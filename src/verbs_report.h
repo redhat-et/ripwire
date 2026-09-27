@@ -1811,19 +1811,13 @@ constexpr const char* kSkippedLegend =
 // of its own (buildUnindexedAttr's note records the seven-byte floor headroom that forbids one there).
 // §TRACKED — the unvetted-dir clause, written ONLY into a document that carries unvetted-dir rows (a root outside any
 // git work tree, or one git could not answer for, holding a build-output-named directory), so every git checkout's
-// --skipped stays byte-identical. The DEFINITION the map header's unvetted_dirs= points at, like escaped_root= above.
-void writeUnvettedDirLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
-{
-    if( cs.unvettedDirs == 0 )
-    {
-        return;
-    }
-    w.write( "<!-- unvetted_dirs= counts build-output-named subtrees (build, dist, out, target, cmake-build-*, …) pruned with NO git"
-             " tracked-file check: the root is not in a git work tree, or git could not answer. In a work tree the files git tracks"
-             " under such a name are indexed and only untracked output is pruned; here nothing could tell source from output, so a"
-             " source package under such a name is absent. Each is one f why=\"unvetted-dir\" row, bytes=\"0\"; all are inside"
-             " pruned_dirs= too. Contents UNKNOWN, not zero. -->" );
-}
+// --skipped stays byte-identical. The DEFINITION the map header's unvetted_dirs= points at, like escaped_root= below.
+inline constexpr std::string_view kUnvettedDirClause =
+    "<!-- unvetted_dirs= counts build-output-named subtrees (build, dist, out, target, cmake-build-*, …) pruned with NO git"
+    " tracked-file check: the root is not in a git work tree, or git could not answer. In a work tree the files git tracks"
+    " under such a name are indexed and only untracked output is pruned; here nothing could tell source from output, so a"
+    " source package under such a name is absent. Each is one f why=\"unvetted-dir\" row, bytes=\"0\"; all are inside"
+    " pruned_dirs= too. Contents UNKNOWN, not zero. -->";
 
 void writeEscapedRootLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
 {
@@ -2284,7 +2278,10 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeSkippedHealthLegends( w, health );
         const CrawlSkips& cs = ing.crawlSkips;
         writeEscapedRootLegend( w, cs );                            // §SEC1 — only into a document that has escaped-root rows
-        writeUnvettedDirLegend( w, cs );                            // §TRACKED — only into a document that has unvetted-dir rows
+        if( cs.unvettedDirs > 0 )                                   // §TRACKED — only into a document that has unvetted-dir rows
+        {
+            w.write( kUnvettedDirClause );
+        }
         writeNestRefusedLegend( w, cs );                            // only into a document that has nest-refused rows
         writeExtractPartialLegend( w, cs );                         // only into a document that has extract-partial rows
         writeSkippedHeader( w, ing, health, cfg.maxFileBytes );    // the <skipped …> counters, up to root=

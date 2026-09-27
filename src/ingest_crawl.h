@@ -1525,19 +1525,6 @@ struct GitTrackedSet
 
 constexpr std::size_t kMaxTrackedPathspecBytes = 64ull * 1024ull;
 
-// Is some proper ancestor directory of `rel` one of the sorted `dirs`?
-bool underSortedDir( const std::vector<std::string>& dirs, std::string_view rel ) noexcept
-{
-    for( std::size_t slash = rel.rfind( '/' ); slash != std::string_view::npos && slash > 0; slash = rel.rfind( '/', slash - 1 ) )
-    {
-        if( pathInIgnoreSet( dirs, rel.substr( 0, slash ) ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 GitTrackedSet collectGitTracked( const char* rootDir, const std::vector<std::string>& relDirs )
 {
     EXPECTS( std::is_sorted( relDirs.begin(), relDirs.end() ), "the pathspecs and the filter both need the sorted set" );
@@ -1582,15 +1569,21 @@ GitTrackedSet collectGitTracked( const char* rootDir, const std::vector<std::str
         const std::size_t end = nul == std::string::npos ? buf.size() : nul;
         const std::string_view ent( buf.data() + i, end - i );
         i = end + 1;
-        if( ent.empty() || !underSortedDir( relDirs, ent ) )
-        {
-            continue;   // an empty record, or (whole-list mode) a tracked path outside every deferred dir
-        }
-        out.files.emplace_back( ent );
+        // Its ancestor directories, shallowest first; the path is kept only when one of them is a deferred dir
+        // (always so under pathspecs; the filter that matters in whole-list mode).
+        const std::size_t firstAncestor = out.dirs.size();
+        bool              isUnderDeferred = false;
         for( std::size_t slash = ent.find( '/' ); slash != std::string_view::npos; slash = ent.find( '/', slash + 1 ) )
         {
             out.dirs.emplace_back( ent.substr( 0, slash ) );
+            isUnderDeferred = isUnderDeferred || pathInIgnoreSet( relDirs, out.dirs.back() );
         }
+        if( !isUnderDeferred )
+        {
+            out.dirs.resize( firstAncestor );   // an empty record, or a tracked path outside every deferred dir
+            continue;
+        }
+        out.files.emplace_back( ent );
     }
     std::sort( out.files.begin(), out.files.end() );
     std::sort( out.dirs.begin(), out.dirs.end() );
@@ -1674,82 +1667,37 @@ struct CrawlResult
     CrawlSkips                   skips;
 };
 
-CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
-                            std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true )
+// §TRACKED — ONE crawl's walk state, so the main walk and the re-walk of a deferred build-output subtree classify
+// every entry with the SAME code: a tracked file under build/ meets exactly the tests every other file meets —
+// --exclude, the nested denylist, the symlink boundary, the ignore set, the size ceilings. The members are the
+// locals collectSources used to hold, under the same names.
+struct CrawlWalk
 {
-    std::vector<std::string>     out;
-    std::vector<SkippedOversize> skipped;
-    CrawlSkips                   skips;
-    HashMap<std::string, std::uint64_t> extTally;   // unindexed source/text-looking ext -> file count
-
-    // §N6-C: the mode is set before ANY early return, so a single-file root, an unopenable root and a
-    // refused probe all report what was consulted rather than inheriting a default that implies more.
-    skips.ignoreMode = respectGitignore ? IgnoreMode::Unavailable : IgnoreMode::Off;
-
-    std::error_code ec;
-    fs::path root = fs::path( rootDir );
-
-    // §SEC1 — the boundary, canonicalized ONCE for the whole walk (ingest.h carries the rule and the reasons).
-    // Computed before the single-file branch because that branch is its own boundary: a user who names a file
-    // directly has selected it, and realpath'ing the root makes the file trivially inside itself.
-    const std::string rootReal = canonicalCrawlRoot( rootDir == nullptr ? std::string_view{} : std::string_view( rootDir ) );
-
-    // If the root is a regular file, index just that one file instead of refusing.
-    if( fs::is_regular_file( root, ec ) && !ec )
-    {
-        // Process this single file through the same validation pipeline as directory walk would.
-        const std::string name = root.filename().string();
-        if( !isDenylistedName( name ) )
-        {
-            const std::string ext = lowerExtensionOf( name );
-            // Check if extension is supported (source language or doc format).
-            if( lookupLang( ext ) != nullptr || docparse::isDocExtension( ext ) )
-            {
-                const std::uintmax_t sz = fs::file_size( root, ec );
-                if( !ec && sz <= maxFileBytes )
-                {
-                    out.push_back( rootDir );
-                }
-                else if( !ec && sz > maxFileBytes )
-                {
-                    skipped.push_back( { rootDir, sz, maxFileBytes } );
-                }
-            }
-            else if( !isNonTextExtension( ext ) )
-            {
-                ++extTally[ ext ];
-            }
-        }
-        ec.clear();
-        return { std::move( out ), std::move( skipped ), std::move( skips ) };
-    }
-
-    // Otherwise treat root as a directory.
-    auto opts = fs::directory_options::skip_permission_denied;
-    fs::recursive_directory_iterator it( root, opts, ec );
-    if( ec )
-    {
-        DISCLOSE( "ingest: cannot open root directory — empty result" );
-        return { std::move( out ), std::move( skipped ), std::move( skips ) };
-    }
-
-    const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode );   // §N6-C
-
     // Build-output-NAMED subtrees (ingest.h isBuildOutputDirName) the walk pruned but did not yet rule on: in a git
     // work tree the TRACKED files under them are source and are indexed after the walk; everything else there stays
-    // pruned. Collected in walk order; the tracked probe below sorts its own pathspecs.
+    // pruned. Collected in walk order; admitTrackedUnderBuildDirs sorts its own pathspecs.
     struct DeferredBuildDir
     {
         fs::path    path;
         std::string full;   // the logical spelling (fullPath()), for a row
         std::string rel;    // root-relative, as git spells it
     };
-    std::vector<DeferredBuildDir> deferredDirs;
 
-    // ONE entry's classification, shared by the main walk (tracked == nullptr) and the re-walk of a deferred
-    // build-output subtree (tracked != nullptr), so a tracked file under build/ meets exactly the tests every
-    // other file meets — --exclude, the nested denylist, the symlink boundary, the ignore set, the size ceilings.
-    const auto visit = [ & ]( fs::recursive_directory_iterator& it, const GitTrackedSet* tracked )
+    const char*                          rootDir;
+    const std::vector<std::string>&      excludeSubstr;
+    std::string_view                     excludeLabel;
+    std::size_t                          maxFileBytes;
+    const std::string&                   rootReal;
+    const GitIgnoreSet&                  ignoreSet;
+    std::vector<std::string>&            out;
+    std::vector<SkippedOversize>&        skipped;
+    CrawlSkips&                          skips;
+    HashMap<std::string, std::uint64_t>& extTally;
+    std::vector<DeferredBuildDir>        deferredDirs = {};
+    std::error_code                      ec           = {};
+
+    // ONE entry. `tracked` is null on the main walk and git's tracked set on the re-walk of a deferred subtree.
+    void visit( fs::recursive_directory_iterator& it, const GitTrackedSet* tracked )
     {
         const fs::path& p = it->path();
         std::string     full;
@@ -1785,55 +1733,68 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             }
         }
 
-        // prune noise/vendor/build subtrees entirely (a .gitignore-lite default denylist)
         if( it->is_directory( ec ) )
         {
-            // The denylist itself now lives in ingest.h (kCrawlSkipDirs / isSkippedCrawlDir) so darkflags.h's
-            // CMake walk prunes exactly the same subtrees — see the note there.
-            bool skip     = excluded;
-            bool deferred = false;
-            if( !skip )
-            {
-                const DirVerdict v = builtinDirVerdict( p, [ & ] { return relForHash( fullPath(), rootDir ); }, tracked, ignoreSet );
-                if( v == DirVerdict::Untracked )
-                {
-                    it.disable_recursion_pending();   // untracked output inside a deferred subtree, already counted in pruned_dirs
-                    return;
-                }
-                skip     = v != DirVerdict::Walk;
-                deferred = v == DirVerdict::Defer;
-            }
-            // skip any dir that contains a CMakeCache.txt — it's a build output tree
-            if( !skip )
-            {
-                const fs::path cache_sentinel = p / "CMakeCache.txt";
-                if( fs::exists( cache_sentinel, ec ) )
-                {
-                    skip = true;
-                }
-                ec.clear();
-            }
-            // §N6-C: the ignore rule is tested LAST, so ignoredDirs= counts only the subtrees no rule this
-            // build already carried had pruned — every existing counter keeps the meaning it had, and the
-            // new one is exactly "what honouring .gitignore additionally removed".
-            bool ignoredDir = false;
-            if( !skip && ignoreSet.available )
-            {
-                ignoredDir = pathInIgnoreSet( ignoreSet.dirs, relForHash( fullPath(), rootDir ) );
-                skip       = ignoredDir;
-            }
-            if( skip )
-            {
-                it.disable_recursion_pending();
-                recordDirPrune( skips, excluded, ignoredDir, *it, fullPath );   // §L1/§N6-C: see its header
-                if( deferred )
-                {
-                    deferredDirs.push_back( { p, fullPath(), std::string( relForHash( fullPath(), rootDir ) ) } );
-                }
-            }
+            visitDir( it, tracked, excluded, fullPath );
             return;
         }
+        visitFile( it, tracked, excluded, fullPath );
+    }
 
+    // prune noise/vendor/build subtrees entirely (a .gitignore-lite default denylist)
+    template< typename PathFn >
+    void visitDir( fs::recursive_directory_iterator& it, const GitTrackedSet* tracked, bool excluded, PathFn&& fullPath )
+    {
+        const fs::path& p = it->path();
+        // The denylist itself now lives in ingest.h (kCrawlSkipDirs / isSkippedCrawlDir) so darkflags.h's
+        // CMake walk prunes exactly the same subtrees — see the note there.
+        bool skip     = excluded;
+        bool deferred = false;
+        if( !skip )
+        {
+            const DirVerdict v = builtinDirVerdict( p, [ & ] { return relForHash( fullPath(), rootDir ); }, tracked, ignoreSet );
+            if( v == DirVerdict::Untracked )
+            {
+                it.disable_recursion_pending();   // untracked output inside a deferred subtree, already counted in pruned_dirs
+                return;
+            }
+            skip     = v != DirVerdict::Walk;
+            deferred = v == DirVerdict::Defer;
+        }
+        // skip any dir that contains a CMakeCache.txt — it's a build output tree
+        if( !skip )
+        {
+            const fs::path cache_sentinel = p / "CMakeCache.txt";
+            if( fs::exists( cache_sentinel, ec ) )
+            {
+                skip = true;
+            }
+            ec.clear();
+        }
+        // §N6-C: the ignore rule is tested LAST, so ignoredDirs= counts only the subtrees no rule this
+        // build already carried had pruned — every existing counter keeps the meaning it had, and the
+        // new one is exactly "what honouring .gitignore additionally removed".
+        bool ignoredDir = false;
+        if( !skip && ignoreSet.available )
+        {
+            ignoredDir = pathInIgnoreSet( ignoreSet.dirs, relForHash( fullPath(), rootDir ) );
+            skip       = ignoredDir;
+        }
+        if( skip )
+        {
+            it.disable_recursion_pending();
+            recordDirPrune( skips, excluded, ignoredDir, *it, fullPath );   // §L1/§N6-C: see its header
+            if( deferred )
+            {
+                deferredDirs.push_back( { p, fullPath(), std::string( relForHash( fullPath(), rootDir ) ) } );
+            }
+        }
+    }
+
+    template< typename PathFn >
+    void visitFile( fs::recursive_directory_iterator& it, const GitTrackedSet* tracked, bool excluded, PathFn&& fullPath )
+    {
+        const fs::path& p = it->path();
         if( !it->is_regular_file( ec ) )
         {
             return;
@@ -1947,26 +1908,18 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         // (Win 3 from PERF.md). Any binary file that slips through produces zero defs/refs and
         // is invisible in the ranked map; its phantom fileId has no downstream effect.
         out.push_back( fullPath() );
-    };
-
-    const fs::recursive_directory_iterator end;
-    {
-        PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
-        for( ; it != end; it.increment( ec ) )
-        {
-            if( ec )
-            {
-                ec.clear();
-                continue;
-            }
-            visit( it, nullptr );
-        }
     }
+
     // The deferred build-output subtrees: ONE git child for all of them, then a re-walk of each that holds a
-    // tracked file, descending only toward tracked paths. No git verdict (not a work tree, git failed): the name
-    // rule stands and each subtree is ROWED as unvetted — it may hold source nothing could tell from output.
-    if( !deferredDirs.empty() )
+    // tracked file, descending only toward tracked paths. No git verdict (not a work tree, git failed) or a
+    // subtree the re-walk cannot open: the name rule stands and the subtree is ROWED as unvetted — it may hold
+    // source nothing could tell from output.
+    void admitTrackedUnderBuildDirs( fs::directory_options opts )
     {
+        if( deferredDirs.empty() )
+        {
+            return;
+        }
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: tracked files under build-output dirs" );
         std::vector<std::string> rels;
         rels.reserve( deferredDirs.size() );
@@ -1978,25 +1931,22 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         const GitTrackedSet tracked = collectGitTracked( rootDir, rels );
         for( const DeferredBuildDir& d : deferredDirs )
         {
-            if( !tracked.available )
-            {
-                recordCrawlDrop( skips.unvettedDirRows, skips.unvettedDirs, d.full, {}, fs::directory_entry( d.path, ec ) );
-                ec.clear();
-                continue;
-            }
-            if( !pathInIgnoreSet( tracked.dirs, d.rel ) )
+            if( tracked.available && !pathInIgnoreSet( tracked.dirs, d.rel ) )
             {
                 continue;   // nothing tracked below: pure build output, as the name said
             }
-            fs::recursive_directory_iterator sub( d.path, opts, ec );
-            if( ec )
+            fs::recursive_directory_iterator sub;
+            if( tracked.available )
             {
-                // tracked files git named, in a directory this walk cannot open: say so rather than drop them
+                sub = fs::recursive_directory_iterator( d.path, opts, ec );
+            }
+            if( !tracked.available || ec )
+            {
                 recordCrawlDrop( skips.unvettedDirRows, skips.unvettedDirs, d.full, {}, fs::directory_entry( d.path, ec ) );
                 ec.clear();
                 continue;
             }
-            for( ; sub != end; sub.increment( ec ) )
+            for( const fs::recursive_directory_iterator end; sub != end; sub.increment( ec ) )
             {
                 if( ec )
                 {
@@ -2006,7 +1956,86 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 visit( sub, &tracked );
             }
         }
+        ENSURES( skips.unvettedDirs <= skips.prunedDirs, "every unvetted dir was counted as a built-in prune first" );
     }
+};
+CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
+                            std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true )
+{
+    std::vector<std::string>     out;
+    std::vector<SkippedOversize> skipped;
+    CrawlSkips                   skips;
+    HashMap<std::string, std::uint64_t> extTally;   // unindexed source/text-looking ext -> file count
+
+    // §N6-C: the mode is set before ANY early return, so a single-file root, an unopenable root and a
+    // refused probe all report what was consulted rather than inheriting a default that implies more.
+    skips.ignoreMode = respectGitignore ? IgnoreMode::Unavailable : IgnoreMode::Off;
+
+    std::error_code ec;
+    fs::path root = fs::path( rootDir );
+
+    // §SEC1 — the boundary, canonicalized ONCE for the whole walk (ingest.h carries the rule and the reasons).
+    // Computed before the single-file branch because that branch is its own boundary: a user who names a file
+    // directly has selected it, and realpath'ing the root makes the file trivially inside itself.
+    const std::string rootReal = canonicalCrawlRoot( rootDir == nullptr ? std::string_view{} : std::string_view( rootDir ) );
+
+    // If the root is a regular file, index just that one file instead of refusing.
+    if( fs::is_regular_file( root, ec ) && !ec )
+    {
+        // Process this single file through the same validation pipeline as directory walk would.
+        const std::string name = root.filename().string();
+        if( !isDenylistedName( name ) )
+        {
+            const std::string ext = lowerExtensionOf( name );
+            // Check if extension is supported (source language or doc format).
+            if( lookupLang( ext ) != nullptr || docparse::isDocExtension( ext ) )
+            {
+                const std::uintmax_t sz = fs::file_size( root, ec );
+                if( !ec && sz <= maxFileBytes )
+                {
+                    out.push_back( rootDir );
+                }
+                else if( !ec && sz > maxFileBytes )
+                {
+                    skipped.push_back( { rootDir, sz, maxFileBytes } );
+                }
+            }
+            else if( !isNonTextExtension( ext ) )
+            {
+                ++extTally[ ext ];
+            }
+        }
+        ec.clear();
+        return { std::move( out ), std::move( skipped ), std::move( skips ) };
+    }
+
+    // Otherwise treat root as a directory.
+    auto opts = fs::directory_options::skip_permission_denied;
+    fs::recursive_directory_iterator it( root, opts, ec );
+    if( ec )
+    {
+        DISCLOSE( "ingest: cannot open root directory — empty result" );
+        return { std::move( out ), std::move( skipped ), std::move( skips ) };
+    }
+
+    const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode );   // §N6-C
+
+    CrawlWalk walk{ rootDir, excludeSubstr, excludeLabel, maxFileBytes, rootReal, ignoreSet, out, skipped, skips, extTally };
+
+    const fs::recursive_directory_iterator end;
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
+        for( ; it != end; it.increment( ec ) )
+        {
+            if( ec )
+            {
+                ec.clear();
+                continue;
+            }
+            walk.visit( it, nullptr );
+        }
+    }
+    walk.admitTrackedUnderBuildDirs( opts );
 
     // LOAD-BEARING: lexicographic (byte-order) sort fixes node-id assignment run-to-run.
     std::sort( out.begin(), out.end() );
