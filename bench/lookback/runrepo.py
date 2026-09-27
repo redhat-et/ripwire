@@ -16,14 +16,14 @@ import argparse, json, os, subprocess, sys, time
 
 HERE = os.path.dirname( os.path.abspath( __file__ ) )
 sys.path.insert( 0, HERE )
-import common, labels, maphunks, metrics, rankers
+import common, fngrain, labels, maphunks, metrics, rankers
 
 
 def product_units( repo, rev, stratum, blobs ):
     """{path: loc} of product source at rev (§1 path+name rule, plus the generated marker in the first 5
     lines), and the counts the health report needs."""
     out = common.git( repo, "ls-tree", "-r", "-z", "--full-tree", rev )
-    units, gen, cand = {}, 0, 0
+    units, gen, cand, blob_of = {}, 0, 0, {}
     for rec in out.split( "\x00" ):
         if not rec:
             continue
@@ -37,7 +37,8 @@ def product_units( repo, rev, stratum, blobs ):
             gen += 1
             continue
         units[ path ] = max( 1, maphunks.line_count( data ) )
-    return units, dict( path_rule_files=cand, generated_dropped=gen, units=len( units ) )
+        blob_of[ path ] = sha
+    return units, dict( path_rule_files=cand, generated_dropped=gen, units=len( units ) ), blob_of
 
 
 def windows_for( kind, chain ):
@@ -48,12 +49,16 @@ def windows_for( kind, chain ):
     raise ValueError( kind )
 
 
-def label_window( repo, fixes_by_rule, path_chain, wincommits, t_index, t_sha ):
+def label_window( repo, fixes_by_rule, path_chain, wincommits, t_index, t_sha, units_fn=None, keyfn=None, records=None, record_rule=None ):
     """Walk the first-parent path from T; for every window commit that is a fix under a rule, record the
-    T-files its hunks touch. Returns ({rule: {path_at_T: d}}, mechanics counters)."""
+    T-units its hunks touch. units_fn(path, blob) gives the units at a fix's parent (default: the whole file,
+    the file grain); keyfn turns a unit key into the label-table key (default: its path). Returns
+    ({rule: {key: d}}, mechanics counters). With records (a list), every hunk of a record_rule fix in a
+    population file is appended with its commit sha — the A1 sample frame."""
     tracker = maphunks.RenameTracker()
     fixed = { r: {} for r in fixes_by_rule }
-    whole = lambda p: [ ( "", "<file>", 0, 1, 10 ** 12 ) ]          # file grain: the whole file is the unit
+    whole = units_fn or ( lambda p, b: [ ( "", "<file>", 0, 1, 10 ** 12 ) ] )     # file grain: the whole file is the unit
+    keyfn = keyfn or ( lambda key: key[ 0 ] )
     t_paths = { k[ 0 ] for k in t_index }
     n = dict( fix_commits={ r: 0 for r in fixes_by_rule }, walked=0, hunks=dict( hunks=0, mapped=0, unmapped=0, born_after_t=0, out_of_population=0 ) )
     wins = set( wincommits )
@@ -66,13 +71,18 @@ def label_window( repo, fixes_by_rule, path_chain, wincommits, t_index, t_sha ):
         files = diffs[ sha ] if rules else ns[ sha ]
         n[ "walked" ] += 1
         if rules:
-            hit, cnt = maphunks.touched_units( files, whole, tracker, t_index, t_paths )
+            recs = [] if records is not None and record_rule in rules else None
+            hit, cnt = maphunks.touched_units( files, whole, tracker, t_index, t_paths, recs )
+            for r_ in recs or []:
+                r_[ "sha" ] = sha
+                records.append( r_ )
             for k2, v in cnt.items():
                 n[ "hunks" ][ k2 ] += v
             for r in rules:
                 n[ "fix_commits" ][ r ] += 1
                 for key in hit:
-                    fixed[ r ][ key[ 0 ] ] = fixed[ r ].get( key[ 0 ], 0 ) + 1
+                    k = keyfn( key )
+                    fixed[ r ][ k ] = fixed[ r ].get( k, 0 ) + 1
         tracker.advance( files )
     return fixed, n
 
@@ -94,13 +104,20 @@ def main( argv ):
     ap.add_argument( "--links-cache" )
     ap.add_argument( "--offline", action="store_true" )
     ap.add_argument( "--windows", default="main" )
-    ap.add_argument( "--grain", default="file" )
+    ap.add_argument( "--grain", default="file", choices=( "file", "function" ) )
+    ap.add_argument( "--ts-cache", help="directory for the compiled parser library and the per-blob units cache" )
     ap.add_argument( "--seal", action="store_true" )
     ap.add_argument( "--ripwire", default="ripwire" )
     a = ap.parse_args( argv )
-    if a.grain != "file":
-        sys.exit( "runrepo: --grain %s needs the independent tree-sitter parser (§4.3), which is not available; "
-                  "refusing to fall back to ripwire's own parse" % a.grain )
+    fn = a.grain == "function"
+    if fn:
+        if not a.ts_cache:
+            sys.exit( "runrepo: --grain function needs --ts-cache (the independent parser's build and cache directory)" )
+        import tsparse
+        ucache = maphunks.UnitCache( a.clone, tsparse.Parser( tsparse.build( a.ts_cache ) ) )
+        disk = os.path.join( a.ts_cache, "units" )
+        units_fn = lambda p, b: ucache.units_blob( b, p, disk )
+    a1 = []
     os.makedirs( a.out, exist_ok=True )
     clock = {}
     t0 = time.time()
@@ -122,7 +139,7 @@ def main( argv ):
             manifest[ "windows" ].append( w )
             continue
         ts = time.time()
-        units, ucount = product_units( repo, t_sha, a.stratum, blobs )
+        units, ucount, blob_of = product_units( repo, t_sha, a.stratum, blobs )
         w[ "population" ] = ucount
         clock.setdefault( "population", 0 )
         clock[ "population" ] += time.time() - ts
@@ -142,6 +159,20 @@ def main( argv ):
         dirty = common.git( wt, "status", "--porcelain", "--untracked-files=all" ).strip()
         health = rankers.health_hotspots( header, t_sha )
         read_frac, n_pruned, n_unread = rankers.ripwire_read_fraction( units, skipped )
+        if fn:
+            ts = time.time()
+            pop, pst = fngrain.population( ucache, blob_of, disk )
+            grows = fngrain.run_graph_rows( wt, a.ripwire )
+            joined, jc = fngrain.join( pop, grows, mrows )
+            scored = { k: v for k, v in joined.items() if v[ 0 ] is not None }
+            w[ "function_grain" ] = dict( parse=pst, join=jc, scored_units=len( scored ) )
+            clock[ "parse_join" ] = clock.get( "parse_join", 0 ) + time.time() - ts
+            if pst[ "read_fraction" ] < common.PARSE_FLOOR:
+                health.append( "parser read %.3f < %.2f" % ( pst[ "read_fraction" ], common.PARSE_FLOOR ) )
+            if jc[ "units" ] and jc[ "joined" ] / jc[ "units" ] < common.JOIN_FLOOR:
+                health.append( "join %.3f < %.2f" % ( jc[ "joined" ] / jc[ "units" ], common.JOIN_FLOOR ) )
+            if jc[ "joined" ] and jc[ "ccx" ] / jc[ "joined" ] < common.CCX_FLOOR:
+                health.append( "ccx %.3f < %.2f" % ( jc[ "ccx" ] / jc[ "joined" ], common.CCX_FLOOR ) )
         w[ "ripwire_read" ] = dict( fraction=round( read_frac, 4 ), pruned_dir_units=n_pruned, skipped_units=n_unread )
         if read_frac < common.PARSE_FLOOR:
             health.append( "ripwire read %.3f of product files < %.2f (pruned dirs %d, skipped %d)" % ( read_frac, common.PARSE_FLOOR, n_pruned, n_unread ) )
@@ -155,10 +186,17 @@ def main( argv ):
         lb, since = rankers.lookback_commits( repo, t_sha )
         clock[ "lookback" ] = clock.get( "lookback", 0 ) + time.time() - ts
         arms, diag = rankers.file_arms( units, hot_rows, mrows, lb )
+        if fn:
+            ts = time.time()
+            churn, prior, lc = fngrain.lookback_fn( repo, t_sha, since, set( pop ), units_fn )
+            clock[ "lookback_fn" ] = clock.get( "lookback_fn", 0 ) + time.time() - ts
+            w[ "function_grain" ][ "lookback" ] = lc
+            arms = fngrain.fn_arms( scored, pop, hot_rows, churn, prior )
+            diag = dict( units=len( arms ), with_churn=sum( 1 for v in arms.values() if v[ "CHURN" ] ) )
         seen_by_rw = set( hot_rows ) | { r[ "p" ] for r in mrows }
         w[ "arms_diag" ] = dict( diag, lookback_commits=len( lb ), lookback_since=since,
                                  units_seen_by_ripwire=sum( 1 for p in units if p in seen_by_rw ) )
-        ranking[ str( k ) ] = dict( loc=units, arms=arms )
+        ranking[ str( k ) ] = dict( loc=( { ks: v[ "BIG" ] for ks, v in arms.items() } if fn else units ), arms=arms )
         # labels (never joined to the ranking before both are hashed)
         ts = time.time()
         wincommits, path_chain = labels.window_commits( chain, t_sha, lo, hi )
@@ -172,7 +210,19 @@ def main( argv ):
         rules = { "keyword": { s for s, v in lab.items() if v[ "keyword" ] }, "B": { s for s, v in lab.items() if v[ "route_b" ] } }
         if a.route == "A":
             rules[ "A" ] = { s for s, v in lab.items() if v[ "route_a" ] }
-        fixed, n = label_window( repo, rules, path_chain, wincommits, { ( p, "", "<file>", 0 ) for p in units }, t_sha )
+        primary_rule = { "A": "A", "B": "B", "K": "keyword" }[ a.route ]
+        if fn:
+            recs = []
+            fixed, n = label_window( repo, rules, path_chain, wincommits, set( pop ), t_sha, units_fn, fngrain.keystr, recs, primary_rule )
+            for r_ in recs:
+                data = ucache.blobs.get( r_[ "blob" ] ) if r_[ "blob" ] else None
+                if data is not None:
+                    r_[ "card" ], r_[ "near" ] = fngrain.excerpt( data, r_, ucache.units_blob( r_[ "blob" ], r_[ "path" ], disk ) )
+                r_[ "repo" ], r_[ "window" ] = a.full_name, k
+            a1 += recs
+            w[ "fixed_units_scored" ] = { r: sum( 1 for x in v if x in ranking[ str( k ) ][ "loc" ] ) for r, v in fixed.items() }
+        else:
+            fixed, n = label_window( repo, rules, path_chain, wincommits, { ( p, "", "<file>", 0 ) for p in units }, t_sha )
         clock[ "labels" ] = clock.get( "labels", 0 ) + time.time() - ts
         w[ "label_mechanics" ] = dict( n, gh_graphql_calls=links.calls if links else 0 )
         w[ "fixed_units" ] = { r: len( v ) for r, v in fixed.items() }
@@ -181,6 +231,9 @@ def main( argv ):
     blobs.close()
     if os.path.exists( wt ):
         common.git( repo, "worktree", "remove", "--force", wt )
+    if fn:
+        with open( os.path.join( a.out, "a1_records.json" ), "w" ) as fh:
+            json.dump( a1, fh, indent=0, sort_keys=True )
     manifest[ "ranking_sha256" ] = sha_json( ranking, os.path.join( a.out, "ranking_table.json" ) )
     manifest[ "label_sha256" ] = sha_json( label_table, os.path.join( a.out, "label_table.json" ) )
     # ── join and score, once ─────────────────────────────────────────────────────────────────────────────

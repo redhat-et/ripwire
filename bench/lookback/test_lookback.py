@@ -279,12 +279,12 @@ def test_hunk_parse_insertion_rename_and_mapping():
         t_units = { ( p, u[ 0 ], u[ 1 ], u[ 2 ] ) for p in ( "m.toy", "other.toy" ) for u in cache.units( t, p ) }
         assert ( "m.toy", "K", "a", 0 ) in t_units and ( "m.toy", "", "top", 0 ) in t_units
         tr = maphunks.RenameTracker()
-        hit1, n1 = maphunks.touched_units( f1, lambda p: cache.units( c1 + "^1", p ), tr, t_units )
+        hit1, n1 = maphunks.touched_units( f1, lambda p, b: cache.units( c1 + "^1", p ), tr, t_units )
         assert hit1 == { ( "m.toy", "K", "a", 0 ), ( "m.toy", "K", "b", 0 ) }, hit1   # insertion anchor 3 -> a; line 6 -> b
         tr.advance( f1 )
         assert tr.path_at_t( "n.toy" ) == "m.toy"
         f2 = maphunks.commit_diff( g.dir, c2 )
-        hit2, n2 = maphunks.touched_units( f2, lambda p: cache.units( c2 + "^1", p ), tr, t_units )
+        hit2, n2 = maphunks.touched_units( f2, lambda p, b: cache.units( c2 + "^1", p ), tr, t_units )
         # identity carried through the rename; deleting other.toy is a hunk over q's lines, so it touches q
         assert hit2 == { ( "m.toy", "", "top", 0 ), ( "other.toy", "", "q", 0 ) }, hit2
         assert n2 == dict( hunks=2, mapped=2, unmapped=0, born_after_t=0, out_of_population=0 ), n2
@@ -306,7 +306,7 @@ def test_added_after_t_is_not_in_population():
         tr.advance( maphunks.commit_diff( g.dir, c1 ) )
         assert tr.path_at_t( "b.toy" ) is None
         cache = maphunks.UnitCache( g.dir, ToyFunctions() )
-        hit, n = maphunks.touched_units( maphunks.commit_diff( g.dir, c2 ), lambda p: cache.units( c2 + "^1", p ), tr, { ( "a.toy", "", "f", 0 ) } )
+        hit, n = maphunks.touched_units( maphunks.commit_diff( g.dir, c2 ), lambda p, b: cache.units( c2 + "^1", p ), tr, { ( "a.toy", "", "f", 0 ) } )
         assert hit == set() and n[ "born_after_t" ] == 1 and n[ "mapped" ] == 0
         cache.blobs.close()
     finally:
@@ -324,8 +324,8 @@ def test_name_status_matches_diff_renames():
         g.write( "n.toy", "def n\n" )
         c = g.commit( "move" )
         ns = sorted( maphunks.name_status( g.dir, c ), key=str )
-        full = [ ( o, n, [] ) for o, n, _ in maphunks.commit_diff( g.dir, c ) ]
-        assert ns == sorted( full, key=str ) == sorted( [ ( "a.toy", "b.toy", [] ), ( "d.toy", None, [] ), ( None, "n.toy", [] ) ], key=str ), ns
+        full = [ ( o, n, [], None ) for o, n, _, _b in maphunks.commit_diff( g.dir, c ) ]
+        assert ns == sorted( full, key=str ) == sorted( [ ( "a.toy", "b.toy", [], None ), ( "d.toy", None, [], None ), ( None, "n.toy", [], None ) ], key=str ), ns
     finally:
         g.close()
 
@@ -356,6 +356,8 @@ def test_batched_diffs_equal_per_commit_diffs():
         for s in shas:
             assert batched[ s ] == maphunks.commit_diff( g.dir, s ), s
             assert sorted( ns[ s ], key=str ) == sorted( maphunks.name_status( g.dir, s ), key=str ), s
+            for o, n, h, b in batched[ s ]:
+                assert ( b is None ) == ( o is None ), ( s, o, b )                   # the old blob id rides along
     finally:
         g.close()
 
@@ -376,7 +378,7 @@ def test_quoted_paths_and_combined_parse():
     assert maphunks.unquote_path( '"a\\tb.c"' ) == "a\tb.c"
     assert maphunks.unquote_path( '"caf\\303\\251.py"' ) == "café.py"
     txt = "diff --combined x.c\nindex 1,2..3\n@@@ -5,2 -7,0 +5,3 @@@\n@@@ -20 -21 +22 @@@\n"
-    assert maphunks.parse_combined( txt ) == [ ( "x.c", "x.c", [ ( 5, 2 ), ( 20, 1 ) ] ) ]
+    assert maphunks.parse_combined( txt ) == [ ( "x.c", "x.c", [ ( 5, 2 ), ( 20, 1 ) ], "1" ) ]
     assert maphunks.old_lines( 0, 0 ) == ( 1, 1 ) and maphunks.old_lines( 7, 0 ) == ( 7, 7 ) and maphunks.old_lines( 7, 3 ) == ( 7, 9 )
 
 
@@ -491,6 +493,88 @@ def test_bootstrap_and_beats_are_deterministic():
     assert a == b and a[ "ok" ] and a[ "ci" ][ 0 ] > 0 and a[ "sign" ] == 1.0
     lo, hi = analyze.sd_ci( 0.1, 3 )
     assert 0.05 < lo < 0.06 and 0.6 < hi < 0.65
+
+
+# ── function grain ──────────────────────────────────────────────────────────────────────────────────────
+TS_SAMPLES = {
+    "a.py": ( b"import x\nclass K:\n    def a(self):\n        def inner():\n            pass\n        return 1\n\n    @dec\n    def b(self): pass\n"
+              b"def top():\n    lam = lambda y: y\n    return lam\n", [ ( "K", "a", 3, 6 ), ( "K", "b", 9, 9 ), ( "", "top", 10, 12 ) ] ),
+    "a.go": ( b"package p\nfunc F() {\n  g := func() {}\n  g()\n}\nfunc (s *Server[T]) Run(x int) error {\n  return nil\n}\n",
+              [ ( "", "F", 2, 5 ), ( "Server", "Run", 6, 8 ) ] ),
+    "A.java": ( b"class A {\n  A() { }\n  void m() {\n    Runnable r = () -> {};\n    new Object() { public String toString() { return \"\"; } };\n  }\n"
+                b"  abstract void n();\n  class B { int q() { return 1; } }\n}\ninterface I { void z(); default void d() {} }\n",
+                [ ( "A", "A", 2, 2 ), ( "A", "m", 3, 6 ), ( "B", "q", 8, 8 ), ( "I", "d", 10, 10 ) ] ),
+    "a.rs": ( b"fn top() {}\nimpl<T> Foo<T> {\n    fn m(&self) -> u8 { 1 }\n}\ntrait Tr { fn sig(&self); fn def(&self) {} }\n#[cfg(test)]\nmod tests {\n"
+              b"    fn helper() {}\n}\n#[test]\nfn t1() {}\n", [ ( "", "top", 1, 1 ), ( "Foo", "m", 3, 3 ), ( "Tr", "def", 5, 5 ) ] ),
+    "a.ts": ( b"export function f() {}\nconst g = () => 1;\nclass C {\n  m() { return 2; }\n  h = () => 3;\n}\nfunction* gen() {}\n",
+              [ ( "", "f", 1, 1 ), ( "", "g", 2, 2 ), ( "C", "m", 4, 4 ), ( "C", "h", 5, 5 ), ( "", "gen", 7, 7 ) ] ),
+    "a.tsx": ( b"export function App() { return <div/>; }\n", [ ( "", "App", 1, 1 ) ] ),
+    "a.cpp": ( b"namespace ns {\nclass K {\n  int m() { return 1; }\n  K();\n};\nK::K() {}\nint *ptr(int (*cb)(int)) { return 0; }\n"
+               b"template<typename T> void t(T x) { auto l = [](){}; }\nvoid Outer::Inner::q() {}\nbool operator==(const K&, const K&) { return true; }\n}\nint decl(int);\n",
+               [ ( "K", "m", 3, 3 ), ( "K", "K", 6, 6 ), ( "ns", "ptr", 7, 7 ), ( "ns", "t", 8, 8 ), ( "Inner", "q", 9, 9 ), ( "ns", "operator==", 10, 10 ) ] ),
+    "a.c": ( b"static int f(void) { return 0; }\nint (*getfp(void))(int) { return 0; }\nstruct S { int x; };\n", [ ( "", "f", 1, 1 ), ( "", "getfp", 2, 2 ) ] ),
+}
+
+
+def _ts_parser():
+    import shutil, tsparse
+    if not shutil.which( "cc" ):
+        return None
+    cache = os.environ.get( "LOOKBACK_TS_CACHE" ) or os.path.join( tempfile.gettempdir(), "lookback-tscache" )
+    return tsparse.Parser( tsparse.build( cache ) )
+
+
+def test_tsparse_units_per_language():
+    P = _ts_parser()
+    if P is None:
+        print( "     (skipped: no C compiler)" )
+        return
+    for path, ( data, want ) in sorted( TS_SAMPLES.items() ):
+        got, status = P.parse_file( path, data )
+        assert status == "parsed" and got == want, ( path, status, got )
+    assert P.parse_file( "big.py", b"x" * ( 4 * 1024 * 1024 + 1 ) ) == ( [], "too_big" )
+
+
+def test_parse_log_patch_mixes_plain_and_combined():
+    txt = ( "\x00aaa\x01p1\x01fix: x\x02\ndiff --git a/f.c b/f.c\nindex " + "1" * 40 + ".." + "2" * 40 + " 100644\n--- a/f.c\n+++ b/f.c\n@@ -3,2 +3,2 @@\n-x\n+y\n"
+            "\x00bbb\x01p1 p2\x01Merge\x02\ndiff --combined g.c\nindex " + "3" * 40 + "," + "4" * 40 + ".." + "5" * 40 + "\n@@@ -7,1 -7,1 +7,1 @@@\n" )
+    got = maphunks.parse_log_patch( txt )
+    assert got == [ ( "aaa", 1, "fix: x", [ ( "f.c", "f.c", [ ( 3, 2 ) ], "1" * 40 ) ] ), ( "bbb", 2, "Merge", [ ( "g.c", "g.c", [ ( 7, 1 ) ], "3" * 40 ) ] ) ], got
+
+
+def test_function_join_rules():
+    import fngrain
+    pop = { ( "a.c", "", "f", 0 ): ( 10, 20 ), ( "a.c", "", "g", 0 ): ( 30, 40 ), ( "a.c", "", "h", 0 ): ( 50, 60 ), ( "a.c", "K", "o", 0 ): ( 70, 80 ),
+            ( "a.c", "", "z", 0 ): ( 90, 95 ) }
+    graph = [ ( "a.c", "f", "fn", 12 ), ( "a.c", "g", "fn", 36 ), ( "a.c", "h", "fn", 49 ), ( "a.c", "h", "fn", 51 ), ( "a.c", "o", "method", 70 ),
+              ( "a.c", "z", "fn", 90 ) ]
+    met = [ dict( t="fn", p="a.c", n="f", ccx="4", **{ "in": "2" } ), dict( t="method", p="a.c", n="o", sc="K", ccx="1", overloads="2" ),
+            dict( t="fn", p="a.c", n="z", ccx="0" ) ]
+    got, c = fngrain.join( pop, graph, met )
+    assert got == { ( "a.c", "", "f", 0 ): ( 4, 2 ), ( "a.c", "", "z", 0 ): ( 0, 0 ) }, got       # o's row merged overloads: dropped
+    assert c == dict( units=5, joined=2, ambiguous=1, missing=1, ccx=2, overload_merged=1, metrics_ambiguous=0 ), c
+
+
+def test_lookback_fn_through_a_rename():
+    import fngrain
+    g = GitRepo()
+    try:
+        g.write( "old.toy", "def f\n  1\n  2\ndef g\n  3\n" )
+        g.commit( "add" )
+        g.write( "old.toy", "def f\n  1\n  X\ndef g\n  3\n" )
+        g.commit( "Fix crash in f" )
+        g.git( "mv", "old.toy", "new.toy" )
+        g.commit( "move" )
+        g.write( "new.toy", "def f\n  1\n  X\ndef g\n  Y\n" )
+        t = g.commit( "tidy g" )
+        cache = maphunks.UnitCache( g.dir, ToyFunctions() )
+        t_index = { ( "new.toy", "", "f", 0 ), ( "new.toy", "", "g", 0 ) }
+        churn, prior, c = fngrain.lookback_fn( g.dir, t, 1600000000, t_index, lambda p, b: cache.units_blob( b, p ) )
+        assert churn == { ( "new.toy", "", "f", 0 ): 1, ( "new.toy", "", "g", 0 ): 1 }, churn
+        assert prior == { ( "new.toy", "", "f", 0 ): 1 } and c[ "commits" ] == 4 and c[ "unlanded" ] == 0, ( prior, c )
+        cache.blobs.close()
+    finally:
+        g.close()
 
 
 # ── selectrepos pure parts ──────────────────────────────────────────────────────────────────────────────

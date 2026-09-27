@@ -43,15 +43,24 @@ def _strip_prefix( p, prefix ):
     return p[ len( prefix ): ] if p.startswith( prefix ) else p
 
 
+ZERO_BLOB = "0" * 40
+
+
+def _blob( s ):
+    return None if not s or set( s ) == { "0" } else s
+
+
 def parse_unified( text ):
-    """-U0 unified diff -> [(old_path|None, new_path|None, [(old_start, old_len)])]."""
+    """-U0 unified diff (--full-index) -> [(old_path|None, new_path|None, [(old_start, old_len)], old_blob|None)]."""
     files, cur = [], None
     for line in text.split( "\n" ):
         if line.startswith( "diff --git " ):
-            cur = [ None, None, [] ]
+            cur = [ None, None, [], None ]
             files.append( cur )
         elif cur is None:
             continue
+        elif line.startswith( "index " ) and not cur[ 2 ]:
+            cur[ 3 ] = _blob( line[ 6: ].split( " " )[ 0 ].split( ".." )[ 0 ] )
         elif line.startswith( "--- " ):
             cur[ 0 ] = _strip_prefix( line[ 4: ], "a/" )
         elif line.startswith( "+++ " ):
@@ -68,13 +77,15 @@ def parse_unified( text ):
 
 
 def parse_combined( text ):
-    """-c -U0 combined diff -> [(path, path, [(first_parent_start, first_parent_len)])]."""
+    """-c -U0 combined diff -> [(path, path, [(first_parent_start, first_parent_len)], first_parent_blob)]."""
     files, cur = [], None
     for line in text.split( "\n" ):
         if line.startswith( "diff --combined " ) or line.startswith( "diff --cc " ):
             p = unquote_path( line.split( " ", 2 )[ 2 ] )
-            cur = [ p, p, [] ]
+            cur = [ p, p, [], None ]
             files.append( cur )
+        elif cur is not None and line.startswith( "index " ) and not cur[ 2 ]:
+            cur[ 3 ] = _blob( line[ 6: ].split( " " )[ 0 ].split( ".." )[ 0 ].split( "," )[ 0 ] )
         elif cur is not None and line.startswith( "@@@ " ):
             m = CHUNK_RE.match( line )
             if m:
@@ -85,12 +96,36 @@ def parse_combined( text ):
 def commit_diff( repo, sha, parent=None ):
     """The diff of a commit against its FIRST parent (the fix-unit rule), -U0, renames on."""
     parent = parent or ( sha + "^1" )
-    return parse_unified( common.git( repo, "diff", "-U0", "--no-color", "--no-ext-diff", "-M", "--src-prefix=a/",
+    return parse_unified( common.git( repo, "diff", "-U0", "--full-index", "--no-color", "--no-ext-diff", "-M", "--src-prefix=a/",
                                       "--dst-prefix=b/", parent, sha ) )
 
 
 def merge_combined_diff( repo, sha ):
-    return parse_combined( common.git( repo, "diff-tree", "-c", "-U0", "--no-color", "--no-ext-diff", sha ) )
+    return parse_combined( common.git( repo, "diff-tree", "-c", "-U0", "--full-index", "--no-color", "--no-ext-diff", sha ) )
+
+
+def parse_log_patch( text ):
+    """`git log -c -p -U0 --full-index --format=%x00%H%x01%P%x01%B%x02` -> [(sha, nparents, message, files)]: a
+    non-merge's files are its diff against its parent, a merge's its combined diff (old side = first parent)."""
+    out = []
+    for rec in text.split( "\x00" )[ 1: ]:
+        head, _, diff = rec.partition( "\x02" )
+        sha, parents, body = head.split( "\x01", 2 )
+        blocks, cur, kind = [], [], None
+        for line in diff.split( "\n" ):
+            if line.startswith( "diff --git " ) or line.startswith( "diff --combined " ) or line.startswith( "diff --cc " ):
+                if cur:
+                    blocks.append( ( kind, cur ) )
+                kind, cur = ( "u" if line.startswith( "diff --git " ) else "c" ), [ line ]
+            elif cur:
+                cur.append( line )
+        if cur:
+            blocks.append( ( kind, cur ) )
+        files = []
+        for kind, lines in blocks:
+            files += ( parse_unified if kind == "u" else parse_combined )( "\n".join( lines ) )
+        out.append( ( sha, len( parents.split() ), body.strip(), files ) )
+    return out
 
 
 def old_lines( start, length ):
@@ -170,13 +205,39 @@ class UnitCache:
         return self.blob_of[ k ]
 
     def units( self, rev, path ):
-        sha = self.blob_sha( rev, path )
+        return self.units_blob( self.blob_sha( rev, path ), path )
+
+    def units_blob( self, sha, path, disk=None ):
+        """Units of one blob (parsed once; a provider with parse_file() also records the parse status, and a
+        disk directory, when given, persists the answer across runs)."""
         if sha is None:
             return []
-        if sha not in self.by_blob:
-            data = self.blobs.get( sha ) or b""
-            self.by_blob[ sha ] = with_ordinals( self.provider.units( path, data ) )
-        return self.by_blob[ sha ]
+        key = ( sha, os.path.splitext( path )[ 1 ].lower() )
+        if key not in self.by_blob:
+            f = os.path.join( disk, sha[ :2 ], sha + key[ 1 ] + ".json" ) if disk else None
+            if f and os.path.exists( f ):
+                import json
+                with open( f ) as fh:
+                    got = json.load( fh )
+                units, status = [ tuple( u ) for u in got[ "units" ] ], got[ "status" ]
+            else:
+                data = self.blobs.get( sha ) or b""
+                if hasattr( self.provider, "parse_file" ):
+                    raw, status = self.provider.parse_file( path, data )
+                else:
+                    raw, status = self.provider.units( path, data ), "parsed"
+                units = with_ordinals( raw )
+                if f:
+                    import json
+                    os.makedirs( os.path.dirname( f ), exist_ok=True )
+                    with open( f + ".tmp", "w" ) as fh:
+                        json.dump( dict( units=units, status=status ), fh )
+                    os.replace( f + ".tmp", f )
+            self.by_blob[ key ] = ( units, status )
+        return self.by_blob[ key ][ 0 ]
+
+    def status( self, sha, path ):
+        return self.by_blob.get( ( sha, os.path.splitext( path )[ 1 ].lower() ), ( None, None ) )[ 1 ]
 
 
 # ── rename tracking along the first-parent chain ────────────────────────────────────────────────────────
@@ -193,7 +254,7 @@ class RenameTracker:
     def advance( self, files ):
         """files: parse_unified() output of ONE first-parent commit."""
         updates, dead = {}, []
-        for old, new, _ in files:
+        for old, new, *_ in files:
             if old is None and new is not None:
                 updates[ new ] = None                              # added after T
             elif old is not None and new is None:
@@ -207,10 +268,11 @@ class RenameTracker:
         self.to_t.update( updates )
 
 
-def touched_units( files, units_at_parent, tracker, t_index, t_paths=None ):
+def touched_units( files, units_at_parent, tracker, t_index, t_paths=None, records=None ):
     """The set of T-units a first-parent commit's hunks touch.
     files           — parse_unified() of c vs c^1
-    units_at_parent — callable(path_at_parent) -> with_ordinals() units at c^1
+    units_at_parent — callable(path_at_parent, blob_at_parent) -> with_ordinals() units at c^1
+    records         — if a list, one dict per hunk in a population file is appended (the A1 sample frame)
     tracker         — RenameTracker positioned at c^1 (NOT yet advanced over c)
     t_index         — set of (path_at_T, scope, name, ordinal) in the population
     t_paths         — the population's paths at T (derived from t_index when None)
@@ -221,7 +283,7 @@ def touched_units( files, units_at_parent, tracker, t_index, t_paths=None ):
         t_paths = { k[ 0 ] for k in t_index }
     hit = set()
     n = dict( hunks=0, mapped=0, unmapped=0, born_after_t=0, out_of_population=0 )
-    for old, new, hunks in files:
+    for old, new, hunks, *rest in files:
         if old is None or not hunks:
             continue
         pt = tracker.path_at_t( old )
@@ -230,7 +292,8 @@ def touched_units( files, units_at_parent, tracker, t_index, t_paths=None ):
             n[ "hunks" ] += len( hunks )
             n[ key ] += len( hunks )
             continue
-        units = units_at_parent( old )
+        blob = rest[ 0 ] if rest else None
+        units = units_at_parent( old, blob )
         spans = [ ( u[ 3 ], u[ 4 ] ) for u in units ]
         for start, length in hunks:
             n[ "hunks" ] += 1
@@ -242,6 +305,9 @@ def touched_units( files, units_at_parent, tracker, t_index, t_paths=None ):
                     hit.add( key )
                     mapped = True
             n[ "mapped" if mapped else "unmapped" ] += 1
+            if records is not None:
+                records.append( dict( path=old, path_at_t=pt, blob=blob, start=start, length=length,
+                                      units=[ list( units[ i ] ) for i in overlapping( spans, lo, hi ) ] ) )
     return hit, n
 
 
@@ -256,11 +322,11 @@ def name_status( repo, sha, parent=None ):
         if st[ 0 ] in "RC":
             old, new = toks[ i + 1 ], toks[ i + 2 ]
             i += 3
-            files.append( ( old, new, [] ) if st[ 0 ] == "R" else ( None, new, [] ) )     # a copy is a new file
+            files.append( ( old, new, [], None ) if st[ 0 ] == "R" else ( None, new, [], None ) )     # a copy is a new file
         else:
             path = toks[ i + 1 ]
             i += 2
-            files.append( ( None, path, [] ) if st[ 0 ] == "A" else ( path, None, [] ) if st[ 0 ] == "D" else ( path, path, [] ) )
+            files.append( ( None, path, [], None ) if st[ 0 ] == "A" else ( path, None, [], None ) if st[ 0 ] == "D" else ( path, path, [], None ) )
     return files
 
 
@@ -282,16 +348,16 @@ def _parse_name_status_lines( text ):
         parts = line.split( "\t" )
         st = parts[ 0 ]
         if st[ 0 ] == "R":
-            files.append( ( unquote_path( parts[ 1 ] ), unquote_path( parts[ 2 ] ), [] ) )
+            files.append( ( unquote_path( parts[ 1 ] ), unquote_path( parts[ 2 ] ), [], None ) )
         elif st[ 0 ] == "C":
-            files.append( ( None, unquote_path( parts[ 2 ] ), [] ) )
+            files.append( ( None, unquote_path( parts[ 2 ] ), [], None ) )
         elif st[ 0 ] == "A":
-            files.append( ( None, unquote_path( parts[ 1 ] ), [] ) )
+            files.append( ( None, unquote_path( parts[ 1 ] ), [], None ) )
         elif st[ 0 ] == "D":
-            files.append( ( unquote_path( parts[ 1 ] ), None, [] ) )
+            files.append( ( unquote_path( parts[ 1 ] ), None, [], None ) )
         else:
             p = unquote_path( parts[ 1 ] )
-            files.append( ( p, p, [] ) )
+            files.append( ( p, p, [], None ) )
     return files
 
 
@@ -309,7 +375,7 @@ def first_parent_diffs( repo, shas ):
     if not shas:
         return {}
     env_in = "\n".join( shas ) + "\n"
-    p = subprocess.run( common.git_argv( repo, "log", "--no-walk=unsorted", "--stdin", "--diff-merges=first-parent", "-M", "-U0", "--no-color",
+    p = subprocess.run( common.git_argv( repo, "log", "--no-walk=unsorted", "--stdin", "--diff-merges=first-parent", "-M", "-U0", "--full-index", "--no-color",
                                          "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--format=%x00%H" ),
                         input=env_in, capture_output=True, text=True, errors="replace", env=common.git_env() )
     if p.returncode != 0:

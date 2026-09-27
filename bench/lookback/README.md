@@ -21,6 +21,8 @@ frozen yet; until it is, every constant below may still change, and every change
 | `metrics.py` | Tie-block effort curve, Popt, recall@20%, AUROC — exact integer/rational arithmetic |
 | `analyze.py` | Per-repository pooling, the repository-cluster bootstrap, §6's pass/fail conditions, §7's power arithmetic |
 | `runrepo.py` | One repository end to end in the registered order: ranking table, label table, both hashed, then one join and score |
+| `tsparse.py` | The independent function parser: ctypes over the vendored tree-sitter runtime and grammars, this harness's own queries |
+| `fngrain.py` | Function grain: population at T, the ripwire join, look-back CHURN/PRIOR through the one mapper, A1 hand-check cards |
 | `test_lookback.py` | Synthetic unit tests (hand-computed curves, the tie-block identity, regex cases, toy git repositories with known fixes). Reads no corpus, runs no ripwire, uses no network |
 
 Run the tests with `python3 bench/lookback/test_lookback.py` (stdlib only; about a second).
@@ -32,18 +34,24 @@ Run the tests with `python3 bench/lookback/test_lookback.py` (stdlib only; about
 It joins and scores once. With `--seal`, scores go to `scores.sealed.json` and only that file's hash is
 printed, so a pilot can be run for its mechanics without anyone reading its scores.
 
-## Parser status (function grain)
+## Function grain (the primary grain)
 
-The registration's primary grain is the function, labelled by an **independent** tree-sitter parse, so that the
-binary under test does not shape its own labels. No tree-sitter Python binding is installed on the development
-machine, and this harness does not fall back to ripwire's own parse. Until an independent parser is supplied:
+`tsparse.py` is the independent parser (decision A9, option 2): Python `ctypes` over the tree-sitter runtime and
+the grammars vendored in `third_party/deps`, compiled once into a scratch shared library (`build()`), with this
+harness's own definition queries. None of ripwire's extraction code or queries is used. Limitation: labels and
+ripwire share the same upstream grammar builds, so a grammar mis-parse is common-mode.
 
-- `runrepo.py --grain file` (the S5 file grain) is the only grain that runs. It needs no parser: a unit is a
-  product-source file, its effort is its line count, and any fix hunk in it labels it.
-- `maphunks.py` already takes a pluggable unit provider (`units(path, bytes) -> [(scope, name, start, end)]`),
-  and `rankers.join_function_rows` already joins provider units to ripwire rows by path, scope, name and start
-  line (±3). `--metrics` rows carry no start line, so that join needs `--pack-signatures` (whose `<d l=>` rows do).
-- `runrepo.py --grain function` refuses to run rather than degrade.
+`runrepo.py --grain function --ts-cache DIR` runs the function grain (`fngrain.py`):
+- the population is every named function/method with a body in product source at T (nested ones collapse into
+  the outermost); effort is its span in lines;
+- the join (§4.3): a unit joins the ONE `--graph-query=all` row with its path and name whose line is within ±3 of
+  its start; `ccx=`/`in=` come from the `--metrics` row with that path and name (scope breaks a tie). `--metrics`
+  merges same-name definitions into one row (`overloads=N`); such units have no per-definition ccx and are
+  dropped as ambiguous matches, counted against the 90% join floor;
+- CHURN / PRIOR map every look-back commit's hunks (merges through their combined diff) at the commit's parent,
+  carried to T's paths by a rename map built over the first-parent chain;
+- labels map fix hunks at each fix's parent; every hunk of a primary-route fix in a population file is written to
+  `a1_records.json` with a source excerpt, the A1 hand-check frame (`maphunks.a1_sample`).
 
 ## ripwire's own blind spots the health floors must catch
 
@@ -52,7 +60,9 @@ machine, and this harness does not fall back to ripwire's own parse. Until an in
   `build` is never read, and `--skipped` counts such directories (`pruned_dirs=`) without naming them. Those files
   fall into HOT's bottom tie block with CCX = FANIN = 0. `runrepo.py` counts them against the parse floor
   (`ripwire_read` in the manifest); a (repository, T) below 95% fails its health check and is replaced.
-- `--metrics` rows carry no start line, so the function-grain join needs a second call (`--pack-signatures`).
+- `--metrics` rows carry no start line (`--pack-signatures` is capped at 50 rows), so the join reads lines from
+  `--graph-query=all`; and `--metrics` merges same-name definitions (Java overloads, Go methods of one name on
+  several receivers), which drops those units from the scored population.
 
 ## Budget notes (measured, for planning the main run)
 

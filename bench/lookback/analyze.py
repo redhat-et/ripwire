@@ -86,20 +86,56 @@ def n_for_power( sd, true_delta, target=0.80, nmax=200 ):
     return None
 
 
+def rescore( outdir, ignore_health=False ):
+    """Recompute runrepo's scores from its two hashed tables (ranking_table.json, label_table.json). With
+    ignore_health, windows that failed a §4.3 health floor are scored too — EXPLORATORY ONLY (a pilot reading an
+    SD); the registered analysis replaces such a repository instead."""
+    import json, metrics, rankers
+    m = json.load( open( os.path.join( outdir, "manifest.json" ) ) )
+    R = json.load( open( os.path.join( outdir, "ranking_table.json" ) ) )
+    L = json.load( open( os.path.join( outdir, "label_table.json" ) ) )
+    scores = {}
+    for w in m[ "windows" ]:
+        k = str( w[ "k" ] )
+        if k not in R:
+            continue
+        if w[ "ripwire" ][ "health_failures" ] and not ignore_health:
+            scores[ k ] = dict( dropped="health", failures=w[ "ripwire" ][ "health_failures" ] )
+            continue
+        per = {}
+        for rule, fx in sorted( L[ k ][ "fixed" ].items() ):
+            fx = { x for x in fx if x in R[ k ][ "loc" ] }
+            if len( fx ) < common.EVENT_FLOOR:
+                per[ rule ] = dict( dropped="event_floor", fixed=len( fx ) )
+                continue
+            per[ rule ] = { arm: metrics.score_arm( [ ( tuple( v ) if isinstance( v, list ) else v, R[ k ][ "loc" ][ u ], 1 if u in fx else 0 )
+                                                      for u in sorted( R[ k ][ "loc" ] ) for v in [ R[ k ][ "arms" ][ u ][ arm ] ] ] )
+                            for arm in rankers.ARMS_FILE }
+        scores[ k ] = per
+    return m, scores
+
+
 # ── CLI: the pre-freeze SD pilot readout ────────────────────────────────────────────────────────────────
-def sd_pilot( outdirs, contrasts=( ( "HOT", "RANDOM" ), ( "HOT", "CCX" ), ( "HOT", "FANIN" ) ) ):
+def sd_pilot( outdirs, contrasts=( ( "HOT", "RANDOM" ), ( "HOT", "CCX" ), ( "HOT", "FANIN" ), ( "CCX", "RANDOM" ), ( "FANIN", "RANDOM" ),
+                                   ( "CHURN", "RANDOM" ), ( "HOTFN", "RANDOM" ), ( "PRIOR", "RANDOM" ), ( "SMALL", "RANDOM" ), ( "BIG", "RANDOM" ) ),
+              ignore_health=False ):
     """Reads each runrepo OUTDIR (manifest.json + scores.json), takes its PRIMARY rule, and prints per-repo
     Δ Popt per contrast, the between-repository SD with its chi-square CI, and what that SD implies for §7."""
     import json
-    table, rows = {}, []
+    table, rows, out_popt = {}, [], {}
     for d in outdirs:
-        m = json.load( open( os.path.join( d, "manifest.json" ) ) )
-        s = json.load( open( os.path.join( d, m[ "scores_file" ] ) ) )
+        if ignore_health:
+            m, s = rescore( d, ignore_health=True )
+        else:
+            m = json.load( open( os.path.join( d, "manifest.json" ) ) )
+            s = json.load( open( os.path.join( d, m[ "scores_file" ] ) ) )
         rule = m[ "primary_rule" ]
         table[ m[ "full_name" ] ] = { w: s[ w ][ rule ] for w in s if rule in s[ w ] and "dropped" not in s[ w ][ rule ] }
+        out_popt[ m[ "full_name" ] ] = { w: { arm: round( v[ "popt" ], 4 ) for arm, v in s[ w ][ rule ].items() if v.get( "popt" ) is not None }
+                                        for w in s if rule in s[ w ] and "dropped" not in s[ w ][ rule ] }
         rows.append( ( m[ "full_name" ], rule, { w: ( s[ w ].get( "dropped" ) or s[ w ].get( rule, {} ).get( "dropped" ) ) for w in s } ) )
     mp = per_repo_means( table, "popt" )
-    out = dict( repos=rows, contrasts={} )
+    out = dict( repos=rows, contrasts={}, popt_by_window=out_popt, exploratory_ignore_health=ignore_health )
     for a, b in contrasts:
         d = deltas( mp, a, b )
         vals = [ v for _, v in d ]
@@ -114,7 +150,7 @@ def sd_pilot( outdirs, contrasts=( ( "HOT", "RANDOM" ), ( "HOT", "CCX" ), ( "HOT
 
 if __name__ == "__main__":
     import json
-    if len( sys.argv ) > 2 and sys.argv[ 1 ] == "sd-pilot":
-        print( json.dumps( sd_pilot( sys.argv[ 2: ] ), indent=1, sort_keys=True ) )
+    if len( sys.argv ) > 2 and sys.argv[ 1 ] in ( "sd-pilot", "sd-pilot-ignore-health" ):
+        print( json.dumps( sd_pilot( sys.argv[ 2: ], ignore_health=sys.argv[ 1 ].endswith( "health" ) ), indent=1, sort_keys=True ) )
     else:
         sys.exit( "usage: analyze.py sd-pilot OUTDIR..." )
