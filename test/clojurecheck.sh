@@ -20,7 +20,8 @@ rows = list(t.iter('s'))
 names = {s.get('n').split('/')[0] for s in rows}
 expected = {'sample.core', 'sample.browser', 'sample.shared', 'sample.tasks', 'answer', 'cached',
             'square', 'secret', 'unless', 'area', 'Greeter', 'Person', 'Counter', 'quoted', 'interop',
-            'run', 'render', 'shared', 'task', 'quoted-holder'}
+            'run', 'render', 'shared', 'task', 'quoted-holder', 'route', 'spaced', 'commented',
+            'gap-call', 'comment-call'}
 assert names == expected, (names, expected)
 by = {s.get('n').split('/')[0]: s for s in rows}
 for name, kind in {'answer':'var', 'cached':'var', 'square':'fn', 'unless':'macro',
@@ -32,9 +33,25 @@ assert 'square' in calls('secret'), calls('secret')
 assert 'secret' in calls('run'), calls('run')
 assert 'square' in calls('render'), calls('render')
 assert 'render' in calls('task'), calls('task')
+for name in ('spaced', 'commented', 'gap-call', 'comment-call'):
+    assert 'square' in calls(name), (name, calls(name))
 assert 'square' not in calls('quoted-holder'), calls('quoted-holder')
 print('PASS Clojure definitions, kinds, calls, quote/discard negatives, and four extensions')
 PY
+
+"$BIN" "$TMP/fix" --metrics --no-cache >"$TMP/metrics.xml"
+python3 - "$TMP/metrics.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+rows = [s for s in ET.parse(sys.argv[1]).iter('s') if s.get('n') == 'route']
+assert len(rows) == 1, rows
+assert rows[0].get('params') == '1', rows[0].attrib
+PY
+
+mkdir "$TMP/rules"
+printf '%s\n' '- id: clojure-symbol' '  language: clj' '  severity: warn' \
+    '  message: symbol found' '  query: |' '    (sym_lit name: (sym_name) @hit)' >"$TMP/rules/clj.yml"
+"$BIN" "$TMP/fix" --lint-rules="$TMP/rules" --no-cache >"$TMP/lint.xml"
+rg -q 'rule="clojure-symbol"' "$TMP/lint.xml"
 
 "$BIN" "$TMP/fix" >"$TMP/warm-a.xml"
 "$BIN" "$TMP/fix" >"$TMP/warm-b.xml"
@@ -52,9 +69,15 @@ assert facts(sys.argv[1]) == facts(sys.argv[2])
 PY
 "$BIN" "$TMP/fix" --skipped --no-cache >"$TMP/skipped.xml"
 rg -q '<lang n="clj" files="4"' "$TMP/skipped.xml"
-! rg -q 'degraded-parse' "$TMP/skipped.xml"
+if rg -q 'degraded-parse' "$TMP/skipped.xml"; then
+    echo 'Unexpected degraded Clojure parse' >&2
+    exit 1
+fi
 "$BIN" "$TMP/fix" --deps --no-cache >"$TMP/deps.xml"
-! rg -q 'dep_langs="[^"]*clj' "$TMP/deps.xml"
+if rg -q 'dep_langs="[^"]*clj' "$TMP/deps.xml"; then
+    echo 'Unexpected Clojure dependency capability' >&2
+    exit 1
+fi
 "$BIN" "$TMP/fix" --nonlocal-state --no-cache >"$TMP/nonlocal.xml"
 rg -q 'unanalyzed_langs="clojure"' "$TMP/nonlocal.xml"
 rg -q 'unanalyzed_files="4"' "$TMP/nonlocal.xml"

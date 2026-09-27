@@ -23,7 +23,9 @@ std::string_view clojureListHead( TSNode list, std::string_view src ) noexcept
     }
     const std::uint32_t childCount = ts_node_named_child_count( list );
     std::uint32_t       headIndex  = 0;
-    while( headIndex < childCount && kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "comment" ) )
+    while( headIndex < childCount
+           && ( kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "comment" )
+                || kindIs( ts_node_type( ts_node_named_child( list, headIndex ) ), "dis_expr" ) ) )
     {
         ++headIndex;
     }
@@ -102,9 +104,19 @@ bool clojureKeepCapture( TSNode role, bool isDef, std::string_view src ) noexcep
 std::uint16_t clojureParams( TSNode definition, std::string_view src ) noexcept
 {
     TSNode params {};
+    const bool isDefmethod = clojureListHead( definition, src ) == "defmethod";
+    std::uint32_t formIndex = 0;
     for( std::uint32_t i = 0; i < ts_node_named_child_count( definition ); ++i )
     {
         const TSNode child = ts_node_named_child( definition, i );
+        if( kindIs( ts_node_type( child ), "comment" ) || kindIs( ts_node_type( child ), "dis_expr" ) )
+        {
+            continue;
+        }
+        if( isDefmethod && formIndex++ < 3 )
+        {
+            continue;
+        }
         if( std::strcmp( ts_node_type( child ), "vec_lit" ) == 0 )
         {
             params = child;

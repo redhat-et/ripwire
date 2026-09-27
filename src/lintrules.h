@@ -106,6 +106,7 @@ inline constexpr LangTokenRow kLangTokenRows[] = {
     { "kotlin",     Lang::Kotlin     },
     { "gdscript",   Lang::GDScript   },
     { "clojure",    Lang::Clojure    },
+    { "clj",        Lang::Clojure    },
 };
 
 /// Parse a supported language token; assign out only on success and otherwise return false.

@@ -7,6 +7,14 @@
 (defmacro unless [pred & body] `(if (not ~pred) ~@body))
 (defmulti area :shape)
 (defmethod area :circle [{:keys [radius]}] (square radius))
+(defmethod route [:get :admin] [request] request)
+(#_(ignored) defn #_(ignored-name) spaced [x] (square x))
+(; a comment may separate a list opener from its head
+ defn ; or a definition head from its name
+ commented [x] (square x))
+(defn gap-call [x] (#_(ignored-call) square x))
+(defn comment-call [x] (; a comment may precede a call head
+                        square x))
 (defprotocol Greeter (greet [this]))
 (defrecord Person [name] Greeter (greet [_] (str "Hi " name)))
 (deftype Counter [value])
