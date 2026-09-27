@@ -2320,7 +2320,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     // same defs window, so the lex build and cache round-trip treat these defs like captured ones.
     if( le.lang == Lang::Ruby )
     {
-        captureRubyAttrDefs( root, fileId, src, defs );
+        captureRubyDefs( root, fileId, src, defs );
     }
 }
 

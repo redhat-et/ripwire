@@ -13,6 +13,57 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Added — a Ruby `db/schema.rb` renders its columns as Section definitions
+
+A Rails schema is recognized BY CONTENT, never by path: a Ruby file whose tree holds a
+`create_table "x", … do |t| … end` call — the call's do-block carries one block parameter — is a
+rendered schema, wherever it lives. Each `t.<type> "name"` / `t.<type> :name` in a table block mints
+ONE `SymKind::Section` def at `Lang::Ruby` — the data-kind slot a doc heading or YAML key already
+occupies (model.h: a Section's isolation is a language property; the Ruby ones are still no call
+edges) — span = the name token, both quote spellings and the `:symbol` form. Rails-generated attribute
+uses (`product.price`) then resolve to the column as a definition: it appears in `--uses`, `--grep`,
+`--whereis` and the map. THE COLUMNS ARE DEFINITIONS ONLY, by maintainer decision: buildGraph's
+byName skips Section-Ruby, so a column admits NO call edge and no PageRank weight — an untyped
+`response.code` must not become a table's caller, and 200 `name` columns must not damp a model's real
+`def name` (both measured at review; edges may return behind an evidence rule, e.g. a receiver proven
+to be the owning model). The id rule covers the grounded spellings: no id column/spelling → an
+implicit `id` def (the anchor is the table-name string — no `id` token exists there); `id: false` →
+no id def; `id: :uuid` → an `id` def at the pair key (the uuid is a TYPE of the id column, never a
+column of its own; the type is not modelled); `primary_key: "x"` → a def named the string instead.
+An ARRAY or symbol `primary_key` (a composite key, or a hand-written migration) mints NO implicit id —
+the rendered composite columns are the block's own explicit `t.<type>` lines. `t.timestamps` mints
+`created_at` AND `updated_at` (the DSL names them literally, symmetric with the id rule) — the two
+defs anchor at the method token's edges. The DSL CALLS keep their reference posture exactly like the
+attr family: `string`/`datetime`/`create_table` stay external-surface names. Duplicate columns across
+tables stay SEPARATE defs (same name, distinct identity bytes): `id` on N tables is `defs="N"`, and
+the map row merges them with `overloads`, never hiding the multiplicity. MIGRATIONS never interfere: a
+class-wrapped create_table — the migration shape, string- or symbol-named — is refused by a
+class/module-nest gate (a rendered schema's tables live at file level or under `Schema[].define`, never
+inside a class body), so the rendered `db/schema.rb` stays the ONE source of column names and indexing
+the migration beside its schema cannot double any def; `add_column` / `remove_column` /
+`change_column` are argument data and read nowhere — a column added then dropped never registers
+(pinned by the three migration fixtures). Rails 8's `db/queue_schema.rb`, `db/cache_schema.rb` and
+`db/cable_schema.rb` are matched by the same content gate. kParserVer lands at 126 (extraction facts
+changed; carried 122 pre-rebase and renumbered for the train-20 `.astro` collision, then to 126 at
+review — 123 is reserved for #325, 124 in flight, 125 queued for #338; the merge commit sets the final
+number; no record layout change — kCacheVersion and kQSnapCacheScheme stay).
+Gate: `test/rubyschemacheck.sh` on `test/rubyschemafix/` — schema text from a real, running Rails
+8.1 app's `bin/rails db:schema:dump` (verified `db:schema:load`-able), original domain tables scrubbed
+to `spike_*` names; two spellings no dump emits are restored by hand and marked in-file (`id: :uuid`,
+which that dump actually failed on, and a literal `t.timestamps`). Stated capture floors, each pinned
+by a gate arm: `t.index` / `t.references` / `t.belongs_to` / `t.polymorphic` / `t.check_constraint` /
+`t.exclusion_constraint` / `t.unique_constraint` name no column (a `t.references`/`t.belongs_to` mints
+no `<x>_id`, and a `create_join_table` mints nothing — raws dumps render these as explicit columns);
+a column call must be ON the block parameter (`helper.string "x"` names nothing); a symbol-named table
+(`create_table :users`) is a migration spelling, not a schema surface; `where("price > ?")` string
+fragments stay opaque; the picker splits honestly (`rec.name` on a plain local and a rich `X.new.name`
+receiver are `graph_ambiguous`, `self.name` inside the defining class pins its own def). The
+before-evidence: on the pre-change binary every column was `defs=0 external=1` — the fixture's
+`--uses=name` read `defs="10"` (9 attr/def defs plus the YAML key) with the schema columns invisible; it
+now reads `defs="19" external="0"` and the column uses resolve to definitions only.
+
 ## [0.6.4] — 2026-09-25
 
 ### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)

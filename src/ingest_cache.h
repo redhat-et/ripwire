@@ -279,7 +279,37 @@ constexpr std::uint32_t kCacheVersion = 25;           // 25: #150 AND #157 (trai
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 122;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 126;          // bump on any grammar/.scm/extraction change
+                                                      // 126 = the Rails schema-column capture
+                                                      //   (test/rubyschemacheck.sh, unreleased; reviewed round at
+                                                      //   123/126 — carried 122 pre-rebase, renumbered once for the
+                                                      //   train-20 .astro collision and again to 126 at the
+                                                      //   maintainer's request: 123 is reserved for #325, 124 in
+                                                      //   flight, 125 queued for #338; the MERGE COMMIT sets the
+                                                      //   final number): a Ruby file whose tree holds a
+                                                      //   `create_table "x", … do |t| … end` call is a rendered
+                                                      //   db/schema.rb BY CONTENT, and every `t.<type> "name"` /
+                                                      //   `t.<type> :name` in the table block mints a
+                                                      //   SymKind::Section def (the data-kind slot, same as a doc
+                                                      //   heading / YAML key) at Lang::Ruby — DEFINITIONS ONLY:
+                                                      //   the defs answer --uses/--grep/--whereis, but
+                                                      //   buildGraph's byName skips Section-Ruby, so columns
+                                                      //   admit NO call edges and no PageRank weight (the
+                                                      //   "admission consequence" planned earlier was retracted
+                                                      //   after the maintainer measured unrelated-call binding
+                                                      //   and map takeover; edges may return behind an evidence
+                                                      //   rule). Also: the four-spelling id rule (implicit /
+                                                      //   id: false / id: :uuid / primary_key: "x"; an array or
+                                                      //   symbol primary_key suppresses the implicit id — a
+                                                      //   composite key has no id), `t.timestamps` -> created_at
+                                                      //   + updated_at, constraint DSL floors (check/
+                                                      //   exclusion/unique_constraint name no column), the
+                                                      //   review-round receiver floor (a column call must be on
+                                                      //   the block parameter), and MIGRATIONS contribute
+                                                      //   nothing (class/module-nest gate). No record layout
+                                                      //   change: kCacheVersion stays, kQSnapCacheScheme stays.
+                                                      //   A 122/123/124/125 cache differs only in the schema
+                                                      //   defs and Section-Ruby edges it lacks.
                                                       // 122 = 2026-09-25 (#320/#67, test/astrocheck.sh): .astro joins
                                                       //   kLangTable on the TypeScript grammar, parsed through ONE
                                                       //   included range over its `---` frontmatter; blank lines
