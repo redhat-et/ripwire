@@ -271,6 +271,7 @@ endmacro()
 set(_ripwire_query_names
   bash
   c
+  clojure
   cpp
   csharp
   dart
@@ -552,6 +553,11 @@ add_ts_grammar(kotlin https://github.com/fwcd/tree-sitter-kotlin.git 1852ea17b7f
 # gaps, NOT patched here (guardrail G3 — this repo carries no grammar fork).
 add_ts_grammar(gdscript https://github.com/PrestonKnopp/tree-sitter-gdscript.git c5c8fa4861b5a4f04a7e60d97587fc3b6cc5639e)  # master, ABI 14
 
+# Yogthos' fork retains Sogaiu's grammar rules and regenerates an ABI-15 parser.
+# On 4,933 real files it parsed 4,930 (99.94%) in 2.24 s; the Sogaiu ABI-14
+# generated parser repeatedly stalled on the same corpus. CC0; no scanner.
+add_ts_grammar(clojure https://github.com/yogthos/tree-sitter-clojure.git 8ec8407eada5f29728d746a46cbe6115938b5422)  # v0.0.14, ABI 15
+
 # PHP (.php): the official tree-sitter org grammar. Like TypeScript this repo hosts TWO sub-grammars
 # in subdirectories — `php/` (the full one: HTML text interleaved with `<?php … ?>` blocks) and
 # `php_only/` (no surrounding text). ONLY `php/` is vendored and built: a real .php file in a real
@@ -657,6 +663,7 @@ set(RIPWIRE_TS_OBJECTS
   $<TARGET_OBJECTS:ts_dart>
   $<TARGET_OBJECTS:ts_kotlin>
   $<TARGET_OBJECTS:ts_gdscript>
+  $<TARGET_OBJECTS:ts_clojure>
   $<TARGET_OBJECTS:ts_elixir>
   $<TARGET_OBJECTS:ts_php>
   $<TARGET_OBJECTS:ts_toml>
@@ -892,7 +899,7 @@ endif()
 set(RIPWIRE_GRAMMAR_TARGETS
   ts_cpp ts_python ts_go ts_rust ts_tsts ts_tstsx ts_swift ts_objc
   ts_javascript ts_bash ts_java ts_ruby ts_json ts_toml ts_yaml ts_csharp ts_c ts_cuda ts_markdown
-  ts_php ts_lua ts_elixir ts_dart ts_kotlin ts_gdscript)
+  ts_php ts_lua ts_elixir ts_dart ts_kotlin ts_gdscript ts_clojure)
 set(RIPWIRE_RUNTIME_COMPILE_TARGETS ripwire_probe ripwire tree-sitter ${RIPWIRE_GRAMMAR_TARGETS})
 set(RIPWIRE_RUNTIME_LINK_TARGETS ripwire_probe ripwire)
 # The C++ subset of the compile list — the only targets that include a C++ standard library at all, and so
@@ -1372,6 +1379,7 @@ if(RIPWIRE_FUZZ)
   add_ripwire_fuzzer(lua        tree_sitter_lua        lua)
   add_ripwire_fuzzer(kotlin     tree_sitter_kotlin     kotlin)
   add_ripwire_fuzzer(gdscript   tree_sitter_gdscript   gdscript)
+  add_ripwire_fuzzer(clojure    tree_sitter_clojure    clojure)
   add_custom_target(ripwire_fuzzers DEPENDS ${RIPWIRE_FUZZ_TARGETS})
 
   # ---- reader fuzzers: ripwire's OWN parsers of bytes it did not create (test/fuzz/readers/) ----

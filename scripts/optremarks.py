@@ -68,7 +68,7 @@ HOT_FILES = (
     "src/lexical.h",              # tokenizer
 
     # ── the ingest translation unit ──────────────────────────────────────────────────────────────
-    # One TU, seventeen files since the split. It is the overwhelming majority of both a cold and a
+    # One TU, seventeen guarded sections since the split. It is the overwhelming majority of both a cold and a
     # warm run, so most of its sections are hot — that is a fact about where this tool spends its
     # time, not a lapsed rule. The six that are NOT hot are in COLD_FILES, each with its number.
     "src/ingest.cpp",             # the TU anchor: the ingest() driver and its phase calls. Its own body is small now — the phases live in the sections below
@@ -111,6 +111,8 @@ COLD_FILES = (
       "per-node tree-sitter walk — is covered by ingest_binds.h and ingest_relations.h, which run for every grammar." ),
     ( "src/ingest_elixir.h",
       "Elixir-specific capture helpers: per node, but for one grammar with a small corpus share. Same argument as ingest_jsimports.h above." ),
+    ( "src/ingest_clojure.h",
+      "Clojure-specific capture helpers: per query capture, but only for Clojure files. Same corpus-share argument as ingest_elixir.h above." ),
 
     # ── the other translation units under src/ ────────────────────────────────────────────────────
     ( "src/main.cpp",

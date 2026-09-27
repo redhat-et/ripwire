@@ -155,7 +155,7 @@ reply = pathlib.Path(sys.argv[1])
 index = json.loads(next(reply.glob('index-*.json')).read_text())
 model = json.loads((reply / index['reply']['codemodel-v2']['jsonFile']).read_text())
 expected = {'ripwire_fuzz_' + name for name in
-            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua dart kotlin gdscript'.split()}
+            'cpp python go rust typescript tsx swift objc javascript bash java ruby json toml yaml csharp c php elixir lua dart kotlin gdscript clojure'.split()}
 cmake_text = pathlib.Path(sys.argv[2]).read_text()
 readers = cmake_text.split('set(RIPWIRE_FUZZ_READERS', 1)[1].split(')', 1)[0].split()
 expected_readers = {'ripwire_fuzz_reader_' + name for name in readers}
@@ -171,7 +171,7 @@ for config in model['configurations']:
 print(len(readers))
 PY
     then
-        ok "configured model contains all 23 grammar fuzz executables and one ripwire_fuzz_reader_<name> per RIPWIRE_FUZZ_READERS entry"
+        ok "configured model contains all 24 grammar fuzz executables and one ripwire_fuzz_reader_<name> per RIPWIRE_FUZZ_READERS entry"
     else
         no "configured grammar or reader fuzz executable set differs from the grammar list / RIPWIRE_FUZZ_READERS"
     fi
@@ -191,7 +191,7 @@ grep -q 'max_total_time=' "$RUNNER" && grep -q 'max_len=65536' "$RUNNER" && grep
     && ok "fuzz runner is time-, input-, and concurrency-bounded" || no "bounded fuzz runner contract missing"
 
 seedCount="$( find "$ROOT/test/fuzz/seeds" -mindepth 2 -maxdepth 2 -name valid | wc -l | tr -d ' ' )"
-if [ "$seedCount" = 23 ]; then ok "all 23 grammars have valid seeds"; else no "expected 23 grammar seeds, found $seedCount"; fi
+if [ "$seedCount" = 24 ]; then ok "all 24 grammars have valid seeds"; else no "expected 24 grammar seeds, found $seedCount"; fi
 
 # ── the nightly workflow: the TSan build runs against main once a day, and nothing about it can quietly widen ─────────
 # ThreadSanitizer is not a per-PR leg (owner decision, 2026-09-17): it runs from .github/workflows/nightly.yml. These
