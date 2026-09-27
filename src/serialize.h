@@ -2338,13 +2338,6 @@ inline std::string buildIgnoredAttr( const CrawlSkips& skips )
     return attr;
 }
 
-// One map-header gauge, ` name=N`, or nothing at all when N is zero: the absent-when-zero rule every crawl gauge below
-// shares, so a tree the gauge never fired on keeps a byte-identical map (test/golden.xml, every argvdiff vector).
-inline std::string absentAtZeroAttr( std::string_view nameEq, std::uint64_t n )
-{
-    return n == 0 ? std::string() : std::string( nameEq ) + std::to_string( n );
-}
-
 // §SEC1 — how many files the crawl REFUSED because a symlink took them out of the root (ingest.h carries the
 // rule). On the DEFAULT map, not only on --skipped, because the default map is the surface an agent actually
 // reads and a corpus that quietly shrank is precisely what the honesty contract forbids: files= would
@@ -2353,9 +2346,19 @@ inline std::string absentAtZeroAttr( std::string_view nameEq, std::uint64_t n )
 // which is what test/golden.xml and every argvdiff vector ride on. The DEFINITION lives in the --skipped
 // legend and --help, not here, for the reason buildUnindexedAttr's note measured: the map's fixed floor has
 // seven bytes of headroom at the smallest --max-tokens budgets, and no clause of any wording fits.
+//
+// §TRACKED rides the same attribute string: unvetted_dirs= counts the build-output-named subtrees (build/dist/out/target…)
+// pruned with NO git tracked-file verdict (no work tree, or git could not answer), where a source package under such a
+// name is absent and files= would present the survivors as the tree. Same placement, same absent-at-zero rule (every git
+// checkout keeps a byte-identical map), defined in the --skipped clause and the compact legend for the same reason.
 inline std::string buildEscapedRootAttr( const CrawlSkips& skips )
 {
-    return absentAtZeroAttr( " escaped_root=", skips.escapedFiles );
+    std::string attr = skips.escapedFiles == 0 ? std::string() : " escaped_root=" + std::to_string( skips.escapedFiles );
+    if( skips.unvettedDirs > 0 )
+    {
+        attr += " unvetted_dirs=" + std::to_string( skips.unvettedDirs );
+    }
+    return attr;
 }
 
 // The per-symbol honesty counters (graph.h ambOut / unresolvedOut / locPinOut) reach both map dialects as
@@ -2709,12 +2712,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     // §L1: the LANGUAGES this build could not read at all — buildUnindexedAttr carries the whole rule.
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
-    const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
-    // §TRACKED — build-output-named subtrees (build/dist/out/target…) pruned with NO git tracked-file verdict (no work tree, or
-    // git could not answer): a source package under such a name is absent, and files= would present the survivors as the
-    // tree. escaped_root='s placement and absent-at-zero rule (every git checkout keeps a byte-identical map); defined in the
-    // --skipped clause and the compact legend, for the seven-byte floor reason buildEscapedRootAttr gives.
-    const std::string unvettedAttr  = absentAtZeroAttr( " unvetted_dirs=", ing.crawlSkips.unvettedDirs );
+    const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1/§TRACKED, empty unless a symlink left the root or a build dir went unvetted
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -2791,7 +2789,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             stats += " nest_refused=";  stats += std::to_string( ing.crawlSkips.nestRefusedFiles );
         }
         stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += unindexedAttr;
-        stats += ignoredAttr;  stats += escapedAttr;  stats += unvettedAttr;  stats += fitAttr;
+        stats += ignoredAttr;  stats += escapedAttr;  stats += fitAttr;
         stats += " order=";      stats += orderAttr;
         stats += " -->";
         return stats;
