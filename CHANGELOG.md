@@ -22,7 +22,7 @@ The crawl prunes build-output directory names (`build`, `dist`, `out`, `target`,
 there. A Python package's `lib/build/*.py` was left out of the index, and the only sign was an unnamed
 `pruned_dirs=` count on `--skipped`. Now, in a git work tree, the files git tracks under such a
 directory are indexed. They go through the same per-file tests as every other file. Untracked content
-there stays pruned. This costs one `git ls-files --cached` fork per crawl, and only when such a
+there stays pruned. This costs one `git ls-files` fork per crawl, and only when such a
 directory exists and git has not already reported it as wholly ignored.
 
 Outside a work tree, or when git cannot answer, the name rule still applies, and each such directory is

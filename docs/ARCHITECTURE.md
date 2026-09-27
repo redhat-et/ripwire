@@ -65,7 +65,7 @@ all, the same treatment an `--exclude`'d one gets). What the denylist skips:
   `cmake-build-*`) are a guess about *untracked* output, and real source lives under them (a Python
   package's `lib/build/`). So in a git work tree the files git **tracks** under such a directory are
   indexed, through the same per-file tests as every other file, and only the untracked rest is pruned.
-  That costs one `git ls-files --cached` fork per crawl, and only when such a directory exists and the
+  That costs one `git ls-files` fork per crawl, and only when such a directory exists and the
   ignore probe has not already collapsed it (git collapses a directory only when nothing under it is
   tracked). Outside a work tree, or when git cannot answer, the name rule stands and each such
   directory is disclosed by name: `unvetted_dirs=` on the map header and `--skipped`, with
