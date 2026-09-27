@@ -237,6 +237,92 @@ grep -q "rwGateMainSymbol" "$TMP/probefail.map" \
     && ok "gitignore probe failure still maps the tree in full (the safe fallback, not an empty map)" \
     || no "gitignore probe failure produced an empty/short map instead of falling back to a full walk"
 
+# ── 14. TRACKED SOURCE UNDER A BUILD-OUTPUT NAME (build/dist/out/target…). The crawl prunes those names as
+#    build OUTPUT, and before this arm existed it pruned them whatever git said: a repository's tracked
+#    `lib/build/*.py` package (21 files on one real Python repository) vanished from files=, from --skipped's
+#    rows and from every answer, with only an unnamed pruned_dirs= count to show for it. The name is a
+#    heuristic about UNTRACKED output, so in a work tree the files git TRACKS there are indexed and the rest
+#    stays pruned; outside git nothing can tell the two apart, so the name rule stands and every such
+#    directory is DISCLOSED by name (unvetted_dirs= + why="unvetted-dir" rows). Languages are deliberately
+#    mixed (py, rs, js): the rule is a directory name, never a grammar. vendor/ stays pruned even when
+#    tracked — vendored code is skipped as a class, not as output.
+TB="$TMP/tbrepo"
+mkdir -p "$TB/build/nested" "$TB/target" "$TB/pkg/dist" "$TB/vendor" "$TB/src"
+printf 'def rw_gate_tb_build_gen():\n    return 1\n'           >"$TB/build/gen.py"
+printf 'def rw_gate_tb_build_nested():\n    return 2\n'        >"$TB/build/nested/deep.py"
+printf 'pub fn rw_gate_tb_target_lib() -> i32 { 3 }\n'         >"$TB/target/lib.rs"
+printf 'export function rwGateTbDistFn() { return 4; }\n'      >"$TB/pkg/dist/d.js"
+printf 'def rw_gate_tb_vendor():\n    return 5\n'              >"$TB/vendor/v.py"
+printf 'def rw_gate_tb_main():\n    return 6\n'                >"$TB/src/main.py"
+(
+    cd "$TB" || exit 1
+    git init -q . >/dev/null 2>&1
+    git config user.email gate@example.invalid
+    git config user.name  gate
+    git add -A >/dev/null 2>&1
+    git commit -qm fixture >/dev/null 2>&1
+)
+# untracked build output beside the tracked source: a binary object, a generated .py, a whole out/ tree
+printf '\177ELF\000\000' >"$TB/build/out.o"
+printf 'def rw_gate_tb_untracked_gen():\n    return 7\n' >"$TB/build/untracked_gen.py"
+mkdir -p "$TB/out" && printf 'def rw_gate_tb_untracked_out():\n    return 8\n' >"$TB/out/o.py"
+run "$TB" >"$TMP/tb.map"
+tbmiss=""
+for s in rw_gate_tb_build_gen rw_gate_tb_build_nested rw_gate_tb_target_lib rwGateTbDistFn rw_gate_tb_main; do
+    grep -q "$s" "$TMP/tb.map" || tbmiss="$tbmiss $s"
+done
+[ -z "$tbmiss" ] && ok "14a git: TRACKED files under build/ target/ pkg/dist/ (nested too) are indexed" \
+    || no "14a git: tracked source under a build-output name is missing:$tbmiss"
+tbleak=""
+for s in rw_gate_tb_untracked_gen rw_gate_tb_untracked_out rw_gate_tb_vendor; do
+    grep -q "$s" "$TMP/tb.map" && tbleak="$tbleak $s"
+done
+[ -z "$tbleak" ] && ok "14b git: untracked output (build/untracked_gen.py, out/) and tracked vendor/ stay pruned" \
+    || no "14b git: pruned content leaked into the map:$tbleak"
+"$BIN" "$TB" --skipped --no-cache >"$TMP/tb.sk" 2>/dev/null
+grep -q 'unvetted' "$TMP/tb.sk" "$TMP/tb.map" \
+    && no "14c git: an unvetted_dirs=/unvetted-dir disclosure on a work tree, where git's verdict exists" \
+    || ok "14c git: no unvetted disclosure where git vetted every build-output dir"
+grep -q 'pruned_dirs="6"' "$TMP/tb.sk" \
+    && ok "14d git: pruned_dirs= still counts the six pruned subtrees (.git build target pkg/dist vendor out)" \
+    || no "14d git: pruned_dirs moved: $( grep -o 'pruned_dirs="[0-9]*"' "$TMP/tb.sk" )"
+# 14e: a .gitignore naming build/ does not hide what git tracks there (git lists such a dir file by file)
+printf 'build/\nout/\n' >"$TB/.gitignore"
+run "$TB" >"$TMP/tb.ign"
+grep -q rw_gate_tb_build_gen "$TMP/tb.ign" && ! grep -q rw_gate_tb_untracked_gen "$TMP/tb.ign" \
+    && ok "14e git: an ignored build/ still yields its tracked file, never its untracked one" \
+    || no "14e git: .gitignore build/ changed the tracked/untracked split"
+rm -f "$TB/.gitignore"
+# 14f: cold and warm, twice: byte-identical
+run "$TB" >"$TMP/tb.map2"
+cmp -s "$TMP/tb.map" "$TMP/tb.map2" && ok "14f git: the map with tracked build-dir files is byte-identical across runs" \
+    || no "14f git: two runs differ"
+# 14g: NON-GIT copy — the name rule stands and is disclosed BY NAME
+NG="$TMP/tbplain"; cp -R "$TB" "$NG"; rm -rf "$NG/.git"
+run "$NG" >"$TMP/ng.map"
+grep -q rw_gate_tb_build_gen "$TMP/ng.map" \
+    && no "14g non-git: build/ was indexed without any tracked verdict" \
+    || ok "14g non-git: build-output dirs stay pruned (no git verdict to override the name)"
+grep -q 'unvetted_dirs=4 ' "$TMP/ng.map" \
+    && ok "14h non-git: the map header discloses unvetted_dirs=4 (build out pkg/dist target)" \
+    || no "14h non-git: map header lacks unvetted_dirs=4: $( grep -oE '<!-- files=[^>]*' "$TMP/ng.map" | head -1 )"
+"$BIN" "$NG" --skipped --no-cache >"$TMP/ng.sk" 2>/dev/null
+ngrows="$( grep -oE '<f p="[^"]*" why="unvetted-dir"' "$TMP/ng.sk" | sed 's/.*p="\([^"]*\)".*/\1/' | tr '\n' ' ' )"
+[ "$ngrows" = "build out pkg/dist target " ] && grep -q 'unvetted_dirs="4"' "$TMP/ng.sk" \
+    && ok "14i non-git: --skipped rows each unvetted dir by name ($ngrows) with unvetted_dirs=\"4\"" \
+    || no "14i non-git: --skipped unvetted rows wrong: [$ngrows] $( grep -o 'unvetted_dirs="[0-9]*"' "$TMP/ng.sk" )"
+# 14j: a git that cannot answer the tracked probe degrades to the non-git disclosure, never to silence
+cat >"$SHIM/git" <<SHEOF
+#!/usr/bin/env bash
+case " \$* " in *" ls-files --cached "*) exit 1 ;; esac
+exec "$REALGIT" "\$@"
+SHEOF
+chmod +x "$SHIM/git"
+PATH="$SHIM:$PATH" "$BIN" "$TB" --skipped --no-cache >"$TMP/tbfail.sk" 2>/dev/null; tbfailRc=$?
+[ "$tbfailRc" -eq 0 ] && grep -q 'unvetted_dirs="' "$TMP/tbfail.sk" && grep -q 'why="unvetted-dir"' "$TMP/tbfail.sk" \
+    && ok "14j git: a failing tracked probe falls back to the name rule AND rows the unvetted dirs (rc=0)" \
+    || no "14j git: a failing tracked probe was not disclosed (rc=$tbfailRc): $( grep -o 'unvetted_dirs="[0-9]*"' "$TMP/tbfail.sk" )"
+
 # ── 13. the flag is in --help (the deckcheck allowlist row for --no-ignore retires with it).
 "$BIN" --help=all 2>&1 | grep -q -- '--no-ignore' && ok "--no-ignore is documented in --help" \
     || no "--no-ignore is missing from --help"

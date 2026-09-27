@@ -2351,6 +2351,16 @@ inline std::string buildEscapedRootAttr( const CrawlSkips& skips )
     return skips.escapedFiles == 0 ? std::string() : " escaped_root=" + std::to_string( skips.escapedFiles );
 }
 
+// §TRACKED — build-output-named subtrees (build/dist/out/target…) pruned with NO git tracked-file verdict (a root outside
+// any work tree, or git could not answer): inside a work tree their tracked files are indexed, here a source package under
+// such a name is simply absent, and files= would present the survivors as the tree. On the default map for escaped_root='s
+// reason; absent at zero, so every git checkout (whose verdict always exists) keeps a byte-identical map. The DEFINITION
+// lives in the --skipped clause and the compact legend, for the same seven-byte floor reason given above.
+inline std::string buildUnvettedDirsAttr( const CrawlSkips& skips )
+{
+    return skips.unvettedDirs == 0 ? std::string() : " unvetted_dirs=" + std::to_string( skips.unvettedDirs );
+}
+
 // The per-symbol honesty counters (graph.h ambOut / unresolvedOut / locPinOut) reach both map dialects as
 // NULLABLE vectors — nullptr ⇒ never measured (a pure sizing pass). These two are the only ways the emitters
 // read them, so "an absent counter reads as zero" is stated once instead of in six hand-rolled chains.
@@ -2703,6 +2713,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
     const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
+    const std::string unvettedAttr  = buildUnvettedDirsAttr( ing.crawlSkips ); // §TRACKED, empty unless a build dir went unvetted
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -2779,7 +2790,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             stats += " nest_refused=";  stats += std::to_string( ing.crawlSkips.nestRefusedFiles );
         }
         stats += precAttr;  stats += rootsAttr;  stats += changedAttr;  stats += skippedAttr;  stats += unindexedAttr;
-        stats += ignoredAttr;  stats += escapedAttr;  stats += fitAttr;
+        stats += ignoredAttr;  stats += escapedAttr;  stats += unvettedAttr;  stats += fitAttr;
         stats += " order=";      stats += orderAttr;
         stats += " -->";
         return stats;
@@ -8224,6 +8235,11 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     if( h.ing.crawlSkips.escapedFiles > 0 )
     {
         rw::formatTo( hdr, sizeof( hdr ), "\"escaped_root\":{},", ( unsigned long long ) h.ing.crawlSkips.escapedFiles );
+        w.write( hdr );
+    }
+    if( h.ing.crawlSkips.unvettedDirs > 0 )   // §TRACKED, JSON lane: same argument, same absent-when-zero rule
+    {
+        rw::formatTo( hdr, sizeof( hdr ), "\"unvetted_dirs\":{},", ( unsigned long long ) h.ing.crawlSkips.unvettedDirs );
         w.write( hdr );
     }
 

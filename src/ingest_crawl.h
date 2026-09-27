@@ -1344,24 +1344,26 @@ bool underGitRoot( const char* rootDir )
     }
 }
 
-GitIgnoreSet collectGitIgnored( const char* rootDir )
+// The one reader both crawl probes share (the ignore set above, the tracked set below): run `cmd`, keep its
+// stdout in `buf`, and refuse the WHOLE answer past kMaxIgnoreProbeBytes — a partial path list is the silent
+// failure both probes exist to prevent. A non-zero exit outranks the ceiling: a reader that stopped early
+// leaves the child to die on SIGPIPE, and either way nothing of the answer is used.
+enum class GitProbeRead : std::uint8_t
 {
-    GitIgnoreSet out;
-    if( !underGitRoot( rootDir ) )
-    {
-        return out;
-    }
-    const std::string cmd = gitCmd( " -C " ) + shSingleQuote( rootDir == nullptr ? std::string( "." ) : std::string( rootDir ) )
-                          + " -c core.quotepath=false ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null";
+    Ok,
+    NotRunnable,   // popen refused
+    Failed,        // git ran and exited non-zero (not a work tree, no git reachable via the shell, …)
+    OverCeiling,
+};
+GitProbeRead readGitProbe( const std::string& cmd, std::string& buf )
+{
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( pipe == nullptr )
     {
-        DISCLOSE( out, GitIgnoreSet::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the ignore probe — full walk" );
-        return out;
+        return GitProbeRead::NotRunnable;
     }
-    std::string buf;
-    char        chunk[ 8192 ];
-    bool        overflowed = false;
+    char chunk[ 8192 ];
+    bool overflowed = false;
     for( std::size_t n = std::fread( chunk, 1, sizeof( chunk ), pipe ); n > 0; n = std::fread( chunk, 1, sizeof( chunk ), pipe ) )
     {
         if( buf.size() + n > kMaxIgnoreProbeBytes )
@@ -1371,8 +1373,30 @@ GitIgnoreSet collectGitIgnored( const char* rootDir )
         }
         buf.append( chunk, n );
     }
-    const int rc = os::pclose( pipe );
-    if( rc != 0 )
+    if( os::pclose( pipe ) != 0 )
+    {
+        return GitProbeRead::Failed;
+    }
+    return overflowed ? GitProbeRead::OverCeiling : GitProbeRead::Ok;
+}
+
+GitIgnoreSet collectGitIgnored( const char* rootDir )
+{
+    GitIgnoreSet out;
+    if( !underGitRoot( rootDir ) )
+    {
+        return out;
+    }
+    const std::string cmd = gitCmd( " -C " ) + shSingleQuote( rootDir == nullptr ? std::string( "." ) : std::string( rootDir ) )
+                          + " -c core.quotepath=false ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null";
+    std::string        buf;
+    const GitProbeRead read = readGitProbe( cmd, buf );
+    if( read == GitProbeRead::NotRunnable )
+    {
+        DISCLOSE( out, GitIgnoreSet::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the ignore probe — full walk" );
+        return out;
+    }
+    if( read == GitProbeRead::Failed )
     {
         // Not a git work tree, or no git binary — the DESIGNED degrade: the fallback (a full walk, no
         // ignore-set pruning) is safe either way. `available` is already false here (its default), so this
@@ -1381,7 +1405,7 @@ GitIgnoreSet collectGitIgnored( const char* rootDir )
         DISCLOSE( out, GitIgnoreSet::DisclosureWhy::ProbeFailed, "ingest: the git ignore probe exited non-zero — full walk" );
         return out;
     }
-    if( overflowed )
+    if( read == GitProbeRead::OverCeiling )
     {
         DISCLOSE( out, GitIgnoreSet::DisclosureWhy::ProbeOverCeiling, "ingest: git ignore probe exceeded its byte ceiling — full walk" );
         return out;
@@ -1475,6 +1499,148 @@ void recordDirPrune( CrawlSkips& skips, bool excluded, bool ignoredDir, const fs
     ++skips.prunedDirs;
 }
 
+// §TRACKED — which files git TRACKS under the build-output-named directories the walk deferred (`relDirs`,
+// root-relative, sorted). ONE child for the whole crawl, and only when such a directory exists and was not
+// already collapsed by the ignore probe; a root with no `.git` above it spawns nothing (nongitqmetricscheck's
+// contract). `--literal-pathspecs` because a directory name is data, not a glob; past kMaxTrackedPathspecBytes
+// of arguments the pathspecs are dropped and the whole tracked list is filtered here instead, so the answer
+// never depends on the platform's argument ceiling. `files` are the tracked paths at or below a deferred
+// directory; `dirs` every ancestor directory of one (the re-walk descends only those).
+struct GitTrackedSet
+{
+    bool                     available = false;   // git answered whole; files/dirs are authoritative
+    std::vector<std::string> files;               // root-relative, sorted
+    std::vector<std::string> dirs;                // root-relative, NO trailing '/', sorted, unique
+    enum class DisclosureWhy : std::uint8_t
+    {
+        GitNotRunnable,
+        ProbeFailed,
+        ProbeOverCeiling,
+    };
+    void disclose( DisclosureWhy ) noexcept
+    {
+        available = false;
+    }
+};
+
+constexpr std::size_t kMaxTrackedPathspecBytes = 64ull * 1024ull;
+
+// Is some proper ancestor directory of `rel` one of the sorted `dirs`?
+bool underSortedDir( const std::vector<std::string>& dirs, std::string_view rel ) noexcept
+{
+    for( std::size_t slash = rel.rfind( '/' ); slash != std::string_view::npos && slash > 0; slash = rel.rfind( '/', slash - 1 ) )
+    {
+        if( pathInIgnoreSet( dirs, rel.substr( 0, slash ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+GitTrackedSet collectGitTracked( const char* rootDir, const std::vector<std::string>& relDirs )
+{
+    EXPECTS( std::is_sorted( relDirs.begin(), relDirs.end() ), "the pathspecs and the filter both need the sorted set" );
+    GitTrackedSet out;
+    if( relDirs.empty() || !underGitRoot( rootDir ) )
+    {
+        return out;
+    }
+    std::string specs;
+    for( const std::string& d : relDirs )
+    {
+        specs += ' ';
+        specs += shSingleQuote( d );
+    }
+    if( specs.size() > kMaxTrackedPathspecBytes )
+    {
+        specs.clear();   // the whole tracked list, filtered below
+    }
+    const std::string cmd = gitCmd( " --literal-pathspecs -C " ) + shSingleQuote( rootDir == nullptr ? std::string( "." ) : std::string( rootDir ) )
+                          + " -c core.quotepath=false ls-files --cached -z" + ( specs.empty() ? std::string() : " --" + specs ) + " 2>/dev/null";
+    std::string        buf;
+    const GitProbeRead read = readGitProbe( cmd, buf );
+    // Each degrade leaves `available` false: the build-output dirs stay pruned and are rowed unvetted.
+    if( read == GitProbeRead::NotRunnable )
+    {
+        DISCLOSE( out, GitTrackedSet::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the tracked-file probe" );
+        return out;
+    }
+    if( read == GitProbeRead::Failed )
+    {
+        DISCLOSE( out, GitTrackedSet::DisclosureWhy::ProbeFailed, "ingest: the git tracked-file probe exited non-zero" );
+        return out;
+    }
+    if( read == GitProbeRead::OverCeiling )
+    {
+        DISCLOSE( out, GitTrackedSet::DisclosureWhy::ProbeOverCeiling, "ingest: the git tracked-file probe exceeded its byte ceiling" );
+        return out;
+    }
+    for( std::size_t i = 0; i < buf.size(); )
+    {
+        const std::size_t nul = buf.find( '\0', i );
+        const std::size_t end = nul == std::string::npos ? buf.size() : nul;
+        const std::string_view ent( buf.data() + i, end - i );
+        i = end + 1;
+        if( ent.empty() || !underSortedDir( relDirs, ent ) )
+        {
+            continue;   // an empty record, or (whole-list mode) a tracked path outside every deferred dir
+        }
+        out.files.emplace_back( ent );
+        for( std::size_t slash = ent.find( '/' ); slash != std::string_view::npos; slash = ent.find( '/', slash + 1 ) )
+        {
+            out.dirs.emplace_back( ent.substr( 0, slash ) );
+        }
+    }
+    std::sort( out.files.begin(), out.files.end() );
+    std::sort( out.dirs.begin(), out.dirs.end() );
+    out.dirs.erase( std::unique( out.dirs.begin(), out.dirs.end() ), out.dirs.end() );
+    out.available = true;
+    ENSURES( std::is_sorted( out.files.begin(), out.files.end() ) && std::is_sorted( out.dirs.begin(), out.dirs.end() ),
+             "pathInIgnoreSet binary-searches both" );
+    return out;
+}
+
+// What the BUILT-IN name rule says about one directory. `tracked` is null on the main walk and git's tracked
+// set on the re-walk of a deferred build-output subtree. The CMakeCache.txt sentinel and the ignore set are
+// tested by the caller afterwards, exactly as before, so every existing counter keeps its meaning.
+enum class DirVerdict : std::uint8_t
+{
+    Walk,        // descend (the caller's later tests may still prune it)
+    Prune,       // the denylist prunes it, whatever git tracks
+    Defer,       // a build-output name in a tree git may know: pruned now, its tracked files indexed after the walk
+    Untracked,   // re-walk only: no tracked file below — build output, already counted with its deferred ancestor
+};
+template< typename RelFn >
+DirVerdict builtinDirVerdict( const fs::path& dir, RelFn&& rel, const GitTrackedSet* tracked, const GitIgnoreSet& ignoreSet )
+{
+    const std::string name = dir.filename().string();
+    if( tracked != nullptr )
+    {
+        if( !pathInIgnoreSet( tracked->dirs, rel() ) )
+        {
+            return DirVerdict::Untracked;
+        }
+        return isSkippedCrawlDir( name ) && !isBuildOutputDirName( name ) ? DirVerdict::Prune : DirVerdict::Walk;
+    }
+    if( !isSkippedCrawlDir( name ) )
+    {
+        return DirVerdict::Walk;
+    }
+    if( !isBuildOutputDirName( name ) )
+    {
+        return DirVerdict::Prune;
+    }
+    // git collapses a directory to one ignored entry only when nothing below it is tracked: no probe needed
+    if( ignoreSet.available && pathInIgnoreSet( ignoreSet.dirs, rel() ) )
+    {
+        return DirVerdict::Prune;
+    }
+    std::error_code ec;
+    const bool isCMakeTree = fs::exists( dir / "CMakeCache.txt", ec );   // a CMake build tree stays pruned, tracked or not
+    return isCMakeTree ? DirVerdict::Prune : DirVerdict::Defer;
+}
+
 // §L1: establish the ordering contract on everything the crawl collected out of order. The row vectors
 // sort by path; the extension histogram comes out of a HashMap, whose iteration order is an implementation
 // detail, so it sorts by count DESC then extension ASC. That last one matters more than usual: it rides
@@ -1488,6 +1654,7 @@ void finalizeCrawlSkips( CrawlSkips& skips, const HashMap<std::string, std::uint
     std::sort( skips.ignored.begin(), skips.ignored.end(), byPath );               // §N6-C, same contract
     std::sort( skips.ignoredDirRows.begin(), skips.ignoredDirRows.end(), byPath ); // §N6-C, same contract
     std::sort( skips.escaped.begin(), skips.escaped.end(), byPath );               // §SEC1, same contract
+    std::sort( skips.unvettedDirRows.begin(), skips.unvettedDirRows.end(), byPath ); // §TRACKED, same contract
     skips.unindexedExts.reserve( extTally.size() );
     for( const auto& [ ext, count ] : extTally )
     {
@@ -1568,6 +1735,220 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
 
     const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode );   // §N6-C
 
+    // Build-output-NAMED subtrees (ingest.h isBuildOutputDirName) the walk pruned but did not yet rule on: in a git
+    // work tree the TRACKED files under them are source and are indexed after the walk; everything else there stays
+    // pruned. Collected in walk order; the tracked probe below sorts its own pathspecs.
+    struct DeferredBuildDir
+    {
+        fs::path    path;
+        std::string full;   // the logical spelling (fullPath()), for a row
+        std::string rel;    // root-relative, as git spells it
+    };
+    std::vector<DeferredBuildDir> deferredDirs;
+
+    // ONE entry's classification, shared by the main walk (tracked == nullptr) and the re-walk of a deferred
+    // build-output subtree (tracked != nullptr), so a tracked file under build/ meets exactly the tests every
+    // other file meets — --exclude, the nested denylist, the symlink boundary, the ignore set, the size ceilings.
+    const auto visit = [ & ]( fs::recursive_directory_iterator& it, const GitTrackedSet* tracked )
+    {
+        const fs::path& p = it->path();
+        std::string     full;
+        const auto fullPath = [ & ]() -> const std::string&
+        {
+            if( full.empty() )
+            {
+                full = os::program_path( p );   // the logical path the model carries: '/' on every platform
+            }
+            return full;
+        };
+
+        // user --exclude substrings prune dirs and drop files (vendored/generated trees). #228/A1: match
+        // against the ROOT-RELATIVE spelling (relForHash), never the raw typed path — an absolute or
+        // trailing-slash root spelling must not let an --exclude substring hit the checkout location
+        // above the root (the same defect class rootRelPath fixes for the index-builder seams). Multi-root
+        // (A12): match against the LABELED spelling so one excludes list applies uniformly across roots.
+        bool excluded = false;
+        if( !excludeSubstr.empty() )
+        {
+            std::string             labeledBuf;
+            const std::string_view  rel       = relForHash( fullPath(), rootDir );
+            std::string_view        matchPath = rel;
+            if( !excludeLabel.empty() )
+            {
+                labeledBuf.assign( excludeLabel );
+                if( !rel.empty() ) { labeledBuf.push_back( '/' );  labeledBuf.append( rel ); }
+                matchPath = labeledBuf;
+            }
+            for( const std::string& ex : excludeSubstr )
+            {
+                if( !ex.empty() && matchPath.find( ex ) != std::string_view::npos ) { excluded = true; break; }
+            }
+        }
+
+        // prune noise/vendor/build subtrees entirely (a .gitignore-lite default denylist)
+        if( it->is_directory( ec ) )
+        {
+            // The denylist itself now lives in ingest.h (kCrawlSkipDirs / isSkippedCrawlDir) so darkflags.h's
+            // CMake walk prunes exactly the same subtrees — see the note there.
+            bool skip     = excluded;
+            bool deferred = false;
+            if( !skip )
+            {
+                const DirVerdict v = builtinDirVerdict( p, [ & ] { return relForHash( fullPath(), rootDir ); }, tracked, ignoreSet );
+                if( v == DirVerdict::Untracked )
+                {
+                    it.disable_recursion_pending();   // untracked output inside a deferred subtree, already counted in pruned_dirs
+                    return;
+                }
+                skip     = v != DirVerdict::Walk;
+                deferred = v == DirVerdict::Defer;
+            }
+            // skip any dir that contains a CMakeCache.txt — it's a build output tree
+            if( !skip )
+            {
+                const fs::path cache_sentinel = p / "CMakeCache.txt";
+                if( fs::exists( cache_sentinel, ec ) )
+                {
+                    skip = true;
+                }
+                ec.clear();
+            }
+            // §N6-C: the ignore rule is tested LAST, so ignoredDirs= counts only the subtrees no rule this
+            // build already carried had pruned — every existing counter keeps the meaning it had, and the
+            // new one is exactly "what honouring .gitignore additionally removed".
+            bool ignoredDir = false;
+            if( !skip && ignoreSet.available )
+            {
+                ignoredDir = pathInIgnoreSet( ignoreSet.dirs, relForHash( fullPath(), rootDir ) );
+                skip       = ignoredDir;
+            }
+            if( skip )
+            {
+                it.disable_recursion_pending();
+                recordDirPrune( skips, excluded, ignoredDir, *it, fullPath );   // §L1/§N6-C: see its header
+                if( deferred )
+                {
+                    deferredDirs.push_back( { p, fullPath(), std::string( relForHash( fullPath(), rootDir ) ) } );
+                }
+            }
+            return;
+        }
+
+        if( !it->is_regular_file( ec ) )
+        {
+            return;
+        }
+        // In a deferred build-output subtree only what git TRACKS is source; the rest is the build's output.
+        if( tracked != nullptr && !pathInIgnoreSet( tracked->files, relForHash( fullPath(), rootDir ) ) )
+        {
+            return;
+        }
+
+        const std::string name = p.filename().string();
+        if( isDenylistedName( name ) )
+        {
+            return;
+        }
+
+        // §SEC1 — THE CRAWL BOUNDARY, and it is tested BEFORE the extension is classified. Order is the
+        // contract here exactly as it is for the two drops below, but for a different reason: the
+        // unsupported-ext class is READ AND SERVED by grep's aux scan (search.h grepCollectAux), so a
+        // boundary test placed after the classification leaves a `.txt` link to an out-of-root file
+        // serving its bytes through --grep with every other arm of the fix green. Measured; it is arm 5
+        // of test/crawlescapecheck.sh. After isDenylistedName for the mirror reason the other tests sit
+        // where they do: this class then holds only files that would OTHERWISE HAVE BEEN READ.
+        //
+        // `is_symlink()` reads the cached readdir type, so the cost of this line on a symlink-free tree
+        // is a branch; only a symlink pays the realpath inside crawlPathStaysInRoot.
+        const bool isLink = it->is_symlink( ec );
+        ec.clear();
+        if( isLink && !crawlPathStaysInRoot( fullPath(), rootReal ) )
+        {
+            recordRootEscape( skips, fullPath(), lowerExtensionOf( name ) );
+            return;
+        }
+
+        // extension must be a known source language OR a doc format (P1-B: notebooks/html/csv are collected
+        // like code so they get a fileId; they're skipped by the tree-sitter parse loop and handled in the
+        // doc post-pass instead). Use the filename here so rejected regular files do not pay to stringify the
+        // full path; materialize the full path only after the extension survives.
+        //
+        // §N6-C: the repository's own verdict on this file, ONE lazy predicate shared by the two sites that
+        // ask it — the lookup stringifies the path (relForHash over fullPath), so it is evaluated only where
+        // a class actually consults it, never for a binary asset or an --exclude'd file. False under
+        // --no-ignore, on a non-git root, and when git could not answer (ignoreSet.available).
+        const auto ignored = [ & ]() -> bool
+        {
+            return ignoreSet.available && pathInIgnoreSet( ignoreSet.files, relForHash( fullPath(), rootDir ) );
+        };
+
+        // §L1: the two NON-SIZE drops are classified and recorded together (recordPreSizeDrop) — see its
+        // header for why the tests must run in that order, why the unsupported-ext class alone consults the
+        // ignore verdict BEFORE it records a row, and why none of it is written inline here.
+        const std::string ext = lowerExtensionOf( name );
+        if( recordPreSizeDrop( skips, extTally, ext, excluded, *it, fullPath, ignored ) )
+        {
+            return;
+        }
+
+        // §N6-C: AFTER the extension and the --exclude match — see pathInIgnoreSet's header for the ordering.
+        if( ignored() )
+        {
+            recordCrawlDrop( skips.ignored, skips.ignoredFiles, fullPath(), ext, *it );
+            return;
+        }
+
+        const std::uintmax_t sz = it->file_size( ec );
+        if( ec || sz > maxFileBytes )
+        {
+            if( !ec && sz > maxFileBytes )
+            {
+                // §P0.5d: a size drop is reportable, not invisible — path + size + the ceiling that dropped it
+                skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( maxFileBytes ) } );
+            }
+            ec.clear();
+            return;
+        }
+
+        // JSON-lane ceiling (see kMaxJsonConfigBytes): big .json is data, not config — skip it before it
+        // mints a symbol-table explosion. Applies only to the .json extension; --max-file-size does not
+        // override it upward (config files this large do not exist; data files this large are the hazard).
+        //
+        // §B13.1: COUNTED, exactly like the generic size drop 8 lines above. Both are "an otherwise-indexable
+        // file the crawl dropped for exceeding a size ceiling", which is what skipped_oversize means, and the
+        // two are mutually exclusive BY CONSTRUCTION — the generic ceiling is tested first, so a .json over
+        // both ceilings is counted once, there — which is why one list serves both and no file is counted
+        // twice. Uncounted, this drop broke the header's own accounting invariant
+        // (files= + skipped_oversize= = the candidate population the crawl considered): on this repo the
+        // DEFAULT map reported files=866 with the attribute absent (implying 866) while --max-file-size=256K
+        // reported files=861 + skipped_oversize=8 = 869. Three files — the >256 KB .json under
+        // bench/locbench/ — vanished with no counter, no stderr and no legend clause, which is the exact
+        // class skipped_oversize exists to kill. The ceiling itself is deliberately NOT lifted here: it is a
+        // content-class guard (data vs config) that merely uses size as its proxy, so letting a SIZE flag
+        // override it would trade a disclosure defect for a corpus one.
+        if( sz > kMaxJsonConfigBytes && ext == ".json" )
+        {
+            skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxJsonConfigBytes ) } );
+            return;
+        }
+
+        // YAML-lane ceiling (see kMaxYamlConfigBytes): the same hazard class as .json — a machine-written
+        // DATA population behind a config extension — at YAML's own measured calibration: 512 KB, because
+        // JSON's 256 KB would drop real hand-maintained config (NeMo's 293 KB cicd-main.yml). Counted in
+        // skipped_oversize exactly like its two siblings above, for the same accounting invariant.
+        if( sz > kMaxYamlConfigBytes && ( ext == ".yml" || ext == ".yaml" ) )
+        {
+            skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxYamlConfigBytes ) } );
+            return;
+        }
+
+        // binary sniff: the parse pool's looksBinary() already guards against binary content;
+        // removing the crawl-time sniff here avoids 3 syscalls × N files on every warm run
+        // (Win 3 from PERF.md). Any binary file that slips through produces zero defs/refs and
+        // is invisible in the ranked map; its phantom fileId has no downstream effect.
+        out.push_back( fullPath() );
+    };
+
     const fs::recursive_directory_iterator end;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
@@ -1578,186 +1959,52 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
                 ec.clear();
                 continue;
             }
-
-            const fs::path& p = it->path();
-            std::string     full;
-            const auto fullPath = [ & ]() -> const std::string&
+            visit( it, nullptr );
+        }
+    }
+    // The deferred build-output subtrees: ONE git child for all of them, then a re-walk of each that holds a
+    // tracked file, descending only toward tracked paths. No git verdict (not a work tree, git failed): the name
+    // rule stands and each subtree is ROWED as unvetted — it may hold source nothing could tell from output.
+    if( !deferredDirs.empty() )
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest/crawl: tracked files under build-output dirs" );
+        std::vector<std::string> rels;
+        rels.reserve( deferredDirs.size() );
+        for( const DeferredBuildDir& d : deferredDirs )
+        {
+            rels.push_back( d.rel );
+        }
+        std::sort( rels.begin(), rels.end() );
+        const GitTrackedSet tracked = collectGitTracked( rootDir, rels );
+        for( const DeferredBuildDir& d : deferredDirs )
+        {
+            if( !tracked.available )
             {
-                if( full.empty() )
-                {
-                    full = os::program_path( p );   // the logical path the model carries: '/' on every platform
-                }
-                return full;
-            };
-
-            // user --exclude substrings prune dirs and drop files (vendored/generated trees). #228/A1: match
-            // against the ROOT-RELATIVE spelling (relForHash), never the raw typed path — an absolute or
-            // trailing-slash root spelling must not let an --exclude substring hit the checkout location
-            // above the root (the same defect class rootRelPath fixes for the index-builder seams). Multi-root
-            // (A12): match against the LABELED spelling so one excludes list applies uniformly across roots.
-            bool excluded = false;
-            if( !excludeSubstr.empty() )
-            {
-                std::string             labeledBuf;
-                const std::string_view  rel       = relForHash( fullPath(), rootDir );
-                std::string_view        matchPath = rel;
-                if( !excludeLabel.empty() )
-                {
-                    labeledBuf.assign( excludeLabel );
-                    if( !rel.empty() ) { labeledBuf.push_back( '/' );  labeledBuf.append( rel ); }
-                    matchPath = labeledBuf;
-                }
-                for( const std::string& ex : excludeSubstr )
-                {
-                    if( !ex.empty() && matchPath.find( ex ) != std::string_view::npos ) { excluded = true; break; }
-                }
-            }
-
-            // prune noise/vendor/build subtrees entirely (a .gitignore-lite default denylist)
-            if( it->is_directory( ec ) )
-            {
-                // The denylist itself now lives in ingest.h (kCrawlSkipDirs / isSkippedCrawlDir) so darkflags.h's
-                // CMake walk prunes exactly the same subtrees — see the note there.
-                bool skip = excluded;
-                if( !skip )
-                {
-                    skip = isSkippedCrawlDir( p.filename().string() );
-                }
-                // skip any dir that contains a CMakeCache.txt — it's a build output tree
-                if( !skip )
-                {
-                    const fs::path cache_sentinel = p / "CMakeCache.txt";
-                    if( fs::exists( cache_sentinel, ec ) )
-                    {
-                        skip = true;
-                    }
-                    ec.clear();
-                }
-                // §N6-C: the ignore rule is tested LAST, so ignoredDirs= counts only the subtrees no rule this
-                // build already carried had pruned — every existing counter keeps the meaning it had, and the
-                // new one is exactly "what honouring .gitignore additionally removed".
-                bool ignoredDir = false;
-                if( !skip && ignoreSet.available )
-                {
-                    ignoredDir = pathInIgnoreSet( ignoreSet.dirs, relForHash( fullPath(), rootDir ) );
-                    skip       = ignoredDir;
-                }
-                if( skip )
-                {
-                    it.disable_recursion_pending();
-                    recordDirPrune( skips, excluded, ignoredDir, *it, fullPath );   // §L1/§N6-C: see its header
-                }
-                continue;
-            }
-
-            if( !it->is_regular_file( ec ) )
-            {
-                continue;
-            }
-
-            const std::string name = p.filename().string();
-            if( isDenylistedName( name ) )
-            {
-                continue;
-            }
-
-            // §SEC1 — THE CRAWL BOUNDARY, and it is tested BEFORE the extension is classified. Order is the
-            // contract here exactly as it is for the two drops below, but for a different reason: the
-            // unsupported-ext class is READ AND SERVED by grep's aux scan (search.h grepCollectAux), so a
-            // boundary test placed after the classification leaves a `.txt` link to an out-of-root file
-            // serving its bytes through --grep with every other arm of the fix green. Measured; it is arm 5
-            // of test/crawlescapecheck.sh. After isDenylistedName for the mirror reason the other tests sit
-            // where they do: this class then holds only files that would OTHERWISE HAVE BEEN READ.
-            //
-            // `is_symlink()` reads the cached readdir type, so the cost of this line on a symlink-free tree
-            // is a branch; only a symlink pays the realpath inside crawlPathStaysInRoot.
-            const bool isLink = it->is_symlink( ec );
-            ec.clear();
-            if( isLink && !crawlPathStaysInRoot( fullPath(), rootReal ) )
-            {
-                recordRootEscape( skips, fullPath(), lowerExtensionOf( name ) );
-                continue;
-            }
-
-            // extension must be a known source language OR a doc format (P1-B: notebooks/html/csv are collected
-            // like code so they get a fileId; they're skipped by the tree-sitter parse loop and handled in the
-            // doc post-pass instead). Use the filename here so rejected regular files do not pay to stringify the
-            // full path; materialize the full path only after the extension survives.
-            //
-            // §N6-C: the repository's own verdict on this file, ONE lazy predicate shared by the two sites that
-            // ask it — the lookup stringifies the path (relForHash over fullPath), so it is evaluated only where
-            // a class actually consults it, never for a binary asset or an --exclude'd file. False under
-            // --no-ignore, on a non-git root, and when git could not answer (ignoreSet.available).
-            const auto ignored = [ & ]() -> bool
-            {
-                return ignoreSet.available && pathInIgnoreSet( ignoreSet.files, relForHash( fullPath(), rootDir ) );
-            };
-
-            // §L1: the two NON-SIZE drops are classified and recorded together (recordPreSizeDrop) — see its
-            // header for why the tests must run in that order, why the unsupported-ext class alone consults the
-            // ignore verdict BEFORE it records a row, and why none of it is written inline here.
-            const std::string ext = lowerExtensionOf( name );
-            if( recordPreSizeDrop( skips, extTally, ext, excluded, *it, fullPath, ignored ) )
-            {
-                continue;
-            }
-
-            // §N6-C: AFTER the extension and the --exclude match — see pathInIgnoreSet's header for the ordering.
-            if( ignored() )
-            {
-                recordCrawlDrop( skips.ignored, skips.ignoredFiles, fullPath(), ext, *it );
-                continue;
-            }
-
-            const std::uintmax_t sz = it->file_size( ec );
-            if( ec || sz > maxFileBytes )
-            {
-                if( !ec && sz > maxFileBytes )
-                {
-                    // §P0.5d: a size drop is reportable, not invisible — path + size + the ceiling that dropped it
-                    skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( maxFileBytes ) } );
-                }
+                recordCrawlDrop( skips.unvettedDirRows, skips.unvettedDirs, d.full, {}, fs::directory_entry( d.path, ec ) );
                 ec.clear();
                 continue;
             }
-
-            // JSON-lane ceiling (see kMaxJsonConfigBytes): big .json is data, not config — skip it before it
-            // mints a symbol-table explosion. Applies only to the .json extension; --max-file-size does not
-            // override it upward (config files this large do not exist; data files this large are the hazard).
-            //
-            // §B13.1: COUNTED, exactly like the generic size drop 8 lines above. Both are "an otherwise-indexable
-            // file the crawl dropped for exceeding a size ceiling", which is what skipped_oversize means, and the
-            // two are mutually exclusive BY CONSTRUCTION — the generic ceiling is tested first, so a .json over
-            // both ceilings is counted once, there — which is why one list serves both and no file is counted
-            // twice. Uncounted, this drop broke the header's own accounting invariant
-            // (files= + skipped_oversize= = the candidate population the crawl considered): on this repo the
-            // DEFAULT map reported files=866 with the attribute absent (implying 866) while --max-file-size=256K
-            // reported files=861 + skipped_oversize=8 = 869. Three files — the >256 KB .json under
-            // bench/locbench/ — vanished with no counter, no stderr and no legend clause, which is the exact
-            // class skipped_oversize exists to kill. The ceiling itself is deliberately NOT lifted here: it is a
-            // content-class guard (data vs config) that merely uses size as its proxy, so letting a SIZE flag
-            // override it would trade a disclosure defect for a corpus one.
-            if( sz > kMaxJsonConfigBytes && ext == ".json" )
+            if( !pathInIgnoreSet( tracked.dirs, d.rel ) )
             {
-                skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxJsonConfigBytes ) } );
+                continue;   // nothing tracked below: pure build output, as the name said
+            }
+            fs::recursive_directory_iterator sub( d.path, opts, ec );
+            if( ec )
+            {
+                // tracked files git named, in a directory this walk cannot open: say so rather than drop them
+                recordCrawlDrop( skips.unvettedDirRows, skips.unvettedDirs, d.full, {}, fs::directory_entry( d.path, ec ) );
+                ec.clear();
                 continue;
             }
-
-            // YAML-lane ceiling (see kMaxYamlConfigBytes): the same hazard class as .json — a machine-written
-            // DATA population behind a config extension — at YAML's own measured calibration: 512 KB, because
-            // JSON's 256 KB would drop real hand-maintained config (NeMo's 293 KB cicd-main.yml). Counted in
-            // skipped_oversize exactly like its two siblings above, for the same accounting invariant.
-            if( sz > kMaxYamlConfigBytes && ( ext == ".yml" || ext == ".yaml" ) )
+            for( ; sub != end; sub.increment( ec ) )
             {
-                skipped.push_back( { fullPath(), std::uint64_t( sz ), std::uint64_t( kMaxYamlConfigBytes ) } );
-                continue;
+                if( ec )
+                {
+                    ec.clear();
+                    continue;
+                }
+                visit( sub, &tracked );
             }
-
-            // binary sniff: the parse pool's looksBinary() already guards against binary content;
-            // removing the crawl-time sniff here avoids 3 syscalls × N files on every warm run
-            // (Win 3 from PERF.md). Any binary file that slips through produces zero defs/refs and
-            // is invisible in the ranked map; its phantom fileId has no downstream effect.
-            out.push_back( fullPath() );
         }
     }
 

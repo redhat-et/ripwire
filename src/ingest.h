@@ -267,6 +267,27 @@ inline bool isSkippedCrawlDir( std::string_view dirName ) noexcept
     return dirName.size() > 5 && dirName.compare( dirName.size() - 5, 5, ".dSYM" ) == 0;
 }
 
+// The BUILD-OUTPUT subset of the denylist above: names a build writes into. The name is a heuristic about
+// UNTRACKED output only — repositories keep real source under such names (a Python package's `lib/build/`,
+// a Go repository's tracked `build/` scripts) — so inside a git work tree the ingest crawl asks git which
+// files under such a directory are TRACKED and indexes exactly those (ingest_crawl.h collectSources). Every
+// other denylist entry is pruned whatever git tracks: vendored code (vendor, third_party, node_modules) is
+// skipped as a class, tracked or not; VCS metadata, tool/env noise and captures are never source; a
+// ".dSYM" bundle or a CMakeCache.txt tree is generated even when someone committed it. Language-neutral by
+// construction: a directory name, never a file's language. Only the ingest crawl applies the override so far;
+// darkflags.h's CMake walk and docdrift.h's probe walk still prune these names by name alone.
+inline bool isBuildOutputDirName( std::string_view dirName ) noexcept
+{
+    constexpr std::string_view kBuildOutputDirs[] = { "build", "dist", "out", "target", "asan", "build_prof", "CMakeFiles" };
+    bool isOutput = dirName.size() > 12 && dirName.compare( 0, 12, "cmake-build-" ) == 0;
+    for( std::string_view s : kBuildOutputDirs )
+    {
+        isOutput = isOutput || dirName == s;
+    }
+    ENSURES( !isOutput || isSkippedCrawlDir( dirName ), "a build-output name the crawl denylist does not prune — the override would be dead" );
+    return isOutput;
+}
+
 // ── §SEC1: THE CRAWL BOUNDARY ────────────────────────────────────────────────────────────────────────────
 //
 // ONE RULE, STATED ONCE, FOR EVERY WALK THIS BINARY OWNS: a path a crawl collected must resolve, AFTER LINK

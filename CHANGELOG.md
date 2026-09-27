@@ -13,6 +13,26 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ---
 
+## [Unreleased]
+
+### Fixed — tracked source under a `build`/`dist`/`out`/`target` directory is indexed
+
+The crawl prunes build-output directory names (`build`, `dist`, `out`, `target`, `asan`, `build_prof`,
+`CMakeFiles`, `cmake-build-*`) wherever they sit, and it used to do so even when git tracked source
+there. A Python package's `lib/build/*.py` was left out of the index, and the only sign was an unnamed
+`pruned_dirs=` count on `--skipped`. Now, in a git work tree, the files git tracks under such a
+directory are indexed. They go through the same per-file tests as every other file. Untracked content
+there stays pruned. This costs one `git ls-files --cached` fork per crawl, and only when such a
+directory exists and git has not already reported it as wholly ignored.
+
+Outside a work tree, or when git cannot answer, the name rule still applies, and each such directory is
+now disclosed by name: `unvetted_dirs=N` on the map header (and in the JSON map) and on `--skipped`,
+with one `why="unvetted-dir"` row per directory. Each attribute appears only when non-zero, so a git
+checkout's answers are unchanged byte for byte. The other denylist names (`vendor`, `third_party`,
+`node_modules`, VCS and tool directories, `captures`) and `CMakeCache.txt` build trees are still pruned
+even when tracked. The CMake walk behind `--flags` and the `--doc-drift` probe walk still prune by name
+alone. Gate: `test/gitignorecheck.sh` arms 14a–14j.
+
 ## [0.6.4] — 2026-09-25
 
 ### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)

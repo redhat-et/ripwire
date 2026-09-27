@@ -60,7 +60,19 @@ all, the same treatment an `--exclude`'d one gets). What the denylist skips:
 
 - **directories by NAME:** `.git`, `.claude`, `.hg`, `.svn`, `node_modules`, `vendor`, `third_party`,
   `.cache`, `build`, `dist`, `out`, `target`, `.venv`, `venv`, `__pycache__`, `.idea`, `.vscode`,
-  `asan`, `build_prof`, `CMakeFiles`, `captures`, and anything matching `cmake-build-*`;
+  `asan`, `build_prof`, `CMakeFiles`, `captures`, and anything matching `cmake-build-*`. The
+  build-output names among them (`build`, `dist`, `out`, `target`, `asan`, `build_prof`, `CMakeFiles`,
+  `cmake-build-*`) are a guess about *untracked* output, and real source lives under them (a Python
+  package's `lib/build/`). So in a git work tree the files git **tracks** under such a directory are
+  indexed, through the same per-file tests as every other file, and only the untracked rest is pruned.
+  That costs one `git ls-files --cached` fork per crawl, and only when such a directory exists and the
+  ignore probe has not already collapsed it (git collapses a directory only when nothing under it is
+  tracked). Outside a work tree, or when git cannot answer, the name rule stands and each such
+  directory is disclosed by name: `unvetted_dirs=` on the map header and `--skipped`, with
+  `why="unvetted-dir"` rows. The other names are pruned even when tracked: vendored code, VCS
+  metadata, tool and environment noise, and captures are skipped as a class. The MCP server's
+  watch list does not see a `git add` under such a directory, the same limit a `.gitignore` edit has;
+  edits to and deletions of an admitted file are caught by the per-file check;
 - **any directory containing a `CMakeCache.txt`** — a build-output tree, whatever it is called;
 - **paths matching a `--exclude=SUBSTR`** (repeatable), which prunes directories and drops files;
 - files over 4 MB (`--max-file-size=N[K|M|G]` overrides);
@@ -96,8 +108,10 @@ can only over-count), and the vendored scanner additionally carries the one-line
   `*_pb2.py`, `*.pb.go`.
 
 Ingest never throws — a bad file, a missing grammar or a corrupt cache degrades and prints a one-line
-`DISCLOSE( msg )` trace to stderr in debug builds. **The ordinary denylist prunes above are silent**, deliberately: they
-are the normal state of every crawl and a note per skipped directory would be noise, not evidence. The
+`DISCLOSE( msg )` trace to stderr in debug builds. **The ordinary denylist prunes above are silent on stderr**, deliberately: they
+are the normal state of every crawl and a note per skipped directory would be noise, not evidence.
+They are still counted (`pruned_dirs=` on `--skipped`), and the unvetted build-output directories are
+also named (see above). The
 size-ceiling drops sit between the two — silent on stderr, but *counted* into the header's
 `skipped_oversize=N`, so a corpus that shrank says so in the output rather than vanishing quietly.
 

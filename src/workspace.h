@@ -229,8 +229,10 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     // by the workspace's union), so its rows relabel and its count sums exactly like every sibling above. A
     // link in root A pointing into root B is an escape from A; B's own copy is indexed under B, where it lives.
     relabel( part.crawlSkips.escaped,        m.crawlSkips.escaped );
+    relabel( part.crawlSkips.unvettedDirRows, m.crawlSkips.unvettedDirRows );   // §TRACKED: the verdict is per root, like the ignore set
 
     m.crawlSkips.escapedFiles     += part.crawlSkips.escapedFiles;
+    m.crawlSkips.unvettedDirs     += part.crawlSkips.unvettedDirs;
     m.crawlSkips.nestRefusedFiles += part.crawlSkips.nestRefusedFiles;
     m.crawlSkips.extractPartialFiles += part.crawlSkips.extractPartialFiles;
     m.crawlSkips.excludedFiles    += part.crawlSkips.excludedFiles;

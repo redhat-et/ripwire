@@ -492,6 +492,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "unindexed",         "unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most)", false, {}, MapHeaderRead::Only },
     { "unindexed_exts",    "unindexed_exts=E: E such extensions in all, the list cut", false, {}, MapHeaderRead::Only },
     { "escaped_root",      "escaped_root=K: K files refused: a symlink led out of the root", false, {}, MapHeaderRead::Only },
+    { "unvetted_dirs",     "unvetted_dirs=K: K build/dist/out/target-named dirs pruned with no git tracked-file check (no work tree); contents unknown", false, {}, MapHeaderRead::Only },
     { "precise",           "precise=K: K call edges a SCIP index pinned", false, {}, MapHeaderRead::Only },
     { "fields",            "format=columnar: parallel arrays, not row attributes: <paths> maps I=path, each <cols> array holds n= comma-separated values in one row order, fields= naming them (the path column indexes <paths>; &#44; is a comma)", true, "cols" },
     // THE TESTED COLUMN (2026-09-12, the follow-up to the <s tested=> row below). --callers/--callees/--impact --format=columnar

@@ -1155,6 +1155,15 @@ struct CrawlSkips
     {
         ++escapedFiles;
     }
+
+    // Build-output-NAMED subtrees (ingest.h isBuildOutputDirName: build/dist/out/target…) the walk pruned with NO
+    // git tracked-file verdict: the root is not in a git work tree, or git could not answer. Inside a work tree
+    // the crawl indexes every TRACKED file under such a directory (ingest_crawl.h collectSources), so the name
+    // prunes only untracked output there; here nothing could tell source from output, and a tracked
+    // `lib/build/*.py` package would vanish unannounced. A SUBSET of prunedDirs (every one is counted there
+    // too), rowed like ignoredDirRows (bytes 0, ext ""), and printed as unvetted_dirs= on --skipped and the map.
+    std::vector<SkippedFile>  unvettedDirRows;      // capped rows, path-sorted (bytes 0 = a directory)
+    std::uint64_t             unvettedDirs    = 0;  // EXACT count (rows may be fewer)
 };
 
 // §L1 — PARSE HEALTH: a per-indexed-file record of how much of the file the parser actually understood,

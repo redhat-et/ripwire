@@ -1809,6 +1809,22 @@ constexpr const char* kSkippedLegend =
 // absent-means-nothing-happened rule as the nest-refused clause below, so every other --skipped document stays
 // byte-identical. This is the class's DEFINITION: the map header carries escaped_root= with no in-band clause
 // of its own (buildUnindexedAttr's note records the seven-byte floor headroom that forbids one there).
+// §TRACKED — the unvetted-dir clause, written ONLY into a document that carries unvetted-dir rows (a root outside any
+// git work tree, or one git could not answer for, holding a build-output-named directory), so every git checkout's
+// --skipped stays byte-identical. The DEFINITION the map header's unvetted_dirs= points at, like escaped_root= above.
+void writeUnvettedDirLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
+{
+    if( cs.unvettedDirs == 0 )
+    {
+        return;
+    }
+    w.write( "<!-- unvetted_dirs= counts build-output-named subtrees (build, dist, out, target, cmake-build-*, …) pruned with NO git"
+             " tracked-file check: the root is not in a git work tree, or git could not answer. In a work tree the files git tracks"
+             " under such a name are indexed and only untracked output is pruned; here nothing could tell source from output, so a"
+             " source package under such a name is absent. Each is one f why=\"unvetted-dir\" row, bytes=\"0\"; all are inside"
+             " pruned_dirs= too. Contents UNKNOWN, not zero. -->" );
+}
+
 void writeEscapedRootLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
 {
     if( cs.escapedFiles == 0 )
@@ -2184,7 +2200,8 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                                   || cs.ignored.size() < cs.ignoredFiles || cs.ignoredDirRows.size() < cs.ignoredDirs   // §N6-C
                                   || cs.nestRefused.size() < cs.nestRefusedFiles
                                   || cs.extractPartial.size() < cs.extractPartialFiles
-                                  || cs.escaped.size() < cs.escapedFiles;                                               // §SEC1
+                                  || cs.escaped.size() < cs.escapedFiles                                                // §SEC1
+                                  || cs.unvettedDirRows.size() < cs.unvettedDirs;                                       // §TRACKED
     char nestAttr[ 48 ] = "";   // absent when zero, like every attribute that only a rare corpus can make non-zero
     if( cs.nestRefusedFiles > 0 )
     {
@@ -2212,6 +2229,12 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
                    effectiveMax, kMaxJsonConfigBytes, kMaxYamlConfigBytes,
                    std::string_view( nestAttr ), std::string_view( partialAttr ), std::string_view( escAttr ), rowsCapped ? " rows_capped=\"1\"" : "" );
     w.write( hdr );
+    // §TRACKED — same absent-when-zero rule (every git checkout keeps a byte-identical header). Written after hdr, never
+    // into it: hdr's arithmetic (test/fixedbufsweep.sh row `hdr`) has no room for a fifteenth counter.
+    if( cs.unvettedDirs > 0 )
+    {
+        w.write( " unvetted_dirs=\"" + std::to_string( cs.unvettedDirs ) + "\"" );
+    }
 }
 
 // §P0.5d / §L1 — --skipped: WHY the index does not contain a file, and which files it DOES contain but
@@ -2261,6 +2284,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeSkippedHealthLegends( w, health );
         const CrawlSkips& cs = ing.crawlSkips;
         writeEscapedRootLegend( w, cs );                            // §SEC1 — only into a document that has escaped-root rows
+        writeUnvettedDirLegend( w, cs );                            // §TRACKED — only into a document that has unvetted-dir rows
         writeNestRefusedLegend( w, cs );                            // only into a document that has nest-refused rows
         writeExtractPartialLegend( w, cs );                         // only into a document that has extract-partial rows
         writeSkippedHeader( w, ing, health, cfg.maxFileBytes );    // the <skipped …> counters, up to root=
@@ -2276,6 +2300,7 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.escaped,        "escaped-root", skRootPrefix );  // §SEC1: links whose target left the root
         writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered
         writeDropRows( w, esc, cs.ignoredDirRows, "ignored-dir", skRootPrefix );   // §N6-C: the subtrees they pruned
+        writeDropRows( w, esc, cs.unvettedDirRows, "unvetted-dir", skRootPrefix ); // §TRACKED: build-output dirs no git verdict vetted
         writeDropRows( w, esc, cs.nestRefused,    "nest-refused", skRootPrefix );  // indexed, then refused by the Kotlin nesting guard
         writeDropRows( w, esc, cs.extractPartial, "extract-partial", skRootPrefix );   // indexed, facts partial (ingest_prewarm.h)
         writeUnindexedExtRows( w, esc, cs.unindexedExts );
