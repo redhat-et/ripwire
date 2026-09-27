@@ -29,7 +29,7 @@ Reported by @mariadb-KyleHutchinson (follow-up to #323).
   - vitest: the path is one quoted filter without `--`. The CLI dropped the filter after `--` and ran the
     whole suite. A leading `-` is now spelled `./-…`.
   - jest: a positional argument is a regex, so `[id]` never matched its own file. Such a path now goes
-    through `--runTestsByPath`.
+    through jest's `runTestsByPath` option.
   - `node --test`: from Node 21 an argument is a glob (zero tests, exit 0) and before 21 a literal path.
     A path with glob syntax is `run_unknown="1"`.
 - **A vitest/jest command only for a file the runner's default include collects.** The name must end in
