@@ -137,7 +137,7 @@ static_assert( firstNodeFieldRowOutOfPlace() == kNodeFieldCount,
 // SoA, not a map: the scan reads ONLY the grammar pointers, so they live in their own contiguous array
 // and the id blocks never share a cache line with them.
 //
-// THE CAPACITY IS NOT A SILENT CAP. It is 64 against 25 distinct grammars over 52 extension rows today,
+// THE CAPACITY IS NOT A SILENT CAP. It is 64 against 26 distinct grammars over 55 extension rows today,
 // and ingest_crawl.h carries a static_assert that the crawl table's ROW count — an upper bound on its
 // distinct-grammar count — fits here, so a 65th language is a COMPILE error rather than a run that is
 // quietly slower. test/fieldidcheck.sh arm F is the second guard, on the distinct count. The runtime
