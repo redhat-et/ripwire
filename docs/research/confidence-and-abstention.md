@@ -462,3 +462,40 @@ python3 bench/arb/score_abstention_calibration.py       # the registered bands, 
 - The `coverage=` observation in §3.3 is not a finding and must not be cited as one.
 - 214 held-out instances were not scored because their snapshots are not on the disk this ran on. The
   92 that were scored are a floor, and a replication on the remainder is part of §5.2.
+
+---
+
+## Addendum (2026-09-27) — two follow-up signals, both scored after this note, both FAIL
+
+Neither result below is on this branch. Each was pre-registered and scored on stacked branches, and
+each number here comes from a file committed there. The population is the same 92 held-out
+instances as §3.3; each run reproduced the registered population fingerprint before it was scored.
+The band is §5.2's (false-warn ≤ 0.20 at miss-recall ≥ 0.50). The gating grain is a missed gold
+function (`func_hit`).
+
+**`served_syms` — FAIL.** `served_syms` is the number of symbols in the served head (the `<d>` rows
+under `<sigs>`), a fact every `--for` answer already shows. It was pre-registered at
+`lane/served-syms-prereg` @ `860b4dfb34b364b46634b4e5af2208bf01d652bd` (§5.4 there). The registration
+fixed the population, the statistic and the threshold sweep, and it fixed the direction in advance:
+a larger head counts as evidence of a miss. That direction was chosen after one exploratory AUROC on
+these 92 had already been seen, so it was not blind. The metric is AUROC with a 95% bootstrap CI
+(10,000 resamples), plus a sweep over every threshold for one that meets the band. Result, at
+`lane/served-syms-result` @ `50c554e6077b252ee1f009b950d4666756668202` (§10 there;
+`bench/locbench/results/served_syms_prereg/calib.json`): AUROC **0.278 [0.177, 0.385]** on `func_hit`
+(38 misses in 92) and 0.331 on file grain. Both are at or below the 0.35 rung that §5.2 registers as
+refuting the registered direction. No threshold meets the band. For abstention, the served head's
+size does not supply the operating point that `confidence=` lacks (§3.3). It licenses no warning and
+no threshold. Reading the result in the opposite direction would be a post-hoc choice. Testing that
+direction would need its own pre-registration on new held-out instances, and none has been run.
+
+**`margin_bp` re-score — FAIL.** `margin_bp` is the adaptive cut's raw drop fraction, left unzeroed on
+`confidence="low"`. It is emitted only by the unmerged `lane/for-margin-resolution` @ `e6f8942e`.
+Because `served_syms` did not pass, the registration committed `margin_bp` in advance to exactly one
+re-score, with the direction fixed as warn iff `margin_bp ≤ t`, the same band and the same grain.
+Result, at `lane/margin-rescore` @ `9ffd3628c3369bfd0b32fed2c37ced365550146b` (§11 there;
+`bench/locbench/results/margin_rescore/calib.json`): AUROC **0.604 [0.484, 0.719]** on `func_hit`
+(§5.2 rung: weak) and 0.579 on file grain. No threshold meets the band. `lane/for-margin-resolution`
+is closed and will not merge. `margin_pct=` stays as §2 describes it.
+
+Taken together, neither follow-up changes §1. `--for` still discloses its confidence and does not
+act on it, and this branch still ships no threshold (§9).
