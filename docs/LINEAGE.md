@@ -21,10 +21,10 @@ licence in [`THIRD_PARTY.md`](../THIRD_PARTY.md). First-party code under `src/` 
 third-party code lives under `third_party/` and keeps its own licence. Citing a paper means the idea
 was read and applied, not that any of its text or code is here.
 
-**The counts, derived from the tables below:** **49 repositories** and **71 papers** are folded, and
+**The counts, derived from the tables below:** **50 repositories** and **71 papers** are folded, and
 a labelled survey of **237 tools** contributed nothing and says so. **The two sets are disjoint by
 construction, so they add rather than nest:** a tool that contributed a lesson gets a row in §3a and
-is never repeated in §3b, which makes the field study 49 folded *plus* 237 surveyed — not 49 picked
+is never repeated in §3b, which makes the field study 50 folded *plus* 237 surveyed — not 50 picked
 out of 237. `test/readmedriftcheck.sh` re-derives all three numbers from these tables on every run,
 fails if the README's sentence disagrees, and proves the disjointness itself (arm E6) rather than
 taking this paragraph's word for it. Arm E9 checks this second restatement of the pair independently
@@ -252,6 +252,7 @@ shipped target links, and it is named in the near-miss paragraph below rather th
 | [Daniel Lemire's blog code, 2023-07-13](https://github.com/lemire/Code-used-on-Daniel-Lemire-s-blog/tree/master/2023/07/13/src) | The nibble-table classifier as working SSE code, and the SWAR case fold that lowercases eight bytes with high-bit arithmetic and no per-byte branch. | `classMasks` (the two-stage lookup tables) and `swarLowerFold8` in `src/infra/strkern.h`; the fused subtoken hash in `src/lexindex.h` folds its bytes with it |
 | [StringZilla](https://github.com/ashvardanian/StringZilla) | On NEON there is no `pmovmskb`: `vshrn_n_u16( …, 4 )` plus one 64-bit lane read is the movemask; a 256-bit byte set is tested sixteen bytes at a time as two table lookups over `(byte >> 3, byte & 7)`; the portable path is the exact SWAR has-zero-byte probe. | `neonNibbleMask`/`neonByteMask`, `Byteset256` + `findByteset`, `swarZeroByteMask` in `src/infra/strkern.h`; the XML and JSON escapers (`src/serialize.h`, `src/infra/jsonesc.h`) copy clean runs between the bytes the set finds |
 | [Tempesta FW `fast_str`](https://github.com/tempesta-tech/blog/tree/master/fast_str) | Lowercase A–Z branchlessly as one wrapping subtract and one unsigned compare, with the 0x80-bias spelling when the ISA only compares signed bytes; classify with the same two-stage shuffle at 32 bytes per step. | `lowerFoldAscii` / `lowerFoldedEquals` and the AVX2 path of `classMasks` in `src/infra/strkern.h` |
+| [SkillSpector](https://github.com/NVIDIA/SkillSpector) (NVIDIA) | **Scan an agent skill before it is installed, by category of harm.** NVIDIA's skill-scanning work is where `--scan-skills` came from: a skill file is untrusted input, and it is read for prompt injection, credential or environment exfiltration, and requests that reach beyond what the skill declares. SkillSpector pairs code-based analyzers (static patterns across 17 categories, AST walks, taint tracking, whitespace padding, MCP tool poisoning) with an LLM judgment pass; only the code-based side can come across, because ripwire is deterministic and runs no model. The lesson still open is its taint tracking: decide exfiltration by following a secret-shaped source to a network sink, not by matching a single line. Ours is line-level, and `EXFILTRATE:net-exfil` fires on documented API calls and loopback checks as CRITICAL while missing flows that span lines ([#353](https://github.com/redhat-et/ripwire/issues/353)); the fix reads SkillSpector's current detection first. | `src/skillscan.h` (`--scan-skills` / `--scan-skill=FILE`, the four categories INJECTION, EXFILTRATE, SCOPE-CREEP, FRONTMATTER) |
 
 **Read and not folded, and worth naming because they are the near misses.** A scoped-snippet view
 with scope breadcrumbs — the one rung of the detail ladder that is still missing here — was designed
