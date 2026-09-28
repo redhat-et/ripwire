@@ -1344,7 +1344,7 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// standing on giants", AMBER);
   title(s, "The research inside — classic and current");
   s.addText([
-    { text: "49 repositories + 71 papers folded", options: { color: TEXT, bold: true } },
+    { text: "50 repositories + 71 papers folded", options: { color: TEXT, bold: true } },
     { text: "  ·  and a labelled survey of 237 tools that contributed nothing, which says so — every row with the lesson taken and where it lives: docs/LINEAGE.md", options: { color: MUTED } },
   ], { x: MX, y: 1.58, w: 12.0, h: 0.34, fontFace: SANS, fontSize: 13, margin: 0 });
   const classics = [
@@ -1398,7 +1398,7 @@ function storyCards(s, { kick, head, stories, footText }){
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["650 gate scripts",                  "bash test/manifestcheck.sh"], // gatecount
-    ["49 repos · 71 papers · 237 surveyed","bash test/readmedriftcheck.sh"],
+    ["50 repos · 71 papers · 237 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
     ["the oracle round",                  "bench/headtohead/r9-2026-08-09/RESULTS.md"],
