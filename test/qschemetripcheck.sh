@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-09-27 (Clojure): RE-DERIVED with UPDATE_GOLDEN=1 (hash dc868b59c7…5981ab).
+#   kParserVer 124 -> 125 adds the Clojure grammar/query/extraction; kCacheVersion stays 25 and
+#   kQSnapCacheScheme stays 15. Only extraction identity changed, not Snapshot blob semantics.
 # 2026-09-27, train 21 (#220 part 2 + builtin-bind merged): RE-DERIVED on the merged tree with UPDATE_GOLDEN=1 — the
 #   hash is c451a79f1c…40c2cf, unchanged from #220's entry below: builtin-bind's kQSnapCacheScheme 14 -> 15 and its
 #   declinedCallMayReach exemption move no hashed declaration, and #220's kParserVer 124 is already in the pin.

@@ -250,6 +250,24 @@ triple-quoted string that ends in an escaped `$`). `test/kotlincheck.sh`
 covers extraction, both bridge directions in flat and split layouts, the Java-edge invariant, the
 bodyless-type collapse, hostile nesting, metrics and determinism.
 
+<a id="clojure-extraction"></a>
+**Clojure extraction.** The vendored Yogthos parser is a fork of Sogaiu's grammar. The grammar
+rules match at the pinned revisions, while Yogthos' generated ABI-15 parser completed 4,930 of 4,933
+files (99.94%, 55.5 MB across Metabase, clojure-lsp, clj-kondo and Babashka) in 2.24 s. Sogaiu's
+ABI-14 generated parser repeatedly stalled on the same corpus. Two failures were intentionally
+invalid clj-kondo corpus files; the third was a Metabase test file.
+
+`queries/clojure/tags.scm` captures structural two-symbol defining lists and direct symbolic list
+heads. `ingest_clojure.h` classifies namespaces, vars, functions, multimethods, macros, protocols,
+records and types, and rejects quoted, syntax-quoted and reader-discarded subtrees. Macro-generated
+definitions and calls, dynamic invocation, namespace aliases/import resolution and protocol/type
+method symbols are not inferred. Multi-arity functions report inexact arity, so call resolution does
+not narrow on a guess. Clojure does not claim dependency capability until namespace forms have a
+corpus-index-backed resolver. The shared clone/readability scanner does not yet strip Clojure's `;`
+comments; this can hide clone matches or inflate lexical readability counts. `test/clojurecheck.sh`
+covers the four extensions, definition kinds, calls, quote/discard negatives, cache parity, root
+spelling, skipped census and dependency/nonlocal-state disclosures.
+
 Elixir extraction landed at revision 78 (rich 79) — `kParserVer` in `src/ingest_cache.h`, mirrored by
 `kIngestParserVerMirror` in `src/quality.h`. The required `qschemetrip` source-change pin is refreshed
 for this extraction change; snapshot scheme 8 is unchanged.

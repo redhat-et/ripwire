@@ -136,7 +136,7 @@ claim cannot quietly drift. The row-by-row ledger is
 </details>
 
 **Languages:** Rust · C++ · Objective-C/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript ·
-JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Bash · C# · JSON · TOML · YAML · Markdown — see
+JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
 **Latest: 0.6.5** — TypeScript alias imports resolve, and fixes from Windows testers. [Release notes](#release-notes) ·
@@ -2062,9 +2062,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>650 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>651 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **650 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **651 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2255,7 +2255,7 @@ are one contributor's corpus away from being measurably better, and we cannot se
 ## Languages
 
 <details>
-<summary><b>25</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
+<summary><b>26</b> vendored grammars, and what each parser does and does not see — CUDA launch edges, PHP dynamic dispatch, Lua metatables</summary>
 
 C, C++, Objective-C / Objective-C++, **Metal** (Metal Shading Language, `.metal` — indexed with the
 C++ grammar, since MSL is a C++14 dialect, so a dual-compile header's symbols resolve from both the
@@ -2273,7 +2273,7 @@ a runtime call with no syntax to read, so a Lua corpus reports no inheritance ed
 implied), **Dart** (`.dart` — classes, mixins, extensions, enums, typedefs, functions, methods, getters/setters; `recv.m()`, `recv?.m()` and cascade `..m()` invocations are edges. Two stated floors: named constructors and factories index under the CLASS name, so `C()`, `C.seeded()` and `factory C.fromA()` are overloads of `C`; and `noSuchMethod` dynamic dispatch names its callee at run time. The grammar makes a function body a SIBLING of its signature rather than a child, so the definition span is extended through it at capture time — without that, every call in a body attributes to the enclosing class), **Elixir** (`.ex`/`.exs` — nested modules, structs, protocols and implementations, functions, macros, guards,
 delegates, types, callbacks, attributes and literal ExUnit tests; module/name/arity resolution with lexical aliases,
 filtered imports, default arguments, captures and pipes; see the
-[static-analysis limits](docs/ARCHITECTURE.md#elixir-extraction)), **Kotlin** (`.kt` — classes, objects, companion objects, interfaces, enum classes and functions, extension functions included; bare and navigation calls and constructor delegation are call-graph edges; an import is a dependency edge only (role="import" on `--uses`, never a `--callers`/`--impact` edge — T13/fix3, 2026-09-20). Kotlin and Java share one call graph, and a call reaches the other language only when its own defines no candidate of that name, so adding `.kt` files never moves a Java edge. Stated floors: an explicit receiver (`A.f()`) does not narrow candidates; a multiplatform `expect`/`actual` type pair is two candidates; `.kts` is not indexed; and a file nesting string templates past 128 levels is refused and listed by `--skipped` — see the [Kotlin limits](docs/ARCHITECTURE.md#kotlin-extraction)), **GDScript** (`.gd` — a Godot file is a class body: `class_name` names it and its file-scope `func`/`var` are its members, with inner classes, constants, enums and their members, signals and call edges; `preload`/`load` produce no dependency edge yet, and `.tscn`/`.tres`/`.gdshader` are not indexed — see the [GDScript notes](docs/ARCHITECTURE.md#gdscript-extraction)), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
+[static-analysis limits](docs/ARCHITECTURE.md#elixir-extraction)), **Kotlin** (`.kt` — classes, objects, companion objects, interfaces, enum classes and functions, extension functions included; bare and navigation calls and constructor delegation are call-graph edges; an import is a dependency edge only (role="import" on `--uses`, never a `--callers`/`--impact` edge — T13/fix3, 2026-09-20). Kotlin and Java share one call graph, and a call reaches the other language only when its own defines no candidate of that name, so adding `.kt` files never moves a Java edge. Stated floors: an explicit receiver (`A.f()`) does not narrow candidates; a multiplatform `expect`/`actual` type pair is two candidates; `.kts` is not indexed; and a file nesting string templates past 128 levels is refused and listed by `--skipped` — see the [Kotlin limits](docs/ARCHITECTURE.md#kotlin-extraction)), **GDScript** (`.gd` — a Godot file is a class body: `class_name` names it and its file-scope `func`/`var` are its members, with inner classes, constants, enums and their members, signals and call edges; `preload`/`load` produce no dependency edge yet, and `.tscn`/`.tres`/`.gdshader` are not indexed — see the [GDScript notes](docs/ARCHITECTURE.md#gdscript-extraction)), **Clojure** (`.clj`/`.cljs`/`.cljc`/`.bb` — namespaces, vars, functions, macros, multimethods, protocols, records and types; direct symbolic list-head calls are edges. Quoted, syntax-quoted and reader-discarded forms are excluded. Macro expansion, dynamic invocation, namespace aliases/import resolution, protocol/type method symbols, and exact multi-arity signatures are stated floors — see the [Clojure limits](docs/ARCHITECTURE.md#clojure-extraction)), Bash, Go, Rust, Swift, C#, JSON + TOML + YAML (config keys — a
 `[tool.ruff.lint]` table is one symbol under its full dotted name, and
 `pyproject.toml`/`Cargo.toml`/CI workflows become greppable), and **Markdown** (`.md`/`.markdown` —
 the DOC tier: every heading, ATX or setext, is a section symbol whose span runs to the next
@@ -2891,7 +2891,7 @@ The CLI write verbs and the MCP write verbs use the same safety contract:
 
 ### 12. Supported languages and formats
 
-The tool vendors 25 tree-sitter grammars. A table maps a file extension to a grammar and a query
+The tool vendors 26 tree-sitter grammars. A table maps a file extension to a grammar and a query
 file. One query engine runs over every language. A new language requires a vendored grammar, a query
 file, and one row in the extension table.
 
@@ -2903,9 +2903,10 @@ file, and one row in the extension table.
 | Metal (MSL) | `.metal` | Indexed with the C++ grammar. |
 | CUDA | `.cu`, `.cuh` | `<<<>>>` launch sites are call edges. |
 | Python | `.py` | |
-| TypeScript / JavaScript | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Named imports and default imports resolve. One vendored dependency supplies two of the 25 grammars, `typescript` and `tsx`. `.astro` frontmatter rides this same `Lang` — see its own row below. |
+| TypeScript / JavaScript | `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` | Named imports and default imports resolve. One vendored dependency supplies two of the 26 grammars, `typescript` and `tsx`. `.astro` frontmatter rides this same `Lang` — see its own row below. |
 | Java | `.java` | Qualified `new` calls resolve in a precise tier. |
 | Kotlin | `.kt` | Shares one call graph with Java. A file with string templates past 128 levels is refused and listed by `--skipped`. |
+| Clojure | `.clj`, `.cljs`, `.cljc`, `.bb` | Structural defining forms and direct symbolic list-head calls; quoted/discarded syntax is excluded. Macro expansion and namespace/import resolution are not inferred. |
 | Ruby | `.rb` | Superclasses, mixins, `autoload`, and constant receivers are read. |
 | PHP | `.php`, `.phtml` | Dynamic dispatch is a stated floor. |
 | Lua | `.lua` | Metatable inheritance produces no inheritance edge. `require` is a function call. A string-literal `require` that names exactly one file in the tree adds a dependency edge. |

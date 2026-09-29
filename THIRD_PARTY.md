@@ -72,6 +72,7 @@ is why the sizes are what they are — `parser.c` is one big static table, not h
 | `deps/markdown` | tree-sitter-markdown (v0.5.3; the block grammar `tree-sitter-markdown/` only) | Matthias Deiml | MIT | `f969cd3ae3f9fbd4e43205431d0ae286014c05b5` | https://github.com/tree-sitter-grammars/tree-sitter-markdown | 2.1 MB |
 | `deps/kotlin` | tree-sitter-kotlin (ABI 14) | fwcd | MIT | `1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1` | https://github.com/fwcd/tree-sitter-kotlin | 32 MB |
 | `deps/gdscript` | tree-sitter-gdscript (master) | Preston Knopp | MIT | `c5c8fa4861b5a4f04a7e60d97587fc3b6cc5639e` | https://github.com/PrestonKnopp/tree-sitter-gdscript | 2624 KB |
+| `deps/clojure` | tree-sitter-clojure v0.0.14 (ABI 15) | Sogaiu, Yogthos and contributors | CC0-1.0 | `8ec8407eada5f29728d746a46cbe6115938b5422` | https://github.com/yogthos/tree-sitter-clojure | 0.8 MB |
 | `deps/doctest` | doctest (v2.4.12) | Viktor Kirilov | MIT | `1da23a3e8119ec5cce4f9388e91b065e20bf06f5` | https://github.com/doctest/doctest | 0.7 MB |
 
 Notes:
@@ -91,6 +92,9 @@ Notes:
 - `deps/kotlin` is pinned to a bare commit rather than the last tag (`v0.3.8`, Aug 2024) because
   that tag predates a scanner segfault fix (upstream #136) present on `main`; the pinned commit is
   `main`'s tip as of this vendoring, chosen for the fix, not for being a release.
+- `deps/clojure` comes from Yogthos' fork of Sogaiu's grammar. At the pinned revisions the grammar
+  rules match; Yogthos' regenerated ABI-15 parser completed the 4,933-file qualification corpus
+  while Sogaiu's older ABI-14 generated parser repeatedly stalled.
 - `deps/ts_typescript` keeps `common/scanner.h`, which both sub-grammars' `src/scanner.c` include.
 - `deps/php` keeps the repo-relative layout `common/scanner.h` + `php/src/…` for the same reason, and
   for one more: upstream hosts TWO sub-grammars (`php/`, `php_only/`) whose `src/scanner.c` each
