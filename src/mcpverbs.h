@@ -1822,6 +1822,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     {
         lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
     }
+    // fix #10: the raw lexical evidence bar, read before any lift reshapes the rank — the CLI twin's lr.maxLexicalScore,
+    // which the how answer's head discloses as weak= (forhow.h); nothing else on this surface reads it
+    const bool mcpIsWeak = lensRank.empty() || maxScoreUndoingTier( lensRank, tierMul ) < kWeakLexicalScoreThreshold;
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
     // Scope.symbols literally NAMED in the task text are lifted to just below the top hit (the measured #1
@@ -1974,39 +1977,12 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // very ranking (the CLI --for twin's), the sections byte-identical to the CLI's; nothing below runs.
     if( isHowEligible && mcpRootArg == std::string_view( root ) && forhow::howTextFires( task ) )
     {
-        const forhow::HowSections sec    = forhow::howSections( { ing, ix.g, task, lensRank, mcpRootArg, redact } );
-        const std::string         atAttr = gitstamp::atAttr( root );
-        std::string               doc    = ctxRootOpen( task, routeNoteOf( rc, shape, noRoute ), mcpRootArg );
-        std::string               attrs  = mcpForConf.attrs + atAttr;
-        if( mentionAnchored > 0 )
-        {
-            attrs += " mention_anchored=\"" + std::to_string( mentionAnchored ) + "\"";
-        }
-        if( docMentions > 0 )
-        {
-            attrs += " doc_mentions=\"" + std::to_string( docMentions ) + "\"";
-        }
-        forhow::spliceRootAttrs( doc, attrs + capAttrs + forhow::howRootAttrs() );
-        const std::vector<rw::ForNamedHeaderRow> hdrRows = rw::forNamedHeaderRows( ing, task );
-        doc += "<!-- ripwire lens for \"" + xmlCommentText( task ) + "\"" + termsCapNote + mentionNote + boostNote + docMentionNote + floorNote;
-        doc += kHowTaskLegend;
-        if( doc.find( " route=\"" ) < doc.find( '>' ) )
-        {
-            doc += kForRouteCodeLegend;
-        }
-        doc += mcpForConf.note;
-        doc += forhow::howLegendClauses();
-        if( !hdrRows.empty() )
-        {
-            doc += kForHdrLegend;
-        }
-        doc += " -->";
-        doc += rw::forRootRelPathsLegendShort( true, !atAttr.empty() );
-        doc += rw::renderNamedHeaderRowsXml( ing, hdrRows, mcpRootArg );
-        doc += sec.xml;
-        doc += "</ctx>";
-        forhow::spliceRootAttrs( doc, forhow::howEstAttr( doc.size(), sec.cdataBytes ) );
-        return doc;
+        const forhow::HowHead     head = forhow::howHeadFor( ing, lensRank, mcpEvidence,
+            { task, routeNoteOf( rc, shape, noRoute ), mcpRouteTag, mcpRootArg, gitstamp::stampAt( root ), mentionNote, boostNote, docMentionNote,
+              capAttrs, mcpIsWeak } );
+        const forhow::HowSections sec  = forhow::howSections( { ing, ix.g, task, lensRank, mcpRootArg, redact, head } );
+        return forhow::howFullDocument( head, xmlCommentText( task ), termsCapNote + mentionNote + boostNote + docMentionNote + floorNote, {},
+                                        sec.xml, sec.cdataBytes );
     }
 
     const std::vector<char>  impure    = computeImpure( ing, ix.g );
@@ -4114,6 +4090,8 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul,
                                                                               0, 0, {}, &lr.evidence );
+    // fix #10: the raw lexical evidence bar before any lift (the how answer's weak=), as forTaskText reads it
+    const bool isWeakLexical = lr.rank.empty() || maxScoreUndoingTier( lr.rank, tierMul ) < kWeakLexicalScoreThreshold;
     // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
     lr.routeNote = routeNoteOf( rc, shape, noRoute );   // row 6: the route CODE, ONE producer (filter.h)
 
@@ -4202,7 +4180,19 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     // MCP `for` verb's own (the same primitives, the same order, above) — so they are byte-identical to `for`'s
     if( isHowEligible && !in.rootArg.empty() && forhow::howTextFires( task ) )
     {
-        const forhow::HowSections sec = forhow::howSections( { ing, g, task, lr.rank, in.rootArg, redact } );
+        // the name-exact route scores whole names, so its subtoken evidence (coverage=) comes from one exhaustive subtoken
+        // pass whose scores are discarded — forTaskText's own second call
+        LexTermEvidence evidence = lr.evidence;
+        if( rc.which == LexMode::NameExact )
+        {
+            evidence = LexTermEvidence{};
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &evidence );
+        }
+        const char* const         routeTag = noRoute ? "no-route" : ( rc.which == LexMode::NameExact ? "name-exact" : "subtoken+body" );
+        const forhow::HowHead     head     = forhow::howHeadFor( ing, lr.rank, evidence,
+            { task, lr.routeNote, routeTag, in.rootArg, gitstamp::stampAt( root ), lr.mentionNote, lr.boostNote, lr.docMentionNote, lr.capAttrs,
+              isWeakLexical } );
+        const forhow::HowSections sec = forhow::howSections( { ing, g, task, lr.rank, in.rootArg, redact, head } );
         bundle = forhow::howIntoPackTask( bundle, sec, budgetTokens > 0 ? budgetTokens : std::size_t( kPackTaskDefaultTokens ) );
     }
     return bundle;

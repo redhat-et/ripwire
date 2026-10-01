@@ -29,6 +29,7 @@
 
 #include "commentcoherence.h"   // isCommentStopword — BASE's fixed English stopword list (prereg S2)
 #include "filter.h"             // pathTierOf / isDemoOrGeneratedPath — the Source-tier test (prereg S4)
+#include "forpage.h"            // forCoveragePct / forAnswerIsThin — coverage=, as the --for lens computes it
 #include "forhowbase.h"         // the trigger and the legend clauses (dependency-free: cli.h and legenddict.h read them)
 #include "lexical.h"            // subtokens
 #include "mention.h"            // ForNamedHeaderRow — the <hdr> rows the --for answers carry first — THE index split (prereg S2 "index-split subtokens")
@@ -46,6 +47,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <span>
 #include <string>
 #include <string_view>
@@ -53,6 +55,43 @@
 
 namespace rw
 {
+
+// The data notes in their compact spelling: the numbers stay, the sentence goes. Unknown shapes pass
+// through VERBATIM — a note this table does not know is never shortened into something it did not say.
+inline std::string compactForNote( std::string_view note )
+{
+    // " [relevance floor: kept 7 of 40 - the other 33 scored zero…]" → " [floor: kept 7 of 40]"
+    if( note.starts_with( " [relevance floor: kept " ) )
+    {
+        const std::size_t cut = note.find( " - " );
+        return cut == std::string_view::npos ? std::string( note ) : " [floor: kept " + std::string( note.substr( 24, cut - 24 ) ) + "]";
+    }
+    // " [doc mentions: 2 docs discussing 1 top-ranked symbol surfaced; doc_mentions= …]" → " [doc mentions: 2 docs, 1 symbol; doc_mentions=]"
+    if( note.starts_with( " [doc mentions: " ) )
+    {
+        const std::size_t disc = note.find( " discussing " );
+        const std::size_t top  = note.find( " top-ranked symbol" );
+        if( disc != std::string_view::npos && top != std::string_view::npos && top > disc )
+        {
+            return " [doc mentions: " + std::string( note.substr( 16, disc - 16 ) ) + ", " + std::string( note.substr( disc + 12, top - disc - 12 ) )
+                 + " symbol" + ( note.substr( top + 18 ).starts_with( "s" ) ? "s" : "" ) + "; doc_mentions=]";
+        }
+        return std::string( note );
+    }
+    // " [mention anchor: 1 file + 2 symbols named in the task, …; mention_anchored= …]" → " [mention anchor: 1 file + 2 symbols; mention_anchored=]"
+    if( note.starts_with( " [mention anchor: " ) )
+    {
+        const std::size_t cut = note.find( " named in the task" );
+        return cut == std::string_view::npos ? std::string( note ) : std::string( note.substr( 0, cut ) ) + "; mention_anchored=]";
+    }
+    // " [cochange boost: promoted N symbols in M files that historically …]" → " [cochange boost: promoted N symbols in M files]"
+    if( note.starts_with( " [cochange boost: promoted " ) )
+    {
+        const std::size_t cut = note.find( " that " );
+        return cut == std::string_view::npos ? std::string( note ) : std::string( note.substr( 0, cut ) ) + "]";
+    }
+    return std::string( note );
+}
 
 // ── the <hdr> rows, ONE renderer ──────────────────────────────────────────────────────────────────────────────────────
 // R2-AF (round 2, S4): `<hdr p= of=/>` — the named file's one same-directory, same-stem decl/impl partner. It was spelled
@@ -100,7 +139,9 @@ inline constexpr std::size_t kHowBodyHops         = 3;      // B
 inline constexpr std::size_t kHowBodyBytesEach    = 1024;   // B
 inline constexpr std::size_t kHowBodyBytesAll     = 2048;   // B
 inline constexpr std::size_t kHowNameRows         = 8;      // N
-inline constexpr std::size_t kHowCeilingBytes     = 8192;   // ceiling on the sections (§0 "Ceiling")
+inline constexpr std::size_t kHowCeilingBytes     = 8192;   // §0 "Ceiling": the WHOLE first answer — the CLI default --for
+                                                            // document (howCompactDocument), the unit §2 prices; every
+                                                            // surface trims its sections against that same document
 
 // The how answer reads the --for lens's index, the one that captures value uses (cli.h needsValueUses), and a plain
 // --callers/--callees reads the lean one, which can resolve fewer calls (measured: 10 callers where the lens index has
@@ -1318,25 +1359,6 @@ inline std::vector<HowBody> selectBodies( HowContext& cx, const HowPath& path, c
     return bodies;
 }
 
-// ── the answer ────────────────────────────────────────────────────────────────────────────────────────────────────────
-struct HowInputs
-{
-    const IngestResult&       ing;
-    const Graph&              g;
-    std::string_view          task;
-    const std::vector<float>& rank;      // the --for lens's default ranking, final (every lift applied)
-    std::string_view          rootArg;   // single-root runs: p= is relative to it
-    RedactCounts*             redact;    // REQUIRED (no default): signatures and body lines are emitted source text
-};
-
-struct HowSections
-{
-    std::string xml;             // `<path …>` through `</names>` — identical on all four surfaces
-    std::size_t cdataBytes = 0;  // the body-line bytes inside it (priced at the body rate)
-    std::size_t seedCount  = 0;
-    bool        isOverCeiling = false;
-};
-
 // the lens window W: the top kForLensDefaultTopN by (score desc, id asc), after the relevance floor — the --for
 // lens's own two calls (serialize.h relevanceFloorCut; the radix order its <sigs> selects with)
 inline std::vector<NodeId> howWindow( const std::vector<float>& rank )
@@ -1352,6 +1374,253 @@ inline std::vector<NodeId> howWindow( const std::vector<float>& rank )
     return ids;
 }
 
+// est_tokens= for a finished how document: markup at the map rate, body lines at the body rate; the attribute's own
+// digits are part of what it prices (the --for fixpoint, verbs_for.h finishForLensHeaderPriced).
+inline std::string howEstAttr( std::size_t docBytesWithoutAttr, std::size_t cdataBytes )
+{
+    const auto price = [ & ]( std::size_t attrBytes )
+    {
+        const std::size_t markup = docBytesWithoutAttr + attrBytes - cdataBytes;
+        return tokensForEmittedBytes( markup, kBytesPerTokenDefault ) + tokensForEmittedBytes( cdataBytes, kBytesPerTokenBody );
+    };
+    std::size_t est  = price( 0 );
+    std::string attr = " est_tokens=\"" + std::to_string( est ) + "\"";
+    for( int pass = 0; pass < 4; ++pass )
+    {
+        const std::size_t next = price( attr.size() );
+        if( next == est )
+        {
+            break;
+        }
+        est  = next;
+        attr = " est_tokens=\"" + std::to_string( est ) + "\"";
+    }
+    return attr;
+}
+
+// The F2 clauses every dialect carries, in one order (the session dictionary holds each one verbatim).
+inline std::string howLegendClauses()
+{
+    std::string s;
+    s.reserve( 1600 );
+    s += kHowShapeLegend;
+    s += kHowPathLegend;
+    s += kHowHopLegend;
+    s += kHowBodyLegend;
+    s += kHowNamesLegend;
+    s += kHowEstLegend;
+    return s;
+}
+
+// ── the canonical answer around the sections ──────────────────────────────────────────────────────────────────────────
+// The CLI default (compact) --for answer is the unit the ceiling and §2 measure. Every surface builds THIS head from its
+// own ranking — the same inputs on all four (the --for lens's ranking, its term evidence, route, notes, cap attributes and
+// the root) — so the trim it decides is the same trim everywhere and the sections stay byte-identical.
+struct HowHead
+{
+    std::string_view task;
+    std::string      routeNote;
+    std::string_view rootArg;
+    std::string      confAttrs;          // confidence= margin_pct= [coverage=] — deriveForConfidence, as the lens
+    std::string      confNote;           // its full-dialect reading (the MCP `for` legend carries it)
+    bool             hasCoverage = false;
+    std::string      atStamp;            // gitstamp::stampAt — "" off git
+    std::uint32_t    mentionAnchored = 0;
+    std::uint32_t    docMentions     = 0;
+    std::string      capAttrs;           // the indexing caps that cut the ranking (mention.h CapDisclosure)
+    std::string      notes;              // the data notes, compact (compactForNote): mention, cochange, doc mentions, floor
+    bool             isWeak = false;     // the top raw lexical score is under the evidence bar (lexical.h)
+    std::string      hdrXml;             // <hdr p= of=/> rows
+};
+
+struct HowHeadInputs
+{
+    std::string_view task;
+    std::string_view routeNote;
+    const char*      routeTag;           // "name-exact" | "subtoken+body" | "no-route"
+    std::string_view rootArg;
+    std::string_view atStamp;
+    std::string_view mentionNote;        // any surface's spelling: compactForNote reads the numbers, not the sentence
+    std::string_view boostNote;
+    std::string_view docMentionNote;
+    std::string_view capAttrs;
+    bool             isWeak;
+};
+
+// the first unsigned number after `key` in `note` (0 when absent)
+inline std::uint32_t noteNumberAfter( std::string_view note, std::string_view key ) noexcept
+{
+    const std::size_t at = note.find( key );
+    if( at == std::string_view::npos )
+    {
+        return 0;
+    }
+    std::uint32_t n = 0;
+    for( std::size_t i = at + key.size(); i < note.size() && note[i] >= '0' && note[i] <= '9'; ++i )
+    {
+        n = n * 10 + std::uint32_t( note[i] - '0' );
+    }
+    return n;
+}
+
+// A note with its cap clauses taken out (mention.h capDisclosureNote: " [cut: … not shown here]"): the MCP twins append
+// them to the lift notes where the CLI keeps them apart, and the head states the caps once, from capAttrs (howCapNote).
+inline std::string withoutCapClauses( std::string_view note )
+{
+    std::string out( note );
+    for( std::size_t at = out.find( " [cut:" ); at != std::string::npos; at = out.find( " [cut:", at ) )
+    {
+        const std::size_t end = out.find( "not shown here]", at );
+        if( end == std::string::npos )
+        {
+            break;
+        }
+        out.erase( at, end + std::string_view( "not shown here]" ).size() - at );
+    }
+    return out;
+}
+
+inline HowHead howHeadFor( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& evidence, const HowHeadInputs& in )
+{
+    HowHead h;
+    h.task      = in.task;
+    h.routeNote = in.routeNote;
+    h.rootArg   = in.rootArg;
+    h.atStamp   = in.atStamp;
+    h.capAttrs  = in.capAttrs;
+    h.isWeak    = in.isWeak;
+    // confidence=/margin_pct=/coverage= — the lens's own three calls (verbs_for.h runForLens, mcpverbs.h forTaskText)
+    const AdaptiveCut       cut      = adaptiveCut( rank, 5, std::size_t( kForLensDefaultTopN ), /*scanFullDistribution=*/true );
+    const bool              homonym  = isAdaptiveHomonymDecline( isNameExactRouteTag( in.routeTag ), cut, 5 );
+    const RelevanceFloorCut floor    = relevanceFloorCut( rank, kForLensDefaultTopN );
+    ForConfidence           conf     = deriveForConfidence( cut, floor.topN, homonym );
+    const int               coverage = forCoveragePct( evidence, topLensId( rank ) );
+    if( forAnswerIsThin( coverage, distinctFilesOf( ing, howWindow( rank ) ) ) && coverage >= 0 )
+    {
+        conf.attrs   += " coverage=\"" + std::to_string( coverage ) + "\"";
+        conf.note    += kForCoverageLegend;
+        h.hasCoverage = true;
+    }
+    h.confAttrs = std::move( conf.attrs );
+    h.confNote  = std::move( conf.note );
+    // the counts the root states, read off the notes every surface writes from the same numbers
+    if( const std::uint32_t files = noteNumberAfter( in.mentionNote, "[mention anchor: " ); in.mentionNote.find( "[mention anchor: " ) != std::string_view::npos )
+    {
+        h.mentionAnchored = files + noteNumberAfter( in.mentionNote.substr( in.mentionNote.find( " + " ) ), " + " );
+    }
+    h.docMentions = noteNumberAfter( in.docMentionNote, "[doc mentions: " );
+    h.notes = compactForNote( withoutCapClauses( in.mentionNote ) ) + compactForNote( withoutCapClauses( in.boostNote ) )
+            + compactForNote( withoutCapClauses( in.docMentionNote ) ) + compactForNote( floor.note );
+    h.hdrXml = renderNamedHeaderRowsXml( ing, forNamedHeaderRows( ing, in.task ), in.rootArg );
+    return h;
+}
+
+// The root every how answer opens with: BASE's --for root attributes (minus the body posture and budget_bytes=), then
+// shape= and lens=; schema= rides the compact dialect only, as on the lens.
+inline std::string howRootOpen( const HowHead& h, bool withSchema )
+{
+    std::string doc   = ctxRootOpen( h.task, h.routeNote, h.rootArg );
+    std::string attrs = h.confAttrs + ( h.atStamp.empty() ? std::string() : " at=\"" + h.atStamp + "\"" );
+    attrs += h.mentionAnchored > 0 ? " mention_anchored=\"" + std::to_string( h.mentionAnchored ) + "\"" : std::string();
+    attrs += h.docMentions > 0 ? " doc_mentions=\"" + std::to_string( h.docMentions ) + "\"" : std::string();
+    attrs += withSchema ? " schema=\"ripwire.for/v1\"" : "";
+    attrs += h.capAttrs;
+    attrs += " shape=\"how\" lens=\"" + std::string( kHowLensValue ) + "\"";
+    const std::size_t close = doc.find( '>' );
+    doc.insert( close == std::string::npos ? doc.size() : close, attrs );
+    return doc;
+}
+
+// the cap clause, self-defining (mention.h capDisclosureNote's spelling, over all the caps at once)
+inline std::string howCapNote( std::string_view capAttrs )
+{
+    CapDisclosure all;
+    all.xml = std::string( capAttrs );
+    return capDisclosureNote( all );
+}
+
+// THE canonical answer: the CLI default (compact) --for document around `sectionsXml`.
+inline std::string howCompactDocument( const HowHead& h, std::string_view sectionsXml, std::size_t cdataBytes )
+{
+    std::string doc = howRootOpen( h, /*withSchema=*/true );
+    doc += "<!-- ripwire for schema=ripwire.for/v1 shape=how: task= the query";
+    doc += h.routeNote.empty() ? std::string_view() : kForRouteCodeLegend;
+    doc += kForCompactConfidenceClause;
+    doc += h.hasCoverage ? kForCompactCoverageClause : std::string_view();
+    doc += howLegendClauses();
+    doc += h.hdrXml.empty() ? std::string_view() : kForCompactHdrClause;
+    doc += h.notes;
+    doc += howCapNote( h.capAttrs );
+    doc += " -->";
+    doc += forRootRelPathsLegendShort( !h.rootArg.empty(), !h.atStamp.empty() );
+    if( h.isWeak )
+    {
+        const std::size_t close = doc.rfind( " -->" );
+        doc.insert( close == std::string::npos ? doc.size() : close, " weak=\"1\"" );
+    }
+    doc += h.hdrXml;
+    doc += sectionsXml;
+    doc += "</ctx>";
+    const std::string est   = howEstAttr( doc.size(), cdataBytes );
+    const std::size_t close = doc.find( '>' );
+    doc.insert( close, est );
+    return doc;
+}
+
+// The FULL-dialect how answer: the CLI --legend=full answer, and the MCP `for` dialect (whose lens legend opens
+// `<!-- ripwire lens for "TASK"` — the shape legenddict.h's ref posture recognises). `notes` is the surface's own prose
+// notes and `capNote` its cap clause ("" where the notes already carry it).
+inline std::string howFullDocument( const HowHead& h, std::string_view taskNote, std::string_view notes, std::string_view capNote,
+                                    std::string_view sectionsXml, std::size_t cdataBytes )
+{
+    std::string doc = howRootOpen( h, /*withSchema=*/false );
+    doc += "<!-- ripwire lens for \"";
+    doc += taskNote;
+    doc += "\"";
+    doc += notes;
+    doc += h.confNote;
+    doc += kHowTaskLegend;
+    doc += h.routeNote.empty() ? std::string_view() : kForRouteCodeLegend;
+    doc += howLegendClauses();
+    doc += h.hdrXml.empty() ? std::string_view() : kForHdrLegend;
+    doc += capNote;
+    doc += " -->";
+    doc += forRootRelPathsLegendShort( !h.rootArg.empty(), !h.atStamp.empty() );
+    if( h.isWeak )
+    {
+        const std::size_t close = doc.rfind( " -->" );
+        doc.insert( close == std::string::npos ? doc.size() : close, " weak=\"1\"" );
+    }
+    doc += h.hdrXml;
+    doc += sectionsXml;
+    doc += "</ctx>";
+    const std::string est   = howEstAttr( doc.size(), cdataBytes );
+    const std::size_t close = doc.find( '>' );
+    doc.insert( close, est );
+    return doc;
+}
+
+// ── the answer ────────────────────────────────────────────────────────────────────────────────────────────────────────
+struct HowInputs
+{
+    const IngestResult&       ing;
+    const Graph&              g;
+    std::string_view          task;
+    const std::vector<float>& rank;      // the --for lens's default ranking, final (every lift applied)
+    std::string_view          rootArg;   // single-root runs: p= is relative to it
+    RedactCounts*             redact;    // REQUIRED (no default): signatures and body lines are emitted source text
+    const HowHead&            head;      // the canonical answer around the sections — what the ceiling measures
+};
+
+struct HowSections
+{
+    std::string xml;             // `<path …>` through `</names>` — identical on all four surfaces
+    std::size_t cdataBytes = 0;  // the body-line bytes inside it (priced at the body rate)
+    std::size_t seedCount  = 0;
+    bool        isOverCeiling = false;
+};
+
+
 struct HowModel
 {
     HowPath              path;
@@ -1361,6 +1630,9 @@ struct HowModel
     std::size_t          past       = 0;
     std::size_t          seedCount  = 0;
     bool                 isOverCeiling = false;
+    std::size_t          cutNames    = 0;   // what the ceiling took, by kind — disclosed on <path> as cut_names= …
+    std::size_t          cutCallees  = 0;
+    std::size_t          cutLines    = 0;
 };
 
 class HowRenderer
@@ -1416,6 +1688,12 @@ public:
                 next += sel( p.waiting[i] );
             }
             x += " capped=\"1\" next=\"" + esc( next ) + "\"";
+        }
+        const struct { const char* attr; std::size_t n; } kCuts[] = { { " cut_names=\"", m.cutNames }, { " cut_callees=\"", m.cutCallees },
+                                                                      { " cut_lines=\"", m.cutLines } };
+        for( const auto& [ attr, n ] : kCuts )
+        {
+            x += n > 0 ? attr + std::to_string( n ) + "\"" : std::string();
         }
         if( m.isOverCeiling )
         {
@@ -1558,6 +1836,7 @@ inline bool trimHowStep( HowModel& m )
     if( m.namesShown > 0 )
     {
         --m.namesShown;
+        ++m.cutNames;
         return true;
     }
     for( std::size_t i = m.path.hops.size(); i-- > 0; )
@@ -1566,6 +1845,7 @@ inline bool trimHowStep( HowModel& m )
         if( h.depth > 0 && h.shownRows > 0 )
         {
             --h.shownRows;
+            ++m.cutCallees;
             return true;
         }
     }
@@ -1583,6 +1863,7 @@ inline bool trimHowStep( HowModel& m )
         if( worst != nullptr )
         {
             worst->isKept = false;
+            ++m.cutLines;
             return true;
         }
     }
@@ -1664,11 +1945,18 @@ inline HowSections howSections( const HowInputs& in )
     HowRenderer r( ing, in.rootArg, in.task );
     HowSections out;
     out.xml = r.render( m, &out.cdataBytes );
-    while( out.xml.size() > kHowCeilingBytes && trimHowStep( m ) )
+    // THE CEILING, on the whole first answer (the CLI default document around these sections): names, then deeper hops'
+    // callee rows, then body lines in reverse priority — never <path> or a seed's row — and over_ceiling="1" iff the
+    // answer is still over. Every cut is counted on <path> (cut_*=) and in its element's own shown=/lines_shown=.
+    // RIPWIRE_HOW_UNCAPPED=1 is the reported F2-uncapped arm: the same answer with the ceiling off, nothing else moved.
+    const char* const uncapped   = std::getenv( "RIPWIRE_HOW_UNCAPPED" );
+    const bool        isUncapped = uncapped != nullptr && uncapped[0] == '1' && uncapped[1] == '\0';
+    const auto answerBytes = [ & ] { return howCompactDocument( in.head, out.xml, out.cdataBytes ).size(); };
+    while( !isUncapped && answerBytes() > kHowCeilingBytes && trimHowStep( m ) )
     {
         out.xml = r.render( m, &out.cdataBytes );
     }
-    if( out.xml.size() > kHowCeilingBytes )
+    if( !isUncapped && answerBytes() > kHowCeilingBytes )
     {
         m.isOverCeiling = true;
         out.xml = r.render( m, &out.cdataBytes );
@@ -1681,48 +1969,12 @@ inline HowSections howSections( const HowInputs& in )
 }
 
 // ── the document around the sections ──────────────────────────────────────────────────────────────────────────────────
-// The F2 clauses every dialect carries, in one order (the session dictionary holds each one verbatim).
-inline std::string howLegendClauses()
-{
-    std::string s;
-    s.reserve( 1600 );
-    s += kHowShapeLegend;
-    s += kHowPathLegend;
-    s += kHowHopLegend;
-    s += kHowBodyLegend;
-    s += kHowNamesLegend;
-    s += kHowEstLegend;
-    return s;
-}
 
 inline std::string howRootAttrs()
 {
     return " shape=\"how\" lens=\"" + std::string( kHowLensValue ) + "\"";
 }
 
-// est_tokens= for a finished how document: markup at the map rate, body lines at the body rate; the attribute's own
-// digits are part of what it prices (the --for fixpoint, verbs_for.h finishForLensHeaderPriced).
-inline std::string howEstAttr( std::size_t docBytesWithoutAttr, std::size_t cdataBytes )
-{
-    const auto price = [ & ]( std::size_t attrBytes )
-    {
-        const std::size_t markup = docBytesWithoutAttr + attrBytes - cdataBytes;
-        return tokensForEmittedBytes( markup, kBytesPerTokenDefault ) + tokensForEmittedBytes( cdataBytes, kBytesPerTokenBody );
-    };
-    std::size_t est  = price( 0 );
-    std::string attr = " est_tokens=\"" + std::to_string( est ) + "\"";
-    for( int pass = 0; pass < 4; ++pass )
-    {
-        const std::size_t next = price( attr.size() );
-        if( next == est )
-        {
-            break;
-        }
-        est  = next;
-        attr = " est_tokens=\"" + std::to_string( est ) + "\"";
-    }
-    return attr;
-}
 
 // Insert `attrs` before the '>' that closes the first start tag of `doc`.
 inline void spliceRootAttrs( std::string& doc, std::string_view attrs )

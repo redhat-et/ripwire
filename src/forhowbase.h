@@ -18,7 +18,7 @@ namespace rw
 // What the shape is and what it leaves out. lens= takes the MCP dialect's meaning (mcpverbs.h kMcpForLensColumnsLegend):
 // a named column is NOT CARRIED, never measured-and-zero.
 inline constexpr std::string_view kHowShapeLegend =
-    "; shape=how: a how it works answer, a call path from the entry points the task names, not a ranked list;"
+    "; shape=how: a how it works answer, a call path from entry points picked by the task's names and words, not a ranked list;"
     " lens=: the per-row columns and sections this shape does not carry (not measured here, never zero);"
     " the same for task with the signatures-only flag serves them";
 
@@ -26,7 +26,9 @@ inline constexpr std::string_view kHowPathLegend =
     "; path seeds= hops=: up to 3 seeds (a named identifier first, then definitions whose names carry the task's words,"
     " alternating with the ranked window) and the resolved calls walked from them, chains a > b > c | b > d"
     " (a later chain starts at its branch point), 9 hops at most, depth 4; capped=1 next=: callees still waiting,"
-    " next= expands them; over_ceiling=1: rows were trimmed to the 8 KB ceiling";
+    " next= expands them; cut_names= cut_callees= cut_lines=: names, deeper hops' callee rows and body lines the 8 KB answer"
+    " ceiling took, in that order (each element's shown=/lines_shown= counts what is left, its next= returns the rest);"
+    " over_ceiling=1: the answer is still over 8 KB after those cuts";
 
 inline constexpr std::string_view kHowHopLegend =
     "; h n= p=file:line: one hop, its signature as text; c n= cl= p=: its distinct resolved callees, task words first"
@@ -47,6 +49,12 @@ inline constexpr std::string_view kHowNamesLegend =
 inline constexpr std::string_view kHowEstLegend = "; est_tokens= prices this answer in tokens";
 
 inline constexpr std::string_view kHowTaskLegend = "; task= the query";
+
+// Two clauses of the --for lens's COMPACT dialect, here so the how answer's compact head (forhow.h) and the lens
+// (verbs_for.h appendCompactForLegend) spell them once.
+inline constexpr std::string_view kForCompactConfidenceClause = "; confidence=/margin_pct= head score drop (low=flat)";
+inline constexpr std::string_view kForCompactHdrClause =
+    "; hdr p= of=: the named file's one same-dir same-stem decl/impl partner, listed first (a lookup)";
 
 // The opener of the how legend inside a --pack-task / explore answer: NOT a "<!-- ripwire " prose opener, so the compact
 // dialect (compactlegend.h) keeps it as the answer's own legend of the sections it adds, and legenddict.h reduces its

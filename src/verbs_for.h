@@ -765,8 +765,7 @@ inline constexpr std::string_view kForCompactLegendLayer =
 // ONE spelling for both dialects (graphlegend.h kForRouteCodeLegend): the compact dialect and the default one
 // say the same thing about route=, so they cannot drift into two readings of one code.
 inline constexpr std::string_view kForCompactLegendRoute = rw::kForRouteCodeLegend;
-inline constexpr std::string_view kForCompactLegendConfidence =
-    "; confidence=/margin_pct= head score drop (low=flat)";
+inline constexpr std::string_view kForCompactLegendConfidence = rw::kForCompactConfidenceClause;
 inline constexpr std::string_view kForCompactLegendHops =
     "; h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved";
 inline constexpr std::string_view kForCompactLegendBodies =
@@ -775,45 +774,10 @@ inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), r= rank (gap = trimmed)";
 // R2-AF (round 2, S4): the COMPACT dialect's `<hdr p= of=/>` clause — verbatim, round-2 amendment §R7.
 // 96 B, present-only like every clause in this dialect (appendCompactForLegend below).
-inline constexpr std::string_view kForCompactLegendHdr =
-    "; hdr p= of=: the named file's one same-dir same-stem decl/impl partner, listed first (a lookup)";
+inline constexpr std::string_view kForCompactLegendHdr = rw::kForCompactHdrClause;
 
-// The data notes in their compact spelling: the numbers stay, the sentence goes. Unknown shapes pass
-// through VERBATIM — a note this table does not know is never shortened into something it did not say.
-inline std::string compactForNote( std::string_view note )
-{
-    // " [relevance floor: kept 7 of 40 - the other 33 scored zero…]" → " [floor: kept 7 of 40]"
-    if( note.starts_with( " [relevance floor: kept " ) )
-    {
-        const std::size_t cut = note.find( " - " );
-        return cut == std::string_view::npos ? std::string( note ) : " [floor: kept " + std::string( note.substr( 24, cut - 24 ) ) + "]";
-    }
-    // " [doc mentions: 2 docs discussing 1 top-ranked symbol surfaced; doc_mentions= …]" → " [doc mentions: 2 docs, 1 symbol; doc_mentions=]"
-    if( note.starts_with( " [doc mentions: " ) )
-    {
-        const std::size_t disc = note.find( " discussing " );
-        const std::size_t top  = note.find( " top-ranked symbol" );
-        if( disc != std::string_view::npos && top != std::string_view::npos && top > disc )
-        {
-            return " [doc mentions: " + std::string( note.substr( 16, disc - 16 ) ) + ", " + std::string( note.substr( disc + 12, top - disc - 12 ) )
-                 + " symbol" + ( note.substr( top + 18 ).starts_with( "s" ) ? "s" : "" ) + "; doc_mentions=]";
-        }
-        return std::string( note );
-    }
-    // " [mention anchor: 1 file + 2 symbols named in the task, …; mention_anchored= …]" → " [mention anchor: 1 file + 2 symbols; mention_anchored=]"
-    if( note.starts_with( " [mention anchor: " ) )
-    {
-        const std::size_t cut = note.find( " named in the task" );
-        return cut == std::string_view::npos ? std::string( note ) : std::string( note.substr( 0, cut ) ) + "; mention_anchored=]";
-    }
-    // " [cochange boost: promoted N symbols in M files that historically …]" → " [cochange boost: promoted N symbols in M files]"
-    if( note.starts_with( " [cochange boost: promoted " ) )
-    {
-        const std::size_t cut = note.find( " that " );
-        return cut == std::string_view::npos ? std::string( note ) : std::string( note.substr( 0, cut ) ) + "]";
-    }
-    return std::string( note );
-}
+// The data notes in their compact spelling: rw::compactForNote (src/forhow.h — the how answer's canonical head reads it too).
+using rw::compactForNote;
 
 // Does THIS answer's root carry route=? The reading of a code is present-only in both dialects, so both ask the
 // question the same way: the ladder's rung (c) may have dropped the attribute (withRouteAttr), and a run the
@@ -2193,81 +2157,6 @@ inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::
     return x;
 }
 
-// fix #10 (forhow.h): the CLI --for answer to a how-it-works task — the root (BASE's attributes minus the body posture
-// and budget_bytes=, plus shape= and lens=), ONE legend comment in the run's dialect, BASE's <hdr> rows, the F2 sections.
-// Everything the root carries is defined in that comment (compact or full); est_tokens= prices the whole document.
-struct ForHowCliParts
-{
-    std::string_view   rootOpen;        // ctxRootOpen( task, route, root ): "<ctx task= route= root=>"
-    std::string_view   rootAttrs;       // confidence=/margin_pct=[/coverage=], at=, mention_anchored=/doc_mentions=, the cap attrs
-    std::string_view   taskNote;        // the task, comment-scrubbed (full dialect echo)
-    std::string_view   confidenceNote;  // the full dialect's confidence (and coverage) reading
-    bool               hasCoverage;
-    bool               hasRoute;
-    bool               hasHdr;
-    bool               isCompact;
-    bool               isWeak;
-    bool               hasRoot;
-    bool               hasAt;
-    std::string_view   notes[ 6 ];      // mention, cochange, siblift, expand, doc mentions, floor — data notes, numbers kept
-    std::string_view   capNote;
-    std::string_view   hdrXml;
-};
-
-inline std::string forHowCliDocument( const ForHowCliParts& p, const rw::forhow::HowSections& sec )
-{
-    using namespace rw;
-    std::string doc( p.rootOpen );
-    forhow::spliceRootAttrs( doc, std::string( p.rootAttrs ) + ( p.isCompact ? " schema=\"ripwire.for/v1\"" : "" ) + forhow::howRootAttrs() );
-    if( p.isCompact )
-    {
-        doc += "<!-- ripwire for schema=ripwire.for/v1 shape=how: ";
-        doc += kHowTaskLegend.substr( 2 );
-        if( p.hasRoute )
-        {
-            doc += kForCompactLegendRoute;
-        }
-        doc += kForCompactLegendConfidence;
-        if( p.hasCoverage )
-        {
-            doc += kForCompactCoverageClause;
-        }
-    }
-    else
-    {
-        doc += "<!-- ripwire lens for \"";
-        doc += p.taskNote;
-        doc += "\"";
-        doc += p.confidenceNote;
-        doc += kHowTaskLegend;
-        if( p.hasRoute )
-        {
-            doc += kForRouteCodeLegend;
-        }
-    }
-    doc += forhow::howLegendClauses();
-    if( p.hasHdr )
-    {
-        doc += p.isCompact ? kForCompactLegendHdr : std::string_view( kForHdrLegend );
-    }
-    for( const std::string_view n : p.notes )
-    {
-        doc += p.isCompact ? compactForNote( n ) : std::string( n );
-    }
-    doc += p.capNote;
-    doc += " -->";
-    doc += forRootRelPathsLegendShort( p.hasRoot, p.hasAt );
-    if( p.isWeak )
-    {
-        spliceBefore( doc, " -->", /*fromEnd=*/true, " weak=\"1\"" );
-    }
-    doc += p.hdrXml;
-    doc += sec.xml;
-    doc += "</ctx>";
-    forhow::spliceRootAttrs( doc, forhow::howEstAttr( doc.size(), sec.cdataBytes ) );
-    return doc;
-}
-
 std::optional<int> runForLens( const MainDispatch& d )
 {
     using namespace rw;
@@ -2605,14 +2494,13 @@ std::optional<int> runForLens( const MainDispatch& d )
         // ranked bundle. Everything above (the ranking, confidence=, the hdr rows) is BASE's own computation, read as is.
         if( cfg.howArgsDefault && flSingleRoot && rw::forhow::howTextFires( cfg.forTask ) )
         {
-            const rw::forhow::HowSections sec = rw::forhow::howSections( { ing, g, cfg.forTask, lensRank, flRootArg, redactPtr } );
-            const std::string             rootAttrs = forConf.attrs + forAtAttrStr + mentionDocAttrsStr + lr.capAttrs;
-            const ForHowCliParts          parts{ rootOpenStr, rootAttrs, taskNote, forConf.note, forCoverageOn,
-                                                 rootOpenStr.find( " route=\"" ) != std::string::npos, !forHdrRows.empty(),
-                                                 cfg.legend == "compact", forWeak, !flRootArg.empty(), !forAtAttrStr.empty(),
-                                                 { mentionNote, boostNote, sibliftNote, expandNote, docMentionNote, floorNote },
-                                                 lr.capNote, forHdrXml };
-            const std::string doc = forHowCliDocument( parts, sec );
+            const rw::forhow::HowHead     head = rw::forhow::howHeadFor( ing, lensRank, lr.evidence,
+                { cfg.forTask, routeNoteRaw, lr.routeTag, flRootArg, forAtStamp, mentionNote, boostNote, docMentionNote, lr.capAttrs, forWeak } );
+            const rw::forhow::HowSections sec  = rw::forhow::howSections( { ing, g, cfg.forTask, lensRank, flRootArg, redactPtr, head } );
+            const std::string             doc  = cfg.legend == "compact"
+                ? rw::forhow::howCompactDocument( head, sec.xml, sec.cdataBytes )
+                : rw::forhow::howFullDocument( head, taskNote, mentionNote + boostNote + sibliftNote + expandNote + docMentionNote + floorNote,
+                                               lr.capNote, sec.xml, sec.cdataBytes );
             std::fwrite( doc.data(), 1, doc.size(), stdout );
             reportRedactions( stderr, redactCounts );
             return 0;
@@ -3923,8 +3811,12 @@ std::optional<int> runPackTask( const MainDispatch& d )
     // byte-identical to the --for answer's; notes and tests follow unchanged.
     if( cfg.howArgsDefault && !in.rootArg.empty() && rw::forhow::howTextFires( task ) )
     {
-        const LensRanking               forLr = computeLensRanking( d, task, forCompactPosture( cfg ), /*fullDistribution=*/true );
-        const rw::forhow::HowSections   sec   = rw::forhow::howSections( { ing, g, task, forLr.rank, in.rootArg, d.redactPtr } );
+        const LensRanking             forLr = computeLensRanking( d, task, forCompactPosture( cfg ), /*fullDistribution=*/true );
+        const std::string             at    = gitstamp::stampAt( d.root );
+        const rw::forhow::HowHead     head  = rw::forhow::howHeadFor( ing, forLr.rank, forLr.evidence,
+            { task, forLr.routeNote, forLr.routeTag, in.rootArg, at, forLr.mentionNote, forLr.boostNote, forLr.docMentionNote, forLr.capAttrs,
+              forLr.maxLexicalScore < kWeakLexicalScoreThreshold } );
+        const rw::forhow::HowSections sec   = rw::forhow::howSections( { ing, g, task, forLr.rank, in.rootArg, d.redactPtr, head } );
         bundle = rw::forhow::howIntoPackTask( bundle, sec, cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : std::size_t( kPackTaskDefaultTokens ) );
     }
     if( cfg.withGraph && bundle.size() >= 6 && bundle.compare( bundle.size() - 6, 6, "</ctx>" ) == 0 )

@@ -30,7 +30,9 @@ default arguments on one root — CLI `--for` and `--pack-task` (beside `--legen
 - `<h n= p=>` per hop: its signature, its distinct resolved callees `<c n= cl= p=>` (8 for a seed, 4 deeper; `cl=` up
   to 3 call-site lines; `amb=K` for a call split over K definitions, never followed) and, on a seed, 2 callers
   `<us><u n= p= cl=>` (a type member's: the type's instantiation sites). Every cut is `shown= total= capped="1"` with
-  `next="--callees=…"` / `next="--callers=…"`.
+  `next="--callees=… --metrics"` / `next="--callers=… --metrics"` (`--metrics` reads the value-use index this answer reads;
+  `--limit=N` rides along when the list is longer than one page). Callees and callers are name-resolved call edges, the
+  same edges `--callers`/`--callees` list — not proof of a runtime call; `cl=` lists the hop's call sites of that NAME.
 - `<b n= p= lines_shown= sel= lines_total= next=>`: the first 3 hops' selected body lines — first line, calls,
   guards, field writes, exits — numbered, at most 1 KB a body and 2 KB in all, kept by priority and re-emitted in source
   order; `next=` is the whole body.
@@ -41,11 +43,18 @@ The four sections are byte-identical on all four surfaces, read off `--for`'s ow
 the root keeps its attributes except the body posture and `budget_bytes=`, and gains `shape="how"` and `lens=`, which
 names what the shape does not carry (the per-row `cx ccx in churn amp tested clone` columns, the lego/compose stubs, the
 file tail and `<hops>`; `--for=TASK --signatures-only` serves them). On `--pack-task`/`explore` the sections take the
-place of the ranking, bodies and callers; notes and tests follow unchanged. The clauses that define the new attributes
-join the session legend dictionary (`dictv=` moves; MCP `legend:"ref"` sends them once per session). A section set over
-8 KB trims names, then deeper callee rows, then body lines, never `<path>` or a seed, and then says `over_ceiling="1"`.
-Every other input — another opener, any shaping flag, a format, a budget, a page, a second root — is byte-identical to
-before. Gate: `test/forhowcheck.sh`.
+place of the ranking, bodies and callers and the root gains the same two attributes (its `dropped_positive=`, a count of
+the ranking it no longer carries, goes, and `est_tokens=` is re-priced); notes and tests follow, assembled as before —
+on `--pack-task` from the value-use index `--for` reads, so the sections match `--for`'s byte for byte. The clauses that
+define the new attributes join the session legend dictionary (`dictv=` moves; MCP `legend:"ref"` sends them once per
+session). The whole first answer — the CLI default `--for` document — is held to 8,192 B: names go first, then deeper
+hops' callee rows, then body lines in reverse priority, never `<path>` or a seed's row; each cut is counted on `<path>`
+(`cut_names=` `cut_callees=` `cut_lines=`) and in the element's own `shown=`/`lines_shown=`, whose `next=` returns it, and
+`over_ceiling="1"` says the answer is still over after the cuts. Every surface trims against that same document, so the
+sections stay identical; `RIPWIRE_HOW_UNCAPPED=1` turns the ceiling off (a measurement arm). Seeds are picked from names
+and words, not proven entry points: a mechanism reached through a dispatch table, a callback or a hook has no call edge
+to follow. Every other input — another opener, any shaping flag, a format, a budget, a page, a second root, MCP `paths`
+— is byte-identical to before. Gate: `test/forhowcheck.sh`.
 
 ### Added — a memory guard on every root: zero-config, silent on normal runs, a disclosed partial answer past its line (#350, layer 3)
 
