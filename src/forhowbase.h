@@ -32,7 +32,7 @@ inline constexpr std::string_view kHowHopLegend =
     "; h n= p=file:line: one hop, its signature as text; c n= cl= p=: its distinct resolved callees, task words first"
     " (8 for a seed, 4 deeper), cl= up to 3 call-site lines, p= only for a callee with no h row; amb=K: K definitions"
     " share the call, not followed; us u n= p= cl=: a seed's callers (a member's: its type's instantiation sites);"
-    " shown= total= capped=1 next=: the whole list";
+    " shown= total= capped=1 next=: the whole list, read (with the metrics flag) from the same value-use index as this answer";
 
 inline constexpr std::string_view kHowBodyLegend =
     "; b n= p= lines_shown= sel= lines_total= next=: the first 3 hops' selected lines, N: text (first line, calls,"

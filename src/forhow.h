@@ -102,6 +102,12 @@ inline constexpr std::size_t kHowBodyBytesAll     = 2048;   // B
 inline constexpr std::size_t kHowNameRows         = 8;      // N
 inline constexpr std::size_t kHowCeilingBytes     = 8192;   // ceiling on the sections (§0 "Ceiling")
 
+// The how answer reads the --for lens's index, the one that captures value uses (cli.h needsValueUses), and a plain
+// --callers/--callees reads the lean one, which can resolve fewer calls (measured: 10 callers where the lens index has
+// 13). --metrics selects the value-use index and leaves a --callers/--callees answer byte-identical otherwise, so the
+// follow-up lists exactly the rows this answer counted.
+inline constexpr std::string_view kHowValueUseIndexFlag = " --metrics";
+
 // ── the question: identifiers, terms, variants (prereg S1-S3) ────────────────────────────────────────────────────────
 inline constexpr std::string_view kHowExtraStopwords[] = {
     "explain", "walk", "through", "happen", "happens", "happened", "get", "gets", "got", "make", "makes", "made", "work",
@@ -1450,7 +1456,7 @@ public:
                + "\" total=\"" + std::to_string( h.rows.size() ) + "\"";
             if( h.shownRows < h.rows.size() )
             {
-                x += " capped=\"1\" next=\"" + esc( "--callees=" + sel( h.id ) + pageAllRows( h.calleesBySelector ) ) + "\"";
+                x += " capped=\"1\" next=\"" + esc( "--callees=" + sel( h.id ) + std::string( kHowValueUseIndexFlag ) + pageAllRows( h.calleesBySelector ) ) + "\"";
             }
             x += ">" + esc( h.sig );
             for( std::size_t k = 0; k < h.shownRows; ++k )
@@ -1478,7 +1484,7 @@ public:
                 if( shown < h.callers.size() )
                 {
                     const NodeId of = h.container != kNoNode ? h.container : h.id;
-                    x += " capped=\"1\" next=\"" + esc( "--callers=" + sel( of ) + pageAllRows( h.callersBySelector ) ) + "\"";
+                    x += " capped=\"1\" next=\"" + esc( "--callers=" + sel( of ) + std::string( kHowValueUseIndexFlag ) + pageAllRows( h.callersBySelector ) ) + "\"";
                 }
                 x += ">";
                 for( std::size_t k = 0; k < shown; ++k )
