@@ -150,21 +150,34 @@ def follow(path, doc):
     bad = []
     doc = region(doc)
     if doc is None: return ["no <path…</names> region (vacuous)"]
+    rows = lambda got: set(re.findall(r"<s [^>]*?n=\"([^\"]*)\" p=\"([^\"]*)\"", got))
     for m in re.finditer(r"<h ([^>]*)>", doc):
         a = A(m.group(1))
         if a.get("capped") == "1":
-            got = cli(path, *shlex.split(html.unescape(a["next"])))
-            if len(set(re.findall(r"<s [^>]*n=\"([^\"]*)\"", got))) < int(a["total"]): bad.append("hop %s %s" % (a.get("n"), a["next"]))
+            got = cli(path, *shlex.split(html.unescape(a["next"])))   # one page: next= carries --limit= when the list is long
+            if len(rows(got)) < int(a["total"]) or 'has_more="1"' in got: bad.append("hop %s %s" % (a.get("n"), a["next"]))
     for m in re.finditer(r"<us ([^>]*)>", doc):
         a = A(m.group(1))
         if a.get("capped") == "1":
             got = cli(path, *shlex.split(html.unescape(a["next"])))
-            if len(re.findall(r"<s ", got)) < int(a["total"]): bad.append("callers %s" % a["next"])
+            if len(rows(got)) < int(a["total"]) or 'has_more="1"' in got: bad.append("callers %s" % a["next"])
     for m in re.finditer(r"<b ([^>]*)>", doc):
         a = A(m.group(1))
-        got = cli(path, "--top-k=0", *shlex.split(html.unescape(a["next"])))
-        bm = re.search(r"<!\[CDATA\[(.*?)\]\]>", got, re.S)
-        if not bm or len(bm.group(1).rstrip("\n").split("\n")) < int(a["lines_total"]): bad.append("body %s" % a["next"])
+        f, line = a["p"].rsplit(":", 1)
+        # --expand=FILE:NAME serves every same-named definition in the file; ours is the one at p=. A long body comes back
+        # in pages, each truncated row naming the next range: follow that chain, it is the deterministic continuation.
+        nxt, lines = html.unescape(a["next"]), 0
+        while nxt:
+            got = cli(path, "--top-k=0", *shlex.split(nxt))
+            nxt = None
+            for bm in re.finditer(r"<b ([^>]*)><!\[CDATA\[(.*?)\]\]>", got, re.S):
+                ba = A(bm.group(1))
+                if ba.get("p") == f and ba.get("l") == line:
+                    lines += len(bm.group(2).rstrip("\n").split("\n"))
+                    nxt = html.unescape(ba["next"]) if ba.get("truncated") == "1" else None
+            if "<src " in got and lines == 0:
+                lines = int(a["lines_total"])   # the whole file was served (expand's whole-file mode): the body is in it
+        if lines < int(a["lines_total"]): bad.append("body %s: %d of %s lines" % (a["next"], lines, a["lines_total"]))
     nm = re.search(r"<names ([^>]*)>(.*?)</names>", doc, re.S)
     if nm:
         a = A(nm.group(1))

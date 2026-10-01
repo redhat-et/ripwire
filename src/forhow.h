@@ -33,7 +33,8 @@
 #include "lexical.h"            // subtokens
 #include "mention.h"            // ForNamedHeaderRow — the <hdr> rows the --for answers carry first — THE index split (prereg S2 "index-split subtokens")
 #include "model.h"
-#include "nextverb.h"           // nextFlag — the ONE next= quoting
+#include "nextverb.h"           // nextFlag
+#include "pageview.h"           // kCallHierarchyRowCap — the --callers/--callees default page a next= must exceed — the ONE next= quoting
 #include "redact.h"             // redactInPlace — every emitted source line passes the secret scrub
 #include "sarif.h"              // rootPrefixOf / rootRelativeUri — p= relative to the root, as every --for row
 #include "serialize.h"          // escapeXml, cleanSig, appendCdataSafe, relevanceFloorCut, kForLensDefaultTopN, tokensForEmittedBytes
@@ -712,7 +713,36 @@ struct HowHop
     std::size_t               listed    = 0;        // rows shown (the cap, before the ceiling)
     std::size_t               shownRows = 0;        // rows rendered (≤ listed; the ceiling may trim a deeper hop's)
     std::vector<HowCallerRow> callers;              // a seed only: every distinct caller, priority order
+    std::size_t               calleesBySelector = 0;   // what --callees=FILE:NAME lists (every same-named def in the file)
+    std::size_t               callersBySelector = 0;   // what --callers=FILE:NAME lists for the callers' target
 };
+
+// How many distinct rows `--callees=FILE:NAME` (or `--callers=`) lists for `id`'s selector: the union over every definition
+// of that name in that file (the selector resolves to all of them) — the --limit= a next= needs to return them in one page.
+inline std::size_t selectorRowCount( const IngestResult& ing, const Graph& g, NodeId id, bool wantCallers )
+{
+    const Symbol&       s = ing.symbols[id];
+    std::vector<NodeId> rows;
+    const auto*         ro = g.inEdges.rowOffsets();
+    const auto*         ci = g.inEdges.colIndices();
+    for( NodeId d = 0; d < NodeId( ing.symbols.size() ); ++d )
+    {
+        if( ing.symbols[d].fileId != s.fileId || ing.symbols[d].name != s.name )
+        {
+            continue;
+        }
+        if( wantCallers )
+        {
+            rows.insert( rows.end(), ci + ro[d], ci + ro[d + 1] );
+        }
+        else
+        {
+            rows.insert( rows.end(), g.outTargets.begin() + g.outOff[d], g.outTargets.begin() + g.outOff[d + 1] );
+        }
+    }
+    std::sort( rows.begin(), rows.end() );
+    return std::size_t( std::unique( rows.begin(), rows.end() ) - rows.begin() );
+}
 
 inline bool calleeBefore( const HowCalleeRow& a, const HowCalleeRow& b ) noexcept
 {
@@ -795,8 +825,9 @@ inline void buildHopRows( HowContext& cx, HowHop& hop )
         i = j;
     }
     std::sort( hop.rows.begin(), hop.rows.end(), calleeBefore );
-    hop.listed    = std::min( hop.rows.size(), hop.depth == 0 ? kHowSeedCalleeRows : kHowDeepCalleeRows );
-    hop.shownRows = hop.listed;
+    hop.listed            = std::min( hop.rows.size(), hop.depth == 0 ? kHowSeedCalleeRows : kHowDeepCalleeRows );
+    hop.shownRows         = hop.listed;
+    hop.calleesBySelector = selectorRowCount( ing, cx.g, hop.id, /*wantCallers=*/false );
 }
 
 // a seed's callers (a List-A member's: its container's instantiation sites), tier then task words then rank then place
@@ -829,6 +860,7 @@ inline void buildCallerRows( HowContext& cx, HowHop& hop )
         if( ing.symbols[a.id].line != ing.symbols[b.id].line ) { return ing.symbols[a.id].line < ing.symbols[b.id].line; }
         return a.id < b.id;
     } );
+    hop.callersBySelector = selectorRowCount( ing, cx.g, target, /*wantCallers=*/true );
     const std::string_view targetName = ing.symbols[target].name;
     for( std::size_t i = 0; i < keyed.size(); ++i )
     {
@@ -1363,6 +1395,10 @@ public:
 
     std::string render( const HowModel& m, std::size_t* cdataBytesOut )
     {
+        // the --limit= that makes a --callees=/--callers= follow-up return every row in ONE page (their default page is
+        // kCallHierarchyRowCap rows, pageview.h); "" when the default page already holds them all
+        const auto pageAllRows = []( std::size_t rowCount )
+        { return countFieldIfAbove( std::uint32_t( rowCount ), std::uint32_t( kCallHierarchyRowCap ), " --limit=" ); };
         const HowPath& p = m.path;
         std::string    x = "<path seeds=\"" + std::to_string( m.seedCount ) + "\" hops=\"" + std::to_string( p.hops.size() ) + "\"";
         if( !p.waiting.empty() )
@@ -1414,7 +1450,7 @@ public:
                + "\" total=\"" + std::to_string( h.rows.size() ) + "\"";
             if( h.shownRows < h.rows.size() )
             {
-                x += " capped=\"1\" next=\"" + esc( "--callees=" + sel( h.id ) ) + "\"";
+                x += " capped=\"1\" next=\"" + esc( "--callees=" + sel( h.id ) + pageAllRows( h.calleesBySelector ) ) + "\"";
             }
             x += ">" + esc( h.sig );
             for( std::size_t k = 0; k < h.shownRows; ++k )
@@ -1442,7 +1478,7 @@ public:
                 if( shown < h.callers.size() )
                 {
                     const NodeId of = h.container != kNoNode ? h.container : h.id;
-                    x += " capped=\"1\" next=\"" + esc( "--callers=" + sel( of ) ) + "\"";
+                    x += " capped=\"1\" next=\"" + esc( "--callers=" + sel( of ) + pageAllRows( h.callersBySelector ) ) + "\"";
                 }
                 x += ">";
                 for( std::size_t k = 0; k < shown; ++k )
@@ -1739,6 +1775,27 @@ inline std::size_t howElementEnd( std::string_view doc, std::size_t at ) noexcep
     return std::string_view::npos;
 }
 
+// The indexing-cap pairs the root carries (` X_capped="1" X_total="N"`, mention.h CapDisclosure) defined where this answer
+// can read them: the compact dialect keeps X_capped='s generic reading and drops the bundle's prose that spelled X_total=.
+inline std::string howCapClause( std::string_view rootOpen )
+{
+    std::string names;
+    for( std::size_t at = rootOpen.find( "_capped=\"" ); at != std::string_view::npos; at = rootOpen.find( "_capped=\"", at + 1 ) )
+    {
+        std::size_t from = at;
+        while( from > 0 && rootOpen[from - 1] != ' ' )
+        {
+            --from;
+        }
+        const std::string stem( rootOpen.substr( from, at - from ) );
+        if( rootOpen.find( " " + stem + "_total=\"" ) != std::string_view::npos )
+        {
+            names += " " + stem + "_capped= " + stem + "_total=";
+        }
+    }
+    return names.empty() ? std::string() : " [cut:" + names + ": an indexing cap dropped content; _total= the count before the cap]";
+}
+
 // erase ` name="…"` from the first start tag of `doc`
 inline void eraseRootAttr( std::string& doc, std::string_view name )
 {
@@ -1830,6 +1887,7 @@ inline std::string howIntoPackTask( const std::string& bundle, const HowSections
     std::string doc = head;
     doc += kHowPackTaskLegendOpen;
     doc += howLegendClauses();   // every clause verbatim, so the ref posture can take each out once it was sent
+    doc += howCapClause( head.substr( 0, head.find( '>' ) ) );
     doc += " -->";
     doc += sec.xml;
     doc.append( bundle, spanEnd, std::string::npos );

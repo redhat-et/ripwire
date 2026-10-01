@@ -563,7 +563,10 @@ inline bool needsValueUses( const Config& cfg ) noexcept
     return !cfg.usesSym.empty() || cfg.metrics || !cfg.forTask.empty() || !cfg.exemplar.empty()
            || cfg.contextRatio || cfg.nonlocalState || cfg.qualityPanel
            || !cfg.verifyClaim.empty()          // uses()/unused() claims count read/write use-sites
-           || cfg.evalRetrieval || !cfg.evalMined.empty() || !cfg.evalSkills.empty();
+           || cfg.evalRetrieval || !cfg.evalMined.empty() || !cfg.evalSkills.empty()
+           // fix #10: a --pack-task answered in shape="how" reads the --for lens's own index (src/forhow.h), so its
+           // sections are byte-identical to --for's; any other --pack-task keeps the lean ingest
+           || ( cfg.howArgsDefault && !cfg.packTask.empty() && forhow::howTextFires( cfg.packTask ) );
 }
 
 inline bool startsWith( std::string_view s, std::string_view p ) noexcept
