@@ -20,6 +20,7 @@
 #include "filter.h"        // §P4: rankTierSymbolMultipliers — the fixture/present tier down-weight the CLI ranking lenses apply
 #include "redact.h"        // RedactCounts — the per-request redaction tally threaded through the body/doc verbs
 #include "forpage.h"    // L-W: the --for file page, coverage= and the thin rule — shared with the CLI twin
+#include "forhow.h"        // fix #10: the shape="how" answer (for, explore) — and the ONE <hdr> row renderer
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
@@ -370,6 +371,21 @@ inline std::string mcpUnknownFieldRefusal( const std::string& scope, std::string
         }
     }
     return {};
+}
+
+// fix #10 (forhow.h): the MCP half of the how answer's "default arguments" rule — the call names a task, optionally a
+// path and a legend posture, and nothing else (a budget, a page, no_route, sections, a partition or a second root keeps
+// the pre-change answer). Read off the request's own keys, the same reader the unknown-field refusal walks.
+inline bool mcpHowArgsDefault( const std::string& args )
+{
+    for( const std::string& field : mcpdetail::objectKeys( args ) )
+    {
+        if( field != "task" && field != "path" && field != "legend" )
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Capture one FILE*-writing renderer into a string — infra/emit.h's ONE renderToString seam (whose Rendered sink
@@ -1750,10 +1766,12 @@ inline void priceForTaskRoot( std::string& doc, std::size_t budgetTokens )
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
-                                const std::string& sections = std::string() )   // L2 (round-1 lever B1): the CLI --sections=
+                                const std::string& sections = std::string(),   // L2 (round-1 lever B1): the CLI --sections=
                                                         // twin — "" (the default) collapses <lego>/<compose> to a counted
                                                         // stub; "lego", "compose" or "lego,compose" opts back into the
                                                         // pre-stub render (mcp.h validates the closed set before this call)
+                                bool isHowEligible = false )   // fix #10: the call's arguments are task/path only (mcp.h) — a
+                                                               // how-it-works task is then answered in the shape="how" (forhow.h)
 {
     const std::size_t forBudgetBytes = budgetTokens > 0 ? budgetBytesForTokens( budgetTokens )
                                                         : kForPayloadBudgetBytes;
@@ -1950,6 +1968,45 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     {
         mcpForConf.attrs += " coverage=\"" + std::to_string( mcpCoverage ) + "\"";
         mcpForConf.note  += kForCoverageLegend;
+    }
+
+    // fix #10 (forhow.h): a how-it-works task with default arguments and one root — the shape="how" answer, read off this
+    // very ranking (the CLI --for twin's), the sections byte-identical to the CLI's; nothing below runs.
+    if( isHowEligible && mcpRootArg == std::string_view( root ) && forhow::howTextFires( task ) )
+    {
+        const forhow::HowSections sec    = forhow::howSections( { ing, ix.g, task, lensRank, mcpRootArg, redact } );
+        const std::string         atAttr = gitstamp::atAttr( root );
+        std::string               doc    = ctxRootOpen( task, routeNoteOf( rc, shape, noRoute ), mcpRootArg );
+        std::string               attrs  = mcpForConf.attrs + atAttr;
+        if( mentionAnchored > 0 )
+        {
+            attrs += " mention_anchored=\"" + std::to_string( mentionAnchored ) + "\"";
+        }
+        if( docMentions > 0 )
+        {
+            attrs += " doc_mentions=\"" + std::to_string( docMentions ) + "\"";
+        }
+        forhow::spliceRootAttrs( doc, attrs + capAttrs + forhow::howRootAttrs() );
+        const std::vector<rw::ForNamedHeaderRow> hdrRows = rw::forNamedHeaderRows( ing, task );
+        doc += "<!-- ripwire lens for \"" + xmlCommentText( task ) + "\"" + termsCapNote + mentionNote + boostNote + docMentionNote + floorNote;
+        doc += kHowTaskLegend;
+        if( doc.find( " route=\"" ) < doc.find( '>' ) )
+        {
+            doc += kForRouteCodeLegend;
+        }
+        doc += mcpForConf.note;
+        doc += forhow::howLegendClauses();
+        if( !hdrRows.empty() )
+        {
+            doc += kForHdrLegend;
+        }
+        doc += " -->";
+        doc += rw::forRootRelPathsLegendShort( true, !atAttr.empty() );
+        doc += rw::renderNamedHeaderRowsXml( ing, hdrRows, mcpRootArg );
+        doc += sec.xml;
+        doc += "</ctx>";
+        forhow::spliceRootAttrs( doc, forhow::howEstAttr( doc.size(), sec.cdataBytes ) );
+        return doc;
     }
 
     const std::vector<char>  impure    = computeImpure( ing, ix.g );
@@ -2223,30 +2280,11 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
     }
     std::fwrite( headerStr.data(), 1, headerStr.size(), mem );
-    // R2-AF (round 2, S4): first rows inside the root, right after the legend — the CLI twin's exact rule
-    // (verbs_for.h renderForHdrRowsXml), duplicated here rather than shared because main.cpp includes this
-    // file (mcp.h, line 48) before verbs_for.h (line 525) — the render is ~10 lines over the SAME resolver
-    // (rw::forNamedHeaderRows, mention.h), which is the part a divergence would actually cost.
+    // R2-AF (round 2, S4): first rows inside the root, right after the legend — the CLI twin's exact rule, through
+    // the ONE renderer both twins and the how answer share (forhow.h rw::renderNamedHeaderRowsXml).
     if( !mcpForHdrRows.empty() )
     {
-        const std::string mcpHdrRootPrefix = flRootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( flRootArg );
-        const auto         mcpHdrRel        = [ & ]( std::uint32_t f ) -> std::string
-        {
-            return flRootArg.empty() ? std::string( ing.files[f] ) : std::string( rw::sarif::rootRelativeUri( ing.files[f], mcpHdrRootPrefix ) );
-        };
-        std::vector<char> mcpHdrEsc;
-        std::string       mcpHdrXml;
-        for( const rw::ForNamedHeaderRow& row : mcpForHdrRows )
-        {
-            // same local invariant as the CLI twin's renderForHdrRowsXml (verbs_for.h): the resolver
-            // (rw::forNamedHeaderRows, mention.h) is the only producer of these ids.
-            ASSUME( row.partnerFile < ing.files.size() && row.namedFile < ing.files.size() );
-            mcpHdrXml += "<hdr p=\"";
-            mcpHdrXml += rw::escapeXml( mcpHdrRel( row.partnerFile ), mcpHdrEsc );
-            mcpHdrXml += "\" of=\"";
-            mcpHdrXml += rw::escapeXml( mcpHdrRel( row.namedFile ), mcpHdrEsc );
-            mcpHdrXml += "\"/>";
-        }
+        const std::string mcpHdrXml = rw::renderNamedHeaderRowsXml( ing, mcpForHdrRows, flRootArg );
         std::fwrite( mcpHdrXml.data(), 1, mcpHdrXml.size(), mem );
     }
     // §P3 × §P4 (parity with the CLI --for): narrow the lego block to the files the budget-trimmed sigs
@@ -4049,7 +4087,8 @@ inline std::pair<std::string, std::string> qualityBaselineJson( const std::strin
 // value outside 2..16, which is silently clamped OFF rather than erroring an otherwise valid explore call)
 // ⇒ the plain single-bundle form, byte-identical to before.
 inline std::string packTaskText( const std::string& root, const std::string& task, std::size_t budgetTokens,
-                                 RedactCounts* redact = nullptr, std::uint32_t partitionCount = 0, bool noRoute = false )
+                                 RedactCounts* redact = nullptr, std::uint32_t partitionCount = 0, bool noRoute = false,
+                                 bool isHowEligible = false )   // fix #10: arguments task/path only (mcp.h) — see forTaskText
 {
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
@@ -4158,7 +4197,15 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     {
         return packpartition::packTaskPartitionText( ing, g, task, lr, in, partitionCount );
     }
-    return packTaskBundleText( ing, g, task, lr, in );
+    std::string bundle = packTaskBundleText( ing, g, task, lr, in );
+    // fix #10 (forhow.h): the how sections in place of the ranking, bodies and callers, read off THIS ranking — which is the
+    // MCP `for` verb's own (the same primitives, the same order, above) — so they are byte-identical to `for`'s
+    if( isHowEligible && !in.rootArg.empty() && forhow::howTextFires( task ) )
+    {
+        const forhow::HowSections sec = forhow::howSections( { ing, g, task, lr.rank, in.rootArg, redact } );
+        bundle = forhow::howIntoPackTask( bundle, sec, budgetTokens > 0 ? budgetTokens : std::size_t( kPackTaskDefaultTokens ) );
+    }
+    return bundle;
 }
 
 // `from_trace` verb: the MCP twin of --from-trace — maps a pasted stack trace / sanitizer report / compiler

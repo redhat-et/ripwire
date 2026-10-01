@@ -35,6 +35,7 @@
 #include "ensemble.h"              // --ensemble: the family join over structural / lexical / confusion / historical evidence
 #include "qualitypanel.h"          // --quality-panel: THE SINGLE COMMAND — the ensemble's four families plus colocation and state, under a preset
 #include "testmap.h"               // §P11.2/§P11.4: the test<->code map both ways (--affected=SYM seeding)
+#include "forhow.h"                // fix #10: the shape="how" answer to a how-it-works task (--for, --pack-task)
 #include "packtask.h"              // L4: the shared --pack-task / MCP explore/pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"             // --pack-task --partition=N — the fan-out form (core + N slices), same assembler.
                                    //   BEFORE mcp.h so mcpverbs.h's explore verb can reach packTaskPartitionText (same rule packtask.h follows).

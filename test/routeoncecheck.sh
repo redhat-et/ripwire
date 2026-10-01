@@ -68,7 +68,10 @@ grep -oE 'route="(name-exact\(|subtoken\+body)' "$TMP/for.xml" >/dev/null \
 #      the compact bundle rebuilds its header through the same builder with a DIFFERENT enrichment plan
 #      (its own legend, its own root attributes), which is exactly where a second 'routed:' copy could
 #      reappear unobserved. Presence guard first (CONTRIBUTING §2): the query must actually serve compact.
-"$BIN" fix --for="how does resolution work" --no-cache >"$TMP/forc.xml" 2>/dev/null
+# The how-it-works opener now answers in shape="how" (src/forhow.h, test/forhowcheck.sh), which has no <sigs> head for
+# this arm to measure; the task is the SAME bag of words reordered so it no longer opens with the prefix, and BM25
+# reads the bag, not the order — the arm measures the ranking it always measured.
+"$BIN" fix --for="resolution work: how does" --no-cache >"$TMP/forc.xml" 2>/dev/null
 grep -q 'bundle="compact"' "$TMP/forc.xml" \
     && ok "--for conceptual presence: the query serves the COMPACT shape" \
     || no "--for conceptual presence: the query no longer serves bundle=\"compact\" — re-author it, the compact arm observes the wrong shape"
@@ -93,6 +96,18 @@ grep -oE 'route="[^"]*"' "$TMP/pt.xml" | grep -q ']"$' \
     || ok "--pack-task route= ends with the route reason, not a bracket"
 
 # (c) JSON dialect: exactly one "route" key.
+# (a3) the how-it-works shape (src/forhow.h) builds its OWN root and legend: the same single-copy contract there — route=
+#      once, on the root, and no 'routed:' prose copy in any comment. Presence guard first: the original question opens
+#      with a how-it-works prefix, so it must serve shape="how".
+"$BIN" fix --for="how does resolution work" --no-cache >"$TMP/forh.xml" 2>/dev/null
+grep -q '<ctx [^>]*shape="how"' "$TMP/forh.xml" \
+    && ok "--for how presence: the how-it-works question serves shape=\"how\"" \
+    || no "--for how presence: the how-it-works question did not serve shape=\"how\""
+nh="$( grep -o ' route="' "$TMP/forh.xml" | wc -l | tr -d ' ' )"
+[ "$nh" = 1 ] && ! grep -q 'routed:' "$TMP/forh.xml" \
+    && ok "--for how shape: route= once on the root, no 'routed:' comment copy" \
+    || no "--for how shape: route= appears $nh time(s) or a 'routed:' copy rides a comment"
+
 "$BIN" fix --for="buildGraph" --json --no-cache >"$TMP/for.json" 2>/dev/null
 n="$( grep -o '"route"' "$TMP/for.json" | wc -l | tr -d ' ' )"
 if [ "$n" = 1 ]; then ok '--for --json carries one "route" key'; else no "--for --json carries $n \"route\" keys (want 1)"; fi

@@ -96,7 +96,11 @@ for path, chunks in files.items():
     open( os.path.join( work, path ), "w" ).write( "\n".join( chunks ) )
 PYEOF
 
-Q="how does the frobwidget pipeline schedule its quantum stages"
+# The SAME bag of words as the task this gate was registered with ("how does the frobwidget pipeline schedule its
+# quantum stages"), reordered so it does not OPEN with a how-it-works prefix: that opener now answers in shape="how"
+# (src/forhow.h, test/forhowcheck.sh), which has no <sigs> section for these arms to measure. BM25 reads the bag, not
+# the order, so every arm below measures the bundle it always measured (the base binary passes this gate either way).
+Q="the frobwidget pipeline schedule its quantum stages: how does"
 STAGES="One Two Three Four Five Six"
 
 # the <sigs>…</sigs> span, extracted byte-exactly (the forautobodycheck precedent: sed's pattern-space

@@ -2063,9 +2063,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>658 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>659 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **658 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **659 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2415,7 +2415,7 @@ same renderer. One computation has one output shape.
 
 | Item | Requirement |
 | --- | --- |
-| Operating system | macOS (arm64 or x86-64) or Linux (arm64 or x86-64). Native Windows x64 **builds** with both clang-cl and MSVC `cl.exe` — CI builds both on `windows-latest` every full matrix and smoke-tests each binary (`--version`, `ctest`, a real crawl, the two-run byte-identical contract, well-formed XML); the 658-gate suite does not run there, and ASan is compiled but never executed, so treat it as a build, not a validated platform. From 0.6.3 a prebuilt `windows-x64` zip ships as a **preview** ([Windows](#windows)): CI unzips it and compares its output with Linux's byte for byte, but no maintainer runs Windows, so WSL2 remains the fully supported way to run it on a Windows machine. |
+| Operating system | macOS (arm64 or x86-64) or Linux (arm64 or x86-64). Native Windows x64 **builds** with both clang-cl and MSVC `cl.exe` — CI builds both on `windows-latest` every full matrix and smoke-tests each binary (`--version`, `ctest`, a real crawl, the two-run byte-identical contract, well-formed XML); the 659-gate suite does not run there, and ASan is compiled but never executed, so treat it as a build, not a validated platform. From 0.6.3 a prebuilt `windows-x64` zip ships as a **preview** ([Windows](#windows)): CI unzips it and compares its output with Linux's byte for byte, but no maintainer runs Windows, so WSL2 remains the fully supported way to run it on a Windows machine. |
 | Prebuilt Linux floor | RHEL 8 or later (glibc 2.28) |
 | Prebuilt macOS floor | macOS 14 or later, Apple silicon. 0.6.1 is the last release with an Intel macOS binary; on an Intel Mac, pin `RIPWIRE_VERSION=v0.6.1` or build from source. |
 | x86-64 floor | x86-64-v3 (Intel Haswell, 2013, or later), for a prebuilt binary and a source build alike |

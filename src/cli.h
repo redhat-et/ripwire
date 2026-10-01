@@ -19,6 +19,7 @@
 #include "version.h"  // configure-generated kRipwireVersion + short build info (--version)
 #include "infra/emit.h" // rw::emitTo + kEmitterName — --version discloses the emitter that compiled in (emit=)
 #include "infra/os.h"   // rw::os::normalize_path_arg — path-valued arguments take the program's path spelling at intake
+#include "forhowbase.h" // rw::forhow::howCliArgsDefault — the how-it-works answer's "default arguments" half (forhow.h)
 #include "rootguard.h"  // rw::noProjectRootReason — #350 layer 1: a run with no root, from a home/system directory
 
 namespace rw
@@ -493,6 +494,10 @@ struct Config
                                                              // exact written line and touches nothing else.
     bool             notesList       = false;               // --notes (B11/L3): list all field notes grouped by target, dangling
                                                              // targets (no matching indexed symbol/file — legal) flagged. Read-only.
+    bool             howArgsDefault  = false;               // the how-it-works answer's "default arguments" half (forhowbase.h
+                                                             // howCliArgsDefault): one root, one --for=/--pack-task=, and only
+                                                             // --legend=/--cache[=]/--no-cache beside them. Read by runForLens and
+                                                             // runPackTask beside the text trigger; set from argv, never by a flag.
     bool             packTaskFlag    = false;               // --pack-task was given at all (a bare/empty value still routes to the
                                                              // handler and refuses loudly rather than falling through to the map)
     std::string_view packTask;                              // --pack-task="TASK" (B11/L4): the budget-shared task bundle — ONE call
@@ -5496,6 +5501,8 @@ inline Config parseArgs( int argc, char** argv ) noexcept
         c.stable = true;
     }
 
+    // the how-it-works answer's argument rule (forhow.h): a property of the whole argv, so it is read once here
+    c.howArgsDefault = forhow::howCliArgsDefault( argc, argv );
     validateConfig( c );
     return c;
 }

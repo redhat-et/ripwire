@@ -37,6 +37,7 @@
 // `--legend-dict=roster`). Gate: test/legendrefcheck.sh.
 
 #include "compactlegend.h"
+#include "forhowbase.h"         // the how answer's named clauses (fix #10) and its pack-task legend opener
 #include "forpage.h"            // kForCoverageLegend (and, through lexical.h, kForConfidenceNote)
 #include "graphlegend.h"        // the named MCP `for` clauses, kForIdRouteLegend, kForRouteCodeLegend, the root-rel prose
 #include "serialize.h"          // kForFileTailLegend
@@ -89,6 +90,15 @@ inline constexpr std::string_view kForClauseEntries[] =
     kForSigsShrunkNote,
     kForRootRelProse,
     kForAtStampProse,
+    // fix #10: the shape="how" answer's clauses (forhowbase.h) — on its `for` lens legend and on the explore/pack-task
+    // answer's own how legend comment (kHowPackTaskLegendOpen), both reduced below
+    kHowShapeLegend,
+    kHowPathLegend,
+    kHowHopLegend,
+    kHowBodyLegend,
+    kHowNamesLegend,
+    kHowEstLegend,
+    kHowTaskLegend,
 };
 
 inline constexpr std::size_t kCoreCount     = std::size( kCoreEntries );
@@ -661,28 +671,50 @@ inline bool reduceCompactLegend( std::string_view comment, std::string_view view
     return true;
 }
 
-// Any other head comment: a native `for` legend loses every entry the session was already sent (verbatim, longest first,
-// so no match eats a longer one) and the task it echoes; a data comment moves whole.
+// The fixed clauses a legend comment carries that the session was already sent come out of it (verbatim, longest first, so
+// no match eats a longer one); every clause it carries is touched (it is sent now, in either posture).
+inline std::string dropServedClauses( std::string rest, const std::vector<std::size_t>& forOrder, const LegendSession& session, HeadReduction& r )
+{
+    for( const std::size_t id : forOrder )
+    {
+        const std::size_t at = rest.find( entryBody( id ) );
+        if( at == std::string::npos )
+        {
+            continue;
+        }
+        r.touched.push_back( id );
+        if( session.isServed( id ) )
+        {
+            rest.erase( at, entryBody( id ).size() );
+        }
+    }
+    return rest;
+}
+
+// fix #10: the how answer's own legend comment on an explore/pack-task answer (forhowbase.h kHowPackTaskLegendOpen)
+inline bool isHowLegendComment( std::string_view comment ) noexcept
+{
+    return comment.starts_with( kHowPackTaskLegendOpen ) && comment.substr( kHowPackTaskLegendOpen.size() ).starts_with( "; " );
+}
+
+// Any other head comment: a native `for` legend — or the how answer's legend — loses every entry the session was already
+// sent, and the `for` legend the task it echoes; a data comment moves whole. A how legend left with its opener alone
+// defines nothing and goes.
 inline bool reduceOtherComment( std::string_view comment, const RefShape& s, const std::vector<std::size_t>& forOrder,
                                 const LegendSession& session, HeadReduction& r )
 {
     std::string rest( comment );
     if( s.isFor )
     {
-        for( const std::size_t id : forOrder )
+        rest = tidyComment( stripTaskEcho( dropServedClauses( std::move( rest ), forOrder, session, r ), s.rootOpen ) );
+    }
+    else if( isHowLegendComment( comment ) )
+    {
+        rest = tidyComment( dropServedClauses( std::move( rest ), forOrder, session, r ) );
+        if( rest == std::string( kHowPackTaskLegendOpen ) + " -->" )
         {
-            const std::size_t at = rest.find( entryBody( id ) );
-            if( at == std::string::npos )
-            {
-                continue;
-            }
-            r.touched.push_back( id );
-            if( session.isServed( id ) )
-            {
-                rest.erase( at, entryBody( id ).size() );
-            }
+            return true;
         }
-        rest = tidyComment( stripTaskEcho( rest, s.rootOpen ) );
     }
     if( isEmptyComment( rest ) )
     {
@@ -703,7 +735,8 @@ inline std::optional<HeadReduction> reduceHead( std::string_view view, const Ref
     // The native legend's candidates: its fixed clauses, and the readings of the completeness terms it carries
     // (closeRosterGaps put any its own legend lacked into the answer).
     std::vector<std::size_t> forOrder;
-    if( s.isFor )
+    const bool hasHowLegend = std::any_of( s.head.begin(), s.head.end(), [ & ]( const Span& c ) { return view.substr( c.begin ).starts_with( kHowPackTaskLegendOpen ); } );
+    if( s.isFor || hasHowLegend )
     {
         for( std::size_t k = 0; k < kForCount; ++k ) { forOrder.push_back( kForBase + k ); }
         for( const std::uint16_t t : compactPresentTerms( compactDocHead( view, s.root ), view ) ) { forOrder.push_back( kTermBase + t ); }

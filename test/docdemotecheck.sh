@@ -70,7 +70,10 @@ cd "$TMP"
 # ordinary prose that must match NEITHER shape.
 BUGQ=$'**Describe the bug**\nA clear and concise description of what the bug is: the flush drops a pinned page.\n\n**Steps to reproduce**\nSteps to reproduce the behavior:\n1. Go to the page and open it\n2. See the error\n\n**Expected behavior**\nA clear and concise description of what you expected to happen.\n\n**Screenshots**\nIf applicable, add screenshots to help explain your problem.\n\n**Additional context**\nAdd any other context about the problem here, including the version and the platform.'
 TRACEQ=$'Traceback (most recent call last):\n  File "/usr/lib/python3.11/runpy.py", line 198, in _run_module_as_main\n    return _run_code(code, main_globals, None,\n  File "/usr/lib/python3.11/runpy.py", line 88, in _run_code\n    exec(code, run_globals)\nRuntimeError: eviction of a pinned page in the page cache during flush'
-CONCEPTQ='how does the evictor choose a victim page'
+# The how-it-works opener now answers in shape="how" (src/forhow.h, test/forhowcheck.sh), which has no <sigs> head for
+# this arm to measure; the task is the SAME bag of words reordered so it no longer opens with the prefix, and BM25
+# reads the bag, not the order — the arm measures the ranking it always measured.
+CONCEPTQ='the evictor choose a victim page: how does'
 
 # rank of the first row whose path matches $2 in a candidates export $1 (empty when absent)
 rank_of(){ python3 - "$1" "$2" <<'PY'
@@ -99,6 +102,11 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-10-01 (fix #10, the how-it-works answer): docdemotegolden_for.xml 5821 -> 5824 B. CAUSE: CONCEPTQ opened
+# with "how does", which now answers in shape="how" (src/forhow.h) — no <sigs> for (f) to pin. CONCEPTQ is the SAME bag
+# of words reordered ("the evictor choose a victim page: how does"). Verified before re-pinning, with the base binary:
+# old task vs new task, the two documents are byte-identical once the task text and est_tokens= (+1, the 4 B longer
+# echo) are normalised — no ranking, demotion or route byte moved; the base and the lane binaries agree on the new one.
 # RE-PIN 2026-09-13 (merge of lane/sc-legend and lane/for-widen): docdemotegolden_for.xml RE-MEASURED on the
 # MERGED tree at 5,809 B (est_tokens "2328"), from 5,887 on for-widen's tree and 5,425 on sc-legend's. Neither
 # lane's own number is the merged one, so this is measured, not summed. Three identified changes, and the golden

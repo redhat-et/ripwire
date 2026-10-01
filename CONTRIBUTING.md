@@ -544,7 +544,7 @@ contract and well-formedness. The GCC/Clang language extensions this tree uses g
 refuses a new `__builtin_*`, inline asm or `__attribute__` outside that pair, so a Windows break is caught on every
 POSIX leg rather than discovered on Windows.
 
-A green Windows matrix is **not** the same as a validated platform. The 658-gate suite does not run there — it needs
+A green Windows matrix is **not** the same as a validated platform. The 659-gate suite does not run there — it needs
 the harness on #44 — and the ASan flavour is compiled on Windows but never executed.
 
 The **windows-x64 release zip** (a preview from 0.6.3) is built by `.github/workflows/windows-package.yml`, which

@@ -2249,7 +2249,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         }
                         const std::optional<std::string> answer = forTaskText( path, task, redactPtr,
                                                                                 budgetArg.isPresent ? std::size_t( budgetArg.value ) : 0, noRoute, pg,
-                                                                                sections );   // L2: "" (default) = stub; the validated closed set otherwise
+                                                                                sections,   // L2: "" (default) = stub; the validated closed set otherwise
+                                                                                mcpHowArgsDefault( args ) );   // fix #10 (forhow.h)
                         if( !answer )
                         {
                             return errResult( -32603, "internal error: the for answer buffer lost bytes — no answer served" );
@@ -2516,7 +2517,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     static_assert( kMcpRecallTopKMax == 1000,
                                    "the top_k refusal names the band 1..1000 in mcprefusal.h's kMcpValueFields and in the "
                                    "tools/list memory_recall stanza — move all three together" );
-                    resp = textResult( packTaskText( path, task, budgetTokens, redactPtr, partitionCount, noRoute ) );
+                    resp = textResult( packTaskText( path, task, budgetTokens, redactPtr, partitionCount, noRoute, mcpHowArgsDefault( args ) ) );
                 }
                 // L4: `from_trace` — maps a pasted stack-trace/sanitizer/compiler-error TEXT onto indexed symbols
                 // (fromTraceBundleText, tracelocus.h) — the SAME assembler --from-trace's CLI path calls.

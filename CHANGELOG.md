@@ -16,6 +16,37 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Added — `--for` answers a how-it-works task with a call path, not a ranked list (fix #10, pre-registered)
+
+A task that opens "how does", "how do", "how is", "how are", "how can", "explain how", "walk me through" or "what
+happens when" (case and leading quotes ignored; "how many/much/often/long" excluded) asks for a mechanism. Asked with
+default arguments on one root — CLI `--for` and `--pack-task` (beside `--legend=` and `--cache`/`--no-cache` only), MCP
+`for` and `explore` (`task`, `path`, `legend` only) — ripwire now answers it in `shape="how"` (`src/forhow.h`):
+
+- `<path seeds= hops=>`: up to 3 seeds, picked first from identifiers the question names (backticked, qualified, or
+  `snake_case`/`camelCase`), then from definitions whose names carry the question's words, alternating with the `--for`
+  window's own ranked callables; then the resolved calls walked from them, task words first — 9 hops at most, depth 4,
+  printed as chains `a > b > c | b > d`. A walk the cap stops reads `capped="1" next="--expand=…"`.
+- `<h n= p=>` per hop: its signature, its distinct resolved callees `<c n= cl= p=>` (8 for a seed, 4 deeper; `cl=` up
+  to 3 call-site lines; `amb=K` for a call split over K definitions, never followed) and, on a seed, 2 callers
+  `<us><u n= p= cl=>` (a type member's: the type's instantiation sites). Every cut is `shown= total= capped="1"` with
+  `next="--callees=…"` / `next="--callers=…"`.
+- `<b n= p= lines_shown= sel= lines_total= next=>`: the first 3 hops' selected body lines — first line, calls,
+  guards, field writes, exits — numbered, at most 1 KB a body and 2 KB in all, kept by priority and re-emitted in source
+  order; `next=` is the whole body.
+- `<names shown= total= past= next=>`: the rest of the 40-row lens window as `name p:line`, with `next=` the
+  candidates export of every window row and `past=` the positive-score files outside it.
+
+The four sections are byte-identical on all four surfaces, read off `--for`'s own default ranking. On `--for`/`for`
+the root keeps its attributes except the body posture and `budget_bytes=`, and gains `shape="how"` and `lens=`, which
+names what the shape does not carry (the per-row `cx ccx in churn amp tested clone` columns, the lego/compose stubs, the
+file tail and `<hops>`; `--for=TASK --signatures-only` serves them). On `--pack-task`/`explore` the sections take the
+place of the ranking, bodies and callers; notes and tests follow unchanged. The clauses that define the new attributes
+join the session legend dictionary (`dictv=` moves; MCP `legend:"ref"` sends them once per session). A section set over
+8 KB trims names, then deeper callee rows, then body lines, never `<path>` or a seed, and then says `over_ceiling="1"`.
+Every other input — another opener, any shaping flag, a format, a budget, a page, a second root — is byte-identical to
+before. Gate: `test/forhowcheck.sh`.
+
 ### Added — a memory guard on every root: zero-config, silent on normal runs, a disclosed partial answer past its line (#350, layer 3)
 
 ripwire measured none of its own memory, so a large tree (#350: a non-git home directory, 67 GB) could grow it until

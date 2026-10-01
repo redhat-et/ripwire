@@ -2186,32 +2186,86 @@ inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t t
 inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::vector<rw::ForNamedHeaderRow>& rows,
                                         std::string_view rootArg )
 {
-    if( rows.empty() )
-    {
-        return {};
-    }
-    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
-    const auto         rel       = [ & ]( std::uint32_t f ) -> std::string
-    {
-        return rootArg.empty() ? std::string( ing.files[f] ) : std::string( rw::sarif::rootRelativeUri( ing.files[f], rootPrefix ) );
-    };
-    std::vector<char> esc;
-    std::string        x;
-    for( const rw::ForNamedHeaderRow& row : rows )
-    {
-        // local invariant: forNamedHeaderRows only ever returns fileIds it read out of ing.files itself
-        // (mention.h), so an out-of-range id here would mean that resolver's own contract broke, not a
-        // renderer bug — worth trapping right at the point the bad index would otherwise index OOB below.
-        ASSUME( row.partnerFile < ing.files.size() && row.namedFile < ing.files.size() );
-        x += "<hdr p=\"";
-        x += rw::escapeXml( rel( row.partnerFile ), esc );
-        x += "\" of=\"";
-        x += rw::escapeXml( rel( row.namedFile ), esc );
-        x += "\"/>";
-    }
+    // ONE renderer for the rows (forhow.h rw::renderNamedHeaderRowsXml): this lens, its MCP twin and the how answer
+    std::string x = rw::renderNamedHeaderRowsXml( ing, rows, rootArg );
     // runForLens charges x.size() in every budget sum and emits x itself, so "no row" and "no bytes" must agree
-    ENSURES( !x.empty(), "renderForHdrRowsXml: rows resolved but nothing rendered" );
+    ENSURES( rows.empty() == x.empty(), "renderForHdrRowsXml: rows resolved but nothing rendered" );
     return x;
+}
+
+// fix #10 (forhow.h): the CLI --for answer to a how-it-works task — the root (BASE's attributes minus the body posture
+// and budget_bytes=, plus shape= and lens=), ONE legend comment in the run's dialect, BASE's <hdr> rows, the F2 sections.
+// Everything the root carries is defined in that comment (compact or full); est_tokens= prices the whole document.
+struct ForHowCliParts
+{
+    std::string_view   rootOpen;        // ctxRootOpen( task, route, root ): "<ctx task= route= root=>"
+    std::string_view   rootAttrs;       // confidence=/margin_pct=[/coverage=], at=, mention_anchored=/doc_mentions=, the cap attrs
+    std::string_view   taskNote;        // the task, comment-scrubbed (full dialect echo)
+    std::string_view   confidenceNote;  // the full dialect's confidence (and coverage) reading
+    bool               hasCoverage;
+    bool               hasRoute;
+    bool               hasHdr;
+    bool               isCompact;
+    bool               isWeak;
+    bool               hasRoot;
+    bool               hasAt;
+    std::string_view   notes[ 6 ];      // mention, cochange, siblift, expand, doc mentions, floor — data notes, numbers kept
+    std::string_view   capNote;
+    std::string_view   hdrXml;
+};
+
+inline std::string forHowCliDocument( const ForHowCliParts& p, const rw::forhow::HowSections& sec )
+{
+    using namespace rw;
+    std::string doc( p.rootOpen );
+    forhow::spliceRootAttrs( doc, std::string( p.rootAttrs ) + ( p.isCompact ? " schema=\"ripwire.for/v1\"" : "" ) + forhow::howRootAttrs() );
+    if( p.isCompact )
+    {
+        doc += "<!-- ripwire for schema=ripwire.for/v1 shape=how: ";
+        doc += kHowTaskLegend.substr( 2 );
+        if( p.hasRoute )
+        {
+            doc += kForCompactLegendRoute;
+        }
+        doc += kForCompactLegendConfidence;
+        if( p.hasCoverage )
+        {
+            doc += kForCompactCoverageClause;
+        }
+    }
+    else
+    {
+        doc += "<!-- ripwire lens for \"";
+        doc += p.taskNote;
+        doc += "\"";
+        doc += p.confidenceNote;
+        doc += kHowTaskLegend;
+        if( p.hasRoute )
+        {
+            doc += kForRouteCodeLegend;
+        }
+    }
+    doc += forhow::howLegendClauses();
+    if( p.hasHdr )
+    {
+        doc += p.isCompact ? kForCompactLegendHdr : std::string_view( kForHdrLegend );
+    }
+    for( const std::string_view n : p.notes )
+    {
+        doc += p.isCompact ? compactForNote( n ) : std::string( n );
+    }
+    doc += p.capNote;
+    doc += " -->";
+    doc += forRootRelPathsLegendShort( p.hasRoot, p.hasAt );
+    if( p.isWeak )
+    {
+        spliceBefore( doc, " -->", /*fromEnd=*/true, " weak=\"1\"" );
+    }
+    doc += p.hdrXml;
+    doc += sec.xml;
+    doc += "</ctx>";
+    forhow::spliceRootAttrs( doc, forhow::howEstAttr( doc.size(), sec.cdataBytes ) );
+    return doc;
 }
 
 std::optional<int> runForLens( const MainDispatch& d )
@@ -2547,6 +2601,22 @@ std::optional<int> runForLens( const MainDispatch& d )
         // through forLensHeaderText (above) rather than being appended once, because the ceiling ladder below has
         // to PRICE a header without the comment's task echo or without route= and then emit that exact shape.
         const std::string        rootOpenStr = ctxRootOpen( cfg.forTask, routeNoteRaw, flRootArg );
+        // fix #10 (forhow.h): a how-it-works task, default arguments, one root — the shape="how" answer replaces the
+        // ranked bundle. Everything above (the ranking, confidence=, the hdr rows) is BASE's own computation, read as is.
+        if( cfg.howArgsDefault && flSingleRoot && rw::forhow::howTextFires( cfg.forTask ) )
+        {
+            const rw::forhow::HowSections sec = rw::forhow::howSections( { ing, g, cfg.forTask, lensRank, flRootArg, redactPtr } );
+            const std::string             rootAttrs = forConf.attrs + forAtAttrStr + mentionDocAttrsStr + lr.capAttrs;
+            const ForHowCliParts          parts{ rootOpenStr, rootAttrs, taskNote, forConf.note, forCoverageOn,
+                                                 rootOpenStr.find( " route=\"" ) != std::string::npos, !forHdrRows.empty(),
+                                                 cfg.legend == "compact", forWeak, !flRootArg.empty(), !forAtAttrStr.empty(),
+                                                 { mentionNote, boostNote, sibliftNote, expandNote, docMentionNote, floorNote },
+                                                 lr.capNote, forHdrXml };
+            const std::string doc = forHowCliDocument( parts, sec );
+            std::fwrite( doc.data(), 1, doc.size(), stdout );
+            reportRedactions( stderr, redactCounts );
+            return 0;
+        }
         // T3 (pre-registered: docs/EVALS.md §4, T3 round): terminal-by-default — the auto <bodies> mode is on
         // unless the caller took an explicit body posture (--detail=N) or opted out (--signatures-only). The
         // --json and --format=candidates dialects never reach the auto machinery (candidates returned above;
@@ -3848,6 +3918,15 @@ std::optional<int> runPackTask( const MainDispatch& d )
     }
 
     std::string bundle = packTaskBundleText( ing, g, task, lr, in );
+    // fix #10 (forhow.h): a how-it-works task with default arguments and one root — the how sections take the place of
+    // the ranking, bodies and callers, read off --for's OWN default ranking (never this bundle's), so the sections are
+    // byte-identical to the --for answer's; notes and tests follow unchanged.
+    if( cfg.howArgsDefault && !in.rootArg.empty() && rw::forhow::howTextFires( task ) )
+    {
+        const LensRanking               forLr = computeLensRanking( d, task, forCompactPosture( cfg ), /*fullDistribution=*/true );
+        const rw::forhow::HowSections   sec   = rw::forhow::howSections( { ing, g, task, forLr.rank, in.rootArg, d.redactPtr } );
+        bundle = rw::forhow::howIntoPackTask( bundle, sec, cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : std::size_t( kPackTaskDefaultTokens ) );
+    }
     if( cfg.withGraph && bundle.size() >= 6 && bundle.compare( bundle.size() - 6, 6, "</ctx>" ) == 0 )
     {
         std::fwrite( bundle.data(), 1, bundle.size() - 6, stdout );

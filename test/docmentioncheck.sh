@@ -219,7 +219,10 @@ for f in CHANGELOG.md README.md README.zh-CN.md README.ja.md docs/en/guide.md do
     [ -f "$NF/$f" ] || no "fixture NF: $f was not written"
 done
 
-NQ="how are search results ranked for a query"
+# The how-it-works opener now answers in shape="how" (src/forhow.h, test/forhowcheck.sh), which has no <sigs> head for
+# this arm to measure; the task is the SAME bag of words reordered so it no longer opens with the prefix, and BM25
+# reads the bag, not the order — the arm measures the ranking it always measured.
+NQ="search results ranked for a query: how are"
 ncands(){ "$BIN" "$NF" --for="$1" --format=candidates --top-k=60 --no-cache "${@:2}" 2>/dev/null; }
 # rank of the first candidate row whose path matches $2 (an ERE), or 999 when none does
 rankOf(){ printf '%s' "$1" | grep -oE '<cand r="[0-9]+"[^>]* p="[^"]*"' | grep -E " p=\"$2\"" | head -1 | grep -oE 'r="[0-9]+"' | grep -oE '[0-9]+' || echo 999; }
