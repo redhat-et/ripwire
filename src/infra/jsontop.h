@@ -82,4 +82,61 @@ inline std::size_t topLevelValueStart( std::string_view json, std::string_view k
     return std::string_view::npos;
 }
 
+
+// The byte range (begin,end) of the FIRST top-level `"key": { ... }` object VALUE in `json` — package.json's
+// own top level ("scripts", "dependencies", "devDependencies" are SIBLINGS, never nested in one another), so
+// only a depth-1 key is a match; a same-named key inside some other object (e.g. a "scripts" key nested
+// inside an unrelated config blob) is not evidence. A non-object value (or an absent key) yields npos/npos.
+struct ObjSpan
+{
+    std::size_t begin = std::string_view::npos;
+    std::size_t end   = std::string_view::npos;
+};
+
+
+inline ObjSpan topLevelObjectBody( std::string_view json, std::string_view key )
+{
+    std::size_t v = topLevelValueStart( json, key );
+    if( v == std::string_view::npos || json[v] != '{' )
+    {
+        return {};   // scripts/dependencies must be an object; anything else is not this shape
+    }
+    const std::size_t objStart = v + 1;
+    int                d       = 0;
+    for( ; v < json.size(); ++v )
+    {
+        if( json[v] == '"' )
+        {
+            const std::size_t close = rw::jsonStringEnd( json, v );
+            v = ( close == std::string_view::npos ) ? json.size() : close + 1;
+            --v;   // the for-loop's ++v re-lands exactly past the string
+            continue;
+        }
+        if( json[v] == '{' )
+        {
+            ++d;
+        }
+        else if( json[v] == '}' )
+        {
+            --d;
+            if( d == 0 )
+            {
+                return { objStart, v };
+            }
+        }
+    }
+    return {};   // unterminated object: malformed input, no evidence
+}
+
+// train20-cr C8: the string value of package.json's top-level `key` (`"type"`), or "" when absent or not a
+// string — the same "no evidence" reading `stringValue` gives an absent field.
+inline std::string topLevelStringValue( std::string_view json, std::string_view key )
+{
+    std::size_t v = topLevelValueStart( json, key );
+    if( v == std::string_view::npos || json[v] != '"' )
+    {
+        return {};
+    }
+    return readQuoted( json, v );
+}
 }   // namespace rw::jsrunner::detail

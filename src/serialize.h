@@ -4131,14 +4131,8 @@ inline std::string compressBody( std::string_view src )
 // --pack-signatures call-site — which passes none of them — stays byte-identical to its golden/gates.
 // churn is PER-FILE (indexed by fileId); clone/tested/amp are PER-SYMBOL (indexed by symbol id). ccx is
 // already emitted under metrics=true, so the lens = ccx (there) + churn/clone/tested/amp (here).
-// append one `,"key":"escaped-value"` field to a JSON object under construction, IN PLACE — jsonesc::escapeInto
-// appends, so no per-field scratch string is needed (the reused-buffer posture jsonesc documents).
-inline void appendJsonStrField( std::string& out, const char* keyWithComma, std::string_view value )
-{
-    out += keyWithComma;  out += '"';
-    jsonesc::escapeInto( value, out, false, true, false );
-    out += '"';
-}
+// appendJsonStrField — one `,"key":"escaped-value"` field appended IN PLACE — lives in infra/jsonesc.h (rw::), shared
+// with orientmap.h's JSON sections so the escape flags cannot drift between the map's rows and its orient sections.
 
 // P2.4 — the `,"cx":…,"ccx":…[,"in":…]` metrics run of a JSON signature row. "in" is emitted ONLY when a
 // fan-in vector was actually supplied: an absent key means "not measured", never a fabricated 0 (which reads

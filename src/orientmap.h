@@ -242,34 +242,11 @@ inline std::vector<JsonMember> objectMembers( std::string_view body )
 // the object body (between its braces) of the top-level `key`, or "" when the value is not an object
 inline std::string_view topLevelObject( std::string_view json, std::string_view key )
 {
-    std::size_t v = jsrunner::detail::topLevelValueStart( json, key );
-    if( v == std::string_view::npos || json[ v ] != '{' )
-    {
-        return {};
-    }
-    int depth = 0;
-    for( std::size_t p = v; p < json.size(); ++p )
-    {
-        if( json[ p ] == '"' )
-        {
-            const std::size_t close = rw::jsonStringEnd( json, p );
-            p = ( close == std::string_view::npos ) ? json.size() : close;
-            continue;
-        }
-        depth += ( json[ p ] == '{' ) ? 1 : ( json[ p ] == '}' ) ? -1 : 0;
-        if( depth == 0 )
-        {
-            return json.substr( v + 1, p - v - 1 );
-        }
-    }
-    return {};
+    const jsrunner::detail::ObjSpan s = jsrunner::detail::topLevelObjectBody( json, key );   // the runner detector's own scan
+    return s.begin == std::string_view::npos ? std::string_view() : json.substr( s.begin, s.end - s.begin );
 }
 
-inline std::string topLevelString( std::string_view json, std::string_view key )
-{
-    std::size_t v = jsrunner::detail::topLevelValueStart( json, key );
-    return ( v == std::string_view::npos || json[ v ] != '"' ) ? std::string() : jsrunner::detail::readQuoted( json, v );
-}
+// the string value of the top-level `key`, or "" when absent or not a string: jsrunner::detail::topLevelStringValue
 
 // the per-file facts every step reads, computed once
 struct FileFacts
@@ -593,7 +570,7 @@ inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vect
     if( const std::optional<std::string> pj = docparse::detail::readWholeFile( root + "/package.json" ); pj )
     {
         const std::string_view json = *pj;
-        const std::string      binStr = topLevelString( json, "bin" );
+        const std::string      binStr = jsrunner::detail::topLevelStringValue( json, "bin" );
         std::vector<std::string> bins;
         if( !binStr.empty() )
         {
@@ -612,7 +589,7 @@ inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vect
         }
         std::vector<std::string> entryPaths;
         std::vector<std::string> subpaths;
-        const std::string        exportsStr = topLevelString( json, "exports" );
+        const std::string        exportsStr = jsrunner::detail::topLevelStringValue( json, "exports" );
         if( !exportsStr.empty() )
         {
             entryPaths.push_back( exportsStr );
@@ -628,7 +605,7 @@ inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vect
             }
             ( m.key == "." ? entryPaths : subpaths ).push_back( m.value );
         }
-        if( const std::string mainStr = topLevelString( json, "main" ); !mainStr.empty() )
+        if( const std::string mainStr = jsrunner::detail::topLevelStringValue( json, "main" ); !mainStr.empty() )
         {
             entryPaths.push_back( mainStr );
         }
@@ -730,11 +707,7 @@ inline std::string num( std::string_view name, std::size_t v )
 
 inline void jstr( std::string& out, std::string_view key, std::string_view value )
 {
-    out += ",\"";
-    out += key;
-    out += "\":\"";
-    jsonesc::escapeInto( value, out, /*escapeAngleAmp=*/false, /*validateUtf8=*/true, /*replacementAsTextEscape=*/false );
-    out += '"';
+    rw::appendJsonStrField( out, ( ",\"" + std::string( key ) + "\":" ).c_str(), value );   // the map's own JSON field writer
 }
 
 inline void jnum( std::string& out, std::string_view key, std::size_t v )

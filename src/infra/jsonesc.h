@@ -258,6 +258,17 @@ inline void escapeCc( std::string_view s, std::string& out )
 
 }   // namespace jsonesc
 
+// append one `,"key":"escaped-value"` field to a JSON object under construction, IN PLACE — jsonesc::escapeInto
+// appends, so no per-field scratch string is needed (the reused-buffer posture jsonesc documents). ONE definition,
+// here, for serialize.h (the JSON map's per-row fields) and orientmap.h (the orient sections' JSON): the same
+// escape flags (no angle/amp escape, UTF-8 validated, replacement as a byte) on both, so neither can drift.
+inline void appendJsonStrField( std::string& out, const char* keyWithComma, std::string_view value )
+{
+    out += keyWithComma;  out += '"';
+    jsonesc::escapeInto( value, out, false, true, false );
+    out += '"';
+}
+
 // ── jsonStringEnd / isJsonWs — the canonical JSON SCAN primitives ───────────────────────────────
 //
 // W2-M0: the escape-aware "where does this JSON string end" walk had two homes with two different
