@@ -32,8 +32,9 @@
 #       utility_demoted=.
 #   (L) LEGEND (Gate D, G4): every new element's attributes are defined by a `<tag attr= …>` spelling of THAT element in the
 #       compact and full XML legends, the MCP analyze legend, --help=all (the --json keys' legend) and the session dictionary
-#       (and, with ORIENTMAP_BASE_BIN, that spelling is new to the dictionary); in a legend=ref session the ref answers carry
-#       no section definition, end with <about legend="ref"> naming the dictionary's dictv=, and lean only on the dictionary.
+#       (and, with ORIENTMAP_BASE_BIN, that spelling is new to the dictionary); in a legend=ref session the definition reaches
+#       the session at most once (legenddict.h serves an entry lazily, with the first answer that needs it), every ref answer
+#       ends with <about legend="ref"> naming the dictionary's dictv=, and leans only on the dictionary or itself.
 #   (C) COST, explain-or-fail (owner 2026-10-02): the registered numbers are TARGETS — sections <= 4,096 B, <overflow> <=
 #       2,048 B, map growth vs ORIENTMAP_BASE_BIN <= +4,096 B. An excess passes only when test/orientmapfix/cost_explanations.tsv
 #       (or ORIENTMAP_COST_EXPLAIN) states which content and why the answer needs it; it is then reported, never cut. The
@@ -233,7 +234,10 @@ def uncapped(M, label):
         return
     o1, o2 = s1["overflow"], s2["overflow"]
     d1, d2 = M["doc"], doc2
-    check(d1[:o1.start] == d2[:o2.start] and d1[o1.end:] == d2[o2.end:], "(U) %s: every byte outside <overflow> is the capped answer's" % label)
+    def unpriced(t):   # est_tokens= prices the answer AS EMITTED, so it moves with the overflow's bytes; nothing else may
+        return re.sub(r'est_tokens=("?)\d+', r"est_tokens=\1#", t)
+    check(unpriced(d1[:o1.start]) == unpriced(d2[:o2.start]) and unpriced(d1[o1.end:]) == unpriced(d2[o2.end:]),
+          "(U) %s: every byte outside <overflow> is the capped answer's (est_tokens= aside: it prices the answer as emitted)" % label)
     runaway(M, label, doc2, "uncapped answer")
     if o2.a.get("over_ceiling") != "1":
         check(o2.a.get("capped") == "0" and "next" not in o2.a and o2.a.get("shown") == o2.a.get("total"), "(U) %s: uncapped <overflow> cuts nothing" % label)
@@ -394,19 +398,22 @@ def legend_arm(M, refs):
     is_ref = [bool(re.search(r'<about [^>]*legend="ref"', d)) for d in refs]
     check(any(is_ref), "(L) a legend=ref session serves analyze in ref posture (after the first answer)", str(is_ref))
     badr = []
+    carried = 0
     for i, d in enumerate(refs):
         if not is_ref[i]:
             continue
         c = om.legend(d)
-        if any(om.defines(c, t, at) for t, at in elems.items()):
-            badr.append("#%d re-carries a section definition" % (i + 1))
+        if any(om.defines(c, t, at) for t, at in elems.items()):   # served lazily: the first answer that needs it carries it once
+            carried += 1
+            if carried > 1:
+                badr.append("#%d re-carries a section definition the session was already sent" % (i + 1))
         tail = re.search(r'<about ([^>]*)/>\s*</[\w-]+>\s*$', d)
         if not tail or 'legend="ref"' not in tail.group(1) or 'dictv="%s"' % dictv not in tail.group(1):
             badr.append("#%d does not end with <about legend=ref dictv=%s>" % (i + 1, dictv))
         u = [t for t, at in elems.items() if not om.defines(dict_txt + c, t, at)]
         if u:
             badr.append("#%d leans on undefined %s" % (i + 1, u))
-    check(not badr, "(L) ref answers carry no section definition, end with <about legend=ref> naming the dictionary's dictv, and lean only on it", str(badr))
+    check(not badr, "(L) ref answers carry the section definition at most once per session, end with <about legend=ref> naming the dictionary's dictv, and lean only on it", str(badr))
 
 
 if not ONLY_EXTRA:

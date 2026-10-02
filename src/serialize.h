@@ -26,6 +26,7 @@
                           // strip --grep's emitGrepReport uses, reused here so the two verbs cannot diverge
 #include "prconverge.h" // W2-F: RankDisclosure + the pr_iters= / pr_converged= spellings (CLI and MCP share them)
 #include "gitmine.h"    // F3 (H2H-Graft): RecentFile — the map's <recent> rows are the churn-decay miner's own product
+#include "orientmap.h"  // fix #8: the orient sections (<entry_points>, <subsystems>, <overflow>, <demoted>) of the map scope
 
 #include <algorithm>
 #include <numeric>     // std::iota — codeFirstKeep
@@ -1931,6 +1932,11 @@ struct MapAnnotations
     // next= that pages them. Every other map keeps the plain rank-order cut, and a map-scope map whose cut swapped
     // nothing carries neither attribute (byte-identical). Filled by assignment, like the trailing fields above.
     bool codeFirstRows = false;
+
+    // Fix #8 (docs/EVALS.md "A default map that orients"): the orient sections of the SINGLE-ROOT map scope — the plain map
+    // (XML, --json, --max-tokens, --html), MCP analyze on a clean working set, MCP rank_by=pagerank — computed once by the
+    // caller (orientmap.h build) so every surface writes the same bytes. Null on every other map: byte-identical.
+    const orient::Sections* orient = nullptr;
 };
 
 // ── the code-first row pick: data_sections_cut= / next= (docs/EVALS.md "Map data Sections never crowd code out of the
@@ -2010,6 +2016,21 @@ inline constexpr std::string_view kDataSectionsCutLegend =
     "<!-- data_sections_cut=N: N data Sections (doc headings, data and config keys, schema columns) that ranked inside this "
     "top-K were swapped out for the code rows ranked just below it, so a Section is shown only when every code row is. "
     "next= is the graph-query call that pages the Sections past those shown, the N swapped ones first, K rows a page -->";
+
+// Fix #8: the orient sections' legend, charged only to a map that carries them. Every element is spelled with every
+// attribute it can carry (orientmapcheck (L) reads the spelling). No double hyphen inside a comment (G4).
+inline constexpr std::string_view kOrientLegend =
+    "<!-- orient: the whole-repo map's orientation, before the ranked rows; rank vector untouched. <entry_points shown= "
+    "total= capped= next=>: entry points with evidence, core files only: <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry> "
+    "(a manifest bin/script, a main definition, the package entry module); total= counts every one, next= pages the rest. "
+    "<subsystems g=ROOT shown= total= capped= next=>: the core files (source tier, not test/demo/generated, not demoted) "
+    "grouped under g= (the directory holding 2/3 of their rank mass): <grp l=LABEL n=FILES> rows by mass, each with its "
+    "top <m p=PATH> members; l= is dir/ or a file-name prefix, /top/ or /prefix outside g=; p= is relative to g=, "
+    "repo-relative with a leading / outside it. <overflow shown= total= capped= next= over_ceiling=>: every core file "
+    "not named above, breadth-first over the groups (every group's next member before any group's one after), cut at "
+    "2048 B and re-grouped; next= pages the cut names in that order; over_ceiling=1: the runaway guard cut it. "
+    "<demoted utility_demoted=N next=>: N utility sinks (called from many files, calling few) and vendored/compat files "
+    "left the ranked rows and the groups; next= lists them -->";
 
 // F3: the <recent> element — rank_by=churn-decay's file-level answer FIRST, paths + age in days at HEAD's clock +
 // decayed weight — written before the first <f> group so "what changed recently" is answered before the symbol
@@ -2691,6 +2712,11 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         }
         sortutil::radixSortByScoreDescId( order, rank );
     }
+    // Fix #8 O3: the demoted files' rows leave the ranked head (before the code-first pick, which then picks among the rest).
+    if( ann.orient != nullptr && !stubbed )
+    {
+        orient::demoteRows( ing, *ann.orient, order );
+    }
     // The map scope's code-first row pick (MapAnnotations::codeFirstRows): rewrites the kept prefix, returns its disclosure.
     const DataSectionsCut dataSecCut = ( ann.codeFirstRows && !stubbed ) ? codeFirstKeep( ing, order, keep ) : DataSectionsCut{};
 
@@ -2875,6 +2901,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( dataSecCut.cut > 0 )
     {
         legend += kDataSectionsCutLegend;   // charged to the map that carries data_sections_cut=
+    }
+    if( ann.orient != nullptr && ann.orient->isActive )
+    {
+        legend += kOrientLegend;            // fix #8: charged to the map that carries the orient sections
     }
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty
     // for a lexical or HITS ordering, and the prose half only on the map whose iteration stopped short.
@@ -3132,6 +3162,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 w.write( "\" p=\"" );     w.write( escapeXml( r < ing.rootPaths.size() ? ing.rootPaths[r] : std::string(), esc ) );
                 w.write( "\"/>" );
             }
+        }
+        if( ann.orient != nullptr && ann.orient->isActive )
+        {
+            w.write( ann.orient->xml );   // fix #8: the orient sections, before every ranked row (one rendering, every surface)
         }
         writeRecentRows( w, ann, pathRel, esc );   // F3: rank_by=churn-decay's file-level answer, before the symbol map
         // C1-b: under in=DIR the symbol map is a DISCLOSED stub (docs/METHODOLOGY.md §9.3) — the caller asked for DIR's
@@ -8573,6 +8607,11 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         w.write( ",\"data_sections_cut\":" + std::to_string( h.dataSectionsCut.cut ) + ",\"next\":" );   // composed, not a fixed buffer
         writeJsonStr( w, dataSectionsNext( h.dataSectionsCut ), esc );
     }
+    // Fix #8: the orient sections, the XML's elements as keys (attributes one to one, one array per child tag).
+    if( h.ann != nullptr && h.ann->orient != nullptr && h.ann->orient->isActive )
+    {
+        w.write( h.ann->orient->json );
+    }
 
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).
@@ -8657,6 +8696,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     sortutil::radixSortByScoreDescId( order, rank );
 
     const std::size_t keep = std::min<std::size_t>( topK > 0 ? std::size_t( topK ) : S, S );
+    if( ann.orient != nullptr )
+    {
+        orient::demoteRows( ing, *ann.orient, order );   // fix #8 O3: serialize()'s demotion, same rule
+    }
     const DataSectionsCut dataSecCut = ann.codeFirstRows ? codeFirstKeep( ing, order, keep ) : DataSectionsCut{};   // serialize()'s pick, same rule
 
     std::vector<std::vector<NodeId>> buckets( ing.files.size() );

@@ -434,6 +434,15 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
     //    absolute path (85 rows on ripwire's own tree). Same single-root condition every other MCP verb
     //    uses; serialize() emits root= and the shared legend clause from there, so nothing else moves.
     const std::string_view anRootArg = ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+    // Fix #8: a clean single-root working set is the default map's own question, so analyze carries its orient sections
+    // (ix.rank is then the plain rankGraph vector: diffTeleport with no changed file is the uniform prior, mcpindex.h).
+    rw::orient::Sections orientSections;
+    rw::MapAnnotations   ann{ .prDisclosure = ix.prDisclosure, .codeFirstRows = ix.isCleanWorkingSet };
+    if( ix.isCleanWorkingSet && ix.ing.realPaths.empty() )
+    {
+        orientSections = rw::orient::build( ix.ing, ix.rank, ix.g.outOff, ix.g.outTargets );
+        ann.orient     = &orientSections;
+    }
     return captureXml( [ & ]( std::FILE* f )
                        { serialize( f, ix.ing, ix.rank, ix.g.outOff, ix.g.outTargets, topK,
                                     /*mostImportantLast=*/false, /*metrics=*/false, /*fanIn=*/nullptr,
@@ -447,7 +456,7 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
                                     // W2-F: the map's convergence disclosure. The CLI map carries pr_iters= and
                                     // this one must too — "the clause landed at 3 of its 5 echo sites" is the
                                     // §B4 family, and mcpclidiffcheck is the gate that keeps the two surfaces one.
-                                    /*ann=*/rw::MapAnnotations{ .prDisclosure = ix.prDisclosure, .codeFirstRows = ix.isCleanWorkingSet },
+                                    /*ann=*/ann,
                                     /*statsFirstScreen=*/true, anRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls ); } );
 }
 
@@ -504,6 +513,14 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
     }
 
     const std::string_view rbRootArg = ix.ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+    // Fix #8: pagerank is the default map's ranking, so a single-root rank_by=pagerank carries the orient sections too.
+    rw::orient::Sections orientSections;
+    rw::MapAnnotations   ann{ .rankByLabel = rankByLabel, .prDisclosure = disclosure, .codeFirstRows = rankByLabel == nullptr };
+    if( rankByLabel == nullptr && ix.ing.realPaths.empty() )
+    {
+        orientSections = rw::orient::build( ix.ing, rank, ix.g.outOff, ix.g.outTargets );
+        ann.orient     = &orientSections;
+    }
     return captureXml( [ & ]( std::FILE* f )
                        { serialize( f, ix.ing, rank, ix.g.outOff, ix.g.outTargets, topK,
                                     /*mostImportantLast=*/false, /*metrics=*/false, /*fanIn=*/nullptr,
@@ -514,7 +531,7 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
                                     ix.g.bindLabel.empty() ? nullptr : &ix.g.bindLabel,
                                     /*autoOrder=*/false, /*outEstTokens=*/nullptr,
                                     /*extraPayloadTokens=*/0,
-                                    /*ann=*/rw::MapAnnotations{ .rankByLabel = rankByLabel, .prDisclosure = disclosure, .codeFirstRows = rankByLabel == nullptr },   // pagerank: the map scope's code-first pick
+                                    /*ann=*/ann,   // pagerank: the map scope's code-first pick and orient sections
                                     /*statsFirstScreen=*/true, rbRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls ); } );
 }
 

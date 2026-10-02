@@ -2469,7 +2469,8 @@ inline void writeDocumentShell( std::FILE* out, const std::string& pageTitle )
 //   module" rule so the wiki and the text verb agree.
 inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank, const Graph& g, int topK, const HtmlColorExtras& color,
                        std::string_view rootArg = {},   // R-R: the root FILES[] entries are relative to
-                       bool codeFirstRows = false )     // the default map's code-first node pick (serialize.h codeFirstKeep)
+                       bool codeFirstRows = false,      // the default map's code-first node pick (serialize.h codeFirstKeep)
+                       const orient::Sections* orientSections = nullptr )   // fix #8: the map scope's orient sections (serialize.h)
 {
     const std::vector<std::uint32_t>& outOff     = g.outOff;
     const std::vector<NodeId>&        outTargets = g.outTargets;
@@ -2495,6 +2496,10 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         if( rank[a] != rank[b] ) { return rank[a] > rank[b];
 }
         return a < b; } );
+    if( orientSections != nullptr )
+    {
+        orient::demoteRows( ing, *orientSections, order );   // fix #8 O3: the XML/JSON map's demotion, same rule
+    }
     if( codeFirstRows )
     {
         codeFirstKeep( ing, order, cap );   // the same pick the XML/JSON map makes over its kept rows (the page has no disclosure root)
@@ -2843,8 +2848,19 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
     // inline the JS sim + wiki router
     rw::emitTo( out, "{}{}{}{}{}{}", kScriptColour, kScriptSim, kScriptMarks, kScriptDraw, kScriptViews, kScriptRouter );
 
+    rw::emitRaw( out, "</script>\n" );
+    // Fix #8: the orient sections, the XML map's own elements as escaped text in a collapsed panel (one rendering, every surface).
+    if( orientSections != nullptr && orientSections->isActive )
+    {
+        std::string text;
+        text.reserve( orientSections->xml.size() + 64 );
+        for( char c : orientSections->xml )
+        {
+            text += c == '<' ? std::string( "&lt;" ) : c == '>' ? std::string( "&gt;" ) : c == '&' ? std::string( "&amp;" ) : std::string( 1, c );
+        }
+        rw::emitTo( out, "<details id=\"orient\"><summary>Orient: entry points, subsystems, every core file</summary><pre>{}</pre></details>\n", text );
+    }
     rw::emitRaw( out,
-        "</script>\n"
         "</body>\n"
         "</html>\n"
  );

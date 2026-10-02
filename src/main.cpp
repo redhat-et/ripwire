@@ -1868,6 +1868,31 @@ int runDefaultMap( const MainDispatch& d )
     mapAnn.recentMergeBombsSkipped = recentMergeBombsSkipped;   // rides <recent> (the rows' own window), filled by assignment like seed
     mapAnn.notesDegraded = d.notesDegraded;   // L3 follow-up (CodeRabbit 4053600616): onto every <r> this run emits
     mapAnn.codeFirstRows = isDefaultMapScope;   // the code-first row pick + its data_sections_cut= / next= (serialize.h)
+    // Fix #8 (docs/EVALS.md "A default map that orients"): the orient sections, on the SINGLE-ROOT plain map only — no
+    // ordering, dialect, filter or scoping flag (those keep the base bytes; Gate S pins them), the same scope MCP analyze
+    // (clean tree) and rank_by=pagerank serve. Computed once from the default rank vector; every serialization reads it.
+    const bool isOrientScope = isDefaultMapScope && mapSingleRoot && !cfg.metrics && !cfg.columnar && !cfg.mostImportantLast && !cfg.stable
+                            && !cfg.noAutoOrder && cfg.excludes.empty() && cfg.inDir.empty();
+    rw::orient::Sections orientSections;
+    if( isOrientScope )
+    {
+        orientSections = rw::orient::build( ing, rank, g.outOff, g.outTargets );
+        mapAnn.orient  = &orientSections;
+    }
+    if( !cfg.orientPage.empty() )
+    {
+        const bool isKnownKind = std::ranges::find( rw::orient::kPageKinds, cfg.orientPage ) != std::ranges::end( rw::orient::kPageKinds );
+        if( !isOrientScope || !isKnownKind )
+        {
+            rw::emitTo( stderr, "ripwire: --orient={} pages an orient section of the plain single-root map: pass entry, groups, overflow or demoted, "
+                                "with no other verb or map flag (--offset=M --limit=N window it)\n", cfg.orientPage );
+            return 2;
+        }
+        const std::string orientPage = rw::orient::page( ing, rank, orientSections, cfg.orientPage, std::size_t( std::max( 0, cfg.pageOffset ) ),
+                                                         std::size_t( std::max( 0, cfg.pageLimit ) ) );
+        rw::emitRaw( stdout, orientPage.c_str() );
+        return 0;
+    }
     // C1-b (2026-09-12): --in=DIR — the scoped block and the map stub, filled by assignment like seed. The two next= strings
     // outlive every serialize() call below (mapAnn holds views into them). The scoped next= is the SAME run at the next
     // offset, page size carried when the caller set one; the stub's next= is the same run without in= (the map it stubbed).
@@ -2130,7 +2155,7 @@ int runDefaultMap( const MainDispatch& d )
         htmlColor.atStamp  = htmlProv.atStamp;
         htmlColor.rootName = htmlProv.rootName;
         htmlColor.version  = kRipwireVersion;
-        writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg, /*codeFirstRows=*/isDefaultMapScope );   // R-R
+        writeHtml( htmlOut, ing, rank, g, mapTopK, htmlColor, mapRootArg, /*codeFirstRows=*/isDefaultMapScope, mapAnn.orient );   // R-R
         if( htmlOut != stdout )
         {
             std::fclose( htmlOut );
