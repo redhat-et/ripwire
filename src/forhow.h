@@ -531,13 +531,6 @@ inline std::string_view lastScopeSegment( std::string_view scope ) noexcept
     return scope.substr( from );
 }
 
-inline std::string_view fileStem( std::string_view path ) noexcept
-{
-    const std::string_view base = path.substr( path.find_last_of( '/' ) + 1 );   // npos + 1 == 0: the whole path
-    const std::size_t      cut  = base.find_last_of( '.' );
-    return ( cut == std::string_view::npos || cut == 0 ) ? base : base.substr( 0, cut );
-}
-
 // ── seeds (prereg S5-S7) ──────────────────────────────────────────────────────────────────────────────────────────────
 struct HowSeedPick
 {
@@ -618,7 +611,7 @@ inline std::vector<HowSeedPick> buildListA( HowContext& cx, std::vector<HowScore
                 continue;
             }
             all.push_back( id );
-            if( !qual.empty() && ( iequalsAscii( lastScopeSegment( s.scope ), qual ) || iequalsAscii( fileStem( rootRelPath( ing, s.fileId ) ), qual ) ) )
+            if( !qual.empty() && ( iequalsAscii( lastScopeSegment( s.scope ), qual ) || iequalsAscii( rw::mention_detail::pathStem( rootRelPath( ing, s.fileId ) ), qual ) ) )
             {
                 qualified.push_back( id );
             }

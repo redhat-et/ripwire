@@ -4049,6 +4049,43 @@ inline std::pair<std::string, std::string> qualityBaselineJson( const std::strin
 // surfaces. `merge_scout` and `note-add`/`notes` stay CLI-only (write verbs / multi-ref UX; see
 // skills/ripwire-mcp).
 
+// fix #10 (forhow.h): what the pack_task twin (packTaskText, below) of forTaskText's how branch reads — THIS call's ranking and its route.
+struct PackTaskHowInputs
+{
+    const McpIndex&           ix;
+    std::string_view          task;
+    const std::string&        root;
+    std::string_view          rootArg;
+    const LensRanking&        lr;
+    const RouteChoice&        rc;
+    const std::vector<float>& tierMul;
+    bool                      noRoute;
+    bool                      isWeakLexical;   // the raw lexical evidence bar before any lift (the head's weak=)
+    RedactCounts*             redact;
+    std::size_t               budgetTokens;
+};
+
+// The how sections in place of the bundle's ranking, bodies and callers, read off the pack_task ranking — which is the MCP
+// `for` verb's own (the same primitives, the same order) — so they are byte-identical to `for`'s.
+inline std::string packTaskHowBundle( const PackTaskHowInputs& h, const std::string& bundle )
+{
+    const IngestResult& ing = h.ix.ing;
+    // the name-exact route scores whole names, so its subtoken evidence (coverage=) comes from one exhaustive subtoken
+    // pass whose scores are discarded — forTaskText's own second call
+    LexTermEvidence evidence = h.lr.evidence;
+    if( h.rc.which == LexMode::NameExact )
+    {
+        evidence = LexTermEvidence{};
+        lexicalScoresTiered( ing, h.ix.g.outOff, h.ix.g.outTargets, h.task, /*pruneTopK=*/0, nullptr, &h.tierMul, 0, 0, {}, &evidence );
+    }
+    const char* const         routeTag = h.noRoute ? "no-route" : ( h.rc.which == LexMode::NameExact ? "name-exact" : "subtoken+body" );
+    const forhow::HowHead     head     = forhow::howHeadFor( ing, h.lr.rank, evidence,
+        { h.task, h.lr.routeNote, routeTag, h.rootArg, gitstamp::stampAt( h.root ), h.lr.mentionNote, h.lr.boostNote, h.lr.docMentionNote,
+          h.lr.capAttrs, h.isWeakLexical } );
+    const forhow::HowSections sec      = forhow::howSections( { ing, h.ix.g, h.task, h.lr.rank, h.rootArg, h.redact, head } );
+    return forhow::howIntoPackTask( bundle, sec, h.budgetTokens > 0 ? h.budgetTokens : std::size_t( kPackTaskDefaultTokens ) );
+}
+
 // `explore`/`pack_task` verb: the MCP twin of --pack-task — ONE call assembling the routed ranking + full
 // bodies + 1-hop callers + field notes + tests_to_run under ONE deterministic byte budget. Computes the lens
 // ranking with the SAME primitives forTaskText (the `for` verb, above) uses — chooseForRanker / lexicalScores
@@ -4175,25 +4212,10 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     {
         return packpartition::packTaskPartitionText( ing, g, task, lr, in, partitionCount );
     }
-    std::string bundle = packTaskBundleText( ing, g, task, lr, in );
-    // fix #10 (forhow.h): the how sections in place of the ranking, bodies and callers, read off THIS ranking — which is the
-    // MCP `for` verb's own (the same primitives, the same order, above) — so they are byte-identical to `for`'s
+    const std::string bundle = packTaskBundleText( ing, g, task, lr, in );
     if( isHowEligible && !in.rootArg.empty() && forhow::howTextFires( task ) )
     {
-        // the name-exact route scores whole names, so its subtoken evidence (coverage=) comes from one exhaustive subtoken
-        // pass whose scores are discarded — forTaskText's own second call
-        LexTermEvidence evidence = lr.evidence;
-        if( rc.which == LexMode::NameExact )
-        {
-            evidence = LexTermEvidence{};
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &evidence );
-        }
-        const char* const         routeTag = noRoute ? "no-route" : ( rc.which == LexMode::NameExact ? "name-exact" : "subtoken+body" );
-        const forhow::HowHead     head     = forhow::howHeadFor( ing, lr.rank, evidence,
-            { task, lr.routeNote, routeTag, in.rootArg, gitstamp::stampAt( root ), lr.mentionNote, lr.boostNote, lr.docMentionNote, lr.capAttrs,
-              isWeakLexical } );
-        const forhow::HowSections sec = forhow::howSections( { ing, g, task, lr.rank, in.rootArg, redact, head } );
-        bundle = forhow::howIntoPackTask( bundle, sec, budgetTokens > 0 ? budgetTokens : std::size_t( kPackTaskDefaultTokens ) );
+        return packTaskHowBundle( { ix, task, root, in.rootArg, lr, rc, tierMul, noRoute, isWeakLexical, redact, budgetTokens }, bundle );
     }
     return bundle;
 }
