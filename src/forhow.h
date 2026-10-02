@@ -1839,9 +1839,9 @@ inline bool trimHowStep( HowModel& m )
         ++m.cutNames;
         return true;
     }
-    for( std::size_t i = m.path.hops.size(); i-- > 0; )
+    for( std::size_t ic = m.path.hops.size(); ic > 0; --ic )   // cursors, not `i-- > 0`: no unsigned wrap at exit (G1)
     {
-        HowHop& h = m.path.hops[i];
+        HowHop& h = m.path.hops[ic - 1];
         if( h.depth > 0 && h.shownRows > 0 )
         {
             --h.shownRows;
@@ -1849,9 +1849,9 @@ inline bool trimHowStep( HowModel& m )
             return true;
         }
     }
-    for( std::size_t bi = m.bodies.size(); bi-- > 0; )
+    for( std::size_t bc = m.bodies.size(); bc > 0; --bc )
     {
-        HowBody&     b     = m.bodies[bi];
+        HowBody&     b     = m.bodies[bc - 1];
         HowBodyLine* worst = nullptr;
         for( HowBodyLine& l : b.selected )
         {
