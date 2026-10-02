@@ -506,11 +506,15 @@ probeFor()
 # PINNED 2026-10-01 (C/C++ declaration/definition fold): ripwire.edit-check/v1 610 (measured 595). The --edit-check=distance
 # probe used to be REFUSED — geometry.h declares distance and geometry.cpp defines it, and the verb counted the prototype and
 # its definition as two contracts — so the schema had no XML answer to pin. It now answers about the definition.
+# RE-PINNED 2026-10-02 (fix #8, lane/orient-map-067): ripwire.map/v1 910 -> 1520 (measured 1505, the --top-k=3 probe). The
+# map scope now leads with its orient sections, and their ONE compact reading (compactlegend.h kCompactOrientTermO, ~590 B:
+# every new element spelled with every attribute) plus the window: term their shown=/total=/capped= pull in ride every
+# map answer of that scope. No other schema moved. Under legend=ref the reading is served once per session.
 # the pins follow the definitions, measured + 10 rounded up to 10.
 # schema                      pin  measured
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
-ripwire.map/v1                   910   892
+ripwire.map/v1                   1520  1505
 ripwire.map-diff/v1              900   885
 ripwire.pack-signatures/v1       770   759
 ripwire.metrics/v1               1040  1021
