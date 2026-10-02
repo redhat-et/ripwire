@@ -1,0 +1,5 @@
+# orientmapcheck (C): a registered byte TARGET may be exceeded only with a stated reason — which content, and why the answer
+# needs it (owner 2026-10-02: explain or fail; never drop content to hit a target). Columns: root label <TAB> metric
+# (sections|overflow|growth) <TAB> reason. The label is "fixture" or an ORIENTMAP_EXTRA_ROOTS basename.
+fixture	sections	The fixture's file names are ~70 B on purpose, so that the 2,048 B overflow cut binds; the twelve group rows then carry 36 such paths (about 2.3 KB). Every byte is a core file name the rule requires; shorter names would test less.
+fixture	growth	Same cause as the sections row: the long synthetic names, required to bind the overflow cut, are the growth.

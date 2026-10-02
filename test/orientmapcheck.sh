@@ -1,40 +1,48 @@
 #!/usr/bin/env bash
 # orientmapcheck.sh — the default whole-repo map orients: entry points with evidence, a subsystem grouping, every core
 # file named once (inside a 2,048 B overflow, the rest one next= away), utility sinks and vendored code in one counted
-# tail (fix list #8, the registered orient-map v2 arms O / O-narrow; docs/EVALS.md "Orient map").
+# tail (fix list #8, the registered orient-map v2 arms O / O-narrow; docs/EVALS.md "A default map that orients").
 #
 # WRITTEN BEFORE THE CODE IT MEASURES (CLAUDE.md non-negotiable #1): on the pre-change binary every arm that needs the
 # sections is RED, and the arms about what must NOT change are green. The section schema, the label/path conventions
 # and the classifier/oracle live in test/lib/orientmap.py (its docstring is the schema).
 #
 # Arms, on the generated fixture (test/orientmapfix/gen.sh, a committed git tree so MCP analyze sees a clean working set;
-# the oracle must decide every comparison it makes, or the fixture is refused):
-#   (F) THE RULE, exactly: g= is the registered grouping root; <subsystems> lists the first 12 groups in mass order with
-#       n= and the top 3 members; <overflow> holds a PREFIX of the breadth-first list of every core file not yet named,
-#       re-grouped in group order; total=/shown=/capped= are the rule's own counts; <entry_points> carries the manifest
-#       bin, the `main` definition and the "." export (in that evidence order), never the near-miss `main_loop` and never
-#       a bin whose build output has no source twin; every vendored/compat core file is demoted (utility_demoted=).
+# the oracle must decide every comparison it makes and the two designed ties must print equal k=, or the fixture fails):
+#   (F) THE RULE, exactly: g= is the registered grouping root; <subsystems> lists the first 12 groups in mass order (ties by
+#       label) with n= and the top 3 members (ties by path); <overflow> holds a PREFIX of the breadth-first list of every core
+#       file not yet named, re-grouped in group order; total=/shown=/capped= are the rule's own counts; <entry_points> lists
+#       evidence from CORE files only, in evidence order (bin/script, `main`, entry module), within a class by file mass then
+#       path, at most 5 rows; total= counts core evidence only (a bin with no source twin, a bin into tests/, and `main` in a
+#       test, fixture or vendored file are neither listed nor counted); the demoted set is EXACTLY the compat file and the
+#       utility sink (pinned here; the vendored file is not indexed at all).
 #   (D) DISCLOSURE (Gate D): each next= (entry points, subsystems, overflow, utility_demoted) and then next_offset= pages
-#       EXACTLY what its element cut, in rank order, each once, every page <= K rows; no file is named twice across
-#       <subsystems> and <overflow>; every name is a core file; named + paged = every core file.
-#   (U) UNCAPPED (the reported variant, RIPWIRE_ORIENT_UNCAPPED=1): <overflow> is the whole breadth-first list, capped="0",
-#       and every byte outside <overflow> is the capped answer's.
+#       EXACTLY what its element cut, in rank order, each once, every page <= K rows; on the fixture the pages equal the
+#       oracle's (groups 13.. with n=, the overflow's breadth-first tail, the demoted set); no file is named twice across
+#       <subsystems> and <overflow>; every name is a core file; named + paged = every core file; a group's n= is its size.
+#   (U) UNCAPPED (the reported variant, RIPWIRE_ORIENT_UNCAPPED=1): <overflow> is the whole breadth-first list, capped="0"
+#       unless the runaway ceiling fired, and every byte outside <overflow> is the capped answer's.
 #   (P) PARITY (Gate P): the bytes from the first section tag to the end of the last are identical on the CLI map (compact,
-#       --legend=full, --top-k=16, --max-tokens=4000), MCP analyze (clean tree, compact and full) and MCP rank_by
-#       (omitted and pagerank); --json carries the same sections row for row; --html carries every label and name.
-#   (N) NOT APPLIED: --tree, --rank-by=authority|hub|rrf, --for, MCP analyze with an uncommitted edit, MCP rank_by
-#       authority and MCP explore carry no section and no utility_demoted=.
-#   (L) LEGEND (Gate D, G4): every attribute of every new element is defined (name=) in the compact and full XML legends,
-#       the MCP analyze legend and --help=all (the --json keys' legend), each new tag is named there, the session
-#       dictionary (--legend-dict) defines them, and an MCP legend=ref analyze leans only on definitions that session has.
-#   (C) COST (registered, step 1 of the stair): the sections are <= 4,096 B (deciding on ORIENTMAP_EXTRA_ROOTS, the
-#       registered scope; INFO on the fixture, whose long names exist to bind the overflow cap); <overflow> is <= 2,048 B and no further name
-#       fits; the first section starts within 1,024 B. The start is measured from byte 0 of the answer (the registered
-#       text); ORIENTMAP_START_FROM=body measures from the end of the leading legend comments instead, and both are printed.
-#       With ORIENTMAP_BASE_BIN=<pre-change binary>: map growth <= +4,096 B, and with ORIENTMAP_ARM=narrow the ranked rows
-#       are byte-identical to the base binary's.
+#       --legend=full, --top-k=16, --max-tokens=4000, --max-tokens=200 — the sections are never budgeted away —,
+#       --rank-by=pagerank), MCP analyze (clean tree: {}, compact, full, paths:[ROOT], an untracked-only change, a non-git
+#       root, a legend=ref session) and MCP rank_by (omitted, pagerank, pagerank+full); --json and --json --max-tokens=4000
+#       carry the same sections row for row; --html carries every label and name.
+#   (N) NOT APPLIED: --tree, --rank-by=authority|hub|rrf, --for, MCP analyze with a tracked edit, a staged-only change or a
+#       README-only edit, MCP analyze over two roots, MCP rank_by authority and MCP explore carry no section and no
+#       utility_demoted=.
+#   (L) LEGEND (Gate D, G4): every new element's attributes are defined by a `<tag attr= …>` spelling of THAT element in the
+#       compact and full XML legends, the MCP analyze legend, --help=all (the --json keys' legend) and the session dictionary
+#       (and, with ORIENTMAP_BASE_BIN, that spelling is new to the dictionary); in a legend=ref session the ref answers carry
+#       no section definition, end with <about legend="ref"> naming the dictionary's dictv=, and lean only on the dictionary.
+#   (C) COST, explain-or-fail (owner 2026-10-02): the registered numbers are TARGETS — sections <= 4,096 B, <overflow> <=
+#       2,048 B, map growth vs ORIENTMAP_BASE_BIN <= +4,096 B. An excess passes only when test/orientmapfix/cost_explanations.tsv
+#       (or ORIENTMAP_COST_EXPLAIN) states which content and why the answer needs it; it is then reported, never cut. The
+#       first section starts within 1,024 B of the answer BODY (after the leading legend). No further overflow name fits
+#       the cut. A section carrying over_ceiling="1" (the runaway guard) is listed as a bug signal. A byte breakdown is
+#       printed. With ORIENTMAP_BASE_BIN: every ranked row's k= equals the base binary's (the rank vector is untouched), and
+#       with ORIENTMAP_ARM=narrow the ranked rows are byte-identical to the base binary's.
 #   (X) xmllint well-formed, two runs byte-identical.
-# ORIENTMAP_EXTRA_ROOTS=dir1:dir2 runs (D), (U), (P) and (C) on those trees too (the measurement harness's corpora).
+# ORIENTMAP_EXTRA_ROOTS=dir1:dir2 runs (D), (U), (P) and (C) on those trees too; ORIENTMAP_ONLY_EXTRA=1 skips the fixture.
 # Exit 0 all pass, 1 any fail (a fixture the oracle cannot decide is a failure), 2 setup.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -52,9 +60,11 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 export TMPDIR="$TMP/" XDG_CACHE_HOME="$TMP/xdg"
 unset RIPWIRE_ORIENT_UNCAPPED
 echo "orientmapcheck: BIN=$BIN"
-bash "$GEN" "$TMP/fx" >/dev/null && git -C "$TMP/fx" init -q && git -C "$TMP/fx" add -A \
-    && git -C "$TMP/fx" -c user.name=gate -c user.email=gate@example.invalid -c commit.gpgsign=false commit -qm fixture \
-    || { echo "orientmapcheck: fixture generation failed"; exit 2; }
+mkfix(){
+    bash "$GEN" "$1" >/dev/null && git -C "$1" init -q && git -C "$1" add -A \
+        && git -C "$1" -c user.name=gate -c user.email=gate@example.invalid -c commit.gpgsign=false commit -qm fixture
+}
+mkfix "$TMP/fx" || { echo "orientmapcheck: fixture generation failed"; exit 2; }
 
 python3 - "$BIN" "$TMP" "$ROOT" "${ORIENTMAP_EXTRA_ROOTS:-}" <<'PYEOF' || no "the arms above reported a failure (or the check body could not run)"
 import html as H, json, os, re, shutil, subprocess, sys
@@ -64,8 +74,10 @@ import orientmap as om
 
 BASE_BIN = os.environ.get("ORIENTMAP_BASE_BIN", "")
 ARM = os.environ.get("ORIENTMAP_ARM", "O")
-START_FROM = os.environ.get("ORIENTMAP_START_FROM", "byte0")
+ONLY_EXTRA = os.environ.get("ORIENTMAP_ONLY_EXTRA") == "1"
 UNC = {"RIPWIRE_ORIENT_UNCAPPED": "1"}
+FX = os.path.join(TMP, "fx")
+FIX_DEMOTED = {"src/pkg/compat/list_shim.py", "src/pkg/util/blockpool.py"}
 fails = []
 
 
@@ -83,11 +95,22 @@ def check(cond, m, why=""):
     return cond
 
 
-FX = os.path.join(TMP, "fx")
+def explanations():
+    out = {}
+    for path in (os.path.join(ROOT, "test", "orientmapfix", "cost_explanations.tsv"), os.environ.get("ORIENTMAP_COST_EXPLAIN", "")):
+        if path and os.path.isfile(path):
+            for line in open(path):
+                f = line.rstrip("\n").split("\t")
+                if len(f) >= 3 and not line.startswith("#") and f[2].strip():
+                    out[(f[0], f[1])] = f[2].strip()
+    return out
 
 
-def model(root):
-    """everything the arms need about one root: the answer, its sections, the inventory, the oracle"""
+EXPLAIN = explanations()
+
+
+def model(root, pinned=None):
+    """the answer, its sections, the inventory, the demoted set and the oracle over core = candidates - demoted"""
     doc, rc = om.run(BIN, root)
     secs = om.sections(doc)
     inv, _ = om.inventory(BIN, root)
@@ -103,7 +126,7 @@ def model(root):
             else:
                 rows, dprob = om.follow(BIN, root, d.a["next"], "p")
                 dem = [r["p"] for r in rows]
-    core = [p for p in cand if p not in set(dem)]
+    core = [p for p in cand if p not in set(pinned if pinned is not None else dem)]
     return dict(root=root, doc=doc, rc=rc, secs=secs, inv=inv, ms=ms, cand=cand, dem=dem, dprob=dprob, dcount=dcount,
                 core=core, orc=om.oracle(core, ms))
 
@@ -113,9 +136,15 @@ def names(node, g):
     return [(grp.a.get("l"), [om.unrel(m.a.get("p", ""), g) for m in grp.find("m")]) for grp in node.find("grp")]
 
 
-def gate_d(M, label):
-    """(D) on one root: counts, next= recovery, core-ness, once-only, completeness"""
-    s, root = M["secs"], M["root"]
+def runaway(M, label, doc=None, what="answer"):
+    hit = [n.tag for n in om.walk(om.tree(doc if doc is not None else M["doc"])) if n.a.get("over_ceiling") == "1"
+           and (n.tag in om.SECTION_TAGS or "utility_demoted" in n.a)]
+    check(not hit, "(C) %s %s: no section hit the runaway ceiling" % (label, what), "BUG SIGNAL, over_ceiling on %s" % hit)
+
+
+def gate_d(M, label, exact=False):
+    """(D) on one root: counts, next= recovery (against the oracle when exact), core-ness, once-only, completeness"""
+    s, root, orc = M["secs"], M["root"], M["orc"]
     if not check("subsystems" in s and "overflow" in s, "(D) %s: <subsystems> and <overflow> are present" % label):
         return
     sub, ov = s["subsystems"], s["overflow"]
@@ -146,8 +175,13 @@ def gate_d(M, label):
         check(len(cut) == len(set(cut)) and not (set(cut) & set(shown)), "(D) %s: overflow next= pages each cut name once, none shown" % label)
         check(int(ov.a["total"]) - int(ov.a["shown"]) == len(cut), "(D) %s: overflow next= returns total-shown=%d names (got %d)"
               % (label, int(ov.a["total"]) - int(ov.a["shown"]), len(cut)))
+        if exact:
+            k = int(ov.a.get("shown", 0))
+            check(cut == [p for _, p in orc["ranked"][k:]], "(D) %s: overflow next= pages the oracle's breadth-first tail, in order" % label)
     missing = sorted(set(M["core"]) - set(shown) - set(cut))
     check(not missing, "(D) %s: named + paged = every core file (%d)" % (label, len(M["core"])), "%d missing, e.g. %s" % (len(missing), missing[:5]))
+    sizes = {lab: str(len(ps)) for lab, ps in orc["members"].items()}
+    gdecided = not any(a.startswith("G descent") for a in orc["ambiguous"]) and g == orc["G"]
     if "next" in sub.a:
         rows, probs = om.follow(BIN, root, sub.a["next"], "l")
         labs = [r["l"] for r in rows]
@@ -155,11 +189,28 @@ def gate_d(M, label):
         check(not probs and len(allg) == len(set(allg)) and len(allg) == int(sub.a["total"]),
               "(D) %s: subsystems next= pages the %d groups past the shown ones, each once" % (label, int(sub.a["total"]) - int(sub.a["shown"])),
               "; ".join(probs[:3]) or "%d labels" % len(allg))
-    if "entry_points" in s and "next" in s["entry_points"].a:
+        if exact:
+            check([(r["l"], r.get("n")) for r in rows] == [(l, sizes[l]) for l in orc["order"][12:]],
+                  "(D) %s: subsystems next= pages the oracle's groups 13.. in order, each with its n=" % label)
+        elif gdecided:
+            badn = [(r["l"], r.get("n")) for r in rows if r["l"] in sizes and r.get("n") != sizes[r["l"]]]
+            check(not badn, "(D) %s: every paged group's n= is its core-file count" % label, str(badn[:5]))
+    if gdecided:
+        badn = [(grp.a.get("l"), grp.a.get("n")) for grp in sub.find("grp") if sizes.get(grp.a.get("l")) != grp.a.get("n")]
+        check(not badn, "(D) %s: every group row's n= is its core-file count" % label, str(badn[:5]))
+    if "entry_points" in s:
         ep = s["entry_points"]
-        rows, probs = om.follow(BIN, root, ep.a["next"], "why")
-        check(not probs and len(rows) == int(ep.a["total"]) - int(ep.a["shown"]) and all(r.get("why") in om.WHY for r in rows),
-              "(D) %s: entry_points next= returns the %d entries not listed, each with why=" % (label, int(ep.a["total"]) - int(ep.a["shown"])))
+        for e in ep.find("e"):
+            mm = re.match(r"(.+):(\d+)$", e.a.get("p", ""))
+            f = mm and os.path.join(root, mm.group(1))
+            good = bool(mm) and e.a.get("why") in om.WHY and e.a.get("n") and os.path.isfile(f) and mm.group(1) in set(M["core"]) \
+                and 1 <= int(mm.group(2)) <= max(1, sum(1 for _ in open(f, errors="replace")))
+            check(good, "(D) %s: entry row %s is a core file, file:line inside it, n= and why=" % (label, e.a))
+        if "next" in ep.a:
+            rows, probs = om.follow(BIN, root, ep.a["next"], "why")
+            check(not probs and len(rows) == int(ep.a["total"]) - int(ep.a["shown"]) and all(r.get("why") in om.WHY for r in rows)
+                  and all(r.get("p", "").rsplit(":", 1)[0] in set(M["core"]) for r in rows),
+                  "(D) %s: entry_points next= returns the %d core entries not listed, each with why=" % (label, int(ep.a["total"]) - int(ep.a["shown"])))
     if M["dcount"] is None:
         no("(D) %s: no utility_demoted= anywhere in the answer" % label)
     else:
@@ -167,16 +218,11 @@ def gate_d(M, label):
               "(D) %s: utility_demoted=%d equals the files its next= returns, each once" % (label, M["dcount"]),
               "; ".join(M["dprob"][:3]) or "next= returned %d" % len(M["dem"]))
         vend = sorted(p for p in M["cand"] if om.is_vendored(p) and p not in M["dem"])
-        check(not vend, "(D) %s: every vendored/compat core file is demoted" % label, str(vend[:5]))
+        check(not vend, "(D) %s: every vendored/compat core candidate is demoted" % label, str(vend[:5]))
         if ARM != "narrow":
             ranked_files = {f.a.get("p") for f in om.walk(om.tree(M["doc"])) if f.tag == "f"}
             check(not (ranked_files & set(M["dem"])), "(D) %s: no demoted file keeps a ranked row" % label)
-    for e in (s["entry_points"].find("e") if "entry_points" in s else []):
-        mm = re.match(r"(.+):(\d+)$", e.a.get("p", ""))
-        f = mm and os.path.join(root, mm.group(1))
-        good = bool(mm) and e.a.get("why") in om.WHY and e.a.get("n") and os.path.isfile(f) \
-            and 1 <= int(mm.group(2)) <= max(1, sum(1 for _ in open(f, errors="replace")))
-        check(good, "(D) %s: entry row %s has file:line inside the file, n= and why=" % (label, e.a))
+    runaway(M, label)
 
 
 def uncapped(M, label):
@@ -188,12 +234,12 @@ def uncapped(M, label):
     o1, o2 = s1["overflow"], s2["overflow"]
     d1, d2 = M["doc"], doc2
     check(d1[:o1.start] == d2[:o2.start] and d1[o1.end:] == d2[o2.end:], "(U) %s: every byte outside <overflow> is the capped answer's" % label)
-    check(o2.a.get("capped") == "0" and "next" not in o2.a and o2.a.get("shown") == o2.a.get("total"), "(U) %s: uncapped <overflow> cuts nothing" % label)
+    runaway(M, label, doc2, "uncapped answer")
+    if o2.a.get("over_ceiling") != "1":
+        check(o2.a.get("capped") == "0" and "next" not in o2.a and o2.a.get("shown") == o2.a.get("total"), "(U) %s: uncapped <overflow> cuts nothing" % label)
     sub = s1["subsystems"]
     g = sub.a.get("g", "")
-    full = {}
-    for lab, ps in names(sub, g):
-        full[lab] = list(ps)
+    full = {lab: list(ps) for lab, ps in names(sub, g)}
     order = list(full)
     for lab, ps in names(o2, o2.a.get("g", g)):
         if lab not in full:
@@ -205,11 +251,33 @@ def uncapped(M, label):
     capped_names = [p for _, ps in names(o1, o1.a.get("g", g)) for p in ps]
     k = len(capped_names)
     check(set(capped_names) == set(ranked[:k]), "(U) %s: the capped overflow is a prefix of the breadth-first list the uncapped one implies" % label)
-    if "next" in o1.a:
+    if "next" in o1.a and o2.a.get("over_ceiling") != "1":
         rows, _ = om.follow(BIN, M["root"], o1.a["next"], "p")
         check([r["p"] for r in rows] == ranked[k:], "(U) %s: overflow next= pages the rest of that list in rank order" % label)
     if o1.a.get("capped") == "0":
         check(d1 == d2, "(U) %s: under the cap the uncapped answer is byte-identical" % label)
+
+
+def json_rows_match(doc, secs):
+    j = json.loads(doc)
+    bad = []
+    for tag, node in secs.items():
+        if tag == "demoted":
+            continue
+        jo = j.get(tag)
+        if not isinstance(jo, dict):
+            bad.append(tag + " absent")
+            continue
+        for k, v in node.a.items():
+            if str(jo.get(k)) != v:
+                bad.append("%s.%s %r != %r" % (tag, k, jo.get(k), v))
+        kt = "e" if tag == "entry_points" else "grp"
+        xr = [(c.tag, sorted(c.a.items()), [sorted(x.a.items()) for x in c.kids]) for c in node.kids]
+        jr = [(kt, sorted((k, str(v)) for k, v in c.items() if k != "m"), [sorted((k, str(v)) for k, v in x.items()) for x in c.get("m", [])])
+              for c in jo.get(kt, [])]
+        if xr != jr:
+            bad.append(tag + " rows differ")
+    return bad
 
 
 def parity(M, label):
@@ -218,49 +286,29 @@ def parity(M, label):
     if not check(r0 is not None, "(P) %s: the CLI map carries the sections" % label):
         return
     ref = M["doc"][r0[0]:r0[1]]
-    variants = {"--legend=full": om.run(BIN, root, "--legend=full")[0], "--top-k=16": om.run(BIN, root, "--top-k=16")[0],
-                "--max-tokens=4000": om.run(BIN, root, "--max-tokens=4000")[0]}
-    an, anf, rb, rbp = om.mcp(BIN, root, [("analyze", {}), ("analyze", {"legend": "full"}), ("rank_by", {}), ("rank_by", {"rank_by": "pagerank"})])
-    variants.update({"MCP analyze": an, "MCP analyze legend=full": anf, "MCP rank_by": rb, "MCP rank_by pagerank": rbp})
-    bad = []
-    for k, d in variants.items():
-        r = om.region(d)
-        if r is None or d[r[0]:r[1]] != ref:
-            bad.append(k)
-    check(not bad, "(P) %s: section bytes identical on CLI XML, --legend=full, --top-k=16, --max-tokens=4000, MCP analyze, MCP rank_by" % label, str(bad))
-    j = json.loads(om.run(BIN, root, "--json")[0])
-    jbad = []
-    for tag, node in M["secs"].items():
-        if tag == "demoted":
-            continue
-        jo = j.get(tag)
-        if not isinstance(jo, dict):
-            jbad.append(tag + " absent")
-            continue
-        for k, v in node.a.items():
-            if str(jo.get(k)) != v:
-                jbad.append("%s.%s %r != %r" % (tag, k, jo.get(k), v))
-        def rows(n):
-            return [(c.tag, sorted(c.a.items()), [sorted(x.a.items()) for x in c.kids]) for c in n.kids]
-        def jrows(o, kidtag):
-            out = []
-            for c in o.get(kidtag, []):
-                sub = [sorted((k, str(v)) for k, v in x.items()) for x in c.get("m", [])]
-                out.append((kidtag, sorted((k, str(v)) for k, v in c.items() if k != "m"), sub))
-            return out
-        kt = "e" if tag == "entry_points" else "grp"
-        if rows(node) != jrows(jo, kt):
-            jbad.append(tag + " rows differ")
-    check(not jbad, "(P) %s: --json carries the same sections row for row" % label, "; ".join(jbad[:4]))
+    variants = {a: om.run(BIN, root, *a.split())[0] for a in ("--legend=full", "--top-k=16", "--max-tokens=4000", "--max-tokens=200", "--rank-by=pagerank")}
+    calls = [("analyze", {}), ("analyze", {"legend": "compact"}), ("analyze", {"legend": "full"}), ("analyze", {"paths": [root]}),
+             ("rank_by", {}), ("rank_by", {"rank_by": "pagerank"}), ("rank_by", {"rank_by": "pagerank", "legend": "full"})]
+    for (tool, a), d in zip(calls, om.mcp(BIN, root, calls)):
+        variants["MCP %s %s" % (tool, json.dumps(a, sort_keys=True).replace(root, "ROOT"))] = d
+    refs = om.mcp(BIN, root, [("analyze", {}), ("analyze", {}), ("analyze", {})], ref=True)
+    for i, d in enumerate(refs):
+        variants["MCP legend=ref session analyze #%d" % (i + 1)] = d
+    bad = [k for k, d in variants.items() if om.region(d) is None or d[om.region(d)[0]:om.region(d)[1]] != ref]
+    check(not bad, "(P) %s: section bytes identical on %d CLI/MCP in-scope variants" % (label, len(variants)), str(bad))
+    for args in (["--json"], ["--json", "--max-tokens=4000"]):
+        jb = json_rows_match(om.run(BIN, root, *args)[0], M["secs"])
+        check(not jb, "(P) %s: %s carries the same sections row for row" % (label, " ".join(args)), "; ".join(jb[:4]))
     hp = os.path.join(TMP, "h.html")
     om.run(BIN, root, "--html=" + hp)
     ht = open(hp, errors="replace").read() if os.path.exists(hp) else ""
     want = [n.a.get("l") or n.a.get("p") for n in om.walk([M["secs"][t] for t in ("subsystems", "overflow") if t in M["secs"]]) if n.tag in ("grp", "m")]
     miss = [w for w in want if w and w not in ht and H.escape(w) not in ht and json.dumps(w)[1:-1] not in ht]
-    check(want and not miss, "(P) %s: --html carries every section label and name" % label, str(miss[:5]))
+    check(bool(want) and not miss, "(P) %s: --html carries every section label and name" % label, str(miss[:5]))
+    return refs
 
 
-def cost(M, label, deciding=True):
+def cost(M, label):
     doc = M["doc"]
     r = om.region(doc)
     if not check(r is not None, "(C) %s: sections present to measure" % label):
@@ -271,22 +319,31 @@ def cost(M, label, deciding=True):
         if not m:
             break
         lead_end += m.end()
-    start0, startb = r[0], r[0] - lead_end
-    print("  INFO  (C) %s: sections %d B; first section at byte %d (%d after the leading legend); answer %d B" % (label, r[1] - r[0], start0, startb, len(doc)))
-    if deciding:
-        check(r[1] - r[0] <= om.SECTIONS_CAP, "(C) %s: sections <= %d B (%d)" % (label, om.SECTIONS_CAP, r[1] - r[0]))
-    else:   # the registered cost scope is the corpora and the table/OOS repos; the fixture's long names are there to bind the overflow
-        print("  INFO  (C) %s: sections %s the %d B cap (decided on the corpora, not on this fixture)" % (label, "within" if r[1] - r[0] <= om.SECTIONS_CAP else "OVER", om.SECTIONS_CAP))
-    st = start0 if START_FROM == "byte0" else startb
-    check(st <= om.START_CAP, "(C) %s: the first section starts within %d B (%s reading: %d)" % (label, om.START_CAP, START_FROM, st))
-    ov = M["secs"].get("overflow")
+    s = M["secs"]
+    parts = {t: s[t].end - s[t].start for t in om.SECTION_TAGS if t in s}
+    ranked = len(doc) - r[1]
+    print("  INFO  (C) %s: bytes — leading legend %d, root/header %d, %s, ranked rows and tail %d; answer %d; first section at "
+          "byte %d (body offset %d)" % (label, lead_end, r[0] - lead_end, ", ".join("%s %d" % kv for kv in parts.items()), ranked,
+                                         len(doc), r[0], r[0] - lead_end))
+
+    def target(metric, val, cap):
+        if val <= cap:
+            ok("(C) %s: %s %d B within the %d B target" % (label, metric, val, cap))
+        elif (label, metric) in EXPLAIN:
+            ok("(C) %s: %s %d B over the %d B target, EXPLAINED: %s" % (label, metric, val, cap, EXPLAIN[(label, metric)]))
+        else:
+            no("(C) %s: %s %d B over the %d B target with no stated reason (add a row to test/orientmapfix/cost_explanations.tsv "
+               "or ORIENTMAP_COST_EXPLAIN: which content, and why the answer needs it)" % (label, metric, val, cap))
+    target("sections", r[1] - r[0], om.SECTIONS_CAP)
+    check(r[0] - lead_end <= om.START_CAP, "(C) %s: the first section starts within %d B of the body (%d)" % (label, om.START_CAP, r[0] - lead_end))
+    ov = s.get("overflow")
     if ov is not None:
         ob = ov.end - ov.start
-        check(ob <= om.OVERFLOW_CAP, "(C) %s: <overflow> <= %d B (%d)" % (label, om.OVERFLOW_CAP, ob))
-        if ov.a.get("capped") == "1" and "next" in ov.a:
+        target("overflow", ob, om.OVERFLOW_CAP)
+        if ov.a.get("capped") == "1" and "next" in ov.a and ov.a.get("over_ceiling") != "1":
             rows, _ = om.follow(BIN, M["root"], ov.a["next"], "p")
             if rows:
-                g = ov.a.get("g", M["secs"]["subsystems"].a.get("g", "")) if "subsystems" in M["secs"] else ""
+                g = ov.a.get("g", s["subsystems"].a.get("g", "")) if "subsystems" in s else ""
                 nxt = rows[0]["p"]
                 lab = next((l for l, ps in M["orc"]["members"].items() if nxt in ps), None)
                 add = len('<m p="%s"/>' % H.escape(om.printed(nxt, g)))
@@ -295,118 +352,168 @@ def cost(M, label, deciding=True):
                 check(ob + add > om.OVERFLOW_CAP, "(C) %s: the first cut name would not have fit (%d + %d B)" % (label, ob, add))
     if BASE_BIN:
         bdoc, _ = om.run(BASE_BIN, M["root"])
-        check(len(doc) - len(bdoc) <= 4096, "(C) %s: map growth vs base <= +4,096 B (%+d)" % (label, len(doc) - len(bdoc)))
+        target("growth", len(doc) - len(bdoc), om.GROWTH_CAP)
+        _, ja = om.masses(BIN, M["root"])
+        _, jb = om.masses(BASE_BIN, M["root"])
+        def rows(j, skip):
+            return sorted((f["p"], s_.get("t"), s_.get("n"), s_.get("sc", ""), s_.get("k")) for f in j.get("r", []) if f["p"] not in skip for s_ in f.get("s", []))
+        skip = set(M["dem"]) if ARM != "narrow" else set()
+        check(rows(ja, skip) == rows(jb, skip), "(C) %s: every ranked row's k= equals the base binary's (the rank vector is untouched)" % label)
         if ARM == "narrow":
-            def ranked(d):
-                i = d.find("<f ", om.region(d)[1] if om.region(d) else 0)
+            def ranked_rows(d):
+                rr = om.region(d)
+                i = d.find("<f ", rr[1] if rr else 0)
                 return d[i:] if i >= 0 else ""
-            check(ranked(doc) == ranked(bdoc), "(C) %s: O-narrow's ranked rows are byte-identical to the base binary's" % label)
+            check(ranked_rows(doc) == ranked_rows(bdoc), "(C) %s: O-narrow's ranked rows are byte-identical to the base binary's" % label)
 
 
-# ── the fixture ──────────────────────────────────────────────────────────────────────────────────────────────────────
-print("== fixture ==")
-M = model(FX)
-orc = M["orc"]
-if orc["ambiguous"] or orc["G"] != "src/pkg/" or len(orc["order"]) < 14 or len(orc["ranked"]) < 40:
-    print("orientmapcheck: the fixture no longer exercises the rule decisively (G=%r, %d groups, %d overflow names, %d ambiguous: %s)"
-          % (orc["G"], len(orc["order"]), len(orc["ranked"]), len(orc["ambiguous"]), orc["ambiguous"][:3]))
-    sys.exit(1)
-s = M["secs"]
-print("== (F) the registered rule, exactly ==")
-check(M["rc"] == 0, "(F) the map exits 0")
-if check("subsystems" in s, "(F) the map carries <subsystems>"):
-    sub = s["subsystems"]
-    check(sub.a.get("g") == orc["G"], "(F) g= is the grouping root %r" % orc["G"], "got %r" % sub.a.get("g"))
-    want = [(lab, str(len(orc["members"][lab])), [om.printed(p, orc["G"]) for p in orc["members"][lab][:3]]) for lab in orc["order"][:12]]
-    got = [(grp.a.get("l"), grp.a.get("n"), [m.a.get("p") for m in grp.find("m")]) for grp in sub.find("grp")]
-    check(got == want, "(F) the 12 group rows: labels, n= and top-3 members, in mass order",
-          "first difference: %r" % (next(((a, b) for a, b in zip(got + [None] * 12, want) if a != b), None),))
-    check(sub.a.get("total") == str(len(orc["order"])) and sub.a.get("shown") == str(min(12, len(orc["order"]))),
-          "(F) <subsystems> total=%d shown=%d" % (len(orc["order"]), min(12, len(orc["order"]))), str(sub.a))
-if check("overflow" in s, "(F) the map carries <overflow>"):
-    ov = s["overflow"]
-    k = int(ov.a.get("shown", "-1"))
-    check(ov.a.get("total") == str(len(orc["ranked"])), "(F) <overflow> total= is every core file not named in the group rows (%d)" % len(orc["ranked"]), str(ov.a))
-    surv = orc["ranked"][:max(k, 0)]
-    regroup = []
-    for lab in orc["order"]:
-        ps = [p for p in orc["members"][lab] if (lab, p) in set(surv)]
-        if ps:
-            regroup.append((lab, [om.printed(p, orc["G"]) for p in ps]))
-    got = [(grp.a.get("l"), [m.a.get("p") for m in grp.find("m")]) for grp in ov.find("grp")]
-    check(k > 0 and got == regroup, "(F) <overflow> is the first %d of the breadth-first list, re-grouped in group then member order" % k,
-          "first difference: %r" % (next(((a, b) for a, b in zip(got + [None] * 30, regroup) if a != b), None),))
-    check(0 < k < len(orc["ranked"]), "(F) the fixture's overflow is cut (the cap binds: %d of %d)" % (k, len(orc["ranked"])))
-if check("entry_points" in s, "(F) the map carries <entry_points>"):
-    ep = s["entry_points"]
-    rows = [(e.a.get("p", "").rsplit(":", 1)[0], e.a.get("why"), e.a.get("n")) for e in ep.find("e")]
-    want = [("src/pkg/tool.ts", "bin"), ("src/pkg/cli_main.py", "main"), ("src/pkg/index.ts", "entry")]
-    check([(p, w) for p, w, _ in rows] == want, "(F) entry rows: the bin's source twin, the main definition, the '.' export — in evidence order", str(rows))
-    mainrow = [e for e in ep.find("e") if e.a.get("why") == "main"]
-    check(len(mainrow) == 1 and mainrow[0].a.get("p") == "src/pkg/cli_main.py:5" and mainrow[0].a.get("n") == "main",
-          "(F) the main row is src/pkg/cli_main.py:5 n=main (not main_loop)", str([e.a for e in mainrow]))
-    check(not any("nosuchstem" in e.a.get("p", "") for e in ep.find("e")), "(F) a bin with no source twin has no row")
-    tot = int(ep.a.get("total", "0"))
-    check(tot >= len(rows) + 1 and "next" in ep.a, "(F) the subpath export counts in total= and is one next= away", str(ep.a))
-    if "next" in ep.a:
-        prow, _ = om.follow(BIN, FX, ep.a["next"], "why")
-        check(any(r.get("p", "").startswith("src/pkg/sub.ts") for r in prow), "(F) entry_points next= returns the subpath export's source (src/pkg/sub.ts)", str(prow))
-check(M["dcount"] is not None and "src/pkg/compat/queue_compat.py" in M["dem"], "(F) the compat file is demoted (utility_demoted= + next=)")
+def legend_arm(M, refs):
+    s = M["secs"]
+    elems = {}
+    for t, node in s.items():
+        for n in (om.walk([node]) if t != "demoted" else [node]):
+            elems.setdefault(n.tag, set()).update(n.a.keys())
+    if not check(bool(elems), "(L) the sections carry elements to define"):
+        return
+    print("  INFO  (L) new elements and attributes: %s" % {k: sorted(v) for k, v in elems.items()})
+    an_c, = om.mcp(BIN, M["root"], [("analyze", {})])
+    dict_txt = subprocess.run([BIN, "--legend-dict"], capture_output=True, text=True).stdout
+    srcs = {"compact XML legend": om.legend(M["doc"]), "full XML legend": om.legend(om.run(BIN, M["root"], "--legend=full")[0]),
+            "MCP analyze legend": om.legend(an_c), "--help=all": subprocess.run([BIN, "--help=all"], capture_output=True, text=True).stdout,
+            "--legend-dict": dict_txt}
+    for k, text in srcs.items():
+        u = sorted("<%s %s>" % (t, " ".join(a + "=" for a in sorted(at))) for t, at in elems.items() if not om.defines(text, t, at))
+        check(not u, "(L) %s spells every new element with all of its attributes" % k, str(u))
+    if BASE_BIN:
+        bd = subprocess.run([BASE_BIN, "--legend-dict"], capture_output=True, text=True).stdout.splitlines()
+        newtags = [t for t in elems if t in om.SECTION_TAGS + ("grp",) or "utility_demoted" in elems[t]]
+        stale = [t for t in newtags if not any(om.defines(l, t, elems[t]) for l in dict_txt.splitlines() if l not in set(bd))]
+        check(not stale, "(L) the dictionary defines each new element on a line the base binary's dictionary lacks", str(stale))
+    m = re.search(r"dictv=(\S+)", dict_txt)
+    dictv = m.group(1) if m else None
+    is_ref = [bool(re.search(r'<about [^>]*legend="ref"', d)) for d in refs]
+    check(any(is_ref), "(L) a legend=ref session serves analyze in ref posture (after the first answer)", str(is_ref))
+    badr = []
+    for i, d in enumerate(refs):
+        if not is_ref[i]:
+            continue
+        c = om.legend(d)
+        if any(om.defines(c, t, at) for t, at in elems.items()):
+            badr.append("#%d re-carries a section definition" % (i + 1))
+        tail = re.search(r'<about ([^>]*)/>\s*</[\w-]+>\s*$', d)
+        if not tail or 'legend="ref"' not in tail.group(1) or 'dictv="%s"' % dictv not in tail.group(1):
+            badr.append("#%d does not end with <about legend=ref dictv=%s>" % (i + 1, dictv))
+        u = [t for t, at in elems.items() if not om.defines(dict_txt + c, t, at)]
+        if u:
+            badr.append("#%d leans on undefined %s" % (i + 1, u))
+    check(not badr, "(L) ref answers carry no section definition, end with <about legend=ref> naming the dictionary's dictv, and lean only on it", str(badr))
 
-print("== (D) disclosure ==")
-gate_d(M, "fixture")
-print("== (U) uncapped variant ==")
-uncapped(M, "fixture")
-print("== (P) parity ==")
-parity(M, "fixture")
 
-print("== (N) not applied ==")
-for args in (["--tree"], ["--rank-by=authority"], ["--rank-by=hub"], ["--rank-by=rrf"], ["--for=where is the request handled"]):
-    d, _ = om.run(BIN, FX, *args)
-    check(om.region(d) is None and "utility_demoted" not in d, "(N) %s carries no section and no utility_demoted=" % " ".join(args))
-rb_auth, explore = om.mcp(BIN, FX, [("rank_by", {"rank_by": "authority"}), ("explore", {"task": "where is the request handled"})])
-for k, d in (("MCP rank_by authority", rb_auth), ("MCP explore", explore)):
-    check(om.region(d) is None and "utility_demoted" not in d, "(N) %s carries no section and no utility_demoted=" % k)
-dirty = os.path.join(TMP, "fxdirty")
-shutil.copytree(FX, dirty)
-with open(os.path.join(dirty, "src/pkg/io.py"), "a") as fh:
-    fh.write("\n\ndef io_layer_uncommitted(value):\n    return value\n")
-(dan,) = om.mcp(BIN, dirty, [("analyze", {})])
-check(om.region(dan) is None and "utility_demoted" not in dan, "(N) MCP analyze with an uncommitted edit carries no section")
+if not ONLY_EXTRA:
+    print("== fixture ==")
+    M = model(FX, pinned=FIX_DEMOTED)
+    orc = M["orc"]
+    ties = [M["ms"].get(a, (None,))[0] == M["ms"].get(b, (-1,))[0] for a, b in (("src/pkg/tie-a.py", "src/pkg/tie/b.py"), ("src/pkg/Kappa.py", "src/pkg/beta/x.py"))]
+    if orc["ambiguous"] or orc["G"] != "src/pkg/" or len(orc["order"]) < 14 or len(orc["ranked"]) < 30 or not all(ties):
+        no("the fixture no longer exercises the rule decisively (G=%r, %d groups, %d overflow names, ties printed equal %s, %d ambiguous: %s)"
+           % (orc["G"], len(orc["order"]), len(orc["ranked"]), ties, len(orc["ambiguous"]), orc["ambiguous"][:3]))
+        sys.exit(1)
+    s = M["secs"]
+    print("== (F) the registered rule, exactly ==")
+    check(M["rc"] == 0, "(F) the map exits 0")
+    check(orc["order"].index("beta/") < orc["order"].index("kappa") and orc["members"]["tie/"] == ["src/pkg/tie-a.py", "src/pkg/tie/b.py"],
+          "(F) (oracle) the designed ties break by label and by path")
+    if check("subsystems" in s, "(F) the map carries <subsystems>"):
+        sub = s["subsystems"]
+        check(sub.a.get("g") == orc["G"], "(F) g= is the grouping root %r" % orc["G"], "got %r" % sub.a.get("g"))
+        want = [(lab, str(len(orc["members"][lab])), [om.printed(p, orc["G"]) for p in orc["members"][lab][:3]]) for lab in orc["order"][:12]]
+        got = [(grp.a.get("l"), grp.a.get("n"), [m.a.get("p") for m in grp.find("m")]) for grp in sub.find("grp")]
+        check(got == want, "(F) the 12 group rows: labels, n= and top-3 members, in mass order (ties by label, then path)",
+              "first difference: %r" % (next(((a, b) for a, b in zip(got + [None] * 12, want) if a != b), None),))
+        check(sub.a.get("total") == str(len(orc["order"])) and sub.a.get("shown") == str(min(12, len(orc["order"]))),
+              "(F) <subsystems> total=%d shown=%d" % (len(orc["order"]), min(12, len(orc["order"]))), str(sub.a))
+    if check("overflow" in s, "(F) the map carries <overflow>"):
+        ov = s["overflow"]
+        k = int(ov.a.get("shown", "-1"))
+        check(ov.a.get("total") == str(len(orc["ranked"])), "(F) <overflow> total= is every core file not named in the group rows (%d)" % len(orc["ranked"]), str(ov.a))
+        surv = set(orc["ranked"][:max(k, 0)])
+        regroup = [(lab, [om.printed(p, orc["G"]) for p in orc["members"][lab] if (lab, p) in surv]) for lab in orc["order"]]
+        regroup = [x for x in regroup if x[1]]
+        got = [(grp.a.get("l"), [m.a.get("p") for m in grp.find("m")]) for grp in ov.find("grp")]
+        check(k > 0 and got == regroup, "(F) <overflow> is the first %d of the breadth-first list, re-grouped in group then member order" % k,
+              "first difference: %r" % (next(((a, b) for a, b in zip(got + [None] * 30, regroup) if a != b), None),))
+        check(0 < k < len(orc["ranked"]), "(F) the fixture's overflow is cut (the cut binds: %d of %d)" % (k, len(orc["ranked"])))
+    if check("entry_points" in s, "(F) the map carries <entry_points>"):
+        ep = s["entry_points"]
+        rows = [e.a for e in ep.find("e")]
+        want = [("src/pkg/sync.ts", "bin"), ("src/pkg/tool.ts", "bin"), ("src/pkg/admin.ts", "bin"),
+                ("src/pkg/launcher.py", "main"), ("scripts/release_build.py", "main")]
+        check([(r.get("p", "").rsplit(":", 1)[0], r.get("why")) for r in rows] == want,
+              "(F) the 5 entry rows: core bins by mass, then core `main` definitions by mass — no test/fixture/vendored main, "
+              "no bin without a source twin or into tests/", str(rows))
+        check([(r.get("p"), r.get("n")) for r in rows if r.get("why") == "main"] == [("src/pkg/launcher.py:5", "main"), ("scripts/release_build.py:1", "main")],
+              "(F) the main rows carry file:line of `main` (never main_loop)")
+        check(all(r.get("p", "").endswith(":1") for r in rows if r.get("why") == "bin"), "(F) a bin row points at its source file's first code symbol (line 1)")
+        check(ep.a.get("total") == "7" and ep.a.get("shown") == "5" and "next" in ep.a,
+              "(F) total=7 counts core evidence only (3 bins, 2 mains, the entry module, the subpath export)", str(ep.a))
+        if "next" in ep.a:
+            prow, _ = om.follow(BIN, FX, ep.a["next"], "why")
+            check([(r.get("p", "").rsplit(":", 1)[0], r.get("why")) for r in prow] == [("src/pkg/index.ts", "entry"), ("src/pkg/sub.ts", "entry")],
+                  "(F) entry_points next= returns the entry module, then the subpath export's source", str(prow))
+    check(M["dcount"] is not None and set(M["dem"]) == FIX_DEMOTED, "(F) the demoted set is exactly the compat file and the utility sink",
+          "got %s" % sorted(M["dem"]))
 
-print("== (L) legend and dictionary ==")
-newattrs = set()
-for t, node in s.items():
-    for n in om.walk([node]):
-        if t == "demoted" and n is node:
-            newattrs.update(("utility_demoted", "next") if "next" in n.a else ("utility_demoted",))
-        elif t != "demoted":
-            newattrs.update(n.a.keys())
-tags = [t for t in om.NEW_TAGS if any(n.tag == t for n in om.walk(list(v for k, v in s.items() if k != "demoted")))]
-def undefined(text):
-    return sorted(a for a in newattrs if not re.search(r"(?<![\w-])" + re.escape(a) + "=", text)) + \
-           sorted("<%s>" % t for t in tags if not re.search(r"(?<![\w-])" + re.escape(t) + r"(?![\w-])", text))
-an_c, = om.mcp(BIN, FX, [("analyze", {})])
-srcs = {"compact XML legend": om.legend(M["doc"]), "full XML legend": om.legend(om.run(BIN, FX, "--legend=full")[0]),
-        "MCP analyze legend": om.legend(an_c),
-        "--help=all": subprocess.run([BIN, "--help=all"], capture_output=True, text=True).stdout,
-        "--legend-dict": subprocess.run([BIN, "--legend-dict"], capture_output=True, text=True).stdout}
-check(bool(newattrs), "(L) the sections carry attributes to define", "no sections")
-for k, text in srcs.items():
-    u = undefined(text) if newattrs else ["(no sections)"]
-    check(not u, "(L) %s defines every new attribute and names every new tag" % k, str(u))
-(an_ref,) = om.mcp(BIN, FX, [("analyze", {})], ref=True)
-u = undefined(srcs["--legend-dict"] + om.legend(an_ref)) if newattrs else ["(no sections)"]
-check(not u and om.region(an_ref) is not None, "(L) MCP legend=ref analyze: sections present, every definition in the dictionary or the answer", str(u))
+    print("== (D) disclosure ==")
+    gate_d(M, "fixture", exact=True)
+    print("== (U) uncapped variant ==")
+    uncapped(M, "fixture")
+    print("== (P) parity ==")
+    refs = parity(M, "fixture") or []
+    for name, mut in (("untracked-only change", lambda d: open(os.path.join(d, "src/pkg/brand_new_module.py"), "w").write("def q9999(v):\n    return v\n")),
+                      ("non-git root", lambda d: shutil.rmtree(os.path.join(d, ".git")))):
+        d = os.path.join(TMP, "near-" + name.split()[0])
+        shutil.copytree(FX, d)
+        mut(d)
+        (a,) = om.mcp(BIN, d, [("analyze", {})])
+        ra, rc_ = om.region(a), om.region(om.run(BIN, d)[0])
+        check(ra is not None and rc_ is not None, "(P) MCP analyze with an %s is the whole-repo map: it carries the sections" % name)
 
-print("== (C) cost ==")
-cost(M, "fixture", deciding=False)
+    print("== (N) not applied ==")
+    for args in (["--tree"], ["--rank-by=authority"], ["--rank-by=hub"], ["--rank-by=rrf"], ["--for=where is the request handled"]):
+        d, _ = om.run(BIN, FX, *args)
+        check(om.region(d) is None and "utility_demoted" not in d, "(N) %s carries no section and no utility_demoted=" % " ".join(args))
+    rb_auth, explore, two = om.mcp(BIN, FX, [("rank_by", {"rank_by": "authority"}), ("explore", {"task": "where is the request handled"}),
+                                             ("analyze", {"paths": [FX, os.path.join(ROOT, "test", "fixture")]})])
+    for k, d in (("MCP rank_by authority", rb_auth), ("MCP explore", explore), ("MCP analyze over two roots", two)):
+        check(om.region(d) is None and "utility_demoted" not in d, "(N) %s carries no section and no utility_demoted=" % k)
 
-print("== (X) well-formed and deterministic ==")
-if shutil.which("xmllint"):
-    x = subprocess.run(["xmllint", "--noout", "-"], input=M["doc"].encode(), capture_output=True)
-    check(x.returncode == 0, "(X) the map is well-formed XML", x.stderr.decode()[:200])
-check(om.run(BIN, FX)[0] == M["doc"], "(X) two runs are byte-identical")
+    def tracked(d):
+        with open(os.path.join(d, "src/pkg/wire.py"), "a") as fh:
+            fh.write("\n\ndef q9998(value):\n    return value\n")
+
+    def staged(d):
+        tracked(d)
+        subprocess.run(["git", "-C", d, "add", "src/pkg/wire.py"], check=True)
+
+    def readme(d):
+        with open(os.path.join(d, "src/pkg/README.md"), "a") as fh:
+            fh.write("\nMore.\n")
+    for name, mut in (("a tracked edit", tracked), ("a staged-only change", staged), ("a README-only edit", readme)):
+        d = os.path.join(TMP, "dirty-" + name.split()[1])
+        shutil.copytree(FX, d)
+        mut(d)
+        (dan,) = om.mcp(BIN, d, [("analyze", {})])
+        check(om.region(dan) is None and "utility_demoted" not in dan, "(N) MCP analyze with %s (a biased working set) carries no section" % name)
+
+    print("== (L) legend and dictionary ==")
+    legend_arm(M, refs)
+    print("== (C) cost ==")
+    cost(M, "fixture")
+    print("== (X) well-formed and deterministic ==")
+    if shutil.which("xmllint"):
+        x = subprocess.run(["xmllint", "--noout", "-"], input=M["doc"].encode(), capture_output=True)
+        check(x.returncode == 0, "(X) the map is well-formed XML", x.stderr.decode()[:200])
+    check(om.run(BIN, FX)[0] == M["doc"], "(X) two runs are byte-identical")
 
 for extra in [e for e in EXTRA.split(":") if e]:
     lab = os.path.basename(extra.rstrip("/"))

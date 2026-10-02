@@ -29,7 +29,8 @@ DOC_EXTS = (".adoc", ".markdown", ".md", ".mdx", ".org", ".rst", ".tsv", ".txt",
             ".pdf", ".docx", ".pptx", ".xlsx")
 NONCODE_KINDS = ("sec", "modscope")
 OVERFLOW_CAP = 2048
-SECTIONS_CAP = 4096
+SECTIONS_CAP = 4096   # registered TARGETS (step 1 of the stair): an excess passes only with a stated reason
+GROWTH_CAP = 4096
 START_CAP = 1024
 ROUND = 5e-5          # k= prints 4 dp
 ALL = "--top-k=100000000"
@@ -111,6 +112,16 @@ def sections(doc):
     return out
 
 
+def defining_patterns(text, tag):
+    """every `<tag attr= attr=…>` spelling in a legend text, as the set of attribute names it defines"""
+    return [set(re.findall(r"([\w-]+)=", m.group(1) or "")) for m in re.finditer(r"<%s((?:\s[^<>]*)?)>" % re.escape(tag), text)]
+
+
+def defines(text, tag, names):
+    """does some `<tag …>` spelling in text define every attribute in names?"""
+    return any(set(names) <= got for got in defining_patterns(text, tag))
+
+
 def unrel(p, g):
     return p[1:] if p.startswith("/") else (g or "") + p
 
@@ -128,7 +139,7 @@ def mcp(BIN, path, calls, ref=False, env=None):
     if ref:
         msgs.append({"jsonrpc": "2.0", "id": 9, "method": "resources/read", "params": {"uri": "ripwire://legend-dict"}})
     for i, (tool, a) in enumerate(calls):
-        aa = dict(path=path)
+        aa = {} if "paths" in a else dict(path=path)
         aa.update(a)
         msgs.append({"jsonrpc": "2.0", "id": 100 + i, "method": "tools/call", "params": {"name": tool, "arguments": aa}})
     e = dict(os.environ)

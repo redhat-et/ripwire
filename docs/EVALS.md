@@ -14467,3 +14467,65 @@ legends and `--help=all` (DEV-5); this registration's text above names no file o
 any A binary ran, because `--anchor` refuses without it (DEV-12); Gate S masks the MCP `_index` stamp (it folds file mtimes, so BASE differs
 from itself there) and the initialize reply's `dictv=` (DEV-9); I2 is read at the emitted 4-dp precision (DEV-10); B does not
 re-pick `--tree`, whose own offset paging a window swap would break (DEV-11).
+
+## A default map that orients and names every core file (fix #8) — PRE-REGISTERED 2026-10-01 (before any arm code or arm number)
+
+This is the public form of a registration frozen on 2026-10-01 (frozen text sha256
+`860a52fa175c1968cb7701bd39cbcabbd7aba5ed7ae2fad8f609490e987b21d6`, superseding a version withdrawn before any arm was
+built). It lands with its gate, `test/orientmapcheck.sh` (red on the pre-change binary), before any arm code. The decision
+rests on a pre-registered held-out evaluation; details are published with the results.
+
+**Problem.** The whole-repo map is ordered by PageRank, so utility sinks and vendored macros lead it, real subsystems fall
+out of the default window, and nothing names the entry points or groups the files.
+
+**Mechanism (arm O, presentation only: the rank vector is untouched).**
+- **Core file:** an indexed file with at least one code symbol, Source tier (`pathTierOf`), not demo/generated
+  (`isDemoOrGeneratedPath`), not demoted by O3. **Mass:** the sum of a file's scores in the default map's rank vector.
+- **Grouping root G:** from the repo root, descend while one child directory holds at least 2/3 of the core mass under G.
+  Groups: each child directory of G (`dir/`); a file directly in G joins the group of its name prefix (basename without
+  extension, leading `_` removed, lowercased, cut at the first `-` or `_`; a prefix equal to a child directory joins it);
+  files outside G group by top-level directory, printed with a leading `/`. Groups by mass, then label; members likewise.
+- **O1 `<entry_points>`:** at most 5 rows with `file:line`, symbol and `why=` evidence, in evidence order (manifest
+  bin/script, a `main` definition, the package entry module); a build-output path maps to its same-stem source or yields no
+  row; further entries count in `total=` and are one `next=` away.
+- **O2 `<subsystems>`:** the first 12 groups, each with `n=` and its top 3 members. **O2-overflow `<overflow>`:** every
+  core file not yet named, ranked breadth-first (every group's j-th member before any group's (j+1)-th), cut at 2,048 B,
+  re-grouped for display; the cut is counted and recoverable with `next=`. `RIPWIRE_ORIENT_UNCAPPED=1` is the reported
+  uncapped variant (only `<overflow>` may differ), so grading can show whether the cap chops answers.
+- **O3:** utility sinks and vendored/compat files leave the ranked rows and the groups for one counted tail,
+  `utility_demoted=` with its own `next=`.
+- **Surfaces:** the CLI default map (XML, `--json`, `--max-tokens` — the sections are never budgeted away —, the sections
+  of `--html`, under `--legend`, `--top-k=N`, `--rank-by=pagerank`), MCP `analyze` on a clean working set (one root;
+  an untracked-only change and a non-git root are clean, as the working-set mask already says), MCP `rank_by` pagerank.
+  Not: `analyze` with a tracked, staged or documentation edit, or over two roots; `rank_by` authority/hub/rrf; `--tree`;
+  `for`; `explore`; and every other map dialect or shaping flag, which keeps the base bytes: `--exclude=`, `--top-k=0`,
+  `--order=`, `--format=`, `--compress`, `--signatures-only`, `--metrics`, `--mermaid`, a multi-root map.
+- **Fallback O-narrow:** O1 and O2 with the overflow; the ranked rows stay byte-identical to the base. **Placebo (20
+  seeds):** random evidence-free entry rows, random re-partition of the groups, a rank-decile-stratified random demotion and
+  a random-order overflow at the same byte cap.
+
+**Gates (written before the code).**
+- **Gate S:** every non-map surface is byte-identical to the base over a frozen argv list (frozen before any arm binary);
+  the rank vector's code is unchanged. The one permitted difference: the session dictionary may gain exactly O's entries.
+- **Gate P:** the bytes from the first section to the end of the overflow are identical on the CLI map, MCP `analyze` and
+  MCP `rank_by` pagerank; `--json` carries the same sections row for row.
+- **Gate D:** every `next=` pages exactly what its element cut, each once, every page at most K rows; every name is a core
+  file and none is named twice; every new attribute is defined in the XML, JSON and compact legends and the dictionary.
+- **Cost (step 1 of the stair, METHODOLOGY §9; owner rulings before any arm ran):** the registered numbers are TARGETS —
+  default-map growth at most +4,096 B, the sections at most 4,096 B, the overflow at most 2,048 B — judged "explain or
+  fail": an excess passes only with a stated reason (which content, and why the answer needs it), is then reported, and
+  is never met by dropping content. The first section starts within 1,024 B of the answer body (counted from the end of
+  the leading legend comments). A runaway ceiling well above typical answers sets `over_ceiling=`, cuts with `next=`,
+  and is listed by the gate as a bug signal. A byte breakdown is reported per repo.
+
+**Pass bars.**
+- **In-sample:** at least 2 of 3 whole-repo orient rows graded ✓ blind, with at least 1 gain over the base, no row lower,
+  no new false claim, and every non-✓ row's recall at least the base's.
+- **Held-out (decides):** a ✓ gain of at least 1 on non-inert rows, pooled recall +10 pp or more, no row lower, no new
+  false claim.
+- **Non-regression:** the `--eval` co-change guard on the map as emitted (`map_emit`, code-seeded commits, paired
+  bootstrap within repo): the arm fails if, at any k ∈ {5, 10, 20}, the pooled lower bound is below −1.0 pp or any repo's
+  point Δ is below −2.0 pp. A content claim needs the arm to beat all 20 placebo seeds; otherwise it is reported as a shape gain.
+- **Decision:** ship O iff everything passes (Gate P included); ship O-narrow iff O fails only the `--eval` guard and
+  O-narrow passes everything; an in-sample pass with a held-out fail changes no default; a Gate S, P or D failure is a
+  wiring defect.
