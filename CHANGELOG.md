@@ -16,6 +16,18 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 ## [Unreleased]
 
 
+### Changed — a how-it-works task no longer gets the ranked bundle on `--for`, `--pack-task`, MCP `for` and `explore` (fix #10)
+
+On all four surfaces, a task that opens with a how-opener (below) and is asked with default arguments now answers in
+`shape="how"`. It no longer carries the ranking (`<sigs>`/`<d r=>` rows), the bodies, the callers or `<hops>` (`lens=`
+names what is not carried); on `--pack-task`/`explore` the notes and tests still follow. To get the previous answer, pass
+any non-default argument: on the CLI e.g. `--top-k=40`, `--signatures-only` or `--token-budget=N`; over MCP e.g.
+`budget_tokens`. Three gates changed with it, by design: `mentioncheck`, `callsrankordercheck` and `compactroutecheck`
+keep their original assertions on a "where …" twin of each task and assert the how answer on the "how …" task. Cost: a
+triggered `--pack-task` reads the value-use index `--for` reads (so its sections match `--for` byte for byte), and costs
+what `--for` costs. On django (`--no-cache`, shared machine, load 11–25), it ran 5.4–6.7 s and ~620 MB RSS, against
+3.3–3.8 s and ~330 MB for the same task before this change.
+
 ### Added — `--for` answers a how-it-works task with a call path, not a ranked list (fix #10, pre-registered)
 
 A task that opens "how does", "how do", "how is", "how are", "how can", "explain how", "walk me through" or "what
@@ -26,13 +38,18 @@ default arguments on one root — CLI `--for` and `--pack-task` (beside `--legen
 - `<path seeds= hops=>`: up to 3 seeds, picked first from identifiers the question names (backticked, qualified, or
   `snake_case`/`camelCase`), then from definitions whose names carry the question's words, alternating with the `--for`
   window's own ranked callables; then the resolved calls walked from them, task words first — 9 hops at most, depth 4,
-  printed as chains `a > b > c | b > d`. A walk the cap stops reads `capped="1" next="--expand=…"`.
+  printed as chains `a > b > c | b > d`. A walk the cap stops reads `capped="1" next="--expand=…"`. Each seed's `<h>`
+  row says what picked it: `seed="named"` (a name the question gives), `seed="words"` (its words) or `seed="rank"` (the
+  ranked window). The last two are a best guess, not a proven entry point. A name the question gives that no Source
+  definition has is listed on `<path unmatched="…">`, and the root's `confidence=` then reads `low`.
 - `<h n= p=>` per hop: its signature, its distinct resolved callees `<c n= cl= p=>` (8 for a seed, 4 deeper; `cl=` up
   to 3 call-site lines; `defs=K` for a call split over K definitions, never followed — not `amb=`, the map's per-symbol count) and, on a seed, 2 callers
   `<us><u n= p= cl=>` (a type member's: the type's instantiation sites). Every cut is `shown= total= capped="1"` with
   `next="--callees=… --metrics"` / `next="--callers=… --metrics"` (`--metrics` reads the value-use index this answer reads;
   `--limit=N` rides along when the list is longer than one page). Callees and callers are name-resolved call edges, the
-  same edges `--callers`/`--callees` list — not proof of a runtime call; `cl=` lists the hop's call sites of that NAME.
+  same edges `--callers`/`--callees` list — not proof of a runtime call. `cl=` lists the hop's lines calling that
+  name; when a hop calls a method and a function of one name, the method's row keeps the receiver calls and the
+  function's row the bare ones.
   `<path>` carries `counts_floor="1"`, as `--callers`/`--callees` do: every call count is a floor of the resolved calls.
 - `<b n= p= lines_shown= sel= lines_total= next=>`: the first 3 hops' selected body lines — first line, calls,
   guards, field writes, exits — numbered, at most 1 KB a body and 2 KB in all, kept by priority and re-emitted in source

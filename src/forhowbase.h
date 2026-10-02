@@ -25,11 +25,14 @@ inline constexpr std::string_view kHowPathLegend =
     "; path seeds= hops=: up to 3 seeds and the resolved calls walked from them, a > b > c | b > d (a later chain"
     " starts at its branch point; 9 hops, depth 4); capped=1 next=: callees left to expand; cut_names= cut_callees="
     " cut_lines=: rows the 8 KB answer ceiling cut, in that order (each element's next= returns them);"
-    " over_ceiling=1: still over after the cuts; counts_floor=1: every call count is a floor (resolved calls only)";
+    " over_ceiling=1: still over after the cuts; counts_floor=1: every call count is a floor (resolved calls only);"
+    " unmatched=: names the task gives that no source definition has (confidence= then reads low)";
 
 inline constexpr std::string_view kHowHopLegend =
-    "; h n= p=file:line: a hop, its signature as text; c n= cl= p=: its resolved callees, task words first (8 for a"
-    " seed, 4 deeper), cl= up to 3 call lines, p= when it has no h row; defs=K: the name has K definitions, not followed; us u n= p="
+    "; h n= p=file:line: a hop, its signature as text; seed=named|words|rank: what picked a seed (a name the task gives;"
+    " its words; the ranked window) - words and rank are a best guess, not a proven entry point; c n= cl= p=: its resolved"
+    " callees, task words first (8 for a seed, 4 deeper), cl= up to 3 lines calling that name (a method's member calls, a"
+    " function's bare ones, when a hop calls both), p= when it has no h row; defs=K: the name has K definitions, not followed; us u n= p="
     " cl=: a seed's callers (a member's: its type's); shown= total= capped=1 next=: the whole list (the metrics flag"
     " reads this answer's index)";
 

@@ -23,6 +23,11 @@
 #   (S) SEEDS: a backticked identifier is the first seed; a qualified one (`.`, `::`, `#`, `->`) picks the definition its
 #       qualifier names among two same-named ones; an unmatched qualifier falls back to every definition of the last
 #       segment; a conceptual question's first seed is the definition whose NAME carries the question's terms.
+#   (H) SEED HONESTY: every seed row says what picked it (seed=named|words|rank) and no other row does; a backticked name
+#       is seed="named"; a word question carries no named seed; a name the question gives that nothing defines
+#       (`Zorblax.frobnicate`) is listed as <path unmatched=>, and the root then never reads confidence="high".
+#   (L) CALL LINES: a hop that calls a local function AND a same-named method lists the bare calls on the function's
+#       row and the receiver calls on the method's (cl=), not the name's every line on both.
 #   (R) REF POSTURE (Gate D's dictionary leg), on `for` and on `explore`: in a session that read the legend dictionary, the
 #       second triggered answer defines every attribute it carries in its own comments or in the dictionary text the session
 #       read, and carries none of the how clauses the first answer already sent.
@@ -372,6 +377,63 @@ done
 if [ -z "$sbad" ]; then
     ok "(S) identifier, qualified identifier (. :: # ->, two same-named defs), unmatched qualifier and term-named seeds come first; no match is seeds=\"0\""
 else no "(S) seeds:$sbad"; fi
+
+# ── (H) seed honesty: what picked each seed, and a named identifier that nothing defines ───────────────────────────────
+hbad=""
+seedrows(){ printf '%s' "$1" | grep -o '<h n="[^"]*" p="[^"]*" seed="[^"]*"' | sed 's/.*seed="//;s/"$//' | tr '\n' ' '; }
+H1="$( "$BIN" "$FIX" --no-cache --for='how is `call_handler` used' 2>/dev/null )"
+H2="$( "$BIN" "$FIX" --no-cache --for="how does the router dispatch a request" 2>/dev/null )"
+H3="$( "$BIN" "$FIX" --no-cache --for='how does `Zorblax.frobnicate` dispatch a request' 2>/dev/null )"
+for v in H1 H2 H3; do
+    eval "doc=\"\$$v\""
+    n="$( printf '%s' "$doc" | grep -o '<path seeds="[0-9]*"' | grep -o '[0-9]*' )"
+    k="$( printf '%s' "$doc" | grep -o ' seed="[a-z]*"' | wc -l | tr -d ' ' )"
+    [ -n "$n" ] && [ "$n" = "$k" ] || hbad="$hbad [$v: $k seed= rows for seeds=$n]"
+    printf '%s' "$doc" | grep -oE ' seed="[a-z]*"' | grep -qvE ' seed="(named|words|rank)"' && hbad="$hbad [$v: a seed= value outside named|words|rank]"
+done
+case "$( seedrows "$H1" )" in "named "*) ;; *) hbad="$hbad [backticked call_handler: first seed basis '$( seedrows "$H1" )', want named]" ;; esac
+case " $( seedrows "$H2" )" in *" named "*) hbad="$hbad [word question has a named seed: $( seedrows "$H2" )]" ;; esac
+printf '%s' "$H1$H2" | grep -q '<path [^>]* unmatched=' && hbad="$hbad [unmatched= on a question whose names all resolve]"
+printf '%s' "$H3" | grep -q '<path [^>]* unmatched="Zorblax.frobnicate"' || hbad="$hbad [undefined Zorblax.frobnicate: no <path unmatched=>]"
+printf '%s' "$H3" | grep -o '<ctx [^>]*>' | grep -q ' confidence="high"' && hbad="$hbad [undefined name still reads confidence=\"high\"]"
+case " $( seedrows "$H3" )" in *" named "*) hbad="$hbad [undefined name produced a named seed: $( seedrows "$H3" )]" ;; esac
+if [ -z "$hbad" ]; then
+    ok "(H) seed= on every seed row (named|words|rank), named for a backticked name, none named on a word question; an undefined name is <path unmatched=> and the root does not read confidence=\"high\""
+else no "(H) seed honesty:$hbad"; fi
+
+# ── (L) cl= on a local function beside a same-named method: bare calls on one row, receiver calls on the other ──────────
+mkdir -p "$TMP/cl/lib"
+cat > "$TMP/cl/lib/graph.js" <<'JS'
+class ChunkGraph {
+	getModuleHash(module, runtime) {
+		return module.id + runtime;
+	}
+}
+module.exports = ChunkGraph;
+JS
+cat > "$TMP/cl/lib/plugin.js" <<'JS'
+const ChunkGraph = require("./graph");
+class HotPlugin {
+	applyHotUpdates(compilation) {
+		compilation.hooks.fullHash.tap("HotPlugin", (hash) => {
+			const getModuleHash = (module) => {
+				return compilation.chunkGraph.getModuleHash(module, "main");
+			};
+			hash.update(getModuleHash(compilation.first));
+			hash.update(getModuleHash(compilation.second));
+		});
+		compilation.hooks.record.tap("HotPlugin", () => {
+			const chunkGraph = compilation.chunkGraph;
+			return compilation.ok ? chunkGraph.getModuleHash(compilation.third, "x") : 0;
+		});
+	}
+}
+module.exports = HotPlugin;
+JS
+CL="$( "$BIN" "$TMP/cl" --no-cache --for="how does HotPlugin apply hot updates" 2>/dev/null | grep -oE '<c n="getModuleHash"[^>]*>' | tr '\n' ' ' )"
+if [ "$CL" = '<c n="getModuleHash" cl="8,9"/> <c n="getModuleHash" cl="13" p="lib/graph.js:2"/> ' ]; then
+    ok "(L) the local getModuleHash row lists its bare calls (cl=8,9), the ChunkGraph method's row its receiver call (cl=13)"
+else no "(L) same-named function and method rows: got '$CL', want the bare calls on the local row and the receiver call on the method's"; fi
 
 # ── (R) the ref posture — the dictionary leg of Gate D, on for and on explore ──────────────────────────────────────────
 python3 - "$TMP" "$FIX" <<'PY' >"$TMP/r.out" 2>&1

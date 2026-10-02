@@ -383,6 +383,37 @@ inline HowQuestion parseHowQuestion( std::string_view s )
 inline bool isHowCallableKind( SymKind k ) noexcept { return k == SymKind::Function || k == SymKind::Method; }
 inline bool isHowContainerKind( SymKind k ) noexcept { return k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface; }
 inline bool hasHowBody( const Symbol& s ) noexcept { return s.endByte > s.sigEndByte; }
+// a seed candidate's shape (prereg S4): a callable or a container, with a body; its file must also be Source-tier
+inline bool isHowCandidateShape( const Symbol& s ) noexcept
+{
+    return ( isHowCallableKind( s.kind ) || isHowContainerKind( s.kind ) ) && hasHowBody( s );
+}
+inline bool isHowSourcePath( std::string_view p ) { return pathTierOf( p ) == PathTier::Source && !isDemoOrGeneratedPath( p ); }
+
+// The identifiers the question names (backticked, qualified, snake_case/camelCase) whose last segment no Source-tier
+// callable or container defines — no seed can be that name, so the answer says so (unmatched=, comma-separated, dotted).
+inline std::string howUnmatchedIdentifiers( const IngestResult& ing, const std::vector<std::vector<std::string>>& identifiers )
+{
+    std::string out;
+    for( const std::vector<std::string>& ident : identifiers )
+    {
+        const std::string_view last    = ident.back();
+        bool                   defined = false;
+        for( NodeId id = 0; id < ing.symbols.size() && !defined; ++id )
+        {
+            const Symbol& sy = ing.symbols[id];
+            defined = sy.name == last && isHowCandidateShape( sy ) && isHowSourcePath( rootRelPath( ing, sy.fileId ) );
+        }
+        if( !defined )
+        {
+            for( std::size_t k = 0; k < ident.size(); ++k )
+            {
+                out += ( k == 0 ? ( out.empty() ? "" : "," ) : "." ) + ident[k];
+            }
+        }
+    }
+    return out;
+}
 
 // p(c) = matched / count over the name's distinct subtokens; m(c) = distinct terms matched in name ∪ container ∪ path;
 // x(c) = the name equals an identifier the question names.
@@ -413,10 +444,11 @@ struct HowContext
     std::vector<std::int8_t>  hasPathSubs;
     std::vector<std::uint32_t> termStamp;
     std::uint32_t             stamp = 0;
+    docparse::detail::FileBytesCache files;            // each hop's source, read once (docparse.h): signatures, bodies, call sites
 
     HowContext( const IngestResult& i, const Graph& gr, const std::vector<float>& r, const HowQuestion& qq )
         : ing( i ), g( gr ), rank( r ), q( qq ), fileIsSource( i.files.size(), -1 ), pathSubs( i.files.size() ),
-          hasPathSubs( i.files.size(), 0 ), termStamp( qq.terms.size(), 0 )
+          hasPathSubs( i.files.size(), 0 ), termStamp( qq.terms.size(), 0 ), files( i.files.size() )
     {
     }
 
@@ -424,8 +456,7 @@ struct HowContext
     {
         if( fileIsSource[f] < 0 )
         {
-            const std::string_view p = rootRelPath( ing, f );
-            fileIsSource[f]          = ( pathTierOf( p ) == PathTier::Source && !isDemoOrGeneratedPath( p ) ) ? 1 : 0;
+            fileIsSource[f] = isHowSourcePath( rootRelPath( ing, f ) ) ? 1 : 0;
         }
         return fileIsSource[f] == 1;
     }
@@ -437,7 +468,7 @@ struct HowContext
     bool isCandidate( NodeId id )
     {
         const Symbol& s = ing.symbols[id];
-        return ( isHowCallableKind( s.kind ) || isHowContainerKind( s.kind ) ) && hasHowBody( s ) && isSourceFile( s.fileId );
+        return isHowCandidateShape( s ) && isSourceFile( s.fileId );
     }
     float lensScore( NodeId id ) const noexcept { return id < rank.size() ? rank[id] : 0.0f; }
 
@@ -532,10 +563,16 @@ inline std::string_view lastScopeSegment( std::string_view scope ) noexcept
 }
 
 // ── seeds (prereg S5-S7) ──────────────────────────────────────────────────────────────────────────────────────────────
+// What picked a seed, disclosed on its <h> row as seed=: a name the question gives (x), the question's words (List A
+// without x), or the lens's ranked window alone (List B without either) — the last two are a best guess, not an entry point.
+enum class HowSeedBasis : std::uint8_t { Named, Words, Rank };
+inline constexpr std::string_view kHowSeedBasisNames[] = { "named", "words", "rank" };   // HowSeedBasis order
+
 struct HowSeedPick
 {
-    NodeId id        = kNoNode;
-    NodeId container = kNoNode;   // the container List A replaced by its members, when the seed came from one
+    NodeId       id        = kNoNode;
+    NodeId       container = kNoNode;   // the container List A replaced by its members, when the seed came from one
+    HowSeedBasis basis     = HowSeedBasis::Rank;
 };
 
 // The resolved, followable call edges of `from` (prereg P): Source callable targets, never a split arm (outProv 3).
@@ -641,9 +678,10 @@ inline std::vector<HowSeedPick> buildListA( HowContext& cx, std::vector<HowScore
     for( const HowKeyed& e : entries )
     {
         const Symbol& c = ing.symbols[e.id];
+        const HowSeedBasis basis = e.sc.x ? HowSeedBasis::Named : HowSeedBasis::Words;
         if( !isHowContainerKind( c.kind ) )
         {
-            out.push_back( { e.id, kNoNode } );
+            out.push_back( { e.id, kNoNode, basis } );
             continue;
         }
         // a container is replaced in place by its member callables (prereg S5)
@@ -660,7 +698,7 @@ inline std::vector<HowSeedPick> buildListA( HowContext& cx, std::vector<HowScore
         std::sort( members.begin(), members.end(), memberBefore );
         for( const HowKeyed& mbr : members )
         {
-            out.push_back( { mbr.id, e.id } );
+            out.push_back( { mbr.id, e.id, basis } );   // a member of a named container is named through it
         }
     }
     return out;
@@ -680,7 +718,10 @@ inline std::vector<HowSeedPick> buildListB( HowContext& cx, std::span<const Node
             scoreOf[id] = cx.score( id );
             scored[id]  = 1;
         }
-        ( scoreOf[id].m >= 1 ? withTerm : rest ).push_back( { id, kNoNode } );
+        const HowScore&    sc    = scoreOf[id];
+        const HowSeedBasis basis = sc.x ? HowSeedBasis::Named
+                                 : ( sc.m >= 1 && sc.count > 0 && 2u * sc.matched >= sc.count ) ? HowSeedBasis::Words : HowSeedBasis::Rank;
+        ( sc.m >= 1 ? withTerm : rest ).push_back( { id, kNoNode, basis } );
     }
     withTerm.insert( withTerm.end(), rest.begin(), rest.end() );
     return withTerm;
@@ -748,6 +789,7 @@ struct HowHop
     int                       parent    = -1;       // index into the hop list; -1 for a seed
     int                       depth     = 0;
     NodeId                    container = kNoNode;  // a List-A member seed's container: its callers are instantiation sites
+    HowSeedBasis              seedBasis = HowSeedBasis::Rank;   // a seed only (parent -1): what picked it
     std::string               sig;
     std::vector<HowCalleeRow> rows;                 // every distinct callee, priority order
     std::size_t               listed    = 0;        // rows shown (the cap, before the ceiling)
@@ -795,49 +837,86 @@ inline bool calleeBefore( const HowCalleeRow& a, const HowCalleeRow& b ) noexcep
     return a.id < b.id;
 }
 
-// (callee name, line) in svLess order, line breaking ties — never string_view's operator<, which aborts the Linux G1
-// leg (portablebuildcheck #6b); the sort and the lookup below share this one order
-inline bool callSiteBefore( const std::pair<std::string_view, std::uint32_t>& a, const std::pair<std::string_view, std::uint32_t>& b ) noexcept
+// One call site FROM a hop: the called name, its line, and whether it was written with a receiver or qualifier
+// (`x.f()`, `self.f()`, `p->f()`, `A::f()`) or bare (`f()`) — read off the source: the call expression starts at the name
+// or it does not (Reference::recv is not recorded for every language). Ordered svLess on the name — never string_view's operator<, which aborts the Linux G1 leg
+// (portablebuildcheck #6b) — then line, then bare before member; the sort and the lookup below share this one order.
+struct HowCallSite
 {
-    if( a.first != b.first )
+    std::string_view name;
+    std::uint32_t    line     = 0;
+    bool             isMember = false;
+};
+inline bool callSiteBefore( const HowCallSite& a, const HowCallSite& b ) noexcept
+{
+    if( a.name != b.name )
     {
-        return rw::sortutil::svLess( a.first, b.first );
+        return rw::sortutil::svLess( a.name, b.name );
     }
-    return a.second < b.second;
+    return a.line != b.line ? a.line < b.line : a.isMember < b.isMember;
 }
 
-// one pass over the reference table: the call sites FROM `from`, as (callee name, line), sorted
-inline std::vector<std::pair<std::string_view, std::uint32_t>> callSitesFrom( const IngestResult& ing, NodeId from )
+// one pass over the reference table: the call sites FROM `from` (whose file's bytes are `src`, "" when unread), sorted
+inline std::vector<HowCallSite> callSitesFrom( const IngestResult& ing, NodeId from, std::string_view src )
 {
-    std::vector<std::pair<std::string_view, std::uint32_t>> sites;
+    std::vector<HowCallSite> sites;
     for( const Reference& r : ing.references )
     {
         if( r.fromSymbol != from || r.role != RefRole::Call || r.isCompose || r.isDocLink || r.lang == Lang::Markdown )
         {
             continue;
         }
-        sites.emplace_back( r.calleeName, r.line );
+        const std::string_view name   = r.calleeName;
+        const bool             isBare = src.size() >= r.startByte + name.size() ? src.substr( r.startByte, name.size() ) == name
+                                                                                : r.recv == RecvKind::None;
+        sites.push_back( { name, r.line, !isBare } );
     }
     std::sort( sites.begin(), sites.end(), callSiteBefore );
-    sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
+    sites.erase( std::unique( sites.begin(), sites.end(), []( const HowCallSite& a, const HowCallSite& b )
+                              { return a.name == b.name && a.line == b.line && a.isMember == b.isMember; } ), sites.end() );
     return sites;
 }
 
-inline std::vector<std::uint32_t> linesNaming( const std::vector<std::pair<std::string_view, std::uint32_t>>& sites, std::string_view name )
+// Which sites of a name a row lists: every one (the name's lines), or — when a hop calls a method AND a function of the same
+// name — only the member calls for the method's row and only the bare calls for the function's (HowSiteFilter).
+enum class HowSiteFilter : std::uint8_t { AnyCall, MemberCalls, BareCalls };
+
+inline std::vector<std::uint32_t> linesNaming( const std::vector<HowCallSite>& sites, std::string_view name,
+                                               HowSiteFilter only = HowSiteFilter::AnyCall )
 {
     std::vector<std::uint32_t> lines;
-    for( auto it = std::lower_bound( sites.begin(), sites.end(), std::make_pair( name, std::uint32_t( 0 ) ), callSiteBefore );
-         it != sites.end() && it->first == name; ++it )
+    for( auto it = std::lower_bound( sites.begin(), sites.end(), HowCallSite{ name, 0, false }, callSiteBefore );
+         it != sites.end() && it->name == name; ++it )
     {
-        lines.push_back( it->second );
+        const bool keep = only == HowSiteFilter::AnyCall || ( only == HowSiteFilter::MemberCalls ) == it->isMember;
+        if( keep && ( lines.empty() || lines.back() != it->line ) )
+        {
+            lines.push_back( it->line );
+        }
     }
     return lines;
+}
+
+// A method and a function of one name, both called from one hop: the method's row keeps the member calls, the function's
+// the bare ones (a JS local `getModuleHash()` beside `chunkGraph.getModuleHash()`); any other row keeps the name's lines.
+inline void splitSameNamedCallLines( const IngestResult& ing, const std::vector<HowCallSite>& sites, std::vector<HowCalleeRow>& rows )
+{
+    for( HowCalleeRow& row : rows )
+    {
+        const SymKind k = ing.symbols[row.id].kind;
+        const auto    isOtherKind = [ & ]( const HowCalleeRow& o ) { return o.ambArms == 0 && o.name == row.name && ing.symbols[o.id].kind != k; };
+        if( row.ambArms == 0 && std::any_of( rows.begin(), rows.end(), isOtherKind ) )
+        {
+            row.lines     = linesNaming( sites, row.name, k == SymKind::Method ? HowSiteFilter::MemberCalls : HowSiteFilter::BareCalls );
+            row.firstLine = row.lines.empty() ? UINT32_MAX : row.lines.front();
+        }
+    }
 }
 
 inline void buildHopRows( HowContext& cx, HowHop& hop )
 {
     const IngestResult& ing   = cx.ing;
-    const auto          sites = callSitesFrom( ing, hop.id );
+    const auto          sites = callSitesFrom( ing, hop.id, cx.files.get( ing, ing.symbols[hop.id].fileId ) );
     std::vector<NodeId> splitArms;
     forEachFollowableCallee( cx, hop.id, [ & ]( NodeId t, bool isSplit )
     {
@@ -875,6 +954,7 @@ inline void buildHopRows( HowContext& cx, HowHop& hop )
         hop.rows.push_back( std::move( row ) );
         i = j;
     }
+    splitSameNamedCallLines( ing, sites, hop.rows );
     std::sort( hop.rows.begin(), hop.rows.end(), calleeBefore );
     hop.listed            = std::min( hop.rows.size(), hop.depth == 0 ? kHowSeedCalleeRows : kHowDeepCalleeRows );
     hop.shownRows         = hop.listed;
@@ -919,7 +999,7 @@ inline void buildCallerRows( HowContext& cx, HowHop& hop )
         row.id = keyed[i].id;
         if( i < kHowCallerRows )
         {
-            row.lines = linesNaming( callSitesFrom( ing, row.id ), targetName );
+            row.lines = linesNaming( callSitesFrom( ing, row.id, {} ), targetName );   // every line naming it: no split needed
         }
         hop.callers.push_back( std::move( row ) );
     }
@@ -960,13 +1040,14 @@ inline HowPath walkHowPath( HowContext& cx, const std::vector<HowSeedPick>& seed
     HowPath           out;
     std::vector<char> isHop( cx.ing.symbols.size(), 0 );
     std::vector<HowPoolEntry> pool;
-    const auto addHop = [ & ]( NodeId id, int parent, int depth, NodeId container )
+    const auto addHop = [ & ]( NodeId id, int parent, int depth, NodeId container, HowSeedBasis basis )
     {
         HowHop hop;
         hop.id        = id;
         hop.parent    = parent;
         hop.depth     = depth;
         hop.container = container;
+        hop.seedBasis = basis;
         buildHopRows( cx, hop );
         isHop[id] = 1;
         const int self = int( out.hops.size() );
@@ -982,7 +1063,7 @@ inline HowPath walkHowPath( HowContext& cx, const std::vector<HowSeedPick>& seed
     };
     for( const HowSeedPick& s : seeds )
     {
-        addHop( s.id, -1, 0, s.container );
+        addHop( s.id, -1, 0, s.container, s.basis );
     }
     const auto eligible = [ & ]( const HowPoolEntry& e ) { return !isHop[e.id] && ( e.sc.m >= 1 || e.L > 0.0f ); };
     while( out.hops.size() < kHowHopMax )
@@ -1000,7 +1081,7 @@ inline HowPath walkHowPath( HowContext& cx, const std::vector<HowSeedPick>& seed
             break;
         }
         const HowPoolEntry chosen = *best;
-        addHop( chosen.id, chosen.parent, chosen.depth, kNoNode );
+        addHop( chosen.id, chosen.parent, chosen.depth, kNoNode, HowSeedBasis::Rank );
     }
     std::vector<HowPoolEntry> left;
     for( const HowPoolEntry& e : pool )
@@ -1420,6 +1501,7 @@ struct HowHead
     std::string      notes;              // the data notes, compact (compactForNote): mention, cochange, doc mentions, floor
     bool             isWeak = false;     // the top raw lexical score is under the evidence bar (lexical.h)
     std::string      hdrXml;             // <hdr p= of=/> rows
+    std::string      unmatched;          // named identifiers no Source definition has (howUnmatchedIdentifiers) — <path unmatched=>
 };
 
 struct HowHeadInputs
@@ -1489,6 +1571,13 @@ inline HowHead howHeadFor( const IngestResult& ing, const std::vector<float>& ra
         conf.attrs   += " coverage=\"" + std::to_string( coverage ) + "\"";
         conf.note    += kForCoverageLegend;
         h.hasCoverage = true;
+    }
+    // a name the question gives that nothing defines: the seeds cannot be it, so the answer never reads confident
+    h.unmatched = howUnmatchedIdentifiers( ing, parseHowQuestion( in.task ).identifiers );
+    if( const std::size_t at = conf.attrs.find( " confidence=\"" ); !h.unmatched.empty() && at != std::string::npos )
+    {
+        const std::size_t from = at + std::string_view( " confidence=\"" ).size();
+        conf.attrs.replace( from, conf.attrs.find( '"', from ) - from, "low" );
     }
     h.confAttrs = std::move( conf.attrs );
     h.confNote  = std::move( conf.note );
@@ -1622,6 +1711,7 @@ struct HowModel
     std::size_t          cutNames    = 0;   // what the ceiling took, by kind — disclosed on <path> as cut_names= …
     std::size_t          cutCallees  = 0;
     std::size_t          cutLines    = 0;
+    std::string          unmatched;         // the head's (HowHead::unmatched), on <path>
 };
 
 class HowRenderer
@@ -1668,7 +1758,8 @@ public:
         { return countFieldIfAbove( std::uint32_t( rowCount ), std::uint32_t( kCallHierarchyRowCap ), " --limit=" ); };
         const HowPath& p = m.path;
         // counts_floor=1: the callee and caller counts are the resolved graph's, as --callees/--callers mark theirs
-        std::string    x = "<path seeds=\"" + std::to_string( m.seedCount ) + "\" hops=\"" + std::to_string( p.hops.size() ) + "\"" + kGraphCountFloorAttrXml;
+        std::string    x = "<path seeds=\"" + std::to_string( m.seedCount ) + "\" hops=\"" + std::to_string( p.hops.size() ) + "\"" + kGraphCountFloorAttrXml
+                         + ( m.unmatched.empty() ? std::string() : " unmatched=\"" + esc( m.unmatched ) + "\"" );
         if( !p.waiting.empty() )
         {
             std::string next = "--expand=";
@@ -1720,7 +1811,9 @@ public:
         }
         for( const HowHop& h : p.hops )
         {
-            x += "<h n=\"" + esc( m_ing.symbols[h.id].name ) + "\" p=\"" + esc( loc( h.id ) ) + "\" shown=\"" + std::to_string( h.shownRows )
+            x += "<h n=\"" + esc( m_ing.symbols[h.id].name ) + "\" p=\"" + esc( loc( h.id ) ) + "\""
+               + ( h.parent < 0 ? " seed=\"" + std::string( kHowSeedBasisNames[ std::size_t( h.seedBasis ) ] ) + "\"" : std::string() )
+               + " shown=\"" + std::to_string( h.shownRows )
                + "\" total=\"" + std::to_string( h.rows.size() ) + "\"";
             if( h.shownRows < h.rows.size() )
             {
@@ -1876,18 +1969,18 @@ inline HowSections howSections( const HowInputs& in )
         const std::vector<HowSeedPick> seeds = pickSeeds( cx, listA, listB );
         m.seedCount = seeds.size();
         m.path      = walkHowPath( cx, seeds );
+        m.unmatched = in.head.unmatched;
     }
-    docparse::detail::FileBytesCache srcCache( ing.files.size() );   // each hop's file, read once (docparse.h)
     for( HowHop& h : m.path.hops )
     {
         const Symbol& s = ing.symbols[h.id];
-        const std::string& src = srcCache.get( ing, s.fileId );
+        const std::string& src = cx.files.get( ing, s.fileId );
         if( s.sigStartByte < s.sigEndByte && s.sigEndByte <= src.size() )
         {
             h.sig = cleanSig( src.data(), s.sigStartByte, s.sigEndByte, in.redact );
         }
     }
-    m.bodies = selectBodies( cx, m.path, q, in.redact, srcCache );
+    m.bodies = selectBodies( cx, m.path, q, in.redact, cx.files );
 
     std::vector<char> isHop( ing.symbols.size(), 0 );
     for( const HowHop& h : m.path.hops )
