@@ -369,7 +369,9 @@ done
 [ "$( first_hop 'how does app.dispatch route a request' )" = "dispatch@router.py:11" ] || sbad="$sbad [unmatched qualifier: $( first_hop 'how does app.dispatch route a request' )]"
 "$BIN" "$FIX" --no-cache --for="how does the router dispatch a request" 2>/dev/null | grep -q '<path seeds="[1-3]"' || sbad="$sbad [<path seeds=> missing]"
 "$BIN" "$FIX" --no-cache --for="how does zzqx frobnicate" 2>/dev/null | grep -q '<path seeds="0"' || sbad="$sbad [no seed: want <path seeds=\"0\">]"
-[ -z "$sbad" ] && ok "(S) identifier, qualified identifier (. :: # ->, two same-named defs), unmatched qualifier and term-named seeds come first; no match is seeds=\"0\"" || no "(S) seeds:$sbad"
+if [ -z "$sbad" ]; then
+    ok "(S) identifier, qualified identifier (. :: # ->, two same-named defs), unmatched qualifier and term-named seeds come first; no match is seeds=\"0\""
+else no "(S) seeds:$sbad"; fi
 
 # ── (R) the ref posture — the dictionary leg of Gate D, on for and on explore ──────────────────────────────────────────
 python3 - "$TMP" "$FIX" <<'PY' >"$TMP/r.out" 2>&1
@@ -401,7 +403,9 @@ done
 "$BIN" src --no-cache --for="how does the lens ranking pick its top rows" >"$TMP/u1" 2>/dev/null
 RIPWIRE_HOW_UNCAPPED=1 "$BIN" src --no-cache --for="how does the lens ranking pick its top rows" >"$TMP/u2" 2>/dev/null
 [ "$( wc -c <"$TMP/u1" )" -le 8192 ] && { cmp -s "$TMP/u1" "$TMP/u2" || ubad="$ubad [src lens]"; }
-[ -z "$ubad" ] && ok "(U) RIPWIRE_HOW_UNCAPPED=1 is byte-identical to the answer whenever the answer is under 8,192 B" || no "(U) uncapped arm differs under the ceiling:$ubad"
+if [ -z "$ubad" ]; then
+    ok "(U) RIPWIRE_HOW_UNCAPPED=1 is byte-identical to the answer whenever the answer is under 8,192 B"
+else no "(U) uncapped arm differs under the ceiling:$ubad"; fi
 
 # ── (X) well-formed + deterministic ─────────────────────────────────────────────────────────────────────────────────────
 "$BIN" "$FIX" --no-cache --for="$Q" >"$TMP/x1" 2>/dev/null; "$BIN" "$FIX" --no-cache --for="$Q" >"$TMP/x2" 2>/dev/null

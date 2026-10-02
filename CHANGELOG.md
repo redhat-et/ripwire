@@ -28,7 +28,7 @@ default arguments on one root — CLI `--for` and `--pack-task` (beside `--legen
   window's own ranked callables; then the resolved calls walked from them, task words first — 9 hops at most, depth 4,
   printed as chains `a > b > c | b > d`. A walk the cap stops reads `capped="1" next="--expand=…"`.
 - `<h n= p=>` per hop: its signature, its distinct resolved callees `<c n= cl= p=>` (8 for a seed, 4 deeper; `cl=` up
-  to 3 call-site lines; `amb=K` for a call split over K definitions, never followed) and, on a seed, 2 callers
+  to 3 call-site lines; `defs=K` for a call split over K definitions, never followed — not `amb=`, the map's per-symbol count) and, on a seed, 2 callers
   `<us><u n= p= cl=>` (a type member's: the type's instantiation sites). Every cut is `shown= total= capped="1"` with
   `next="--callees=… --metrics"` / `next="--callers=… --metrics"` (`--metrics` reads the value-use index this answer reads;
   `--limit=N` rides along when the list is longer than one page). Callees and callers are name-resolved call edges, the

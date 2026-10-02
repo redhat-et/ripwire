@@ -29,7 +29,7 @@ inline constexpr std::string_view kHowPathLegend =
 
 inline constexpr std::string_view kHowHopLegend =
     "; h n= p=file:line: a hop, its signature as text; c n= cl= p=: its resolved callees, task words first (8 for a"
-    " seed, 4 deeper), cl= up to 3 call lines, p= when it has no h row; amb=K: K definitions, not followed; us u n= p="
+    " seed, 4 deeper), cl= up to 3 call lines, p= when it has no h row; defs=K: the name has K definitions, not followed; us u n= p="
     " cl=: a seed's callers (a member's: its type's); shown= total= capped=1 next=: the whole list (the metrics flag"
     " reads this answer's index)";
 

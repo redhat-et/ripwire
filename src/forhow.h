@@ -795,6 +795,17 @@ inline bool calleeBefore( const HowCalleeRow& a, const HowCalleeRow& b ) noexcep
     return a.id < b.id;
 }
 
+// (callee name, line) in svLess order, line breaking ties — never string_view's operator<, which aborts the Linux G1
+// leg (portablebuildcheck #6b); the sort and the lookup below share this one order
+inline bool callSiteBefore( const std::pair<std::string_view, std::uint32_t>& a, const std::pair<std::string_view, std::uint32_t>& b ) noexcept
+{
+    if( a.first != b.first )
+    {
+        return rw::sortutil::svLess( a.first, b.first );
+    }
+    return a.second < b.second;
+}
+
 // one pass over the reference table: the call sites FROM `from`, as (callee name, line), sorted
 inline std::vector<std::pair<std::string_view, std::uint32_t>> callSitesFrom( const IngestResult& ing, NodeId from )
 {
@@ -807,7 +818,7 @@ inline std::vector<std::pair<std::string_view, std::uint32_t>> callSitesFrom( co
         }
         sites.emplace_back( r.calleeName, r.line );
     }
-    std::sort( sites.begin(), sites.end() );
+    std::sort( sites.begin(), sites.end(), callSiteBefore );
     sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
     return sites;
 }
@@ -815,7 +826,7 @@ inline std::vector<std::pair<std::string_view, std::uint32_t>> callSitesFrom( co
 inline std::vector<std::uint32_t> linesNaming( const std::vector<std::pair<std::string_view, std::uint32_t>>& sites, std::string_view name )
 {
     std::vector<std::uint32_t> lines;
-    for( auto it = std::lower_bound( sites.begin(), sites.end(), std::make_pair( name, std::uint32_t( 0 ) ) );
+    for( auto it = std::lower_bound( sites.begin(), sites.end(), std::make_pair( name, std::uint32_t( 0 ) ), callSiteBefore );
          it != sites.end() && it->first == name; ++it )
     {
         lines.push_back( it->second );
@@ -844,7 +855,7 @@ inline void buildHopRows( HowContext& cx, HowHop& hop )
         row.firstLine = row.lines.empty() ? UINT32_MAX : row.lines.front();
         hop.rows.push_back( std::move( row ) );
     } );
-    // an edge split over several definitions: ONE row per called name, amb= its arm count, never followed
+    // an edge split over several definitions: ONE row per called name, defs= its arm count, never followed
     std::sort( splitArms.begin(), splitArms.end(), [ & ]( NodeId a, NodeId b )
                { return ing.symbols[a].name != ing.symbols[b].name ? ing.symbols[a].name < ing.symbols[b].name : a < b; } );
     for( std::size_t i = 0; i < splitArms.size(); )
@@ -1726,7 +1737,7 @@ public:
                 }
                 if( r.ambArms > 1 )
                 {
-                    x += " amb=\"" + std::to_string( r.ambArms ) + "\"";
+                    x += " defs=\"" + std::to_string( r.ambArms ) + "\"";   // defs=: the name's definitions — amb= is the map's per-symbol count
                 }
                 else if( !isHopId[r.id] )
                 {

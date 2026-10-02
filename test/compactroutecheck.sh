@@ -186,14 +186,15 @@ print("legend" if leg and all(k in leg.group(1) for k in ("route=", "lens=:", "p
 print("edges" if re.search(r"<path [^>]*>[^<]*</path><h n=[^>]*>.*?<c n=", d, re.S) else "noedges")   # the chain, then its hop rows
 PY9
 )"
-printf '%s\n' "$HCHK" | grep -qx legend && ok "(9) how form: the compact legend opens the answer and defines route=, lens= and <path>" \
-    || no "(9) how form: the compact legend is missing or does not define route=/lens=/<path>"
-printf '%s\n' "$HCHK" | grep -qx edges && ok "(9) how form: <path> carries hop rows with resolved callees (the edge context, in the how shape)" \
-    || no "(9) how form: <path> has no <h> row with a <c> callee"
-[ "$( wc -c < "$TMP/howfull" )" -gt "$( wc -c < "$TMP/how" )" ] && ok "(9) how form: --legend=full restores the prose legend (longer than compact)" \
-    || no "(9) how form: --legend=full is not longer than the compact answer"
-{ cmp -s "$TMP/how" "$TMP/how2" && { ! command -v xmllint >/dev/null 2>&1 || xmllint --noout "$TMP/how" 2>/dev/null; }; } \
-    && ok "(9) how form: byte-identical across 2 runs and well-formed" || no "(9) how form: not deterministic or not well-formed"
+if printf '%s\n' "$HCHK" | grep -qx legend; then ok "(9) how form: the compact legend opens the answer and defines route=, lens= and <path>"
+else no "(9) how form: the compact legend is missing or does not define route=/lens=/<path>"; fi
+if printf '%s\n' "$HCHK" | grep -qx edges; then ok "(9) how form: <path> carries hop rows with resolved callees (the edge context, in the how shape)"
+else no "(9) how form: <path> has no <h> row with a <c> callee"; fi
+if [ "$( wc -c < "$TMP/howfull" )" -gt "$( wc -c < "$TMP/how" )" ]; then ok "(9) how form: --legend=full restores the prose legend (longer than compact)"
+else no "(9) how form: --legend=full is not longer than the compact answer"; fi
+if cmp -s "$TMP/how" "$TMP/how2" && { ! command -v xmllint >/dev/null 2>&1 || xmllint --noout "$TMP/how" 2>/dev/null; }; then
+    ok "(9) how form: byte-identical across 2 runs and well-formed"
+else no "(9) how form: not deterministic or not well-formed"; fi
 
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES PRESENT"; exit 1

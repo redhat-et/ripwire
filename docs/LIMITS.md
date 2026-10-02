@@ -16,10 +16,10 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 230 | 91 | 128 | **102** |
+| 238 | 92 | 136 | **102** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 230 + 7 is the 237 constants this generator parses out of `src/`.
+are not counted as caps, and 238 + 7 is the 245 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -37,8 +37,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **128 of 230 caps are classified
-(43 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 102 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **128 of 238 caps are classified
+(43 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 110 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -88,7 +88,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 91 files that declare a cap — the 230 caps counted above, and no parameter.
+One table for each of the 92 files that declare a cap — the 238 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -309,6 +309,21 @@ Discloses: `hosts_capped`
 | `kMaxFamily` | `64` | INDEXING | gates one flip may light — an alias fan-out past this is a table, not a switch |
 | `kMaxFlipRows` | `25` | OUTPUT | per emitted list; a DEFAULT --limit=N raises and --detail lifts |
 | `kMaxNearMisses` | `5` | OUTPUT | "did you mean" suggestions on an unknown gate name; --limit=N raises it |
+
+### `src/forhow.h`
+
+Discloses: `X_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kHowCallerRows` | `2` | — | P: a seed's callers |
+| `kHowCeilingBytes` | `8192` | — | §0 "Ceiling": the WHOLE first answer — the CLI default --for |
+| `kHowDeepCalleeRows` | `4` | — | P: …and on a deeper hop |
+| `kHowDepthMax` | `4` | — | P |
+| `kHowHopMax` | `9` | — | P: seeds included |
+| `kHowNameRows` | `8` | — | N |
+| `kHowSeedCalleeRows` | `8` | — | P: callee rows on a seed's hop |
+| `kHowSeedMax` | `3` | — | S7 |
 
 ### `src/forpage.h`
 
