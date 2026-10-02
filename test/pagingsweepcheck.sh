@@ -742,6 +742,9 @@ TABLE = {
     # one row per file, NOT a window over the bundle. The bare --for root (<ctx>) is therefore uncut by
     # construction and carries no quintet; the page itself (test/forwidencheck.sh) carries the full quintet.
     "--for":                ( [ "--for=escapeXml" ], None ),
+    # Fix #8 (2026-10-02): --orient=KIND pages one orient section of the default map (the next= its sections carry); the
+    # overflow page is the long one.
+    "--orient":             ( [ "--orient=overflow" ], None ),
 }
 fail = 0
 missing = [ v for v in universe if v not in TABLE ]

@@ -1099,11 +1099,10 @@ inline std::string page( const IngestResult& ing, const std::vector<float>& rank
     {
         head += detail::attr( "g", s.rootG );
     }
-    head += detail::num( "shown", to - from ) + detail::num( "total", total ) + detail::num( "capped", to < total ? 1 : 0 )
-          + detail::num( "has_more", to < total ? 1 : 0 );
-    if( to < total )
+    head += detail::num( "shown", to - from ) + detail::num( "total", total ) + detail::num( "capped", to < total ? 1 : 0 );
+    if( to < total )   // the paging half rides only a cut page (pageview.h's rule: a bare uncut answer stays byte-neutral)
     {
-        head += detail::num( "next_offset", to );
+        head += detail::num( "has_more", 1 ) + detail::num( "next_offset", to );
     }
     head += detail::num( "offset", from ) + detail::num( "limit", lim ) + ">";
     return head + rows + "</orient>";
