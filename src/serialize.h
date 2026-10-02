@@ -2019,18 +2019,27 @@ inline constexpr std::string_view kDataSectionsCutLegend =
 
 // Fix #8: the orient sections' legend, charged only to a map that carries them. Every element is spelled with every
 // attribute it can carry (orientmapcheck (L) reads the spelling). No double hyphen inside a comment (G4).
-inline constexpr std::string_view kOrientLegend =
-    "<!-- orient: the whole-repo map's orientation, before the ranked rows; rank vector untouched. <entry_points shown= "
-    "total= capped= next=>: entry points with evidence, core files only: <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry> "
-    "(a manifest bin/script, a main definition, the package entry module); total= counts every one, next= pages the rest. "
-    "<subsystems g=ROOT shown= total= capped= next=>: the core files (source tier, not test/demo/generated, not demoted) "
-    "grouped under g= (the directory holding 2/3 of their rank mass): <grp l=LABEL n=FILES> rows by mass, each with its "
-    "top <m p=PATH> members; l= is dir/ or a file-name prefix, /top/ or /prefix outside g=; p= is relative to g=, "
-    "repo-relative with a leading / outside it. <overflow shown= total= capped= next= over_ceiling=>: every core file "
-    "not named above, breadth-first over the groups (every group's next member before any group's one after), cut at "
-    "2048 B and re-grouped; next= pages the cut names in that order; over_ceiling=1: the runaway guard cut it. "
-    "<demoted utility_demoted=N next=>: N utility sinks (called from many files, calling few) and vendored/compat files "
-    "left the ranked rows and the groups; next= lists them -->";
+inline constexpr std::string_view kOrientLegendO =
+    "<!-- orient: the whole-repo map's orientation, before the ranked rows; the rank (k=) is untouched. <entry_points shown= "
+    "total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with evidence (a manifest "
+    "bin/script, a main definition, the package entry module), core files only. <subsystems g=ROOT shown= total= capped= "
+    "next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not test/demo/generated, not demoted) grouped "
+    "under g=, the directory holding 2/3 of their rank mass; label= is dir/ or a name prefix (/top/, /prefix outside g=); groups "
+    "by mass with their top members; p= relative to g=, else /repo-relative. <overflow shown= total= capped= next= "
+    "over_ceiling=>: every other core file, each group's next member before any group's one after, cut at 2048 B; "
+    "over_ceiling=1: the runaway guard cut it. <demoted utility_demoted=N next=>: N utility sinks (called from many files, "
+    "calling few) and vendored/compat files left the ranked rows and the groups. next= pages any cut -->";
+// O-narrow keeps every ranked row (orientarm.h kArm, orientmap.h demoteRows), so its legend says so in the same place.
+inline constexpr std::string_view kOrientLegendNarrow =
+    "<!-- orient: the whole-repo map's orientation, before the ranked rows; the rank (k=) is untouched. <entry_points shown= "
+    "total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with evidence (a manifest "
+    "bin/script, a main definition, the package entry module), core files only. <subsystems g=ROOT shown= total= capped= "
+    "next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not test/demo/generated, not demoted) grouped "
+    "under g=, the directory holding 2/3 of their rank mass; label= is dir/ or a name prefix (/top/, /prefix outside g=); groups "
+    "by mass with their top members; p= relative to g=, else /repo-relative. <overflow shown= total= capped= next= "
+    "over_ceiling=>: every other core file, each group's next member before any group's one after, cut at 2048 B; "
+    "over_ceiling=1: the runaway guard cut it. <demoted utility_demoted=N next=>: N utility sinks (called from many files, "
+    "calling few) and vendored/compat files left the groups (the ranked rows keep them). next= pages any cut -->";
 
 // F3: the <recent> element — rank_by=churn-decay's file-level answer FIRST, paths + age in days at HEAD's clock +
 // decayed weight — written before the first <f> group so "what changed recently" is answered before the symbol
@@ -2904,7 +2913,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     }
     if( ann.orient != nullptr && ann.orient->isActive )
     {
-        legend += kOrientLegend;            // fix #8: charged to the map that carries the orient sections
+        legend += orient::kArm == orient::Arm::Narrow ? kOrientLegendNarrow : kOrientLegendO;   // fix #8: charged to the map that carries the sections
     }
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty
     // for a lexical or HITS ordering, and the prose half only on the map whose iteration stopped short.

@@ -134,7 +134,7 @@ def model(root, pinned=None):
 
 def names(node, g):
     """[(label, [repo paths])] of a <subsystems>/<overflow> node"""
-    return [(grp.a.get("l"), [om.unrel(m.a.get("p", ""), g) for m in grp.find("m")]) for grp in node.find("grp")]
+    return [(grp.a.get("label"), [om.unrel(m.a.get("p", ""), g) for m in grp.find("m")]) for grp in node.find("grp")]
 
 
 def runaway(M, label, doc=None, what="answer"):
@@ -184,20 +184,20 @@ def gate_d(M, label, exact=False):
     sizes = {lab: str(len(ps)) for lab, ps in orc["members"].items()}
     gdecided = not any(a.startswith("G descent") for a in orc["ambiguous"]) and g == orc["G"]
     if "next" in sub.a:
-        rows, probs = om.follow(BIN, root, sub.a["next"], "l")
-        labs = [r["l"] for r in rows]
+        rows, probs = om.follow(BIN, root, sub.a["next"], "label")
+        labs = [r["label"] for r in rows]
         allg = [l for l, _ in names(sub, g)] + labs
         check(not probs and len(allg) == len(set(allg)) and len(allg) == int(sub.a["total"]),
               "(D) %s: subsystems next= pages the %d groups past the shown ones, each once" % (label, int(sub.a["total"]) - int(sub.a["shown"])),
               "; ".join(probs[:3]) or "%d labels" % len(allg))
         if exact:
-            check([(r["l"], r.get("n")) for r in rows] == [(l, sizes[l]) for l in orc["order"][12:]],
+            check([(r["label"], r.get("n")) for r in rows] == [(l, sizes[l]) for l in orc["order"][12:]],
                   "(D) %s: subsystems next= pages the oracle's groups 13.. in order, each with its n=" % label)
         elif gdecided:
-            badn = [(r["l"], r.get("n")) for r in rows if r["l"] in sizes and r.get("n") != sizes[r["l"]]]
+            badn = [(r["label"], r.get("n")) for r in rows if r["label"] in sizes and r.get("n") != sizes[r["label"]]]
             check(not badn, "(D) %s: every paged group's n= is its core-file count" % label, str(badn[:5]))
     if gdecided:
-        badn = [(grp.a.get("l"), grp.a.get("n")) for grp in sub.find("grp") if sizes.get(grp.a.get("l")) != grp.a.get("n")]
+        badn = [(grp.a.get("label"), grp.a.get("n")) for grp in sub.find("grp") if sizes.get(grp.a.get("label")) != grp.a.get("n")]
         check(not badn, "(D) %s: every group row's n= is its core-file count" % label, str(badn[:5]))
     if "entry_points" in s:
         ep = s["entry_points"]
@@ -306,7 +306,7 @@ def parity(M, label):
     hp = os.path.join(TMP, "h.html")
     om.run(BIN, root, "--html=" + hp)
     ht = open(hp, errors="replace").read() if os.path.exists(hp) else ""
-    want = [n.a.get("l") or n.a.get("p") for n in om.walk([M["secs"][t] for t in ("subsystems", "overflow") if t in M["secs"]]) if n.tag in ("grp", "m")]
+    want = [n.a.get("label") or n.a.get("p") for n in om.walk([M["secs"][t] for t in ("subsystems", "overflow") if t in M["secs"]]) if n.tag in ("grp", "m")]
     miss = [w for w in want if w and w not in ht and H.escape(w) not in ht and json.dumps(w)[1:-1] not in ht]
     check(bool(want) and not miss, "(P) %s: --html carries every section label and name" % label, str(miss[:5]))
     return refs
@@ -351,8 +351,8 @@ def cost(M, label):
                 nxt = rows[0]["p"]
                 lab = next((l for l, ps in M["orc"]["members"].items() if nxt in ps), None)
                 add = len('<m p="%s"/>' % H.escape(om.printed(nxt, g)))
-                if lab not in {grp.a.get("l") for grp in ov.find("grp")}:
-                    add += len('<grp l="%s"></grp>' % H.escape(lab or ""))
+                if lab not in {grp.a.get("label") for grp in ov.find("grp")}:
+                    add += len('<grp label="%s"></grp>' % H.escape(lab or ""))
                 check(ob + add > om.OVERFLOW_CAP, "(C) %s: the first cut name would not have fit (%d + %d B)" % (label, ob, add))
     if BASE_BIN:
         bdoc, _ = om.run(BASE_BIN, M["root"])
@@ -434,7 +434,7 @@ if not ONLY_EXTRA:
         sub = s["subsystems"]
         check(sub.a.get("g") == orc["G"], "(F) g= is the grouping root %r" % orc["G"], "got %r" % sub.a.get("g"))
         want = [(lab, str(len(orc["members"][lab])), [om.printed(p, orc["G"]) for p in orc["members"][lab][:3]]) for lab in orc["order"][:12]]
-        got = [(grp.a.get("l"), grp.a.get("n"), [m.a.get("p") for m in grp.find("m")]) for grp in sub.find("grp")]
+        got = [(grp.a.get("label"), grp.a.get("n"), [m.a.get("p") for m in grp.find("m")]) for grp in sub.find("grp")]
         check(got == want, "(F) the 12 group rows: labels, n= and top-3 members, in mass order (ties by label, then path)",
               "first difference: %r" % (next(((a, b) for a, b in zip(got + [None] * 12, want) if a != b), None),))
         check(sub.a.get("total") == str(len(orc["order"])) and sub.a.get("shown") == str(min(12, len(orc["order"]))),
@@ -446,7 +446,7 @@ if not ONLY_EXTRA:
         surv = set(orc["ranked"][:max(k, 0)])
         regroup = [(lab, [om.printed(p, orc["G"]) for p in orc["members"][lab] if (lab, p) in surv]) for lab in orc["order"]]
         regroup = [x for x in regroup if x[1]]
-        got = [(grp.a.get("l"), [m.a.get("p") for m in grp.find("m")]) for grp in ov.find("grp")]
+        got = [(grp.a.get("label"), [m.a.get("p") for m in grp.find("m")]) for grp in ov.find("grp")]
         check(k > 0 and got == regroup, "(F) <overflow> is the first %d of the breadth-first list, re-grouped in group then member order" % k,
               "first difference: %r" % (next(((a, b) for a, b in zip(got + [None] * 30, regroup) if a != b), None),))
         check(0 < k < len(orc["ranked"]), "(F) the fixture's overflow is cut (the cut binds: %d of %d)" % (k, len(orc["ranked"])))

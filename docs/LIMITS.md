@@ -16,10 +16,10 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 233 | 92 | 128 | **105** |
+| 238 | 93 | 128 | **110** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 233 + 7 is the 240 constants this generator parses out of `src/`.
+are not counted as caps, and 238 + 7 is the 245 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -37,8 +37,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **130 of 233 caps are classified
-(45 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 103 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **130 of 238 caps are classified
+(45 INDEXING, 41 OUTPUT, 44 BOUNDARY); the remaining 108 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -88,7 +88,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 92 files that declare a cap — the 233 caps counted above, and no parameter.
+One table for each of the 93 files that declare a cap — the 238 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -681,6 +681,18 @@ Discloses: `cells_capped`, `decls_capped`
 | `kDeclMatchBudget` | `40000` | — | — |
 | `kMaxCells` | `2048` | — | — |
 | `kRowCap` | `40` | — | — |
+
+### `src/orientmap.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kEntryRows` | `5` | — | O1: entry rows shown |
+| `kGroupRows` | `12` | — | O2: group rows shown |
+| `kGroupTop` | `3` | — | O2: members per group row |
+| `kPageLimit` | `200` | — | a follow-up page's rows (the map's default top-K) |
+| `kSinkMaxCalleeFiles` | `2` | — | — |
 
 ### `src/packtask.h`
 

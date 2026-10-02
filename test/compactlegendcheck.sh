@@ -281,6 +281,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # closing "-->". The root already printed untested_modscope="0"; the full legend now defines it. Checked: the pin equals
 # the previous head's --legend=full output byte for byte (at= masked), and the new output differs from it by exactly
 # that insertion.
+# RE-ANCHORED BY HAND 2026-10-02 (fix #8, lane/orient-map-067, docs/EVALS.md "A default map that orients"): map.xml gains
+# the orient sections and their legend, because a pre-L1 binary cannot print either. Checked: the old pin equals the base
+# binary's (main 40c83e4f) --legend=full output byte for byte (at= masked), and the new output differs from it by exactly
+# three insertions — the "<!-- orient: …-->" legend clause (+1,029 B), the sections after the <r> tag (+376 B: no entry
+# point, three groups, nothing cut, utility_demoted="0") — and est_tokens= 858 -> 1421 in its two places. No row moved.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

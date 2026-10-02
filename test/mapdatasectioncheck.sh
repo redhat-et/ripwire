@@ -19,7 +19,9 @@
 # Arms (the pre-registration in docs/EVALS.md "Map data Sections" names them):
 #   (P)  §1 grid: shape x {long,short} x N in {20,40,200} x K in {200,16}, plus the primary cells S3/S4 long N=220.
 #        Surfaces: XML, --json, the --html node set, --tree (the code file is listed first; --tree is not re-picked),
-#        --max-tokens=1500, and MCP analyze on a clean git tree. Pass = 8/8 code rows on every cell x surface.
+#        --max-tokens=1500, and MCP analyze on a clean git tree. Pass = 8/8 code rows on every cell x surface. Where the
+#        orient sections ride (fix #8) the max-tokens surface asserts code-first among its kept rows, and its twin outside
+#        the orient scope (an --exclude= no path holds) keeps the 8/8 bar.
 #   (D)  Gate D, for the pick: data_sections_cut = Sections in the rank-order top-K - Sections still shown; next= then
 #        next_offset= (until has_more="0") pages every unshown Section once, the swapped ones first, every page <= K rows.
 #        Run on XML and --max-tokens; --json, MCP analyze and MCP rank_by must carry the XML's disclosure.
@@ -205,6 +207,16 @@ for (shape, ln, n) in cells:
         print("CELL\t%s\t%s\t%d\t%d\txml=%d\tjson=%d\thtml=%d\ttree_first=%s\tmaxtok=%d\tmcp=%d\tbytes_first=%s\tbytes_8th=%s" % (
             shape, ln, n, K, stat["xml"], stat["json"], stat["html"], tfile.group(1) if tfile else "-", stat["maxtok"], stat["mcp"],
             firsts[0] if firsts else "-", firsts[7] if len(firsts) >= 8 else "-"))
+        # The orient sections (fix #8, docs/EVALS.md "A default map that orients") ride the map scope and are never budgeted
+        # away, so under the 1,500-token ceiling they and their legend take the bytes the ranked rows had: the max-tokens
+        # surface then keeps fewer rows, and the #339 property it must still show is CODE-FIRST among the rows it keeps (every
+        # kept row a code row until all 8 are kept). The old path, 8/8 at this ceiling, is held by its twin: the same run
+        # outside the orient scope (an --exclude= no path holds keeps the same corpus and drops the sections).
+        if "<subsystems " in mt:
+            kept = len(mrows)
+            (ok if stat["maxtok"] == min(8, kept) else no)("%s maxtok (orient sections): %d/%d kept rows are code rows (code-first)" % (lab, stat["maxtok"], min(8, kept)))
+            stat["maxtok"] = code_rows(xml_map(run(d, "--max-tokens=1500", "--top-k=%d" % K, "--exclude=orientmap-twin-no-such-path"))[1])
+            stat = {("maxtok-twin" if k == "maxtok" else k): v for k, v in stat.items()}
         for surf, v in stat.items():
             (ok if v == 8 else no)("%s %s: %d/8 code rows" % (lab, surf, v))
         (ok if tfile and tfile.group(1) == "app.py" else no)("%s tree: code file listed first (%s)" % (lab, tfile.group(1) if tfile else "none"))

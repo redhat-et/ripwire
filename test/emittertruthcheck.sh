@@ -358,7 +358,11 @@ cmp -s "$TMP/def1.xml" "$TMP/def2.xml" && ok "default map byte-identical run-to-
                                        || no "default map is NOT deterministic"
 # NOTE: the map header has carried its own shown= since long before this lane, so shown= alone is NOT a
 # marker of contamination — check only the attributes this lane introduced.
-grep -q 'capped=\|hits_capped=\|from_p=\|to_p=\|from_defs=\|to_defs=\|seam_pairs=' "$TMP/def1.xml" \
+# The orient sections (fix #8, docs/EVALS.md "A default map that orients") are the default map's own and carry their own
+# window (shown= total= capped= next=), so they, their legend clause and the window term their window pulls into the legend are cut out before the grep: the guard is that no r27 EMITTER's attribute
+# leaks into the default map, and an r27 attribute anywhere else in the map still fails it.
+perl -0pe 's/<entry_points shown= total=.*?(and the groups|keep them\))//sg; s/<entry_points shown="\d.*?<\/overflow>//s; s/<demoted [^>]*\/>//s; s/window: shown= total= capped= \(capped=1 cut\)\. //s' "$TMP/def1.xml" > "$TMP/def1.noorient.xml"
+grep -q 'capped=\|hits_capped=\|from_p=\|to_p=\|from_defs=\|to_defs=\|seam_pairs=' "$TMP/def1.noorient.xml" \
     && no "default map gained an r27-emitters attribute — G5 violated" \
     || ok "default map carries no r27-emitters attribute (flags stayed additive)"
 # §P8 (2026-07-28) — REPINNED. What this line guards is that the default map is still the UNWRAPPED <r>

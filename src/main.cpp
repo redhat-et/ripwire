@@ -1869,10 +1869,10 @@ int runDefaultMap( const MainDispatch& d )
     mapAnn.notesDegraded = d.notesDegraded;   // L3 follow-up (CodeRabbit 4053600616): onto every <r> this run emits
     mapAnn.codeFirstRows = isDefaultMapScope;   // the code-first row pick + its data_sections_cut= / next= (serialize.h)
     // Fix #8 (docs/EVALS.md "A default map that orients"): the orient sections, on the SINGLE-ROOT plain map only — no
-    // ordering, dialect, filter or scoping flag (those keep the base bytes; Gate S pins them), the same scope MCP analyze
+    // dialect, filter or scoping flag (those keep the base bytes; Gate S pins them), the same scope MCP analyze
     // (clean tree) and rank_by=pagerank serve. Computed once from the default rank vector; every serialization reads it.
-    const bool isOrientScope = isDefaultMapScope && mapSingleRoot && !cfg.metrics && !cfg.columnar && !cfg.mostImportantLast && !cfg.stable
-                            && !cfg.noAutoOrder && cfg.excludes.empty() && cfg.inDir.empty();
+    const bool isOrientScope = isDefaultMapScope && mapSingleRoot && !cfg.metrics && !cfg.columnar && cfg.excludes.empty()
+                            && cfg.inDir.empty();   // --order= only reorders the ranked rows (MCP analyze serves order=stable): in scope
     rw::orient::Sections orientSections;
     if( isOrientScope )
     {

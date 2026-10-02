@@ -368,6 +368,9 @@ TWIN = {
     # L-W (2026-09-12, forpage.h): --for joined the paging set for its FILE PAGE (--limit/--offset select the
     # one-row-per-file widening document); its twin takes the same limit/offset through mcpPageArgs.
     "--for": "for",
+    # Fix #8 (2026-10-02): --orient=KIND pages an orient section of the default map — the follow-up every section's next=
+    # names. The sections themselves ride MCP analyze/rank_by, but their next= is the CLI page: no MCP verb serves it.
+    "--orient": "",
 }
 unmapped = sorted( v for v in pagingCli if v not in TWIN )
 check( not unmapped, "(G) every paging CLI verb is classified twin-or-not (%s)" % ( ",".join( unmapped ) or "none unmapped" ) )

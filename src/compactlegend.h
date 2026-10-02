@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "infra/Diagnostics.h"   // EXPECTS/ENSURES — the reprice's contract
+#include "orientarm.h"            // fix #8: the orient term says what this arm does to a demoted file's ranked rows
 
 namespace rw
 {
@@ -186,7 +187,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     { "pattern",      "pattern",      "structural pattern hits with their enclosing symbol" },
     { "cands",        "candidates",   "flat top-K export for an external reranker: <cand r= s= n= id= k= p= l=><sig>" },
     { "orient",       "orient",       "one page of a default-map orient section, in its order: <orient kind=entry|groups|overflow|demoted g=ROOT> rows "
-                                      "<e p=FILE:LINE n= why=>, <grp l= n=><m p=>, <m p=> (p= relative to g=, else repo-relative)" },
+                                      "<e p=FILE:LINE n= why=>, <grp label= n=><m p=>, <m p=> (p= relative to g=, else repo-relative)" },
 };
 
 // Comment openers that are explanatory prose — replaced under compact. Everything else is data and stays.
@@ -216,7 +217,7 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
     "<!-- pr_iters=",                  // the PageRank convergence block on map-family roots
     "<!-- data_sections_cut=",         // the map scope's Section-cut clause (serialize.h kDataSectionsCutLegend); the
                                        // completeness table's data_sections_cut row restates it
-    "<!-- orient: ",                   // fix #8: the orient sections' clause (serialize.h kOrientLegend); the completeness
+    "<!-- orient: ",                   // fix #8: the orient sections' clause (serialize.h kOrientLegendO/Narrow); the completeness
                                        // table's subsystems-qualified g= row restates it
     "<!-- at= is the git commit",      // the churn/quality provenance block
     "<!-- in=DIR: ",                   // C1-b's scoped-block clause (serialize.h kRecentScopeLegendOpen/Close). Without
@@ -305,6 +306,21 @@ inline constexpr std::string_view kModScopeEscapedName = "&lt;file-scope&gt;";
 inline constexpr std::string_view kCompactModScopeReading =
     "<file-scope> (t=modscope): a file's MODULE SCOPE — where a top-level call and an anonymous callback "
     "body's calls live; a CALLER, never a callee, with no body to expand";
+
+// Fix #8: the orient sections' one compact term (below), each element spelled with every attribute it can carry
+// (test/orientmapcheck.sh (L)); the last clause is what this arm does to a demoted file (orientarm.h).
+inline constexpr std::string_view kCompactOrientTermO =
+    "<entry_points shown= total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with "
+    "evidence, core files only. <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: core "
+    "files grouped under g= (2/3 of rank mass), groups by mass with top members; p= relative to g=, else /repo-relative. "
+    "<overflow shown= total= capped= next= over_ceiling=>: every other core file breadth-first, cut at 2048 B; next= "
+    "pages the cut. <demoted utility_demoted=N next=>: N sink or vendored files left the ranked rows and the groups";
+inline constexpr std::string_view kCompactOrientTermNarrow =
+    "<entry_points shown= total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with "
+    "evidence, core files only. <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: core "
+    "files grouped under g= (2/3 of rank mass), groups by mass with top members; p= relative to g=, else /repo-relative. "
+    "<overflow shown= total= capped= next= over_ceiling=>: every other core file breadth-first, cut at 2048 B; next= "
+    "pages the cut. <demoted utility_demoted=N next=>: N sink or vendored files left the groups (the ranked rows keep them)";
 
 inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
 {
@@ -410,11 +426,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "data_sections_cut", "data_sections_cut=N: N data Sections (headings, data keys) swapped out of this top-K for lower-ranked code rows; next= pages them first" },
     // Fix #8: the orient sections, ONE term for the four elements that always ride together (keyed on <subsystems g=>, which
     // only that element carries), each element spelled with every attribute it can carry (orientmapcheck (L)).
-    { "g", "<entry_points shown= total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with "
-           "evidence, core files only. <subsystems g=ROOT shown= total= capped= next=> <grp l=LABEL n=FILES> <m p=PATH>: core "
-           "files grouped under g= (2/3 of rank mass), groups by mass with top members; p= relative to g=, else /repo-relative. "
-           "<overflow shown= total= capped= next= over_ceiling=>: every other core file breadth-first, cut at 2048 B; next= "
-           "pages the cut. <demoted utility_demoted=N next=>: N sink or vendored files left the ranked rows", true, "subsystems" },
+    { "g", orient::kArm == orient::Arm::Narrow ? kCompactOrientTermNarrow : kCompactOrientTermO, true, "subsystems" },
     { "pr_converged",      "pr_converged=0: iteration cap hit before convergence" },
     // Form-conditional map roots whose clauses (kRankByDisclosure, kChurnRankLegend, --around's seed block) are prose.
     // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.

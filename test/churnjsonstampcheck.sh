@@ -41,7 +41,12 @@ import json, sys
 churn = json.load( open( sys.argv[1] ) )
 plain = json.load( open( sys.argv[2] ) )
 extra   = sorted( set( churn ) - set( plain ) )
-missing = sorted( set( plain ) - set( churn ) )
+# Fix #8 (docs/EVALS.md "A default map that orients"): the orient sections are the pagerank map scope's own payload keys
+# (like data_sections_cut, which is absent here only because nothing is swapped), never a header stamp; a churn map is
+# outside that scope by design. They are set aside here and pinned to the right side below.
+ORIENT  = { "entry_points", "subsystems", "overflow", "demoted" }
+missing = sorted( set( plain ) - set( churn ) - ORIENT )
+print( "ORIENT_ON_CHURN=" + ",".join( sorted( ORIENT & set( churn ) ) ) )
 print( "EXTRA=" + ",".join( extra ) )
 print( "MISSING=" + ",".join( missing ) )
 print( "RANK_BY=" + str( churn.get( "rank_by", "" ) ) )
@@ -62,6 +67,8 @@ else
 fi
 [ -z "$MISSING" ] && ok "churn JSON header drops no key the pagerank header carries" \
                   || no "churn JSON header is MISSING keys the pagerank header has: $MISSING"
+[ -z "$ORIENT_ON_CHURN" ] && ok "the churn map carries no orient section (outside the map scope)" \
+                          || no "the churn map carries orient sections it must not: $ORIENT_ON_CHURN"
 
 # (2) the values carry MEANING (not pinned to a sha/window that moves with the tree)
 if [ "$RANK_BY" = "churn" ]; then ok "rank_by == \"churn\""; else no "rank_by is '$RANK_BY', want \"churn\""; fi

@@ -24,8 +24,9 @@
 //               directory joins that directory); outside G, a top-level directory (`/top/`) or a root file's prefix
 //               (`/prefix`). Groups by mass, then label; members by mass, then path. Paths print relative to G (g=);
 //               a file outside G prints repo-relative with a leading `/`.
+#include "orientarm.h"         // kArm — the registered arm this build is
 #include "filter.h"            // pathTierOf / isDemoOrGeneratedPath / hasDirSegment — the BASE classifications the rule reads
-#include "jsrunner.h"          // jsrunner::detail::topLevelValueStart / readQuoted — the package.json walk the runner detector uses
+#include "infra/jsontop.h"     // jsrunner::detail::topLevelValueStart / readQuoted — the package.json walk the runner detector uses
 #include "model.h"
 #include "nextverb.h"          // nextAttrXml — the escapeXml policy for an attribute, byte for byte
 #include "docparse.h"          // docparse::detail::readWholeFile
@@ -45,14 +46,12 @@ namespace rw::orient
 {
 
 // ── the registered arms and constants (fixed in the arm's first commit; developed on ripwire/django/webpack + fixtures) ──
-enum class Arm : std::uint8_t { O, Narrow, Placebo };
-inline constexpr Arm kArm = Arm::O;   // the O-narrow and PLACEBO arm builds flip this one constant
 
 inline constexpr std::size_t kGroupRows        = 12;      // O2: group rows shown
 inline constexpr std::size_t kGroupTop         = 3;       // O2: members per group row
 inline constexpr std::size_t kEntryRows        = 5;       // O1: entry rows shown
 inline constexpr std::size_t kOverflowCutBytes = 2048;    // O2-overflow: the registered cut (half of v1's +4,096 B growth bar)
-inline constexpr std::size_t kRunawayBytes     = 24576;   // the runaway guard (~7x the dev corpora's median sections); sets over_ceiling=
+inline constexpr std::size_t kRunawayBytes     = 131072;  // the runaway guard on the overflow (~5x the dev corpora's ~27 KB median map answer); sets over_ceiling=
 inline constexpr std::size_t kPageLimit        = 200;     // a follow-up page's rows (the map's default top-K)
 // O3 sink: a file whose code is called from at least kSinkMinCallerFiles other core-candidate files (or kSinkCallerShare of
 // them, whichever is more) and that itself calls into at most kSinkMaxCalleeFiles others — a leaf every module leans on.
@@ -808,10 +807,10 @@ inline std::string entryJson( const FileFacts& ff, const EntryRow& r )
     return "{" + o.substr( 1 ) + "}";
 }
 
-// one group row: <grp l= [n=]><m p=/>…</grp>, and its JSON twin
+// one group row: <grp label= [n=]><m p=/>…</grp>, and its JSON twin
 inline std::string groupXml( std::string_view label, const std::size_t* n, const std::vector<std::string>& members )
 {
-    std::string out = "<grp" + attr( "l", label ) + ( n ? num( "n", *n ) : std::string() ) + ">";
+    std::string out = "<grp" + attr( "label", label ) + ( n ? num( "n", *n ) : std::string() ) + ">";
     for( const std::string& p : members )
     {
         out += memberXml( p );
@@ -822,7 +821,7 @@ inline std::string groupXml( std::string_view label, const std::size_t* n, const
 inline std::string groupJson( std::string_view label, const std::size_t* n, const std::vector<std::string>& members )
 {
     std::string o;
-    jstr( o, "l", label );
+    jstr( o, "label", label );
     if( n )
     {
         jnum( o, "n", *n );
@@ -1056,7 +1055,7 @@ inline constexpr std::string_view kPageKinds[] = { "entry", "groups", "overflow"
 
 inline constexpr std::string_view kPageLegend =
     "<!-- ripwire orient: one page of a default-map orient section, rank order: <orient kind=entry|groups|overflow|demoted "
-    "g=ROOT> rows <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry> (entry points), <grp l=LABEL n=FILES> with its top <m "
+    "g=ROOT> rows <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry> (entry points), <grp label=LABEL n=FILES> with its top <m "
     "p=PATH> (groups), <m p=PATH> (overflow names relative to g=, outside it repo-relative with a leading /; demoted files "
     "repo-relative). window: shown= total= capped= has_more= next_offset= offset= limit= page the list (capped=1 cut; "
     "next_offset= pastes as offset=) -->";

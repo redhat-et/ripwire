@@ -129,7 +129,10 @@ OFIX="$( order_of test/fixture )"
 # of that spelling as a directory inside the tree: all six <f> rows carried layer="test" (cd test/fixture && ripwire .
 # printed none). The tag now comes from the root-relative path, so the six attributes are gone; the byte model also
 # charges each file path as p= prints it (root-relative) instead of with the typed root prepended.
-{ [ "$EFIX" = "863" ] && [ "$OFIX" = "important-first" ]; } \
+# RE-PIN 2026-10-02 (fix #8, docs/EVALS.md "A default map that orients"): 863 -> 1426, and the document GREW by design: the
+# default map now leads with its orient sections (<entry_points>, <subsystems>, <overflow>, <demoted>) and their legend
+# clause. The order verdict is the point of this line and does not move: the fixture still does not auto-flip.
+{ [ "$EFIX" = "1426" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 

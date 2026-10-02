@@ -47,6 +47,8 @@ pattern subsection.
 Plain markdown: file + symbol count, call-graph modules (Louvain clusters with lead symbol), god-files
 ranked by `afferent` (dependents), cycle list, top PageRank symbols. **Read the god-file list carefully** —
 highest-leverage, highest-risk files. For most "orient me" asks this one rung is enough.
+The plain map (`ripwire <dir>`) leads the same way: `<entry_points>`, `<subsystems>` (12 groups, top files) and an
+`<overflow>` naming every other core file; whatever a section cuts is one `--orient=entry|groups|overflow|demoted` away.
 
 **2. Task-relevant code** — `ripwire <dir> --for="<the task in your own words>"`
 Ranked signatures + doc-comments + cx/in metrics by relevance (matches names, docs, AND bodies — not just

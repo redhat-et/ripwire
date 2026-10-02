@@ -14502,7 +14502,8 @@ out of the default window, and nothing names the entry points or groups the file
   an untracked-only change and a non-git root are clean, as the working-set mask already says), MCP `rank_by` pagerank.
   Not: `analyze` with a tracked, staged or documentation edit, or over two roots; `rank_by` authority/hub/rrf; `--tree`;
   `for`; `explore`; and every other map dialect or shaping flag, which keeps the base bytes: `--exclude=`, `--top-k=0`,
-  `--order=`, `--format=`, `--compress`, `--signatures-only`, `--metrics`, `--mermaid`, a multi-root map.
+  `--format=`, `--compress`, `--signatures-only`, `--metrics`, `--mermaid`, a multi-root map (`--order=` only reorders
+  the ranked rows and stays in scope, as MCP `analyze` serves `order=stable`).
 - **Fallback O-narrow:** O1 and O2 with the overflow; the ranked rows stay byte-identical to the base. **Placebo (20
   seeds):** random evidence-free entry rows, random re-partition of the groups, a rank-decile-stratified random demotion and
   a random-order overflow at the same byte cap.

@@ -127,7 +127,16 @@ for entry in "${SHAPES[@]}"; do
 done
 
 # ── #2: MONOTONE charging — adding a payload to the same map can never LOWER the reported estimate. ────
-E_MAP="$( est_of "$TMP/map.out" )"
+# Fix #8 (docs/EVALS.md "A default map that orients"): the bare map now leads with its orient sections, and a payload
+# verb's ride-along map is outside that scope, so "the same map" is the bare map WITHOUT them — its twin, the same run
+# under an --exclude= no path holds (outside the orient scope, same corpus). The sections themselves only add: the
+# sectioned bare map must price at least its twin.
+"$BIN" src --top-k=10 --exclude=estcharge-twin-no-such-path --no-cache >"$TMP/map-twin.out" 2>/dev/null
+E_SECT="$( est_of "$TMP/map.out" )"
+E_MAP="$( est_of "$TMP/map-twin.out" )"
+[ -n "$E_SECT" ] && [ -n "$E_MAP" ] && [ "$E_SECT" -ge "$E_MAP" ] 2>/dev/null \
+    && ok "#2 the sectioned bare map ($E_SECT) prices at least its sectionless twin ($E_MAP)" \
+    || no "#2 the sectioned bare map ($E_SECT) priced BELOW its sectionless twin ($E_MAP)"
 mono=1
 for label in metrics sigs src bodies outline "bodies+sigs"; do
     E="$( est_of "$TMP/$label.out" )"
@@ -141,11 +150,17 @@ done
 #    streamed 12 KB / 67 KB. Budget is set from the bare map's own estimate (so the map alone always
 #    fits) and each payload arm must fail it. ────────────────────────────────────────────────────────────
 TB=$(( E_MAP + 20 ))
-"$BIN" src --top-k=10 --token-budget=$TB --no-cache >"$TMP/tb_map.out" 2>"$TMP/tb_map.err"
+# E_MAP is the sectionless twin's (see #2), so the control is the twin; the sectioned map gets its own control at its own price.
+"$BIN" src --top-k=10 --exclude=estcharge-twin-no-such-path --token-budget=$TB --no-cache >"$TMP/tb_map.out" 2>"$TMP/tb_map.err"
 rc_map=$?
 [ "$rc_map" -eq 0 ] \
     && ok "#3 control: the bare map fits --token-budget=$TB (exit 0)" \
     || no "#3 control: the bare map should fit --token-budget=$TB, got exit $rc_map"
+"$BIN" src --top-k=10 --token-budget=$(( E_SECT + 20 )) --no-cache >/dev/null 2>&1
+rc_sect=$?
+[ "$rc_sect" -eq 0 ] \
+    && ok "#3 control: the sectioned bare map fits --token-budget=$(( E_SECT + 20 )) (exit 0)" \
+    || no "#3 control: the sectioned bare map should fit --token-budget=$(( E_SECT + 20 )), got exit $rc_sect"
 for entry in "sigs:--pack-signatures" "src:--pack-top-n=3" "bodies:--expand=$SYM" "outline:--outline=$SYM"; do
     label="${entry%%:*}"; args="${entry#*:}"
     # shellcheck disable=SC2086

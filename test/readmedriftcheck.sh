@@ -725,6 +725,41 @@ if [ -z "$budget_flag" ]; then
 else
     ( cd "$ROOT" && "$BIN" . --no-cache ) > "$TMP/map_bare.xml" 2>/dev/null
     ( cd "$ROOT" && "$BIN" . --no-cache "$budget_flag" ) > "$TMP/map_budget.xml" 2>/dev/null
+    # Fix #8 (docs/EVALS.md "A default map that orients"): the default map now leads with its orient sections, which are
+    # never budgeted away, so under this budget they (and their legend) take most of the bytes and few ranked rows
+    # remain. The ranked-head promise is held by the TWIN, the same budgeted run outside the orient scope (an --exclude=
+    # no path holds: same corpus, no sections); the sectioned run must still be a head of the same ranking, under the
+    # ceiling, and carry its sections.
+    ( cd "$ROOT" && "$BIN" . --no-cache "$budget_flag" --exclude=readmedrift-twin-no-such-path ) > "$TMP/map_twin.xml" 2>/dev/null
+    if grep -q '<subsystems ' "$TMP/map_budget.xml"; then
+        sect="$( python3 - "$TMP/map_bare.xml" "$TMP/map_budget.xml" <<'PY'
+import re, sys
+def rows( path ):
+    text = open( path, encoding="utf-8" ).read()
+    est = re.search( r'<r [^>]*est_tokens="(\d+)"', text )
+    keys = set(); cur = ""
+    for m in re.finditer( r'<(f|s) ([^>]*)>', text ):
+        attrs = dict( re.findall( r'([a-z_]+)="([^"]*)"', m.group( 2 ) ) )
+        if m.group( 1 ) == "f":
+            cur = attrs.get( "p", "" ); continue
+        keys.add( attrs.get( "id" ) or f'{cur}::{attrs.get("t")}::{attrs.get("n")}' )
+    return ( int( est.group( 1 ) ) if est else -1 ), keys
+bareEst, bare = rows( sys.argv[ 1 ] )
+budEst,  bud  = rows( sys.argv[ 2 ] )
+problems = []
+if not bud:                     problems.append( "the sectioned budgeted map keeps no ranked row" )
+if not bud <= bare:             problems.append( f"{len(bud - bare)} budgeted row(s) absent from the bare map" )
+if not 0 < budEst <= 4500:      problems.append( f"budgeted est_tokens={budEst}, ceiling 4500" )
+print( ( "FAIL " + "; ".join( problems ) ) if problems else f"OK budgeted={budEst} rows={len(bud)}/{len(bare)}" )
+PY
+)"
+        case "$sect" in
+            OK*) ok "(G4) $budget_flag with the orient sections: a head of the same ranking under the ceiling (${sect#OK })" ;;
+            *)   no "(G4) $budget_flag with the orient sections: ${sect#FAIL }" ;;
+        esac
+        cp "$TMP/map_twin.xml" "$TMP/map_budget.xml"   # the promise below is the twin's, against the twin's own bare map
+        ( cd "$ROOT" && "$BIN" . --no-cache --exclude=readmedrift-twin-no-such-path ) > "$TMP/map_bare.xml" 2>/dev/null
+    fi
     verdict="$( python3 - "$TMP/map_bare.xml" "$TMP/map_budget.xml" <<'PY'
 import re, sys
 def rows( path ):

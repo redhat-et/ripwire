@@ -254,9 +254,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # count (mention.h countUnbacktickedDocFiles) reads the markdown files through it — two new call sites, same helper.
 # 29 -> 30 (same lane, review round): BuiltinMethodGate::namedBeyondDefinition reads a Python file that defines a class
 # to find an annotation naming it — one new call site, same helper.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 30 ] \
-    && ok "repo: --uses=readWholeFile count=30 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 30"
+# 30 -> 32 2026-10-02 (lane/orient-map-067, fix #8): orient::detail::entryRows reads package.json and pyproject.toml (the
+# entry-point evidence) through the same canonical helper — two new call sites, same helper, no new fopen/fread.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 32 ] \
+    && ok "repo: --uses=readWholeFile count=32 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 32"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

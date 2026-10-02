@@ -3,15 +3,15 @@ map: O1 <entry_points>, O2 <subsystems>, O2-overflow <overflow>, O3 utility_demo
 
 The section schema this module reads (fixed by the gate, so the arm implements it, not the other way round):
   <entry_points shown= total= [capped= next=]> <e p="FILE:LINE" n="SYMBOL" why="bin|script|main|entry"/> ... </entry_points>
-  <subsystems g="G" shown= total= capped= [next=]> <grp l="LABEL" n="N"> <m p="PATH"/> x <= 3 </grp> ... </subsystems>
-  <overflow shown= total= capped= [next=]> <grp l="LABEL"> <m p="PATH"/> ... </grp> ... </overflow>
+  <subsystems g="G" shown= total= capped= [next=]> <grp label="LABEL" n="N"> <m p="PATH"/> x <= 3 </grp> ... </subsystems>
+  <overflow shown= total= capped= [next=]> <grp label="LABEL"> <m p="PATH"/> ... </grp> ... </overflow>
   utility_demoted="N" on ONE element of the answer, which carries its own next= when N > 0.
-Labels: a child directory of G is "dir/"; a prefix group in G is "prefix"; outside G, a top-level directory is "/top/"
+Labels (label=, never l=: l= is a line number everywhere else): a child directory of G is "dir/"; a prefix group in G is "prefix"; outside G, a top-level directory is "/top/"
 and a root file's prefix is "/prefix". <m p=> is relative to G, or repo-relative with a leading "/" outside G. <e p=> is
 repo-relative. JSON mirrors the XML one to one: the three section keys hold their attributes plus one array per child tag.
 
 A next= value is argv appended to `BIN ROOT --no-cache`; its answer pages with has_more="1"/next_offset= (pasted as
---offset=) until has_more is absent or "0". Page rows: elements with p= (file pages), l= (group pages), why= (entry
+--offset=) until has_more is absent or "0". Page rows: elements with p= (file pages), label= (group pages), why= (entry
 pages); a page root's g= relativises its p= exactly as <subsystems g=> does.
 
 The classifier mirrors BASE's src/filter.h (pathTierOf, isDemoOrGeneratedPath) and docparse.h's prose extensions; the

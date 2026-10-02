@@ -2856,7 +2856,13 @@ inline void writeHtml( std::FILE* out, const IngestResult& ing, const std::vecto
         text.reserve( orientSections->xml.size() + 64 );
         for( char c : orientSections->xml )
         {
-            text += c == '<' ? std::string( "&lt;" ) : c == '>' ? std::string( "&gt;" ) : c == '&' ? std::string( "&amp;" ) : std::string( 1, c );
+            switch( c )
+            {
+                case '<': text += "&lt;"; break;
+                case '>': text += "&gt;"; break;
+                case '&': text += "&amp;"; break;
+                default:  text += c; break;
+            }
         }
         rw::emitTo( out, "<details id=\"orient\"><summary>Orient: entry points, subsystems, every core file</summary><pre>{}</pre></details>\n", text );
     }
