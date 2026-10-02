@@ -33,7 +33,10 @@
 #include "infra/Diagnostics.h"
 #include "infra/jsonesc.h"     // jsonesc::escapeInto — the JSON map's string escape (serialize.h writeJsonStr's flags)
 #include "infra/sortutil.h"    // svLess
+#include "infra/emit.h"   // PLACEBO: emitRaw (the draws dump)
 #include <algorithm>
+#include <cstdio>
+#include <random>   // PLACEBO: std::mt19937_64(s)
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -811,6 +814,176 @@ inline std::string groupJson( std::string_view label, const std::size_t* n, cons
 
 }   // namespace detail
 
+
+// ── PLACEBO_s (the registered placebo arm only): O's shape and bytes without its signal ────────────────────────────────
+namespace detail
+{
+
+inline std::size_t draw( std::mt19937_64& rng, std::size_t n )
+{
+    return n == 0 ? 0 : std::size_t( rng() % std::uint64_t( n ) );   // explicit modulo: the same draws on every standard library
+}
+
+template<class T> inline void shuffleWith( std::vector<T>& v, std::mt19937_64& rng )
+{
+    for( std::size_t i = v.size(); i > 1; --i )
+    {
+        std::swap( v[ i - 1 ], v[ draw( rng, i ) ] );
+    }
+}
+
+inline void placebo( Sections& s, const IngestResult& ing, const FileFacts& ff, const std::vector<std::uint32_t>& core )
+{
+    const char* const seedEnv = std::getenv( "RIPWIRE_ORIENT_PLACEBO_SEED" );   // external input: a decimal seed, else 1
+    std::uint64_t     seed    = 1;
+    if( seedEnv != nullptr && *seedEnv != '\0' )
+    {
+        seed = std::strtoull( seedEnv, nullptr, 10 );
+    }
+    std::mt19937_64 rng( seed );
+    std::string     dump = "SEED\t" + std::to_string( seed ) + "\n";
+
+    // entry rows: random function definitions, O's why= sequence
+    std::vector<std::uint32_t> fns;
+    for( std::uint32_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        if( ing.symbols[ i ].kind == SymKind::Function || ing.symbols[ i ].kind == SymKind::Method )
+        {
+            fns.push_back( i );
+        }
+    }
+    for( EntryRow& r : s.entries )
+    {
+        if( fns.empty() )
+        {
+            break;
+        }
+        const Symbol& sym = ing.symbols[ fns[ draw( rng, fns.size() ) ] ];
+        r.fileId = sym.fileId;
+        r.line   = std::max<std::uint32_t>( 1, sym.line );
+        r.name   = sym.name;
+        dump += "ENTRY\t" + ff.rel[ r.fileId ] + "\t" + std::to_string( r.line ) + "\t" + r.name + "\t" + std::string( r.why ) + "\n";
+    }
+
+    // groups: O's core files re-partitioned at random into O's sizes, random directory labels
+    std::vector<std::uint32_t> files = core;
+    shuffleWith( files, rng );
+    std::vector<std::string> dirs;
+    for( std::uint32_t f = 0; f < ff.rel.size(); ++f )
+    {
+        const std::size_t slash = ff.rel[ f ].rfind( '/' );
+        if( slash != std::string::npos )
+        {
+            dirs.push_back( ff.rel[ f ].substr( 0, slash + 1 ) );
+        }
+    }
+    std::sort( dirs.begin(), dirs.end(), []( std::string_view a, std::string_view b ) { return sortutil::svLess( a, b ); } );
+    dirs.erase( std::unique( dirs.begin(), dirs.end() ), dirs.end() );
+    std::size_t at = 0;
+    for( Group& g : s.groups )
+    {
+        const std::size_t n = g.members.size();
+        g.members.assign( files.begin() + std::ptrdiff_t( at ), files.begin() + std::ptrdiff_t( at + n ) );
+        at += n;
+        g.label = dirs.empty() ? std::string( "./" ) : dirs[ draw( rng, dirs.size() ) ];
+        dump += "GROUP\t" + g.label + "\t" + std::to_string( n );
+        for( std::uint32_t f : g.members )
+        {
+            dump += "\t" + ff.rel[ f ];
+        }
+        dump += "\n";
+    }
+
+    // demotion: per O-demoted file, a random same-decile candidate that O did not demote
+    std::vector<std::uint32_t> cands;
+    for( std::uint32_t f = 0; f < ff.isCandidate.size(); ++f )
+    {
+        if( ff.isCandidate[ f ] )
+        {
+            cands.push_back( f );
+        }
+    }
+    std::sort( cands.begin(), cands.end(), byMassThenPath( ff ) );
+    std::vector<std::uint8_t> decile( ff.rel.size(), 0 );
+    for( std::size_t i = 0; i < cands.size(); ++i )
+    {
+        decile[ cands[ i ] ] = std::uint8_t( std::min<std::size_t>( 9, i * 10 / cands.size() ) );
+    }
+    std::vector<char>          taken( ff.rel.size(), 0 );
+    std::vector<std::uint32_t> drawn;
+    double                     massO = 0.0;
+    double                     massP = 0.0;
+    std::size_t                shortfall = 0;
+    for( std::uint32_t f : s.demoted )
+    {
+        massO += ff.mass[ f ];
+        std::vector<std::uint32_t> pool;
+        for( std::uint32_t c : cands )
+        {
+            if( decile[ c ] == decile[ f ] && !s.demotedFile[ c ] && !taken[ c ] )
+            {
+                pool.push_back( c );
+            }
+        }
+        if( pool.empty() )
+        {
+            ++shortfall;
+            continue;
+        }
+        const std::uint32_t c = pool[ draw( rng, pool.size() ) ];
+        taken[ c ] = 1;
+        drawn.push_back( c );
+        massP += ff.mass[ c ];
+    }
+    std::sort( drawn.begin(), drawn.end(), byMassThenPath( ff ) );
+    s.demoted = drawn;
+    std::fill( s.demotedFile.begin(), s.demotedFile.end(), char( 0 ) );
+    for( std::uint32_t f : drawn )
+    {
+        s.demotedFile[ f ] = 1;
+        dump += "DEMOTED\t" + ff.rel[ f ] + "\n";
+    }
+    dump += "DEMOTED_MASS\tO=" + std::to_string( massO ) + "\tPLACEBO=" + std::to_string( massP ) + "\tshortfall=" + std::to_string( shortfall ) + "\n";
+
+    // overflow: the core files not named in the shown rows, in rng order (the render cuts it at the same byte cap)
+    std::vector<char>          named( ff.rel.size(), 0 );
+    std::vector<std::uint32_t> groupOf( ff.rel.size(), 0 );
+    for( std::uint32_t gi = 0; gi < s.groups.size(); ++gi )
+    {
+        for( std::size_t m = 0; m < s.groups[ gi ].members.size(); ++m )
+        {
+            groupOf[ s.groups[ gi ].members[ m ] ] = gi;
+            named[ s.groups[ gi ].members[ m ] ] = gi < kGroupRows && m < kGroupTop;
+        }
+    }
+    std::vector<std::uint32_t> rest;
+    for( std::uint32_t f : core )
+    {
+        if( !named[ f ] )
+        {
+            rest.push_back( f );
+        }
+    }
+    shuffleWith( rest, rng );
+    s.ranked = rest;
+    s.rankedGroup.clear();
+    for( std::uint32_t f : rest )
+    {
+        s.rankedGroup.push_back( groupOf[ f ] );
+        dump += "OVERFLOW\t" + ff.rel[ f ] + "\n";
+    }
+    if( const char* const dumpPath = std::getenv( "RIPWIRE_ORIENT_PLACEBO_DUMP" ); dumpPath != nullptr && *dumpPath != '\0' )
+    {
+        if( std::FILE* out = std::fopen( dumpPath, "w" ); out != nullptr )
+        {
+            rw::emitRaw( out, dump.c_str() );
+            std::fclose( out );
+        }
+    }
+}
+
+}   // namespace detail
+
 // ── build: the model, rendered once ─────────────────────────────────────────────────────────────────────────────────────
 // `rank` is the default map's vector (rankGraph). Single-root maps only: the caller decides the scope (main.cpp, mcpverbs.h).
 inline Sections build( const IngestResult& ing, const std::vector<float>& rank, const std::vector<std::uint32_t>& outOff,
@@ -906,6 +1079,10 @@ inline Sections build( const IngestResult& ing, const std::vector<float>& rank, 
         }
     }
     s.entries = detail::entryRows( ing, core, ff, s.entryShown );
+    if constexpr( kArm == Arm::Placebo )
+    {
+        detail::placebo( s, ing, ff, core );   // the registered placebo arm: O's shape, its signal drawn at random
+    }
 
     // ── render ──
     std::string x;
