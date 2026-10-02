@@ -9,6 +9,6 @@ namespace rw::orient
 {
 
 enum class Arm : std::uint8_t { O, Narrow, Placebo };
-inline constexpr Arm kArm = Arm::O;
+inline constexpr Arm kArm = Arm::Narrow;   // the registered O-narrow arm
 
 }   // namespace rw::orient
