@@ -322,8 +322,11 @@ std::string lowerExtensionOf( std::string_view path )
     return ext;
 }
 
-// ---- capture-name prefix -> role. @definition.* -> DEF, @reference.* -> REF. ----
-enum class CapRole : std::uint8_t { Ignore, NameOnly, Def, Ref };
+// ---- capture-name prefix -> role. @definition.* -> DEF, @reference.* -> REF, @import.* -> IMP. ----
+// `Import` is the shared import-capture vocabulary of #358: one `@import.path` per WRITTEN specifier,
+// declared in the grammar's own tags.scm and normalised by ONE specifier normaliser per DepDialect
+// (src/ingest_importcap.h), in place of the per-language extractors this replaces.
+enum class CapRole : std::uint8_t { Ignore, NameOnly, Def, Ref, Import };
 
 // Map the part AFTER "definition."/"reference." to a SymKind. Falls back to Other.
 SymKind defKind( std::string_view tail ) noexcept
@@ -405,6 +408,7 @@ CapRole roleOf( std::string_view cap, SymKind& kindOut ) noexcept
 {
     constexpr std::string_view kDef = "definition.";
     constexpr std::string_view kRef = "reference.";
+    constexpr std::string_view kImp = "import.";
 
     if( cap == "name" )
     {
@@ -419,6 +423,12 @@ CapRole roleOf( std::string_view cap, SymKind& kindOut ) noexcept
     if( cap.size() > kRef.size() && cap.substr( 0, kRef.size() ) == kRef )
     {
         return CapRole::Ref;
+    }
+    // @import.* is tested AFTER @reference.* on purpose: the two families must stay disjoint, and an
+    // earlier arm silently swallowing an import capture would look like a working query.
+    if( cap.size() > kImp.size() && cap.substr( 0, kImp.size() ) == kImp )
+    {
+        return CapRole::Import;
     }
 
     return CapRole::Ignore;   // @doc, @local.scope, etc.
