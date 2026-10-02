@@ -73,6 +73,7 @@
 # Usage:  bash test/crashsweepcheck.sh [BIN]      RIPWIRE_ASAN_BIN=asan/ripwire bash test/crashsweepcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+export RIPWIRE_TESTLIB="$ROOT/test/lib"   # shardmatch.py: the --match scan, complete past the engine budget
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
@@ -110,56 +111,21 @@ from collections import Counter, defaultdict
 BIN, SRC, OUT = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(OUT, exist_ok=True)
 
-def _scanHalves():
-    """SRC's files in two halves for a --match that reached the engine's 5000-hit budget (pattern.h kMaxHits): each
-    half is scanned with the OTHER half --exclude'd. --exclude is a root-relative SUBSTRING filter, so a path that is a
-    substring of another (emit.h / infra/emit.h) is kept on the same side as it — the halves stay disjoint."""
-    files = sorted(os.path.relpath(os.path.join(d, f), SRC) for d, _, fs in os.walk(SRC) for f in fs)
-    up = list(range(len(files)))
-    def find(i):
-        while up[i] != i:
-            up[i] = up[up[i]]; i = up[i]
-        return i
-    for i, a in enumerate(files):
-        for j, b in enumerate(files):
-            if i != j and a in b:
-                up[find(i)] = find(j)
-    groups = defaultdict(list)
-    for i, f in enumerate(files):
-        groups[find(i)].append(f)
-    halves = ([], [])
-    for g in sorted(groups.values(), key=lambda g: (-len(g), g)):
-        min(halves, key=len).extend(g)
-    return halves
-
+# The scan is SHARDED when the whole tree reaches the engine's hit budget (test/lib/shardmatch.py), so the rules read
+# every site of src/ however large it grows; a scan that still cannot be completed exits 3, never a partial list.
+sys.path.insert(0, os.environ["RIPWIRE_TESTLIB"])
+from shardmatch import ShardedMatch
+_scanEnv = dict(os.environ)
+# A sanitizer job may route reports to a log file (log_path=…); the scan's own runs report on stderr instead,
+# so a sanitizer abort here names its cause in the gate output rather than as a bare rc=-6.
+for key in ("ASAN_OPTIONS", "UBSAN_OPTIONS", "LSAN_OPTIONS"):
+    _scanEnv[key] = (_scanEnv[key] + ":" if _scanEnv.get(key) else "") + "log_path=stderr"
+_budget = int(os.environ["RIPWIRE_SHARD_BUDGET"]) if os.environ.get("RIPWIRE_SHARD_BUDGET") else None
+_scanner = ShardedMatch(BIN, SRC, os.path.join(OUT, "shards"), env=_scanEnv, budget=_budget)
 
 def match(query):
-    """Run one --match over SRC; return [(file, line, fn, text)] and fail loudly if the scan was partial."""
-    # A sanitizer job may route reports to a log file (log_path=…); the scan's own runs report on stderr instead,
-    # so a sanitizer abort here names its cause in the gate output rather than as a bare rc=-6.
-    env = dict(os.environ)
-    for key in ("ASAN_OPTIONS", "UBSAN_OPTIONS", "LSAN_OPTIONS"):
-        env[key] = (env[key] + ":" if env.get(key) else "") + "log_path=stderr"
-    def scan(excludes):
-        proc = subprocess.run([BIN, SRC, "--match=" + query, "--limit=5000"] + ["--exclude=" + e for e in excludes], capture_output=True, text=True, env=env)
-        root = re.search(r"<match [^>]*>", proc.stdout)
-        if proc.returncode != 0 or root is None:
-            print("SCANFAIL rc=%d query=%s stderr=%s" % (proc.returncode, query[:80], proc.stderr[-1200:]))
-            sys.exit(3)
-        return proc.stdout, 'hits_capped="1"' in root.group(0)
-    out, capped = scan([])
-    if capped:   # the whole tree is past the hit budget: scan it as two disjoint halves, each of which must be complete
-        a, b = _scanHalves()
-        (outA, cappedA), (outB, cappedB) = scan(b), scan(a)
-        if cappedA or cappedB:
-            print("SCANFAIL engine hit cap reached, even per half — the scan is partial: " + query[:80])
-            sys.exit(3)
-        out = outA + outB
-    rows = []
-    for p, fn, text in re.findall(r'<m p="([^"]*)" in="([^"]*)">(.*?)</m>', out, re.S):
-        f, _, ln = p.rpartition(":")
-        rows.append((f, int(ln), html.unescape(fn), html.unescape(text)))
-    return rows
+    """One --match over SRC, complete (sharded past the engine budget); [(file, line, fn, text)]."""
+    return _scanner.match(query)
 
 def pairs(rows):
     """Queries below bind a predicate capture then the payload capture: rows arrive in that order, two per match."""
@@ -841,6 +807,21 @@ else
     is_sanitized "$BIN" || [ -n "$ASAN_BIN" ] \
         || note "B3: no sanitizer binary (RIPWIRE_ASAN_BIN) — the overflow this arm exists for is only observable in that build"
 fi
+
+echo
+echo "=== Z: the static scan is complete whatever the size of the tree it reads (test/lib/shardmatch.py) ==="
+# The rules above read src/ through one --match per rule, and the engine stops at a fixed hit budget; src/ grows past it.
+# The scan shards instead of stopping (shardmatch.py's header). (Z1) proves completeness on a generated tree past the
+# budget; (Z2) proves a split changes no row, on src/ itself.
+if python3 "$RIPWIRE_TESTLIB/shardmatch.py" selftest "$BIN" "$TMP/shardtest" "$SRC" >"$TMP/shardtest.txt" 2>&1; then :; fi
+while IFS= read -r line; do
+    case "$line" in
+        PASS\ \ *) ok "${line#PASS  }" ;;
+        FAIL\ \ *) no "${line#FAIL  }" ;;
+        *)          no "shard self-test: $line" ;;
+    esac
+done <"$TMP/shardtest.txt"
+grep -q '^PASS  (Z1) the sharded scan' "$TMP/shardtest.txt" || no "(Z1) the size-independence arm did not run"
 
 echo
 [ "$fail" -eq 0 ] && { echo "crashsweepcheck: ALL PASS"; exit 0; } || { echo "crashsweepcheck: SOME CHECKS FAILED"; exit 1; }

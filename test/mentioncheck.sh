@@ -19,7 +19,7 @@
 #         nothing). Precision-first: only the dir's index file lifts, never the whole directory.
 #   (vii) NAMED IDENTIFIER (dogfood G2, 2026-09-26) — a symbol the task names VERBATIM takes the direct-symbol
 #         slot, below an unanchored #1: a bare snake_case/camelCase word, `name()` call syntax, a backticked word,
-#         `ns::fn`, or `mod.fn`, defined in at most 3 files. Measured: "Where does hybrid_search rank search results"
+#         `ns::fn`, or `mod.fn`, defined in at most 3 files. Measured: "How does hybrid_search rank search results"
 #         served the named function at r=8 on a public Python repo. RED on the base binary (absent from the served
 #         head), GREEN after. Controls, each byte-identical to --no-mention-boost: plain English words that ARE
 #         symbol names; call syntax inside pasted code (a fence, an indented line); `std::vector`; a qualifier that
@@ -306,14 +306,28 @@ named(){ # $1=label $2=query $3=symbol — in the served head at r<=2, #1 unchan
         ok "vii $1: $3 served at r=$rOn below the unchanged #1 (anchor off: absent from the served head)"
     else no "vii $1: $3 expected at r<=2 with #1 unchanged, got on=${rOn:-absent} off=${rOff:-absent} top-on=$( topOf "$ON" ) top-off=$( topOf "$OFF" )"; fi
 }
-named "bare snake_case"      "Where does hybrid_search rank search results"               hybrid_search
-named "backticked"           'Where does `hybrid_search` rank search results'             hybrid_search
-named "module.fn"            "Where does search.hybrid_search rank search results"        hybrid_search
+# fix #10: a "how does ..." task takes the how answer (forhow.h), which carries no ranked <d r=> rows, so the
+# served-rank arm runs on "where does ..." twins of the same three tasks (the ranked lens path stays pinned) ...
+named "bare snake_case"      "Where does hybrid_search rank search results"             hybrid_search
+named "backticked"           'Where does `hybrid_search` rank search results'           hybrid_search
+named "module.fn"            "Where does search.hybrid_search rank search results"      hybrid_search
+# ... and the "how" tasks themselves assert what must hold under the how answer: the named symbol is the FIRST seed
+# (the first <h> row of <path>), and the root still discloses the lift (mention_anchored="1")
+howSeed(){ # $1=label $2=query $3=symbol
+    H="$( headOf "$2" )"
+    first="$( printf '%s' "$H" | grep -o '<h n="[^"]*"' | head -1 | sed 's/<h n="//;s/"$//' )"
+    if printf '%s' "$H" | grep -q 'shape="how"' && [ "$first" = "$3" ] && printf '%s' "$H" | grep -q 'mention_anchored="1"'; then
+        ok "vii $1 (how answer): $3 is the first seed and the root keeps mention_anchored=\"1\""
+    else no "vii $1 (how answer): want shape=\"how\", first seed $3 and mention_anchored=\"1\"; got first seed '${first}'"; fi
+}
+howSeed "bare snake_case"    "How does hybrid_search rank search results"               hybrid_search
+howSeed "backticked"         'How does `hybrid_search` rank search results'             hybrid_search
+howSeed "module.fn"          "How does search.hybrid_search rank search results"        hybrid_search
 named "self.fn"              "why is self.hybrid_search slow to rank search results"    hybrid_search
 named "ns::fn"               "where does ranking::rescore reorder the search results"   rescore
 named "PHP case-folded call" "why does mergerankings() drop the ranked search results"  MergeRankings
 named "call syntax"          "why does helper() return stale search results"            helper
-ON1="$( headOf "Where does hybrid_search rank search results" )"
+ON1="$( headOf "How does hybrid_search rank search results" )"
 if printf '%s' "$ON1" | grep -q 'mention_anchored="1"'; then
     ok "vii the root discloses the lift: mention_anchored=\"1\""
 else no "vii mention_anchored=\"1\" missing on the anchored head"; fi
@@ -325,6 +339,12 @@ inert(){ # $1=label $2=query
     else no "vii control $1: the anchor moved bytes on a task whose named identifier must not lift"; fi
 }
 inert "plain words (get, results, rank)" "where do I get the search results and rank them"
+# the "how do" twin takes the how answer, which a --no-mention-boost run (a shaping flag) never does, so the
+# byte-identity control cannot apply; what must hold is that plain words still anchor nothing
+PW="$( headOf "how do I get the search results and rank them" )"
+if printf '%s' "$PW" | grep -q 'shape="how"' && ! printf '%s' "$PW" | grep -q 'mention_anchored='; then
+    ok "vii control plain words (how answer): no mention_anchored= on the root — plain words lift nothing"
+else no "vii control plain words (how answer): want shape=\"how\" and no mention_anchored= on the root"; fi
 inert "call syntax inside a fenced paste" 'why does it rank search results ```x = helper(cache)```'
 inert "call syntax on an indented pasted line" "$( printf 'why does it rank search results\n    x = helper(cache)\n' )"
 inert "std::vector names no user symbol" "does std::vector hold the search results"
@@ -379,7 +399,7 @@ MA="$( headOf "$MANY" )"
 if printf '%s' "$MA" | grep -q 'mention_idents_capped="1" mention_idents_total="70"'; then
     ok "vii 70 distinct identifiers: the first 64 are read, the cut is disclosed (mention_idents_capped=\"1\" mention_idents_total=\"70\")"
 else no "vii identifier bound: expected mention_idents_capped=\"1\" mention_idents_total=\"70\""; fi
-D1="$( headOf "Where does hybrid_search rank search results" )"; D2="$( headOf "Where does hybrid_search rank search results" )"
+D1="$( headOf "How does hybrid_search rank search results" )"; D2="$( headOf "How does hybrid_search rank search results" )"
 if [ -n "$D1" ] && [ "$D1" = "$D2" ]; then ok "vii determinism (anchored twice, byte-identical)"
 else no "vii anchored output not deterministic"; fi
 

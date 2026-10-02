@@ -44,7 +44,10 @@ echo "compactroutecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-CONC="where are identifiers split into subtokens for ranking"   # multi-word, no word is a whole symbol name
+CONC="where are identifiers split into subtokens for ranking" # multi-word, no word is a whole symbol name
+# fix #10: the "how" form of the same task takes the how answer (forhow.h), not the compact bundle — arms 1-8 run on
+# the "where" twin above, and arm (9) asserts what the "how" form must still carry
+CONC_HOW="how are identifiers split into subtokens for ranking"
 NAME="pageRankDouble"                                          # name-exact: a small, stable anchor
 
 rw(){ "$BIN" src --no-cache "$@" 2>/dev/null; }
@@ -163,6 +166,34 @@ rw --for="$CONC" >"$TMP/d2"; rw --for="$CONC" >"$TMP/d3"
 { cmp -s "$TMP/conc" "$TMP/d2" && cmp -s "$TMP/conc" "$TMP/d3"; } \
     && ok "(8b) the compact bundle is byte-identical across 3 runs" \
     || no "(8b) the compact bundle is not deterministic"
+
+# ── (9) the "how" form: the how answer in place of the compact bundle, on the same route, under the compact legend ──
+# Arms 1-3 do NOT hold here, by design: the how root drops bundle=/bodies=/reason= (it is not the compact bundle), its
+# edge context is <path> rather than <hops> (lens= names hops as not carried), and its <b> rows are selected lines.
+rw --for="$CONC_HOW" >"$TMP/how"; rw --for="$CONC_HOW" --legend=full >"$TMP/howfull"; rw --for="$CONC_HOW" >"$TMP/how2"
+HROOT="$( grep -o '<ctx [^>]*>' "$TMP/how" | head -1 )"
+case "$HROOT" in
+    *' route="subtoken+body"'*' schema="ripwire.for/v1"'*' shape="how"'*' lens="'*hops*) ok "(9) how form: same route= and schema=, shape=\"how\", lens= names the <hops> it does not carry" ;;
+    *) no "(9) how form root: want route=\"subtoken+body\" schema=\"ripwire.for/v1\" shape=\"how\" lens=…hops; got $HROOT" ;;
+esac
+case "$HROOT" in *' bundle='*|*' bodies='*|*' reason='*) no "(9) how form root still carries the compact bundle's bundle=/bodies=/reason=" ;;
+                 *) ok "(9) how form root carries no bundle=/bodies=/reason= (it is not the compact bundle)" ;; esac
+HCHK="$( python3 - "$TMP/how" <<'PY9'
+import re, sys
+d = open(sys.argv[1], encoding="utf-8").read()
+leg = re.match(r"<ctx [^>]*><!-- (ripwire for schema=ripwire\.for/v1 shape=how:.*?)-->", d, re.S)
+print("legend" if leg and all(k in leg.group(1) for k in ("route=", "lens=:", "path seeds= hops=:")) else "nolegend")
+print("edges" if re.search(r"<path [^>]*>[^<]*</path><h n=[^>]*>.*?<c n=", d, re.S) else "noedges")   # the chain, then its hop rows
+PY9
+)"
+printf '%s\n' "$HCHK" | grep -qx legend && ok "(9) how form: the compact legend opens the answer and defines route=, lens= and <path>" \
+    || no "(9) how form: the compact legend is missing or does not define route=/lens=/<path>"
+printf '%s\n' "$HCHK" | grep -qx edges && ok "(9) how form: <path> carries hop rows with resolved callees (the edge context, in the how shape)" \
+    || no "(9) how form: <path> has no <h> row with a <c> callee"
+[ "$( wc -c < "$TMP/howfull" )" -gt "$( wc -c < "$TMP/how" )" ] && ok "(9) how form: --legend=full restores the prose legend (longer than compact)" \
+    || no "(9) how form: --legend=full is not longer than the compact answer"
+{ cmp -s "$TMP/how" "$TMP/how2" && { ! command -v xmllint >/dev/null 2>&1 || xmllint --noout "$TMP/how" 2>/dev/null; }; } \
+    && ok "(9) how form: byte-identical across 2 runs and well-formed" || no "(9) how form: not deterministic or not well-formed"
 
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES PRESENT"; exit 1

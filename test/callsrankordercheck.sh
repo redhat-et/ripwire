@@ -97,6 +97,9 @@ printf '    #0 0x000102 in hub_dispatch(int) src/hub.cpp:5:9\n    #1 0x000104 in
 
 TASK="reconcile the quarantine ledger sweep"
 CONC="where are ledger entries reconciled during a sweep"
+# fix #10: the "how" form of the same question takes the how answer (forhow.h), which carries no <hops> (lens= names
+# it), so arm (5) measures the compact route on the "where" twin above and arm (5h) measures the how answer's own rows
+CONC_HOW="how are ledger entries reconciled during a sweep"
 
 # ── the checker: ONE <calls> block per bundle by construction (only hub_dispatch has out-edges in this
 # fixture), so it asserts that and prints the block's attrs plus its <c n=> names in DOCUMENT order.
@@ -267,20 +270,38 @@ else
                    *) ok "(6b) arm 1's extraction, re-run over a mutated real bundle, goes red" ;; esac
 fi
 
-# ── (7) determinism + well-formedness on all four routes ──────────────────────────────────────────────────
+# ── (5h) the how answer orders a capped hop's callee rows the same way: task words first, then (rank desc, id asc) ──
+FH="$( "$BIN" "$FX" --for="$CONC_HOW" 2>/dev/null )"
+HUB="$( printf '%s' "$FH" | python3 -c '
+import re, sys
+m = re.search(r"(<h n=\"hub_dispatch\"[^>]*>)(.*?)</h>", sys.stdin.read(), re.S)
+if not m:
+    sys.exit(print("NOHUB"))
+rows = re.findall(r"<c n=\"([^\"]*)\"", m.group(2))
+attrs = ["%s=%s" % kv for kv in re.findall(r" (shown|total|capped)=\"([^\"]*)\"", m.group(1))]
+print(" ".join(rows) + " | " + " ".join(attrs))' )"
+WANT_HOW="$( printf '%s' "$EXPECT_RANKED" | cut -d' ' -f1-8 ) | shown=8 total=21 capped=1"
+if ! printf '%s' "$FH" | grep -q 'shape="how"'; then
+    no "(5h) the \"how\" twin did not take the how answer — this arm measured nothing"
+elif [ "$HUB" = "$WANT_HOW" ]; then
+    ok "(5h) how answer: hub_dispatch's capped callee rows lead with the ranked callee, then the leaves in id order ($HUB)"
+else no "(5h) how answer: hub_dispatch rows '$HUB', want '$WANT_HOW'"; fi
+
+# ── (7) determinism + well-formedness on all five answers ──────────────────────────────────────────────────
 det_fail=0
 d(){ A="$( eval "$1" )"; B="$( eval "$1" )"; [ "$A" = "$B" ] || { no "(7) not byte-identical across two runs: $2"; det_fail=1; }; }
 d "\"$BIN\" \"$FX\" --pack-task=\"$TASK\" --token-budget=9000 2>/dev/null" "--pack-task"
 d "\"$BIN\" \"$FX\" --from-trace=\"$TMP/trace.txt\" 2>/dev/null" "--from-trace"
 d "\"$BIN\" \"$FX4\" --expand=hub_dispatch --top-k=0 2>/dev/null" "--expand"
 d "\"$BIN\" \"$FX\" --for=\"$CONC\" 2>/dev/null" "--for compact"
-[ "$det_fail" = 0 ] && ok "(7) all four bundles byte-identical across two runs"
+d "\"$BIN\" \"$FX\" --for=\"$CONC_HOW\" 2>/dev/null" "--for how"
+[ "$det_fail" = 0 ] && ok "(7) all five bundles byte-identical across two runs"
 if command -v xmllint >/dev/null 2>&1; then
     wf=0
-    for v in "$PT" "$TR" "$EX" "$FC"; do
+    for v in "$PT" "$TR" "$EX" "$FC" "$FH"; do
         printf '%s' "$v" | xmllint --noout - 2>/dev/null || wf=1
     done
-    if [ "$wf" = 0 ]; then ok "(7) all four bundles are well-formed"; else no "(7) a bundle is not well-formed"; fi
+    if [ "$wf" = 0 ]; then ok "(7) all five bundles are well-formed"; else no "(7) a bundle is not well-formed"; fi
 else
     printf '  SKIP  xmllint (not installed)\n'
 fi
