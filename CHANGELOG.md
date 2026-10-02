@@ -33,6 +33,7 @@ default arguments on one root — CLI `--for` and `--pack-task` (beside `--legen
   `next="--callees=… --metrics"` / `next="--callers=… --metrics"` (`--metrics` reads the value-use index this answer reads;
   `--limit=N` rides along when the list is longer than one page). Callees and callers are name-resolved call edges, the
   same edges `--callers`/`--callees` list — not proof of a runtime call; `cl=` lists the hop's call sites of that NAME.
+  `<path>` carries `counts_floor="1"`, as `--callers`/`--callees` do: every call count is a floor of the resolved calls.
 - `<b n= p= lines_shown= sel= lines_total= next=>`: the first 3 hops' selected body lines — first line, calls,
   guards, field writes, exits — numbered, at most 1 KB a body and 2 KB in all, kept by priority and re-emitted in source
   order; `next=` is the whole body.

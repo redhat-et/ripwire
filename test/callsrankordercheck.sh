@@ -96,7 +96,7 @@ EOF
 printf '    #0 0x000102 in hub_dispatch(int) src/hub.cpp:5:9\n    #1 0x000104 in main src/zzz_target.cpp:3:5\n' > "$TMP/trace.txt"
 
 TASK="reconcile the quarantine ledger sweep"
-CONC="how are ledger entries reconciled during a sweep"
+CONC="where are ledger entries reconciled during a sweep"
 
 # ── the checker: ONE <calls> block per bundle by construction (only hub_dispatch has out-edges in this
 # fixture), so it asserts that and prints the block's attrs plus its <c n=> names in DOCUMENT order.

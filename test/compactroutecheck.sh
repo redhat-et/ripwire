@@ -44,7 +44,7 @@ echo "compactroutecheck: BIN=$BIN"
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
-CONC="how are identifiers split into subtokens for ranking"   # multi-word, no word is a whole symbol name
+CONC="where are identifiers split into subtokens for ranking"   # multi-word, no word is a whole symbol name
 NAME="pageRankDouble"                                          # name-exact: a small, stable anchor
 
 rw(){ "$BIN" src --no-cache "$@" 2>/dev/null; }

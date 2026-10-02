@@ -90,20 +90,50 @@ os.makedirs(OUT, exist_ok=True)
 queriesRun = 0
 
 
+def _scanHalves():
+    """SRC's files in two halves for a --match that reached the engine's 5000-hit budget (pattern.h kMaxHits): each
+    half is scanned with the OTHER half --exclude'd. --exclude is a root-relative SUBSTRING filter, so a path that is a
+    substring of another (emit.h / infra/emit.h) is kept on the same side as it — the halves stay disjoint."""
+    files = sorted(os.path.relpath(os.path.join(d, f), SRC) for d, _, fs in os.walk(SRC) for f in fs)
+    up = list(range(len(files)))
+    def find(i):
+        while up[i] != i:
+            up[i] = up[up[i]]; i = up[i]
+        return i
+    for i, a in enumerate(files):
+        for j, b in enumerate(files):
+            if i != j and a in b:
+                up[find(i)] = find(j)
+    groups = defaultdict(list)
+    for i, f in enumerate(files):
+        groups[find(i)].append(f)
+    halves = ([], [])
+    for g in sorted(groups.values(), key=lambda g: (-len(g), g)):
+        min(halves, key=len).extend(g)
+    return halves
+
+
 def match(query):
     """One --match over SRC -> [(file, line, fn, text)]. A partial or failed scan exits 3, never an empty list."""
     global queriesRun
-    proc = subprocess.run([BIN, SRC, "--match=" + query, "--limit=5000"], capture_output=True, text=True)
-    root = re.search(r"<match [^>]*>", proc.stdout)
-    if proc.returncode != 0 or root is None:
-        print("SCANFAIL rc=%d query=%s stderr=%s" % (proc.returncode, query[:100], proc.stderr[:300]))
-        sys.exit(3)
-    if 'hits_capped="1"' in root.group(0) or 'capped="1"' in root.group(0):
-        print("SCANFAIL the scan is partial (a cap was reached): " + query[:100])
-        sys.exit(3)
+    def scan(excludes):
+        proc = subprocess.run([BIN, SRC, "--match=" + query, "--limit=5000"] + ["--exclude=" + e for e in excludes], capture_output=True, text=True)
+        root = re.search(r"<match [^>]*>", proc.stdout)
+        if proc.returncode != 0 or root is None:
+            print("SCANFAIL rc=%d query=%s stderr=%s" % (proc.returncode, query[:100], proc.stderr[:300]))
+            sys.exit(3)
+        return proc.stdout, 'hits_capped="1"' in root.group(0) or 'capped="1"' in root.group(0)
+    out, capped = scan([])
+    if capped:   # the whole tree is past the hit budget: scan it as two disjoint halves, each of which must be complete
+        a, b = _scanHalves()
+        (outA, cappedA), (outB, cappedB) = scan(b), scan(a)
+        if cappedA or cappedB:
+            print("SCANFAIL the scan is partial (a cap was reached, even per half): " + query[:100])
+            sys.exit(3)
+        out = outA + outB
     queriesRun += 1
     rows = []
-    for p, fn, text in re.findall(r'<m p="([^"]*)" in="([^"]*)">(.*?)</m>', proc.stdout, re.S):
+    for p, fn, text in re.findall(r'<m p="([^"]*)" in="([^"]*)">(.*?)</m>', out, re.S):
         f, _, ln = p.rpartition(":")
         rows.append((f, int(ln), html.unescape(fn), html.unescape(text)))
     return rows

@@ -25,7 +25,7 @@ inline constexpr std::string_view kHowPathLegend =
     "; path seeds= hops=: up to 3 seeds and the resolved calls walked from them, a > b > c | b > d (a later chain"
     " starts at its branch point; 9 hops, depth 4); capped=1 next=: callees left to expand; cut_names= cut_callees="
     " cut_lines=: rows the 8 KB answer ceiling cut, in that order (each element's next= returns them);"
-    " over_ceiling=1: still over after the cuts";
+    " over_ceiling=1: still over after the cuts; counts_floor=1: every call count is a floor (resolved calls only)";
 
 inline constexpr std::string_view kHowHopLegend =
     "; h n= p=file:line: a hop, its signature as text; c n= cl= p=: its resolved callees, task words first (8 for a"

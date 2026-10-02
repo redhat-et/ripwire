@@ -512,26 +512,6 @@ inline std::uint32_t firedRuleMask( const Symbol& s, std::string_view sig )
 static_assert( kRuleCount <= std::numeric_limits<decltype( firedRuleMask( std::declval<const Symbol&>(), std::string_view() ) )>::digits,
                "firedRuleMask holds one bit per naming rule — widen it before kRuleCount outgrows it" );
 
-// Read one file whole, memoized. A signature is a byte range in a file, and an unreadable file must degrade
-// to "no signature" — both role-vs-return-type rules then stay silent — rather than to a guess. The read
-// itself is docparse's canonical one, not a fourth copy of the fopen/fseek/fread dance.
-struct FileBytesCache
-{
-    std::vector<std::string> bytes;
-    std::vector<char>        loaded;
-
-    explicit FileBytesCache( std::size_t fileCount ) : bytes( fileCount ), loaded( fileCount, 0 ) {}
-
-    const std::string& get( const IngestResult& ing, std::uint32_t fileId )
-    {
-        if( !loaded[fileId] )
-        {
-            loaded[fileId] = 1;
-            bytes[fileId] = docparse::detail::readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );   // unreadable ⇒ empty
-        }
-        return bytes[fileId];
-    }
-};
 
 }   // namespace detail
 
@@ -622,7 +602,7 @@ inline CalibrationReport scoreRenamePairs( const IngestResult& ing, RenameHarves
         }
     }
 
-    detail::FileBytesCache fileBytes( ing.files.size() );
+    docparse::detail::FileBytesCache fileBytes( ing.files.size() );   // memoized whole-file reads (docparse.h)
     for( std::size_t pairIndex = 0; pairIndex < harvest.candidates.size(); ++pairIndex )
     {
         if( keep[pairIndex] == 2 )

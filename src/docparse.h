@@ -23,6 +23,7 @@
 
 #include "infra/sortutil.h"  // svLess — the memcmp-then-length string_view order the sorted tables below use
 #include "infra/ownedfile.h" // rw::OwnedFile — the whole-file readers own their stream, so every return closes it
+#include "model.h"            // IngestResult / diskPath — FileBytesCache reads an indexed file by its id
 #include "pathguard.h"        // rw::pathguard::NoFollowRead — the owned line stream a fixed-name file is read through
 
 #include <algorithm>   // std::binary_search — the membership test, instead of a hand-rolled scan loop
@@ -224,6 +225,27 @@ inline std::optional<std::string> readWholeFile( const std::string& path )
     }
     return out;
 }
+
+// One indexed file's bytes, read whole on first use and memoized for the rest of the answer; an unreadable file reads as
+// empty, so a caller degrades to "no bytes" (no signature, no body) rather than to a guess. Shared by --naming-calibration
+// (renamemine.h) and the how answer (forhow.h) — one cache, not a copy per verb.
+struct FileBytesCache
+{
+    std::vector<std::string> bytes;
+    std::vector<char>        loaded;
+
+    explicit FileBytesCache( std::size_t fileCount ) : bytes( fileCount ), loaded( fileCount, 0 ) {}
+
+    const std::string& get( const IngestResult& ing, std::uint32_t fileId )
+    {
+        if( !loaded[fileId] )
+        {
+            loaded[fileId] = 1;
+            bytes[fileId] = readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );   // unreadable ⇒ empty
+        }
+        return bytes[fileId];
+    }
+};
 
 // A fixed-name file in the tree (.ripwire_config, the quality-acks ledger) whose CONTENT is the repository's to decide
 // but whose SHAPE is not, opened as a line stream only when it is a regular file. Anything else at that name — a

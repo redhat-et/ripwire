@@ -270,13 +270,14 @@ inline const char* multiRootTableLegend( bool multiRoot ) noexcept
 // `git grep -c 'xmlCommentText(' -- src/` (excluding this definition) and FAILS if it disagrees with the
 // count on the CALL-SITES line below, so the next divergence is a red gate rather than a stale sentence.
 //
-//   CALL-SITES: 16
+//   CALL-SITES: 17
 //     main.cpp     --for task echo · --exemplar request note · --query route note
 //                  · --run-trace command echo (runTraceLegendComment)                   (4)
 //     packtask.h   task · mention · co-change-boost · doc-mention notes                 (4)
 //                  · siblift · expand lift notes (2026-09-10 lift disclosure)             (2)
 //                  · W2-K restated body-omission marker name echo                       (1)
 //     mcpverbs.h   for/pack-task task · exemplar request note                           (2)
+//                  · the how answer's task echo (forTaskText, fix #10)                  (1)
 //     tracelocus.h --from-trace src note                                                (1)
 //     serialize.h  the <b>/<o> per-symbol name echo inside a comment: packBodies'        (2)
 //                  over-budget marker and spentTailComment (lane/cutfix-bodies, 2026-09-23)

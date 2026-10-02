@@ -1262,7 +1262,7 @@ inline std::size_t keepBodyLines( HowBody& b, std::size_t budget )
 }
 
 inline std::vector<HowBody> selectBodies( HowContext& cx, const HowPath& path, const HowQuestion& q, RedactCounts* redact,
-                                          HashMap<std::uint32_t, std::string>& srcCache )
+                                          docparse::detail::FileBytesCache& srcCache )
 {
     const IngestResult& ing = cx.ing;
     HashMap<std::string_view, char> inRepoNames;
@@ -1290,22 +1290,7 @@ inline std::vector<HowBody> selectBodies( HowContext& cx, const HowPath& path, c
         {
             continue;
         }
-        if( !srcCache.contains( s.fileId ) )
-        {
-            std::string text;
-            if( std::FILE* in = std::fopen( diskPath( ing, s.fileId ).c_str(), "rb" ) )
-            {
-                char        buf[ 4096 ];
-                std::size_t n;
-                while( ( n = std::fread( buf, 1, sizeof( buf ), in ) ) > 0 )
-                {
-                    text.append( buf, n );
-                }
-                std::fclose( in );
-            }
-            srcCache.emplace( s.fileId, std::move( text ) );
-        }
-        const std::string& src = srcCache[ s.fileId ];
+        const std::string& src = srcCache.get( ing, s.fileId );
         if( s.sigStartByte >= src.size() || s.endByte > src.size() || s.sigStartByte >= s.endByte )
         {
             continue;   // the file moved under the index: no body to select from (its hop row still stands)
@@ -1671,7 +1656,8 @@ public:
         const auto pageAllRows = []( std::size_t rowCount )
         { return countFieldIfAbove( std::uint32_t( rowCount ), std::uint32_t( kCallHierarchyRowCap ), " --limit=" ); };
         const HowPath& p = m.path;
-        std::string    x = "<path seeds=\"" + std::to_string( m.seedCount ) + "\" hops=\"" + std::to_string( p.hops.size() ) + "\"";
+        // counts_floor=1: the callee and caller counts are the resolved graph's, as --callees/--callers mark theirs
+        std::string    x = "<path seeds=\"" + std::to_string( m.seedCount ) + "\" hops=\"" + std::to_string( p.hops.size() ) + "\"" + kGraphCountFloorAttrXml;
         if( !p.waiting.empty() )
         {
             std::string next = "--expand=";
@@ -1880,26 +1866,11 @@ inline HowSections howSections( const HowInputs& in )
         m.seedCount = seeds.size();
         m.path      = walkHowPath( cx, seeds );
     }
-    HashMap<std::uint32_t, std::string> srcCache;
+    docparse::detail::FileBytesCache srcCache( ing.files.size() );   // each hop's file, read once (docparse.h)
     for( HowHop& h : m.path.hops )
     {
         const Symbol& s = ing.symbols[h.id];
-        if( !srcCache.contains( s.fileId ) )
-        {
-            std::string text;
-            if( std::FILE* f = std::fopen( diskPath( ing, s.fileId ).c_str(), "rb" ) )
-            {
-                char        buf[ 4096 ];
-                std::size_t n;
-                while( ( n = std::fread( buf, 1, sizeof( buf ), f ) ) > 0 )
-                {
-                    text.append( buf, n );
-                }
-                std::fclose( f );
-            }
-            srcCache.emplace( s.fileId, std::move( text ) );
-        }
-        const std::string& src = srcCache[ s.fileId ];
+        const std::string& src = srcCache.get( ing, s.fileId );
         if( s.sigStartByte < s.sigEndByte && s.sigEndByte <= src.size() )
         {
             h.sig = cleanSig( src.data(), s.sigStartByte, s.sigEndByte, in.redact );
