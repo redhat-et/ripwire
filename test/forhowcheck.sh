@@ -375,7 +375,7 @@ done
 python3 - "$TMP" "$FIX" <<'PY' >"$TMP/r.out" 2>&1
 import sys; sys.path.insert(0, sys.argv[1]); from h import *
 fix = sys.argv[2]
-CLAUSES = ["shape=how: a how it works answer", "path seeds= hops=:", "h n= p=file:line:", "b n= p= lines_shown=", "names shown= total= past= next=:"]
+CLAUSES = ["shape=how: a call path answer", "path seeds= hops=:", "h n= p=file:line:", "b n= p= lines_shown=", "names shown= total= past= next=:"]
 bad = []
 for tool in ("for", "explore"):
     (a, b), dic = mcp(fix, [(tool, {"task": "how does the router dispatch a request"}), (tool, {"task": "how is a request validated"})], ref=True)

@@ -18,33 +18,28 @@ namespace rw
 // What the shape is and what it leaves out. lens= takes the MCP dialect's meaning (mcpverbs.h kMcpForLensColumnsLegend):
 // a named column is NOT CARRIED, never measured-and-zero.
 inline constexpr std::string_view kHowShapeLegend =
-    "; shape=how: a how it works answer, a call path from entry points picked by the task's names and words, not a ranked list;"
-    " lens=: the per-row columns and sections this shape does not carry (not measured here, never zero);"
-    " the same for task with the signatures-only flag serves them";
+    "; shape=how: a call path answer, not a ranked list; lens=: columns and sections not carried (never 0; the"
+    " signatures-only flag on the same for task serves them)";
 
 inline constexpr std::string_view kHowPathLegend =
-    "; path seeds= hops=: up to 3 seeds (a named identifier first, then definitions whose names carry the task's words,"
-    " alternating with the ranked window) and the resolved calls walked from them, chains a > b > c | b > d"
-    " (a later chain starts at its branch point), 9 hops at most, depth 4; capped=1 next=: callees still waiting,"
-    " next= expands them; cut_names= cut_callees= cut_lines=: names, deeper hops' callee rows and body lines the 8 KB answer"
-    " ceiling took, in that order (each element's shown=/lines_shown= counts what is left, its next= returns the rest);"
-    " over_ceiling=1: the answer is still over 8 KB after those cuts";
+    "; path seeds= hops=: up to 3 seeds and the resolved calls walked from them, a > b > c | b > d (a later chain"
+    " starts at its branch point; 9 hops, depth 4); capped=1 next=: callees left to expand; cut_names= cut_callees="
+    " cut_lines=: rows the 8 KB answer ceiling cut, in that order (each element's next= returns them);"
+    " over_ceiling=1: still over after the cuts";
 
 inline constexpr std::string_view kHowHopLegend =
-    "; h n= p=file:line: one hop, its signature as text; c n= cl= p=: its distinct resolved callees, task words first"
-    " (8 for a seed, 4 deeper), cl= up to 3 call-site lines, p= only for a callee with no h row; amb=K: K definitions"
-    " share the call, not followed; us u n= p= cl=: a seed's callers (a member's: its type's instantiation sites);"
-    " shown= total= capped=1 next=: the whole list, read (with the metrics flag) from the same value-use index as this answer";
+    "; h n= p=file:line: a hop, its signature as text; c n= cl= p=: its resolved callees, task words first (8 for a"
+    " seed, 4 deeper), cl= up to 3 call lines, p= when it has no h row; amb=K: K definitions, not followed; us u n= p="
+    " cl=: a seed's callers (a member's: its type's); shown= total= capped=1 next=: the whole list (the metrics flag"
+    " reads this answer's index)";
 
 inline constexpr std::string_view kHowBodyLegend =
-    "; b n= p= lines_shown= sel= lines_total= next=: the first 3 hops' selected lines, N: text (first line, calls,"
-    " guards, field writes, exits); sel= lines selected, lines_shown= kept within 1 KB a body and 2 KB in all,"
-    " lines_total= the body's lines, next= the whole body";
+    "; b n= p= lines_shown= sel= lines_total= next=: the first 3 hops' selected lines, N: text (1 KB a body, 2 KB in"
+    " all) of sel= selected and lines_total= in the body; next= the body";
 
 inline constexpr std::string_view kHowNamesLegend =
-    "; names shown= total= past= next=: the 40-row lens window's other rows, name p:line; in rank order, total= window"
-    " rows not already hops, next= every window row; past= positive-score files outside the window (the limit=N page"
-    " of the same for task lists them)";
+    "; names shown= total= past= next=: the 40-row window's other rows, name p:line; in rank order, total= those"
+    " rows, next= every window row; past= positive-score files past the window (the limit=N page)";
 
 inline constexpr std::string_view kHowEstLegend = "; est_tokens= prices this answer in tokens";
 
