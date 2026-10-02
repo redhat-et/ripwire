@@ -112,7 +112,9 @@ def gq(d, *args):
     return a, rows
 def sections_all(d):
     a, _ = gq(d, "--graph-query=kind(all,sec)", "--limit=1")
-    count = int(a.get("count", "0"))
+    if "count" not in a:
+        return None   # the Section query itself failed: no <query count=> root (a crash, a refusal, an empty stdout)
+    count = int(a["count"])
     if count == 0: return 0, []
     _, rows = gq(d, "--graph-query=kind(all,sec)", "--limit=%d" % count)
     return count, sorted(rows)
@@ -174,8 +176,15 @@ cells = [(s, l, n) for s in ("S1", "S2", "S3", "S4") for l in ("long", "short") 
 for (shape, ln, n) in cells:
     d = os.path.join(TMP, "%s-%s-%d" % (shape, ln, n))
     allsec = sections_all(d)
-    if allsec[0] == 0:
+    if allsec is None:
+        no("%s %s N=%d: the Section query (--graph-query='kind(all,sec)') returned no answer" % (shape, ln, n)); continue
+    if allsec[0] == 0 and shape == "S1":
+        # S1 is a db/schema.rb: only a build that indexes Rails schema tables as Sections (#339) has any to crowd code out
         print("  SKIP  %s %s N=%d: this build indexes no Section in the data file" % (shape, ln, n)); continue
+    if allsec[0] == 0:
+        # Markdown headings, YAML keys and JSON keys are always Sections: zero is an indexing regression, and every check
+        # below would pass on a map with no Section in it
+        no("%s %s N=%d: no Section indexed in the Markdown/YAML/JSON data file — the cell cannot test the pick" % (shape, ln, n)); continue
     for K in (200, 16):
         lab = "%s %s N=%d K=%d" % (shape, ln, n, K)
         xml = run(d, "--top-k=%d" % K)

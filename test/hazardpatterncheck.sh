@@ -720,7 +720,7 @@ echo "=== Z: the static scan is complete whatever the size of the tree it reads 
 # The rules above read src/ through one --match per rule, and the engine stops at a fixed hit budget; src/ grows past it.
 # The scan shards instead of stopping (shardmatch.py's header). (Z1) proves completeness on a generated tree past the
 # budget; (Z2) proves a split changes no row, on src/ itself.
-if python3 "$RIPWIRE_TESTLIB/shardmatch.py" selftest "$BIN" "$TMP/shardtest"  >"$TMP/shardtest.txt" 2>&1; then :; fi
+if python3 "$RIPWIRE_TESTLIB/shardmatch.py" selftest "$BIN" "$TMP/shardtest" "$SRC" >"$TMP/shardtest.txt" 2>&1; then :; fi
 while IFS= read -r line; do
     case "$line" in
         PASS\ \ *) ok "${line#PASS  }" ;;

@@ -35,6 +35,11 @@
 #   (N) S2 — a declaration with matching types and defaults that the include proof cannot reach is disclosed as
 #       defaults_untied= beside the flags.
 #   (I) an unproven declaration (the definition's file does not include the header) lends no defaults.
+#   (P) an attribute group in a class head (`struct alignas( 8 ) S`, `struct __attribute__(( packed )) S`,
+#       `class __declspec( dllexport ) S`) is part of the head: the member's chain keeps `S`, so its declaration pairs.
+#   (Q) a function-pointer parameter is a list this reader cannot parse: the declaration is Unproven, never Different, so
+#       a caller relying on its default is disclosed by defaults_untied=; two overloads that both meet that one
+#       declaration count it once.
 #
 # Operates on private temp git repos. Needs git and python3.
 set -u
@@ -195,6 +200,7 @@ example(){ sed -n "s/.* — e\.g\. --edit-check=\(.*\)$/\1/p" "$TMP/err" | sed "
 roundTrip(){ # roundTrip <label> <corpus> <selector> <min callers every pasted handle must answer>
     ec "$2" "$3" >/dev/null
     if [ "$( rc )" != 1 ]; then no "$1: --edit-check=$3 exited $( rc ), expected the ambiguity refusal"; return; fi
+    cp "$TMP/err" "$TMP/refusal"   # the reruns below overwrite $TMP/err; an arm that inspects the refusal reads this copy
     handles >"$TMP/handles"
     [ -s "$TMP/handles" ] || { no "$1: no handle list in the refusal: $( cat "$TMP/err" )"; return; }
     _ex="$( example )"
@@ -202,9 +208,12 @@ roundTrip(){ # roundTrip <label> <corpus> <selector> <min callers every pasted h
                                        || no "$1: the e.g. handle '$_ex' is not among the listed handles: $( cat "$TMP/err" )"
     while IFS= read -r _h; do
         _o="$( ec "$2" "$_h" )"
+        _c="$( attr "$( root "$_o" )" callers )"
         if [ "$( rc )" != 0 ] || [ -z "$( root "$_o" )" ]; then
             no "$1: suggested handle '$_h' is refused on rerun (exit $( rc )): $( cat "$TMP/err" )"
-        elif [ "$( attr "$( root "$_o" )" callers )" -lt "$4" ]; then
+        elif ! [[ "$_c" =~ ^[0-9]+$ ]]; then
+            no "$1: suggested handle '$_h' answers with no numeric callers= (\"$_c\"): a malformed answer"
+        elif [ "$_c" -lt "$4" ]; then
             no "$1: suggested handle '$_h' answers callers=\"$( attr "$( root "$_o" )" callers )\" (want >= $4): a handle whose answer is not the definition's"
         else
             ok "$1: suggested handle '$_h' is accepted and answers callers=\"$( attr "$( root "$_o" )" callers )\""
@@ -232,7 +241,11 @@ printf '#include "h.h"\nint a() { return f( 1 ); }\n' >"$W/use.cpp"
 commit "$W"
 printf 'int f( int x, int y );\n' >"$W/h.h"
 roundTrip "(J) dropped default" "$W" f 1
-case "$( cat "$TMP/err" )" in *'h.h'*'— e.g.'*) no "(J) the refusal still lists a handle for h.h's declaration: $( cat "$TMP/err" )" ;; *) ok "(J) no handle for the declaration-only contract" ;; esac
+case "$( cat "$TMP/refusal" )" in
+    *'Qualify one contract:'*'h.h'*) no "(J) the refusal still lists a handle for h.h's declaration: $( cat "$TMP/refusal" )" ;;
+    *'Qualify one contract:'*) ok "(J) no handle for the declaration-only contract" ;;
+    *) no "(J) the saved refusal holds no handle list: $( cat "$TMP/refusal" )" ;;
+esac
 OW="$( ec "$W" ./posix.cpp:f )"
 [ "$( flagged "$OW" )" = a ] && ok "(J) the definition's handle flags the call the dropped default broke" \
                                || no "(J) ./posix.cpp:f flags=[$( flagged "$OW" )], expected [a]"
@@ -391,6 +404,44 @@ OU="$( ec "$U" ./lib.cpp:scale )"
 [ "$( flagged "$OU" )" = a1 ] && [ -z "$( attr "$( root "$OU" )" defaults_from )" ] \
     && ok "(I) lib.cpp does not include lib.h: no defaults are borrowed, a1 stays flagged (the safe direction)" \
     || no "(I) flags=[$( flagged "$OU" )] defaults_from=\"$( attr "$( root "$OU" )" defaults_from )\""
+
+echo "=== (P) an attribute group in a class head is part of the head, not a cancel ==="
+attrHead(){ # attrHead <label> <head spelling>
+    _d="$TMP/attrhead-$1"; mkdir -p "$_d"
+    printf '%s\n{\n    int f( int x, int y = 2 );\n};\n' "$2" >"$_d/lib.h"
+    printf '#include "lib.h"\nint S::f( int x, int y )\n{\n    return x + y;\n}\n' >"$_d/lib.cpp"
+    printf '#include "lib.h"\nint a() { S s; return s.f( 1 ); }\n' >"$_d/use.cpp"
+    commit "$_d"
+    _o="$( ec "$_d" ./lib.cpp:f )"; _r="$( root "$_o" )"
+    if [ -n "$_r" ] && [ -z "$( flagged "$_o" )" ] && [ "$( attr "$_r" defaults_from )" = decl ]; then
+        ok "(P) '$2': the member declaration pairs with S::f (no flag, defaults_from=\"decl\")"
+    else
+        no "(P) '$2': flags=[$( flagged "$_o" )] defaults_from=\"$( attr "$_r" defaults_from )\" defaults_untied=\"$( attr "$_r" defaults_untied )\""
+    fi
+}
+attrHead alignas 'struct alignas( 8 ) S'
+attrHead gnu 'struct __attribute__(( packed )) S'
+attrHead declspec 'class __declspec( dllexport ) S'
+
+echo "=== (Q) a function-pointer parameter: Unproven and disclosed, counted once across overloads ==="
+Q="$TMP/fnptr"; mkdir -p "$Q"
+printf 'void on( int (*)( int ), int n = 0 );\n' >"$Q/lib.h"
+printf '#include "lib.h"\nvoid on( int (*cb)( int ), int n )\n{\n    cb( n );\n}\n' >"$Q/lib.cpp"
+printf '#include "lib.h"\nint g( int );\nvoid a() { on( g ); }\n' >"$Q/use.cpp"
+commit "$Q"
+OQ="$( ec "$Q" ./lib.cpp:on )"; RQ="$( root "$OQ" )"
+[ "$( attr "$RQ" defaults_untied )" = 1 ] \
+    && ok "(Q) the 1-argument call stays flagged and defaults_untied=\"1\" says the unparsed declaration may admit it" \
+    || no "(Q) flags=[$( flagged "$OQ" )] defaults_untied=\"$( attr "$RQ" defaults_untied )\" (want 1)"
+Q2="$TMP/fnptr2"; mkdir -p "$Q2"
+printf 'void on( int (*)( int ), int n = 0 );\n' >"$Q2/lib.h"
+printf '#include "lib.h"\nvoid on( int (*cb)( int ), int n )\n{\n    cb( n );\n}\nvoid on( double d, int n )\n{\n}\n' >"$Q2/lib.cpp"
+printf '#include "lib.h"\nint g( int );\nvoid a() { on( g ); }\n' >"$Q2/use.cpp"
+commit "$Q2"
+OQ2="$( ec "$Q2" ./lib.cpp:on )"; RQ2="$( root "$OQ2" )"
+[ "$( attr "$RQ2" defs )" = 2 ] && [ "$( attr "$RQ2" defaults_untied )" = 1 ] \
+    && ok "(Q) two overloads that both meet the one unparsed declaration count it once (defs=\"2\" defaults_untied=\"1\")" \
+    || no "(Q) defs=\"$( attr "$RQ2" defs )\" defaults_untied=\"$( attr "$RQ2" defaults_untied )\" (want 2 and 1: one declaration)"
 
 echo "=== determinism + well-formedness ==="
 O2="$( ec "$F" ./lib.cpp:scale )"

@@ -14452,6 +14452,9 @@ non-Section in any corpus or fixture. Sections with in-edges have them only from
   on this repository at K=16, on `test/fixture` (so `test/golden.xml` and every map pin are unchanged) and on the uncrowded
   fixture cells. Where a swap fires the root says so: this repository's default map at K=200 swaps its one `sec` row
   (`data_sections_cut="1"`), and Gate D's walk pages the swapped Section first, then the rest, each once.
+- As shipped, `data_sections_cut=N` counts the Sections the swap displaced from the rank-order top-K (what Gate D checks),
+  not every indexed Section left unshown; the frozen Disclosure definition above is kept as registered, and the rest
+  are reached through `next=`.
 - Gate S (ii): 132 of 132 rows identical to BASE under the same two masks as A (122 of 132 unmasked, the same 10 rows).
 - `--eval` is untouched by construction (B changes neither the rank vector nor `src/eval.h`) and its stdout is in Gate S.
 

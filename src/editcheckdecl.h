@@ -96,32 +96,41 @@ inline void editCheckBlankComments( std::string& text )
     }
 }
 
+// One file's comment-blanked text. `whole` is false when the file could not be opened or its read stopped on an error:
+// the text is then empty or partial, so a signature read from it proves nothing (editCheckSignatureOf discloses it).
+struct EditCheckFileText
+{
+    std::uint32_t fileId;
+    std::string   body;
+    bool          whole;
+};
+
 // The comment-blanked text of the files one answer reads, each read once. The preview's spliced file is read from memory.
 class EditCheckSources
 {
 public:
     EditCheckSources( const IngestResult& input, const EditCheckSpliced& splicedFile ) : ing( input ), spliced( splicedFile ) {}
 
-    const std::string& text( std::uint32_t fileId )
+    const EditCheckFileText& text( std::uint32_t fileId )
     {
-        for( const auto& [ id, body ] : files )
+        for( const EditCheckFileText& f : files )
         {
-            if( id == fileId )
+            if( f.fileId == fileId )
             {
-                return body;
+                return f;
             }
         }
-        files.emplace_back( fileId, read( fileId ) );
-        editCheckBlankComments( files.back().second );
-        return files.back().second;
+        files.push_back( read( fileId ) );
+        editCheckBlankComments( files.back().body );
+        return files.back();
     }
 
 private:
-    std::string read( std::uint32_t fileId ) const
+    EditCheckFileText read( std::uint32_t fileId ) const
     {
         if( spliced.engaged && spliced.fileId == fileId )
         {
-            return std::string( spliced.bytes );
+            return { fileId, std::string( spliced.bytes ), true };
         }
         std::string body;
         OwnedFile   in = openOwnedFile( diskPath( ing, fileId ).c_str(), "rb" );
@@ -130,13 +139,13 @@ private:
         {
             body.append( buf, n );
         }
-        return body;   // an unreadable file reads empty: nothing in it parses, nothing pairs
+        const bool whole = in && std::ferror( in.file ) == 0;
+        return { fileId, std::move( body ), whole };
     }
 
-    const IngestResult&                                ing;
-    EditCheckSpliced                                   spliced;
-    std::deque<std::pair<std::uint32_t, std::string>>  files;   // a deque: a reference text() handed out stays valid
-                                                                // while later files are appended
+    const IngestResult&           ing;
+    EditCheckSpliced              spliced;
+    std::deque<EditCheckFileText> files;   // a deque: a reference text() handed out stays valid while later files are appended
 };
 
 // ── one parameter's type ──────────────────────────────────────────────────────────────────────────────────────
@@ -428,6 +437,27 @@ private:
         return i;
     }
 
+    // past the balanced parenthesised group that starts at the first non-blank byte from `i` (none: `i` itself)
+    std::size_t skipParenGroup( std::size_t i ) const
+    {
+        const std::size_t open = text.find_first_not_of( " \t\r\n", i );
+        if( open == std::string_view::npos || text[open] != '(' )
+        {
+            return i;
+        }
+        std::size_t depth = 0;
+        for( std::size_t j = open; j < text.size(); ++j )
+        {
+            depth += ( text[j] == '(' ) ? 1u : 0u;
+            depth -= ( text[j] == ')' ) ? 1u : 0u;
+            if( depth == 0 )
+            {
+                return j + 1;
+            }
+        }
+        return text.size();
+    }
+
     std::size_t skipLiteral( std::size_t i ) const
     {
         const char  quote = text[i];
@@ -455,6 +485,11 @@ private:
             ++end;
         }
         const std::string_view w = text.substr( i, end - i );
+        if( pending && ( w == "alignas" || w == "__attribute__" || w == "__declspec" ) )
+        {
+            lastWord = w;
+            return skipParenGroup( end );   // an attribute group inside a class head is part of the head, not a '(' cancel
+        }
         scopeMacro  = scopeMacro || scopeMacroAt( w, i, end );
         usingBefore = usingBefore || ( lastWord == "using" && w == "namespace" && i < askedOffset );
         if( ( w == "namespace" && lastWord != "using" ) || ( ( w == "struct" || w == "class" || w == "union" ) && lastWord != "enum" ) )
@@ -621,12 +656,29 @@ struct EditCheckSignature
     std::uint16_t                           defaulted;
     bool                                    ok;
     bool                                    mayDefault;
+    // The DISCLOSE sink: a signature that cannot be read is not a signature without defaults. mayDefault is what the
+    // answer's defaults_untied= counts, so an unread declaration is disclosed beside the flags it might admit.
+    enum class DisclosureWhy : std::uint8_t
+    {
+        UnreadableFile,   // the file could not be opened, or its read stopped on an error
+    };
+    void disclose( DisclosureWhy ) noexcept   // one reason: unproven, and it may carry a default
+    {
+        ok         = false;
+        mayDefault = true;
+    }
 };
 
 inline EditCheckSignature editCheckSignatureOf( EditCheckSources& sources, const Symbol& s )
 {
-    EditCheckSignature     sig{};
-    const std::string&     file  = sources.text( s.fileId );
+    EditCheckSignature       sig{};
+    const EditCheckFileText& source = sources.text( s.fileId );
+    const std::string&       file   = source.body;
+    if( !source.whole )
+    {
+        DISCLOSE( sig, EditCheckSignature::DisclosureWhy::UnreadableFile, "edit-check: a C/C++ source could not be read whole — its signature is unproven and counted by defaults_untied=" );
+        return sig;
+    }
     const std::uint32_t    end   = std::min<std::uint32_t>( isDefinitionNotDeclaration( s ) ? s.sigEndByte : s.endByte, std::uint32_t( file.size() ) );
     if( end <= s.sigStartByte || end - s.sigStartByte > kEditCheckSigCap )
     {
@@ -647,6 +699,11 @@ inline EditCheckSignature editCheckSignatureOf( EditCheckSources& sources, const
         if( param.find( "..." ) != std::string_view::npos )
         {
             return sig;   // variadic: never a fixed list
+        }
+        if( param.find( '(' ) != std::string_view::npos )
+        {
+            return sig;   // a function-pointer, function-type or decltype parameter: its declarator name is not stripped,
+                          // so the list is unparsed (Unproven, disclosed on mayDefault), never compared as types
         }
         sig.defaulted += raw.defaulted[k] ? 1u : 0u;
         sig.types.push_back( editCheckTypeTokens( param ) );
@@ -727,18 +784,18 @@ struct EditCheckDeclDefaults
     bool                       fromDecl;
 };
 
-// One definition's minimum, and its untied count. Only a fixed-arity C-family DEFINITION can be widened — anything else
-// is already a wildcard (arityExact 0) or has no declaration to read.
-inline std::pair<std::uint16_t, std::uint32_t> editCheckMinArity( const IngestResult& ing, EditCheckSources& sources, NodeId def )
+// One definition's minimum; its untied declarations are appended to `untied` (an overload set may meet one declaration
+// from several members, so the caller counts distinct ids). Only a fixed-arity C-family DEFINITION can be widened —
+// anything else is already a wildcard (arityExact 0) or has no declaration to read.
+inline std::uint16_t editCheckMinArity( const IngestResult& ing, EditCheckSources& sources, NodeId def, std::vector<NodeId>& untied )
 {
     const Symbol& f = ing.symbols[ def ];
     if( !langCompatible( f.lang, Lang::C ) || f.arityExact == 0 || !isDefinitionNotDeclaration( f ) )
     {
-        return { f.params, 0u };
+        return f.params;
     }
     const EditCheckSignature defSig   = editCheckSignatureOf( sources, f );
     std::uint16_t            minArity = f.params;
-    std::uint32_t            untied   = 0;
     for( NodeId cand = 0; cand < ing.symbols.size(); ++cand )
     {
         if( ing.symbols[ cand ].name != f.name || cand == def )
@@ -750,9 +807,12 @@ inline std::pair<std::uint16_t, std::uint32_t> editCheckMinArity( const IngestRe
         {
             minArity = std::min<std::uint16_t>( minArity, std::uint16_t( f.params - std::min( tie.defaulted, f.params ) ) );
         }
-        untied += ( tie.tie == EditCheckTie::Unproven && tie.mayDefault ) ? 1u : 0u;
+        if( tie.tie == EditCheckTie::Unproven && tie.mayDefault )
+        {
+            untied.push_back( cand );
+        }
     }
-    return { minArity, untied };
+    return minArity;
 }
 
 inline EditCheckDeclDefaults editCheckDeclDefaults( const IngestResult& ing, std::span<const NodeId> overloadNodes, const EditCheckSpliced& spliced )
@@ -760,13 +820,15 @@ inline EditCheckDeclDefaults editCheckDeclDefaults( const IngestResult& ing, std
     EditCheckDeclDefaults res{};
     EditCheckSources      sources( ing, spliced );
     res.minArity.reserve( overloadNodes.size() );
+    std::vector<NodeId> untiedDecls;   // one declaration two overloads both meet is ONE untied declaration
     for( NodeId ov : overloadNodes )
     {
-        const auto [ minArity, untied ] = editCheckMinArity( ing, sources, ov );
+        const std::uint16_t minArity = editCheckMinArity( ing, sources, ov, untiedDecls );
         res.minArity.push_back( minArity );
-        res.untied  += untied;
         res.fromDecl = res.fromDecl || minArity < ing.symbols[ ov ].params;
     }
+    std::sort( untiedDecls.begin(), untiedDecls.end() );
+    res.untied = std::uint32_t( std::unique( untiedDecls.begin(), untiedDecls.end() ) - untiedDecls.begin() );
     ENSURES( res.minArity.size() == overloadNodes.size() );
     return res;
 }
