@@ -4922,9 +4922,28 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             sinceHasBaseline       = !scope.baselineSha.empty();
             sinceBaselineRefused   = scope.baselineRefused;
         }
+        // 0.6.7 shallow-history tail: a rev that no root resolves may simply lie past a depth-limited clone's fetched history.
+        // The probe reads EVERY root (a full primary beside a shallow secondary is the multi-root shape the 0.6.6 review
+        // caught on the mining verbs); the first shallow root's hint rides the refusal, "" on full clones (byte-identical).
+        std::string sinceShallowHint;
+        if( multiRoot )
+        {
+            for( const WorkspaceRoot& r : ws )
+            {
+                sinceShallowHint = rw::gitstamp::shallowRefHint( r.arg );
+                if( !sinceShallowHint.empty() )
+                {
+                    break;
+                }
+            }
+        }
+        else
+        {
+            sinceShallowHint = rw::gitstamp::shallowRefHint( root );
+        }
         if( !sinceResolvesSomewhere )
         {
-            rw::emitTo( stderr, "{}\n", sinceUnresolvedRefusal( cfg.since ).c_str() );
+            rw::emitTo( stderr, "{}\n", sinceUnresolvedRefusal( cfg.since, sinceShallowHint ).c_str() );
             return 1;
         }
         // N4 (capture-audit verify-wave1 2026-09-04): the SECOND half of the one policy. A value that resolves as a
@@ -4939,7 +4958,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         const bool sinceHostNeedsBaseline = activeSinceHostNeedsBaseline( cfg );
         if( sinceHostNeedsBaseline && !sinceHasBaseline && gitRepoHasHistory( multiRoot ? ws[0].arg : root ) )
         {
-            rw::emitTo( stderr, "{}\n", sinceNoBaselineRefusal( cfg.since, multiRoot ? ws[0].arg : root, sinceBaselineRefused ).c_str() );
+            rw::emitTo( stderr, "{}\n", sinceNoBaselineRefusal( cfg.since, multiRoot ? ws[0].arg : root, sinceBaselineRefused, sinceShallowHint ).c_str() );
             return 1;
         }
     }

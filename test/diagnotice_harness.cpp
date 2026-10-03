@@ -228,6 +228,7 @@ std::string endedFromStatus( int status )
 
 [[noreturn]] void runReporterAsChild( int writeEnd, void ( *report )() )
 {
+    alarm( 60 );   // a reporter that hangs dies of SIGALRM (the parent reads signal:14) instead of leaving the drain loop waiting
     dup2( writeEnd, 2 );
     close( writeEnd );
     const rlimit noCore = { 0, 0 };
@@ -554,6 +555,7 @@ int runAlloc( int pairCount )
 
 int main( int argc, char** argv )
 {
+    alarm( 300 );   // backstop: a harness that outlives its gate dies of SIGALRM instead of spinning (see scripts/gatebound.sh)
     const std::string_view mode = argc > 1 ? argv[ 1 ] : "";
     if( mode == "writes" )
     {

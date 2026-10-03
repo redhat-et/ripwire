@@ -12,6 +12,11 @@
 #   --hotspots                         churn="1" on every row under a twelve-month window label, unqualified.
 #   --pr-context / --merge-scout       "unknown ref 'HEAD~1'" with no word about the likeliest cause.
 #
+#   --pr-context / --situ (0.6.7)    embedded owners/co-change/window rows with no qualification at all.
+#   --quality-delta=HEAD~1, --dmm=HEAD~1, --since=HEAD~1 (0.6.7)  "does not resolve" / "neither a git revision" with no word
+#                                      about the likeliest cause, while the pr-context/merge-scout refusals already named it.
+#   --hotspots/--cochange --since=HEAD (0.6.7)  an empty since-window root returned before the qualified emitter, unqualified.
+#
 # CONTRACT (one probe, one attribute): on the shallow clone each verb says "shallow" and how to deepen, the
 # qualified roots carry shallow="1" with a legend clause defining it (full AND compact), and the MCP owners and
 # cochange twins carry the same qualification. On the FULL clone of the same history none of it appears, a true
@@ -137,6 +142,71 @@ MC="$( mcp_text cochange "{\"path\":\"$SH\",\"file\":\"a.c\"}" )"
 if has "$MC" '"shallow":true'; then ok "MCP cochange on shallow: \"shallow\":true"; else no "MCP cochange on shallow: $( printf '%s' "$MC" | head -c 300 )"; fi
 MCF="$( mcp_text cochange "{\"path\":\"$FULL\",\"file\":\"a.c\"}" )"
 if has "$MCF" '"shallow"'; then no "MCP cochange on full carries a shallow key"; else ok "MCP cochange on full: no shallow key"; fi
+
+# ── 7. the COMPOSED surfaces (0.6.7 tail): --pr-context, --situ and MCP situational_awareness embed owners / co-change /
+#      window rows mined from the same history, so they carry the same qualification. One uncommitted edit gives each clone a
+#      changed file to review; the sections below run on the dirtied clones, so they sit after every clean-tree arm. ──
+for d in "$FULL" "$SH"; do printf 'int edited( int z ) { return helper( z ) + 2; }\n' >> "$d/a.c"; done
+for leg in full compact; do
+    P="$( run "$SH" --pr-context --legend=$leg )"; PR="$( root_of "$P" )"
+    if has "$PR" 'shallow="1"'; then ok "pr-context ($leg) on shallow: the root carries shallow=\"1\""; else no "pr-context ($leg) on shallow: no shallow=\"1\" on the root: $( printf '%s' "$PR" | head -c 300 )"; fi
+    if legend_defines_shallow "$P"; then ok "pr-context ($leg): the legend defines shallow="; else no "pr-context ($leg): shallow= emitted and not defined in the legend"; fi
+    if printf '%s' "$P" | xmllint --noout - 2>/dev/null; then ok "pr-context ($leg) on shallow: well-formed"; else no "pr-context ($leg) on shallow: not well-formed XML"; fi
+    if has "$P" '<owners authors="1" bf="1"'; then ok "pr-context ($leg) on shallow: the embedded owners row still reads from the fetched commit (qualified, not refused)"; else no "pr-context ($leg) on shallow: the embedded owners row changed shape: $( printf '%s' "$P" | grep -o '<owners[^>]*>' | head -1 )"; fi
+done
+PF="$( run "$FULL" --pr-context --legend=full )"
+if { has "$PF" 'shallow="1"' || has "$PF" '<!-- shallow='; }; then no "pr-context on the full clone carries shallow=\"1\" or its clause"; else ok "pr-context on the full clone: no shallow attribute or clause"; fi
+# the multi-root form writes one <pr-context root=…> section per root; each section probes ITS root, so the full root's section
+# stays byte-identical to the full+full control's while the shallow root's section is qualified.
+PM="$( "$BIN" "$FULL" "$SH" --pr-context --legend=full --no-cache 2>/dev/null )"
+PM_SH="$( printf '%s' "$PM" | grep -o '<pr-context[^>]*root="[^"]*shallow"[^>]*>' | head -1 )"
+PM_FU="$( printf '%s' "$PM" | grep -o '<pr-context[^>]*root="[^"]*full"[^>]*>' | head -1 )"
+if { has "$PM_SH" 'shallow="1"' && ! has "$PM_FU" 'shallow="1"'; }; then ok "pr-context full+shallow workspace: only the shallow root's section carries shallow=\"1\""; else no "pr-context full+shallow workspace: shallow-root section [$PM_SH] full-root section [$PM_FU]"; fi
+if legend_defines_shallow "$PM"; then ok "pr-context full+shallow workspace: the legend defines shallow="; else no "pr-context full+shallow workspace: shallow= undefined"; fi
+SI="$( run "$SH" --situ )"; SI3="$( printf '%s' "$SI" | grep -F '[3] co-change' )"
+if { has "$SI3" 'window="' && has "$SI3" 'shallow="1"'; }; then ok "situ on shallow: the [3] co-change window line carries shallow=\"1\""; else no "situ on shallow: [3] line: $SI3"; fi
+SIF="$( run "$FULL" --situ )"
+if { has "$SIF" '[3] co-change' && ! has "$SIF" 'shallow="1"'; }; then ok "situ on the full clone: no shallow=\"1\""; else no "situ on full: $( printf '%s' "$SIF" | grep -F '[3]' )"; fi
+MS="$( mcp_text situational_awareness "{\"path\":\"$SH\"}" )"
+if { has "$MS" '"cochange_window":' && has "$MS" '"shallow":true'; }; then ok "MCP situational_awareness on shallow: \"shallow\":true beside cochange_window"; else no "MCP situational_awareness on shallow: $( printf '%s' "$MS" | grep -o '"cochange_window[^}]*' | head -c 300 )"; fi
+MSF="$( mcp_text situational_awareness "{\"path\":\"$FULL\"}" )"
+if { has "$MSF" '"cochange_window":' && ! has "$MSF" '"shallow"'; }; then ok "MCP situational_awareness on full: no shallow key"; else no "MCP situational_awareness on full: $( printf '%s' "$MSF" | head -c 300 )"; fi
+
+# ── 8. UNFETCHED-REV refusals (0.6.7 tail): a rev spelled past the fetched history refuses with the SAME probe-backed hint the
+#      pr-context/merge-scout refusals carry (one helper, gitstamp::shallowRefHint). The full clone's refusal for a rev that does
+#      not exist keeps its bytes: a typo there reads exactly as before, and the generic cause list is not the probe's sentence. ──
+HINT="this is a shallow clone"
+for v in --quality-delta=HEAD~1 --dmm=HEAD~1 "--hotspots --since=HEAD~1" "--cochange --since=HEAD~1" "--rank-by=churn --since=HEAD~1" "--slice=twice:x --since=HEAD~1"; do
+    # shellcheck disable=SC2086
+    E="$( run "$SH" $v )"
+    if { has "$E" "$HINT" && has "$E" "git fetch --deepen"; }; then ok "$v on shallow: the refusal carries the probe-backed shallow hint"; else no "$v on shallow: $( printf '%s' "$E" | head -c 300 )"; fi
+done
+for v in --quality-delta=nosuchref --dmm=nosuchref "--hotspots --since=nosuchref" "--slice=twice:x --since=nosuchref" --quality-delta=HEAD~9; do
+    # shellcheck disable=SC2086
+    E="$( run "$FULL" $v )"; RC=$?
+    if { [ "$RC" -ne 0 ] && ! has "$E" "$HINT"; }; then ok "$v on the full clone: refuses (rc=$RC) with no probed shallow hint"; else no "$v on full (rc=$RC): $( printf '%s' "$E" | head -c 300 )"; fi
+done
+# the boundary sentence (section 1) is the NoParent path, not the BadRev one: it must not gain the "may lie beyond" hint
+QB="$( run "$SH" --quality-delta=HEAD )"
+if { has "$QB" "shallow boundary" && ! has "$QB" "$HINT"; }; then ok "quality-delta=HEAD on shallow: the boundary sentence stays its own (no unfetched-rev hint)"; else no "quality-delta=HEAD on shallow: $( printf '%s' "$QB" | head -c 300 )"; fi
+# multi-root: a value no root resolves refuses once; a shallow root among them names the likeliest cause, two full roots do not
+E="$( "$BIN" "$FULL" "$SH" --hotspots --since=HEAD~9 --no-cache 2>&1 >/dev/null )"
+if { has "$E" "$HINT" && has "$E" "git fetch --deepen"; }; then ok "hotspots --since=HEAD~9 full+shallow workspace: the refusal carries the shallow hint"; else no "since full+shallow workspace: $( printf '%s' "$E" | head -c 300 )"; fi
+E="$( "$BIN" "$FULL" "$FULL2" --hotspots --since=HEAD~9 --no-cache 2>&1 >/dev/null )"
+if { has "$E" "neither a git revision" && ! has "$E" "shallow"; }; then ok "hotspots --since=HEAD~9 full+full workspace: still the plain refusal, no shallow claim"; else no "since full+full workspace: $( printf '%s' "$E" | head -c 300 )"; fi
+
+# ── 9. EMPTY since-windows (0.6.7 tail): --hotspots / --cochange with an active window that matched no commits return an empty
+#      root BEFORE the qualified emitter; that root is a claim about the fetched history too, so it carries shallow= as well. ──
+for v in --hotspots --cochange; do
+    for leg in full compact; do
+        O="$( run "$SH" "$v" --since=HEAD --legend=$leg )"; RC=$?; R="$( root_of "$O" )"
+        if { [ "$RC" -eq 0 ] && has "$R" 'commits="0"' && has "$R" 'shallow="1"'; }; then ok "$v --since=HEAD ($leg) on shallow: the empty-window root carries shallow=\"1\" (rc=0, still commits=0)"; else no "$v --since=HEAD ($leg) on shallow (rc=$RC): $R"; fi
+        if legend_defines_shallow "$O"; then ok "$v --since=HEAD ($leg): the legend defines shallow="; else no "$v --since=HEAD ($leg): shallow= emitted and not defined in the legend"; fi
+        if printf '%s' "$O" | xmllint --noout - 2>/dev/null; then ok "$v --since=HEAD ($leg): well-formed"; else no "$v --since=HEAD ($leg): not well-formed XML"; fi
+    done
+    F="$( run "$FULL" "$v" --since=HEAD --legend=full )"
+    if { has "$F" 'commits="0"' && ! has "$F" 'shallow="1"' && ! has "$F" '<!-- shallow='; }; then ok "$v --since=HEAD on the full clone: empty window, no shallow attribute or clause"; else no "$v --since=HEAD on full: $( root_of "$F" )"; fi
+done
 
 [ "$fail" -eq 0 ] && echo "ALL CHECKS PASSED" || echo "$fail CHECK(S) FAILED"
 exit $fail

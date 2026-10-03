@@ -207,22 +207,31 @@ inline bool looksLikeDate( std::string_view s )
 // N4: THE ONE no-baseline refusal — a --since that is a real window but names no commit at or before it, on a
 // host that compares against a commit. Spelled here alone (sincecheck.sh's N4 source arm counts the files);
 // main.cpp decides it beside the M8 validation, slicediff.h prints the same sentence on its own degrade path.
-inline std::string sinceNoBaselineRefusal( std::string_view value, const std::string& root, bool isBaselineRefused = false )
+// 0.6.7: `shallowHint` is gitstamp::shallowRefHint's sentence (or "" on a full clone, byte-identical): on a depth-limited clone
+// the commit at or before the window usually exists upstream and was simply not fetched, which "resolves to no commit" alone
+// does not say. The hint is a parameter because gitstamp.h sits above this header; every host passes the one helper's answer.
+inline std::string sinceNoBaselineRefusal( std::string_view value, const std::string& root, bool isBaselineRefused = false,
+                                           std::string_view shallowHint = {} )
 {
     return "ripwire: --since=" + std::string( value ) + ( isBaselineRefused ? " resolved to an answer from git that is not a commit object name in '"
                                                                              : " resolves to no commit in '" ) + root
          + "' — beside --slice it names the revision to compare this variable's def-use slice against "
-           "(e.g. --since=HEAD~1, --since=<sha>, --since=\"2 weeks ago\")";
+           "(e.g. --since=HEAD~1, --since=<sha>, --since=\"2 weeks ago\")" + std::string( shallowHint );
 }
 
 // THE ONE unresolvable---since refusal, shared by every host (M8). Four verbs consume --since and the
 // §P0.5c "a window nobody chose is not a measurement" fix landed on one of them; the other three either
 // worded it themselves or did not refuse at all. Hosts print this; nobody re-words it.
-inline std::string sinceUnresolvedRefusal( std::string_view value )
+// 0.6.7: on a shallow clone `--since=HEAD~3` IS a revision spelling that merely lies past the fetched history, so the host
+// appends gitstamp::shallowRefHint's sentence (`shallowHint`; "" on a full clone keeps this refusal byte-identical).
+inline std::string sinceUnresolvedRefusal( std::string_view value, std::string_view shallowHint = {} )
 {
-    return "ripwire: --since='" + std::string( value ) + "' is neither a git revision nor a real calendar date — refusing "
-           "rather than measuring under a window nobody chose (a revision: HEAD~20, v1.2.0, a sha; a date: 2026-01-01, "
-           "'2 weeks ago', yesterday)";
+    std::string out = "ripwire: --since='";
+    out += value;
+    out += "' is neither a git revision nor a real calendar date — refusing rather than measuring under a window nobody chose "
+           "(a revision: HEAD~20, v1.2.0, a sha; a date: 2026-01-01, '2 weeks ago', yesterday)";
+    out += shallowHint;
+    return out;
 }
 
 // popen a shell command and return its trimmed stdout ("" on any failure — never crashes). THE one copy of the

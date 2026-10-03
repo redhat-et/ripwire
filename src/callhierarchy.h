@@ -23,7 +23,10 @@
 #include "filter.h"    // pathTierIndexOver / compareTierThenPath — the tier-then-path row order both surfaces serve
 #include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / countTestedIn / isTestedByReach
 #include "model.h"
+#include "infra/sortutil.h"   // svLess: the explicit byte order every string_view sort here takes (portablebuildcheck #6)
 
+#include <algorithm>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -79,7 +82,155 @@ struct CallHierarchyRows
     std::size_t         bodylessDefs  = 0;
     std::size_t         unprovenDefs  = 0;
     std::size_t         declinedCalls = 0;
+    std::string         crossKind;            // cross_kind= value ("fn:1,method:10"), "" unless defs span 2+ kinds
+    std::size_t         declinedIface = 0;   // callers only: declinedIfaceCallsNaming below, the root's declined_iface=
 };
+
+// cross_kind= (comparison table hono-07, 2026-09-30): a bare `getPath` resolved to ONE free function
+// (src/utils/url.ts) and TEN `protected getPath` methods of unrelated classes, and the rows unioned their callers
+// with nothing but defs="11" to say so — `createRequest` (which calls this.getPath) read as a caller of the utils
+// function. The union is the documented reading of defs=; what was missing is that the definitions are not even the
+// same KIND of thing. The value lists each kind with its def count, in SymKind order, and is empty (the attribute
+// absent) whenever every definition shares one kind, so a same-kind overload set keeps its bytes.
+inline std::string crossKindValue( const IngestResult& ing, const std::vector<NodeId>& matches )
+{
+    constexpr std::size_t kKinds = std::size_t( SymKind::ModuleScope ) + 1;
+    std::size_t           perKind[kKinds] = {};
+    std::size_t           distinct        = 0;
+    for( const NodeId m : matches )
+    {
+        if( m >= ing.symbols.size() )
+        {
+            continue;
+        }
+        const std::size_t k = std::size_t( ing.symbols[m].kind );
+        EXPECTS( k < kKinds, "SymKind's last enumerator is ModuleScope" );
+        distinct += perKind[k] == 0 ? 1 : 0;
+        ++perKind[k];
+    }
+    if( distinct < 2 )
+    {
+        return {};
+    }
+    std::string value;
+    for( std::size_t k = 0; k < kKinds; ++k )
+    {
+        if( perKind[k] > 0 )
+        {
+            value += ( value.empty() ? "" : "," ) + std::string( symTag( SymKind( k ) ) ) + ":" + std::to_string( perKind[k] );
+        }
+    }
+    return value;
+}
+
+// The TypeScript methods with no body that are a CONTRACT — an interface member (method_signature), an abstract or an
+// ambient (.d.ts) member — as their own symbol ids, minus overload signatures: those sit in the same file as a bodied
+// method of the same name, which implements them, so their receiver is that class and not an interface.
+inline std::vector<NodeId> tsContractSignatures( const IngestResult& ing )
+{
+    std::vector<std::pair<std::uint32_t, std::string_view>> bodied;   // (file, name) of every bodied TS method
+    std::vector<NodeId>                                     bodyless;
+    for( NodeId id = 0; id < ing.symbols.size(); ++id )
+    {
+        const Symbol& s = ing.symbols[id];
+        if( s.lang != Lang::TypeScript || s.kind != SymKind::Method )
+        {
+            continue;
+        }
+        if( s.sigEndByte == s.endByte )
+        {
+            bodyless.push_back( id );
+        }
+        else
+        {
+            bodied.emplace_back( s.fileId, s.name );
+        }
+    }
+    using FileName           = std::pair<std::uint32_t, std::string_view>;
+    const auto byFileThenName = []( const FileName& a, const FileName& b ) noexcept
+    {
+        return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second );
+    };
+    std::sort( bodied.begin(), bodied.end(), byFileThenName );
+    std::erase_if( bodyless, [ & ]( NodeId id )
+    {
+        const Symbol& s = ing.symbols[id];
+        return std::binary_search( bodied.begin(), bodied.end(), FileName( s.fileId, s.name ), byFileThenName );
+    } );
+    return bodyless;
+}
+
+// One declined list's verdict for declinedIfaceCallsNaming: TypeScript, its called name among `sigNames`, and either a
+// candidate in `isTarget` or the name among `targetSigNames`. A declined list is one called name's same-language
+// definitions, so its first candidate names the call.
+inline bool declinedListIsIfaceNaming( const IngestResult& ing, std::span<const NodeId> cand, std::span<const std::string_view> sigNames,
+                                       std::span<const std::string_view> targetSigNames, const std::vector<char>& isTarget )
+{
+    if( cand.empty() || cand.front() >= ing.symbols.size() )
+    {
+        return false;
+    }
+    const Symbol& head = ing.symbols[ cand.front() ];
+    if( head.lang != Lang::TypeScript || !std::binary_search( sigNames.begin(), sigNames.end(), head.name, sortutil::svLess ) )
+    {
+        return false;
+    }
+    return std::binary_search( targetSigNames.begin(), targetSigNames.end(), head.name, sortutil::svLess )
+        || std::any_of( cand.begin(), cand.end(), [ & ]( NodeId c ) { return c < isTarget.size() && isTarget[c]; } );
+}
+
+// declined_iface= on the callers and impact answers (graphlegend.h kDeclinedIfaceLegend). graph.h Rule 2 does not narrow a
+// TS call to an interface member on an annotation (`x: Router`, `router!: Router`), so a call through an interface-typed
+// receiver whose method name has several definitions is declined, and the interface's own answer could miss it: the
+// decl/def collapse can keep the bodyless signature out of the candidate list, so declined_calls= on
+// `--callers=router.ts:match` was absent. This counts, once per CALL, the TS declines whose called name is also the name
+// of a TS contract signature in the tree (tsContractSignatures), and that either named one of `targets` among their
+// candidates or share the name of a signature in `targets` (the interface's own selector). The second arm is why it is
+// NOT a subset of declined_calls= and can exceed it. The match is by NAME: no receiver type is read, so a counted call
+// MAY go through the interface or may be another same-named method (String.prototype.match). A disclosure, never a
+// bind: the real fix narrows on annotations and is out of this count's scope.
+// Zero, at no cost past one scan of `targets`, when no target is TypeScript, so every other language keeps its bytes.
+inline std::size_t declinedIfaceCallsNaming( const IngestResult& ing, const Graph& g, std::span<const NodeId> targets )
+{
+    const auto isTs = [ & ]( NodeId t ) { return t < ing.symbols.size() && ing.symbols[t].lang == Lang::TypeScript; };
+    if( g.declinedListCallCount.empty() || !std::any_of( targets.begin(), targets.end(), isTs ) )
+    {
+        return 0;
+    }
+    EXPECTS( g.declinedListOff.size() == g.declinedListCallCount.size() + 1, "one offset past every declined list" );
+    std::vector<std::string_view> sigNames;
+    std::vector<std::string_view> targetSigNames;   // the interface's own selector: its signatures' names
+    std::vector<char>             isTarget( ing.symbols.size(), 0 );
+    for( const NodeId t : targets )
+    {
+        if( t < isTarget.size() )
+        {
+            isTarget[t] = 1;
+        }
+    }
+    for( const NodeId id : tsContractSignatures( ing ) )
+    {
+        sigNames.push_back( ing.symbols[id].name );
+        if( isTarget[id] )
+        {
+            targetSigNames.push_back( ing.symbols[id].name );
+        }
+    }
+    std::sort( sigNames.begin(), sigNames.end(), sortutil::svLess );
+    sigNames.erase( std::unique( sigNames.begin(), sigNames.end() ), sigNames.end() );
+    std::sort( targetSigNames.begin(), targetSigNames.end(), sortutil::svLess );
+    std::size_t callCount = 0;
+    for( std::size_t listIndex = 0; listIndex < g.declinedListCallCount.size(); ++listIndex )
+    {
+        const std::span<const NodeId> cand( g.declinedListCand.data() + g.declinedListOff[ listIndex ],
+                                            g.declinedListOff[ listIndex + 1 ] - g.declinedListOff[ listIndex ] );
+        if( declinedListIsIfaceNaming( ing, cand, sigNames, targetSigNames, isTarget ) )
+        {
+            callCount += g.declinedListCallCount[ listIndex ];
+        }
+    }
+    return callCount;
+}
 
 // The ONE selector derivation for both callers emitters and their legend condition.
 // A declined call names no single definition: widen only a narrowed callers selector to
@@ -119,6 +270,7 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     {
         return out;   // the caller owns the refusal: a CLI stderr line, or a JSON-RPC -32602
     }
+    out.crossKind = crossKindValue( ing, out.matches );
 
     std::vector<char> seen( ing.symbols.size(), 0 );
     for( const NodeId x : out.matches )
@@ -148,6 +300,7 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     }
 
     out.declinedCalls = wantCallers ? declinedCallsNaming( g, out.matches ) : declinedCallsMadeBy( g, out.matches );
+    out.declinedIface = wantCallers ? declinedIfaceCallsNaming( ing, g, out.matches ) : 0;
 
     // LB-G (r10 §5): TIER before path — filter.h states the key once and --uses shares it. Plain path order
     // put 171 `tests/` rows ahead of anything useful on django's `--callers=bulk_create`.

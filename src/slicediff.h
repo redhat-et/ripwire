@@ -38,6 +38,7 @@
 #include "editpreview.h"    // editpreview::ingestOneFile — the ONE single-file parse path (self-contained by its own header note)
 #include "gitmine.h"        // looksLikeDate — the ONE approxidate-garbage gate --hotspots --since already uses
 #include "quality.h"        // gitRepoHasHistory / gitResolveCommitSha / gitOneLine / gitRenameMap / cacheDirLadder / TmpTreeGuard
+#include "gitstamp.h"       // gitstamp::shallowRefHint — the no-baseline refusal's shallow-clone suffix (0.6.7)
 #include "redact.h"         // redactInPlace — the body-emission seam every CDATA payload passes through
 #include "sarif.h"          // rootPrefixOf / rootRelativeUri — the root-relative path identity
 
@@ -570,7 +571,7 @@ inline Out compute( const std::string& root, const std::string& sinceSpec, const
     if( sha.empty() )
     {
         out.ok  = false;
-        out.err = sinceNoBaselineRefusal( sinceSpec, root );
+        out.err = sinceNoBaselineRefusal( sinceSpec, root, false, rw::gitstamp::shallowRefHint( root ) );   // 0.6.7: shallow hint
         return out;
     }
 

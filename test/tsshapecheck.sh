@@ -32,6 +32,9 @@
 #
 # §5 is the no-adoption arm: the shapes that were already right must be untouched by §1–§3.
 #
+# §7 is a CALL-SITE shape, not a definition: `await f<T>(x)`, which the grammar parses as `(await f)<T>(x)`,
+# checked in .ts and .tsx on a fixture of its own.
+#
 # Fixture (test/tsshapefix/): service.ts (abstract contract + arrow-bound fields + plain fields),
 # facade.ts (the lazy-facade cast idiom), limits.d.ts (ambient containers and bindings),
 # typeimport.ts (the vendored-grammar parse hole and its containment), objectliteral.ts (the
@@ -140,6 +143,111 @@ has brokenTypeArgument && ok "type-ARGUMENT form costs nothing — enclosing fun
 for sym in TransportBase SocketTransport PlainFields isReady deliver FacadeModule loadFacadeModule plainArrowExport; do
     has "$sym" && ok "pre-existing shape untouched: $sym" \
                 || no "REGRESSION: previously-extracted symbol lost: $sym"
+done
+
+# ── 7) CALL-SITE shape: `await f<T>(x)` and `!f<T>(x)` are calls (TS and TSX) ──────────────────────
+# tree-sitter-typescript parses an await before an explicit type-argument call as `(await f)<T>(x)`: the
+# call_expression's function: is the await_expression, so a query that only looks for function: (identifier) or
+# (member_expression) never sees the callee and the site was no reference at all — no edge, and no declined or
+# unresolved count either, so a callers answer was silently short. Measured on hono @6abd35b0: 5 sites, among
+# them the method-override middleware's `await parseBody<Record<string, string>>(c.req)`, whose function never
+# appeared as a parseBody caller. Each grammar has its own query file (queries/typescript, queries/tsx), so the
+# arm runs once per extension. The fixture is written here rather than under tsshapefix/ so §1-§5's map is
+# untouched. RED before the await patterns: a1, a2, a3, a5 and methodOverride are absent; a4 (no await) is the
+# control that was always found. The unary operators (`!`, `typeof`, `void`, `-`) bind the same way, `(!f)<T>(x)`, and
+# were missed the same way (RED before the unary patterns: u1-u6). The negatives pin that a comparison chain, an
+# instantiation expression and a type argument stay at zero edges.
+AW="$TMP/await"
+for ext in ts tsx; do
+    D="$AW/$ext"; mkdir -p "$D"
+    cat >"$D/calls.$ext" <<'EOF'
+export const f = async <T>(x: number): Promise<T> => x as unknown as T;
+export class Svc { async g<T>(x: number): Promise<T> { return x as unknown as T; } }
+export class K {
+  async #p<T>(x: number): Promise<T> { return x as unknown as T; }
+  async a3() { return await this.#p<number>(1); }
+}
+export const pending = Promise.resolve(1);
+export async function a1() { return await f<number>(1); }
+export async function a2(o: { svc: Svc }) { return await o.svc.g<number>(1); }
+export function a4() { return f<number>(1); }
+export async function a5() { return await f<Map<string, Array<Record<string, number>>>>(1); }
+export async function a6() { const v = await pending; return v; }
+export async function a7() { return !await f<number>(1); }
+export async function a8() { return await await f<number>(1); }
+EOF
+    cat >"$D/override.$ext" <<'EOF'
+export const parseBody = async <T>(r: { json(): Promise<unknown> }): Promise<T> => (await r.json()) as T;
+export const methodOverride = (options: { app: unknown }) =>
+  async function methodOverride(c: { req: { json(): Promise<unknown> } }) {
+    const form = await parseBody<Record<string, string>>(c.req);
+    return form && options;
+  };
+EOF
+    # The unary operators share the quirk: `!f<T>(x)` parses as `(!f)<T>(x)`, the call's function: a unary_expression.
+    cat >"$D/unary.$ext" <<'EOF'
+export function fw<T>(x: number): T { return x as unknown as T; }
+export class Q {
+  fm<T>(x: number): T { return x as unknown as T; }
+  #fq<T>(x: number): T { return x as unknown as T; }
+  u6() { return !this.#fq<number>(1); }
+}
+export function u1() { return !fw<number>(1); }
+export function u2() { return typeof fw<number>(1); }
+export function u3() { return void fw<number>(1); }
+export function u4() { return -fw<number>(1); }
+export function u5(o: { q: Q }) { return !o.q.fm<number>(1); }
+EOF
+    # NEGATIVES the await/unary patterns must not turn into calls: a comparison chain with and without parentheses,
+    # an instantiation expression (type arguments, no call), a name used only as a type argument, and a bare name under
+    # `!`, `typeof`, `await` or `-` with no call at all (n6, the near miss a pattern without its call_expression would take).
+    cat >"$D/negatives.$ext" <<'EOF'
+export function na() { return 1; }
+export function nb() { return 2; }
+export function nc() { return 3; }
+export function nd<T>(x: T) { return x; }
+export function ne<T>(x: number) { return x as unknown as T; }
+export function nf() { return 4; }
+export async function n1() { return await (na < nb) > (nc); }
+export async function n2() { return await na < nb > nc; }
+export async function n3() { return await nd<number>; }
+export async function n4() { return await ne<typeof nf>(1); }
+export function n5() { return !(na < nb) > (nc); }
+export async function n6() { return !na || typeof nb === "function" || (await nc) === 3 || -nd; }
+EOF
+    rowsOf(){ "$BIN" "$D" --no-cache --callers="$1" --limit=100 2>/dev/null | grep -oE '<s [^>]*n="[^"]*"' | grep -oE 'n="[^"]*"' | sed 's/n="//;s/"$//' | sort | tr '\n' ' ' | sed 's/ $//'; }
+    got="$( rowsOf f )"
+    [ "$got" = "a1 a4 a5 a7 a8" ] && ok "$ext: --callers=f is a1 a4 a5 a7 a8 (await f<T>(), the plain f<T>() control, nested type arguments, !await and await await)" \
+                                  || no "$ext: --callers=f got [$got], want [a1 a4 a5 a7 a8] — an \`await f<T>(x)\` site is no reference"
+    got="$( rowsOf g )"
+    [ "$got" = "a2" ] && ok "$ext: --callers=g is a2 (await o.svc.g<T>(), the member form)" \
+                      || no "$ext: --callers=g got [$got], want [a2] — the member form of await-with-type-arguments is no reference"
+    got="$( rowsOf '#p' )"
+    [ "$got" = "a3" ] && ok "$ext: --callers=#p is a3 (await this.#p<T>(), the private form)" \
+                      || no "$ext: --callers=#p got [$got], want [a3] — the private form of await-with-type-arguments is no reference"
+    got="$( rowsOf parseBody )"
+    [ "$got" = "methodOverride" ] && ok "$ext: --callers=parseBody is methodOverride (the hono middleware shape: a named function expression returned by an arrow)" \
+                                  || no "$ext: --callers=parseBody got [$got], want [methodOverride]"
+    got="$( rowsOf pending )"
+    [ -z "$got" ] && ok "$ext: a bare \`await pending\` (no call) mints no call reference" \
+                  || no "$ext: --callers=pending got [$got] — an await of a value became a call"
+    got="$( rowsOf fw )"
+    [ "$got" = "u1 u2 u3 u4" ] && ok "$ext: --callers=fw is u1 u2 u3 u4 (!, typeof, void and unary - before f<T>())" \
+                               || no "$ext: --callers=fw got [$got], want [u1 u2 u3 u4] — a unary operator before f<T>(x) hides the call"
+    got="$( rowsOf fm )"
+    [ "$got" = "u5" ] && ok "$ext: --callers=fm is u5 (!o.q.fm<T>(), the member form)" \
+                      || no "$ext: --callers=fm got [$got], want [u5] — the member form under a unary operator is no reference"
+    got="$( rowsOf '#fq' )"
+    [ "$got" = "u6" ] && ok "$ext: --callers=#fq is u6 (!this.#fq<T>(), the private form)" \
+                      || no "$ext: --callers=#fq got [$got], want [u6] — the private form under a unary operator is no reference"
+    for neg in na nb nc nd nf; do
+        got="$( rowsOf "$neg" )"
+        [ -z "$got" ] && ok "$ext: --callers=$neg is empty (a comparison operand, an instantiation expression or a type argument is no call)" \
+                      || no "$ext: --callers=$neg got [$got] — a comparison, an instantiation expression or a type argument became a call"
+    done
+    got="$( rowsOf ne )"
+    [ "$got" = "n4" ] && ok "$ext: --callers=ne is n4 (await ne<typeof nf>(1) calls ne, not its type argument)" \
+                      || no "$ext: --callers=ne got [$got], want [n4]"
 done
 
 # ── 6) determinism + well-formedness on this fixture ──────────────────────────────────────────────

@@ -132,6 +132,67 @@
   function: (member_expression
     property: (private_property_identifier) @name)) @reference.call
 
+; `await f<T>(x)` — tree-sitter-typescript parses an await before an explicit type-argument call as
+; `(await f)<T>(x)`: a call_expression whose function: is the await_expression, so the three patterns
+; above never see the callee and the site was no reference at all (no edge, no declined or unresolved
+; count). `await f(x)` without type arguments parses the other way round and is already covered. The
+; @name's parent is the await_expression for the bare form (a bare call to receiverOf) and the
+; member_expression for the member forms (the same receiver reading as the patterns above).
+(call_expression
+  function: (await_expression
+    (identifier) @name)) @reference.call
+
+(call_expression
+  function: (await_expression
+    (member_expression
+      property: (property_identifier) @name))) @reference.call
+
+(call_expression
+  function: (await_expression
+    (member_expression
+      property: (private_property_identifier) @name))) @reference.call
+
+; The same precedence quirk for the unary operators: `!f<T>(x)`, `typeof f<T>(x)`, `void f<T>(x)` and `-f<T>(x)`
+; parse as `(!f)<T>(x)`, a call whose function: is the unary_expression. Same three forms, same receiver
+; reading (the bare form's @name parent is the unary_expression, which receiverOf reads as a bare call).
+(call_expression
+  function: (unary_expression
+    argument: (identifier) @name)) @reference.call
+
+(call_expression
+  function: (unary_expression
+    argument: (member_expression
+      property: (property_identifier) @name))) @reference.call
+
+(call_expression
+  function: (unary_expression
+    argument: (member_expression
+      property: (private_property_identifier) @name))) @reference.call
+
+; One level deeper, the two stacked forms real code writes: `!await f<T>(x)` (the call's function: is
+; unary(await f)) and `await await f<T>(x)` (await(await f)). Deeper stacks stay unextracted (a disclosed floor).
+(call_expression
+  function: (unary_expression
+    argument: (await_expression
+      (identifier) @name))) @reference.call
+
+(call_expression
+  function: (unary_expression
+    argument: (await_expression
+      (member_expression
+        property: (property_identifier) @name)))) @reference.call
+
+(call_expression
+  function: (await_expression
+    (await_expression
+      (identifier) @name))) @reference.call
+
+(call_expression
+  function: (await_expression
+    (await_expression
+      (member_expression
+        property: (property_identifier) @name)))) @reference.call
+
 (new_expression
   constructor: (identifier) @name) @reference.call
 

@@ -1289,8 +1289,11 @@ inline std::vector<std::string_view> peelAttributeGroups( std::string_view& s )
         }
         int         depth = 0;
         std::size_t open  = std::string_view::npos;
-        for( std::size_t i = mask.size(); i-- > 0; )
+        // Cursor counts down to 1, index = cursor - 1: the `i-- > 0` idiom wraps the unsigned to SIZE_MAX when no
+        // `(` balances the trailing `)` (`int b );`), which G1's -fsanitize=integer aborts on (abicheck arm 11).
+        for( std::size_t cursor = mask.size(); cursor > 0; --cursor )
         {
+            const std::size_t i = cursor - 1;
             if( mask[i] == ')' )      { ++depth; }
             else if( mask[i] == '(' ) { --depth; if( depth == 0 ) { open = i; break; } }
         }
@@ -1352,8 +1355,9 @@ inline std::vector<std::string_view> peelExtents( std::string_view& s )
         }
         int         depth = 0;
         std::size_t open  = std::string_view::npos;
-        for( std::size_t i = s.size(); i-- > 0; )
+        for( std::size_t cursor = s.size(); cursor > 0; --cursor )   // cursors, not `i-- > 0`: an unbalanced `]` wrapped it
         {
+            const std::size_t i = cursor - 1;
             if( s[i] == ']' )
             {
                 ++depth;
@@ -2064,8 +2068,9 @@ inline void modelStatement( BodyWalk& w, std::string_view stmt )
 // A `#` that opens a preprocessor DIRECTIVE (only whitespace between it and the line start).
 inline bool atDirectiveStart( std::string_view body, std::size_t at )
 {
-    for( std::size_t i = at; i-- > 0; )
+    for( std::size_t cursor = at; cursor > 0; --cursor )   // cursors, not `i-- > 0`: a `#` with no newline before it wrapped it
     {
+        const std::size_t i = cursor - 1;
         if( body[i] == '\n' )
         {
             return true;

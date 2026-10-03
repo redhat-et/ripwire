@@ -44,6 +44,7 @@
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"   # arm (f5) builds a git repo: GIT_DIR/GIT_WORK_TREE and the agent-home vars unset
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"          # allow a repo-relative RIPWIRE_BIN
 FIX="$ROOT/test/cfix"
@@ -206,6 +207,116 @@ grep -q "ADDTWO_EDGE_GONE:True" "$TMP/mut_check" \
 grep -q "RUN_EDGE_GONE:True" "$TMP/mut_check" \
     && ok "mutation: renamed main.c CROSS-FILE call site -> run -> add_one edge vanished (non-tautological)" \
     || no "mutation: run -> add_one edge survived a renamed call site — the edge assertion is a tautology"
+
+# ═══════════════════════════════════════════════════════════════════════════
+echo
+echo "=== a body-less type specifier in a signature is not the function's encloser (comparison table tmux-07/tmux-15) ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# tmux writes `static enum cmd_retval⏎cmd_set_environment_exec(…)`. The tags query captures every named
+# enum_specifier as a type definition, and the body-less one in the return type then CLIMBED to the enclosing
+# function_definition (the climb exists for function_declarator → function_definition) and took the WHOLE
+# function's span. So `--at` chained `struct cmd_retval` around the function, `--grep` labelled hits in="cmd_retval",
+# and a call inside a function with an `enum box_lines` PARAMETER was attributed to a caller `struct box_lines`.
+# RED on main 953818d6 for (a)-(d); (e) pins that the real enum definition is untouched.
+EN="$TMP/enumsig"
+mkdir -p "$EN/cpp"
+cat >"$EN/a.c" <<'EOF'
+enum cmd_retval { CMD_RETURN_NORMAL, CMD_RETURN_ERROR };
+enum box_lines { BOX_SINGLE, BOX_DOUBLE };
+
+static int helper(int x)
+{
+	return x + 1;
+}
+
+static enum cmd_retval
+cmd_split_exec(int a)
+{
+	helper(a);
+	errmsg("ENUMSIG no current session");
+	return CMD_RETURN_NORMAL;
+}
+
+int
+menu_display(int a,
+    enum box_lines lines)
+{
+	return helper(a) + (int)lines;
+}
+EOF
+cp "$EN/a.c" "$EN/cpp/b.cpp"
+EN_AT="$( "$BIN" "$EN" --no-cache --at=a.c:13 2>/dev/null )"
+printf '%s' "$EN_AT" | grep -q 'sym="cmd_split_exec" chain="1"' \
+    && ok "(a) --at inside a 'static enum X⏎name(' function chains the function alone" \
+    || no "(a) --at chains something around cmd_split_exec: $( printf '%s' "$EN_AT" | grep -o '<at .*' | cut -c1-300 )"
+EN_GREP="$( "$BIN" "$EN" --no-cache --grep="ENUMSIG no current session" 2>/dev/null )"
+printf '%s' "$EN_GREP" | grep -q 'in="cmd_split_exec"' \
+    && ok "(b) a --grep hit in that function names in=\"cmd_split_exec\"" \
+    || no "(b) --grep in= is not the function: $( printf '%s' "$EN_GREP" | grep -o '<hit l=[^>]*>' | head -1 )"
+EN_CALLERS="$( "$BIN" "$EN" --no-cache --callers=helper 2>/dev/null )"
+if printf '%s' "$EN_CALLERS" | grep -q '<s t="fn" n="menu_display"' && ! printf '%s' "$EN_CALLERS" | grep -q 't="struct"'; then
+    ok "(c) a call in a function with an 'enum box_lines' parameter is attributed to the function, no struct caller"
+else
+    no "(c) --callers=helper names a struct as a caller: $( printf '%s' "$EN_CALLERS" | grep -o '<s [^>]*>' | tr '\n' ' ' )"
+fi
+# (c2) the CALLEE direction of the same defect (tmux `cmd_find_target(…, enum cmd_find_type type, …)`: the 23 call
+# edges of the function hung off `cmd_find_type`, so --callees=cmd_find_target read count="0"). The function owns its
+# callees; the body-less parameter specifier owns none.
+EN_CE="$( "$BIN" "$EN" --no-cache --callees=menu_display 2>/dev/null )"
+EN_CE_ENUM="$( "$BIN" "$EN" --no-cache --callees=box_lines 2>/dev/null | grep -o '<callees [^>]*>' )"
+if printf '%s' "$EN_CE" | grep -q '<s t="fn" n="helper"' && printf '%s' "$EN_CE_ENUM" | grep -q 'count="0"'; then
+    ok "(c2) --callees=menu_display lists helper; the 'enum box_lines' specifier owns no callee"
+else
+    no "(c2) the parameter specifier still owns the function's calls: menu_display=$( printf '%s' "$EN_CE" | grep -o '<callees [^>]*>' ) box_lines=$EN_CE_ENUM"
+fi
+EN_CPP="$( "$BIN" "$EN/cpp" --no-cache --at=b.cpp:13 2>/dev/null )"
+printf '%s' "$EN_CPP" | grep -q 'sym="cmd_split_exec" chain="1"' \
+    && ok "(d) the C++ grammar (.cpp, and .h which C++ owns) gets the same span" \
+    || no "(d) C++: --at chains something around cmd_split_exec: $( printf '%s' "$EN_CPP" | grep -o '<at .*' | cut -c1-300 )"
+"$BIN" "$EN" --no-cache --at=a.c:1 2>/dev/null | grep -q '<s n="cmd_retval" t="struct" l="1" el="1"/>' \
+    && ok "(e) the real 'enum cmd_retval { … }' definition is unchanged (t=\"struct\", its own line)" \
+    || no "(e) the bodied enum definition moved"
+
+# (f) the body-less specifier mints NO definition at all (review rv-answer-honesty-067 item 1). Keeping it as a small
+# def of its own sat in the function's return-type position, wholly before the name — extentsuspect.h's R3 derailed-
+# parse signature — so clean functions read extent_suspect="head" and --hotspots stopped ranking them (tmux: 0 -> 206
+# flagged rows, extent_suspect_files 80, ranked 241 -> 206). It is a type USE: no def, no extent flag, one cmd_retval.
+# The C++ sibling is a body-less `class Widget` in a return type (the bare class pattern); struct/union need a body
+# or a declaration parent in the tags queries, so they never reach this path. RED at 6ef65b15.
+cat >"$EN/cpp/w.cpp" <<'EOF'
+class Widget { public: int x; };
+static int wh(int a) { return a; }
+
+class Widget *
+make_widget(int a)
+{
+	wh(a);
+	return nullptr;
+}
+EOF
+EN_MAP="$( "$BIN" "$EN" --no-cache --top-k=100000 2>/dev/null )"
+printf '%s' "$EN_MAP" | grep -q 'extent_suspect=' \
+    && no "(f) a clean 'static enum X⏎fn(' / 'class W *fn(' file carries extent_suspect: $( printf '%s' "$EN_MAP" | grep -o '<s [^>]*extent_suspect[^>]*>' | head -3 | tr '\n' ' ' )" \
+    || ok "(f) no extent_suspect on the enum/class return-type and enum-parameter functions"
+"$BIN" "$EN" --no-cache --skipped 2>/dev/null | grep -q 'extent_suspect_files=' \
+    && no "(f2) --skipped names extent_suspect_files on the clean fixture" \
+    || ok "(f2) --skipped carries no extent_suspect_files"
+EN_CR="$( printf '%s' "$EN_MAP" | grep -o '<s t="[a-z]*" n="cmd_retval"[^>]*>' )"
+if [ -n "$EN_CR" ] && ! printf '%s' "$EN_CR" | grep -q 'overloads='; then
+    ok "(f3) cmd_retval is one definition per file (no overloads=) — the return-type uses mint none"
+else
+    no "(f3) the return-type specifier still mints a definition: $EN_CR"
+fi
+printf '%s' "$EN_MAP" | grep -o '<s t="[a-z]*" n="Widget"[^>]*>' | grep -q 'overloads=' \
+    && no "(f4) C++ 'class Widget *make_widget(' still mints a second Widget definition" \
+    || ok "(f4) C++ body-less class in a return type mints no definition"
+if command -v git >/dev/null 2>&1; then
+    git -C "$EN" init -q . && git -C "$EN" -c user.email=t@t -c user.name=t add -A && git -C "$EN" -c user.email=t@t -c user.name=t commit -qm base
+    EN_HOT="$( "$BIN" "$EN" --no-cache --hotspots 2>/dev/null | grep -o '<hotspots [^>]*>' )"
+    printf '%s' "$EN_HOT" | grep -q 'unranked_extent_suspect=' \
+        && no "(f5) --hotspots withholds files as extent-suspect: $EN_HOT" \
+        || ok "(f5) --hotspots ranks every file (no unranked_extent_suspect)"
+fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo

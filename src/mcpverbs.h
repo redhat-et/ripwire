@@ -773,6 +773,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + ",\"hop_tested\":" + std::to_string( chTested.tested )
          + ",\"hop_untested\":" + std::to_string( chTested.untested )
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
+         + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
          + nextFieldJson( nextFlag( referencingOnly ? "--uses=" : "--expand=", chNextSelector ) );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
     {
@@ -790,6 +791,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // deleting a 43 B clause rather than re-anchoring around it). The key travels self-named in the payload,
     // which is where the disclosure has to be — the same posture bodyless_defs= already holds here.
     out += unprovenDefsKeyJson( chRows.unprovenDefs );
+    out += crossKindKeyJson( chRows.crossKind );   // hono-07: the CLI root's cross_kind=, self-named like unproven_defs above
     out += pageDisclosure( pab, sizeof( pab ), pwPrimary.end - pwPrimary.begin, rowTotal, pwPrimary.end,
                            page.limit, page.offset, discloseCap, kJsonPageSyntax );
     if( !referencingOnly )
@@ -832,8 +834,14 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
 // in-edge CSR the index already holds — zero new analysis, bounded by the page's own row cap. Row
 // semantics live in search.h's grepEnclosingRows (shared with the CLI emitter); this is serialization.
 // Returns "" or a leading-comma fragment the caller splices before its closing brace.
-inline std::string grepEnclosingJson( const IngestResult& ing, const Graph& g, std::span<const GrepHit> hits )
+// 0.6.7 (sweep #9): every row also carries `handle` — the fetch_body handle, the SAME identity and content pin the CLI's h=
+// under --handles mints (search.h grepEncHandleCandidate decides WHICH row may carry one; handleFor mints it from the index's
+// own byte hash) — or `handle_omitted` with the CLI legend's reason. Before this a grep answer named enclosing symbols that
+// fetch_body could not take, so the agent re-read every file it had just searched.
+inline std::string grepEnclosingJson( const McpIndex& ix, std::span<const GrepHit> hits )
 {
+    const IngestResult&           ing     = ix.ing;
+    const Graph&                  g       = ix.g;
     const std::vector<GrepEncRow> encRows = grepEnclosingRows( ing, g, hits );
     if( encRows.empty() )
     {
@@ -856,6 +864,20 @@ inline std::string grepEnclosingJson( const IngestResult& ing, const Graph& g, s
         if( row.cx > 0 )
         {
             out += ",\"cx\":" + std::to_string( row.cx );
+        }
+        const char*  omitted = nullptr;
+        const NodeId id      = grepEncHandleCandidate( ing, row, omitted );
+        if( id == kNoNode )
+        {
+            out += std::string( ",\"handle_omitted\":\"" ) + omitted + "\"";
+        }
+        else if( const std::string handle = handleFor( ix, id ); handle.empty() )
+        {
+            out += ",\"handle_omitted\":\"unreadable\"";   // no content hash could be proven for that file
+        }
+        else
+        {
+            out += ",\"handle\":\"" + mcpdetail::jsonEscape( handle ) + "\"";
         }
         out += "}";
     }
@@ -1158,6 +1180,14 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
         {
             out += ",\"parse_degraded\":true";
         }
+        // 0.6.7 (sweep #9): the matched line itself — the CLI hit's own CDATA, cut at the same kGrepMatchedLineMaxBytes cap
+        // (grepEnrich applies it for both surfaces) and disclosed the same way: line_bytes is the WHOLE line's byte length,
+        // present only when the cap cut it. Appended after the historic keys, so key-order readers are untouched.
+        out += ",\"text\":\"" + mcpdetail::jsonEscape( h.text ) + "\"";
+        if( h.lineBytes != 0 )
+        {
+            out += ",\"line_bytes\":" + std::to_string( h.lineBytes );
+        }
         out += "}";
     }
     out += "]";
@@ -1171,7 +1201,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                         singleRootJ, rootPrefixJ );
     // R1 (the 2026-08-12 usage mine): the CLI <enc>/<suggest> twins, appended AFTER "hits" so the
     // historic key order three other gates read (files,total,shown,capped) is byte-untouched.
-    out += grepEnclosingJson( ing, ix.g, std::span<const GrepHit>( hits ) );
+    out += grepEnclosingJson( ix, std::span<const GrepHit>( hits ) );
     if( collected.raw.empty() )
     {
         out += grepSuggestJson( ing, pattern );
@@ -1316,7 +1346,8 @@ inline std::string declDefAndWindowJson( const SituationFacts& facts, PathRelFn 
              + std::to_string( dp.shared ) + "}";
     }
     return out + "],\"cochange_window\":\"" + mcpdetail::jsonEscape( facts.coWindow ) + "\",\"cochange_commits\":"
-         + std::to_string( facts.coCommits );
+         + std::to_string( facts.coCommits )
+         + ( facts.shallow ? ",\"shallow\":true" : "" );   // 0.6.7: the CLI [3] line's shallow="1" — present-only, the cochange twin's spelling
 }
 
 // C1 F-10 (2026-09-10): --situ joined cli.h's honorsPaging set (its blast-radius and co-change sections
@@ -2662,6 +2693,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     std::vector<NodeId>     declineTargets( reach );
     declineTargets.insert( declineTargets.end(), seeds.begin(), seeds.end() );
     const std::size_t       declinedCalls  = declinedCallsNaming( g, declineTargets );
+    const std::size_t       declinedIface  = declinedIfaceCallsNaming( ing, g, declineTargets );   // the CLI --impact's declined_iface=
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -2683,7 +2715,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // Measured before the legend (#220 part 1): its imports_unresolved= decides whether that clause rides.
     ImportTier imports = impactImportTier( ing, seeds );
     sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
-    rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
+    rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
                   kImpactImportTierLegend,
                   impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ).c_str(),   // #220: exactly when the root carries them, as on the CLI
@@ -2691,6 +2723,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   kTestedLensBlindSpotLegend,                       // F-02: rides with the partition, byte-identical to the CLI twin
                   unprovenDefsVerbLegend( UnprovenDefsVerb::Impact, unprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=, as on the CLI
                   declinedCallsLegendWithGate( declinedCalls > 0, g.gateDeclinedCalls > 0 ),         // exactly when the root carries declined_calls=, as on the CLI
+                  declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
@@ -2709,7 +2742,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     rw::emitTo( mem, "<impact of=\"{}\" defs=\"{}\" reaches=\"{}\"{}{}{} radius_tested=\"{}\" radius_untested=\"{}\"{}{}{}{}{}{}>",
                   ex( symbol ).c_str(), seeds.size(), reach.size(), unprovenDefsAttrXml( unprovenDefs ).c_str(),   // H1: where the CLI root carries it
                   byDepthAttrXml( byDepth ),                                                                        // 0.6.5: the CLI root's by_depth=
-                  imports.xmlAttrs.c_str(), radiusTested, radiusUntested, declinedCallsAttrXml( declinedCalls ).c_str(), imRootAttr.c_str(),
+                  imports.xmlAttrs.c_str(), radiusTested, radiusUntested, ( declinedCallsAttrXml( declinedCalls ) + declinedIfaceAttrXml( declinedIface ) ).c_str(), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
                   nextAttrXml( nextFlag( "--safe-delete=", symbol ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same root attribute set (mcpclidiffcheck)

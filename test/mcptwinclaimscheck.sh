@@ -17,6 +17,13 @@
 #   (C) find_symbol — `count` / `hop_tested` / `hop_untested` describe the CALLS array, and sat unlabelled next
 #                   to `calledBy_total` ("count":0 beside "calledBy_total":67 on a leaf). Contract: the payload
 #                   names the array count= describes (count_of="calls"), and count equals that array's total.
+#   (D) grep      — (0.6.7 tail, sweep item #9 on all three repos) a hit row was {file, line, in} and nothing else:
+#                   no matched text, so the agent re-read every file it had just searched, and no handle on the
+#                   enclosing rows, so fetch_body had nothing to take. The CLI prints the matched line as each
+#                   hit's CDATA (line_bytes= when the 512-byte cap cut it) and h= on every unique editable <enc>
+#                   row. Contract: the same text, cut at the same cap and disclosed the same way, per (file, line)
+#                   on both surfaces; every enclosing row carries `handle` (this dialect's name for h=, the one
+#                   fetch_body takes) or the same handle_omitted reason the CLI gives, and the handle round-trips.
 #
 # Usage: bash test/mcptwinclaimscheck.sh [path/to/ripwire]     (default build/ripwire)
 set -u
@@ -46,6 +53,8 @@ int caller( int x )
     return ep;
 }
 EOF
+# (D) one code line past the 512-byte matched-line cap, holding the pattern: the cut must be disclosed identically on both surfaces.
+{ printf 'int longline( int x ) { return helper( x )'; for i in $( seq 1 70 ); do printf ' + helper( %d )' "$i"; done; printf '; }\n'; } > "$FIX/long.c"
 cat > "$FIX/ts/display.ts" <<'EOF'
 interface Row { valueToken: string; }
 export function show( row: Row ): string { return row.valueToken; }
@@ -131,6 +140,60 @@ else:
     rj = json.loads( rt ) if rt else {}
     ( ok if rj.get( "count" ) == len( rj.get( "calledBy", [] ) ) and "count_of" not in rj else no )(
         "(C) find_referencing_symbols: count= is the calledBy total, its only array (no count_of needed)" )
+
+# ── (D) grep: the matched text and the fetch_body handle, on both surfaces, per (file, line) ──
+gx, _, _ = cli( [ "--grep=helper", "--handles" ] )
+gt, gerr = mcp( "grep", { "path": FIX, "pattern": "helper" } )
+if gt is None:
+    no( "(D) MCP grep refused: %s" % gerr )
+else:
+    gj = json.loads( gt )
+    hits = gj.get( "hits", [] )
+    ( ok if hits and all( "helper" in h.get( "text", "" ) for h in hits ) else no )( "(D) every MCP grep hit carries text holding the pattern (%d hits)" % len( hits ) )
+    # the CLI's primary <hit> rows: (file, line) → (CDATA text, line_bytes or None); folded <at> sites print no text and are skipped
+    cliText = {}
+    for fm in re.finditer( r'<f p="([^"]*)"[^>]*>(.*?)</f>', gx, flags = re.S ):
+        for hm in re.finditer( r'<hit l="(\d+)"([^>]*)><!\[CDATA\[(.*?)\]\]>', fm.group( 2 ), flags = re.S ):
+            lb = re.search( r'line_bytes="(\d+)"', hm.group( 2 ) )
+            cliText[ ( fm.group( 1 ), int( hm.group( 1 ) ) ) ] = ( hm.group( 3 ), int( lb.group( 1 ) ) if lb else None )
+    ( ok if cliText else no )( "(D) fixture sanity: the CLI grep printed CDATA hit rows (%d)" % len( cliText ) )
+    mcpText = { ( h.get( "file" ), h.get( "line" ) ): ( h.get( "text" ), h.get( "line_bytes" ) ) for h in hits }
+    diff = [ k for k, v in cliText.items() if mcpText.get( k ) != v ]
+    ( ok if cliText and not diff else no )( "(D) text and line_bytes agree per (file, line) on both surfaces (differ: %s)" % diff[ :3 ] )
+    longc = [ v for k, v in mcpText.items() if k[ 0 ] == "long.c" ]
+    ( ok if longc and all( v[ 1 ] and v[ 1 ] > 512 and len( v[ 0 ].encode() ) <= 512 for v in longc ) else no )(
+        "(D) the over-cap line on long.c is cut at the CLI's cap and discloses line_bytes on the MCP row (%s)" % [ ( len( v[ 0 ] or "" ), v[ 1 ] ) for v in longc ] )
+    ( ok if not any( "text_omitted" in h for h in hits ) else no )( "(D) no hit falls back to text_omitted when its text is deliverable" )
+    enc = { e.get( "n" ): e for e in gj.get( "enclosing", [] ) }
+    ( ok if "caller" in enc and "longline" in enc and "helper" in enc else no )( "(D) fixture sanity: enclosing rows name caller, longline and helper (%s)" % sorted( enc ) )
+    hre = re.compile( r'^sym#[0-9a-f]{16}@[0-9a-f]{16}$' )
+    uniq = [ n for n in ( "caller", "longline" ) if n in enc ]
+    ( ok if uniq and all( hre.match( enc[ n ].get( "handle", "" ) ) for n in uniq ) else no )(
+        "(D) every unique editable enclosing row carries a fetch_body handle (%s)" % { n: enc.get( n, {} ).get( "handle" ) for n in uniq } )
+    ( ok if "helper" in enc and "handle" not in enc[ "helper" ] and enc[ "helper" ].get( "handle_omitted" ) == "ambiguous" else no )(
+        "(D) the name that grouped two definitions (helper: def + prototype) carries handle_omitted=ambiguous, never a handle (%s)" % enc.get( "helper" ) )
+    cliH = dict( re.findall( r'<enc n="([^"]*)"[^>]*\bh="([^"]*)"', gx ) )
+    ( ok if uniq and all( cliH.get( n ) == enc[ n ].get( "handle" ) for n in uniq ) else no )(
+        "(D) the MCP handle is the CLI h= for the same enclosing name (cli=%s)" % { n: cliH.get( n ) for n in uniq } )
+    if "caller" in enc and enc[ "caller" ].get( "handle" ):
+        bt2, berr2 = mcp( "fetch_body", { "path": FIX, "handle": enc[ "caller" ][ "handle" ] } )
+        ( ok if bt2 is not None and "int caller( int x )" in bt2 else no )( "(D) fetch_body round-trips the grep handle to caller's body (%s)" % ( berr2 or "ok" )[ :160 ] )
+        stale = enc[ "caller" ][ "handle" ][ :-1 ] + ( "0" if enc[ "caller" ][ "handle" ][ -1 ] != "0" else "1" )
+        bt3, berr3 = mcp( "fetch_body", { "path": FIX, "handle": stale } )
+        ( ok if bt3 is None else no )( "(D) a handle whose content half was altered is refused by fetch_body (the pin is real)" )
+# tools/list: the grep description names what a row now carries (text, handle), the surface an agent reads before calling
+p = subprocess.run( [ BIN, "--mcp" ], input = '{"jsonrpc":"2.0","id":1,"method":"initialize"}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n',
+                    capture_output = True, text = True, timeout = 120 )
+tl = [ l for l in p.stdout.splitlines() if '"tools/list"' in l or '"tools":' in l ]
+desc = ""
+for l in tl:
+    try:
+        for t in json.loads( l ).get( "result", {} ).get( "tools", [] ):
+            if t.get( "name" ) == "grep":
+                desc = t.get( "description", "" )
+    except Exception:
+        pass
+( ok if "text" in desc and "handle" in desc else no )( "(D) tools/list grep description names the matched text and the handle (%s)" % desc[ :120 ] )
 
 print( "%d CHECK(S) FAILED" % fails if fails else "ALL CHECKS PASSED" )
 sys.exit( 1 if fails else 0 )

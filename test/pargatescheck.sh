@@ -1015,4 +1015,72 @@ else
     no "stdout: the gate's stderr line is missing from the transcript"
 fi
 
+# ── (O) A stopped gate leaves no harness behind (2026-10-02) ──────────────────────────────────────────────────────
+# test/expandrangecheck.sh (its slicebody_harness) and test/diagnoticecheck.sh (diagnotice_asan) once left harness
+# processes re-parented to launchd, spinning ~60% CPU for hours, three times in two days: a gate that waits in the
+# foreground on a harness that never starts (an ASan binary can hang in the sanitizer runtime's own init on macOS,
+# before main(); see scripts/gatebound.sh) is stopped by a suite timeout, and its harness outlives it.
+#
+# This arm runs the REAL gates against a stub compiler whose "harness" is `sleep TOKEN`, so the hang is
+# deterministic and needs no sanitizer. It starts the gate, waits for the harness to appear, stops the gate, and
+# asserts no process carrying the token survives 2 s later (TERM) -- or the cap plus 2 s later (KILL, which runs no
+# trap, so only the harness's own alarm can end it; the cap is set to seconds through RIPWIRE_GATE_HARNESS_CAP_SEC).
+# It reds on the gates as they were before scripts/gatebound.sh: there the harness is waited on in the foreground,
+# and a stop that reaches only the gate leaves it asleep.
+ORPH="$TMP/orph"; mkdir -p "$ORPH"
+cat >"$ORPH/fakecxx" <<'EOF2'
+#!/bin/sh
+# stub compiler: --version and -fsyntax-only succeed; -o OUT writes a program that exits at once if it is named
+# asanprobe, and otherwise one that sleeps on a token unique to this run (the "harness that never finishes").
+out=""; prev=""
+for a in "$@"; do
+    [ "$prev" = "-o" ] && out="$a"
+    prev="$a"
+done
+case " $* " in *" --version "*) echo "fakecxx 1"; exit 0 ;; esac
+if [ -n "$out" ]; then
+    case "$out" in
+        *asanprobe) printf '#!/bin/sh\nexit 0\n' >"$out" ;;
+        *)          printf '#!/bin/sh\nexec sleep %s\n' "$ORPH_TOKEN" >"$out" ;;
+    esac
+    chmod +x "$out"
+fi
+exit 0
+EOF2
+printf '#!/bin/sh\nexit 0\n' >"$ORPH/fakebin"
+chmod +x "$ORPH/fakecxx" "$ORPH/fakebin"
+
+orphan_case()   # $1 = gate, $2 = signal, $3 = harness cap (s), $4 = seconds to wait after the stop
+{
+    local gate="$1" sig="$2" cap="$3" settle="$4" tok gp i left
+    tok="7$(( RANDOM % 9000 + 1000 ))$(( RANDOM % 90 + 10 ))"   # seven digits: a longer one overflows sleep(1) and returns at once
+    ORPH_TOKEN="$tok" CXX="$ORPH/fakecxx" RIPWIRE_GATE_HARNESS_CAP_SEC="$cap" \
+        bash "$ROOT/test/$gate.sh" "$ORPH/fakebin" >"$ORPH/$gate.$sig.log" 2>&1 &
+    gp=$!
+    for i in $( seq 1 150 ); do
+        pgrep -f "sleep $tok" >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+    if ! pgrep -f "sleep $tok" >/dev/null 2>&1; then
+        no "(O) $gate: the stub harness never started, so nothing was measured"
+        tail -4 "$ORPH/$gate.$sig.log" | sed 's/^/        /'
+        kill -KILL "$gp" 2>/dev/null; wait "$gp" 2>/dev/null
+        return
+    fi
+    kill -"$sig" "$gp" 2>/dev/null     # no wait: a gate that ignores the stop must not hang this arm
+    sleep "$settle"
+    left="$( pgrep -f "sleep $tok" | tr '\n' ' ' )"
+    if [ -z "$left" ]; then
+        ok "(O) $gate stopped by SIG$sig mid-harness: no harness alive $settle s later"
+    else
+        no "(O) $gate stopped by SIG$sig mid-harness: harness pid(s) $left still alive $settle s later (orphaned)"
+        pkill -KILL -f "sleep $tok" 2>/dev/null
+    fi
+    kill -KILL "$gp" 2>/dev/null; wait "$gp" 2>/dev/null
+}
+for _g in expandrangecheck diagnoticecheck; do
+    orphan_case "$_g" TERM 600 2
+    orphan_case "$_g" KILL 2 5
+done
+
 [ "$fail" -eq 0 ] && echo "pargatescheck: ALL PASS" || { echo "pargatescheck: SOME CHECKS FAILED"; exit 1; }

@@ -386,6 +386,48 @@ inline std::size_t testRowPartnerCount( const std::vector<TestRow>& rows )
     }
     return n;
 }
+// THE RUN-FIRST HEAD (comparison table hono-20 / textual-20, 2026-09-30): an evidence-ordered list of 80-249 test files
+// said nothing about which rows carry the most direct evidence (textual's snapshot test sat inside an undifferentiated
+// tier of 157). The head is every changed=, partner= or hops=1 row — the module's own tests and the tests that call it
+// directly — or, when the list has none of those, the rows at its smallest hops=. rankTestRows' order makes it a prefix.
+// It is a RUN ORDER, never a skip list: the walk is name-based and its counts are floors, so a row past the head (or a
+// test the walk missed) can still exercise the change. Nothing is dropped: the count only marks where the head ends.
+inline std::size_t testRowRunFirstCount( const std::vector<TestRow>& rows )
+{
+    std::size_t n = 0;
+    while( n < rows.size() && ( rows[n].changed || rows[n].partner || rows[n].hops == 1 ) )
+    {
+        ++n;
+    }
+    if( n == 0 && !rows.empty() && rows.front().hops > 0 )
+    {
+        const std::uint32_t nearest = rows.front().hops;
+        while( n < rows.size() && rows[n].hops == nearest && !rows[n].changed && !rows[n].partner )
+        {
+            ++n;
+        }
+    }
+    return n;
+}
+// Present only when the tier SPLITS the list (0 < N < total rows): a list that is all run-first, or empty, says nothing new.
+inline bool runFirstSplits( std::size_t runFirst, std::size_t totalRows ) noexcept
+{
+    return runFirst > 0 && runFirst < totalRows;
+}
+// The XML attribute or the JSON key, through graphlegend.h's shared absent-at-zero spelling.
+inline std::string runFirstField( const std::vector<TestRow>& rows, std::size_t totalRows, bool json )
+{
+    const std::size_t runFirst = testRowRunFirstCount( rows );
+    return countFieldOrEmpty( "run_first", runFirstSplits( runFirst, totalRows ) ? runFirst : 0, json );
+}
+inline constexpr std::string_view kRunFirstLegend =
+    "run_first=N (only when it splits the list): the first N test files carry the most direct evidence (changed, partner or "
+    "hops=1 rows, else those at the smallest hops=); a run order, not a skip list: the rest can still exercise the change. ";
+inline std::string_view runFirstLegend( bool on ) noexcept
+{
+    return on ? kRunFirstLegend : std::string_view();
+}
+
 // The legend clause every emitter splices next to its rows — one wording, so the four verbs cannot drift.
 // Written long, measured (477 B), cut to the shortest honest form — test/testgatelegendbudgetcheck.sh's ratchet.
 inline constexpr std::string_view kTestRowEvidenceLegend =
@@ -1389,6 +1431,7 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
         afRows.push_back( { f, std::string( afPathRel( f ) ), std::string( answer.isSeedTestFile[f] ? " seed_kind=\"test\"" : "" ) + testRowEvidence( row, EvDialect::Xml ) } );
     }
     const JoinedTestRows afRowsXml = testRowsList( runners, afRows, TestRowShape{ RowDialect::Xml, "test" }, ex );
+    const std::string    afRunFirst = runFirstField( answer.rows, answer.rows.size(), /*json=*/false );   // hono-20: the run-first head
     // seeded_by= is the honesty half of the file-first rule: the two readings answer DIFFERENT questions
     // over the same argument string and return different counts, so which one fired is a fact about the
     // measurement, not a detail. seeds= is the resolved seed-symbol count (1 for a lone function, ~84
@@ -1403,17 +1446,21 @@ inline AffectedReportResult writeAffectedReport( std::FILE* out, const IngestRes
                  "{}"     // M21(b)/E1: the run=/run_unknown= rule and the <g> group row, testmap.h's ONE wording — rows-gated
                  // TRAIN 10: read off the index rather than re-derived here (testmap.h's own rule for this fact),
                  // so the sentence is decided by the very object that spelled the commands it describes.
+                 "{}"     // hono-20/textual-20: the run-first clause, exactly when the root carries run_first=
                  "{}{}-->{}", kTestRowEvidenceLegend, runHintClauseIfRows( afRowsXml.files, runners.rootRelative() ),
                  // H1: the decl→def residue resolveAffectedSeeds summed over the symbol items. A file:name item whose
                  // definitions were dropped seeded the walk with declarations alone, which reached the reader as a bare
                  // tests="0" — on the verb whose answer is the list of tests to run. Exactly when the root carries it.
+                 runFirstLegend( !afRunFirst.empty() ),
                  unprovenDefsVerbLegend( UnprovenDefsVerb::Affected, sel.unprovenDefs > 0 ).c_str(),
                  graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( singleRoot ) );
     rw::emitTo( out, "<affected changed=\"{}\" seeded_by=\"{}\" seeds=\"{}\" seed_test_files=\"{}\" tests=\"{}\" reached=\"{}\"{} script_gates_unmodelled=\"{}\""
+                 "{}"   // hono-20: run_first=, where the run-first head ends; absent unless it splits
                  " order=\"evidence\" partners=\"{}\"{}{}>",
                  ex( spec ).c_str(), affectedSeededBy( sel ), seeds.size(), sel.seedTestFiles.size(), testFiles.size(), reach.size(),
                  unprovenDefsAttrXml( sel.unprovenDefs ).c_str(),   // H1: beside the zero it qualifies; absent at zero
                  scriptGatesUnmodelledCount( ing ),
+                 afRunFirst.c_str(),
                  testRowPartnerCount( answer.rows ),      // F1: how many rows stand on the name convention alone or as well
                  afRootAttr.c_str(),                      // M12: root= says what every <test p=> below is relative to
                  graphCountFloorAttrXml( g ).c_str()  );   // H5/M15: gauge + marker; tests=/reached= are a transitive-caller walk over the name-based CSR

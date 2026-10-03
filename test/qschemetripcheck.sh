@@ -34,10 +34,22 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-02, train 24 (recall, answer-honesty, #368, contrib-checklist, hygiene-orphans, readme-terminality merged):
+#   RE-DERIVED ONCE on the merged tree with UPDATE_GOLDEN=1 (hash a7f2ec25d4…9388db). kParserVer 132 -> 133: above the two
+#   merged lanes' extraction changes (130 body-less C/C++ type specifier span; 131 TS/TSX await/unary type-argument
+#   calls) and train 23's 132; kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's kIngestParserVerMirror
+#   moves with it.
 # 2026-10-02, train 23 (map data sections + edit-check pairing merged): RE-DERIVED ONCE on the merged tree with
 #   UPDATE_GOLDEN=1 (hash e355d7b821…1518a2). kParserVer 129 -> 132 for cache-key hygiene only (branch builds already ran
 #   at 129, 130 and 131; no extraction change); kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's
 #   kIngestParserVerMirror moves with it.
+# 2026-10-01, lane/answer-honesty-067: RE-DERIVED with UPDATE_GOLDEN=1 (hash ef157dad82…be6849a). kParserVer 129 -> 130 (a
+#   body-less C/C++ type specifier keeps its own span; record VALUES change, layout does not: kCacheVersion stays 27,
+#   kQSnapCacheScheme unchanged); quality.h's mirror moves with it. The train may renumber.
+# 2026-10-01, lane recall (await-with-type-arguments calls): RE-DERIVED with UPDATE_GOLDEN=1 (hash 05a1ead450…a9cf36).
+#   kParserVer 129 -> 131 (130 is reserved by a language lane): queries/typescript and queries/tsx capture
+#   `await f<T>(x)`, parsed as `(await f)<T>(x)`, as a call. Only the extraction-identity declaration moves —
+#   kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's kIngestParserVerMirror moves with it.
 # 2026-09-30, train 22 (qd-masking-stubs, fn-literal-bodies, #338 and #325 merged): RE-DERIVED ONCE on the merged tree
 #   with UPDATE_GOLDEN=1 (hash 5d82542872…4b49c3d3e). kParserVer 124 -> 129 (fn-literal's 128, then ONE bump for #338 and
 #   #325, whose PRs carried 125 and 98/99), kCacheVersion 25 -> 27 (fn-literal), kQSnapCacheScheme 15 -> 16 (qd-masking);

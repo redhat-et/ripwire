@@ -16,7 +16,8 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 CORPUS="$ROOT/test/expandrangefix"
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+. "$ROOT/scripts/gatebound.sh"
+TMP="$( mktemp -d )"; trap 'gate_bounded_reap; rm -rf "$TMP"' EXIT; gate_bounded_arm
 fail=0
 
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
@@ -167,6 +168,9 @@ cat >"$TMP/slicebody_harness.cpp" <<'CPP'
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#if !defined( _WIN32 )
+#include <unistd.h>
+#endif
 
 static int g_fail = 0;
 
@@ -190,6 +194,9 @@ static rw::SlicedBody sliceExact( const char* text, std::uint32_t lo, std::uint3
 
 int main()
 {
+#if !defined( _WIN32 )
+    alarm( 60 );   // backstop: a harness that outlives its gate dies of SIGALRM instead of spinning
+#endif
     const rw::SlicedBody one = sliceExact( "int f() { return 1; }", 1, 1 );
     check( one.text == "int f() { return 1; }" && one.total == 1, "a one-line body with no trailing newline slices whole" );
     const rw::SlicedBody utf = sliceExact( "int g()\n{\n    return 2; // caf\xC3\xA9", 3, 3 );
@@ -201,14 +208,18 @@ int main()
 }
 CPP
 printf 'int main() { return 0; }\n' >"$TMP/asanprobe.cpp"
+# The probe RUNS the program too: on some macOS hosts an ASan binary hangs in the runtime's own init, before main()
+# (see scripts/gatebound.sh), and that is a host that cannot run this arm, not a defect in sliceBodyLines.
 if ! "$CXX" "$CXXSTD" -fsanitize=address,undefined "$TMP/asanprobe.cpp" -o "$TMP/asanprobe" >/dev/null 2>&1; then
     printf '  SKIP  sliceBodyLines bounds harness: %s cannot link an ASan/UBSan program on this host\n' "$CXX"
+elif ! ASAN_OPTIONS=detect_leaks=0 gate_bounded 20 "$TMP/asanprobe" >/dev/null 2>&1; then
+    printf '  SKIP  sliceBodyLines bounds harness: an ASan/UBSan program built by %s does not run to completion on this host (hung or failed in the runtime before main)\n' "$CXX"
 elif ! "$CXX" "$CXXSTD" -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all \
         -I"$ROOT/src/infra" -I"$ROOT/third_party" -I"$ROOT/src" \
         "$TMP/slicebody_harness.cpp" "$ROOT/src/infra/diagnostics.cpp" -o "$TMP/slicebody_harness" 2>"$TMP/slicebody_cc.log"; then
     no "sliceBodyLines bounds harness failed to compile (the sanitizer toolchain works, so this is the harness or serialize.h)"
     grep -m5 'error' "$TMP/slicebody_cc.log" | sed 's/^/    /'
-elif ASAN_OPTIONS=detect_leaks=0 "$TMP/slicebody_harness" >"$TMP/slicebody_run.log" 2>&1; then
+elif ASAN_OPTIONS=detect_leaks=0 gate_bounded 60 "$TMP/slicebody_harness" >"$TMP/slicebody_run.log" 2>&1; then
     grep -E '^  PASS  ' "$TMP/slicebody_run.log"
     ok "sliceBodyLines stays inside an exact-size body under ASan/UBSan"
 else

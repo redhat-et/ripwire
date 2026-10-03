@@ -417,3 +417,26 @@ byte budget, **`total=` is the number of rows handed to the byte gate**: after t
 window and after rows with nothing to print, before any byte budget (rule 5, extended to every byte gate on
 2026-09-24). A byte cut can therefore never hide inside `total=`. A candidate window, such as `--for`'s 40-row
 head, is not a byte cut. What lies past a window needs its own attribute, decided once for every ranking verb.
+
+### 9.2 Addendum, 2026-10-02 — answering first; sizes are guards and stair-steps
+
+§9 makes terminality the objective and the ceiling a constraint; this addendum states how that is scored while a
+complete answer to every question is still out of reach. Until an answer can be complete it owes three things: it
+stays bounded, it says what it does not know, and it names where to look next. A change is therefore judged on four
+measures, not one:
+
+- **Complete answers** — the share of questions answered so the agent can act without re-checking.
+- **Honest-partial rate** — how often an incomplete answer says what it is missing instead of sounding confident.
+- **False-confidence rate** — wrong answers that claim to be complete; the worst case, held near zero.
+- **Next-clue usefulness** — for partial and wrong answers, whether the first suggested next step reaches what the
+  question needed within one hop. Graded blind.
+
+A size limit has exactly one of two roles, and a limit that has neither is removed. A **runaway guard** is a hard
+ceiling well above typical answers; it exists to catch an output bug, so hitting it is a bug signal that needs an
+explanation, and it says so when it trips. A **stair-step target** is a byte figure driven down release over
+release; each row is explain-or-fail, so anything over it carries a stated reason, and it never drops content that
+the uncapped variant shows is needed.
+
+**A capped variant is always graded against its uncapped twin; the better-answering one ships; bytes break ties and
+are driven down across releases without lowering complete answers.** Earlier compaction work sometimes cut useful
+information, which is why every cut must be disclosed, recoverable, and measured against the uncapped twin.

@@ -1006,7 +1006,12 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     };
     // r26-stamp Task A: anchor these callers/blast-radius/tests numbers to the commit (+dirty state) they were
     // computed against — "" (omitted) on a non-git root, never a placeholder.
-    const std::string atAttrStr = gitstamp::atAttr( root );
+    // 0.6.7 shallow-history tail: the embedded <cochange window= commits=> and <owners bf= share=> rows are mined from THIS
+    // root's history, so on a depth-limited clone the root carries the same shallow="1" the owners/cochange verbs carry (one
+    // probe; the attribute rides the same splice as at=, which stays the last attribute, and prices the same way). "" on a
+    // full clone, so every full-history bundle keeps its bytes. A multi-root run calls this once per root with ITS root.
+    const bool        prShallow = gitstamp::isShallow( root );
+    const std::string atAttrStr = std::string( gitstamp::shallowAttr( prShallow ) ) + gitstamp::atAttr( root );
 
     // r26 anchoring attributes — emitted ONLY for the BASEREF form (the working-tree default has no anchoring
     // question, and stays byte-identical). anchor="merge-base" is the normal path; anchor="ref-tip-two-dot" is
@@ -1035,7 +1040,9 @@ inline int writePrContext( std::FILE* out, const std::string& root, const Ingest
     // spelling — carried in the clause struct rather than as a second bare bool.
     const bool        prRootRelRuns  = rw::runsAreRootRelative( ing, root );
     const std::string legendText     = prLegendText( escBase, rw::graphGaugeClauses( g ), PrLegendClauses{ .rootRelativeRuns = prRootRelRuns } );
-    const std::string anchorNoteText = prAnchorNoteText( anchorAttr );
+    // 0.6.7: the shallow clause rides the anchoring-note slot — written and priced by every form (empty diff / plain / budgeted)
+    // exactly as the note is, and defined exactly when the root carries the attribute ("" otherwise).
+    const std::string anchorNoteText = prAnchorNoteText( anchorAttr ) + gitstamp::shallowLegend( prShallow );
     // The clause-bearing form is built ONCE, and only if it is the form that gets written — the difference
     // between the two is exactly what testmap.h's runHintClauseIfRows returns for this run (prLegendText
     // splices that and the est-unmeasured clause, nothing else), so the pricer below asks that same seam for

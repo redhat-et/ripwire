@@ -483,6 +483,101 @@ for q in deterministic "malformed rules line" TIERTOKEN_prose; do
 done
 
 # ═══════════════════════════════════════════════════════════════════════════
+echo "=== (12) the literal question — no code hit in source code lifts the source STRING hits ==="
+# ═══════════════════════════════════════════════════════════════════════════
+# Comparison-table rows tmux-16 / textual-16 (find-literal, 2026-09-30): "which code reads the option
+# escape-time" / "who reads the TEXTUAL_DRIVER env var". The code tier was NOT empty — a regress shell
+# script's `set -g escape-time 0` and a CHANGELOG line parse as code — so the code tier won and the
+# answers themselves, the C string "escape-time" in the options table and get_environ("TEXTUAL_DRIVER"),
+# rode only as suppressed_string=N. A code hit in a test/doc file, or in a shell/YAML/TOML/JSON file where a
+# bare word IS code, is a usage of the literal, not the program text that holds it. When no code hit sits
+# in source code and a string hit sits in a source file, the string tier is served WITH code
+# (tier="code+string"); comments stay held back. RED on the pre-fix binary: tier absent, the options.c row
+# missing, suppressed_string="1".
+LT="$TMP/literalsandbox"
+mkdir -p "$LT/src" "$LT/tests" "$LT/scripts"
+cat >"$LT/src/options.c" <<'EOF'
+static const char *option_names[] = { "LITTOKEN-escape-time", 0 };
+/* LITTOKEN-escape-time is documented in a comment, which stays held back */
+int options_count( void )
+{
+    return 1;
+}
+EOF
+cat >"$LT/tests/keys.sh" <<'EOF'
+tmux set -g LITTOKEN-escape-time 0
+EOF
+cat >"$LT/scripts/setup.sh" <<'EOF'
+tmux set -s LITTOKEN-escape-time 10
+EOF
+cat >"$LT/NEWS.md" <<'EOF'
+- added the LITTOKEN-escape-time option
+EOF
+LT_OUT="$( "$BIN" "$LT" --no-cache --grep=LITTOKEN-escape-time 2>/dev/null )"
+lt_tier="$( attr tier "$LT_OUT" )"
+lt_sup_s="$( attr suppressed_string "$LT_OUT" )"
+lt_sup_c="$( attr suppressed_comment "$LT_OUT" )"
+if [ "$lt_tier" = "code+string" ] && [ -z "$lt_sup_s" ] && [ "$lt_sup_c" = "1" ]; then
+    ok "(12) no code hit in source code: the source string is served with code, tier=code+string, the comment still held"
+else
+    no "(12) expected tier=code+string, no suppressed_string, suppressed_comment=1; got tier=$lt_tier suppressed_string=$lt_sup_s suppressed_comment=$lt_sup_c"
+    printf '%s\n' "$LT_OUT" | grep -o '<grep [^>]*>'
+fi
+printf '%s' "$LT_OUT" | grep -q '<f p="src/options.c"' \
+    && ok "(12b) the string literal that holds the option (src/options.c) is a row" \
+    || no "(12b) src/options.c is not served — the literal's own definition is still behind suppressed_string"
+if printf '%s' "$LT_OUT" | grep -q '<f p="tests/keys.sh"' && printf '%s' "$LT_OUT" | grep -q '<f p="NEWS.md"' \
+   && printf '%s' "$LT_OUT" | grep -q '<f p="scripts/setup.sh"'; then
+    ok "(12c) the code-tier usages (test script, shell script, doc) are still served beside it"
+else
+    no "(12c) the lift dropped a code-tier row"
+fi
+printf '%s' "$LT_OUT" | grep -o '<!--.*-->' | head -1 | grep -q 'code+string' \
+    && ok "(12d) the legend defines the code+string label in the answer that emits it" \
+    || no "(12d) tier=code+string was emitted and the legend never says what it means"
+# (12e) NOT a blanket lift: the same literal as an IDENTIFIER in a C source file keeps the code tier alone.
+cat >"$LT/src/reader.c" <<'EOF'
+int LITTOKEN_reader( void ) { return 0; }
+const char *reader_name = "LITTOKEN_reader";
+EOF
+cat >"$LT/tests/reader.sh" <<'EOF'
+LITTOKEN_reader
+EOF
+LR_OUT="$( "$BIN" "$LT" --no-cache --grep=LITTOKEN_reader 2>/dev/null )"
+if [ -z "$( attr tier "$LR_OUT" )" ] && [ "$( attr suppressed_string "$LR_OUT" )" = "1" ]; then
+    ok "(12e) a code hit in source code keeps today's answer: code tier, the string held back"
+else
+    no "(12e) the lift fired with a source code hit present: tier=$( attr tier "$LR_OUT" ) suppressed_string=$( attr suppressed_string "$LR_OUT" )"
+fi
+# (12g) BOTH halves mean the same "source code" (review of this lane, item 3): a STRING in a JSON or shell file under a
+# source path is not "a source file holds it as a string", any more than a bare word there is a code hit. With only
+# such strings the lift must not fire and the answer is main's: code tier, the string held back. RED at 6ef65b15.
+LN="$TMP/literalneg"
+mkdir -p "$LN/regress" "$LN/src"
+printf 'tmux set -g LNTOKEN-escape-time 0\n'         >"$LN/regress/keys.sh"
+printf '{"LNTOKEN-escape-time": 500}\n'                >"$LN/src/defaults.json"
+printf 'echo "LNTOKEN-escape-time"\n'                  >"$LN/src/tool.sh"
+LN_OUT="$( "$BIN" "$LN" --no-cache --grep=LNTOKEN-escape-time 2>/dev/null )"
+if [ -z "$( attr tier "$LN_OUT" )" ] && [ -n "$( attr suppressed_string "$LN_OUT" )" ]; then
+    ok "(12g) strings only in JSON/shell files under src/ do not lift: code tier, suppressed_string=$( attr suppressed_string "$LN_OUT" )"
+else
+    no "(12g) a JSON/shell string under src/ lifted the string tier: tier=$( attr tier "$LN_OUT" ) suppressed_string=$( attr suppressed_string "$LN_OUT" )"
+    printf '%s\n' "$LN_OUT" | grep -o '<grep [^>]*>'
+fi
+
+# (12f) the MCP grep twin lifts the same rows (one collection, one decision).
+LT_MCP="$( printf '%s\n%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$LT"'","pattern":"LITTOKEN-escape-time"}}}' \
+    | "$BIN" "$LT" --mcp --no-cache 2>/dev/null | tail -1 )"
+if printf '%s' "$LT_MCP" | grep -q 'code+string' && printf '%s' "$LT_MCP" | grep -q 'src/options.c'; then
+    ok "(12f) the MCP grep twin serves the lifted string row and the same label"
+else
+    no "(12f) the MCP grep twin did not lift the string tier"; printf '%s\n' "$LT_MCP" | cut -c1-400
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
 echo "=== (10) determinism + well-formed XML on every tiered surface ==="
 # ═══════════════════════════════════════════════════════════════════════════
 for q in TIERTOKEN_frob TIERTOKEN_prose TIERTOKEN_md; do

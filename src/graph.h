@@ -23,7 +23,8 @@
 #include "pincensus.h"           // eval-only per-call-site decision census (--pin-census); inert unless armed
 #include "externalnames.h"       // Phase 5: the committed builtin/stdlib tables behind the external-name veto
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
-#include "infra/namesplit.h"     // isIdentChar — BuiltinMethodGate::namedBeyondDefinition's identifier-token scan
+#include "clones.h"              // scanCodeTokens / CodeScanOptions — BuiltinMethodGate::namedBeyondDefinition's code-token count
+#include "infra/namesplit.h"     // isIdentChar — identifierRunCount, the identifier runs inside a string annotation
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 
@@ -2272,23 +2273,141 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
 // THE SAME-FILE ANNOTATION RULE (BuiltinMethodGate::fileNames, byReferenceOnly). Python records no annotation as a binding
 // or reference, so `def f( p: Pool )`, `x: Pool = …`, `"Pool"`, `Optional[Pool]`, `isinstance( o, Pool )` and `-> Pool`
 // leave fileRefClasses empty in the file that DEFINES Pool. A class the file defines still counts there when its name
-// occurs as an identifier token more often than the file defines a class of that name: a `class Pool:` line (and the
-// module-level name Python binds for it) is one token per definition, and any other occurrence — including a comment or a
-// docstring — is evidence. Errs toward keeping the edge: an unreadable file admits, and prose counts, so the gate removes
-// less there, never more. The gate caches one file's bytes (its calls arrive file by file). Stops at limit + 1.
-inline bool identifierTokenCountExceeds( std::string_view text, std::string_view name, std::size_t limit ) noexcept
+// occurs as a CODE token more often than the file defines a class of that name: a `class Pool:` line (and the
+// module-level name Python binds for it) is one token per definition, and any other code occurrence is evidence. The
+// tokens come from the house code scanner (clones.h scanCodeTokens), so a `# Pool` comment, a docstring and a `'Pool warm'`
+// or `"Pool"` string are NOT evidence (test/commenttokencheck.sh A-E: each bound a json dict's `data.get` to Pool.get when
+// the count ran over every identifier byte run in the file) — EXCEPT a string in annotation or subscript position, which
+// Python reads as a type expression: `p: "Pool"` and `x: "Pool" = …` (a `:` then the string on the same line), `-> "Pool"`,
+// `None | "Pool"` (a union member after `|`), and `Optional["Pool"]` / `type["Pool"]` / `Dict[str, "Pool"]` (directly inside
+// a `[ … ]` that follows a name, a keyword or a `]`). Those are scanned for identifier runs as the whole file once was (arm N;
+// builtinbindcheck arm T's `p: "PStr"`), and so are the `{…}` fields of an f-string (`f"{Pool}"`, arm R: Python compiles
+// them as code). A docstring follows its `:` on the NEXT line, an `__all__` tuple sits in `( … )`, a list literal's `[`
+// follows `=`, and a call argument follows `(`, so each stays prose (arm O). The scanner runs with Python's string
+// grammar: `'…'` is a string, `'''…'''` and `"""…"""` run to their closing triple so an apostrophe or a lone `"` inside a
+// docstring stays string content (arm Q), and `//` is floor division, not a comment, so `n = total // 2; kind = Pool`
+// keeps the rest of its line (arm P). Floors toward KEEPING an edge: an unreadable file admits; a dict literal's
+// `"k": "Pool"`, a lambda's `: "Pool"`, a dict lookup's `d["Pool"]` and a list after a keyword (`return ["Pool"]`) read as
+// annotations or subscripts. Floors toward DROPPING one (a true mention this count does not see): a string that is a type
+// only by its callee's convention — `cast("Pool", x)`, `TypeVar("T", bound="Pool")` — reads as a call argument; a PEP 484
+// type comment `x = make()  # type: Pool` is a comment; an annotation whose string starts on the line after its `:` is
+// prose; an f-string's literal text (`f"Pool {x}"`) is prose. The gate caches one file's bytes (its calls arrive file by file).
+inline std::size_t identifierRunCount( std::string_view text, std::string_view name ) noexcept
 {
-    std::size_t tokens   = 0;
+    std::size_t runs     = 0;
     std::size_t runStart = 0;
-    for( std::size_t at = 0; at <= text.size() && tokens <= limit; ++at )
+    for( std::size_t at = 0; at <= text.size(); ++at )
     {
         if( at < text.size() && namesplit::isIdentChar( text[ at ] ) )
         {
             continue;
         }
-        tokens  += ( text.substr( runStart, at - runStart ) == name ) ? 1u : 0u;
+        runs    += ( text.substr( runStart, at - runStart ) == name ) ? 1u : 0u;
         runStart = at + 1;
     }
+    return runs;
+}
+
+// The identifier runs named `name` inside an f-string's `{…}` fields: `{{` is a literal brace, a field ends at the next `}`
+// (a nested `{…}` in a format spec ends it early — that spec's tail is then literal text, the keep direction either way).
+inline std::size_t interpolatedRunCount( std::string_view text, std::string_view name ) noexcept
+{
+    std::size_t runs = 0;
+    for( std::size_t open = text.find( '{' ); open != std::string_view::npos; open = text.find( '{', open ) )
+    {
+        if( open + 1 < text.size() && text[ open + 1 ] == '{' )
+        {
+            open += 2;
+            continue;
+        }
+        const std::size_t close = text.find( '}', open );
+        if( close == std::string_view::npos )
+        {
+            break;
+        }
+        runs += identifierRunCount( text.substr( open + 1, close - open - 1 ), name );
+        open  = close + 1;
+    }
+    return runs;
+}
+
+// Where the scanner's current token sits: the previous token and the open-bracket stack, enough to tell a string in
+// annotation or subscript position (a type expression) from any other string. Every token is a view into `text`.
+struct StringTokenPosition
+{
+    std::string_view  text;                                    // the scanned file
+    std::string_view  prev;                                    // the previous token (empty before the first)
+    CodeTokenKind     prevKind = CodeTokenKind::Punctuation;
+    std::vector<char> brackets;                                // the open brackets: 's' = a subscript `[`, 'o' = any other
+
+    // A String token directly after `:`, `->` or `|` on the same line (`p: "X"`, `-> "X"`, `None | "X"`), or directly inside a
+    // subscript at its `[` or a `,` (`Name["X"]`, `Name[str, "X"]`): Python reads it as a type expression.
+    [[nodiscard]] bool isTypeExpression( std::string_view token ) const noexcept
+    {
+        const std::size_t prevEnd    = prev.empty() ? 0 : std::size_t( prev.data() + prev.size() - text.data() );
+        const std::size_t tokenStart = std::size_t( token.data() - text.data() );
+        const bool        sameLine   = !prev.empty() && text.find( '\n', prevEnd ) >= tokenStart;
+        const bool        annotation = sameLine && ( prev == ":" || prev == "->" || prev == "|" );
+        const bool        subscript  = !brackets.empty() && brackets.back() == 's' && ( prev == "[" || prev == "," );
+        return annotation || subscript;
+    }
+
+    // An `f`-prefixed string (`f"…"`, `rf'…'`, `F"""…"""`): the prefix is the Identifier token glued to the opening quote.
+    [[nodiscard]] bool isFormatString( std::string_view token ) const noexcept
+    {
+        if( prevKind != CodeTokenKind::Identifier || prev.size() > 2 || prev.data() + prev.size() != token.data() )
+        {
+            return false;
+        }
+        return prev.find_first_of( "fF" ) != std::string_view::npos && prev.find_first_not_of( "fFrR" ) == std::string_view::npos;
+    }
+
+    // Every token passes through once it is classified: a `[` after a name, a keyword (`type[`, PEP 585) or a `]` opens a
+    // subscript, `(` `{` and any other
+    // `[` open an ordinary bracket, a closer pops (an unbalanced closer is ignored), and the token becomes `prev`.
+    void advance( std::string_view token, CodeTokenKind kind )
+    {
+        if( kind == CodeTokenKind::Punctuation )
+        {
+            if( token == "(" || token == "{" )
+            {
+                brackets.push_back( 'o' );
+            }
+            else if( token == "[" )
+            {
+                brackets.push_back( ( prevKind == CodeTokenKind::Identifier || prevKind == CodeTokenKind::Keyword || prev == "]" ) ? 's' : 'o' );
+            }
+            else if( ( token == ")" || token == "]" || token == "}" ) && !brackets.empty() )
+            {
+                brackets.pop_back();
+            }
+        }
+        prev     = token;
+        prevKind = kind;
+    }
+};
+
+inline bool identifierTokenCountExceeds( const std::string& text, std::string_view name, std::size_t limit, Lang lang )
+{
+    std::size_t         tokens = 0;
+    StringTokenPosition at{ .text = text };
+    scanCodeTokens( text, 0, text.size(),
+                    CodeScanOptions{ .stripHashComments = usesHashLineComments( lang ), .munchMultiByteOperators = true,   // `->` is one token
+                                     .singleQuoteStrings = usesSingleQuoteStrings( lang ), .slashComments = lang != Lang::Python,
+                                     .tripleQuoteStrings = lang == Lang::Python },
+                    [ & ]( std::string_view token, CodeTokenKind kind )
+                    {
+                        if( kind == CodeTokenKind::Identifier || kind == CodeTokenKind::Keyword )
+                        {
+                            tokens += ( token == name ) ? 1u : 0u;
+                        }
+                        else if( kind == CodeTokenKind::String )
+                        {
+                            tokens += at.isTypeExpression( token ) ? identifierRunCount( token, name )
+                                    : at.isFormatString( token )   ? interpolatedRunCount( token, name ) : 0u;
+                        }
+                        at.advance( token, kind );
+                    } );
     return tokens > limit;
 }
 
@@ -2434,9 +2553,19 @@ struct BuiltinMethodGate
         {
             return true;
         }
-        const auto defs = std::ranges::count_if( containersByFile[ fileId ], [ & ]( NodeId t )
-                                                 { return isClassLike( ing.symbols[ t ] ) && ing.symbols[ t ].name == className[ k ]; } );
-        return identifierTokenCountExceeds( *text, className[ k ], static_cast<std::size_t>( defs ) );
+        // The class's own language decides the scan's comment and string shapes; a file with no definition of the class
+        // (k reached through the cone) takes its first container's, and an empty file scans as C-family (nothing to count).
+        std::size_t defs = 0;
+        Lang        lang = containersByFile[ fileId ].empty() ? Lang::Unknown : ing.symbols[ containersByFile[ fileId ].front() ].lang;
+        for( const NodeId t : containersByFile[ fileId ] )
+        {
+            if( isClassLike( ing.symbols[ t ] ) && ing.symbols[ t ].name == className[ k ] )
+            {
+                ++defs;
+                lang = ing.symbols[ t ].lang;
+            }
+        }
+        return identifierTokenCountExceeds( *text, className[ k ], defs, lang );
     }
 
     // Python: is the receiver of `x.m()` a MODULE whose file holds `target`? See the struct comment for the three shapes.

@@ -58,6 +58,9 @@
 #   (G) the predicates can fail (a line that does not sum, unaccounted=1, a bare zero, a header without declined=,
 #       a uses answer that drops the declined site, a next= that incorrectly retains the narrowed selector)
 #   (H) determinism x2 (map and census), xmllint, no degrade alert on stderr
+#   (I) declined_iface=: on an inline TS tree (an interface, two implementations, an annotated caller) the callers
+#       and impact answers in every dialect and the MCP twins count the decline an interface-typed receiver explains,
+#       with its legend clause; a decline with no signature of its name, and the callees form, carry neither
 #
 # Exits non-zero on any failure.
 
@@ -487,6 +490,85 @@ R='<callers of="java/alpha/Alpha.java:jbody" defs="1" count="0" declined_calls="
 is_bare_next "$R" jbody \
     && no "(G) the bare-name pointer predicate accepts a narrowed selector" \
     || ok "(G) a next= that still names the narrowed selector IS rejected"
+
+# ── (I) declined_iface= — the declines an interface-typed TypeScript receiver explains ───────────────────────────
+# hono's helper/dev `app.router.match('GET','/')` goes through a field typed by the Router interface; once `match` has
+# several definitions the resolver declines it (it does not narrow on a TS annotation), and `--callers` on the
+# interface's own signature had NO count for it: the decl/def collapse keeps the bodyless signature out of the
+# candidate list, so declined_calls= was absent and count="0" stood alone. declined_iface= is the disclosure (the
+# resolver fix is separate): callers and impact, CLI XML / --json / columnar and the MCP twins, absent at zero, with
+# its legend clause exactly when it is there. RED on a binary without it: no answer carries the key.
+echo "=== (I) declined_iface= — interface-typed TS receivers ==="
+IF="$TMP/iface"; mkdir -p "$IF/src/helper"
+printf '%s\n' 'export interface Router<T> {' '  match(method: string, path: string): T[];' '}' >"$IF/src/router.ts"
+printf '%s\n' 'export class Trie { match(method: string, path: string): number[] { return [method.length + path.length]; } }' \
+    'export class Ring { check(x: number): boolean { return x > 0; } }' >"$IF/src/trie.ts"
+printf '%s\n' 'export class Accepts { match(a: string, b: string): boolean { return a === b; } }' \
+    'export class Gate { check(x: number): boolean { return x < 0; } }' >"$IF/src/accepts.ts"
+printf '%s\n' 'export class Req {' '  parse(a: string): number;' '  parse(a: number): number;' '  parse(a: unknown): number { return 1; }' '}' >"$IF/src/req.ts"
+printf '%s\n' 'export class Other { parse(a: unknown): number { return 2; } }' >"$IF/src/other.ts"
+printf '%s\n' "import type { Router } from '../router';" 'export const getRouterName = (r: Router<number>) => {' \
+    "  return r.match('GET', '/');" '};' 'export const probe = (z: any) => z.check(1);' 'export const pick = (q: any) => q.parse(1);' >"$IF/src/helper/dev.ts"
+ifr(){ ( cd "$IF" && "$BIN" . --no-cache "$@" 2>/dev/null ); }
+ifcase(){   # label | verb args | root tag | want declined_iface ("" = absent)
+    local doc R got; doc="$TMP/if.xml"; ifr $2 >"$doc"; R="$( root_tag "$doc" "$3" )"; got="$( attr "$R" declined_iface )"
+    if [ "$got" = "$4" ]; then ok "(I) $1: declined_iface=\"$got\""; else no "(I) $1: declined_iface=\"$got\", want \"$4\" — ${R:-no <$3> root}"; fi
+    if [ -n "$4" ]; then
+        legend_of "$doc" | grep -q 'declined_iface=K' && ok "(I) $1: the legend defines declined_iface=" \
+            || no "(I) $1: declined_iface= carried with no definition in its legend"
+    else
+        legend_of "$doc" | grep -q 'declined_iface=' && no "(I) $1: the legend defines declined_iface= on an answer without it" \
+            || ok "(I) $1: no declined_iface= clause either"
+    fi
+}
+ifcase "--callers=src/router.ts:match (the interface's own answer)" "--callers=src/router.ts:match" callers 1
+ifcase "--callers=match (bare)"                                   "--callers=match"                callers 1
+ifcase "--callers=src/trie.ts:match (an implementation)"          "--callers=src/trie.ts:match"    callers 1
+ifcase "--impact=src/router.ts:match"                             "--impact=src/router.ts:match"   impact  1
+ifcase "--impact=src/router.ts:match --format=columnar"           "--impact=src/router.ts:match --format=columnar" impact 1
+ifcase "--callers=match --format=columnar"                        "--callers=match --format=columnar" callers 1
+ifcase "--callers=check (declined, no signature of that name)"     "--callers=check"                callers ""
+ifcase "--callers=parse (declined; only an OVERLOAD signature has the name)" "--callers=parse"       callers ""
+ifcase "--callees=getRouterName (callees form never carries it)"   "--callees=getRouterName"        callees ""
+R="$( root_tag "$TMP/if.xml" callees )"; [ "$( attr "$R" declined_calls )" = 1 ] && ok "(I) --callees=getRouterName still carries declined_calls=\"1\"" \
+    || no "(I) --callees=getRouterName premise: declined_calls missing: ${R:-none}"
+for c in check parse; do
+    ifr --callers=$c >"$TMP/if.xml"; R="$( root_tag "$TMP/if.xml" callers )"
+    if [ "$( attr "$R" declined_calls )" = 1 ]; then ok "(I) control premise: --callers=$c is declined_calls=\"1\""; else no "(I) control premise ($c): ${R:-none}"; fi
+done
+# The wording is pinned, both forms: the count matches by NAME (no receiver type is read), a counted call MAY go through
+# the interface, and it is not a subset of declined_calls= (the shared-name arm can exceed it).
+ifr --callers=src/router.ts:match >"$TMP/if.xml"
+if legend_of "$TMP/if.xml" | grep -q 'by name only (MAY go through it); not a subset of declined_calls='; then
+    ok "(I) the compact declined_iface= reading says by name only, MAY, and not a subset"
+else
+    no "(I) the compact declined_iface= reading lost its by-name / MAY / not-a-subset wording"
+fi
+ifr --callers=src/router.ts:match --legend=full >"$TMP/if.xml"
+if legend_of "$TMP/if.xml" | grep -q "It matches by NAME only: the receiver's type is not read, so a counted call MAY go through that interface" \
+   && legend_of "$TMP/if.xml" | grep -q 'it is NOT a subset of declined_calls= and can exceed it'; then
+    ok "(I) the full declined_iface= clause says by name only, MAY, and not a subset"
+else
+    no "(I) the full declined_iface= clause lost its by-name / MAY / not-a-subset wording"
+fi
+for v in callers impact; do
+    ifr --$v=src/router.ts:match --legend=full >"$TMP/if.xml"
+    legend_of "$TMP/if.xml" | grep -q 'declined_iface=K (absent when 0) counts declined TypeScript call SITES' \
+        && ok "(I) --$v --legend=full carries the full declined_iface= clause" || no "(I) --$v --legend=full lacks the full declined_iface= clause"
+done
+for j in "--callers=src/router.ts:match" "--impact=src/router.ts:match"; do
+    if ifr $j --json | grep -q '"declined_iface":1[,}]'; then ok "(I) $j --json carries \"declined_iface\":1"; else no "(I) $j --json lacks \"declined_iface\":1"; fi
+done
+ifr --callers=check --json | grep -q '"declined_iface"' && no "(I) --callers=check --json carries declined_iface" || ok "(I) --callers=check --json: no declined_iface key"
+M="$( mcp_text "$( call find_referencing_symbols '{"path":"'"$IF"'","symbol":"src/router.ts:match"}' )" )"
+printf '%s' "$M" | grep -q '"declined_iface":1[,}]' && ok "(I) MCP find_referencing_symbols carries \"declined_iface\":1" \
+    || no "(I) MCP find_referencing_symbols: $( printf '%s' "$M" | head -c 240 )"
+M="$( mcp_text "$( call impact '{"path":"'"$IF"'","symbol":"src/router.ts:match","legend":"full"}' )" )"
+printf '%s' "$M" | grep -oE '<impact [^>]*>' | grep -q ' declined_iface="1"' && ok "(I) MCP impact root declined_iface=\"1\"" \
+    || no "(I) MCP impact: $( printf '%s' "$M" | grep -oE '<impact [^>]*>' | head -1 || echo no root )"
+# the TS arm of the main fixture has a decline but no signature: nothing there may carry the key
+rw --callers=tsHop >"$TMP/if0.xml"; grep -q 'declined_iface' "$TMP/if0.xml" && no "(I) declinefix --callers=tsHop carries declined_iface" \
+    || ok "(I) declinefix --callers=tsHop (declined, no signature): no declined_iface"
 
 # ── (H) determinism, well-formedness, no degrade alert ────────────────────────────────────────────────────────
 echo "=== (H) determinism + well-formedness ==="

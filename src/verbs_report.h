@@ -1257,7 +1257,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         {
             rw::emitTo( stderr, "ripwire: --hotspots --since='{}' is neither a git revision nor a recognizable date — refusing rather than "
                                   "reporting an all-history scan under a window label you did not ask for "
-                                  "(e.g. ripwire <dir> --hotspots --since=\"2 weeks ago\", or --since=HEAD~20)\n", std::string_view( cfg.since.data(), cfg.since.size() ) );
+                                  "(e.g. ripwire <dir> --hotspots --since=\"2 weeks ago\", or --since=HEAD~20){}\n", std::string_view( cfg.since.data(), cfg.since.size() ),
+                          rw::gitstamp::shallowRefHint( root ) );   // 0.6.7: the likeliest cause on a depth-limited clone, "" otherwise
             return 1;
         }
 
@@ -1275,10 +1276,14 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                 std::vector<char>  sinceEsc;
                 const std::string  windowLabel = std::string( escapeXml( std::string_view( cfg.since ), sinceEsc ) );
                 rw::emitTo( stdout, "<!-- ripwire hotspots: the since-window matched no commits — empty result, not an error (git history exists) -->" );
+                // 0.6.7 shallow tail: "no commit in the window" is a claim about the FETCHED history too, so this root carries the
+                // same qualification the ranked root does (one probe over every mined root; the clause defined exactly when present).
+                const bool hsEmptyShallow = anyMinedRootShallow( root, multiRoot, ws );
+                rw::emitRaw( stdout, gitstamp::shallowLegend( hsEmptyShallow ) );
                 // the same partition the main path emits, so a reader parsing one shape parses both:
                 // an empty window means every file is unranked for want of churn.
-                rw::emitTo( stdout, "<hotspots window=\"{}\" files=\"{}\" ranked=\"0\" unranked_no_churn=\"{}\" unranked_no_complexity=\"0\" commits=\"0\" shown=\"0\" capped=\"0\"{}></hotspots>",
-                             windowLabel.c_str(), ing.files.size(), ing.files.size(), gitstamp::atAttr( root ).c_str() );
+                rw::emitTo( stdout, "<hotspots window=\"{}\" files=\"{}\" ranked=\"0\" unranked_no_churn=\"{}\" unranked_no_complexity=\"0\" commits=\"0\" shown=\"0\" capped=\"0\"{}{}></hotspots>",
+                             windowLabel.c_str(), ing.files.size(), ing.files.size(), gitstamp::shallowAttr( hsEmptyShallow ), gitstamp::atAttr( root ).c_str() );
                 return 0;
             }
             if( const std::string shallowWhy = minedRootShallowCause( root, multiRoot, ws ); !shallowWhy.empty() )   // 0.6.6: shallow says so, on any mined root
@@ -1576,7 +1581,11 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                 // about a specific HEAD, and --hotspots' own zero-row path already stamps for that reason.
                 // sub_windows="0" is the literal truth on this path: no commit was mined, so no partition was
                 // made. Emitting the nominal 3 here would name a denominator that never existed.
-                rw::emitTo( stdout, "<cochange pairs=\"0\" commits=\"0\" window=\"{}\" sub_windows=\"0\" shown=\"0\" capped=\"0\"{}></cochange>", coWindowLabel.c_str(), gitstamp::atAttr( root ).c_str() );
+                // 0.6.7 shallow tail: the empty window is mined from the fetched history, so it carries the ranked root's qualification.
+                const bool coEmptyShallow = anyMinedRootShallow( root, multiRoot, ws );
+                rw::emitRaw( stdout, gitstamp::shallowLegend( coEmptyShallow ) );
+                rw::emitTo( stdout, "<cochange pairs=\"0\" commits=\"0\" window=\"{}\" sub_windows=\"0\" shown=\"0\" capped=\"0\"{}{}></cochange>", coWindowLabel.c_str(),
+                             gitstamp::shallowAttr( coEmptyShallow ), gitstamp::atAttr( root ).c_str() );
                 return 0;
             }
             if( const std::string shallowWhy = minedRootShallowCause( root, multiRoot, ws ); !shallowWhy.empty() )   // 0.6.6: shallow says so, on any mined root

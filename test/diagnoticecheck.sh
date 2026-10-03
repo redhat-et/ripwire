@@ -72,7 +72,8 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 CXXSTD="$( ripwire_cxx_std_flag "$CXX" )"
 DIAG="$ROOT/src/infra/diagnostics.cpp"
 HARNESS="$ROOT/test/diagnotice_harness.cpp"
-WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+. "$ROOT/scripts/gatebound.sh"
+WORK="$( mktemp -d )"; trap 'gate_bounded_reap; rm -rf "$WORK"' EXIT; gate_bounded_arm
 
 echo "diagnoticecheck: CXX=$CXX"
 
@@ -309,11 +310,12 @@ if ! build_harness "$H" "$DIAG" "$WORK/cc.log" -O2; then
     no "the harness failed to compile against src/infra/diagnostics.cpp"; sed 's/^/    /' "$WORK/cc.log" | head -30
 else
     ok "harness compiled against src/infra/diagnostics.cpp"
-    echo "diagnoticecheck: harness CXX=$CXX ($( "$CXX" --version 2>/dev/null | head -1 )) $( "$H" info )"
+    gate_bounded 120 "$H" info > "$WORK/info.txt" 2>&1   # not inside $( ): a stop must reach the gate's own wait, not a substitution's
+    echo "diagnoticecheck: harness CXX=$CXX ($( "$CXX" --version 2>/dev/null | head -1 )) $( cat "$WORK/info.txt" )"
 
     # ── (W) one write per notice, byte-exact ──
     mkdir -p "$WORK/dump"
-    "$H" writes "$WORK/dump" > "$WORK/writes.txt"; rc=$?
+    gate_bounded 120 "$H" writes "$WORK/dump" > "$WORK/writes.txt"; rc=$?
     if [ "$rc" -ne 0 ]; then
         no "(W) the harness could not set up the measurement (rc=$rc)"; sed 's/^/    /' "$WORK/writes.txt" | head -10
     fi
@@ -324,7 +326,7 @@ else
 
     # ── (W') the capture can see a second write ──
     if [ -s "$WORK/diagnostics_mutwriter.cpp" ] && build_harness "$WORK/mut" "$WORK/diagnostics_mutwriter.cpp" "$WORK/ccmut.log" -O2; then
-        "$WORK/mut" writes > "$WORK/mutwrites.txt"
+        gate_bounded 120 "$WORK/mut" writes > "$WORK/mutwrites.txt"
         mutLine="$( grep -E '^case degraded ' "$WORK/mutwrites.txt" )"
         if [[ "$mutLine" == *" writes=2 "* ]]; then
             ok "(W') control: the harness built against the duplicated-writer mutation reads writes=2 — (W) can go red"
@@ -336,7 +338,7 @@ else
     fi
 
     # ── (T) stress ──
-    "$H" stress "$WORK/stress.err" 4 2 3000 > "$WORK/stress.txt"; rc=$?
+    gate_bounded 120 "$H" stress "$WORK/stress.err" 4 2 3000 > "$WORK/stress.txt"; rc=$?
     cp "$WORK/stress.txt" "$WORK/stress_rows_last"
     if [ "$rc" -ne 0 ]; then
         no "(T) the harness could not set up the stress run (rc=$rc)"
@@ -351,8 +353,8 @@ else
     if ! build_harness "$A" "$DIAG" "$WORK/cca.log" -O2 "$ROOT/src/alloccount.cpp"; then
         no "(A) the harness failed to compile with src/alloccount.cpp"; sed 's/^/    /' "$WORK/cca.log" | head -10
     else
-        "$A" alloc 0 > "$WORK/alloc0.out" 2> "$WORK/alloc0.err"; rc0=$?
-        "$A" alloc 55 > "$WORK/alloc55.out" 2> "$WORK/alloc55.err"; rc55=$?
+        gate_bounded 120 "$A" alloc 0 > "$WORK/alloc0.out" 2> "$WORK/alloc0.err"; rc0=$?
+        gate_bounded 120 "$A" alloc 55 > "$WORK/alloc55.out" 2> "$WORK/alloc55.err"; rc55=$?
         base="$( sed -nE 's/^ALLOC_REPORT allocs=([0-9]+) bytes=([0-9]+) .*/\1 \2/p' "$WORK/alloc0.err" )"
         measured="$( sed -nE 's/^ALLOC_REPORT allocs=([0-9]+) bytes=([0-9]+) .*/\1 \2/p' "$WORK/alloc55.err" )"
         if [ "$rc0" -ne 0 ] || [ "$rc55" -ne 0 ] || [ -z "$base" ] || [ -z "$measured" ] || ! grep -qx 'alloc calls=110' "$WORK/alloc55.out"; then
@@ -370,8 +372,8 @@ else
     if [ "${allocControlTook:-0}" != 1 ] || ! build_harness "$WORK/mutalloc" "$WORK/diagnostics_mutalloc.cpp" "$WORK/ccma.log" -O2 "$ROOT/src/alloccount.cpp"; then
         no "(A') control: no rw::emitRaw( stderr, … ) call in writeNotice to reroute, or the mutation failed to compile — (A) is unproven"
     else
-        "$WORK/mutalloc" alloc 0 > /dev/null 2> "$WORK/malloc0.err"
-        "$WORK/mutalloc" alloc 55 > /dev/null 2> "$WORK/malloc55.err"
+        gate_bounded 120 "$WORK/mutalloc" alloc 0 > /dev/null 2> "$WORK/malloc0.err"
+        gate_bounded 120 "$WORK/mutalloc" alloc 55 > /dev/null 2> "$WORK/malloc55.err"
         mBase="$( sed -nE 's/^ALLOC_REPORT allocs=([0-9]+) .*/\1/p' "$WORK/malloc0.err" )"
         mMeasured="$( sed -nE 's/^ALLOC_REPORT allocs=([0-9]+) .*/\1/p' "$WORK/malloc55.err" )"
         if [ -n "$mBase" ] && [ -n "$mMeasured" ] && [ "$mMeasured" -gt "$mBase" ]; then
@@ -384,22 +386,34 @@ fi
 
 # ── (Z) the same harness under the G1 sanitizer stack ───────────────────────────────────────────────────────────
 Z="$WORK/diagnotice_asan"
-if build_harness "$Z" "$DIAG" "$WORK/ccz.log" -O1 -fsanitize=address,undefined -fno-sanitize-recover=all; then
-    "$Z" writes > "$WORK/zwrites.txt" 2> "$WORK/zwrites.err"; rc=$?
+z_ready()   # builds the sanitized harness and proves it STARTS; prints the SKIP reason and fails when it cannot
+{
+    if ! build_harness "$Z" "$DIAG" "$WORK/ccz.log" -O1 -fsanitize=address,undefined -fno-sanitize-recover=all; then
+        echo "  SKIP  (Z) the ASan+UBSan harness does not build with $CXX here, so the sanitized arm proved nothing; first compiler line:"
+        sed 's/^/    /' "$WORK/ccz.log" | head -5
+        return 1
+    fi
+    # Built, but will it start? On some macOS hosts an ASan binary hangs in the runtime's own init, before main()
+    # (scripts/gatebound.sh). That is a host that cannot run this arm, so it SKIPs like a host that cannot link it.
+    if ! ASAN_OPTIONS=detect_leaks=0 gate_bounded 30 "$Z" info >/dev/null 2>&1; then
+        echo "  SKIP  (Z) the ASan+UBSan harness built but does not start within 30 s on this host (hung or failed in the sanitizer runtime before main), so the sanitized arm proved nothing"
+        return 1
+    fi
+    return 0
+}
+if z_ready; then
+    gate_bounded 120 "$Z" writes > "$WORK/zwrites.txt" 2> "$WORK/zwrites.err"; rc=$?
     if [ "$rc" -ne 0 ]; then
         no "(Z) sanitized writes run exited $rc"; sed 's/^/    /' "$WORK/zwrites.err" | head -10
     fi
     check_writes "(Z)" "$WORK/zwrites.txt"
     check_long "(Z)" "$WORK/zwrites.txt"
-    "$Z" stress "$WORK/zstress.err" 4 2 1000 > "$WORK/zstress.txt"; rc=$?
+    gate_bounded 120 "$Z" stress "$WORK/zstress.err" 4 2 1000 > "$WORK/zstress.txt"; rc=$?
     cp "$WORK/zstress.txt" "$WORK/stress_rows_last"
     if [ "$rc" -ne 0 ]; then
         no "(Z) sanitized stress run exited $rc"
     fi
     check_stress "(Z)" "$WORK/zstress.txt"
-else
-    echo "  SKIP  (Z) the ASan+UBSan harness does not build with $CXX here, so the sanitized arm proved nothing; first compiler line:"
-    sed 's/^/    /' "$WORK/ccz.log" | head -5
 fi
 
 if [ "$fail" -eq 0 ]; then

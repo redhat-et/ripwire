@@ -203,6 +203,25 @@ answer will not fit, it says it went over rather than silently dropping the row 
 Those two are the stair-steps: honest about what is missing, priced in what it spends. The step they
 climb toward is a question fully answered in one call, which is not always trivial to reach — and
 where it is not, the output says so rather than pretending otherwise.
+
+**How we measure the climb.** A complete answer to every code question is genuinely hard, and it is
+reached over many releases rather than in one. Until an answer can be complete, it owes you three
+things: it stays bounded in size, it is fully honest about what it does not know, and it gives you a
+clue where to look next. So every change is judged on more than "was it right":
+
+- **Complete answers:** the share of questions answered so you can act without re-checking.
+- **Honest-partial rate:** how often an incomplete answer says what it is missing, instead of
+  sounding confident.
+- **False-confidence rate:** wrong answers that claim to be complete — the worst case, held near zero.
+- **Next-clue usefulness:** for partial and wrong answers, whether following the answer's first
+  suggested next step reaches what the question needed, within one hop. Graded blind.
+
+**Answering comes first; efficiency is how we get there.** We aim for answers about as lean as the
+leanest tools, but a byte budget is never allowed to cost an answer. We have gone too far toward short
+answers before and cut information that was needed, so now every size limit has one of two jobs: a
+runaway guard far above typical answers (it catches an output bug, and says so when it trips), or a
+stair-step target where anything over it must be explained. A capped answer is always measured
+against the same answer uncapped, and the one that answers better wins.
 </details>
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
@@ -2063,9 +2082,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>660 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>662 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **660 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **662 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a

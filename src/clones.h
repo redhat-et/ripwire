@@ -17,6 +17,7 @@
 #include <limits>       // std::numeric_limits — the mask-width static_assert: an index shifted into a mask must fit it
 #include <cstdio>
 #include <string>
+#include <utility>      // std::forward — the C-family scanCodeTokens spelling hands its sink to the CodeScanOptions one
 #include <vector>
 
 namespace rw
@@ -139,10 +140,23 @@ inline constexpr std::uint32_t kHashLineCommentLangMask = langBit( Lang::Python 
 static_assert( kLangCount <= std::numeric_limits<decltype( kHashLineCommentLangMask )>::digits,
                "Lang outgrew a 32-bit mask — widen kHashLineCommentLangMask" );
 
-inline bool usesHashLineComments( Lang lang ) noexcept
-{
-    return ( ( kHashLineCommentLangMask >> std::uint32_t( lang ) ) & std::uint32_t( 1 ) ) != 0;
-}
+// Is `lang`'s bit set in a langBit mask? One shift and one AND, the form every mask predicate below shares (so the
+// second predicate did not land as a 29-token clone of the first, which --quality-delta named when it did).
+inline constexpr bool langInMask( std::uint32_t mask, Lang lang ) noexcept { return ( ( mask >> std::uint32_t( lang ) ) & std::uint32_t( 1 ) ) != 0; }
+
+inline bool usesHashLineComments( Lang lang ) noexcept { return langInMask( kHashLineCommentLangMask, lang ); }
+
+// Languages whose `'` opens a STRING literal (CodeScanOptions::singleQuoteStrings), not a char literal: the three the
+// builtin-method name gate has a table for (graph.h BuiltinMethodGate::tableFor), which is the one consumer that asks.
+// Only Python is exercised today (the gate's same-file rule is Python-only; test/commenttokencheck.sh A-I); the JS-family
+// and Ruby rows are the lexical fact, kept so a later extension of that rule cannot scan `'…'` as code by omission. Not
+// in this mask, deliberately: C/C++/Java/Rust (char literals), and every language the clone/readability lenses scan,
+// whose normalized streams must keep their bytes.
+inline constexpr std::uint32_t kSingleQuoteStringLangMask = langBit( Lang::Python ) | langBit( Lang::Ruby ) | langBit( Lang::JavaScript ) | langBit( Lang::TypeScript );
+static_assert( kLangCount <= std::numeric_limits<decltype( kSingleQuoteStringLangMask )>::digits,
+               "Lang outgrew a 32-bit mask — widen kSingleQuoteStringLangMask" );
+
+inline bool usesSingleQuoteStrings( Lang lang ) noexcept { return langInMask( kSingleQuoteStringLangMask, lang ); }
 
 // What the scanner decided a token IS. The consumer decides what to DO with that — normalize it away
 // (--clones) or keep it verbatim (--readability) — which is the whole reason the two are separable.
@@ -167,14 +181,64 @@ enum class CodeTokenKind : std::uint8_t { Identifier, Keyword, Number, String, P
 // PARAMETER and not a unification precisely because flipping it for --clones would change that verb's
 // normalized streams — i.e. its output bytes — and the new lens must be purely additive (G5).
 //
+// singleQuoteStrings (CodeScanOptions): OFF (every C-family consumer) keeps the `'` branch below — a char literal with a
+// plausible close, else punctuation. ON, a `'` opens a STRING that runs to the next unescaped `'`, exactly as `"` does,
+// because in Python, Ruby and the JS family `'…'` IS a string: with it off, `'Pool warm'` scans as `'` `Pool` `warm` `'`
+// and the words inside a log message count as code. An f-string's `{…}` is string content here (the graph.h consumer reads
+// the fields itself, StringTokenPosition::isFormatString).
+//
+// tripleQuoteStrings (CodeScanOptions): OFF (the default) reads `"""` as `""` then `"` — a quote INSIDE the triple would then
+// close the string early and flip code and string for the rest of the span. ON, a `"""` or `'''` opens one STRING that runs
+// to the matching closing triple, as Python reads it, so an apostrophe or a lone `"` inside a docstring stays string
+// content (commenttokencheck arm Q). The one consumer is graph.h identifierTokenCountExceeds, for Python.
+//
+// slashComments (CodeScanOptions): ON (every C-family consumer, and the default) drops `//`-to-EOL and `/* … */` as
+// comments. OFF keeps them as punctuation, because in Python `//` is floor division: `n = total // 2; kind = Pool` must
+// not lose the rest of its line (commenttokencheck arm P). The one consumer that turns it off is the same graph.h count,
+// for Python (PHP has `#` AND `//` comments, so the `#`-comment mask is not the right switch).
+//
 // `sink( std::string_view token, CodeTokenKind kind )` is called once per token, in source order.
-template<typename Sink>
-inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b, bool stripHashComments,
-                            bool munchMultiByteOperators, Sink&& sink )
+struct CodeScanOptions
 {
+    bool stripHashComments       = false;   // `#` to EOL is a comment (usesHashLineComments)
+    bool munchMultiByteOperators = false;   // longest match from kMultiByteOperators (the --readability shape)
+    bool singleQuoteStrings      = false;   // `'` opens a string literal, not a char literal (Python, Ruby, the JS family)
+    bool slashComments           = true;    // `//` to EOL and `/* … */` are comments (off: Python's `//` is floor division)
+    bool tripleQuoteStrings      = false;   // `"""…"""` / `'''…'''` is one string to its closing triple (Python)
+};
+
+template<typename Sink>
+inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b, CodeScanOptions options, Sink&& sink )
+{
+    const bool        stripHashComments       = options.stripHashComments;
+    const bool        munchMultiByteOperators = options.munchMultiByteOperators;
     const std::size_t n = std::min<std::size_t>( b, src.size() );
     std::size_t       i = std::min<std::size_t>( a, n );
     const auto        idc = []( unsigned char c ) noexcept { return std::isalnum( c ) != 0 || c == '_'; };
+    // a `"`-style string: from the opening quote to the next unescaped close (or the end of the span), one String token;
+    // with tripleQuoteStrings, an opening `"""` runs to the next unescaped `"""`
+    const auto        quoted = [ & ]( char quote )
+    {
+        const std::size_t begin  = i;
+        const bool        triple = options.tripleQuoteStrings && i + 2 < n && src[i + 1] == quote && src[i + 2] == quote;
+        const std::size_t width  = triple ? 3 : 1;
+        i += width;
+        while( i < n )
+        {
+            if( src[i] == '\\' )
+            {
+                i += 2;
+                continue;
+            }
+            if( src[i] == quote && ( !triple || ( i + 2 < n && src[i + 1] == quote && src[i + 2] == quote ) ) )
+            {
+                break;
+            }
+            ++i;
+        }
+        i = std::min( n, i + width );
+        sink( std::string_view( src.data() + begin, i - begin ), CodeTokenKind::String );
+    };
 
     while( i < n )
     {
@@ -184,7 +248,7 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
             ++i;
             continue;
         }
-        if( c == '/' && i + 1 < n && src[i + 1] == '/' )
+        if( options.slashComments && c == '/' && i + 1 < n && src[i + 1] == '/' )
         {
             i += 2;
             while( i < n && src[i] != '\n' )
@@ -193,7 +257,7 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
             }
             continue;
         }
-        if( c == '/' && i + 1 < n && src[i + 1] == '*' )
+        if( options.slashComments && c == '/' && i + 1 < n && src[i + 1] == '*' )
         {
             i += 2;
             while( i + 1 < n && !( src[i] == '*' && src[i + 1] == '/' ) )
@@ -214,18 +278,12 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
         }
         if( c == '"' )
         {
-            const std::size_t begin = i;
-            ++i;
-            while( i < n && src[i] != '"' )
-            {
-                if( src[i] == '\\' )
-                {
-                    ++i;
-                }
-                ++i;
-            }
-            i = std::min( n, i + 1 );
-            sink( std::string_view( src.data() + begin, i - begin ), CodeTokenKind::String );
+            quoted( '"' );
+            continue;
+        }
+        if( c == '\'' && options.singleQuoteStrings )
+        {
+            quoted( '\'' );
             continue;
         }
         // ' opens a char literal only with a plausible close (bounded lookahead) AND not directly after an
@@ -272,6 +330,15 @@ inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b
         sink( std::string_view( src.data() + i, len ), CodeTokenKind::Punctuation );
         i += len;
     }
+}
+
+// The C-family spelling every --clones / --readability / --comment-coherence / --clone-idiom call site uses: `'` stays a
+// char literal. The two flags map onto CodeScanOptions in declaration order; nothing else differs.
+template<typename Sink>
+inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b, bool stripHashComments,
+                            bool munchMultiByteOperators, Sink&& sink )
+{
+    scanCodeTokens( src, a, b, CodeScanOptions{ stripHashComments, munchMultiByteOperators, false }, std::forward<Sink>( sink ) );
 }
 
 // The --clones PROJECTION of a scanned token: identity erased, control flow kept. One statement of the

@@ -879,8 +879,10 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
     const std::string probeCut = changedCount > probed
         ? " partners_capped=\"1\" probed=\"" + std::to_string( probed ) + "\" changed_files=\"" + std::to_string( changedCount ) + "\""
         : std::string();
-    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\"{}{}:\n",
-                  partners.size(), coWindow.c_str(), coCommits, probeCut.c_str(),
+    // 0.6.7 shallow tail: the window was mined from THIS root's fetched history; on a depth-limited clone the line carries the
+    // shallow="1" the cochange verb's root carries (the at: line's +shallow suffix names the state, this names the measurement).
+    rw::emitTo( out, "  [3] co-change — usually edited with these but NOT in your diff ({}) window=\"{}\" commits=\"{}\"{}{}{}:\n",
+                  partners.size(), coWindow.c_str(), coCommits, gitstamp::shallowAttr( gitstamp::isShallow( root ) ), probeCut.c_str(),
                   situShowingNote( partnerShown, partners.size(), "files",
                                    situNextInvocation( page.selector, partners.size() ) ).c_str() );
     if( partners.empty() )
@@ -925,6 +927,7 @@ struct SituationFacts
     SituSiblings                                  siblings;      // L-D: same-directory, same-stem neighbours of the changed files — STORED spellings (an unindexed .inl has no fileId)
     std::string                                   coWindow;      // the window label its co-change was mined in ("18mo@HEAD"), empty only if never mined
     std::size_t                                   coCommits = 0; // commits that window actually contained — 0 ⇒ the zero above is not a measurement
+    bool                                          shallow = false; // 0.6.7: the root is a depth-limited clone — coCommits and hotspots' churn count only the fetched commits
     std::vector<std::pair<std::uint32_t, std::uint64_t>> hotspots; // (changed file, cx×churn score) for high-risk changed files (score desc, path asc)
     std::vector<std::string>                      modulesTouched; // distinct TOP-LEVEL directory of each changed file (sorted)
 };
@@ -1008,6 +1011,7 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     facts.siblings = lexicalSiblings( ing, changedFile );   // L-D: the same list the CLI report's [1] prints
     facts.coWindow = defaultWindowLabel( root, "18mo" );   // F2: the composed zero's window travels WITH the zero
     facts.coCommits = coSets.size();
+    facts.shallow   = gitstamp::isShallow( root );         // 0.6.7: ...and so does its qualification (the one probe)
     HashMap<std::uint32_t, double> partnerDeg;
     std::uint32_t                  probed = 0;
     for( std::uint32_t f = 0; f < F && probed < 40; ++f )
@@ -1422,8 +1426,10 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // is no t="modscope" shape left for a reader of THIS listing to meet and no legend clause to spend bytes
     // on here. (It remains a legitimate CALLER row elsewhere — --callers/--impact/--for still carry
     // rw::modScopeLegend for their own t="modscope" rows; this document has none of those, only <u> rows.)
-    rw::emitTo( out, "<!-- {}{}{}{}{}{}-->{}", kTestGateLegend,
+    const std::string tgRunFirst = runFirstField( r.testRows, testRows, /*json=*/false );   // hono-20/textual-20: the run-first head
+    rw::emitTo( out, "<!-- {}{}{}{}{}{}{}-->{}", kTestGateLegend,
                   tgHasRows ? kTestGateRowLegend : "", std::string_view( kTestRowEvidenceLegend.data(), tgHasRows ? int( kTestRowEvidenceLegend.size() ) : 0 ),
+                  runFirstLegend( !tgRunFirst.empty() ),   // exactly when the root carries run_first=
                   runHintClauseIfRows( testRows, runsAreRootRelative( ing, root ) ),   // the ONE gate: this clause is about <t> rows, so an untested-only report pays nothing
                   untestedModscopeLegend( r.untestedModscope > 0 ),   // F3: the full clause at N>0, a one-line definition at 0
                   ( std::string( rw::graphUnindexedLegend( rw::graphGaugeClauses( g ) ) )   // #66: exactly when the root carries the attribute
@@ -1443,11 +1449,12 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     rw::emitTo( out, "<test-gate changed=\"{}\" impacted=\"{}\" tests=\"{}\" untested=\"{}\" untested_modscope=\"{}\""
                        " shown_tests=\"{}\" tests_capped=\"{}\" shown_untested=\"{}\" untested_capped=\"{}\""
                        " script_gates_unmodelled=\"{}\" script_gates_registered=\"{}\" script_gates_mapped=\"{}\""
-                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}>",
+                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}{}>",
                   r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                   shownTests, shownTests < testRows ? 1 : 0, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
                   r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,   // P8 (L7): ccx_bar=
+                  tgRunFirst.c_str(),   // hono-20: where the run-first head of the <t> rows ends; absent unless it splits
                   graphCountFloorAttrXml( g ).c_str(),   // M15: gauge + counts_floor="1", the one splice every graph-floored root shares
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
@@ -1512,11 +1519,12 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     rw::emitTo( out, "{{\"changed\":{},\"impacted\":{},\"tests\":{},\"untested\":{},\"untested_modscope\":{}"
                        ",\"shown_tests\":{},\"tests_capped\":{},\"shown_untested\":{},\"untested_capped\":{}"
                        ",\"script_gates_unmodelled\":{},\"script_gates_registered\":{},\"script_gates_mapped\":{}"
-                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{},\"at\":{}{}{}{},\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{}{},\"at\":{}{}{}{},\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                  shownTestsJ, shownTestsJ < testRows ? "true" : "false", shownRows,
                  shownRows < r.untested.size() ? "true" : "false",
                  scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,
+                 runFirstField( r.testRows, testRows, /*json=*/true ).c_str(),   // the XML twin's run_first=
                  graphCountFloorAttrJson( g ).c_str(),   // M15: the JSON twin's gauge + "counts_floor":true
                  rw::cstr( pageJson ), atJson.c_str(), tgJRootJson.c_str(),   // M12: root= rides only when the document has rows (same gate as the XML twin)
                  declinedCallsKeyJson( r.declinedCalls ).c_str(),                // the XML twin's declined_calls=

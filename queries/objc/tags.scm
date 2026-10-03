@@ -26,3 +26,14 @@
 ; message sends, not field_expression), so this is a zero-cost honesty gain, not a resolution gain —
 ; matches C's own documented behavior for the same shape.
 (call_expression function: (field_expression field: (field_identifier) @name)) @reference.call
+
+; ---- import capture (the shared vocabulary of issue #358) ----
+; ONE capture name for every include spelling this grammar has. The node is the path TOKEN as written,
+; delimiters included — `"dep.h"`, `<dep.h>`, or a bare macro name — and the CFamily normaliser turns it
+; into a bare path plus the quote-vs-angle bit. Read off a real parse with `--match`, never predicted
+; (13 hits over the test/importcapcheck.sh fixture: every #include in all three grammars plus the two
+; ObjC #import). The UNANCHORED shape is what reaches an include written inside an #if/#else/#elif guard,
+; which is the union-over-arms posture ingest_relations.h already documents — a spurious edge, never a
+; missing one.
+(preproc_include
+  path: (_) @import.path)

@@ -635,6 +635,24 @@ inline std::string declinedCallsKeyJson( std::size_t declinedCalls )
     return declinedCalls > 0 ? ",\"declined_calls\":" + std::to_string( declinedCalls ) : std::string();
 }
 
+// ── declined_iface= on the callers and impact answers and their MCP twins (callhierarchy.h declinedIfaceCallsNaming) ──
+// Declined TypeScript calls that share their name with an interface or abstract signature. The resolver does not narrow
+// on a type annotation, so `r.match()` with `r: Router` is declined once `match` has several definitions, and the
+// interface's own answer could have no count for it. The match is by NAME (the receiver's type is not read), so a
+// counted call MAY go through the interface; the count is not a subset of declined_calls=. Absent at zero; its clause
+// rides exactly when the attribute does. No double hyphen anywhere, because it lands inside an XML comment.
+inline constexpr const char* kDeclinedIfaceLegend =
+    "declined_iface=K (absent when 0) counts declined TypeScript call SITES that share their called name with a method signature with no body in this tree (an interface or abstract member; an overload signature beside its implementation is not one). It matches by NAME only: the receiver's type is not read, so a counted call MAY go through that interface or may be another same-named method (a string's match, say). The resolver does not narrow a call on a TypeScript type annotation, so a call through an interface-typed receiver is declined once the name has two or more definitions, and it is in no count or row here. It counts the declined calls that could have meant these definitions (or, for impact, a symbol in the radius) and those sharing the name of a signature among them, each once, so it is NOT a subset of declined_calls= and can exceed it; the uses verb on the called name lists the sites. ";
+inline const char* declinedIfaceLegend( bool on ) noexcept { return on ? kDeclinedIfaceLegend : ""; }
+inline std::string declinedIfaceAttrXml( std::size_t declinedIface )
+{
+    return countAttrXmlOrEmpty( "declined_iface", declinedIface );
+}
+inline std::string declinedIfaceKeyJson( std::size_t declinedIface )
+{
+    return countFieldOrEmpty( "declined_iface", declinedIface, /*json=*/true );
+}
+
 // ── Depth-labelled --impact (0.6.5): by_depth= on the root, d= on the rows ──────────────────────────────────────────
 // `counts` is graph.h depthCounts over the FULL reach set: element k counts the rows first reached at hop k+1. One
 // spelling per dialect, shared by the CLI --impact and its MCP twin so the two cannot drift. Absent when the reach set
@@ -782,6 +800,22 @@ inline std::string impactTsImportLegend( std::uint64_t importsUnresolved, std::u
 inline constexpr const char* kUnprovenDefsLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS this file:name selector found and could not tie to the file it named: they are NOT in defs= and no row or count here includes them. A declaration widens to the definitions it stands for only where the definition is IN the named file, or its own file includes the named file, resolved path-precisely; a same-named body anywhere else is not evidence and is never served. Widen the selector to the bare NAME, or to Scope::name, to see them. ";
 inline const char* unprovenDefsLegend( bool on ) noexcept { return on ? kUnprovenDefsLegend : ""; }
+
+// ── cross_kind= on the callers/callees answers (comparison table hono-07; test/callerscheck.sh arm X) ──
+// The definitions a selector resolved to are of 2+ KINDS (a free function and unrelated methods sharing a name), so the
+// union the defs= clause describes mixes neighbours of things that are not the same API. Emitted exactly when the
+// attribute is, the unprovenDefsLegend( bool ) rule. G4: inside an XML comment, so no double hyphen.
+inline constexpr const char* kCrossKindLegend =
+    "cross_kind=kind:N,... (absent when every definition shares one kind) says the defs= definitions are of DIFFERENT kinds, N of each: the rows union the neighbours of all of them, so a row may reach a definition other than the one you mean. Narrow with a file:name selector. ";
+inline const char* crossKindLegend( bool on ) noexcept { return on ? kCrossKindLegend : ""; }
+inline std::string crossKindAttrXml( const std::string& value )
+{
+    return value.empty() ? std::string() : " cross_kind=\"" + value + "\"";
+}
+inline std::string crossKindKeyJson( const std::string& value )
+{
+    return value.empty() ? std::string() : ",\"cross_kind\":\"" + value + "\"";
+}
 
 // ── issue #60: the module-scope owner's clause, emitted exactly when a t="modscope" ROW is in the answer ──
 // A file-scope call (a top-level statement, or a call inside an anonymous callback body) used to have no

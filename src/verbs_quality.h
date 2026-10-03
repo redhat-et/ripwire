@@ -101,10 +101,12 @@ std::optional<int> loadRefPairDelta( const std::string& root, std::string_view s
             // The did-you-mean here cannot be a spelling neighbourhood — git already owns the ref namespace and
             // has no cheap enumeration of it — so the adjacent help names the PROBE and the three causes that
             // actually produce this on an agent's machine, which is more use than a guessed nearest ref.
-            rw::emitTo( stderr, "ripwire: --quality-delta: '{}' does not resolve to a commit in {}\n"
+            // 0.6.7: the cause list below GUESSES; on a depth-limited clone the probe KNOWS, so the first line names it
+            // (gitstamp::shallowRefHint — the same sentence pr-context and merge-scout print; "" on a full clone).
+            rw::emitTo( stderr, "ripwire: --quality-delta: '{}' does not resolve to a commit in {}{}\n"
                                   "  check it with `git -C {} rev-parse --verify {}^{{commit}}`; the usual causes are a typo, a ref that\n"
                                   "  lives only on a remote you have not fetched, or a shallow clone whose history stops before it\n",
-                          ref.badToken.c_str(), root.c_str(), root.c_str(), ref.badToken.c_str() );
+                          ref.badToken.c_str(), root.c_str(), rw::gitstamp::shallowRefHint( root ), root.c_str(), ref.badToken.c_str() );
             return 1;
         case quality::RefSpecStatus::BadRange:
             rw::emitTo( stderr, "ripwire: --quality-delta: '{}' uses the three-dot form; this compares two TREES, so spell it A..B "
@@ -1768,7 +1770,8 @@ std::optional<int> runDmm( const MainDispatch& d )
     const dmm::Result r = dmm::computeDmm( d.root, cfg.dmmRange, d.ing, cfg.excludes, cfg.maxFileBytes );
     if( r.status == dmm::Status::BadRev )
     {
-        rw::emitTo( stderr, "ripwire: --dmm: '{}' does not resolve to a commit in {}\n", r.badToken.c_str(), d.root.c_str() );
+        rw::emitTo( stderr, "ripwire: --dmm: '{}' does not resolve to a commit in {}{}\n", r.badToken.c_str(), d.root.c_str(),
+                      rw::gitstamp::shallowRefHint( d.root ) );   // 0.6.7: the likeliest cause on a depth-limited clone, "" otherwise
         return 1;
     }
     if( r.status == dmm::Status::BadRange )

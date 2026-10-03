@@ -808,6 +808,41 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
    you are looking for it). Update the one-line **Latest: 0.6.x** pointer near the top of README.md to
    match.
 
+**Before you ask for review.** These are the findings that most often send a change back for a second
+round. Each takes minutes to check; each miss costs a review round.
+
+1. **Negative arms that can fail.** For every new positive arm, add near-miss negatives the *new* code could
+   plausibly mishandle — not trivially unrelated inputs — and comment out your guard once to watch one go
+   red. See [an arm that cannot fail](#the-failure-mode-that-keeps-coming-back-an-arm-that-cannot-fail).
+2. **Probe the siblings of what you fixed.** Fixed unary? Try binary and optional-chain. Fixed `struct`? Try
+   `union`, `enum`, `class`. Fix each sibling, or name it as a disclosed floor.
+3. **Wording matches the mechanism.** For each new attribute, legend sentence, doc line and CHANGELOG entry:
+   by name or by resolution? a subset or all of it? "may" or "does"? a floor or a total? Write one sentence
+   saying what it does *not* mean and run a counterexample against it.
+4. **Sanitizer build at your final commit.** Rebuild `asan/` at the sha you push and run the gates you
+   touched there ([sanitizer build](#sanitizer-build-the-g1-stack--required-before-you-open-a-pr)).
+5. **A "pre-existing" failure fails on `main` too.** Run it on a `main` binary and quote the result; until
+   then it is yours.
+6. **The full gate suite at your final commit** — including after fixes made in response to review. A fix
+   round is a new change and has broken a gate the first round passed.
+7. **Byte identity outside the change's scope.** Run 30 or more argvs the change should not touch against a
+   base and a head binary: the diff is empty, or each difference is explained as intended.
+8. **Legend and dictionary figures come from the binary.** Quote `ripwire --legend-dict` for any `dictv=` or
+   entries number; never hand arithmetic.
+9. **Bump on an extraction change.** If extraction output moves, bump `kParserVer` in `src/ingest_cache.h`
+   and its mirror `kIngestParserVerMirror` in `src/quality.h`, so old caches are refused rather than
+   served; `qschemetripcheck` says when a quality snapshot's meaning moved too.
+10. **Name each deferral and give its reason** — out of scope and harmless, or blocking. A reviewer will
+    judge each one, so make that cheap.
+11. **No test process outlives its gate.** `pgrep` after the suite, and kill what you started.
+12. **Comparing binaries? Use `--no-cache`**, or a fresh `--cache` directory per binary, so one binary is
+    never measured through the other's cache.
+13. **The recurring review catches:** every root of a multi-root call gets the same check and limit, not
+    just the first; on a partial or stopped index, "none found" is disclosed or refused, never a zero
+    claim; a dedup or merge of findings keeps the most severe row, not the first; a substring match on a
+    name is whole-word or bounded (probe `catalog` and `dialog` for `log`); a per-tag or per-file cap
+    cannot make the result depend on file order.
+
 **The gate count is a build product.** It is stated in `README.md`, `docs/EVALS.md` and
 `present/deck5_ripwire_build.js` — eight sites — and every one of them is written by
 `docs/gatecount_build.py` from the single absorb loop in `test/regression.sh`, then gated by

@@ -93,5 +93,64 @@ fi
 # full-posture `<callees of= defs=` root shape, so it asks for --legend=full (rows identical across postures).
 if "$BIN" "$ROOT" --callees=empty --legend=full 2>/dev/null | grep -qE '<callees of="empty" defs="[0-9]+"'; then ok "P10.6: --callees carries defs= (a count=0 is now a measurement over N known defs)"; else no "P10.6: --callees root missing defs="; fi
 
+# ── X: cross_kind= — a bare name whose definitions are of different KINDS (comparison table hono-07) ────────────────
+# `getPath` was a free function in src/utils/url.ts AND ten `protected getPath` methods of unrelated classes; the
+# rows unioned their callers under nothing but defs="11", so `createRequest` (which calls this.getPath) read as a
+# caller of the utils function. RED on main 953818d6: no cross_kind= anywhere.
+XK="$( mktemp -d )"; trap 'rm -rf "$XK"' EXIT
+mkdir -p "$XK/src/utils" "$XK/src/adapter"
+cat >"$XK/src/utils/url.ts" <<'EOF'
+export const getPath = (request: Request): string => {
+  return request.url
+}
+
+export const getPathNoStrict = (request: Request): string => {
+  return getPath(request)
+}
+EOF
+cat >"$XK/src/adapter/handler.ts" <<'EOF'
+export abstract class EventProcessor<E> {
+  protected abstract getPath(event: E): string
+
+  createRequest(event: E): string {
+    return this.getPath(event)
+  }
+}
+
+export class V2Processor extends EventProcessor<string> {
+  protected getPath(event: string): string {
+    return event
+  }
+}
+EOF
+XK_OUT="$( "$BIN" "$XK" --no-cache --callers=getPath --legend=full 2>/dev/null )"
+xk_root="$( printf '%s' "$XK_OUT" | grep -o '<callers [^>]*>' | head -1 )"
+printf '%s' "$xk_root" | grep -q 'cross_kind="fn:1,method:2"' \
+    && ok "X: a bare name over 1 function + 2 methods carries cross_kind=\"fn:1,method:2\"" \
+    || no "X: expected cross_kind=\"fn:1,method:2\" on the root, got: $xk_root"
+printf '%s' "$XK_OUT" | grep -o '<!--.*-->' | grep -q 'cross_kind=kind:N' \
+    && ok "X: the legend defines cross_kind= in the answer that carries it" \
+    || no "X: cross_kind= emitted without its legend clause"
+"$BIN" "$XK" --no-cache --callers=src/utils/url.ts:getPath 2>/dev/null | grep -q 'cross_kind=' \
+    && no "X: a file:name selector that resolved to ONE kind still carries cross_kind=" \
+    || ok "X: the file-qualified selector (one kind) carries no cross_kind="
+"$BIN" "$XK" --no-cache --callees=getPath 2>/dev/null | grep -o '<callees [^>]*>' | grep -q 'cross_kind="fn:1,method:2"' \
+    && ok "X: --callees carries the same cross_kind= (one resolution, both directions)" \
+    || no "X: --callees missing cross_kind="
+"$BIN" "$XK" --no-cache --callers=getPath --json 2>/dev/null | grep -q '"cross_kind":"fn:1,method:2"' \
+    && ok "X: --json carries the cross_kind key" || no "X: --json missing cross_kind"
+"$BIN" "$XK" --no-cache --callers=getPath --format=columnar 2>/dev/null | grep -q 'cross_kind="fn:1,method:2"' \
+    && ok "X: --format=columnar carries cross_kind=" || no "X: --format=columnar missing cross_kind="
+XK_MCP="$( printf '%s\n%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_referencing_symbols","arguments":{"path":"'"$XK"'","symbol":"getPath"}}}' \
+    | "$BIN" "$XK" --mcp --no-cache 2>/dev/null | tail -1 )"
+printf '%s' "$XK_MCP" | grep -q 'cross_kind' && printf '%s' "$XK_MCP" | grep -q 'fn:1,method:2' \
+    && ok "X: the MCP twin find_referencing_symbols carries cross_kind" \
+    || { no "X: the MCP twin dropped cross_kind"; printf '%s\n' "$XK_MCP" | cut -c1-300; }
+# Same-kind overloads keep their bytes: queryfix's hot() is one function.
+c hot | grep -q 'cross_kind=' && no "X: a single-kind answer grew cross_kind=" || ok "X: a single-kind answer carries no cross_kind="
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

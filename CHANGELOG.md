@@ -15,6 +15,19 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+
+### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
+
+The MCP `grep` hit row was `{file, line, in}`: no matched text, so an agent re-read every file it had just searched, and
+no handle on the enclosing rows, so `fetch_body` had nothing to take (sweep item #9, all three repos). Each hit now carries
+`text` — the CLI hit's own CDATA, cut at the same 512-byte cap with `line_bytes` (the whole line's length) present exactly
+when the cap cut it — and each `enclosing` row carries `handle` (the CLI's `h=` under `--handles`, same identity and content
+pin, minted from the index's own byte hash) or `handle_omitted` with the CLI legend's reason (`ambiguous`, `non-code`,
+`unreadable`). The rule for which row may carry a handle is one function both surfaces read (`search.h`
+`grepEncHandleCandidate`). Keys are appended after the historic ones; the CLI `--grep` answer is byte-identical. The
+`tools/list` description names the new fields. Gate: `mcptwinclaimscheck` (D); `shallowhistorycheck` sections 7–9 cover
+the three items above.
+
 ### Added — `Class.method` and `Class#method` are selectors wherever `Class::method` is
 
 Agents and documentation name a method `Class.method` (Python, JS, Java) or `Class#method` (Ruby, JSDoc), and every
@@ -216,6 +229,128 @@ corpora, with this repository's `--report` totals unchanged. `kParserVer` 129 in
 inheritance records; 99 dropped a computed superclass's stray receiver ref); the record layout is unchanged, and
 the `quality.h` mirror and `test/qschemetrip.hash` move with it.
 
+### Changed — shallow-clone qualification reaches the composed surfaces, the unfetched-rev refusals and the empty windows
+
+0.6.6 put `shallow="1"` on the owners / hotspots / cochange roots of a depth-limited clone and a deepen hint on the
+pr-context and merge-scout unknown-ref refusals. Four surfaces that answer from the same history were left out
+(found on three depth-1 clones in the 0.6.6 command sweep; every item reproduced on the current base before the fix):
+
+- `--pr-context` embeds `<owners bf= share=>` and `<cochange window= commits=>` per changed file; `--situ`'s `[3] co-change`
+  line and the MCP `situational_awareness` twin carry the same window. On a shallow clone the pr-context root now carries
+  `shallow="1"` (the clause that defines it rides the envelope every form writes, and the compact dictionary already holds
+  the term), the situ window line carries `shallow="1"`, and the JSON twin carries `"shallow":true` beside
+  `cochange_window` — present only on a shallow clone, so every full-history answer is byte-identical. A multi-root run
+  probes each root for its own section.
+- `--quality-delta=HEAD~3`, `--dmm=HEAD~3` and `--since=HEAD~3` (every `--since` host: hotspots, cochange, rank-by=churn,
+  slice, and slice's no-baseline degrade) refused with "does not resolve" / "is neither a git revision" and nothing about
+  the likeliest cause. Each refusal now ends with the ONE probe-backed sentence the pr-context/merge-scout refusals
+  already print (`gitstamp::shallowRefHint`): "this is a shallow clone, so the ref may lie beyond the fetched history;
+  deepen it with git fetch --deepen=N, or git fetch --unshallow". On a full clone every refusal keeps its bytes; the
+  `--since` probe reads every workspace root. The shallow-boundary sentence (`--quality-delta=HEAD` on the boundary
+  commit) is unchanged — it is a different fact.
+- `--hotspots --since=REV` / `--cochange --since=REV` over a window that matched no commits returned their empty root before
+  the qualified emitter, with no `shallow=`. The empty-window root now carries `shallow="1"` and its legend clause exactly
+  as the ranked root does (both legend postures; still `commits="0"`, exit 0).
+
+### Changed — `CONTRIBUTING.md` §6 gains a "Before you ask for review" checklist
+
+Thirteen items for a contributor or an agent to run before opening a PR, drawn from the findings that most
+often sent a change back for a second review round: arms that cannot fail, sibling shapes left unprobed, wording
+stronger than the mechanism, the sanitizer build and full suite at the final commit, and `kParserVer` bumps.
+Docs only; no behavior change.
+
+### Changed — docs: README and METHODOLOGY state how the climb to complete answers is measured
+
+The README's goal section gains the four measures an answer is judged on (complete answers, honest-partial rate,
+false-confidence rate, next-clue usefulness) and the rule that answering comes before size; `docs/METHODOLOGY.md`
+gains §9.2, which fixes the two roles a size limit may have (runaway guard, stair-step target) and the
+capped-versus-uncapped grading rule. Documentation only; no behaviour change.
+
+### Changed — the C-family import edges come from one shared capture instead of two per-language extractors (#358, C-family slice)
+
+`src/ingest_relations.h` held about 21 per-language import extractors (`csharpUsingTarget`, `phpUseTarget`,
+`jsModuleLoadTarget`, `luaRequireTarget`, `rubyRequireTarget`, `elixirDirectiveTarget`, …), each re-deriving the same
+three steps: find the directive's node, pick the child carrying the written specifier, normalise that child's text.
+This lands the **C-family slice** of #358 (c, cpp, objc, and the `.h`/`.hpp`/`.cu`/`.cuh`/`.metal` extensions that ride
+those grammars) on the shared vocabulary the issue asks for, so the remaining languages can land one at a time.
+
+`@import.path` is now the capture name for "the written specifier of one import directive", declared once per grammar
+in `queries/{c,cpp,objc}/tags.scm` and unanchored, so an include inside an `#if`/`#else`/`#elif` guard is matched at any
+depth rather than being anchored to the file root — with the walk's own reach re-imposed afterwards in C++ by
+`importContainerReach`, which walks the captured node's ancestry and keeps exactly the ancestors the old walk would have
+entered (so an include under `extern "C" { … }`, a `namespace`, or a function body is still NOT captured, exactly as
+before). `src/ingest_importcap.h` holds what is left: **one specifier normaliser per `DepDialect`**, not one extractor per
+language — the dialect is the unit at which "what does a written specifier mean" actually varies, and `dependencyDialect`
+already groups languages by exactly that. `DepDialect` moved out of `lintrules.h` into its own `src/depdialect.h` so the
+ingest TU can name it (`lintrules.h` includes it back; the enum and its table are unchanged). Dependency **resolution**
+stays in `src/resolve.h` and is untouched.
+
+Two gates that a query cannot express stayed in C++, as normaliser arms: the C and C++ grammars have no `#import`
+rule, so it parses as a generic `preproc_call` — and so do `#pragma once`, `#error` and `#warning`, which the same
+pattern captures and none of which is a dependency. The normaliser reads the directive's text and drops every spelling
+that is not `#import` (tags-pass predicates never run; that is the same reason `using namespace ns;` is gated in
+`ingest.cpp`). The ObjC grammar *has* an `#import` rule, so it routes through `preproc_include` and needs no gate.
+
+Two things the walk owned were re-derived rather than dropped, because dropping either would have been a silent
+behaviour change: the **decided-dead filter now covers the includes window** in the tags pass (a flat query cannot know
+an `#if 0` arm is dead — without this line the round would have resurrected every dead include), and the
+**import-container nesting bound** is recovered from the captured node's ancestry with the same `DISCLOSE`
+(`test/preproccondcheck.sh`'s 600-deep arm pins drop + announce + still-index, and is the only thing pinning that
+announcement for the walk-based languages). The bound's last three rows are pinned by `test/importcapcheck.sh` at 255, 256
+and 257 nested conditionals: an include under exactly 256 containers is still captured and the cut starts at 257, which is
+what the old walk did — it pushed a frame at `depth + 1` and refused to descend a container whose own depth had reached the
+bound.
+
+**One disclosure difference is intended, and it is in `--skipped` only.** `extract-partial` for import nesting now fires
+only when a captured import is actually cut at the bound. Previously it also fired when the walk merely *entered* a too-deep
+container on its way to a file that turned out to contain no import at all — so a file with 300 nested `#ifdef` and no
+`#include` is no longer announced (the more accurate answer: nothing was dropped), while an include inside a function body
+under 260 nested conditionals *is* still announced (the safe direction: the depth test completes before the reach test can
+conclude the walk would never have entered the function). Matching the previous behaviour exactly would need an unbounded
+parent walk, which is the thing the bound exists to prevent. Both directions are pinned in `test/importcapcheck.sh`.
+
+**Dependency edges are byte-identical** on every dependency-capable language this round touches. Verified by keeping
+both binaries and running them against one unchanged tree — the pre-change build and this one agree byte-for-byte on
+`.` (2 354 files, 3 730 include edges, 0 added, 0 lost), `test/`, `test/nestedimportfix` and `test/includeprecisefix`,
+on both `--no-cache` and `--deps`. The new `test/importcapcheck.sh` pins the shapes (quote vs angle, all three
+`#import` spellings, a macro include, guarded arms, both dead arms, the `#pragma`/`#error` gate, the import-role
+use-site half, cache round-trip, determinism) over a 14-edge fixture it builds itself.
+
+### Changed — `--affected` and `--test-gate` mark which tests to run first (`run_first=`)
+
+A tests-to-run answer listed every reaching test in evidence order (changed, partner, then `hops=` ascending), 80 to
+249 files on the comparison table's repositories, with nothing marking which rows carry the most direct evidence. The
+root now carries `run_first=N`: the first N test files are every changed, partner or `hops=1` row (the module's own
+tests and the tests that call it directly), or, when the list has none of those, the rows at its smallest `hops=`. It
+is a run order, not a skip list: the walk is name-based and its counts are floors, so the rest can still exercise the
+change. Nothing is dropped or reordered, and the attribute is absent when it would split nothing. It is defined in the full and compact legends and carried by `--affected` (and the
+MCP `affected` tool, which shares its renderer), `--test-gate` (XML and `--json`), and the edit receipt's
+`tests_to_run` companions. On hono, `--affected=src/utils/url.ts` gives `run_first="2"`: `src/utils/url.test.ts` and
+`src/hono.test.ts`. `test/testgatelegendbudgetcheck.sh`'s budget moves 3730 → 3930 B for the clause. Gate:
+`test/affectedcheck.sh` arms (7h)–(7o).
+
+### Changed — `--callers`/`--callees` flag a name whose definitions are of different kinds (`cross_kind=`)
+
+A bare name can resolve to unrelated definitions: `getPath` was one free function in `src/utils/url.ts` and ten
+`protected getPath` methods of adapter classes. The rows union the callers of all of them, which `defs="11"`
+disclosed, but nothing said the definitions were not even the same kind of thing, so `createRequest` (it calls
+`this.getPath`) read as a caller of the utils function. The root now carries `cross_kind="fn:1,method:10"` (each kind
+with its definition count) whenever the definitions span two or more kinds, defined in the full and compact legends,
+on the XML, columnar and `--json` forms and on the MCP `find_symbol`/`find_referencing_symbols` twins. It is absent
+when every definition shares one kind, so overload sets keep their bytes. A `file:name` selector narrows to one
+definition. Gate: `test/callerscheck.sh` arm X.
+
+### Changed — `--grep` serves a source file's string literal when every code hit is only a use of it
+
+A literal question ("which code reads the option `escape-time`", "who reads `TEXTUAL_DRIVER`") is answered by a
+string literal in source: `"escape-time"` in an options table, `get_environ("TEXTUAL_DRIVER")`. The span tiers served
+the code tier whenever it held anything, so a test script's `set -g escape-time 0` or a changelog line outranked the
+answer, which rode only as `suppressed_string=N`. When no code hit sits in source code (every one is in a test, bench
+or doc file, or in a shell, YAML, TOML or JSON file, where a bare word parses as code) and source code holds the
+literal as a string (the same two exclusions apply to the string), the default answer now serves the string tier beside the code tier, labelled
+`tier="code+string"`; comments stay held back and counted. A code hit in source code keeps today's answer. The MCP
+`grep` tool makes the same choice. Gate: `test/greptiercheck.sh` arm (12).
+
 ### Changed — data Sections no longer crowd code out of the default map (#339 F1): a code-first row pick, disclosed
 
 A data file of a few hundred keys or headings indexes as `SymKind::Section` rows with no call edges. Their rank is their
@@ -299,11 +434,79 @@ per page instead. Gate: `test/impactdepthcheck.sh`.
 
 ### Changed — the versions this release moves, stated once
 
-`kParserVer` 124 → 132 (the function-literal fix takes 128; #338 and #325 take 129; 132 then sits above every number
-a branch build of unreleased work has used, so no cache such a build wrote is read as this release's), `kCacheVersion` 25 → 27
+`kParserVer` 124 → 133 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
+span fix and the TypeScript `await f<T>(x)` / `!f<T>(x)` calls each took a number of their own on their branches, and 133
+then sits above every number a branch build of unreleased work has used, so no cache such a build wrote is read as this
+release's), `kCacheVersion` 25 → 27
 (the function-literal fix's record changes) and `kQSnapCacheScheme` 15 → 16 (the `--quality-delta` error-masking and
 placeholder changes). Every ingest cache written by an earlier build is refused and re-indexed once, and every
-cached quality snapshot is recomputed. The session legend dictionary is `dictv=b5c64a12f0346e6c entries=771`.
+cached quality snapshot is recomputed. The session legend dictionary is `dictv=66409821069cf5cb entries=775`.
+
+### Fixed — test infrastructure: a gate killed mid-run no longer leaves its harness spinning (expandrangecheck, diagnoticecheck)
+
+`slicebody_harness` (test/expandrangecheck.sh) and `diagnotice_asan` (test/diagnoticecheck.sh) were found re-parented to
+launchd at ~60% CPU for hours, three times in two days. Cause, sampled live: an ASan-built program can hang on macOS
+before `main()` -- the sanitizer runtime's own init re-enters its allocator through dyld and spins on its own spin lock
+in `sched_yield` -- so no check inside the harness could ever run, and a gate that merely waited in the foreground
+left it behind when a suite timeout killed the gate. `scripts/gatebound.sh` now runs every harness under a perl
+`alarm` cap (survives SIGKILL) in the background, with the gate's EXIT/TERM/INT/HUP traps killing it; both harnesses
+also arm an `alarm` of their own, and a sanitized harness that will not start is a SKIP, like one that will not link.
+`test/pargatescheck.sh` arm (O) stops each gate mid-harness (TERM and KILL) and asserts no harness survives.
+
+### Fixed — C/C++: a body-less `enum X` in a function signature no longer poses as the function's encloser
+
+tmux writes `static enum cmd_retval` on one line and the function name on the next. The tags query indexes every named
+`enum` specifier, and the body-less one in a return or parameter type then took the whole enclosing function's span, so
+`--at` chained `struct cmd_retval` around the function, `--grep` labelled its hits `in="cmd_retval"`, and `--callers`
+named `struct box_lines` (from an `enum box_lines` parameter) as a caller. A body-less C/C++ enum, struct, union or class
+specifier now keeps its own span: on tmux, `--callers=options_get_number` lists 121 functions and no struct, and the
+four `"no current session"` hits name their functions. Such a specifier is a type use in the signature, so it no
+longer mints a definition either (no extra `overloads=` on the enum's name, and no `extent_suspect` flag on the function).
+`kParserVer` 129 → 130 (record values change for C/C++ only; `kCacheVersion` stays 27). Gate: `test/ccheck.sh`, the
+body-less type specifier arms.
+
+### Fixed — `--layout` and `--stray-content --abi` no longer wrap an unsigned index on a malformed member (G1)
+
+Three backward scans in `src/layout.h` were written `for( i = n; i-- > 0; )`, which wraps `i` to `SIZE_MAX` when the
+scan runs off the front: a trailing `)` that no `(` balances (`peelAttributeGroups`), a trailing `]` that no `[`
+balances (`peelExtents`), and a `#` with nothing but spaces between it and the start of a struct body
+(`atDirectiveStart`). The wrapped value was never used, so plain builds answered correctly, but the sanitizer build
+(`-fsanitize=integer`) aborted with exit 134. `--stray-content --abi` on this repository hit the first one, which
+turned `test/attrvocabcheck.sh` red under `asan/ripwire`. The three loops now count a cursor down to 1 and index
+`cursor - 1`, as `resolve.h` already does; output is byte-identical. Gate: `test/abicheck.sh` arm 11, one struct
+per loop through `--layout` plus the `--abi` path, which skips by name on a binary built without sanitizers.
+
+### Fixed — a class named only in a comment, docstring or string no longer admits a same-file builtin-named call to its method
+
+The builtin-method name gate admits a Python `x.get( k )` to a same-file `Pool.get` when the defining file names `Pool`
+beyond its `class` line, because Python records no annotation as a binding and `def f( p: Pool )` must count. That count
+was an identifier scan over every byte of the file, so `# Pool is the cache`, a docstring reading ``:class:`Pool` `` and a
+`logging.info( 'Pool warm' )` message each counted exactly like an annotation, and `data.get( "repos" )` on a json dict bound
+to `Pool.get` — a caller row, an `--impact` hop and a `tested=` claim with no call behind it. The count now runs over the
+house code scanner (`scanCodeTokens`), which drops `#` comments and `"…"` strings and, for this consumer, `'…'` strings too
+(a new `CodeScanOptions` spelling; every `--clones` / `--readability` call site keeps its bytes), so only a token the parser
+would read as code counts. A string in annotation or subscript position is a type expression, not prose, and counts
+exactly as the unquoted spelling does — Python forward references are strings: `p: "Pool"` and `x: "Pool" = …` (a `:`
+then the string on the same line), `-> "Pool"`, `None | "Pool"` (a union member after `|`), and `Optional["Pool"]` /
+`type["Pool"]` / `Dict[str, "Pool"]` (directly inside a `[ … ]` that follows a name, a keyword or a `]`). A docstring (its `:` ends the previous line), an `__all__` tuple entry, a list literal entry,
+a `return "Pool"` and a call argument stay prose. In the `#`-comment languages `//` is floor division, not a comment, so
+`n = total // 2; kind = Pool` keeps the rest of its line. Such a call is declined and counted (`declined_calls=`), as the
+gate declines every other unevidenced call. The scanner runs with Python's string grammar for this count: `'…'` is a
+string, a triple-quoted `'''…'''` / `"""…"""` runs to its closing triple (so an apostrophe or a lone `"` inside a docstring
+stays string content instead of flipping code and string for the rest of the file), and an f-string's `{…}` fields are
+code (`f"{Pool}"` counts; its literal text does not). Floors toward keeping an edge: a dict literal's `"k": "Pool"`, a
+lambda's `: "Pool"`, a dict lookup's `d["Pool"]` and a list after a keyword (`return ["Pool"]`) count as annotation or
+subscript strings. Floors toward dropping one — a true mention this count does not see, so a class named nowhere else
+beyond its `class` line is declined there: a string that is a type only by its callee's convention (`cast("Pool", x)`,
+`TypeVar("T", bound="Pool")`) reads as a call argument; a PEP 484 type comment `x = make()  # type: Pool` is a comment; an
+annotation whose string starts on the line after its `:` is prose; a Python 3.12 nested f-string that reuses the outer
+quote (PEP 701, `f"{d["k"]} {Pool}"`) ends at that inner quote for this scanner, so a field after it reads as string text. Not changed: the comment and docstring text never made a call edge
+of its own in any language (tree-sitter reads no call in a comment), and a call on a receiver of unknown type whose name is
+NOT in the builtin table (`self._observer.start()` beside an in-repo `start`) still binds by name — that is the resolver's
+stated name-based floor, not this gate. Gate: `test/commenttokencheck.sh` (arms A–E red before; F–I near misses; J the
+annotation control; K interpolations; L the C++/Lua/Ruby/JS comment families; M determinism; N annotation and subscript
+strings keep the edge, N5 the `|` union member, N6 `type["Pool"]`; O every other string is prose; P Python's `//` is not a
+comment; Q triple-quoted strings run to their closing triple; R f-string fields are code, its text is prose).
 
 ### Fixed — crashsweepcheck and hazardpatterncheck no longer depend on the size of `src/`
 
@@ -347,6 +550,38 @@ transitive include, an unreadable scope chain or file, a signature past 16 KiB o
 (CLI and MCP `edit_check`); the `--dry-run`/`new_body` preview keeps one contract per file. The test fixture's own
 `--edit-check=distance` (declared in `geometry.h`, defined in `geometry.cpp`) now answers instead of refusing.
 Gate: `test/editcheckdeclcheck.sh`.
+
+### Fixed — TypeScript: `await f<T>(x)` and `!f<T>(x)` are calls
+
+tree-sitter-typescript parses an `await` in front of a call with explicit type arguments as `(await f)<T>(x)`: the
+call's function is the await expression. The TypeScript and TSX queries looked only for a name or a member access
+there, so the site was not a reference at all. It drew no edge and was counted in no declined or unresolved gauge, so
+`--callers`, `--impact` and the map missed it without saying so. The bare (`await f<T>(x)`), member
+(`await o.svc.f<T>(x)`) and `#private` (`await this.#p<T>(x)`) forms are now call references in `.ts`, `.mts`,
+`.cts`, `.tsx` and Astro frontmatter. `await f(x)` without type arguments was already found. On hono, the
+method-override middleware is now a caller of `parseBody`
+(`await parseBody<Record<string, string>>(c.req)`). The unary operators bind the same way: `!f<T>(x)`, `typeof f<T>(x)`,
+`void f<T>(x)` and `-f<T>(x)` parse as `(!f)<T>(x)` and are now call references in the same three forms, as are the
+stacked `!await f<T>(x)` and `await await f<T>(x)`. Deeper stacks, and a parenthesized callee `(f)(x)` (with or
+without type arguments, an older gap), are still not extracted. A comparison
+chain (`await (a < b) > (c)`), an instantiation expression without a call (`await f<T>`) and a type argument
+(`f<typeof g>(1)`) still mint no call. `kParserVer` moves, so a TypeScript cache is re-indexed once.
+Gate: `tsshapecheck` §7, in `.ts` and `.tsx`.
+
+### Fixed — `--callers` / `--impact` disclose declined TypeScript calls that share a name with an interface or abstract signature (`declined_iface=`)
+
+The resolver does not narrow a TypeScript call by a type annotation. A call such as `r.match()` with `r: Router`, or
+`app.router.match()` through a field typed by the `Router` interface, is therefore declined once `match` has two or
+more definitions. On a small tree the interface's own answer did not count it: `--callers=router.ts:match` printed
+`count="0"` with no `declined_calls=`, because the bodyless signature was not among the declined call's candidates. The callers and impact answers now carry `declined_iface=K` in XML, `--json` and `--format=columnar`, and
+in the MCP `find_referencing_symbols` and `impact` twins. It is absent at 0, and its
+legend clause is printed only when the attribute is. It counts declined TypeScript calls whose called name is also an
+interface or abstract method signature (not an overload signature beside its implementation) and that could have
+meant the selector's definitions, or a symbol in the impact radius, or that share a signature's name with them. The
+match is by name only: the receiver's type is not read, so a counted call may go through the interface, or may be
+another same-named method such as a string's `match`. Because of the shared-name arm it is not a subset of
+`declined_calls=` and can exceed it. This is a disclosure. These calls still get no edge. On hono, `--callers=src/router.ts:match` now reads `count="6"`
+`declined_calls="170" declined_iface="172"`. Gate: `declinecheck` arm (I).
 
 ### Fixed — `--scan-skill(s)`: quoting a sensitive path no longer hides its upload (sensitive-read-upload)
 

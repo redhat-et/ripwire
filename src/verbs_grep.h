@@ -55,16 +55,13 @@ public:
         {
             return {};
         }
-        if( row.defCount != 1 || row.ids.size() != 1 )
+        const char*      omitted = nullptr;
+        const rw::NodeId id      = rw::grepEncHandleCandidate( ing_, row, omitted );   // 0.6.7: the rule the MCP twin shares
+        if( id == rw::kNoNode )
         {
-            return " handle_omitted=\"ambiguous\"";
+            return std::string( " handle_omitted=\"" ) + omitted + "\"";
         }
-        const rw::NodeId id = row.ids.front();
         const rw::Symbol& s = ing_.symbols[id];
-        if( s.kind == rw::SymKind::Section )
-        {
-            return " handle_omitted=\"non-code\"";
-        }
         const std::uint64_t contentHash = hashFor( s.fileId );
         const std::string handle = rw::sourceHandleFor( ing_, g_, root_, id, contentHash );
         return handle.empty() ? " handle_omitted=\"unreadable\"" : " h=\"" + handle + "\"";
@@ -274,7 +271,9 @@ const char* grepTierLegend( const rw::GrepTierReport& tier )
     }
     return "SPAN TIERS: each hit is classified by the tree-sitter span it sits in (code/comment/string) and this answer serves "
            "the CODE tier, or — when no hit is code — comment and string TOGETHER; tier= names what was served when it is not "
-           "code, so a pattern living only in prose is answered, never emptied. "
+           "code, so a pattern living only in prose is answered, never emptied. When every code hit is a USE of the literal (a "
+           "test/doc file, or a shell, YAML, TOML or JSON file) and source code (not one of those) holds it as a string, the string tier is "
+           "served WITH code, labelled code+string; comments stay held back. "
            // M17 (capture-audit 2026-09-04, lens1 F4): the label is a CLAIM, and this sentence is the
            // difference between a proven one and an unproven one. Deliberately no attribute=value literal
            // (this verb's own rule — gates parse the header counters by grep).

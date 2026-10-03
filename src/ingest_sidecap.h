@@ -1545,9 +1545,14 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         }
 #endif
 
-        if( le.lang != Lang::Elixir )
+        // Elixir directives share the lexical tags context below (ElixirContext), and as of #358 so do the
+        // C-family ones: their `@import.path` captures are normalised and emitted by captureTagsFacts, and
+        // captureIncludes no longer reads a preproc_include / preproc_call at all. The walk is pure cost
+        // for those languages — it descends only allowlisted containers, and a C-family include lives at
+        // file scope or inside a preprocessor guard, which the tags query already reaches unanchored.
+        if( le.lang != Lang::Elixir && dependencyDialect( le.lang ) != DepDialect::CFamily )
         {
-            captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens, shortfall );   // Elixir directives share the lexical tags context below.
+            captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens, shortfall );
         }
         captureJsImportFacts( root, le.lang, fileId, src, binds );
 
@@ -1698,6 +1703,19 @@ inline void foldFieldDefs( std::vector<RawDef>& defs, std::size_t first, Lang la
     defs.resize( write );
 }
 
+// A C/C++ enum/struct/union/class SPECIFIER node — the tags query's type-definition captures. When one has no body
+// (`enum cmd_retval` as a return or parameter type) the def-span climb in captureTagsFacts must not adopt the enclosing
+// function_definition for it (comparison table tmux-07/15, test/ccheck.sh): only a function declarator owns that body.
+inline bool isCFamilyTypeSpecifier( Lang lang, TSNode node ) noexcept
+{
+    if( lang != Lang::C && lang != Lang::Cpp )
+    {
+        return false;
+    }
+    const char* t = ts_node_type( node );
+    return kindIs( t, "enum_specifier" ) || kindIs( t, "struct_specifier" ) || kindIs( t, "union_specifier" ) || kindIs( t, "class_specifier" );
+}
+
 /// Append definitions and references captured by the language query, with language-specific filtering.
 /// Captured spans refer to src and root; a null cursor appends nothing. Existing output rows are retained.
 /// `ppDead` is this file's decided-dead byte ranges (preprocDeadRangesFor, computed ONCE per file by the
@@ -1728,6 +1746,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     const std::size_t firstDefOfFile = defs.size();   // member-variable round: foldFieldDefs' window (below)
     const std::size_t firstRefOfFile = refs.size();   // #72 follow-up: dropPreprocDead's window (below)
     const std::size_t firstBindOfFile = binds.size();
+    // #358: the `@import.*` window — dropPreprocDead's, now that this pass emits Includes too.
+    const std::size_t firstIncOfFile = includes.size();
 
     ElixirContext elixir;
     elixir.shortfall = &shortfall;
@@ -1824,6 +1844,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     break;
 
                     case CapRole::Ignore:
+                    break;
+
+                    // #358: `@import.path` — emit here, not in a second pass. Matches arrive by start byte and captures
+                    // within a match in query order, so a staging vector would produce the identical
+                    // order while costing an allocation and a drain block.
+                    case CapRole::Import:
+                    {
+                        emitCapturedImport( cap.node, fileId, le.lang, src, includes, refs, shortfall );
+                    }
                     break;
                 }
             }
@@ -1935,6 +1964,18 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // No-op for every pre-existing Var capture (Swift/C#/Go/Python parents hit a scope-stop or the
             // file root before any "body"-owning ancestor — verified byte-identical on the gate corpora).
             // A Field's span is its own field_declaration / defining assignment — the Var rule, same reason.
+            // A BODY-LESS C/C++ type specifier — `enum cmd_retval` as a return type (`static enum cmd_retval⏎fn(…)`, tmux's
+            // style) or a parameter type — is captured by the tags query's bare enum/class pattern, and the climb below
+            // ADOPTED the enclosing function_definition, whose body it sits outside of: the specifier took the WHOLE
+            // function's span, so --at chained `struct cmd_retval` around the function, --grep labelled its hits
+            // in="cmd_retval" and its calls were attributed to a `struct box_lines` caller (comparison table tmux-07/15,
+            // test/ccheck.sh). The adoption is for a function DECLARATOR. A type specifier whose climb reaches a body owner
+            // it sits outside of is a type USE in that function's signature, not a definition, so it mints NO def: keeping
+            // it as a small def of its own put a span in the return-type position wholly before the name — extentsuspect.h
+            // R3's derailed-parse signature — and flagged clean functions extent_suspect="head" (review of this lane,
+            // ccheck arm (f)). The declaration-wrapper rule at a scope stop is unchanged (`enum E : int;`, a prototype).
+            const bool bodylessTypeSpec = isCFamilyTypeSpecifier( le.lang, roleNode );
+            bool       typeUseInSignature = false;
             if( ts_node_is_null( body ) && kind != SymKind::Var && kind != SymKind::Field && le.lang != Lang::Elixir )
             {
                 TSNode child = roleNode;
@@ -1980,12 +2021,18 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     const TSNode pb = fieldChild( p, NodeField::Body );
                     if( !ts_node_is_null( pb ) )
                     {
-                        if( !spanContains( pb, roleNode ) ) { defNode = p; body = pb; }
+                        const bool outsideBody = !spanContains( pb, roleNode );
+                        if( outsideBody && !bodylessTypeSpec ) { defNode = p; body = pb; }
+                        typeUseInSignature = outsideBody && bodylessTypeSpec;
                         break;
                     }
                     child = p;
                     p     = ts_node_parent( p );
                 }
+            }
+            if( typeUseInSignature )
+            {
+                continue;   // a body-less C/C++ specifier in a function's signature: a type use, never a definition
             }
 
             // ObjC/Kotlin body-field fallback for the grammars that expose a body as an unnamed CHILD, not a
@@ -2327,10 +2374,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     // the facts spelled inside the block are dropped. Before foldFieldDefs, so the Python
     // one-field-per-(class,name) fold can never elect a definition that cannot compile.
     //
-    // BINDS / INCLUDES — this function appends to them only for Elixir (ElixirContext), a language with no
-    // preprocessor: preprocDeadRangesFor is empty there, so neither window needs the filter.
+    // BINDS / INCLUDES — this function appended to `binds` for Elixir (ElixirContext) only, and to
+    // `includes` for Elixir until #358 moved the C-family dependency edges here from captureIncludes.
+    // Elixir has no preprocessor, so its window needed no filter; C-family is the opposite case in every
+    // sense — `#include` inside `#if 0` is the shape this whole filter exists for, and it arrives through
+    // the tags query now (the query cannot know an arm is dead; that is preprocdead.h's one job). Without
+    // this line the round would have RESURRECTED every dead include: measured on the test/importcapcheck.sh
+    // fixture, the
+    // `#if 0` block's dep_dead_if.h and the `#elif 0` arm's dep_elif.h both come back as edges.
     dropPreprocDead( refs, firstRefOfFile, ppDead, refSiteByte );
     dropPreprocDead( defs, firstDefOfFile, ppDead, defSiteByte );
+    dropPreprocDead( includes, firstIncOfFile, ppDead, incSiteByte );
 
     if( le.lang == Lang::Elixir ) { elixirExpandImplementations( elixir, defs, firstDefOfFile, binds, firstBindOfFile ); }
     foldFieldDefs( defs, firstDefOfFile, le.lang );   // member-variable round: owner-less fields drop, Python fields fold to one per (class, name)

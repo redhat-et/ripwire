@@ -1071,6 +1071,7 @@ namespace mcpedit
         // the root-level companions --affected carries beside its rows, so the two documents disclose the
         // same facts about the same list
         out += ",\"order\":\"evidence\",\"partners\":" + std::to_string( rw::testRowPartnerCount( ans.rows ) );
+        out += rw::runFirstField( ans.rows, ans.rows.size(), /*json=*/true );   // --affected's run_first=, same rule
         // F3: `"tests_to_run":[]` was an UNLABELLED ZERO. Its twin says "0 modelled tests, N shell gates the
         // call-graph walk cannot see, counts are floors"; the fold said `[]`, which a reader takes for
         // "nothing tests this" rather than "nothing that is a CALL EDGE tests this" (a shell harness runs the
