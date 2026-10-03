@@ -174,20 +174,10 @@ inline bool endsWithView( std::string_view s, std::string_view suffix ) noexcept
 
 // Offset of the first WHOLE-WORD occurrence of `word` in `hay`, or npos. containsWord is the yes/no form;
 // a caller that must read what sits to the LEFT of the hit (flipimpact's binding declarator) needs WHERE.
+// An empty word is never found (lexscan::findWholeWord would answer the first boundary position).
 inline std::size_t firstWordAt( std::string_view hay, std::string_view word ) noexcept
 {
-    if( word.empty() )
-    {
-        return std::string_view::npos;
-    }
-    for( std::size_t at = hay.find( word ); at != std::string_view::npos; at = hay.find( word, at + 1 ) )
-    {
-        if( wholeWordAt( hay, at, word.size() ) )
-        {
-            return at;
-        }
-    }
-    return std::string_view::npos;
+    return word.empty() ? std::string_view::npos : lexscan::findWholeWord( hay, word );
 }
 
 inline bool containsWord( std::string_view hay, std::string_view word ) noexcept

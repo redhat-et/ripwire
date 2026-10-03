@@ -95,6 +95,7 @@
 #include "arch.h"               // fnv1a64
 #include "infra/hashutil.h"     // fnv1aMultiply — the sanitizer-safe wrapping multiply (G1 runs -fsanitize=integer)
 #include "infra/jsonesc.h"      // shSingleQuote
+#include "infra/lexscan.h"      // wholeWordAt — the shared lexical primitive
 #include "serialize.h"          // escapeXml
 #include "pageview.h"           // §P8: pageWindow / pageDisclosure — the shared --limit/--offset contract
 #include "workspace.h"          // wsdetail::segmentsOf
@@ -1476,19 +1477,9 @@ struct WhereResult
     gitoracle::NameFate            fate;
 };
 
-// Whole-word occurrence: SYM not flanked by identifier bytes (so `foo` never matches `foobar`/`myfoo`).
-inline bool wholeWordAt( std::string_view hay, std::size_t at, std::size_t len ) noexcept
-{
-    if( at > 0 && isIdentByte( (unsigned char)hay[at - 1] ) )
-    {
-        return false;
-    }
-    if( at + len < hay.size() && isIdentByte( (unsigned char)hay[at + len] ) )
-    {
-        return false;
-    }
-    return true;
-}
+// Whole-word occurrence: SYM not flanked by identifier bytes (so `foo` never matches `foobar`/`myfoo`) — the one
+// definition in infra/lexscan.h, same alphabet as isIdentByte above.
+using lexscan::wholeWordAt;
 
 // The declarator END of a definition line, with trailing SPECIFIERS stripped: `noexcept`, cv/ref qualifiers,
 // the virtual-override words, a pure/defaulted/deleted tail, and a trailing-return arrow. Returns the index one
