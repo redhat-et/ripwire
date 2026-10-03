@@ -740,6 +740,32 @@ five times, round-robin across the sizes, and compares medians. The thresholds a
 stall (one 640 KB run delayed 0.6 s) fails the old arm and passes the new one. A deliberately quadratic per-word
 rescan in `scanAsanWordBoundaries` still fails B1, B2 and B3 (medians 1033 / 14094 ms / timeout).
 
+### Added — the budgeted-bundle candidate page: `--for`/`--pack-task` under a budget take a resumable `--limit`/`--offset` window; MCP `explore` gains `limit`/`offset` (issue #294, PR #362)
+
+`--for=TASK --token-budget=N` with an explicit `--limit`/`--offset` now answers with the **candidate
+page**: one `<sigs>` window over the same ranked candidate set the bundle cuts — the pageview quintet
+(`shown=/total=/capped=/has_more=/next_offset=`) on the root, `above_cliff=` the head-tier count,
+`tier=` one tier per page (a head window ends at the cliff), `r=` each row's GLOBAL candidate rank,
+`at=` the git index answered from, `next=` the pasteable continuation argv (dropped when
+`has_more="0"`), `over_ceiling="1"` when the budget cannot fit the window (fewer rows served, never
+silently more bytes), and the page's own legend in both dialects (`--legend=full|compact`, the central
+compact table). `--pack-task` under a budget takes the same window; a window with no budget stays the
+`--for` file page; `--partition` and a window refuse together. The un-paged bundles are byte-identical
+(`forbudgetmonotoncheck`), and `--offset=0` alone remains the un-paged answer — its resume point is
+its own `<sigs shown=>`.
+
+MCP `explore` declares `limit`/`offset` (the same bounded pair `for` takes) and answers the same
+page shape; previously it silently ignored `budget_tokens` beside a window and served the budgetless
+file page. The MCP twins page their own shared ranking (`ranking="mcp-lens"` names it on the root;
+the CLI verbs page `verbs_for.h`'s `computeLensRanking`, `ranking="for-lens"` — the two pipelines
+rank slightly different candidate sets, so `ranking=` says which list a window pages), and the MCP
+pages carry no pasteable CLI `next=` handle — a CLI continuation would walk a different list; the
+machine attributes (`next_offset=`/`limit=`/`next_tier=`) carry the programmatic continuation
+through the same verb. The `tools/list` manifest grows 46,581 → 46,765 B (measured against train 23's
+`main`, re-based after the sync), and the ceiling moves 46,700 → 46,800 B
+- the one sanctioned case that moves it: the paging schema properties (`limit`/`offset`/`next_tier`
+on `for`, `pack_task` and `explore`)
+(`test/mcpmanifestcheck.sh` arm `(1b)` asserts the figure against a live measurement).
 ### Fixed — the Linux G1 sanitizer ritual completes: five string_view comparator lambdas stop wrapping, and the GCC ASan path builds (#342)
 
 `LSAN_OPTIONS=… ./asan/ripwire .` — the sanitizer ritual AGENTS.md requires before a PR — aborted on any

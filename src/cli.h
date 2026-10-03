@@ -2626,9 +2626,12 @@ inline constexpr char kHelpTail[] =
         "                               Any verb NOT in that list REFUSES both flags (exit 1) rather than accepting and\n"
         "                               ignoring them: budget/top-k verbs (--recall/--pack-task/--from-trace/\n"
         "                               --expand/--outline/--pack-signatures/--format=candidates) are shaped by\n"
-        "                               --top-k/--max-tokens/--token-budget, not a page (--for's bare bundle is shaped by\n"
-        "                               --token-budget the same way, and takes --limit/--offset only as its file page, where\n"
-        "                               the budget flags are refused in turn); the rest (--path/--connect/\n"
+        "                               --token-budget the same way; --for takes --limit/--offset as its FILE page, where\n"
+        "                               the budget flags are refused in turn (bare --pack-task --limit refuses: it has no\n"
+        "                               page without a budget), and --for/--pack-task beside --token-budget take the window\n"
+        "                               as the BUDGETED-BUNDLE CANDIDATE PAGE — one <sigs> window over the ranked candidates,\n"
+        "                               signatures only (bodies come via next= or --expand), their resumable continuation;\n"
+        "                               the rest (--path/--connect/\n"
         "                               --around/--exemplar/--report/--mermaid/--map-diff/--metrics and the default map)\n"
         "                               answer with a single fixed-shape result that has no row list to window at all.\n"
         "    --exclude=SUBSTR           drop matching paths (repeatable)   --ignore-tests\n"
@@ -3728,7 +3731,11 @@ inline bool honorsPaging( const Config& c ) noexcept
         // FILE-GRAIN widening page. Membership is conditional on purpose: the bare --for bundle keeps honoring
         // --token-budget/--max-tokens/--format=candidates --top-k, which validateShapingFlagsHonored refuses on
         // every paging member — and refuses beside the page too, where no byte ceiling exists to shape against.
-        || ( !c.forTask.empty() && ( c.pageLimit > 0 || c.pageOffset > 0 ) );
+        || ( !c.forTask.empty() && ( c.pageLimit > 0 || c.pageOffset > 0 ) )
+        // PAGING-POC (issue #294): --pack-task joins ONLY under a budgeted window — its candidate page
+        // mirrors --for's (the shared emitForCandidatePage). The bare --pack-task bundle keeps refusing
+        // the pair (it has no window to serve), and a windowless budget run is untouched.
+        || ( c.packTaskFlag && c.tokenBudget != 0 && ( c.pageLimit > 0 || c.pageOffset > 0 ) );
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in
@@ -3904,7 +3911,8 @@ inline constexpr PagingFamilyFlagGuard kMaxTokensGuard
 inline constexpr PagingFamilyFlagGuard kTokenBudgetGuard
 {
     "--token-budget is honored by the default map (the CI gate), --for, --pack-task, --recall, "
-    "--handoff, --from-trace, --run-trace and --pr-context — none of them, --pr-context aside (it pages AND shapes by budget), "
+    "--handoff, --from-trace, --run-trace and --pr-context — none of them, --pr-context and --for/--pack-task beside an explicit "
+    "--limit/--offset window aside (those page AND shape by budget: the budgeted-bundle candidate page, issue #294), "
     "in the --limit/--offset-honoring set (",
     ")",
     "no byte budget to gate",
@@ -3937,7 +3945,12 @@ inline void validateShapingFlagsHonored( Config& c ) noexcept
     {
         refusePagingFamilyFlag( c, kMaxTokensGuard );
     }
-    if( c.tokenBudget != 0 && !c.prContext )
+    // PAGING-POC (issue #294): --for/--pack-task under an EXPLICIT --limit/--offset window page their
+    // budgeted bundle (the candidate-offset continuation) — they page AND shape by budget, the same
+    // class --pr-context holds alone today. The refusal skips that combination only; every other
+    // budgeted verb, and the bare bundles, refuse exactly as before.
+    const bool budgetWindowPages = ( !c.forTask.empty() || c.packTaskFlag ) && ( c.pageLimit > 0 || c.pageOffset > 0 );
+    if( c.tokenBudget != 0 && !c.prContext && !budgetWindowPages )
     {
         refusePagingFamilyFlag( c, kTokenBudgetGuard );
     }
@@ -4946,8 +4959,18 @@ inline void validateConfig( Config& c ) noexcept
     // every bundle-shaping flag beside it would be accepted-and-ignored, the named failure family this file
     // refuses everywhere else (§H4). Named one at a time, so the remedy is the flag to drop. --top-k,
     // --max-tokens and --token-budget are refused by validateShapingFlagsHonored (the page is a paging member).
-    if( !c.forTask.empty() && ( c.pageLimit > 0 || c.pageOffset > 0 ) )
+    // #294 review (verbs_for.h:3824): --pack-task beside a budgeted window serves the CANDIDATE page,
+    // and the candidate page (like the file page) is a fixed <sigs>/<files> shape — bundle-shaping flags
+    // would be accepted-and-ignored there too. Both pages refuse them; the message names the page that
+    // was selected, so the remedy (drop the flag, or the window) reads correctly.
+    const bool forFilePageSelected  = !c.forTask.empty() && c.tokenBudget == 0 && ( c.pageLimit > 0 || c.pageOffset > 0 );
+    const bool forCandidateSelected = ( ( !c.forTask.empty() || c.packTaskFlag ) && c.tokenBudget != 0
+                                        && ( c.pageLimit > 0 || c.pageOffset > 0 ) );
+    if( forFilePageSelected || forCandidateSelected )
     {
+        const char* const pageName = forFilePageSelected
+            ? "--for --limit/--offset is the file-grain widening page (one <f> row per file, its own <files> document)"
+            : "--for/--pack-task --token-budget with --limit/--offset is the budgeted-bundle candidate page (one fixed <sigs> window, its own resumable document)";
         struct PageShapeFlag { const char* name; bool set; };
         const PageShapeFlag shapeFlags[] = {
             { "--json",              c.json },            { "--format=candidates", c.candidates },
@@ -4960,7 +4983,7 @@ inline void validateConfig( Config& c ) noexcept
         {
             if( f.set )
             {
-                rw::emitTo( stderr, "ripwire: --for --limit/--offset is the file-grain widening page (one <f> row per file, its own <files> document) — it has no bundle for {} to shape, so the flag is refused rather than ignored: drop {} for the page, or drop --limit/--offset for the bundle\n", f.name, f.name );
+                rw::emitTo( stderr, "ripwire: {} — it has no bundle for {} to shape, so the flag is refused rather than ignored: drop {} for the page, or drop the window for the bundle\n", pageName, f.name, f.name );   // 3 placeholders, 3 args (the #362 review caught a 4th)
                 c.ok = false;
             }
         }

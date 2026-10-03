@@ -156,6 +156,312 @@ inline std::string forWidenNext( std::string_view task )
     return forPageInvocation( task, kForPageRowsDefault, 0 );
 }
 
+// ── THE BUDGETED-BUNDLE CANDIDATE PAGE (issue #294; the ruling + the #362 review round) ───────────
+// What the caller passes, in one struct (the #362 review's request-struct ask: forCandidatePageDoc's
+// parameter list was 12 deep; this is also the runPackTask quality gate's remedy — one struct, not
+// eight loose scalars threaded through two callers).
+struct ForCandidatePageReq
+{
+    std::string_view       task;
+    std::string_view       verbName;       // "--for=" / "--pack-task=": next= names THEIR verb (#294 review)
+    std::string_view       ranking;        // #362 review, item 1: WHICH ranking paged this window — "for-lens"
+                                           //   (verbs_for.h computeLensRanking, the CLI --for/--pack-task pipeline)
+                                           //   or "mcp-lens" (the twins' shared inline pipeline, mcpverbs.h). The
+                                           //   two pipelines rank slightly different candidate sets (the un-paged
+                                           //   heads agree; the page denominator exposes the difference), so a
+                                           //   consumer that crosses dialects must not assume one list.
+    bool                   pasteHandle = true;   // false on MCP: no pasteable CLI argv — a CLI continuation would
+                                                //   walk a DIFFERENT list on the twins' pipeline (#362 review, item 1);
+                                                //   the machine attrs (next_offset=/limit=/next_tier=) remain for the
+                                                //   programmatic continuation through the same verb.
+    bool                   compactLegend = false;   // emit in the compact dialect (the default posture): the page is
+                                                    //   compacted IN-DOC by the central layer (applyCompactDialect,
+                                                    //   candidate-page) so the measured est_tokens=/over_ceiling=
+                                                    //   describe the bytes actually emitted (#362 review, item 4 —
+                                                    //   the CLI-side compaction used to reprice a page the trim loop
+                                                    //   had measured against the full legend, and the stderr line
+                                                    //   contradicted the page). Pre-compacted here, the outer layers
+                                                    //   see schema= and pass it through (AlreadyCompact).
+    std::string_view       routeNote;
+    std::string_view       rootArg;
+    rw::RedactCounts*      redactPtr = nullptr;
+    std::string_view       atStamp;        // gitstamp::stampAt: the index this page answered from
+    std::size_t            tokenBudget = 0;
+    int                    pageLimit   = 0;
+    int                    pageOffset  = 0;
+};
+
+inline std::string forCandidatePageDoc( const rw::IngestResult& ing, const std::vector<float>& lensRank,
+                                        const rw::AdaptiveCut& forCut, const ForCandidatePageReq& p )
+{
+    using namespace rw;   // the file's idiom: function-scoped
+    const std::string_view task        = p.task;
+    const std::string_view verbName    = p.verbName;
+    const std::string_view rankingName = p.ranking;
+    const bool             pasteHandle = p.pasteHandle;
+    const bool             compactLegend = p.compactLegend;
+    const std::string_view routeNote  = p.routeNote;
+    const std::string_view rootArg    = p.rootArg;
+    rw::RedactCounts* const redactPtr = p.redactPtr;
+    const std::string_view atStamp    = p.atStamp;
+    const std::size_t      tokenBudget = p.tokenBudget;
+    const int              pageLimit   = p.pageLimit;
+    const int              pageOffset  = p.pageOffset;
+
+    // the ranked candidate order: ALL ids sorted (score desc, id asc) — the same total order
+    // packSignatures selects with — truncated to the positive-scored candidates (the set the
+    // bundle's cut was against; total= counts it on EVERY page, so a re-decided denominator is
+    // impossible by construction). candIdxOf maps an id back to its candidate index: the TRUE
+    // resume point comes from the last PRINTED row's index + 1 (#362 review, item 2), not from
+    // a served-count arithmetic that pseudo-symbols (a candidate slot with no printed row) skew.
+    std::vector<NodeId>    candOrder;
+    std::vector<std::uint32_t> candIdxOf( ing.symbols.size(), kNoNode );
+    {
+        const std::size_t S = ing.symbols.size();
+        candOrder.resize( S );
+        for( NodeId i = 0; i < S; ++i ) { candOrder[ i ] = i; }
+        rw::sortutil::radixSortByScoreDescId( candOrder, lensRank );
+        candOrder.resize( std::min( forCut.positiveHits, S ) );
+        for( std::size_t k = 0; k < candOrder.size(); ++k ) { candIdxOf[ candOrder[ k ] ] = std::uint32_t( k ); }
+    }
+    const std::size_t candidateTotal = candOrder.size();
+    PageWindow        win            = pageWindow( candidateTotal, pageLimit, pageOffset );
+    // SINGLE-TIER WINDOWS (#362 review, item 4): a head window never crosses the cliff — it ends
+    // AT the cliff, so every page is one tier and tier= never labels below-cliff rows as head.
+    // (cliffRank is the head count itself: "a cut at rank i keeps ranks [1,i]" — lexical.h.)
+    const bool below = forCut.cliffRank > 0 && win.begin >= forCut.cliffRank;
+    if( forCut.cliffRank > 0 && win.begin < forCut.cliffRank && win.end > forCut.cliffRank )
+    {
+        win.end = forCut.cliffRank;
+    }
+
+    // window the rank copy: candidates inside [win.begin, win.end) keep their score, everything
+    // else sorts below them (-1), so packSignatures' top-N selection serves exactly the window in
+    // rank order — no new selection logic, and the H1 ladder still trims within the page.
+    std::vector<float> pageRank( ing.symbols.size(), -1.0f );
+    for( std::size_t i = win.begin; i < win.end; ++i ) { pageRank[ candOrder[ i ] ] = lensRank[ candOrder[ i ] ]; }
+
+    // the sigs block's byte budget: the page's shell (head+tail+legend) is RESERVED ahead of it
+    // (kForPageSpliceReserve, #362 review's named-constant ask), and the block never gets less
+    // than kForPageSigsFloorBytes — the ONE-ROW floor (#362 review, item 3): a budget that cannot
+    // fit a row serves the top row with over_ceiling="1" rather than an empty page whose next=
+    // points back at itself (a stuck loop).
+    constexpr std::size_t kForPageSpliceReserve    = 600;
+    constexpr std::size_t kForPageSigsFloorBytes   = 512;
+    const std::size_t sigsBytesBudget = tokenBudget > 0
+        ? std::max<std::size_t>( std::size_t( double( tokenBudget ) * kMinBytesPerToken ) > kForPageSpliceReserve
+                                   ? std::size_t( double( tokenBudget ) * kMinBytesPerToken ) - kForPageSpliceReserve : 0,
+                                 kForPageSigsFloorBytes )
+        : kForPageSigsFloorBytes;
+
+    // SINK FORM (Diagnostics.h §4b — the contract selfcheckcheck (R) pins): the page document is the
+    // sink. The degrade field is what the emitter reads and surfaces as reason= on the page itself,
+    // so a degraded render tells the release reader IN THE ANSWER — never silently-empty stdout,
+    // never a sink-less stderr-only note (selfcheckcheck: the pin goes DOWN, never up).
+    struct ForPageRender
+    {
+        enum class DisclosureWhy : std::uint8_t { ChargeStreamRefused, ChargeStreamTorn };
+        DisclosureWhy why = DisclosureWhy::ChargeStreamRefused;
+        void disclose( DisclosureWhy w ) noexcept { why = w; }
+    } forPageRender;
+
+    // the printed rows: packSignatures reports the ids it EMITTED (shownIdsOut) — the honest shown
+    // (rows printed) and the honest resume (the last printed row's candidate index + 1).
+    std::vector<NodeId> shownIds;
+    std::string         sigsDoc;
+    bool                rendered = false;
+    {
+        const std::optional<RedactCounts> redactBefore = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
+        const auto restoreRedact = [ & ]() noexcept { if( redactBefore ) { *redactPtr = *redactBefore; } };
+        rw::MemoryStream stream;
+        std::FILE* const buffer = rw::openChargeStream( stream );
+        if( buffer == nullptr )
+        {
+            DISCLOSE( forPageRender, ForPageRender::DisclosureWhy::ChargeStreamRefused );
+            restoreRedact();
+        }
+        else
+        {
+            packSignatures( buffer, ing, pageRank, int( win.end - win.begin ), sigsBytesBudget, /*metrics=*/true,
+                            nullptr, nullptr, redactPtr,
+                            nullptr, nullptr, nullptr, nullptr,      // Q3 enrichments: page rows are the core sig form
+                            /*rankAdaptivePayload=*/true,
+                            sigsBytesBudget,                          // H1 ladder over the page
+                            nullptr, rootArg,
+                            /*hasRelevanceFloor=*/true, nullptr,
+                            /*shownIdsOut=*/&shownIds, /*cappedOut=*/nullptr, /*topRowNext=*/{}, /*cutOut=*/nullptr,
+                            std::uint32_t( win.begin ) );             // rankBase: continuation rows carry their GLOBAL r= (#294 review)
+            const rw::MemoryStreamBytes block = stream.finish();
+            if( !block.isWhole )
+            {
+                DISCLOSE( forPageRender, ForPageRender::DisclosureWhy::ChargeStreamTorn );
+                restoreRedact();
+            }
+            else
+            {
+                sigsDoc.assign( block.bytes );
+                rendered = true;
+            }
+        }
+    }
+
+    // ── the assembly: one set of lambdas, reused by the degrade page AND the trim loop AND the ──
+    // ── final assembly, so the three cannot drift (#362 review's reuse ask) ───────────────────
+    // one scratch buffer PER attribute: the escape helper appends to the buffer and returns a view
+    // of it, so two calls sharing one buffer inside one argument list race on realloc and mangle
+    // each other (the bug this page's first CI round caught on route=).
+    std::vector<char> escTask;  const std::string_view taskAttr  = escapeXml( task, escTask );
+    std::vector<char> escRoute; const std::string_view routeAttr = escapeXml( routeNote, escRoute );
+    std::vector<char> escRoot;  const std::string_view rootAttr  = escapeXml( rootArg, escRoot );
+    std::vector<char> escAt;    // the at= scratch (one buffer per attribute)
+    const auto buildHead = [ & ]( std::size_t shownNow, std::size_t nextOff, std::string_view extra ) {
+        return "<sigs task=\"" + std::string( taskAttr ) + "\" route=\"" + std::string( routeAttr )
+             + "\" shown=\"" + std::to_string( shownNow ) + "\" total=\"" + std::to_string( candidateTotal )
+             // above_cliff (#362 review, item 4): the HEAD-TIER CANDIDATE COUNT — cliffRank IS that
+             // count ("a cut at rank i keeps ranks [1,i]" — lexical.h), stated next to total= so an
+             // agent decides from page 1 whether the below-cliff remainder is worth fetching.
+             + "\" above_cliff=\"" + std::to_string( forCut.cliffRank )
+             + "\" capped=\"" + ( shownNow < candidateTotal ? "1" : "0" )
+             + "\" has_more=\"" + ( nextOff < candidateTotal ? "1" : "0" )
+             + "\" next_offset=\"" + std::to_string( nextOff )
+             + "\" offset=\"" + std::to_string( win.begin )
+             + "\" limit=\"" + std::to_string( pageLimit > 0 ? pageLimit : 0 )
+             + "\" tier=\"" + ( below ? "below-cliff" : "head" ) + "\""
+             + ( rankingName.empty() ? std::string() : " ranking=\"" + std::string( rankingName ) + "\"" )
+             + std::string( extra );
+    };
+    // THE PASTEABLE CONTINUATION HANDLE — the file page's next= contract: the argv that walks to
+    // next_offset. Dropped entirely past kNextAttrMaxBytes (a hint that pastes wrong is worse than
+    // no hint) and dropped when has_more="0" (#362 review, item 3: a last page handing back a next
+    // that returns an empty page carrying the same next= is a loop with no exit).
+    const auto buildNextAttr = [ & ]( std::size_t nextOff ) {
+        if( !pasteHandle ) { return std::string(); }   // MCP: no pasteable CLI argv — the machine attrs carry the resume (#362 review, item 1)
+        if( nextOff >= candidateTotal ) { return std::string(); }
+        std::string inv = nextFlag( verbName, task );   // THEIR verb: pasting continues the same verb (#294 review)
+        inv += " --token-budget=" + std::to_string( tokenBudget );
+        if( pageLimit > 0 ) { inv += " --limit=" + std::to_string( pageLimit ); }
+        inv += " --offset=" + std::to_string( nextOff );
+        if( inv.size() > kNextAttrMaxBytes ) { return std::string(); }
+        return nextAttrXml( inv );
+    };
+    // next_tier (the ruling's suggestion 2): the tier the CONTINUATION page will carry — only
+    // beside a next= (nothing further means no tier to advertise).
+    const auto buildNextTierAttr = [ & ]( std::size_t nextOff ) {
+        if( !pasteHandle ) { return std::string(); }   // rides beside next= only
+        if( nextOff >= candidateTotal ) { return std::string(); }
+        return std::string( " next_tier=\"" ) + ( ( forCut.cliffRank > 0 && nextOff >= forCut.cliffRank ) ? "below-cliff" : "head" ) + "\"";
+    };
+    // est_tokens is MEASURED from the page's own final bytes (legend included); the tail's digit
+    // count feeds back into the total, so one re-derivation closes the loop (it converges immediately).
+    const auto buildTail = [ & ]( const std::string& h, std::string_view legend, std::string_view r,
+                                  bool overCeiling, std::size_t nextOff ) {
+        std::size_t est = std::size_t( double( h.size() + legend.size() + r.size() + 96 ) / kMinBytesPerToken );
+        std::string t;
+        for( int pass = 0; pass < 3; ++pass )
+        {
+            t = " est_tokens=\"" + std::to_string( est )
+              + "\" budget_tokens=\"" + std::to_string( tokenBudget )
+              + "\" root=\"" + std::string( rootAttr ) + "\"" + buildNextAttr( nextOff ) + buildNextTierAttr( nextOff )
+              + ( overCeiling ? " over_ceiling=\"1\"" : std::string() )
+              + ( atStamp.empty() ? std::string() : " at=\"" + std::string( escapeXml( atStamp, escAt ) ) + "\"" ) + ">";
+            const std::size_t fin = std::size_t( double( h.size() + t.size() + legend.size() + r.size() ) / kMinBytesPerToken );
+            if( fin == est ) { break; }
+            est = fin;
+        }
+        return std::pair<std::string, std::size_t>( t, est );
+    };
+    // THE LEGEND — the page's own vocabulary, defined the way every other answer defines its own:
+    // a leading comment after the root tag, full dialect emitted here, compact dialect rewritten by
+    // the central table (compactlegend.h: applyCompactDialect with the "for"/"pack-task" hint), so
+    // --legend=full|compact works through the SAME machinery on both dialects (#362 review, item 5).
+    // the legend text: NO double-hyphen anywhere (G4 — it rides inside an XML comment), so the
+    // verbs are named dashless, the file page's own convention ("the two flags are named without
+    // their dashes").
+    const std::string dashlessVerb = verbName == "--pack-task=" ? std::string( "pack-task" )
+                                                          : std::string( "for" );
+    const std::string legend =
+        "<!-- ripwire candidate-page ripwire.candidate-page/v1"
+        ": the BUDGETED-BUNDLE CANDIDATE PAGE of the " + dashlessVerb + " lens — a resumable window over the SAME ranked candidate set the bundle cuts. task= the query; route= which ranker answered and why; root= the crawl root; at= the git index this page answered from (a continuation whose at= differs was served by a different index: re-run page 1). shown= rows PRINTED on this page; total= candidates in the whole set, on every page; above_cliff= the head-tier candidate count (cliffRank: a cut at rank i keeps ranks [1,i]); tier= THIS page's tier, head or below-cliff, one tier per page, the window ends at the cliff; next_tier= the next page's tier; capped= 1 when shown < total; has_more=/next_offset= the resume (the candidate index the next page starts at); offset=/limit= this page's window; r= each row's GLOBAL candidate rank (pages merge without duplicate r); next= the pasteable argv that walks to next_offset (dropped when has_more=0: nothing further); budget_tokens= the ceiling this page answers under; est_tokens= this page's measured size; over_ceiling= 1 when est_tokens exceeds budget_tokens (the budget could not fit the window: fewer rows were served, never silently more bytes); reason= names a degraded render (the sigs block was lost, not hidden) -->";
+
+    // the honest degrade page: the emitter READS the sink — the full quintet with zero rows and
+    // reason= naming what was lost, built by the SAME lambdas so it cannot drift (#362 review's ask).
+    if( !rendered )
+    {
+        const std::string reason = " reason=\"" + std::string( forPageRender.why == ForPageRender::DisclosureWhy::ChargeStreamTorn
+                                                    ? "sigs-charge-stream-torn" : "sigs-charge-stream-refused" ) + "\"";
+        const std::string h = buildHead( 0, win.end, reason );
+        const auto [ t, est ] = buildTail( h, legend, "</sigs>", /*overCeiling=*/false, win.end );
+        return h + t + legend + "</sigs>";
+    }
+    // rows: packSignatures' <sigs> block minus its own open tag (kept verbatim with its close).
+    const std::size_t openBeg  = sigsDoc.find( "<sigs" );
+    const std::size_t openEnd  = sigsDoc.find( '>' );
+    const std::size_t keepFrom = ( openBeg != std::string::npos && openEnd != std::string::npos ) ? openEnd + 1 : 0;
+    std::string rowsNow = sigsDoc.substr( keepFrom );
+
+    // THE TRUE RESUME (#362 review, item 2): the last PRINTED row's candidate index + 1 — NOT
+    // win.begin + a served count: a pseudo-symbol (a candidate slot packSignatures serves without
+    // printing a row) skews the arithmetic one short, and the next page re-serves the last row
+    // (the duplicate seam). shownIds is packSignatures' own emitted-ids report, in rank order.
+    std::size_t kept    = shownIds.size();
+    std::size_t nextNow = ( kept > 0 ) ? std::size_t( candIdxOf[ shownIds.back() ] ) + 1 : win.end;
+    // the forward guarantee (#362 review, item 3): next_offset ALWAYS moves past this page's
+    // window start when anything was printed — a next= that points back at the page it came
+    // from is a loop with no exit.
+    if( kept > 0 && nextNow <= win.begin ) { nextNow = win.begin + 1; }
+
+    // THE BUDGET TRIM (#362 review, item 1): the page IS an answer under the budget. The H1
+    // ladder already trimmed within the block; if the assembled page still exceeds, drop
+    // trailing WHOLE rows — cutting at the START of the last row (a cut at its close leaves
+    // the row open and the document malformed) — never below ONE row while the window is
+    // non-empty (item 3: a budget that cannot fit a row serves the top row with over_ceiling="1"
+    // rather than an empty page whose next= points back at itself), and re-derive the page's own
+    // arithmetic (shown/next_offset/has_more/next=) from what shipped.
+    std::string h = buildHead( kept, nextNow, {} );
+    auto [ t, est ] = buildTail( h, legend, rowsNow, /*overCeiling=*/false, nextNow );
+    if( tokenBudget > 0 && est > tokenBudget )
+    {
+        const std::size_t rowFloor = ( win.end > win.begin ) ? std::size_t( 1 ) : std::size_t( 0 );
+        while( kept > rowFloor && est > tokenBudget )
+        {
+            const std::size_t lastClose = rowsNow.rfind( "</d>" );
+            const std::size_t rowStart  = rowsNow.rfind( "<d ", lastClose );
+            if( lastClose == std::string::npos || rowStart == std::string::npos ) { break; }
+            rowsNow = rowsNow.substr( 0, rowStart ) + "</sigs>";
+            --kept;
+            nextNow = ( kept > 0 ) ? std::size_t( candIdxOf[ shownIds[ kept - 1 ] ] ) + 1 : win.end;
+            h = buildHead( kept, nextNow, {} );
+            std::tie( t, est ) = buildTail( h, legend, rowsNow, /*overCeiling=*/false, nextNow );
+            if( est <= tokenBudget ) { break; }
+        }
+        if( est > tokenBudget )
+        {
+            std::tie( t, est ) = buildTail( h, legend, rowsNow, /*overCeiling=*/true, nextNow );
+        }
+    }
+    std::string pageOut = h + t + legend + rowsNow;
+    // (#362 review, item 4) the dialect actually emitted: compact first (the central layer — it
+    // reprices est_tokens= and settles over_ceiling= on the bytes it writes), so the page's own
+    // numbers describe what ships; the outer layers see schema= and pass it through untouched.
+    if( compactLegend )
+    {
+        applyCompactDialect( pageOut, "candidate-page" );
+    }
+    // the stderr notice reads the FINAL page: est_tokens straight off the emitted root, so the
+    // line can never contradict the document (the full-dialect trim numbers used to).
+    if( tokenBudget > 0 )
+    {
+        const std::size_t finalEst = rootUnsignedAttr( std::string_view( pageOut ).substr( pageOut.find( '<' ), pageOut.find( '>' ) + 1 ), "est_tokens" );
+        if( finalEst > tokenBudget && pageOut.find( " over_ceiling=\"1\"" ) != std::string::npos )
+        {
+            rw::emitTo( stderr, "ripwire: for-page est_tokens={} exceeds the stated budget={} — the window cannot fit; "
+                               "the top row is served with over_ceiling=1\n", finalEst, tokenBudget );
+        }
+    }
+    return pageOut;
+}
+
+
 struct ForFileRow
 {
     std::uint32_t fileId      = 0;

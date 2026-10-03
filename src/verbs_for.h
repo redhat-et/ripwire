@@ -2214,6 +2214,20 @@ inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::
     return x;
 }
 
+// the CLI half of the shared page (forpage.h owns the doc): write it to stdout. One implementation,
+// three dialects — the CLI bundle verbs and the MCP twins all build the SAME document.
+inline int emitForCandidatePage( const rw::IngestResult& ing, const std::vector<float>& lensRank, const rw::AdaptiveCut& forCut,
+                                 const rw::ForCandidatePageReq& req )
+{
+    // the CLI half of the shared page (forpage.h owns the doc): write it to stdout. One
+    // implementation, three dialects — the CLI bundle verbs and the MCP twins all build the SAME
+    // document. rw::emitRaw (#362 review's ask): the repo's own stdout writer, not the raw stream call.
+    const std::string doc = rw::forCandidatePageDoc( ing, lensRank, forCut, req );
+    rw::emitRaw( stdout, doc.c_str() );
+    return 0;
+}
+
+
 std::optional<int> runForLens( const MainDispatch& d )
 {
     using namespace rw;
@@ -2286,7 +2300,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // positive-score file, ranked file-first (forpage.h says how), the follow-up the routing-loop ladder
         // showed completes answers where a body cannot. It owns its own <files> root, so it bypasses the whole
         // <ctx> bundle below; cli.h refuses every bundle-shaping flag beside it rather than ignoring one.
-        if( cfg.pageLimit > 0 || cfg.pageOffset > 0 )
+        // PAGING-POC (issue #294): under --token-budget an explicit window is NOT the file page — it is
+        // the BUDGETED-BUNDLE CANDIDATE PAGE, served by the shared inline below. The file
+        // page keeps every windowless-budget call exactly as forwidencheck pins it.
+        if( ( cfg.pageLimit > 0 || cfg.pageOffset > 0 ) && cfg.tokenBudget == 0 )
         {
             const ForFilePage page    = computeForFilePage( ing, lensRank, lr.evidence );
             const std::string pageXml = renderForFilePageXml( ing, page, ForPageRenderParts{ cfg.forTask, ctxRootOpen( cfg.forTask, routeNoteRaw, flRootArg ),
@@ -2429,6 +2446,21 @@ std::optional<int> runForLens( const MainDispatch& d )
         }
 
         ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline );
+
+        // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): budget + explicit window ⇒ the
+        // resumable candidate page (shared inline; the un-paged bundle below stays byte-identical).
+        if( cfg.tokenBudget != 0 && ( cfg.pageLimit > 0 || cfg.pageOffset > 0 ) )
+        {
+            // W3-N1/#294 review: the page redacts through packSignatures — the tally must be reported,
+            // exactly like the --json early return below (a redacted credential must never be silent).
+            const int pageRc = emitForCandidatePage( ing, lensRank, forCut, rw::ForCandidatePageReq{ cfg.forTask, "--for=", /*ranking=*/"for-lens",
+                                         /*pasteHandle=*/true, /*compactLegend=*/cfg.legend != "full",
+                                         routeNoteRaw, flRootArg, redactPtr,
+                                         flSingleRoot ? std::string_view( gitstamp::stampAt( std::string( root ) ) ) : std::string_view(),
+                                         cfg.tokenBudget, cfg.pageLimit, cfg.pageOffset } );
+            reportRedactions( stderr, redactCounts );   // W3-N1: the page redacts — the tally reports
+            return pageRc;
+        }
         // L-W: coverage= rides the SAME sentence and the SAME byte exemption as confidence=/margin_pct= — but ONLY
         // on a THIN answer (owner decision 2026-09-12: present-only). The thin verdict is decided HERE, from the
         // resolved surface above and the top symbol's term share, and it drives three things at once: the
@@ -3734,6 +3766,30 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
 // kPackTask* constants) now lives in packtask.h (L4) as packTaskBundleText() — shared verbatim with the MCP
 // explore/pack_task verb (mcpverbs.h's packTaskText()). This handler only resolves CLI-specific inputs
 // (flags, MainDispatch pointers) and hands them to that ONE assembler.
+// (#362 review, item 2): the budgeted-window branch, extracted — runPackTask's own complexity was
+// the quality gate's finding (19 -> 28 as the paging round grew the branch inline). One helper, one
+// job: refuse a partitioned window, serve the candidate page, report the redaction tally.
+inline std::optional<int> runPackTaskPage( const MainDispatch& d, const rw::LensRanking& lr, const std::string& task,
+                                           const rw::PackTaskInputs& in )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+    if( cfg.partitionCount > 0 )
+    {
+        rw::emitRaw( stderr, "ripwire: --partition and a --limit/--offset window are mutually exclusive — a partitioned bundle has N+1 slices and no single candidate order to page; drop one\n" );
+        return 1;
+    }
+    const AdaptiveCut   packCut    = adaptiveCut( lr.rank, 5, std::size_t( cfg.packTopN > 0 ? cfg.packTopN : kForLensDefaultTopN ), true );
+    const std::string   packAtStamp = in.rootArg.empty() ? std::string() : gitstamp::stampAt( std::string( in.rootArg ) );
+    const int packPageRc = emitForCandidatePage( ing, lr.rank, packCut, rw::ForCandidatePageReq{ task, "--pack-task=", /*ranking=*/"for-lens",
+                                 /*pasteHandle=*/true, /*compactLegend=*/cfg.legend != "full",
+                                 lr.routeNote, in.rootArg,
+                                 d.redactPtr, packAtStamp, cfg.tokenBudget, cfg.pageLimit, cfg.pageOffset } );
+    reportRedactions( stderr, d.redactCounts );   // W3-N1: the page redacts — the tally reports
+    return packPageRc;
+}
+
 std::optional<int> runPackTask( const MainDispatch& d )
 {
     using namespace rw;
@@ -3778,6 +3834,16 @@ std::optional<int> runPackTask( const MainDispatch& d )
     in.notesDegraded        = d.notesDegraded;   // L3 follow-up (CodeRabbit 4053600616)
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     in.rootArg = ( ing.realPaths.empty() && cfg.roots.size() == 1 ) ? cfg.roots[0] : std::string_view();
+
+    // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): --pack-task under --token-budget
+    // with an explicit window pages its ranked candidates, mirroring --for (the shared inline). The cliff
+    // statistic is computed here ONCE (the same call --for's disclosure uses); --partition and a window
+    // refuse together — a partitioned bundle has N+1 slices and no single candidate order to page.
+    // (#362 review, item 2): the branch body lives in runPackTaskPage — this stays the one-line gate
+    if( cfg.tokenBudget != 0 && ( cfg.pageLimit > 0 || cfg.pageOffset > 0 ) )
+    {
+        return runPackTaskPage( d, lr, task, in );
+    }
 
     // --partition=N: the FAN-OUT form. Same lens ranking, same PackTaskInputs, same
     // assembler; partition.h only decides WHICH slice each of the N+1 bundles is masked to and how the

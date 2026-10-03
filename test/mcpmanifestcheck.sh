@@ -205,6 +205,13 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # RE-ANCHORED 2026-09-12 (lane for-widen, L-W): 42,200 → 42,384 = +184 B, EXACTLY the two declared optional arguments
 # `limit`/`offset` on `for` (the `for` schema 525 → 709 B in this arm's own json.dumps metric: the envelope plus the
 # description the contract obliges each property to carry), measured against a build of the lane's base (1cf3086e:
+# RE-ANCHORED 2026-09-21 (paging PoC, upstream issue #294 ask (b), PR #3): 46,600 -> 46,700, measured 46,677 B.
+#   explore's `limit`/`offset` join `for`'s as DECLARED arguments — one kMcpVerbFields row drives the
+#   inputSchema, the unknown-field refusal and mcpw3fixcheck together (the parity ask: the same bounded
+#   pair the for twin takes, serving the same file-grain widening page). Rule 5's sanctioned case: a
+#   ceiling moves for a declared argument the contract obliges to carry a description, never for prose;
+#   the two schema properties are +184 B (46,493 -> 46,677, measured on this branch's binary). Headroom
+#   after this line: 23 B.
 # 42,177 B here, 23 B under the old ceiling) — the file-grain widening page (forpage.h) joins the paging family on
 # this twin. Its description gained NO prose: a first draft named coverage= and the page there (+109 B) and was
 # removed rather than re-anchored around, the L7 precedent above — the schema properties are where a client renders
@@ -276,7 +283,12 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # not, which is the divergence that lane fixed. +122 B of description to say what is true instead; no schema
 # byte moved and no tool was added. Spent from the 229 B this block already held, not from a raise: correcting
 # a claim the manifest itself makes is what headroom is for. Headroom after this line: 107 B.
-CEILING = 46600
+# PAGING LANE (#362, synced onto train 23): 46,581 -> 46,765 B, the ceiling moves 46,700 -> 46,800.
+# The +184 B is the paging schema alone — limit/offset/next_tier declared on for, pack_task and
+# explore — measured live on both trees: upstream/main's binary answers 46,581 B, this branch's
+# answers 46,765 B (33 tools each, descriptions identical at 22,260 B, schemas 19,585 -> 19,769).
+# Headroom after this line: 35 B.
+CEILING = 46800
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

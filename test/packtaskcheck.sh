@@ -367,4 +367,60 @@ else
 fi
 
 echo
+# ── ARM E of the paging spec (upstream issue #294, corrected scope): the pack-task bundle continuation ──
+# --pack-task under --token-budget cuts sections tail-first and discloses them, but --offset/--limit are
+# refused today, so the cut has no resumable handle. RED on the pre-change binary by design. Once the
+# continuation exists: a continuation page (offset>0) that serves BELOW-CLIFF candidates must carry its
+# OWN disclosed set marker (a tier=/"below-cliff"-shaped attribute) so a consumer never reads
+# cliff-rejected content as relevant — the packtask.h:1690 lesson (two dialects, one count) says the
+# continuation must not borrow page 1's label. And offset=0 must be byte-identical to the un-paged answer.
+echo "=== ARM E: paged pack-task — own tier marker on continuation pages; offset=0 byte-identical ==="
+"$BIN" "$ROOT" --pack-task="rank symbols by pagerank" --token-budget=800 --offset=0 >"$TMP/e_page0" 2>/dev/null
+"$BIN" "$ROOT" --pack-task="rank symbols by pagerank" --token-budget=800 --offset=3 >"$TMP/e_page3" 2>/dev/null
+"$BIN" "$ROOT" --pack-task="rank symbols by pagerank" --token-budget=800 >"$TMP/e_nopage" 2>/dev/null
+
+python3 - "$TMP" <<'PY'
+import os, sys, xml.etree.ElementTree as ET
+
+tmp = sys.argv[1]
+problems = []
+
+def load(name):
+    path = os.path.join(tmp, name)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        problems.append(f"{name}: no output — the pack-task continuation does not exist yet "
+                        "(today --token-budget refuses --offset; that refusal IS this arm's recorded red)")
+        return None
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    try:
+        return ET.fromstring(raw), raw
+    except ET.ParseError as e:
+        problems.append(f"{name}: not parseable XML ({e})"); return None
+
+p0 = load("e_page0"); p3 = load("e_page3")
+nopage = os.path.join(tmp, "e_nopage")
+if p0 is not None and os.path.exists(nopage) and os.path.getsize(nopage) > 0:
+    if p0[1] != open(nopage, encoding="utf-8", errors="replace").read():
+        problems.append("e_page0: offset=0 is NOT byte-identical to the un-paged pack-task — the regression floor is broken")
+if p3 is not None:
+    root, _ = p3
+    a = root.attrib
+    tier = a.get("tier") or a.get("set") or ""
+    if not tier:
+        problems.append('e_page3: a continuation page carries no own set marker (tier=/set=) — '
+                        "below-cliff content must never borrow page 1's relevance label")
+
+# mutation: the marker check can fail — a fabricated bare continuation page must be DETECTED
+mut = ET.fromstring('<pack shown="3" total="9" capped="1" has_more="1" next_offset="9"/>').attrib
+if not (mut.get("tier") or mut.get("set")):
+    print("  PASS  (E) mutation: a bare continuation page (no tier marker) IS detected")
+else:
+    problems.append("mutation: the tier-marker check cannot fail")
+
+for p in problems: print("  FAIL  " + p)
+sys.exit(1 if problems else 0)
+PY
+[ $? = 0 ] && ok 'ARM E: paged pack-task carries its own tier marker; offset=0 is byte-identical' \
+               || no 'ARM E: the pack-task continuation contract (upstream issue #294) does not hold — see FAIL lines above'
+
 [ "$fail" = 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

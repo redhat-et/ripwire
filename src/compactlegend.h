@@ -83,6 +83,11 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // 1-hop neighbours in either direction, rel= which one, of_top= there the bodies that qualified (bodiesTotal), shared= how many
     // of them a row neighbours (emitted above 1); run= rides a <test> row only when a runner is derivable (testmap.h runHint). The
     // <d> lens facts and route= ride only some answers and are present-only terms below. compactlegendcheck (D36).
+    // ── the budgeted-bundle candidate page (root <sigs>; issue #294 / PR #362) — hinted by the window
+    // flag pair that rode along, and reached from the pack-task hint too (the root-attr adjust below):
+    // one spec for both verbs and both dialects, because the page is ONE document shape.
+    { "sigs", "candidate-page",
+      "budgeted-bundle candidate page: a resumable window over the ranked candidate set the bundle cuts, for task= under budget_tokens=, one tier per page, ranks global across pages" },
     { "ctx", "pack-task",  "one-call task bundle for task= under budget_tokens=: <sigs><d n= sc= l= p=> ranking, <far><s t= n= p=> ranked but over 1 hop out (of_top= ranked rows) > <bodies><b t= n= p= l=> with <calls><c n= l=> callees > <callers><s rel=caller|callee shared=> 1-hop from the bodies (of_top= bodies; shared= bodies reached, absent at 1) > notes > <tests><test p= run=> (run= when derivable)" },
     { "ctx", "from-trace", "trace frames mapped to indexed symbols, innermost first; the innermost in-corpus body included" },
     { "ctx", "exemplar",   "the best-in-class instance of kind= for the task, chosen by role: <exemplar n= p= in= ccx= tested=>, <bodies><b> to imitate" },
@@ -1163,6 +1168,15 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "budget_per_agent_tokens", "budget_per_agent_tokens=: one agent's budget, core_budget_tokens= plus partition_budget_tokens=", false, "ctx-partitions", MapHeaderRead::No, {}, "pack-task" },   // also defines core_budget_tokens= partition_budget_tokens=
     { "total_bytes", "total_bytes=N: bytes of all bundles together", false, "ctx-partitions", MapHeaderRead::No, {}, "pack-task" },
     { "overlap_mean", "overlap_mean=/overlap_max=: pairwise Jaccard over the ids partitions name, before trimming", false, "ctx-partitions", MapHeaderRead::No, {}, "pack-task" },   // also defines overlap_max=
+    // the budgeted-bundle candidate page's own terms (#294/PR #362, root <sigs>, key candidate-page):
+    // the paging quintet and limit=/offset= are universal (kCompactPagingAttrs above); these six are
+    // the page's own vocabulary, one reading each, the L4 one-attribute-one-reading law.
+    { "above_cliff", "above_cliff=N: the head-tier candidate count (the cliff rank — a cut at rank i keeps ranks [1,i]); a continuation with offset= >= N serves below-cliff rows", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
+    { "tier", "tier=head|below-cliff: this page's tier; the window never crosses the cliff, so one tier per page", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
+    { "next_tier", "next_tier=: the tier the continuation page carries (beside next=, which is dropped when has_more=0)", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
+    { "r", "r=N: the row's GLOBAL candidate rank across pages (continuation rows keep theirs; pages merge without duplicate r)", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
+    { "at", "at=: the git index this page answered from; a continuation whose at= differs was served by a different index", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
+    { "reason", "reason=: the render degraded and the sigs block was lost (named), not hidden", false, "sigs", MapHeaderRead::No, {}, "candidate-page" },
     { "shared_symbols", "shared_symbols=/union_symbols=: ids two or more partitions name / ids any partition names", false, "ctx-partitions", MapHeaderRead::No, {}, "pack-task" },   // also defines union_symbols=
     { "core_overlap", "core_overlap=: share of the core surface a partition reaches anyway", false, "ctx-partitions", MapHeaderRead::No, {}, "pack-task" },
     // from-trace: src/tracelocus.h (renderTraceBlock, buildTraceHeader via ctxRootOpen, the budget_tokens attr)
@@ -2053,6 +2067,13 @@ inline CompactOutcome applyCompactDialectOnce( std::string& doc, std::string_vie
     if( hint == "expand" && rootOpen.find( " mode=\"whole-file\"" ) != std::string_view::npos )
     {
         effectiveHint = "expand-file";
+    }
+    // the candidate page (#294/PR #362): explore/pack_task answer it under the pack-task hint, but the
+    // page is its OWN document shape (root <sigs>, the above_cliff mark) with its own spec row — the
+    // same root-attribute adjustment shape as the expand/whole-file row above.
+    if( hint == "pack-task" && rootOpen.find( " above_cliff=\"" ) != std::string_view::npos )
+    {
+        effectiveHint = "candidate-page";
     }
     const CompactLegendSpec* spec = findCompactSpec( root.tag, effectiveHint );
     if( spec == nullptr ) { return root.hasSchema ? CompactOutcome::AlreadyCompact : CompactOutcome::UnknownRoot; }
