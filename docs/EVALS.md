@@ -14533,3 +14533,26 @@ out of the default window, and nothing names the entry points or groups the file
 - **Decision:** ship O iff everything passes (Gate P included); ship O-narrow iff O fails only the `--eval` guard and
   O-narrow passes everything; an in-sample pass with a held-out fail changes no default; a Gate S, P or D failure is a
   wiring defect.
+
+### O-narrow v3: true entry rows and true group labels — REGISTRATION DRAFT 2026-10-03 (round 2; freezes in QUEUE before any OOS cell)
+
+The blind O2 verdict (in-sample tmux/hono/textual, held-out htop/fastify, rung-0 grades) recorded the registered negative
+for O, O-uncapped and O-narrow. O-narrow was ✓ on 2 of 3 in-sample rows (base 0 of 3) and 2 of 2 held-out rows (base 1 of
+2) at recall 1.000. It failed in-sample only on one false-row class, both rows on hono-01:
+- an entry row named a non-exported type alias;
+- a group labelled `request/` listed `request.ts`, which sits beside that directory, not inside it.
+
+It failed held-out only on the pooled-recall bar. That bar was unreachable once the base was already ✓ at recall 1.000 on
+one of the two rows: the largest possible Δ was +9.1 pp.
+
+v3 is O-narrow (the shipping arm: `src/orientarm.h` `kArm = Arm::Narrow`, so the ranked rows stay byte-identical to the
+base's) with three changes; every other registered rule is v2's.
+- **Entry rows** name only an exported or public entry: a module-level `main` (a JVM static main; Go only in `package
+  main`), or the first function, class or type a manifest-named module exports by its own syntax, else `<file-scope>` at
+  line 1. A build path maps to a same-stem source at most one source root away, or deeper only when the stem is unique.
+- **Labels** are true of every member: `dir/` only when every member sits under it, else the bare name.
+- **A memory-guard partial ingest carries no section** (CLI and MCP), and `--orient=KIND` refuses.
+
+The held-out bar counts only rows where the base is not ✓. The deciding set is the sealed round-2 repos plus one more Go or
+Python repo sealed before any binary. Gate: `test/orientmapcheck.sh` (E), (G), (M), plus the generic label and entry-row
+truth checks on every root. Its full text and sha256 are logged before the held-out run, like v2's.

@@ -1871,8 +1871,12 @@ int runDefaultMap( const MainDispatch& d )
     // Fix #8 (docs/EVALS.md "A default map that orients"): the orient sections, on the SINGLE-ROOT plain map only — no
     // dialect, filter or scoping flag (those keep the base bytes; Gate S pins them), the same scope MCP analyze
     // (clean tree) and rank_by=pagerank serve. Computed once from the default rank vector; every serialization reads it.
+    // A memory-guard partial ingest carries none (O-narrow v3, review M1): every count the sections print (total=, n=,
+    // utility_demoted=) would be a floor with no marker of its own; the map answers with memory_stop= as on BASE, and
+    // --orient=KIND refuses with every other selector (mapFlagRefusingPartial). MCP analyze / rank_by gate the same way.
     const bool isOrientScope = isDefaultMapScope && mapSingleRoot && !cfg.metrics && !cfg.columnar && cfg.excludes.empty()
-                            && cfg.inDir.empty();   // --order= only reorders the ranked rows (MCP analyze serves order=stable): in scope
+                            && cfg.inDir.empty()   // --order= only reorders the ranked rows (MCP analyze serves order=stable): in scope
+                            && !ing.memoryStop.isSet();
     rw::orient::Sections orientSections;
     if( isOrientScope )
     {
@@ -4072,8 +4076,9 @@ int main( int argc, char** argv )
 // the order they are named: the renderings with no header to carry memory_stop= (--html, --mermaid); the modifiers that
 // resolve a SELECTOR against the index — --expand/--outline a symbol name (one in a file the guard never parsed would
 // read as "matched no symbol", a false none-found), --in=DIR a directory against the crawl's files (only a crawl stop
-// cuts those: a directory it never reached would read as "no indexed file"); and --pin-census, which writes the
-// resolver's census to a file with no header to carry the cut. nullptr: the map answers, disclosed in its header.
+// cuts those: a directory it never reached would read as "no indexed file"); --pin-census, which writes the
+// resolver's census to a file with no header to carry the cut; and --orient=KIND, a page of an orient section whose
+// total= would be a floor (the partial map carries no section either). nullptr: the map answers, disclosed in its header.
 static const char* mapFlagRefusingPartial( const rw::Config& cfg, const rw::MemoryStop& stop )
 {
     const struct
@@ -4087,6 +4092,7 @@ static const char* mapFlagRefusingPartial( const rw::Config& cfg, const rw::Memo
         { !cfg.outline.empty(), "--outline" },
         { !cfg.inDir.empty() && stop.phase == rw::MemoryStop::Phase::Crawl, "--in" },
         { !cfg.pinCensus.empty(), "--pin-census" },
+        { !cfg.orientPage.empty(), "--orient" },
     };
     for( const auto& row : rows )
     {

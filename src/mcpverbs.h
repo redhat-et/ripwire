@@ -438,7 +438,7 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
     // (ix.rank is then the plain rankGraph vector: diffTeleport with no changed file is the uniform prior, mcpindex.h).
     rw::orient::Sections orientSections;
     rw::MapAnnotations   ann{ .prDisclosure = ix.prDisclosure, .codeFirstRows = ix.isCleanWorkingSet };
-    if( ix.isCleanWorkingSet && ix.ing.realPaths.empty() )
+    if( ix.isCleanWorkingSet && ix.ing.realPaths.empty() && !ix.ing.memoryStop.isSet() )   // a partial index: no section (main.cpp isOrientScope)
     {
         orientSections = rw::orient::build( ix.ing, ix.rank, ix.g.outOff, ix.g.outTargets );
         ann.orient     = &orientSections;
@@ -516,7 +516,7 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
     // Fix #8: pagerank is the default map's ranking, so a single-root rank_by=pagerank carries the orient sections too.
     rw::orient::Sections orientSections;
     rw::MapAnnotations   ann{ .rankByLabel = rankByLabel, .prDisclosure = disclosure, .codeFirstRows = rankByLabel == nullptr };
-    if( rankByLabel == nullptr && ix.ing.realPaths.empty() )
+    if( rankByLabel == nullptr && ix.ing.realPaths.empty() && !ix.ing.memoryStop.isSet() )   // a partial index: no section
     {
         orientSections = rw::orient::build( ix.ing, rank, ix.g.outOff, ix.g.outTargets );
         ann.orient     = &orientSections;

@@ -91,10 +91,13 @@ sys.path.insert(0, os.path.join(ROOT, "test", "lib"))
 import orientmap as om
 
 BASE_BIN = os.environ.get("ORIENTMAP_BASE_BIN", "")
-ARM = os.environ.get("ORIENTMAP_ARM", "O")
 ONLY_EXTRA = os.environ.get("ORIENTMAP_ONLY_EXTRA") == "1"
 UNC = {"RIPWIRE_ORIENT_UNCAPPED": "1"}
 FX = os.path.join(TMP, "fx")
+# the registered arm this binary is: ORIENTMAP_ARM, else read from its own legend (orientarm.h kArm picks the legend; O-narrow's
+# says the ranked rows keep the demoted files), so the lane head (kArm = Narrow) and an O arm build each get their own arms
+ARM = os.environ.get("ORIENTMAP_ARM") or ("narrow" if "the ranked rows keep them" in om.run(BIN, FX)[0] else "O")
+print("  INFO  arm: %s" % ARM)
 FIX_DEMOTED = {"src/pkg/compat/list_shim.py", "src/pkg/util/blockpool.py"}
 fails = []
 

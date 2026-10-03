@@ -286,6 +286,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # binary's (main 40c83e4f) --legend=full output byte for byte (at= masked), and the new output differs from it by exactly
 # three insertions — the "<!-- orient: …-->" legend clause (+1,029 B), the sections after the <r> tag (+376 B: no entry
 # point, three groups, nothing cut, utility_demoted="0") — and est_tokens= 858 -> 1421 in its two places. No row moved.
+# RE-ANCHORED BY HAND 2026-10-03 (lane/orient-narrow-v3): map.xml's "<!-- orient: …-->" clause is the O-narrow v3 wording
+# (n= an exported entry or <file-scope>; label= dir/ only when every member is under it; the ranked rows keep the demoted
+# files; the corrected G-descent and p= sentences), +287 B, and est_tokens= 1421 -> 1536 in its two places. Checked: every
+# element and every other comment is byte-identical to the previous pin (at= masked).
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -510,11 +514,14 @@ probeFor()
 # map scope now leads with its orient sections, and their ONE compact reading (compactlegend.h kCompactOrientTermO, ~590 B:
 # every new element spelled with every attribute) plus the window: term their shown=/total=/capped= pull in ride every
 # map answer of that scope. No other schema moved. Under legend=ref the reading is served once per session.
+# RE-PINNED 2026-10-03 (lane/orient-narrow-v3): ripwire.map/v1 1520 -> 1550 (measured 1537, the --top-k=3 probe). The compact
+# orient term now says what n= names (exported, or <file-scope>) and when label= ends in / — the two readings whose absence
+# let the O2 graders find false entry rows and false directory labels; no other schema moved.
 # the pins follow the definitions, measured + 10 rounded up to 10.
 # schema                      pin  measured
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
-ripwire.map/v1                   1520  1505
+ripwire.map/v1                   1550  1537
 ripwire.map-diff/v1              900   885
 ripwire.pack-signatures/v1       770   759
 ripwire.metrics/v1               1040  1021

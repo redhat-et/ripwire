@@ -256,9 +256,12 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # to find an annotation naming it — one new call site, same helper.
 # 30 -> 32 2026-10-02 (lane/orient-map-067, fix #8): orient::detail::entryRows reads package.json and pyproject.toml (the
 # entry-point evidence) through the same canonical helper — two new call sites, same helper, no new fopen/fread.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 32 ] \
-    && ok "repo: --uses=readWholeFile count=32 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 32"
+# 32 -> 34 2026-10-03 (lane/orient-narrow-v3): orient::detail::moduleRow reads a manifest-named JS/TS module to find the
+# first symbol its own syntax exports, and isProgramMain reads a Go file's package clause (main only in package main) —
+# two new call sites, same helper, no new fopen/fread.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 34 ] \
+    && ok "repo: --uses=readWholeFile count=34 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 34"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

@@ -2022,10 +2022,12 @@ inline constexpr std::string_view kDataSectionsCutLegend =
 inline constexpr std::string_view kOrientLegendO =
     "<!-- orient: the whole-repo map's orientation, before the ranked rows; the rank (k=) is untouched. <entry_points shown= "
     "total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with evidence (a manifest "
-    "bin/script, a main definition, the package entry module), core files only. <subsystems g=ROOT shown= total= capped= "
-    "next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not test/demo/generated, not demoted) grouped "
-    "under g=, the directory holding 2/3 of their rank mass; label= is dir/ or a name prefix (/top/, /prefix outside g=); groups "
-    "by mass with their top members; p= relative to g=, else /repo-relative. <overflow shown= total= capped= next= "
+    "bin/script, a main definition, the package entry module), p= repo-relative; n= is a module-level main, the script's "
+    "function, or the module's first function, class or type its own syntax exports, else <file-scope> (the module itself). "
+    "<subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not "
+    "test/demo/generated, not demoted) grouped under g=, reached from the root while one child directory holds 2/3 of its "
+    "parent's rank mass; label= is dir/ when every member is under it, else a name prefix (with dir/ when files so named "
+    "sit beside it; /top/, /prefix outside g=); groups by mass with their top members; m p= relative to g=, else /repo-relative. <overflow shown= total= capped= next= "
     "over_ceiling=>: every other core file, each group's next member before any group's one after, cut at 2048 B; "
     "over_ceiling=1: the runaway guard cut it. <demoted utility_demoted=N next=>: N utility sinks (called from many files, "
     "calling few) and vendored/compat files left the ranked rows and the groups. next= pages any cut -->";
@@ -2033,10 +2035,12 @@ inline constexpr std::string_view kOrientLegendO =
 inline constexpr std::string_view kOrientLegendNarrow =
     "<!-- orient: the whole-repo map's orientation, before the ranked rows; the rank (k=) is untouched. <entry_points shown= "
     "total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with evidence (a manifest "
-    "bin/script, a main definition, the package entry module), core files only. <subsystems g=ROOT shown= total= capped= "
-    "next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not test/demo/generated, not demoted) grouped "
-    "under g=, the directory holding 2/3 of their rank mass; label= is dir/ or a name prefix (/top/, /prefix outside g=); groups "
-    "by mass with their top members; p= relative to g=, else /repo-relative. <overflow shown= total= capped= next= "
+    "bin/script, a main definition, the package entry module), p= repo-relative; n= is a module-level main, the script's "
+    "function, or the module's first function, class or type its own syntax exports, else <file-scope> (the module itself). "
+    "<subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not "
+    "test/demo/generated, not demoted) grouped under g=, reached from the root while one child directory holds 2/3 of its "
+    "parent's rank mass; label= is dir/ when every member is under it, else a name prefix (with dir/ when files so named "
+    "sit beside it; /top/, /prefix outside g=); groups by mass with their top members; m p= relative to g=, else /repo-relative. <overflow shown= total= capped= next= "
     "over_ceiling=>: every other core file, each group's next member before any group's one after, cut at 2048 B; "
     "over_ceiling=1: the runaway guard cut it. <demoted utility_demoted=N next=>: N utility sinks (called from many files, "
     "calling few) and vendored/compat files left the groups (the ranked rows keep them). next= pages any cut -->";

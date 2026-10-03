@@ -6,7 +6,8 @@
 // vendored macros led it, real subsystems fell out of the window, and nothing named the entry points. This header adds a
 // PRESENTATION in front of the ranked rows; the rank vector is untouched (Gate S pins rankGraph and its inputs):
 //   O1 <entry_points>  at most 5 rows of evidence-backed entry points (a manifest bin/script, a `main` definition, the
-//                      package entry module), core files only; every further one is one next= away;
+//                      package entry module), named by an exported entry or the module scope; every further one is
+//                      one next= away;
 //   O2 <subsystems>    the first 12 groups of core files by mass, each with n= and its top 3 members;
 //   O2 <overflow>      every core file not named yet, breadth-first over the groups, cut at 2,048 B and re-grouped; the
 //                      cut is counted and one next= away (RIPWIRE_ORIENT_UNCAPPED=1 is the uncapped variant);
@@ -23,7 +24,10 @@
 //               extension, leading `_` removed, lowercased, cut before the first `-` or `_`; a prefix equal to a child
 //               directory joins that directory); outside G, a top-level directory (`/top/`) or a root file's prefix
 //               (`/prefix`). Groups by mass, then label; members by mass, then path. Paths print relative to G (g=);
-//               a file outside G prints repo-relative with a leading `/`.
+//               a file outside G prints repo-relative with a leading `/`. A label is true of every member (O-narrow v3):
+//               a directory group a sibling file joined by prefix is labelled by the bare name (`request`, `/tools`).
+//   entry rows  (O-narrow v3) a module-level `main` (a JVM static main; Go only in package main), or a manifest-named
+//               module by its first exported function/class/type, else <file-scope> at line 1 (moduleRow, jsExports).
 #include "orientarm.h"         // kArm — the registered arm this build is
 #include "filter.h"            // pathTierOf / isDemoOrGeneratedPath / hasDirSegment — the BASE classifications the rule reads
 #include "infra/jsontop.h"     // jsrunner::detail::topLevelValueStart / readQuoted — the package.json walk the runner detector uses
@@ -34,10 +38,12 @@
 #include "infra/jsonesc.h"     // jsonesc::escapeInto — the JSON map's string escape (serialize.h writeJsonStr's flags)
 #include "infra/sortutil.h"    // svLess
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -85,7 +91,7 @@ struct Group
 struct Sections
 {
     bool                       isActive = false;
-    std::vector<char>          demotedFile;      // per file id: 1 = left the ranked rows and the groups (O3)
+    std::vector<char>          demotedFile;      // per file id: 1 = left the groups (O3; arm O also moves its ranked rows)
     std::vector<std::uint32_t> demoted;          // the demoted files, mass desc then path (the tail next= pages)
     std::string                rootG;            // g= (repo-relative, '/'-terminated, "" = the repo root)
     std::vector<Group>         groups;           // every group, in order
@@ -254,6 +260,7 @@ struct FileFacts
     std::vector<std::string> rel;            // repo-relative path
     std::vector<double>      mass;           // sum of the file's symbol scores
     std::vector<char>        isCandidate;    // code symbol, Source tier, not demo/generated
+    std::vector<char>        isCodeless;     // Source tier, not demo/generated or vendored, but no code symbol (a re-export-only module)
     std::vector<std::uint32_t> firstSym;     // the file's first code symbol (lowest line, then id), or UINT32_MAX
 };
 
@@ -264,6 +271,7 @@ inline FileFacts factsOf( const IngestResult& ing, const std::vector<float>& ran
     ff.rel.resize( F );
     ff.mass.assign( F, 0.0 );
     ff.isCandidate.assign( F, 0 );
+    ff.isCodeless.assign( F, 0 );
     ff.firstSym.assign( F, UINT32_MAX );
     std::vector<char> hasCode( F, 0 );
     for( std::uint32_t f = 0; f < F; ++f )
@@ -290,7 +298,9 @@ inline FileFacts factsOf( const IngestResult& ing, const std::vector<float>& ran
     }
     for( std::uint32_t f = 0; f < F; ++f )
     {
-        ff.isCandidate[ f ] = hasCode[ f ] && pathTierOf( ff.rel[ f ] ) == PathTier::Source && !isDemoOrGeneratedPath( ff.rel[ f ] );
+        const bool isSource = pathTierOf( ff.rel[ f ] ) == PathTier::Source && !isDemoOrGeneratedPath( ff.rel[ f ] );
+        ff.isCandidate[ f ] = hasCode[ f ] && isSource;
+        ff.isCodeless[ f ]  = !hasCode[ f ] && isSource && !isVendored( ff.rel[ f ] );
     }
     return ff;
 }
@@ -444,16 +454,33 @@ inline std::string printed( std::string_view rel, std::string_view G )
 namespace detail
 {
 
-// the core file a manifest path names: itself when indexed, else (under a build-output directory) the same-stem source
-// file — the one whose directory path shares the most trailing components with the manifest's, then mass, then path
-inline std::uint32_t manifestTarget( std::string_view manifestPath, const std::vector<std::uint32_t>& core, const FileFacts& ff )
+// a path's directory components ("a/b/c.ts" -> {"a", "b"})
+inline std::vector<std::string_view> dirComponents( std::string_view rel )
+{
+    std::vector<std::string_view> out;
+    std::size_t                   from = 0;
+    for( std::size_t slash = rel.find( '/' ); slash != std::string_view::npos; slash = rel.find( '/', from ) )
+    {
+        out.push_back( rel.substr( from, slash - from ) );
+        from = slash + 1;
+    }
+    return out;
+}
+
+// the entry-eligible file a manifest path names (`eligible`: the core files plus the codeless source modules — a package
+// entry that only re-exports declares nothing): the file itself when indexed; else, under a build-output directory, the
+// same-stem source file whose directory is the build path's directory below the build dir (component-wise, a trailing
+// part of it) behind at most ONE source root (dist/cjs/index.js <- src/index.ts, dist/pkg/x.js <- src/pkg/x.ts); a deeper
+// one only when its stem is unique (a flattened bundle, dist/flat.js <- src/pkg/flat.ts). An ambiguous stem with no
+// candidate one root away names no file: the heaviest deep index.ts is a guess, never the entry module (O-narrow v3).
+inline std::uint32_t manifestTarget( std::string_view manifestPath, const std::vector<std::uint32_t>& eligible, const FileFacts& ff )
 {
     std::string_view mp = manifestPath;
     while( mp.size() >= 2 && mp[ 0 ] == '.' && mp[ 1 ] == '/' )
     {
         mp.remove_prefix( 2 );
     }
-    for( std::uint32_t f : core )
+    for( std::uint32_t f : eligible )
     {
         if( ff.rel[ f ] == mp )
         {
@@ -465,14 +492,17 @@ inline std::uint32_t manifestTarget( std::string_view manifestPath, const std::v
     {
         return UINT32_MAX;
     }
-    const std::size_t      slash = mp.rfind( '/' );
-    const std::string_view base  = slash == std::string_view::npos ? mp : mp.substr( slash + 1 );
+    const std::string_view rest  = mp.substr( mp.find( '/' ) + 1 );   // below the build dir
+    const std::size_t      slash = rest.rfind( '/' );
+    const std::string_view base  = slash == std::string_view::npos ? rest : rest.substr( slash + 1 );
     const std::size_t      dot   = base.find( '.' );
     const std::string_view stem  = dot == std::string_view::npos ? base : base.substr( 0, dot );
-    const std::string_view mdir  = mp.substr( mp.find( '/' ) + 1, slash == std::string_view::npos ? 0 : slash - mp.find( '/' ) );   // below the build dir
+    const std::vector<std::string_view> mdirs = dirComponents( rest );
     std::uint32_t best = UINT32_MAX;
     std::size_t   bestShared = 0;
-    for( std::uint32_t f : core )
+    std::size_t   sameStem = 0;
+    std::uint32_t onlyStem = UINT32_MAX;
+    for( std::uint32_t f : eligible )
     {
         const std::string_view rel   = ff.rel[ f ];
         const std::size_t      fs    = rel.rfind( '/' );
@@ -483,11 +513,17 @@ inline std::uint32_t manifestTarget( std::string_view manifestPath, const std::v
         {
             continue;
         }
-        const std::string_view fdir   = fs == std::string_view::npos ? std::string_view() : rel.substr( 0, fs + 1 );
-        std::size_t            shared = 0;
-        while( shared < mdir.size() && shared < fdir.size() && mdir[ mdir.size() - 1 - shared ] == fdir[ fdir.size() - 1 - shared ] )
+        ++sameStem;
+        onlyStem = f;
+        const std::vector<std::string_view> fdirs = dirComponents( rel );
+        std::size_t shared = 0;   // trailing directory components the source shares with the build path
+        while( shared < mdirs.size() && shared < fdirs.size() && mdirs[ mdirs.size() - 1 - shared ] == fdirs[ fdirs.size() - 1 - shared ] )
         {
             ++shared;
+        }
+        if( fdirs.size() - shared > 1 )   // more than one source root in front of the shared part: not this build path's twin
+        {
+            continue;
         }
         if( best == UINT32_MAX || shared > bestShared || ( shared == bestShared && byMassThenPath( ff )( f, best ) ) )
         {
@@ -495,7 +531,7 @@ inline std::uint32_t manifestTarget( std::string_view manifestPath, const std::v
             bestShared = shared;
         }
     }
-    return best;
+    return best != UINT32_MAX ? best : sameStem == 1 ? onlyStem : UINT32_MAX;
 }
 
 // pyproject.toml [project.scripts] / [tool.poetry.scripts]: name = "pkg.mod:func" -> (module, func)
@@ -539,32 +575,262 @@ inline std::vector<std::pair<std::string, std::string>> pyprojectScripts( std::s
     return out;
 }
 
-inline EntryRow fileRow( const IngestResult& ing, const FileFacts& ff, std::uint32_t f, std::string_view why )
+// ── O1's naming rule (O-narrow v3): a row names an EXPORTED/PUBLIC entry or the module itself ─────────────────────────────
+// A manifest bin/entry module is named by the first function, class or type its own syntax exports (ES `export`, an
+// `export {…}` clause, `export default NAME`, CommonJS `module.exports` / `exports.X`), else by its module scope
+// <file-scope> at line 1 — a true statement about the module, never a non-exported alias, a private helper or a constant.
+inline bool isIdentChar( char c ) noexcept
+{
+    return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '$';
+}
+
+// the first whole-word occurrence of `w` in `text` at or after `from`
+inline std::size_t findWord( std::string_view text, std::string_view w, std::size_t from = 0 ) noexcept
+{
+    for( std::size_t p = text.find( w, from ); p != std::string_view::npos; p = text.find( w, p + 1 ) )
+    {
+        const bool isStart = p == 0 || !isIdentChar( text[ p - 1 ] );
+        const bool isEnd   = p + w.size() >= text.size() || !isIdentChar( text[ p + w.size() ] );
+        if( isStart && isEnd )
+        {
+            return p;
+        }
+    }
+    return std::string_view::npos;
+}
+
+inline std::size_t skipSpace( std::string_view text, std::size_t p ) noexcept
+{
+    while( p < text.size() && ( text[ p ] == ' ' || text[ p ] == '\t' || text[ p ] == '\n' || text[ p ] == '\r' ) )
+    {
+        ++p;
+    }
+    return p;
+}
+
+// the identifier starting at p ("" when none)
+inline std::string_view identAt( std::string_view text, std::size_t p ) noexcept
+{
+    std::size_t e = p;
+    while( e < text.size() && isIdentChar( text[ e ] ) )
+    {
+        ++e;
+    }
+    return text.substr( p, e - p );
+}
+
+// an assignment's right-hand identifier after p ("= NAME", not "=="; "= class NAME" / "= function NAME" read through)
+inline std::string_view assignedIdent( std::string_view text, std::size_t p ) noexcept
+{
+    p = skipSpace( text, p );
+    if( p >= text.size() || text[ p ] != '=' || ( p + 1 < text.size() && text[ p + 1 ] == '=' ) )
+    {
+        return {};
+    }
+    p = skipSpace( text, p + 1 );
+    std::string_view word = identAt( text, p );
+    if( word == "class" || word == "function" || word == "async" )
+    {
+        word = identAt( text, skipSpace( text, p + word.size() ) );
+    }
+    return word;
+}
+
+inline std::string_view lineAt( std::string_view text, std::uint32_t line ) noexcept
+{
+    std::size_t p = 0;
+    for( std::uint32_t l = 1; l < line && p != std::string_view::npos; ++l )
+    {
+        p = text.find( '\n', p );
+        p = p == std::string_view::npos ? p : p + 1;
+    }
+    if( p == std::string_view::npos || p > text.size() )
+    {
+        return {};
+    }
+    const std::size_t e = text.find( '\n', p );
+    return text.substr( p, e == std::string_view::npos ? std::string_view::npos : e - p );
+}
+
+// does the module's own syntax export `name` (declared on `line`)?
+inline bool jsExports( std::string_view text, std::string_view name, std::uint32_t line ) noexcept
+{
+    const std::string_view decl = lineAt( text, line );
+    if( const std::size_t at = findWord( decl, name ); at != std::string_view::npos )
+    {
+        const std::string_view before = decl.substr( 0, at );
+        if( findWord( before, "export" ) != std::string_view::npos || before.find( "exports" ) != std::string_view::npos )
+        {
+            return true;   // export function f / export interface T / module.exports = class C / exports.f = function f
+        }
+    }
+    for( std::size_t p = findWord( text, "export" ); p != std::string_view::npos; p = findWord( text, "export", p + 1 ) )
+    {
+        std::size_t q = skipSpace( text, p + 6 );
+        if( identAt( text, q ) == "default" )
+        {
+            if( identAt( text, skipSpace( text, q + 7 ) ) == name )
+            {
+                return true;   // export default NAME
+            }
+            continue;
+        }
+        if( identAt( text, q ) == "type" )
+        {
+            q = skipSpace( text, q + 4 );
+        }
+        if( q >= text.size() || text[ q ] != '{' )
+        {
+            continue;
+        }
+        const std::size_t close = text.find( '}', q );
+        if( close == std::string_view::npos )
+        {
+            break;
+        }
+        if( identAt( text, skipSpace( text, close + 1 ) ) == "from" )
+        {
+            continue;   // a re-export names another module's binding, not one declared here
+        }
+        const std::string_view clause = text.substr( q + 1, close - q - 1 );
+        for( std::size_t i = 0; i < clause.size(); )
+        {
+            i = skipSpace( clause, i );
+            std::string_view local = identAt( clause, i );
+            if( local == "type" )   // `export { type T }`
+            {
+                const std::size_t j = skipSpace( clause, i + 4 );
+                if( !identAt( clause, j ).empty() )
+                {
+                    i     = j;
+                    local = identAt( clause, j );
+                }
+            }
+            if( !local.empty() && local == name )
+            {
+                return true;   // export { …, NAME [as X], … }
+            }
+            const std::size_t comma = clause.find( ',', i );
+            i = comma == std::string_view::npos ? clause.size() : comma + 1;
+        }
+    }
+    for( std::size_t p = text.find( "exports" ); p != std::string_view::npos; p = text.find( "exports", p + 1 ) )
+    {
+        if( ( p > 0 && isIdentChar( text[ p - 1 ] ) ) || ( p + 7 < text.size() && isIdentChar( text[ p + 7 ] ) ) )
+        {
+            continue;
+        }
+        std::size_t q = p + 7;
+        if( q < text.size() && text[ q ] == '.' )   // [module.]exports.X = NAME, or exports.NAME = …
+        {
+            const std::string_view key = identAt( text, q + 1 );
+            if( !key.empty() && ( ( key == name && !assignedIdent( text, q + 1 + key.size() ).empty() ) || assignedIdent( text, q + 1 + key.size() ) == name ) )
+            {
+                return true;
+            }
+            continue;
+        }
+        const bool isModule = p >= 7 && text.substr( p - 7, 7 ) == "module.";
+        if( isModule && assignedIdent( text, q ) == name )
+        {
+            return true;   // module.exports = NAME / module.exports = class NAME
+        }
+    }
+    return false;
+}
+
+inline bool isJsLike( std::string_view rel ) noexcept
+{
+    const std::size_t dot = rel.rfind( '.' );
+    return dot != std::string_view::npos && std::any_of( std::begin( kSourceExts ), std::end( kSourceExts ), [ & ]( std::string_view e ) { return rel.substr( dot ) == e; } );
+}
+
+// a manifest-named module's row: its first exported function, class or type (JS/TS), else its module scope at line 1
+inline EntryRow moduleRow( const IngestResult& ing, const FileFacts& ff, const std::string& root, std::uint32_t f, std::string_view why )
 {
     EntryRow r;
     r.fileId = f;
     r.why    = why;
-    if( const std::uint32_t s = ff.firstSym[ f ]; s != UINT32_MAX )
+    r.name   = "<file-scope>";
+    if( !isJsLike( ff.rel[ f ] ) )
     {
-        r.line = std::max<std::uint32_t>( 1, ing.symbols[ s ].line );
-        r.name = ing.symbols[ s ].name;
+        return r;
     }
-    else
+    const std::optional<std::string> text = docparse::detail::readWholeFile( root + "/" + ff.rel[ f ] );
+    if( !text )
     {
-        r.name = "<file-scope>";
+        return r;   // unread: the module is still the entry, so its scope is a true name (a symbol would be a guess)
+    }
+    std::uint32_t best = UINT32_MAX;
+    for( std::uint32_t s = 0; s < ing.symbols.size(); ++s )
+    {
+        const Symbol& sym      = ing.symbols[ s ];
+        const bool    isNamable = sym.kind == SymKind::Function || sym.kind == SymKind::Class || sym.kind == SymKind::Struct || sym.kind == SymKind::Interface;
+        if( sym.fileId == f && isNamable && !sym.fnLocal && ( best == UINT32_MAX || sym.line < ing.symbols[ best ].line )
+            && jsExports( *text, sym.name, sym.line ) )
+        {
+            best = s;
+        }
+    }
+    if( best != UINT32_MAX )
+    {
+        r.line = std::max<std::uint32_t>( 1, ing.symbols[ best ].line );
+        r.name = ing.symbols[ best ].name;
     }
     return r;
 }
 
-// every evidence row from core files, listing order: bin/script, `main` definitions, the entry module (each class by file
-// mass then path), then the subpath exports (never listed); one row per file, its first evidence winning
+// `main` is a program entry when it is a module-level function (a method named main on a class is not), or a JVM/.NET
+// class's static main (indexed as a method); a Go `func main` only in `package main`
+inline bool isProgramMain( const Symbol& s, std::string_view root, std::string_view rel )
+{
+    if( s.name != "main" || s.fnLocal )
+    {
+        return false;
+    }
+    const bool isJvm = s.lang == Lang::Java || s.lang == Lang::Kotlin || s.lang == Lang::CSharp;
+    if( !( ( s.kind == SymKind::Function && s.scope.empty() ) || ( s.kind == SymKind::Method && isJvm ) ) )
+    {
+        return false;
+    }
+    if( s.lang != Lang::Go )
+    {
+        return true;
+    }
+    const std::optional<std::string> text = docparse::detail::readWholeFile( std::string( root ) + "/" + std::string( rel ) );
+    if( !text )
+    {
+        return false;   // unread: the package clause is unknown, so no claim
+    }
+    for( std::size_t p = findWord( *text, "package" ); p != std::string_view::npos; p = findWord( *text, "package", p + 1 ) )
+    {
+        if( ( p == 0 || ( *text )[ p - 1 ] == '\n' ) && identAt( *text, skipSpace( *text, p + 7 ) ) == "main" )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// every evidence row, listing order: bin/script, `main` definitions, the entry module (each class by file mass then path),
+// then the subpath exports (never listed); one row per file, its first evidence winning. Manifest-named modules come from
+// `eligible` (core files plus codeless source modules); `main` definitions from core files.
 inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vector<std::uint32_t>& core, const FileFacts& ff, std::size_t& listable )
 {
     std::vector<char> isCore( ing.files.size(), 0 );
+    std::vector<std::uint32_t> eligible = core;
     for( std::uint32_t f : core )
     {
         isCore[ f ] = 1;
     }
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( ff.isCodeless[ f ] )
+        {
+            eligible.push_back( f );
+        }
+    }
+    std::sort( eligible.begin(), eligible.end() );
     std::vector<std::vector<EntryRow>> cls( 4 );
     const std::string root = ing.crawlRoot.empty() ? std::string( "." ) : ing.crawlRoot;
     if( const std::optional<std::string> pj = docparse::detail::readWholeFile( root + "/package.json" ); pj )
@@ -582,9 +848,9 @@ inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vect
         }
         for( const std::string& b : bins )
         {
-            if( const std::uint32_t f = manifestTarget( b, core, ff ); f != UINT32_MAX )
+            if( const std::uint32_t f = manifestTarget( b, eligible, ff ); f != UINT32_MAX )
             {
-                cls[ 0 ].push_back( fileRow( ing, ff, f, "bin" ) );
+                cls[ 0 ].push_back( moduleRow( ing, ff, root, f, "bin" ) );
             }
         }
         std::vector<std::string> entryPaths;
@@ -611,16 +877,16 @@ inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vect
         }
         for( const std::string& e : entryPaths )
         {
-            if( const std::uint32_t f = manifestTarget( e, core, ff ); f != UINT32_MAX )
+            if( const std::uint32_t f = manifestTarget( e, eligible, ff ); f != UINT32_MAX )
             {
-                cls[ 2 ].push_back( fileRow( ing, ff, f, "entry" ) );
+                cls[ 2 ].push_back( moduleRow( ing, ff, root, f, "entry" ) );
             }
         }
         for( const std::string& e : subpaths )
         {
-            if( const std::uint32_t f = manifestTarget( e, core, ff ); f != UINT32_MAX )
+            if( const std::uint32_t f = manifestTarget( e, eligible, ff ); f != UINT32_MAX )
             {
-                cls[ 3 ].push_back( fileRow( ing, ff, f, "entry" ) );
+                cls[ 3 ].push_back( moduleRow( ing, ff, root, f, "entry" ) );
             }
         }
     }
@@ -632,15 +898,18 @@ inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vect
             std::replace( modPath.begin(), modPath.end(), '.', '/' );
             for( const std::string& cand : { modPath + ".py", "src/" + modPath + ".py", modPath + "/__init__.py", "src/" + modPath + "/__init__.py" } )
             {
-                const auto hit = std::find_if( core.begin(), core.end(), [ & ]( std::uint32_t f ) { return ff.rel[ f ] == cand; } );
-                if( hit == core.end() )
+                const auto hit = std::find_if( eligible.begin(), eligible.end(), [ & ]( std::uint32_t f ) { return ff.rel[ f ] == cand; } );
+                if( hit == eligible.end() )
                 {
                     continue;
                 }
-                EntryRow r = fileRow( ing, ff, *hit, "script" );
+                EntryRow r;   // the function the script names when the module defines it, else the module scope (never a guess)
+                r.fileId = *hit;
+                r.why    = "script";
+                r.name   = "<file-scope>";
                 for( const Symbol& s : ing.symbols )
                 {
-                    if( s.fileId == *hit && s.name == func && isCodeKind( s.kind ) )
+                    if( s.fileId == *hit && s.name == func && isCodeKind( s.kind ) && !s.fnLocal && s.scope.empty() )
                     {
                         r.line = std::max<std::uint32_t>( 1, s.line );
                         r.name = s.name;
@@ -654,7 +923,7 @@ inline std::vector<EntryRow> entryRows( const IngestResult& ing, const std::vect
     }
     for( const Symbol& s : ing.symbols )
     {
-        if( s.name == "main" && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && s.fileId < isCore.size() && isCore[ s.fileId ] )
+        if( s.fileId < isCore.size() && isCore[ s.fileId ] && isProgramMain( s, root, ff.rel[ s.fileId ] ) )
         {
             EntryRow r;
             r.fileId = s.fileId;
@@ -882,6 +1151,16 @@ inline Sections build( const IngestResult& ing, const std::vector<float>& rank, 
         for( std::uint32_t f : g.members )   // summed in member order: a fixed order, so equal structures sum equal
         {
             g.mass += ff.mass[ f ];
+        }
+        // a label is TRUE of every member (O-narrow v3): `dir/` (`/top/`) only when every member sits under that directory;
+        // a file beside it that joined by its name prefix (request.ts beside request/) makes the label the bare name
+        if( g.label.size() > 1 && g.label.back() == '/' )
+        {
+            const std::string dir = g.label.front() == '/' ? g.label.substr( 1 ) : G + g.label;
+            if( std::any_of( g.members.begin(), g.members.end(), [ & ]( std::uint32_t f ) { return ff.rel[ f ].compare( 0, dir.size(), dir ) != 0; } ) )
+            {
+                g.label.pop_back();
+            }
         }
         s.groups.push_back( std::move( g ) );
     }

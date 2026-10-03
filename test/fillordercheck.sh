@@ -132,7 +132,11 @@ OFIX="$( order_of test/fixture )"
 # RE-PIN 2026-10-02 (fix #8, docs/EVALS.md "A default map that orients"): 863 -> 1426, and the document GREW by design: the
 # default map now leads with its orient sections (<entry_points>, <subsystems>, <overflow>, <demoted>) and their legend
 # clause. The order verdict is the point of this line and does not move: the fixture still does not auto-flip.
-{ [ "$EFIX" = "1426" ] && [ "$OFIX" = "important-first" ]; } \
+# RE-PIN 2026-10-03 (lane/orient-narrow-v3): 1426 -> 1541, legend text only: the orient clause now says what n= names (an
+# exported entry or <file-scope>), when label= carries a trailing / (every member under it), that the ranked rows keep the
+# demoted files (the shipping arm is O-narrow), and corrects the G-descent and p= wording. Every element and row is
+# byte-identical to the 1426 document's; the order verdict does not move.
+{ [ "$EFIX" = "1541" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 
