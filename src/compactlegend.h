@@ -313,13 +313,13 @@ inline constexpr std::string_view kCompactOrientTermO =
     "<entry_points shown= total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with "
     "evidence, core files only. <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: core "
     "files grouped under g= (2/3 of rank mass), groups by mass with top members; p= relative to g=, else /repo-relative. "
-    "<overflow shown= total= capped= next= over_ceiling=>: every other core file breadth-first, cut at 2048 B; next= "
+    "<overflow shown= total= capped= next=>: every other core file breadth-first, cut at 2048 B; next= "
     "pages the cut. <demoted utility_demoted=N next=>: N sink or vendored files left the ranked rows and the groups";
 inline constexpr std::string_view kCompactOrientTermNarrow =
     "<entry_points shown= total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with "
     "evidence, core files only. <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: core "
     "files grouped under g= (2/3 of rank mass), groups by mass with top members; p= relative to g=, else /repo-relative. "
-    "<overflow shown= total= capped= next= over_ceiling=>: every other core file breadth-first, cut at 2048 B; next= "
+    "<overflow shown= total= capped= next=>: every other core file breadth-first, cut at 2048 B; next= "
     "pages the cut. <demoted utility_demoted=N next=>: N sink or vendored files left the groups (the ranked rows keep them)";
 
 inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
@@ -427,6 +427,10 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // Fix #8: the orient sections, ONE term for the four elements that always ride together (keyed on <subsystems g=>, which
     // only that element carries), each element spelled with every attribute it can carry (orientmapcheck (L)).
     { "g", orient::kArm == orient::Arm::Narrow ? kCompactOrientTermNarrow : kCompactOrientTermO, true, "subsystems" },
+    // Fix #8, present-only (compactlegendcheck (D12)): the runaway guard's flag rides <overflow> only when it fired, so its
+    // reading is its own element-qualified row — spelled with every attribute the element carries beside it, because
+    // orientmapcheck (L) reads one <overflow …> spelling per definition.
+    { "over_ceiling",      "<overflow shown= total= capped= next= over_ceiling=1>: the runaway guard cut the overflow; next= pages the rest", true, "overflow" },
     { "pr_converged",      "pr_converged=0: iteration cap hit before convergence" },
     // Form-conditional map roots whose clauses (kRankByDisclosure, kChurnRankLegend, --around's seed block) are prose.
     // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.
