@@ -7,8 +7,10 @@ The section schema this module reads (fixed by the gate, so the arm implements i
   <overflow shown= total= capped= [next=]> <grp label="LABEL"> <m p="PATH"/> ... </grp> ... </overflow>
   utility_demoted="N" on ONE element of the answer, which carries its own next= when N > 0.
 Labels (label=, never l=: l= is a line number everywhere else): a child directory of G is "dir/"; a prefix group in G is "prefix"; outside G, a top-level directory is "/top/"
-and a root file's prefix is "/prefix". <m p=> is relative to G, or repo-relative with a leading "/" outside G. <e p=> is
-repo-relative. JSON mirrors the XML one to one: the three section keys hold their attributes plus one array per child tag.
+and a root file's prefix is "/prefix". A label is TRUE of every member (O-narrow v3): a file whose prefix names a directory
+beside it joins that directory's group, and the group is then labelled by the bare name ("request", "/tools"), never
+"dir/" — "dir/" is printed only when every member sits under dir/ (label_true below). <m p=> is relative to G, or
+repo-relative with a leading "/" outside G. <e p=> is repo-relative. JSON mirrors the XML one to one: the three section keys hold their attributes plus one array per child tag.
 
 A next= value is argv appended to `BIN ROOT --no-cache`; its answer pages with has_more="1"/next_offset= (pasted as
 --offset=) until has_more is absent or "0". Page rows: elements with p= (file pages), label= (group pages), why= (entry
@@ -329,6 +331,27 @@ def group_label(p, G, childdirs, topdirs):
     return "/" + pre + "/" if pre in topdirs else "/" + pre
 
 
+def truthful_label(lab, paths, G):
+    """the label a group of repo paths may carry: "dir/" ("/top/") only when every member sits under that directory, else
+    the bare name ("dir", "/top") — the group a sibling file joined by its prefix"""
+    if not lab.endswith("/"):
+        return lab
+    d = lab[1:] if lab.startswith("/") else G + lab
+    return lab if all(p.startswith(d) for p in paths) else lab[:-1]
+
+
+def label_true(lab, printed_path):
+    """is a label true of one member, as printed (relative to g=, or "/repo-relative" outside it)? "X/" holds only paths
+    under X/; a bare "X" holds paths under X/ and files named by the prefix X (the registered prefix rule)"""
+    if lab.endswith("/"):
+        return printed_path.startswith(lab)
+    name = lab[1:] if lab.startswith("/") else lab
+    path = printed_path[1:] if lab.startswith("/") and printed_path.startswith("/") else printed_path
+    if (lab.startswith("/")) != printed_path.startswith("/"):
+        return False
+    return path.startswith(name + "/") or ("/" not in path and prefix(path) == name)
+
+
 def breadth_first(order, members):
     """every core file not in a shown group row's top 3: each round j takes every group's j-th member, groups in order"""
     named = {p for lab in order[:12] for p in members[lab][:3]}
@@ -349,6 +372,7 @@ def oracle(core, mass):
     groups = {}
     for p in core:
         groups.setdefault(group_label(p, G, childdirs, topdirs), []).append(p)
+    groups = {truthful_label(lab, ps, G): ps for lab, ps in groups.items()}
     gm = [(lab, sum(m[p][0] for p in ps), sum(m[p][1] for p in ps)) for lab, ps in groups.items()]
     order = od.sort(gm, "group order")
     members = {lab: od.sort([(p, m[p][0], m[p][1]) for p in groups[lab]], "members of " + lab) for lab in order}

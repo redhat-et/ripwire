@@ -8,8 +8,8 @@
 #   - core mass sits under src/pkg/, so the grouping root G descends root -> src/ -> src/pkg/;
 #   - twelve child directories of G with 1..8 files (distinct member weights inside each group);
 #   - files directly in G grouped by prefix: kebab (job-scan), snake (job_pool), a leading underscore (_job_run), a prefix
-#     equal to a child directory (job -> job/), CamelCase lowercased (Gateway, gateway_utils), a bare stem (wire);
-#   - two EXACT ties, broken by the registered key: members tie-a.py / tie/b.py of group tie/ (path order puts tie-a.py
+#     equal to a child directory (job joins job/, labelled `job`: a label is true of every member), CamelCase lowercased (Gateway, gateway_utils), a bare stem (wire);
+#   - two EXACT ties, broken by the registered key: members tie-a.py / tie/b.py of group tie (path order puts tie-a.py
 #     first; a directory-first crawl lists tie/ first), and groups kappa (Kappa.py) / beta/ (label order puts beta/ first;
 #     the crawl lists Kappa.py first);
 #   - core files outside G: scripts/ (a top-level directory), setup_tools.py (the root, by prefix), src/legacy_shim.py;
@@ -90,7 +90,8 @@ py("src/pkg/beta/x.py", 3.0)
 # launcher (4.4 = main 1.0 + main_loop 1.7 + parse_cli_flags 1.7): `main` is evidence; `main_loop` is the near miss
 w("src/pkg/launcher.py", "def main_loop(argv):\n    return argv\n\n\ndef main():\n    return main_loop([])\n\n\n"
                          "def parse_cli_flags(argv):\n    return list(argv)\n")
-# TypeScript sources behind package.json's build output (dist/ is never written: only the manifest names it)
+# TypeScript sources behind package.json's build output (dist/ is never written: only the manifest names it). A build path
+# maps to the same-stem source one source root away (dist/pkg/tool.js <- src/pkg/tool.ts, tsc's rootDir=src layout)
 ts("src/pkg/sync.ts", 2.7)
 ts("src/pkg/tool.ts", 1.7)
 ts("src/pkg/admin.ts", 1.0)
@@ -117,10 +118,10 @@ w("docs/guide.md", "# Guide\n\n## Usage\n\nRun the tool.\n")
 w("package.json", """{
   "name": "orientfix",
   "version": "1.0.0",
-  "bin": { "orientfix": "dist/tool.js", "orientfix-admin": "dist/admin.js", "orientfix-sync": "dist/sync.js",
-           "orientfix-gone": "dist/nosuchstem.js", "orientfix-test": "dist/test_runner.js" },
-  "main": "dist/index.js",
-  "exports": { ".": "./dist/index.js", "./sub": "./dist/sub.js" }
+  "bin": { "orientfix": "dist/pkg/tool.js", "orientfix-admin": "dist/pkg/admin.js", "orientfix-sync": "dist/pkg/sync.js",
+           "orientfix-gone": "dist/pkg/nosuchstem.js", "orientfix-test": "dist/test_runner.js" },
+  "main": "dist/pkg/index.js",
+  "exports": { ".": "./dist/pkg/index.js", "./sub": "./dist/pkg/sub.js" }
 }
 """)
 PY

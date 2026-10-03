@@ -43,6 +43,21 @@
 #       printed. With ORIENTMAP_BASE_BIN: every ranked row's k= equals the base binary's (the rank vector is untouched), and
 #       with ORIENTMAP_ARM=narrow the ranked rows are byte-identical to the base binary's.
 #   (X) xmllint well-formed, two runs byte-identical.
+# O-narrow v3 (PREREG_orient_narrow_v3; the blind O2 grading's false rows on hono-01 and the final review's M1), on a second
+# fixture (test/orientmapfix/gen_truth.sh) and, for the generic halves, inside (D) on every root:
+#   (E) ENTRY ROWS name only exported/public program or package entries: a module-level `main` function or a JVM static
+#       main (never a method named main on a helper class); a manifest bin/script/entry module named by the module's first
+#       function, class or type its own syntax exports (ES `export`, `export {…}`/`export default NAME`, CommonJS
+#       `module.exports`/`exports.X`), else by its module scope <file-scope> at line 1 — never a non-exported alias, a
+#       private helper or a constant; a pyproject script by the function it names when the module defines it, else
+#       <file-scope>; a build-output path maps only to a same-stem source one source root away (dist/cjs/index.js <-
+#       src/index.ts, never the heavier src/jsx/hooks/index.ts). (D) adds on every root: a named row's symbol is declared
+#       on its line and is not a constant (t=var).
+#   (G) GROUP LABELS are true of every member (shown, overflow and paged): `X/` only when every member sits under X/; a
+#       file beside X/ that joins its group by prefix makes the label `X` (`/X` outside g=); a nested X/X.ts keeps `X/`.
+#   (M) MEMORY-GUARD PARTIAL INGEST (RIPWIRE_TEST_MEMGUARD=parse:N): the CLI map (XML and --json) and MCP analyze /
+#       rank_by carry no section and no utility_demoted= (their totals would be floors with no marker); --orient=KIND
+#       refuses (exit 5) like every other selector on a partial index. Byte-neutral on a whole ingest (Gate S).
 # ORIENTMAP_EXTRA_ROOTS=dir1:dir2 runs (D), (U), (P) and (C) on those trees too; ORIENTMAP_ONLY_EXTRA=1 skips the fixture.
 # Exit 0 all pass, 1 any fail (a fixture the oracle cannot decide is a failure), 2 setup.
 set -u
@@ -51,8 +66,9 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$PWD/$BIN"
 GEN="$ROOT/test/orientmapfix/gen.sh"
+GEN_TRUTH="$ROOT/test/orientmapfix/gen_truth.sh"
 [ -x "$BIN" ] || { echo "orientmapcheck: no ripwire binary at $BIN — build first"; exit 2; }
-[ -f "$GEN" ] || { echo "orientmapcheck: fixture generator missing: $GEN"; exit 2; }
+[ -f "$GEN" ] && [ -f "$GEN_TRUTH" ] || { echo "orientmapcheck: fixture generator missing: $GEN / $GEN_TRUTH"; exit 2; }
 command -v git >/dev/null 2>&1 || { echo "orientmapcheck: git not on PATH"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "orientmapcheck: python3 required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -62,10 +78,11 @@ export TMPDIR="$TMP/" XDG_CACHE_HOME="$TMP/xdg"
 unset RIPWIRE_ORIENT_UNCAPPED
 echo "orientmapcheck: BIN=$BIN"
 mkfix(){
-    bash "$GEN" "$1" >/dev/null && git -C "$1" init -q && git -C "$1" add -A \
+    bash "${2:-$GEN}" "$1" >/dev/null && git -C "$1" init -q && git -C "$1" add -A \
         && git -C "$1" -c user.name=gate -c user.email=gate@example.invalid -c commit.gpgsign=false commit -qm fixture
 }
 mkfix "$TMP/fx" || { echo "orientmapcheck: fixture generation failed"; exit 2; }
+mkfix "$TMP/fx2" "$GEN_TRUTH" || { echo "orientmapcheck: truth fixture generation failed"; exit 2; }
 
 python3 - "$BIN" "$TMP" "$ROOT" "${ORIENTMAP_EXTRA_ROOTS:-}" <<'PYEOF' || no "the arms above reported a failure (or the check body could not run)"
 import html as H, json, os, re, shutil, subprocess, sys
@@ -114,7 +131,7 @@ def model(root, pinned=None):
     """the answer, its sections, the inventory, the demoted set and the oracle over core = candidates - demoted"""
     doc, rc = om.run(BIN, root)
     secs = om.sections(doc)
-    inv, _ = om.inventory(BIN, root)
+    inv, invj = om.inventory(BIN, root)
     ms, _ = om.masses(BIN, root)
     cand = om.core_candidates(inv)
     dem, dprob, dcount = [], [], None
@@ -128,7 +145,8 @@ def model(root, pinned=None):
                 rows, dprob = om.follow(BIN, root, d.a["next"], "p")
                 dem = [r["p"] for r in rows]
     core = [p for p in cand if p not in set(pinned if pinned is not None else dem)]
-    return dict(root=root, doc=doc, rc=rc, secs=secs, inv=inv, ms=ms, cand=cand, dem=dem, dprob=dprob, dcount=dcount,
+    syms = {f["p"]: [(s_.get("n"), s_.get("t")) for s_ in f.get("s", [])] for f in invj.get("r", [])}
+    return dict(root=root, doc=doc, rc=rc, secs=secs, inv=inv, syms=syms, ms=ms, cand=cand, dem=dem, dprob=dprob, dcount=dcount,
                 core=core, orc=om.oracle(core, ms))
 
 
@@ -160,6 +178,10 @@ def gate_d(M, label, exact=False):
         cap = a.get("capped")
         check(sh <= tot and cap == ("1" if sh < tot else "0") and (("next" in a) == (sh < tot)),
               "(D) %s: <%s> shown=%d <= total=%d, capped=%s and next= exactly when something is cut" % (label, tag, sh, tot, cap))
+    false_lab = [(lab, m.a.get("p")) for node in (sub, ov) for grp in node.find("grp") for lab in [grp.a.get("label", "")]
+                 for m in grp.find("m") if not om.label_true(lab, m.a.get("p", ""))]
+    check(not false_lab, "(D)(G) %s: every group label is true of every member it lists (X/ only under X/; a bare X by prefix or under X/)" % label,
+          str(false_lab[:5]))
     sub_names = [p for _, ps in names(sub, g) for p in ps]
     ov_names = [p for _, ps in names(ov, ov.a.get("g", g)) for p in ps]
     shown = sub_names + ov_names
@@ -207,6 +229,9 @@ def gate_d(M, label, exact=False):
             good = bool(mm) and e.a.get("why") in om.WHY and e.a.get("n") and os.path.isfile(f) and mm.group(1) in set(M["core"]) \
                 and 1 <= int(mm.group(2)) <= max(1, sum(1 for _ in open(f, errors="replace")))
             check(good, "(D) %s: entry row %s is a core file, file:line inside it, n= and why=" % (label, e.a))
+            if good:
+                check(entry_symbol_true(M, mm.group(1), int(mm.group(2)), e.a.get("n")),
+                      "(D)(E) %s: entry row %s names its module scope at line 1, or a symbol declared on that line that is not a constant" % (label, e.a))
         if "next" in ep.a:
             rows, probs = om.follow(BIN, root, ep.a["next"], "why")
             check(not probs and len(rows) == int(ep.a["total"]) - int(ep.a["shown"]) and all(r.get("why") in om.WHY for r in rows)
@@ -224,6 +249,18 @@ def gate_d(M, label, exact=False):
             ranked_files = {f.a.get("p") for f in om.walk(om.tree(M["doc"])) if f.tag == "f"}
             check(not (ranked_files & set(M["dem"])), "(D) %s: no demoted file keeps a ranked row" % label)
     runaway(M, label)
+
+
+def entry_symbol_true(M, path, line, n):
+    """an entry row names <file-scope> at line 1, or a symbol of that file declared on that line whose kind is not var"""
+    if n == "<file-scope>":
+        return line == 1
+    try:
+        text = open(os.path.join(M["root"], path), errors="replace").read().split("\n")
+    except OSError:
+        return False
+    kinds = {t for nm, t in M["syms"].get(path, []) if nm == n}
+    return 1 <= line <= len(text) and re.search(r"\b%s\b" % re.escape(n), text[line - 1]) is not None and bool(kinds) and "var" not in kinds
 
 
 def uncapped(M, label):
@@ -422,6 +459,102 @@ def legend_arm(M, refs):
     check(not badr, "(L) ref answers carry the section definition at most once per session, end with <about legend=ref> naming the dictionary's dictv, and lean only on it", str(badr))
 
 
+def truth():
+    """(E) entry rows, (G) group labels, (M) the memory-guard partial ingest — on test/orientmapfix/gen_truth.sh"""
+    T = os.path.join(TMP, "fx2")
+    TM = model(T)
+    ts_ = TM["secs"]
+    print("== (E) entry rows name exported/public entries only ==")
+    if check("entry_points" in ts_, "(E) the truth fixture's map carries <entry_points>"):
+        ep = ts_["entry_points"]
+        rows = [dict(e.a) for e in ep.find("e")]
+        if "next" in ep.a:
+            more, probs = om.follow(BIN, T, ep.a["next"], "why")
+            check(not probs, "(E) entry_points next= pages cleanly", "; ".join(probs[:3]))
+            rows += more
+        got = sorted((r.get("p", "").rsplit(":", 1)[0], r.get("n"), r.get("why")) for r in rows)
+        print("  INFO  (E) entry rows: %s" % [(r.get("p"), r.get("n"), r.get("why")) for r in rows])
+        bad_names = {"Internal", "helperOnly", "VERSION", "VERSION_TAG", "_parseArgs", "isHttpErrorLike", "isPlainHelper", "_helper",
+                     "_bind_port", "_prepare", "UpdateStateFunction", "helper"}
+        check(not [r for r in rows if r.get("n") in bad_names],
+              "(E) no entry row names a non-exported alias, a private helper or a version constant",
+              str([(r.get("p"), r.get("n")) for r in rows if r.get("n") in bad_names]))
+        check(("src/index.ts", "Options", "entry") in got,
+              "(E) the package entry module is named by its first EXPORTED function, class or type (export interface Options)")
+        check(not [r for r in rows if r.get("p", "").startswith("src/jsx/hooks/index.ts")],
+              "(E) dist/index.js and dist/cjs/index.js map to src/index.ts (one source root away), never the heavier src/jsx/hooks/index.ts")
+        check(("src/cli.ts", "<file-scope>", "bin") in got and "src/cli.ts:1" in [r.get("p") for r in rows],
+              "(E) a bin module that exports nothing is named by its module scope <file-scope> at line 1")
+        check(("lib/server.js", "server", "bin") in got and ("lib/application.js", "Application", "bin") in got,
+              "(E) CommonJS: module.exports = server / module.exports = class Application name the row")
+        check(("src/tpkg/serve.py", "serve", "script") in got and ("src/tpkg/cli.py", "<file-scope>", "script") in got,
+              "(E) pyproject: a script function the module defines is named; one it only imports gives <file-scope>, not the helper above it")
+        check(("src/App.java", "main", "main") in got and ("src/tpkg/launch.py", "main", "main") in got,
+              "(E) a module-level main function and a JVM static main are entry rows")
+        check(not [r for r in rows if r.get("p", "").startswith("src/tpkg/worker.py")],
+              "(E) a Python method named main on a helper class is not an entry row")
+        want = sorted([("src/index.ts", "Options", "entry"), ("src/cli.ts", "<file-scope>", "bin"), ("lib/server.js", "server", "bin"),
+                       ("lib/application.js", "Application", "bin"), ("src/tpkg/serve.py", "serve", "script"),
+                       ("src/tpkg/cli.py", "<file-scope>", "script"), ("src/App.java", "main", "main"), ("src/tpkg/launch.py", "main", "main")])
+        check(got == want and ep.a.get("total") == str(len(want)), "(E) exactly the %d true entry rows, total=%d" % (len(want), len(want)),
+              "got %s total=%s" % (got, ep.a.get("total")))
+        badline = [r for r in rows if not entry_symbol_true(TM, r.get("p", "").rsplit(":", 1)[0], int(r.get("p", ":0").rsplit(":", 1)[1] or 0), r.get("n"))]
+        check(not badline, "(E) every named row's symbol is declared on its line (module scope at line 1)", str(badline[:3]))
+    print("== (G) group labels are true of every member ==")
+    udoc, _ = om.run(BIN, T, env=UNC)
+    us = om.sections(udoc)
+    if check("subsystems" in us and "overflow" in us, "(G) the truth fixture's uncapped map carries <subsystems> and <overflow>"):
+        g = us["subsystems"].a.get("g", "")
+        check(g == "src/", "(G) (fixture premise) g= is src/", "got %r" % g)
+        grp_of = {}
+        labels = []
+        for node in (us["subsystems"], us["overflow"]):
+            for lab, ps in names(node, g):
+                labels.append(lab)
+                for p in ps:
+                    grp_of[p] = lab
+        paged = []
+        if "next" in us["subsystems"].a:
+            prow, _ = om.follow(BIN, T, us["subsystems"].a["next"], "label")
+            paged = [r["label"] for r in prow]
+        labels += paged
+        check(grp_of.get("src/request.ts") == "request" and grp_of.get("src/request-utils.ts") == "request"
+              and grp_of.get("src/request/body.ts") == "request",
+              "(G) src/request.ts and src/request-utils.ts beside src/request/ share its group, labelled `request`",
+              "request.ts %r, request-utils.ts %r, request/body.ts %r" % (grp_of.get("src/request.ts"), grp_of.get("src/request-utils.ts"),
+                                                                         grp_of.get("src/request/body.ts")))
+        check("request/" not in labels, "(G) no group is labelled `request/` while it holds a file outside src/request/", str(labels))
+        check(grp_of.get("src/router/router.ts") == "router/" and grp_of.get("src/router/trie.ts") == "router/",
+              "(G) a nested X/X.ts with no sibling (src/router/router.ts) keeps `router/`", str(grp_of.get("src/router/router.ts")))
+        check(grp_of.get("tools.py") == "/tools" and grp_of.get("tools/gen.py") == "/tools" and "/tools/" not in labels,
+              "(G) outside g=, tools.py beside tools/ is `/tools`, never `/tools/`", "%r %r" % (grp_of.get("tools.py"), grp_of.get("tools/gen.py")))
+        check(grp_of.get("scripts/build.py") == "/scripts/", "(G) outside g=, a directory alone stays `/scripts/`", str(grp_of.get("scripts/build.py")))
+        false_lab = [(lab, m.a.get("p")) for node in (us["subsystems"], us["overflow"]) for grp in node.find("grp")
+                     for lab in [grp.a.get("label", "")] for m in grp.find("m") if not om.label_true(lab, m.a.get("p", ""))]
+        check(not false_lab, "(G) every label is true of every member it lists (uncapped)", str(false_lab[:5]))
+        check(sorted(set(labels)) == sorted(TM["orc"]["order"]), "(G) the labels are the oracle's (the registered rule + truthful labels)",
+              "got %s want %s" % (sorted(set(labels)), sorted(TM["orc"]["order"])))
+    gate_d(TM, "truth fixture")
+    print("== (M) a memory-guard partial ingest carries no orient section ==")
+    PART = {"RIPWIRE_TEST_MEMGUARD": "parse:3"}
+    full_pg, rc_full = om.run(BIN, T, "--orient=groups")
+    check(om.region(TM["doc"]) is not None and rc_full == 0 and "<orient" in full_pg,
+          "(M) (premise) the whole ingest carries the sections and --orient=groups pages (rc=%d)" % rc_full)
+    pdoc, prc = om.run(BIN, T, env=PART)
+    check(prc == 0 and "memory_stop=" in pdoc, "(M) (premise) the seam cuts the ingest: the map answers with memory_stop= (rc=%d)" % prc)
+    check(om.region(pdoc) is None and "utility_demoted" not in pdoc,
+          "(M) the CLI map on a partial ingest carries no section and no utility_demoted= (their totals would be unmarked floors)")
+    pj, _ = om.run(BIN, T, "--json", env=PART)
+    check(not any(k in pj for k in ('"entry_points"', '"subsystems"', '"overflow"', '"utility_demoted"')),
+          "(M) the --json map on a partial ingest carries no section key")
+    ppg, pprc = om.run(BIN, T, "--orient=groups", env=PART)
+    check(pprc == 5 and "<orient" not in ppg, "(M) --orient=groups on a partial ingest refuses (exit 5, no page)", "rc=%d" % pprc)
+    man, mrb = om.mcp(BIN, T, [("analyze", {}), ("rank_by", {})], env=PART)
+    check(bool(man) and bool(mrb), "(M) (premise) MCP answered analyze and rank_by under the seam")
+    check(om.region(man) is None and "utility_demoted" not in man and om.region(mrb) is None and "utility_demoted" not in mrb,
+          "(M) MCP analyze and rank_by on a partial ingest carry no section and no utility_demoted= (CLI == MCP)")
+
+
 if not ONLY_EXTRA:
     print("== fixture ==")
     M = model(FX, pinned=FIX_DEMOTED)
@@ -434,7 +567,7 @@ if not ONLY_EXTRA:
     s = M["secs"]
     print("== (F) the registered rule, exactly ==")
     check(M["rc"] == 0, "(F) the map exits 0")
-    check(orc["order"].index("beta/") < orc["order"].index("kappa") and orc["members"]["tie/"] == ["src/pkg/tie-a.py", "src/pkg/tie/b.py"],
+    check(orc["order"].index("beta/") < orc["order"].index("kappa") and orc["members"]["tie"] == ["src/pkg/tie-a.py", "src/pkg/tie/b.py"],
           "(F) (oracle) the designed ties break by label and by path")
     if check("subsystems" in s, "(F) the map carries <subsystems>"):
         sub = s["subsystems"]
@@ -466,7 +599,7 @@ if not ONLY_EXTRA:
               "no bin without a source twin or into tests/", str(rows))
         check([(r.get("p"), r.get("n")) for r in rows if r.get("why") == "main"] == [("src/pkg/launcher.py:5", "main"), ("scripts/release_build.py:1", "main")],
               "(F) the main rows carry file:line of `main` (never main_loop)")
-        check(all(r.get("p", "").endswith(":1") for r in rows if r.get("why") == "bin"), "(F) a bin row points at its source file's first code symbol (line 1)")
+        check(all(r.get("p", "").endswith(":1") for r in rows if r.get("why") == "bin"), "(F) a bin row points at its source module's first exported function (line 1)")
         check(ep.a.get("total") == "7" and ep.a.get("shown") == "5" and "next" in ep.a,
               "(F) total=7 counts core evidence only (3 bins, 2 mains, the entry module, the subpath export)", str(ep.a))
         if "next" in ep.a:
@@ -527,6 +660,9 @@ if not ONLY_EXTRA:
         x = subprocess.run(["xmllint", "--noout", "-"], input=M["doc"].encode(), capture_output=True)
         check(x.returncode == 0, "(X) the map is well-formed XML", x.stderr.decode()[:200])
     check(om.run(BIN, FX)[0] == M["doc"], "(X) two runs are byte-identical")
+
+    print("== truth fixture (O-narrow v3) ==")
+    truth()
 
 for extra in [e for e in EXTRA.split(":") if e]:
     lab = os.path.basename(extra.rstrip("/"))
