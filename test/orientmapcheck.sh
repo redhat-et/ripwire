@@ -85,7 +85,7 @@ mkfix "$TMP/fx" || { echo "orientmapcheck: fixture generation failed"; exit 2; }
 mkfix "$TMP/fx2" "$GEN_TRUTH" || { echo "orientmapcheck: truth fixture generation failed"; exit 2; }
 
 python3 - "$BIN" "$TMP" "$ROOT" "${ORIENTMAP_EXTRA_ROOTS:-}" <<'PYEOF' || no "the arms above reported a failure (or the check body could not run)"
-import html as H, json, os, re, shutil, subprocess, sys
+import html as H, json, os, re, shlex, shutil, subprocess, sys
 BIN, TMP, ROOT, EXTRA = sys.argv[1:5]
 sys.path.insert(0, os.path.join(ROOT, "test", "lib"))
 import orientmap as om
@@ -178,10 +178,9 @@ def gate_d(M, label, exact=False):
         cap = a.get("capped")
         check(sh <= tot and cap == ("1" if sh < tot else "0") and (("next" in a) == (sh < tot)),
               "(D) %s: <%s> shown=%d <= total=%d, capped=%s and next= exactly when something is cut" % (label, tag, sh, tot, cap))
-    false_lab = [(lab, m.a.get("p")) for node in (sub, ov) for grp in node.find("grp") for lab in [grp.a.get("label", "")]
-                 for m in grp.find("m") if not om.label_true(lab, m.a.get("p", ""))]
-    check(not false_lab, "(D)(G) %s: every group label is true of every member it lists (X/ only under X/; a bare X by prefix or under X/)" % label,
-          str(false_lab[:5]))
+    false_lab = false_labels(printed_groups(sub) + printed_groups(ov) + (paged_groups(root, sub.a["next"]) if "next" in sub.a else []))
+    check(not false_lab, "(D)(G) %s: every group label is true of every member it lists, shown and paged (X/ only under X/; a bare X by "
+          "prefix or under X/)" % label, str(false_lab[:5]))
     sub_names = [p for _, ps in names(sub, g) for p in ps]
     ov_names = [p for _, ps in names(ov, ov.a.get("g", g)) for p in ps]
     shown = sub_names + ov_names
@@ -226,17 +225,22 @@ def gate_d(M, label, exact=False):
         for e in ep.find("e"):
             mm = re.match(r"(.+):(\d+)$", e.a.get("p", ""))
             f = mm and os.path.join(root, mm.group(1))
-            good = bool(mm) and e.a.get("why") in om.WHY and e.a.get("n") and os.path.isfile(f) and mm.group(1) in set(M["core"]) \
+            good = bool(mm) and e.a.get("why") in om.WHY and e.a.get("n") and os.path.isfile(f) and entry_file_ok(M, mm.group(1)) \
                 and 1 <= int(mm.group(2)) <= max(1, sum(1 for _ in open(f, errors="replace")))
-            check(good, "(D) %s: entry row %s is a core file, file:line inside it, n= and why=" % (label, e.a))
+            check(good, "(D) %s: entry row %s is a core file (or a codeless source entry module), file:line inside it, n= and why=" % (label, e.a))
             if good:
-                check(entry_symbol_true(M, mm.group(1), int(mm.group(2)), e.a.get("n")),
-                      "(D)(E) %s: entry row %s names its module scope at line 1, or a symbol declared on that line that is not a constant" % (label, e.a))
+                check(entry_symbol_true(M, mm.group(1), int(mm.group(2)), e.a.get("n"), e.a.get("why")),
+                      "(D)(E) %s: entry row %s names its module scope at line 1, or a symbol declared on that line that is not a constant "
+                      "(JS/TS bin/entry: exported by its own syntax; Python script: not _private)" % (label, e.a))
         if "next" in ep.a:
             rows, probs = om.follow(BIN, root, ep.a["next"], "why")
             check(not probs and len(rows) == int(ep.a["total"]) - int(ep.a["shown"]) and all(r.get("why") in om.WHY for r in rows)
-                  and all(r.get("p", "").rsplit(":", 1)[0] in set(M["core"]) for r in rows),
+                  and all(entry_file_ok(M, r.get("p", "").rsplit(":", 1)[0]) for r in rows),
                   "(D) %s: entry_points next= returns the %d core entries not listed, each with why=" % (label, int(ep.a["total"]) - int(ep.a["shown"])))
+            badp = [r for r in rows if not re.match(r".+:\d+$", r.get("p", ""))
+                    or not entry_symbol_true(M, r["p"].rsplit(":", 1)[0], int(r["p"].rsplit(":", 1)[1]), r.get("n"), r.get("why"))]
+            check(not badp, "(D)(E) %s: every PAGED entry row names its module scope at line 1 or a true, exported, non-constant symbol" % label,
+                  str(badp[:3]))
     if M["dcount"] is None:
         no("(D) %s: no utility_demoted= anywhere in the answer" % label)
     else:
@@ -251,8 +255,42 @@ def gate_d(M, label, exact=False):
     runaway(M, label)
 
 
-def entry_symbol_true(M, path, line, n):
-    """an entry row names <file-scope> at line 1, or a symbol of that file declared on that line whose kind is not var"""
+JS_EXTS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+
+
+def js_exported(lines, line, n):
+    """does the module's own syntax export the symbol n declared on `line`? `export`/`module.exports`/`exports.` before the
+    name on its line, a local `export {… n …}` clause (not `… from`), `export default n`, `module.exports = n`, or
+    `[module.]exports.X = n` / `[module.]exports.n =`"""
+    L = lines[line - 1]
+    m = re.search(r"\b%s\b" % re.escape(n), L)
+    if m and re.search(r"\bexport\b|\bmodule\.exports\b|\bexports\.", L[:m.start()]):
+        return True
+    whole = "\n".join(lines)
+    e = re.escape(n)
+    for pat in (r"\bexport\s+default\s+%s\b" % e, r"\bmodule\.exports\s*=\s*%s\b" % e, r"\bexports\.[\w$]+\s*=\s*%s\b" % e,
+                r"\bexports\.%s\s*=" % e):
+        if re.search(pat, whole):
+            return True
+    for c in re.finditer(r"\bexport\s*(?:type\s*)?\{([^}]*)\}(?!\s*from\b)", whole):
+        if n in [x.strip().split(" as ")[0].strip() for x in c.group(1).split(",")]:
+            return True
+    return False
+
+
+def entry_file_ok(M, path):
+    """an entry row's file: a core file, or a source-tier, non-demo, non-vendored file the index holds no code symbol for
+    (a re-export-only package entry module, hono's src/index.ts shape)"""
+    if path in set(M["core"]):
+        return True
+    has_code = bool(set(M["inv"].get(path, set())) - set(om.NONCODE_KINDS))
+    return (os.path.isfile(os.path.join(M["root"], path)) and not has_code and om.tier(path) == "source" and not om.is_demo(path)
+            and not om.is_vendored(path))
+
+
+def entry_symbol_true(M, path, line, n, why=None):
+    """an entry row names <file-scope> at line 1, or a symbol of that file declared on that line whose kind is not var; a JS/TS
+    bin/entry row's symbol is exported by the module's own syntax; a Python script row never names a _private function"""
     if n == "<file-scope>":
         return line == 1
     try:
@@ -260,7 +298,38 @@ def entry_symbol_true(M, path, line, n):
     except OSError:
         return False
     kinds = {t for nm, t in M["syms"].get(path, []) if nm == n}
-    return 1 <= line <= len(text) and re.search(r"\b%s\b" % re.escape(n), text[line - 1]) is not None and bool(kinds) and "var" not in kinds
+    if not (1 <= line <= len(text) and re.search(r"\b%s\b" % re.escape(n), text[line - 1]) is not None and bool(kinds) and "var" not in kinds):
+        return False
+    if why in ("bin", "entry") and path.endswith(JS_EXTS) and not js_exported(text, line, n):
+        return False
+    if why == "script" and path.endswith(".py") and n.startswith("_"):
+        return False
+    return True
+
+
+def false_labels(groups):
+    """[(label, printed member)] where a label is not true of a member; groups = [(label, [printed paths])]"""
+    return [(lab, p) for lab, ps in groups for p in ps if not om.label_true(lab, p)]
+
+
+def printed_groups(node):
+    return [(grp.a.get("label", ""), [m.a.get("p", "") for m in grp.find("m")]) for grp in node.find("grp")]
+
+
+def paged_groups(root, nxt, env=None):
+    """every <grp> row (label, printed top members) a subsystems next= pages, through next_offset="""
+    out, args = [], shlex.split(nxt)
+    for _ in range(om.MAX_PAGES):
+        doc, rc = om.run(BIN, root, *args, env=env)
+        forest = om.tree(doc)
+        if rc != 0 or not forest:
+            break
+        top = forest[0]
+        out += printed_groups(top)
+        if top.a.get("has_more") != "1" or "next_offset" not in top.a:
+            break
+        args = [x for x in args if not x.startswith("--offset=")] + ["--offset=" + top.a["next_offset"]]
+    return out
 
 
 def uncapped(M, label):
@@ -276,6 +345,10 @@ def uncapped(M, label):
     check(unpriced(d1[:o1.start]) == unpriced(d2[:o2.start]) and unpriced(d1[o1.end:]) == unpriced(d2[o2.end:]),
           "(U) %s: every byte outside <overflow> is the capped answer's (est_tokens= aside: it prices the answer as emitted)" % label)
     runaway(M, label, doc2, "uncapped answer")
+    if "subsystems" in s2:
+        fl = false_labels(printed_groups(s2["subsystems"]) + printed_groups(o2)
+                          + (paged_groups(M["root"], s2["subsystems"].a["next"], env=UNC) if "next" in s2["subsystems"].a else []))
+        check(not fl, "(U)(G) %s: every label of the uncapped answer (groups, overflow, paged groups) is true of every member" % label, str(fl[:5]))
     if o2.a.get("over_ceiling") != "1":
         check(o2.a.get("capped") == "0" and "next" not in o2.a and o2.a.get("shown") == o2.a.get("total"), "(U) %s: uncapped <overflow> cuts nothing" % label)
     sub = s1["subsystems"]
@@ -475,12 +548,17 @@ def truth():
         got = sorted((r.get("p", "").rsplit(":", 1)[0], r.get("n"), r.get("why")) for r in rows)
         print("  INFO  (E) entry rows: %s" % [(r.get("p"), r.get("n"), r.get("why")) for r in rows])
         bad_names = {"Internal", "helperOnly", "VERSION", "VERSION_TAG", "_parseArgs", "isHttpErrorLike", "isPlainHelper", "_helper",
-                     "_bind_port", "_prepare", "UpdateStateFunction", "helper"}
+                     "_bind_port", "_prepare", "UpdateStateFunction", "helper", "firstLocal", "_internal", "helperA", "createApp"}
         check(not [r for r in rows if r.get("n") in bad_names],
               "(E) no entry row names a non-exported alias, a private helper or a version constant",
               str([(r.get("p"), r.get("n")) for r in rows if r.get("n") in bad_names]))
-        check(("src/index.ts", "Options", "entry") in got,
-              "(E) the package entry module is named by its first EXPORTED function, class or type (export interface Options)")
+        check(("src/index.ts", "<file-scope>", "entry") in got and "src/index.ts:1" in [r.get("p") for r in rows],
+              "(E) the package entry module in hono's shape (imports and re-exports, nothing declared) is <file-scope> at line 1")
+        check(("src/options.ts", "Options", "bin") in got,
+              "(E) a module is named by its first EXPORTED function, class or type (export interface Options, after a non-exported "
+              "alias, a private helper and an exported VERSION constant)")
+        check(("src/exportlist.ts", "b", "bin") in got and ("src/defexp.ts", "make", "bin") in got and ("lib/cjsx.js", "create", "bin") in got,
+              "(E) `export { b }` (b not the first declaration), `export default make` and `exports.create = create` name b, make, create")
         check(not [r for r in rows if r.get("p", "").startswith("src/jsx/hooks/index.ts")],
               "(E) dist/index.js and dist/cjs/index.js map to src/index.ts (one source root away), never the heavier src/jsx/hooks/index.ts")
         check(("src/cli.ts", "<file-scope>", "bin") in got and "src/cli.ts:1" in [r.get("p") for r in rows],
@@ -489,16 +567,20 @@ def truth():
               "(E) CommonJS: module.exports = server / module.exports = class Application name the row")
         check(("src/tpkg/serve.py", "serve", "script") in got and ("src/tpkg/cli.py", "<file-scope>", "script") in got,
               "(E) pyproject: a script function the module defines is named; one it only imports gives <file-scope>, not the helper above it")
-        check(("src/App.java", "main", "main") in got and ("src/tpkg/launch.py", "main", "main") in got,
-              "(E) a module-level main function and a JVM static main are entry rows")
+        check(("src/App.java", "main", "main") in got and ("src/tpkg/launch.py", "main", "main") in got and ("cmd/tool/main.go", "main", "main") in got,
+              "(E) a module-level main function, a JVM static main and a Go func main in package main are entry rows")
+        check(not [r for r in rows if r.get("p", "").startswith("src/gox/helper.go")],
+              "(E) a Go func main in a library package (package gox) is not an entry row")
         check(not [r for r in rows if r.get("p", "").startswith("src/tpkg/worker.py")],
               "(E) a Python method named main on a helper class is not an entry row")
-        want = sorted([("src/index.ts", "Options", "entry"), ("src/cli.ts", "<file-scope>", "bin"), ("lib/server.js", "server", "bin"),
-                       ("lib/application.js", "Application", "bin"), ("src/tpkg/serve.py", "serve", "script"),
-                       ("src/tpkg/cli.py", "<file-scope>", "script"), ("src/App.java", "main", "main"), ("src/tpkg/launch.py", "main", "main")])
+        want = sorted([("src/index.ts", "<file-scope>", "entry"), ("src/options.ts", "Options", "bin"), ("src/cli.ts", "<file-scope>", "bin"),
+                       ("lib/server.js", "server", "bin"), ("lib/application.js", "Application", "bin"), ("src/exportlist.ts", "b", "bin"),
+                       ("src/defexp.ts", "make", "bin"), ("lib/cjsx.js", "create", "bin"), ("src/tpkg/serve.py", "serve", "script"),
+                       ("src/tpkg/cli.py", "<file-scope>", "script"), ("src/App.java", "main", "main"), ("src/tpkg/launch.py", "main", "main"),
+                       ("cmd/tool/main.go", "main", "main")])
         check(got == want and ep.a.get("total") == str(len(want)), "(E) exactly the %d true entry rows, total=%d" % (len(want), len(want)),
               "got %s total=%s" % (got, ep.a.get("total")))
-        badline = [r for r in rows if not entry_symbol_true(TM, r.get("p", "").rsplit(":", 1)[0], int(r.get("p", ":0").rsplit(":", 1)[1] or 0), r.get("n"))]
+        badline = [r for r in rows if not entry_symbol_true(TM, r.get("p", "").rsplit(":", 1)[0], int(r.get("p", ":0").rsplit(":", 1)[1] or 0), r.get("n"), r.get("why"))]
         check(not badline, "(E) every named row's symbol is declared on its line (module scope at line 1)", str(badline[:3]))
     print("== (G) group labels are true of every member ==")
     udoc, _ = om.run(BIN, T, env=UNC)
@@ -528,6 +610,9 @@ def truth():
               "(G) a nested X/X.ts with no sibling (src/router/router.ts) keeps `router/`", str(grp_of.get("src/router/router.ts")))
         check(grp_of.get("tools.py") == "/tools" and grp_of.get("tools/gen.py") == "/tools" and "/tools/" not in labels,
               "(G) outside g=, tools.py beside tools/ is `/tools`, never `/tools/`", "%r %r" % (grp_of.get("tools.py"), grp_of.get("tools/gen.py")))
+        check(grp_of.get("src/Stats.ts") == "stats" and grp_of.get("src/stats/collect.ts") == "stats" and "stats/" not in labels,
+              "(G) CamelCase src/Stats.ts beside src/stats/ shares its group, labelled `stats` (never `stats/`)",
+              "%r %r" % (grp_of.get("src/Stats.ts"), grp_of.get("src/stats/collect.ts")))
         check(grp_of.get("scripts/build.py") == "/scripts/", "(G) outside g=, a directory alone stays `/scripts/`", str(grp_of.get("scripts/build.py")))
         false_lab = [(lab, m.a.get("p")) for node in (us["subsystems"], us["overflow"]) for grp in node.find("grp")
                      for lab in [grp.a.get("label", "")] for m in grp.find("m") if not om.label_true(lab, m.a.get("p", ""))]
@@ -547,10 +632,17 @@ def truth():
     pj, _ = om.run(BIN, T, "--json", env=PART)
     check(not any(k in pj for k in ('"entry_points"', '"subsystems"', '"overflow"', '"utility_demoted"')),
           "(M) the --json map on a partial ingest carries no section key")
-    ppg, pprc = om.run(BIN, T, "--orient=groups", env=PART)
-    check(pprc == 5 and "<orient" not in ppg, "(M) --orient=groups on a partial ingest refuses (exit 5, no page)", "rc=%d" % pprc)
+    for kind in ("entry", "groups", "overflow", "demoted"):
+        ppg, pprc = om.run(BIN, T, "--orient=" + kind, env=PART)
+        check(pprc == 5 and "<orient" not in ppg, "(M) --orient=%s on a partial ingest refuses (exit 5, no page)" % kind, "rc=%d" % pprc)
+    hp = os.path.join(TMP, "partial.html")
+    _, hrc = om.run(BIN, T, "--html=" + hp, env=PART)
+    check(hrc == 5 and not (os.path.exists(hp) and "request" in open(hp, errors="replace").read()),
+          "(M) --html on a partial ingest refuses (exit 5; a rendering with no header cannot carry the floor)", "rc=%d" % hrc)
     man, mrb = om.mcp(BIN, T, [("analyze", {}), ("rank_by", {})], env=PART)
-    check(bool(man) and bool(mrb), "(M) (premise) MCP answered analyze and rank_by under the seam")
+    check("memory_stop=" in man and "memory_stop=" in mrb and not man.startswith("ERROR") and not mrb.startswith("ERROR"),
+          "(M) (premise) MCP analyze and rank_by ANSWERED the partial index (memory_stop= in both, no error reply)",
+          "%r / %r" % (man[:120], mrb[:120]))
     check(om.region(man) is None and "utility_demoted" not in man and om.region(mrb) is None and "utility_demoted" not in mrb,
           "(M) MCP analyze and rank_by on a partial ingest carry no section and no utility_demoted= (CLI == MCP)")
 
@@ -592,20 +684,22 @@ if not ONLY_EXTRA:
     if check("entry_points" in s, "(F) the map carries <entry_points>"):
         ep = s["entry_points"]
         rows = [e.a for e in ep.find("e")]
-        want = [("src/pkg/sync.ts", "bin"), ("src/pkg/tool.ts", "bin"), ("src/pkg/admin.ts", "bin"),
-                ("src/pkg/launcher.py", "main"), ("scripts/release_build.py", "main")]
+        want = [("src/pkg/flat.ts", "bin"), ("src/pkg/sync.ts", "bin"), ("src/pkg/tool.ts", "bin"), ("src/pkg/admin.ts", "bin"),
+                ("src/pkg/launcher.py", "main")]
         check([(r.get("p", "").rsplit(":", 1)[0], r.get("why")) for r in rows] == want,
-              "(F) the 5 entry rows: core bins by mass, then core `main` definitions by mass — no test/fixture/vendored main, "
-              "no bin without a source twin or into tests/", str(rows))
-        check([(r.get("p"), r.get("n")) for r in rows if r.get("why") == "main"] == [("src/pkg/launcher.py:5", "main"), ("scripts/release_build.py:1", "main")],
-              "(F) the main rows carry file:line of `main` (never main_loop)")
+              "(F) the 5 entry rows: core bins by mass (the flattened dist/flat.js mapped to its unique-stem src/pkg/flat.ts), then "
+              "core `main` definitions by mass — no test/fixture/vendored main, no bin without a source twin or naming a tests/ file", str(rows))
+        check([(r.get("p"), r.get("n")) for r in rows if r.get("why") == "main"] == [("src/pkg/launcher.py:5", "main")],
+              "(F) the main row carries file:line of `main` (never main_loop)")
         check(all(r.get("p", "").endswith(":1") for r in rows if r.get("why") == "bin"), "(F) a bin row points at its source module's first exported function (line 1)")
-        check(ep.a.get("total") == "7" and ep.a.get("shown") == "5" and "next" in ep.a,
-              "(F) total=7 counts core evidence only (3 bins, 2 mains, the entry module, the subpath export)", str(ep.a))
+        check(ep.a.get("total") == "8" and ep.a.get("shown") == "5" and "next" in ep.a,
+              "(F) total=8 counts core evidence only (4 bins, 2 mains, the entry module, the subpath export)", str(ep.a))
         if "next" in ep.a:
             prow, _ = om.follow(BIN, FX, ep.a["next"], "why")
-            check([(r.get("p", "").rsplit(":", 1)[0], r.get("why")) for r in prow] == [("src/pkg/index.ts", "entry"), ("src/pkg/sub.ts", "entry")],
-                  "(F) entry_points next= returns the entry module, then the subpath export's source", str(prow))
+            check([(r.get("p", "").rsplit(":", 1)[0], r.get("why")) for r in prow]
+                  == [("scripts/release_build.py", "main"), ("src/pkg/index.ts", "entry"), ("src/pkg/sub.ts", "entry")]
+                  and prow[0].get("p") == "scripts/release_build.py:1" and prow[0].get("n") == "main",
+                  "(F) entry_points next= returns the second main, then the entry module, then the subpath export's source", str(prow))
     check(M["dcount"] is not None and set(M["dem"]) == FIX_DEMOTED, "(F) the demoted set is exactly the compat file and the utility sink",
           "got %s" % sorted(M["dem"]))
 

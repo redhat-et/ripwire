@@ -17,7 +17,8 @@
 #     whose only code is module scope;
 #   - O3: vendored/compat directories (compat/, vendor/) and one utility sink (util/blockpool.py: called from twelve files,
 #     calling nothing);
-#   - entry-point evidence: three package.json bins with a source twin (plus one with none and one into tests/), two
+#   - entry-point evidence: four package.json bins with a source twin (one flattened: dist/flat.js <- src/pkg/flat.ts; plus
+#     one with none and one naming an indexed tests/ file), two
 #     `main` definitions in core files (plus `main` in a test, a fixture and a vendored file, and the near-miss
 #     `main_loop`), "main" and the "." export (one module), and one subpath export.
 # The output is a pure function of OUT: no dates, no randomness, no environment reads.
@@ -97,6 +98,9 @@ ts("src/pkg/tool.ts", 1.7)
 ts("src/pkg/admin.ts", 1.0)
 ts("src/pkg/index.ts", 2.0)
 ts("src/pkg/sub.ts", 3.4)
+# a flattened bundler bin (tsup/esbuild: dist/flat.js <- src/pkg/flat.ts, two components deeper): mapped because its stem
+# is unique among the core sources (an ambiguous stem maps only one source root away — the hono-01 index.ts defect)
+ts("src/pkg/flat.ts", 6.8)
 # the utility sink (O3): every directory's first module calls it; it calls nothing
 w("src/pkg/util/blockpool.py", "def pool_take(value):\n    return value\n\n\ndef pool_give(value):\n    return value\n")
 # vendored / compat (O3 demotes these by the registered generic list); `main` in a vendored file is not evidence
@@ -109,6 +113,7 @@ py("src/legacy_shim.py", 6.4)
 # NOT core (a `main` in a test and in a fixture is not evidence)
 py("tests/test_handlers.py", 2.0, extra=["main"])
 w("tests/test_runner.ts", "export function runAll(): number {\n  return 0;\n}\n")
+w("tests/run_all.js", "function runAllTests () {\n  return 0\n}\nmodule.exports = runAllTests\n")   # an INDEXED bin target: only the tests/ tier drops it
 py("src/pkg/fixtures/sample_data.py", 2.0, extra=["main"])
 py("src/pkg/migrations/0001_initial.py", 2.0)
 py("src/pkg/static/bundle.py", 2.0)
@@ -119,7 +124,7 @@ w("package.json", """{
   "name": "orientfix",
   "version": "1.0.0",
   "bin": { "orientfix": "dist/pkg/tool.js", "orientfix-admin": "dist/pkg/admin.js", "orientfix-sync": "dist/pkg/sync.js",
-           "orientfix-gone": "dist/pkg/nosuchstem.js", "orientfix-test": "dist/test_runner.js" },
+           "orientfix-gone": "dist/pkg/nosuchstem.js", "orientfix-test": "tests/run_all.js", "orientfix-flat": "dist/flat.js" },
   "main": "dist/pkg/index.js",
   "exports": { ".": "./dist/pkg/index.js", "./sub": "./dist/pkg/sub.js" }
 }
