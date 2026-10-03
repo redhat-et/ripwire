@@ -289,7 +289,8 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # RE-ANCHORED BY HAND 2026-10-03 (lane/orient-narrow-v3): map.xml's "<!-- orient: …-->" clause is the O-narrow v3 wording
 # (n= an exported entry or <file-scope>; label= dir/ only when every member is under it; the ranked rows keep the demoted
 # files; the corrected G-descent and p= sentences), +287 B, and est_tokens= 1421 -> 1536 in its two places. Checked: every
-# element and every other comment is byte-identical to the previous pin (at= masked).
+# element and every other comment is byte-identical to the previous pin (at= masked). Again 2026-10-03 (final review F5):
+# +52 B, the clause names a JVM/.NET static main (Go only in package main); est_tokens= 1536 -> 1556; nothing else moved.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -516,12 +517,13 @@ probeFor()
 # map answer of that scope. No other schema moved. Under legend=ref the reading is served once per session.
 # RE-PINNED 2026-10-03 (lane/orient-narrow-v3): ripwire.map/v1 1520 -> 1550 (measured 1537, the --top-k=3 probe). The compact
 # orient term now says what n= names (exported, or <file-scope>) and when label= ends in / — the two readings whose absence
-# let the O2 graders find false entry rows and false directory labels; no other schema moved.
+# let the O2 graders find false entry rows and false directory labels; no other schema moved. 1550 -> 1570 (measured 1556,
+# final review F5): "n= a program or exported entry", since a C or Python main is not "exported".
 # the pins follow the definitions, measured + 10 rounded up to 10.
 # schema                      pin  measured
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
-ripwire.map/v1                   1550  1537
+ripwire.map/v1                   1570  1556
 ripwire.map-diff/v1              900   885
 ripwire.pack-signatures/v1       770   759
 ripwire.metrics/v1               1040  1021

@@ -136,7 +136,9 @@ OFIX="$( order_of test/fixture )"
 # exported entry or <file-scope>), when label= carries a trailing / (every member under it), that the ranked rows keep the
 # demoted files (the shipping arm is O-narrow), and corrects the G-descent and p= wording. Every element and row is
 # byte-identical to the 1426 document's; the order verdict does not move.
-{ [ "$EFIX" = "1541" ] && [ "$OFIX" = "important-first" ]; } \
+# RE-PIN 2026-10-03 (lane/orient-narrow-v3, final review F5): 1541 -> 1561, legend text only (n= names a JVM/.NET static
+# main too, Go only in package main); the order verdict does not move.
+{ [ "$EFIX" = "1561" ] && [ "$OFIX" = "important-first" ]; } \
     && ok "test/fixture (est_tokens=$EFIX) does NOT auto-flip — order=$OFIX (golden neutral)" \
     || no "test/fixture unexpectedly changed order or est_tokens (est=$EFIX order=$OFIX)"
 
