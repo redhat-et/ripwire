@@ -365,10 +365,16 @@ def cost(M, label):
         check(rows(ja, skip) == rows(jb, skip), "(C) %s: every ranked row's k= equals the base binary's (the rank vector is untouched)" % label)
         if ARM == "narrow":
             def ranked_rows(d):
+                # the rows start after the orient region, or — on the base binary's map, which has none — after the root's
+                # open tag: searching from byte 0 there landed on the compact LEGEND's own "<f p= layer=>" spelling (first
+                # narrow corpus leg, 2026-10-02) and compared legend text to rows. Corrected before any narrow data was graded.
                 rr = om.region(d)
-                i = d.find("<f ", rr[1] if rr else 0)
+                start = rr[1] if rr else d.find(">", d.find("<r ")) + 1
+                i = d.find("<f ", start)
                 return d[i:] if i >= 0 else ""
-            check(ranked_rows(doc) == ranked_rows(bdoc), "(C) %s: O-narrow's ranked rows are byte-identical to the base binary's" % label)
+            rn, rb = ranked_rows(doc), ranked_rows(bdoc)
+            check(rn.startswith("<f ") and rb.startswith("<f "), "(C) %s: both ranked-row extractions start at a row" % label)
+            check(rn == rb, "(C) %s: O-narrow's ranked rows are byte-identical to the base binary's" % label)
 
 
 def legend_arm(M, refs):
