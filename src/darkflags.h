@@ -38,6 +38,7 @@
 #include "pageview.h"           // §P8: pageWindow / effectiveRowCap / secondaryCutAttrs — the ONE paging contract
 #include "nextverb.h"           // P3: nextAttrXml — the ONE pasteable follow-up a cut root carries
 #include "infra/Diagnostics.h"  // DISCLOSE
+#include "infra/lexscan.h"      // identByte / wholeWordAt / takeIdent — the shared lexical primitives
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 
@@ -136,23 +137,11 @@ inline bool isDarkDefault( std::string_view v )
 
 // ── lexical helpers ──────────────────────────────────────────────────────────────────────────────────────
 
-inline bool identByte( unsigned char c ) noexcept { return std::isalnum( c ) || c == '_'; }
-
-// `hay[at, at+len)` is a WHOLE word (not flanked by identifier bytes) — so `Foo` never matches `FooBar` /
-// `myFoo`. Lives HERE, beside identByte, because three modules need the same test on raw file text:
-// layout.h's declaration scanner, flipimpact.h's value lane, and the harvest below.
-inline bool wholeWordAt( std::string_view hay, std::size_t at, std::size_t len ) noexcept
-{
-    if( at > 0 && identByte( (unsigned char)hay[at - 1] ) )
-    {
-        return false;
-    }
-    if( at + len < hay.size() && identByte( (unsigned char)hay[at + len] ) )
-    {
-        return false;
-    }
-    return true;
-}
+// identByte / wholeWordAt / takeIdent live in infra/lexscan.h (one definition beside findWholeWord); the names stay here
+// for this module's callers and the three that reach them through darkflags:: (layout.h, flipimpact.h, degradedscan.h).
+using lexscan::identByte;
+using lexscan::wholeWordAt;
+using lexscan::takeIdent;
 
 // An IDENTIFIER-shaped run: a letter or underscore, then identifier bytes only, with a length in
 // [minLen, maxLen]. Lives beside identByte because more than one lane needs the identical test —
@@ -255,17 +244,6 @@ inline std::string_view trimView( std::string_view s )
         --b;
     }
     return s.substr( a, b - a );
-}
-
-// The identifier starting at `i` (empty if src[i] does not open one), advancing `i` past it.
-inline std::string_view takeIdent( std::string_view src, std::size_t& i )
-{
-    const std::size_t s = i;
-    while( i < src.size() && identByte( (unsigned char)src[i] ) )
-    {
-        ++i;
-    }
-    return src.substr( s, i - s );
 }
 
 // Every identifier mentioned in `expr` (a preprocessor condition), skipping the `defined` keyword itself.

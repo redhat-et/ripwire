@@ -36,6 +36,7 @@
 #include "docparse.h"          // docparse::detail::readWholeFile
 #include "infra/Diagnostics.h"
 #include "infra/jsonesc.h"     // jsonesc::escapeInto — the JSON map's string escape (serialize.h writeJsonStr's flags)
+#include "infra/lexscan.h"     // findWholeWord / takeIdent / wholeWordAt — the shared lexical primitives
 #include "infra/sortutil.h"    // svLess
 #include <algorithm>
 #include <cctype>
@@ -264,6 +265,23 @@ struct FileFacts
     std::vector<std::uint32_t> firstSym;     // the file's first code symbol (lowest line, then id), or UINT32_MAX
 };
 
+// a file's place in the registered classification: a core candidate (code symbol, Source tier, not demo/generated), a
+// codeless source module (an entry target only: a package entry that re-exports declares nothing), or neither
+enum class SourceClass : std::uint8_t { None, Code, Codeless };
+
+inline SourceClass sourceClassOf( std::string_view rel, bool hasCode )
+{
+    if( pathTierOf( rel ) != PathTier::Source || isDemoOrGeneratedPath( rel ) )
+    {
+        return SourceClass::None;
+    }
+    if( hasCode )
+    {
+        return SourceClass::Code;
+    }
+    return isVendored( rel ) ? SourceClass::None : SourceClass::Codeless;
+}
+
 inline FileFacts factsOf( const IngestResult& ing, const std::vector<float>& rank )
 {
     const std::size_t F = ing.files.size();
@@ -298,9 +316,9 @@ inline FileFacts factsOf( const IngestResult& ing, const std::vector<float>& ran
     }
     for( std::uint32_t f = 0; f < F; ++f )
     {
-        const bool isSource = pathTierOf( ff.rel[ f ] ) == PathTier::Source && !isDemoOrGeneratedPath( ff.rel[ f ] );
-        ff.isCandidate[ f ] = hasCode[ f ] && isSource;
-        ff.isCodeless[ f ]  = !hasCode[ f ] && isSource && !isVendored( ff.rel[ f ] );
+        const SourceClass c = sourceClassOf( ff.rel[ f ], hasCode[ f ] != 0 );
+        ff.isCandidate[ f ] = c == SourceClass::Code;
+        ff.isCodeless[ f ]  = c == SourceClass::Codeless;
     }
     return ff;
 }
@@ -579,25 +597,9 @@ inline std::vector<std::pair<std::string, std::string>> pyprojectScripts( std::s
 // A manifest bin/entry module is named by the first function, class or type its own syntax exports (ES `export`, an
 // `export {…}` clause, `export default NAME`, CommonJS `module.exports` / `exports.X`), else by its module scope
 // <file-scope> at line 1 — a true statement about the module, never a non-exported alias, a private helper or a constant.
-inline bool isIdentChar( char c ) noexcept
-{
-    return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '$';
-}
-
-// the first whole-word occurrence of `w` in `text` at or after `from`
-inline std::size_t findWord( std::string_view text, std::string_view w, std::size_t from = 0 ) noexcept
-{
-    for( std::size_t p = text.find( w, from ); p != std::string_view::npos; p = text.find( w, p + 1 ) )
-    {
-        const bool isStart = p == 0 || !isIdentChar( text[ p - 1 ] );
-        const bool isEnd   = p + w.size() >= text.size() || !isIdentChar( text[ p + w.size() ] );
-        if( isStart && isEnd )
-        {
-            return p;
-        }
-    }
-    return std::string_view::npos;
-}
+// The lexical primitives are infra/lexscan.h's ([A-Za-z0-9_]): a JS `$name` therefore reads as a boundary, so a marker on
+// it is MISSED (the row names the module scope, a true statement), never invented.
+using lexscan::findWholeWord;
 
 inline std::size_t skipSpace( std::string_view text, std::size_t p ) noexcept
 {
@@ -609,25 +611,26 @@ inline std::size_t skipSpace( std::string_view text, std::size_t p ) noexcept
 }
 
 // the identifier starting at p ("" when none)
-inline std::string_view identAt( std::string_view text, std::size_t p ) noexcept
+inline std::string_view identAt( std::string_view text, std::size_t p )
 {
-    std::size_t e = p;
-    while( e < text.size() && isIdentChar( text[ e ] ) )
-    {
-        ++e;
-    }
-    return text.substr( p, e - p );
+    return lexscan::takeIdent( text, p );   // p is a copy: the caller's offset does not move
+}
+
+// is there an assignment `=` (not `==`) at p, past whitespace?
+inline bool isAssignAt( std::string_view text, std::size_t p ) noexcept
+{
+    p = skipSpace( text, p );
+    return p < text.size() && text[ p ] == '=' && !( p + 1 < text.size() && text[ p + 1 ] == '=' );
 }
 
 // an assignment's right-hand identifier after p ("= NAME", not "=="; "= class NAME" / "= function NAME" read through)
-inline std::string_view assignedIdent( std::string_view text, std::size_t p ) noexcept
+inline std::string_view assignedIdent( std::string_view text, std::size_t p )
 {
-    p = skipSpace( text, p );
-    if( p >= text.size() || text[ p ] != '=' || ( p + 1 < text.size() && text[ p + 1 ] == '=' ) )
+    if( !isAssignAt( text, p ) )
     {
         return {};
     }
-    p = skipSpace( text, p + 1 );
+    p = skipSpace( text, skipSpace( text, p ) + 1 );
     std::string_view word = identAt( text, p );
     if( word == "class" || word == "function" || word == "async" )
     {
@@ -653,18 +656,18 @@ inline std::string_view lineAt( std::string_view text, std::uint32_t line ) noex
 }
 
 // does the module's own syntax export `name` (declared on `line`)?
-inline bool jsExports( std::string_view text, std::string_view name, std::uint32_t line ) noexcept
+inline bool jsExports( std::string_view text, std::string_view name, std::uint32_t line )
 {
     const std::string_view decl = lineAt( text, line );
-    if( const std::size_t at = findWord( decl, name ); at != std::string_view::npos )
+    if( const std::size_t at = findWholeWord( decl, name ); at != std::string_view::npos )
     {
         const std::string_view before = decl.substr( 0, at );
-        if( findWord( before, "export" ) != std::string_view::npos || before.find( "exports" ) != std::string_view::npos )
+        if( findWholeWord( before, "export" ) != std::string_view::npos || before.find( "exports" ) != std::string_view::npos )
         {
             return true;   // export function f / export interface T / module.exports = class C / exports.f = function f
         }
     }
-    for( std::size_t p = findWord( text, "export" ); p != std::string_view::npos; p = findWord( text, "export", p + 1 ) )
+    for( std::size_t p = findWholeWord( text, "export" ); p != std::string_view::npos; p = findWholeWord( text, "export", p + 1 ) )
     {
         std::size_t q = skipSpace( text, p + 6 );
         if( identAt( text, q ) == "default" )
@@ -716,7 +719,7 @@ inline bool jsExports( std::string_view text, std::string_view name, std::uint32
     }
     for( std::size_t p = text.find( "exports" ); p != std::string_view::npos; p = text.find( "exports", p + 1 ) )
     {
-        if( ( p > 0 && isIdentChar( text[ p - 1 ] ) ) || ( p + 7 < text.size() && isIdentChar( text[ p + 7 ] ) ) )
+        if( !lexscan::wholeWordAt( text, p, 7 ) )
         {
             continue;
         }
@@ -724,7 +727,8 @@ inline bool jsExports( std::string_view text, std::string_view name, std::uint32
         if( q < text.size() && text[ q ] == '.' )   // [module.]exports.X = NAME, or exports.NAME = …
         {
             const std::string_view key = identAt( text, q + 1 );
-            if( !key.empty() && ( ( key == name && !assignedIdent( text, q + 1 + key.size() ).empty() ) || assignedIdent( text, q + 1 + key.size() ) == name ) )
+            const std::size_t after = q + 1 + key.size();
+            if( !key.empty() && ( ( key == name && isAssignAt( text, after ) ) || assignedIdent( text, after ) == name ) )
             {
                 return true;
             }
@@ -739,10 +743,12 @@ inline bool jsExports( std::string_view text, std::string_view name, std::uint32
     return false;
 }
 
-inline bool isJsLike( std::string_view rel ) noexcept
+// a JS/TS function, class or type (a type alias is Struct) declared at module level: what an export marker can name
+inline bool isNamableEntryKind( const Symbol& sym ) noexcept
 {
-    const std::size_t dot = rel.rfind( '.' );
-    return dot != std::string_view::npos && std::any_of( std::begin( kSourceExts ), std::end( kSourceExts ), [ & ]( std::string_view e ) { return rel.substr( dot ) == e; } );
+    const bool isJs   = sym.lang == Lang::TypeScript || sym.lang == Lang::JavaScript;
+    const bool isKind = sym.kind == SymKind::Function || sym.kind == SymKind::Class || sym.kind == SymKind::Struct || sym.kind == SymKind::Interface;
+    return isJs && isKind && !sym.fnLocal;
 }
 
 // a manifest-named module's row: its first exported function, class or type (JS/TS), else its module scope at line 1
@@ -752,26 +758,23 @@ inline EntryRow moduleRow( const IngestResult& ing, const FileFacts& ff, const s
     r.fileId = f;
     r.why    = why;
     r.name   = "<file-scope>";
-    if( !isJsLike( ff.rel[ f ] ) )
-    {
-        return r;
-    }
-    const std::optional<std::string> text = docparse::detail::readWholeFile( root + "/" + ff.rel[ f ] );
-    if( !text )
-    {
-        return r;   // unread: the module is still the entry, so its scope is a true name (a symbol would be a guess)
-    }
-    std::uint32_t best = UINT32_MAX;
+    std::vector<std::uint32_t> namable;   // the module's JS/TS functions, classes and types, line order (then id)
     for( std::uint32_t s = 0; s < ing.symbols.size(); ++s )
     {
-        const Symbol& sym      = ing.symbols[ s ];
-        const bool    isNamable = sym.kind == SymKind::Function || sym.kind == SymKind::Class || sym.kind == SymKind::Struct || sym.kind == SymKind::Interface;
-        if( sym.fileId == f && isNamable && !sym.fnLocal && ( best == UINT32_MAX || sym.line < ing.symbols[ best ].line )
-            && jsExports( *text, sym.name, sym.line ) )
+        const Symbol& sym = ing.symbols[ s ];
+        if( sym.fileId == f && isNamableEntryKind( sym ) )
         {
-            best = s;
+            namable.push_back( s );
         }
     }
+    std::stable_sort( namable.begin(), namable.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return ing.symbols[ a ].line < ing.symbols[ b ].line; } );
+    const std::optional<std::string> text = namable.empty() ? std::nullopt : docparse::detail::readWholeFile( root + "/" + ff.rel[ f ] );
+    if( !text )
+    {
+        return r;   // nothing namable, or unread: the module is still the entry, so its scope is a true name (a symbol would be a guess)
+    }
+    const auto hit = std::find_if( namable.begin(), namable.end(), [ & ]( std::uint32_t s ) { return jsExports( *text, ing.symbols[ s ].name, ing.symbols[ s ].line ); } );
+    const std::uint32_t best = hit == namable.end() ? UINT32_MAX : *hit;
     if( best != UINT32_MAX )
     {
         r.line = std::max<std::uint32_t>( 1, ing.symbols[ best ].line );
@@ -802,7 +805,7 @@ inline bool isProgramMain( const Symbol& s, std::string_view root, std::string_v
     {
         return false;   // unread: the package clause is unknown, so no claim
     }
-    for( std::size_t p = findWord( *text, "package" ); p != std::string_view::npos; p = findWord( *text, "package", p + 1 ) )
+    for( std::size_t p = findWholeWord( *text, "package" ); p != std::string_view::npos; p = findWholeWord( *text, "package", p + 1 ) )
     {
         if( ( p == 0 || ( *text )[ p - 1 ] == '\n' ) && identAt( *text, skipSpace( *text, p + 7 ) ) == "main" )
         {

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "infra/jsonesc.h"   // shSingleQuote — the repository's canonical POSIX argv quoting
+#include "infra/lexscan.h"   // findWholeWord — boundedFind's one definition
 #include "model.h"           // IngestResult
 #include "query.h"           // isKnownLayerWord — the layer vocabulary --verify enforces at evaluation
 #include "sarif.h"           // rootRelativeUri / rootPrefixOf — the ONE root-relative path rule the map emits with
@@ -85,18 +86,10 @@ inline bool wordByte( char c ) noexcept
     return std::isalnum( u ) || c == '_';
 }
 
+// the first whole-word occurrence (wordByte's alphabet): infra/lexscan.h findWholeWord, the one definition
 inline std::size_t boundedFind( std::string_view haystack, std::string_view needle, std::size_t from = 0 ) noexcept
 {
-    for( std::size_t p = haystack.find( needle, from ); p != std::string_view::npos; p = haystack.find( needle, p + 1 ) )
-    {
-        const bool left  = p == 0 || !wordByte( haystack[p - 1] );
-        const bool right = p + needle.size() == haystack.size() || !wordByte( haystack[p + needle.size()] );
-        if( left && right )
-        {
-            return p;
-        }
-    }
-    return std::string_view::npos;
+    return lexscan::findWholeWord( haystack, needle, from );
 }
 
 inline bool has( std::string_view lower, std::string_view phrase ) noexcept

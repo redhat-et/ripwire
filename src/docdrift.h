@@ -550,16 +550,7 @@ inline constexpr const char* kDeclKeywords[] = { "constexpr", "const", "static",
 
 inline bool hasWholeWord( std::string_view line, std::string_view word )
 {
-    for( std::size_t at = line.find( word ); at != std::string_view::npos; at = line.find( word, at + 1 ) )
-    {
-        const bool leftOk  = at == 0 || !darkflags::identByte( (unsigned char)line[ at - 1 ] );
-        const bool rightOk = at + word.size() >= line.size() || !darkflags::identByte( (unsigned char)line[ at + word.size() ] );
-        if( leftOk && rightOk )
-        {
-            return true;
-        }
-    }
-    return false;
+    return lexscan::findWholeWord( line, word ) != std::string_view::npos;   // infra/lexscan.h, the one definition
 }
 
 inline bool declKeywordOnLine( std::string_view line )
