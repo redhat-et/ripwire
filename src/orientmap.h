@@ -623,7 +623,34 @@ inline bool isAssignAt( std::string_view text, std::size_t p ) noexcept
     return p < text.size() && text[ p ] == '=' && !( p + 1 < text.size() && text[ p + 1 ] == '=' );
 }
 
-// an assignment's right-hand identifier after p ("= NAME", not "=="; "= class NAME" / "= function NAME" read through)
+// does the expression END at p (past spaces and tabs)? `;`, a line end, `}`, `,`, `)`, a comment or EOF — so `= make`
+// ends there, while `= make(…)`, `= make.x`, `= make[…]` or `= make ? …` export something the callee only computes
+inline bool exprEndsAt( std::string_view text, std::size_t p ) noexcept
+{
+    while( p < text.size() && ( text[ p ] == ' ' || text[ p ] == '\t' ) )
+    {
+        ++p;
+    }
+    if( p >= text.size() )
+    {
+        return true;
+    }
+    const char c = text[ p ];
+    const bool isComment = c == '/' && p + 1 < text.size() && ( text[ p + 1 ] == '/' || text[ p + 1 ] == '*' );
+    return c == ';' || c == '\n' || c == '\r' || c == '}' || c == ',' || c == ')' || isComment;
+}
+
+// the identifier an export binds at p when the expression IS that identifier ("NAME" then the expression's end), or ""
+// when it is a call, member access or any longer expression of it (final review F1: `module.exports = mergeExports(fn, …)`
+// exports the call's result, not mergeExports)
+inline std::string_view boundIdentAt( std::string_view text, std::size_t p )
+{
+    const std::string_view word = identAt( text, p );
+    return !word.empty() && exprEndsAt( text, p + word.size() ) ? word : std::string_view();
+}
+
+// an assignment's right-hand identifier after p ("= NAME" ending the expression, not "=="; "= class NAME" /
+// "= function NAME" read through: those DECLARE the exported name)
 inline std::string_view assignedIdent( std::string_view text, std::size_t p )
 {
     if( !isAssignAt( text, p ) )
@@ -631,12 +658,14 @@ inline std::string_view assignedIdent( std::string_view text, std::size_t p )
         return {};
     }
     p = skipSpace( text, skipSpace( text, p ) + 1 );
-    std::string_view word = identAt( text, p );
+    const std::string_view word = identAt( text, p );
     if( word == "class" || word == "function" || word == "async" )
     {
-        word = identAt( text, skipSpace( text, p + word.size() ) );
+        const std::size_t q = skipSpace( text, p + word.size() );
+        const std::string_view next = identAt( text, q );
+        return next == "function" ? identAt( text, skipSpace( text, q + next.size() ) ) : next;   // async function NAME
     }
-    return word;
+    return boundIdentAt( text, p );
 }
 
 inline std::string_view lineAt( std::string_view text, std::uint32_t line ) noexcept
@@ -672,9 +701,9 @@ inline bool jsExports( std::string_view text, std::string_view name, std::uint32
         std::size_t q = skipSpace( text, p + 6 );
         if( identAt( text, q ) == "default" )
         {
-            if( identAt( text, skipSpace( text, q + 7 ) ) == name )
+            if( boundIdentAt( text, skipSpace( text, q + 7 ) ) == name )
             {
-                return true;   // export default NAME
+                return true;   // export default NAME (not export default NAME(…): that exports the call's result)
             }
             continue;
         }

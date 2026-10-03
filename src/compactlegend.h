@@ -311,14 +311,14 @@ inline constexpr std::string_view kCompactModScopeReading =
 // (test/orientmapcheck.sh (L)); the last clause is what this arm does to a demoted file (orientarm.h).
 inline constexpr std::string_view kCompactOrientTermO =
     "<entry_points shown= total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with "
-    "evidence (n= exported, or <file-scope>). <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> "
+    "evidence (n= a program or exported entry, or <file-scope>). <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> "
     "<m p=PATH>: core files grouped under g=, groups by mass with top members; label= dir/ only if all members are in it; "
     "p= relative to g=, else /repo-relative. "
     "<overflow shown= total= capped= next=>: every other core file breadth-first, cut at 2048 B; next= "
     "pages the cut. <demoted utility_demoted=N next=>: N sink or vendored files left the ranked rows and the groups";
 inline constexpr std::string_view kCompactOrientTermNarrow =
     "<entry_points shown= total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with "
-    "evidence (n= exported, or <file-scope>). <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> "
+    "evidence (n= a program or exported entry, or <file-scope>). <subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> "
     "<m p=PATH>: core files grouped under g=, groups by mass with top members; label= dir/ only if all members are in it; "
     "p= relative to g=, else /repo-relative. "
     "<overflow shown= total= capped= next=>: every other core file breadth-first, cut at 2048 B; next= "

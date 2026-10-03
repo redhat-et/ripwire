@@ -14548,8 +14548,8 @@ one of the two rows: the largest possible Δ was +9.1 pp.
 v3 is O-narrow (the shipping arm: `src/orientarm.h` `kArm = Arm::Narrow`, so the ranked rows stay byte-identical to the
 base's) with three changes; every other registered rule is v2's.
 - **Entry rows** name only an exported or public entry: a module-level `main` (a JVM static main; Go only in `package
-  main`), or the first function, class or type a manifest-named module exports by its own syntax, else `<file-scope>` at
-  line 1. A build path maps to a same-stem source at most one source root away, or deeper only when the stem is unique.
+  main`), or the first function, class or type a manifest-named module exports by its own syntax (the exported identifier
+  ends the expression: an exported call's result names the module), else `<file-scope>` at line 1. A build path maps to a same-stem source at most one source root away, or deeper only when the stem is unique.
 - **Labels** are true of every member: `dir/` only when every member sits under it, else the bare name.
 - **A memory-guard partial ingest carries no section** (CLI and MCP), and `--orient=KIND` refuses.
 

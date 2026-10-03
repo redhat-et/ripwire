@@ -96,8 +96,14 @@ UNC = {"RIPWIRE_ORIENT_UNCAPPED": "1"}
 FX = os.path.join(TMP, "fx")
 # the registered arm this binary is: ORIENTMAP_ARM, else read from its own legend (orientarm.h kArm picks the legend; O-narrow's
 # says the ranked rows keep the demoted files), so the lane head (kArm = Narrow) and an O arm build each get their own arms
-ARM = os.environ.get("ORIENTMAP_ARM") or ("narrow" if "the ranked rows keep them" in om.run(BIN, FX)[0] else "O")
-print("  INFO  arm: %s" % ARM)
+_armdoc = om.run(BIN, FX)[0]
+_isNarrowLegend, _isOLegend = "the ranked rows keep them" in _armdoc, "left the ranked rows and the groups" in _armdoc
+if _isNarrowLegend == _isOLegend:   # a legend edit must not silently flip (or blur) the arm the checks below assume
+    print("  FAIL  the map's legend carries %s of the two arm sentences (O: 'left the ranked rows and the groups'; O-narrow: "
+          "'the ranked rows keep them') — exactly one is required" % ("both" if _isNarrowLegend else "neither"))
+    sys.exit(1)
+ARM = os.environ.get("ORIENTMAP_ARM") or ("narrow" if _isNarrowLegend else "O")
+print("  INFO  arm: %s (legend: %s)" % (ARM, "narrow" if _isNarrowLegend else "O"))
 FIX_DEMOTED = {"src/pkg/compat/list_shim.py", "src/pkg/util/blockpool.py"}
 fails = []
 
@@ -271,8 +277,9 @@ def js_exported(lines, line, n):
         return True
     whole = "\n".join(lines)
     e = re.escape(n)
-    for pat in (r"\bexport\s+default\s+%s\b" % e, r"\bmodule\.exports\s*=\s*%s\b" % e, r"\bexports\.[\w$]+\s*=\s*%s\b" % e,
-                r"\bexports\.%s\s*=" % e):
+    end = r"(?=[ \t]*(?:[;\r\n},)]|//|/\*|$))"   # the identifier ENDS the expression: `= make(…)` exports a call's result
+    for pat in (r"\bexport\s+default\s+%s%s" % (e, end), r"\bmodule\.exports\s*=\s*%s%s" % (e, end),
+                r"\bexports\.[\w$]+\s*=\s*%s%s" % (e, end), r"\bexports\.%s\s*=" % e):
         if re.search(pat, whole):
             return True
     for c in re.finditer(r"\bexport\s*(?:type\s*)?\{([^}]*)\}(?!\s*from\b)", whole):
@@ -551,7 +558,8 @@ def truth():
         got = sorted((r.get("p", "").rsplit(":", 1)[0], r.get("n"), r.get("why")) for r in rows)
         print("  INFO  (E) entry rows: %s" % [(r.get("p"), r.get("n"), r.get("why")) for r in rows])
         bad_names = {"Internal", "helperOnly", "VERSION", "VERSION_TAG", "_parseArgs", "isHttpErrorLike", "isPlainHelper", "_helper",
-                     "_bind_port", "_prepare", "UpdateStateFunction", "helper", "firstLocal", "_internal", "helperA", "createApp"}
+                     "_bind_port", "_prepare", "UpdateStateFunction", "helper", "firstLocal", "_internal", "helperA", "createApp",
+                     "build", "factory", "real"}
         check(not [r for r in rows if r.get("n") in bad_names],
               "(E) no entry row names a non-exported alias, a private helper or a version constant",
               str([(r.get("p"), r.get("n")) for r in rows if r.get("n") in bad_names]))
@@ -570,6 +578,10 @@ def truth():
               "(E) CommonJS: module.exports = server / module.exports = class Application name the row")
         check(("src/tpkg/serve.py", "serve", "script") in got and ("src/tpkg/cli.py", "<file-scope>", "script") in got,
               "(E) pyproject: a script function the module defines is named; one it only imports gives <file-scope>, not the helper above it")
+        check(("lib/callres.js", "<file-scope>", "bin") in got and ("src/defcall.ts", "<file-scope>", "bin") in got
+              and ("lib/factory.js", "<file-scope>", "bin") in got and ("lib/plainmake.js", "make", "bin") in got,
+              "(E) an export of a CALL RESULT (module.exports = make({…}), export default build({…}), exports.api = factory(real)) "
+              "is <file-scope>, never the callee; a plain module.exports = make names make")
         check(("src/App.java", "main", "main") in got and ("src/tpkg/launch.py", "main", "main") in got and ("cmd/tool/main.go", "main", "main") in got,
               "(E) a module-level main function, a JVM static main and a Go func main in package main are entry rows")
         check(not [r for r in rows if r.get("p", "").startswith("src/gox/helper.go")],
@@ -580,7 +592,9 @@ def truth():
                        ("lib/server.js", "server", "bin"), ("lib/application.js", "Application", "bin"), ("src/exportlist.ts", "b", "bin"),
                        ("src/defexp.ts", "make", "bin"), ("lib/cjsx.js", "create", "bin"), ("src/tpkg/serve.py", "serve", "script"),
                        ("src/tpkg/cli.py", "<file-scope>", "script"), ("src/App.java", "main", "main"), ("src/tpkg/launch.py", "main", "main"),
-                       ("cmd/tool/main.go", "main", "main")])
+                       ("cmd/tool/main.go", "main", "main"), ("lib/callres.js", "<file-scope>", "bin"),
+                       ("src/defcall.ts", "<file-scope>", "bin"), ("lib/factory.js", "<file-scope>", "bin"),
+                       ("lib/plainmake.js", "make", "bin")])
         check(got == want and ep.a.get("total") == str(len(want)), "(E) exactly the %d true entry rows, total=%d" % (len(want), len(want)),
               "got %s total=%s" % (got, ep.a.get("total")))
         badline = [r for r in rows if not entry_symbol_true(TM, r.get("p", "").rsplit(":", 1)[0], int(r.get("p", ":0").rsplit(":", 1)[1] or 0), r.get("n"), r.get("why"))]

@@ -2022,8 +2022,9 @@ inline constexpr std::string_view kDataSectionsCutLegend =
 inline constexpr std::string_view kOrientLegendO =
     "<!-- orient: the whole-repo map's orientation, before the ranked rows; the rank (k=) is untouched. <entry_points shown= "
     "total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with evidence (a manifest "
-    "bin/script, a main definition, the package entry module), p= repo-relative; n= is a module-level main, the script's "
-    "function, or the module's first function, class or type its own syntax exports, else <file-scope> (the module itself). "
+    "bin/script, a main definition, the package entry module), p= repo-relative; n= is a module-level main or a JVM/.NET "
+    "static main (Go only in package main), the script's function, or the module's first function, class or type its own "
+    "syntax exports, else <file-scope> (the module itself). "
     "<subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not "
     "test/demo/generated, not demoted) grouped under g=, reached from the root while one child directory holds 2/3 of its "
     "parent's rank mass; label= is dir/ when every member is under it, else a name prefix (with dir/ when files so named "
@@ -2035,8 +2036,9 @@ inline constexpr std::string_view kOrientLegendO =
 inline constexpr std::string_view kOrientLegendNarrow =
     "<!-- orient: the whole-repo map's orientation, before the ranked rows; the rank (k=) is untouched. <entry_points shown= "
     "total= capped= next=> <e p=FILE:LINE n=SYMBOL why=bin|script|main|entry>: entry points with evidence (a manifest "
-    "bin/script, a main definition, the package entry module), p= repo-relative; n= is a module-level main, the script's "
-    "function, or the module's first function, class or type its own syntax exports, else <file-scope> (the module itself). "
+    "bin/script, a main definition, the package entry module), p= repo-relative; n= is a module-level main or a JVM/.NET "
+    "static main (Go only in package main), the script's function, or the module's first function, class or type its own "
+    "syntax exports, else <file-scope> (the module itself). "
     "<subsystems g=ROOT shown= total= capped= next=> <grp label=LABEL n=FILES> <m p=PATH>: the core files (source tier, not "
     "test/demo/generated, not demoted) grouped under g=, reached from the root while one child directory holds 2/3 of its "
     "parent's rank mass; label= is dir/ when every member is under it, else a name prefix (with dir/ when files so named "

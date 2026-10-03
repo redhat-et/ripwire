@@ -12,6 +12,9 @@
 #         constant; its first exported function, class or type is `export interface Options` (the row's n=);
 #       - `export { b }` where b is not the first declaration names b; `export default make` names make; CommonJS
 #         `exports.create = create` names create;
+#       - an export of a CALL RESULT exports the result, not the callee: `module.exports = make({…})`,
+#         `export default build({…})` and `exports.api = factory(real)` read <file-scope>; the plain `module.exports = make`
+#         names make (webpack lib/index.js `module.exports = mergeExports(fn, {…})`, final review F1);
 #       - a bin script that exports nothing (src/cli.ts: a constant, then a private helper) is named by its module scope;
 #       - CommonJS: lib/server.js exports `server` by `module.exports = server` after a VERSION constant and a private
 #         instanceof helper; lib/application.js exports `module.exports = class Application` after a private helper;
@@ -75,6 +78,11 @@ w("src/defexp.ts", "function _internal(x: number): number {\n  return x;\n}\nfun
                    "  return _internal(x);\n}\nexport default make\n")
 w("lib/cjsx.js", "'use strict'\nfunction helperA (x) {\n  return x\n}\nfunction create (x) {\n  return helperA(x)\n}\n"
                  "exports.create = create\n")
+# exports of a call result (the callee is not what the module exports) vs the plain identifier
+w("lib/callres.js", "'use strict'\nfunction make (o) {\n  return o\n}\nmodule.exports = make({ a: 1 })\n")
+w("src/defcall.ts", "function build(o: object): object {\n  return o;\n}\nexport default build({ x: 1 });\n")
+w("lib/factory.js", "'use strict'\nfunction factory (f) {\n  return f\n}\nfunction real () {\n  return 1\n}\nexports.api = factory(real)\n")
+w("lib/plainmake.js", "'use strict'\nfunction make (x) {\n  return x\n}\nmodule.exports = make\n")
 # Go: `func main` is a program entry only in package main
 w("src/gox/helper.go", "package gox\n\nfunc main() {\n}\n\nfunc Helper() int {\n\treturn 1\n}\n")
 w("cmd/tool/main.go", "package main\n\nfunc main() {\n}\n")
@@ -101,7 +109,8 @@ w("package.json", """{
   "name": "orienttruth",
   "version": "1.0.0",
   "bin": { "tcli": "dist/cli.js", "tserve": "lib/server.js", "tapp": "lib/application.js", "topts": "dist/options.js",
-           "texl": "dist/exportlist.js", "tdef": "dist/defexp.js", "tcjsx": "lib/cjsx.js" },
+           "texl": "dist/exportlist.js", "tdef": "dist/defexp.js", "tcjsx": "lib/cjsx.js",
+           "tcall": "lib/callres.js", "tdefcall": "dist/defcall.js", "tfactory": "lib/factory.js", "tplain": "lib/plainmake.js" },
   "main": "dist/cjs/index.js",
   "exports": { ".": { "types": "./dist/types/index.d.ts", "import": "./dist/index.js", "require": "./dist/cjs/index.js" } }
 }
