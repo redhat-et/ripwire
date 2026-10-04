@@ -33,6 +33,66 @@ assert 'phantom' not in syms, 'quoted definition became an indexed symbol'
 assert 'nonexistent' not in calls('quoted'), 'quoted call site became a call edge'
 print('  PASS Elixir definitions, guards, macros, local/remote calls, pipes and negatives')
 PY
+
+# Issue #357: quoted syntax is inert, but unquote expressions are evaluated while
+# constructing it. Keep this fixture separate from the golden corpus so the gate
+# contrasts the call sites and the declined count directly.
+mkdir "$TMP/inert"
+cat > "$TMP/inert/quoted.ex" <<'EXINERT'
+defmodule InertFixture do
+  def inert(x), do: x
+  def bar(x), do: x
+  def splice(x), do: [x]
+  def after_call(x), do: x
+  def quote(x), do: x
+  def comment(x), do: x
+
+  def run(x) do
+    quote do
+      inert(x)
+      foo(unquote(bar(x)))
+      [unquote_splicing(splice(x))]
+    end
+    after_call(x)
+    InertFixture.quote(x)
+    InertFixture.comment(x)
+  end
+
+  def options(x) do
+    quote bind_quoted: [item: bar(x)] do
+      inert(item)
+    end
+  end
+
+  def nested(x) do
+    quote do
+      unquote(quote do
+        inert(x)
+        unquote(bar(x))
+      end)
+    end
+  end
+end
+EXINERT
+"$BIN" "$TMP/inert" --no-cache > "$TMP/inert.xml"
+python3 - "$TMP/inert.xml" <<'PYINERT'
+import re, sys, xml.etree.ElementTree as ET
+data = open(sys.argv[1]).read()
+syms = {s.get('n'): s for s in ET.fromstring(data).iter('s')}
+def calls(name): return {c.get('n') for c in syms[name].iter('c')}
+assert 'inert/1' not in calls('run/1'), 'ordinary quoted call became an edge'
+assert 'bar/1' in calls('run/1'), 'unquote(bar(x)) lost its live call edge'
+assert 'splice/1' in calls('run/1'), 'unquote_splicing(splice(x)) lost its live call edge'
+assert 'after_call/1' in calls('run/1'), 'call after quote was suppressed'
+assert {'quote/1', 'comment/1'} <= calls('run/1'), 'ordinary named functions were treated as special forms'
+assert 'bar/1' in calls('options/1'), 'bind_quoted option expression was suppressed'
+assert 'inert/1' not in calls('options/1'), 'bind_quoted quote body became live'
+assert 'bar/1' in calls('nested/1'), 'inner unquote in nested quote lost its live call edge'
+assert 'inert/1' not in calls('nested/1'), 'nested quote body became live'
+match = re.search(r'\bdeclined=(\d+)\b', data)
+assert match and int(match.group(1)) >= 3, 'inert-region calls vanished from declined accounting'
+print('  PASS inert quote bodies, live holes, near misses, boundaries, and declined count')
+PYINERT
 for n in a b c; do "$BIN" "$TMP/fix" > "$TMP/$n.xml"; done
 cmp "$TMP/map.xml" "$TMP/a.xml"
 cmp "$TMP/a.xml" "$TMP/b.xml"
