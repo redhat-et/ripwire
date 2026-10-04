@@ -2291,7 +2291,7 @@ inline constexpr const char* kDeclinedMapLegend =
 inline constexpr const char* kDeclinedGateMapLegend =
     "<!-- hdr:declined=also-counts-builtin-type-method-calls(dict.get,list.append)whose-bound-targets-classes-the-callers-file-never-names -->";
 inline constexpr const char* kInertDeclinedMapLegend =
-    "<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-quote-AST-outside-enabled-unquote/unquote_splicing;no-edge;not-a-possible-callee -->";
+    "<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-inert-quote-AST-after-unquote/unquote_splicing-re-entry;no-edge;not-a-possible-callee -->";
 
 // #157: the default map's own nest-refused disclosure — before this, a refused file's absence carried no signal
 // on the map's own header at all, only in the skipped verb's own report (if a reader thought to ask). Charged

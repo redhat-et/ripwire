@@ -185,8 +185,8 @@ PYINERTVERBS
 mkdir -p "$TMP/marker/src" "$TMP/marker/a" "$TMP/marker/b"
 cat > "$TMP/marker/src/run.cpp" <<'CPPMARKER'
 int run() {
-  const char* marker = R"marker(<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-quote-AST-outside-enabled-unquote/unquote_splicing;no-edge;not-a-possible-callee -->)marker";
-  const char* clause = "ordinary Elixir calls written inside quote AST";
+  const char* marker = R"marker(<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-inert-quote-AST-after-unquote/unquote_splicing-re-entry;no-edge;not-a-possible-callee -->)marker";
+  const char* clause = "ordinary Elixir call candidates in inert quote AST";
   return duplicate();
 }
 CPPMARKER

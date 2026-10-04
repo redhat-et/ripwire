@@ -370,7 +370,7 @@ inline bool isJsTsBuiltinMember( std::string_view ctor, std::string_view name ) 
 //             function value. name = the container, fieldName = the written callee, composeRel = the key,
 //             qualifier = p|l|f, argCount = the parameter index. Joined to Value rows only (called_by=/through=, a
 //             may-call clue); never a use site, never in the CSR.
-//   Inert   — an ordinary Elixir call candidate inside quote's AST body, outside an unquote live hole.
+//   Inert   — an ordinary Elixir call candidate whose enclosing quote AST remains inert after live-hole re-entry.
 //             It remains a site for declined/report accounting, but can never bind or mint a call edge.
 enum class RefRole : std::uint8_t { Call, Read, Write, Import, Extends, Macro, Type, Value, Through, Inert };
 // The number of RefRole enumerators — the bound readRef validates a cached role byte against (see kSymKindCount).
