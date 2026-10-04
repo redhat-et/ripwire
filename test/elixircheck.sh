@@ -118,6 +118,21 @@ def declined(path):
 assert declined(sys.argv[1]) >= declined(sys.argv[2]) + 4, (declined(sys.argv[1]), declined(sys.argv[2]))
 print('  PASS four inert call sites move declined accounting by four')
 PYINERTCOUNT
+"$BIN" "$TMP/inert" --callees=run/1 --no-cache > "$TMP/inert-callees.xml"
+"$BIN" "$TMP/inert" --callers=inert/1 --no-cache > "$TMP/inert-callers.xml"
+python3 - "$TMP/inert.xml" "$TMP/inert-callees.xml" "$TMP/inert-callers.xml" <<'PYINERTVERBS'
+import sys, xml.etree.ElementTree as ET
+map_text, callees_text, callers_text = [open(p).read() for p in sys.argv[1:]]
+assert 'including inert Elixir quote sites' in map_text, 'compact map misdescribes declined sites'
+callees = ET.fromstring(callees_text)
+assert callees.get('declined_calls') == '2', callees.attrib
+assert 'including inert Elixir quote sites' in callees_text, 'compact callees misdescribes declined sites'
+callers = ET.fromstring(callers_text)
+assert callers.get('count') == '0', callers.attrib
+assert 'declined_calls' not in callers.attrib, 'inert sites became possible callers'
+print('  PASS declined map/callees accounting, compact readings, and no possible callers')
+PYINERTVERBS
+
 # quote options control whether unquote is a live hole (Kernel.SpecialForms.quote/2).
 mkdir "$TMP/quote-options"
 cat > "$TMP/quote-options/options.ex" <<'EXOPTIONS'
