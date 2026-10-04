@@ -133,6 +133,28 @@ assert 'declined_calls' not in callers.attrib, 'inert sites became possible call
 print('  PASS declined map/callees accounting, compact readings, and no possible callers')
 PYINERTVERBS
 
+# A non-Elixir body may quote our legend markers as source text. Only real
+# comments outside CDATA may select the inert-decline reading.
+mkdir -p "$TMP/marker/src" "$TMP/marker/a" "$TMP/marker/b"
+cat > "$TMP/marker/src/run.cpp" <<'CPPMARKER'
+int run() {
+  const char* marker = R"marker(<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-quote-AST-outside-enabled-unquote/unquote_splicing;no-edge;not-a-possible-callee -->)marker";
+  const char* clause = "ordinary Elixir calls written inside quote AST";
+  return duplicate();
+}
+CPPMARKER
+printf 'int duplicate() { return 1; }\n' > "$TMP/marker/a/a.cpp"
+printf 'int duplicate() { return 2; }\n' > "$TMP/marker/b/b.cpp"
+"$BIN" "$TMP/marker" --pack-top-n=3 --no-cache > "$TMP/marker.xml"
+python3 - "$TMP/marker.xml" <<'PYMARKER'
+import sys, xml.etree.ElementTree as ET
+text = open(sys.argv[1]).read()
+ET.fromstring(text)
+assert 'declined=1' in text and '<![CDATA[' in text, 'marker control is vacuous'
+assert 'including inert Elixir quote sites' not in text, 'C++ source text changed the compact declined reading'
+print('  PASS non-Elixir CDATA markers cannot select the inert-decline reading')
+PYMARKER
+
 # quote options control whether unquote is a live hole (Kernel.SpecialForms.quote/2).
 mkdir "$TMP/quote-options"
 cat > "$TMP/quote-options/options.ex" <<'EXOPTIONS'
