@@ -9,6 +9,6 @@ namespace rw::orient
 {
 
 enum class Arm : std::uint8_t { O, Narrow, Placebo };
-inline constexpr Arm kArm = Arm::Narrow;   // O-narrow v3 (PREREG_orient_narrow_v3): the shipping candidate; O is abandoned (O2 verdict)
+inline constexpr Arm kArm = Arm::Placebo;   // the registered PLACEBO_s arm (never shipped)
 
 }   // namespace rw::orient
