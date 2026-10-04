@@ -41,7 +41,8 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
   its receiver. Ranking keeps the old ladder's pick (the same-file, else same-directory rung): the extra candidates
   are listed at edge weight zero, so a guess never moves PageRank.
-- Measured on the round-1 comparison-table calls for this tool: see the lane report; the gate is
+- Cost, measured over 210 calls on eight public repositories (`--no-cache`): +8.55% bytes in total; 32% of the
+  `<s>`/`<c>`/`<e>` rows carry `via="name"`, most of them the map's `<c>` rows (C trees: no change). The gate is
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
   for every evidence rule). Ingest records the receiver chain (`kParserVer` 146, `kCacheVersion` 29), so a cache
   written by an earlier build is re-parsed.

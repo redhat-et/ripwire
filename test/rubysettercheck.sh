@@ -119,7 +119,9 @@ if grep -q 'n="count=" sc="W"' "$SPLIT"; then ok "def count=(v) → W::count="; 
 if grep -q 'n="limit=" sc="W"' "$SPLIT"; then ok "def self.limit=(v) → W::limit= (singleton setter)"; else no "def self.limit=(v) not indexed"; fi
 if grep -q 'n="name=" sc="Other"' "$SPLIT"; then ok "Other#name= indexed separately"; else no "Other#name= not indexed"; fi
 if grep -q '<s t="method" n="name" sc="W"' "$SPLIT"; then ok "getter def name still indexed as W::name"; else no "getter W::name missing"; fi
-if [ "$( grep -c 'n="name" ' "$SPLIT" )" -eq 1 ]; then ok "exactly one symbol named name (the getter)"; else no "expected one getter row, got $( grep -c 'n="name" ' "$SPLIT" )"; fi
+# SYMBOL rows only (`<s `): since FE-B a map <c n="name" via="name"/> callee row also has `n="name" ` followed by a space,
+# and it is a call, not a definition — the count this arm makes is of definitions named `name`.
+if [ "$( grep -c '^<s [^>]*n="name" ' "$SPLIT" )" -eq 1 ]; then ok "exactly one symbol named name (the getter)"; else no "expected one getter row, got $( grep -c '^<s [^>]*n="name" ' "$SPLIT" )"; fi
 
 echo "=== a setter CALL edges to the setter, never to the getter ==="
 WR="$( rowOf 'n="writer" ' )"
