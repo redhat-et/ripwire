@@ -2180,13 +2180,15 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 29;   // MUST equal ingest.cpp's kCacheVersion (gated); 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 146;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 147;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 145 = lane FE-B (receiver evidence, see kParserVer note; above train 25's 143/144; the train renumbers)
                                                           // 141 = 2026-10-04 (train 25: above FE-A's 134/135 and refval-edges' 140, see kParserVer
                                                           //   note; kIngestCacheVersionMirror 28 from FE-A, kQSnapCacheScheme 17 from refval-edges)
                                                           // 140 = lane refval-edges (reference-as-value rows; see kParserVer note)
                                                           // 135 = 2026-10-03 (lane FE-A fix round, see kParserVer note)
                                                           // 134 = 2026-10-03 (lane FE-A, see kParserVer note; 133 is train 24's)
+                                                          // 145 = 2026-10-04 (Ruby include and extend sides, see kParserVer
+                                                          //   note; kIngestCacheVersionMirror stays 27)
                                                           // 142 = 2026-10-04 (the Ruby method-lookup branch on main 2720d1c5:
                                                           //   above main's 133, train 25's 141 and the branch's carried 130–137,
                                                           //   see kParserVer note; kIngestCacheVersionMirror stays 27)

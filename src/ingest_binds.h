@@ -1568,14 +1568,11 @@ inline void rubyNoteHelperMethods( TSNode call, std::uint32_t fileId, std::strin
     }
 }
 
-// One file's `helper_method` declarations, into `binds` — a file that never spells the word is not walked. One iterative
-// pre-order walk: an explicit stack, so a hostile nesting depth costs heap, not stack.
-inline void captureRubyHelperMethods( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+// Every node of a Ruby file's tree, handed to `take` in turn; a node `take` returns true for is taken, and its subtree is
+// not walked. Iterative, so a hostile nesting depth costs heap, not stack.
+template<class Take>
+inline void rubyWalkUntaken( TSNode root, Take&& take )
 {
-    if( src.find( "helper_method" ) == std::string_view::npos )
-    {
-        return;
-    }
     std::vector<TSNode> stack { root };
     std::vector<TSNode> kids;
     ChildCursor         cursor( root );
@@ -1583,21 +1580,38 @@ inline void captureRubyHelperMethods( TSNode root, std::uint32_t fileId, std::st
     {
         const TSNode n = stack.back();
         stack.pop_back();
+        if( !take( n ) )
+        {
+            collectChildren( n, cursor.cur, kids );
+            stack.insert( stack.end(), kids.begin(), kids.end() );
+        }
+    }
+}
+
+// One file's `helper_method` declarations, into `binds` — a file that never spells the word is not walked (rubyWalkUntaken).
+inline void captureRubyHelperMethods( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( src.find( "helper_method" ) == std::string_view::npos )
+    {
+        return;
+    }
+    rubyWalkUntaken( root, [ & ]( TSNode n )
+    {
         const bool declares = kindIs( ts_node_type( n ), "call" ) && ts_node_is_null( fieldChild( n, NodeField::Receiver ) )
                            && fieldChildTextOfKind( n, NodeField::Method, "identifier", src ) == "helper_method";
         if( declares && rubyAtClassBody( n ) )
         {
             rubyNoteHelperMethods( n, fileId, src, binds );
-            continue;
+            return true;
         }
-        collectChildren( n, cursor.cur, kids );
-        stack.insert( stack.end(), kids.begin(), kids.end() );
-    }
+        return false;
+    } );
 }
 
 // Parser version 137 (test/rubyclassrecvcheck.sh): is the Ruby def `defNode` a SINGLETON method — `def self.m`, or a def
-// inside `class << self` — which a call on the class object answers and no instance's lookup reaches? The nearest class,
+// inside `class << self` — which a call on a class object answers and no instance's lookup reaches? The nearest class,
 // module or def above a plain `def` decides; a block between them (`class_methods do`, `included do`) is walked through.
+// rubyDefSide below tells whose class object; captureRubyClassMixins reads a directive in `class << self` with this.
 inline bool rubyIsSingletonDef( TSNode defNode ) noexcept
 {
     if( kindIs( ts_node_type( defNode ), "singleton_method" ) )
@@ -1621,14 +1635,121 @@ inline bool rubyIsSingletonDef( TSNode defNode ) noexcept
     return false;
 }
 
-// A LocalBindKind::RubySingletonDef binding for the def at `defNode` named `name`, when it is a singleton method.
-inline void rubyNoteSingletonDef( TSNode defNode, std::uint32_t fileId, std::string_view name, std::vector<RawBind>& binds )
+// What a Ruby def is to a class object (parser versions 137 and 145; test/rubyclassrecvcheck.sh).
+enum class RubyDefSide : std::uint8_t
 {
-    if( rubyIsSingletonDef( defNode ) )
+    Instance,    // an instance method: no call on a class object reaches it
+    Singleton,   // a singleton method of the class or module that holds it — `def self.m`, a def or an accessor in `class << self`
+    Includer,    // a class method of each class INCLUDING its module, defined on the includer itself: a singleton def inside a
+                 //   concern's `included do`, which runs on the includer
+    ClassMethods,   // a class method of each includer from a module extended onto it: a def inside a concern's `class_methods
+                    //   do`, which ActiveSupport::Concern makes the concern's ClassMethods
+};
+
+// The two blocks of an ActiveSupport::Concern whose defs can be its includer's class methods (RubyDefSide::Includer,
+// ClassMethods).
+inline constexpr std::array<std::string_view, 2> kRubyIncluderBlocks = { "included", "class_methods" };
+
+// The concern hook (kRubyIncluderBlocks) whose block `n` is, written at class-body level, or empty.
+inline std::string_view rubyIncluderHook( TSNode n, std::string_view src ) noexcept
+{
+    const TSNode owner = kindIs( ts_node_type( n ), "do_block" ) || kindIs( ts_node_type( n ), "block" ) ? ts_node_parent( n ) : TSNode {};
+    if( ts_node_is_null( owner ) || !kindIs( ts_node_type( owner ), "call" ) )
     {
-        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( defNode ), .lang = Lang::Ruby,
-                                   .kind = LocalBindKind::RubySingletonDef, .var = std::string( name ) } );
+        return {};
     }
+    const std::string_view hook = rubyNamedDirective( owner, src, kRubyIncluderBlocks );
+    return !hook.empty() && rubyAttrAtClassBodyLevel( owner, src ) ? hook : std::string_view {};
+}
+
+// What a def written in a concern's `hook` block is: in `included do`, a singleton def is the includer's own and a plain
+// one an instance method; in `class_methods do`, a plain def is the includer's class method.
+inline RubyDefSide rubyHookSide( std::string_view hook, bool singleton ) noexcept
+{
+    if( hook == "included" )
+    {
+        return singleton ? RubyDefSide::Includer : RubyDefSide::Instance;
+    }
+    return singleton ? RubyDefSide::Instance : RubyDefSide::ClassMethods;
+}
+
+// What the Ruby def — or `class << self` accessor — at `defNode` is to a class object. A `def self.m`, or a `class << self`
+// above it, makes it a singleton method, and the nearest class, module or def above decides whose — unless a concern's
+// `included do` (for a singleton def) or `class_methods do` (for a plain one) at class-body level comes first, which makes
+// it the includer's: defined on the includer itself, or in the module the concern extends onto it. Any other block between
+// is walked through.
+inline RubyDefSide rubyDefSide( TSNode defNode, std::string_view src ) noexcept
+{
+    const bool selfDef = kindIs( ts_node_type( defNode ), "singleton_method" );
+    if( selfDef && fieldChildTextOfKind( defNode, NodeField::Object, "self", src ).empty() )
+    {
+        return RubyDefSide::Instance;   // `def obj.m` is another object's
+    }
+    bool singleton = selfDef;
+    for( TSNode n = ts_node_parent( defNode ); !ts_node_is_null( n ); n = ts_node_parent( n ) )
+    {
+        const char* t = ts_node_type( n );
+        if( kindIs( t, "singleton_class" ) )
+        {
+            if( fieldChildTextOfKind( n, NodeField::Value, "self", src ).empty() )
+            {
+                return RubyDefSide::Instance;   // `class << Other` opens another object's singleton
+            }
+            singleton = true;
+            continue;
+        }
+        if( kindIs( t, "class" ) || kindIs( t, "module" ) || kindIs( t, "method" ) || kindIs( t, "singleton_method" ) )
+        {
+            break;
+        }
+        if( const std::string_view hook = rubyIncluderHook( n, src ); !hook.empty() )
+        {
+            return rubyHookSide( hook, singleton );
+        }
+    }
+    return singleton ? RubyDefSide::Singleton : RubyDefSide::Instance;
+}
+
+// The importedName a Ruby class-object binding carries for a def on `side` (model.h LocalBindKind::RubySingletonDef).
+inline std::string rubySideMark( RubyDefSide side )
+{
+    return std::string( side == RubyDefSide::Includer ? kRubyIncluderMark : side == RubyDefSide::ClassMethods ? kRubyClassMethodsMark : std::string_view {} );
+}
+
+// A LocalBindKind::RubySingletonDef binding for the def at `defNode` named `name`, when a class object answers it: a
+// singleton method (parser version 137), or a class method of each includer (parser version 145).
+inline void rubyNoteClassSideDef( TSNode defNode, std::uint32_t fileId, std::string_view name, std::string_view src, std::vector<RawBind>& binds )
+{
+    const RubyDefSide side = rubyDefSide( defNode, src );
+    if( side != RubyDefSide::Instance )
+    {
+        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( defNode ), .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef,
+                                   .var = std::string( name ), .importedName = rubySideMark( side ) } );
+    }
+}
+
+// The bindings for what the `class << self` call `n` declares on the class object's `side` — an accessor, or a
+// delegation-DSL call (captureRubySingletonAccessors below). An accessor's binding sits at its symbol,
+// where captureRubyAttrDefs starts its def (no owner), and carries the side's mark (one a concern's `included do`
+// declares is the includer's); a delegated name has no def, and is read against the class that owns the singleton.
+inline void rubyNoteSingletonDecl( TSNode n, RubyDefSide side, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    const std::string_view delegation = rubyNamedDirective( n, src, kRubyDelegationCalls );
+    if( delegation.empty() )
+    {
+        rubyNoteSymbolArguments( fieldChild( n, NodeField::Arguments ),
+                                 RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .importedName = rubySideMark( side ) },
+                                 src, binds );
+        return;
+    }
+    const std::string owner = rubyEnclosingScopeOf( n, src );
+    if( delegation == "delegate_missing_to" )
+    {
+        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .typeName = owner } );
+        return;
+    }
+    rubyNoteSymbolArguments( fieldChild( n, NodeField::Arguments ), RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .typeName = owner },
+                             src, binds );
 }
 
 // What a `class << self` declares beside its defs is the class object's too (parser version 137): each accessor
@@ -1642,34 +1763,81 @@ inline void captureRubySingletonAccessors( TSNode root, std::uint32_t fileId, st
     {
         return;
     }
-    std::vector<TSNode> stack { root };
-    std::vector<TSNode> kids;
-    ChildCursor         cursor( root );
-    while( !stack.empty() )
+    rubyWalkUntaken( root, [ & ]( TSNode n )
     {
-        const TSNode           n          = stack.back();
-        stack.pop_back();
-        const bool             call       = kindIs( ts_node_type( n ), "call" );
-        const bool             accessor   = call && !rubyNamedDirective( n, src, kRubyAttrFamilyNames ).empty();
-        const std::string_view delegation = call ? rubyNamedDirective( n, src, kRubyDelegationCalls ) : std::string_view {};
-        if( ( accessor || !delegation.empty() ) && rubyAttrAtClassBodyLevel( n, src ) && rubyIsSingletonDef( n ) )
+        const bool        call     = kindIs( ts_node_type( n ), "call" );
+        const bool        declares = call && ( !rubyNamedDirective( n, src, kRubyAttrFamilyNames ).empty() || !rubyNamedDirective( n, src, kRubyDelegationCalls ).empty() );
+        const RubyDefSide side     = declares && rubyAttrAtClassBodyLevel( n, src ) ? rubyDefSide( n, src ) : RubyDefSide::Instance;
+        if( side == RubyDefSide::Instance )
         {
-            const std::string owner = accessor ? std::string {} : rubyEnclosingScopeOf( n, src );
-            if( delegation == "delegate_missing_to" )
-            {
-                binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby,
-                                           .kind = LocalBindKind::RubySingletonDef, .typeName = owner } );
-                continue;
-            }
-            // an accessor's binding sits at its symbol, where captureRubyAttrDefs starts its def (no owner); a delegated name has
-            // no def, and is read against the class that owns the singleton
-            rubyNoteSymbolArguments( fieldChild( n, NodeField::Arguments ),
-                                     RawBind { .fileId = fileId, .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef, .typeName = owner }, src, binds );
-            continue;
+            return false;
         }
-        collectChildren( n, cursor.cur, kids );
-        stack.insert( stack.end(), kids.begin(), kids.end() );
+        rubyNoteSingletonDecl( n, side, fileId, src, binds );
+        return true;
+    } );
+}
+
+// Parser version 145 (test/rubyclassrecvcheck.sh): each mixin the CLASS OBJECT's lookup reaches rather than its
+// instances' — the constants of an `extend M`, and of an `include`/`prepend` inside `class << self` — as a
+// LocalBindKind::RubyClassMixin binding at the constant's own start byte, where captureRubyMixinBases puts its inherit
+// reference, read where that reads the directive (class-body level, or a concern's `included do`). One a concern's
+// `included do` writes extends the includer, not the concern: importedName kRubyIncluderMark. A class body's `extend self`
+// names no constant: its binding sits at the directive, var "self". A file that never writes `extend` or `<<` is not
+// walked, and the walk enters no def, whose body holds no directive.
+// Is the mixin directive `n` an `extend self` — its one argument `self`?
+inline bool rubyExtendsSelf( TSNode n ) noexcept
+{
+    const TSNode args = fieldChild( n, NodeField::Arguments );
+    return !ts_node_is_null( args ) && ts_node_named_child_count( args ) == 1 && kindIs( ts_node_type( ts_node_named_child( args, 0 ) ), "self" );
+}
+
+// The RubyClassMixin bindings of the mixin directive `n` (an `extend` when `extend`), read where captureRubyMixinBases reads
+// it: one per constant a class object's lookup reaches, and a module body's `extend self`.
+inline void rubyNoteClassMixins( TSNode n, bool extend, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    const bool inIncluded = rubyInConcernIncludedBlock( n, src );
+    if( !inIncluded && !rubyAttrAtClassBodyLevel( n, src ) )
+    {
+        return;
     }
+    const bool singleton = rubyIsSingletonDef( n );   // the directive sits in `class << self`
+    if( extend && !inIncluded && !singleton && rubyExtendsSelf( n ) )
+    {
+        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyClassMixin, .var = "self" } );
+    }
+    if( extend == singleton )
+    {
+        return;   // an include joins the instances' lookup, an extend inside `class << self` the singleton's own
+    }
+    const bool includer = inIncluded || ( singleton && rubyDefSide( n, src ) == RubyDefSide::Includer );
+    for( const TSNode c : rubyMixinTargets( n, src ) )
+    {
+        binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( c ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyClassMixin,
+                                   .importedName = includer ? std::string( kRubyIncluderMark ) : std::string {} } );
+    }
+}
+
+inline void captureRubyClassMixins( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( src.find( "extend" ) == std::string_view::npos && src.find( "<<" ) == std::string_view::npos )
+    {
+        return;
+    }
+    rubyWalkUntaken( root, [ & ]( TSNode n )
+    {
+        const char* t = ts_node_type( n );
+        if( kindIs( t, "method" ) || kindIs( t, "singleton_method" ) )
+        {
+            return true;   // a def body holds no directive
+        }
+        const std::string_view verb = kindIs( t, "call" ) ? rubyNamedDirective( n, src, kRubyConstantDirectives ) : std::string_view {};
+        if( verb.empty() || verb == "autoload" )
+        {
+            return false;
+        }
+        rubyNoteClassMixins( n, verb == "extend", fileId, src, binds );
+        return true;
+    } );
 }
 
 // ─── FactoryBot's factory definitions (parser version 132, test/rubytypedrecvcheck.sh) ─────────────────────────────────

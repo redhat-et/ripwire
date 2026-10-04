@@ -4,11 +4,17 @@
 # Before this round such a call bound to whichever in-tree method had the name once the class itself missed it: Rails
 # apps' `Hash.new`, `Date.new` and `Service.new` all bound to one controller's `new` action, a model's `where` to a mailer
 # preview's mock.
-# THE RULE (graph.h RubyTypedReceivers::closedLookup; ingest_binds.h classifyRubyReceiver; parser version 137):
+# THE RULE (graph.h RubyTypedReceivers::closedLookup; ingest_binds.h classifyRubyReceiver; parser versions 137 and 145):
 #   * the class the tree opens at the constant answers from its lookup: the class's singleton methods (`def self.m`, a
-#     def or an accessor in `class << self`), the modules it extends or includes (a concern's `class_methods do`, a nested
-#     `module ClassMethods`), its superclasses' singleton methods, then a reopened Module, Class, Object, Kernel or
-#     BasicObject. The shallowest that defines the name decides. A class's instance method is its instances' alone;
+#     def or an accessor in `class << self`), what each module it includes defines on its includer (a `def self.m` or an
+#     `extend` in a concern's `included do`, a concern's `class_methods do`, a nested `module ClassMethods`), the
+#     instance methods of the modules it extends (or includes inside `class << self`), its superclasses' singleton
+#     methods, then a reopened Module, Class, Object, Kernel or BasicObject. The shallowest that defines the name
+#     decides; what an included module defines on its includer stands at the includer's own level. A class's instance
+#     method is its instances' alone, and so is an included module's; a module's own singleton method is the module's.
+#     Ruby's order: the class's singleton (with what its included modules define there), then the modules it extends —
+#     a `class_methods do` block is one — and only then its superclass's; `extend self` puts a module, and what it
+#     includes, on its own class object;
 #   * `C.new` is Class#new unless a `def self.new` answers first, and Class#new runs the first `initialize` an instance's
 #     lookup finds — never an instance method named `new` (a controller's action);
 #   * when nothing there defines the name, Ruby's answer is outside the tree — ActiveRecord::Base's `where`,
@@ -19,8 +25,9 @@
 #   * a class written below a base that forwards a class object's call to a new instance — a mailer's
 #     (ActionMailer::Base, Devise::Mailer), ActiveSupport::CurrentAttributes — answers a name it lacks from its
 #     instances' lookup: `UserMailer.welcome( u )` runs UserMailer#welcome;
-#   * a class whose lookup holds a method_missing answers any name, and is left as before; so does a name a `class << self`
-#     delegates (`delegate :reset, to: :instance`), a class method the tree indexes no def of;
+#   * a method_missing in a class's lookup answers only what nothing in that lookup defines (Ruby calls it on a miss): such
+#     a name is left as before. So is a name a `class << self` delegates (`delegate :reset, to: :instance`), a class
+#     method the tree indexes no def of;
 #   * the constant is read as Ruby reads it from the call site, by fully-qualified constant (resolve.h's constant index):
 #     lexically — the innermost class or module open around the site, its enclosing ones, the top level — then through
 #     the ancestors of that open or of a qualified constant's head (`Sub::Failure` for a Failure Sub's superclass nests).
@@ -34,18 +41,32 @@
 # Stated floors, each pinned below:
 #   (a) a constant the tree assigns (`DEFAULT_LIMITS = Limits.new`) is a value of a class the tree does not type: a
 #       call on it binds by name as before.
-#   (b) the tree does not tell `include` from `extend`: an included module's instance method answers a call on the class —
-#       unless the module nests a `module ClassMethods`, which makes it a concern whose class methods live there.
-#   (c) a module's every method answers a call on the module: `module_function` and `extend self` are not read, so a
-#       method without either answers too.
+#   (b) LIFTED at parser version 145: the tree tells `include` from `extend`, so an included module's instance method no
+#       longer answers a call on the class (`Report.print_me` is refused).
+#   (c) a module's every instance method answers a call on the module: `module_function` is not read, so a method a
+#       module neither copies with it nor gets from `extend self` answers too. `extend self` is read (parser version 145):
+#       with it, what the module includes answers as well.
 #   (d) a tree with no Ruby superclass, mixin or constant reference keeps no constant index: there a constant is read by
 #       its final segment, a qualified one only where the tree opens that path, and two classes of one name share a lookup.
-#   (e) a module mixed in at run time — `Tool.extend( Tool::Ext )` written as a call on the constant, not a class-body
-#       directive — is in no lookup: a call it answers is refused.
+#   (e) a module mixed in by a call rather than a class-body directive — `Tool.extend( Tool::Ext )`, or
+#       `singleton_class.prepend EscapeExt` in the body (activesupport's ERB::Util) — is in no lookup: a call it answers
+#       is refused.
 #   (f) a class `Struct.new( … ) do … end` or `Data.define( … ) do … end` builds is opened by no file: a def in its block
 #       (`def self.from`) answers no call on its constant, which is refused.
 #   (g) `class << Clock` opens another object's singleton: its defs read as top-level defs, which no call with a receiver
 #       reaches, so `Clock.tick` is refused (activesupport's `class << Benchmark; def ms`).
+#   (h) LIFTED at parser version 145: a mixin's own singleton method (`def self.x` in the module's body) stays the
+#       module's (`Speaker.shout` is refused, `Shouting.shout` answers), while one written inside a concern's
+#       `included do … end` block, which runs on the includer, is the includer's (`Engine.configurations`).
+#   (i) an instance's lookup — a receiver the code builds (`svc = Service.new( 9 ); svc.call`), a bare call in an
+#       instance method — still reads the class's singleton methods as its own: `svc.call` splits between `def self.call`
+#       and the instance `call`, where Ruby runs the instance's. (The class object's lookup tells the two sides apart; an
+#       instance's does not yet.)
+#   (j) a method_missing that only an instance answers (an instance method of the class or of a module it includes) still
+#       leaves a call on the class object to the name ladder when the lookup misses: `Proxy.anything` binds by name, where
+#       Ruby raises NoMethodError.
+#   (k) two modules extended at one level answer their union: `Dual.pick` splits between First and Second, where Ruby
+#       takes the later `extend`.
 #
 # Usage:  test/rubyclassrecvcheck.sh   |   RIPWIRE_BIN=asan/ripwire test/rubyclassrecvcheck.sh
 # Exits non-zero on any failure. Self-contained via mktemp.
@@ -98,6 +119,10 @@ cat > "$FIX/lib/finders.rb" <<'RUBY'
 module Finders
   def lookup( id )
     id
+  end
+
+  def self.finder_own
+    1
   end
 end
 RUBY
@@ -289,6 +314,7 @@ RUBY
 cat > "$FIX/lib/settings.rb" <<'RUBY'
 class Settings
   class << self
+    include Defaults
     attr_accessor :config
 
     def build_all
@@ -334,6 +360,14 @@ cat > "$FIX/lib/printable.rb" <<'RUBY'
 module Printable
   def print_me
     "p"
+  end
+end
+RUBY
+
+cat > "$FIX/lib/defaults.rb" <<'RUBY'
+module Defaults
+  def preset_names
+    []
   end
 end
 RUBY
@@ -470,6 +504,180 @@ class << Clock
 end
 RUBY
 
+# what a module a class includes defines on the class object: a def self.x in a concern's included block (it runs on the
+# includer) and an extend there — but not a module-body def self.x or extend, which stay the module's own
+cat > "$FIX/lib/configurable.rb" <<'RUBY'
+module Configurable
+  extend ActiveSupport::Concern
+  extend Tunables
+
+  included do
+    extend Knobs
+
+    def self.configurations
+      {}
+    end
+  end
+
+  module ClassMethods
+    def configure
+      1
+    end
+  end
+end
+
+module Tunables
+  def tune
+    1
+  end
+end
+
+module Knobs
+  def knob
+    1
+  end
+end
+
+class Engine
+  include Configurable
+end
+
+module Shouting
+  def self.shout
+    1
+  end
+end
+
+class Speaker
+  include Shouting
+end
+
+# a method_missing answers only what nothing in the lookup defines (ActiveRecord::Base extends DynamicMatchers)
+module Matchers
+  def method_missing( name, *args )
+    super
+  end
+end
+
+class Store
+  extend Matchers
+  include Configurable
+end
+
+# a concern that includes a concern: the inner one's included block runs on the outer one's includer, whose own
+# singleton it then defines — ahead of a module the includer extends
+module Outer
+  extend ActiveSupport::Concern
+  include Configurable
+end
+
+module Presets
+  def configurations
+    {}
+  end
+end
+
+class Rig
+  extend Presets
+  include Outer
+end
+
+# an extended module's initialize is the class object's method, never what Class#new runs
+module Assembly
+  def initialize( *args )
+    super
+  end
+end
+
+class Gadget
+  extend Assembly
+end
+
+# Ruby's order on a class object: the class's own singleton, then the modules it extends (a concern's ClassMethods and
+# class_methods block among them), and only then its superclass's
+module Ranked
+  extend ActiveSupport::Concern
+
+  class_methods do
+    def rank
+      1
+    end
+
+    def tier
+      1
+    end
+  end
+
+  module ClassMethods
+    def grade
+      1
+    end
+  end
+end
+
+class Listing
+  def self.grade
+    0
+  end
+end
+
+class Featured < Listing
+  include Ranked
+
+  def self.rank
+    0
+  end
+end
+
+# extend self: a module's own methods, and those of the modules it includes, answer a call on it
+module Codec
+  def encode( x )
+    x
+  end
+end
+
+module JsonCodec
+  include Codec
+  extend self
+end
+
+# floor (e): a singleton_class.prepend is a call, not a class-body directive
+module EscapeExt
+  def escape_text( s )
+    s
+  end
+end
+
+module Escaper
+  singleton_class.prepend EscapeExt
+end
+
+# floor (j): a method_missing only an instance answers
+class Proxy
+  def method_missing( name, *args )
+    super
+  end
+end
+
+# floor (k): two modules extended at one level
+module First
+  def pick
+    1
+  end
+end
+
+module Second
+  def pick
+    2
+  end
+end
+
+class Dual
+  extend First
+  extend Second
+end
+RUBY
+
 cat > "$FIX/lib/helpers.rb" <<'RUBY'
 def format_amount( n )
   n.to_s
@@ -501,6 +709,20 @@ class Decoy
   def done?( x ); end
   def tool_reset; end
   def from( h ); end
+  def configurations; end
+  def shout; end
+  def print_me; end
+  def finder_own; end
+  def preset_names; end
+  def knob; end
+  def tune; end
+  def find_by_name; end
+  def rank; end
+  def tier; end
+  def grade; end
+  def encode( x ); end
+  def escape_text( s ); end
+  def pick; end
 end
 RUBY
 
@@ -538,7 +760,7 @@ class Caller
     Report.render # @instance
     Pipeline.new( [] ) # @new_action
     Builder.new( 8 ) # @self_new
-    Report.print_me # @include_floor
+    Report.print_me # @include_instance
     Util.helper # @module_floor
     UserMailer.welcome( 10 ) # @mailer
     Current.user = 11 # @current
@@ -550,6 +772,30 @@ class Caller
     Report.strike? # @concern_precedence
     Clock.tick # @foreign_singleton_floor
     Sub::Failure.new( "m" ) # @ancestor_const
+    Engine.configurations # @included_singleton
+    Speaker.shout # @module_singleton
+    Shouting.shout # @module_own
+    Report.finder_own # @extended_own_singleton
+    Settings.preset_names # @singleton_include
+    Engine.knob # @included_extend
+    Engine.tune # @module_extend
+    Configurable.tune # @module_extend_own
+    Configurable.configurations # @included_on_concern
+    Searchable.search # @class_methods_on_concern
+    Archivable.archived # @nested_class_methods_on_concern
+    Store.configurations # @missing_after_lookup
+    Store.find_by_name # @missing_miss
+    Rig.configurations # @concern_dependency
+    Gadget.new # @new_extended
+    Featured.rank # @own_before_class_methods_block
+    Featured.tier # @class_methods_block
+    Featured.grade # @class_methods_before_superclass
+    JsonCodec.encode( 1 ) # @extend_self_include
+    Escaper.escape_text( "s" ) # @singleton_prepend_floor
+    Proxy.anything # @instance_missing_floor
+    Dual.pick # @same_level_floor
+    svc = Service.new( 9 )
+    svc.call # @instance_side_floor
   end
 end
 
@@ -671,6 +917,26 @@ only    build_all     Settings::build_all     $CALLER singleton_class  "a def in
 refused label         $CALLER instance_accessor "an instance attr_reader is no method of the class object"
 refused render        $CALLER instance          "Report#render is Report's instances'"
 
+echo "=== include is the instances' side, extend the class object's (floors (b) and (h) lifted, parser version 145) ==="
+refused print_me      $CALLER include_instance  "an included module's instance method is the instances', not the class object's"
+refused shout         $CALLER module_singleton  "Shouting's module-body def self.shout stays Shouting's: Speaker.shout raises NoMethodError"
+only    shout         Shouting::shout         $CALLER module_own       "a module-body def self.shout answers a call on the module"
+refused finder_own    $CALLER extended_own_singleton "an extended module's own def self.x is not among the instance methods extend adds"
+only    preset_names  Defaults::preset_names  $CALLER singleton_include "an include inside class << self extends the class object"
+only    configurations Configurable::configurations $CALLER included_singleton "a def self.x in a concern's included block runs on the includer"
+only    knob          Knobs::knob             $CALLER included_extend  "an extend in a concern's included block extends the includer"
+refused tune          $CALLER module_extend     "a concern's body-level extend is the concern's own, not its includer's"
+only    tune          Tunables::tune          $CALLER module_extend_own "a module's body-level extend answers a call on the module"
+refused configurations $CALLER included_on_concern "an included block runs on each includer, never on the concern"
+refused search        $CALLER class_methods_on_concern "a class_methods block extends each includer, never the concern"
+refused archived      $CALLER nested_class_methods_on_concern "a nested module ClassMethods extends each includer, never the concern"
+only    configurations Configurable::configurations $CALLER concern_dependency "an inner concern's included block runs on the outer one's includer, ahead of a module it extends"
+refused new           $CALLER new_extended      "an extended module's initialize is no instance's: Class#new never runs it"
+only    rank          Featured::rank          $CALLER own_before_class_methods_block "the class's own def self.rank answers before a class_methods block, which is extended"
+only    tier          Ranked::tier            $CALLER class_methods_block "a class_methods block answers its includer"
+only    grade         ClassMethods::grade     $CALLER class_methods_before_superclass "an extended module answers before the superclass's singleton"
+only    encode        Codec::encode           $CALLER extend_self_include "extend self: what the module includes answers a call on it"
+
 echo "=== a base that forwards to an instance: the instances' lookup answers ==="
 only    welcome       UserMailer::welcome     $CALLER mailer           "ActionMailer::Base's class object runs the instance method"
 only    user=         Current::user=          $CALLER current          "ActiveSupport::CurrentAttributes forwards to the instance"
@@ -698,7 +964,7 @@ echo "=== a reopened root answers every class object ==="
 only    cached_name   Module::cached_name     $CALLER root_module      "a class is a Module"
 only    cached_name   Module::cached_name     $CALLER root_external    "so is a class the tree never opens"
 
-echo "=== a method_missing, or a class << self delegation, answers the name: left as before ==="
+echo "=== a class << self delegation answers the name, and a method_missing what the lookup lacks: left as before ==="
 DELEG="$( rows $CALLER "$( line $CALLER class_delegate )" reset )"
 if printf '%s\n' "$DELEG" | grep -qF "::Registry::reset#"
 then
@@ -713,14 +979,43 @@ then
 else
     no "@missing :anything no longer binds by name; census: $( printf '%s' "$MISSING" | tr '\t\n' ' ;' )"
 fi
+MISS="$( rows $CALLER "$( line $CALLER missing_miss )" find_by_name )"
+if printf '%s\n' "$MISS" | grep -qF "::Decoy::find_by_name#"
+then
+    ok "@missing_miss :find_by_name binds by name as before (nothing in Store's lookup defines it, so Matchers' method_missing may)"
+else
+    no "@missing_miss :find_by_name no longer binds by name; census: $( printf '%s' "$MISS" | tr '\t\n' ' ;' )"
+fi
+only    configurations Configurable::configurations $CALLER missing_after_lookup "a def in the lookup answers before any method_missing does: Ruby calls it only on a miss"
 
 echo "=== stated floors ==="
 only    fetch_limit   Limits::fetch_limit     $CALLER value_floor      "floor (a): a constant the tree assigns binds by name"
-only    print_me      Printable::print_me     $CALLER include_floor    "floor (b): an included module's method answers a call on the class"
 refused tool_reset    $CALLER runtime_extend_floor "floor (e): Tool.extend( Tool::Ext ) at run time is in no lookup"
+refused escape_text   $CALLER singleton_prepend_floor "floor (e): singleton_class.prepend EscapeExt is a call, in no lookup"
 refused from          lib/filters.rb data_block_floor "floor (f): Filters = Data.define do … end is opened by no file"
 refused tick          $CALLER foreign_singleton_floor "floor (g): class << Clock is no open of Clock"
 only    helper        Util::helper            $CALLER module_floor     "floor (c): a module's method answers a call on the module"
+PROXY="$( rows $CALLER "$( line $CALLER instance_missing_floor )" anything )"
+if printf '%s\n' "$PROXY" | grep -qF "::Decoy::anything#"
+then
+    ok "floor (j) pinned: Proxy.anything binds by name, though only Proxy's instances answer any name"
+else
+    no "floor (j): Proxy.anything no longer binds by name; census: $( printf '%s' "$PROXY" | tr '\t\n' ' ;' )"
+fi
+DUAL="$( rows $CALLER "$( line $CALLER same_level_floor )" pick )"
+if printf '%s\n' "$DUAL" | grep -qF "::First::pick#" && printf '%s\n' "$DUAL" | grep -qF "::Second::pick#" && ! printf '%s\n' "$DUAL" | grep -qF "::Decoy::"
+then
+    ok "floor (k) pinned: Dual.pick splits between the two modules Dual extends"
+else
+    no "floor (k): Dual.pick no longer splits between First and Second; census: $( printf '%s' "$DUAL" | tr '\t\n' ' ;' )"
+fi
+SIDE="$( rows $CALLER "$( line $CALLER instance_side_floor )" call )"
+if printf '%s\n' "$SIDE" | grep -qF "lib/service.rb::Service::call#" && printf '%s\n' "$SIDE" | grep -qF "lib/service_instance.rb::Service::call#"
+then
+    ok "floor (i) pinned: svc.call on a Service.new splits between def self.call and the instance call"
+else
+    no "floor (i): svc.call no longer splits between def self.call and the instance call; census: $( printf '%s' "$SIDE" | tr '\t\n' ' ;' )"
+fi
 only    new           Failure::initialize     $CALLER ancestor_const   "Sub::Failure is Base::Failure, through Sub's superclass"
 
 # floor (d): a tree with no superclass, mixin or constant reference keeps no constant index

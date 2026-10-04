@@ -43,6 +43,663 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   for every evidence rule). Ingest records the receiver chain (`kParserVer` 145, `kCacheVersion` 29), so a cache
   written by an earlier build is re-parsed.
 
+### Changed — a Ruby class object's lookup tells `include` from `extend`, in Ruby's order, and a `method_missing` answers only what it misses
+
+The class-object lookup in the entry below walked a class's mixins without telling how each one came in. So an
+included module's instance method answered a call on the class (that entry's floor (b)), and so did a module-body
+`def self.x` of a module the class includes (floor (h)). Ruby raises NoMethodError for both. A `method_missing` anywhere
+in the lookup also sent every call on the class to the name ladder, even a name the lookup defines, though Ruby calls
+`method_missing` only on a miss. `ActiveRecord::Base` extends `DynamicMatchers`, so every class method of `Base` went to
+the ladder. That is why `Base.configurations` split or declined against `DatabaseConfigurations`' reader (the bare-word
+entry gives the counts).
+
+**At ingest** (`ingest_binds.h captureRubyClassMixins`, `rubyDefSide`):
+- each mixin the class object's lookup reaches mints a `LocalBindKind::RubyClassMixin` binding at its constant: an
+  `extend`, an `include` inside `class << self`, and a module's `extend self`;
+- a def that a concern defines for its includers carries a mark on its `RubySingletonDef` binding: `included` for a
+  `def self.x` in `included do`, `class_methods` for a def in `class_methods do`.
+
+**The lookup** (`graph.h RubyClassObjects::sideLookup`) walks each ancestor on the side it joins, in Ruby's order:
+- first the class's own singleton methods, with what an included concern's `included do` defines there;
+- then the modules it extends, level by level: an `extend`, a concern's `class_methods do` and nested `ClassMethods`,
+  and a module that an `included do` extends;
+- only then its superclass's, one round per class up the chain.
+
+What no longer answers a call on the class object:
+- an included module's instance methods;
+- a module's own `def self.x`, or the modules that module extends;
+- on a concern itself, the class methods it gives its includers.
+
+An instance's lookup (what `C.new` runs as `initialize`, or a forwarding base's name) holds no extended module, and
+searches a class's included modules before its superclass. A `method_missing` in the lookup now answers only a name
+nothing there defines, which is left to the ladder as before. A `class << self` delegation still leaves its name there.
+
+Measured with `--no-cache`, against the entry below (0b6118a6), both runs on one snapshot of each tree:
+
+| Corpus | Edges | Call-graph isolated | `declined=` | Call sites changed |
+| --- | --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/` | 11,482 → 11,478 | 2,422 → 2,421 | 4,728 → 4,704 | 82 |
+| activesupport 7.2.3.2 `lib/` | 3,414 → 3,417 | 1,267 → 1,266 | 1,386 → 1,380 | 23 |
+| Rails app A | 27,498 → 27,503 | 18,591 → 18,589 | 39,342 → 39,336 | 8 |
+| Rails app B | 26,044 → 26,044 | 5,737 → 5,736 | 34,560 → 34,560 | 6 |
+| this repo's `src/` (C++), a JavaScript app, a Python repo | default map byte-identical | | | |
+
+Every changed call site was read against the source, all 119 of them rather than a sample:
+- **activerecord**: 21 changed target, 27 gained an edge where they declined, and 34 keep their target but are now
+  decided by the lookup rather than by name.
+  - `ActiveRecord::Base.configurations`, `.connection_handler`, `.lease_connection`, `.establish_connection` and the
+    like now reach `Core`'s `included do` defs or the `ConnectionHandling` that `Base` extends.
+  - Of the 13 callers of `Core.configurations` on `main`, the 12 that were right are single edges again. The 13th keeps
+    the reader, and the 9 sites in the `.rake` file join them. The two bare calls in `QueryCache::ClassMethods` still
+    split, since their `self` is any includer.
+  - `inspection_filter` reaches `Core`'s `ClassMethods`, not the instance reader. `CommandRecorder.new` reaches its
+    `initialize`.
+  - All 82 were right.
+- **activesupport**: 16 changed target and 6 gained an edge. `Duration.new`, `TimeWithZone.new`, `OptionMerger.new` and
+  the like are classes with a `method_missing`; they now reach their `initialize`, not `TaggedLogging.new` or
+  `TimeZone.new`. One call is newly refused: `ERB::Util.html_escape`, which a `singleton_class.prepend` supplies (floor
+  (e)). It bound before only because the misread `prepend` of the instance side reached the same module.
+- **The applications**: two calls on a subclass now reach the class method that its included concern's `ClassMethods`
+  defines, which Ruby searches before the superclass's (they bound to the superclass's before). 12 calls to `new` on
+  classes with a `method_missing` now reach their `initialize`, 6 of them instead of a controller's `new` action. All
+  14 were right.
+
+Lifted: floors (b) and (h) of the entry below, whose arms are kept, inverted. Floor (c) is lifted in part: `extend self`
+is read.
+
+Stated floors, each pinned by `test/rubyclassrecvcheck.sh`:
+- **(c)** A module's every instance method answers a call on the module: `module_function` is not read.
+- **(e)** A module mixed in by a call rather than a class-body directive is in no lookup. That covers
+  `Tool.extend( Tool::Ext )` and `singleton_class.prepend M` in the body (activesupport's `ERB::Util`).
+- **(i)** An instance's lookup still reads the class's singleton methods as its own. That covers a receiver the code
+  builds (`svc = Service.new( 9 ); svc.call`) and a bare call in an instance method. So `svc.call` splits between
+  `def self.call` and the instance `call`, where Ruby runs the instance's.
+- **(j)** A `method_missing` that only an instance answers still leaves a call on the class object to the ladder when the
+  lookup misses: `Proxy.anything` binds by name, where Ruby raises NoMethodError.
+- **(k)** Two modules extended at one level answer their union: `Dual.pick` splits between `First` and `Second`, where
+  Ruby takes the later `extend`.
+
+`kParserVer` 142 → 145, above `main`'s 143 and 144. New records, same layout: `kCacheVersion` stays 27, and Ruby caches
+re-parse once.
+
+### Changed — a Ruby call on a class answers from the class object's lookup: `C.new` runs `initialize`, a lookup that leaves the tree is refused
+
+A call whose receiver is a constant (`Report.generate`, `User.where( … )`, `Service.new( x )`, `JSON.parse( s )`) is
+sent to the class object. Once the class itself missed the name, such a call bound to whichever in-tree method had it.
+On application B, 2,537 calls to `new` (`Hash.new`, `Date.new`, every service's) bound to one controller's `new` action,
+and a model's `where` to a mailer preview's mock. On application A, `User.where` and its kind bound to a feed model's
+`def self.where` (1,200 call sites), and `JSON.parse` to a URI service's `parse`.
+
+**Which class** (`graph.h RubyClassObjects::receiverFqn`). The constant is read as Ruby resolves it from the call site, by
+fully-qualified constant over the constant index. First lexically: the class or module open around the site, the ones
+around it, then the top level. Then through the ancestors of that open, or of a qualified constant's head (`Sub::Failure`
+for a Failure that Sub's superclass nests). Last by Zeitwerk's directories, a namespace no file opens
+(`Alerts::Senders::Pay` is the tree's `Senders::Pay`). A receiver written with a path keeps it at ingest
+(`Reference::fieldName`, `ingest_binds.h rubyReceiverWrittenPath`). `described_class` and `described_class::Worker` keep
+the described class's path. So two classes of one name no longer share a lookup: `BankIntegration.process_event`
+reaches BankIntegration's `HookMethods`, not MailIntegration's, and `Result.new` inside `module Billing` reaches
+Billing's Result. A constant that resolves to nothing the tree opens answers only from a reopened root. That covers
+`JSON`, `RSpec`, `Stripe::Customer` beside an app's `Customer`, and a `Row = Struct.new( … )` constant beside an
+unrelated in-tree `Row`.
+
+**What answers** (`RubyClassObjects::lookup`). The shallowest of the class, its mixins and its superclasses to define the
+name as a class method, walked along what their superclass and mixin references resolve to:
+- a singleton method: `def self.m`, or a def or an accessor in `class << self`, each recorded at ingest as a
+  `LocalBindKind::RubySingletonDef` binding;
+- a module's method: an extended module's, or a concern's `ClassMethods`'.
+
+A class's instance method is its instances' alone. So `Service.call` reaches `def self.call`, and no longer splits with
+the instance `call` beside it. The same holds for a method of a concern that nests a `ClassMethods`. After those come a
+reopened Module, Class, Object, Kernel or BasicObject.
+
+`C.new` is Class#new unless a `def self.new` answers first, and Class#new runs the first `initialize` an instance's lookup
+finds, never an instance method named `new`. Some classes sit below a base whose class object forwards a name it lacks to
+a new instance: `ActionMailer::Base`, `Devise::Mailer`, `ActiveSupport::CurrentAttributes`. Those answer from their
+instances' lookup (`UserMailer.welcome( u )`, `Current.user = u`).
+
+**When nothing answers**, Ruby's method is outside the tree (ActiveRecord::Base's `where`, StandardError's `initialize`,
+Struct's `new`), and the call is refused as external.
+
+Left as before:
+- a SCREAMING constant's value (`LIMITS = Limits.new`, a value of a class nothing types);
+- a class object that may answer any name: a `method_missing` in its lookup, or the name a `class << self` delegates
+  (activerecord's `ExplainRegistry.collect?`). The entry above narrows the first: a `method_missing` answers only what
+  the lookup misses.
+
+Measured with `--no-cache`, the RSpec matcher-chain change below (parser version 136) against this change, both runs on
+one snapshot of each tree.
+
+| Corpus | Edges | Call-graph isolated | Call sites that lost an edge | Gained an edge (to an `initialize`) | Changed target (to an `initialize`) | Split call sites | Newly refused (no edge before) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/` | 11,436 → 11,482 | 2,551 → 2,422 | 236 | 327 (320) | 219 (202) | 1,289 → 1,099 | 633 |
+| activesupport 7.2.3.2 `lib/` | 3,535 → 3,414 | 1,283 → 1,267 | 190 | 28 (26) | 70 (54) | 356 → 338 | 387 |
+| Rails app A | 29,524 → 27,491 | 18,872 → 18,596 | 2,201 | 1,152 (1,130) | 483 (285) | 1,541 → 1,059 | 6,927 |
+| Rails app B | 28,374 → 26,044 | 5,698 → 5,737 | 3,650 | 247 (0) | 2,238 (697) | 2,253 → 716 | 7,180 |
+| this repo's `src/` (C++), a JavaScript app, a Python repo | default map byte-identical | | | | | | |
+
+Edges fall where a wrong binding goes, and rise where an `initialize` gains its callers. Methods with an in-tree caller:
+
+| Corpus | Before → after | Gain a first caller | Lose every caller |
+| --- | --- | --- | --- |
+| Rails app A | 7,905 → 8,235 | 357 | 27 |
+| Rails app B | 7,493 → 7,613 | 142 | 22 |
+| activerecord | 3,615 → 3,782 | 174 | 7 |
+
+The newly refused calls had no edge before (several namesakes, and nothing to choose between them); they are now counted
+as external. Some wrong bindings remain on calls whose receiver is a value, not a constant (`klass.new`,
+`relation.where`): 67 calls to `new` still reach the controller's action, and 570 calls to `where` the feed model's.
+
+Sampled against the source, 20 call sites per kind and application:
+- **Lost an edge:** 20 of 20 on A and 20 of 20 on B were wrong bindings: ActiveRecord finders and `create!` on models,
+  `JSON.parse`, `Time.now`, `Rails.logger`, a Sidekiq worker's `perform_async`,
+  `ActiveModel::Type::Boolean.new`, an ActiveJob's `new`.
+- **Gained an edge:** 20 of 20 on A, each `C.new` reaching C's `initialize`. 20 of 20 on B, each an integration module's
+  call reaching its own extended module.
+- **Changed target:** 20 of 20 on A and on B. Each was one of:
+  - a split collapsed onto `def self.m`;
+  - a controller's `new` replaced by the class's `initialize`;
+  - a same-named class or module in another namespace replaced by the one the constant names;
+  - a class method the superclass defines (a service's `resolve`).
+- **Lost every caller:** of the methods sampled from that list, each was a wrong-before binding, except the stated floors
+  below: a module extended at run time on A (floor (e)), two classes a block builds on B (floor (f)), and
+  activesupport's `Benchmark.ms` (floor (g)).
+
+Stated floors, each pinned by `test/rubyclassrecvcheck.sh`:
+- **(a)** A constant the tree assigns (`DEFAULT_LIMITS = Limits.new`) is a value of a class the tree does not type: a
+  call on it binds by name as before.
+- **(b)** The tree does not tell `include` from `extend`: an included module's instance method answers a call on the
+  class, unless the module nests a `ClassMethods`.
+- **(c)** A module's every method answers a call on the module: `module_function` and `extend self` are not read.
+- **(d)** A tree with no Ruby superclass, mixin or constant reference keeps no constant index. There a constant is read by
+  its final segment, and two classes of one name share a lookup.
+- **(e)** A module mixed in at run time (`Tool.extend( Tool::Ext )`, a call rather than a class-body directive) is in no
+  lookup.
+- **(f)** A class that `Struct.new( … ) do … end` or `Data.define( … ) do … end` builds is opened by no file, so a def in
+  its block answers no call on its constant.
+- **(g)** `class << Clock` opens another object's singleton. Its defs read as top-level defs, which no receiver reaches.
+- **(h)** A mixin's own singleton methods (`def self.x`) answer a call on each class that includes it. That is what Ruby
+  does for one written inside a concern's `included do … end` block, which runs on the includer, but not for one in the
+  module's body, which stays the module's: there a call on the includer raises NoMethodError in Ruby and binds here. The
+  tree does not tell the two apart.
+
+Lifted: `test/rubyinheritcheck.sh` floor (c) and `test/rubyrecvnarrowcheck.sh` floor (b), the final-segment probe that
+calls on a class shared. `UsesAlpha.beta_make` no longer pins Beta::Base's method, and `Left::Shared.go` reaches Left's
+alone. Their arms are kept, inverted. So are the three arms that pinned a missed class lookup to the name ladder
+(`Rec.make`, `Calc.report`, the base-clause mutation): they now expect the call refused.
+
+`kParserVer` 136 → 137. This adds an appended binding kind and a path in an existing field, with the same layout, so
+`kCacheVersion` stays 27, and Ruby caches re-parse once.
+
+### Changed — a call on an RSpec matcher's chain is RSpec's: `receive( :m ).with`, `change { }.from( a ).to( b )`
+
+`expect( v ).to` stopped binding to an in-tree `def to` in the RSpec round below, but a matcher's own chain still bound
+by name. `receive( :m ).with( 1 )`, `.and_return( 2 )` after it, and the `to` of `change { }.from( a ).to( b )` are
+called on the matcher a receiver-less builder returns, and every link is RSpec's.
+
+**What is typed** (`ingest_binds.h rubyMatcherChainType`; `model.h kRspecTargets`). Inside an example group, the matcher
+builders `receive`, `have_received`, `receive_messages`, `receive_message_chain`, `change`, `raise_error` /
+`raise_exception`, `output`, `be_within` and `yield_control` build that RSpec class, as `expect` and `allow` do. A call
+on a chain rooted at one is typed as the root, at most 8 links from it. A link's own class (Change's `from` returns a
+ChangeFromValue) is RSpec's all the same. A FactoryBot build at a chain's root types nothing: its methods return anything.
+
+**Which defs shadow a builder** (`graph.h rubyDefinedBuilders`). Only a def an example group's self can reach: a top-level
+def, a reopened Object's, a def inside a group's block, or a module's in test code (what a `config.include` mixes in). A
+class's method and an application module's are not in a group's lookup. Before, any def of the name counted, so every
+Rails migration's `def change` turned the `change` builder off for the whole tree.
+
+Measured with `--no-cache`, the Rake/Jbuilder change below (parser version 135) against this change, both runs on one
+snapshot of each tree.
+
+| Corpus | Edges | Call sites that lost an edge | Newly refused (no edge before) |
+| --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/`, activesupport 7.2.3.2 `lib/` | default map byte-identical | 0 | 0 |
+| Rails app A | 29,574 → 29,524 | 135 | 2,353 |
+| Rails app B (no in-tree namesake of a chain method) | 28,374 → 28,374 | 0 | 3,720 |
+
+On application A, every lost edge was the presenter's `to`, from a `change { }` chain, as read off the source of
+all 135 sites. The newly refused calls are the chain methods themselves: `with`, `and_return`, `by`, `and_call_original`,
+`from`, `once`, `of`. 47 calls still bind to the presenter's `to`, 25 of them in spec/support helper modules (floor (a)).
+
+Stated floors, each pinned by `test/rubyrspectargetcheck.sh`:
+- **(b)** A builder's name is shadowed by a def an example group can reach, as above. An application module that a
+  `config.include` does mix in is not read as one.
+- **(c)** A link more than 8 calls from its builder binds by name as before.
+
+`kParserVer` 135 → 136. Same layout, so `kCacheVersion` stays 27, and Ruby caches re-parse once.
+
+### Changed — Rake task files and Jbuilder views are crawled as Ruby, and their top-level `self` is known
+
+A Rails application keeps Ruby in two more file kinds: Rake tasks (`lib/tasks/*.rake`) and Jbuilder JSON views
+(`app/views/**/*.json.jbuilder`). Neither was crawled, so a method that only a task or a JSON view called had no
+caller. Both now index as Ruby, with every Ruby rule a `.rb` file gets (`ingest_crawl.h kLangTable`, and the lint,
+include, comment and seed-extension tables beside it).
+
+**Self outside any class** (`graph.h RubyTopSelf`). Crawling alone was wrong in a measurable way: a template's bare
+`json` bound to the one in-tree `def json` (422 call sites on application A), and a partial's local
+bound to whichever class defines a method of that name. Outside any class Ruby's self is what runs the file:
+
+| File | Self | A receiver-less call reaches |
+| --- | --- | --- |
+| `.rake` | Rake's `main`: the file is loaded at top level, and a task's block is called as written | a top-level def, a reopened Object, Kernel or BasicObject |
+| `.jbuilder` | the view: ActionView compiles a template into a method of it | the same, each method of a module in an app/helpers/ `*_helper.rb` file (Rails' `helper :all`), and each controller method a `helper_method` declaration names |
+
+Any other in-tree namesake is refused as external: a partial's local, a route helper, ActionView's own. A def in test code
+is refused too (`filter.h isTestSymbol`): a def inside an example group's block has no class around it, and is the group's
+method. `helper_method :a, :b` at class-body position is recorded as a `LocalBindKind::RubyHelperMethod` binding against
+the declaring class or module (`ingest_binds.h captureRubyHelperMethods`).
+
+**A template's `json`** (`ingest_binds.h typeRubyJbuilderLocal`) is the local the template handler binds to the view's
+JbuilderTemplate. A read of it is no call. A call on it (`json.summary …`, `json.partial! …`) is a key the class's
+method_missing writes, and is refused as external unless the tree opens JbuilderTemplate.
+
+Measured with `--no-cache`, the Rails declared-call change below (parser version 134) against this change, both runs
+on one snapshot of each tree.
+
+| Corpus | Files added (`.jbuilder` / `.rake`) | Edges | Call-graph isolated | Template sites: an edge / refused | Task-file sites: an edge / refused |
+| --- | --- | --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/` | 0 / 1 | 11,381 → 11,436 | 2,552 → 2,551 | — | 119 / 34 |
+| activesupport 7.2.3.2 `lib/` | none: default map byte-identical | | | | |
+| Rails app A | 62 / 24 | 29,350 → 29,574 | 18,827 → 18,872 | 166 / 467 | 116 / 4 |
+| Rails app B | 107 / 35 | 27,684 → 28,374 | 5,607 → 5,698 | 384 / 2,101 | 506 / 97 |
+| this repo's `src/` (C++), a JavaScript app, a Python repo | none: default map byte-identical | | | | |
+
+No symbol that had a call edge lost it. Isolated rises because the added files bring symbols with no in-tree edge: a
+template whose every call is a Jbuilder key or a framework helper, a task's private def. Of the refused template sites,
+`json` keys are 420 on A and 1,818 on B, and bare words 45 and 278. Five `.rb` methods on A and three on B gain their
+first caller. On application B, 23 call sites in `.rb` files also bind to methods of two classes a task file defines
+(a model's reader, a demo seeder's), where a column of that name is what runs. That is floor (g) of the typed-receiver round.
+
+Sampled against the source:
+- **The view's rules:** every decision sampled was right. All 37 bare calls on A that bind go into app/helpers
+  modules. B's 3 go into `helper_method`s. Of the bare words crawling alone had bound, 9 on A and 56 on B are now
+  refused, and each is a partial's local.
+- **Calls on a value:** 15 of 20 template edges on A and 8 of 20 on B; 8 of 15 task-file edges on A and 4 of 15 on B.
+  Every miss is a call on an untyped receiver, or on an out-of-tree constant (`Hash.new`, `JSON.parse`), bound to the
+  one in-tree def of that name. That is the same floor as in every `.rb` file, not a rule of this change. In application
+  B's `.rb` files, `new` binds to one controller's `new` action at 2,509 call sites, and `where` to a mailer preview's mock
+  at 1,174.
+
+Stated floors, each pinned by `test/rubyrakejbuildercheck.sh`:
+- **(a)** `json.extract! user, :email` names attributes by symbol, and they are not read as calls.
+- **(b)** A `.rb` file's top level is left as before: a block there may run with another self (`describe`,
+  `routes.draw`, `FactoryBot.define`), so a receiver-less call outside any class binds by name.
+
+Not in this change:
+- Sorbet `.rbi` stubs (291 files on application A): each declares a gem's methods, and would add a namesake for nearly
+  every gem call.
+- ERB, Slim and HAML templates: no grammar for them is vendored.
+- `Rakefile`, `Gemfile` and `*.gemspec`: the crawl is keyed by extension.
+- A def in a block outside any class in application code (`Struct.new( … ) do … end`) reads as a top-level def.
+
+`kParserVer` 134 → 135. New records and an appended binding kind, same layout, so `kCacheVersion` stays 27, and Ruby
+caches re-parse once.
+
+### Changed — a method a Rails declaration names by symbol has a caller: callbacks, conditions, rescue handlers, `send`
+
+`before_action :authenticate`, `after_save :reindex`, `validate :name_present`, an `if: :published?` condition and
+`rescue_from …, with: :not_found` each name, by symbol, a method the framework calls later on the class's instances.
+Nothing in the source calls it. Until now every callback method in a Rails app therefore had no caller, ranked as a
+leaf, and `--callers` answered nothing for it. The same was true of a method reached through `send( :m )`.
+
+**What is read** (`ingest_binds.h RubyBareCallWalk::noteDeclaredCall`). Each such symbol is a receiver-less call from the
+class body, resolved like any call to self there: the class's own method, a superclass's, or a concern's
+(`test/rubyreachcheck.sh`). A method no class in reach defines (Devise's `authenticate_user!`) is refused, not bound to
+a namesake. The macro must sit at class-body position: the innermost def-or-class wall is a class or module body. A
+concern's `included do` block counts; a def does not.
+
+| Declaration | The symbols read as calls |
+| --- | --- |
+| A callback (`kRubyCallbackMacros`): `before_action`/`after_action`/`around_action` and their `prepend_`/`append_` forms, ActiveRecord/ActiveModel `before_*`/`after_*`/`around_*` and `validate`, ActiveJob `*_perform`/`*_enqueue`/`after_discard`, mailer delivery and ActionCable channel callbacks | each positional symbol, and the `if:`/`unless:` options (a symbol or an array of them) |
+| `validates`, `validates_*_of`, `validates_with` | only `if:`/`unless:` (the positional symbols are attributes) |
+| `rescue_from` | `with:` |
+| `send`, `public_send`, `__send__`, `try`, `try!`, `method` with a literal symbol | that method, called on the same receiver (`sendTargets`) |
+
+The `send` family resolves exactly as the call written out would. The call's own reference is copied, renamed, and
+placed at the symbol, typed receiver included, so `helper.try( :assist )` answers from `Helper`.
+
+Measured with `--no-cache`, the RSpec expectation-target change below (parser version 133) against this change, both runs
+on one snapshot of each tree.
+
+| Corpus | Edges | Call-graph isolated | Sites gaining an edge (declarations / `send` family) | Newly refused |
+| --- | --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/` | 11,275 → 11,381 | 2,604 → 2,552 | 30 (2 / 28) | 0 |
+| activesupport 7.2.3.2 `lib/` | 3,500 → 3,535 | 1,292 → 1,283 | 34 | 1 |
+| Rails app A | 28,734 → 29,350 | 19,071 → 18,827 | 651 (533 / 118) | 11 |
+| Rails app B | 27,173 → 27,610 | 5,831 → 5,579 | 464 (405 / 59) | 1 |
+| this repo's `src/` (C++), a JavaScript app, a Python repo | default map byte-identical | | | |
+
+Sampled against the source:
+- **Declarations:** 20 of 20 correct across the two applications. Each bound to the class's own method, the superclass's
+  (an `ApplicationController` guard, from a subclass's `before_action`), or a concern's (an integration gate's
+  guard, a notifier concern's hook).
+- **The `send` family:** 7 of 10 on application A and 8 of 10 on application B. On B the other two split across classes
+  that share a final name, including the right one (Round 3's floor (g)). On A the three misses bind an untyped
+  receiver's call to the one in-tree namesake (`x.try( :email )` → one model's `email`), as the
+  same call written out, `x.email`, already did.
+- On activerecord, `became.send( :initialize )` on an untyped receiver splits across all 78 `initialize` definitions, as
+  an untyped `x.m` with 78 definers does. That one site carries 78 of activerecord's 106 new edges.
+
+Stated floors, each pinned by `test/rubydeclrefcheck.sh`:
+- **(a)** Option values that are not calls make none: `only:`/`except:` (action names), `on:` (an event), `prepend:`.
+  Neither do `validates`' attribute names.
+- **(b)** `skip_before_action :x` removes a callback and calls nothing.
+- **(c)** `set_callback` and other ActiveSupport::Callbacks plumbing are not read.
+- **(d)** A string or computed name (`send( "m" )`, `send( name )`) is not read.
+- **(e)** A callback macro inside a method body is not read.
+
+Not in this change: methods that `delegate`, `alias_method` and `define_method` define. A def minted for them would
+need to be visible only to calls on its own class. Round 2 tried minting delegate defs as ordinary defs and produced
+388 wrong edges on application A.
+
+`kParserVer` 133 → 134. New records, same layout, so `kCacheVersion` stays 27, and Ruby caches re-parse once.
+
+### Changed — a call on RSpec's own expectation target is RSpec's: `expect( v ).to` no longer binds to an in-tree `def to`
+
+Inside an example group, `expect( v ).to eq( 1 )` calls `to` on the object `expect` returns, an
+RSpec::Expectations::ValueExpectationTarget. Its `to`, `not_to` and `to_not` are RSpec's. That receiver was untyped, so
+the call bound by name alone. On Rails application A, whose only `def to` is a presenter's, 13,480 expectations bound to
+that presenter's `to`. That ranked it second in the default map, and a utility method its body calls, fourth.
+
+**What is typed** (`ingest_binds.h rubyValueType`, the walk Round 3 types receivers on; `model.h kRspecTargets`). Inside an
+example group (a describe/context, a shared group, a `def` in one), a receiver-less builder returns an instance of one of
+RSpec's target classes, typed like any built receiver: in place, or held by a local.
+
+| Builder | Class |
+| --- | --- |
+| `expect( v )`, a bare `is_expected` | `RSpec::Expectations::ValueExpectationTarget` |
+| `expect { … }` | `RSpec::Expectations::BlockExpectationTarget` |
+| `allow( v )` | `RSpec::Mocks::AllowanceTarget` |
+| `expect_any_instance_of( K )` | `RSpec::Mocks::AnyInstanceExpectationTarget` |
+| `allow_any_instance_of( K )` | `RSpec::Mocks::AnyInstanceAllowanceTarget` |
+
+**How the call resolves** (`graph.h RubyTypedReceivers::outOfTreeTarget`). When the tree never opens the class, only a
+reopened `Object`, `Kernel` or `BasicObject` can answer. Otherwise the method Ruby runs is RSpec's, and the call is
+refused as external. A tree that opens the class (RSpec's own source, or a patch) answers from it, as from any in-tree
+class. A tree that defines a method named after the builder (`def expect`) types nothing from that name.
+
+Measured with `--no-cache`, the typed-receiver change below (parser version 132) against this change, both runs on
+one snapshot of each tree. Call sites are keyed by (file, line, callee) with `--pin-census`.
+
+| Corpus | Edges | Call-graph isolated | Edges lost (refused) | Newly refused (no edge before) |
+| --- | --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/`, activesupport 7.2.3.2 `lib/` | default map byte-identical | | 0 | 0 |
+| Rails app A | 29,670 → 28,734 | 18,999 → 19,071 | 13,480 | 1,661 |
+| Rails app B (no in-tree `def to`) | 27,173 → 27,173 | 5,831 → 5,831 | 0 | 25,365 |
+
+On application A, every lost edge was the presenter's `to`. Twelve sites sampled at random are all `expect( … ).to`.
+The presenter drops from rank 2 of the default map's 191 rows to 126, and the utility method from 4 to 127. A single
+line can carry two `to` calls (the matcher chain in floor (c)). On 78 lines one call is now refused and the other still
+binds. On application B, only the header's `external=` count moves (6,965 → 32,331).
+
+Stated floors, each pinned by `test/rubyrspectargetcheck.sh`:
+- **(a)** Outside an example group, the call binds by name as before: a helper module in `spec/support` that a
+  `config.include` mixes in, or an `RSpec.configure` hook. On application A that is 25 sites in `spec/support`.
+- **(b)** A tree that defines a method named after the builder types nothing from that name.
+- **(c)** Matcher chains are not typed. `receive( :m ).with( … )`, and the `to` of `change { }.from( a ).to( b )`, bind by
+  name as before (137 `to` sites on application A).
+- **(d)** An `expect` with a receiver (`helper.expect( 1 )`) is not RSpec's builder.
+
+The class check also exposed a Round 3 gap. The opens a qualified type is checked against came from the base scope, which
+is built only for a tree with a Ruby superclass, mixin or constant reference. In any other tree, a qualified constant was
+never trusted. `rubyOpenedPaths` now builds the full constant index for such a tree (`resolve.h rubyConstantIndexOf`, the
+ungated core of `buildRubyConstantIndex`), once a typed receiver is qualified. `test/rubytypedrecvcheck.sh` pins it with a
+flat tree.
+
+`kParserVer` 132 → 133. The layout is unchanged (a type is a string the record already carries), so `kCacheVersion`
+stays 27, and Ruby caches re-parse once.
+
+### Changed — a Ruby call on a receiver the code builds answers from that class's lookup: locals, lets, factories, constructions
+
+A Ruby receiver the code builds is an instance of one class, and Ruby's method lookup on that class decides which `def`
+answers a call on it. Until now every such call bound by name alone — same file, same directory, the one definer in the
+tree, else no edge:
+- `c = Client.new` then `c.get` declined between `Client#get` and `Other#get`.
+- `u = User.find( id )` then `u.email`, a column Rails generates, bound to an unrelated `Post#email`.
+- In a spec, `let( :user ) { create( :user ) }` then `user.activate!` bound to `Post#activate!` whenever the file also
+  built a Post: the include narrow reads `Post.new` as an import, and `RSpec.describe User` names User only as an
+  argument.
+
+**What is typed** (`ingest_binds.h`, on the walk that already tracks Ruby's locals and RSpec's lets). A value is typed
+when it is `Const.new( … )`, an Active Record finder on a constant (`find`, `find_by`, `create`, `first`, … ),
+`described_class.new`, or a FactoryBot build (`create`/`build`/`build_stubbed( :user, … )` inside an example group, or
+on `FactoryBot`). A call's receiver is typed when it is:
+- one of those written in place: `Client.new.close`, `User.find_by( … ).activate!`, `create( :user ).name`;
+- a local whose every binding in its scope builds the same one;
+- the `let`/`subject` RSpec runs for that name there: the innermost, so a nested group's override wins, and a local of
+  the same name hides it. A group's implicit `subject` is its parent's explicit one, else `described_class.new`.
+
+A factory's class is FactoryBot's rule, read from the tree's `FactoryBot.define` blocks (`captureRubyFactories`): the
+`class:` option as written, else the enclosing factory's, else the `parent:` factory's, else the name camelised. The
+type rides the call reference's receiver text (`model.h rubyTypedRecvOf`) with the receiver kind unchanged, so every
+rule that does not read it sees the call exactly as before.
+
+**How a typed call resolves** (`graph.h RubyTypedReceivers`). The class's lookup answers: its own methods, its mixins
+and superclass chain over the Ruby overlay of the entry below (the shallowest level that defines the name decides), then a reopened
+`Object`, `Kernel` or `BasicObject`. When none of those defines it, a class below may (Active Record's single-table
+inheritance hands back a subclass), so the call keeps the candidates the class's instances reach (`RubySelfReach`). With
+none left the call is refused as external (`external=`): a column, an association, `errors`, `reload`, a framework
+method — the method Ruby runs is outside the tree. The type is used only when it means what it says:
+- a factory with one class tree-wide;
+- a class the tree defines, and for a qualified constant, one whose path the tree opens: `OpenSSL::Cipher.new` is not
+  activerecord's `Encryption::Cipher`, `Stripe::Customer` is not an app's `Customer` model;
+- no class in its lookup defining the method that built it: a `def self.find` may return anything.
+
+Measured with `--no-cache`, the method-lookup change below (parser version 131) against these changes, both runs on
+one snapshot of each tree. Edges and isolated symbols are `--report` totals. Call sites are keyed by (file, line,
+callee) with `--pin-census`.
+
+| Corpus | Edges | Call-graph isolated | Sites gaining an edge | Retargeted | Edges lost (refused) | Newly refused (no edge before) |
+| --- | --- | --- | --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/` | 11,278 → 11,275 | 2,611 → 2,604 | 33 | 31 | 0 | 2 |
+| activesupport 7.2.3.2 `lib/` | 3,498 → 3,500 | 1,293 → 1,292 | 3 | 0 | 1 | 4 |
+| Rails app A | 28,733 → 29,670 | 19,023 → 18,999 | 2,616 | 212 | 625 | 3,880 |
+| Rails app B | 27,093 → 27,192 | 5,867 → 5,831 | 926 | 292 | 1,370 | 1,795 |
+| this repo's `src/` (C++), a JavaScript app, a Python repo | default map byte-identical | | | | | |
+
+Most of the applications' change is in specs, where a `let` built by a factory is the commonest receiver there is.
+Sampled against the source:
+- **Edges lost were wrong:** 10 of 10 on each application. Every one bound a generated method — an association, a
+  column or its setter, `errors`, `reload`, CanCan's `can?` — to an unrelated class's namesake, a test stub's
+  `body` among them.
+- **Added edges correct:** 10 of 10 on activerecord (Arel managers built in place: `um.take`, `sm.project`) and 10 of 10
+  on each application. On application A, 2 of the 10 bind to a Sorbet `abstract` stub in a mixin (`def id; end` in
+  a reports module). Ruby's lookup does find the stub first: Rails includes its generated attribute and
+  association modules when the class is created, so a later `include` comes before them, and sorbet-runtime's stub
+  forwards to `super`.
+- **Retargets better:** 9 of 10 on activerecord (1 neutral), 6 of 6 on application B (`service.call` had bound to
+  a middleware's `call`), 9 of 10 on application A (1 now split between two classes that share a final name).
+
+Stated floors, each pinned by `test/rubytypedrecvcheck.sh`:
+- **(a)** A type the tree does not define (`Net::HTTP.new`, `SimpleDelegator.new`, a `Point = Struct.new( … )` constant)
+  changes nothing; neither does a qualified constant whose path the tree never opens.
+- **(b)** A class that defines its own `self.find` or `self.new`, or has an ancestor that does, may return anything: a
+  local built that way is untyped.
+- **(c)** Control flow is not read. A local bound any other way anywhere in its scope — another assignment, a parameter,
+  a block parameter — is untyped everywhere in that scope.
+- **(d)** Instance variables, method return values, `x.class` and a `let` defined in a shared context in another file are
+  not typed.
+- **(e)** A class whose lookup can leave it (a delegator, `method_missing`, the delegation DSL) refuses nothing, as for
+  a call to self (the entry below).
+- **(f)** Two factories sharing a name with different classes type nothing.
+- **(g)** A method defined only through `alias`/`alias_method` is no definition the tree indexes, so a typed call to it
+  is refused rather than bound to another class's namesake (activerecord's `sm.limit = 1`, which had no edge before
+  either).
+
+Classes are keyed by final segment, as everywhere in the graph: two classes sharing a name share a lookup (the
+split above; `test/rubyreachcheck.sh` floor (e)).
+
+Two earlier floors are lifted, and their gate arms are kept inverted: `test/rubyrecvnarrowcheck.sh` (c), where
+`Calc.new.scale` now pins to `Calc::scale`, and `test/rubydescribedclasscheck.sh` (a), where `described_class.new.m`
+now pins to the described class.
+
+`kParserVer` 131 → 132. Same layout (a typed receiver is a string the record already carries; factories are bindings of
+the appended `LocalBindKind::RubyFactory`): `kCacheVersion` stays 27, and Ruby caches re-parse once.
+
+
+### Changed — a Ruby call to self reaches what Ruby's method lookup reaches: mixins are ancestors, a class body's self is the class, an unreachable namesake is no target
+
+A receiver-less Ruby call (`m`, `m( x )`) or `self.m` inside a class or module sends `m` to self. Ruby answers it from
+self's ancestors: the class, its mixins, its superclass and theirs. The resolver read three things wrong:
+- **Mixins were not ancestors.** `include Hub::SignalMixin` put nothing in the caller's base walk, so `signal`
+  split between the mixin's def and an unrelated same-file `Hub#signal`, and a concern's call to its includer's
+  method declined. Each constant of an `include`/`extend`/`prepend` at class-DSL position, or inside a concern's
+  `included do … end`, now mints an inherit reference (`ingest_relations.h captureRubyMixinBases`). It is scoped by
+  Ruby's constant lookup, starting inside the class (`resolve.h rubyScopeMixinReferences`). A concern's nested
+  `module ClassMethods` is an ancestor of the concern, since `ActiveSupport::Concern` extends it onto every includer.
+- **A class-body call ran against the namespace around the class.** `define_section :first` inside `Ns::Catalog` bound to
+  `Ns.define_section`. Its self is now the class (`graph.h callerSelfScope`).
+- **A candidate no lookup can reach still bound by name.** Examples:
+  - a controller's `render` bound to a component's `def render`;
+  - every bare `raise` in activesupport bound to `ProxyObject#raise`;
+  - `request` bound to the `request` of a class the controller only names, because Rule 3's include narrow read a
+    constant reference as evidence;
+  - a scope lambda's `where` bound to an unrelated `def where`.
+
+  `graph.h RubySelfReach` now keeps only the candidates whose owner lies in self's reach: the ancestors of self, and of
+  every class below it. So a template method reaches a subclass's hook, and a concern its includer's method. A call left
+  with none is vetoed as external (`external=`): the method Ruby runs is outside the indexed tree.
+
+Mixins feed only these Ruby self-call reads, through an overlay (`graph.h buildRubyCha`). Keyed by name like every base,
+a generic module name in the shared inheritance graph widened CHA-lite cones and the builtin-method gate's evidence for
+receiver calls (activerecord's `sql.dup` bound to `Inheritance::ClassMethods#dup`). A `ClassMethods` key is qualified by
+the module that holds it, since dozens of concerns each nest one.
+
+What the rule leaves alone:
+- **The implicit roots.** A method of a reopened `Object`, `Kernel`, `BasicObject`, `Module` or `Class` (activesupport's
+  core extensions), since every self has them as ancestors.
+- **Top-level defs**, but only while no class in reach has an out-of-tree superclass or mixin. Ruby asks
+  `ActionController::Base` before `Object`, so a controller's `render` no longer reaches a top-level `def render` in a
+  spec (453 call sites on one application).
+- **A class that answers any name**: one defining `method_missing`, one writing the delegation DSL (`delegate`,
+  `delegate_missing_to`, `def_delegator(s)` define methods the tree does not index yet), or one below `SimpleDelegator`,
+  `Delegator` or a Draper decorator.
+- **A call outside any class**: a script's top level, or an RSpec example group's blocks.
+
+Measured with `--no-cache`, the bare-word-call changes below (parser version 130) against these changes. Edges and
+isolated symbols are `--report` totals. Call sites are keyed by (file, line, callee) with `--pin-census`.
+
+| Corpus | Edges | Call-graph isolated | Sites gaining an edge | Retargeted | Refused (`external=`) |
+| --- | --- | --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/` | 11,169 → 11,278 | 2,564 → 2,611 | 147 | 27 | 205 |
+| activesupport 7.2.3.2 `lib/` | 3,717 → 3,498 | 1,279 → 1,293 | 11 | 6 | 275 |
+| Rails app A | 30,044 → 28,733 | 18,850 → 19,023 | 91 | 277 | 1,758 (+6 declined) |
+| Rails app B | 27,695 → 26,762 | 5,752 → 5,853 | 161 | 10 | 1,521 (+24 declined) |
+| this repo's `src/` (C++), a JavaScript app, a Python repo | default map byte-identical | | | | |
+
+Sampled against the source:
+- **Refusals that removed a wrong edge:** 13 of 15 on activerecord, 15 of 15 on activesupport, 14 of 15 and 15 of 15 on
+  the applications. The losses are calls inside a `Class.new( ActiveRecord::Base ) { … }` block (floor (d)).
+- **Added edges correct:** 15 of 15 on activerecord, 14 and 15 of 15 on the applications. They are mostly mixin
+  base-walk hits: an adapter's `execute` reaching `DatabaseStatements`, a concern's call reaching its host.
+- **Retargets better:** 7 of 10 on activerecord (2 neutral, 1 now a split), 12 of 12 and 6 of 8 (2 neutral) on the
+  applications.
+
+Stated floors, each pinned by `test/rubyreachcheck.sh`:
+- **(a)** A class whose lookup can leave the class refuses nothing (see above).
+- **(b)** A class that writes the delegation DSL is exempt. Indexing delegated names as methods needs a call-to-self-only
+  visibility, so a receiver call of that name is not taken as evidence; that is a later round's job. The DSL call itself
+  is no exception: on activesupport a `delegate :x, to: :y` line has two namesakes in reach, core_ext's `Module#delegate`
+  and `Notifications::Fanout`'s `attr_reader :delegate`, and declines.
+- **(c)** Instance and class methods share one name space: `extend M` and `include M` both put M in reach.
+- **(d)** Inside `instance_eval`, `class_eval`, `instance_exec` or `Class.new` blocks the rule reads the lexical self,
+  as Rule 1 always has.
+- **(e)** Reach is read by class name, as the inheritance graph is keyed, so two classes sharing a name share their
+  reach. This refuses less, never more.
+- **(f)** A call outside any class is untouched.
+- **(g)** `prepend` is read as `include`.
+- **(h)** A top-level def is reachable only while no class in reach has an out-of-tree ancestor (above).
+- **(i)** A mixin written inside a method body runs when the method does, and is not read. Activerecord's `primary_key=`
+  includes `CompositePrimaryKey` this way.
+- **(j)** Rails' shared view object, into which every `app/helpers` module is mixed, is not modelled.
+- **(k)** A core class's own ancestry beyond the implicit roots is not modelled. A reopened `class Array` does not reach
+  a reopened `Enumerable`.
+
+`kParserVer` 130 → 131. New records, same layout: `kCacheVersion` stays 27, and Ruby caches re-parse once.
+
+### Added — a Ruby bare-word call is a call: `full_name`, `render_profile`, the `items` of `items.sum`
+
+A Ruby call with no receiver, no arguments and no parentheses parses as a plain `(identifier)` in tree-sitter-ruby.
+That is the same node a local-variable read is, so `queries/ruby/tags.scm` never captured it, and one Ruby call site
+in five minted no reference at all. Measured with Prism's `CallNode#variable_call?`: 4,157 of 28,584 call sites in
+activerecord 7.2.3.2 `lib/`, and 50,893 of 250,320 and 56,897 of 295,879 in two Rails applications.
+
+Ruby's parser decides call-versus-local **lexically**, and `ingest_binds.h::captureRubyBareCalls` applies the same
+rule in one source-order walk:
+- An identifier is a local exactly when an assignment, parameter or pattern binds its name **earlier** in its own scope
+  or in an enclosing block's, up to the nearest `def`, `class`, `module` or `class <<`.
+- Every other bare identifier becomes a receiver-less call reference. That is the implicit-self shape resolve.h's
+  Rule 1 and its base walk already read.
+
+The binding kinds are the one table #338's `described_class` floor already used (`kRubyLocalKinds`). It gains the
+binders Ruby has beyond assignment and parameters: `for`, pattern matching (`in x`, `=> x`, array and find patterns,
+`in { x: }`), and a regex literal's named groups on the left of `=~`. So `described_class` reads those locals too.
+A few more shapes:
+- A hash or keyword-argument shorthand (`{ payload: }`) reads `payload`.
+- Inside a block with no parameter list, `it` and `_1` … `_9` are its implicit parameters.
+- RSpec: a group's `let` / `let!` / `subject` / `subject!` (and test-prof's `let_it_be` family), and the implicit
+  `subject`, bind like locals over the whole group. That covers lines before the `let`, nested groups and a `def`
+  inside the group, so a spec's `user` never reaches an application `def user`. They are not minted as definitions:
+  application code could then name them, and 1,818 and 1,036 application call sites to a uniquely-defined method
+  share a name with a `let` on the two applications.
+
+### Fixed — Ruby has no declarations: an `attr_reader` accessor or an empty `def` hook is the definition a call names
+
+`model.h::isDefinitionNotDeclaration` (`endByte > sigEndByte`, plus a Kotlin type) decides what graph.h's decl/def
+collapse may evict and what `canonByName` holds. Ruby has no prototype, abstract member or interface: every class,
+module, `def`, attr accessor and constant it indexes is a definition. A body-less one read as a declaration and was
+evicted whenever a same-named bodied `def` existed anywhere. So inside `Tracker`, `aliases`, `self.aliases` and
+`aliases()` all bound to an unrelated `Join#aliases`, and an inherited empty hook lost to another class's method.
+
+The predicate gains a Ruby clause beside the Kotlin one. The collapse also gives Ruby its own family, as Kotlin has
+one: in the shared family a Ruby `def` evicted a same-named C prototype (a C extension's header), and the C call read
+unresolved.
+
+Measured with `--no-cache`, `main` (953818d6, parser version 129) against these changes. Edges and isolated symbols
+are `--report` totals; `declined=` is the map header's.
+
+| Corpus | Edges | Call-graph isolated | `declined=` |
+| --- | --- | --- | --- |
+| activerecord 7.2.3.2 `lib/` | 8,146 → 11,169 | 3,221 → 2,564 | 5,367 → 5,485 |
+| activesupport 7.2.3.2 `lib/` | 3,094 → 3,717 | 1,468 → 1,279 | 1,591 → 1,695 |
+| Rails app A | 27,027 → 30,044 | 20,059 → 18,850 | 41,265 → 54,418 |
+| Rails app B | 24,394 → 27,695 | 6,686 → 5,752 | 34,281 → 39,021 |
+| this repo's `src/` (C++), a JavaScript app, a Python repo | default map byte-identical | | |
+
+How the new edges were checked (`--pin-census`, keyed by call site):
+- **Every decided bare call is a Prism `variable_call?`** at the same file, line and name: 3,144 on activerecord, 766
+  on activesupport, 7,887 and 8,498 on the applications.
+- **Lost edges.** 195, 23, 6,449 and 1,372 call sites lost their edge. Each had been pinned to one def only because the
+  name's other definers were evicted, and it now declines. Of 50 sampled (10 activerecord, 20 per application), none
+  was correct. Examples: every RSpec `context "…" do` in app A was bound to one service's `context`, and
+  `self.class.name` to one model's `name`.
+- **Added edges.** 21 of 22 sampled non-split activerecord edges were correct, and 29 of 40 application edges.
+- **Baseline.** A sample of the applications' pre-existing edges reads 14 of 24 correct.
+
+Stated floors, each pinned by `test/rubybarecallcheck.sh`:
+- **(a)** `defined?( x )` calls nothing.
+- **(b)** A `let` from a shared context is unknown in the including file, so there the name reads as a call.
+- **(c)** Locals made at run time (`binding.local_variable_set`, `eval`) are invisible to a lexical rule.
+- **(d)** Inside `instance_eval` / `class_eval` blocks, a bare call resolves against the lexical class, as a
+  parenthesised `m()` always has.
+- **(e)** The RSpec DSL call itself (`subject( :x ) { … }`, `it "…" do`) is an ordinary call and binds by name.
+
+A known limit of the ladder, not of these rounds: a method Rails **generates** (a column, an association,
+ActiveModel's `errors`, Devise's `current_user`) has no in-tree definition. A call to it can therefore land on the
+one unrelated in-tree method of that name. For example, app A's 269 `errors` edges to one concern's
+`def errors; end` stub grow to 455.
+
+The same fix puts every attr accessor on the name ladder, so the untyped-receiver limit also reaches calls that bound
+nothing before. On activerecord `connection_class.name` now reaches `Column#name`, and on activesupport the cache's
+`entry.value` splits between `Duration#value` and `Scalar#value`; in a sample taken in review, about 4 in 10 such newly
+bound calls named `Class#name` or another class's reader. An accessor can also become a second definer: `ActiveRecord::Base.configurations` (a
+`def self.configurations` in `Core`) now meets `DatabaseConfigurations`' `attr_reader :configurations` on the ladder,
+since `ActiveRecord::Base` extends `DynamicMatchers`, whose `method_missing` leaves its class-object lookup open (the
+class-object entry above). Of the 13 methods that called `Core.configurations`, 5 now split between the two and 7
+decline; the 13th, `configs.configurations` in `DatabaseConfigurations#build_configs`, now reaches the reader, as it should.
+The include-and-extend entry at the top of this section consults that `method_missing` only after the lookup misses,
+which puts the 12 back on `Core`'s def as single edges.
+
+`kParserVer` 129 → 130. New records, same layout: `kCacheVersion` stays 27, and Ruby caches re-parse once.
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
 
@@ -582,6 +1239,15 @@ as the definition and the hash covered the next function instead: the dead-set b
 extractor now reads the whole signature before deciding it is a prototype; two arms are red on the old extractor (a
 wrapped prototype is skipped; every watched capture is exactly one function), and the other 16 watched functions hash
 byte-identically under both. The pin is re-derived once.
+`kParserVer` 124 → 145 (the function-literal fix takes 128; #338 and #325 take 129; the body-less C/C++ type-specifier
+span fix and the TypeScript `await f<T>(x)` / `!f<T>(x)` calls each took a number of their own on their branches, as did
+the Ruby method-lookup changes, one per step from 130 to 137: bare-word calls, mixins, typed receivers, RSpec targets,
+Rails declared calls, Rake and Jbuilder files, RSpec matcher chains, class objects, then 145 for the review's
+include-and-extend change. 145 sits above every number a branch build of unreleased work has used, so no cache such a
+build wrote is read as this release's), `kCacheVersion` 25 → 27
+(the function-literal fix's record changes) and `kQSnapCacheScheme` 15 → 16 (the `--quality-delta` error-masking and
+placeholder changes). Every ingest cache written by an earlier build is refused and re-indexed once, and every
+cached quality snapshot is recomputed. The session legend dictionary is `dictv=66409821069cf5cb entries=775`.
 
 ### Fixed — test infrastructure: a gate killed mid-run no longer leaves its harness spinning (expandrangecheck, diagnoticecheck)
 

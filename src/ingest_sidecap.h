@@ -2236,7 +2236,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 d.scope = rubyEnclosingScopeOf( nameNode, src );   // (test/rubyscopecheck.sh)
                 if( kind == SymKind::Method || kind == SymKind::Function )
                 {
-                    rubyNoteSingletonDef( defNode, fileId, d.name, binds );   // a class object's method (test/rubyclassrecvcheck.sh)
+                    rubyNoteClassSideDef( defNode, fileId, d.name, src, binds );   // a class object's method (test/rubyclassrecvcheck.sh)
                 }
             }
             else if( le.lang == Lang::Kotlin )
@@ -2421,6 +2421,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     // template's `json` — a local, typed JbuilderTemplate — in the refs window.
     // Parser version 137 (test/rubyclassrecvcheck.sh): the accessors a `class << self` declares, into binds as singleton
     // methods — beside each singleton def, which the def capture above notes.
+    // Parser version 145 (test/rubyclassrecvcheck.sh): the mixins the class object's lookup reaches — an `extend`, an
+    // `include` in `class << self` — into binds, beside the inherit reference each mixin already is.
     if( le.lang == Lang::Ruby )
     {
         captureRubyAttrDefs( root, fileId, src, defs );
@@ -2428,6 +2430,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
         captureRubyFactories( root, fileId, src, binds );
         captureRubyHelperMethods( root, fileId, src, binds );
         captureRubySingletonAccessors( root, fileId, src, binds );
+        captureRubyClassMixins( root, fileId, src, binds );
         if( le.ext == kJbuilderExt )
         {
             typeRubyJbuilderLocal( fileId, refs );

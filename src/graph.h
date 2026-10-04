@@ -3322,18 +3322,107 @@ inline RubyTopSelf buildRubyTopSelf( const IngestResult& ing, const RubySelfReac
 //     `Point = Struct.new( … )` constant, a gem's class — answers only from a reopened root. A tree with no constant index
 //     reads the final segment, as every class is keyed elsewhere.
 //   * WHAT answers: the shallowest of the class, its mixins and its superclasses — read by fully-qualified constant along
-//     what the index scopes their superclass and mixin references to (fqnUp) — to define the name as a class method: a
-//     singleton method (`def self.m`, a def or an accessor in `class << self`: LocalBindKind::RubySingletonDef), or a
-//     module's method (an extended module's, a concern's ClassMethods'); a class's instance method is its instances'
-//     alone, and so is a method of a concern that nests a ClassMethods. Then a reopened Module, Class, Object, Kernel or
-//     BasicObject. `C.new` is Class#new unless a `def self.new` answers first, and Class#new runs the first `initialize`
-//     an instance's lookup finds — never an instance method named `new`. A class below a base that forwards a class
-//     object's call to a new instance (kRubyInstanceForwardingBases: a mailer's, ActiveSupport::CurrentAttributes)
-//     answers a name it lacks from its instances' lookup.
+//     what the index scopes their superclass and mixin references to (fqnSides) — to define the name as a class method,
+//     each on the side of the lookup it joins (parser version 145, RubySide): the class's and its superclasses' singleton
+//     methods (`def self.m`, a def or an accessor in `class << self`: LocalBindKind::RubySingletonDef); what a module the
+//     class includes defines on its includer — a singleton def in a concern's `included do`, at the includer's own
+//     level, then a def in its `class_methods do`, its nested ClassMethods, a module its `included do` extends — and the
+//     instance methods of a module the class extends (LocalBindKind::RubyClassMixin: an `extend`, an `include` in
+//     `class << self`, a module's `extend self`). Ruby's order: the class's own singleton, then what it extends, level by
+//     level, and only then its superclass's (one round per class up the chain). A class's instance method is its
+//     instances' alone, and so is an included module's; a module's own singleton method, or one it extends, is the
+//     module's. A call on a module answers from its own methods too (floor (c): `module_function` is not read). Then a
+//     reopened Module, Class, Object, Kernel or BasicObject. `C.new` is Class#new
+//     unless a `def self.new` answers first, and Class#new runs the first `initialize` an instance's lookup finds — never
+//     an instance method named `new`. A class below a base that forwards a class object's call to a new instance
+//     (kRubyInstanceForwardingBases: a mailer's, ActiveSupport::CurrentAttributes) answers a name it lacks from its
+//     instances' lookup.
 //   * When nothing there defines the name, Ruby's answer is outside the tree (ActiveRecord::Base's `where`,
 //     StandardError's initialize), and the call is refused as external rather than bound to an unrelated namesake.
-// Left as before: a SCREAMING constant the tree assigns (`LIMITS = Limits.new`, a value of a class nothing types), and a
-// class object that may answer any name — a method_missing in its lookup, or the name delegated by a `class << self`.
+// Left as before: a SCREAMING constant the tree assigns (`LIMITS = Limits.new`, a value of a class nothing types), a name
+// a `class << self` delegates, and a name nothing in the lookup defines when a method_missing there may answer it — Ruby
+// calls a method_missing only when its lookup misses, so a def the lookup finds answers first (ActiveRecord::Base, which
+// extends DynamicMatchers, still answers `configurations` from Core's `included do`).
+
+// Which side of a Ruby lookup a walk stands on at a class or module (RubyClassObjects::sideLookup; parser version 145).
+enum class RubySide : std::uint8_t
+{
+    ClassObject,           // the class object, or a superclass's: its singleton methods answer, and a module's own methods
+                           //   (floor (c))
+    Included,              // a module the class includes: what its `included do` defines on the includer answers, at the
+                           //   includer's own level
+    ConcernClassMethods,   // the same module's `class_methods do` block, which the concern extends onto the includer: its
+                           //   defs answer a level above
+    Extended,              // a module the class object extends: its instance methods answer
+    Instance,              // an instance's lookup (what Class#new's initialize is, a forwarding base's name): any instance
+                           //   method
+};
+
+// How a Ruby ancestor joins the lookup of the class or module that writes it (RubyClassObjects::fqnSides).
+enum class RubyAncestry : std::uint8_t
+{
+    Superclass,
+    Include,          // `include` or `prepend` — in the body, or in a concern's `included do` (into the includer)
+    Extend,           // `extend` in the body, an `include` in `class << self`, a module's `extend self`: the writer's own
+                      //   class object
+    IncluderExtend,   // `extend` in a concern's `included do`: the includer's class object
+    ClassMethods,     // a concern's nested ClassMethods, which ActiveSupport::Concern extends onto the includer
+};
+
+// One step of a lookup walk (RubyClassObjects::sideLookup): a constant, and the side the walk stands on there.
+using RubySideStep = std::pair<const std::string*, RubySide>;
+
+struct RubyAncestorEdge
+{
+    std::string  fqn;
+    RubyAncestry how = RubyAncestry::Superclass;
+
+    auto operator<=>( const RubyAncestorEdge& ) const = default;
+};
+
+// The side a walk standing on `from` reaches an ancestor on across `how`, or nullopt when that ancestor is in no lookup from
+// there: a module's own body-level `extend` is the module's, a concern's ClassMethods its includers', and an instance's
+// lookup holds no extended module. (A concern's `class_methods do` block is no ancestor: sideSteps steps to it.) Rows
+// follow RubySide's order, columns RubyAncestry's.
+inline constexpr std::optional<RubySide> kRubySideAcross[ 5 ][ 5 ] = {
+    //                     Superclass              Include                 Extend                  IncluderExtend          ClassMethods
+    /* ClassObject */    { RubySide::ClassObject,  RubySide::Included,     RubySide::Extended,     std::nullopt,           std::nullopt },
+    /* Included */       { std::nullopt,           RubySide::Included,     std::nullopt,           RubySide::Extended,     RubySide::Extended },
+    /* ConcernClassM. */ { std::nullopt,           std::nullopt,           std::nullopt,           std::nullopt,           std::nullopt },
+    /* Extended */       { std::nullopt,           RubySide::Extended,     std::nullopt,           std::nullopt,           std::nullopt },
+    /* Instance */       { RubySide::Instance,     RubySide::Instance,     std::nullopt,           std::nullopt,           std::nullopt },
+};
+
+inline std::optional<RubySide> rubySideAcross( RubySide from, RubyAncestry how ) noexcept
+{
+    return kRubySideAcross[ unsigned( from ) ][ unsigned( how ) ];
+}
+
+// What a Ruby def is to a class object, as bits (RubyClassObjects::defSides).
+inline constexpr char kRubyDefSingleton = 1;   // a singleton method of the class or module that holds it
+inline constexpr char kRubyDefIncluder  = 2;   // a class method each class including its module defines (model.h kRubyIncluderMark)
+inline constexpr char kRubyDefModule    = 4;   // a method of a module, which a call on the module answers (floor (c))
+inline constexpr char kRubyDefBlock     = 8;   // a def in a concern's `class_methods do` (model.h kRubyClassMethodsMark)
+
+// Does a def whose side bits are `bits` answer a walk standing on `side`?
+inline bool rubyAnswersOn( RubySide side, char bits ) noexcept
+{
+    const bool singleton = ( bits & kRubyDefSingleton ) != 0;
+    const bool includers = ( bits & ( kRubyDefIncluder | kRubyDefBlock ) ) != 0;
+    if( side == RubySide::ClassObject )
+    {
+        return !includers && ( singleton || ( bits & kRubyDefModule ) != 0 );
+    }
+    if( side == RubySide::Included )
+    {
+        return ( bits & kRubyDefIncluder ) != 0;
+    }
+    if( side == RubySide::ConcernClassMethods )
+    {
+        return ( bits & kRubyDefBlock ) != 0;
+    }
+    return !singleton && !includers;   // Extended and Instance: an instance method of what the walk stands on
+}
 
 // What a call on a receiver whose every answer the tree knows reaches (rubyClosedLookup).
 struct RubyClosedLookup
@@ -3370,30 +3459,40 @@ struct RubyClassObjects
     const RubyBaseScope&                                   bases;             // the constant index a receiver's FQN is read off
     HashMap<std::string, char>                             constantValues;    // every SCREAMING constant the tree assigns
     HashMap<std::string, char>                             missingOwners;     // every class or module defining a method_missing
-    HashMap<NodeId, char>                                  classObjectDefs;   // every def a class object may answer from
+    std::vector<char>                                      defSides;          // per symbol: the kRubyDef* bits of a def a
+                                                                              //   class object may answer from, else 0
     HashMap<std::string, char>                             forwarders;        // every class written below a forwarding base
     HashMap<std::string, char>                             classDelegated;    // "<class>#<name>" a `class << self` delegates
     HashMap<std::string, std::vector<std::string>>         fqnUp;             // a constant → what its superclass and mixins
                                                                               //   resolve to, and a concern's ClassMethods
+    HashMap<std::string, std::vector<RubyAncestorEdge>>    fqnSides;          // the same, each with how it joins the lookup
     Reference                                              initializeCall;    // a Ruby call of `initialize`: what C.new runs
     mutable HashMap<std::string, std::vector<std::string>> fqnAncestorsMemo;
     mutable rw::SmallVec<NodeId, 2>                        hits, rootHits;
     mutable std::vector<const std::string*>                walkLevel, walkNext;
     mutable HashMap<std::string_view, char>                walkSeen;
+    mutable std::vector<RubySideStep>                      sideLevel, sideNext, sideRound;
+    mutable HashMap<std::string_view, char>                sideSeen;          // a constant → the sides the walk met it on, a bit each
 
     RubyClassObject                 of( const Reference& r ) const;                                     // the class a constant names
     RubyClassObject                 ofIndexed( const Reference& r ) const;
     const rw::SmallVec<NodeId, 2>*  lookup( const Reference& r, const RubyClassObject& object ) const;   // what answers a call on it
     const rw::SmallVec<NodeId, 2>*  definerLookup( const RubyClassObject& object, const Reference& asked, bool classObject ) const;
     const rw::SmallVec<NodeId, 2>*  rootLookup( const Reference& r ) const;                             // a reopened root's
-    bool                            open( const RubyClassObject& object, std::string_view callee ) const;   // it may answer any name
+    bool                            delegates( const RubyClassObject& object, std::string_view callee ) const;   // a class << self delegates it
+    bool                            missingAnswers( const RubyClassObject& object ) const;   // a method_missing may answer a miss
     template<class Probe>
     const rw::SmallVec<NodeId, 2>*  levelLookup( const HashMap<std::string, std::vector<std::string>>& edges, const std::string& start, Probe&& probe ) const;
     void                            expandLevel( const HashMap<std::string, std::vector<std::string>>& edges, const std::string& name ) const;
     void                            noteNamedDefs( const std::string& owner, std::string_view callee ) const;
-    void                            noteFqnDefs( const std::string& fqn, std::string_view callee, bool classObject ) const;
+    const rw::SmallVec<NodeId, 2>*  sideLookup( const std::string& start, RubySide side, std::string_view callee ) const;
+    void                            sideSteps( const std::string& name, RubySide at ) const;
+    void                            sideVisit( const std::string& name, RubySide on, std::vector<RubySideStep>& into ) const;
+    void                            noteSideDefs( const std::string& fqn, std::string_view callee, RubySide side ) const;
     bool                            ownedBy( NodeId c, const std::string& fqn ) const;
     bool                            anyInLookup( const std::string& cls, const HashMap<std::string, char>& owners ) const;
+    template<class Pred>
+    bool                            anyAncestor( const std::string& cls, Pred&& pred ) const;
     bool                            pathOpened( std::string_view written ) const;
     std::string                     receiverFqn( const Reference& r ) const;
     std::string                     lexicalConstant( const std::vector<RubyOpenRec>& opens, std::uint32_t site, std::string_view written ) const;
@@ -3631,7 +3730,7 @@ inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::levelLookup( const HashM
     return hits.empty() ? nullptr : &hits;
 }
 
-// The defs of `callee` that `owner`, read by name, holds where a class object may answer from them (classObjectDefs), into
+// The defs of `callee` that `owner`, read by name, holds where its class object answers from them (defSides), into
 // hits. A nested `module ClassMethods` is keyed "<holder>::ClassMethods" in the overlay while its defs are indexed under the
 // bare name every concern's shares, so its defs are read by the concern that holds them (RubySelfReach::qualifiedOwner).
 inline void RubyClassObjects::noteNamedDefs( const std::string& owner, std::string_view callee ) const
@@ -3646,16 +3745,16 @@ inline void RubyClassObjects::noteNamedDefs( const std::string& owner, std::stri
     for( const NodeId c : *defs )
     {
         const auto q = nested ? typed.reach.qualifiedOwner.find( c ) : typed.reach.qualifiedOwner.end();
-        if( classObjectDefs.find( c ) != classObjectDefs.end() && ( !nested || ( q != typed.reach.qualifiedOwner.end() && q->second == owner ) ) )
+        if( rubyAnswersOn( RubySide::ClassObject, defSides[ c ] ) && ( !nested || ( q != typed.reach.qualifiedOwner.end() && q->second == owner ) ) )
         {
             hits.push_back( c );
         }
     }
 }
 
-// The defs of `callee` the class or module whose fully-qualified constant is `fqn` holds, into hits — only those a class
-// object may answer from when `classObject`.
-inline void RubyClassObjects::noteFqnDefs( const std::string& fqn, std::string_view callee, bool classObject ) const
+// The defs of `callee` the class or module whose fully-qualified constant is `fqn` holds that answer a walk standing on
+// `side` there, into hits.
+inline void RubyClassObjects::noteSideDefs( const std::string& fqn, std::string_view callee, RubySide side ) const
 {
     const std::size_t              cut  = fqn.rfind( "::" );
     const rw::SmallVec<NodeId, 2>* defs = typed.narrower.definitionsIn( cut == std::string::npos ? std::string_view( fqn ) : std::string_view( fqn ).substr( cut + 2 ), callee );
@@ -3665,21 +3764,84 @@ inline void RubyClassObjects::noteFqnDefs( const std::string& fqn, std::string_v
     }
     for( const NodeId c : *defs )
     {
-        if( ( !classObject || classObjectDefs.find( c ) != classObjectDefs.end() ) && ownedBy( c, fqn ) )
+        if( rubyAnswersOn( side, defSides[ c ] ) && ownedBy( c, fqn ) )
         {
             hits.push_back( c );
         }
     }
 }
 
-// What the lookup the class object stands at defines `asked` in: as a class method when `classObject` — a class's singleton
-// method, a module's (classObjectDefs) — else as its instances' (any def). Over fully-qualified constants when the tree
-// keeps a constant index (fqnUp), else over names (the overlay), where two classes of one name share a lookup.
+// Onto `into` unless the walk has stood on `name` on side `on` already (sideSeen); fqnSides and the caller own every name.
+inline void RubyClassObjects::sideVisit( const std::string& name, RubySide on, std::vector<RubySideStep>& into ) const
+{
+    const char bit             = char( 1 << unsigned( on ) );
+    const auto [ seen, fresh ] = sideSeen.try_emplace( name, bit );
+    if( fresh || ( seen->second & bit ) == 0 )
+    {
+        seen->second = char( seen->second | bit );
+        into.emplace_back( &name, on );
+    }
+}
+
+// Where the walk goes from `name`, standing on `at`: an included module's `class_methods do` block, a level up; and each
+// ancestor in fqnSides on the side it is reached on (rubySideAcross) — an included one onto this level (what its
+// `included do` defines is the includer's own), a superclass onto the next round, any other onto the next level.
+inline void RubyClassObjects::sideSteps( const std::string& name, RubySide at ) const
+{
+    if( at == RubySide::Included )
+    {
+        sideVisit( name, RubySide::ConcernClassMethods, sideNext );
+    }
+    const auto up = fqnSides.find( name );
+    if( up == fqnSides.end() )
+    {
+        return;
+    }
+    for( const RubyAncestorEdge& e : up->second )
+    {
+        if( const std::optional<RubySide> to = rubySideAcross( at, e.how ) )
+        {
+            sideVisit( e.fqn, *to, e.how == RubyAncestry::Superclass ? sideRound : *to == RubySide::Included ? sideLevel : sideNext );
+        }
+    }
+}
+
+// The first place along Ruby's lookup order, walked from `start` on `side` (sideSteps), at which a def of `callee` answers
+// on the side the walk stands on, into hits; nullptr when none does. One round per class up the superclass chain; within
+// it, level by level, the class, then what it extends or includes. A level with two definers answers their union.
+inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::sideLookup( const std::string& start, RubySide side, std::string_view callee ) const
+{
+    hits.clear();
+    sideSeen.clear();
+    sideRound.clear();
+    sideVisit( start, side, sideRound );
+    while( !sideRound.empty() && hits.empty() )   // a round: one class of the superclass chain
+    {
+        sideLevel.swap( sideRound );
+        sideRound.clear();
+        while( !sideLevel.empty() && hits.empty() )   // a level: one step along its mixins
+        {
+            sideNext.clear();
+            for( std::size_t i = 0; i < sideLevel.size(); ++i )   // by index: an included module joins this level as it is met
+            {
+                const auto [ name, at ] = sideLevel[ i ];
+                noteSideDefs( *name, callee, at );
+                sideSteps( *name, at );
+            }
+            sideLevel.swap( sideNext );
+        }
+    }
+    return hits.empty() ? nullptr : &hits;
+}
+
+// What the lookup the class object stands at defines `asked` in: as a class method when `classObject`, else as its
+// instances'. Over fully-qualified constants, side by side, when the tree keeps a constant index (sideLookup), else over
+// names (the overlay), where two classes of one name share a lookup.
 inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::definerLookup( const RubyClassObject& object, const Reference& asked, bool classObject ) const
 {
     if( !object.fqn.empty() )
     {
-        return levelLookup( fqnUp, object.fqn, [ & ]( const std::string& n ) { noteFqnDefs( n, asked.calleeName, classObject ); } );
+        return sideLookup( object.fqn, classObject ? RubySide::ClassObject : RubySide::Instance, asked.calleeName );
     }
     if( classObject )
     {
@@ -3801,25 +3963,33 @@ inline bool RubyClassObjects::opened( const std::string& fqn ) const
 // Is a class or module in cls's lookup, read by name, one of `owners`?
 inline bool RubyClassObjects::anyInLookup( const std::string& cls, const HashMap<std::string, char>& owners ) const
 {
-    const auto owned = [ &owners ]( const std::string& a ) { return owners.find( a ) != owners.end(); };
-    return !owners.empty() && std::ranges::any_of( typed.reach.ancestorsOf( cls ), owned );
+    return !owners.empty() && anyAncestor( cls, [ &owners ]( const std::string& a ) { return owners.find( a ) != owners.end(); } );
 }
 
-// Does the class object answer a name the tree indexes no def of — a method_missing in its lookup, or `callee` delegated by
-// a `class << self` there (model.h kRubyDelegationCalls)? Then the tree cannot say what answers it.
-inline bool RubyClassObjects::open( const RubyClassObject& object, std::string_view callee ) const
+// Does `pred` hold of a class or module in cls's lookup, read by name?
+template<class Pred>
+inline bool RubyClassObjects::anyAncestor( const std::string& cls, Pred&& pred ) const
 {
-    if( anyInLookup( *object.cls, missingOwners ) )
-    {
-        return true;
-    }
+    return std::ranges::any_of( typed.reach.ancestorsOf( cls ), pred );
+}
+
+// Does a `class << self` in the class object's lookup delegate `callee` (model.h kRubyDelegationCalls)? It then defines a
+// class method the tree indexes no def of, and the tree cannot say what answers the call.
+inline bool RubyClassObjects::delegates( const RubyClassObject& object, std::string_view callee ) const
+{
     std::string key;
     const auto  delegated = [ & ]( const std::string& a )
     {
         key.assign( a ).append( 1, '#' ).append( callee );
         return classDelegated.find( key ) != classDelegated.end();
     };
-    return !classDelegated.empty() && std::ranges::any_of( typed.reach.ancestorsOf( *object.cls ), delegated );
+    return !classDelegated.empty() && anyAncestor( *object.cls, delegated );
+}
+
+// Is a method_missing (or a `delegate_missing_to`) in the class object's lookup? It answers a name nothing there defines.
+inline bool RubyClassObjects::missingAnswers( const RubyClassObject& object ) const
+{
+    return anyInLookup( *object.cls, missingOwners );
 }
 
 // Does the tree open the qualified constant `written` — is it, or its last two segments or more, a trailing path of a
@@ -3852,7 +4022,8 @@ inline bool RubyClassObjects::ownedBy( NodeId c, const std::string& fqn ) const
 
 // What a call reaches on a receiver whose every answer the tree knows: one of RSpec's targets or a template's `json`, which
 // only a reopened instance root answers (RubyTypedReceivers), and a class object, which its lookup answers
-// (RubyClassObjects). Not closed for any other receiver, nor for a class object that may answer any name.
+// (RubyClassObjects). Not closed for any other receiver, nor for a class object whose `class << self` delegates the name,
+// nor for one whose lookup misses it where a method_missing may answer: Ruby calls that only on a miss.
 inline RubyClosedLookup rubyClosedLookup( const Reference& r, const RubyTypedReceivers& typed, const RubyClassObjects& classes )
 {
     if( typed.outOfTreeTarget( r ) )
@@ -3864,11 +4035,16 @@ inline RubyClosedLookup rubyClosedLookup( const Reference& r, const RubyTypedRec
     {
         return { true, classes.rootLookup( r ) };
     }
-    if( object.cls == nullptr || classes.open( object, r.calleeName ) )
+    if( object.cls == nullptr || classes.delegates( object, r.calleeName ) )
     {
         return {};
     }
-    return { true, classes.lookup( r, object ) };
+    const rw::SmallVec<NodeId, 2>* hit = classes.lookup( r, object );
+    if( hit == nullptr && classes.missingAnswers( object ) )
+    {
+        return {};
+    }
+    return { true, hit };
 }
 
 // Every trailing path of every constant the tree opens (`A::B::C` → "A::B::C", "B::C", "C"), read off the base scope's
@@ -3947,9 +4123,22 @@ inline void rubyDefinedBuilders( const IngestResult& ing, std::array<bool, std::
     }
 }
 
+// The kRubyDef* bit a RubySingletonDef binding's mark names (model.h kRubyIncluderMark, kRubyClassMethodsMark; none: a
+// singleton method).
+inline char rubyDefBitOfMark( std::string_view mark ) noexcept
+{
+    if( mark == kRubyIncluderMark )
+    {
+        return kRubyDefIncluder;
+    }
+    return mark == kRubyClassMethodsMark ? kRubyDefBlock : kRubyDefSingleton;
+}
+
 // The singleton bindings (LocalBindKind::RubySingletonDef): each def or accessor site — `def self.m`, a def or an accessor
-// in `class << self` — as (fileId << 32) | its start byte, which a def's own start (Symbol::sigStartByte) joins; and each
-// name a `class << self` delegates, into out.classDelegated (`delegate_missing_to`, every name: out.missingOwners).
+// in `class << self` — as (fileId << 32) | its start byte, which a def's own start (Symbol::sigStartByte) joins, → its
+// side: kRubyDefIncluder or kRubyDefBlock for one that is each includer's (parser version 145), else kRubyDefSingleton;
+// and each name a
+// `class << self` delegates, into out.classDelegated (`delegate_missing_to`, every name: out.missingOwners).
 inline HashMap<std::uint64_t, char> rubySingletonSites( const IngestResult& ing, RubyClassObjects& out )
 {
     HashMap<std::uint64_t, char> sites;
@@ -3961,7 +4150,7 @@ inline HashMap<std::uint64_t, char> rubySingletonSites( const IngestResult& ing,
         }
         if( b.typeName.empty() )
         {
-            sites.try_emplace( ( std::uint64_t( b.fileId ) << 32 ) | b.startByte, 1 );
+            sites.try_emplace( ( std::uint64_t( b.fileId ) << 32 ) | b.startByte, rubyDefBitOfMark( b.importedName ) );
         }
         else if( b.var.empty() )
         {
@@ -4000,30 +4189,62 @@ inline HashMap<std::string, char> rubyExtendableModules( const IngestResult& ing
     return modules;
 }
 
-// Every def a class object may answer from (RubyClassObjects::classObjectDefs): a singleton method (rubySingletonSites) and
-// every method or accessor of an extendable module (rubyExtendableModules), whose instance methods a class object reaches
-// when the module is extended onto it, and a concern's ClassMethods'. A class's instance method is its instances' alone.
+// Every def a class object may answer from (RubyClassObjects::defSides, per symbol) → its kRubyDef* bits: a singleton
+// method or an includer's class method (rubySingletonSites), and every method or accessor of an extendable module
+// (rubyExtendableModules) or a concern's ClassMethods, which a call on the module answers. A class's instance method is
+// its instances' alone: its bits are 0.
 inline void rubyClassObjectDefs( const IngestResult& ing, RubyClassObjects& out )
 {
     const HashMap<std::uint64_t, char>  singletons = rubySingletonSites( ing, out );
     const HashMap<std::string, char>    modules    = rubyExtendableModules( ing );
     const HashMap<NodeId, std::string>& nested     = out.typed.reach.qualifiedOwner;
+    out.defSides.assign( ing.symbols.size(), 0 );
     for( const Symbol& s : ing.symbols )
     {
-        const bool def       = s.lang == Lang::Ruby && !s.scope.empty() && ( s.kind == SymKind::Method || s.kind == SymKind::Function || s.kind == SymKind::Var );
-        const bool singleton = def && singletons.find( ( std::uint64_t( s.fileId ) << 32 ) | s.sigStartByte ) != singletons.end();
-        const bool module    = def && ( nested.find( s.id ) != nested.end() || modules.find( s.scope ) != modules.end() );
-        if( singleton || module )
+        if( s.lang != Lang::Ruby || s.scope.empty() || !( s.kind == SymKind::Method || s.kind == SymKind::Function || s.kind == SymKind::Var ) )
         {
-            out.classObjectDefs.try_emplace( s.id, 1 );
+            continue;
         }
+        const auto site   = singletons.find( ( std::uint64_t( s.fileId ) << 32 ) | s.sigStartByte );
+        const bool module = nested.find( s.id ) != nested.end() || modules.find( s.scope ) != modules.end();
+        out.defSides[ s.id ] = char( ( site != singletons.end() ? site->second : 0 ) | ( module ? kRubyDefModule : 0 ) );
     }
 }
 
-// Each Ruby inherit reference — superclass or mixin — the constant index scoped, from the constant of the class or module
-// that writes it, into the ancestry by fully-qualified constant (RubyClassObjects::fqnUp).
-inline void rubyFqnInherits( const IngestResult& ing, const RubyBaseScope& bases, HashMap<std::string, std::vector<std::string>>& out )
+// Every mixin the class object's lookup reaches (LocalBindKind::RubyClassMixin) as (fileId << 32) | its constant's start
+// byte, which its inherit reference's own start joins → how it joins: Extend, or IncluderExtend for one a concern's
+// `included do` writes.
+inline HashMap<std::uint64_t, RubyAncestry> rubyClassMixinSites( const IngestResult& ing )
 {
+    HashMap<std::uint64_t, RubyAncestry> sites;
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::RubyClassMixin && b.var.empty() )
+        {
+            sites.try_emplace( ( std::uint64_t( b.fileId ) << 32 ) | b.startByte, b.importedName == kRubyIncluderMark ? RubyAncestry::IncluderExtend : RubyAncestry::Extend );
+        }
+    }
+    return sites;
+}
+
+// How the Ruby inherit reference `i` joins its writer's lookup: a superclass; a mixin the class object's lookup reaches,
+// an extend (rubyClassMixinSites); any other mixin, an include.
+inline RubyAncestry rubyAncestryOf( const RubyBaseScope& bases, std::size_t i, const Reference& r, const HashMap<std::uint64_t, RubyAncestry>& classSide )
+{
+    if( i >= bases.mixinRefs.size() || bases.mixinRefs[ i ] == 0 )
+    {
+        return RubyAncestry::Superclass;
+    }
+    const auto side = classSide.find( ( std::uint64_t( r.fileId ) << 32 ) | r.startByte );
+    return side != classSide.end() ? side->second : RubyAncestry::Include;
+}
+
+// Each Ruby inherit reference — superclass or mixin — the constant index scoped, from the constant of the class or module
+// that writes it, into the ancestry by fully-qualified constant (RubyClassObjects::fqnSides), with how it joins the
+// writer's lookup (rubyAncestryOf).
+inline void rubyFqnInherits( const IngestResult& ing, const RubyBaseScope& bases, HashMap<std::string, std::vector<RubyAncestorEdge>>& out )
+{
+    const HashMap<std::uint64_t, RubyAncestry> classSide = rubyClassMixinSites( ing );
     for( std::size_t i = 0; i < ing.references.size(); ++i )
     {
         const Reference&   r       = ing.references[ i ];
@@ -4031,30 +4252,66 @@ inline void rubyFqnInherits( const IngestResult& ing, const RubyBaseScope& bases
         const std::string* derived = base != nullptr && !base->empty() ? bases.fqnOfSymbol( ing.symbols[ r.fromSymbol ] ) : nullptr;
         if( derived != nullptr )
         {
-            out[ *derived ].push_back( *base );
+            out[ *derived ].push_back( { *base, rubyAncestryOf( bases, i, r, classSide ) } );
         }
     }
 }
 
-// The ancestry by fully-qualified constant (RubyClassObjects::fqnUp): the inherit references (rubyFqnInherits), and each
-// concern's nested `module ClassMethods`, which ActiveSupport::Concern extends onto every includer, from the concern that
-// holds it.
-inline void rubyFqnAncestry( const IngestResult& ing, const RubyBaseScope& bases, HashMap<std::string, std::vector<std::string>>& out )
+// Each module's `extend self` (a LocalBindKind::RubyClassMixin binding of var "self"), into the ancestry as an extend of
+// itself, from the open around the directive.
+inline void rubyFqnSelfExtends( const IngestResult& ing, const RubyBaseScope& bases, HashMap<std::string, std::vector<RubyAncestorEdge>>& out )
+{
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind != LocalBindKind::RubyClassMixin || b.var != "self" || b.fileId >= bases.ix.opensByFile.size() )
+        {
+            continue;
+        }
+        const std::vector<RubyOpenRec>& opens = bases.ix.opensByFile[ b.fileId ];
+        const std::uint32_t             o     = rubyInnermostOpen( opens, b.startByte );
+        if( o != kNoFile )
+        {
+            out[ opens[ o ].fqn ].push_back( { opens[ o ].fqn, RubyAncestry::Extend } );
+        }
+    }
+}
+
+// The ancestry by fully-qualified constant (RubyClassObjects::fqnSides): the inherit references (rubyFqnInherits), each
+// module's `extend self` (rubyFqnSelfExtends), and each concern's nested `module ClassMethods`, which
+// ActiveSupport::Concern extends onto every includer, from the concern that holds it.
+inline void rubyFqnAncestry( const IngestResult& ing, const RubyBaseScope& bases, HashMap<std::string, std::vector<RubyAncestorEdge>>& out )
 {
     rubyFqnInherits( ing, bases, out );
+    rubyFqnSelfExtends( ing, bases, out );
     for( const Symbol& s : ing.symbols )
     {
         const std::string* fqn = rubyIsConcernClassMethods( s ) ? bases.fqnOfSymbol( s ) : nullptr;
         const std::size_t  cut = fqn != nullptr ? fqn->rfind( "::" ) : std::string::npos;
         if( cut != std::string::npos )
         {
-            out[ fqn->substr( 0, cut ) ].push_back( *fqn );
+            out[ fqn->substr( 0, cut ) ].push_back( { *fqn, RubyAncestry::ClassMethods } );
         }
     }
     for( auto& [ k, v ] : out )
     {
         std::sort( v.begin(), v.end() );
         v.erase( std::unique( v.begin(), v.end() ), v.end() );
+    }
+}
+
+// The ancestry's names alone (RubyClassObjects::fqnUp): each constant's ancestors in fqnSides, one per constant, in order.
+inline void rubyFqnNames( const HashMap<std::string, std::vector<RubyAncestorEdge>>& sides, HashMap<std::string, std::vector<std::string>>& up )
+{
+    for( const auto& [ k, v ] : sides )
+    {
+        std::vector<std::string>& names = up[ k ];
+        for( const RubyAncestorEdge& e : v )   // sorted by constant first
+        {
+            if( names.empty() || names.back() != e.fqn )
+            {
+                names.push_back( e.fqn );
+            }
+        }
     }
 }
 
@@ -4129,7 +4386,8 @@ inline RubyClassObjects buildRubyClassObjects( const IngestResult& ing, const Ru
     }
     rubyClassObjectDefs( ing, out );
     rubyInstanceForwarders( ing, out.forwarders );
-    rubyFqnAncestry( ing, bases, out.fqnUp );
+    rubyFqnAncestry( ing, bases, out.fqnSides );
+    rubyFqnNames( out.fqnSides, out.fqnUp );
     out.initializeCall.lang       = Lang::Ruby;
     out.initializeCall.calleeName = kRubyInitialize;
     return out;

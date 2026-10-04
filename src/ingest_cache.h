@@ -312,8 +312,8 @@ constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiver
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 146;          // bump on any grammar/.scm/extraction change
-                                                      // 146 = TRIAL (FE-B on #373, scratch only). 145 = lane FE-B (receiver evidence): member calls record memberPath/memberCtor and
+constexpr std::uint32_t kParserVer    = 147;          // bump on any grammar/.scm/extraction change
+                                                      // 147 = TRIAL (FE-B lane 146 on #373 162255eb's 145, scratch only). 145 = lane FE-B (receiver evidence): member calls record memberPath/memberCtor and
                                                       //   Java/Kotlin/C#/Swift member calls are memberCall; typed parameters/locals, field types
                                                       //   method aliases and aliased class imports are RecvType/MemberType/MethodAlias/NameAlias
                                                       //   bindings. Above train 25's 143/144 (rich);
@@ -337,6 +337,16 @@ constexpr std::uint32_t kParserVer    = 146;          // bump on any grammar/.sc
                                                       //   global-destructure aliases and Go import specs are ModuleAlias bindings; JsShadow
                                                       //   also covers declarations spelled like a JS global (externalnames.h tables — a
                                                       //   table edit is an extraction change). 133 is train 24's; the train renumbers.
+                                                      // 145 = 2026-10-04 (test/rubyclassrecvcheck.sh, PR #373 review): a
+                                                      //   Ruby mixin the class object's lookup reaches — an `extend`, an
+                                                      //   `include` in `class << self` — mints a LocalBindKind::
+                                                      //   RubyClassMixin binding at its constant (an appended kind), and a
+                                                      //   RubySingletonDef binding carries importedName "included" when
+                                                      //   its def is each includer's class method (a singleton def in a
+                                                      //   concern's `included do`, a def in `class_methods do`, which now
+                                                      //   mints one). Above main's 143 and 144. Same layout: kCacheVersion
+                                                      //   stays 27, kQSnapCacheScheme stays 16. A Ruby cache written at 142
+                                                      //   lacks them and must re-parse.
                                                       // 142 = 2026-10-04 (the Ruby method-lookup branch rebased onto main 2720d1c5):
                                                       //   cache-key hygiene, not an extraction change. The branch's eight
                                                       //   Ruby extraction steps carried 130–137 (the notes below keep

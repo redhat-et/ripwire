@@ -18,8 +18,9 @@
 # only by a Ruby call to self, as is a concern's nested `module ClassMethods` (extended onto its includer); a class-body
 # call's self is the class; and a bare call inside a class or module keeps only the candidates
 # whose owner lies in that reach — the caller's ancestors, and the ancestors of every class below it — plus top-level
-# defs (private methods of Object, reachable from anywhere). When none is left it declines (declined=): the method is
-# outside the indexed tree, and the tool says so rather than naming a namesake.
+# defs (private methods of Object, reachable from anywhere). When none is left the call is refused as external (graph.h
+# vetoExternal, counted in the header's external=, recorded as mechanism `external` by --pin-census): the method Ruby
+# runs is outside the indexed tree, and the tool says so rather than naming a namesake.
 #
 # Stated floors, each pinned below where a fixture can show it:
 #   (a) a class whose lookup can leave the class — a `SimpleDelegator`/`Delegator` or Draper decorator in reach, a
@@ -32,15 +33,16 @@
 #   (h) a top-level def is a private method of Object, and any ancestor answers before Object does: a class whose
 #       reach holds an out-of-tree superclass or mixin (ActionController::Base) does not reach a top-level def.
 #   (i) a mixin written inside a METHOD body runs when the method does (activerecord's `primary_key=` includes
-#       CompositePrimaryKey; `attr_readonly` includes HasReadonlyAttributes) and is not read: calls that need it decline.
+#       CompositePrimaryKey; `attr_readonly` includes HasReadonlyAttributes) and is not read: calls that need it are
+#       refused as external.
 #   (j) Rails mixes every app/helpers module into one view object at run time; the tree says nothing of it, so a helper
-#       module's bare call to another helper module's method declines.
+#       module's bare call to another helper module's method is refused as external.
 #   (k) a core class's own ancestry is not modelled beyond every self's roots (BasicObject, Object, Kernel, and Module
-#       and Class): a reopened `class Array` calling a reopened `module Enumerable`'s method declines.
+#       and Class): a reopened `class Array` calling a reopened `module Enumerable`'s method is refused as external.
 #   (c) instance and class methods share one name space here, as everywhere in the graph: `extend M` and `include M`
 #       both put M in reach, so an instance method's call to an extended module's method is admitted.
 #   (d) inside `instance_eval`/`class_eval`/`instance_exec` blocks self changes; the rule reads the lexical self, as
-#       Rule 1 always has, so a DSL block run against another in-tree object declines its calls there.
+#       Rule 1 always has, so a DSL block run against another in-tree object has its calls there refused as external.
 #   (e) reach is read by class NAME, as the inheritance graph is keyed: two classes sharing a name share their reach,
 #       which refuses less, never more.
 #   (f) a call outside any class — a script's top level, an RSpec example group's blocks — is untouched by the rule.
@@ -553,12 +555,35 @@ misses  WriterDecoy::_write_attribute "id=" "WriterDecoy is neither above nor be
 reaches ClassMethods::define_hooks Wrapper "include Callbacky extends its ClassMethods onto Wrapper (the Concern convention)"
 misses  HookDecoy::define_hooks    Wrapper "an unrelated class's namesake stays out of reach"
 
-echo "=== out of reach: the method Ruby runs is not in the tree, so the call declines ==="
+echo "=== out of reach: the method Ruby runs is not in the tree, so the call is refused as external (external=) ==="
 misses Component::render     show    "a controller's render is ActionController's, not a component's"
 misses Rating::request   show    "naming Rating does not make its methods self's"
 misses LinkStub::errors      check   "an ActiveModel form's errors is ActiveModel's"
 misses LinkStub::where       Post    "a scope lambda's where runs on the model's relation"
 misses Outer::outer_helper   m       "Outer::Inner does not inherit from Outer: lexical nesting is not lookup"
+# The outcome, not only the missing edge: each of those calls is recorded and refused as external, not declined and not
+# dropped (src/pincensus.h — one C row per call site the resolver decided or refused).
+# refusedFrom CALLER CALLEE WHY — the census records CALLEE calls from CALLER (a caller id up to its #), and each is
+# refused as external
+refusedFrom(){
+    local r; r="$( awk -F'\t' -v c="$1" -v n="$2" '$1 == "C" && $7 == n && index( $6, c "#" ) == 1 { print $2 }' "$DIR/census.tsv" )"
+    if [ -n "$r" ] && ! printf '%s\n' "$r" | grep -qvx external
+    then
+        ok "$1 :$2 refused as external ($3)"
+    else
+        no "$1 :$2 is not refused as external ($3); census mechanisms: $( printf '%s' "$r" | tr '\n' ' ' )"
+    fi
+}
+if "$BIN" "$FIX" --no-cache --pin-census="$DIR/census.tsv" >/dev/null 2>"$DIR/census.err"
+then
+    refusedFrom lib/app/pages_controller.rb::PagesController::show render       "ActionController's render"
+    refusedFrom lib/app/pages_controller.rb::PagesController::show request      "ActionController's request"
+    refusedFrom lib/forms/signup_form.rb::SignupForm::check        errors       "ActiveModel's errors"
+    refusedFrom app/models/post.rb::Post                            where        "the relation's where"
+    refusedFrom lib/app/outer.rb::Inner::m                          outer_helper "no ancestor of Inner defines it"
+else
+    no "--pin-census exited non-zero: $( head -3 "$DIR/census.err" )"
+fi
 
 echo "=== floor (b): a class that delegates is exempt — its bare calls bind by name as before ==="
 reaches Quoting::quote_name        build "delegate :quote_name, to: :@conn — the delegated method is not indexed, Creation is exempt"
