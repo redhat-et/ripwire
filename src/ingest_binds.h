@@ -800,6 +800,15 @@ inline bool rubyNamingChild( TSNode n, const char* t, TSNode c ) noexcept
     return kindIs( t, "setter" ) || kindIs( t, "alias" ) || kindIs( t, "undef" );
 }
 
+// FE-B on #373: a Ruby receiver the code builds, typed in the reference's own fields (model.h rubyTypedRecvOf)
+inline void rubyTypeReceiver( RawRef& ref, std::string_view type, std::string_view via, bool factory )
+{
+    ref.recvVar.clear();
+    ref.memberCtor.assign( type );
+    ref.memberVia.assign( via );
+    ref.memberFactory = factory;
+}
+
 // ─── Ruby's TYPED receiver (test/rubytypedrecvcheck.sh, parser version 132) ───────────────────────────────────────────
 // A receiver the code BUILDS is an instance of one class, and Ruby's method lookup on that class decides which `def` a call
 // on it reaches (graph.h rubyTypedReceiver). What builds one is read from what the expression IS: `Const.new( … )` and the
@@ -810,7 +819,7 @@ inline bool rubyNamingChild( TSNode n, const char* t, TSNode c ) noexcept
 // binding in its scope builds the same one, or the let/subject RSpec runs for that name there — the innermost definition,
 // a nested group's override included — where a group with no subject of its own has its parent's, and at the top
 // `described_class.new`. RubyBareCallWalk reads all of it on the walk it already makes, beside the locals it tracks, and
-// typeReceivers writes each type into its call reference (model.h rubyTypedRecvToken). Floors (test/rubytypedrecvcheck.sh):
+// typeReceivers writes each type into its call reference (rubyTypeReceiver above; model.h rubyTypedRecvOf). Floors (test/rubytypedrecvcheck.sh):
 // control flow is not read (one binding of another shape anywhere in the scope, a parameter or a block parameter
 // included, leaves the local untyped); instance variables, return values and a shared context's lets are not typed.
 // RSpec's own builders are read the same way (test/rubyrspectargetcheck.sh, parser version 133): inside an example
@@ -1378,7 +1387,7 @@ inline void RubyBareCallWalk::typeReceivers( std::size_t firstRef, std::size_t e
     {
         if( const RubyTypedSite* site = siteOf( refs_[ i ] ) )
         {
-            refs_[ i ].recvVar = rubyTypedRecvToken( site->type.type, site->type.via, site->type.factory );
+            rubyTypeReceiver( refs_[ i ], site->type.type, site->type.via, site->type.factory );
         }
     }
 }
@@ -1503,7 +1512,7 @@ inline void typeRubyJbuilderLocal( std::uint32_t fileId, std::vector<RawRef>& re
     {
         if( refs[ i ].role == RefRole::Call && refs[ i ].recv == RecvKind::NamedVar && refs[ i ].recvVar == kJbuilderLocal )
         {
-            refs[ i ].recvVar = rubyTypedRecvToken( kJbuilderTemplate, kJbuilderLocal, false );
+            rubyTypeReceiver( refs[ i ], kJbuilderTemplate, kJbuilderLocal, false );
         }
     }
 }

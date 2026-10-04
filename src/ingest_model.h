@@ -920,6 +920,8 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         ref.memberRoot  = std::move( r.memberRoot );    // FE-A: its receiver chain's root identifier
         ref.memberPath  = std::move( r.memberPath );    // FE-B: the members between that root and the callee
         ref.memberCtor  = std::move( r.memberCtor );    // FE-B: the class a constructed receiver names
+        ref.memberVia   = std::move( r.memberVia );     // FE-B on #373: the method a Ruby typed receiver was built by
+        ref.memberFactory = r.memberFactory;            // FE-B on #373: memberCtor names a FactoryBot factory
         ref.fieldName   = std::move( r.fieldName );   // S5-E: the member variable name (e.g. "m_pool")
         ref.composeRel  = std::move( r.composeRel );  // S5-E: "creates" or "uses"
         ref.startByte   = r.startByte;                // shadow fix round: for the block-span containment test

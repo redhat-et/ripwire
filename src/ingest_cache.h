@@ -87,6 +87,8 @@ struct RawRef
     std::string   memberRoot;          // FE-A: the receiver chain's ROOT identifier when memberCall (`JSON` in `JSON.parse()`); see model.h
     std::string   memberPath;          // FE-B: the member names between memberRoot and the callee, '.'-joined ("" = `root.m()`); see model.h
     std::string   memberCtor;          // FE-B: the class a constructed receiver names (`new X().m()`, Go `X{}.m()`); see model.h
+    std::string   memberVia;           // FE-B on #373: the method a Ruby typed receiver was built by (`new`, a finder); see model.h
+    bool          memberFactory = false;   // FE-B on #373: memberCtor names a FactoryBot factory, not a class
 };
 
 // P2-D Rule 2 raw local-variable type binding (pre-attribution). startByte sits inside the enclosing
@@ -137,7 +139,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
 constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiverevidencecheck.sh) — RawRef gains `memberPath` (str) and
-                                                      //    `memberCtor` (str) after `memberRoot` (ref record 46 -> 54 bytes lean),
+                                                      //    `memberCtor` (str) after `memberRoot` (ref record 46 -> 54 bytes lean;
+                                                      //    on #373 also `memberVia` (str) + `memberFactory` (u8), 54 -> 59: the Ruby
+                                                      //    typed receiver moved out of recvVar — same version, one FE-B format),
                                                       //    and RawBind gains four APPENDED kinds (RecvType, MemberType,
                                                       //    MethodAlias, NameAlias). A FORMAT change: the version guard rejects a v28 blob.
                                                       // 28: FE-A (test/falseedgecheck.sh) — RawRef gains `memberCall` (u8) and
@@ -379,7 +383,7 @@ constexpr std::uint32_t kParserVer    = 146;          // bump on any grammar/.sc
                                                       // 132 = 2026-10-02 (test/rubytypedrecvcheck.sh): a Ruby call
                                                       //   receiver the file BUILDS (`Client.new`, a finder, a FactoryBot
                                                       //   build, a let or local holding one) carries its type in the
-                                                      //   call RawRef's recvVar (model.h rubyTypedRecvToken), and each
+                                                      //   call RawRef's recvVar (FE-B on #373 moved it to memberCtor/memberVia), and each
                                                       //   FactoryBot `factory` mints a RawBind of the APPENDED kind
                                                       //   LocalBindKind::RubyFactory (ingest_binds.h). Same layout:
                                                       //   kCacheVersion unchanged (27). A Ruby cache written at 131
@@ -2200,7 +2204,7 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         }
     }
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); }
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); w.str( r.memberVia ); w.u8( r.memberFactory ? 1 : 0 ); }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2226,7 +2230,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // can't silently stale them.
 inline constexpr std::size_t kMinDefRecordBytesLean      = 88;   // 16×u32 + 16×u8 + 2×str(len u32, empty)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
-inline constexpr std::size_t kMinRefRecordBytes          = 54;   // 3×u32 + 10×u8 + 8×str(len u32, empty)
+inline constexpr std::size_t kMinRefRecordBytes          = 59;   // 3×u32 + 11×u8 + 9×str(len u32, empty)
 
 inline std::size_t minDefRecordBytes( bool captureValueUses ) noexcept
 {
@@ -2334,7 +2338,7 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.u8() != 0; x.viaArrow = r.u8() != 0; x.qualifierRootsStd = r.u8() != 0; x.memberCall = r.u8() != 0; x.memberRoot = r.str(); x.memberPath = r.str(); x.memberCtor = r.str(); return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.u8() != 0; x.viaArrow = r.u8() != 0; x.qualifierRootsStd = r.u8() != 0; x.memberCall = r.u8() != 0; x.memberRoot = r.str(); x.memberPath = r.str(); x.memberCtor = r.str(); x.memberVia = r.str(); x.memberFactory = r.u8() != 0; return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
 inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.u8() != 0; b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }

@@ -3518,7 +3518,7 @@ inline bool rubyIsConstantName( std::string_view name ) noexcept
 inline std::string_view rubyConstantReceiver( const Reference& r ) noexcept
 {
     const bool constant = r.lang == Lang::Ruby && r.role == RefRole::Call && r.recv == RecvKind::NamedVar && r.qualifier.empty()
-                       && rubyIsConstantName( r.recvVar ) && r.recvVar.find( kRubyTypedRecvSep ) == std::string::npos;
+                       && rubyIsConstantName( r.recvVar ) && !rubyTypedRecvOf( r );
     const std::string_view written = !constant ? std::string_view {} : r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName );
     return written.substr( written.starts_with( "::" ) ? 2 : 0 );
 }

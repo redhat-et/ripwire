@@ -744,7 +744,7 @@ struct Reference
     std::string   calleeName;             // referenced name (final identifier segment)
     std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
     std::string   recvVar;                // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
-                                          //   A Ruby receiver the code BUILDS carries its type here instead (rubyTypedRecvOf below).
+                                          //   A Ruby receiver the code BUILDS leaves it empty: its type is memberCtor/memberVia (rubyTypedRecvOf).
     std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
                                           //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
                                           //   (`this->m_pool.run()` → "m_pool") — the two are mutually exclusive
@@ -772,17 +772,21 @@ struct Reference
     //   other shape and every language that records no member-call shape.
     std::string   memberPath;
     std::string   memberCtor;
+    // FE-B on #373: a Ruby receiver the code BUILDS (`User.new`, a finder, a FactoryBot build, a let or local holding one)
+    //   carries its type here, out of band: memberCtor = the class's constant as written (or the factory name when
+    //   memberFactory), memberVia = the method that built it. recvVar is then empty. Read through rubyTypedRecvOf.
+    std::string   memberVia;
+    bool          memberFactory = false;
 };
 
 // A Ruby call whose RECEIVER the code builds (parser version 132, test/rubytypedrecvcheck.sh): `c = Client.new` then `c.get`,
 // `let( :user ) { create( :user ) }` then `user.activate!`, `User.find_by( … ).activate!`. ingest_binds.h reads the shape
-// by Ruby's own local rule and writes the type into Reference::recvVar as "<Class>.<via>" — the class's constant as written
-// and the method that built it (`User.find_by`, `OpenSSL::Cipher.new`) — or ":<factory>.<via>" for a FactoryBot build (`:user.create`), whose class
-// only the tree's factory definitions know (graph.h rubyFactoryClasses). The receiver KIND is left as it was (NamedVar,
-// FieldOfVar), so every rule that does not read the type sees the call exactly as before; and a `.` is in no Ruby
-// identifier or constant segment, so no receiver the tool recorded before can read as a type.
-inline constexpr char kRubyTypedRecvSep = '.';
-
+// by Ruby's own local rule and writes the type into the reference's OWN fields (FE-B on #373: it used to ride recvVar as an
+// in-band "<Class>.<via>" token): Reference::memberCtor = the class's constant as written (`User`, `OpenSSL::Cipher`), or
+// the factory name with memberFactory set for a FactoryBot build, whose class only the tree's factory definitions know
+// (graph.h rubyFactoryClasses); memberVia = the method that built it (`find_by`, `new`, `create`). recvVar is left empty,
+// and the receiver KIND as it was (NamedVar, FieldOfVar), so every rule that does not read the type sees the call exactly
+// as before.
 struct RubyTypedRecv
 {
     std::string_view type;              // the class's constant as written (`User`, `Admin::User`), or the factory name
@@ -790,22 +794,15 @@ struct RubyTypedRecv
     bool             factory = false;   // `type` names a FactoryBot factory, not a class
 };
 
-inline std::string rubyTypedRecvToken( std::string_view type, std::string_view via, bool factory )
-{
-    return std::string( factory ? ":" : "" ).append( type ).append( 1, kRubyTypedRecvSep ).append( via );
-}
 
 // the type a Ruby reference's receiver was built as, or nullopt for every other reference
 inline std::optional<RubyTypedRecv> rubyTypedRecvOf( const Reference& r ) noexcept
 {
-    const std::size_t sep = r.lang == Lang::Ruby ? r.recvVar.find( kRubyTypedRecvSep ) : std::string::npos;
-    if( sep == std::string::npos )
+    if( r.lang != Lang::Ruby || r.memberCtor.empty() || r.memberVia.empty() )
     {
         return std::nullopt;
     }
-    const std::string_view token = r.recvVar;
-    const bool             factory = token.starts_with( ':' );
-    return RubyTypedRecv { token.substr( factory ? 1 : 0, sep - ( factory ? 1 : 0 ) ), token.substr( sep + 1 ), factory };
+    return RubyTypedRecv { r.memberCtor, r.memberVia, r.memberFactory };
 }
 
 // RSpec's targets (test/rubyrspectargetcheck.sh, parser version 133): inside an example group, the receiver-less builder
