@@ -1789,11 +1789,11 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
     {
         out += ' ';
         const auto& term = compactReading( i );
-        if( term.attr == "declined_calls" && doc.find( "ordinary Elixir calls written inside quote AST" ) != std::string_view::npos )
+        if( term.attr == "declined_calls" && compactCommentOpenedBy( doc, "<!-- ripwire callers/callees:" ).find( "ordinary Elixir calls written inside quote AST" ) != std::string_view::npos )
         {
             out += "declined_calls=K: K call sites without edges, including inert Elixir quote sites outside enabled unquote/unquote_splicing holes; inert sites have no target candidates or uses rows";
         }
-        else if( term.attr == "declined" && doc.find( "ordinary-Elixir-call-sites-inside-quote-AST" ) != std::string_view::npos )
+        else if( term.attr == "declined" && !compactCommentOpenedBy( doc, "<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-quote-AST" ).empty() )
         {
             out += "declined=K: K call sites without edges, including inert Elixir quote sites outside enabled unquote/unquote_splicing holes";
         }
