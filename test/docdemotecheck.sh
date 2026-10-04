@@ -99,6 +99,13 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-10-04 (lane FE-B, receiver evidence): docdemotegolden_for.xml 5821 -> 6010 B (est_tokens "2328" -> "2404").
+# CAUSE: pagecache.py's `evict_one( self )` names a function its file never imports — Python resolves it nowhere — so
+# FE-B binds it by NAME ALONE: the hop's <c n="evict_one"> row carries via="name", and --for's header defines it (one
+# present-only clause, graphlegend.h kForViaNameClause, on the hop ids the compact route serves). Verified before
+# re-pinning, against the pre-change golden: the root's est_tokens=, the header clause and the row's attribute are the whole
+# diff — no ranking, demotion or route byte moved, and arm (f)'s own assertions still hold. The noroute golden is
+# UNCHANGED: its <bodies> carry no <calls> row through a name-only edge, so the clause does not ride (present-only).
 # RE-PIN 2026-09-13 (merge of lane/sc-legend and lane/for-widen): docdemotegolden_for.xml RE-MEASURED on the
 # MERGED tree at 5,809 B (est_tokens "2328"), from 5,887 on for-widen's tree and 5,425 on sc-legend's. Neither
 # lane's own number is the merged one, so this is measured, not summed. Three identified changes, and the golden

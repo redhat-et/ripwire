@@ -143,7 +143,9 @@ for name in seed_names:
     # scope included, so len(rows) == reaches stays the row-count invariance it always was.
     # 0.6.5 (depth-labelled --impact): a row may carry d= (its hop depth, run-length) between p= and tested=; the
     # row COUNT this invariance reads is unchanged by it (test/impactdepthcheck.sh gates the depths themselves).
-    rows = re.findall(r'<s t="(\w+)" n="([^"]+)" p="([^"]+)"(?: d="\d+")?( tested="1")?/>', doc)
+    # FE-B: a row reached only through a by-name edge carries via="name" after tested= — it DISCLOSES how the row was
+    # reached, never whether it is one, so the row count this invariance reads must take it like d= above.
+    rows = re.findall(r'<s t="(\w+)" n="([^"]+)" p="([^"]+)"(?: d="\d+")?( tested="1")?(?: via="name")?/>', doc)
     reaches = int(attrs.get("reaches", "-1"))
     if len(rows) != reaches:
         row_count_ok = False

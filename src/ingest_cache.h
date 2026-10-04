@@ -313,7 +313,10 @@ constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiver
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
 constexpr std::uint32_t kParserVer    = 147;          // bump on any grammar/.scm/extraction change
-                                                      // 147 = TRIAL (FE-B lane 146 on #373 162255eb's 145, scratch only). 145 = lane FE-B (receiver evidence): member calls record memberPath/memberCtor and
+                                                      // 147 = TRIAL (FE-B lane 146 on #373 162255eb's 145, scratch only).
+                                                      // 146 = lane FE-B fix round: JS/TS `static` members record a StaticMember
+                                                      //   binding (the class side of the lookup); the lane's 145 builds lack it.
+                                                      // 145 = lane FE-B (receiver evidence): member calls record memberPath/memberCtor and
                                                       //   Java/Kotlin/C#/Swift member calls are memberCall; typed parameters/locals, field types
                                                       //   method aliases and aliased class imports are RecvType/MemberType/MethodAlias/NameAlias
                                                       //   bindings. Above train 25's 143/144 (rich);

@@ -4449,7 +4449,10 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
     }
     for( const Reference& r : ing.references )
     {
-        if( !r.isDocLink )   // a backtick mention in prose is not code evidence
+        // a backtick mention in prose is not code evidence; a read/write USE-site is recorded only by the rich ingest (--uses,
+        // MCP), so reading it here made the same call bind on MCP and decline on the CLI map — evidence must not depend on
+        // which ingest ran (FE-B found it through mcpclidiffcheck's stanza on a Python `set().update()` beside a method)
+        if( !r.isDocLink && r.role != RefRole::Read && r.role != RefRole::Write )
         {
             note( r.fileId, r.calleeName );
             note( r.fileId, r.recvVar );
@@ -5687,14 +5690,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
                 if( !callerCls.empty() )
                 {
-                    return !owner.empty() && recvEv.inCone( callerCls, owner );
+                    return !owner.empty() && recvEv.inCone( callerCls, owner ) && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
                 }
                 return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
             }
             if( isSuperRoot( ch.root ) )
             {
                 const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
-                return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner );
+                return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner )
+                    && recvEv.onSide( ref, c, recvEv.callerIsStatic( ref.fromSymbol ) );
             }
             if( recvEv.isLocalName( ref.fromSymbol, ch.root ) || externalVeto.hasLocal( ref, ch.root ) )
             {
@@ -5713,7 +5717,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
             const std::string_view cls = recvEv.unalias( ref.fileId, ch.root );
-            return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner );   // a class-name receiver: the class or a base
+            return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner )   // a class-name receiver: the class or a base,
+                && recvEv.onSide( ref, c, /*classSide=*/true );                                                 // its CLASS side
         }
         if( implicitReceiverLang( ref.lang ) )
         {
@@ -7000,7 +7005,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         // FE-B: a name-only tier LISTS every candidate in reach, but RANK keeps the classic ladder's pick — the rung it would
         // have stopped at (same file, else same directory) shares the call's weight as before, and the extra hedged
-        // candidates ride at a tenth of a share: a guess is listed, not let to move PageRank.
+        // candidates ride at weight ZERO: a guess is listed, not let to move PageRank. Zero, not a fraction: PageRank divides
+        // by each caller's weighted out-degree, so a caller whose ONLY out-edges are extras would push its whole mass through
+        // any positive weight — measured on this repository, where each `empty()` member forwarding to a container's
+        // `.empty()` became a clique of same-directory `empty` methods and their rank rose ~6x. At zero such a caller stays
+        // dangling, exactly as the classic ladder left it (its rung held only the caller: a recursion, no edge).
         const std::uint32_t rdirE   = fileDir[ r.fileId ];
         const auto          classic = [ & ]( NodeId to ) -> bool
         {
@@ -7015,8 +7024,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             nClassic += ( c != r.fromSymbol && classic( c ) ) ? 1u : 0u;
         }
-        const bool  allClassic = nClassic == 0;   // the classic rung held only the caller: every target shares the weight
-        const float base = conf / float( allClassic ? nReal : nClassic );   // split over real (non-self) targets
+        const float base = nClassic > 0 ? conf / float( nClassic ) : 0.f;   // split over the classic rung's real (non-self) targets
         // a qualified written type decided this site by its last name — Rule 2 or 2b narrowed on it, or CHA-lite pruned by it — so every edge it
         // commits is prov="final-segment" (resolve.h finalSegmentTypeAt, fieldFinalSegmentAt); never a class-identity CLAIM, whose one class was verified
         const bool  finalSegmentType = ( ( receiverTypeNarrowed || censusCone ) && !identityClaim && narrower.finalSegmentTypeAt( r ) )
@@ -7029,7 +7037,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             const std::uint64_t ekey = ( std::uint64_t( r.fromSymbol ) << 32 ) | to;
             EdgeAcc& e = acc[ ekey ];
-            e.confSum += ( allClassic || classic( to ) ) ? base : base * 0.1f;
+            e.confSum += classic( to ) ? base : 0.f;
             e.nref    += 1;
             if( splitPick )
             {

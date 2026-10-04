@@ -883,6 +883,21 @@ inline std::string viaNameLegend( bool present, bool impact = false, bool column
     }
     return out;
 }
+// …and as --for's two header strips spell a present-only clause (see kForCompactModScopeClause below): the verb's FIRST-SCREEN
+// legend must define every attribute its payload can carry, so --for (and --exemplar) define it there, on an over-approximated
+// bit (serialize.h namesOnlyOutAny), and tell the section not to repeat it.
+inline constexpr std::string_view kForCompactViaNameClause =
+    "; c via=name: that callee matched by name alone, receiver unproven (NOT a claim the edge is false)";
+// The full dialect's spelling: the same three facts as kViaNameLegend (the mechanism, the listing, the NOT sentence) in the
+// fewest bytes, because every byte of --for's header is un-charged by its token ladder and its tight rungs carry ~0
+// headroom (see kForRootRelPathsLegendShort's measurement in verbs_for.h). ~190 B against kViaNameLegend's ~430 B.
+inline constexpr std::string_view kForViaNameClause =
+    " via=\"name\" on a <c> row: that callee matched by name alone (nothing proves the receiver's class); every by-name "
+    "candidate in reach is listed. It does NOT mean the edge is false.";
+inline std::string forViaNameClause()
+{
+    return std::string( kForViaNameClause );
+}
 // …as its own comment node, for the surfaces whose legend is written beside the rows (a <bodies>/<hops> block's <calls>)
 inline std::string viaNameLegendComment()
 {
@@ -894,7 +909,7 @@ inline std::string viaNameNoteJson()
     std::string text = kViaNameLegend;
     for( std::size_t at = text.find( "via=\"name\"" ); at != std::string::npos; at = text.find( "via=\"name\"", at ) )
     {
-        text.replace( at, 10, "\\\"via\\\":\\\"name\\\"" );   // via="name" -> \"via\":\"name\" inside the JSON string
+        text.replace( at, 10, "\\\"via\\\":\\\"name\\\"" ); // via="name" -> \"via\":\"name\" inside the JSON string
         at += 16;
     }
     if( const std::size_t at = text.find( "on a row" ); at != std::string::npos )

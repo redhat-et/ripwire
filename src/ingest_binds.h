@@ -4138,7 +4138,8 @@ inline std::string_view annotatedClass( TSNode node, std::string_view src )
 inline void pushEvidenceBind( BindCtx& cx, LocalBindKind kind, std::string_view var, std::string_view type, std::string_view imported,
                               std::uint32_t at, bool flag )
 {
-    EXPECTS( kind == LocalBindKind::RecvType || kind == LocalBindKind::MemberType || kind == LocalBindKind::MethodAlias || kind == LocalBindKind::NameAlias,
+    EXPECTS( kind == LocalBindKind::RecvType || kind == LocalBindKind::MemberType || kind == LocalBindKind::MethodAlias || kind == LocalBindKind::NameAlias
+                 || kind == LocalBindKind::StaticMember,
              "only the receiver-evidence kinds ride this emitter" );
     if( type.empty() || ( var.empty() && !( kind == LocalBindKind::RecvType && flag ) ) )
     {
@@ -4262,6 +4263,21 @@ inline void captureReceiverEvidence( BindCtx& cx, TSNode n, const char* t )
             if( !ts_node_is_null( name ) && kindIs( ts_node_type( name ), "identifier" ) )
             {
                 pushEvidenceBind( cx, LocalBindKind::RecvType, nodeTextOf( name, src ), annotatedClass( fieldChild( n, NodeField::Type ), src ), {}, at, false );
+            }
+        }
+        else if( kindIs( t, "method_definition" ) )
+        {
+            // `static m () {}`: the member's side of the lookup, recorded inside its body so it attributes to the member
+            const TSNode name = fieldChild( n, NodeField::Name );
+            const TSNode body = fieldChild( n, NodeField::Body );
+            bool         isStatic = false;
+            for( std::uint32_t i = 0, k = ts_node_child_count( n ); i < k && !isStatic; ++i )
+            {
+                isStatic = kindIs( ts_node_type( ts_node_child( n, i ) ), "static" );
+            }
+            if( isStatic && !ts_node_is_null( name ) && !ts_node_is_null( body ) )
+            {
+                pushEvidenceBind( cx, LocalBindKind::StaticMember, nodeTextOf( name, src ), "static", {}, ts_node_start_byte( body ), false );
             }
         }
         else if( lang == Lang::TypeScript && kindIs( t, "public_field_definition" ) )

@@ -40,4 +40,8 @@ definition beside them, plus near-miss calls whose receiver IS proven and whose 
   too), an in-repo superclass's member (and Java `super.flush()`), a free / top-level function, a Ruby top-level
   def; a Ruby included module's method is resolved or hedged (the contract only: Ruby's own lookup is separate work).
 
+Sides of a class lookup (js/lib/sides.js, ts/src/sides.ts, kt/src/app/Sides.kt): a call on the class object reaches
+its static (companion) members, a call on an instance the others. A fallback hook only after a miss
+(py/src/tui/ghost.py): `__getattr__` leaves a defined member's call resolved.
+
 The names are paraphrases of graded false rows; the code is minimal and is never built.

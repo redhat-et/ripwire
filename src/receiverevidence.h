@@ -94,6 +94,7 @@ struct ReceiverEvidence
     const HashMap<std::string, std::vector<std::string>>& chaUp;       // class name → its direct base names (sorted)
     const HashMap<std::string, char>&                     classNames;  // every in-repo class-like name
     std::vector<std::string>                              ownerClass;  // per symbol: the class that owns it, "" none
+    std::vector<std::uint8_t>                             staticMember;    // per symbol: 1 = a JS/TS `static` member (the CLASS side)
     HashMap<std::string, rw::SmallVec<NodeId, 2>>         methodsByType;   // "Class::name" → its callables
     HashMap<std::string, std::string>                     memberType;      // "Class#field" → field class ("" = tombstone)
     HashMap<std::string, std::vector<std::string>>        embeds;          // "Class" → its other bases: Go embedded classes (promotion)
@@ -234,6 +235,7 @@ struct ReceiverEvidence
     void build()
     {
         buildOwners();
+        staticMember.assign( ing.symbols.size(), 0u );
         for( const Symbol& s : ing.symbols )
         {
             // a BODIED callable only: an interface's or an abstract class's bodyless signature is the contract a call
@@ -278,7 +280,14 @@ struct ReceiverEvidence
             const bool typedLocal = b.kind == LocalBindKind::RecvType
                                  || ( b.kind == LocalBindKind::Type && ( ing.symbols[ b.fromSymbol ].lang == Lang::TypeScript
                                                                          || ing.symbols[ b.fromSymbol ].lang == Lang::Python ) );
-            if( typedLocal && !b.var.empty() )
+            if( b.kind == LocalBindKind::StaticMember )
+            {
+                if( ing.symbols[ from ].name == b.var )   // recorded inside the member's body: the member itself
+                {
+                    staticMember[ from ] = 1;
+                }
+            }
+            else if( typedLocal && !b.var.empty() )
             {
                 tombstoneInsert( localType, keyOf( from, '#', b.var ), b.typeName );
             }
@@ -572,6 +581,22 @@ struct ReceiverEvidence
         return {};
     }
 
+    // The two SIDES of a JS/TS class lookup (#373's Ruby class-object rule, here): a call on the CLASS object reaches its
+    // `static` members only, a call on an INSTANCE its other members only. True for every target in another language.
+    bool onSide( const Reference& r, NodeId target, bool classSide ) const noexcept
+    {
+        if( r.lang != Lang::JavaScript && r.lang != Lang::TypeScript )
+        {
+            return true;
+        }
+        return target < staticMember.size() && ( staticMember[ target ] != 0 ) == classSide;
+    }
+    // Does `this` inside the caller name the CLASS? Only inside a static member.
+    bool callerIsStatic( NodeId from ) const noexcept
+    {
+        return from < staticMember.size() && staticMember[ from ] != 0;
+    }
+
     // RESOLVE: the definitions this member call's typed receiver reaches, in `found`; false when the receiver proves
     // nothing (untyped, a type this tree does not define, or a type that defines no such member anywhere in its cone).
     bool narrow( const Reference& r ) const
@@ -598,6 +623,9 @@ struct ReceiverEvidence
         {
             return false;
         }
+        // the side the receiver names: the class object (a class-name receiver, or `this`/`super` inside a static member),
+        // else an instance; a stated field below always holds an instance
+        bool classSide = isStatic || ( ch.ctor.empty() && ( isThisRoot( ch.root ) || isSuperRoot( ch.root ) ) && callerIsStatic( r.fromSymbol ) );
         std::string_view rest = ch.path;
         while( !rest.empty() )   // walk the stated field classes
         {
@@ -606,12 +634,27 @@ struct ReceiverEvidence
             rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( dot + 1 );
             type = fieldOf( type, field );
             superOnly = false;
+            classSide = false;
             if( type.empty() )
             {
                 return false;
             }
         }
-        return methodOf( type, r.calleeName, superOnly );
+        if( !methodOf( type, r.calleeName, superOnly ) )
+        {
+            return false;
+        }
+        // a wrong-side definition is never the answer: what is left is, and nothing left proves nothing (the ladder hedges)
+        std::size_t kept = 0;
+        for( std::size_t i = 0; i < found.size(); ++i )
+        {
+            if( onSide( r, found[ i ], classSide ) )
+            {
+                found[ kept++ ] = found[ i ];
+            }
+        }
+        found.resize( kept );
+        return !found.empty();
     }
 
     // Python `feed = parser.feed; … feed( data )`: the alias names a typed object's method

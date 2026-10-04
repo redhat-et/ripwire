@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-04, lane/fe-b-receiver-evidence: RE-DERIVED with UPDATE_GOLDEN=1 (hash 9e06e28ba5…36253dbb). kParserVer 141 -> 146
+#   (above train 25's 143/144; the ref record gains the receiver chain memberPath/memberCtor and the receiver-evidence
+#   binding kinds), kCacheVersion 28 -> 29; quality.h's mirrors move with them. kQSnapCacheScheme stays 17: a snapshot's meaning is unchanged, and the
+#   edges it reads are re-derived under the new kParserVer. The train renumbers and re-derives.
 # 2026-10-04, train 25, extractor fix: RE-DERIVED with UPDATE_GOLDEN=1 (hash d1a2878ce0…44e6c8). No source or scheme
 #   change: extract_fn now reads a candidate's whole signature before deciding it is a prototype, so computeSnapshot's
 #   two-line forward declaration is skipped and its REAL definition is hashed for the first time since the import
