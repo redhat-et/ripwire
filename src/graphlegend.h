@@ -599,8 +599,8 @@ inline constexpr const char* kDeclinedCallsLegend =
 inline constexpr const char* kDeclinedCallsGateClause =
     "It also counts a call named like a builtin-type method (dict.get, list.append) whose bound definitions' classes the caller's file never names. ";
 inline constexpr const char* kInertDeclinedCallsClause =
-    "In the callees form it also counts ordinary Elixir calls written inside quote AST outside unquote/unquote_splicing holes. "
-    "These sites cannot reach a target, so they contribute no caller or impact declined_calls= candidate list. ";
+    "In the callees form it also counts ordinary Elixir calls written inside quote AST outside enabled unquote/unquote_splicing holes. "
+    "These sites have no uses rows or target candidates, so they contribute no caller or impact declined_calls= candidate list. ";
 inline const char* declinedCallsLegend( bool on ) noexcept { return on ? kDeclinedCallsLegend : ""; }
 inline const char* declinedCallsGateLegend( bool on ) noexcept { return on ? kDeclinedCallsGateClause : ""; }
 // --test-gate's own short form: the same attribute and unit, sized for a verb whose legend has an absolute byte budget

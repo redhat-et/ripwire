@@ -1788,7 +1788,19 @@ inline std::string compactLegendText( const CompactLegendSpec& spec, std::string
     for( const std::uint16_t i : compactPresentTerms( head, doc, spec.key ) )
     {
         out += ' ';
-        out.append( compactReading( i ).reading );
+        const auto& term = compactReading( i );
+        if( term.attr == "declined_calls" && doc.find( "ordinary Elixir calls written inside quote AST" ) != std::string_view::npos )
+        {
+            out += "declined_calls=K: K call sites without edges, including inert Elixir quote sites outside enabled unquote/unquote_splicing holes; inert sites have no target candidates or uses rows";
+        }
+        else if( term.attr == "declined" && doc.find( "ordinary-Elixir-call-sites-inside-quote-AST" ) != std::string_view::npos )
+        {
+            out += "declined=K: K call sites without edges, including inert Elixir quote sites outside enabled unquote/unquote_splicing holes";
+        }
+        else
+        {
+            out.append( term.reading );
+        }
         out += '.';
     }
     // #60: the module-scope owner is the one kind that arrives under a dozen different spellings —

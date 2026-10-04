@@ -300,12 +300,33 @@ std::uint32_t elixirVisibilityEnd( TSNode scope, std::string_view src ) noexcept
     return end;
 }
 
+// An unquote belongs to its nearest quote body. bind_quoted disables holes by
+// default; an explicit literal unquote option takes precedence. Unknown options
+// cannot prove a live hole, so retain the inert call candidate instead.
+bool elixirLiveHole( TSNode hole, std::string_view src ) noexcept
+{
+    for( TSNode parent = ts_node_parent( hole ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
+    {
+        if( elixirTarget( parent, src ) != "quote" || !elixirContains( elixirBody( parent, src ), hole ) )
+        {
+            continue;
+        }
+        const TSNode option = elixirKeywordValue( parent, "unquote:", src );
+        if( !ts_node_is_null( option ) )
+        {
+            return nodeTextOf( option, src ) == "true";
+        }
+        return ts_node_is_null( elixirKeywordValue( parent, "bind_quoted:", src ) );
+    }
+    return false;
+}
+
 bool elixirInert( TSNode node, std::string_view src ) noexcept
 {
     return inInertRegion( node, [ & ]( TSNode ancestor, TSNode site ) noexcept
     {
         const auto target = elixirTarget( ancestor, src );
-        if( ( target == "unquote" || target == "unquote_splicing" ) && elixirContains( elixirFirstArgument( ancestor ), site ) )
+        if( ( target == "unquote" || target == "unquote_splicing" ) && elixirContains( elixirFirstArgument( ancestor ), site ) && elixirLiveHole( ancestor, src ) )
         {
             return InertBoundary::Live;
         }
