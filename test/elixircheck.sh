@@ -34,6 +34,53 @@ assert 'nonexistent' not in calls('quoted'), 'quoted call site became a call edg
 print('  PASS Elixir definitions, guards, macros, local/remote calls, pipes and negatives')
 PY
 
+# Live-hole arguments execute even when the enclosing quoted syntax is a
+# declaration head or metadata. Outer declaration/pattern filters must stop here.
+mkdir "$TMP/head-holes"
+cat > "$TMP/head-holes/heads.ex" <<'EXHEADHOLES'
+defmodule HeadHole do
+  def bar(x), do: x
+  def seed(), do: :generated
+  defmacro generated(x) do
+    quote do
+      def unquote(bar(x))(arg), do: arg
+    end
+  end
+  defmacro typed(x) do
+    quote do
+      @spec unquote(bar(x))
+    end
+  end
+  defmacro bare() do
+    quote do
+      def unquote(seed)(arg), do: arg
+    end
+  end
+  defmacro bound_name(seed) do
+    quote do
+      def unquote(seed)(arg), do: arg
+    end
+  end
+  defmacro disabled(x) do
+    quote unquote: false do
+      def unquote(bar(x))(arg), do: arg
+    end
+  end
+end
+EXHEADHOLES
+"$BIN" "$TMP/head-holes" --no-cache > "$TMP/head-holes.xml"
+python3 - "$TMP/head-holes.xml" <<'PYHEADHOLES'
+import sys, xml.etree.ElementTree as ET
+syms = {s.get('n'): s for s in ET.parse(sys.argv[1]).iter('s')}
+def calls(name): return {c.get('n') for c in syms[name].iter('c')}
+assert calls('generated/1') == {'bar/1'}, 'quoted declaration head dropped the live-hole call'
+assert calls('typed/1') == {'bar/1'}, 'quoted metadata dropped the live-hole call'
+assert calls('bare/0') == {'seed/0'}, 'quoted declaration head mistook a live bare call for a pattern'
+assert not calls('bound_name/1'), 'bound live-hole variable became a zero-arity call'
+assert not calls('disabled/1'), 'disabled declaration-head hole became live'
+print('  PASS live holes in quoted declaration heads/metadata, bare calls and variable negatives')
+PYHEADHOLES
+
 # Issue #357: quoted syntax is inert, but unquote expressions are evaluated while
 # constructing it. Keep this fixture separate from the golden corpus so the gate
 # contrasts the call sites and the declined count directly.
