@@ -14,13 +14,15 @@
 # with no receiver or the receiver `RSpec`, that carries a block.
 #
 # Stated floors, pinned below so each stays a decision:
-#   (a) a CHAINED receiver (`described_class.new.m_chain`) is untouched — the same one-hop bound as #267's
-#       `Calc.new.scale`: the receiver is a call, not a constant.
+#   (a) a CHAINED receiver (`described_class.new.m_chain`) was untouched — the same one-hop bound as #267's
+#       `Calc.new.scale`: the receiver is a call, not a constant — until parser version 132 typed a receiver the code
+#       builds (test/rubytypedrecvcheck.sh). Its arm below is kept, INVERTED: it now pins m_chain to Calc.
 #   (b) a group with no constant (`RSpec.describe "no class"`, `RSpec.describe :sym`) names no class, so
 #       `described_class` there is left exactly as it was.
 #   (c) a `describe` call on any other receiver (`Docs.describe Calc do`) is not an RSpec example group.
-#   (d) `subject` — the implicit `described_class.new` — is NOT modeled in this round: an explicit `subject { … }`
-#       can be anything, and telling the two apart is its own round.
+#   (d) `subject` — the implicit `described_class.new` — is NOT modeled by this rule: an explicit `subject { … }`
+#       can be anything. test/rubytypedrecvcheck.sh (parser version 132) types a group's subject, explicit or
+#       implicit, as a call RECEIVER from what its block builds.
 #   (e) a REDEFINED `described_class` declines: the redefinition names what it means, and this rule does not read
 #       it, so it answers nothing rather than the group's constant. A METHOD of that name — any `:described_class`
 #       symbol (`let( :described_class ) { … }`) or `def described_class` — declines every site in the file, since a
@@ -477,8 +479,10 @@ pins calc_spec.rb   m_inner Tally  Calc  "a nested describe Tally is the innermo
 pins engine_spec.rb e_run   Engine Other "a bare describe, and a scope_resolution constant named by its final segment"
 pins calc_spec.rb   m_nil   Calc   Tally "describe nil passes its parent's class through — RSpec reads nil like a String"
 
-echo "=== floors (a) chained, (b) no constant, (c) not RSpec, (e) redefined — each left exactly as it was ==="
-untouched calc_spec.rb    m_chain "described_class.new.m_chain — the receiver is a call, the #267 one-hop bound (floor (a), stated)"
+echo "=== floor (a) lifted: described_class.new is a typed receiver (parser version 132) ==="
+pins calc_spec.rb   m_chain Calc   Tally "described_class.new.m_chain — the receiver the code builds is a Calc (test/rubytypedrecvcheck.sh)"
+
+echo "=== floors (b) no constant, (c) not RSpec, (e) redefined — each left exactly as it was ==="
 untouched noclass_spec.rb m_none  "RSpec.describe \"no class\" names no class (floor (b), stated)"
 untouched noclass_spec.rb m_sym   "RSpec.describe :sym names no class (floor (b), stated)"
 untouched docs_spec.rb    m_docs  "Docs.describe Calc is not an RSpec example group (floor (c), stated)"

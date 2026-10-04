@@ -553,7 +553,7 @@ inline constexpr std::string_view kCodeExtensions[] = {
     // crawl itself admits it (src/ingest_crawl.h's kLangTable) — a task description naming a .hxx FILE:LINE
     // seed used to be recognized nowhere even though the file it names now indexes fine.
     ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh", ".hxx", ".c", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs",
-    ".java", ".rb", ".swift", ".cs", ".m", ".mm", ".cu", ".cuh", ".metal", ".kt",
+    ".java", ".rb", ".rake", ".jbuilder", ".swift", ".cs", ".m", ".mm", ".cu", ".cuh", ".metal", ".kt",
 };
 
 inline bool looksLikeFileToken( std::string_view token ) noexcept

@@ -1,7 +1,8 @@
 # RUBY CALL-FORM MATRIX fixture — one line per call SPELLING the grammar distinguishes.
-# Expected counts are literals read off this file. The ABSENT row is absent BY DESIGN, stated in
-# queries/ruby/tags.scm's own header: a bare, receiver-less, parenthesis-less call is
-# indistinguishable from a local-variable read, so it is deliberately not captured.
+# Expected counts are literals read off this file. A bare, receiver-less, parenthesis-less name is
+# a call or a local read by Ruby's LEXICAL rule (ingest_binds.h::captureRubyBareCalls): it is a
+# local exactly when an assignment earlier in the same scope binds it. Row 6 is the call; row 7 is
+# the same name after such an assignment, and is absent BY DESIGN.
 
 def bare_paren_fn
   1
@@ -43,8 +44,13 @@ def caller
   a
 end
 
+def caller_bare
+  # 6. a bare, receiver-less, paren-less call — no binding of the name precedes it in this def
+  bare_noparen_fn
+end
+
 def caller_absent
-  # 6. ABSENT BY DESIGN — a bare, receiver-less, paren-less call parses as an identifier and is
-  #    indistinguishable from a local-variable read. Capturing it would spray every local name.
+  # 7. ABSENT BY DESIGN — the assignment makes the name a local, so the second line is a read
+  bare_noparen_fn = 7
   bare_noparen_fn
 end

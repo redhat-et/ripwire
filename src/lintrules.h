@@ -160,7 +160,7 @@ inline constexpr LintExtRow kLintExtRows[] = {
     { ".js", Lang::JavaScript }, { ".jsx", Lang::JavaScript }, { ".mjs", Lang::JavaScript }, { ".cjs", Lang::JavaScript },
     { ".sh", Lang::Bash }, { ".bash", Lang::Bash }, { ".zsh", Lang::Bash },
     { ".java", Lang::Java },
-    { ".rb", Lang::Ruby },
+    { ".rb", Lang::Ruby }, { ".rake", Lang::Ruby }, { ".jbuilder", Lang::Ruby },
     { ".cs", Lang::CSharp },
     { ".php", Lang::Php }, { ".phtml", Lang::Php },
     { ".lua", Lang::Lua },

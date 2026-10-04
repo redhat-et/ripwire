@@ -56,6 +56,21 @@ inline bool isBaseTypeNodeIn( const char* nt, Lang lang ) noexcept
     return lang == Lang::Ruby ? ( kindIs( nt, "constant" ) || kindIs( nt, "scope_resolution" ) ) : isBaseTypeNode( nt );
 }
 
+// One use-site RawRef sited at node `at`: its start byte (the byte-span sweep attributes the ref to the enclosing def)
+// and its 1-based line (ABS-3: --uses p="file:line"), with the role and name the caller decides; every other field keeps
+// RawRef's default.
+inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role, std::string name )
+{
+    RawRef r;
+    r.fileId    = fileId;
+    r.startByte = ts_node_start_byte( at );
+    r.line      = ts_node_start_point( at ).row + 1;
+    r.lang      = lang;
+    r.role      = role;
+    r.name      = std::move( name );
+    return r;
+}
+
 // Emit one inherit RawRef (derived → base) for a base-type node. startByte sits inside the class header
 // (the type node's own start), so the byte-span enclosing attribution binds fromSymbol = the derived class.
 inline void emitBaseRef( TSNode typeNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs )
@@ -65,14 +80,8 @@ inline void emitBaseRef( TSNode typeNode, std::uint32_t fileId, Lang lang, std::
     {
         return;
     }
-    RawRef r;
-    r.fileId    = fileId;
-    r.startByte = a;                       // inside the class header → attributes to the derived class
-    r.line      = ts_node_start_point( typeNode ).row + 1;   // ABS-3: 1-based use-site line for --uses
-    r.lang      = lang;
+    RawRef r    = rawRefAt( typeNode, fileId, lang, RefRole::Extends, finalSegment( src.substr( a, b - a ) ) );   // a base-class / interface use-site
     r.isInherit = true;
-    r.role      = RefRole::Extends;        // ABS-3: a base-class / interface use-site (derived → base)
-    r.name      = finalSegment( src.substr( a, b - a ) );
     refs.push_back( std::move( r ) );
 }
 
@@ -441,9 +450,8 @@ void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, 
 // attribution assigns fromSymbol = the derived class. Explicit-syntax langs: C++/TS/JS/Java/Python/Swift/
 // C#/PHP/Kotlin/Ruby. Ruby reuses the `superclass` clause name Java's extends clause already has, and
 // names its base with (constant)/(scope_resolution) — see isBaseTypeNodeIn. A Ruby MIXIN
-// (`include M` / `extend M` / `prepend M`) is NOT captured here, for the same reason the PHP note below
-// gives: it is a call in the class BODY, not a clause. Ruby's ancestor chain does hold included modules,
-// so that is a stated residue (test/rubyinheritcheck.sh floor (b)), not a claim it is not inheritance. Lua is deliberately absent and it is a DISCLOSED non-goal, not an omission: Lua inheritance IS
+// (`include M` / `extend M` / `prepend M`) is a call in the class BODY, not a clause, so it is captured where
+// the call is read instead: captureRubyMixinBases (parser version 131; test/rubyreachcheck.sh). Lua is deliberately absent and it is a DISCLOSED non-goal, not an omission: Lua inheritance IS
 // `setmetatable( Derived, { __index = Base } )`, an ordinary runtime call over an ordinary table, so there
 // is no syntax to read and a Lua corpus correctly reports no inheritance edges at all.
 //
@@ -1465,11 +1473,12 @@ inline std::string_view rubyNamedDirective( TSNode n, std::string_view src, std:
 
 // `include A, B` / `extend M` / `prepend P` — ONE directive naming N constants and therefore N Include
 // records, in SOURCE order (the same shape as elixirAliasGroup). A non-constant argument (`include
-// Object.const_get(:X)`, `include mod`) contributes nothing; the constant ones beside it still do.
-inline std::vector<std::string> rubyMixinTargets( TSNode n, std::string_view src )
+// Object.const_get(:X)`, `include mod`) contributes nothing; the constant ones beside it still do. The constant
+// NODES: captureIncludes reads each one's text for its Include record, and captureRubyMixinBases its byte.
+inline std::vector<TSNode> rubyMixinTargets( TSNode n, std::string_view src )
 {
-    std::vector<std::string> out;
-    const std::string_view   m = rubyNamedDirective( n, src, kRubyConstantDirectives );
+    std::vector<TSNode>    out;
+    const std::string_view m = rubyNamedDirective( n, src, kRubyConstantDirectives );
     if( m.empty() || m == "autoload" )
     {
         return out;
@@ -1482,9 +1491,9 @@ inline std::vector<std::string> rubyMixinTargets( TSNode n, std::string_view src
     ChildCursor cursor( args );   // O(children): `include A, # … B` — 58x at 16 000 (childwalkscalecheck B20)
     forEachNamedChild( args, cursor.cur, [ & ]( TSNode a )
     {
-        if( std::string c = rubyConstantText( a, src ); !c.empty() )
+        if( isBaseTypeNodeIn( ts_node_type( a ), Lang::Ruby ) )   // a constant or a constant path: rubyConstantText's set
         {
-            out.push_back( std::move( c ) );
+            out.push_back( a );
         }
         return true;
     } );
@@ -1552,6 +1561,44 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
         cur = p;
     }
     return false;
+}
+
+// A Ruby MIXIN is an ancestor (parser version 131): `include A, B` / `extend M` / `prepend P` at class-DSL position
+// (rubyAttrAtClassBodyLevel) puts each constant in the class's ancestor chain, so each emits one inherit reference at the
+// CONSTANT's own byte — the shape a superclass has, so resolve.h's RubyBaseScope scopes it by Ruby's constant lookup and
+// graph.h's inheritance graph and base walk read it unchanged. `extend` reaches the class's singleton, not its
+// instances; the graph keeps one method namespace per class (instance and class methods alike), so it is an ancestor
+// there too. So does one inside a module body's `included do … end` (rubyInConcernIncludedBlock). A directive anywhere
+// else — a method body, another block, a file's top level — emits none.
+// Is `call` a statement of an ActiveSupport::Concern `included do … end` block written at a module's body level? When a
+// class includes the concern the block runs in that class, so a mixin there joins the INCLUDER's ancestors; read as an
+// ancestor of the concern itself, it reaches the includer through the concern — activerecord's AttributeMethods
+// assembles its Read, Write and PrimaryKey modules exactly so.
+inline bool rubyInConcernIncludedBlock( TSNode call, std::string_view src ) noexcept
+{
+    TSNode up = ts_node_parent( call );
+    if( !ts_node_is_null( up ) && ( kindIs( ts_node_type( up ), "body_statement" ) || kindIs( ts_node_type( up ), "block_body" ) ) )
+    {
+        up = ts_node_parent( up );   // do … end wraps its statements in body_statement, { } in block_body
+    }
+    const TSNode block = up;
+    const TSNode owner = ts_node_is_null( block ) ? block : ts_node_parent( block );
+    return !ts_node_is_null( owner ) && ( kindIs( ts_node_type( block ), "do_block" ) || kindIs( ts_node_type( block ), "block" ) )
+        && kindIs( ts_node_type( owner ), "call" ) && rubyNamedDirective( owner, src, std::array<std::string_view, 1>{ "included" } ) == "included"
+        && rubyAttrAtClassBodyLevel( owner, src );
+}
+
+inline void captureRubyMixinBases( TSNode call, const std::vector<TSNode>& constants, std::uint32_t fileId, std::string_view src,
+                                   std::vector<RawRef>& refs )
+{
+    if( constants.empty() || !( rubyAttrAtClassBodyLevel( call, src ) || rubyInConcernIncludedBlock( call, src ) ) )
+    {
+        return;
+    }
+    for( const TSNode a : constants )
+    {
+        emitBaseRef( a, fileId, Lang::Ruby, src, refs );
+    }
 }
 
 // A CONSTANT CHAIN: `Name`, `A::B::C`, `::A::B` — every segment a constant, the head a constant or absent (`::A`).
@@ -2556,10 +2603,12 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
         {
             // `include A, B` / `extend M` / `prepend P` (parser version 82): N constants off one directive node, in
             // SOURCE order, each a symbolic Include — the Ruby twin of the Elixir alias group below.
-            for( std::string& member : rubyMixinTargets( n, src ) )
+            const std::vector<TSNode> mixins = rubyMixinTargets( n, src );
+            for( const TSNode member : mixins )
             {
-                emitDirective( std::move( member ), true, isLazy, false );
+                emitDirective( rubyConstantText( member, src ), true, isLazy, false );
             }
+            captureRubyMixinBases( n, mixins, fileId, src, refs );   // parser version 131: and each is an ancestor
         }
         else if( lang == Lang::Ruby && kindIs( t, "argument_list" ) )
         {

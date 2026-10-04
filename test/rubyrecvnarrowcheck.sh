@@ -24,17 +24,23 @@
 #     maps to SymKind::Other (ingest_crawl.h::defKind) for every language, and in Ruby that kind is reached
 #     by nothing else — queries/ruby/tags.scm emits class, module, method and constant, and the other three
 #     have kinds of their own — so buildGraph's Rule 2c class-name set takes Ruby's SymKind::Other symbols.
-#   * A MISS never deletes an edge: the receiver naming no in-repo definition (`Time.now`), or naming one
-#     that does not define the callee, degrades to the unchanged honest ladder.
+#   * A receiver naming no in-repo definition (`Time.now`) mints no edge. One naming a class whose lookup does not
+#     define the callee degraded to the name ladder through parser version 136; since 137 Ruby's lookup on the class
+#     object decides it (test/rubyclassrecvcheck.sh): `Calc.report` reaches no Tally.report and is refused as
+#     external. That arm below is kept, INVERTED.
 #
 # Stated floors, pinned below so each stays a decision rather than an accident:
 #   (a) LIFTED at parser version 98 by test/rubyinheritcheck.sh (`class Child < Parent` now mints an
 #       inherit ref, so chaUp holds Ruby and the base walk runs). The arm below is kept, INVERTED: it
 #       now asserts `Child.build` pins to Parent::build, and it is the tripwire that fires if Ruby ever
 #       loses its inheritance edges again.
-#   (b) Matching is by FINAL SEGMENT, so two classes with the same last name in different namespaces
-#       both defining the callee keep BOTH candidates (an honest split), exactly as Rule 2c documents.
-#   (c) A variable receiver (`c.scale`) and a chained one (`Calc.new.scale`) are untouched by this round.
+#   (b) LIFTED at parser version 137 by test/rubyclassrecvcheck.sh: a call on a class reads the constant by its
+#       fully-qualified name through the constant index, so `Left::Shared.go` reaches Left's Shared alone where two
+#       classes of the last name `Shared` both define `go`. Through 136 that was an honest split; the arm below is kept,
+#       INVERTED.
+#   (c) A variable receiver (`c.scale`) is untouched by this round. A chained one (`Calc.new.scale`) was too, until
+#       parser version 132 typed a receiver the code builds (test/rubytypedrecvcheck.sh); its arm below is kept,
+#       INVERTED: it now asserts `Calc.new.scale` pins to Calc::scale alone.
 #   (d) A constant receiver whose class defines BOTH `def self.x` and `def x` gets an honest two-way split that
 #       includes the instance method (rails `Journey::Parser.parse`): a split, not a pin. Ruby's tags.scm gives
 #       `method` and `singleton_method` one kind, so telling them apart is a later round.
@@ -268,12 +274,20 @@ CPR="$( "$BIN" "$FIX" --no-cache --callers=Printer::format 2>/dev/null )"
 echo "$CPR" | grep -q 'count="0"' && ok "--callers=Printer::format reports count=\"0\"" \
     || no "--callers=Printer::format did not report count=0: $( echo "$CPR" | grep -o '<callers[^>]*' )"
 
-echo "=== a MISS never deletes an edge, and never invents one ==="
+echo "=== a MISS invents no edge ==="
 E="$( rowOf 'n="external_call" ' )"
 echo "$E" | grep -q '<c ' && no "Time.now minted an edge — neither Time nor now is defined in this tree: $E" || ok "Time.now → no edge (out-of-tree receiver, unchanged)"
 MM="$( rowOf 'n="missing_method_call" ' )"
-[ "$( edgesTo "$MM" report )" -eq 1 ] && ok "Calc.report → the one report def still resolves through the honest name ladder (the narrow missed, it did not veto)" \
-    || no "Calc.report lost its edge — a narrow MISS must degrade to the ladder, never delete: $MM"
+# An absence arm must fail on a missing row: an empty rowOf counts zero edges, which alone would read as a PASS.
+if [ -z "$MM" ]
+then
+    no "the missing_method_call row is missing from the map — the zero-edge check below would pass on nothing"
+elif [ "$( edgesTo "$MM" report )" -eq 0 ]
+then
+    ok "Calc.report → no edge: Calc's lookup defines no report, and Tally's class method is no method of Calc (parser version 137)"
+else
+    no "Calc.report bound to a namesake its class's lookup cannot reach: $MM"
+fi
 
 echo "=== the base walk: a method on the SUPERCLASS narrows too (floor (a), lifted at parser version 98) ==="
 I="$( rowOf 'n="inherited_call" ' )"
@@ -290,18 +304,40 @@ else
     no "--callers=Unrelated::build exited non-zero: $( head -3 "$DIR/cbu.err" )"
 fi
 
-echo "=== floor (b): two same-final-segment classes both defining the callee keep BOTH (honest split) ==="
+echo "=== floor (b), lifted at parser version 137: Left::Shared.go names Left's Shared alone ==="
 SS="$( rowOf 'n="same_segment_call" ' )"
-[ "$( edgesTo "$SS" go )" -eq 2 ] && ok "Left::Shared.go → both Shared::go defs (final-segment matching; floor, stated)" \
-    || no "Left::Shared.go produced $( edgesTo "$SS" go ) go edges — narrowing to ONE of them needs the Ruby constant index, and a claim in this gate: $SS"
+# which Shared: the same shape in a fixture of its own, one class per file, read off the census (a constant index needs one
+# Ruby superclass in the tree, so it carries one)
+SEG="$DIR/segment"; mkdir -p "$SEG"
+printf 'module Left\n  class Shared\n    def self.go\n      1\n    end\n  end\nend\n' > "$SEG/left.rb"
+printf 'module Right\n  class Shared\n    def self.go\n      2\n    end\n  end\nend\n' > "$SEG/right.rb"
+printf 'class Base\nend\n\nclass Caller < Base\n  def run\n    Left::Shared.go\n  end\nend\n' > "$SEG/call.rb"
+"$BIN" "$SEG" --no-cache --pin-census="$DIR/segment.tsv" >/dev/null 2>&1
+SEGT="$( awk -F'\t' '$1 == "C" && $7 == "go" { print $8 }' "$DIR/segment.tsv" )"
+if [ "$( edgesTo "$SS" go )" -eq 1 ] && printf '%s' "$SEGT" | grep -qF "left.rb::Shared::go#" && ! printf '%s' "$SEGT" | grep -qF "right.rb::"
+then
+    ok "Left::Shared.go → Left's Shared::go alone (one edge here; left.rb's def, not right.rb's, on the one-class-per-file fixture)"
+else
+    no "Left::Shared.go is not Left's Shared::go alone ($( edgesTo "$SS" go ) go edges here; census on the per-file fixture: $SEGT)"
+fi
 
-echo "=== floor (c): variable and chained receivers are untouched by this round ==="
+echo "=== floor (c): a variable receiver is untouched by this round; a chained Calc.new is typed (parser version 132) ==="
 IC="$( rowOf 'n="instance_call" ' )"
 [ "$( edgesTo "$IC" scale )" -eq 2 ] && ok "c.scale( 7 ) → unchanged 2-way split (a variable receiver has no type in Ruby; floor, stated)" \
     || no "c.scale( 7 ) produced $( edgesTo "$IC" scale ) scale edges — this round must not move a variable receiver: $IC"
 CC="$( rowOf 'n="chain_call" ' )"
-[ "$( edgesTo "$CC" scale )" -eq 2 ] && ok "Calc.new.scale( 8 ) → unchanged 2-way split (the receiver is a CALL, undecidable in one hop; floor, stated)" \
-    || no "Calc.new.scale( 8 ) produced $( edgesTo "$CC" scale ) scale edges: $CC"
+CCL="$( "$BIN" "$FIX" --no-cache --callers=Calc::scale 2>/dev/null )"; CCL_RC=$?
+CTL="$( "$BIN" "$FIX" --no-cache --callers=Tally::scale 2>/dev/null )"; CTL_RC=$?
+# The Tally half is an absence: a crash or refusal leaves CTL empty, which `! grep` alone reads as a PASS.
+if [ "$CCL_RC" -ne 0 ] || [ "$CTL_RC" -ne 0 ]
+then
+    no "--callers=Calc::scale / --callers=Tally::scale exited $CCL_RC / $CTL_RC — the absence half cannot be read off a failed run"
+elif echo "$CCL" | grep -q 'n="chain_call"' && ! echo "$CTL" | grep -q 'n="chain_call"'
+then
+    ok "Calc.new.scale( 8 ) → Calc::scale alone (floor (c) lifted: the receiver the code builds is a Calc — test/rubytypedrecvcheck.sh)"
+else
+    no "Calc.new.scale( 8 ) does not pin to Calc::scale alone: $CC"
+fi
 echo "$CC" | grep -q '<c n="new"' && no "Calc.new minted an edge to a new this tree never defines" || ok "…and Calc.new mints no edge (no def named new exists here)"
 
 echo "=== determinism, and the warm cache agrees with the cold one ==="

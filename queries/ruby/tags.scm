@@ -5,9 +5,11 @@
 ; Ruby structure the call graph cares about:
 ;   - class / module definitions → def nodes (containers; module is a namespace/mixin)
 ;   - `def name` / `def self.name` method definitions → the def nodes calls resolve TO
-;   - method calls → the call references (edges). A bare `foo` with no receiver and no
-;     args parses as (identifier); `foo(..)` / `obj.foo` parses as (call). We capture the
-;     (call) form's method name — the reliable, unambiguous call site.
+;   - method calls → the call references (edges). `foo(..)` / `obj.foo` parses as (call), and
+;     this query captures the (call) form's method name. A bare `foo` with no receiver, args or
+;     parentheses parses as (identifier) — the same node a local-variable read is — and no query
+;     can tell the two apart: ingest_binds.h captureRubyBareCalls mints those calls by Ruby's own
+;     lexical local rule instead (parser version 130, test/rubybarecallcheck.sh).
 ;   - require / require_relative → reference edges (they ARE plain (call) nodes, captured
 ;     by the call rule below — no separate rule needed).
 ;

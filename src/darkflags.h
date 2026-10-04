@@ -449,7 +449,7 @@ inline constexpr std::int32_t kTemplateText = -1;
 inline constexpr std::string_view kShellExtTable[] = { ".sh", ".bash", ".zsh" };
 
 inline constexpr std::string_view kHashCommentExtTable[] = {
-    ".py", ".pyi", ".sh", ".bash", ".zsh", ".rb", ".pl", ".cmake", ".yml", ".yaml", ".toml", ".r", ".jl"
+    ".py", ".pyi", ".sh", ".bash", ".zsh", ".rb", ".rake", ".jbuilder", ".pl", ".cmake", ".yml", ".yaml", ".toml", ".r", ".jl"
 };
 
 inline LineSyntax lineSyntaxFor( std::string_view path )

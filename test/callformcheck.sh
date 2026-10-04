@@ -407,13 +407,20 @@ uses ruby member_fn     1 "2. method call through a receiver"
 uses ruby receiver_fn   1 "3. module-function call, dot receiver"
 uses ruby colon_fn      1 "4. :: used as the method-call operator"
 uses ruby deep_fn       1 "5. scope_resolution receiver, then a dot call"
-# 6. ABSENT BY DESIGN, stated in queries/ruby/tags.scm's own header: a bare, receiver-less,
-# paren-less call is textually indistinguishable from a local-variable read.
-# The presence guard here is the one V5 defeated: it deleted this very line and both arms below
-# stayed green. Anchored so it matches the CALL inside caller_absent, never the `def` on line 10.
-fixtureHasRe ruby/main.rb '^  bare_noparen_fn$' "6. the bare paren-less CALL is still WRITTEN (V5's deletion target)"
-uses       ruby bare_noparen_fn 0 "6. ABSENT BY DESIGN: bare paren-less call, pinned at literal 0"
-probeBlind ruby caller_absent bare_noparen_fn "6. …and absent at EXTRACTION, by the grammar's own disclosure"
+# 6. A bare, receiver-less, paren-less name parses as an (identifier), the same node a local read
+# is. Until parser 130 it was ABSENT BY DESIGN here (pinned at literal 0); ingest_binds.h::
+# captureRubyBareCalls now applies Ruby's own lexical rule, so with no binding before it, it is a call.
+# 7. The same name after `bare_noparen_fn = 7` in the same def is a local read: ABSENT BY DESIGN, and
+# caller_absent's reference list is legitimately empty. The presence guard is the one V5 defeated
+# (it deleted the bare line and both absence arms stayed green); anchored on the indentation, it
+# matches the bare line in BOTH callers and never the `def` on line 11 — both are counted.
+fixtureHasRe ruby/main.rb '^  bare_noparen_fn = 7$' "7. the binding that makes row 7 a local is still WRITTEN"
+[ "$( grep -cE '^  bare_noparen_fn$' "$FIX/ruby/main.rb" )" = 2 ] \
+    && ok "[fixture] ruby/main.rb still spells the bare \`bare_noparen_fn\` twice — 6. the call and 7. the local read" \
+    || no "[fixture] ruby/main.rb no longer spells the bare \`bare_noparen_fn\` twice — row 6 or row 7 is now VACUOUS"
+uses       ruby bare_noparen_fn 1 "6. bare paren-less call, one edge — caller_bare's; caller_absent's read is a local"
+probeSees  ruby caller_bare bare_noparen_fn "6. …and it EXTRACTS as a receiver-less call"
+probeBlind ruby caller_absent bare_noparen_fn "7. ABSENT BY DESIGN: a read after an assignment binds the name is a local"
 
 echo
 echo "=== Swift — test/callformfix/swift/main.swift ==="

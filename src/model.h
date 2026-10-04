@@ -18,6 +18,7 @@
 #include <tuple>       // std::tie — lessUnindexedExt's mixed-direction compare
 #include <array>       // Symbol::evWhy — the fixed-size ev_why tag counters
 #include <cstdint>
+#include <optional>    // rubyTypedRecvOf — a Ruby reference's built receiver type, or none
 #include <string>
 #include <string_view>
 #include <type_traits>   // std::is_trivially_copyable_v — the VarSpan layout pin below
@@ -640,10 +641,15 @@ struct FnLocalScope
 // override. Consumers that MEASURE or SERVE a body (clones, complexity, --readability units, lexical.h's route anchor)
 // keep the plain span test: a class with no body is a definition, but it has no volume. Gate: test/kotlincheck.sh §11
 // (the PR's bodyless interface) and §13.
+// Ruby breaks it for EVERY kind: the language has no declarations at all — no prototype, no abstract member, no
+// interface — so each class, module, def, attr accessor and constant it indexes is the definition of its name. An
+// `attr_reader :aliases` accessor and an empty `def on_event; end` hook own no body span, and read as declarations the
+// collapse evicted them for any same-named bodied def in the family: a call inside Tracker to its own `aliases` bound to
+// an unrelated Join#aliases. Gate: test/rubybarecallcheck.sh ("Ruby has no declarations").
 inline bool isDefinitionNotDeclaration( const Symbol& s ) noexcept
 {
     const bool kotlinType = s.lang == Lang::Kotlin && ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface );
-    return s.endByte > s.sigEndByte || kotlinType;
+    return s.endByte > s.sigEndByte || kotlinType || s.lang == Lang::Ruby;
 }
 
 // local-variable-indexing plan Phase 1 MVP scope (docs/LOCALS_INDEXING.md): C/C++ only — highest
@@ -738,11 +744,17 @@ struct Reference
     std::string   calleeName;             // referenced name (final identifier segment)
     std::string   qualifier;              // explicit scope at the call site (`A` in `A::b()`); "" if bare/method — for canonical resolve
     std::string   recvVar;                // receiver variable identifier when recv==NamedVar/FieldOfVar (`x` in `x->m()`); "" otherwise — for Rule 2
+                                          //   A Ruby receiver the code BUILDS carries its type here instead (rubyTypedRecvOf below).
     std::string   fieldName;              // member variable name when isCompose (e.g. "m_pool"); ALSO the INTERMEDIATE
                                           //   field of a depth-2 chained receiver when recv is FieldOfThis/FieldOfVar
                                           //   (`this->m_pool.run()` → "m_pool") — the two are mutually exclusive
                                           //   (a compose ref is never a call ref, and the compose readers all gate
-                                          //   on isCompose), so one slot carries both; "" otherwise
+                                          //   on isCompose), so one slot carries both; "" otherwise. A third reading,
+                                          //   on a Ruby call whose receiver is a constant written with a path (recv
+                                          //   NamedVar, parser version 137): the path as written (`Billing::Invoice.issue`
+                                          //   → "Billing::Invoice"; `described_class` → the group's constant whole),
+                                          //   recvVar keeping the final segment every class is keyed by (graph.h
+                                          //   RubyClassObjects::receiverFqn); no chain or compose reader reads a NamedVar's
     std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
@@ -761,6 +773,95 @@ struct Reference
     std::string   memberPath;
     std::string   memberCtor;
 };
+
+// A Ruby call whose RECEIVER the code builds (parser version 132, test/rubytypedrecvcheck.sh): `c = Client.new` then `c.get`,
+// `let( :user ) { create( :user ) }` then `user.activate!`, `User.find_by( … ).activate!`. ingest_binds.h reads the shape
+// by Ruby's own local rule and writes the type into Reference::recvVar as "<Class>.<via>" — the class's constant as written
+// and the method that built it (`User.find_by`, `OpenSSL::Cipher.new`) — or ":<factory>.<via>" for a FactoryBot build (`:user.create`), whose class
+// only the tree's factory definitions know (graph.h rubyFactoryClasses). The receiver KIND is left as it was (NamedVar,
+// FieldOfVar), so every rule that does not read the type sees the call exactly as before; and a `.` is in no Ruby
+// identifier or constant segment, so no receiver the tool recorded before can read as a type.
+inline constexpr char kRubyTypedRecvSep = '.';
+
+struct RubyTypedRecv
+{
+    std::string_view type;              // the class's constant as written (`User`, `Admin::User`), or the factory name
+    std::string_view via;               // the method that built it: `new`, a finder, a factory build
+    bool             factory = false;   // `type` names a FactoryBot factory, not a class
+};
+
+inline std::string rubyTypedRecvToken( std::string_view type, std::string_view via, bool factory )
+{
+    return std::string( factory ? ":" : "" ).append( type ).append( 1, kRubyTypedRecvSep ).append( via );
+}
+
+// the type a Ruby reference's receiver was built as, or nullopt for every other reference
+inline std::optional<RubyTypedRecv> rubyTypedRecvOf( const Reference& r ) noexcept
+{
+    const std::size_t sep = r.lang == Lang::Ruby ? r.recvVar.find( kRubyTypedRecvSep ) : std::string::npos;
+    if( sep == std::string::npos )
+    {
+        return std::nullopt;
+    }
+    const std::string_view token = r.recvVar;
+    const bool             factory = token.starts_with( ':' );
+    return RubyTypedRecv { token.substr( factory ? 1 : 0, sep - ( factory ? 1 : 0 ) ), token.substr( sep + 1 ), factory };
+}
+
+// RSpec's targets (test/rubyrspectargetcheck.sh, parser version 133): inside an example group, the receiver-less builder
+// `builder` — or the bare `is_expected`, which is `expect( subject )` — returns an instance of `cls`, whose `to`/`not_to`/
+// `to_not` are RSpec's. ingest_binds.h rubyValueType types the value; graph.h RubyTypedReceivers answers a call on it.
+// The matchers whose chain methods are RSpec's join them (parser version 136): `receive( :m ).with( 1 )`, the `to` of
+// `change { }.from( 1 ).to( 2 )` — a call on a chain rooted at one is typed as the root (ingest_binds.h
+// rubyMatcherChainType); a link's own class (Change's `from` returns a ChangeFromValue) is RSpec's all the same.
+struct RspecTarget
+{
+    std::string_view builder;
+    std::string_view cls;
+};
+inline constexpr RspecTarget kRspecTargets[] = {
+    { "expect", "RSpec::Expectations::ValueExpectationTarget" },   // `expect { … }`: kRspecBlockTarget
+    { "is_expected", "RSpec::Expectations::ValueExpectationTarget" },
+    { "allow", "RSpec::Mocks::AllowanceTarget" },
+    { "expect_any_instance_of", "RSpec::Mocks::AnyInstanceExpectationTarget" },
+    { "allow_any_instance_of", "RSpec::Mocks::AnyInstanceAllowanceTarget" },
+    { "receive", "RSpec::Mocks::Matchers::Receive" },
+    { "have_received", "RSpec::Mocks::Matchers::HaveReceived" },
+    { "receive_messages", "RSpec::Mocks::Matchers::ReceiveMessages" },
+    { "receive_message_chain", "RSpec::Mocks::Matchers::ReceiveMessageChain" },
+    { "change", "RSpec::Matchers::BuiltIn::Change" },
+    { "raise_error", "RSpec::Matchers::BuiltIn::RaiseError" },
+    { "raise_exception", "RSpec::Matchers::BuiltIn::RaiseError" },
+    { "output", "RSpec::Matchers::BuiltIn::Output" },
+    { "be_within", "RSpec::Matchers::BuiltIn::BeWithin" },
+    { "yield_control", "RSpec::Matchers::BuiltIn::YieldControl" },
+};
+inline constexpr std::string_view kRspecBlockTarget = "RSpec::Expectations::BlockExpectationTarget";
+
+// The RSpec target a receiver typed `cls` (leading `::` dropped) by the builder `via` is — `expect { … }`'s block form
+// included — or nullptr: a class reached any other way (`ValueExpectationTarget.new`) is an ordinary constant.
+inline const RspecTarget* rspecTargetOf( std::string_view cls, std::string_view via ) noexcept
+{
+    for( const RspecTarget& t : kRspecTargets )
+    {
+        if( t.builder == via )
+        {
+            return t.cls == cls || ( via == "expect" && cls == kRspecBlockTarget ) ? &t : nullptr;
+        }
+    }
+    return nullptr;
+}
+
+// Ruby's delegation DSL: a class that writes one defines methods the tree indexes nowhere in it (ActiveSupport's `delegate`
+// and `delegate_missing_to`, Forwardable's `def_delegator(s)`), so it may answer a name no lookup over the tree finds (graph.h
+// RubySelfReach); one a `class << self` writes defines the class object's (ingest_binds.h captureRubySingletonAccessors).
+inline constexpr std::string_view kRubyDelegationCalls[] = { "def_delegator", "def_delegators", "delegate", "delegate_missing_to" };
+
+// A Jbuilder template's `json` (test/rubyrakejbuildercheck.sh, parser version 135): the template handler binds it to the
+// view's JbuilderTemplate, a BasicObject whose method_missing makes every call on it a key. ingest_binds.h types the local
+// in a `.jbuilder` file; graph.h RubyTypedReceivers refuses a call on it unless the tree opens the class.
+inline constexpr std::string_view kJbuilderTemplate = "JbuilderTemplate";
+inline constexpr std::string_view kJbuilderLocal    = "json";
 
 // A physical dependency: one #include / import directive (file → target). The target is the raw
 // include path / module name (resolved to a file id later, for the file→file dependency graph).
@@ -909,6 +1010,19 @@ enum class LocalBindKind : std::uint8_t
                    //     (`const { stringify } = JSON`); importedName = the member it names, "*" for the whole module. Go:
                    //     var "." is a dot import. fromSymbol kNoNode, spans {0,0}. Read only by graph.h FalseEdgeRules;
                    //     every other binding consumer filters by kind or skips file-scope records. APPENDED (cache u8).
+    RubyFactory,    // parser version 132: a FactoryBot `factory :name` definition — var=the factory name (or one of its
+                   //     `aliases:`), typeName=the final segment of the class it builds (ingest_binds.h captureRubyFactories).
+                   //     Read by graph.h rubyFactoryClasses ONLY; every other reader skips it by kind or finds no
+                   //     variable of that name. APPENDED for the same cache reason as VarDecl.
+    RubyHelperMethod, // parser version 135: a `helper_method :name` declaration at class-body position — var=the method,
+                   //     typeName=the final segment of the class or module that declares it (ingest_binds.h
+                   //     RubyBareCallWalk::noteDeclaredCall). Read by graph.h RubyTopSelf ONLY. APPENDED, as above.
+    RubySingletonDef, // parser version 137: a Ruby SINGLETON method — `def self.m`, a def or an accessor inside `class << self`
+                   //     — at startByte, the def's own start (Symbol::sigStartByte); var=the method, typeName empty
+                   //     (ingest_binds.h rubyNoteSingletonDef, captureRubySingletonAccessors). A name the delegation DSL
+                   //     defines in a `class << self` has no def: typeName=the owning class, var=the name (empty for
+                   //     `delegate_missing_to`, every name). Read by graph.h's class-object lookup ONLY
+                   //     (rubyClassObjectDefs). APPENDED, as above.
     // FE-B (test/receiverevidencecheck.sh): the receiver-evidence facts graph.h ReceiverEvidence reads, and NOTHING else.
     //   Every other binding consumer filters by kind or skips these four by isReceiverEvidenceKind below — a field name
     //   recorded here is not a local of the method that assigns it, and a type written on a parameter is not a class the

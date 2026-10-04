@@ -61,6 +61,10 @@ struct LangEntry
 // Named once so the table row and ingest_sidecap.h's restrictAstroToFrontmatter cannot drift apart.
 inline constexpr std::string_view kAstroExt = ".astro";
 
+// The Ruby extension whose top level is a view (a Jbuilder template), named once for the row and ingest_sidecap.h's
+// captureRubyBareCalls call, which binds the template's `json` there.
+inline constexpr std::string_view kJbuilderExt = ".jbuilder";
+
 // Order does not matter (linear scan); kept grouped by language for readability.
 // The extent is EXACT, not headroom: it was 32 with 32 rows, .toml made it 33, .pyi made it 34 and the
 // .yml/.yaml pair made it 36, the .php/.phtml/.lua trio made it 40, the .ex/.exs pair made it 42, the
@@ -93,7 +97,7 @@ inline constexpr std::string_view kAstroExt = ".astro";
 // the latter a list item), so those files carry the file-level node alone and serve as ONE whole-file
 // unit. A heading detector per format is a later lane with its own measurement. `.mdx` is markdown with
 // JSX, which the block grammar already reads as html blocks (opaque). Gate: test/textdocscheck.sh.
-constexpr std::array<LangEntry, 51> kLangTable = {{
+constexpr std::array<LangEntry, 53> kLangTable = {{
     { ".cpp",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cc",   Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
     { ".cxx",  Lang::Cpp,        &tree_sitter_cpp,        "cpp"        },
@@ -185,6 +189,11 @@ constexpr std::array<LangEntry, 51> kLangTable = {{
     { ".zsh",  Lang::Bash,       &tree_sitter_bash,       "bash"       },   // zsh — parsed with the bash grammar (superset-ish; partial)
     { ".java", Lang::Java,       &tree_sitter_java,       "java"       },   // Java — classes/interfaces/enums/methods/ctors + calls
     { ".rb",   Lang::Ruby,       &tree_sitter_ruby,       "ruby"       },   // Ruby — class/module/def + method calls + require
+    // A Rake task file and a Jbuilder view are plain Ruby (test/rubyrakejbuildercheck.sh, parser version 135): what a
+    // task or a JSON view calls is a caller like any other. Outside any class their self is known — Rake's `main`, the
+    // view — and graph.h RubyTopSelf reads it; a `.jbuilder` file's `json` is the template's (ingest_binds.h).
+    { ".rake", Lang::Ruby,       &tree_sitter_ruby,       "ruby"       },
+    { kJbuilderExt, Lang::Ruby,  &tree_sitter_ruby,       "ruby"       },
     { ".json", Lang::Json,       &tree_sitter_json,       "json"       },   // JSON — top-level + 2nd-level object keys as t="sec"; DATA, no call edges
     { ".toml", Lang::Toml,       &tree_sitter_toml,       "toml"       },   // TOML — [table] headers + their keys as t="sec"; DATA, no call edges
     { ".yml",  Lang::Yaml,       &tree_sitter_yaml,       "yaml"       },   // YAML — mapping keys (mdepth<=2, seqs transparent) as t="sec"; DATA, no call edges

@@ -249,8 +249,10 @@ echo "=== (I) the header, its legend and the census agree ==="
 HDR="$( stats "$TMP/map.xml" )"
 [ "$( gauge "$HDR" declined )" = 15 ] && ok "(I) header declined=15 (8 gate declines outside mono/: four Python .get, JS Map.get and Array.push, TS Map.get, Ruby Hash#fetch; mono/: 4 ladder declines kept + pop, popitem, shift)" \
     || no "(I) header declined= should be 15: ${HDR:-no stats comment}"
-[ "$( gauge "$HDR" external )" = 1 ] && ok "(I) header external=1: raw.decode(\"utf-8\") can reach no in-repo definition (the only one is a closure)" \
-    || no "(I) header external= should be 1: ${HDR:-no stats comment}"
+# external=3 since parser version 137 (test/rubyclassrecvcheck.sh): RbPool.new and LinkedList.new are Class#new on a class
+# the tree defines no initialize for, which runs BasicObject's — outside the tree
+[ "$( gauge "$HDR" external )" = 3 ] && ok "(I) header external=3: raw.decode(\"utf-8\") can reach no in-repo definition (the only one is a closure); RbPool.new and LinkedList.new reach no in-tree initialize" \
+    || no "(I) header external= should be 3: ${HDR:-no stats comment}"
 legend_of "$TMP/map.xml" | grep -q 'hdr:declined=also-counts-builtin-type-method-calls' \
     && ok "(I) the full map legend defines hdr:declined= including the builtin-name clause" \
     || no "(I) the full map legend does not name the builtin-name decline under hdr:declined="

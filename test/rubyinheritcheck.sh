@@ -25,11 +25,11 @@
 #       `extends_clause`, C#'s `base_list`), and in Ruby that descent landed on `Struct`, minting an edge that
 #       only read as absent because the fixture defines no Struct. `class Built < Factory.fabricate( :x )` against
 #       an in-tree `Factory` pins it.
-#   (b) a MIXIN (`include Helper` / `extend` / `prepend`) is NOT an inheritance edge in this round. It is
-#       a receiver-less call in the class BODY, not a clause — the same shape, and the same decision, as
-#       PHP's in-body `use SomeTrait;` (captureBases' own header). Ruby's ancestor chain really does hold
-#       included modules, so this is a real residue and a later round's subject, not a claim that it is
-#       not inheritance.
+#   (b) a MIXIN (`include Helper` / `extend` / `prepend`) is an ANCESTOR for the call graph since parser version
+#       131 — the base walk, the CHA cone and a bare call's reach read it (ingest_relations.h captureRubyMixinBases,
+#       test/rubyreachcheck.sh) — but it mints no IMPLEMENTOR row: --lego lists the classes below a CLASS, and the
+#       inheritance overlay takes only class-like bases (graph.h namespaceCompatible), which a module is not. So
+#       --lego=Helper still lists no Mixed; a module's implementor row is a separate decision, not taken here.
 #   (c) the base WALK is keyed by NAME. A base is found by name (its final segment, as every language's is)
 #       and then SCOPED: the superclass as written is looked up the way Ruby looks it up — Module.nesting
 #       innermost first, then the top level, `::X` absolute — against every class/module the tree opens (the
@@ -38,9 +38,9 @@
 #       `class Inner < Base` inside `module Beta` lands on Beta::Base alone, and a base the tree never opens
 #       (`ActiveRecord::Base`) adds nothing to the CHA name graph — Rec's walk no longer reaches Space::Base's
 #       methods. What stays name-keyed is the walk's METHOD probe (canonByName is keyed `Scope::method` with the
-#       IMMEDIATE scope), so two in-tree bases sharing a final name still share one probe: `UsesAlpha.beta_make`
-#       pins to Beta::Base#beta_make although UsesAlpha < Alpha::Base. Pinned below; lifting it needs a
-#       qualified scope on the symbol itself.
+#       IMMEDIATE scope), so two in-tree bases sharing a final name still share one probe — for a call to self. A call
+#       on a CLASS walks fully-qualified constants since parser version 137 (test/rubyclassrecvcheck.sh): the
+#       `UsesAlpha.beta_make` arm below is kept, INVERTED — UsesAlpha < Alpha::Base reaches no Beta::Base#beta_make.
 #   (d) `Built = Class.new( Parent )` — with or without a block — makes Built < Parent at runtime, but it is a constant
 #       ASSIGNMENT whose value is a call, not a `class` open: no class symbol, no superclass clause, no edge. The same
 #       decision as (a): the tool reads a base off a class header, never off a computed value.
@@ -333,10 +333,11 @@ CLS="$( "$BIN" "$FIX" --no-cache --callers=Parent::shared_helper 2>/dev/null )"
 echo "$CLS" | grep -q 'n="use_inherited"' && ok "--callers=Parent::shared_helper lists use_inherited" \
     || no "--callers=Parent::shared_helper does not list use_inherited"
 
+# Parser version 130 (test/rubybarecallcheck.sh) mints the bare, parenthesis-less call this arm once pinned as minting
+# nothing; it now takes the same base walk as the parenthesised shared_helper( 1 ) above.
 UB="$( rowOf 'n="use_bare" ' )"
-echo "$UB" | grep -q '<c ' \
-    && no "a bare, parenthesis-less bare_helper minted an edge — queries/ruby/tags.scm captures the (call) form only, and a no-arg receiver-less call parses as (identifier): if that changed, say so HERE and in the tags.scm header" \
-    || ok "a bare, parenthesis-less call still mints nothing (an extraction floor of tags.scm, not of this round)"
+[ "$( edgesTo "$UB" bare_helper )" -eq 1 ] && ok "a bare, parenthesis-less bare_helper inside Child → exactly one edge (Parent#bare_helper, the base walk)" \
+    || no "a bare, parenthesis-less bare_helper inside Child produced $( edgesTo "$UB" bare_helper ) edges, want 1 (Parent#bare_helper): $UB"
 
 echo "=== floors (a) computed base, (b) mixins ==="
 refuses Struct && ok "a computed superclass mints no edge: the tree indexes no Struct, so --lego=Struct refuses (floor (a), stated)" \
@@ -349,8 +350,8 @@ then
 fi
 if runq LH "$FIX" --no-cache --lego=Helper
 then
-    echo "$LH" | grep -q '<impl n="Mixed"' && no "include Helper minted an inheritance edge — that is a later round, and it moves the CHA fan-out: say so HERE, in captureBases' header and in CHANGELOG.md (floor (b))" \
-        || ok "include Helper is not an inheritance edge (floor (b), stated)"
+    echo "$LH" | grep -q '<impl n="Mixed"' && no "include Helper listed Mixed as a --lego implementor — a module's implementor row is its own decision: say so HERE, in captureRubyMixinBases' header and in CHANGELOG.md (floor (b))" \
+        || ok "include Helper is no --lego implementor row (floor (b), stated): the mixin is an ancestor for calls only"
 fi
 CM="$( rowOf 'n="call_mixin" ' )"
 echo "$CM" | grep -q '<c n="helped"' && ok "…and Mixed.new.helped still edges the one helped def through the name ladder (a floor deletes nothing)" \
@@ -404,18 +405,33 @@ fi
 notLists Parent Built2 "Built2 = Class.new( Parent ) is a constant assignment whose value is a call — no class open, no edge (floor (d), stated)"
 notLists Parent Blocky "Blocky = Class.new( Parent ) do … end is the same assignment with a block (floor (d), stated)"
 
-echo "=== floor (c): the base WALK — an out-of-tree base walks nowhere; a same-named in-tree base still shares the probe ==="
+echo "=== floor (c): the base WALK — an out-of-tree base walks nowhere; a call on a class walks fully-qualified constants ==="
 CO="$( rowOf 'n="call_out_of_tree_base" ' )"
-[ "$( edgesTo "$CO" make )" -eq 2 ] \
-    && ok "Rec.make is an honest 2-way split (Space::Base.make, Unrelated.make): ActiveRecord::Base is not Space::Base, so the walk no longer pins it" \
-    || no "Rec.make produced $( edgesTo "$CO" make ) make edges (want 2 — the out-of-tree base must not walk into Space::Base): $CO"
+# since parser version 137 a call on a class reads the class object's lookup (test/rubyclassrecvcheck.sh): Rec's leaves the
+# tree at ActiveRecord::Base, so the call is refused as external — once an honest split over Space::Base.make and Unrelated.make
+# An absence arm must fail on a missing row: an empty rowOf counts zero edges, which alone would read as a PASS.
+if [ -z "$CO" ]
+then
+    no "the call_out_of_tree_base row is missing from the map — the zero-edge check below would pass on nothing"
+elif [ "$( edgesTo "$CO" make )" -eq 0 ]
+then
+    ok "Rec.make has no edge: ActiveRecord::Base is not Space::Base, so the walk no longer pins it, and the lookup leaves the tree"
+else
+    no "Rec.make produced $( edgesTo "$CO" make ) make edges (want 0 — the out-of-tree base must not walk into Space::Base, nor the call reach a namesake): $CO"
+fi
 CA="$( rowOf 'n="call_alpha" ' )"
 [ "$( edgesTo "$CA" alpha_make )" -eq 1 ] && ok "UsesAlpha.alpha_make → exactly one edge (the walk reaches Alpha::Base)" \
     || no "UsesAlpha.alpha_make produced $( edgesTo "$CA" alpha_make ) edges: $CA"
 CB="$( rowOf 'n="call_beta_through_alpha" ' )"
-[ "$( edgesTo "$CB" beta_make )" -eq 1 ] \
-    && ok "UsesAlpha.beta_make still pins Beta::Base#beta_make — the walk's method probe is keyed Base::beta_make by the IMMEDIATE scope (floor (c), stated)" \
-    || no "UsesAlpha.beta_make produced $( edgesTo "$CB" beta_make ) edges: if the walk's probe is now scoped, invert this arm and say so in the header and CHANGELOG.md (floor (c))"
+if [ -z "$CB" ]
+then
+    no "the call_beta_through_alpha row is missing from the map — the zero-edge check below would pass on nothing"
+elif [ "$( edgesTo "$CB" beta_make )" -eq 0 ]
+then
+    ok "UsesAlpha.beta_make has no edge — a call on a class walks fully-qualified constants (parser version 137), and Alpha::Base defines no beta_make"
+else
+    no "UsesAlpha.beta_make produced $( edgesTo "$CB" beta_make ) edges: Beta::Base#beta_make is no method of UsesAlpha < Alpha::Base"
+fi
 
 echo "=== determinism, warm == cold, and --deps is untouched ==="
 "$BIN" "$FIX" --no-cache >"$DIR/b.xml" 2>/dev/null
@@ -442,12 +458,21 @@ then
         || ok "mutation: Child is no longer an implementor of Parent"
 fi
 MQ="$( "$BIN" "$MUT" --no-cache 2>/dev/null | sed 's/></>\n</g' | awk '/n="call_inherited" /{f=1;print;next} /^<s /{f=0} f' )"
-[ "$( echo "$MQ" | grep -c '<c n="build"' )" -eq 2 ] \
-    && ok "mutation: Child.build is an honest 2-way split again — the pin was the inheritance edge and nothing else" \
-    || no "mutation: Child.build produced $( echo "$MQ" | grep -c '<c n="build"' ) build edges with no base clause: $MQ"
+# with no base clause Child's lookup defines no build, so the call on the class is refused as external (parser version 137,
+# test/rubyclassrecvcheck.sh) — the pin was the inheritance edge and nothing else
+if [ "$( echo "$MQ" | grep -c '<c n="build"' )" -eq 0 ]
+then
+    ok "mutation: Child.build has no edge — the pin was the inheritance edge and nothing else"
+else
+    no "mutation: Child.build produced $( echo "$MQ" | grep -c '<c n="build"' ) build edges with no base clause: $MQ"
+fi
 MCU="$( "$BIN" "$MUT" --no-cache --callers=Unrelated::build 2>/dev/null )"
-echo "$MCU" | grep -q 'n="call_inherited"' && ok "mutation: …and Unrelated::build is back among its callers" \
-    || no "mutation: Unrelated::build does not list call_inherited: $( echo "$MCU" | grep -o '<callers[^>]*' )"
+if echo "$MCU" | grep -q 'n="call_inherited"'
+then
+    no "mutation: Unrelated::build lists call_inherited — a class whose lookup leaves the tree bound to a namesake"
+else
+    ok "mutation: …and Unrelated::build is not among its callers either"
+fi
 
 echo "=== #325 disclosure: a base left on the final-segment rule is counted as ruby_bases_unscoped= ==="
 # resolve.h's fallback — an inherit reference with no superclass directive at its class open keeps the byName rule —
@@ -460,8 +485,12 @@ then
         && no "absence: --lego=Parent carries ruby_bases_unscoped= on a tree where every Ruby base was scoped" \
         || ok "absence: no ruby_bases_unscoped= on --lego=Parent when every Ruby base was scoped (absent at zero)"
 fi
-# The expected count: every `class X < Const` in the fixture (a computed superclass mints no inherit reference).
-WANT="$( cat "$FIX"/*.rb | grep -cE '^[[:space:]]*class [A-Z][A-Za-z0-9_:]* < (::)?[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*[[:space:]]*(;|#|$)' )"
+# The expected count: every `class X < Const` in the fixture (a computed superclass mints no inherit reference) and,
+# since parser version 131, every constant of a class-body `include`/`extend`/`prepend` — a mixin is an ancestor too
+# (ingest_relations.h captureRubyMixinBases), so the seam drops its directive from the join as well.
+SUPERS="$( cat "$FIX"/*.rb | grep -cE '^[[:space:]]*class [A-Z][A-Za-z0-9_:]* < (::)?[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*[[:space:]]*(;|#|$)' )"
+MIXINS="$( cat "$FIX"/*.rb | grep -E '^[[:space:]]+(include|extend|prepend) ' | grep -oE '(::)?[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*' | grep -c . )"
+WANT=$(( SUPERS + MIXINS ))
 if RIPWIRE_TEST_RUBY_BASE_UNSCOPED=1 runq SEAMED "$FIX" --no-cache --lego=Parent --legend=full
 then
     echo "$SEAMED" | grep -q " ruby_bases_unscoped=\"$WANT\"" \

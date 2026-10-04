@@ -208,7 +208,7 @@ inline IncludeLang includeLangOf( std::string_view path ) noexcept
         // never a basename fallback); none is deferred, because unlike a Go package path or a C# namespace,
         // each of these four names a FILE by a rule this tool can evaluate without a build system.
         { ".sh",  IncludeLang::Bash },    { ".bash", IncludeLang::Bash },  { ".zsh", IncludeLang::Bash },
-        { ".rb",  IncludeLang::Ruby },
+        { ".rb",  IncludeLang::Ruby },    { ".rake", IncludeLang::Ruby },  { ".jbuilder", IncludeLang::Ruby },
         { ".lua", IncludeLang::Lua },
         { ".ex",  IncludeLang::Elixir },  { ".exs", IncludeLang::Elixir },
         // B6.2: `.cs` has NO entry here — it falls through to IncludeLang::Other below, DEFERRED like
@@ -1576,20 +1576,13 @@ inline std::uint32_t rubyInnermostOpen( const std::vector<RubyOpenRec>& opens, s
     return i;
 }
 
-inline RubyConstantIndex buildRubyConstantIndex( const IngestResult& ing )
+// The constant index of every class/module the tree opens, whether or not anything names one (buildRubyConstantIndex
+// below is the gated form the resolver reads; graph.h buildRubyTypedReceivers reads this one when that one is empty).
+inline RubyConstantIndex rubyConstantIndexOf( const IngestResult& ing )
 {
     PROFILE_SCOPE_DESCRIBE( "resolve/ruby: constant index" );
     RubyConstantIndex ix;
-    bool anySymbolic = false;
-    for( const Include& inc : ing.includes )
-    {
-        if( inc.isSymbolic )
-        {
-            anySymbolic = true;
-            break;
-        }
-    }
-    if( !anySymbolic || ing.constOpens.empty() )
+    if( ing.constOpens.empty() )
     {
         return ix;
     }
@@ -1706,6 +1699,13 @@ inline RubyConstantIndex buildRubyConstantIndex( const IngestResult& ing )
     return ix;
 }
 
+// The constant index the resolver reads: empty unless a symbolic directive exists (a tree that names no constant needs none).
+inline RubyConstantIndex buildRubyConstantIndex( const IngestResult& ing )
+{
+    const bool anySymbolic = std::any_of( ing.includes.begin(), ing.includes.end(), []( const Include& inc ) noexcept { return inc.isSymbolic; } );
+    return anySymbolic ? rubyConstantIndexOf( ing ) : RubyConstantIndex {};
+}
+
 // Resolve one symbolic Ruby directive to its (offset, count) run in `ix.files` — {0,0} when nothing in the
 // tree defines it. `memo` is keyed by (the WHOLE nesting chain, written target): two sites with the same
 // Module.nesting and spelling — the whole of a Rails controller's `include`s, every model's `< ApplicationRecord`
@@ -1812,6 +1812,8 @@ struct RubyBaseScope
     HashMap<std::uint32_t, std::string>           baseFqn;       // reference index → resolved base constant (EMPTY
                                                                  // when the tree opens no such constant); find-only
     HashMap<std::string, rw::SmallVec<NodeId, 2>> classesByFqn;  // constant → the Ruby symbols whose own open it is
+    std::vector<char>                             mixinRefs;     // per reference: 1 ⇒ read off an include/extend/prepend
+                                                                 // (parser version 131); empty when the tree has none
 
     // nullptr: not a scoped Ruby base — the byName rule stands. Otherwise the resolved constant (empty = none).
     const std::string* resolvedBase( std::size_t refIdx ) const noexcept
@@ -1928,6 +1930,105 @@ inline bool rubyBaseUnscopedTestSeam() noexcept
     return on;
 }
 
+// One symbolic directive's site: its byte and its constant as written.
+struct RubyDirectiveSite
+{
+    std::uint32_t      byte   = 0;
+    const std::string* target = nullptr;
+};
+
+// Every symbolic directive that is not a value use, per file in byte order — the records a MIXIN reference is joined to
+// (parser version 131: ingest_relations.h captureRubyMixinBases puts the reference at its constant, the directive sits at
+// its `include` call). Stable, so two constants of one `include A, B` keep their source order at their shared byte.
+inline std::vector<std::vector<RubyDirectiveSite>> rubyDirectiveSitesByFile( const IngestResult& ing, const RubyConstantIndex& ix )
+{
+    std::vector<std::vector<RubyDirectiveSite>> byFile( ix.opensByFile.size() );
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.isSymbolic && !inc.isValueUse && inc.fileId < byFile.size() )
+        {
+            byFile[ inc.fileId ].push_back( { inc.byte, &inc.target } );
+        }
+    }
+    for( std::vector<RubyDirectiveSite>& v : byFile )
+    {
+        std::stable_sort( v.begin(), v.end(), []( const RubyDirectiveSite& a, const RubyDirectiveSite& b ) noexcept { return a.byte < b.byte; } );
+    }
+    return byFile;
+}
+
+// The mixin directive a Ruby inherit reference at `r` was read off, or nullptr when it is no mixin (a superclass): the
+// nearest directive at or before the reference, strictly inside the same open `derived` (a superclass's directive sits AT
+// the open's own start byte, so the strict bound leaves it out), whose constant ends in the reference's name.
+inline const std::string* rubyMixinDirectiveOf( const std::vector<RubyDirectiveSite>& sites, const std::vector<RubyOpenRec>& opens,
+                                                std::uint32_t derived, const Reference& r ) noexcept
+{
+    auto it = std::upper_bound( sites.begin(), sites.end(), r.startByte,
+                                []( std::uint32_t b, const RubyDirectiveSite& s ) noexcept { return b < s.byte; } );
+    while( it != sites.begin() )
+    {
+        --it;
+        if( it->byte <= opens[ derived ].startByte )
+        {
+            return nullptr;
+        }
+        const std::string_view w   = *it->target;
+        const std::size_t      cut = w.rfind( "::" );
+        if( rubyInnermostOpen( opens, it->byte ) == derived && ( cut == std::string_view::npos ? w : w.substr( cut + 2 ) ) == r.calleeName )
+        {
+            return it->target;
+        }
+    }
+    return nullptr;
+}
+
+// Ruby's lookup of a MIXIN's constant: an `include M` in a class body is evaluated INSIDE the class, so the class's own
+// scope is searched first (`Outer::M` for `class Outer; include M`), then the enclosing nesting and the top level
+// exactly as a superclass's (rubyResolveBaseConstant).
+inline std::string rubyResolveMixinConstant( const HashMap<std::string, char>& opened, const std::vector<RubyOpenRec>& opens,
+                                             std::uint32_t derived, std::string_view written )
+{
+    if( !rubyConstIsAbsolute( written ) )
+    {
+        std::string inside = opens[ derived ].fqn;
+        inside += "::";
+        inside += written;
+        if( opened.find( inside ) != opened.end() )
+        {
+            return inside;
+        }
+    }
+    return rubyResolveBaseConstant( opened, opens, derived, written );
+}
+
+// The mixin half of the join (parser version 131), run before the superclass half below: each Ruby inherit reference read
+// off an `include`/`extend`/`prepend` gets its constant from rubyResolveMixinConstant. The superclass half then skips the
+// references this one scoped. The test seam leaves every reference to the superclass half, which discloses it.
+inline void rubyScopeMixinReferences( RubyBaseScope& sc, const IngestResult& ing )
+{
+    if( rubyBaseUnscopedTestSeam() )
+    {
+        return;
+    }
+    const std::vector<std::vector<RubyDirectiveSite>> sites = rubyDirectiveSitesByFile( ing, sc.ix );
+    for( std::size_t i = 0; i < ing.references.size(); ++i )
+    {
+        const Reference& r = ing.references[ i ];
+        if( !r.isInherit || r.lang != Lang::Ruby || r.fileId >= sc.ix.opensByFile.size() )
+        {
+            continue;
+        }
+        const std::vector<RubyOpenRec>& opens   = sc.ix.opensByFile[ r.fileId ];
+        const std::uint32_t             derived = rubyInnermostOpen( opens, r.startByte );
+        if( const std::string* mixin = ( derived == kNoFile ) ? nullptr : rubyMixinDirectiveOf( sites[ r.fileId ], opens, derived, r ) )
+        {
+            sc.baseFqn.emplace( std::uint32_t( i ), rubyResolveMixinConstant( sc.opened, opens, derived, *mixin ) );
+            sc.mixinRefs.resize( ing.references.size(), 0 );   // sized once, on the first mixin
+            sc.mixinRefs[ i ] = 1;
+        }
+    }
+}
+
 // Joins each Ruby inherit reference to the superclass directive at its derived class's open and records the
 // resolved base constant in `sc.baseFqn`. A reference the join cannot place is left out — the byName rule stands.
 inline void rubyScopeBaseReferences( RubyBaseScope& sc, const IngestResult& ing )
@@ -1939,6 +2040,10 @@ inline void rubyScopeBaseReferences( RubyBaseScope& sc, const IngestResult& ing 
         if( !r.isInherit || r.lang != Lang::Ruby || r.fileId >= sc.ix.opensByFile.size() )
         {
             continue;
+        }
+        if( sc.baseFqn.find( std::uint32_t( i ) ) != sc.baseFqn.end() )
+        {
+            continue;   // a mixin, scoped by rubyScopeMixinReferences
         }
         const std::vector<RubyOpenRec>& opens   = sc.ix.opensByFile[ r.fileId ];
         const std::uint32_t             derived = rubyInnermostOpen( opens, r.startByte );
@@ -1978,6 +2083,7 @@ inline RubyBaseScope buildRubyBaseScope( const IngestResult& ing )
             sc.classesByFqn[ *fqn ].push_back( s.id );   // ids ascending → each list is in id order
         }
     }
+    rubyScopeMixinReferences( sc, ing );   // parser version 131: mixins first, then the superclass half skips them
     rubyScopeBaseReferences( sc, ing );
     return sc;
 }
@@ -6080,8 +6186,9 @@ struct Narrower
 
         const bool isThisSelf = ( r.recv == RecvKind::ThisObj );
         // Ruby rides the bare arm too: a receiver-less `m(args)` inside a method is an implicit-self send —
-        // the language has no other reading of it (a bare `m` with neither receiver nor parens is a local
-        // read and is never captured; queries/ruby/tags.scm). test/rubyscopecheck.sh, Rule 1 arms.
+        // the language has no other reading of it — and so is a bare `m` with neither receiver nor parens
+        // wherever Ruby's lexical rule says it is no local (ingest_binds.h captureRubyBareCalls, parser
+        // version 130). test/rubyscopecheck.sh, Rule 1 arms; test/rubybarecallcheck.sh.
         const bool isCish      = ( r.lang == Lang::Cpp || r.lang == Lang::ObjC || r.lang == Lang::Ruby );
         const bool bareCish    = isCish && ( r.recv == RecvKind::None );   // C++ unqualified member-or-namespace lookup; Ruby implicit self
         if( !isThisSelf && !bareCish )
