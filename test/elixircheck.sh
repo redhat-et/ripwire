@@ -118,6 +118,43 @@ def declined(path):
 assert declined(sys.argv[1]) >= declined(sys.argv[2]) + 4, (declined(sys.argv[1]), declined(sys.argv[2]))
 print('  PASS four inert call sites move declined accounting by four')
 PYINERTCOUNT
+# quote options control whether unquote is a live hole (Kernel.SpecialForms.quote/2).
+mkdir "$TMP/quote-options"
+cat > "$TMP/quote-options/options.ex" <<'EXOPTIONS'
+defmodule QuoteOptions do
+  def bar(x), do: x
+  def splice(x), do: [x]
+  def bound(x) do
+    quote bind_quoted: [x: x] do
+      unquote(bar(x))
+      [unquote_splicing(splice(x))]
+    end
+  end
+  def disabled(x) do
+    quote unquote: false, do: unquote(bar(x))
+  end
+  def enabled(x) do
+    quote bind_quoted: [x: x], unquote: true do
+      unquote(bar(x))
+    end
+  end
+end
+EXOPTIONS
+"$BIN" "$TMP/quote-options" --no-cache > "$TMP/options.xml"
+python3 - "$TMP/options.xml" <<'PYOPTIONS'
+import sys, xml.etree.ElementTree as ET
+syms = {s.get('n'): s for s in ET.parse(sys.argv[1]).iter('s')}
+def calls(name): return {c.get('n') for c in syms[name].iter('c')}
+assert not calls('bound/1'), 'bind_quoted incorrectly activates unquote/splicing'
+assert not calls('disabled/1'), 'unquote: false incorrectly activates unquote'
+assert calls('enabled/1') == {'bar/1'}, 'explicit unquote: true failed to restore the live hole'
+print('  PASS disabled unquote, bind_quoted default, and explicit re-enable')
+PYOPTIONS
+for n in a b c; do "$BIN" "$TMP/inert" > "$TMP/inert-$n.xml"; done
+cmp "$TMP/inert.xml" "$TMP/inert-a.xml"
+cmp "$TMP/inert-a.xml" "$TMP/inert-b.xml"
+cmp "$TMP/inert-b.xml" "$TMP/inert-c.xml"
+echo '  PASS inert count and live edges survive cold/warm round trips'
 for n in a b c; do "$BIN" "$TMP/fix" > "$TMP/$n.xml"; done
 cmp "$TMP/map.xml" "$TMP/a.xml"
 cmp "$TMP/a.xml" "$TMP/b.xml"
