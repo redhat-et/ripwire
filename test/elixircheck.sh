@@ -222,6 +222,20 @@ defmodule QuoteOptions do
       unquote(bar(x))
     end
   end
+  def nested_inert(x) do
+    quote do
+      quote do
+        unquote(bar(x))
+      end
+    end
+  end
+  def nested_disabled(x) do
+    quote unquote: false do
+      unquote(quote do
+        unquote(bar(x))
+      end)
+    end
+  end
 end
 EXOPTIONS
 "$BIN" "$TMP/quote-options" --no-cache > "$TMP/options.xml"
@@ -232,6 +246,8 @@ def calls(name): return {c.get('n') for c in syms[name].iter('c')}
 assert not calls('bound/1'), 'bind_quoted incorrectly activates unquote/splicing'
 assert not calls('disabled/1'), 'unquote: false incorrectly activates unquote'
 assert calls('enabled/1') == {'bar/1'}, 'explicit unquote: true failed to restore the live hole'
+assert not calls('nested_inert/1'), 'unquote in an inert nested quote became live'
+assert not calls('nested_disabled/1'), 'disabled outer hole evaluated its nested quote'
 print('  PASS disabled unquote, bind_quoted default, and explicit re-enable')
 PYOPTIONS
 for n in a b c; do "$BIN" "$TMP/inert" > "$TMP/inert-$n.xml"; done
