@@ -151,6 +151,8 @@ bool elixirMetadataAttribute( std::string_view name ) noexcept
     return elixirTypedAttribute( name ) || std::find( std::begin( metadata ), std::end( metadata ), name ) != std::end( metadata );
 }
 
+bool elixirLiveHole( TSNode hole, TSNode site, std::string_view src ) noexcept;
+
 /// Decide whether a candidate definition or call capture represents supported executable Elixir syntax.
 /// role and name are non-null query captures into src. Reject quoted and dynamic syntax and metadata
 /// references; retain executable defaults and attributes while excluding declaration heads and patterns.
@@ -161,6 +163,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     // so quoted definition heads and special forms never inflate declined=.
     for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
+        if( elixirLiveHole( parent, role, src ) ) { break; } // outer quoted declarations do not constrain the evaluated argument
         if( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src  ) == "@" )
         {
             if( elixirMetadataAttribute( elixirAttribute( parent, src ) )
@@ -223,6 +226,7 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
     bool inDefault = false;
     for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
+        if( elixirLiveHole( parent, role, src ) ) { break; } // outer quoted declarations do not constrain the evaluated argument
         if( std::strcmp( ts_node_type( parent ), "binary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src ) == "\\\\" )
         {
             const TSNode value = fieldChild( parent, NodeField::Right );
@@ -303,8 +307,10 @@ std::uint32_t elixirVisibilityEnd( TSNode scope, std::string_view src ) noexcept
 // An unquote belongs to its nearest quote body. bind_quoted disables holes by
 // default; an explicit literal unquote option takes precedence. Unknown options
 // cannot prove a live hole, so retain the inert call candidate instead.
-bool elixirLiveHole( TSNode hole, std::string_view src ) noexcept
+bool elixirLiveHole( TSNode hole, TSNode site, std::string_view src ) noexcept
 {
+    const auto target = elixirTarget( hole, src );
+    if( ( target != "unquote" && target != "unquote_splicing" ) || !elixirContains( elixirFirstArgument( hole ), site ) ) { return false; }
     for( TSNode parent = ts_node_parent( hole ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
         if( elixirTarget( parent, src ) != "quote" || !elixirContains( elixirBody( parent, src ), hole ) )
@@ -326,7 +332,7 @@ bool elixirInert( TSNode node, std::string_view src ) noexcept
     return inInertRegion( node, [ & ]( TSNode ancestor, TSNode site ) noexcept
     {
         const auto target = elixirTarget( ancestor, src );
-        if( ( target == "unquote" || target == "unquote_splicing" ) && elixirContains( elixirFirstArgument( ancestor ), site ) && elixirLiveHole( ancestor, src ) )
+        if( elixirLiveHole( ancestor, site, src ) )
         {
             return InertBoundary::Live;
         }
@@ -521,6 +527,7 @@ struct ElixirContext
     {
         for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
         {
+            if( elixirLiveHole( p, node, src ) ) { return {}; } // patterns outside the live hole are inert syntax
             if( elixirNodeIs( p, "unary_operator" ) && nodeFieldText( p, NodeField::Operator, src  ) == "^" ) { return {}; }
             if( elixirFunctionKeyword( elixirTarget( p, src ) ) )
             {

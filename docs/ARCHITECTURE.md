@@ -171,7 +171,8 @@ candidates inside a `quote` body mint no edges and are counted in the map's `dec
 `unquote_splicing(...)` are live when enabled, as are expressions in `bind_quoted:` options.
 `bind_quoted` disables unquoting by default; explicit `unquote: true` re-enables it and
 `unquote: false` keeps its argument inert. Nonliteral unquote options cannot prove a live hole.
-Nested quotes become inert again inside a live hole. `use` records the
+Nested quotes become inert again inside a live hole. Quoted declaration heads and metadata
+do not suppress evaluated hole arguments; bound variables in those arguments remain variables. `use` records the
 dependency, but does not execute `__using__`; framework DSLs and generated Phoenix/Ecto functions
 therefore need an explicit source definition to appear. A call that only an injected import could
 answer has no lexical candidate: no edge is minted from a same-named function elsewhere, and the call
