@@ -1909,6 +1909,25 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             {
                 continue;
             }
+            if( le.lang == Lang::Elixir && elixirInert( roleNode, src ) )
+            {
+                // Keep ordinary call candidates as declined facts, never edges. Definition heads and
+                // special forms have already failed elixirKeepCapture; bare names require lexical
+                // classification and are not counted as calls merely because they are identifiers.
+                if( isRef && refCapSv == "reference.call" )
+                {
+                    RawRef r;
+                    r.fileId    = fileId;
+                    r.startByte = ts_node_start_byte( roleNode );
+                    r.line      = nameRow + 1;
+                    r.lang      = Lang::Elixir;
+                    r.role      = RefRole::Inert;
+                    const auto [ count, known ] = elixirCallArity( roleNode, nameNode, src );
+                    r.name = known ? elixirFunctionName( nameTxt, count ) : std::string( nameTxt );
+                    refs.push_back( std::move( r ) );
+                }
+                continue;
+            }
             if( le.lang == Lang::Elixir && refCapSv == "reference.bare" )
             {
                 // Bare pipe targets have their own capture; every other bare name needs lexical variable exclusion.

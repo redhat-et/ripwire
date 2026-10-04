@@ -370,16 +370,18 @@ inline bool isJsTsBuiltinMember( std::string_view ctor, std::string_view name ) 
 //             function value. name = the container, fieldName = the written callee, composeRel = the key,
 //             qualifier = p|l|f, argCount = the parameter index. Joined to Value rows only (called_by=/through=, a
 //             may-call clue); never a use site, never in the CSR.
-enum class RefRole : std::uint8_t { Call, Read, Write, Import, Extends, Macro, Type, Value, Through };
+//   Inert   — an ordinary Elixir call candidate inside quote's AST body, outside an unquote live hole.
+//             It remains a site for declined/report accounting, but can never bind or mint a call edge.
+enum class RefRole : std::uint8_t { Call, Read, Write, Import, Extends, Macro, Type, Value, Through, Inert };
 // The number of RefRole enumerators — the bound readRef validates a cached role byte against (see kSymKindCount).
-inline constexpr std::size_t kRefRoleCount = static_cast<std::size_t>( RefRole::Through ) + 1;
+inline constexpr std::size_t kRefRoleCount = static_cast<std::size_t>( RefRole::Inert ) + 1;
 static_assert( enumCountIsExact<RefRole, kRefRoleCount>(), "kRefRoleCount must name the LAST RefRole enumerator — move it with the append" );
 static_assert( sizeof( RefRole ) == 1, "RefRole must be a single byte (SoA-friendly, smallest int that fits)" );
 
 // the terse `role=` attribute string for the use-site index — a declarative table indexed by the enum, in enum
 // order. The static_assert is the guard a switch's -Werror=switch used to be: a NEW role without a spelling is a
 // build error, never a silent fallback.
-inline constexpr const char* kRefRoleTagTable[] = { "call", "read", "write", "import", "extends", "macro", "type", "value", "through" };
+inline constexpr const char* kRefRoleTagTable[] = { "call", "read", "write", "import", "extends", "macro", "type", "value", "through", "inert" };
 static_assert( std::size( kRefRoleTagTable ) == kRefRoleCount, "kRefRoleTagTable: one spelling per RefRole, in enum order" );
 inline const char* refRoleTag( RefRole r ) noexcept
 {

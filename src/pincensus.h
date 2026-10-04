@@ -115,10 +115,9 @@ enum class CallDisposition : std::uint8_t
     OtherRoot         = 5,   // multi-root only: every compatible definition lives in ANOTHER root and no include/import
                              // reaches it — external to this root, which is what that root's solo run would say
     QualifiedExternal = 6,   // a Rust `Scope::name()` call no in-repo member of `Scope` can answer (the H4 W3 guard)
-    Declined          = 7,   // tier 3: two or more same-language candidates, none in the caller's file or directory, none
-                             // pinned by a qualifier or a receiver rule; or the builtin-method name gate (graph.h
-                             // BuiltinMethodGate) admitted none of a builtin-type method name's candidates — header
-                             // declined=, answers' declined_calls=
+    Declined          = 7,   // tier 3: ambiguous calls with no safe binding; builtin-method name gate refusals; or
+                             // inert quoted call candidates. No edge; all count in header declined=. An inert site
+                             // contributes to its caller's declinedOut, but names no possible target list.
     FileScope         = 8,   // a call outside every symbol with no caller node to hang an edge on. Since issue #60
                              // ingest_model.h mintModuleScopeOwners gives every such call a module-scope owner over
                              // exactly isResolvableCallReference's population below, so on a code corpus this bucket
@@ -147,7 +146,7 @@ static_assert( std::string_view( kCallDispositionNames[ std::size_t( CallDisposi
 // re-derivation, so the two cannot disagree about what a call is — only about what happened to one.
 inline bool isResolvableCallReference( const Reference& r ) noexcept
 {
-    return !r.isInherit && !r.isDocLink && !r.isCompose && ( r.role == RefRole::Call || r.role == RefRole::Macro );
+    return !r.isInherit && !r.isDocLink && !r.isCompose && ( r.role == RefRole::Call || r.role == RefRole::Macro || r.role == RefRole::Inert );
 }
 
 // Per-row provenance bits — every narrowing stage that FIRED on this site, not just the deciding one. A

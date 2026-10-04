@@ -156,13 +156,11 @@ bool elixirMetadataAttribute( std::string_view name ) noexcept
 /// references; retain executable defaults and attributes while excluding declaration heads and patterns.
 bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std::string_view src ) noexcept
 {
-    // Quoted syntax and module attributes (notably @spec/@type) are not runtime call sites.
+    // Module attributes (notably @spec/@type) are not runtime call sites.
+    // The shared inert-region decision runs after this capture's other syntax filters,
+    // so quoted definition heads and special forms never inflate declined=.
     for( TSNode parent = ts_node_parent( role ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
     {
-        if( elixirTarget( parent, src ) == "quote" )
-        {
-            return false;
-        }
         if( std::strcmp( ts_node_type( parent ), "unary_operator" ) == 0 && nodeFieldText( parent, NodeField::Operator, src  ) == "@" )
         {
             if( elixirMetadataAttribute( elixirAttribute( parent, src ) )
@@ -215,8 +213,9 @@ bool elixirKeepCapture( TSNode role, TSNode name, bool isDef, SymKind kind, std:
         }
     }
     constexpr std::string_view special[] = { "defimpl", "defstruct", "defexception", "defoverridable", "alias", "import", "require", "use",
-                                            "quote", "unquote", "unquote_splicing", "case", "cond", "for", "if", "unless", "with", "receive", "try" };
+                                            "unquote", "unquote_splicing", "case", "cond", "for", "if", "unless", "with", "receive", "try" };
     if( elixirFunctionKeyword( target ) || elixirModuleKeyword( target )
+        || ( target == "quote" && !ts_node_is_null( elixirBody( role, src ) ) )
         || std::find( std::begin( special ), std::end( special ), target ) != std::end( special ) )
     {
         return false;
@@ -301,13 +300,21 @@ std::uint32_t elixirVisibilityEnd( TSNode scope, std::string_view src ) noexcept
     return end;
 }
 
-bool elixirQuoted( TSNode node, std::string_view src ) noexcept
+bool elixirInert( TSNode node, std::string_view src ) noexcept
 {
-    for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    return inInertRegion( node, [ & ]( TSNode ancestor, TSNode site ) noexcept
     {
-        if( elixirTarget( p, src ) == "quote" ) { return true; }
-    }
-    return false;
+        const auto target = elixirTarget( ancestor, src );
+        if( ( target == "unquote" || target == "unquote_splicing" ) && elixirContains( elixirFirstArgument( ancestor ), site ) )
+        {
+            return InertBoundary::Live;
+        }
+        if( target == "quote" && elixirContains( elixirBody( ancestor, src ), site ) )
+        {
+            return InertBoundary::Inert;
+        }
+        return InertBoundary::None;
+    } );
 }
 
 std::string elixirFunctionName( std::string_view name, std::uint32_t arity )
@@ -590,8 +597,8 @@ struct ElixirContext
                 std::uint32_t size = 0;
                 const char* name = ts_query_capture_name_for_id( query, capture.index, &size );
                 const std::string_view label( name, size );
-                if( label == "elixir.context" && !elixirQuoted( capture.node, src ) ) { calls.push_back( capture.node ); }
-                if( label == "reference.bare" && !elixirQuoted( capture.node, src ) ) { identifiers.push_back( capture.node ); }
+                if( label == "elixir.context" && !elixirInert( capture.node, src ) ) { calls.push_back( capture.node ); }
+                if( label == "reference.bare" && !elixirInert( capture.node, src ) ) { identifiers.push_back( capture.node ); }
             }
         }
         std::sort( calls.begin(), calls.end(), []( TSNode a, TSNode b ) { return ts_node_start_byte( a ) < ts_node_start_byte( b ); } );

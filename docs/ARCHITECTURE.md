@@ -165,7 +165,11 @@ metadata do not become executable calls. Alias/import/require/use and behaviour 
 module dependencies resolved through declared module identities, regardless of umbrella/file layout.
 `@behaviour` and `defimpl` supply contract/implementation relationships for `--uses` and `--lego`.
 
-**Static limits:** quoted AST and macro-generated definitions are not expanded. `use` records the
+**Static limits:** quoted AST and macro-generated definitions are not expanded. Ordinary call
+candidates inside a `quote` body mint no edges and are counted in the map's `declined=` gauge;
+`--callees` counts those sites on their enclosing function. Calls inside `unquote(...)` and
+`unquote_splicing(...)` are live, as are expressions in `bind_quoted:` options. Nested quotes
+become inert again inside a live hole. `use` records the
 dependency, but does not execute `__using__`; framework DSLs and generated Phoenix/Ecto functions
 therefore need an explicit source definition to appear. A call that only an injected import could
 answer has no lexical candidate: no edge is minted from a same-named function elsewhere, and the call
@@ -196,9 +200,7 @@ that function — the underscore rule is for unused variables, and a bare `_seed
 (`src/ingest_elixir.h`); and a call that omits a defaulted argument reaches the bodyless head that
 evaluates the default beside the clauses, so `--path` and `--impact` see the default expression's calls
 from that caller, while a call that supplies the argument reaches the clauses alone
-(`src/elixir_resolve.h`). One gap stays open: executable `unquote(...)` and `bind_quoted:` expressions
-under `quote` are omitted with the rest of the quoted-AST filter, so a helper called only from inside
-an `unquote` has no caller edge from its macro.
+(`src/elixir_resolve.h`).
 
 `test/elixircheck.sh`, `test/eliximportcheck.sh` and `test/elixirsemanticcheck.sh` cover extraction,
 metrics, exact target selection against decoys, lexical boundaries, contracts, CLI/MCP use-site parity,

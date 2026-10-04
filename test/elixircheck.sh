@@ -93,6 +93,31 @@ match = re.search(r'\bdeclined=(\d+)\b', data)
 assert match and int(match.group(1)) >= 3, 'inert-region calls vanished from declined accounting'
 print('  PASS inert quote bodies, live holes, near misses, boundaries, and declined count')
 PYINERT
+mkdir "$TMP/inert-control"
+python3 - "$TMP/inert/quoted.ex" "$TMP/inert-control/quoted.ex" <<'PYINERTCONTROL'
+import pathlib, sys
+original = pathlib.Path(sys.argv[1]).read_text()
+lines = original.splitlines(keepends=True)
+mutated = 0
+for i, line in enumerate(lines):
+    if line.strip() in {'inert(x)', 'inert(item)'}:
+        lines[i] = line[:len(line) - len(line.lstrip())] + 'x\n'
+        mutated += 1
+    elif line.strip() == 'foo(unquote(bar(x)))':
+        lines[i] = line.replace('foo(unquote(bar(x)))', 'unquote(bar(x))')
+        mutated += 1
+assert mutated == 4, f'control did not remove all four inert call sites: {mutated}'
+pathlib.Path(sys.argv[2]).write_text(''.join(lines))
+PYINERTCONTROL
+"$BIN" "$TMP/inert-control" --no-cache > "$TMP/inert-control.xml"
+python3 - "$TMP/inert.xml" "$TMP/inert-control.xml" <<'PYINERTCOUNT'
+import re, sys
+def declined(path):
+    match = re.search(r'\bdeclined=(\d+)\b', open(path).read())
+    return int(match.group(1)) if match else 0
+assert declined(sys.argv[1]) >= declined(sys.argv[2]) + 4, (declined(sys.argv[1]), declined(sys.argv[2]))
+print('  PASS four inert call sites move declined accounting by four')
+PYINERTCOUNT
 for n in a b c; do "$BIN" "$TMP/fix" > "$TMP/$n.xml"; done
 cmp "$TMP/map.xml" "$TMP/a.xml"
 cmp "$TMP/a.xml" "$TMP/b.xml"

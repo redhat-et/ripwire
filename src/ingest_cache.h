@@ -302,7 +302,9 @@ constexpr std::uint32_t kCacheVersion = 28;           // 28: FE-A (test/falseedg
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 143;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 145;          // bump on any grammar/.scm/extraction change
+                                                      // 145 = issue #357 lane: Elixir quote live holes and counted inert
+                                                      //   call candidates. 144 is main's rich-family tag; train renumbers.
                                                       // 143 = 2026-10-04 (train 25 review fixes): two extraction changes —
                                                       //   a declaration named like the global object (`var self = this`, a
                                                       //   parameter `window`) is now a JsShadow binding, and a value-reference
