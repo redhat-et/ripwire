@@ -470,6 +470,11 @@ exactproven swift callees Sources/App/Logger.swift:close "fn flush Sources/App/L
 # whichever lands first
 visible   rb callees lib/app/logger.rb:line "stamp lib/app/helpers.rb"
 notproven rb callees lib/app/logger.rb:line "render lib/app/exporter.rb"
+# Ruby's own lookup (RubySelfReach, PR #373) is PROOF: what it proves comes out resolved, never via="name" — a mixin's
+# method, a concern's call to its includer's method, a template method's call to a subclass's hook
+exactproven rb callees lib/app/logger.rb:line "method stamp lib/app/helpers.rb"
+exactproven rb callees lib/app/auditable.rb:log_audit "method audit_target lib/app/order.rb"
+exactproven rb callees lib/app/order.rb:render_report "method header_line lib/app/order.rb"
 exactproven rb callees lib/app/logger.rb:close "method flush lib/app/logger.rb;method reset lib/app/logger.rb;method top_level_note lib/app/notes.rb"
 
 echo "=== (O) graded false callees from an earlier binary (Go, TS, Python repros): red where still present, pinned clean otherwise ==="

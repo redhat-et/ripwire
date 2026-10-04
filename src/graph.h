@@ -3060,6 +3060,25 @@ struct RubySelfReach
         return memo.emplace( self, std::move( reach ) ).first->second;
     }
 
+    // FE-B: does self's lookup PROVE candidate `c` — a class or module the tree defines, in reach, and a reach no
+    // delegator or method_missing opens (an open reach admits everything, which proves nothing)
+    bool proves( const IngestResult& ing, const std::string& self, NodeId c ) const
+    {
+        const Reach& reach = reachOf( self );
+        if( reach.open )
+        {
+            return false;
+        }
+        const auto         q     = qualifiedOwner.find( c );
+        const std::string& owner = q != qualifiedOwner.end() ? q->second : ing.symbols[ c ].scope;
+        if( owner.empty() )
+        {
+            return !reach.external;   // a top-level def: a private method of Object, reached while no outside ancestor answers first
+        }
+        const bool known = q != qualifiedOwner.end() || classNames.find( owner ) != classNames.end();
+        return known && reach.names.find( owner ) != reach.names.end();
+    }
+
     // The candidates of `ids` self's lookup can reach, into `out` (cleared first); true when any was left out. A candidate
     // owned by no Ruby class or module the tree defines is reachable; a top-level def (a private method of Object) only
     // while every ancestor in reach is in the tree — an out-of-tree one (ActionController::Base) is found first by Ruby.
@@ -3195,6 +3214,11 @@ struct RubyTopSelf
         return !call || kind == Kind::None ? nullptr : kind == Kind::Main ? &kMain : &kView;
     }
     static bool owns( const std::string& self ) noexcept { return self == "<main>" || self == "<view>"; }
+    // FE-B: a class's self is RubySelfReach's proof; outside any class nothing is proven (a top-level script's call)
+    bool proves( const std::string& self, NodeId c ) const
+    {
+        return !owns( self ) && reach.proves( ing, self, c );
+    }
 
     // The candidates of `ids` self reaches, into `out` (cleared first); true when any was left out. A class's self is
     // RubySelfReach's to read; for "<main>" and "<view>", a candidate owned by no Ruby class or module the tree defines is
@@ -6019,7 +6043,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 continue;
             }
             nameIds = &rubyReachable;
-            languageLookupProved = true;   // FE-B: Ruby's own lookup decided which candidates are in reach
         }
         if( !scipPinned && !canonical && !narrowed && it != byName.end() )
         {
@@ -6113,7 +6136,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && !canonical && !cand.empty() && rubySelf != nullptr
             && rubyTop.reachableOf( *rubySelf, cand, filtScratch ) )
         {
-            languageLookupProved = true;   // FE-B: Ruby's own lookup decided which candidates are in reach
             cand.swap( filtScratch );
             if( cand.empty() )
             {
@@ -6171,6 +6193,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // candidate to the same rule, because one candidate is not evidence.
         bool nameOnly = false;
         bool nameOnlyAnyFile = false, nameOnlyAnyDir = false;   // which rung the classic ladder would have stopped at (rank weight)
+        // TRIAL (#373): the candidates Ruby's own lookup PROVES are the call's answer, like any other proof
+        if( hedgeEligible && !narrowed && rubySelf != nullptr && !cand.empty() )
+        {
+            provedScratch.clear();
+            for( NodeId c : cand )
+            {
+                if( rubyTop.proves( *rubySelf, c ) )
+                {
+                    provedScratch.push_back( c );
+                }
+            }
+            if( !provedScratch.empty() )
+            {
+                cand.swap( provedScratch );
+                languageLookupProved = true;
+            }
+        }
         if( hedgeEligible && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
         {
             provedScratch.clear();
