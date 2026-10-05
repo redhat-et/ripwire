@@ -3951,7 +3951,7 @@ ripwire 0.6.1 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=f8d4
 </callers>
 `````
 
-## `./build/ripwire . --at=src/graph.h:999999`
+## `./build/ripwire . --at=src/graph.h:999999 --legend=full`
 
 *A seed past the end of the file — the refusal shape for a faulted location.*
 
@@ -3964,7 +3964,7 @@ ripwire 0.6.1 (dev, AppleClang 21.0.0.21000101, emit=std::print, built_from=f8d4
 stderr:
 
 `````
-ripwire: the at flag's seed 'src/graph.h:999999' named no location (./src/graph.h has only 6763 lines — the seed asked for line 999999)
+ripwire: the at flag's seed 'src/graph.h:999999' named no location (./src/graph.h has only 9428 lines — the seed asked for line 999999)
 `````
 
 ## `./build/ripwire . --verify="calls(runDefaultMap, rankGraphTeleport)"`
