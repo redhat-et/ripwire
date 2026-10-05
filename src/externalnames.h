@@ -56,6 +56,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <span>
 #include <string_view>
@@ -196,6 +197,55 @@ static_assert( std::is_sorted( std::begin( kStdInlineNamespaceNames ), std::end(
                "kStdInlineNamespaceNames must be strictly sorted (binary search)" );
 
 
+// ── FE-A: the JS/TS GLOBAL tables (graph.h FalseEdgeRules; gate test/falseedgecheck.sh). A call on a global object
+// (`JSON.stringify( b )`, `Buffer.from( p )`, `crypto.subtle.verify( … )`) or to a global function (`fetch( u )`) reaches
+// the runtime, never an in-repo definition the calling file does not import, declare or shadow — yet the name ladder
+// bound each of them to the lone same-named in-repo function, getter or object property. A name in these tables, used
+// in a file that binds no name of that spelling (no import, require, declaration, parameter or local — the extractor
+// records each as a JsShadow or ModuleAlias binding, ingest_jsimports.h), is a call outside the tree: external=.
+// PROVENANCE — Node 26.9.0, the global object as an ES MODULE sees it (the `node -e` REPL adds every builtin module as
+// a global, so the module form is the honest one), identifier-shaped own property names only:
+//   node --no-warnings m.mjs, m.mjs:
+//     const n=Object.getOwnPropertyNames(globalThis).filter(k=>/^[A-Za-z_][A-Za-z0-9_]*$/.test(k));
+//     console.log(n.filter(k=>typeof globalThis[k]==='function'&&/^[a-z]/.test(k)).sort());            // kJsGlobalFunctionNames
+//     console.log(n.filter(k=>/^[A-Z]/.test(k)&&['function','object'].includes(typeof globalThis[k])).sort(),   // kJsGlobalObjectNames:
+//                 n.filter(k=>/^[a-z]/.test(k)&&typeof globalThis[k]==='object').sort());              //   both lists
+//   kJsGlobalObjectNames takes both lists minus `global` and `globalThis`, which name the global object ITSELF and so
+//   are kJsGlobalAliasNames below, with the browser's `self` and `window`: a call through an alias is external only when
+//   the called name is itself in a global table (`globalThis.fetch( u )`), because a script's own top-level function is
+//   reachable as `window.f()`. A global object name is ALSO a global function when called bare (`Symbol()`, `new URL()`).
+//   Browser-only globals (`document`, `alert`, `requestAnimationFrame`) are not in Node's list: a stated floor.
+inline constexpr std::string_view kJsGlobalObjectNames[] = {
+    "AbortController", "AbortSignal", "AggregateError", "Array", "ArrayBuffer", "AsyncDisposableStack", "Atomics", "BigInt", "BigInt64Array",
+    "BigUint64Array", "Blob", "Boolean", "BroadcastChannel", "Buffer", "ByteLengthQueuingStrategy", "CloseEvent", "CompressionStream",
+    "CountQueuingStrategy", "Crypto", "CryptoKey", "CustomEvent", "DOMException", "DataView", "Date", "DecompressionStream", "DisposableStack",
+    "Error", "ErrorEvent", "EvalError", "Event", "EventTarget", "File", "FinalizationRegistry", "Float16Array", "Float32Array", "Float64Array",
+    "FormData", "Function", "Headers", "Int16Array", "Int32Array", "Int8Array", "Intl", "Iterator", "JSON", "Map", "Math", "MessageChannel",
+    "MessageEvent", "MessagePort", "Navigator", "Number", "Object", "Performance", "PerformanceEntry", "PerformanceMark", "PerformanceMeasure",
+    "PerformanceObserver", "PerformanceObserverEntryList", "PerformanceResourceTiming", "Promise", "Proxy", "QuotaExceededError", "RangeError",
+    "ReadableByteStreamController", "ReadableStream", "ReadableStreamBYOBReader", "ReadableStreamBYOBRequest", "ReadableStreamDefaultController",
+    "ReadableStreamDefaultReader", "ReferenceError", "Reflect", "RegExp", "Request", "Response", "Set", "SharedArrayBuffer", "Storage", "String",
+    "SubtleCrypto", "SuppressedError", "Symbol", "SyntaxError", "TextDecoder", "TextDecoderStream", "TextEncoder", "TextEncoderStream",
+    "TransformStream", "TransformStreamDefaultController", "TypeError", "URIError", "URL", "URLPattern", "URLSearchParams", "Uint16Array",
+    "Uint32Array", "Uint8Array", "Uint8ClampedArray", "WeakMap", "WeakRef", "WeakSet", "WebAssembly", "WebSocket", "WritableStream",
+    "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "crypto", "navigator", "performance", "process", "sessionStorage"
+};
+inline constexpr std::string_view kJsGlobalFunctionNames[] = {
+    "atob", "btoa", "clearImmediate", "clearInterval", "clearTimeout", "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
+    "escape", "eval", "fetch", "isFinite", "isNaN", "parseFloat", "parseInt", "queueMicrotask", "setImmediate", "setInterval", "setTimeout",
+    "structuredClone", "unescape"
+};
+inline constexpr std::string_view kJsGlobalAliasNames[] = { "global", "globalThis", "self", "window" };
+
+// FE-A: Go's predeclared FUNCTIONS (The Go Programming Language Specification, "Predeclared identifiers" — Functions,
+// go1.21+, which added clear/max/min). A bare Go call that no same-package function answers (graph.h FalseEdgeRules —
+// a bare call reaches only its own package) is external= when its name is one of these, and unresolved= otherwise (a
+// local closure the extractor does not record). 18 names, transcribed from the spec's list; sorted.
+inline constexpr std::string_view kGoBuiltinNames[] = {
+    "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max", "min", "new", "panic", "print", "println",
+    "real", "recover"
+};
+
 // ── THE BUILTIN-METHOD TABLES — the member twin of the tables above (graph.h BuiltinMethodGate; gate
 // test/builtinbindcheck.sh). A member call `d.get( k )` whose receiver's type no evidence rule proved is resolved by
 // NAME alone, and when a repository defines exactly one method called `get` that lone definition used to take
@@ -281,6 +331,44 @@ constexpr bool isStrictlySortedTable( std::span<const std::string_view> table ) 
 static_assert( isStrictlySortedTable( kPythonBuiltinMethodNames ), "kPythonBuiltinMethodNames must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kJsBuiltinMethodNames ), "kJsBuiltinMethodNames must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kRubyBuiltinMethodNames ), "kRubyBuiltinMethodNames must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kJsGlobalObjectNames ), "kJsGlobalObjectNames must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kJsGlobalFunctionNames ), "kJsGlobalFunctionNames must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kJsGlobalAliasNames ), "kJsGlobalAliasNames must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kGoBuiltinNames ), "kGoBuiltinNames must be strictly sorted (binary search)" );
+
+// FE-A: which JS/TS global table holds `name` (graph.h FalseEdgeRules, ingest_jsimports.h) — an object (`JSON`; also a
+// constructor when called bare), a function (`fetch`), or a name for the global object itself (`globalThis`).
+enum class JsGlobal : std::uint8_t { None, Object, Function, GlobalObject };
+inline JsGlobal jsGlobalKindOf( std::string_view name ) noexcept
+{
+    const auto holds = [ name ]( std::span<const std::string_view> table ) { return std::ranges::binary_search( table, name, rw::sortutil::svLess ); };
+    if( holds( kJsGlobalObjectNames ) )
+    {
+        return JsGlobal::Object;
+    }
+    if( holds( kJsGlobalFunctionNames ) )
+    {
+        return JsGlobal::Function;
+    }
+    return holds( kJsGlobalAliasNames ) ? JsGlobal::GlobalObject : JsGlobal::None;
+}
+inline bool isJsGlobalName( std::string_view name ) noexcept   // an object or a function: a name a bare call can mean
+{
+    switch( jsGlobalKindOf( name ) )
+    {
+        case JsGlobal::Object:
+        case JsGlobal::Function:
+        {
+            return true;
+        }
+        case JsGlobal::GlobalObject:
+        case JsGlobal::None:
+        {
+            return false;
+        }
+    }
+    return false;
+}
 
 }   // namespace externalnames
 }   // namespace rw

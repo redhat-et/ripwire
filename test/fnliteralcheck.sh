@@ -140,13 +140,15 @@ edge lua init.lua:run    lua_helper init.lua:4 "a non-local Lua nested function 
 edge c a/x.cpp:use_helper helper a/x.cpp:3 "a same-file top-level C++ function, as on main"
 # (g) the scope span rides the ingest cache: a WARM run (cache on, second pass) answers these arms exactly as --no-cache.
 #     A blob from an older format (kCacheVersion 26 held wrong spans for the shapes above) is never read: the format is in
-#     the blob's name and header, and cachefuzzcheck's version_decrement arm proves an N-1 blob is refused.
+#     the blob's name and header, and cachefuzzcheck's version_decrement arm proves an N-1 blob is refused. The fingerprint
+#     carries graph_unresolved= too: since FE-A the shadow shape's parameter call is unresolved (a call through the
+#     parameter), no longer declined between two unrelated methods, so declined_calls= alone would leave it no witness.
 CACHEHOME="$TMP/cachehome"; mkdir -p "$CACHEHOME/xdg" "$CACHEHOME/tmp"
 for q in "c a/x.cpp:use_helper" "php a.php:use_helper" "lua init.lua:run" "import cmd/use.ts:declCaller" "shadow tests/a.test.ts:captureStdout"; do
     set -- $q
-    cold="$( ( cd "$EDGE/$1" && "$BIN" . --callees="$2" --no-cache --legend=compact 2>/dev/null ) | grep -oE '<s t="[^>]*>|declined_calls="[0-9]+"' )"
+    cold="$( ( cd "$EDGE/$1" && "$BIN" . --callees="$2" --no-cache --legend=compact 2>/dev/null ) | grep -oE '<s t="[^>]*>|declined_calls="[0-9]+"|graph_unresolved="[0-9]+"' )"
     for pass in 1 2; do
-        warm="$( ( cd "$EDGE/$1" && XDG_CACHE_HOME="$CACHEHOME/xdg" TMPDIR="$CACHEHOME/tmp" "$BIN" . --callees="$2" --legend=compact 2>/dev/null ) | grep -oE '<s t="[^>]*>|declined_calls="[0-9]+"' )"
+        warm="$( ( cd "$EDGE/$1" && XDG_CACHE_HOME="$CACHEHOME/xdg" TMPDIR="$CACHEHOME/tmp" "$BIN" . --callees="$2" --legend=compact 2>/dev/null ) | grep -oE '<s t="[^>]*>|declined_calls="[0-9]+"|graph_unresolved="[0-9]+"' )"
     done
     if [ -n "$cold" ] && [ "$cold" = "$warm" ]; then ok "$2: warm cache answers as --no-cache"; else no "$2: warm cache differs from --no-cache — cold: $cold / warm: $warm"; fi
 done

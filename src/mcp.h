@@ -1293,9 +1293,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // Same map `analyze` serves (same MEMBERSHIP/ORDER split), a different ranking SIGNAL.
                    "{\"name\":\"rank_by\",\"description\":\"The SAME architecture map 'analyze' serves, ranked by a different signal instead of plain PageRank. rank_by = pagerank (default, omit it — the CLI's own unbiased --rank-by=pagerank; 'analyze' can rank differently on a tree with uncommitted changes, where it biases toward your working set), authority (called by many good hubs — core APIs/utilities), hub (calls many good authorities — entrypoints/orchestrators), or rrf (fuses all three, Reciprocal Rank Fusion). churn and churn-decay are valid CLI --rank-by= values this tool REFUSES for now — they mine git history through a path this server does not build yet; use the CLI (ripwire <dir> --rank-by=churn) until then. The MEMBERSHIP/ORDER split and every other attribute follow the same rule as 'analyze'.\","
                    + mcprefuse::toolMetadataFor( "rank_by", pathIsRequired ) + "},"
-                   "{\"name\":\"find_symbol\",\"description\":\"A symbol's 1-hop neighborhood: the symbol (with a fetch_body handle) plus direct callers (calledBy) and callees (calls). Full transitive reach: 'impact'. Read/write/import sites, not just calls: 'uses'. JSON {symbol, calledBy, calls, defs, count, hop_tested, hop_untested, declined_calls, counts_floor}; both arrays are FLOORS and the payload says why. limit/offset page them. symbol = final name segment (add scope to disambiguate); " + std::string( kAtSeedDocClause ) + "\","
+                   "{\"name\":\"find_symbol\",\"description\":\"A symbol's 1-hop neighborhood: the symbol (with a fetch_body handle) plus direct callers (calledBy) and callees (calls). Full transitive reach: 'impact'. Read/write/import sites, not just calls: 'uses'. JSON {symbol, calledBy, calls, defs, count, hop_tested, hop_untested, declined_calls, counts_floor}; both arrays are FLOORS and the payload says why. valueRefs/valueCallees: value uses (tables, args), not a proven call. limit/offset page them. symbol = final name segment (add scope to disambiguate); " + std::string( kAtSeedDocClause ) + "\","
                    + mcprefuse::toolMetadataFor( "find_symbol", pathIsRequired ) + "},"
-                   "{\"name\":\"find_referencing_symbols\",\"description\":\"Direct (1-hop) callers of a symbol, each with a fetch_body handle. For the full transitive blast radius use 'impact', for read/write/import sites 'uses'. JSON {symbol, calledBy, defs, count, hop_tested, hop_untested, declined_calls, counts_floor}; calledBy is a FLOOR and the payload says why; declined_calls: same-named calls left unbound, not in count. limit/offset page it. " + std::string( kAtSeedShortClause ) + "\","
+                   "{\"name\":\"find_referencing_symbols\",\"description\":\"Direct (1-hop) callers of a symbol, each with a fetch_body handle. For the full transitive blast radius use 'impact', for read/write/import sites 'uses'. JSON {symbol, calledBy, defs, count, hop_tested, hop_untested, declined_calls, counts_floor}; calledBy is a FLOOR and the payload says why; declined_calls: same-named calls left unbound, not in count; valueRefs: value uses (tables, args), not a proven call, not in count. limit/offset page it. " + std::string( kAtSeedShortClause ) + "\","
                    + mcprefuse::toolMetadataFor( "find_referencing_symbols", pathIsRequired ) + "},"
                    // verifier N8: limit/offset are DECLARED here because they are HONORED (mcpPageArgs →
                    // pageWindow, the same trio the CLI --grep applies). This was the only paged CLI verb whose
@@ -2892,7 +2892,8 @@ inline int runMcp( const McpStdioConfig& config )
 {
     // MEASURE-FIRST instrumentation (RIPWIRE_MCP_TIMINGS, off by default → byte-identical + silent server, same
     // discipline as ingest.cpp's RIPWIRE_CACHE_STATS). When set, emit ONE stderr TSV line per handled request:
-    //   ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1>
+    //   ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1> vri=<0|1>
+    // (McpRequestTiming, mcpindex.h, writes it; vri=1: this request built the value-reference index.)
     // stderr only, so the JSON-RPC stdout stream is untouched and every determinism/protocol gate is unaffected.
     // NOTE: the design specified a `--mcp-timings` CLI flag; cli.h/main.cpp are owned by a concurrent agent this
     // round, so we use the env var instead (recorded in bench/PROFILE.md's appendix) — same zero-cost-off contract.
@@ -2922,9 +2923,7 @@ inline int runMcp( const McpStdioConfig& config )
         }
 
         // per-request timing capture (only when the env observable is on — zero clock/atomic work otherwise).
-        const std::chrono::steady_clock::time_point t0 =
-            timingsOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-        const std::uint64_t rebuildAtStart = timingsOn ? mcpRebuildCounter().load( std::memory_order_relaxed ) : 0;
+        const McpRequestTiming timing( timingsOn );
 
         const McpDispatchResult r = dispatchMcpLine( line, config.topK, config.stable, config.noRedact, policy );
         if( r.isNotification )
@@ -2937,17 +2936,8 @@ inline int runMcp( const McpStdioConfig& config )
         std::fflush( stdout );
 
         // MEASURE-FIRST per-request timing line (stderr only, env-gated). Emitted AFTER the protocol response is
-        // flushed so it can never interleave into the JSON-RPC stdout stream. rebuilt=1 iff a full getIndex()
-        // rebuild fired somewhere in this request's handling (staleness / post-edit path).
-        if( timingsOn )
-        {
-            const double wallMs = std::chrono::duration< double, std::milli >(
-                                      std::chrono::steady_clock::now() - t0 ).count();
-            const unsigned rebuilt = ( mcpRebuildCounter().load( std::memory_order_relaxed ) != rebuildAtStart ) ? 1u : 0u;
-            rw::emitTo( stderr, "ripwire-timing verb={} wall_ms={:.3f} rebuilt={}\n",
-                          r.timingVerb.c_str(), wallMs, rebuilt );
-            std::fflush( stderr );
-        }
+        // flushed so it can never interleave into the JSON-RPC stdout stream (McpRequestTiming, mcpindex.h).
+        timing.emit( r.timingVerb );
     }
     return 0;
 }

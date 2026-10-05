@@ -18,12 +18,13 @@
 # quietly starts (or stops) counting these pins in `amb=` cannot pass; arms (C)/(D) pin the label's
 # discrimination; (E)/(F) pin G5 additivity and determinism; (G) pins the oracle side of the join.
 #
-# THE FIXTURE (test/pincensusfix/, 2 files, ~30 lines) reproduces both shapes in the smallest form:
-#   pinned.py — `Alpha.run` bare-calls `helper()`; `Alpha.helper` and `Beta.helper` both live in this
-#               file, so tier 1 keeps BOTH and S6-C decides: `pinned.py::Alpha::` beats `pinned.py::`.
+# THE FIXTURE (test/pincensusfix/, 2 Kotlin files, ~40 lines; Python until FE-A, whose bare call reaches no method —
+# test/falseedgecheck.sh) reproduces both shapes in the smallest form:
+#   pinned.kt — `Alpha.run` bare-calls `helper()`; `Alpha.helper` and `Beta.helper` both live in this
+#               file, so tier 1 keeps BOTH and S6-C decides: `pinned.kt::Alpha::` beats `pinned.kt::`.
 #               ONE edge, NO `amb=` — the silent pin.
-#   tied.py   — `Eps.go` bare-calls `other()`; `Gamma.other` and `Delta.other` are SIBLINGS, so both
-#               share exactly `tied.py::` and NEITHER is more local. The tier stays full, the call
+#   tied.kt   — `Eps.go` bare-calls `other()`; `Gamma.other` and `Delta.other` are SIBLINGS, so both
+#               share exactly `tied.kt::` and NEITHER is more local. The tier stays full, the call
 #               splits, `amb=` counts it — the honest control.
 #
 # Exits non-zero on any failure.
@@ -55,8 +56,8 @@ MAP="$( "$BIN" "$CORPUS" --no-cache --legend=full 2>/dev/null )"
 # ── THE LOOKUP IS BOUND TO ITS FILE (PR #215 review, CodeRabbit 5191303552) ────────────────────────
 # Row 6 (2026-09-12) replaced the row's path-repeating id="PATH::SCOPE::NAME" with sc="SCOPE" alone, and
 # these arms were re-keyed onto n= plus sc= over the WHOLE map. That reads the right row on this fixture
-# by LUCK — Alpha exists only in pinned.py and Eps only in tied.py, so nothing else can match — but it
-# stopped PROVING that Alpha::run belongs to pinned.py or Eps::go to tied.py, which is half of what the
+# by LUCK — Alpha exists only in pinned.kt and Eps only in tied.kt, so nothing else can match — but it
+# stopped PROVING that Alpha::run belongs to pinned.kt or Eps::go to tied.kt, which is half of what the
 # subject of this census is. The canonical id composes as p::sc::n with p= coming from the enclosing
 # <f p=>, so the lookup composes it the same way: the row must sit inside THAT file's block and carry
 # THAT sc= and THAT n=. index() throughout, never a regex, so a '.' in a path is a '.'.
@@ -76,35 +77,35 @@ fileScopedRow()   # $1=map  $2=path  $3=scope  $4=name  ->  the <s …> row(s) f
         index( $0, "s " ) == 1 && index( $0, " n=\"" n "\"" ) > 0 && index( $0, " sc=\"" sc "\"" ) > 0 { print }
     '
 }
-RUN_ROW="$( fileScopedRow "$MAP" "pinned.py" "Alpha" "run" )"
-GO_ROW="$(  fileScopedRow "$MAP" "tied.py"   "Eps"   "go"  )"
+RUN_ROW="$( fileScopedRow "$MAP" "pinned.kt" "Alpha" "run" )"
+GO_ROW="$(  fileScopedRow "$MAP" "tied.kt"   "Eps"   "go"  )"
 [ "$( printf '%s\n' "$RUN_ROW" | grep -c 's ' )" = 1 ] \
-    && ok "(A) pinned.py::Alpha::run resolves to exactly ONE row, p= sc= and n= all read" \
-    || no "(A) pinned.py::Alpha::run does not resolve to one row inside <f p=\"pinned.py\">: $RUN_ROW"
+    && ok "(A) pinned.kt::Alpha::run resolves to exactly ONE row, p= sc= and n= all read" \
+    || no "(A) pinned.kt::Alpha::run does not resolve to one row inside <f p=\"pinned.kt\">: $RUN_ROW"
 [ "$( printf '%s\n' "$GO_ROW" | grep -c 's ' )" = 1 ] \
-    && ok "(A) tied.py::Eps::go resolves to exactly ONE row, p= sc= and n= all read" \
-    || no "(A) tied.py::Eps::go does not resolve to one row inside <f p=\"tied.py\">: $GO_ROW"
+    && ok "(A) tied.kt::Eps::go resolves to exactly ONE row, p= sc= and n= all read" \
+    || no "(A) tied.kt::Eps::go does not resolve to one row inside <f p=\"tied.kt\">: $GO_ROW"
 # …and the CONTROL that makes those two arms mean something: the same lookup with the WRONG p= must
 # find NOTHING. A whole-map grep on n=/sc= passes this fixture and can never fail it, which is exactly
 # why it stopped being evidence. If the composition ever loses its p= half, these two go red.
-[ -z "$( fileScopedRow "$MAP" "tied.py" "Alpha" "run" )" ] \
-    && ok "(A) control: Alpha::run is NOT found under p=\"tied.py\" — the arm reads the path, not the name alone" \
+[ -z "$( fileScopedRow "$MAP" "tied.kt" "Alpha" "run" )" ] \
+    && ok "(A) control: Alpha::run is NOT found under p=\"tied.kt\" — the arm reads the path, not the name alone" \
     || no "(A) control: Alpha::run matched under the WRONG path — this lookup is not reading p="
-[ -z "$( fileScopedRow "$MAP" "pinned.py" "Eps" "go" )" ] \
-    && ok "(A) control: Eps::go is NOT found under p=\"pinned.py\"" \
+[ -z "$( fileScopedRow "$MAP" "pinned.kt" "Eps" "go" )" ] \
+    && ok "(A) control: Eps::go is NOT found under p=\"pinned.kt\"" \
     || no "(A) control: Eps::go matched under the WRONG path — this lookup is not reading p="
 
 if printf '%s' "$RUN_ROW" | grep -q 'amb='; then
-    no "(A) pinned.py::Alpha::run carries amb= — the locality pin is no longer silent: $RUN_ROW"
+    no "(A) pinned.kt::Alpha::run carries amb= — the locality pin is no longer silent: $RUN_ROW"
 else
-    ok "(A) the locality pin is SILENT — pinned.py::Alpha::run carries no amb="
+    ok "(A) the locality pin is SILENT — pinned.kt::Alpha::run carries no amb="
 fi
 # the edge walk starts from that same file-bound row, not from the first n="run" anywhere in the map
-N_HELPER="$( fileBlock "$MAP" "pinned.py" | tr '>' '\n' | awk '/n="run" sc="Alpha"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
+N_HELPER="$( fileBlock "$MAP" "pinned.kt" | tr '>' '\n' | awk '/n="run" sc="Alpha"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
 [ "$N_HELPER" = 1 ] && ok "(A) the pin emitted ONE confident edge (not a split)" \
-    || no "(A) pinned.py::Alpha::run emitted $N_HELPER helper edges, want 1"
-printf '%s' "$GO_ROW" | grep -q 'amb="1"' && ok "(A) the tied control is HONEST — tied.py::Eps::go carries amb=\"1\"" \
-    || no "(A) tied.py::Eps::go does not carry amb=\"1\": $GO_ROW"
+    || no "(A) pinned.kt::Alpha::run emitted $N_HELPER helper edges, want 1"
+printf '%s' "$GO_ROW" | grep -q 'amb="1"' && ok "(A) the tied control is HONEST — tied.kt::Eps::go carries amb=\"1\"" \
+    || no "(A) tied.kt::Eps::go does not carry amb=\"1\": $GO_ROW"
 printf '%s' "$MAP" | grep -q 'ambiguous=1 ' && ok "(A) header ambiguous=1 — the pin contributes ZERO to the disclosed gauge" \
     || no "(A) header ambiguous= is not 1: $( printf '%s' "$MAP" | grep -o 'ambiguous=[0-9]*' | head -1 )"
 
@@ -123,33 +124,33 @@ head -1 "$TMP/c1.tsv" 2>/dev/null | grep -q '^# ripwire pin-census v3' \
 
 # ── (C) THE POINT — the census names the pinned site, its mechanism, and its TARGET IDENTITY ──────
 # The map says `<c n="helper"/>`. The census must say WHICH helper, and that locality is what decided.
-PIN_ROW="$( grep -E '^C	locality	' "$TMP/c1.tsv" 2>/dev/null | grep 'pinned.py::Alpha::run' )"
+PIN_ROW="$( grep -E '^C	locality	' "$TMP/c1.tsv" 2>/dev/null | grep 'pinned.kt::Alpha::run' )"
 if [ -n "$PIN_ROW" ]; then
     ok "(C) the locality-pinned site is labelled: $PIN_ROW"
 else
-    no "(C) no 'C<TAB>locality' row for pinned.py::Alpha::run — the census cannot see the pin"
+    no "(C) no 'C<TAB>locality' row for pinned.kt::Alpha::run — the census cannot see the pin"
     grep -n 'Alpha::run' "$TMP/c1.tsv" 2>/dev/null | sed 's/^/          /'
 fi
-printf '%s' "$PIN_ROW" | grep -q 'pinned.py::Alpha::helper' \
+printf '%s' "$PIN_ROW" | grep -q 'pinned.kt::Alpha::helper' \
     && ok "(C) the census carries the pinned TARGET's canonical id (the identity <c n=.../> omits)" \
-    || no "(C) the pinned row does not name pinned.py::Alpha::helper — no identity to join an oracle against"
-printf '%s' "$PIN_ROW" | grep -q 'pinned.py::Beta::helper' \
+    || no "(C) the pinned row does not name pinned.kt::Alpha::helper — no identity to join an oracle against"
+printf '%s' "$PIN_ROW" | grep -q 'pinned.kt::Beta::helper' \
     && no "(C) the pinned row also lists Beta::helper — that candidate was DROPPED, not emitted" \
     || ok "(C) the pinned row lists exactly the surviving target"
 
 # ── (D) mutation control — the label DISCRIMINATES (a tie is not a pin) ───────────────────────────
-TIE_ROW="$( grep -E '^C	split	' "$TMP/c1.tsv" 2>/dev/null | grep 'tied.py::Eps::go' )"
+TIE_ROW="$( grep -E '^C	split	' "$TMP/c1.tsv" 2>/dev/null | grep 'tied.kt::Eps::go' )"
 if [ -n "$TIE_ROW" ]; then
     ok "(D) the full-tie site is labelled split, not locality: $TIE_ROW"
 else
-    no "(D) no 'C<TAB>split' row for tied.py::Eps::go — the label does not discriminate, so (C) means nothing"
+    no "(D) no 'C<TAB>split' row for tied.kt::Eps::go — the label does not discriminate, so (C) means nothing"
     grep -n 'Eps::go' "$TMP/c1.tsv" 2>/dev/null | sed 's/^/          /'
 fi
-printf '%s' "$TIE_ROW" | grep -q 'tied.py::Gamma::other' && printf '%s' "$TIE_ROW" | grep -q 'tied.py::Delta::other' \
+printf '%s' "$TIE_ROW" | grep -q 'tied.kt::Gamma::other' && printf '%s' "$TIE_ROW" | grep -q 'tied.kt::Delta::other' \
     && ok "(D) the split row lists BOTH surviving targets" \
     || no "(D) the split row does not list both Gamma::other and Delta::other"
-grep -E '^C	locality	' "$TMP/c1.tsv" 2>/dev/null | grep -q 'tied.py::Eps::go' \
-    && no "(D) tied.py::Eps::go is ALSO labelled locality — the label is not exclusive" \
+grep -E '^C	locality	' "$TMP/c1.tsv" 2>/dev/null | grep -q 'tied.kt::Eps::go' \
+    && no "(D) tied.kt::Eps::go is ALSO labelled locality — the label is not exclusive" \
     || ok "(D) no locality label on the tied site"
 
 # ── (E) G5 — the flag is purely additive: stdout is byte-identical with and without it ────────────
@@ -220,13 +221,13 @@ fi
 # 1-based call-site line beside each decision; without it the census cannot be joined to a SCIP
 # occurrence at all and the failure classes can only be guessed. The line is the LAST column so every
 # v1 consumer (`awk $6/$7`, `parts[7]`) keeps reading unchanged.
-RUN_LINE="$( awk -F'\t' '$1=="C" && $6 ~ /^pinned\.py::Alpha::run#/ && $7=="helper" {print $9; exit}' "$TMP/c1.tsv" 2>/dev/null )"
+RUN_LINE="$( awk -F'\t' '$1=="C" && $6 ~ /^pinned\.kt::Alpha::run#/ && $7=="helper" {print $9; exit}' "$TMP/c1.tsv" 2>/dev/null )"
 [ "$RUN_LINE" = 15 ] && ok "(J) the pinned site carries its call-site line as column 9 (15)" \
-    || no "(J) column 9 of the pinned-site row is '$RUN_LINE', want 15 (pinned.py:15 is \`return helper()\`)"
+    || no "(J) column 9 of the pinned-site row is '$RUN_LINE', want 15 (pinned.kt:15 is \`return helper()\`)"
 GO_LINE="$( awk -F'\t' '$1=="C" && $7=="other" {print $9; exit}' "$TMP/c1.tsv" 2>/dev/null )"
-[ "$GO_LINE" = "$( grep -n 'return other()' "$CORPUS/tied.py" | cut -d: -f1 )" ] \
+[ "$GO_LINE" = "$( grep -n 'return other()' "$CORPUS/tied.kt" | cut -d: -f1 )" ] \
     && ok "(J) the tied control carries its call-site line too ($GO_LINE)" \
-    || no "(J) tied.py::Eps::go row column 9 is '$GO_LINE', want the \`return other()\` line"
+    || no "(J) tied.kt::Eps::go row column 9 is '$GO_LINE', want the \`return other()\` line"
 head -1 "$TMP/c1.tsv" 2>/dev/null | grep -q 'line' \
     && ok "(J) the header line names the new column" \
     || no "(J) the header does not declare the line column: $( head -1 "$TMP/c1.tsv" )"
@@ -236,9 +237,9 @@ head -1 "$TMP/c1.tsv" 2>/dev/null | grep -q 'line' \
 # occurrence to a ripwire symbol by exact (file, line). Classifying a def-side miss needs every symbol
 # ripwire holds with its line — a table no shipped surface lists in full (`--pack-signatures` is a
 # top-50 payload). One `S` row per symbol: id (with #NODEID), kind tag, 1-based def line.
-S_RUN="$( awk -F'\t' '$1=="S" && $2 ~ /^pinned\.py::Alpha::run#/ {print $3 "/" $4; exit}' "$TMP/c1.tsv" 2>/dev/null )"
-[ "$S_RUN" = "fn/14" ] && ok "(K) S row for pinned.py::Alpha::run carries kind and def line (fn/14)" \
-    || no "(K) S row for pinned.py::Alpha::run is '$S_RUN', want fn/14"
+S_RUN="$( awk -F'\t' '$1=="S" && $2 ~ /^pinned\.kt::Alpha::run#/ {print $3 "/" $4; exit}' "$TMP/c1.tsv" 2>/dev/null )"
+[ "$S_RUN" = "fn/14" ] && ok "(K) S row for pinned.kt::Alpha::run carries kind and def line (fn/14)" \
+    || no "(K) S row for pinned.kt::Alpha::run is '$S_RUN', want fn/14"
 N_S="$( grep -c '^S	' "$TMP/c1.tsv" )"
 N_SYM="$( printf '%s' "$MAP" | grep -o 'symbols=[0-9]*' | head -1 | cut -d= -f2 )"
 [ "$N_S" = "$N_SYM" ] && ok "(K) one S row per symbol ($N_S == header symbols=$N_SYM)" \

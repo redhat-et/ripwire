@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-05, ci/ruby-method-lookup-on-main (feat/ruby-method-lookup e55e7aec merged with main 255dc199, for CI only):
+#   RE-DERIVED ONCE on the merged tree with UPDATE_GOLDEN=1 (hash a4e37a094b…735858). kParserVer stays 145: above main's 143
+#   and its full-use file tag 144. kCacheVersion 28 and kQSnapCacheScheme 17 are main's; quality.h's mirrors match.
 # 2026-10-04, feat/ruby-method-lookup (PR #373 review: include and extend sides): RE-PINNED with UPDATE_GOLDEN=1 (hash
 #   2aaf4390cb…4f692eeb). kParserVer 142 -> 145: a Ruby extraction change (RubyClassMixin bindings, the includer mark), above
 #   main's 143 and 144; kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's kIngestParserVerMirror moves with
@@ -42,11 +45,44 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   494bccc1ca…be6c147e). kParserVer 133 -> 142: the branch's eight Ruby extraction steps carried 130–137, and 142 is
 #   above those, main's 133 and train 25's 141; kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's
 #   kIngestParserVerMirror moves with it. The train may renumber.
+# 2026-10-04, train 25 review fixes: RE-DERIVED with UPDATE_GOLDEN=1 (hash 32240f4552…2dafcc). kParserVer 141 -> 143 (two
+#   extraction changes: a declaration named like the JS global object is a JsShadow binding; value-reference slot text
+#   is cut on a UTF-8 boundary and JS string keys are capped) with quality.h's mirror; 143 because 141's full-use file
+#   tag was 142. kQSnapCacheScheme stays 17: what a Snapshot means is unchanged, and every key carries the parser mirror.
+# 2026-10-04, train 25, extractor fix: RE-DERIVED with UPDATE_GOLDEN=1 (hash d1a2878ce0…44e6c8). No source or scheme
+#   change: extract_fn now reads a candidate's whole signature before deciding it is a prototype, so computeSnapshot's
+#   two-line forward declaration is skipped and its REAL definition is hashed for the first time since the import
+#   (the old capture started at the prototype and ran into computeHeadSnapshot). The other 16 manifest captures are
+#   byte-identical under both extractors. kQSnapCacheScheme stays 17: the real computeSnapshot differs from main's
+#   (2720d1c5) only by refval-edges' value-referenced exclusion, which that lane's 16 -> 17 bump covers; earlier
+#   scheme decisions on it were made by hand (the entries below).
+# 2026-10-04, train 25 (lane/fe-a-false-edges, lane/refval-edges, lane/train24-cr2-followup merged): RE-DERIVED ONCE on
+#   the merged tree with UPDATE_GOLDEN=1 (hash 723c71a3de…36d288). kParserVer 140 -> 141: above FE-A's 134/135 and
+#   refval-edges' 140 (both extraction changes) and train 24's 133; kCacheVersion 28 (FE-A's ref-record change, the max);
+#   kQSnapCacheScheme 17 (refval-edges' dead-kind change, the max); quality.h's mirrors move with them.
 # 2026-10-02, train 24 (recall, answer-honesty, #368, contrib-checklist, hygiene-orphans, readme-terminality merged):
 #   RE-DERIVED ONCE on the merged tree with UPDATE_GOLDEN=1 (hash a7f2ec25d4…9388db). kParserVer 132 -> 133: above the two
 #   merged lanes' extraction changes (130 body-less C/C++ type specifier span; 131 TS/TSX await/unary type-argument
 #   calls) and train 23's 132; kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's kIngestParserVerMirror
 #   moves with it.
+# 2026-10-03, lane/fe-a-false-edges fix round: RE-DERIVED with UPDATE_GOLDEN=1 (hash 41dd4678dd…3e069f). kParserVer 134 -> 135 (the
+#   lane's Rust path-call extraction change; its earlier binaries ran 134 with the old extraction). kCacheVersion stays 28.
+# 2026-10-03, lane/fe-a-false-edges: RE-DERIVED with UPDATE_GOLDEN=1 (hash 30b29982af…87fa82). kParserVer 132 -> 134 (FE-A
+#   extraction: member-call shape, ModuleAlias bindings, global-name shadows; 133 is train 24's), kCacheVersion 27 -> 28
+#   (the ref record gains memberCall/memberRoot); quality.h's mirrors move with them; kQSnapCacheScheme stays 16. The
+#   train renumbers and re-derives.
+# 2026-10-03, lane/refval-edges fix round (R2 of its final review): kQSnapCacheScheme 16 -> 17. A function a value
+#   holds (a struct/dict/object table entry, a callback argument; valuerefindex.h isValueReferenced) leaves the
+#   Snapshot's dead set, so a v16 blob would carry the old, wider set. The pinned hash does NOT move, and that is a
+#   gap in this gate, not a refactor: extract_fn's forward-declaration skip tests only the FIRST signature line.
+#   computeSnapshot's two-line forward declaration therefore starts the capture, which then runs on into
+#   computeHeadSnapshot, so the hashed "computeSnapshot" text is computeHeadSnapshot's body and the real
+#   dead-set builder is not watched. The scheme moved anyway. The extractor fix is left to its own change,
+#   since it re-pins for every lane.
+# 2026-10-02, lane/refval-edges (a3ef443a): RE-DERIVED with UPDATE_GOLDEN=1 (hash 6ffa0ec399…ee4815). kParserVer
+#   132 -> 140 (lane-local; a train renumbers it): RefRole::Value / RefRole::Through references are extracted for
+#   C/C++, JS/TS, Python and Go. quality.h's kIngestParserVerMirror moves with it (qextractionkeycheck).
+#   kCacheVersion stays 27; no hashed quality.h function changed in that commit.
 # 2026-10-02, train 23 (map data sections + edit-check pairing merged): RE-DERIVED ONCE on the merged tree with
 #   UPDATE_GOLDEN=1 (hash e355d7b821…1518a2). kParserVer 129 -> 132 for cache-key hygiene only (branch builds already ran
 #   at 129, 130 and 131; no extraction change); kCacheVersion stays 27, kQSnapCacheScheme stays 16; quality.h's
@@ -713,17 +749,23 @@ MANIFEST="$( awk '
 # ── extract one function's full Allman-style source ( signature line(s) .. matching closing brace ) ────────
 # Depth-counting starts only once a line whose TRIMMED content is exactly "{" is seen (the true Allman body
 # open) — this deliberately ignores any brace pairs on the signature line itself (e.g. a `= {}` default
-# argument), which would otherwise terminate the extraction after one line. A candidate match whose line ends
-# in ";" (a forward declaration/prototype, e.g. computeSnapshot's own fwd decl a few hundred lines above its
-# definition) is skipped — scanning continues for the real, brace-bodied definition.
+# argument), which would otherwise terminate the extraction after one line.
+# A candidate's SIGNATURE is read up to its first line that ends in ";" (comment stripped) or holds a "{",
+# whichever comes first: ";" first means a forward declaration/prototype — dropped, and scanning continues for
+# the real, brace-bodied definition. Until train 25 only the FIRST signature line was tested for ";", so a
+# prototype whose parameter list wraps (computeSnapshot's own two-line fwd decl above computeHeadSnapshot) was
+# taken as the definition: the capture ran into the next function's body and computeSnapshot itself was never
+# hashed. Arm "two-line prototype" below is red on that extractor.
 extract_fn(){
     local file="$1" fn="$2"
     awk -v fn="$fn" '
-        BEGIN { capturing=0; bodyStarted=0; depth=0 }
-        !capturing && $0 ~ ( "^inline[ \t].*[^A-Za-z0-9_]" fn "\\(" ) {
+        BEGIN { capturing=0; pending=0; bodyStarted=0; depth=0; buf="" }
+        !capturing && !pending && $0 ~ ( "^inline[ \t].*[^A-Za-z0-9_]" fn "\\(" ) { pending=1; buf="" }
+        pending {
             probe=$0; sub( /\/\/.*/, "", probe ); gsub( /[ \t]+$/, "", probe )
-            if( probe ~ /;$/ ) next                 # forward declaration/prototype — keep scanning
-            capturing=1
+            if( probe ~ /;$/ && probe !~ /\{/ ) { pending=0; buf=""; next }   # prototype (one line or wrapped) — keep scanning
+            if( probe !~ /\{/ ) { buf=buf $0 "\n"; next }                     # signature continues on the next line
+            pending=0; capturing=1; printf "%s", buf; buf=""
         }
         capturing {
             print
@@ -743,6 +785,36 @@ extract_fn(){
     ' "$file"
 }
 
+# ── the extractor's own arms (train 25): a wrapped prototype is skipped, and every manifest capture is ONE function ──
+XT="$( mktemp -d )"; trap 'rm -rf "$XT"' EXIT
+cat > "$XT/proto.h" <<'CPP'
+inline int tripFixture( int a,
+                        int b );   // fwd — defined below
+inline int otherFixture( int a )
+{
+    return a;   // OTHER-BODY
+}
+inline int tripFixture( int a,
+                        int b )
+{
+    return a + b;   // TRIP-BODY
+}
+CPP
+xbody="$( extract_fn "$XT/proto.h" tripFixture )"
+if printf '%s\n' "$xbody" | grep -q 'TRIP-BODY' && ! printf '%s\n' "$xbody" | grep -q 'otherFixture\|OTHER-BODY'; then
+    ok "two-line prototype: extract_fn skips a wrapped forward declaration and captures the real definition"
+else
+    no "two-line prototype: extract_fn captured [$( printf '%s' "$xbody" | tr '\n' '|' | cut -c1-200 )] — a wrapped prototype was taken as the definition"
+fi
+for fn in $MANIFEST; do
+    nsig="$( extract_fn "$SRC" "$fn" | grep -c '^inline[ \t]' )"
+    nbody="$( extract_fn "$SRC" "$fn" | grep -c '^[ \t]*{[ \t]*$' )"
+    if [ "$nsig" != 1 ] || [ "$nbody" -lt 1 ]; then
+        no "manifest capture of '$fn' is not one brace-bodied function (inline lines=$nsig, body-open lines=$nbody) — extract_fn took a prototype or ran into a neighbour"
+        xbad=1
+    fi
+done
+[ "${xbad:-0}" = 0 ] && ok "every manifest capture is exactly one brace-bodied function (no prototype, no neighbour)"
 CONCAT=""
 missing=0
 for fn in $MANIFEST; do

@@ -87,6 +87,12 @@ def is_weight(name, val):
         return False
     return f != int(f)                      # a fractional "cap" is a proportion, not a count
 
+# A WINDOW disclosure: the bare `capped=` of a `<x total= shown= capped=>` element, or the `"capped":` key of its JSON
+# twin, as the file EMITS it — inside a C++ string literal, so the quote after it is escaped (`capped=\"`, `\"capped\":`).
+# A comment that only mentions `capped="1"` is no emission and does not count; neither does `uncapped=` or `x_capped=`
+# (the named form above). Recorded as '' and rendered `capped`.
+WINDOW = re.compile(r'(?<![A-Za-z0-9_])capped=\\"|\\"capped\\":')
+
 def scan():
     caps, disc = [], collections.defaultdict(set)
     files = sorted(ROOT.joinpath('src').rglob('*.h')) + sorted(ROOT.joinpath('src').rglob('*.cpp'))
@@ -95,6 +101,8 @@ def scan():
         txt = p.read_text(errors='replace')
         for a in re.findall(r'\b([A-Za-z_][A-Za-z0-9_]*)_capped', txt):   # mixed case too: calledBy_capped, not y_capped
             disc[rel].add(a)
+        if WINDOW.search(txt):
+            disc[rel].add('')
         for m in DECL.finditer(txt):
             if not KEY.search(m.group(1)):
                 continue
@@ -184,7 +192,8 @@ def render(caps, disc, classes):
     w('Every compile-time cap in `src/`, what it bounds, and whether its file discloses a truncation when')
     w('it fires. A cap is a **routing decision**: it decides what an agent can and cannot find. Set one')
     w('where the pathological tail is, never near the typical case — and when it fires, say so')
-    w('(`*_capped="1"` with a `*_total=`), because a silent cut reads to the caller as "none exists".\n')
+    w('(`*_capped="1"` with a `*_total=`), because a silent cut reads to the caller as "none exists". A file that emits')
+    w('a window (`<x total= shown= capped=>`, or its JSON twin\'s `"capped":`) discloses `capped`.\n')
     w('A row is pinned by what a cap IS — its file, name, value, class and note — never by the line it sits')
     w('on, so a comment rewritten or a helper deleted above a cap changes no row here and cannot stale this')
     w('document. To reach a declaration, search its file for the name (`grep -n <name> <file>`, or')
@@ -268,7 +277,7 @@ def render(caps, disc, classes):
       % (len({c[2] for c in caps}), len(caps)))
     for rel in sorted({c[2] for c in caps}):
         rows = [c for c in caps if c[2] == rel]
-        d = ', '.join('`%s_capped`' % a for a in sorted(disc.get(rel, []))) or '**none**'
+        d = ', '.join('`%s_capped`' % a if a else '`capped`' for a in sorted(disc.get(rel, []))) or '**none**'
         w('### `%s`\n' % rel)
         w('Discloses: %s\n' % d)
         w('| constant | value | class | note |')

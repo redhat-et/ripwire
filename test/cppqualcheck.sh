@@ -254,9 +254,11 @@ US="$( run . --uses=selectBaseline --no-cache )"
 # count (mention.h countUnbacktickedDocFiles) reads the markdown files through it — two new call sites, same helper.
 # 29 -> 30 (same lane, review round): BuiltinMethodGate::namedBeyondDefinition reads a Python file that defines a class
 # to find an annotation naming it — one new call site, same helper.
-[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 30 ] \
-    && ok "repo: --uses=readWholeFile count=30 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 30"
+# 30 -> 31 (lane/fe-a-false-edges): FE-A's Go module census (graph.h collectGoModules) reads each go.mod above a Go file
+# through the canonical helper — one new call site, same helper.
+[ "$( cnt "$( run . --uses=readWholeFile --no-cache )" )" = 31 ] \
+    && ok "repo: --uses=readWholeFile count=31 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 31"
 [ "$( cnt "$( run . --callers=writeTally --no-cache )" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
     || no "repo: --callers=writeTally expected 1"

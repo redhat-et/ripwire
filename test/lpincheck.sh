@@ -13,10 +13,10 @@
 # re-applies the `Graph::localityKey` tie-break (an unscoped def is compared as `path::name`, not its bare
 # name) so a module-level function is no longer auto-lost to a same-file class method.
 #
-# THE FIXTURE (test/lpinfix/, 3 files):
-#   pinned.py   — `Alpha.run` -> `helper()`; `Alpha.helper` beats `Beta.helper` by scope: ONE edge, `lpin="1"`, no `amb=`.
-#   tied.py     — `Eps.go` -> `other()`; sibling classes tie: split, `amb="1"`, no `lpin=`.
-#   modlevel.py — `Caller.go` -> `compute()`; `Helper.compute` vs module-level `compute`: a full tie under
+# THE FIXTURE (test/lpinfix/, 3 Kotlin files — Python until FE-A, whose bare call reaches no method: test/falseedgecheck.sh):
+#   pinned.kt   — `Alpha.run` -> `helper()`; `Alpha.helper` beats `Beta.helper` by scope: ONE edge, `lpin="1"`, no `amb=`.
+#   tied.kt     — `Eps.go` -> `other()`; sibling classes tie: split, `amb="1"`, no `lpin=`.
+#   modlevel.kt — `Caller.go` -> `compute()`; `Helper.compute` vs top-level `compute`: a full tie under
 #                 localityKey ⇒ split, `amb="1"`, no `lpin=` (was a silent pin on Helper::compute).
 #
 # Exits non-zero on any failure.
@@ -45,30 +45,30 @@ MAP="$( cat "$TMP/map.xml" )"
 row(){ _n="${1##*::}"; _r="${1#*::}"; _s="${_r%::*}"; printf '%s' "$MAP" | tr '<' '\n' | grep "n=\"$_n\" sc=\"$_s\"" | head -1; }
 
 # ── (A) the pin is DISCLOSED on its row, and it is still not an amb ──────────────────────────────
-RUN_ROW="$( row 'pinned.py::Alpha::run' )"
-printf '%s' "$RUN_ROW" | grep -q 'lpin="1"' && ok "(A) pinned.py::Alpha::run carries lpin=\"1\" — the locality pin is disclosed" \
-    || no "(A) pinned.py::Alpha::run has no lpin=\"1\": $RUN_ROW"
-printf '%s' "$RUN_ROW" | grep -q 'amb=' && no "(A) pinned.py::Alpha::run carries amb= — the marker inflated amb=: $RUN_ROW" \
+RUN_ROW="$( row 'pinned.kt::Alpha::run' )"
+printf '%s' "$RUN_ROW" | grep -q 'lpin="1"' && ok "(A) pinned.kt::Alpha::run carries lpin=\"1\" — the locality pin is disclosed" \
+    || no "(A) pinned.kt::Alpha::run has no lpin=\"1\": $RUN_ROW"
+printf '%s' "$RUN_ROW" | grep -q 'amb=' && no "(A) pinned.kt::Alpha::run carries amb= — the marker inflated amb=: $RUN_ROW" \
     || ok "(A) the pin still contributes nothing to amb="
 N_HELPER="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/n="run" sc="Alpha"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
 if [ "$N_HELPER" = 1 ]; then ok "(A) the pin still emits ONE confident edge"; else no "(A) $N_HELPER helper edges on Alpha::run, want 1"; fi
 
 # ── (B) the tied control — a split is not a pin ───────────────────────────────────────────────────
-GO_ROW="$( row 'tied.py::Eps::go' )"
-printf '%s' "$GO_ROW" | grep -q 'amb="1"' && ok "(B) tied.py::Eps::go carries amb=\"1\" (the honest split)" \
-    || no "(B) tied.py::Eps::go lacks amb=\"1\": $GO_ROW"
-printf '%s' "$GO_ROW" | grep -q 'lpin=' && no "(B) tied.py::Eps::go carries lpin= — a split labelled as a pin: $GO_ROW" \
+GO_ROW="$( row 'tied.kt::Eps::go' )"
+printf '%s' "$GO_ROW" | grep -q 'amb="1"' && ok "(B) tied.kt::Eps::go carries amb=\"1\" (the honest split)" \
+    || no "(B) tied.kt::Eps::go lacks amb=\"1\": $GO_ROW"
+printf '%s' "$GO_ROW" | grep -q 'lpin=' && no "(B) tied.kt::Eps::go carries lpin= — a split labelled as a pin: $GO_ROW" \
     || ok "(B) no lpin= on the split"
 
 # ── (C) the module-level shape — a full tie under localityKey, not a silent pin ──────────────────
-CALLER_ROW="$( row 'modlevel.py::Caller::go' )"
-printf '%s' "$CALLER_ROW" | grep -q 'amb="1"' && ok "(C) modlevel.py::Caller::go is an honest split (amb=\"1\") — the module-level def is no longer auto-lost" \
-    || no "(C) modlevel.py::Caller::go is not amb=\"1\" — Helper::compute still silently wins: $CALLER_ROW"
-printf '%s' "$CALLER_ROW" | grep -q 'lpin=' && no "(C) modlevel.py::Caller::go carries lpin= — still pinned: $CALLER_ROW" \
+CALLER_ROW="$( row 'modlevel.kt::Caller::go' )"
+printf '%s' "$CALLER_ROW" | grep -q 'amb="1"' && ok "(C) modlevel.kt::Caller::go is an honest split (amb=\"1\") — the module-level def is no longer auto-lost" \
+    || no "(C) modlevel.kt::Caller::go is not amb=\"1\" — Helper::compute still silently wins: $CALLER_ROW"
+printf '%s' "$CALLER_ROW" | grep -q 'lpin=' && no "(C) modlevel.kt::Caller::go carries lpin= — still pinned: $CALLER_ROW" \
     || ok "(C) no lpin= on the module-level site"
-grep -E '^C	locality	' "$TMP/c.tsv" | grep -q 'modlevel.py::Caller::go' \
-    && no "(C) the census still labels modlevel.py::Caller::go locality-pinned" \
-    || ok "(C) the census agrees: no locality row for modlevel.py::Caller::go"
+grep -E '^C	locality	' "$TMP/c.tsv" | grep -q 'modlevel.kt::Caller::go' \
+    && no "(C) the census still labels modlevel.kt::Caller::go locality-pinned" \
+    || ok "(C) the census agrees: no locality row for modlevel.kt::Caller::go"
 
 # ── (D) the header counter, and its equality with the census ──────────────────────────────────────
 HDR="$( printf '%s' "$MAP" | grep -o '<!-- files=[^>]*-->' | head -1 )"

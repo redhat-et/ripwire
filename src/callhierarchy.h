@@ -24,8 +24,10 @@
 #include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / countTestedIn / isTestedByReach
 #include "model.h"
 #include "infra/sortutil.h"   // svLess: the explicit byte order every string_view sort here takes (portablebuildcheck #6)
+#include "valuerefs.h" // the reference-as-value rows both surfaces serve beside the call rows
 
 #include <algorithm>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -84,6 +86,7 @@ struct CallHierarchyRows
     std::size_t         declinedCalls = 0;
     std::string         crossKind;            // cross_kind= value ("fn:1,method:10"), "" unless defs span 2+ kinds
     std::size_t         declinedIface = 0;   // callers only: declinedIfaceCallsNaming below, the root's declined_iface=
+    ValueRefRows        valueRefs;     // reference-as-value round: <vr> rows, never in `rows` or any count above
 };
 
 // cross_kind= (comparison table hono-07, 2026-09-30): a bare `getPath` resolved to ONE free function
@@ -310,7 +313,8 @@ inline std::pair<std::string_view, bool> callHierarchyNextSelector( const Ingest
     return { name, true };
 }
 
-inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers )
+inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers,
+                                            const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
 {
     CallHierarchyRows out;
     // X9(b): "file:name" disambiguates here (the same rule --around/--lego/--edit-check use through
@@ -381,6 +385,13 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     // widely-called that callee is elsewhere, not how central it is to the body that calls it. Guarded on
     // wantCallers so callees (and find_symbol's `calls`) keep the tier/path order above, byte-identical to
     // origin/main.
+    // Reference-as-value round: the <vr> rows beside the call rows — the binding sites of `matches` (callers), or what
+    // `matches` stores/passes and may call through (callees). Never merged into `rows`: they are not calls.
+    {
+        const std::optional<ValueRefIndex> local = valueIndex == nullptr ? std::optional<ValueRefIndex>( std::in_place, ing ) : std::nullopt;
+        const ValueRefIndex&               vri   = valueIndex != nullptr ? *valueIndex : *local;
+        out.valueRefs = wantCallers ? valueRefCallerRows( ing, vri, out.matches ) : valueRefCalleeRows( ing, vri, out.matches );
+    }
     if( wantCallers )
     {
         rankBeforeCap( ing, out.rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; },

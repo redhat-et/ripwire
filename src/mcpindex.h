@@ -21,6 +21,7 @@
 #include "gitmine.h"
 #include "lexical.h"
 #include "recall.h"
+#include "valuerefs.h"          // reference-as-value round: the per-index ValueRefIndex cache (valueRefIndexOf)
 #include "situ.h"
 #include "workspace.h"          // multi-root `paths` array (A11): root hygiene + labels + merge
 #include "infra/statclock.h"    // rw::saturatingNanoseconds — the staleness stat reads without signed overflow past 2262
@@ -529,6 +530,16 @@ struct McpIndex
     // toward, as of the LAST rebuild — kept so mcpStale() can detect "same tree, different diff" (see below).
     std::uint64_t                     workingSetHash = 0;   // FNV-1a of the changed-file id list used to build `rank`
 
+    // Reference-as-value round: the value-reference index (src/valuerefs.h) is O(references) to build, which on a large
+    // tree is most of a warm 1-hop call's cost — so it is built on first use and reused until `ing` is replaced. It
+    // holds pointers into `ing` (ValueRefIndex::m_importsByFile keeps `const Binding*`), so EVERY write of `ing` drops
+    // it first: getIndex's rebuild and releaseMcpIndexMemory. Keying it on contentHash was not enough — a rebuild with
+    // unchanged file content (a directory mtime moved, or only a file's ctime after a chmod) keeps contentHash and the
+    // reference count, and the old index then read the freed bindings. Pure cache: it is a function of `ing`, so no
+    // output byte depends on whether it was warm.
+    mutable std::shared_ptr<const ValueRefIndex> valueRefs;
+    mutable std::uint64_t                        valueRefBuilds = 0;   // monotone: McpRequestTiming's vri= reads it
+
     // ── P1-15 incremental-pass disclosure (the `_reingest` envelope field; mcpReingestField below).
     //
     // incrementalPasses counts ONLY rebuilds that refreshed an index this process ALREADY held for this
@@ -809,6 +820,7 @@ inline void releaseMcpIndexMemory()
 {
     McpIndex& ix = mcpIndexSlot();
     ix.valid = false;
+    ix.valueRefs.reset();   // it points into `ing` (see McpIndex::valueRefs) — and it is resident bulk too
     ix.ing   = IngestResult{};
     ix.g     = Graph{};
     std::vector<float>().swap( ix.rank );
@@ -827,6 +839,43 @@ inline std::atomic<std::uint64_t>& mcpRebuildCounter()
     static std::atomic<std::uint64_t> n{ 0 };
     return n;
 }
+
+// The RIPWIRE_MCP_TIMINGS line of one request, shared by the stdio loop (runMcp) and the HTTP server (runMcpHttp):
+//   ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1> vri=<0|1>
+// rebuilt=1: a full getIndex() rebuild fired while the request was handled (mcpRebuildCounter). vri=1: the request built
+// the value-reference index (McpIndex::valueRefBuilds) — once after every rebuild, never on a warm reuse. Off (the env
+// unset): no clock read, no counter read, nothing printed. stderr only, after the response is out.
+struct McpRequestTiming
+{
+    explicit McpRequestTiming( bool timingsOn )
+        : m_on( timingsOn )
+    {
+        if( m_on )
+        {
+            m_t0          = std::chrono::steady_clock::now();
+            m_rebuildAt0  = mcpRebuildCounter().load( std::memory_order_relaxed );
+            m_vriAt0      = mcpIndexSlot().valueRefBuilds;
+        }
+    }
+    void emit( std::string_view verb ) const
+    {
+        if( !m_on )
+        {
+            return;
+        }
+        const double   wallMs  = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - m_t0 ).count();
+        const unsigned rebuilt = mcpRebuildCounter().load( std::memory_order_relaxed ) != m_rebuildAt0 ? 1u : 0u;
+        const unsigned vri     = mcpIndexSlot().valueRefBuilds != m_vriAt0 ? 1u : 0u;
+        rw::emitTo( stderr, "ripwire-timing verb={} wall_ms={:.3f} rebuilt={} vri={}\n", verb, wallMs, rebuilt, vri );
+        std::fflush( stderr );
+    }
+
+private:
+    bool                                  m_on = false;
+    std::chrono::steady_clock::time_point m_t0{};
+    std::uint64_t                         m_rebuildAt0 = 0;
+    std::uint64_t                         m_vriAt0     = 0;
+};
 
 // P1-15 — the `_reingest` envelope field for a response whose handling ran an INCREMENTAL pass, or "" when
 // it did not. `passesAtEntry` is McpIndex::incrementalPasses as read before the verb ran; a difference means
@@ -1100,6 +1149,18 @@ inline void maybePrefetchHeadSnapshot( const std::string& root, std::size_t file
     } ).detach();
 }
 
+// The value-reference index of `ix`, built on first use and reused until `ix.ing` is replaced (every writer of `ing`
+// resets it — see McpIndex::valueRefs).
+inline const ValueRefIndex& valueRefIndexOf( const McpIndex& ix )
+{
+    if( !ix.valueRefs )
+    {
+        ix.valueRefs = std::make_shared<const ValueRefIndex>( ix.ing );
+        ++ix.valueRefBuilds;
+    }
+    return *ix.valueRefs;
+}
+
 // the cached index for `root`, rebuilt only when stale (otherwise returned as-is, no parse, no graph rebuild).
 inline const McpIndex& getIndex( const std::string& root )
 {
@@ -1131,6 +1192,10 @@ inline const McpIndex& getIndex( const std::string& root )
     // read at the same moment and for the same reason as the line above. Rebuild path only — nothing here
     // touches the warm reuse that returned above.
     const McpRebuildBaseline a3Before = mcpRebuildBaseline( ix, isIncrementalPass );
+
+    // `ing` is about to be replaced: the value-reference index points into it (McpIndex::valueRefs), so it goes first —
+    // whether or not the file content moved.
+    ix.valueRefs.reset();
 
     // Multi-root workspace key (A11): per-root ingest (each with ITS OWN mcpCachePath blob — an edit in
     // one root never reparses another) merged into one IngestResult; else the single-root path unchanged.

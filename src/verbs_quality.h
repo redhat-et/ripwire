@@ -182,6 +182,7 @@ struct DeltaBasis
     rw::quality::IdentityHealing                        healing;
     std::size_t                                         registerMacroExcluded = 0;   // P2.2: disclosed dead-code exemption count
     std::size_t                                         declinedCallExcluded  = 0;   // dead-code exemption by a declined call (quality.h isDeadCandidate)
+    std::size_t                                         valueRefExcluded      = 0;   // dead-code exemption: held as a VALUE (valuerefindex.h)
     std::size_t                                         apiNewSurface         = 0;   // Q-DIAL-4: new PUBLIC symbols this change added — the count that replaced one never-gating row each
     std::size_t acksBadLines = 0;   // 2026-09-06: .ripwire_quality_acks lines skipped as unparseable (disclosed on the root)
     // #228: WHICH basis produced baseSel.snapshot when the marker is one of the git-HEAD family, and WHY when
@@ -229,7 +230,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
                                              out.deltaRoot, root, cfg.qualityAck, refs.rangeSpan );
         out.regs    = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
                                              out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
-                                             &out.cloneIdioms, &out.declinedCallExcluded );
+                                             &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded );
         return std::nullopt;
     }
 
@@ -310,7 +311,7 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, d.ing, d.g,
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
-                                      &out.cloneIdioms, &out.declinedCallExcluded );
+                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded );
     return std::nullopt;
 }
 
@@ -799,6 +800,7 @@ struct QualityDeltaLegendParts
     std::size_t                                   baselineAbsorbed; // H11: baseline_absorbed= on the root (0 = attribute absent)
     const char*                                   headBasis;     // #228: head_basis= value on the root (nullptr = attribute absent)
     bool                                          anyDeclinedCallExcluded = false;   // declined-call-excluded= is on the root
+    bool                                          anyValueRefExcluded     = false;   // value-ref-excluded= is on the root
 };
 
 // A DEFINITION IS EMITTED WHEN THE THING IT DEFINES IS IN THE DOCUMENT. Nothing is dropped and no limit is
@@ -863,6 +865,13 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
     {
         std::fputs( "declined-call-excluded= is a FLOOR, not a finding: symbols this run kept out of the dead-code kind only because a call "
                     "the resolver declined to bind (the map's declined=) could have meant them. Never gates; absent at zero. ", stdout );
+    }
+    if( p.anyValueRefExcluded )
+    {
+        rw::emitRaw( stdout, "value-ref-excluded= is a FLOOR, not a finding: symbols this run kept out of the dead-code kind only because a table, "
+                             "field, argument or registering decorator holds them as a VALUE (matched by name; it is not a proven call; the callers "
+                             "verb lists the sites; @classmethod-style wrappers do not count), "
+                             "the --dead-code verb's own rule. Never gates; absent at zero. " );
     }
 
     // (3) the two identity re-filings, each keyed to the attribute family it defines. The second is
@@ -1520,7 +1529,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             const std::string headBasisJson = ( basis.headBasis == nullptr ? std::string()
                                               : std::string( ",\"head_basis\":\"" ) + basis.headBasis + "\"" )
                                             + ( basis.declinedCallExcluded == 0 ? std::string()   // the XML twin's declined-call-excluded=, absent at zero
-                                              : ",\"declined-call-excluded\":" + std::to_string( basis.declinedCallExcluded ) );
+                                              : ",\"declined-call-excluded\":" + std::to_string( basis.declinedCallExcluded ) )
+                                            + rw::countFieldOrEmpty( "value-ref-excluded", basis.valueRefExcluded, /*json=*/true );
             rw::emitTo( stdout, "{{\"baseline\":\"{}\",\"regressions\":{},\"minor\":{},\"acked\":{},\"stale\":{},"
                          "\"preexisting-worse\":{},\"new-symbol\":{},\"gating\":{},\"register-macro-excluded\":{},\"api-new-surface\":{},\"at\":{}{}{}{}{}{}{},\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleAcks.size(),
@@ -1622,7 +1632,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         emitQualityDeltaLegend( { baseSel.marker, refPair, identityAttrs, !saRows.empty(), ackedCount > 0,
                                   basis.registerMacroExcluded > 0, configDiag.total() > 0, regs, outOfScope,
                                   scope.active() || !foreignAcks.empty(), !foreignAcks.empty(), baselineAbsorbed,
-                                  basis.headBasis, basis.declinedCallExcluded > 0 } );
+                                  basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0 } );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
         std::string sidecarHealthAttrs;
@@ -1632,6 +1642,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // marker named on its own before this attribute existed.
         if( basis.headBasis != nullptr )  { sidecarHealthAttrs += std::string( " head_basis=\"" ) + basis.headBasis + "\""; }
         if( basis.declinedCallExcluded > 0 ) { sidecarHealthAttrs += " declined-call-excluded=\"" + std::to_string( basis.declinedCallExcluded ) + "\""; }
+        sidecarHealthAttrs += rw::countAttrXmlOrEmpty( "value-ref-excluded", basis.valueRefExcluded );   // absent at zero, beside its sibling
         // at= anchors this regression list to the commit (+dirty state) it was computed against.
         rw::emitTo( stdout, "<quality-delta baseline=\"{}\" regressions=\"{}\" minor=\"{}\" acked=\"{}\" stale=\"{}\" preexisting-worse=\"{}\" new-symbol=\"{}\" gating=\"{}\" register-macro-excluded=\"{}\" api-new-surface=\"{}\"{}{}{}{}{}{}{}>",
                      baseMarker, regs.size(), minorCount, ackedCount, staleAcks.size(), preexistingCount, newSymbolCount, gatingCount, basis.registerMacroExcluded, basis.apiNewSurface,
@@ -2008,6 +2019,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         std::size_t registerMacroExcluded = 0;   // P2.2: disclosed count — see the header comment below
         std::size_t runnerRootExcluded    = 0;   // 0.6.6 D4: disclosed count (runner-root-excluded=, absent at 0)
         std::size_t decoratedExcluded     = 0;   // 0.6.6 D4 review: decorated Python defs, counted apart (decorated-excluded=)
+        std::size_t valueRefExcluded      = 0;   // reference-as-value round: held as a VALUE by a table/field/argument (value-ref-excluded=)
+        const rw::ValueRefIndex dcVri( ing );    // valuerefs.h — the same rows --callers shows, under its visibility rules
 
         // Optional path filter (--dead-code=DIR). §P0.3: this was a bare SUFFIX test, so it could only ever
         // match a FILENAME — every directory argument produced count="0" with confidence="high", and a typo'd
@@ -2099,6 +2112,12 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                 ++runnerRootExcluded;   // 0.6.6 D4: a test runner reaches it — never dead-code
                 continue;
             }
+            // One entity, one reason: checked LAST, so a def a reason above already excluded is counted there only.
+            if( dcVri.isValueReferenced( s.id ) )
+            {
+                ++valueRefExcluded;     // a dispatch table / field / argument holds it — not dead, not a proven call either
+                continue;
+            }
             candidates.push_back( s.id );
         }
 
@@ -2136,7 +2155,13 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "them (wrappers such as @staticmethod/@property/@lru_cache are included, and register nothing): Python has "
                      "no internal linkage, so such a row rested on a `static` token alone. Both are FLOORS, never findings, "
                      "absent at 0. A `static` inside a comment is not linkage evidence. "
-                     "Graph evidence is local to the indexed tree; verify before deleting. {}-->", rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str() );
+                     "Graph evidence is local to the indexed tree; verify before deleting. {}{}-->",
+                     // Reference-as-value round: beside its hyphenated siblings above, exactly when the root carries it.
+                     valueRefExcluded > 0 ? "value-ref-excluded=N (absent when 0): internal functions kept off this list because a table, "
+                                            "field or argument holds them as a VALUE (matched by name; it is not a proven call; the callers verb "
+                                            "lists the sites). One entity, one reason: a def a reason above already excluded is counted there only. "
+                                          : "",
+                     rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str() );
         // §P15/§P16: candidates is already deterministically sorted (path asc, line asc, name asc) and used to
         // print every candidate unconditionally — completeness was the whole contract, matching --uses' shape,
         // so it pages the same way: no historic display cap, discloseCap=false (un-paginated tag byte-identical).
@@ -2153,7 +2178,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         }
         // 0.6.6 D4: runner-root-excluded= is absent at 0, so a tree with no Python test/decorated root is byte-identical
         const std::string runnerRootAttr = ( runnerRootExcluded == 0 ? std::string() : std::format( " runner-root-excluded=\"{}\"", runnerRootExcluded ) )
-                                         + ( decoratedExcluded == 0 ? std::string() : std::format( " decorated-excluded=\"{}\"", decoratedExcluded ) );
+                                         + ( decoratedExcluded == 0 ? std::string() : std::format( " decorated-excluded=\"{}\"", decoratedExcluded ) )
+                                         + ( valueRefExcluded == 0 ? std::string() : std::format( " value-ref-excluded=\"{}\"", valueRefExcluded ) );
         rw::emitTo( stdout, "<dead-code count=\"{}\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"{}\"{}{}{}{}{}{}>",
                      candidates.size(), registerMacroExcluded, runnerRootAttr,
                      dcFilterAttr.c_str(),

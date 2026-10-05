@@ -262,7 +262,8 @@ instrumentation + harness, build NOTHING else this round** — the honest, desig
 ### Instrumentation (env-gated, zero-cost-off)
 `RIPWIRE_MCP_TIMINGS=1` makes `runMcp` (`src/mcp.h`) emit ONE stderr line per request —
 `ripwire-timing verb=<v> wall_ms=<f> rebuilt=<0|1>` — where `rebuilt=1` means a full `getIndex()` rebuild
-(the staleness / post-edit cache-miss path) fired during that request. Off by default → the server is
+(the staleness / post-edit cache-miss path) fired during that request; a later field `vri=<0|1>` (added in train 25)
+says the request built the value-reference index, which happens once after each rebuild. Off by default → the server is
 byte-identical + silent on stdout (gated by `test/spectimingcheck.sh`, and the A/B in `bench/spec_trace.py
 --determinism`). Same precedent as `ingest.cpp`'s `RIPWIRE_CACHE_STATS`.
 

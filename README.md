@@ -2082,9 +2082,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>669 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>671 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **669 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **671 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2743,9 +2743,11 @@ compiler. These limits follow:
 - A name that has several definitions at the same resolution tier produces one edge per candidate.
   Each edge carries the weight `1/k`. The symbol carries `amb="K"`. The header totals the events in
   `ambiguous=`.
-- Two further gauges sit beside `ambiguous=`. `unresolved=` counts calls whose in-repo definitions
-  were all language-filtered. `unindexed=` counts files no grammar could read, whose calls raise
-  neither of the other two.
+- Two further gauges sit beside `ambiguous=`. `unresolved=` counts calls left with no edge and no
+  proof that the target is outside the tree: every same-named in-repo definition is language-filtered
+  or out of the language's lookup (a method for a receiverless call, another Go package). `external=`
+  counts the calls the language does prove are outside (a builtin or global, an outside import).
+  `unindexed=` counts files no grammar could read, whose calls raise neither of the other two.
 
 The output uses these disclosure rules without exception:
 
@@ -2836,7 +2838,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 233 compile-time caps and 7 ranking parameters.
+Another gate derives the cap inventory. The tool has 236 compile-time caps and 7 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.

@@ -276,7 +276,15 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # not, which is the divergence that lane fixed. +122 B of description to say what is true instead; no schema
 # byte moved and no tool was added. Spent from the 229 B this block already held, not from a raise: correcting
 # a claim the manifest itself makes is what headroom is for. Headroom after this line: 107 B.
-CEILING = 46600
+# RE-ANCHORED 2026-10-03 (lane/refval-edges, reference-as-value rows): 46,600 -> 46,750, measured 46,722 (from 46,581,
+# 33 tools). The #214 precedent above, not the L7 one: these clauses describe the RESPONSE of two answers that carry no
+# legend of any kind. find_symbol and find_referencing_symbols now serve `valueRefs` (and find_symbol `valueCallees`):
+# a function USED AS A VALUE — stored in a dispatch table or passed as an argument — which is NOT a call. A JSON client
+# that met those keys with no reading would sum them into its callers; the one place an MCP client reads prose is this
+# description, so each says "value uses (tables, args), not a proven call" (+70 B and +71 B, 141 B in all, no schema
+# byte moved, no tool added). Headroom after this line: 28 B (the final review tightened a first 46,800 anchor to the
+# #214-sized margin: 78 B of unattributed headroom was wider than any re-anchor here has taken).
+CEILING = 46750
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )

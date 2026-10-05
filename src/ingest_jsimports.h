@@ -189,6 +189,156 @@ inline std::uint32_t jsModuleBindingCount( TSNode root, std::string_view name, s
     return count;
 }
 
+// FE-A: one top-level `const|let|var` statement's MODULE ALIASES (model.h LocalBindKind::ModuleAlias), handed to `emit` as
+// ( declarator, local name, source, member, sourceIsIdentifier ):
+//   `const x = require( 'm' )`          → ( x, m, "*", false )
+//   `const { a, b: c } = require( 'm' )` → ( a, m, a, false ), ( c, m, b, false )
+//   `const { a } = G`                   → ( a, G, a, true )   — G any identifier; graph.h decides whether it is a global
+// The require shape is ingest_relations.h jsModuleLoadTarget's (bare `require`, one string argument) minus dynamic import().
+// Any other declarator (a computed key, a rest element, a default value, a member RHS) records nothing: an absent alias
+// leaves the call to the unchanged ladder. Each recorded declarator's start byte lands in `aliasDecls`, so the shadow
+// walk below does not read the alias as a declaration hiding itself.
+template <class Emit>
+inline void captureJsModuleAliases( TSNode stmt, std::string_view src, HashMap<std::uint32_t, char>& aliasDecls, Emit&& emit )
+{
+    ChildCursor cursor( stmt );
+    std::vector<TSNode> declarators;
+    collectChildren( stmt, cursor.cur, declarators );
+    for( TSNode declarator : declarators )
+    {
+        if( !jsNodeIs( declarator, "variable_declarator" ) ) { continue; }
+        const TSNode name  = fieldChild( declarator, NodeField::Name );
+        const TSNode value = fieldChild( declarator, NodeField::Value );
+        if( ts_node_is_null( name ) || ts_node_is_null( value ) ) { continue; }
+        std::string source;
+        bool        fromIdentifier = false;
+        if( jsNodeIs( value, "call_expression" ) && nodeFieldText( value, NodeField::Function, src ) == "require" )
+        {
+            source = jsModuleLoadTarget( value, src );
+        }
+        else if( jsNodeIs( value, "identifier" ) && jsNodeIs( name, "object_pattern" ) )
+        {
+            source         = std::string( pattern::nodeText( value, src ) );
+            fromIdentifier = true;
+        }
+        if( source.empty() ) { continue; }
+        bool any = false;
+        if( jsNodeIs( name, "identifier" ) && !fromIdentifier )
+        {
+            emit( declarator, std::string( pattern::nodeText( name, src ) ), source, std::string( "*" ), false );
+            any = true;
+        }
+        else if( jsNodeIs( name, "object_pattern" ) )
+        {
+            ChildCursor patternCursor( name );
+            std::vector<TSNode> props;
+            collectChildren( name, patternCursor.cur, props );
+            for( TSNode prop : props )
+            {
+                if( jsNodeIs( prop, "shorthand_property_identifier_pattern" ) )
+                {
+                    std::string local( pattern::nodeText( prop, src ) );
+                    emit( declarator, local, source, local, fromIdentifier );
+                    any = true;
+                }
+                else if( jsNodeIs( prop, "pair_pattern" ) )
+                {
+                    const TSNode key = fieldChild( prop, NodeField::Key );
+                    const TSNode val = fieldChild( prop, NodeField::Value );
+                    if( jsNodeIs( key, "property_identifier" ) && jsNodeIs( val, "identifier" ) )
+                    {
+                        emit( declarator, std::string( pattern::nodeText( val, src ) ), source, std::string( pattern::nodeText( key, src ) ), fromIdentifier );
+                        any = true;
+                    }
+                }
+            }
+        }
+        if( any ) { aliasDecls.try_emplace( ts_node_start_byte( declarator ), 1 ); }
+    }
+}
+
+// FE-A: add to `names` every JS/TS global (externalnames.h kJsGlobalObjectNames / kJsGlobalFunctionNames, and the names
+// of the global object itself, kJsGlobalAliasNames: `var self = this` hides `self` exactly as `const JSON = …` hides
+// JSON) the file spells as an identifier token — the set whose declarations the shadow walk records. One linear token
+// scan; comments and strings over-include (a harmless extra name the walk then finds no declaration of).
+inline void jsNoteGlobalSpellings( TSNode root, std::string_view src, HashMap<std::string, char>& names )
+{
+    const std::uint32_t end = std::min<std::uint32_t>( ts_node_end_byte( root ), static_cast<std::uint32_t>( src.size() ) );
+    std::uint32_t at = ts_node_start_byte( root );
+    while( at < end )
+    {
+        if( !namesplit::isIdentChar( src[ at ] ) ) { ++at; continue; }
+        const std::uint32_t start = at;
+        while( at < end && namesplit::isIdentChar( src[ at ] ) ) { ++at; }
+        const std::string_view token = src.substr( start, at - start );
+        if( externalnames::jsGlobalKindOf( token ) != externalnames::JsGlobal::None ) { names.try_emplace( std::string( token ), 1 ); }
+    }
+}
+
+// FE-A: Go import specs as MODULE ALIASES (model.h LocalBindKind::ModuleAlias): `import c "x/y"` → ( c, x/y ), `import
+// "x/y"` → ( the package name the path implies, x/y ), `import . "x/y"` → ( ".", x/y ); a blank import binds nothing. The
+// implied name is the path's last element with a trailing major version (`/v2`, `.v3`) and a `go-` prefix or `-go`
+// suffix dropped — the convention, not the package clause, which lives outside the tree: a package that names itself
+// otherwise is simply not recognised (graph.h then leaves its calls to the ladder, as before).
+inline std::string goImpliedPackageName( std::string_view path )
+{
+    std::string_view last = path;
+    std::size_t      cut  = last.rfind( '/' );
+    std::string_view rest = cut == std::string_view::npos ? std::string_view{} : last.substr( 0, cut );
+    last = cut == std::string_view::npos ? last : last.substr( cut + 1 );
+    const auto isMajor = []( std::string_view s ) { return s.size() >= 2 && s[ 0 ] == 'v' && std::all_of( s.begin() + 1, s.end(), []( char c ) { return c >= '0' && c <= '9'; } ); };
+    if( isMajor( last ) && !rest.empty() )
+    {
+        const std::size_t prev = rest.rfind( '/' );
+        last = prev == std::string_view::npos ? rest : rest.substr( prev + 1 );
+    }
+    if( const std::size_t dot = last.rfind( '.' ); dot != std::string_view::npos && isMajor( last.substr( dot + 1 ) ) ) { last = last.substr( 0, dot ); }
+    if( last.starts_with( "go-" ) ) { last.remove_prefix( 3 ); }
+    if( last.ends_with( "-go" ) ) { last.remove_suffix( 3 ); }
+    return std::string( last );
+}
+
+inline void captureGoImportFacts( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( lang != Lang::Go ) { return; }
+    ChildCursor cursor( root );
+    std::vector<TSNode> pending;
+    collectChildren( root, cursor.cur, pending );
+    std::erase_if( pending, []( TSNode n ) { return !jsNodeIs( n, "import_declaration" ); } );
+    while( !pending.empty() )
+    {
+        const TSNode node = pending.back();
+        pending.pop_back();
+        if( jsNodeIs( node, "import_declaration" ) || jsNodeIs( node, "import_spec_list" ) )
+        {
+            ChildCursor childCursor( node );
+            std::vector<TSNode> nested;
+            collectChildren( node, childCursor.cur, nested );
+            for( TSNode child : nested ) { pending.push_back( child ); }
+            continue;
+        }
+        if( !jsNodeIs( node, "import_spec" ) ) { continue; }
+        const TSNode pathNode = fieldChild( node, NodeField::Path );
+        if( ts_node_is_null( pathNode ) ) { continue; }
+        std::string_view written = pattern::nodeText( pathNode, src );   // "x/y" or `x/y`, one delimiter pair
+        if( written.size() < 2 || written.front() != written.back() || ( written.front() != '"' && written.front() != '`' ) ) { continue; }
+        std::string path( written.substr( 1, written.size() - 2 ) );
+        if( path.empty() ) { continue; }
+        const TSNode nameNode = fieldChild( node, NodeField::Name );
+        std::string  local    = ts_node_is_null( nameNode ) ? goImpliedPackageName( path ) : std::string( pattern::nodeText( nameNode, src ) );
+        if( local.empty() || local == "_" ) { continue; }
+        RawBind bind;
+        bind.fileId       = fileId;
+        bind.lang         = lang;
+        bind.startByte    = ts_node_start_byte( node );
+        bind.kind         = LocalBindKind::ModuleAlias;
+        bind.var          = std::move( local );
+        bind.typeName     = std::move( path );
+        bind.importedName = "*";
+        binds.push_back( std::move( bind ) );
+    }
+}
+
 inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
 {
     if( lang != Lang::TypeScript && lang != Lang::JavaScript ) { return; }
@@ -197,6 +347,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
     collectChildren( root, cursor.cur, children );
     HashMap<std::string, char> imported;
     imported.reserve( children.size() );
+    HashMap<std::uint32_t, char> aliasDecls;   // FE-A: start bytes of the declarators that ARE a ModuleAlias — never their own shadow
     const auto record = [ & ]( TSNode node, LocalBindKind kind, std::string name, TSNode scope )
     {
         RawBind bind;
@@ -240,6 +391,22 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                         binds.back().importedName = isDefault ? "default" : std::string( pattern::nodeText( name, src ) );
                     }
                 }
+                else if( jsNodeIs( node, "namespace_import" ) && !jsHasToken( stmt, "type" ) )
+                {
+                    // FE-A: `import * as ns from 'm'` binds the MODULE; graph.h FalseEdgeRules reads `ns.f()` through it
+                    ChildCursor nsCursor( node );
+                    std::vector<TSNode> nsKids;
+                    collectChildren( node, nsCursor.cur, nsKids );
+                    for( TSNode kid : nsKids )
+                    {
+                        if( !jsNodeIs( kid, "identifier" ) ) { continue; }
+                        std::string local( pattern::nodeText( kid, src ) );
+                        imported.try_emplace( local, 1 );
+                        record( stmt, LocalBindKind::ModuleAlias, std::move( local ), {} );
+                        binds.back().typeName     = module;
+                        binds.back().importedName = "*";
+                    }
+                }
                 else if( jsNodeIs( node, "import_statement" ) || jsNodeIs( node, "import_clause" ) || jsNodeIs( node, "named_imports" ) )
                 {
                     ChildCursor childCursor( node );
@@ -248,6 +415,17 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                     for( TSNode child : nested ) { pending.push_back( child ); }
                 }
             }
+        }
+        else if( jsNodeIs( stmt, "lexical_declaration" ) || jsNodeIs( stmt, "variable_declaration" ) )
+        {
+            captureJsModuleAliases( stmt, src, aliasDecls, [ & ]( TSNode declarator, std::string local, std::string source, std::string member, bool fromIdentifier )
+            {
+                imported.try_emplace( local, 1 );
+                record( declarator, LocalBindKind::ModuleAlias, std::move( local ), {} );
+                binds.back().typeName         = std::move( source );
+                binds.back().importedName     = std::move( member );
+                binds.back().isFromAssignment = fromIdentifier;
+            } );
         }
         else if( jsNodeIs( stmt, "export_statement" ) )
         {
@@ -317,6 +495,10 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
             }
         }
     }
+    // FE-A: a declaration spelled like a JS/TS global (`const JSON = …`, a parameter `fetch`) hides the global the same way
+    // it hides an import, and graph.h FalseEdgeRules reads both through these JsShadow records. Only names the file spells
+    // as an identifier join, so a file that never says `JSON` pays nothing for it.
+    jsNoteGlobalSpellings( root, src, imported );
     if( imported.empty() ) { return; }
 
     // Imports are module-scoped. Record matching declarations' lexical spans so nested closures inherit
@@ -351,7 +533,7 @@ inline void captureJsImportFacts( TSNode root, Lang lang, std::uint32_t fileId, 
                 }
             }
         }
-        else if( jsNodeIs( node, "variable_declarator" ) )
+        else if( jsNodeIs( node, "variable_declarator" ) && aliasDecls.find( ts_node_start_byte( node ) ) == aliasDecls.end() )
         {
             binding = fieldChild( node, NodeField::Name );
             const bool isVar = jsNodeIs( ts_node_parent( node ), "variable_declaration" );

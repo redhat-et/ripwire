@@ -148,7 +148,9 @@ int main( int argc, char** argv )
     rw::HashMap<rw::NodeId, std::vector<const rw::Reference*>> bySym;
     for( const rw::Reference& r : ir.references )
     {
-        if( r.fromSymbol != rw::kNoNode )
+        // A value use (a function stored or passed) and a call THROUGH a value are not call references: this dump is
+        // the pre-resolution CALL list test/callformcheck.sh reads, so they stay out of it (src/valuerefs.h serves them).
+        if( r.fromSymbol != rw::kNoNode && r.role != rw::RefRole::Value && r.role != rw::RefRole::Through )
         {
             bySym[ r.fromSymbol ].push_back( &r );
         }

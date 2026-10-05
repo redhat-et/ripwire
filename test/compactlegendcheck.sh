@@ -281,6 +281,13 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # closing "-->". The root already printed untested_modscope="0"; the full legend now defines it. Checked: the pin equals
 # the previous head's --legend=full output byte for byte (at= masked), and the new output differs from it by exactly
 # that insertion.
+# RE-ANCHORED BY HAND 2026-10-04 (train 25, FE-A false-edge resolution), map.xml only: the v1 header legend's two
+# gauge clauses now state what FE-A counts — unresolved= "calls-with-no-edge-and-no-proof-of-an-outside-target(every-
+# same-named-def-lang-incompatible-or-out-of-the-language-lookup)" (was "call-name-defined-only-in-a-lang-incompatible-
+# file") and external= "...-outside-the-tree-ON-PROOF(builtin/global/predeclared/C-library-name-without-in-repo-evidence,
+# outside-import/use,super-past-the-tree;...)" (was "(builtin/stdlib-name-...,external-import,...)"), +106 B — and the
+# est_tokens= that prices them, 858 -> 901 (header and root). Checked: the new output differs from the pin by exactly
+# those two clauses and that figure; the six other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

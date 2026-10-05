@@ -68,7 +68,74 @@ struct RecvShape
     std::string var;
     std::string field;
     bool        viaArrow = false;
+    bool        member = false;   // FE-A: Go/JS/TS/Rust — the callee is a member access's field (model.h Reference::memberCall)
+    std::string root;             // FE-A: that access's receiver-chain root identifier, "" when not an identifier
 };
+
+// FE-A (model.h Reference::memberRoot): the ROOT identifier of a Go/JS/TS/Rust receiver chain — `crypto` for
+// `crypto.subtle`, `this` for `this.a`, the package alias for `pkg.F`. Walks only member accesses (`a.b.c` →
+// `a`); any other receiver node (a call, `new X()`, a subscript, a literal, a parenthesized expression) has no
+// root identifier and answers "". `self` in Rust and `this` in JS answer their own spelling, so a consumer can
+// tell them from a package or a global object. Bounded by the chain's depth, which the tree bounds.
+inline std::string memberChainRoot( TSNode recv, std::string_view src )
+{
+    TSNode node = recv;
+    for( int depth = 0; depth < 64 && !ts_node_is_null( node ); ++depth )
+    {
+        const char* t = ts_node_type( node );
+        if( kindIs( t, "identifier" ) || kindIs( t, "this" ) || kindIs( t, "self" ) || kindIs( t, "package_identifier" ) )
+        {
+            return std::string( pattern::nodeText( node, src ) );
+        }
+        if( kindIs( t, "member_expression" ) )
+        {
+            node = fieldChild( node, NodeField::Object );
+        }
+        else if( kindIs( t, "selector_expression" ) )
+        {
+            node = fieldChild( node, NodeField::Operand );
+        }
+        else if( kindIs( t, "field_expression" ) )
+        {
+            node = fieldChild( node, NodeField::Value );
+        }
+        else
+        {
+            return {};
+        }
+    }
+    return {};
+}
+
+// FE-A: the member-access node kind and its receiver field for the languages whose receiverOf records no shape (Go, JS/TS,
+// Rust; and C, whose only member call is a call through a function-pointer field).
+inline TSNode memberOnlyReceiver( TSNode parent, Lang lang ) noexcept
+{
+    const char* t = ts_node_type( parent );
+    if( ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && kindIs( t, "member_expression" ) )
+    {
+        return fieldChild( parent, NodeField::Object );
+    }
+    if( lang == Lang::Go && kindIs( t, "selector_expression" ) )
+    {
+        return fieldChild( parent, NodeField::Operand );
+    }
+    if( lang == Lang::Rust && kindIs( t, "field_expression" ) )
+    {
+        return fieldChild( parent, NodeField::Value );
+    }
+    if( lang == Lang::Rust && kindIs( t, "scoped_identifier" ) )
+    {
+        // a PATH call: `Type::f()`, `Self::f()`, `<T as Trait>::f()` — never bare, even when rustQualifierOf leaves the
+        // qualifier empty (the UFCS cast form), so FE-A must not read it as a receiverless call
+        return fieldChild( parent, NodeField::Path );
+    }
+    if( lang == Lang::C && kindIs( t, "field_expression" ) )
+    {
+        return fieldChild( parent, NodeField::Argument );   // `ops->open( x )`: a call through a function-pointer FIELD
+    }
+    return TSNode{};
+}
 
 // One receiver NODE → its RecvShape. `allowChain` is the ONE-hop bound: true at the call's immediate
 // receiver (a member-access receiver descends exactly one level, re-asking the same questions of its
@@ -2121,11 +2188,9 @@ inline RecvShape receiverOf( TSNode nameNode, Lang lang, std::string_view src )
     {
         return {};
     }
-    if( ( lang == Lang::TypeScript || lang == Lang::JavaScript )
-        && kindIs( ts_node_type( parent ), "member_expression" ) )
+    if( const TSNode obj = memberOnlyReceiver( parent, lang ); !ts_node_is_null( obj ) )
     {
-        const TSNode obj = fieldChild( parent, NodeField::Object );
-        if( !ts_node_is_null( obj ) )
+        if( lang == Lang::TypeScript || lang == Lang::JavaScript )
         {
             const RecvKind lit = classifyJsTsLiteralRecv( obj, src, 0 );
             if( lit != RecvKind::None )
@@ -2133,7 +2198,10 @@ inline RecvShape receiverOf( TSNode nameNode, Lang lang, std::string_view src )
                 return { lit, {}, {} };
             }
         }
-        return {};   // non-literal TS/JS member call: today's RecvKind::None
+        RecvShape member;   // recv stays None (non-literal TS/JS, every Go/Rust member call); FE-A marks the shape
+        member.member = true;
+        member.root   = memberChainRoot( obj, src );
+        return member;
     }
     if( !isMemberAccessNode( ts_node_type( parent ), lang ) )
     {

@@ -298,13 +298,23 @@ make_widget(int a)
 	return nullptr;
 }
 EOF
-EN_MAP="$( "$BIN" "$EN" --no-cache --top-k=100000 2>/dev/null )"
-printf '%s' "$EN_MAP" | grep -q 'extent_suspect=' \
-    && no "(f) a clean 'static enum X⏎fn(' / 'class W *fn(' file carries extent_suspect: $( printf '%s' "$EN_MAP" | grep -o '<s [^>]*extent_suspect[^>]*>' | head -3 | tr '\n' ' ' )" \
-    || ok "(f) no extent_suspect on the enum/class return-type and enum-parameter functions"
-"$BIN" "$EN" --no-cache --skipped 2>/dev/null | grep -q 'extent_suspect_files=' \
-    && no "(f2) --skipped names extent_suspect_files on the clean fixture" \
-    || ok "(f2) --skipped carries no extent_suspect_files"
+# Each absence below is read only off an answer that completed: a failed or partial run is a FAIL, not "nothing found".
+if ! EN_MAP="$( "$BIN" "$EN" --no-cache --top-k=100000 2>/dev/null )"; then
+    no "(f) premise: the --top-k=100000 map run failed (rc!=0), so an absent extent_suspect= proves nothing"
+elif ! printf '%s' "$EN_MAP" | grep -q '<s '; then
+    no "(f) premise: the map has no rows"
+elif printf '%s' "$EN_MAP" | grep -q 'extent_suspect='; then
+    no "(f) a clean 'static enum X⏎fn(' / 'class W *fn(' file carries extent_suspect: $( printf '%s' "$EN_MAP" | grep -o '<s [^>]*extent_suspect[^>]*>' | head -3 | tr '\n' ' ' )"
+else
+    ok "(f) no extent_suspect on the enum/class return-type and enum-parameter functions"
+fi
+if ! EN_SK="$( "$BIN" "$EN" --no-cache --skipped 2>/dev/null )" || ! printf '%s' "$EN_SK" | grep -q '<skipped '; then
+    no "(f2) premise: --skipped failed or emitted no <skipped> report"
+elif printf '%s' "$EN_SK" | grep -q 'extent_suspect_files='; then
+    no "(f2) --skipped names extent_suspect_files on the clean fixture"
+else
+    ok "(f2) --skipped carries no extent_suspect_files"
+fi
 EN_CR="$( printf '%s' "$EN_MAP" | grep -o '<s t="[a-z]*" n="cmd_retval"[^>]*>' )"
 if [ -n "$EN_CR" ] && ! printf '%s' "$EN_CR" | grep -q 'overloads='; then
     ok "(f3) cmd_retval is one definition per file (no overloads=) — the return-type uses mint none"

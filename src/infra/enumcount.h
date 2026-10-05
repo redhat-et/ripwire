@@ -77,4 +77,15 @@ constexpr bool enumCountIsExact() noexcept
 
 #endif
 
+// The one bounded lookup of an enum-indexed table: `table[e]` when e indexes it, `fallback` for a byte past the
+// table (a corrupt cache byte, a value past the enum). refRoleTag, valueRefFamily and cacheRejectName all read
+// their tables through it rather than re-spelling the bound check.
+template<class E, class Table, class T>
+    requires std::is_enum_v<E>
+constexpr T enumTableAt( const Table& table, E e, T fallback ) noexcept
+{
+    const auto i = static_cast<std::size_t>( e );
+    return i < std::size( table ) ? T( table[ i ] ) : fallback;
+}
+
 }   // namespace rw

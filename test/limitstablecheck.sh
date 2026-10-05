@@ -389,6 +389,31 @@ else
     fi
 fi
 
+# ── (W) a window disclosure is a disclosure; a mention is not ───────────────────────────────────────
+# A file that EMITS a `<x total= shown= capped=>` window (or its JSON twin's "capped":) discloses its cut as surely as a
+# named `x_capped=`: the per-file "Discloses:" line must say `capped`, not **none**. Near misses that must stay **none**:
+# a comment that only mentions capped="1" (no emission), and an emitted `uncapped=` (another attribute ending in capped).
+mkdir -p "$TMP/win/src" "$TMP/win/docs"
+cp "$GEN" "$TMP/win/docs/limits_build.py"
+printf 'inline constexpr std::size_t kWinXmlRowCap = 8;\nstd::string w() { return std::string( " shown=\\"8\\" capped=\\"1\\"" ); }\n' > "$TMP/win/src/wxml.h"
+printf 'inline constexpr std::size_t kWinJsonRowCap = 8;\nstd::string j() { return std::string( ",\\"capped\\":1" ); }\n' > "$TMP/win/src/wjson.h"
+printf 'inline constexpr std::size_t kWinCommentRowCap = 8;\n// rows beyond it are counted (capped="1") by another file\n' > "$TMP/win/src/wcomment.h"
+printf 'inline constexpr std::size_t kWinUncappedRowCap = 8;\nstd::string u() { return std::string( " uncapped=\\"1\\"" ); }\n' > "$TMP/win/src/wuncapped.h"
+if ! python3 "$TMP/win/docs/limits_build.py" --root "$TMP/win" --out "$TMP/win/docs/LIMITS.md" >/dev/null 2>&1; then
+    no "(W) the generator refused the synthetic window tree"
+else
+    python3 - "$TMP/win/docs/LIMITS.md" <<'WIN' || fail=1
+import re, sys
+doc = open( sys.argv[ 1 ], encoding="utf-8" ).read()
+got = dict( re.findall( r"### `src/([^`]+)`\n\nDiscloses: ([^\n]+)", doc ) )
+want = { "wxml.h": "`capped`", "wjson.h": "`capped`", "wcomment.h": "**none**", "wuncapped.h": "**none**" }
+bad = [ "%s: %r (want %r)" % ( f, got.get( f ), w ) for f, w in sorted( want.items() ) if got.get( f ) != w ]
+if bad:
+    print( "  FAIL  (W) window disclosure: " + "; ".join( bad ) ); sys.exit( 1 )
+print( "  PASS  (W) an emitted window (XML capped=, JSON \"capped\":) discloses `capped`; a comment mention and uncapped= stay **none**" )
+WIN
+fi
+
 # ── (F) the sidecar names live caps only ────────────────────────────────────────────────────────────
 TSV="$ROOT/docs/limits_classes.tsv"
 if [ ! -f "$TSV" ]; then

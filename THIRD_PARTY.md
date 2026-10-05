@@ -146,3 +146,38 @@ OR OTHER DEALINGS IN THE SOFTWARE.
 Each adapted passage says what it changed (the quoting works on UTF-8 bytes and always quotes; several errno
 rows answer what a POSIX caller expects rather than what libuv's event loop does). Re-deriving any row is a
 read of the named upstream function at the pinned commit beside the comment.
+
+### Reference-as-value usages (codebase-memory-mcp)
+
+| Where | Adapted from | Upstream | License |
+| --- | --- | --- | --- |
+| `src/ingest_valuerefs.h` — `ValueRefWalk` (a function named in a value position becomes a usage at its enclosing scope; a call through a value is recorded beside it) | codebase-memory-mcp `handle_usages`, `try_emit_usage`, `is_direct_argument_value`, `is_value_field`, `internal/cbm/extract_usages.c` | https://github.com/DeusData/codebase-memory-mcp at `96c3f41cf334d87670cb085f1fcf16f637293222` | MIT |
+
+The mechanism is ported, not the code: the C walker over every identifier became a C++23 walk over a closed list
+of value positions per grammar, with lexical scope tracking, a slot (`into=`) per row, and calls through a value
+recorded as their own role; the rows never enter the call graph (src/valuerefs.h says what a row does and does not
+mean). codebase-memory-mcp's MIT notice:
+
+```
+MIT License
+
+Copyright (c) 2025 DeusData
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

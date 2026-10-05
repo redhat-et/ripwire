@@ -31,7 +31,6 @@
 #include <cstring>
 #include <cctype>
 #include <cerrno>
-#include <chrono>
 
 #include "infra/os.h"      // rw::os — socket/bind/listen/accept/recv/send/setsockopt; struct timeval for SO_RCVTIMEO (slow-loris guard)
 
@@ -655,9 +654,7 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
         {
             // authorized, well-formed POST /mcp → the SAME shared handler the stdio loop uses. A notification
             // (no id) gets a bodyless 202; everything else a 200 with the JSON-RPC response as the body.
-            const std::chrono::steady_clock::time_point t0 =
-                timingsOn ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-            const std::uint64_t rebuildAtStart = timingsOn ? mcpRebuildCounter().load( std::memory_order_relaxed ) : 0;
+            const McpRequestTiming timing( timingsOn );
 
             const McpDispatchResult r = dispatchMcpLine( req.body, cfg.topK, cfg.stable, cfg.noRedact, policy );
             if( r.isNotification )
@@ -669,14 +666,7 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
                 respond( fd, "200 OK", "application/json", r.resp );
             }
 
-            if( timingsOn )
-            {
-                const double wallMs = std::chrono::duration< double, std::milli >(
-                                          std::chrono::steady_clock::now() - t0 ).count();
-                const unsigned rebuilt = ( mcpRebuildCounter().load( std::memory_order_relaxed ) != rebuildAtStart ) ? 1u : 0u;
-                rw::emitTo( stderr, "ripwire-timing verb={} wall_ms={:.3f} rebuilt={}\n", r.timingVerb.c_str(), wallMs, rebuilt );
-                std::fflush( stderr );
-            }
+            timing.emit( r.timingVerb );   // stderr, after the response (McpRequestTiming, mcpindex.h)
         }
 
         os::close( fd );

@@ -68,7 +68,16 @@ grep -qE '\{limit\}s' "$PARGATES" \
 # ── FUNCTIONAL: exercise the REAL mechanism at second-scale via two throwaway patched copies ─────────────
 # Only DEFAULT_TIMEOUT_SEC (and, in the second copy, one extra dict entry) are rewritten — the timeout
 # selection, the subprocess call, and the message formatting are byte-identical to the production script.
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+# The (O) arm runs one gate in the background at a time; if THIS script is stopped mid-arm, the stop does not reach that
+# gate, so its stub harness (`sleep <token>`) would outlive us for its whole cap. The cleanup stops the active gate and
+# kills its harness by token, on EXIT and on a catchable stop (TERM/INT exit through it).
+ORPH_GATE_PID=""; ORPH_TOK=""
+cleanup(){
+    if [ -n "$ORPH_GATE_PID" ]; then kill -TERM "$ORPH_GATE_PID" 2>/dev/null; fi
+    if [ -n "$ORPH_TOK" ]; then pkill -KILL -f "sleep $ORPH_TOK" 2>/dev/null; fi
+    rm -rf "$TMP"
+}
+TMP="$( mktemp -d )"; trap cleanup EXIT; trap 'exit 143' TERM; trap 'exit 130' INT
 CORPUSROOT="$TMP/corpus"; mkdir -p "$CORPUSROOT/test"
 cat > "$CORPUSROOT/test/probequickgate.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -1057,6 +1066,7 @@ orphan_case()   # $1 = gate, $2 = signal, $3 = harness cap (s), $4 = seconds to 
     ORPH_TOKEN="$tok" CXX="$ORPH/fakecxx" RIPWIRE_GATE_HARNESS_CAP_SEC="$cap" \
         bash "$ROOT/test/$gate.sh" "$ORPH/fakebin" >"$ORPH/$gate.$sig.log" 2>&1 &
     gp=$!
+    ORPH_GATE_PID="$gp"; ORPH_TOK="$tok"
     for i in $( seq 1 150 ); do
         pgrep -f "sleep $tok" >/dev/null 2>&1 && break
         sleep 0.2
@@ -1065,6 +1075,7 @@ orphan_case()   # $1 = gate, $2 = signal, $3 = harness cap (s), $4 = seconds to 
         no "(O) $gate: the stub harness never started, so nothing was measured"
         tail -4 "$ORPH/$gate.$sig.log" | sed 's/^/        /'
         kill -KILL "$gp" 2>/dev/null; wait "$gp" 2>/dev/null
+        ORPH_GATE_PID=""; ORPH_TOK=""
         return
     fi
     kill -"$sig" "$gp" 2>/dev/null     # no wait: a gate that ignores the stop must not hang this arm
@@ -1077,6 +1088,7 @@ orphan_case()   # $1 = gate, $2 = signal, $3 = harness cap (s), $4 = seconds to 
         pkill -KILL -f "sleep $tok" 2>/dev/null
     fi
     kill -KILL "$gp" 2>/dev/null; wait "$gp" 2>/dev/null
+    ORPH_GATE_PID=""; ORPH_TOK=""
 }
 for _g in expandrangecheck diagnoticecheck; do
     orphan_case "$_g" TERM 600 2

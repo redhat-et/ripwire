@@ -607,6 +607,31 @@ inline constexpr const char* kDeclinedCallsTestGateLegend =
 // The clause and, where the gate declined in this graph, its gate sentence — the one spelling every declined_calls= emitter uses.
 inline std::string declinedCallsLegendWithGate( bool on, bool gateDeclined ) { return std::string( declinedCallsLegend( on ) ) + declinedCallsGateLegend( on && gateDeclined ); }
 
+// ── reference-as-value round (src/valuerefs.h, src/ingest_valuerefs.h) ─────────────────────────────────────────
+// Each clause rides ONLY a document that carries the attribute or rows it defines (value_refs= / <vrs>), so an answer
+// with no value reference keeps its bytes. What a row does NOT mean is said in the same breath: it is matched by name,
+// it is not a proven call, and no count or reach includes it.
+inline constexpr const char* kValueRefsCallersLegend =
+    "value_refs=N (absent when 0) counts <vr> rows: the function is USED AS A VALUE, not called: stored into a table, field or variable, or passed as an argument, matched by name. It is not a proven call; count= and every reach exclude it. <vrs total= shown= capped= next=> is their window (capped=\"1\": rows cut, next= pages every site). <vr in_id= bind= into= called_by=>: the enclosing symbol, the binding site file:line, where the value lands, and the functions that may call through that slot (a called parameter, or tbl[k]() / tbl.k() on the same declaration). ";
+inline constexpr const char* kValueRefsCalleesLegend =
+    "value_refs=N (absent when 0) counts <vr> rows: functions this one uses AS VALUES (stored or passed), matched by name, and with through= the ones it may call through a parameter or table (through= is the written callee). It is not a proven call; count= excludes them. <vrs total= shown= capped= next=> is their window. <vr to= def= bind= into= through= sites=>: the function, its definition, the binding site, where the value lands, the call through it, and how many binding sites one to=/through= pair joins. ";
+inline constexpr const char* kValueRefsReachLegend =
+    "value_refs=N (absent when 0) counts <vr> rows: SYM is USED AS A VALUE at bind= (stored into into= or passed), matched by name. It is not a proven call: reaches= and impact_reaches= exclude them, and a caller that runs it through that slot is not in the radius. <vrs total= shown= capped= next=> is their window; <vr in_id= bind= into= called_by=>: the enclosing symbol, the binding site, where it lands, functions that may call through it. ";
+inline constexpr const char* kValueRefsSafeDeleteLegend =
+    "value_refs=N (absent when 0): SYM is USED AS A VALUE N times (a table, field or argument holds it; matched by name, not a proven call). Each such site (a decorator row aside: a fact about the definition) is in uses=; any row keeps dead_code_candidate at 0 and risk off none-found: deleting SYM breaks the table even though no call reaches it. <vrs>/<vr in_id= bind= into= called_by=> list them. ";
+inline constexpr const char* kToValueRefsLegend =
+    "to_value_refs=N (absent when 0): to= is USED AS A VALUE N times (stored or passed, matched by name); a run through such a slot is not a proven call and is no hop here: the callers verb on to= lists the binding sites and called_by=. ";
+inline constexpr const char* kUsesValueRoleLegend =
+    "role=\"value\" (reference-as-value round): the function is USED AS A VALUE there, stored into a table, field or variable or passed as an argument, matched by name with the callers verb's own visibility rules. It is not a proven call; the callers verb shows where the value lands and who may call through it. A decorator row is a fact about the definition, not a site: the callers verb lists it, this verb does not. ";
+inline const char* usesValueRoleLegend( bool on ) noexcept { return on ? kUsesValueRoleLegend : ""; }
+inline const char* valueRefsLegend( bool on, bool callersSide ) noexcept
+{
+    return on ? ( callersSide ? kValueRefsCallersLegend : kValueRefsCalleesLegend ) : "";
+}
+inline const char* valueRefsReachLegend( bool on ) noexcept { return on ? kValueRefsReachLegend : ""; }
+inline const char* valueRefsSafeDeleteLegend( bool on ) noexcept { return on ? kValueRefsSafeDeleteLegend : ""; }
+inline const char* toValueRefsLegend( bool on ) noexcept { return on ? kToValueRefsLegend : ""; }
+
 // ONE absent-at-zero count attribute: ` name="N"`, or nothing at all when count is 0. declined_calls= below and
 // --skipped's extent_suspect_files=/macro_blanked_files= (root) and extent_suspect_syms=/macro_blanked= (<h> rows)
 // all spell through it, so the shape has one definition instead of a copy per verb.

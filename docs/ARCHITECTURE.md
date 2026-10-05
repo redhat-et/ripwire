@@ -369,6 +369,17 @@ the affected edges are marked `prov="scip"`.
 **False edges are expected and acceptable.** The deliverable is an importance *ranking*, not a sound
 call graph, and the first XML comment in every run says so.
 
+**References as values are not edges.** A function named in a value position — a struct-field or
+dict/object/array initialiser, a call argument, an assignment, a decorator — is captured by
+`src/ingest_valuerefs.h` as `RefRole::Value`, and a call *through* such a value (a called parameter,
+`tbl[k](…)`) as `RefRole::Through` (the mechanism is ported from codebase-memory-mcp; THIRD_PARTY.md).
+Neither role enters the CSR, PageRank or any count. `src/valuerefs.h` resolves them by name with the
+call graph's visibility (same file first; C `static` stays in its file; JS/TS/Python need a named
+import; Go stays in its package) and serves them as separate `<vr>` rows with `value_refs=N`: where
+the value lands (`into=`), and which functions may call through that slot (`called_by=`/`through=`).
+A row is a clue to follow, not a proven call; `--dead-code` and `--safe-delete` treat a value use as
+a reason a function is not dead.
+
 ### graph — the CSR
 
 **Nodes are symbols. Files are not nodes.** A file is a serialization attribute. If files were

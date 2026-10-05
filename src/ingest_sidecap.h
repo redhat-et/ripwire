@@ -1555,6 +1555,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
             captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens, shortfall );
         }
         captureJsImportFacts( root, le.lang, fileId, src, binds );
+        captureGoImportFacts( root, le.lang, fileId, src, binds );   // FE-A: Go import specs → ModuleAlias (graph.h FalseEdgeRules)
 
         // A4-R5: cross-language FFI binding declarations (pybind11 / extern "C" / ctypes handle). Inert on a
         // binding-free file (pybind gated on a file signal; extern-C/ctypes only fire on their exact shapes).
@@ -1647,6 +1648,11 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
             fuseprobe::gFilesTotal.fetch_add( 1, std::memory_order_relaxed );
         }
 #endif
+
+        // Reference-as-value round: a function NAMED in a value position (an initialiser, an argument, an
+        // assignment, a decorator…) and every call THROUGH such a value. Both lean and rich families capture it —
+        // --callers/--callees/--impact/--dead-code read it — and neither role enters the call graph (model.h RefRole).
+        captureValueRefs( le.lang, fileId, src, root, refs );
 
         // #72 follow-up: everything the side passes just appended for THIS file, filtered through the one
         // decided-dead rule.
@@ -2349,6 +2355,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
                     r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
                     r.viaArrow  = rs.viaArrow;                                           //   `p->m()`: Rule 2b's smart-pointer pointee needs it
+                    r.memberCall = rs.member;  r.memberRoot = std::move( rs.root );      //   FE-A: a Go/JS/TS/Rust member call and its receiver root
                     if( le.lang == Lang::Ruby && r.recv == RecvKind::NamedVar )
                     {
                         r.fieldName = rubyReceiverWrittenPath( nameNode, r.recvVar, src );   // parser version 137: a constant's path as written

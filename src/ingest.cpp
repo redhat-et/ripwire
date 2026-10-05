@@ -15,6 +15,7 @@
 #include "infra/nodekind.h"    // rw::kindIs - the inline node-kind compare the per-AST-node dispatch chains run on (OPTREMARKS F3)
 #include "infra/fieldid.h"     // rw::fieldChild - the same defect one layer down: the field NAME resolved once per grammar, not per node
 #include "infra/hashutil.h"    // sanitizer-clean modulo-2^64 FNV multiplication
+#include "externalnames.h"     // FE-A: the JS/TS global tables the shadow walk keys on (ingest_jsimports.h jsNoteGlobalSpellings)
 #include "infra/namesplit.h"   // H4: stripTemplateArgs for the C++ qualified-call re-split (shared with tracelocus.h)
 #include "infra/jsonesc.h"     // rw::shSingleQuote - the git ignore probe quotes its root the same way every other git popen does
 #include "infra/fixedStr.h"    // rw::findByte — the NEON/SSE2 byte scan buildNewlineOffsets rides
@@ -193,6 +194,7 @@ extern "C"
 #include "ingest_binds.h"
 #include "ingest_elixir.h"
 #include "ingest_importcap.h"
+#include "ingest_valuerefs.h"
 #include "ingest_sidecap.h"
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"
