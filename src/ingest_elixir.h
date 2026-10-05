@@ -378,8 +378,10 @@ struct ElixirContext
         }
         for( TSNode p = ts_node_parent( node ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
         {
-            if( elixirModuleKeyword( elixirTarget( p, src ) ) || elixirTarget( p, src ) == "defimpl" )
+            if( ( elixirModuleKeyword( elixirTarget( p, src ) ) || elixirTarget( p, src ) == "defimpl" )
+                && !elixirInert( p, src ) )
             {
+                // Quoted module declarations are AST, not the lexical module of an evaluated hole.
                 return moduleName( p, depth + 1 );
             }
         }

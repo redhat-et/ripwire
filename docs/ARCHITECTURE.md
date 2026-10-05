@@ -173,7 +173,7 @@ Bare variable-shaped AST identifiers are not counted merely for being identifier
 `bind_quoted` disables unquoting by default; explicit `unquote: true` re-enables it and
 `unquote: false` keeps its argument inert. Nonliteral unquote options cannot prove a live hole.
 Nested quotes become inert again inside a live hole; an inner quote that is itself inert
-cannot execute its own holes in the current stage. Quoted declaration heads and metadata
+cannot execute its own holes in the current stage. Quoted module declarations do not change the lexical module of evaluated holes. Quoted declaration heads and metadata
 do not suppress evaluated hole arguments; bound variables in those arguments remain variables. `use` records the
 dependency, but does not execute `__using__`; framework DSLs and generated Phoenix/Ecto functions
 therefore need an explicit source definition to appear. A call that only an injected import could
