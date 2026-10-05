@@ -33,6 +33,289 @@ assert 'phantom' not in syms, 'quoted definition became an indexed symbol'
 assert 'nonexistent' not in calls('quoted'), 'quoted call site became a call edge'
 print('  PASS Elixir definitions, guards, macros, local/remote calls, pipes and negatives')
 PY
+
+# Live-hole arguments execute even when the enclosing quoted syntax is a
+# declaration head or metadata. Outer declaration/pattern filters must stop here.
+mkdir "$TMP/head-holes"
+cat > "$TMP/head-holes/heads.ex" <<'EXHEADHOLES'
+defmodule HeadHole do
+  def bar(x), do: x
+  def seed(), do: :generated
+  defmacro generated(x) do
+    quote do
+      def unquote(bar(x))(arg), do: arg
+    end
+  end
+  defmacro typed(x) do
+    quote do
+      @spec unquote(bar(x))
+    end
+  end
+  defmacro bare() do
+    quote do
+      def unquote(seed)(arg), do: arg
+    end
+  end
+  defmacro bound_name(seed) do
+    quote do
+      def unquote(seed)(arg), do: arg
+    end
+  end
+  defmacro disabled(x) do
+    quote unquote: false do
+      def unquote(bar(x))(arg), do: arg
+    end
+  end
+end
+EXHEADHOLES
+"$BIN" "$TMP/head-holes" --no-cache > "$TMP/head-holes.xml"
+python3 - "$TMP/head-holes.xml" <<'PYHEADHOLES'
+import sys, xml.etree.ElementTree as ET
+syms = {s.get('n'): s for s in ET.parse(sys.argv[1]).iter('s')}
+def calls(name): return {c.get('n') for c in syms[name].iter('c')}
+assert calls('generated/1') == {'bar/1'}, 'quoted declaration head dropped the live-hole call'
+assert calls('typed/1') == {'bar/1'}, 'quoted metadata dropped the live-hole call'
+assert calls('bare/0') == {'seed/0'}, 'quoted declaration head mistook a live bare call for a pattern'
+assert not calls('bound_name/1'), 'bound live-hole variable became a zero-arity call'
+assert not calls('disabled/1'), 'disabled declaration-head hole became live'
+print('  PASS live holes in quoted declaration heads/metadata, bare calls and variable negatives')
+PYHEADHOLES
+
+# A module declaration which is itself quoted must not change the lexical
+# module of an evaluated hole. A same-file namesake makes wrong-scope fallback visible.
+mkdir "$TMP/module-hole"
+cat > "$TMP/module-hole/modules.ex" <<'EXMODULEHOLE'
+defmodule Real do
+  def bar(x), do: x
+  def run(x) do
+    quote do
+      defmodule Phantom do
+        unquote(bar(x))
+      end
+    end
+  end
+end
+defmodule Other do
+  def bar(x), do: x
+end
+EXMODULEHOLE
+"$BIN" "$TMP/module-hole" --no-cache > "$TMP/module-hole.xml"
+python3 - "$TMP/module-hole.xml" <<'PYMODULEHOLE'
+import sys, xml.etree.ElementTree as ET
+syms = {(s.get('n'), s.get('sc', '')): s for s in ET.parse(sys.argv[1]).iter('s')}
+assert 'bar/1' in {c.get('n') for c in syms['run/1', 'Real'].iter('c')}, 'inert module ancestor stole the live-hole lexical scope'
+assert not any(n == 'Phantom' for n, sc in syms), 'inert module became a definition'
+print('  PASS inert module declarations do not shadow live-hole lexical scope')
+PYMODULEHOLE
+"$BIN" "$TMP/module-hole" --callees=run/1 --no-cache > "$TMP/module-hole-callees.xml"
+python3 - "$TMP/module-hole-callees.xml" <<'PYMODULETARGET'
+import sys, xml.etree.ElementTree as ET
+rows = {(s.get('n'), s.get('p')) for s in ET.parse(sys.argv[1]).iter('s')}
+assert rows == {('bar/1', 'modules.ex:2')}, f'live hole bound to the wrong module: {rows}'
+print('  PASS live hole reaches Real.bar/1, not the same-file Other.bar/1')
+PYMODULETARGET
+
+# Issue #357: quoted syntax is inert, but unquote expressions are evaluated while
+# constructing it. Keep this fixture separate from the golden corpus so the gate
+# contrasts the call sites and the declined count directly.
+mkdir "$TMP/inert"
+cat > "$TMP/inert/quoted.ex" <<'EXINERT'
+defmodule InertFixture do
+  def inert(x), do: x
+  def bar(x), do: x
+  def splice(x), do: [x]
+  def after_call(x), do: x
+  def quote(x), do: x
+  def comment(x), do: x
+
+  def run(x) do
+    quote do
+      inert(x)
+      foo(unquote(bar(x)))
+      [unquote_splicing(splice(x))]
+    end
+    after_call(x)
+    InertFixture.quote(x)
+    InertFixture.comment(x)
+  end
+
+  def options(x) do
+    quote bind_quoted: [item: bar(x)] do
+      inert(item)
+    end
+  end
+
+  def nested(x) do
+    quote do
+      unquote(quote do
+        inert(x)
+        unquote(bar(x))
+      end)
+    end
+  end
+end
+EXINERT
+"$BIN" "$TMP/inert" --no-cache > "$TMP/inert.xml"
+python3 - "$TMP/inert.xml" <<'PYINERT'
+import re, sys, xml.etree.ElementTree as ET
+data = open(sys.argv[1]).read()
+syms = {s.get('n'): s for s in ET.fromstring(data).iter('s')}
+def calls(name): return {c.get('n') for c in syms[name].iter('c')}
+assert 'inert/1' not in calls('run/1'), 'ordinary quoted call became an edge'
+assert 'bar/1' in calls('run/1'), 'unquote(bar(x)) lost its live call edge'
+assert 'splice/1' in calls('run/1'), 'unquote_splicing(splice(x)) lost its live call edge'
+assert 'after_call/1' in calls('run/1'), 'call after quote was suppressed'
+assert {'quote/1', 'comment/1'} <= calls('run/1'), 'ordinary named functions were treated as special forms'
+assert 'bar/1' in calls('options/1'), 'bind_quoted option expression was suppressed'
+assert 'inert/1' not in calls('options/1'), 'bind_quoted quote body became live'
+assert 'bar/1' in calls('nested/1'), 'inner unquote in nested quote lost its live call edge'
+assert 'inert/1' not in calls('nested/1'), 'nested quote body became live'
+match = re.search(r'\bdeclined=(\d+)\b', data)
+assert match and int(match.group(1)) >= 3, 'inert-region calls vanished from declined accounting'
+print('  PASS inert quote bodies, live holes, near misses, boundaries, and declined count')
+PYINERT
+mkdir "$TMP/inert-control"
+python3 - "$TMP/inert/quoted.ex" "$TMP/inert-control/quoted.ex" <<'PYINERTCONTROL'
+import pathlib, sys
+original = pathlib.Path(sys.argv[1]).read_text()
+lines = original.splitlines(keepends=True)
+mutated = 0
+for i, line in enumerate(lines):
+    if line.strip() in {'inert(x)', 'inert(item)'}:
+        lines[i] = line[:len(line) - len(line.lstrip())] + 'x\n'
+        mutated += 1
+    elif line.strip() == 'foo(unquote(bar(x)))':
+        lines[i] = line.replace('foo(unquote(bar(x)))', 'unquote(bar(x))')
+        mutated += 1
+assert mutated == 4, f'control did not remove all four inert call sites: {mutated}'
+pathlib.Path(sys.argv[2]).write_text(''.join(lines))
+PYINERTCONTROL
+"$BIN" "$TMP/inert-control" --no-cache > "$TMP/inert-control.xml"
+python3 - "$TMP/inert.xml" "$TMP/inert-control.xml" <<'PYINERTCOUNT'
+import re, sys
+def declined(path):
+    match = re.search(r'\bdeclined=(\d+)\b', open(path).read())
+    return int(match.group(1)) if match else 0
+assert declined(sys.argv[1]) >= declined(sys.argv[2]) + 4, (declined(sys.argv[1]), declined(sys.argv[2]))
+print('  PASS four inert call sites move declined accounting by four')
+PYINERTCOUNT
+"$BIN" "$TMP/inert" --callees=run/1 --no-cache > "$TMP/inert-callees.xml"
+"$BIN" "$TMP/inert" --callers=inert/1 --no-cache > "$TMP/inert-callers.xml"
+python3 - "$TMP/inert.xml" "$TMP/inert-callees.xml" "$TMP/inert-callers.xml" <<'PYINERTVERBS'
+import sys, xml.etree.ElementTree as ET
+map_text, callees_text, callers_text = [open(p).read() for p in sys.argv[1:]]
+assert 'including inert Elixir quote sites' in map_text, 'compact map misdescribes declined sites'
+callees = ET.fromstring(callees_text)
+assert callees.get('declined_calls') == '2', callees.attrib
+assert 'including inert Elixir quote sites' in callees_text, 'compact callees misdescribes declined sites'
+callers = ET.fromstring(callers_text)
+assert callers.get('count') == '0', callers.attrib
+assert 'declined_calls' not in callers.attrib, 'inert sites became possible callers'
+print('  PASS declined map/callees accounting, compact readings, and no possible callers')
+PYINERTVERBS
+
+# A non-Elixir body may quote our legend markers as source text. Only real
+# comments outside CDATA may select the inert-decline reading.
+mkdir -p "$TMP/marker/src" "$TMP/marker/a" "$TMP/marker/b"
+cat > "$TMP/marker/src/run.cpp" <<'CPPMARKER'
+int run() {
+  const char* marker = R"marker(<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-inert-quote-AST-after-unquote/unquote_splicing-re-entry;no-edge;not-a-possible-callee -->)marker";
+  const char* clause = "ordinary Elixir call candidates in inert quote AST";
+  return duplicate();
+}
+CPPMARKER
+printf 'int duplicate() { return 1; }\n' > "$TMP/marker/a/a.cpp"
+printf 'int duplicate() { return 2; }\n' > "$TMP/marker/b/b.cpp"
+"$BIN" "$TMP/marker" --pack-top-n=3 --no-cache > "$TMP/marker.xml"
+python3 - "$TMP/marker.xml" <<'PYMARKER'
+import sys, xml.etree.ElementTree as ET
+text = open(sys.argv[1]).read()
+ET.fromstring(text)
+assert 'declined=1' in text and '<![CDATA[' in text, 'marker control is vacuous'
+assert 'including inert Elixir quote sites' not in text, 'C++ source text changed the compact declined reading'
+print('  PASS non-Elixir CDATA markers cannot select the inert-decline reading')
+PYMARKER
+
+# Operator calls and named function captures are reference candidates too. Bare
+# variable-shaped AST names are not counted merely for being identifiers.
+mkdir "$TMP/inert-kinds"
+cat > "$TMP/inert-kinds/count.ex" <<'EXKINDS'
+defmodule InertKinds do
+  def bar(x), do: x
+  def run(x) do
+    quote do
+      bar(x)
+      1 + 2
+      &bar/1
+      x
+    end
+  end
+end
+EXKINDS
+"$BIN" "$TMP/inert-kinds" --no-cache > "$TMP/inert-kinds.xml"
+python3 - "$TMP/inert-kinds.xml" <<'PYKINDS'
+import re, sys, xml.etree.ElementTree as ET
+text = open(sys.argv[1]).read()
+syms = {s.get('n'): s for s in ET.fromstring(text).iter('s')}
+assert not list(syms['run/1'].iter('c')), 'inert operator/capture became an edge'
+match = re.search(r'\bdeclined=(\d+)\b', text)
+assert match and int(match.group(1)) == 3, 'inert operator/named capture references disappeared or variable AST inflated counting'
+print('  PASS inert calls, operators and named captures counted; variable AST excluded')
+PYKINDS
+
+# quote options control whether unquote is a live hole (Kernel.SpecialForms.quote/2).
+mkdir "$TMP/quote-options"
+cat > "$TMP/quote-options/options.ex" <<'EXOPTIONS'
+defmodule QuoteOptions do
+  def bar(x), do: x
+  def splice(x), do: [x]
+  def bound(x) do
+    quote bind_quoted: [x: x] do
+      unquote(bar(x))
+      [unquote_splicing(splice(x))]
+    end
+  end
+  def disabled(x) do
+    quote unquote: false, do: unquote(bar(x))
+  end
+  def enabled(x) do
+    quote bind_quoted: [x: x], unquote: true do
+      unquote(bar(x))
+    end
+  end
+  def nested_inert(x) do
+    quote do
+      quote do
+        unquote(bar(x))
+      end
+    end
+  end
+  def nested_disabled(x) do
+    quote unquote: false do
+      unquote(quote do
+        unquote(bar(x))
+      end)
+    end
+  end
+end
+EXOPTIONS
+"$BIN" "$TMP/quote-options" --no-cache > "$TMP/options.xml"
+python3 - "$TMP/options.xml" <<'PYOPTIONS'
+import sys, xml.etree.ElementTree as ET
+syms = {s.get('n'): s for s in ET.parse(sys.argv[1]).iter('s')}
+def calls(name): return {c.get('n') for c in syms[name].iter('c')}
+assert not calls('bound/1'), 'bind_quoted incorrectly activates unquote/splicing'
+assert not calls('disabled/1'), 'unquote: false incorrectly activates unquote'
+assert calls('enabled/1') == {'bar/1'}, 'explicit unquote: true failed to restore the live hole'
+assert not calls('nested_inert/1'), 'unquote in an inert nested quote became live'
+assert not calls('nested_disabled/1'), 'disabled outer hole evaluated its nested quote'
+print('  PASS disabled unquote, bind_quoted default, and explicit re-enable')
+PYOPTIONS
+for n in a b c; do "$BIN" "$TMP/inert" > "$TMP/inert-$n.xml"; done
+cmp "$TMP/inert.xml" "$TMP/inert-a.xml"
+cmp "$TMP/inert-a.xml" "$TMP/inert-b.xml"
+cmp "$TMP/inert-b.xml" "$TMP/inert-c.xml"
+echo '  PASS inert count and live edges survive cold/warm round trips'
 for n in a b c; do "$BIN" "$TMP/fix" > "$TMP/$n.xml"; done
 cmp "$TMP/map.xml" "$TMP/a.xml"
 cmp "$TMP/a.xml" "$TMP/b.xml"

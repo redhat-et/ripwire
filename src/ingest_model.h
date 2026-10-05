@@ -329,7 +329,7 @@ inline void mintModuleScopeOwners( IngestResult& result, std::vector<RawDef>& ra
         {
             continue;
         }
-        if( r.role != RefRole::Call && r.role != RefRole::Macro )
+        if( r.role != RefRole::Call && r.role != RefRole::Macro && r.role != RefRole::Inert )
         {
             continue;
         }
@@ -928,7 +928,7 @@ inline void emitReferences( IngestResult& result, std::vector<RawRef>& rawRefs, 
         // one that does not, so one reference's spelling would depend on an unrelated fact about its file;
         // and --affected's import tier and graph.h's Binding tables both already read that kNoNode.
         const bool refTakesModuleScope = !r.isInherit && !r.isDocLink && !r.isCompose
-                                      && ( r.role == RefRole::Call || r.role == RefRole::Macro );
+                                      && ( r.role == RefRole::Call || r.role == RefRole::Macro || r.role == RefRole::Inert );
         ref.fromSymbol  = refTakesModuleScope ? refSweep.find( r.fileId, r.startByte )
                                               : refSweep.findOwnedDef( r.fileId, r.startByte );
     }

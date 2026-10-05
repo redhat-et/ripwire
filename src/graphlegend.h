@@ -598,6 +598,9 @@ inline constexpr const char* kDeclinedCallsLegend =
 // answer on a tree the gate never touched keeps its bytes.
 inline constexpr const char* kDeclinedCallsGateClause =
     "It also counts a call named like a builtin-type method (dict.get, list.append) whose bound definitions' classes the caller's file never names. ";
+inline constexpr const char* kInertDeclinedCallsClause =
+    "In the callees form it also counts ordinary Elixir call candidates in inert quote AST after unquote/unquote_splicing re-entry. "
+    "These sites have no uses rows or target candidates, so they contribute no caller or impact declined_calls= candidate list. ";
 inline const char* declinedCallsLegend( bool on ) noexcept { return on ? kDeclinedCallsLegend : ""; }
 inline const char* declinedCallsGateLegend( bool on ) noexcept { return on ? kDeclinedCallsGateClause : ""; }
 // --test-gate's own short form: the same attribute and unit, sized for a verb whose legend has an absolute byte budget
@@ -605,7 +608,10 @@ inline const char* declinedCallsGateLegend( bool on ) noexcept { return on ? kDe
 inline constexpr const char* kDeclinedCallsTestGateLegend =
     "declined_calls=K (absent when 0): K call SITES the resolver declined to bind that could have reached the change or its radius (the map's declined=); a test behind one is in no row here. ";
 // The clause and, where the gate declined in this graph, its gate sentence — the one spelling every declined_calls= emitter uses.
-inline std::string declinedCallsLegendWithGate( bool on, bool gateDeclined ) { return std::string( declinedCallsLegend( on ) ) + declinedCallsGateLegend( on && gateDeclined ); }
+inline std::string declinedCallsLegendWithGate( bool on, bool gateDeclined, bool inertDeclined = false )
+{
+    return std::string( declinedCallsLegend( on ) ) + declinedCallsGateLegend( on && gateDeclined ) + ( on && inertDeclined ? kInertDeclinedCallsClause : "" );
+}
 
 // ── reference-as-value round (src/valuerefs.h, src/ingest_valuerefs.h) ─────────────────────────────────────────
 // Each clause rides ONLY a document that carries the attribute or rows it defines (value_refs= / <vrs>), so an answer

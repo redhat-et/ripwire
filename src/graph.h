@@ -129,6 +129,7 @@ struct Graph
     // stores what those calls could equally have meant ONCE PER DISTINCT candidate list (internDeclinedList): list k is declinedListCand[ off[k], off[k+1] ),
     // named by declinedListCallCount[k] calls — what the callers and impact answers read to count, once per call, the declines that could have meant THEIR symbols.
     std::vector<std::uint32_t> declinedOut;
+    std::size_t                inertDeclinedCalls = 0;   // quoted call sites counted in declinedOut, with no candidate list
     std::vector<std::uint32_t> declinedListOff{ 0u };   // the leading offset lives here, so a default Graph is already a valid zero-list CSR
     std::vector<NodeId>        declinedListCand;
     std::vector<std::size_t>   declinedListCallCount;
@@ -269,7 +270,7 @@ inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
             return kind == SymKind::Macro;
         }
         case RefRole::Call: case RefRole::Read: case RefRole::Write: case RefRole::Import:
-        case RefRole::Value: case RefRole::Through:   // never in the call loop; graph.h valueRefIndex narrows by kind itself
+        case RefRole::Value: case RefRole::Through: case RefRole::Inert:   // Inert exits before the name ladder
         {
             return true;   // un-narrowed — see the doctrine above; a NEW role is a -Werror=switch decision here
         }
@@ -4054,6 +4055,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( r.fromSymbol == kNoNode )
         {
             disposition = CallDisposition::FileScope;   // no caller node for an edge; the use-site index still lists the site
+            continue;
+        }
+        if( r.role == RefRole::Inert )
+        {
+            // The syntax is a call candidate, but quoted AST cannot execute it. Count the declined
+            // site on its caller; do not intern target candidates, since it could reach none of them.
+            ++g.declinedOut[ r.fromSymbol ];
+            ++g.inertDeclinedCalls;
+            disposition = CallDisposition::Declined;
             continue;
         }
         const auto it = byName.find( r.calleeName );

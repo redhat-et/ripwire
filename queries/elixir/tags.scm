@@ -1,5 +1,7 @@
 ; Elixir definitions are ordinary calls in the grammar. captureTagsFacts applies
-; the keyword/head/quote filters in ingest_elixir.h; tags predicates are not evaluated.
+; the keyword/head filters in ingest_elixir.h and the shared inert-region
+; walk in ingest_inert.h; tags predicates are not evaluated. Capturing every call as
+; @inert/@live would still need C++ head checks and enlarge this hot capture stream.
 ; Anchors restrict definition names to the FIRST argument (never a call's body).
 (call target: (identifier)
   (arguments . [(alias) (dot) (atom)] @name)) @definition.module

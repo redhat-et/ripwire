@@ -1924,6 +1924,28 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 if( nameTxt == "/" && elixirNodeIs( parent, "unary_operator" ) && nodeFieldText( parent, NodeField::Operator, src  ) == "&" ) { continue; }
             }
 
+            if( le.lang == Lang::Elixir && elixirInert( roleNode, src ) )
+            {
+                // Keep call/operator/named-capture candidates as declined facts, never edges. Heads,
+                // special forms and non-call operators already failed their syntax filters. Bare AST
+                // names remain variable-shaped syntax unless they explicitly name a function capture.
+                if( isRef && ( refCapSv == "reference.call" || refCapSv == "reference.operator"
+                               || ( refCapSv == "reference.bare" && elixir.namedCapture( nameNode ) ) ) )
+                {
+                    RawRef r;
+                    r.fileId    = fileId;
+                    r.startByte = ts_node_start_byte( roleNode );
+                    r.line      = nameRow + 1;
+                    r.lang      = Lang::Elixir;
+                    r.role      = RefRole::Inert;
+                    auto [ count, known ] = elixirCallArity( roleNode, nameNode, src );
+                    if( refCapSv == "reference.operator" ) { count = elixirNodeIs( roleNode, "binary_operator" ) ? 2 : 1; known = true; }
+                    r.name = known ? elixirFunctionName( nameTxt, count ) : std::string( nameTxt );
+                    refs.push_back( std::move( r ) );
+                }
+                continue;
+            }
+
             if( isDef )
             {
                 if( le.lang == Lang::Elixir && defCapSv == "definition.attribute" ) { kind = SymKind::Var; }

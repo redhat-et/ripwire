@@ -2290,6 +2290,8 @@ inline constexpr const char* kDeclinedMapLegend =
 // only to a map where the gate declined at least one call, so a map the gate never touched keeps its bytes.
 inline constexpr const char* kDeclinedGateMapLegend =
     "<!-- hdr:declined=also-counts-builtin-type-method-calls(dict.get,list.append)whose-bound-targets-classes-the-callers-file-never-names -->";
+inline constexpr const char* kInertDeclinedMapLegend =
+    "<!-- hdr:declined=also-counts-ordinary-Elixir-call-sites-inside-inert-quote-AST-after-unquote/unquote_splicing-re-entry;no-edge;not-a-possible-callee -->";
 
 // #157: the default map's own nest-refused disclosure — before this, a refused file's absence carried no signal
 // on the map's own header at all, only in the skipped verb's own report (if a reader thought to ask). Charged
@@ -2658,7 +2660,8 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                        const std::vector<std::uint32_t>* declinedOut = nullptr,
                        // of those, the calls the builtin-method name gate declined (graph.h g.gateDeclinedCalls) → the
                        // kDeclinedGateMapLegend clause, absent when zero.
-                       std::size_t gateDeclinedCalls = 0 )
+                       std::size_t gateDeclinedCalls = 0,
+                       std::size_t inertDeclinedCalls = 0 )
 {
     const std::size_t* changedCount = ann.changedCount;
     const std::string* mapAtStamp   = ann.atStamp;
@@ -2888,6 +2891,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::size_t declinedTotal   = counterTotal( declinedOut );     // calls tier 3 declined: no edge, and no guess
     legend += declinedTotal > 0 ? kDeclinedMapLegend : "";               // charged to the map that carries declined=
     legend += gateDeclinedCalls > 0 ? kDeclinedGateMapLegend : "";       // only where the builtin-method gate declined a call
+    legend += inertDeclinedCalls > 0 ? kInertDeclinedMapLegend : "";     // only where an Elixir quote declined a call candidate
     // C1 DRIFT FIX (Round C lane B, found by re-reading this header's own output). `precise=` means "how many
     // out-edges a SCIP index PINNED", and the emitter's own comment below says it is "emitted ONLY under
     // --scip". Both were true when outProv held only {0, 1}. A4-R5 then added value 2 (an FFI binding edge)
