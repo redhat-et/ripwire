@@ -202,6 +202,33 @@ assert 'including inert Elixir quote sites' not in text, 'C++ source text change
 print('  PASS non-Elixir CDATA markers cannot select the inert-decline reading')
 PYMARKER
 
+# Operator calls and named function captures are reference candidates too. Bare
+# variable-shaped AST names are not counted merely for being identifiers.
+mkdir "$TMP/inert-kinds"
+cat > "$TMP/inert-kinds/count.ex" <<'EXKINDS'
+defmodule InertKinds do
+  def bar(x), do: x
+  def run(x) do
+    quote do
+      bar(x)
+      1 + 2
+      &bar/1
+      x
+    end
+  end
+end
+EXKINDS
+"$BIN" "$TMP/inert-kinds" --no-cache > "$TMP/inert-kinds.xml"
+python3 - "$TMP/inert-kinds.xml" <<'PYKINDS'
+import re, sys, xml.etree.ElementTree as ET
+text = open(sys.argv[1]).read()
+syms = {s.get('n'): s for s in ET.fromstring(text).iter('s')}
+assert not list(syms['run/1'].iter('c')), 'inert operator/capture became an edge'
+match = re.search(r'\bdeclined=(\d+)\b', text)
+assert match and int(match.group(1)) == 3, 'inert operator/named capture references disappeared or variable AST inflated counting'
+print('  PASS inert calls, operators and named captures counted; variable AST excluded')
+PYKINDS
+
 # quote options control whether unquote is a live hole (Kernel.SpecialForms.quote/2).
 mkdir "$TMP/quote-options"
 cat > "$TMP/quote-options/options.ex" <<'EXOPTIONS'
