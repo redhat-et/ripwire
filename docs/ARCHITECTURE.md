@@ -165,9 +165,10 @@ metadata do not become executable calls. Alias/import/require/use and behaviour 
 module dependencies resolved through declared module identities, regardless of umbrella/file layout.
 `@behaviour` and `defimpl` supply contract/implementation relationships for `--uses` and `--lego`.
 
-**Static limits:** quoted AST and macro-generated definitions are not expanded. Ordinary call
-candidates inside a `quote` body mint no edges and are counted in the map's `declined=` gauge;
-`--callees` counts those sites on their enclosing function. Calls inside `unquote(...)` and
+**Static limits:** quoted AST and macro-generated definitions are not expanded. Ordinary call,
+operator and named-function-capture candidates inside a `quote` body mint no edges and are counted
+in the map's `declined=` gauge; `--callees` counts those sites on their enclosing function.
+Bare variable-shaped AST identifiers are not counted merely for being identifiers. Calls inside `unquote(...)` and
 `unquote_splicing(...)` are live when enabled, as are expressions in `bind_quoted:` options.
 `bind_quoted` disables unquoting by default; explicit `unquote: true` re-enables it and
 `unquote: false` keeps its argument inert. Nonliteral unquote options cannot prove a live hole.
