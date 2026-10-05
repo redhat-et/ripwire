@@ -81,6 +81,33 @@ assert not calls('disabled/1'), 'disabled declaration-head hole became live'
 print('  PASS live holes in quoted declaration heads/metadata, bare calls and variable negatives')
 PYHEADHOLES
 
+# A module declaration which is itself quoted must not change the lexical
+# module of an evaluated hole. A same-file namesake makes wrong-scope fallback visible.
+mkdir "$TMP/module-hole"
+cat > "$TMP/module-hole/modules.ex" <<'EXMODULEHOLE'
+defmodule Real do
+  def bar(x), do: x
+  def run(x) do
+    quote do
+      defmodule Phantom do
+        unquote(bar(x))
+      end
+    end
+  end
+end
+defmodule Other do
+  def bar(x), do: x
+end
+EXMODULEHOLE
+"$BIN" "$TMP/module-hole" --no-cache > "$TMP/module-hole.xml"
+python3 - "$TMP/module-hole.xml" <<'PYMODULEHOLE'
+import sys, xml.etree.ElementTree as ET
+syms = {(s.get('n'), s.get('sc', '')): s for s in ET.parse(sys.argv[1]).iter('s')}
+assert 'bar/1' in {c.get('n') for c in syms['run/1', 'Real'].iter('c')}, 'inert module ancestor stole the live-hole lexical scope'
+assert not any(n == 'Phantom' for n, sc in syms), 'inert module became a definition'
+print('  PASS inert module declarations do not shadow live-hole lexical scope')
+PYMODULEHOLE
+
 # Issue #357: quoted syntax is inert, but unquote expressions are evaluated while
 # constructing it. Keep this fixture separate from the golden corpus so the gate
 # contrasts the call sites and the declined count directly.
