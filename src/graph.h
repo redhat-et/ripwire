@@ -3279,6 +3279,7 @@ enum class RubySide : std::uint8_t
     Instance,              // an instance's lookup (what Class#new's initialize is, a forwarding base's name): any instance
                            //   method
 };
+inline constexpr std::size_t kRubySideCount = static_cast<std::size_t>( RubySide::Instance ) + 1;
 
 // How a Ruby ancestor joins the lookup of the class or module that writes it (RubyClassObjects::fqnSides).
 enum class RubyAncestry : std::uint8_t
@@ -3290,6 +3291,7 @@ enum class RubyAncestry : std::uint8_t
     IncluderExtend,   // `extend` in a concern's `included do`: the includer's class object
     ClassMethods,     // a concern's nested ClassMethods, which ActiveSupport::Concern extends onto the includer
 };
+inline constexpr std::size_t kRubyAncestryCount = static_cast<std::size_t>( RubyAncestry::ClassMethods ) + 1;
 
 // One step of a lookup walk (RubyClassObjects::sideLookup): a constant, and the side the walk stands on there.
 using RubySideStep = std::pair<const std::string*, RubySide>;
@@ -3298,15 +3300,13 @@ struct RubyAncestorEdge
 {
     std::string  fqn;
     RubyAncestry how = RubyAncestry::Superclass;
-
-    auto operator<=>( const RubyAncestorEdge& ) const = default;
 };
 
 // The side a walk standing on `from` reaches an ancestor on across `how`, or nullopt when that ancestor is in no lookup from
 // there: a module's own body-level `extend` is the module's, a concern's ClassMethods its includers', and an instance's
 // lookup holds no extended module. (A concern's `class_methods do` block is no ancestor: sideSteps steps to it.) Rows
 // follow RubySide's order, columns RubyAncestry's.
-inline constexpr std::optional<RubySide> kRubySideAcross[ 5 ][ 5 ] = {
+inline constexpr std::optional<RubySide> kRubySideAcross[ kRubySideCount ][ kRubyAncestryCount ] = {
     //                     Superclass              Include                 Extend                  IncluderExtend          ClassMethods
     /* ClassObject */    { RubySide::ClassObject,  RubySide::Included,     RubySide::Extended,     std::nullopt,           std::nullopt },
     /* Included */       { std::nullopt,           RubySide::Included,     std::nullopt,           RubySide::Extended,     RubySide::Extended },
@@ -3317,6 +3317,9 @@ inline constexpr std::optional<RubySide> kRubySideAcross[ 5 ][ 5 ] = {
 
 inline std::optional<RubySide> rubySideAcross( RubySide from, RubyAncestry how ) noexcept
 {
+    // The table's one reader proves both extents (in a body, not at namespace scope, where a call is a <file-scope> symbol).
+    static_assert( enumCountIsExact<RubySide, kRubySideCount>(), "kRubySideCount must name the LAST RubySide — move it with the append" );
+    static_assert( enumCountIsExact<RubyAncestry, kRubyAncestryCount>(), "kRubyAncestryCount must name the LAST RubyAncestry — move it with the append" );
     return kRubySideAcross[ unsigned( from ) ][ unsigned( how ) ];
 }
 
@@ -4365,10 +4368,12 @@ inline void rubyFqnAncestry( const IngestResult& ing, const RubyBaseScope& bases
             out[ fqn->substr( 0, cut ) ].push_back( { *fqn, RubyAncestry::ClassMethods } );
         }
     }
+    const auto key = []( const RubyAncestorEdge& e ) { return std::tie( e.fqn, e.how ); };
     for( auto& [ k, v ] : out )
     {
-        std::sort( v.begin(), v.end() );
-        v.erase( std::unique( v.begin(), v.end() ), v.end() );
+        std::ranges::sort( v, {}, key );
+        const auto dup = std::ranges::unique( v, {}, key );
+        v.erase( dup.begin(), dup.end() );
     }
 }
 
