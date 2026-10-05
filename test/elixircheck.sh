@@ -107,6 +107,13 @@ assert 'bar/1' in {c.get('n') for c in syms['run/1', 'Real'].iter('c')}, 'inert 
 assert not any(n == 'Phantom' for n, sc in syms), 'inert module became a definition'
 print('  PASS inert module declarations do not shadow live-hole lexical scope')
 PYMODULEHOLE
+"$BIN" "$TMP/module-hole" --callees=run/1 --no-cache > "$TMP/module-hole-callees.xml"
+python3 - "$TMP/module-hole-callees.xml" <<'PYMODULETARGET'
+import sys, xml.etree.ElementTree as ET
+rows = {(s.get('n'), s.get('p')) for s in ET.parse(sys.argv[1]).iter('s')}
+assert rows == {('bar/1', 'modules.ex:2')}, f'live hole bound to the wrong module: {rows}'
+print('  PASS live hole reaches Real.bar/1, not the same-file Other.bar/1')
+PYMODULETARGET
 
 # Issue #357: quoted syntax is inert, but unquote expressions are evaluated while
 # constructing it. Keep this fixture separate from the golden corpus so the gate
