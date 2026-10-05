@@ -112,6 +112,8 @@ COLD_FILES = (
       "per-node tree-sitter walk — is covered by ingest_binds.h and ingest_relations.h, which run for every grammar." ),
     ( "src/ingest_elixir.h",
       "Elixir-specific capture helpers: per node, but for one grammar with a small corpus share. Same argument as ingest_jsimports.h above." ),
+    ( "src/ingest_inert.h",
+      "The shared inert-boundary walk currently runs only for Elixir quote captures and context. Like ingest_elixir.h, its remarks cover one grammar, not the general corpus." ),
     # ── per-DIRECTIVE, where every hot ingest section above is per-node or per-file ────────────────────
     ( "src/ingest_importcap.h",
       "the shared @import.path capture vocabulary (issue #358), carrying the C family for now. It is called from ONE place in ingest_sidecap.h and runs once per captured "
