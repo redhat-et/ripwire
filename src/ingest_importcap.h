@@ -23,15 +23,10 @@
 // the bare name `require`, whether an argument is a single string literal. Those are normaliser arms, not
 // extractors — one per dialect, not one per language.
 //
-// THE VOCABULARY IS A FAMILY, AND ONLY ITS FIRST MEMBER IS SPENT. `@import.path` is the only capture name
-// in use, because C-family imports have no other part: `#include` names a path and nothing else — no
-// alias to record, no list of imported names. The other two names the issue sketches are reserved BY NAME
-// so the next language lands on them rather than inventing a spelling: `@import.alias` is the local name an
-// import renames a target to (`import a.b as c`, `use Foo\Bar as Baz`, `using X = Foo.Bar`), and
-// `@import.names` is a group of targets ONE directive names (`use Foo\{A, B}`, `alias MyApp.{Bar, Baz}`),
-// which is why both of those are emitted by the C++ side today through a per-directive helper rather than
-// by one capture — a capture names one node, and a group is many. No enum value reserves them: an unused
-// arm that no query can reach is a lie about what the vocabulary supports.
+// Python also consumes @import.names (one named clause per match) and @import.alias (its optional
+// local rename). These build the existing Import bindings, never additional dependency targets.
+// Other dialects still use their existing extractors until their own slice moves over.
+// Python retains the bounded captureIncludes walk for exact nesting disclosure, even with no import.
 //
 // ORDERING. ts_query_cursor_next_match yields matches by the match's start byte, so a capture arrives in
 // SOURCE order and the emitted Includes do too — the same order captureIncludes' walk produced, because
@@ -132,17 +127,60 @@ ImportSpec normaliseCFamilyImport( TSNode directive, std::string_view raw, std::
 }
 
 // ── the dispatch: ONE normaliser per DepDialect ──────────────────────────────────────────────────────
-// CFamily is the only dialect that has moved over so far; every other arm returns an empty ImportSpec,
-// which is what makes the capture INERT rather than wrong on a language whose tags.scm has not adopted
-// `@import.path` yet. Each `case` is deleted as its language moves, and the compiler then names every
-// other dialect still to do — the same "one language at a time" landing the issue asks for.
+// Python keeps its written span verbatim, including the first plain import's `as alias` spelling.
+// Cleaning that clause or emitting one target per clause would change --deps and is a separate change.
+// Other dialects remain inert until their queries adopt this vocabulary.
 ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::string_view raw, std::string_view src )
 {
     switch( dialect )
     {
         case DepDialect::CFamily: return normaliseCFamilyImport( directive, raw, src );
-        default:                  return {};   // no language but C-family captures @import.path yet
+        case DepDialect::Python:  return { std::string( raw ) };
+        default:                  return {};   // dialects that have not moved over
     }
+}
+
+// One @import.names clause and its optional @import.alias → the existing Python Import binding.
+// The query selects the clause; normalization keeps the plain-import module marker and from-import
+// member distinction (#287). Both records stay at the STATEMENT byte, with the same empty spans.
+// A multi-clause import still has only its FIRST Include, but every clause binds a name. Reach and
+// depth must apply to bindings too, or a cut/ERROR-wrapped import would still narrow a call.
+void emitCapturedPythonImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    const bool   hasAlias = !ts_node_is_null( aliasNode );
+    const TSNode clause   = hasAlias ? ts_node_parent( namesNode ) : namesNode;
+    const TSNode stmt     = ts_node_parent( clause );
+    const bool   isFrom   = kindIs( ts_node_type( stmt ), "import_from_statement" );
+    bool         reachable = false;
+    if( importContainerReach( stmt, Lang::Python, reachable ) > kMaxImportContainerDepth || !reachable )
+    {
+        return;
+    }
+    // The old walk called its binding helper only after extracting a nonempty first target.
+    const TSNode first = fieldChild( stmt, isFrom ? NodeField::ModuleName : NodeField::Name );
+    if( nodeTextOf( first, src ).empty() )
+    {
+        return;
+    }
+    std::string_view bound = nodeTextOf( hasAlias ? aliasNode : namesNode, src );
+    if( !isFrom && !hasAlias )
+    {
+        bound = bound.substr( 0, bound.find( '.' ) );   // `import a.b` binds `a`, not `a.b`
+    }
+    std::string target = importSpecifierText( isFrom ? first : namesNode, src );
+    if( bound.empty() || target.empty() )
+    {
+        return;
+    }
+    RawBind b;
+    b.fileId       = fileId;
+    b.startByte    = ts_node_start_byte( stmt );
+    b.lang         = Lang::Python;
+    b.kind         = LocalBindKind::Import;
+    b.var.assign( bound );
+    b.typeName     = std::move( target );
+    b.importedName = isFrom ? std::string{} : "module";
+    binds.push_back( std::move( b ) );
 }
 
 // One captured `@import.path` → the Include record plus its ABS-3 import-role use-site ref, which is
@@ -168,22 +206,23 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::
 // keeps the round a pure refactor; the widening an unanchored query would otherwise buy is real, and
 // belongs in its own PR.
 //
-// SEVEN PARAMETERS, and that is the house shape rather than an accident. --quality-delta's `params` check
-// bars 5, and this is over it; the siblings it sits between take 5 (captureBases, captureFields,
-// capturePythonImportBinds) and 9 (captureIncludes — the very function this round moved C-family OUT of),
-// with the two per-file drivers at 10. Four of the seven are the sink set (includes, refs, shortfall) plus
-// the file id every capture records carry. Collapsing them into a context struct would take this one call
-// under the bar while leaving every sibling over it, i.e. a local abstraction that makes the family harder
-// to read, not easier. The count is the convention; the bar is generic.
 void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::string_view src,
                          std::vector<Include>& includes, std::vector<RawRef>& refs, ExtractShortfall& shortfall )
 {
     const TSNode directive = ts_node_parent( pathNode );
+    if( lang == Lang::Python && kindIs( ts_node_type( directive ), "import_statement" )
+        && !ts_node_eq( pathNode, fieldChild( directive, NodeField::Name ) ) )
+    {
+        return;   // the old walk emitted only the first name, even for `import a, b`
+    }
     bool           reachable = false;
     if( importContainerReach( directive, lang, reachable ) > kMaxImportContainerDepth )
     {
-        DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::ImportNestingTooDeep,
-                  "ingest: import-container nesting past the depth bound — deeper imports not captured" );
+        if( lang != Lang::Python )   // Python's retained walk owns the exact disclosure, including empty containers
+        {
+            DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::ImportNestingTooDeep,
+                      "ingest: import-container nesting past the depth bound — deeper imports not captured" );
+        }
         return;   // the same degrade the walk performed: not captured, file still indexed
     }
     if( !reachable )
