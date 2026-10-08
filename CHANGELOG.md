@@ -15,6 +15,43 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — a warm CLI call costs about a quarter less, `--whereis` on a many-branch checkout about 70% less, and `--whereis` refuses instead of printing a zero it never measured
+
+Every answer is byte-identical to before except the one `--whereis` refusal below. Measured on 2026-10-08 on a
+10-core arm64 Mac, Release builds, median of 5 warm calls, against main at 60dd3b3f:
+
+| call | before | after |
+| --- | ---: | ---: |
+| `--callers` on a 3,100-file snapshot of this repository, no `.git` | 319 ms | 269 ms |
+| the same snapshot as a one-commit git repository | 437 ms | 341 ms |
+| five verbs on this repository's checkout (`bench/warmcli.sh`, median of medians) | 448 ms | 342 ms |
+| `--whereis` on a checkout with 139 local branches | 12.3 s | 3.7 s |
+
+- **The git ignore probe runs beside the crawl.** Every call on a git checkout asked `git ls-files --others --ignored`
+  before the crawl could start. The crawl now walks with the previous call's answer for that root while git computes
+  this call's, and the two are compared byte for byte before anything is parsed; when they differ, the crawl and the
+  cache load are redone on git's answer. Every answer is still git's own answer for this call. Under `--no-cache` the
+  probe runs before the crawl, as it did.
+- **No shell is started for a markitdown that cannot run.** The doc pass started `/bin/sh -c markitdown …` for every
+  pdf/docx/pptx/xlsx on every call, and on a machine without markitdown the shell's "not found" was never cached. The
+  PATH is now searched the way the shell searches it, once per ingest, so installing markitdown is still noticed on
+  the next call.
+- **The resolver reads dense arrays for a name with many definitions.** A module-scope call has had a caller node since
+  0.6.2, so the test scripts' top-level `ok "…"` calls (about 650 shell definitions of `ok`) reach the candidate walks.
+  Those walks now read per-symbol arrays instead of whole symbols.
+- **`--whereis` reads each git listing in blocks and lists each distinct tip once**, the listings in parallel, and
+  scans each blob once however many branches share it.
+
+### Fixed — `--whereis` refuses when it could not read the blobs, instead of answering `hits="0"`
+
+`--whereis` reads every blob through one `git cat-file --batch`, whose sha list is a file under the cache directory.
+When that directory was unusable (for example `TMPDIR` naming a directory that does not exist), the batch never
+started and the answer said `on-head="0" hits="0"`, with a near-miss note suggesting the name it had been given, on
+a repository whose HEAD defines it. The CLI now exits 1 and names the cause on stderr, and the MCP `whereis` tool
+answers error -32603. A genuine zero over a working cache directory is answered as before.
+`--stray-content` and `--abi` read blobs the same way and still answer without saying the read failed. That is
+known and not fixed here.
+
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 
 The entry below left one floor open, (i). A call to self, or on a receiver the code builds, read a class's defs from both
