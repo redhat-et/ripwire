@@ -555,7 +555,7 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
 // returns "" with `seedFault` set, and the dispatcher speaks the shared refusal triple over -32602 rather
 // than answering a question the caller did not ask.
 inline std::string whereisText( const std::string& root, const std::string& symbol, const std::string& filter,
-                                std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr )
+                                std::size_t maxHits, McpPageArgs page = {}, bool* seedFault = nullptr, bool* blobFault = nullptr )
 {
     std::string sel = symbol;
     std::string seedSpec;
@@ -574,6 +574,11 @@ inline std::string whereisText( const std::string& root, const std::string& symb
     crossref::WhereResult res = crossref::computeWhereis( root, sel, filter, crossref::WhereisEvidence{ nullptr, indexDefs } );
     if( !res.ok )
     {
+        return {};
+    }
+    if( res.blobsUnread )   // the CLI twin's refusal: a hit count over blobs never read is not an answer
+    {
+        if( blobFault != nullptr ) { *blobFault = true; }
         return {};
     }
     res.seedSpec = std::move( seedSpec );

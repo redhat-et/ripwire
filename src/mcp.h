@@ -2297,10 +2297,17 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     resp = pagedResult( [ & ]( McpPageArgs pg )
                     {
                         bool              seedFault = false;
-                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault );
+                        bool              blobFault = false;
+                        const std::string t = whereisText( path, symbol, kind, crossref::kWhereisHits, pg, &seedFault, &blobFault );
                         if( seedFault )
                         {
                             return errResultMsg( -32602, mcprefuse::notFound( getIndex( path ).ing, "symbol", symbol ) );
+                        }
+                        if( blobFault )
+                        {
+                            DISCLOSE( Diagnostics::answerRefused, "whereis (MCP): the blob stream did not serve every blob — a -32603 error names it, no hit count" );
+                            return errResult( -32603, "could not read the trees' blobs (git cat-file --batch did not start or stopped early; is the cache "
+                                                      "dir under TMPDIR writable?) — no hit count rather than one nothing measured" );
                         }
                         return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to search" ) : textResult( t );
                     } );

@@ -1468,6 +1468,10 @@ struct WhereResult
     //             what tells the reader which of the two zeros they are holding.
     std::string           seedSpec;
     std::string           nearMiss;
+    // The blob stream behind hits= never started or ended before serving every blob (an unwritable batch list, a git
+    // that did not start or died): no row count, zero included, is a measurement then, so both hosts REFUSE the answer
+    // (exit 1 / an MCP error naming the cause) instead of printing hits= — the honesty bug of cli-floor §4.
+    bool                  blobsUnread = false;
 
     // The --with-history lane: a non-owning view of the caller's oracle index (nullptr ⇒ not asked for) plus
     // THIS symbol's verdict, resolved once at compute time so emission stays a pure print. Views at the seam:
@@ -2260,10 +2264,29 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     struct Site { std::uint32_t refIndex; std::string path; bool replaced; };
     bool anyEmptyTree = false;   // T1: a zero-row ls-tree could be a FAILED listing — it forfeits complete=
     gtl::btree_map<std::string, std::vector<Site>> sites;
+    // One `git ls-tree -r` per DISTINCT tip (HEAD and its own branch share one; so do branches left at the same
+    // commit), run across the crossref git pool: a listing is a pure function of an immutable commit, so a tip is
+    // never listed twice and the order the listings finish in reaches nothing — each lands in its tip's own slot and
+    // the sites are assembled below in ref order, exactly as the serial loop assembled them. A slot whose worker
+    // never ran reads as an empty listing, which forfeits complete= like any other suspect tree (T1).
+    std::vector<std::string> distinctTips;
+    distinctTips.reserve( refs.size() );
+    for( const RefInfo& ref : refs )
+    {
+        distinctTips.push_back( ref.tip );
+    }
+    std::sort( distinctTips.begin(), distinctTips.end() );
+    distinctTips.erase( std::unique( distinctTips.begin(), distinctTips.end() ), distinctTips.end() );
+    std::vector<std::vector<RawRow>> rowsByTip( distinctTips.size() );
+    ParallelSweep                    listingSweep;
+    parallelIndexed( distinctTips.size(), [ & ]( std::size_t tipIndex ) { rowsByTip[ tipIndex ] = lsTree( root, distinctTips[ tipIndex ] ); }, listingSweep );
     for( std::uint32_t i = 0; i < refs.size(); ++i )
     {
-        const std::vector<RawRow> rows = lsTree( root, refs[i].tip );
-        if( rows.empty() )
+        const auto tipAt = std::lower_bound( distinctTips.begin(), distinctTips.end(), refs[ i ].tip );
+        ASSUME( tipAt != distinctTips.end() && *tipAt == refs[ i ].tip, "whereis: every ref's tip was put in distinctTips above" );
+        const std::size_t           tipIndex = std::size_t( tipAt - distinctTips.begin() );
+        const std::vector<RawRow>&  rows     = rowsByTip[ tipIndex ];
+        if( rows.empty() || !listingSweep.isDone( tipIndex ) )
         {
             anyEmptyTree = true;
         }
@@ -2281,6 +2304,12 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     result.refsScanned   = refs.size() - 1;                                   // HEAD is not one of the swept refs
 
     StreamBlobStats blobStats;   // T1: the degrade census that decides whether this scan may claim complete=
+    // A blob is LINE-SCANNED once, however many (ref, path) sites point at it — a file no branch touched is one blob
+    // under every one of 137 branches — and its rows are then stamped once per site, in site order. A row's content
+    // is (line, def-shape, text) of the BLOB, its label (ref, tip, date, path) of the SITE, so the copies are the
+    // rows the per-site scan made, in the same order.
+    std::vector<WhereHit> blobRows;
+    const RefInfo         blobOnly{};
     streamBlobs( root, shas, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
                  {
         if( !isText || bytes.find( sym ) == std::string_view::npos ) { return;   // cheap reject before the line walk
@@ -2288,6 +2317,8 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
         const auto it = sites.find( sha );
         if( it == sites.end() ) { return;
 }
+        blobRows.clear();
+        scanBlobForSymbol( bytes, sym, blobOnly, std::string(), blobRows );
         for( const Site& s : it->second )
         {
             const bool head   = refs[ s.refIndex ].name == "HEAD";
@@ -2295,9 +2326,16 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
             result.onHead     = result.onHead || ( head && !s.replaced );
             if( !s.replaced )
             {
-                scanBlobForSymbol( bytes, sym, refs[ s.refIndex ], s.path, result.hits );
+                const RefInfo& ref = refs[ s.refIndex ];
+                for( const WhereHit& row : blobRows )
+                {
+                    result.hits.push_back( WhereHit{ ref.name, ref.tip, ref.date, s.path, row.line, row.isDef, row.text, false } );
+                }
             }
         } }, &blobStats );
+    // A stream that never started, or died before serving every blob, leaves hits= and on-head= unmeasured: a zero from
+    // it is not "no tree holds the name". The caller refuses on this rather than print that zero (CHECKLIST 13b).
+    result.blobsUnread = blobStats.startFailed || blobStats.endedEarly;
 
     // T1: exhaustive-over-text iff every sha streamed clean AND no ref's tree listing was suspect. An empty
     // sha list (every scanned tree empty, or none) trivially streamed clean — anyEmptyTree covers that shape.

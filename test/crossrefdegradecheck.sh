@@ -22,6 +22,8 @@
 #      exactly one; and at exactly cap+1 items `size > shown` went false, so the element vanished ENTIRELY
 #      and one row disappeared unmarked. Both the general case and that boundary are pinned here — nothing
 #      in test/ pinned any more= count before, which is why the bug survived.
+#   6) (cli-perf-068) A blob stream that never started (an unusable cache dir for its sha list) is refused by
+#      --whereis on both hosts, not printed as on-head="0" hits="0" with a near-miss retrying the same name.
 #   5) Two adjacent ways a real hit is reported as no hit at all: a symbol defined on an UNTERMINATED final
 #      line (the scan only evaluated on '\n', so hits="0" — which the help text says means "this repo never
 #      had the name"), and a branch whose name legally contains '|' (the for-each-ref parse split on it and
@@ -272,6 +274,50 @@ REFS_BEFORE="$( git -C "$C" for-each-ref --format='%(refname) %(objectname)' 2>/
     && ok "read-only: the working tree is unchanged" || no "read-only: a crossref verb mutated the working tree"
 [ "$( git -C "$C" for-each-ref --format='%(refname) %(objectname)' 2>/dev/null | cksum )" = "$REFS_BEFORE" ] \
     && ok "read-only: no ref was created, moved or deleted" || no "read-only: a crossref verb wrote a ref"
+
+# ══ 6) a blob stream that never ran is not a measured zero (cli-perf-068; the cli-floor §4 finding) ═════════
+# --whereis reads every blob through ONE `git cat-file --batch` whose sha list is a file under the cache dir. With that
+# dir unusable (TMPDIR naming a directory that does not exist) the batch never started, and the answer still printed
+# on-head="0" hits="0" plus a near-miss note whose retry= was the very name asked — on a repository whose HEAD defines
+# it. Now both hosts REFUSE (CLI: exit 1 naming the cause; MCP: an error) instead of printing a count nothing measured.
+# 6c is the near-miss negative: a GENUINE zero over a working cache dir must still answer hits="0", exit 0.
+H="$TMP/blobless"; mkdir -p "$H" "$TMP/goodtmp"
+printf 'int whereisProbeName( int x ) { return x; }\nint whereisProbeCaller( void ) { return whereisProbeName( 1 ); }\n' > "$H/a.c"
+git -C "$H" init -q -b main && git -C "$H" add a.c && git -C "$H" commit -qm one
+TMPDIR="$TMP/goodtmp/" "$BIN" "$H" --whereis=whereisProbeName >"$TMP/b6a.xml" 2>"$TMP/b6a.err"; rc6a=$?
+H6A="$( attr hits < "$TMP/b6a.xml" )"
+if [ "$rc6a" = 0 ] && [ -n "$H6A" ] && [ "$H6A" -ge 2 ] 2>/dev/null; then ok "6a control: a working cache dir finds the name ($H6A hits, exit 0)"
+else no "6a control: expected exit 0 and >=2 hits, got rc=$rc6a hits=${H6A:-none}"; fi
+TMPDIR="$TMP/no-such-dir/" "$BIN" "$H" --whereis=whereisProbeName >"$TMP/b6b.out" 2>"$TMP/b6b.err"; rc6b=$?
+if [ "$rc6b" != 0 ] && ! grep -q '<whereis ' "$TMP/b6b.out" && grep -q 'could not read the trees' "$TMP/b6b.err"; then
+    ok "6b unreadable blob stream: refused (exit $rc6b, cause on stderr), no hits= printed"
+else no "6b unreadable blob stream: expected a refusal, got rc=$rc6b, stdout: $( head -c 200 "$TMP/b6b.out" )"; fi
+TMPDIR="$TMP/goodtmp/" "$BIN" "$H" --whereis=noSuchNameAnywhere >"$TMP/b6c.xml" 2>/dev/null; rc6c=$?
+if [ "$rc6c" = 0 ] && [ "$( attr hits < "$TMP/b6c.xml" )" = "0" ]; then ok "6c negative: a genuine zero over a working cache dir still answers hits=\"0\", exit 0"
+else no "6c negative: a genuine zero was refused or miscounted (rc=$rc6c, hits=$( attr hits < "$TMP/b6c.xml" ))"; fi
+if command -v python3 >/dev/null 2>&1; then
+    M6="$( TMPDIR="$TMP/no-such-dir/" python3 - "$BIN" "$H" <<'PY'
+import json, subprocess, sys
+msgs = [ { "jsonrpc": "2.0", "id": 1, "method": "initialize" },
+         { "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "whereis", "arguments": { "path": sys.argv[ 2 ], "symbol": "whereisProbeName" } } } ]
+p = subprocess.run( [ sys.argv[ 1 ], "--mcp" ], input = "".join( json.dumps( m ) + "\n" for m in msgs ), capture_output = True, text = True, timeout = 300 )
+lines = [ l for l in p.stdout.splitlines() if l.strip() ]
+d = json.loads( lines[ -1 ] ) if lines else {}
+res = d.get( "result", {} )
+text = ( res.get( "content" ) or [ {} ] )[ 0 ].get( "text", "" )
+if "error" in d:
+    print( "ERROR " + d[ "error" ].get( "message", "" ) )
+elif res.get( "isError" ):
+    print( "ERROR " + text )
+else:
+    print( "ANSWER " + text[ :200 ] )
+PY
+)"
+    case "$M6" in
+        "ERROR "*"could not read the trees"*) ok "6d MCP twin: the same unreadable stream is an error naming the cause, not a hit count" ;;
+        *) no "6d MCP twin: expected an error naming the unread blobs, got: $( printf '%s' "$M6" | head -c 200 )" ;;
+    esac
+fi
 
 # G4: every emitted document must survive xmllint
 if command -v xmllint >/dev/null 2>&1; then
