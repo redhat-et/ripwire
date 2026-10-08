@@ -1,9 +1,7 @@
-// The S6-C locality tie-break's PINNING shape (same as test/pincensusfix/pinned.kt).
-//
-// `Alpha.run` makes a BARE (implicit-`this`) `helper()` call. `Alpha.helper` and `Beta.helper` both live in THIS file,
-// so the same-file rung keeps both and S6-C decides: `pinned.kt::Alpha::` beats `pinned.kt::`. ONE confident edge, NO
-// `amb=` — and, since phase 4 (docs/EVALS.md "Phase 4"), `lpin="1"` on the caller row: the pin is a prior's guess and
-// the map now says so instead of dressing it as an evidence-backed resolution. (Python until FE-A, see pincensusfix.)
+// Was the S6-C locality tie-break's PINNING shape (same as test/pincensusfix/pinned.kt); since FE-B
+// (test/receiverevidencecheck.sh) it is EVIDENCE: `Alpha.run` makes a BARE (implicit-`this`) `helper()` call, and an
+// implicit `this` reaches Alpha's own members and its bases, never the unrelated `Beta.helper`. ONE confident edge to
+// `Alpha.helper`, NO `amb=`, and NO `lpin=` — nothing was left for a prior to pick. The pin itself is pinnedcone.kt.
 class Alpha {
     fun helper(): Int {
         return 1

@@ -1670,7 +1670,11 @@ PYRZ
 rz_run(){ ( cd "$RZ" && "$BIN" corpus --for="widget ping box router" --detail=1 --token-budget="$1" --no-cache --legend=full ) >"$RZ/o.xml" 2>/dev/null; }
 rz_est(){ grep -aoE 'est_tokens="[0-9]+"' "$RZ/o.xml" | head -1 | tr -dc '0-9'; }
 rz_note(){ grep -acF '[legend clauses:' "$RZ/o.xml"; }
-RZ_WIDE=1200
+# FE-B (test/receiverevidencecheck.sh): 1200 -> 1400. The fixture's bare widgetPingStepN() calls name a function another
+# file defines with no import, so their <calls> rows are via="name" and --for's header now defines it (~190 B, never
+# dropped). The full document prices at est_tokens=1269 (it was 1162, 38 under the old 1200), so 1200 no longer carried
+# its legend; 1400 is the wide control again with ~130 tokens of headroom. The probe and the control still read E off it.
+RZ_WIDE=1400
 rz_run "$RZ_WIDE"; RZ_E="$( rz_est )"; RZ_WIDE_NOTE="$( rz_note )"
 # THE CLAUSES THIS ARM COUNTS — all THREE of the droppable trio (CodeRabbit, PR #215). It counted two: the
 # confidence reading and the tail reading, but not the route= reading the arm's own paragraph above names.

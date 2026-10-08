@@ -20,8 +20,9 @@
 #
 # THE FIXTURE (test/pincensusfix/, 2 Kotlin files, ~40 lines; Python until FE-A, whose bare call reaches no method —
 # test/falseedgecheck.sh) reproduces both shapes in the smallest form:
-#   pinned.kt — `Alpha.run` bare-calls `helper()`; `Alpha.helper` and `Beta.helper` both live in this
-#               file, so tier 1 keeps BOTH and S6-C decides: `pinned.kt::Alpha::` beats `pinned.kt::`.
+#   pinned.kt — `Alpha.run` bare-calls `helper()`; `Alpha.helper` and its BASE `Beta.helper` both live in this
+#               file (Beta became Alpha's base with FE-B, whose implicit receiver proves only the class and its
+#               bases), so tier 1 keeps BOTH and S6-C decides: `pinned.kt::Alpha::` beats `pinned.kt::Beta::`.
 #               ONE edge, NO `amb=` — the silent pin.
 #   tied.kt   — `Eps.go` bare-calls `other()`; `Gamma.other` and `Delta.other` are SIBLINGS, so both
 #               share exactly `tied.kt::` and NEITHER is more local. The tier stays full, the call

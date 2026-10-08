@@ -264,15 +264,21 @@ fi
 cleanArm "(N5) a value the search also calls" "$TMP/valin" "handleRequest,other"
 
 echo "(M) MCP path_between carries the same clause"
-python3 - "$BIN" "$TMP" <<'PY'
+# Two MCP legend postures (lean-answers): the unchanged assertions run on --mcp-legend=inline, the pre-posture spelling
+# where every answer carries its root facts on <path>; a TWIN runs the default session posture, whose answers after the
+# first are legend="ref" and carry their root facts on the closing <about …/> instead. Both must match the CLI.
+for MPOST in inline session; do
+python3 - "$BIN" "$TMP" "$MPOST" <<'PY'
 import json, re, subprocess, sys
-binp, tmp = sys.argv[1], sys.argv[2]
+binp, tmp, posture = sys.argv[1], sys.argv[2], sys.argv[3]
 cases = [ ( "decl", "Machine_run", "Process_update", True ), ( "val", "listen", "respond", True ),
           ( "thr", "start", "target", True ), ( "clean", "a", "d", False ) ]
 reqs = [ { "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "g", "version": "1" } } } ]
 for i, ( d, a, b, _ ) in enumerate( cases ):
     reqs.append( { "jsonrpc": "2.0", "id": i + 1, "method": "tools/call", "params": { "name": "path_between", "arguments": { "path": tmp + "/" + d, "from": a, "to": b } } } )
-p = subprocess.run( [ binp, "--mcp" ], input = "".join( json.dumps( r ) + "\n" for r in reqs ), capture_output = True, text = True, timeout = 120 )
+argv = [ binp, "--mcp" ] + ( [ "--mcp-legend=inline" ] if posture == "inline" else [] )
+p = subprocess.run( argv, input = "".join( json.dumps( r ) + "\n" for r in reqs ), capture_output = True, text = True, timeout = 120 )
+refs = 0
 resp = {}
 for line in p.stdout.splitlines():
     try:
@@ -284,12 +290,16 @@ for line in p.stdout.splitlines():
 def head( t ):
     m = re.search( r'<path [^>]*>', t )
     return m.group( 0 ) if m else ""
+def facts( t ):   # the root's facts: <path …>, plus a legend="ref" answer's closing <about …/> (where they move)
+    ab = re.search( r'<about [^>]*legend="ref"[^>]*/>', t )
+    return head( t ) + ( ab.group( 0 ) if ab else "" )
 def pick( t, name ):
-    m = re.search( r'\s' + name + r'="([^"]*)"', head( t ) )
+    m = re.search( r'\s' + name + r'="([^"]*)"', facts( t ) )
     return m.group( 1 ) if m else None
 bad = 0
 for i, ( d, a, b, gap ) in enumerate( cases ):
     mcp = resp.get( i + 1, "" )
+    refs += 1 if re.search( r'<about [^>]*legend="ref"', mcp ) else 0
     cli = subprocess.run( [ binp, tmp + "/" + d, "--no-cache", "--path=%s,%s" % ( a, b ) ], capture_output = True, text = True ).stdout
     if not head( mcp ):
         print( "  MCP gave no <path> root for", d, repr( mcp[:300] ), p.stderr[:300] ); bad = 1; continue
@@ -302,14 +312,20 @@ for i, ( d, a, b, gap ) in enumerate( cases ):
         print( "  %s: MCP hint still claims no path" % d ); bad = 1
     if not gap and "no directed call path" not in mcp:
         print( "  %s: MCP lost the plain no-path hint" % d ); bad = 1
+# the posture premise: inline answers never take the ref posture; the session twin's answers after the first all do
+if posture == "inline" and refs != 0:
+    print( "  inline posture: %d answer(s) came back legend=\"ref\"" % refs ); bad = 1
+if posture == "session" and refs != len( cases ) - 1:
+    print( "  session posture: %d of the %d later answers are legend=\"ref\" (the twin tests nothing new)" % ( refs, len( cases ) - 1 ) ); bad = 1
 sys.exit( bad )
 PY
 mrc=$?
 if [ "$mrc" -eq 0 ]; then
-    ok "(M) path_between: same searched/gaps/gap_syms/rows/next as the CLI on P1-P3, plain hint on N1"
+    ok "(M) path_between ($MPOST legend posture): same searched/gaps/gap_syms/rows/next as the CLI on P1-P3, plain hint on N1"
 else
-    no "(M) MCP path_between disagrees with the CLI or the helper crashed (rc=$mrc, details above)"
+    no "(M) MCP path_between ($MPOST legend posture) disagrees with the CLI or the helper crashed (rc=$mrc, details above)"
 fi
+done
 
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "FAIL"; fi
 exit "$fail"

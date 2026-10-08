@@ -99,6 +99,16 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-10-08 (train 26b: lean-answers merged): docdemotegolden_for.xml 6167 -> 5851 B (est_tokens "2467" -> "2340")
+# and docdemotegolden_noroute.xml 9695 -> 9364 B ("3441" -> "3309"). Only the zero elision and its legend reading moved:
+# undoing it (zeros back, reading removed, est_tokens=/at= masked) gives the train-side goldens exactly, on both fixtures,
+# and no r= row spells a zero (arm (f) one row spelling). The routed golden was first re-pinned at 5902 B with the two
+# rows the docs reorder moved still spelling cx="0" ccx="0" in="0"; the reorder now keeps the spelling (serialize.h).
+# RE-PIN 2026-10-08 (train 26b: FE-B merged beside for-spine-span's hop-slot rule): docdemotegolden_for.xml 6268 -> 6167 B
+# (est_tokens "2507" -> "2467"). FE-B binds request_page's only callee `evict_one( self )` by name alone, so the hop-slot
+# rule gives request_page no <h> slot: <hops shown="1" … noedge="5"> with its one <h> row becomes <hops shown="0" …
+# noedge="6">. That and est_tokens= are the whole diff against the train-side golden (checked mechanically); the header
+# carries no via clause, since no row carries via="name" (arm (f) present-only via clause). The noroute golden is unchanged.
 # RE-PIN 2026-10-04 (lane for-spine-span-068, by design): docdemotegolden_for.xml 5821 -> 6268 B and
 # docdemotegolden_noroute.xml 9423 -> 9695 B. Every <d> row with a known extent gains e="N" right after l= (5 and 6
 # rows), the full legend gains the e= clause, est_tokens moves with the bytes. The routed golden also shows the
@@ -106,6 +116,19 @@ PY
 # <sigs docs_after_code="2"> and its reading. --no-route has no reorder (the rule is routed-path only). Checked
 # mechanically: removing e=, est_tokens=, the e= clause and the docs_after_code attribute/reading leaves the no-route
 # golden byte-identical and the routed one differing only in that row order. Gate: test/forsigspancheck.sh.
+# RE-PIN 2026-10-04 (lane FE-B, receiver evidence): docdemotegolden_for.xml 5821 -> 6010 B (est_tokens "2328" -> "2404").
+# CAUSE: pagecache.py's `evict_one( self )` names a function its file never imports — Python resolves it nowhere — so
+# FE-B binds it by NAME ALONE: the hop's <c n="evict_one"> row carries via="name", and --for's header defines it (one
+# present-only clause, graphlegend.h kForViaNameClause, on the hop ids the compact route serves). Verified before
+# re-pinning, against the pre-change golden: the root's est_tokens=, the header clause and the row's attribute are the whole
+# diff — no ranking, demotion or route byte moved, and arm (f)'s own assertions still hold. The noroute golden is
+# UNCHANGED: its <bodies> carry no <calls> row through a name-only edge, so the clause does not ride (present-only).
+# RE-PIN 2026-10-07 (lane/lean-answers-068, --for zero elision): docdemotegolden_for.xml 5821 -> 5505 B
+# (est_tokens "2328" -> "2202") and docdemotegolden_noroute.xml 9423 -> 9092 B (est_tokens "3333" -> "3200").
+# ONE identified change: a lens row omits cx=/ccx=/in= when 0 and the legend says an absent one is 0.
+# Verified before re-pinning: putting cx="0"/ccx="0"/in="0" back on every r= row, deleting the zero reading
+# from the legend comment and masking est_tokens=/at=, live and previous goldens are byte-identical on BOTH
+# fixtures — no ranking, demotion, route or row moved. (f)/(h)'s own assertions are unchanged.
 # RE-PIN 2026-09-13 (merge of lane/sc-legend and lane/for-widen): docdemotegolden_for.xml RE-MEASURED on the
 # MERGED tree at 5,809 B (est_tokens "2328"), from 5,887 on for-widen's tree and 5,425 on sc-legend's. Neither
 # lane's own number is the merged one, so this is measured, not summed. Three identified changes, and the golden
@@ -241,6 +264,29 @@ grep -q 'doc_tier="' "$TMP/conceptc.xml" \
 diff -q "$TMP/concept.xml" "$ROOT/test/docdemotegolden_for.xml" >/dev/null \
     && ok "(f) conceptual --for byte-identical to the pre-change golden" \
     || no "(f) conceptual --for drifted from test/docdemotegolden_for.xml"
+# (f) one row spelling: every r= row of a --for answer omits a zero cx=/ccx=/in= (the lens legend: absent = 0), the rows
+# the code-above-docs reorder moved and re-headed (serialize.h reorderDocsAfterCode) included. This routed question
+# moves the two notes/paging_design.md rows below the code.
+if [ -s "$TMP/concept.xml" ] && grep -q '<ctx ' "$TMP/concept.xml"; then
+    zrows="$( grep -oE '<d [^>]* r="[0-9]+"[^>]*>' "$TMP/concept.xml" | grep -cE ' (cx|ccx|in)="0"' )"
+    if [ "$zrows" = "0" ]; then ok "(f) no --for row spells a zero cx=/ccx=/in= (moved rows included)"
+    else no "(f) $zrows --for row(s) still spell a zero cx=/ccx=/in= (a re-headed row lost the lens spelling)"; fi
+else
+    no "(f) conceptual --for produced no <ctx> root, so the row-spelling arm proves nothing"
+fi
+# (f) present-only via clause: the header's via="name" reading rides only when a row carries via="name". On this
+# fixture the one hop whose only callee is name-only (request_page -> evict_one) takes no <h> slot (the hop-slot rule,
+# test/forsigspancheck.sh (H)), so no row is left to carry the attribute and the clause must not ride either.
+if [ -s "$TMP/concept.xml" ] && grep -q '<ctx ' "$TMP/concept.xml"; then
+    # a ROW's attribute (an element's), not the legend's own spelling of it (`via="name" on a <c> row`)
+    if grep -q 'matched by name alone' "$TMP/concept.xml" && ! grep -Eq '<[a-z]+ [^<>]*via="name"' "$TMP/concept.xml"; then
+        no "(f) the via=\"name\" legend clause rides with no via=\"name\" row in the answer (a hop dropped by the hop-slot rule still counted)"
+    else
+        ok "(f) the via=\"name\" legend clause rides only beside a via=\"name\" row"
+    fi
+else
+    no "(f) conceptual --for produced no <ctx> root, so the present-only via arm proves nothing"
+fi
 
 # ── (g) --recall untouched ──────────────────────────────────────────────────────────────────────────────
 diff -q "$TMP/recall.xml" "$ROOT/test/docdemotegolden_recall.golden" >/dev/null \

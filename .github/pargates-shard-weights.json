@@ -468,6 +468,7 @@
 "recalltablecheck.sh": 0.2,
 "recalltotalcheck.sh": 24.7,
 "receiptpostcheck.sh": 20.4,
+"receiverevidencecheck.sh": 36.0,
 "redactcheck.sh": 2.2,
 "redactfixcheck.sh": 0.3,
 "refusaltailcheck.sh": 3.4,

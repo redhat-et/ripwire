@@ -188,7 +188,10 @@ class Server:
         env.update(extra_env)
         self.err = open(errpath, "w+")
         self.errpath = errpath
-        self.p = subprocess.Popen([binp, "--mcp"] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.err,
+        # --mcp-legend=inline: every answer carries its root facts on its own root, the spelling the one-shot CLI oracle
+        # writes. The default session posture moves them to a closing <about legend="ref"/> after the first answer; its
+        # equality with the CLI is held by mcpincrementalcheck's and pathgapcheck's posture twins and by legendrefcheck.
+        self.p = subprocess.Popen([binp, "--mcp", "--mcp-legend=inline"] + args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.err,
                                   text=True, env=env)
         self.id = 0
         self.timing_seen = 0
@@ -628,8 +631,16 @@ def release_attempt(k, refR, refA, kk):
         stats["release"] += 1
         check(v2 == refR, "cycle %d RL: the unchanged tree R, released and rebuilt, answers equal the one-shot CLI" % k, "cli=%s mcp=%s" % (short(refR), short(v2)))
         gotA, fA = mcp_views(s, A, symbols_at(kk), PATHS, GREPS, RANKBYS)
-        if gotA[("fs", "cb")][0] == "MCPERR" and "memory limit" in str(gotA[("fs", "cb")][1]):
-            row("NOTE", "cycle %d RL: the release was proved; the call on A after it was refused by name (the footprint stayed over the floor)" % k)
+        # the memory guard may refuse ANY call on A by name, not only the first (a bigger index reaches the floor later in the
+        # sequence): such a refusal is the named premise "the footprint stayed over the floor", and every call it did
+        # answer must still equal the one-shot CLI
+        refusedA = [key for key, v in gotA.items() if v and v[0] == "MCPERR" and "memory limit" in str(v[1])]
+        if refusedA:
+            row("NOTE", "cycle %d RL: the release was proved; %d call(s) on A after it were refused by name (the footprint stayed over the floor)"
+                % (k, len(refusedA)))
+            badA = [b_ for b_ in compare("RL A", refA, gotA) if b_[0] not in refusedA]
+            check(not badA, "cycle %d RL: after the release, every call on tree A the guard answered equals the one-shot CLI" % k,
+                  "; ".join("%s: cli=%s mcp=%s" % (a_, short(b_), short(c_)) for a_, b_, c_ in badA[:2]))
             return "ok"
         bad = compare("RL A", refA, gotA)
         check(not bad, "cycle %d RL: after the release, tree A answers equal the one-shot CLI" % k,

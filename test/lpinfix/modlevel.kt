@@ -1,11 +1,10 @@
 // The phase-3b repro: a TOP-LEVEL function against a same-file class method.
 //
-// `Caller.go` bare-calls `compute()`. Two defs answer: `Helper.compute` (canonical id
-// `modlevel.kt::Helper::compute`) and the top-level `compute` — whose canonical id degrades to the BARE
-// NAME `compute`, sharing ZERO segments with any caller. Before phase 4 S6-C pinned `Helper::compute`
-// silently on that asymmetry. With `Graph::localityKey` (`modlevel.kt::compute` for the unscoped def) both
-// candidates share exactly `modlevel.kt::` — a full tie — so the call is an honest split: `amb="1"` on
-// `Caller::go`, no `lpin=`, and `ambiguous=` counts it. (Kotlin: Python, the vehicle until FE-A, now binds the module def.)
+// `Caller.go` bare-calls `compute()`. Before phase 4 S6-C pinned `Helper::compute` silently; phase 4's
+// `Graph::localityKey` made it a full tie and an honest split. Since FE-B (test/receiverevidencecheck.sh) Kotlin's
+// implicit receiver decides it: a bare call inside `Caller` reaches Caller's own members, its bases, or a top-level
+// function — never the unrelated `Helper.compute`. ONE plain edge to the top-level `compute`, no `amb=`, no `lpin=`:
+// the module-level def is not lost, it is the answer. The honest-split shape lives on in modlevel.m (Objective-C).
 class Caller {
     fun go(): Int {
         return compute()

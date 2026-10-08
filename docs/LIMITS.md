@@ -789,6 +789,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
 
+### `src/receiverevidence.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kWalkCap` | `64` | INDEXING | classes visited per base walk; deterministic (sorted chaUp) |
+
 ### `src/redact.h`
 
 Discloses: **none**

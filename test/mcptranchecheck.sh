@@ -186,9 +186,26 @@ IMP_CLI="$( "$BIN" "$ROOT" --impact=escapeXml --limit=3 --offset=2 --legend=full
 [ "$IMP_BAT" = "$IMP_CLI" ] \
     && ok "M4 [batch]: paged <impact> is byte-identical to the CLI page" \
     || no "M4 [batch]: CLI [$IMP_CLI] vs batch [$IMP_BAT]"
-WH="$( mcp_text "$( call whereis '{"path":"'"$ROOT"'","symbol":"runMcp","limit":2}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"
+# lane/lean-answers-068: the whereis default may list only the definitions (listing="defs", references counted), and on a
+# single-branch checkout runMcp has ONE def row, so limit=2 there cannot show 2. The arm keeps its exact assertion on the
+# whole list (listing:"all", the pre-listing answer); the twin below holds limit= on the default's LISTED rows.
+WH="$( mcp_text "$( call whereis '{"path":"'"$ROOT"'","symbol":"runMcp","limit":2,"listing":"all"}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"
 case "$WH" in *'shown="2"'*'has_more="1"'*'next_offset="2"'*) ok "M4 [live]: whereis honors limit= and discloses has_more/next_offset";;
               *) no "M4 [live]: whereis still ignores limit= — $WH";; esac
+WHD="$( mcp_text "$( call whereis '{"path":"'"$ROOT"'","symbol":"runMcp","limit":1}' )" | tr '<' '\n' | grep '^whereis ' | head -1 )"
+WHD_TOTAL="$( printf '%s' "$WHD" | grep -oE ' total="[0-9]+"' | grep -oE '[0-9]+' )"
+WHD_SHOWN="$( printf '%s' "$WHD" | grep -oE ' shown="[0-9]+"' | grep -oE '[0-9]+' )"
+if [ -n "$WHD_TOTAL" ] && [ -n "$WHD_SHOWN" ] && [ "$WHD_TOTAL" -ge 1 ] && [ "$WHD_SHOWN" = "1" ]; then
+    if [ "$WHD_TOTAL" -gt 1 ]; then
+        case "$WHD" in *'has_more="1"'*'next_offset="1"'*) ok "M4 [live, default listing twin]: limit=1 shows 1 of the $WHD_TOTAL listed rows and discloses has_more/next_offset";;
+                       *) no "M4 [live, default listing twin]: $WHD_TOTAL listed rows, limit=1, no has_more/next_offset — $WHD";; esac
+    else
+        case "$WHD" in *'has_more="0"'*) ok "M4 [live, default listing twin]: limit=1 shows the 1 listed row, has_more=0";;
+                       *) no "M4 [live, default listing twin]: 1 listed row but has_more is not 0 — $WHD";; esac
+    fi
+else
+    no "M4 [live, default listing twin]: limit=1 on the default listing — shown='${WHD_SHOWN:-none}' total='${WHD_TOTAL:-none}' — $WHD"
+fi
 
 echo
 echo "=== M5 — quality_delta speaks the CLI's key vocabulary ==="

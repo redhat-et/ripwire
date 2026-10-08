@@ -288,11 +288,19 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # outside-import/use,super-past-the-tree;...)" (was "(builtin/stdlib-name-...,external-import,...)"), +106 B — and the
 # est_tokens= that prices them, 858 -> 901 (header and root). Checked: the new output differs from the pin by exactly
 # those two clauses and that figure; the six other pins are unchanged.
+# RE-ANCHORED 2026-10-08 (train 26b: lean-answers merged onto for-spine-span), for.xml only: 4201 -> 4117 B, est_tokens=
+# 1683 -> 1650. The two lanes' changes compose (e= rows and clause, then the zero elision and its clause); undoing ONLY
+# the zero elision (est_tokens=/at= masked) gives the previous pin exactly. at= is stored masked, as before. The six other
+# pins are unchanged.
 # RE-ANCHORED BY HAND 2026-10-04 (lane for-spine-span-068, by design), for.xml only: the four <d> rows gain e="N" (the
 # definition's last line) right after l=, the full legend gains the present-only e= clause ("; e= on a d row: the 1-based
 # line where that definition ends, …", 221 B), and est_tokens= moves 1580 -> 1683 with the bytes (3937 -> 4194 B).
 # Checked: removing the four e= attributes and that clause and masking est_tokens leaves the pin byte-identical (at=
 # masked); no docs_after_code (the fixture has no markdown row). The six other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-10-04 (lane/lean-answers-068), for.xml only: a --for lens row omits a zero cx=/ccx=/in= and the
+# v1 legend says "each absent when 0;". Checked mechanically: restoring the zeros on every r= row and removing that clause
+# gives the previous pin byte for byte with at= and est_tokens= masked (est_tokens= prices the shorter bytes). The six
+# other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -521,6 +529,24 @@ probeFor()
 # its definition as two contracts — so the schema had no XML answer to pin. It now answers about the definition.
 # the pins follow the definitions, measured + 10 rounded up to 10.
 # schema                      pin  measured
+# RE-PINNED 2026-10-04 (lane/lean-answers-068), two new definitions, each measured on this gate's fixture against the
+# base binary (255dc199) — no prose was added to any reading that already rode:
+#   ripwire.for/v1 738->761: " (absent cx/ccx/in = 0)" (+23 B) — the --for lens omits a zero cx=/ccx=/in=.
+#   ripwire.whereis/v1 611->887: the default listing's readings — listing=, the <refs count= next=> element (and the
+#   generic next= reading it pulls in), head_date= (the tip/date hoist) and complete='s "(of its listing=)" (+276 B). The
+#   answer they ride is the lean one: its rows shrink from every reference to the definitions alone.
+# RE-PINNED 2026-10-07 (lane/lean-answers-068 fix round 1, review B1 + its non-blocking item 2), measured on this gate's
+# fixture: ripwire.whereis/v1 887->1023: the listing= reading gains "; default: defs only if strictly shorter than all"
+# (+49 B: the default now serves the defs page only when it is strictly shorter than the all page) and "; a def the
+# parser does not model (define_method, setattr, assignment) is a counted ref" (+87 B) — +136 B, nothing else moved.
+# Both ride only a page that carries listing=. The OLD path keeps its own pin: the whereis-listing=all twin after the
+# universe loop holds the whole-list page's legend at 700 B (measured 692), so it cannot grow inside this headroom.
+# RE-PINNED 2026-10-08 (lane/lean-answers-068 fix round 2, review D1), measured on this gate's fixture: ripwire.whereis/v1
+# 1023->1037, pin 1040->1050 (measured + 10 rounded up to 10): the listing= reading "default: defs only if strictly shorter
+# than all" becomes "default: defs if it lists more defs than all, else if shorter" (+14 B) because the default now serves
+# the defs page whenever it lists MORE definitions than the all page under the row cap, whatever its bytes. Rides only a
+# page that carries listing=; nothing else moved. The OLD path keeps its pin: the whereis-listing=all twin holds the
+# whole-list page's legend at 700 B (measured 692, unchanged).
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
 ripwire.map/v1                   910   892
@@ -582,14 +608,14 @@ ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
 ripwire.merge-scout/v1            570   558
-ripwire.whereis/v1                630   611
+ripwire.whereis/v1               1050  1037
 ripwire.community/v1             730   719
 ripwire.layout/v1                1220  1203
 ripwire.pack-task/v1             990   974
 ripwire.pack-top-n/v1            760   745
 ripwire.expand/v1                280   265
 ripwire.expand-file/v1            360   342
-ripwire.for/v1                    750   738
+ripwire.for/v1                    775   761
 '
 pinFor()
 {
@@ -754,6 +780,18 @@ else
 fi
 [ "$nRefuse" -ge 60 ] && ok "(U) $nRefuse non-XML flags refuse --legend=compact (empty stdout, non-zero exit); $nSkip write/serve/exec flags not probed" \
                       || no "(U) only $nRefuse non-XML flags refused compact (want ≥ 60)"
+# (U-TWIN) the whole-list whereis page (--whereis-listing=all, the pre-listing answer) keeps its OWN pin: the default's pin
+# rose to 1040 B for the listing= readings, and without this twin the old path could grow inside that headroom unseen.
+# 700 = measured 692 (the base's 611 plus the head_date= reading) + 10, rounded up to 10.
+( cd "$REPO" && "$BIN" . --whereis=distance --whereis-listing=all >"$TMP/wall.c" 2>/dev/null </dev/null ); rcWall=$?
+( cd "$REPO" && "$BIN" . --whereis=distance --whereis-listing=all --legend=full >"$TMP/wall.f" 2>/dev/null </dev/null )
+wallLb="$( leg prose "$TMP/wall.c" "$TMP/wall.f" )"
+if [ "$rcWall" -eq 0 ] && [ "$( leg schema "$TMP/wall.c" )" = "ripwire.whereis/v1" ] && ! grep -o '<whereis [^>]*>' "$TMP/wall.c" | grep -q ' listing=' \
+   && [ -n "$wallLb" ] && [ "$wallLb" -gt 0 ] 2>/dev/null && [ "$wallLb" -le 700 ]; then
+    ok "(U-TWIN) --whereis=distance --whereis-listing=all compact PROSE legend is $wallLb B (<= its 700 B pin; the default's pin is 1040)"
+else
+    no "(U-TWIN) --whereis-listing=all compact PROSE legend is '${wallLb:-none}' B (pin 700; exit $rcWall): $( leg legend "$TMP/wall.c" | head -c 200 )"
+fi
 
 echo
 echo "=== (F) the DEFAULT is the default posture; --legend=full restores MORE legend over the SAME payload (L1) ==="
@@ -982,7 +1020,11 @@ echo
 # RE-ANCHORED 2026-09-26 (lane impact-depth-065, depth-labelled --impact): 7,500 → 7,700 B, measured 7,622 (7,495 on the
 # base binary b343b988). The loop's --impact=distance probe now carries by_depth= and d=, and its compact legend reads both
 # (+127 B, the (U) table's ripwire.impact/v1 row); the other nine verbs unmoved. Same rule: the next multiple of 100 B.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,700 B (34,431 B in full on the fixture) ==="
+# RE-ANCHORED 2026-10-08 (train 26b): 7,700 → 7,800 B, measured 7,711. Attributed on this fixture by merge step: 7,622 at
+# the train's phase-A head, 7,688 with receiver evidence merged (its present-only via= readings; under the old ceiling),
+# 7,711 with lean-answers merged: +23 B, all on the --for probe, the " (absent cx/ccx/in = 0)" reading the lane pinned
+# in the ripwire.for/v1 row. The other verbs are unmoved by that step. Same rule: the next multiple of 100 B.
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,800 B (34,716 B in full on the fixture) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -991,8 +1033,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 7700 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,700 B; full: $fullBytes B)"
+[ "$loopBytes" -le 7800 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,800 B; full: $fullBytes B)"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="

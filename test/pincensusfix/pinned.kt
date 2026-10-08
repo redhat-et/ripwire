@@ -7,16 +7,16 @@
 // Alpha.helper is pinned (the right answer: `this.helper()`), ONE confident edge is emitted, and `amb=` is NOT
 // incremented. That silent commitment is what the census exists to make visible.
 //
-class Alpha {
-    fun helper(): Int {
+class Alpha : Beta() {
+    override fun helper(): Int {
         return 1
     }
     fun run(): Int {
         return helper()
     }
 }
-class Beta {
-    fun helper(): Int {
+open class Beta {
+    open fun helper(): Int {
         return 2
     }
 }

@@ -2179,7 +2179,7 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 28;   // MUST equal ingest.cpp's kCacheVersion (gated); 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 29;   // MUST equal ingest.cpp's kCacheVersion (gated); 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
 constexpr std::uint32_t kIngestParserVerMirror    = 156;  // MUST equal ingest.cpp's kParserVer   (gated)
                                                           // 156 = 2026-10-08 (train 26b: above every lane build, up to 154 / rich tag 155; see the
                                                           //   kParserVer note)
@@ -2187,6 +2187,8 @@ constexpr std::uint32_t kIngestParserVerMirror    = 156;  // MUST equal ingest.c
                                                           //   lanes in flight, see kParserVer note; kIngestCacheVersionMirror stays main's 28)
                                                           // 145 = lane honesty-small-068 (lane-local; the train renumbered it)
                                                           // 145 = lane train25-cr2-followup (train 25 re-review fixes; lane-local, the train renumbered it)
+                                                          // 150..154 = lane FE-B on train 26a (lane-local; the train renumbered it; 146/145 = earlier
+                                                          //   lane FE-B builds; kIngestCacheVersionMirror 29 is FE-B's)
                                                           // 141 = 2026-10-04 (train 25: above FE-A's 134/135 and refval-edges' 140, see kParserVer
                                                           //   note; kIngestCacheVersionMirror 28 from FE-A, kQSnapCacheScheme 17 from refval-edges)
                                                           // 140 = lane refval-edges (reference-as-value rows; see kParserVer note)

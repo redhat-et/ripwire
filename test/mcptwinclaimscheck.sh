@@ -100,8 +100,10 @@ def headRows( xml ):
     return rows
 
 # ── (A) whereis: the call site on use.c:4 is a reference on BOTH surfaces, labelled by the same mechanism ──
-cx, _, _ = cli( [ "--whereis=helper" ] )
-mx, merr = mcp( "whereis", { "path": FIX, "symbol": "helper" } )
+# lean-answers lane: the use.c:4 row is a kind="ref" row, which the DEFAULT listing counts rather than prints, so (A) reads
+# the whole list on both surfaces (--whereis-listing=all / listing:"all"); (A-default) below is its twin on the default.
+cx, _, _ = cli( [ "--whereis=helper", "--whereis-listing=all" ] )
+mx, merr = mcp( "whereis", { "path": FIX, "symbol": "helper", "listing": "all" } )
 if mx is None:
     no( "(A) MCP whereis refused: %s" % merr )
 else:
@@ -111,6 +113,18 @@ else:
     ( ok if cr == mr and cr else no )( "(A) HEAD rows (p, l, kind) identical on CLI and MCP (cli=%s mcp=%s)" % ( sorted( cr ), sorted( mr ) ) )
     hl = lambda x: ( re.search( r'head_labels="([^"]*)"', x ) or [ None, "" ] )[ 1 ]
     ( ok if hl( cx ) == hl( mx ) == "index" else no )( "(A) head_labels= is index on both surfaces (cli=%s mcp=%s)" % ( hl( cx ), hl( mx ) ) )
+
+# ── (A-default) the twin on the default listing: the same def rows on both surfaces, the ref rows counted identically ──
+cd, _, _ = cli( [ "--whereis=helper" ] )
+md, mderr = mcp( "whereis", { "path": FIX, "symbol": "helper" } )
+if md is None:
+    no( "(A-default) MCP whereis refused: %s" % mderr )
+else:
+    crd, mrd = headRows( cd ), headRows( md )
+    rc = lambda x: ( re.search( r'<refs count="(\d+)"', x ) or [ None, "" ] )[ 1 ]
+    defs_all = { r for r in headRows( cx ) if r[ 2 ] == "def" } if cx else set()
+    ( ok if crd == mrd and crd == defs_all and crd else no )( "(A-default) HEAD def rows identical on CLI and MCP and equal to the whole list's (cli=%s mcp=%s)" % ( sorted( crd ), sorted( mrd ) ) )
+    ( ok if ( "use.c", "4", "ref" ) not in crd and rc( cd ) == rc( md ) and rc( cd ) not in ( "", "0" ) else no )( "(A-default) the use.c:4 reference is counted (<refs count=%s>), not printed, on both surfaces (mcp count=%s)" % ( rc( cd ), rc( md ) ) )
 
 # ── (B) uses: a refusal claims only what was checked ──
 _, cerr, crc = cli( [ "--uses=valueToken" ] )

@@ -108,12 +108,23 @@ wait_for_id() {
 }
 
 # ─── the long-lived WARM server ───────────────────────────────────────────────────────────────────
+# lean-answers lane: a stdio session's legend posture is now "ref" after its first answer (--mcp-legend=session, the
+# default), so a warm server's later answers carry their legend once per session while a cold server's single answer is
+# inline. That posture is orthogonal to what this gate measures (the incremental INDEX), so the byte-identity arms run
+# on --mcp-legend=inline (the pre-lane posture, unchanged assertions) and a TWIN warm server on the default posture is
+# held to the same tree-state rows (equiv's twin arm below).
 FIFO="$WORK/in.fifo"; mkfifo "$FIFO"
-TMPDIR="$WARMTMP" "$BIN" --mcp <"$FIFO" >"$TMP/warm.out" 2>/dev/null &
+TMPDIR="$WARMTMP" "$BIN" --mcp --mcp-legend=inline <"$FIFO" >"$TMP/warm.out" 2>/dev/null &
 SRV=$!
 exec 9>"$FIFO"
-trap 'exec 9>&- 2>/dev/null; kill "$SRV" 2>/dev/null; rm -rf "$TMP"' EXIT
+WARMTMP_D="$TMP/warmtmp_d"; mkdir -p "$WARMTMP_D"
+FIFO_D="$WORK/in_d.fifo"; mkfifo "$FIFO_D"
+TMPDIR="$WARMTMP_D" "$BIN" --mcp <"$FIFO_D" >"$TMP/warm_d.out" 2>/dev/null &
+SRV_D=$!
+exec 8>"$FIFO_D"
+trap 'exec 9>&- 2>/dev/null; exec 8>&- 2>/dev/null; kill "$SRV" "$SRV_D" 2>/dev/null; rm -rf "$TMP"' EXIT
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' >&9
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' >&8
 
 # ask the WARM server for verb `for` with task $2, response id $1 → sets WTEXT / WSTAMP / WREINGEST.
 warm_for() {
@@ -124,6 +135,11 @@ warm_for() {
     WTEXT="$( inner_for_id "$TMP/warm.out" "$id" )"
     WSTAMP="$( stamp_for_id "$TMP/warm.out" "$id" )"
     WREINGEST="$( reingest_for_id "$TMP/warm.out" "$id" )"
+    # the default-posture twin server gets the same request (WTEXT_D; empty when it never answered)
+    printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' \
+        "$id" "$WORK" "$task" >&8
+    WTEXT_D=""
+    wait_for_id "$TMP/warm_d.out" "$id" && WTEXT_D="$( inner_for_id "$TMP/warm_d.out" "$id" )"
 }
 
 # ask a FRESH server (fresh TMPDIR ⇒ no cache blob ⇒ genuine COLD full reingest) → CTEXT / CSTAMP.
@@ -132,7 +148,7 @@ cold_for() {
     local ct; ct="$( mktemp -d "$TMP/cold.XXXXXX" )"
     printf '%s\n{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' \
         '{"jsonrpc":"2.0","id":1,"method":"initialize"}' "$WORK" "$task" \
-        | TMPDIR="$ct" "$BIN" --mcp >"$ct/out" 2>/dev/null
+        | TMPDIR="$ct" "$BIN" --mcp --mcp-legend=inline >"$ct/out" 2>/dev/null
     CTEXT="$( inner_for_id "$ct/out" 7 )"
     CSTAMP="$( stamp_for_id "$ct/out" 7 )"
 }
@@ -150,6 +166,24 @@ equiv() {
         no "$what: incremental verb text DIFFERS from a cold full reingest"
         diff <( printf '%s\n' "$WTEXT" ) <( printf '%s\n' "$CTEXT" ) | head -20
     fi
+    # twin (default session posture): the warm answer is legend="ref" and its rows and root facts equal the cold answer's
+    local tw
+    tw="$( printf '%s\n%s\n' "$WTEXT_D" "$CTEXT" | python3 -c '
+import sys, json, re
+w, c = [ json.loads( l ) for l in sys.stdin.read().splitlines()[:2] ]
+A = re.compile( r"\s([\w:.-]+)=\"([^\"]*)\"" )
+def rows( t ):
+    m = re.search( r"<sigs\b[^>]*>.*?</sigs><tail[^>]*>.*?</tail>", t, re.S ); return m.group( 0 ) if m else None   # <sigs> may carry docs_after_code=
+ab = re.search( r"<about\b[^>]*/>", w ); rt = re.search( r"<ctx\b[^>]*>", c )
+if not ab or "legend=\"ref\"" not in ab.group( 0 ): print( "NOREF" ); sys.exit()
+wa = { k: v for k, v in A.findall( ab.group( 0 ) ) if k not in ( "legend", "dict", "dictv" ) }
+ca = { k: v for k, v in A.findall( rt.group( 0 ) ) if k != "task" } if rt else None
+print( "SAME" if rows( w ) is not None and rows( w ) == rows( c ) and wa == ca else "DIFF" )
+' 2>&1 )"
+    case "$tw" in
+        SAME) ok "$what (default legend posture twin): warm legend=\"ref\" answer has the cold answer's rows and root facts";;
+        *)    no "$what (default legend posture twin): warm answer vs cold: $tw";;
+    esac
     if [ "$WSTAMP" = "$CSTAMP" ]; then
         ok "$what: _index stamp matches cold ('$WSTAMP')"
     else
@@ -403,7 +437,8 @@ esac
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 exec 9>&-
-wait "$SRV" 2>/dev/null
+exec 8>&-
+wait "$SRV" "$SRV_D" 2>/dev/null
 
 echo
 if [ "$fail" -eq 0 ]; then

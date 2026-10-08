@@ -13,11 +13,17 @@
 # re-applies the `Graph::localityKey` tie-break (an unscoped def is compared as `path::name`, not its bare
 # name) so a module-level function is no longer auto-lost to a same-file class method.
 #
-# THE FIXTURE (test/lpinfix/, 3 Kotlin files — Python until FE-A, whose bare call reaches no method: test/falseedgecheck.sh):
-#   pinned.kt   — `Alpha.run` -> `helper()`; `Alpha.helper` beats `Beta.helper` by scope: ONE edge, `lpin="1"`, no `amb=`.
+# THE FIXTURE (test/lpinfix/: Kotlin — Python until FE-A, whose bare call reaches no method: test/falseedgecheck.sh — and
+# one Objective-C file, a language FE-B's receiver evidence does not narrow: test/receiverevidencecheck.sh):
+#   pinnedcone.kt — `Kappa.run` -> `step()`; Kappa's override beats the `Lambda.step` it inherits by scope: ONE edge,
+#                 `lpin="1"`, no `amb=`. (The pin shape; pinned.kt carried it until FE-B.)
+#   pinned.kt   — `Alpha.run` -> `helper()`; since FE-B the implicit receiver PROVES `Alpha.helper` (`Beta.helper` is an
+#                 unrelated class): ONE edge, no `amb=`, and no `lpin=` — evidence decided, not a prior.
 #   tied.kt     — `Eps.go` -> `other()`; sibling classes tie: split, `amb="1"`, no `lpin=`.
-#   modlevel.kt — `Caller.go` -> `compute()`; `Helper.compute` vs top-level `compute`: a full tie under
-#                 localityKey ⇒ split, `amb="1"`, no `lpin=` (was a silent pin on Helper::compute).
+#   modlevel.m  — `-[Caller go]` -> `compute()`; the C function vs `-[Helper compute]`: a full tie under localityKey ⇒
+#                 split, `amb="1"`, no `lpin=` (was a silent pin on the method). modlevel.kt carried it until FE-B.
+#   modlevel.kt — `Caller.go` -> `compute()`; since FE-B the implicit receiver reaches the top-level `compute` and never
+#                 `Helper.compute`: ONE edge to the module-level def, no `amb=`, no `lpin=`.
 #
 # Exits non-zero on any failure.
 
@@ -45,13 +51,20 @@ MAP="$( cat "$TMP/map.xml" )"
 row(){ _n="${1##*::}"; _r="${1#*::}"; _s="${_r%::*}"; printf '%s' "$MAP" | tr '<' '\n' | grep "n=\"$_n\" sc=\"$_s\"" | head -1; }
 
 # ── (A) the pin is DISCLOSED on its row, and it is still not an amb ──────────────────────────────
-RUN_ROW="$( row 'pinned.kt::Alpha::run' )"
-printf '%s' "$RUN_ROW" | grep -q 'lpin="1"' && ok "(A) pinned.kt::Alpha::run carries lpin=\"1\" — the locality pin is disclosed" \
-    || no "(A) pinned.kt::Alpha::run has no lpin=\"1\": $RUN_ROW"
-printf '%s' "$RUN_ROW" | grep -q 'amb=' && no "(A) pinned.kt::Alpha::run carries amb= — the marker inflated amb=: $RUN_ROW" \
+RUN_ROW="$( row 'pinnedcone.kt::Kappa::run' )"
+printf '%s' "$RUN_ROW" | grep -q 'lpin="1"' && ok "(A) pinnedcone.kt::Kappa::run carries lpin=\"1\" — the locality pin is disclosed" \
+    || no "(A) pinnedcone.kt::Kappa::run has no lpin=\"1\": $RUN_ROW"
+printf '%s' "$RUN_ROW" | grep -q 'amb=' && no "(A) pinnedcone.kt::Kappa::run carries amb= — the marker inflated amb=: $RUN_ROW" \
     || ok "(A) the pin still contributes nothing to amb="
+N_STEP="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/n="run" sc="Kappa"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="step"' )"
+if [ "$N_STEP" = 1 ]; then ok "(A) the pin still emits ONE confident edge"; else no "(A) $N_STEP step edges on Kappa::run, want 1"; fi
+# FE-B: the shape pinned.kt carried is now EVIDENCE (an implicit `this` never reaches the unrelated Beta) — still ONE
+# edge and no amb=, and no lpin= because no prior picked it
+RUN_ROW="$( row 'pinned.kt::Alpha::run' )"
+printf '%s' "$RUN_ROW" | grep -q 'lpin=\|amb=' && no "(A2) pinned.kt::Alpha::run carries lpin=/amb= — the implicit receiver should decide it: $RUN_ROW" \
+    || ok "(A2) pinned.kt::Alpha::run: neither lpin= nor amb= — the implicit receiver decided"
 N_HELPER="$( printf '%s' "$MAP" | tr '>' '\n' | awk '/n="run" sc="Alpha"/{f=1} f{print} /\/s/{if(f)exit}' | grep -c 'n="helper"' )"
-if [ "$N_HELPER" = 1 ]; then ok "(A) the pin still emits ONE confident edge"; else no "(A) $N_HELPER helper edges on Alpha::run, want 1"; fi
+if [ "$N_HELPER" = 1 ]; then ok "(A2) ONE helper edge on Alpha::run"; else no "(A2) $N_HELPER helper edges on Alpha::run, want 1"; fi
 
 # ── (B) the tied control — a split is not a pin ───────────────────────────────────────────────────
 GO_ROW="$( row 'tied.kt::Eps::go' )"
@@ -61,14 +74,22 @@ printf '%s' "$GO_ROW" | grep -q 'lpin=' && no "(B) tied.kt::Eps::go carries lpin
     || ok "(B) no lpin= on the split"
 
 # ── (C) the module-level shape — a full tie under localityKey, not a silent pin ──────────────────
-CALLER_ROW="$( row 'modlevel.kt::Caller::go' )"
-printf '%s' "$CALLER_ROW" | grep -q 'amb="1"' && ok "(C) modlevel.kt::Caller::go is an honest split (amb=\"1\") — the module-level def is no longer auto-lost" \
-    || no "(C) modlevel.kt::Caller::go is not amb=\"1\" — Helper::compute still silently wins: $CALLER_ROW"
-printf '%s' "$CALLER_ROW" | grep -q 'lpin=' && no "(C) modlevel.kt::Caller::go carries lpin= — still pinned: $CALLER_ROW" \
+# the Objective-C twin: an unscoped row (no sc=), read inside its own <f> group
+CALLER_ROW="$( printf '%s' "$MAP" | tr '<' '\n' | awk '/^f p="modlevel.m"/{f=1;next} /^f /{f=0} f && /^s [^>]*n="go"/{print; exit}' )"
+printf '%s' "$CALLER_ROW" | grep -q 'amb="1"' && ok "(C) modlevel.m: -[Caller go] is an honest split (amb=\"1\") — the module-level def is no longer auto-lost" \
+    || no "(C) modlevel.m: -[Caller go] is not amb=\"1\" — the method still silently wins: $CALLER_ROW"
+printf '%s' "$CALLER_ROW" | grep -q 'lpin=' && no "(C) modlevel.m: -[Caller go] carries lpin= — still pinned: $CALLER_ROW" \
     || ok "(C) no lpin= on the module-level site"
-grep -E '^C	locality	' "$TMP/c.tsv" | grep -q 'modlevel.kt::Caller::go' \
-    && no "(C) the census still labels modlevel.kt::Caller::go locality-pinned" \
-    || ok "(C) the census agrees: no locality row for modlevel.kt::Caller::go"
+grep -E '^C	locality	' "$TMP/c.tsv" | grep -q 'modlevel.m::go' \
+    && no "(C) the census still labels modlevel.m::go locality-pinned" \
+    || ok "(C) the census agrees: no locality row for modlevel.m::go"
+# FE-B: modlevel.kt's implicit receiver resolves it to the top-level compute — one plain edge, no split, no pin
+CALLER_ROW="$( row 'modlevel.kt::Caller::go' )"
+printf '%s' "$CALLER_ROW" | grep -q 'amb=\|lpin=' && no "(C2) modlevel.kt::Caller::go carries amb=/lpin= — the implicit receiver should decide it: $CALLER_ROW" \
+    || ok "(C2) modlevel.kt::Caller::go: neither amb= nor lpin= — the implicit receiver decided"
+grep -E '^C	unique	' "$TMP/c.tsv" | grep 'modlevel.kt::Caller::go' | grep -q '	modlevel.kt::compute#' \
+    && ok "(C2) the census binds modlevel.kt::Caller::go to the top-level compute alone" \
+    || no "(C2) the census does not bind modlevel.kt::Caller::go to the top-level compute alone: $( grep 'modlevel.kt::Caller::go' "$TMP/c.tsv" )"
 
 # ── (D) the header counter, and its equality with the census ──────────────────────────────────────
 HDR="$( printf '%s' "$MAP" | grep -o '<!-- files=[^>]*-->' | head -1 )"
@@ -134,9 +155,11 @@ class Subscriber:
 PYEOF
 "$BIN" "$SELFD" --no-cache >"$TMP/selfwin.xml" 2>/dev/null
 SW="$( sed 's/></>\n</g' "$TMP/selfwin.xml" | awk '/n="publish_event" sc="Facade"/{f=1;print;next} /^<s /{f=0} f' )"
-[ "$( printf '%s' "$SW" | grep -c '<c n="publish_event"' )" = 2 ] \
+# FE-B: a merged via="name" row <c … x="N"/> stands for N edges (serialize.h writeMapCalleeRows), so edges are summed
+SW_EDGES="$( printf '%s' "$SW" | grep -o '<c n="publish_event"[^>]*>' | awk '{ n = 1; if ( match( $0, / x="[0-9]+"/ ) ) n = substr( $0, RSTART + 4, RLENGTH - 5 ) + 0; s += n } END { print s + 0 }' )"
+[ "$SW_EDGES" = 2 ] \
     && ok "(I) the facade keeps BOTH real targets (2 edges) — the caller no longer wins its own tie-break" \
-    || no "(I) facade.py::Facade::publish_event has $( printf '%s' "$SW" | grep -c '<c n="publish_event"' ) publish_event edges, want 2: $SW"
+    || no "(I) facade.py::Facade::publish_event has $SW_EDGES publish_event edges, want 2: $SW"
 printf '%s' "$SW" | grep -q 'amb="1"' && ok "(I) …disclosed as an honest split (amb=\"1\")" \
     || no "(I) the facade split is not marked amb=\"1\": $( printf '%s' "$SW" | head -1 )"
 printf '%s' "$SW" | grep -q 'lpin=' && no "(I) the facade carries lpin= — a two-way tie was pinned: $( printf '%s' "$SW" | head -1 )" \
@@ -155,10 +178,18 @@ class Beta:
     def ping(self, n):
         return n
 PYEOF
+# FE-B (test/receiverevidencecheck.sh) moved this residual BY DESIGN: `other.ping( 1 )` has no receiver evidence, so it
+# is a NAME-ONLY call, and a name-only call keeps every same-file and same-directory candidate instead of tier 1 alone
+# (src/graph.h's stated floor says so). The cross-file Beta.ping is therefore listed — but only HEDGED: via="name" on
+# --callees, never a confident edge. What must still hold: the caller never wins (no self edge) and nothing is proven.
 RESH="$( "$BIN" "$RESD" --no-cache 2>/dev/null | grep -o '<!-- files=[^>]*-->' | head -1 )"
-printf '%s' "$RESH" | grep -q ' edges=0 ' \
-    && ok "(I) stated floor holds: a caller alone in the SAME-FILE tier still yields no edge (tier 1 is untouched)" \
-    || no "(I) the tier-1 residual moved — update this arm AND src/graph.h's stated floor: $RESH"
+printf '%s' "$RESH" | grep -q ' edges=1 ' \
+    && ok "(I) the name-only residual lists ONE edge (the cross-file candidate; the caller's own def stays a dropped self-loop)" \
+    || no "(I) the tier-1 residual moved again — update this arm AND src/graph.h's stated floor: $RESH"
+RESC="$( cd "$RESD" && "$BIN" . --no-cache --callees=a.py:ping 2>/dev/null )"
+printf '%s' "$RESC" | grep -q '<s t="fn" n="ping" p="b.py:2" via="name"/>' \
+    && ok "(I) …and that edge is HEDGED: --callees marks Beta.ping via=\"name\" (no confident cross-file edge)" \
+    || no "(I) the residual's cross-file edge is not marked via=\"name\": $( printf '%s' "$RESC" | grep -o '<s [^>]*/>' | tr '\n' ' ' )"
 
 # ── (H) determinism + well-formedness ─────────────────────────────────────────────────────────────
 # L1 (2026-09-19): the --pin-census run above asks for the full legend; the rerun it is compared to asks for the same.

@@ -973,8 +973,7 @@ struct FromTraceResult
 // The size the compact layer delivers for one assembled candidate (its own size when the layer would not rewrite it).
 [[nodiscard]] inline std::size_t traceDeliveredBytes( std::string_view candidate )
 {
-    const std::size_t delivered = rw::compactDeliveredBytes( candidate, "from-trace" );
-    return delivered > 0 ? delivered : candidate.size();
+    return rw::compactDeliveredBytesOrWritten( candidate, "from-trace" );
 }
 
 // The signature/body section, sized against the fixed part the reader actually receives. The first render prices the
@@ -1232,7 +1231,7 @@ inline FromTraceResult fromTraceBundleText( const IngestResult& ing, const Graph
             }
 
             const std::vector<NodeId> bodyIds = traceBodyIds( part, hop );   // LB-A: innermost frame, then the top hop row
-            packBodies( m, ing, bodyIds, in.bodyBudgetBytes, g.outOff, g.outTargets, in.compress, in.redact,
+            packBodies( m, ing, bodyIds, in.bodyBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact,
                         /*ranges=*/nullptr, in.notes,                 // L3: the rank-1 body surfaces notes too
                         /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true, /*withFileContext=*/false,
                         in.rootArg,                                   // R-R: root-relative <b p=…>

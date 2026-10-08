@@ -210,18 +210,21 @@ PY="$( callees po_go )"
     && ok "(e-py) po_go() self.member.compute() stays honestly split (annotated attr NOT narrowed — disclosed limit)" \
     || no "(e-py) po_go() lost its honest split — Python receiver behavior must be unchanged this round"
 TS="$( callees to_go )"
-( printf '%s\n' "$TS" | grep -q 't.ts:1"' ) && ( printf '%s\n' "$TS" | grep -q 't.ts:2"' ) \
-    && ok "(e-ts) to_go() this.member.compute() stays honestly split (TS receivers uncaptured — disclosed limit)" \
-    || no "(e-ts) to_go() lost its honest split — TS receiver behavior must be unchanged this round"
+# FE-B (test/receiverevidencecheck.sh) reads TS field annotations: `member: THelper;` types `this.member`, so to_go()
+# RESOLVES to THelper.compute and TDecoy.compute is no candidate (it was the honest split while TS receivers were
+# uncaptured). An UNtyped TS chain stays name-only (receiverevidencecheck's `ctx.req.raw.headers.get()` arm).
+( printf '%s\n' "$TS" | grep -q 't.ts:1"' ) && ! ( printf '%s\n' "$TS" | grep -q 't.ts:2"\|via="name"' ) \
+    && ok "(e-ts) to_go() this.member.compute() resolves to THelper.compute alone (the annotated field types it — FE-B)" \
+    || no "(e-ts) to_go() should resolve to THelper.compute alone, plain: $( printf '%s' "$TS" | tr '\n' ' ' )"
 
-# ── (h) the header gauge agrees with the arms above: exactly the 6 honest splits remain ambiguous
-#        (expl, unk, freeuse, multi, po_go, to_go — run/ptr/inh_go narrowed, shadowLocal and shadowParam are
+# ── (h) the header gauge agrees with the arms above: exactly the 5 honest splits remain ambiguous
+#        (expl, unk, freeuse, multi, po_go — to_go resolves since FE-B; run/ptr/inh_go narrowed, shadowLocal and shadowParam are
 #        Rule 2; shadowParam was a split until Rule 2 read parameter types, 2026-09-16, which moved this from 7).
 #        Counted from the fixture, not guessed: flip arms above before touching this number. ──
 AMB="$( printf '%s\n' "$MAP" | grep -o 'ambiguous=[0-9]*' | head -1 )"
-[ "$AMB" = "ambiguous=6" ] \
-    && ok "(h) header gauge ambiguous=6 — only the honest splits remain" \
-    || no "(h) header gauge is '$AMB', expected ambiguous=6 (3 field-typed calls narrowed, 6 honest splits kept)"
+[ "$AMB" = "ambiguous=5" ] \
+    && ok "(h) header gauge ambiguous=5 — only the honest splits remain" \
+    || no "(h) header gauge is '$AMB', expected ambiguous=5 (3 field-typed calls narrowed, to_go resolved, 5 honest splits kept)"
 
 # ── (n) same-NAMED class collision (FIX2): conflicting same-named fields tombstone — NEITHER Dup::go narrows ──
 MAP2="$( "$BIN" "$FIX2" --no-cache --legend=full 2>/dev/null | tr '>' '\n' )"

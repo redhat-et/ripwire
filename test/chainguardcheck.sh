@@ -211,17 +211,20 @@ GO2="$( "$BIN" "$FIX2" --callees=go --no-cache 2>/dev/null | grep -o '<callees.*
 ( printf '%s\n' "$GO2" | grep -q 'p.py:2"' ) && ( printf '%s\n' "$GO2" | grep -q 'p.py:6"' ) \
     && ok "(j-py) PApp.go() self.pool.acquire() keeps its COMPLETE split (Python shape capture changes no edge)" \
     || no "(j-py) PApp.go() lost part of its split — the widening changed Python edges"
-( printf '%s\n' "$GO2" | grep -q 't.ts:1"' ) && ( printf '%s\n' "$GO2" | grep -q 't.ts:2"' ) \
-    && ok "(j-ts) TApp.go() this.cfg.opts.enable() keeps its COMPLETE split (TS receivers uncaptured)" \
-    || no "(j-ts) TApp.go() lost part of its split — TS receiver behavior must be unchanged"
+# FE-B (test/receiverevidencecheck.sh) reads TS field annotations: `cfg: TCfg` and `opts: TOpts` type the chain, so
+# TApp.go() RESOLVES to TOpts.enable and TDecoy.enable is no candidate (the split held while TS receivers were
+# uncaptured). The Python chain above is still split: a Python attribute annotation is not read (disclosed).
+( printf '%s\n' "$GO2" | grep -q 't.ts:1" *$' ) && ! ( printf '%s\n' "$GO2" | grep -q 't.ts:2"' ) \
+    && ok "(j-ts) TApp.go() this.cfg.opts.enable() resolves to TOpts.enable alone (stated field types — FE-B)" \
+    || no "(j-ts) TApp.go() should resolve to TOpts.enable alone: $( printf '%s' "$GO2" | tr '\n' ' ' )"
 AMB2="$( printf '%s\n' "$MAP2" | grep -o 'ambiguous=[0-9]*' | head -1 )"
-[ "$AMB2" = "ambiguous=2" ] \
-    && ok "(j) FIX2 header gauge ambiguous=2 — both cross-language chains stay split" \
-    || no "(j) FIX2 header gauge is '$AMB2', expected ambiguous=2"
+[ "$AMB2" = "ambiguous=1" ] \
+    && ok "(j) FIX2 header gauge ambiguous=1 — the Python chain stays split, the typed TS chain resolves" \
+    || no "(j) FIX2 header gauge is '$AMB2', expected ambiguous=1"
 EDG2="$( printf '%s\n' "$MAP2" | grep -o 'edges=[0-9]*' | head -1 )"
-[ "$EDG2" = "edges=4" ] \
-    && ok "(j) FIX2 header gauge edges=4 — cross-language edge sets byte-stable" \
-    || no "(j) FIX2 header gauge is '$EDG2', expected edges=4"
+[ "$EDG2" = "edges=3" ] \
+    && ok "(j) FIX2 header gauge edges=3 — the Python split's two edges and TS's one" \
+    || no "(j) FIX2 header gauge is '$EDG2', expected edges=3"
 
 # ── (k) determinism + cache transparency across the kParserVer bump ───────────────────────────────────
 "$BIN" "$FIX" --no-cache >"$TMP/m1" 2>/dev/null

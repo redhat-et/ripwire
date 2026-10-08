@@ -31,7 +31,7 @@
 #                     fun greet(): String -> square(2)          -- member function, CROSS-FILE call
 #                   }
 #                   fun Int.doubled(): Int                    -- extension function
-#                   fun useJavaHelper(): Int -> JavaBridge.helper(5)  -- Kotlin -> ???, QUALIFIED on a name both define (§5 trade-off)
+#                   fun useJavaHelper(): Int -> JavaBridge.helper(5)  -- Kotlin -> ???, QUALIFIED on a name both define (§5: Java's, by its class-name receiver, since FE-B)
 #                   fun useJavaOnly(): Int -> JavaBridge.javaOnly(3)  -- Kotlin -> Java, qualified, a name only Java defines (§3)
 #                   fun ambiguousCall(): Int -> helper(5)      -- Kotlin -> ???, BARE (the collision probe)
 #                   fun runAll(): Int -> of, greet, doubled, useJavaHelper, useJavaOnly, ambiguousCall
@@ -53,13 +53,13 @@
 #     fixture and split across three directories alike (§14a).
 #   - JVM BRIDGE, Kotlin -> Java: useJavaOnly's `JavaBridge.javaOnly(3)` reaches the Java method — a
 #     name only Java defines, which is the case the bridge exists for (§3).
-#   - THE COLLISION, by rule: `helper` is defined in both languages, so both Kotlin sites — the BARE
-#     ambiguousCall() and the QUALIFIED useJavaHelper() — bind Kotlin's Extra.helper: the bridge admits
-#     the other JVM language only when the caller's own defines no candidate (graph.h
-#     keepOwnJvmLanguageCandidates). The qualified site is the disclosed trade-off: Kotlin receivers do
-#     not narrow candidates yet (ingest_binds.h). What this replaced reported both helpers at
-#     ambiguous=2 in this flat fixture — and silently bound NEITHER once the files sat in different
-#     directories, the same tier-3 drop that deleted Java edges on square/retrofit (§14).
+#   - THE COLLISION, by rule: `helper` is defined in both languages. The BARE ambiguousCall() binds Kotlin's Extra.helper
+#     (hedged via="name": nothing imports the object's member): the bridge admits the other JVM language only when the
+#     caller's own defines no candidate (graph.h keepOwnJvmLanguageCandidates). The QUALIFIED useJavaHelper() was the
+#     disclosed trade-off until FE-B (Kotlin receivers did not narrow); its class-name receiver now proves Java's
+#     JavaBridge.helper. What this replaced reported both helpers at ambiguous=2 in this flat fixture — and silently
+#     bound NEITHER once the files sat in different directories, the same tier-3 drop that deleted Java edges on
+#     square/retrofit (§14).
 #   - A same-name Kotlin/Java pair of TYPES is kept as two definitions even when one side has no body
 #     (model.h isDefinitionNotDeclaration, §11 and §13); the positional body fallback in ingest_sidecap.h is what
 #     gives a bodied Kotlin definition its body span.
@@ -262,9 +262,9 @@ echo "=== 5. THE COLLISION: a same-name Kotlin/Java pair binds the caller's OWN 
 # ═══════════════════════════════════════════════════════════════════════════
 # helper is defined in both languages (Util.kt's Extra.helper, JavaBridge.java's helper). The bridge admits the other JVM
 # language only when the caller's own defines no candidate of the name (graph.h keepOwnJvmLanguageCandidates), so BOTH
-# Kotlin call sites — the bare ambiguousCall() and the QUALIFIED useJavaHelper()'s `JavaBridge.helper(5)` — bind Kotlin's
-# Extra.helper. The qualified one is the disclosed trade-off, pinned so it cannot move silently: Kotlin receivers do not
-# narrow candidates yet (ingest_binds.h), so `JavaBridge.` is evidence this resolver cannot read. What this replaced: both
+# Kotlin call sites — the bare ambiguousCall() and the QUALIFIED useJavaHelper()'s `JavaBridge.helper(5)` — bound Kotlin's
+# Extra.helper until FE-B: the qualified one was the disclosed trade-off (Kotlin receivers did not narrow). FE-B's class-name
+# receiver closes it (see below). What this replaced: both
 # sites bound BOTH helpers at ambiguous=2 — but only because this fixture is one directory; split across three they
 # reached NEITHER, with no amb= and no unresolved= (§14a runs that split layout).
 USES_HELPER="$( "$BIN" "$FIX" --uses=helper --no-cache 2>/dev/null )"
@@ -272,12 +272,17 @@ echo "$USES_HELPER" | grep -q 'defs="2"' && ok '--uses=helper: defs="2" — both
     || no "--uses=helper: expected defs=2: $( echo "$USES_HELPER" | grep -o '<uses [^>]*>' )"
 UTIL_HELPER_CALLERS="$( "$BIN" "$FIX" --callers="Util.kt:helper" --no-cache 2>/dev/null )"
 HELPER_CALLERS="$( "$BIN" "$FIX" --callers="JavaBridge.java:helper" --no-cache 2>/dev/null )"
-echo "$UTIL_HELPER_CALLERS" | grep -q 'count="2"' && echo "$UTIL_HELPER_CALLERS" | grep -q 'n="useJavaHelper"' && echo "$UTIL_HELPER_CALLERS" | grep -q 'n="ambiguousCall"' \
-    && ok "--callers=Util.kt:helper: count=2 — the bare ambiguousCall AND the qualified useJavaHelper both bind Kotlin's Extra.helper" \
-    || no "--callers=Util.kt:helper: expected both Kotlin call sites: $( echo "$UTIL_HELPER_CALLERS" | grep -o '<callers [^>]*>' )"
-echo "$HELPER_CALLERS" | grep -q 'count="0"' \
-    && ok "--callers=JavaBridge.java:helper: count=0 — no Kotlin site reaches Java's helper while Kotlin defines one (the trade-off)" \
-    || no "--callers=JavaBridge.java:helper: expected count=0 — a Kotlin site reached Java's helper although Kotlin defines one: $( echo "$HELPER_CALLERS" | grep -o '<callers [^>]*>' )"
+# FE-B (test/receiverevidencecheck.sh) closed the trade-off: a Kotlin class-name receiver is evidence now, so the QUALIFIED
+# `JavaBridge.helper(5)` reaches Java's JavaBridge.helper — proven, no via= — while the BARE ambiguousCall() keeps the
+# own-language-first rule (it never reaches Java's helper) and binds Kotlin's Extra.helper only HEDGED: a top-level
+# function's bare call reaches an object's member through an import, which this file does not have.
+echo "$UTIL_HELPER_CALLERS" | grep -q 'count="1"' && echo "$UTIL_HELPER_CALLERS" | grep -q '<s t="fn" n="ambiguousCall" p="[^"]*" via="name"/>' \
+    && ! echo "$UTIL_HELPER_CALLERS" | grep -q 'n="useJavaHelper"' \
+    && ok "--callers=Util.kt:helper: count=1 — the bare ambiguousCall, hedged via=\"name\"; the qualified useJavaHelper no longer lands here" \
+    || no "--callers=Util.kt:helper: expected only the bare call, hedged: $( echo "$UTIL_HELPER_CALLERS" | grep -oE '<callers [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
+echo "$HELPER_CALLERS" | grep -q 'count="1"' && echo "$HELPER_CALLERS" | grep -q '<s t="fn" n="useJavaHelper" p="[^"]*"/>' \
+    && ok "--callers=JavaBridge.java:helper: count=1 — the qualified useJavaHelper, proven by its class-name receiver; the bare site never reaches Java (own language first)" \
+    || no "--callers=JavaBridge.java:helper: expected exactly the qualified useJavaHelper, proven: $( echo "$HELPER_CALLERS" | grep -oE '<callers [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo
@@ -919,9 +924,10 @@ for L in flat split; do
     callerRows "$ROOTL" JavaBridge.java:javaOnly | grep -q 'n="useJavaOnly"' \
         && ok "$L: Kotlin -> Java — useJavaOnly reaches JavaBridge.javaOnly, a name only Java defines" \
         || no "$L: Kotlin -> Java — useJavaOnly does not reach JavaBridge.javaOnly"
-    [ "$( callersCount "$ROOTL" Util.kt:helper )" = 'count="2"' ] && [ "$( callersCount "$ROOTL" JavaBridge.java:helper )" = 'count="0"' ] \
-        && ok "$L: both Kotlin helper(5) calls bind Kotlin's Extra.helper and none reaches Java's (own language first)" \
-        || no "$L: helper — Util.kt:helper $( callersCount "$ROOTL" Util.kt:helper ), JavaBridge.java:helper $( callersCount "$ROOTL" JavaBridge.java:helper ); expected count=2 and count=0"
+    [ "$( callersCount "$ROOTL" Util.kt:helper )" = 'count="1"' ] && [ "$( callersCount "$ROOTL" JavaBridge.java:helper )" = 'count="1"' ] \
+        && callerRows "$ROOTL" JavaBridge.java:helper | grep -q 'n="useJavaHelper"' \
+        && ok "$L: the bare helper(5) binds Kotlin's Extra.helper (own language first) and the qualified JavaBridge.helper(5) reaches Java's (FE-B)" \
+        || no "$L: helper — Util.kt:helper $( callersCount "$ROOTL" Util.kt:helper ), JavaBridge.java:helper $( callersCount "$ROOTL" JavaBridge.java:helper ); expected count=1 and count=1 (useJavaHelper)"
 done
 
 # 14b. Response.body beside an unrelated Kotlin body() in another directory. The Java callers must equal the same tree's

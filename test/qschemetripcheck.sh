@@ -34,6 +34,23 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# PENDING (train 26b, not yet re-derived): the pin below is FE-B's lane pin (34d7ef2e81…), and it is stale on the train,
+#   whose watched text is kParserVer 156 (above FE-B's 154 and its rich tag 155; honesty-small and train25-cr2-followup
+#   folded in too), kCacheVersion 29 (FE-B) and kQSnapCacheScheme 18 (train25-cr2-followup), with quality.h's mirrors.
+#   Re-derive ONCE with UPDATE_GOLDEN=1 after the train's last lane merges and replace this line with that entry.
+# 2026-10-08, lane FE-B fix round 2 (review B4): RE-DERIVED with UPDATE_GOLDEN=1 (hash 34d7ef2e81…a5bd559d). kParserVer
+#   152 -> 154 (binding spans and tombstones, type parameters; 153 is 152's rich tag); quality.h's mirror with it.
+#   kCacheVersion and kQSnapCacheScheme unchanged. The train renumbers if needed.
+# 2026-10-07, lane FE-B fix round 1 (review B3): RE-DERIVED with UPDATE_GOLDEN=1 (hash e6abc48760…048773). kParserVer
+#   150 -> 152 (Java/C#/Kotlin/Swift declarations record RecvType/MemberType; 151 is 150's rich tag), the quality.h
+#   mirror with it. kCacheVersion and kQSnapCacheScheme unchanged. The train renumbers if needed.
+# 2026-10-07, lane FE-B merged onto train 26a (cd87e30e): RE-DERIVED with UPDATE_GOLDEN=1 (hash abf245ceff…678aeb).
+#   kParserVer 148 -> 150 (FE-B's receiver chain + bind kinds on top of #373; 149 is 148's rich tag), kCacheVersion
+#   28 -> 29 (FE-B's ref record), quality.h mirrors with them. kQSnapCacheScheme stays 17. The train renumbers if needed.
+# 2026-10-04, lane/fe-b-receiver-evidence: RE-DERIVED with UPDATE_GOLDEN=1 (hash 9e06e28ba5…36253dbb). kParserVer 141 -> 146
+#   (above train 25's 143/144; the ref record gains the receiver chain memberPath/memberCtor and the receiver-evidence
+#   binding kinds), kCacheVersion 28 -> 29; quality.h's mirrors move with them. kQSnapCacheScheme stays 17: a snapshot's meaning is unchanged, and the
+#   edges it reads are re-derived under the new kParserVer. The train renumbers and re-derives.
 # 2026-10-04, train 26a (PR #373, Ruby method lookup, merged onto main 255dc199): RE-DERIVED ONCE on the merged tree with
 #   UPDATE_GOLDEN=1 (hash 9fe75d7e33…283213). The only watched text that moved is the kParserVer declaration: 143 -> 148,
 #   above the branch's 145 and the 145–147 other branch builds have used (148's full-use file tag is 149); quality.h's

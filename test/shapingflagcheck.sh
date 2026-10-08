@@ -416,7 +416,7 @@ fprobeFor()
         --format=)       printf '%s' '--format=columnar' ;;
         --color-by=)     printf '%s' '--color-by=lang' ;;
         --grep-scope=)   printf '%s' '--grep-scope=file' ;;
-        --grep-in=)      printf '%s' '--grep-in=any' ;;
+        --grep-in=)      printf '%s' '--grep-in=any' ;;  --whereis-listing=) printf '%s' '--whereis-listing=all' ;;  --mcp-legend=) printf '%s' '--mcp-legend=inline' ;;  # closed value sets: a bogus value refuses before any knob
         --legend=)       printf '%s' '--legend=compact' ;;
         --slice-flow=)   printf '%s' '--slice-flow=back' ;;
         --agent=)        printf '%s' '--agent=codex' ;;

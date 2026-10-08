@@ -143,4 +143,5 @@ kUnitComplexityLowRiskMax	BOUNDARY
 kUnitInterfacingLowRiskMax	BOUNDARY
 kUnitSizeLowRiskMax	BOUNDARY
 kVrMaxDepth	INDEXING
+kWalkCap	INDEXING
 kWhereisHits	OUTPUT

@@ -1627,7 +1627,8 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         {
             result.nearMiss = didYouMean( d.ing, whereisSel );
         }
-        crossref::writeWhereisPage( stdout, result, cfg.detail ? SIZE_MAX : crossref::kWhereisHits, cfg.pageLimit, cfg.pageOffset );
+        crossref::writeWhereisPage( stdout, result, cfg.detail ? SIZE_MAX : crossref::kWhereisHits, cfg.pageLimit, cfg.pageOffset,
+                                    crossref::whereisListingOf( cfg.whereisListing ) );
         return 0;
     }
     return std::nullopt;

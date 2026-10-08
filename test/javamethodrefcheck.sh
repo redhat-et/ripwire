@@ -216,7 +216,9 @@ expect_callers makeFn "genericTypeMethod lambdaForm nestedTypeMethod typeMethod"
 # set above is satisfied by an edge pointing anywhere — and before the receiver-resolution fix every
 # one of these references landed on the caller's own file's A.makeFn, via the bare-name ladder and
 # the locality tie-break. Each reference must resolve to the member of the type it named.
-expect_callers Widget.java:makeFn "genericTypeMethod typeMethod"
+# FE-B (test/receiverevidencecheck.sh): the lambda's INVOCATION `Widget.makeFn( item )` is a class-name receiver, so it
+# resolves to Widget's member too — it used to land on A.makeFn by the same file-locality pin the references had.
+expect_callers Widget.java:makeFn "genericTypeMethod lambdaForm typeMethod"
 expect_callers Outer.java:makeFn "nestedTypeMethod"
 
 # The r9 shadow pass is C++/ObjC evidence. A Java call never resolves to a local, so a parameter
@@ -294,9 +296,9 @@ echo "callers_set(makeFn) after mutation = [${S1}]"
 # names no definition anywhere, so it produces no edge rather than one to a plausible neighbour.
 S2="$( callers_set "$MUT" Widget.java:makeFn )"
 echo "callers_set(Widget.java:makeFn) after mutation = [${S2}]"
-[ "$S2" = "genericTypeMethod" ] \
-    && ok "mutation leaves Widget.java:makeFn with only genericTypeMethod" \
-    || no "mutation expected Widget.java:makeFn = [genericTypeMethod], got [$S2]"
+[ "$S2" = "genericTypeMethod lambdaForm" ] \
+    && ok "mutation leaves Widget.java:makeFn with genericTypeMethod and the untouched lambda invocation (FE-B: a class-name receiver)" \
+    || no "mutation expected Widget.java:makeFn = [genericTypeMethod lambdaForm], got [$S2]"
 S3="$( callers_set "$MUT" Outer.java:makeFn )"
 [ "$S3" = "nestedTypeMethod" ] \
     && ok "mutation leaves Outer.java:makeFn untouched (nestedTypeMethod)" \

@@ -36,7 +36,14 @@ dline(){ printf '%s' "$1" | sed 's/></>\n</g' | grep -E "<d [^>]*>$2" | head -1;
 # ── 1) the --for bundle carries the quality lens on its ranked <d> blocks (ccx + amp) ─────────────────
 FOR1="$( "$BIN" test/fixture --no-cache --for="compute perimeter distance" 2>/dev/null )"
 DL="$( dline "$FOR1" 'double distance' )"
-if printf '%s' "$DL" | grep -q ' ccx='; then ok "--for <d> carries ccx (cognitive complexity): $DL"; else no "--for <d> missing ccx: $DL"; fi
+# lean-answers lane (by design): a lens row omits a zero cx=/ccx=/in= and the legend reads an absent one as 0. The strict
+# "carries ccx" arm reads a row whose ccx is NOT 0 (perimeter, ccx=1); the distance row (ccx 0) carries ccx= or omits it
+# under the "absent = 0" reading — never omits it silently.
+DLP="$( dline "$FOR1" 'double perimeter' )"
+if printf '%s' "$DLP" | grep -q ' ccx="[1-9]'; then ok "--for <d> carries ccx (cognitive complexity) on a nonzero row: $DLP"; else no "--for <d> missing a nonzero ccx: $DLP"; fi
+if printf '%s' "$DL" | grep -q ' ccx='; then ok "--for <d> carries ccx (cognitive complexity): $DL"
+elif [ -n "$DL" ] && printf '%s' "$FOR1" | grep -qE 'absent cx/ccx/in = 0|each absent when 0'; then ok "--for <d> omits a zero ccx and the legend reads absent as 0: $DL"
+else no "--for <d> missing ccx with no absent = 0 reading: $DL"; fi
 if printf '%s' "$DL" | grep -q ' amp='; then ok "--for <d> carries amp (change-amplification)"; else no "--for <d> missing amp: $DL"; fi
 
 # ── 2) GOLDEN NEUTRALITY — plain --pack-signatures must NOT carry any lens attr; default map unchanged ─

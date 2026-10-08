@@ -164,7 +164,9 @@ DMAP="$( "$BIN" "$DEL" --no-cache 2>/dev/null | sed 's/></>\n</g' )"
 DEDGES="$( echo "$DMAP" | grep -o '<!-- files=[^>]*edges=[0-9]*' | grep -o 'edges=[0-9]*' | cut -d= -f2 )"
 if [ "${DEDGES:-0}" -eq 2 ]; then ok "facade delegation keeps both real targets (edges=2)"; else no "facade delegation: expected edges=2, got ${DEDGES:-0} — the caller won its own locality tie-break?"; fi
 FAC="$( echo "$DMAP" | awk '/n="publish_event" sc="Facade"/{f=1;print;next} /^<s /{f=0} f' )"
-if [ "$( echo "$FAC" | grep -c '<c n="publish_event"' )" -eq 2 ]; then ok "Facade::publish_event → two publish_event callee rows (Fanout, Subscriber)"; else no "Facade::publish_event callee rows: $( echo "$FAC" | grep -c '<c n="publish_event"' )"; fi
+# FE-B: a merged via="name" row <c … x="N"/> stands for N callee rows (serialize.h writeMapCalleeRows)
+FAC_ROWS="$( echo "$FAC" | grep -o '<c n="publish_event"[^>]*>' | awk '{ n = 1; if ( match( $0, / x="[0-9]+"/ ) ) n = substr( $0, RSTART + 4, RLENGTH - 5 ) + 0; s += n } END { print s + 0 }' )"
+if [ "$FAC_ROWS" -eq 2 ]; then ok "Facade::publish_event → two publish_event callee rows (Fanout, Subscriber)"; else no "Facade::publish_event callee rows: $FAC_ROWS"; fi
 if echo "$FAC" | grep -q 'amb="1"'; then ok "…disclosed as an honest split (amb=\"1\"), not a locality guess"; else no "Facade::publish_event is not marked amb=\"1\": $( echo "$FAC" | head -1 )"; fi
 echo "$FAC" | grep -q 'lpin=' && no "Facade::publish_event carries lpin= — the tie-break picked ONE target from a two-way tie" || ok "…and no lpin= (a two-way tie is left a tie)"
 

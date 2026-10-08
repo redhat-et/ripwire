@@ -246,7 +246,8 @@ except Exception as e:
 for s in root.iter( "s" ):
     if s.get( "n" ) == sym:
         for c in s.findall( "c" ):
-            print( c.get( "n" ), c.get( "prov" ) or "-" )
+            for _ in range( int( c.get( "x" ) or 1 ) ):   # FE-B: a merged via="name" row x=N stands for N edges
+                print( c.get( "n" ), c.get( "prov" ) or "-" )
 ' "$2"
 }
 # how many of SYM's edges carry prov="split"

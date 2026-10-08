@@ -548,6 +548,9 @@ struct ForLensHeaderParts
     bool             endLinePresent = false;   // may a <d> row carry e= (serialize.h defEndLine)? A code row with a known
                                             // extent among the row head — read from the same head walk as
                                             // modScopePresent; a file the emitter then fails to read is the residual.
+    bool             viaPresent = false;     // FE-B: may a <calls><c> row of this bundle carry via="name"? Some head row
+                                            // (the same row head modScopePresent reads) has a name-only out-edge
+                                            // (serialize.h namesOnlyOutAny). Over-approximates the 16-per-symbol cap.
 
     // ── THE DROPPABLE LEGEND, as ONE bit ──────────────────────────────────────────────────────────────
     // confidenceNote / tailLegend / idRouteLegend moved in lock step at every read and every write, and the
@@ -741,14 +744,17 @@ inline std::string legendDroppedNote( bool compact, bool thin, bool routeWasOn, 
 inline constexpr std::string_view kForCompactLegendRoot =
     "bundle=/bodies=/reason= the body posture; ";
 inline constexpr std::string_view kForCompactLegendRows =
-    "d: cx= ccx= complexity, in= callers, churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; "
+    "d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1, sc= scope, id=p::sc::n; "
     "total= shown= capped=1 if cut";
 // …and the same clause for a bundle whose served rows carry NO scope (a corpus of free functions, a markdown
 // tree): 22 B of sc= reading removed, nothing else. Two constants rather than one built at runtime because this
 // dialect's whole contract is a pinned byte count per schema, and a pin reads a constant.
 inline constexpr std::string_view kForCompactLegendRowsNoScope =
-    "d: cx= ccx= complexity, in= callers, churn= amp= change, clone= tested= 1; "
+    "d: cx= ccx= complexity, in= callers (absent cx/ccx/in = 0), churn= amp= change, clone= tested= 1; "
     "total= shown= capped=1 if cut";
+static_assert( kForCompactLegendRows.find( rw::kForZeroAbsentCompactNote ) != std::string_view::npos
+               && kForCompactLegendRowsNoScope.find( rw::kForZeroAbsentCompactNote ) != std::string_view::npos,
+               "the compact zero reading is the exempt note, verbatim (graphlegend.h forZeroNoteBytes)" );
 // L1 fix round (2026-09-19, rv-r1-L1 HIGH-1): task= (the root's echo of the query), next= (the follow-up on a <d> row), pure=
 // (a <d> row flag) and the <compose><field> rows rode every default answer with no reading in either dialect;
 // legendcoveragecheck's default rows now fail on that. Charged like the rows clause; runForLens caps the compact charge at
@@ -893,6 +899,7 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
         { p.layerPresent, kForCompactLegendLayer },
         { p.modScopePresent, rw::kForCompactModScopeClause },   // #60
         { p.endLinePresent, rw::kForCompactEndLineLegend },
+        { p.viaPresent, rw::kForCompactViaNameClause },        // FE-B
     };
     for( const auto& [ on, clause ] : kPresentOnly )
     {
@@ -1006,7 +1013,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
              "invisible neighbours without hurting, no measured recall lift; see bench/ANSWERQUALITY.md]";
     }
     h += ": reusable building blocks + quality facts for what you're about to touch "
-         "(cx=complexity ccx=cognitive in=reuse-count churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
+         "(cx=complexity ccx=cognitive in=reuse-count, each absent when 0; churn=recent-commits amp=change-amplification clone=1(duplicated) tested=1) "
          "— prefer composing/reusing these; watch the high-churn/high-amp/cloned ones";
     // BOTH readings are present-only (PR #215 review): sc= when a served row carries one, route= when the root
     // carries the attribute. A reading with nothing to define is bytes the bundle could have spent on a row, and
@@ -1045,6 +1052,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     if( p.endLinePresent )
     {
         h.append( rw::kForEndLineLegend );   // e=: present-only, on the same bit the compact strip reads
+    }
+    if( p.viaPresent )
+    {
+        h.append( rw::forViaNameClause() );   // FE-B: present-only, on the same bit the compact strip reads
     }
     if( p.legendDropped )
     {
@@ -1474,7 +1485,8 @@ inline int emitForLensJson( std::FILE* out, const std::string& header, const For
     constexpr std::size_t kJsonSurfaceCountsBytes = 96;
     const std::size_t bundleBudget = in.tokenBudget > 0 ? budgetBytesForTokens( in.tokenBudget )
                                                         : kForPayloadBudgetBytes;
-    const std::size_t fixedBytes = header.size() + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
+    const std::size_t fixedBytes = header.size() - std::min( header.size(), rw::forZeroNoteBytes( header ) )   // lean-answers: exempt
+                                  + kJsonEnvelopeBytes + kJsonSurfaceCountsBytes
                                   + ( in.noteIndex ? kJsonNotesStanzaBytes : 0 );
     const std::size_t sigsBudget = bundleBudget > fixedBytes ? bundleBudget - fixedBytes : 1;
 
@@ -1892,7 +1904,7 @@ std::vector<rw::NodeId> computeAutoBodyCandidateIds( const rw::IngestResult& ing
 ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                         const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                         std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
-                                        const std::vector<rw::RouteAnchorDef>& anchorDefs )
+                                        const std::vector<rw::RouteAnchorDef>& anchorDefs, bool viaLegendInHead )
 {
     ForAutoBodiesResult out;
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
@@ -1955,9 +1967,9 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
         // shell the "budget" branch below already gets for free, rather than a second hand-rolled tag.
         out.attr    = " bundle=\"auto\" bodies=\"0\" reason=\"no_candidates\"";
         out.section = rw::chargeSection( [ & ]( std::FILE* f )
-            { rw::packBodies( f, ing, autoBodyIds, /*budgetBytes=*/1, g.outOff, g.outTargets, cfg.compress, redactPtr,
+            { rw::packBodies( f, ing, autoBodyIds, /*budgetBytes=*/1, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                                /*ranges=*/nullptr, /*noteIndex=*/nullptr, nullptr, /*truncateOversizedFirst=*/false,
-                               /*withFileContext=*/false, fabRootArg, &lensRank ); },
+                               /*withFileContext=*/false, fabRootArg, &lensRank, viaLegendInHead ); },
             rw::kBytesPerTokenBody );
         if( !out.section.isRendered )
         {
@@ -1977,9 +1989,9 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     const std::size_t  autoBodyBudget = std::max<std::size_t>( 1, std::min( leftBytes, cfg.packBudgetBytes ) );
     rw::EmittedBodies autoEmitted;
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
-        { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
+        { rw::packBodies( f, ing, autoBodyIds, autoBodyBudget, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                            /*ranges=*/nullptr, /*noteIndex=*/nullptr, &autoEmitted, /*truncateOversizedFirst=*/false,
-                           /*withFileContext=*/false, fabRootArg, &lensRank ); },
+                           /*withFileContext=*/false, fabRootArg, &lensRank, viaLegendInHead ); },
         rw::kBytesPerTokenBody );
 
     if( !out.section.isRendered )
@@ -2095,17 +2107,10 @@ inline std::size_t enrichmentLegendBytesEmitted( const ForEnrichmentPlan& plan, 
     return plan.compact ? kForCompactLegendHops.size() : kForCompactLegendBodies.size();
 }
 
-ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
-                                          const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
-                                          std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr )
+// The compact route's <hops> rows: the positive-score head of the ranked surface, capped at kPackTaskBodyCandidates. One
+// spelling, read by buildForCompactHops and by the header's via="name" question (FE-B), so the two cannot disagree.
+inline std::vector<rw::NodeId> forCompactHopIds( const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank )
 {
-    ForAutoBodiesResult out;
-    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
-    const bool             fcSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
-    const std::string_view fcRootArg    = fcSingleRoot ? cfg.roots[0] : std::string_view();
-
-    // candidates: EXACTLY the head buildForAutoBodies would have bodied — same rule, same order, so the
-    // two shapes describe the same symbols and only differ in how much of each they serve.
     std::vector<rw::NodeId> hopIds;
     for( rw::NodeId sid : lensSurfaceIds )
     {
@@ -2115,6 +2120,36 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
         }
         hopIds.push_back( sid );
     }
+    return hopIds;
+}
+// --detail=N's bodies: the top min(N, forTopN) symbols by (score desc, id asc) — the order the sigs use. One spelling, read
+// by the --detail section and by the header's via="name" question (FE-B).
+inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const std::vector<float>& lensRank, int detail, int forTopN )
+{
+    const std::size_t        S = ing.symbols.size();
+    std::vector<rw::NodeId> ids( S );
+    for( rw::NodeId i = 0; i < S; ++i )
+    {
+        ids[i] = i;
+    }
+    rw::sortutil::radixSortByScoreDescId( ids, lensRank );
+    ids.resize( std::min<std::size_t>( { std::size_t( detail ), std::size_t( forTopN ), S } ) );
+    return ids;
+}
+
+ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                          const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
+                                          std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
+                                          bool viaLegendInHead )
+{
+    ForAutoBodiesResult out;
+    // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
+    const bool             fcSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string_view fcRootArg    = fcSingleRoot ? cfg.roots[0] : std::string_view();
+
+    // candidates: EXACTLY the head buildForAutoBodies would have bodied — same rule, same order, so the
+    // two shapes describe the same symbols and only differ in how much of each they serve.
+    const std::vector<rw::NodeId> hopIds = forCompactHopIds( lensSurfaceIds, lensRank );
 
     std::size_t leftBytes = bundleBudget > committedBytes ? bundleBudget - committedBytes : 0;
     if( cfg.tokenBudget == 0 )
@@ -2146,8 +2181,8 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
                                                                         : std::size_t( 1 ) );
 
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
-        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg,
-                        rw::graphNameOnlyBits( g ) ); },   // hop-slot rule: FE-B's hedge bit (nullptr without FE-B)
+        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, g.outNameOnly, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg,
+                        viaLegendInHead ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
         // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the
@@ -2177,12 +2212,13 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
 ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                         const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                         const ForEnrichmentPlan& plan, const std::vector<rw::RouteAnchorDef>& anchorDefs,
-                                        rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget )
+                                        rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget,
+                                        bool viaLegendInHead )   // FE-B: the header defines via="name" (ForLensHeaderParts::viaPresent)
 {
     const std::size_t   committed = committedBytes + plan.attrReserve;
     ForAutoBodiesResult out       = plan.compact
-        ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr )
-        : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs );
+        ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, viaLegendInHead )
+        : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs, viaLegendInHead );
     if( plan.compact )
     {
         out.markupBytes = out.section.xml.size();
@@ -2664,13 +2700,38 @@ std::optional<int> runForLens( const MainDispatch& d )
             forModScopePresent = forModScopePresent || ing.symbols[sid].kind == rw::SymKind::ModuleScope;
             forEndLinePresent  = forEndLinePresent || ( forEndLines && rw::mayCarryEndLine( ing.symbols[sid] ) );
         }
+        // FE-B: may a <calls> row of this bundle carry via="name"? Only the sections that render <calls> can, and each one's
+        // node set is known before the header: the compact route's hop ids, T3's auto-body candidates, or --detail's head
+        // (autoBundleMode excludes --detail). Their name-only out-edges decide it — over-approximating only the byte ladder
+        // and the 16-per-symbol cap inside those sections, never the rows the header itself lists.
+        bool forViaPresent = false;
+        if( !g.outNameOnly.empty() )
+        {
+            std::vector<rw::NodeId> viaIds;
+            if( autoBundleMode && plan.compact )
+            {
+                viaIds = forCompactHopIds( lensSurfaceIds, lensRank );
+                // only the hops packHops gives a slot can carry a row (the hop-slot rule drops a hop whose every callee
+                // edge is name-only, so its via="name" rows never print)
+                std::erase_if( viaIds, [ & ]( rw::NodeId id ) { return !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, id ); } );
+            }
+            else if( autoBundleMode && plan.autoBodies )
+            {
+                viaIds = computeAutoBodyCandidateIds( ing, lensSurfaceIds, lensRank, routeAnchorDefs );
+            }
+            else if( cfg.detail > 0 )
+            {
+                viaIds = forDetailIds( ing, lensRank, cfg.detail, forTopN );
+            }
+            forViaPresent = rw::namesOnlyOutAny( g.outOff, g.outNameOnly, viaIds );
+        }
         ForLensHeaderParts headerParts{ cfg.forTask, rootOpenStr, taskNote, adaptiveNote,
                                         mentionNote, boostNote, docMentionNote, sibliftNote, expandNote, floorNote,
                                         forConf.attrs, forConf.note, forAtAttrStr, mentionDocAttrsStr,
                                         cfg.anchor, plan.autoBodies, plan.compact, cfg.legend == "compact",
                                         /*tailLegend=*/true, /*idRouteLegend=*/true, /*legendDropped=*/false, flRootArg,
                                         /*hdrLegend=*/!forHdrRows.empty(), forScPresent, forComposePresent,
-                                        forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent };
+                                        forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -2948,6 +3009,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             DISCLOSE( "runForLens: header exemptions exceed the emitted header — the sig ledger would underflow; charging the header whole" );
         }
         std::size_t chargedHeaderBytes = exemptBytes > headerStr.size() ? headerStr.size() : headerStr.size() - exemptBytes;
+        chargedHeaderBytes -= std::min( chargedHeaderBytes, rw::forZeroNoteBytes( headerStr ) );   // lean-answers: the zero reading never costs a row
         // L1 fix round (rv-r1-L1 HIGH-1 / MED-5): THE DEFAULT NEVER CHARGES ITS SIGNATURES MORE HEADER THAN --legend=full WOULD.
         // The compact header now defines task=/next=/pure=/<field> (kForCompactLegendFacts), and charging those bytes cost the
         // default a signature row --legend=full carried (compactlegendcheck (P1): 19 vs 20 rows at --token-budget=3000); making
@@ -2959,12 +3021,14 @@ std::optional<int> runForLens( const MainDispatch& d )
         {
             ForLensHeaderParts fullParts = headerParts;
             fullParts.compactLegend = false;
-            const std::size_t fullHeaderBytes = forLensHeaderText( fullParts, /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} ).size();
+            const std::string fullHeader      = forLensHeaderText( fullParts, /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+            const std::size_t fullHeaderBytes = fullHeader.size();
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes()
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u );
-            const std::size_t fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
+            std::size_t       fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
+            fullCharged -= std::min( fullCharged, rw::forZeroNoteBytes( fullHeader ) );   // lean-answers: exempt, as above
             chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
         }
         const std::size_t fixedBytes = chargedHeaderBytes + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
@@ -3040,7 +3104,8 @@ std::optional<int> runForLens( const MainDispatch& d )
                                 &shownSigIds,                                // lane 2: the rows actually emitted — the tail excludes THESE files
                                 &forSigsCapped,                              // did the ladder fire? — the budget_bytes= clause rides only then
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
-                                &forSigsCut );                               // cut-fix lane A: which cut readings the tag owes
+                                &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes
+                                SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0)
             },
             sigsStr );
         if( !sigsPreRendered )
@@ -3261,15 +3326,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the lens. N=0 emits nothing → byte-identical to a run without --detail.
         if( cfg.detail > 0 )
         {
-            const std::size_t S = ing.symbols.size();
-            detailIds.resize( S );
-            for( NodeId i = 0; i < S; ++i )
-            {
-                detailIds[i] = i;
-            }
-            rw::sortutil::radixSortByScoreDescId( detailIds, lensRank );   // (score desc, id asc) — same order as the sigs
-            const std::size_t detN = std::min<std::size_t>( { std::size_t( cfg.detail ), std::size_t( forTopN ), S } );
-            detailIds.resize( detN );
+            detailIds = forDetailIds( ing, lensRank, cfg.detail, forTopN );   // (score desc, id asc) — same order as the sigs
             // Composes with --max-tokens: when set, it bounds the body byte budget (same conservative rate the
             // map path uses). §F1: --token-budget SHAPES this lens (D10 — trims to fit, always exit 0), so it
             // has to bound the bodies as well; before this it bounded <sigs> ONLY and the bodies rode along on
@@ -3289,9 +3346,9 @@ std::optional<int> runForLens( const MainDispatch& d )
                 detailBodyBudget = std::min( detailBodyBudget, leftBytes );
             }
             detailSection = rw::chargeSection( [ & ]( std::FILE* f )
-                { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, cfg.compress, redactPtr,
+                { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                               /*ranges=*/nullptr, notesPtr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
-                              /*withFileContext=*/false, flRootArg, &lensRank ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
+                              /*withFileContext=*/false, flRootArg, &lensRank, headerParts.viaPresent ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
                 rw::kBytesPerTokenBody );
             if( !detailSection.isRendered )
             {
@@ -3318,10 +3375,11 @@ std::optional<int> runForLens( const MainDispatch& d )
                                           // reserved ahead of the body walk (the kAutoAttrReserve pattern) so
                                           // the disclosure always fits; the DEFAULT regime reserves nothing —
                                           // the tail rides on top there and the bodies stay byte-identical.
-                                          bundleBudget );
+                                          bundleBudget, headerParts.viaPresent );
             if( enrich.surfaceOff || enrich.legendOff )
             {
                 headerParts.autoBundle = headerParts.compactBundle = false;
+                headerParts.viaPresent = false;   // FE-B: the section that could carry it is gone (autoBundleMode excludes --detail)
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
         }
@@ -3528,7 +3586,8 @@ std::optional<int> runForLens( const MainDispatch& d )
             packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
                             rw::forLensRules( forDocsAfterCode, forEndLines ), nullptr, nullptr, nullptr,   // the degrade path selects identically
-                            forTopRowNext );                                         // L-W: same next= rule on the degrade path
+                            forTopRowNext,                                           // L-W: same next= rule on the degrade path
+                            nullptr, SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the same row spelling
         }
         if( legoPreRendered )
         {
@@ -3573,10 +3632,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // directly at the SAME budget — uncharged for that one run, with an alert, never a fabricated number.
         if( cfg.detail > 0 )
         {
-            rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets,
+            rw::emitChargedSection( stdout, detailSection, [ & ]{ packBodies( stdout, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, g.outNameOnly,
                                                                               cfg.compress, redactPtr, /*ranges=*/nullptr, notesPtr,
                                                                               /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
-                                                                              /*withFileContext=*/false, flRootArg, &lensRank ); } );
+                                                                              /*withFileContext=*/false, flRootArg, &lensRank, headerParts.viaPresent ); } );
         }
         else if( autoSection.isRendered && !autoSection.xml.empty() )
         {
@@ -3707,14 +3766,17 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
         // The truncation-trio clause closes the four baseline lines this verb held (bodies@shown/total/capped
         // + calls@total, the "cheapest bulk win" shape the baseline header names) — packBodies emits both
         // children, and calls@total only surfaces when the winner has callees, so the gap was tree-dependent.
+        // FE-B: the winner's <calls> rows may carry via="name" — defined HERE, on the first screen, not beside the rows
+        const bool exemplarVia = rw::namesOnlyOutAny( g.outOff, g.outNameOnly, std::span<const NodeId>( &pick.winner, 1 ) );
         rw::emitTo( stdout, "<!-- ripwire exemplar for \"{}\"{}: the repo's best-in-class {} to imitate — {}. "
                      "On the root, the three attributes that ARE that ordering's evidence: in=reuse-count "
                      "(callers), ccx=cognitive complexity, tested=1 when a test reaches it (OMITTED, never 0, "
                      "when none does). The body follows in a bodies section, its callee signatures in a calls "
                      "child; both disclose truncation the house way: total= is how many qualified, shown= how "
                      "many are printed, capped=1 when the two differ (calls omits shown= and capped= when its "
-                     "list is complete). Copy its shape, not its text. -->",
-                     ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), rw::kExemplarSelectionRule );
+                     "list is complete). Copy its shape, not its text.{} -->",
+                     ex( reqNote ).c_str(), kindNote.c_str(), symTag( pick.targetKind ), rw::kExemplarSelectionRule,
+                     exemplarVia ? rw::forViaNameClause() : std::string() );
         // R-E fix (2026-08-19): root= — same reason as --lego above. p= went root-relative in the first R-E
         // landing with no attribute naming the root, on the one verb whose whole job is "open this file".
         const std::string exemplarRootAttr = tvSingleRoot ? ( " root=\"" + ex( tvRootArg ) + "\"" ) : std::string();
@@ -3724,9 +3786,9 @@ std::optional<int> runTargetedViews( const MainDispatch& d )
                      fin( pick.winner ), wsym.ccx, exemplarRootAttr.c_str(), ts( pick.winner ) ? " tested=\"1\"" : "",
                      pick.lowConfidence ? " low_confidence=\"1\"" : "",
                      pick.overCcxBar    ? " over_ccx_bar=\"1\"" : "" );
-        packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, cfg.compress, redactPtr,
+        packBodies( stdout, ing, { pick.winner }, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
                    /*ranges=*/nullptr, /*noteIndex=*/nullptr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
-                   /*withFileContext=*/false, tvRootArg );
+                   /*withFileContext=*/false, tvRootArg, /*calleeRank=*/nullptr, exemplarVia );
         rw::emitRaw( stdout, "</exemplar>" );
         reportRedactions( stderr, redactCounts );
         return 0;

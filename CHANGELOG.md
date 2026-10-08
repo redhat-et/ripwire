@@ -15,6 +15,62 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
+
+A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled
+`m` that the name ladder reached, and each such row read as a confident edge with nothing behind it but the name: a
+request context's `ctx.onerror()` drawn to the `Application.onerror` its file defines, a WeakMap's `.get()` drawn to
+the same file's accessor, a Go struct field's `item.text.Get()` drawn to an unrelated `Merger.Get`, a bare `flush()`
+in a Java class with an outside base drawn to an unrelated class's `flush`.
+
+- **Receivers the source types now resolve** (JavaScript, TypeScript, Python, Go, Java, Kotlin, C#, Swift): `this` /
+  `self` / `cls` inside a class and `super` / `base` through its bases; a parameter or local whose class is written
+  (a TS/Python/Go/Java/C#/Kotlin/Swift annotation or declared type, a Go method receiver, a JS `new Foo()`, Java/C#
+  `new Foo()` (`var` included), Python `Foo()`, Kotlin/Swift `Foo()` or Go `Foo{}` initializer, an import alias of the
+  class); a constructed receiver (`new Foo().m()`); a class-name receiver; a chain of fields whose classes are stated
+  (`this.bucket = new Schemas()`, Python `self.x = Foo()`, Go struct and embedded fields, Java/C# fields and
+  properties, Kotlin/Swift properties and Kotlin `val` constructor properties, read through `this`/`self` or bare);
+  Python `feed = parser.feed`. A Go module alias proves its package by the exact import path: the nearest `go.mod`'s
+  module path plus the directory below it, or the path a local `replace` gives a directory (in a tree with no `go.mod`
+  at all, a directory that ends the import path). A local is read where its language scopes it: a block's declaration
+  from the declaration to the block's end, a parameter in its function or lambda, a Python name in its whole function.
+  Every other binding of a name also hides the field or the outer local it shadows there — a loop, lambda, catch,
+  resource or `with`/`except` variable, a pattern, `case`, `out var` or `match` capture, a destructuring entry, Swift
+  `if`/`guard`/`while let`, a Go range / type-switch / short variable, a JS or Python reassignment (a statically typed
+  variable keeps its declared type when reassigned). Such a binding
+  names its own class only when it is written or constructed with one (a typed loop, lambda or resource variable); otherwise the call
+  through it is name-only, like a call through an untyped local or an interface-typed receiver with several
+  implementors. A written type that names a generic's type parameter (`<Tank>`, `[T any]`, `def f[T]`) names no class,
+  even when a class of that name exists. Wider than the language, and so name-only rather than resolved: a pattern
+  variable hides its field in its whole enclosing block (an `else` branch too), a Java local hides a field anywhere in
+  its method, and a Python rebinding anywhere in its function. Not read, the floor: a nested function or class
+  declaration that reuses a typed binding's name (JS/TS/Python), Kotlin's implicit `it` beside a field named `it`, and a
+  Python conditional or later rebinding, which still types the variable for the whole function: `tank = Barrel()` in a
+  branch proves `Barrel.spill` for a `tank.spill()` beside it, even one before the assignment (the older assignment-type
+  rule, which this change does not read). A JS/TS call on the class object reaches its `static` members only,
+  and a call on an instance never one. A Ruby call's candidates that Ruby's own method lookup proves (the entries below) are its
+  answer, never `via="name"`.
+- **A call nothing proves is NAME-ONLY.** Its candidates the language's own lookup proves are its answer (an
+  implicit receiver's class and bases, a free function in scope, the module a receiver alias names). With none
+  proven, every same-file and same-directory candidate is listed — a lone global one too, because one candidate is
+  not evidence — and each row carries `via="name"` (MCP: `"via":"name"`) on `--callees`, `--callers`, `--path`,
+  `--connect`'s `<e>`, the `<calls>` rows of `--expand` and `--for`, the default map's `<c>` rows (and its
+  `--json` and MCP `analyze` twins), and MCP `find_symbol`, `find_referencing_symbols`, `impact` and
+  `path_between`. An `--impact` row that no all-proven path reaches inherits
+  it. A legend sentence rides exactly when such a row does and says what it does not mean: not that the edge is
+  false. Rule 3's include-file narrow no longer decides a member call: the file a caller imports says nothing about
+  its receiver. Ranking keeps the old ladder's pick (the same-file, else same-directory rung): the extra candidates
+  are listed at edge weight zero, so a guess never moves PageRank.
+- **The map merges what it would repeat.** A map `<s>` printed one `<c>` row per same-named by-name candidate, N
+  byte-identical rows; it now prints such a `via="name"` group once with `x="N"`, and `--callees` on that symbol
+  lists every candidate with its file. The map's legend is a short spelling of the same reading (and defines `x=`);
+  the compact dialect states both in its element rows. The README's `--max-tokens=3000` map keeps 20 rows.
+- Cost, measured over 210 calls on eight public repositories (`--no-cache`): +2.04% bytes in total (C trees: no
+  change); the `--max-tokens=3000` maps of the eight repositories keep 337 rows (331 before the change). The gate is
+  `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
+  for every evidence rule). Ingest records the receiver chain and the Java/C#/Kotlin/Swift declarations
+  (`kParserVer` 156 in this release, see the versions note; `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
+
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 
 The entry below left one floor open, (i). A call to self, or on a receiver the code builds, read a class's defs from both
@@ -766,7 +822,9 @@ value (`.then( handleResponse )`), or a call through a parameter. Any of those c
 says the search was incomplete: `searched=` (the symbols it reached), `gaps="declined:D,unresolved:U,value:V,through:T"`,
 `gap_syms=` with up to three `<gap t= n= p= gaps=>` rows (nearest `from=` first, `gap_syms_capped="1"` past that) and a
 `next=` that expands their bodies. A `<gap>` row is where the search could not see, never a hop. Ambiguous calls are not
-counted (every candidate has an edge the search follows), nor are calls to names defined nowhere in the tree. When the
+counted (every candidate has an edge the search follows), nor are calls bound by name alone (`via="name"`: the search
+follows the candidates such a call lists, so a namesake in another directory that it does not list is never searched,
+and an unreached `to=` behind one still reads "no directed call path"), nor calls to names defined nowhere in the tree. When the
 search met no such call the answer is unchanged, byte for byte. The legend dictionary gains three entries. A floor:
 the `next=` names a gap row by file and name, so where one file holds two definitions of that name it serves both. Gate:
 `test/pathgapcheck.sh`.
@@ -903,8 +961,52 @@ after the fix.
   `docs_after_code`: it is the answer it was before the reorder, so its est_tokens promise stays what it was (the reading
   would be uncharged bytes). These are the same three ceilings that drop `e=`, decided by one predicate.
   `RIPWIRE_NO_DOCS_AFTER_CODE`, set to any value (even empty or `0`), turns the reorder off everywhere (CLI and MCP `for`).
+- **A hop row needs a resolved callee.** In a compact `--for` answer's `<hops>`, a candidate whose every callee edge
+  was bound by name alone (the `via="name"` rows of the receiver-evidence entry above) gets no `<h>` row and is counted
+  in `noedge=`, whose reading is "no RESOLVED callee found", never "none exists". The header then defines `via=` only
+  when a hop that keeps its row has such a callee. Gates: `test/forsigspancheck.sh` (H), `test/docdemotecheck.sh` (f).
 
 Gate: `forsigspancheck` (fixture `test/forcompletefix`, C/JS/Python/TS).
+
+### Changed — leaner answers: `--whereis` lists definitions, two lossless row spellings, the MCP legend once per session
+
+Measured on 90 rung-0 answers of a comparison table (eight repos, three in-sample and five held out), base vs this
+build: 631,732 → 611,785 B for the lossless changes alone (−3.2%), 568,600 B with the `--whereis` default (−10.0%).
+Every gold item the base answers supplied is still supplied (502 of 502), and decoding the lossless spellings gives
+the base answer back element for element on all 90.
+
+- **`--whereis=SYM` lists the definitions and counts the references, when that answer is more complete or shorter.** Every
+  `kind="def"` row is listed; the `kind="ref"` rows are counted in one `<refs count="N" next="--whereis=SYM
+  --whereis-listing=refs"/>` element whose `next=` lists exactly those rows. The default serves this page when it
+  lists MORE definitions than the `--whereis-listing=all` page does under the same row cap (a capped all page can list
+  fewer: HEAD's references fill the cap before the branch definitions arrive), whatever its bytes. When both pages list
+  the same definitions, it serves this page only if it is strictly shorter in bytes (compared as written and in the
+  compact legend), and a tie lists every hit. On a symbol with few references (one to three on a 60-symbol sample) the
+  count and its legend reading cost more than the rows they replace, so the default never serves a page that lists
+  fewer definitions, nor, for the same definitions, one that lists fewer rows in more bytes (an explicit
+  `--whereis-listing=defs` is served as asked).
+  `--whereis-listing=defs|refs|all` (MCP `listing`) picks the rows; `all` is the whole hit list. An answer with no
+  reference row, or no definition row (the mentions are then the answer), lists every hit. `kind="def"` is the
+  parser's label: a definition it does not model (a Ruby `define_method`, a `setattr`, a name bound by assignment) is
+  among the counted references, and the legend says so. Median where-defined answer 10,455 → 1,560 B.
+  `shown=`/`capped=`/`--limit`/`--offset` and `<more hits=>` window the listed rows; `hits=` counts every row;
+  `complete=` reads the listing.
+- **Lossless:** a `--whereis` row on HEAD's commit omits `tip=`/`date=` (they read `at=` and the new root
+  `head_date=`); a `--for` lens row omits `cx=`/`ccx=`/`in=` when 0 (the legend says an absent one is 0; the rows
+  kept by the byte budget are unchanged). Median per class: how-it-works −0.24 KB, orient-for −0.26 KB,
+  where-defined −1.95 KB; map answers are unchanged.
+- **MCP: the legend session opens on the first answer.** A stdio session no longer waits for a read of
+  `ripwire://legend-dict`: its first answer carries its legend inline, later answers take the `legend="ref"`
+  posture (rows first, each definition sent once per session, the core carried by the first ref answer).
+  `--mcp-legend=inline` keeps the previous posture; `legend:"compact"`/`"full"` still keep one answer inline; the
+  CLI and the HTTP transport are unchanged. A ten-call session on one repo: 45,463 → 32,622 B (inline) → 29,679 B.
+- **Manifest.** The `tools/list` manifest grows 46,732 → 46,869 B: whereis declares `listing`.
+
+Gates: `crossrefcheck` (LEAN L1–L16 — L11–L14 the same-definitions bytes rule: one ref, 73 refs, the exact tie and one
+byte either side, the MCP twin; L15 and L16 the definitions-first rule: a capped answer whose longer defs page lists more
+definitions is served, and one whose pages list the same definitions keeps the shorter all page, each with its MCP twin
+— and listing=all twins), `completecheck`, `legendrefcheck` (J), `mcptwinclaimscheck`
+(A-default), `compactlegendcheck` (re-pinned with the measured bytes; a listing=all twin pin), `mcpmanifestcheck`.
 
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)
@@ -1429,11 +1531,11 @@ files, RSpec matcher chains, class objects — then 142 and 145 for its rebase a
 change); 141 sat above every number a branch build of unreleased work had used, and the review fixes to the global-object
 shadow and the value-reference slot text take 143, above 141's full-use file tag 142. The Ruby method lookup lands at
 148, renumbered from its branch's 145: other branch builds in flight have used up to 147, and 148's full-use file tag is
-149. The Go named-type kinds and the train 25 re-review's extraction fixes each took 145 on their branches and land
-together at 156: branch builds in flight have used up to 154, whose full-use file tag is 155, so no cache such a build
-wrote is read as this release's), `kCacheVersion` 25 → 28
-(the function-literal fix's record changes, then the false-edge fix's member-call fields; the Ruby branch's appended
-binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 18
+149. The Go named-type kinds and the train 25 re-review's extraction fixes each took 145 on their branches, and the
+receiver-evidence records took 145 to 154 on theirs; all three land together at 156: branch builds have used up to 154,
+whose full-use file tag is 155, so no cache such a build wrote is read as this release's), `kCacheVersion` 25 → 29
+(the function-literal fix's record changes, then the false-edge fix's member-call fields, then the receiver chain
+`memberPath`/`memberCtor`; the Ruby branch's appended binding kinds need no bump of their own) and `kQSnapCacheScheme` 15 → 18
 (the `--quality-delta` error-masking and placeholder changes, then the dead kind agreeing with `--dead-code` on functions
 held as values, then on a function that only stores itself). Every ingest cache written by an earlier build is refused and re-indexed once, and every
 cached quality snapshot is recomputed. The session legend dictionary is `dictv=cbadf4aa6acda0c2 entries=787`.

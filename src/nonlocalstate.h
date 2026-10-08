@@ -572,7 +572,7 @@ inline std::vector<AccessSite> collectAccesses( const IngestResult& ing, const s
     HashMap<std::string, char> locallyBound;                   // "fromSymbol\x1fvar" -> 1
     for( const Binding& b : ing.bindings )
     {
-        if( b.fromSymbol != kNoNode )
+        if( b.fromSymbol != kNoNode && !isReceiverEvidenceKind( b.kind ) )   // FE-B: a field's type fact binds no local
         {
             locallyBound[ std::to_string( b.fromSymbol ) + "\x1f" + b.var ] = 1;
         }

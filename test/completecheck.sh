@@ -439,12 +439,16 @@ wwhere zqOther | grep -q '<hit ref="HEAD" [^>]*p="src/other.c" l="1" kind="def"'
 # 18f) the INVARIANT: no complete="1" answer carries a HEAD row for a path that differs from HEAD
 CHANGED="$( git -C "$WT" diff --name-only HEAD; git -C "$WT" ls-files --others --exclude-standard )"
 bad=0
+# lean-answers lane: the invariant reads BOTH listings — the default (def rows) and the whole list (every row), so the
+# default's shorter row set never makes it pass vacuously.
 for s in zqKeep zqFresh zqOldName zqNewName zqDoomed zqGone zqUntracked zqOther zqUser; do
-    out="$( wwhere "$s" )"
+  for lst in defs all; do
+    out="$( wwhere "$s" --whereis-listing=$lst )"
     printf '%s' "$out" | wroot | grep -q 'complete="1"' || continue
     for p in $CHANGED; do
-        printf '%s' "$out" | grep -q "<hit ref=\"HEAD\" [^>]*p=\"$p\"" && { bad=1; no "whereis (18f): $s claims complete=\"1\" beside a stale HEAD row for changed $p"; }
+        printf '%s' "$out" | grep -q "<hit ref=\"HEAD\" [^>]*p=\"$p\"" && { bad=1; no "whereis (18f): $s ($lst) claims complete=\"1\" beside a stale HEAD row for changed $p"; }
     done
+  done
 done
 [ $bad -eq 0 ] && ok 'whereis (18f): no complete="1" answer carries a HEAD row for a path the working tree changed'
 
@@ -532,13 +536,24 @@ printf 'def helper( x ):\n    return x\n' >"$TL/pkg/lib.py"
 printf 'from pkg.lib import helper as real\n\ndef helper( x ):\n    return real( x )\n\ndef only_in_test():\n    return helper( 1 )\n' >"$TL/tests/test_lib.py"
 ( cd "$TL" && git init -q -b main . && git add -A \
     && git -c user.name=fx -c user.email=fx@example.invalid -c commit.gpgsign=false commit -qm seed ) >/dev/null 2>&1
-TLO="$( "$BIN" "$TL" --whereis=helper --no-cache 2>/dev/null )"
+# lean-answers lane: the "every hit printed" half reads the WHOLE list, so it asks for it (--whereis-listing=all, the
+# pre-listing answer); the twin below holds the same facts on the default listing, where the refs are counted.
+TLO="$( "$BIN" "$TL" --whereis=helper --no-cache --whereis-listing=all 2>/dev/null )"
 FIRSTDEF="$( printf '%s' "$TLO" | grep -o '<hit [^>]*kind="def"[^>]*>' | head -1 )"
 TESTDEF="$( printf '%s' "$TLO" | grep -o '<hit [^>]*p="tests/test_lib.py" l="3" kind="def"[^>]*>' )"
 { printf '%s' "$FIRSTDEF" | grep -q 'p="pkg/lib.py" l="1" kind="def" t=' && printf '%s' "$TESTDEF" | grep -q 'kind="def" test_local="1"' \
   && [ "$( printf '%s' "$TLO" | sed 's/<!--.*-->//' | grep -o '<hit ' | wc -l | tr -d ' ' )" = "$( printf '%s' "$TLO" | grep -o ' hits="[0-9]*"' | grep -o '[0-9]*' )" ]; } \
     && ok 'whereis (18n): the production def leads; the test-local def is marked test_local="1" and kept (every hit printed)' \
     || { no 'whereis (18n): a test-local definition is not demoted beside the production one'; printf '%s\n' "$TLO" | sed 's/<!--.*-->//' | head -c 900; echo; }
+# TWIN on the default listing (lean-answers lane): the same order and mark on the def rows, and every hit accounted for —
+# printed (the def rows) or counted (<refs count=>), the two summing to hits=.
+TLD="$( "$BIN" "$TL" --whereis=helper --no-cache 2>/dev/null )"
+{ printf '%s' "$TLD" | grep -o '<hit [^>]*kind="def"[^>]*>' | head -1 | grep -q 'p="pkg/lib.py" l="1" kind="def" t=' \
+  && printf '%s' "$TLD" | grep -o '<hit [^>]*p="tests/test_lib.py" l="3" kind="def"[^>]*>' | grep -q 'kind="def" test_local="1"' \
+  && [ "$(( $( printf '%s' "$TLD" | sed 's/<!--.*-->//' | grep -o '<hit ' | wc -l | tr -d ' ' ) + $( printf '%s' "$TLD" | grep -oE '<refs count="[0-9]+"' | grep -oE '[0-9]+' || echo 0 ) ))" \
+       = "$( printf '%s' "$TLD" | grep -o ' hits="[0-9]*"' | grep -o '[0-9]*' )" ]; } \
+    && ok 'whereis (18n twin, default listing): the production def leads, the test-local def is marked; printed + refs count= = hits=' \
+    || { no 'whereis (18n twin): the default listing lost the test-local order or an unaccounted hit'; printf '%s\n' "$TLD" | sed 's/<!--.*-->//' | head -c 900; echo; }
 printf '%s' "$TLO" | grep -q 'TEST-LOCAL: \|test_local=1: ' \
     && ok 'whereis (18n): test_local= is defined in the legend where it rides' || no 'whereis (18n): test_local= rides undefined'
 "$BIN" "$TL" --whereis=only_in_test --no-cache 2>/dev/null | grep -q 'test_local' \

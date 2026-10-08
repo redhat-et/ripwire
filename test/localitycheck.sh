@@ -30,8 +30,8 @@
 #  6b  control — a `std::unique_ptr<Target>` member, which Rule 2b reads since test/fieldnarrowcheck.sh arm p, narrows
 #      `owned_->pick()` to Target::pick alone (receiver-rule). Arm 6 held that member until then, as the unreadable type.
 #   7  a TYPED receiver whose type defines no such method (`Shape& other`) splits (RED: Decoy::pick)
-#   8  control — the FILE credit stays: {the caller itself, Target::peek} still pins Target::peek by locality, with
-#      the disclosure (census mech=locality). Skipping the tie-break for these receivers moved no target on seven
+#   8  control — {the caller itself, Target::peek} answers Target::peek; since FE-B the call is name-only, so the
+#      disclosure is via="name" on the row (census mech=unique), no longer the locality pin. Skipping the tie-break for these receivers moved no target on seven
 #      corpora either, but relabelled every such site `unique` and dropped its lpin= disclosure.
 #   9  control — a typed receiver Rule 2 narrows is untouched (receiver-rule, Target::pick alone)
 # Exits non-zero on any failure.
@@ -163,9 +163,14 @@ expectSite "(6)" Wrapper::forward pick "pick@1 pick@15 pick@6" split
 expectSite "(6b)" Wrapper::forwardOwned pick "pick@1" receiver-rule
 # ── 7) a TYPED receiver whose type defines no `pick`: Rule 2 declines, CHA-lite's cone keeps nothing and degrades.
 expectSite "(7)" Decoy::typedNoMethod pick "pick@1 pick@15 pick@6" split
-# ── 8) control — the FILE credit stays: the tier is {Decoy::peek itself, Target::peek}; the caller scores zero, so
-#       Target::peek is the locality pick and stays disclosed as one.
-expectSite "(8)" Decoy::peek peek "peek@1" locality
+# ── 8) control — the target stays: the tier is {Decoy::peek itself, Target::peek}; the caller is never its own answer, so
+#       Target::peek is the one row. Since FE-B (test/receiverevidencecheck.sh) an untyped receiver's call is NAME-ONLY and
+#       never reaches the tie-break, so the disclosure moved from the census's `locality` pin to the row itself: via="name"
+#       (the census labels a lone name-only target `unique`, as it labels a lone global).
+expectSite "(8)" Decoy::peek peek "peek@1" unique
+"$BIN" "$RFIX" --callees=Decoy::peek --no-cache 2>/dev/null | grep -q '<s t="method" n="peek" p="r.cpp:1" via="name"/>' \
+    && ok "(8) Decoy::peek(): the Target::peek row says via=\"name\" — the pick is disclosed on the row" \
+    || no "(8) Decoy::peek(): the Target::peek row is not marked via=\"name\""
 # ── 9) control — Rule 2 narrows a typed local before the tie-break: one precise edge, untouched.
 expectSite "(9)" Decoy::typedLocal pick "pick@1" receiver-rule
 

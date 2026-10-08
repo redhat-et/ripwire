@@ -1602,9 +1602,12 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         {
             arms.rust = &rustCtx;
         }
+        // FE-B: JavaScript and Go (and, review B3, C#, Kotlin and Swift) join for the receiver-evidence records alone
+        // (captureReceiverEvidence); every other branch of the pass gates its own language, so their record streams gain
+        // exactly those kinds.
         if( le.lang == Lang::Cpp || le.lang == Lang::ObjC || le.lang == Lang::Python || le.lang == Lang::TypeScript
-            || le.lang == Lang::Java
-            || le.lang == Lang::C )
+            || le.lang == Lang::Java || le.lang == Lang::JavaScript || le.lang == Lang::Go
+            || le.lang == Lang::C || le.lang == Lang::CSharp || le.lang == Lang::Kotlin || le.lang == Lang::Swift )
         {
             arms.bind = &bindCtx;
         }
@@ -2349,13 +2352,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
                 if( !isImportRef && le.lang != Lang::Elixir )                             // an import site has no receiver and no argument list —
                 {                                                                        //   the defaults (RecvKind::None, argCountKnown=false) are the truth
-                    RecvShape rs = le.lang == Lang::Java
+                    // FE-B: a Java method INVOCATION reads its receiver like every other language (a member call or a bare
+                    // implicit-this call); only a method REFERENCE (`T::m`) keeps issue #74's type-candidate shape.
+                    const bool javaMethodRef = le.lang == Lang::Java && !ts_node_is_null( roleNode ) && kindIs( ts_node_type( roleNode ), "method_reference" );
+                    RecvShape rs = javaMethodRef
                                  ? javaMethodReferenceReceiver( roleNode, src )
                                  : receiverOf( nameNode, le.lang, src );                 // P2-D: `this`/`self`/`x`/`base.field` shape
                     r.recv = rs.kind;  r.recvVar = std::move( rs.var );                  //   → one-hop narrowing in resolve.h
                     r.fieldName = std::move( rs.field );                                 //   depth-2 intermediate field; "" otherwise
                     r.viaArrow  = rs.viaArrow;                                           //   `p->m()`: Rule 2b's smart-pointer pointee needs it
                     r.memberCall = rs.member;  r.memberRoot = std::move( rs.root );      //   FE-A: a Go/JS/TS/Rust member call and its receiver root
+                    r.memberPath = std::move( rs.path );  r.memberCtor = std::move( rs.ctor );   //   FE-B: the rest of that receiver chain
                     if( le.lang == Lang::Ruby && r.recv == RecvKind::NamedVar )
                     {
                         r.fieldName = rubyReceiverWrittenPath( nameNode, r.recvVar, src );   // parser version 137: a constant's path as written

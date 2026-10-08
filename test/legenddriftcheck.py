@@ -188,7 +188,10 @@ def extract_flag_tokens_from_legend(legend_text):
     # depth-labelled --impact (0.6.5): "d" joins for the same documented reason. src/graphlegend.h kImpactDepthLegend
     # defines the <s> row's OUTPUT ATTRIBUTE as "d=N on <s>: hop depth", and there is no --d flag (single-letter flags
     # do not exist in this CLI). Added by NAME, per this list's own rule.
-    placeholder_exclude = {"bodies", "bodyless", "overloads", "files", "hits", "toks", "noedge", "total", "shown", "d"}
+    # lane FE-B fix round 1: "x" joins for the same documented reason. The map's via legend (src/graphlegend.h
+    # kMapViaNameLegend) and the compact <c x=N> row define a merged map row's OUTPUT ATTRIBUTE as "x=N"; there is no --x
+    # flag. Added by NAME, per this list's own rule.
+    placeholder_exclude = {"bodies", "bodyless", "overloads", "files", "hits", "toks", "noedge", "total", "shown", "d", "x"}
     for match in re.finditer(r'\b([a-z][a-z0-9\-]*)=[NM]\b', legend_text):
         word = match.group(1)
         if word not in placeholder_exclude:

@@ -845,22 +845,34 @@ round. Each takes minutes to check; each miss costs a review round.
     claim; a dedup or merge of findings keeps the most severe row, not the first; a substring match on a
     name is whole-word or bounded (probe `catalog` and `dialog` for `log`); a per-tag or per-file cap
     cannot make the result depend on file order.
-14. **A match key names the real entity.** A filter, dedup or match identifies owner + name in its binding
+14. **A gate fails closed.** A shell gate checks that a value is present and numeric before it compares it, so an
+    erroring comparison never falls through to PASS; it SKIPs a case only for a named, expected missing premise and
+    FAILs on any other; an absence ("no row X", "nothing skipped") is read only off a command that succeeded and
+    produced its root or rows; when one harness call is added to sibling gates, diff the call sites so every arm
+    runs. A wrapper records the runner's own exit status right after it, and a reported `rc=0` is checked against
+    the log's failure count.
+15. **Claims match every surface.** A comment, legend or doc that says a case is handled names the arm that proves
+    it, or the claim goes. After a behaviour change, search every surface that describes it (CLI help, MCP tool
+    descriptions, legends, docs) for sentences the change made false, and re-check size ceilings such as the MCP
+    tool list. A count over a set (overloads, roots, shards) counts distinct entities; probe two members that meet
+    the same one. An external read on an answer path tells "could not read" from "read, empty" and discloses the
+    failure, never "none".
+16. **A match key names the real entity.** A filter, dedup or match identifies owner + name in its binding
     scope, never file + name; probe two owners of one name in one file, and a bare name beside a same-named
     class member.
-15. **A gate detects what it needs and skips by name.** A gate that needs a sanitizer, a tool or a locale
+17. **A gate detects what it needs and skips by name.** A gate that needs a sanitizer, a tool or a locale
     checks for it itself and SKIPs naming it when absent; a guard on machine state exits rather than printing;
     a new row or attribute name does not match the name patterns existing gates grep for.
-16. **After any merge, count format placeholders against arguments** at every format call either side
+18. **After any merge, count format placeholders against arguments** at every format call either side
     touched: two sides adding the same `{}` merge cleanly and silently drop an argument. Never edit a tree
     while its suite runs.
-17. **Commit before you mutate.** Commit the fix before a mutation test, and undo a mutation by restoring the
+19. **Commit before you mutate.** Commit the fix before a mutation test, and undo a mutation by restoring the
     committed file, never by checking out over uncommitted work; a build's `built_from` matches the commit it
     claims.
-18. **A text cap cuts on a UTF-8 boundary** and adds the ellipsis only when bytes were dropped; probe a
+20. **A text cap cuts on a UTF-8 boundary** and adds the ellipsis only when bytes were dropped; probe a
     multibyte character straddling the cap, a text of exactly the cap, and the same slot in every language
     that writes it.
-19. **A derived cache dies with its parent.** A cached object that points into a rebuilt structure is dropped
+21. **A derived cache dies with its parent.** A cached object that points into a rebuilt structure is dropped
     wherever that structure is reassigned, never kept on a content stamp; probe a rebuild that keeps the
     stamp (a chmod, a new non-source file) under the sanitizer build.
 

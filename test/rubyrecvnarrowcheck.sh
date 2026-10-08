@@ -228,6 +228,8 @@ callersLacks(){
     esac
     if echo "$out" | grep -q "$3"; then no "$4"; else ok "$5"; fi
 }
+# how many <c> edges of that name; FE-B: a merged via="name" row <c … x="N"/> stands for N edges (serialize.h writeMapCalleeRows)
+edgesTo(){ echo "$1" | grep -o "<c n=\"$2\"[^>]*>" | awk '{ n = 1; if ( match( $0, / x="[0-9]+"/ ) ) n = substr( $0, RSTART + 4, RLENGTH - 5 ) + 0; s += n } END { print s + 0 }'; }
 
 echo "=== the fixture parsed the way this gate assumes ==="
 for want in 'n="add" sc="Calc"' 'n="add" sc="Tally"' 'n="run" sc="Engine"' 'n="run" sc="Motor"' \

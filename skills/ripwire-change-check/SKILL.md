@@ -147,7 +147,10 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
     a symbol, HEAD first; `on-head="0"` alongside branch hits is content that exists ONLY on a branch. Each
     distinct blob is read once (git is content-addressed), so 30 branches cost about one tree. `kind="def"`
     on a branch row is a lexical heuristic — branch blobs are raw text, never ingested; for HEAD's parsed
-    answer use `--expand`/`--callers`.
+    answer use `--expand`/`--callers`. By default only the `kind="def"` rows are listed and the mentions are
+    counted in one `<refs count=N next=…>` row (its `next=` lists them) when that page lists MORE definitions than
+    the all page does under the same row cap (a capped all page can list fewer), or the same ones in strictly fewer
+    bytes; otherwise, and with `--whereis-listing=all`, every row is listed.
     A tree scan only finds what some ref *still carries*, so `hits="0"` cannot by itself tell a name this repo
     never had from one it deleted. Add `--with-history` and a `<fate>` row says which: `v="never"`, or
     `v="removed" commit=… date=… p=…` naming the commit that took it out. One `git log` pass, memoized per

@@ -337,6 +337,8 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     // @FILE:LINE seed line pre-pick), flow is a CLOSED direction set so the sentence names it.
     { "var",           "a STRING variable name inside the resolved definition (omit it to list the sliceable locals)", "var=\"out\"" },
     { "flow",          "a STRING flow direction: back, fwd or both (omit it for the flat per-line rows)", "flow=\"back\"" },
+    // lean-answers lane: whereis's CLOSED listing set, the CLI --whereis-listing= values verbatim.
+    { "listing",       "a STRING: defs (refs counted), refs or all; default: more defs listed, else the shorter page", "listing=\"all\"" },
     // lane/t10-mcp-coverage: rank_by's own CLOSED value set, the CLI --rank-by= spelling verbatim (cli.h's
     // parse arm). churn/churn-decay are valid CLI values that this row still names — the closed-set check
     // must accept them so the refusal can then say WHY they are unsupported HERE (a named gap, not an
@@ -1063,7 +1065,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     // unflagged-row window in editcheck.h), the same rule the `impact`/`uses` rows above state. They
     // page the CONTEXT rows only; the flagged callers this verb exists to name are never windowed.
     { "edit_check",               "path paths symbol new_body limit offset legend" },
-    { "whereis",                  "path symbol kind limit offset legend" },
+    { "whereis",                  "path symbol kind limit offset listing legend" },
     { "stray_content",            "path kind limit offset legend" },
     { "flags",                    "path kind symbol limit offset legend" },
     { "doc_drift",                "path kind limit offset legend" },

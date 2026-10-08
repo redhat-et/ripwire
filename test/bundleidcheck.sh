@@ -107,10 +107,19 @@ def rows( path ):
     for m in re.finditer( r'<d ([^>]*)>', text ):
         attrs = dict( re.findall( r'(\w+)="([^"]*)"', m.group( 1 ) ) )
         if 'n' not in attrs or 'l' not in attrs: continue
+        # lean-answers lane: the --for lens omits a zero in= on an r= row and its legend says so ("absent cx/ccx/in = 0"),
+        # so on THAT answer an absent in= reads 0 — the same fact in the new spelling; pack-task still prints every in=.
+        if zeroAbsent and 'r' in attrs and 'in' not in attrs: attrs[ 'in' ] = '0'
         out[ ( attrs.get( 'p', '' ), attrs['l'], attrs['n'] ) ] = attrs.get( 'in' )
     return out
 
-a, b   = rows( sys.argv[1] ), rows( sys.argv[2] )
+forText = open( sys.argv[1], encoding = 'utf-8' ).read()
+if 'absent cx/ccx/in = 0' not in forText and 'each absent when 0' not in forText:
+    print( 'MISMATCH legend: the --for answer omits zeros without saying absent = 0' )
+zeroAbsent = True
+a = rows( sys.argv[1] )
+zeroAbsent = False
+b = rows( sys.argv[2] )
 shared = sorted( set( a ) & set( b ) )
 bad    = [ ( k, a[k], b[k] ) for k in shared if a[k] != b[k] ]
 print( 'shared=%d' % len( shared ) )
@@ -150,6 +159,8 @@ else
     while read -r nm fp val; do
         [ -n "$nm" ] || continue
         ref="$( drows "$TMP/for.xml" | grep -oE "n=\"$nm\"[^>]* p=\"$fp\"[^>]* in=\"[0-9]+\"" | grep -oE 'in="[0-9]+"' | head -1 | tr -cd '0-9' )"
+        # lean-answers lane: a --for r= row with no in= is a 0 (its legend: absent cx/ccx/in = 0), not "no row"
+        [ -n "$ref" ] || { drows "$TMP/for.xml" | grep -qE "n=\"$nm\"[^>]* p=\"$fp\"[^>]* r=\"[0-9]+\"" && ref=0; }
         [ -n "$ref" ] || continue
         [ "$val" = "$ref" ] || { mism=$(( mism + 1 )); echo "    mismatch $nm ($fp): trace=$val for=$ref"; }
     done <<< "$( drows "$TMP/trace.xml" | grep -oE 'n="[A-Za-z_][A-Za-z0-9_]*"[^>]* p="[^"]*"[^>]* in="[0-9]+"' \

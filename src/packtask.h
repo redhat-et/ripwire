@@ -1189,7 +1189,7 @@ inline std::size_t probeBodyCost( const IngestResult& ing, const Graph& g, NodeI
     // would price a listing the bundle will never emit, and every fit decision downstream inherits that.
     const PackTaskRendered one = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodyProbeRenderFailed>( [ & ]( std::FILE* m )
     {
-        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, in.compress, in.redact, nullptr, nullptr, &dummy,
+        packBodies( m, ing, { id }, SIZE_MAX, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact, nullptr, nullptr, &dummy,
                    /*truncateOversizedFirst=*/true, /*withFileContext=*/false, in.rootArg, in.calleeRank );
     }, in.renderFaults );
     if( !one.ok )
@@ -1337,7 +1337,7 @@ inline std::vector<NodeId> selectMonotoneBodySubset( const IngestResult& ing, co
         EmittedBodies            dummy;
         wrapperLen = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodyProbeRenderFailed>( [ & ]( std::FILE* m )
         {
-            packBodies( m, ing, {}, SIZE_MAX, g.outOff, g.outTargets, in.compress, in.redact, nullptr, nullptr, &dummy );
+            packBodies( m, ing, {}, SIZE_MAX, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact, nullptr, nullptr, &dummy );
         }, in.renderFaults ).text.size();
         for( std::size_t i = 0; i < n; ++i )
         {
@@ -1729,7 +1729,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
         const std::vector<NodeId> renderIds = selectMonotoneBodySubset( ing, g, bodyIds, bodiesBudget, in );
         const PackTaskRendered bodies = packTaskRender<PackTaskRenderFaults::DisclosureWhy::BodiesRenderFailed>( [ & ]( std::FILE* m )
         {
-            packBodies( m, ing, renderIds, bodiesBudget, g.outOff, g.outTargets, in.compress, in.redact,
+            packBodies( m, ing, renderIds, bodiesBudget, g.outOff, g.outTargets, g.outNameOnly, in.compress, in.redact,
                         /*ranges=*/nullptr, /*noteIndex=*/nullptr, &emittedBodies, /*truncateOversizedFirst=*/true,
                         /*withFileContext=*/false, in.rootArg, in.calleeRank );
         }, in.renderFaults );

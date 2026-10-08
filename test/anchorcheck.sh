@@ -108,11 +108,20 @@ QUERY="frobnicate widget cache"
 # ladder trimmed used to appear in neither section), and the clause defining the tail says so. Verified before
 # re-pinning: with every comment and est_tokens= normalized out, old and new documents are byte-identical —
 # this fixture's head covers every file, so its tail is unchanged and every ranking byte is unmoved.
+# RE-PIN 2026-10-08 (train 26b: lean-answers merged onto for-spine-span): 3807 -> 3783 B, est_tokens="1449" -> "1439".
+# The two lanes' changes compose: e= rows and clause (for-spine-span) plus the zero elision and its clause (lean). Verified
+# mechanically: undoing ONLY the zero elision (zeros back after e=/p=, clause removed, est_tokens=/at= masked) gives the
+# train-side golden exactly.
 # RE-PIN 2026-10-07 (lane for-spine-span-068, by design): 3557 -> 3807 B (+250 B), est_tokens="1349" -> "1449". CAUSE: --for
 # rows with a known extent carry e="N" (the definition's last line) right after l= (3 rows here), and the full
 # legend gains the clause defining e=. Verified before re-pinning (tmp re-pin script, base binary 0c115310 == old golden):
 # with e= attributes, that clause and est_tokens normalized out, old and new documents are byte-identical — no
 # ranking, body or route byte moved.
+# RE-PIN 2026-10-07 (lane/lean-answers-068, --for zero elision): 3557 -> 3533 B, est_tokens="1349" -> "1339". ONE
+# identified change: a lens row omits cx=/ccx=/in= when 0 and the full legend says ", each absent when 0;". Verified
+# before re-pinning: the base binary (255dc199) reproduces the previous golden byte for byte, and putting cx="0"/ccx="0"/
+# in="0" back on every r= row, deleting that clause and masking est_tokens= gives the previous golden exactly — no
+# ranking, body or anchor byte moved (anchor-neutrality, this golden's purpose, untouched).
 # L1 (2026-09-19): the CLI default legend is compact; this arm compares against a golden recorded from the full default, so it asks for it.
 "$BIN" anchorfix --no-cache --for="$QUERY" --no-route --legend=full >"$TMP/plain_full.xml" 2>/dev/null
 diff -q "$TMP/plain_full.xml" "$ROOT/test/anchorfix/golden_for.xml" >/dev/null \

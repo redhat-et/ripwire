@@ -9,10 +9,12 @@
 // core (below), one purpose line per compact schema (compactlegend.h kCompactLegendSpecs), one reading per completeness
 // term (kCompactCompletenessTerms), and the MCP `for` dialect's fixed clauses (graphlegend.h, lexical.h, forpage.h,
 // serialize.h — named constants, so these are the very bytes the headers append). An entry is served in THIS process
-// once its bytes went out verbatim: the core when the client reads ripwire://legend-dict (mcp.h), every other entry the
-// first time an answer carries it. The session starts in the inline posture and switches to ref only when the core was
-// read; after that an answer DROPS exactly the entries this process already served and KEEPS the rest inline, in a
-// trailing comment, marking them served. So every attribute a ref answer carries is defined by bytes this process
+// once its bytes went out verbatim: the core when the client reads ripwire://legend-dict (mcp.h) or when the session's
+// first ref answer carries it, every other entry the first time an answer carries it. The session starts in the inline
+// posture and switches to ref when the core was read or — the MCP stdio default since the lean-answers lane — once its
+// first answer this dictionary can reduce went out inline (openSessionWith); after that an answer DROPS exactly the
+// entries this process already served and KEEPS the rest (the core included, until served) inline, in a trailing
+// comment, marking them served. So every attribute a ref answer carries is defined by bytes this process
 // already sent, or by that answer itself — never by a dictionary the reader was only pointed at.
 //
 // WHY LAZY AND NOT ONE FETCH. The prereg registered a ~5.5 KB dictionary fetched once (the distinct compact clauses the
@@ -781,7 +783,7 @@ inline RefParts assembleRef( std::string_view view, const RefShape& s, const Hea
 // native legend for MCP `for`. Only called once `session.refOn`.
 inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session )
 {
-    EXPECTS( session.refOn, "the ref posture exists only after the session was served the dictionary core" );
+    EXPECTS( session.refOn, "the ref posture exists only once the session opened it (a core read, or its first inline answer)" );
     session.served.resize( kEntryCount, 0 );
     const std::string_view view = doc;
     const std::optional<detail::RefShape> shape = detail::inferRefShape( view );
@@ -789,10 +791,30 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session )
     {
         return RefOutcome::NotApplicable;
     }
-    const std::optional<detail::HeadReduction> head = detail::reduceHead( view, *shape, session );
+    std::optional<detail::HeadReduction> head = detail::reduceHead( view, *shape, session );
     if( !head )
     {
         return RefOutcome::NotApplicable;
+    }
+    // lean-answers lane: a session OPENED by its first inline answer (openSessionWith, the MCP default) was never sent the
+    // core — the reading of <about legend="ref"> itself. Its first ref answer carries every unserved core entry in the
+    // same trailing comment as any other unserved entry, so the honesty rule above holds without a resource read.
+    // The core ids are marked served ONLY when the ref answer goes out: an answer kept inline (below) never carried them.
+    std::string              core;
+    std::vector<std::size_t> coreIds;
+    for( std::size_t id = 0; id < kCoreCount; ++id )
+    {
+        if( !session.isServed( id ) )
+        {
+            coreIds.push_back( id );
+            core += core.empty() ? "" : " ";
+            core.append( entryBody( id ) );
+            core += '.';
+        }
+    }
+    if( !core.empty() )
+    {
+        head->residual.insert( head->residual.begin(), "<!-- " + core + " -->" );
     }
     detail::RefParts  parts    = detail::assembleRef( view, *shape, *head );
     const std::size_t refBytes = parts.bytes( *shape );
@@ -816,8 +838,33 @@ inline RefOutcome applyRefPosture( std::string& doc, LegendSession& session )
     out += parts.trailer;
     out += shape->closeTag;
     ENSURES( out.size() <= doc.size(), "a ref answer is never longer than the inline answer it replaces" );
+    for( const std::size_t id : coreIds ) { session.markServed( id ); }   // carried by this ref answer's trailing comment
     doc.swap( out );
     return RefOutcome::Ref;
+}
+
+// THE MCP DEFAULT (lean-answers lane): a stdio session that never read ripwire://legend-dict is OPENED by its first answer
+// this dictionary can reduce. That answer is served inline and unchanged — its whole legend, the definitions it needs —
+// and every entry it carried counts as served; the session then takes the ref posture, whose first ref answer carries the
+// core (applyRefPosture). An answer the dictionary cannot reduce (JSON, plain text, a legend it does not hold) leaves the
+// session closed. `doc` is read, never changed. Returns whether the session opened.
+inline bool openSessionWith( std::string_view doc, LegendSession& session )
+{
+    EXPECTS( !session.refOn, "a session opens once; an open one takes the ref posture instead" );
+    session.served.resize( kEntryCount, 0 );
+    const std::optional<detail::RefShape> shape = detail::inferRefShape( doc );
+    if( !shape )
+    {
+        return false;
+    }
+    const std::optional<detail::HeadReduction> head = detail::reduceHead( doc, *shape, session );
+    if( !head )
+    {
+        return false;
+    }
+    for( const std::size_t id : head->touched ) { session.markServed( id ); }   // sent now, inline
+    session.refOn = true;
+    return true;
 }
 
 } // namespace rw::legenddict

@@ -91,7 +91,9 @@ g add -A; g commit -qm "doc quoting the entry point"
 g checkout -q master 2>/dev/null || g checkout -q main
 
 W="$TMP/w.xml"
-"$BIN" "$R" --whereis=parseArgs --limit=200 >"$W" 2>/dev/null
+# lean-answers lane: the §A7 arms read kind="ref" rows, which the DEFAULT listing counts rather than prints, so they read the
+# whole list (--whereis-listing=all); the twin after them holds the same labels on the default listing.
+"$BIN" "$R" --whereis=parseArgs --limit=200 --whereis-listing=all >"$W" 2>/dev/null
 tr '<' '\n' <"$W" | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)".*/\1 \4 \2:\3/p' >"$TMP/rows"
 head_rows(){ sed -n 's/^HEAD //p' "$TMP/rows"; }
 
@@ -132,7 +134,19 @@ grep -q '^feat-doc def DOC\.md:' "$TMP/rows" \
     || { no '§A7: whereis root still spells the scan denominator refs='; grep -o '<whereis[^>]*>' "$W"; }
 
 # determinism + well-formedness of the changed verb
-"$BIN" "$R" --whereis=parseArgs --limit=200 >"$TMP/w2.xml" 2>/dev/null
+# TWIN on the default listing: the same def rows (HEAD's exactly the index def site, the branch doc's lexical def), no
+# ref row printed, and the ref rows of the whole list — core.cpp:11 among them — counted exactly by <refs count=>.
+WD="$TMP/wd.xml"
+"$BIN" "$R" --whereis=parseArgs --limit=200 >"$WD" 2>/dev/null
+tr '<' '\n' <"$WD" | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)".*/\1 \4 \2:\3/p' >"$TMP/rowsd"
+NREFALL="$( grep -c ' ref ' "$TMP/rows" )"
+{ [ "$( grep ' def ' "$TMP/rowsd" )" = "$( grep ' def ' "$TMP/rows" )" ] && ! grep -q ' ref ' "$TMP/rowsd" \
+  && [ "$( sed -n 's/^HEAD //p' "$TMP/rowsd" | grep '^def ' )" = "def core.cpp:4" ] && grep -q '^feat-doc def DOC\.md:' "$TMP/rowsd" \
+  && grep -q '^HEAD ref core\.cpp:11$' "$TMP/rows" && grep -q "<refs count=\"$NREFALL\"" "$WD" && grep -q 'head_labels="index"' "$WD"; } \
+    && ok "§A7 (default listing twin): the same def rows (HEAD exactly core.cpp:4, the branch doc's lexical def); the $NREFALL ref rows, core.cpp:11 among them, counted" \
+    || { no '§A7 (default listing twin): the default listing changed a label or miscounted the refs'; cat "$TMP/rowsd"; grep -o '<refs [^>]*>' "$WD"; }
+
+"$BIN" "$R" --whereis=parseArgs --limit=200 --whereis-listing=all >"$TMP/w2.xml" 2>/dev/null
 if cmp -s "$W" "$TMP/w2.xml"; then ok "GUARD §A7: whereis is byte-identical run-to-run"; else no "§A7: whereis is non-deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$W" 2>/dev/null; then ok "GUARD §A7: whereis XML well-formed"; else no "§A7: whereis XML malformed"; fi

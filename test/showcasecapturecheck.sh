@@ -549,7 +549,9 @@ for cand in $seedCands; do
 
     # (1) what the capture PUBLISHES — that is what a reader gets, and where the 1148/buildGraph defect
     # lived: main's 09-05 and 09-07 both carry <at l="1148" sym="buildGraph"> under a rankGraphTeleport demo.
-    recSym="$( grep -oE '<at p="src/graph\.h" l="'"$cand"'" sym="[^"]*"' "$newestCapture" | grep -oE 'sym="[^"]*"' | head -1 )"
+    # The CLI default is the compact dialect (L1, 2026-09-19), whose root carries schema= FIRST; a capture recorded since then
+    # spells <at schema="ripwire.at/v1" p=… l=… sym=…>. The optional schema= reads both spellings of the same three facts.
+    recSym="$( grep -oE '<at (schema="[^"]*" )?p="src/graph\.h" l="'"$cand"'" sym="[^"]*"' "$newestCapture" | grep -oE 'sym="[^"]*"' | head -1 )"
     if [ "$recSym" = "sym=\"$SEEDSYM\"" ]; then
         ok "(H) the capture PUBLISHES sym=\"$SEEDSYM\" for src/graph.h:$cand — the reader is given the symbol the demo is about"
     else

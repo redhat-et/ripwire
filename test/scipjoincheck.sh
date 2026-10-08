@@ -19,7 +19,9 @@
 # THE FIXTURE (test/scipjoinfix/: a.py, b.py, index.scip from make_index.py — line numbers there):
 #   * local trap      `local 0` def on a.py:2 (sum's line) + `local 0` ref on b.py:6 (inside K.run)
 #   * parameter trap  `Box#go().(model)` def on a.py:9 (go's own line); `model(1)` on a.py:10 resolves
-#                     to that PARAMETER in SCIP, while ripwire's tier {Box.model, model} is S6-C-pinned
+#                     to that PARAMETER in SCIP, while ripwire's tier {Box.model, model} was S6-C-pinned until FE-B
+#                     (test/receiverevidencecheck.sh): a call THROUGH a parameter is name-only now, so the tier is
+#                     kept whole — a disclosed split, both rows via="name" — and the join reads that split
 #   * external        `sum(vals)` on a.py:8 resolves to `builtins/sum().` in SCIP; ripwire -> a.py::sum
 #   * control         `helper()` on b.py:6 resolves to b.py::helper in both
 #
@@ -43,9 +45,9 @@ echo "scipjoincheck: BIN=$BIN  CORPUS=$CORPUS"
 
 # ── (A) the fixture reproduces the shapes: a locality pin and two unique resolutions ──────────────
 "$BIN" "$CORPUS" $EXC --no-cache --pin-census="$TMP/plain.tsv" >"$TMP/plain.xml" 2>"$TMP/plain.err" || no "(A) plain run failed"
-awk -F'\t' '$1=="C" && $2=="locality" && $6 ~ /^a\.py::Box::go#/ && $7=="model" && $8 ~ /^a\.py::Box::model#/' "$TMP/plain.tsv" | grep -q . \
-    && ok "(A) Box.go -> model is S6-C locality-pinned to Box.model (the shape under audit)" \
-    || { no "(A) Box.go -> model is not a locality pin to Box.model"; grep '^C' "$TMP/plain.tsv" | sed 's/^/          /'; }
+awk -F'\t' '$1=="C" && $2=="split" && $6 ~ /^a\.py::Box::go#/ && $7=="model" && $8 ~ /a\.py::Box::model#/ && $8 ~ /\|a\.py::model#/' "$TMP/plain.tsv" | grep -q . \
+    && ok "(A) Box.go -> model is the whole name-only tier {Box.model, model} (the shape under audit; FE-B: never a pin through a parameter)" \
+    || { no "(A) Box.go -> model is not the split over Box.model and model"; grep '^C' "$TMP/plain.tsv" | sed 's/^/          /'; }
 awk -F'\t' '$1=="C" && $2=="unique" && $6 ~ /^a\.py::Box::total#/ && $7=="sum"' "$TMP/plain.tsv" | grep -q . \
     && ok "(A) Box.total -> sum resolves uniquely to a.py::sum" || no "(A) Box.total -> sum is not a unique resolution"
 awk -F'\t' '$1=="C" && $6 ~ /^b\.py::K::run#/ && $7=="helper"' "$TMP/plain.tsv" | grep -q . \
@@ -94,13 +96,14 @@ printf '%s' "$LINE" | grep -q '(1/1)' && ok "(F) stderr: SCIP matched 1/1 intern
 # ── (G) the harness reads both definitions ────────────────────────────────────────────────────────
 python3 "$ROOT/bench/scip_pin_precision.py" --bin "$BIN" --repo "$CORPUS" --scip "$IDX" --exclude make_index.py \
         --workdir "$TMP" --label join --json "$TMP/join.json" >"$TMP/harness.out" 2>&1 || no "(G) harness failed: $( tail -3 "$TMP/harness.out" )"
-if python3 - "$TMP/join.json" <<'PY'; then ok "(G) harness: locality covered=1 precision=0.000 (full oracle), in-repo-only covered=0"; else no "(G) harness readout wrong: $( cat "$TMP/harness.out" | tail -12 )"; fi
+if python3 - "$TMP/join.json" <<'PY'; then ok "(G) harness: the parameter site reads as split covered=1 precision=0.000 (full oracle), in-repo-only covered=0; locality covers none"; else no "(G) harness readout wrong: $( cat "$TMP/harness.out" | tail -12 )"; fi
 import json, sys
 j = json.load( open( sys.argv[ 1 ] ) )
-loc = j[ "rows" ][ "locality" ]
-assert loc[ "covered" ] == 1 and loc[ "confirmed" ] == 0, loc
-assert loc[ "covered_inrepo" ] == 0, loc
-assert loc[ "sentinel_nondef" ] == 1 and loc[ "sentinel_external" ] == 0, loc
+spl = j[ "rows" ][ "split" ]
+assert spl[ "covered" ] == 1 and spl[ "confirmed" ] == 0, spl
+assert spl[ "covered_inrepo" ] == 0, spl
+assert spl[ "sentinel_nondef" ] == 1 and spl[ "sentinel_external" ] == 0, spl
+assert j[ "rows" ].get( "locality", {} ).get( "covered", 0 ) == 0, j[ "rows" ].get( "locality" )
 uni = j[ "rows" ][ "unique" ]
 assert uni[ "sentinel_external" ] == 1, uni
 PY

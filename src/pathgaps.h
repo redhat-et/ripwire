@@ -183,8 +183,9 @@ inline constexpr std::string_view kPathGapsLegend =
     "keeps no edge for (gaps= counts them: declined = several candidates and nothing chose one, unresolved = an in-repo name every definition of which was "
     "filtered out, value = a function stored or passed as a value and not otherwise reached, through = a call through a parameter or slot), so this is NOT "
     "proof that no path exists. <gap t= n= p= gaps=> rows are the symbols that carry them, nearest to from= first, gap_syms_capped=1 = more than shown; a row "
-    "is where the search could not see, never a hop. Not counted: ambiguous calls (every candidate has an edge the search followed) and calls to names "
-    "defined nowhere in the tree. next= reads the rows' bodies. ";
+    "is where the search could not see, never a hop. Not counted: ambiguous calls (every candidate has an edge the search followed), calls bound by "
+    "name alone (via=name: the search follows the candidates such a call lists, never a namesake it does not list) and calls to names defined nowhere "
+    "in the tree. next= reads the rows' bodies. ";
 inline std::string_view pathGapsLegend( bool on ) noexcept
 {
     return on ? kPathGapsLegend : std::string_view();

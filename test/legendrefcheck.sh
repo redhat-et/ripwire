@@ -57,8 +57,13 @@ def ok(m):  print(f"  PASS  {m}")
 def no(m):  print(f"  FAIL  {m}"); fails.append(m)
 def check(c, m): (ok if c else no)(m)
 
-def session(calls):
+# lean-answers lane: the stdio default now OPENS the session on its first reducible answer. Arms (A)-(I) assert the
+# pre-lane contract ("ref only after the read") and run it where it still lives, --mcp-legend=inline; arm (J) is their
+# twin on the default posture.
+OLD_POSTURE = ["--mcp-legend=inline"]
+def session(calls, server=None):
     """One stdio MCP session. calls: [(tool, args)] or ('@method', params). Returns [(kind, text)]."""
+    server = OLD_POSTURE if server is None else server
     reqs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}]
     for i, (name, args) in enumerate(calls, 1):
         if name.startswith("@"):
@@ -66,7 +71,7 @@ def session(calls):
         else:
             a = dict(args); a.setdefault("path", FX)
             reqs.append({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": a}})
-    p = subprocess.run([BIN, "--mcp"], input="".join(json.dumps(r) + "\n" for r in reqs).encode(), capture_output=True, cwd=FX)
+    p = subprocess.run([BIN, "--mcp"] + server, input="".join(json.dumps(r) + "\n" for r in reqs).encode(), capture_output=True, cwd=FX)
     out = []
     for line in p.stdout.decode(errors="replace").splitlines():
         if not line.strip(): continue
@@ -313,6 +318,54 @@ for i, t in refs:
     except ET.ParseError as e:
         illformed.append(f"{CALLS[i][0]}:{e}")
 check(NREF >= 12 and not illformed, f"(I) over {NREF} ref answers, every one parses and keeps its newlines inside CDATA ({illformed})")
+
+# ── (J) THE DEFAULT SESSION (lean-answers lane): the twin of (A)-(F)/(I) on the stdio default ─────────────────────────────
+# The session opens on its first answer the dictionary can reduce: that answer is the inline answer, byte for byte;
+# every later reducible answer is ref (or, where ref would be longer, the inline answer); the core reaches the session
+# once, in its first ref answer; no entry is sent twice; every roster attribute is defined where the reader holds it.
+print("=== (J) the default session: first answer inline, later answers ref ===")
+DEF = []
+D = session(CALLS + CALLS, server=DEF)
+check(len(D) == 1 + 2 * N, f"(J) the default session answered every request ({len(D) - 1} of {2 * N})")
+dinit = D[0][1] if D and D[0][0] == "init" else ""
+check(len(dinit.encode()) <= 1000 and f"dictv={DICTV}" in dinit and "ripwire://legend-dict/full" in dinit,
+      f"(J) the default initialize names the posture, the same dictv and the full dictionary in <= 1,000 B ({len(dinit.encode())} B)")
+dans = D[1:]
+check(dans[0][1] == pre[0][1] and not is_ref(dans[0][1]), "(J) the session's first answer is the inline answer, byte-identical to the pre-read one")
+drefs = [(i, t) for i, (_, t) in enumerate(dans) if i > 0 and t.lstrip().startswith("<")]
+DNREF = sum(1 for _, t in drefs if is_ref(t))
+dinline = [CALLS[i % N][0] for i, t in drefs if not is_ref(t) and t != pre[i % N][1]]
+check(DNREF >= 12 and not dinline, f"(J) every later XML answer is ref ({DNREF}) or the inline answer byte for byte (third shapes: {dinline})")
+core0 = "<about legend=\"ref\" dict= dictv=>"
+firstref = next((t for _, t in drefs if is_ref(t)), "")
+check(core0 in "".join(comments(firstref)), "(J) the first ref answer carries the dictionary core (the reading of <about legend=\"ref\">)")
+dpost = "".join("".join(comments(t)) for _, t in drefs if is_ref(t))
+dtwice = [e[:60] for e in entries if len(e) > 12 and dpost.count(e) > 1]
+check(not dtwice and dpost.count(core0) == 1, f"(J) no dictionary entry reaches the session twice through its ref answers ({dtwice[:3]})")
+ddiff = [CALLS[i % N][0] for i, t in drefs if is_ref(t) and pairs(t) != pairs(full_by.get(i % N) if CALLS[i % N][0] != "for" else pre[i % N][1])]
+check(not ddiff, f"(J) each ref answer carries the same attribute name=value multiset as its inline twin ({ddiff})")
+dheld, dgaps = "", []
+for i, (_, t) in enumerate(dans):
+    dheld += "".join(comments(t))
+    if t.lstrip().startswith("<") and is_ref(t):
+        dgaps += [f"{CALLS[i % N][0]}@{a}" for a in sorted(roster_hits(t)) if not defined(a, dheld)]
+check(not dgaps, f"(J) no roster attribute of a ref answer rides undefined by the bytes this session sent ({dgaps[:6]})")
+dlong = [f"{CALLS[i % N][0]} {len(t)}>{len(pre[i % N][1])}" for i, t in drefs if is_ref(t) and len(t) > len(pre[i % N][1])]
+check(not dlong, f"(J) every ref answer <= the inline answer it replaces ({dlong})")
+dill = []
+for i, t in drefs:
+    if not is_ref(t): continue
+    try:
+        ET.fromstring(t)
+        if "\n" in strip_cdata(t).rstrip("\n"): dill.append(CALLS[i % N][0] + ":newline")
+    except ET.ParseError as e:
+        dill.append(f"{CALLS[i % N][0]}:{e}")
+check(not dill, f"(J) every default-session ref answer is well-formed G4 XML ({dill})")
+DI = session([CALLS[0]] + [(v, dict(a, legend="compact")) for v, a in CALLS if v != "for"], server=DEF)
+check([t for _, t in DI[2:]] == pre_nf, "(J) legend:\"compact\" in an open default session keeps that answer inline, byte-identical")
+r = subprocess.run([BIN, "--mcp-legend=inline"], capture_output=True, text=True)
+r2 = subprocess.run([BIN, "--mcp", "--mcp-legend=bogus"], capture_output=True, text=True, input="")
+check(r.returncode != 0 and r2.returncode != 0, f"(J) --mcp-legend without --mcp, and an unknown value, refuse (rc={r.returncode}/{r2.returncode})")
 
 print(f"legendrefcheck: {'FAIL' if fails else 'PASS'} ({len(fails)} failing)")
 sys.exit(1 if fails else 0)
