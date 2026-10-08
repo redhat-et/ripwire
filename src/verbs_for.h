@@ -2243,7 +2243,7 @@ inline std::vector<std::string> ownerQuestionWords( std::string_view task )
     return words;
 }
 
-static_assert( std::ranges::is_sorted( kOwnerCommonWords ), "kOwnerCommonWords is binary-searched: keep it sorted" );
+static_assert( std::ranges::is_sorted( kOwnerCommonWords, rw::sortutil::svLess ), "kOwnerCommonWords is binary-searched: keep it sorted" );
 
 inline ForOwnerPlan forOwnerHopPlan( const rw::IngestResult& ing, const rw::Graph& g, std::string_view task,
                                      const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
@@ -2298,7 +2298,7 @@ inline ForOwnerPlan forOwnerHopPlan( const rw::IngestResult& ing, const rw::Grap
     std::erase_if( found, [ & ]( const Owner& o ) { return !std::binary_search( headWords.begin(), headWords.end(), o.word ); } );
     // rank order, common words after the rest (stable: rank order inside each group)
     std::stable_partition( found.begin(), found.end(),
-                           []( const Owner& o ) { return !std::ranges::binary_search( kOwnerCommonWords, std::string_view( o.word ) ); } );
+                           []( const Owner& o ) { return !std::ranges::binary_search( kOwnerCommonWords, std::string_view( o.word ), rw::sortutil::svLess ); } );   // svLess: #345
     for( Owner& o : found )
     {
         if( !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, o.id ) )
