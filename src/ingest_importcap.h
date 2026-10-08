@@ -122,7 +122,7 @@ struct ImportSpec
 {
     std::string text;
     bool        isAngle = false;   // CFamily: <x.h> is external (unresolvable without a build system), "x.h" is not
-    bool        isLazy  = false;   // Web: a require()/import() CALL written inside a function body (Include::isLazy)
+    bool        lazyInClosure = false;   // Web: this is a require()/import() CALL, so it is Include::isLazy iff it sits in a function body
 };
 
 // ── DepDialect::CFamily ───────────────────────────────────────────────────────────────────────────────
@@ -165,22 +165,20 @@ ImportSpec normaliseCFamilyImport( TSNode directive, std::string_view raw, std::
 //       call out of the dependency graph stay C++: jsModuleLoadTarget (src/ingest_relations.h), UNCHANGED by
 //       this round and shared with captureJsImportFacts, reads the callee text, the argument count and the
 //       string. The query only says where a candidate call is; the guards say whether it is a module load.
-//       The lazy bit (a hit inside a function body) comes from the caller's ancestor walk, never from here.
+//       Whether the hit is LAZY (written inside a function body) is the ancestry's answer, not the text's: this
+//       arm only says the directive is a call (`lazyInClosure`), and emitCapturedImport ANDs it with the walk up.
 // `import x = require('y')` (TS) is `import_require_clause` with its own `source:` and matches no pattern —
 // the extractor never read it either, so it is still not an edge: a disclosed floor, unchanged by the round.
-ImportSpec normaliseWebImport( TSNode directive, TSNode pathNode, bool insideFn, std::string_view src )
+ImportSpec normaliseWebImport( TSNode directive, std::string_view raw, std::string_view src )
 {
-    const bool bothNodes = !ts_node_is_null( directive ) && !ts_node_is_null( pathNode );
-    EXPECTS( bothNodes, "both nodes come from one captured match" );
     ImportSpec out;
     if( kindIs( ts_node_type( directive ), "call_expression" ) )
     {
-        out.text   = jsModuleLoadTarget( directive, src );
-        out.isLazy = insideFn && !out.text.empty();   // kParserVer 72: a hit found inside a function body is LAZY
-        ENSURES( !out.isLazy || !out.text.empty(), "a lazy bit never rides on an empty (dropped) target" );
+        out.text          = jsModuleLoadTarget( directive, src );
+        out.lazyInClosure = !out.text.empty();   // kParserVer 72: a hit found inside a function body is LAZY (the caller knows where it sits)
         return out;
     }
-    out.text = importSpecifierText( pathNode, src );   // strips the one quote pair
+    out.text = std::string( pattern::stripQuotePair( raw ) );   // the captured node is a `string`: strip the one quote pair
     return out;
 }
 
@@ -189,12 +187,12 @@ ImportSpec normaliseWebImport( TSNode directive, TSNode pathNode, bool insideFn,
 // which is what makes the capture INERT rather than wrong on a language whose tags.scm has not adopted
 // `@import.path` yet. Each `case` is deleted as its language moves, and the compiler then names every
 // other dialect still to do — the same "one language at a time" landing the issue asks for.
-ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, TSNode pathNode, bool insideFn, std::string_view src )
+ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::string_view raw, std::string_view src )
 {
     switch( dialect )
     {
-        case DepDialect::CFamily: return normaliseCFamilyImport( directive, nodeTextOf( pathNode, src ), src );
-        case DepDialect::Web:     return normaliseWebImport( directive, pathNode, insideFn, src );
+        case DepDialect::CFamily: return normaliseCFamilyImport( directive, raw, src );
+        case DepDialect::Web:     return normaliseWebImport( directive, raw, src );
         default:                  return {};   // no other language captures @import.path yet
     }
 }
@@ -202,9 +200,11 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, TSNod
 // True for a dialect whose directives come from `@import.path` and NOT from captureIncludes' walk. The one
 // place the walk is switched off (captureSideFacts) asks this, so a dialect cannot be moved in the normaliser
 // above and still be walked a second time, or walked-off without a normaliser.
+inline constexpr std::array<DepDialect, 2> kCapturedImportDialects = { DepDialect::CFamily, DepDialect::Web };
+
 inline bool importsFromCapture( DepDialect dialect ) noexcept
 {
-    return dialect == DepDialect::CFamily || dialect == DepDialect::Web;
+    return std::find( kCapturedImportDialects.begin(), kCapturedImportDialects.end(), dialect ) != kCapturedImportDialects.end();
 }
 
 // The DIRECTIVE a captured specifier belongs to — the node both records are SITED at. For a C include or a
@@ -266,7 +266,7 @@ void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::
     {
         return;   // a non-container ancestor the walk would never have entered — see importContainerReach
     }
-    const ImportSpec spec = normaliseImportSpecifier( dependencyDialect( lang ), directive, pathNode, reach.insideFn, src );
+    const ImportSpec spec = normaliseImportSpecifier( dependencyDialect( lang ), directive, nodeTextOf( pathNode, src ), src );
     if( spec.text.empty() )
     {
         return;
@@ -281,7 +281,7 @@ void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::
         r.name      = std::move( name );
         refs.push_back( std::move( r ) );
     }
-    includes.push_back( { fileId, spec.isAngle, spec.isLazy, false, ts_node_start_byte( directive ), false, spec.text } );
+    includes.push_back( { fileId, spec.isAngle, spec.lazyInClosure && reach.insideFn, false, ts_node_start_byte( directive ), false, spec.text } );
 }
 
 }   // namespace

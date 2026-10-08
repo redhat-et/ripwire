@@ -473,9 +473,7 @@ fi
 # slice is a refactor, so main's set is the contract. The `neg_*` / `lazy_*` / `cjs_*` names say what each
 # edge (or non-edge) is, so a diff reads without opening the fixture.
 
-web_fixture() {   # $1 = an empty directory
-    local W="$1"
-    mkdir -p "$W"
+web_fixture_ts() { local W="$1"
     cat > "$W/main.ts" <<'TS'
 import def from "./es_default";
 import { named1, named2 as alias2 } from "./es_named";
@@ -529,6 +527,8 @@ const pe = (require("./paren_require"));
 const aw = await require("./await_require");
 label: require("./labeled");
 TS
+}
+web_fixture_js() { local W="$1"
     cat > "$W/main.js" <<'JS'
 import def from "./es_default";
 import { named1, named2 as alias2 } from "./es_named";
@@ -552,6 +552,8 @@ const g2 = () => import("./lazy_arrow");
 class K { m() { return require("./neg_class_method"); } }
 exports.run = function () { return require("./lazy_exports_fn"); };
 JS
+}
+web_fixture_small() { local W="$1"   # .tsx .mjs .cjs .jsx and the .astro frontmatter
     cat > "$W/comp.tsx" <<'TSX'
 import React from "react";
 import { Button } from "./tsx_button";
@@ -563,12 +565,18 @@ TSX
     printf 'const a = require("./cjs_file");\nmodule.exports = { get b() { return require("./cjs_lazy"); } };\n' > "$W/mod.cjs"
     printf 'import J from "./jsx_import";\nconst V = () => <J/>;\n' > "$W/view.jsx"
     printf '%s\n' '---' 'import A from "./astro_import";' 'const m = require("./astro_require");' 'export * from "./astro_reexport";' '---' '<div>{A}</div>' > "$W/page.astro"
+}
+web_fixture_stubs() { local W="$1"
     # every specifier above names a real file, so each edge RESOLVES and the lazy bit and --uses are observable
     local spec
     for spec in $(cat "$W"/main.ts "$W"/main.js "$W"/comp.tsx "$W"/mod.mjs "$W"/mod.cjs "$W"/view.jsx "$W"/page.astro \
                   | grep -o '"\./[A-Za-z_0-9]*"\|'"'"'\./[A-Za-z_0-9]*'"'" | tr -d "\"'" | sort -u); do
         printf 'export const %s = 1;\n' "${spec#./}" > "$W/${spec#./}.js"
     done
+}
+web_fixture() {   # $1 = an empty directory
+    mkdir -p "$1"
+    web_fixture_ts "$1"; web_fixture_js "$1"; web_fixture_small "$1"; web_fixture_stubs "$1"
 }
 
 # The expected Include targets per file, in source order, as one space-separated line each — read off the
