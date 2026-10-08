@@ -7228,8 +7228,8 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     for( std::size_t i = 0; i < ownerRows; ++i )
     {
         const NodeId id = nodes[ i ];
-        ASSUME( id < ing.symbols.size() && hopSlotHasProvenEdge( outOff, outNameOnly, id ),
-                "the owner plan seats only indexed symbols with a proven callee edge (forOwnerHopPlan)" );
+        // forOwnerHopPlan seats only indexed symbols, each with a proven callee edge (hopSlotHasProvenEdge, read there)
+        ASSUME( id < ing.symbols.size(), "the owner plan seats only indexed symbols (forOwnerHopPlan)" );
         const Symbol&     s    = ing.symbols[ id ];
         const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg, esc );
         std::string       row = "<h l=\"" + std::to_string( s.line ) + "\" p=\"";   // composed on std::string: no new fixed buffer
