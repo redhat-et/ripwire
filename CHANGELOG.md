@@ -32,7 +32,8 @@ that repeat the question's other words, so its callees — the names an agent ne
   edge has no row and is counted in `noedge=` once. Name-only callees keep `via="name"`.
 - By name, not by resolution: `qword=` says the name equals the word, never that the symbol is the only or the true
   implementation. Default regime: owner rows ride on top of the hop allowance, so every earlier `<h>` row is still
-  served (a moved owner can only free room). Under `--token-budget` they are funded first. A question that names no
+  served (a moved owner can only free room), and `<sigs>`/`<tail>` are unchanged: the legend clauses the owner rows
+  switch on (`qword=`, and `via="name"` when only an owner row carries it) are not charged to the signature budget. Under `--token-budget` they are funded first. A question that names no
   owner, `--json --for` and the MCP `for` verb are byte-identical; `RIPWIRE_NO_OWNER_HOP=1` restores the previous
   answer. Measured on the 32 `--for` rows of the round-1 comparison set: the two in-scope rows now name 5 of 5 gold
   callee items they missed (were 0 of 5); 23 of 32 answers are byte-identical, 1 differs only in `noedge=`, and 8 grow by 0.2–1.1 KB (+1.4% over all 32). Gate:

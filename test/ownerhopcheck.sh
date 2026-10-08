@@ -63,7 +63,12 @@
 #        capped="1" and next="--callees=pkg/broadcast.py:broadcast".
 #   (R)  no-regression: every <h> row of the RIPWIRE_NO_OWNER_HOP=1 answer is still served, in the same relative order
 #        (owner rows removed), its <calls> a prefix of the head row's (a moved owner only frees budget: more names of the
-#        same walk, never fewer, never others); non-owner questions byte-identical to the A/B handle.
+#        same walk, never fewer, never others); on every (R) question <sigs> and <tail> are byte-identical to the A/B
+#        handle. Non-owner questions are byte-identical to the A/B handle.
+#   (S)  sigs: where the owner rows ALONE switch on the header's via="name" clause (premise: the A/B answer has no via
+#        clause, the head has it — gateway's remember/encode are name-only callees, no ranked hop has one), <sigs> and
+#        <tail> are byte-identical to the A/B handle in both dialects, default and --token-budget=3000 (the clause is a
+#        disclosure exempt from the sig trim, exactly as the qword clause is; charged, it cost a signature row).
 #   (B)  explicit --token-budget=4500 (hops fit): the owner row is first, est_tokens <= 4500 or over_ceiling="1"; at 4000
 #        (less room than the owner row needs) the owner is first or named by qword_cut + next=;
 #        --token-budget=1200 (ceiling spent, reason="budget"): byte-identical to the A/B handle. (B3) a budget sweep
@@ -325,30 +330,65 @@ if ran_ok "$f" "(G/guard)"; then
 fi
 
 # ── (R) no-regression against the A/B handle ─────────────────────────────────────────────────────────────────────────
-for spec in "ts|$QTS" "py|$QPY" "c|$QC" "py|$QCAP" "ts|$QV"; do
-    r="${spec%%|*}"; q="${spec#*|}"
+# SECTS XML — the <sigs> and <tail> sections verbatim (the parts an owner row must never change)
+SECTS(){ python3 -c "import re,sys; x=open(sys.argv[1]).read(); print([m.group(0) for t in ('sigs','tail') for m in [re.search(r'<%s[ >].*?</%s>' % (t, t), x, re.S)] if m])" "$1"; }
+# mode exact: the A/B rows' <calls> EXACTLY (the five fixture questions — no moved owner there frees a later row's budget);
+# mode prefix: a PREFIX, and >= 1 row must actually gain names (else the widened branch is not exercised).
+for spec in "prefix|ts|$QTS" "prefix|py|$QPY" "prefix|c|$QC" "prefix|py|$QCAP" "prefix|ts|$QV"; do
+    mode="${spec%%|*}"; rest="${spec#*|}"; r="${rest%%|*}"; q="${rest#*|}"
     tag="$r.$( printf '%s' "$q" | cksum | cut -d' ' -f1 )"
     on="$TMP/r.$tag.on.xml"; off="$TMP/r.$tag.off.xml"; run "$r" "$on" "--for=$q"; runoff "$r" "$off" "--for=$q"
     ran_ok "$on" "(R/$r '$q') head" && ran_ok "$off" "(R/$r '$q') A/B" || continue
     HJ "$on" "$on.json" "(R/$r) head"; HJ "$off" "$off.json" "(R/$r) A/B"
-    res="$( python3 - "$on.json" "$off.json" <<'PY'
+    res="$( python3 - "$on.json" "$off.json" "$mode" <<'PY'
 import json, sys
-on = json.load(open(sys.argv[1])); off = json.load(open(sys.argv[2]))
+on = json.load(open(sys.argv[1])); off = json.load(open(sys.argv[2])); mode = sys.argv[3]
 owners = {(r['p'], r['n'], r['l']) for r in on['rows'] if r.get('qword')}
 base = [r for r in off['rows'] if (r['p'], r['n'], r['l']) not in owners]
 head = [r for r in on['rows'] if not r.get('qword')]
-# identity, and the calls as a PREFIX: a moved owner only frees budget, so a ranked row the A/B handle cut may name MORE of
-# the same walk (measured: on fzf-12 replacePlaceholder went from 0 to 2 names), never fewer and never others (rows are walked in order
-# against one cumulative budget, so every row the A/B handle printed starts at most as deep into it)
+# exact: identity AND calls equal. prefix: a moved owner only frees budget, so a ranked row the A/B handle cut may name MORE
+# of the same walk (measured: fzf-12 replacePlaceholder 0 -> 2 names), never fewer and never others (rows are walked in
+# order against one cumulative budget, so every row the A/B handle printed starts at most as deep into it)
 ident = lambda r: (r['p'], r['n'], r['l'])
 calls = lambda r: [(c['n'], c.get('l'), c.get('via')) for c in r['calls']]
 hd = {ident(r): r for r in head}
-missing = [ident(r) for r in base if ident(r) not in hd or calls(hd[ident(r)])[:len(calls(r))] != calls(r)]
+same = (lambda a, b: a == b) if mode == 'exact' else (lambda a, b: b[:len(a)] == a)
+missing = [ident(r) for r in base if ident(r) not in hd or not same(calls(r), calls(hd[ident(r)]))]
+gained = [r['n'] for r in base if ident(r) in hd and len(calls(hd[ident(r)])) > len(calls(r))]
+moved = [r['n'] for r in off['rows'] if ident(r) in owners]
 order_ok = [ident(r) for r in head if ident(r) in {ident(b) for b in base}] == [ident(r) for r in base if ident(r) in hd]
-print('OK' if not missing and order_ok and off['rows'] else 'BAD missing=%s order_ok=%s base_rows=%d' % (missing[:3], order_ok, len(off['rows'])))
+premise = True
+print('OK' if not missing and order_ok and off['rows'] and premise
+      else 'BAD missing=%s order_ok=%s base_rows=%d gained=%s moved=%s' % (missing[:3], order_ok, len(off['rows']), gained, moved))
 PY
 )"
-    if [ "$res" = OK ]; then ok "(R/$r) '$q': every A/B <h> row is still served, same calls, same order"; else no "(R/$r) '$q': $res"; fi
+    if [ "$res" = OK ]; then
+        if [ "$mode" = exact ]; then ok "(R/$r) '$q': every A/B <h> row is still served, exactly the same calls, same order"
+        else ok "(R/prefix) '$q': a moved owner frees budget — every A/B <h> row is still served, its calls a prefix, >= 1 row gains names"; fi
+    else no "(R/$mode/$r) '$q': $res"; fi
+    if [ "$( SECTS "$on" )" = "$( SECTS "$off" )" ] && [ "$( SECTS "$off" )" != "[]" ]; then ok "(R/sigs/$r) '$q': <sigs>/<tail> byte-identical to the A/B handle"
+    else no "(R/sigs/$r) '$q': <sigs>/<tail> differ from the A/B handle (or are absent)"; fi
+done
+# ── (S) the via="name" clause the owner rows alone switch on never costs <sigs> a row (CHANGES 1 of the review) ──────────
+# The header asks "may a <calls> row carry via=name?" over the hop ids AND the owner rows. When only an owner row answers
+# yes, the clause is the owner rows' disclosure: exempt from the sig trim like the qword clause, so <sigs>/<tail> stay the
+# A/B handle's. Red before the exemption: compact default 36 sigs with docs_dropped 10 -> 11, full at 3000 31 -> 29 rows.
+for spec in "compact|$QTS|" "compact|$QV|" "full|$QTS|--legend=full" "compact|$QTS|--token-budget=3000" "full|$QTS|--legend=full --token-budget=3000"; do
+    dia="${spec%%|*}"; rest="${spec#*|}"; q="${rest%%|*}"; extra="${rest#*|}"
+    tag="s.$dia.$( printf '%s %s' "$q" "$extra" | cksum | cut -d' ' -f1 )"
+    on="$TMP/$tag.on.xml"; off="$TMP/$tag.off.xml"
+    # shellcheck disable=SC2086
+    run ts "$on" "--for=$q" $extra; runoff ts "$off" "--for=$q" $extra
+    ran_ok "$on" "(S/$dia '$q'${extra:+ $extra}) head" && ran_ok "$off" "(S/$dia '$q'${extra:+ $extra}) A/B" || continue
+    if [ -z "$extra" ] || [ "$extra" = "--legend=full" ]; then   # premise: the owner rows alone switch the clause on
+        if [ "$dia" = compact ]; then pat='c via=name:'; else pat='via="name" on a <c> row'; fi
+        non="$( grep -cF "$pat" "$on" )"; noff="$( grep -cF "$pat" "$off" )"
+        if [ "$non" -ge 1 ] && [ "$noff" = 0 ] && grep -q 'qword="gateway"' "$on"; then :
+        else no "(S/$dia '$q'${extra:+ $extra}) premise: via clause head=$non A/B=$noff (want >=1 / 0) with the gateway owner row"; continue; fi
+    fi
+    if [ "$( SECTS "$on" )" = "$( SECTS "$off" )" ] && [ "$( SECTS "$off" )" != "[]" ]; then
+        ok "(S/$dia '$q'${extra:+ $extra}) the owner rows' via=\"name\" clause costs <sigs>/<tail> nothing (byte-identical to the A/B handle)"
+    else no "(S/$dia '$q'${extra:+ $extra}) <sigs>/<tail> differ from the A/B handle: $( grep -o '<sigs [^>]*>' "$on" ) vs $( grep -o '<sigs [^>]*>' "$off" )"; fi
 done
 for spec in "ts|How does the team review pull requests?" "c|How does the log walk the process tables?"; do
     r="${spec%%|*}"; q="${spec#*|}"

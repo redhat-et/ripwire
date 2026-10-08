@@ -553,6 +553,9 @@ struct ForLensHeaderParts
                                             // (serialize.h namesOnlyOutAny). Over-approximates the 16-per-symbol cap.
     bool             ownerPresent = false;   // owner-hop: the compact <hops> carries a qword= row or a qword_cut= disclosure
                                             // (forOwnerHopPlan, decided before the header, cleared with the section)
+    bool             viaByOwnerOnly = false; // owner-hop: viaPresent holds ONLY because the owner rows joined the via question
+                                            // (the six ranked hop ids alone answer no) — the via clause is then the owner
+                                            // rows' disclosure, exempt from the sig trim exactly as the qword clause is
 
     // ── THE DROPPABLE LEGEND, as ONE bit ──────────────────────────────────────────────────────────────
     // confidenceNote / tailLegend / idRouteLegend moved in lock step at every read and every write, and the
@@ -804,6 +807,16 @@ inline std::string_view ownerHopLegend( const ForLensHeaderParts& p, bool compac
         return {};
     }
     return compact ? kForCompactLegendOwner : kForOwnerHopLegend;
+}
+// …and what the sig-trim ledger exempts for the owner rows in this dialect: the qword clause, plus the via="name" clause when
+// the owner rows alone switched it on (a base answer without them never carried it, so charging it cost <sigs> a row:
+// fastify-13 Context r23, pdoc AstInfo r38). ownerPresent and viaPresent are cleared with their sections, so neither part
+// is exempted for a clause the header did not write.
+inline std::size_t ownerLegendExemptBytes( const ForLensHeaderParts& p, bool compact )
+{
+    const bool        viaByOwner = p.viaPresent && p.viaByOwnerOnly;
+    const std::size_t viaBytes   = !viaByOwner ? 0u : ( compact ? rw::kForCompactViaNameClause.size() : rw::forViaNameClause().size() );
+    return ownerHopLegend( p, compact ).size() + viaBytes;
 }
 inline constexpr std::string_view kForCompactLegendBodies =
     "; b t= n= p= l= full bodies, c n= l= callee signatures";
@@ -2972,16 +2985,22 @@ std::optional<int> runForLens( const MainDispatch& d )
             ? forOwnerHopPlan( ing, g, cfg.forTask, lensSurfaceIds, lensRank, forCompactHopIds( lensSurfaceIds, lensRank ) )
             : ForOwnerPlan{};
         bool forViaPresent = false;
+        bool forViaByOwnerOnly = false;   // owner-hop: the six ranked hop ids alone answer no, the owner rows switch it on
         if( !g.outNameOnly.empty() )
         {
             std::vector<rw::NodeId> viaIds;
             if( autoBundleMode && plan.compact )
             {
-                viaIds = forCompactHopIds( lensSurfaceIds, lensRank );
-                viaIds.insert( viaIds.end(), ownerPlan.rowIds.begin(), ownerPlan.rowIds.end() );   // owner rows carry <calls> too
                 // only the hops packHops gives a slot can carry a row (the hop-slot rule drops a hop whose every callee
                 // edge is name-only, so its via="name" rows never print)
-                std::erase_if( viaIds, [ & ]( rw::NodeId id ) { return !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, id ); } );
+                const auto unslotted = [ & ]( rw::NodeId id ) { return !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, id ); };
+                viaIds = forCompactHopIds( lensSurfaceIds, lensRank );
+                std::erase_if( viaIds, unslotted );
+                const bool rankedVia = rw::namesOnlyOutAny( g.outOff, g.outNameOnly, viaIds );   // the question without owners
+                std::vector<rw::NodeId> ownerViaIds = ownerPlan.rowIds;   // owner rows carry <calls> too
+                std::erase_if( ownerViaIds, unslotted );
+                forViaByOwnerOnly = !rankedVia && rw::namesOnlyOutAny( g.outOff, g.outNameOnly, ownerViaIds );
+                viaIds.insert( viaIds.end(), ownerViaIds.begin(), ownerViaIds.end() );
             }
             else if( autoBundleMode && plan.autoBodies )
             {
@@ -3000,7 +3019,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                         /*tailLegend=*/true, /*idRouteLegend=*/true, /*legendDropped=*/false, flRootArg,
                                         /*hdrLegend=*/!forHdrRows.empty(), forScPresent, forComposePresent,
                                         forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent,
-                                        ownerPlan.any() };
+                                        ownerPlan.any(), forViaByOwnerOnly };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3271,9 +3290,10 @@ std::optional<int> runForLens( const MainDispatch& d )
         // admits are the ones it admitted without it (owner ruling: e= is exempt from the row budget).
         const std::size_t endLineLegendEmitted = !headerParts.endLinePresent ? 0u
                                                : ( compactLegendOn ? rw::kForCompactEndLineLegend.size() : rw::kForEndLineLegend.size() );
-        // owner-hop: the qword clause is a disclosure on the same contract — exempt, so <sigs> is byte-identical with and
-        // without the owner rows (the rows ride on top of the hop budget; their reading never costs a signature row).
-        const std::size_t ownerLegendEmitted = !headerParts.ownerPresent ? 0u : ( compactLegendOn ? kForCompactLegendOwner.size() : kForOwnerHopLegend.size() );
+        // owner-hop: the qword clause — and the via="name" clause when only the owner rows switched it on — are disclosures
+        // on the same contract: exempt, so <sigs> is byte-identical with and without the owner rows (the rows ride on top of
+        // the hop budget; their reading never costs a signature row). Gate: ownerhopcheck (S).
+        const std::size_t ownerLegendEmitted = ownerLegendExemptBytes( headerParts, compactLegendOn );
         const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted + idRouteLegendEmitted
                                       + endLineLegendEmitted + ownerLegendEmitted;
         if( exemptBytes > headerStr.size() )
@@ -3299,7 +3319,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes()
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u )
-                                              + ( headerParts.ownerPresent ? kForOwnerHopLegend.size() : 0u );
+                                              + ownerLegendExemptBytes( headerParts, /*compact=*/false );
             std::size_t       fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
             fullCharged -= std::min( fullCharged, rw::forZeroNoteBytes( fullHeader ) );   // lean-answers: exempt, as above
             chargedHeaderBytes = std::min( chargedHeaderBytes, fullCharged );
