@@ -169,5 +169,27 @@ expectSite "(8)" Decoy::peek peek "peek@1" locality
 # ── 9) control — Rule 2 narrows a typed local before the tie-break: one precise edge, untouched.
 expectSite "(9)" Decoy::typedLocal pick "pick@1" receiver-rule
 
+# ── 10) (cli-perf-068) the per-(name, language) candidate memo answers every call as the plain walk did. One name, `ok`,
+#       is defined in 18 shell scripts AND 18 Python files (36 definitions, past the memo's 16-candidate floor), and each
+#       file calls its own `ok` at module scope. The same-file tier must pick the caller's OWN file in the caller's OWN
+#       language for every file, whichever language filled the memo first: a memo keyed without the language, or a
+#       same-file run found in the wrong place, binds some file's call elsewhere (or nowhere) and turns these red.
+MF="$( mktemp -d )"
+for i in $( seq 1 18 ); do
+    printf 'ok() { echo "$1"; }\nok "bash %s"\nok "again"\n' "$i" > "$MF/s$i.sh"
+    printf 'def ok(x):\n    return x\nok("py %s")\n' "$i" > "$MF/p$i.py"
+done
+memoBad=0
+for i in 1 2 9 17 18; do
+    for f in "s$i.sh" "p$i.py"; do
+        out="$( "$BIN" "$MF" --no-cache --callers="$f:ok" 2>/dev/null )"
+        if printf '%s' "$out" | grep -q 'count="1"' && printf '%s' "$out" | grep -q "p=\"$f:1\""; then :; else
+            memoBad=1; no "(10) $f:ok should have exactly its own file's module scope as caller: $( printf '%s' "$out" | grep -o '<callers [^>]*>' | head -1 )"
+        fi
+    done
+done
+rm -rf "$MF"
+if [ "$memoBad" -eq 0 ]; then ok "(10) 36 same-named defs over two languages: every file's module-scope call binds its own file's ok (10 files sampled)"; fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
