@@ -200,11 +200,16 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::
 // True for a dialect whose directives come from `@import.path` and NOT from captureIncludes' walk. The one
 // place the walk is switched off (captureSideFacts) asks this, so a dialect cannot be moved in the normaliser
 // above and still be walked a second time, or walked-off without a normaliser.
-inline constexpr std::array<DepDialect, 2> kCapturedImportDialects = { DepDialect::CFamily, DepDialect::Web };
-
 inline bool importsFromCapture( DepDialect dialect ) noexcept
 {
-    return std::find( kCapturedImportDialects.begin(), kCapturedImportDialects.end(), dialect ) != kCapturedImportDialects.end();
+    switch( dialect )   // one case per dialect normaliseImportSpecifier has an arm for
+    {
+        case DepDialect::CFamily:
+        case DepDialect::Web:
+            return true;
+        default:
+            return false;
+    }
 }
 
 // The DIRECTIVE a captured specifier belongs to — the node both records are SITED at. For a C include or a
