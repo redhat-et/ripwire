@@ -23,6 +23,7 @@ FAILED=0
 fail() { printf '  FAIL  %s\n' "$*"; FAILED=$(( FAILED + 1 )); }
 ok()   { printf '  PASS  %s\n' "$*" || { FAILED=$(( FAILED + 1 )); printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 [ -x "$BIN" ] || { echo "mapinventorycheck: no binary at $BIN — build first"; exit 2; }
+echo "mapinventorycheck: BIN=$BIN"
 cd "$ROOT" || exit 2
 FIX=test/mapinvfix
 [ -d "$FIX" ] || { echo "mapinventorycheck: fixture $FIX missing"; exit 2; }
@@ -37,10 +38,11 @@ run --top-k=3 --max-tokens=400 >"$TMP/maxtok"
 run --top-k=3 --expand=run >"$TMP/expand"
 run --top-k=3 --for="where does main start" >"$TMP/for"
 run --top-k=3 --stable >"$TMP/stable"
+run --top-k=3 --no-inventory --json >"$TMP/noinvjson"
 run --top-k=3 >"$TMP/map2"
 
 # The tier, isolated (one line of minified XML).
-INV="$( grep -o '<inv .*</inv>' "$TMP/map" )"
+INV="$( grep -o '<inv listed="[0-9].*</inv>' "$TMP/map" )"
 
 # (A) the tier rides a map whose ranked rows dropped a file — RED on a binary without it
 if [ -n "$INV" ]; then ok "(A) a map with a ranked cut carries <inv>"; else fail "(A) no <inv> on a map whose top-k=3 dropped 15 of 18 files"; fi
@@ -91,12 +93,12 @@ done
 if [ "$DUP" = 0 ]; then ok "(G2) no shown file is named again"; else fail "(G2) a file is both a ranked <f> group and an <ls> name"; fi
 
 # (H) present-only: a map that shows every file carries no tier (small maps stay byte-identical)
-if grep -q '<inv ' "$TMP/whole"; then fail "(H) <inv> on a map that shows every file"; else ok "(H) no <inv> when the ranked rows show every file"; fi
+if grep -q '<inv listed="' "$TMP/whole"; then fail "(H) <inv> on a map that shows every file"; else ok "(H) no <inv> when the ranked rows show every file"; fi
 
 # (I) scope: never under --max-tokens (its fit is a binary search on top-k; the tier would make it non-monotone),
 # never on a payload verb's ride-along map
-for f in maxtok expand for; do
-    if grep -q '<inv \|"inv":' "$TMP/$f"; then fail "(I) <inv> rides the $f answer"; else ok "(I) no <inv> on the $f answer"; fi
+for f in maxtok expand for noinvjson; do
+    if grep -q '<inv listed="\|"inv":' "$TMP/$f"; then fail "(I) <inv> rides the $f answer"; else ok "(I) no <inv> on the $f answer"; fi
 done
 
 # (J) the JSON twin carries the same decision
@@ -120,7 +122,38 @@ for f in map full stable; do if wf "$TMP/$f"; then ok "(L) $f is well-formed"; e
 
 # (M) determinism, and --stable keeps the tier (path order is already stable)
 if cmp -s "$TMP/map" "$TMP/map2"; then ok "(M) two runs byte-identical"; else fail "(M) non-deterministic"; fi
-if grep -q '<inv ' "$TMP/stable"; then ok "(M2) --stable carries the tier"; else fail "(M2) --stable dropped the tier"; fi
+if grep -q '<inv listed="' "$TMP/stable"; then ok "(M2) --stable carries the tier"; else fail "(M2) --stable dropped the tier"; fi
+
+# (N) the ranked rows are untouched (checklist 23): the same top-k under --no-inventory prints the identical <f>/<s>/<c>
+# sequence the tiered map does, and nothing of the tier (element or legend clause)
+rows_of(){ sed 's/<inv listed="[0-9].*<\/inv>//' "$1" | grep -oE '<f p="[^"]*"|<s t="[^"]*" n="[^"]*"[^>]*>(<c [^>]*/>)*' | tr '\n' ' '; }
+run --top-k=3 --no-inventory >"$TMP/rowsonly"
+run --top-k=3 --no-inventory --legend=full >"$TMP/rowsonly_full"
+if ! grep -q '<inv listed="\|<!-- inv: ' "$TMP/rowsonly" "$TMP/rowsonly_full" && [ -n "$( rows_of "$TMP/map" )" ] && [ "$( rows_of "$TMP/map" )" = "$( rows_of "$TMP/rowsonly" )" ]; then
+    ok "(N) ranked rows byte-identical to the tier-less twin"
+else
+    fail "(N) the tier changed the ranked rows (or the twin carries a tier)"
+fi
+
+# (O) important-last: the tier moves to the FRONT so the top-ranked rows keep the end position
+run --top-k=3 --most-important-last >"$TMP/last"
+if grep -q '"><inv listed="[0-9]*" unlisted="[0-9]*">.*</inv><f p="' "$TMP/last" && grep -q '</f></r>' "$TMP/last"; then ok "(O) --most-important-last: <inv> precedes the rows"; else fail "(O) --most-important-last: <inv> is not before the ranked rows"; fi
+
+# (P) runaway guards, each at the boundary and one past it (generated corpora; top-k=1 shows one file)
+gen_c(){ d="$1"; n="$2"; mkdir -p "$d/src"; i=0; while [ "$i" -lt "$n" ]; do printf 'int fn%d( void ) { return %d; }\n' "$i" "$i" >"$d/src/f$i.c"; i=$(( i + 1 )); done; }
+gen_go(){ d="$1"; n="$2"; i=0; while [ "$i" -lt "$n" ]; do mkdir -p "$d/cmd/p$i"; printf 'package main\n\nfunc main() {}\n' >"$d/cmd/p$i/main.go"; i=$(( i + 1 )); done; }
+gen_c "$TMP/c2001" 2001; gen_c "$TMP/c2002" 2002
+gen_go "$TMP/g32" 32; gen_c "$TMP/g32" 2; gen_go "$TMP/g33" 33; gen_c "$TMP/g33" 2
+"$BIN" "$TMP/c2001" --no-cache --top-k=1 >"$TMP/c2001.out" 2>/dev/null
+"$BIN" "$TMP/c2002" --no-cache --top-k=1 >"$TMP/c2002.out" 2>/dev/null
+"$BIN" "$TMP/g32" --no-cache --top-k=1 >"$TMP/g32.out" 2>/dev/null
+"$BIN" "$TMP/g33" --no-cache --top-k=1 >"$TMP/g33.out" 2>/dev/null
+NC1="$( grep -o '<ls p="src" n="[0-9]*" f="[^"]*"' "$TMP/c2001.out" | sed 's/.*f="//;s/"$//' | tr ',' '\n' | wc -l | tr -d ' ' )"
+if [ "$NC1" = 2000 ] && ! grep -q 'names_cut=' "$TMP/c2001.out"; then ok "(P) 2000 unshown code files: all named, no names_cut="; else fail "(P) at the 2000-name ceiling: named=$NC1, names_cut=$( grep -o 'names_cut="[0-9]*"' "$TMP/c2001.out" )"; fi
+if grep -q '<inv listed="1" unlisted="2001" names_cut="2001">' "$TMP/c2002.out" && grep -q '<ls p="src" n="2001"/>' "$TMP/c2002.out"; then ok "(P) 2001 past the ceiling: the dir keeps n= only, names_cut=2001"; else fail "(P) past the ceiling: $( grep -o '<inv [^>]*>' "$TMP/c2002.out" ) $( grep -o '<ls p="src" n="[0-9]*"[^/]\{0,20\}' "$TMP/c2002.out" )"; fi
+E32="$( grep -o '<entry p="' "$TMP/g32.out" | wc -l | tr -d ' ' )"; E33="$( grep -o '<entry p="' "$TMP/g33.out" | wc -l | tr -d ' ' )"
+if [ "$E32" = 32 ] && ! grep -q 'entry_total=' "$TMP/g32.out"; then ok "(P) 32 entries: all shown, no entry_total="; else fail "(P) 32 entries: shown=$E32 $( grep -o 'entry_total="[0-9]*"' "$TMP/g32.out" )"; fi
+if [ "$E33" = 32 ] && grep -q 'entry_total="33"' "$TMP/g33.out"; then ok "(P) 33 entries: 32 shown, entry_total=33"; else fail "(P) 33 entries: shown=$E33 $( grep -o 'entry_total="[0-9]*"' "$TMP/g33.out" )"; fi
 
 echo "mapinventorycheck: $FAILED failure(s)"
 [ "$FAILED" -eq 0 ]

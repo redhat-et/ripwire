@@ -45,9 +45,19 @@ struct MapInventory
     bool                       active   = false;   // false ⇒ the tier is not emitted at all (byte-identical map)
     std::size_t                listed   = 0;       // files the ranked rows showed (the map's <f> groups)
     std::size_t                unlisted = 0;       // every other indexed file; listed + unlisted = files=
-    std::vector<NodeId>        entries;            // path order, then symbol id
+    std::vector<NodeId>        entries;            // path order, then symbol id; at most kInventoryEntryCap
+    std::size_t                entryTotal = 0;     // every entry found (entries.size() < entryTotal ⇒ cut, disclosed)
     std::vector<MapInventoryDir> dirs;             // path order
+    std::size_t                namesCut = 0;       // code files counted but not named: the name ceiling was reached
 };
+
+// RUNAWAY GUARDS (PROCESS rule 5a), far above any measured answer: the eleven orient repos of the round-1 table name at
+// most 431 files (textual) and list at most 6 entries (gotestsum), so neither guard fires on them. A monorepo of
+// thousands of unshown code files would otherwise print every name (~13 B each). Past the ceiling, directories in path
+// order keep n= and drop f= (names_cut= on <inv> says how many files that left unnamed; ripwire on p= ranks them);
+// past the entry cap, entry_total= says how many entries exist.
+inline constexpr std::size_t kInventoryNameCeiling = 2000;
+inline constexpr std::size_t kInventoryEntryCap    = 32;
 
 // Directory components whose subtree rolls up count-only. pathTierOf's test/bench/fixture conventions plus the
 // presentational ones (examples, docs, regress, samples) — local to the inventory on purpose: widening pathTierOf
@@ -179,6 +189,11 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
     }
     std::stable_sort( inv.entries.begin(), inv.entries.end(), [ & ]( NodeId a, NodeId b )
     { return pathRel( ing.symbols[ a ].fileId ) < pathRel( ing.symbols[ b ].fileId ); } );
+    inv.entryTotal = inv.entries.size();
+    if( inv.entries.size() > kInventoryEntryCap )
+    {
+        inv.entries.resize( kInventoryEntryCap );
+    }
 
     // ── ls rows ──
     std::vector<std::uint32_t> unshown;
@@ -220,6 +235,20 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
             d.named.push_back( k.f );
         }
     }
+    // the name ceiling: whole directories, path order — a directory is named completely or not at all, so f= is never a
+    // silent part-list
+    std::size_t namedSoFar = 0;
+    for( MapInventoryDir& d : inv.dirs )
+    {
+        if( namedSoFar + d.named.size() > kInventoryNameCeiling )
+        {
+            inv.namesCut += d.named.size();
+            d.named.clear();
+            namedSoFar = kInventoryNameCeiling;   // every later directory is count-only too: one contiguous cut
+            continue;
+        }
+        namedSoFar += d.named.size();
+    }
     ENSURES( inv.listed + inv.unlisted == F, "every indexed file is listed or inventoried" );
     return inv;
 }
@@ -232,6 +261,8 @@ inline constexpr std::string_view kMapInventoryLegend =
     "or a __main__.py module scope, with its resolved callees as c rows; entries declared only in a manifest (package.json "
     "main/bin, console_scripts) are not detected. ls p= n= f=: n= unshown files under directory p=, f= the code files "
     "among them by name; test, doc and config files are counted, not named, and a test/bench/fixture/example/doc "
-    "directory rolls up whole. ripwire on p= ranks that directory -->";
+    "directory rolls up whole. ripwire on p= ranks that directory. Runaway guards: entry_total=N when more than 32 "
+    "entries exist (the first 32 by path shown); names_cut=N code files left unnamed past a 2000 name ceiling "
+    "(directories after it, path order, keep n= only) -->";
 
 }  // namespace rw

@@ -428,9 +428,11 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // The map scope's code-first pick (serialize.h codeFirstKeep): the Sections it swapped out. Present-only.
     { "data_sections_cut", "data_sections_cut=N: N data Sections (headings, data keys) swapped out of this top-K for lower-ranked code rows; next= pages them first" },
     // D7 (mapinventory.h): the map scope's inventory tier, ELEMENT-qualified (p=/n=/f= mean other things on other rows).
-    { "listed",            "<inv listed= unlisted=>: files the ranked rows show / do not (sum = files=); each unshown file is named or counted below, names only", true, "inv" },
-    { "n",                 "<entry p= n=>: a program entry by name (main called only by its own module scope, or __main__.py), callees as c rows; manifest-only entries not detected", true, "entry" },
-    { "n",                 "<ls p= n= f=>: n= unshown files under dir p=, f= its code files by name; test/doc/config files and test/doc/example dirs are counted, not named", true, "ls" },
+    { "listed",            "<inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below", true, "inv" },
+    { "n",                 "<entry p= n=>: a program entry by name (a main only its own module scope calls, or __main__.py), callees as c rows; manifest entries not read", true, "entry" },
+    { "n",                 "<ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted", true, "ls" },
+    { "entry_total",       "inv entry_total=N: N entries, the first 32 by path shown", true, "inv" },
+    { "names_cut",         "inv names_cut=N: N code files left unnamed past the 2000-name ceiling (later dirs n= only)", true, "inv" },
     { "pr_converged",      "pr_converged=0: iteration cap hit before convergence" },
     // Form-conditional map roots whose clauses (kRankByDisclosure, kChurnRankLegend, --around's seed block) are prose.
     // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.

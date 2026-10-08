@@ -127,7 +127,23 @@ for entry in "${SHAPES[@]}"; do
 done
 
 # ── #2: MONOTONE charging — adding a payload to the same map can never LOWER the reported estimate. ────
-E_MAP="$( est_of "$TMP/map.out" )"
+# D7 (2026-10-08, by-design break, PROCESS rule 4): the bare map now carries the inventory tier (<inv>, the files its
+# ranked rows leave out), and a payload verb's ride-along map does not — so "the same map" is the bare map WITHOUT that
+# tier. --no-inventory is that map (the same rows, no tier; #2-rows proves both premises). The old comparison is kept
+# as #2-tier: the bare map with its tier must charge at least what the rows alone do.
+"$BIN" src --top-k=10 --no-inventory --no-cache >"$TMP/map_rows.out" 2>/dev/null
+E_MAP="$( est_of "$TMP/map_rows.out" )"
+E_TIER="$( est_of "$TMP/map.out" )"
+rows_of(){ sed 's/<inv listed="[0-9].*<\/inv>//' "$1" | grep -aoE '<f p="[^"]*"|<s t="[^"]*" n="[^"]*"' | tr '\n' ' '; }
+if [ -n "$E_MAP" ] && ! grep -q '<inv ' "$TMP/map_rows.out" && [ "$( rows_of "$TMP/map_rows.out" )" = "$( rows_of "$TMP/map.out" )" ] \
+   && grep -q '<inv ' "$TMP/map.out"; then
+    ok "#2-rows premise: --no-inventory serves the same ten ranked rows with no <inv> (est $E_MAP)"
+else
+    no "#2-rows premise broken: the rows-only twin is not the bare map minus its tier (est ${E_MAP:-?}) — #2/#3 compare against the wrong map"
+fi
+[ -n "$E_TIER" ] && [ -n "$E_MAP" ] && [ "$E_TIER" -ge "$E_MAP" ] 2>/dev/null \
+    && ok "#2-tier: the bare map with its inventory reports est_tokens=$E_TIER >= the rows alone ($E_MAP)" \
+    || no "#2-tier: the bare map with its inventory reports ${E_TIER:-?} < the rows alone (${E_MAP:-?}) — the tier is uncharged"
 mono=1
 for label in metrics sigs src bodies outline "bodies+sigs"; do
     E="$( est_of "$TMP/$label.out" )"
@@ -141,7 +157,8 @@ done
 #    streamed 12 KB / 67 KB. Budget is set from the bare map's own estimate (so the map alone always
 #    fits) and each payload arm must fail it. ────────────────────────────────────────────────────────────
 TB=$(( E_MAP + 20 ))
-"$BIN" src --top-k=10 --token-budget=$TB --no-cache >"$TMP/tb_map.out" 2>"$TMP/tb_map.err"
+# D7: the control is the rows-only twin above (the bare map's tier is charged and need not fit this budget)
+"$BIN" src --top-k=10 --no-inventory --token-budget=$TB --no-cache >"$TMP/tb_map.out" 2>"$TMP/tb_map.err"
 rc_map=$?
 [ "$rc_map" -eq 0 ] \
     && ok "#3 control: the bare map fits --token-budget=$TB (exit 0)" \
