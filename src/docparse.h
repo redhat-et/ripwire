@@ -621,8 +621,8 @@ inline std::string shellQuote( const std::string& s )
 // every warm run, for an answer known before the fork (cli-floor 2026-10-08: ~25 ms of a warm call on this repository,
 // two present/ decks). This asks the same question the shell would, with no process: os::which walks PATH exactly as
 // sh does (an empty entry is the current directory; a directory or a non-executable file named markitdown is not a
-// program). It is asked once per doc post-pass, never memoized across ingests, so installing markitdown under a
-// running MCP server is seen on its next ingest. It answers TRUE whenever it cannot rule the shell out — PATH unset
+// program). It is asked per bridge doc, just before the popen it replaces, and never memoized, so installing
+// markitdown under a running MCP server is seen on its next ingest. It answers TRUE whenever it cannot rule the shell out — PATH unset
 // (sh then searches its own default path), an executable `./markitdown` (a Windows shell searches the current
 // directory first), or an exported shell function of that name — because a false "absent" would drop a Section the
 // shell would have produced, while a false "present" only costs the popen it always cost. Gated by

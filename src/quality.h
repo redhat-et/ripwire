@@ -6166,11 +6166,17 @@ inline std::optional<bool> rescoreAckRecord( const AckRecord& r, std::optional<s
     return rescoreNumericMajor( bareKind, r.was, r.now, barOverride, minorDeltaOverride );
 }
 
-inline std::string ackMapKey( const std::string& kind, std::uint64_t key )
+// A 64-bit key spelled as its 16 lowercase hex digits — the ack ledger's key, and the ingest's per-root sidecar names.
+inline std::string hex16( std::uint64_t key )
 {
     char hex[ 20 ];
     rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( key ) );
-    return kind + " " + hex;
+    return hex;
+}
+
+inline std::string ackMapKey( const std::string& kind, std::uint64_t key )
+{
+    return kind + " " + hex16( key );
 }
 
 // ─── THE LEGACY-ACK BACKFILL — what a row written before provenance existed CAN still get back ─────────

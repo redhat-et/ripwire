@@ -1585,9 +1585,7 @@ private:
 
     static std::string sidecarName( const std::string& rootReal )
     {
-        char sidecarFile[ 64 ];
-        rw::formatTo( sidecarFile, sizeof( sidecarFile ), "ripwire-ignoreprobe-{:016x}.bin", static_cast<unsigned long long>( fnv1a64( rootReal ) ) );
-        return sidecarFile;
+        return "ripwire-ignoreprobe-" + quality::hex16( fnv1a64( rootReal ) ) + ".bin";
     }
 
     // The previous call's answer for this root, or nothing. The header names the root in full, so two roots whose names

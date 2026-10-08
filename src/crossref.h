@@ -2231,6 +2231,58 @@ inline bool whereHitBefore( const WhereHit& a, const WhereHit& b )
 // such a row is PRINTED — a doc row claiming kind="def" is still a doc row claiming kind="def", now below the
 // code. Nothing is dropped and no row's attributes change; a reader who wants the doc evidence still gets
 // every row of it.
+// Every ref's tree listing, each DISTINCT tip listed once (HEAD and its own branch share one; so do branches left at the
+// same commit), the listings run across the crossref git pool: a listing is a pure function of an immutable commit, so a
+// tip is never listed twice, and the order the listings finish in reaches nothing — each lands in its tip's own slot and
+// computeWhereis assembles the sites in ref order, exactly as its serial loop did. A listing is WHOLE when its worker
+// ran and it holds a row: a zero-row listing could be a failed `git ls-tree`, and either forfeits complete= (T1).
+struct TipListings
+{
+    std::vector<std::string>         distinctTips;   // sorted, unique
+    std::vector<std::vector<RawRow>> rowsByTip;      // parallel to distinctTips
+    std::vector<char>                whole;          // parallel to distinctTips
+
+    std::pair<const std::vector<RawRow>&, bool> of( const std::string& tip ) const
+    {
+        const auto at = std::lower_bound( distinctTips.begin(), distinctTips.end(), tip );
+        ASSUME( at != distinctTips.end() && *at == tip, "whereis: every ref's tip was listed by listDistinctTips" );
+        const std::size_t tipIndex = std::size_t( at - distinctTips.begin() );
+        return { rowsByTip[ tipIndex ], whole[ tipIndex ] != 0 };
+    }
+};
+
+inline TipListings listDistinctTips( const std::string& root, const std::vector<RefInfo>& refs )
+{
+    TipListings out;
+    out.distinctTips.reserve( refs.size() );
+    for( const RefInfo& ref : refs )
+    {
+        out.distinctTips.push_back( ref.tip );
+    }
+    std::sort( out.distinctTips.begin(), out.distinctTips.end() );
+    out.distinctTips.erase( std::unique( out.distinctTips.begin(), out.distinctTips.end() ), out.distinctTips.end() );
+    out.rowsByTip.resize( out.distinctTips.size() );
+    ParallelSweep sweep;
+    parallelIndexed( out.distinctTips.size(), [ & ]( std::size_t tipIndex ) { out.rowsByTip[ tipIndex ] = lsTree( root, out.distinctTips[ tipIndex ] ); }, sweep );
+    out.whole.resize( out.distinctTips.size() );
+    for( std::size_t tipIndex = 0; tipIndex < out.distinctTips.size(); ++tipIndex )
+    {
+        out.whole[ tipIndex ] = sweep.isDone( tipIndex ) && !out.rowsByTip[ tipIndex ].empty() ? 1 : 0;
+    }
+    ENSURES( out.rowsByTip.size() == out.distinctTips.size() && out.whole.size() == out.distinctTips.size(), "one listing and one verdict per distinct tip" );
+    return out;
+}
+
+// One blob's rows (scanned once, with no site's label), stamped with one site's ref and path, in line order: the rows
+// scanBlobForSymbol makes for that site, since a row's content is the blob's and its label is the site's.
+inline void stampBlobRows( const std::vector<WhereHit>& blobRows, const RefInfo& ref, const std::string& path, std::vector<WhereHit>& out )
+{
+    for( const WhereHit& row : blobRows )
+    {
+        out.push_back( WhereHit{ ref.name, ref.tip, ref.date, path, row.line, row.isDef, row.text, false } );
+    }
+}
+
 inline WhereResult computeWhereis( const std::string& root, std::string_view sym, std::string_view filter,
                                    WhereisEvidence evidence = {} )
 {
@@ -2264,29 +2316,11 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     struct Site { std::uint32_t refIndex; std::string path; bool replaced; };
     bool anyEmptyTree = false;   // T1: a zero-row ls-tree could be a FAILED listing — it forfeits complete=
     gtl::btree_map<std::string, std::vector<Site>> sites;
-    // One `git ls-tree -r` per DISTINCT tip (HEAD and its own branch share one; so do branches left at the same
-    // commit), run across the crossref git pool: a listing is a pure function of an immutable commit, so a tip is
-    // never listed twice and the order the listings finish in reaches nothing — each lands in its tip's own slot and
-    // the sites are assembled below in ref order, exactly as the serial loop assembled them. A slot whose worker
-    // never ran reads as an empty listing, which forfeits complete= like any other suspect tree (T1).
-    std::vector<std::string> distinctTips;
-    distinctTips.reserve( refs.size() );
-    for( const RefInfo& ref : refs )
-    {
-        distinctTips.push_back( ref.tip );
-    }
-    std::sort( distinctTips.begin(), distinctTips.end() );
-    distinctTips.erase( std::unique( distinctTips.begin(), distinctTips.end() ), distinctTips.end() );
-    std::vector<std::vector<RawRow>> rowsByTip( distinctTips.size() );
-    ParallelSweep                    listingSweep;
-    parallelIndexed( distinctTips.size(), [ & ]( std::size_t tipIndex ) { rowsByTip[ tipIndex ] = lsTree( root, distinctTips[ tipIndex ] ); }, listingSweep );
+    const TipListings listings = listDistinctTips( root, refs );
     for( std::uint32_t i = 0; i < refs.size(); ++i )
     {
-        const auto tipAt = std::lower_bound( distinctTips.begin(), distinctTips.end(), refs[ i ].tip );
-        ASSUME( tipAt != distinctTips.end() && *tipAt == refs[ i ].tip, "whereis: every ref's tip was put in distinctTips above" );
-        const std::size_t           tipIndex = std::size_t( tipAt - distinctTips.begin() );
-        const std::vector<RawRow>&  rows     = rowsByTip[ tipIndex ];
-        if( rows.empty() || !listingSweep.isDone( tipIndex ) )
+        const auto [ rows, whole ] = listings.of( refs[ i ].tip );
+        if( !whole )
         {
             anyEmptyTree = true;
         }
@@ -2326,11 +2360,7 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
             result.onHead     = result.onHead || ( head && !s.replaced );
             if( !s.replaced )
             {
-                const RefInfo& ref = refs[ s.refIndex ];
-                for( const WhereHit& row : blobRows )
-                {
-                    result.hits.push_back( WhereHit{ ref.name, ref.tip, ref.date, s.path, row.line, row.isDef, row.text, false } );
-                }
+                stampBlobRows( blobRows, refs[ s.refIndex ], s.path, result.hits );
             }
         } }, &blobStats );
     // A stream that never started, or died before serving every blob, leaves hits= and on-head= unmeasured: a zero from
