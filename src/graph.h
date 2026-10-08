@@ -5728,6 +5728,39 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     rw::SmallVec<NodeId, 2>  reachScratch; // reused per-call buffer: the candidates a call can reach by name (reachableByName)
     rw::SmallVec<NodeId, 2>  rubyReachable; // reused per-call buffer: the candidates a Ruby call to self can reach (RubySelfReach)
 
+    // ---- the resolve loop's dense per-candidate views (cli-perf-068) ---------------------------------------------------
+    // The loop below walks a name's WHOLE candidate list several times per call — the language filter, the namespace gate,
+    // the same-file and same-directory tiers — and each step read one field out of a Symbol at a random id. That is cheap
+    // for a name with two definitions and was the resolve loop's cost for a name with hundreds: since every module-scope
+    // call got an owner (24bb6e5d), the test scripts' top-level `ok "…"` / `no "…"` calls (~650 same-named shell
+    // definitions each, ~28k calls on this repository) reached those walks, and the loop went 22 -> 79 ms on that commit
+    // alone. symLang/symKind are copies of the two Symbol fields those walks read (symFileId, above, is the third), so
+    // each walk reads a dense array in id order instead: same values, same order, same answer. `nameHasFnLocalDef` is
+    // the one precomputed fact reachableByName needs to say "nothing to set aside": a name none of whose definitions is
+    // function-local cannot yield (localDefOutOfReach is false for every candidate, and every list the loop hands
+    // reachableByName is a subset of the name's byName list), so its walk — a Symbol load plus a binary search per
+    // candidate — is skipped with the answer it would have returned. Keyed by the byName entry's address: nothing
+    // inserts into or erases from byName past its construction, so the address is stable for the loop.
+    std::vector<Lang>    symLang( N );
+    std::vector<SymKind> symKind( N );
+    for( std::size_t symIndex = 0; symIndex < N; ++symIndex )
+    {
+        symLang[ symIndex ] = ing.symbols[ symIndex ].lang;
+        symKind[ symIndex ] = ing.symbols[ symIndex ].kind;
+    }
+    ankerl::unordered_dense::set<const rw::SmallVec<NodeId, 2>*> nameHasFnLocalDef;
+    if( !ing.fnLocalScopes.empty() )
+    {
+        for( const auto& [ name, ids ] : byName )
+        {
+            if( std::any_of( ids.begin(), ids.end(), [ & ]( NodeId c ) { return ing.symbols[ c ].fnLocal != 0; } ) )
+            {
+                nameHasFnLocalDef.insert( &ids );
+            }
+        }
+    }
+    ENSURES( symLang.size() == N && symKind.size() == N && symFileId.size() == N, "the dense views cover every symbol id the loop can hold" );
+
     // ---- census arming + the ORACLE side (eval-only; src/pincensus.h) ------------------------------
     // The oracle rows are a straight transcription of the overlay's own (from, calleeName) → target table
     // into the census's id space — the same table graph.h consults below, so the two sides of the join
@@ -5943,7 +5976,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && r.lang != Lang::Elixir && !r.qualifier.empty() )
         {
             appendCanonicalCandidates( cand, qkey, r, CanonicalScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols },
-                                       [ & ]( NodeId c ) { return langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ); } );
+                                       [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
         // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
@@ -6238,7 +6271,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 std::size_t         found     = 0;
                 for( NodeId c : it->second )
                 {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && symFileId[c] == aliasFile )
+                    if( langCompatible( symLang[ c ], r.lang ) && symFileId[c] == aliasFile )
                     {
                         only = c;
                         if( ++found > 1 )
@@ -6287,7 +6320,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // whichever same-named def competes, and yielding would move them from external= into declined=, so such a call
         // resolves exactly as it did before local defs had bodies.
         const bool localsYield = !scipPinned && !canonical && !narrowed && !builtinGated && it != byName.end() && !ing.fnLocalScopes.empty()
-                                 && reachableByName( ing, *baseIds, r, reachScratch )
+                                 && nameHasFnLocalDef.contains( &it->second ) && reachableByName( ing, *baseIds, r, reachScratch )
                                  && !( r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty() && externalVeto.isExternalBound( r ) );
         const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
         // Ruby: Rule 3 and the ladder choose only among what self's method lookup can reach (RubySelfReach), on the side
@@ -6318,7 +6351,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 for( NodeId c : rule3Out )
                 {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) )
+                    if( langCompatible( symLang[ c ], r.lang ) )
                     {
                         cand.push_back( c );
                     }
@@ -6356,7 +6389,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 for( NodeId c : *nameIds )
                 {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    if( langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ) )
                     {
                         cand.push_back( c ); // same lang, or ObjC↔C++ bridge; same ROOT (A10)
                     }
@@ -6364,7 +6397,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 for( std::size_t i = 0; localsYield && cand.empty() && i < baseIds->size(); ++i )   // nothing reachable survived: the whole list
                 {
                     const NodeId c = ( *baseIds )[ i ];
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    if( langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ) )
                     {
                         cand.push_back( c );
                     }
@@ -6378,7 +6411,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     for( NodeId c : *baseIds )
                     {
-                        if( !langCompatible( ing.symbols[c].lang, r.lang ) || sameRoot( c, r.fileId ) )
+                        if( !langCompatible( symLang[ c ], r.lang ) || sameRoot( c, r.fileId ) )
                         {
                             continue;
                         }
@@ -6430,7 +6463,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             std::size_t keepCount = 0;
             for( std::size_t ci = 0; ci < cand.size(); ++ci )
             {
-                if( namespaceCompatible( r.role, ing.symbols[ cand[ci] ].kind ) )
+                if( namespaceCompatible( r.role, symKind[ cand[ci] ] ) )
                 {
                     cand[ keepCount++ ] = cand[ci];
                 }
@@ -6510,7 +6543,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 for( NodeId c : cand )
                 {
-                    if( ing.symbols[c].fileId == r.fileId )
+                    if( symFileId[ c ] == r.fileId )
                     {
                         tier.push_back( c ); // tier 1: same file
                     }
@@ -6521,7 +6554,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const std::uint32_t rdir = fileDir[ r.fileId ];
                 for( NodeId c : cand )
                 {
-                    if( fileDir[ing.symbols[c].fileId] == rdir )
+                    if( fileDir[ symFileId[ c ] ] == rdir )
                     {
                         tier.push_back( c );
                     }
