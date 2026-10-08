@@ -11,6 +11,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
+echo "taskroutecheck: BIN=$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 REPO="$TMP/router repo"
 mkdir -p "$REPO"
@@ -642,6 +643,26 @@ if [ "$rc" -ne 0 ] && grep -qi 'single-root' "$TMP/multi.err"; then ok "multi-ro
 for f in --verify --connect --expand --grep --grep-context --edit-check --from-trace --situ --pack-task --exemplar --for \
          --edit-plan --dry-run --handles --legend --doctor --agent=codex --test-gate --slice --slice-flow --at --uses --seams \
          --rank-by= --limit=; do "$BIN" --help=all 2>&1 | grep -q -- "$f" || no "recommended flag absent from --help: $f"; done
+
+# ── K50: a NON-ASCII prompt is not a sanitizer error (lowerAscii, the name-shape and FILE:LINE predicates) ──────────────
+# `for( const unsigned char c : text )` over a string_view of `char` converts every byte >= 0x80 implicitly; G1's
+# implicit-integer-sign-change makes that a hard abort on the sanitizer build, so every --help-task prompt with an
+# accented letter, CJK or an emoji died there (K50). The arms below are RED only on a sanitizer binary (run the gate
+# with BIN=asan/ripwire); on a plain build they prove the answer is still a router document and is unchanged by the
+# non-ASCII bytes, which is also what a regression to a locale-sensitive tolower would break.
+for kp in 'where is the résumé parser called from' 'what is at router.cpp:é9' 'how does `Ünï.cöde` work' 'explain computeBudget and 路由 plus 🙂'; do
+    routeRaw "$kp" >"$TMP/k50.out"; k50rc=$?
+    if [ "$k50rc" = 0 ] && grep -q '<task-route ' "$TMP/k50.out" && ! grep -q 'runtime error' "$TMP/err"; then
+        ok "K50: a non-ASCII prompt answers cleanly (rc 0, a <task-route>, no sanitizer report): $kp"
+    else
+        no "K50: a non-ASCII prompt died or reported (rc=$k50rc): $kp :: $( head -c 200 "$TMP/err" )"
+    fi
+done
+# The negative control: the non-ASCII bytes are noise to the router — the same prompt without them routes identically.
+K50A="$( route 'how do alphaNode, betaNode and gammaNode all come together' )"
+K50B="$( route 'how do alphaNode, betaNode and gammaNode all come together, café' )"
+[ "${K50A%%resolved_symbols*}" = "${K50B%%resolved_symbols*}" ] && case "$K50B" in *'intent="connect-symbols"'*) ok "K50: a trailing non-ASCII word leaves the --connect route unchanged";; *) no "K50: the control did not route --connect: $K50B";; esac \
+    || no "K50: a trailing non-ASCII word changed the route: [$K50A] vs [$K50B]"
 
 # ── byte-compat: the verify-claim template must emit the SHIPPED --verify grammar byte-exactly ─────────
 # (PLAN 2026-08-13 addendum: gate against the real verb's PARSER, never a copy of its syntax.)

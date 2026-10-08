@@ -99,7 +99,7 @@ inline LspFrame lspReadMessage( std::FILE* in )
 
     std::string low = head;
     std::transform( low.begin(), low.end(), low.begin(),
-                    [ ]( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+                    [ ]( char c ) { return static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); } );   // char in, explicit narrowing: an unsigned char parameter is G1's implicit sign-change on a byte >= 0x80
     const std::size_t k = low.find( "content-length:" );
     if( k == std::string::npos ) { f.eof = true; f.malformed = true; return f; }
     std::size_t len = 0;
@@ -678,7 +678,7 @@ inline std::string lspWorkspaceSymbol( const rw::IngestResult& ing, const std::s
     const auto lowerCopy = [ ]( std::string s )
     {
         std::transform( s.begin(), s.end(), s.begin(),
-                        [ ]( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+                        [ ]( char c ) { return static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); } );   // char in, explicit narrowing: an unsigned char parameter is G1's implicit sign-change on a byte >= 0x80
         return s;
     };
     const std::string qLower = lowerCopy( std::string( query ) );

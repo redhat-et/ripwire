@@ -66,9 +66,10 @@ inline std::string lowerAscii( std::string_view text )
 {
     std::string out;
     out.reserve( text.size() );
-    for( const unsigned char c : text )
+    for( const char ch : text )   // EXPLICIT unsigned narrowing: `for( const unsigned char c : text )` is G1's implicit-integer-sign-change on any byte >= 0x80 (K50)
     {
-        out.push_back( char( std::tolower( c ) ) );
+        const unsigned char c = static_cast<unsigned char>( ch );
+        out.push_back( ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : char( c ) );   // A-Z only: a byte >= 0x80 passes through untouched
     }
     return out;
 }
@@ -447,8 +448,9 @@ inline SymbolMention symbolMention( std::string_view task, std::string_view lowe
     // fall through to the weak tier, where Section-kind symbols are never weak evidence (weakEvidenceKind),
     // so the name could not resolve even when explicitly backtick-marked in the task text (backticks are
     // step 1 of identifierMentionShape, itself unreachable without this).
-    const bool hasMark = std::any_of( name.begin(), name.end(), []( const unsigned char c )
+    const bool hasMark = std::any_of( name.begin(), name.end(), []( const char ch )
     {
+        const unsigned char c = static_cast<unsigned char>( ch );   // explicit narrowing (K50): a byte >= 0x80 must not convert implicitly
         return std::isupper( c ) || c == '_' || c == ':' || c == '.' || c == '$';
     } );
     if( hasMark )
@@ -626,7 +628,7 @@ inline std::string firstFileLineToken( std::string_view task )
             const std::string_view lineDigits = token.substr( colon + 1 );
             const std::string_view fileGuess  = token.substr( 0, colon );
             const bool allDigits = !lineDigits.empty() && std::all_of( lineDigits.begin(), lineDigits.end(),
-                                   []( const unsigned char c ) { return std::isdigit( c ) != 0; } );
+                                   []( const char c ) { return std::isdigit( static_cast<unsigned char>( c ) ) != 0; } );   // explicit narrowing (K50)
             if( allDigits && looksLikeFileToken( fileGuess ) )
             {
                 return std::string( fileGuess ) + ":" + std::string( lineDigits );

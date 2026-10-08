@@ -2670,7 +2670,7 @@ inline bool whereisSpecIsFileQualified( std::string_view spec )
     {
         return false;
     }
-    return std::all_of( ext.begin(), ext.end(), []( unsigned char c ) { return std::isalnum( c ) != 0; } );
+    return std::all_of( ext.begin(), ext.end(), []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0; } );   // explicit narrowing: an unsigned char parameter is G1's implicit sign-change on a byte >= 0x80
 }
 
 // The bare-name half a caller should retype. Only meaningful when whereisSpecIsFileQualified( spec ).
