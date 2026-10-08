@@ -289,7 +289,7 @@ else
 fi
 
 echo
-echo "=== 8. one-shot --for recipes budget with --token-budget, never --max-tokens ==="
+echo "=== 8. one-shot --for recipes name no budget (never --max-tokens, never a --token-budget) ==="
 
 # --for does not read --max-tokens: it warns on stderr and emits the full, unbudgeted result.
 # --token-budget is the flag that actually shapes --for's output. The wrap recipes are the tool's
@@ -303,13 +303,17 @@ for _agent in claude codex cursor windsurf gemini opencode aider; do
         ok "wrap $_agent never pairs --for with --max-tokens"
     fi
 done
-# the three recipes that ship a budgeted one-shot --for line must budget it with --token-budget=
+# K29 (2026-10-08): the three one-shot --for recipes name NO budget. A budget handed to an agent is a ceiling it
+# pastes for every task: --token-budget=2000 answered 5 of 9 measured questions where the default answered 8, and
+# the owner rule is lean AND answered. The default budget shapes the answer; the recipe must not narrow it.
 for _agent in claude opencode aider; do
     _out="$( "$BIN" wrap "$_agent" 2>/dev/null )"
-    if echo "$_out" | grep -- '--for=' | grep -q -- '--token-budget='; then
-        ok "wrap $_agent one-shot --for recipe carries --token-budget="
+    if ! echo "$_out" | grep -q -- ' --for="<your task>"'; then
+        no "wrap $_agent lost its one-shot --for=\"<your task>\" recipe line"
+    elif echo "$_out" | grep -- '--for=' | grep -q -e '--token-budget' -e '--max-tokens'; then
+        no "wrap $_agent one-shot --for recipe carries a budget flag — it must recommend the default budget"
     else
-        no "wrap $_agent one-shot --for recipe lost its --token-budget= budget"
+        ok "wrap $_agent one-shot --for recipe is present and names no budget flag"
     fi
 done
 
