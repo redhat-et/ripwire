@@ -15,6 +15,29 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — `--for`: the function a question names gets the first hop row, with all its callee names
+
+The compact `--for` answer hop-expanded only the six best-ranked rows, inside a ~1 KB allowance. A question that names
+the function it is about ("How does the JWT middleware verify a token?") often ranks that function below a dozen symbols
+that repeat the question's other words, so its callees — the names an agent needed next — were never served.
+
+- A ranked function or method DEFINITION (not a test symbol, not a C prototype) whose whole name, leading `_ # $ @`
+  removed and ASCII case folded, equals a word of the question is that question's owner, when the word has such a
+  definition in the top 24. It gets a `<h qword="word">` row first in `<hops>`, past the six-row cap; every same-named
+  definition in the ranked pool is its own row. At most three owner rows; the rest are disclosed as
+  `<hops qword_cut="N" next="--callees=…">`. A small list of common English words (get, then, write, …) ranks after the
+  other owner words, so verbs a question merely uses do not take the owner's slot.
+- An owner row lists its callees up to 100 names (a runaway guard); past it, or under an explicit budget that cuts it,
+  `<calls capped="1" next=…>` names the full list. The hop-slot rule still applies: an owner with no proven callee
+  edge has no row and is counted in `noedge=` once. Name-only callees keep `via="name"`.
+- By name, not by resolution: `qword=` says the name equals the word, never that the symbol is the only or the true
+  implementation. Default regime: owner rows ride on top of the hop allowance, so every earlier `<h>` row is still
+  served (a moved owner can only free room). Under `--token-budget` they are funded first. A question that names no
+  owner, `--json --for` and the MCP `for` verb are byte-identical; `RIPWIRE_NO_OWNER_HOP=1` restores the previous
+  answer. Measured on the 32 `--for` rows of the round-1 comparison set: the two in-scope rows now name 5 of 5 gold
+  callee items they missed (were 0 of 5); 23 of 32 answers are byte-identical, 2 differ only in `noedge=`, and 7 grow by 0.2–1.1 KB. Gate:
+  `test/ownerhopcheck.sh`.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

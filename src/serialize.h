@@ -6072,24 +6072,38 @@ struct CalleeCallsSink
     // FE-B: set once the block's caller has been charged the via="name" legend comment it will write (packBodies/packHops
     // write it ahead of the rows, after the walk) — so the budget the walk honours already holds those bytes
     bool*                            viaLegendCharged = nullptr;
+    // owner-hop (verbs_for.h THE QUESTION'S OWNER): an owner row lists its callees up to a RUNAWAY GUARD instead of the
+    // sixteen a ranked row shows, and a cut listing carries the pasteable full list. Defaulted to the ranked shape, so
+    // every pre-existing caller is byte-identical. `cappedNext` is already XML-escaped and written only when cut.
+    std::uint32_t                    rowCap     = 16;
+    std::string_view                 cappedNext;
 };
 
 // The <calls> wrapper, written in front of the rows it describes (they have to be walked before `shown`
 // is known). pageview.h THE TRUNCATION VOCABULARY rule 3: shown=/capped= are added ONLY when the 16-row
 // cap or the byte budget actually cut the list, and they are added TOGETHER — never shown="T" capped="0"
 // on a complete listing.
-inline void appendCallsBlock( std::string& out, std::uint32_t total, int shown, const std::string& rows )
+// `nextEscaped` (owner rows only): the continuation that lists the whole set, written beside capped="1" and only then.
+inline void appendCallsBlock( std::string& out, std::uint32_t total, int shown, const std::string& rows, std::string_view nextEscaped = {} )
 {
     char callsHdr[ 64 ];
-    if( static_cast<std::uint32_t>( shown ) < total )
+    const bool cut = static_cast<std::uint32_t>( shown ) < total;
+    if( cut )
     {
-        rw::formatTo( callsHdr, sizeof( callsHdr ), "<calls total=\"{}\" shown=\"{}\" capped=\"1\">", total, shown );
+        rw::formatTo( callsHdr, sizeof( callsHdr ), "<calls total=\"{}\" shown=\"{}\" capped=\"1\"", total, shown );
     }
     else
     {
-        rw::formatTo( callsHdr, sizeof( callsHdr ), "<calls total=\"{}\">", total );
+        rw::formatTo( callsHdr, sizeof( callsHdr ), "<calls total=\"{}\"", total );
     }
     out += callsHdr;
+    if( cut && !nextEscaped.empty() )
+    {
+        out += " next=\"";
+        out += nextEscaped;
+        out += "\"";
+    }
+    out += ">";
     out += rows;
     out += "</calls>";
 }
@@ -6303,7 +6317,7 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
     std::string                      callsBody;
     std::vector<MergedCalleeNameRow> nameRows;   // names-only rendering: collected, merged by name, written after the walk
     int                              shown = 0;
-    for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < 16 && used < budgetBytes; ++k )
+    for( std::uint32_t k = outOff[id]; k < outOff[id + 1] && shown < int( sink.rowCap ) && used < budgetBytes; ++k )
     {
         const NodeId cid = walk[ k - outOff[id] ];
         if( cid >= ing.symbols.size() )
@@ -6342,7 +6356,7 @@ inline void emitCalleeCallsBlock( std::string& out, NodeId id, const std::vector
         }
     }
     appendMergedCalleeNameRows( callsBody, nameRows, esc );   // no-op on the signature rendering (nameRows stays empty)
-    appendCallsBlock( out, total, shown, callsBody );
+    appendCallsBlock( out, total, shown, callsBody, sink.cappedNext );
 }
 
 // THE <bodies> DISCLOSURE (§B8.3). This was the one budgeted section element carrying NO attributes at all:
@@ -7093,6 +7107,33 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
     w.flush();
 }
 
+// ── THE QUESTION'S OWNER ROWS (lane owner-hop-068; the selection is verbs_for.h forOwnerHopPlan) ──────────────────
+// The first `rows` nodes handed to packHops are OWNER rows: a ranked callable definition whose whole name equals a word
+// of the question. Each prints `qword="<word>"`, lists its callees up to kForOwnerHopNameGuard (a runaway guard, the
+// kMaxExpandSibs precedent — never a target) and, when that listing is cut, says where the whole of it is
+// (`<calls … capped="1" next=>`). Owners the plan could not seat (the row cap) or the budget could not fund are counted
+// in `<hops qword_cut="N" next=>`, the continuation naming the first of them.
+inline constexpr std::uint32_t kForOwnerHopNameGuard = 100;
+struct HopOwners
+{
+    std::size_t                   rows = 0;            // the first `rows` nodes are owner rows, in slot order
+    std::vector<std::string_view> words;               // the folded question word of each owner row (one per row)
+    std::size_t                   budgetBytes = 0;     // 0: ride ON TOP of the hop budget (default regime, guard only)
+    bool                          fundFirst   = false; // explicit ceiling: owners are funded first and the ranked rows get
+                                                       //   what they leave of budgetBytes (never more than their own budget)
+    std::size_t                   capCut      = 0;     // owners with a proven edge past the row cap (never seated)
+    NodeId                        firstCapCut = kNoNode;
+};
+
+// The continuation that lists one owner's callees: the canonical id when the symbol has a scope (two same-named methods
+// of one file are two entities, and FILE:NAME would merge them), else FILE:NAME. Escaped for an attribute value.
+inline std::string ownerCalleesNext( const IngestResult& ing, const Symbol& s, std::string_view pathRel, std::string_view rootArg,
+                                     std::vector<char>& esc )
+{
+    std::string target = s.scope.empty() ? std::string( pathRel ) + ":" + std::string( s.name ) : canonicalIdForEmit( ing, s, rootArg );
+    return "--callees=" + std::string( escapeXml( target, esc ) );
+}
+
 // ── THE <hops> SECTION: one-hop edge context without the body text ────────────────────────────────────
 // (pre-registered: docs/EVALS.md, the T3 route-narrowing round; the allowance is
 // kForCompactHopBudgetBytes above, with its derivation.)
@@ -7112,8 +7153,9 @@ inline void packBodies( std::FILE* out, const IngestResult& ing, const std::vect
 // group for, and walking `nodes` in the order the caller ranked them spends the budget on the
 // best-ranked symbols first.
 //
-// A candidate with no resolved out-edges gets NO row and is counted in `noedge=` instead — see the loop
-// for why that is the honest form rather than the cheap one. Call edges are name-based, so dynamic
+// A candidate with no resolved out-edges gets NO row and is counted in `noedge=` instead — and so does an OWNER of the
+// question (THE QUESTION'S OWNER ROWS above) with none, exactly once whether or not it was also a ranked candidate — see
+// the loop for why that is the honest form rather than the cheap one. Call edges are name-based, so dynamic
 // dispatch, callbacks and macros can be missing: `noedge=` means none FOUND, never none exists
 // (CONTRIBUTING #3), and it is deliberately a separate number from `capped=`, which says only that the
 // byte budget stopped before the remaining candidates.
@@ -7125,13 +7167,16 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
                       std::size_t* outShown = nullptr,          // rows actually emitted; nullptr ⇒ not recorded
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
                       std::string_view rootArg = {},            // R-E: same single-root-only root= every verb takes
-                      bool viaLegendInHead = false )            // FE-B: packBodies' parameter of the same name
+                      bool viaLegendInHead = false,             // FE-B: packBodies' parameter of the same name
+                      const HopOwners* owners = nullptr )       // owner-hop: the leading owner rows; nullptr ⇒ none (byte-identical)
 {
     bool viaLegendCharged = viaLegendInHead;   // FE-B: the via="name" legend has been charged against the budget (CalleeCallsSink)
     if( budgetBytes == 0 )                                      // 0 ⇒ UNLIMITED, packBodies' own convention
     {
         budgetBytes = SIZE_MAX;
     }
+    const std::size_t ownerRows = owners != nullptr ? std::min( owners->rows, nodes.size() ) : 0;
+    EXPECTS( owners == nullptr || owners->words.size() == owners->rows, "one question word per owner row" );
 
     XmlWriter         w( out );
     std::vector<char> esc;
@@ -7173,8 +7218,58 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     std::size_t requestedCount = 0;
     std::size_t shownCount     = 0;
     std::size_t noEdgeCount    = 0;
-    for( NodeId id : nodes )
+    // owner rows: their own byte room (default regime: unlimited, the name guard is the only stop), their own via-legend
+    // charge (so the ranked rows below are charged exactly what they were charged without owners), counted cuts
+    std::size_t ownerUsed      = 0;
+    std::size_t ownerBudget    = ( owners != nullptr && owners->budgetBytes > 0 ) ? owners->budgetBytes : SIZE_MAX;
+    bool        ownerVia       = viaLegendInHead;
+    std::size_t ownerCut       = owners != nullptr ? owners->capCut : 0;
+    NodeId      firstOwnerCut  = kNoNode;                       // the first owner the BUDGET cut (it ranks before every cap cut)
+    for( std::size_t i = 0; i < ownerRows; ++i )
     {
+        const NodeId id = nodes[ i ];
+        ASSUME( id < ing.symbols.size() && hopSlotHasProvenEdge( outOff, outNameOnly, id ),
+                "the owner plan seats only indexed symbols with a proven callee edge (forOwnerHopPlan)" );
+        const Symbol&     s    = ing.symbols[ id ];
+        const std::string next = ownerCalleesNext( ing, s, pathRel( s.fileId ), rootArg, esc );
+        std::string       row = "<h l=\"" + std::to_string( s.line ) + "\" p=\"";   // composed on std::string: no new fixed buffer
+        row += escapeXml( pathRel( s.fileId ), esc );
+        row += "\" n=\"";
+        row += escapeXml( s.name, esc );
+        row += "\" qword=\"";
+        row += escapeXml( owners->words[ i ], esc );
+        row += "\">";
+        // the row's identity AND the next= its <calls> may carry are charged before a single name — a row that cannot
+        // pay for both is not started, it is counted as cut (an owner row never drops its names without saying where)
+        const std::size_t rowFixed = row.size() + next.size() + 8 + 16;   // + ' next=""' + '</calls></h>'
+        if( ownerUsed + rowFixed >= ownerBudget )
+        {
+            if( firstOwnerCut == kNoNode )
+            {
+                firstOwnerCut = id;
+            }
+            ++ownerCut;
+            continue;
+        }
+        ownerUsed += rowFixed;
+        emitCalleeCallsBlock( row, id, outOff, outTargets, ing, contentOf, esc, ownerUsed, ownerBudget,
+                              CalleeCallsSink{ redact, /*recorded=*/nullptr, /*namesOnly=*/true, rank, &outNameOnly, &ownerVia,
+                                               kForOwnerHopNameGuard, next } );
+        row += "</h>";
+        children += row;
+        ++requestedCount;
+        ++shownCount;
+    }
+    if( owners != nullptr && owners->fundFirst )
+    {
+        // explicit ceiling: the owners were funded first; the ranked rows get the rest, never more than their own budget
+        const std::size_t left = owners->budgetBytes > ownerUsed ? owners->budgetBytes - ownerUsed : 0;
+        budgetBytes      = std::min( budgetBytes, left );
+        viaLegendCharged = viaLegendCharged || ownerVia;
+    }
+    for( std::size_t i = ownerRows; i < nodes.size(); ++i )
+    {
+        const NodeId id = nodes[ i ];
         if( id >= ing.symbols.size() )
         {
             continue;                                           // never a request this function could answer
@@ -7230,19 +7325,30 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     char open[ 128 ];
     if( noEdgeCount > 0 )
     {
-        rw::formatTo( open, sizeof( open ), "<hops shown=\"{}\" total=\"{}\" capped=\"{}\" noedge=\"{}\">",
+        rw::formatTo( open, sizeof( open ), "<hops shown=\"{}\" total=\"{}\" capped=\"{}\" noedge=\"{}\"",
                        shownCount, requestedCount, shownCount + noEdgeCount < requestedCount ? 1 : 0, noEdgeCount );
     }
     else
     {
-        rw::formatTo( open, sizeof( open ), "<hops shown=\"{}\" total=\"{}\" capped=\"{}\">",
+        rw::formatTo( open, sizeof( open ), "<hops shown=\"{}\" total=\"{}\" capped=\"{}\"",
                        shownCount, requestedCount, shownCount < requestedCount ? 1 : 0 );
     }
+    std::string openTag( open );
+    if( ownerCut > 0 )
+    {
+        // DISCLOSE the owners not served as an owner row (the row cap, or the budget): how many, and where the first is
+        const NodeId first = firstOwnerCut != kNoNode ? firstOwnerCut : owners->firstCapCut;
+        ASSUME( first < ing.symbols.size(), "a counted owner cut names an indexed symbol (forOwnerHopPlan / the walk above)" );
+        openTag += " qword_cut=\"" + std::to_string( ownerCut ) + "\" next=\"";
+        openTag += ownerCalleesNext( ing, ing.symbols[ first ], pathRel( ing.symbols[ first ].fileId ), rootArg, esc );
+        openTag += "\"";
+    }
+    openTag += ">";
     if( !viaLegendInHead && children.find( " via=\"name\"" ) != std::string::npos )
     {
         w.write( viaNameLegendComment() );   // FE-B: exactly when a hop's <calls> row carries via="name"
     }
-    w.write( open );
+    w.write( openTag );
     w.write( children );
     w.write( "</hops>" );
     w.flush();
