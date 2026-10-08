@@ -477,6 +477,7 @@ void captureMacroBodyCalls( TSNode defineNode, std::uint32_t fileId, Lang lang, 
 // child, collecting type nodes at both depths (Rust is a separate pass — impl Trait for T is a sibling).
 void captureBases( TSNode classNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs )
 {
+    PROFILE_SCOPE_DESCRIBE( "ingest/relations: base classes of one class" );
     // O(children) at all three levels. These child lists LOOK grammar-bounded — a class node's clauses, a
     // clause's base types — and the earlier class-3 reasoning said so, but EXTRAS refute it: a comment run
     // between two base types is spliced straight into the clause's own child array (src/infra/tschildren.h),
@@ -789,6 +790,7 @@ inline WrittenPointee stdSmartPointee( TSNode typeNode, std::string_view src ) n
 // `w_.m()` does not (kParserVer 113). Every other qualified template (`std::vector<Widget> v_;`) still records nothing.
 void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawRef>& refs )
 {
+    PROFILE_SCOPE_DESCRIBE( "ingest/relations: fields of one class" );
     if( lang != Lang::Cpp )
     {
         return; // C++ only for S5-E; extend for Python/TS later

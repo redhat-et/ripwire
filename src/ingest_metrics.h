@@ -1213,7 +1213,8 @@ struct Complexity { std::uint32_t cx; std::uint32_t ccx; std::uint32_t maxNest; 
 // per node and gets locals=0, which the caller (this file, RawDef→Symbol) leaves at 0 and serialize.h
 // never emits (absent, not a bare "0" — see localsCountedLang's own comment).
 inline Complexity complexityOf( TSNode root, std::string_view src, Lang lang )   // one fused DFS → cx, ccx, maxNest, locals, ppAlt, the nesting profile, AND ev
-{                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest/metrics: complexityOf one function (fused DFS)" );                                                                     // A4-F25: NOT noexcept — cc_walk (and kids here) allocate
     CcAccum acc;
     const bool countLocals = localsCountedLang( lang );
     // essential complexity rides the SAME walk (zero new tree-sitter queries). ONE arena/label/pending set

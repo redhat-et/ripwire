@@ -248,6 +248,7 @@ inline std::string sinceUnresolvedRefusal( std::string_view value, std::string_v
 // 2026-10-08), and every git one-liner in the tool reads through here.
 inline std::string popenTrimmed( const std::string& cmd )
 {
+    PROFILE_SCOPE_DESCRIBE( "gitmine: popenTrimmed (one shell + git child, block read)" );
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
     {

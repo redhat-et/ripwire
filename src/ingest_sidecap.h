@@ -1150,6 +1150,69 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
     return true;
 }
 
+// ── cold-ingest profile scopes by LANGUAGE FAMILY (cli-perf-068 STEP 0) ──────────────────────────────────────────
+// A PROFILE_SCOPE names one code site, so the parse pool's per-file phases (parse, side captures, tags captures) are
+// opened through underExtractScope, which picks one of eight family-named sites per phase: the self-profile then splits
+// a cold index's parse and extraction cost by language family (the LLVM memory run reads these). In a build without
+// RIPWIRE_PROFILE the macro is nothing and this is a switch that calls `work` — same work, same order, same answer.
+enum class ExtractFamily : std::uint8_t { CFamily, Python, JsTs, JvmDotNet, GoRustSwiftDart, Scripting, Bash, DocsData, Count };
+enum class ExtractPhase : std::uint8_t { Parse, SideFacts, TagsFacts, Count };
+
+constexpr ExtractFamily extractFamilyOf( Lang lang ) noexcept
+{
+    switch( lang )
+    {
+        case Lang::Cpp: case Lang::C: case Lang::ObjC:                                    return ExtractFamily::CFamily;
+        case Lang::Python:                                                                return ExtractFamily::Python;
+        case Lang::TypeScript: case Lang::JavaScript:                                     return ExtractFamily::JsTs;
+        case Lang::Java: case Lang::Kotlin: case Lang::CSharp:                            return ExtractFamily::JvmDotNet;
+        case Lang::Go: case Lang::Rust: case Lang::Swift: case Lang::Dart:                return ExtractFamily::GoRustSwiftDart;
+        case Lang::Ruby: case Lang::Php: case Lang::Lua: case Lang::Elixir: case Lang::GDScript: return ExtractFamily::Scripting;
+        case Lang::Bash:                                                                  return ExtractFamily::Bash;
+        case Lang::Markdown: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Unknown: return ExtractFamily::DocsData;
+    }
+    return ExtractFamily::DocsData;   // a byte past the enum; a NEW Lang is a -Werror=switch error above
+}
+
+inline constexpr const char* kExtractScopeNames[ std::size_t( ExtractPhase::Count ) ][ std::size_t( ExtractFamily::Count ) ] = {
+    { "ingest/extract[c-family]: parse one file", "ingest/extract[python]: parse one file", "ingest/extract[js-ts]: parse one file",
+      "ingest/extract[jvm-dotnet]: parse one file", "ingest/extract[go-rust-swift-dart]: parse one file", "ingest/extract[scripting]: parse one file",
+      "ingest/extract[bash]: parse one file", "ingest/extract[docs-data]: parse one file" },
+    { "ingest/extract[c-family]: side captures (relations, binds, includes, values)", "ingest/extract[python]: side captures (relations, binds, includes, values)",
+      "ingest/extract[js-ts]: side captures (relations, binds, includes, values)", "ingest/extract[jvm-dotnet]: side captures (relations, binds, includes, values)",
+      "ingest/extract[go-rust-swift-dart]: side captures (relations, binds, includes, values)", "ingest/extract[scripting]: side captures (relations, binds, includes, values)",
+      "ingest/extract[bash]: side captures (relations, binds, includes, values)", "ingest/extract[docs-data]: side captures (relations, binds, includes, values)" },
+    { "ingest/extract[c-family]: tags captures (defs, refs, metrics)", "ingest/extract[python]: tags captures (defs, refs, metrics)",
+      "ingest/extract[js-ts]: tags captures (defs, refs, metrics)", "ingest/extract[jvm-dotnet]: tags captures (defs, refs, metrics)",
+      "ingest/extract[go-rust-swift-dart]: tags captures (defs, refs, metrics)", "ingest/extract[scripting]: tags captures (defs, refs, metrics)",
+      "ingest/extract[bash]: tags captures (defs, refs, metrics)", "ingest/extract[docs-data]: tags captures (defs, refs, metrics)" },
+};
+
+template<ExtractPhase Phase, ExtractFamily Family, class Work>
+decltype( auto ) inExtractScope( Work&& work )
+{
+    PROFILE_SCOPE_DESCRIBE( kExtractScopeNames[ std::size_t( Phase ) ][ std::size_t( Family ) ] );
+    return work();
+}
+
+template<ExtractPhase Phase, class Work>
+decltype( auto ) underExtractScope( Lang lang, Work&& work )
+{
+    switch( extractFamilyOf( lang ) )
+    {
+        case ExtractFamily::CFamily:         return inExtractScope<Phase, ExtractFamily::CFamily>( work );
+        case ExtractFamily::Python:          return inExtractScope<Phase, ExtractFamily::Python>( work );
+        case ExtractFamily::JsTs:            return inExtractScope<Phase, ExtractFamily::JsTs>( work );
+        case ExtractFamily::JvmDotNet:       return inExtractScope<Phase, ExtractFamily::JvmDotNet>( work );
+        case ExtractFamily::GoRustSwiftDart: return inExtractScope<Phase, ExtractFamily::GoRustSwiftDart>( work );
+        case ExtractFamily::Scripting:       return inExtractScope<Phase, ExtractFamily::Scripting>( work );
+        case ExtractFamily::Bash:            return inExtractScope<Phase, ExtractFamily::Bash>( work );
+        case ExtractFamily::DocsData:        break;
+        case ExtractFamily::Count:           break;
+    }
+    return inExtractScope<Phase, ExtractFamily::DocsData>( work );
+}
+
 TSTree* parseTree( TSParser* parser, std::string_view src )
 {
     TSTree* tree = nullptr;

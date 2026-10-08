@@ -524,6 +524,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         return;
     }
 
+    PROFILE_SCOPE_DESCRIBE( "crossref: git cat-file --batch stream (every blob, callback included)" );
     std::vector<char> body;
     std::string       header;
     for( std::size_t served = 0; served < shas.size(); ++served )
@@ -1685,7 +1686,9 @@ inline std::vector<RawRow> lsTree( const std::string& root, const std::string& r
         DISCLOSE( "crossref: refusing to list a tree whose revision argument is not a resolved object name" );
         return {};
     }
+    PROFILE_SCOPE_DESCRIBE( "crossref/whereis: git ls-tree -r of one tip (process + read + parse)" );
     const std::string raw = gitCapture( root, "ls-tree -r " + shSingleQuote( rev ) + " -- 2>/dev/null" );
+    PROFILE_SCOPE_DESCRIBE( "crossref/whereis: parse one ls-tree listing" );
     std::vector<RawRow> out;
     for( std::string_view line : splitLines( raw ) )
     {
@@ -1940,6 +1943,7 @@ struct WorktreeScan
 // dropped by the caller, so a deleted or renamed definition stops answering from a commit the checkout left.
 inline WorktreeScan scanWorktree( const std::string& root, std::string_view sym, const RefInfo& head )
 {
+    PROFILE_SCOPE_DESCRIBE( "crossref/whereis: worktree overlay (diff + others + read changed copies)" );
     WorktreeScan     scan;
     const GitListing changed = worktreeChangedPaths( root, head.tip );
     if( !changed.ok )
@@ -2286,6 +2290,7 @@ inline void stampBlobRows( const std::vector<WhereHit>& blobRows, const RefInfo&
 inline WhereResult computeWhereis( const std::string& root, std::string_view sym, std::string_view filter,
                                    WhereisEvidence evidence = {} )
 {
+    PROFILE_SCOPE_DESCRIBE( "crossref/whereis: total (refs, listings, blob scan, overlay, sort)" );
     WhereResult result;
     result.sym    = std::string( sym );
     result.filter = std::string( filter );   // H14/M6: echoed on the root beside refs_scanned=, which it bounds
@@ -2380,6 +2385,7 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
 
     // The checkout first, then refs by name; within a group, SOURCE before test before docs (§P11.5, see this
     // function's header), then definitions before references, then path/line — whereHitBefore states it.
+    PROFILE_SCOPE_DESCRIBE( "crossref/whereis: sort hit rows" );
     std::sort( result.hits.begin(), result.hits.end(), []( const WhereHit& a, const WhereHit& b ) { return whereHitBefore( a, b ); } );
     return result;
 }

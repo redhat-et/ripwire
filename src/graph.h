@@ -5743,19 +5743,22 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // inserts into or erases from byName past its construction, so the address is stable for the loop.
     std::vector<Lang>    symLang( N );
     std::vector<SymKind> symKind( N );
-    for( std::size_t symIndex = 0; symIndex < N; ++symIndex )
-    {
-        symLang[ symIndex ] = ing.symbols[ symIndex ].lang;
-        symKind[ symIndex ] = ing.symbols[ symIndex ].kind;
-    }
     ankerl::unordered_dense::set<const rw::SmallVec<NodeId, 2>*> nameHasFnLocalDef;
-    if( !ing.fnLocalScopes.empty() )
     {
-        for( const auto& [ name, ids ] : byName )
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/2l: dense candidate views + function-local name set" );
+        for( std::size_t symIndex = 0; symIndex < N; ++symIndex )
         {
-            if( std::any_of( ids.begin(), ids.end(), [ & ]( NodeId c ) { return ing.symbols[ c ].fnLocal != 0; } ) )
+            symLang[ symIndex ] = ing.symbols[ symIndex ].lang;
+            symKind[ symIndex ] = ing.symbols[ symIndex ].kind;
+        }
+        if( !ing.fnLocalScopes.empty() )
+        {
+            for( const auto& [ name, ids ] : byName )
             {
-                nameHasFnLocalDef.insert( &ids );
+                if( std::any_of( ids.begin(), ids.end(), [ & ]( NodeId c ) { return ing.symbols[ c ].fnLocal != 0; } ) )
+                {
+                    nameHasFnLocalDef.insert( &ids );
+                }
             }
         }
     }

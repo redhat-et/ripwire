@@ -2709,7 +2709,12 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
             }
 
             fileBuf.resize( std::size_t( spanEnd - spanStart ) );
-            if( !preadExact( frame.blob.fd, fileBuf.data(), fileBuf.size(), spanStart ) )
+            bool spanRead = false;
+            {
+                PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: pread one coalesced span" );
+                spanRead = preadExact( frame.blob.fd, fileBuf.data(), fileBuf.size(), spanStart );
+            }
+            if( !spanRead )
             {
                 DISCLOSE( Diagnostics::answerUnchanged, "the affected files are reparsed from source: the answer is byte-identical, only slower",
                           "ingest: cache blob read failed mid-load — the unread records are reparsed" );
@@ -2720,7 +2725,12 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
             {
                 const CacheEntry& e   = frame.entries[ wanted[i].entryIndex ];
                 const char*       rec = fileBuf.data() + std::size_t( e.recOffset - spanStart );
-                if( recordSum32( std::string_view( rec, e.recLength ) ) != e.recSum )
+                bool recordSumOk = false;
+                {
+                    PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: record digest (recordSum32)" );
+                    recordSumOk = recordSum32( std::string_view( rec, e.recLength ) ) == e.recSum;
+                }
+                if( !recordSumOk )
                 {
                     // A record torn on its own while the table survived: drop THIS file (it reparses) and
                     // keep the rest of the blob. The table is what must be trusted whole, not each record.
@@ -2731,7 +2741,12 @@ inline HashMap<std::string, FileFacts> loadCache( const std::string& path, std::
                 ByteR       r{ rec, rec + e.recLength };
                 std::string rel;
                 FileFacts   ff;
-                if( !readFileRecord( r, captureValueUses, dictScratch, rel, ff ) )
+                bool decoded = false;
+                {
+                    PROFILE_SCOPE_DESCRIBE( "ingest/loadCache: decode one record (readFileRecord)" );
+                    decoded = readFileRecord( r, captureValueUses, dictScratch, rel, ff );
+                }
+                if( !decoded )
                 {
                     continue;   // corrupt record → that file reparses (readFileRecord already disclosed)
                 }
