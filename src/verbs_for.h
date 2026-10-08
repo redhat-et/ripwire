@@ -2188,6 +2188,15 @@ struct ForOwnerPlan
     bool changesNodes() const noexcept { return any() || !noEdgeIds.empty(); }   // …or an edgeless owner to count in noedge=
 };
 
+// What the --for header already decided for the enrichment section it introduces: FE-B's "the header defines
+// via=\"name\"" (ForLensHeaderParts::viaPresent) and the owner plan its qword clause read. One aggregate, so the section
+// builders render exactly what the header promised without a parameter per promise.
+struct ForSectionPromises
+{
+    bool                viaLegendInHead = false;
+    const ForOwnerPlan* owners          = nullptr;   // nullptr ⇒ no owner rows (an empty plan reads the same)
+};
+
 // ASCII fold of one name or word, leading _ # $ @ removed (the owner match key)
 inline std::string ownerFoldName( std::string_view n )
 {
@@ -2385,8 +2394,11 @@ inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const 
 ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                           const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                           std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
-                                          bool viaLegendInHead, const ForOwnerPlan& ownerPlan )
+                                          const ForSectionPromises& promised )
 {
+    static const ForOwnerPlan kNoOwners{};
+    const ForOwnerPlan&       ownerPlan       = promised.owners != nullptr ? *promised.owners : kNoOwners;
+    const bool                viaLegendInHead = promised.viaLegendInHead;
     ForAutoBodiesResult out;
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     const bool             fcSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
@@ -2431,7 +2443,7 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
     const rw::HopOwners           owners   = forHopOwners( cfg, ing, ownerPlan, leftBytes, fcRootArg );
 
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
-        { rw::packHops( f, ing, hopNodes, hopBudget, g.outOff, g.outTargets, g.outNameOnly, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg,
+        { rw::packHops( f, ing, hopNodes, hopBudget, g.outOff, g.outTargets, g.outNameOnly, redactPtr, &lensRank, fcRootArg,
                         viaLegendInHead, &owners ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
@@ -2463,13 +2475,12 @@ ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestR
                                         const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                         const ForEnrichmentPlan& plan, const std::vector<rw::RouteAnchorDef>& anchorDefs,
                                         rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget,
-                                        bool viaLegendInHead,    // FE-B: the header defines via="name" (ForLensHeaderParts::viaPresent)
-                                        const ForOwnerPlan& ownerPlan )   // owner-hop: the plan the header's qword clause read
+                                        const ForSectionPromises& promised )   // FE-B via="name" in the head + the owner plan
 {
     const std::size_t   committed = committedBytes + plan.attrReserve;
     ForAutoBodiesResult out       = plan.compact
-        ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, viaLegendInHead, ownerPlan )
-        : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs, viaLegendInHead );
+        ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, promised )
+        : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs, promised.viaLegendInHead );
     if( plan.compact )
     {
         out.markupBytes = out.section.xml.size();
@@ -3637,7 +3648,7 @@ std::optional<int> runForLens( const MainDispatch& d )
                                           // reserved ahead of the body walk (the kAutoAttrReserve pattern) so
                                           // the disclosure always fits; the DEFAULT regime reserves nothing —
                                           // the tail rides on top there and the bodies stay byte-identical.
-                                          bundleBudget, headerParts.viaPresent, ownerPlan );
+                                          bundleBudget, ForSectionPromises{ headerParts.viaPresent, &ownerPlan } );
             if( enrich.surfaceOff || enrich.legendOff )
             {
                 headerParts.autoBundle = headerParts.compactBundle = false;

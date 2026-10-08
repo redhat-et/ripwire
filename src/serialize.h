@@ -7268,7 +7268,6 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
                       const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                       const std::vector<std::uint8_t>& outNameOnly,   // FE-B: Graph::outNameOnly — the <c> rows' via="name"
                       RedactCounts* redact = nullptr,
-                      std::size_t* outShown = nullptr,          // rows actually emitted; nullptr ⇒ not recorded
                       const std::vector<float>* rank = nullptr, // query relevance, for ordering a CUT callee listing
                       std::string_view rootArg = {},            // R-E: same single-root-only root= every verb takes
                       bool viaLegendInHead = false,             // FE-B: packBodies' parameter of the same name
@@ -7390,10 +7389,6 @@ inline void packHops( std::FILE* out, const IngestResult& ing, const std::vector
     w.write( children );
     w.write( "</hops>" );
     w.flush();
-    if( outShown )
-    {
-        *outShown = shownCount;
-    }
 }
 
 // ── M6 (density audit 2026-08-08): the WHOLE-FILE form a bare --expand can serve ─────────────────────
