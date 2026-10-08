@@ -482,7 +482,11 @@ import "./es_sideeffect";
 import type { T } from "./es_type_named";
 import type DefT from "./es_type_default";
 import { type U, V } from "./es_inline_type";
+import dflt, { n1 } from "./es_default_and_named";
+import json from "./es_import_attributes" with { type: "json" };
 export * from "./re_star";
+export { default } from "./re_default";
+export { default as D } from './re_default_as_single_quote';
 export * as hns from "./re_star_as";
 export { x as y } from "./re_named_as";
 export type { Z } from "./re_type";
@@ -508,6 +512,8 @@ const cat = require("./neg_concat" + sfx);
 const res = require.resolve("./neg_resolve");
 const nw = new Foo(require("./neg_new_arg"));
 const nest = foo(bar(require("./fn_arg_nested")));
+const th = import("./neg_dynamic_then").then(( m ) => m);
+const bang = !require("./neg_unary");
 function f() { return require("./lazy_function"); }
 const g2 = () => import("./lazy_arrow");
 class K { m() { return require("./neg_class_method"); } }
@@ -580,8 +586,8 @@ web_fixture() {   # $1 = an empty directory
 }
 
 # The expected Include targets per file, in source order, as one space-separated line each — read off the
-# PRE-CHANGE binary on exactly this fixture. 36 / 15 / 4 / 3 / 2 / 1 / 3 edges.
-W_MAIN_TS='./es_default ./es_named ./es_namespace ./es_sideeffect ./es_type_named ./es_type_default ./es_inline_type ./re_star ./re_star_as ./re_named_as ./re_type ./cjs_const ./cjs_destructured ./cjs_var_single ./cjs_bare ./cjs_module_exports ./dyn_await ./cjs_optional_call ./fn_arg_nested ./lazy_function ./lazy_arrow ./lazy_getter ./if_then ./if_else ./try_body ./catch_body ./for_body ./export_default_require ./export_const_require ./export_fn_dynamic ./callback_fn ./callback_arrow ./callback_second ./paren_require ./await_require ./labeled'
+# PRE-CHANGE binary on exactly this fixture. 40 / 15 / 4 / 3 / 2 / 1 / 3 edges.
+W_MAIN_TS='./es_default ./es_named ./es_namespace ./es_sideeffect ./es_type_named ./es_type_default ./es_inline_type ./es_default_and_named ./es_import_attributes ./re_star ./re_default ./re_default_as_single_quote ./re_star_as ./re_named_as ./re_type ./cjs_const ./cjs_destructured ./cjs_var_single ./cjs_bare ./cjs_module_exports ./dyn_await ./cjs_optional_call ./fn_arg_nested ./lazy_function ./lazy_arrow ./lazy_getter ./if_then ./if_else ./try_body ./catch_body ./for_body ./export_default_require ./export_const_require ./export_fn_dynamic ./callback_fn ./callback_arrow ./callback_second ./paren_require ./await_require ./labeled'
 W_MAIN_JS='./es_default ./es_named ./es_namespace ./es_sideeffect ./re_star ./re_star_as ./re_named_as ./cjs_const ./cjs_destructured ./cjs_bare ./cjs_module_exports ./dyn_await ./lazy_function ./lazy_arrow ./lazy_exports_fn'
 W_COMP_TSX='react ./tsx_button ./tsx_card ./tsx_cjs'
 W_MOD_MJS='./mjs_import ./mjs_reexport ./mjs_cjs'
@@ -624,13 +630,13 @@ for pair in "main.ts:$W_MAIN_TS" "main.js:$W_MAIN_JS" "comp.tsx:$W_COMP_TSX" "mo
         printf '    expected: %s\n    got:      %s\n' "$want" "${got:-<none>}"
     fi
 done
-[ "$WEB_BAD" -eq 0 ] && ok "J2: exact Include set and order for .ts .js .tsx .mjs .cjs .jsx and the .astro frontmatter (64 edges)"
+[ "$WEB_BAD" -eq 0 ] && ok "J2: exact Include set and order for .ts .js .tsx .mjs .cjs .jsx and the .astro frontmatter (68 edges)"
 NEG=$(grep -o '<inc t="[^"]*neg_[^"]*"' "$TMP/web.deps.xml" | wc -l | tr -d '[:space:]')
 EDGES=$(grep -o '<inc t=' "$TMP/web.deps.xml" | wc -l | tr -d '[:space:]')
-if [ "$NEG" = "0" ] && [ "${EDGES:-0}" -eq 64 ]; then
+if [ "$NEG" = "0" ] && [ "${EDGES:-0}" -eq 68 ]; then
     ok "J3: no neg_* specifier became an edge (the query is broader than a module load; the text gate and the reach rule hold)"
 else
-    no "J3: neg_* edges=${NEG:-?} (want 0), total edges=${EDGES:-?} (want 64)"
+    no "J3: neg_* edges=${NEG:-?} (want 0), total edges=${EDGES:-?} (want 68)"
 fi
 
 # ── J4: the LAZY bit, re-derived from ancestry ────────────────────────────────────────────────────────
@@ -724,7 +730,11 @@ else
     skip "J8: pre-change-cache arm for JS/TS (set RIPWIRE_BASE_BIN=<path to a pre-change ripwire> to run it)"
 fi
 "$BIN" "$WEB" --no-cache --deps > "$TMP/web.d2.xml" 2>/dev/null
-cmp -s "$TMP/web.deps.xml" "$TMP/web.d2.xml" && ok "J8: deterministic (two --no-cache JS/TS runs identical)" || no "J8: non-deterministic JS/TS output"
+if cmp -s "$TMP/web.deps.xml" "$TMP/web.d2.xml"; then
+    ok "J8: deterministic (two --no-cache JS/TS runs identical)"
+else
+    no "J8: non-deterministic JS/TS output"
+fi
 
 # ── well-formed XML ───────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then

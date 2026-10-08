@@ -1169,7 +1169,7 @@ learn the walk would never have entered the class). Both are pinned in `test/imp
 `--impact`, `--callers`, `--zoom`, `--report` and `--for` over three TypeScript repositories, the CommonJS tree of a
 global npm install, two npm cache trees, a `.astro` tree and this repository's `test/` fixtures. `test/importcapcheck.sh`
 gains a JS/TS section (J1–J8): an exact edge list, in source order, for `.ts .js .tsx .mjs .cjs .jsx` and a `.astro`
-frontmatter (64 edges, with the `neg_*` shapes that must stay out), the lazy bit, the use-site half, the depth bound at
+frontmatter (68 edges, with the `neg_*` shapes that must stay out), the lazy bit, the use-site half, the depth bound at
 254/255/256 blocks, the two disclosure differences, and cache round-trip with a pre-change cache accepted unchanged
 (no `kParserVer` bump).
 
