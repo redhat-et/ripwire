@@ -253,8 +253,9 @@ ref_run(){ spec_env "$BIN" "$SPEC" --top-k=400 --no-cache 2>/dev/null; }
 same_as_ref(){
     spec_run >"$TMP/spec.out"; ref_run >"$TMP/ref.out"
     if ! cmp -s "$TMP/spec.out" "$TMP/ref.out"; then no "14$1: the cached (speculated) run differs from --no-cache"; return; fi
-    if [ "$3" = present ]; then grep -q "$2" "$TMP/spec.out" && ok "14$1: cached run == --no-cache, and $2 is indexed" || no "14$1: $2 should be indexed"
-    else grep -q "$2" "$TMP/spec.out" && no "14$1: $2 should be ignored now" || ok "14$1: cached run == --no-cache, and $2 is ignored"; fi
+    if grep -q "$2" "$TMP/spec.out"; then found=present; else found=absent; fi
+    if [ "$found" = "$3" ]; then ok "14$1: cached run == --no-cache, and $2 is $3"
+    else no "14$1: $2 should be $3, the cached run has it $found"; fi
 }
 spec_run >/dev/null
 if [ -n "$( find "$SC" -name 'ripwire-ignoreprobe-*.bin' 2>/dev/null | head -1 )" ]; then ok "14a: a cached run on a git root keeps the ignore answer for the next call's speculation"
@@ -285,7 +286,7 @@ if ! grep -q 'stopped the crawl' "$TMP/spec.i.err"; then no "14i: the crawl:6 se
 elif [ "$rcSpecI" = "$rcRefI" ] && cmp -s "$TMP/spec.i" "$TMP/ref.i"; then ok "14i: a lost speculation under a crawl memory stop answers as --no-cache does (rc $rcSpecI)"
 else no "14i: a lost speculation under a crawl memory stop differs from --no-cache (rc $rcSpecI vs $rcRefI)"; fi
 spec_run >"$TMP/spec.a"; spec_run >"$TMP/spec.b"
-cmp -s "$TMP/spec.a" "$TMP/spec.b" && ok "14h: two cached runs in a row are byte-identical" || no "14h: two cached runs in a row differ"
+if cmp -s "$TMP/spec.a" "$TMP/spec.b"; then ok "14h: two cached runs in a row are byte-identical"; else no "14h: two cached runs in a row differ"; fi
 
 # ── 13. the flag is in --help (the deckcheck allowlist row for --no-ignore retires with it).
 "$BIN" --help=all 2>&1 | grep -q -- '--no-ignore' && ok "--no-ignore is documented in --help" \

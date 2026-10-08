@@ -1550,7 +1550,9 @@ public:
             fresh_ = runGitIgnoreProbe( rootDir );   // no sidecar to speculate from, or no git child to overlap: as before
             return parseGitIgnoreProbe( *fresh_ );
         }
-        sidecarPath_ = quality::resolveCacheBlobPath( quality::cacheDirLadder(), "ripwire-ignoreprobe-" + quality::hex16( fnv1a64( rootReal ) ) + ".bin" );
+        // Named by the house root key (quality::cacheRootKeyHex, realpath-normalized), so the eviction sweep pins this
+        // file with every other family of the root (test/evictioncheck.sh (k)/(l)); the header still names the root.
+        sidecarPath_ = quality::resolveCacheBlobPath( quality::cacheDirLadder(), "ripwire-ignoreprobe-" + quality::cacheRootKeyHex( rootDir ) + ".bin" );
         sidecarHeader_ = std::string( kSidecarMagic ) + rootReal + '\0';
         pending_     = std::async( std::launch::async, [ root = std::string( rootDir ) ] { return runGitIgnoreProbe( root.c_str() ); } );
         speculation_ = loadSidecar();
