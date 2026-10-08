@@ -466,7 +466,7 @@ fi
 #       tier; a top-level one is lazy="0"; one file required both ways is lazy="0" (the pair rule)
 #   J5  the use-site half — --uses reports the import-role ref of a named import
 #   J6  the DEPTH BOUND on blocks — kept at 255 and 256 containers, cut AND announced at 257, as the walk did
-#   J7  the two DELIBERATE disclosure differences (same two as the C-family arm 12c, same reason)
+#   J7  the DELIBERATE disclosure differences (the two of the C-family arm 12c, same reason, plus a non-import under a too-deep nest)
 #   J8  cache round-trip, a pre-change binary's cache accepted (no kParserVer bump), determinism
 #
 # The expected lists are the SPECIFICATION and were read off the pre-change binary, never reasoned out: this
@@ -688,7 +688,7 @@ for n in 254 255 256; do
 done
 [ "$WB_BAD" -eq 0 ] && ok "J6: depth bound — kept under 255 and 256 containers, cut AND announced under 257 (edges identical to the walk's)"
 
-# ── J7: the two DELIBERATE disclosure differences, in both directions (the C-family arm 12c, for JS) ────
+# ── J7: the DELIBERATE disclosure differences, in both directions (the C-family arm 12c, for JS) ────
 # (i) QUIETER: `require('./deep')` is ITSELF a container, so the walk refused to descend into it from depth
 #     256 and announced, although the edge was kept and nothing was dropped. n=255 above is that shape: edge
 #     kept, and this binary says nothing because nothing was lost (the walk said extract-partial).
@@ -705,6 +705,24 @@ if [ "$LE" = "0" ] && [ "$LF" = "1" ] && [ "$QF" = "0" ]; then
     ok "J7: disclosure differences hold — silent when the edge was kept (255 blocks), loud when the bound cut an unreachable import (class method)"
 else
     no "J7: class-method-under-300: edges=$LE partial=$LF (want 0/1); 255-blocks partial=$QF (want 0)"
+fi
+
+# (iii) QUIETER, and no import in the file at all: 300 nested blocks around `foo( "x" )` (a call the Web pattern
+#     captures and the text gate drops), and 300 nested #ifdef around `#pragma once` (captured by the C/C++
+#     preproc_call pattern, dropped by the #import gate). The walk announced on any too-deep CONTAINER, and the
+#     first version of this arm announced because the bound test ran before the text gate; both said "an import
+#     was cut" when nothing import-shaped existed. The text gate now runs first, so neither does.
+WQ="$TMP/wquiet"; mkdir -p "$WQ/js" "$WQ/c"
+{ i=0; while [ "$i" -lt 300 ]; do printf '{'; i=$((i + 1)); done
+  printf ' foo("x"); '; i=0; while [ "$i" -lt 300 ]; do printf '}'; i=$((i + 1)); done; printf '\n'; } > "$WQ/js/a.js"
+{ i=0; while [ "$i" -lt 300 ]; do printf '#ifdef G%s\n' "$i"; i=$((i + 1)); done
+  printf '#pragma once\n'; i=0; while [ "$i" -lt 300 ]; do printf '#endif\n'; i=$((i + 1)); done; } > "$WQ/c/a.c"
+QJ=$("$BIN" "$WQ/js" --skipped --no-cache 2>/dev/null | grep -c 'why="extract-partial"' | tr -d '[:space:]' || true)
+QC=$("$BIN" "$WQ/c"  --skipped --no-cache 2>/dev/null | grep -c 'why="extract-partial"' | tr -d '[:space:]' || true)
+if [ "$QJ" = "0" ] && [ "$QC" = "0" ]; then
+    ok "J7: no announcement when nothing import-shaped was cut (foo( \"x\" ) under 300 blocks, #pragma once under 300 #ifdef)"
+else
+    no "J7: non-import under a too-deep nest announced an import cut: js=$QJ c=$QC (want 0/0)"
 fi
 
 # ── J8: cache round-trip and a pre-change cache ─────────────────────────────────────────────────────

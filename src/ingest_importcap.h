@@ -281,8 +281,18 @@ TSNode importDirectiveOf( TSNode pathNode ) noexcept
 void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::string_view src,
                          std::vector<Include>& includes, std::vector<RawRef>& refs, ExtractShortfall& shortfall )
 {
-    const TSNode      directive = importDirectiveOf( pathNode );
-    const ImportReach reach     = importContainerReach( directive, lang );
+    const TSNode     directive = importDirectiveOf( pathNode );
+    // TEXT FIRST, ancestry second. The Web call pattern matches every bare `f( "s" … )`, so most captures here are
+    // not imports at all, and the reach read below is a descent from the root — paying it to learn that `t( "key" )`
+    // is not a dependency is the cost that made a 2 000-deep hyperscript tree 300x slower. Dropping a non-import
+    // BEFORE the bound test also means a `#pragma once` / `foo( "x" )` under a too-deep nest no longer announces
+    // "an import was cut" when none was (the walk announced on any too-deep container, import or not).
+    const ImportSpec spec = normaliseImportSpecifier( dependencyDialect( lang ), directive, nodeTextOf( pathNode, src ), src );
+    if( spec.text.empty() )
+    {
+        return;
+    }
+    const ImportReach reach = importContainerReach( directive, lang );
     if( reach.depth > kMaxImportContainerDepth )
     {
         DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::ImportNestingTooDeep,
@@ -292,11 +302,6 @@ void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::
     if( !reach.reachable )
     {
         return;   // a non-container ancestor the walk would never have entered — see importContainerReach
-    }
-    const ImportSpec spec = normaliseImportSpecifier( dependencyDialect( lang ), directive, nodeTextOf( pathNode, src ), src );
-    if( spec.text.empty() )
-    {
-        return;
     }
     if( std::string name = importName( spec.text ); !name.empty() )
     {
