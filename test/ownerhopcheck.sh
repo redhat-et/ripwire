@@ -62,9 +62,11 @@
 #   (G)  guard: dispatch (20 callees) lists all 20 names; broadcast (105 callees) lists exactly 100 (the guard) with
 #        capped="1" and next="--callees=pkg/broadcast.py:broadcast".
 #   (R)  no-regression: every <h> row of the RIPWIRE_NO_OWNER_HOP=1 answer is still served, in the same relative order
-#        (owner rows removed), its <calls> a prefix of the head row's (a moved owner only frees budget: more names of the
-#        same walk, never fewer, never others); on every (R) question <sigs> and <tail> are byte-identical to the A/B
-#        handle. Non-owner questions are byte-identical to the A/B handle.
+#        (owner rows removed), with EXACTLY the same <calls> on the five fixture questions; (R/prefix) only where a moved
+#        owner frees budget (gain: fanout moves out of the ranked rows, push_batch 5 -> 12 names, premise >= 1 row gains)
+#        the A/B row's <calls> are a strict PREFIX of the head row's (more names of the same walk, never fewer, never
+#        others); and on every (R) question <sigs> and <tail> are byte-identical to the A/B handle. Non-owner questions
+#        are byte-identical to the A/B handle.
 #   (S)  sigs: where the owner rows ALONE switch on the header's via="name" clause (premise: the A/B answer has no via
 #        clause, the head has it — gateway's remember/encode are name-only callees, no ranked hop has one), <sigs> and
 #        <tail> are byte-identical to the A/B handle in both dialects, default and --token-budget=3000 (the clause is a
@@ -334,7 +336,7 @@ fi
 SECTS(){ python3 -c "import re,sys; x=open(sys.argv[1]).read(); print([m.group(0) for t in ('sigs','tail') for m in [re.search(r'<%s[ >].*?</%s>' % (t, t), x, re.S)] if m])" "$1"; }
 # mode exact: the A/B rows' <calls> EXACTLY (the five fixture questions — no moved owner there frees a later row's budget);
 # mode prefix: a PREFIX, and >= 1 row must actually gain names (else the widened branch is not exercised).
-for spec in "prefix|ts|$QTS" "prefix|py|$QPY" "prefix|c|$QC" "prefix|py|$QCAP" "prefix|ts|$QV"; do
+for spec in "exact|ts|$QTS" "exact|py|$QPY" "exact|c|$QC" "exact|py|$QCAP" "exact|ts|$QV" "prefix|gain|How does fanout deliver events?"; do
     mode="${spec%%|*}"; rest="${spec#*|}"; r="${rest%%|*}"; q="${rest#*|}"
     tag="$r.$( printf '%s' "$q" | cksum | cut -d' ' -f1 )"
     on="$TMP/r.$tag.on.xml"; off="$TMP/r.$tag.off.xml"; run "$r" "$on" "--for=$q"; runoff "$r" "$off" "--for=$q"
@@ -357,7 +359,7 @@ missing = [ident(r) for r in base if ident(r) not in hd or not same(calls(r), ca
 gained = [r['n'] for r in base if ident(r) in hd and len(calls(hd[ident(r)])) > len(calls(r))]
 moved = [r['n'] for r in off['rows'] if ident(r) in owners]
 order_ok = [ident(r) for r in head if ident(r) in {ident(b) for b in base}] == [ident(r) for r in base if ident(r) in hd]
-premise = True
+premise = bool(gained) and bool(moved) if mode == 'prefix' else True
 print('OK' if not missing and order_ok and off['rows'] and premise
       else 'BAD missing=%s order_ok=%s base_rows=%d gained=%s moved=%s' % (missing[:3], order_ok, len(off['rows']), gained, moved))
 PY
