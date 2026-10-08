@@ -64,11 +64,17 @@ inline void publishDocBridgeBlob( const std::string& bridgeBlobPath, std::uint32
 // cacheEnabled=false (--no-cache) bypasses the sidecar entirely. tmpKey keeps concurrent workers'
 // unpublished temp files distinct; the publish itself is a whole-file rename, so a concurrent
 // reader sees every byte or none.
-inline std::string docTextViaBridgeCache( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey )
+// `bridgeMayRun` is docparse::markitdownMayRun(), asked once by the post-pass: false means the shell could not start
+// markitdown, so a bridge doc whose bytes have no cached extraction is "" without the popen — the answer the popen
+// gave (rc 127), minus one shell start per doc per run. The cache is still consulted first either way, so a blob
+// extracted while markitdown was installed keeps answering after it is removed, exactly as before.
+inline std::string docTextViaBridgeCache( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey, bool bridgeMayRun )
 {
+    EXPECTS( !path.empty(), "doc post-pass: every crawled doc path is a non-empty spelling" );
     std::string text;
     std::string bridgeBlobPath;
-    if( cacheEnabled && docparse::docKindOf( ext ) == docparse::DocKind::Markitdown )
+    const bool  viaBridge = docparse::docKindOf( ext ) == docparse::DocKind::Markitdown;
+    if( cacheEnabled && viaBridge )
     {
         if( const std::optional<std::string> docBytes = docparse::detail::readWholeFile( path ) )
         {
@@ -78,6 +84,10 @@ inline std::string docTextViaBridgeCache( const std::string& path, const std::st
             bridgeBlobPath = quality::resolveCacheBlobPath( quality::cacheDirLadder(), blobName );
             text = docparse::detail::readWholeFile( bridgeBlobPath ).value_or( std::string() );   // miss ⇒ text stays empty
         }
+    }
+    if( text.empty() && viaBridge && !bridgeMayRun )
+    {
+        return text;   // no cached extraction, and no markitdown the shell could start: the popen's own answer, ""
     }
     if( text.empty() )
     {
@@ -120,6 +130,11 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
     // 2) extract in parallel, storing each result at its OWN slot (no cross-thread sharing of a slot →
     //    order-independent). A per-doc `hasText` gate distinguishes "not extractable" (skip) from empty.
     const std::size_t ndocs = docIds.size();
+    // Asked ONCE per post-pass, and only when a bridge doc exists (a PATH walk of stats, no process): every worker
+    // reads the same answer, and the next ingest asks again, so a markitdown installed meanwhile is seen.
+    const bool anyBridgeDoc = std::any_of( docIds.begin(), docIds.end(), [ & ]( std::uint32_t fid )
+                                           { return docparse::docKindOf( lowerExtensionOf( result.files[ fid ] ) ) == docparse::DocKind::Markitdown; } );
+    const bool bridgeMayRun = anyBridgeDoc && docparse::markitdownMayRun();
     std::vector<std::string> docTextOut( ndocs );
     std::vector<char>        docHasText( ndocs, 0 );
     std::vector<RawDefLex>   docLex( ndocs );        // B0.2: per-doc Section stats (rich only), own slot per worker
@@ -158,7 +173,7 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
                         const std::uint32_t fid = docIds[ di ];
                         const std::string   ext = lowerExtensionOf( result.files[ fid ] );
 
-                        std::string text = docTextViaBridgeCache( result.files[ fid ], ext, cacheEnabled, fid );
+                        std::string text = docTextViaBridgeCache( result.files[ fid ], ext, cacheEnabled, fid, bridgeMayRun );
                         if( !text.empty() )
                         {
                             if( captureValueUses )

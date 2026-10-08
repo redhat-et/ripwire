@@ -10,6 +10,8 @@
 #   4. changing the doc's bytes re-invokes (the key is the content, not the path)
 #   5. an EMPTY extraction is never cached (machine fact, not a byte fact): a no-output fake is
 #      re-invoked on the next run rather than wedging "" into the cache
+#   6-9. (cli-perf-068) no shell is started for a markitdown that cannot run, and that answer is never memoized:
+#      absent-then-installed, a directory ahead on PATH, a non-executable file, an empty PATH entry (the cwd)
 # Does NOT edit test/regression.sh (the orchestrator wires it).
 #
 #   RIPWIRE_BIN=build/ripwire bash test/docmdcachecheck.sh
@@ -73,6 +75,53 @@ printf 'silent doc bytes %s' "$$" > "$TMP/corpus/deck.docx"
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" >/dev/null 2>&1
 PATH="$TMP/bin:$PATH" "$BIN" "$TMP/corpus" >/dev/null 2>&1
 if [ "$( count )" = "5" ]; then ok "empty extraction not cached (silent bridge re-invoked each run)"; else no "empty-extraction arm: expected 5 total invocations, got $( count )"; fi
+
+# 6-9 (cli-perf-068): the post-pass asks the shell's own question — could `markitdown` start at all? — before it
+# forks one, so a machine without markitdown no longer pays a /bin/sh per bridge doc per run. Absence is not memoized:
+# each arm below would go red if the answer were cached, mis-walked PATH, or ruled the shell out when it could run.
+# The PATH is pinned to the fake's dirs plus /usr/bin:/bin so a markitdown installed on the host cannot answer.
+SYS_PATH="/usr/bin:/bin"
+mkdir -p "$TMP/b6" "$TMP/b7dir/markitdown" "$TMP/b7" "$TMP/b8" "$TMP/b9"
+cat > "$TMP/fake" <<'FAKE'
+#!/bin/bash
+echo "invoked $1" >> "$FAKE_LOG"
+echo "# Extracted Deck"
+echo "hello from fake markitdown"
+FAKE
+chmod +x "$TMP/fake"
+newdoc(){ printf 'arm %s doc bytes %s $$=%s' "$1" "$( date +%s%N 2>/dev/null || date +%s )" "$$" > "$TMP/corpus/deck.docx"; }
+
+# 6. absent, then installed between two runs: the first run invokes nothing and carries no doc Section; the second
+#    sees the new program (a memoized "absent" would keep it at zero)
+newdoc 6; before="$( count )"
+PATH="$TMP/b6:$SYS_PATH" "$BIN" "$TMP/corpus" > "$TMP/absent.xml" 2>/dev/null
+if [ "$( count )" = "$before" ] && ! grep -q 'p="deck.docx"' "$TMP/absent.xml" && grep -q 'a.cpp' "$TMP/absent.xml"; then
+    ok "absent bridge: no invocation, no doc Section, map still produced"
+else no "absent bridge: expected $before invocations and no Section, got $( count ) (map: $( wc -c < "$TMP/absent.xml" ) B)"; fi
+cp "$TMP/fake" "$TMP/b6/markitdown"
+PATH="$TMP/b6:$SYS_PATH" "$BIN" "$TMP/corpus" > "$TMP/installed.xml" 2>/dev/null
+if [ "$( count )" = "$(( before + 1 ))" ] && grep -q 'p="deck.docx"' "$TMP/installed.xml"; then
+    ok "bridge installed after an absent run is invoked on the next run (absence is not memoized)"
+else no "installed-after-absent: expected $(( before + 1 )) invocations and a Section, got $( count )"; fi
+
+# 7. a DIRECTORY named markitdown earlier on PATH is not a program (sh skips it): the real one after it still runs
+newdoc 7; before="$( count )"; cp "$TMP/fake" "$TMP/b7/markitdown"
+PATH="$TMP/b7dir:$TMP/b7:$SYS_PATH" "$BIN" "$TMP/corpus" >/dev/null 2>&1
+if [ "$( count )" = "$(( before + 1 ))" ]; then ok "a directory named markitdown ahead on PATH does not hide the program behind it"
+else no "dir-ahead arm: expected $(( before + 1 )) invocations, got $( count )"; fi
+
+# 8. a NON-executable file named markitdown is no program either (sh: rc 126 -> ""): same map as the absent run
+cp "$TMP/fake" "$TMP/b8/markitdown"; chmod -x "$TMP/b8/markitdown"
+newdoc 8; before="$( count )"
+PATH="$TMP/b8:$SYS_PATH" "$BIN" "$TMP/corpus" > "$TMP/noexec.xml" 2>/dev/null
+if [ "$( count )" = "$before" ] && ! grep -q 'p="deck.docx"' "$TMP/noexec.xml"; then ok "a non-executable markitdown is treated as absent, as sh treats it"
+else no "non-executable arm: expected $before invocations and no Section, got $( count )"; fi
+
+# 9. an EMPTY PATH entry is the current directory to sh: a markitdown there must still run
+newdoc 9; before="$( count )"; cp "$TMP/fake" "$TMP/b9/markitdown"
+( cd "$TMP/b9" && PATH=":$SYS_PATH" "$BIN" "$TMP/corpus" >/dev/null 2>&1 )
+if [ "$( count )" = "$(( before + 1 ))" ]; then ok "an empty PATH entry (the cwd) reaches a markitdown there, as sh does"
+else no "empty-PATH-entry arm: expected $(( before + 1 )) invocations, got $( count )"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
