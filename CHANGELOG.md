@@ -35,7 +35,7 @@ that repeat the question's other words, so its callees — the names an agent ne
   served (a moved owner can only free room). Under `--token-budget` they are funded first. A question that names no
   owner, `--json --for` and the MCP `for` verb are byte-identical; `RIPWIRE_NO_OWNER_HOP=1` restores the previous
   answer. Measured on the 32 `--for` rows of the round-1 comparison set: the two in-scope rows now name 5 of 5 gold
-  callee items they missed (were 0 of 5); 23 of 32 answers are byte-identical, 2 differ only in `noedge=`, and 7 grow by 0.2–1.1 KB. Gate:
+  callee items they missed (were 0 of 5); 23 of 32 answers are byte-identical, 1 differs only in `noedge=`, and 8 grow by 0.2–1.1 KB (+1.4% over all 32). Gate:
   `test/ownerhopcheck.sh`.
 
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
