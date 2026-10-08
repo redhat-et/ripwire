@@ -64,3 +64,22 @@
       (attribute
         attribute: (identifier) @name)
   ]) @reference.call
+
+; Shared import vocabulary (#358). The dependency target is still ONE per statement: the first
+; name of a plain import (including its alias spelling), or the module_name of a from-import.
+; C++ keeps only the first name capture and imposes the old container reach/depth; queries are
+; unanchored so conditional and function-body imports keep their existing coverage.
+(import_statement name: (_) @import.path)
+(import_from_statement module_name: (_) @import.path)
+
+; Every named clause binds, even when it is not the first dependency target. @import.names is
+; one member of that clause list per match; @import.alias is its optional local rename. Wildcards
+; bind no name here, as before. Keep aliases in the SAME match as their named target.
+(import_statement name: (dotted_name) @import.names)
+(import_statement name: (aliased_import
+  name: (dotted_name) @import.names
+  alias: (identifier) @import.alias))
+(import_from_statement name: (dotted_name) @import.names)
+(import_from_statement name: (aliased_import
+  name: (dotted_name) @import.names
+  alias: (identifier) @import.alias))

@@ -15,6 +15,21 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — Python imports use the shared capture vocabulary (#358, Python slice)
+
+Python dependency targets now come from `@import.path`; named clauses and their optional local
+renames use `@import.names` and `@import.alias` to produce the existing import bindings.
+The Python branches and binding extractor they replace leave `src/ingest_relations.h`.
+Resolution stays unchanged. A comma-separated plain import still contributes only its first
+dependency target, and an aliased first clause retains its written `as` spelling in `--deps`.
+These existing limits are preserved rather than widened by the capture migration.
+
+The bounded Python walk remains for its exact nesting disclosure, including deep containers
+with no import. Captured targets and bindings use the same container reach and depth limit.
+No persisted record or extraction-version change is intended; the Python import gate checks
+fresh/warm output and, when `RIPWIRE_BASE_BIN` is supplied, acceptance of a pristine-main cache
+without rewriting it.
+
 ### Changed — a Ruby call to self, or on an instance the code builds, answers from its own side: an instance never reaches `def self.m`
 
 The entry below left one floor open, (i). A call to self, or on a receiver the code builds, read a class's defs from both

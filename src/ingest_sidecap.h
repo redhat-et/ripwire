@@ -1554,6 +1554,8 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
         {
             captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens, shortfall );
         }
+        // Python's import records now come from tags captures. Its bounded walk above remains for
+        // exact ImportNestingTooDeep disclosure, even when no import lies below the cut (#358).
         captureJsImportFacts( root, le.lang, fileId, src, binds );
         captureGoImportFacts( root, le.lang, fileId, src, binds );   // FE-A: Go import specs → ModuleAlias (graph.h FalseEdgeRules)
 
@@ -1783,6 +1785,8 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             uint32_t         nameRow  = 0;   // 0-based row of the @name identifier
             bool             haveName = false;
             TSNode           nameNode {};    // the @name identifier node — for C++ scope/qualifier (E#4)
+            TSNode           importNamesNode {};   // Python: one clause's target, paired with its optional alias
+            TSNode           importAliasNode {};
 
             for( uint16_t ci = 0; ci < match.capture_count; ++ci )
             {
@@ -1857,12 +1861,27 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     // order while costing an allocation and a drain block.
                     case CapRole::Import:
                     {
-                        emitCapturedImport( cap.node, fileId, le.lang, src, includes, refs, shortfall );
+                        if( capSv == "import.path" )
+                        {
+                            emitCapturedImport( cap.node, fileId, le.lang, src, includes, refs, shortfall );
+                        }
+                        else if( le.lang == Lang::Python && capSv == "import.names" )
+                        {
+                            importNamesNode = cap.node;
+                        }
+                        else if( le.lang == Lang::Python && capSv == "import.alias" )
+                        {
+                            importAliasNode = cap.node;
+                        }
                     }
                     break;
                 }
             }
 
+            if( !ts_node_is_null( importNamesNode ) )
+            {
+                emitCapturedPythonImportBind( importNamesNode, importAliasNode, fileId, src, binds );
+            }
             if( !haveName )
             {
                 continue;
