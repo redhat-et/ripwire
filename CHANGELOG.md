@@ -1152,25 +1152,35 @@ the bare name `require`/`import`, there is exactly one argument, and it is a str
 are re-derived from the captured node's ancestry, not dropped: the **container reach** (the walk entered only an
 allowlist, so `require('x').y`, `[require('x')]`, `a ? require('x') : b`, a class method body and a `declare module`
 body were never edges, and still are not) and the **lazy bit** (a `require`/`import` call written inside a function
-body is `lazy="1"` on `--impact`'s import tier, from the same ancestor loop that checks the reach).
+body is `lazy="1"` on `--impact`'s import tier, from the same ancestor read that checks the reach).
 
 **Not changed, deliberately.** `import x = require('y')` (TypeScript) is not an edge, before or after: the grammar
 gives it its own `import_require_clause`, which the walk never read and no pattern here matches. `@import.alias` and
 `@import.names` are not used: the Include record of a JS/TS import names a module and nothing else; the bound names
 are a different record (`captureJsImportFacts`, untouched).
 
-**The same disclosure difference as the C-family slice, in `--skipped` only.** `extract-partial` for import nesting now
-fires only when a captured import is actually cut at the bound. A `require('x')` is itself a container to the old walk,
-so it announced at 254 and 255 nested blocks although the edge was kept; this does not. In the other direction, an
-import under 300 nested blocks inside a class method is announced (the ancestor loop reaches the bound before it can
-learn the walk would never have entered the class). Both are pinned in `test/importcapcheck.sh`.
+**Disclosure differences from the walk, in `--skipped` only** (the C-family slice's two, plus a third in the function both languages share).
+`extract-partial` for import nesting now fires only when a captured import is actually cut at the bound. A `require('x')`
+is itself a container to the old walk, so it announced at 254 and 255 nested blocks although the edge was kept; this
+does not. A call the pattern captures but the `require`/`import` text gate drops (`foo('x')`) under 300 nested blocks is
+not announced either, and neither is a C-family `#pragma once` under 300 `#ifdef` — the text gate now runs before the
+bound test, in the one function both languages share, so an import was never cut. In the other direction, an import
+under 300 nested blocks inside a class method is announced (the ancestor read reaches the bound before it can learn the
+walk would never have entered the class). All three are pinned in `test/importcapcheck.sh`.
+
+**The ancestry is read in one descent from the root.** `ts_node_parent` is itself a descent from the root, so walking up
+k ancestors costs k of them. The first version of this slice did that, bounded to 256 hops, and a synthetic file of
+2 000 nested `foo( "x", foo( "x", … ) )` calls took 152 s against 0.5 s for the walk it replaced (Apple M2 Pro, one run
+each, loaded machine). The final version reads reach, depth and the lazy bit off one `ts_node_child_with_descendant`
+descent, after the text gate, and the same file takes 0.9 s. On three TypeScript repositories and the CommonJS tree of a
+global npm install the `--deps` wall time is unchanged to within run-to-run noise.
 
 **Dependency edges are byte-identical.** Verified with both binaries against unchanged trees: `--deps`, `--uses`,
 `--impact`, `--callers`, `--zoom`, `--report` and `--for` over three TypeScript repositories, the CommonJS tree of a
 global npm install, two npm cache trees, a `.astro` tree and this repository's `test/` fixtures. `test/importcapcheck.sh`
 gains a JS/TS section (J1–J8): an exact edge list, in source order, for `.ts .js .tsx .mjs .cjs .jsx` and a `.astro`
 frontmatter (68 edges, with the `neg_*` shapes that must stay out), the lazy bit, the use-site half, the depth bound at
-254/255/256 blocks, the two disclosure differences, and cache round-trip with a pre-change cache accepted unchanged
+254/255/256 blocks, the disclosure differences, and cache round-trip with a pre-change cache accepted unchanged
 (no `kParserVer` bump).
 
 ### Changed — `--affected` and `--test-gate` mark which tests to run first (`run_first=`)
