@@ -71,6 +71,9 @@
 #        clause, the head has it — gateway's remember/encode are name-only callees, no ranked hop has one), <sigs> and
 #        <tail> are byte-identical to the A/B handle in both dialects, default and --token-budget=3000 (the clause is a
 #        disclosure exempt from the sig trim, exactly as the qword clause is; charged, it cost a signature row).
+#   (C/scoped) the first cut owner is a method with a same-named free function in its file (scope: Bus.notify vs
+#        notify): next= is the canonical --callees=app/bus.py::Bus::notify, and pasting it resolves defs="1" (the
+#        FILE:NAME form merges both: premise defs >= 2).
 #   (B)  explicit --token-budget=4500 (hops fit): the owner row is first, est_tokens <= 4500 or over_ceiling="1"; at 4000
 #        (less room than the owner row needs) the owner is first or named by qword_cut + next=;
 #        --token-budget=1200 (ceiling spent, reason="budget"): byte-identical to the A/B handle. (B3) a budget sweep
@@ -298,6 +301,23 @@ if ran_ok "$f" "(C)"; then
     else no "(C) cut owners' rows $got, want each once as a plain row (no qword)"; fi
 fi
 
+# ── (C/scoped) the canonical next= keeps a method apart from a same-named free function in its file (item 16) ─────────
+f="$TMP/scope.xml"; run scope "$f" "--for=How does notify tell listeners of a change?"
+if ran_ok "$f" "(C/scoped)"; then
+    HJ "$f" "$TMP/scope.json" "(C/scoped)"
+    got="$( J "(d['hops'].get('qword_cut'), d['hops'].get('next'))" <"$TMP/scope.json" )"
+    if [ "$got" = "('1', '--callees=app/bus.py::Bus::notify')" ]; then ok "(C/scoped) qword_cut=\"1\" next= names the cut METHOD by its canonical id (Bus::notify)"
+    else no "(C/scoped) (qword_cut, next) = $got, want ('1', '--callees=app/bus.py::Bus::notify')"; fi
+    nx="$( J "d['hops'].get('next','')" <"$TMP/scope.json" )"
+    f2="$TMP/scope.next.xml"; run scope "$f2" "$nx"; f3="$TMP/scope.file.xml"; run scope "$f3" "--callees=app/bus.py:notify"
+    if ran_ok "$f2" "(C/scoped) pasted next=" && ran_ok "$f3" "(C/scoped) FILE:NAME premise"; then
+        d2="$( grep -o '<callees [^>]*' "$f2" | grep -o 'defs="[0-9]*"' )"; d3="$( grep -o '<callees [^>]*' "$f3" | grep -o 'defs="[0-9]*"' | tr -dc 0-9 )"
+        names="$( grep -o '<s [^>]*n="[^"]*"' "$f2" | sed 's/.*n="\([^"]*\)"/\1/' | sort | tr '\n' ' ' )"
+        if [ "${d3:-0}" -ge 2 ] && [ "$d2" = 'defs="1"' ] && [ "$names" = "flush_queue mark_dirty " ]; then
+            ok "(C/scoped) pasting next= resolves defs=\"1\" (Bus.notify: flush_queue mark_dirty); FILE:NAME would merge $d3 defs"
+        else no "(C/scoped) pasted next=: $d2 names=[$names]; FILE:NAME defs=${d3:-?} (want defs=\"1\", flush_queue mark_dirty, FILE:NAME >= 2)"; fi
+    fi
+fi
 # ── (V) common English verbs never starve the owner the question is about (C8) ───────────────────────────────────────
 f="$TMP/ts.v.xml"; run ts "$f" "--for=$QV"; f2="$TMP/ts.v.cand"; run ts "$f2" "--for=$QV" --format=candidates
 if ran_ok "$f" "(V)" && ran_ok "$f2" "(V) premise"; then
