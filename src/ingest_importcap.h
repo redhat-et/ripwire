@@ -85,33 +85,55 @@ struct ImportReach
 // So reach is restored here and the widening is left as its own follow-up.
 //
 // The file root is deliberately NOT tested: its children are what the walk always started from, so
-// `isImportContainer(root)` being false must not reject a file-scope include. The loop stops when
-// `p`'s own parent is null, which is the root.
+// `isImportContainer(root)` being false must not reject a file-scope include. The ancestors read are the
+// nodes STRICTLY BETWEEN the root and the directive.
+//
+// ONE DESCENT FROM THE ROOT, not an upward walk. tree-sitter nodes hold no parent pointer, so every
+// ts_node_parent is itself a descent from the root and walking k ancestors up costs k of them (the precedent
+// and its measurement: ingest_names.h::enclosingFunctionScope — 600 nested blocks, 19.7 s upward against
+// 9.4 s down). The first version of this function walked up, bounded to kMaxImportContainerDepth hops, and
+// that bound capped the HOPS, not the cost: a TS/JS file of 2 000 nested `foo( "x", foo( "x", … ) )` calls
+// (a hyperscript tree; every one matches the call pattern) took 152 s against 0.5 s for the walk it replaced.
+// Descending once is O(depth) per directive, and what the upward loop answered is read off the same descent:
+// `run` is how many container ancestors sit directly above the directive (the loop's reach before it met a
+// non-container or the bound), `total` is how many ancestors there are. Reachable means the run is all of them,
+// or the run already passed the bound (the loop stops at the bound before it can see a non-container above —
+// that is the one LOUDER disclosure difference test/importcapcheck.sh pins, kept exactly).
 ImportReach importContainerReach( TSNode directive, Lang lang ) noexcept
 {
     const bool directiveIsNode = !ts_node_is_null( directive );   // hoisted: a promise holds no call (selfcheckcheck C)
     EXPECTS( directiveIsNode, "the directive is a node of the parsed tree: importDirectiveOf never returns null for a captured specifier" );
-    ImportReach reach;
-    for( TSNode p = ts_node_parent( directive ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    std::uint32_t total = 0;
+    std::uint32_t run   = 0;        // container ancestors directly above the directive (reset by a non-container)
+    bool          fnInRun = false;  // some container in `run` is a function body
+    TSNode        n     = ts_node_child_with_descendant( ts_tree_root_node( directive.tree ), directive );
+    for( ; !ts_node_is_null( n ) && !ts_node_eq( n, directive ); n = ts_node_child_with_descendant( n, directive ) )
     {
-        if( ts_node_is_null( ts_node_parent( p ) ) )
+        const char* t = ts_node_type( n );
+        ++total;
+        if( isImportContainer( lang, t ) )
         {
-            break;                                   // p is the file root: reached unconditionally
+            ++run;
+            // The walk's `childInsideFn = frame.insideFn || isFunctionLike( lang, t )` is sticky downward, so the
+            // directive is inside a function exactly when ANY container above it is a function-body kind.
+            fnInRun = fnInRun || isFunctionLike( lang, t );
         }
-        if( !isImportContainer( lang, ts_node_type( p ) ) )
+        else
         {
-            reach.reachable = false;                 // the walk would not have entered this node
-            break;
+            run     = 0;
+            fnInRun = false;
         }
-        // The walk's `childInsideFn = frame.insideFn || isFunctionLike( lang, t )` is sticky downward, so the
-        // directive is inside a function exactly when ANY container above it is a function-body kind.
-        reach.insideFn = reach.insideFn || isFunctionLike( lang, ts_node_type( p ) );
-        if( ++reach.depth > kMaxImportContainerDepth )
-        {
-            break;                                   // STOPS AT THE BOUND: past it the answer cannot change, and
-        }                                            // a hostile file must not buy an unbounded parent walk
     }
-    ENSURES( reach.depth <= kMaxImportContainerDepth + 1, "the ancestor loop stops one past the bound, so a hostile file buys a bounded parent walk" );
+    ImportReach reach;
+    if( ts_node_is_null( n ) )
+    {
+        reach.reachable = false;    // the descent lost the directive: read as "the walk would not have entered", a floor
+        return reach;
+    }
+    reach.depth     = static_cast<std::uint16_t>( std::min<std::uint32_t>( run, kMaxImportContainerDepth + 1u ) );
+    reach.reachable = ( run == total ) || ( run > kMaxImportContainerDepth );
+    reach.insideFn  = fnInRun;
+    ENSURES( reach.depth <= kMaxImportContainerDepth + 1, "the depth is clamped one past the bound" );
     return reach;
 }
 
