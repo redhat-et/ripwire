@@ -89,6 +89,8 @@ struct ImportReach
 // `p`'s own parent is null, which is the root.
 ImportReach importContainerReach( TSNode directive, Lang lang ) noexcept
 {
+    const bool directiveIsNode = !ts_node_is_null( directive );   // hoisted: a promise holds no call (selfcheckcheck C)
+    EXPECTS( directiveIsNode, "the directive is a node of the parsed tree: importDirectiveOf never returns null for a captured specifier" );
     ImportReach reach;
     for( TSNode p = ts_node_parent( directive ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
     {
@@ -109,6 +111,7 @@ ImportReach importContainerReach( TSNode directive, Lang lang ) noexcept
             break;                                   // STOPS AT THE BOUND: past it the answer cannot change, and
         }                                            // a hostile file must not buy an unbounded parent walk
     }
+    ENSURES( reach.depth <= kMaxImportContainerDepth + 1, "the ancestor loop stops one past the bound, so a hostile file buys a bounded parent walk" );
     return reach;
 }
 
@@ -167,11 +170,14 @@ ImportSpec normaliseCFamilyImport( TSNode directive, std::string_view raw, std::
 // the extractor never read it either, so it is still not an edge: a disclosed floor, unchanged by the round.
 ImportSpec normaliseWebImport( TSNode directive, TSNode pathNode, bool insideFn, std::string_view src )
 {
+    const bool bothNodes = !ts_node_is_null( directive ) && !ts_node_is_null( pathNode );
+    EXPECTS( bothNodes, "both nodes come from one captured match" );
     ImportSpec out;
     if( kindIs( ts_node_type( directive ), "call_expression" ) )
     {
         out.text   = jsModuleLoadTarget( directive, src );
         out.isLazy = insideFn && !out.text.empty();   // kParserVer 72: a hit found inside a function body is LAZY
+        ENSURES( !out.isLazy || !out.text.empty(), "a lazy bit never rides on an empty (dropped) target" );
         return out;
     }
     out.text = importSpecifierText( pathNode, src );   // strips the one quote pair
@@ -207,7 +213,12 @@ inline bool importsFromCapture( DepDialect dialect ) noexcept
 TSNode importDirectiveOf( TSNode pathNode ) noexcept
 {
     const TSNode parent = ts_node_parent( pathNode );
-    return kindIs( ts_node_type( parent ), "arguments" ) ? ts_node_parent( parent ) : parent;
+    const bool hasParent = !ts_node_is_null( parent );
+    ASSUME( hasParent, "a captured specifier is a string or path token, never the file root" );
+    const TSNode directive = kindIs( ts_node_type( parent ), "arguments" ) ? ts_node_parent( parent ) : parent;
+    const bool hasDirective = !ts_node_is_null( directive );
+    ENSURES( hasDirective, "an `arguments` list always belongs to a call" );
+    return directive;
 }
 
 // One captured `@import.path` → the Include record plus its ABS-3 import-role use-site ref, which is
