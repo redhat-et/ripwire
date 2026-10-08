@@ -27,6 +27,7 @@
                           // strip --grep's emitGrepReport uses, reused here so the two verbs cannot diverge
 #include "prconverge.h" // W2-F: RankDisclosure + the pr_iters= / pr_converged= spellings (CLI and MCP share them)
 #include "gitmine.h"    // F3 (H2H-Graft): RecentFile — the map's <recent> rows are the churn-decay miner's own product
+#include "mapinventory.h"   // D7: the map scope's <inv> tier — computeMapInventory, kMapInventoryLegend
 
 #include <algorithm>
 #include <numeric>     // std::iota — codeFirstKeep
@@ -1953,6 +1954,11 @@ struct MapAnnotations
     // FE-B: the compact posture strips the map's via="name" comment (compactlegend.h, the via/x rows restate it), so the
     // map does not write it at all — and the --max-tokens fit, which measures this render, prices the delivered bytes.
     bool               viaLegendStripped = false;
+    // D7 MAP-INVENTORY (mapinventory.h): the map scope's inventory tier — <inv> after the ranked rows, naming or counting
+    // every indexed file they did not show, plus the program entries. Set where codeFirstRows is (the plain CLI map, MCP
+    // analyze on a clean working set, MCP rank_by=pagerank) except under --max-tokens (mapInventoryWanted). Filled by
+    // assignment, like the trailing fields above.
+    bool               inventoryTier = false;
 };
 
 // ── the code-first row pick: data_sections_cut= / next= (docs/EVALS.md "Map data Sections never crowd code out of the
@@ -2743,6 +2749,54 @@ inline bool hopSlotHasProvenEdge( const std::vector<std::uint32_t>& outOff, cons
                          []( std::uint8_t bit ) { return bit != 0; } );
 }
 
+// D7 MAP-INVENTORY: whether THIS map carries the inventory tier (mapinventory.h), decided once for both dialects. The
+// default map scope only (MapAnnotations::inventoryTier); never under in=DIR's stub (no ranked rows to complement),
+// multi-root (the roots table already partitions the paths, and a per-root inventory is a different answer), or
+// --max-tokens (its fit binary-searches top-k over the rendered bytes; an inventory that GROWS as top-k shrinks would
+// make that search non-monotone).
+inline bool mapInventoryWanted( const IngestResult& ing, const MapAnnotations& ann ) noexcept
+{
+    return ann.inventoryTier && !ann.stubSymbols && ing.rootLabels.size() < 2 && ann.maxTokensFit == nullptr;
+}
+
+// The XML <inv> element: `<inv listed= unlisted=><entry p= n=><c …/></entry>…<ls p= n= f=/>…</inv>`. Entry callees go
+// through writeMapCalleeRows, the ranked rows' own writer, so prov=/via="name"/x= read exactly as they do above.
+template <class PathRel>
+inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const MapInventory& inv, const PathRel& pathRel,
+                                  const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                                  const std::vector<std::uint8_t>* outProv, const std::vector<std::uint8_t>* outNameOnly,
+                                  std::vector<char>& esc, std::vector<std::uint32_t>& scratch )
+{
+    EXPECTS( inv.active, "the caller emits the tier only when it has a cut to inventory" );
+    w.write( "<inv listed=\"" );  w.write( std::to_string( inv.listed ) );
+    w.write( "\" unlisted=\"" );  w.write( std::to_string( inv.unlisted ) );  w.write( "\">" );
+    for( NodeId id : inv.entries )
+    {
+        const Symbol& s = ing.symbols[ id ];
+        w.write( "<entry p=\"" );  w.write( escapeXml( pathRel( s.fileId ), esc ) );
+        w.write( "\" n=\"" );      w.write( escapeXml( s.name, esc ) );  w.write( "\">" );
+        writeMapCalleeRows( w, ing, outOff[ id ], outOff[ id + 1 ], outTargets, outProv, outNameOnly, esc, scratch );
+        w.write( "</entry>" );
+    }
+    for( const MapInventoryDir& d : inv.dirs )
+    {
+        w.write( "<ls p=\"" );  w.write( escapeXml( d.dir, esc ) );
+        w.write( "\" n=\"" );   w.write( std::to_string( d.total ) );  w.write( "\"" );
+        if( !d.named.empty() )
+        {
+            std::string names;
+            for( std::uint32_t f : d.named )
+            {
+                if( !names.empty() ) { names += ','; }
+                names += inventoryBaseOf( pathRel( f ) );
+            }
+            w.write( " f=\"" );  w.write( escapeXml( names, esc ) );  w.write( "\"" );
+        }
+        w.write( "/>" );
+    }
+    w.write( "</inv>" );
+}
+
 inline void serialize( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
                        const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
                        int topK, bool mostImportantLast = false,
@@ -2854,6 +2908,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         if( !seen[f] ) { seen[f] = 1;  fileOrder.push_back( f ); }
         buckets[f].push_back( id );
     }
+    // D7: the inventory over the files the kept rows did NOT reach (`seen` is exactly the printed <f> groups)
+    const MapInventory inventory = ( mapInventoryWanted( ing, ann ) && !stubbed )
+                                 ? computeMapInventory( ing, outOff, outTargets, seen, pathRel ) : MapInventory{};
 
     // T1/§H7: the byte MODEL. It keeps two jobs and loses one. It still decides the T3 emit order below
     // (which has to be decided before any byte exists — see §H7 at estimateTokens) and it still supplies
@@ -3028,6 +3085,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( dataSecCut.cut > 0 )
     {
         legend += kDataSectionsCutLegend;   // charged to the map that carries data_sections_cut=
+    }
+    if( inventory.active )
+    {
+        legend += kMapInventoryLegend;      // D7: charged to the map that carries <inv>
     }
     // W2-F: the pr_iters= / pr_converged= definition, charged to the maps that carry the attributes — empty
     // for a lexical or HITS ordering, and the prose half only on the map whose iteration stopped short.
@@ -3335,6 +3396,21 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             stub += "/>";
             w.write( stub );
         }
+        // D7: the inventory tier rides the LOW-importance end of the document — after the rows, or before them when the
+        // map is emitted important-last (an explicit flag or the fill-aware auto flip), so the top-ranked rows keep the
+        // end position that order promises.
+        const auto writeInventory = [ & ]()
+        {
+            if( inventory.active )
+            {
+                writeMapInventoryXml( w, ing, inventory, pathRel, outOff, outTargets, outProv, outNameOnly, esc, hedgedScratch );
+            }
+        };
+        const bool inventoryFirst = !stable && effImportantLast;   // --stable's path order wins, as it does for the rows
+        if( inventoryFirst )
+        {
+            writeInventory();
+        }
         static const std::vector<std::uint32_t> kNoFiles;
         for( std::uint32_t f : ann.stubSymbols ? kNoFiles : fileOrder )
         {
@@ -3552,6 +3628,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 w.write( "</s>" );
             }
             w.write( "</f>" );
+        }
+        if( !inventoryFirst )
+        {
+            writeInventory();
         }
         w.write( "</r>" );
     };
@@ -9438,6 +9518,61 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     w.write( "]" );
 }
 
+// D7: the JSON twin of writeMapInventoryXml — `,"inv":{"listed":L,"unlisted":U,"entry":[{"p":…,"n":…,"c":[…]}],
+// "ls":[{"p":…,"n":N,"f":[…]}]}` after the "r" array. The callee objects spell exactly what a "r" row's "c" array does.
+template <class PathRel>
+inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const MapInventory& inv, const PathRel& pathRel,
+                                   const std::vector<std::uint32_t>& outOff, const std::vector<NodeId>& outTargets,
+                                   const std::vector<std::uint8_t>* outProv, const std::vector<std::uint8_t>* outNameOnly,
+                                   std::string& esc )
+{
+    EXPECTS( inv.active, "the caller emits the tier only when it has a cut to inventory" );
+    w.write( ",\"inv\":{\"listed\":" );  w.write( std::to_string( inv.listed ) );
+    w.write( ",\"unlisted\":" );         w.write( std::to_string( inv.unlisted ) );
+    w.write( ",\"entry\":[" );
+    for( std::size_t i = 0; i < inv.entries.size(); ++i )
+    {
+        const NodeId  id = inv.entries[ i ];
+        const Symbol& s  = ing.symbols[ id ];
+        w.write( i ? ",{\"p\":" : "{\"p\":" );  writeJsonStr( w, pathRel( s.fileId ), esc );
+        w.write( ",\"n\":" );                    writeJsonStr( w, s.name, esc );
+        w.write( ",\"c\":[" );
+        for( std::uint32_t e = outOff[ id ]; e < outOff[ id + 1 ]; ++e )
+        {
+            w.write( e > outOff[ id ] ? ",{\"n\":" : "{\"n\":" );  writeJsonStr( w, ing.symbols[ outTargets[ e ] ].name, esc );
+            if( outProv && e < outProv->size() && ( *outProv )[ e ] )
+            {
+                w.write( ",\"prov\":" );  writeJsonStr( w, provLabel( ( *outProv )[ e ] ), esc );
+            }
+            if( outNameOnly && e < outNameOnly->size() && ( *outNameOnly )[ e ] != 0 )
+            {
+                w.write( ",\"via\":\"name\"" );
+            }
+            w.write( "}" );
+        }
+        w.write( "]}" );
+    }
+    w.write( "],\"ls\":[" );
+    for( std::size_t i = 0; i < inv.dirs.size(); ++i )
+    {
+        const MapInventoryDir& d = inv.dirs[ i ];
+        w.write( i ? ",{\"p\":" : "{\"p\":" );  writeJsonStr( w, d.dir, esc );
+        w.write( ",\"n\":" );  w.write( std::to_string( d.total ) );
+        if( !d.named.empty() )
+        {
+            w.write( ",\"f\":[" );
+            for( std::size_t j = 0; j < d.named.size(); ++j )
+            {
+                if( j ) { w.write( "," ); }
+                writeJsonStr( w, inventoryBaseOf( pathRel( d.named[ j ] ) ), esc );
+            }
+            w.write( "]" );
+        }
+        w.write( "}" );
+    }
+    w.write( "]}" );
+}
+
 // The default-map JSON sibling of serialize() — same rank/order/bucket logic (kept a deliberate, mechanical
 // duplication per the L2 seam decision: a sibling emitter, not a shared-emission refactor of the XML path,
 // so the G5 byte-identical-default contract carries zero risk from this addition). Scope: the common single-
@@ -9510,6 +9645,9 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         if( !seen[f] ) { seen[f] = 1;  fileOrder.push_back( f ); }
         buckets[f].push_back( id );
     }
+    // D7: the XML twin's inventory, the same selection (mapinventory.h) over the same printed-file set
+    const MapInventory inventory = mapInventoryWanted( ing, ann ) ? computeMapInventory( ing, outOff, outTargets, seen, pathRel )
+                                                                  : MapInventory{};
 
     // T1/§H7: SAME byte-model the XML sibling uses, in the same two roles — the fill-order oracle and the
     // rate source. The REPORTED est_tokens is measured from the emitted bytes in PHASE 2 below, exactly as
@@ -9670,7 +9808,12 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
             }
             w.write( "]}" );
         }
-        w.write( "]}" );
+        w.write( "]" );
+        if( inventory.active )
+        {
+            writeMapInventoryJson( w, ing, inventory, pathRel, outOff, outTargets, outProv, outNameOnly, esc );
+        }
+        w.write( "}" );
     };
     // DEGRADE, one path for both failures: the header FIRST with the MODELLED estimate, the array streamed behind it.
     const auto emitModelled = [ & ]()

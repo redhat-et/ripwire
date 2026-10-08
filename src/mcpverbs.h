@@ -449,7 +449,7 @@ inline std::string analyzeToString( const std::string& root, int topK, bool stab
                                     // W2-F: the map's convergence disclosure. The CLI map carries pr_iters= and
                                     // this one must too — "the clause landed at 3 of its 5 echo sites" is the
                                     // §B4 family, and mcpclidiffcheck is the gate that keeps the two surfaces one.
-                                    /*ann=*/rw::MapAnnotations{ .prDisclosure = ix.prDisclosure, .codeFirstRows = ix.isCleanWorkingSet },
+                                    /*ann=*/rw::MapAnnotations{ .prDisclosure = ix.prDisclosure, .codeFirstRows = ix.isCleanWorkingSet, .inventoryTier = ix.isCleanWorkingSet },
                                     /*statsFirstScreen=*/true, anRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls,
                                     ix.g.outNameOnly.empty() ? nullptr : &ix.g.outNameOnly ); } );
 }
@@ -517,7 +517,7 @@ inline std::string rankByText( const std::string& root, std::string_view mode, i
                                     ix.g.bindLabel.empty() ? nullptr : &ix.g.bindLabel,
                                     /*autoOrder=*/false, /*outEstTokens=*/nullptr,
                                     /*extraPayloadTokens=*/0,
-                                    /*ann=*/rw::MapAnnotations{ .rankByLabel = rankByLabel, .prDisclosure = disclosure, .codeFirstRows = rankByLabel == nullptr },   // pagerank: the map scope's code-first pick
+                                    /*ann=*/rw::MapAnnotations{ .rankByLabel = rankByLabel, .prDisclosure = disclosure, .codeFirstRows = rankByLabel == nullptr, .inventoryTier = rankByLabel == nullptr },   // pagerank: the map scope's code-first pick
                                     /*statsFirstScreen=*/true, rbRootArg, &ix.g.locPinOut, ix.g.externalCalls, &ix.g.declinedOut, ix.g.gateDeclinedCalls,
                                     ix.g.outNameOnly.empty() ? nullptr : &ix.g.outNameOnly ); } );
 }

@@ -1872,6 +1872,7 @@ int runDefaultMap( const MainDispatch& d )
     mapAnn.viaLegendStripped = cfg.legend == "compact" && !cfg.json;   // FE-B: the rewrite would strip the map's via comment
     mapAnn.notesDegraded = d.notesDegraded;   // L3 follow-up (CodeRabbit 4053600616): onto every <r> this run emits
     mapAnn.codeFirstRows = isDefaultMapScope;   // the code-first row pick + its data_sections_cut= / next= (serialize.h)
+    mapAnn.inventoryTier = isDefaultMapScope;   // D7: the <inv> tier (serialize.h mapInventoryWanted drops it under --max-tokens)
     // C1-b (2026-09-12): --in=DIR — the scoped block and the map stub, filled by assignment like seed. The two next= strings
     // outlive every serialize() call below (mapAnn holds views into them). The scoped next= is the SAME run at the next
     // offset, page size carried when the caller set one; the stub's next= is the same run without in= (the map it stubbed).
