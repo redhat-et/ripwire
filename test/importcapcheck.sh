@@ -443,6 +443,281 @@ else
     no "non-deterministic output"
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# JS/TS SLICE (DepDialect::Web) — TypeScript, TSX, JavaScript and the .astro frontmatter.
+#
+# WHAT THIS PINS. `import … from 'x'`, the re-exports (`export * from`, `export { a as b } from`,
+# `export type { T } from`), and the CommonJS / dynamic `require('x')` / `import('x')` no longer come from
+# captureIncludes' walk (directiveTargetOf's import_statement-source / export_statement / call_expression
+# branches). They come from the same `@import.path` name, three patterns per queries/{typescript,tsx,
+# javascript}/tags.scm, normalised by the DepDialect::Web arm of src/ingest_importcap.h. The EMITTED edges
+# are exactly the ones the walk emitted, for every spelling — and for every spelling the walk did NOT emit:
+#
+#   J1  the Web patterns are COMPILED IN, and the walk's TS/JS branches are GONE from src/
+#   J2  exact edge list, in source order, for .ts .js .tsx .mjs .cjs .jsx and the .astro frontmatter —
+#       ES default/named/namespace/side-effect/type imports, three re-export spellings, CommonJS in every
+#       container shape the walk entered (declaration, assignment, export, callback, await, if/try/for…)
+#   J3  THE NEGATIVES — the query matches ANY `x('s')` call at ANY depth; every `neg_*` specifier below is
+#       a shape the walk never turned into an edge (member callee, `.foo` chained on the call, ternary,
+#       array, two arguments, a comment before the string, template literal, computed, `require.resolve`,
+#       a `new` argument, TS `import x = require()`, a `declare module` body, a class method) and none may
+#       become one. The leading text gate (callee is `require`/`import`) and the reach rule are what hold.
+#   J4  the LAZY bit — a require()/import() written inside a function body is lazy="1" on --impact's import
+#       tier; a top-level one is lazy="0"; one file required both ways is lazy="0" (the pair rule)
+#   J5  the use-site half — --uses reports the import-role ref of a named import
+#   J6  the DEPTH BOUND on blocks — kept at 255 and 256 containers, cut AND announced at 257, as the walk did
+#   J7  the two DELIBERATE disclosure differences (same two as the C-family arm 12c, same reason)
+#   J8  cache round-trip, a pre-change binary's cache accepted (no kParserVer bump), determinism
+#
+# The expected lists are the SPECIFICATION and were read off the pre-change binary, never reasoned out: this
+# slice is a refactor, so main's set is the contract. The `neg_*` / `lazy_*` / `cjs_*` names say what each
+# edge (or non-edge) is, so a diff reads without opening the fixture.
+
+web_fixture() {   # $1 = an empty directory
+    local W="$1"
+    mkdir -p "$W"
+    cat > "$W/main.ts" <<'TS'
+import def from "./es_default";
+import { named1, named2 as alias2 } from "./es_named";
+import * as ns from "./es_namespace";
+import "./es_sideeffect";
+import type { T } from "./es_type_named";
+import type DefT from "./es_type_default";
+import { type U, V } from "./es_inline_type";
+export * from "./re_star";
+export * as hns from "./re_star_as";
+export { x as y } from "./re_named_as";
+export type { Z } from "./re_type";
+import eq = require("./neg_import_equals");
+import type eq2 = require("./neg_import_equals_type");
+export = ns;
+const r1 = require("./cjs_const");
+const { q1, q2 } = require("./cjs_destructured");
+var r2 = require('./cjs_var_single');
+require("./cjs_bare");
+module.exports = require("./cjs_module_exports");
+const dyn = await import("./dyn_await");
+const opt = require?.("./cjs_optional_call");
+const memb = require("./neg_member").foo;
+const tern = cond ? require("./neg_ternary") : null;
+const arr = [require("./neg_array")];
+const two = require("./neg_two_args", "./neg_second");
+const cm = require(/*c*/ "./neg_comment");
+const tpl = require(`./neg_template`);
+const nonlit = require(neg_variable);
+const other = foo.require("./neg_foo_require");
+const cat = require("./neg_concat" + sfx);
+const res = require.resolve("./neg_resolve");
+const nw = new Foo(require("./neg_new_arg"));
+const nest = foo(bar(require("./fn_arg_nested")));
+function f() { return require("./lazy_function"); }
+const g2 = () => import("./lazy_arrow");
+class K { m() { return require("./neg_class_method"); } }
+const o = { get G() { return require("./lazy_getter"); } };
+if (x) { require("./if_then"); } else { require("./if_else"); }
+try { require("./try_body"); } catch (e) { require("./catch_body"); }
+for (;;) { require("./for_body"); }
+switch (x) { case 1: require("./switch_case"); }
+declare module "amb" { import q from "./neg_ambient"; }
+namespace NS { import w = require("./neg_ns_equals"); const z2 = require("./neg_ns_const"); }
+export default require("./export_default_require");
+export const ex = require("./export_const_require");
+export function ef() { return import("./export_fn_dynamic"); }
+foo(function () { require("./callback_fn"); });
+foo(() => require("./callback_arrow"), require("./callback_second"));
+const pe = (require("./paren_require"));
+const aw = await require("./await_require");
+label: require("./labeled");
+TS
+    cat > "$W/main.js" <<'JS'
+import def from "./es_default";
+import { named1, named2 as alias2 } from "./es_named";
+import * as ns from "./es_namespace";
+import "./es_sideeffect";
+export * from "./re_star";
+export * as hns from "./re_star_as";
+export { x as y } from "./re_named_as";
+const r1 = require("./cjs_const");
+const { q1, q2 } = require("./cjs_destructured");
+require("./cjs_bare");
+module.exports = require("./cjs_module_exports");
+const dyn = await import("./dyn_await");
+const memb = require("./neg_member").foo;
+const arr = [require("./neg_array")];
+const two = require("./neg_two_args", "./neg_second");
+const cm = require(/*c*/ "./neg_comment");
+const nonlit = require(neg_variable);
+function f() { return require("./lazy_function"); }
+const g2 = () => import("./lazy_arrow");
+class K { m() { return require("./neg_class_method"); } }
+exports.run = function () { return require("./lazy_exports_fn"); };
+JS
+    cat > "$W/comp.tsx" <<'TSX'
+import React from "react";
+import { Button } from "./tsx_button";
+export { Card } from "./tsx_card";
+export const View = () => <Button onClick={() => import("./tsx_lazy")}>{require("./neg_tsx_jsx_child")}</Button>;
+const side = require("./tsx_cjs");
+TSX
+    printf 'import m from "./mjs_import";\nexport * from "./mjs_reexport";\nconst c = require("./mjs_cjs");\n' > "$W/mod.mjs"
+    printf 'const a = require("./cjs_file");\nmodule.exports = { get b() { return require("./cjs_lazy"); } };\n' > "$W/mod.cjs"
+    printf 'import J from "./jsx_import";\nconst V = () => <J/>;\n' > "$W/view.jsx"
+    printf '%s\n' '---' 'import A from "./astro_import";' 'const m = require("./astro_require");' 'export * from "./astro_reexport";' '---' '<div>{A}</div>' > "$W/page.astro"
+    # every specifier above names a real file, so each edge RESOLVES and the lazy bit and --uses are observable
+    local spec
+    for spec in $(cat "$W"/main.ts "$W"/main.js "$W"/comp.tsx "$W"/mod.mjs "$W"/mod.cjs "$W"/view.jsx "$W"/page.astro \
+                  | grep -o '"\./[A-Za-z_0-9]*"\|'"'"'\./[A-Za-z_0-9]*'"'" | tr -d "\"'" | sort -u); do
+        printf 'export const %s = 1;\n' "${spec#./}" > "$W/${spec#./}.js"
+    done
+}
+
+# The expected Include targets per file, in source order, as one space-separated line each — read off the
+# PRE-CHANGE binary on exactly this fixture. 36 / 15 / 4 / 3 / 2 / 1 / 3 edges.
+W_MAIN_TS='./es_default ./es_named ./es_namespace ./es_sideeffect ./es_type_named ./es_type_default ./es_inline_type ./re_star ./re_star_as ./re_named_as ./re_type ./cjs_const ./cjs_destructured ./cjs_var_single ./cjs_bare ./cjs_module_exports ./dyn_await ./cjs_optional_call ./fn_arg_nested ./lazy_function ./lazy_arrow ./lazy_getter ./if_then ./if_else ./try_body ./catch_body ./for_body ./export_default_require ./export_const_require ./export_fn_dynamic ./callback_fn ./callback_arrow ./callback_second ./paren_require ./await_require ./labeled'
+W_MAIN_JS='./es_default ./es_named ./es_namespace ./es_sideeffect ./re_star ./re_star_as ./re_named_as ./cjs_const ./cjs_destructured ./cjs_bare ./cjs_module_exports ./dyn_await ./lazy_function ./lazy_arrow ./lazy_exports_fn'
+W_COMP_TSX='react ./tsx_button ./tsx_card ./tsx_cjs'
+W_MOD_MJS='./mjs_import ./mjs_reexport ./mjs_cjs'
+W_MOD_CJS='./cjs_file ./cjs_lazy'
+W_VIEW_JSX='./jsx_import'
+W_PAGE_ASTRO='./astro_import ./astro_require ./astro_reexport'
+
+WEB="$TMP/web"; web_fixture "$WEB"
+"$BIN" "$WEB" --deps --no-cache > "$TMP/web.deps.xml" 2> "$TMP/web.deps.err"
+web_incs(){ sed 's/<f /\n<f /g' "$TMP/web.deps.xml" | grep "^<f p=\"$1\"" | grep -o '<inc t="[^"]*"' | sed 's/<inc t="//; s/"$//' | tr '\n' ' ' | sed 's/ $//'; }
+
+# ── J1: the Web patterns are COMPILED IN, and the walk's TS/JS branches are gone ───────────────────────
+# `source: (string) @import.path` is the line two of the three patterns share (import_statement and
+# export_statement) in each of the three embedded query files; a pre-change binary carries none (measured: 0
+# vs 6). The C-family patterns never contain it, so unlike the C-family arm 1 this one is RED on a binary
+# without the JS/TS slice.
+WEB_PATTERNS=$(grep -ao 'source: (string) @import\.path' "$BIN" | wc -l | tr -d '[:space:]')
+if [ -n "$WEB_PATTERNS" ] && [ "$WEB_PATTERNS" -ge 6 ]; then
+    ok "J1: the JS/TS import patterns are in the binary's embedded tags.scm ($WEB_PATTERNS occurrences; 0 on a pre-change build)"
+else
+    no "J1: expected >= 6 occurrences of the JS/TS @import.path patterns in the binary, got '${WEB_PATTERNS:-none}'"
+fi
+for gone in 'kindIs( t, "export_statement" )' 'target = jsModuleLoadTarget( n, src );'; do
+    if grep -rqF "$gone" "$ROOT/src"; then
+        no "J1: the walk's TS/JS branch \`$gone\` is still in src/ — it should have been removed with this language"
+    else
+        ok "J1: the walk's TS/JS branch is gone from src/ ($gone)"
+    fi
+done
+
+# ── J2 + J3: exact edge list per file, which also pins every negative ──────────────────────────────────
+WEB_BAD=0
+for pair in "main.ts:$W_MAIN_TS" "main.js:$W_MAIN_JS" "comp.tsx:$W_COMP_TSX" "mod.mjs:$W_MOD_MJS" \
+            "mod.cjs:$W_MOD_CJS" "view.jsx:$W_VIEW_JSX" "page.astro:$W_PAGE_ASTRO"; do
+    f=${pair%%:*}; want=${pair#*:}
+    got=$(web_incs "$f")
+    if [ -z "$got" ] || [ "$got" != "$want" ]; then
+        WEB_BAD=1
+        no "J2: $f Include targets differ from the pre-change set"
+        printf '    expected: %s\n    got:      %s\n' "$want" "${got:-<none>}"
+    fi
+done
+[ "$WEB_BAD" -eq 0 ] && ok "J2: exact Include set and order for .ts .js .tsx .mjs .cjs .jsx and the .astro frontmatter (64 edges)"
+NEG=$(grep -o '<inc t="[^"]*neg_[^"]*"' "$TMP/web.deps.xml" | wc -l | tr -d '[:space:]')
+EDGES=$(grep -o '<inc t=' "$TMP/web.deps.xml" | wc -l | tr -d '[:space:]')
+if [ "$NEG" = "0" ] && [ "${EDGES:-0}" -eq 64 ]; then
+    ok "J3: no neg_* specifier became an edge (the query is broader than a module load; the text gate and the reach rule hold)"
+else
+    no "J3: neg_* edges=${NEG:-?} (want 0), total edges=${EDGES:-?} (want 64)"
+fi
+
+# ── J4: the LAZY bit, re-derived from ancestry ────────────────────────────────────────────────────────
+# Include::isLazy came from captureIncludes' sticky `insideFn`; the tags pass has no walk frame, so
+# importContainerReach recomputes it from the captured call's ancestors. Observable one level up: --impact's
+# import tier prints lazy= per importer edge.
+LZ="$TMP/lz"; mkdir -p "$LZ"
+printf 'const eager = require("./eager");\nfunction later() { return require("./lazy_only"); }\nfunction both() { return require("./both"); }\nconst b2 = require("./both");\nmodule.exports = { later, both, eager, b2 };\n' > "$LZ/entry.js"
+for n in eager lazy_only both; do printf 'function %s_fn() { return 1; }\nmodule.exports = %s_fn;\n' "$n" "$n" > "$LZ/$n.js"; done
+LZ_BAD=0
+for pair in eager_fn:0 lazy_only_fn:1 both_fn:0; do
+    s=${pair%%:*}; want=${pair#*:}
+    got=$("$BIN" "$LZ" --impact="$s" --no-cache 2>/dev/null | grep -o '<f via="import" p="entry\.js" lazy="[01]"' | grep -o 'lazy="[01]"' | head -1)
+    if [ "$got" != "lazy=\"$want\"" ]; then LZ_BAD=1; no "J4: --impact=$s importer edge is ${got:-absent}, want lazy=\"$want\""; fi
+done
+[ "$LZ_BAD" -eq 0 ] && ok "J4: lazy bit — top-level require lazy=0, function-body require lazy=1, a file required both ways lazy=0"
+
+# ── J5: the use-site half ────────────────────────────────────────────────────────────────────────────
+WU=$("$BIN" "$WEB" --uses=es_named --no-cache 2>/dev/null | grep -o '<u role="import" p="main\.\(ts\|js\):2"' | wc -l | tr -d '[:space:]')
+if [ "${WU:-0}" -eq 2 ]; then
+    ok "J5: --uses reports the import-role ref of a named import in both main.ts:2 and main.js:2"
+else
+    no "J5: --uses=es_named import-role rows = ${WU:-?} (want 2)"
+fi
+
+# ── J6: the DEPTH BOUND, on nested blocks ───────────────────────────────────────────────────────────
+# `{ { … require('./deep') … } }` — each block is a statement_block, and the statement is an
+# expression_statement, so n blocks put the call under n+1 containers. The walk captured a directive under
+# exactly 256 containers and cut at 257; importContainerReach must agree. n = 254, 255 are kept; 256 is
+# cut and announced.
+WB="$TMP/wbound"
+web_bound(){ # $1=blocks
+    mkdir -p "$WB/$1"; printf 'export const deep = 1;\n' > "$WB/$1/deep.js"
+    local i=0
+    { while [ "$i" -lt "$1" ]; do printf '{'; i=$((i + 1)); done
+      printf ' require("./deep"); '
+      i=0; while [ "$i" -lt "$1" ]; do printf '}'; i=$((i + 1)); done; printf '\n'; } > "$WB/$1/a.js"
+}
+WB_BAD=0
+for n in 254 255 256; do
+    web_bound "$n"
+    e=$("$BIN" "$WB/$n" --deps    --no-cache 2>/dev/null | grep -o '<inc ' | wc -l | tr -d '[:space:]')
+    f=$("$BIN" "$WB/$n" --skipped --no-cache 2>/dev/null | grep -c 'why="extract-partial"' | tr -d '[:space:]' || true)
+    if [ "$n" -le 255 ]; then want_e=1; want_f=0; else want_e=0; want_f=1; fi
+    if [ "$e" != "$want_e" ] || [ "$f" != "$want_f" ]; then
+        WB_BAD=1
+        no "J6: $n nested blocks: edge=$e extract-partial=$f (want $want_e/$want_f)"
+    fi
+done
+[ "$WB_BAD" -eq 0 ] && ok "J6: depth bound — kept under 255 and 256 containers, cut AND announced under 257 (edges identical to the walk's)"
+
+# ── J7: the two DELIBERATE disclosure differences, in both directions (the C-family arm 12c, for JS) ────
+# (i) QUIETER: `require('./deep')` is ITSELF a container, so the walk refused to descend into it from depth
+#     256 and announced, although the edge was kept and nothing was dropped. n=255 above is that shape: edge
+#     kept, and this binary says nothing because nothing was lost (the walk said extract-partial).
+# (ii) LOUDER: 300 blocks inside a class METHOD. The walk never entered the class (class_declaration is not
+#     an import container) so it said nothing; the ancestor loop reaches the bound first and announces. The
+#     safe direction — a floor that says so — and the same trade the C-family slice accepted.
+WL="$TMP/wloud"; mkdir -p "$WL"; printf 'export const deep = 1;\n' > "$WL/deep.js"
+{ printf 'class K { m() { '; i=0; while [ "$i" -lt 300 ]; do printf '{'; i=$((i + 1)); done
+  printf ' require("./deep"); '; i=0; while [ "$i" -lt 300 ]; do printf '}'; i=$((i + 1)); done; printf ' } }\n'; } > "$WL/a.js"
+LE=$("$BIN" "$WL" --deps    --no-cache 2>/dev/null | grep -o '<inc ' | wc -l | tr -d '[:space:]')
+LF=$("$BIN" "$WL" --skipped --no-cache 2>/dev/null | grep -c 'why="extract-partial"' | tr -d '[:space:]' || true)
+QF=$("$BIN" "$WB/255" --skipped --no-cache 2>/dev/null | grep -c 'why="extract-partial"' | tr -d '[:space:]' || true)
+if [ "$LE" = "0" ] && [ "$LF" = "1" ] && [ "$QF" = "0" ]; then
+    ok "J7: disclosure differences hold — silent when the edge was kept (255 blocks), loud when the bound cut an unreachable import (class method)"
+else
+    no "J7: class-method-under-300: edges=$LE partial=$LF (want 0/1); 255-blocks partial=$QF (want 0)"
+fi
+
+# ── J8: cache round-trip and a pre-change cache ─────────────────────────────────────────────────────
+WC="$TMP/web.cache.bin"
+"$BIN" "$WEB" --cache="$WC" --deps > "$TMP/web.cold.xml" 2>/dev/null
+"$BIN" "$WEB" --cache="$WC" --deps > "$TMP/web.warm.xml" 2>/dev/null
+if cmp -s "$TMP/web.cold.xml" "$TMP/web.warm.xml" && cmp -s "$TMP/web.cold.xml" "$TMP/web.deps.xml"; then
+    ok "J8: warm == cold == --no-cache on --deps for the JS/TS fixture (isLazy round-trips)"
+else
+    no "J8: JS/TS --deps differs between cold, warm and --no-cache"
+fi
+if [ -n "$BASE_BIN" ] && [ -x "$BASE_BIN" ]; then
+    WP="$TMP/web.pre.bin"; rm -f "$WP"
+    "$BASE_BIN" "$WEB" --cache="$WP" --deps >/dev/null 2>&1
+    cp "$WP" "$TMP/web.pre.bin.copy"
+    "$BIN" "$WEB" --cache="$WP" --deps > "$TMP/web.prewarm.xml" 2>/dev/null
+    if cmp -s "$TMP/web.prewarm.xml" "$TMP/web.deps.xml" && cmp -s "$WP" "$TMP/web.pre.bin.copy"; then
+        ok "J8: a pre-change binary's JS/TS cache is accepted unchanged and reads identically — no kParserVer bump is owed"
+    else
+        no "J8: a pre-change JS/TS cache reads differently or was rewritten — extraction output changed, kParserVer must be bumped"
+    fi
+else
+    skip "J8: pre-change-cache arm for JS/TS (set RIPWIRE_BASE_BIN=<path to a pre-change ripwire> to run it)"
+fi
+"$BIN" "$WEB" --no-cache --deps > "$TMP/web.d2.xml" 2>/dev/null
+cmp -s "$TMP/web.deps.xml" "$TMP/web.d2.xml" && ok "J8: deterministic (two --no-cache JS/TS runs identical)" || no "J8: non-deterministic JS/TS output"
+
 # ── well-formed XML ───────────────────────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/cold.xml" 2>/dev/null; then ok "xml well-formed"; else no "xml malformed"; fi

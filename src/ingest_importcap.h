@@ -33,18 +33,26 @@
 // by one capture — a capture names one node, and a group is many. No enum value reserves them: an unused
 // arm that no query can reach is a lie about what the vocabulary supports.
 //
+// SECOND MEMBER: DepDialect::Web (TypeScript, TSX, JavaScript, the .astro frontmatter that rides TypeScript).
+// Its three spellings are three patterns on the SAME capture name — `import … from 'x'`, a re-export
+// `export … from 'x'`, and the CommonJS / dynamic call `require('x')` / `import('x')` — and one normaliser.
+// Neither `@import.alias` nor `@import.names` is used for it, for the same reason C-family has none: the
+// Include record a TS/JS import produces names a MODULE and nothing else. The bound names (`import { a as b }`)
+// are a different record — captureJsImportFacts' RawBinds, in src/ingest_jsimports.h — which this slice does
+// not touch, so there is no current JS/TS semantics for those two names to carry yet.
+//
 // ORDERING. ts_query_cursor_next_match yields matches by the match's start byte, so a capture arrives in
 // SOURCE order and the emitted Includes do too — the same order captureIncludes' walk produced, because
 // emitCapturedImport runs straight from the capture dispatch with nothing staging it in between. The
 // import-role use-site refs move into the tags pass's own window, where orderReferences re-sorts them by
 // (startByte, name, role, isInherit) — a total key, so the move cannot reorder a published row.
 //
-// WHAT THE WALK STILL OWNS, AND DOES NOT TRAVEL WITH THE MOVE. Three things captureIncludes computed from
+// WHAT THE WALK USED TO OWN, AND DOES NOT TRAVEL WITH THE MOVE. Three things captureIncludes computed from
 // its own frame are re-derived here rather than dropped: the import-container nesting bound
-// (importContainerDepth + the same DISCLOSE, below), the lazy bit a TS/JS require needs from `insideFn`,
-// and Ruby's innermost-open index for the constant-receiver dedupe. The first is recovered now because it
-// is one parent hop per import; the other two are why a language still on the walk cannot move until the
-// emission can re-derive them from ancestry too — the tags pass never sees a walk frame.
+// (importContainerReach + the same DISCLOSE, below), the lazy bit a TS/JS require needs from `insideFn`
+// (the same ancestor loop, one more bit), and Ruby's innermost-open index for the constant-receiver dedupe.
+// The first two are recovered because each is one parent hop per import; the third is why Ruby cannot move
+// until the emission can re-derive it from ancestry too — the tags pass never sees a walk frame.
 
 #include "depdialect.h"   // DepDialect + dependencyDialect — the unit one normaliser is written per
 
@@ -54,8 +62,16 @@ namespace rw
 namespace
 {
 
-// The import-container REACH of a captured directive, and its DEPTH — the walk's own two rules,
-// re-derived from the captured node because the walk no longer runs for this language.
+// What importContainerReach reads off one directive's ancestry.
+struct ImportReach
+{
+    std::uint16_t depth     = 0;       // containers above the directive, stopped at kMaxImportContainerDepth + 1
+    bool          reachable = true;    // every node between the file root and the directive is an import container
+    bool          insideFn  = false;   // some such container is a function body (kJsFunctionContainers): TS/JS lazy bit
+};
+
+// The import-container REACH of a captured directive, its DEPTH and its function-body bit — the walk's own
+// rules, re-derived from the captured node because the walk no longer runs for this language.
 //
 // REACH. captureIncludes seeded the frame stack with root's DIRECT children and then entered only
 // `isImportContainer` nodes, so a directive was reachable exactly when every node between the file root
@@ -71,10 +87,9 @@ namespace
 // The file root is deliberately NOT tested: its children are what the walk always started from, so
 // `isImportContainer(root)` being false must not reject a file-scope include. The loop stops when
 // `p`'s own parent is null, which is the root.
-std::uint16_t importContainerReach( TSNode directive, Lang lang, bool& reachable ) noexcept
+ImportReach importContainerReach( TSNode directive, Lang lang ) noexcept
 {
-    std::uint16_t depth     = 0;
-    reachable = true;
+    ImportReach reach;
     for( TSNode p = ts_node_parent( directive ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
     {
         if( ts_node_is_null( ts_node_parent( p ) ) )
@@ -83,15 +98,18 @@ std::uint16_t importContainerReach( TSNode directive, Lang lang, bool& reachable
         }
         if( !isImportContainer( lang, ts_node_type( p ) ) )
         {
-            reachable = false;                       // the walk would not have entered this node
+            reach.reachable = false;                 // the walk would not have entered this node
             break;
         }
-        if( ++depth > kMaxImportContainerDepth )
+        // The walk's `childInsideFn = frame.insideFn || isFunctionLike( lang, t )` is sticky downward, so the
+        // directive is inside a function exactly when ANY container above it is a function-body kind.
+        reach.insideFn = reach.insideFn || isFunctionLike( lang, ts_node_type( p ) );
+        if( ++reach.depth > kMaxImportContainerDepth )
         {
             break;                                   // STOPS AT THE BOUND: past it the answer cannot change, and
         }                                            // a hostile file must not buy an unbounded parent walk
     }
-    return depth;
+    return reach;
 }
 
 // One captured `@import.path`, normalised. `text` empty is the "not an import after all" signal and the
@@ -101,6 +119,7 @@ struct ImportSpec
 {
     std::string text;
     bool        isAngle = false;   // CFamily: <x.h> is external (unresolvable without a build system), "x.h" is not
+    bool        isLazy  = false;   // Web: a require()/import() CALL written inside a function body (Include::isLazy)
 };
 
 // ── DepDialect::CFamily ───────────────────────────────────────────────────────────────────────────────
@@ -131,18 +150,64 @@ ImportSpec normaliseCFamilyImport( TSNode directive, std::string_view raw, std::
     return out;
 }
 
+// ── DepDialect::Web ──────────────────────────────────────────────────────────────────────────────────
+// TypeScript, TSX, JavaScript and the .astro frontmatter. Two directive shapes reach this normaliser, told
+// apart by the DIRECTIVE node (the captured string's statement, or its call):
+//   import_statement / export_statement — `import … from 'x'`, `import 'x'`, `import type …`, and the re-exports
+//       `export * from`, `export * as n from`, `export { a as b } from`, `export type { T } from`. The grammar
+//       gives all of them the same `source:` string, which is the whole capture; every other export_statement
+//       has no `source:` and is not matched by the query at all.
+//   call_expression — the CommonJS `require('x')` and the dynamic `import('x')`. A query cannot say "the
+//       callee's TEXT is require" (tags-pass predicates never run), so the three guards that keep an ordinary
+//       call out of the dependency graph stay C++: jsModuleLoadTarget (src/ingest_relations.h), UNCHANGED by
+//       this round and shared with captureJsImportFacts, reads the callee text, the argument count and the
+//       string. The query only says where a candidate call is; the guards say whether it is a module load.
+//       The lazy bit (a hit inside a function body) comes from the caller's ancestor walk, never from here.
+// `import x = require('y')` (TS) is `import_require_clause` with its own `source:` and matches no pattern —
+// the extractor never read it either, so it is still not an edge: a disclosed floor, unchanged by the round.
+ImportSpec normaliseWebImport( TSNode directive, TSNode pathNode, bool insideFn, std::string_view src )
+{
+    ImportSpec out;
+    if( kindIs( ts_node_type( directive ), "call_expression" ) )
+    {
+        out.text   = jsModuleLoadTarget( directive, src );
+        out.isLazy = insideFn && !out.text.empty();   // kParserVer 72: a hit found inside a function body is LAZY
+        return out;
+    }
+    out.text = importSpecifierText( pathNode, src );   // strips the one quote pair
+    return out;
+}
+
 // ── the dispatch: ONE normaliser per DepDialect ──────────────────────────────────────────────────────
-// CFamily is the only dialect that has moved over so far; every other arm returns an empty ImportSpec,
+// CFamily and Web are the dialects that have moved over so far; every other arm returns an empty ImportSpec,
 // which is what makes the capture INERT rather than wrong on a language whose tags.scm has not adopted
 // `@import.path` yet. Each `case` is deleted as its language moves, and the compiler then names every
 // other dialect still to do — the same "one language at a time" landing the issue asks for.
-ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::string_view raw, std::string_view src )
+ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, TSNode pathNode, bool insideFn, std::string_view src )
 {
     switch( dialect )
     {
-        case DepDialect::CFamily: return normaliseCFamilyImport( directive, raw, src );
-        default:                  return {};   // no language but C-family captures @import.path yet
+        case DepDialect::CFamily: return normaliseCFamilyImport( directive, nodeTextOf( pathNode, src ), src );
+        case DepDialect::Web:     return normaliseWebImport( directive, pathNode, insideFn, src );
+        default:                  return {};   // no other language captures @import.path yet
     }
+}
+
+// True for a dialect whose directives come from `@import.path` and NOT from captureIncludes' walk. The one
+// place the walk is switched off (captureSideFacts) asks this, so a dialect cannot be moved in the normaliser
+// above and still be walked a second time, or walked-off without a normaliser.
+inline bool importsFromCapture( DepDialect dialect ) noexcept
+{
+    return dialect == DepDialect::CFamily || dialect == DepDialect::Web;
+}
+
+// The DIRECTIVE a captured specifier belongs to — the node both records are SITED at. For a C include or a
+// JS import/re-export it is the specifier's parent; for a call it is the call, one hop further, because the
+// specifier sits in the call's `arguments`.
+TSNode importDirectiveOf( TSNode pathNode ) noexcept
+{
+    const TSNode parent = ts_node_parent( pathNode );
+    return kindIs( ts_node_type( parent ), "arguments" ) ? ts_node_parent( parent ) : parent;
 }
 
 // One captured `@import.path` → the Include record plus its ABS-3 import-role use-site ref, which is
@@ -178,19 +243,19 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::
 void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::string_view src,
                          std::vector<Include>& includes, std::vector<RawRef>& refs, ExtractShortfall& shortfall )
 {
-    const TSNode directive = ts_node_parent( pathNode );
-    bool           reachable = false;
-    if( importContainerReach( directive, lang, reachable ) > kMaxImportContainerDepth )
+    const TSNode      directive = importDirectiveOf( pathNode );
+    const ImportReach reach     = importContainerReach( directive, lang );
+    if( reach.depth > kMaxImportContainerDepth )
     {
         DISCLOSE( shortfall, ExtractShortfall::DisclosureWhy::ImportNestingTooDeep,
                   "ingest: import-container nesting past the depth bound — deeper imports not captured" );
         return;   // the same degrade the walk performed: not captured, file still indexed
     }
-    if( !reachable )
+    if( !reach.reachable )
     {
         return;   // a non-container ancestor the walk would never have entered — see importContainerReach
     }
-    const ImportSpec spec = normaliseImportSpecifier( dependencyDialect( lang ), directive, nodeTextOf( pathNode, src ), src );
+    const ImportSpec spec = normaliseImportSpecifier( dependencyDialect( lang ), directive, pathNode, reach.insideFn, src );
     if( spec.text.empty() )
     {
         return;
@@ -205,7 +270,7 @@ void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::
         r.name      = std::move( name );
         refs.push_back( std::move( r ) );
     }
-    includes.push_back( { fileId, spec.isAngle, false, false, ts_node_start_byte( directive ), false, spec.text } );
+    includes.push_back( { fileId, spec.isAngle, spec.isLazy, false, ts_node_start_byte( directive ), false, spec.text } );
 }
 
 }   // namespace

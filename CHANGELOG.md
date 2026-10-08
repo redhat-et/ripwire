@@ -1136,6 +1136,43 @@ on both `--no-cache` and `--deps`. The new `test/importcapcheck.sh` pins the sha
 `#import` spellings, a macro include, guarded arms, both dead arms, the `#pragma`/`#error` gate, the import-role
 use-site half, cache round-trip, determinism) over a 14-edge fixture it builds itself.
 
+### Changed — the TypeScript / JavaScript import edges come from the shared capture too (#358, JS/TS slice)
+
+The second language family onto the `@import.path` vocabulary the C-family slice introduced. `import … from 'x'`, the
+re-exports (`export * from`, `export * as n from`, `export { a as b } from`, `export type { T } from`) and the CommonJS /
+dynamic `require('x')` / `import('x')` are now three patterns on the one capture name in `queries/{typescript,tsx,
+javascript}/tags.scm`, normalised by a `DepDialect::Web` arm in `src/ingest_importcap.h`. `captureIncludes` no longer
+walks a TypeScript or JavaScript file at all, and the three branches of `directiveTargetOf` that read it are gone.
+`jsModuleLoadTarget` stays: it is the text gate for the call spelling, and `captureJsImportFacts` (the bindings a
+destructured `require` makes) still reads it.
+
+A query cannot say "the callee's text is `require`" (tags-pass predicates never run), so the pattern matches any bare
+call with a leading string and the three guards that keep an ordinary call out of the graph stay C++: the callee is
+the bare name `require`/`import`, there is exactly one argument, and it is a string. Two more things the walk owned
+are re-derived from the captured node's ancestry, not dropped: the **container reach** (the walk entered only an
+allowlist, so `require('x').y`, `[require('x')]`, `a ? require('x') : b`, a class method body and a `declare module`
+body were never edges, and still are not) and the **lazy bit** (a `require`/`import` call written inside a function
+body is `lazy="1"` on `--impact`'s import tier, from the same ancestor loop that checks the reach).
+
+**Not changed, deliberately.** `import x = require('y')` (TypeScript) is not an edge, before or after: the grammar
+gives it its own `import_require_clause`, which the walk never read and no pattern here matches. `@import.alias` and
+`@import.names` are not used: the Include record of a JS/TS import names a module and nothing else; the bound names
+are a different record (`captureJsImportFacts`, untouched).
+
+**The same disclosure difference as the C-family slice, in `--skipped` only.** `extract-partial` for import nesting now
+fires only when a captured import is actually cut at the bound. A `require('x')` is itself a container to the old walk,
+so it announced at 254 and 255 nested blocks although the edge was kept; this does not. In the other direction, an
+import under 300 nested blocks inside a class method is announced (the ancestor loop reaches the bound before it can
+learn the walk would never have entered the class). Both are pinned in `test/importcapcheck.sh`.
+
+**Dependency edges are byte-identical.** Verified with both binaries against unchanged trees: `--deps`, `--uses`,
+`--impact`, `--callers`, `--zoom`, `--report` and `--for` over three TypeScript repositories, the CommonJS tree of a
+global npm install, two npm cache trees, a `.astro` tree and this repository's `test/` fixtures. `test/importcapcheck.sh`
+gains a JS/TS section (J1–J8): an exact edge list, in source order, for `.ts .js .tsx .mjs .cjs .jsx` and a `.astro`
+frontmatter (64 edges, with the `neg_*` shapes that must stay out), the lazy bit, the use-site half, the depth bound at
+254/255/256 blocks, the two disclosure differences, and cache round-trip with a pre-change cache accepted unchanged
+(no `kParserVer` bump).
+
 ### Changed — `--affected` and `--test-gate` mark which tests to run first (`run_first=`)
 
 A tests-to-run answer listed every reaching test in evidence order (changed, partner, then `hops=` ascending), 80 to
