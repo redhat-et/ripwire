@@ -522,8 +522,6 @@ if (x) { require("./if_then"); } else { require("./if_else"); }
 try { require("./try_body"); } catch (e) { require("./catch_body"); }
 for (;;) { require("./for_body"); }
 switch (x) { case 1: require("./switch_case"); }
-declare module "amb" { import q from "./neg_ambient"; }
-namespace NS { import w = require("./neg_ns_equals"); const z2 = require("./neg_ns_const"); }
 export default require("./export_default_require");
 export const ex = require("./export_const_require");
 export function ef() { return import("./export_fn_dynamic"); }
@@ -560,6 +558,10 @@ exports.run = function () { return require("./lazy_exports_fn"); };
 JS
 }
 web_fixture_small() { local W="$1"   # .tsx .mjs .cjs .jsx and the .astro frontmatter
+    cat > "$W/neg.ts" <<'NEG'
+declare module "amb" { import q from "./neg_ambient"; }
+namespace NS { import w = require("./neg_ns_equals"); const z2 = require("./neg_ns_const"); }
+NEG
     cat > "$W/comp.tsx" <<'TSX'
 import React from "react";
 import { Button } from "./tsx_button";
@@ -575,7 +577,7 @@ TSX
 web_fixture_stubs() { local W="$1"
     # every specifier above names a real file, so each edge RESOLVES and the lazy bit and --uses are observable
     local spec
-    for spec in $(cat "$W"/main.ts "$W"/main.js "$W"/comp.tsx "$W"/mod.mjs "$W"/mod.cjs "$W"/view.jsx "$W"/page.astro \
+    for spec in $(cat "$W"/main.ts "$W"/neg.ts "$W"/main.js "$W"/comp.tsx "$W"/mod.mjs "$W"/mod.cjs "$W"/view.jsx "$W"/page.astro \
                   | grep -o '"\./[A-Za-z_0-9]*"\|'"'"'\./[A-Za-z_0-9]*'"'" | tr -d "\"'" | sort -u); do
         printf 'export const %s = 1;\n' "${spec#./}" > "$W/${spec#./}.js"
     done
