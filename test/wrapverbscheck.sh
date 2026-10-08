@@ -297,7 +297,9 @@ echo "=== 8. one-shot --for recipes name no budget (never --max-tokens, never a 
 # recommended `--for="<task>" --max-tokens=2000`, which produced an unbudgeted map + a warning).
 for _agent in claude codex cursor windsurf gemini opencode aider; do
     _out="$( "$BIN" wrap "$_agent" 2>/dev/null )"
-    if echo "$_out" | grep -- '--for=' | grep -q -- '--max-tokens'; then
+    if ! echo "$_out" | grep -q -- '--for='; then
+        no "wrap $_agent printed no --for= line — the --max-tokens check below would pass on nothing"
+    elif echo "$_out" | grep -- '--for=' | grep -q -- '--max-tokens'; then
         no "wrap $_agent pairs --for with --max-tokens — inert advice, --for ignores that flag"
     else
         ok "wrap $_agent never pairs --for with --max-tokens"
