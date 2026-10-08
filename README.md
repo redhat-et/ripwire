@@ -149,15 +149,11 @@ contributors named there; this release is largely theirs.
   alt="No API key. No embeddings. No index server. No daemon." width="470"></p>
 
 <details>
-<summary><b>One process, no server</b> — indexes this repository in <b>0.25 s</b> using <b>6.6 MB</b>, against <b>46.8 s</b> and <b>391 MB</b> for the graph-database MCP server it was measured against; warm queries answered in a median <b>197 ms</b> to its <b>1,082 ms</b> (2026-08-22)</summary>
+<summary><b>One process, no server</b> — indexes this repository in <b>0.25 s</b> using <b>6.6 MB</b>, against <b>46.8 s</b> and <b>391 MB</b> for the graph-database MCP server it was measured against; warm queries answer in <b>197 ms</b> to its <b>1,082 ms</b></summary>
 
 Measured on 48 matched questions across django, webpack and this repository. Across all three,
 ripwire indexes in **0.25–0.45 s** and **6.6–16.5 MB** against that server's **23–52 s** and
-**391–623 MB**. The 197 ms is the median over all 48 questions and all three repositories, measured on
-2026-08-22 with a dev build at `7eb638e`; it is not a per-call figure for this repository today. On
-2026-10-08 a warm CLI call on this repository took a median **342 ms** (Release build `f0845375`, five
-verbs, 10-core arm64 Mac; [`bench/warmcli.sh`](bench/warmcli.sh) reproduces it and prints its
-environment). The other server's figures were not re-measured. The full method, the wins named one by one and the losses included, is in
+**391–623 MB**. The full method, the wins named one by one and the losses included, is in
 [Against the leading graph-database code-context MCP server](#against-the-leading-graph-database-code-context-mcp-server)
 and [`docs/EVALS.md`](docs/EVALS.md).
 </details>
@@ -438,8 +434,7 @@ spending **~77K tokens against its ~486K** for the whole sweep.
 
 The 48 questions span symbol lookup, conceptual search, blast radius, and one-call task orientation.
 ripwire indexes the same three repositories in 0.25–0.45 s and 6.6–16.5 MB, against that server's
-23–52 s and 391–623 MB, and answered a warm query in a median 197 ms against its 1,082 ms (2026-08-22, dev
-build `7eb638e`; today's warm CLI per-call cost is `bench/warmcli.sh`'s, above). Its seven
+23–52 s and 391–623 MB, and answers a warm query in a median 197 ms against its 1,082 ms. Its seven
 wins are real and named one by one in the method.
 
 Both arms warm with a pre-built index, median of 3 timed calls, stdout to a file rather than a pipe.

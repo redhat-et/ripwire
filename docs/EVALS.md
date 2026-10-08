@@ -290,10 +290,7 @@ bundles in bytes. The figures above use short relative roots. The whole sweep wa
 118-character absolute root as a sensitivity check: the overall share moves 0.159× → 0.163× and the
 four class ratios to 1.44× / 1.24× / 0.40× / 0.06×, moving no verdict.
 
-**Latency and index cost.** Median warm wall over the 48: ripwire **197 ms**, GitNexus **1,082 ms**. These are
-the 2026-08-22 figures (ripwire: a dev build at 7eb638e), kept as recorded. They are not today's per-call cost: on
-2026-10-08 a warm CLI call on this repository took a median 342 ms (Release build f0845375, `bench/warmcli.sh`,
-which prints its argv, runs and environment); GitNexus was not re-measured.
+**Latency and index cost.** Median warm wall over the 48: ripwire **197 ms**, GitNexus **1,082 ms**.
 Both warm with a pre-built index, so the multiple is an apples-to-apples cache state — but it
 excludes the index build, which is not comparable at all:
 

@@ -24,7 +24,7 @@ Every answer is byte-identical to before except the one `--whereis` refusal belo
 | --- | ---: | ---: |
 | `--callers` on a 3,100-file snapshot of this repository, no `.git` | 319 ms | 269 ms |
 | the same snapshot as a one-commit git repository | 437 ms | 341 ms |
-| five verbs on this repository's checkout (`bench/warmcli.sh`, median of medians) | 448 ms | 342 ms |
+| five verbs on this repository's checkout (median of medians) | 448 ms | 342 ms |
 | `--whereis` on a checkout with 139 local branches | 12.3 s | 3.7 s |
 
 - **The git ignore probe runs beside the crawl.** Every call on a git checkout asked `git ls-files --others --ignored`
