@@ -96,9 +96,10 @@ struct ImportReach
 // (a hyperscript tree; every one matches the call pattern) took 152 s against 0.5 s for the walk it replaced.
 // Descending once is O(depth) per directive, and what the upward loop answered is read off the same descent:
 // `run` is how many container ancestors sit directly above the directive (the loop's reach before it met a
-// non-container or the bound), `total` is how many ancestors there are. Reachable means the run is all of them,
-// or the run already passed the bound (the loop stops at the bound before it can see a non-container above —
-// that is the one LOUDER disclosure difference test/importcapcheck.sh pins, kept exactly).
+// non-container or the bound), `total` is how many ancestors there are. Reachable means the run is all of them.
+// A run PAST the bound is reported by `depth` (clamped one past it), which the caller tests BEFORE `reachable`: the
+// upward loop stopped at the bound without ever seeing a non-container above it, so a too-deep import is announced
+// whether or not the walk would have entered it — the one LOUDER disclosure difference test/importcapcheck.sh pins.
 ImportReach importContainerReach( TSNode directive, Lang lang ) noexcept
 {
     const bool directiveIsNode = !ts_node_is_null( directive );   // hoisted: a promise holds no call (selfcheckcheck C)
@@ -131,7 +132,7 @@ ImportReach importContainerReach( TSNode directive, Lang lang ) noexcept
         return reach;
     }
     reach.depth     = static_cast<std::uint16_t>( std::min<std::uint32_t>( run, kMaxImportContainerDepth + 1u ) );
-    reach.reachable = ( run == total ) || ( run > kMaxImportContainerDepth );
+    reach.reachable = ( run == total );
     reach.insideFn  = fnInRun;
     ENSURES( reach.depth <= kMaxImportContainerDepth + 1, "the depth is clamped one past the bound" );
     return reach;
