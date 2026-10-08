@@ -317,7 +317,7 @@ infra/os.h	spawn_sh	open	1	closes	in the forked child: dup2 onto stdin, close, t
 infra/os.h	read_small	open	1	closes	one read, then ::close before the only return past the failed-open one (Linux /proc and /sys files)
 ingest_cache.h	openOnce	open	1	owned	ReadFd's destructor closes it
 ingest_cache.h	saveCache	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd
-ingest_crawl.h	collectGitIgnored	popen	1	closes	the overflow break still reaches pclose
+ingest_crawl.h	runGitIgnoreProbe	popen	1	closes	the overflow break still reaches pclose
 ingest_docpass.h	publishDocBridgeBlob	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd
 lintrules.h	loadLintRules	fopen	1	closes	skips only a failed open; fclose after the sized read
 main.cpp	dispatchMain	fopen	1	closes	returns only on a failed open; fclose after the read loop

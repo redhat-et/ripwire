@@ -1379,49 +1379,99 @@ bool underGitRoot( const char* rootDir )
     }
 }
 
-GitIgnoreSet collectGitIgnored( const char* rootDir )
+// The probe's PROCESS half, split from its parse so it can run off the main thread (IgnoreProbeSpeculation below): one
+// `git ls-files --others --ignored` popen, read whole, classified exactly as collectGitIgnored always classified it —
+// a non-zero exit outranks an overflow (the overflow break still reaches pclose, and its status is read first). No
+// DISCLOSE and no parse here: the parse below runs on the thread that applies the answer, so the disclosure ledger
+// sees exactly the degrades of the answer the crawl used.
+struct GitIgnoreProbeRaw
 {
-    GitIgnoreSet out;
+    enum class State : std::uint8_t
+    {
+        NotGit,        // no `.git` above the root: no git child was started (nongitqmetricscheck)
+        NotRunnable,   // popen failed
+        Failed,        // git exited non-zero
+        OverCeiling,   // more than kMaxIgnoreProbeBytes
+        Answered,      // `bytes` is git's whole -z answer
+    };
+    State       state = State::NotGit;
+    std::string bytes;
+    bool operator==( const GitIgnoreProbeRaw& ) const = default;
+};
+
+GitIgnoreProbeRaw runGitIgnoreProbe( const char* rootDir )
+{
+    PROFILE_SCOPE_DESCRIBE( "ingest: git ignore probe (the git process; off the main thread when speculated)" );
+    GitIgnoreProbeRaw raw;
     if( !underGitRoot( rootDir ) )
     {
-        return out;
+        return raw;
     }
     const std::string cmd = gitCmd( " -C " ) + shSingleQuote( rootDir == nullptr ? std::string( "." ) : std::string( rootDir ) )
                           + " -c core.quotepath=false ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null";
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( pipe == nullptr )
     {
-        DISCLOSE( out, GitIgnoreSet::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the ignore probe — full walk" );
-        return out;
+        raw.state = GitIgnoreProbeRaw::State::NotRunnable;
+        return raw;
     }
-    std::string buf;
-    char        chunk[ 8192 ];
-    bool        overflowed = false;
+    char chunk[ 8192 ];
+    bool overflowed = false;
     for( std::size_t n = std::fread( chunk, 1, sizeof( chunk ), pipe ); n > 0; n = std::fread( chunk, 1, sizeof( chunk ), pipe ) )
     {
-        if( buf.size() + n > kMaxIgnoreProbeBytes )
+        if( raw.bytes.size() + n > kMaxIgnoreProbeBytes )
         {
             overflowed = true;
             break;
         }
-        buf.append( chunk, n );
+        raw.bytes.append( chunk, n );
     }
     const int rc = os::pclose( pipe );
-    if( rc != 0 )
+    raw.state    = rc != 0 ? GitIgnoreProbeRaw::State::Failed : overflowed ? GitIgnoreProbeRaw::State::OverCeiling : GitIgnoreProbeRaw::State::Answered;
+    if( raw.state != GitIgnoreProbeRaw::State::Answered )
     {
-        // Not a git work tree, or no git binary — the DESIGNED degrade: the fallback (a full walk, no
-        // ignore-set pruning) is safe either way. `available` is already false here (its default), so this
-        // changes no output — it disclose()s the fact for the self-check ledger instead of leaving the
-        // degrade to a bare `return`, matching the GitNotRunnable/ProbeOverCeiling sites just above/below.
-        DISCLOSE( out, GitIgnoreSet::DisclosureWhy::ProbeFailed, "ingest: the git ignore probe exited non-zero — full walk" );
-        return out;
+        raw.bytes.clear();   // only an answer carries bytes, so two probes that failed the same way compare equal
     }
-    if( overflowed )
+    ENSURES( raw.state == GitIgnoreProbeRaw::State::Answered || raw.bytes.empty(), "a probe that did not answer carries no bytes" );
+    return raw;
+}
+
+// The probe's PARSE half: every degrade disclosed exactly where collectGitIgnored disclosed it, then the -z entries.
+GitIgnoreSet parseGitIgnoreProbe( const GitIgnoreProbeRaw& raw )
+{
+    GitIgnoreSet out;
+    switch( raw.state )
     {
-        DISCLOSE( out, GitIgnoreSet::DisclosureWhy::ProbeOverCeiling, "ingest: git ignore probe exceeded its byte ceiling — full walk" );
-        return out;
+        case GitIgnoreProbeRaw::State::NotGit:
+        {
+            return out;
+        }
+        case GitIgnoreProbeRaw::State::NotRunnable:
+        {
+            DISCLOSE( out, GitIgnoreSet::DisclosureWhy::GitNotRunnable, "ingest: cannot run git for the ignore probe — full walk" );
+            return out;
+        }
+        case GitIgnoreProbeRaw::State::Failed:
+        {
+            // Not a git work tree, or no git binary — the DESIGNED degrade: the fallback (a full walk, no
+            // ignore-set pruning) is safe either way. `available` is already false here (its default), so this
+            // changes no output — it disclose()s the fact for the self-check ledger instead of leaving the
+            // degrade to a bare `return`, matching the GitNotRunnable/ProbeOverCeiling sites just above/below.
+            DISCLOSE( out, GitIgnoreSet::DisclosureWhy::ProbeFailed, "ingest: the git ignore probe exited non-zero — full walk" );
+            return out;
+        }
+        case GitIgnoreProbeRaw::State::OverCeiling:
+        {
+            DISCLOSE( out, GitIgnoreSet::DisclosureWhy::ProbeOverCeiling, "ingest: git ignore probe exceeded its byte ceiling — full walk" );
+            return out;
+        }
+        case GitIgnoreProbeRaw::State::Answered:
+        {
+            break;
+        }
     }
 
+    const std::string& buf = raw.bytes;
     for( std::size_t i = 0; i < buf.size(); )
     {
         const std::size_t nul     = buf.find( '\0', i );
@@ -1460,6 +1510,124 @@ GitIgnoreSet collectGitIgnored( const char* rootDir )
     return out;
 }
 
+GitIgnoreSet collectGitIgnored( const char* rootDir )
+{
+    return parseGitIgnoreProbe( runGitIgnoreProbe( rootDir ) );
+}
+
+// ── the ignore probe, SPECULATED (cli-perf-068) ───────────────────────────────────────────────────────
+//
+// The probe is one git process on every call — ~60 ms of a ~400 ms warm call on this repository, measured, and most of
+// it git walking the same tree the crawl is about to walk. Its answer rarely changes between two calls, but WHAT can
+// change it is wide: any .gitignore in the tree, .git/info/exclude, the index, core.excludesFile and the config that
+// names it, and the untracked files themselves (a new `x.log` under an existing `*.log` rule changes the answer while
+// no ignore FILE changed). A cache keyed on the files that hold rules would miss that last one; this does not key on
+// anything. It SPECULATES: the crawl walks with the answer the previous call got for this root (a sidecar under the
+// cache dir) while git computes this call's answer on a worker, and ingest() compares the two — byte for byte, the
+// raw -z stream — before anything downstream of the crawl has run (crawlStands). Equal: the crawl that ran IS the
+// crawl the fresh answer gives, so nothing is redone. Different: the crawl and the cache load are run again on the
+// fresh answer, and the sidecar is replaced. Every answer is therefore git's own answer for THIS call, exactly as
+// before; what is saved is the wait — git runs beside the walk and the cache load instead of before them.
+//
+// Spawn conditions are the ones the probe always had: it starts at the same point of collectSources (a directory root
+// whose walk opened), only under a `.git` (no child at all otherwise), and not under --no-ignore. With the cache off
+// (--no-cache) there is no sidecar, so the probe runs on the calling thread, as before. One per ingest() call.
+class IgnoreProbeSpeculation
+{
+public:
+    explicit IgnoreProbeSpeculation( bool sidecarEnabled ) noexcept : sidecarEnabled_( sidecarEnabled ) {}
+
+    // collectSources' one consult, at the point the probe always ran. On the redo pass (after a lost speculation) it
+    // hands back the fresh answer the join already holds.
+    GitIgnoreSet setFor( const char* rootDir, const std::string& rootReal )
+    {
+        if( fresh_ )
+        {
+            return parseGitIgnoreProbe( *fresh_ );
+        }
+        if( !sidecarEnabled_ || !underGitRoot( rootDir ) )
+        {
+            fresh_ = runGitIgnoreProbe( rootDir );   // no sidecar to speculate from, or no git child to overlap: as before
+            return parseGitIgnoreProbe( *fresh_ );
+        }
+        sidecarPath_ = quality::resolveCacheBlobPath( quality::cacheDirLadder(), sidecarName( rootReal ) );
+        sidecarHeader_ = std::string( kSidecarMagic ) + rootReal + '\0';
+        pending_     = std::async( std::launch::async, [ root = std::string( rootDir ) ] { return runGitIgnoreProbe( root.c_str() ); } );
+        speculation_ = loadSidecar();
+        if( !speculation_ )
+        {
+            return parseGitIgnoreProbe( join() );   // nothing to speculate from (first call on this root): wait, as before
+        }
+        return parseGitIgnoreProbe( *speculation_ );
+    }
+
+    // ingest()'s check, before the parse pool: true when the crawl that ran used this call's own git answer — the fresh
+    // answer itself, or a speculation byte-identical to it. False means the caller redoes the crawl (setFor now returns
+    // the fresh answer). Publishes the fresh answer for the next call whenever it differs from what was speculated.
+    bool crawlStands()
+    {
+        PROFILE_SCOPE_DESCRIBE( "ingest: ignore probe join (wait for git, compare with the speculation)" );
+        if( pending_.valid() )
+        {
+            (void)join();
+        }
+        if( !speculation_ )
+        {
+            return true;   // the crawl waited for the fresh answer, or no probe ran at all
+        }
+        const bool stands = *speculation_ == *fresh_;
+        speculation_.reset();   // decided: a redo pass reads fresh_, and a second call to this is a no-op
+        return stands;
+    }
+
+private:
+    static constexpr std::string_view kSidecarMagic = "ripwire-ignore-speculation/1\n";
+
+    static std::string sidecarName( const std::string& rootReal )
+    {
+        char sidecarFile[ 64 ];
+        rw::formatTo( sidecarFile, sizeof( sidecarFile ), "ripwire-ignoreprobe-{:016x}.bin", static_cast<unsigned long long>( fnv1a64( rootReal ) ) );
+        return sidecarFile;
+    }
+
+    // The previous call's answer for this root, or nothing. The header names the root in full, so two roots whose names
+    // hash alike never read each other's answer; anything unreadable or misshapen is simply no speculation.
+    std::optional<GitIgnoreProbeRaw> loadSidecar() const
+    {
+        std::optional<std::string> blob = pathguard::readRegularFileNoFollow( sidecarPath_ );
+        if( !blob || blob->size() > sidecarHeader_.size() + kMaxIgnoreProbeBytes || !blob->starts_with( sidecarHeader_ ) )
+        {
+            return std::nullopt;
+        }
+        return GitIgnoreProbeRaw{ GitIgnoreProbeRaw::State::Answered, blob->substr( sidecarHeader_.size() ) };
+    }
+
+    const GitIgnoreProbeRaw& join()
+    {
+        fresh_ = pending_.get();   // a throw on the worker (allocation) surfaces here, where the synchronous probe threw
+        if( fresh_->state == GitIgnoreProbeRaw::State::Answered && ( !speculation_ || !( *speculation_ == *fresh_ ) ) )
+        {
+            if( !quality::atomicWriteFile( sidecarPath_, sidecarHeader_ + fresh_->bytes ) )
+            {
+                DISCLOSE( Diagnostics::answerUnchanged, "this call used git's own ignore answer; only the next call's speculation is not saved",
+                          "ingest: the ignore-probe sidecar could not be written — the next call waits for git, as before" );
+            }
+        }
+        else if( fresh_->state != GitIgnoreProbeRaw::State::Answered && speculation_ )
+        {
+            os::unlink( sidecarPath_.c_str() );   // git stopped answering here: a stale answer must not be speculated on again
+        }
+        return *fresh_;
+    }
+
+    bool                              sidecarEnabled_ = false;
+    std::string                       sidecarPath_;
+    std::string                       sidecarHeader_;
+    std::future<GitIgnoreProbeRaw>    pending_;
+    std::optional<GitIgnoreProbeRaw>  speculation_;
+    std::optional<GitIgnoreProbeRaw>  fresh_;
+};
+
 // Sorted-vector membership. A binary search over a contiguous, already-sorted vector beats a hash map at
 // these sizes and costs no allocation, and — unlike a HashMap — has no iteration order that could reach
 // output (the G2 container rule's standing caveat).
@@ -1490,14 +1658,17 @@ bool pathInIgnoreSet( const std::vector<std::string>& sorted, std::string_view r
 // §N6-C — the probe AND the mode it implies, as one decision, so collectSources reads the answer instead
 // of computing it. One fork per root, paid only for a directory root the walk actually opened: the probe
 // is worthless on a single-file root and must not be charged to a root the walk already refused.
-GitIgnoreSet probeIgnoreSet( const char* rootDir, bool respectGitignore, IgnoreMode& modeOut )
+// `speculation` (ingest()'s, see IgnoreProbeSpeculation) lets the git process run beside the walk; without one the probe
+// runs here, on this thread, as it always did.
+GitIgnoreSet probeIgnoreSet( const char* rootDir, bool respectGitignore, IgnoreMode& modeOut, IgnoreProbeSpeculation* speculation,
+                             const std::string& rootReal )
 {
     if( !respectGitignore )
     {
         return {};   // modeOut was already set to Off by the caller, before any early return could skip it
     }
     PROFILE_SCOPE_DESCRIBE( "ingest: crawl (git ignore probe)" );
-    GitIgnoreSet set = collectGitIgnored( rootDir );
+    GitIgnoreSet set = speculation != nullptr ? speculation->setFor( rootDir, rootReal ) : collectGitIgnored( rootDir );
     modeOut = set.available ? IgnoreMode::Git : set.rootIgnored ? IgnoreMode::RootIgnored : IgnoreMode::Unavailable;
     return set;
 }
@@ -1554,7 +1725,7 @@ struct CrawlResult
 // finished walk's list is, so a partial corpus is still a deterministic one; ingest() discloses the stop.
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
                             std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true,
-                            memguard::Watch* memWatch = nullptr )
+                            memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr )
 {
     std::vector<std::string>     out;
     std::vector<SkippedOversize> skipped;
@@ -1612,7 +1783,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
         return { std::move( out ), std::move( skipped ), std::move( skips ) };
     }
 
-    const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode );   // §N6-C
+    const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode, ignoreSpeculation, rootReal );   // §N6-C
 
     const fs::recursive_directory_iterator end;
     {

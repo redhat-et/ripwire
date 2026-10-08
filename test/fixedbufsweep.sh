@@ -233,6 +233,7 @@ NUMERIC_ONLY = {
     ( "src/infra/profileScope.h", "buf" ): 5,
     ( "src/ingest_astquery.h", "suffix" ): 1,
     ( "src/ingest_docpass.h", "blobName" ): 1,
+    ( "src/ingest_crawl.h", "sidecarFile" ): 1,   # cli-perf-068: IgnoreProbeSpeculation::sidecarName — "ripwire-ignoreprobe-" + 16 hex digits + ".bin" = 40 B against 63 usable + NUL. One uint64, nothing escaped.
     ( "src/lsp.h", "hdr" ): 1,    # 2026-09-16 (--lsp Phase 1): lspWriteMessage's "Content-Length: {}\r\n\r\n" — ONE size_t, 20 digits worst case: 40 B against 63 usable + NUL. No %s, nothing escaped.
     ( "src/lsp.h", "buf" ): 1,    # 2026-09-16 (--lsp Phase 1): lspRangeJson's range object — 61 fixed chars + FOUR uint32 line/character numbers, 10 digits worst case: 101 B against 127 usable + NUL. No %s, nothing escaped; the strings around it (URI, name) are composed on std::string by the callers, never through this buffer.
     ( "src/main.cpp", "hdr" ): 1,
@@ -594,7 +595,7 @@ if not bad:
 #            238 -> 239 calls/sites, 104 -> 105 rows). noteCacheReject's new `char detail[192]` names both version
 #            numbers on a refused cache blob; one formatTo of a literal and two std::uint32_t, rowed 'not-markup'
 #            (a stderr notice). Re-derived on the train 20 merged tree; no other train lane moves the population.
-EXPECTED = { "mentions": 351, "calls": 241, "sites": 241, "rows": 105, "widthforms": 0 }
+EXPECTED = { "mentions": 352, "calls": 242, "sites": 242, "rows": 106, "widthforms": 0 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
