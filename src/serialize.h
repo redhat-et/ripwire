@@ -26,6 +26,7 @@
 #include "sarif.h"       // R-E (2026-08-17): rootRelativeUri/rootPrefixOf — the same root= single-root-only
                           // strip --grep's emitGrepReport uses, reused here so the two verbs cannot diverge
 #include "prconverge.h" // W2-F: RankDisclosure + the pr_iters= / pr_converged= spellings (CLI and MCP share them)
+#include "historyread.h" // K51: history_unread= on every root that prints churn=/amp=
 #include "gitmine.h"    // F3 (H2H-Graft): RecentFile — the map's <recent> rows are the churn-decay miner's own product
 
 #include <algorithm>
@@ -349,7 +350,9 @@ inline std::string ctxRootOpen( std::string_view task, std::string_view routeNot
     {
         out += " route_scrubbed=\"1\"";
     }
+    out += renderHistoryUnread( DiscloseAs::XmlAttrs );   // K51: absent unless the amp=/churn= walk could not be read; shared by --for/--pack-task/--from-trace
     out += ">";
+    out += renderHistoryUnread( DiscloseAs::LegendComment );   // its own definition (historyread.h)
     return out;
 }
 
@@ -377,6 +380,7 @@ inline std::string ctxRootJsonScrubKeys( std::string_view task, std::string_view
     {
         keys += ",\"route_xml_scrubbed\":true";
     }
+    keys += renderHistoryUnread( DiscloseAs::JsonKeys );   // K51: this is the one JSON root writer every ctx-family document shares (--for, --pack-task, --from-trace)
     return keys;
 }
 
@@ -3247,6 +3251,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         // L3 follow-up (CodeRabbit 4053600616): TRULY last, past every pre-existing attribute — same placement
         // rule as lens= just above, so no attribute-adjacency assertion in test/ can break on it.
         if( ann.notesDegraded ) { h += notes::kNotesDegradedAttr; }
+        h += renderHistoryUnread( DiscloseAs::XmlAttrs );   // K51: absent unless the amp=/churn= walk could not be read
         // The code-first pick's swaps, last of all (the same placement rule as the two above): absent when nothing was swapped.
         if( dataSecCut.cut > 0 )
         {
@@ -3254,6 +3259,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             h += nextAttrXml( dataSectionsNext( dataSecCut ) );
         }
         h += ">";
+        h += renderHistoryUnread( DiscloseAs::LegendComment );   // K51: its own definition, right behind the root it marks
         return h;
     };
     const auto buildTail = [ & ]( std::size_t estTokens ) -> std::string
@@ -9406,6 +9412,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
     // (every MCP client) reading a truncated ranking with no key to tell it so is the exact defect the XML
     // side just closed. Same slot, same absent-means-converged rule.
     w.write( renderDisclosure( h.ann->prDisclosure, DiscloseAs::JsonKeys ) );
+    w.write( renderHistoryUnread( DiscloseAs::JsonKeys ) );   // K51: the JSON twin of the root's history_unread= (absent unless the amp= walk was unread)
 
     // The JSON twin of the XML root's data_sections_cut= / next= (codeFirstKeep): same keys, same absent-at-zero rule.
     if( h.dataSectionsCut.cut > 0 )

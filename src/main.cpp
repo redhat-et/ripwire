@@ -89,6 +89,7 @@ static_assert( rw::kTestGateCcxBarMirror == rw::quality::kCcxBar, "situ.h kTestG
 #include "didyoumean.h"            // §P12.1 / §B6 M8: the ONE near-miss suggester, now shared with the MCP refusal table
 #include "selectorrefuse.h"        // §B4.2: the ONE file:name selector not-found refusal — all six SYM-taking verbs
 #include "gitmine.h"
+#include "historyread.h"        // K51: the disclosure of a git history walk that could not be read (churn=/amp=)
 #include "ownersview.h"            // §P6.4: countUniformOwnership/ownershipRowsToPrint — shared with mcpverbs.h's `owners` verb
 #include "mention.h"               // B8: query-mention anchoring — files/modules/symbols NAMED in the --for text
 #include "siblift.h"               // r4 EXPERIMENT: env-gated same-directory sibling lift (inert by default)
@@ -5252,6 +5253,18 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             // sets concatenate (commits are disjoint across repos) and churn accumulates per file.
             ASSUME( historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
                     "this block runs under startHistoryWalks' condition (--help-task has already answered), so every root's walk was started" );
+            // K51: a walk git could not finish arrives flagged (it is never cached either); the document says so (historyread.h).
+            HistoryReadReport& historyReport = historyRead();
+            const auto         joinWalk      = [ & ]( std::size_t r )
+            {
+                quality::HistoryWalk walk = historyWalks[ r ].get();
+                if( walk.raw.unread )
+                {
+                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkUnread,
+                              "main: the git history walk could not be read — churn= is absent and amp= counts callers only, and the document says so" );
+                }
+                return walk;
+            };
             std::vector<std::vector<std::uint32_t>> commits;
             if( multiRoot )
             {
@@ -5261,7 +5274,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                     // Y2: the memoized form — skips the 431 ms `git log --name-only` walk on a
                     // warm (repo, HEAD sha, window, boundary-sha) hit; see quality.h's qchurn family.
                     std::vector<std::vector<std::uint32_t>> part =
-                        quality::resolveHistoryWalk( historyWalks[ r ].get(), ing,
+                        quality::resolveHistoryWalk( joinWalk( r ), ing,
                                              cfg.forTask.empty() ? 0u : 12u,
                                              cfg.forTask.empty() ? nullptr : &rootChurn, r );
                     for( std::vector<std::uint32_t>& c : part )
@@ -5284,7 +5297,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             else
             {
                 // Y2: memoized — see the multi-root branch above.
-                commits = quality::resolveHistoryWalk( historyWalks[ 0 ].get(), ing,
+                commits = quality::resolveHistoryWalk( joinWalk( 0 ), ing,
                                                cfg.forTask.empty() ? 0u : 12u,
                                                cfg.forTask.empty() ? nullptr : &forChurn );
             }

@@ -15,6 +15,23 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — a git history walk that could not be read says so, and is retried
+
+A `git log --name-only` that failed (an unreadable object, a bad ref, git not starting) came back as an empty stream and was
+stored under the (repo, HEAD, window) key, so `churn=` and `amp=` read as "no change history" until HEAD moved, with no
+tell. A walk git could not finish is now never cached, so the next call walks again, and every document that prints
+`churn=` or `amp=` (the map under `--metrics`, `--for`, `--pack-task` and `--grep` with `--metrics`, `--around`) carries
+`history_unread="1"` on its root (`"history_unread":true` in JSON) beside a comment that defines it. It means `churn=` is
+absent and `amp=` counts callers only. It does not mean the other numbers are affected, and a walk that read an empty
+window (a repository with no commit) stays silent.
+
+### Fixed — a non-ASCII `--help-task` prompt no longer trips the sanitizer build
+
+`lowerAscii` converted every byte of the prompt through an implicit `char` to `unsigned char` conversion, which the
+sanitizer build (`implicit-integer-sign-change`) aborts on for any byte at or above 0x80. The same shape sat in the
+router's name-shape and `FILE:LINE` predicates, the LSP header parser and the extension test; each now narrows
+explicitly.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

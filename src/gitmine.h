@@ -1560,6 +1560,10 @@ struct RawCommitStream
 {
     struct Commit { std::int64_t epoch = 0; std::vector<std::string> paths; };
     std::vector<Commit> commits;
+    // K51: the walk COULD NOT BE READ (git would not start, or exited non-zero part-way) — as against "read, and the
+    // window holds no commit". `commits` is then empty or a prefix, never a measurement, and the memoizing caller
+    // must not store it: an empty stream cached under the (repo, HEAD, window) key silenced churn=/amp= until HEAD moved.
+    bool unread = false;
 };
 
 inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::string& coSince )
@@ -1572,6 +1576,7 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
     {
+        out.unread = true;
         return out;
     }
 
@@ -1598,7 +1603,7 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
         }
         out.commits.back().paths.push_back( std::move( s ) );   // readByteSafeLine clear()s its buffer first, so moving out of it is safe
     }
-    os::pclose( pipe );
+    out.unread = os::pclose( pipe ) != 0;   // K51: git ran and died (a missing or corrupt object, a bad ref) — the lines above are a prefix, not the window
     return out;
 }
 

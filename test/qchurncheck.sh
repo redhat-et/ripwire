@@ -121,6 +121,81 @@ diff -q "$TMP/new.out" "$TMP/new2.out" >/dev/null \
     && ok "new-head cold vs warm output byte-identical" \
     || no "new-head cold vs warm output differs"
 
+# ── K51: a walk git COULD NOT FINISH is disclosed on every verb that prints churn=/amp=, never cached, and retried ──────────
+# Before the fix a failed `git log --name-only` came back as an EMPTY stream, was stored under the (repo, HEAD, window) key,
+# and every later call answered "no churn, no co-change partners" with no tell until HEAD moved. Two failure injections: a
+# git shim that dies on the walk (reaches every build flavour), and a REAL one (a commit object removed from the store).
+# The disclosure is history_unread="1" on the root (JSON: "history_unread":true); a read that found nothing stays silent.
+KSHIM="$TMP/kshim"; mkdir -p "$KSHIM"
+cat >"$KSHIM/git" <<KSHIMEOF
+#!/bin/sh
+case "\$*" in *name-only*) exit 128;; esac
+exec "$( command -v git )" "\$@"
+KSHIMEOF
+chmod +x "$KSHIM/git"
+krun(){ local out="$1"; shift; env PATH="$KSHIM:$PATH" TMPDIR="$QTMP" "$BIN" "$REPO" "$@" --no-cache >"$out" 2>"$TMP/k.err"; }
+printf '// k51\n' >> "$REPO/src/lib.cpp"
+git -C "$REPO" commit -qam "k51"                      # a fresh HEAD: no qchurn blob exists for it yet
+kbefore="$( nqchurn )"
+krun "$TMP/k_for.out" --for=helper; rcK=$?
+[ "$rcK" -eq 0 ] && grep -q ' history_unread="1"' "$TMP/k_for.out" \
+    && ok "K51: --for on a failed walk says history_unread=\"1\" on its root" \
+    || no "K51: --for on a failed walk is silent (rc=$rcK): $( head -c 300 "$TMP/k_for.out" )"
+grep -q ' churn="' "$TMP/k_for.out" \
+    && no "K51: a failed walk still printed a churn= value" \
+    || ok "K51: no churn= value is printed from a failed walk"
+krun "$TMP/k_map.out" --metrics
+grep -q ' history_unread="1"' "$TMP/k_map.out" && ok "K51: --metrics (the map) says history_unread=\"1\"" || no "K51: --metrics on a failed walk is silent"
+krun "$TMP/k_json.out" --for=helper --json
+grep -q '"history_unread":true' "$TMP/k_json.out" && ok "K51: --for --json says \"history_unread\":true" || no "K51: --for --json on a failed walk is silent"
+krun "$TMP/k_grep.out" --grep=helper --metrics
+grep -q ' history_unread="1"' "$TMP/k_grep.out" && ok "K51: --grep --metrics says history_unread=\"1\"" || no "K51: --grep --metrics on a failed walk is silent"
+krun "$TMP/k_full.out" --for=helper --legend=full
+grep -q 'history_unread=1: the git history walk' "$TMP/k_full.out" \
+    && ok "K51: the attribute is defined beside its root (a comment that reads it)" || no "K51: history_unread= is not defined in the document"
+xmllint --noout "$TMP/k_for.out" "$TMP/k_map.out" "$TMP/k_grep.out" "$TMP/k_full.out" 2>/dev/null \
+    && ok "K51: every disclosing document is well-formed XML" || no "K51: a disclosing document is malformed XML"
+[ "$( nqchurn )" -eq "$kbefore" ] \
+    && ok "K51: the failed walk was NOT cached (qchurn blobs $kbefore -> $( nqchurn ))" \
+    || no "K51: a failed walk was stored as a qchurn blob ($kbefore -> $( nqchurn ))"
+run "$TMP/k_retry.log" --for=helper --no-cache >"$TMP/k_retry.out" 2>/dev/null
+[ "$( name_only_count "$TMP/k_retry.log" )" -ge 1 ] && grep -q ' churn="[0-9]' "$TMP/k_retry.out" && ! grep -q 'history_unread' "$TMP/k_retry.out" \
+    && ok "K51: the next call RETRIES the walk, prints churn=, and carries no disclosure" \
+    || no "K51: the call after a failed walk did not retry cleanly (walks=$( name_only_count "$TMP/k_retry.log" )): $( head -c 200 "$TMP/k_retry.out" )"
+[ "$( nqchurn )" -gt "$kbefore" ] && ok "K51: the successful retry IS cached" || no "K51: the successful retry wrote no blob"
+
+# the REAL failure: remove the parent commit's object — HEAD still resolves, the walk dies part-way
+printf '// k51b\n' >> "$REPO/src/lib.cpp"
+git -C "$REPO" commit -qam "k51b"
+kparent="$( git -C "$REPO" rev-parse HEAD~1 )"; kobj="$REPO/.git/objects/${kparent:0:2}/${kparent:2}"
+if [ -f "$kobj" ]; then
+    cp "$kobj" "$TMP/kobj.save"; rm -f "$kobj"
+    run "$TMP/k_real.log" --for=helper --no-cache >"$TMP/k_real.out" 2>/dev/null; rcR=$?
+    [ "$rcR" -eq 0 ] && grep -q ' history_unread="1"' "$TMP/k_real.out" \
+        && ok "K51: a REAL unreadable object (git exits non-zero part-way) is disclosed" \
+        || no "K51: a real git failure is silent (rc=$rcR): $( head -c 200 "$TMP/k_real.out" )"
+    kreal="$( nqchurn )"
+    run "$TMP/k_real2.log" --for=helper --no-cache >"$TMP/k_real2.out" 2>/dev/null
+    [ "$( name_only_count "$TMP/k_real2.log" )" -ge 1 ] && [ "$( nqchurn )" -eq "$kreal" ] \
+        && ok "K51: the real failure is retried on the next call and still not cached" \
+        || no "K51: the real failure was cached or not retried (walks=$( name_only_count "$TMP/k_real2.log" ), blobs $kreal -> $( nqchurn ))"
+    mkdir -p "$( dirname "$kobj" )"; cp "$TMP/kobj.save" "$kobj"
+    run "$TMP/k_heal.log" --for=helper --no-cache >"$TMP/k_heal.out" 2>/dev/null
+    grep -q ' churn="[0-9]' "$TMP/k_heal.out" && ! grep -q 'history_unread' "$TMP/k_heal.out" \
+        && ok "K51: with the object restored the same call prints churn= and no disclosure" \
+        || no "K51: the restored repo still answers degraded: $( head -c 200 "$TMP/k_heal.out" )"
+else
+    no "K51: premise — the parent commit is not a loose object ($kobj), so the real-failure arm cannot run"
+fi
+
+# negative: "read, and empty" is NOT "could not read" — a repository with no commit has no history to read
+UNBORN="$( mktemp -d )"; mkdir -p "$UNBORN/src"; cp "$REPO/src/lib.cpp" "$UNBORN/src/lib.cpp"; git -C "$UNBORN" init -q
+env TMPDIR="$QTMP" "$BIN" "$UNBORN" --for=helper --no-cache >"$TMP/k_unborn.out" 2>/dev/null; rcU=$?
+[ "$rcU" -eq 0 ] && grep -q '<ctx' "$TMP/k_unborn.out" && ! grep -q 'history_unread' "$TMP/k_unborn.out" \
+    && ok "K51: an unborn repository (read, empty) carries no disclosure" \
+    || no "K51: an unborn repository was disclosed as unread, or failed (rc=$rcU)"
+rm -rf "$UNBORN"
+
 # ── xmllint clean (sanity — --for output is still well-formed XML under the cached path) ───────────────
 "$BIN" "$REPO" --for="helper" --no-cache 2>/dev/null | xmllint --noout - 2>/dev/null \
     && ok "xmllint clean" || no "xmllint reported malformed XML"

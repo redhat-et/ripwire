@@ -4580,7 +4580,7 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
 // corrupt/foreign blob — is a clean miss that falls through to a full recompute, never a wrong answer). No git repo
 // degrades to an empty stream; no resolvable HEAD to the uncached walk (which itself degrades to an empty stream —
 // gitLogNameOnlyRaw's contract). Thread-safe: every memo it reaches (the HEAD anchor, the toplevel) takes its own
-// mutex, and the blob write is an atomic rename.
+// mutex, and the blob write is an atomic rename. K51: a walk git could not complete comes back with `unread` set and is never stored.
 inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince )
 {
     if( !hasEnclosingGitRepo( root ) )
@@ -4590,7 +4590,11 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     const std::string headSha = gitHeadSha( root );
     if( headSha.empty() )
     {
-        return gitLogNameOnlyRaw( root, coSince );
+        // No resolvable HEAD: an unborn branch has no history to read, and git log's failure there is that fact, not an I/O
+        // error — so this walk is "read, empty" (K51 floor: a HEAD that is corrupt rather than unborn reads the same here).
+        RawCommitStream noHead = gitLogNameOnlyRaw( root, coSince );
+        noHead.unread          = false;
+        return noHead;
     }
 
     const std::string repoHex  = cacheRootKeyHex( root );
@@ -4609,6 +4613,13 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     }
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
+    if( raw.unread )
+    {
+        // K51: a walk that could not be read is NOT stored. Stored, its empty stream would answer "read, no commits" under this
+        // (repo, HEAD, window) key for as long as HEAD stayed put; unstored, the next call walks again and the caller discloses.
+        // The flag rides the returned stream to main.cpp's amp=/churn= block, which DISCLOSEs it into the document (historyread.h).
+        return raw;
+    }
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                      // write just recomputes next time
     return raw;

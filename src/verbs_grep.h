@@ -913,7 +913,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
     // R-H: the tier disclosure (helper above) — empty when nothing was held back.
     const std::string tierAttr = grepTierAttrs( tierReport, /*floorAlreadyEmitted=*/hitsCapped != 0 );   // N2: tier_budget= floors the root too
     // §R-J: unindexed_files_scanned=/unindexed_files_skipped=/unindexed_candidates_capped= (helper above).
-    const std::string auxAttr = grepUnindexedAttrs( aux );
+    const std::string auxAttr = grepUnindexedAttrs( aux ) + renderHistoryUnread( DiscloseAs::XmlAttrs );   // K51: absent unless the amp= walk (--metrics) could not be read
     const std::string regexSkipAttr = grepRegexSkipAttrs( cfg, found, aux, /*floorAlreadyEmitted=*/hitsCapped != 0 || tierReport.budgetHit != nullptr );
     std::string       scanShortAttr;
     if( found.unreadableFiles != 0 )
@@ -954,6 +954,7 @@ int emitGrepReport( const rw::Config& cfg, const rw::IngestResult& ing, const rw
                                  /*collectionCapped=*/ hitsCapped != 0 ),   // H8: the cap hits_capped= names floors the root
                  hitsCapped, completeAttr, tierAttr.c_str(), corpusAttr.c_str(), auxAttr.c_str(), regexSkipAttr.c_str(),
                  scanShortAttr.c_str(), rw::nextAttrXml( grepNext ).c_str() );
+    rw::emitTo( stdout, "{}", renderHistoryUnread( DiscloseAs::LegendComment ) );   // K51: its own definition, behind the root it marks
     // G1 (2026-08-15 harvest): hits GROUP by file under <f p="…">, root-relative when this is a single-root
     // run (report-memgraph §F6: the absolute root prefix alone was 42.5% of a real --grep payload; the
     // repeated-per-hit path was report-octocode §F1's 31.4%). Byte-identical text within one file's group
