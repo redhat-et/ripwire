@@ -1546,11 +1546,13 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
 #endif
 
         // Elixir directives share the lexical tags context below (ElixirContext), and as of #358 so do the
-        // C-family ones: their `@import.path` captures are normalised and emitted by captureTagsFacts, and
-        // captureIncludes no longer reads a preproc_include / preproc_call at all. The walk is pure cost
-        // for those languages — it descends only allowlisted containers, and a C-family include lives at
-        // file scope or inside a preprocessor guard, which the tags query already reaches unanchored.
-        if( le.lang != Lang::Elixir && dependencyDialect( le.lang ) != DepDialect::CFamily )
+        // C-family ones and Go's: their `@import.path` captures are normalised and emitted by captureTagsFacts,
+        // and captureIncludes no longer reads a preproc_include / preproc_call / Go import_declaration at all.
+        // The walk is pure cost for those languages — it descends only allowlisted containers, and a C-family
+        // include lives at file scope or inside a preprocessor guard, which the tags query already reaches
+        // unanchored (a Go import_declaration is a child of the file root by rule).
+        if( const DepDialect dialect = dependencyDialect( le.lang );
+            le.lang != Lang::Elixir && dialect != DepDialect::CFamily && dialect != DepDialect::Go )
         {
             captureIncludes( root, le.lang, fileId, src, incs, refs, binds, constOpens, shortfall );
         }

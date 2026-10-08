@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# importcapcheck.sh — the gate for the shared import-capture vocabulary (issue #358), C-family slice.
+# importcapcheck.sh — the gate for the shared import-capture vocabulary (issue #358), C-family and Go slices.
 #
 # WHAT THIS PINS. `#include` / `#import` for c, cpp, objc (and the .h/.hpp/.cu/.cuh/.metal extensions
 # that ride those grammars) no longer come from a per-language extractor in src/ingest_relations.h. They
@@ -39,6 +39,20 @@
 #  13  no kParserVer bump is owed    — a cache written by a PRE-CHANGE binary is accepted and reads
 #                                    identically, which is the evidence the records did not change
 #                                    (RIPWIRE_BASE_BIN, the house name; SKIPs when unset, as on CI)
+#
+#
+# THE GO SLICE (arms 14-19, below the C-family arms). Go's `import_declaration` — single and grouped, aliased,
+# dot, blank, cgo `import "C"` — is captured as `@import.path` in queries/go/tags.scm and read by the ONE
+# DepDialect::Go normaliser in src/ingest_importcap.h; the walk in captureIncludes no longer runs for Go.
+#  14  the Go capture is COMPILED IN — `(import_declaration) @import.path` is in the binary's embedded tags.scm
+#  15  every Go form, exact rows — single/aliased/dot/blank/group/cgo/tab/semicolon/raw-string/UTF-8 cut/error
+#                                    recovery, pinned as the byte-for-byte rows the extractor emitted
+#  16  no widening                  — an import_declaration the grammar never makes a child of the file root
+#                                    (inside a function body) stays out, exactly as the walk left it
+#  17  resolution through imports   — a go.mod `replace` still maps an import onto a sibling root's package
+#                                    (single, aliased and grouped), and a bogus replace target removes the edge
+#  18  the use-site half            — `--uses=<last path element>` reports role="import" for a Go import
+#  19  Go cache + determinism       — warm == cold == --no-cache on --deps over the Go fixture
 #
 # Usage:  test/importcapcheck.sh
 #         RIPWIRE_BIN=asan/ripwire test/importcapcheck.sh
@@ -441,6 +455,199 @@ if cmp -s "$TMP/d1.xml" "$TMP/d2.xml"; then
     ok "deterministic (two --no-cache runs identical)"
 else
     no "non-deterministic output"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+# THE GO SLICE (arms 14-19). Go's import_declaration rides `(import_declaration) @import.path` and the
+# DepDialect::Go normaliser; the Include target is the declaration CLAUSE, exactly as the removed walk branch
+# built it, so every row below is the byte-for-byte row the extractor emitted (read off the pre-change binary,
+# not predicted). A GROUPED import is ONE row whose text is the whole group cut at 96 bytes — resolve.h's
+# resolveGoImport documents that — and splitting it per spec would ADD rows, which is exactly what arm 15
+# would show as a diff.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+GO="$TMP/go"; mkdir -p "$GO/cmd" "$GO/pkg/util" "$GO/replaced"
+printf 'module example.com/app\n\ngo 1.21\n\nrequire example.com/ext v0.0.0\n\nreplace example.com/ext => ./replaced\n' > "$GO/go.mod"
+printf 'package ext\n\nfunc Ext() int { return 1 }\n'     > "$GO/replaced/ext.go"
+printf 'package util\n\nfunc Helper() int { return 2 }\n' > "$GO/pkg/util/util.go"
+cat > "$GO/main.go" <<'GOSRC'
+package main
+
+import "fmt"
+import f2 "os"
+import . "strings"
+import _ "embed"
+import (
+	"example.com/app/pkg/util"
+	alias "example.com/ext"
+	. "math"
+	_ "net/http/pprof"
+	"strconv" // trailing comment
+)
+
+import "C"
+
+func main() {
+	fmt.Println(util.Helper(), alias.Ext(), f2.Args, strconv.Itoa(1), ToUpper("x"), Abs(1))
+}
+GOSRC
+# a TAB after the keyword keeps the word `import` (the keyword is dropped at a SPACE); two spaces leave one
+# leading space; a trailing `;` is trimmed; a raw-string path keeps its backticks.
+printf 'package main\n\nimport\t"os"\nimport  "io";\nimport `raw/path`\n\nfunc t() { _ = os.Args }\n' > "$GO/cmd/tab.go"
+cat > "$GO/cmd/long.go" <<'GOSRC'
+package main
+
+import (
+	"github.com/very/long/module/path/that/goes/on/and/on/and/on/forever/and/ever/amen/pkg1"
+	"github.com/very/long/module/path/that/goes/on/and/on/and/on/forever/and/ever/amen/pkg2"
+)
+
+func l() {}
+GOSRC
+# error recovery: a bare `import` swallowing the next lines is still ONE import_declaration, and a broken
+# function header does not stop the next import being recovered.
+printf 'package main\n\nimport\nfunc b( {\nimport "after/error"\n' > "$GO/cmd/broken.go"
+printf 'package main\n\nfunc f( {\nimport "x"\n}\n' > "$GO/cmd/err.go"
+# the 96-byte cut lands mid multibyte sequence on purpose: the pre-change bytes are kept, not "fixed".
+printf 'package main\nimport "é世界/pkg"; import "z"\nimport ("é世界/pkg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n)\n' > "$GO/cmd/utf.go"
+# a definition named like the last path element of utf.go's first import: --uses keys on an INDEXED name, so
+# arm 18 needs one (`fmt`, `os` have no definition in the tree and answer found=0).
+printf 'package main\n\nfunc pkg() {}\n' > "$GO/cmd/pkgdef.go"
+# arm 16's negative: an import inside a function body is not a file-scope declaration and was never an edge.
+printf 'package main\n\nfunc a() {\n\timport "inbody"\n}\n' > "$GO/cmd/nested.go"
+
+"$BIN" "$GO" --deps --no-cache > "$TMP/go.xml" 2>/dev/null
+grep -o '<f p="[^"]*"\|<inc t="[^"]*"' "$TMP/go.xml" > "$TMP/go.rows"
+cat > "$TMP/go.want" <<'GOWANT'
+<f p="cmd/broken.go"
+<inc t="b( {&#10;import &quot;after/error&quot;"
+<f p="cmd/err.go"
+<inc t="&quot;x&quot;"
+<f p="cmd/long.go"
+<inc t="(&#10;&#9;&quot;github.com/very/long/module/path/that/goes/on/and/on/and/on/forever/and/ever/amen/pkg1&quot;&#10;&#9;&quot;gi"
+<f p="cmd/tab.go"
+<inc t="import&#9;&quot;os&quot;"
+<inc t=" &quot;io&quot;"
+<inc t="`raw/path`"
+<f p="cmd/utf.go"
+<inc t="&quot;é世界/pkg&quot;"
+<inc t="&quot;z&quot;"
+<inc t="(&quot;é世界/pkg/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+<f p="main.go"
+<inc t="&quot;fmt&quot;"
+<inc t="f2 &quot;os&quot;"
+<inc t=". &quot;strings&quot;"
+<inc t="_ &quot;embed&quot;"
+<inc t="(&#10;&#9;&quot;example.com/app/pkg/util&quot;&#10;&#9;alias &quot;example.com/ext&quot;&#10;&#9;. &quot;math&quot;&#10;&#9;_ &quot;net/http/pprof&quot;&#10;&#9;&quot;strconv&quot;"
+<inc t="&quot;C&quot;"
+GOWANT
+
+# ── arm 14: the Go capture is COMPILED IN ─────────────────────────────────────────────────────────────
+# Same reasoning as arm 1: a --match probe feeds its own query to the astQuery engine and passes on a
+# pre-change binary, so the capture is looked for where it lives — the tags.scm embedded in the image. The
+# C-family arm above already finds the literal `import.path`; THIS literal is Go's own pattern, absent from
+# a build whose Go imports still come from the walk.
+if grep -qa '(import_declaration) @import\.path' "$BIN"; then
+    ok "Go: (import_declaration) @import.path is in the binary's embedded tags.scm"
+else
+    no "Go: the import_declaration capture is not compiled into this binary — Go imports are not on the shared vocabulary"
+fi
+
+# ── arm 15: every Go form, exact rows ─────────────────────────────────────────────────────────────────
+if cmp -s "$TMP/go.rows" "$TMP/go.want"; then
+    ok "Go: 21 rows byte-exact — single, aliased, dot, blank, group (cut at 96 bytes), cgo \"C\", tab, semicolon, raw string, UTF-8 cut, error recovery"
+else
+    no "Go: Include rows differ from the pre-change extractor's (diff expected vs got below)"
+    diff "$TMP/go.want" "$TMP/go.rows" | sed 's/^/      /' | head -30
+fi
+# each form NAMED, so a red arm says which spelling a regression lost rather than "rows differ".
+for form in 'fmt&quot;' 'f2 &quot;os&quot;' '\. &quot;strings&quot;' '_ &quot;embed&quot;' '&quot;C&quot;' 'alias &quot;example\.com/ext&quot;'; do
+    grep -q "<inc t=\"[^\"]*$form" "$TMP/go.xml" || no "Go: the form [$form] has no Include row"
+done
+# the group is ONE row: three spec lines of main.go's block must not each become a row of their own.
+if [ "$(grep -c '<inc t="(&#10;&#9;&quot;example' "$TMP/go.xml")" -eq 1 ] \
+   && ! grep -q '<inc t="&quot;strconv&quot;"' "$TMP/go.xml" \
+   && ! grep -q '<inc t="&quot;example.com/app/pkg/util&quot;"' "$TMP/go.xml"; then
+    ok "Go: a grouped import block is ONE Include (its specs are not split into rows)"
+else
+    no "Go: a grouped import block was split into per-spec rows — that ADDS edges, a behaviour change"
+fi
+
+# ── arm 16: no widening ───────────────────────────────────────────────────────────────────────────────
+if grep -q 'inbody' "$TMP/go.xml"; then
+    no "Go: an import inside a function body became an edge (the capture is wider than the walk it replaced)"
+else
+    ok "Go: an import inside a function body stays out (reach re-derived from ancestry, as for C-family)"
+fi
+if ! grep -q 'cmd/nested.go' "$TMP/go.xml"; then
+    ok "Go: the function-body file carries no Include row at all"
+else
+    no "Go: cmd/nested.go gained an Include row"
+fi
+
+# ── arm 17: resolution through imports — go.mod `replace` onto a sibling root ─────────────────────────
+# The module-path resolution the Include feeds (resolve.h resolveGoImport) reads the FIRST QUOTED TOKEN of the
+# clause, so a single, an aliased and a GROUPED import of the same package all resolve to its one file. Two
+# importing roots, one providing root; svc/pkg/handle.go must have afferent=2.
+WS="$TMP/gows"; mkdir -p "$WS/svc/pkg" "$WS/cli" "$WS/cli2" "$WS/clibogus"
+printf 'package pkg\n\nfunc GoHandle() int { return 1 }\n' > "$WS/svc/pkg/handle.go"
+printf 'module example.com/svc\n\ngo 1.21\n'               > "$WS/svc/go.mod"
+printf 'module example.com/cli\n\ngo 1.21\n\nreplace example.com/svc => ../svc\n'   > "$WS/cli/go.mod"
+printf 'package main\n\nimport svc "example.com/svc/pkg"\n\nfunc runGoMain() int { return svc.GoHandle() }\n' > "$WS/cli/main.go"
+printf 'module example.com/cli2\n\ngo 1.21\n\nreplace example.com/svc => ../svc\n'  > "$WS/cli2/go.mod"
+printf 'package main\n\nimport (\n\tsvc "example.com/svc/pkg"\n\t"fmt"\n)\n\nfunc runGrouped() int { fmt.Println(); return svc.GoHandle() }\n' > "$WS/cli2/main.go"
+printf 'module example.com/clibogus\n\ngo 1.21\n\nreplace example.com/svc => ../svc/NONEXISTENT\n' > "$WS/clibogus/go.mod"
+printf 'package main\n\nimport svc "example.com/svc/pkg"\n\nfunc runBogus() int { return svc.GoHandle() }\n' > "$WS/clibogus/main.go"
+"$BIN" "$WS/svc" "$WS/cli" "$WS/cli2" --deps --no-cache > "$TMP/gows.xml" 2>/dev/null
+if grep -q '<f p="svc/pkg/handle.go" afferent="2"' "$TMP/gows.xml"; then
+    ok "Go: a go.mod replace resolves a single/aliased import AND a grouped one onto the sibling root's package (afferent=2)"
+else
+    no "Go: replace-based resolution changed — svc/pkg/handle.go afferent != 2: $(grep -o '<f p="svc/pkg/handle.go"[^>]*' "$TMP/gows.xml")"
+fi
+# the evidence-driven negative: the same import under a replace whose target does not exist resolves to nothing.
+"$BIN" "$WS/svc" "$WS/clibogus" --deps --no-cache > "$TMP/gobogus.xml" 2>/dev/null
+if grep -q '<inc t="svc &quot;example.com/svc/pkg&quot;"' "$TMP/gobogus.xml" && ! grep -q '<f p="svc/pkg/handle.go" afferent="[1-9]' "$TMP/gobogus.xml"; then
+    ok "Go: a replace to a missing directory leaves the import captured but UNRESOLVED (evidence-driven, not name-driven)"
+else
+    no "Go: bogus replace — the import is not captured, or it resolved: $(grep -o '<f p="svc/pkg/handle.go"[^>]*' "$TMP/gobogus.xml")"
+fi
+
+# ── arm 18: the use-site half ─────────────────────────────────────────────────────────────────────────
+GUSES="$("$BIN" "$GO" --uses=pkg --no-cache 2>/dev/null)"
+if printf '%s' "$GUSES" | grep -q '<u role="import" p="cmd/utf.go:2"'; then
+    ok "Go: --uses=pkg reports the import site cmd/utf.go:2 with role=\"import\" (the ABS-3 half survived the move)"
+else
+    no "Go: --uses lost the import-role use-site ref for a Go import: $(printf '%s' "$GUSES" | grep -o '<u [^>]*' | head -3)"
+fi
+
+# ── arm 19: Go cache round-trip + determinism ────────────────────────────────────────────────────────
+GCACHE="$TMP/go.cache"
+"$BIN" "$GO" --cache="$GCACHE" --deps > "$TMP/gocold.xml" 2>/dev/null
+"$BIN" "$GO" --cache="$GCACHE" --deps > "$TMP/gowarm.xml" 2>/dev/null
+if cmp -s "$TMP/gocold.xml" "$TMP/gowarm.xml" && cmp -s "$TMP/gocold.xml" "$TMP/go.xml"; then
+    ok "Go: warm == cold == --no-cache on --deps (the Go Include round-trip is byte-identical)"
+else
+    no "Go: --deps differs between cold, warm and --no-cache"
+fi
+if [ -n "${BASE_BIN:-}" ] && [ -x "${BASE_BIN:-}" ]; then
+    "$BASE_BIN" "$GO" --deps --no-cache > "$TMP/gobase.xml" 2>/dev/null
+    if cmp -s "$TMP/gobase.xml" "$TMP/go.xml"; then
+        ok "Go: --deps over the fixture is byte-identical to the pre-change binary's"
+    else
+        no "Go: --deps differs from the pre-change binary — dependency output changed"
+    fi
+    # and the Go half of arm 13: a cache written by the pre-change binary over the Go fixture is ACCEPTED
+    # (file untouched) and reads identically, so no kParserVer bump is owed for the Go records either.
+    GPRE="$TMP/gopre.bin"; rm -f "$GPRE"
+    "$BASE_BIN" "$GO" --cache="$GPRE" --deps >/dev/null 2>&1
+    cp "$GPRE" "$TMP/gopre.bin.copy"
+    "$BIN" "$GO" --cache="$GPRE" --deps > "$TMP/gopre.xml" 2>/dev/null
+    if cmp -s "$TMP/gopre.xml" "$TMP/go.xml" && cmp -s "$GPRE" "$TMP/gopre.bin.copy"; then
+        ok "Go: a pre-change binary's cache over the Go fixture is accepted untouched and reads identically — no kParserVer bump owed"
+    else
+        no "Go: a pre-change cache reads differently or was rewritten — extraction output changed, kParserVer must be bumped"
+    fi
+else
+    skip "Go: pre-change comparison (set RIPWIRE_BASE_BIN=<pre-change ripwire> to run it)"
 fi
 
 # ── well-formed XML ───────────────────────────────────────────────────────────────────────────────────

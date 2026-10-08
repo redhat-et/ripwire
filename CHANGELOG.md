@@ -1086,6 +1086,24 @@ false-confidence rate, next-clue usefulness) and the rule that answering comes b
 gains §9.2, which fixes the two roles a size limit may have (runaway guard, stair-step target) and the
 capped-versus-uncapped grading rule. Documentation only; no behaviour change.
 
+### Changed — Go import edges come from the shared `@import.path` capture (#358, Go slice)
+
+Go is the second language onto the shared import-capture vocabulary that the C-family slice introduced. A Go
+`import_declaration` — single or grouped, aliased (`import f "fmt"`), dot (`import . "x"`), blank (`import _ "x"`), and
+cgo's `import "C"` — is now matched by `(import_declaration) @import.path` in `queries/go/tags.scm` and read by one
+`DepDialect::Go` normaliser in `src/ingest_importcap.h`; `captureIncludes` no longer walks Go files. The captured node is
+the whole declaration because that is the unit the Include record has always been built from: its target is the
+declaration's clause (`importClauseTarget`, shared with Swift, which still reads it from the walk), so a grouped block
+stays ONE record and `resolveGoImport` still takes the first quoted token. Splitting a group into one record per spec,
+and moving the alias onto `@import.alias`, would add rows and are left for their own slice.
+
+**Output is byte-identical.** Dependency and resolve output over the Go fixtures and repos in the lane report is
+unchanged, the go.mod `module` / `replace` resolution reads the same records, and a cache written by the previous binary
+is accepted untouched, so no parser-version bump is owed. `test/importcapcheck.sh` gains six Go arms (embedded capture,
+21 byte-exact rows covering every form above plus tab, semicolon, raw-string, UTF-8 cut and error-recovery spellings, no
+widening for a function-body import, replace-based resolution with a bogus-target negative, the import-role use-site
+ref, and the Go cache round-trip).
+
 ### Changed — the C-family import edges come from one shared capture instead of two per-language extractors (#358, C-family slice)
 
 `src/ingest_relations.h` held about 21 per-language import extractors (`csharpUsingTarget`, `phpUseTarget`,
