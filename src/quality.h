@@ -2552,11 +2552,18 @@ inline std::string headSnapExclHex( const std::vector<std::string>& excludes, st
 // only WRITTEN into its shard the next time it is (re)computed. A blob absent from both locations is a clean
 // miss, created fresh, in its shard. `evictOldCacheFamily` below sweeps both layouts, so an old flat blob
 // still ages out on schedule even if its key is never rewritten.
+// A 64-bit key spelled as its 16 lowercase hex digits — the ack ledger's key (ackMapKey), the shard below, and the
+// ingest's per-root sidecar names.
+inline std::string hex16( std::uint64_t key )
+{
+    char hex[ 20 ];
+    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( key ) );
+    return hex;
+}
+
 inline std::string blobShardHex( std::string_view filename )
 {
-    char hex[ 3 ];
-    rw::formatTo( hex, sizeof( hex ), "{:02x}", static_cast<unsigned>( fnv1a64( filename ) & 0xff ) );
-    return std::string( hex );
+    return hex16( fnv1a64( filename ) ).substr( 14 );   // the low byte, two hex digits: "{:02x}" of ( hash & 0xff )
 }
 
 inline std::string resolveCacheBlobPath( const std::string& dir, const std::string& filename )
@@ -6164,14 +6171,6 @@ inline std::optional<bool> rescoreAckRecord( const AckRecord& r, std::optional<s
         bareKind = bareKind.substr( 0, colon );
     }
     return rescoreNumericMajor( bareKind, r.was, r.now, barOverride, minorDeltaOverride );
-}
-
-// A 64-bit key spelled as its 16 lowercase hex digits — the ack ledger's key, and the ingest's per-root sidecar names.
-inline std::string hex16( std::uint64_t key )
-{
-    char hex[ 20 ];
-    rw::formatTo( hex, sizeof( hex ), "{:016x}", static_cast<unsigned long long>( key ) );
-    return hex;
 }
 
 inline std::string ackMapKey( const std::string& kind, std::uint64_t key )

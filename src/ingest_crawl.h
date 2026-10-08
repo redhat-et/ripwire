@@ -1550,7 +1550,7 @@ public:
             fresh_ = runGitIgnoreProbe( rootDir );   // no sidecar to speculate from, or no git child to overlap: as before
             return parseGitIgnoreProbe( *fresh_ );
         }
-        sidecarPath_ = quality::resolveCacheBlobPath( quality::cacheDirLadder(), sidecarName( rootReal ) );
+        sidecarPath_ = quality::resolveCacheBlobPath( quality::cacheDirLadder(), "ripwire-ignoreprobe-" + quality::hex16( fnv1a64( rootReal ) ) + ".bin" );
         sidecarHeader_ = std::string( kSidecarMagic ) + rootReal + '\0';
         pending_     = std::async( std::launch::async, [ root = std::string( rootDir ) ] { return runGitIgnoreProbe( root.c_str() ); } );
         speculation_ = loadSidecar();
@@ -1582,11 +1582,6 @@ public:
 
 private:
     static constexpr std::string_view kSidecarMagic = "ripwire-ignore-speculation/1\n";
-
-    static std::string sidecarName( const std::string& rootReal )
-    {
-        return "ripwire-ignoreprobe-" + quality::hex16( fnv1a64( rootReal ) ) + ".bin";
-    }
 
     // The previous call's answer for this root, or nothing. The header names the root in full, so two roots whose names
     // hash alike never read each other's answer; anything unreadable or misshapen is simply no speculation.

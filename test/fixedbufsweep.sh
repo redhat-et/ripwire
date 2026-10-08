@@ -254,7 +254,7 @@ NUMERIC_ONLY = {
     ( "src/partition.h", "nb" ): 1,
     ( "src/quality.h", "b" ): 1,
     ( "src/quality.h", "cidHex" ): 1,
-    ( "src/quality.h", "hex" ): 7,
+    ( "src/quality.h", "hex" ): 6,  # cli-perf-068: blobShardHex and ackMapKey now share hex16 (one buffer for two)
     ( "src/quality.h", "name" ): 1,
     ( "src/recall.h", "scoreText" ): 1,
     ( "src/serialize.h", "...)" ): 1,
@@ -594,7 +594,7 @@ if not bad:
 #            238 -> 239 calls/sites, 104 -> 105 rows). noteCacheReject's new `char detail[192]` names both version
 #            numbers on a refused cache blob; one formatTo of a literal and two std::uint32_t, rowed 'not-markup'
 #            (a stderr notice). Re-derived on the train 20 merged tree; no other train lane moves the population.
-EXPECTED = { "mentions": 351, "calls": 241, "sites": 241, "rows": 105, "widthforms": 0 }
+EXPECTED = { "mentions": 350, "calls": 240, "sites": 240, "rows": 105, "widthforms": 0 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the
