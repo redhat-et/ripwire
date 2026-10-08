@@ -27,14 +27,22 @@ class Signal:
 
 
 def invoke_watcher(watcher, old, new):
+    stamp(watcher)
     return watcher(old, new)
 
 
 def schedule_refresh(obj):
+    stamp(obj)
     return obj
 
 
 def record_signal(obj):
+    stamp(obj)
+    return obj
+
+
+def stamp(obj):
+    """mark an object as touched (a proven callee for the three helpers above)."""
     return obj
 
 
