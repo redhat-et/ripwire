@@ -1158,20 +1158,41 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
 enum class ExtractFamily : std::uint8_t { CFamily, Python, JsTs, JvmDotNet, GoRustSwiftDart, Scripting, Bash, DocsData, Count };
 enum class ExtractPhase : std::uint8_t { Parse, SideFacts, TagsFacts, Count };
 
+// One row per Lang, in enumerator order (model.h): the size assert below fails when a language is appended without a row.
+inline constexpr ExtractFamily kExtractFamilyByLang[] = {
+    ExtractFamily::CFamily,          // Cpp
+    ExtractFamily::Python,           // Python
+    ExtractFamily::JsTs,             // TypeScript
+    ExtractFamily::GoRustSwiftDart,  // Go
+    ExtractFamily::GoRustSwiftDart,  // Rust
+    ExtractFamily::GoRustSwiftDart,  // Swift
+    ExtractFamily::CFamily,          // ObjC
+    ExtractFamily::DocsData,         // Markdown
+    ExtractFamily::JsTs,             // JavaScript
+    ExtractFamily::Bash,             // Bash
+    ExtractFamily::JvmDotNet,        // Java
+    ExtractFamily::Scripting,        // Ruby
+    ExtractFamily::DocsData,         // Unknown
+    ExtractFamily::DocsData,         // Json
+    ExtractFamily::JvmDotNet,        // CSharp
+    ExtractFamily::CFamily,          // C
+    ExtractFamily::DocsData,         // Toml
+    ExtractFamily::DocsData,         // Yaml
+    ExtractFamily::Scripting,        // Php
+    ExtractFamily::Scripting,        // Lua
+    ExtractFamily::Scripting,        // Elixir
+    ExtractFamily::GoRustSwiftDart,  // Dart
+    ExtractFamily::JvmDotNet,        // Kotlin
+    ExtractFamily::Scripting,        // GDScript
+};
+static_assert( std::size( kExtractFamilyByLang ) == kLangCount, "one profile family row per Lang, in enumerator order" );
+static_assert( kExtractFamilyByLang[ std::size_t( Lang::Kotlin ) ] == ExtractFamily::JvmDotNet && kExtractFamilyByLang[ std::size_t( Lang::C ) ] == ExtractFamily::CFamily,
+               "the table follows Lang's enumerator order" );
+
 constexpr ExtractFamily extractFamilyOf( Lang lang ) noexcept
 {
-    switch( lang )
-    {
-        case Lang::Cpp: case Lang::C: case Lang::ObjC:                                    return ExtractFamily::CFamily;
-        case Lang::Python:                                                                return ExtractFamily::Python;
-        case Lang::TypeScript: case Lang::JavaScript:                                     return ExtractFamily::JsTs;
-        case Lang::Java: case Lang::Kotlin: case Lang::CSharp:                            return ExtractFamily::JvmDotNet;
-        case Lang::Go: case Lang::Rust: case Lang::Swift: case Lang::Dart:                return ExtractFamily::GoRustSwiftDart;
-        case Lang::Ruby: case Lang::Php: case Lang::Lua: case Lang::Elixir: case Lang::GDScript: return ExtractFamily::Scripting;
-        case Lang::Bash:                                                                  return ExtractFamily::Bash;
-        case Lang::Markdown: case Lang::Json: case Lang::Toml: case Lang::Yaml: case Lang::Unknown: return ExtractFamily::DocsData;
-    }
-    return ExtractFamily::DocsData;   // a byte past the enum; a NEW Lang is a -Werror=switch error above
+    const std::size_t langIdx = static_cast<std::size_t>( lang );
+    return langIdx < kLangCount ? kExtractFamilyByLang[ langIdx ] : ExtractFamily::DocsData;
 }
 
 inline constexpr const char* kExtractScopeNames[ std::size_t( ExtractPhase::Count ) ][ std::size_t( ExtractFamily::Count ) ] = {
