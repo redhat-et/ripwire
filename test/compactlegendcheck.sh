@@ -786,6 +786,86 @@ done
 [ "${p1bind:-0}" -gt 0 ] && ok "(P1) the arm binds: on ${p1bind} of $p1n runs the budget cut the full answer's <sigs> and the default is the compact posture (default carries more rows on $p1more)" \
                         || no "(P1) on none of $p1n runs did the budget cut the full answer's <sigs> under a compact default — the superset arm proved nothing"
 
+# (P1-D) knob-honesty-068 round 3 (orchestrator ruling D, 2026-10-08): ON A BUDGETED ANSWER THE COMPACT POSTURE NEVER EMITS A
+# HEADER LARGER THAN --legend=full's FOR THE SAME CONTENT (verbs_for.h forServeFullLegendHeader). At a tight budget the full
+# dialect's rung zero pays (its prose clauses are long) while the compact one's cannot (its dropped-legend note is longer than
+# the clauses), so full's header can finish SMALLER — and then the larger compact header is what made the default pay a row
+# --legend=full keeps. When full's header is smaller the default serves it: same rows, same facts, fewer bytes; schema= (the
+# compact dialect's id) is then absent, which is how the answer says which legend form it carries.
+# FIXED ARMS on a SHORT RELATIVE root (`src`, run from $ROOT). The sweep above runs on "$ROOT/src", and that path rides the
+# header the rows are budgeted against: on a checkout path longer than ~52 chars these two argv passed, on CI's shorter path
+# they did not (red at 4acbcd22: default 7 vs full 8, default 9 vs full 10). Each fixed arm asserts, on the same argv:
+#   P1  rows(default) ⊇ rows(--legend=full);   P4  the default is inside its budget or no further over it than full;
+#   C3  full fits ⇒ the default fits too, with no fewer rows (no row paid where full needed none);
+#   D   header(default) ≤ header(full), and a default with no schema= (full's legend form) is --legend=full byte for byte.
+# TWIN (scope): at --token-budget=6000 the compact header is the smaller one, and the default keeps its own dialect (schema=,
+# header strictly smaller than full's) — red on a mutant that always serves full's header. ABSENCES are read only off answers
+# that produced a <ctx> root (CHECKLIST 14).
+cat > "$TMP/p1d.py" <<'PY'
+import re, sys
+def doc( path ):
+    return open( path, encoding = "utf-8", errors = "replace" ).read()
+def header( t ):   # the root open tag + the comments right after it (the legend); -1 when there is no <ctx> root
+    m = re.match( r"\s*<ctx\s[^>]*>", t )
+    if not m: return -1
+    i = m.end()
+    while t.startswith( "<!--", i ):
+        j = t.find( "-->", i ); i = len( t ) if j < 0 else j + 3
+    return i
+def est( t ):
+    m = re.search( r'<ctx\s[^>]*\sest_tokens="([0-9]+)"', t ); return int( m.group( 1 ) ) if m else -1
+d, f = doc( sys.argv[ 1 ] ), doc( sys.argv[ 2 ] )
+schema = 1 if re.match( r'\s*<ctx\s[^>]*\sschema="ripwire\.for/v1"', d ) else 0
+over   = 1 if re.match( r'\s*<ctx\s[^>]*\sover_ceiling="1"', d ) else 0
+fover  = 1 if re.match( r'\s*<ctx\s[^>]*\sover_ceiling="1"', f ) else 0
+print( header( d ), header( f ), est( d ), est( f ), schema, over, fover, 1 if d == f else 0 )
+PY
+p1dbad=0
+p1d_arm(){   # p1d_arm TASK BUDGET WANT(full|compact)
+    ( cd "$ROOT" && "$BIN" src --for="$1" --token-budget="$2" ) >"$TMP/p1d.def" 2>/dev/null
+    ( cd "$ROOT" && "$BIN" src --for="$1" --token-budget="$2" --legend=full ) >"$TMP/p1d.full" 2>/dev/null
+    set -- "$1" "$2" "$3" $( python3 "$TMP/rows.py" "$TMP/p1d.def" "$TMP/p1d.full" | tr -d "[](),'" )
+    local task="$1" tb="$2" want="$3" drows="${4:-}" frows="${5:-}" lost="${6:-}"
+    set -- $( python3 "$TMP/p1d.py" "$TMP/p1d.def" "$TMP/p1d.full" )
+    if [ $# -ne 8 ] || [ "$1" -lt 0 ] || [ "$2" -lt 0 ] || [ "$3" -lt 0 ] || [ "$4" -lt 0 ] || [ -z "$lost" ] || [ -z "$frows" ]; then
+        p1dbad=$(( p1dbad + 1 )); no "(P1-D) --for='$task' --token-budget=$tb on root src: could not read both answers (a <ctx> root, est_tokens=, rows) — got '$*' rows='$drows/$frows/$lost'"; return
+    fi
+    local dh="$1" fh="$2" de="$3" fe="$4" schema="$5" over="$6" fover="$7" same="$8" why=""
+    [ "$lost" -ne 0 ] && why="$why P1: lost $lost row(s) full carries (default $drows, full $frows);"
+    [ "$de" -gt "$tb" ] && [ "$de" -gt "$fe" ] && why="$why P4: est_tokens $de over the budget AND over full's $fe;"
+    [ "$fover" -eq 0 ] && [ "$fe" -le "$tb" ] && { [ "$over" -eq 1 ] || [ "$de" -gt "$tb" ] || [ "$drows" -lt "$frows" ]; } \
+        && why="$why C3: full fits ($frows rows, est $fe) but the default does not or carries fewer (rows $drows, est $de, over_ceiling=$over);"
+    [ "$dh" -gt "$fh" ] && why="$why D: header $dh B > full's $fh B;"
+    [ "$schema" -eq 0 ] && [ "$same" -ne 1 ] && why="$why D: no schema= (full's legend form) but not --legend=full byte for byte;"
+    case "$want" in
+        full)    [ "$schema" -eq 0 ] || why="$why D: full's header is the smaller here, so the default must carry it (schema= absent) — it kept the compact one ($dh B vs $fh B);" ;;
+        compact) { [ "$schema" -eq 1 ] && [ "$dh" -lt "$fh" ]; } || why="$why twin: the compact header is the smaller here, so the default must keep it (schema=, header < full's) — schema=$schema, $dh B vs $fh B;" ;;
+    esac
+    if [ -n "$why" ]; then
+        p1dbad=$(( p1dbad + 1 )); no "(P1-D) --for='$task' --token-budget=$tb on root src:$why"
+    else
+        ok "(P1-D) --for='$task' --token-budget=$tb on root src: rows $drows ⊇ full's $frows, est $de (full $fe), header $dh B ≤ full's $fh B, form=$want"
+    fi
+}
+p1d_arm "rank symbols by pagerank" 1500 full
+p1d_arm "parse command line flags" 1500 full
+p1d_arm "rank symbols by pagerank" 6000 compact
+# MCP `for` has ONE dialect (it declares no `legend` field, src/mcprefusal.h; the compact layer never runs on it), so there is no
+# compact header to fall back from — this sentinel goes red the day MCP `for` gains a compact dialect without the same rule.
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"src","task":"parse command line flags","budget_tokens":1500}}}' \
+    | ( cd "$ROOT" && "$BIN" --mcp 2>/dev/null ) | tail -1 >"$TMP/p1d.mcp"
+if grep -q '<ctx ' "$TMP/p1d.mcp"; then
+    if grep -q 'schema=\\"ripwire.for' "$TMP/p1d.mcp"; then
+        p1dbad=$(( p1dbad + 1 )); no "(P1-D) MCP for now answers in a compact dialect (schema=) — extend ruling D's header rule (forServeFullLegendHeader) to it"
+    else
+        ok "(P1-D) MCP for budget_tokens=1500 on path src answers in its one (full) dialect — no compact header exists to exceed full's"
+    fi
+else
+    p1dbad=$(( p1dbad + 1 )); no "(P1-D) MCP for budget_tokens=1500 on path src produced no <ctx> answer — the sentinel proves nothing"
+fi
+[ "$p1dbad" -eq 0 ] && ok "(P1-D) ruling D holds on the short-root fixed arms, the scope twin and the MCP sentinel"
+
 # (P2) the default map's --token-budget gate decides on the price the default PRINTS. It used to decide on the full
 # dialect's price before the compact layer ran, so a map that fits once compacted was withheld (exit 3). Budget = the
 # compact price itself: the default must answer (exit 0), --legend=full must still withhold (exit 3), and the full price

@@ -40,7 +40,13 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
   the cause where the answer's own ceiling was otherwise met. Measured on 20 queries at a 2000-token budget: the CLI keeps
   every row on 19 (the 20th was over its ceiling and now pays one row to fit), `--json` on all 20, MCP `for` on all 20
   (19 of them over their ceiling either way); at 4000, MCP `for` pays on the 6 answers that fit only by paying.
-  No budget, ceiling or token conversion changed.
+  No budget, ceiling or token conversion changed. And on a budgeted `--for` answer the default (compact) header is never
+  larger than `--legend=full`'s for the same content: at a tight budget the full dialect's droppable prose clauses go to
+  the ceiling and leave a smaller header than compact's, which cannot shed its own, and that larger header used to cost
+  the default a row `--legend=full` kept. Where full's header is the smaller, the default now serves it — same rows,
+  same facts, fewer bytes; `schema=` is then absent from the root, which is how the answer says which legend it carries.
+  Unbudgeted answers, and budgeted ones whose compact header is the smaller, are byte-identical. MCP `for` has one
+  (full) dialect and `--json` no legend header, so neither changes.
 - **`--lint` / `--lint-rules` and `--sarif`.** A rule that spends its per-rule match budget (`count_capped="1"`) now makes
   the root carry `findings_next=` (SARIF: `runs[0].properties.findingsNext`, which keeps `--sarif`): only the floored
   rules, under a 10x budget, through the new `--lint-max-per-rule=N` (sets each rule's budget either way; the default
@@ -50,7 +56,7 @@ Three cuts were disclosed and still dead ends — counted, with no pasteable cal
 
 Also: the `ripwire-handoff` skill passed `--top-k=20` to `--for`, which does not read it; it now spells
 `--signatures-only`. Gates: `forrankordercheck` (9), `lintbudgetcheck` (5), `impactimportcheck` (#9d), `estchargecheck`
-(#11 A7 unpaid twin), `compactlegendcheck` (P4 floor twin), `forrankordercheck` (10) and (11), `fordisclosurecheck` (#2c).
+(#11 A7 unpaid twin), `compactlegendcheck` (P4 floor twin, P1-D), `forrankordercheck` (10) and (11), `fordisclosurecheck` (#2c).
 
 
 ### Added — MCP `grep` rows carry the matched text and a `fetch_body` handle (CLI parity)

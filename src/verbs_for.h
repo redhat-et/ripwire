@@ -1295,6 +1295,14 @@ struct ForLensRootFinish
     bool             sigsUnpaidOver       = false;
 };
 
+// knob-honesty-068 round 3 (orchestrator ruling D): on a budgeted answer the compact posture serves --legend=full's header for
+// the same content when that header finishes STRICTLY smaller (a tie keeps the compact dialect and its schema=). One named
+// predicate so the rule has one spelling and a mutation of it has one site (compactlegendcheck (P1-D) goes red).
+[[nodiscard]] constexpr bool forServeFullLegendHeader( std::size_t fullHeaderBytes, std::size_t compactHeaderBytes ) noexcept
+{
+    return fullHeaderBytes < compactHeaderBytes;
+}
+
 // PR #215 review: the finished header AND the number it prints, handed back together. finishForLensHeader
 // below is this function's header half and stays the name every emit site calls; the ceiling ladder's exact-
 // ceiling test needs the OTHER half, because "does this document fit what its root promises" is the question
@@ -3036,8 +3044,10 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
         // max_tokens= rode every budgeted default answer undefined (the full dialect's confidence clause carries them). The
         // compact clause names the ones THIS root carries; the full dialect's bytes are unchanged (compactlegendcheck A-PIN).
         const bool compactEstLegend = cfg.legend == "compact";
+        // round 3 (ruling D): the full dialect's clause, named — the header comparison below prices the full alternative with it
+        constexpr std::string_view kForEstTokensLegendFull = " est_tokens= prices this bundle in tokens";
         const std::string_view kForEstTokensLegend =
-            !compactEstLegend                   ? std::string_view( " est_tokens= prices this bundle in tokens" )
+            !compactEstLegend                   ? kForEstTokensLegendFull
             : forGateBudget && forBodyCeiling   ? std::string_view( " est_tokens= prices this bundle in tokens; budget_tokens=/max_tokens= the token budget/body ceiling asked" )
             : forGateBudget                     ? std::string_view( " est_tokens= prices this bundle in tokens; budget_tokens= the token budget asked" )
             : forBodyCeiling                    ? std::string_view( " est_tokens= prices this bundle in tokens; max_tokens= the body ceiling asked" )
@@ -3486,10 +3496,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
             // by it (serialize.h climbCeilingLadderBy). Both halves: the reserve-priced sum above AND the header
             // that will actually be emitted, because the reserve cannot see over_ceiling="1" and its clause (70 B),
             // owed whenever est_tokens exceeds budget_tokens and priced by finishForLensHeader's own fixpoint.
-            const auto fitsCeiling = [ & ]( std::string_view candidate )
+            // knob-honesty-068 (round 3, ruling D): both predicates are built for a (root finish, reserve) pair, because the ladder
+            // below is climbed twice on a compact answer — once per legend dialect — and each dialect prices its OWN est_tokens clause.
+            const auto fitsCeilingFor = [ & ]( const ForLensRootFinish& finish, std::size_t payloadBytes )
             {
-                return candidate.size() + ladderPayloadBytes <= ladderCeiling
-                    && finishForLensHeader( std::string( candidate ), rootFinish ).size() + emittedNonHeaderBytes <= ladderCeiling;
+                return [ &finish, payloadBytes, ladderCeiling, emittedNonHeaderBytes ]( std::string_view candidate )
+                {
+                    return candidate.size() + payloadBytes <= ladderCeiling
+                        && finishForLensHeader( std::string( candidate ), finish ).size() + emittedNonHeaderBytes <= ladderCeiling;
+                };
             };
             // …AND THE EXACT CEILING IS NOT A BYTE TEST AT ALL (PR #215 review: "use mixed-rate accounting for the
             // exact-ceiling test"). What the root PROMISES is `est_tokens <= budget_tokens`, and est_tokens is not
@@ -3509,9 +3524,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
             // The maxTokens/--detail body ceiling is deliberately NOT folded in: this rung has always been about
             // the --token-budget ceiling, forLensOverCeiling answers the wider question on the finished document,
             // and widening a rung is a change to what it drops, not a fix to how it prices.
-            const auto fitsExactCeiling = [ & ]( std::string_view candidate )
+            const auto fitsExactCeilingFor = [ & ]( const ForLensRootFinish& finish )
             {
-                return finishForLensHeaderPriced( std::string( candidate ), rootFinish ).estTokens <= cfg.tokenBudget;
+                return [ &finish, budget = cfg.tokenBudget ]( std::string_view candidate )
+                {
+                    return finishForLensHeaderPriced( std::string( candidate ), finish ).estTokens <= budget;
+                };
             };
             // RUNG ZERO — the confidence LEGEND clause, before any of the ladder's own rungs: it is the one
             // header string whose loss costs NO unique information (confidence=/margin_pct= stay on the root
@@ -3537,7 +3555,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
             // --token-budget=1200` printed est_tokens="778", no over_ceiling=, and had dropped all three clauses.
             // …AND THE RATE WAS ONLY HALF OF IT: a BYTE ceiling cannot express this root's promise at all, because
             // est_tokens is two rates (markup 2.50, bodies 3.80) over a document the byte sum also mis-assembles
-            // from reserves. fitsExactCeiling above is the token comparison itself now; see its own note.
+            // from reserves. fitsExactCeilingFor above is the token comparison itself now; see its own note.
             //
             // ONE DROPPABLE BIT. These three fields moved in lock step at every read and write, and the guard that used
             // to test all three was true whenever any clause remained, which is the only state this branch is reached
@@ -3550,26 +3568,69 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
             // candidate is built and compared; a drop that does not pay is not taken, and the readings simply ride.
             // This is the assertion, not a comment about one: there is no shape in which the byte-negative branch
             // can be reached, because the branch is the comparison.
-            if( headerParts.legendDroppable() && !fitsExactCeiling( headerStr ) )
+            //
+            // Rung zero and the ladder, for one dialect's header parts (round 3: climbed once per dialect on a compact answer).
+            // `header` is forLensHeaderText( parts, true, true, {} ) — the shape every build above leaves headerStr in.
+            const auto climbHeader = [ & ]( ForLensHeaderParts& parts, const ForLensRootFinish& finish, std::size_t payloadBytes,
+                                            std::string header ) -> rw::CeilingLadderChoice
             {
-                const ForLensHeaderParts keptParts = headerParts;
-                headerParts.dropDroppableLegend();
-                std::string droppedHeader = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
-                if( droppedHeader.size() < headerStr.size() )
+                const auto build = [ &parts ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
+                { return forLensHeaderText( parts, withRouteAttr, withTaskEcho, extraNotes ); };
+                const auto fitsExact = fitsExactCeilingFor( finish );
+                if( parts.legendDroppable() && !fitsExact( header ) )
                 {
-                    headerStr = std::move( droppedHeader );
+                    const ForLensHeaderParts keptParts = parts;
+                    parts.dropDroppableLegend();
+                    std::string droppedHeader = build( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+                    if( droppedHeader.size() < header.size() )
+                    {
+                        header = std::move( droppedHeader );
+                    }
+                    else
+                    {
+                        parts = keptParts;   // byte-negative: keep the readings and say nothing
+                    }
                 }
-                else
-                {
-                    headerParts = keptParts;   // byte-negative: keep the readings and say nothing
-                }
-            }
-            // M3: the ladder hands back the rung it took. That value — never a search of the emitted text — is
-            // what puts over_ceiling="1" on the root below.
-            rw::CeilingLadderChoice chosen = rw::climbCeilingLadderBy( buildForHeader, headerStr, fitsExactCeiling, fitsCeiling,
-                                                                       /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
+                // M3: the ladder hands back the rung it took. That value — never a search of the emitted text — is
+                // what puts over_ceiling="1" on the root below.
+                return rw::climbCeilingLadderBy( build, header, fitsExact, fitsCeilingFor( finish, payloadBytes ),
+                                                 /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
+            };
+            const ForLensHeaderParts partsAtLadder = headerParts;   // round 3: the full dialect's climb starts from the same parts
+            rw::CeilingLadderChoice  chosen        = climbHeader( headerParts, rootFinish, ladderPayloadBytes, std::move( headerStr ) );
             headerStr                = std::move( chosen.header );
             rootFinish.lastRungFired = ( chosen.rung == rw::CeilingRung::OverCeiling );
+            // knob-honesty-068 round 3 (orchestrator ruling D): ON A BUDGETED ANSWER THE COMPACT POSTURE NEVER EMITS A HEADER
+            // LARGER THAN --legend=full's FOR THE SAME CONTENT. Rung zero cannot pay in the compact dialect (its dropped-legend
+            // note is longer than the clauses it would drop, above) while the full dialect's prose clauses are long enough to
+            // pay, so at a tight budget the full header can finish SMALLER than the compact one (measured: `--for="parse command
+            // line flags" --token-budget=1500` on root src, 1222 B compact vs 1021 B full) — and then the larger header is what
+            // made the compact answer pay a row --legend=full keeps (compactlegendcheck P1). So the full dialect's header is
+            // climbed over the SAME parts, rows and root finish (its own est_tokens clause and reserve), and when it finishes
+            // strictly smaller it is the one served: same rows, same facts, fewer bytes — lean-answers' --whereis rule (never
+            // serve the longer of two equal-content variants). Which form was served is the root's own posture attribute:
+            // schema="ripwire.for/v1" rides only the compact dialect, so its absence says the full legend answered. Everything
+            // after this point (the C3 fit, the payment hand-back, the labels) reads the header actually chosen. An unbudgeted
+            // answer never reaches this block, and a budgeted one whose compact header is not larger keeps every byte.
+            if( headerParts.compactLegend )
+            {
+                ForLensHeaderParts fullParts = partsAtLadder;
+                fullParts.compactLegend      = false;
+                ForLensRootFinish fullFinish = rootFinish;
+                fullFinish.estTokensLegend   = kForEstTokensLegendFull;
+                fullFinish.lastRungFired     = false;
+                const std::size_t       fullPayloadBytes = ladderPayloadBytes - kForEstTokensLegend.size() + kForEstTokensLegendFull.size();
+                rw::CeilingLadderChoice fullChosen       = climbHeader( fullParts, fullFinish, fullPayloadBytes,
+                                                                        forLensHeaderText( fullParts, /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} ) );
+                fullFinish.lastRungFired = ( fullChosen.rung == rw::CeilingRung::OverCeiling );
+                if( forServeFullLegendHeader( finishForLensHeader( fullChosen.header, fullFinish ).size(),
+                                               finishForLensHeader( headerStr, rootFinish ).size() ) )
+                {
+                    headerParts = fullParts;
+                    headerStr   = std::move( fullChosen.header );
+                    rootFinish  = fullFinish;
+                }
+            }
             // knob-honesty-068 (orchestrator rulings 2026-10-07): the recovery handle ALWAYS ships. Read off the FINISHED
             // document (the header this ladder chose + every byte stdout receives): does it land past its ceiling — the byte
             // allowance, or the token budget the root names? The label only adds bytes, so a document over before it is over
