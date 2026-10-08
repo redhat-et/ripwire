@@ -25,7 +25,8 @@
 # Fixtures: test/legofix (lego collapses: three small interfaces still clear the threshold) and
 # test/sectionpricefix (both lego and compose collapse: a purpose-built interface + HAS-A owners sized
 # comfortably above threshold) prove the ABOVE-threshold side; test/hasafix (compose stays whole: two
-# short <field> rows, priced BELOW threshold) proves the round-2 delta itself, arm (10).
+# short <field> rows, priced BELOW threshold) proves the round-2 delta itself, arm (10). test/legochargefix (a lego
+# block bigger than the <sigs> budget) proves the stub is what the <sigs> budget is charged for, arm (13).
 #
 # Usage:  bash test/forsectioncollapsecheck.sh [path-to-ripwire-binary]
 #         RIPWIRE_BIN=build/ripwire bash test/forsectioncollapsecheck.sh
@@ -391,6 +392,60 @@ sys.exit(0 if 'lego/compose collapse to a counted stub by default' not in t else
         || no "(12d) MCP for: the legend clause leaked onto a run where nothing was stubbed"
 else
     ok "(12) MCP legend disclosure arm skipped (python3 absent)"
+fi
+
+# ── (13) lego-charge (K18 root cause): the <sigs> budget charges a collapsing section at its STUB, not its full render.
+# test/legochargefix is textual-shaped: its query names 14 interfaces with 4 implementors each, so the full <lego> render
+# (~10 KB) is bigger than the default <sigs> budget, while the default answer serves it as a ~150 B stub. Charging the
+# full render left 1 B for <sigs>: 4 rows in a ~3 KB answer under a 7.5 KB ceiling (textual's round-1 rows: 4 of 40).
+# Rules (rw::forSectionsSigChargePlan, serialize.h): no explicit ceiling → the default answer's charge, also under
+# --sections= (so the stub's next= restores both sections with the SAME <sigs>, byte-identically); an explicit ceiling
+# (--token-budget, MCP budget_tokens) → a section --sections= opts into is charged in full (hard bound).
+LCQ="how do render stage classes arrange and reflow widgets"
+lc_shown(){ grep -o '<sigs shown="[0-9]*"' "$1" | head -1 | grep -o '[0-9][0-9]*'; }
+lc_est(){ grep -o 'est_tokens="[0-9]*"' "$1" | head -1 | grep -o '[0-9][0-9]*'; }
+lc_sigs(){ grep -o '<sigs .*</sigs>' "$1"; }
+"$BIN" test/legochargefix --no-cache --for="$LCQ" >"$TMP/lc_def.xml" 2>/dev/null;                                  rc_def=$?
+"$BIN" test/legochargefix --no-cache --for="$LCQ" --sections=lego,compose >"$TMP/lc_rest.xml" 2>/dev/null;         rc_rest=$?
+"$BIN" test/legochargefix --no-cache --for="$LCQ" --token-budget=3000 >"$TMP/lc_tb.xml" 2>/dev/null;               rc_tb=$?
+"$BIN" test/legochargefix --no-cache --for="$LCQ" --token-budget=3000 --sections=lego,compose >"$TMP/lc_tbrest.xml" 2>/dev/null; rc_tbrest=$?
+LC_DEF="$( lc_shown "$TMP/lc_def.xml" )"; LC_REST="$( lc_shown "$TMP/lc_rest.xml" )"
+LC_TB="$( lc_shown "$TMP/lc_tb.xml" )";   LC_TBREST="$( lc_shown "$TMP/lc_tbrest.xml" )"; LC_TBEST="$( lc_est "$TMP/lc_tbrest.xml" )"
+if [ "$rc_def$rc_rest$rc_tb$rc_tbrest" != "0000" ] || ! [[ "$LC_DEF" =~ ^[0-9]+$ && "$LC_REST" =~ ^[0-9]+$ && "$LC_TB" =~ ^[0-9]+$ && "$LC_TBREST" =~ ^[0-9]+$ && "$LC_TBEST" =~ ^[0-9]+$ ]]; then
+    no "(13) legochargefix: a run failed or printed no <sigs shown=>/est_tokens= (rc=$rc_def/$rc_rest/$rc_tb/$rc_tbrest shown=$LC_DEF/$LC_REST/$LC_TB/$LC_TBREST est=$LC_TBEST)"
+else
+    # (13a) RED on the base: the stub is served, so the budget pays the stub — the answer carries a budget's worth of rows
+    grep -Eq '<lego total="[0-9]+" shown="0" capped="1" next="[^"]*"/>' "$TMP/lc_def.xml" && [ "$LC_DEF" -ge 24 ] \
+        && ok "(13a) default: <lego> is served as a stub and <sigs> shows $LC_DEF rows (the stub's price was charged, not the full render's)" \
+        || no "(13a) default: <sigs shown=\"$LC_DEF\"> (want >= 24 with a <lego> stub) — the budget paid for a lego render it never served"
+    # (13b) the stub's next= restores both sections byte-identically: same <sigs> block, the full <lego> on top
+    [ "$( lc_sigs "$TMP/lc_def.xml" )" = "$( lc_sigs "$TMP/lc_rest.xml" )" ] && grep -q '<lego><iface ' "$TMP/lc_rest.xml" \
+        && ok "(13b) --sections=lego,compose: the same <sigs> as the stubbed answer ($LC_REST rows) plus the full <lego>" \
+        || no "(13b) --sections=lego,compose: <sigs shown=\"$LC_REST\"> differs from the stubbed answer's ($LC_DEF) or no full <lego> — next= does not restore the cut it disclosed"
+    LC_STUBTOTAL="$( grep -o '<lego total="[0-9]*"' "$TMP/lc_def.xml" | head -1 | grep -o '[0-9][0-9]*' )"
+    LC_IFACES="$( grep -o '<iface ' "$TMP/lc_rest.xml" | wc -l | tr -d ' ' )"
+    [[ "$LC_STUBTOTAL" =~ ^[0-9]+$ ]] && [ "$LC_IFACES" -eq "$(( LC_STUBTOTAL < 12 ? LC_STUBTOTAL : 12 ))" ] \
+        && ok "(13c) the stub's total=$LC_STUBTOTAL matches the restored <lego> ($LC_IFACES <iface> rows, display cap 12)" \
+        || no "(13c) the stub's total=\"$LC_STUBTOTAL\" vs $LC_IFACES restored <iface> rows (display cap 12)"
+    # (13d) NEAR-MISS: under an explicit ceiling, a section --sections= opts into is charged in full — the hard bound holds
+    # (its <lego> is then narrowed to the few rendered rows' files — here none of stages.h — so the bound is read off <sigs>)
+    [ "$LC_TBEST" -le 3000 ] && [ "$LC_TBREST" -lt "$LC_TB" ] \
+        && ok "(13d) --token-budget=3000 --sections=lego,compose: est_tokens=$LC_TBEST <= 3000, <sigs> $LC_TBREST < $LC_TB (the full <lego> was charged)" \
+        || no "(13d) --token-budget=3000 --sections=lego,compose: est_tokens=$LC_TBEST, <sigs> $LC_TBREST vs $LC_TB stubbed — the opted-in section was not charged in full under an explicit ceiling"
+fi
+if command -v python3 >/dev/null 2>&1; then
+    lc_mcp(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"test/legochargefix","task":"%s"%s}}}\n' "$LCQ" "$1" \
+                | "$BIN" --mcp 2>/dev/null | python3 -c "
+import json,sys,re
+t = json.loads(sys.stdin.readline())['result']['content'][0]['text']
+m = re.search(r'<sigs shown=\"([0-9]+)\"', t)
+print(m.group(1) if m else 'none')"; }
+    LCM_DEF="$( lc_mcp '' )"; LCM_TB="$( lc_mcp ',"budget_tokens":3000' )"; LCM_TBREST="$( lc_mcp ',"budget_tokens":3000,"sections":"lego,compose"' )"
+    [[ "$LCM_DEF" =~ ^[0-9]+$ && "$LCM_TB" =~ ^[0-9]+$ && "$LCM_TBREST" =~ ^[0-9]+$ ]] && [ "$LCM_DEF" -ge 24 ] && [ "$LCM_TBREST" -lt "$LCM_TB" ] \
+        && ok "(13e) MCP for: the same charge — <sigs> $LCM_DEF rows by default; under budget_tokens + sections $LCM_TBREST < $LCM_TB" \
+        || no "(13e) MCP for: <sigs shown> default=$LCM_DEF budget=$LCM_TB budget+sections=$LCM_TBREST (want >= 24, and the last below the middle)"
+else
+    printf '  SKIP  %s\n' "(13e) python3 absent: the MCP twin of the lego charge is not checked"
 fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"

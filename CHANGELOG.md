@@ -15,6 +15,19 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — `--for`: the `<sigs>` budget is charged for the `<lego>`/`<compose>` stub it serves, not the full render
+
+The default answer collapses `<lego>`/`<compose>` to a ~120 B counted stub, but the `<sigs>` budget was charged the full
+render before the collapse. On a corpus whose question names many interfaces, the full `<lego>` filled the budget: one
+measured Python corpus served 4 of 40 signature rows in a ~4.6 KB answer under the 7.5 KB ceiling.
+
+- A section served as a stub is charged at the stub's size (the CLI lens and the MCP `for` tool share one rule).
+- Without an explicit ceiling, `--sections=lego,compose` keeps the stubbed answer's `<sigs>` budget, so the stub's `next=`
+  restores both sections with the same `<sigs>` rows, byte-identically. Under `--token-budget`/`--max-tokens` (MCP
+  `budget_tokens`) the restored sections are charged in full, so the hard bound holds.
+- Measured on 32 `--for` questions over 8 corpora: 19 answers byte-identical, 13 carry more signature rows
+  (4 to 29-33 on the corpus above), and every row the old answer showed is still shown. Gate: `forsectioncollapsecheck` (13).
+
 ### Changed — `--for`: the function a question names gets the first hop row, with all its callee names
 
 The compact `--for` answer hop-expanded only the six best-ranked rows, inside a ~1 KB allowance. A question that names

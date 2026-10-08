@@ -2248,10 +2248,17 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::size_t mcpAtLegendExemptBytes = !flRootArg.empty() && !mcpForAtAttrStr.empty() ? rw::kForAtStampProse.size() : 0;   // r2-LO, above
     // e=: a disclosure on the same contract (the CLI twin exempts the same clause)
     const std::size_t mcpEndLineExemptBytes = mcpEndLineLegend.size();
+    // lego-charge: <lego>/<compose> cost what they are SERVED as (the CLI twin's rule, rw::forSectionsSigChargePlan):
+    // a collapsing section its stub; under an explicit budget_tokens, a section `sections` opts into its full render.
+    const ForStubbableSection mcpLegoChargeIn{ .hasContent = !legoStr.empty(), .preCapTotal = legoPreCapCount, .rendered = true,
+                                               .renderedBytes = legoStr.size() };
+    const ForStubbableSection mcpComposeChargeIn{ .hasContent = !composeStr.empty(), .preCapTotal = composePreCapCount, .rendered = true,
+                                                  .renderedBytes = composeStr.size() };
+    const ForSectionStubPlan  mcpSigChargePlan = forSectionsSigChargePlan( sections, budgetTokens > 0, task, mcpLegoChargeIn, mcpComposeChargeIn );
     const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
                                  - mcpEndLineExemptBytes
                                  - rw::forZeroNoteBytes( headerStr )   // lean-answers: the zero reading never costs a row
-                                 + legoStr.size() + composeStr.size() + routeStr.size() + 6;   // + "</ctx>"
+                                 + mcpSigChargePlan.servedBytes( mcpLegoChargeIn, mcpComposeChargeIn ) + routeStr.size() + 6;   // + "</ctx>"
     const std::size_t sigsBudget = forBudgetBytes > fixedBytes ? forBudgetBytes - fixedBytes : 1;   // ≥1: 0 = "no budget"
 
     // L3: field-notes surfacing — parity with the CLI --for lens. loadNoteIndex reads root/.ripwire_notes (a
@@ -2402,41 +2409,32 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // late-insertion technique for kOverCeilingLegend) knows whether to add it.
     bool mcpSectionsWillStub = false;
     {
-        const bool mcpWantLego    = sectionsWant( sections, "lego" );
-        const bool mcpWantCompose = sectionsWant( sections, "compose" );
-        const bool mcpLegoCandidate    = !legoStr.empty()    && !mcpWantLego;
-        const bool mcpComposeCandidate = !composeStr.empty() && !mcpWantCompose;
-        if( mcpLegoCandidate || mcpComposeCandidate )
+        // the CLI twin's one plan (rw::planForSectionStubs): this surface always renders whole, so rendered=true
+        const ForSectionStubPlan plan = planForSectionStubs(
+            sections, task,
+            ForStubbableSection{ .hasContent = !legoStr.empty(), .preCapTotal = legoPreCapCount, .rendered = true, .renderedBytes = legoStr.size() },
+            ForStubbableSection{ .hasContent = !composeStr.empty(), .preCapTotal = composePreCapCount, .rendered = true, .renderedBytes = composeStr.size() } );
+        const bool mcpLegoWillStub    = plan.legoWillStub;
+        const bool mcpComposeWillStub = plan.composeWillStub;
+        // postcondition of the rule itself, checked BEFORE the swap below discards the original size:
+        // whichever section actually collapses is, by construction, smaller than what it replaced.
+        ENSURES( !mcpLegoWillStub    || plan.lego.stubXml.size()    < legoStr.size(),
+                 "R2-L2' MCP twin: a lego stub collapsed without being smaller than the section it replaced" );
+        ENSURES( !mcpComposeWillStub || plan.compose.stubXml.size() < composeStr.size(),
+                 "R2-L2' MCP twin: a compose stub collapsed without being smaller than the section it replaced" );
+        ENSURES( !( mcpLegoWillStub && mcpSigChargePlan.legoWillStub ) || plan.lego.stubXml.size() <= mcpSigChargePlan.lego.stubXml.size(),
+                 "lego-charge MCP twin: the served lego stub is longer than the stub the <sigs> budget was charged for" );
+        if( mcpLegoWillStub )
         {
-            std::string sectionsNextMcp = nextFlag( "--for=", task );
-            sectionsNextMcp += ' ';
-            sectionsNextMcp += nextFlag( "--sections=", "lego,compose" );
-            const SectionStubPricing legoPricing    = mcpLegoCandidate
-                ? priceSectionStub( "lego",    legoPreCapCount,    sectionsNextMcp, /*hasRenderedBytes=*/true, legoStr.size() )
-                : SectionStubPricing{};
-            const SectionStubPricing composePricing = mcpComposeCandidate
-                ? priceSectionStub( "compose", composePreCapCount, sectionsNextMcp, /*hasRenderedBytes=*/true, composeStr.size() )
-                : SectionStubPricing{};
-            const bool mcpLegoWillStub    = mcpLegoCandidate    && legoPricing.collapse;
-            const bool mcpComposeWillStub = mcpComposeCandidate && composePricing.collapse;
-            // postcondition of the rule itself, checked BEFORE the swap below discards the original size:
-            // whichever section actually collapses is, by construction, smaller than what it replaced.
-            ENSURES( !mcpLegoWillStub    || legoPricing.stubXml.size()    < legoStr.size(),
-                     "R2-L2' MCP twin: a lego stub collapsed without being smaller than the section it replaced" );
-            ENSURES( !mcpComposeWillStub || composePricing.stubXml.size() < composeStr.size(),
-                     "R2-L2' MCP twin: a compose stub collapsed without being smaller than the section it replaced" );
-            if( mcpLegoWillStub )
-            {
-                legoStr = legoPricing.stubXml;
-            }
-            if( mcpComposeWillStub )
-            {
-                composeStr = composePricing.stubXml;
-            }
-            // R2-L2p: same truth table as the CLI's `if( legoWillStub || composeWillStub ) sectionsStubNote = …`
-            // (verbs_for.h ~2858): the legend rides iff at least one section actually collapsed.
-            mcpSectionsWillStub = mcpLegoWillStub || mcpComposeWillStub;
+            legoStr = plan.lego.stubXml;
         }
+        if( mcpComposeWillStub )
+        {
+            composeStr = plan.compose.stubXml;
+        }
+        // R2-L2p: same truth table as the CLI's `if( legoWillStub || composeWillStub ) sectionsStubNote = …`
+        // (verbs_for.h ~2858): the legend rides iff at least one section actually collapsed.
+        mcpSectionsWillStub = mcpLegoWillStub || mcpComposeWillStub;
     }
     const bool mcpLegoCountAttrs = legoStr.find( rw::kLegoCountAttrPrefix ) != std::string::npos;   // false on a stub (its own attributes only)
     std::fwrite( sigsStr.data(), 1, sigsStr.size(), mem );
