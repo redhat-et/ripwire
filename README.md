@@ -2838,7 +2838,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 237 compile-time caps and 7 ranking parameters.
+Another gate derives the cap inventory. The tool has 241 compile-time caps and 7 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.
