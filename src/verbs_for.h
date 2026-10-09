@@ -1908,8 +1908,11 @@ std::size_t forSigClaimWithTrailingReserve( std::size_t sigSideCeiling, std::siz
     {
         return sigSideCeiling;
     }
-    const std::size_t room = bundleBudget > reserveBytes ? bundleBudget - reserveBytes : 0;
-    return std::min( sigSideCeiling, room );
+    const std::size_t room  = bundleBudget > reserveBytes ? bundleBudget - reserveBytes : 0;
+    const std::size_t claim = std::min( sigSideCeiling, room );
+    ENSURES( claim <= sigSideCeiling && claim + reserveBytes <= std::max( bundleBudget, reserveBytes ),
+             "forSigClaimWithTrailingReserve: the sig claim grew past its ceiling or left the reserve no room" );
+    return claim;
 }
 
 // The FIRST-BODY FLOOR's byte budget: the first --detail body served whole when it is at most a quarter of the
@@ -2451,33 +2454,33 @@ inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const 
 
 // fix round 4 (rule 5, review rv-wrap-recipe-k29 F1): the compact <hops> section an exhausted explicit ceiling
 // leaves out, as a counted marker instead of nothing — `<hops shown="0" total="N" capped="1" next="--for=TASK"/>`.
-// total= counts the rows the section would have been asked to serve (the owner rows + the candidate head, ids the
-// ingest knows) — the requested count packHops itself would print; how many of them have proven edges (noedge=) is
-// not known without the render, so the marker does not claim it. next= is the same question without --token-budget,
-// the answer whose own compact allowance serves the hop rows. No rows ⇒ no marker (nothing was cut). Markup bytes,
-// charged through buildForEnrichment's markupBytes like the rendered section.
+// total= counts the CANDIDATE head the section covers (ids the ingest knows) — not the owner rows: at a spent ceiling the
+// answer must stay byte-identical with and without the owner-hop plan (ownerhopcheck (B2), owner-hop's signed contract:
+// "owner rows add nothing"), and the next= answer serves those owner rows too. How many candidates have proven edges
+// (noedge=) is not known without the render, so the marker does not claim it. next= is the same question without
+// --token-budget, whose own compact allowance serves the hop rows. No candidates => no marker (nothing was cut). Markup
+// bytes, charged through buildForEnrichment's markupBytes like the rendered section.
 inline constexpr std::string_view kForHopsBudgetCutLegend =
-    "; hops shown=0 capped=1: the call-hop rows (one hop of callees per top row) this budget left out, total= of them; next= serves them";
+    "; hops shown=0 capped=1: this budget left out the call-hop rows (one hop of callees for each of total= top rows); next= serves them";
 // the hops cut's continuation (` next="--for=TASK"`) — one spelling for the marker, the partial-cut splice and the reserve
 inline std::string forHopsCutNextAttr( const rw::Config& cfg )
 {
     return rw::nextAttrXml( rw::nextFlag( "--for=", cfg.forTask ) );
 }
 // the bytes an explicit ceiling reserves out of the sig claim so the compact hops' cut disclosure always fits: the widest
-// marker (`<hops shown="0" total="NN" capped="1"` + next= + `/>`, total <= kPackTaskBodyCandidates + owners, two digits)
-// plus its present-only legend clause — the kCompactAttrReserve / kForFileTailShellReserve pattern.
+// marker (`<hops shown="0" total="NN" capped="1"` + next= + `/>`, total <= kPackTaskBodyCandidates, two digits) plus its
+// present-only legend clause — the kCompactAttrReserve / kForFileTailShellReserve pattern.
 inline std::size_t forHopsCutReserve( const rw::Config& cfg )
 {
     constexpr std::size_t kMarkerShell = std::string_view( "<hops shown=\"0\" total=\"NN\" capped=\"1\"/>" ).size();
     return kMarkerShell + forHopsCutNextAttr( cfg ).size() + kForHopsBudgetCutLegend.size();
 }
 
-rw::ChargedSection forHopsBudgetCutMarker( const rw::Config& cfg, const rw::IngestResult& ing, const ForOwnerPlan& ownerPlan,
-                                           const std::vector<rw::NodeId>& hopIds )
+rw::ChargedSection forHopsBudgetCutMarker( const rw::Config& cfg, const rw::IngestResult& ing, const std::vector<rw::NodeId>& hopIds )
 {
     rw::ChargedSection marker;
     std::size_t        total = 0;
-    for( const rw::NodeId id : forOwnerHopNodes( ownerPlan, hopIds ) )
+    for( const rw::NodeId id : hopIds )
     {
         total += id < ing.symbols.size() ? 1u : 0u;
     }
@@ -2554,7 +2557,7 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
         // fix round 4 (rule 5, review rv-wrap-recipe-k29 F1): the hop rows this budget left out are NAMED, not dropped
         // silently — an empty <hops> carrying the count and the call that serves them (the same question without the
         // budget, whose compact allowance is its own). The bytes are this section's and the ladder prices them.
-        out.section = forHopsBudgetCutMarker( cfg, ing, ownerPlan, hopIds );
+        out.section = forHopsBudgetCutMarker( cfg, ing, hopIds );
         return out;
     }
 

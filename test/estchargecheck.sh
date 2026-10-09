@@ -780,7 +780,7 @@ a7r_out >"$A7R/hd.xml"
 hd_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hd.xml" | head -1 )"
 hd_shown="$( printf '%s' "$hd_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hd_tot="$( printf '%s' "$hd_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
 { [ "$h_tag" = "<hops shown=\"0\" total=\"$h_tot\" capped=\"1\" next=\"--for=&apos;$A7R_Q&apos;\"/>" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
-  && grep -aqF 'hops shown=0 capped=1: the call-hop rows' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
+  && grep -aqF 'hops shown=0 capped=1: this budget left out the call-hop rows' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
   && [ "${hd_shown:-0}" -ge 1 ] 2>/dev/null && [ "$hd_tot" = "$h_tot" ]; } \
     && ok "#11 A7D hops: the spent-ceiling <hops> is the counted marker ($h_tag), defined, inside budget; its next= serves $hd_shown of $hd_tot rows" \
     || no "#11 A7D hops: spent-ceiling <hops> not the counted, continued marker (got '${h_tag:-none}', next= answer '${hd_tag:-none}', root '${h_root:0:80}…')"
