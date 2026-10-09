@@ -35,7 +35,7 @@ measured Python corpus served 4 of 40 signature rows in a ~4.6 KB answer under t
 - Under `--token-budget`, a spent ceiling no longer drops the compact `<hops>` section without a trace: it ships as
   `<hops shown="0" total="N" capped="1" next=…/>`, where `next=` is the same question without the budget. A partly cut
   `<hops>` carries the same `next=`, and a cut `<tail>` carries the `--for … --limit=N` file page. These bytes are reserved
-  from the signature rows, so measured at 2000 tokens over 32 questions: 202 hop rows named on 32/32 answers (none before),
+  from the signature rows, so measured at 2000 tokens over 32 questions: 192 hop rows named on 32/32 answers (none before),
   65 signature rows fewer (still disclosed by `<sigs>`'s own `next=`). Gates: `estchargecheck` #11 A7D, `fordisclosurecheck`
   #1b/#1c.
 
