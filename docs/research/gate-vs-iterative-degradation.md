@@ -114,19 +114,21 @@ Two floors, chosen automatically (`docs/COMMANDS.md` `--quality-delta` section, 
 
 ### 4. The fix that just landed — a clean tree must never gate
 
-`$ORCH/reports/t12-qd-noop.md` (this orchestration round, branch `lane/t12-qd-noop-diff`, head
-`d54ce3da`). The mechanism: the git-HEAD floor is built by archiving and re-ingesting HEAD into a
+Commit `d54ce3da` on `main` (`fix(quality): stop modelling git's sparse rule …`, refs #228), the third
+and last fix in a series of review rounds on this one defect class. The mechanism: the git-HEAD floor is built by archiving and re-ingesting HEAD into a
 temp directory, which is a **different file population** from the working tree whenever anything is
 untracked, gitignored, export-ignored, sparse-checked-out, or otherwise present on one side and not
 the other — a shallow clone, `.gitignore`d duplicate, or skip-worktree flag all reproduce it. Because
 a dead-code verdict is a property of the *whole population* a symbol is ingested with, not of its own
 file, a file present on only one side can flip a same-named definition's dead/alive verdict on a
 symbol *both* sides share — and a no-op diff gates. Three review rounds converged on the same defect
-class reached three different ways; the final fix (round 3, `d54ce3da`) replaces a hand-written model
+class reached three different ways; the final fix (`d54ce3da`) replaces a hand-written model
 of git's file-selection rules with git's own answer, rather than patching the model a third time. This
 matters to a researcher reading the tool cold: it is the concrete shape of "the gate itself has bugs,"
-and it is now closed for the no-op case specifically — read the report for what's still scoped out
-(the Django `cls.`/`self.` dispatch half of the same issue, tracked separately, #237).
+and it is now closed for the no-op case specifically. Still scoped out is the Django `cls.`/`self.`
+dispatch half of the same issue, tracked separately (#237), and the commit message states a known cost:
+a sparse-checkout user now takes the archived comparison, which is not sparse-aware, so an excluded
+caller can read as vanished and gate on a tree with no edit in it.
 
 ### 5. The ack ledger, and why it exists
 
@@ -154,12 +156,51 @@ would take for the hypothesis to be wrong.
 
 ### 7. What our own backtest says — read this before citing the tool as a detector
 
-`$ORCH/reports/study-checks.md` §3 (backtest against ripwire's own commit history, `W` = window in
-commits): at the realistic five-commit window, `--quality-delta` fires on **14/24 (58%) of states
-that provably contained a finding somebody later fixed, and on 12/30 (40%) of control states with no
-recorded defect.** 58% vs 40% is not discrimination — it is closer to a coin flip weighted by how
-much code moved. The kind firing most on *defect-free* control states is `complexity` (10 of 30
-control reds), the same kind whose per-symbol external-corpus signal (§4 of that report) is the one
+We backtested `--quality-delta` against ripwire's own public commit history. The question: does
+exit 2 fire more on states that contained a defect somebody later fixed than on ordinary states?
+
+*Method.* Two sets of states, both taken from commits on `main` and run with a binary built from a tree
+identical to `main` at `755f9026`, using the `--quality-delta=A..B` ref-range form, so no checkout is disturbed. The
+**recall set (24 states)** is every commit whose subject says it *resolves* a `--quality-delta`
+finding (subject mentions `--quality-delta`, clone, dedupe, duplication or complexity, minus
+ack/docs/deck/CHANGELOG/README/catalog/slides commits); the defective state is the fix commit's parent,
+`F^`. It is reconstructed from git history rather than from the project's internal defect log, because
+only 15 of that log's 377 rows name a fix commit. The **control set (30 states)** is a deterministic
+1-in-13 sample of non-merge commits whose subject has no quality wording and which match no recorded
+defect. The gate is run over a window of `W` commits ending at the state: `W=1` is `F^^..F^` vs `C^..C`,
+`W=5` is `F~6..F^` vs `C~5..C`. "Fired" means exit 2.
+
+| window | recall states fired | control states fired |
+| --- | --- | --- |
+| W=1 | 4 / 24 (17%) | 2 / 30 (6.7%) |
+| W=5 | **14 / 24 (58%)** | **12 / 30 (40%)** |
+
+The kinds behind the W=5 reds: in the recall set, duplication 8, verbosity 6, new-clone 5, complexity 5;
+in the control set, **complexity 10**, verbosity 5, nesting 3, duplication 3, api-surface 3 (a state can
+fire several kinds). At `W=1` the ratio looks like 2.5x but rests on six events in total.
+
+*Caveats.* A control red is a false alarm only in the weak sense that nobody recorded a defect there; it
+may be an unrecorded real regression. A fix commit often resolves a finding introduced several commits
+earlier, so `W=1` under-counts recall by construction, and `W=5` is the fairer read — and the worse one.
+The recall set is selected from commit subjects and inherits whatever bias commit messages have. One
+repository, one tool's own history: this says nothing about other codebases.
+
+*External check on complexity.* The per-symbol signal quoted below comes from a second, separate
+measurement on human-authored defects: LocBench V1 (`bench/locbench/`) instances, 112 sampled and 54
+usable (the rest had no repository checkout available locally or no control neighbour), giving 76
+files a fix later touched and 76 control files, neighbours of the touched ones. The sample was
+pre-registered; it was widened from 1-in-11 to 1-in-5 before the first measurement run because the
+original sample landed exactly on the stated floor. Per file, every bar fires 2.2-4.2x more often on a
+touched file, but that is mostly size (median 902 lines touched vs 152 control, 5.9x), so only the
+per-symbol rate is quotable: over 4,709 touched and 710 control function symbols, complexity fires on
+6.41% vs 3.94% (ratio 1.63, 95% CI [1.11, 2.38]); function length 1.04, parameter count 1.13 and nesting
+0.88 all have intervals that include 1; duplication is 1.33 (CI [1.03, 1.73]). This measures
+concentration on code that a later fix touched, not whether a check names the defect, and the control
+arm is small.
+
+Read the `W=5` row: 58% vs 40% is not discrimination — it is closer to a coin flip weighted by how
+much code moved. The kind firing most on *defect-free* control states is `complexity` (10 in the kind
+counts above), the same kind whose per-symbol external-corpus signal (the external check above) is the one
 structural metric that *does* separate human-authored defects from non-defects at 1.63× (95% CI
 [1.11, 2.38]). Read plainly: `--quality-delta` measures accumulated debt, and debt correlates with
 defect-proneness in the literature and in our own external check, but firing on a state is not the
@@ -172,8 +213,8 @@ useful, and honestly weaker claim.
 ### 8. Reading order, summarized
 
 `docs/COMMANDS.md` (`--quality-delta` family) → `src/quality.h` lines 1–20 → the ten-kind table
-above with the file open beside it → `$ORCH/reports/t12-qd-noop.md` → `.ripwire_quality_acks` header
-comment → `docs/EVALS.md` §1 and §6 → `$ORCH/reports/study-checks.md` §3. That is roughly 45 minutes
+above with the file open beside it → `.ripwire_quality_acks` header
+comment → `docs/EVALS.md` §1 and §6 → the backtest section (§7 of this note). That is roughly 45 minutes
 to a working mental model, and it ends exactly where Part 2 starts: with the honest limit of what the
 gate has been shown to do.
 
@@ -267,8 +308,8 @@ the model ack, that has to be a separate, explicitly labeled arm).
 
 ### 2.3 What "the trajectory changed" would mean, numerically — fixed in advance
 
-Stated before any run, per the project's own pre-registration discipline (`study-checks.md`'s
-external arm is the house precedent: the sampling amendment was written and executed *before* the
+Stated before any run, per the project's own pre-registration discipline (the external check in §7
+above is the house precedent: the sampling amendment was written and executed *before* the
 first measurement). Candidate instruments, all computed per seed task then aggregated:
 
 1. **Cumulative-regression slope.** Fit `regressions[i]` (from §2.2, baseline-anchored so
