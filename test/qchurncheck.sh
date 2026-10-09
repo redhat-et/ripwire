@@ -145,11 +145,17 @@ grep -q ' churn="' "$TMP/k_for.out" \
     && no "K51: a failed walk still printed a churn= value" \
     || ok "K51: no churn= value is printed from a failed walk"
 krun "$TMP/k_map.out" --metrics
-grep -q ' history_unread="1"' "$TMP/k_map.out" && ok "K51: --metrics (the map) says history_unread=\"1\"" || no "K51: --metrics on a failed walk is silent"
+grep -q ' history_unread="1"' "$TMP/k_map.out" \
+    && ok "K51: --metrics (the map) says history_unread=\"1\"" \
+    || no "K51: --metrics on a failed walk is silent"
 krun "$TMP/k_json.out" --for=helper --json
-grep -q '"history_unread":true' "$TMP/k_json.out" && ok "K51: --for --json says \"history_unread\":true" || no "K51: --for --json on a failed walk is silent"
+grep -q '"history_unread":true' "$TMP/k_json.out" \
+    && ok "K51: --for --json says \"history_unread\":true" \
+    || no "K51: --for --json on a failed walk is silent"
 krun "$TMP/k_grep.out" --grep=helper --metrics
-grep -q ' history_unread="1"' "$TMP/k_grep.out" && ok "K51: --grep --metrics says history_unread=\"1\"" || no "K51: --grep --metrics on a failed walk is silent"
+grep -q ' history_unread="1"' "$TMP/k_grep.out" \
+    && ok "K51: --grep --metrics says history_unread=\"1\"" \
+    || no "K51: --grep --metrics on a failed walk is silent"
 krun "$TMP/k_full.out" --for=helper --legend=full
 grep -q 'history_unread=1: the git history walk' "$TMP/k_full.out" \
     && ok "K51: the attribute is defined beside its root (a comment that reads it)" || no "K51: history_unread= is not defined in the document"
@@ -162,7 +168,9 @@ run "$TMP/k_retry.log" --for=helper --no-cache >"$TMP/k_retry.out" 2>/dev/null
 [ "$( name_only_count "$TMP/k_retry.log" )" -ge 1 ] && grep -q ' churn="[0-9]' "$TMP/k_retry.out" && ! grep -q 'history_unread' "$TMP/k_retry.out" \
     && ok "K51: the next call RETRIES the walk, prints churn=, and carries no disclosure" \
     || no "K51: the call after a failed walk did not retry cleanly (walks=$( name_only_count "$TMP/k_retry.log" )): $( head -c 200 "$TMP/k_retry.out" )"
-[ "$( nqchurn )" -gt "$kbefore" ] && ok "K51: the successful retry IS cached" || no "K51: the successful retry wrote no blob"
+[ "$( nqchurn )" -gt "$kbefore" ] \
+    && ok "K51: the successful retry IS cached" \
+    || no "K51: the successful retry wrote no blob"
 
 # the REAL failure: remove the parent commit's object — HEAD still resolves, the walk dies part-way
 printf '// k51b\n' >> "$REPO/src/lib.cpp"

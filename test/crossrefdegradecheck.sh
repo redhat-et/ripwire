@@ -92,7 +92,9 @@ k75 "$TMP/k75_s_good.out" "$K75GOOD" --stray-content; rcS=$?
     && ok "K75 control: --stray-content answers the branch with work as unmerged when the cache dir works" \
     || no "K75 control: --stray-content (rc=$rcS) did not report v=\"unmerged\" - the refusal arms below would prove nothing"
 k75 "$TMP/k75_a_good.out" "$K75GOOD" --stray-content --abi; rcA=$?
-[ "$rcA" = 2 ] && ok "K75 control: --abi reports the break (exit 2) when the cache dir works" || no "K75 control: --abi exited $rcA, not 2"
+[ "$rcA" = 2 ] \
+    && ok "K75 control: --abi reports the break (exit 2) when the cache dir works" \
+    || no "K75 control: --abi exited $rcA, not 2"
 
 for v in "--stray-content" "--stray-content --abi" "--stray-content --plan" "--eval-stray=$TMP/k75labels.tsv"; do
     # shellcheck disable=SC2086
