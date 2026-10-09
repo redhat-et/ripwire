@@ -196,6 +196,64 @@ else
     no "K51: premise — the parent commit is not a loose object ($kobj), so the real-failure arm cannot run"
 fi
 
+# the PREFIX: git dies two commits below HEAD, after printing the newest part of the window. The commits it printed are KEPT
+# (a floor is still information) and the document must say they are a floor, never "churn= is absent" beside a churn= value.
+# Red on fddd4b3c: it printed churn="1" next to a comment saying churn= is absent.
+printf '// k51c\n' >> "$REPO/src/lib.cpp"
+git -C "$REPO" commit -qam "k51c"
+kgp="$( git -C "$REPO" rev-parse HEAD~2 )"; kgpobj="$REPO/.git/objects/${kgp:0:2}/${kgp:2}"
+KPRETMP="$TMP/kpretmp"; mkdir -p "$KPRETMP"         # its own cache dir: a healthy blob under $QTMP would serve the broken run warm
+env TMPDIR="$KPRETMP" "$BIN" "$REPO" --for=helper --no-cache --legend=full >"$TMP/k_pre1.out" 2>/dev/null
+khealthy="$( grep -o ' p="src/lib.cpp"[^>]* churn="[0-9]*"' "$TMP/k_pre1.out" | head -1 | sed 's/.*churn="\([0-9]*\)"/\1/' )"
+if [ -f "$kgpobj" ] && [ -n "$khealthy" ]; then
+    cp "$kgpobj" "$TMP/kgpobj.save"; rm -f "$kgpobj"
+    run "$TMP/k_pre.log" --for=helper --no-cache --legend=full >"$TMP/k_pre.out" 2>/dev/null; rcP=$?
+    kpre="$( grep -o ' p="src/lib.cpp"[^>]* churn="[0-9]*"' "$TMP/k_pre.out" | head -1 | sed 's/.*churn="\([0-9]*\)"/\1/' )"
+    if [ "$rcP" -eq 0 ] && grep -q ' history_unread="1"' "$TMP/k_pre.out"; then
+        ok "K51: a walk that dies two commits below HEAD is disclosed"
+    else
+        no "K51: a prefix walk is silent (rc=$rcP): $( head -c 200 "$TMP/k_pre.out" )"
+    fi
+    if [ -n "$kpre" ] && [ "$kpre" -ge 1 ] && [ "$kpre" -lt "$khealthy" ]; then
+        ok "K51: the prefix keeps its commits as a floor (churn=$kpre of $khealthy)"
+    else
+        no "K51: the prefix churn= is not a floor below the healthy count (prefix='$kpre', healthy=$khealthy)"
+    fi
+    if grep -q 'history_unread=1: the git history walk.*(git stopped part-way), so churn= and amp= count only the commits that were read: both are floors' "$TMP/k_pre.out"; then
+        ok "K51: the prefix comment names the cause and says churn=/amp= are floors"
+    else
+        no "K51: the prefix comment does not call churn=/amp= floors: $( grep -o '<!--history_unread[^>]*' "$TMP/k_pre.out" | head -c 300 )"
+    fi
+    if [ -n "$kpre" ] && grep -q 'churn= is absent' "$TMP/k_pre.out"; then
+        no "K51: the document prints churn=$kpre beside a comment that says churn= is absent"
+    else
+        ok "K51: no comment calls churn= absent beside a printed churn="
+    fi
+    mkdir -p "$( dirname "$kgpobj" )"; cp "$TMP/kgpobj.save" "$kgpobj"
+else
+    no "K51: premise — HEAD~2 is not a loose object ($kgpobj) or the healthy run printed no churn= ('$khealthy'), so the prefix arm cannot run"
+fi
+
+# git that does not RUN (not on PATH) in a real repository: gitHeadSha reads "" exactly as on an unborn branch, but the walk
+# fails with the shell's 127, not git's 128 — so it is disclosed, never the silent unborn floor. Red on fddd4b3c (silent).
+KNOGIT="$TMP/knogit"; mkdir -p "$KNOGIT"            # an empty PATH directory: popen still finds /bin/sh, the shell finds no git
+env PATH="$KNOGIT" TMPDIR="$QTMP" "$BIN" "$REPO" --for=helper --no-cache --legend=full >"$TMP/k_nogit.out" 2>/dev/null; rcN=$?
+if [ "$rcN" -eq 0 ] && grep -q ' history_unread="1"' "$TMP/k_nogit.out"; then
+    ok "K51: git missing from PATH in a git repository is disclosed"
+else
+    no "K51: git missing from PATH is silent, or failed (rc=$rcN): $( head -c 200 "$TMP/k_nogit.out" )"
+fi
+if grep -q 'history_unread=1: the git history walk.*(git did not run), so churn= is absent and amp= counts callers only' "$TMP/k_nogit.out"; then
+    ok "K51: the no-git comment names the cause (git did not run)"
+else
+    no "K51: the no-git comment does not name the cause: $( grep -o '<!--history_unread[^>]*' "$TMP/k_nogit.out" | head -c 300 )"
+fi
+if grep -q ' churn="' "$TMP/k_nogit.out"; then
+    no "K51: git missing from PATH still printed a churn= value"
+else
+    ok "K51: git missing from PATH prints no churn="
+fi
+
 # negative: "read, and empty" is NOT "could not read" — a repository with no commit has no history to read
 UNBORN="$( mktemp -d )"; mkdir -p "$UNBORN/src"; cp "$REPO/src/lib.cpp" "$UNBORN/src/lib.cpp"; git -C "$UNBORN" init -q
 env TMPDIR="$QTMP" "$BIN" "$UNBORN" --for=helper --no-cache >"$TMP/k_unborn.out" 2>/dev/null; rcU=$?

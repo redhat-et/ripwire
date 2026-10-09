@@ -1564,6 +1564,11 @@ struct RawCommitStream
     // window holds no commit". `commits` is then empty or a prefix, never a measurement, and the memoizing caller
     // must not store it: an empty stream cached under the (repo, HEAD, window) key silenced churn=/amp= until HEAD moved.
     bool unread = false;
+    // Why, when `unread`: git never ran (no popen, or the shell could not find/execute it: exit 127/126) — `commits` is
+    // empty — as against git ran and stopped part-way, `commits` the newest-first prefix it printed before it died.
+    bool notRun = false;
+    // git's decoded exit code (WEXITSTATUS), -1 when it did not exit normally or never started; 0 on a clean read.
+    int exitCode = 0;
 };
 
 inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::string& coSince )
@@ -1576,7 +1581,9 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        out.unread = true;
+        out.unread   = true;
+        out.notRun   = true;
+        out.exitCode = -1;
         return out;
     }
 
@@ -1603,7 +1610,15 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
         }
         out.commits.back().paths.push_back( std::move( s ) );   // readByteSafeLine clear()s its buffer first, so moving out of it is safe
     }
-    out.unread = os::pclose( pipe ) != 0;   // K51: git ran and died (a missing or corrupt object, a bad ref) — the lines above are a prefix, not the window
+    const int status = os::pclose( pipe );
+    if( status != 0 )
+    {
+        // K51: git died (a missing or corrupt object, a bad ref) — the lines above are a prefix, not the window — or the
+        // shell never ran it (127: not on PATH, 126: not executable), and there are no lines at all.
+        out.unread   = true;
+        out.exitCode = WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+        out.notRun   = out.exitCode == 127 || out.exitCode == 126;
+    }
     return out;
 }
 

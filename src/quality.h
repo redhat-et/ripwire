@@ -4590,10 +4590,19 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     const std::string headSha = gitHeadSha( root );
     if( headSha.empty() )
     {
-        // No resolvable HEAD: an unborn branch has no history to read, and git log's failure there is that fact, not an I/O
-        // error — so this walk is "read, empty" (K51 floor: a HEAD that is corrupt rather than unborn reads the same here).
+        // No resolvable HEAD: an unborn branch has no history to read, and git log's failure there (git's own fatal exit,
+        // 128) is that fact, not an I/O error — so that walk is "read, empty" (K51 floor: a HEAD that is corrupt rather than
+        // unborn exits 128 too and reads the same here). Any OTHER failure means git did not answer at all — not on PATH
+        // (the shell's 127), not executable, no popen — and gitHeadSha's "" was that, not an unborn branch: it stays unread.
         RawCommitStream noHead = gitLogNameOnlyRaw( root, coSince );
-        noHead.unread          = false;
+        if( noHead.unread && noHead.exitCode == 128 )
+        {
+            noHead.unread = false;
+        }
+        else if( noHead.unread )
+        {
+            noHead.notRun = true;
+        }
         return noHead;
     }
 

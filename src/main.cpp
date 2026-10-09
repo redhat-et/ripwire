@@ -5258,10 +5258,15 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             const auto         joinWalk      = [ & ]( std::size_t r )
             {
                 quality::HistoryWalk walk = historyWalks[ r ].get();
-                if( walk.raw.unread )
+                if( walk.raw.unread && walk.raw.notRun )
                 {
-                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkUnread,
-                              "main: the git history walk could not be read — churn= is absent and amp= counts callers only, and the document says so" );
+                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkNotRun,
+                              "main: git did not run for the history walk — churn= is absent and amp= counts callers only, and the document says so" );
+                }
+                else if( walk.raw.unread )
+                {
+                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkStopped,
+                              "main: the git history walk stopped part-way — churn= and amp= count only the commits read (floors), and the document says so" );
                 }
                 return walk;
             };
