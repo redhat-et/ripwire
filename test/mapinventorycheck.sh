@@ -55,8 +55,8 @@ ENTRIES="$( printf '%s' "$INV" | grep -o '<entry p="[^"]*" n="[^"]*"' | sed 's/<
 WANT='cs/Program.cs:Main go/cmd/main.go:main java/App.java:main prog.c:main py/pkg/__main__.py:&lt;file-scope&gt; py/tool.py:main rs/src/main.rs:main ts/cli.ts:main '
 if [ "$ENTRIES" = "$WANT" ]; then ok "(C) entries = C/Go/Rust/Java/C# main, a __main__.py scope, a guarded Python main, a TS main its module scope calls"; else fail "(C) entries: got [$ENTRIES] want [$WANT]"; fi
 # (C2) near-miss negatives, one per rule: a test-dir main, an examples main, a main with a real caller, a main
-# reached only from ANOTHER file's module scope
-for neg in 'tests/test_prog.c' 'examples/demo.c' 'py/lib.py' 'py/pkg/cli.py'; do
+# reached only from ANOTHER file's module scope, a guarded main in a test-NAMED file outside any test dir
+for neg in 'tests/test_prog.c' 'examples/demo.c' 'py/lib.py' 'py/pkg/cli.py' 'py/test_runner.py'; do
     if printf '%s' "$INV" | grep -q "<entry p=\"$neg\""; then fail "(C2) $neg claimed as an entry"; else ok "(C2) $neg is not an entry"; fi
 done
 
