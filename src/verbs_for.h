@@ -3491,9 +3491,17 @@ std::optional<int> runForLens( const MainDispatch& d )
         // floor is MEASURED — the --detail section rendered at the floor budget (wrapper, the first body, the omitted-bodies
         // comment) — not estimated. No explicit ceiling, or neither flag: reserve 0, claim unchanged (byte-identical).
         const std::vector<NodeId> detailIds = cfg.detail > 0 ? forDetailIds( ing, lensRank, cfg.detail, forTopN ) : std::vector<NodeId>{};   // (score desc, id asc) — same order as the sigs
+        //
+        // THE PRE-REGISTERED KILL (fix round 4, reports/lego-charge.md): with BOTH --detail and --with-graph the reserve is OFF.
+        // Measured on the 32 round-1 questions at --token-budget=2000 --detail=3 --with-graph, reserving both sections cut the
+        // gold-relevant owner Reactive._set (textual-12, r=8) out of <sigs>; header + graph + rows through r=8 + any real first
+        // body exceed the allowance there, so no floor keeps the row AND meets the budget. That shape keeps the ranked rows'
+        // claim, the first body still gets its floor (head-cut with next=, recoverable), and the overshoot is disclosed by the
+        // root's over_ceiling="1" — every cut named, nothing reserved away. Each section alone keeps its reserve (no gold row lost).
+        const bool        reserveTrailing   = explicitForCeiling && !( cfg.detail > 0 && cfg.withGraph );
         const std::size_t detailFloorBudget = explicitForCeiling ? forDetailFirstBodyFloor( ing, detailIds, bundleBudget ) : 0u;
-        std::size_t       trailingReserve   = explicitForCeiling ? graphSection.xml.size() : 0u;
-        if( detailFloorBudget > 0 )
+        std::size_t       trailingReserve   = reserveTrailing ? graphSection.xml.size() : 0u;
+        if( reserveTrailing && detailFloorBudget > 0 )
         {
             // a MEASURE, not a rendering the reader gets: it redacts the same text into a scratch tally, so a secret the
             // real render redacts is still counted once
