@@ -1889,6 +1889,49 @@ std::size_t forSigSideCeiling( bool autoBundleMode, int packTopN, std::size_t bu
     return bundleBudget;
 }
 
+// ── THE TRAILING-SECTION RESERVE under an explicit ceiling (lego-charge fix round 4, estchargecheck #11 A7) ──
+// §F1 charged --with-graph's block and the --detail bodies, but only AFTER <sigs> had already claimed the whole
+// sig-side ceiling: the graph block (a FIXED cost, no budget knob) and the first --detail body (packBodies serves
+// it whole or head-cut even at a 1-byte budget, with its section wrapper and the omitted-bodies comment) then rode
+// past the stated budget. MEASURED on base with `src --for --token-budget=2000 --detail=20 --with-graph`: 6177 B
+// ("parse the command line flags") and 6167 B ("emit the legend") against a 5428 B allowance, both over_ceiling="1"
+// with the ladder's last-rung note claiming the HEADER floor left no payload to trim — the trimmable payload was
+// <sigs>, sized as if the two trailing sections cost nothing. The fix is the forSigSideCeiling idea applied to these
+// two sections: under an explicit --token-budget the sig side's claim is capped so the graph block and a first-body
+// floor fit inside the bundle budget. The default regime (no --token-budget) and a budgeted run with neither flag
+// pass reserveBytes=0, so the claim is the unchanged sigSideCeiling (byte-identical by construction). The cap only
+// binds when the bundle cannot hold sigSideCeiling AND the reserve, so a wide explicit ceiling in auto-bundle mode
+// (sig side already frozen at the default share) is untouched too — forbudgetmonotoncheck's invariant holds.
+std::size_t forSigClaimWithTrailingReserve( std::size_t sigSideCeiling, std::size_t bundleBudget, std::size_t reserveBytes ) noexcept
+{
+    if( reserveBytes == 0 )
+    {
+        return sigSideCeiling;
+    }
+    const std::size_t room = bundleBudget > reserveBytes ? bundleBudget - reserveBytes : 0;
+    return std::min( sigSideCeiling, room );
+}
+
+// The FIRST-BODY FLOOR's byte budget: the first --detail body served whole when it is at most a quarter of the
+// bundle budget, else head-cut at that quarter (packBodies' truncateOversizedFirst path, which carries lines= and
+// the next= that serves the rest — a disclosed, recoverable cut). Only the FIRST body is floored: the rest of
+// --detail still takes whatever the ceiling leaves, exactly as before. 0 when there is no servable first body.
+inline constexpr std::size_t kForDetailFloorShareDivisor = 4;   // the floor's cap = bundleBudget / this
+std::size_t forDetailFirstBodyFloor( const rw::IngestResult& ing, const std::vector<rw::NodeId>& detailIds, std::size_t bundleBudget )
+{
+    for( const rw::NodeId id : detailIds )   // packBodies' own skip rule: an invalid id or a module scope is no body
+    {
+        if( id >= ing.symbols.size() || ing.symbols[id].kind == rw::SymKind::ModuleScope )
+        {
+            continue;
+        }
+        const rw::Symbol&     s   = ing.symbols[id];
+        const std::size_t raw = s.endByte > s.sigStartByte ? s.endByte - s.sigStartByte : 0;
+        return std::min( raw, bundleBudget / kForDetailFloorShareDivisor );
+    }
+    return 0;
+}
+
 // The auto-body candidate head: the top-kPackTaskBodyCandidates positive-score rows of the ranked
 // surface — the same "top heads with a positive score" rule packTaskBundleText applies, on the same
 // (score desc, id asc) order sigs selected with.
@@ -3340,7 +3383,41 @@ std::optional<int> runForLens( const MainDispatch& d )
         // than the default cannot re-inflate the trimmed sig tail at the bodies' expense (the rule, its
         // measured defect and the invariant: forSigSideCeiling above; gate: forbudgetmonotoncheck).
         const std::size_t sigSideCeiling = forSigSideCeiling( autoBundleMode, cfg.packTopN, bundleBudget );
-        const std::size_t sigsBudget = sigSideCeiling > fixedBytes ? sigSideCeiling - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
+
+        // §F1's graph block, rendered HERE (before <sigs>) rather than beside the bodies: it reads only lensRank, so the
+        // bytes are the same wherever it renders, and an explicit ceiling must know them before the sig side claims its
+        // share (fix round 4: forSigClaimWithTrailingReserve). Emission order is unchanged (detail, then graph).
+        rw::ChargedSection graphSection, detailSection;
+        if( cfg.withGraph )
+        {
+            graphSection = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lensRank, g.outOff, g.outTargets ); },
+                                               rw::kBytesPerTokenDefault );
+            if( !graphSection.isRendered )
+            {
+                // the block streams uncharged below: the lens's own contract omits an est_tokens that left it out
+                DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SiblingBlockUnmeasured, "runForLens: the graph block streams uncharged — est_tokens omitted" );
+            }
+        }
+        // fix round 4 (estchargecheck #11 A7): under an EXPLICIT ceiling the graph block and a first --detail body floor are
+        // reserved out of the sig side's claim, so <sigs> cannot spend the bytes the two trailing sections will ship. The
+        // floor is MEASURED — the --detail section rendered at the floor budget (wrapper, the first body, the omitted-bodies
+        // comment) — not estimated. No explicit ceiling, or neither flag: reserve 0, claim unchanged (byte-identical).
+        const std::vector<NodeId> detailIds = cfg.detail > 0 ? forDetailIds( ing, lensRank, cfg.detail, forTopN ) : std::vector<NodeId>{};   // (score desc, id asc) — same order as the sigs
+        const std::size_t detailFloorBudget = explicitForCeiling ? forDetailFirstBodyFloor( ing, detailIds, bundleBudget ) : 0u;
+        std::size_t       trailingReserve   = explicitForCeiling ? graphSection.xml.size() : 0u;
+        if( detailFloorBudget > 0 )
+        {
+            // a MEASURE, not a rendering the reader gets: it redacts the same text into a scratch tally, so a secret the
+            // real render redacts is still counted once
+            std::optional<RedactCounts> floorRedact = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
+            trailingReserve += rw::chargeSection( [ & ]( std::FILE* f )
+                { packBodies( f, ing, detailIds, detailFloorBudget, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, floorRedact ? &*floorRedact : nullptr,
+                              /*ranges=*/nullptr, notesPtr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
+                              /*withFileContext=*/false, flRootArg, &lensRank, headerParts.viaPresent ); },
+                rw::kBytesPerTokenBody ).xml.size();   // a degraded measure is 0 bytes: the reserve falls back to the graph alone
+        }
+        const std::size_t sigClaim   = forSigClaimWithTrailingReserve( sigSideCeiling, bundleBudget, trailingReserve );
+        const std::size_t sigsBudget = sigClaim > fixedBytes ? sigClaim - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
 
         // The two attributes SPLICED into the header AFTER the ceiling ladder has chosen a rung — est_tokens
         // (" est_tokens=\"NNNNNNNN\"", bounded well under 24 B: 8 digits covers ~100M tokens) and, when the
@@ -3595,22 +3672,11 @@ std::optional<int> runForLens( const MainDispatch& d )
         // budget knob, so its size is a FIXED cost; the bodies are the one section with a byte budget, so they
         // are the section that absorbs whatever the ceiling has left. Pricing the fixed cost first is what lets
         // the bodies' budget be exact.
-        rw::ChargedSection graphSection, detailSection;
-        if( cfg.withGraph )
-        {
-            graphSection = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lensRank, g.outOff, g.outTargets ); },
-                                               rw::kBytesPerTokenDefault );
-            if( !graphSection.isRendered )
-            {
-                // the block streams uncharged below: the lens's own contract omits an est_tokens that left it out
-                DISCLOSE( blockCharge, ForLensBlockCharge::DisclosureWhy::SiblingBlockUnmeasured, "runForLens: the graph block streams uncharged — est_tokens omitted" );
-            }
-        }
+        // (graphSection is rendered above, before <sigs> — fix round 4 reserves its bytes out of the sig side.)
 
         // both kept alive past the render so the isRendered=false degrade path below re-emits the SAME set at
-        // the SAME budget (the map path's emitSection lambda has the identical contract)
-        std::vector<NodeId> detailIds;
-        std::size_t         detailBodyBudget = 0;
+        // the SAME budget (the map path's emitSection lambda has the identical contract); detailIds is computed above
+        std::size_t detailBodyBudget = 0;
 
         // --detail=N (lever 3): importance-weighted detail — spend FULL bodies on only
         // the top-N ranked symbols (the head the rank identifies), leaving the rest as the signatures emitted
@@ -3619,7 +3685,6 @@ std::optional<int> runForLens( const MainDispatch& d )
         // the lens. N=0 emits nothing → byte-identical to a run without --detail.
         if( cfg.detail > 0 )
         {
-            detailIds = forDetailIds( ing, lensRank, cfg.detail, forTopN );   // (score desc, id asc) — same order as the sigs
             // Composes with --max-tokens: when set, it bounds the body byte budget (same conservative rate the
             // map path uses). §F1: --token-budget SHAPES this lens (D10 — trims to fit, always exit 0), so it
             // has to bound the bodies as well; before this it bounded <sigs> ONLY and the bodies rode along on
@@ -3636,7 +3701,9 @@ std::optional<int> runForLens( const MainDispatch& d )
                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve + sectionsStubSpliceReserve
                                              + rw::kForFileTailShellReserve;   // deep-tail: the shell's reserved bytes (explicit regime only — this branch)
                 const std::size_t leftBytes  = bundleBudget > spentBytes ? bundleBudget - spentBytes : 1;
-                detailBodyBudget = std::min( detailBodyBudget, leftBytes );
+                // fix round 4: never below the first-body floor the sig side reserved (forDetailFirstBodyFloor) — the header's
+                // exempt disclosures are paid by this side, and they must not cut the one body the reserve was taken for
+                detailBodyBudget = std::min( detailBodyBudget, std::max( leftBytes, detailFloorBudget ) );
             }
             detailSection = rw::chargeSection( [ & ]( std::FILE* f )
                 { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,

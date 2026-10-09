@@ -27,6 +27,11 @@ measured Python corpus served 4 of 40 signature rows in a ~4.6 KB answer under t
   the restored sections are charged in full, so the hard bound holds.
 - Measured on 32 `--for` questions over 8 corpora: 19 answers byte-identical, 13 carry more signature rows
   (4 to 29-33 on the corpus above), and every row the old answer showed is still shown. Gate: `forsectioncollapsecheck` (13).
+- Under `--token-budget` with `--with-graph` and/or `--detail`, the `<sigs>` budget now leaves room for the graph block and
+  the first `--detail` body (whole up to a quarter of the budget, else cut with a `next=` for the rest). Before, both rode
+  past the budget: on this repo's own source, `--token-budget=2000 --detail=20 --with-graph` delivered ~6.1 KB against a
+  5.4 KB allowance, with `over_ceiling="1"` and a note blaming the header. Without `--token-budget` nothing changes.
+  Gate: `estchargecheck` #11 A7R.
 
 ### Changed — `--for`: the function a question names gets the first hop row, with all its callee names
 
