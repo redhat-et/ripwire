@@ -1586,6 +1586,15 @@ inline int decodedExitCode( int status ) noexcept
     return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
 }
 
+// K51: fold the walk's pclose() status into `out` — 0 is a clean read and changes nothing.
+inline void noteWalkExit( RawCommitStream& out, int status ) noexcept
+{
+    if( status != 0 )
+    {
+        markWalkUnread( out, decodedExitCode( status ), false );
+    }
+}
+
 inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::string& coSince )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitLogNameOnlyRaw (git log --name-only popen)" );
@@ -1625,10 +1634,7 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     }
     // K51: git died (a missing or corrupt object, a bad ref) — the lines above are a prefix, not the window — or the shell
     // never ran it (127: not on PATH, 126: not executable), and there are no lines at all.
-    if( const int status = os::pclose( pipe ); status != 0 )
-    {
-        markWalkUnread( out, decodedExitCode( status ), false );
-    }
+    noteWalkExit( out, os::pclose( pipe ) );
     return out;
 }
 
