@@ -215,7 +215,11 @@ mkPagingFixture(){
         local b
         for b in 1 2 3 4 5 6 7 8; do
             git checkout -q -b "stray$b" || exit 1
-            printf 'int strayFn%d(){ return %d; }\n' "$b" "$b" > "src/stray$b.cpp"
+            # Each branch also carries its OWN renderWidget definition line (`n + b`, distinct text per branch): the
+            # definitions page lists a line several refs share ONCE (crossref.h foldSharedBranchDefs, lane
+            # whereis-defs-fix), so the 8 inherited copies of widget.cpp's line are one row with refs="8" — too few rows
+            # to page with --limit=3. Eight distinct branch definitions keep the default page at 10 def rows.
+            printf 'int strayFn%d(){ return %d; }\nstatic int renderWidget( int n ){ return n + %d; }\n' "$b" "$b" "$b" > "src/stray$b.cpp"
             git add -A && git commit -qm "stray work $b" || exit 1
             git checkout -q "$home" || exit 1
         done

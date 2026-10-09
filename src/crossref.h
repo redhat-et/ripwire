@@ -1395,6 +1395,12 @@ struct WhereHit
     std::string   text;               // the trimmed source line (evidence, so the caller can judge)
     bool          fromWorktree = false;   // read from the WORKING-TREE copy of a path that differs from HEAD (ref="worktree")
     bool          testLocal    = false;   // a TEST-LOCAL definition, demoted below the production ones (test_local="1")
+    // foldSharedBranchDefs: a kind="def" row outside the checkout whose (path, line text) other refs hold too is ONE
+    // definition held by N refs. The first row of such a group (lowest ref name) is its representative and carries
+    // defRefs = N (1 = this ref alone); every later row of the group is foldedDef and the definitions page skips it
+    // (listing=all still prints it). 0 = not a branch definition row.
+    std::uint32_t defRefs   = 0;
+    bool          foldedDef = false;
 
     // The CHECKOUT is HEAD's tree overlaid with the working copy of every path that differs from it: those rows
     // sort, label and count as one group, ahead of the other refs. Keyed on the flag, never on the ref name, so a
@@ -1597,6 +1603,177 @@ inline bool insideArgumentList( std::string_view line, std::size_t at ) noexcept
 // rows do NOT come here at all when the caller supplies the index's def sites (see relabelHeadHitsFromIndex):
 // the honest split documented in --help is HEAD = parsed, refs = lexical, and this function is the lexical half.
 // False positives here cost a `kind="def"` that should have read `kind="ref"`, never a missed hit.
+// A declaration marker (`def `, `fn `, `class `…) that HEADS the declaration of the name at `at`: its own word
+// (`#undef x` holds no `def `, `defn ` no `fn `, `template_t` no `template`), reached from the line's start through
+// declarator text only, and separated from the name by declarator text only — identifier bytes, spaces and the
+// punctuation a declarator head carries (`: < > , * & ( ) . [ ] ~ '`: `func (r *T) name(`, `def self.name`,
+// `impl<'a> Name<'a>`, `template<class T> T name(`). A quote, a `;`, an `=` or a brace between the two means the
+// marker is inside a string, a comment or an earlier statement: the 26b sweep's definitions page carried
+// `w.write( "<impl n=\"" ); w.write( escapeXml( … ) )` (the `impl ` of a string literal) and a shell comment's
+// `0 def rows in 3385 hits` as kind="def". A `using` declaration defines the name only as an alias
+// (`using Name = …`); `using ns::name;` re-exports it and is a reference.
+inline bool declMarkerBefore( std::string_view line, std::string_view marker, std::size_t at ) noexcept
+{
+    static constexpr std::string_view kBreaksHead    = "\"'/;={}#";     // before the marker: not a declaration line (`pub(crate) fn` keeps its parens)
+    static constexpr std::string_view kBreaksBetween = "\"\\;={}";      // between the marker and the name: not its declaration
+    for( std::size_t pos = line.find( marker ); pos != std::string_view::npos && pos < at; pos = line.find( marker, pos + 1 ) )
+    {
+        const std::size_t end = pos + marker.size();
+        if( pos > 0 && isIdentByte( (unsigned char)line[ pos - 1 ] ) )
+        {
+            continue;
+        }
+        if( end < line.size() && isIdentByte( (unsigned char)marker.back() ) && isIdentByte( (unsigned char)line[ end ] ) )
+        {
+            continue;   // `template` is a bare word: `template_t` is not it
+        }
+        if( line.substr( 0, pos ).find_first_of( kBreaksHead ) != std::string_view::npos )
+        {
+            return false;   // the first marker already sits inside a string, a comment or an expression
+        }
+        if( line.substr( end, at - end ).find_first_of( kBreaksBetween ) != std::string_view::npos )
+        {
+            return false;
+        }
+        if( marker == "using " )
+        {
+            std::size_t k = at;
+            while( k < line.size() && isIdentByte( (unsigned char)line[ k ] ) )
+            {
+                ++k;
+            }
+            while( k < line.size() && std::isspace( (unsigned char)line[ k ] ) )
+            {
+                ++k;
+            }
+            return k < line.size() && line[ k ] == '=';
+        }
+        return true;
+    }
+    return false;
+}
+
+// Is the text BEFORE the name an expression or a statement, so that `name(` is a CALL in it? A definition's prefix
+// is a return type, qualifiers, a scope or an attribute — identifier bytes, `< > , : * & ~ [ ]` and spaces, never an
+// operator, a brace, a paren or a statement keyword. Every byte below is one no definition line carries before its
+// name: `out += escapeXml( task, esc ); }` (the 26b sweep's 59 false kind="def" rows), `if( x ) { f( a ); }`,
+// `x = f( a )`, `a ? f( b ) : c`, `// f( a )`. The keywords are the statement heads the C-family, Python, JS/TS, Ruby,
+// Go, Rust and Swift grammars put before a call with no paren of their own (`return f( a )`, `if f( a ):`, `await f( a )`,
+// `match f( a ) {`); a type or qualifier word (`static`, `const`, `inline`, `public`, `async`, `operator`…) is not here.
+inline bool expressionBeforeName( std::string_view line, std::size_t at ) noexcept
+{
+    static constexpr std::string_view kStatementHeads[] = {
+        "return", "throw", "throws", "else", "new", "delete", "await", "yield", "raise", "print", "echo", "if", "elif",
+        "while", "for", "with", "assert", "not", "and", "or", "in", "is", "lambda", "case", "switch", "match", "guard",
+        "unless", "until", "typeof", "sizeof", "instanceof", "co_return", "co_await", "co_yield", "goto", "do", "then",
+    };
+    const std::string_view before = line.substr( 0, at );
+    if( before.find_first_of( "=;{}()+!?|^%/\"'" ) != std::string_view::npos )
+    {
+        return true;
+    }
+    for( std::size_t i = 0; i < before.size(); )
+    {
+        if( !isIdentByte( (unsigned char)before[ i ] ) )
+        {
+            ++i;
+            continue;
+        }
+        std::size_t j = i;
+        while( j < before.size() && isIdentByte( (unsigned char)before[ j ] ) )
+        {
+            ++j;
+        }
+        const std::string_view word = before.substr( i, j - i );
+        for( std::string_view head : kStatementHeads )
+        {
+            if( word == head )
+            {
+                return true;
+            }
+        }
+        i = j;
+    }
+    return false;
+}
+
+// What follows the parameter list's closing paren decides between a definition and a call whose line happens to end
+// in a definition's terminator. After a DEFINITION's `)` come only: the body `{`, an init list `:`, a trailing return
+// `->`, a qualifier (`const`, `noexcept`, `&`, `&&`, `override`…), `= 0|default|delete`, an attribute `[[`, a comment,
+// or the end of the line (the body opens on the next line). Anything else — `;` `,` `)` `.` `[` `?` an operator, `}`,
+// a word such as `do` or `then` — means the name was called: `f( a ).then( b )`, `{ f( a ) }`, `f( a ) do |x|`.
+// `open` is the index of the `(` after the name. An unbalanced list (the signature wraps) decides nothing: false.
+inline bool callShapedAfterParams( std::string_view line, std::size_t open ) noexcept
+{
+    static constexpr std::string_view kAfterDeclWords[] = {
+        "const", "noexcept", "override", "final", "volatile", "mutable", "requires", "throw", "throws", "try", "where",
+        "__attribute__", "asm", "default", "delete",
+    };
+    EXPECTS( open < line.size() && line[ open ] == '(', "the caller found the name's parameter list opening at `open`" );
+    int         depth = 0;
+    std::size_t close = std::string_view::npos;
+    for( std::size_t i = open; i < line.size(); ++i )
+    {
+        if( line[ i ] == '(' )
+        {
+            ++depth;
+        }
+        else if( line[ i ] == ')' && --depth == 0 )
+        {
+            close = i;
+            break;
+        }
+    }
+    if( close == std::string_view::npos )
+    {
+        return false;
+    }
+    std::size_t k = close + 1;
+    while( k < line.size() && std::isspace( (unsigned char)line[ k ] ) )
+    {
+        ++k;
+    }
+    if( k >= line.size() )
+    {
+        return false;
+    }
+    const char c    = line[ k ];
+    const char next = ( k + 1 < line.size() ) ? line[ k + 1 ] : '\0';
+    if( c == '{' || c == ':' || c == '&' || ( c == '-' && next == '>' ) || ( c == '[' && next == '[' )
+        || ( c == '/' && ( next == '/' || next == '*' ) ) )
+    {
+        return false;
+    }
+    if( c == '=' )
+    {
+        std::size_t v = k + 1;
+        while( v < line.size() && std::isspace( (unsigned char)line[ v ] ) )
+        {
+            ++v;
+        }
+        const std::string_view rest = line.substr( v );
+        return !( rest.starts_with( "0" ) || rest.starts_with( "default" ) || rest.starts_with( "delete" ) );
+    }
+    if( isIdentByte( (unsigned char)c ) )
+    {
+        std::size_t j = k;
+        while( j < line.size() && isIdentByte( (unsigned char)line[ j ] ) )
+        {
+            ++j;
+        }
+        const std::string_view word = line.substr( k, j - k );
+        for( std::string_view w : kAfterDeclWords )
+        {
+            if( word == w )
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    return true;
+}
+
 inline bool definitionShaped( std::string_view line, std::string_view sym, std::size_t at )
 {
     static constexpr std::string_view kDeclMarkers[] = {
@@ -1605,7 +1782,7 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
     };
     for( std::string_view m : kDeclMarkers )
     {
-        if( line.find( m ) != std::string_view::npos && line.find( m ) < at )
+        if( declMarkerBefore( line, m, at ) )
         {
             return true;
         }
@@ -1617,6 +1794,13 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
     // which are references, not definitions. The accepted terminators are '{' (body opens here), '}' (whole
     // one-line body), ')' (signature wraps to the next line) and ':' (a constructor's init list follows),
     // tested AFTER declaratorEnd() has stripped any trailing specifier tail.
+    //
+    // Two more tests, both lexical (the 26b sweep: with the definitions page listing EVERY kind="def" row of every
+    // ref, 59 of the 60 rows for a defs="1" symbol were call sites that merely ended in `}` or `)`): the text
+    // before the name must read as a declarator prefix, not an expression or a statement (expressionBeforeName),
+    // and what follows the parameter list must be a definition's tail, not a call's (callShapedAfterParams).
+    // What stays a floor: a bare `name( args )` alone on its line with nothing before or after it is a wrapped
+    // signature in C and a semicolon-free call in JS or Python, and one line cannot tell them apart.
     const std::size_t after = at + sym.size();
     if( after < line.size() && line[ after ] == '(' )
     {
@@ -1624,7 +1808,8 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
         const char last     = ( e > 0 ) ? line[ e - 1 ] : ';';
         const bool endsDecl = last == '{' || last == '}' || last == ')' || last == ':';
         const bool isCall   = at >= 1 && ( line[ at - 1 ] == '.' || ( at >= 2 && line[ at - 2 ] == '-' && line[ at - 1 ] == '>' ) );
-        return endsDecl && !isCall && at > 0 && !insideArgumentList( line, at );
+        return endsDecl && !isCall && at > 0 && !insideArgumentList( line, at ) && !expressionBeforeName( line, at )
+            && !callShapedAfterParams( line, after );
     }
     // ObjC method: "- (ret) sym" / "+ (ret) sym"
     if( !line.empty() && ( line[0] == '-' || line[0] == '+' ) && line.find( ')' ) < at )
@@ -1667,28 +1852,38 @@ inline void scanLineForSymbol( std::string_view line, std::string_view sym, cons
 // perfectly legal git content, and evaluating only on '\n' silently skipped it. A symbol defined on that
 // final line then reported hits="0" — which this verb's own help text tells the reader means "this repo
 // never had the name", the single most misleading answer it can give.
+//
+// The walk is OCCURRENCE-driven, not line-driven: one search finds the next occurrence of `sym` anywhere in the
+// blob, the newlines skipped over are counted (the line number) and only the line holding the occurrence is handed
+// to scanLineForSymbol — a line without the symbol is never visited on its own. The line-by-line walk this replaces
+// paid two searches per line (the newline, then the symbol) over every line of every blob that held the symbol at
+// all, and on a 153-ref repo that was the larger half of a 22 s --whereis. Same hits, same order, one per line.
 inline void scanBlobForSymbol( std::string_view bytes, std::string_view sym,
                                const RefInfo& ref, const std::string& path, std::vector<WhereHit>& out )
 {
-    std::size_t   lineStart = 0;
+    std::size_t   lineStart = 0;   // the first byte of the line that holds `counted`
+    std::size_t   counted   = 0;   // every newline before this offset is in lineNo
     std::uint32_t lineNo    = 1;
-    while( lineStart <= bytes.size() )
+    for( std::size_t pos = bytes.find( sym ); pos != std::string_view::npos; pos = bytes.find( sym, lineStart ) )
     {
-        std::size_t  end     = bytes.find( '\n', lineStart );
-        const bool   isFinal = ( end == std::string_view::npos );
-        if( isFinal )
+        lineNo += std::uint32_t( std::count( bytes.begin() + std::ptrdiff_t( counted ), bytes.begin() + std::ptrdiff_t( pos ), '\n' ) );
+        if( const std::size_t nl = bytes.rfind( '\n', pos ); nl != std::string_view::npos && nl >= counted )
         {
-            end = bytes.size();
+            lineStart = nl + 1;
         }
-
+        std::size_t end = bytes.find( '\n', pos );
+        if( end == std::string_view::npos )
+        {
+            end = bytes.size();   // a final line with no trailing '\n' is legal git content and is scanned like any other
+        }
         scanLineForSymbol( bytes.substr( lineStart, end - lineStart ), sym, ref, path, lineNo, out );
-
-        if( isFinal )
+        if( end >= bytes.size() )
         {
             break;
         }
+        ++lineNo;                                                             // the line is done: one hit per line
         lineStart = end + 1;
-        ++lineNo;
+        counted   = lineStart;
     }
 }
 
@@ -2194,6 +2389,66 @@ inline bool demoteTestLocalDefs( std::vector<WhereHit>& hits )
     return false;
 }
 
+// The 26b sweep's definitions page: a defs="1" symbol listed 2113 "definitions", because every one of 153 refs holds
+// its own copy of the same `inline … escapeXml( … )` line and each copy was a row. Identical definition lines across
+// the OTHER refs — the same path, the same line text, kind="def", outside the checkout — are ONE definition held by
+// N refs. In the sorted order (refs by name) the first row of such a group is its representative: it carries
+// defRefs = N and the definitions page prints it once with refs="N"; every later row of the group is foldedDef and
+// that page skips it. Nothing is erased: hits= still counts every row and listing=all prints each ref's own row.
+// A ref that holds the same text at TWO lines of one path (a macro twin, a copy in a #if branch) is two groups —
+// the k-th such line of a ref joins the k-th group — so N is exactly the number of refs holding the row, never more.
+// The checkout's rows (HEAD and worktree=) are the parsed answer and never fold; nor does any kind="ref" row.
+inline void foldSharedBranchDefs( std::vector<WhereHit>& hits )
+{
+    struct Group
+    {
+        std::string              lastRef;        // the ref whose rows were last seen for this (path, text)
+        std::size_t              ordinalInRef = 0;   // how many rows of that ref this key has had so far
+        std::vector<std::size_t> representatives;   // one per ordinal: the hit index that stands for it
+    };
+    gtl::btree_map<std::string, Group> groups;
+    std::string                        key;
+    std::size_t                        branchDefs = 0, represented = 0;   // every branch def row is one representative's count
+    for( std::size_t i = 0; i < hits.size(); ++i )
+    {
+        WhereHit& h = hits[ i ];
+        if( !h.isDef || h.inCheckout() )
+        {
+            continue;
+        }
+        ++branchDefs;
+        key.assign( h.path );
+        key += '\n';   // a path never holds a newline, and text is one trimmed line: the join is unambiguous
+        key += h.text;
+        Group& g = groups[ key ];
+        if( g.lastRef != h.ref )
+        {
+            g.lastRef      = h.ref;
+            g.ordinalInRef = 0;
+        }
+        else
+        {
+            ++g.ordinalInRef;
+        }
+        if( g.ordinalInRef < g.representatives.size() )
+        {
+            WhereHit& rep = hits[ g.representatives[ g.ordinalInRef ] ];
+            ++rep.defRefs;
+            h.foldedDef = true;
+        }
+        else
+        {
+            g.representatives.push_back( i );
+            h.defRefs = 1;
+        }
+    }
+    for( const WhereHit& h : hits )
+    {
+        represented += h.foldedDef ? 0 : h.defRefs;
+    }
+    ENSURES( represented == branchDefs, "the representatives' refs= counts add up to every branch definition row: nothing is dropped, only counted" );
+}
+
 // The emitted ORDER of --whereis rows (see computeWhereis' header): the checkout (HEAD plus its worktree rows) first
 // as ONE group — a definition the edit just added sorts among HEAD's definitions, not after them; the two never
 // share a path, so the group needs no ref order inside it — then the other refs by name; within a group SOURCE
@@ -2280,16 +2535,24 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     struct Site { std::uint32_t refIndex; std::string path; bool replaced; };
     bool anyEmptyTree = false;   // T1: a zero-row ls-tree could be a FAILED listing — it forfeits complete=
     gtl::btree_map<std::string, std::vector<Site>> sites;
-    for( std::uint32_t i = 0; i < refs.size(); ++i )
     {
-        const std::vector<RawRow> rows = lsTree( root, refs[i].tip );
-        if( rows.empty() )
+        // One `git ls-tree -r` process per ref, run through the same pool the stray-content sweep uses: each worker
+        // writes only its own slot, and the fan-out below reads the slots in ref order, so the map (and the answer)
+        // is the serial one by construction. Measured on a 153-ref repo: 7.0 s of serial ls-tree wall → 2.1 s.
+        std::vector<std::vector<RawRow>> trees( refs.size() );
+        ParallelSweep                    treeSweep;
+        parallelIndexed( refs.size(), [ & ]( std::size_t i ) { trees[ i ] = lsTree( root, refs[ i ].tip ); }, treeSweep );
+        for( std::uint32_t i = 0; i < refs.size(); ++i )
         {
-            anyEmptyTree = true;
-        }
-        for( const RawRow& r : rows )
-        {
-            sites[ r.bSha ].push_back( Site{ i, r.path, i == 0 && std::binary_search( worktree.replaced.begin(), worktree.replaced.end(), r.path ) } );
+            const std::vector<RawRow>& rows = trees[ i ];
+            if( rows.empty() || !treeSweep.isDone( i ) )
+            {
+                anyEmptyTree = true;   // a slot a worker never reached is an unlisted tree: it forfeits complete= like an empty one
+            }
+            for( const RawRow& r : rows )
+            {
+                sites[ r.bSha ].push_back( Site{ i, r.path, i == 0 && std::binary_search( worktree.replaced.begin(), worktree.replaced.end(), r.path ) } );
+            }
         }
     }
 
@@ -2333,6 +2596,7 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     // The checkout first, then refs by name; within a group, SOURCE before test before docs (§P11.5, see this
     // function's header), then definitions before references, then path/line — whereHitBefore states it.
     std::sort( result.hits.begin(), result.hits.end(), []( const WhereHit& a, const WhereHit& b ) { return whereHitBefore( a, b ); } );
+    foldSharedBranchDefs( result.hits );   // after the sort: the representative of a group is its first row in this order
     return result;
 }
 
@@ -2735,8 +2999,17 @@ inline std::string whereisDottedRetryOf( const IngestResult& ing, std::string_vi
 // The legend's CONDITIONAL tail: each paragraph rides only an answer that carries what it defines, so a plain
 // answer pays no bytes for the with_history lane, test-local rows or the worktree overlay. Split out of
 // writeWhereisPage so the page writer stays a page writer.
-inline void writeWhereisLegendTail( std::FILE* out, const WhereResult& res )
+inline void writeWhereisLegendTail( std::FILE* out, const WhereResult& res, bool sharedDefs )
 {
+    // refs= on a hit rides only a definitions page that printed one (foldSharedBranchDefs), and so does its reading.
+    if( sharedDefs )
+    {
+        rw::emitRaw( out, "SHARED DEFINITIONS: refs=\"N\" on a kind=\"def\" row outside the checkout means N scanned refs hold this same "
+                           "definition line (the same path and the same line text); the row is printed once, for the first of those "
+                           "refs by name, whose ref=, tip=, date= and l= it carries (another of the N may hold the line at a different "
+                           "line number). It appears only under listing=\"defs\" and only when N is at least 2: a definition one ref "
+                           "alone holds carries no refs=. hits= still counts every copy, and listing=all prints each ref's own row. " );
+    }
     // §L10b: the with_history lane's own <history> element, previously undefined on this legend — shared
     // verbatim with --doc-drift's copy (gitoracle.h kHistoryProbeLegend) so the two cannot drift. Only
     // when res.history actually made that element reachable — an unconditional splice would cost every
@@ -2850,6 +3123,7 @@ struct ListedHits
     std::vector<std::size_t> rows;
     std::string_view         attr;
     std::size_t              refsElided = 0;
+    std::size_t              defsFolded = 0;   // def rows of other refs a listed row's refs= stands for (folded="N" on the root)
 };
 
 inline ListedHits listedHits( const WhereResult& res, WhereisListing listing )
@@ -2867,14 +3141,21 @@ inline ListedHits listedHits( const WhereResult& res, WhereisListing listing )
         for( std::size_t i = 0; i < res.hits.size(); ++i ) { out.rows[ i ] = i; }
         return out;
     }
-    const bool wantDefs = lean;
+    // The definitions page lists each shared branch definition ONCE (foldSharedBranchDefs): a folded row's line is
+    // already on the page, on its representative, whose refs= counts it. The whole list (listing=all) keeps every row.
+    const bool  wantDefs = lean;
+    std::size_t folded   = 0;
     for( std::size_t i = 0; i < res.hits.size(); ++i )
     {
-        if( res.hits[ i ].isDef == wantDefs ) { out.rows.push_back( i ); }
+        const WhereHit& h = res.hits[ i ];
+        if( h.isDef != wantDefs ) { continue; }
+        if( wantDefs && h.foldedDef ) { ++folded; continue; }
+        out.rows.push_back( i );
     }
     out.attr       = wantDefs ? std::string_view( "defs" ) : std::string_view( "refs" );
     out.refsElided = wantDefs ? refs : 0;
-    ENSURES( out.rows.size() == ( wantDefs ? defs : refs ), "a listing holds exactly the rows of its kind" );
+    out.defsFolded = folded;
+    ENSURES( out.rows.size() + folded == ( wantDefs ? defs : refs ), "a listing holds exactly the rows of its kind, a folded def on its representative" );
     return out;
 }
 
@@ -2963,7 +3244,11 @@ inline void writeWhereisRoot( std::FILE* out, const WhereResult& res, const Wher
     {
         anyHoist = anyHoist || whereisRowOnHeadCommit( res.hits[ listed.rows[ k ] ], res.headSha, headDate );
     }
-    const std::string listingAttr  = listed.attr.empty() ? std::string() : ( " listing=\"" + std::string( listed.attr ) + "\"" );
+    // folded= (foldSharedBranchDefs): the def rows of other refs that a listed row's refs= stands for, so the root's
+    // arithmetic stays checkable in one place: shown + more + folded + refs count = hits. Only when a row folded,
+    // so an answer with no shared branch definition is byte-identical to before.
+    const std::string listingAttr  = ( listed.attr.empty() ? std::string() : ( " listing=\"" + std::string( listed.attr ) + "\"" ) )
+                                   + ( listed.defsFolded > 0 ? ( " folded=\"" + std::to_string( listed.defsFolded ) + "\"" ) : std::string() );
     const std::string headDateAttr = anyHoist ? ( " head_date=\"" + ex( headDate ) + "\"" ) : std::string();
     rw::emitTo( out, "<whereis sym=\"{}\" on-head=\"{}\" refs_scanned=\"{}\" blobs=\"{}\" hits=\"{}\" head_labels=\"{}\"{}{}{}{} at=\"{:.9}{}\"{}{}>",
                   ex( res.sym ).c_str(), res.onHead ? 1 : 0, res.refsScanned, res.distinctBlobs, res.hits.size(),
@@ -2999,9 +3284,12 @@ inline void writeWhereisRows( std::FILE* out, const WhereResult& res, const List
                           h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
             continue;
         }
-        rw::emitTo( out, "<hit ref=\"{}\" tip=\"{:.9}\" date=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{} t=\"{}\"/>",
+        // refs="N" rides ONLY the definitions page (foldSharedBranchDefs): the row stands for N refs' copies of the same
+        // definition line. listing=all prints each copy as its own row and never carries it; a lone copy carries none.
+        const std::string sharedAttr = ( listed.attr == "defs" && h.defRefs >= 2 ) ? ( " refs=\"" + std::to_string( h.defRefs ) + "\"" ) : std::string();
+        rw::emitTo( out, "<hit ref=\"{}\" tip=\"{:.9}\" date=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{}{} t=\"{}\"/>",
                       ex( h.ref ).c_str(), h.tip.c_str(), ex( h.date ).c_str(), ex( h.path ).c_str(),
-                      h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
+                      h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", sharedAttr.c_str(), ex( h.text ).c_str() );
     }
     ASSUME( shownCount == hitPage.end - hitPage.begin );
     // <more hits="N"/> = the LISTED rows AFTER this page, so shown + more == the listed rows from this page's offset
@@ -3104,7 +3392,10 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "the same rows byte for byte that listing=all prints). listing= is absent when every hit is listed: the hit "
                        "list holds no kind=\"ref\" row, or no kind=\"def\" row (then the mentions are the answer), or the defs page "
                        "would neither list more definitions nor be shorter, or the whole list was asked for (the whereis-listing flag, value all; its value defs "
-                       "lists the definitions whatever the size). kind=\"def\" on a HEAD row is the parser's label, not a proof: a "
+                       "lists the definitions whatever the size). Under listing=\"defs\" a definition line that several refs hold "
+                       "(the same path and line text, outside the checkout) is one row with refs=\"N\", defined below when one rides, "
+                       "and folded= on the root counts the rows so folded: shown plus more plus folded plus the refs count equals hits. "
+                       "kind=\"def\" on a HEAD row is the parser's label, not a proof: a "
                        "definition the parser does not model (a Ruby define_method, a setattr, a name bound by assignment such as an "
                        "alias in a class body) is a kind=\"ref\" row, so under listing=\"defs\" it is among the counted refs. "
                        "shown=, capped=, the paging attributes and the more "
@@ -3121,7 +3412,10 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "Binary blobs are outside the claim (a text symbol cannot occur in one); an oversized TEXT blob suppresses "
                        "the claim instead of being silently skipped. Its ABSENCE claims nothing. "
                        "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). " );
-    writeWhereisLegendTail( out, res );
+    const bool sharedDefs = listed.attr == "defs"
+                         && std::any_of( listed.rows.begin() + std::ptrdiff_t( hitPage.begin ), listed.rows.begin() + std::ptrdiff_t( hitPage.end ),
+                                         [ & ]( std::size_t i ) { return res.hits[ i ].defRefs >= 2; } );
+    writeWhereisLegendTail( out, res, sharedDefs );
     std::fputs( "-->", out );
     const std::string headDate = whereisHeadDate( res );
     writeWhereisRoot( out, res, WhereisPageView{ listed, hitPage, pageLimit, pageOffset }, headDate, ex );
@@ -3170,11 +3464,22 @@ inline ListedHits whereisServedListing( const WhereResult& res, std::size_t maxH
     // lists are in hit-list order and Defs is the def subsequence, so the definitions the All page shows are a PREFIX
     // of the Defs page's: comparing the counts compares the sets. More definitions wins whatever its bytes; only equal
     // sets fall to the bytes rule below.
+    // Counted as DEFINITION ROWS OF THE WHOLE LIST: on the Defs page a representative row stands for defRefs rows
+    // (foldSharedBranchDefs), on the All page every row is its own. The prefix argument still holds: each def row
+    // the All page shows is either a representative (on the Defs page no later than its own def-subsequence
+    // position, so within the first n) or folds into one that precedes it, and every (representative, ref) pair
+    // is counted once in defRefs — so the Defs page's weighted count is at least the All page's.
     const auto defsShown = [ & ]( const ListedHits& l )
     {
-        const std::size_t n = std::min( l.rows.size(), maxHits );
-        return std::size_t( std::count_if( l.rows.begin(), l.rows.begin() + std::ptrdiff_t( n ),
-                                           [ & ]( std::size_t i ) { return res.hits[ i ].isDef; } ) );
+        const std::size_t n        = std::min( l.rows.size(), maxHits );
+        const bool        weighted = l.attr == "defs";
+        std::size_t       shown    = 0;
+        for( std::size_t k = 0; k < n; ++k )
+        {
+            const WhereHit& h = res.hits[ l.rows[ k ] ];
+            shown += !h.isDef ? 0 : ( weighted ? std::max<std::size_t>( h.defRefs, 1 ) : 1 );
+        }
+        return shown;
     };
     const std::size_t defsOnDefsPage = defsShown( defs );
     const std::size_t defsOnAllPage  = defsShown( all );

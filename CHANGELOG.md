@@ -15,6 +15,32 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — `--whereis` labels a branch row `kind="def"` only for a definition's shape, lists a line several refs share once, and scans refs in parallel
+
+Measured on this repository (153 local refs), `--whereis=escapeXml`, warm, base and this build run turn about on the same
+loaded machine: the definitions page went from 60 rows (`total="2113"`, 59 of them call sites such as
+`if( !task.empty() ) { out += escapeXml( task, esc ); }` labelled `kind="def"`) to 2 rows, both the declaration; wall
+20.9–21.1 s → 10.1–10.8 s. Two repositories with no local refs answer byte for byte as before.
+
+- **The lexical shape test reads the whole line.** On a non-HEAD ref (and on HEAD when `head_labels="lexical"`) a line is
+  `kind="def"` only when the text before the name is a declarator prefix — no operator, brace, paren, quote or statement
+  keyword (`return`, `if`, `await`, `match`…) — and what follows the parameter list is a definition's tail (`{`, an init
+  list, `->`, a qualifier, the end of the line), not a call's (`;`, `,`, `)`, `.`, `do`…). A declaration marker (`def `,
+  `fn `, `impl `…) counts only when it heads the declaration, never from inside a string literal or a comment, and
+  `using ns::name;` is a reference. What stays a floor: a bare `name( args )` alone on its line is a wrapped signature
+  in C and a semicolon-free call in JS or Python, and one line cannot tell them apart. Language-neutral (one heuristic
+  serves every ref blob); probed on C++, Python, JS, Ruby and shell shapes.
+- **A definition line several refs hold is one row.** Under `listing="defs"` a `kind="def"` row outside the checkout whose
+  path and line text other refs hold too is printed once, for the first of those refs by name, with `refs="N"`; the root's
+  `folded=` counts the rows it stands for (`shown + more + folded + refs count = hits`). `hits=` still counts every copy and
+  `--whereis-listing=all` prints each ref's own row. A ref holding the same text at two lines of one path is two rows.
+- **Faster, with no ref cut.** The per-ref `git ls-tree -r` runs through the stray-content sweep's pool (7.0 s → 2.1 s
+  serial vs parallel on 153 refs), and the blob walk jumps from occurrence to occurrence instead of reading every line.
+  `complete=` keeps its meaning: a tree a worker never listed forfeits it like an empty one.
+
+Gates: `test/crossrefcheck.sh` (5b: the shapes and the fold, red on the previous build), `test/pagingsweepcheck.sh` (its
+fixture's branches now define the symbol differently each, so the definitions page still pages).
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

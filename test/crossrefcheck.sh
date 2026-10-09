@@ -231,14 +231,31 @@ srcRow="$(  grep -n 'engine\.'       "$TMP/w2rows" | tail -1 | cut -d: -f1 )"
 
 # TWIN on the default listing (lean-answers lane): the same def rows in the same order (source before the doc), the
 # doc-quoting kind="ref" row not dropped but COUNTED — refs count= equals the whole list's kind="ref" rows.
+#
+# FOLD UPDATE (lane whereis-defs-fix): the three branches all inherit base's `int computeBudget( int frames )` at
+# engine.cpp:3, so the definitions page lists that line ONCE, on the first branch by name, with refs="3"
+# (foldSharedBranchDefs); the whole list above (--whereis-listing=all, the untouched twin) still prints each
+# branch's own row. The arm now asserts the fold's arithmetic instead of row-for-row equality: every def row of the
+# default is a def row of the whole list, in the same order, and the refs= counts (1 when absent) add up to the
+# whole list's def rows — nothing is dropped, it is counted.
 "$BIN" "$R" --whereis=computeBudget >"$TMP/w2d" 2>/dev/null
 tr '<' '\n' <"$TMP/w2d" | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)".*/\1 \4 \2:\3/p' >"$TMP/w2dall"
+tr '<' '\n' <"$TMP/w2d" | grep '^hit ' | grep 'kind="def"' | awk '{ n = 1; if( match( $0, / refs="[0-9]+"/ ) ) { n = substr( $0, RSTART + 7, RLENGTH - 8 ) } print n }' >"$TMP/w2dweights"
 W2REFS="$( grep -c ' ref ' "$TMP/w2all" )"
-{ [ "$( grep ' def ' "$TMP/w2dall" )" = "$( grep ' def ' "$TMP/w2all" )" ] && ! grep -q ' ref ' "$TMP/w2dall" \
+W2DEFS_ALL="$( grep -c ' def ' "$TMP/w2all" )"
+W2DEFS_SUM="$( awk '{s+=$1} END{print s+0}' "$TMP/w2dweights" )"
+{ [ "$( grep ' def ' "$TMP/w2dall" )" = "$( grep ' def ' "$TMP/w2all" | awk '{ k = ( $1 == "HEAD" ) ? "HEAD" NR : $2 " " $3 } !seen[k]++' )" ] && ! grep -q ' ref ' "$TMP/w2dall" \
+  && [ "$W2DEFS_SUM" = "$W2DEFS_ALL" ] && [ "$W2DEFS_ALL" -ge 2 ] \
   && [ "$( sed -n 1p "$TMP/w2dall" )" = "HEAD def engine.cpp:3" ] && [ "$W2REFS" -ge 1 ] \
   && grep -q "<refs count=\"$W2REFS\"" "$TMP/w2d" && grep -q 'on-head="1"' "$TMP/w2d" && grep -q 'head_labels="index"' "$TMP/w2d"; } \
-    && ok "whereis (default listing twin): the def rows of the whole list, source first; the $W2REFS kind=\"ref\" row(s), the doc row among them, counted by <refs count=>" \
-    || { no "whereis (default listing twin): the default lost a def row or miscounted the refs"; cat "$TMP/w2dall"; grep -o '<refs [^>]*>' "$TMP/w2d"; }
+    && ok "whereis (default listing twin): the def rows of the whole list, source first, shared branch lines folded (refs= sums to $W2DEFS_ALL def rows); the $W2REFS kind=\"ref\" row(s), the doc row among them, counted by <refs count=>" \
+    || { no "whereis (default listing twin): the default lost a def row, folded wrongly (refs= sum $W2DEFS_SUM vs $W2DEFS_ALL def rows) or miscounted the refs"; cat "$TMP/w2dall"; grep -o '<refs [^>]*>' "$TMP/w2d"; }
+# The fold's witness on this fixture: the three branches' identical engine.cpp:3 line is one row, refs="3", on the
+# first branch by name, and the whole list keeps all three (a count, never a drop).
+W2FOLDED="$( tr '<' '\n' <"$TMP/w2d" | grep -c '^hit ref="feat-merged" .*kind="def" refs="3" ' )"
+[ "$W2FOLDED" -eq 1 ] && [ "$( grep -c ' def engine.cpp:3' "$TMP/w2all" )" -eq 4 ] && ! grep -q ' refs="' "$TMP/w2" \
+    && ok 'whereis (fold): the branches'"'"' shared engine.cpp:3 definition is one row refs="3" on feat-merged; listing=all keeps all four rows and carries no refs=' \
+    || { no "whereis (fold): expected one feat-merged def row with refs=\"3\" (got $W2FOLDED) and 4 engine.cpp:3 def rows in the whole list"; cat "$TMP/w2dall"; }
 
 # The finding's own repro, on this repo, when it is a git tree deep enough to answer. Skipped rather
 # than failed on a shallow/absent checkout: this arm is a bonus over the fixture arms above, which
@@ -254,6 +271,121 @@ if git -C "$ROOT" rev-parse --verify -q HEAD >/dev/null 2>&1; then
     esac
 else
     ok "whereis: repo root is not a git tree — real-repo arm skipped"
+fi
+
+# ── 5b) --whereis on the OTHER refs: the lexical shape test says kind="def" only for a definition's shape, and the
+#        definitions page lists a line that several refs hold ONCE (refs="N") ──────────────────────────────────
+# The 26b sweep (ideas-fable-26b #9): with the definitions page listing every kind="def" row of every ref, a defs="1"
+# symbol listed 2113 "definitions" — 59 of the first 60 were call sites that merely ended in `}` or `)`
+# (`if( !task.empty() ) { out += escapeXml( task, esc ); }`), a string literal's `impl `, a comment's `def `, and every
+# ref's own copy of the one real line. Its own fixture: three branches hold the same shapes.cpp / calls.js (shape-b
+# byte-identical to shape-a, shape-c with one extra comment line so its lines are numbered differently), beside the
+# call shapes of C++, Python, JS, a string literal, a shell comment and a using-declaration. HEAD defines the name in
+# budget.cpp, so HEAD's label comes from the index and every branch row is the lexical heuristic's.
+SH="$TMP/shapes"; mkdir -p "$SH"
+gs(){ git -C "$SH" "$@" >/dev/null 2>&1; }
+gs init -q -b main
+gs config commit.gpgsign false
+printf '#pragma once\nint computeBudget( int frames );\n' > "$SH/budget.h"
+printf 'int computeBudget( int frames )\n{\n    return frames * 16;\n}\n' > "$SH/budget.cpp"
+gs add budget.h budget.cpp
+gs commit -qm base
+write_shapes(){   # $1 = extra leading comment lines for shapes.cpp (shifts every line number)
+    { printf '%s' "$1"; cat <<'EOF'
+#include "budget.h"
+static int computeBudget( int frames ) { return frames * 32; }
+auto computeBudget( long frames ) -> long { return frames; }
+int notADef( int total )
+{
+    if( total == 0 ) { total += computeBudget( 1 ); }
+    if( total == 1 ) { computeBudget( 2 ); }
+    return computeBudget( 3 );
+}
+EOF
+    } > "$SH/shapes.cpp"
+    printf 'if computeBudget( 7 ):\n    pass\nx = computeBudget( 8 )\n' > "$SH/calls.py"
+    printf 'await computeBudget( 9 )\ncomputeBudget( 10 ).then( x => x )\nclass Budget {\n  computeBudget( frames ) {\n    return frames\n  }\n}\n' > "$SH/calls.js"
+    printf 'w.write( "<impl n=\\"" );  w.write( computeBudget( 11 ) );\nusing ns::computeBudget;\n' > "$SH/w.cpp"
+    printf '# 0 def rows in computeBudget( 12 ) hits\n' > "$SH/note.sh"
+}
+gs checkout -qb shape-a
+write_shapes ""
+gs add shapes.cpp calls.py calls.js w.cpp note.sh
+gs commit -qm "the shapes"
+gs checkout -qb shape-b
+printf 'unrelated\n' > "$SH/other.txt"
+gs add other.txt
+gs commit -qm "shape-b: the same shapes, plus an unrelated file"
+gs checkout -q main
+gs checkout -qb shape-c
+write_shapes "// shape-c: one more line above, so every line number differs from shape-a's
+"
+gs add shapes.cpp calls.py calls.js w.cpp note.sh
+gs commit -qm "shape-c: the same lines, numbered differently"
+gs checkout -q main
+
+"$BIN" "$SH" --whereis=computeBudget >"$TMP/sd" 2>/dev/null; rcSd=$?
+"$BIN" "$SH" --whereis=computeBudget --whereis-listing=all >"$TMP/sa" 2>/dev/null; rcSa=$?
+rows_of(){ tr '<' '\n' <"$1" | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)"\( test_local="1"\)\{0,1\}\( refs="[0-9]*"\)\{0,1\} t=.*/\1 \4 \2:\3\6/p'; }
+rows_of "$TMP/sd" >"$TMP/sdrows"; rows_of "$TMP/sa" >"$TMP/sarows"
+if [ $rcSd -ne 0 ] || [ $rcSa -ne 0 ] || ! grep -q '<whereis ' "$TMP/sd" || ! grep -q '<whereis ' "$TMP/sa"; then
+    no "whereis (shapes): the fixture produced no <whereis> root (rc $rcSd / $rcSa)"
+else
+    # (i) RED on 93aeab1d: the nine call shapes read kind="def" on every branch. Every branch def row is one of the
+    #     three definition shapes — the one-line body, the trailing return and the JS method — and no other line.
+    DEF_T="$( tr '<' '\n' <"$TMP/sa" | grep '^hit ref="shape-' | grep 'kind="def"' | sed -n 's/.* t="\(.*\)"\/>$/\1/p' | sort -u )"
+    EXPECT_T="$( printf '%s\n' 'computeBudget( frames ) {' 'auto computeBudget( long frames ) -&gt; long { return frames; }' 'static int computeBudget( int frames ) { return frames * 32; }' 'int computeBudget( int frames )' | sort -u )"
+    [ "$DEF_T" = "$EXPECT_T" ] \
+        && ok 'whereis (shapes): on the branches only the definition shapes read kind="def" (base'"'"'s budget.cpp, the one-line body, the trailing return, the JS method)' \
+        || { no 'whereis (shapes): a call shape reads kind="def" on a branch, or a definition shape lost its label'; printf '%s\n' "$DEF_T"; }
+    # (ii) each call shape is a kind="ref" row (present, labelled ref): the fix relabels, it never drops.
+    missing=""
+    for shape in 'total += computeBudget( 1 ); }' '{ computeBudget( 2 ); }' 'return computeBudget( 3 );' 'if computeBudget( 7 ):' 'x = computeBudget( 8 )' \
+                 'await computeBudget( 9 )' 'computeBudget( 10 ).then' '&lt;impl n=' '0 def rows' 'using ns::computeBudget;'; do
+        tr '<' '\n' <"$TMP/sa" | grep '^hit ref="shape-a"' | grep 'kind="ref"' | grep -qF "$shape" || missing="$missing [$shape]"
+    done
+    [ -z "$missing" ] \
+        && ok 'whereis (shapes): the C++, Python, JS, string-literal, comment and using-declaration call shapes are kind="ref" rows on shape-a' \
+        || { no "whereis (shapes): call shapes not found as kind=\"ref\" rows:$missing"; grep '^shape-a' "$TMP/sarows"; }
+    # (iii) the fold: the definitions page lists each shared line once, on shape-a (first by name), refs="3" — shape-c
+    #       holds the same text at other line numbers and still folds (the key is path + text, not the line).
+    #       The base's budget.cpp:1 is on every branch too, so four shared lines: HEAD's two index rows + four shape-a rows.
+    [ "$( grep -c '^shape-a def .* refs="3"' "$TMP/sdrows" )" -eq 4 ] && ! grep -q '^shape-[bc] ' "$TMP/sdrows" \
+      && [ "$( sed -n 1p "$TMP/sdrows" )" = "HEAD def budget.cpp:1" ] && [ "$( grep -c ' def ' "$TMP/sdrows" )" -eq 6 ] \
+      && grep -q '^shape-c def shapes.cpp:3$' "$TMP/sarows" && grep -q '^shape-a def shapes.cpp:2 refs="3"' "$TMP/sdrows" \
+      && grep -o '<whereis [^>]*>' "$TMP/sd" | grep -q ' listing="defs" folded="8" ' \
+        && ok 'whereis (fold): the four shared definition lines are one row each on shape-a with refs="3" (folded="8" on the root); shape-c holds one at another line number and folds by text' \
+        || { no 'whereis (fold): expected HEAD + four shape-a rows refs="3" and folded="8" on the definitions page'; cat "$TMP/sdrows"; grep -o '<whereis [^>]*>' "$TMP/sd"; }
+    # (iv) the whole list is the untouched twin: every branch's own row, no refs=/folded= anywhere, rows == hits=.
+    SA_HITS="$( grep -o '<whereis [^>]*' "$TMP/sa" | grep -o ' hits="[0-9]*"' | grep -o '[0-9]*' )"
+    SA_ROWS="$( grep -c . "$TMP/sarows" )"
+    [ -n "$SA_HITS" ] && [ "$SA_ROWS" = "$SA_HITS" ] && ! grep -q ' refs="' "$TMP/sa" && ! grep -q ' folded="' "$TMP/sa" && [ "$( grep -c ' def ' "$TMP/sarows" )" -eq 14 ] \
+        && ok "whereis (fold twin): --whereis-listing=all prints every row ($SA_ROWS == hits=$SA_HITS), 14 def rows, no refs= or folded=" \
+        || { no "whereis (fold twin): rows $SA_ROWS vs hits=$SA_HITS, def rows $( grep -c ' def ' "$TMP/sarows" ) (want 14), or refs=/folded= leaked into the whole list"; grep -o '<whereis [^>]*>' "$TMP/sa"; }
+    # (v) the counts agree across the two pages: hits= identical, and <refs count=> on the default equals the whole list's ref rows.
+    SD_HITS="$( grep -o '<whereis [^>]*' "$TMP/sd" | grep -o ' hits="[0-9]*"' | grep -o '[0-9]*' )"
+    [ "$SD_HITS" = "$SA_HITS" ] && grep -q "<refs count=\"$( grep -c ' ref ' "$TMP/sarows" )\"" "$TMP/sd" \
+        && ok "whereis (fold): hits=$SD_HITS on both pages; <refs count=> equals the whole list's kind=\"ref\" rows" \
+        || { no "whereis (fold): hits= or <refs count=> disagree between the pages"; grep -o '<whereis [^>]*>' "$TMP/sd"; grep -o '<refs [^>]*>' "$TMP/sd"; }
+    # (vi) the legend defines refs= where it rides (full prose and compact dictionary), and the full page stays well-formed XML
+    #      with the SHARED DEFINITIONS clause spliced into its comment (checklist 25: no `--` inside it).
+    "$BIN" "$SH" --whereis=computeBudget --legend=full >"$TMP/sdf" 2>/dev/null
+    "$BIN" "$SH" --whereis=computeBudget --legend=compact >"$TMP/sdc" 2>/dev/null
+    if command -v xmllint >/dev/null 2>&1; then
+        xmllint --noout "$TMP/sdf" 2>/dev/null && grep -q 'SHARED DEFINITIONS: refs="N"' "$TMP/sdf" \
+            && ok 'whereis (fold legend): the full legend defines refs= (SHARED DEFINITIONS) and the page is well-formed XML' \
+            || no 'whereis (fold legend): the full page is malformed or its legend does not define refs='
+    else
+        grep -q 'SHARED DEFINITIONS: refs="N"' "$TMP/sdf" && ok 'whereis (fold legend): the full legend defines refs= (xmllint absent: well-formedness not checked)' \
+            || no 'whereis (fold legend): the full legend does not define refs='
+    fi
+    grep -q 'hit refs=N' "$TMP/sdc" \
+        && ok 'whereis (fold legend): the compact dictionary defines hit refs=N on the page that carries it' \
+        || no 'whereis (fold legend): the compact dictionary lacks the hit refs=N reading'
+    "$BIN" "$SH" --whereis=computeBudget --whereis-listing=all --legend=compact >"$TMP/sac" 2>/dev/null
+    ! grep -q 'hit refs=N' "$TMP/sac" && ! grep -q 'SHARED DEFINITIONS' "$TMP/sa" \
+        && ok 'whereis (fold legend): neither legend carries the refs= reading on the whole list, which never prints it' \
+        || no 'whereis (fold legend): the refs= reading rides a page without the attribute'
 fi
 
 # ── 6) refusals: bare --whereis, and a non-git root ────────────────────────────────────────────────────
@@ -373,9 +505,16 @@ WD_HITS="$(  printf '%s' "$W1D" | grep -oE '<whereis [^>]*' | grep -oE ' hits="[
 WD_MORE="$(  printf '%s' "$W1D" | grep -oE '<more hits="[0-9]+"' | grep -oE '[0-9]+' )"
 WD_REFS="$(  printf '%s' "$W1D" | grep -oE '<refs count="[0-9]+"' | grep -oE '[0-9]+' )"
 WD_ROWS="$(  printf '%s' "$W1D" | sed 's/<!--.*-->//' | grep -oE '<hit ' | grep -c '' )"
-{ [ -n "$WD_MORE" ] && [ -n "$WD_REFS" ] && [ "$(( WD_SHOWN + WD_MORE + WD_REFS ))" = "$WD_HITS" ] && [ "$WD_ROWS" = "$WD_SHOWN" ]; } \
-    && ok "§B8.2 whereis (default listing twin): shown($WD_SHOWN) + more($WD_MORE) + refs count($WD_REFS) == hits($WD_HITS)" \
-    || no "§B8.2 whereis (default listing twin): shown=$WD_SHOWN more=$WD_MORE refs=$WD_REFS hits=$WD_HITS rows=$WD_ROWS"
+# FOLD UPDATE (lane whereis-defs-fix): the branches' shared definition line is one row (refs="3"), and the root's folded=
+# counts the two rows it stands for — shown + more + folded + refs count == hits. The whole-list arm above is the
+# untouched twin (no folded= there: rows == hits).
+WD_FOLDED="$( printf '%s' "$W1D" | grep -oE '<whereis [^>]*' | grep -oE ' folded="[0-9]+"' | grep -oE '[0-9]+' )"
+{ [ -n "$WD_MORE" ] && [ -n "$WD_REFS" ] && [ "$(( WD_SHOWN + WD_MORE + ${WD_FOLDED:-0} + WD_REFS ))" = "$WD_HITS" ] && [ "$WD_ROWS" = "$WD_SHOWN" ]; } \
+    && ok "§B8.2 whereis (default listing twin): shown($WD_SHOWN) + more($WD_MORE) + folded(${WD_FOLDED:-0}) + refs count($WD_REFS) == hits($WD_HITS)" \
+    || no "§B8.2 whereis (default listing twin): shown=$WD_SHOWN more=$WD_MORE folded=${WD_FOLDED:-0} refs=$WD_REFS hits=$WD_HITS rows=$WD_ROWS"
+[ "$WD_FOLDED" = "2" ] \
+    && ok '§B8.2 whereis (default listing twin): folded="2" on the root — the two branch copies of engine.cpp:3 behind the refs="3" row' \
+    || no "§B8.2 whereis (default listing twin): folded=\"${WD_FOLDED:-absent}\" on the root, want 2"
 WDEND="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --offset="$WD_HITS" 2>/dev/null )"
 if ! printf '%s' "$WDEND" | grep -q '<whereis '; then
     no "§B8.2 whereis (default listing twin): the past-the-end page produced no <whereis> root"
@@ -690,15 +829,24 @@ fi
 # explicit pages of the same binary, byte for byte.
 defs_in(){ hits_of def | wc -l | tr -d ' '; }
 dw(){ "$BIN" "$1" --whereis="$2" --no-cache "${@:3}" 2>/dev/null; }
-# (L15) the cap bites: HEAD defines zqCap once and calls it 70 times; 64 branches sit at the previous commit (same files)
-# and HEAD adds one unrelated commit, so every branch row carries tip=/date=. The all page lists HEAD's definition and 59
-# references (60 rows), the defs page 60 definitions, and the defs page is the LONGER one in bytes — the default is defs.
+# (L15) the cap bites: HEAD defines zqCap once and calls it 70 times; 64 branches each hold their OWN definition line
+# (`return x + N`: 64 distinct lines, so none folds into another — foldSharedBranchDefs lists a line several refs share
+# once, which is the lane whereis-defs-fix twin below), and HEAD adds one unrelated commit, so every branch row carries
+# tip=/date=. The all page lists HEAD's definition and 59 references (60 rows), the defs page 60 definitions, and the
+# defs page is the LONGER one in bytes — the default is defs.
 D15="$TMP/cap15"; mkdir -p "$D15"; git -C "$D15" init -q -b main >/dev/null 2>&1; git -C "$D15" config commit.gpgsign false
 printf 'int zqCap( int x ) { return x; }\n' >"$D15/def.c"
 { printf 'int useAll( void )\n{\n    int s = 0;\n'; i=0; while [ $i -lt 70 ]; do printf '    s += zqCap( %d );\n' $i; i=$((i+1)); done; printf '    return s;\n}\n'; } >"$D15/use.c"
 printf '// head\n' >"$D15/other.c"
 git -C "$D15" add -A >/dev/null 2>&1; git -C "$D15" commit -qm cap1 >/dev/null 2>&1
-i=0; while [ $i -lt 64 ]; do git -C "$D15" branch "b$i" >/dev/null 2>&1; i=$((i+1)); done
+i=0; while [ $i -lt 64 ]; do
+    git -C "$D15" checkout -qb "b$i" >/dev/null 2>&1
+    printf 'int zqCap( int x ) { return x + %d; }\n' $i >"$D15/def.c"
+    git -C "$D15" commit -qam "b$i" >/dev/null 2>&1
+    git -C "$D15" checkout -q main >/dev/null 2>&1
+    i=$((i+1))
+done
+printf 'int zqCap( int x ) { return x; }\n' >"$D15/def.c"
 printf '// head, later\n' >"$D15/other.c"; git -C "$D15" add -A >/dev/null 2>&1
 GIT_COMMITTER_DATE="2026-02-02T00:00:00Z" GIT_AUTHOR_DATE="2026-02-02T00:00:00Z" git -C "$D15" commit -qm cap2 >/dev/null 2>&1
 C_D="$( dw "$D15" zqCap )"; C_A="$( dw "$D15" zqCap --whereis-listing=all )"; C_F="$( dw "$D15" zqCap --whereis-listing=defs )"
@@ -710,6 +858,24 @@ if [ "$CD_F" -gt "$CD_A" ] 2>/dev/null && [ "$( nbytes "$C_F" )" -gt "$( nbytes 
         || { no "LEAN (L15): the default ($( nbytes "$C_D" ) B) is not the defs page ($( nbytes "$C_F" ) B, $CD_F defs) over the all page ($( nbytes "$C_A" ) B, $CD_A defs)"; printf '%s\n' "$C_D" | lroot; }
 else
     no "LEAN (L15): premises not met: defs shown $CD_F vs all $CD_A, bytes $( nbytes "$C_F" ) vs $( nbytes "$C_A" ), all capped?"
+fi
+# (L15-FOLD, lane whereis-defs-fix) the same shape with the 64 branches at ONE commit: their 64 copies of the definition
+# line are one row refs="64" (folded="63" on the root), the defs page is now the SHORTER page (2 rows) and is still the
+# default — it lists more definitions (65 represented) than the capped all page (HEAD's one). RED on 93aeab1d: 60 rows,
+# every one the same line, 4 more behind <more>.
+D15F="$TMP/cap15fold"; mkdir -p "$D15F"; git -C "$D15F" init -q -b main >/dev/null 2>&1; git -C "$D15F" config commit.gpgsign false
+cp "$D15/def.c" "$D15/use.c" "$D15F/"; printf '// head\n' >"$D15F/other.c"
+git -C "$D15F" add -A >/dev/null 2>&1; git -C "$D15F" commit -qm cap1 >/dev/null 2>&1
+i=0; while [ $i -lt 64 ]; do git -C "$D15F" branch "b$i" >/dev/null 2>&1; i=$((i+1)); done
+printf '// head, later\n' >"$D15F/other.c"; git -C "$D15F" add -A >/dev/null 2>&1
+GIT_COMMITTER_DATE="2026-02-02T00:00:00Z" GIT_AUTHOR_DATE="2026-02-02T00:00:00Z" git -C "$D15F" commit -qm cap2 >/dev/null 2>&1
+C_FD="$( dw "$D15F" zqCap )"
+if printf '%s' "$C_FD" | lroot | grep -q ' listing="defs" folded="63" ' && [ "$( printf '%s' "$C_FD" | defs_in )" = "2" ] \
+   && [ "$( printf '%s' "$C_FD" | tr '<' '\n' | grep -c '^hit ref="b0" .*kind="def" refs="64" ' )" = "1" ] \
+   && ! printf '%s' "$C_FD" | grep -q '<more '; then
+    ok 'LEAN (L15-FOLD): 64 branches sharing one definition line are one row refs="64" (folded="63"); the 2-row defs page is the default with nothing behind <more>'
+else
+    no 'LEAN (L15-FOLD): the shared definition line is not folded into one refs="64" row on a 2-row defs page'; printf '%s\n' "$C_FD" | lroot; printf '%s' "$C_FD" | tr '<' '\n' | grep -c '^hit '
 fi
 # (L15-MCP) the same symbol over MCP (no `listing`): byte-identical to the CLI defs page.
 if command -v python3 >/dev/null 2>&1; then
