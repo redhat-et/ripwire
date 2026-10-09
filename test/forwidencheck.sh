@@ -276,7 +276,7 @@ run --for="$THIN" --limit=0 >/dev/null; rc=$?
 if [ "$rc" != 0 ] && grep -q -- '--limit' "$TMP/err"; then ok "(6) --limit=0 is refused (rc=$rc)"; else no "(6) --limit=0 not refused: rc=$rc $( head -c 160 "$TMP/err" )"; fi
 run --for="$THIN" --limit=abc >/dev/null; rc=$?
 if [ "$rc" != 0 ] && grep -q -- '--limit' "$TMP/err"; then ok "(6) --limit=abc is refused (rc=$rc)"; else no "(6) --limit=abc not refused: rc=$rc $( head -c 160 "$TMP/err" )"; fi
-for flag in --json --format=candidates --detail=1 --signatures-only --token-budget=2000; do
+for flag in --json --format=candidates --detail=1 --signatures-only; do
     run --for="$THIN" --limit=5 $flag >"$TMP/shape.out"; rc=$?
     if [ "$rc" != 0 ] && [ ! -s "$TMP/shape.out" ]; then
         ok "(6) the page refuses $flag rather than ignoring it (rc=$rc)"
@@ -284,6 +284,17 @@ for flag in --json --format=candidates --detail=1 --signatures-only --token-budg
         no "(6) the page accepted $flag: rc=$rc, $( wc -c <"$TMP/shape.out" | tr -d ' ' ) bytes on stdout, stderr: $( head -c 160 "$TMP/err" )"
     fi
 done
+# PAGING-POC (issue #294): --token-budget beside a window no longer refuses — the combination now has a
+# DEFINED meaning, the budgeted-bundle CANDIDATE PAGE (a different document, verbs_for.h's shared
+# emitForCandidatePage). The old refusal guarded against budget-silently-ignored beside this file page;
+# the new arm pins the STRONGER contract: budget+window answers with the <sigs>-rooted candidate page
+# carrying the pageview quintet, so THIS file page stays budgetless by construction, never by refusal.
+run --for="$THIN" --limit=5 --token-budget=2000 >"$TMP/shape.out"; rc=$?
+if [ "$rc" = 0 ] && grep -q '^<sigs ' "$TMP/shape.out" && grep -q 'next_offset=' "$TMP/shape.out"; then
+    ok "(6) budget+window answers with the CANDIDATE page (<sigs root, quintet) — this file page stays budgetless by construction"
+else
+    no "(6) budget+window did not answer with the candidate page: rc=$rc $( head -c 120 "$TMP/shape.out" ) $( head -c 120 "$TMP/err" )"
+fi
 
 # ── (7) the MCP twin serves the same page ──────────────────────────────────────────────────────────────
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s","limit":40}}}\n' \

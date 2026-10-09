@@ -549,7 +549,10 @@ for cand in $seedCands; do
 
     # (1) what the capture PUBLISHES — that is what a reader gets, and where the 1148/buildGraph defect
     # lived: main's 09-05 and 09-07 both carry <at l="1148" sym="buildGraph"> under a rankGraphTeleport demo.
-    recSym="$( grep -oE '<at p="src/graph\.h" l="'"$cand"'" sym="[^"]*"' "$newestCapture" | grep -oE 'sym="[^"]*"' | head -1 )"
+    # attribute-order-insensitive: the compact dialect (bcb796959) moved schema= onto the <at> root
+    # BEFORE p=, so the old p-first grep matched nothing on any capture regenerated since — extract
+    # the whole tag for THIS line, then read sym= out of it
+    recSym="$( grep -oE '<at [^>]*>' "$newestCapture" | grep "p=\"src/graph\.h\" l=\"""$cand""\"" | grep -oE 'sym="[^"]*"' | head -1 )"
     if [ "$recSym" = "sym=\"$SEEDSYM\"" ]; then
         ok "(H) the capture PUBLISHES sym=\"$SEEDSYM\" for src/graph.h:$cand — the reader is given the symbol the demo is about"
     else

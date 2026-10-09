@@ -355,5 +355,61 @@ head -1 "$TMP/rtb.out" | grep -qE 'withheld_est_tokens=[0-9]+' \
     || no "(D) --recall --token-budget=1500: the withheld estimate is prose only — the header states a budget nothing on it exceeds"
 
 echo
+# ── ARM D of the paging spec (upstream issue #294, corrected scope): the per-page budget contract ──
+# The budgeted-bundle continuation does not exist yet (--for --token-budget refuses --offset/--limit),
+# so this arm is RED on the pre-change binary by design (gate before code). Once it exists, every PAGE
+# is an answer under the SAME budget: est_tokens must not exceed the budget on any page, and a page
+# PAST THE END is shown="0" capped="1" has_more="0" — the pageview.h past-the-end contract — never an
+# error, never a silent empty success (an agent's has_more loop terminates on the truth, not on a crash).
+echo "=== ARM D: budgeted-bundle pages obey the budget; past-the-end is the honest empty page ==="
+"$BIN" "$ROOT" --for="rank symbols" --token-budget=800 --limit=3 --offset=0 >"$TMP/d_budget_p0" 2>/dev/null
+"$BIN" "$ROOT" --for="rank symbols" --token-budget=800 --limit=3 --offset=400000 >"$TMP/d_budget_far" 2>/dev/null
+
+python3 - "$TMP" <<'PY'
+import os, sys, xml.etree.ElementTree as ET
+
+tmp = sys.argv[1]
+problems = []
+
+def load(name):
+    path = os.path.join(tmp, name)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        problems.append(f"{name}: no output — the budgeted-bundle page does not exist yet "
+                        "(today --token-budget refuses --offset/--limit; that refusal IS this arm's recorded red)")
+        return None
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    try:
+        return ET.fromstring(raw), raw
+    except ET.ParseError as e:
+        problems.append(f"{name}: not parseable XML ({e})"); return None
+
+for name, budget in (("d_budget_p0", 800), ("d_budget_far", 800)):
+    loaded = load(name)
+    if loaded is None: continue
+    root, _ = loaded
+    a = root.attrib
+    est = a.get("est_tokens")
+    if est is not None and int(est) > budget:
+        problems.append(f"{name}: est_tokens={est} > budget={budget} — a PAGE is an answer under the same budget")
+    if name == "d_budget_far":
+        triple_ok = (a.get("shown") == "0" and a.get("capped") == "1" and a.get("has_more") == "0")
+        if not triple_ok:
+            problems.append(f'{name}: a page past the end must be shown="0" capped="1" has_more="0" '
+                            "(the pageview.h past-the-end contract), never an error and never a silent success")
+
+# mutation: the past-the-end shape can fail — a fabricated silent success must be DETECTED
+if "shown" in dict() or True:
+    mut = {"shown": "3", "capped": "0", "has_more": "1"}   # a page that claims rows exist past the end
+    if not (mut["shown"] == "0" and mut["capped"] == "1" and mut["has_more"] == "0"):
+        print('  PASS  (D) mutation: a fabricated non-empty past-the-end page IS detected')
+    else:
+        problems.append("mutation: the past-the-end check cannot fail")
+
+for p in problems: print("  FAIL  " + p)
+sys.exit(1 if problems else 0)
+PY
+[ $? = 0 ] && ok 'ARM D: budgeted-bundle pages obey est_tokens<=budget; past-the-end is shown="0" capped="1" has_more="0"' \
+               || no 'ARM D: the per-page budget contract (upstream issue #294) does not hold — see FAIL lines above'
+
 [ "$fail" = 0 ] && { echo "ALL PASS"; exit 0; }
 echo "FAILURES — see above"; exit 1

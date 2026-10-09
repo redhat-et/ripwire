@@ -3745,6 +3745,10 @@ static constexpr CompactKeyRule kBundleKeyRules[] =
     { "skipped",         []( const rw::Config& c ) noexcept { return c.skippedList; },                               CompactKeyMark::FirstChild, "skipped" },
     { "notes",           []( const rw::Config& c ) noexcept { return c.notesList; },                                 CompactKeyMark::FirstChild, "notes" },
     { "lego",            []( const rw::Config& c ) noexcept { return !c.legoType.empty(); },                         CompactKeyMark::FirstChild, "lego" },
+    // the candidate page's rule sits ABOVE pack-task's: both ask on the same flags, and the mark
+    // (above_cliff, the page root's own attribute) is what tells the <sigs> page from the <ctx> bundle
+    // the pack-task row below must keep serving.
+    { "candidate-page",  []( const rw::Config& c ) noexcept { return ( !c.forTask.empty() || c.packTaskFlag ) && c.tokenBudget != 0 && ( c.pageLimit > 0 || c.pageOffset > 0 ); }, CompactKeyMark::RootAttr, "above_cliff" },
     { "pack-task",       []( const rw::Config& c ) noexcept { return c.packTaskFlag || !c.packTask.empty(); },       CompactKeyMark::RootAttr,   "budget_tokens" },
     { "from-trace",      []( const rw::Config& c ) noexcept { return !c.fromTrace.empty() || !c.runTrace.empty(); }, CompactKeyMark::RootAttr,   "task" },
     { "expand",          []( const rw::Config& c ) noexcept { return !c.expand.empty(); },                           CompactKeyMark::None,       {} },
@@ -3823,7 +3827,11 @@ static bool nativeCompactLegendVerb( const rw::Config& c ) noexcept
     // L1 fix round (rv-r1-L1 LOW-1): --batch outranks --for in dispatch, so `--for=X --batch=F` answers the batch envelope —
     // an answer this layer shapes. Only a run --for actually answers is skipped.
     const bool batchAnswers = !c.batchFile.empty();   // the batch envelope answers, and this layer shapes it
-    return !batchAnswers && !c.forTask.empty();
+    // the budgeted-bundle CANDIDATE PAGE (#294/PR #362) is NOT the --for bundle this skip protects:
+    // its legend is pure prose (no data comment), so the layer's rewrite is safe — and required, or
+    // --legend=compact is accepted and ignored on the page (the #362 review's item 5).
+    const bool forCandidatePage = !c.forTask.empty() && c.tokenBudget != 0 && ( c.pageLimit > 0 || c.pageOffset > 0 );
+    return !batchAnswers && !c.forTask.empty() && !forCandidatePage;
 }
 
 // L1 fix round (rv-r1-L1 LOW-3): a DEFAULTED posture captured every run through a tmpfile, a 1.28 MB `--lint --sarif`

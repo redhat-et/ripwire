@@ -1836,6 +1836,37 @@ five times, round-robin across the sizes, and compares medians. The thresholds a
 stall (one 640 KB run delayed 0.6 s) fails the old arm and passes the new one. A deliberately quadratic per-word
 rescan in `scanAsanWordBoundaries` still fails B1, B2 and B3 (medians 1033 / 14094 ms / timeout).
 
+### Added — the budgeted-bundle candidate page: `--for`/`--pack-task` under a budget take a resumable `--limit`/`--offset` window; MCP `explore` gains `limit`/`offset` (issue #294, PR #362)
+
+`--for=TASK --token-budget=N` with an explicit `--limit`/`--offset` now answers with the **candidate
+page**: one `<sigs>` window over the same ranked candidate set the bundle cuts — the pageview quintet
+(`shown=/total=/capped=/has_more=/next_offset=`) on the root, `above_cliff=` the head-tier count,
+`tier=` one tier per page (a head window ends at the cliff), `r=` each row's GLOBAL candidate rank,
+`at=` the git index answered from, `next=` the pasteable continuation argv (dropped when
+`has_more="0"`), `over_ceiling="1"` when the budget cannot fit the window (fewer rows served, never
+silently more bytes), and the page's own legend in both dialects (`--legend=full|compact`, the central
+compact table). `--pack-task` under a budget takes the same window; a window with no budget stays the
+`--for` file page; `--partition` and a window refuse together. The un-paged bundles are byte-identical
+(`forbudgetmonotoncheck`), and `--offset=0` alone remains the un-paged answer — its resume point is
+its own `<sigs shown=>`.
+
+MCP `explore` declares `limit`/`offset` (the same bounded pair `for` takes) and answers the same
+page shape; previously it silently ignored `budget_tokens` beside a window and served the budgetless
+file page. All five page paths — CLI `--for`, CLI `--pack-task`, MCP `for`/`explore`/`pack_task` —
+page ONE candidate list: the CLI pages force the ranking's full distribution under a window (the
+rule `--for`'s bundle path already followed), exactly the exhaustive scoring the MCP twins always
+used, so the `ranking=` attribute the first round carried is gone — there is nothing left to
+distinguish. Every page, CLI or MCP, carries the same pasteable `next=`/`next_tier=`: an MCP page's
+handle is a CLI argv now, and it walks the same list. Every accepted ranking flag
+(the CLI's `--no-route`, `--no-mention-boost`, `--no-doc-mention`, `--cochange-boost`; the twins'
+`no_route`) rides `next=`, so a pasted continuation re-ranks identically — the
+`test/pagingsweepcheck.sh` walk arms pin all five surfaces to `has_more="0"` with identical row
+sequences and pin each flag's echo. The `tools/list` manifest grows 46,732 → 46,916 B (measured
+against train 25's `main`; descriptions identical, and the +184 B of schema is `explore`'s
+`limit`/`offset` alone — `for` already declared the pair, `pack_task` is a dispatch alias, not a
+listed tool), and the ceiling moves 46,750 → 46,950 B
+- the one sanctioned case that moves it: `explore`'s two declared schema properties
+(`test/mcpmanifestcheck.sh` arm `(1b)` asserts the figure against a live measurement).
 ### Fixed — the Linux G1 sanitizer ritual completes: five string_view comparator lambdas stop wrapping, and the GCC ASan path builds (#342)
 
 `LSAN_OPTIONS=… ./asan/ripwire .` — the sanitizer ritual AGENTS.md requires before a PR — aborted on any

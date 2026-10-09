@@ -88,7 +88,19 @@ guard "--limit with --report"         'honored only by'                     "$NO
 # refusal this row pinned no longer exists. What still refuses beside the page is a byte budget (the page has
 # none to shape against; validateShapingFlagsHonored fires because --for joins the honoring set when a window
 # is asked for). The page itself is asserted below, after the guard table (test/forwidencheck.sh owns its shape).
-guard "--token-budget beside --for --limit (the page has no budget)" 'in the --limit/--offset-honoring set' "$NOROOT" --for=x --limit=3 --token-budget=1000
+# PAGING-POC (issue #294): --token-budget beside --for --limit no longer REFUSES — the combination now
+# has a defined meaning: the budgeted-bundle CANDIDATE PAGE (verbs_for.h's shared emitForCandidatePage).
+# The old row pinned the kTokenBudgetGuard refusal the carve removed (and used $NOROOT because that guard
+# fired BEFORE root resolution; with no guard firing, the run dies on the bad root instead — the "wrong
+# message" the old row reported). The replacement pins the STRONGER contract on a REAL corpus: budget +
+# window answers with the candidate page — exit 0, a <sigs> root carrying the pageview quintet — so the
+# file page stays budgetless by construction (forwidencheck arm (6) holds the same seam from its side).
+"$BIN" "$ROOT/test/fixture" --for=x --limit=3 --token-budget=1000 --no-cache >"$TMP/candpage.out" 2>"$TMP/candpage.err" </dev/null; candpage_rc=$?
+if [ "$candpage_rc" = 0 ] && grep -q '^<sigs ' "$TMP/candpage.out" && grep -q 'next_offset=' "$TMP/candpage.out"; then
+    ok "budget+window (--for --limit --token-budget) answers with the candidate page (<sigs root, quintet)"
+else
+    no "budget+window (--for --limit --token-budget) must answer with the candidate page: rc=$candpage_rc $( head -c 120 "$TMP/candpage.out" ) $( head -c 120 "$TMP/candpage.err" )"
+fi
 guard "--offset with --metrics"       'honored only by'                     "$NOROOT" --metrics --offset=2
 # the positive half of the L-W row above: --for --limit=N answers with the <files> page (exit 0), on a real corpus
 "$BIN" "$ROOT/test/fixture" --for=x --limit=3 --no-cache >"$TMP/forpage.out" 2>"$TMP/forpage.err" </dev/null; forpage_rc=$?

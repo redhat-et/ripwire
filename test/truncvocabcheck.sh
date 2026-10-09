@@ -500,5 +500,124 @@ else
     ok "G4: xmllint unavailable (skipped)"
 fi
 
+# ── (H) ARM A of the paging spec (upstream issue #294, scope corrected by measurement) ──────────
+echo
+echo "── (H) ARM A: the BUDGETED bundle continuation carries the pageview quintet ──"
+# SCOPE, corrected by what the tree already does (measured 2026-09-19, on this binary):
+#   * `--for=TASK --limit=N` (+offset=M) is the FILE-GRAIN WIDENING PAGE — it exists, it carries the
+#     full pageview quintet, and forwidencheck owns it. Re-gating it here would violate §6.4 (the gate
+#     that already owns the subject takes the arm; a duplicate arm is coverage-shaped noise).
+#   * The MCP `for` verb serves that widening page today (limit=5 → <files shown= total= has_more=
+#     next_offset= next="…">); the MCP `explore` verb refuses limit ("unknown field").
+#   * `--for --token-budget=N --offset=M` REFUSES (stdout empty). The byte-budgeted compact bundle —
+#     the thing whose cut IS disclosed (over_ceiling= reason=) but with NO continuation handle — is the
+#     actual open gap of issue #294. THIS arm guards exactly that: the budgeted bundle, paged by
+#     candidate offset, must carry the pageview quintet, and offset=0 must be byte-identical to the
+#     un-paged budgeted answer (the regression floor: existing callers must see identical output).
+# RED on the pre-feature binary is the intended state — gate written BEFORE the code, red vs the
+# pre-change binary, same discipline as runtracecheck.sh. It greens when the continuation ships.
+paged(){ local name="$1"; shift; run "$@" > "$TMP/page_$name.xml"; }
+paged for_budget_p0w  "$BIG"  --for="rank symbols" --token-budget=800 --limit=6 --offset=0
+paged for_budget_page  "$BIG"  --for="rank symbols" --token-budget=800 --offset=5
+paged pack_budget_page "$BIG"  --pack-task="rank symbols by pagerank" --token-budget=800 --offset=5
+run "$BIG" --for="rank symbols" --token-budget=800 --offset=0 > "$TMP/page_for_budget_alone.xml"   # offset=0 ALONE = the un-paged bundle
+run "$BIG" --for="rank symbols" --token-budget=800 > "$TMP/page_for_budget_nopage.xml"
+
+python3 - "$TMP" <<'PY'
+import os, sys, xml.etree.ElementTree as ET
+
+tmp = sys.argv[1]
+QUINTET = ("shown", "total", "capped", "has_more", "next_offset")
+problems = []
+
+def load(name):
+    path = os.path.join(tmp, f"page_{name}.xml")
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        problems.append(f"{name}: the paged run produced no output — the page arm asserted nothing "
+                        "(today: --token-budget refuses --offset; that refusal IS the red this arm exists to record)")
+        return None
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    try:
+        return ET.fromstring(raw), raw
+    except ET.ParseError as e:
+        problems.append(f'{name}: paged output is not parseable XML ({e}) — a paged task-lens answer must be a document')
+        return None
+
+paged_roots = {}
+for name in ("for_budget_p0w", "for_budget_page", "pack_budget_page"):
+    loaded = load(name)
+    if loaded is None: continue
+    paged_roots[name] = loaded[0]
+    root, _ = loaded
+    a = root.attrib
+    missing = [k for k in QUINTET if k not in a]
+    if missing:
+        problems.append(f'{name}: paged budgeted root lacks the pageview quintet (missing: {", ".join(missing)}) — '
+                        "the continuation contract pageview.h owns for every row verb is absent on the budgeted bundle")
+        continue
+    if a["capped"] not in ("0", "1"):
+        problems.append(f'{name}: capped="{a["capped"]}" is not the 0|1 bit (rule 3)')
+    if int(a["shown"]) > int(a["total"]):
+        problems.append(f'{name}: shown={a["shown"]} > total={a["total"]} — a page cannot show more than the candidate set')
+    # issue #294 ruling, suggestions 1+3: above_cliff (the head-tier count, next to total=) and the
+    # at= index stamp (which index answered; a consumer compares across pages instead of mixing two
+    # rankings silently). above_cliff must be < total unless the whole set is head-tier.
+    if "above_cliff" not in a:
+        problems.append(f'{name}: paged root lacks above_cliff= — the ruling\'s suggestion 1 (decide from page 1 whether the remainder is worth fetching)')
+    elif int(a["above_cliff"]) >= int(a["total"]) and int(a["total"]) > 0:
+        problems.append(f'{name}: above_cliff={a["above_cliff"]} >= total={a["total"]} — the boundary is not inside the set')
+    if "at" not in a:
+        problems.append(f'{name}: paged root lacks at= — the index stamp the ruling\'s suggestion 3 names (a stale continuation must be detectable, not silent)')
+    # ARM C of the paging spec, housed here because THIS gate owns the <bodies> rule-5 vocabulary (the
+    # §B8.3 sweep): within a candidate page, a body byte-trim must still disclose shown=/total=/capped=
+    # on <bodies> — the candidate cursor advances the SET, rule 5 discloses the within-page byte trim.
+    for el in root.iter():
+        ea = el.attrib
+        if ea.get("capped") == "1" and el.tag.lower().endswith("bodies"):
+            if "shown" not in ea or "total" not in ea:
+                problems.append(f'{name}: <{el.tag} capped="1"> within the page carries no '
+                                "shown=/total= — the within-page byte trim is undisclosed (rule 5)")
+
+# ARM F of the paging spec (CONTINGENT on the #294 ruling; it encodes the PROPOSED answer): the cliff
+# boundary is computed ONCE over the full ranked candidate set — the boundary value reported must be
+# IDENTICAL on every page of the same query. If maintainers pick the per-page re-cliff alternative, this
+# assert is rewritten to that contract before any code lands (the spec does not assume its own question).
+cliff_attrs = {}
+for name, root in paged_roots.items():
+    for el in root.iter():
+        for key, val in el.attrib.items():
+            if key in ("cliff_rank", "cliffrank", "cliff"):
+                cliff_attrs.setdefault(key, set()).add(val)
+if cliff_attrs:
+    for key, vals in cliff_attrs.items():
+        if len(vals) > 1:
+            problems.append(f"cliff {key} moved across pages of the same query ({sorted(vals)}) — the boundary "
+                            "must be computed once over the full candidate set, not re-decided per page")
+
+alone = os.path.join(tmp, "page_for_budget_alone.xml")
+nopage = os.path.join(tmp, "page_for_budget_nopage.xml")
+if os.path.exists(alone) and os.path.getsize(alone) > 0 and os.path.exists(nopage) and os.path.getsize(nopage) > 0:
+    if open(alone, encoding="utf-8", errors="replace").read() != open(nopage, encoding="utf-8", errors="replace").read():
+        problems.append("for_budget_alone: --offset=0 ALONE must be byte-identical to the un-paged budgeted "
+                        "answer (the un-paged bundle is the byte-pinned ladder, forbudgetmonotoncheck's ground — "
+                        "the page contract ADDS a windowed mode, it must not touch the un-paged bytes)")
+
+# mutation: the assertion shape can fail — a bare paged root with no continuation handle must be SEEN
+mut = ET.fromstring('<ctx shown="5" total="9" capped="1"/>').attrib
+if sorted(k for k in QUINTET if k not in mut) != ["has_more", "next_offset"]:
+    problems.append("mutation: a bare paged root with no has_more=/next_offset= was NOT detected — the arm cannot fail")
+else:
+    print('  PASS  (H) mutation: a bare paged root (no has_more=/next_offset=) IS detected')
+
+for p in problems: print("  FAIL  " + p)
+print("  ..    (H) budgeted-bundle paged captures checked: 3, plus the offset=0 byte-identity floor")
+sys.exit(1 if problems else 0)
+PY
+if [ $? = 0 ]; then
+    ok '(H) paged budgeted-bundle roots carry the full pageview quintet; offset=0 is byte-identical to the un-paged budgeted answer'
+else
+    no '(H) the budgeted-bundle continuation contract (upstream issue #294, corrected scope) does not hold — see FAIL lines above'
+fi
+
 [ $fail = 0 ] && echo "ALL PASS" || echo "FAILURES"
 exit $fail

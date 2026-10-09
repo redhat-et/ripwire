@@ -4634,9 +4634,14 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                             std::string_view topRowNext = {},    // L-W (forpage.h): the r=1 row's next= when the caller
                                                              //   judged the answer THIN (the widening page); "" ⇒ the
                                                              //   --expand body follow-up, byte-identical to before.
-                            SigsCutReport* cutOut = nullptr )   // cut-fix lane A: the tag's shown/total/docs_dropped/capped,
+                            SigsCutReport* cutOut = nullptr,  // cut-fix lane A: the tag's shown/total/docs_dropped/capped,
                                                              //   for the caller's legend splices. Lens path only; zeroed
                                                              //   (nothing cut) on every other path.
+                            std::uint32_t rankBase = 0 )       // d1/paging (#294): 1-based GLOBAL candidate-rank base for the windowed
+                                                             //   serving (0 = the un-windowed default, byte-identical) — a continuation
+                                                             //   page's rows carry their GLOBAL r= (page 2's first row is r=201, not
+                                                             //   r=1: the rank-adaptive doc/sig tiers and the r=1 row's next= hint key
+                                                             //   on GLOBAL rank), so pages merge without duplicate r=
 {
     if( cutOut )
     {
@@ -4702,7 +4707,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         globalRankOf.assign( S, 0 );
         for( std::size_t k = 0; k < keep; ++k )
         {
-            globalRankOf[order[k]] = std::uint32_t( k + 1 );
+            globalRankOf[order[k]] = rankBase + std::uint32_t( k + 1 );   // + rankBase: the WINDOWED serving's global base
         }
     }
 
@@ -4996,7 +5001,11 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             {
                 continue;
             }
-            pushShownSigId( shownIdsOut, order, e.globalRank );   // lane 2
+            // lane 2 — the LOCAL rank under rankBase: globalRank carries the WINDOWED serving's
+            // global offset (#294 review), and order[] holds the WINDOW's rows in its head, so the
+            // id mapping must subtract rankBase or it reads past the window into the masked tail
+            // (the #362 review round's next_offset=2^32 seam).
+            pushShownSigId( shownIdsOut, order, std::uint32_t( e.globalRank - rankBase ) );
             w.write( e.head.c_str() );
             if( !e.doc.empty() ) { w.write( "<doc>" );  w.write( escapeXml( e.doc, esc ) );  w.write( "</doc>" ); }
             w.write( escapeXml( e.sig, esc ) );

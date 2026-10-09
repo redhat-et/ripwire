@@ -17,7 +17,7 @@ it once, marked `×N`.
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 236 | 94 | 135 | **101** |
+| 236 | 94 | 137 | **99** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
 are not counted as caps, and 236 + 7 is the 243 constants this generator parses out of `src/`.
@@ -323,7 +323,7 @@ Discloses: `capped`, `hosts_capped`
 
 ### `src/forpage.h`
 
-Discloses: **none**
+Discloses: `capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
