@@ -36,13 +36,17 @@ TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 
 # L1 (2026-09-19): the CLI default legend is compact and spells <bodies >/<r > inside its comment; these arms measure the
 # byte offsets and counts of the REAL elements, so the three runs ask for the full legend.
-"$BIN" "$FIX" --expand=dupTarget --pack-budget-bytes=10 --no-cache --legend=full >"$TMP/dup.xml" 2>"$TMP/dup.err"
+# expand-lean-k64 (2026-10-08): an --expand whose definitions are all served no longer carries a map by itself (see
+# expandtopk0check (H)); the map still rides — body-first reorder, note=, stderr note — wherever a composed payload owns
+# it. --outline beside --expand is that shape, so this gate's probe composes the two. The ride-along mechanics under test
+# are unchanged; only the way to reach them moved.
+"$BIN" "$FIX" --expand=dupTarget --outline=uniqueTarget --pack-budget-bytes=10 --no-cache --legend=full >"$TMP/dup.xml" 2>"$TMP/dup.err"
 
-# ── sanity: the fixture really landed in bundle mode (map+bodies both ride) — otherwise every arm below
-#    proves nothing (identical to expandtopk0check.sh (B)'s own sanity arm, same fixture, same forcing flag).
-grep -q 'mode="bundle"' "$TMP/dup.xml" \
-    && ok "(A) sanity: the ambiguous probe landed in bundle mode (map+bodies both ride)" \
-    || no "(A) sanity failed: --pack-budget-bytes=10 did not force bundle mode — arm proves nothing"
+# ── sanity: the map really rides beside the bodies (a composed --outline owns it) — otherwise every arm below
+#    proves nothing.
+grep -q '<r ' "$TMP/dup.xml" && grep -q '<bodies' "$TMP/dup.xml" \
+    && ok "(A) sanity: the composed probe carries both the ranked map and the bodies" \
+    || no "(A) sanity failed: the composed --expand --outline probe carries no ride-along map — arm proves nothing"
 
 # ── (B) THE CORE FIX: <bodies> starts before the ranked map's <r ...>, or no map rides at all. ───────────
 bodiesOff="$( grep -bo '<bodies' "$TMP/dup.xml" | head -1 | cut -d: -f1 )"

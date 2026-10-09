@@ -235,10 +235,12 @@ done
     && ok "(4c) at all $sweep_n paddings the served document is no larger than the candidate it rejected — the comparison is symmetric" \
     || no "(4c) $sweep_bad of $sweep_n paddings served a document LARGER than the candidate they rejected (listed above) — the two candidates are priced on different accounting"
 
-# (4d) the one field (4a)/(4b) cannot exercise: mapBytes. Both fixtures above are EXACT-NAME --expand, which
-# defaults its own map to top-k=0 — so no ranked map rides and the map term is 0 on both sides. An AMBIGUOUS
-# name (two definitions) keeps the default map, and the bundle then wins carrying it: the same identity must
-# hold with the map's own bytes inside the price.
+# (4d) the AMBIGUOUS name (two definitions). Until expand-lean-k64 (2026-10-08) this arm was the only one to exercise the
+# bundle price's mapBytes term: a multi-definition name kept the ranked map, and the bundle then won carrying it. A name whose
+# definitions are ALL served now ships no map (the bodies already answer it), so the CLI no longer reaches a bundle that rides a
+# map under mode= selection (a composed --outline/--max-tokens/--query owns the map and opts out of mode= selection). The map
+# term is therefore 0 on this shape too, and the identity this arm pins is the same one (4a)/(4b) pin, now on the
+# multi-definition document: reason="bundle NB" IS the delivered document, and no ranked map rides.
 mkdir -p "$TMP/ambig"
 for f in a b; do
     {   printf 'int dupSym( int a ) { return a + 1; }\n/*'
@@ -249,12 +251,19 @@ done
 ( cd "$TMP" && "$BIN" ambig --expand=dupSym --no-cache --legend=full ) >"$TMP/ambig.xml" 2>/dev/null
 ambTotal="$( wc -c <"$TMP/ambig.xml" | tr -d ' ' )"
 amb_num="$( reason_num "$TMP/ambig.xml" bundle )"
-if ! grep -q '<r ' "$TMP/ambig.xml"; then
-    no "(4d) the ambiguous --expand=dupSym served no ranked map — the mapBytes term is untested by this arm"
+if grep -q '<r ' "$TMP/ambig.xml"; then
+    no "(4d) the ambiguous --expand=dupSym (all definitions served) still carried a ranked map"
 elif [ -n "$amb_num" ] && [ "$amb_num" = "$ambTotal" ]; then
-    ok "(4d) bundle mode WITH its ranked map: reason=\"bundle ${amb_num}B\" IS the delivered document ($ambTotal B)"
+    ok "(4d) bundle mode on a multi-definition name, no map: reason=\"bundle ${amb_num}B\" IS the delivered document ($ambTotal B)"
 else
-    no "(4d) bundle mode with a map prices a document it does not serve: reason=\"bundle ${amb_num:-unreadable}B\" against $ambTotal B delivered"
+    no "(4d) bundle mode on a multi-definition name prices a document it does not serve: reason=\"bundle ${amb_num:-unreadable}B\" against $ambTotal B delivered"
+fi
+# (4d-twin) the explicit-top-k path keeps its map, and mode= selection stands aside there (the agent asked for the map)
+( cd "$TMP" && "$BIN" ambig --expand=dupSym --top-k=5 --no-cache --legend=full ) >"$TMP/ambig5.xml" 2>/dev/null
+if grep -q '<r ' "$TMP/ambig5.xml" && ! grep -q 'mode="' "$TMP/ambig5.xml"; then
+    ok "(4d-twin) explicit --top-k=5 on the ambiguous name keeps the map and the undecorated shape"
+else
+    no "(4d-twin) explicit --top-k=5 on the ambiguous name: map or mode= wrong: $( grep -oE '<ctx[^>]*>' "$TMP/ambig5.xml" )"
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

@@ -15,6 +15,18 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — `--expand` / `--outline` ship no ride-along map when every definition they name is served
+
+`--expand=NAME` on a name with several definitions, and `--outline=NAME`, used to carry the generic top-200 ranked map
+beside bodies that already answered the request (on this repository `--expand=subtokens`: 26,752 B, of which 19,444 B
+was map rows that never mention the symbol; `--expand=emitTo` served the whole 24,788 B file because the whole-file
+comparison priced the bundle with that map). When every requested definition is served the map now defaults to
+`top-k=0`: the root carries `topk_default="0"` and `map_next="ripwire ROOT"` (the call that prints the map, for a session
+that skipped orienting). When a byte budget cut some definitions the root names exactly those in `unserved_total=N` and
+`unserved_next="--expand=FILE:LINE:NAME,..."` instead of shipping the map. The whole-file comparison therefore prices the
+payload only. An explicit `--top-k=N` keeps the previous shape. Language-neutral: the decision reads the record of which
+requested definitions were emitted.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled
