@@ -988,7 +988,7 @@ inline constexpr char kHelpHead[] =
         "                               a counted stub by default — this IS the stub's own next= spelling, so pasting it back\n"
         "                               unchanged is enough. A comma-separated, order-insensitive, closed set (lego and/or\n"
         "                               compose, each named at most once); every other section of the bundle is unaffected —\n"
-        "                               the <sigs> budget is the stubbed answer's. Under an explicit --token-budget/--max-tokens\n"
+        "                               the <sigs> budget is the stubbed answer's. Under an explicit --token-budget\n"
         "                               the restored sections are charged in full, so <sigs> can carry fewer rows there.\n"
         "    --signatures-only          (with --for) signatures only: no automatic bodies in the bundle\n"
         "                               (with --for) opt out of the terminal-by-default bundle: no auto bodies, no bundle=\"auto\"\n"

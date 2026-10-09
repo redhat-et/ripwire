@@ -3329,7 +3329,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         // lego-charge: <lego>/<compose> cost what they are SERVED as — a collapsing section its stub, not its full render
         // (rw::forSectionsSigChargePlan states both rules and why --sections= keeps the default's charge without a ceiling).
         // A section the degrade path will stream unmeasured has no bytes here (legoStr/composeStr empty): blockCharge discloses it.
-        const bool                    explicitForCeiling = cfg.tokenBudget > 0 || cfg.maxTokens > 0;
+        const bool                    explicitForCeiling = cfg.tokenBudget > 0;   // the lens's only <sigs> ceiling (--max-tokens bounds --detail bodies)
         const rw::ForStubbableSection legoChargeIn{ .hasContent = !legoStr.empty(), .preCapTotal = legoPreCapCount, .rendered = legoPreRendered,
                                                     .renderedBytes = legoStr.size() };
         const rw::ForStubbableSection composeChargeIn{ .hasContent = !composeStr.empty(), .preCapTotal = composePreCapCount,

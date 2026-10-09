@@ -23,8 +23,8 @@ measured Python corpus served 4 of 40 signature rows in a ~4.6 KB answer under t
 
 - A section served as a stub is charged at the stub's size (the CLI lens and the MCP `for` tool share one rule).
 - Without an explicit ceiling, `--sections=lego,compose` keeps the stubbed answer's `<sigs>` budget, so the stub's `next=`
-  restores both sections with the same `<sigs>` rows, byte-identically. Under `--token-budget`/`--max-tokens` (MCP
-  `budget_tokens`) the restored sections are charged in full, so the hard bound holds.
+  restores both sections with the same `<sigs>` rows, byte-identically. Under `--token-budget` (MCP `budget_tokens`)
+  the restored sections are charged in full, so the hard bound holds.
 - Measured on 32 `--for` questions over 8 corpora: 19 answers byte-identical, 13 carry more signature rows
   (4 to 29-33 on the corpus above), and every row the old answer showed is still shown. Gate: `forsectioncollapsecheck` (13).
 

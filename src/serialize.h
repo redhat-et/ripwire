@@ -8118,7 +8118,7 @@ inline ForSectionStubPlan planForSectionStubs( std::string_view sections, std::s
 //    sections back "byte-identically in one call" (kForSectionStubLegend), and only a call whose <sigs> match the stubbed
 //    answer's renders them so (the lego is narrowed to the rendered sigs' files, §P3×§P4). The restored sections then ride
 //    on top of that answer, priced in est_tokens=; charging them in full would serve FEWER rows than the stub promised.
-//  * Under an explicit ceiling (--token-budget / --max-tokens / MCP budget_tokens), a section --sections= opts into is
+//  * Under an explicit ceiling (--token-budget / MCP budget_tokens), a section --sections= opts into is
 //    charged at its full render: the ceiling is a hard bound, and the stub's next= never carries one.
 // The charge is taken before the §P3×§P4 narrow, on the pre-narrow render and count. The narrow only empties implementor
 // lists, so a served stub's total= can only shrink (runForLens ENSURES it). A section served whole was charged at its
