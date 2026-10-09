@@ -125,20 +125,19 @@ inline bool isInventoryCodeSymbol( const Symbol& s ) noexcept
 // `main` is an entry only when its own file's module scope calls it. None: no claim.
 enum class InventoryEntryStyle : std::uint8_t { None, EntryFn, EntryStaticMethod, ModuleScopeCall };
 
+// The languages of each style, as data (a reader checks one list, not a switch).
+inline constexpr Lang kInventoryEntryFnLangs[]       = { Lang::C, Lang::Cpp, Lang::ObjC, Lang::Go, Lang::Rust, Lang::Kotlin, Lang::Dart };
+inline constexpr Lang kInventoryStaticMethodLangs[]  = { Lang::Java, Lang::CSharp };
+inline constexpr Lang kInventoryModuleScopeLangs[]   = { Lang::Python, Lang::JavaScript, Lang::TypeScript, Lang::Ruby, Lang::Bash,
+                                                         Lang::Php, Lang::Lua };
+
 inline constexpr InventoryEntryStyle inventoryEntryStyle( Lang l ) noexcept
 {
-    switch( l )
-    {
-        case Lang::C: case Lang::Cpp: case Lang::ObjC: case Lang::Go: case Lang::Rust: case Lang::Kotlin: case Lang::Dart:
-            return InventoryEntryStyle::EntryFn;
-        case Lang::Java: case Lang::CSharp:
-            return InventoryEntryStyle::EntryStaticMethod;
-        case Lang::Python: case Lang::JavaScript: case Lang::TypeScript: case Lang::Ruby: case Lang::Bash: case Lang::Php:
-        case Lang::Lua:
-            return InventoryEntryStyle::ModuleScopeCall;
-        default:
-            return InventoryEntryStyle::None;
-    }
+    const auto in = [ l ]( const auto& langs ) noexcept { return std::find( std::begin( langs ), std::end( langs ), l ) != std::end( langs ); };
+    return in( kInventoryEntryFnLangs )      ? InventoryEntryStyle::EntryFn
+         : in( kInventoryStaticMethodLangs ) ? InventoryEntryStyle::EntryStaticMethod
+         : in( kInventoryModuleScopeLangs )  ? InventoryEntryStyle::ModuleScopeCall
+                                             : InventoryEntryStyle::None;
 }
 
 // A def whose name and kind fit its language's entry convention (callers are judged separately).
@@ -167,31 +166,29 @@ inline bool isInventoryMainModule( const IngestResult& ing, const Symbol& s ) no
 // so its own window never cuts. A superset — it also lists non-entries of those names (tests, methods, callees).
 inline std::string inventoryEntriesNext( const IngestResult& ing, const MapInventory& inv, std::size_t from )
 {
-    bool lower = false, upper = false, mainModule = false;
+    bool on[ 3 ] = { false, false, false };   // a cut def named main, one named Main, a cut __main__.py scope
     for( std::size_t i = from; i < inv.entries.size(); ++i )
     {
         const Symbol& s = ing.symbols[ inv.entries[ i ] ];
-        mainModule = mainModule || s.kind == SymKind::ModuleScope;
-        lower      = lower || ( s.kind != SymKind::ModuleScope && s.name == "main" );
-        upper      = upper || ( s.kind != SymKind::ModuleScope && s.name == "Main" );
+        const bool    scope = s.kind == SymKind::ModuleScope;
+        on[ 0 ] = on[ 0 ] || ( !scope && s.name == "main" );
+        on[ 1 ] = on[ 1 ] || ( !scope && s.name == "Main" );
+        on[ 2 ] = on[ 2 ] || scope;
     }
-    std::vector<std::string> parts;
-    if( lower )      { parts.emplace_back( "name(\"main\")" ); }
-    if( upper )      { parts.emplace_back( "name(\"Main\")" ); }
-    if( mainModule ) { parts.emplace_back( "and(file(all,\"(^|/)__main__\\.py$\"),kind(all,modscope))" ); }
-    std::size_t limit = 0;
+    static constexpr std::string_view kParts[ 3 ] = { "name(\"main\")", "name(\"Main\")",
+                                                      "and(file(all,\"(^|/)__main__\\.py$\"),kind(all,modscope))" };
+    std::string joined;
+    int         n = 0;
+    for( int i = 0; i < 3; ++i )
+    {
+        if( on[ i ] ) { joined += n++ ? "," : "";  joined += kParts[ i ]; }
+    }
+    std::size_t limit = 0;   // every symbol the expression can match, so the query's own window never cuts
     for( const Symbol& s : ing.symbols )
     {
-        limit += ( lower && s.name == "main" ) || ( upper && s.name == "Main" ) || ( mainModule && isInventoryMainModule( ing, s ) );
+        limit += ( on[ 0 ] && s.name == "main" ) || ( on[ 1 ] && s.name == "Main" ) || ( on[ 2 ] && isInventoryMainModule( ing, s ) );
     }
-    std::string expr = parts.size() == 1 ? parts[ 0 ] : std::string();
-    for( std::size_t i = 0; parts.size() > 1 && i < parts.size(); ++i )
-    {
-        expr += i == 0 ? "or(" : ",";
-        expr += parts[ i ];
-    }
-    if( parts.size() > 1 ) { expr += ")"; }
-    return nextFlag( "--graph-query=", expr ) + " --limit=" + std::to_string( limit );
+    return nextFlag( "--graph-query=", n > 1 ? "or(" + joined + ")" : joined ) + " --limit=" + std::to_string( limit );
 }
 
 // The program entries by each language's convention (the header's rule), outside the rolled-up directories and test
