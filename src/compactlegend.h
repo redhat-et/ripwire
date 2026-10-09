@@ -1189,13 +1189,13 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "mode", "mode=/reason=: bundle served, not the whole file; reason= gives both byte counts or the cause; explicit top-k opts out", false, "ctx", MapHeaderRead::No, {}, "expand" },   // also defines reason=
     { "topk_default", "topk_default=0: an exact name was expanded, so the ranked map was dropped; pass top-k=N to get it back", false, "ctx", MapHeaderRead::No, {}, "expand" },
     // expand-lean-k64: a multi-definition name whose definitions were ALL served drops the map too (map_next=), and a cut one names what it did not serve
-    { "map_next", "map_next=: the shell call that prints the ranked map this answer did not ship (orient once per session, not per lookup)", false, "ctx", MapHeaderRead::No, {}, "expand" },
+    { "map_next", "map_next=: the shell call printing the map this answer omits", false, "ctx", MapHeaderRead::No, {}, "expand" },
     { "unserved_total", "unserved_total=N: N requested definitions have no body here (budget or unreadable); unserved_next= is the call serving them", false, "ctx", MapHeaderRead::No, {}, "expand" },   // also defines unserved_next=
     { "inc_total", "inc_total=N: the file's true include/import count; inc= lists the first 24, inc_capped=1 when cut", true, "b", MapHeaderRead::No, {}, "expand" },
     // expand (whole-file serving): src/main.cpp chooseExpandServe (fileOpen) + the topk_default insert
     { "mode", "mode=/reason=: whole-file won, the file text cost fewer bytes than the bundle; reason= gives both sizes", false, "ctx", MapHeaderRead::No, {}, "expand-file" },   // also defines reason=
     { "topk_default", "topk_default=0: an exact name was expanded, so the ranked map was dropped; pass top-k=N to get it back", false, "ctx", MapHeaderRead::No, {}, "expand-file" },
-    { "map_next", "map_next=: the shell call that prints the ranked map this answer did not ship (orient once per session, not per lookup)", false, "ctx", MapHeaderRead::No, {}, "expand-file" },
+    { "map_next", "map_next=: the shell call printing the map this answer omits", false, "ctx", MapHeaderRead::No, {}, "expand-file" },
     // slice: src/slice.h (the <slice> root emit, kSliceCountsAttrXml)
     { "sym", "sym=/lang=: the sliced definition's name and language; p= is its file:line", false, "slice", MapHeaderRead::No, {}, "slice" },   // also defines lang=
     { "vars", "vars=N: sliceable local bindings in the definition, one v row each; name one to slice it", false, "slice", MapHeaderRead::No, {}, "slice" },
@@ -1241,7 +1241,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "err", "err=: why an ok=0 sub-query failed; no payload follows", true, "q", MapHeaderRead::No, {}, "batch" },
     // pack-signatures (--outline whose definitions were all served): src/main.cpp (ctxLeanAttr / ctxUnservedAttr)
     { "topk_default", "topk_default=0: the outlines asked for were all served, so the ranked map was dropped; pass top-k=N to get it back", false, "ctx", MapHeaderRead::No, {}, "pack-signatures" },
-    { "map_next", "map_next=: the shell call that prints the ranked map this answer did not ship (orient once per session, not per lookup)", false, "ctx", MapHeaderRead::No, {}, "pack-signatures" },
+    { "map_next", "map_next=: the shell call printing the map this answer omits", false, "ctx", MapHeaderRead::No, {}, "pack-signatures" },
     { "unserved_total", "unserved_total=N: N requested definitions have no outline here (budget or unreadable); unserved_next= is the call serving them", false, "ctx", MapHeaderRead::No, {}, "pack-signatures" },   // also defines unserved_next=
     // pack-signatures: src/serialize.h (<f layer=> from src/arch.h builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "f", MapHeaderRead::No, {}, "pack-signatures" },
