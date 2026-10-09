@@ -323,9 +323,103 @@ else
     ok "(L) the single-definition exact-name answer is unchanged (topk_default only, no map_next=)"
 fi
 
+# ── (M) fix round 1: map_next= replays EVERY root and the crawl-scope flags, shell-quoted (nextFlag) ─────────────────
+# A multi-root call's map is the map of all its roots; the pointer used to fall back to "ripwire ." (the parent tree), and
+# it dropped --ignore-tests/--exclude, so pasting it printed a map of a different corpus. Exact pointers, then pasted.
+xmlUnesc(){ sed -e 's/&apos;/'"'"'/g' -e 's/&quot;/"/g' -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g'; }
+attrOf(){ grep -oE "$1=\"[^\"]*\"" "$2" | head -1 | sed "s/^$1=\"//;s/\"\$//"; }
+MR="$TMP/mr"; mkdir -p "$MR/r1" "$MR/r2"
+printf 'int multiWork(void) { return 1; }\n' >"$MR/r1/w.c"
+printf 'int multiWork(void) { return 2; }\n' >"$MR/r2/w.c"
+( cd "$MR" && "$BIN" r1 r2 --expand=multiWork --no-cache ) >"$TMP/mroot.xml" 2>/dev/null
+mrNext="$( attrOf map_next "$TMP/mroot.xml" )"
+[ "$mrNext" = "ripwire r1 r2" ] \
+    && ok "(M) multi-root: map_next names BOTH roots (\"$mrNext\")" \
+    || no "(M) multi-root: map_next='$mrNext', want 'ripwire r1 r2': $( grep -oE '<ctx[^>]*>' "$TMP/mroot.xml" | head -1 )"
+grep -q 'return 1' "$TMP/mroot.xml" && grep -q 'return 2' "$TMP/mroot.xml" \
+    && ok "(M) multi-root: both definitions are served (premise of the lean answer)" \
+    || no "(M) multi-root: the two definitions are not both served"
+( cd "$MR" && "$BIN" r1 r2 --no-cache --top-k=3 ) >"$TMP/mroot_map.xml" 2>/dev/null
+( cd "$MR" && eval "\"\$BIN\" ${mrNext#ripwire } --no-cache --top-k=3" ) >"$TMP/mroot_paste.xml" 2>/dev/null
+grep -q '<r ' "$TMP/mroot_paste.xml" && cmp -s "$TMP/mroot_map.xml" "$TMP/mroot_paste.xml" \
+    && ok "(M) multi-root: the pasted map_next prints the two-root map byte for byte" \
+    || no "(M) multi-root: the pasted map_next does not print the two-root map"
+# The scope tree holds a tests/ file, so --ignore-tests really changes the map the pointer must reproduce.
+SC="$TMP/sc"; mkdir -p "$SC"; cp -R "$FIX" "$SC/fix"; mkdir -p "$SC/fix/tests"
+printf 'int testOnlyHelper(void) { return dupTarget(); }\nint testOnlyCaller(void) { return testOnlyHelper(); }\n' >"$SC/fix/tests/test_dup.c"
+( cd "$SC" && "$BIN" fix --expand=dupTarget --ignore-tests '--exclude=nomatch*' --no-cache ) >"$TMP/scope.xml" 2>/dev/null
+scNext="$( attrOf map_next "$TMP/scope.xml" )"
+[ "$scNext" = "ripwire fix --exclude=&apos;nomatch*&apos; --ignore-tests" ] \
+    && ok "(M) crawl scope: map_next replays --exclude (quoted) and --ignore-tests" \
+    || no "(M) crawl scope: map_next='$scNext', want the root plus --exclude='nomatch*' --ignore-tests"
+scShell="$( printf '%s' "$scNext" | xmlUnesc )"
+( cd "$SC" && eval "\"\$BIN\" ${scShell#ripwire } --no-cache --top-k=50" ) >"$TMP/scope_paste.xml" 2>/dev/null
+( cd "$SC" && "$BIN" fix --ignore-tests '--exclude=nomatch*' --no-cache --top-k=50 ) >"$TMP/scope_map.xml" 2>/dev/null
+( cd "$SC" && "$BIN" fix --no-cache --top-k=50 ) >"$TMP/scope_wide.xml" 2>/dev/null
+cmp -s "$TMP/scope_map.xml" "$TMP/scope_wide.xml" \
+    && no "(M) crawl scope premise: --ignore-tests does not change this tree's map — the paste arm would prove nothing" \
+    || ok "(M) crawl scope premise: --ignore-tests changes this tree's map"
+grep -q '<r ' "$TMP/scope_paste.xml" && cmp -s "$TMP/scope_map.xml" "$TMP/scope_paste.xml" \
+    && ok "(M) crawl scope: the pasted map_next prints the same-scope map byte for byte" \
+    || no "(M) crawl scope: the pasted map_next does not print the same-scope map"
+"$BIN" test/expandtopk0fix --expand=dupTarget --no-cache >"$TMP/plainptr.xml" 2>/dev/null
+[ "$( attrOf map_next "$TMP/plainptr.xml" )" = "ripwire test/expandtopk0fix" ] \
+    && ok "(M) negative: with no crawl-scope flag map_next is just the root" \
+    || no "(M) negative: plain map_next='$( attrOf map_next "$TMP/plainptr.xml" )', want 'ripwire test/expandtopk0fix'"
+
+# ── (N) fix round 1: unserved_next= is shell-quoted, and past 16 cut definitions it says how many it lists ──────────
+# Each file under "sub dir/" holds a 62-line (~2.8 KB) `def work`; a 3500 B pack budget serves one. With 4 files the 3 cut ones are
+# all listed (no unserved_listed=); with 20 files the 19 cut ones exceed the 16-selector guard: unserved_listed="16", the
+# paste (default budget: 16 bodies fit) serves exactly those 16, and the same call with a larger budget serves all 20 (the
+# legend's "the rest"). Served = <b> rows in bundle mode or <src sym=> blocks in whole-file mode, whichever the call picks.
+rootOf(){ grep -oE '<ctx[^>]*>' "$1" | head -1; }
+mkwork(){ local d="$1" n="$2" i j; mkdir -p "$d/sub dir"
+    for i in $( seq -w 1 "$n" ); do
+        { echo "def work():"; for j in $( seq 1 61 ); do echo "    value_$j = 'padding to about forty-five bytes $j'"; done; } >"$d/sub dir/m$i.py"
+    done; }
+selectorsOf(){ printf '%s' "$1" | xmlUnesc | sed -e "s/^--expand=//" -e "s/^'//" -e "s/'\$//" | tr ',' '\n' | sort; }
+servedOf(){ grep -oE '<b t="[a-z]+" l="[0-9]+" p="[^"]*" n="work"' "$1" | sed -E 's/.* l="([0-9]+)" p="([^"]*)".*/\2:\1:work/' | sort; }
+servedAnyOf(){ { servedOf "$1"; grep -oE '<src p="[^"]*" sym="work:[0-9]+"' "$1" | sed -E 's/<src p="([^"]*)" sym="work:([0-9]+)"/\1:\2:work/'; } | sort -u; }   # bundle or whole-file
+SP4="$TMP/sp4"; mkwork "$SP4" 4
+( cd "$SP4" && "$BIN" . --expand=work --pack-budget-bytes=3500 --no-cache ) >"$TMP/sp4.xml" 2>/dev/null
+un4="$( attrOf unserved_next "$TMP/sp4.xml" )"
+grep -q 'unserved_total="3"' "$TMP/sp4.xml" && case "$un4" in "--expand=&apos;sub dir/"*) true ;; *) false ;; esac \
+    && ok "(N) space path: unserved_total=\"3\" and unserved_next is single-quoted for the shell" \
+    || no "(N) space path: $( grep -oE '<ctx[^>]*>' "$TMP/sp4.xml" | head -1 )"
+rootOf "$TMP/sp4.xml" | grep -q 'unserved_listed=' \
+    && no "(N) negative: unserved_listed= appeared though all 3 cut definitions are listed" \
+    || ok "(N) negative: no unserved_listed= when every cut definition is listed"
+( cd "$SP4" && eval "\"\$BIN\" . --no-cache $( printf '%s' "$un4" | xmlUnesc )" ) >"$TMP/sp4_paste.xml" 2>/dev/null
+[ "$( selectorsOf "$un4" | wc -l | tr -d ' ' )" = 3 ] && [ "$( servedAnyOf "$TMP/sp4_paste.xml" )" = "$( selectorsOf "$un4" )" ] \
+    && ok "(N) space path: the pasted unserved_next serves exactly the 3 cut definitions" \
+    || no "(N) space path: pasted unserved_next served [$( servedAnyOf "$TMP/sp4_paste.xml" | tr '\n' ' ' )], listed [$( selectorsOf "$un4" | tr '\n' ' ' )]"
+SP20="$TMP/sp20"; mkwork "$SP20" 20
+( cd "$SP20" && "$BIN" . --expand=work --pack-budget-bytes=3500 --no-cache ) >"$TMP/sp20.xml" 2>/dev/null
+tot20="$( attrOf unserved_total "$TMP/sp20.xml" )"; un20="$( attrOf unserved_next "$TMP/sp20.xml" )"
+served20="$( servedOf "$TMP/sp20.xml" | wc -l | tr -d ' ' )"
+[ -n "$tot20" ] && [ "$tot20" -gt 16 ] && [ "$(( tot20 + served20 ))" = 20 ] && rootOf "$TMP/sp20.xml" | grep -q 'unserved_listed="16"' \
+    && ok "(N) >16 cut: unserved_total=\"$tot20\" (+$served20 served = 20) and unserved_listed=\"16\"" \
+    || no "(N) >16 cut: total='$tot20' served=$served20: $( grep -oE '<ctx[^>]*>' "$TMP/sp20.xml" | head -1 | cut -c1-300 )"
+( cd "$SP20" && eval "\"\$BIN\" . --no-cache $( printf '%s' "$un20" | xmlUnesc )" ) >"$TMP/sp20_paste.xml" 2>/dev/null
+[ "$( selectorsOf "$un20" | wc -l | tr -d ' ' )" = 16 ] && [ "$( servedAnyOf "$TMP/sp20_paste.xml" )" = "$( selectorsOf "$un20" )" ] \
+    && rootOf "$TMP/sp20_paste.xml" | grep -q 'schema=' && ! rootOf "$TMP/sp20_paste.xml" | grep -q 'unserved_' \
+    && ok "(N) >16 cut: the pasted unserved_next serves exactly the 16 it lists, and nothing is cut in that answer" \
+    || no "(N) >16 cut: pasted unserved_next served $( servedAnyOf "$TMP/sp20_paste.xml" | wc -l | tr -d ' ' ): $( rootOf "$TMP/sp20_paste.xml" | cut -c1-200 )"
+( cd "$SP20" && "$BIN" . --expand=work --pack-budget-bytes=1000000 --no-cache ) >"$TMP/sp20_all.xml" 2>/dev/null   # (deprecated knob, still the one that cut)
+[ "$( servedAnyOf "$TMP/sp20_all.xml" | wc -l | tr -d ' ' )" = 20 ] && rootOf "$TMP/sp20_all.xml" | grep -q 'schema=' && ! rootOf "$TMP/sp20_all.xml" | grep -q 'unserved_' \
+    && [ -z "$( comm -23 <( servedOf "$TMP/sp20_paste.xml" ) <( servedAnyOf "$TMP/sp20_all.xml" ) )" ] \
+    && ok "(N) >16 cut: the rest are recoverable — a larger --pack-budget-bytes serves all 20, no unserved_*" \
+    || no "(N) >16 cut: the larger-budget call did not serve all 20: $( grep -oE '<ctx[^>]*>' "$TMP/sp20_all.xml" | head -1 | cut -c1-200 )"
+
+# ── (O) fix round 1 (review N1): several --outline tokens keep the ordinary map (the lean rule is for ONE token) ─────
+"$BIN" "$FIX" --outline=uniqueTarget,dupTarget --no-cache >"$TMP/ol2.xml" 2>/dev/null
+grep -q '<r ' "$TMP/ol2.xml" && ! grep -qE 'topk_default=|map_next=|unserved_' "$TMP/ol2.xml" \
+    && ok "(O) multi-token --outline keeps the ordinary map, no lean decoration" \
+    || no "(O) multi-token --outline went lean or lost its map: $( grep -oE '<ctx[^>]*>' "$TMP/ol2.xml" | head -1 )"
+
 # ── (F) well-formedness + determinism ─────────────────────────────────────────────────────────────────
 if command -v xmllint >/dev/null 2>&1; then
-    for f in uniq dup5 dup tk5 tk0 big real_default real_tk0 mdef cut ol olcut emit; do
+    for f in uniq dup5 dup tk5 tk0 big real_default real_tk0 mdef cut ol olcut emit mroot scope sp4 sp20 sp20_paste ol2; do
         if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "(F) $f.xml well-formed"; else no "(F) $f.xml fails xmllint"; fi
     done
 else

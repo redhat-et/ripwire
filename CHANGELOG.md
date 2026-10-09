@@ -21,9 +21,11 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 beside bodies that already answered the request (on this repository `--expand=subtokens`: 26,752 B, of which 19,444 B
 was map rows that never mention the symbol; `--expand=emitTo` served the whole 24,788 B file because the whole-file
 comparison priced the bundle with that map). When every requested definition is served the map now defaults to
-`top-k=0`: the root carries `topk_default="0"` and `map_next="ripwire ROOT"` (the call that prints the map, for a session
-that skipped orienting). When a byte budget cut some definitions the root names exactly those in `unserved_total=N` and
-`unserved_next="--expand=FILE:LINE:NAME,..."` instead of shipping the map. The whole-file comparison therefore prices the
+`top-k=0`: the root carries `topk_default="0"` and `map_next="ripwire ROOT..."` (the call that prints the map, for a session
+that skipped orienting: every root of the call plus its crawl-scope flags, shell-quoted). When a byte budget cut some
+definitions the root names exactly those in `unserved_total=N` (the true count) and a shell-quoted
+`unserved_next="--expand=FILE:LINE:NAME,..."` instead of shipping the map; past 16 cut definitions it serves the first 16,
+`unserved_listed="16"` says so, and a larger `--pack-budget-bytes` serves the rest. The whole-file comparison therefore prices the
 payload only. An explicit `--top-k=N` keeps the previous shape. Language-neutral: the decision reads the record of which
 requested definitions were emitted.
 

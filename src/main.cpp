@@ -1205,6 +1205,28 @@ inline std::string churnDecayWindowLabel( std::string_view minedSpan )
     return label;
 }
 
+// The crawl-scope flags a pasted continuation must replay so it indexes the SAME files this run did: --exclude,
+// --max-file-size, --no-ignore, --ignore-tests (the enumeration below says why these four and no others). Each is
+// returned with its leading space; empty at the defaults. Shared by scopedMapNextInvocation and leanMapPointer.
+inline std::string crawlScopeFlags( const rw::Config& cfg )
+{
+    std::string inv;
+    for( const std::string& x : cfg.excludes )
+    {
+        inv += " " + rw::nextFlag( "--exclude=", x );
+    }
+    // The ceiling is replayed as the BYTE COUNT it resolved to, not as the caller's "2K": parseByteSize accepts
+    // plain digits, and the number is what shaped the crawl. Omitted at the default, so the common hint is
+    // unchanged to the byte.
+    if( cfg.maxFileBytes != rw::kDefaultMaxFileBytes )
+    {
+        inv += " --max-file-size=" + std::to_string( cfg.maxFileBytes );
+    }
+    if( cfg.noIgnore )     { inv += " --no-ignore"; }
+    if( cfg.ignoreTests )  { inv += " --ignore-tests"; }
+    return inv;
+}
+
 // C1-b (2026-09-12): --in=DIR's page of <recent scope=> rows, from the SAME mining pass as the global block. The prefix is
 // matched on the ROOT-RELATIVE spelling the map prints (serialize.h pathRel: rootRelativeUri against the crawl root as
 // typed), so a scoped row is byte-identical to its global twin — a sub-root-relative spelling missed every held-out gold
@@ -1268,19 +1290,7 @@ inline std::string scopedMapNextInvocation( const rw::Config& cfg, std::string_v
     {
         inv += " " + rw::nextFlag( "--since=", cfg.since );
     }
-    for( const std::string& x : cfg.excludes )
-    {
-        inv += " " + rw::nextFlag( "--exclude=", x );
-    }
-    // The ceiling is replayed as the BYTE COUNT it resolved to, not as the caller's "2K": parseByteSize accepts
-    // plain digits, and the number is what shaped the crawl. Omitted at the default, so the common hint is
-    // unchanged to the byte.
-    if( cfg.maxFileBytes != rw::kDefaultMaxFileBytes )
-    {
-        inv += " --max-file-size=" + std::to_string( cfg.maxFileBytes );
-    }
-    if( cfg.noIgnore )     { inv += " --no-ignore"; }
-    if( cfg.ignoreTests )  { inv += " --ignore-tests"; }
+    inv += crawlScopeFlags( cfg );
     if( withIn )
     {
         inv += " " + rw::nextFlag( "--in=", scopeDir );
@@ -1531,33 +1541,35 @@ inline constexpr const char* kMapRidesAlongFmt =
 // root says so (topk_default="0", the exact-name default's own disclosure) and carries ONE recoverable pointer to the map
 // it did not ship (map_next=, a shell line: the map is the default verb of `ripwire ROOT`). The bodies' headers already
 // carry p= l= t= for every definition. When some were NOT served (cut by the byte budget, unreadable), the root names
-// exactly those — unserved_total= and unserved_next= (the --expand/--outline call serving them) — never the generic map.
-// Language-neutral: the decision reads the served-id record, not any language's syntax. An EXPLICIT --top-k keeps today's
-// shape. kMaxUnservedSelectors is a blow-up guard (the kMaxExpandSibs precedent), not a target: unserved_total= is the true count.
+// exactly those — unserved_total= (the true count) and unserved_next= (the --expand/--outline call serving them, quoted by
+// the next= house rule) — never the generic map. kMaxUnservedSelectors is a blow-up guard (the kMaxExpandSibs precedent),
+// not a target: past it unserved_next= serves the FIRST kMaxUnservedSelectors and unserved_listed= says how many it lists;
+// the rest are recovered by the same call with a larger --pack-budget-bytes (the legend says so). Language-neutral: the
+// decision reads the served-id record, not any language's syntax. An EXPLICIT --top-k keeps today's shape.
 inline constexpr std::size_t kMaxUnservedSelectors = 16;
 
-inline std::string leanMapPointer( std::string_view rootArg )
+// `ripwire ROOT…`: EVERY root this call crawled (a multi-root call's map is the map of all of them — an empty mapRootArg
+// there used to fall back to ".", the parent tree), each quoted by the next= house rule, plus the crawl-scope flags that
+// decided which files were indexed, so the pasted call maps the same corpus. Presentation and payload flags stay out.
+inline std::string leanMapPointer( const rw::Config& cfg )
 {
-    std::string root( rootArg.empty() ? std::string_view( "." ) : rootArg );
-    const bool  plain = std::all_of( root.begin(), root.end(), []( char c )
-    { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '.' || c == '/' || c == '_' || c == '-' || c == '+' || c == '@' || c == '~' || c == ':' || c == ','; } );
-    if( !plain )
+    std::string inv = "ripwire";
+    for( const std::string_view root : cfg.roots )
     {
-        std::string q = "'";
-        for( char c : root )
-        {
-            q += c == '\'' ? std::string( "'\\''" ) : std::string( 1, c );
-        }
-        root = q + "'";
+        inv += " " + rw::nextFlag( "", root );
     }
-    return "ripwire " + root;
+    if( cfg.roots.empty() )
+    {
+        inv += " .";
+    }
+    return inv + crawlScopeFlags( cfg );
 }
 
 struct UnservedDefs
 {
     std::size_t requested = 0;   // valid, non-module-scope requests
     std::size_t unserved  = 0;   // of those, the ones with no body/outline in the answer
-    std::string attrs;           // ` unserved_total="N" unserved_next="--expand=P:L:N,…"` — empty when unserved == 0
+    std::string attrs;           // ` unserved_total="N" [unserved_listed="K"] unserved_next="--expand=P:L:N,…"` — empty when unserved == 0
 };
 
 inline UnservedDefs unservedDefsOf( const rw::IngestResult& ing, const std::vector<rw::NodeId>& requested, std::vector<rw::NodeId> served,
@@ -1592,7 +1604,10 @@ inline UnservedDefs unservedDefsOf( const rw::IngestResult& ing, const std::vect
     }
     if( u.unserved > 0 )
     {
-        u.attrs = " unserved_total=\"" + std::to_string( u.unserved ) + "\"" + rw::nextAttrXml( std::string( verbFlag ) + "=" + selectors, "unserved_next" );
+        // unserved_listed= only when the guard cut the list: unserved_next= then serves the first `listed`, not all of them.
+        u.attrs = " unserved_total=\"" + std::to_string( u.unserved ) + "\""
+            + ( listed < u.unserved ? " unserved_listed=\"" + std::to_string( listed ) + "\"" : std::string() )
+            + rw::nextAttrXml( rw::nextFlag( std::string( verbFlag ) + "=", selectors ), "unserved_next" );
     }
     return u;
 }
@@ -2444,7 +2459,7 @@ int runDefaultMap( const MainDispatch& d )
         if( un.requested > 0 )
         {
             mapTopK      = 0;
-            ctxLeanAttr  = " topk_default=\"0\"" + nextAttrXml( leanMapPointer( mapRootArg ), "map_next" );
+            ctxLeanAttr  = " topk_default=\"0\"" + nextAttrXml( leanMapPointer( cfg ), "map_next" );
             ctxUnservedAttr = un.attrs;
         }
     }

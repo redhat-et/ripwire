@@ -175,7 +175,8 @@ When you need to understand a specific function/class/concept in full (its body,
    everything it calls — read the body with the callee signatures beside it. No ranked map rides along (orient
    ONCE per session with `ripwire <dir>`, then look symbols up lean); a bare name with several definitions
    serves them all, still map-free — `map_next=` on the root is the call that prints the map if you skipped
-   orienting, and `unserved_next=` names the definitions a byte budget cut. (No `<doc>` block
+   orienting, and `unserved_next=` is the call serving the definitions a byte budget cut (the first `unserved_listed=` of
+   them when that attribute is present; `unserved_total=` is the true count). (No `<doc>` block
    here; SYM's own doc-comment is in the CDATA body if it sits inside the definition — otherwise read the
    source lines just above `l=`.)
    About to Edit what you just expanded? If your edit tool needs a fresh native Read of the file first
