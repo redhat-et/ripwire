@@ -8104,7 +8104,8 @@ inline ForSectionStubPlan planForSectionStubs( std::string_view sections, std::s
     }
     p.legoWillStub    = legoCandidate && p.lego.collapse;
     p.composeWillStub = composeCandidate && p.compose.collapse;
-    ENSURES( p.servedBytes( legoIn, composeIn ) <= legoIn.renderedBytes + composeIn.renderedBytes,
+    const std::size_t served = p.servedBytes( legoIn, composeIn );
+    ENSURES( served <= legoIn.renderedBytes + composeIn.renderedBytes,
              "planForSectionStubs: a collapse made the two sections bigger than their measured renders" );
     return p;
 }
