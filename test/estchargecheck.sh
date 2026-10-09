@@ -657,6 +657,145 @@ done
     && ok "#11 A7 sweep control: $a7s_inside_labelled budget(s) carry a root over_ceiling=\"1\" INSIDE the allowance — the sweep crosses the late-label band" \
     || no "#11 A7 sweep control: no budget carried over_ceiling=\"1\" inside the allowance — the sweep no longer reaches the est_tokens > N band, re-anchor its ranges"
 
+# ── #11 A7R (lego-charge fix round 4): THE TRAILING-SECTION RESERVE. Under --token-budget, --with-graph's block and the
+# first --detail body were charged only AFTER <sigs> had claimed the whole sig-side ceiling, so both rode past the
+# budget, and the ladder's last rung then blamed the HEADER floor ("no payload left to trim") while <sigs> was the
+# trimmable payload. MEASURED on the parent binary over this arm's corpus: --detail=20 --with-graph at 2000 tokens =
+# 6054 B vs a 5428 B allowance; --detail=3 served its first body as a one-line over_ceiling stub at every budget.
+# runForLens now reserves the graph bytes and a MEASURED first-body floor out of the sig claim
+# (forSigClaimWithTrailingReserve / forDetailFirstBodyFloor). The corpus is git-less, run from a relative path, every
+# body is longer than a quarter of the smallest budget's bundle (so the floor's head-cut + next= path runs), and its
+# 40 signature rows overflow the default sig share (so <sigs> is capped="1" in every regime below — the negatives
+# compare a CUT section, not a whole one).
+A7R="$TMP/a7reserve"
+mkdir -p "$A7R/corpus"
+python3 - "$A7R/corpus" <<'PYG'
+import os, sys
+out = sys.argv[1]
+for i in range( 6 ):
+    lines = []
+    for j in range( 12 ):
+        nxt = f"serializeRow{i}_{j + 1}( map, row )" if j + 1 < 12 else "0"
+        body = [ f"    int acc = map + row + {i * 7 + j};" ] + [ f"    acc += flushMapRow( map, row, {k} ) * {i + 1};" for k in range( 30 + j ) ]
+        lines += [ f"// serializeRow{i}_{j}: serialize one map row into the output buffer the map writer flushes, keeping the row order stable",
+                   f"int serializeRow{i}_{j}( int map, int row, int column, int stride, int width, int height, int depth, int offset, int flags, int mode )",
+                   "{" ] + body + [ f"    return acc + {nxt};", "}", "" ]
+    with open( os.path.join( out, f"mod{i}.cpp" ), "w" ) as fh:
+        fh.write( "\n".join( lines ) )
+PYG
+A7R_Q="serialize the map row"
+a7r_out(){ ( cd "$A7R" && "$BIN" corpus --for="$A7R_Q" "$@" --no-cache ) 2>/dev/null; }
+a7r_sigs(){ python3 -c 'import re,sys; m=re.search(r"<sigs\b.*?</sigs>",open(sys.argv[1]).read(),re.S); print(m.group(0) if m else "")' "$1"; }
+# A7R-1 (positive): every budget, three shapes — exit 0, inside the allowance, NO over_ceiling on the root (est_tokens fits
+# budget_tokens), no ladder last rung, <sigs> present, and with --detail a first <b> that is not the one-line over_ceiling
+# stub; a first body the floor cut carries the next= that serves the rest (rule 5: every cut recoverable).
+a7r_bad=""; a7r_runs=0
+for spec in "graph:--with-graph" "detail:--detail=3"; do
+    r_label="${spec%%:*}"; r_args="${spec#*:}"
+    for N in 1500 2000 2500 3000; do
+        # shellcheck disable=SC2086
+        a7r_out --token-budget=$N $r_args >"$A7R/o.xml"
+        r_rc=$?
+        a7r_runs=$(( a7r_runs + 1 ))
+        r_b="$( bytes_of "$A7R/o.xml" )"
+        r_a="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
+        r_root="$( grep -aoE '^<ctx [^>]*>' "$A7R/o.xml" | head -1 )"
+        r_why=""
+        [ "$r_rc" -eq 0 ] || r_why="exit $r_rc"
+        [ -n "$r_root" ] && grep -aq '<sigs ' "$A7R/o.xml" || r_why="$r_why no-root-or-sigs"
+        [ -n "$r_b" ] && [ "$r_b" -le "$r_a" ] 2>/dev/null || r_why="$r_why ${r_b:-?}B>${r_a}B"
+        [ "${r_root#* over_ceiling=\"1\"}" = "$r_root" ] || r_why="$r_why over_ceiling"
+        ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7R/o.xml" || r_why="$r_why last-rung"
+        if [ "${r_args#*--detail}" != "$r_args" ]; then
+            r_b1="$( grep -aoE '<b [^>]*>' "$A7R/o.xml" | head -1 )"
+            [ -n "$r_b1" ] || r_why="$r_why no-first-body"
+            [ "${r_b1#* over_ceiling=}" = "$r_b1" ] || r_why="$r_why first-body-stub"
+            { [ "${r_b1#* truncated=\"1\"}" = "$r_b1" ] || [ "${r_b1#* next=\"--expand=}" != "$r_b1" ]; } || r_why="$r_why cut-without-next"
+        fi
+        [ -z "$r_why" ] || a7r_bad="$a7r_bad $r_label@$N:[${r_why# }]"
+    done
+done
+[ "$a7r_runs" -eq 8 ] && [ -z "$a7r_bad" ] \
+    && ok "#11 A7R reserve: 8 budgeted runs (--with-graph / --detail=3 at 1500..3000) — inside N x 2.36 x 1.15, no over_ceiling, no last rung, first body served (cut ones carry next=)" \
+    || no "#11 A7R reserve: <sigs> spent the bytes of the graph block / first --detail body —$a7r_bad"
+# A7R-K (the PRE-REGISTERED KILL, reports/lego-charge.md fix round 4): with BOTH --detail and --with-graph the reserve is
+# off — reserving both cut a gold-relevant owner row out of <sigs> on the measured question set. So that shape's ranked
+# rows keep their claim: never FEWER <sigs> rows than the same budget's --with-graph run (which reserves the graph alone),
+# a delivery past the allowance is disclosed (root over_ceiling="1"), and the first body still gets its floor — not the
+# one-line over_ceiling stub, and a head-cut carries next=.
+a7k_bad=""
+for N in 2000 2500 3000; do
+    a7r_out --token-budget=$N --detail=20 --with-graph >"$A7R/k.xml"; k_rc=$?
+    a7r_out --token-budget=$N --with-graph >"$A7R/kg.xml"
+    k_rows="$( grep -aoE '<d [^>]*>' "$A7R/k.xml" | wc -l | tr -d ' ' )"; g_rows="$( grep -aoE '<d [^>]*>' "$A7R/kg.xml" | wc -l | tr -d ' ' )"
+    k_b="$( bytes_of "$A7R/k.xml" )"; k_a="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
+    k_root="$( grep -aoE '^<ctx [^>]*>' "$A7R/k.xml" | head -1 )"
+    k_b1="$( grep -aoE '<b [^>]*>' "$A7R/k.xml" | head -1 )"
+    k_why=""
+    [ "$k_rc" -eq 0 ] && [ -n "$k_root" ] || k_why="exit $k_rc / no root"
+    [ "${k_rows:-0}" -ge 1 ] && [ "${k_rows:-0}" -ge "${g_rows:-0}" ] 2>/dev/null || k_why="$k_why rows ${k_rows:-?}<graph-only ${g_rows:-?}"
+    { [ -n "$k_b" ] && [ "$k_b" -le "$k_a" ]; } 2>/dev/null || [ "${k_root#* over_ceiling=\"1\"}" != "$k_root" ] || k_why="$k_why ${k_b:-?}B>${k_a}B-unlabelled"
+    [ -n "$k_b1" ] && [ "${k_b1#* over_ceiling=}" = "$k_b1" ] || k_why="$k_why first-body-stub"
+    { [ "${k_b1#* truncated=\"1\"}" = "$k_b1" ] || [ "${k_b1#* next=\"--expand=}" != "$k_b1" ]; } || k_why="$k_why cut-without-next"
+    [ -z "$k_why" ] || a7k_bad="$a7k_bad @$N:[${k_why# }]"
+done
+[ -z "$a7k_bad" ] \
+    && ok "#11 A7R kill: --detail=20 --with-graph at 2000..3000 keeps at least the --with-graph run's <sigs> rows, labels any overshoot over_ceiling, serves the first body at its floor" \
+    || no "#11 A7R kill: the both-sections shape —$a7k_bad"
+# A7R-2 (the floor's cut is the one the floor priced): at 1500 tokens the first body is longer than the floor, so it ships
+# head-cut — truncated="1" with lines= and next= — never dropped and never the bare one-line stub.
+a7r_out --token-budget=1500 --detail=3 >"$A7R/f.xml"
+r_b1="$( grep -aoE '<b [^>]*>' "$A7R/f.xml" | head -1 )"
+r_hi="$( printf '%s' "$r_b1" | sed -nE 's/.* lines="1-([0-9]+)\/[0-9]+".*/\1/p' )"
+{ [ "${r_b1#* truncated=\"1\"}" != "$r_b1" ] && [ "${r_b1#* over_ceiling=}" = "$r_b1" ] && [ "${r_hi:-0}" -ge 2 ] 2>/dev/null \
+  && [ "${r_b1#* next=\"--expand=}" != "$r_b1" ]; } \
+    && ok "#11 A7R floor: the first --detail body at 1500 tokens is head-cut at the floor with lines= and next= ($r_b1)" \
+    || no "#11 A7R floor: the first --detail body at 1500 tokens is not the floor's head-cut of >= 2 lines (got '${r_b1:-none}')"
+# A7R-N1 (near-miss negative, NO explicit ceiling): the reserve must not exist — <sigs> is byte-identical with and
+# without --with-graph (the default regime's graph rides on top, as before).
+a7r_out >"$A7R/n0.xml"; a7r_out --with-graph >"$A7R/n1.xml"
+n0="$( a7r_sigs "$A7R/n0.xml" )"; n1="$( a7r_sigs "$A7R/n1.xml" )"
+{ [ -n "$n0" ] && [ "$n0" = "$n1" ] && [ "${n0#*capped=\"1\"}" != "$n0" ]; } \
+    && ok "#11 A7R no ceiling: <sigs> (capped=1) byte-identical with and without --with-graph — nothing reserved without --token-budget" \
+    || no "#11 A7R no ceiling: <sigs> differs with --with-graph and no --token-budget (or the arm's <sigs> is not cut) — the reserve leaked into the default regime"
+# A7R-N2 (near-miss negative, a WIDE explicit ceiling in the auto bundle): the sig side is already frozen at the default
+# share (forSigSideCeiling) and the bundle holds that share AND the graph, so the reserve does not bind — <sigs>
+# byte-identical with and without --with-graph at 8000 tokens (forbudgetmonotoncheck's invariant, seen from this side).
+a7r_out --token-budget=8000 >"$A7R/w0.xml"; a7r_out --token-budget=8000 --with-graph >"$A7R/w1.xml"
+w0="$( a7r_sigs "$A7R/w0.xml" )"; w1="$( a7r_sigs "$A7R/w1.xml" )"
+{ [ -n "$w0" ] && [ "$w0" = "$w1" ] && [ "${w0#*capped=\"1\"}" != "$w0" ]; } \
+    && ok "#11 A7R wide ceiling: <sigs> (capped=1) byte-identical with and without --with-graph at --token-budget=8000 — the reserve binds only when the bundle cannot hold both" \
+    || no "#11 A7R wide ceiling: <sigs> differs with --with-graph at --token-budget=8000 (or is not cut) — the reserve shrank a sig share that had room"
+
+# ── #11 A7D (fix round 4, review rv-wrap-recipe-k29 F1; rule 5 — never a silent cut): under --token-budget the compact
+# <hops> section is no longer DROPPED with no element when the ceiling is spent. The arm corpus is on the conceptual route.
+# A7D-1: at 2000 tokens the section is the counted marker — shown="0" total=N capped="1" and next= the same question with
+# no budget — its legend clause rides the header, the answer stays inside its budget (the disclosure's bytes are
+# reserved), and the next= RECOVERS the rows: that call's <hops> serves at least one row of the same total.
+a7r_out --token-budget=2000 >"$A7R/h.xml"
+h_tag="$( grep -aoE '<hops [^>]*>' "$A7R/h.xml" | head -1 )"
+h_root="$( grep -aoE '^<ctx [^>]*>' "$A7R/h.xml" | head -1 )"
+h_tot="$( printf '%s' "$h_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
+a7r_out >"$A7R/hd.xml"
+hd_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hd.xml" | head -1 )"
+hd_shown="$( printf '%s' "$hd_tag" | sed -nE 's/<hops shown="([0-9]+)".*/\1/p' )"; hd_tot="$( printf '%s' "$hd_tag" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
+{ [ "$h_tag" = "<hops shown=\"0\" total=\"$h_tot\" capped=\"1\" next=\"--for=&apos;$A7R_Q&apos;\"/>" ] && [ "${h_tot:-0}" -ge 1 ] 2>/dev/null \
+  && grep -aqF 'hops shown=0 capped=1: the call-hop rows' "$A7R/h.xml" && [ "${h_root#* over_ceiling=}" = "$h_root" ] \
+  && [ "${hd_shown:-0}" -ge 1 ] 2>/dev/null && [ "$hd_tot" = "$h_tot" ]; } \
+    && ok "#11 A7D hops: the spent-ceiling <hops> is the counted marker ($h_tag), defined, inside budget; its next= serves $hd_shown of $hd_tot rows" \
+    || no "#11 A7D hops: spent-ceiling <hops> not the counted, continued marker (got '${h_tag:-none}', next= answer '${hd_tag:-none}', root '${h_root:0:80}…')"
+# A7D-2: a PARTIAL hops cut under the budget carries the same next= (5000 tokens: some rows fit, not all).
+a7r_out --token-budget=5000 >"$A7R/hp.xml"
+hp_tag="$( grep -aoE '<hops [^>]*>' "$A7R/hp.xml" | head -1 )"
+{ [ "${hp_tag#*shown=\"0\"}" = "$hp_tag" ] && [ "${hp_tag#* capped=\"1\"}" != "$hp_tag" ] && [ "${hp_tag#* next=\"--for=&apos;$A7R_Q&apos;\"}" != "$hp_tag" ]; } \
+    && ok "#11 A7D partial hops cut at 5000 tokens carries next= ($hp_tag)" \
+    || no "#11 A7D partial hops cut at 5000 tokens: no next= on a cut <hops> with rows (got '${hp_tag:-none}')"
+# A7D-N (near-miss negative): WITHOUT --token-budget the default regime is unchanged — its cut <hops> (capped="1") gets no
+# next= from this change (a named deferral: adding it there moves every default --for answer).
+{ [ "${hd_tag#* capped=\"1\"}" != "$hd_tag" ] && [ "${hd_tag#* next=}" = "$hd_tag" ]; } \
+    && ok "#11 A7D no budget: the default regime's cut <hops> is byte-unchanged (capped=1, no next= added): $hd_tag" \
+    || no "#11 A7D no budget: the default <hops> changed or is not cut (got '${hd_tag:-none}') — the disclosure leaked into the default regime"
+
 # A9/A10 — the header's own spliced attributes are inside the number. IDENTITY, not a band: for a bundle with
 # no --detail bodies, est_tokens is markup-only, so it must equal round(delivered bytes / 2.50) EXACTLY
 # (kBytesPerTokenDefault). Pre-fix the est_tokens attribute (~19 B) and weak="1" (9 B) sat outside the sum,
