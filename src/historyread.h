@@ -20,7 +20,7 @@
 // The comment names which cause this run hit. A verb that runs no history walk (a plain map, --callers) never carries it.
 //
 // NOT COVERED (pre-existing, deferred): the other git walks — --cochange and the MCP cochange tool, --rank-by=churn and
-// --owners — still read a failed walk as an empty one (CHANGELOG, Known issues).
+// --owners — do not yet tell a failed walk from an empty one (CHANGELOG, the K51 entry).
 //
 // ONE RENDERER (the prconverge.h rule): the forms differ only in the syntax of their host, never in what they say, so a
 // new host adds a DiscloseAs case here, never a sibling function. XmlAttrs and the comment form (LegendComment) go on every

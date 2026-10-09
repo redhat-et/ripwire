@@ -35,8 +35,9 @@ names the cause. It means `churn=` and the co-change half of `amp=` count only t
 floors: when git did not run, `churn=` is absent and `amp=` counts callers only; when git stopped part-way, they count the
 newest part of the window it read. It does not mean the other numbers are affected, and a walk that read an empty window (a
 repository with no commit) stays silent; a HEAD that is corrupt rather than unborn still reads as that empty window. Not yet
-covered: `--cochange` (and the MCP `cochange` tool), `--rank-by=churn` and `--owners` run their own git walks and still read a
-failed one as empty (`commits="0"`, "found no commits", no `<owners>`).
+covered: `--cochange` (and the MCP `cochange` tool), `--rank-by=churn` and `--owners` run their own git walks and do not yet tell a
+failed one from an empty one (`commits="0" partners="0"`; "found no commits in its window"; exit 1 with "git unavailable /
+no history").
 
 ### Fixed — a non-ASCII `--help-task` prompt no longer trips the sanitizer build
 
