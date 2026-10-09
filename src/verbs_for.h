@@ -3890,6 +3890,16 @@ std::optional<int> runForLens( const MainDispatch& d )
             " [task_echo: dropped (ceiling)]", " [task_echo + route_attr: dropped (ceiling)]",
             " [over_ceiling= is 1 on the root: the header floor (verbatim task echo + fixed legend) exceeds this budget"
             " - no payload left to trim]" };
+        // fix round 5 (owner ruling 2026-10-09, option B; reports/lego-charge.md): the both-trailing-sections shape under an
+        // explicit ceiling KEEPS its ranked rows (reserveTrailing above is off) and goes over the budget on purpose — answers
+        // first, a budget never silently removes an answer. There the header floor is NOT what overshoots (measured: a ~1.8 KB
+        // header under a 5.4 KB allowance), so blaming it was false. This note names what really rides past the budget. It
+        // is chosen only when the header as built fits the allowance by itself; a header floor that alone exceeds it keeps
+        // the note above, which is then true.
+        static constexpr rw::CeilingLadderNotes kNotesKeptRows{
+            kNotes.echoDropped, kNotes.echoAndRouteDropped,
+            " [over_ceiling= is 1 on the root: the ranked rows are kept, not cut for the trailing sections, and with the"
+            " --with-graph block and the first --detail body at its floor they exceed this budget - kept, not trimmed]" };
 
         // PR #135: the priced root this header will carry — every late splice and the est_tokens fixpoint, in
         // finishForLensHeader (above runForLens, with each splice's rationale). Assembled BEFORE the ladder so the
@@ -4041,8 +4051,11 @@ std::optional<int> runForLens( const MainDispatch& d )
             }
             // M3: the ladder hands back the rung it took. That value — never a search of the emitted text — is
             // what puts over_ceiling="1" on the root below.
+            // fix round 5: the last rung's reason must be TRUE — the header floor only when the header alone overruns
+            const bool keptTrailingOverrun = explicitForCeiling && !reserveTrailing && headerStr.size() + 6 <= ladderCeiling;
             rw::CeilingLadderChoice chosen = rw::climbCeilingLadderBy( buildForHeader, headerStr, fitsExactCeiling, fitsCeiling,
-                                                                       /*hasRouteAttr=*/!routeNoteRaw.empty(), kNotes );
+                                                                       /*hasRouteAttr=*/!routeNoteRaw.empty(),
+                                                                       keptTrailingOverrun ? kNotesKeptRows : kNotes );
             headerStr                = std::move( chosen.header );
             rootFinish.lastRungFired = ( chosen.rung == rw::CeilingRung::OverCeiling );
         }

@@ -23,6 +23,14 @@
 # gate — that band is the recurrence guard, and it is the reason this file asserts a band and never a
 # bit-exact token count (house rule: float/estimate assertions get a tolerance, never bit-equality).
 #
+# BY-DESIGN BREAK (rule 4; owner ruling 2026-10-09, option B; reports/lego-charge.md fix round 5): #11 A7's old bar
+# "--token-budget=2000 --detail=20 --with-graph on src stays inside N x 2.36 x 1.15" no longer holds for that ONE shape.
+# With BOTH trailing sections under an explicit ceiling the answer KEEPS its ranked rows (a gold owner row, textual-12
+# Reactive._set, was cut when the two sections were reserved out of <sigs>) and goes over the budget, labelled
+# over_ceiling="1" with a TRUE reason and a next= on every cut: answers first, a budget never silently removes an
+# answer. The old assertion is kept as A7 twin wherever it must still hold (each flag alone at 2000, and both flags at
+# a budget the rows fit); A7B asserts the new contract for both-flags-over-budget.
+#
 # Usage:  bash test/estchargecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/estchargecheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
@@ -580,14 +588,61 @@ done
 # A7 — and --token-budget must SHAPE the bodies, not just the signatures. D10: --for trims to fit, exit 0.
 # The pre-fix binary streamed 68 035 B here against a 4 248 B ceiling; the bar is the stated ceiling plus the
 # documented single-entry overshoot tolerance (serialize.h kCeilingFirstEntryTolerance = 1.15).
+# BY-DESIGN BREAK (owner ruling 2026-10-09, option B — see this file's header): the old arm ran ONLY the both-flags shape
+# at 2000, which now keeps its rows and goes over on purpose. A7 TWIN keeps the old assertion, unchanged in substance
+# (exit 0, delivered <= the allowance), on every shape where it must still hold: each trailing flag alone at 2000, and
+# both flags at 5000 where the ranked rows fit (measured at fix round 5: 4727 / 4769 / 12337 B vs 5428 / 5428 / 13570 B).
 TBF=2000
 ALLOW="$( awk "BEGIN{printf \"%d\", $TBF*2.36*1.15}" )"
+for tw in "2000:--detail=20" "2000:--with-graph" "5000:--detail=20 --with-graph"; do
+    tw_n="${tw%%:*}"; tw_args="${tw#*:}"
+    tw_allow="$( awk "BEGIN{printf \"%d\", $tw_n*2.36*1.15}" )"
+    # shellcheck disable=SC2086
+    "$BIN" src --for="$FOR_TASK" --token-budget=$tw_n $tw_args --no-cache >"$TMP/f_tw.out" 2>/dev/null
+    rc_tw=$?
+    tw_b="$( bytes_of "$TMP/f_tw.out" )"
+    { [ "$rc_tw" -eq 0 ] && [ -n "$tw_b" ] && [ "$tw_b" -le "$tw_allow" ]; } 2>/dev/null \
+        && ok "#11 A7 twin --for --token-budget=$tw_n $tw_args: $tw_b B within the $tw_allow B allowance (exit 0, SHAPED)" \
+        || no "#11 A7 twin --for --token-budget=$tw_n $tw_args: ${tw_b:-?} B vs the $tw_allow B allowance, exit $rc_tw — the budget does not bound the appended sections"
+done
+# A7B — THE NEW CONTRACT for both flags OVER the budget (owner ruling, option B). Same query, same 2000 tokens. It must:
+#   (premise) deliver past the allowance at exit 0 — else the shape now fits and this arm must be re-anchored, not passed;
+#   (rows)    keep every <sigs> row the same budget shows WITHOUT the trailing flags, and those rows are the uncapped
+#             answer's top rows in its order (no higher-ranked row of the uncapped answer is missing) — the trailing
+#             sections never remove an answer row;
+#   (label)   carry over_ceiling="1" on the root;
+#   (reason)  name the reason TRUTHFULLY: the last-rung note is the kept-rows one, not "the header floor ... exceeds",
+#             and what it names is there — the header alone fits the allowance, and <sigs> rows, the graph block and a
+#             first --detail body are all present;
+#   (next)    a cut first body carries a next= that recovers exactly the lines it cut (checked on A7R's corpus below,
+#             whose first body is longer than the floor; here a first body served whole carries no truncated=).
+KEPT_NOTE='[over_ceiling= is 1 on the root: the ranked rows are kept, not cut for the trailing sections'
+FLOOR_NOTE='[over_ceiling= is 1 on the root: the header floor'
+rows_of(){ grep -aoE '<d [^>]*>' "$1" | sed -nE 's/.* n="([^"]*)".*/\1/p'; }
 "$BIN" src --for="$FOR_TASK" --token-budget=$TBF --detail=20 --with-graph --no-cache >"$TMP/f_tb.out" 2>"$TMP/f_tb.err"
 rc_ftb=$?
+"$BIN" src --for="$FOR_TASK" --token-budget=$TBF --no-cache >"$TMP/f_tbp.out" 2>/dev/null
 FTB="$( bytes_of "$TMP/f_tb.out" )"
-{ [ "$rc_ftb" -eq 0 ] && [ "$FTB" -le "$ALLOW" ]; } 2>/dev/null \
-    && ok "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B within the $ALLOW B allowance (exit 0, SHAPED)" \
-    || no "#11 A7 --for --token-budget=$TBF --detail=20 --with-graph: $FTB B vs the $ALLOW B allowance, exit $rc_ftb — the budget does not bound the appended sections"
+a7b_root="$( grep -aoE '^<ctx [^>]*>' "$TMP/f_tb.out" | head -1 )"
+a7b_hdr="$( python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); print(d.find(b"<sigs"))' "$TMP/f_tb.out" )"
+rows_of "$TMP/f_tb.out" >"$TMP/a7b.rows"; rows_of "$TMP/f_tbp.out" >"$TMP/a7b.plain"; rows_of "$TMP/f_for.out" >"$TMP/a7b.unc"
+a7b_n="$( wc -l < "$TMP/a7b.rows" | tr -d ' ' )"; a7b_pn="$( wc -l < "$TMP/a7b.plain" | tr -d ' ' )"
+a7b_why=""
+{ [ "$rc_ftb" -eq 0 ] && [ -n "$a7b_root" ] && [ -n "$FTB" ] && [ "$FTB" -gt "$ALLOW" ]; } 2>/dev/null \
+    || a7b_why="$a7b_why premise:${FTB:-?}B<=${ALLOW}B-or-exit-$rc_ftb(re-anchor)"
+{ [ "$a7b_pn" -ge 1 ] && [ "$a7b_n" -ge "$a7b_pn" ] && [ -z "$( grep -vxF -f "$TMP/a7b.rows" "$TMP/a7b.plain" )" ] \
+  && [ "$( head -n "$a7b_n" "$TMP/a7b.unc" )" = "$( cat "$TMP/a7b.rows" )" ]; } 2>/dev/null \
+    || a7b_why="$a7b_why rows:$a7b_n-vs-plain-$a7b_pn-or-not-the-uncapped-prefix"
+[ "${a7b_root#* over_ceiling=\"1\"}" != "$a7b_root" ] || a7b_why="$a7b_why no-over_ceiling"
+{ grep -aqF "$KEPT_NOTE" "$TMP/f_tb.out" && ! grep -aqF "$FLOOR_NOTE" "$TMP/f_tb.out" && [ "${a7b_hdr:--1}" -gt 0 ] && [ "$a7b_hdr" -le "$ALLOW" ] \
+  && grep -aq '<graph ' "$TMP/f_tb.out" && grep -aqE '<bodies [^>]*><b ' "$TMP/f_tb.out" && [ "$a7b_n" -ge 1 ]; } 2>/dev/null \
+    || a7b_why="$a7b_why reason:not-the-kept-rows-note-or-untrue(header ${a7b_hdr:-?}B)"
+a7b_b1="$( grep -aoE '<b [^>]*>' "$TMP/f_tb.out" | head -1 )"
+{ [ -n "$a7b_b1" ] && { [ "${a7b_b1#* truncated=\"1\"}" = "$a7b_b1" ] || [ "${a7b_b1#* next=\"--expand=}" != "$a7b_b1" ]; }; } \
+    || a7b_why="$a7b_why first-body-cut-without-next"
+[ -z "$a7b_why" ] \
+    && ok "#11 A7B (by-design, owner option B) --token-budget=$TBF --detail=20 --with-graph: $FTB B past the $ALLOW B allowance, over_ceiling=\"1\", keeps all $a7b_pn rows of the flagless budget answer ($a7b_n rows, the uncapped answer's top), reason names the kept rows (header ${a7b_hdr} B fits alone)" \
+    || no "#11 A7B (by-design, owner option B) --token-budget=$TBF --detail=20 --with-graph —$a7b_why"
 # and without an explicit --token-budget the bodies keep their own budget: the bundle must NOT have shrunk
 { [ "$( bytes_of "$TMP/f_for_detail.out" )" -gt "$ALLOW" ]; } 2>/dev/null \
     && ok "#11 A7 no --token-budget: --detail keeps its --pack-budget-bytes budget (unbudgeted bundle unshrunk)" \
@@ -640,7 +695,15 @@ for spec in "default:760:1500:" "detail_graph:2880:3080:--detail=20 --with-graph
         s_b="$( bytes_of "$A7S/o.xml" )"
         s_a="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
         s_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/o.xml" | head -1 )"
-        if [ "$s_rc" -ne 0 ] || { [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml"; }; then
+        # fix round 5: the last rung now names one of two reasons, each only where it is true — the header floor, or (both
+        # trailing sections under the ceiling) the kept rows. Either is the disclosure; the kept-rows one must also be TRUE
+        # here: only on the both-flags shape, and with the header alone inside the allowance.
+        s_hdr="$( python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); print(d.find(b"<sigs"))' "$A7S/o.xml" )"
+        s_kept=0; grep -aqF '[over_ceiling= is 1 on the root: the ranked rows are kept' "$A7S/o.xml" && s_kept=1
+        if [ "$s_kept" -eq 1 ] && { [ -z "$s_args" ] || [ "${s_hdr:--1}" -gt "$s_a" ]; }; then
+            a7s_badn=$(( a7s_badn + 1 ))
+            [ "$a7s_badn" -le 6 ] && a7s_bad="$a7s_bad $s_label@$N=kept-rows-note-untrue(header ${s_hdr}B)"
+        elif [ "$s_rc" -ne 0 ] || { [ "$s_b" -gt "$s_a" ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/o.xml" && [ "$s_kept" -eq 0 ]; }; then
             a7s_badn=$(( a7s_badn + 1 ))
             [ "$a7s_badn" -le 6 ] && a7s_bad="$a7s_bad $s_label@$N=${s_b}/${s_a}B(exit $s_rc)"
         elif [ "$s_b" -le "$s_a" ] && [ "${s_root#* over_ceiling=\"1\"}" != "$s_root" ]; then
@@ -705,7 +768,7 @@ for spec in "graph:--with-graph" "detail:--detail=3"; do
         [ -n "$r_root" ] && grep -aq '<sigs ' "$A7R/o.xml" || r_why="$r_why no-root-or-sigs"
         [ -n "$r_b" ] && [ "$r_b" -le "$r_a" ] 2>/dev/null || r_why="$r_why ${r_b:-?}B>${r_a}B"
         [ "${r_root#* over_ceiling=\"1\"}" = "$r_root" ] || r_why="$r_why over_ceiling"
-        ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7R/o.xml" || r_why="$r_why last-rung"
+        ! grep -aqF '[over_ceiling= is 1 on the root: ' "$A7R/o.xml" || r_why="$r_why last-rung"   # either reason (fix round 5)
         if [ "${r_args#*--detail}" != "$r_args" ]; then
             r_b1="$( grep -aoE '<b [^>]*>' "$A7R/o.xml" | head -1 )"
             [ -n "$r_b1" ] || r_why="$r_why no-first-body"
@@ -742,6 +805,47 @@ done
 [ -z "$a7k_bad" ] \
     && ok "#11 A7R kill: --detail=20 --with-graph at 2000..3000 keeps at least the --with-graph run's <sigs> rows, labels any overshoot over_ceiling, serves the first body at its floor" \
     || no "#11 A7R kill: the both-sections shape —$a7k_bad"
+# A7R-K2 (fix round 5, owner ruling option B — the A7B contract on a corpus whose first body is LONGER than the floor):
+# at 2000 and 2500 tokens --detail=20 --with-graph delivers past the allowance with over_ceiling="1", the last rung names
+# the kept rows (never the header floor: the header alone fits), and the head-cut first body's next= RECOVERS EXACTLY the
+# lines it cut — the cut CDATA plus the next= answer's CDATA is the function's source, line for line (rule 5).
+a7k2_bad=""
+for N in 2000 2500; do
+    a7r_out --token-budget=$N --detail=20 --with-graph >"$A7R/k2.xml"; k2_rc=$?
+    k2_b="$( bytes_of "$A7R/k2.xml" )"; k2_a="$( awk "BEGIN{printf \"%d\", $N*2.36*1.15}" )"
+    k2_root="$( grep -aoE '^<ctx [^>]*>' "$A7R/k2.xml" | head -1 )"
+    k2_hdr="$( python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); print(d.find(b"<sigs"))' "$A7R/k2.xml" )"
+    k2_why=""
+    { [ "$k2_rc" -eq 0 ] && [ -n "$k2_b" ] && [ "$k2_b" -gt "$k2_a" ] && [ "${k2_root#* over_ceiling=\"1\"}" != "$k2_root" ]; } 2>/dev/null \
+        || k2_why="$k2_why premise/label:${k2_b:-?}B-vs-${k2_a}B"
+    { grep -aqF "$KEPT_NOTE" "$A7R/k2.xml" && ! grep -aqF "$FLOOR_NOTE" "$A7R/k2.xml" && [ "${k2_hdr:--1}" -gt 0 ] && [ "$k2_hdr" -le "$k2_a" ]; } 2>/dev/null \
+        || k2_why="$k2_why reason"
+    k2_next="$( grep -aoE '<b [^>]*>' "$A7R/k2.xml" | head -1 | sed -nE 's/.* truncated="1".* next="--expand=([^"]*)".*/\1/p' )"
+    if [ -z "$k2_next" ]; then
+        k2_why="$k2_why first-body-not-head-cut-with-next"
+    else
+        ( cd "$A7R" && "$BIN" corpus --expand="$k2_next" --no-cache ) >"$A7R/k2n.xml" 2>/dev/null
+        python3 - "$A7R/k2.xml" "$A7R/k2n.xml" "$A7R/corpus" <<'PYR' || k2_why="$k2_why next=-does-not-recover-the-cut"
+import re, sys, os
+cut = open( sys.argv[1] ).read(); nxt = open( sys.argv[2] ).read()
+m1 = re.search( r'<b [^>]* p="([^"]+)" n="[^"]+" lines="1-(\d+)/(\d+)" truncated="1"[^>]*><!\[CDATA\[(.*?)\]\]>', cut, re.S )
+l1 = re.search( r'<b [^>]* l="(\d+)" p="', cut )
+m2 = re.search( r'<b [^>]* lines="(\d+)-(\d+)/(\d+)"[^>]*><!\[CDATA\[(.*?)\]\]>', nxt, re.S )
+if not ( m1 and l1 and m2 ): sys.exit( 1 )
+k, t = int( m1.group( 2 ) ), int( m1.group( 3 ) )
+if ( int( m2.group( 1 ) ), int( m2.group( 2 ) ), int( m2.group( 3 ) ) ) != ( k + 1, t, t ): sys.exit( 1 )
+src = open( os.path.join( sys.argv[3], m1.group( 1 ) ) ).read().split( "\n" )
+start = int( l1.group( 1 ) ) - 1
+want = "\n".join( src[ start : start + t ] )
+got = m1.group( 4 ).rstrip( "\n" ) + "\n" + m2.group( 4 )
+sys.exit( 0 if got.rstrip( "\n" ) == want.rstrip( "\n" ) else 1 )
+PYR
+    fi
+    [ -z "$k2_why" ] || a7k2_bad="$a7k2_bad @$N:[${k2_why# }]"
+done
+[ -z "$a7k2_bad" ] \
+    && ok "#11 A7R kill+next (by-design, owner option B): --detail=20 --with-graph at 2000/2500 is over_ceiling with the kept-rows reason, and the cut first body's next= returns exactly the lines it cut" \
+    || no "#11 A7R kill+next (by-design, owner option B): —$a7k2_bad"
 # A7R-2 (the floor's cut is the one the floor priced): at 1500 tokens the first body is longer than the floor, so it ships
 # head-cut — truncated="1" with lines= and next= — never dropped and never the bare one-line stub.
 a7r_out --token-budget=1500 --detail=3 >"$A7R/f.xml"
