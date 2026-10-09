@@ -146,8 +146,10 @@ inline bool isInventoryEntryShape( const Symbol& s ) noexcept
 {
     switch( inventoryEntryStyle( s.lang ) )
     {
-        case InventoryEntryStyle::EntryFn:
-        case InventoryEntryStyle::ModuleScopeCall:   return s.kind == SymKind::Function && s.name == "main";
+        case InventoryEntryStyle::EntryFn:           return s.kind == SymKind::Function && s.name == "main";
+        // a script language indexes a class member as a Function with its class as scope (Python `def main(self)`):
+        // only a TOP-LEVEL main is the script's entry
+        case InventoryEntryStyle::ModuleScopeCall:   return s.kind == SymKind::Function && s.name == "main" && s.scope.empty();
         case InventoryEntryStyle::EntryStaticMethod: return s.kind == SymKind::Method && ( s.name == "main" || s.name == "Main" );
         case InventoryEntryStyle::None:              break;
     }
