@@ -17,13 +17,13 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ### Changed — `ripwire wrap` recommends `--for` at its default budget
 
-The CLI-first paste block (claude, opencode, codex-style agents) and the aider repo-map line told the agent
-to run `--for="<your task>" --token-budget=2000`. That explicit budget is a hard ceiling, so the answer kept
-about half the bytes of the default and dropped signature, file and call-hop rows the default shows (40 `--for`
-questions over eight open-source repositories, one release binary, `--no-cache`: median 4.6 KB against 9.2 KB;
-35 questions lost signature rows and 24 lost call-hop rows; every cut was disclosed with `capped="1"` and a `next=`).
-Both lines now read `--for="<your task>"`, which serves the default budget; the default budget itself and every other knob are unchanged, and a caller can still add
-`--token-budget=N` by hand. Only the printed `wrap` text changes.
+The CLI-first paste block (claude, codex, opencode, openclaw, hermes) and the aider repo-map line now read
+`--for="<your task>"` instead of adding `--token-budget=2000`. That budget is a ceiling. Over 40 `--for` questions in
+eight open-source repositories (one release binary, `--no-cache`) it halved the median answer (4.6 KB against 9.2 KB).
+It dropped signature rows on 35 questions and call-hop rows on 24. Only the signature cut carried `capped="1"` and a
+`next=`. The file tail carried `capped="1"` alone, and on 22 questions the whole call-hop block was left out with no
+marker. The default budget and every other knob are unchanged, and `--token-budget=N` still works when passed by hand.
+Only the printed `wrap` text changes.
 
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
