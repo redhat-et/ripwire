@@ -15,6 +15,7 @@
 
 #include "infra/jsonesc.h"   // shSingleQuote — the repository's canonical POSIX argv quoting
 #include "model.h"           // IngestResult
+#include "queryshape.h"      // detail::lowerAscii — the one ASCII lowercaser (K50)
 #include "query.h"           // isKnownLayerWord — the layer vocabulary --verify enforces at evaluation
 #include "sarif.h"           // rootRelativeUri / rootPrefixOf — the ONE root-relative path rule the map emits with
 #include "verify.h"          // parseClaim — the SHIPPED claim grammar; the router never re-implements it
@@ -62,17 +63,10 @@ struct TaskRouteResult
     int                      margin = 0;
 };
 
-inline std::string lowerAscii( std::string_view text )
-{
-    std::string out;
-    out.reserve( text.size() );
-    for( const char ch : text )   // EXPLICIT unsigned narrowing: `for( const unsigned char c : text )` is G1's implicit-integer-sign-change on any byte >= 0x80 (K50)
-    {
-        const unsigned char c = static_cast<unsigned char>( ch );
-        out.push_back( ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : char( c ) );   // A-Z only: a byte >= 0x80 passes through untouched
-    }
-    return out;
-}
+// K50: ONE ASCII lowercaser for the tree's task-text readers. This file used to spell its own loop (`for( const unsigned char c :
+// text )`, an implicit sign change on every byte >= 0x80 that aborted the sanitizer build on a non-ASCII prompt), and the fix for it
+// made that loop byte-identical to queryshape.h's, which --quality-delta flagged as a clone of the reused helper. It is that one now.
+using queryshape::detail::lowerAscii;
 
 // "is this word one of these?" — the shape four tables' predicates were each writing out by hand, which is
 // how a five-line any_of becomes a duplication finding against its own neighbours.
