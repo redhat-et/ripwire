@@ -591,7 +591,7 @@ Discloses: `entries_capped`, `names_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kInventoryEntryCap` | `32` | OUTPUT | — |
+| `kInventoryEntryCap` | `256` | OUTPUT | — |
 | `kInventoryNameCeiling` | `2000` | OUTPUT | — |
 
 ### `src/mcp.h`

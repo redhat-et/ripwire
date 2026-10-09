@@ -2770,8 +2770,16 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
     EXPECTS( inv.active, "the caller emits the tier only when it has a cut to inventory" );
     w.write( "<inv listed=\"" );  w.write( std::to_string( inv.listed ) );
     w.write( "\" unlisted=\"" );  w.write( std::to_string( inv.unlisted ) );  w.write( "\"" );
-    if( inv.entryTotal > inv.entries.size() ) { w.write( " entries_capped=\"1\" entries_total=\"" );  w.write( std::to_string( inv.entryTotal ) );  w.write( "\"" ); }
-    if( inv.namesCapped )                     { w.write( " names_capped=\"1\" names_total=\"" );    w.write( std::to_string( inv.namesTotal ) );  w.write( "\"" ); }
+    if( inv.entryTotal > inv.entries.size() )
+    {
+        w.write( " entries_capped=\"1\" entries_total=\"" );  w.write( std::to_string( inv.entryTotal ) );  w.write( "\"" );
+        w.write( nextAttrXml( inv.entriesNext, "entries_next" ) );   // rule 5: the cut is recoverable
+    }
+    if( inv.namesCapped )
+    {
+        w.write( " names_capped=\"1\" names_total=\"" );  w.write( std::to_string( inv.namesTotal ) );  w.write( "\"" );
+        w.write( nextAttrXml( inv.namesNext, "names_next" ) );
+    }
     w.write( ">" );
     for( NodeId id : inv.entries )
     {
@@ -9532,8 +9540,16 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
     EXPECTS( inv.active, "the caller emits the tier only when it has a cut to inventory" );
     w.write( ",\"inv\":{\"listed\":" );  w.write( std::to_string( inv.listed ) );
     w.write( ",\"unlisted\":" );         w.write( std::to_string( inv.unlisted ) );
-    if( inv.entryTotal > inv.entries.size() ) { w.write( ",\"entries_capped\":true,\"entries_total\":" );  w.write( std::to_string( inv.entryTotal ) ); }
-    if( inv.namesCapped )                     { w.write( ",\"names_capped\":true,\"names_total\":" );    w.write( std::to_string( inv.namesTotal ) ); }
+    if( inv.entryTotal > inv.entries.size() )
+    {
+        w.write( ",\"entries_capped\":true,\"entries_total\":" );  w.write( std::to_string( inv.entryTotal ) );
+        w.write( ",\"entries_next\":" );  writeJsonStr( w, inv.entriesNext, esc );
+    }
+    if( inv.namesCapped )
+    {
+        w.write( ",\"names_capped\":true,\"names_total\":" );  w.write( std::to_string( inv.namesTotal ) );
+        w.write( ",\"names_next\":" );  writeJsonStr( w, inv.namesNext, esc );
+    }
     w.write( ",\"entry\":[" );
     for( std::size_t i = 0; i < inv.entries.size(); ++i )
     {

@@ -94,14 +94,14 @@ $ ./build/ripwire . --top-k=5
 
 ### `--no-inventory`
 
-**Answers:** drop the default map's <inv> tier: the files its ranked rows leave out, and the entries The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by name convention) and <ls> rows naming or counting every unshown file by directory.
+**Answers:** drop the default map's <inv> tier, the files and entries its ranked rows leave out.
 
-This flag drops it (the rows are unchanged either way). Never present under --max-tokens or on a payload verb's map.
+The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by each language's own entry convention) and <ls> rows naming or counting every unshown file by directory. This flag drops it (the rows are unchanged either way). The tier never rides a map fitted to a token budget, nor a payload verb's ride-along map.
 
 **Caveats (stated by the binary):**
 
-- drop the default map's <inv> tier: the files its ranked rows leave out, and the entries The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by name convention) and <ls> rows naming or counting every unshown file by directory.
-- Never present under --max-tokens or on a payload verb's map.
+- The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by each language's own entry convention) and <ls> rows naming or counting every unshown file by directory.
+- The tier never rides a map fitted to a token budget, nor a payload verb's ride-along map.
 
 ### `--max-tokens=N`
 
@@ -126,7 +126,7 @@ $ ./build/ripwire . --max-tokens=1500
 </r>
 ```
 
-**Shaped by:** `--no-inventory`, `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--run-trace`, `--limit`
+**Shaped by:** `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--run-trace`, `--limit`
 
 **Caveats (stated by the binary):**
 

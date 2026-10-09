@@ -102,7 +102,7 @@ the gnarliest function. Plan edits around this list.
 **6. Budget it** if the map is large — `--max-tokens=8000` or `--top-k=50`. Both shape the default map;
 a positive, explicit `--top-k` is inert on plain `--for` (it warns on stderr and emits the full bundle) —
 bound a `--for` call with `--signatures-only`, `--token-budget=N` or `--detail=N` instead.
-When the ranked rows leave files out, the map ends with `<inv>`: the program entries (`<entry>`, by name convention)
+When the ranked rows leave files out, the map ends with `<inv>`: the program entries (`<entry>`, by each language's entry convention)
 and every unshown file, named or counted per directory (`<ls>`). Read it before concluding a file or entry point is
 not there; `--no-inventory` drops it (the rows are unchanged).
 

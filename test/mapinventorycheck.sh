@@ -139,21 +139,85 @@ fi
 run --top-k=3 --most-important-last >"$TMP/last"
 if grep -q '"><inv listed="[0-9]*" unlisted="[0-9]*">.*</inv><f p="' "$TMP/last" && grep -q '</f></r>' "$TMP/last"; then ok "(O) --most-important-last: <inv> precedes the rows"; else fail "(O) --most-important-last: <inv> is not before the ranked rows"; fi
 
-# (P) runaway guards, each at the boundary and one past it (generated corpora; top-k=1 shows one file)
+# (P) runaway guards, each at the boundary and one past it (generated corpora; top-k=1 shows one file). Past either
+# guard the cut is RECOVERABLE (PROCESS rule 5): entries_next= / names_next= are argv on the same root that run and list
+# what was cut — asserted by running them and finding a cut item in the answer.
 gen_c(){ d="$1"; n="$2"; mkdir -p "$d/src"; i=0; while [ "$i" -lt "$n" ]; do printf 'int fn%d( void ) { return %d; }\n' "$i" "$i" >"$d/src/f$i.c"; i=$(( i + 1 )); done; }
 gen_go(){ d="$1"; n="$2"; i=0; while [ "$i" -lt "$n" ]; do mkdir -p "$d/cmd/p$i"; printf 'package main\n\nfunc main() {}\n' >"$d/cmd/p$i/main.go"; i=$(( i + 1 )); done; }
 gen_c "$TMP/c2001" 2001; gen_c "$TMP/c2002" 2002
-gen_go "$TMP/g32" 32; gen_c "$TMP/g32" 2; gen_go "$TMP/g33" 33; gen_c "$TMP/g33" 2
+gen_go "$TMP/g256" 256; gen_c "$TMP/g256" 2; gen_go "$TMP/g257" 257; gen_c "$TMP/g257" 2
 "$BIN" "$TMP/c2001" --no-cache --top-k=1 >"$TMP/c2001.out" 2>/dev/null
 "$BIN" "$TMP/c2002" --no-cache --top-k=1 >"$TMP/c2002.out" 2>/dev/null
-"$BIN" "$TMP/g32" --no-cache --top-k=1 >"$TMP/g32.out" 2>/dev/null
-"$BIN" "$TMP/g33" --no-cache --top-k=1 >"$TMP/g33.out" 2>/dev/null
+"$BIN" "$TMP/c2002" --no-cache --top-k=1 --json >"$TMP/c2002.json" 2>/dev/null
+"$BIN" "$TMP/g256" --no-cache --top-k=1 >"$TMP/g256.out" 2>/dev/null
+"$BIN" "$TMP/g257" --no-cache --top-k=1 >"$TMP/g257.out" 2>/dev/null
+"$BIN" "$TMP/g257" --no-cache --top-k=1 --json >"$TMP/g257.json" 2>/dev/null
 NC1="$( grep -o '<ls p="src" n="[0-9]*" f="[^"]*"' "$TMP/c2001.out" | sed 's/.*f="//;s/"$//' | tr ',' '\n' | wc -l | tr -d ' ' )"
 if [ "$NC1" = 2000 ] && ! grep -q 'names_capped=' "$TMP/c2001.out"; then ok "(P) 2000 unshown code files: all named, no names_capped="; else fail "(P) at the 2000-name ceiling: named=$NC1, $( grep -o 'names_capped="[0-9]*"' "$TMP/c2001.out" )"; fi
-if grep -q '<inv listed="1" unlisted="2001" names_capped="1" names_total="2001">' "$TMP/c2002.out" && grep -q '<ls p="src" n="2001"/>' "$TMP/c2002.out"; then ok "(P) 2001 past the ceiling: the dir keeps n= only, names_capped=1 names_total=2001"; else fail "(P) past the ceiling: $( grep -o '<inv [^>]*>' "$TMP/c2002.out" ) $( grep -o '<ls p="src" n="[0-9]*"[^/]\{0,20\}' "$TMP/c2002.out" )"; fi
-E32="$( grep -o '<entry p="' "$TMP/g32.out" | wc -l | tr -d ' ' )"; E33="$( grep -o '<entry p="' "$TMP/g33.out" | wc -l | tr -d ' ' )"
-if [ "$E32" = 32 ] && ! grep -q 'entries_capped=' "$TMP/g32.out"; then ok "(P) 32 entries: all shown, no entries_capped="; else fail "(P) 32 entries: shown=$E32 $( grep -o 'entries_total="[0-9]*"' "$TMP/g32.out" )"; fi
-if [ "$E33" = 32 ] && grep -q 'entries_capped="1" entries_total="33"' "$TMP/g33.out"; then ok "(P) 33 entries: 32 shown, entries_capped=1 entries_total=33"; else fail "(P) 33 entries: shown=$E33 $( grep -o 'entries_total="[0-9]*"' "$TMP/g33.out" )"; fi
+if grep -q '<inv listed="1" unlisted="2001" names_capped="1" names_total="2001" names_next="[^"]*">' "$TMP/c2002.out" && grep -q '<ls p="src" n="2001"/>' "$TMP/c2002.out"; then ok "(P) 2001 past the ceiling: the dir keeps n= only, names_capped=1 names_total=2001 names_next="; else fail "(P) past the ceiling: $( grep -o '<inv [^>]*>' "$TMP/c2002.out" ) $( grep -o '<ls p="src" n="[0-9]*"[^/]\{0,20\}' "$TMP/c2002.out" )"; fi
+E256="$( grep -o '<entry p="' "$TMP/g256.out" | wc -l | tr -d ' ' )"; E257="$( grep -o '<entry p="' "$TMP/g257.out" | wc -l | tr -d ' ' )"
+if [ "$E256" = 256 ] && ! grep -q 'entries_capped=\|entries_next=' "$TMP/g256.out"; then ok "(P) 256 entries: all shown, no entries_capped=/entries_next="; else fail "(P) 256 entries: shown=$E256 $( grep -o 'entries_total="[0-9]*"' "$TMP/g256.out" )"; fi
+if [ "$E257" = 256 ] && grep -q 'entries_capped="1" entries_total="257" entries_next="' "$TMP/g257.out"; then ok "(P) 257 entries: 256 shown, entries_capped=1 entries_total=257 entries_next="; else fail "(P) 257 entries: shown=$E257 $( grep -o 'entries_total="[0-9]*"' "$TMP/g257.out" )"; fi
+# (P2) each next= runs (rc=0, non-empty) on the same root and its answer carries an item the guard cut: the entry past
+# the cap in path order (cmd/p99 sorts after the 256 kept), a file past the name ceiling (its basename)
+xmlunesc(){ sed 's/&quot;/"/g;s/&apos;/'"'"'/g;s/&lt;/</g;s/&gt;/>/g;s/&amp;/\&/g'; }
+CUTE="$( grep -o '<entry p="[^"]*"' "$TMP/g257.out" | sed 's/<entry p="//;s/"$//' | sort | tail -1 )"
+LASTE="$( cd "$TMP/g257" && ls -d cmd/p*/main.go | sort | tail -1 )"
+ENEXT="$( grep -o 'entries_next="[^"]*"' "$TMP/g257.out" | sed 's/^entries_next="//;s/"$//' | xmlunesc )"
+if [ -n "$ENEXT" ] && [ "$LASTE" != "$CUTE" ]; then
+    eval "\"\$BIN\" \"\$TMP/g257\" --no-cache $ENEXT" >"$TMP/enext.out" 2>"$TMP/enext.err"; rcE=$?
+    if [ "$rcE" -eq 0 ] && [ -s "$TMP/enext.out" ] && grep -q "p=\"$LASTE:" "$TMP/enext.out"; then ok "(P2) entries_next [$ENEXT] runs and lists the cut entry $LASTE"; else fail "(P2) entries_next [$ENEXT]: rc=$rcE, cut entry $LASTE listed: $( grep -c "p=\"$LASTE:" "$TMP/enext.out" )"; fi
+else
+    fail "(P2) no entries_next= (or the cut entry $LASTE was shown)"
+fi
+NNEXT="$( grep -o 'names_next="[^"]*"' "$TMP/c2002.out" | sed 's/^names_next="//;s/"$//' | xmlunesc )"
+if [ -n "$NNEXT" ]; then
+    eval "\"\$BIN\" \"\$TMP/c2002\" --no-cache $NNEXT" >"$TMP/nnext.out" 2>"$TMP/nnext.err"; rcN=$?
+    NLIST="$( grep -o '<file p="src/f[0-9]*\.c"' "$TMP/nnext.out" | sort -u | wc -l | tr -d ' ' )"
+    if [ "$rcN" -eq 0 ] && [ "$NLIST" = 2002 ]; then ok "(P2) names_next [$NNEXT] runs and lists all 2002 files (the 2001 count-only names among them)"; else fail "(P2) names_next [$NNEXT]: rc=$rcN, files listed=$NLIST of 2002"; fi
+else
+    fail "(P2) no names_next= past the ceiling"
+fi
+# (P3) the JSON twin carries the same recovery argv
+JEN="$( python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["inv"].get("entries_next",""))' "$TMP/g257.json" 2>/dev/null )"
+JNN="$( python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["inv"].get("names_next",""))' "$TMP/c2002.json" 2>/dev/null )"
+if [ -n "$JEN" ] && [ "$JEN" = "$ENEXT" ] && [ -n "$JNN" ] && [ "$JNN" = "$NNEXT" ]; then ok "(P3) JSON entries_next / names_next = XML"; else fail "(P3) JSON next: entries [$JEN] vs [$ENEXT], names [$JNN] vs [$NNEXT]"; fi
+
+# (Q) an entry is claimed only by its language's OWN convention (fix round 1: a method or an uncalled script function
+# named main was labelled a program entry). Six near-misses, each must NOT be an entry: a Python / JS class method
+# main, a Ruby singleton method main, a Python main with no __main__ guard and no caller, an uncalled exported TS
+# main, a Bash main defined and never invoked. Positive controls in the same run: a Bash script that runs
+# `main "$@"`, a Python main under the __main__ guard, a C main.
+Q="$TMP/langs"; mkdir -p "$Q/lib" "$Q/web" "$Q/bin" "$Q/pkg"
+printf 'class Runner:\n    def main(self):\n        return 2\n' >"$Q/lib/runner.py"
+printf 'class Job { main() { return 3 } }\nmodule.exports = Job\n' >"$Q/web/job.js"
+printf 'module Foo\n  def self.main\n    1\n  end\nend\n' >"$Q/lib/foo.rb"
+printf 'def helper():\n    return 1\n\ndef main():\n    return helper()\n' >"$Q/lib/unused_main.py"
+printf 'export function main() { return 1 }\n' >"$Q/web/lib.ts"
+printf 'main() { echo hi; }\n' >"$Q/lib/lib.sh"
+printf '#!/bin/sh\nwork() { echo w; }\nmain() { work; }\nmain "$@"\n' >"$Q/bin/run.sh"
+printf 'def go():\n    return 1\n\ndef main():\n    return go()\n\nif __name__ == "__main__":\n    main()\n' >"$Q/bin/tool.py"
+printf 'int step( void ) { return 0; }\nint main( void ) { return step(); }\n' >"$Q/prog.c"
+i=0; while [ "$i" -lt 30 ]; do printf 'def g%d():\n    return %d\n' "$i" "$i" >"$Q/pkg/m$i.py"; i=$(( i + 1 )); done
+"$BIN" "$Q" --no-cache --top-k=5 >"$TMP/langs.out" 2>/dev/null
+QE="$( grep -o '<entry p="[^"]*" n="[^"]*"' "$TMP/langs.out" | sed 's/<entry p="\([^"]*\)" n="\([^"]*\)"/\1:\2/' | tr '\n' ' ' )"
+for neg in lib/runner.py web/job.js lib/foo.rb lib/unused_main.py web/lib.ts lib/lib.sh; do
+    if printf '%s' "$QE" | grep -q "$neg:"; then fail "(Q) $neg claimed as a program entry [$QE]"; else ok "(Q) $neg (a method main / an uncalled script main) is not an entry"; fi
+done
+if [ "$QE" = 'bin/run.sh:main bin/tool.py:main prog.c:main ' ]; then ok "(Q) entries = a Bash main its script runs, a guarded Python main, a C main"; else fail "(Q) positive controls: got [$QE] want [bin/run.sh:main bin/tool.py:main prog.c:main ]"; fi
+
+# (R) bench/example siblings roll up like examples/: benchmark/ (grpc-go's benchmark mains), Go's _examples/ and
+# _example/, e2e/ — no entry claimed, a count-only <ls> row. integration/ and testing/ stay named (real package names,
+# stated in mapinventory.h): their main is judged by the entry rule. Control: cmd/app/main.go stays an entry.
+R="$TMP/sibs"
+for d in benchmark _examples/hello _example/hi e2e integration cmd/app; do mkdir -p "$R/$d"; printf 'package main\n\nfunc helperX() {}\n\nfunc main() { helperX() }\n' >"$R/$d/main.go"; done
+i=0; mkdir -p "$R/pkg"; while [ "$i" -lt 30 ]; do printf 'package pkg\n\nfunc G%d() int { return %d }\n' "$i" "$i" >"$R/pkg/m$i.go"; i=$(( i + 1 )); done
+"$BIN" "$R" --no-cache --top-k=5 >"$TMP/sibs.out" 2>/dev/null
+for d in benchmark _examples _example e2e; do
+    if grep -q "<entry p=\"$d/" "$TMP/sibs.out"; then fail "(R) a main under $d/ claimed as an entry"; else ok "(R) no entry under $d/"; fi
+    if grep -q "<ls p=\"$d\" n=\"1\"/>" "$TMP/sibs.out"; then ok "(R) $d/ rolls up count-only"; else fail "(R) $d/ is not a count-only <ls> row: $( grep -o "<ls p=\"$d[^>]*>" "$TMP/sibs.out" )"; fi
+done
+if grep -q '<entry p="cmd/app/main.go" n="main">' "$TMP/sibs.out" && grep -q '<entry p="integration/main.go" n="main">' "$TMP/sibs.out"; then ok "(R) controls: cmd/app and integration/ mains stay entries"; else fail "(R) controls: $( grep -o '<entry p="[^"]*"' "$TMP/sibs.out" | tr '\n' ' ' )"; fi
 
 echo "mapinventorycheck: $FAILED failure(s)"
 [ "$FAILED" -eq 0 ]
