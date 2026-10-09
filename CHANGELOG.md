@@ -21,9 +21,9 @@ The CLI-first paste block (claude, codex, opencode, openclaw, hermes) and the ai
 `--for="<your task>"` instead of adding `--token-budget=2000`. That budget is a ceiling. Over 40 `--for` questions in
 eight open-source repositories (one release binary, `--no-cache`) it halved the median answer (4.6 KB against 9.2 KB).
 It dropped signature rows on 35 questions and call-hop rows on 24. Only the signature cut carried `capped="1"` and a
-`next=`. The file tail carried `capped="1"` alone, and on 22 questions the whole call-hop block was left out with no
-marker. The default budget and every other knob are unchanged, and `--token-budget=N` still works when passed by hand.
-Only the printed `wrap` text changes.
+`next=`. The file tail and two partial hop cuts carried `capped="1"` alone, and on 24 questions the whole call-hop block
+was left out with no marker (22 of them had hop rows). The default budget and every other knob are unchanged, and
+`--token-budget=N` still works when passed by hand. Only the printed `wrap` text changes.
 
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
