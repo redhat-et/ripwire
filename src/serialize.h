@@ -1063,12 +1063,20 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
 // emitted (a total of 0 means genuinely none remain, never not-computed — the B1.4 rule for elements).
 // `shownCap` lets the explicit-budget caller trim rows below the collected count; the JSON twin below
 // renders the SAME decision so the dialects cannot diverge on what was served.
-inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, std::vector<char>& esc )
+// `cutNextAttr` (a ready ` next="…"` from nextAttrXml, or empty) rides the open tag ONLY when the tail is cut
+// (shown < total): the call that serves the files left out. Empty (every caller but the --for explicit-budget
+// regime) ⇒ byte-identical to before.
+inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, std::vector<char>& esc, std::string_view cutNextAttr = {} )
 {
     const std::size_t shown = std::min( shownCap, t.paths.size() );
     std::string x = "<tail total=\"" + std::to_string( t.total )
                   + "\" shown=\"" + std::to_string( shown )
-                  + "\" capped=\"" + ( shown < t.total ? "1" : "0" ) + "\">";
+                  + "\" capped=\"" + ( shown < t.total ? "1" : "0" ) + "\"";
+    if( shown < t.total )
+    {
+        x += cutNextAttr;
+    }
+    x += ">";
     for( std::size_t i = 0; i < shown; ++i )
     {
         x += "<t p=\"";  x += escapeXml( t.paths[i], esc );  x += "\"/>";
@@ -1117,11 +1125,11 @@ inline constexpr std::string_view kForHdrLegend =
 
 // Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
 // "fits" — the shell is reserved by the caller). Walks down from the collected count; deterministic.
-inline std::size_t fileTailShownForBudget( const FileTail& t, std::size_t budgetBytes, std::vector<char>& esc )
+inline std::size_t fileTailShownForBudget( const FileTail& t, std::size_t budgetBytes, std::vector<char>& esc, std::string_view cutNextAttr = {} )
 {
     for( std::size_t shown = t.paths.size(); shown > 0; --shown )
     {
-        if( renderFileTailXml( t, shown, esc ).size() <= budgetBytes )
+        if( renderFileTailXml( t, shown, esc, cutNextAttr ).size() <= budgetBytes )
         {
             return shown;
         }

@@ -2449,6 +2449,71 @@ inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const 
     return ids;
 }
 
+// fix round 4 (rule 5, review rv-wrap-recipe-k29 F1): the compact <hops> section an exhausted explicit ceiling
+// leaves out, as a counted marker instead of nothing — `<hops shown="0" total="N" capped="1" next="--for=TASK"/>`.
+// total= counts the rows the section would have been asked to serve (the owner rows + the candidate head, ids the
+// ingest knows) — the requested count packHops itself would print; how many of them have proven edges (noedge=) is
+// not known without the render, so the marker does not claim it. next= is the same question without --token-budget,
+// the answer whose own compact allowance serves the hop rows. No rows ⇒ no marker (nothing was cut). Markup bytes,
+// charged through buildForEnrichment's markupBytes like the rendered section.
+inline constexpr std::string_view kForHopsBudgetCutLegend =
+    "; hops shown=0 capped=1: the call-hop rows (one hop of callees per top row) this budget left out, total= of them; next= serves them";
+// the hops cut's continuation (` next="--for=TASK"`) — one spelling for the marker, the partial-cut splice and the reserve
+inline std::string forHopsCutNextAttr( const rw::Config& cfg )
+{
+    return rw::nextAttrXml( rw::nextFlag( "--for=", cfg.forTask ) );
+}
+// the bytes an explicit ceiling reserves out of the sig claim so the compact hops' cut disclosure always fits: the widest
+// marker (`<hops shown="0" total="NN" capped="1"` + next= + `/>`, total <= kPackTaskBodyCandidates + owners, two digits)
+// plus its present-only legend clause — the kCompactAttrReserve / kForFileTailShellReserve pattern.
+inline std::size_t forHopsCutReserve( const rw::Config& cfg )
+{
+    constexpr std::size_t kMarkerShell = std::string_view( "<hops shown=\"0\" total=\"NN\" capped=\"1\"/>" ).size();
+    return kMarkerShell + forHopsCutNextAttr( cfg ).size() + kForHopsBudgetCutLegend.size();
+}
+
+rw::ChargedSection forHopsBudgetCutMarker( const rw::Config& cfg, const rw::IngestResult& ing, const ForOwnerPlan& ownerPlan,
+                                           const std::vector<rw::NodeId>& hopIds )
+{
+    rw::ChargedSection marker;
+    std::size_t        total = 0;
+    for( const rw::NodeId id : forOwnerHopNodes( ownerPlan, hopIds ) )
+    {
+        total += id < ing.symbols.size() ? 1u : 0u;
+    }
+    if( total == 0 )
+    {
+        return marker;
+    }
+    marker.xml        = "<hops shown=\"0\" total=\"" + std::to_string( total ) + "\" capped=\"1\""
+                      + forHopsCutNextAttr( cfg ) + "/>";
+    marker.tokens     = rw::tokensForEmittedBytes( marker.xml.size(), rw::kBytesPerTokenDefault );
+    marker.isRendered = true;
+    return marker;
+}
+
+// fix round 4 (rule 5): an explicit-budget <hops> the budget CUT names the call that serves the rest. A cut with no
+// next= of its own (the qword_cut= disclosure already carries one) gets ` next=` spliced into the open tag; the bytes
+// were held back from the rows' budget (buildForCompactHops' rowRoom), so the section stays inside what it was given.
+// A rendered section with shown="0" capped="1" is spliced the same way and then reads as the exhausted-ceiling marker
+// does (counted, continued). An uncut section (capped="0") is untouched.
+void forHopsCutDisclose( rw::ChargedSection& section, std::string_view cutNext )
+{
+    std::string&            x   = section.xml;
+    const std::size_t       end = x.find( '>' );
+    if( !section.isRendered || end == std::string::npos || x.compare( 0, 5, "<hops" ) != 0 )
+    {
+        return;
+    }
+    const std::string_view open( x.data(), end );
+    if( open.find( " capped=\"1\"" ) == std::string_view::npos || open.find( " next=" ) != std::string_view::npos )
+    {
+        return;
+    }
+    x.insert( end, cutNext );
+    section.tokens = rw::tokensForEmittedBytes( x.size(), rw::kBytesPerTokenDefault );
+}
+
 ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                           const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                           std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
@@ -2486,14 +2551,22 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
     {
         out.attr      = " bundle=\"compact\" bodies=\"0\" reason=\"budget\"";
         out.legendOff = true;
+        // fix round 4 (rule 5, review rv-wrap-recipe-k29 F1): the hop rows this budget left out are NAMED, not dropped
+        // silently — an empty <hops> carrying the count and the call that serves them (the same question without the
+        // budget, whose compact allowance is its own). The bytes are this section's and the ladder prices them.
+        out.section = forHopsBudgetCutMarker( cfg, ing, ownerPlan, hopIds );
         return out;
     }
 
     // the surface allowance MINUS this surface's own fixed disclosure — see kForCompactSurfaceBudgetBytes.
     constexpr std::size_t kCompactFixedBytes = kForCompactBundleLegend.size() + kCompactAttrReserve + kCompactWrapReserve;
-    const std::size_t     hopBudget          = std::min( leftBytes, rw::kForCompactSurfaceBudgetBytes > kCompactFixedBytes
-                                                                        ? rw::kForCompactSurfaceBudgetBytes - kCompactFixedBytes
-                                                                        : std::size_t( 1 ) );
+    // fix round 4: under an explicit ceiling a cut <hops> carries next= (forHopsCutNextAttr), so its bytes come out of the
+    // rows' budget first; the default regime is unchanged (cutNext empty)
+    const std::string     cutNext            = cfg.tokenBudget > 0 ? forHopsCutNextAttr( cfg ) : std::string();
+    const std::size_t     rowRoom            = leftBytes > cutNext.size() ? leftBytes - cutNext.size() : 1u;
+    const std::size_t     hopBudget          = std::min( rowRoom, rw::kForCompactSurfaceBudgetBytes > kCompactFixedBytes
+                                                                      ? rw::kForCompactSurfaceBudgetBytes - kCompactFixedBytes
+                                                                      : std::size_t( 1 ) );
 
     // THE QUESTION'S OWNER (forOwnerHopPlan): owner rows first, the candidates they were not, the edgeless owners last;
     // an empty plan leaves both exactly as they were (forOwnerHopNodes / forHopOwners).
@@ -2519,6 +2592,10 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
     }
     out.attr = hopNodes.empty() ? " bundle=\"compact\" bodies=\"0\" reason=\"no_candidates\""
                               : " bundle=\"compact\" bodies=\"0\" reason=\"compact-route\"";
+    if( !cutNext.empty() )
+    {
+        forHopsCutDisclose( out.section, cutNext );
+    }
     return out;
 }
 
@@ -2555,8 +2632,11 @@ ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestR
 // regime: the full row cap, bytes riding on top (est_tokens measures them). Explicit regime: rows fit the
 // residual the rendered bundle actually left; the shell's bytes were reserved ahead of the body walk
 // (kForFileTailShellReserve inside the enrichment's committed sum), so the disclosure always fits.
+// fix round 4 (rule 5, review rv-wrap-recipe-k29 F1): under an explicit ceiling the cut tail carries `cutNextAttr` —
+// the --for file page (forTailCutNextAttr) that lists every positive-score file — and the shell reserve the caller
+// took (forTailShellReserve) includes it, so the disclosure still always fits.
 inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t tokenBudget,
-                                         std::size_t bundleBudget, std::size_t spentBytes )
+                                         std::size_t bundleBudget, std::size_t spentBytes, std::string_view cutNextAttr = {} )
 {
     std::vector<char> esc;
     if( tokenBudget == 0 )
@@ -2564,8 +2644,16 @@ inline std::string renderForFileTailXml( const rw::FileTail& tail, std::size_t t
         return rw::renderFileTailXml( tail, rw::kForFileTailShownCap, esc );
     }
     const std::size_t tailAllowed = std::max<std::size_t>( bundleBudget > spentBytes ? bundleBudget - spentBytes : 0u,
-                                                           rw::kForFileTailShellReserve );
-    return rw::renderFileTailXml( tail, rw::fileTailShownForBudget( tail, tailAllowed, esc ), esc );
+                                                           rw::kForFileTailShellReserve + cutNextAttr.size() );
+    return rw::renderFileTailXml( tail, rw::fileTailShownForBudget( tail, tailAllowed, esc, cutNextAttr ), esc, cutNextAttr );
+}
+
+// The explicit-budget tail's cut continuation: the --for file page (one row per positive-score file, pageable), the
+// one call that lists the files a budget left out of <tail>. Empty without --token-budget: the default regime's tail is
+// unchanged (a named deferral — adding it there moves every default --for answer).
+inline std::string forTailCutNextAttr( const rw::Config& cfg )
+{
+    return cfg.tokenBudget > 0 ? rw::nextAttrXml( rw::forWidenNext( cfg.forTask ) ) : std::string();
 }
 
 // R2-AF (round 2, S4): render the task's named-file/decl-impl-partner rows (rw::forNamedHeaderRows,
@@ -3416,6 +3504,14 @@ std::optional<int> runForLens( const MainDispatch& d )
                               /*withFileContext=*/false, flRootArg, &lensRank, headerParts.viaPresent ); },
                 rw::kBytesPerTokenBody ).xml.size();   // a degraded measure is 0 bytes: the reserve falls back to the graph alone
         }
+        const std::string forTailNext = forTailCutNextAttr( cfg );   // fix round 4: the explicit-budget tail's cut next= (empty otherwise)
+        if( explicitForCeiling )
+        {
+            // fix round 4 (rule 5): the two cut disclosures an explicit ceiling owes — the tail's next= and, on the compact
+            // route, the hops cut (marker or spliced next= + its clause) — are reserved like the trailing sections, so
+            // disclosing a cut never pushes the answer over the budget it was cut for
+            trailingReserve += forTailNext.size() + ( plan.compact ? forHopsCutReserve( cfg ) : 0u );
+        }
         const std::size_t sigClaim   = forSigClaimWithTrailingReserve( sigSideCeiling, bundleBudget, trailingReserve );
         const std::size_t sigsBudget = sigClaim > fixedBytes ? sigClaim - fixedBytes : 1;   // ≥1: 0 would mean "no budget"
 
@@ -3699,7 +3795,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             {
                 const std::size_t spentBytes = headerStr.size() + forHdrXml.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                              + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve + sectionsStubSpliceReserve
-                                             + rw::kForFileTailShellReserve;   // deep-tail: the shell's reserved bytes (explicit regime only — this branch)
+                                             + rw::kForFileTailShellReserve + forTailNext.size();   // deep-tail: the shell's reserved bytes + its cut next= (explicit regime only — this branch)
                 const std::size_t leftBytes  = bundleBudget > spentBytes ? bundleBudget - spentBytes : 1;
                 // fix round 4: never below the first-body floor the sig side reserved (forDetailFirstBodyFloor) — the header's
                 // exempt disclosures are paid by this side, and they must not cut the one body the reserve was taken for
@@ -3730,7 +3826,7 @@ std::optional<int> runForLens( const MainDispatch& d )
             enrich = buildForEnrichment( cfg, ing, g, lensSurfaceIds, lensRank, plan, routeAnchorDefs, redactPtr,
                                           headerStr.size() + forHdrXml.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                               + routeStr.size() + graphSection.xml.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve + sectionsStubSpliceReserve
-                                              + ( cfg.tokenBudget > 0 ? rw::kForFileTailShellReserve : 0u ),
+                                              + ( cfg.tokenBudget > 0 ? rw::kForFileTailShellReserve + forTailNext.size() : 0u ),
                                           // deep-tail: under an explicit ceiling the tail SHELL's bytes are
                                           // reserved ahead of the body walk (the kAutoAttrReserve pattern) so
                                           // the disclosure always fits; the DEFAULT regime reserves nothing —
@@ -3755,6 +3851,12 @@ std::optional<int> runForLens( const MainDispatch& d )
         }
         const rw::ChargedSection& autoSection = enrich.section;
         const std::string&        autoAttr    = enrich.attr;
+        if( enrich.legendOff && !autoSection.xml.empty() )
+        {
+            // fix round 4: the hops budget-cut marker rides a header whose compact legend was just dropped — its one
+            // present-only clause says what the empty element is (priced by the ladder through rootFinish)
+            sectionsStubNote += kForHopsBudgetCutLegend;
+        }
 
         // ── DEEP-TAIL d2: render the file-grain tail, funded LAST (see serialize.h kForFileTailShownCap) ──
         // Rendered after the bodies decision so the explicit regime spends only the RESIDUAL the rendered
@@ -3766,7 +3868,8 @@ std::optional<int> runForLens( const MainDispatch& d )
         const std::string tailStr = renderForFileTailXml( forFileTailShown, cfg.tokenBudget, bundleBudget,
                                                            headerStr.size() + forHdrXml.size() + sigsStr.size() + legoStr.size() + composeStr.size()
                                                                + routeStr.size() + graphSection.xml.size() + detailSection.xml.size()
-                                                               + autoSection.xml.size() + autoAttr.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve + sectionsStubSpliceReserve );
+                                                               + autoSection.xml.size() + autoAttr.size() + 6 + headerSpliceReserve + droppedPositiveSpliceReserve + sectionsStubSpliceReserve,
+                                                           forTailNext );
 
         // N1: the last rung's note DEFINES the root attribute it accompanies (over_ceiling= …), so the attribute is
         // never on a document whose legend does not explain it; the bracket spelling stays. It is PROSE ONLY now —
