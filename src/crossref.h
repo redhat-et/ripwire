@@ -677,8 +677,14 @@ public:
             }
             facts_.emplace( sha, std::move( f ) );
             ++fetched_;
-        } );
+        }, &stats_ );
     }
+
+    // K75: a batch that never started (the sha list could not be written under the cache dir, git did not spawn) or died
+    // before serving every blob leaves the shas it never reached ABSENT from facts_, and get() answers an absent sha with a
+    // shared empty record — "this side contributed no lines". A caller that then reports verdicts from it prints a measured-
+    // looking answer made of nothing (a branch with unmerged work reading merged), so it asks this first and refuses.
+    bool unread() const noexcept { return stats_.startFailed || stats_.endedEarly; }
 
     // The facts for `sha`, or a shared empty (non-text) record for an absent side — so a caller can treat
     // "this path did not exist on that side" as "it contributed no lines" without a null check.
@@ -697,7 +703,16 @@ private:
     gtl::btree_map<std::string, BlobFacts>   facts_;
     std::vector<std::string>                 pending_;
     std::size_t                              fetched_ = 0;
+    StreamBlobStats                          stats_;
 };
+
+// K75: the words every host of a blob-reading verb refuses in when the one `git cat-file --batch` behind it did not
+// serve every blob. The cause is named WHERE the reader looks (stderr + exit 1, or an MCP error), never as a zero.
+inline std::string blobsUnreadCause()
+{
+    return "could not read the branches' blobs (the one `git cat-file --batch` did not start or stopped early; its sha list is written under "
+         + quality::cacheDirLadder() + " - is TMPDIR a writable directory?)";
+}
 
 // ── git plumbing (read-only) ─────────────────────────────────────────────────────────────────────────────
 
@@ -1068,6 +1083,9 @@ struct StrayResult
     // unknown="0" at exit 0 reads as "no branch carries stray work" — the most reassuring possible answer,
     // from a sweep that never happened. ok=false, so the caller refuses in the --doc-drift/--dead-code words.
     bool                 filterMatchedNothing = false;
+    // K75: the blob batch behind every verdict never started or died part-way (an unwritable cache dir, TMPDIR naming a missing
+    // directory, git failing): each ref's lines would read as absent and its verdict as merged. ok=false; the caller refuses.
+    bool                 blobsUnread = false;
     std::string          filter;                // H14/M6: the --stray-content=SUBSTR this sweep was narrowed by ("" = none)
     std::string          headSha;
     std::string          headRef;
@@ -1359,6 +1377,12 @@ inline StrayResult computeStrayContent( const std::string& root, std::string_vie
 
     BlobStore blobs( root );
     registerSweepBlobs( diffs, plumbing, blobs );
+    if( blobs.unread() )
+    {
+        result.ok          = false;   // refused, not answered: the caller names blobsUnreadCause() on stderr / as an MCP error
+        result.blobsUnread = true;
+        return result;
+    }
 
     // ── phase 5: the analysis proper — pure, serial, deterministic ──────────────────────────────────────
     // A ref whose work is entirely on the live line is the boring, common case — in a 30-branch sweep it is
@@ -2359,6 +2383,7 @@ struct EvalReport
     std::vector<std::string> badRefs;           // labels naming a ref this git repo does not have at all —
                                                  // refused, never scored (see evalStray below)
     bool                     ok = true;
+    bool                     blobsUnread = false;   // K75: the sweep's blob batch was unread — refused, like a non-git root
 };
 
 inline bool parseVerdict( std::string_view s, Verdict& out )
@@ -2388,7 +2413,7 @@ inline EvalReport evalStray( const std::string& root, const std::string& labelsP
     }
 
     const StrayResult res = computeStrayContent( root, {} );
-    if( !res.ok ) { rep.ok = false; return rep; }
+    if( !res.ok ) { rep.ok = false; rep.blobsUnread = res.blobsUnread; return rep; }
 
     // Reported refs carry their verdict; every ref NOT reported was scanned and found merged (writeStrayContent
     // omits those), so an absent ref scores as `merged` rather than as a miss.

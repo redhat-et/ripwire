@@ -60,6 +60,62 @@ count_of(){ tr '<' '\n' | grep -v '^!--' | grep -c "^$1 "; }
 
 echo "crossrefdegradecheck: BIN=$BIN"
 
+# ══ K75: --stray-content, --abi, --plan and --eval-stray REFUSE when the blob batch cannot run ═══════════════
+#
+# Every cross-branch verdict is built from ONE `git cat-file --batch` whose sha list is written under the cache directory. With
+# TMPDIR naming a directory that does not exist, that list cannot be written, the batch never starts, every blob reads as absent,
+# and the answer was merged="1" refs="1" (a branch holding unmerged work), --abi exit 0 with no drift: a measured-looking zero made
+# of nothing (the whereis hits="0" bug's siblings). The refusal is the whereis mechanism: exit 1, the cause named on stderr, no
+# document on stdout. Arms: a control (the same repo answers when the directory exists, which proves the refusal is about the
+# missing directory and not about the fixture), then the refusal on each verb and on the MCP twin.
+K75="$TMP/k75repo"; mkdir -p "$K75"
+k(){ git -C "$K75" "$@" >/dev/null 2>&1; }
+k init -q -b main
+k config commit.gpgsign false
+printf 'int base( void )\n{\n    return 1;\n}\n' > "$K75/a.c"
+printf '#pragma once\nstruct Uniforms\n{\n    float x;\n    float y;\n};\nstatic_assert( sizeof( Uniforms ) == 8, "uniform GPU contract" );\n' > "$K75/shader.h"
+k add -A; k commit -qm base
+k checkout -qb side
+printf 'int base( void )\n{\n    return 1;\n}\n\nint sideOnlyThing( void )\n{\n    return 42;\n}\n' > "$K75/a.c"
+printf '#pragma once\nstruct Uniforms\n{\n    float x;\n    float y;\n    float z;\n};\nstatic_assert( sizeof( Uniforms ) == 8, "uniform GPU contract" );\n' > "$K75/shader.h"
+k commit -qam "side work"
+k checkout -q main
+printf 'int base( void )\n{\n    return 1;\n}\n\nint mainWork( void )\n{\n    return 7;\n}\n' > "$K75/a.c"
+k commit -qam "live-line work"
+K75GOOD="$TMP/k75tmp"; mkdir -p "$K75GOOD"
+K75BAD="$TMP/k75-no-such-dir"                      # never created: TMPDIR names a directory that does not exist
+printf 'side\tunmerged\n' > "$TMP/k75labels.tsv"
+k75(){ local out="$1" tmpd="$2"; shift 2; env TMPDIR="$tmpd" "$BIN" "$K75" "$@" --no-cache --legend=full >"$out" 2>"$out.err"; }
+
+k75 "$TMP/k75_s_good.out" "$K75GOOD" --stray-content; rcS=$?
+[ "$rcS" = 0 ] && grep -q 'v="unmerged"' "$TMP/k75_s_good.out" \
+    && ok "K75 control: --stray-content answers the branch with work as unmerged when the cache dir works" \
+    || no "K75 control: --stray-content (rc=$rcS) did not report v=\"unmerged\" - the refusal arms below would prove nothing"
+k75 "$TMP/k75_a_good.out" "$K75GOOD" --stray-content --abi; rcA=$?
+[ "$rcA" = 2 ] && ok "K75 control: --abi reports the break (exit 2) when the cache dir works" || no "K75 control: --abi exited $rcA, not 2"
+
+for v in "--stray-content" "--stray-content --abi" "--stray-content --plan" "--eval-stray=$TMP/k75labels.tsv"; do
+    # shellcheck disable=SC2086
+    k75 "$TMP/k75_bad.out" "$K75BAD" $v; rcB=$?
+    if [ "$rcB" = 1 ] && [ ! -s "$TMP/k75_bad.out" ] && grep -q "could not read the branches' blobs" "$TMP/k75_bad.out.err" && grep -q 'TMPDIR' "$TMP/k75_bad.out.err"; then
+        ok "K75: $v with TMPDIR missing refuses (exit 1, no document, the cause and TMPDIR named on stderr)"
+    else
+        no "K75: $v with TMPDIR missing did not refuse (rc=$rcB, stdout $( wc -c <"$TMP/k75_bad.out" | tr -d ' ' ) bytes): $( grep -v 'math degraded\|compact legend' "$TMP/k75_bad.out.err" | head -c 200 )"
+    fi
+done
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"stray_content","arguments":{"path":"'"$K75"'"}}}' \
+    | env TMPDIR="$K75BAD" "$BIN" --mcp 2>/dev/null | tail -1 >"$TMP/k75_mcp.json"
+grep -q '"code":-32603' "$TMP/k75_mcp.json" && grep -q "could not read the branches" "$TMP/k75_mcp.json" \
+    && ok "K75: the MCP stray_content twin answers -32603 naming the cause, not a verdict or 'not a git repository'" \
+    || no "K75: the MCP twin did not refuse with -32603: $( head -c 240 "$TMP/k75_mcp.json" )"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"stray_content","arguments":{"path":"'"$K75"'"}}}' \
+    | env TMPDIR="$K75GOOD" "$BIN" --mcp 2>/dev/null | tail -1 >"$TMP/k75_mcp_good.json"
+grep -q 'unmerged' "$TMP/k75_mcp_good.json" && ! grep -q '"error"' "$TMP/k75_mcp_good.json" \
+    && ok "K75 control: the MCP twin answers when the cache dir works" || no "K75 control: the MCP twin did not answer on a good TMPDIR"
+
+
 # ══ fixture A: a SHALLOW clone — the CI default, and the case that reported every branch as merged ═══════
 #
 # `side` carries two lines of genuinely unmerged work. The shallow clone keeps one commit per ref, so the

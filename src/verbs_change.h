@@ -688,6 +688,13 @@ inline constexpr int           kRunTraceExitCommandFailed = 4;                  
 // H7 (capture-audit 2026-09-04; hosts added at the wave-3 close): the ONE sentence for a --stray-content=SUBSTR
 // filter that selected no ref NAME — spoken by the bare verb ("" host) and by its two hosts ("--plan: ", "--abi: ").
 // refs="0" at exit 0 would read as "no branch carries stray work", the most reassuring answer these verbs give.
+// K75: the blob batch behind a cross-branch verb never started or died part-way. The refusal names the cause where the reader
+// looks (stderr, exit 1) — the other answer was merged="1" / "no break" for every branch, a measured-looking zero made of nothing.
+inline void printBlobsUnreadRefusal( const char* hostPrefix )
+{
+    DISCLOSE( Diagnostics::answerRefused, "the blob batch behind the cross-branch sweep did not serve every blob, so no verdict is printed - stderr names the cause, exit 1" );
+    rw::emitTo( stderr, "ripwire: {}{} - refusing rather than print verdicts nothing measured\n", hostPrefix, rw::crossref::blobsUnreadCause() );
+}
 inline void printStrayFilterNoMatch( const char* hostPrefix, std::string_view filter )
 {
     rw::emitTo( stderr, "ripwire: {}--stray-content={} matches no local ref — a zero here would be a failure, not a "
@@ -1416,6 +1423,10 @@ int runAbiCheck( const MainDispatch& d )
         {
             printStrayFilterNoMatch( "--abi: ", d.cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
         }
+        else if( result.blobsUnread )
+        {
+            printBlobsUnreadRefusal( "--abi: " );
+        }
         else
         {
             rw::emitTo( stderr, "ripwire: --abi: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
@@ -1465,6 +1476,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             {
                 printStrayFilterNoMatch( "--plan: ", cfg.strayFilter );   // H7, the host's spelling (wave-3 close)
             }
+            else if( result.blobsUnread )
+            {
+                printBlobsUnreadRefusal( "--plan: " );
+            }
             else
             {
                 rw::emitTo( stderr, "ripwire: --plan: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
@@ -1499,6 +1514,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
                 // branch carries stray work" — from a sweep that matched no branch NAME at all.
                 printStrayFilterNoMatch( "", cfg.strayFilter );
             }
+            else if( result.blobsUnread )
+            {
+                printBlobsUnreadRefusal( "--stray-content: " );   // K75
+            }
             else
             {
                 rw::emitTo( stderr, "ripwire: --stray-content: more than {} refs match — narrow it with --stray-content=SUBSTR\n", crossref::kMaxRefs );
@@ -1517,6 +1536,11 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         const crossref::EvalReport rep = crossref::evalStray( root, std::string( cfg.evalStray ) );
         if( !rep.ok )
         {
+            if( rep.blobsUnread )
+            {
+                printBlobsUnreadRefusal( "--eval-stray: " );   // K75
+                return 1;
+            }
             if( !rep.badRefs.empty() )
             {
                 // H13: the file read fine and this IS a git repo — the refusal is that one or more

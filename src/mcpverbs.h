@@ -602,11 +602,12 @@ inline std::string whereisText( const std::string& root, const std::string& symb
 // M13: --stray-content is in cli.h's honorsPaging set — writeStrayContentPage is the entry point the
 // CLI already calls with cfg.pageLimit/cfg.pageOffset, so the twin passes the same pair rather than 0,0.
 inline std::string strayContentText( const std::string& root, const std::string& filter, std::size_t maxFiles,
-                                     McpPageArgs page = {} )
+                                     McpPageArgs page = {}, bool* blobFault = nullptr )
 {
     const crossref::StrayResult res = crossref::computeStrayContent( root, filter );
     if( !res.ok )
     {
+        if( res.blobsUnread && blobFault != nullptr ) { *blobFault = true; }   // K75: the host answers an error naming the cause, not "not a git repository"
         return {};
     }
     return captureXml( [ & ]( std::FILE* f ) { crossref::writeStrayContentPage( f, res, maxFiles, page.limit, page.offset ); } );

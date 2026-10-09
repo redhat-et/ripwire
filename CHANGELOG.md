@@ -15,6 +15,14 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — the cross-branch verbs refuse when the blob batch cannot run
+
+`--stray-content`, `--stray-content --abi`, `--stray-content --plan`, `--eval-stray` and the MCP `stray_content` tool read
+every branch's content through one `git cat-file --batch` whose sha list is written under the cache directory. With `TMPDIR`
+naming a directory that does not exist the list could not be written, every blob read as absent, and the answer was
+`merged="1"` for a branch holding unmerged work (`--abi`: exit 0, no drift). Each now exits 1 (MCP: `-32603`) naming the
+cause and `TMPDIR`, with nothing on stdout, the way `--whereis` refuses on the same condition.
+
 ### Fixed — a git history walk that could not be read says so, and is retried
 
 A `git log --name-only` that failed (an unreadable object, a bad ref, git not starting) came back as an empty stream and was

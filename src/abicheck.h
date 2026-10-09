@@ -241,6 +241,7 @@ struct AbiResult
     bool           nonGitRoot  = false;
     bool           tooManyRefs = false;
     bool           filterMatchedNothing = false;   // H7: the --stray-content=SUBSTR filter selected no ref NAME
+    bool           blobsUnread = false;            // K75: the blob batch both sides are modelled from never started or died part-way — refused
     std::string    headSha;
     std::string    headRef;
     std::string    atStamp;           // M10: gitstamp::stampAt(root) — head= above stays a bare 9-hex sha
@@ -543,6 +544,7 @@ inline void modelRefBlobs( const std::string& root, layout::ModelCtx& ctx, const
     for( const auto& [ sha, paths ] : sw.shaPaths ) { (void)paths; shas.push_back( sha ); }
     result.distinctBlobs = shas.size();
 
+    crossref::StreamBlobStats blobStats;   // K75: a batch that never started leaves every slot present=false, which reads as "no break"
     crossref::streamBlobs( root, shas, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
     {
         const auto sit = sw.shaPaths.find( sha );
@@ -587,7 +589,8 @@ inline void modelRefBlobs( const std::string& root, layout::ModelCtx& ctx, const
                 mit->second[ ci ].present = true;
             }
         }
-    } );
+    }, &blobStats );
+    result.blobsUnread = blobStats.startFailed || blobStats.endedEarly;
 }
 
 // ── pass 3: classify one (ref, path) site's candidates ───────────────────────────────────────────────────
@@ -739,6 +742,11 @@ inline AbiResult computeAbiCheck( const std::string& root, const IngestResult& i
     SweepState sw;
     collectAuthoredSites( root, refs, byPath, sw, Tally{ rows, result } );   // WHERE each ref's own work reaches
     modelRefBlobs( root, ctx, byPath, sw, result );                          // one cat-file batch for both sides
+    if( result.blobsUnread )
+    {
+        result.ok = false;   // K75: refused, not answered — every slot would read present=false, i.e. "no break on any branch"
+        return result;
+    }
 
     const ClassifyCtx cc{ ctx, headCache, result };
     for( const PathSite& ps : sw.pathSites )

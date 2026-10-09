@@ -2332,7 +2332,13 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // `kind` doubles as the optional ref-name substring filter (no dedicated arg needed).
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
-                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg );
+                        bool              blobFault = false;
+                        const std::string t = strayContentText( path, kind, crossref::kStrayFilesPerRef, pg, &blobFault );
+                        if( blobFault )
+                        {
+                            DISCLOSE( Diagnostics::answerRefused, "stray_content (MCP): the blob batch did not serve every blob - a -32603 error names it, no verdicts" );
+                            return errResultMsg( -32603, crossref::blobsUnreadCause() );
+                        }
                         return t.empty() ? errResult( -32602, "not a git repository (or no HEAD commit) — no refs to compare" ) : textResult( t );
                     } );
                 }
