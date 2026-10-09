@@ -25,6 +25,10 @@ subsystem you're working in — also accepts a remote `ripwire <git-url>` (shall
 you can orient in a dependency before ever cloning it) — or several roots for a split checkout,
 `ripwire dir1 dir2 --report`: ONE merged, root-labeled map instead of two separate mental models.
 
+**Orient ONCE per session, then look up lean.** Run the map (`ripwire <dir>`, or `--for`) once to learn the
+subsystems and entry points; after that `--expand` / `--outline` / `--whereis` / `--callers` answer with no
+ride-along map. If you skipped the orient step, the `map_next=` on an `--expand` root is the call that prints it.
+
 ## The escalation ladder — climb only until you feel oriented
 
 **0. Recall what you already KNOW** — `ripwire <dir> --recall="<the task>"`
@@ -58,7 +62,7 @@ this default deletes. `bodies="0" reason="budget"` means it did not fit whole.
 *Conceptual phrase* (`bundle="compact" bodies="0" reason="compact-route"`): no bodies — you get the ranked
 map plus a `<hops>` section, one row per top-ranked symbol with its one-hop callee names. **Read the map,
 pick ONE symbol, then `--expand=path:name`** (paste the row's own `p=` and `n=`; a bare name that is not
-unique costs you the whole map). That is the flow, and it is cheaper than the bodies were: half the bytes
+unique serves every definition, still without the map). That is the flow, and it is cheaper than the bodies were: half the bytes
 of the old bundle on conceptual queries, and the edges tell you which symbol is worth the second call.
 `--auto-bodies` restores inline bodies on that route if you want them; `--signatures-only` drops both
 shapes; `--detail=N` picks the body count explicitly.
