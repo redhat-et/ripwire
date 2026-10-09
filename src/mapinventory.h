@@ -28,7 +28,9 @@
 #include <vector>
 
 #include "model.h"
-#include "filter.h"   // isTestPath / isTestSymbol / pathTierOf / hasDirSegment — the shared test-path conventions
+#include "filter.h"   // isTestSymbol — the shared test-path convention
+#include "resolve.h"  // includerDir — the shared directory-of-a-path splitter
+#include "infra/namesplit.h"   // namesplit::afterLast — the shared basename splitter
 
 namespace rw
 {
@@ -93,16 +95,12 @@ inline std::string_view inventoryRollupDirOf( std::string_view rel ) noexcept
     return rel.substr( 0, best + bestLen - 1 );   // without the trailing '/'
 }
 
+// directory and basename of a display path: the shared splitters (resolve.h includerDir, namesplit afterLast), with
+// the root's files grouped under "."
 inline std::string_view inventoryDirOf( std::string_view rel ) noexcept
 {
-    const std::size_t slash = rel.rfind( '/' );
-    return slash == std::string_view::npos ? std::string_view( "." ) : rel.substr( 0, slash );
-}
-
-inline std::string_view inventoryBaseOf( std::string_view rel ) noexcept
-{
-    const std::size_t slash = rel.rfind( '/' );
-    return slash == std::string_view::npos ? rel : rel.substr( slash + 1 );
+    const std::string_view dir = includerDir( rel );
+    return dir.empty() ? std::string_view( "." ) : dir;
 }
 
 // A code symbol: anything a reader can open as a definition — not a data Section (doc heading, JSON/YAML key) and
@@ -112,54 +110,23 @@ inline bool isInventoryCodeSymbol( const Symbol& s ) noexcept
     return s.kind != SymKind::Section && s.kind != SymKind::ModuleScope;
 }
 
-// `shownFile[f]` != 0 ⇔ the ranked rows printed a <f> group for file f. `pathRel` maps a file id to its display path
-// (the same root-relative form every <f p=> uses).
+// A program entry by name convention: a def named main (Main for a method) outside the rolled-up directories and test
+// code, whose only in-repo callers are its own file's module scope; or a __main__.py module scope. Path order, at most
+// kInventoryEntryCap kept (entryTotal counts them all).
 template <class PathRel>
-inline MapInventory computeMapInventory( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
-                                         const std::vector<NodeId>& outTargets, const std::vector<char>& shownFile,
-                                         const PathRel& pathRel )
+inline void collectInventoryEntries( MapInventory& inv, const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                                     const std::vector<NodeId>& outTargets, const PathRel& pathRel )
 {
     const std::size_t F = ing.files.size();
     const std::size_t S = ing.symbols.size();
-    EXPECTS( shownFile.size() == F, "one shown bit per indexed file" );
-    EXPECTS( outOff.size() >= S + 1 || S == 0, "outOff is the CSR offset array over the symbols" );
-    MapInventory inv;
-
-    // code symbols per file: a file with none is counted, never named
-    std::vector<std::uint32_t> codeSyms( F, 0 );
-    for( const Symbol& s : ing.symbols )
-    {
-        if( s.fileId < F && isInventoryCodeSymbol( s ) )
-        {
-            ++codeSyms[ s.fileId ];
-        }
-    }
-    // Present-only: the tier rides a map whose ranked rows LEFT OUT a file with code in it. A map that shows every
-    // such file has nothing to inventory (its unshown files are empty or data-only) and stays byte-identical.
-    bool anyCut = false;
-    for( std::size_t f = 0; f < F; ++f )
-    {
-        if( !shownFile[ f ] ) { ++inv.unlisted; } else { ++inv.listed; }
-        anyCut = anyCut || ( !shownFile[ f ] && codeSyms[ f ] > 0 );
-    }
-    if( !anyCut )
-    {
-        return MapInventory{};
-    }
-    inv.active = true;
-
-    // ── entries ──
     const auto isEntryName = [ & ]( const Symbol& s ) noexcept
     {
         return ( s.kind == SymKind::Function && s.name == "main" )
             || ( s.kind == SymKind::Method && ( s.name == "main" || s.name == "Main" ) );
     };
-    const auto entryEligibleFile = [ & ]( std::uint32_t f ) noexcept
-    {
-        // test PATHS need no clause here: isTestSymbol (below) covers a candidate def, and every test directory isTestPath
-        // knows (test/, tests/, __tests__/) is a rolled-up directory, which covers a __main__.py scope
-        return inventoryRollupDirOf( rootRelPath( ing, f ) ).empty();
-    };
+    // test PATHS need no clause here: isTestSymbol (below) covers a candidate def, and every test directory isTestPath
+    // knows (test/, tests/, __tests__/) is a rolled-up directory, which covers a __main__.py scope
+    const auto entryEligibleFile = [ & ]( std::uint32_t f ) noexcept { return inventoryRollupDirOf( rootRelPath( ing, f ) ).empty(); };
     std::vector<char> candidate( S, 0 );
     for( NodeId id = 0; id < S; ++id )
     {
@@ -183,7 +150,7 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
     {
         const Symbol& s = ing.symbols[ id ];
         const bool mainModule = s.kind == SymKind::ModuleScope && s.fileId < F
-                             && inventoryBaseOf( rootRelPath( ing, s.fileId ) ) == "__main__.py" && entryEligibleFile( s.fileId );
+                             && namesplit::afterLast( rootRelPath( ing, s.fileId ), "/" ) == "__main__.py" && entryEligibleFile( s.fileId );
         if( candidate[ id ] || mainModule )
         {
             inv.entries.push_back( id );
@@ -196,19 +163,22 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
     {
         inv.entries.resize( kInventoryEntryCap );
     }
+}
 
-    // ── ls rows ──
-    std::vector<std::uint32_t> unshown;
-    for( std::uint32_t f = 0; f < F; ++f )
-    {
-        if( !shownFile[ f ] ) { unshown.push_back( f ); }
-    }
-    // group key: the rolled-up dir when the file sits under one, else its own dir
+// One row per directory over the unshown files, path order. A file under a rolled-up directory groups under that
+// directory and is counted; elsewhere a code file (codeSyms > 0, not test-named) is named, every other file counted.
+template <class PathRel>
+inline void collectInventoryDirs( MapInventory& inv, const IngestResult& ing, const std::vector<char>& shownFile,
+                                  const std::vector<std::uint32_t>& codeSyms, const PathRel& pathRel )
+{
     struct Keyed { std::string key; bool rolled; std::uint32_t f; };
     std::vector<Keyed> keyed;
-    keyed.reserve( unshown.size() );
-    for( std::uint32_t f : unshown )
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
+        if( shownFile[ f ] )
+        {
+            continue;
+        }
         // classify on the ROOT-RELATIVE path (a checkout living under a tests/ dir is not a test tree — #228), group
         // and print in the display form every <f p=> uses
         const std::string_view rel    = rootRelPath( ing, f );
@@ -237,24 +207,68 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
             d.named.push_back( k.f );
         }
     }
-    // the name ceiling: whole directories, path order — a directory is named completely or not at all, so f= is never a
-    // silent part-list
-    std::size_t namedSoFar = 0;
+}
+
+// The name ceiling: whole directories, path order — a directory is named completely or not at all, so f= is never a
+// silent part-list; past the ceiling every later directory is count-only too (one contiguous cut).
+inline void applyInventoryNameCeiling( MapInventory& inv ) noexcept
+{
     for( const MapInventoryDir& d : inv.dirs )
     {
         inv.namesTotal += d.named.size();
     }
+    std::size_t namedSoFar = 0;
     for( MapInventoryDir& d : inv.dirs )
     {
         if( namedSoFar + d.named.size() > kInventoryNameCeiling )
         {
             inv.namesCapped = inv.namesCapped || !d.named.empty();
             d.named.clear();
-            namedSoFar = kInventoryNameCeiling;   // every later directory is count-only too: one contiguous cut
+            namedSoFar = kInventoryNameCeiling;
             continue;
         }
         namedSoFar += d.named.size();
     }
+    ENSURES( namedSoFar <= kInventoryNameCeiling, "the printed names stay within the ceiling" );
+}
+
+// `shownFile[f]` != 0 ⇔ the ranked rows printed a <f> group for file f. `pathRel` maps a file id to its display path
+// (the same root-relative form every <f p=> uses).
+template <class PathRel>
+inline MapInventory computeMapInventory( const IngestResult& ing, const std::vector<std::uint32_t>& outOff,
+                                         const std::vector<NodeId>& outTargets, const std::vector<char>& shownFile,
+                                         const PathRel& pathRel )
+{
+    const std::size_t F = ing.files.size();
+    EXPECTS( shownFile.size() == F, "one shown bit per indexed file" );
+    EXPECTS( outOff.size() >= ing.symbols.size() + 1 || ing.symbols.empty(), "outOff is the CSR offset array over the symbols" );
+    MapInventory inv;
+
+    // code symbols per file: a file with none is counted, never named
+    std::vector<std::uint32_t> codeSyms( F, 0 );
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.fileId < F && isInventoryCodeSymbol( s ) )
+        {
+            ++codeSyms[ s.fileId ];
+        }
+    }
+    // Present-only: the tier rides a map whose ranked rows LEFT OUT a file with code in it. A map that shows every
+    // such file has nothing to inventory (its unshown files are empty or data-only) and stays byte-identical.
+    bool anyCut = false;
+    for( std::size_t f = 0; f < F; ++f )
+    {
+        if( !shownFile[ f ] ) { ++inv.unlisted; } else { ++inv.listed; }
+        anyCut = anyCut || ( !shownFile[ f ] && codeSyms[ f ] > 0 );
+    }
+    if( !anyCut )
+    {
+        return MapInventory{};
+    }
+    inv.active = true;
+    collectInventoryEntries( inv, ing, outOff, outTargets, pathRel );
+    collectInventoryDirs( inv, ing, shownFile, codeSyms, pathRel );
+    applyInventoryNameCeiling( inv );
     ENSURES( inv.listed + inv.unlisted == F, "every indexed file is listed or inventoried" );
     return inv;
 }

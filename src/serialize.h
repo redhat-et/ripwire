@@ -2791,7 +2791,7 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
             for( std::uint32_t f : d.named )
             {
                 if( !names.empty() ) { names += ','; }
-                names += inventoryBaseOf( pathRel( f ) );
+                names += namesplit::afterLast( pathRel( f ), "/" );
             }
             w.write( " f=\"" );  w.write( escapeXml( names, esc ) );  w.write( "\"" );
         }
@@ -9569,7 +9569,7 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
             for( std::size_t j = 0; j < d.named.size(); ++j )
             {
                 if( j ) { w.write( "," ); }
-                writeJsonStr( w, inventoryBaseOf( pathRel( d.named[ j ] ) ), esc );
+                writeJsonStr( w, namesplit::afterLast( pathRel( d.named[ j ] ), "/" ), esc );
             }
             w.write( "]" );
         }
