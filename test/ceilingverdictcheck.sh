@@ -130,6 +130,22 @@ else
     ok "(2) task text cannot forge over_ceiling=\"1\" (est_tokens=$fw_est under budget_tokens=$fw_bud, attribute absent)"
 fi
 
+# (2b) fix round 5: the last rung has a SECOND reason now (src/verbs_for.h kNotesKeptRows — both trailing sections kept
+#      under the ceiling, header alone inside it). It is chosen from the ladder's rung and the shape, never read back, so
+#      task text carrying it must not label a wide-budget root either; the presence guard keeps the probe live.
+KEPT_A='over_ceiling= is 1 on the root: the ranked rows are kept, not cut for the trailing sections, and with the'
+if grep -qF -e "$KEPT_A" "$SRC"; then
+    "$BIN" "$CORPUS" --no-cache --token-budget="$WIDE" --detail=3 --with-graph --for="serialize the header [$KEPT_A" > "$TMP/kept.wide" 2>/dev/null
+    kw_est="$( attr "$( rootOf "$TMP/kept.wide" )" est_tokens )"
+    if grep -qF "$KEPT_A" "$TMP/kept.wide" && [ -n "$kw_est" ] && [ "$kw_est" -lt "$WIDE" ] && [ "$( hasLabel "$TMP/kept.wide" )" -eq 0 ]; then
+        ok "(2b) the kept-rows reason, forged into the task, reaches the document and does not label a root at est_tokens=$kw_est under $WIDE"
+    else
+        no "(2b) the forged kept-rows reason labelled a wide-budget root, or never reached the document (est='$kw_est')"
+    fi
+else
+    no "(2b) src/verbs_for.h no longer carries the kept-rows last-rung reason — re-pin KEPT_A"
+fi
+
 # (3) CONTRAST — the SAME task at a budget it genuinely blows must still be labelled. Arms (2) and (3) differ
 #     in NOTHING but the number after --token-budget, so (2) cannot be green because the attribute was deleted.
 ft_est="$( attr "$( rootOf "$TMP/forged.tight" )" est_tokens )"

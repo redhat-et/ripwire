@@ -32,6 +32,12 @@ measured Python corpus served 4 of 40 signature rows in a ~4.6 KB answer under t
   past the budget and the first body shrank to its first line. With BOTH flags nothing is reserved: on the measured
   questions that cut a needed signature row, so those answers keep their rows, serve the first body at its floor, and say
   `over_ceiling="1"` when they overshoot. Without `--token-budget` nothing changes. Gate: `estchargecheck` #11 A7R.
+- By-design break, owner ruling 2026-10-09: `--token-budget=2000 --detail=20 --with-graph` on this repo's `src` no longer
+  fits its allowance (6029 B vs 5428 B). It keeps every signature row the same budget shows without the two flags, says
+  `over_ceiling="1"`, and the cut first body carries a `next=` that returns exactly the lines it cut. The over-budget note
+  now names the kept rows, the graph block and the first body's floor. It used to blame the header floor, which was false
+  here: the header alone is ~1.8 KB. The old bar still holds for each flag alone and for both flags when the rows fit.
+  Gates: `estchargecheck` #11 A7 twin / A7B / A7R kill+next, `ceilingverdictcheck` (2b).
 - Under `--token-budget`, a spent ceiling no longer drops the compact `<hops>` section without a trace: it ships as
   `<hops shown="0" total="N" capped="1" next=…/>`, where `next=` is the same question without the budget. A partly cut
   `<hops>` carries the same `next=`, and a cut `<tail>` carries the `--for … --limit=N` file page. These bytes are reserved
