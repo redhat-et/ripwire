@@ -111,12 +111,16 @@ git status --porcelain 2>/dev/null | grep -vE '^\?\? (build|asan|tsan)' | LC_ALL
 # decide whether the ride-along note='s bytes should be charged to the search/verdict, the SAME predicate
 # `noteAppliesToBundle` already evaluates further down for the SAME two verbs (--expand/--outline). It does
 # not change which verbs honour --top-k, only fixes an existing verb's ceiling math, so this is a re-pin.
+# expand-lean-k64 (2026-10-08, 21->22 / 14->15): ONE new read of each, the same kind as V1's. `leanEligible` (src/main.cpp)
+# is the multi-definition twin of V1's exact-name predicate — it reads cfg.topKExplicit and cfg.maxTokens to decide whether
+# the lean default applies (an explicit --top-k and a --max-tokens-sized map both stand it aside). --expand/--outline
+# already honour both flags in kShapingVerbs, so this is a re-pin, not a column change.
 MAXSITES="$( grep -c 'cfg\.maxTokens\|c\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
 TOPSITES="$( grep -c 'cfg\.topK\|c\.topK'           src/main.cpp src/verbs_*.h src/mcpserver.h 2>/dev/null | awk -F: '{s+=$2} END{print s+0}' )"
-[ "$MAXSITES" = 21 ] && ok "(A) --max-tokens has 21 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
-                     || no "(A) --max-tokens read sites moved 21 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
-[ "$TOPSITES" = 14 ] && ok "(A) --top-k has 14 read sites outside cli.h" \
-                     || no "(A) --top-k read sites moved 14 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
+[ "$MAXSITES" = 22 ] && ok "(A) --max-tokens has 22 read sites outside cli.h (grep 'cfg\\.maxTokens' src/main.cpp src/verbs_*.h src/mcpserver.h)" \
+                     || no "(A) --max-tokens read sites moved 22 -> $MAXSITES: a verb gained or lost the budget, so kShapingVerbs' honorsMaxTokens column must be re-decided (and this number re-pinned)"
+[ "$TOPSITES" = 15 ] && ok "(A) --top-k has 15 read sites outside cli.h" \
+                     || no "(A) --top-k read sites moved 15 -> $TOPSITES: re-decide kShapingVerbs' honorsTopK column and re-pin this number"
 # no OTHER file may read them: a third file would be a verb family this table has never heard of.
 # 2026-08-29 main.cpp split: src/verbs_*.h are SECTIONS of main.cpp's own TU (RIPWIRE_MAIN_TU-guarded),
 # so they count as main.cpp in this derivation — the counts above sweep them, the exclusion below too.
