@@ -1571,6 +1571,21 @@ struct RawCommitStream
     int exitCode = 0;
 };
 
+// K51: mark a walk unread. `exitCode` is git's decoded exit (-1: it never started, or did not exit normally); the shell's 127
+// (not on PATH) and 126 (not executable) mean git never ran either, so `commits` is empty, not a prefix.
+inline void markWalkUnread( RawCommitStream& out, int exitCode, bool neverStarted ) noexcept
+{
+    out.unread   = true;
+    out.exitCode = exitCode;
+    out.notRun   = neverStarted || exitCode == 127 || exitCode == 126;
+}
+
+// A pclose()/wait status as an exit code: WEXITSTATUS on a normal exit, -1 for a signal or an unreadable status.
+inline int decodedExitCode( int status ) noexcept
+{
+    return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+}
+
 inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::string& coSince )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitLogNameOnlyRaw (git log --name-only popen)" );
@@ -1581,9 +1596,7 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        out.unread   = true;
-        out.notRun   = true;
-        out.exitCode = -1;
+        markWalkUnread( out, -1, true );
         return out;
     }
 
@@ -1610,14 +1623,11 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
         }
         out.commits.back().paths.push_back( std::move( s ) );   // readByteSafeLine clear()s its buffer first, so moving out of it is safe
     }
-    const int status = os::pclose( pipe );
-    if( status != 0 )
+    // K51: git died (a missing or corrupt object, a bad ref) — the lines above are a prefix, not the window — or the shell
+    // never ran it (127: not on PATH, 126: not executable), and there are no lines at all.
+    if( const int status = os::pclose( pipe ); status != 0 )
     {
-        // K51: git died (a missing or corrupt object, a bad ref) — the lines above are a prefix, not the window — or the
-        // shell never ran it (127: not on PATH, 126: not executable), and there are no lines at all.
-        out.unread   = true;
-        out.exitCode = WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
-        out.notRun   = out.exitCode == 127 || out.exitCode == 126;
+        markWalkUnread( out, decodedExitCode( status ), false );
     }
     return out;
 }
