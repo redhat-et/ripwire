@@ -1703,15 +1703,10 @@ inline bool expressionBeforeName( std::string_view line, std::size_t at ) noexce
 // or the end of the line (the body opens on the next line). Anything else — `;` `,` `)` `.` `[` `?` an operator, `}`,
 // a word such as `do` or `then` — means the name was called: `f( a ).then( b )`, `{ f( a ) }`, `f( a ) do |x|`.
 // `open` is the index of the `(` after the name. An unbalanced list (the signature wraps) decides nothing: false.
-inline bool callShapedAfterParams( std::string_view line, std::size_t open ) noexcept
+inline std::size_t matchingParen( std::string_view line, std::size_t open ) noexcept
 {
-    static constexpr std::string_view kAfterDeclWords[] = {
-        "const", "noexcept", "override", "final", "volatile", "mutable", "requires", "throw", "throws", "try", "where",
-        "__attribute__", "asm", "default", "delete",
-    };
     EXPECTS( open < line.size() && line[ open ] == '(', "the caller found the name's parameter list opening at `open`" );
-    int         depth = 0;
-    std::size_t close = std::string_view::npos;
+    int depth = 0;
     for( std::size_t i = open; i < line.size(); ++i )
     {
         if( line[ i ] == '(' )
@@ -1720,29 +1715,25 @@ inline bool callShapedAfterParams( std::string_view line, std::size_t open ) noe
         }
         else if( line[ i ] == ')' && --depth == 0 )
         {
-            close = i;
-            break;
+            return i;
         }
     }
-    if( close == std::string_view::npos )
-    {
-        return false;
-    }
-    std::size_t k = close + 1;
-    while( k < line.size() && std::isspace( (unsigned char)line[ k ] ) )
-    {
-        ++k;
-    }
-    if( k >= line.size() )
-    {
-        return false;
-    }
+    return std::string_view::npos;
+}
+
+// Is the text at `k` (the first non-space byte after the parameter list) a definition's tail? See callShapedAfterParams.
+inline bool definitionTailAt( std::string_view line, std::size_t k ) noexcept
+{
+    static constexpr std::string_view kAfterDeclWords[] = {
+        "const", "noexcept", "override", "final", "volatile", "mutable", "requires", "throw", "throws", "try", "where",
+        "__attribute__", "asm",
+    };
     const char c    = line[ k ];
     const char next = ( k + 1 < line.size() ) ? line[ k + 1 ] : '\0';
     if( c == '{' || c == ':' || c == '&' || ( c == '-' && next == '>' ) || ( c == '[' && next == '[' )
         || ( c == '/' && ( next == '/' || next == '*' ) ) )
     {
-        return false;
+        return true;
     }
     if( c == '=' )
     {
@@ -1752,26 +1743,30 @@ inline bool callShapedAfterParams( std::string_view line, std::size_t open ) noe
             ++v;
         }
         const std::string_view rest = line.substr( v );
-        return !( rest.starts_with( "0" ) || rest.starts_with( "default" ) || rest.starts_with( "delete" ) );
+        return rest.starts_with( "0" ) || rest.starts_with( "default" ) || rest.starts_with( "delete" );
     }
-    if( isIdentByte( (unsigned char)c ) )
+    std::size_t j = k;
+    while( j < line.size() && isIdentByte( (unsigned char)line[ j ] ) )
     {
-        std::size_t j = k;
-        while( j < line.size() && isIdentByte( (unsigned char)line[ j ] ) )
-        {
-            ++j;
-        }
-        const std::string_view word = line.substr( k, j - k );
-        for( std::string_view w : kAfterDeclWords )
-        {
-            if( word == w )
-            {
-                return false;
-            }
-        }
-        return true;
+        ++j;
     }
-    return true;
+    const std::string_view word = line.substr( k, j - k );
+    return !word.empty() && std::find( std::begin( kAfterDeclWords ), std::end( kAfterDeclWords ), word ) != std::end( kAfterDeclWords );
+}
+
+inline bool callShapedAfterParams( std::string_view line, std::size_t open ) noexcept
+{
+    const std::size_t close = matchingParen( line, open );
+    if( close == std::string_view::npos )
+    {
+        return false;
+    }
+    std::size_t k = close + 1;
+    while( k < line.size() && std::isspace( (unsigned char)line[ k ] ) )
+    {
+        ++k;
+    }
+    return k < line.size() && !definitionTailAt( line, k );
 }
 
 inline bool definitionShaped( std::string_view line, std::string_view sym, std::size_t at )
@@ -2999,17 +2994,17 @@ inline std::string whereisDottedRetryOf( const IngestResult& ing, std::string_vi
 // The legend's CONDITIONAL tail: each paragraph rides only an answer that carries what it defines, so a plain
 // answer pays no bytes for the with_history lane, test-local rows or the worktree overlay. Split out of
 // writeWhereisPage so the page writer stays a page writer.
-inline void writeWhereisLegendTail( std::FILE* out, const WhereResult& res, bool sharedDefs )
+// refs= on a hit rides only a definitions page that printed one (foldSharedBranchDefs), and so does its reading: the
+// SHARED DEFINITIONS clause of the legend, spliced by writeWhereisListedPage beside the tail below.
+inline constexpr char kWhereisSharedDefsLegend[] =
+    "SHARED DEFINITIONS: refs=\"N\" on a kind=\"def\" row outside the checkout means N scanned refs hold this same "
+    "definition line (the same path and the same line text); the row is printed once, for the first of those "
+    "refs by name, whose ref=, tip=, date= and l= it carries (another of the N may hold the line at a different "
+    "line number). It appears only under listing=\"defs\" and only when N is at least 2: a definition one ref "
+    "alone holds carries no refs=. hits= still counts every copy, and listing=all prints each ref's own row. ";
+
+inline void writeWhereisLegendTail( std::FILE* out, const WhereResult& res )
 {
-    // refs= on a hit rides only a definitions page that printed one (foldSharedBranchDefs), and so does its reading.
-    if( sharedDefs )
-    {
-        rw::emitRaw( out, "SHARED DEFINITIONS: refs=\"N\" on a kind=\"def\" row outside the checkout means N scanned refs hold this same "
-                           "definition line (the same path and the same line text); the row is printed once, for the first of those "
-                           "refs by name, whose ref=, tip=, date= and l= it carries (another of the N may hold the line at a different "
-                           "line number). It appears only under listing=\"defs\" and only when N is at least 2: a definition one ref "
-                           "alone holds carries no refs=. hits= still counts every copy, and listing=all prints each ref's own row. " );
-    }
     // §L10b: the with_history lane's own <history> element, previously undefined on this legend — shared
     // verbatim with --doc-drift's copy (gitoracle.h kHistoryProbeLegend) so the two cannot drift. Only
     // when res.history actually made that element reachable — an unconditional splice would cost every
@@ -3125,6 +3120,14 @@ struct ListedHits
     std::size_t              refsElided = 0;
     std::size_t              defsFolded = 0;   // def rows of other refs a listed row's refs= stands for (folded="N" on the root)
 };
+
+// The ` refs="N"` a row carries, or "": it rides ONLY the definitions page (foldSharedBranchDefs), where the row stands
+// for N refs' copies of the same definition line. listing=all prints each copy as its own row and never carries it; a
+// lone copy carries none. The legend's SHARED DEFINITIONS clause rides exactly the pages where this is non-empty.
+inline std::string whereisSharedAttr( const ListedHits& listed, const WhereHit& h )
+{
+    return ( listed.attr == "defs" && h.defRefs >= 2 ) ? ( " refs=\"" + std::to_string( h.defRefs ) + "\"" ) : std::string();
+}
 
 inline ListedHits listedHits( const WhereResult& res, WhereisListing listing )
 {
@@ -3284,12 +3287,9 @@ inline void writeWhereisRows( std::FILE* out, const WhereResult& res, const List
                           h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
             continue;
         }
-        // refs="N" rides ONLY the definitions page (foldSharedBranchDefs): the row stands for N refs' copies of the same
-        // definition line. listing=all prints each copy as its own row and never carries it; a lone copy carries none.
-        const std::string sharedAttr = ( listed.attr == "defs" && h.defRefs >= 2 ) ? ( " refs=\"" + std::to_string( h.defRefs ) + "\"" ) : std::string();
         rw::emitTo( out, "<hit ref=\"{}\" tip=\"{:.9}\" date=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{}{} t=\"{}\"/>",
                       ex( h.ref ).c_str(), h.tip.c_str(), ex( h.date ).c_str(), ex( h.path ).c_str(),
-                      h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", sharedAttr.c_str(), ex( h.text ).c_str() );
+                      h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", whereisSharedAttr( listed, h ).c_str(), ex( h.text ).c_str() );
     }
     ASSUME( shownCount == hitPage.end - hitPage.begin );
     // <more hits="N"/> = the LISTED rows AFTER this page, so shown + more == the listed rows from this page's offset
@@ -3412,10 +3412,12 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "Binary blobs are outside the claim (a text symbol cannot occur in one); an oversized TEXT blob suppresses "
                        "the claim instead of being silently skipped. Its ABSENCE claims nothing. "
                        "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). " );
-    const bool sharedDefs = listed.attr == "defs"
-                         && std::any_of( listed.rows.begin() + std::ptrdiff_t( hitPage.begin ), listed.rows.begin() + std::ptrdiff_t( hitPage.end ),
-                                         [ & ]( std::size_t i ) { return res.hits[ i ].defRefs >= 2; } );
-    writeWhereisLegendTail( out, res, sharedDefs );
+    if( std::any_of( listed.rows.begin() + std::ptrdiff_t( hitPage.begin ), listed.rows.begin() + std::ptrdiff_t( hitPage.end ),
+                     [ & ]( std::size_t i ) { return !whereisSharedAttr( listed, res.hits[ i ] ).empty(); } ) )
+    {
+        rw::emitRaw( out, kWhereisSharedDefsLegend );
+    }
+    writeWhereisLegendTail( out, res );
     std::fputs( "-->", out );
     const std::string headDate = whereisHeadDate( res );
     writeWhereisRoot( out, res, WhereisPageView{ listed, hitPage, pageLimit, pageOffset }, headDate, ex );
