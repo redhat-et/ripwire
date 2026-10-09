@@ -2180,7 +2180,10 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 28;   // MUST equal ingest.cpp's kCacheVersion (gated); 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 148;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 149;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 149 = 2026-10-08 (merge #3: carried 126 -> 144 -> 149; the
+                                                          //   Rails schema-column capture, DEFINITIONS ONLY — no Section-Ruby
+                                                          //   call edges; trains 22-26a took 128-148)
                                                           // 148 = 2026-10-04 (train 26a: PR #373 merged; above the branch's 145 and the 145–147
                                                           //   lanes in flight, see kParserVer note; kIngestCacheVersionMirror stays main's 28)
                                                           // 141 = 2026-10-04 (train 25: above FE-A's 134/135 and refval-edges' 140, see kParserVer

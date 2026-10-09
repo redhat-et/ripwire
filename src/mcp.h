@@ -141,8 +141,17 @@ inline constexpr McpToolMask kMcpAllToolsMask = ( McpToolMask{ 1 } << kMcpVerbCo
 // kMcpVerbTable's row for `name`, or kMcpVerbCount when the name is not an advertised tool.
 constexpr std::size_t mcpToolIndex( std::string_view name ) noexcept
 {
-    const McpVerbInfo* const row = findByField( kMcpVerbTable, &McpVerbInfo::name, name );
-    return row == nullptr ? kMcpVerbCount : static_cast<std::size_t>( row - kMcpVerbTable );
+    // Index loop, not findByField's row-pointer arithmetic: g++ 15 rejects the
+    // (char*)&row + offsetof folding under -fsanitize=address ("not a constant
+    // expression", mcp.h static_assert on 33 rows) — same values on every compiler.
+    for( std::size_t i = 0; i < kMcpVerbCount; ++i )
+    {
+        if( kMcpVerbTable[ i ].name == name )
+        {
+            return i;
+        }
+    }
+    return kMcpVerbCount;
 }
 
 // The named profiles. `members` is a comma list of tool names; "" means every tool.

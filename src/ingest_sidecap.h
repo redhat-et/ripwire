@@ -2419,7 +2419,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     // `include` in `class << self` — into binds, beside the inherit reference each mixin already is.
     if( le.lang == Lang::Ruby )
     {
-        captureRubyAttrDefs( root, fileId, src, defs );
+        captureRubyDefs( root, fileId, src, defs );   // #339: the Definitions-only walker (attr defs + rendered db/schema.rb columns)
         captureRubyBareCalls( root, fileId, src, refs );
         captureRubyFactories( root, fileId, src, binds );
         captureRubyHelperMethods( root, fileId, src, binds );

@@ -21,7 +21,13 @@ section, and it is not an afterthought.
 | **Co-change / known-item evals** | `--eval`, `--eval-retrieval` (see `bench/ANSWERQUALITY.md`) | Whether the tool surfaces the other files a real historical commit touched; and known-item retrieval across four rankers. |
 | **Ensemble calibration harness** | `bench/ensemblecal/` | Whether `--ensemble`'s four evidence families are actually orthogonal, how often each fires, how stable each is across commits — and the preset ladder derived from that (§9). |
 | **Differential argv harness** | `test/argvdiffcheck.sh` | That a refactor changed *nothing observable*: two binaries, every argv vector, stdout + stderr + exit code byte-identical. |
-| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 671 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 672 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+
+
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 672 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
+
+
+| **The gate suite** | `test/regression.sh`, `test/pargates.py` | 672 gate scripts plus the determinism, cache-transparency and golden contracts. <!-- gatecount --> |
 | **`--quality-delta`** | `src/quality.h` | Ten measured code-quality failure modes, reported only where a change made them worse. |
 
 ### The labeling protocol (why the held-out eval is allowed to disagree with the ranker)
@@ -5866,7 +5872,9 @@ copy here would be exactly the dialect divergence that gate exists to catch. Com
 tags, wrap, stable-order defaults), seven individually invoked standalone gates (`g1freshcheck`,
 `skillscan`, `htmlexport`, `compresscheck`, `handoffcheck`, `releaseinstallcheck`,
 `taskroutecheck`), and a single loop
-naming **671 gate scripts**, all of which exist on disk. <!-- gatecount -->
+
+
+naming **672 gate scripts**, all of which exist on disk. <!-- gatecount -->
 
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same scripts in parallel so a full
 verification fits in one sitting. It does not modify `regression.sh`.
@@ -6969,9 +6977,12 @@ Listed because the reason is more useful than the silence.
   shipped**. See `bench/locbench/anchorhop_calib.json`. The mention anchor's reproducible numbers are
   the ablations in §4.
 - **A single round gate-count.** Two in-tree numbers disagree (`test/pargates.py`'s docstring says
-  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 671. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 672. The <!-- gatecount -->
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 672. The <!-- gatecount -->
+
+
+  ~210; `test/argvdiffcheck.sh` says 200+), while the loop in `test/regression.sh` names 672. The <!-- gatecount -->
   loop is the authority; the stale docstrings are a known drift. Since 2026-09-10 the number is not
-  written by hand anywhere: `docs/gatecount_build.py` derives it from the loop and rewrites every
   published site, `test/gatecountcheck.sh` fails if any of them drifts, and `test/manifestcheck.sh`
   still asserts this very number against the loop's actual length as the post-hoc catch.
 - **"282 argv vectors."** The gate asserts a floor of ≥250 assembled from five sources; 282 was a
@@ -14470,3 +14481,4 @@ legends and `--help=all` (DEV-5); this registration's text above names no file o
 any A binary ran, because `--anchor` refuses without it (DEV-12); Gate S masks the MCP `_index` stamp (it folds file mtimes, so BASE differs
 from itself there) and the initialize reply's `dictv=` (DEV-9); I2 is read at the emitted 4-dp precision (DEV-10); B does not
 re-pick `--tree`, whose own offset paging a window swap would break (DEV-11).
+
