@@ -1080,6 +1080,12 @@ inline std::FILE* openTokenBudgetBuffer( rw::MemoryStream& stream, TokenBudgetSt
 // here the same way the layer will compact it and repriced by the same rule (compactlegend.h compactRepricedTokens),
 // so the number decided on is the number the root prints. A body the dialect cannot shape keeps its own price — an
 // empty one (the map streamed unbuffered) and a --json one (no posture) included.
+// map-inventory-d7: the number decided on is READ from the compacted body — the root's est_tokens=, or the map header's
+// field when --stable keeps the root free of it — never recomputed from compacted.size(). That recount priced the bytes
+// AFTER the layer had rewritten the est digits themselves (a 5-digit full price repriced to 4 digits is 2 bytes shorter
+// in the root and the header), so on that boundary the gate said one token less than the header it was asserting
+// (tokenbudgetcheck #9: src --top-k=233 on 7608d1f6, header 9965, gate 9964). The recount stays only as the fallback for
+// a compacted body that prints no price at all.
 static std::size_t compactPostureMapPrice( const rw::Config& cfg, std::string_view body, std::size_t fullEstTokens )
 {
     if( cfg.legend != "compact" || fullEstTokens == 0 )
@@ -1091,6 +1097,29 @@ static std::size_t compactPostureMapPrice( const rw::Config& cfg, std::string_vi
     {
         return fullEstTokens;
     }
+    const std::string_view       doc  = compacted;
+    const rw::CompactRootInfo    root = rw::findCompactRoot( doc );
+    if( const std::size_t printed = root.tag.empty() ? 0 : rw::rootUnsignedAttr( doc.substr( root.openBegin, root.openEnd - root.openBegin ), "est_tokens" );
+        printed > 0 )
+    {
+        return printed;
+    }
+    const std::string_view header = rw::compactMapHeader( doc );
+    if( const std::size_t at = header.find( " est_tokens=" ); at != std::string_view::npos )
+    {
+        std::size_t v = 0;
+        bool        any = false;
+        for( std::size_t i = at + 12; i < header.size() && header[ i ] >= '0' && header[ i ] <= '9'; ++i )
+        {
+            v   = v * 10 + std::size_t( header[ i ] - '0' );
+            any = true;
+        }
+        if( any && v > 0 )
+        {
+            return v;
+        }
+    }
+    // no printed price to read (a body whose root and header carry none): the recount is the only number there is
     return static_cast<std::size_t>( rw::compactRepricedTokens( static_cast<long long>( fullEstTokens ), body.size(), compacted.size() ) );
 }
 

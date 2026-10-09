@@ -195,7 +195,7 @@ function storyCards(s, { kick, head, stories, footText }){
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
     ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Kotlin · Ruby · PHP · Lua · Elixir · Dart · GDScript · Bash · C# · JSON · TOML · YAML · Markdown — 25 vendored grammars, Astro frontmatter on the TypeScript one; markdown headings are real symbols"],   // GDScript: CHANGELOG [0.6.2] (#233); Astro: CHANGELOG [0.6.4] (#320)
-    ["agent-native", "an MCP server and 188 long flags behind one `--help` that is always the authority"],
+    ["agent-native", "an MCP server and 189 long flags behind one `--help` that is always the authority"],
   ];
   // Row height carries the LONGEST body (the language line, which wraps to three at this width),
   // not the shortest — a fixed 0.68 clipped its last line off the bottom of the card.
@@ -230,7 +230,7 @@ function storyCards(s, { kick, head, stories, footText }){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 188 long flags; docs/COMMANDS.md carries an entry for every one of them, 168 with a recorded invocation and its output");
+  foot(s, "--help is generated from the binary's own flag table — 189 long flags; docs/COMMANDS.md carries an entry for every one of them, 168 with a recorded invocation and its output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -1537,7 +1537,7 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["188 long flags · 36 slides",        "bash test/deckclaimcheck.sh"],
+    ["189 long flags · 36 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["679 gate scripts",                  "bash test/manifestcheck.sh"], // gatecount

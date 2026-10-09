@@ -40,6 +40,14 @@ python3 - "$TMP/churn.json" "$TMP/pagerank.json" > "$TMP/verdict.txt" <<'PY'
 import json, sys
 churn = json.load( open( sys.argv[1] ) )
 plain = json.load( open( sys.argv[2] ) )
+# D7 (2026-10-08): "inv" is PAYLOAD, not header — the JSON twin of the map scope's <inv> element, which rides the
+# pagerank map whose ranked rows left files out and never a churn-ranked map (not the map scope). It sits beside "r"
+# and is compared as payload: the header keysets below exclude it, and INV_* says where it rode.
+PAYLOAD = { "inv" }
+print( "INV_PLAIN=" + str( int( "inv" in plain ) ) )
+print( "INV_CHURN=" + str( int( "inv" in churn ) ) )
+churn = { k: v for k, v in churn.items() if k not in PAYLOAD }
+plain = { k: v for k, v in plain.items() if k not in PAYLOAD }
 extra   = sorted( set( churn ) - set( plain ) )
 missing = sorted( set( plain ) - set( churn ) )
 print( "EXTRA=" + ",".join( extra ) )
@@ -62,6 +70,9 @@ else
 fi
 [ -z "$MISSING" ] && ok "churn JSON header drops no key the pagerank header carries" \
                   || no "churn JSON header is MISSING keys the pagerank header has: $MISSING"
+# D7: the inventory payload rides the map scope (pagerank, top-k=3 over src/ leaves files out) and never churn
+[ "$INV_PLAIN" = 1 ] && [ "$INV_CHURN" = 0 ] && ok "\"inv\" (payload) rides the pagerank map and not the churn map" \
+    || no "\"inv\" placement: pagerank=$INV_PLAIN churn=$INV_CHURN (want 1/0) — the payload exclusion above would hide a header key"
 
 # (2) the values carry MEANING (not pinned to a sha/window that moves with the tree)
 if [ "$RANK_BY" = "churn" ]; then ok "rank_by == \"churn\""; else no "rank_by is '$RANK_BY', want \"churn\""; fi
