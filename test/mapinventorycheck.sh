@@ -184,9 +184,9 @@ JNN="$( python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["inv"].g
 if [ -n "$JEN" ] && [ "$JEN" = "$ENEXT" ] && [ -n "$JNN" ] && [ "$JNN" = "$NNEXT" ]; then ok "(P3) JSON entries_next / names_next = XML"; else fail "(P3) JSON next: entries [$JEN] vs [$ENEXT], names [$JNN] vs [$NNEXT]"; fi
 
 # (Q) an entry is claimed only by its language's OWN convention (fix round 1: a method or an uncalled script function
-# named main was labelled a program entry). Nine near-misses, each must NOT be an entry: a Python / JS class method
+# named main was labelled a program entry). Ten near-misses, each must NOT be an entry: a Python / JS class method
 # main, a Ruby singleton method main (each uncalled, then each called from module scope), a Python main with no
-# __main__ guard and no caller, an uncalled exported TS main, a Bash main defined and never invoked. Positive controls in the same run: a Bash script that runs
+# __main__ guard and no caller, an uncalled exported TS main, a Bash main defined and never invoked, a Swift method main. Positive controls in the same run: a Bash script that runs
 # `main "$@"`, a Python main under the __main__ guard, a C main.
 Q="$TMP/langs"; mkdir -p "$Q/lib" "$Q/web" "$Q/bin" "$Q/pkg"
 printf 'class Runner:\n    def main(self):\n        return 2\n' >"$Q/lib/runner.py"
@@ -200,13 +200,15 @@ printf 'main() { echo hi; }\n' >"$Q/lib/lib.sh"
 printf 'class Runner:\n    def main(self):\n        return 2\n\nRunner().main()\n' >"$Q/lib/runner_called.py"
 printf 'class Job { main() { return 3 } }\nnew Job().main()\n' >"$Q/web/job_called.js"
 printf 'class Tool\n  def self.main\n    1\n  end\nend\nTool.main\n' >"$Q/lib/tool_called.rb"
+# a language with no main convention the index can read (Swift's entry is @main / main.swift): a method main is no claim
+printf 'class App {\n    func main() {}\n}\n' >"$Q/lib/App.swift"
 printf '#!/bin/sh\nwork() { echo w; }\nmain() { work; }\nmain "$@"\n' >"$Q/bin/run.sh"
 printf 'def go():\n    return 1\n\ndef main():\n    return go()\n\nif __name__ == "__main__":\n    main()\n' >"$Q/bin/tool.py"
 printf 'int step( void ) { return 0; }\nint main( void ) { return step(); }\n' >"$Q/prog.c"
 i=0; while [ "$i" -lt 30 ]; do printf 'def g%d():\n    return %d\n' "$i" "$i" >"$Q/pkg/m$i.py"; i=$(( i + 1 )); done
 "$BIN" "$Q" --no-cache --top-k=5 >"$TMP/langs.out" 2>/dev/null
 QE="$( grep -o '<entry p="[^"]*" n="[^"]*"' "$TMP/langs.out" | sed 's/<entry p="\([^"]*\)" n="\([^"]*\)"/\1:\2/' | tr '\n' ' ' )"
-for neg in lib/runner.py web/job.js lib/foo.rb lib/unused_main.py web/lib.ts lib/lib.sh lib/runner_called.py web/job_called.js lib/tool_called.rb; do
+for neg in lib/runner.py web/job.js lib/foo.rb lib/unused_main.py web/lib.ts lib/lib.sh lib/runner_called.py web/job_called.js lib/tool_called.rb lib/App.swift; do
     if printf '%s' "$QE" | grep -q "$neg:"; then fail "(Q) $neg claimed as a program entry [$QE]"; else ok "(Q) $neg (a method main / an uncalled script main) is not an entry"; fi
 done
 if [ "$QE" = 'bin/run.sh:main bin/tool.py:main prog.c:main ' ]; then ok "(Q) entries = a Bash main its script runs, a guarded Python main, a C main"; else fail "(Q) positive controls: got [$QE] want [bin/run.sh:main bin/tool.py:main prog.c:main ]"; fi
