@@ -156,8 +156,9 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
     };
     const auto entryEligibleFile = [ & ]( std::uint32_t f ) noexcept
     {
-        const std::string_view rel = rootRelPath( ing, f );
-        return !isTestPath( rel ) && inventoryRollupDirOf( rel ).empty();
+        // test PATHS need no clause here: isTestSymbol (below) covers a candidate def, and every test directory isTestPath
+        // knows (test/, tests/, __tests__/) is a rolled-up directory, which covers a __main__.py scope
+        return inventoryRollupDirOf( rootRelPath( ing, f ) ).empty();
     };
     std::vector<char> candidate( S, 0 );
     for( NodeId id = 0; id < S; ++id )
