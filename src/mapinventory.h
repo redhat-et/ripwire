@@ -95,14 +95,6 @@ inline std::string_view inventoryRollupDirOf( std::string_view rel ) noexcept
     return rel.substr( 0, best + bestLen - 1 );   // without the trailing '/'
 }
 
-// directory and basename of a display path: the shared splitters (resolve.h includerDir, namesplit afterLast), with
-// the root's files grouped under "."
-inline std::string_view inventoryDirOf( std::string_view rel ) noexcept
-{
-    const std::string_view dir = includerDir( rel );
-    return dir.empty() ? std::string_view( "." ) : dir;
-}
-
 // A code symbol: anything a reader can open as a definition — not a data Section (doc heading, JSON/YAML key) and
 // not the synthetic module-scope row every script file carries.
 inline bool isInventoryCodeSymbol( const Symbol& s ) noexcept
@@ -186,7 +178,8 @@ inline void collectInventoryDirs( MapInventory& inv, const IngestResult& ing, co
         const std::string_view rolled = inventoryRollupDirOf( rel );
         if( rolled.empty() )
         {
-            keyed.push_back( Keyed{ std::string( inventoryDirOf( disp ) ), false, f } );
+            const std::string_view dir = includerDir( disp );   // the shared directory splitter; the root's files group under "."
+            keyed.push_back( Keyed{ std::string( dir.empty() ? std::string_view( "." ) : dir ), false, f } );
             continue;
         }
         const std::size_t prefix = disp.ends_with( rel ) ? disp.size() - rel.size() : 0;
