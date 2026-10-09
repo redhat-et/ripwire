@@ -431,8 +431,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "listed",            "<inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below", true, "inv" },
     { "n",                 "<entry p= n=>: a program entry by name (a main only its own module scope calls, or __main__.py), callees as c rows; manifest entries not read", true, "entry" },
     { "n",                 "<ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted", true, "ls" },
-    { "entry_total",       "inv entry_total=N: N entries, the first 32 by path shown", true, "inv" },
-    { "names_cut",         "inv names_cut=N: N code files left unnamed past the 2000-name ceiling (later dirs n= only)", true, "inv" },
+    { "entries_capped",    "inv entries_capped=1 entries_total=N: N entries, the first 32 by path shown", true, "inv" },
+    { "names_capped",      "inv names_capped=1 names_total=N: N unshown code files passed the 2000-name ceiling; later dirs n= only", true, "inv" },
     { "pr_converged",      "pr_converged=0: iteration cap hit before convergence" },
     // Form-conditional map roots whose clauses (kRankByDisclosure, kChurnRankLegend, --around's seed block) are prose.
     // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.

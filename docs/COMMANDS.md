@@ -38,7 +38,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 ## Contents
 
-**understand a codebase cold** — [`--top-k`](#--top-kn) · [`--max-tokens`](#--max-tokensn) · [`--token-budget`](#--token-budgetnkmg) · [`--help-task`](#--help-tasktask) · [`--for`](#--fortask) · [`--sections`](#--sectionslegocompose) · [`--signatures-only`](#--signatures-only) · [`--auto-bodies`](#--auto-bodies) · [`--no-route`](#--no-route) · [`--adaptive`](#--adaptive) · [`--no-mention-boost`](#--no-mention-boost) · [`--no-doc-mention`](#--no-doc-mention) · [`--lego`](#--legotype) · [`--exemplar`](#--exemplartaskkind) · [`--recall`](#--recalltask) · [`--tree`](#--tree) · [`--html`](#--htmlfile) · [`--color-by`](#--color-bymode) · [`--order`](#--ordermode) · [`--no-stable`](#--no-stable)
+**understand a codebase cold** — [`--top-k`](#--top-kn) · [`--no-inventory`](#--no-inventory) · [`--max-tokens`](#--max-tokensn) · [`--token-budget`](#--token-budgetnkmg) · [`--help-task`](#--help-tasktask) · [`--for`](#--fortask) · [`--sections`](#--sectionslegocompose) · [`--signatures-only`](#--signatures-only) · [`--auto-bodies`](#--auto-bodies) · [`--no-route`](#--no-route) · [`--adaptive`](#--adaptive) · [`--no-mention-boost`](#--no-mention-boost) · [`--no-doc-mention`](#--no-doc-mention) · [`--lego`](#--legotype) · [`--exemplar`](#--exemplartaskkind) · [`--recall`](#--recalltask) · [`--tree`](#--tree) · [`--html`](#--htmlfile) · [`--color-by`](#--color-bymode) · [`--order`](#--ordermode) · [`--no-stable`](#--no-stable)
 
 **navigate / answer a question** — [`--around`](#--aroundsym) · [`--callers`](#--callerssym) · [`--callees`](#--calleessym) · [`--uses`](#--usessym) · [`--graph-query`](#--graph-queryexpr) · [`--external-surface`](#--external-surface) · [`--path`](#--pathsrcdst) · [`--connect`](#--connectabc) · [`--impact`](#--impactsym) · [`--verify`](#--verifyclaim) · [`--mentions`](#--mentionssym) · [`--affected`](#--affectedf1f2sym) · [`--exercises`](#--exercisestestfile) · [`--situ`](#--situf1f2) · [`--handoff`](#--handoff) · [`--test-gate`](#--test-gatef1f2) · [`--grep`](#--grepstr----regexpat) · [`--grep-context`](#--grep-contextn----grep-beforen----grep-aftern) · [`--and`](#--andstr) · [`--not`](#--notstr) · [`--grep-scope`](#--grep-scopelinefile) · [`--grep-in`](#--grep-incodeany) · [`--handles`](#--handles) · [`--match`](#--matchquery) · [`--pattern`](#--patternpat) · [`--query`](#--queryterms)
 
@@ -92,6 +92,17 @@ $ ./build/ripwire . --top-k=5
 - --for's OWN signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is INERT there (documented, not fixed — a real fix is a behavior change);
 - to WIDEN a --for answer use --limit=N, the file-grain page (one row per file), not --top-k.
 
+### `--no-inventory`
+
+**Answers:** drop the default map's <inv> tier: the files its ranked rows leave out, and the entries The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by name convention) and <ls> rows naming or counting every unshown file by directory.
+
+This flag drops it (the rows are unchanged either way). Never present under --max-tokens or on a payload verb's map.
+
+**Caveats (stated by the binary):**
+
+- drop the default map's <inv> tier: the files its ranked rows leave out, and the entries The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by name convention) and <ls> rows naming or counting every unshown file by directory.
+- Never present under --max-tokens or on a payload verb's map.
+
 ### `--max-tokens=N`
 
 **Answers:** budget the map to ~N tokens (binary-search top-K) — SHAPES the map to fit.
@@ -115,7 +126,7 @@ $ ./build/ripwire . --max-tokens=1500
 </r>
 ```
 
-**Shaped by:** `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--run-trace`, `--limit`
+**Shaped by:** `--no-inventory`, `--token-budget`, `--recall`, `--detail`, `--pr-context`, `--from-trace`, `--run-trace`, `--limit`
 
 **Caveats (stated by the binary):**
 

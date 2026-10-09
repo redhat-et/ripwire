@@ -52,8 +52,8 @@ if grep -q '</f><inv [^>]*>.*</inv></r>' "$TMP/map"; then ok "(B) <inv> follows 
 
 # (C) entries: exactly the program entries by convention, sorted by path
 ENTRIES="$( printf '%s' "$INV" | grep -o '<entry p="[^"]*" n="[^"]*"' | sed 's/<entry p="\([^"]*\)" n="\([^"]*\)"/\1:\2/' | tr '\n' ' ' )"
-WANT='go/cmd/main.go:main java/App.java:main prog.c:main py/pkg/__main__.py:&lt;file-scope&gt; py/tool.py:main rs/src/main.rs:main '
-if [ "$ENTRIES" = "$WANT" ]; then ok "(C) entries = C/Go/Rust/Java main, a __main__.py scope, a guarded Python main"; else fail "(C) entries: got [$ENTRIES] want [$WANT]"; fi
+WANT='cs/Program.cs:Main go/cmd/main.go:main java/App.java:main prog.c:main py/pkg/__main__.py:&lt;file-scope&gt; py/tool.py:main rs/src/main.rs:main ts/cli.ts:main '
+if [ "$ENTRIES" = "$WANT" ]; then ok "(C) entries = C/Go/Rust/Java/C# main, a __main__.py scope, a guarded Python main, a TS main its module scope calls"; else fail "(C) entries: got [$ENTRIES] want [$WANT]"; fi
 # (C2) near-miss negatives, one per rule: a test-dir main, an examples main, a main with a real caller, a main
 # reached only from ANOTHER file's module scope
 for neg in 'tests/test_prog.c' 'examples/demo.c' 'py/lib.py' 'py/pkg/cli.py'; do
@@ -149,11 +149,11 @@ gen_go "$TMP/g32" 32; gen_c "$TMP/g32" 2; gen_go "$TMP/g33" 33; gen_c "$TMP/g33"
 "$BIN" "$TMP/g32" --no-cache --top-k=1 >"$TMP/g32.out" 2>/dev/null
 "$BIN" "$TMP/g33" --no-cache --top-k=1 >"$TMP/g33.out" 2>/dev/null
 NC1="$( grep -o '<ls p="src" n="[0-9]*" f="[^"]*"' "$TMP/c2001.out" | sed 's/.*f="//;s/"$//' | tr ',' '\n' | wc -l | tr -d ' ' )"
-if [ "$NC1" = 2000 ] && ! grep -q 'names_cut=' "$TMP/c2001.out"; then ok "(P) 2000 unshown code files: all named, no names_cut="; else fail "(P) at the 2000-name ceiling: named=$NC1, names_cut=$( grep -o 'names_cut="[0-9]*"' "$TMP/c2001.out" )"; fi
-if grep -q '<inv listed="1" unlisted="2001" names_cut="2001">' "$TMP/c2002.out" && grep -q '<ls p="src" n="2001"/>' "$TMP/c2002.out"; then ok "(P) 2001 past the ceiling: the dir keeps n= only, names_cut=2001"; else fail "(P) past the ceiling: $( grep -o '<inv [^>]*>' "$TMP/c2002.out" ) $( grep -o '<ls p="src" n="[0-9]*"[^/]\{0,20\}' "$TMP/c2002.out" )"; fi
+if [ "$NC1" = 2000 ] && ! grep -q 'names_capped=' "$TMP/c2001.out"; then ok "(P) 2000 unshown code files: all named, no names_capped="; else fail "(P) at the 2000-name ceiling: named=$NC1, $( grep -o 'names_capped="[0-9]*"' "$TMP/c2001.out" )"; fi
+if grep -q '<inv listed="1" unlisted="2001" names_capped="1" names_total="2001">' "$TMP/c2002.out" && grep -q '<ls p="src" n="2001"/>' "$TMP/c2002.out"; then ok "(P) 2001 past the ceiling: the dir keeps n= only, names_capped=1 names_total=2001"; else fail "(P) past the ceiling: $( grep -o '<inv [^>]*>' "$TMP/c2002.out" ) $( grep -o '<ls p="src" n="[0-9]*"[^/]\{0,20\}' "$TMP/c2002.out" )"; fi
 E32="$( grep -o '<entry p="' "$TMP/g32.out" | wc -l | tr -d ' ' )"; E33="$( grep -o '<entry p="' "$TMP/g33.out" | wc -l | tr -d ' ' )"
-if [ "$E32" = 32 ] && ! grep -q 'entry_total=' "$TMP/g32.out"; then ok "(P) 32 entries: all shown, no entry_total="; else fail "(P) 32 entries: shown=$E32 $( grep -o 'entry_total="[0-9]*"' "$TMP/g32.out" )"; fi
-if [ "$E33" = 32 ] && grep -q 'entry_total="33"' "$TMP/g33.out"; then ok "(P) 33 entries: 32 shown, entry_total=33"; else fail "(P) 33 entries: shown=$E33 $( grep -o 'entry_total="[0-9]*"' "$TMP/g33.out" )"; fi
+if [ "$E32" = 32 ] && ! grep -q 'entries_capped=' "$TMP/g32.out"; then ok "(P) 32 entries: all shown, no entries_capped="; else fail "(P) 32 entries: shown=$E32 $( grep -o 'entries_total="[0-9]*"' "$TMP/g32.out" )"; fi
+if [ "$E33" = 32 ] && grep -q 'entries_capped="1" entries_total="33"' "$TMP/g33.out"; then ok "(P) 33 entries: 32 shown, entries_capped=1 entries_total=33"; else fail "(P) 33 entries: shown=$E33 $( grep -o 'entries_total="[0-9]*"' "$TMP/g33.out" )"; fi
 
 echo "mapinventorycheck: $FAILED failure(s)"
 [ "$FAILED" -eq 0 ]

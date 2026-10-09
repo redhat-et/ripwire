@@ -48,14 +48,15 @@ struct MapInventory
     std::vector<NodeId>        entries;            // path order, then symbol id; at most kInventoryEntryCap
     std::size_t                entryTotal = 0;     // every entry found (entries.size() < entryTotal ⇒ cut, disclosed)
     std::vector<MapInventoryDir> dirs;             // path order
-    std::size_t                namesCut = 0;       // code files counted but not named: the name ceiling was reached
+    std::size_t                namesTotal = 0;     // every unshown code file a directory row could name
+    bool                       namesCapped = false;   // the name ceiling left some of them counted, not named (disclosed)
 };
 
 // RUNAWAY GUARDS (PROCESS rule 5a), far above any measured answer: the eleven orient repos of the round-1 table name at
-// most 431 files (textual) and list at most 6 entries (gotestsum), so neither guard fires on them. A monorepo of
+// most 199 files (htop) and list at most 5 entries (gotestsum), so neither guard fires on them. A monorepo of
 // thousands of unshown code files would otherwise print every name (~13 B each). Past the ceiling, directories in path
-// order keep n= and drop f= (names_cut= on <inv> says how many files that left unnamed; ripwire on p= ranks them);
-// past the entry cap, entry_total= says how many entries exist.
+// order keep n= and drop f= (names_capped="1" names_total=N on <inv>; ripwire on p= ranks them); past the entry cap,
+// entries_capped="1" entries_total=N.
 inline constexpr std::size_t kInventoryNameCeiling = 2000;
 inline constexpr std::size_t kInventoryEntryCap    = 32;
 
@@ -238,11 +239,15 @@ inline MapInventory computeMapInventory( const IngestResult& ing, const std::vec
     // the name ceiling: whole directories, path order — a directory is named completely or not at all, so f= is never a
     // silent part-list
     std::size_t namedSoFar = 0;
+    for( const MapInventoryDir& d : inv.dirs )
+    {
+        inv.namesTotal += d.named.size();
+    }
     for( MapInventoryDir& d : inv.dirs )
     {
         if( namedSoFar + d.named.size() > kInventoryNameCeiling )
         {
-            inv.namesCut += d.named.size();
+            inv.namesCapped = inv.namesCapped || !d.named.empty();
             d.named.clear();
             namedSoFar = kInventoryNameCeiling;   // every later directory is count-only too: one contiguous cut
             continue;
@@ -261,8 +266,8 @@ inline constexpr std::string_view kMapInventoryLegend =
     "or a __main__.py module scope, with its resolved callees as c rows; entries declared only in a manifest (package.json "
     "main/bin, console_scripts) are not detected. ls p= n= f=: n= unshown files under directory p=, f= the code files "
     "among them by name; test, doc and config files are counted, not named, and a test/bench/fixture/example/doc "
-    "directory rolls up whole. ripwire on p= ranks that directory. Runaway guards: entry_total=N when more than 32 "
-    "entries exist (the first 32 by path shown); names_cut=N code files left unnamed past a 2000 name ceiling "
-    "(directories after it, path order, keep n= only) -->";
+    "directory rolls up whole. ripwire on p= ranks that directory. Runaway guards: entries_capped=1 entries_total=N "
+    "when more than 32 entries exist (the first 32 by path shown); names_capped=1 names_total=N when the N unshown "
+    "code files pass a 2000 name ceiling (directories past it, path order, keep n= only) -->";
 
 }  // namespace rw

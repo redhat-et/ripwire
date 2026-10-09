@@ -2770,8 +2770,8 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
     EXPECTS( inv.active, "the caller emits the tier only when it has a cut to inventory" );
     w.write( "<inv listed=\"" );  w.write( std::to_string( inv.listed ) );
     w.write( "\" unlisted=\"" );  w.write( std::to_string( inv.unlisted ) );  w.write( "\"" );
-    if( inv.entryTotal > inv.entries.size() ) { w.write( " entry_total=\"" );  w.write( std::to_string( inv.entryTotal ) );  w.write( "\"" ); }
-    if( inv.namesCut > 0 )                    { w.write( " names_cut=\"" );    w.write( std::to_string( inv.namesCut ) );    w.write( "\"" ); }
+    if( inv.entryTotal > inv.entries.size() ) { w.write( " entries_capped=\"1\" entries_total=\"" );  w.write( std::to_string( inv.entryTotal ) );  w.write( "\"" ); }
+    if( inv.namesCapped )                     { w.write( " names_capped=\"1\" names_total=\"" );    w.write( std::to_string( inv.namesTotal ) );  w.write( "\"" ); }
     w.write( ">" );
     for( NodeId id : inv.entries )
     {
@@ -9532,8 +9532,8 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
     EXPECTS( inv.active, "the caller emits the tier only when it has a cut to inventory" );
     w.write( ",\"inv\":{\"listed\":" );  w.write( std::to_string( inv.listed ) );
     w.write( ",\"unlisted\":" );         w.write( std::to_string( inv.unlisted ) );
-    if( inv.entryTotal > inv.entries.size() ) { w.write( ",\"entry_total\":" );  w.write( std::to_string( inv.entryTotal ) ); }
-    if( inv.namesCut > 0 )                    { w.write( ",\"names_cut\":" );    w.write( std::to_string( inv.namesCut ) ); }
+    if( inv.entryTotal > inv.entries.size() ) { w.write( ",\"entries_capped\":true,\"entries_total\":" );  w.write( std::to_string( inv.entryTotal ) ); }
+    if( inv.namesCapped )                     { w.write( ",\"names_capped\":true,\"names_total\":" );    w.write( std::to_string( inv.namesTotal ) ); }
     w.write( ",\"entry\":[" );
     for( std::size_t i = 0; i < inv.entries.size(); ++i )
     {

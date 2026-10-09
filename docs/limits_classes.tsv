@@ -47,6 +47,8 @@ kHandoffSymbolsPerDocFile	OUTPUT
 kIdiomMaxCondTokens	BOUNDARY
 kIdiomMaxLabelTokens	BOUNDARY
 kIdiomMaxReturnTokens	BOUNDARY
+kInventoryEntryCap	OUTPUT
+kInventoryNameCeiling	OUTPUT
 kMatchMaxHits	INDEXING
 kMaxAggsModeled	INDEXING
 kMaxAliasDepth	INDEXING
