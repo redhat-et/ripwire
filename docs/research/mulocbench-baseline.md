@@ -1,7 +1,7 @@
 # MULocBench — adapter design, pre-registration, and open questions (no run yet)
 
-Status 2026-09-20: **no MULocBench data is on disk anywhere on this machine** (checked
-`bench-assets/`, `$ORCH`, and the whole `project2` tree — nothing). **No number exists yet.** This
+Status 2026-09-20: **no MULocBench data is on disk in the repository or `bench-assets/`** (checked
+both — nothing). **No number exists yet.** This
 document is the design and the pre-registration that must exist *before* any row is scored — the
 house rule `bench/multiswe/run_multiswe.py` and `bench/locbench/run_locbench.py` both follow
 (`docs/METHODOLOGY.md` §9; every `dataset.lock` in this repo is a frozen, content-hashed instance
@@ -43,9 +43,7 @@ is a guess pending confirmation, not a fact this document asserts.
 
 ## 1. What a MULocBench adapter must change, versus what we have
 
-Read: `bench/locbench/run_locbench.py` (the LocBench harness `$ORCH/sim/r4/run_locbench.py` names —
-confirmed identical in content to the committed `bench/locbench/run_locbench.py`; the `$ORCH` copy is
-a working mirror, not a second source), and `bench/multiswe/run_multiswe.py`, which already
+Read: `bench/locbench/run_locbench.py` (the LocBench harness), and `bench/multiswe/run_multiswe.py`, which already
 demonstrates the reuse pattern (`sys.path.insert` + `import run_locbench as lb`) this adapter follows.
 `bench-assets/r4/r4_worker.py` / `r4_score.py` are the **head-to-head** harness's worker/scorer
 (`bench/headtohead/`, a different instrument — it re-runs *other tools*, not just ripwire, against the
@@ -263,8 +261,8 @@ Derived from reading the paper and the dataset card, not from anything else:
 
 ## 4. Owner-run fetch steps
 
-Same shape as `$ORCH/sim/msb/README_OWNER.md`'s Multi-SWE-bench pattern (also mirrored at
-`$ORCH/sim/mulocbench/README_OWNER.md` for this round). **Nothing below has been run.** No agent in
+Same shape as the owner-run Multi-SWE-bench pattern (the owner fetches and clones; the agent only reads
+what is already on disk). **Nothing below has been run.** No agent in
 this lane downloads the dataset or clones a repository — that is the owner's step, same reasoning as
 Multi-SWE-bench: **do not download the dataset or clone any repository** is a hard constraint on the
 agent, not on the owner.
@@ -273,31 +271,31 @@ agent, not on the owner.
 real field names/shapes before any mining code is trusted (closes the gap §1 flags: field names above
 are sourced from the dataset card's prose, not yet verified against one real row).
 ```sh
-bash $ORCH/sim/mulocbench/1_fetch_rows.sh
+bash fetch_rows.sh   # owner-supplied script; not committed in this PR
 # writes bench-assets/mulocbench/datasets/{splits.json, mulocbench_rows.jsonl, SHA256SUMS}
 ```
-Uses the same public HF `datasets-server` JSON API `1_fetch_rows.sh` in `sim/msb` already uses
+The owner's script uses the public HF `datasets-server` JSON API, as the Multi-SWE-bench fetch step does
 (`/splits`, then paginated `/rows`), pointed at `somethingone/MULocBench`, `train` split — JSON rows
 only, no Parquet/pickle download, no code execution. **Disk budget: well under 200 MB** (the card's
 own Parquet auto-conversion is 21.4 MB; JSON row text is typically 2-4x a Parquet size for
 text-heavy columns like `body`, so a 200 MB ceiling is a generous estimate, not a measurement — will
 be corrected against the real number the first time this runs).
 
-**Step 2 — tell the agent step 1 is done.** The orchestrator then works out, from the real
+**Step 2 — tell the agent step 1 is done.** The agent then works out, from the real
 `file_loc`/`own_code_loc`/`ass_file_loc`/`other_rep_loc`/`loctype` shapes, whether §1/§2's field-name
 assumptions held, fixes the mining/eligibility code in writing if not, and writes
 `bench/mulocbench/dataset.lock` (frozen instance list, content-hash sealed, same shape as
 `bench/multiswe/dataset.lock`).
 
 **Step 3 — clone the checkouts the lock names.** Single-commit, shallow, hooks/LFS off, same shape
-as `sim/msb/3_clone.sh`:
+as the Multi-SWE-bench clone step:
 ```sh
-bash $ORCH/sim/mulocbench/3_clone.sh
+bash clone.sh   # owner-supplied script; not committed in this PR
 # reads bench-assets/mulocbench/datasets/checkouts.tsv (org/repo <TAB> base_commit <TAB> dir)
 # writes bench-assets/mulocbench/repos/<dir>/
 ```
 **Disk budget: 8 GB, hard-capped in the script (checks `du -sk` before each clone and stops), same
-budget-then-stop shape as `sim/msb/3_clone.sh`'s 15 GB cap.** This is a placeholder estimate, not a
+budget-then-stop shape as the Multi-SWE-bench clone step's 15 GB cap.** This is a placeholder estimate, not a
 measurement — only 46 distinct repos total (versus Multi-SWE-bench's many-repos-per-language spread),
 but MULocBench's "top-50 most-starred Python projects" sampling frame plausibly includes some large
 monorepo-style checkouts; the real figure will be known after step 1 lists the actual 46 repos, and
@@ -309,7 +307,7 @@ first real MULocBench number this repo will have.
 
 ## 5. Current status (task 5)
 
-No MULocBench data exists on this disk — checked `bench-assets/`, every `$ORCH/sim/*` directory, and
+No MULocBench data exists in the repository — checked `bench-assets/` and
 the repo tree; nothing under any spelling of `mulocbench`/`MULocBench` exists except this document and
 the adapter skeleton in `bench/mulocbench/`. **No number exists yet, and none is claimed here.**
 Everything in §2 is the pre-registration; §4 is what the owner needs to run before §2 can be tested

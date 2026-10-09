@@ -12,8 +12,8 @@
 # sees a real row, and fix it in writing (this file + the design doc, same commit) rather than quietly
 # reconciling a mismatch.
 #
-# Do NOT run this file's network path in this lane. The owner fetches raw rows via
-# $ORCH/sim/mulocbench/1_fetch_rows.sh (JSON only, no dataset build); this file's own --refresh-dataset
+# Do NOT run this file's network path in this lane. The owner fetches raw rows separately (JSON only, no
+# dataset build; see docs/research/mulocbench-baseline.md §4); this file's own --refresh-dataset
 # network path mirrors bench/multiswe/run_multiswe.py's shape for future symmetry, but has not been
 # exercised this round. --offline is the only mode this file has ever been asked to run in, and it has
 # not even been run in that mode yet (no fixture exists — bench/multiswe/README.md's offline-gate
@@ -160,7 +160,7 @@ def main():
     ap = argparse.ArgumentParser( description="UNTESTED MULocBench adapter skeleton — see "
                                               "docs/research/mulocbench-baseline.md before running anything" )
     ap.add_argument( "--raw-jsonl", required=True, help="local JSONL of MULocBench rows, already fetched "
-                     "by the OWNER via $ORCH/sim/mulocbench/1_fetch_rows.sh — this script never fetches it" )
+                     "by the OWNER per docs/research/mulocbench-baseline.md §4 — this script never fetches it" )
     ap.add_argument( "--dataset-lock", default=str( HERE / "dataset.lock" ) )
     ap.add_argument( "--work-dir", required=True )
     ap.add_argument( "--top-k", type=int, default=200 )
