@@ -551,9 +551,14 @@ probeFor()
 # the defs page whenever it lists MORE definitions than the all page under the row cap, whatever its bytes. Rides only a
 # page that carries listing=; nothing else moved. The OLD path keeps its pin: the whereis-listing=all twin holds the
 # whole-list page's legend at 700 B (measured 692, unchanged).
+# RE-PINNED 2026-10-08 (lane/map-inventory-d7, D7), measured on this gate's fixture: ripwire.map/v1 892->1129, pin
+# 910->1140 (measured + 10 rounded up to 10). The --top-k=3 probe leaves out three of the fixture's six files, so the map
+# now carries the inventory tier (<inv listed= unlisted=>, <ls p= n= f=>; no <entry> on this fixture) and its two
+# present-only readings (+237 B with separators). Nothing else moved. The OLD path keeps its pin: the --no-inventory twin
+# after the universe loop holds the same probe without the tier at 910 B.
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
-ripwire.map/v1                   910   892
+ripwire.map/v1                   1140  1129
 ripwire.map-diff/v1              900   885
 ripwire.pack-signatures/v1       770   759
 ripwire.metrics/v1               1040  1021
@@ -795,6 +800,18 @@ if [ "$rcWall" -eq 0 ] && [ "$( leg schema "$TMP/wall.c" )" = "ripwire.whereis/v
     ok "(U-TWIN) --whereis=distance --whereis-listing=all compact PROSE legend is $wallLb B (<= its 700 B pin; the default's pin is 1040)"
 else
     no "(U-TWIN) --whereis-listing=all compact PROSE legend is '${wallLb:-none}' B (pin 700; exit $rcWall): $( leg legend "$TMP/wall.c" | head -c 200 )"
+fi
+# (U-TWIN) the map without its inventory tier keeps the pre-D7 pin: the --top-k=3 probe's pin rose to 1140 B for the <inv>
+# readings, and without this twin the rest of the map legend could grow inside that headroom unseen. --no-inventory serves
+# the same ranked rows with no tier (mapinventorycheck (N)). 910 = the pre-D7 pin (measured 892).
+( cd "$REPO" && "$BIN" . --top-k=3 --no-inventory >"$TMP/mnoinv.c" 2>/dev/null </dev/null ); rcMni=$?
+( cd "$REPO" && "$BIN" . --top-k=3 --no-inventory --legend=full >"$TMP/mnoinv.f" 2>/dev/null </dev/null )
+mniLb="$( leg prose "$TMP/mnoinv.c" "$TMP/mnoinv.f" )"
+if [ "$rcMni" -eq 0 ] && [ "$( leg schema "$TMP/mnoinv.c" )" = "ripwire.map/v1" ] && ! grep -q '<inv listed="' "$TMP/mnoinv.c" \
+   && [ -n "$mniLb" ] && [ "$mniLb" -gt 0 ] 2>/dev/null && [ "$mniLb" -le 910 ]; then
+    ok "(U-TWIN) --top-k=3 --no-inventory compact PROSE legend is $mniLb B (<= the pre-D7 910 B pin; the tiered probe's pin is 1140)"
+else
+    no "(U-TWIN) --top-k=3 --no-inventory compact PROSE legend is '${mniLb:-none}' B (pin 910; exit $rcMni): $( leg legend "$TMP/mnoinv.c" | head -c 200 )"
 fi
 
 echo
