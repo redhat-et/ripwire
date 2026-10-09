@@ -789,12 +789,14 @@ inline constexpr std::string_view kForCompactLegendHops =
 // the ranked head, never a resolution), widens noedge= to the owners, and defines the two disclosures an owner cut carries.
 // What qword= does NOT mean: that the row is the only, or the true, implementation of the question's subject.
 inline constexpr std::string_view kForCompactLegendOwner =
-    "; h qword= its name equals that question word (by name, not resolved, not the only one), first, calls to 100 (capped=1 next= all); "
+    "; h qword= its name (case-folded, leading _#$@ dropped) equals that question word (by name, not resolved, not the only one), first, calls to 100 (capped=1 next= all); "
     "qword_cut= owners not so served, next= the first";
 // owner-hop: the full dialect's reading of the same two attributes (present-only, after the clause above; no "--": a comment)
 inline constexpr std::string_view kForOwnerHopLegend =
-    "; hops row qword= the question word that row's NAME equals (by name in the ranked head, a lookup, not a resolution; it "
-    "does not mean the symbol is the only or the true implementation): such an owner row comes first and its calls child "
+    "; hops row qword= the question word that row's NAME equals (ASCII case-folded, leading _ # $ @ dropped; by name in the "
+    "ranked head, a lookup, not a resolution; it "
+    "does not mean the symbol is the only or the true implementation): such an owner row comes first (a word on a short "
+    "common-verb list such as get, set, run or write ranks after the other owner words) and its calls child "
     "lists up to 100 callee names (capped=1 with next= naming the full list when the guard or the budget cut it); an owner "
     "with no resolved callee is counted in noedge= like any ranked symbol. hops qword_cut=N: owners not served as a qword "
     "row (the three-row cap or the budget; one of the six ranked candidates still keeps its plain row), next= the first";
