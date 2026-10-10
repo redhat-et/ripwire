@@ -47,6 +47,7 @@ kHandoffSymbolsPerDocFile	OUTPUT
 kIdiomMaxCondTokens	BOUNDARY
 kIdiomMaxLabelTokens	BOUNDARY
 kIdiomMaxReturnTokens	BOUNDARY
+kLegoClosureRowCap	OUTPUT
 kMatchMaxHits	INDEXING
 kMaxAggsModeled	INDEXING
 kMaxAliasDepth	INDEXING

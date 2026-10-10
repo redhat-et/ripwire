@@ -8472,8 +8472,10 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
 // lane lego-transitive: the TARGETED --lego answer also lists the DEEPER implementors — the types below a direct one
 // (`class Default( SimpleFormatter )` under `BaseFormatter`), each with via= (the type it extends that put it in the
 // closure) and depth= (hops below the interface; the direct rows are depth 1 and carry neither). The direct rows stay
-// uncapped as before; the deeper rows are one page of at most kLegoClosureRowCap, a RUNAWAY guard well above any
-// measured closure, and a cut discloses transitive_shown= + has_more="1" + a next= that replays the verb with --offset.
+// uncapped as before; the deeper rows are one page of at most kLegoClosureRowCap, a RUNAWAY guard: the measured
+// closures of a library base class are 1-78 rows, while a framework root (a UI toolkit's node or widget class, 1.4-1.6 K
+// classes below it) would print ~170-190 KB, so it pages. A cut discloses transitive_shown= + has_more="1" + a next= that replays
+// the verb with --offset.
 // --limit/--offset (MCP limit/offset) window these deeper rows; the direct rows repeat on every page.
 inline constexpr std::size_t kLegoClosureRowCap = 200;
 
