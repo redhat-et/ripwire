@@ -17,6 +17,7 @@
 #      <iface> row and the ranked --for <lego> section keep their bare p=.
 # (M1) a Ruby module mixed in with include/extend (captureRubyMixinBases) is an implements edge: --lego=DSL lists TaskLib.
 # (M2) a JS/TS class factory `const Sub = Base.extend('Sub', …)` is a class definition extending its receiver.
+# (M3) a bare name resolves to a CODE definition whenever one matched, never to a markdown heading sorted first.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -193,6 +194,28 @@ done
 if lego TNode
 then
     if has '<impl n="TBin" p="ts/nodes.ts:5"/>' && has '<impl n="TView" p="ts/view.tsx:2"/>'; then ok "TypeScript (with a type argument) and TSX factories list under TNode"; else no "TNode rows: $( printf '%s\n' "$OUT" | grep '^<impl' | tr '\n' ' ' )"; fi
+fi
+
+echo "=== (M3) the focus is a CODE definition whenever one matched ==="
+if lego Loader
+then
+    if iface | grep -q 'p="js/loader.js"'; then ok "--lego=Loader picks js/loader.js over the docs/api.md heading"; else no "--lego=Loader picked: $( iface )"; fi
+    if has '<impl n="FileSystemLoader"'; then ok "…and lists its implementor FileSystemLoader"; else no "Loader lists no FileSystemLoader"; fi
+    if iface | grep -q 'defs="2"'; then ok "defs=\"2\" still counts the heading beside the class"; else no "Loader defs: $( iface )"; fi
+fi
+if lego js/docs/api.md:Loader
+then
+    if iface | grep -q 'p="js/docs/api.md"'; then ok "a file:name selector still reaches the heading"; else no "docs selector: $( iface )"; fi
+fi
+if lego Guide
+then
+    if iface | grep -q 'p="js/docs/api.md"'; then ok "a name only a heading defines still resolves to it"; else no "Guide: $( iface )"; fi
+fi
+if "$BIN" "$FIX" --no-cache --around=Loader >"$DIR/around" 2>"$DIR/err"
+then
+    if grep -o '<s [^>]*n="Loader"[^>]*>' "$DIR/around" | grep -q 'js/loader.js\|t="cls"'; then ok "--around=Loader centres on the class (the same resolver)"; else no "--around=Loader rows: $( grep -o '<s [^>]*n="Loader"[^>]*>' "$DIR/around" | head -2 )"; fi
+else
+    no "--around=Loader exited non-zero: $( head -2 "$DIR/err" )"
 fi
 
 echo "=== well-formed ==="

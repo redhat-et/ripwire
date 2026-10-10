@@ -2992,8 +2992,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- of= is the resolved SEED this neighbourhood is centred on; depth= call hops walked and fanout= "
                   "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
-                  "defs= (only when >1) = that NAME has N definitions and the lowest-id one was walked (a C/C++ declaration "
-                  "without a body yields to the lowest-id definition of its scope that has one); qualify with "
+                  "defs= (only when >1) = that NAME has N definitions and the lowest-id one was walked (a CODE definition before a doc "
+                  "heading or config key, and a C/C++ declaration without a body yields to the lowest-id definition of its "
+                  "scope that has one); qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
         legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
         // H1: charged only on a run whose root carries unproven_defs= — the same rule, and part of the head est_tokens prices.

@@ -9642,10 +9642,23 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
 // through, so it is written on every path exactly as resolveAllByNameQualified writes it.
 inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefCountOut = nullptr )
 {
-    const std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec, unprovenDefCountOut );
+    std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec, unprovenDefCountOut );
     if( matches.empty() )
     {
         return kNoNode;
+    }
+    // lane lego-transitive (M3): a CODE definition is the focus whenever one matched. The lowest id is crawl order, and a
+    // docs/ heading sorted first answered `--lego=Loader` about docs/api.md (defs=3, implementors=0) while src/loader.js
+    // held the class. A non-code match (a markdown heading, a JSON/YAML/TOML key) stays reachable by its file:name
+    // selector, and is still the answer when it is all that matched. Every verb that names one focus reads this
+    // (--lego, --around, --connect and their MCP twins), so the rule is stated once, here.
+    if( !isCodeLang( ing.symbols[ matches.front() ].lang ) )
+    {
+        const auto code = std::find_if( matches.begin(), matches.end(), [ & ]( NodeId id ) { return isCodeLang( ing.symbols[ id ].lang ); } );
+        if( code != matches.end() )
+        {
+            std::rotate( matches.begin(), code, code + 1 );   // the first code match leads; the rest keep their order
+        }
     }
     const Symbol& lowest = ing.symbols[ matches.front() ];
     const auto    cOrCpp = []( Lang lang ) noexcept { return lang == Lang::Cpp || lang == Lang::C; };

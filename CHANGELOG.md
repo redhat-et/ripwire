@@ -40,6 +40,11 @@ classes made from it. The name must be the string the call is given — `$.exten
 `Base.extend({…})` and `const A = B.extend('C')` stay what they look like (an object merge, no class). Parser version
 157 (re-index on first run).
 
+A bare name now resolves to a CODE definition whenever one matched: `--lego=Loader` answered about a `docs/api.md`
+heading (`defs="3" implementors="0"`) while `src/loader.js` held the class, because the heading had the lower id. The
+same pick serves `--around` and `--connect` (and their MCP twins). A heading or config key is still reached by its
+`file:name` selector, and is still the answer when nothing else is named that.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled
