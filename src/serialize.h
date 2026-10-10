@@ -8766,7 +8766,8 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
              "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload or rescue class — is a USE, not a load-time "
              "dependency: it is in the impact verb's importer tier (lazy=1) and in this row's inc t= list, and it is NOT in "
              "afferent=/instab=/transitive=/godfiles/stabledeps/cycles/ccd/acd/nccd/shape=; health lazy_edges= counts the "
-             "pairs left out and a row's lazy_edges= its own — both absent when 0. " );
+             "pairs left out and a row's lazy_edges= its own — both absent when 0. a godfiles row's layer= is its built-in "
+             "arch layer from a dir name (absent if none); a layer=test file has test dependents only. " );
     w.write( rw::depsImportsUnresolvedLegend( tsImports.unresolved > 0 ) );   // #220: exactly when the root carries the pair
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
@@ -8834,8 +8835,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
             w.write( gfb );   // ranked by afferent = # files that #include this one
             for( std::size_t i = 0; i < capG; ++i )
             {
-                char gb[ 48 ];  rw::formatTo( gb, sizeof( gb ), "\" afferent=\"{}\"/>", afferent[ byAff[i] ] );
-                w.write( "<f p=\"" );  w.write( escapeXml( pathRel( byAff[i] ), esc ) );  w.write( gb );
+                char gb[ 48 ];  rw::formatTo( gb, sizeof( gb ), " afferent=\"{}\"/>", afferent[ byAff[i] ] );
+                w.write( "<f p=\"" );  w.write( escapeXml( pathRel( byAff[i] ), esc ) );  w.write( "\"" );
+                // the built-in layer (P3), present-only: a layer=test row is a test helper with test dependents only
+                if( const char* fl = builtinLayer( rootRelPath( ing, byAff[i] ) ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }
+                w.write( gb );
             }
             w.write( "</godfiles>" );
         }

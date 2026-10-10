@@ -50,6 +50,50 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
     }
 }
 
+// --report "## God files": the files a change ripples through most (afferent = files that include/import/source
+// each one). A file in the built-in TEST layer (builtinLayer == "test": test/, tests/, bench/ — e.g. the shell
+// library every gate `source`s) has only test dependents, so ranking it above src/ headers named a test helper
+// as the codebase's god file. Such files are counted on one layer=test line under the list, never dropped; the
+// header's "of M" counts the ranked (non-test-layer) files. With no depended-on test-layer file the section is
+// byte-identical to the single ranking it replaces. Language-neutral: the split is by path layer, not by the
+// directive (#include, import, require, source) that made the edge.
+void emitReportGodFiles( const rw::IngestResult& ing, const std::vector<std::uint32_t>& afferent, bool singleRoot,
+                         std::string_view rootPrefix )
+{
+    EXPECTS( afferent.size() == ing.files.size(), "afferent is indexed by file id" );
+    std::vector<std::uint32_t> ranked, testLayer;
+    for( std::uint32_t f = 0; f < std::uint32_t( afferent.size() ); ++f )
+    {
+        if( afferent[f] == 0 )
+        {
+            continue;
+        }
+        ( std::string_view( rw::builtinLayer( rw::rootRelPath( ing, f ) ) ) == "test" ? testLayer : ranked ).push_back( f );
+    }
+    const auto byAfferent = [ & ]( std::uint32_t a, std::uint32_t b ) { return afferent[a] != afferent[b] ? afferent[a] > afferent[b] : a < b; };
+    std::sort( ranked.begin(), ranked.end(), byAfferent );
+    std::sort( testLayer.begin(), testLayer.end(), byAfferent );
+    const auto relPath = [ & ]( std::uint32_t f ) -> std::string_view
+    {
+        return singleRoot ? rw::sarif::rootRelativeUri( ing.files[f], rootPrefix ) : std::string_view( ing.files[f] );
+    };
+    const std::size_t shown = std::min<std::size_t>( ranked.size(), 10 );
+    rw::emitTo( stdout, "\n## God files (most depended-on; showing {} of {})\n", shown, ranked.size() );
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        rw::emitTo( stdout, "- `{}` — {} dependents\n", relPath( ranked[i] ), afferent[ranked[i]] );
+    }
+    if( ranked.empty() )
+    {
+        rw::emitTo( stdout, "{}", testLayer.empty() ? "- (no include/import edges captured)\n" : "- (none outside layer=test)\n" );
+    }
+    if( !testLayer.empty() )
+    {
+        rw::emitTo( stdout, "- layer=test: {} more depended-on files under a test, tests or bench directory, not ranked above; top `{}` — {} dependents\n",
+                     testLayer.size(), relPath( testLayer[0] ), afferent[testLayer[0]] );
+    }
+}
+
 // §P6.2: a community label anchored to a trivial accessor ("push_back@svector.h", "empty@notes.h" — the
 // real-repo instances that motivated this) tells a reader nothing about a multi-member module. These names
 // are called from everywhere by construction (every container user calls push_back/empty/size), so they
@@ -3192,7 +3236,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // untested cross-directory edges, grouped by DIRECTED dir pair (caller-module → callee-module)
         struct SeamEdge { NodeId u, v; };
         HashMap<std::uint64_t, std::vector<SeamEdge>> grp;
-        std::uint32_t bridges = 0, untested = 0;
+        std::uint32_t bridges = 0, untested = 0, docLinks = 0;
         for( NodeId u = 0; u < N; ++u )
         {
             for( std::uint32_t k = g.outOff[u]; k < g.outOff[u + 1]; ++k )
@@ -3202,6 +3246,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
                 if( du == dv )
                 {
                     continue; // same directory — not a seam
+                }
+                // A link from one document section to another (a README heading naming docs/EVALS.md) is not
+                // code: no test can exercise it, so it is neither a bridge nor untested. Counted in doc_links=.
+                if( ing.symbols[u].kind == SymKind::Section && ing.symbols[v].kind == SymKind::Section )
+                {
+                    ++docLinks;
+                    continue;
                 }
                 ++bridges;
                 if( u < testReach.size() && testReach[u] )
@@ -3234,8 +3285,9 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // §B12.5 — the UNIT clause is the same sentence on all three verbs that spell `untested=` (see
         // situ.h's kTestGateLegend and flipimpact.h's writeFlipHeader). Each legend was locally honest,
         // which is precisely why a reader comparing two of the numbers is misled.
-        rw::emitTo( stdout, "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). {}{}{}-->{}",
-                     rw::modScopeLegend( stHasModScope ),   // #60: exactly when a <edge caller="<file-scope>"> row is
+        rw::emitTo( stdout, "<!-- ripwire seams: cross-directory call edges NO test reaches (untested integration seams; a fact, not a mandate). module = parent dir; seam = caller-dir -> callee-dir, spelled from= and to=. Each seam pages its own edge rows with shown=/capped=; an edge names caller= at site p= calling callee= at site cp=. UNIT: untested= here counts cross-directory call EDGES. The test gate verb spells untested= over impacted SYMBOLS and the flip verb over the defs a gate lights, so the three numbers count three different things and must never be compared or summed across verbs. raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). {}{}{}{}-->{}",
+                     rw::modScopeLegend( stHasModScope ),
+                     docLinks > 0 ? "doc_links=N: cross-directory links between two document sections (headings, data keys), left out of bridges= and untested= because no test exercises a document link. " : "",   // #60: exactly when a <edge caller="<file-scope>"> row is
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str(), rw::rootRelPathsLegend( stSingleRoot ) );
         // P2.1: two nested caps, neither previously marked — at most 20 seam PAIRS, and at most 5 example
         // EDGES inside each. Each <seam> gains shown= alongside its true untested= count.
@@ -3255,8 +3307,9 @@ std::optional<int> runStructureText( const MainDispatch& d )
         const PageWindow  seamsPw     = pageWindow( pairs.size(), effectiveRowCap( cfg.pageLimit, 20 ), cfg.pageOffset );
         const std::size_t shownPairs  = seamsPw.end - seamsPw.begin;
         char              seamsAb[ kPageDisclosureCap ];
-        rw::emitTo( stdout, "<seams modules=\"{}\" bridges=\"{}\" untested=\"{}\" test_files=\"{}\" seam_pairs=\"{}\"{}{}{}>",
-                     dirName.size(), bridges, untested, testFileCount, pairs.size(),
+        const std::string docLinksAttr = docLinks > 0 ? " doc_links=\"" + std::to_string( docLinks ) + "\"" : std::string();   // present-only
+        rw::emitTo( stdout, "<seams modules=\"{}\" bridges=\"{}\" untested=\"{}\"{} test_files=\"{}\" seam_pairs=\"{}\"{}{}{}>",
+                     dirName.size(), bridges, untested, docLinksAttr, testFileCount, pairs.size(),
                      ( pageDisclosure( seamsAb, sizeof( seamsAb ), shownPairs, pairs.size(), seamsPw.end,
                                        cfg.pageLimit, cfg.pageOffset, true )
                        + rw::renderDisclosure( prD, rw::DiscloseAs::XmlAttrs ) ).c_str(),
@@ -3494,30 +3547,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
             rw::emitTo( stdout, "- **{}** — {} symbols\n", presentation.label[c].c_str(), std::size_t( members[c].size() ) );
         }
 
-        std::vector<std::uint32_t> ford( F );
-        for( std::uint32_t f = 0; f < F; ++f )
-        {
-            ford[f] = f;
-        }
-        std::sort( ford.begin(), ford.end(), [ & ]( std::uint32_t a, std::uint32_t b ) { return afferent[a] != afferent[b] ? afferent[a] > afferent[b] : a < b; } );
-        const std::size_t godFileCount = std::count_if( afferent.begin(), afferent.end(), []( std::uint32_t count ) { return count > 0; } );
-        const std::size_t reportGodFiles = std::min<std::size_t>( godFileCount, 10 );
-        rw::emitTo( stdout, "\n## God files (most depended-on; showing {} of {})\n", reportGodFiles, godFileCount );
-        bool anyGod = false;
-        for( std::uint32_t i = 0; i < F && i < 10; ++i )
-        {
-            if( afferent[ford[i]] == 0 )
-            {
-                break;
-            }
-            anyGod = true;
-            const std::string_view rp = stSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ford[i]], stRootPrefix ) : std::string_view( ing.files[ford[i]] );
-            rw::emitTo( stdout, "- `{}` — {} dependents\n", std::string_view( rp.data(), rp.size() ), afferent[ford[i]] );
-        }
-        if( !anyGod )
-        {
-            rw::emitTo( stdout, "- (no include/import edges captured)\n" );
-        }
+        emitReportGodFiles( ing, afferent, stSingleRoot, stRootPrefix );
 
         const std::size_t reportCycles = std::min<std::size_t>( cycles.size(), 6 );
         // #220 part 1: while in-repo TS/JS imports drew no edge, the total is measured over the resolved edges only — NOT a

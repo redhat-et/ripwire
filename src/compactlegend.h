@@ -753,6 +753,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "bridges", "bridges=N: cross-directory call edges, tested or not; untested= is those no test reaches", false, "seams", MapHeaderRead::No, {}, "seams" },
     { "test_files", "test_files=N: test files whose calls seed the reach; 0 means every seam reads untested", false, "seams", MapHeaderRead::No, {}, "seams" },
     { "seam_pairs", "seam_pairs=N: directed dir pairs with an untested edge (the seam rows' total)", false, "seams", MapHeaderRead::No, {}, "seams" },
+    { "doc_links", "doc_links=N: cross-directory links between two document sections, not in bridges= or untested= (no test exercises a document link); absent at 0", true, "seams", MapHeaderRead::No, {}, "seams" },
     // test-gate: src/situ.h writeTestGateReport + computeTestGateFor, src/testmap.h buildShellGateIndex
     { "impacted", "impacted=N: symbols that transitively call the change (changed symbols excluded)", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },
     { "shown_tests", "shown_tests=/shown_untested=: t rows and u rows printed, two independent counts", false, "test-gate", MapHeaderRead::No, {}, "test-gate" },   // also defines shown_untested=
@@ -809,6 +810,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "violations", "violations=N: edges into a file more unstable by over 0.05 (Martin I); only the worst 12 are listed", true, "stabledeps", MapHeaderRead::No, {}, "deps" },
     { "from", "from=: the including file of a stable-deps violation; it depends on the more unstable to=", true, "v", MapHeaderRead::No, {}, "deps" },
     { "gap", "gap=: instab of to= minus instab of from=, project includes only; worst first", true, "v", MapHeaderRead::No, {}, "deps" },
+    { "layer", "godfiles f layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none. A layer=test file has test dependents only", true, "f", MapHeaderRead::No, {}, "deps" },
     // doc-drift: src/docdrift.h (root emitted near kDocDriftLegend, <doc-drift docs= clean= ... corpus=>)
     { "docs", "docs=N: markdown docs scanned for anchors; docs minus clean = the doc rows", false, "doc-drift", MapHeaderRead::No, {}, "doc-drift" },
     { "clean", "clean=N: docs with no failed anchor (drift and dated 0); not proof every anchor was checked", false, "doc-drift", MapHeaderRead::No, {}, "doc-drift" },
