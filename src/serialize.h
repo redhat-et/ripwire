@@ -8690,6 +8690,25 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 // --deps: the file→file physical dependency view. Files ranked by include count (heaviest first =
 // the "pulls in 100 headers to do something simple" detector); each lists its #include/import
 // targets. Descriptive — names the number so the agent can choose a lighter path.
+// --deps <godfiles>: the most depended-on files (afferent > 0), most first with a path tie-break, at most 12;
+// `total` receives how many files have any dependent (the listing's total=).
+inline std::vector<std::uint32_t> depsGodfileRows( const IngestResult& ing, const std::vector<std::uint32_t>& afferent, std::size_t& total )
+{
+    std::vector<std::uint32_t> byAff;
+    for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ); ++f )
+    {
+        if( f < afferent.size() && afferent[f] > 0 )
+        {
+            byAff.push_back( f );
+        }
+    }
+    std::sort( byAff.begin(), byAff.end(), [ & ]( std::uint32_t a, std::uint32_t b )
+               { return afferent[a] != afferent[b] ? afferent[a] > afferent[b] : ing.files[a] < ing.files[b]; } );
+    total = byAff.size();
+    byAff.resize( std::min<std::size_t>( byAff.size(), 12 ) );
+    return byAff;
+}
+
 inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       const std::vector<std::vector<std::uint32_t>>& cycles,
                       const std::vector<std::uint32_t>& transitive, const std::vector<std::uint32_t>& afferent,
@@ -8766,8 +8785,16 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
              "closure (a Ruby method/lambda/block, a TS/JS function body) or is a Ruby autoload or rescue class — is a USE, not a load-time "
              "dependency: it is in the impact verb's importer tier (lazy=1) and in this row's inc t= list, and it is NOT in "
              "afferent=/instab=/transitive=/godfiles/stabledeps/cycles/ccd/acd/nccd/shape=; health lazy_edges= counts the "
-             "pairs left out and a row's lazy_edges= its own — both absent when 0. a godfiles row's layer= is its built-in "
-             "arch layer from a dir name (absent if none); a layer=test file has test dependents only. " );
+             "pairs left out and a row's lazy_edges= its own — both absent when 0. " );
+    // present-only: the layer= reading rides exactly when a shown godfiles row carries layer=
+    std::size_t                      godTotal   = 0;
+    const std::vector<std::uint32_t> godRows    = depsGodfileRows( ing, afferent, godTotal );
+    const bool                       godLayered = std::any_of( godRows.begin(), godRows.end(),
+                                                               [ & ]( std::uint32_t f ) { return *builtinLayer( rootRelPath( ing, f ) ) != '\0'; } );
+    if( godLayered )
+    {
+        w.write( "a godfiles row's layer= is its built-in arch layer from a dir name (absent if none); a layer=test file has test dependents only. " );
+    }
     w.write( rw::depsImportsUnresolvedLegend( tsImports.unresolved > 0 ) );   // #220: exactly when the root carries the pair
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
@@ -8813,17 +8840,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // most depended-ON (afferent coupling Ca) = highest blast radius: changing these recompiles the most.
     // The complement of the transitive-cone ranking below (efferent, "pulls in 100 headers").
     {
-        std::vector<std::uint32_t> byAff;
-        for( std::uint32_t f = 0; f < F; ++f )
-        {
-            if( f < afferent.size() && afferent[f] > 0 )
-            {
-                byAff.push_back( f );
-            }
-        }
-        std::sort( byAff.begin(), byAff.end(), [ & ]( std::uint32_t a, std::uint32_t b )
-                   { return afferent[a] != afferent[b] ? afferent[a] > afferent[b] : ing.files[a] < ing.files[b]; } );
-        const std::size_t capG = byAff.size() < 12 ? byAff.size() : 12;
+        const std::size_t capG = godRows.size();
         if( capG )
         {
             // §P9 N6: this listing used to emit exactly 12 rows with no total/cap disclosure while
@@ -8831,14 +8848,14 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
             // src/pageview.h, THE TRUNCATION VOCABULARY, rules 1-3, applied here too.
             char gfb[ 64 ];
             rw::formatTo( gfb, sizeof( gfb ), "<godfiles total=\"{}\" shown=\"{}\" capped=\"{}\">",
-                           byAff.size(), capG, capG < byAff.size() ? 1 : 0 );
+                           godTotal, capG, capG < godTotal ? 1 : 0 );
             w.write( gfb );   // ranked by afferent = # files that #include this one
             for( std::size_t i = 0; i < capG; ++i )
             {
-                char gb[ 48 ];  rw::formatTo( gb, sizeof( gb ), " afferent=\"{}\"/>", afferent[ byAff[i] ] );
-                w.write( "<f p=\"" );  w.write( escapeXml( pathRel( byAff[i] ), esc ) );  w.write( "\"" );
+                char gb[ 48 ];  rw::formatTo( gb, sizeof( gb ), " afferent=\"{}\"/>", afferent[ godRows[i] ] );
+                w.write( "<f p=\"" );  w.write( escapeXml( pathRel( godRows[i] ), esc ) );  w.write( "\"" );
                 // the built-in layer (P3), present-only: a layer=test row is a test helper with test dependents only
-                if( const char* fl = builtinLayer( rootRelPath( ing, byAff[i] ) ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }
+                if( const char* fl = builtinLayer( rootRelPath( ing, godRows[i] ) ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }
                 w.write( gb );
             }
             w.write( "</godfiles>" );

@@ -121,9 +121,13 @@ else
         || no "7d: header/rows disagree with the ranked set: $GOD"
 fi
 # 7e: no depended-on test-layer file → no layer=test line (the section is the single ranking it was)
-printf '%s' "$REP" | grep -q '^- layer=test' \
-    && no "7e: a layer=test line appeared on a corpus with no test-layer dependents" \
-    || ok "7e: no layer=test line without a depended-on test-layer file"
+if ! printf '%s' "$REP" | grep -q '^## God files'; then
+    no "7e: the hub fixture's --report printed no God files section"
+elif printf '%s' "$REP" | grep -q '^- layer=test'; then
+    no "7e: a layer=test line appeared on a corpus with no test-layer dependents"
+else
+    ok "7e: no layer=test line without a depended-on test-layer file"
+fi
 
 # ── 8) --seams (same runStructureText): a README -> docs/ link is not an untested code seam ───────────────
 # Two README headings link docs/EVALS.md and docs/GUIDE.md; src/main.cpp calls lib/util.cpp (a real untested seam).
@@ -138,9 +142,11 @@ SROOT="$( printf '%s' "$SEAMS" | grep -o '<seams [^>]*>' )"
 if [ "$src_" != 0 ] || [ -z "$SROOT" ]; then
     no "8: --seams on the doc-link fixture failed (rc=$src_) or printed no <seams> root"
 else
-    printf '%s' "$SEAMS" | grep -q '<seam from="[^"]*" to="docs"' \
-        && no "8a: a doc-section -> doc-section link is still listed as an untested seam to docs" \
-        || ok "8a: no <seam ... to=\"docs\"> from README section links"
+    if printf '%s' "$SEAMS" | grep -q '<seam from="[^"]*" to="docs"'; then
+        no "8a: a doc-section -> doc-section link is still listed as an untested seam to docs"
+    else
+        ok "8a: no <seam ... to=\"docs\"> from README section links"
+    fi
     printf '%s' "$SROOT" | grep -q ' bridges="1" untested="1" doc_links="2" ' \
         && ok "8b: the two doc links are counted in doc_links=2, outside bridges=/untested=" \
         || no "8b: root counts wrong (want bridges=1 untested=1 doc_links=2): $SROOT"
@@ -165,6 +171,18 @@ else
         && ok "9a: the test helper's godfiles row carries layer=\"test\"" || no "9a: no layer=\"test\" on test/lib/helper.sh: $GF"
     printf '%s' "$GF" | grep -q '<f p="testing/tool.sh" afferent="2"/>' \
         && ok "9b: near miss: testing/tool.sh has no layer= (not a built-in layer dir)" || no "9b: testing/tool.sh row wrong: $GF"
+fi
+# 9c/9d: the full legend reads godfiles layer= exactly when a shown row carries it (present-only)
+LFULL="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$T" --deps --legend=full --no-cache 2>/dev/null )"
+RFULL="$( perl -e 'alarm 15; exec @ARGV' "$BIN" "$R" --deps --legend=full --no-cache 2>/dev/null )"
+printf '%s' "$LFULL" | grep -q "a godfiles row's layer= is its built-in arch layer" \
+    && ok "9c: --deps --legend=full reads layer= where a godfiles row carries it" || no "9c: layer= rides with no full-legend reading"
+if ! printf '%s' "$RFULL" | grep -q '<godfiles '; then
+    no "9d: the hub fixture's --deps --legend=full printed no <godfiles>"
+elif printf '%s' "$RFULL" | grep -q "a godfiles row's layer="; then
+    no "9d: the layer= reading rides on a corpus with no layered godfiles row"
+else
+    ok "9d: no layer= reading without a layered godfiles row"
 fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
