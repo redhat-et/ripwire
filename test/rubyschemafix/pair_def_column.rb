@@ -7,11 +7,11 @@ module Spike
       "def"
     end
 
-    # locality-resolved arm: a `self.name` read at class level, in the class whose own
-    # `def name` sits in this same file — the receiver pins the enclosing class, so
-    # the resolver picks THAT def (amb=0), never splitting over the schema column or
-    # the yaml key.
-    def self.lookup
+    # locality-resolved arm: an INSTANCE method's `self.name`, in the class whose own
+    # `def name` sits in this same file — Ruby's method lookup pins THAT def (no via=),
+    # never the schema column or the yaml key. (A class-side `def self.lookup` would
+    # call the class object's own `name`, Module#name, and bind nothing in the tree.)
+    def lookup
       self.name
     end
   end
