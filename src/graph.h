@@ -7651,7 +7651,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         baseCand.clear();
         for( NodeId baseId : *baseIds )
         {
-            if( !isClassLike( ing.symbols[baseId].kind ) )
+            // lane lego-transitive (M1): a Ruby MODULE is a base here too. `include M` / `extend M` / `prepend M` put it in
+            // the class's ancestors (captureRubyMixinBases, parser version 131), so the class implements its contract the way
+            // a subclass does — and --lego=M listed nobody (rake: `include Rake::DSL`). The test is BuiltinMethodGate's
+            // class-like rule, the one that already counts a Ruby module (Ruby && SymKind::Other: @definition.module maps to
+            // Other for every language, and only Ruby's tags have no other Other). Other languages need nothing here: an
+            // Elixir module is a struct-kind symbol (defimpl / @behaviour already list), a PHP trait an interface (its
+            // `use T;` is not captured — the stated floor in captureBases), a Rust trait an interface, a Python mixin a class.
+            if( !isClassLike( ing.symbols[baseId].kind ) && !BuiltinMethodGate::isClassLike( ing.symbols[baseId] ) )
             {
                 continue;
             }

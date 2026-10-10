@@ -15,6 +15,7 @@
 #      An interface with no deeper row carries none of it (byte identity with the direct-only answer).
 # (S2) every <impl> row of the TARGETED answer says where the class is: p="file:LINE" (the --uses/--callers spelling); the
 #      <iface> row and the ranked --for <lego> section keep their bare p=.
+# (M1) a Ruby module mixed in with include/extend (captureRubyMixinBases) is an implements edge: --lego=DSL lists TaskLib.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -138,6 +139,28 @@ M="$( mcp '' )"
 if printf '%s' "$M" | grep -q 'transitive=\\"3\\"' && ! printf '%s' "$M" | grep -q 'has_more'; then ok "MCP without a window: the whole closure"; else no "MCP default: $( printf '%s' "$M" | head -c 300 )"; fi
 M="$( mcp ',"offset":-1' )"
 if printf '%s' "$M" | grep -q '"error"'; then ok "MCP offset:-1 is refused"; else no "MCP offset:-1 accepted: $( printf '%s' "$M" | head -c 300 )"; fi
+
+echo "=== (M1) a Ruby module mixed in is an implements edge: include / extend ==="
+if lego DSL
+then
+    if has '<impl n="TaskLib" p="rb/tasklib.rb:2"/>'; then ok "--lego=DSL lists TaskLib (include Rake::DSL) at rb/tasklib.rb:2"; else no "--lego=DSL: no TaskLib row: $( iface )"; fi
+    if has '<impl n="MakefileLoader"'; then ok "--lego=DSL lists MakefileLoader"; else no "--lego=DSL: no MakefileLoader"; fi
+    if has '<impl n="Singleton"'; then ok "--lego=DSL lists Singleton (extend Rake::DSL)"; else no "--lego=DSL: no Singleton (extend)"; fi
+    if iface | grep -q 'implementors="3"'; then ok "implementors=\"3\": the top-level self.extend adds no row"; else no "DSL count: $( iface )"; fi
+    if iface | grep -q 'implementors_floor'; then no "the bound include still reads as an unbound floor: $( iface )"; else ok "no implementors_floor once the include binds"; fi
+fi
+if lego Helpers
+then
+    if iface | grep -q 'implementors="0"'; then ok "an include inside a method body is no edge (Helpers lists nobody)"; else no "Helpers: $( iface )"; fi
+fi
+if lego Ping
+then
+    if [ "$( count '<impl n="Pong"' )" = 1 ] && [ "$( count '<impl n="Pinged"' )" = 1 ] && ! has '<impl n="Ping"'; then ok "a module cycle (Ping <-> Pong) lists each type once and never the interface itself"; else no "Ping cycle rows: $( printf '%s\n' "$OUT" | grep '^<impl' | tr '\n' ' ' )"; fi
+fi
+if lego Pong
+then
+    if printf '%s\n' "$OUT" | grep '<impl n="Pinged"' | grep -q 'via="Ping" depth="2"'; then ok "--lego=Pong reaches Pinged through Ping (depth 2)"; else no "Pong closure: $( printf '%s\n' "$OUT" | grep '^<impl' | tr '\n' ' ' )"; fi
+fi
 
 echo "=== well-formed ==="
 if command -v xmllint >/dev/null 2>&1

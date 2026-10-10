@@ -1569,7 +1569,9 @@ inline bool rubyAttrAtClassBodyLevel( TSNode n, std::string_view src ) noexcept
 // graph.h's inheritance graph and base walk read it unchanged. `extend` reaches the class's singleton, not its
 // instances; the graph keeps one method namespace per class (instance and class methods alike), so it is an ancestor
 // there too. So does one inside a module body's `included do … end` (rubyInConcernIncludedBlock). A directive anywhere
-// else — a method body, another block, a file's top level — emits none.
+// else — a method body, another block, a file's top level — emits none. Since lane lego-transitive the reference is also an
+// IMPLEMENTOR edge: graph.h's implementors builder admits a Ruby module as a base, so --lego=M lists every class (and
+// module) that mixes M in, and test/rubyinheritcheck.sh floor (b) is closed.
 // Is `call` a statement of an ActiveSupport::Concern `included do … end` block written at a module's body level? When a
 // class includes the concern the block runs in that class, so a mixin there joins the INCLUDER's ancestors; read as an
 // ancestor of the concern itself, it reaches the includer through the concern — activerecord's AttributeMethods

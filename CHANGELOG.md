@@ -30,6 +30,10 @@ Every `<impl>` row of the targeted answer now says where the class is: `p="file:
 spelling, so the implementor opens at its definition. The `<iface>` row and the ranked `--for` `<lego>` section keep the
 bare `p="file"`.
 
+A Ruby module mixed in with `include M`, `extend M` or `prepend M` is now an implements edge as well as an ancestor:
+`--lego=M` lists every class (and module) that mixes it in — `--lego=DSL` lists the classes that `include Rake::DSL`,
+where it answered `implementors="0"`. A mixin inside a method body or at a file's top level still adds nothing.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

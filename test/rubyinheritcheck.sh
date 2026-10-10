@@ -27,9 +27,9 @@
 #       an in-tree `Factory` pins it.
 #   (b) a MIXIN (`include Helper` / `extend` / `prepend`) is an ANCESTOR for the call graph since parser version
 #       131 — the base walk, the CHA cone and a bare call's reach read it (ingest_relations.h captureRubyMixinBases,
-#       test/rubyreachcheck.sh) — but it mints no IMPLEMENTOR row: --lego lists the classes below a CLASS, and the
-#       inheritance overlay takes only class-like bases (graph.h namespaceCompatible), which a module is not. So
-#       --lego=Helper still lists no Mixed; a module's implementor row is a separate decision, not taken here.
+#       test/rubyreachcheck.sh) — and since lane lego-transitive it is an IMPLEMENTOR edge too: graph.h's implementors
+#       builder admits a Ruby module as a base (BuiltinMethodGate::isClassLike's Ruby-module rule), so --lego=Helper
+#       lists Mixed. Floor (b) is CLOSED; the arm below is inverted and says so (rake: `include Rake::DSL`).
 #   (c) the base WALK is keyed by NAME. A base is found by name (its final segment, as every language's is)
 #       and then SCOPED: the superclass as written is looked up the way Ruby looks it up — Module.nesting
 #       innermost first, then the top level, `::X` absolute — against every class/module the tree opens (the
@@ -350,8 +350,9 @@ then
 fi
 if runq LH "$FIX" --no-cache --lego=Helper
 then
-    echo "$LH" | grep -q '<impl n="Mixed"' && no "include Helper listed Mixed as a --lego implementor — a module's implementor row is its own decision: say so HERE, in captureRubyMixinBases' header and in CHANGELOG.md (floor (b))" \
-        || ok "include Helper is no --lego implementor row (floor (b), stated): the mixin is an ancestor for calls only"
+    # INVERTED (lane lego-transitive): the decision this arm demanded be stated was taken — captureRubyMixinBases' header,
+    # graph.h's implementors builder and CHANGELOG.md say so. A mixin is now an implementor row as well as an ancestor.
+    if echo "$LH" | grep -q '<impl n="Mixed"'; then ok "include Helper lists Mixed as a --lego implementor (floor (b) closed)"; else no "include Helper lists no Mixed under --lego=Helper — the module implementor row is gone: $( echo "$LH" | grep -oE '<(iface|impl) [^>]*>' | tr '\n' ' ' )"; fi
 fi
 CM="$( rowOf 'n="call_mixin" ' )"
 echo "$CM" | grep -q '<c n="helped"' && ok "…and Mixed.new.helped still edges the one helped def through the name ladder (a floor deletes nothing)" \
