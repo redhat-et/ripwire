@@ -247,7 +247,12 @@ GATE_BUDGET_SEC = {
                                          # so it pays the suite's cost while competing for the same -j.
                                          # ~54 s idle local; rc=124 at the flat cap on 5 of 6 CI legs.
     "estchargecheck.sh":          900,   # ~26 s idle local; rc=124 at the flat cap on all ubuntu legs.
-    "pagingsweepcheck.sh":        900,   # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs.
+    "pagingsweepcheck.sh":        2400,  # ~34 s idle local; rc=124 at the flat cap on all ubuntu legs. 2026-10-09 (train 26c):
+                                         # under CI's --budget-scale 4 the 900 here lost to the 1200 s scaled default, and the
+                                         # gate measured 786.5 s on the 26b macOS-plain leg, 1086 s on a trial with PR #362, and
+                                         # rc=124 at exactly 1200 s on 26b's first run (re-run to pass). The hang tripwire now
+                                         # sits at 2x the slowest measured run; the pagination sweep itself is the next lane's
+                                         # candidate for a split into its own gate.
     "slicediffcheck.sh":          900,   # replays 57 labelled commits (checkout + --slice --since each); ~80 s local
     "mcpframehonestycheck.sh":    900,   # 2026-09-07 (first sharded CI run 34145918269): rc=124 at 300.1 s on three of
                                          # four Linux legs' shard 2 -- "exactly the cap" again. ~150 s local; a shard
