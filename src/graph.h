@@ -144,10 +144,10 @@ struct Graph
     std::size_t                gateDeclinedCalls = 0;   // of the header's declined=, the calls the builtin-method name gate declined
     // Of the header's declined=, the C++ calls the standard-member gate declined (StdMemberGate below): its own legend clause
     // rides where this is >0, so a tree with none keeps its bytes. stdMemberDeclines is one entry per DECLINED C++ call named
-    // like a standard member on a receiver nothing typed — by that gate or by the ladder's own tier-3 decline — packed
-    // StdMemberGate::key( caller, table index ) and sorted after the resolve loop: the callees answer's <stdm> line.
-    std::size_t                stdMemberDeclinedCalls = 0;
-    std::vector<std::uint64_t> stdMemberDeclines;
+    // like a standard member on a receiver nothing typed — by that gate or by the ladder's own tier-3 decline — as
+    // ( caller, kCppStdMemberNames index ), sorted after the resolve loop: the callees answer's <stdm> line.
+    std::size_t                                    stdMemberDeclinedCalls = 0;
+    std::vector<std::pair<NodeId, std::uint16_t>>  stdMemberDeclines;
     // Every call reference's disposition (pincensus.h CallDisposition), one bucket per reference. Read by buildGraph's
     // unaccounted alert and copied into pinCensus when a census is armed; its external/unresolved/declined buckets
     // equal those header gauges by construction.
@@ -2905,12 +2905,6 @@ struct StdMemberGate
         const std::uint16_t                     index = ( it != table.end() && *it == r.calleeName ) ? std::uint16_t( it - table.begin() ) : kNotStd;
         ENSURES( index == kNotStd || index < table.size(), "a table index, or none" );
         return index;
-    }
-
-    // One Graph::stdMemberDeclines entry: the caller in the high bits, so a sorted vector groups each caller's calls.
-    static std::uint64_t key( NodeId caller, std::uint16_t index ) noexcept
-    {
-        return ( std::uint64_t( caller ) << 16 ) | index;
     }
 };
 
@@ -7115,7 +7109,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         internDeclinedList( g, declinedListsByHash, cand );
                         if( stdIndex != StdMemberGate::kNotStd && !writtenTypeReaches( stdRecvType, r.fromSymbol, cand ) )
                         {
-                            g.stdMemberDeclines.push_back( StdMemberGate::key( r.fromSymbol, stdIndex ) );   // the <stdm> line names it too
+                            g.stdMemberDeclines.emplace_back( r.fromSymbol, stdIndex );   // the <stdm> line names it too
                         }
                         disposition = CallDisposition::Declined;
                         continue;
@@ -7448,7 +7442,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     g.gateDeclinedTarget[ c ] = 1;
                 }
-                g.stdMemberDeclines.push_back( StdMemberGate::key( r.fromSymbol, stdIndex ) );
+                g.stdMemberDeclines.emplace_back( r.fromSymbol, stdIndex );
                 disposition = CallDisposition::Declined;
                 continue;
             }
@@ -12005,11 +11999,12 @@ inline std::size_t declinedCallsMadeBy( const Graph& g, std::span<const NodeId> 
 
 // The callees answer's <stdm> line: of the declines `sources` made (declinedCallsMadeBy), the C++ calls named like a
 // standard container or string member on a receiver nothing typed (Graph::stdMemberDeclines, StdMemberGate) — the names,
-// each once in table (byte) order, and how many calls. Empty on a graph with none, so every other answer keeps its bytes.
+// each once in table (byte) order and comma-joined, and how many calls. Empty on a graph with none, so every other answer
+// keeps its bytes. The names are table literals (identifier characters only): neither dialect needs to escape them.
 struct StdMemberCallsMade
 {
-    std::vector<std::string_view> names;
-    std::size_t                   calls = 0;
+    std::string names;
+    std::size_t calls = 0;
 };
 inline StdMemberCallsMade stdMemberCallsMadeBy( const Graph& g, std::span<const NodeId> sources )
 {
@@ -12022,13 +12017,11 @@ inline StdMemberCallsMade stdMemberCallsMadeBy( const Graph& g, std::span<const 
     std::vector<char> named( std::size( externalnames::kCppStdMemberNames ), 0 );
     for( const NodeId s : sources )
     {
-        const auto lo = std::lower_bound( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end(), StdMemberGate::key( s, 0 ) );
-        const auto hi = std::upper_bound( lo, g.stdMemberDeclines.end(), StdMemberGate::key( s, 0xFFFFu ) );
-        for( auto it = lo; it != hi; ++it )
+        const auto lo = std::lower_bound( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end(), std::pair<NodeId, std::uint16_t>( s, 0 ) );
+        for( auto it = lo; it != g.stdMemberDeclines.end() && it->first == s; ++it )
         {
-            const std::size_t index = std::size_t( *it & 0xFFFFu );
-            ASSUME( index < named.size(), "StdMemberGate::key packs a table index" );
-            named[ index ] = 1;
+            ASSUME( it->second < named.size(), "the resolve loop records a kCppStdMemberNames index" );
+            named[ it->second ] = 1;
             ++out.calls;
         }
     }
@@ -12036,10 +12029,11 @@ inline StdMemberCallsMade stdMemberCallsMadeBy( const Graph& g, std::span<const 
     {
         if( named[ i ] != 0 )
         {
-            out.names.push_back( externalnames::kCppStdMemberNames[ i ] );
+            out.names.append( out.names.empty() ? "" : "," ).append( externalnames::kCppStdMemberNames[ i ] );
         }
     }
-    ENSURES( out.names.empty() == ( out.calls == 0 ), "a named call and a listed name come together" );
+    ENSURES( out.names.empty() == ( out.calls == 0 ) && out.calls <= declinedCallsMadeBy( g, sources ),
+             "a named call and a listed name come together, and every one is a decline the sources made" );
     return out;
 }
 

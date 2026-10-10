@@ -28,7 +28,7 @@ names (a small-vector's `push_back`, a path wrapper's `c_str`, every `empty` and
   in `declined_calls=` on every definition it would have bound (so `--callers` / `--impact` / `--safe-delete` say the
   count, and no definition becomes a dead-code candidate for losing a by-name caller); a legend clause of its own,
   charged only where it fired. `--callees` (and the MCP `find_symbol` twin) names those calls once:
-  `<stdm n="clear,data,push_back,reserve,size" calls="11"/>`.
+  `<stdm n="clear,data,push_back,reserve,size" calls="11"/>` (JSON `"stdm":{"n":"…","calls":11}`).
 - The names are data (`src/externalnames.h` `kCppStdMemberNames`, 78 container / string / view / span / optional /
   smart-pointer members, generic verbs such as `get`, `count`, `swap`, `read`, `write` excluded). A receiver a rule
   types is never touched — a typed local, parameter, pointer or member field, `this->`, an implicit-this call — and

@@ -631,10 +631,12 @@ inline const char* stdMemberCallsLegend( bool on ) noexcept { return on ? kStdMe
 // (test/testgatelegendbudgetcheck.sh), so it defines the one form it emits rather than all three.
 inline constexpr const char* kDeclinedCallsTestGateLegend =
     "declined_calls=K (absent when 0): K call SITES the resolver declined to bind that could have reached the change or its radius (the map's declined=); a test behind one is in no row here. ";
-// The clause and, where a gate declined in this graph, its gate sentence — the one spelling every declined_calls= emitter uses.
-inline std::string declinedCallsLegendWithGate( bool on, bool gateDeclined, bool stdDeclined )
+// The clause and, where the gate declined in this graph, its gate sentence — the one spelling every declined_calls= emitter uses.
+inline std::string declinedCallsLegendWithGate( bool on, bool gateDeclined ) { return std::string( declinedCallsLegend( on ) ) + declinedCallsGateLegend( on && gateDeclined ); }
+// The same, plus the C++ standard-member gate's sentence where that gate declined in this graph (graph.h StdMemberGate).
+inline std::string declinedCallsLegendWithGates( bool on, bool gateDeclined, bool stdDeclined )
 {
-    return std::string( declinedCallsLegend( on ) ) + declinedCallsGateLegend( on && gateDeclined ) + declinedCallsStdLegend( on && stdDeclined );
+    return declinedCallsLegendWithGate( on, gateDeclined ) + declinedCallsStdLegend( on && stdDeclined );
 }
 
 // ── reference-as-value round (src/valuerefs.h, src/ingest_valuerefs.h) ─────────────────────────────────────────

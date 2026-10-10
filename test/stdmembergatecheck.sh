@@ -200,21 +200,24 @@ rw --callees=stdParam >"$TMP/cec.xml"
 grep -q 'stdm n= calls=: of declined_calls=' "$TMP/cec.xml" \
     && ok "(F) the compact callees legend defines stdm n= calls=" || no "(F) the compact callees legend does not define stdm"
 rw --callees=typedLocal --legend=full >"$TMP/cen.xml"
-grep -q 'stdm' "$TMP/cen.xml" && no "(F) a callees answer with no declined standard-member call mentions stdm" \
-    || ok "(F) a callees answer with no such call carries neither the line nor its sentence"
+if [ -z "$( root_tag "$TMP/cen.xml" callees )" ]; then no "(F) --callees=typedLocal produced no <callees> root — the absence below would be vacuous"
+elif grep -q 'stdm' "$TMP/cen.xml"; then no "(F) a callees answer with no declined standard-member call mentions stdm"
+else ok "(F) a callees answer with no such call carries neither the line nor its sentence"; fi
 rw --callees=stdParam --format=columnar --legend=full >"$TMP/col.xml"
 [ -s "$TMP/col.xml" ] && ! grep -q 'stdm' "$TMP/col.xml" \
     && ok "(F) the columnar callees form carries neither the line nor its sentence (rows only, as with <vrs>)" \
     || no "(F) the columnar callees form: $( grep -o 'stdm[^>]*' "$TMP/col.xml" | head -2 )"
 rw --callees=stdParam --json >"$TMP/ce.json"
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("stdm")=={"n":["clear","push_back","size"],"calls":3} and d.get("declined_calls")==3 else 1)' "$TMP/ce.json" \
-    && ok "(F) --json callees carries \"stdm\":{\"n\":[clear,push_back,size],\"calls\":3}" || no "(F) --json callees: $( head -c 300 "$TMP/ce.json" )"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("stdm")=={"n":"clear,push_back,size","calls":3} and d.get("declined_calls")==3 else 1)' "$TMP/ce.json" \
+    && ok "(F) --json callees carries \"stdm\":{\"n\":\"clear,push_back,size\",\"calls\":3} (the XML attribute values)" || no "(F) --json callees: $( head -c 300 "$TMP/ce.json" )"
 M="$( mcp_text "$( call find_symbol '{"path":"'"$CORPUS"'","symbol":"stdParam"}' )" )"
-printf '%s' "$M" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("stdm")=={"n":["clear","push_back","size"],"calls":3} else 1)' \
+printf '%s' "$M" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("stdm")=={"n":"clear,push_back,size","calls":3} else 1)' \
     && ok "(F) MCP find_symbol (the callees direction) carries the same \"stdm\"" || no "(F) MCP find_symbol: $( printf '%s' "$M" | head -c 300 )"
 M="$( mcp_text "$( call find_referencing_symbols '{"path":"'"$CORPUS"'","symbol":"stdParam"}' )" )"
-printf '%s' "$M" | grep -q '"stdm"' && no "(F) MCP find_referencing_symbols (callers) carries stdm" \
-    || ok "(F) MCP find_referencing_symbols (the callers direction) carries no stdm"
+if ! printf '%s' "$M" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if "symbol" in d else 1)' 2>/dev/null; then
+    no "(F) MCP find_referencing_symbols gave no answer — the absence below would be vacuous: $( printf '%s' "$M" | head -c 200 )"
+elif printf '%s' "$M" | grep -q '"stdm"'; then no "(F) MCP find_referencing_symbols (callers) carries stdm"
+else ok "(F) MCP find_referencing_symbols (the callers direction) carries no stdm"; fi
 
 # ── (G) dead-code safety ──────────────────────────────────────────────────────────────────────────────────────
 echo "=== (G) a definition whose only callers were declined is no dead-code candidate ==="

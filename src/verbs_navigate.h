@@ -229,7 +229,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             rw::emitTo( stdout, "{}{}{}{}{}{}{}-->{}{}", rw::callHierarchyLegendOpen( wantCallers, chNextIsBare, cfg.columnar ).c_str(),
                          rw::capLegendClause( rw::computePageDisclosure( pw.end - pw.begin, result.size(), pw.end,
                                                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap ).active ),
-                         rw::declinedCallsLegendWithGate( chRows.declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 ),   // exactly when the root carries declined_calls=
+                         rw::declinedCallsLegendWithGates( chRows.declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 ),   // exactly when the root carries declined_calls=
                          std::string( rw::declinedIfaceLegend( chRows.declinedIface > 0 ) )   // likewise, exactly when declined_iface= is there
                            + rw::stdMemberCallsLegend( chRows.stdCalls.calls > 0 && !cfg.columnar ),   // and when the <stdm> line is (XML only)
                          ( std::string( rw::unprovenDefsLegend( chRows.unprovenDefs > 0 ) )      // H1: likewise, exactly when unproven_defs= is there
@@ -775,7 +775,7 @@ std::optional<int> runUses( const MainDispatch& d )
                      "defs_of_name=/call_sites_of_name= (qualifier only) are the un-narrowed totals. "
                      "{}{}{}-->{}{}", rw::kUsesLegendOpen,
                      ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Uses, usUnprovenDefs > 0 )           // H1: exactly when the root carries unproven_defs=
-                       + rw::declinedCallsLegendWithGate( usDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 )                                // exactly when it carries declined_calls=
+                       + rw::declinedCallsLegendWithGates( usDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 )                                // exactly when it carries declined_calls=
                        + rw::usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) )
                        + rw::valueRefsDepthLegend( usDepthCut.files > 0 ) ).c_str(),   // exactly when the root carries the depth disclosure
                      rw::capLegendClause( rw::computePageDisclosure( pageRows, sites.size(), upw.end,
@@ -951,7 +951,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
     const std::size_t declinedCalls = flags.declinedCalls;
     // declined_calls=: its definition, and — beside risk=none-found — the sentence that keeps none-found from reading as
     // a safety verdict about a definition some declined call may have meant (graph.h declinedCallsNaming).
-    std::string declinedClause = rw::declinedCallsLegendWithGate( declinedCalls > 0, flags.gateDeclined, flags.stdDeclined );
+    std::string declinedClause = rw::declinedCallsLegendWithGates( declinedCalls > 0, flags.gateDeclined, flags.stdDeclined );
     if( declinedCalls > 0 && risk == "none-found" )
     {
         declinedClause += "none-found beside declined_calls= is not a safety reading: those calls may reach this definition. ";
@@ -2702,7 +2702,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                          rw::testedLensLegend( cfg.columnar ), rw::kImpactTestedPartitionLegend,   // A6: the columnar form reads its dense column
                          rw::kTestedLensBlindSpotLegend,                           // F-02: rides with the partition
                          rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=
-                         rw::declinedCallsLegendWithGate( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 ),           // exactly when the root carries declined_calls=
+                         rw::declinedCallsLegendWithGates( imDeclinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 ),           // exactly when the root carries declined_calls=
                          rw::declinedIfaceLegend( imDeclinedIface > 0 ),                                             // likewise, exactly when declined_iface= is there
                          rw::modScopeLegend( imHasModScope ),                      // #60: likewise, exactly when a t="modscope" row is
                          ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )   // exactly when the root carries value_refs=
