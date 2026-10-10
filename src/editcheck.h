@@ -1203,7 +1203,7 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     // H1: what callers= and incompatible= did not read, addressed to incompatible= by name — ahead of the floor tail, and
     // emitted exactly when the root carries unproven_defs= (graphlegend.h unprovenDefsVerbLegend).
     out += unprovenDefsVerbLegend( UnprovenDefsVerb::EditCheck, unprovenDefs > 0 );
-    out += declinedCallsLegendWithGate( declinedCalls > 0, g.gateDeclinedCalls > 0 );   // exactly when the root carries declined_calls=
+    out += declinedCallsLegendWithGate( declinedCalls > 0, g.gateDeclinedCalls > 0, g.stdMemberDeclinedCalls > 0 );   // exactly when the root carries declined_calls=
     // §H4 §3.4: the shared floor + counting-unit tail, appended from the ONE constant every graph-count verb
     // splices. It is load-bearing HERE more than anywhere: callers="1" on a symbol with an unmodelled second
     // caller is the exact shape §H4 measured, and this legend's own "the tree as it stands" paragraph reads

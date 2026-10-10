@@ -615,14 +615,27 @@ inline constexpr const char* kDeclinedCallsLegend =
 // answer on a tree the gate never touched keeps its bytes.
 inline constexpr const char* kDeclinedCallsGateClause =
     "It also counts a call named like a builtin-type method (dict.get, list.append) whose bound definitions' classes the caller's file never names. ";
+// The C++ standard-member gate's declines (graph.h StdMemberGate) ride the same count, with ONE definition possible and in
+// the caller's own file or directory too; charged only where that gate declined at least one call in the graph
+// (Graph::stdMemberDeclinedCalls), so a tree it never touched keeps its bytes. What it does NOT mean is in the same breath.
+inline constexpr const char* kDeclinedCallsStdClause =
+    "It also counts a C++ call written on a receiver nothing typed and named like a standard container or string member (v.push_back, s.size): the standard library's own member may be the one called, so no in-tree namesake is bound; it is not a claim that the receiver is a standard type. ";
 inline const char* declinedCallsLegend( bool on ) noexcept { return on ? kDeclinedCallsLegend : ""; }
 inline const char* declinedCallsGateLegend( bool on ) noexcept { return on ? kDeclinedCallsGateClause : ""; }
+inline const char* declinedCallsStdLegend( bool on ) noexcept { return on ? kDeclinedCallsStdClause : ""; }
+// The callees answer's <stdm> line (graph.h stdMemberCallsMadeBy): rides exactly when the line does.
+inline constexpr const char* kStdMemberCallsLegend =
+    "<stdm n= calls=>: of declined_calls=, the calls these definitions make that are named like a C++ standard container or string member (n=, each name once) on a receiver nothing typed; calls= how many. No edge and no row: the standard library's own member may be the one called, and so may an in-tree namesake. It does not list every standard-library call the body makes: a name with no in-tree definition never had a candidate to decline. ";
+inline const char* stdMemberCallsLegend( bool on ) noexcept { return on ? kStdMemberCallsLegend : ""; }
 // --test-gate's own short form: the same attribute and unit, sized for a verb whose legend has an absolute byte budget
 // (test/testgatelegendbudgetcheck.sh), so it defines the one form it emits rather than all three.
 inline constexpr const char* kDeclinedCallsTestGateLegend =
     "declined_calls=K (absent when 0): K call SITES the resolver declined to bind that could have reached the change or its radius (the map's declined=); a test behind one is in no row here. ";
-// The clause and, where the gate declined in this graph, its gate sentence — the one spelling every declined_calls= emitter uses.
-inline std::string declinedCallsLegendWithGate( bool on, bool gateDeclined ) { return std::string( declinedCallsLegend( on ) ) + declinedCallsGateLegend( on && gateDeclined ); }
+// The clause and, where a gate declined in this graph, its gate sentence — the one spelling every declined_calls= emitter uses.
+inline std::string declinedCallsLegendWithGate( bool on, bool gateDeclined, bool stdDeclined )
+{
+    return std::string( declinedCallsLegend( on ) ) + declinedCallsGateLegend( on && gateDeclined ) + declinedCallsStdLegend( on && stdDeclined );
+}
 
 // ── reference-as-value round (src/valuerefs.h, src/ingest_valuerefs.h) ─────────────────────────────────────────
 // Each clause rides ONLY a document that carries the attribute or rows it defines (value_refs= / <vrs>), so an answer

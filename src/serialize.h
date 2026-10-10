@@ -2312,6 +2312,11 @@ inline constexpr const char* kDeclinedMapLegend =
 // only to a map where the gate declined at least one call, so a map the gate never touched keeps its bytes.
 inline constexpr const char* kDeclinedGateMapLegend =
     "<!-- hdr:declined=also-counts-builtin-type-method-calls(dict.get,list.append)whose-bound-targets-classes-the-callers-file-never-names -->";
+// The C++ standard-member gate's declines (graph.h StdMemberGate) ride the same declined= count; charged only to a map where
+// that gate declined at least one call, so a map it never touched keeps its bytes. No '>' and no double hyphen inside.
+inline constexpr const char* kDeclinedStdMapLegend =
+    "<!-- hdr:declined=also-counts-C++-calls-on-an-untyped-receiver-named-like-a-std-container/string-member(v.push_back,s.size);"
+    "the-std-member-may-be-the-one-called;not-a-claim-the-receiver-is-a-std-type -->";
 
 // #157: the default map's own nest-refused disclosure — before this, a refused file's absence carried no signal
 // on the map's own header at all, only in the skipped verb's own report (if a reader thought to ask). Charged
@@ -2805,7 +2810,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                        std::size_t gateDeclinedCalls = 0,
                        // FE-B: Graph::outNameOnly (parallel to outTargets) → via="name" on a <c> row and the via legend
                        // comment; nullptr/empty ⇒ every edge is evidence-bound and the map is byte-identical.
-                       const std::vector<std::uint8_t>* outNameOnly = nullptr )
+                       const std::vector<std::uint8_t>* outNameOnly = nullptr,
+                       // of declined=, the calls the C++ standard-member gate declined (graph.h g.stdMemberDeclinedCalls) →
+                       // the kDeclinedStdMapLegend clause, absent when zero.
+                       std::size_t stdMemberDeclinedCalls = 0 )
 {
     const std::size_t* changedCount = ann.changedCount;
     const std::string* mapAtStamp   = ann.atStamp;
@@ -3041,6 +3049,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::size_t declinedTotal   = counterTotal( declinedOut );     // calls tier 3 declined: no edge, and no guess
     legend += declinedTotal > 0 ? kDeclinedMapLegend : "";               // charged to the map that carries declined=
     legend += gateDeclinedCalls > 0 ? kDeclinedGateMapLegend : "";       // only where the builtin-method gate declined a call
+    legend += stdMemberDeclinedCalls > 0 ? kDeclinedStdMapLegend : "";   // only where the C++ standard-member gate declined a call
     if( outNameOnly && !stubbed && !ann.viaLegendStripped
         && namesOnlyOutAny( outOff, *outNameOnly, std::span<const NodeId>( order.data(), std::min( keep, order.size() ) ) ) )
     {
@@ -9481,7 +9490,8 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                            std::size_t externalCalls = 0,                           // Phase 5: same as serialize()'s
                            const std::vector<std::uint32_t>* declinedOut = nullptr, // tier-3 declines: same as serialize()'s
                            std::size_t /*gateDeclinedCalls*/ = 0,   // serialize()'s legend clause; JSON carries no legend, so unread here
-                           const std::vector<std::uint8_t>* outNameOnly = nullptr )   // FE-B: same as serialize()'s → "via":"name"
+                           const std::vector<std::uint8_t>* outNameOnly = nullptr,   // FE-B: same as serialize()'s → "via":"name"
+                           std::size_t /*stdMemberDeclinedCalls*/ = 0 )   // serialize()'s legend clause; JSON carries no legend, so unread here
 {
     const std::size_t S = ing.symbols.size();
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );

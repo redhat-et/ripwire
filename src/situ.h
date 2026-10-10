@@ -1434,7 +1434,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                   untestedModscopeLegend( r.untestedModscope > 0 ),   // F3: the full clause at N>0, a one-line definition at 0
                   ( std::string( rw::graphUnindexedLegend( rw::graphGaugeClauses( g ) ) )   // #66: exactly when the root carries the attribute
                     + ( r.declinedCalls > 0 ? rw::kDeclinedCallsTestGateLegend : "" )                               // exactly when it carries declined_calls=
-                    + rw::declinedCallsGateLegend( r.declinedCalls > 0 && g.gateDeclinedCalls > 0 ) ).c_str(),
+                    + rw::declinedCallsGateLegend( r.declinedCalls > 0 && g.gateDeclinedCalls > 0 ) + rw::declinedCallsStdLegend( r.declinedCalls > 0 && g.stdMemberDeclinedCalls > 0 ) ).c_str(),
                   rw::rootRelPathsLegend( !tgRootAttr.empty() ) );
     // §P11.4: this gate EXITS 4 on the obligation, so its rows carry the command that discharges it — where
     // one is derivable. Absent run= = not derivable (testmap.h states why a fallback would be a lie).

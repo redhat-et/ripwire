@@ -544,6 +544,7 @@
 "spectimingcheck.sh": 1.8,
 "staleackcheck.sh": 6.1,
 "statgatecheck.sh": 10.2,
+"stdmembergatecheck.sh": 10.0,
 "structlayoutcheck.sh": 12.0,
 "sublistcountcheck.sh": 9.6,
 "substrfiltercheck.sh": 42.0,

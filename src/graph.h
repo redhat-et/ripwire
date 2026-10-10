@@ -142,6 +142,12 @@ struct Graph
     // that call bound to it by name.
     std::vector<char>          gateDeclinedTarget;
     std::size_t                gateDeclinedCalls = 0;   // of the header's declined=, the calls the builtin-method name gate declined
+    // Of the header's declined=, the C++ calls the standard-member gate declined (StdMemberGate below): its own legend clause
+    // rides where this is >0, so a tree with none keeps its bytes. stdMemberDeclines is one entry per DECLINED C++ call named
+    // like a standard member on a receiver nothing typed — by that gate or by the ladder's own tier-3 decline — packed
+    // StdMemberGate::key( caller, table index ) and sorted after the resolve loop: the callees answer's <stdm> line.
+    std::size_t                stdMemberDeclinedCalls = 0;
+    std::vector<std::uint64_t> stdMemberDeclines;
     // Every call reference's disposition (pincensus.h CallDisposition), one bucket per reference. Read by buildGraph's
     // unaccounted alert and copied into pinCensus when a census is armed; its external/unresolved/declined buckets
     // equal those header gauges by construction.
@@ -2457,9 +2463,8 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
 //       message send has no receiver shape either — so a gate would decline typed true edges it cannot tell from the
 //       false ones; probed: `void f( Pool p ) { p.get( k ); }` and `Pool *p; [p addObject:x]` bind by name alone);
 //       Go (its builtin types have no methods; a stdlib-type receiver such as `sync.Pool.Get` does bind a lone in-repo
-//       `Get` by name, and needs the declared-type evidence Go's extractor does not record either); C and C++ (they
-//       carry declared-type evidence, so the fix there is an evidence-AGAINST rule for a receiver of a std or builtin
-//       type, not a name list).
+//       `Get` by name, and needs the declared-type evidence Go's extractor does not record either); C (no member
+//       functions); C++ has its own rule, StdMemberGate below, because its receiver evidence differs (Rule 1/2/2b type it).
 // THE SAME-FILE ANNOTATION RULE (BuiltinMethodGate::fileNames, byReferenceOnly). Python records no annotation as a binding
 // or reference, so `def f( p: Pool )`, `x: Pool = …`, `"Pool"`, `Optional[Pool]`, `isinstance( o, Pool )` and `-> Pool`
 // leave fileRefClasses empty in the file that DEFINES Pool. A class the file defines still counts there when its name
@@ -2846,6 +2851,64 @@ struct BuiltinMethodGate
             }
         }
         return Verdict::NoEvidence;
+    }
+};
+
+// THE C++ STANDARD-MEMBER GATE (test/stdmembergatecheck.sh; the names are data: externalnames.h kCppStdMemberNames).
+// A C++ member call whose receiver no rule typed — `out.push_back( c )` on a `std::vector<char>&` parameter, `s.size()`,
+// `getV().empty()` — is NAME-ONLY (FE-B): it keeps every same-file, same-directory and included-file definition of the
+// name, each hedged via="name". When the name is a standard container or string member, those rows were overwhelmingly
+// calls on the standard types: on this repository's own map 14 of the top 20 PageRank rows were such names
+// (svector::push_back, WidePath::c_str, ElixirResolver::append, every `empty` and `find` in src/). A standard container
+// is a concrete, non-virtual class template, so a receiver of standard type never dispatches into the tree: the standard
+// library's own member is always one of the call's candidates, and nothing in the source chose an in-tree one over it.
+// Such a call is DECLINED, never retargeted: no edge; the header's declined=; the tier the ladder would have bound is
+// interned (declined_calls= on --callers/--impact of those definitions) and marked in gateDeclinedTarget (none of them
+// becomes a dead-code candidate for losing a by-name caller); Graph::stdMemberDeclinedCalls for its legend clause; and a
+// <stdm> line on the caller's --callees answer (Graph::stdMemberDeclines, stdMemberCallsMadeBy).
+// APPLIES to a C++ Call with no qualifier, written on a receiver (`x.m()`, `p->m()`, `f().m()`), named in the table, that
+// the resolve loop left NAME-ONLY (no SCIP pin, canonical tier, receiver rule, FFI binding or identity claim decided it,
+// and the language's own lookup proved no candidate — `this->size()` in a class with `size` is proven and kept), and
+// whose receiver's WRITTEN non-std type, if it has one, does not reach a candidate (buildGraph's receiverWrittenType and
+// writtenTypeReaches: a local declared `SmallVec<NodeId, 2>` — an alias the rules do not map — whose cone holds svector keeps
+// the ladder's hedge on svector::push_back, since the type may be that container; `HashMap<K, V> m; m.find( k )` reaching
+// UnionFind::find by name does not).
+// STATED FLOORS: (1) by name: an in-tree container reached through an untyped receiver (`auto& v = pool.items();
+// v.push_back( x )`) loses its by-name edge to declined_calls=; (2) a written type is matched by its cone's class NAMES, as
+// CHA-lite matches it; (3) generic names and iostream/filesystem/atomic/thread members are not in the table (externalnames.h
+// says which and why), so their calls keep the ladder.
+// LANGUAGE SCOPE (each probed): C has no member functions. Rust receivers carry no declared type (`let s = Stack{..};
+// s.push()` splits by name today), so a gate would decline typed true edges with the false ones. Go, Java, Kotlin, C# and
+// Swift name their standard members after interfaces in-tree types implement on purpose (Len/Write/String/Close, add/size,
+// Add, append), so an unproven receiver may dispatch into the tree. ObjC message sends carry no receiver shape.
+// Python/JS/TS/Ruby: BuiltinMethodGate above.
+struct StdMemberGate
+{
+    static constexpr std::uint16_t kNotStd = 0xFFFFu;
+    // How many in-tree definitions the name must reach before the gate declines. The split it replaces always has the standard
+    // library's own member as one arm, so ONE in-tree candidate already makes two unrelated definitions: `s.append( x )` on a
+    // std::string bound to a repository's only `append` (one definition, one by-name edge) is the case this gate exists for.
+    static constexpr std::size_t   kMinInTreeCandidates = 1;
+
+    // The table index of a call the gate is about — C++, a call, unqualified, written on a receiver, a table name — else
+    // kNotStd. Whether the resolve loop left it name-only, and its receiver's written type, are the caller's to add.
+    static std::uint16_t tableIndexOf( const Reference& r ) noexcept
+    {
+        if( r.lang != Lang::Cpp || r.role != RefRole::Call || !r.qualifier.empty() || !isMemberCallRef( r ) )
+        {
+            return kNotStd;
+        }
+        const std::span<const std::string_view> table( externalnames::kCppStdMemberNames );   // strictly sorted: static_assert
+        const auto                              it = std::lower_bound( table.begin(), table.end(), std::string_view( r.calleeName ), rw::sortutil::svLess );
+        const std::uint16_t                     index = ( it != table.end() && *it == r.calleeName ) ? std::uint16_t( it - table.begin() ) : kNotStd;
+        ENSURES( index == kNotStd || index < table.size(), "a table index, or none" );
+        return index;
+    }
+
+    // One Graph::stdMemberDeclines entry: the caller in the high bits, so a sorted vector groups each caller's calls.
+    static std::uint64_t key( NodeId caller, std::uint16_t index ) noexcept
+    {
+        return ( std::uint64_t( caller ) << 16 ) | index;
     }
 };
 
@@ -6052,6 +6115,41 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         return ( ref.lang == Lang::TypeScript || ref.lang == Lang::JavaScript ) && rootRelPath( ing, cs.fileId ).ends_with( ".d.ts" );
     };
+    // StdMemberGate's receiver exception. A C++ named receiver may carry a WRITTEN type outside namespace std that the rules above
+    // could not map to a class — a local or parameter declared `SmallVec<NodeId, 2>` (an alias), or a member field Rule 2b has a
+    // type for. When that type's inheritance cone (its alias targets and bases included, chaUp) holds one of the candidates the
+    // ladder reached, the call keeps the ladder's hedge: the type may be that in-tree container. A written type whose cone holds
+    // none of them (`HashMap<K, V> m; m.find( k )` reaching UnionFind::find by name) is no evidence for them, and the gate applies.
+    // A declared local hides a same-named field (Rule 2b's own local-shadow veto), and a `std::`-typed declaration reads as "".
+    std::string stdRecvKey;   // reused "<fromSymbol>#<recvVar>" buffer
+    const auto receiverWrittenType = [ & ]( const Reference& ref ) -> std::string_view
+    {
+        if( ref.lang != Lang::Cpp || ref.recv != RecvKind::NamedVar || ref.recvVar.empty() || ref.fromSymbol == kNoNode )
+        {
+            return {};
+        }
+        if( const std::string_view local = narrower.recvVarTypeName( ref ); !local.empty() )
+        {
+            return local;
+        }
+        stdRecvKey.clear();  Narrower::appendUint( stdRecvKey, ref.fromSymbol );  stdRecvKey.push_back( '#' );  stdRecvKey.append( ref.recvVar );
+        if( const auto lit = fieldNarrow.localNameSet.find( stdRecvKey ); lit != fieldNarrow.localNameSet.end() && ( lit->second & kLocalNameDeclared ) != 0 )
+        {
+            return {};   // a declared local, untyped or written in std: not the field
+        }
+        const FlatRecvType* field = narrower.fieldEntryAt( ref, ing.symbols[ ref.fromSymbol ].scope, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } );
+        // a std smart pointer's pointee is reached through `->` alone: `w_.reset()` on `std::unique_ptr<W> w_;` is the pointer's own member
+        return ( field == nullptr || ( field->arrowOnly && !ref.viaArrow ) ) ? std::string_view{} : std::string_view( field->type );
+    };
+    const auto writtenTypeReaches = [ & ]( std::string_view type, NodeId from, std::span<const NodeId> ids ) -> bool
+    {
+        if( type.empty() )
+        {
+            return false;
+        }
+        const ChaConeMemo::Cone cone = chaCones.coneFor( type );
+        return std::any_of( ids.begin(), ids.end(), [ & ]( NodeId c ) { return c != from && chaCones.contains( cone, type, ing.symbols[ c ].scope ); } );
+    };
     rw::SmallVec<NodeId, 2>  rubyReachable; // reused per-call buffer: the candidates a Ruby call to self can reach (RubySelfReach)
 
     // ---- census arming + the ORACLE side (eval-only; src/pincensus.h) ------------------------------
@@ -6893,6 +6991,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
         }
+        // StdMemberGate: a NAME-ONLY C++ member call named like a standard container or string member, whose receiver carries
+        // no written type outside namespace std — its table index, else kNotStd. Decided once here: the ladder's own tier-3
+        // decline and the post-filter below both read it.
+        const std::uint16_t    stdIndex    = nameOnly ? StdMemberGate::tableIndexOf( r ) : StdMemberGate::kNotStd;
+        const std::string_view stdRecvType = ( stdIndex != StdMemberGate::kNotStd ) ? receiverWrittenType( r ) : std::string_view{};
         // ---- tier ladder (the name-based fallback) — SKIPPED when SCIP pinned this site, and for Rule 2's class-identity CLAIM (a type fact, not a locality guess)
         const bool identityClaim = narrowed && narrower.identityClaimFor( r );
         if( !scipPinned && ( r.lang == Lang::Elixir || identityClaim ) ) { tier = cand; }
@@ -6976,6 +7079,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     {
                         ++g.declinedOut[ r.fromSymbol ];
                         internDeclinedList( g, declinedListsByHash, cand );
+                        if( stdIndex != StdMemberGate::kNotStd && !writtenTypeReaches( stdRecvType, r.fromSymbol, cand ) )
+                        {
+                            g.stdMemberDeclines.push_back( StdMemberGate::key( r.fromSymbol, stdIndex ) );   // the <stdm> line names it too
+                        }
                         disposition = CallDisposition::Declined;
                         continue;
                     }
@@ -7271,6 +7378,48 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
         }
 
+        // ---- the C++ standard-member gate (StdMemberGate above) — it only ever removes an edge -------------------------
+        // The ladder decided this name-only call as it decides every other; when the name is a standard container or string
+        // member and the receiver carries no written non-std type, the in-tree definitions it reached by NAME are declined
+        // instead of bound: the standard library's own member is the call's other candidate. A self-only tier is left to the
+        // Self exit, exactly as the builtin-method gate leaves it.
+        if( stdIndex != StdMemberGate::kNotStd && !bindingPinned && !identityClaim && !writtenTypeReaches( stdRecvType, r.fromSymbol, tier ) )
+        {
+            ASSUME( stdIndex < std::size( externalnames::kCppStdMemberNames ), "tableIndexOf returns a table index or kNotStd" );
+            gateRefused.clear();
+            for( const NodeId c : tier )
+            {
+                if( c != r.fromSymbol )
+                {
+                    gateRefused.push_back( c );   // what the edge loop below would bind: what the call could have meant
+                }
+            }
+            std::size_t byName = 0;   // the name's in-tree candidates the ladder chose among (cand and the included file's), the caller excluded
+            for( const NodeId c : cand )
+            {
+                byName += ( c != r.fromSymbol ) ? 1u : 0u;
+            }
+            for( const NodeId c : memberRule3 )
+            {
+                byName += ( c != r.fromSymbol && std::find( cand.begin(), cand.end(), c ) == cand.end() ) ? 1u : 0u;
+            }
+            if( !gateRefused.empty() && byName >= StdMemberGate::kMinInTreeCandidates )
+            {
+                std::sort( gateRefused.begin(), gateRefused.end() );   // one sequence per set, as internDeclinedList keys it
+                ++g.declinedOut[ r.fromSymbol ];
+                ++g.stdMemberDeclinedCalls;
+                internDeclinedList( g, declinedListsByHash, gateRefused );
+                g.gateDeclinedTarget.resize( N, 0 );   // no-op after the first decline: a definition a declined call could have meant is not dead
+                for( const NodeId c : gateRefused )
+                {
+                    g.gateDeclinedTarget[ c ] = 1;
+                }
+                g.stdMemberDeclines.push_back( StdMemberGate::key( r.fromSymbol, stdIndex ) );
+                disposition = CallDisposition::Declined;
+                continue;
+            }
+        }
+
         // ambiguity clue (S6-C): count when, AFTER all narrowing (canonical / Rule-1 / locality), the call STILL
         // resolves to >1 in-repo target — every one of which receives a 1/k-split edge below — excluding a
         // self-loop. HONESTY INVARIANT: the amb count must reflect EXACTLY the multi-way pick the edge emission
@@ -7426,6 +7575,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         disposition = CallDisposition::Bound;
     }
+    std::sort( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() );   // grouped by caller: stdMemberCallsMadeBy's equal_range
     // A reference that left the loop naming no disposition is a resolver bug behind a correct-looking map: the
     // edges are right and the census's conservation line is not. Every plain build says so, census or not.
     if( g.callDispositions[ std::size_t( CallDisposition::Unaccounted ) ] > 0 )
@@ -11817,6 +11967,46 @@ inline std::size_t declinedCallsMadeBy( const Graph& g, std::span<const NodeId> 
         }
     }
     return callCount;
+}
+
+// The callees answer's <stdm> line: of the declines `sources` made (declinedCallsMadeBy), the C++ calls named like a
+// standard container or string member on a receiver nothing typed (Graph::stdMemberDeclines, StdMemberGate) — the names,
+// each once in table (byte) order, and how many calls. Empty on a graph with none, so every other answer keeps its bytes.
+struct StdMemberCallsMade
+{
+    std::vector<std::string_view> names;
+    std::size_t                   calls = 0;
+};
+inline StdMemberCallsMade stdMemberCallsMadeBy( const Graph& g, std::span<const NodeId> sources )
+{
+    StdMemberCallsMade out;
+    if( g.stdMemberDeclines.empty() )
+    {
+        return out;
+    }
+    EXPECTS( std::is_sorted( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end() ), "buildGraph sorts the declines after its resolve loop" );
+    std::vector<char> named( std::size( externalnames::kCppStdMemberNames ), 0 );
+    for( const NodeId s : sources )
+    {
+        const auto lo = std::lower_bound( g.stdMemberDeclines.begin(), g.stdMemberDeclines.end(), StdMemberGate::key( s, 0 ) );
+        const auto hi = std::upper_bound( lo, g.stdMemberDeclines.end(), StdMemberGate::key( s, 0xFFFFu ) );
+        for( auto it = lo; it != hi; ++it )
+        {
+            const std::size_t index = std::size_t( *it & 0xFFFFu );
+            ASSUME( index < named.size(), "StdMemberGate::key packs a table index" );
+            named[ index ] = 1;
+            ++out.calls;
+        }
+    }
+    for( std::size_t i = 0; i < named.size(); ++i )
+    {
+        if( named[ i ] != 0 )
+        {
+            out.names.push_back( externalnames::kCppStdMemberNames[ i ] );
+        }
+    }
+    ENSURES( out.names.empty() == ( out.calls == 0 ), "a named call and a listed name come together" );
+    return out;
 }
 
 }   // namespace rw

@@ -15,6 +15,31 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — a C++ call named like a standard container member, on a receiver nothing typed, binds no in-tree namesake
+
+`out.push_back( c )` on a `std::vector<char>&` parameter, `s.size()` on a `std::string`, `getV().empty()`: a C++ member
+call whose receiver no rule typed bound by NAME to whatever in-tree class defines the member — a hedged via="name" row,
+but a row, and every graph reader counted it. On this repository's own map 14 of the top 20 PageRank rows were such
+names (a small-vector's `push_back`, a path wrapper's `c_str`, every `empty` and `find` under `src/`), and
+`--callees=escapeXml` listed 8 of them beside its 4 real callees.
+
+- A standard container is a concrete, non-virtual class template, so a receiver of standard type never dispatches into
+  the tree. Such a call is now DECLINED after the ladder decides it: no edge; counted in the header's `declined=` and
+  in `declined_calls=` on every definition it would have bound (so `--callers` / `--impact` / `--safe-delete` say the
+  count, and no definition becomes a dead-code candidate for losing a by-name caller); a legend clause of its own,
+  charged only where it fired. `--callees` (and the MCP `find_symbol` twin) names those calls once:
+  `<stdm n="clear,data,push_back,reserve,size" calls="11"/>`.
+- The names are data (`src/externalnames.h` `kCppStdMemberNames`, 78 container / string / view / span / optional /
+  smart-pointer members, generic verbs such as `get`, `count`, `swap`, `read`, `write` excluded). A receiver a rule
+  types is never touched — a typed local, parameter, pointer or member field, `this->`, an implicit-this call — and
+  neither is one whose written non-std type reaches a candidate (an alias of the in-tree container keeps its hedge).
+- C++ only, each other language for a stated reason: C has no member functions; Rust receivers carry no declared type
+  yet; Go, Java, Kotlin, C# and Swift name their standard members after interfaces in-tree types implement; ObjC
+  message sends carry no receiver shape; Python, JS, TS and Ruby keep the builtin-method name gate.
+- Measured on this repository (`--no-cache`): call edges 40,460 → 24,965, `ambiguous=` 12,509 → 2,761, `declined=`
+  12,207 → 25,816; the top 20 PageRank rows carry no standard member name (14 before); `--callees=escapeXml`
+  count 12 → 4 plus the `<stdm>` line. Gate: `test/stdmembergatecheck.sh`.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

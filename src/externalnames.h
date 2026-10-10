@@ -274,11 +274,8 @@ inline constexpr std::string_view kGoBuiltinNames[] = {
 //     ruby -e 'puts [Hash,Array,String].flat_map{|t| t.public_instance_methods(false)}.map(&:to_s)
 //       .select{|n| n =~ /\A[a-z_][A-Za-z0-9_]*[?!=]?\z/}.uniq.sort'
 //     233 names.
-// NO TABLE, BY DESIGN, for the other indexed languages — each reason is recorded in graph.h beside BuiltinMethodGate:
-// Java, Kotlin, C#, Swift, Rust and ObjC record no declared parameter or local type (and an ObjC message send carries no
-// receiver shape), so a gate would decline their typed true edges along with the false ones; Go's builtin types have
-// no methods, and its stdlib-type receivers (`sync.Pool.Get`) need the same missing declared-type evidence; C and C++
-// already carry declared-type evidence (Rule 2, 2b, CHA-lite) and want an evidence-against rule instead.
+// NO TABLE HERE for the other indexed languages — each reason is recorded in graph.h beside BuiltinMethodGate and
+// StdMemberGate. C++ has its own table below (kCppStdMemberNames), read by a different rule: StdMemberGate.
 inline constexpr std::string_view kPythonBuiltinMethodNames[] = {
     "add", "append", "capitalize", "casefold", "center", "clear", "copy", "count", "decode", "difference", "difference_update", "discard", "encode",
     "endswith", "expandtabs", "extend", "find", "format", "format_map", "fromhex", "fromkeys", "get", "hex", "index", "insert", "intersection",
@@ -321,6 +318,32 @@ inline constexpr std::string_view kRubyBuiltinMethodNames[] = {
     "valid_encoding?", "value?", "values", "values_at", "zip"
 };
 
+// ── THE C++ STANDARD-MEMBER TABLE (graph.h StdMemberGate; gate test/stdmembergatecheck.sh). A C++ member call
+// `out.push_back( c )` whose receiver no rule typed used to bind by NAME to whatever in-tree class defines `push_back`:
+// on this repository's own map the top 20 PageRank rows were 14 such names (svector::push_back, WidePath::c_str,
+// ElixirResolver::append, every `empty`/`find` in src/), fed by calls on `std::vector`, `std::string` and friends. A
+// standard container is a concrete, non-virtual class template, so a receiver of standard type never dispatches into
+// the tree — the call's other candidate is always the standard library's own member. A name here makes StdMemberGate
+// DECLINE such a call (no edge, counted, disclosed) instead of letting the name pick an in-tree definition; a call
+// whose receiver a rule typed (Rule 1/2/2b, `this`, a written non-std type) is never touched.
+// PROVENANCE: transcribed from the C++23 member synopses of the sequence, associative and unordered containers
+// ([containers]), basic_string and basic_string_view ([strings]), span ([views.span]), optional ([optional]) and the
+// smart pointers ([smartptr]) — MINUS every name that is also a generic verb or noun non-container classes routinely
+// define for themselves (get set reset release swap count value index compare copy replace merge extract splice remove
+// remove_if unique sort reverse fill first last lock top push pop transform and_then or_else error expired), and minus
+// every iostream, filesystem, atomic, thread and chrono member (read write flush open close string str load store join
+// wait), whose unproven-receiver calls are an unmeasured mix of standard and in-tree types. 78 names; sorted by byte.
+inline constexpr std::string_view kCppStdMemberNames[] = {
+    "append", "append_range", "assign", "assign_range", "at", "back", "before_begin", "begin", "bucket_count", "c_str", "capacity",
+    "cbefore_begin", "cbegin", "cend", "clear", "contains", "crbegin", "crend", "data", "emplace", "emplace_after", "emplace_back",
+    "emplace_front", "emplace_hint", "empty", "end", "ends_with", "equal_range", "erase", "erase_after", "find", "find_first_not_of",
+    "find_first_of", "find_last_not_of", "find_last_of", "front", "get_allocator", "has_value", "hash_function", "insert", "insert_after",
+    "insert_or_assign", "insert_range", "insert_range_after", "key_comp", "key_eq", "length", "load_factor", "lower_bound", "max_bucket_count",
+    "max_load_factor", "max_size", "owner_before", "pop_back", "pop_front", "prepend_range", "push_back", "push_front", "rbegin", "rehash",
+    "remove_prefix", "remove_suffix", "rend", "reserve", "resize", "resize_and_overwrite", "rfind", "shrink_to_fit", "size", "size_bytes",
+    "starts_with", "subspan", "substr", "try_emplace", "upper_bound", "use_count", "value_comp", "value_or"
+};
+
 // ONE sortedness proof for the three tables above, taking the table as a span, so the three stay one shape rather than
 // three near-copies of the assert this file already spells per table. The lookup is graph.h BuiltinMethodGate::appliesTo,
 // its only reader, which picks the table by language first.
@@ -331,6 +354,8 @@ constexpr bool isStrictlySortedTable( std::span<const std::string_view> table ) 
 static_assert( isStrictlySortedTable( kPythonBuiltinMethodNames ), "kPythonBuiltinMethodNames must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kJsBuiltinMethodNames ), "kJsBuiltinMethodNames must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kRubyBuiltinMethodNames ), "kRubyBuiltinMethodNames must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kCppStdMemberNames ), "kCppStdMemberNames must be strictly sorted (binary search)" );
+static_assert( std::size( kCppStdMemberNames ) <= 0xFFFFu, "StdMemberGate packs a kCppStdMemberNames index into 16 bits" );
 static_assert( isStrictlySortedTable( kJsGlobalObjectNames ), "kJsGlobalObjectNames must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kJsGlobalFunctionNames ), "kJsGlobalFunctionNames must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kJsGlobalAliasNames ), "kJsGlobalAliasNames must be strictly sorted (binary search)" );
