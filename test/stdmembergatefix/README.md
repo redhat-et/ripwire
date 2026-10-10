@@ -14,6 +14,6 @@ and `StdMap`, an alias of a standard map.
   declined and disclosed (declined_calls=, the callees answer's `<stdm>` line), never bound to an in-tree namesake.
 
 Controls: a name outside the table (`grow`) keeps the ladder; a bare call `size( b )` reaches the free function; `c/`
-holds a C function-pointer call; `far/` calls `w.empty()` where no namesake is in reach, so the ladder itself
-declines it (tier 3) (C has no member functions, so no gate); `rs/` is the Rust stated scope (no declared
-receiver types there yet), whose by-name split must stay unchanged.
+holds a C function-pointer call (C has no member functions, so no gate); `rs/` is the Rust stated scope (no declared
+receiver types there yet), whose by-name split must stay unchanged. `far/` calls `w.empty()` where no namesake is in
+reach, so the ladder itself declines it (tier 3), and the `<stdm>` line still names it.

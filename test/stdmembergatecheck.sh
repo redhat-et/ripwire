@@ -34,8 +34,9 @@
 #   (F) disclosure surfaces: the map header's declined= equals the census's declined bucket, the full map legend, the
 #       callers legend and the callees legend each carry their clause, the compact callees legend defines stdm, the
 #       columnar callees form carries neither the line nor its sentence, JSON and the MCP find_symbol twin carry "stdm"
-#   (G) dead-code safety: Shelf::empty (anonymous namespace, its only callers declined) is no dead-code candidate, and
-#       --safe-delete carries declined_calls="3" beside risk=none-found
+#   (G) dead-code safety: on a copy outside the fixture paths (which are never dead by design), --quality-delta counts the
+#       definitions whose only callers were declined as declined-call-excluded=, and --safe-delete=Shelf::empty carries
+#       declined_calls="3" with dead_code_candidate="0"
 #   (S) 0 bytes on a tree the gate never declined in: test/builtinbindfix's map and callers legends carry no C++ clause
 #   (K) the predicates can fail: a via="name" row and a missing <stdm> line are both caught
 #   (L) determinism x2, xmllint on every answer whose new clause rides, no degrade alert on stderr
@@ -196,10 +197,17 @@ printf '%s' "$M" | grep -q '"stdm"' && no "(F) MCP find_referencing_symbols (cal
 
 # ── (G) dead-code safety ──────────────────────────────────────────────────────────────────────────────────────
 echo "=== (G) a definition whose only callers were declined is no dead-code candidate ==="
-rw --dead-code >"$TMP/dead.xml"
-R="$( root_tag "$TMP/dead.xml" dead-code )"
-[ -n "$R" ] && ! grep -q 'n="empty"' "$TMP/dead.xml" \
-    && ok "(G) --dead-code lists no empty (Shelf::empty's two callers were declined, not absent)" || no "(G) --dead-code: $( grep -oE '<d [^>]*>' "$TMP/dead.xml" | head -3 )"
+# a fixture path is never dead by design (quality.h isFixturePath), so the dead-set arm runs on a copy in $TMP
+QD="$TMP/qd"; rm -rf "$QD"; mkdir -p "$QD"; cp -R app lib far "$QD/" 2>/dev/null
+( cd "$QD" && git init -q && git -c user.name=t -c user.email=t@t add -A && git -c user.name=t -c user.email=t@t commit -qm base ) >/dev/null 2>&1
+printf '\n' >>"$QD/app/local.cpp"
+( cd "$QD" && "$BIN" . --no-cache --quality-delta >"$TMP/qd.xml" 2>/dev/null )
+QR="$( root_tag "$TMP/qd.xml" quality-delta )"
+if [ -n "$( attr "$QR" declined-call-excluded )" ] && [ "$( attr "$QR" declined-call-excluded )" -ge 1 ] 2>/dev/null; then
+    ok "(G) --quality-delta keeps the gated calls' targets out of the dead set: declined-call-excluded=\"$( attr "$QR" declined-call-excluded )\""
+else
+    no "(G) --quality-delta carries no declined-call-excluded= count: ${QR:-no <quality-delta> root}"
+fi
 rw --safe-delete=Shelf::empty >"$TMP/sd.xml"
 R="$( root_tag "$TMP/sd.xml" safe-delete )"
 [ "$( attr "$R" declined_calls )" = "3" ] && [ "$( attr "$R" dead_code_candidate )" = "0" ] \

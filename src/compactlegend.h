@@ -333,7 +333,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // lane recall: absent at zero, callers and impact only (graphlegend.h kDeclinedIfaceLegend).
     { "declined_iface",    "declined_iface=K: K declined TS calls sharing a name with an interface/abstract signature, by name only (MAY go through it); not a subset of declined_calls=" },
     // graph.h StdMemberGate: the callees answer's <stdm> line, absent when the definitions made no such call (graphlegend.h kStdMemberCallsLegend).
-    { "calls",             "stdm n= calls=: of declined_calls=, calls named like a C++ std container/string member (n=) on an untyped receiver; no edge or row (may be the std member)", false, "stdm" },
+    { "calls",             "stdm n= calls=: of declined_calls=, calls named like a C++ std container/string/optional/smart-pointer member (n=) on an untyped receiver; no edge or row (may be the std member)", false, "stdm" },
     // Reference-as-value round (graphlegend.h kValueRefs*Legend, src/valuerefs.h): every term absent at zero, present-only.
     // Each says what a value row does NOT mean in the same breath (checklist 3): matched by name, not a proven call.
     { "value_refs",        "value_refs=N: N vr rows, the function used as a VALUE (stored or passed), matched by name; not a proven call, in no count or reach" },

@@ -2315,7 +2315,7 @@ inline constexpr const char* kDeclinedGateMapLegend =
 // The C++ standard-member gate's declines (graph.h StdMemberGate) ride the same declined= count; charged only to a map where
 // that gate declined at least one call, so a map it never touched keeps its bytes. No '>' and no double hyphen inside.
 inline constexpr const char* kDeclinedStdMapLegend =
-    "<!-- hdr:declined=also-counts-C++-calls-on-an-untyped-receiver-named-like-a-std-container/string-member(v.push_back,s.size);"
+    "<!-- hdr:declined=also-counts-C++-calls-on-an-untyped-receiver-named-like-a-std-container/string/optional/smart-pointer-member(v.push_back,s.size);"
     "the-std-member-may-be-the-one-called;not-a-claim-the-receiver-is-a-std-type -->";
 
 // #157: the default map's own nest-refused disclosure — before this, a refused file's absence carried no signal
