@@ -214,7 +214,14 @@ SA_TS="$( sa --callers=tsHelper )"
     || no "SA3: tsCaller row: $( row "$SA_TS" tsCaller )"
 [ "$( sat "$( row "$SA_TS" tsDirect )" )" = "k.ts:2" ] && ok "SA3: its direct sibling caller does (k.ts:2)" \
     || no "SA3: tsDirect row: $( row "$SA_TS" tsDirect )"
-sa --callees=two_lines | sed 's/<!--.*-->//' | grep -q 'sites_at=' && no "SA4: a --callees row carries sites_at=" || ok "SA4: --callees rows carry no sites_at="
+SA_CE="$( sa --callees=two_lines | sed 's/<!--.*-->//' )"
+if ! printf '%s' "$SA_CE" | grep -q '<callees [^>]*count="[1-9]'; then
+    no "SA4: premise: --callees=two_lines printed no callees root with rows: $SA_CE"
+elif printf '%s' "$SA_CE" | grep -q 'sites_at='; then
+    no "SA4: a --callees row carries sites_at="
+else
+    ok "SA4: --callees rows carry no sites_at="
+fi
 # SA5: sites_at= equals the --uses role="call" lines inside that caller, for every row of the answer (one question, two documents).
 SA5_BAD=0; SA5_N=0
 for nm in target pyhelper; do
@@ -244,7 +251,14 @@ SA_F="$( sa --callers=many --legend=full )"
 { printf '%s' "$SA_F" | grep -o '<!--.*-->' | grep -q 'sites_at= on a caller row' && printf '%s' "$SA_F" | grep -q 'sites_total=N' \
   && printf '%s' "$SA_F" | xmllint --noout - 2>/dev/null; } \
     && ok "SA8: --legend=full carries the sites_at=/sites_total= clauses and stays well-formed (no -- in the comment)" || no "SA8: full legend: $( printf '%s' "$SA_F" | head -c 300 )"
-sa --callers=d1 >/dev/null; "$BIN" "$FIX" --callers=d1 --no-cache 2>/dev/null | grep -q 'sites_at' && no "SA8: a zero-row answer mentions sites_at" || ok "SA8: present-only: a zero-row answer carries no sites_at reading"
+SA_D1="$( "$BIN" "$FIX" --callers=d1 --no-cache 2>/dev/null )"
+if ! printf '%s' "$SA_D1" | grep -q '<callers [^>]*count="0"'; then
+    no "SA8: premise: --callers=d1 printed no zero-row callers root: $SA_D1"
+elif printf '%s' "$SA_D1" | grep -q 'sites_at'; then
+    no "SA8: a zero-row answer mentions sites_at"
+else
+    ok "SA8: present-only: a zero-row answer carries no sites_at reading"
+fi
 SA_AMP="$( sa --callers=amp_target )"
 { printf '%s' "$SA_AMP" | grep -q 'sites_at="a&amp;b/amp.c:2"' && printf '%s' "$SA_AMP" | xmllint --noout - 2>/dev/null; } \
     && ok "SA9: a path holding & is escaped inside sites_at= (well-formed)" || no "SA9: amp answer: $SA_AMP"
@@ -265,7 +279,13 @@ SA_C="$( sa --callers=target --format=columnar )"
     && ok "SA10: --format=columnar carries the sites_at column (fields= names it)" || no "SA10: columnar: $( printf '%s' "$SA_C" | sed 's/<!--.*-->//' )"
 sa --callers=many --format=columnar | grep -q '<sites_total>20</sites_total>' && ok "SA10: a cut columnar row carries the sites_total column" \
     || no "SA10: columnar cut row"
-sa --callers=target --format=columnar | grep -q 'sites_total' && no "SA10: present-only: an uncut columnar answer carries sites_total" || ok "SA10: present-only: no sites_total column when nothing was cut"
+if ! printf '%s' "$SA_C" | grep -q '<sites_at>'; then
+    no "SA10: premise: the uncut columnar answer carries no sites_at column"
+elif printf '%s' "$SA_C" | grep -q 'sites_total'; then
+    no "SA10: present-only: an uncut columnar answer carries sites_total"
+else
+    ok "SA10: present-only: no sites_total column when nothing was cut"
+fi
 sa_mcp(){ printf '%s\n%s\n%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
     '{"jsonrpc":"2.0","method":"notifications/initialized"}' \

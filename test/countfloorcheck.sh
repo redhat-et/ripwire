@@ -226,8 +226,13 @@ ROW_USER="$( printf '%s' "$OUT_C" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
 if [ "$( attr "$ROW_PAD" p )" = "a.c:9" ]; then ok "(C) p= still names the caller's definition line (a.c:9)"; else no "(C) p= changed on the pad row: $ROW_PAD"; fi
 if [ "$( attr "$ROW_PAD" sites_at )" = "a.c:11 a.c:12 a.c:13" ]; then ok "(C) three calls on three lines: sites_at=\"a.c:11 a.c:12 a.c:13\""; else no "(C) pad row: $ROW_PAD"; fi
 if [ "$( attr "$ROW_USER" sites_at )" = "a.c:22" ]; then ok "(C) a call continued onto its own line: sites_at=\"a.c:22\""; else no "(C) user row: $ROW_USER"; fi
-printf '%s' "$OUT_C" | grep -q '<c [^>]*sites_l=' && no "(C-twin) a safe-delete row still carries the bare-line sites_l=" \
-    || ok "(C-twin) safe-delete rows carry sites_at= only (the bare-line sites_l= stays on edit-check)"
+if [ -z "$ROW_PAD" ] || [ -z "$ROW_USER" ]; then
+    no "(C-twin) premise: the safe-delete answer printed no caller rows"
+elif printf '%s' "$OUT_C" | grep -q '<c [^>]*sites_l='; then
+    no "(C-twin) a safe-delete row still carries the bare-line sites_l="
+else
+    ok "(C-twin) safe-delete rows carry sites_at= only (the bare-line sites_l= stays on edit-check)"
+fi
 ROW_TW="$( printf '%s' "$( run c --safe-delete=twice )" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
 if [ "$( attr "$ROW_TW" sites_at )" = "a.c:20" ]; then ok "(D) a single-definition callee called once still prints its call site (a.c:20)"; else no "(D) twice row: $ROW_TW"; fi
 R_C="$( root_tag "$OUT_C" safe-delete )"
@@ -413,7 +418,9 @@ for dialect in compact full; do
             && ok "(N/$dialect) $term defined in the legend of the $var answer" || no "(N/$dialect) $term is not defined in the $var legend"
     done
 done
-case "$( run c --safe-delete=helper_dead --legend=compact )" in *callers_floor*|*uses_floor*|*sites_l*|*sites_at*) no "(N) a legend defines a floor/sites term its answer does not carry" ;; *) ok "(N) present-only: no floor/sites term on an answer without them" ;; esac
+N_DEAD="$( run c --safe-delete=helper_dead --legend=compact )"
+printf '%s' "$N_DEAD" | grep -q '<safe-delete ' || no "(N) premise: --safe-delete=helper_dead printed no safe-delete root"
+case "$N_DEAD" in *callers_floor*|*uses_floor*|*sites_l*|*sites_at*) no "(N) a legend defines a floor/sites term its answer does not carry" ;; *) ok "(N) present-only: no floor/sites term on an answer without them" ;; esac
 
 # ── O: determinism + xmllint ─────────────────────────────────────────────────────────────────────────────
 echo "=== O: determinism and well-formed XML ==="
