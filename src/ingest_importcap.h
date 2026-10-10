@@ -25,9 +25,10 @@
 //
 // THE VOCABULARY IS A FAMILY, AND ONLY ITS FIRST MEMBER IS SPENT. `@import.path` is the only capture name
 // in use, because C-family imports have no other part: `#include` names a path and nothing else — no
-// alias to record, no list of imported names. The other two names the issue sketches are reserved BY NAME
-// so the next language lands on them rather than inventing a spelling: `@import.alias` is the local name an
-// import renames a target to (`import a.b as c`, `use Foo\Bar as Baz`, `using X = Foo.Bar`), and
+// alias to record, no list of imported names — and because Go's alias/dot/blank spellings ride inside the
+// declaration clause its Include has always carried (see DepDialect::Go below), not in a field of their own.
+// The other two names the issue sketches are reserved BY NAME so the next language lands on them rather
+// than inventing a spelling: `@import.alias` is the local name an import renames a target to (`import a.b as c`, `use Foo\Bar as Baz`, `using X = Foo.Bar`), and
 // `@import.names` is a group of targets ONE directive names (`use Foo\{A, B}`, `alias MyApp.{Bar, Baz}`),
 // which is why both of those are emitted by the C++ side today through a per-directive helper rather than
 // by one capture — a capture names one node, and a group is many. No enum value reserves them: an unused
@@ -205,8 +206,29 @@ ImportSpec normaliseWebImport( TSNode directive, std::string_view raw, std::stri
     return out;
 }
 
+// ── DepDialect::Go ───────────────────────────────────────────────────────────────────────────────────
+// A Go import is ONE `import_declaration` — `import "fmt"`, `import f "fmt"` (aliased), `import . "x"` (dot),
+// `import _ "x"` (blank), cgo's `import "C"`, or a parenthesised group of any of those — and the Include
+// target it has always carried is the declaration's own CLAUSE (importClauseTarget, shared with the one
+// language that still reads it from the walk), not a per-spec specifier. So the captured node is the
+// declaration itself (queries/go/tags.scm: `(import_declaration) @import.path`) and the normaliser is the
+// clause reader, nothing more. A GROUPED import therefore stays ONE record whose text is the whole group cut
+// at 96 bytes, exactly as before: resolve.h's resolveGoImport documents that ("grouped imports collapse to
+// one node upstream and are left unresolved"), and splitting a group into one record per spec would add
+// edges — a behaviour change, so its own slice. The alias / dot / blank spellings are the same: they ride
+// INSIDE the clause text (`f "fmt"`), which is why `@import.alias` and `@import.names` are NOT used here —
+// today's Go semantics have no separate alias or names field on an Include. (The alias a Go import binds is
+// a different record altogether, the ModuleAlias RawBind captureGoImportFacts writes; it is not a dependency
+// edge and is left where it is.)
+ImportSpec normaliseGoImport( TSNode declaration, std::string_view src )
+{
+    ImportSpec out;
+    out.text = importClauseTarget( declaration, src );
+    return out;
+}
+
 // ── the dispatch: ONE normaliser per DepDialect ──────────────────────────────────────────────────────
-// CFamily and Web are the dialects that have moved over so far; every other arm returns an empty ImportSpec,
+// CFamily, Web and Go are the dialects that have moved over so far; every other arm returns an empty ImportSpec,
 // which is what makes the capture INERT rather than wrong on a language whose tags.scm has not adopted
 // `@import.path` yet. Each `case` is deleted as its language moves, and the compiler then names every
 // other dialect still to do — the same "one language at a time" landing the issue asks for.
@@ -216,6 +238,7 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::
     {
         case DepDialect::CFamily: return normaliseCFamilyImport( directive, raw, src );
         case DepDialect::Web:     return normaliseWebImport( directive, raw, src );
+        case DepDialect::Go:      return normaliseGoImport( directive, src );
         default:                  return {};   // no other language captures @import.path yet
     }
 }
@@ -229,6 +252,7 @@ inline bool importsFromCapture( DepDialect dialect ) noexcept
     {
         case DepDialect::CFamily:
         case DepDialect::Web:
+        case DepDialect::Go:
             return true;
         default:
             return false;
@@ -238,8 +262,12 @@ inline bool importsFromCapture( DepDialect dialect ) noexcept
 // The DIRECTIVE a captured specifier belongs to — the node both records are SITED at. For a C include or a
 // JS import/re-export it is the specifier's parent; for a call it is the call, one hop further, because the
 // specifier sits in the call's `arguments`.
-TSNode importDirectiveOf( TSNode pathNode ) noexcept
+TSNode importDirectiveOf( DepDialect dialect, TSNode pathNode ) noexcept
 {
+    if( dialect == DepDialect::Go )
+    {
+        return pathNode;   // the Go capture IS the whole import_declaration
+    }
     const TSNode parent = ts_node_parent( pathNode );
     const bool hasParent = !ts_node_is_null( parent );
     ASSUME( hasParent, "a captured specifier is a string or path token, never the file root" );
@@ -282,7 +310,7 @@ TSNode importDirectiveOf( TSNode pathNode ) noexcept
 void emitCapturedImport( TSNode pathNode, std::uint32_t fileId, Lang lang, std::string_view src,
                          std::vector<Include>& includes, std::vector<RawRef>& refs, ExtractShortfall& shortfall )
 {
-    const TSNode     directive = importDirectiveOf( pathNode );
+    const TSNode     directive = importDirectiveOf( dependencyDialect( lang ), pathNode );
     // TEXT FIRST, ancestry second. The Web call pattern matches every bare `f( "s" … )`, so most captures here are
     // not imports at all, and the reach read below is a descent from the root — paying it to learn that `t( "key" )`
     // is not a dependency is the cost that made a 2 000-deep hyperscript tree 300x slower. Dropping a non-import

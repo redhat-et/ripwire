@@ -2107,7 +2107,8 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // CLEAN written specifier via grammar child fields (module path / quoted specifier / use argument), not a
 // sliced clause — the sound resolver input.
 //
-// #358: the C-family rows are GONE from this list. C++ preproc_include (path field, "" local vs <>
+// #358: the C-family rows are GONE from this list, and so is Go's (the Go `import_declaration` clause is read by
+// the DepDialect::Go normaliser; only Swift still reaches the `import_declaration` branch below). C++ preproc_include (path field, "" local vs <>
 // external) and C++ preproc_call with directive `#import` are captured as `@import.path` by the grammar's
 // own query and read by the DepDialect::CFamily normaliser (src/ingest_importcap.h), so this function is
 // never asked about a C-family node. The TS/JS rows (import_statement `source:`, the export_statement
@@ -2132,6 +2133,35 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // the record it builds (src/ingest_importcap.h). A field no path can set is a lie in the type, so it is
 // gone rather than documented as always-false.
 struct DirectiveTarget { std::string target; bool isLazy; bool isSymbolic; bool isReceiver; };
+
+// The written CLAUSE of an `import_declaration` — the declaration's own text with its leading keyword
+// dropped (everything after the first space), at most 96 bytes, trailing `;` / space / newline / CR
+// trimmed. This is the Include target Go has always carried (`"fmt"`, `f "fmt"`, `. "x"`, `_ "x"`, or a
+// whole `( … )` group collapsed to ONE record), and Swift's `import Foundation`. Shared by the Swift walk
+// branch below and by the DepDialect::Go normaliser (src/ingest_importcap.h) so the two cannot drift; the
+// quirks are PRE-EXISTING and preserved byte-for-byte on purpose (#358 is a pure refactor): the keyword is
+// dropped at a SPACE, so `import<TAB>"os"` keeps the word `import`; a group is cut at 96 bytes, mid
+// character if it lands there; a tab is not trimmed. Empty for an empty or out-of-range span.
+std::string importClauseTarget( TSNode n, std::string_view src )
+{
+    std::string        target;
+    const std::uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
+    if( a < b && b <= src.size() )
+    {
+        std::string_view s  = src.substr( a, b - a );
+        const std::size_t sp = s.find( ' ' );                        // drop the leading keyword
+        if( sp != std::string_view::npos )
+        {
+            s = s.substr( sp + 1 );
+        }
+        target.assign( s.data(), s.size() < 96 ? s.size() : 96 );
+        while( !target.empty() && ( target.back() == ';' || target.back() == ' ' || target.back() == '\n' || target.back() == '\r' ) )
+        {
+            target.pop_back();
+        }
+    }
+    return target;
+}
 
 // `insideFn` is the walk's sticky "inside a closure" bit, now read by Ruby alone (a constant receiver written
 // inside a method / lambda / block is lazy). TS/JS used to be the other reader: its require()/import() branch
@@ -2244,25 +2274,14 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
             }
         }
     }
-    else if(    kindIs( t, "import_declaration" ) )            // Go / Swift — captured but NOT precise-resolved
+    else if(    kindIs( t, "import_declaration" ) )            // Swift — captured but NOT precise-resolved
     {
-        // Go (needs go.mod module-root) and Swift (whole-module, no path) are DEFERRED — the precise
-        // resolver leaves them unresolved. Keep the best-effort target for --uses / --deps back-compat.
-        const uint32_t a = ts_node_start_byte( n ), b = ts_node_end_byte( n );
-        if( a < b && b <= src.size() )
-        {
-            std::string_view s  = src.substr( a, b - a );
-            const std::size_t sp = s.find( ' ' );                        // drop the leading keyword
-            if( sp != std::string_view::npos )
-            {
-                s = s.substr( sp + 1 );
-            }
-            target.assign( s.data(), s.size() < 96 ? s.size() : 96 );
-            while( !target.empty() && ( target.back() == ';' || target.back() == ' ' || target.back() == '\n' || target.back() == '\r' ) )
-            {
-                target.pop_back();
-            }
-        }
+        // #358: Go moved onto `@import.path` (queries/go/tags.scm + the DepDialect::Go normaliser in
+        // src/ingest_importcap.h), so this branch is reached by Swift ALONE now. The clause reader is the
+        // one both languages shared and is kept as ONE function (importClauseTarget) rather than copied:
+        // Swift (whole-module, no path) is DEFERRED in the precise resolver, and its slice has its own
+        // landing. Keep the best-effort target for --uses / --deps back-compat.
+        target = importClauseTarget( n, src );
     }
     else if( kindIs( t, "using_directive" ) )
     { // C# `using Foo.Bar;` / `using static Foo;` / `using X = Foo.Bar;`

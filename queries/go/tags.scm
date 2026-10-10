@@ -70,3 +70,17 @@
 ; it parses as a plain call_expression and is captured by the pattern above. This widening was
 ; REJECTED on the evidence above rather than shipped, per this project's own rule for false-positive
 ; risk: reject with the evidence instead of shipping it.
+
+; ---- import capture (the shared vocabulary of issue #358) ----
+; ONE capture name: `@import.path`. For Go the captured node is the WHOLE `import_declaration`, because
+; that is the unit the Include record has always been built from: `import "fmt"`, `import f "fmt"`
+; (aliased), `import . "x"` (dot), `import _ "x"` (blank), cgo's `import "C"`, and a parenthesised group of
+; any of those are each ONE declaration and ONE Include whose target is the declaration's clause
+; (importClauseTarget in src/ingest_relations.h, applied by the DepDialect::Go normaliser in
+; src/ingest_importcap.h). Capturing the inner `import_spec` / path string instead would split a group into
+; one record per spec, which adds dependency edges — a behaviour change, not this slice. For the same
+; reason there is no `@import.alias` / `@import.names` here: the alias, dot and blank spellings are part of
+; the clause text, and a Go Include has no separate alias or names field today.
+; The shape is read off a real parse (`--match`), not predicted: a declaration is `import` + exactly one
+; `import_spec` or `import_spec_list`, and a broken file still yields an `import_declaration` node.
+(import_declaration) @import.path
