@@ -5360,6 +5360,9 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                            ampPtr, cboPtr, testedPtr, lcom4Ptr, impurePtr, forChurn, redactCounts, redactPtr, notesPtr,
                            notesDegraded, grepPhases.valid ? &grepPhases : nullptr, needsValueUses };
 
+    // Every verb from here on answers from the built graph: its query and its emit are this scope (the self-profile's
+    // "after the graph" share; the verbs' own scopes nest inside it).
+    PROFILE_SCOPE_DESCRIBE( "main: query + emit (the verb, after the graph)" );
     if( std::optional<int> handled = runForLens( dsp ) )
     {
         return *handled;

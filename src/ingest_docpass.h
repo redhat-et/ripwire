@@ -64,11 +64,17 @@ inline void publishDocBridgeBlob( const std::string& bridgeBlobPath, std::uint32
 // cacheEnabled=false (--no-cache) bypasses the sidecar entirely. tmpKey keeps concurrent workers'
 // unpublished temp files distinct; the publish itself is a whole-file rename, so a concurrent
 // reader sees every byte or none.
+// A bridge doc whose bytes have no cached extraction asks docparse::markitdownMayRun() before the popen: false means
+// the shell could not start markitdown, so the answer is "" without the popen — what the popen answered (rc 127),
+// minus one shell start per doc per run. The cache is still consulted first, so a blob extracted while markitdown
+// was installed keeps answering after it is removed, exactly as before.
 inline std::string docTextViaBridgeCache( const std::string& path, const std::string& ext, bool cacheEnabled, std::uint32_t tmpKey )
 {
+    EXPECTS( !path.empty(), "doc post-pass: every crawled doc path is a non-empty spelling" );
     std::string text;
     std::string bridgeBlobPath;
-    if( cacheEnabled && docparse::docKindOf( ext ) == docparse::DocKind::Markitdown )
+    const bool  viaBridge = docparse::docKindOf( ext ) == docparse::DocKind::Markitdown;
+    if( cacheEnabled && viaBridge )
     {
         if( const std::optional<std::string> docBytes = docparse::detail::readWholeFile( path ) )
         {
@@ -78,6 +84,10 @@ inline std::string docTextViaBridgeCache( const std::string& path, const std::st
             bridgeBlobPath = quality::resolveCacheBlobPath( quality::cacheDirLadder(), blobName );
             text = docparse::detail::readWholeFile( bridgeBlobPath ).value_or( std::string() );   // miss ⇒ text stays empty
         }
+    }
+    if( text.empty() && viaBridge && !docparse::markitdownMayRun() )
+    {
+        return text;   // no cached extraction, and no markitdown the shell could start: the popen's own answer, ""
     }
     if( text.empty() )
     {

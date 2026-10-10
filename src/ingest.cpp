@@ -58,6 +58,7 @@
 #include <string_view>
 #include <atomic>
 #include <thread>
+#include <future>              // cli-perf-068: the git ignore probe on a worker (ingest_crawl.h IgnoreProbeSpeculation)
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -315,10 +316,18 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     // #350 layer 3: one memory watch for this ingest, shared by the crawl and the parse pool (memguard.h)
     memguard::Watch memWatch;
 
-    // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space)
+    // cli-perf-068: the git ignore probe runs beside the walk and the cache load, on the previous call's answer, and is
+    // checked against this call's own answer before the parse pool (ingest_crawl.h IgnoreProbeSpeculation). No sidecar
+    // under --no-cache: the probe then runs inside the crawl, as it always did.
+    IgnoreProbeSpeculation ignoreSpeculation( !cacheFile.empty() );
+
+    // 1) deterministic crawl -> sorted file list (this list IS result.files / the fileId space). A lambda because a lost
+    //    ignore speculation runs it a second time, on git's fresh answer (below, before the parse pool).
+    const auto crawlInto = [ & ]()
     {
         PROFILE_SCOPE_DESCRIBE( "ingest: crawl (collectSources)" );
-        auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel, respectGitignore, &memWatch );
+        auto [ crawledPaths, oversizeSkipped, taxonomySkips ] = collectSources( rootDir, excludeSubstr, maxFileBytes, excludeLabel, respectGitignore, &memWatch,
+                                                                                &ignoreSpeculation );
         result.files           = std::move( crawledPaths );
         // #228: record the root once, for rootRelPath (model.h). A directory crawl joins it onto every path; a
         // single-file root IS its one path, so the root-relative view anchors at that file's directory instead.
@@ -344,7 +353,8 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
                 DISCLOSE( result.memoryStop, MemoryStop::DisclosureWhy::CrawlOverLimit, "ingest: the memory guard stopped the crawl — files= is what it saw, a floor of the tree" );
             }
         }
-    }
+    };
+    crawlInto();
 
     // Win 1 (PERF.md P1) — lazy grammar compilation: load the cache FIRST, then compile only the
     // grammars needed by cache-miss files (new or hash-changed). On a fully-warm zero-change run,
@@ -373,9 +383,24 @@ IngestResult ingest( const char* rootDir, const std::vector<std::string>& exclud
     HashMap<std::string, FileFacts> cache =
         cacheFile.empty() ? HashMap<std::string, FileFacts>{}
                           : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
-    const long long cacheWriteNs = cacheStats.blobWriteNs;
     // per-fileId scan arrays (language classify + hash/stat-gate + health slots) — ingest_prewarm.h
     IngestFileScan scan = makeFileScan( result.files );
+
+    // The ignore speculation is decided HERE: nothing past this point has run on the crawl's file list but the cache load
+    // and the scan arrays, and both are redone. A lost speculation (the previous call's ignore answer differs from git's
+    // answer for this call) re-walks on the fresh answer; the crawl's memory stop is re-armed and re-recorded with it.
+    if( !ignoreSpeculation.crawlStands() )
+    {
+        result.memoryStop = MemoryStop{};
+        memWatch.rearmForParse();   // clears the crawl's stop flags: the second walk is measured on its own
+        crawlInto();
+        cacheStats = CacheLoadStats{};
+        cache      = cacheFile.empty() ? HashMap<std::string, FileFacts>{}
+                                       : loadCache( std::string( cacheFile ), rootDir, captureValueUses, result.files, cacheStats );
+        scan       = makeFileScan( result.files );
+    }
+    ENSURES( scan.lang.size() == result.files.size(), "the scan arrays describe the crawl the parse pool will read" );
+    const long long cacheWriteNs = cacheStats.blobWriteNs;
 
     // lazy tags.scm prewarm: detect the cache-miss set (prefilling scan.hash/stat), launch the async
     // grammar compiles, and hand the compile/ready state to the parse pool via `prewarm` (ingest_prewarm.h).

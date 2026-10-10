@@ -1150,6 +1150,90 @@ bool prepareParserFor( TSParser* parser, const LangEntry& le )
     return true;
 }
 
+// ── cold-ingest profile scopes by LANGUAGE FAMILY (cli-perf-068 STEP 0) ──────────────────────────────────────────
+// A PROFILE_SCOPE names one code site, so the parse pool's per-file phases (parse, side captures, tags captures) are
+// opened through underExtractScope, which picks one of eight family-named sites per phase: the self-profile then splits
+// a cold index's parse and extraction cost by language family (the LLVM memory run reads these). In a build without
+// RIPWIRE_PROFILE the macro is nothing and this is a switch that calls `work` — same work, same order, same answer.
+enum class ExtractFamily : std::uint8_t { CFamily, Python, JsTs, JvmDotNet, GoRustSwiftDart, Scripting, Bash, DocsData, Count };
+enum class ExtractPhase : std::uint8_t { Parse, SideFacts, TagsFacts, Count };
+
+// One row per Lang, in enumerator order (model.h): the size assert below fails when a language is appended without a row.
+inline constexpr ExtractFamily kExtractFamilyByLang[] = {
+    ExtractFamily::CFamily,          // Cpp
+    ExtractFamily::Python,           // Python
+    ExtractFamily::JsTs,             // TypeScript
+    ExtractFamily::GoRustSwiftDart,  // Go
+    ExtractFamily::GoRustSwiftDart,  // Rust
+    ExtractFamily::GoRustSwiftDart,  // Swift
+    ExtractFamily::CFamily,          // ObjC
+    ExtractFamily::DocsData,         // Markdown
+    ExtractFamily::JsTs,             // JavaScript
+    ExtractFamily::Bash,             // Bash
+    ExtractFamily::JvmDotNet,        // Java
+    ExtractFamily::Scripting,        // Ruby
+    ExtractFamily::DocsData,         // Unknown
+    ExtractFamily::DocsData,         // Json
+    ExtractFamily::JvmDotNet,        // CSharp
+    ExtractFamily::CFamily,          // C
+    ExtractFamily::DocsData,         // Toml
+    ExtractFamily::DocsData,         // Yaml
+    ExtractFamily::Scripting,        // Php
+    ExtractFamily::Scripting,        // Lua
+    ExtractFamily::Scripting,        // Elixir
+    ExtractFamily::GoRustSwiftDart,  // Dart
+    ExtractFamily::JvmDotNet,        // Kotlin
+    ExtractFamily::Scripting,        // GDScript
+};
+static_assert( std::size( kExtractFamilyByLang ) == kLangCount, "one profile family row per Lang, in enumerator order" );
+static_assert( kExtractFamilyByLang[ std::size_t( Lang::Kotlin ) ] == ExtractFamily::JvmDotNet && kExtractFamilyByLang[ std::size_t( Lang::C ) ] == ExtractFamily::CFamily,
+               "the table follows Lang's enumerator order" );
+
+constexpr ExtractFamily extractFamilyOf( Lang lang ) noexcept
+{
+    const std::size_t langIdx = static_cast<std::size_t>( lang );
+    return langIdx < kLangCount ? kExtractFamilyByLang[ langIdx ] : ExtractFamily::DocsData;
+}
+
+inline constexpr const char* kExtractScopeNames[ std::size_t( ExtractPhase::Count ) ][ std::size_t( ExtractFamily::Count ) ] = {
+    { "ingest/extract[c-family]: parse one file", "ingest/extract[python]: parse one file", "ingest/extract[js-ts]: parse one file",
+      "ingest/extract[jvm-dotnet]: parse one file", "ingest/extract[go-rust-swift-dart]: parse one file", "ingest/extract[scripting]: parse one file",
+      "ingest/extract[bash]: parse one file", "ingest/extract[docs-data]: parse one file" },
+    { "ingest/extract[c-family]: side captures (relations, binds, includes, values)", "ingest/extract[python]: side captures (relations, binds, includes, values)",
+      "ingest/extract[js-ts]: side captures (relations, binds, includes, values)", "ingest/extract[jvm-dotnet]: side captures (relations, binds, includes, values)",
+      "ingest/extract[go-rust-swift-dart]: side captures (relations, binds, includes, values)", "ingest/extract[scripting]: side captures (relations, binds, includes, values)",
+      "ingest/extract[bash]: side captures (relations, binds, includes, values)", "ingest/extract[docs-data]: side captures (relations, binds, includes, values)" },
+    { "ingest/extract[c-family]: tags captures (defs, refs, metrics)", "ingest/extract[python]: tags captures (defs, refs, metrics)",
+      "ingest/extract[js-ts]: tags captures (defs, refs, metrics)", "ingest/extract[jvm-dotnet]: tags captures (defs, refs, metrics)",
+      "ingest/extract[go-rust-swift-dart]: tags captures (defs, refs, metrics)", "ingest/extract[scripting]: tags captures (defs, refs, metrics)",
+      "ingest/extract[bash]: tags captures (defs, refs, metrics)", "ingest/extract[docs-data]: tags captures (defs, refs, metrics)" },
+};
+
+template<ExtractPhase Phase, ExtractFamily Family, class Work>
+decltype( auto ) inExtractScope( Work&& work )
+{
+    PROFILE_SCOPE_DESCRIBE( kExtractScopeNames[ std::size_t( Phase ) ][ std::size_t( Family ) ] );
+    return work();
+}
+
+template<ExtractPhase Phase, class Work>
+decltype( auto ) underExtractScope( Lang lang, Work&& work )
+{
+    switch( extractFamilyOf( lang ) )
+    {
+        case ExtractFamily::CFamily:         return inExtractScope<Phase, ExtractFamily::CFamily>( work );
+        case ExtractFamily::Python:          return inExtractScope<Phase, ExtractFamily::Python>( work );
+        case ExtractFamily::JsTs:            return inExtractScope<Phase, ExtractFamily::JsTs>( work );
+        case ExtractFamily::JvmDotNet:       return inExtractScope<Phase, ExtractFamily::JvmDotNet>( work );
+        case ExtractFamily::GoRustSwiftDart: return inExtractScope<Phase, ExtractFamily::GoRustSwiftDart>( work );
+        case ExtractFamily::Scripting:       return inExtractScope<Phase, ExtractFamily::Scripting>( work );
+        case ExtractFamily::Bash:            return inExtractScope<Phase, ExtractFamily::Bash>( work );
+        case ExtractFamily::DocsData:        break;
+        case ExtractFamily::Count:           break;
+    }
+    return inExtractScope<Phase, ExtractFamily::DocsData>( work );
+}
+
 TSTree* parseTree( TSParser* parser, std::string_view src )
 {
     TSTree* tree = nullptr;

@@ -254,7 +254,7 @@ NUMERIC_ONLY = {
     ( "src/partition.h", "nb" ): 1,
     ( "src/quality.h", "b" ): 1,
     ( "src/quality.h", "cidHex" ): 1,
-    ( "src/quality.h", "hex" ): 7,
+    ( "src/quality.h", "hex" ): 6,  # cli-perf-068: blobShardHex and ackMapKey now share hex16 (one buffer for two)
     ( "src/quality.h", "name" ): 1,
     ( "src/recall.h", "scoreText" ): 1,
     ( "src/serialize.h", "...)" ): 1,
@@ -617,7 +617,10 @@ if not bad:
 #            lines NAME rw::formatTo without calling it: the format-arity family table and two comments in
 #            src/defectshape.h, the defect-shape legend sentence (verbs_quality.h) and the --help paragraph (cli.h).
 #            train 26b (cr-qd-kinds merged onto the train's 358/248/248/109): re-derived on the merged tree.
-EXPECTED = { "mentions": 363, "calls": 248, "sites": 248, "rows": 109, "widthforms": 0 }
+#            2026-10-08 (lane/cli-perf-068): -1 call/-1 mention/-1 site, rows unchanged (the lane's own delta on its base:
+#            351/241/241/105 -> 350/240/240/105).
+#            train 26c (cli-perf merged onto the train's 363/248/248/109): re-derived on the merged tree.
+EXPECTED = { "mentions": 362, "calls": 247, "sites": 247, "rows": 109, "widthforms": 0 }
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

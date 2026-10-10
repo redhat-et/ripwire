@@ -6054,6 +6054,88 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     };
     rw::SmallVec<NodeId, 2>  rubyReachable; // reused per-call buffer: the candidates a Ruby call to self can reach (RubySelfReach)
 
+    // ---- the resolve loop's dense per-candidate views (cli-perf-068) ---------------------------------------------------
+    // The loop below walks a name's WHOLE candidate list several times per call — the language filter, the namespace gate,
+    // the same-file and same-directory tiers — and each step read one field out of a Symbol at a random id. That is cheap
+    // for a name with two definitions and was the resolve loop's cost for a name with hundreds: since every module-scope
+    // call got an owner (24bb6e5d), the test scripts' top-level `ok "…"` / `no "…"` calls (~650 same-named shell
+    // definitions each, ~28k calls on this repository) reached those walks, and the loop went 22 -> 79 ms on that commit
+    // alone. symLang/symKind are copies of the two Symbol fields those walks read (symFileId, above, is the third), so
+    // each walk reads a dense array in id order instead: same values, same order, same answer. `nameHasFnLocalDef` is
+    // the one precomputed fact reachableByName needs to say "nothing to set aside": a name none of whose definitions is
+    // function-local cannot yield (localDefOutOfReach is false for every candidate, and every list the loop hands
+    // reachableByName is a subset of the name's byName list), so its walk — a Symbol load plus a binary search per
+    // candidate — is skipped with the answer it would have returned. Keyed by the byName entry's address: nothing
+    // inserts into or erases from byName past its construction, so the address is stable for the loop.
+    std::vector<Lang>    symLang( N );
+    std::vector<SymKind> symKind( N );
+    ankerl::unordered_dense::set<const rw::SmallVec<NodeId, 2>*> nameHasFnLocalDef;
+    {
+        PROFILE_SCOPE_DESCRIBE( "buildGraph/2l: dense candidate views + function-local name set" );
+        for( std::size_t symIndex = 0; symIndex < N; ++symIndex )
+        {
+            symLang[ symIndex ] = ing.symbols[ symIndex ].lang;
+            symKind[ symIndex ] = ing.symbols[ symIndex ].kind;
+        }
+        if( !ing.fnLocalScopes.empty() )
+        {
+            for( const auto& [ name, ids ] : byName )
+            {
+                if( std::any_of( ids.begin(), ids.end(), [ & ]( NodeId c ) { return ing.symbols[ c ].fnLocal != 0; } ) )
+                {
+                    nameHasFnLocalDef.insert( &ids );
+                }
+            }
+        }
+    }
+    ENSURES( symLang.size() == N && symKind.size() == N && symFileId.size() == N, "the dense views cover every symbol id the loop can hold" );
+
+    // ---- the per-(name, language) candidate memo: work that is invariant across the calls to one name ---------------
+    // For a name with many definitions, three walks over its list decide the same thing for every call written in the
+    // same language: which candidates survive the language filter (the name-based fallback's admission loop), whether
+    // the namespace gate removes any of them for the call's role, and how the survivors fall by file. The resolve loop
+    // used to redo all three per call — 650 candidates for every one of ~28k module-scope `ok` / `no` calls in this
+    // repository's test scripts (the cand-build stage alone was the loop's largest). This memo computes them ONCE per
+    // (byName entry, caller language), on the first call that needs them, and every later call copies the survivors and
+    // finds its same-file tier by binary search over the file-sorted list. Only the unnarrowed whole-name path reads it
+    // (the list handed in IS the byName entry, single root, nothing in cand yet), only for lists of kLangCandMemoMin or
+    // more, and `candMemo` is dropped the moment anything but a removal could have touched cand (the Ruby side cut), or
+    // any removal did (its size no longer matches). Same survivors, same order, same tiers: the answer is unchanged.
+    struct LangCandidates
+    {
+        std::vector<NodeId> ids;                  // the name's candidates the language filter admits, in list order
+        std::uint32_t       nsPassRoles  = 0;     // bit k: every one passes namespaceCompatible( RefRole( k ), … )
+        bool                sortedByFile = false; // ids is non-decreasing in symFileId, so one file's ids are one run
+    };
+    struct NameLangCandidates
+    {
+        std::uint32_t                            filledLangs = 0;   // bit k: byLang[ k ] is computed
+        std::array<LangCandidates, kLangCount>   byLang;
+    };
+    static_assert( kLangCount <= 32 && kRefRoleCount <= 32, "the memo's language and role sets are 32-bit masks" );
+    constexpr std::size_t kLangCandMemoMin = 16;   // below this the walks are cheaper than the memo lookup
+    HashMap<const rw::SmallVec<NodeId, 2>*, NameLangCandidates> langCandMemo;
+    langCandMemo.reserve( 1024 );
+    const auto fillLangCandidates = [ & ]( const rw::SmallVec<NodeId, 2>& ids, Lang lang, LangCandidates& out )
+    {
+        for( NodeId c : ids )
+        {
+            if( langCompatible( symLang[ c ], lang ) )
+            {
+                out.ids.push_back( c );
+            }
+        }
+        for( std::size_t roleIndex = 0; roleIndex < kRefRoleCount; ++roleIndex )
+        {
+            const RefRole role = static_cast<RefRole>( roleIndex );
+            if( std::all_of( out.ids.begin(), out.ids.end(), [ & ]( NodeId c ) { return namespaceCompatible( role, symKind[ c ] ); } ) )
+            {
+                out.nsPassRoles |= 1u << roleIndex;
+            }
+        }
+        out.sortedByFile = std::is_sorted( out.ids.begin(), out.ids.end(), [ & ]( NodeId a, NodeId b ) { return symFileId[ a ] < symFileId[ b ]; } );
+    };
+
     // ---- census arming + the ORACLE side (eval-only; src/pincensus.h) ------------------------------
     // The oracle rows are a straight transcription of the overlay's own (from, calleeName) → target table
     // into the census's id space — the same table graph.h consults below, so the two sides of the join
@@ -6112,6 +6194,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         cand.clear();
         tier.clear();
+        const LangCandidates* candMemo = nullptr;              // set when cand is exactly a memoized list (see langCandMemo)
         float tierConf = 1.0f;                                 // tier 1: same file (default; overridden below)
         // census bookkeeping (inert unless armed): which narrowing stages actually FIRED on this site, and
         // how wide the tier was when it reached the locality tie-break. Read only at the emission point.
@@ -6269,7 +6352,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( !scipPinned && r.lang != Lang::Elixir && !r.qualifier.empty() )
         {
             appendCanonicalCandidates( cand, qkey, r, CanonicalScopes { canonByName, canonFamilyByName, specializationsWithBases, narrower, chaUp, ing.symbols },
-                                       [ & ]( NodeId c ) { return langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ); } );
+                                       [ & ]( NodeId c ) { return langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ); } );
             canonical = !cand.empty();
         }
         // ── L3 fn-pointer/callback binding resolve — BEFORE Rule 1, because a local variable shadows a
@@ -6578,7 +6661,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 std::size_t         found     = 0;
                 for( NodeId c : it->second )
                 {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && symFileId[c] == aliasFile )
+                    if( langCompatible( symLang[ c ], r.lang ) && symFileId[c] == aliasFile )
                     {
                         only = c;
                         if( ++found > 1 )
@@ -6627,7 +6710,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // whichever same-named def competes, and yielding would move them from external= into declined=, so such a call
         // resolves exactly as it did before local defs had bodies.
         const bool localsYield = !scipPinned && !canonical && !narrowed && !builtinGated && it != byName.end() && !ing.fnLocalScopes.empty()
-                                 && reachableByName( ing, *baseIds, r, reachScratch )
+                                 && nameHasFnLocalDef.contains( &it->second ) && reachableByName( ing, *baseIds, r, reachScratch )
                                  && !( r.role == RefRole::Call && r.qualifier.empty() && bindingTier.empty() && externalVeto.isExternalBound( r ) );
         const rw::SmallVec<NodeId, 2>* nameIds = localsYield ? &reachScratch : baseIds;
         // FE-B: for a MEMBER call the include graph says which file the caller imports, never what its receiver is — the
@@ -6675,7 +6758,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || implicitReceiverLang( r.lang ) ) ) ? memberRule3 : cand;
                 for( NodeId c : rule3Out )
                 {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) )
+                    if( langCompatible( symLang[ c ], r.lang ) )
                     {
                         into.push_back( c );
                     }
@@ -6709,11 +6792,26 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     continue;
                 }
             }
+            else if( !multiRoot && nameIds == baseIds && baseIds == &it->second && cand.empty() && nameIds->size() >= kLangCandMemoMin )
+            {
+                // the whole-name path for a name with many definitions: the language filter's survivors, memoized
+                // per (name, language) — sameRoot is constant-true on a single root, so they are this loop's own
+                NameLangCandidates& memo    = langCandMemo[ nameIds ];
+                const std::size_t   langIdx = static_cast<std::size_t>( r.lang );
+                ASSUME( langIdx < kLangCount, "a reference's language is a Lang enumerator" );
+                if( ( memo.filledLangs >> langIdx & 1u ) == 0 )
+                {
+                    fillLangCandidates( *nameIds, r.lang, memo.byLang[ langIdx ] );
+                    memo.filledLangs |= 1u << langIdx;
+                }
+                candMemo = &memo.byLang[ langIdx ];
+                cand.assign( candMemo->ids.begin(), candMemo->ids.end() );
+            }
             else
             {
                 for( NodeId c : *nameIds )
                 {
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    if( langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ) )
                     {
                         cand.push_back( c ); // same lang, or ObjC↔C++ bridge; same ROOT (A10)
                     }
@@ -6721,7 +6819,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 for( std::size_t i = 0; localsYield && cand.empty() && i < baseIds->size(); ++i )   // nothing reachable survived: the whole list
                 {
                     const NodeId c = ( *baseIds )[ i ];
-                    if( langCompatible( ing.symbols[c].lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    if( langCompatible( symLang[ c ], r.lang ) && sameRoot( c, r.fileId ) )
                     {
                         cand.push_back( c );
                     }
@@ -6735,7 +6833,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     for( NodeId c : *baseIds )
                     {
-                        if( !langCompatible( ing.symbols[c].lang, r.lang ) || sameRoot( c, r.fileId ) )
+                        if( !langCompatible( symLang[ c ], r.lang ) || sameRoot( c, r.fileId ) )
                         {
                             continue;
                         }
@@ -6759,6 +6857,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                     : RubyCut::Unchanged;
             cut != RubyCut::Unchanged )
         {
+            candMemo = nullptr;   // cand is the side cut's list now, not the memoized one
             cand.swap( filtScratch );
             if( cut == RubyCut::Declined )
             {
@@ -6782,12 +6881,12 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // uniquely a macro by construction); see namespaceCompatible's comment for the derivation and
         // test/nsfiltercheck.sh for the gate that keeps it that way. It is here because it is the seam a
         // future round would edit, and a silent edit is the failure mode the gate exists to catch.
-        if( !cand.empty() )
+        if( !cand.empty() && !( candMemo != nullptr && ( candMemo->nsPassRoles >> static_cast<std::uint32_t>( r.role ) & 1u ) != 0 ) )
         {
             std::size_t keepCount = 0;
             for( std::size_t ci = 0; ci < cand.size(); ++ci )
             {
-                if( namespaceCompatible( r.role, ing.symbols[ cand[ci] ].kind ) )
+                if( namespaceCompatible( r.role, symKind[ cand[ci] ] ) )
                 {
                     cand[ keepCount++ ] = cand[ci];
                 }
@@ -6814,6 +6913,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             disposition = vetoExternal( r );                                    // nothing inside std answers → external=, counted External
             continue;
+        }
+        if( candMemo != nullptr && cand.size() != candMemo->ids.size() )
+        {
+            candMemo = nullptr;   // a gate or guard above removed a candidate: cand is no longer the memoized list
         }
 
         // ---- FE-B: PROVEN or NAME-ONLY (receiverevidence.h, point 2). A call no rule above answered binds by name; the
@@ -6983,11 +7086,23 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             else
             {
-                for( NodeId c : cand )
+                if( candMemo != nullptr && candMemo->sortedByFile )
                 {
-                    if( ing.symbols[c].fileId == r.fileId )
+                    // the memoized list is file-sorted, so this file's candidates are one run, in list order
+                    const auto fileLess = [ & ]( NodeId c, std::uint32_t fileId ) noexcept { return symFileId[ c ] < fileId; };
+                    const auto lessFile = [ & ]( std::uint32_t fileId, NodeId c ) noexcept { return fileId < symFileId[ c ]; };
+                    const auto runBegin = std::lower_bound( cand.begin(), cand.end(), r.fileId, fileLess );
+                    const auto runEnd   = std::upper_bound( runBegin, cand.end(), r.fileId, lessFile );
+                    tier.insert( tier.end(), runBegin, runEnd );
+                }
+                else
+                {
+                    for( NodeId c : cand )
                     {
-                        tier.push_back( c ); // tier 1: same file
+                        if( symFileId[ c ] == r.fileId )
+                        {
+                            tier.push_back( c ); // tier 1: same file
+                        }
                     }
                 }
             if( tier.empty() )                                     // tier 2: same directory
@@ -6996,7 +7111,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 const std::uint32_t rdir = fileDir[ r.fileId ];
                 for( NodeId c : cand )
                 {
-                    if( fileDir[ing.symbols[c].fileId] == rdir )
+                    if( fileDir[ symFileId[ c ] ] == rdir )
                     {
                         tier.push_back( c );
                     }

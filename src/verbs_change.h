@@ -1612,6 +1612,14 @@ std::optional<int> runCrossRef( const MainDispatch& d )
             rw::emitTo( stderr, "ripwire: --whereis: {} is not a git repository (or has no HEAD commit) — no refs to search\n", root.c_str() );
             return 1;
         }
+        if( result.blobsUnread )
+        {
+            DISCLOSE( Diagnostics::answerRefused, "whereis: the blob stream did not serve every blob, so no hit count is printed — stderr names the cause, exit 1" );
+            rw::emitTo( stderr, "ripwire: --whereis: could not read the trees' blobs (the one `git cat-file --batch` did not start or stopped early; "
+                                "its sha list is written under {}) — refusing rather than print a hit count nothing measured\n",
+                        quality::cacheDirLadder() );
+            return 1;
+        }
         result.seedSpec = std::move( whereisSeed );
         // The tree zero stays an answer; the near-miss only says WHICH zero it is (a name this repo never
         // had, or a keystroke away from one it has). Computed only on the zero, so a real hit list is

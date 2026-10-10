@@ -19,6 +19,7 @@
                                  // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
 
 #include <algorithm>
+#include <array>        // popenTrimmed's 64 KB read block
 #include <atomic>       // the join's once-per-process disclosure flags
 #include <bit>          // std::popcount — the recurrence mask's set-bit count (Clio sub-windows)
 #include <cctype>
@@ -238,23 +239,27 @@ inline std::string sinceUnresolvedRefusal( std::string_view value, std::string_v
 // popen-trim shape in the tool: the quality.h git one-liners, the doctor probes, crossref.h and binstale.h all
 // reach it as quality::popenTrimmed (a using-declaration of this). It lives HERE — the lower header, which
 // quality.h includes — because resolveSinceScope needed the same reader (N4, 2026-09-04) and a second copy in
-// this file was a --quality-delta new-clone-of-reused-helper row. Built on readByteSafeLine (infra/stdinline.h),
-// the G3 byte-safe line reader every git pipe in this header uses: no fixed buffer to split a long path on
-// (churnjoincheck's G3 arm forbids fgets here), a high byte never sign-changed. Lines are re-joined with the
-// '\n' the reader consumed, so multi-line callers (crossref.h, the rename map) read exactly what fgets gave them.
+// this file was a --quality-delta new-clone-of-reused-helper row. It reads the WHOLE stream in blocks and splits
+// nothing: the answer is every byte the command wrote, then the trailing whitespace trim. That is byte-for-byte
+// what the line reader it replaces produced (each line re-joined with the '\n' it consumed, an unterminated last
+// line given one, which the trim then removes), with no fixed buffer to split a long path on (churnjoincheck's
+// G3 arm) and no high byte ever sign-changed — but one fread per 64 KB instead of one locked fgetc per byte. The
+// per-byte read was 55% of a --whereis on a 137-branch checkout (one `git ls-tree -r` per branch, cli-floor
+// 2026-10-08), and every git one-liner in the tool reads through here.
 inline std::string popenTrimmed( const std::string& cmd )
 {
+    PROFILE_SCOPE_DESCRIBE( "gitmine: popenTrimmed (one shell + git child, block read)" );
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
     {
         return {};
     }
-    std::string out;
-    std::string line;
-    while( readByteSafeLine( pipe, line ) )
+    std::string                  out;
+    std::array<char, 64 * 1024> block;
+    for( std::size_t got = std::fread( block.data(), 1, block.size(), pipe ); got > 0; got = std::fread( block.data(), 1, block.size(), pipe ) )
     {
-        out += line;
-        out += '\n';
+        ASSUME( got <= block.size(), "fread returns at most the count it was asked for" );
+        out.append( block.data(), got );
     }
     os::pclose( pipe );
     while( !out.empty() && ( out.back() == '\n' || out.back() == '\r' || out.back() == ' ' ) )

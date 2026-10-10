@@ -237,6 +237,57 @@ grep -q "rwGateMainSymbol" "$TMP/probefail.map" \
     && ok "gitignore probe failure still maps the tree in full (the safe fallback, not an empty map)" \
     || no "gitignore probe failure produced an empty/short map instead of falling back to a full walk"
 
+# ── 14. (cli-perf-068) the SPECULATED probe stays exact. With the cache on, the crawl walks with the PREVIOUS call's
+#    ignore answer (a sidecar under the cache dir) while git computes this call's answer beside it, and ingest() redoes
+#    the crawl when the two differ (ingest_crawl.h IgnoreProbeSpeculation). Every arm above runs --no-cache, which keeps
+#    the probe synchronous, so none of them reaches this path. Each arm below changes ONE input the ignore answer reads,
+#    then asserts the cached run (speculating on the stale answer) is byte-identical to a --no-cache run of the same
+#    tree, and that the change took effect. 14a is the red-first arm: the base binary writes no sidecar. A binary that
+#    trusted the speculation without the check fails 14c-14g (CHECKLIST 1 mutation, recorded in the lane report).
+SC="$TMP/spec-cache"; mkdir -p "$SC" "$TMP/xdg/git" "$TMP/home"
+SPEC="$TMP/spec"; mkrepo "$SPEC"
+spec_env(){ HOME="$TMP/home" XDG_CONFIG_HOME="$TMP/xdg" GIT_CONFIG_NOSYSTEM=1 "$@"; }
+spec_run(){ spec_env env TMPDIR="$SC/" "$BIN" "$SPEC" --top-k=400 2>/dev/null; }
+ref_run(){ spec_env "$BIN" "$SPEC" --top-k=400 --no-cache 2>/dev/null; }
+# same_as_ref LABEL SYMBOL want(present|absent): one cached run against one --no-cache run, then the symbol's state
+same_as_ref(){
+    spec_run >"$TMP/spec.out"; ref_run >"$TMP/ref.out"
+    if ! cmp -s "$TMP/spec.out" "$TMP/ref.out"; then no "14$1: the cached (speculated) run differs from --no-cache"; return; fi
+    if grep -q "$2" "$TMP/spec.out"; then found=present; else found=absent; fi
+    if [ "$found" = "$3" ]; then ok "14$1: cached run == --no-cache, and $2 is $3"
+    else no "14$1: $2 should be $3, the cached run has it $found"; fi
+}
+spec_run >/dev/null
+if [ -n "$( find "$SC" -name 'ripwire-ignoreprobe-*.bin' 2>/dev/null | head -1 )" ]; then ok "14a: a cached run on a git root keeps the ignore answer for the next call's speculation"
+else no "14a: no ignore-probe sidecar under the cache dir — the probe is not speculated"; fi
+same_as_ref b rwGateGeneratedSymbol absent                                   # warm: the speculation matches git
+printf 'gen_out/\ntracked_anyway.cpp\n' >"$SPEC/.gitignore"                  # c: an EDITED .gitignore un-ignores generated.cpp
+same_as_ref c rwGateGeneratedSymbol present
+printf 'int rwGateNestedSymbol( int a ) { return a + 7; }\n' >"$SPEC/keep/extra.cpp"; spec_run >/dev/null
+printf 'extra.cpp\n' >"$SPEC/keep/.gitignore"                                # d: a NEW nested .gitignore
+same_as_ref d rwGateNestedSymbol absent
+printf 'int rwGateInfoExcludeSymbol( int a ) { return a + 8; }\n' >"$SPEC/info_ex.cpp"; spec_run >/dev/null
+mkdir -p "$SPEC/.git/info"; printf 'info_ex.cpp\n' >>"$SPEC/.git/info/exclude"   # e: .git/info/exclude
+same_as_ref e rwGateInfoExcludeSymbol absent
+printf 'int rwGateGlobalSymbol( int a ) { return a + 9; }\n' >"$SPEC/glob_ex.cpp"; spec_run >/dev/null
+printf 'glob_ex.cpp\n' >"$TMP/xdg/git/ignore"                                # f1: the DEFAULT global excludes file
+same_as_ref f1 rwGateGlobalSymbol absent
+printf 'int rwGateExcludesFileSymbol( int a ) { return a + 10; }\n' >"$SPEC/cfg_ex.cpp"; : >"$TMP/excludes"
+git -C "$SPEC" config core.excludesFile "$TMP/excludes"; spec_run >/dev/null
+printf 'cfg_ex.cpp\n' >"$TMP/excludes"                                       # f2: core.excludesFile's file, edited
+same_as_ref f2 rwGateExcludesFileSymbol absent
+printf 'scratch_*.cpp\n' >>"$SPEC/.gitignore"; spec_run >/dev/null           # g: no rule FILE changes, only the tree:
+printf 'int rwGateScratchSymbol( int a ) { return a + 11; }\n' >"$SPEC/scratch_new.cpp"   # a new file an old rule ignores
+same_as_ref g rwGateScratchSymbol absent
+printf 'gen_out/\n' >"$SPEC/.gitignore"                                       # i: a LOST speculation whose walk the memory
+spec_env env RIPWIRE_TEST_MEMGUARD=crawl:6 TMPDIR="$SC/" "$BIN" "$SPEC" --top-k=400 >"$TMP/spec.i" 2>"$TMP/spec.i.err"; rcSpecI=$?   # guard stops:
+spec_env env RIPWIRE_TEST_MEMGUARD=crawl:6 "$BIN" "$SPEC" --top-k=400 --no-cache >"$TMP/ref.i" 2>/dev/null; rcRefI=$?        # the redo is re-armed
+if ! grep -q 'stopped the crawl' "$TMP/spec.i.err"; then no "14i: the crawl:6 seam did not stop the walk — the arm tests nothing"
+elif [ "$rcSpecI" = "$rcRefI" ] && cmp -s "$TMP/spec.i" "$TMP/ref.i"; then ok "14i: a lost speculation under a crawl memory stop answers as --no-cache does (rc $rcSpecI)"
+else no "14i: a lost speculation under a crawl memory stop differs from --no-cache (rc $rcSpecI vs $rcRefI)"; fi
+spec_run >"$TMP/spec.a"; spec_run >"$TMP/spec.b"
+if cmp -s "$TMP/spec.a" "$TMP/spec.b"; then ok "14h: two cached runs in a row are byte-identical"; else no "14h: two cached runs in a row differ"; fi
+
 # ── 13. the flag is in --help (the deckcheck allowlist row for --no-ignore retires with it).
 "$BIN" --help=all 2>&1 | grep -q -- '--no-ignore' && ok "--no-ignore is documented in --help" \
     || no "--no-ignore is missing from --help"
