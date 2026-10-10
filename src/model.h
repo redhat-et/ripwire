@@ -94,7 +94,9 @@ inline const char* symTag( SymKind k ) noexcept
         case SymKind::Struct:    return "struct";
         case SymKind::Interface: return "iface";
         case SymKind::Var:       return "var";
-        case SymKind::Section:   return "sec";    // markdown heading (doc structure; isolated in the graph)
+        case SymKind::Section:   return "sec";    // data-kind defs: doc headings, JSON/YAML keys, and Ruby db/schema.rb
+                                                  // columns — the Ruby ones are definitions only, NO call edges
+                                                  // (graph.h buildGraph's byName skips them; see isMeasurableKind)
         case SymKind::Macro:     return "macro";  // #define (disclosed-degraded: replacement text, not a parsed body)
         case SymKind::Field:     return "field";  // member variable (id=path::Owner::field; use-sites via --uses=Owner.field)
         case SymKind::Other:     return "other";

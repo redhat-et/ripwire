@@ -79,3 +79,20 @@
 ; raises in a class and in a module) and defines nothing.
 (call
   method: (identifier) @name) @reference.call
+; The Rails schema capture (test/rubyschemacheck.sh): a file whose tree holds a
+; `create_table "x", … do |t| … end` call is a rendered db/schema.rb (content-gated — path plays no
+; part), and each `t.<type> "name"` / `t.<type> :name` in the table block mints ONE data-kind def
+; (SymKind::Section at Lang::Ruby, see model.h) via the C++ side-capture in ingest_names.h, span = the
+; name token — Rails-generated attribute uses (`product.price`) resolve to the column as a def.
+; DEFINITIONS ONLY by maintainer decision: the defs answer --uses/--grep/--whereis, but buildGraph's
+; byName skips Section-Ruby, so columns admit NO call edges, only the restart share every def gets (untyped-receiver
+; binding and map takeover were measured; edges may return behind an evidence rule). The four id
+; spellings and `t.timestamps` also name columns (implicit `id` / `id: false` / `id: :uuid` /
+; `primary_key: "x"` / created_at+updated_at); an ARRAY or symbol primary_key (composite key) mints no
+; implicit id. The DSL CALLS stay references like this one (`string`, `datetime`, `create_table` remain
+; external). Stated floors: `t.index`/`references`/`belongs_to`/`polymorphic`/`check_constraint`/
+; `exclusion_constraint`/`unique_constraint` name no column; duplicate columns across tables stay
+; SEPARATE defs (`id` on N tables -> defs="N"); `where("price > ?")` fragments stay opaque. A MIGRATION
+; never contributes: a class-wrapped create_table (string- or symbol-named) is refused by the
+; class/module-nest gate — the schema is the ONE source of column names; add_column/remove_column/
+; change_column are argument data and read nowhere (a column added then dropped never registers).

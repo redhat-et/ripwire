@@ -1730,7 +1730,7 @@ inline void rubyNoteClassSideDef( TSNode defNode, std::uint32_t fileId, std::str
 
 // The bindings for what the `class << self` call `n` declares on the class object's `side` — an accessor, or a
 // delegation-DSL call (captureRubySingletonAccessors below). An accessor's binding sits at its symbol,
-// where captureRubyAttrDefs starts its def (no owner), and carries the side's mark (one a concern's `included do`
+// where captureRubyDefs starts its def (no owner), and carries the side's mark (one a concern's `included do`
 // declares is the includer's); a delegated name has no def, and is read against the class that owns the singleton.
 inline void rubyNoteSingletonDecl( TSNode n, RubyDefSide side, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
 {
@@ -1753,7 +1753,7 @@ inline void rubyNoteSingletonDecl( TSNode n, RubyDefSide side, std::uint32_t fil
 }
 
 // What a `class << self` declares beside its defs is the class object's too (parser version 137): each accessor
-// (`attr_accessor :config`, one RubySingletonDef binding per name, where captureRubyAttrDefs starts its def) and each name
+// (`attr_accessor :config`, one RubySingletonDef binding per name, where captureRubyDefs starts its def) and each name
 // the delegation DSL defines (model.h kRubyDelegationCalls — `delegate :reset, to: :instance`: a binding per name against
 // the owning class; `delegate_missing_to` one with no name, as it answers every name). A file that never writes `<<` is not
 // walked; the walk is iterative, so a hostile nesting depth costs heap, not stack.
