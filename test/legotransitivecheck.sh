@@ -13,6 +13,8 @@
 #      <impl via= depth=>; transitive=N on the <iface>; implementors= still counts the direct rows alone;
 #      --limit/--offset (MCP limit/offset) page the deeper rows, a cut says has_more="1" + a next= that pages on.
 #      An interface with no deeper row carries none of it (byte identity with the direct-only answer).
+# (S2) every <impl> row of the TARGETED answer says where the class is: p="file:LINE" (the --uses/--callers spelling); the
+#      <iface> row and the ranked --for <lego> section keep their bare p=.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -74,6 +76,25 @@ fi
 if lego OnlyChild
 then
     if iface | grep -q 'implementors="0"' && ! has 'transitive="'; then ok "a leaf class answers implementors=\"0\" with no closure attribute"; else no "leaf: $( iface )"; fi
+fi
+
+echo "=== (S2) every TARGETED impl row carries its definition's line ==="
+if lego BaseFormatter
+then
+    if has '<impl n="SimpleFormatter" p="py/formatters.py:7"/>'; then ok "a direct row: p=\"py/formatters.py:7\" (the class line)"; else no "direct row: $( printf '%s\n' "$OUT" | grep '<impl n="SimpleFormatter"' )"; fi
+    if has '<impl n="Pylint" p="py/formatters.py:15" via='; then ok "a deeper row: p=\"py/formatters.py:15\""; else no "deeper row: $( printf '%s\n' "$OUT" | grep '<impl n="Pylint"' )"; fi
+    if iface | grep -q 'p="py/formatters.py"'; then ok "the <iface> row keeps its bare p= (unchanged)"; else no "iface p= changed: $( iface )"; fi
+fi
+# the ranked --for <lego> section is NOT the targeted answer: its rows keep the bare p= (byte identity outside the verb)
+if "$BIN" "$FIX" --no-cache --for="formatter base class" --sections=lego,compose >"$DIR/for" 2>"$DIR/err"
+then
+    if grep -q '<impl n="[A-Za-z]*" p="[^"]*"' "$DIR/for"; then
+        if grep -q '<impl n="[A-Za-z]*" p="[^"]*:[0-9]' "$DIR/for"; then no "a --for <lego> row gained :LINE"; else ok "--for <lego> rows keep p=\"file\""; fi
+    else
+        no "--for printed no <impl> row to check: $( head -c 300 "$DIR/for" )"
+    fi
+else
+    no "--for exited non-zero: $( head -2 "$DIR/err" )"
 fi
 
 echo "=== (S1) the page: --limit/--offset window the deeper rows; next= pages on ==="

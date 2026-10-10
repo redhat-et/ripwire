@@ -26,6 +26,10 @@ deeper row is unchanged. The deeper rows are one page of at most 200 (a runaway 
 them. `--lego` honors `--limit`/`--offset` only for this window; without one it keeps its `--max-tokens` notice. The
 `tools/list` manifest grows 46,930 → 47,114 B (+184 B: the declared `limit` and `offset` arguments on `lego`).
 
+Every `<impl>` row of the targeted answer now says where the class is: `p="file:LINE"`, the `--uses`/`--callers`
+spelling, so the implementor opens at its definition. The `<iface>` row and the ranked `--for` `<lego>` section keep the
+bare `p="file"`.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

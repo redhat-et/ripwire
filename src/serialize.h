@@ -8758,7 +8758,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 
         for( std::size_t j = 0; j < cap; ++j )
         {
-            writeLegoImplRow( w, ing, impls[j], pathRel( ing.symbols[ impls[j] ].fileId ), withPaths, false, nullptr, esc );
+            writeLegoImplRow( w, ing, impls[j], pathRel( ing.symbols[ impls[j] ].fileId ), withPaths, focusId != kNoNode, nullptr, esc );
         }
         if( impls.size() > cap )
         {
@@ -8766,7 +8766,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         }
         for( std::size_t j = deep.window.begin; j < deep.window.end; ++j )   // empty unless TARGETED with a deeper row
         {
-            writeLegoImplRow( w, ing, deep.deeper[j].id, pathRel( ing.symbols[ deep.deeper[j].id ].fileId ), withPaths, false, &deep.deeper[j], esc );
+            writeLegoImplRow( w, ing, deep.deeper[j].id, pathRel( ing.symbols[ deep.deeper[j].id ].fileId ), withPaths, true, &deep.deeper[j], esc );
         }
         w.write( "</iface>" );
     }

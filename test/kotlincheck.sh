@@ -876,7 +876,8 @@ for L in split flat; do
     # reading the Java interface. Implementors of that definition are the read: collapsed as a declaration, it had none.
     LEGO="$( "$BIN" "$BL/$L" --lego=Marker --no-cache 2>/dev/null )"
     if echo "$LEGO" | grep -q "<iface n=\"Marker\" p=\"${K}Models.kt\""; then
-        echo "$LEGO" | grep -q "<impl n=\"Tagged\" p=\"${K}Models.kt\"" \
+        # lane lego-transitive (S2): a targeted --lego impl row now carries its definition line, p="FILE:LINE"
+        echo "$LEGO" | grep -q "<impl n=\"Tagged\" p=\"${K}Models.kt:[0-9][0-9]*\"" \
             && ok "$L: the bodyless Kotlin interface Marker survives the collapse, and Tagged implements it" \
             || no "$L: the bodyless Kotlin interface Marker has no Tagged implementor — it was collapsed as a declaration: $( echo "$LEGO" | grep -oE '<(iface|impl) [^>]*>' | tr '\n' ' ' )"
     else
