@@ -643,6 +643,41 @@ a7b_b1="$( grep -aoE '<b [^>]*>' "$TMP/f_tb.out" | head -1 )"
 [ -z "$a7b_why" ] \
     && ok "#11 A7B (by-design, owner option B) --token-budget=$TBF --detail=20 --with-graph: $FTB B past the $ALLOW B allowance, over_ceiling=\"1\", keeps all $a7b_pn rows of the flagless budget answer ($a7b_n rows, the uncapped answer's top), reason names the kept rows (header ${a7b_hdr} B fits alone)" \
     || no "#11 A7B (by-design, owner option B) --token-budget=$TBF --detail=20 --with-graph —$a7b_why"
+# A7B-X (fix round 6, checklist 25): the kept-rows note rides INSIDE the header XML comment, so the answers that carry it
+# must be well-formed XML — its first spelling held two flag names with their leading double hyphens and every such
+# answer failed xmllint ("Double hyphen within comment"), on the compact default and on --legend=full alike.
+if command -v xmllint >/dev/null 2>&1; then
+    "$BIN" src --for="$FOR_TASK" --token-budget=$TBF --detail=20 --with-graph --legend=full --no-cache >"$TMP/f_tbl.out" 2>/dev/null
+    a7x_bad=""
+    for f in f_tb f_tbl; do
+        grep -aqF "$KEPT_NOTE" "$TMP/$f.out" || a7x_bad="$a7x_bad $f:no-kept-rows-note(premise)"
+        xmllint --noout "$TMP/$f.out" 2>/dev/null || a7x_bad="$a7x_bad $f:xmllint-rejected"
+    done
+    [ -z "$a7x_bad" ] \
+        && ok "#11 A7B-X the kept-rows answers (compact + --legend=full) carry the note and are well-formed XML" \
+        || no "#11 A7B-X the kept-rows note breaks the answer's XML or no longer rides —$a7x_bad"
+else
+    printf '  SKIP  #11 A7B-X xmllint not installed\n'
+fi
+# A7B-N (fix round 6, checklist 1 — the negative of A7B's reason): the kept-rows note is chosen only when the header as
+# built fits the allowance by itself. Same both-flags shape, but a 700-char task at 300 tokens: the verbatim task echo
+# alone puts the header past the 814 B allowance, so the TRUE reason is the header floor and the kept-rows note would be
+# false. Red on the mutant that drops the header-fits term from keptTrailingOverrun (review mutant MX).
+A7N_TASK="$( python3 -c 'w="serialize the map rows into the output buffer while keeping the row order stable and flushing the writer "; print((w*10)[:700].strip())' )"
+"$BIN" src --for="$A7N_TASK" --token-budget=300 --detail=3 --with-graph --no-cache >"$TMP/f_tbn.out" 2>/dev/null
+rc_a7n=$?
+a7n_allow="$( awk "BEGIN{printf \"%d\", 300*2.36*1.15}" )"
+a7n_root="$( grep -aoE '^<ctx [^>]*>' "$TMP/f_tbn.out" | head -1 )"
+a7n_hdr="$( python3 -c 'import sys; d=open(sys.argv[1],"rb").read(); print(d.find(b"<sigs"))' "$TMP/f_tbn.out" )"
+a7n_why=""
+{ [ "$rc_a7n" -eq 0 ] && [ "${a7n_hdr:--1}" -gt "$a7n_allow" ]; } 2>/dev/null \
+    || a7n_why="$a7n_why premise:header-${a7n_hdr:-?}B-not-past-${a7n_allow}B-or-exit-$rc_a7n(re-anchor)"
+[ "${a7n_root#* over_ceiling=\"1\"}" != "$a7n_root" ] || a7n_why="$a7n_why no-over_ceiling"
+grep -aqF "$FLOOR_NOTE" "$TMP/f_tbn.out" || a7n_why="$a7n_why no-header-floor-note"
+! grep -aqF "$KEPT_NOTE" "$TMP/f_tbn.out" || a7n_why="$a7n_why kept-rows-note-false-here"
+[ -z "$a7n_why" ] \
+    && ok "#11 A7B-N 700-char task at --token-budget=300 --detail=3 --with-graph: header ${a7n_hdr} B alone past the ${a7n_allow} B allowance, the last rung names the header floor, not the kept rows" \
+    || no "#11 A7B-N header-alone-over shape names the wrong reason —$a7n_why"
 # and without an explicit --token-budget the bodies keep their own budget: the bundle must NOT have shrunk
 { [ "$( bytes_of "$TMP/f_for_detail.out" )" -gt "$ALLOW" ]; } 2>/dev/null \
     && ok "#11 A7 no --token-budget: --detail keeps its --pack-budget-bytes budget (unbudgeted bundle unshrunk)" \
@@ -820,6 +855,10 @@ for N in 2000 2500; do
         || k2_why="$k2_why premise/label:${k2_b:-?}B-vs-${k2_a}B"
     { grep -aqF "$KEPT_NOTE" "$A7R/k2.xml" && ! grep -aqF "$FLOOR_NOTE" "$A7R/k2.xml" && [ "${k2_hdr:--1}" -gt 0 ] && [ "$k2_hdr" -le "$k2_a" ]; } 2>/dev/null \
         || k2_why="$k2_why reason"
+    # fix round 6 (checklist 25): the kept-rows note rides in the header XML comment here too — the answer must parse
+    if command -v xmllint >/dev/null 2>&1; then
+        xmllint --noout "$A7R/k2.xml" 2>/dev/null || k2_why="$k2_why xmllint-rejected"
+    fi
     k2_next="$( grep -aoE '<b [^>]*>' "$A7R/k2.xml" | head -1 | sed -nE 's/.* truncated="1".* next="--expand=([^"]*)".*/\1/p' )"
     if [ -z "$k2_next" ]; then
         k2_why="$k2_why first-body-not-head-cut-with-next"
