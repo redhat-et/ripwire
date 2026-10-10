@@ -231,7 +231,12 @@ jsonRows(){ "$BIN" "$CORPUS" --for="$TASK" --token-budget="$1" --json 2>/dev/nul
 
 # ── arm 1: est_tokens must fit the ceiling the user asked for, in BOTH dialects ────────────────────
 # (tight budget 1100, re-anchored 2026-09-11 — see the CEILING MARGIN block above for the arithmetic)
-for tb in 1100 1640 3000; do
+# RE-ANCHORED 2026-10-10 (train 26c): the tight rung 1100 -> 1200. lego-charge charges <lego>/<compose> at their served size
+# and #362's <tail next=> rides the bundle, so at 1100 this corpus's XML answer is the 4-row floor with its next= unpaid
+# (est_tokens 1213, over_ceiling="1" + the unpaid clause: disclosed, not silent — the knob-honesty contract, not the leak
+# this arm pins). Swept on the merged binary: 1150 / 1200 serve 4 rows at est_tokens=1121 (JSON 1098), 1250..1350 five rows
+# at 1246; 1200 sits mid-plateau with 79 tokens of headroom, one step clear of each edge. 1640 and 3000 unchanged.
+for tb in 1200 1640 3000; do
   xe="$( xmlEst "$tb" )"; je="$( jsonEst "$tb" )"
   if [ -z "$xe" ] || [ -z "$je" ]; then no "budget=$tb: could not read est_tokens from one of the dialects (xml='$xe' json='$je')"; continue; fi
   if [ "$xe" -le "$tb" ]; then ok "budget=$tb: XML est_tokens=$xe fits the ceiling"
@@ -242,7 +247,7 @@ done
 
 # ── arm 2: the two dialects select COMPARABLE row counts (they need not be equal) ──────────────────
 # Before the fix the XML lens bought 2-2.4x the rows with the same budget, because notes were free.
-for tb in 1100 1640 3000; do
+for tb in 1200 1640 3000; do
   xr="$( xmlRows "$tb" )"; jr="$( jsonRows "$tb" )"
   if [ -z "$jr" ] || [ "$jr" -eq 0 ]; then no "budget=$tb: JSON selected no rows — the comparison has no denominator"; continue; fi
   if [ "$xr" -le $(( jr * 13 / 10 + 1 )) ] && [ "$xr" -ge $(( jr * 7 / 10 )) ]; then
@@ -365,7 +370,10 @@ fi
 
 # ── arm 4: L3 inertness — a tree with no notes is unaffected by any of this ────────────────────────
 rm -f "$CORPUS/.ripwire_notes"
-bare="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=800 2>/dev/null )"
+# RE-ANCHORED 2026-10-10 (train 26c): 800 -> 900 for the no-notes arms below (same cause as arm 1's rung: at 800 the merged
+# binary serves the 4-row floor with its unpaid next=, est_tokens 988 default / 951 full, over and labelled; from 850 both
+# postures fit — 808 / 817 — and 900 holds 865 in the full legend with margin). The notes corpus's 800 runs above are unchanged.
+bare="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=900 2>/dev/null )"
 case "$bare" in *"<note "*) no "a tree with no .ripwire_notes still emitted a <note> element";; *) ok "a tree with no notes emits none (L3 inertness)";; esac
 # L1 (2026-09-19): the 800-token fit was calibrated in the full legend, the default when it was written, and is asked
 # for by name. The DEFAULT (compact) answer on this tree carries more rows and lands over 800 at this one budget; that is
@@ -374,20 +382,20 @@ case "$bare" in *"<note "*) no "a tree with no .ripwire_notes still emitted a <n
 # here: 66 budgets (300..3550 step 50) on the P4-shape fixtures, the default is over on 15 (72 functions) and 15 (12
 # functions), --legend=full on 11 and 12; the earlier "8 of 66 vs 2, 55 before" did not reproduce. What the default MUST do
 # there is say so — asserted below.
-bareFull="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=800 --legend=full 2>/dev/null )"
+bareFull="$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=900 --legend=full 2>/dev/null )"
 bareEst="$( printf '%s' "$bareFull" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
-if [ -n "$bareEst" ] && [ "$bareEst" -le 800 ]; then ok "no-notes tree also fits the ceiling in the full legend (est_tokens=$bareEst)"
-else no "no-notes tree reports est_tokens='$bareEst' against a budget of 800 (full legend)"; fi
+if [ -n "$bareEst" ] && [ "$bareEst" -le 900 ]; then ok "no-notes tree also fits the ceiling in the full legend (est_tokens=$bareEst)"
+else no "no-notes tree reports est_tokens='$bareEst' against a budget of 900 (full legend)"; fi
 defEst="$( printf '%s' "$bare" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
 if [ -z "$defEst" ]; then no "no-notes tree at the default posture carries no est_tokens="
-elif [ "$defEst" -le 800 ]; then ok "no-notes tree at the default posture fits (est_tokens=$defEst)"
+elif [ "$defEst" -le 900 ]; then ok "no-notes tree at the default posture fits (est_tokens=$defEst)"
 else
-    case "$bare" in *'over_ceiling="1"'*) ok "no-notes tree at the default posture is over 800 (est_tokens=$defEst) and SAYS so (over_ceiling=\"1\")" ;;
-                    *) no "no-notes tree at the default posture is over 800 (est_tokens=$defEst) in SILENCE" ;; esac
+    case "$bare" in *'over_ceiling="1"'*) ok "no-notes tree at the default posture is over 900 (est_tokens=$defEst) and SAYS so (over_ceiling=\"1\")" ;;
+                    *) no "no-notes tree at the default posture is over 900 (est_tokens=$defEst) in SILENCE" ;; esac
 fi
 
 # ── arm 5: still deterministic and well-formed after the accounting change ─────────────────────────
-if [ "$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=800 2>/dev/null )" = "$bare" ]; then ok "output is byte-identical run-to-run"
+if [ "$( "$BIN" "$CORPUS" --for="$TASK" --token-budget=900 2>/dev/null )" = "$bare" ]; then ok "output is byte-identical run-to-run"
 else no "output is not deterministic"; fi
 if command -v xmllint >/dev/null 2>&1; then
   if printf '%s' "$OUT800" | xmllint --noout - 2>/dev/null; then ok "note-bearing XML is well-formed (G4)"; else no "note-bearing XML fails xmllint"; fi
