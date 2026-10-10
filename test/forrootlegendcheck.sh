@@ -76,24 +76,30 @@ done
 # rows the header then cannot pay for: on this very fixture the a4a58141 default (before those definitions) was over its
 # budget at 870, 930 and 1000 tokens and fit 850 by three tokens. That overshoot is labelled over_ceiling="1" and counted in
 # the CHANGELOG; the root= clause's own cost is what this arm is about, and the full dialect measures it.
-OUT2="$( "$BIN" "$TMP/tiny" --for="widget routine dispatcher" --token-budget=850 --no-cache --legend=full 2>/dev/null )"
+# RE-ANCHORED 2026-10-10 (train 26c): 850 -> 1000. lego-charge charges <lego>/<compose> at their served size and #362's
+# <tail next=> rides the bundle, so at 850 this fixture is the 4-row floor with its next= unpaid, labelled over_ceiling="1"
+# at est_tokens=967 in the full legend (red on two macOS shards of run 38041394072 and on a 10-core host alike). Swept
+# 900..1200 step 25 on the merged binary (full legend / default): 925 serves 5 rows at 892 / 880, 950..975 six rows at 939 /
+# 942, 1000 six rows at 940 / 989 — 60 tokens of headroom in the full legend, the dialect this arm measures (the 2026-09-12
+# re-anchor's 36-token posture or better); 1025+ seven rows at 987. The assertions are unchanged.
+OUT2="$( "$BIN" "$TMP/tiny" --for="widget routine dispatcher" --token-budget=1000 --no-cache --legend=full 2>/dev/null )"
 EST2="$( printf '%s' "$OUT2" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
-if [ -n "$EST2" ] && [ "$EST2" -le 850 ]; then
-    ok "arm2: --token-budget=850 fits the ceiling in the full legend (est_tokens=$EST2)"
+if [ -n "$EST2" ] && [ "$EST2" -le 1000 ]; then
+    ok "arm2: --token-budget=1000 fits the ceiling in the full legend (est_tokens=$EST2)"
 else
-    no "arm2: --token-budget=850 est_tokens=${EST2:-unreadable} exceeds the ceiling — the legend clause is too expensive"
+    no "arm2: --token-budget=1000 est_tokens=${EST2:-unreadable} exceeds the ceiling — the legend clause is too expensive"
 fi
-OUT2D="$( "$BIN" "$TMP/tiny" --for="widget routine dispatcher" --token-budget=850 --no-cache 2>/dev/null )"
+OUT2D="$( "$BIN" "$TMP/tiny" --for="widget routine dispatcher" --token-budget=1000 --no-cache 2>/dev/null )"
 EST2D="$( printf '%s' "$OUT2D" | grep -o 'est_tokens="[0-9]*"' | head -1 | tr -dc '0-9' )"
-if [ -n "$EST2D" ] && { [ "$EST2D" -le 850 ] || printf '%s' "$OUT2D" | head -c 600 | grep -q ' over_ceiling="1"'; }; then
-    ok "arm2: the default answer at --token-budget=850 fits or says it does not (est_tokens=$EST2D)"
+if [ -n "$EST2D" ] && { [ "$EST2D" -le 1000 ] || printf '%s' "$OUT2D" | head -c 600 | grep -q ' over_ceiling="1"'; }; then
+    ok "arm2: the default answer at --token-budget=1000 fits or says it does not (est_tokens=$EST2D)"
 else
-    no "arm2: the default answer at --token-budget=850 is over (est_tokens=${EST2D:-unreadable}) with no over_ceiling label"
+    no "arm2: the default answer at --token-budget=1000 is over (est_tokens=${EST2D:-unreadable}) with no over_ceiling label"
 fi
 if printf '%s' "$OUT2" | grep -qF "$CLAUSE_SNIPPET"; then
-    ok "arm2: the clause SURVIVES at --token-budget=850 (not dropped by the ceiling ladder)"
+    ok "arm2: the clause SURVIVES at --token-budget=1000 (not dropped by the ceiling ladder)"
 else
-    no "arm2: the clause is missing at --token-budget=850 — it was silently dropped instead of fitting"
+    no "arm2: the clause is missing at --token-budget=1000 — it was silently dropped instead of fitting"
 fi
 if printf '%s' "$OUT2" | xmllint --noout - 2>/dev/null; then ok "arm2: tight-budget output is well-formed (G4)"; else no "arm2: tight-budget output fails xmllint"; fi
 
