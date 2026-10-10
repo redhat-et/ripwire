@@ -172,10 +172,15 @@ fi
 #      test/cloneband_harness.cpp is named by test/clonebandcheck.sh and by nothing else. Stems differ, so
 #      this is the MENTION path on a corpus with 255 candidate runner scripts — where a wrong tie-break or
 #      an over-eager match would show up immediately.
+#      The seed is src/clones.h, the one header the harness includes and calls into (hops=1). It used to be
+#      src/graph.h, which reached the harness at hops=2 only through by-name edges from std::*.find()/size() calls
+#      onto graph.h namesakes; the C++ standard-member gate (graph.h StdMemberGate) declines those, so graph.h no
+#      longer reaches it — the arm still asks the same run= question of the same harness.
 RA="$( perl -e 'alarm 90; exec @ARGV' "$BIN" "$ROOT" --affected=src/graph.h 2>/dev/null )"
-[ "$( runof 'cloneband_harness.cpp' "$RA" )" = "bash test/clonebandcheck.sh" ] \
+RC="$( perl -e 'alarm 90; exec @ARGV' "$BIN" "$ROOT" --affected=src/clones.h 2>/dev/null )"
+[ "$( runof 'cloneband_harness.cpp' "$RC" )" = "bash test/clonebandcheck.sh" ] \
     && ok "repo: cloneband_harness.cpp -> run=\"bash test/clonebandcheck.sh\"" \
-    || no "repo: cloneband_harness.cpp run= wrong: '$( runof 'cloneband_harness.cpp' "$RA" )'"
+    || no "repo: cloneband_harness.cpp run= wrong: '$( runof 'cloneband_harness.cpp' "$RC" )'"
 [ "$( runof 'connectcore_harness.cpp' "$RA" )" = "bash test/connectcorecheck.sh" ] \
     && ok "repo: connectcore_harness.cpp -> run=\"bash test/connectcorecheck.sh\"" \
     || no "repo: connectcore_harness.cpp run= wrong: '$( runof 'connectcore_harness.cpp' "$RA" )'"
