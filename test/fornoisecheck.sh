@@ -3,6 +3,12 @@
 # tiers, and the ONE body slot of a "how does" question (lane/for-noise-body-slot, train 27 #4;
 # pre-registered in $ORCH/reports/for-noise-body-slot.md BEFORE the ranking code; reports/ideas-fable-26b.md idea #2).
 #
+# SCOPE NOW (lane/for-noise, train 27, owner plan 2026-10-10): A and C ship; B (evidence tier) and D (body slot) are
+# OUT of scope and their contract arms are DEFERRED — kept here, written to the early gates review's 8 changes, and
+# run only with FORNOISE_BD=1 (otherwise each block SKIPs by name). Their GREEN twins (no body without a cue, none
+# under --signatures-only/--json/MCP, ...) stay ACTIVE: they hold for a binary with no body slot too, and a leaked
+# body would turn them red. Premises re-shown on the 26c head 4c38d363 (checklist 28).
+#
 # THE FOUR CONTRACTS THIS PINS (every lettered arm marked RED was run red on the pre-change binary
 # 0852bc0f; the GREEN ones are twins of what must still hold — PROCESS rule 4, no gate erosion):
 #
@@ -39,13 +45,17 @@
 # Arms (colour on the pre-change binary in brackets):
 #   A1 [RED]  T-A: no write* row at r<=25 (idea #2 kill (3))        A2 [RED]  T-A: Router (src/router.ts) r<=3
 #   A3 [RED]  T-D: SAMPLE_QUESTIONS (frame words in strings) not r<=10   A4 [GREEN] sole-anchor: "how do I write" keeps write r=1, no frame_terms
-#   A5 [RED]  T-A root frame_terms>=4 + legend (full and compact)     A6/A7/A8 [GREEN] name-exact / --no-route / --query carry none of the new attributes
+#   A5 [RED]  T-A root frame_terms=12 EXACT + legend (full and compact) A6/A7/A8 [GREEN] name-exact / --no-route / --query carry none of the new attributes
+#   A9 [RED]  R2 twin: "how does `write` flush the stream" keeps write r=1 WITH frame_terms riding (a backticked frame word stays)
+#   A10 [GREEN] demotion is not a cut: the down-weighted / demoted rows still carry s>0 in --format=candidates --top-k=60
 #   B1 [RED]  T-B: listProjectFiles and filterFiles both r<=3          B2 [RED]  T-B: the three doc/string-only rows rank below both
 #   B3 [RED]  T-B root evidence_demoted>=3 + legend                   B4 [GREEN] SCANNER_NOTE (name match) is not demoted: r<=5
 #   B5 [RED]  --format=candidates carries frame_terms= and evidence_demoted=
 #   C1 [RED]  T-A: benchmarks RouterInterface below Router/SmartRouter  C2 [RED] T-A: RouterLike (.d.ts) below Router
 #   C3 [RED]  twin matcher: src/ copy ranks above the examples/ copy    C4 [RED] T-A: upgradeWebSocket ONE row + also= + dups_collapsed
 #   C5 [GREEN] two `match` methods in different files stay two rows    C6 [GREEN] tests/ row below the src/ owner (T-PY)
+#   C4 also pins the KEEPER: p="src/adapter/deno/websocket.ts" (the src/ rule) and also="adapters/deno/src/websocket.ts"
+#   C7 [GREEN] family lift: "how does the benchmarks tool wrap a router" keeps RouterInterface not below Router
 #   D1 [RED]  T-D: bodies="1", <b n="jwt"> holding getCookie / HTTPException(401 / ctx.set('jwtPayload' (idea #2 kill (1))
 #   D2 [RED]  T-D: the body is jwt (calls verify), not verify (r=1)     D3 [RED] T-D: sigs shown < --signatures-only shown; capped next= present
 #   D4 [RED]  --token-budget=3000: bodies="1", est_tokens within 1.15x  D5 [GREEN] --token-budget=400: bodies="0", no <b, >=1 row
@@ -55,7 +65,10 @@
 #   D12 [RED] compact legend defines b t= n= p= l= when a body rides; new attributes defined wherever they ride
 #   M1-M3     mutation controls: the checkers reject canned pre-change shapes (a gate that cannot go red is none)
 #   X1-X3     determinism x2, xmllint on both dialects, no `--` inside an XML comment (checklist 25)
-#   I1-I6     [optional, RIPWIRE_BASE_BIN=<pre-change binary>] byte identity on the untouched verbs
+#   I1-I10    [optional, RIPWIRE_BASE_BIN=<pre-change binary>] byte identity on the untouched verbs (+ --grep/--uses: pathTierOf leak)
+#   deferred (FORNOISE_BD=1): B1-B3, B5b, B6 (parser-vs-heuristic shapes), D1 body + l=, D3' (re-anchored), D4, D5 reason=budget,
+#             D8-D10 (+ p= of the .c file, never the .h prototype), D12 compact legend, D13 fallback owner (a)-(c),
+#             D14 named identifier (`verify`), D15 sole-anchor bodies, D16 body_next= on --json / MCP
 #
 # Usage:  bash test/fornoisecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/fornoisecheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used.
@@ -71,6 +84,7 @@ fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 skip(){ printf '  SKIP  %s\n' "$*"; return 0; }
+BD="${FORNOISE_BD:-0}"   # 1 = run the deferred B/D contract arms (lane/for-noise ships A and C only)
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
@@ -191,6 +205,14 @@ elif cmd == "est":                      # est MAXTOKENS : est_tokens <= MAX and 
     r = root(); e = int(r.get("est_tokens", "0") or 0)
     if e == 0 or e > int(args[0]) or r.get("over_ceiling") == "1": fail("est_tokens=%s over_ceiling=%s (max %s)" % (r.get("est_tokens"), r.get("over_ceiling"), args[0]))
     print("est_tokens=%d" % e)
+elif cmd == "candpos":                  # candpos NAME [PATH] : a --format=candidates <cand n=NAME> with s>0 (demoted, never cut)
+    hit = [dict(re.findall(r'(\w+)="([^"]*)"', c)) for c in re.findall(r'<cand ([^>]*)>', t)]
+    hit = [a for a in hit if a.get("n") == args[0] and (len(args) < 2 or a.get("p") == args[1])]
+    if not hit: fail("no <cand n=%s%s>" % (args[0], (" p=" + args[1]) if len(args) > 1 else ""))
+    try: sv = float(hit[0].get("s", "0"))
+    except ValueError: fail("cand %s s=%r is not a number" % (args[0], hit[0].get("s")))
+    if not sv > 0: fail("cand %s s=%s, wanted > 0" % (args[0], sv))
+    print("%s r=%s s=%s" % (args[0], hit[0].get("r"), hit[0].get("s")))
 elif cmd == "rowsge":                   # rowsge N
     if len(rows()) < int(args[0]): fail("only %d rows" % len(rows()))
 else:
@@ -210,6 +232,12 @@ T_BIG="How does render_screen draw the screen?"
 T_TWIN="how does the matcher match a route"
 T_SOLE="how do I write"
 T_MATCH="match method path handlers"
+T_R2="how does \`write\` flush the stream"
+T_BENCH="how does the benchmarks tool wrap a router"
+T_FB1="How does pane resolution work?"            # D13 (a): no whole-name owner, ONE head callable shares a kept subtoken (pane)
+T_FB2="How does the garbage collector work?"      # D13 (b): a cue, no head callable shares a kept subtoken
+T_FB3="How does the client window get chosen?"    # D13 (c): several sharers (client / window) — premise re-checked when D lands
+T_NAMED="How does \`verify\` check the token?"   # D14: a NAMED identifier is the owner, not the callee-edge entry point
 
 run --for="$T_A" >"$TMP/a.xml";   run --for="$T_A" --legend=compact >"$TMP/a.c.xml"
 run --for="$T_B" >"$TMP/b.xml";   run --for="$T_B" --format=candidates --top-k=40 >"$TMP/b.cand.xml"
@@ -218,7 +246,9 @@ run --for="$T_D" --signatures-only >"$TMP/d.sig.xml"
 run --for="$T_D_NOCUE" >"$TMP/d.nocue.xml"
 run --for="$T_PY" >"$TMP/py.xml"; run --for="$T_C" >"$TMP/c.xml"; run --for="$T_BIG" >"$TMP/big.xml"
 run --for="$T_TWIN" >"$TMP/twin.xml"; run --for="$T_SOLE" >"$TMP/sole.xml"; run --for="$T_MATCH" >"$TMP/match.xml"
-for f in a b d d.sig d.nocue py c big twin sole match; do
+run --for="$T_R2" >"$TMP/r2.xml"; run --for="$T_BENCH" >"$TMP/bench.xml"
+run --for="$T_A" --format=candidates --top-k=60 >"$TMP/a.cand.xml"
+for f in a b d d.sig d.nocue py c big twin sole match r2 bench; do
     [ -s "$TMP/$f.xml" ] && grep -q '<sigs' "$TMP/$f.xml" || { no "(0) $f.xml: no <sigs> block — the fixture answered nothing, every arm below would be vacuous"; }
 done
 
@@ -228,7 +258,10 @@ if r="$( chk rankle Router 3 src/router.ts "$TMP/a.xml" )"; then ok "(A2) T-A: R
 if r="$( chk norow '^SAMPLE_QUESTIONS$' 10 "$TMP/d.xml" )"; then ok "(A3) T-D: SAMPLE_QUESTIONS (frame words in strings) not at r<=10"; else no "(A3) T-D: $r"; fi
 if r="$( chk rankle write 1 "$TMP/sole.xml" )"; then ok "(A4) sole-anchor guard: '$T_SOLE' keeps write at r=1"; else no "(A4) sole-anchor: $r"; fi
 if r="$( chk noattr frame_terms "$TMP/sole.xml" )"; then ok "(A4) sole-anchor guard: no frame_terms= rides (nothing was down-weighted)"; else no "(A4) sole-anchor: $r"; fi
-if r="$( chk rootattrge frame_terms 4 "$TMP/a.xml" )"; then ok "(A5) T-A root $r"; else no "(A5) T-A: $r"; fi
+# A5 EXACT (rv-gates CHANGE 8): T-A's unique >=2-byte terms that are on the frozen frame list AND occur in this fixture
+# (each probed alone with --no-route --format=candidates on 4c38d363: s>0) — want to write new must it implement and which
+# existing read first = 12; `what` and `should` are on the list but absent from the fixture (s=0), so they are not counted.
+if r="$( chk rootattr frame_terms '12' "$TMP/a.xml" )"; then ok "(A5) T-A root $r (exact)"; else no "(A5) T-A: $r"; fi
 if r="$( chk legend 'frame_terms=' "$TMP/a.xml" )"; then ok "(A5) full legend defines frame_terms="; else no "(A5) full legend: $r"; fi
 if r="$( chk legend 'frame_terms=' "$TMP/a.c.xml" )"; then ok "(A5) compact legend defines frame_terms="; else no "(A5) compact legend: $r"; fi
 run --for=TrieRouter >"$TMP/ne.xml"
@@ -238,21 +271,44 @@ run --for="$T_A" --no-route >"$TMP/nr.xml"
 if r="$( chk noattr frame_terms evidence_demoted dups_collapsed also "$TMP/nr.xml" )"; then ok "(A7) --no-route carries none of the new attributes"; else no "(A7) --no-route: $r"; fi
 run --query="$T_A" >"$TMP/q.xml"
 if grep -q 'frame_terms=\|evidence_demoted=\|dups_collapsed=' "$TMP/q.xml"; then no "(A8) --query carries a --for-only attribute"; else ok "(A8) --query carries none of the new attributes"; fi
-
-# ── B: evidence tier ────────────────────────────────────────────────────────────────────────────────────────
-if r="$( chk rankle listProjectFiles 3 "$TMP/b.xml" )"; then ok "(B1) T-B: listProjectFiles r=$r"; else no "(B1) T-B: $r"; fi
-if r="$( chk rankle filterFiles 3 "$TMP/b.xml" )"; then ok "(B1) T-B: filterFiles r=$r"; else no "(B1) T-B: $r"; fi
-for noise in MAXIMUM_FILE_LINES SAMPLE_QUESTIONS PLAN_REFERENCE_RES; do
-    if r="$( chk below "$noise" listProjectFiles "$TMP/b.xml" )"; then ok "(B2) T-B: $r"; else no "(B2) T-B: $r"; fi
-    if r="$( chk below "$noise" filterFiles "$TMP/b.xml" )"; then ok "(B2) T-B: $r"; else no "(B2) T-B: $r"; fi
+if r="$( chk rankle write 1 src/utils/stream.ts "$TMP/r2.xml" )"; then ok "(A9) R2 twin: a backticked frame word keeps its row: write r=$r"; else no "(A9) R2 twin: $r"; fi
+if r="$( chk rootattrge frame_terms 1 "$TMP/r2.xml" )"; then ok "(A9) R2 twin: $r rides (the other frame words were weighted)"; else no "(A9) R2 twin: $r"; fi
+# A10 (rv-gates CHANGE 7, rule 5): a quarter weight / the tier factor is a DOWN-weight — every such row is still ranked
+for n in write writeFile writeTextFile writeSSE RouterInterface RouterLike; do
+    if r="$( chk candpos "$n" "$TMP/a.cand.xml" )"; then ok "(A10) T-A candidates: $r (down-weighted, not cut)"; else no "(A10) T-A candidates: $r"; fi
 done
-if r="$( chk rootattrge evidence_demoted 3 "$TMP/b.xml" )"; then ok "(B3) T-B root $r"; else no "(B3) T-B: $r"; fi
-if r="$( chk legend 'evidence_demoted=' "$TMP/b.xml" )"; then ok "(B3) full legend defines evidence_demoted="; else no "(B3) legend: $r"; fi
-if r="$( chk rankle SCANNER_NOTE 5 "$TMP/b.xml" )"; then ok "(B4) T-B: SCANNER_NOTE (its NAME matches) is not demoted: r=$r"; else no "(B4) T-B: $r"; fi
-if grep -q '<candidates [^>]*frame_terms="[0-9]*"' "$TMP/b.cand.xml" && grep -q '<candidates [^>]*evidence_demoted="[0-9]*"' "$TMP/b.cand.xml"; then
-    ok "(B5) --format=candidates carries frame_terms= and evidence_demoted= (provenance)"
+for n in MAXIMUM_FILE_LINES SAMPLE_QUESTIONS PLAN_REFERENCE_RES; do
+    if r="$( chk candpos "$n" "$TMP/b.cand.xml" )"; then ok "(A10) T-B candidates: $r (down-weighted, not cut)"; else no "(A10) T-B candidates: $r"; fi
+done
+if grep -q '<candidates [^>]*frame_terms="[0-9]*"' "$TMP/b.cand.xml"; then ok "(A11) --format=candidates carries frame_terms= (provenance)"; else no "(A11) --format=candidates lacks frame_terms= on its root"; fi
+
+# ── B: evidence tier — DEFERRED (out of lane/for-noise scope; FORNOISE_BD=1 runs it) ──────────────────────────
+if [ "$BD" = "1" ]; then
+    if r="$( chk rankle listProjectFiles 3 "$TMP/b.xml" )"; then ok "(B1) T-B: listProjectFiles r=$r"; else no "(B1) T-B: $r"; fi
+    if r="$( chk rankle filterFiles 3 "$TMP/b.xml" )"; then ok "(B1) T-B: filterFiles r=$r"; else no "(B1) T-B: $r"; fi
+    for noise in MAXIMUM_FILE_LINES SAMPLE_QUESTIONS PLAN_REFERENCE_RES; do
+        if r="$( chk below "$noise" listProjectFiles "$TMP/b.xml" )"; then ok "(B2) T-B: $r"; else no "(B2) T-B: $r"; fi
+        if r="$( chk below "$noise" filterFiles "$TMP/b.xml" )"; then ok "(B2) T-B: $r"; else no "(B2) T-B: $r"; fi
+    done
+    if r="$( chk rootattrge evidence_demoted 3 "$TMP/b.xml" )"; then ok "(B3) T-B root $r"; else no "(B3) T-B: $r"; fi
+    if r="$( chk legend 'evidence_demoted=' "$TMP/b.xml" )"; then ok "(B3) full legend defines evidence_demoted="; else no "(B3) legend: $r"; fi
+    if r="$( chk rankle SCANNER_NOTE 5 "$TMP/b.xml" )"; then ok "(B4) T-B: SCANNER_NOTE (its NAME matches) is not demoted: r=$r"; else no "(B4) T-B: $r"; fi
+    if grep -q '<candidates [^>]*evidence_demoted="[0-9]*"' "$TMP/b.cand.xml"; then
+        ok "(B5b) --format=candidates carries evidence_demoted= (provenance; frame_terms= is A11)"
+    else
+        no "(B5b) --format=candidates lacks evidence_demoted= on its root"
+    fi
+    # B6 (rv-gates CHANGE 6, checklist 29): the parser decides the tier — a kept word inside a template SUBSTITUTION and after a
+    # `//` inside a string literal is CODE; a text heuristic (backtick/quote counting, `//`) would demote both.
+    for n in selectionSummary remoteProbe; do
+        for noise in MAXIMUM_FILE_LINES SAMPLE_QUESTIONS PLAN_REFERENCE_RES; do
+            if r="$( chk below "$noise" "$n" "$TMP/b.xml" )"; then ok "(B6) T-B: $r (not demoted)"; else no "(B6) T-B: $r"; fi
+        done
+    done
+    if r="$( chk rootattr evidence_demoted '3' "$TMP/b.xml" )"; then ok "(B6) T-B root $r (exact: the three doc/string-only rows)"; else no "(B6) T-B: $r"; fi
+
 else
-    no "(B5) --format=candidates lacks frame_terms=/evidence_demoted= on its root"
+    skip "(B1-B3, B5b, B6) evidence tier: deferred — B is out of lane/for-noise's scope (owner plan 2026-10-10); FORNOISE_BD=1 runs these"
 fi
 
 # ── C: tiers and duplicates ────────────────────────────────────────────────────────────────────────────────
@@ -264,30 +320,21 @@ if rs="$( chk rankle sourceMatcher 1 src/matcher.ts "$TMP/twin.xml" )"; then ok 
 if r="$( chk below exampleMatcher sourceMatcher examples/matcher.ts "$TMP/twin.xml" )"; then ok "(C3) twin: $r"; else no "(C3) twin: $r"; fi
 n="$( chk count upgradeWebSocket "$TMP/a.xml" )"
 if [ "$n" = "1" ]; then ok "(C4) T-A: upgradeWebSocket is ONE row (two byte-identical files)"; else no "(C4) T-A: upgradeWebSocket rows=$n, wanted 1"; fi
-if r="$( chk rowattr upgradeWebSocket also 'websocket\.ts' "$TMP/a.xml" )"; then ok "(C4) T-A: $r"; else no "(C4) T-A: $r"; fi
+# rv-gates CHANGE 8: pin the KEEPER (the src/ first-segment rule) and the exact also= — a first-seen-copy keeper goes red
+if r="$( chk rowattr upgradeWebSocket p '^src/adapter/deno/websocket\.ts$' "$TMP/a.xml" )"; then ok "(C4) T-A: keeper $r"; else no "(C4) T-A: keeper $r"; fi
+if r="$( chk rowattr upgradeWebSocket also '^adapters/deno/src/websocket\.ts$' "$TMP/a.xml" )"; then ok "(C4) T-A: $r"; else no "(C4) T-A: $r"; fi
 if r="$( chk sigsattrge dups_collapsed 1 "$TMP/a.xml" )"; then ok "(C4) T-A: <sigs $r>"; else no "(C4) T-A: $r"; fi
 if r="$( chk legend 'dups_collapsed=' 'also=' "$TMP/a.xml" )"; then ok "(C4) full legend defines dups_collapsed= and also="; else no "(C4) legend: $r"; fi
 n="$( chk count match "$TMP/match.xml" )"
 if [ "${n:-0}" -ge 2 ]; then ok "(C5) two same-named match methods in different files stay $n rows"; else no "(C5) match rows=$n, wanted >=2 (entity identity)"; fi
 if r="$( chk noattr dups_collapsed also "$TMP/match.xml" )"; then ok "(C5) nothing collapsed on non-identical files"; else no "(C5) $r"; fi
 if r="$( chk below test_css_parsed_and_applied_to_widgets apply "$TMP/py.xml" )"; then ok "(C6) T-PY: $r (tests/ tier unchanged)"; else no "(C6) T-PY: $r"; fi
+if r="$( chk below Router RouterInterface "$TMP/bench.xml" )"; then ok "(C7) family lift: '$T_BENCH' names the family — $r"; else no "(C7) family lift: $r"; fi
 
 # ── D: the body slot ────────────────────────────────────────────────────────────────────────────────────────
+# ACTIVE here: the GREEN twins — they hold for a binary with no body slot and go red if a body leaks where none may ride.
 if r="$( chk rootattr bundle compact "$TMP/d.xml" )"; then ok "(D1) T-D: $r"; else no "(D1) T-D: $r"; fi
-if r="$( chk bodycount 1 "$TMP/d.xml" )"; then ok "(D1) T-D: exactly one body, root bodies=\"1\""; else no "(D1) T-D: $r"; fi
-if r="$( chk body jwt src/middleware/jwt/jwt.ts "getCookie" "HTTPException(401" "ctx.set('jwtPayload'" "$TMP/d.xml" )"; then
-    ok "(D1) T-D: $r holds the three kill-(1) strings"
-else
-    no "(D1) T-D: $r"
-fi
-if r="$( chk legend 'bodies=1' "$TMP/d.xml" )"; then ok "(D1) full legend explains the compact body (bodies=1)"; else no "(D1) legend: $r"; fi
-if grep -q '<b [^>]*n="verify"' "$TMP/d.xml"; then no "(D2) T-D: verify's body was served — the entry point (jwt calls verify) must win"; else ok "(D2) T-D: the body is the entry point jwt, not verify (r=1)"; fi
-sd="$( chk shown "$TMP/d.xml" )"; ss="$( chk shown "$TMP/d.sig.xml" )"
-if [ -n "$sd" ] && [ -n "$ss" ] && [ "$sd" -lt "$ss" ]; then ok "(D3) T-D: the body is PAID in rows: shown $sd < --signatures-only $ss"; else no "(D3) T-D: shown default=$sd vs --signatures-only=$ss (the body must displace rows)"; fi
-if r="$( chk sigsattr next 'signatures-only' "$TMP/d.xml" )"; then ok "(D3) T-D: displaced rows recoverable: <sigs $r>"; else no "(D3) T-D: $r"; fi
-run --for="$T_D" --token-budget=3000 >"$TMP/d.tb3000.xml"
-if r="$( chk bodycount 1 "$TMP/d.tb3000.xml" )"; then ok "(D4) --token-budget=3000: the slot is served inside the ceiling"; else no "(D4) --token-budget=3000: $r"; fi
-if r="$( chk est 3450 "$TMP/d.tb3000.xml" )"; then ok "(D4) --token-budget=3000: $r within 1.15x"; else no "(D4) --token-budget=3000: $r"; fi
+if grep -q '<b [^>]*n="verify"' "$TMP/d.xml"; then no "(D2) T-D: verify's body was served — the entry point (jwt calls verify) must win"; else ok "(D2) T-D: no verify body (the entry point jwt, or no slot)"; fi
 run --for="$T_D" --token-budget=400 >"$TMP/d.tb400.xml"
 if r="$( chk rootattr bodies 0 "$TMP/d.tb400.xml" )"; then ok "(D5) --token-budget=400: bodies=\"0\" (no room past the top rows)"; else no "(D5) --token-budget=400: $r"; fi
 if r="$( chk nobody "$TMP/d.tb400.xml" )"; then ok "(D5) --token-budget=400: no <b"; else no "(D5) --token-budget=400: $r"; fi
@@ -305,11 +352,6 @@ else
 fi
 run --for="$T_D" --auto-bodies >"$TMP/d.auto.xml"
 if r="$( chk rootattr bundle auto "$TMP/d.auto.xml" )"; then ok "(D7) --auto-bodies: $r (the rank-first walk, unchanged)"; else no "(D7) --auto-bodies: $r"; fi
-if r="$( chk body apply src/textual/css/stylesheet.py "_check_rule(" "widget.refresh()" "$TMP/py.xml" )"; then ok "(D8) T-PY: $r (the method, not the class)"; else no "(D8) T-PY: $r"; fi
-if r="$( chk body cmd_find_target src/c/cmd-find.c "cmd_find_get_session(" "cmd_find_valid_state(" "$TMP/c.xml" )"; then ok "(D9) T-C: $r"; else no "(D9) T-C: $r"; fi
-if r="$( chk bodyattr render_screen truncated 1 "$TMP/big.xml" )"; then ok "(D10) oversized owner: <b $r> (head-cut, never dropped)"; else no "(D10) oversized: $r"; fi
-if r="$( chk bodyattr render_screen next '^--expand=' "$TMP/big.xml" )"; then ok "(D10) oversized owner: $r"; else no "(D10) oversized: $r"; fi
-if r="$( chk bodyattr render_screen lines '^[0-9]+-[0-9]+/[0-9]+$' "$TMP/big.xml" )"; then ok "(D10) oversized owner: $r"; else no "(D10) oversized: $r"; fi
 cat > "$TMP/mcptext.py" <<'PY'
 import json, sys
 for line in sys.stdin:
@@ -327,10 +369,73 @@ if grep -q '<sigs' "$TMP/d.mcp.xml"; then
 else
     no "(D11) MCP for answered nothing — the floor could not be checked"
 fi
-if r="$( chk legend 'b t= n= p= l=' "$TMP/d.c.xml" )"; then ok "(D12) compact legend defines b t= n= p= l= when a body rides"; else no "(D12) compact legend: $r"; fi
-for f in a a.c b d d.c py c big twin match; do
+for f in a a.c b d d.c py c big twin match r2 bench; do
     if r="$( chk defined "$TMP/$f.xml" )"; then ok "(D12) $f.xml: $r"; else no "(D12) $f.xml: $r"; fi
 done
+
+# DEFERRED (FORNOISE_BD=1): the body-slot contracts, with the early gates review's changes 3, 4, 5 and 8 applied.
+if [ "$BD" = "1" ]; then
+    if r="$( chk bodycount 1 "$TMP/d.xml" )"; then ok "(D1) T-D: exactly one body, root bodies=\"1\""; else no "(D1) T-D: $r"; fi
+    if r="$( chk body jwt src/middleware/jwt/jwt.ts "getCookie" "HTTPException(401" "ctx.set('jwtPayload'" "$TMP/d.xml" )"; then
+        ok "(D1) T-D: $r holds the three kill-(1) strings"
+    else
+        no "(D1) T-D: $r"
+    fi
+    if r="$( chk bodyattr jwt l '^12$' "$TMP/d.xml" )"; then ok "(D1) T-D: $r (CHANGE 5: the definition line)"; else no "(D1) T-D: $r"; fi
+    if r="$( chk legend 'bodies=1' "$TMP/d.xml" )"; then ok "(D1) full legend explains the compact body (bodies=1)"; else no "(D1) legend: $r"; fi
+    # D3' (CHANGE 3, checklist 22/28): re-anchored. The old "shown default < --signatures-only shown" held on the base binary of
+    # a CLEAN tree (39 < 40). On 4c38d363: default est_tokens=3900, shown=39/40; jwt's body = 2,660 B, the largest
+    # --signatures-only row = 434 B -> an honest payment displaces >= ceil(2660/434) = 7 rows: shown <= 33, est <= 4100 (+5%).
+    # Run from the absolute root AND a SHORT relative root (header bytes move the budget boundary).
+    ( cd "$ROOT/test" && "$BIN" fornoisefix --no-cache --for="$T_D" 2>/dev/null ) >"$TMP/d.rel.xml"
+    for f in d d.rel; do
+        if r="$( chk est 4100 "$TMP/$f.xml" )"; then ok "(D3) $f: $r (the body is paid, not added)"; else no "(D3) $f: $r"; fi
+        sd="$( chk shown "$TMP/$f.xml" )"
+        if [ -n "$sd" ] && [ "$sd" -le 33 ] 2>/dev/null; then ok "(D3) $f: shown=$sd <= 33 (the body displaced rows)"; else no "(D3) $f: shown=$sd, wanted <= 33"; fi
+        if r="$( chk sigsattr next 'signatures-only' "$TMP/$f.xml" )"; then ok "(D3) $f: displaced rows recoverable: <sigs $r>"; else no "(D3) $f: $r"; fi
+    done
+    run --for="$T_D" --token-budget=3000 >"$TMP/d.tb3000.xml"
+    ( cd "$ROOT/test" && "$BIN" fornoisefix --no-cache --for="$T_D" --token-budget=3000 2>/dev/null ) >"$TMP/d.tb3000.rel.xml"
+    ( cd "$ROOT/test" && "$BIN" fornoisefix --no-cache --for="$T_D" --token-budget=400 2>/dev/null ) >"$TMP/d.tb400.rel.xml"
+    for f in d.tb3000 d.tb3000.rel; do
+        if r="$( chk bodycount 1 "$TMP/$f.xml" )"; then ok "(D4) $f: the slot is served inside the ceiling"; else no "(D4) $f: $r"; fi
+        if r="$( chk est 3450 "$TMP/$f.xml" )"; then ok "(D4) $f: $r within 1.15x"; else no "(D4) $f: $r"; fi
+    done
+    for f in d.tb400 d.tb400.rel; do
+        if r="$( chk rootattr reason budget "$TMP/$f.xml" )"; then ok "(D5) $f: $r (CHANGE 8: the reason is the budget)"; else no "(D5) $f: $r"; fi
+    done
+    if r="$( chk body apply src/textual/css/stylesheet.py "_check_rule(" "widget.refresh()" "$TMP/py.xml" )"; then ok "(D8) T-PY: $r (the method, not the class)"; else no "(D8) T-PY: $r"; fi
+    if r="$( chk body cmd_find_target src/c/cmd-find.c "cmd_find_get_session(" "cmd_find_valid_state(" "$TMP/c.xml" )"; then ok "(D9) T-C: $r"; else no "(D9) T-C: $r"; fi
+    if grep -q '<b [^>]*p="src/c/cmd-find.h"' "$TMP/c.xml"; then no "(D9) T-C: the header PROTOTYPE was chosen as the owner (CHANGE 5)"; else ok "(D9) T-C: the .h prototype is never the owner"; fi
+    if r="$( chk bodyattr render_screen truncated 1 "$TMP/big.xml" )"; then ok "(D10) oversized owner: <b $r> (head-cut, never dropped)"; else no "(D10) oversized: $r"; fi
+    if r="$( chk bodyattr render_screen next '^--expand=' "$TMP/big.xml" )"; then ok "(D10) oversized owner: $r"; else no "(D10) oversized: $r"; fi
+    if r="$( chk bodyattr render_screen lines '^[0-9]+-[0-9]+/[0-9]+$' "$TMP/big.xml" )"; then ok "(D10) oversized owner: $r"; else no "(D10) oversized: $r"; fi
+    if r="$( chk bodyattr render_screen p '^src/c/render\.c$' "$TMP/big.xml" )"; then ok "(D10) oversized owner: $r (the .c definition, not render.h)"; else no "(D10) oversized: $r"; fi
+    if r="$( chk legend 'b t= n= p= l=' "$TMP/d.c.xml" )"; then ok "(D12) compact legend defines b t= n= p= l= when a body rides"; else no "(D12) compact legend: $r"; fi
+    # D13 (CHANGE 4): the fallback owner, conservative — (a) one sharer fires, (b) no sharer and (c) several sharers none of
+    # which is the best-ranked callable serve NO slot (bodies="0" reason="compact-route"). (c)'s premise (no sharer is the
+    # best-ranked callable of the head) is re-shown on the D binary when D lands — it cannot be shown before D's owner choice exists.
+    run --for="$T_FB1" >"$TMP/fb1.xml"; run --for="$T_FB2" >"$TMP/fb2.xml"; run --for="$T_FB3" >"$TMP/fb3.xml"
+    if r="$( chk body cmd_find_get_pane src/c/cmd-find.c "$TMP/fb1.xml" )"; then ok "(D13a) one sharer: $r"; else no "(D13a) one sharer: $r"; fi
+    for f in fb2 fb3; do
+        if r="$( chk nobody "$TMP/$f.xml" )"; then ok "(D13) $f: no body"; else no "(D13) $f: $r"; fi
+        if r="$( chk rootattr reason compact-route "$TMP/$f.xml" )"; then ok "(D13) $f: $r"; else no "(D13) $f: $r"; fi
+    done
+    # D14 (ruling R6): a NAMED identifier beats the callee-edge rule — `verify` is the body, not jwt
+    run --for="$T_NAMED" >"$TMP/named.xml"
+    if r="$( chk body verify src/utils/jwt/jwt.ts "$TMP/named.xml" )"; then ok "(D14) named identifier: $r"; else no "(D14) named identifier: $r"; fi
+    # D15 (ruling R7): sole-anchor + cue — nothing was down-weighted, `write` is an owner, D fires on it
+    if r="$( chk body write src/utils/stream.ts "$TMP/sole.xml" )"; then ok "(D15) sole anchor: $r"; else no "(D15) sole anchor: $r"; fi
+    # D16 (ruling R4): --json / MCP carry the clue, not the body
+    if python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if str(d.get('body_next','')).endswith('src/middleware/jwt/jwt.ts:jwt') else 1)" "$TMP/d.json"; then
+        ok "(D16) --json: body_next names src/middleware/jwt/jwt.ts:jwt"
+    else
+        no "(D16) --json: no body_next= naming jwt"
+    fi
+    if r="$( chk rootattr body_next '.*src/middleware/jwt/jwt\.ts:jwt$' "$TMP/d.mcp.xml" )"; then ok "(D16) MCP for: $r"; else no "(D16) MCP for: $r"; fi
+else
+    skip "(D1 body, D3', D4, D5 reason, D8-D10, D12 legend, D13-D16) body slot: deferred — D is out of lane/for-noise's scope (owner plan 2026-10-10); FORNOISE_BD=1 runs these"
+fi
 
 # ── M: mutation controls — the checkers reject canned pre-change shapes ─────────────────────────────────────
 printf '%s' '<ctx task="t" route="subtoken+body" bundle="compact" bodies="0" reason="compact-route"><!-- legend --><sigs shown="2" total="2"><d l="1" n="verify" p="src/utils/jwt/jwt.ts" r="1">x</d><d l="2" n="jwt" p="src/middleware/jwt/jwt.ts" r="2">y</d></sigs><hops shown="0" total="0" capped="0"></hops></ctx>' >"$TMP/m1.xml"
@@ -346,7 +451,7 @@ if chk rowattr upgradeWebSocket also "$TMP/m3.xml" >/dev/null 2>&1; then no "(M3
 run --for="$T_D" >"$TMP/d2.xml"
 if cmp -s "$TMP/d.xml" "$TMP/d2.xml"; then ok "(X1) T-D is deterministic (x2 byte-identical)"; else no "(X1) T-D differs between two runs"; fi
 if command -v xmllint >/dev/null 2>&1; then
-    for f in a a.c b d d.c py c big twin; do
+    for f in a a.c b d d.c py c big twin r2 bench; do
         if xmllint --noout "$TMP/$f.xml" 2>/dev/null; then ok "(X2) $f.xml is well-formed XML"; else no "(X2) $f.xml failed xmllint"; fi
     done
 else
@@ -375,6 +480,8 @@ if [ -n "${RIPWIRE_BASE_BIN:-}" ] && [ -x "${RIPWIRE_BASE_BIN}" ]; then
 --expand=src/middleware/jwt/jwt.ts:jwt
 --pack-task=how does the JWT middleware verify a token
 --for=How does the JWT middleware verify a token?|--no-route
+--grep=match
+--uses=exampleMatcher
 ARGV
 else
     skip "(I) RIPWIRE_BASE_BIN unset or not executable — base-binary byte identity not run here"

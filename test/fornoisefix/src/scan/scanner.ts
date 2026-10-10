@@ -24,3 +24,9 @@ export const runScan = async (options: ScanOptions): Promise<string[]> => {
   }
   return results
 }
+
+// rv-gates-for-noise CHANGE 6 (checklist 29): two shapes a TEXT heuristic misreads and tree-sitter does not —
+// the kept word sits inside a template-literal SUBSTITUTION (code), and after a `//` INSIDE a string literal (code).
+const files: string[] = []
+export function selectionSummary(): string { return `picked ${files.length}` }
+export function remoteProbe(): number { const u = 'http://probe'; return u.length + files.length }
