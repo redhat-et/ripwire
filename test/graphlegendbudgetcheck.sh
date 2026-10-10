@@ -118,8 +118,14 @@ budgetFor(){
         # when reaches>0. Measured on this probe: 3926 B on main (3fcd515f), 4288 B on this lane (+362 B, exactly the
         # clause); 4336 keeps impact's 48 B headroom. The gate's RED-on-1dc7b01 property rests on the uses pin (4114 <
         # 4303), which does not move.
+        # RE-PINNED impact +197 (2026-10-10, lane lean-trio, idea #6): a CUT --impact symbol window now opens with the
+        # per-file rollup of the WHOLE reach set (<files files= shown_files= files_capped=> + <rf syms= d=> rows), and the
+        # full legend gains graphlegend.h impactRollupLegend's FILES sentence, present exactly when that element rides
+        # (this probe's window is cut). Shortened from a 330 B draft to 197 B before the pin moved. Measured on this probe:
+        # 4288 B on main (0852bc0f), 4485 B on this lane (+197 B, exactly the sentence); 4533 keeps impact's 48 B headroom.
+        # The gate's RED-on-1dc7b01 property rests on the uses pin (4114 < 4303), which does not move.
         callers) echo 3429 ;;
-        impact)  echo 4336 ;;
+        impact)  echo 4533 ;;
         uses)    echo 4114 ;;
     esac
 }

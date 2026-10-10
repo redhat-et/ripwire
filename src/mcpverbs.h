@@ -2932,10 +2932,11 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // Measured before the legend (#220 part 1): its imports_unresolved= decides whether that clause rides.
     ImportTier imports = impactImportTier( ing, seeds );
     sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
-    const ImpactFileRollup imFiles = impactFileRollup( ing, reach, depth, page.limit, symbol );   // idea #6: the CLI arm's rollup
     // Reference-as-value round: SYM's binding sites, the CLI --impact's value_refs=/<vrs> by the same call.
     const ValueRefRows  imValueRefs = valueRefCallerRows( ing, valueRefIndexOf( ix ), seeds );
     const PageWindow    ipw         = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
+    // idea #6: the CLI arm's rollup, under the same rule — it rides only beside a CUT symbol window
+    const ImpactFileRollup imFiles = impactFileRollup( ing, reach, depth, page.limit, symbol, ipw.end - ipw.begin < show.size() );
     const bool          imHasVia    = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactRowNameOnly( proven, n ); } );
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
@@ -2949,7 +2950,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
                   ( std::string( valueRefsReachLegend( !imValueRefs.rows.empty() ) )                  // exactly when the root carries value_refs=, as on the CLI
                     + valueRefsDepthLegendFor( imValueRefs )                                             // ... and the depth disclosure, as on the CLI
-                    + impactRollupLegend( !reach.empty(), imports.umbrella ) ).c_str(),                  // idea #6, as on the CLI
+                    + impactRollupLegend( !imFiles.rows.empty(), imports.umbrella ) ).c_str(),                  // idea #6, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,

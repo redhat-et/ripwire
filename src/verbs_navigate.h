@@ -2569,18 +2569,9 @@ int emitImpactJson( const ImpactView& v )
     printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix, v.testReach, &v.depth, &via );
     rw::emitTo( stdout, "],\"import_reach\":[" );
     rw::emitImportRowsJson( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
-    // idea #6: the XML form's <files> rollup, as an object (n/shown/capped/files_next + rows)
-    rw::emitTo( stdout, "],\"files\":{{\"n\":{},\"shown\":{},\"capped\":{}{},\"rows\":[", v.fileRollup.rows.size(), v.fileRollup.shown,
-                v.fileRollup.capped ? "true" : "false",
-                v.fileRollup.next.empty() ? std::string() : ",\"files_next\":\"" + jsonStr( v.fileRollup.next ) + "\"" );
-    for( std::size_t i = 0; i < v.fileRollup.shown; ++i )
-    {
-        const rw::ImpactFileRow& fr  = v.fileRollup.rows[i];
-        const std::string_view   raw = v.ing.files[ fr.fileId ];
-        const std::string_view   rel = v.rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, v.rootPrefix );
-        rw::emitTo( stdout, "{}{{\"p\":\"{}\",\"syms\":{},\"d\":{}}}", i ? "," : "", jsonStr( rel ).c_str(), fr.syms, fr.minDepth );
-    }
-    rw::emitTo( stdout, "]}}{}}}", rw::valueRefsJson( v.ing, v.valueRefs, true, rw::VrRender{ v.singleRoot, v.rootPrefix }, "vrs",
+    rw::emitRaw( stdout, "]" );
+    rw::emitImpactFileRollupJson( stdout, v.ing, v.fileRollup, v.rootPrefix );   // idea #6: present exactly when the XML element is
+    rw::emitTo( stdout, "{}}}", rw::valueRefsJson( v.ing, v.valueRefs, true, rw::VrRender{ v.singleRoot, v.rootPrefix }, "vrs",
                                                      "--uses=" + std::string( v.sym ) ) );
     return 0;
 }
@@ -2687,7 +2678,9 @@ std::optional<int> runImpact( const MainDispatch& d )
         // which left the legend predicate with nothing to read but the whole `show` set — CodeRabbit
         // 4057546113. Hoisted so the rows and the reading that describes them come from one expression.
         const rw::PageWindow imPage = pageWindow( show.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset );
-        const rw::ImpactFileRollup imFiles = rw::impactFileRollup( ing, reach, imDepth, cfg.pageLimit, cfg.impactSym );   // idea #6
+        // idea #6: the rollup rides only beside a CUT symbol window (graph.h impactFileRollup)
+        const rw::ImpactFileRollup imFiles = rw::impactFileRollup( ing, reach, imDepth, cfg.pageLimit, cfg.impactSym,
+                                                                   imPage.end - imPage.begin < show.size() );
         // Reference-as-value round: SYM's own binding sites, beside the radius they are not in.
         const rw::ValueRefIndex imVri( ing );
         const rw::ValueRefRows  imValueRefs = rw::valueRefCallerRows( ing, imVri, seeds );
@@ -2715,7 +2708,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                          rw::declinedCallsLegendWithGate( imDeclinedCalls > 0, g.gateDeclinedCalls > 0 ),           // exactly when the root carries declined_calls=
                          rw::declinedIfaceLegend( imDeclinedIface > 0 ),                                             // likewise, exactly when declined_iface= is there
                          ( std::string( rw::modScopeLegend( imHasModScope ) )      // #60: likewise, exactly when a t="modscope" row is
-                           + rw::impactRollupLegend( !reach.empty() && !cfg.columnar, imports.umbrella ) ).c_str(),   // idea #6
+                           + rw::impactRollupLegend( !imFiles.rows.empty() && !cfg.columnar, imports.umbrella ) ).c_str(),   // idea #6
                          ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )   // exactly when the root carries value_refs=
                            + rw::valueRefsDepthLegendFor( imValueRefs ) ).c_str(),                 // ... and the depth disclosure
                          rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );

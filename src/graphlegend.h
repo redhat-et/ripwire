@@ -748,14 +748,12 @@ inline std::string impactRollupLegend( bool rollup, bool umbrella )
     std::string out;
     if( rollup )
     {
-        out += "FILES: the files element rolls the WHOLE reach set (every reached symbol, not only the rows below) up by file, "
-               "before the symbol rows: n= files in all, shown= listed, one rf row each with syms= its reached symbols and d= "
-               "the fewest hops to any of them, ordered by d= then syms= then path; capped=\"1\" with files_next= (the call "
-               "listing every file) when cut. ";
+        out += "FILES (only beside a cut symbol window): the WHOLE reach set by file. files= in all, shown_files= listed; rf "
+               "syms= reached symbols there, d= fewest hops; by d=, syms=, path; files_capped=\"1\" with files_next= (lists all) when cut. ";
     }
     if( umbrella )
     {
-        out += "importers_umbrella=\"1\": SYM's file is an umbrella header (imported by at least half the indexed files), so "
+        out += "importers_umbrella=\"1\": SYM's file is an umbrella header (imported by at least half the files that import anything, and by more than 40), so "
                "its importers are a COUNT here, not rows (shown_importers= is 0); importers_next= lists them. ";
     }
     return out;

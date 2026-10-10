@@ -10375,7 +10375,12 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
 // over EVERY reached symbol: one row per file with syms= (reached symbols in it) and d= (the fewest hops to any of
 // them), ordered by d= then syms= (descending) then path. Its own window: kImpactFileRollupCap rows by default, sized by
 // --limit like the import tier; a cut names the call that lists all of it (files_next=). Pure function of the reach.
-inline constexpr std::size_t kImpactFileRollupCap = 40;   // the symbol window's own default (kCallHierarchyRowCap)
+// It rides ONLY when the symbol window is cut (`windowCut`): an uncut answer's rows already name every reached file, so
+// the rollup there would restate them grouped (bytes, no fact). A files_next= --limit large enough to uncut the symbol
+// window therefore prints the rows instead of the rollup — every file is still named, as a row's p=.
+// 20 (not the symbol window's 40): the rollup is an index of where to look; round-2 tmux-09's two gold files rank 6 and 9
+// of 111 there, and the rows are paid on every cut answer.
+inline constexpr std::size_t kImpactFileRollupCap = 20;
 
 struct ImpactFileRow
 {
@@ -10393,9 +10398,13 @@ struct ImpactFileRollup
 };
 
 inline ImpactFileRollup impactFileRollup( const IngestResult& ing, std::span<const NodeId> reach, const std::vector<std::uint32_t>& depth,
-                                          int pageLimit, std::string_view sym )
+                                          int pageLimit, std::string_view sym, bool windowCut )
 {
     ImpactFileRollup          r;
+    if( !windowCut )
+    {
+        return r;   // the rows name every reached file already (see the block comment); nothing to roll up
+    }
     std::vector<std::uint32_t> rowOfFile( ing.files.size(), UINT32_MAX );
     for( const NodeId n : reach )
     {

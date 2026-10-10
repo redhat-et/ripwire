@@ -489,9 +489,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // shared sub-cap clause.
     { "importers_next",    "importers_next=: the call listing every importer", true, "impact" },
     // idea #6 (lane lean-trio): the reach set's per-file rollup element and the umbrella-header count, present-only
-    { "importers_umbrella", "importers_umbrella=1: SYM's file is imported by half the corpus or more; importers are a count, importers_next= lists them", true, "impact" },
-    { "syms", "files n=/shown=: every file the WHOLE reach set touches / listed; rf syms= reached symbols there, d= fewest hops", true, "rf", MapHeaderRead::No, {}, "impact" },
-    { "files_next", "files_next=: the call listing every file of the rollup", true, "files", MapHeaderRead::No, {}, "impact" },
+    { "importers_umbrella", "importers_umbrella=1: SYM's file is imported by half the files that import anything (and over 40); importers are a count, importers_next= lists them", true, "impact" },
+    { "shown_files", "files files=/shown_files=: files the WHOLE reach set touches (rides beside a cut symbol window) / listed; rf syms= reached symbols there, d= fewest hops; files_capped=1 + files_next= when cut", true, "files", MapHeaderRead::No, {}, "impact" },
     { "shown_bridges",     "shown_bridges=/bridges=: <bridge> rows printed (the 12 heaviest) / all pairs", false, "zoom", MapHeaderRead::No, {}, "zoom" },
     { "shown_symbols",     "shown_symbols=: <s> rows printed", false, "tree", MapHeaderRead::No, {}, "tree" },
     // THE SWEEP'S LAST PASS (2026-09-12) listed every attribute the compact --impact, --safe-delete, --communities,

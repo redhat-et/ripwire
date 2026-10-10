@@ -61,7 +61,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForLensDefaultTopN` = `40`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `320` — **12 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `320` — **12 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -117,7 +117,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForFileTailShownCap` = `24`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **10 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **10 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -134,7 +134,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForPayloadBudgetBytes` = `7500`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `60000` — **10 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `60000` — **10 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -151,7 +151,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForCapTailSigBytes` = `96`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `768` — **8 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `768` — **8 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -166,7 +166,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kMaxExpandSibs` = `100`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `800` — **5 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `800` — **5 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -219,7 +219,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kForAutoBodyBudgetBytes` = `6000`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `48000` — **2 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `48000` — **2 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -373,7 +373,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kMaxExpandIncludes` = `24`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **1 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `192` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |
@@ -429,7 +429,7 @@ moving. Re-run `prepare|screen|sweep` to refresh them.
 
 ### `kWithGraphNodeCap` = `8`
 
-`src/serialize.h` — discloses: `calls_capped`, `inc_capped`, `sibs_capped` — probe value `64` — **1 verb(s) respond**
+`src/serialize.h` — discloses: `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped` — probe value `64` — **1 verb(s) respond**
 
 | invocation | default | at probe | delta |
 | --- | --- | --- | --- |

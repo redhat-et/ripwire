@@ -319,22 +319,46 @@ U_ALL="$( perl -e 'alarm 30; exec @ARGV' "$BIN" "$RU" --impact=importHubFn --no-
     && ok "umbrella: a hub imported by under half the importing files is not one (no importers_umbrella=)" \
     || no "umbrella: the 60-extra sandbox was called an umbrella"
 rm -rf "$RU"
-# ── #9f FILE ROLLUP (lane lean-trio, idea #6): <files n= shown=> rolls the WHOLE reach set up by file before the symbol
-# rows: n= counts every reaching file, the default page lists at most 40 with files_next= when cut, and --limit lists
-# every one. RED on main 0852bc0f: no <files> element.
-F_N="$( body "$R_DEF" | grep -o '<files [^>]*>' | grep -oE ' n="[0-9]+"' | grep -oE '[0-9]+' )"
+# ── #9f FILE ROLLUP (lane lean-trio, idea #6): beside a CUT symbol window, <files files= shown_files= files_capped=>
+# rolls the WHOLE reach set up by file before the symbol rows: files= counts every reaching file, the default page lists
+# 20 rf rows with files_next= when cut, and pasting files_next= names every file (as rf rows while the symbol window is
+# still cut, as the symbol rows' own p= once it is not). An UNCUT symbol window carries no rollup: its rows already name
+# every file. Noun-prefixed counts only, so the root's bare shown=/capped= stay the only ones (emittertruthcheck reads
+# the last shown= on the line). RED on main 0852bc0f: no <files> element.
+F_ROOT="$( body "$R_DEF" | grep -o '<files [^>]*>' | head -1 )"
+F_N="$( attr files "$F_ROOT" )"; F_SH="$( attr shown_files "$F_ROOT" )"
 F_DEF="$( body "$R_DEF" | grep -o '<rf ' | wc -l | tr -d ' ' )"
-F_ROWS="$( body "$R_ALL" | grep -o '<rf ' | wc -l | tr -d ' ' )"
-{ [ -n "$F_N" ] && [ "$F_N" -gt 40 ] && [ "$F_DEF" = 40 ] \
-  && body "$R_DEF" | grep -q "files_next=\"--impact=importHubFn --limit=$F_N\"" && [ "$F_ROWS" = "$F_N" ]; } \
-    && ok "rollup: <files n=$F_N> over the whole reach, 40 rf rows by default with files_next=, all $F_N under --limit" \
-    || no "rollup: expected <files n> above 40 with 40 rows + files_next=, all under --limit; got n=$F_N rows=$F_DEF rows_all=$F_ROWS"
+if [ "$( attr capped "$R_DEF" )" = 1 ] && [ -n "$F_N" ] && [ "$F_N" -gt 20 ] && [ "$F_SH" = 20 ] && [ "$F_DEF" = 20 ] \
+   && [ "$( attr files_capped "$F_ROOT" )" = 1 ] && [ "$( attr files_next "$F_ROOT" )" = "--impact=importHubFn --limit=$F_N" ] \
+   && ! printf '%s' "$F_ROOT" | grep -qE ' (shown|capped|n)="'; then
+    ok "rollup: a cut window opens with <files files=$F_N shown_files=20 files_capped=1> and files_next= names the listing call"
+else
+    no "rollup: expected <files files>20 shown_files=20 files_capped=1 files_next=> beside a cut window; got '$F_ROOT' with $F_DEF rf rows"
+fi
+R_FN="$( ri --limit="${F_N:-0}" )"
+if [ "$( attr capped "$R_FN" )" = 1 ]; then
+    F_PASTE="$( body "$R_FN" | grep -o '<rf ' | wc -l | tr -d ' ' )"
+else
+    F_PASTE="$( body "$R_FN" | grep -oE '<s [^>]*p="[^":]*' | sed 's/.*p="//' | sort -u | wc -l | tr -d ' ' )"
+fi
+[ -n "$F_N" ] && [ "$F_PASTE" = "$F_N" ] \
+    && ok "rollup: pasting files_next= names all $F_N files" \
+    || no "rollup: pasting files_next= named $F_PASTE files (want ${F_N:-?})"
 body "$R_DEF" | grep -o '<rf [^>]*>' | head -1 | grep -qE 'syms="[0-9]+" d="1"' \
     && ok "rollup: the first rf row is a depth-1 file (ordered by d= first)" \
     || no "rollup: the first rf row is not depth 1: $( body "$R_DEF" | grep -o '<rf [^>]*>' | head -1 )"
 [ "$( body "$R_DEF" | sed 's/<s t=.*//' | grep -c '<files ' )" = 1 ] \
     && ok "rollup: the files element precedes the symbol rows" \
     || no "rollup: the files element does not precede the symbol rows"
+{ [ "$( attr capped "$R_ALL" )" = 0 ] && ! body "$R_ALL" | grep -q '<files '; } \
+    && ok "rollup: an uncut symbol window (--limit=100) carries no files element" \
+    || no "rollup: --limit=100 capped=$( attr capped "$R_ALL" ), files element present=$( body "$R_ALL" | grep -c '<files ' )"
+ri --json | grep -qE '"files":\{"files":[0-9]+,"shown_files":20,"files_capped":true,"files_next":"--impact=importHubFn --limit=' \
+    && ok "rollup: the --json dialect carries the same rollup object" \
+    || no "rollup: --json lacks the files object beside a cut window"
+ri --limit=100 --json | grep -q '"files":{' \
+    && no "rollup: --json carries a files object beside an uncut window" \
+    || ok "rollup: --json carries no files object beside an uncut window"
 
 # ── #9c THE CUT NAMES ITS CALL (cut-fix E, 2026-09-24) ──────────────────────────────────────────────────
 # A cut tier was a DEAD-END cut (answer-completeness §1.3/§5.8): counted, and no call named that serves the rest.

@@ -9061,9 +9061,11 @@ inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
     }
 }
 
-// idea #6: the reach set's per-file rollup (graph.h impactFileRollup), BEFORE the symbol window: <files n= shown=
-// [capped="1" files_next=]> holding one <rf p= syms= d=/> per file. Its own tag (rf), so a reader or gate counting the
-// import tier's <f> rows never picks it up. Emitted only when the reach set is non-empty.
+// idea #6: the reach set's per-file rollup (graph.h impactFileRollup), BEFORE the symbol window: <files files=
+// shown_files= files_capped= [files_next=]> holding one <rf p= syms= d=/> per file. Its own tag (rf), so a reader or gate
+// counting the import tier's <f> rows never picks it up, and noun-prefixed counts (the import tier's importers=/
+// shown_importers=/importers_capped= shape), so the root's own shown=/capped= stay the only bare ones in the answer.
+// Emitted only when the rollup has rows (it rides beside a cut symbol window only).
 template<class RollupT>
 inline void emitImpactFileRollupXml( std::FILE* out, const IngestResult& ing, const RollupT& r, std::string_view rootPrefix )
 {
@@ -9072,7 +9074,7 @@ inline void emitImpactFileRollupXml( std::FILE* out, const IngestResult& ing, co
         return;
     }
     std::vector<char> esc;
-    rw::emitTo( out, "<files n=\"{}\" shown=\"{}\"{}{}>", r.rows.size(), r.shown, r.capped ? " capped=\"1\"" : "",
+    rw::emitTo( out, "<files files=\"{}\" shown_files=\"{}\" files_capped=\"{}\"{}>", r.rows.size(), r.shown, r.capped ? "1" : "0",
                 rw::nextAttrXml( r.next, "files_next" ) );
     for( std::size_t i = 0; i < r.shown; ++i )
     {
@@ -9081,6 +9083,26 @@ inline void emitImpactFileRollupXml( std::FILE* out, const IngestResult& ing, co
         rw::emitTo( out, "<rf p=\"{}\" syms=\"{}\" d=\"{}\"/>", std::string( escapeXml( rel, esc ) ).c_str(), r.rows[i].syms, r.rows[i].minDepth );
     }
     rw::emitRaw( out, "</files>" );
+}
+
+// idea #6: the JSON form of the rollup above — `,"files":{files,shown_files,files_capped[,files_next],rows:[{p,syms,d}]}`,
+// the XML element's own noun-prefixed names. Emits nothing when the rollup has no rows, exactly when the element is absent.
+template<class RollupT>
+inline void emitImpactFileRollupJson( std::FILE* out, const IngestResult& ing, const RollupT& r, std::string_view rootPrefix )
+{
+    if( r.rows.empty() )
+    {
+        return;
+    }
+    rw::emitTo( out, ",\"files\":{{\"files\":{},\"shown_files\":{},\"files_capped\":{}{},\"rows\":[", r.rows.size(), r.shown,
+                r.capped ? "true" : "false", r.next.empty() ? std::string() : ",\"files_next\":\"" + jsonStr( r.next ) + "\"" );
+    for( std::size_t i = 0; i < r.shown; ++i )
+    {
+        const std::string_view raw = ing.files[ r.rows[i].fileId ];
+        const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
+        rw::emitTo( out, "{}{{\"p\":\"{}\",\"syms\":{},\"d\":{}}}", i ? "," : "", jsonStr( rel ).c_str(), r.rows[i].syms, r.rows[i].minDepth );
+    }
+    rw::emitRaw( out, "]}" );
 }
 
 inline void emitImportRowsJson( std::FILE* out, const IngestResult& ing,

@@ -359,7 +359,7 @@ Discloses: `importers_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kChaConeCap` | `4096` | INDEXING | per-walk discovery cap, unchanged from the per-call walk |
-| `kImpactFileRollupCap` | `40` | — | the symbol window's own default (kCallHierarchyRowCap) |
+| `kImpactFileRollupCap` | `20` | — | — |
 | `kMaxEdges` | `256` | — | total emitted edge cap |
 | `kMaxNodes` | `96` | — | total emitted node cap (§3 size caps) |
 | `kMaxRadius` | `12` | — | — |
@@ -868,7 +868,7 @@ Discloses: **none**
 
 ### `src/serialize.h`
 
-Discloses: `capped`, `calls_capped`, `inc_capped`, `sibs_capped`
+Discloses: `capped`, `calls_capped`, `files_capped`, `importers_capped`, `inc_capped`, `sibs_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

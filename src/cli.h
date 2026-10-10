@@ -1176,6 +1176,8 @@ inline constexpr char kHelpHead[] =
         "                               lazy=\"1\": every one of that importer's edges is written inside a closure — a TS/JS require()/import()\n"
         "                               inside a function body, a Ruby constant receiver or argument inside a method/lambda/block, a Ruby\n"
         "                               autoload or rescue class — not at load time: still a real dependency, weaker than a top-level one\n"
+        "                               a CUT symbol window opens with <files files= shown_files=>: the WHOLE reach set by file (rf syms= d=,\n"
+        "                               20 by default, --limit sizes it); an umbrella header's importers are a count (importers_umbrella=\"1\")\n"
         "    counts_floor=\"1\"           every count on the graph verbs is a FLOOR, never a total; a 0 means none found\n"
         "                               on --callers/--callees/--uses/--impact/--edit-check every count is a FLOOR, never a total: the\n"
         "                               call graph is extracted from source text by name, so dynamic dispatch\n"
