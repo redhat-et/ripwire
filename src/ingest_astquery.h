@@ -2143,4 +2143,245 @@ std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, st
     return out;
 }
 
+// ---- definitionLinesInBlobs (ingest.h): the tags path over blobs from other git refs ----
+//
+// The DISCLOSE sink of one blob: a degrade sets its slot's status, which is exactly what the caller reads (a blob
+// that is not Parsed never confirms a definition, and --whereis says how many such blobs it met).
+struct BlobDefsSlot
+{
+    enum class DisclosureWhy : std::uint8_t
+    {
+        NoParser,          // ts_parser_new / ts_query_cursor_new gave nothing: the worker parses no blob
+        GrammarRejected,   // the grammar could not be set on the parser (ABI): this blob is not parsed
+        ParseNull,         // tree-sitter returned no tree
+        ExtractPartial,    // the tags pass disclosed a shortfall (ExtractShortfall): its definitions may be incomplete
+        WorkerThrew,       // an exception inside the worker: the slot keeps Failed
+    };
+    BlobDefinitions& slot;
+    void disclose( DisclosureWhy ) noexcept   // every reason records the same fact: no complete answer for this blob
+    {
+        slot.lines.clear();
+        slot.status = BlobDefsStatus::Failed;
+    }
+};
+
+// One blob through the crawl's language rule and the parse-pool worker's extraction steps, in the worker's order.
+// `scan` is a one-slot scan the nesting refusal records into (its --skipped bookkeeping has no reader here: the
+// slot's Unread status is this blob's disclosure).
+inline void definitionLinesOfOneBlob( const BlobText& blob, std::string_view name, TSParser* parser, TSQueryCursor* cursor,
+                                      MemberMacroReparse& macroWork, IngestFileScan& scan, BlobDefinitions& slot )
+{
+    const std::string ext = lowerExtensionOf( blob.path );
+    const LangEntry*  le  = lookupLang( ext );
+    if( le == nullptr )
+    {
+        slot.status = BlobDefsStatus::NoGrammar;
+        return;
+    }
+    if( blob.bytes.size() > kDefaultMaxFileBytes || looksBinary( blob.bytes ) )
+    {
+        slot.status = BlobDefsStatus::Unread;   // the crawl's own ceiling and binary sniff: the index skips these too
+        return;
+    }
+    if( le->ext == ".h" && looksObjC( blob.bytes ) )
+    {
+        if( const LangEntry* objcLe = lookupLang( ".m" ) )
+        {
+            le = objcLe;
+        }
+    }
+    const std::string pathText( blob.path );
+    scan.nestRefusedBytes[ 0 ] = 0;
+    if( refuseNesting( *le, blob.bytes, pathText.c_str(), 0, scan ) )
+    {
+        slot.status = BlobDefsStatus::Unread;
+        return;
+    }
+    if( !prepareParserFor( parser, *le ) )
+    {
+        DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::GrammarRejected, "whereis: a blob's grammar could not be set — its rows confirm no definition" );
+        return;
+    }
+    std::vector<RawDef>  defs;
+    std::vector<RawRef>  refs;
+    std::vector<RawBind> binds;
+    std::vector<Include> incs;
+    if( le->lang == Lang::Markdown )
+    {
+        TreeGuard mdTree( parseTree( parser, blob.bytes ) );
+        if( mdTree.get() == nullptr )
+        {
+            DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::ParseNull, "whereis: a markdown blob did not parse — its rows confirm no definition" );
+            return;
+        }
+        extractMarkdown( 0, blob.bytes, fs::path( pathText ).stem().string(), ts_tree_root_node( mdTree.get() ), defs, refs );
+    }
+    else
+    {
+        IncludedRangeGuard     rangeGuard;
+        const AstroFrontmatter astro = restrictAstroToFrontmatter( parser, *le, blob.bytes, rangeGuard );
+        if( astro == AstroFrontmatter::Unterminated )
+        {
+            DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::ExtractPartial, "whereis: an .astro blob opens a frontmatter fence it never closes — not extracted" );
+            return;
+        }
+        if( astro == AstroFrontmatter::None )
+        {
+            slot.status = BlobDefsStatus::Parsed;   // a template-only .astro: the index extracts nothing from it either
+            return;
+        }
+        TreeGuard tree( parseTree( parser, blob.bytes ) );
+        if( tree.get() == nullptr )
+        {
+            DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::ParseNull, "whereis: a blob did not parse — its rows confirm no definition" );
+            return;
+        }
+        if( ts_node_has_error( ts_tree_root_node( tree.get() ) ) )   // a clean parse has no error bytes: the re-parse never adopts
+        {
+            (void)measureHealthAdoptingMemberMacroReparse( parser, le->lang, blob.bytes, tree, macroWork );   // may adopt it, as the worker does
+        }
+        const TSNode                        root   = ts_tree_root_node( tree.get() );
+        const std::vector<PreprocDeadRange> ppDead = preprocDeadRangesFor( *le, root, blob.bytes );
+        ExtractShortfall                    shortfall;
+        captureTagsFacts( cursor, *le, 0, blob.bytes, root, defs, refs, binds, incs, ppDead, shortfall, TagsCapture::DefinitionsOnly );
+        if( shortfall.isShort )
+        {
+            DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::ExtractPartial, "whereis: the tags pass over a blob was partial — its rows confirm no definition" );
+            return;
+        }
+    }
+    // The model build's steps that decide which captured definitions become SYMBOLS (ingest.cpp 3a..3a-ter), so a
+    // blob answers what HEAD's index answers for the same bytes: overlapping patterns collapse to one definition, an
+    // ObjC @interface declaration shadowed by its same-file @implementation drops, and a field leaves the symbol
+    // universe (fields are not Symbols, so on HEAD a field line is never a def site either).
+    dedupRawDefs( defs );
+    collapseObjCDeclDefs( defs );
+    (void)partitionFieldDefs( defs );
+    for( const RawDef& d : defs )
+    {
+        if( d.name == name )
+        {
+            slot.lines.push_back( d.line );
+        }
+    }
+    std::sort( slot.lines.begin(), slot.lines.end() );
+    slot.status = BlobDefsStatus::Parsed;
+}
+
+std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> blobs, std::string_view name )
+{
+    std::vector<BlobDefinitions> out( blobs.size() );
+    if( blobs.empty() )
+    {
+        return out;
+    }
+    warmFieldIdTable();   // idempotent; the AST walks behind captureTagsFacts read it lock-free
+
+    // The query set, single-threaded and BEFORE any worker: every grammar a blob can reach — its extension's, plus
+    // ObjC's for a .h (the content reroute is decided inside the worker). compiledQueryFor only ever READS the cache.
+    {
+        std::vector<const LangEntry*> want;
+        const auto need = [ & ]( const LangEntry* le )
+        {
+            if( le == nullptr || le->grammar == nullptr || le->querySub.empty() )
+            {
+                return;
+            }
+            const TSLanguage* g = le->grammar();
+            if( compiledQueryCache().find( g ) != compiledQueryCache().end() )
+            {
+                return;
+            }
+            if( std::none_of( want.begin(), want.end(), [ & ]( const LangEntry* w ) { return w->grammar() == g; } ) )
+            {
+                want.push_back( le );
+            }
+        };
+        for( const BlobText& b : blobs )
+        {
+            const std::string ext = lowerExtensionOf( b.path );
+            need( lookupLang( ext ) );
+            if( ext == ".h" )
+            {
+                need( lookupLang( ".m" ) );
+            }
+        }
+        for( const LangEntry* le : want )
+        {
+            if( TSQuery* q = compileQueryStandalone( *le ); q != nullptr )   // a compile error stays absent: captureTagsFacts discloses it
+            {
+                compiledQueryCache()[ le->grammar() ] = q;   // the cache owns it from here (CompiledQueryCache frees it at teardown)
+            }
+        }
+    }
+
+    std::vector<std::uint32_t> walkOrder( blobs.size() );
+    std::iota( walkOrder.begin(), walkOrder.end(), std::uint32_t( 0 ) );
+    std::stable_sort( walkOrder.begin(), walkOrder.end(), [ & ]( std::uint32_t a, std::uint32_t b ) noexcept
+                      { return blobs[ a ].bytes.size() > blobs[ b ].bytes.size(); } );   // biggest first: no straggler at the tail
+
+    unsigned hw = std::thread::hardware_concurrency();
+    if( hw == 0 )
+    {
+        hw = 1;
+    }
+    const unsigned           threadCount = static_cast<unsigned>( std::min<std::size_t>( hw, blobs.size() ) );
+    std::atomic<std::size_t> nextSlot{ 0 };
+    const auto               worker = [ & ]() noexcept
+    {
+        ParserGuard    pg;
+        TSQueryCursor* cursor = ts_query_cursor_new();
+        if( pg.p == nullptr || cursor == nullptr )
+        {
+            for( std::size_t s = nextSlot.fetch_add( 1, std::memory_order_relaxed ); s < blobs.size(); s = nextSlot.fetch_add( 1, std::memory_order_relaxed ) )
+            {
+                DISCLOSE( ( BlobDefsSlot{ out[ walkOrder[ s ] ] } ), BlobDefsSlot::DisclosureWhy::NoParser, "whereis: no tree-sitter parser for a blob worker" );
+            }
+            if( cursor != nullptr )
+            {
+                ts_query_cursor_delete( cursor );
+            }
+            return;
+        }
+        MemberMacroReparse macroWork;
+        IngestFileScan     scan = makeFileScan( std::vector<std::string>{ std::string() } );
+        for( ;; )
+        {
+            const std::size_t s = nextSlot.fetch_add( 1, std::memory_order_relaxed );
+            if( s >= blobs.size() )
+            {
+                break;
+            }
+            BlobDefinitions& slot = out[ walkOrder[ s ] ];
+            try
+            {
+                definitionLinesOfOneBlob( blobs[ walkOrder[ s ] ], name, pg.p, cursor, macroWork, scan, slot );
+            }
+            catch( ... )   // a throw escaping a worker thread is std::terminate: the blob degrades instead
+            {
+                DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::WorkerThrew, "whereis: a blob worker threw — that blob confirms no definition" );
+            }
+        }
+        ts_query_cursor_delete( cursor );
+    };
+    if( threadCount <= 1 )
+    {
+        worker();
+    }
+    else
+    {
+        std::vector<std::thread> pool;
+        pool.reserve( threadCount );
+        for( unsigned t = 0; t < threadCount; ++t )
+        {
+            pool.emplace_back( worker );
+        }
+        for( std::thread& w : pool )
+        {
+            w.join();
+        }
+    }
+    return out;
+}
+
 }   // namespace rw — ingest_astquery.h section of ingest.cpp

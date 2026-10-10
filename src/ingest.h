@@ -881,4 +881,34 @@ inline bool astQueryNestsTooDeep( std::string_view query )
 // local to the re-parsed substring.
 std::vector<LocalNameFact> collectGatedLocalNames( std::string_view defBytes, std::uint32_t defStartLine, Lang lang );
 
+// ---- --whereis on other refs: where the TAGS PATH defines one name inside blobs the index never read ----
+// HEAD's rows take kind="def" from the index; a row on another ref comes from a git blob the index never saw. This
+// runs the index's own extraction on such a blob — the crawl's extension → grammar rule (with the .h → ObjC content
+// reroute), the nesting refusal, the member-macro re-parse, the `#if 0` filter, the language's tags query through
+// captureTagsFacts, and the markdown section walk — so a branch definition is labelled by the same captures that
+// label HEAD's. `lines` is the 1-based @name line of every definition named `name`, ascending (RawDef::line, which
+// is Symbol::line: the line HEAD's relabel keys on).
+struct BlobText
+{
+    std::string_view path;    // the tree path: its extension picks the grammar, as in the crawl
+    std::string_view bytes;   // the blob's content
+};
+enum class BlobDefsStatus : std::uint8_t
+{
+    Parsed,      // the tags path ran over the whole blob: `lines` is its complete answer for the name
+    NoGrammar,   // no indexed language for this path (the index defines nothing in such a file either)
+    Unread,      // not parsed: binary, over the crawl's default size ceiling, or a nesting refusal (the crawl skips these too)
+    Failed,      // the parser or the tags query could not finish (a null tree, an unavailable query, a partial extract)
+};
+struct BlobDefinitions
+{
+    std::vector<std::uint32_t> lines;
+    BlobDefsStatus             status = BlobDefsStatus::Failed;
+};
+// Parallel over hardware_concurrency() workers, biggest blob first (spanTiersOfFiles' pool shape); each blob writes
+// only its own slot, so the result is the serial one. The tags queries a batch needs are compiled and installed into
+// the process-global query cache BEFORE any worker starts — the single-writer rule ingest() itself follows — so a
+// long-lived server must call this under quality::headSnapshotIngestMutex, like every other ingest call site.
+std::vector<BlobDefinitions> definitionLinesInBlobs( std::span<const BlobText> blobs, std::string_view name );
+
 }   // namespace rw

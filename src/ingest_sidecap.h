@@ -1725,6 +1725,14 @@ inline bool isCFamilyTypeSpecifier( Lang lang, TSNode node ) noexcept
     return kindIs( t, "enum_specifier" ) || kindIs( t, "struct_specifier" ) || kindIs( t, "union_specifier" ) || kindIs( t, "class_specifier" );
 }
 
+// The two postures of one tags pass. Full: every fact the index keeps. DefinitionsOnly (definitionLinesInBlobs, --whereis on
+// other refs): the SAME definitions — every step that decides a definition's existence, name, line, kind or scope runs
+// unchanged — without the work only references, imports and metrics read: the @reference arm, @import emission,
+// complexityOf, the function-scope span, the def arm's IS-A / HAS-A / macro-body reference minting and Ruby's
+// reference and bind passes. Measured on 104 C++ header blobs: those were ~60% of this function's samples (cc_walk alone
+// ~30%, the reference arm's qualifier / receiver parent walks ~30%).
+enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly };
+
 /// Append definitions and references captured by the language query, with language-specific filtering.
 /// Captured spans refer to src and root; a null cursor appends nothing. Existing output rows are retained.
 /// `ppDead` is this file's decided-dead byte ranges (preprocDeadRangesFor, computed ONCE per file by the
@@ -1732,8 +1740,9 @@ inline bool isCFamilyTypeSpecifier( Lang lang, TSNode node ) noexcept
 /// file's tags pass runs later, at the prewarm flush).
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
-                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall )
+                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full )
 {
+    const bool full = mode == TagsCapture::Full;
     if( cursor == nullptr )
     {
         return;
@@ -1860,7 +1869,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     // order while costing an allocation and a drain block.
                     case CapRole::Import:
                     {
-                        emitCapturedImport( cap.node, fileId, le.lang, src, includes, refs, shortfall );
+                        if( full )
+                        {
+                            emitCapturedImport( cap.node, fileId, le.lang, src, includes, refs, shortfall );
+                        }
                     }
                     break;
                 }
@@ -2101,7 +2113,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // A literal-bound name measures its LITERAL; every other def measures defNode, as before.
             const bool   literalBound = !ts_node_is_null( own.literal );
             const TSNode metricNode   = literalBound ? own.literal : defNode;
-            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod ? complexityOf( spanThroughBody ? body : metricNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
+            const auto [ cxVal, ccxVal, nestVal, localsVal, ppAltVal, humpsVal, deepVal, evVal, evWhyVal ] = fnOrMethod && full ? complexityOf( spanThroughBody ? body : metricNode, src, le.lang ) : Complexity{ 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, {} };
             d.cx        = cxVal;
             d.ccx       = ccxVal;
             d.locals    = localsVal;   // Phase 1: floor count, C/C++ only (model.h localsCountedLang) — 0 elsewhere, never emitted there
@@ -2176,7 +2188,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.internalLinkage = internalLinkageBit( le.lang, defNode, src );
             // A FUNCTION bound inside another function's body records that function's span (ingest_names.h
             // enclosingFunctionScope): graph.h reachableByName ranks it below every def a call outside it can name.
-            if( kind == SymKind::Function && !bindsOutsideItsFunction( roleNode, le.lang ) )
+            if( full && kind == SymKind::Function && !bindsOutsideItsFunction( roleNode, le.lang ) )
             {
                 // Descend to the OUTER of the two def nodes: a C-family def's defNode climbed from its declarator (the role
                 // node) to the function_definition, which must not read as the function enclosing itself; a multi-name
@@ -2261,6 +2273,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // holds an error (fileHasError, one O(1) flag test per file) — see parseRecoveredBits.
             d.recovered = fileHasError ? parseRecoveredBits( defNode, kind, le.lang, d.scope.empty() ) : std::uint8_t( 0 );
             defs.push_back( std::move( d ) );
+            if( !full )
+            {
+                continue;   // TagsCapture::DefinitionsOnly: the reference edges below feed no definition
+            }
             if( kind == SymKind::Class || isStructOrNamedType( kind ) || kind == SymKind::Interface )
             {
                 captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
@@ -2271,7 +2287,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 captureMacroBodyCalls( roleNode, fileId, le.lang, src, refs );   // macro-edges: the graph connects THROUGH the macro
             }
             }
-            else if( isRef )
+            else if( isRef && full )
             {
                 // H4: a C++ cast keyword is not a call — see isCppCastKeyword. Valid input, skipped, no alert.
                 if( le.lang == Lang::Cpp && isCppCastKeyword( nameTxt ) )
@@ -2427,6 +2443,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     if( le.lang == Lang::Ruby )
     {
         captureRubyAttrDefs( root, fileId, src, defs );
+        if( !full )
+        {
+            return;   // TagsCapture::DefinitionsOnly: the passes below write references and binds only
+        }
         captureRubyBareCalls( root, fileId, src, refs );
         captureRubyFactories( root, fileId, src, binds );
         captureRubyHelperMethods( root, fileId, src, binds );
