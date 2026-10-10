@@ -5603,6 +5603,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         PROFILE_SCOPE_DESCRIBE( "buildGraph/1d: byName (name -> def ids)" );
         for( const Symbol& s : ing.symbols )
         {
+            if( s.kind == SymKind::Section && s.lang == Lang::Ruby )
+            {
+                continue;   // definitions-only (#339): a Ruby schema column answers --uses/--grep/--whereis as
+                            // a def, but admits NO call edge — the byName table feeds both call binding and the
+                            // common-name damping, so an untyped `response.code` must not become a column's
+                            // caller, and 200 `name` columns must not damp a model's real `def name`.
+                            // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
+                            // later behind an evidence rule (receiver proven to be the owning model).
+            }
             byName[ s.name ].push_back( s.id );
         }
     }

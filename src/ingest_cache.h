@@ -312,7 +312,15 @@ constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiver
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 156;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 158;          // bump on any grammar/.scm/extraction change
+                                                      // 158 = 2026-10-09 (train 26c: PR #339, Rails db/schema.rb columns, merged onto main's 156):
+                                                      //   a Ruby file whose tree holds a `create_table "x", … do |t| … end` call is a rendered
+                                                      //   db/schema.rb BY CONTENT; each `t.<type> "name"` / `t.<type> :name` in the table block
+                                                      //   mints a SymKind::Section def at Lang::Ruby (plus the implicit / `id:` / `primary_key:`
+                                                      //   id rule and `t.timestamps`). DEFINITIONS ONLY: buildGraph's byName skips Section-Ruby,
+                                                      //   so a column takes no call edge. The branch carried 122 -> 126 -> 144 -> 149 across its
+                                                      //   merges with main; 158, not 157: 156's rich file tag is 157. No record layout change
+                                                      //   (kCacheVersion 29, kQSnapCacheScheme 19 stay).
                                                       // 156 = 2026-10-08 (train 26b: signed lanes merged onto main's 148): cache-key hygiene.
                                                       //   Two merged lanes changed extraction under lane-local numbers, both 145:
                                                       //   honesty-small-068 (Go named-type kinds, `type A = B` aliases) and
