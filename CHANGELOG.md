@@ -32,13 +32,15 @@ names (a small-vector's `push_back`, a path wrapper's `c_str`, every `empty` and
 - The names are data (`src/externalnames.h` `kCppStdMemberNames`, 78 container / string / view / span / optional /
   smart-pointer members, generic verbs such as `get`, `count`, `swap`, `read`, `write` excluded). A receiver a rule
   types is never touched — a typed local, parameter, pointer or member field, `this->`, an implicit-this call — and
-  neither is one whose written non-std type reaches a candidate (an alias of the in-tree container keeps its hedge).
+  neither is one whose written non-std type reaches a candidate (an alias of the in-tree container, or a field written
+  as one, keeps its hedge). A receiver with no written type at all — a dereference, a subscript, a range-for `auto`, a
+  template parameter — is declined even where the element is in-tree: the stated floor.
 - C++ only, each other language for a stated reason: C has no member functions; Rust receivers carry no declared type
   yet; Go, Java, Kotlin, C# and Swift name their standard members after interfaces in-tree types implement; ObjC
   message sends carry no receiver shape; Python, JS, TS and Ruby keep the builtin-method name gate.
-- Measured on this repository (`--no-cache`): call edges 40,460 → 24,965, `ambiguous=` 12,509 → 2,761, `declined=`
-  12,207 → 25,816; the top 20 PageRank rows carry no standard member name (14 before); `--callees=escapeXml`
-  count 12 → 4 plus the `<stdm>` line. Gate: `test/stdmembergatecheck.sh`.
+- Measured on this repository (`--no-cache`, the same tree before and after): call edges 40,567 → 25,020, `ambiguous=`
+  12,576 → 2,774, `declined=` 12,240 → 25,840; the top 20 PageRank rows carry no standard member name (14 before);
+  `--callees=escapeXml` count 12 → 4 plus the `<stdm>` line. Gate: `test/stdmembergatecheck.sh`.
 
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 

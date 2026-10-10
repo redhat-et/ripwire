@@ -2871,12 +2871,14 @@ struct BuiltinMethodGate
 // and the language's own lookup proved no candidate — `this->size()` in a class with `size` is proven and kept), and
 // whose receiver's WRITTEN non-std type, if it has one, does not reach a candidate (buildGraph's receiverWrittenType and
 // writtenTypeReaches: a local declared `SmallVec<NodeId, 2>` — an alias the rules do not map — whose cone holds svector keeps
-// the ladder's hedge on svector::push_back, since the type may be that container; `HashMap<K, V> m; m.find( k )` reaching
-// UnionFind::find by name does not).
-// STATED FLOORS: (1) by name: an in-tree container reached through an untyped receiver (`auto& v = pool.items();
-// v.push_back( x )`) loses its by-name edge to declined_calls=; (2) a written type is matched by its cone's class NAMES, as
-// CHA-lite matches it; (3) generic names and iostream/filesystem/atomic/thread members are not in the table (externalnames.h
-// says which and why), so their calls keep the ladder.
+// the ladder's hedge on svector::push_back, since the type may be that container, and so does a field written that way,
+// `this->items_` or one hop off a typed root, `b.items_`; `HashMap<K, V> m; m.find( k )` reaching UnionFind::find by name
+// does not).
+// STATED FLOORS (test/stdmembergatecheck.sh arm H pins them): (1) by name: an in-tree container reached through a receiver
+// with no written type (`auto& v = pool.items(); v.push_back( x )`, `( *p ).push_back()`, `vs[ 0 ].push_back()`, a
+// range-for `auto`, a template parameter, a field two hops off its root) loses its by-name edge to declined_calls=; (2) a
+// written type is matched by its cone's class NAMES, as CHA-lite matches it; (3) generic names and iostream/filesystem/
+// atomic/thread members are not in the table (externalnames.h says which and why), so their calls keep the ladder.
 // LANGUAGE SCOPE (each probed): C has no member functions. Rust receivers carry no declared type (`let s = Stack{..};
 // s.push()` splits by name today), so a gate would decline typed true edges with the false ones. Go, Java, Kotlin, C# and
 // Swift name their standard members after interfaces in-tree types implement on purpose (Len/Write/String/Close, add/size,
