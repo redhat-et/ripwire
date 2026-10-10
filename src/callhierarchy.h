@@ -27,6 +27,7 @@
 #include "valuerefs.h" // the reference-as-value rows both surfaces serve beside the call rows
 
 #include <algorithm>
+#include <format>     // std::format — the <stdm> line's two spellings (stdMemberCallsSpelling)
 #include <optional>
 #include <span>
 #include <string>
@@ -93,13 +94,14 @@ struct CallHierarchyRows
 // The callees answer's <stdm> line (graph.h StdMemberGate, stdMemberCallsMadeBy), one spelling per dialect — the JSON keys
 // mirror the XML attributes, n= the same comma-joined value — absent when the definitions made no such call, so every
 // answer on a tree the gate never touched keeps its bytes.
-inline std::string stdMemberCallsXml( const StdMemberCallsMade& m )
+inline std::string stdMemberCallsSpelling( const StdMemberCallsMade& m, bool json )
 {
-    return m.calls == 0 ? std::string() : "<stdm n=\"" + m.names + "\" calls=\"" + std::to_string( m.calls ) + "\"/>";
-}
-inline std::string stdMemberCallsKeyJson( const StdMemberCallsMade& m )
-{
-    return m.calls == 0 ? std::string() : ",\"stdm\":{\"n\":\"" + m.names + "\",\"calls\":" + std::to_string( m.calls ) + "}";
+    if( m.calls == 0 )
+    {
+        return {};
+    }
+    return json ? std::format( ",\"stdm\":{{\"n\":\"{}\",\"calls\":{}}}", m.names, m.calls )
+                : std::format( "<stdm n=\"{}\" calls=\"{}\"/>", m.names, m.calls );
 }
 
 // cross_kind= (comparison table hono-07, 2026-09-30): a bare `getPath` resolved to ONE free function

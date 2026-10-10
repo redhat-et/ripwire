@@ -782,7 +782,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
          + ",\"hop_untested\":" + std::to_string( chTested.untested )
          + declinedCallsKeyJson( chRows.declinedCalls )   // the CLI root's declined_calls=, for the direction count= describes
          + declinedIfaceKeyJson( chRows.declinedIface )   // the CLI root's declined_iface= (callers direction only)
-         + stdMemberCallsKeyJson( chRows.stdCalls )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
+         + stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true )       // the CLI callees answer's <stdm> line (callees direction only; absent when none)
          + nextFieldJson( nextFlag( referencingOnly ? "--uses=" : "--expand=", chNextSelector ) );   // P3 (L7): the CLI root's next= (mcpattrparitycheck)
     if( !referencingOnly && chRows.bodylessDefs > 0 )
     {

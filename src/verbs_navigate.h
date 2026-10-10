@@ -304,7 +304,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             if( chSingleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
             rw::emitTo( stdout, ",\"hop_tested\":{},\"hop_untested\":{}{}{}", chTested.tested, chTested.untested,
                          rw::declinedCallsKeyJson( chRows.declinedCalls ) + rw::declinedIfaceKeyJson( chRows.declinedIface )   // A6; then the XML root's declined_calls=/declined_iface=
-                           + rw::stdMemberCallsKeyJson( chRows.stdCalls ),                                                           // and the XML <stdm> line
+                           + rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/true ),                                                           // and the XML <stdm> line
                          ( rw::valueRefsCountKeyJson( chRows.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( ing, chRows.valueRefs.depthCut, chVr ) ) );
             rw::emitTo( stdout, "{}{}", pageDisclosure( pab, sizeof( pab ), pw.end - pw.begin, result.size(), pw.end,
                                         cfg.pageLimit, cfg.pageOffset, chDiscloseCap, kJsonPageSyntax ),
@@ -344,7 +344,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                          macroRoleAttr( s.kind ), rw::isTestedByReach( ing, chTested.testReach, result[i] ) ? " tested=\"1\"" : "",
                          viaNameAttr( rowNameOnly( g, matches, result[i], wantCallers ) ) );   // FE-B: a name-only edge says so on its row
         }
-        rw::emitTo( stdout, "{}{}</{}>", rw::stdMemberCallsXml( chRows.stdCalls ),   // the declined C++ standard-member calls, after the rows
+        rw::emitTo( stdout, "{}{}</{}>", rw::stdMemberCallsSpelling( chRows.stdCalls, /*json=*/false ),   // the declined C++ standard-member calls, after the rows
                      rw::valueRefsXml( ing, chRows.valueRefs, wantCallers, chVr, chVrNext ), tag );
         return 0;
     }
