@@ -876,6 +876,31 @@ inline constexpr const char* kModScopeLegend =
     "t=\"modscope\" is a row for a file's MODULE SCOPE, named <file-scope>: the statements outside every named definition, which is where a top-level call and an anonymous callback body's calls live. It is a CALLER, not a function — nothing in the source can name it, so it never appears as a callee, and it has no body, so expanding it returns none. A file that has no such call has no such row. ";
 inline const char* modScopeLegend( bool on ) noexcept { return on ? kModScopeLegend : ""; }
 
+// CALLSITE-AT (2026-10-09): the reading of a caller row's sites_at= — the callers verb's s rows, safe-delete's c rows, and MCP's
+// calledBy[].sites_at — ONE wording for all three. Present-only: `on` is the emitter's own "a row on this page carries sites_at="
+// condition and `cut` its "a row carries sites_total=" condition, so an answer without them pays 0 bytes. `cap` is
+// pageview.h kCallSitesPerRowCap, passed in (this header sits below pageview.h). No double hyphen: inside an XML comment.
+inline constexpr const char* kCallSitesAtLegend =
+    "sites_at= on a caller row lists that caller's call sites spelled like the called name, as pasteable file:line tokens, space-separated "
+    "and ascending: the lines to edit, while p= stays where the caller is DEFINED. Matched by name, like the uses verb's call rows: a "
+    "same-named call to another definition inside that caller is listed too, so it is not proof each site binds here. A row whose edge "
+    "has no call spelled like the name (a call through an aliased import, for one) carries no sites_at=; two calls "
+    "on one line are one site. ";
+inline std::string callSitesAtLegend( bool on, bool cut, std::size_t cap )
+{
+    if( !on )
+    {
+        return {};
+    }
+    std::string clause = kCallSitesAtLegend;
+    if( cut )
+    {
+        clause += "sites_total=N (absent when sites_at= is whole): this row has N sites and sites_at= lists the first " + std::to_string( cap )
+                + "; the uses verb on the same selector lists every one. ";
+    }
+    return clause;
+}
+
 // FE-B (test/receiverevidencecheck.sh): the reading of via="name" — ONE wording for every surface that marks a row with it
 // (--callees/--callers, --impact, --path, --connect's <e>, the <calls> rows of --expand and --for, and MCP's "via":"name").
 // Gated like modScopeLegend: an answer carrying no such row pays 0 bytes. What it does NOT mean is said in the sentence,

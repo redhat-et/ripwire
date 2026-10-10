@@ -147,5 +147,28 @@ else
     echo "  SKIP  (6) xmllint not installed — well-formedness not checked"
 fi
 
+# ── (7) CALLSITE-AT (2026-10-09): a caller row's sites_at= is its call sites as pasteable file:line tokens, cut at 16 per
+#    row with sites_total= and a next= that lists them all (the uses verb) even when no floor named one. RED on the base
+#    binary (it printed bare sites_l= lines, uncut). Near miss: an uncut answer carries neither sites_total= nor that next=.
+SD7="$( mktemp -d )"; trap 'rm -rf "$WORK" "$SD7"' EXIT
+{ printf 'static int sdmany( int x ) { return x; }\nint sdcaller( void )\n{\n    int s = 0;\n'; i=0; while [ $i -lt 20 ]; do printf '    s += sdmany( %d );\n' $i; i=$((i+1)); done; printf '    return s;\n}\n'; } > "$SD7/m.c"
+printf 'static int sdone( int x ) { return x; }\nint sdonecaller( void ) { return sdone( 1 ) + sdone( 2 ); }\n' > "$SD7/o.c"
+SD7_OUT="$( "$BIN" "$SD7" --no-cache --safe-delete=sdmany 2>/dev/null )"
+SD7_ROW="$( printf '%s' "$SD7_OUT" | sed 's/<!--.*-->//' | grep -oE '<c n="sdcaller"[^>]*/>' )"
+SD7_AT="$( printf '%s' "$SD7_ROW" | grep -oE ' sites_at="[^"]*"' | sed -e 's/^ sites_at="//' -e 's/"$//' )"
+{ [ "$( printf '%s' "$SD7_AT" | wc -w | tr -d ' ' )" = 16 ] && [ "${SD7_AT%% *}" = "m.c:5" ] && printf '%s' "$SD7_ROW" | grep -q ' sites_total="20"' \
+  && printf '%s' "$SD7_OUT" | grep -o '<safe-delete [^>]*>' | grep -q ' next="--uses=sdmany"'; } \
+    && ok "(7) a 20-site caller lists 16 file:line sites, sites_total=\"20\", and next=\"--uses=sdmany\" lists every one" \
+    || no "(7) cut safe-delete row/root: $SD7_ROW $( printf '%s' "$SD7_OUT" | grep -o '<safe-delete [^>]*>' )"
+SD7_FULL="$( "$BIN" "$SD7" --no-cache --safe-delete=sdmany --legend=full 2>/dev/null )"
+{ printf '%s' "$SD7_FULL" | grep -o '<!--.*-->' | grep -q 'next= is that uses call' && printf '%s' "$SD7_FULL" | grep -q 'sites_total=N' \
+  && printf '%s' "$SD7_OUT" | grep -o '<!--.*-->' | grep -q 'next=: ' && printf '%s' "$SD7_FULL" | xmllint --noout - 2>/dev/null; } \
+    && ok "(7) both legends define that next= and sites_total= where they ride (full: well-formed)" || no "(7) next=/sites_total= undefined in a legend of the cut answer"
+SD7_ONE="$( "$BIN" "$SD7" --no-cache --safe-delete=sdone 2>/dev/null )"
+{ printf '%s' "$SD7_ONE" | grep -q '<c n="sdonecaller" p="o.c:2" sites_at="o.c:2"/>' \
+  && ! printf '%s' "$SD7_ONE" | grep -o '<safe-delete [^>]*>' | grep -q ' next=' && ! printf '%s' "$SD7_ONE" | grep -q 'sites_total'; } \
+    && ok "(7) near miss: an uncut answer carries sites_at= with neither sites_total= nor a next=" \
+    || no "(7) uncut answer: $SD7_ONE"
+
 [ "$fail" = 0 ] && printf 'ALL PASS\n' || printf 'FAILURES ABOVE\n'
 exit "$fail"

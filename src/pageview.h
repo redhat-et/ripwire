@@ -168,6 +168,12 @@ inline constexpr int kUseSiteRowCap       = 100;
 // — the two surfaces disagreeing about the size of one answer. Named here for the same reason as the two
 // above: a cap that lives at its call site is a cap the sibling surface forgets to have.
 inline constexpr int kCochangePartnerCap  = 30;
+// CALLSITE-AT (2026-10-09): the call sites ONE caller row lists in sites_at= (the callers verb, safe-delete, and the MCP
+// calledBy rows). A runaway guard, not a size target: over the 60 most-called functions of a C repo (2,939 caller rows)
+// the per-row count is p50 1 / p90 3 / p99 16, and the rows above it are test files calling one helper dozens of times
+// at file scope (216 at most). A cut row says so with sites_total= (the uncut count), and the uses verb on the same
+// selector — the callers root's next= — lists every site. Not raised by --limit, which sizes the ROW window.
+inline constexpr std::size_t kCallSitesPerRowCap = 16;
 
 // ── LB-H (r10 GitNexus round) — the display cap on --impact's SECONDARY import tier ──────────────────────
 // Deliberately the SAME 40 as the symbol rows above rather than a third number: it counts a comparable

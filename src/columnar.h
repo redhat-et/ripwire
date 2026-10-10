@@ -179,6 +179,55 @@ inline std::string_view columnarViaField( const std::vector<char>* viaName ) noe
     return columnarViaPresent( viaName ) ? ",via" : "";
 }
 
+// CALLSITE-AT (2026-10-09): the optional `<sites_at>` column — each row's call sites (editcheck.h rowCallSites), its tokens joined
+// by a space, XML-escaped with a value comma written &#44; (kColumnarLegend's rule), an empty value for a row with none —
+// and the dense `<sites_total>` column (the uncut count per row) only when some row's list was cut. Present only when the
+// caller passed sites, so every other columnar answer is byte-identical. `totals` is parallel to `tokens`.
+inline bool columnarAtCut( const std::vector<std::vector<std::string>>& tokens, const std::vector<std::size_t>& totals ) noexcept
+{
+    for( std::size_t i = 0; i < tokens.size() && i < totals.size(); ++i )
+    {
+        if( totals[i] > tokens[i].size() )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+inline void emitColumnarAtColumns( std::FILE* out, const std::vector<std::vector<std::string>>& tokens, const std::vector<std::size_t>& totals )
+{
+    EXPECTS( tokens.size() == totals.size(), "one total per row" );
+    std::vector<char> esc;
+    std::fputs( "<sites_at>", out );
+    for( std::size_t i = 0; i < tokens.size(); ++i )
+    {
+        if( i )
+        {
+            std::fputc( ',', out );
+        }
+        for( std::size_t k = 0; k < tokens[i].size(); ++k )
+        {
+            if( k )
+            {
+                std::fputc( ' ', out );
+            }
+            writeCommaEscaped( out, escapeXml( tokens[i][k], esc ) );
+        }
+    }
+    std::fputs( "</sites_at>", out );
+    if( columnarAtCut( tokens, totals ) )
+    {
+        std::string column = "<sites_total>";
+        for( std::size_t i = 0; i < totals.size(); ++i )
+        {
+            column += i ? "," : "";
+            column += std::to_string( totals[i] );
+        }
+        column += "</sites_total>";
+        rw::emitTo( out, "{}", column );
+    }
+}
+
 // The optional columns a caller asked for, and the fields= suffix naming them, in ONE place: emitColumnarSymbolRows
 // reads each through these, so its own branch count does not grow per optional column.
 inline std::string_view columnarOptionalFields( bool hasTested, bool hasDepth ) noexcept
@@ -219,8 +268,12 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
                                     const std::vector<NodeId>& rows, std::string_view rootPrefix = {},
                                     const std::vector<char>* testReach = nullptr,
                                     const std::vector<std::uint32_t>* depth = nullptr,
-                                    const std::vector<char>* viaName = nullptr )
+                                    const std::vector<char>* viaName = nullptr,
+                                    const std::vector<std::vector<std::string>>* atTokens = nullptr,
+                                    const std::vector<std::size_t>* atTotals = nullptr )
 {
+    EXPECTS( atTokens == nullptr || ( atTotals != nullptr && atTokens->size() == rows.size() && atTotals->size() == rows.size() ),
+             "the sites_at column is parallel to the rows" );
     std::vector<char> esc;
 
     std::vector<std::uint32_t> rowFiles;  rowFiles.reserve( rows.size() );
@@ -234,8 +287,9 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
     rw::emitTo( out, "<{} {} format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
-    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
-                columnarViaField( viaName ) );
+    const std::string_view atFields = atTokens == nullptr ? "" : ( columnarAtCut( *atTokens, *atTotals ) ? ",sites_at,sites_total" : ",sites_at" );
+    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
+                columnarViaField( viaName ), atFields );
 
     // path index array
     std::fputs( "<path>", out );
@@ -285,6 +339,10 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::fputs( "</kind>", out );
     // A6 / 0.6.5 / FE-B: each present only when the caller passed it — see the wrapper banner and emitColumnarOptionalColumns.
     emitColumnarOptionalColumns( out, ing, rows, testReach, depth, viaName );
+    if( atTokens != nullptr )
+    {
+        emitColumnarAtColumns( out, *atTokens, *atTotals );
+    }
 
     rw::emitTo( out, "</cols></{}>", wrapperTag );
 }

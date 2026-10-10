@@ -27,9 +27,11 @@
 #include "editcheckdecl.h"   // the C/C++ declaration/definition identity: editCheckTieDeclaration / editCheckDeclDefaults
 
 #include <algorithm>
+#include <compare>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -650,17 +652,20 @@ inline bool editCheckArityAccepts( const Symbol& os, std::uint16_t minArity, std
 // aliases, imports and receiver, to a definition in the overload set: the same lexical evidence the map used,
 // asked about the function rather than one arity of it. Built once per document; `scratch` is the resolver's
 // output buffer, reused across a pass.
-struct EditCheckCalleeTest
+//
+// CALLSITE-AT (2026-10-09): the test is split from the arity data. CallSiteCalleeTest is the name/Elixir half alone,
+// which is all a SITE pass needs (the callers verb's sites_at= and safe-delete's sites_at=, callSitesAt below); EditCheckCalleeTest
+// adds editCheckDeclDefaults, which reads the C/C++ declarations' source text and is only the arity verdict's input.
+struct CallSiteCalleeTest
 {
     const IngestResult&           ing;
     const Symbol&                 focus;
     std::span<const NodeId>       overloadNodes;
     std::optional<ElixirResolver> logical;   // engaged for an Elixir focus only
     std::vector<NodeId>           scratch;
-    EditCheckDeclDefaults         declDefaults;   // per overload: the fewest arguments a matching C/C++ declaration admits
 
-    EditCheckCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads )
-        : ing( input ), focus( focusSymbol ), overloadNodes( overloads ), declDefaults( editCheckDeclDefaults( input, overloads, {} ) )
+    CallSiteCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads )
+        : ing( input ), focus( focusSymbol ), overloadNodes( overloads )
     {
         if( focus.lang == Lang::Elixir )
         {
@@ -687,6 +692,16 @@ struct EditCheckCalleeTest
             }
         }
         return false;
+    }
+};
+
+struct EditCheckCalleeTest : CallSiteCalleeTest
+{
+    EditCheckDeclDefaults declDefaults;   // per overload: the fewest arguments a matching C/C++ declaration admits
+
+    EditCheckCalleeTest( const IngestResult& input, const Symbol& focusSymbol, std::span<const NodeId> overloads )
+        : CallSiteCalleeTest( input, focusSymbol, overloads ), declDefaults( editCheckDeclDefaults( input, overloads, {} ) )
+    {
     }
 };
 
@@ -753,25 +768,192 @@ inline std::vector<char> editCheckIncompatibleFlags( const IngestResult& ing, st
 // ONE pass over ing.references plus one sort — never a per-row rescan (editCheckIncompatibleFlags' own
 // rule; a widely-shared name has hundreds of caller rows). Duplicate (node,line) pairs collapse: this is a
 // set of LINES TO OPEN, so two calls on one line are one site.
-inline std::vector<std::pair<NodeId, std::uint32_t>>
-editCheckCallSites( const IngestResult& ing, EditCheckCalleeTest& callee, std::span<const char> callerIncompatible )
+template <class OnSite>
+inline void forEachCallSite( const IngestResult& ing, CallSiteCalleeTest& callee, std::span<const char> callerSelected, OnSite&& onSite )
 {
-    std::vector<std::pair<NodeId, std::uint32_t>> sites;
     for( const Reference& r : ing.references )
     {
         if( r.role != RefRole::Call || r.isCompose || r.isDocLink || r.lang == Lang::Markdown )
         {
             continue;
         }
-        if( r.fromSymbol >= callerIncompatible.size() || !callerIncompatible[ r.fromSymbol ] || !callee.reaches( r ) )
+        if( r.fromSymbol >= callerSelected.size() || !callerSelected[ r.fromSymbol ] || !callee.reaches( r ) )
         {
             continue;
         }
-        sites.emplace_back( r.fromSymbol, r.line );
+        onSite( r );
+    }
+}
+
+inline std::vector<std::pair<NodeId, std::uint32_t>>
+editCheckCallSites( const IngestResult& ing, CallSiteCalleeTest& callee, std::span<const char> callerIncompatible )
+{
+    std::vector<std::pair<NodeId, std::uint32_t>> sites;
+    forEachCallSite( ing, callee, callerIncompatible, [ & ]( const Reference& r ) { sites.emplace_back( r.fromSymbol, r.line ); } );
+    std::sort( sites.begin(), sites.end() );
+    sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
+    return sites;
+}
+
+// CALLSITE-AT (2026-10-09, idea #1 of the 26b ideas pass): the SAME pass as editCheckCallSites, keeping each site's own
+// file, for the rows that print a site as a pasteable `file:line` token (the callers verb's sites_at=, safe-delete's sites_at=).
+// A row's p= is where the CALLER is defined; until this, "every call site that must change" needed the uses verb as a
+// second call (tmux-19: 15 caller rows in the first answer, the 23 sites only in the follow-up). The file is the
+// reference's own fileId, never inferred from the caller row. Sorted (caller, file, line), (caller, file, line) unique:
+// two calls on one line are one site to open. POD with no member initializers (EditCheckContract's reason above).
+struct CallSiteAt
+{
+    NodeId        caller;
+    std::uint32_t fileId;
+    std::uint32_t line;
+
+    friend auto operator<=>( const CallSiteAt&, const CallSiteAt& ) = default;
+};
+
+// The call sites of `defs` inside the caller rows `pageCallers` (one page of a callers listing). `defs` is the resolved
+// definition set of ONE selector; a set whose members carry two leaf names (a qualified tier may) gets one pass per
+// distinct name, so the second name's sites are never silently dropped. Each pass is one scan of the reference table.
+inline std::vector<CallSiteAt> callSitesAt( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> pageCallers )
+{
+    std::vector<CallSiteAt> sites;
+    if( defs.empty() || pageCallers.empty() )
+    {
+        return sites;
+    }
+    std::vector<char> onPage( ing.symbols.size(), 0 );
+    for( const NodeId c : pageCallers )
+    {
+        EXPECTS( c < onPage.size(), "a caller row is an indexed symbol" );
+        onPage[c] = 1;
+    }
+    std::vector<NodeId> sameName;
+    for( std::size_t i = 0; i < defs.size(); ++i )
+    {
+        const std::string_view name    = ing.symbols[ defs[i] ].name;
+        const auto             nameAt  = [ & ]( NodeId d ) { return ing.symbols[d].name == name; };
+        if( std::any_of( defs.begin(), defs.begin() + std::ptrdiff_t( i ), nameAt ) )
+        {
+            continue;   // this name's pass already ran
+        }
+        sameName.clear();
+        std::copy_if( defs.begin() + std::ptrdiff_t( i ), defs.end(), std::back_inserter( sameName ), nameAt );
+        CallSiteCalleeTest callee( ing, ing.symbols[ defs[i] ], sameName );
+        forEachCallSite( ing, callee, onPage, [ & ]( const Reference& r ) { sites.push_back( CallSiteAt{ r.fromSymbol, r.fileId, r.line } ); } );
     }
     std::sort( sites.begin(), sites.end() );
     sites.erase( std::unique( sites.begin(), sites.end() ), sites.end() );
     return sites;
+}
+
+// One caller's slice of callSitesAt's sorted result (empty when the pass found none for it).
+inline std::span<const CallSiteAt> callSitesOf( std::span<const CallSiteAt> sites, NodeId caller )
+{
+    const auto lo = std::lower_bound( sites.begin(), sites.end(), caller, []( const CallSiteAt& s, NodeId c ) { return s.caller < c; } );
+    const auto hi = std::upper_bound( lo, sites.end(), caller, []( NodeId c, const CallSiteAt& s ) { return c < s.caller; } );
+    return { lo, hi };
+}
+
+// One caller's sites as pasteable `file:line` tokens, ascending, at most kCallSitesPerRowCap of them (pageview.h: a
+// runaway guard; the cut is disclosed by sites_total= and the uses verb lists the rest). `pathOf( fileId )` spells the file
+// exactly as the row's own p= does (root-relative on a single root). Unescaped: each dialect escapes its own way.
+static_assert( kCallSitesPerRowCap == 16, "compactlegend.h's sites_total= readings spell this cap as 16: change both together" );
+template <class PathOf>
+inline std::vector<std::string> callSiteTokens( std::span<const CallSiteAt> mine, PathOf&& pathOf )
+{
+    std::vector<std::string> tokens;
+    const std::size_t        shown = std::min( mine.size(), kCallSitesPerRowCap );
+    tokens.reserve( shown );
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        tokens.push_back( std::string( pathOf( mine[i].fileId ) ) + ":" + std::to_string( mine[i].line ) );
+    }
+    ENSURES( tokens.size() <= kCallSitesPerRowCap, "the per-row site cap holds" );
+    return tokens;
+}
+
+// A page of caller rows with their site tokens, computed ONCE and rendered by every dialect (XML, columnar, JSON, MCP):
+// tokens[i]/totals[i] belong to rows[i]; `any` = some row has a site (the legend clause rides exactly then), `anyCut` =
+// some row's list was cut (sites_total= rides). POD-style, value-initialized (EditCheckContract's reason above).
+struct RowCallSites
+{
+    std::vector<std::vector<std::string>> tokens;
+    std::vector<std::size_t>              totals;
+    bool                                  any;
+    bool                                  anyCut;
+};
+
+template <class PathOf>
+inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> rows, PathOf&& pathOf )
+{
+    RowCallSites out{};
+    const std::vector<CallSiteAt> sites = callSitesAt( ing, defs, rows );
+    out.tokens.reserve( rows.size() );
+    out.totals.reserve( rows.size() );
+    for( const NodeId r : rows )
+    {
+        const std::span<const CallSiteAt> mine = callSitesOf( sites, r );
+        out.tokens.push_back( callSiteTokens( mine, pathOf ) );
+        out.totals.push_back( mine.size() );
+        out.any    = out.any || !mine.empty();
+        out.anyCut = out.anyCut || mine.size() > out.tokens.back().size();
+    }
+    ENSURES( out.tokens.size() == rows.size() && out.totals.size() == rows.size(), "one entry per row, in row order" );
+    return out;
+}
+
+// The XML row attributes for one caller: ` sites_at="f:l f:l"` (space-separated, XML-escaped) plus ` sites_total="N"` only when
+// the list was cut. "" when the pass found no site in this caller (the attribute is never printed empty).
+inline std::string callSitesAttrXml( const std::vector<std::string>& tokens, std::size_t total )
+{
+    if( tokens.empty() )
+    {
+        return {};
+    }
+    std::string joined;
+    for( const std::string& t : tokens )
+    {
+        if( !joined.empty() ) { joined += ' '; }
+        joined += t;
+    }
+    std::vector<char> esc;
+    std::string out = " sites_at=\"" + std::string( escapeXml( joined, esc ) ) + "\"";
+    if( total > tokens.size() )
+    {
+        out += " sites_total=\"" + std::to_string( total ) + "\"";
+    }
+    return out;
+}
+
+// The MCP twin (find_referencing_symbols / find_symbol calledBy rows): the same reading as one self-named key, only in an
+// answer whose rows carry "sites_at" — the posture via_note already holds. The legend text holds no quote or backslash, so it
+// needs no JSON escaping (ENSURES below keeps that true if the wording changes).
+inline std::string callSitesAtNoteJson( bool on, bool cut, std::size_t cap )
+{
+    const std::string text = callSitesAtLegend( on, cut, cap );
+    ENSURES( text.find_first_of( "\"\\" ) == std::string::npos, "the sites_at= legend needs no JSON escaping" );
+    return text.empty() ? std::string() : ",\"sites_note\":\"" + text + "\"";
+}
+
+// The JSON twin (CLI --json rows and the MCP calledBy rows): `,"sites_at":["f:l",..]` plus `,"sites_total":N` only when cut.
+inline std::string callSitesKeyJson( const std::vector<std::string>& tokens, std::size_t total )
+{
+    if( tokens.empty() )
+    {
+        return {};
+    }
+    std::string out = ",\"sites_at\":[";
+    for( std::size_t i = 0; i < tokens.size(); ++i )
+    {
+        out += i == 0 ? "\"" : ",\"";
+        out += jsonStr( tokens[i] );
+        out += "\"";
+    }
+    out += "]";
+    if( total > tokens.size() )
+    {
+        out += ",\"sites_total\":" + std::to_string( total );
+    }
+    return out;
 }
 
 // The comma-joined, ascending site list for ONE caller, or "" when the pass above found none (a flagged

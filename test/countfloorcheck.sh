@@ -23,9 +23,10 @@
 #      dead_code_candidate="1", no floor marker, no next=.
 #   R  (negatives) recursion: a self-call is bound to the definition itself (C static fn, Python self.m() and module fn,
 #      mutual recursion); (near miss) a recursive TS method with an outside same-named call bound nowhere still floors.
-#   C  CALLSITE-LINE: --safe-delete=width_of rows carry sites_l= (the call lines) beside p= (the definition line):
-#      a caller with three calls on three lines lists all three; one call split over two lines lists its line.
-#   D  (near-miss) a single-definition symbol called once still prints its call site (sites_l= present, one line).
+#   C  CALLSITE-LINE -> CALLSITE-AT (2026-10-09): --safe-delete=width_of rows carry sites_at= (the call sites as pasteable
+#      file:line tokens; it was sites_l=, bare lines) beside p= (the definition line): a caller with three calls on three
+#      lines lists all three; one call split over two lines lists its line. Twin: no safe-delete row carries sites_l= now.
+#   D  (near-miss) a single-definition symbol called once still prints its call site (sites_at= present, one token).
 #   E  grep <enc> on a Python module VARIABLE: callers_floor="1" floor_next="--uses=BACKEND", and --uses=BACKEND
 #      (the clue) lists the reading file.
 #   F  grep <enc> on a method whose only call the resolver DECLINED (two same-named defs in other dirs, an
@@ -223,10 +224,12 @@ OUT_C="$( run c --safe-delete=width_of )"
 ROW_PAD="$( printf '%s' "$OUT_C" | grep -oE '<c n="pad"[^>]*/>' | head -1 )"
 ROW_USER="$( printf '%s' "$OUT_C" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
 if [ "$( attr "$ROW_PAD" p )" = "a.c:9" ]; then ok "(C) p= still names the caller's definition line (a.c:9)"; else no "(C) p= changed on the pad row: $ROW_PAD"; fi
-if [ "$( attr "$ROW_PAD" sites_l )" = "11,12,13" ]; then ok "(C) three calls on three lines: sites_l=\"11,12,13\""; else no "(C) pad row: $ROW_PAD"; fi
-if [ "$( attr "$ROW_USER" sites_l )" = "22" ]; then ok "(C) a call continued onto its own line: sites_l=\"22\""; else no "(C) user row: $ROW_USER"; fi
+if [ "$( attr "$ROW_PAD" sites_at )" = "a.c:11 a.c:12 a.c:13" ]; then ok "(C) three calls on three lines: sites_at=\"a.c:11 a.c:12 a.c:13\""; else no "(C) pad row: $ROW_PAD"; fi
+if [ "$( attr "$ROW_USER" sites_at )" = "a.c:22" ]; then ok "(C) a call continued onto its own line: sites_at=\"a.c:22\""; else no "(C) user row: $ROW_USER"; fi
+printf '%s' "$OUT_C" | grep -q '<c [^>]*sites_l=' && no "(C-twin) a safe-delete row still carries the bare-line sites_l=" \
+    || ok "(C-twin) safe-delete rows carry sites_at= only (the bare-line sites_l= stays on edit-check)"
 ROW_TW="$( printf '%s' "$( run c --safe-delete=twice )" | grep -oE '<c n="user"[^>]*/>' | head -1 )"
-if [ "$( attr "$ROW_TW" sites_l )" = "20" ]; then ok "(D) a single-definition callee called once still prints its call site (20)"; else no "(D) twice row: $ROW_TW"; fi
+if [ "$( attr "$ROW_TW" sites_at )" = "a.c:20" ]; then ok "(D) a single-definition callee called once still prints its call site (a.c:20)"; else no "(D) twice row: $ROW_TW"; fi
 R_C="$( root_tag "$OUT_C" safe-delete )"
 case "$R_C" in *callers_floor=*) no "(C) bound direct calls only, yet callers is floored: $R_C" ;; *) ok "(C) callers=\"2\" with no floor (every call bound)" ;; esac
 
@@ -403,14 +406,14 @@ for dialect in compact full; do
     L_A="$( run c --safe-delete=cell --legend=$dialect )"; L_C="$( run c --safe-delete=width_of --legend=$dialect )"
     L_E="$( run py --grep=APP_BACKEND_ENV --legend=$dialect )"
     L_K="$( run tsl '--for=which router classes implement the Router interface' --legend=$dialect )"
-    for pair in "L_A:callers_floor=" "L_A:uses_floor=" "L_A:unmodelled" "L_C:sites_l=" "L_E:callers_floor=" "L_E:floor_next=" \
+    for pair in "L_A:callers_floor=" "L_A:uses_floor=" "L_A:unmodelled" "L_C:sites_at=" "L_E:callers_floor=" "L_E:floor_next=" \
                 "L_K:implementors_floor=" "L_K:implementors_shown=" "L_K:floor_next="; do
         var="${pair%%:*}"; term="${pair#*:}"
         comments "${!var}" | grep -qF -- "$term" \
             && ok "(N/$dialect) $term defined in the legend of the $var answer" || no "(N/$dialect) $term is not defined in the $var legend"
     done
 done
-case "$( run c --safe-delete=helper_dead --legend=compact )" in *callers_floor*|*uses_floor*|*sites_l*) no "(N) a legend defines a floor/sites term its answer does not carry" ;; *) ok "(N) present-only: no floor/sites term on an answer without them" ;; esac
+case "$( run c --safe-delete=helper_dead --legend=compact )" in *callers_floor*|*uses_floor*|*sites_l*|*sites_at*) no "(N) a legend defines a floor/sites term its answer does not carry" ;; *) ok "(N) present-only: no floor/sites term on an answer without them" ;; esac
 
 # ── O: determinism + xmllint ─────────────────────────────────────────────────────────────────────────────
 echo "=== O: determinism and well-formed XML ==="
