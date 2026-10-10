@@ -214,6 +214,8 @@ inline constexpr std::string_view kCompactProsePrefixes[] =
     "<!-- pr_iters=",                  // the PageRank convergence block on map-family roots
     "<!-- data_sections_cut=",         // the map scope's Section-cut clause (serialize.h kDataSectionsCutLegend); the
                                        // completeness table's data_sections_cut row restates it
+    "<!-- inv: ",                      // D7: the map scope's inventory clause (mapinventory.h kMapInventoryLegend); the
+                                       // completeness table's inv/entry/ls rows restate it
     "<!-- at= is the git commit",      // the churn/quality provenance block
     "<!-- in=DIR: ",                   // C1-b's scoped-block clause (serialize.h kRecentScopeLegendOpen/Close). Without
                                        // this row the ~640 B prose survived BESIDE the compact terms that restate it,
@@ -425,6 +427,12 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "pr_iters",          "pr_iters=N: PageRank iterations" },
     // The map scope's code-first pick (serialize.h codeFirstKeep): the Sections it swapped out. Present-only.
     { "data_sections_cut", "data_sections_cut=N: N data Sections (headings, data keys) swapped out of this top-K for lower-ranked code rows; next= pages them first" },
+    // D7 (mapinventory.h): the map scope's inventory tier, ELEMENT-qualified (p=/n=/f= mean other things on other rows).
+    { "listed",            "<inv listed= unlisted=>: files the ranked rows show / do not (sum = files=), each named or counted below", true, "inv" },
+    { "n",                 "<entry p= n=>: a program entry by its language's convention (C/Go/Rust main, Java/C# static main, a script main its module scope calls, __main__.py), callees as c rows; manifest entries not read", true, "entry" },
+    { "n",                 "<ls p= n= f=>: n= unshown files under dir p=; f= names its code files, the rest (tests, docs, config, test/doc/example dirs) counted", true, "ls" },
+    { "entries_capped",    "inv entries_capped=1 entries_total=N entries_next=: N entries, the first 256 by path shown; entries_next= lists the rest (a superset)", true, "inv" },
+    { "names_capped",      "inv names_capped=1 names_total=N names_next=: N unshown code files passed the 2000-name ceiling; later dirs n= only; names_next= lists them (a superset)", true, "inv" },
     { "pr_converged",      "pr_converged=0: iteration cap hit before convergence" },
     // Form-conditional map roots whose clauses (kRankByDisclosure, kChurnRankLegend, --around's seed block) are prose.
     // window= and defs= are ELEMENT-qualified: --hotspots carries window= and --callers defs=, each meaning something else.

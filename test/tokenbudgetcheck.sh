@@ -236,6 +236,34 @@ GATE_EST="$( grep -oE 'est_tokens=[0-9]+' "$TMP_TB_B_ERR" | grep -oE '[0-9]+' )"
     && ok "gate value ($GATE_EST) == map header's est_tokens ($HDR_EST) — one counter, not two" \
     || no "gate/header est_tokens MISMATCH (header=$HDR_EST gate=$GATE_EST) — a second counter crept in"
 
+# ── #9b (map-inventory-d7, 2026-10-08): the SAME equality on the boundary where the compact reprice drops a digit. The gate
+# used to recount the compacted body's size AFTER the layer had rewritten the est digits (a 5-digit full price repriced to 4
+# digits is 2 bytes shorter in the root and the header), so there it said one token less than the header (7608d1f6:
+# src --top-k=233, header 9965, gate 9964). The arm LOCATES that boundary on today's src/ (it moves with the tree): the
+# smallest top-k whose FULL price reaches 10000, then every k up to 8 past it whose compact header is still 4 digits.
+full_est(){ "$BIN" src --top-k="$1" --legend=full --token-budget=1 --no-cache 2>&1 >/dev/null | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+'; }
+lo=1; hi=4000
+if [ "$( full_est $hi )" -ge 10000 ] 2>/dev/null; then
+    while [ $(( hi - lo )) -gt 1 ]; do mid=$(( ( lo + hi ) / 2 )); if [ "$( full_est $mid )" -ge 10000 ] 2>/dev/null; then hi=$mid; else lo=$mid; fi; done
+    crossed=0; bad=""
+    for k in $( seq "$hi" $(( hi + 8 )) ); do
+        H="$( "$BIN" src --top-k="$k" --token-budget=999999 --no-cache 2>/dev/null | grep -oE 'est_tokens=[0-9]+' | head -1 | grep -oE '[0-9]+' )"
+        [ -n "$H" ] && [ "$H" -lt 10000 ] 2>/dev/null || continue
+        crossed=$(( crossed + 1 ))
+        G="$( "$BIN" src --top-k="$k" --token-budget=1 --no-cache 2>&1 >/dev/null | grep -oE 'est_tokens=[0-9]+' | grep -oE '[0-9]+' )"
+        [ "$G" = "$H" ] || bad="$bad k=$k(header=$H,gate=${G:-?})"
+    done
+    if [ "$crossed" -eq 0 ]; then
+        no "#9b premise: no top-k in $hi..$(( hi + 8 )) has a 5-digit full price and a 4-digit compact one — the arm tested nothing"
+    elif [ -z "$bad" ]; then
+        ok "#9b gate == header on all $crossed digit-crossing top-k (from $hi): the gate reads the printed price"
+    else
+        no "#9b gate/header MISMATCH where the compact reprice drops a digit:$bad"
+    fi
+else
+    no "#9b premise: src --top-k=4000 prices under 10000 tokens — no digit boundary to probe"
+fi
+
 # ── #10: determinism — the same command re-run twice gives the same exit code + the same est_tokens ───
 "$BIN" src --token-budget=1 --no-cache >/dev/null 2>"$TMP_TB_B2_ERR"; rc_tiny2=$?
 GATE_EST2="$( grep -oE 'est_tokens=[0-9]+' "$TMP_TB_B2_ERR" | grep -oE '[0-9]+' )"

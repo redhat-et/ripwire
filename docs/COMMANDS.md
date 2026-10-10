@@ -38,7 +38,7 @@ Two limits apply to nearly everything here and are not repeated in every section
 
 ## Contents
 
-**understand a codebase cold** — [`--top-k`](#--top-kn) · [`--max-tokens`](#--max-tokensn) · [`--token-budget`](#--token-budgetnkmg) · [`--help-task`](#--help-tasktask) · [`--for`](#--fortask) · [`--sections`](#--sectionslegocompose) · [`--signatures-only`](#--signatures-only) · [`--auto-bodies`](#--auto-bodies) · [`--no-route`](#--no-route) · [`--adaptive`](#--adaptive) · [`--no-mention-boost`](#--no-mention-boost) · [`--no-doc-mention`](#--no-doc-mention) · [`--lego`](#--legotype) · [`--exemplar`](#--exemplartaskkind) · [`--recall`](#--recalltask) · [`--tree`](#--tree) · [`--html`](#--htmlfile) · [`--color-by`](#--color-bymode) · [`--order`](#--ordermode) · [`--no-stable`](#--no-stable)
+**understand a codebase cold** — [`--top-k`](#--top-kn) · [`--no-inventory`](#--no-inventory) · [`--max-tokens`](#--max-tokensn) · [`--token-budget`](#--token-budgetnkmg) · [`--help-task`](#--help-tasktask) · [`--for`](#--fortask) · [`--sections`](#--sectionslegocompose) · [`--signatures-only`](#--signatures-only) · [`--auto-bodies`](#--auto-bodies) · [`--no-route`](#--no-route) · [`--adaptive`](#--adaptive) · [`--no-mention-boost`](#--no-mention-boost) · [`--no-doc-mention`](#--no-doc-mention) · [`--lego`](#--legotype) · [`--exemplar`](#--exemplartaskkind) · [`--recall`](#--recalltask) · [`--tree`](#--tree) · [`--html`](#--htmlfile) · [`--color-by`](#--color-bymode) · [`--order`](#--ordermode) · [`--no-stable`](#--no-stable)
 
 **navigate / answer a question** — [`--around`](#--aroundsym) · [`--callers`](#--callerssym) · [`--callees`](#--calleessym) · [`--uses`](#--usessym) · [`--graph-query`](#--graph-queryexpr) · [`--external-surface`](#--external-surface) · [`--path`](#--pathsrcdst) · [`--connect`](#--connectabc) · [`--impact`](#--impactsym) · [`--verify`](#--verifyclaim) · [`--mentions`](#--mentionssym) · [`--affected`](#--affectedf1f2sym) · [`--exercises`](#--exercisestestfile) · [`--situ`](#--situf1f2) · [`--handoff`](#--handoff) · [`--test-gate`](#--test-gatef1f2) · [`--grep`](#--grepstr----regexpat) · [`--grep-context`](#--grep-contextn----grep-beforen----grep-aftern) · [`--and`](#--andstr) · [`--not`](#--notstr) · [`--grep-scope`](#--grep-scopelinefile) · [`--grep-in`](#--grep-incodeany) · [`--handles`](#--handles) · [`--match`](#--matchquery) · [`--pattern`](#--patternpat) · [`--query`](#--queryterms)
 
@@ -91,6 +91,17 @@ $ ./build/ripwire . --top-k=5
 
 - --for's OWN signature/lego/compose bundle self-limits via --pack-top-n instead — --top-k is INERT there (documented, not fixed — a real fix is a behavior change);
 - to WIDEN a --for answer use --limit=N, the file-grain page (one row per file), not --top-k.
+
+### `--no-inventory`
+
+**Answers:** drop the default map's <inv> tier, the files and entries its ranked rows leave out.
+
+The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by each language's own entry convention) and <ls> rows naming or counting every unshown file by directory. This flag drops it (the rows are unchanged either way). The tier never rides a map fitted to a token budget, nor a payload verb's ride-along map.
+
+**Caveats (stated by the binary):**
+
+- The default map appends <inv listed= unlisted=> after its ranked rows whenever they left out a file with code: <entry> rows (program entries by each language's own entry convention) and <ls> rows naming or counting every unshown file by directory.
+- The tier never rides a map fitted to a token budget, nor a payload verb's ride-along map.
 
 ### `--max-tokens=N`
 

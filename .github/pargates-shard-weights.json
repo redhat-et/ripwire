@@ -293,6 +293,7 @@
 "manifestcheck.sh": 62.9,
 "mapdatasectioncheck.sh": 55.0,
 "mapdiffcheck.sh": 3.3,
+"mapinventorycheck.sh": 2.5,
 "matchcapturecheck.sh": 11.8,
 "matchgrammarcheck.sh": 0.6,
 "maxfilesizecheck.sh": 6.8,
