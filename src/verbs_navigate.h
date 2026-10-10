@@ -2469,6 +2469,7 @@ struct ImpactView
     std::span<const std::uint32_t> byDepth;         // 0.6.5: graph.h depthCounts over the FULL reach set — the root's by_depth=
     const rw::ValueRefRows&        valueRefs;       // reference-as-value round: SYM's binding sites — never in reaches=
     const std::vector<char>&       provenReach;     // FE-B (D3): graph.h provenCallerReach — a row outside it is via="name"
+    const rw::ImpactFileRollup&    fileRollup;      // idea #6: graph.h impactFileRollup over the FULL reach set
 };
 
 // FE-B: the window's hedge bits in row order (impactRowNameOnly), for the dialects that carry them per entry or per column
@@ -2568,7 +2569,18 @@ int emitImpactJson( const ImpactView& v )
     printJsonSymbolRows( v.ing, v.show, v.page.begin, v.page.end, v.rootPrefix, v.testReach, &v.depth, &via );
     rw::emitTo( stdout, "],\"import_reach\":[" );
     rw::emitImportRowsJson( stdout, v.ing, v.importPage, v.rootPrefix, v.importLazyPage );
-    rw::emitTo( stdout, "]{}}}", rw::valueRefsJson( v.ing, v.valueRefs, true, rw::VrRender{ v.singleRoot, v.rootPrefix }, "vrs",
+    // idea #6: the XML form's <files> rollup, as an object (n/shown/capped/files_next + rows)
+    rw::emitTo( stdout, "],\"files\":{{\"n\":{},\"shown\":{},\"capped\":{}{},\"rows\":[", v.fileRollup.rows.size(), v.fileRollup.shown,
+                v.fileRollup.capped ? "true" : "false",
+                v.fileRollup.next.empty() ? std::string() : ",\"files_next\":\"" + jsonStr( v.fileRollup.next ) + "\"" );
+    for( std::size_t i = 0; i < v.fileRollup.shown; ++i )
+    {
+        const rw::ImpactFileRow& fr  = v.fileRollup.rows[i];
+        const std::string_view   raw = v.ing.files[ fr.fileId ];
+        const std::string_view   rel = v.rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, v.rootPrefix );
+        rw::emitTo( stdout, "{}{{\"p\":\"{}\",\"syms\":{},\"d\":{}}}", i ? "," : "", jsonStr( rel ).c_str(), fr.syms, fr.minDepth );
+    }
+    rw::emitTo( stdout, "]}}{}}}", rw::valueRefsJson( v.ing, v.valueRefs, true, rw::VrRender{ v.singleRoot, v.rootPrefix }, "vrs",
                                                      "--uses=" + std::string( v.sym ) ) );
     return 0;
 }
@@ -2595,6 +2607,7 @@ int emitImpactXml( const ImpactView& v )
                                  v.pageLimit, v.pageOffset, true ),
                  rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str(),
                  rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) ).c_str() );   // P3 (L7): "is it safe to change" → "can it go"
+    rw::emitImpactFileRollupXml( stdout, v.ing, v.fileRollup, v.rootPrefix );   // idea #6: before the symbol window
     for( std::size_t i = v.page.begin; i < v.page.end; ++i )
     {
         const Symbol&          s  = v.ing.symbols[ v.show[i] ];
@@ -2674,6 +2687,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         // which left the legend predicate with nothing to read but the whole `show` set — CodeRabbit
         // 4057546113. Hoisted so the rows and the reading that describes them come from one expression.
         const rw::PageWindow imPage = pageWindow( show.size(), effectiveRowCap( cfg.pageLimit, rw::kCallHierarchyRowCap ), cfg.pageOffset );
+        const rw::ImpactFileRollup imFiles = rw::impactFileRollup( ing, reach, imDepth, cfg.pageLimit, cfg.impactSym );   // idea #6
         // Reference-as-value round: SYM's own binding sites, beside the radius they are not in.
         const rw::ValueRefIndex imVri( ing );
         const rw::ValueRefRows  imValueRefs = rw::valueRefCallerRows( ing, imVri, seeds );
@@ -2700,7 +2714,8 @@ std::optional<int> runImpact( const MainDispatch& d )
                          rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Impact, imUnprovenDefs > 0 ).c_str(),   // H1: exactly when the root carries unproven_defs=
                          rw::declinedCallsLegendWithGate( imDeclinedCalls > 0, g.gateDeclinedCalls > 0 ),           // exactly when the root carries declined_calls=
                          rw::declinedIfaceLegend( imDeclinedIface > 0 ),                                             // likewise, exactly when declined_iface= is there
-                         rw::modScopeLegend( imHasModScope ),                      // #60: likewise, exactly when a t="modscope" row is
+                         ( std::string( rw::modScopeLegend( imHasModScope ) )      // #60: likewise, exactly when a t="modscope" row is
+                           + rw::impactRollupLegend( !reach.empty() && !cfg.columnar, imports.umbrella ) ).c_str(),   // idea #6
                          ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )   // exactly when the root carries value_refs=
                            + rw::valueRefsDepthLegendFor( imValueRefs ) ).c_str(),                 // ... and the depth disclosure
                          rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
@@ -2714,7 +2729,7 @@ std::optional<int> runImpact( const MainDispatch& d )
                                imports, importPage, importLazyPage, prD, imSingleRoot, imRootPrefix, imRootAttr,
                                imSingleRoot ? cfg.roots[0] : std::string_view(), cfg.pageLimit, cfg.pageOffset,
                                &imTestReach, imRadiusTested, imRadiusUntested, imDeclinedCalls, imDeclinedIface, g, imDepth, imByDepth, imValueRefs,
-                               imProven };
+                               imProven, imFiles };
 
         if( cfg.columnar ) { return emitImpactColumnar( view ); }
         if( cfg.json     ) { return emitImpactJson( view ); }

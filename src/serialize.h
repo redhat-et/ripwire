@@ -9061,6 +9061,28 @@ inline void emitImportRowsXml( std::FILE* out, const IngestResult& ing,
     }
 }
 
+// idea #6: the reach set's per-file rollup (graph.h impactFileRollup), BEFORE the symbol window: <files n= shown=
+// [capped="1" files_next=]> holding one <rf p= syms= d=/> per file. Its own tag (rf), so a reader or gate counting the
+// import tier's <f> rows never picks it up. Emitted only when the reach set is non-empty.
+template<class RollupT>
+inline void emitImpactFileRollupXml( std::FILE* out, const IngestResult& ing, const RollupT& r, std::string_view rootPrefix )
+{
+    if( r.rows.empty() )
+    {
+        return;
+    }
+    std::vector<char> esc;
+    rw::emitTo( out, "<files n=\"{}\" shown=\"{}\"{}{}>", r.rows.size(), r.shown, r.capped ? " capped=\"1\"" : "",
+                rw::nextAttrXml( r.next, "files_next" ) );
+    for( std::size_t i = 0; i < r.shown; ++i )
+    {
+        const std::string_view raw = ing.files[ r.rows[i].fileId ];
+        const std::string_view rel = rootPrefix.empty() ? raw : rw::sarif::rootRelativeUri( raw, rootPrefix );
+        rw::emitTo( out, "<rf p=\"{}\" syms=\"{}\" d=\"{}\"/>", std::string( escapeXml( rel, esc ) ).c_str(), r.rows[i].syms, r.rows[i].minDepth );
+    }
+    rw::emitRaw( out, "</files>" );
+}
+
 inline void emitImportRowsJson( std::FILE* out, const IngestResult& ing,
                                 std::span<const std::uint32_t> files, std::string_view rootPrefix, std::span<const char> lazy = {} )
 {

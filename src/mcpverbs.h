@@ -2932,6 +2932,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // Measured before the legend (#220 part 1): its imports_unresolved= decides whether that clause rides.
     ImportTier imports = impactImportTier( ing, seeds );
     sizeImportTier( imports, page.limit, symbol );   // cut-fix C: limit sizes the tier, as on the CLI
+    const ImpactFileRollup imFiles = impactFileRollup( ing, reach, depth, page.limit, symbol );   // idea #6: the CLI arm's rollup
     // Reference-as-value round: SYM's binding sites, the CLI --impact's value_refs=/<vrs> by the same call.
     const ValueRefRows  imValueRefs = valueRefCallerRows( ing, valueRefIndexOf( ix ), seeds );
     const PageWindow    ipw         = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
@@ -2947,7 +2948,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   declinedCallsLegendWithGate( declinedCalls > 0, g.gateDeclinedCalls > 0 ),         // exactly when the root carries declined_calls=, as on the CLI
                   declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
                   ( std::string( valueRefsReachLegend( !imValueRefs.rows.empty() ) )                  // exactly when the root carries value_refs=, as on the CLI
-                    + valueRefsDepthLegendFor( imValueRefs ) ).c_str(),                                // ... and the depth disclosure, as on the CLI
+                    + valueRefsDepthLegendFor( imValueRefs )                                             // ... and the depth disclosure, as on the CLI
+                    + impactRollupLegend( !reach.empty(), imports.umbrella ) ).c_str(),                  // idea #6, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
@@ -2970,6 +2972,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
                   nextAttrXml( nextFlag( "--safe-delete=", symbol ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same root attribute set (mcpclidiffcheck)
+    emitImpactFileRollupXml( mem, ing, imFiles, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() );   // idea #6, as on the CLI
     for( std::size_t i = ipw.begin; i < ipw.end; ++i )
     { const Symbol& s = ing.symbols[ show[i] ];
       const std::string_view rp = imSingleRoot ? sarif::rootRelativeUri( ing.files[ s.fileId ], imRootPrefix ) : std::string_view( ing.files[ s.fileId ] );

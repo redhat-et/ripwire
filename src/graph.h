@@ -10255,6 +10255,7 @@ struct ImportTier
     std::string                next;       // cut-fix E: the call that lists the whole tier; empty when uncut
     std::uint64_t              importsUnresolved = 0;   // #220 part 1: importers= is a floor while > 0
     std::uint64_t              tsconfigUnread    = 0;   // #220 part 2: configs with an unread extends/references base (tsconfig_unread=)
+    bool                       umbrella          = false;   // idea #6: an umbrella header — see impactImportTier
 };
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
@@ -10270,7 +10271,10 @@ struct ImportTier
 // already does. Gate: impactimportcheck.sh #9d (a 130 B call).
 inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym = {} )
 {
-    t.shown  = std::min( t.files.size(), std::size_t( rw::effectiveRowCap( pageLimit, rw::kImportReachRowCap ) ) );
+    // idea #6: an UMBRELLA def file's importers are counted, not listed, unless --limit asks for rows — a list of every
+    // file that includes tmux.h answers nothing about SYM (round-2 tmux-09: 40 such rows, the two gold files absent).
+    t.shown  = ( t.umbrella && pageLimit == 0 ) ? 0
+             : std::min( t.files.size(), std::size_t( rw::effectiveRowCap( pageLimit, rw::kImportReachRowCap ) ) );
     t.capped = t.shown < t.files.size();
     t.next.clear();
     if( t.capped && !sym.empty() )
@@ -10284,9 +10288,32 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
                + " importers_capped=\"" + ( t.capped ? "1" : "0" ) + "\""
                + rw::nextAttrXml( t.next, "importers_next" )
                + rw::importsUnresolvedAttrXml( t.importsUnresolved )   // #220: absent at zero; the root's counts_floor covers it
-               + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) );   // #220 part 2: likewise
+               + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) )   // #220 part 2: likewise
+               + ( t.umbrella ? " importers_umbrella=\"1\"" : "" );                              // idea #6: present-only
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
+}
+
+// idea #6: an umbrella header — imported by at least half the files that import ANYTHING (the population an include/
+// import can reach; docs and scripts with no import never count), and by more than one default page of them — makes the
+// import tier a census of the corpus, not a blast radius. Its rows are then a count (sizeImportTier).
+inline bool importTierIsUmbrella( const IngestResult& ing, std::size_t importerCount )
+{
+    if( importerCount <= std::size_t( rw::kImportReachRowCap ) )
+    {
+        return false;
+    }
+    std::vector<char> imports( ing.files.size(), 0 );
+    std::size_t       importing = 0;
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.fileId < imports.size() && imports[inc.fileId] == 0 )
+        {
+            imports[inc.fileId] = 1;
+            ++importing;
+        }
+    }
+    return importerCount * 2 >= importing;
 }
 
 inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<NodeId>& seeds )
@@ -10337,8 +10364,70 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
         t.lazy.push_back( sortedLazy[ rankOrder[i] ] );
     }
     ENSURES( t.lazy.size() == t.files.size(), "lazy stays parallel to files" );
+    t.umbrella = importTierIsUmbrella( ing, t.files.size() );   // idea #6
     sizeImportTier( t, 0 );   // the default size; a surface with a --limit re-sizes it (sizeImportTier)
     return t;
+}
+
+// ── idea #6: the per-FILE rollup of the WHOLE reach set ──────────────────────────────────────────────────────
+// The symbol rows are a 40-row window over a reach set that can be hundreds of symbols deep (round-2 tmux-09:
+// reaches=687, the two files the question needed sat past row 40). The rollup answers "which files does this touch"
+// over EVERY reached symbol: one row per file with syms= (reached symbols in it) and d= (the fewest hops to any of
+// them), ordered by d= then syms= (descending) then path. Its own window: kImpactFileRollupCap rows by default, sized by
+// --limit like the import tier; a cut names the call that lists all of it (files_next=). Pure function of the reach.
+inline constexpr std::size_t kImpactFileRollupCap = 40;   // the symbol window's own default (kCallHierarchyRowCap)
+
+struct ImpactFileRow
+{
+    std::uint32_t fileId   = 0;
+    std::uint32_t syms     = 0;
+    std::uint32_t minDepth = 0;
+};
+
+struct ImpactFileRollup
+{
+    std::vector<ImpactFileRow> rows;     // every file the reach set touches, ranked
+    std::size_t                shown  = 0;
+    bool                       capped = false;
+    std::string                next;     // the call listing every row; empty when uncut
+};
+
+inline ImpactFileRollup impactFileRollup( const IngestResult& ing, std::span<const NodeId> reach, const std::vector<std::uint32_t>& depth,
+                                          int pageLimit, std::string_view sym )
+{
+    ImpactFileRollup          r;
+    std::vector<std::uint32_t> rowOfFile( ing.files.size(), UINT32_MAX );
+    for( const NodeId n : reach )
+    {
+        if( n >= ing.symbols.size() )
+        {
+            continue;
+        }
+        const std::uint32_t f = ing.symbols[n].fileId;
+        const std::uint32_t d = n < depth.size() ? depth[n] : 0;
+        if( rowOfFile[f] == UINT32_MAX )
+        {
+            rowOfFile[f] = std::uint32_t( r.rows.size() );
+            r.rows.push_back( ImpactFileRow{ f, 0, d } );
+        }
+        ImpactFileRow& row = r.rows[rowOfFile[f]];
+        ++row.syms;
+        row.minDepth = std::min( row.minDepth, d );
+    }
+    std::sort( r.rows.begin(), r.rows.end(), [ & ]( const ImpactFileRow& a, const ImpactFileRow& b )
+               {
+                   if( a.minDepth != b.minDepth ) { return a.minDepth < b.minDepth; }
+                   if( a.syms != b.syms ) { return a.syms > b.syms; }
+                   return ing.files[a.fileId] < ing.files[b.fileId];
+               } );
+    r.shown  = std::min( r.rows.size(), std::size_t( rw::effectiveRowCap( pageLimit, int( kImpactFileRollupCap ) ) ) );
+    r.capped = r.shown < r.rows.size();
+    if( r.capped && !sym.empty() )
+    {
+        r.next = rw::nextFlag( "--impact=", sym ) + " --limit=" + std::to_string( r.rows.size() );
+    }
+    ENSURES( r.shown <= r.rows.size(), "the rollup page is a prefix of the ranked files" );
+    return r;
 }
 
 // Tarjan SCC on the file→file graph → cycles (SCCs with >1 node). Cyclic physical dependencies are
