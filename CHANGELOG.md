@@ -15,6 +15,22 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — every `--callers` and `--safe-delete` caller row names its call sites as `file:line`
+
+"List every call site that must change" took two calls: a `--callers` row's `p=` is where the CALLER is defined, and the
+lines to edit were only in the `--uses` follow-up. Each caller row now carries `sites_at=`, its call sites spelled like
+the called name as pasteable `file:line` tokens (space-separated, ascending; two calls on one line are one site), so the
+first answer holds them. A file-scope (`<file-scope>`) caller, such as a test file calling a helper at top level, lists
+its sites the same way. `p=`, `count=` and the rows are unchanged.
+
+- **Every dialect:** XML `<s sites_at=>`, `--json` `"sites_at":[...]`, the columnar `<sites_at>` column, and the MCP
+  `find_referencing_symbols` / `find_symbol` `calledBy` rows (with a `sites_note` reading). The sites are the `--uses`
+  call rows inside that caller: matched by name, so they are not proof each one binds to this definition.
+- **A long list is cut, never silently:** a row lists at most 16 sites; a cut row carries `sites_total=N`, and `next=`
+  (the `--uses` call on the same selector) lists every site.
+- **`--safe-delete`:** the bare-line `sites_l=` on its caller rows becomes the same `sites_at=`. `--edit-check` keeps
+  `sites_l=`.
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

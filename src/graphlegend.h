@@ -881,11 +881,9 @@ inline const char* modScopeLegend( bool on ) noexcept { return on ? kModScopeLeg
 // condition and `cut` its "a row carries sites_total=" condition, so an answer without them pays 0 bytes. `cap` is
 // pageview.h kCallSitesPerRowCap, passed in (this header sits below pageview.h). No double hyphen: inside an XML comment.
 inline constexpr const char* kCallSitesAtLegend =
-    "sites_at= on a caller row lists that caller's call sites spelled like the called name, as pasteable file:line tokens, space-separated "
-    "and ascending: the lines to edit, while p= stays where the caller is DEFINED. Matched by name, like the uses verb's call rows: a "
-    "same-named call to another definition inside that caller is listed too, so it is not proof each site binds here. A row whose edge "
-    "has no call spelled like the name (a call through an aliased import, for one) carries no sites_at=; two calls "
-    "on one line are one site. ";
+    "sites_at= on a caller row: its call sites spelled like the called name, as file:line tokens (space-separated, ascending; two "
+    "calls on one line are one site); p= stays where the caller is DEFINED. Matched by name like the uses verb's call rows, so not "
+    "proof each binds here; absent when no call there is spelled like it (an aliased import). ";
 inline std::string callSitesAtLegend( bool on, bool cut, std::size_t cap )
 {
     if( !on )
@@ -895,8 +893,7 @@ inline std::string callSitesAtLegend( bool on, bool cut, std::size_t cap )
     std::string clause = kCallSitesAtLegend;
     if( cut )
     {
-        clause += "sites_total=N (absent when sites_at= is whole): this row has N sites and sites_at= lists the first " + std::to_string( cap )
-                + "; the uses verb on the same selector lists every one. ";
+        clause += "sites_total=N (absent when sites_at= is whole): this row has N sites and sites_at= lists the first " + std::to_string( cap ) + "; the uses verb on the same selector lists every one. ";
     }
     return clause;
 }

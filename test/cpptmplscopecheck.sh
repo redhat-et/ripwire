@@ -484,14 +484,14 @@ PCALL="$( run plain --callers=Box::grow --no-cache --legend=compact )"
 [ "$( printf '%s' "$PMAP" | grep -oE '<s t="method" n="grow"[^>]*>' | sed 's/ k="[^"]*"//' )" = '<s t="method" n="grow" sc="Box" overloads="2">' ] \
     && ok "control: declaration + out-of-line definition are ONE map row, sc=\"Box\" overloads=\"2\"" \
     || no "control map row moved — the join this gate mirrors is not what it was: $( printf '%s' "$PMAP" | grep -oE '<s t="method" n="grow"[^>]*>' | tr '\n' ' ' )"
-{ [ "$( defs "$PCALL" )" = 2 ] && [ "$( cnt "$PCALL" )" = 1 ] && printf '%s' "$PCALL" | grep -q '<s t="fn" n="use" p="box.hpp:8"/>'; } \
+{ [ "$( defs "$PCALL" )" = 2 ] && [ "$( cnt "$PCALL" )" = 1 ] && printf '%s' "$PCALL" | grep -q '<s t="fn" n="use" p="box.hpp:8" sites_at="box.hpp:10"/>'; } \
     && ok "control: --callers=Box::grow defs=\"2\" count=\"1\" -> use (box.hpp:8)" \
     || no "control: --callers=Box::grow expected defs=2 count=1 use, got: $( el "$PCALL" )"
 
 # ── §2 THE CONTRAST: the template twin answers byte-identically ─────────────────────────────────────────────────
 TMAP="$( run templ --no-cache --legend=compact )"
 TCALL="$( run templ --callers=Box::grow --no-cache --legend=compact )"
-{ [ "$( defs "$TCALL" )" = 2 ] && [ "$( cnt "$TCALL" )" = 1 ] && printf '%s' "$TCALL" | grep -q '<s t="fn" n="use" p="box.hpp:8"/>'; } \
+{ [ "$( defs "$TCALL" )" = 2 ] && [ "$( cnt "$TCALL" )" = 1 ] && printf '%s' "$TCALL" | grep -q '<s t="fn" n="use" p="box.hpp:8" sites_at="box.hpp:10"/>'; } \
     && ok "templ: --callers=Box::grow defs=\"2\" count=\"1\" -> use — the definition and the declaration are one member" \
     || no "templ: --callers=Box::grow expected defs=2 count=1 use (the control's answer), got: $( el "$TCALL" )"
 [ "$( printf '%s' "$TMAP" | grep -oE '<s t="method" n="grow"[^>]*>' | sed 's/ k="[^"]*"//' )" = '<s t="method" n="grow" sc="Box" overloads="2">' ] \

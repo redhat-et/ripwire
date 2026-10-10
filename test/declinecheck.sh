@@ -423,7 +423,7 @@ else
     # py_undefined() at module level. RED on the pre-#60 binary, which emits neither the row nor the edge.
     rw --callers=py_undefined >"$TMP/modscope.xml"
     MS="$( root_tag "$TMP/modscope.xml" callers )"
-    grep -q '<s t="modscope" n="&lt;file-scope&gt;" p="py/caller/caller.py:1"/>' "$TMP/modscope.xml" \
+    grep -q '<s t="modscope" n="&lt;file-scope&gt;" p="py/caller/caller.py:1" sites_at="py/caller/caller.py:21"/>' "$TMP/modscope.xml" \
         && ok '(F) the module-level call to py_undefined is owned by a t="modscope" row (#60)' \
         || no "(F) --callers=py_undefined has no modscope row: $MS"
     [ "$( attr "$MS" count )" = 1 ] \

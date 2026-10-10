@@ -167,7 +167,7 @@ invariant "pyfour --quality-delta"    "$PY" --quality-delta
 every_spelling 'control: app/views.py resolves `from pkg.store import load` (pkg/store.py afferent="1")' \
     "pyfour --deps" '<f p="pkg/store.py" afferent="1"/>'
 every_spelling 'control: handler is the one caller of pkg/store.py:load (the import bound it)' \
-    "pyfour --callers=store" '<s t="fn" n="handler" p="app/views.py:4"/>'
+    "pyfour --callers=store" '<s t="fn" n="handler" p="app/views.py:4" sites_at="app/views.py:5"/>'
 every_spelling 'control: the same-directory app/local.py:load has count="0" callers (the name ladder did not bind it)' \
     "pyfour --callers=local" 'count="0"'
 every_spelling 'control: --impact names app/views.py as the importer of pkg/store.py (importers="1")' \
@@ -231,7 +231,7 @@ cwd_selector()
 
 for form in typed abs cwdrel; do
     cwd_selector "(6) --edit-check=<$form root>/pkg/store.py:load" "$PY" "$form" --edit-check pkg/store.py:load 'sym="load"' '<c n="handler" p="app/views.py:4"/>'
-    cwd_selector "(6) --callers=<$form root>/pkg/store.py:load"    "$PY" "$form" --callers    pkg/store.py:load 'count="1"' '<s t="fn" n="handler" p="app/views.py:4"/>'
+    cwd_selector "(6) --callers=<$form root>/pkg/store.py:load"    "$PY" "$form" --callers    pkg/store.py:load 'count="1"' '<s t="fn" n="handler" p="app/views.py:4" sites_at="app/views.py:5"/>'
     cwd_selector "(6) --at=<$form root>/pkg/store.py:2"            "$PY" "$form" --at         pkg/store.py:2    'sym="load"'
     cwd_selector "(6) --affected=<$form root>/pkg/store.py"        "$PY" "$form" --affected   pkg/store.py      'seeds="1"' 'reached="1"'
 done

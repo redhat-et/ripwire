@@ -926,11 +926,13 @@ inline std::string callSitesAttrXml( const std::vector<std::string>& tokens, std
 
 // The MCP twin (find_referencing_symbols / find_symbol calledBy rows): the same reading as one self-named key, only in an
 // answer whose rows carry "sites_at" — the posture via_note already holds. The legend text holds no quote or backslash, so it
-// needs no JSON escaping (ENSURES below keeps that true if the wording changes).
+// needs no JSON escaping (the static_assert below keeps that true if the wording changes).
+static_assert( std::string_view( kCallSitesAtLegend ).find_first_of( "\"\\" ) == std::string_view::npos,
+               "the sites_at= legend rides inside a JSON string unescaped: it holds no quote or backslash" );
 inline std::string callSitesAtNoteJson( bool on, bool cut, std::size_t cap )
 {
+    // callSitesAtLegend's only other text is its sites_total= sentence, whose literals hold no quote or backslash either.
     const std::string text = callSitesAtLegend( on, cut, cap );
-    ENSURES( text.find_first_of( "\"\\" ) == std::string::npos, "the sites_at= legend needs no JSON escaping" );
     return text.empty() ? std::string() : ",\"sites_note\":\"" + text + "\"";
 }
 

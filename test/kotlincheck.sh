@@ -276,11 +276,11 @@ HELPER_CALLERS="$( "$BIN" "$FIX" --callers="JavaBridge.java:helper" --no-cache 2
 # `JavaBridge.helper(5)` reaches Java's JavaBridge.helper — proven, no via= — while the BARE ambiguousCall() keeps the
 # own-language-first rule (it never reaches Java's helper) and binds Kotlin's Extra.helper only HEDGED: a top-level
 # function's bare call reaches an object's member through an import, which this file does not have.
-echo "$UTIL_HELPER_CALLERS" | grep -q 'count="1"' && echo "$UTIL_HELPER_CALLERS" | grep -q '<s t="fn" n="ambiguousCall" p="[^"]*" via="name"/>' \
+echo "$UTIL_HELPER_CALLERS" | grep -q 'count="1"' && echo "$UTIL_HELPER_CALLERS" | grep -q '<s t="fn" n="ambiguousCall" p="[^"]*" via="name" sites_at="Greeter.kt:30"/>' \
     && ! echo "$UTIL_HELPER_CALLERS" | grep -q 'n="useJavaHelper"' \
     && ok "--callers=Util.kt:helper: count=1 — the bare ambiguousCall, hedged via=\"name\"; the qualified useJavaHelper no longer lands here" \
     || no "--callers=Util.kt:helper: expected only the bare call, hedged: $( echo "$UTIL_HELPER_CALLERS" | grep -oE '<callers [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
-echo "$HELPER_CALLERS" | grep -q 'count="1"' && echo "$HELPER_CALLERS" | grep -q '<s t="fn" n="useJavaHelper" p="[^"]*"/>' \
+echo "$HELPER_CALLERS" | grep -q 'count="1"' && echo "$HELPER_CALLERS" | grep -q '<s t="fn" n="useJavaHelper" p="[^"]*" sites_at="Greeter.kt:21"/>' \
     && ok "--callers=JavaBridge.java:helper: count=1 — the qualified useJavaHelper, proven by its class-name receiver; the bare site never reaches Java (own language first)" \
     || no "--callers=JavaBridge.java:helper: expected exactly the qualified useJavaHelper, proven: $( echo "$HELPER_CALLERS" | grep -oE '<callers [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 

@@ -212,7 +212,8 @@ SA_TS="$( sa --callers=tsHelper )"
 { row "$SA_TS" tsCaller | grep -q 'p="j.ts:2"' && ! row "$SA_TS" tsCaller | grep -q 'sites_at='; } \
     && ok "SA3: near miss: a caller whose call is spelled through an aliased import carries no sites_at=" \
     || no "SA3: tsCaller row: $( row "$SA_TS" tsCaller )"
-[ "$( sat "$( row "$SA_TS" tsDirect )" )" = "k.ts:2" ] && ok "SA3: its direct sibling caller does (k.ts:2)" || no "SA3: tsDirect row: $( row "$SA_TS" tsDirect )"
+[ "$( sat "$( row "$SA_TS" tsDirect )" )" = "k.ts:2" ] && ok "SA3: its direct sibling caller does (k.ts:2)" \
+    || no "SA3: tsDirect row: $( row "$SA_TS" tsDirect )"
 sa --callees=two_lines | sed 's/<!--.*-->//' | grep -q 'sites_at=' && no "SA4: a --callees row carries sites_at=" || ok "SA4: --callees rows carry no sites_at="
 # SA5: sites_at= equals the --uses role="call" lines inside that caller, for every row of the answer (one question, two documents).
 SA5_BAD=0; SA5_N=0
@@ -224,7 +225,8 @@ for nm in target pyhelper; do
         SA5_N=$((SA5_N+1)); [ "$got" = "$want" ] || { SA5_BAD=1; printf '        %s/%s: sites_at="%s" but --uses role=call sites "%s"\n' "$nm" "$r" "$got" "$want"; }
     done
 done
-[ "$SA5_BAD" = 0 ] && [ "$SA5_N" -ge 4 ] && ok "SA5: every row's sites_at= equals its --uses role=call sites ($SA5_N rows)" || no "SA5: sites_at= != --uses call sites ($SA5_N rows)"
+[ "$SA5_BAD" = 0 ] && [ "$SA5_N" -ge 4 ] && ok "SA5: every row's sites_at= equals its --uses role=call sites ($SA5_N rows)" \
+    || no "SA5: sites_at= != --uses call sites ($SA5_N rows)"
 SA_O="$( sa --callers=target --limit=1 --offset=1 )"
 { [ "$( printf '%s' "$SA_O" | sed 's/<!--.*-->//' | grep -oE '<s ' | wc -l | tr -d ' ' )" = 1 ] && sat "$( printf '%s' "$SA_O" | sed 's/<!--.*-->//' | grep -oE '<s [^>]*/>' )" | grep -qE '^lib\.c:[0-9]'; } \
     && ok "SA6: a paged window (offset=1) still carries its row's sites" || no "SA6: paged answer: $SA_O"
@@ -233,9 +235,11 @@ SA_M="$( sa --callers=many )"; MROW="$( row "$SA_M" '&lt;file-scope&gt;' )"
   && [ "$( sat "$MROW" | cut -d' ' -f1 )" = "m.py:4" ] && printf '%s' "$SA_M" | grep -q 'next="--uses=many"'; } \
     && ok "SA7: a 20-site row lists the first 16 (ascending) with sites_total=\"20\"; next= (--uses=many) lists all" \
     || no "SA7: capped row: $MROW"
-printf '%s' "$SA_M" | grep -o '<!--.*-->' | grep -q 'sites_total=' && ok "SA7: the compact legend defines sites_total= where it rides" || no "SA7: sites_total= undefined"
+printf '%s' "$SA_M" | grep -o '<!--.*-->' | grep -q 'sites_total=' && ok "SA7: the compact legend defines sites_total= where it rides" \
+    || no "SA7: sites_total= undefined"
 printf '%s' "$SA_T" | grep -o '<!--.*-->' | grep -q 'sites_total=' && no "SA7: present-only: an uncut answer defines sites_total=" || ok "SA7: present-only: an uncut answer pays nothing for sites_total="
-printf '%s' "$SA_T" | grep -o '<!--.*-->' | grep -q 'sites_at=' && ok "SA8: the compact legend defines sites_at= where it rides" || no "SA8: sites_at= undefined in the compact legend"
+printf '%s' "$SA_T" | grep -o '<!--.*-->' | grep -q 'sites_at=' && ok "SA8: the compact legend defines sites_at= where it rides" \
+    || no "SA8: sites_at= undefined in the compact legend"
 SA_F="$( sa --callers=many --legend=full )"
 { printf '%s' "$SA_F" | grep -o '<!--.*-->' | grep -q 'sites_at= on a caller row' && printf '%s' "$SA_F" | grep -q 'sites_total=N' \
   && printf '%s' "$SA_F" | xmllint --noout - 2>/dev/null; } \
@@ -259,7 +263,8 @@ SA_C="$( sa --callers=target --format=columnar )"
 { printf '%s' "$SA_C" | grep -q 'fields="path,name,line,kind,tested,sites_at"' && printf '%s' "$SA_C" | grep -q '<sites_at>[^<]*lib.c:3 lib.c:4 lib.c:5' \
   && printf '%s' "$SA_C" | xmllint --noout - 2>/dev/null; } \
     && ok "SA10: --format=columnar carries the sites_at column (fields= names it)" || no "SA10: columnar: $( printf '%s' "$SA_C" | sed 's/<!--.*-->//' )"
-sa --callers=many --format=columnar | grep -q '<sites_total>20</sites_total>' && ok "SA10: a cut columnar row carries the sites_total column" || no "SA10: columnar cut row"
+sa --callers=many --format=columnar | grep -q '<sites_total>20</sites_total>' && ok "SA10: a cut columnar row carries the sites_total column" \
+    || no "SA10: columnar cut row"
 sa --callers=target --format=columnar | grep -q 'sites_total' && no "SA10: present-only: an uncut columnar answer carries sites_total" || ok "SA10: present-only: no sites_total column when nothing was cut"
 sa_mcp(){ printf '%s\n%s\n%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \

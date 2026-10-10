@@ -28,10 +28,12 @@ live = open(sys.argv[2], encoding="utf-8").read()
 # and say so above the block; they are not asserted here because nothing can keep them true.
 LINE_SUFFIX = re.compile(r":\d+$")
 
-rows = re.findall(r'<s t="[^"]+" n="([^"]+)" p="([^"]+)"/>', live)
+# CALLSITE-AT (2026-10-09): a caller row may carry attributes after p= (sites_at=, tested=, via=); the claim compared is
+# still WHICH callers exist and in WHICH FILE, so the row pattern reads n= and p= and tolerates what follows.
+rows = re.findall(r'<s t="[^"]+" n="([^"]+)" p="([^"]+)"[^>]*/>', live)
 assert rows, "live callers command returned no rows"
 readme_rows = { ( n, LINE_SUFFIX.sub( "", p ) )
-                for n, p in re.findall(r'<s t="[^"]+" n="([^"]+)" p="([^"]+)"/>', readme) }
+                for n, p in re.findall(r'<s t="[^"]+" n="([^"]+)" p="([^"]+)"[^>]*/>', readme) }
 missing = []
 for name, path in rows:
     if ( name, LINE_SUFFIX.sub( "", path ) ) not in readme_rows:

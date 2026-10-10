@@ -305,6 +305,10 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # v1 legend says "each absent when 0;". Checked mechanically: restoring the zeros on every r= row and removing that clause
 # gives the previous pin byte for byte with at= and est_tokens= masked (est_tokens= prices the shorter bytes). The six
 # other pins are unchanged.
+# RE-ANCHORED BY HAND 2026-10-09 (lane callers-sites-first-call, CALLSITE-AT, by design), callers.xml only: its two <s> rows
+# gain sites_at= (each caller's call site as file:line: geometry.cpp:16, sub/consumer.cpp:10) and the full legend gains the
+# present-only sites_at= clause (graphlegend.h kCallSitesAtLegend), 3492 -> 3890 B. Checked mechanically: removing the two
+# sites_at= attributes and that one clause gives the previous pin byte for byte (at= masked). The six other pins are unchanged.
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -531,6 +535,11 @@ probeFor()
 # PINNED 2026-10-01 (C/C++ declaration/definition fold): ripwire.edit-check/v1 610 (measured 595). The --edit-check=distance
 # probe used to be REFUSED — geometry.h declares distance and geometry.cpp defines it, and the verb counted the prototype and
 # its definition as two contracts — so the schema had no XML answer to pin. It now answers about the definition.
+# RE-PINNED 2026-10-09 (lane callers-sites-first-call, CALLSITE-AT): ripwire.callers/v1 330 -> 450 (measured 438; 317 at
+# the last pin) and ripwire.safe-delete/v1 820 -> 840 (measured 828, was 805). Every caller row now carries sites_at=, its
+# call sites as pasteable file:line, and the compact legend reads it ("<s sites_at=>: ..." on callers, +121 B with its
+# separator; on safe-delete the sites_l= reading became the sites_at= one, +23 B). Twins: (U-twin-callers) below holds the
+# callers prose minus that reading to the OLD 330; the existing (U-twin) holds safe-delete minus its reading to 720.
 # the pins follow the definitions, measured + 10 rounded up to 10.
 # schema                      pin  measured
 # RE-PINNED 2026-10-04 (lane/lean-answers-068), two new definitions, each measured on this gate's fixture against the
@@ -603,11 +612,11 @@ ripwire.match/v1                  370   355
 ripwire.lego/v1                  290   275
 ripwire.exemplar/v1               440   422
 ripwire.around/v1                770   760
-ripwire.callers/v1               330   317
+ripwire.callers/v1               450   438
 ripwire.callees/v1                500   484
 ripwire.uses/v1                   510   500
 ripwire.batch/v1                  250   238
-ripwire.safe-delete/v1           820   805
+ripwire.safe-delete/v1           840   828
 ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
@@ -626,7 +635,8 @@ pinFor()
     printf '%s\n' "$PIN_TABLE" | awk -v schema="$1" '$1 == schema { printf "%s", $2; exit }'
 }
 # (U-twin) the pre-2026-10-04 ripwire.safe-delete/v1 pin, kept (PROCESS rule 4: a re-pin keeps a twin for the old path).
-# The 720 -> 820 re-pin above paid for ONE reading, the caller row's sites_l= (+90 B with its separator). Everything else
+# The 720 -> 820 re-pin above paid for ONE reading, the caller row's sites_l= (+90 B with its separator); since CALLSITE-AT
+# (2026-10-09) that reading is the row's sites_at= (file:line tokens), and the twin cuts that one instead. Everything else
 # in that prose legend still fits the OLD 720 B: the same --safe-delete=distance probe, with exactly that reading cut out
 # of a copy of the compact answer, is measured by the same `leg prose` operand the (U) arm uses. The cut is taken only when
 # a caller row carries sites_l= AND the reading occurs once; any other premise FAILs (a cut that removes nothing proves nothing).
@@ -635,12 +645,12 @@ pinFor()
 sdtCut="$( python3 - "$TMP/sdt.c" "$TMP/sdt.cut" <<'PY'
 import re, sys
 doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
-reading = " c sites_l=: its call-site lines (p= is the caller's def line); not proof each binds here."
+reading = " c sites_at=: its call sites spelled like sym=, as file:line (p= is its def line); by name, not proof each binds."
 body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
-if not re.search( r'<c [^>]*sites_l="[0-9]', body ):
-    print( "NOPREMISE no caller row carries sites_l=" ); sys.exit( 0 )
+if not re.search( r'<c [^>]*sites_at="[^"]*:[0-9]', body ):
+    print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )
 if doc.count( reading ) != 1:
-    print( "NOPREMISE the sites_l= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
+    print( "NOPREMISE the sites_at= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
 open( sys.argv[2], "w", encoding = "utf-8" ).write( doc.replace( reading, "", 1 ) )
 print( len( reading.encode() ) )
 PY
@@ -652,9 +662,40 @@ else
         NOPREMISE*) no "(U-twin) safe-delete twin cannot measure: ${sdtCut#NOPREMISE }" ;;
         *)  sdtRest="$( leg prose "$TMP/sdt.cut" "$TMP/sdt.full" )"
             if [ -n "$sdtRest" ] && [ "$sdtRest" -eq "$sdtRest" ] 2>/dev/null && [ "$sdtRest" -le 720 ]; then
-                ok "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is $sdtRest B <= 720 B (the pre-CALLSITE-LINE pin)"
+                ok "(U-twin) safe-delete compact prose minus the sites_at= reading ($sdtCut B) is $sdtRest B <= 720 B (the pre-CALLSITE-LINE pin)"
             else
-                no "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is ${sdtRest:-?} B > 720 B — the rest re-inflated"
+                no "(U-twin) safe-delete compact prose minus the sites_at= reading ($sdtCut B) is ${sdtRest:-?} B > 720 B — the rest re-inflated"
+            fi ;;
+    esac
+fi
+# (U-twin-callers) the pre-2026-10-09 ripwire.callers/v1 pin, kept the same way: the 330 -> 450 re-pin paid for ONE
+# reading, the caller row's sites_at=. The --callers=distance compact answer with exactly that reading cut out still fits
+# 330 B under the same `leg prose` operand; the cut is taken only when a row carries sites_at= AND the reading occurs once.
+( cd "$REPO" && "$BIN" . --callers=distance --legend=compact >"$TMP/cat.c" 2>/dev/null </dev/null \
+  && "$BIN" . --callers=distance --legend=full >"$TMP/cat.full" 2>/dev/null </dev/null ); rcCat=$?
+catCut="$( python3 - "$TMP/cat.c" "$TMP/cat.cut" <<'PY'
+import re, sys
+doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+reading = " <s sites_at=>: its call sites spelled like of=, as file:line (p= is its def line); by name, not proof each binds."
+body = re.sub( r"<!--.*?-->", "", doc, flags = re.S )
+if not re.search( r'<s [^>]*sites_at="[^"]*:[0-9]', body ):
+    print( "NOPREMISE no caller row carries sites_at=" ); sys.exit( 0 )
+if doc.count( reading ) != 1:
+    print( "NOPREMISE the sites_at= reading occurs %d times, not once" % doc.count( reading ) ); sys.exit( 0 )
+open( sys.argv[2], "w", encoding = "utf-8" ).write( doc.replace( reading, "", 1 ) )
+print( len( reading.encode() ) )
+PY
+)"
+if [ "$rcCat" -ne 0 ]; then
+    no "(U-twin-callers) --callers=distance exited $rcCat — the twin cannot measure"
+else
+    case "$catCut" in
+        NOPREMISE*) no "(U-twin-callers) callers twin cannot measure: ${catCut#NOPREMISE }" ;;
+        *)  catRest="$( leg prose "$TMP/cat.cut" "$TMP/cat.full" )"
+            if [ -n "$catRest" ] && [ "$catRest" -eq "$catRest" ] 2>/dev/null && [ "$catRest" -le 330 ]; then
+                ok "(U-twin-callers) callers compact prose minus the sites_at= reading ($catCut B) is $catRest B <= 330 B (the pre-CALLSITE-AT pin)"
+            else
+                no "(U-twin-callers) callers compact prose minus the sites_at= reading ($catCut B) is ${catRest:-?} B > 330 B — the rest re-inflated"
             fi ;;
     esac
 fi
@@ -1188,11 +1229,14 @@ echo
 # RE-ANCHORED 2026-09-26 (lane impact-depth-065, depth-labelled --impact): 7,500 → 7,700 B, measured 7,622 (7,495 on the
 # base binary b343b988). The loop's --impact=distance probe now carries by_depth= and d=, and its compact legend reads both
 # (+127 B, the (U) table's ripwire.impact/v1 row); the other nine verbs unmoved. Same rule: the next multiple of 100 B.
+# RE-ANCHORED 2026-10-09 (lane callers-sites-first-call, CALLSITE-AT): 7,800 → 7,900 B, measured 7,830 (7,711 at the
+# train-26b anchor below, which is this lane's base). The +119 B is the loop's --callers probe: its rows now carry
+# sites_at= and the compact legend reads it (the ripwire.callers/v1 (U) row moved +121 B the same way). Same rule.
 # RE-ANCHORED 2026-10-08 (train 26b): 7,700 → 7,800 B, measured 7,711. Attributed on this fixture by merge step: 7,622 at
 # the train's phase-A head, 7,688 with receiver evidence merged (its present-only via= readings; under the old ceiling),
 # 7,711 with lean-answers merged: +23 B, all on the --for probe, the " (absent cx/ccx/in = 0)" reading the lane pinned
 # in the ripwire.for/v1 row. The other verbs are unmoved by that step. Same rule: the next multiple of 100 B.
-echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,800 B (34,716 B in full on the fixture) ==="
+echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 7,900 B (34,716 B in full on the fixture) ==="
 loopBytes=0; fullBytes=0
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
@@ -1201,8 +1245,8 @@ for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--u
     b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
 done
-[ "$loopBytes" -le 7800 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,800 B; full: $fullBytes B)"
+[ "$loopBytes" -le 7900 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
+                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 7,900 B; full: $fullBytes B)"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="

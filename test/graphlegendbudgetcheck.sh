@@ -118,7 +118,12 @@ budgetFor(){
         # when reaches>0. Measured on this probe: 3926 B on main (3fcd515f), 4288 B on this lane (+362 B, exactly the
         # clause); 4336 keeps impact's 48 B headroom. The gate's RED-on-1dc7b01 property rests on the uses pin (4114 <
         # 4303), which does not move.
-        callers) echo 3429 ;;
+        # RE-PINNED callers +340 (2026-10-09, lane callers-sites-first-call, CALLSITE-AT): every caller row now carries
+        # sites_at=, its call sites as file:line, and the full legend defines it (graphlegend.h kCallSitesAtLegend, present
+        # only when a row carries it). Measured on this probe: 3403 B on main (0852bc0f), 3743 B on this lane (+340 B,
+        # exactly the clause); 3769 keeps callers' 26 B headroom. The OLD 3429 stays as a twin below: the legend with that
+        # one sentence cut out must still fit it, so the rest of the essay cannot re-inflate under the new headroom.
+        callers) echo 3769 ;;
         impact)  echo 4336 ;;
         uses)    echo 4114 ;;
     esac
@@ -141,6 +146,31 @@ for v in $VERBS; do
         info "(a2) --$v: legend ($legend B) still exceeds payload ($payload B) on this symbol — aspirational, not asserted"
     fi
 done
+
+# (a-twin) the pre-CALLSITE-AT callers pin: the --callers full legend minus the sites_at= sentence still fits 3429 B. The
+# cut is taken only when a row carries sites_at= AND the sentence occurs once, start to end; any other premise FAILs.
+twin="$( python3 - "$TMP/callers.xml" <<'PY'
+import re, sys
+doc  = open( sys.argv[1], 'rb' ).read().decode( 'utf-8', 'replace' )
+m    = re.match( r'\A(?:\s*<!--.*?-->)+', doc, re.S )
+leg  = m.group( 0 ) if m else ''
+if not leg or 'sites_at="' not in doc[ len( leg ): ]:
+    print( 'NOPREMISE no row carries sites_at=' ); sys.exit( 0 )
+a, z = 'sites_at= on a caller row', '(an aliased import). '
+i = leg.find( a ); j = leg.find( z, i + 1 ) if i >= 0 else -1
+if i < 0 or j < 0 or leg.count( a ) != 1:
+    print( 'NOPREMISE sentence-not-found-once' ); sys.exit( 0 )
+print( len( ( leg[ :i ] + leg[ j + len( z ): ] ).encode() ) )
+PY
+)"
+case "$twin" in
+    NOPREMISE*) no "(a-twin) --callers legend twin cannot measure: ${twin#NOPREMISE }" ;;
+    *)  if [ -n "$twin" ] && [ "$twin" -eq "$twin" ] 2>/dev/null && [ "$twin" -le 3429 ]; then
+            ok "(a-twin) --callers legend minus the sites_at= sentence is $twin B <= 3429 B (the pre-CALLSITE-AT pin)"
+        else
+            no "(a-twin) --callers legend minus the sites_at= sentence is ${twin:-?} B > 3429 B — the rest re-inflated"
+        fi ;;
+esac
 
 # ── (b) the honesty vocabulary a reader must meet on all three, unchanged by the trim (test/floormarkcheck.sh
 #        already gates the exact cross-verb anchors; this arm is the lane's own quick check that the shared

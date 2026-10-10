@@ -395,10 +395,10 @@ IM="$( "$BIN" "$TMP/issue60prod" --no-cache --impact=setPhase 2>/dev/null )"
     || no "(8b) --callers=setPhase count=\"$( attr count "$CA" )\", expected 2"
 [ "$( attr reaches "$IM" )" = 2 ] && ok "(8b) --impact=setPhase reaches=\"2\" (the pre-#60 binary reports 1)" \
     || no "(8b) --impact=setPhase reaches=\"$( attr reaches "$IM" )\", expected 2"
-printf '%s' "$CA" | grep -q '<s t="fn" n="boot" p="src/index.ts:3"/>' \
+printf '%s' "$CA" | grep -q '<s t="fn" n="boot" p="src/index.ts:3" sites_at="src/index.ts:4"/>' \
     && ok "(8b) the named-function caller row is unchanged — no existing edge moved" \
     || no "(8b) the boot row changed shape: $CA"
-printf '%s' "$CA" | grep -q '<s t="modscope" n="&lt;file-scope&gt;" p="src/index.ts:1"/>' \
+printf '%s' "$CA" | grep -q '<s t="modscope" n="&lt;file-scope&gt;" p="src/index.ts:1" sites_at="src/index.ts:7"/>' \
     && ok "(8b) the module-scope caller is a LABELLED t=\"modscope\" row, not a fabricated function" \
     || no "(8b) --callers=setPhase has no modscope row: $CA"
 # HONESTY, IN EVERY POSTURE. The default CLI legend is compact and the clause is a present-only term
