@@ -133,6 +133,40 @@ inline void absorbCapDisclosure( const CapDisclosure& disc, std::string& note, s
     xmlAttrs += disc.xml;
 }
 
+// lane for-noise A (lexical.h kTaskFrameTermWeight): the frame weighting is not a cap — nothing was cut — but it is
+// a fact of the RANKING the reader cannot see, so it rides the same three post-ladder accumulators (paid in bytes,
+// never in rows) and the same present-only rule: 0 weighted words ⇒ every accumulator stays exactly as it was.
+// The clause carries frame_terms= verbatim, so it defines itself (the dropped_positive= contract). No "--" (G4).
+inline std::string frameTermsAttrXml( std::uint32_t n )
+{
+    return n > 0 ? ( " frame_terms=\"" + std::to_string( n ) + "\"" ) : std::string();
+}
+
+inline std::string frameTermsNote( std::uint32_t n )
+{
+    return n > 0 ? ( " [frame_terms=" + std::to_string( n ) + ": question-frame words scored at a quarter weight, never dropped]" )
+                 : std::string();
+}
+
+inline void absorbFrameTermsDisclosure( std::uint32_t n, std::string& note, std::string& xmlAttrs, std::string& jsonKeys )
+{
+    ASSUME_NO_ALIAS3( note, xmlAttrs, jsonKeys );
+    if( n == 0 )
+    {
+        return;
+    }
+    note     += frameTermsNote( n );
+    xmlAttrs += frameTermsAttrXml( n );
+    jsonKeys += ",\"frame_terms\":" + std::to_string( n );
+}
+
+// The two-dialect form, for the MCP `for` verb (XML text only — absorbCapDisclosure's twin, for the same reason).
+inline void absorbFrameTermsDisclosure( std::uint32_t n, std::string& note, std::string& xmlAttrs )
+{
+    note     += frameTermsNote( n );
+    xmlAttrs += frameTermsAttrXml( n );
+}
+
 // Record one cap into a census the caller may not have asked for. Null-tolerant on purpose: `outInfo` is
 // optional on every boost entry point in this file, and without this the three census statements would each
 // be wrapped in a guard of its own, which buries the facts they record inside control flow that says nothing.

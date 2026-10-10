@@ -574,6 +574,108 @@ inline std::vector<float> rankTierSymbolMultipliers( const IngestResult& ing )
     return rankTierSymbolMultipliersShaped( ing, /*demoteDocTier=*/false );
 }
 
+// ── lane for-noise C (train 27): --for's NOISE TIERS ─────────────────────────────────────────────────────────
+// Three families whose rows restate an API rather than implement it — a benchmark harness's copy of the router
+// interface, an example's demo of the matcher, a declaration file's signature of a function defined elsewhere —
+// take the §P4 demotion factor on the --for subtoken route only (computeLensRanking / mcpverbs.h forTaskText).
+// NOT in pathTierOf: that key also orders --grep/--callers/--uses rows, whose answers must not move. min(), never
+// a product: a file another rule already demoted is one claim, not two. LIFTED when the task names the family
+// ("how does the benchmarks tool …", "which .d.ts declares …"): then those rows ARE the subject.
+// Declaration files are the same construct in two indexed languages — TypeScript .d.ts/.d.mts/.d.cts and the
+// Python typing stub .pyi — so both are in the family (language-neutral); Ruby .rbs/.rbi are not indexed today.
+// What this does NOT mean: nothing is dropped — a demoted row still ranks, and is served when it fits.
+enum class ForNoiseFamily : std::uint8_t
+{
+    None,
+    Benchmarks,
+    Examples,
+    Declarations,
+};
+
+inline ForNoiseFamily forNoiseFamilyOf( std::string_view p ) noexcept
+{
+    if( hasDirSegment( p, "benchmarks/" ) || hasDirSegment( p, "benchmark/" ) )
+    {
+        return ForNoiseFamily::Benchmarks;
+    }
+    if( hasDirSegment( p, "examples/" ) )   // docs/examples/ included: a segment match anywhere in the path
+    {
+        return ForNoiseFamily::Examples;
+    }
+    if( p.ends_with( ".d.ts" ) || p.ends_with( ".d.mts" ) || p.ends_with( ".d.cts" ) || p.ends_with( ".pyi" ) )
+    {
+        return ForNoiseFamily::Declarations;
+    }
+    return ForNoiseFamily::None;
+}
+
+// Which families the task NAMES (bit 1 << family): a whole lower-cased word of the task, or a declaration
+// extension spelled inside it. Word-bounded on isIdentChar, so "examples" lifts and "counterexamples" does not.
+inline unsigned forNoiseFamiliesNamed( std::string_view task ) noexcept
+{
+    unsigned named = 0;
+    std::size_t i = 0;
+    while( i < task.size() )
+    {
+        while( i < task.size() && !namesplit::isIdentChar( task[i] ) )
+        {
+            ++i;
+        }
+        const std::size_t start = i;
+        while( i < task.size() && namesplit::isIdentChar( task[i] ) )
+        {
+            ++i;
+        }
+        std::string w( task.substr( start, i - start ) );
+        for( char& c : w )
+        {
+            c = ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : c;
+        }
+        if( w == "benchmark" || w == "benchmarks" || w == "bench" )
+        {
+            named |= 1u << unsigned( ForNoiseFamily::Benchmarks );
+        }
+        else if( w == "example" || w == "examples" )
+        {
+            named |= 1u << unsigned( ForNoiseFamily::Examples );
+        }
+        else if( w == "declaration" || w == "declarations" || w == "typings" || w == "stub" || w == "stubs" )
+        {
+            named |= 1u << unsigned( ForNoiseFamily::Declarations );
+        }
+    }
+    if( task.find( ".d.ts" ) != std::string_view::npos || task.find( ".d.mts" ) != std::string_view::npos
+        || task.find( ".d.cts" ) != std::string_view::npos || task.find( ".pyi" ) != std::string_view::npos )
+    {
+        named |= 1u << unsigned( ForNoiseFamily::Declarations );
+    }
+    return named;
+}
+
+// Fold the noise tiers into the --for tier vector in place (shrink-only — the MaxScore bound stays a bound).
+inline void applyForNoiseTiers( const IngestResult& ing, std::string_view task, std::vector<float>& tierMul )
+{
+    EXPECTS( tierMul.size() == ing.symbols.size(), "one tier factor per symbol (rankTierSymbolMultipliersShaped)" );
+    const unsigned          named = forNoiseFamiliesNamed( task );
+    std::vector<float>      fileMul( ing.files.size(), 1.f );
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        const ForNoiseFamily fam = forNoiseFamilyOf( rootRelPath( ing, std::uint32_t( f ) ) );
+        if( fam != ForNoiseFamily::None && ( named & ( 1u << unsigned( fam ) ) ) == 0 )
+        {
+            fileMul[f] = kRankTierDemoMul;
+        }
+    }
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        const std::uint32_t f = ing.symbols[i].fileId;
+        if( f < fileMul.size() )
+        {
+            tierMul[i] = std::min( tierMul[i], fileMul[f] );
+        }
+    }
+}
+
 // the tier's own inverse, for the weak-evidence honesty signal (R4 weak=): the strongest score with the
 // tier factor divided back OUT — a corpus whose best evidence lives under a down-weighted path still HAS
 // that evidence; de-prioritized is not absent. (Under MaxScore pruning a down-weighted entry outside the

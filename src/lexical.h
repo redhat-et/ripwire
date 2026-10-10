@@ -107,6 +107,11 @@ struct LexTermEvidence
     std::size_t                termsSeenTotal = 0;
     bool                       termsCapped    = false;
 
+    // lane for-noise A: how many distinct PRESENT (df > 0) query terms were task-frame words scored at
+    // kTaskFrameTermWeight — 0 when the caller did not arm frame weighting, when the task holds none, or when the
+    // sole-anchor guard withheld the weight. The machine form of the root's frame_terms= (present-only).
+    std::uint32_t              frameTermsWeighted = 0;
+
     const std::uint64_t* anyMaskOf( std::size_t sym ) const noexcept { return anyMask.data() + sym * maskWords; }
     static bool          hasBit( const std::uint64_t* mask, std::size_t u ) noexcept { return ( mask[ u / 64 ] >> ( u % 64 ) ) & 1u; }
 
@@ -441,6 +446,46 @@ inline LexHeadIndex buildLexHeadIndex( std::size_t rowCount, TokOfFn&& tokOf )
     return ix;
 }
 
+// ── lane for-noise A (train 27): TASK-FRAME WORDS, weighted, never dropped ─────────────────────────────────
+// A --for task is English prose around a few content words: "I want to write a new router — which existing ones
+// should I read first?". On the subtoken route every one of those words is a BM25 term, so a symbol that recites
+// the FRAME (a `write*` helper, a doc comment that says "how does … work", a list of sample questions) outranks the
+// subject. The frozen list (reports/for-noise-body-slot.md §0.2 A; the gates review ruled no exemption for a frame
+// word that is also a symbol name — the B8 mention anchor lifts a NAMED one) holds the question frame, the
+// asker's verbs and their adjectives. A listed word's contribution is MULTIPLIED by kTaskFrameTermWeight — the
+// docs/EVALS.md lesson of LB-1 (filler-strip), un-guarded stemming and the term margin: a reduced-weight term
+// is the one shape with an unexhausted path; a drop is not. What this does NOT mean: the word is not removed
+// (coverage=, the file page and the evidence masks read it unchanged), and no corpus statistic is consulted —
+// it is the TASK's vocabulary, so a non-English task gets no weighting (a stated floor, every language alike).
+inline constexpr double kTaskFrameTermWeight = 0.25;
+
+inline bool isTaskFrameWord( std::string_view w ) noexcept
+{
+    static constexpr std::string_view kFrame[] = {
+        // the question frame
+        "how", "does", "do", "did", "is", "are", "was", "were", "be", "been", "being", "what", "which", "where", "when",
+        "why", "who", "whom", "whose", "the", "a", "an", "this", "that", "these", "those", "it", "its", "they", "them",
+        "their", "there", "here", "i", "me", "my", "we", "us", "our", "you", "your", "to", "of", "in", "on", "at", "by",
+        "for", "with", "from", "into", "onto", "than", "then", "and", "or", "but", "not", "no", "nor", "so", "if", "as",
+        "any", "all", "some", "each", "every", "one", "also", "just", "only", "really", "please", "thanks", "can",
+        "could", "should", "would", "will", "may", "might", "must", "shall", "has", "have", "had", "get", "gets", "got",
+        "work", "works", "working", "way", "like", "kind", "sort", "thing", "things", "something", "about", "over",
+        "under", "up", "down", "out", "off", "via", "per", "vs", "versus", "etc",
+        // the asker's verbs and adjectives (idea #2)
+        "write", "add", "new", "check", "pick", "turn", "value", "want", "need", "orient", "good", "existing", "first",
+        "copy", "read", "look", "find", "see", "show", "tell", "explain", "give", "make", "use", "used", "using", "start",
+        "begin", "understand", "know", "help", "implement", "implementing", "implemented", "implementation", "change",
+        "changes", "changing", "fix", "fixing", "modify", "update", "create", "creating", "mean", "means" };
+    for( std::string_view f : kFrame )
+    {
+        if( w == f )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // THE pass-2 scan text for one file, resolved by ONE rule in ONE place: the docText override when the file
 // has one, else the file's bytes moved into `scratch`. An EMPTY string means "skip this file" — what an empty
 // docText override and an unreadable file have always meant. `scratch` owns those bytes for as long as the
@@ -472,7 +517,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                                                std::size_t pruneTopK, const std::vector<char>* alwaysExact,
                                                const std::vector<float>* symbolScoreMul, int pathFieldDefaultW = 0,
                                                int basenameFieldDefaultW = 0, std::string_view pathRootPrefix = {},
-                                               LexTermEvidence* evidenceOut = nullptr )   // L-W: the term evidence, read back out (see the struct)
+                                               LexTermEvidence* evidenceOut = nullptr,    // L-W: the term evidence, read back out (see the struct)
+                                               bool frameWeighting = false )              // lane for-noise A: score task-frame words at
+                                                                                          //   kTaskFrameTermWeight (--for's subtoken route only)
 {
     PROFILE_SCOPE_DESCRIBE( "lexical: lexicalScores (BM25 over symbols)" );
     const std::size_t S = ing.symbols.size();
@@ -1236,6 +1283,59 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
     }
 
+    // lane for-noise A — the per-term weight (1.0 everywhere unless armed). SOLE-ANCHOR GUARD, the term margin's
+    // own rule: when every PRESENT kept term is a frame word ("how do I write"), nothing else carries the query, so
+    // no weight is applied and the ranking is the historical one byte for byte. "Present" (df > 0) is load-bearing
+    // for the same reason it is above: an absent content word must not switch the weighting on.
+    std::vector<double> termW;
+    if( frameWeighting )
+    {
+        std::vector<char> present( uniqueCount, 0 );
+        for( std::size_t i = 0; i < S; ++i )
+        {
+            const int* const tfRow = tfFlat.data() + i * uniqueCount;
+            for( std::size_t u = 0; u < uniqueCount; ++u )
+            {
+                present[u] = char( present[u] | ( tfRow[u] > 0 ? 1 : 0 ) );
+            }
+        }
+        std::uint32_t framePresent = 0;
+        bool          contentPresent = false;
+        for( std::size_t u = 0; u < uniqueCount; ++u )
+        {
+            if( present[u] == 0 || termKept[u] == 0 )
+            {
+                continue;
+            }
+            if( isTaskFrameWord( uniqueToks[u] ) )
+            {
+                ++framePresent;
+            }
+            else
+            {
+                contentPresent = true;
+            }
+        }
+        if( contentPresent && framePresent > 0 )
+        {
+            termW.assign( uniqueCount, 1.0 );
+            for( std::size_t u = 0; u < uniqueCount; ++u )
+            {
+                if( present[u] != 0 && isTaskFrameWord( uniqueToks[u] ) )
+                {
+                    termW[u] = kTaskFrameTermWeight;
+                }
+            }
+            if( evidenceOut )
+            {
+                evidenceOut->frameTermsWeighted = framePresent;
+            }
+        }
+    }
+    ASSUME( termW.empty() || termW.size() == uniqueCount );   // one weight per unique term, or none at all
+    // a quarter of a contribution is still a contribution: (0,1], so every bound below stays a bound
+    const auto weightOf = [ &termW ]( std::size_t u ) noexcept { return termW.empty() ? 1.0 : termW[u]; };
+
     // corpus stats — avgdl accumulates in the SAME doc order as before (identical doubles); dfreq[u] =
     // number of docs containing unique query token u (w ≥ 1, so tf > 0 ⇔ the old docs[i] contained it)
     double avgdl = 0;
@@ -1317,6 +1417,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 const double T    = double( tfMaxOf[u] );
                 const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
                 capOcc[u]         = cap1 * double( occCount[u] );
+                if( !termW.empty() )
+                {
+                    capOcc[u] *= termW[u];   // lane for-noise A: the weight shrinks the bound exactly as it shrinks the term
+                }
             }
         }
 
@@ -1362,7 +1466,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 }
                 const int    n   = dfreq[u];
                 const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-                sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
+                if( termW.empty() )
+                {
+                    sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
+                }
+                else
+                {
+                    sc += weightOf( u ) * ( idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) ) );
+                }
             }
             if( ing.symbols[i].kind == SymKind::Section )
             {
@@ -1423,7 +1534,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             }
             const int    n   = dfreq[u];
             const double idf = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-            sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
+            if( termW.empty() )
+            {
+                sc += idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) );
+            }
+            else
+            {
+                sc += weightOf( u ) * ( idf * ( tf * ( k1 + 1.0 ) ) / ( tf + k1 * ( 1.0 - b + b * dl[i] / ( avgdl > 0 ? avgdl : 1.0 ) ) ) );
+            }
         }
         // Markdown headings (sec) compete on name-match with code; down-weight so a doc stays FINDABLE but
         // code wins when both match — fixes prose swamping retrieval in doc-heavy repos (review finding #4).

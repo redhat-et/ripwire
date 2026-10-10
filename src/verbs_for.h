@@ -76,7 +76,7 @@ inline std::string applyStructuralExpansionNoted( const rw::IngestResult& ing, s
 // cost of giving it up on this route: none detectable — 384.7 vs 378.2 ms on django, 283.2 vs 269.8 ms
 // on webpack, 159.3 vs 159.0 ms on this repo, exhaustive at or inside the noise of pruned every time.
 rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task, bool compactCandidate = false,
-                                    bool fullDistribution = false )   // deep-tail: the file-grain tail reads the WHOLE
+                                    bool fullDistribution = false,    // deep-tail: the file-grain tail reads the WHOLE
                                                                       //   positive-score distribution (its total= is a
                                                                       //   real count, and its order runs far past the
                                                                       //   head), so the --for bundle path forces
@@ -84,6 +84,10 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
                                                                       //   rule, for the same reason. Callers with no
                                                                       //   tail (pack-task, candidates) keep the H2
                                                                       //   MaxScore pruning.
+                                    bool forNoiseRules = false )      // lane for-noise: the --for verb's own rules
+                                                                      //   (frame words A, noise tiers C) on its
+                                                                      //   SUBTOKEN route; pack-task and the change
+                                                                      //   family keep the historical ranking.
 {
     using namespace rw;
     const Config&                     cfg       = d.cfg;
@@ -102,6 +106,9 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     const bool        routeOn      = !cfg.noRoute;
     const RouteChoice rc           = routeOn ? chooseForRanker( ing, task ) : RouteChoice{};
     const bool        compactRoute = routeOn && compactCandidate && rc.which == LexMode::SubtokenBody;
+    // lane for-noise: every --for posture of the subtoken route (XML, both legends, --json, --signatures-only,
+    // --format=candidates — and the MCP twin, mcpverbs.h forTaskText), so the pool parity gate sees one ranking.
+    const bool        forNoise     = forNoiseRules && routeOn && rc.which == LexMode::SubtokenBody;
 
     std::size_t       forPruneK = 0;
     std::vector<char> ifaceExact;
@@ -131,7 +138,11 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // §P4 tier de-prioritization (filter.h): fixtures / present/ decks / generated captures score down,
     // folded INTO BM25 scoring (pruning-bound-safe) and BEFORE the B8 mention anchor — a fixture the task
     // literally NAMES is still lifted near the top. Plus, when a shape fired, the document tier.
-    const std::vector<float> tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
+    std::vector<float> tierMul = rankTierSymbolMultipliersShaped( ing, shape.fires() );
+    if( forNoise )
+    {
+        applyForNoiseTiers( ing, task, tierMul );   // lane for-noise C: benchmarks/ examples/ *.d.ts, unless the task names the family
+    }
     // Change logs and translations go LAST in the doc-mention lift below (filter.h docNoiseSymbolMultipliers), unless
     // the task asks about what those files hold. BM25 is untouched. Routed path only, like the shape.
     const std::vector<float> docNoiseMul = routeOn ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};
@@ -142,7 +153,8 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
-                                                                                  0, 0, {}, &out.evidence );   // L-W: the term evidence rides out
+                                                                                  0, 0, {}, &out.evidence,     // L-W: the term evidence rides out
+                                                                                  /*frameWeighting=*/forNoise );
         if( rc.which == LexMode::NameExact )
         {
             // L-W: the name-exact ranker scores WHOLE names, so the subtoken evidence coverage= and the file page
@@ -178,6 +190,9 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         termsCap.note( "terms_capped", "terms_total", out.evidence.termsCapped, out.evidence.termsSeenTotal );
         absorbCapDisclosure( termsCap, out.capNote, out.capAttrs, out.capJson );
     }
+    // lane for-noise A: the frame weighting rides the same three post-ladder accumulators (a disclosure paid in
+    // bytes, never in ranked rows), present only when a frame word was actually weighted.
+    absorbFrameTermsDisclosure( out.evidence.frameTermsWeighted, out.capNote, out.capAttrs, out.capJson );
 
     // R4: capture the RAW routed lexical score's max BEFORE --anchor/mention/cochange reshape lensRank — the
     // honesty signal reads the actual textual evidence, not a graph-expanded or query-mention-boosted number
@@ -2925,7 +2940,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             // anchors moved it, and (the signal that used to be XML-comment-only) whether the whole ranking
             // rests on evidence too thin to trust.
             emitCandidates( stdout, ing, lensRank, cfg.topK, cfg.adaptive, /*scanFullDistribution=*/true,
-                            CandidateProvenance{ lr.routeTag, lr.anchorLifts, forWeak, lr.docTierTag }, redactPtr, flRootArg );
+                            CandidateProvenance{ lr.routeTag, lr.anchorLifts, forWeak, lr.docTierTag, lr.evidence.frameTermsWeighted },
+                            redactPtr, flRootArg );
             reportRedactions( stderr, redactCounts );    // W3-N1: <sig> is now a redacting seam — this export must disclose its own tally
             return 0;
         }
@@ -4370,7 +4386,7 @@ std::optional<int> runForLens( const MainDispatch& d )
         return std::nullopt;
     }
     rw::LensRanking lr = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
-                                             /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
+                                             /*fullDistribution=*/!cfg.candidates, /*forNoiseRules=*/true );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
     // the at= stamp (gitstamp.h): one read per run — every payment-mode render below shares it, like the ranking
     const bool        forSingleRoot = d.ing.realPaths.empty() && cfg.roots.size() == 1;
     const std::string forAtStamp    = forSingleRoot ? rw::gitstamp::stampAt( d.root ) : std::string();

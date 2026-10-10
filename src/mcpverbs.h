@@ -2198,7 +2198,14 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // mention anchor) as the CLI --for. This dialect always routes, so the shape is always asked for and
     // the disclosure always has a route= to ride in.
     const queryshape::Verdict shape   = queryshape::classify( task );
-    const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
+    std::vector<float>        tierMul = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
+    // lane for-noise: the CLI twin's --for rules on the subtoken route (verbs_for.h computeLensRanking forNoise) — the
+    // noise tiers (C) and the frame-word weight (A) — so mcpforparitycheck's pool is one ranking on both surfaces.
+    const bool                forNoise = !noRoute && rc.which == LexMode::SubtokenBody;
+    if( forNoise )
+    {
+        applyForNoiseTiers( ing, task, tierMul );
+    }
     const std::vector<float>  docNoiseMul = !noRoute ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};   // the CLI twin's lift order
     // deep-tail: this bundle now serves the file-grain tail, a full-distribution consumer — the H2
     // MaxScore prune bound is 0 (exhaustive) here for the same reason the CLI --for passes
@@ -2209,7 +2216,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
                                        ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                        : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
-                                                              0, 0, {}, &mcpEvidence );
+                                                              0, 0, {}, &mcpEvidence, /*frameWeighting=*/forNoise );
     if( rc.which == LexMode::NameExact )
     {
         lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
@@ -2235,6 +2242,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         termsCap.note( "terms_capped", "terms_total", mcpEvidence.termsCapped, mcpEvidence.termsSeenTotal );
         absorbCapDisclosure( termsCap, termsCapNote, capAttrs );
     }
+    absorbFrameTermsDisclosure( mcpEvidence.frameTermsWeighted, termsCapNote, capAttrs );   // lane for-noise A: the CLI twin's order
 
     if( !noRoute && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {

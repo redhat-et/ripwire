@@ -6109,6 +6109,7 @@ struct CandidateProvenance
     std::uint32_t anchored = 0;         // §B8 mention-anchor lifts folded into this rank (0 is a real, emitted value)
     bool          weak     = false;     // §P5: the top raw lexical score is below the confidence threshold
     const char*   docTier  = nullptr;   // the QUERY-SHAPE document demotion (filter.h shapeDocTierTag); nullptr ⇒ absent
+    std::uint32_t frameTerms = 0;       // lane for-noise A: task-frame words scored at a quarter weight; 0 ⇒ absent (present-only)
 };
 
 // The root element's opening tag. §A4f — what each attribute means, once:
@@ -6136,6 +6137,10 @@ inline std::string candidatesRootTag( std::size_t keep, std::size_t corpusCount,
         tag += " weak=\"1\"";
     }
     if( prov.docTier ) { tag += " doc_tier=\"";  tag += prov.docTier;  tag += "\""; }
+    if( prov.frameTerms > 0 )
+    {
+        tag += " frame_terms=\"" + std::to_string( prov.frameTerms ) + "\"";
+    }
     return tag + ">";
 }
 
@@ -6205,7 +6210,13 @@ inline void packCandidates( std::FILE* out, const IngestResult& ing, const std::
              "query-mention lifts (0 = the anchor ran and moved nothing); weak=\"1\" means the top raw lexical "
              "score is below the confidence bar, so these rows rest on thin textual evidence; doc_tier= names "
              "the query SHAPE (a pasted trace, a pasted bug-report form) that scored documents down for this "
-             "run, absent when none did. -->" );
+             "run, absent when none did." );
+    if( prov.frameTerms > 0 )   // lane for-noise A: present-only, so every other export is byte-identical
+    {
+        w.write( " frame_terms= counts the question-frame words of the task (how, does, write, existing, ...) that scored "
+                 "at a quarter weight, never dropped." );
+    }
+    w.write( " -->" );
     w.write( candidatesRootTag( keep, S, prov ) );
     for( std::size_t r = 0; r < keep; ++r )
     {
