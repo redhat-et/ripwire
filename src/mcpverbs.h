@@ -2146,6 +2146,8 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, bool payFr
     closeRosterGaps( out );
     mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
     return McpForAssembly{ std::move( out ), mcpSigsCut };
+}
+
 // #362 review round 4, follow-up (quality bar): the twins' B2 rank-flags fragment, named once -
 // the inline conditional appeared in both twins' page calls and the second read pushed
 // packTaskText past its complexity bar.
