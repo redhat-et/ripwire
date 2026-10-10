@@ -6959,6 +6959,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 if( !provedScratch.empty() )
                 {
                     cand.swap( provedScratch );
+                    candMemo = nullptr;   // cand is Rule 3's proven list now, not the memoized one: the ladder may not read it as that file-sorted run
                     narrowed = true;
                 }
             }

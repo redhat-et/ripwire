@@ -38,6 +38,7 @@ that repeat the question's other words, so its callees — the names an agent ne
   answer. Measured on the 32 `--for` rows of the round-1 comparison set: the two in-scope rows now name 5 of 5 gold
   callee items they missed (were 0 of 5); 23 of 32 answers are byte-identical, 1 differs only in `noedge=`, and 8 grow by 0.2–1.1 KB (+1.4% over all 32). Gate:
   `test/ownerhopcheck.sh`.
+
 ### Changed — `ripwire wrap` recommends `--for` at its default budget
 
 The CLI-first paste block (claude, codex, opencode, openclaw, hermes) and the aider repo-map line now read
@@ -103,6 +104,7 @@ in a Java class with an outside base drawn to an unrelated class's `flush`.
   `test/receiverevidencecheck.sh` (every surface, CLI/MCP parity, census conservation, and near misses
   for every evidence rule). Ingest records the receiver chain and the Java/C#/Kotlin/Swift declarations
   (`kParserVer` 156 in this release, see the versions note; `kCacheVersion` 29), so a cache written by an earlier build is re-parsed.
+
 ### Added — `--quality-delta` gains a twelfth kind, `defect-shape`: four defect shapes code review kept finding by hand
 
 `kind="defect-shape"` rows name a known defect SHAPE the change added, in `defect=` (`src/defectshape.h`):
@@ -153,6 +155,7 @@ object-like macro defined in another file (`#define xyargs p.x, p.y` in a header
 can be a false format-arity row; and only a literal `#if 0` is skipped — `#if false`, `#if (0)`, `#if 0 && …` and the
 `#else` of `#if 1` are read as live code. The qsnap blob scheme moves (19 in this release, see the versions note); the
 legend dictionary gains `r defect=`.
+
 ### Changed — a warm CLI call costs about a quarter less, `--whereis` on a many-branch checkout about 70% less, and `--whereis` refuses instead of printing a zero it never measured
 
 Every answer is byte-identical to before except the one `--whereis` refusal below. Measured on 2026-10-08 on a
@@ -4148,6 +4151,7 @@ A 17, A′ 8, B 41, F 275 — and on #44's head C and D red with 18 and 21 viola
 itself a failure. Every arm fires on a planted fixture and stays silent on a clean one on every run. (E), POSIX/Windows
 declaration parity, is present and turns itself on when the Windows branch declares its first function.
 `test/namedfileinputcheck.sh`'s mechanism arm reads the `os::open` spelling. CONTRIBUTING §3 states the rule.
+
 ### Changed — the self-check macro vocabulary is renamed to the conventional spellings, and degrade paths gain a sink form
 
 `VERIFY` / `VERIFY_TEXT` → `ASSUME`; `VERIFY_DEBUG_ONLY(_TEXT)` → `DASSERT`; `VERIFY_NOT_REACHED(_TEXT)` →
@@ -4437,6 +4441,7 @@ allocations) within seconds.
   O(words²) — landing on the exact same candidate the original rescan would have found first. Gate:
   `test/traceasanlinearcheck.sh` (40 KB/160 KB/640 KB/2.5 MB timing; the baseline binary times out past
   640 KB on the same fixture).
+
 ### Fixed — a cache blob, a file in the tree, or an MCP preview could crash, hang or starve the process
 
 Each of these was reproduced before it was fixed, and each now has a gate that fails on the old code.
@@ -5393,6 +5398,7 @@ Both commands in one target made a cross-config Ninja Multi-Config build fail wi
 merged tree. Both stamp scripts also give their temp file a random name. Two builds of one tree used to share
 `<output>.tmp`: in 40 concurrent runs of the old identity script, 10 to 19 failed with "could not write" in each of
 three rounds, and none of the new script's runs did.
+
 ### Fixed — a TS/JS call on a literal no longer pins an unrelated same-named function (parser versions 100 and 103)
 
 `"=".repeat( 50 )` bound webpack's in-repo CssSyntax `repeat`, and `/^@/.exec( … )` its DefinePlugin `exec` (issue
@@ -9205,6 +9211,7 @@ the try handler's entry, aliases — is named in the legend instead of guessed. 
 `docs/EVALS.md` ("Flow-sensitive slice in the small"): 0 wrong of 85 hand-written sentinel use rows across
 53 functions, and the 57-commit `--since` labelled set unchanged at 35/35 and 22/22. Gate:
 `test/sliceflowsenscheck.sh`.
+
 ### Fixed — `--expand` no longer takes minutes on a file whose lines are hundreds of kilobytes
 
 Secret redaction (`redactSecrets`, on by default at every body-emission seam) was quadratic in LINE
@@ -9547,6 +9554,7 @@ verified on ubi8, ubi9, ubuntu:22.04, ubuntu:24.04). A new `smoke-rhel` CI job r
 tarball on a RHEL 9 (ubi9) userland and gates publish. Also: `bench/representative_perfgate.sh`
 byte counting is now GNU-portable (`stat -f %z` is BSD-only and zeroed the corpus-shape preflight
 on every Linux CI leg). No library or CLI behavior changes.
+
 ### Added
 
 - **Optimization-remarks build and triage** — `-DRIPWIRE_OPT_REMARKS=ON` (a separate tree; refused by
