@@ -2636,7 +2636,7 @@ inline constexpr char kHelpTail[] =
         "                               --zoom --external-surface --dead-code --mentions --graph-query --stray-content\n"
         "                               --test-gate --biggest-first --ensemble --quality-panel --context-ratio\n"
         "                               --nonlocal-state --comment-coherence --naming-consistency --safe-delete --pr-context\n"
-        "                               --edit-check --flags --situ --for.\n"
+        "                               --edit-check --flags --situ --for --lego.\n"
         "                               Emit at most N rows, skipping the first M; N overrides the verb's own display cap\n"
         "                               (40 hotspot files, 30 co-change pairs, 60 whereis hits, 100 grep/match hits, 40\n"
         "                               impact rows, 20 seam pairs, 40 readability rows, 40 ensemble symbol rows, 40 context-ratio\n"
