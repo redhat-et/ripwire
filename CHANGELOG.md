@@ -31,11 +31,12 @@ went from 60 rows of `total="2197"` (54 of them call sites) to 2 rows, both the 
   Arms: one well-formed file per language family (C, C++, ObjC, Python, TypeScript, JavaScript, Java, Ruby, Go, Rust,
   Swift, C#, Bash, Markdown) whose every marked line reads as its marker says and as HEAD's index reads the same bytes;
   the twelve definition shapes the stricter reading lost; a branch-only `#define` and annotated Java method.
-- **A runaway guard on that parse, disclosed.** At most 256 blobs or 64 MB per answer, most rows first. A blob the guard
-  leaves, or one the parser cannot finish, confirms nothing: its parse-worthy lines read `kind="text"` (listed beside the
-  definitions, never `kind="def"`) and an `<unparsed blobs= rows= next=>` element counts them; `--detail=1` lifts the guard. Its `next=` replays the same question with `--detail=1` (an explicit
-  `--whereis-listing=` rides with it); an MCP `kind` ref filter is not carried, as `<refs next=>` does not carry it: the CLI
-  has no whereis ref filter.
+- **A runaway guard on that parse, disclosed.** At most 256 blobs or 64 MB per answer, most rows first, under every
+  listing, the default page included. A blob the guard leaves, or one the parser cannot finish, confirms nothing: its
+  parse-worthy lines read `kind="text"` (listed beside the definitions, never `kind="def"`) and an `<unparsed blobs=
+  rows= next=>` element counts them; `--detail=1` lifts the guard. Its `next=` replays the same question with
+  `--detail=1` (an explicit `--whereis-listing=` rides with it); an MCP `kind` ref filter is not carried, as `<refs
+  next=>` does not carry it: the CLI has no whereis ref filter.
 - **A definition line several refs hold is one row.** Under `listing="defs"` a `kind="def"` (or `kind="text"`) row outside
   the checkout whose path and line text other refs hold too is printed once, for the first of those refs by name, with
   `refs="N"`; the root's `folded=` counts the rows it stands for (on the first page, `shown + more + folded + refs count =
@@ -52,7 +53,7 @@ blob a parse. A parsed blob is labelled as HEAD's index labels the same bytes, s
 cleanly (a fragment, a file mid-edit) can lose a definition or show a false one exactly as HEAD's index would.
 MCP `whereis` takes no `detail` argument, so there the guard's `next=` names the CLI flag. Its description keeps its 701
 characters, the sentence calling a branch row's label lexical replaced by the parser one, and the
-`tools/list` manifest grows 46,930 → 46,925 B, a 5 B shrink (the dropped em dash is six bytes of JSON). Gates: `test/crossrefcheck.sh` (5b–5e),
+`tools/list` manifest shrinks 46,930 → 46,925 B (the dropped em dash is six bytes of JSON). Gates: `test/crossrefcheck.sh` (5b–5e),
 `test/selectorhonestycheck.sh` (§A7), `test/pagingsweepcheck.sh`.
 
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
