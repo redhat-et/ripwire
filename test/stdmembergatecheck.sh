@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stdmembergatecheck.sh — a C++ call named like a standard container or string member, on a receiver nothing typed, never
+# stdmembergatecheck.sh — a C++ call named like a standard container or string member, on a receiver no rule ties to an in-tree class, never
 # binds to an in-tree namesake by its name alone.
 #
 #   test/stdmembergatecheck.sh                          # uses build/ripwire on test/stdmembergatefix
@@ -188,10 +188,10 @@ echo "=== (F) the header, the legends, the dialects ==="
 S="$( stats "$TMP/map.xml" )"; hdrd="$( gauge "$S" declined )"; censd="$( disp_in "$TMP/c.tsv" declined )"
 if [ -n "$hdrd" ] && [ "$hdrd" -ge 11 ] && [ "$hdrd" = "${censd:-x}" ]; then ok "(F) header declined=$hdrd (>= the 11 gated calls) equals the census's declined bucket"
 else no "(F) header declined=\"$hdrd\" census declined=\"$censd\" — want >= 11 and equal"; fi
-grep -q 'hdr:declined=also-counts-C++-calls-on-an-untyped-receiver' "$TMP/map.xml" \
+grep -q 'hdr:declined=also-counts-C++-calls-named-like-a-std-container' "$TMP/map.xml" \
     && ok "(F) the full map legend carries the C++ standard-member declined= clause" || no "(F) the full map legend lacks the C++ clause"
 rw --callers=Vec::push_back --legend=full >"$TMP/cl.xml"
-grep -q 'It also counts a C++ call written on a receiver nothing typed' "$TMP/cl.xml" \
+grep -q 'It also counts a C++ call named like a member of a standard container' "$TMP/cl.xml" \
     && ok "(F) the callers legend carries the declined_calls= C++ sentence" || no "(F) the callers legend lacks the C++ sentence"
 rw --callees=stdParam --legend=full >"$TMP/ce.xml"
 grep -q '<stdm n= calls=>: of declined_calls=' "$TMP/ce.xml" \
@@ -242,7 +242,7 @@ echo "=== (S) a tree the gate never declined in carries no C++ clause ==="
 BB="$ROOT/test/builtinbindfix"
 "$BIN" "$BB" --no-cache --legend=full >"$TMP/bbmap.xml" 2>/dev/null
 "$BIN" "$BB" --no-cache --legend=full --callers=py/pool.py:get >"$TMP/bbcl.xml" 2>/dev/null
-[ -s "$TMP/bbmap.xml" ] && [ -s "$TMP/bbcl.xml" ] && ! grep -q -e 'also-counts-C++' -e 'C++ call written on a receiver' -e 'stdm' "$TMP/bbmap.xml" "$TMP/bbcl.xml" \
+[ -s "$TMP/bbmap.xml" ] && [ -s "$TMP/bbcl.xml" ] && ! grep -q -e 'also-counts-C++' -e 'It also counts a C++ call named like' -e 'stdm' "$TMP/bbmap.xml" "$TMP/bbcl.xml" \
     && ok "(S) builtinbindfix's map and callers legends carry no C++ standard-member clause" || no "(S) a C++ clause rides a tree with no C++ decline"
 
 # ── (K) the predicates can fail ───────────────────────────────────────────────────────────────────────────────

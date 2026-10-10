@@ -619,13 +619,13 @@ inline constexpr const char* kDeclinedCallsGateClause =
 // the caller's own file or directory too; charged only where that gate declined at least one call in the graph
 // (Graph::stdMemberDeclinedCalls), so a tree it never touched keeps its bytes. What it does NOT mean is in the same breath.
 inline constexpr const char* kDeclinedCallsStdClause =
-    "It also counts a C++ call written on a receiver nothing typed and named like a member of a standard container, string, optional or smart pointer (v.push_back, s.size): the standard library's own member may be the one called, so no in-tree namesake is bound; it is not a claim that the receiver is a standard type. ";
+    "It also counts a C++ call named like a member of a standard container, string, optional or smart pointer (v.push_back, s.size) on a receiver no rule tied to an in-tree class: the standard library's own member may be the one called, so no in-tree namesake is bound; it is not a claim that the receiver is a standard type. ";
 inline const char* declinedCallsLegend( bool on ) noexcept { return on ? kDeclinedCallsLegend : ""; }
 inline const char* declinedCallsGateLegend( bool on ) noexcept { return on ? kDeclinedCallsGateClause : ""; }
 inline const char* declinedCallsStdLegend( bool on ) noexcept { return on ? kDeclinedCallsStdClause : ""; }
 // The callees answer's <stdm> line (graph.h stdMemberCallsMadeBy): rides exactly when the line does.
 inline constexpr const char* kStdMemberCallsLegend =
-    "<stdm n= calls=>: of declined_calls=, the calls these definitions make that are named like a member of a C++ standard container, string, optional or smart pointer (n=, each name once) on a receiver nothing typed; calls= how many. No edge and no row: the standard library's own member may be the one called, and so may an in-tree namesake. It does not list every standard-library call the body makes: a name with no in-tree definition never had a candidate to decline. ";
+    "<stdm n= calls=>: of declined_calls=, the calls these definitions make that are named like a member of a C++ standard container, string, optional or smart pointer (n=, each name once) on a receiver no rule tied to an in-tree class; calls= how many. No edge and no row: the standard library's own member may be the one called, and so may an in-tree namesake. It does not list every standard-library call the body makes: a name with no in-tree definition never had a candidate to decline. ";
 inline const char* stdMemberCallsLegend( bool on ) noexcept { return on ? kStdMemberCallsLegend : ""; }
 // --test-gate's own short form: the same attribute and unit, sized for a verb whose legend has an absolute byte budget
 // (test/testgatelegendbudgetcheck.sh), so it defines the one form it emits rather than all three.

@@ -15,7 +15,7 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
-### Changed — a C++ call named like a standard container member, on a receiver nothing typed, binds no in-tree namesake
+### Changed — a C++ call named like a standard container member binds no in-tree namesake unless a rule ties its receiver to one
 
 `out.push_back( c )` on a `std::vector<char>&` parameter, `s.size()` on a `std::string`, `getV().empty()`: a C++ member
 call whose receiver no rule typed bound by NAME to whatever in-tree class defines the member — a hedged via="name" row,

@@ -144,7 +144,7 @@ struct Graph
     std::size_t                gateDeclinedCalls = 0;   // of the header's declined=, the calls the builtin-method name gate declined
     // Of the header's declined=, the C++ calls the standard-member gate declined (StdMemberGate below): its own legend clause
     // rides where this is >0, so a tree with none keeps its bytes. stdMemberDeclines is one entry per DECLINED C++ call named
-    // like a standard member on a receiver nothing typed — by that gate or by the ladder's own tier-3 decline — as
+    // like a standard member on a receiver no rule tied to an in-tree class — by that gate or by the ladder's own tier-3 decline — as
     // ( caller, kCppStdMemberNames index ), sorted after the resolve loop: the callees answer's <stdm> line.
     std::size_t                                    stdMemberDeclinedCalls = 0;
     std::vector<std::pair<NodeId, std::uint16_t>>  stdMemberDeclines;
@@ -7019,9 +7019,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
             }
         }
-        // StdMemberGate: a NAME-ONLY C++ member call named like a standard container or string member, whose receiver carries
-        // no written type outside namespace std — its table index, else kNotStd. Decided once here: the ladder's own tier-3
-        // decline and the post-filter below both read it.
+        // StdMemberGate: a NAME-ONLY C++ member call named like a standard container or string member — its table index, else
+        // kNotStd — and its receiver's written non-std type, if any (receiverWrittenType). Decided once here: the ladder's own
+        // tier-3 decline and the post-filter below both read them.
         const std::uint16_t    stdIndex    = nameOnly ? StdMemberGate::tableIndexOf( r ) : StdMemberGate::kNotStd;
         const std::string_view stdRecvType = ( stdIndex != StdMemberGate::kNotStd ) ? receiverWrittenType( r ) : std::string_view{};
         // ---- tier ladder (the name-based fallback) — SKIPPED when SCIP pinned this site, and for Rule 2's class-identity CLAIM (a type fact, not a locality guess)
@@ -7408,7 +7408,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
 
         // ---- the C++ standard-member gate (StdMemberGate above) — it only ever removes an edge -------------------------
         // The ladder decided this name-only call as it decides every other; when the name is a standard container or string
-        // member and the receiver carries no written non-std type, the in-tree definitions it reached by NAME are declined
+        // member and no written non-std type of the receiver reaches them, the in-tree definitions it reached by NAME are declined
         // instead of bound: the standard library's own member is the call's other candidate. A self-only tier is left to the
         // Self exit, exactly as the builtin-method gate leaves it.
         if( stdIndex != StdMemberGate::kNotStd && !bindingPinned && !identityClaim && !writtenTypeReaches( stdRecvType, r.fromSymbol, tier ) )
@@ -11998,7 +11998,7 @@ inline std::size_t declinedCallsMadeBy( const Graph& g, std::span<const NodeId> 
 }
 
 // The callees answer's <stdm> line: of the declines `sources` made (declinedCallsMadeBy), the C++ calls named like a
-// standard container or string member on a receiver nothing typed (Graph::stdMemberDeclines, StdMemberGate) — the names,
+// standard container or string member on a receiver no rule tied to an in-tree class (Graph::stdMemberDeclines) — the names,
 // each once in table (byte) order and comma-joined, and how many calls. Empty on a graph with none, so every other answer
 // keeps its bytes. The names are table literals (identifier characters only): neither dialect needs to escape them.
 struct StdMemberCallsMade
