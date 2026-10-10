@@ -138,7 +138,13 @@ REPO_Q=( "rank graph teleport" "compact legend rewrite" "edit receipt post-check
 # replace, so the byte-shaped <sigs> section fits five more signature rows, and the legend that grew 154 B (the sc=
 # rule, the route= code's reading and the merged-callee reading) is paid for several times over in rows. The other
 # nine stay at their for-widen bases: -1.11%, +0.36%, -0.45%, +1.54%, +0.02%, +1.66%, +0.18%, -0.56%, +2.30%.
-REPO_BASE=( 10134 10029 10080 10102 9880 9397 10009 10070 9966 10379 )
+REPO_BASE=( 10134 10029 10642 10102 9880 9397 10009 10070 9966 10379 )
+# q3 RE-PINNED 2026-10-10 (train 26c): 10080 -> 10642 B (+5.58% on the merged stack), an OUTPUT change of two signed lanes
+# that each stay inside the 4% alone: lego-charge serves two more signature rows (25 -> 27 of 40) because <lego>/<compose>
+# are charged to the <sigs> budget at the size they are SERVED (a collapsing section its stub), and owner-hop adds the
+# question's owner hop row with its callees. Measured on this tree: the 26c parent 9,716 B / 25 rows, the seven phase-A lanes
+# 10,198 B / 25 rows, the lego-charge lane alone 10,356 B / 27 rows, the merged binary 10,642 B / 27 rows. The other nine stay
+# at their bases: +0.25%, -2.64%, -7.65%, +2.00%, +1.86%, -2.25%, -1.50%, -2.88%, -6.06%.
 # q10 RE-PINNED 2026-09-19 (lane/r1-for-sections-stub, L2 round-1 lever B1): 9861 -> 10379 B (+5.25%), an
 # OUTPUT change, the q5 precedent's pattern. This query's ranked head reaches an interface with
 # implementors — the ONLY one of the ten reference queries that does — so it is the one query in this
@@ -621,6 +627,10 @@ fi
 # an alternative that also fit. Same fixture and relative path as (10). Pins are 255dc199's own rows at each budget (the cut's
 # rows; re-pin from a pre-continuation binary if row bytes or the header change), budgets chosen with room on both sides:
 #   CLI XML @2160: 255dc199 17 rows (est 2046); 45a2eeba 16 (est 1998) — RED there; head 17 + next= (est 2078 <= 2160).
+#     train 26c re-pin (2026-10-10, lego-charge): the lane charges <lego>/<compose> to the <sigs> budget at their served size, so
+#     the cut alone leaves 16 rows at 2160 on this fixture (the lane's own pre-continuation binary 1cfbfdcc: 16 rows, est 1970;
+#     the 26c parent and the seven phase-A lanes: 17, est 1985); the merged binary serves those 16 + the unpaid next= (est 2002
+#     <= 2160, no over_ceiling=). Re-pinned from the pre-continuation binary, as this comment asks; the assertions are unchanged.
 #   --json  @2000: 255dc199 16 rows (est 1657); 45a2eeba 15 — RED there; head 16 + "sigs_next" (est 1691).
 #   MCP     @4340: 255dc199 40 rows (est 4257); 45a2eeba 39 — RED there; head 40 + next_budget_tokens= (est 4308 <= 4340).
 # Each: rows >= the cut's own, the handle rides, est_tokens <= the budget, no over_ceiling. A binary that always pays when it
@@ -634,7 +644,7 @@ c11check(){   # LABEL BUDGET WANT ROWS CAPPED HANDLE OVER EST
         no "(11) $label @$bt: shown/capped/handle/over/est = ${*:-<no output>} — want >= $want rows, the handle, est <= $bt, no over_ceiling= (paid where it already fit?)"
     fi
 }
-c11check "CLI --for" 2160 17 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
+c11check "CLI --for" 2160 16 $( c11row "$( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2160 --no-cache 2>/dev/null | cut_arm )" )
 c11check "MCP for" 4340 40 $( c11row "$( mcprel 4340 )" )
 set -- $( cd "$TMP" && "$BIN" fxcut --for="gadget assembler" --token-budget=2000 --json --no-cache 2>/dev/null \
           | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["sigs"]), "sigs_next" in d, bool(d.get("over_ceiling")), d["est_tokens"])' 2>/dev/null )
