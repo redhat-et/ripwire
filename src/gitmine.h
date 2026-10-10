@@ -685,13 +685,12 @@ struct GitCommandLines
 // write, and the join ends there. A block reader (popenTrimmed: the walk's sha-list freshness probe, milliseconds on a
 // real repository) runs to its end. A line reader that stopped early says so (`abandoned`), and the stream cache
 // (quality.h gitRawCommitStreamCached) never writes a prefix. test/memguardcheck.sh (B21).
-inline std::atomic<bool>& gitWalkAbandonFlag() noexcept
-{
-    static std::atomic<bool> flag{ false };
-    return flag;
-}
-inline void abandonGitWalks() noexcept { gitWalkAbandonFlag().store( true, std::memory_order_relaxed ); }
-inline bool gitWalksAbandoned() noexcept { return gitWalkAbandonFlag().load( std::memory_order_relaxed ); }
+inline std::atomic<bool> gGitWalksAbandoned{ false };
+inline void abandonGitWalks() noexcept { gGitWalksAbandoned.store( true, std::memory_order_relaxed ); }
+inline bool gitWalksAbandoned() noexcept { return gGitWalksAbandoned.load( std::memory_order_relaxed ); }
+// the walk readers' line read: false at the end of the stream, or as soon as the walks are abandoned (the lines read so
+// far are then a prefix no caller serves or caches — both are guarded by the same flag)
+inline bool readWalkLine( std::FILE* pipe, std::string& line ) { return !gitWalksAbandoned() && readByteSafeLine( pipe, line ); }
 
 inline GitCommandLines gitCommandLines( const std::string& cmd )
 {
@@ -718,13 +717,8 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
     // is a silently DROPPED commit rather than a fabricated one — still a number the reader would trust.
     // It leaves a trailing '\r' in place by contract, which is why the strip below still runs.
     std::string line;
-    while( readByteSafeLine( pipe, line ) )
+    while( readWalkLine( pipe, line ) )
     {
-        if( gitWalksAbandoned() )
-        {
-            out.abandoned = true;   // the rest of the stream is never read; pclose below ends the child at its next write
-            break;
-        }
         while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' ) )
         {
             line.pop_back();
@@ -734,7 +728,8 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
             out.lines.push_back( line );
         }
     }
-    out.status = os::pclose( pipe );
+    out.abandoned = gitWalksAbandoned();   // the rest of the stream was never read; pclose ends the child at its next write
+    out.status    = os::pclose( pipe );
     return out;
 }
 
@@ -1603,13 +1598,8 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     }
 
     std::string s;
-    while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
+    while( readWalkLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across; stops when abandoned
     {
-        if( gitWalksAbandoned() )
-        {
-            out.commits.clear();   // an abandoned read is a prefix, not a window: nothing of it is an answer, and it is never cached
-            break;                 // pclose below ends the child at its next write
-        }
         while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
         {
             s.pop_back();

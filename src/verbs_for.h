@@ -2821,10 +2821,19 @@ inline bool candidatePageWindowed( const rw::Config& cfg )
 // computed once (`lr`). `sigsNextPayFromRows` is the charged <sigs> continuation's payment mode (serialize.h
 // SigsCutContinuation::payFromRows); with `sigsNextTryOther` set, a run whose capped, charged document lands past its ceiling
 // writes NOTHING to stdout and asks for the run in the other payment mode (runForLens below decides which answer ships).
-std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bool sigsNextPayFromRows, bool* sigsNextTryOther,
-                                   const std::string& forAtStamp )
+// `forAtStamp` (train 26c, CodeRabbit on #383): the at= stamp, read ONCE per run by runForLens — every render shares it.
+struct ForLensPassMode
+{
+    bool             sigsNextPayFromRows = false;
+    bool*            sigsNextTryOther    = nullptr;
+    std::string_view forAtStamp;
+};
+std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, const ForLensPassMode& mode )
 {
     using namespace rw;
+    const bool        sigsNextPayFromRows = mode.sigsNextPayFromRows;
+    bool* const       sigsNextTryOther    = mode.sigsNextTryOther;
+    const std::string forAtStamp( mode.forAtStamp );
     const Config&                     cfg          = d.cfg;
     const IngestResult&               ing          = d.ing;
     const Graph&                      g            = d.g;
@@ -4368,11 +4377,11 @@ std::optional<int> runForLens( const MainDispatch& d )
     // only an explicit --token-budget charges the handle (forSigsNextCharged), so only then can a render hand back
     if( cfg.tokenBudget == 0 )
     {
-        return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/true, nullptr, forAtStamp );
+        return runForLensPass( d, std::move( lr ), ForLensPassMode{ .sigsNextPayFromRows = true, .forAtStamp = forAtStamp } );
     }
     const rw::RedactCounts tallyAtEntry = d.redactCounts;
     bool                   unpaidOver   = false;
-    std::optional<int>     rc           = runForLensPass( d, lr, /*sigsNextPayFromRows=*/false, &unpaidOver, forAtStamp );
+    std::optional<int>     rc           = runForLensPass( d, lr, ForLensPassMode{ .sigsNextPayFromRows = false, .sigsNextTryOther = &unpaidOver, .forAtStamp = forAtStamp } );
     if( !unpaidOver )
     {
         return rc;
@@ -4380,14 +4389,14 @@ std::optional<int> runForLens( const MainDispatch& d )
     ASSUME( !rc );   // the unpaid render that handed back wrote nothing
     d.redactCounts = tallyAtEntry;
     bool paidOver  = false;
-    rc             = runForLensPass( d, lr, /*sigsNextPayFromRows=*/true, &paidOver, forAtStamp );
+    rc             = runForLensPass( d, lr, ForLensPassMode{ .sigsNextPayFromRows = true, .sigsNextTryOther = &paidOver, .forAtStamp = forAtStamp } );
     if( !paidOver )
     {
         return rc;
     }
     ASSUME( !rc );   // the paid render that handed back wrote nothing
     d.redactCounts = tallyAtEntry;
-    return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/false, nullptr, forAtStamp );
+    return runForLensPass( d, std::move( lr ), ForLensPassMode{ .sigsNextPayFromRows = false, .forAtStamp = forAtStamp } );
 }
 
 std::optional<int> runTargetedViews( const MainDispatch& d )
