@@ -25,7 +25,7 @@
 #   (B) std-written or untyped receivers are declined and disclosed: std::vector local / parameter / field, `auto`, a call
 #       result, a std::string's append (ONE in-tree definition), a std::vector's empty (reaching an anonymous-namespace class
 #       in another file), a local declared with an alias of a standard map — each callees answer has no in-tree row, the
-#       exact declined_calls= and the exact <stdm> line
+#       exact declined_calls= and the exact <stdm> line; a call the ladder itself declines (tier 3, far/) is on the line too
 #   (C) a local declared with an alias of the in-tree Vec keeps the ladder's via="name" hedge (the alias's cone reaches Vec)
 #   (D) controls: a name outside the table (`grow`) keeps the ladder; a bare `size( b )` binds the free function; a C
 #       function-pointer call (C has no member functions) and the Rust by-name split (stated scope) are unchanged
@@ -35,7 +35,7 @@
 #       callers legend and the callees legend each carry their clause, the compact callees legend defines stdm, the
 #       columnar callees form carries neither the line nor its sentence, JSON and the MCP find_symbol twin carry "stdm"
 #   (G) dead-code safety: Shelf::empty (anonymous namespace, its only callers declined) is no dead-code candidate, and
-#       --safe-delete carries declined_calls="2" beside risk=none-found
+#       --safe-delete carries declined_calls="3" beside risk=none-found
 #   (S) 0 bytes on a tree the gate never declined in: test/builtinbindfix's map and callers legends carry no C++ clause
 #   (K) the predicates can fail: a via="name" row and a missing <stdm> line are both caught
 #   (L) determinism x2, xmllint on every answer whose new clause rides, no degrade alert on stderr
@@ -135,6 +135,8 @@ check "(B) StdMap m (an alias of std::map); m.clear() — the alias's cone reach
                                                                callees stdAliasClear       '' 1 'clear:1'
 check "(B) same-file anonymous-namespace Shelf::empty is not bound by w.empty() on a std::vector" \
                                                                callees anyEmpty            '' 1 'empty:1'
+check "(B) the ladder's own tier-3 decline (no namesake in reach) is named on the <stdm> line too" \
+                                                               callees farEmpty            '' 1 'empty:1'
 
 # ── (C) an alias of the in-tree container keeps the hedge ────────────────────────────────────────────────────
 echo "=== (C) a written non-std type whose cone reaches a candidate keeps the ladder's hedge ==="
@@ -200,8 +202,8 @@ R="$( root_tag "$TMP/dead.xml" dead-code )"
     && ok "(G) --dead-code lists no empty (Shelf::empty's two callers were declined, not absent)" || no "(G) --dead-code: $( grep -oE '<d [^>]*>' "$TMP/dead.xml" | head -3 )"
 rw --safe-delete=Shelf::empty >"$TMP/sd.xml"
 R="$( root_tag "$TMP/sd.xml" safe-delete )"
-[ "$( attr "$R" declined_calls )" = "2" ] && [ "$( attr "$R" dead_code_candidate )" = "0" ] \
-    && ok "(G) --safe-delete=Shelf::empty: declined_calls=\"2\", dead_code_candidate=\"0\"" || no "(G) --safe-delete root: $R"
+[ "$( attr "$R" declined_calls )" = "3" ] && [ "$( attr "$R" dead_code_candidate )" = "0" ] \
+    && ok "(G) --safe-delete=Shelf::empty: declined_calls=\"3\" (two gated, one tier-3), dead_code_candidate=\"0\"" || no "(G) --safe-delete root: $R"
 
 # ── (S) zero bytes elsewhere ──────────────────────────────────────────────────────────────────────────────────
 echo "=== (S) a tree the gate never declined in carries no C++ clause ==="
