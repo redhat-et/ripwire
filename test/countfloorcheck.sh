@@ -210,6 +210,7 @@ ROW_R2="$( enc_row "$OUT_R2" 'Walker::walk' )"; ROW_R3="$( enc_row "$OUT_R2" wal
 case "$ROW_R2" in *callers_floor=*) no "(R) Python self.walk() recursion is floored: $ROW_R2" ;; *) ok "(R) Python method recursing via self.walk(): no callers_floor" ;; esac
 case "$ROW_R3" in *callers_floor=*) no "(R) Python recursive module function is floored: $ROW_R3" ;; *) ok "(R) Python recursive module function walk_tree: no callers_floor" ;; esac
 R_R3="$( root_tag "$( run pyrec --safe-delete=walk_tree )" safe-delete )"
+[ -n "$R_R3" ] && [ "$( attr "$R_R3" callers )" = 0 ] || no "(R) premise: walk_tree: $R_R3"   # an empty answer must not read as "not floored"
 case "$R_R3" in *callers_floor=*|*' next='*) no "(R) --safe-delete=walk_tree is floored: $R_R3" ;; *) ok "(R) --safe-delete=walk_tree: no callers_floor, no next=" ;; esac
 OUT_RM="$( run crec --grep='n ? p' )"; ROW_PING="$( enc_row "$OUT_RM" pong )"; ROW_PONG="$( enc_row "$OUT_RM" ping )"
 [ "$( attr "$ROW_PING" callers )" = 1 ] && [ "$( attr "$ROW_PONG" callers )" = 2 ] || no "(R) premise: mutual recursion counts: [$ROW_PING] [$ROW_PONG]"
@@ -410,7 +411,9 @@ for dialect in compact full; do
             && ok "(N/$dialect) $term defined in the legend of the $var answer" || no "(N/$dialect) $term is not defined in the $var legend"
     done
 done
-case "$( run c --safe-delete=helper_dead --legend=compact )" in *callers_floor*|*uses_floor*|*sites_l*) no "(N) a legend defines a floor/sites term its answer does not carry" ;; *) ok "(N) present-only: no floor/sites term on an answer without them" ;; esac
+OUT_N="$( run c --safe-delete=helper_dead --legend=compact )"
+[ -n "$( root_tag "$OUT_N" safe-delete )" ] || no "(N) premise: no <safe-delete> answer for helper_dead (an empty answer must not read as present-only)"
+case "$OUT_N" in *callers_floor*|*uses_floor*|*sites_l*) no "(N) a legend defines a floor/sites term its answer does not carry" ;; *) ok "(N) present-only: no floor/sites term on an answer without them" ;; esac
 
 # ── O: determinism + xmllint ─────────────────────────────────────────────────────────────────────────────
 echo "=== O: determinism and well-formed XML ==="
