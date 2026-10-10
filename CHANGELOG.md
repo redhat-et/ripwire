@@ -2464,10 +2464,10 @@ handle is a CLI argv now, and it walks the same list. Every accepted ranking fla
 (the CLI's `--no-route`, `--no-mention-boost`, `--no-doc-mention`, `--cochange-boost`; the twins'
 `no_route`) rides `next=`, so a pasted continuation re-ranks identically — the
 `test/pagingsweepcheck.sh` walk arms pin all five surfaces to `has_more="0"` with identical row
-sequences and pin each flag's echo. The `tools/list` manifest grows 46,732 → 46,916 B (measured
+sequences and pin each flag's echo. The `tools/list` manifest grows 46,930 → 47,114 B (measured
 against train 25's `main`; descriptions identical, and the +184 B of schema is `explore`'s
 `limit`/`offset` alone — `for` already declared the pair, `pack_task` is a dispatch alias, not a
-listed tool), and the ceiling moves 46,750 → 46,950 B
+listed tool), and the ceiling moves 46,950 → 47,150 B
 - the one sanctioned case that moves it: `explore`'s two declared schema properties
 (`test/mcpmanifestcheck.sh` arm `(1b)` asserts the figure against a live measurement).
 ### Fixed — the Linux G1 sanitizer ritual completes: five string_view comparator lambdas stop wrapping, and the GCC ASan path builds (#342)

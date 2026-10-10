@@ -316,7 +316,11 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # is a response attribute, not a schema property). Measured live on both trees: train-25 main's
 # binary answers 46,732 B, this branch's answers 46,916 B (33 tools each, descriptions identical at
 # 22,411 B, schemas 19,585 -> 19,769). Headroom after this line: 34 B, the #214-sized margin.
-CEILING = 46950
+# RE-ANCHORED 2026-10-10 (train 26c, the merged tree): 46,950 -> 47,150, measured 47,114 B (33 tools). The one tool that moved
+# is #362's explore: its schema takes limit/offset (774 -> 958 B, +184 B); descriptions unchanged at 22,472 B, every other
+# schema unchanged (per-tool dump, 26c parent 0852bc0f vs the merged binary). 46,930 + 184 = 47,114, every byte attributed.
+# Headroom after this line: 36 B, the #214-sized margin.
+CEILING = 47150
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )
 schemaBytes = sum( len( json.dumps( t[ "inputSchema" ], separators = ( ",", ":" ) ) ) for t in tools )
