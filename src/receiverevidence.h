@@ -6,8 +6,8 @@
 // with nothing behind it but the name. This header holds the two halves of the fix:
 //
 //   1. ReceiverEvidence::narrow — a RESOLVE rule for receivers the source types: `this`/`self`/`cls` inside a class (and
-//      `super`/`base`, through the bases only), a parameter or local whose class is written (a TS/Python/Go annotation, a
-//      Go method receiver, a JS `new Foo()` / Python `Foo()` / Go `Foo{}` initializer), a constructed receiver
+//      the language's base-class receiver, isSuperRoot, through the bases only), a parameter or local whose class is
+//      written (a TS/Python/Go annotation, a Go method receiver, a JS `new Foo()` / Python `Foo()` / Go `Foo{}` initializer), a constructed receiver
 //      (`new Foo().m()`), a class-name receiver (`Foo.m()`), and a chain of fields whose classes are stated
 //      (`this.bucket = new Schemas()`, Python `self.x = Foo()`, a Go struct field, a Go EMBEDDED field whose methods
 //      are promoted). A hit is the call's whole answer, exactly like Rule 2. Ruby's own method lookup (mixins, typed and
@@ -118,9 +118,26 @@ inline bool isThisRoot( std::string_view root ) noexcept
     return root == "this" || root == "self" || root == "Self";
 }
 
-inline bool isSuperRoot( std::string_view root ) noexcept
+// Is `root` (the call's receiver root, ReceiverEvidence::chainOf) the language's BASE-CLASS receiver — a lookup that walks
+// the caller's bases only? Each spelling counts only where the grammar makes it that keyword: C# `base`; `super` in
+// Java, Kotlin, Swift, JS and TS; Python's `super()` / `super(C, self)` call, which ingest records as RecvKind::SuperObj.
+// Everywhere else the same text is an ordinary name — a Python/JS/Go/Java/… local `base`, a Go or C# local `super`, a
+// Python name `super` that shadows the builtin — and proves nothing about the bases (its own type, if any, decides).
+inline bool isSuperRoot( const Reference& r, std::string_view root ) noexcept
 {
-    return root == "super" || root == "base";
+    if( r.recv == RecvKind::SuperObj )
+    {
+        return true;
+    }
+    switch( r.lang )
+    {
+        case Lang::CSharp:
+            return root == "base";
+        case Lang::Java: case Lang::Kotlin: case Lang::Swift: case Lang::JavaScript: case Lang::TypeScript:
+            return root == "super";
+        default:
+            return false;
+    }
 }
 
 // The innermost function/method of `id`'s file whose span strictly holds `id`'s span; kNoNode when none. `byFile` is
@@ -689,7 +706,7 @@ struct ReceiverEvidence
         {
             return callerClass( r.fromSymbol );
         }
-        if( isSuperRoot( root ) )
+        if( isSuperRoot( r, root ) )
         {
             superOnly = true;
             return callerClass( r.fromSymbol );
@@ -762,7 +779,7 @@ struct ReceiverEvidence
         }
         // the side the receiver names: the class object (a class-name receiver, or `this`/`super` inside a static member),
         // else an instance; a stated field below always holds an instance
-        bool classSide = isStatic || ( ch.ctor.empty() && ( isThisRoot( ch.root ) || isSuperRoot( ch.root ) ) && callerIsStatic( r.fromSymbol ) );
+        bool classSide = isStatic || ( ch.ctor.empty() && ( isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) ) && callerIsStatic( r.fromSymbol ) );
         std::string_view rest = ch.path;
         while( !rest.empty() )   // walk the stated field classes
         {

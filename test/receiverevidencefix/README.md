@@ -52,3 +52,8 @@ The names are paraphrases of graded false rows; the code is minimal and is never
   `nestedBlock` / `lambdaOutside` / `blockOutside` call it past the block that hid it, which must never prove Barrel's. A
   generic whose type parameter is spelled `Tank` (method and class, a field of that type) must never prove class Tank.
   Kept: the field itself, a typed local, a typed loop / lambda variable's own class, a typed parameter.
+- `superroot/{py,js,ts,go,java,kt,swift,cs,cpp,rb}` — CR 5469474915: `Panel` extends `Base`; `Base` and `Widget` both
+  define `render`. `typed` binds a local spelled `base` (C#: `super`) to a `Widget`, `untyped` to a value nothing types
+  (Python and Go also a local `super`), then calls `render` on it: never Base's render through the bases-only lookup.
+  Kept: `super.render()`, Python `super().render()`, Go's promoted `p.Render()`, the typed local's own class. C#
+  `base.Render()` is visible only (no C# tree reads `base` as a receiver root yet).

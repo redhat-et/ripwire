@@ -5994,7 +5994,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 return owner.empty() && cs.fileId == ref.fileId && cs.kind == SymKind::Method;   // an object literal's own member
             }
-            if( isSuperRoot( ch.root ) )
+            if( isSuperRoot( ref, ch.root ) )
             {
                 const std::string_view callerCls = recvEv.callerClass( ref.fromSymbol );
                 return !callerCls.empty() && !owner.empty() && owner != callerCls && recvEv.inCone( callerCls, owner )

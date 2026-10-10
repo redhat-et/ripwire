@@ -125,6 +125,10 @@
 #            Output method (fmt.Errorf / strings.Split pinned clean), TS Date#getTime → an in-repo getTime (the
 #            global Response pinned clean), Python list.append on a list literal → Content.append; each on
 #            --callees and its --for hop block, with constructed-local near misses.
+#   (R) the base-class receiver (CR 5469474915): C# `base` and `super` where it is a keyword (Java/Kotlin/Swift/JS/TS),
+#            and Python's super() call, walk the bases only; a LOCAL spelled `base` (Python/JS/TS/Go/Java/Kotlin/Swift/C++/
+#            Ruby) or `super` (Go, C#, a Python name shadowing the builtin) never proves the base class's method — a typed
+#            one resolves to its own class, an untyped one is hedged. Twins: the keyword calls still prove the base.
 #   (C) conservation: each root's census dispositions still sum to calls= with unaccounted=0 (no silent drop).
 #   (K) the predicates can fail: a planted unhedged false row fails notproven, a planted hedged row passes it and
 #            fails proven, marked rejects an unhedged row, a rootless or not-found answer is NOROOT, the MCP reader
@@ -1011,6 +1015,54 @@ for sel in lib/reply.js:respondWith lib/reply.js:notFound lib/request.js:compile
         else no "(H) parity callees/expand-calls $sel: the reader failed"; fi
     fi
 done
+
+echo "=== (R) the base-class receiver is a KEYWORD, never a local spelled like one (CR 5469474915, receiverevidence.h:124) ==="
+# superroot/<lang>: Panel extends Base; Base and Widget both define render. A local `base` (C#/Go: `super`) holding a
+# Widget, or an untyped value, never proves Base's render through the bases-only lookup: the typed local resolves to its
+# own class, the untyped one is hedged. The keyword twins (`super.render()`, Python `super().render()`, Go's promoted
+# p.Render()) still prove Base's render. C# `base.Render()` is pinned as visible only: no C# tree reaches the base-class
+# receiver today (the grammar's `base` node is not read as a receiver root — a disclosed floor, never a false row).
+SR=superroot
+notproven $SR/py callees pkg/panel.py:untyped "render pkg/shapes.py:2"
+notproven $SR/py callees pkg/panel.py:shadowed "render pkg/shapes.py:2"
+visible   $SR/py callees pkg/panel.py:untyped "render pkg/shapes.py:2" "render pkg/shapes.py:7"
+exactproven $SR/py callees pkg/panel.py:typed "cls Widget pkg/shapes.py;fn render pkg/shapes.py"   # guard: Rule 2 types it first
+proven    $SR/py callees pkg/panel.py:typed "fn render pkg/shapes.py:7"   # guard
+proven    $SR/py callees pkg/panel.py:real_super "fn render pkg/shapes.py:2"   # guard: super() walks the bases
+for l in js ts; do
+    f="$( [ "$l" = js ] && echo lib/panel.js || echo src/panel.ts )"; d="$( [ "$l" = js ] && echo lib/shapes.js || echo src/shapes.ts )"
+    notproven $SR/$l callees "$f:typed" "render $d:2"
+    proven    $SR/$l callees "$f:typed" "method render $d:6"
+    notproven $SR/$l callees "$f:untyped" "render $d:2"
+    visible   $SR/$l callees "$f:untyped" "render $d:2" "render $d:6"
+    proven    $SR/$l callees "$f:realSuper" "method render $d:2"   # guard: super.render()
+done
+notproven $SR/go callees src/panel.go:Typed "Render src/shapes.go:5"
+proven    $SR/go callees src/panel.go:Typed "method Render src/shapes.go:9"
+notproven $SR/go callees src/panel.go:Untyped "Render src/shapes.go:5"
+notproven $SR/go callees src/panel.go:Super "Render src/shapes.go:5"
+visible   $SR/go callees src/panel.go:Super "Render src/shapes.go:5" "Render src/shapes.go:9"
+proven    $SR/go callees src/panel.go:Promoted "method Render src/shapes.go:5"   # guard: the embedded Base's promoted method
+notproven $SR/java callees src/app/Panel.java:typed "render src/app/Base.java"
+proven    $SR/java callees src/app/Panel.java:typed "method render src/app/Widget.java"
+notproven $SR/java callees src/app/Panel.java:untyped "render src/app/Base.java"
+proven    $SR/java callees src/app/Panel.java:realSuper "method render src/app/Base.java"   # guard
+notproven $SR/kt callees src/app/Panel.kt:typed "render src/app/Shapes.kt:4"
+proven    $SR/kt callees src/app/Panel.kt:typed "fn render src/app/Shapes.kt:8"
+notproven $SR/kt callees src/app/Panel.kt:untyped "render src/app/Shapes.kt:4"
+proven    $SR/kt callees src/app/Panel.kt:realSuper "fn render src/app/Shapes.kt:4"   # guard
+notproven $SR/swift callees Sources/App/Panel.swift:typed "render Sources/App/Shapes.swift:2"
+proven    $SR/swift callees Sources/App/Panel.swift:typed "fn render Sources/App/Shapes.swift:6"
+notproven $SR/swift callees Sources/App/Panel.swift:untyped "render Sources/App/Shapes.swift:2"
+proven    $SR/swift callees Sources/App/Panel.swift:realSuper "fn render Sources/App/Shapes.swift:2"   # guard
+notproven $SR/cs callees App/Panel.cs:Typed "Render App/Shapes.cs:5"
+proven    $SR/cs callees App/Panel.cs:Typed "method Render App/Shapes.cs:10"
+notproven $SR/cs callees App/Panel.cs:Untyped "Render App/Shapes.cs:5"
+visible   $SR/cs callees App/Panel.cs:RealBase "Render App/Shapes.cs:5"   # guard (floor above)
+notproven $SR/cpp callees src/panel.cpp:untyped "render src/shapes.h:6"
+proven    $SR/cpp callees src/panel.cpp:typed "method render src/shapes.h:11"   # guard: Rule 2 types it first
+notproven $SR/rb callees lib/panel.rb:untyped "render lib/shapes.rb:2"
+proven    $SR/rb callees lib/panel.rb:typed "method render lib/shapes.rb:8"   # guard
 
 echo "=== (C) conservation: no call silently disappears ==="
 ROOTS="js ts py go java kt cs cpp swift rb"
