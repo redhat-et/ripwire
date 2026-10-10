@@ -1002,6 +1002,10 @@ inline std::string grepTierKeys( const GrepTierReport& tier, bool floorAlreadyEm
     if( std::strcmp( tier.emittedTier, "code" ) != 0 )
     {
         keys += std::string( ",\"tier\":\"" ) + tier.emittedTier + "\"";
+        if( tier.servedString > 0 )
+        {
+            keys += ",\"string_hits\":" + std::to_string( tier.servedString );   // the CLI grepTierAttrs() twin (idea #5)
+        }
         // M17: the CLI grepTierAttrs() twin — same condition, same name. A confidence qualifier is exactly
         // the class of fact a dialect may not drop (mcpclidiffcheck's LENS2), and an MCP-only agent has no
         // CLI to re-ask from before trusting the label.
@@ -1112,16 +1116,16 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
 {
     const McpIndex&            ix        = getIndex( root );
     const IngestResult&        ing       = ix.ing;
-    constexpr int              kRowCap   = 100;
+    GrepTierReport             tierReport;
     // R-H span tiers: the SAME filter, in the SAME position (after collection), as the CLI verb applies —
     // search.h owns the policy precisely so these two surfaces cannot answer differently. `grepInMode` is
     // the MCP `in` argument (the CLI --grep-in twin): the escape hatch has to exist here too, because an
     // MCP-only agent that reads suppressed_comment= has no CLI to re-ask from. Counters ride the payload
     // below under the CLI's own key names.
-    GrepTierReport             tierReport;
     const GrepCollection       collected = grepApplySpanTiers( ing, grepCollect( ing, pattern, /*regex=*/false, /*noPrefilter=*/false ),
-                                                               grepInMode, tierReport );
-    const PageWindow           grepPage  = pageWindow( collected.raw.size(), effectiveRowCap( page.limit, kRowCap ), page.offset );
+                                                               grepInMode, tierReport, /*useMemo=*/true, pattern );
+    const int                  grepRowCap   = tierReport.servedString > 0 ? kGrepLiftRowCap : 100;   // the CLI's default window (idea #5)
+    const PageWindow           grepPage  = pageWindow( collected.raw.size(), effectiveRowCap( page.limit, grepRowCap ), page.offset );
     const std::size_t          rowCount  = grepPage.end - grepPage.begin;
     const std::vector<GrepHit> hits      = grepEnrich( ing, std::span<const GrepRawHit>( collected.raw ).subspan( grepPage.begin, rowCount ), 0, 0 );
 
@@ -1254,7 +1258,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // block below is: existing key-order-sensitive gates read up through "hits" first.
     // H4: the SAME window the indexed list obeyed, over this list's own length (the CLI emitter's auxPage
     // twin) — `limit` reached only the hits array before, so a three-row page shipped 29 unindexed rows.
-    out += grepAuxJson( aux.hits, pageWindow( aux.hits.size(), effectiveRowCap( page.limit, kRowCap ), page.offset ),
+    out += grepAuxJson( aux.hits, pageWindow( aux.hits.size(), effectiveRowCap( page.limit, grepRowCap ), page.offset ),
                         singleRootJ, rootPrefixJ );
     // R1 (the 2026-08-12 usage mine): the CLI <enc>/<suggest> twins, appended AFTER "hits" so the
     // historic key order three other gates read (files,total,shown,capped) is byte-untouched.

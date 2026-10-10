@@ -82,6 +82,19 @@ int TIERTOKEN_frob( int x )
     return x + 1;
 }
 /* TIERTOKEN_frob again, block comment */
+/* lane lean-trio (idea #5): seven more CODE uses, so this token's code tier is FULL (>= 8 hits) and arm (1) keeps its
+   premise — an identifier with a full code tier holds its comments AND strings back. A thin code tier lifts the string
+   tier now; arm (12h) is that path. */
+int tier_uses( void )
+{
+    return TIERTOKEN_frob( 1 )
+         + TIERTOKEN_frob( 2 )
+         + TIERTOKEN_frob( 3 )
+         + TIERTOKEN_frob( 4 )
+         + TIERTOKEN_frob( 5 )
+         + TIERTOKEN_frob( 6 )
+         + TIERTOKEN_frob( 7 );
+}
 int TIERTOKEN_onlycomment_caller( int y )
 {
     // TIERTOKEN_onlycomment appears in comments and NOWHERE else
@@ -100,10 +113,10 @@ D_OUT="$( "$BIN" "$SB" --no-cache --grep=TIERTOKEN_frob 2>/dev/null )"
 d_hits="$( attr hits "$D_OUT" )"
 d_comment="$( attr suppressed_comment "$D_OUT" )"
 d_string="$( attr suppressed_string "$D_OUT" )"
-if [ "$d_hits" = "2" ] && [ "$d_comment" = "2" ] && [ "$d_string" = "1" ]; then
-    ok "(1) code hit + the doc-file mention kept, 2 comment + 1 string suppressed and disclosed"
+if [ "$d_hits" = "9" ] && [ "$d_comment" = "2" ] && [ "$d_string" = "1" ]; then
+    ok "(1) the 8 code hits + the doc-file mention kept, 2 comment + 1 string suppressed and disclosed"
 else
-    no "(1) expected hits=2 suppressed_comment=2 suppressed_string=1, got hits=$d_hits comment=$d_comment string=$d_string"
+    no "(1) expected hits=9 suppressed_comment=2 suppressed_string=1, got hits=$d_hits comment=$d_comment string=$d_string"
     printf '%s\n' "$D_OUT" | grep -o '<grep [^>]*>'
 fi
 # the surviving row must be the DEFINITION line, not one of the prose mentions
@@ -116,7 +129,7 @@ echo "=== (2) --grep-in=any: every tier, and NO tier attributes at all ==="
 # ═══════════════════════════════════════════════════════════════════════════
 A_OUT="$( "$BIN" "$SB" --no-cache --grep=TIERTOKEN_frob --grep-in=any 2>/dev/null )"
 a_hits="$( attr hits "$A_OUT" )"
-if [ "$a_hits" = "5" ]; then ok "(2) --grep-in=any keeps all 5 hits"; else no "(2) --grep-in=any expected hits=5, got $a_hits"; fi
+if [ "$a_hits" = "12" ]; then ok "(2) --grep-in=any keeps all 12 hits (8 code + 2 comment + 1 string + 1 doc)"; else no "(2) --grep-in=any expected hits=12, got $a_hits"; fi
 if printf '%s' "$A_OUT" | grep -qE 'suppressed_comment=|suppressed_string=|tier_budget=|tier_unclassified=|tier="'; then
     no "(2b) --grep-in=any leaked a tier attribute onto an untiered answer"
 else
@@ -536,9 +549,17 @@ printf '%s' "$LT_OUT" | grep -o '<!--.*-->' | head -1 | grep -q 'code+string' \
     && ok "(12d) the legend defines the code+string label in the answer that emits it" \
     || no "(12d) tier=code+string was emitted and the legend never says what it means"
 # (12e) NOT a blanket lift: the same literal as an IDENTIFIER in a C source file keeps the code tier alone.
+# lane lean-trio: seven more code uses keep this identifier's code tier FULL (>= 8 hits) — the premise this arm tests; a
+# THIN code tier now lifts the string tier (arm 12h).
 cat >"$LT/src/reader.c" <<'EOF'
 int LITTOKEN_reader( void ) { return 0; }
 const char *reader_name = "LITTOKEN_reader";
+int reader_uses( void )
+{
+    return LITTOKEN_reader() + LITTOKEN_reader() + LITTOKEN_reader()
+         + LITTOKEN_reader() + LITTOKEN_reader() + LITTOKEN_reader()
+         + LITTOKEN_reader();
+}
 EOF
 cat >"$LT/tests/reader.sh" <<'EOF'
 LITTOKEN_reader
@@ -563,6 +584,65 @@ if [ -z "$( attr tier "$LN_OUT" )" ] && [ -n "$( attr suppressed_string "$LN_OUT
 else
     no "(12g) a JSON/shell string under src/ lifted the string tier: tier=$( attr tier "$LN_OUT" ) suppressed_string=$( attr suppressed_string "$LN_OUT" )"
     printf '%s\n' "$LN_OUT" | grep -o '<grep [^>]*>'
+fi
+
+# (12h) lane lean-trio (idea #5): a THIN code tier (fewer than 8 code hits) serves the source string WITH code — an
+# identifier asked for once or twice is as likely to be the text a table holds. string_hits= keeps the per-tier count.
+# RED on main 0852bc0f: no tier=, suppressed_string="1".
+LH="$TMP/thinsandbox"
+mkdir -p "$LH/src"
+cat >"$LH/src/thin.c" <<'EOF'
+int THINTOKEN_name( void ) { return 0; }
+const char *thin_label = "THINTOKEN_name";
+EOF
+LH_OUT="$( "$BIN" "$LH" --no-cache --grep=THINTOKEN_name 2>/dev/null )"
+if [ "$( attr tier "$LH_OUT" )" = "code+string" ] && [ "$( attr string_hits "$LH_OUT" )" = "1" ] && [ -z "$( attr suppressed_string "$LH_OUT" )" ] \
+   && printf '%s' "$LH_OUT" | grep -q '<hit l="2"'; then
+    ok "(12h) a thin code tier lifts the source string: tier=code+string string_hits=1, the string row served"
+else
+    no "(12h) a thin code tier did not lift the string: tier=$( attr tier "$LH_OUT" ) string_hits=$( attr string_hits "$LH_OUT" ) suppressed_string=$( attr suppressed_string "$LH_OUT" )"
+fi
+# (12i) lane lean-trio (idea #5, round-2 tmux-05): a literal no identifier can spell is served from its string tier even
+# beside a FULL code tier in source, ranked: the source file whose NAME holds the literal first, then other source, then
+# shell scripts; the table entry that holds it carries ref= — the first site naming that callerless entry (where it is
+# registered). RED on main 0852bc0f: the shell rows first, cmd-split.c behind suppressed_string=.
+LS="$TMP/shapesandbox"
+mkdir -p "$LS/src" "$LS/regress"
+cat >"$LS/src/cmd-shape-split.c" <<'EOF'
+struct entry { const char *name; };
+const struct entry cmd_split_entry = {
+    .name = "shape-split",
+};
+EOF
+# a-keys.c sorts BEFORE it by path: the rank, not the path order, must put the file named like the literal first
+cat >"$LS/src/a-keys.c" <<'EOF'
+const char *bindings[] = { "bind x shape-split", 0 };
+EOF
+cat >"$LS/src/cmd.c" <<'EOF'
+extern const struct entry cmd_split_entry;
+const struct entry *cmd_table[] = {
+    &cmd_split_entry,
+    0
+};
+EOF
+for i in 1 2 3 4 5 6 7 8 9; do printf 'tmux shape-split -t %s\n' "$i" >"$LS/regress/a$i.sh"; done
+LS_OUT="$( "$BIN" "$LS" --no-cache --grep=shape-split 2>/dev/null )"
+ls_first="$( printf '%s' "$LS_OUT" | grep -o '<f p="[^"]*"' | head -1 )"
+ls_second="$( printf '%s' "$LS_OUT" | grep -o '<f p="[^"]*"' | sed -n 2p )"
+if [ "$( attr tier "$LS_OUT" )" = "code+string" ] && [ "$ls_first" = '<f p="src/cmd-shape-split.c"' ] && [ "$ls_second" = '<f p="src/a-keys.c"' ]; then
+    ok "(12i) a dashed literal lifts its source strings: the file named like it first, then other source, then scripts"
+else
+    no "(12i) expected tier=code+string, src/cmd-shape-split.c then src/a-keys.c; got tier=$( attr tier "$LS_OUT" ) first=$ls_first second=$ls_second"
+    printf '%s\n' "$LS_OUT" | grep -o '<grep [^>]*>'
+fi
+printf '%s' "$LS_OUT" | grep -q 'in="cmd_split_entry" ref="src/cmd.c:3"' \
+    && ok "(12j) the callerless table entry carries ref= at its registration (src/cmd.c:3), not the extern line" \
+    || no "(12j) no ref=src/cmd.c:3 on the cmd_split_entry hit: $( printf '%s' "$LS_OUT" | grep -o '<hit [^>]*>' | head -2 | tr '\n' ' ' )"
+printf '%s' "$LS_OUT" | grep -o '<!--.*-->' | head -1 | grep -q 'ref=' \
+    && ok "(12k) the legend defines ref= and string_hits= where they are emitted" \
+    || no "(12k) ref= emitted with no reading in the legend"
+if command -v xmllint >/dev/null 2>&1; then
+    printf '%s' "$LS_OUT" | xmllint --noout - 2>/dev/null && ok "(12l) the ranked answer is well-formed XML" || no "(12l) the ranked answer is not well-formed XML"
 fi
 
 # (12f) the MCP grep twin lifts the same rows (one collection, one decision).
