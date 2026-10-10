@@ -378,6 +378,7 @@
 "oswin32logiccheck.sh": 30.0,
 "outlinecheck.sh": 1.5,
 "overbudgetcommentcheck.sh": 0.5,
+"ownerhopcheck.sh": 53.2,
 "ownerscheck.sh": 5.2,
 "packcallersharecheck.sh": 0.9,
 "packtaskcheck.sh": 20.8,

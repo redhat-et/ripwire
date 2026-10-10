@@ -556,6 +556,11 @@ struct ForLensHeaderParts
     bool             viaPresent = false;     // FE-B: may a <calls><c> row of this bundle carry via="name"? Some head row
                                             // (the same row head modScopePresent reads) has a name-only out-edge
                                             // (serialize.h namesOnlyOutAny). Over-approximates the 16-per-symbol cap.
+    bool             ownerPresent = false;   // owner-hop: the compact <hops> carries a qword= row or a qword_cut= disclosure
+                                            // (forOwnerHopPlan, decided before the header, cleared with the section)
+    bool             viaByOwnerOnly = false; // owner-hop: viaPresent holds ONLY because the owner rows joined the via question
+                                            // (the six ranked hop ids alone answer no) — the via clause is then the owner
+                                            // rows' disclosure, exempt from the sig trim exactly as the qword clause is
 
     // ── THE DROPPABLE LEGEND, as ONE bit ──────────────────────────────────────────────────────────────
     // confidenceNote / tailLegend / idRouteLegend moved in lock step at every read and every write, and the
@@ -785,6 +790,41 @@ inline constexpr std::string_view kForCompactLegendConfidence =
     "; confidence=/margin_pct= head score drop (low=flat)";
 inline constexpr std::string_view kForCompactLegendHops =
     "; h l= p= n=, c n= l= (joined for same-named callees, shown= counts them), noedge= no callee resolved";
+// owner-hop: present-only, right after the hops clause, on the same plan the rows come from. Says it is BY NAME (a lookup in
+// the ranked head, never a resolution), widens noedge= to the owners, and defines the two disclosures an owner cut carries.
+// What qword= does NOT mean: that the row is the only, or the true, implementation of the question's subject.
+inline constexpr std::string_view kForCompactLegendOwner =
+    "; h qword= its name (case-folded, leading _#$@ dropped) equals that question word (by name, not resolved, not the only one), first, calls to 100 (capped=1 next= all); "
+    "qword_cut= owners not so served, next= the first";
+// owner-hop: the full dialect's reading of the same two attributes (present-only, after the clause above; no "--": a comment)
+inline constexpr std::string_view kForOwnerHopLegend =
+    "; hops row qword= the question word that row's NAME equals (ASCII case-folded, leading _ # $ @ dropped; by name in the "
+    "ranked head, a lookup, not a resolution; it "
+    "does not mean the symbol is the only or the true implementation): such an owner row comes first (a word on a short "
+    "common-verb list such as get, set, run or write ranks after the other owner words) and its calls child "
+    "lists up to 100 callee names (capped=1 with next= naming the full list when the guard or the budget cut it); an owner "
+    "with no resolved callee is counted in noedge= like any ranked symbol. hops qword_cut=N: owners not served as a qword "
+    "row (the three-row cap or the budget; one of the six ranked candidates still keeps its plain row), next= the first";
+// …and the one question both dialects ask: the clause in this dialect, or nothing (ownerPresent is set only on the compact
+// route and cleared with the section, so it never rides without the hops clause in front of it).
+inline std::string_view ownerHopLegend( const ForLensHeaderParts& p, bool compact ) noexcept
+{
+    if( !p.ownerPresent )
+    {
+        return {};
+    }
+    return compact ? kForCompactLegendOwner : kForOwnerHopLegend;
+}
+// …and what the sig-trim ledger exempts for the owner rows in this dialect: the qword clause, plus the via="name" clause when
+// the owner rows alone switched it on (a base answer without them never carried it, so charging it cost <sigs> a row:
+// fastify-13 Context r23, pdoc AstInfo r38). ownerPresent and viaPresent are cleared with their sections, so neither part
+// is exempted for a clause the header did not write.
+inline std::size_t ownerLegendExemptBytes( const ForLensHeaderParts& p, bool compact )
+{
+    const bool        viaByOwner = p.viaPresent && p.viaByOwnerOnly;
+    const std::size_t viaBytes   = !viaByOwner ? 0u : ( compact ? rw::kForCompactViaNameClause.size() : rw::forViaNameClause().size() );
+    return ownerHopLegend( p, compact ).size() + viaBytes;
+}
 inline constexpr std::string_view kForCompactLegendBodies =
     "; b t= n= p= l= full bodies, c n= l= callee signatures";
 inline constexpr std::string_view kForCompactLegendTail =
@@ -894,6 +934,7 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     {
         h += kForCompactLegendBodies;
     }
+    h += ownerHopLegend( p, /*compact=*/true );   // owner-hop: present-only, right after the hops clause
     // The unconditionally-droppable-free tail of this dialect: five clauses that ride exactly when the bit beside
     // them is set, in THIS order, which is the contract a reader and every byte pin depend on. A table rather than
     // five identical ifs — the list has grown once per lane (hdr, compose, then train 9's lego and layer) and the
@@ -1042,6 +1083,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     {
         h.append( kForAutoBundleLegend );   // T3: present whenever auto mode is on, whatever the fit outcome — it explains bodies="0" too
     }
+    h.append( ownerHopLegend( p, /*compact=*/false ) );   // owner-hop: present-only, right after the bundle clause
     if( p.tailLegend )
     {
         h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
@@ -2209,6 +2251,233 @@ inline std::vector<rw::NodeId> forCompactHopIds( const std::vector<rw::NodeId>& 
     }
     return hopIds;
 }
+// ── THE QUESTION'S OWNER (lane owner-hop-068) ─────────────────────────────────────────────────────────────────────
+// The hop candidates above are the six best-RANKED rows, and a question that names the function it is about ("How does
+// the JWT middleware verify a token?" -> jwt(), rank 12 behind a dozen symbols that repeat the question's other words)
+// never got that function's callees — the graded gold items of two round-1 rows (getCookie, HTTPException, set;
+// validateAsync*). An OWNER is a symbol of the ranked pool (the first kForLensDefaultTopN rows with a positive score) that
+//   * is a callable DEFINITION — a function or method with a body (a C prototype and its body are one entity: the
+//     body's row is the owner, the prototype is no second one) — and not a test symbol (rw::isTestSymbol);
+//   * has a name that, with leading _ # $ @ removed and ASCII case folded, EQUALS a whole word of the question (words
+//     split on every byte that is not a letter, digit, '_' or a non-ASCII byte; length >= 3; not a route stopword) —
+//     whole name only: "log" never makes catalog or dialog owners; `__init__` folds to init__ and matches no word;
+//   * names a word with at least one such definition inside the head tier (rank <= kForDocExcerptRankCount). The gate
+//     is per WORD: once a word qualifies, EVERY same-named definition in the pool is an owner, each its own row (two
+//     classes' _notify are two entities, never one picked silently).
+// This is a NAME lookup over the ranked head, not a resolution: qword= says the name equals the word, never that the
+// symbol is the only or the true implementation of the subject. The case fold matches the question's word only; it never
+// merges two entities. Language-neutral by construction: a name, a kind, a body span and the test partition are what
+// every indexed language already sets.
+// SLOTS: owners with a proven callee edge (the hop-slot rule, rw::hopSlotHasProvenEdge) take up to kForOwnerHopRows rows
+// in rank order — except that a word on kOwnerCommonWords (verbs and function words a question USES: get, then, write …)
+// ranks after every other word, so "how does the gateway get and then write the token" seats gateway first (gate (V)).
+// The rest are disclosed (qword_cut= + next=). An owner with no proven edge never takes a slot; it is counted in noedge=
+// once (it is appended to the hop nodes only when it is not already one of the six). RIPWIRE_NO_OWNER_HOP=1 turns the
+// whole plan off — the A/B handle, the RIPWIRE_NO_DOCS_AFTER_CODE precedent.
+inline constexpr std::size_t kForOwnerHopRows = 3;
+inline constexpr std::string_view kOwnerCommonWords[] = {
+    "all", "call", "each", "from", "get", "has", "into", "new", "put", "read", "run", "set", "that", "then", "this",
+    "use", "when", "with", "write" };
+
+struct ForOwnerPlan
+{
+    std::vector<rw::NodeId>  rowIds;      // the owner rows, slot order (<= kForOwnerHopRows)
+    std::vector<std::string> rowWords;    // the folded question word of each row
+    std::vector<rw::NodeId>  noEdgeIds;   // owners with no proven edge that are NOT among the six candidates
+    std::size_t              capCut      = 0;   // owners with a proven edge past the row cap
+    rw::NodeId               firstCapCut = rw::kNoNode;
+    bool any() const noexcept { return !rowIds.empty() || capCut > 0; }   // a qword row or a qword_cut= disclosure (the legend's bit)
+    bool changesNodes() const noexcept { return any() || !noEdgeIds.empty(); }   // …or an edgeless owner to count in noedge=
+};
+
+// What the --for header already decided for the enrichment section it introduces: FE-B's "the header defines
+// via=\"name\"" (ForLensHeaderParts::viaPresent) and the owner plan its qword clause read. One aggregate, so the section
+// builders render exactly what the header promised without a parameter per promise.
+struct ForSectionPromises
+{
+    bool                viaLegendInHead = false;
+    const ForOwnerPlan* owners          = nullptr;   // nullptr ⇒ no owner rows (an empty plan reads the same)
+};
+
+// ASCII fold of one name or word, leading _ # $ @ removed (the owner match key)
+inline std::string ownerFoldName( std::string_view n )
+{
+    std::size_t i = 0;
+    while( i < n.size() && ( n[i] == '_' || n[i] == '#' || n[i] == '$' || n[i] == '@' ) )
+    {
+        ++i;
+    }
+    std::string out( n.substr( i ) );
+    for( char& c : out )
+    {
+        c = ( c >= 'A' && c <= 'Z' ) ? char( c - 'A' + 'a' ) : c;
+    }
+    return out;
+}
+
+// the question's distinct owner words, sorted (binary-searched below — any question length, no per-word scan)
+inline std::vector<std::string> ownerQuestionWords( std::string_view task )
+{
+    std::vector<std::string> words;
+    const auto isWordByte = []( unsigned char c ) noexcept
+    { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' || c >= 0x80; };
+    std::size_t i = 0;
+    while( i < task.size() )
+    {
+        if( !isWordByte( static_cast<unsigned char>( task[i] ) ) )
+        {
+            ++i;
+            continue;
+        }
+        const std::size_t start = i;
+        while( i < task.size() && isWordByte( static_cast<unsigned char>( task[i] ) ) )
+        {
+            ++i;
+        }
+        std::string w = ownerFoldName( task.substr( start, i - start ) );
+        if( w.size() >= 3 && !rw::isRouteStopword( w ) )
+        {
+            words.push_back( std::move( w ) );
+        }
+    }
+    std::sort( words.begin(), words.end() );
+    words.erase( std::unique( words.begin(), words.end() ), words.end() );
+    return words;
+}
+
+static_assert( std::ranges::is_sorted( kOwnerCommonWords, rw::sortutil::svLess ), "kOwnerCommonWords is binary-searched: keep it sorted" );
+
+inline ForOwnerPlan forOwnerHopPlan( const rw::IngestResult& ing, const rw::Graph& g, std::string_view task,
+                                     const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
+                                     const std::vector<rw::NodeId>& hopIds )
+{
+    ForOwnerPlan plan;
+    if( std::getenv( "RIPWIRE_NO_OWNER_HOP" ) != nullptr )
+    {
+        return plan;
+    }
+    const std::vector<std::string> words = ownerQuestionWords( task );
+    if( words.empty() )
+    {
+        return plan;
+    }
+    struct Owner
+    {
+        rw::NodeId  id;
+        std::size_t rank;   // 1-based position in the ranked surface
+        std::string word;
+    };
+    std::vector<Owner> found;
+    const std::size_t  pool = std::min( lensSurfaceIds.size(), std::size_t( rw::kForLensDefaultTopN ) );
+    for( std::size_t i = 0; i < pool; ++i )
+    {
+        const rw::NodeId id = lensSurfaceIds[i];
+        if( id >= ing.symbols.size() || lensRank[id] <= 0.0f )
+        {
+            continue;
+        }
+        const rw::Symbol& s = ing.symbols[id];
+        if( ( s.kind != rw::SymKind::Function && s.kind != rw::SymKind::Method ) || !rw::isDefinitionNotDeclaration( s ) || rw::isTestSymbol( ing, id ) )
+        {
+            continue;
+        }
+        std::string key = ownerFoldName( s.name );
+        if( std::binary_search( words.begin(), words.end(), key ) )
+        {
+            found.push_back( Owner{ id, i + 1, std::move( key ) } );
+        }
+    }
+    // the head-tier gate, per WORD: a word qualifies when one of its definitions ranks inside the head tier
+    std::vector<std::string> headWords;
+    for( const Owner& o : found )
+    {
+        if( o.rank <= rw::kForDocExcerptRankCount )
+        {
+            headWords.push_back( o.word );
+        }
+    }
+    std::sort( headWords.begin(), headWords.end() );
+    std::erase_if( found, [ & ]( const Owner& o ) { return !std::binary_search( headWords.begin(), headWords.end(), o.word ); } );
+    // rank order, common words after the rest (stable: rank order inside each group)
+    std::stable_partition( found.begin(), found.end(),
+                           []( const Owner& o ) { return !std::ranges::binary_search( kOwnerCommonWords, std::string_view( o.word ), rw::sortutil::svLess ); } );   // svLess: #345
+    for( Owner& o : found )
+    {
+        if( !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, o.id ) )
+        {
+            if( std::ranges::find( hopIds, o.id ) == hopIds.end() )
+            {
+                plan.noEdgeIds.push_back( o.id );   // counted in noedge= once; a candidate already is
+            }
+            continue;
+        }
+        if( plan.rowIds.size() < kForOwnerHopRows )
+        {
+            plan.rowIds.push_back( o.id );
+            plan.rowWords.push_back( std::move( o.word ) );
+            continue;
+        }
+        if( plan.capCut++ == 0 )
+        {
+            plan.firstCapCut = o.id;
+        }
+    }
+    ENSURES( plan.rowIds.size() == plan.rowWords.size() && plan.rowIds.size() <= kForOwnerHopRows, "one word per seated owner, at most the cap" );
+    return plan;
+}
+
+// The <hops> node list with the owner plan applied: owner rows first, then the six candidates minus the owners MOVED out
+// of them (moved, never duplicated), then the edgeless owners that are not candidates (each counted in noedge= once).
+inline std::vector<rw::NodeId> forOwnerHopNodes( const ForOwnerPlan& plan, const std::vector<rw::NodeId>& hopIds )
+{
+    std::vector<rw::NodeId> nodes = plan.rowIds;
+    for( rw::NodeId id : hopIds )
+    {
+        if( std::ranges::find( plan.rowIds, id ) == plan.rowIds.end() )
+        {
+            nodes.push_back( id );
+        }
+    }
+    nodes.insert( nodes.end(), plan.noEdgeIds.begin(), plan.noEdgeIds.end() );
+    return nodes;
+}
+
+// packHops' owner description of a plan. Default regime: the owner rows ride ON TOP of the hop budget (completeness first —
+// every ranked row keeps the budget it had, and the name guard is the only stop). Explicit ceiling: the owners are funded
+// first from what the ceiling left, minus the widest qword_cut/next= disclosure the walk could write (the envelope is the
+// ranked rows' own reserve, kCompactFixedBytes, and is not charged twice).
+inline rw::HopOwners forHopOwners( const rw::Config& cfg, const rw::IngestResult& ing, const ForOwnerPlan& plan,
+                                   std::size_t leftBytes, std::string_view rootArg )
+{
+    rw::HopOwners owners;
+    owners.rows        = plan.rowIds.size();
+    owners.words.assign( plan.rowWords.begin(), plan.rowWords.end() );
+    owners.capCut      = plan.capCut;
+    owners.firstCapCut = plan.firstCapCut;
+    if( cfg.tokenBudget == 0 || !plan.any() )
+    {
+        return owners;
+    }
+    std::vector<char> esc;
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    std::size_t       cutReserve = 0;   // ' qword_cut="NNN" next="--callees=' + the longest target + '"'
+    std::vector<rw::NodeId> cuttable = plan.rowIds;
+    if( plan.firstCapCut != rw::kNoNode )
+    {
+        cuttable.push_back( plan.firstCapCut );
+    }
+    for( rw::NodeId id : cuttable )
+    {
+        const rw::Symbol&      s   = ing.symbols[ id ];
+        const std::string_view rel = rootArg.empty() ? std::string_view( ing.files[ s.fileId ] )
+                                                     : rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix );   // packHops' pathRel
+        cutReserve = std::max( cutReserve, rw::ownerCalleesNext( ing, s, rel, rootArg, esc ).size() + 28 );
+    }
+    owners.budgetBytes = leftBytes > cutReserve ? leftBytes - cutReserve : 1;   // 1, never 0 (0 reads as "ride on top")
+    owners.fundFirst   = true;
+    return owners;
+}
+
 // --detail=N's bodies: the top min(N, forTopN) symbols by (score desc, id asc) — the order the sigs use. One spelling, read
 // by the --detail section and by the header's via="name" question (FE-B).
 inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const std::vector<float>& lensRank, int detail, int forTopN )
@@ -2227,8 +2496,11 @@ inline std::vector<rw::NodeId> forDetailIds( const rw::IngestResult& ing, const 
 ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
                                           const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                           std::size_t committedBytes, std::size_t bundleBudget, rw::RedactCounts* redactPtr,
-                                          bool viaLegendInHead )
+                                          const ForSectionPromises& promised )
 {
+    static const ForOwnerPlan kNoOwners{};
+    const ForOwnerPlan&       ownerPlan       = promised.owners != nullptr ? *promised.owners : kNoOwners;
+    const bool                viaLegendInHead = promised.viaLegendInHead;
     ForAutoBodiesResult out;
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
     const bool             fcSingleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
@@ -2267,9 +2539,14 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
                                                                         ? rw::kForCompactSurfaceBudgetBytes - kCompactFixedBytes
                                                                         : std::size_t( 1 ) );
 
+    // THE QUESTION'S OWNER (forOwnerHopPlan): owner rows first, the candidates they were not, the edgeless owners last;
+    // an empty plan leaves both exactly as they were (forOwnerHopNodes / forHopOwners).
+    const std::vector<rw::NodeId> hopNodes = forOwnerHopNodes( ownerPlan, hopIds );
+    const rw::HopOwners           owners   = forHopOwners( cfg, ing, ownerPlan, leftBytes, fcRootArg );
+
     out.section = rw::chargeSection( [ & ]( std::FILE* f )
-        { rw::packHops( f, ing, hopIds, hopBudget, g.outOff, g.outTargets, g.outNameOnly, redactPtr, /*outShown=*/nullptr, &lensRank, fcRootArg,
-                        viaLegendInHead ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
+        { rw::packHops( f, ing, hopNodes, hopBudget, g.outOff, g.outTargets, g.outNameOnly, redactPtr, &lensRank, fcRootArg,
+                        viaLegendInHead, &owners ); },   // g.outNameOnly also feeds the hop-slot rule (serialize.h noProvenEdge)
         // MARKUP rate, not the body rate — and this is an honesty choice, not a copy-paste slip. The body
         // rate (3.80 B/tok) prices SOURCE TEXT; the compact section contains none, only tags, identifiers
         // and line numbers, which tokenize like the rest of the bundle. Charging structured markup at the
@@ -2284,7 +2561,7 @@ ForAutoBodiesResult buildForCompactHops( const rw::Config& cfg, const rw::Ingest
         out.section    = rw::ChargedSection{};
         return out;
     }
-    out.attr = hopIds.empty() ? " bundle=\"compact\" bodies=\"0\" reason=\"no_candidates\""
+    out.attr = hopNodes.empty() ? " bundle=\"compact\" bodies=\"0\" reason=\"no_candidates\""
                               : " bundle=\"compact\" bodies=\"0\" reason=\"compact-route\"";
     return out;
 }
@@ -2300,12 +2577,12 @@ ForAutoBodiesResult buildForEnrichment( const rw::Config& cfg, const rw::IngestR
                                         const std::vector<rw::NodeId>& lensSurfaceIds, const std::vector<float>& lensRank,
                                         const ForEnrichmentPlan& plan, const std::vector<rw::RouteAnchorDef>& anchorDefs,
                                         rw::RedactCounts* redactPtr, std::size_t committedBytes, std::size_t bundleBudget,
-                                        bool viaLegendInHead )   // FE-B: the header defines via="name" (ForLensHeaderParts::viaPresent)
+                                        const ForSectionPromises& promised )   // FE-B via="name" in the head + the owner plan
 {
     const std::size_t   committed = committedBytes + plan.attrReserve;
     ForAutoBodiesResult out       = plan.compact
-        ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, viaLegendInHead )
-        : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs, viaLegendInHead );
+        ? buildForCompactHops( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, promised )
+        : buildForAutoBodies( cfg, ing, g, lensSurfaceIds, lensRank, committed, bundleBudget, redactPtr, anchorDefs, promised.viaLegendInHead );
     if( plan.compact )
     {
         out.markupBytes = out.section.xml.size();
@@ -2794,16 +3071,28 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
         // node set is known before the header: the compact route's hop ids, T3's auto-body candidates, or --detail's head
         // (autoBundleMode excludes --detail). Their name-only out-edges decide it — over-approximating only the byte ladder
         // and the 16-per-symbol cap inside those sections, never the rows the header itself lists.
+        // owner-hop: THE QUESTION'S OWNER plan (forOwnerHopPlan), decided here, before the header, because the header's
+        // qword clause and its via="name" question both read it; the compact route's <hops> renders exactly this plan.
+        const ForOwnerPlan ownerPlan = ( autoBundleMode && plan.compact )
+            ? forOwnerHopPlan( ing, g, cfg.forTask, lensSurfaceIds, lensRank, forCompactHopIds( lensSurfaceIds, lensRank ) )
+            : ForOwnerPlan{};
         bool forViaPresent = false;
+        bool forViaByOwnerOnly = false;   // owner-hop: the six ranked hop ids alone answer no, the owner rows switch it on
         if( !g.outNameOnly.empty() )
         {
             std::vector<rw::NodeId> viaIds;
             if( autoBundleMode && plan.compact )
             {
-                viaIds = forCompactHopIds( lensSurfaceIds, lensRank );
                 // only the hops packHops gives a slot can carry a row (the hop-slot rule drops a hop whose every callee
                 // edge is name-only, so its via="name" rows never print)
-                std::erase_if( viaIds, [ & ]( rw::NodeId id ) { return !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, id ); } );
+                const auto unslotted = [ & ]( rw::NodeId id ) { return !rw::hopSlotHasProvenEdge( g.outOff, g.outNameOnly, id ); };
+                viaIds = forCompactHopIds( lensSurfaceIds, lensRank );
+                std::erase_if( viaIds, unslotted );
+                const bool rankedVia = rw::namesOnlyOutAny( g.outOff, g.outNameOnly, viaIds );   // the question without owners
+                std::vector<rw::NodeId> ownerViaIds = ownerPlan.rowIds;   // owner rows carry <calls> too
+                std::erase_if( ownerViaIds, unslotted );
+                forViaByOwnerOnly = !rankedVia && rw::namesOnlyOutAny( g.outOff, g.outNameOnly, ownerViaIds );
+                viaIds.insert( viaIds.end(), ownerViaIds.begin(), ownerViaIds.end() );
             }
             else if( autoBundleMode && plan.autoBodies )
             {
@@ -2821,7 +3110,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
                                         cfg.anchor, plan.autoBodies, plan.compact, cfg.legend == "compact",
                                         /*tailLegend=*/true, /*idRouteLegend=*/true, /*legendDropped=*/false, flRootArg,
                                         /*hdrLegend=*/!forHdrRows.empty(), forScPresent, forComposePresent,
-                                        forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent };
+                                        forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent,
+                                        ownerPlan.any(), forViaByOwnerOnly };
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3093,8 +3383,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
         // admits are the ones it admitted without it (owner ruling: e= is exempt from the row budget).
         const std::size_t endLineLegendEmitted = !headerParts.endLinePresent ? 0u
                                                : ( compactLegendOn ? rw::kForCompactEndLineLegend.size() : rw::kForEndLineLegend.size() );
+        // owner-hop: the qword clause — and the via="name" clause when only the owner rows switched it on — are disclosures
+        // on the same contract: exempt, so <sigs> is byte-identical with and without the owner rows (the rows ride on top of
+        // the hop budget; their reading never costs a signature row). Gate: ownerhopcheck (S).
+        const std::size_t ownerLegendEmitted = ownerLegendExemptBytes( headerParts, compactLegendOn );
         const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted + idRouteLegendEmitted
-                                      + endLineLegendEmitted;
+                                      + endLineLegendEmitted + ownerLegendEmitted;
         if( exemptBytes > headerStr.size() )
         {
             DISCLOSE( "runForLens: header exemptions exceed the emitted header — the sig ledger would underflow; charging the header whole" );
@@ -3118,7 +3412,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
                                               + rw::kForFileTailLegend.size() + idRouteParts.bytes()
-                                              + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u );
+                                              + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u )
+                                              + ownerLegendExemptBytes( headerParts, /*compact=*/false );
             std::size_t       fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
             fullCharged -= std::min( fullCharged, rw::forZeroNoteBytes( fullHeader ) );   // lean-answers: exempt, as above
             chargedHeaderBytes    = std::min( chargedHeaderBytes, fullCharged );
@@ -3493,11 +3788,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
                                           // reserved ahead of the body walk (the kAutoAttrReserve pattern) so
                                           // the disclosure always fits; the DEFAULT regime reserves nothing —
                                           // the tail rides on top there and the bodies stay byte-identical.
-                                          bundleBudget, headerParts.viaPresent );
+                                          bundleBudget, ForSectionPromises{ headerParts.viaPresent, &ownerPlan } );
             if( enrich.surfaceOff || enrich.legendOff )
             {
                 headerParts.autoBundle = headerParts.compactBundle = false;
                 headerParts.viaPresent = false;   // FE-B: the section that could carry it is gone (autoBundleMode excludes --detail)
+                headerParts.ownerPresent = false;   // owner-hop: the same section
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
         }
