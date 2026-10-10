@@ -34,6 +34,12 @@ A Ruby module mixed in with `include M`, `extend M` or `prepend M` is now an imp
 `--lego=M` lists every class (and module) that mixes it in — `--lego=DSL` lists the classes that `include Rake::DSL`,
 where it answered `implementors="0"`. A mixin inside a method body or at a file's top level still adds nothing.
 
+A JavaScript/TypeScript class FACTORY, `const Sub = Base.extend('Sub', …)` (nunjucks' node classes), is now a class
+definition that extends its receiver: `--lego=BinOp` answers instead of "type not found", and `--lego=Node` lists the
+classes made from it. The name must be the string the call is given — `$.extend({}, a)`, an unnamed Backbone-style
+`Base.extend({…})` and `const A = B.extend('C')` stay what they look like (an object merge, no class). Parser version
+157 (re-index on first run).
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

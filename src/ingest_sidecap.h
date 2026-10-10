@@ -2264,6 +2264,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             if( kind == SymKind::Class || isStructOrNamedType( kind ) || kind == SymKind::Interface )
             {
                 captureBases( defNode, fileId, le.lang, src, refs );    // IS-A: inheritance edges (derived → base)
+                if( defCapSv == "definition.classfactory" )               // lane lego-transitive (M2): the factory's receiver is the base
+                {
+                    emitBaseRef( jsClassFactoryReceiver( nameNode, src ), fileId, le.lang, src, refs );
+                }
                 captureFields( defNode, fileId, le.lang, src, refs );   // HAS-A: member-variable type edges (S5-E)
             }
             else if( kind == SymKind::Macro )

@@ -7,7 +7,7 @@
 #   py/formatters.py  BaseFormatter <- {SimpleFormatter <- {Default, Pylint, FilenameOnly}, Nothing}
 #   py/diamond.py     Top <- {Left, Right} <- Bottom (both) <- Deepest; Alone <- OnlyChild (direct rows only)
 #   rb/*.rb           Rake::Task <- {FileTask <- FileCreationTask, MultiTask}; Rake::DSL mixed in
-#   js/*.js           Node.extend('BinOp', …) class factories; Loader defined in code AND as a docs heading
+#   js/*.js, ts/*     Node.extend('BinOp', …) class factories (+ near misses); Loader defined in code AND as a docs heading
 #
 # (S1) the TARGETED --lego lists implementors below a direct one, each once at its shallowest depth, as
 #      <impl via= depth=>; transitive=N on the <iface>; implementors= still counts the direct rows alone;
@@ -16,6 +16,7 @@
 # (S2) every <impl> row of the TARGETED answer says where the class is: p="file:LINE" (the --uses/--callers spelling); the
 #      <iface> row and the ranked --for <lego> section keep their bare p=.
 # (M1) a Ruby module mixed in with include/extend (captureRubyMixinBases) is an implements edge: --lego=DSL lists TaskLib.
+# (M2) a JS/TS class factory `const Sub = Base.extend('Sub', …)` is a class definition extending its receiver.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
@@ -160,6 +161,38 @@ fi
 if lego Pong
 then
     if printf '%s\n' "$OUT" | grep '<impl n="Pinged"' | grep -q 'via="Ping" depth="2"'; then ok "--lego=Pong reaches Pinged through Ping (depth 2)"; else no "Pong closure: $( printf '%s\n' "$OUT" | grep '^<impl' | tr '\n' ' ' )"; fi
+fi
+
+echo "=== (M2) the JS/TS class factory: const Sub = Base.extend('Sub', …) ==="
+if lego BinOp
+then
+    ok "--lego=BinOp resolves (it said type not found before)"
+    if has '<impl n="Add" p="js/nodes.js:8"/>' && has '<impl n="Sub" p="js/nodes.js:9"/>'; then ok "BinOp lists Add (var, single-quoted) and Sub (const, double-quoted)"; else no "BinOp rows: $( printf '%s\n' "$OUT" | grep '^<impl' | tr '\n' ' ' )"; fi
+fi
+if lego Node
+then
+    for n in Value BinOp Inner; do
+        if printf '%s\n' "$OUT" | grep "<impl n=\"$n\"" | grep -qv ' via="'; then ok "--lego=Node lists $n directly"; else no "--lego=Node: no direct $n"; fi
+    done
+    if printf '%s\n' "$OUT" | grep '<impl n="Add"' | grep -q 'via="BinOp" depth="2"'; then ok "Add is depth 2 via BinOp (a factory of a factory)"; else no "Add row: $( printf '%s\n' "$OUT" | grep '<impl n="Add"' )"; fi
+    if iface | grep -q 'implementors="3" transitive="2"'; then ok "Node: implementors=\"3\" transitive=\"2\" — no near miss counted"; else no "Node counts: $( iface )"; fi
+fi
+# near misses are no class at all: an object merge, a name that is not the binding's, another method, a spread
+for t in settings Renamed Merged Spread TOther
+do
+    if "$BIN" "$FIX" --no-cache --lego="$t" >/dev/null 2>"$DIR/err"
+    then
+        no "--lego=$t resolved — the near miss became a class"
+    elif grep -q -- "--lego type not found: $t" "$DIR/err"
+    then
+        ok "--lego=$t is not a type (near miss)"
+    else
+        no "--lego=$t failed some other way: $( head -2 "$DIR/err" )"
+    fi
+done
+if lego TNode
+then
+    if has '<impl n="TBin" p="ts/nodes.ts:5"/>' && has '<impl n="TView" p="ts/view.tsx:2"/>'; then ok "TypeScript (with a type argument) and TSX factories list under TNode"; else no "TNode rows: $( printf '%s\n' "$OUT" | grep '^<impl' | tr '\n' ' ' )"; fi
 fi
 
 echo "=== well-formed ==="

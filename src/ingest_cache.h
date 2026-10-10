@@ -312,7 +312,7 @@ constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiver
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 156;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 157;          // bump on any grammar/.scm/extraction change
                                                       // 156 = 2026-10-08 (train 26b: signed lanes merged onto main's 148): cache-key hygiene.
                                                       //   Two merged lanes changed extraction under lane-local numbers, both 145:
                                                       //   honesty-small-068 (Go named-type kinds, `type A = B` aliases) and

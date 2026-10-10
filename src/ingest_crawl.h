@@ -372,6 +372,10 @@ SymKind defKind( std::string_view tail ) noexcept
     {
         return SymKind::Function;
     }
+    if( tail == "classfactory" )   // JS/TS `const Sub = Base.extend('Sub', …)` — gated (isJsClassFactory)
+    {
+        return SymKind::Class;
+    }
     if( tail == "protomethod" )    // JS `Foo.prototype.NAME = fn` — gated (isPrototypeMemberTarget)
     {
         return SymKind::Method;

@@ -124,6 +124,25 @@
     (variable_declarator
       name: (identifier) @name)) @definition.constant)
 
+; lane lego-transitive (M2): a class FACTORY — `const Sub = Base.extend('Sub', …)` (nunjucks' node classes). The call
+; returns a class extending its receiver, so the declarator is a class definition. Captured by shape here, kept only by
+; ingest_names.h isJsClassFactory (tags-pass predicates never run): property `extend`, first argument a string literal
+; spelling the declared name — `$.extend({}, a)` and an unnamed Backbone `Base.extend({…})` are object merges by shape and
+; drop (a disclosed floor). The receiver becomes the base (ingest_sidecap.h, emitBaseRef).
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (call_expression
+      function: (member_expression)
+      arguments: (arguments . (string))))) @definition.classfactory
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (call_expression
+      function: (member_expression)
+      arguments: (arguments . (string))))) @definition.classfactory
+
 ; ---- references (calls) ----
 ; A bare `require("x")` / `import()` is itself a call_expression with an (identifier) function,
 ; so it is captured by the first rule below — no separate import rule needed for the call graph.

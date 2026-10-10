@@ -117,6 +117,25 @@
 (method_signature
   name: (property_identifier) @name) @definition.method
 
+; lane lego-transitive (M2): a class FACTORY — `const Sub = Base.extend('Sub', …)` (nunjucks' node classes). The call
+; returns a class extending its receiver, so the declarator is a class definition. Captured by shape here, kept only by
+; ingest_names.h isJsClassFactory (tags-pass predicates never run): property `extend`, first argument a string literal
+; spelling the declared name — `$.extend({}, a)` and an unnamed Backbone `Base.extend({…})` are object merges by shape and
+; drop (a disclosed floor). The receiver becomes the base (ingest_sidecap.h, emitBaseRef).
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (call_expression
+      function: (member_expression)
+      arguments: (arguments . (string))))) @definition.classfactory
+
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @name
+    value: (call_expression
+      function: (member_expression)
+      arguments: (arguments . (string))))) @definition.classfactory
+
 ; ---- references ----
 
 (call_expression

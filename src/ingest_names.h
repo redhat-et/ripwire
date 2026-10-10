@@ -2111,6 +2111,7 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
+inline TSNode jsClassFactoryReceiver( TSNode nameNode, std::string_view src ) noexcept;
 
 // The @definition.constant drop decision, in its own function for the same reason isCjsExportTarget and
 // isPyEnumMemberTarget have theirs: dropGatedCapture is a dispatcher, and this is the one arm with a
@@ -2236,6 +2237,10 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     {
         return !isCjsExportTarget( nameNode, src );
     }
+    if( defCapSv == "definition.classfactory" )
+    {
+        return ts_node_is_null( jsClassFactoryReceiver( nameNode, src ) );   // lane lego-transitive (M2)
+    }
     if( defCapSv == "definition.protomethod" )
     {
         return !isPrototypeMemberTarget( nameNode, src );
@@ -2317,6 +2322,47 @@ inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noe
         return false;
     }
     return nodeTextOf( fieldChild( obj, NodeField::Property ), src ) == "prototype";
+}
+
+// lane lego-transitive (M2): the RECEIVER of a JS/TS class factory `const Sub = Base.extend('Sub', …)` — the class the
+// factory's result extends — or a null node when `nameNode` (the declarator's name) is not that shape. The shape is all
+// three: the value is a call of a member `X.extend`, its first argument is a string literal, and that literal spells the
+// declared name. The name test is what tells a class factory from an object merge: `$.extend({}, a)`, `_.extend(o, p)`
+// and Backbone's unnamed `Base.extend({…})` have the same call shape and no name, and `const A = B.extend('C')` binds a
+// class to a name other than the one it was made under. The receiver is an identifier or a member chain
+// (`nodes.Node.extend`); a call or `this` receiver is not a class this tool can name. Floors, stated: a template
+// literal name, an assignment without a declaration (`Sub = Base.extend('Sub')`), and `exports.Sub = …` are not read.
+inline TSNode jsClassFactoryReceiver( TSNode nameNode, std::string_view src ) noexcept
+{
+    const TSNode decl = ts_node_parent( nameNode );
+    if( ts_node_is_null( decl ) || !kindIs( ts_node_type( decl ), "variable_declarator" ) )
+    {
+        return TSNode{};
+    }
+    const TSNode call = fieldChild( decl, NodeField::Value );
+    const TSNode fn   = ts_node_is_null( call ) ? call : fieldChild( call, NodeField::Function );
+    if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "member_expression" )
+        || nodeTextOf( fieldChild( fn, NodeField::Property ), src ) != "extend" )
+    {
+        return TSNode{};
+    }
+    const TSNode args = fieldChild( call, NodeField::Arguments );
+    if( ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 )
+    {
+        return TSNode{};
+    }
+    const TSNode           first = ts_node_named_child( args, 0 );
+    const std::string_view lit   = nodeTextOf( first, src );
+    if( !kindIs( ts_node_type( first ), "string" ) || lit.size() < 2 || lit.substr( 1, lit.size() - 2 ) != nodeTextOf( nameNode, src ) )
+    {
+        return TSNode{};
+    }
+    const TSNode recv = fieldChild( fn, NodeField::Object );
+    if( ts_node_is_null( recv ) || !( kindIs( ts_node_type( recv ), "identifier" ) || kindIs( ts_node_type( recv ), "member_expression" ) ) )
+    {
+        return TSNode{};
+    }
+    return recv;
 }
 
 // Constructor identifier of `Foo.prototype.NAME` (the object of the inner `.prototype` member).
