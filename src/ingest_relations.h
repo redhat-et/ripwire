@@ -1101,8 +1101,10 @@ inline std::string phpUseTarget( TSNode useNode, std::string_view src )
 
 // TS/JS `require("./x")` and dynamic `import("./x")` → the written specifier, or empty when this call
 // expression is not a module load. Its own function for the same reason csharpUsingTarget and phpUseTarget
-// are: one AST shape per language stays a one-line call inside directiveTargetOf, whose grain is one
-// branch per grammar spelling rather than one branch plus one nested scan.
+// are: one AST shape per language stays a one-line call at the use site rather than one branch plus one nested
+// scan. #358: its readers are now the DepDialect::Web normaliser (src/ingest_importcap.h — the captured
+// `require`/`import` call) and captureJsImportFacts (src/ingest_jsimports.h — the binding a destructured
+// require makes); directiveTargetOf no longer reads it, because the walk no longer visits TS/JS.
 //
 // THREE conditions, all required, and each is what keeps an ordinary call out of the dependency graph:
 //   * the callee is the BARE identifier `require` or `import` — a member expression
@@ -1869,7 +1871,8 @@ inline bool isPreprocConditional( const char* type ) noexcept
 // --expand's sibling lift, the SameInclude call-resolution tier, and --impact's import tier) was reading
 // an empty table and reporting the emptiness as a horizontal, cycle-free architecture. The four entries
 // below are exactly the statement forms a top-level `require` is written in; the call node itself is read
-// by directiveTargetOf, which is what keeps every OTHER call expression out.
+// by jsModuleLoadTarget (read by the Web normaliser in src/ingest_importcap.h since #358), which is what keeps
+// every OTHER call expression out.
 //
 // EVERY ENTRY HAS A FIXTURE ARM in test/nestedimportfix — an entry with no arm is an untested claim, and
 // every parent chain below was read off a real parse with `--match`, never predicted from the grammar.
@@ -1996,7 +1999,10 @@ inline bool isFunctionLike( Lang lang, const char* type ) noexcept
     return false;
 }
 
-// TS/JS: every container a `require("./x")` / `import("./x")` call can legitimately sit under.
+// TS/JS: every container a `require("./x")` / `import("./x")` call can legitimately sit under. #358: no walk
+// reads this table for TS/JS any more — it is now the REACH RULE src/ingest_importcap.h re-derives from a
+// captured `@import.path` node's ancestry (a specifier under a node that is not listed here was never an edge,
+// and still is not), and the `insideFn` source for the lazy bit (kJsFunctionContainers, below).
 //
 // The first five are the statement forms that wrap a TOP-LEVEL require, kParserVer 71's set — read off
 // real parses, not predicted:
@@ -2030,7 +2036,7 @@ inline bool isFunctionLike( Lang lang, const char* type ) noexcept
 // function: (_) @f)'` returns a real `function:` field of text "import" here, so the earlier miss was the
 // missing container, never a grammar shape jsModuleLoadTarget could not read).
 // EVERY ENTRY still needs the SAME three jsModuleLoadTarget guards (bare require/import callee, one arg, a
-// string literal) — this table only widens WHERE the walk looks, never what counts as a hit.
+// string literal) — this table only widens WHERE a specifier may sit, never what counts as a hit.
 inline constexpr std::array<std::string_view, 34> kJsImportContainers = {
     "lexical_declaration", "variable_declaration", "variable_declarator", "expression_statement", "assignment_expression",
     "statement_block", "return_statement", "labeled_statement", "export_statement",
@@ -2096,8 +2102,7 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // READS them stay separately readable — the walk is one shape, this is one branch per grammar spelling.
 //
 // Node types confirmed per grammar: Python import_statement/import_from_statement; Go/Swift
-// import_declaration; Rust use_declaration + mod_item; C# using_directive; TS/JS call_expression for the
-// CommonJS `require("./x")` and dynamic `import("./x")` spellings; plus the kParserVer-81 four (bash
+// import_declaration; Rust use_declaration + mod_item; C# using_directive; plus the kParserVer-81 four (bash
 // `command`, lua `function_call`, ruby `call`, elixir `call`). LEVER-B B0: non-C imports capture the
 // CLEAN written specifier via grammar child fields (module path / quoted specifier / use argument), not a
 // sliced clause — the sound resolver input.
@@ -2105,16 +2110,20 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // #358: the C-family rows are GONE from this list. C++ preproc_include (path field, "" local vs <>
 // external) and C++ preproc_call with directive `#import` are captured as `@import.path` by the grammar's
 // own query and read by the DepDialect::CFamily normaliser (src/ingest_importcap.h), so this function is
-// never asked about a C-family node. What is left is every language whose extraction needs the walk's own
-// frame state — which is also the list of languages that have NOT moved over yet.
+// never asked about a C-family node. The TS/JS rows (import_statement `source:`, the export_statement
+// re-export, the CommonJS / dynamic call_expression) went the same way: `@import.path` in
+// queries/{typescript,tsx,javascript}/tags.scm, DepDialect::Web normaliser. What is left is every language
+// whose extraction needs the walk's own frame state — which is also the list of languages that have NOT
+// moved over yet.
 //
-// `lang` exists for exactly one branch: `call_expression` is a node type in most of our grammars, and a
-// C++ or Rust function that happens to be named `require` must never manufacture a dependency edge. The
-// language gate makes that impossible by construction rather than by relying on where the walk goes.
+// `lang` exists for the language-gated branches: `call_expression` / `call` / `command` are node types in
+// most of our grammars, and a C++ or Rust function that happens to be named `require` must never
+// manufacture a dependency edge. The language gate makes that impossible by construction rather than by
+// relying on where the walk goes.
 //
-// `isLazy` (kParserVer 72, TS/JS; Ruby since parser version 82/83): true when `insideFn` says this call sits
-// inside a closure container — see kJsFunctionContainers, the Ruby closure kinds, and captureIncludes'
-// `insideFn` propagation below — or when the directive is a Ruby `autoload`. Allocates a std::string →
+// `isLazy` (Ruby since parser version 82/83; TS/JS since kParserVer 72, now computed in ingest_importcap.h):
+// true when `insideFn` says this call sits inside a closure container — see the Ruby closure kinds and
+// captureIncludes' `insideFn` propagation below — or when the directive is a Ruby `autoload`. Allocates a std::string →
 // not noexcept. `isSymbolic` (parser version 82, Ruby only): the target is a CONSTANT resolved through the
 // corpus's own class/module index, never a path — see model.h Include::isSymbolic.
 //
@@ -2124,8 +2133,9 @@ constexpr std::uint16_t kMaxImportContainerDepth = 256;
 // gone rather than documented as always-false.
 struct DirectiveTarget { std::string target; bool isLazy; bool isSymbolic; bool isReceiver; };
 
-// `insideFn` exists for exactly the same one branch `lang` does: whether the call_expression being read
-// sits inside a TS/JS function body, per captureIncludes' walk — meaningless (and ignored) everywhere else.
+// `insideFn` is the walk's sticky "inside a closure" bit, now read by Ruby alone (a constant receiver written
+// inside a method / lambda / block is lazy). TS/JS used to be the other reader: its require()/import() branch
+// moved to `@import.path` (#358), whose lazy bit is re-derived from ancestry in src/ingest_importcap.h.
 DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src, Lang lang, bool insideFn )
 {
     std::string target;
@@ -2133,34 +2143,17 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
     bool        isSymbolic = false;
     bool        isReceiver = false;
 
-    if( kindIs( t, "import_statement" ) )                 // Python `import a` / TS `import … from 'x'`
+    if( kindIs( t, "import_statement" ) )                 // Python `import a`
     {
         // Prefer the grammar's specifier field over slicing the whole statement (LEVER-B B0: the resolver
-        // needs the REAL written specifier, not the clause). Empirically confirmed node shapes:
+        // needs the REAL written specifier, not the clause). Empirically confirmed node shape:
         //   Python: import_statement name:(dotted_name|aliased_import)  → the dotted module `pkg.mod`.
-        //   TS/JS:  import_statement source:(string)                    → the quoted specifier `'./x'`.
-        // A grammar that lacks the field resolves it to id 0, and fieldChild returns null for it, so a single
-        // capture covers both grammars without a per-language branch.
-        if( const TSNode src_ = fieldChild( n, NodeField::Source );  !ts_node_is_null( src_ ) )
-        {
-            target = importSpecifierText( src_, src );                    // TS/JS: strip the surrounding quotes
-        }
-        else if( const TSNode nm = fieldChild( n, NodeField::Name );  !ts_node_is_null( nm ) )
+        // #358: the TS/JS `import … from 'x'` spelling of this node (and the `export … from 'x'` re-export that
+        // used to follow it) is GONE from this function — it is `@import.path` in queries/{typescript,tsx,javascript}
+        // /tags.scm now, read by the DepDialect::Web normaliser (src/ingest_importcap.h).
+        if( const TSNode nm = fieldChild( n, NodeField::Name );  !ts_node_is_null( nm ) )
         {
             target = importSpecifierText( nm, src );                      // Python: the dotted module head
-        }
-    }
-    else if( kindIs( t, "export_statement" ) && ( lang == Lang::TypeScript || lang == Lang::JavaScript ) )
-    {
-        // kParserVer 124 (#220 part 2): a RE-EXPORT — `export { x } from './y'`, `export * from './y'`,
-        // `export * as ns from './y'`, `export type { T } from './y'` — loads its module exactly as an import does,
-        // and a barrel file is made of nothing else, so an import graph without them misses every cycle through a
-        // barrel. The grammar gives the specifier the same `source:` field import_statement has; every other
-        // export_statement (`export function …`, `export { x }`, `export default …`) has none and reads empty, and
-        // the walk still descends into it (it is a kJsImportContainers entry) for the requires inside.
-        if( const TSNode src_ = fieldChild( n, NodeField::Source );  !ts_node_is_null( src_ ) )
-        {
-            target = importSpecifierText( src_, src );
         }
     }
     else if( kindIs( t, "import_from_statement" ) )            // Python `from pkg.mod import Z`
@@ -2171,12 +2164,6 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
         {
             target = importSpecifierText( mn, src );
         }
-    }
-    else if( kindIs( t, "call_expression" )
-             && ( lang == Lang::TypeScript || lang == Lang::JavaScript ) )   // TS/JS `require("./x")` / `import("./x")`
-    {
-        target = jsModuleLoadTarget( n, src );
-        isLazy = insideFn && !target.empty();   // kParserVer 72: a hit found inside a function body is LAZY
     }
     else if( kindIs( t, "command" ) && lang == Lang::Bash )              // Bash `source x.sh` / `. x.sh`
     {
@@ -2295,14 +2282,12 @@ DirectiveTarget directiveTargetOf( TSNode n, const char* t, std::string_view src
 
 // Capture #include / import directives (physical dependencies) by walking the file's top-level nodes —
 // and the bodies of anything that WRAPS a directive, which tree-sitter does not flatten: preprocessor
-// conditionals in the C family and C#, and ordinary language constructs in Python / Rust / C# / TS / JS
-// (see isImportContainer). Each node is read by directiveTargetOf above.
-// kParserVer 72 cost note: TS/JS's kJsImportContainers now includes call_expression/object/arguments —
-// containers a require() sits under with no other purpose — so the walk over a TS/JS file approaches full
-// AST size rather than "top-level statements only". Bounded per-node (each node is visited once) and still
-// depth-capped by kMaxImportContainerDepth; no perf gate exists in this tree to budget against (see
-// CLAUDE.md's "best tool first, then fast" note), and CommonJS's own weight — an entire module system's
-// worth of edges was previously invisible (kParserVer 71's LB-H measurement) — is the justification.
+// conditionals in C# (the C family and TS/JS read `@import.path` instead, #358), and ordinary language
+// constructs in Python / Rust / C# (see isImportContainer). Each node is read by directiveTargetOf above.
+// kParserVer 72 cost note (HISTORICAL for TS/JS since #358, which retired this walk for them — the cost is gone
+// with it): TS/JS's kJsImportContainers included call_expression/object/arguments — containers a require()
+// sits under with no other purpose — so the walk over a TS/JS file approached full AST size rather than
+// "top-level statements only".
 // ABS-3: each directive ALSO emits an import-role RawRef (name = the importable final segment) so the
 // use-site index reports import sites. The ref is file-scope (fromSymbol=kNoNode) — that is correct for
 // a directive at any container depth, and it NEVER enters the call graph (role != Call → skipped in
@@ -2443,10 +2428,11 @@ void captureIncludes( TSNode root, Lang lang, std::uint32_t fileId, std::string_
     // order, which keeps `incs`/`refs` in SOURCE order: the determinism contract is byte-identity, and an
     // order that depended on the walk shape would break it. Only ALLOWLISTED containers are entered, so a
     // language whose imports are top-level by rule (Go, Java) still costs exactly the old scan.
-    // `insideFn` (kParserVer 72, TS/JS only): true once the walk has descended through a function-body
-    // container (kJsFunctionContainers) — sticky for every descendant, never cleared, exactly like `depth`
+    // `insideFn` (kParserVer 72, TS/JS; Ruby's closure kinds since 83): true once the walk has descended through a
+    // function-body container (isFunctionLike) — sticky for every descendant, never cleared, exactly like `depth`
     // is monotonic. It rides the frame rather than being recomputed from ancestry because the walk never
-    // keeps the ancestor chain around: this is the one bit of it a lazy-require call needs.
+    // keeps the ancestor chain around: this is the one bit of it a lazy-require call needs. #358: TS/JS no longer
+    // walks (its lazy bit is re-derived from ancestry in ingest_importcap.h), so Ruby is its only reader here.
     // `openIdx` (parser version 83, Ruby only): the index in `constOpens` of the innermost class/module open the
     // frame sits inside — kNoOpenIdx at file level. It rides the frame for the same reason `insideFn` does (the
     // walk keeps no ancestor chain) and exists for the RECEIVER DEDUPE: a constant receiver is recorded once per

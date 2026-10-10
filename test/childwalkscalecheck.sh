@@ -306,6 +306,21 @@ for n in ( 1000, 16000 ):
     # lists, so both sides execute nodesMatchExactly and only the flooded list differs (CodeRabbit, #130)
     w( "patmeta/n%d/big.c" % n, [ "int a( int x );", "int f( void )", "{", "    return a(" ] + [ C ] * n + [ "    1 ) == a(" ] + [ C ] * n + [ "    1 );", "}" ] )
     w( "patmeta_off/n%d/big.c" % n, [ "int a( int x );", "int f( void )", "{", "    return a( 1 ) == a( 1 );" ] + [ C ] * n + [ C ] * n + [ "}" ] )
+# #358 import-capture reach: importContainerReach reads one directive's ancestry. These two fixtures are about
+# DEPTH, not child-list width, so they sit outside the n1000/n16000 loop and the (C) corpus list on purpose.
+# Each puts 2000 IMPORTS inside 2000 nested containers; the control keeps the nesting and swaps the imports
+# for statements that are not imports, so both sides run the same tags pass over the same tree and only the
+# import emission differs. A reach read that costs a descent PER HOP (an upward ts_node_parent walk) is
+# 60-230x its control here; one descent from the root is under 3x.
+D = 2000
+w( "reachjs/big.js",     [ "{" * D ] + [ 'require( "./m" );' ] * D + [ "}" * D ] )
+w( "reachjs_off/big.js", [ "{" * D ] + [ "noop();" ] * D + [ "}" * D ] )
+w( "reachc/big.c",       [ "#ifdef G%d" % i for i in range( D ) ] + [ '#include "m.h"' ] * D + [ "#endif" ] * D )
+w( "reachc_off/big.c",   [ '#include "m.h"' ] * D )
+for d in ( "reachjs", "reachjs_off" ):
+    w( d + "/m.js", [ "int x;" ] )
+for d in ( "reachc", "reachc_off" ):
+    w( d + "/m.h", [ "int x;" ] )
 PY
 
 # user-CPU seconds (user+sys) of one cold run of "$@" against corpus $1
@@ -527,6 +542,14 @@ pair "(B35) captureTagsFacts/objc-body" objcbody     objcbody_off    "an ObjC me
 b_pm_off="$(  usercpu "$TMP/patmeta_off/n16000" "$BIN" --pattern='$X == $X' )"
 b_pm_walk="$( usercpu "$TMP/patmeta/n16000"     "$BIN" --pattern='$X == $X' )"
 arm "(B36) nodesMatchExactly" "$b_pm_off" "$b_pm_walk" 8 0.30 "--pattern='\$X == \$X' over two 16000-comment argument lists vs the same pattern with the floods outside both lists"
+
+# #358 — importContainerReach (src/ingest_importcap.h): ancestry read in ONE descent, not k ts_node_parent hops
+b_rjs_off="$(     usercpu "$TMP/reachjs_off"  "$BIN" --top-k=100000 )"
+b_rjs_on="$(      usercpu "$TMP/reachjs"      "$BIN" --top-k=100000 )"
+arm "(B37) importContainerReach/js" "$b_rjs_off" "$b_rjs_on" 8 0.30 "2000 require() calls inside 2000 nested blocks vs the same nesting holding 2000 non-import calls"
+b_rc_off="$(      usercpu "$TMP/reachc_off"   "$BIN" --top-k=100000 )"
+b_rc_on="$(       usercpu "$TMP/reachc"       "$BIN" --top-k=100000 )"
+arm "(B38) importContainerReach/c" "$b_rc_off" "$b_rc_on" 8 0.30 "2000 #include lines inside 2000 nested #ifdef vs the same 2000 lines at file scope"
 
 # ── (C) byte-identical against a reference binary ────────────────────────────────────────────────────
 echo
