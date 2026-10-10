@@ -155,7 +155,13 @@ if grep -q '"sc":"Widget"' "$TMP/map.json" && ! grep -q '"id":"qual.cpp::' "$TMP
 # that had just printed the path, on a document carrying no legend at all — a repetition AND an undefined
 # first-screen attribute on the one --expand shape with nothing else to read.
 # L1 (2026-09-19): (E2) reads the FULL legend's composition prose, so this run asks for the full legend.
-"$BIN" test/nestedqualfix --expand=Outer --no-cache --legend=full >"$TMP/wf.xml" 2>/dev/null </dev/null
+# expand-lean-k64 (2026-10-08): the whole-file choice now compares the file against the PAYLOAD bundle (no ride-along map in
+# the price), so test/nestedqualfix (a 1.8 KB file whose bundle is smaller) now serves the bundle. The arms below keep their
+# premise — a whole-file serving of the same nested-type shape — on a file that really IS cheaper than its bundle: the
+# Outer/Inner/out-of-line-ctor idiom alone in one header. The premise is asserted (mode="whole-file") before anything relies on it.
+WFQ="$TMP/wfq"; mkdir -p "$WFQ"
+printf 'class Outer {\npublic:\n  class Inner;\n  Outer();\n};\nOuter::Outer() {}\n' >"$WFQ/outer.hpp"
+"$BIN" "$WFQ" --expand=Outer --no-cache --legend=full >"$TMP/wf.xml" 2>/dev/null </dev/null
 if grep -q 'mode="whole-file"' "$TMP/wf.xml"; then
     if grep -q '<s n="Outer" sc="Outer" l=' "$TMP/wf.xml" && ! grep -q '<s [^>]*id="outer.hpp::' "$TMP/wf.xml"; then
         ok "(E2) whole-file --expand anchor rows carry sc= and no path-repeating id="
@@ -167,12 +173,12 @@ if grep -q 'mode="whole-file"' "$TMP/wf.xml"; then
         && ok "(E2) the whole-file root defines the composition (sc= is not an undefined first-screen attribute)" \
         || no "(E2) the whole-file serving carries no legend defining sc=/the composition"
     # the composed id still RESOLVES, which is the whole contract
-    "$BIN" test/nestedqualfix --expand='outer.hpp::Outer::Outer' --no-cache >"$TMP/wf2.xml" 2>/dev/null </dev/null
+    "$BIN" "$WFQ" --expand='outer.hpp::Outer::Outer' --no-cache >"$TMP/wf2.xml" 2>/dev/null </dev/null
     grep -q '<' "$TMP/wf2.xml" && [ -s "$TMP/wf2.xml" ] \
         && ok "(E2) the composed id from a whole-file row still resolves through --expand" \
         || no "(E2) the composed id p::sc::n from a whole-file anchor row resolves nothing"
 else
-    no "(E2) test/nestedqualfix --expand=Outer no longer serves the whole-file shape — this arm proves nothing"
+    no "(E2) the tiny Outer/Inner header no longer serves the whole-file shape — this arm proves nothing"
 fi
 # candidates: the flat export keeps id= by design (no <f> wrapper, no p= repetition) — pinned so the design
 # stays a decision rather than an omission nobody re-checked.
@@ -205,7 +211,7 @@ else
     no "(E3) the probe did not serve the bundle shape (root says $E3_MODE) — this arm proves nothing"
 fi
 # …and the positive control: a REAL whole-file serving still selects expand-file.
-"$BIN" test/nestedqualfix --expand=Outer --legend=compact --no-cache >"$TMP/e3b.xml" 2>/dev/null </dev/null
+"$BIN" "$WFQ" --expand=Outer --legend=compact --no-cache >"$TMP/e3b.xml" 2>/dev/null </dev/null
 { grep -q 'mode="whole-file"' "$TMP/e3b.xml" && grep -q 'schema="ripwire.expand-file/v1"' "$TMP/e3b.xml"; } \
     && ok "(E3) control: a real whole-file serving still selects ripwire.expand-file/v1" \
     || no "(E3) control: a whole-file serving no longer selects expand-file: $( grep -o 'schema="[^"]*"' "$TMP/e3b.xml" | head -1 )"

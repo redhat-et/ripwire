@@ -28,7 +28,7 @@ fast, accurate brief — not a wall of source code.
 
 2. **Expand the key symbols** — `ripwire <dir> --expand=SYM1,SYM2,SYM3 --legend=compact`
    (Pick the top 3 by rank from step 1.)
-   Output: full bodies + callee signatures. This is the actual contract — paste it into the
+   Output: full bodies + callee signatures (no ranked map rides along; step 1 was your orient). This is the actual contract — paste it into the
    handoff verbatim rather than paraphrasing. **Bodies are redacted by default** — high-confidence
    credentials (API keys, tokens, connection strings) are masked before you see them, so pasting this
    straight into a handoff doc is safe as-is; pass `--no-redact` only if you deliberately need the

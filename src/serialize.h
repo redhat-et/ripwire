@@ -8098,8 +8098,10 @@ inline std::string outlineSkeleton( const std::string& src, const Symbol& s, boo
 // <outline>, byte-identical). total= counts the valid requests with a body to outline (a module scope has
 // none, the packBodies bodyless rule); a skeleton whose span is unreadable is not shown and so also cuts.
 inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& nodes, std::size_t budgetBytes, bool compress, RedactCounts* redact,
-                         std::string_view rootArg = {} )   // R-E (2026-08-17): same single-root-only root
+                         std::string_view rootArg = {},    // R-E (2026-08-17): same single-root-only root
                                                            // argument serialize() takes — see its comment.
+                         std::vector<NodeId>* shownIdsOut = nullptr )   // expand-lean-k64: the ids this call EMITTED an <o> for
+                                                           // (nullptr ⇒ not recorded; output unchanged either way)
 {
     XmlWriter         w( out );
     std::vector<char> esc;
@@ -8164,6 +8166,10 @@ inline void packOutline( std::FILE* out, const IngestResult& ing, const std::vec
         piece += safe;  piece += "]]></o>";
         used += safe.size();
         ++shownCount;
+        if( shownIdsOut != nullptr )
+        {
+            shownIdsOut->push_back( id );
+        }
         pieces.push_back( PackedBodyPiece{ slot, id, SIZE_MAX, false, std::move( piece ) } );
     }
     std::stable_sort( pieces.begin(), pieces.end(), []( const PackedBodyPiece& x, const PackedBodyPiece& y ) { return x.fileSlot < y.fileSlot; } );

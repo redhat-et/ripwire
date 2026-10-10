@@ -142,7 +142,9 @@ grep -q 'srcmut_sigchange' "$TMP/err" && no "the constant nonsense suggestion (s
 #    fetch a canonical id; --outline always rides the classic 200-row map (no V1 lean default applies to
 #    it) and its <s> rows carry id= unconditionally, so it is the stable lookup path here.
 # row 6 (2026-09-12): the row prints the short id sc=; the canonical id composes as <f p=>::sc::n
-CANON_ID="$( "$BIN" "$ROOT" --outline='src/notes.h:empty' --no-cache 2>/dev/null | python3 -c '
+# expand-lean-k64 (2026-10-08): --outline of definitions it fully serves no longer rides the map by default; the lookup asks
+# for the classic ranked map explicitly (--top-k=200, the old default), which is what carries the id= rows read here.
+CANON_ID="$( "$BIN" "$ROOT" --outline='src/notes.h:empty' --top-k=200 --no-cache 2>/dev/null | python3 -c '
 import re, sys
 doc, name, scope = sys.stdin.read(), sys.argv[1], ( sys.argv[2] if len( sys.argv ) > 2 else None )
 for f in re.finditer( r"<f p=\"([^\"]*)\"[^>]*>(.*?)</f>", doc, re.S ):

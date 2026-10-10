@@ -171,8 +171,12 @@ passing `--scip`) — check header `precise=N` to confirm the overlay actually m
 When you need to understand a specific function/class/concept in full (its body, contract, and rationale):
 
 1. **Full body + callee signatures** — `ripwire <dir> --expand=SYM --legend=compact`
-   The ranked map, then `<bodies>` with SYM's full source in CDATA and a `<calls>` block of inline one-line
-   signatures for everything it calls — read the body with the callee signatures beside it. (No `<doc>` block
+   `<bodies>` with SYM's full source in CDATA and a `<calls>` block of inline one-line signatures for
+   everything it calls — read the body with the callee signatures beside it. No ranked map rides along (orient
+   ONCE per session with `ripwire <dir>`, then look symbols up lean); a bare name with several definitions
+   serves them all, still map-free — `map_next=` on the root is the call that prints the map if you skipped
+   orienting, and `unserved_next=` is the call serving the definitions a byte budget cut (the first `unserved_listed=` of
+   them when that attribute is present; `unserved_total=` is the true count). (No `<doc>` block
    here; SYM's own doc-comment is in the CDATA body if it sits inside the definition — otherwise read the
    source lines just above `l=`.)
    About to Edit what you just expanded? If your edit tool needs a fresh native Read of the file first
@@ -231,9 +235,9 @@ field un-places every field after it. A `modeled="1"` number that agrees with th
 emits the full bundle anyway. (`--for --format=candidates --top-k=N` is different: the export consumes the
 flag and caps the rows, no warning. `--for --top-k=0` is refused by the payload-only guard.)
 Narrow plain `--for` with its own arguments: `--signatures-only` (no auto-bodies), `--token-budget=N` (shapes
-the bundle to fit), `--detail=N` (full bodies for just the top N). `--top-k` does shape `--query` — and pair
-it with `--expand` as `--top-k=0` when SYM is an *ambiguous* bare name; an unambiguous single match already
-drops the map by default (`topk_default="0"`).
+the bundle to fit), `--detail=N` (full bodies for just the top N). `--top-k` does shape `--query`. `--expand`/`--outline` need no
+`--top-k=0`: they drop the map by default whenever every definition asked for is served (`topk_default="0"`),
+an ambiguous bare name included; pass `--top-k=N` only if you want the map back in the same call.
 
 ## When the fixed verbs can't phrase the question
 

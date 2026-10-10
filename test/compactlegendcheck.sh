@@ -556,6 +556,10 @@ probeFor()
 # now carries the inventory tier (<inv listed= unlisted=>, <ls p= n= f=>; no <entry> on this fixture) and its two
 # present-only readings (+237 B with separators). Nothing else moved. The OLD path keeps its pin: the --no-inventory twin
 # after the universe loop holds the same probe without the tier at 910 B.
+# RE-PINNED 2026-10-08 (lane/expand-lean-k64): ripwire.expand-file/v1 360 -> 510 (measured 508, the --expand=distance probe).
+# A name with several definitions now serves lean (no ride-along map), so the whole-file answer this probe reaches carries
+# topk_default="0" (+112 B reading) and map_next= (+56 B reading) on its root, both present-only (compactlegend.h). The
+# (U-twin-expand) arm below keeps the OLD 360 B pin for everything else in that legend.
 PIN_TABLE='
 ripwire.edit-check/v1             610   595
 ripwire.map/v1                   1140  1129
@@ -623,7 +627,7 @@ ripwire.layout/v1                1220  1203
 ripwire.pack-task/v1             990   974
 ripwire.pack-top-n/v1            760   745
 ripwire.expand/v1                280   265
-ripwire.expand-file/v1            360   342
+ripwire.expand-file/v1            510   508
 ripwire.for/v1                    775   761
 '
 pinFor()
@@ -660,6 +664,39 @@ else
                 ok "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is $sdtRest B <= 720 B (the pre-CALLSITE-LINE pin)"
             else
                 no "(U-twin) safe-delete compact prose minus the sites_l= reading ($sdtCut B) is ${sdtRest:-?} B > 720 B — the rest re-inflated"
+            fi ;;
+    esac
+fi
+# (U-twin-expand) the pre-2026-10-08 ripwire.expand-file/v1 pin (360 B), kept (PROCESS rule 4): the same --expand=distance probe
+# with exactly the two lean-default readings cut out of a copy of the compact answer must still fit the OLD pin. The cut is
+# taken only when BOTH readings occur once; any other premise FAILs (a cut that removes nothing proves nothing).
+( cd "$REPO" && "$BIN" . --expand=distance --legend=compact >"$TMP/xft.c" 2>/dev/null </dev/null \
+  && "$BIN" . --expand=distance --legend=full >"$TMP/xft.full" 2>/dev/null </dev/null ); rcXft=$?
+xftCut="$( python3 - "$TMP/xft.c" "$TMP/xft.cut" <<'PY'
+import sys
+doc = open( sys.argv[1], encoding = "utf-8", errors = "replace" ).read()
+readings = [ " topk_default=0: an exact name was expanded, so the ranked map was dropped; pass top-k=N to get it back.",
+             " map_next=: the shell call printing the map this answer omits." ]
+for r in readings:
+    if doc.count( r ) != 1:
+        print( "NOPREMISE the reading %r occurs %d times, not once" % ( r[:24], doc.count( r ) ) ); sys.exit( 0 )
+cut = doc
+for r in readings:
+    cut = cut.replace( r, "", 1 )
+open( sys.argv[2], "w", encoding = "utf-8" ).write( cut )
+print( sum( len( r.encode() ) for r in readings ) )
+PY
+)"
+if [ "$rcXft" -ne 0 ]; then
+    no "(U-twin-expand) --expand=distance exited $rcXft — the twin cannot measure"
+else
+    case "$xftCut" in
+        NOPREMISE*) no "(U-twin-expand) expand-file twin cannot measure: ${xftCut#NOPREMISE }" ;;
+        *)  xftRest="$( leg prose "$TMP/xft.cut" "$TMP/xft.full" )"
+            if [ -n "$xftRest" ] && [ "$xftRest" -eq "$xftRest" ] 2>/dev/null && [ "$xftRest" -le 360 ]; then
+                ok "(U-twin-expand) expand-file compact prose minus the two lean-default readings ($xftCut B) is $xftRest B <= 360 B (the pre-lean pin)"
+            else
+                no "(U-twin-expand) expand-file compact prose minus the two lean-default readings ($xftCut B) is ${xftRest:-?} B > 360 B — the rest re-inflated"
             fi ;;
     esac
 fi

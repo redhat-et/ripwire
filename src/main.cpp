@@ -1234,6 +1234,28 @@ inline std::string churnDecayWindowLabel( std::string_view minedSpan )
     return label;
 }
 
+// The crawl-scope flags a pasted continuation must replay so it indexes the SAME files this run did: --exclude,
+// --max-file-size, --no-ignore, --ignore-tests (the enumeration below says why these four and no others). Each is
+// returned with its leading space; empty at the defaults. Shared by scopedMapNextInvocation and leanMapPointer.
+inline std::string crawlScopeFlags( const rw::Config& cfg )
+{
+    std::string inv;
+    for( const std::string& x : cfg.excludes )
+    {
+        inv += " " + rw::nextFlag( "--exclude=", x );
+    }
+    // The ceiling is replayed as the BYTE COUNT it resolved to, not as the caller's "2K": parseByteSize accepts
+    // plain digits, and the number is what shaped the crawl. Omitted at the default, so the common hint is
+    // unchanged to the byte.
+    if( cfg.maxFileBytes != rw::kDefaultMaxFileBytes )
+    {
+        inv += " --max-file-size=" + std::to_string( cfg.maxFileBytes );
+    }
+    if( cfg.noIgnore )     { inv += " --no-ignore"; }
+    if( cfg.ignoreTests )  { inv += " --ignore-tests"; }
+    return inv;
+}
+
 // C1-b (2026-09-12): --in=DIR's page of <recent scope=> rows, from the SAME mining pass as the global block. The prefix is
 // matched on the ROOT-RELATIVE spelling the map prints (serialize.h pathRel: rootRelativeUri against the crawl root as
 // typed), so a scoped row is byte-identical to its global twin — a sub-root-relative spelling missed every held-out gold
@@ -1297,19 +1319,7 @@ inline std::string scopedMapNextInvocation( const rw::Config& cfg, std::string_v
     {
         inv += " " + rw::nextFlag( "--since=", cfg.since );
     }
-    for( const std::string& x : cfg.excludes )
-    {
-        inv += " " + rw::nextFlag( "--exclude=", x );
-    }
-    // The ceiling is replayed as the BYTE COUNT it resolved to, not as the caller's "2K": parseByteSize accepts
-    // plain digits, and the number is what shaped the crawl. Omitted at the default, so the common hint is
-    // unchanged to the byte.
-    if( cfg.maxFileBytes != rw::kDefaultMaxFileBytes )
-    {
-        inv += " --max-file-size=" + std::to_string( cfg.maxFileBytes );
-    }
-    if( cfg.noIgnore )     { inv += " --no-ignore"; }
-    if( cfg.ignoreTests )  { inv += " --ignore-tests"; }
+    inv += crawlScopeFlags( cfg );
     if( withIn )
     {
         inv += " " + rw::nextFlag( "--in=", scopeDir );
@@ -1553,6 +1563,83 @@ inline constexpr std::string_view kExpandWholeFileLegend =
 inline constexpr const char* kMapRidesAlongFmt =
     " note=\"the ranked top-{} map below rides along with the requested payload; --top-k=0 for the payload "
     "alone (--top-k=1 for a minimal map)\"";
+
+// ── expand-lean-k64: --expand/--outline whose requested definitions were ALL served ride no map ─────────────────────
+// A multi-definition name used to ship the generic top-200 map beside bodies that already answer it (0 of 185 rows named
+// the symbol). When every requested definition is served there is nothing left to disambiguate: top-k defaults to 0, the
+// root says so (topk_default="0", the exact-name default's own disclosure) and carries ONE recoverable pointer to the map
+// it did not ship (map_next=, a shell line: the map is the default verb of `ripwire ROOT`). The bodies' headers already
+// carry p= l= t= for every definition. When some were NOT served (cut by the byte budget, unreadable), the root names
+// exactly those — unserved_total= (the true count) and unserved_next= (the --expand/--outline call serving them, quoted by
+// the next= house rule) — never the generic map. kMaxUnservedSelectors is a blow-up guard (the kMaxExpandSibs precedent),
+// not a target: past it unserved_next= serves the FIRST kMaxUnservedSelectors and unserved_listed= says how many it lists;
+// the rest are recovered by the same call with a larger --pack-budget-bytes (the legend says so). Language-neutral: the
+// decision reads the served-id record, not any language's syntax. An EXPLICIT --top-k keeps today's shape.
+inline constexpr std::size_t kMaxUnservedSelectors = 16;
+
+// `ripwire ROOT…`: EVERY root this call crawled (a multi-root call's map is the map of all of them — an empty mapRootArg
+// there used to fall back to ".", the parent tree), each quoted by the next= house rule, plus the crawl-scope flags that
+// decided which files were indexed, so the pasted call maps the same corpus. Presentation and payload flags stay out.
+inline std::string leanMapPointer( const rw::Config& cfg )
+{
+    std::string inv = "ripwire";
+    for( const std::string_view root : cfg.roots )
+    {
+        inv += " " + rw::nextFlag( "", root );
+    }
+    if( cfg.roots.empty() )
+    {
+        inv += " .";
+    }
+    return inv + crawlScopeFlags( cfg );
+}
+
+struct UnservedDefs
+{
+    std::size_t requested = 0;   // valid, non-module-scope requests
+    std::size_t unserved  = 0;   // of those, the ones with no body/outline in the answer
+    std::string attrs;           // ` unserved_total="N" [unserved_listed="K"] unserved_next="--expand=P:L:N,…"` — empty when unserved == 0
+};
+
+inline UnservedDefs unservedDefsOf( const rw::IngestResult& ing, const std::vector<rw::NodeId>& requested, std::vector<rw::NodeId> served,
+                                    std::string_view verbFlag, std::string_view rootArg )
+{
+    UnservedDefs u;
+    std::sort( served.begin(), served.end() );
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    std::string       selectors;
+    std::size_t       listed = 0;
+    for( rw::NodeId id : requested )
+    {
+        if( id >= ing.symbols.size() || ing.symbols[ id ].kind == rw::SymKind::ModuleScope )
+        {
+            continue;
+        }
+        ++u.requested;
+        if( std::binary_search( served.begin(), served.end(), id ) )
+        {
+            continue;
+        }
+        ++u.unserved;
+        if( listed >= kMaxUnservedSelectors )
+        {
+            continue;
+        }
+        const rw::Symbol&          sym  = ing.symbols[ id ];
+        const std::string_view path = rootArg.empty() ? std::string_view( ing.files[ sym.fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ sym.fileId ], rootPrefix );
+        selectors += ( listed == 0 ? "" : "," );
+        selectors += std::string( path ) + ":" + std::to_string( sym.line ) + ":" + sym.name;
+        ++listed;
+    }
+    if( u.unserved > 0 )
+    {
+        // unserved_listed= only when the guard cut the list: unserved_next= then serves the first `listed`, not all of them.
+        u.attrs = " unserved_total=\"" + std::to_string( u.unserved ) + "\""
+            + ( listed < u.unserved ? " unserved_listed=\"" + std::to_string( listed ) + "\"" : std::string() )
+            + rw::nextAttrXml( rw::nextFlag( std::string( verbFlag ) + "=", selectors ), "unserved_next" );
+    }
+    return u;
+}
 
 // ── ONE PRICE FOR BOTH SERVING CANDIDATES (CodeRabbit, PR #215, second round on this comparison) ─────
 // THE DEFECT was not a missing addend, it was two counters. The bundle candidate was priced to the byte
@@ -2349,19 +2436,62 @@ int runDefaultMap( const MainDispatch& d )
     // measurement). Built only when a body is expanded; the same vector rides the two emissions below, so the
     // charged render and the emitted one cannot differ.
     const std::vector<float> calleeOrder = expandNodes.empty() ? std::vector<float>{} : rw::calleeNameSpecificity( ing );
+    EmittedBodies            expandRecord;   // expand-lean-k64: which requested bodies the render above actually emitted
     if( !expandNodes.empty() )
     {
         bodiesSection = rw::chargeSection( [ & ]( std::FILE* f )
-            { packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
-                          expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/nullptr,
+            { expandRecord = EmittedBodies{};   // a re-render starts from empty: the record is what THIS render emitted
+              packBodies( f, ing, expandNodes, cfg.packBudgetBytes, g.outOff, g.outTargets, g.outNameOnly, cfg.compress, redactPtr,
+                          expandRanges.empty() ? nullptr : &expandRanges, d.notesPtr, /*outEmitted=*/&expandRecord,
                           /*truncateOversizedFirst=*/true, /*withFileContext=*/true, mapRootArg, &calleeOrder ); },   // V1: octocode F2 sibs=/inc=
             rw::kBytesPerTokenBody );
     }
+    std::vector<NodeId> outlineShown;   // expand-lean-k64: the outlines the render below emitted
     if( !outlineNodes.empty() )
     {
         outlineSection = rw::chargeSection( [ & ]( std::FILE* f )
-            { packOutline( f, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr, mapRootArg ); },
+            { outlineShown.clear();
+              packOutline( f, ing, outlineNodes, cfg.packBudgetBytes, cfg.compress, redactPtr, mapRootArg, &outlineShown ); },
             rw::kBytesPerTokenBody );
+    }
+
+    // expand-lean-k64 (see kMaxUnservedSelectors above): a payload verb whose requested definitions were ALL served rides no
+    // map. Decided HERE, after the payload rendered, because "all served" is a property of the render; nothing between the
+    // exact-name default above and this point reads mapTopK. Same exclusions as the exact-name default (composed verbs claim
+    // the map for their own purpose; --max-tokens sizes the map; --json has its own twin), plus an explicit --top-k.
+    // Scope: every --expand the exact-name default above did not take (one ambiguous name, several tokens, several tokens
+    // naming one definition) and ONE --outline token (any count — a single-definition --outline rode the same map).
+    // --outline with several tokens keeps the ordinary default. Consequence: wherever the M6 mode choice runs, the map is
+    // already gone, so its bundleDoc.mapBytes term below is 0 from the CLI (kept: the price must stay honest if a future
+    // posture rides a map there).
+    std::string ctxLeanAttr = exactNameExpandDefault ? std::string( " topk_default=\"0\"" ) : std::string();
+    std::string ctxUnservedAttr;
+    const bool  leanEligible = !exactNameExpandDefault && !cfg.topKExplicit && !cfg.packSignatures && cfg.packTopN == 0 && cfg.query.empty()
+        && !cfg.adaptive && cfg.maxTokens == 0 && !cfg.json
+        && ( ( !cfg.expand.empty() && cfg.outline.empty() && !expandNodes.empty() && bodiesSection.isRendered )
+             || ( cfg.outline.size() == 1 && cfg.expand.empty() && !outlineNodes.empty() && outlineSection.isRendered ) );
+    if( leanEligible )
+    {
+        std::vector<NodeId> served;
+        if( cfg.expand.empty() )
+        {
+            served = outlineShown;
+        }
+        else
+        {
+            for( const EmittedBody& b : expandRecord.kept )
+            {
+                served.push_back( b.id );
+            }
+        }
+        const UnservedDefs un = unservedDefsOf( ing, cfg.expand.empty() ? outlineNodes : expandNodes, std::move( served ),
+                                                cfg.expand.empty() ? "--outline" : "--expand", mapRootArg );
+        if( un.requested > 0 )
+        {
+            mapTopK      = 0;
+            ctxLeanAttr  = " topk_default=\"0\"" + nextAttrXml( leanMapPointer( cfg ), "map_next" );
+            ctxUnservedAttr = un.attrs;
+        }
     }
 
     // The --expand fallback: estimateExpandBodyTokens is no longer the primary estimate (measured bytes are),
@@ -2408,7 +2538,7 @@ int runDefaultMap( const MainDispatch& d )
     // the INITIAL value so it survives even when expandAutoServeScope below does not run (a range slice, or
     // a pre-render degrade) — every path exactNameExpandDefault can reach ends up with SOME <ctx ...> to
     // decorate, since hasExtension is provably true whenever --expand is non-empty.
-    std::string         ctxOpenStr = exactNameExpandDefault ? "<ctx topk_default=\"0\">" : "<ctx>";
+    std::string         ctxOpenStr = "<ctx" + ctxLeanAttr + ctxUnservedAttr + ">";
     // R-E fix (2026-08-19): the payload document root DISCLOSES the root its p= are relative to, on the two
     // shapes where the ride-along map's <r root=…> is NOT there to do it — no map at all (mapTopK==0, which
     // the exact-name --expand default always picks) and whole-file mode. The first R-E landing made
@@ -2478,11 +2608,11 @@ int runDefaultMap( const MainDispatch& d )
         // because every byte on that path is raw code text — the same rate and the same pricedRootAttr fixpoint
         // the whole-file emission below applies. topk_default="0" and the unproven residue ride BOTH openers, so
         // the first is charged to both documents and the second is passed as the shared root bytes.
-        const std::size_t         topkDefaultBytes = exactNameExpandDefault ? ( sizeof( " topk_default=\"0\"" ) - 1 ) : 0;
+        const std::size_t         topkDefaultBytes = ctxLeanAttr.size();
         ExpandServeDocument       bundleDoc;
         bundleDoc.payloadBytes  = bodiesSection.xml.size();
         bundleDoc.mapBytes      = mapTopK > 0 ? measureEmittedMapBytes( mapTopK, payloadTokens ) : 0;
-        bundleDoc.rootAttrBytes = ctxRootBytesWhenNoMap + topkDefaultBytes + noteBytes;   // root=/est_tokens= only where no map carries them; note= only where a map does
+        bundleDoc.rootAttrBytes = ctxRootBytesWhenNoMap + topkDefaultBytes + ctxUnservedAttr.size() + noteBytes;   // root=/est_tokens= only where no map carries them; note= only where a map does
         ExpandServeDocument       fileDoc;
         fileDoc.payloadBytes  = wholeFile.xml.size();                         // as EMITTED, not the raw file bytes
         fileDoc.rootAttrBytes = ctxRootAttr.size() + topkDefaultBytes + ctxNotesDegradedBytes;   // whole-file mode always carries root= (no <r root=> rides with it) and, when degraded, the marker too
@@ -2518,9 +2648,9 @@ int runDefaultMap( const MainDispatch& d )
             // the ROOT ATTRIBUTES ride too: the compact legend reads root=/est_tokens=/topk_default= etc. present-only, so a
             // candidate without them would price a legend shorter than the one delivered. The est_tokens= values are the
             // candidates' own prices (the layer reprices them, and a placeholder of another digit count would move the delta).
-            const std::string topk       = exactNameExpandDefault ? " topk_default=\"0\"" : "";
+            const std::string topk       = ctxLeanAttr;
             const std::string fileEst    = std::to_string( static_cast<std::size_t>( double( wholeFile.xml.size() + kExpandWholeFileLegend.size() + ctxRootAttr.size() ) / rw::kBytesPerTokenBody ) + 1 );
-            const std::string bundleRoot = "<ctx" + ctxUnprovenAttr + ( mapTopK == 0 ? ctxRootAttr + " est_tokens=\"" + std::to_string( payloadTokens ) + "\"" : std::string() ) + topk + noteBuf + wholeFileNext + " mode=\"bundle\">";
+            const std::string bundleRoot = "<ctx" + ctxUnprovenAttr + ( mapTopK == 0 ? ctxRootAttr + " est_tokens=\"" + std::to_string( payloadTokens ) + "\"" : std::string() ) + topk + ctxUnservedAttr + noteBuf + wholeFileNext + " mode=\"bundle\">";
             const std::string fileRoot   = "<ctx" + ctxUnprovenAttr + ctxRootAttr + topk + " mode=\"whole-file\" est_tokens=\"" + fileEst + "\">";
             // in the order the bundle is EMITTED — the bodies first, the ride-along map after them: the layer reads its
             // head terms off the root's first child, so a map-first candidate priced a different legend (rv-r1-L1-2: 107 B)
@@ -2535,13 +2665,14 @@ int runDefaultMap( const MainDispatch& d )
             ASSUME( ctxOpenStr.rfind( "<ctx", 0 ) == 0 );
             ctxOpenStr.insert( 4, wholeFileNext );
         }
-        if( exactNameExpandDefault )
+        if( !ctxLeanAttr.empty() )
         {
             // chooseExpandServe's four formatted opens all start "<ctx mode=\"...\" reason=\"...\">" — insert
             // right after "<ctx" so the self-describing default rides alongside whichever mode/reason M6
             // independently picked (bundle-without-a-map still beats a huge whole-file, so this composes).
+            // The unserved names ride the bundle only: a whole-file serving carries every requested definition.
             ASSUME( ctxOpenStr.rfind( "<ctx", 0 ) == 0 );
-            ctxOpenStr.insert( 4, " topk_default=\"0\"" );
+            ctxOpenStr.insert( 4, ctxLeanAttr + ( serveWholeFile ? std::string() : ctxUnservedAttr ) );
         }
     }
     // …and the insert itself, same technique topk_default= uses right above (the four chooseExpandServe

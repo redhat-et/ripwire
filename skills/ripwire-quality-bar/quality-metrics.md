@@ -68,11 +68,11 @@ degrades on (large-N studies):
 - **Contract drift**: unplanned API-surface growth is a documented failure mode distinct from complexity —
   classic complexity metrics lost predictive power for real agent-maintainability failures once controlled
   for size; contract drift and code growth are what remained predictive (arXiv:2606.21804).
-- **Placeholders** (the eleventh kind, not a literature-measured mode): a stub or TODO the change added.
+- **Placeholders** (`placeholder`; not a literature-measured mode): a stub or TODO the change added.
   It never gates; it exists so a change is not called done over a `todo!()` or a `NotImplementedException`.
-- **Defect shapes** (the twelfth kind, `defect-shape`, measured on this project's own review findings, not
-  the literature): a literal format whose fields do not match its arguments (`format-arity` — gates on any
-  origin: new-symbol rows never gate, except defect-shape format-arity), a byte cap plus an ellipsis with no
+- **Defect shapes** (`defect-shape`; measured on this project's own review findings, not the literature): a
+  literal format whose fields do not match its arguments (`format-arity` — the one row that gates on new code
+  too), a byte cap plus an ellipsis with no
   UTF-8 back-off (`utf8-cut`), a keep-first dedup over a severity field (`dedup-first`), and a test
   script's absence assertion that passes on a crash (`vacuous-assert`). The last three are `sev="minor"`.
 - **Pass-rate ≠ design quality**: fewer than half of test-passing agent patches satisfy design constraints

@@ -243,7 +243,7 @@ Ordered understand → navigate → review-the-change:
 | "Where is X handled?" | `ripwire . --for="…"` | **~2.1K tok** | ~4.9K–20K tok — `grep -rn <term> src/`, then read the file it points at | 2.3×–9.3× |
 | "What do I already know?" | `ripwire . --recall="…"` | **~15K tok** | ~445K tok — read all 119 markdown docs this repo carries | 29.2× |
 | "Set me up for this task" | `ripwire . --pack-task="…"` | **~2.1K tok** | ~16K–80K tok — read every relevant file, whole | 7.7×–37.7× |
-| "Show me this one function" | `ripwire . --expand=SYM --top-k=0` | **~260–16.5K tok** body (+~5.7K for the ranked-neighborhood bundle) | ~43K–174K tok — read the whole file it lives in | 2.6×–670× |
+| "Show me this one function" | `ripwire . --expand=SYM` | **~260–16.5K tok** body (+~5.7K for the ranked-neighborhood bundle) | ~43K–174K tok — read the whole file it lives in | 2.6×–670× |
 | "Who calls this function?" | `ripwire . --callers=SYM` | **~580 tok** | ~40K–52K tok — `grep -rn SYM src/` (mostly noise), then open 2–3 files to sort real calls from mentions | 69.2×–89.1× |
 | "Is it safe to change this?" | `ripwire . --impact=SYM` + `--uses=SYM` | **~1.3K tok** | ~18K tok — open every direct-use file, whole | 14.4× |
 | "I have a stack trace" | `ripwire . --from-trace=FILE` | **~1.4K tok** | ~124K–298K tok — grep all 7 frame names, then open the innermost file(s) | 86.9×–208.6× |
@@ -260,7 +260,7 @@ three `docs/ARCHITECTURE.md` names as central; the `--for` row lands `mcpStale`
 (`src/mcpindex.h:633`), the actual staleness check, 5th-ranked; `--recall` lands the container-rule
 doc (`AGENTS.md`) that states, verbatim, the same "no `std::map`" rule `CONTRIBUTING.md` explains in
 full; `--pack-task` names the same three touch points a human would — `cachelint.h`, `mergeCachePack`
-(`src/main.cpp:1787`), the `lintrules.h` helpers it reuses; `--expand --top-k=0` hands back the
+(`src/main.cpp:1787`), the `lintrules.h` helpers it reuses; `--expand` hands back the
 requested function's complete, unmodified body — the ranked-neighborhood addition costs the same
 ~22.6 KB regardless of which function you ask for, confirmed on two (a fixed floor, not per-function
 variance); `--callers` on `langOfPath` names its 2 real callers, the same ones a `grep` hit-list
@@ -799,7 +799,7 @@ to do with it.** Two shapes get the most out of it, and one gets nothing.
 |---|---|---|
 | `ripwire . --for="…" --top-k=5` | `ripwire . --for="…" --signatures-only` (or `--token-budget=N`, `--detail=N`) | `--top-k` is inert on `--for`: the run warns on stderr and emits the full bundle anyway, so the agent *believes* it narrowed the output and did not. |
 | `ripwire . --query="…"` as the default lens | `ripwire . --for="…"` | `--query` is the raw BM25 ranking — the binary's own help calls it debug and says "use --for". It is the right tool for hunting a vocabulary, the wrong default for a task. |
-| `ripwire . --expand=SYM` where SYM is an **ambiguous** bare name | `ripwire . --expand=SYM --top-k=0` (or name it exactly: `--expand=FILE:NAME`) | A multi-match name keeps the ranked map — there IS something to disambiguate — so ~9K est_tokens of map ride along with the bodies. An **unambiguous** single match already defaults to `--top-k=0` on its own (disclosed as `topk_default="0"`); no flag needed there. |
+| `ripwire . --expand=SYM --top-k=0` (a habit from before the lean default) | `ripwire . --expand=SYM` | `--expand` and `--outline` ship no ride-along map whenever every definition asked for is served — one exact match or an ambiguous bare name alike (disclosed as `topk_default="0"`, with `map_next=` naming the call that prints the map if you never oriented). Definitions a byte budget cut are named in `unserved_total=` / `unserved_next=`. An explicit `--top-k=N` still brings the map back. |
 | `--callers=<route handler>` expecting routes | find the URL in the project's own docs (e.g. a feature map), then `--expand` the handler | Framework route handlers have no callers in the graph — the decorator reaches them, not project code. Empty `--callers` on a handler is the design, not a bug. |
 | `ripwire <dir-of-repos> …` (ONE root that happens to contain checkouts) | `cd` into ONE checkout first | Nothing refuses this: the crawl silently walks the nested repos and merges them into one corpus, so you pay for a map of everything and rank across unrelated codebases. Distinct from the real multi-root feature, which is N **explicit** positional roots (`ripwire dir1 dir2 … <verb>`, 2–16 checkouts merged on purpose). |
 

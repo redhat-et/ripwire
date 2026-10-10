@@ -583,6 +583,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kMaxUnservedSelectors` | `16` | — | — |
 | `kRecentRows` | `40` | — | F3: ~45 B a row; the file-level answer, not the file list |
 
 ### `src/mapinventory.h`

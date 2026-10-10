@@ -74,7 +74,7 @@ Match the **default you were about to use**, not a moment:
 
 | About to… | Reach for instead |
 |---|---|
-| `Read` a whole file to understand one function | `--expand=SYM` — that symbol's body + its callees' signatures. The file is not the unit of an answer. |
+| `Read` a whole file to understand one function | `--expand=SYM` — that symbol's body + its callees' signatures, no ride-along map (orient ONCE per session with `ripwire <dir>`, then look up lean). The file is not the unit of an answer. |
 | `Read` several files to learn how something works | `--pack-task="<task>"` — ranking + bodies + callers + tests in ONE budgeted call |
 | `Grep`/`rg` a symbol name across the tree | `--for="theExactName"` (name-exact routing, recall@1 ~99%) · `--uses=SYM` for every read/write/import site |
 | `Grep` a concept ("where do we retry") | `--for="<the concept in words>"` — matches doc-comments and bodies, not just identifiers |
