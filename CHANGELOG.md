@@ -46,7 +46,10 @@ went from 60 rows of `total="2197"` (54 of them call sites) to 2 rows, both the 
   scanned once.
 
 What stays a floor: a definition the loose lexical test misses (a signature wrapped before its parameter list closes, a
-name alone on the line under its return type) is a counted ref when nothing else in its blob earns the blob a parse.
+name alone on the line under its return type, or a definition with no parameter list and no declaration keyword before
+the name: `name: function (`, `pub const NAME`, a C# property) is a counted ref when nothing else in its blob earns the
+blob a parse. A parsed blob is labelled as HEAD's index labels the same bytes, so a file its grammar cannot parse
+cleanly (a fragment, a file mid-edit) can lose a definition or show a false one exactly as HEAD's index would.
 MCP `whereis` takes no `detail` argument, so there the guard's `next=` names the CLI flag. Its description keeps its 701
 characters, the sentence calling a branch row's label lexical replaced by the parser one, and the
 `tools/list` manifest grows 46,930 → 46,925 B, a 5 B shrink (the dropped em dash is six bytes of JSON). Gates: `test/crossrefcheck.sh` (5b–5e),

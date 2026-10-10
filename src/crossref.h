@@ -1730,8 +1730,13 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
 //   * Kotlin's `fun ` marker (`fun f(x) = x + 1`);
 //   * a markdown heading that opens with the name (`## f`): the index makes a section symbol of it.
 // What is still missed is named in definitionShaped's header (a signature wrapped before its parameter list closes, a
-// name alone on a line with only a type above it…); those definitions stay counted refs when nothing else in their
-// blob earns it a parse.
+// name alone on a line with only a type above it…) and, beyond it, a definition with no parameter list and no
+// declaration keyword before the name (`name: function (` in an object literal, Rust `pub const NAME`, a C# property
+// `public int NAME { get; set; }`); those definitions stay counted refs when nothing else in their blob earns it a
+// parse. A second floor is the parser's own, not this test's: a parsed blob is labelled as HEAD's index labels the
+// same bytes, so a file its grammar cannot parse cleanly (a fragment, a file mid-edit) loses a definition or gains a
+// false one exactly as HEAD's index would (the review's siblings probe: 20 definitions lost, one call read as a
+// definition, each matching HEAD's index for the same bytes).
 // `name = (…`, `name = function`, `name = async`, `name = lambda`: the name bound by `=` to a function, an arrow or a lambda.
 inline bool boundToFunctionAfter( std::string_view line, std::size_t after ) noexcept
 {
@@ -4022,8 +4027,11 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "extraction, run over that ref's blob, captures a definition of the name there (once per distinct blob and path; "
                        "a ref holding HEAD's own blob of the path takes HEAD's labels). Only a blob holding a line a loose LEXICAL test calls "
                        "worth parsing is parsed: every row of a blob without one is kind=\"ref\", so a definition that test misses (a "
-                       "signature wrapped before its parameter list closes, a name alone under its return type), alone in its blob, is "
-                       "a counted ref. kind=\"text\" is a line worth parsing whose blob no parse read (the unparsed "
+                       "signature wrapped before its parameter list closes, a name alone under its return type, or a definition with no "
+                       "parameter list and no declaration keyword before the name: name: function (, pub const NAME, a C# property), "
+                       "alone in its blob, is a counted ref. A parsed blob is labelled as HEAD's index labels the same bytes, so a file "
+                       "its grammar cannot parse cleanly (a fragment, a file mid-edit) can lose a definition or show a false one exactly "
+                       "as HEAD's index would. kind=\"text\" is a line worth parsing whose blob no parse read (the unparsed "
                        "element counts them and says why): not a confirmed definition, not a confirmed reference. With "
                        "head_labels=\"lexical\" (no index was supplied, the index knows no def of this name, or the working tree has "
                        "drifted from HEAD) HEAD's rows fall back to a stricter lexical shape test, which reads a quoted signature in a doc as a "
