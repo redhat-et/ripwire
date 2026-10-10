@@ -81,11 +81,11 @@ inline std::string renderHistoryUnread( DiscloseAs as )
     std::string comment = "<!--history_unread=1: the git history walk behind churn= and amp= could not be read in full in this run (";
     if( historyRead().stoppedRoots == 0 )
     {
-        comment += "git did not run), so churn= is absent and amp= counts callers only (a floor)";
+        comment += "the walk did not run), so churn= is absent and amp= counts callers only (a floor)";
     }
     else
     {
-        comment += historyRead().notRunRoots == 0 ? "git stopped part-way" : "git did not run for one root and stopped part-way for another";
+        comment += historyRead().notRunRoots == 0 ? "the walk stopped part-way" : "the walk did not run for one root and stopped part-way for another";
         comment += "), so churn= and amp= count only the commits that were read: both are floors";
     }
     comment += "; an absent churn= here is not zero churn. The failed walk is not cached, so the next call walks again.-->";
