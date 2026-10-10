@@ -347,6 +347,28 @@ inline constexpr const char* kImplementorsFloorLegendComment =
     "another implementor exists. floor_next= lists every extends site of the name, bound or not. A type that satisfies an "
     "interface without naming it (structural typing) leaves no clause at all and is never counted. -->";
 
+// lane lego-transitive: the full dialect's clause for the deeper implementor rows, emitted as its own comment exactly when the
+// targeted interface HAS a depth >= 2 implementor (the kImplementorsFloorLegendComment route above). No double hyphen inside:
+// it rides an XML comment. CLI and MCP share it.
+inline constexpr const char* kLegoClosureLegendComment =
+    "<!-- ripwire lego: transitive=N counts the implementors BELOW a direct one (depth 2 and deeper), each listed once at its "
+    "shallowest depth as <impl via= depth=>: via= names the type it extends that reached it, depth= its hops below this "
+    "interface; a direct row carries neither, and implementors= still counts the direct rows alone. The deeper rows are one page: "
+    "transitive_shown= rows printed when it is cut, transitive_offset= the first one shown, has_more=\"1\" and "
+    "next= the call for the next page. -->";
+
+inline const char* legoClosureLegendComment( const std::vector<std::vector<NodeId>>& graphImplementors, NodeId focus )
+{
+    for( const ImplementorRow& row : implementorClosure( graphImplementors, focus ) )
+    {
+        if( row.depth >= 2 )
+        {
+            return kLegoClosureLegendComment;
+        }
+    }
+    return "";
+}
+
 inline const char* implementorsFloorLegendComment( const IngestResult& ing, const std::vector<std::vector<NodeId>>& graphImplementors, NodeId focus )
 {
     const NodeId one[1] = { focus };

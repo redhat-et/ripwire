@@ -177,6 +177,49 @@ struct Graph
                                               // emits nothing — the map is byte-identical either way.
 };
 
+// One row of an interface's implementor CLOSURE (lane lego-transitive): a type `depth` extends/implements hops below the
+// walk's base, reached FIRST through `via` (the base itself at depth 1).
+struct ImplementorRow
+{
+    NodeId        id    = kNoNode;
+    NodeId        via   = kNoNode;
+    std::uint32_t depth = 0;
+};
+
+// Breadth-first walk DOWN the implementors map from `base`: every type that extends/implements it directly (depth 1)
+// or through another such type (depth 2+), each ONCE at its shallowest depth. Order is depth ascending, then discovery
+// order — each parent's list is id-sorted by buildGraph — so the walk is deterministic. A cycle or a diamond visits a
+// type once and `base` never re-enters. Language-neutral: the map holds every language's edges (class bases, Rust
+// `impl Trait for T`, Ruby mixins, the JS `Base.extend('Name')` factory), so the closure is one rule for all of them.
+inline std::vector<ImplementorRow> implementorClosure( const std::vector<std::vector<NodeId>>& implementors, NodeId base )
+{
+    std::vector<ImplementorRow> rows;
+    HashMap<NodeId, char>       seen;
+    seen.reserve( 32 );
+    seen.emplace( base, char( 1 ) );
+    const auto expand = [ & ]( NodeId parent, std::uint32_t depth )
+    {
+        if( parent >= implementors.size() )
+        {
+            return;
+        }
+        for( NodeId child : implementors[ parent ] )
+        {
+            if( seen.emplace( child, char( 1 ) ).second )
+            {
+                rows.push_back( ImplementorRow{ child, parent, depth } );
+            }
+        }
+    };
+    expand( base, 1 );
+    for( std::size_t i = 0; i < rows.size(); ++i )   // rows grows inside the loop: index, never iterate by reference
+    {
+        expand( rows[i].id, rows[i].depth + 1 );
+    }
+    ENSURES( rows.empty() || rows.back().depth >= rows.front().depth );   // breadth-first: depth never falls
+    return rows;
+}
+
 // FE-B: is the call edge from → to NAME-ONLY, over the raw out-CSR and its parallel hedge bits — bound by name alone at
 // every site that bound it, so every surface renders it via="name". false for an edge that does not exist and for empty
 // hedge bits (a graph with no name-only edge at all). edgeNameOnly( Graph ) below and serialize.h's <calls> block share it.

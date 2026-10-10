@@ -274,6 +274,7 @@
 "legendrefcheck.sh": 4.3,
 "legobundlecheck.sh": 10.2,
 "legocheck.sh": 9.6,
+"legotransitivecheck.sh": 2.0,
 "lintbudgetcheck.sh": 16.7,
 "lintcatalogcheck.sh": 1.7,
 "lintcheck.sh": 3.2,

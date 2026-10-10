@@ -1227,23 +1227,9 @@ inline std::vector<std::pair<NodeId, std::string_view>> pythonDispatchRequests( 
 inline std::vector<NodeId> pythonDispatchClasses( const Graph& g, NodeId base )
 {
     std::vector<NodeId> classes{ base };
-    HashMap<NodeId, bool> visited;
-    visited.reserve( 32 );
-    visited.emplace( base, true );
-    for( std::size_t n = 0; n < classes.size(); ++n )
+    for( const ImplementorRow& row : implementorClosure( g.implementors, base ) )   // cycles and diamonds visit a class once
     {
-        const NodeId id = classes[n];
-        if( id >= g.implementors.size() )
-        {
-            continue;
-        }
-        for( NodeId child : g.implementors[id] )
-        {
-            if( visited.emplace( child, true ).second )
-            {
-                classes.push_back( child ); // cycles and diamonds visit a class only once
-            }
-        }
+        classes.push_back( row.id );
     }
     return classes;
 }

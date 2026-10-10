@@ -8468,6 +8468,87 @@ inline bool narrowLegoToRenderedSigs( const IngestResult& ing, std::vector<std::
     return narrowed;
 }
 
+// lane lego-transitive: the TARGETED --lego answer also lists the DEEPER implementors — the types below a direct one
+// (`class Default( SimpleFormatter )` under `BaseFormatter`), each with via= (the type it extends that put it in the
+// closure) and depth= (hops below the interface; the direct rows are depth 1 and carry neither). The direct rows stay
+// uncapped as before; the deeper rows are one page of at most kLegoClosureRowCap, a RUNAWAY guard well above any
+// measured closure, and a cut discloses transitive_shown= + has_more="1" + a next= that replays the verb with --offset.
+// --limit/--offset (MCP limit/offset) window these deeper rows; the direct rows repeat on every page.
+inline constexpr std::size_t kLegoClosureRowCap = 200;
+
+struct LegoClosurePage
+{
+    std::vector<ImplementorRow> deeper;               // every depth >= 2 row of the closure, in walk order
+    PageWindow                  window{ 0, 0 };       // the slice of `deeper` this answer prints
+};
+
+inline LegoClosurePage legoClosurePage( const std::vector<std::vector<NodeId>>& implementors, NodeId iface, int pageLimit, int pageOffset )
+{
+    LegoClosurePage page;
+    for( const ImplementorRow& row : implementorClosure( implementors, iface ) )
+    {
+        if( row.depth >= 2 )
+        {
+            page.deeper.push_back( row );
+        }
+    }
+    page.window = pageWindow( page.deeper.size(), effectiveRowCap( pageLimit, int( kLegoClosureRowCap ) ), pageOffset );
+    ENSURES( page.window.begin <= page.window.end && page.window.end <= page.deeper.size() );
+    return page;
+}
+
+// The <iface> attributes of that page. EMPTY when the closure has no deeper row, so an answer without one is
+// byte-identical to the direct-only answer. `selector` is the iface's own file:name, the same handle
+// implementors_next= names, so the next page resolves the same definition whatever the reader typed.
+inline std::string legoClosureAttrs( const LegoClosurePage& page, std::string_view selector, int pageLimit )
+{
+    const std::size_t total = page.deeper.size();
+    if( total == 0 )
+    {
+        return {};
+    }
+    std::string       out   = " transitive=\"" + std::to_string( total ) + "\"";
+    const std::size_t shown = page.window.end - page.window.begin;
+    if( shown < total )
+    {
+        out += " transitive_shown=\"" + std::to_string( shown ) + "\"";
+    }
+    if( page.window.begin > 0 )
+    {
+        out += " transitive_offset=\"" + std::to_string( page.window.begin ) + "\"";
+    }
+    if( page.window.end < total )
+    {
+        out += " has_more=\"1\"";
+        out += rw::nextAttrXml( pagedNext( nextFlag( "--lego=", selector ), pageLimit, page.window.end ) );
+    }
+    return out;
+}
+
+// One <impl> row. `line` (S2): the TARGETED answer puts the definition's line on p= (p="file:LINE", the --uses and
+// --callers spelling) so the reader can open the class itself; the ranked bundle rows keep p="file". `deep` is the
+// closure row of a depth >= 2 implementor (via= names the type it extends, depth= its hops), null for a direct one.
+inline void writeLegoImplRow( XmlWriter& w, const IngestResult& ing, NodeId id, std::string_view relPath, bool withPaths, bool line,
+                              const ImplementorRow* deep, std::vector<char>& esc )
+{
+    const Symbol& im = ing.symbols[ id ];
+    w.write( "<impl n=\"" );  w.write( escapeXml( im.name, esc ) );
+    if( withPaths )
+    {
+        w.write( "\" p=\"" );  w.write( escapeXml( relPath, esc ) );
+        if( line && im.line > 0 )
+        {
+            w.write( ":" );  w.write( std::to_string( im.line ) );
+        }
+    }
+    if( deep != nullptr )
+    {
+        w.write( "\" via=\"" );  w.write( escapeXml( ing.symbols[ deep->via ].name, esc ) );
+        w.write( "\" depth=\"" );  w.write( std::to_string( deep->depth ) );
+    }
+    w.write( "\"/>" );
+}
+
 // the Lego view: for the top relevant interfaces/base-classes (those with implementors), emit the
 // concrete implementations — the socket → interchangeable bricks. Descriptive (no pattern labels);
 // steers an agent to snap a new brick into the socket instead of reimplementing. Emitted in --for.
@@ -8497,7 +8578,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                         // compute (no second, drifting tally — the notes_total
                                                         // precedent this repo already avoids: legoTotal at the JSON
                                                         // call site is a DIFFERENT, pre-dedup count, on purpose).
-                      const std::vector<std::vector<NodeId>>* graphImplementors = nullptr )
+                      const std::vector<std::vector<NodeId>>* graphImplementors = nullptr,
                                                         // count-floor: RANKED mode only — the UNSCOPED graph map. The bundle's
                                                         // `implementors` is scoped and then narrowed to the rendered sigs' files
                                                         // (legoImplementorsOnSurface, narrowLegoToRenderedSigs), so its row count
@@ -8505,8 +8586,11 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                         // implementors="1">` answered a tree with six. With this map the count is
                                                         // the targeted --lego=TYPE's own and a short list says so
                                                         // (implementors_shown= + implementors_next=). Null keeps the old shape.
+                      int pageLimit = 0, int pageOffset = 0 )   // lane lego-transitive: TARGETED only — the --limit/--offset
+                                                        // (MCP limit/offset) window over the deeper implementor rows
 {
     EXPECTS( graphImplementors == nullptr || focusId == kNoNode );   // the targeted verb's map IS the graph's
+    EXPECTS( focusId != kNoNode || ( pageLimit == 0 && pageOffset == 0 ) );   // the ranked bundle has no page to window
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
     {
@@ -8589,9 +8673,11 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                                   : ( impls.size() < 16 ? impls.size() : 16 );
         const std::size_t          implementorTotal = id < countMap.size() ? std::max( countMap[id].size(), impls.size() ) : impls.size();
         std::string hdr;
+        const LegoClosurePage deep = focusId != kNoNode ? legoClosurePage( implementors, id, pageLimit, pageOffset ) : LegoClosurePage{};
         if( focusId != kNoNode )
         {
-            hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\" implementors=\"" + std::to_string( impls.size() ) + "\"";
+            hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\" implementors=\"" + std::to_string( impls.size() ) + "\""
+                + legoClosureAttrs( deep, std::string( pathRel( isym.fileId ) ) + ":" + isym.name, pageLimit );
         }
         else
         {
@@ -8672,14 +8758,15 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 
         for( std::size_t j = 0; j < cap; ++j )
         {
-            const Symbol& im = ing.symbols[ impls[j] ];
-            w.write( "<impl n=\"" );  w.write( escapeXml( im.name, esc ) );
-            if( withPaths ) { w.write( "\" p=\"" );  w.write( escapeXml( pathRel( im.fileId ), esc ) ); }
-            w.write( "\"/>" );
+            writeLegoImplRow( w, ing, impls[j], pathRel( ing.symbols[ impls[j] ].fileId ), withPaths, false, nullptr, esc );
         }
         if( impls.size() > cap )
         {
             w.write( "<!-- +more -->" );
+        }
+        for( std::size_t j = deep.window.begin; j < deep.window.end; ++j )   // empty unless TARGETED with a deeper row
+        {
+            writeLegoImplRow( w, ing, deep.deeper[j].id, pathRel( ing.symbols[ deep.deeper[j].id ].fileId ), withPaths, false, &deep.deeper[j], esc );
         }
         w.write( "</iface>" );
     }

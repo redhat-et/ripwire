@@ -1039,7 +1039,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "situational_awareness",    "path diff files limit offset" },
     { "mentions",                 "path paths symbol limit offset" },
     { "for",                      "path paths task budget_tokens no_route limit offset sections" },   // L-W: limit/offset = the file page; L2: sections = the CLI --sections= twin
-    { "lego",                     "path paths type legend" },
+    { "lego",                     "path paths type limit offset legend" },
     { "owners",                   "path symbol limit offset legend" },
     { "fetch_body",               "path handle start_line end_line" },
     { "batch",                    "path queries legend" },

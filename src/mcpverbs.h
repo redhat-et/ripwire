@@ -2607,7 +2607,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
 // check and returned "" for BOTH cases, which is exactly the conflated message the caller downstream had
 // to guess at ("type not found or has no implementors"); removing that check lets the two cases produce
 // genuinely different, unambiguous outcomes.
-inline std::string legoText( const std::string& root, const std::string& type, RedactCounts* redact )
+inline std::string legoText( const std::string& root, const std::string& type, RedactCounts* redact, McpPageArgs page = {} )
 {
     const McpIndex&     ix           = getIndex( root );
     const IngestResult& ing          = ix.ing;
@@ -2626,12 +2626,14 @@ inline std::string legoText( const std::string& root, const std::string& type, R
         // H5: the same legend the CLI --lego prints, and (issue #66) the same adjacent clause defining the
         // graph_unindexed= the root below carries — CLI and MCP are one wording by construction. H1: the unproven_defs=
         // clause rides as its own comment beside the closed literal, exactly as on the CLI.
-        rw::emitTo( mem, "<ctx>{}{}{}{}", kLegoLegend, graphUnindexedLegendComment( rw::graphGaugeClauses( ix.g ) ).c_str(),
+        rw::emitTo( mem, "<ctx>{}{}{}{}{}", kLegoLegend, graphUnindexedLegendComment( rw::graphGaugeClauses( ix.g ) ).c_str(),
                     unprovenDefsVerbComment( UnprovenDefsVerb::Lego, unprovenDefs > 0, "<!-- ripwire lego: " ).c_str(),
-                    implementorsFloorLegendComment( ing, ix.g.implementors, focus ) );   // count-floor: the CLI twin's clause
+                    implementorsFloorLegendComment( ing, ix.g.implementors, focus ),   // count-floor: the CLI twin's clause
+                    legoClosureLegendComment( ix.g.implementors, focus ) );   // lane lego-transitive: the deeper rows' clause, as on the CLI
         packLego( mem, ing, ix.g.implementors, flat, 1, redact, &impure, focus, /*withPaths=*/true,
                   ing.realPaths.empty() ? std::string_view( root ) : std::string_view(),    // R-R: root-relative <iface p=>
-                  unprovenDefsAttrXml( unprovenDefs ) + graphCountFloorAttrXml( ix.g ) );    // H1 + M15: residue, gauge, marker
+                  unprovenDefsAttrXml( unprovenDefs ) + graphCountFloorAttrXml( ix.g ),    // H1 + M15: residue, gauge, marker
+                  nullptr, nullptr, page.limit, page.offset );   // lane lego-transitive: limit/offset window the deeper rows, as on the CLI
         rw::emitRaw( mem, "</ctx>" );
     } );
 }
@@ -5278,7 +5280,7 @@ inline std::string batchPageRefusal( std::string_view verb, const McpPageParse& 
     {
         return {};
     }
-    return ( verb == "grep" || verb == "impact" || verb == "uses" ) ? page.refusal : std::string{};   // LB-G: uses pages too
+    return ( verb == "grep" || verb == "impact" || verb == "uses" || verb == "lego" ) ? page.refusal : std::string{};   // LB-G: uses pages too; lego (deeper rows) too
 }
 
 // The served set as ONE list (registry + the two aliases), for the membership test, the near-miss pool and
@@ -5666,7 +5668,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( missingField( "lego" ) );
         }
-        r.payload = legoText( root, type, redactPtr );           // D8 fix: "" now means genuine not-found only (zero implementors is real content)
+        r.payload = legoText( root, type, redactPtr, pageParse.page );   // D8 fix: "" now means genuine not-found only; paged like the CLI
         if( r.payload.empty() )
         {
             return bad( mcprefuse::notFound( getIndex( root ).ing, "type", type ) );

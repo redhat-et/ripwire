@@ -15,6 +15,17 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — `--lego` lists the implementors below a direct one
+
+`--lego=TYPE` (and the MCP `lego` tool) now walks the extends/implements edges to their closure: a class that extends a
+direct implementor (`class Default( SimpleFormatter )` under `BaseFormatter`) is listed too, once, at its shallowest
+depth, as `<impl n= p= via= depth=>` — `via=` names the type it extends that reached it, `depth=` its hops below the
+interface. The `<iface>` carries `transitive=N`; `implementors=` still counts the direct rows alone, and an answer with no
+deeper row is unchanged. The deeper rows are one page of at most 200 (a runaway guard): a cut says
+`transitive_shown=` and `has_more="1"` with a `next=` that pages on, and `--limit`/`--offset` (MCP `limit`/`offset`) page
+them. `--lego` honors `--limit`/`--offset` only for this window; without one it keeps its `--max-tokens` notice. The
+`tools/list` manifest grows 46,930 → 47,114 B (+184 B: the declared `limit` and `offset` arguments on `lego`).
+
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
 A member call `x.m()` (or, where the receiver is implicit, a bare `m()`) bound to every in-repo definition spelled

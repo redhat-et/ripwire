@@ -865,6 +865,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // count-floor on the targeted lego verb (serialize.h packLego, countfloor.h implementorFloors): present-only.
     { "implementors_floor", "implementors_floor=1: an extends clause spelled like this interface bound nowhere; implementors= may be short (not proof of another)", true, "iface", MapHeaderRead::No, {}, "lego" },
     { "floor_next", "floor_next=: lists every extends site of the name, bound or not", true, "iface", MapHeaderRead::No, {}, "lego" },
+    // lane lego-transitive: the deeper implementors (serialize.h legoClosurePage / legoClosureAttrs / writeLegoImplRow): present-only.
+    { "transitive", "transitive=N: implementors below a direct one (depth 2+), each once; implementors= counts direct rows only", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "transitive_shown", "transitive_shown=N: deeper rows on this page; has_more=1 with next= pages on", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "transitive_offset", "transitive_offset=N: the first deeper row this page shows", true, "iface", MapHeaderRead::No, {}, "lego" },
+    { "via", "impl via= depth=: the type it extends that reached it, its hops below the interface", true, "impl", MapHeaderRead::No, {}, "lego" },
     // layout: src/layout.h writeLayout / writeLayoutDef
     { "sym", "sym=: the aggregate name asked for", false, "layout", MapHeaderRead::No, {}, "layout" },
     { "found", "found=1: a C-family struct/class/union body was located for sym=", false, "layout", MapHeaderRead::No, {}, "layout" },

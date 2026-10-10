@@ -2307,8 +2307,11 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // D8 fix: legoText now only returns "" on genuine not-found — a resolved type with zero
                     // implementors comes back as real content (implementors="0" + contract), so this message
                     // is no longer conflating two different failures.
-                    const std::string t = legoText( path, type, redactPtr );
-                    resp = t.empty() ? errResultMsg( -32602, notFoundKind( "type", type ) ) : textResult( t );
+                    resp = pagedResult( [ & ]( McpPageArgs pg )   // lane lego-transitive: limit/offset window the deeper implementors
+                    {
+                        const std::string t = legoText( path, type, redactPtr, pg );
+                        return t.empty() ? errResultMsg( -32602, notFoundKind( "type", type ) ) : textResult( t );
+                    } );
                 }
                 else if( name == "whereis" && !path.empty() && !symbol.empty() )
                 {

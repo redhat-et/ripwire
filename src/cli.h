@@ -1056,6 +1056,8 @@ inline constexpr char kHelpHead[] =
         "                               the interface->impls view for ONE named interface/base: its signature, method contract,\n"
         "                               and every implementor (own-language only). file:name disambiguates a same-named type.\n"
         "                               No contract for a language this surface cannot read soundly: methods=0 caveat=… says so.\n"
+        "                               Implementors BELOW a direct one follow as via= depth= rows (transitive=N), 200 a page;\n"
+        "                               --limit/--offset page them.\n"
         "    --exemplar=TASK|KIND       before you write: the repo's best existing example of this kind of code, to imitate\n"
         "                               before you write: the repo's best-in-class instance to IMITATE. Just pass a plain task —\n"
         "                               --exemplar=\"format byte sizes\" — and the KIND is inferred from the top match; or name a\n"
@@ -3767,7 +3769,7 @@ constexpr const char* kPagingHonoringVerbs =
     "--communities --community --whereis --grep/--regex --match --pattern --impact --uses --exercises "
     "--seams --zoom --external-surface --dead-code --mentions --graph-query --stray-content --test-gate "
     "--biggest-first --ensemble --quality-panel --context-ratio --nonlocal-state --comment-coherence "
-    "--naming-consistency --safe-delete --pr-context --edit-check --flags --situ --for";
+    "--naming-consistency --safe-delete --pr-context --edit-check --flags --situ --for --lego";
 
 inline bool honorsPaging( const Config& c ) noexcept
 {
@@ -3790,7 +3792,11 @@ inline bool honorsPaging( const Config& c ) noexcept
         // FILE-GRAIN widening page. Membership is conditional on purpose: the bare --for bundle keeps honoring
         // --token-budget/--max-tokens/--format=candidates --top-k, which validateShapingFlagsHonored refuses on
         // every paging member — and refuses beside the page too, where no byte ceiling exists to shape against.
-        || ( !c.forTask.empty() && ( c.pageLimit > 0 || c.pageOffset > 0 ) );
+        || ( !c.forTask.empty() && ( c.pageLimit > 0 || c.pageOffset > 0 ) )
+        // lane lego-transitive: --lego=TYPE joins the same CONDITIONAL way — --limit/--offset window its deeper
+        // implementor rows (depth >= 2, serialize.h legoClosurePage); without a window it keeps its kShapingVerbs row,
+        // so `--lego --max-tokens` is still the "not read … nothing was dropped" notice, not a paging-family refusal.
+        || ( !c.legoType.empty() && ( c.pageLimit > 0 || c.pageOffset > 0 ) );
 }
 
 // --limit/--offset on a verb that windows NOTHING. Same accept-then-silently-ignore class as every guard in

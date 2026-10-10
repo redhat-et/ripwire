@@ -397,7 +397,13 @@ then
     NR="$( echo "$LRS" | grep -c '<impl n="Reop"' )"
     [ "$NR" -eq 1 ] && ok "--lego=Parent lists Reop once, though reopen.rb opens it twice with the superclass repeated" \
         || no "--lego=Parent lists Reop $NR times — two opens of ONE constant are one implementor"
-    NI="$( echo "$LRS" | grep -o '^<impl n="[^"]*"' | sort -u | grep -c . )"
+    # lane lego-transitive: --lego now also lists the classes BELOW a direct one (GrandChild < Child < Parent) as rows that carry
+    # via=/depth=, counted by transitive=, not implementors=. The invariant this arm pins is unchanged — implementors= counts
+    # the DISTINCT DIRECT classes — so the direct rows are the ones counted; the deeper rows are checked against transitive=.
+    NI="$( echo "$LRS" | grep '^<impl n=' | grep -v ' via="' | grep -o '^<impl n="[^"]*"' | sort -u | grep -c . )"
+    NT="$( echo "$LRS" | grep '^<impl n=' | grep ' via="' | grep -o '^<impl n="[^"]*"' | sort -u | grep -c . )"
+    AT="$( echo "$LRS" | grep -o 'transitive="[0-9]*"' | head -1 | tr -dc '0-9' )"
+    if [ "$NT" = "${AT:-0}" ]; then ok "--lego=Parent's transitive=\"${AT:-0}\" counts its $NT distinct deeper classes"; else no "--lego=Parent says transitive=\"${AT:-absent}\" for $NT distinct deeper classes"; fi
     NA="$( echo "$LRS" | grep -o 'implementors="[0-9]*"' | head -1 | tr -dc '0-9' )"
     [ "$NI" = "$NA" ] && ok "--lego=Parent's implementors=\"$NA\" counts its $NI distinct classes" \
         || no "--lego=Parent says implementors=\"$NA\" for $NI distinct classes"

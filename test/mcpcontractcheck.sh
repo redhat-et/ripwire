@@ -368,6 +368,9 @@ TWIN = {
     # L-W (2026-09-12, forpage.h): --for joined the paging set for its FILE PAGE (--limit/--offset select the
     # one-row-per-file widening document); its twin takes the same limit/offset through mcpPageArgs.
     "--for": "for",
+    # lane lego-transitive (2026-10-10): --lego joined the paging set the same conditional way for its DEEPER implementor
+    # rows (serialize.h legoClosurePage); its twin takes the same limit/offset through mcpPageArgs.
+    "--lego": "lego",
 }
 unmapped = sorted( v for v in pagingCli if v not in TWIN )
 check( not unmapped, "(G) every paging CLI verb is classified twin-or-not (%s)" % ( ",".join( unmapped ) or "none unmapped" ) )
