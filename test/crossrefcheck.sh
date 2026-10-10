@@ -1092,6 +1092,93 @@ mkp head/o.md <<'EOF'
 
 Call `probeName()` from the loop. <!-- @R -->
 EOF
+# The C2 call shapes and the review's checklist-29 near-misses (rv-whereis-defs-fix2 X3), each beside a true definition
+# of the same name in a well-formed file of its language, so each file reads both ways: the definition def, the call ref.
+# The call lines carry NO marker (an unmarked line wants ref): a trailing comment would change the shape a lexical reading
+# sees, and the premise below is the bare shape.
+# RED on 93aeab1d (its lexical reading calls several of these calls definitions).
+mkp head/q.py <<'EOF'
+def probeName(n):  # @D
+    def wrap(f):
+        return f
+    return wrap
+
+
+@probeName(1)
+def other():
+    return 2
+EOF
+mkp head/P.java <<'EOF'
+public class P {
+    public static int probeName(int a) { // @D
+        return a;
+    }
+    @probeName(value = 1)
+    int run(int a) {
+        return a;
+    }
+}
+EOF
+mkp head/t.c <<'EOF'
+#define probeName( x ) ( (x) + 1 ) /* @D */
+#define WRAP( x ) probeName( x )
+int useA( int y )
+{
+    if( probeName( y ) > 2 ) {
+        return WRAP( y );
+    }
+    return 0;
+}
+EOF
+mkp head/u.cpp <<'EOF'
+template <typename F> int probeName( int a, F f ) { return f( a ); } // @D
+/**
+ * @see probeName( a )
+ */
+int run( int y )
+{
+    return probeName( y, [&]( int x ) {
+        return x;
+    } );
+}
+EOF
+mkp head/v.cpp <<'EOF'
+struct probeName { int v; }; // @D
+class Foo : public probeName {
+};
+EOF
+mkp head/w.js <<'EOF'
+export function probeName(a) { // @D
+  return a;
+}
+function suite() {
+  probeName(function () {
+    return 1;
+  });
+  probeName('y', () => {
+    return 2;
+  });
+}
+export default probeName(3);
+EOF
+mkp head/x.ts <<'EOF'
+export function probeName(n: number) { // @D
+  return (t: any, k: string) => {};
+}
+export class Box {
+  @probeName(1) handle() {
+    return 3;
+  }
+}
+EOF
+mkp head/y.rb <<'EOF'
+def probeName(a) # @D
+  a
+end
+def other(probeName)
+  1
+end
+EOF
 gp add -A; gp commit -qm base
 gp checkout -qb sib
 mkdir -p "$PB/sib"; cp -R "$PB/head/." "$PB/sib/"
@@ -1193,6 +1280,26 @@ KB="$( "$BIN" "$PB" --whereis=checkBudget --whereis-listing=all --no-cache 2>/de
   && printf '%s' "$KB" | grep -q '<hit ref="sib" [^>]*p="c1/T2.java" l="2" kind="def"'; } \
     && ok 'whereis (branch-only): `#define clampBudget( x )` and `@Test(timeout = 10) public void checkBudget()` read kind="def" on the only ref holding them; the call beside the macro reads kind="ref"' \
     || { no 'whereis (branch-only): a branch-only definition lost its label, or its call site gained one'; printf '%s\n%s\n' "$CB" "$KB" | sed 's/<!--.*-->//'; }
+# "One the parser cannot finish" (CHANGELOG, the UNPARSED clause): a branch .astro that opens a frontmatter fence and never
+# closes it confirms nothing: its parse-worthy line reads kind="text", never def, and <unparsed blobs="1" rows="1"/> counts
+# it with no next= (the guard left nothing, so there is nothing to lift). Its closed twin reads def. RED on 93aeab1d (no
+# <unparsed>; the unclosed line read def).
+AS="$TMP/astro"; mkdir -p "$AS"; git -C "$AS" init -q -b main >/dev/null 2>&1; git -C "$AS" config commit.gpgsign false
+printf 'x\n' >"$AS/a.txt"; git -C "$AS" add -A >/dev/null 2>&1; git -C "$AS" commit -qm base >/dev/null 2>&1; git -C "$AS" checkout -qb feat >/dev/null 2>&1
+printf -- '---\nfunction astroName(a) { return a; }\n---\n<div>{astroName(1)}</div>\n' >"$AS/ok.astro"
+printf -- '---\nfunction astroOpen(a) { return a; }\n<div>{astroOpen(1)}</div>\n' >"$AS/p.astro"
+git -C "$AS" add -A >/dev/null 2>&1; git -C "$AS" commit -qm feat >/dev/null 2>&1; git -C "$AS" checkout -q main >/dev/null 2>&1
+AO="$( "$BIN" "$AS" --whereis=astroOpen --whereis-listing=all --no-cache 2>/dev/null )"; rcAo=$?
+AN="$( "$BIN" "$AS" --whereis=astroName --whereis-listing=all --no-cache 2>/dev/null )"; rcAn=$?
+if [ $rcAo -ne 0 ] || [ $rcAn -ne 0 ] || ! printf '%s' "$AO" | grep -q '<whereis ' || ! printf '%s' "$AN" | grep -q '<whereis '; then
+    no "whereis (parser could not finish): a run produced no <whereis> root (rc $rcAo / $rcAn)"
+else
+    { printf '%s' "$AO" | grep -q '<unparsed blobs="1" rows="1"/>' && printf '%s' "$AO" | grep -q '<hit ref="feat" [^>]*p="p.astro" l="2" kind="text"' \
+      && ! printf '%s' "$AO" | grep -q 'kind="def"' \
+      && printf '%s' "$AN" | grep -q '<hit ref="feat" [^>]*p="ok.astro" l="2" kind="def"' && ! printf '%s' "$AN" | grep -q '<unparsed'; } \
+        && ok 'whereis (parser could not finish): an unclosed .astro frontmatter reads kind="text" with <unparsed blobs="1" rows="1"/> (no next=); its closed twin reads def' \
+        || { no 'whereis (parser could not finish): the unclosed .astro blob was labelled, or not disclosed, or the closed twin lost its def'; printf '%s\n%s\n' "$AO" "$AN" | sed 's/<!--.*-->//'; }
+fi
 # ref_labels= rides only an answer with another ref's row: a repo with no other ref answers as before
 NR="$TMP/norefs"; mkdir -p "$NR"; git -C "$NR" init -q -b main >/dev/null 2>&1; git -C "$NR" config commit.gpgsign false
 printf 'int lonelyName( int a ) { return a; }\nint z( void ) { return lonelyName( 1 ); }\n' >"$NR/x.c"
