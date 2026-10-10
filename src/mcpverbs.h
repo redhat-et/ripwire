@@ -722,7 +722,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     const HopTestedPartition chTested = computeHopTestedPartition( ing, g, referencingOnly ? calledBy : calls );
 
     bool anyVia = false;   // FE-B: an entry carried "via":"name" — the answer then carries via_note, its reading
-    bool anyAt = false, anyAtCut = false;   // CALLSITE-AT: a calledBy row carried "sites_at" / "sites_total" — the answer then carries sites_note
+    RowCallSites calledBySites{};   // CALLSITE-AT: the calledBy window's sites (set once the window is known, below)
     const auto symObj = [ & ]( NodeId id, bool via ) -> std::string
     {
         anyVia = anyVia || via;
@@ -743,25 +743,12 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     };
     const auto rowArray = [ & ]( const std::vector<NodeId>& ids, const PageWindow& w, bool callersSide ) -> std::string
     {
-        // CALLSITE-AT: a calledBy row carries its call sites, the CLI --callers row's sites_at= (editcheck.h rowCallSites over
-        // this window's rows, the same pass and path spelling); a calls row never does.
-        const std::span<const NodeId> win = std::span<const NodeId>( ids ).subspan( w.begin, w.end - w.begin );
-        const RowCallSites sites = callersSide
-            ? rowCallSites( ing, chRows.matches, win, [ & ]( std::uint32_t f ) -> std::string_view
-                            { return sqSingleRoot ? sarif::rootRelativeUri( ing.files[f], sqRootPrefix ) : std::string_view( ing.files[f] ); } )
-            : RowCallSites{};
-        anyAt    = anyAt || sites.any;
-        anyAtCut = anyAtCut || sites.anyCut;
         std::string a = "[";
         for( std::size_t i = w.begin; i < w.end; ++i )
         {
             if( i != w.begin ) { a += ","; }
-            std::string row = symObj( ids[i], rowNameOnly( g, chRows.matches, ids[i], callersSide ) );
-            if( sites.any )
-            {
-                row.insert( row.size() - 1, callSitesKeyJson( sites.tokens[ i - w.begin ], sites.totals[ i - w.begin ] ) );   // before the closing brace
-            }
-            a += row;
+            // CALLSITE-AT: a calledBy row carries its call sites (the CLI --callers row's sites_at=); a calls row never does.
+            a += withRowSites( symObj( ids[i], rowNameOnly( g, chRows.matches, ids[i], callersSide ) ), calledBySites, i - w.begin, callersSide );
         }
         a += "]";
         return a;
@@ -774,6 +761,10 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     const PageWindow pwSecond  = pageWindow( calledBy.size(), rowCap, page.offset );
     const std::size_t rowTotal = referencingOnly ? calledBy.size() : calls.size();
     const bool  discloseCap    = ( pwPrimary.end - pwPrimary.begin ) < rowTotal;
+    // CALLSITE-AT: the calledBy window's rows with their call sites — editcheck.h rowCallSites, the CLI --callers pass and path spelling.
+    const PageWindow& calledByWin = referencingOnly ? pwPrimary : pwSecond;
+    calledBySites = rowCallSites( ing, chRows.matches, std::span<const NodeId>( calledBy ).subspan( calledByWin.begin, calledByWin.end - calledByWin.begin ),
+                                  RootRelPath{ ing, sqRootPrefix, sqSingleRoot } );
     char        pab[ kPageDisclosureCap ];
 
     std::string out = "{";
@@ -830,7 +821,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     {
         out += rw::viaNameNoteJson();   // FE-B: the reading of "via":"name", only in an answer that carries it
     }
-    out += callSitesAtNoteJson( anyAt, anyAtCut, kCallSitesPerRowCap );   // CALLSITE-AT: the reading of "sites_at", only when a row carries it
+    out += nextFieldJson( callSitesAtLegend( calledBySites.any, calledBySites.anyCut, kCallSitesPerRowCap ), "sites_note" );   // CALLSITE-AT: its reading, only when a row carries it (nextFieldJson: "" -> no key, JSON-escaped)
     // Reference-as-value round: the CLI's <vrs> window, the same rows (callhierarchy.h computed them once): valueRefs =
     // where the symbol is USED AS A VALUE (the --callers side), valueCallees = what it stores/passes and may call
     // through (the --callees side, find_symbol only). Absent when empty; value_refs is the callers-side count, beside

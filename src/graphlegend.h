@@ -886,15 +886,9 @@ inline constexpr const char* kCallSitesAtLegend =
     "proof each binds here; absent when no call there is spelled like it (an aliased import). ";
 inline std::string callSitesAtLegend( bool on, bool cut, std::size_t cap )
 {
-    if( !on )
-    {
-        return {};
-    }
-    std::string clause = kCallSitesAtLegend;
-    if( cut )
-    {
-        clause += "sites_total=N (absent when sites_at= is whole): this row has N sites and sites_at= lists the first " + std::to_string( cap ) + "; the uses verb on the same selector lists every one. ";
-    }
+    std::string clause = on ? std::string( kCallSitesAtLegend ) : std::string();
+    clause += on && cut ? "sites_total=N (absent when sites_at= is whole): this row has N sites and sites_at= lists the first " + std::to_string( cap ) + "; the uses verb on the same selector lists every one. "
+                        : std::string();
     return clause;
 }
 

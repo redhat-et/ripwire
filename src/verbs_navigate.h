@@ -71,6 +71,12 @@ inline void emitGraphQueryLegend( const rw::IngestResult& ing, const rw::Graph& 
 // extra bytes on the untested row, the common case.
 // 0.6.5: `depth` is optional too (--impact passes transitiveCallersDepth's hop per node) — when given, every row
 // carries "d":N, the XML row's d=; a JSON row is read on its own, so the key rides every row, never only on a change.
+// CALLSITE-AT: row i's extra JSON keys (sites_at/sites_total), "" when the caller passed none or the row has none.
+inline std::string_view jsonRowKeysAt( const std::vector<std::string>* rowKeys, std::size_t i ) noexcept
+{
+    return rowKeys != nullptr && i < rowKeys->size() ? std::string_view( ( *rowKeys )[ i ] ) : std::string_view();
+}
+
 inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<rw::NodeId>& ids, std::size_t begin, std::size_t end,
                                  std::string_view rootPrefix = {}, const std::vector<char>* testReach = nullptr,
                                  const std::vector<std::uint32_t>* depth = nullptr, const std::vector<char>* viaName = nullptr,
@@ -86,7 +92,7 @@ inline void printJsonSymbolRows( const rw::IngestResult& ing, const std::vector<
                      depth ? ",\"d\":" + std::to_string( ( *depth )[ ids[i] ] ) : std::string(),
                      ( testReach && rw::isTestedByReach( ing, *testReach, ids[i] ) ) ? ",\"tested\":true" : "",
                      ( viaName && i < viaName->size() && ( *viaName )[ i ] != 0 ) ? ",\"via\":\"name\"" : "",   // FE-B: the row's hedge
-                     ( rowKeys && i < rowKeys->size() ) ? std::string_view( ( *rowKeys )[ i ] ) : std::string_view() );
+                     jsonRowKeysAt( rowKeys, i ) );
     }
 }
 
@@ -206,8 +212,7 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         // Callers only: a callee row's sites are the callee's own body, which is the expand next= already names.
         const std::span<const NodeId> chPage = std::span<const NodeId>( result ).subspan( pw.begin, pw.end - pw.begin );
         const rw::RowCallSites chSites = wantCallers
-            ? rw::rowCallSites( ing, matches, chPage, [ & ]( std::uint32_t f ) -> std::string_view
-                                { return chSingleRoot ? rw::sarif::rootRelativeUri( ing.files[f], chRootPrefix ) : std::string_view( ing.files[f] ); } )
+            ? rw::rowCallSites( ing, matches, chPage, rw::RootRelPath{ ing, chRootPrefix, chSingleRoot } )
             : rw::RowCallSites{};
 
         // §H4 §3.4: the FIRST legend these two verbs have ever shipped (0 bytes before — which is why every
@@ -293,8 +298,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
             {
                 pageVia[ i ] = rowNameOnly( g, matches, page[ i ], wantCallers ) ? 1 : 0;
             }
-            emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach, nullptr, &pageVia,
-                                    chSites.any ? &chSites.tokens : nullptr, &chSites.totals );   // CALLSITE-AT: the sites_at column, only when a row has sites
+            emitColumnarSymbolRows( stdout, ing, tag, attr, page, chRootPrefix, &chTested.testReach, nullptr,
+                                    rw::ColumnarRowExtras{ &pageVia, chSites.any ? &chSites.tokens : nullptr, &chSites.totals } );   // CALLSITE-AT: sites_at only when a row has sites
             return 0;
         }
 
@@ -2529,7 +2534,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) );   // P3 (L7): the XML root's next=, same set
     const std::vector<char> via    = impactViaColumn( v, v.page.begin, v.page.end );
     const std::vector<char> rowVia( via.begin() + v.page.begin, via.begin() + v.page.end );   // FE-B: in `rows` order
-    emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach, &v.depth, &rowVia );
+    emitColumnarSymbolRows( stdout, v.ing, "impact", attr.c_str(), rows, v.rootPrefix, v.testReach, &v.depth, rw::ColumnarRowExtras{ &rowVia, nullptr, nullptr } );
     return 0;
 }
 

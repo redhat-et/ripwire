@@ -228,6 +228,24 @@ inline void emitColumnarAtColumns( std::FILE* out, const std::vector<std::vector
     }
 }
 
+// The per-row extras a caller may add after the core columns, in ONE argument so the row emitter's signature does not grow per
+// column: FE-B's via flags and CALLSITE-AT's sites (tokens + parallel totals). Value-initialized = none of them.
+struct ColumnarRowExtras
+{
+    const std::vector<char>*                     viaName;
+    const std::vector<std::vector<std::string>>* atTokens;
+    const std::vector<std::size_t>*              atTotals;
+};
+inline std::string columnarExtraFields( const ColumnarRowExtras& extras )
+{
+    std::string fields( columnarViaField( extras.viaName ) );
+    if( extras.atTokens != nullptr && extras.atTotals != nullptr )
+    {
+        fields += columnarAtCut( *extras.atTokens, *extras.atTotals ) ? ",sites_at,sites_total" : ",sites_at";
+    }
+    return fields;
+}
+
 // The optional columns a caller asked for, and the fields= suffix naming them, in ONE place: emitColumnarSymbolRows
 // reads each through these, so its own branch count does not grow per optional column.
 inline std::string_view columnarOptionalFields( bool hasTested, bool hasDepth ) noexcept
@@ -236,8 +254,9 @@ inline std::string_view columnarOptionalFields( bool hasTested, bool hasDepth ) 
 }
 inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing, const std::vector<NodeId>& rows,
                                          const std::vector<char>* testReach, const std::vector<std::uint32_t>* depth,
-                                         const std::vector<char>* viaName )
+                                         const ColumnarRowExtras& extras )
 {
+    const std::vector<char>* viaName = extras.viaName;
     if( testReach )
     {
         emitColumnarTestedColumn( out, ing, rows, *testReach );
@@ -249,6 +268,10 @@ inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing
     if( columnarViaPresent( viaName ) )
     {
         emitColumnarFlagColumn( out, "via", rows.size(), [ & ]( std::size_t i ) { return i < viaName->size() && ( *viaName )[ i ] != 0; } );
+    }
+    if( extras.atTokens != nullptr && extras.atTotals != nullptr )
+    {
+        emitColumnarAtColumns( out, *extras.atTokens, *extras.atTotals );
     }
 }
 
@@ -262,18 +285,15 @@ inline void emitColumnarOptionalColumns( std::FILE* out, const IngestResult& ing
 // column itself is present only when a caller passed the lens, so a caller with no test data pays 0 bytes).
 // 0.6.5: `depth` (optional, --impact only) adds a dense `<depth>` column — transitiveCallersDepth's hop per row — and
 // names it in fields=; a caller that passes none pays 0 bytes, like the tested column.
-// FE-B: `viaName` (optional, one flag per row) adds the dense `<via>` column (columnarViaPresent) when a row is hedged.
+// FE-B / CALLSITE-AT: `extras` (ColumnarRowExtras, value-initialized = none) adds the dense `<via>` column (columnarViaPresent)
+// when a row is hedged, and the `<sites_at>` (+ `<sites_total>` when cut) columns when the caller passed sites.
 inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
                                     const char* wrapperTag, const std::string& wrapperAttrs,
                                     const std::vector<NodeId>& rows, std::string_view rootPrefix = {},
                                     const std::vector<char>* testReach = nullptr,
                                     const std::vector<std::uint32_t>* depth = nullptr,
-                                    const std::vector<char>* viaName = nullptr,
-                                    const std::vector<std::vector<std::string>>* atTokens = nullptr,
-                                    const std::vector<std::size_t>* atTotals = nullptr )
+                                    const ColumnarRowExtras& extras = {} )
 {
-    EXPECTS( atTokens == nullptr || ( atTotals != nullptr && atTokens->size() == rows.size() && atTotals->size() == rows.size() ),
-             "the sites_at column is parallel to the rows" );
     std::vector<char> esc;
 
     std::vector<std::uint32_t> rowFiles;  rowFiles.reserve( rows.size() );
@@ -287,9 +307,8 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     std::fputs( kColumnarLegend, out );   // §B1.5: once per output, before the element it describes
     rw::emitTo( out, "<{} {} format=\"columnar\">", wrapperTag, wrapperAttrs.c_str() );
     emitPathTable( out, ing, uniqueFiles, esc, rootPrefix );
-    const std::string_view atFields = atTokens == nullptr ? "" : ( columnarAtCut( *atTokens, *atTotals ) ? ",sites_at,sites_total" : ",sites_at" );
-    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
-                columnarViaField( viaName ), atFields );
+    rw::emitTo( out, "<cols n=\"{}\" fields=\"path,name,line,kind{}{}\">", rows.size(), columnarOptionalFields( testReach != nullptr, depth != nullptr ),
+                columnarExtraFields( extras ) );
 
     // path index array
     std::fputs( "<path>", out );
@@ -338,11 +357,7 @@ inline void emitColumnarSymbolRows( std::FILE* out, const IngestResult& ing,
     }
     std::fputs( "</kind>", out );
     // A6 / 0.6.5 / FE-B: each present only when the caller passed it — see the wrapper banner and emitColumnarOptionalColumns.
-    emitColumnarOptionalColumns( out, ing, rows, testReach, depth, viaName );
-    if( atTokens != nullptr )
-    {
-        emitColumnarAtColumns( out, *atTokens, *atTotals );
-    }
+    emitColumnarOptionalColumns( out, ing, rows, testReach, depth, extras );
 
     rw::emitTo( out, "</cols></{}>", wrapperTag );
 }

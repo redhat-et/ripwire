@@ -871,6 +871,19 @@ inline std::vector<std::string> callSiteTokens( std::span<const CallSiteAt> mine
     return tokens;
 }
 
+// The file spelling every sites_at= token uses: the row p='s own (root-relative on a single root, the ingest path otherwise).
+struct RootRelPath
+{
+    const IngestResult& ing;
+    std::string_view    rootPrefix;
+    bool                singleRoot;
+
+    std::string_view operator()( std::uint32_t fileId ) const
+    {
+        return singleRoot ? sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix ) : std::string_view( ing.files[ fileId ] );
+    }
+};
+
 // A page of caller rows with their site tokens, computed ONCE and rendered by every dialect (XML, columnar, JSON, MCP):
 // tokens[i]/totals[i] belong to rows[i]; `any` = some row has a site (the legend clause rides exactly then), `anyCut` =
 // some row's list was cut (sites_total= rides). POD-style, value-initialized (EditCheckContract's reason above).
@@ -924,18 +937,6 @@ inline std::string callSitesAttrXml( const std::vector<std::string>& tokens, std
     return out;
 }
 
-// The MCP twin (find_referencing_symbols / find_symbol calledBy rows): the same reading as one self-named key, only in an
-// answer whose rows carry "sites_at" — the posture via_note already holds. The legend text holds no quote or backslash, so it
-// needs no JSON escaping (the static_assert below keeps that true if the wording changes).
-static_assert( std::string_view( kCallSitesAtLegend ).find_first_of( "\"\\" ) == std::string_view::npos,
-               "the sites_at= legend rides inside a JSON string unescaped: it holds no quote or backslash" );
-inline std::string callSitesAtNoteJson( bool on, bool cut, std::size_t cap )
-{
-    // callSitesAtLegend's only other text is its sites_total= sentence, whose literals hold no quote or backslash either.
-    const std::string text = callSitesAtLegend( on, cut, cap );
-    return text.empty() ? std::string() : ",\"sites_note\":\"" + text + "\"";
-}
-
 // The JSON twin (CLI --json rows and the MCP calledBy rows): `,"sites_at":["f:l",..]` plus `,"sites_total":N` only when cut.
 inline std::string callSitesKeyJson( const std::vector<std::string>& tokens, std::size_t total )
 {
@@ -956,6 +957,17 @@ inline std::string callSitesKeyJson( const std::vector<std::string>& tokens, std
         out += ",\"sites_total\":" + std::to_string( total );
     }
     return out;
+}
+
+// One JSON row object with its sites_at/sites_total keys spliced in before the closing brace — only on the callers side and
+// only when the page has sites (row k of `sites`); every other row comes back unchanged.
+inline std::string withRowSites( std::string rowJson, const RowCallSites& sites, std::size_t k, bool callersSide )
+{
+    if( callersSide && sites.any && k < sites.tokens.size() && !rowJson.empty() )
+    {
+        rowJson.insert( rowJson.size() - 1, callSitesKeyJson( sites.tokens[k], sites.totals[k] ) );
+    }
+    return rowJson;
 }
 
 // The comma-joined, ascending site list for ONE caller, or "" when the pass above found none (a flagged
