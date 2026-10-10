@@ -642,7 +642,11 @@ printf '%s' "$LS_OUT" | grep -o '<!--.*-->' | head -1 | grep -q 'ref=' \
     && ok "(12k) the legend defines ref= and string_hits= where they are emitted" \
     || no "(12k) ref= emitted with no reading in the legend"
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$LS_OUT" | xmllint --noout - 2>/dev/null && ok "(12l) the ranked answer is well-formed XML" || no "(12l) the ranked answer is not well-formed XML"
+    if printf '%s' "$LS_OUT" | xmllint --noout - 2>/dev/null; then
+        ok "(12l) the ranked answer is well-formed XML"
+    else
+        no "(12l) the ranked answer is not well-formed XML"
+    fi
 fi
 
 # (12f) the MCP grep twin lifts the same rows (one collection, one decision).

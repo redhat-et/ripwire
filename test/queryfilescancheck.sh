@@ -70,7 +70,20 @@ cd "$ROOT"
 echo "queryfilescancheck: BIN=$BIN"
 
 # ── (1) THE C1-HUNT REPLAY — the decisive arm ────────────────────────────────────────────────────────────
-"$BIN" . --grep=qualified_identifier >"$TMP/c1.xml" 2>/dev/null
+# lane lean-trio (idea #5): a code+string answer windows its ranked rows (10 by default, next= pages on), so the replay
+# reads the WHOLE listing (--limit=200): what (1b)-(1d) prove is the scan of an unindexed file, not the default window.
+# (1e) below pins the default answer's own disclosure of that window.
+"$BIN" . --grep=qualified_identifier --limit=200 >"$TMP/c1.xml" 2>/dev/null
+"$BIN" . --grep=qualified_identifier >"$TMP/c1_default.xml" 2>/dev/null
+C1D_ROOT="$( grep -oE '<grep [^>]*>' "$TMP/c1_default.xml" | head -1 )"
+C1D_HITS="$( printf '%s' "$C1D_ROOT" | sed -n 's/.* hits="\([0-9]*\)".*/\1/p' )"
+C1D_SHOWN="$( printf '%s' "$C1D_ROOT" | sed -n 's/.* shown="\([0-9]*\)".*/\1/p' )"
+if [ -n "$C1D_HITS" ] && [ -n "$C1D_SHOWN" ] && [ "$C1D_SHOWN" -le "$C1D_HITS" ] \
+   && { [ "$C1D_SHOWN" = "$C1D_HITS" ] || printf '%s' "$C1D_ROOT" | grep -q 'capped="1".*next="--grep=qualified_identifier --offset='; }; then
+    ok "(1e) the default answer shows $C1D_SHOWN of $C1D_HITS hits and names the paging call when it cuts"
+else
+    no "(1e) the default answer's window is not disclosed: $C1D_ROOT"
+fi
 
 TARGET="queries/cpp/tags.scm"
 ORACLE_LINES="$( /usr/bin/grep -n -F 'qualified_identifier' "$ROOT/$TARGET" | cut -d: -f1 | sort -n | uniq )"
@@ -222,7 +235,7 @@ PY
 esac
 
 # ── (6) determinism ──────────────────────────────────────────────────────────────────────────────────────
-"$BIN" . --grep=qualified_identifier >"$TMP/c1_again.xml" 2>/dev/null
+"$BIN" . --grep=qualified_identifier --limit=200 >"$TMP/c1_again.xml" 2>/dev/null
 diff -q "$TMP/c1.xml" "$TMP/c1_again.xml" >/dev/null \
     && ok "(6) determinism: byte-identical C1-hunt output across two runs" \
     || no "(6) --grep=qualified_identifier output differs run-to-run"
