@@ -312,7 +312,11 @@ constexpr std::uint32_t kCacheVersion = 29;           // 29: FE-B (test/receiver
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 157;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 160;          // bump on any grammar/.scm/extraction change
+                                                      // 160 = lane lego-transitive (2026-10-10): a JS/TS class factory
+                                                      //   `const Sub = Base.extend('Sub', ...)` is a class definition extending
+                                                      //   its receiver (tags.scm @definition.classfactory). 160, not 157: 157 is
+                                                      //   156's rich file tag, and train 26c holds 158 (rich 159). The train renumbers.
                                                       // 156 = 2026-10-08 (train 26b: signed lanes merged onto main's 148): cache-key hygiene.
                                                       //   Two merged lanes changed extraction under lane-local numbers, both 145:
                                                       //   honesty-small-068 (Go named-type kinds, `type A = B` aliases) and

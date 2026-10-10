@@ -38,7 +38,7 @@ A JavaScript/TypeScript class FACTORY, `const Sub = Base.extend('Sub', …)` (nu
 definition that extends its receiver: `--lego=BinOp` answers instead of "type not found", and `--lego=Node` lists the
 classes made from it. The name must be the string the call is given — `$.extend({}, a)`, an unnamed Backbone-style
 `Base.extend({…})` and `const A = B.extend('C')` stay what they look like (an object merge, no class). Parser version
-157 (re-index on first run).
+160 (re-index on first run).
 
 A bare name now resolves to a CODE definition whenever one matched: `--lego=Loader` answered about a `docs/api.md`
 heading (`defs="3" implementors="0"`) while `src/loader.js` held the class, because the heading had the lower id. The

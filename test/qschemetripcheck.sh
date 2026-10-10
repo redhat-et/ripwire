@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-10, lane/lego-transitive: RE-PINNED with UPDATE_GOLDEN=1 (hash 3b716e04ee…745391b). kParserVer 156 -> 160
+#   (JS/TS class factory extraction; 157 is 156's rich tag, train 26c holds 158/159), quality.h's mirror with it.
+#   pythonDispatchClasses now reads graph.h implementorClosure: the same breadth-first, visit-once walk over
+#   g.implementors (refactor, same class set and order), so kQSnapCacheScheme and kCacheVersion stay. The train renumbers.
 # 2026-10-08, train 26b final regeneration (all thirteen lanes merged, the path-gap name fix on top): RE-DERIVED ONCE with
 #   UPDATE_GOLDEN=1 on the merged tree (hash a1e54fc30b…9141af3). Watched text: kParserVer 156 (rich file tag 157; above
 #   FE-B's 154/155, honesty-small's and the cr2 follow-up's 145, cr-qd's 148), kCacheVersion 29 (FE-B's ref record),
