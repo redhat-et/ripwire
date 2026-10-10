@@ -103,6 +103,7 @@
 #include "filter.h"             // §P11.5: rw::pathTierOf — the shared source/test/doc ORDERING tier
 #include "infra/Diagnostics.h"  // ASSUME / DISCLOSE
 #include "infra/sortutil.h"    // svLess — the rename probe orders names in byte order, never via string_view operator<
+#include "ingest.h"             // definitionLinesInBlobs — the tags path over another ref's blob (labelBranchRowsByParse)
 
 #include "btree.hpp"      // gtl::btree_map — sorted iteration (house rule: never std::map)
 
@@ -113,6 +114,7 @@
 #include <cstdlib>
 #include <filesystem>   // the worktree overlay: symlink_status / read_symlink / file_size on a changed path
 #include <functional>
+#include <mutex>        // labelBranchRowsByParse holds quality::headSnapshotIngestMutex around the blob parse
 #include <optional>
 #include <string>
 #include <string_view>
@@ -142,6 +144,13 @@ constexpr std::uint32_t kMaxRefs         = 512;      // refusal bound — a swee
 // bury it under thousands of rows. What is dropped is always COUNTED in a <more/> element, never silently.
 constexpr std::size_t   kStrayFilesPerRef = 12;
 constexpr std::size_t   kWhereisHits      = 60;
+
+// --whereis: the RUNAWAY GUARD on the tags parse of other refs' blobs (labelBranchRowsByParse; --detail=N lifts it). Only a
+// blob holding a parse-worthy row (parseWorthyLine) is parsed, one parse per distinct (blob, path): ripwire's own most-called helper
+// across 162 refs needs 104 parses and 43 MB (~1.7 s at load 20 on an M2 Pro); a typical name, a handful. Hitting
+// either bound is disclosed on the answer (<unparsed next=>), and the blobs it leaves confirm no definition.
+constexpr std::size_t   kWhereisParseMaxBlobs = 256;
+constexpr std::size_t   kWhereisParseMaxBytes = std::size_t( 64 ) << 20;
 
 // WHICH ROWS a --whereis answer lists (--whereis-listing=, MCP `listing`). A where-defined question is answered by
 // the kind="def" rows; the kind="ref" rows (8-59 per answer on the comparison-table cells, ~8 KB) supplied no gold
@@ -519,7 +528,9 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
         return;
     }
 
-    const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-" + std::to_string( os::getpid() ) + ".shas";
+    static std::atomic<std::uint64_t> listSeq{ 0 };   // concurrent batches (streamBlobsInSlices) each own their list file
+    const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-" + std::to_string( os::getpid() ) + "-"
+                               + std::to_string( listSeq.fetch_add( 1, std::memory_order_relaxed ) ) + ".shas";
     {
         std::FILE* lf = std::fopen( listPath.c_str(), "wb" );
         if( !lf )
@@ -938,6 +949,48 @@ inline void parallelIndexed( std::size_t count, Body body, ParallelSweep& sweep 
         for( std::thread& worker_ : workers )
         {
             worker_.join();
+        }
+    }
+}
+
+// ── one blob stream through several git processes (streamBlobsInSlices) ──────────────────────────────────────
+// streamBlobs reads every blob through ONE `git cat-file --batch` pipe. On ripwire's 162 refs that is ~900 MB, and under
+// load the pipe's ping-pong, not git's decompression, was the larger cost: 1.9 s for git writing to /dev/null against
+// 5.9 s through `| cat` at load 28, and ~9 s of a --whereis at load 20-25 spent waiting in fread. This reads `slices`
+// contiguous slices of the sha list through as many processes at once (parallelIndexed's pool). `onBlob( index, sha,
+// bytes, isText )` runs on the slice's worker thread, once per served sha, so it may write only slot `index` of its own
+// storage. The stats merge as one batch's would: counts add, and a slice that failed, was cut short or was never reached
+// withholds every completeness claim.
+constexpr std::size_t kWhereisStreamSlices = 4;
+
+template<class OnBlob>
+inline void streamBlobsInSlices( const std::string& root, const std::vector<std::string>& shas, std::size_t slices, OnBlob onBlob,
+                                 StreamBlobStats& stats )
+{
+    slices = std::max<std::size_t>( 1, std::min( slices, shas.size() ) );
+    std::vector<StreamBlobStats> sliceStats( slices );
+    ParallelSweep                sweep;
+    parallelIndexed( slices, [ & ]( std::size_t t )
+    {
+        const std::size_t              begin = shas.size() * t / slices;
+        const std::size_t              end   = shas.size() * ( t + 1 ) / slices;
+        const std::vector<std::string> part( shas.begin() + std::ptrdiff_t( begin ), shas.begin() + std::ptrdiff_t( end ) );
+        std::size_t                    next = begin;   // streamBlobs serves its list in order, one call per served sha
+        streamBlobs( root, part, [ & ]( const std::string& sha, std::string_view bytes, bool isText ) { onBlob( next++, sha, bytes, isText ); },
+                     &sliceStats[ t ] );
+    }, sweep );
+    for( std::size_t t = 0; t < slices; ++t )
+    {
+        const StreamBlobStats& st = sliceStats[ t ];
+        stats.missing    += st.missing;
+        stats.nonBlob    += st.nonBlob;
+        stats.oversized  += st.oversized;
+        stats.binary     += st.binary;
+        stats.endedEarly  = stats.endedEarly || st.endedEarly;
+        stats.startFailed = stats.startFailed || st.startFailed;
+        if( !sweep.isDone( t ) )
+        {
+            DISCLOSE( stats, StreamBlobStats::DisclosureWhy::BatchNotStarted, "crossref: a blob-stream slice was never read — completeness is withheld" );
         }
     }
 }
@@ -1391,10 +1444,14 @@ struct WhereHit
     std::string   date;
     std::string   path;
     std::uint32_t line = 0;
-    bool          isDef = false;      // LEXICAL definition heuristic — see definitionShaped()
+    bool          isDef = false;      // kind="def": HEAD's from the index (or, head_labels="lexical", definitionShaped); another
+                                      //   ref's from the tags parse of its blob (labelBranchRowsByParse)
     std::string   text;               // the trimmed source line (evidence, so the caller can judge)
     bool          fromWorktree = false;   // read from the WORKING-TREE copy of a path that differs from HEAD (ref="worktree")
     bool          testLocal    = false;   // a TEST-LOCAL definition, demoted below the production ones (test_local="1")
+    bool          unconfirmed  = false;   // kind="text": another ref's PARSE-WORTHY row whose blob was not parsed (the
+                                          //   runaway guard, or a parse that could not finish) — never kind="def", never a ref
+    bool          parseWorthy  = false;   // parseWorthyLine(): this line makes its blob worth a tags parse (another ref's rows)
     // foldSharedBranchDefs: a kind="def" row outside the checkout whose (path, line text) other refs hold too is ONE
     // definition held by N refs. The first row of such a group (lowest ref name) is its representative and carries
     // defRefs = N (1 = this ref alone); every later row of the group is foldedDef and the definitions page skips it
@@ -1456,6 +1513,18 @@ inline std::vector<IndexDefSite> whereisIndexDefSites( const IngestResult& ing, 
 //   Unlisted  git could not list what differs; every HEAD row may be stale — complete= is withheld
 enum class WorktreeOverlay : std::uint8_t { Clean, Read, Partial, Unlisted };
 
+// How the OTHER refs' rows got their kind= (labelBranchRowsByParse), counted per distinct (blob, path) — the unit one
+// parse answers. `leftByGuard` and `failed` are the pairs that confirm nothing: their parse-worthy rows are the
+// `textRows` (kind="text"), and the page discloses all three in one <unparsed> element.
+struct BranchLabelCensus
+{
+    std::size_t parsed      = 0;   // parsed by the tags path (definitionLinesInBlobs)
+    std::size_t mirrored    = 0;   // HEAD's own blob at the same path: HEAD's index labels, line for line
+    std::size_t leftByGuard = 0;   // parse-worthy, but past kWhereisParseMaxBlobs / kWhereisParseMaxBytes
+    std::size_t failed      = 0;   // parse-worthy, but the parser could not finish (BlobDefsStatus::Failed)
+    std::size_t textRows    = 0;   // rows of those two that read kind="text"
+};
+
 struct WhereResult
 {
     bool                  ok = true;
@@ -1464,6 +1533,7 @@ struct WhereResult
     std::string           headSha;
     bool                  onHead = false;     // SYM occurs in HEAD's tree
     bool                  headLabelsFromIndex = false;   // §A7: HEAD rows' kind= came from the index, not the shape test
+    BranchLabelCensus     branchLabels;      // how the OTHER refs' rows got kind= (labelBranchRowsByParse; <unparsed> on the page)
     std::size_t           refsScanned = 0;
     std::size_t           distinctBlobs = 0;
     std::string           filter;             // H14/M6: the --stray-filter SUBSTR this scan was narrowed by ("" = none)
@@ -1597,178 +1667,21 @@ inline bool insideArgumentList( std::string_view line, std::size_t at ) noexcept
     return depth > 0;
 }
 
-// Is this line SHAPED like a definition of `sym`? Declarative marker table over the languages ripwire indexes
-// — deliberately LEXICAL, not AST-parsed: this is the REF-BLOB side, raw text that was never ingested, and
-// paying a tree-sitter parse per candidate blob to sharpen a hint would cost more than the hint is worth. HEAD
-// rows do NOT come here at all when the caller supplies the index's def sites (see relabelHeadHitsFromIndex):
-// the honest split documented in --help is HEAD = parsed, refs = lexical, and this function is the lexical half.
-// False positives here cost a `kind="def"` that should have read `kind="ref"`, never a missed hit.
-// A declaration marker (`def `, `fn `, `class `…) that HEADS the declaration of the name at `at`: its own word
-// (`#undef x` holds no `def `, `defn ` no `fn `, `template_t` no `template`), reached from the line's start through
-// declarator text only, and separated from the name by declarator text only — identifier bytes, spaces and the
-// punctuation a declarator head carries (`: < > , * & ( ) . [ ] ~ '`: `func (r *T) name(`, `def self.name`,
-// `impl<'a> Name<'a>`, `template<class T> T name(`). A quote, a `;`, an `=` or a brace between the two means the
-// marker is inside a string, a comment or an earlier statement: the 26b sweep's definitions page carried
-// `w.write( "<impl n=\"" ); w.write( escapeXml( … ) )` (the `impl ` of a string literal) and a shell comment's
-// `0 def rows in 3385 hits` as kind="def". A `using` declaration defines the name only as an alias
-// (`using Name = …`); `using ns::name;` re-exports it and is a reference.
-inline bool declMarkerBefore( std::string_view line, std::string_view marker, std::size_t at ) noexcept
-{
-    static constexpr std::string_view kBreaksHead    = "\"'/;={}#";     // before the marker: not a declaration line (`pub(crate) fn` keeps its parens)
-    static constexpr std::string_view kBreaksBetween = "\"\\;={}";      // between the marker and the name: not its declaration
-    for( std::size_t pos = line.find( marker ); pos != std::string_view::npos && pos < at; pos = line.find( marker, pos + 1 ) )
-    {
-        const std::size_t end = pos + marker.size();
-        if( pos > 0 && isIdentByte( (unsigned char)line[ pos - 1 ] ) )
-        {
-            continue;
-        }
-        if( end < line.size() && isIdentByte( (unsigned char)marker.back() ) && isIdentByte( (unsigned char)line[ end ] ) )
-        {
-            continue;   // `template` is a bare word: `template_t` is not it
-        }
-        if( line.substr( 0, pos ).find_first_of( kBreaksHead ) != std::string_view::npos )
-        {
-            return false;   // the first marker already sits inside a string, a comment or an expression
-        }
-        if( line.substr( end, at - end ).find_first_of( kBreaksBetween ) != std::string_view::npos )
-        {
-            return false;
-        }
-        if( marker == "using " )
-        {
-            std::size_t k = at;
-            while( k < line.size() && isIdentByte( (unsigned char)line[ k ] ) )
-            {
-                ++k;
-            }
-            while( k < line.size() && std::isspace( (unsigned char)line[ k ] ) )
-            {
-                ++k;
-            }
-            return k < line.size() && line[ k ] == '=';
-        }
-        return true;
-    }
-    return false;
-}
-
-// Is the text BEFORE the name an expression or a statement, so that `name(` is a CALL in it? A definition's prefix
-// is a return type, qualifiers, a scope or an attribute — identifier bytes, `< > , : * & ~ [ ]` and spaces, never an
-// operator, a brace, a paren or a statement keyword. Every byte below is one no definition line carries before its
-// name: `out += escapeXml( task, esc ); }` (the 26b sweep's 59 false kind="def" rows), `if( x ) { f( a ); }`,
-// `x = f( a )`, `a ? f( b ) : c`, `// f( a )`. The keywords are the statement heads the C-family, Python, JS/TS, Ruby,
-// Go, Rust and Swift grammars put before a call with no paren of their own (`return f( a )`, `if f( a ):`, `await f( a )`,
-// `match f( a ) {`); a type or qualifier word (`static`, `const`, `inline`, `public`, `async`, `operator`…) is not here.
-inline bool expressionBeforeName( std::string_view line, std::size_t at ) noexcept
-{
-    static constexpr std::string_view kStatementHeads[] = {
-        "return", "throw", "throws", "else", "new", "delete", "await", "yield", "raise", "print", "echo", "if", "elif",
-        "while", "for", "with", "assert", "not", "and", "or", "in", "is", "lambda", "case", "switch", "match", "guard",
-        "unless", "until", "typeof", "sizeof", "instanceof", "co_return", "co_await", "co_yield", "goto", "do", "then",
-    };
-    const std::string_view before = line.substr( 0, at );
-    if( before.find_first_of( "=;{}()+!?|^%/\"'" ) != std::string_view::npos )
-    {
-        return true;
-    }
-    for( std::size_t i = 0; i < before.size(); )
-    {
-        if( !isIdentByte( (unsigned char)before[ i ] ) )
-        {
-            ++i;
-            continue;
-        }
-        std::size_t j = i;
-        while( j < before.size() && isIdentByte( (unsigned char)before[ j ] ) )
-        {
-            ++j;
-        }
-        const std::string_view word = before.substr( i, j - i );
-        for( std::string_view head : kStatementHeads )
-        {
-            if( word == head )
-            {
-                return true;
-            }
-        }
-        i = j;
-    }
-    return false;
-}
-
-// What follows the parameter list's closing paren decides between a definition and a call whose line happens to end
-// in a definition's terminator. After a DEFINITION's `)` come only: the body `{`, an init list `:`, a trailing return
-// `->`, a qualifier (`const`, `noexcept`, `&`, `&&`, `override`…), `= 0|default|delete`, an attribute `[[`, a comment,
-// or the end of the line (the body opens on the next line). Anything else — `;` `,` `)` `.` `[` `?` an operator, `}`,
-// a word such as `do` or `then` — means the name was called: `f( a ).then( b )`, `{ f( a ) }`, `f( a ) do |x|`.
-// `open` is the index of the `(` after the name. An unbalanced list (the signature wraps) decides nothing: false.
-inline std::size_t matchingParen( std::string_view line, std::size_t open ) noexcept
-{
-    EXPECTS( open < line.size() && line[ open ] == '(', "the caller found the name's parameter list opening at `open`" );
-    int depth = 0;
-    for( std::size_t i = open; i < line.size(); ++i )
-    {
-        if( line[ i ] == '(' )
-        {
-            ++depth;
-        }
-        else if( line[ i ] == ')' && --depth == 0 )
-        {
-            return i;
-        }
-    }
-    return std::string_view::npos;
-}
-
-// Is the text at `k` (the first non-space byte after the parameter list) a definition's tail? See callShapedAfterParams.
-inline bool definitionTailAt( std::string_view line, std::size_t k ) noexcept
-{
-    static constexpr std::string_view kAfterDeclWords[] = {
-        "const", "noexcept", "override", "final", "volatile", "mutable", "requires", "throw", "throws", "try", "where",
-        "__attribute__", "asm",
-    };
-    const char c    = line[ k ];
-    const char next = ( k + 1 < line.size() ) ? line[ k + 1 ] : '\0';
-    if( c == '{' || c == ':' || c == '&' || ( c == '-' && next == '>' ) || ( c == '[' && next == '[' )
-        || ( c == '/' && ( next == '/' || next == '*' ) ) )
-    {
-        return true;
-    }
-    if( c == '=' )
-    {
-        std::size_t v = k + 1;
-        while( v < line.size() && std::isspace( (unsigned char)line[ v ] ) )
-        {
-            ++v;
-        }
-        const std::string_view rest = line.substr( v );
-        return rest.starts_with( "0" ) || rest.starts_with( "default" ) || rest.starts_with( "delete" );
-    }
-    std::size_t j = k;
-    while( j < line.size() && isIdentByte( (unsigned char)line[ j ] ) )
-    {
-        ++j;
-    }
-    const std::string_view word = line.substr( k, j - k );
-    return !word.empty() && std::find( std::begin( kAfterDeclWords ), std::end( kAfterDeclWords ), word ) != std::end( kAfterDeclWords );
-}
-
-inline bool callShapedAfterParams( std::string_view line, std::size_t open ) noexcept
-{
-    const std::size_t close = matchingParen( line, open );
-    if( close == std::string_view::npos )
-    {
-        return false;
-    }
-    std::size_t k = close + 1;
-    while( k < line.size() && std::isspace( (unsigned char)line[ k ] ) )
-    {
-        ++k;
-    }
-    return k < line.size() && !definitionTailAt( line, k );
-}
-
+// Is this line SHAPED like a definition of `sym`? A declarative marker table over the languages ripwire indexes,
+// read LEXICALLY over raw text. It labels NO row on another ref: there parseWorthyLine, a looser superset of it, only
+// CHOOSES which blobs the tags path parses (labelBranchRowsByParse — a blob with no such row is not parsed, and its rows
+// read kind="ref"). Its one
+// remaining LABELLING role is HEAD's fallback, head_labels="lexical" (no index def of the name, or a working tree that
+// drifted from HEAD). It errs in BOTH directions, and each costs something different in each role:
+//   * a quoted signature in a doc, a call on a line ending in `}` or `)` (`if( x ) { f( a ); }`), `go f(a)`, `@f(1)`,
+//     `f( a, [&]( int x ) {` read as definition-shaped: a false kind="def" on the HEAD fallback (as a chooser, one
+//     wasted parse that then labels the row a reference);
+//   * a definition it does not shape — a signature wrapped before its `)` or ending in `,`, a declarator followed by a
+//     comment, `fun f(x) = x + 1`, `export const f = (a) =>`, a `name() {` at column 0 — reads as a reference: on the
+//     HEAD fallback a definition missing from the definitions page (counted among the refs). parseWorthyLine takes the
+//     cheap ones of these back in for the chooser; the rest stay a disclosed floor there too.
+// A stricter reading of the line only trades one error for the other (the round-1 prefix and tail rules lost
+// `#define NAME(`, `decltype(auto) NAME(`, `@Test(…) public void NAME()` …): the parser is the fix, not the line.
 inline bool definitionShaped( std::string_view line, std::string_view sym, std::size_t at )
 {
     static constexpr std::string_view kDeclMarkers[] = {
@@ -1777,7 +1690,7 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
     };
     for( std::string_view m : kDeclMarkers )
     {
-        if( declMarkerBefore( line, m, at ) )
+        if( line.find( m ) != std::string_view::npos && line.find( m ) < at )
         {
             return true;
         }
@@ -1789,13 +1702,6 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
     // which are references, not definitions. The accepted terminators are '{' (body opens here), '}' (whole
     // one-line body), ')' (signature wraps to the next line) and ':' (a constructor's init list follows),
     // tested AFTER declaratorEnd() has stripped any trailing specifier tail.
-    //
-    // Two more tests, both lexical (the 26b sweep: with the definitions page listing EVERY kind="def" row of every
-    // ref, 59 of the 60 rows for a defs="1" symbol were call sites that merely ended in `}` or `)`): the text
-    // before the name must read as a declarator prefix, not an expression or a statement (expressionBeforeName),
-    // and what follows the parameter list must be a definition's tail, not a call's (callShapedAfterParams).
-    // What stays a floor: a bare `name( args )` alone on its line with nothing before or after it is a wrapped
-    // signature in C and a semicolon-free call in JS or Python, and one line cannot tell them apart.
     const std::size_t after = at + sym.size();
     if( after < line.size() && line[ after ] == '(' )
     {
@@ -1803,8 +1709,7 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
         const char last     = ( e > 0 ) ? line[ e - 1 ] : ';';
         const bool endsDecl = last == '{' || last == '}' || last == ')' || last == ':';
         const bool isCall   = at >= 1 && ( line[ at - 1 ] == '.' || ( at >= 2 && line[ at - 2 ] == '-' && line[ at - 1 ] == '>' ) );
-        return endsDecl && !isCall && at > 0 && !insideArgumentList( line, at ) && !expressionBeforeName( line, at )
-            && !callShapedAfterParams( line, after );
+        return endsDecl && !isCall && at > 0 && !insideArgumentList( line, at );
     }
     // ObjC method: "- (ret) sym" / "+ (ret) sym"
     if( !line.empty() && ( line[0] == '-' || line[0] == '+' ) && line.find( ')' ) < at )
@@ -1812,6 +1717,65 @@ inline bool definitionShaped( std::string_view line, std::string_view sym, std::
         return true;
     }
     return false;
+}
+
+// Does this line make its blob worth a tags PARSE (labelBranchRowsByParse)? A deliberately LOOSE superset of
+// definitionShaped(), because the two errors cost different things here: a wrong "yes" costs one parse, which then
+// labels the row a reference; a wrong "no" leaves a definition unparsed when it is the only such line of its blob, and
+// that definition reads kind="ref". So the shape test's own misses that are cheap to take in are taken in:
+//   * a comment after the declarator (`int f( int a ) { // note`, `#define f( a ) ( a ) /* note */`): retried without it;
+//   * the name opening the line (`f() {` in a shell script, a GNU-style C signature `f (int a)` under its return type);
+//   * the name bound by `=` to a function, an arrow or a lambda (`export const f = (a) =>`, `f = function (`, `f = lambda`);
+//   * Kotlin's `fun ` marker (`fun f(x) = x + 1`);
+//   * a markdown heading that opens with the name (`## f`): the index makes a section symbol of it.
+// What is still missed is named in definitionShaped's header (a signature wrapped before its parameter list closes, a
+// name alone on a line with only a type above it…); those definitions stay counted refs when nothing else in their
+// blob earns it a parse.
+inline bool parseWorthyLine( std::string_view line, std::string_view sym, std::size_t at )
+{
+    if( at == 0 || definitionShaped( line, sym, at ) )
+    {
+        return true;
+    }
+    const std::size_t after = at + sym.size();
+    for( const std::string_view opener : { std::string_view( "//" ), std::string_view( "/*" ), std::string_view( " #" ) } )
+    {
+        const std::size_t c = line.find( opener, after );
+        if( c != std::string_view::npos && definitionShaped( line.substr( 0, c ), sym, at ) )
+        {
+            return true;
+        }
+    }
+    std::size_t k = after;
+    while( k < line.size() && std::isspace( (unsigned char)line[ k ] ) )
+    {
+        ++k;
+    }
+    if( k + 1 < line.size() && line[ k ] == '=' && line[ k + 1 ] != '=' && line[ k + 1 ] != '>' )
+    {
+        std::size_t v = k + 1;
+        while( v < line.size() && std::isspace( (unsigned char)line[ v ] ) )
+        {
+            ++v;
+        }
+        const std::string_view rhs = line.substr( v );
+        if( rhs.starts_with( "(" ) || rhs.starts_with( "function" ) || rhs.starts_with( "async" ) || rhs.starts_with( "lambda" ) )
+        {
+            return true;
+        }
+    }
+    const std::size_t fun = line.find( "fun " );
+    if( fun != std::string_view::npos && fun < at )
+    {
+        return true;
+    }
+    const std::size_t hashes = line.find_first_not_of( " \t" );   // `#`s, then spaces, then the name: a heading
+    std::size_t       h      = hashes;
+    while( h < at && line[ h ] == '#' )
+    {
+        ++h;
+    }
+    return hashes != std::string_view::npos && h > hashes && h < at && line.find_first_not_of( " \t", h ) == at;
 }
 
 // Record every whole-word occurrence of `sym` in one blob's bytes, as (line number, trimmed line).
@@ -1835,8 +1799,9 @@ inline void scanLineForSymbol( std::string_view line, std::string_view sym, cons
         {
             --b;
         }
-        out.push_back( WhereHit{ ref.name, ref.tip, ref.date, path, lineNo,
-                                 definitionShaped( line, sym, at ), std::string( line.substr( a, b - a ) ), false } );
+        WhereHit& h   = out.emplace_back( WhereHit{ ref.name, ref.tip, ref.date, path, lineNo,
+                                                    definitionShaped( line, sym, at ), std::string( line.substr( a, b - a ) ), false } );
+        h.parseWorthy = parseWorthyLine( line, sym, at );
         return;                                                               // one hit per line — the line IS the evidence
     }
 }
@@ -1907,6 +1872,264 @@ inline std::vector<RawRow> lsTree( const std::string& root, const std::string& r
         }
         out.push_back( RawRow{ std::string( line.substr( tab + 1 ) ), std::string{}, std::string( f[2] ) } );
     }
+    return out;
+}
+
+// ── every ref's full tree from content-addressed tree objects (listTreesOfRefs) ───────────────────────────
+//
+// lsTree above spawns one `git ls-tree -r` per ref. Measured on ripwire's 162 local refs at load 25: that phase was
+// 16.5 s of a 31 s --whereis (process start-up under load, each process re-listing subtrees most refs share). Trees are
+// content-addressed, so a level-order walk reads each DISTINCT tree object ONCE — all of one level through one
+// `git cat-file --batch` — and every ref's listing is rebuilt from those objects in ls-tree's own order (a tree's
+// stored entry order, recursing in place) and spelling (gitQuotedPath: core.quotepath=false, as gitCapture runs it).
+// Anything this walk cannot read exactly — a root that is not the top of the work tree, an object git does not
+// serve, a malformed tree — returns nullopt and the caller lists with lsTree instead: the same rows, only slower.
+struct GitTreeEntry
+{
+    std::string name;
+    std::string sha;
+    bool        isTree = false;   // a subtree; otherwise a blob of any mode (file, executable, symlink) — ls-tree's "blob"
+};
+
+// ls-tree's path spelling under core.quotepath=false: a path holding a control byte, `"` or `\` is written as a C
+// string — quoted, with \a \b \t \n \v \f \r \" \\ and three-digit octal for the other control bytes and DEL — and every
+// other path (bytes >= 0x80 included) is written as is (git quote.c, cq_lookup).
+inline std::string gitQuotedPath( std::string_view path )
+{
+    const auto needs = []( unsigned char c ) noexcept { return c < 0x20 || c == '"' || c == '\\' || c == 0x7f; };
+    if( std::none_of( path.begin(), path.end(), [ & ]( char c ) { return needs( (unsigned char)c ); } ) )
+    {
+        return std::string( path );
+    }
+    std::string out = "\"";
+    for( const char ch : path )
+    {
+        const unsigned char c = (unsigned char)ch;
+        static constexpr std::string_view kLetters = "abtnvfr";   // \a \b \t \n \v \f \r for bytes 7..13
+        if( c >= 7 && c <= 13 )
+        {
+            out += '\\';
+            out += kLetters[ c - 7 ];
+        }
+        else if( c == '"' || c == '\\' )
+        {
+            out += '\\';
+            out += ch;
+        }
+        else if( needs( c ) )
+        {
+            const char oct[] = { '\\', char( '0' + ( c >> 6 ) ), char( '0' + ( ( c >> 3 ) & 7 ) ), char( '0' + ( c & 7 ) ) };
+            out.append( oct, sizeof( oct ) );
+        }
+        else
+        {
+            out += ch;
+        }
+    }
+    out += '"';
+    return out;
+}
+
+// Parse one tree object: `<octal mode> <name>\0<raw id>` repeated. The raw id is 20 bytes for a SHA-1 repository and
+// 32 for SHA-256; `idBytes` comes from the hex length of the tree's own name. False on any malformed entry (external
+// input: VALIDATEd, never assumed). Gitlinks (mode 160000, a submodule's commit) are skipped, as ls-tree's blob filter does.
+inline bool parseGitTree( std::string_view bytes, std::size_t idBytes, std::vector<GitTreeEntry>& out )
+{
+    static constexpr std::string_view kHex = "0123456789abcdef";
+    std::size_t pos = 0;
+    while( pos < bytes.size() )
+    {
+        const std::size_t sp  = bytes.find( ' ', pos );
+        const std::size_t nul = sp == std::string_view::npos ? sp : bytes.find( '\0', sp + 1 );
+        if( !VALIDATE( nul != std::string_view::npos && nul + 1 + idBytes <= bytes.size() ) )   // an entry cut short: not a tree we can read
+        {
+            return false;
+        }
+        const std::string_view mode = bytes.substr( pos, sp - pos );
+        GitTreeEntry           e;
+        e.name.assign( bytes.substr( sp + 1, nul - sp - 1 ) );
+        e.isTree = mode == "40000";
+        e.sha.reserve( idBytes * 2 );
+        for( std::size_t k = 0; k < idBytes; ++k )
+        {
+            const unsigned char b = (unsigned char)bytes[ nul + 1 + k ];
+            e.sha += kHex[ b >> 4 ];
+            e.sha += kHex[ b & 15 ];
+        }
+        pos = nul + 1 + idBytes;
+        if( mode != "160000" )
+        {
+            out.push_back( std::move( e ) );
+        }
+    }
+    return true;
+}
+
+// One `git cat-file --batch` over `shas` (in order): onObject( sha, type, bytes ) per object. False when the batch did not
+// serve every object in full (a start failure, a missing object, a short read): the caller then cannot trust its walk.
+template<class OnObject>
+inline bool catFileBatch( const std::string& root, const std::vector<std::string>& shas, OnObject onObject )
+{
+    if( shas.empty() )
+    {
+        return true;
+    }
+    static std::atomic<std::uint64_t> listSeq{ 0 };
+    const std::string listPath = quality::cacheDirLadder() + "/ripwire-crossref-trees-" + std::to_string( os::getpid() ) + "-"
+                               + std::to_string( listSeq.fetch_add( 1, std::memory_order_relaxed ) ) + ".shas";
+    {
+        std::FILE* lf = std::fopen( listPath.c_str(), "wb" );
+        if( !lf )
+        {
+            return false;
+        }
+        for( const std::string& s : shas )
+        {
+            rw::emitTo( lf, "{}\n", s.c_str() );
+        }
+        std::fclose( lf );
+    }
+    const std::string cmd  = gitCmd( " -C " ) + shSingleQuote( root ) + " cat-file --batch < " + shSingleQuote( listPath ) + " 2>/dev/null";
+    std::FILE*        pipe = os::popen( cmd.c_str(), "r" );
+    if( !pipe )
+    {
+        os::unlink( listPath.c_str() );
+        return false;
+    }
+    bool              ok = true;
+    std::string       header;
+    std::vector<char> body;
+    for( std::size_t served = 0; served < shas.size() && ok; ++served )
+    {
+        header.clear();
+        for( int c = std::fgetc( pipe ); c != EOF && c != '\n'; c = std::fgetc( pipe ) )
+        {
+            header.push_back( char( c ) );
+        }
+        const std::size_t sp2 = header.rfind( ' ' );
+        const std::size_t sp1 = sp2 == std::string::npos || sp2 == 0 ? std::string::npos : header.rfind( ' ', sp2 - 1 );
+        const long long   size = sp1 == std::string::npos ? -1 : std::strtoll( header.c_str() + sp2 + 1, nullptr, 10 );
+        if( size < 0 || header.compare( 0, sp1, shas[ served ] ) != 0 )
+        {
+            ok = false;   // "<sha> missing", an empty header (the pipe ended), or an answer for another object
+            break;
+        }
+        body.resize( std::size_t( size ) );
+        const std::size_t got = size > 0 ? std::fread( body.data(), 1, std::size_t( size ), pipe ) : 0;
+        (void)std::fgetc( pipe );   // the framing LF after the payload
+        ok = got == std::size_t( size ) && onObject( shas[ served ], std::string_view( header ).substr( sp1 + 1, sp2 - sp1 - 1 ),
+                                                     std::string_view( body.data(), got ) );
+    }
+    os::pclose( pipe );
+    os::unlink( listPath.c_str() );
+    return ok;
+}
+
+// Every ref's `ls-tree -r` rows, by the level-order walk above; nullopt when the walk cannot answer exactly.
+inline std::optional<std::vector<std::vector<RawRow>>> listTreesOfRefs( const std::string& root, const std::vector<RefInfo>& refs )
+{
+    // ls-tree lists the CURRENT DIRECTORY's subtree, relative to it: from a root below the top of the work tree the walk
+    // would have to start one subtree down and re-spell every path. That case keeps lsTree.
+    if( !gitCapture( root, "rev-parse --show-prefix 2>/dev/null" ).empty() )
+    {
+        return std::nullopt;
+    }
+    std::vector<std::string> tips;
+    for( const RefInfo& r : refs )
+    {
+        tips.push_back( r.tip );
+    }
+    std::sort( tips.begin(), tips.end() );
+    tips.erase( std::unique( tips.begin(), tips.end() ), tips.end() );
+
+    gtl::btree_map<std::string, std::string> rootOf;   // commit → its tree
+    const bool commitsRead = catFileBatch( root, tips, [ & ]( const std::string& sha, std::string_view type, std::string_view bytes )
+    {
+        const bool shaped = type == "commit" && bytes.starts_with( "tree " ) && bytes.find( '\n' ) != std::string_view::npos;
+        if( !VALIDATE( shaped ) )
+        {
+            return false;
+        }
+        rootOf[ sha ] = std::string( bytes.substr( 5, bytes.find( '\n' ) - 5 ) );
+        return isBlobSha( rootOf[ sha ] );
+    } );
+    if( !commitsRead )
+    {
+        return std::nullopt;
+    }
+
+    gtl::btree_map<std::string, std::vector<GitTreeEntry>> trees;   // every distinct tree object any ref reaches
+    std::vector<std::string>                               level;
+    for( const auto& [ commit, tree ] : rootOf )
+    {
+        (void)commit;
+        level.push_back( tree );
+    }
+    while( !level.empty() )
+    {
+        std::sort( level.begin(), level.end() );
+        level.erase( std::unique( level.begin(), level.end() ), level.end() );
+        std::vector<std::string> next;
+        const bool               read = catFileBatch( root, level, [ & ]( const std::string& sha, std::string_view type, std::string_view bytes )
+        {
+            std::vector<GitTreeEntry> entries;
+            if( type != "tree" || !parseGitTree( bytes, sha.size() / 2, entries ) )
+            {
+                return false;
+            }
+            for( const GitTreeEntry& e : entries )
+            {
+                if( e.isTree && trees.find( e.sha ) == trees.end() )
+                {
+                    next.push_back( e.sha );
+                }
+            }
+            trees.emplace( sha, std::move( entries ) );
+            return true;
+        } );
+        if( !read )
+        {
+            return std::nullopt;
+        }
+        level.clear();
+        for( std::string& s : next )
+        {
+            if( trees.find( s ) == trees.end() )
+            {
+                level.push_back( std::move( s ) );
+            }
+        }
+    }
+
+    std::vector<std::vector<RawRow>> out( refs.size() );
+    for( std::size_t i = 0; i < refs.size(); ++i )
+    {
+        // depth-first in stored order, a subtree listed where it stands: ls-tree -r's own order
+        struct Frame { const std::vector<GitTreeEntry>* entries; std::size_t next; std::size_t prefixLen; };
+        std::string        prefix;
+        std::vector<Frame> stack{ Frame{ &trees.at( rootOf.at( refs[ i ].tip ) ), 0, 0 } };
+        while( !stack.empty() )
+        {
+            Frame& f = stack.back();
+            if( f.next == f.entries->size() )
+            {
+                stack.pop_back();
+                continue;
+            }
+            const GitTreeEntry& e = ( *f.entries )[ f.next++ ];
+            prefix.resize( f.prefixLen );
+            prefix += e.name;
+            if( e.isTree )
+            {
+                const std::size_t childPrefix = prefix.size() + 1;
+                prefix += '/';
+                stack.push_back( Frame{ &trees.at( e.sha ), 0, childPrefix } );
+                continue;
+            }
+            out[ i ].push_back( RawRow{ gitQuotedPath( prefix ), std::string{}, e.sha } );
+        }
+    }
+    ENSURES( out.size() == refs.size(), "one listing per ref, in the refs' order (computeWhereis reads slot i as refs[i])" );
     return out;
 }
 
@@ -1984,6 +2207,195 @@ inline bool relabelHeadHitsFromIndex( std::vector<WhereHit>& hits, std::span<con
         }
     }
     return true;
+}
+
+// ── the OTHER refs' rows: kind= from a parser, never from a reading of the line ───────────────────────────
+//
+// A row on another ref comes from a blob the index never read, and one line read lexically cannot tell a definition
+// from a call in every language (rv-whereis-defs-fix: a stricter reading lost `#define NAME(`, `decltype(auto) NAME(`,
+// `@Test(…) public void NAME()`, `#[derive(Debug)] struct NAME`; a looser one keeps `go NAME(a)`, `@NAME(1)`,
+// `NAME( a, [&]( int x ) {`). So each distinct (blob, path) behind such rows is labelled the way HEAD's rows are:
+//   * HEAD's OWN blob at the same path (a ref that never touched the file), when HEAD's rows came from the index
+//     (head_labels="index"): HEAD's labels, line for line — the same bytes, the same answer, no parse;
+//   * otherwise the index's extraction runs over the blob (definitionLinesInBlobs, ingest.h) and every definition the
+//     tags query captures for the name promotes the nearest row within [line - kHeadDefLineAbove, line +
+//     kHeadDefLineBelow], exactly relabelHeadHitsFromIndex's rule; every other row of the blob is a reference.
+// WHICH blobs are parsed: only those holding a row parseWorthyLine() accepts (a loose superset of definitionShaped).
+// Parsing every blob that mentions the name cost 15-40 s on ripwire's most-called helper (1140 blobs, 467 MB) against a
+// 12 s answer; the chooser cuts that to ~100 blobs, ~43 MB. It CHOOSES, it never labels: a blob it rejects holds no
+// parse-worthy row, and its rows read kind="ref" (the floor parseWorthyLine's header names). A parsed blob is labelled whole.
+// The batch is bounded by the runaway guard (kWhereisParseMaxBlobs / kWhereisParseMaxBytes; WhereisParseBudget),
+// filled most-rows-first. A blob the guard leaves, or one the parser could not finish, confirms NOTHING: its
+// parse-worthy rows read kind="text", never kind="def", its other rows kind="ref", and <unparsed> counts them.
+// A path in no indexed language, or one the crawl would skip (binary, oversized, a nesting refusal), is labelled as
+// the index labels such a file on HEAD: no definition.
+struct WhereisParseBudget
+{
+    std::size_t maxBlobs = kWhereisParseMaxBlobs;
+    std::size_t maxBytes = kWhereisParseMaxBytes;
+};
+
+struct BranchParseJob
+{
+    std::string                sha;          // the blob (with `path`, the unit one parse answers)
+    std::string                path;         // the tree path: its extension picks the grammar
+    std::string                bytes;        // the blob, kept only when it holds a parse-worthy row
+    std::vector<std::uint32_t> hitLines;     // the blob's hit lines, ascending (one hit per line)
+    std::vector<std::size_t>   rows;         // every WhereHit this (blob, path) produced on a non-HEAD ref
+    std::size_t                headFirst = 0, headEnd = 0;   // HEAD's rows of this same (blob, path), when HEAD holds it
+    bool                       shaped    = false;            // some row is parse-worthy (parseWorthyLine): worth a parse
+};
+
+// The hit lines a parse's definition lines promote: per definition line, the nearest hit line in its window (the lower
+// line on a tie — relabelHeadHitsFromIndex walks HEAD's rows in ascending line order with the same strict `<`).
+inline std::vector<std::uint32_t> promotedHitLines( std::span<const std::uint32_t> hitLines, std::span<const std::uint32_t> defLines )
+{
+    EXPECTS( std::is_sorted( hitLines.begin(), hitLines.end() ), "one blob's hit lines, in the scan's ascending order (the tie rule reads them so)" );
+    std::vector<std::uint32_t> promoted;
+    for( const std::uint32_t defLine : defLines )
+    {
+        std::size_t   best     = hitLines.size();
+        std::uint32_t bestDist = 0;
+        for( std::size_t i = 0; i < hitLines.size(); ++i )
+        {
+            const std::uint32_t h = hitLines[ i ];
+            if( h + kHeadDefLineAbove < defLine || h > defLine + kHeadDefLineBelow )
+            {
+                continue;
+            }
+            const std::uint32_t dist = ( h > defLine ) ? h - defLine : defLine - h;
+            if( best == hitLines.size() || dist < bestDist ) { best = i; bestDist = dist; }
+        }
+        if( best != hitLines.size() )
+        {
+            promoted.push_back( hitLines[ best ] );
+        }
+    }
+    std::sort( promoted.begin(), promoted.end() );
+    return promoted;
+}
+
+// Label one job's rows: kind="def" exactly on `defLines` (sorted), else kind="ref" — or, when the job confirmed nothing
+// (`confirmed` false), kind="text" on its parse-worthy rows (parseWorthyLine), the lines that asked for the parse.
+inline void labelJobRows( WhereResult& result, const BranchParseJob& job, std::span<const std::uint32_t> defLines, bool confirmed )
+{
+    EXPECTS( std::all_of( job.rows.begin(), job.rows.end(), [ & ]( std::size_t r ) { return r < result.hits.size() && !result.hits[ r ].inCheckout(); } ),
+             "a job's rows are rows of other refs this scan produced (HEAD's are the index's to label)" );
+    for( const std::size_t r : job.rows )
+    {
+        WhereHit& h = result.hits[ r ];
+        if( !confirmed )
+        {
+            h.unconfirmed = h.parseWorthy;
+            result.branchLabels.textRows += h.parseWorthy ? 1 : 0;
+        }
+        h.isDef = confirmed && std::binary_search( defLines.begin(), defLines.end(), h.line );
+    }
+}
+
+// The parse batch: the parse-worthy jobs no mirror answered, most rows first (then path, then blob — a fact of the
+// answer, never of thread timing), up to the guard. Returns the jobs it parsed, in batch order.
+inline std::vector<std::size_t> branchParseBatch( const std::vector<BranchParseJob>& jobs, std::span<const char> answered,
+                                                  const WhereisParseBudget& budget, BranchLabelCensus& census )
+{
+    std::vector<std::size_t> want;
+    for( std::size_t j = 0; j < jobs.size(); ++j )
+    {
+        if( answered[ j ] == 0 && jobs[ j ].shaped )
+        {
+            want.push_back( j );
+        }
+    }
+    std::sort( want.begin(), want.end(), [ & ]( std::size_t a, std::size_t b )
+               {
+                   const BranchParseJob& x = jobs[ a ];
+                   const BranchParseJob& y = jobs[ b ];
+                   if( x.rows.size() != y.rows.size() ) { return x.rows.size() > y.rows.size(); }
+                   if( x.path != y.path ) { return x.path < y.path; }
+                   return x.sha < y.sha;
+               } );
+    std::vector<std::size_t> batch;
+    std::size_t              bytes = 0;
+    for( const std::size_t j : want )
+    {
+        const std::size_t size = jobs[ j ].bytes.size();
+        if( batch.size() >= budget.maxBlobs || size > budget.maxBytes - bytes )
+        {
+            break;   // the guard: this job and every later one confirm nothing (counted below by the caller)
+        }
+        batch.push_back( j );
+        bytes += size;
+    }
+    census.leftByGuard = want.size() - batch.size();
+    ENSURES( batch.size() <= budget.maxBlobs && bytes <= budget.maxBytes, "the batch stays inside the runaway guard" );
+    return batch;
+}
+
+inline void labelBranchRowsByParse( WhereResult& result, std::vector<BranchParseJob>& jobs, const WhereisParseBudget& budget )
+{
+    std::vector<char> answered( jobs.size(), 0 );
+    for( std::size_t j = 0; j < jobs.size(); ++j )
+    {
+        BranchParseJob& job = jobs[ j ];
+        if( job.headEnd > job.headFirst && result.headLabelsFromIndex )
+        {
+            std::vector<std::uint32_t> headDefs;   // HEAD's rows are ascending by line: one blob, one scan
+            for( std::size_t r = job.headFirst; r < job.headEnd; ++r )
+            {
+                if( result.hits[ r ].isDef ) { headDefs.push_back( result.hits[ r ].line ); }
+            }
+            labelJobRows( result, job, headDefs, true );
+            ++result.branchLabels.mirrored;
+            answered[ j ] = 1;
+        }
+        else if( !job.shaped || sliceGrammarForFile( job.path ) == nullptr )
+        {
+            labelJobRows( result, job, {}, true );   // nothing parse-worthy, or no indexed language: as the index would say
+            answered[ j ] = 1;
+        }
+    }
+    const std::vector<std::size_t> batch = branchParseBatch( jobs, answered, budget, result.branchLabels );
+    std::vector<BlobText>          blobs;
+    blobs.reserve( batch.size() );
+    for( const std::size_t j : batch )
+    {
+        blobs.push_back( BlobText{ jobs[ j ].path, jobs[ j ].bytes } );
+    }
+    std::vector<BlobDefinitions> parsed;
+    if( !blobs.empty() )
+    {
+        // the tags queries live in a process-global, single-writer cache: a long-lived server serializes every ingest on this lock
+        std::lock_guard<std::mutex> ingestLk( quality::headSnapshotIngestMutex() );
+        parsed = definitionLinesInBlobs( blobs, result.sym );
+    }
+    ENSURES( parsed.size() == batch.size(), "one answer per (blob, path) handed to the parser" );
+    for( std::size_t k = 0; k < batch.size(); ++k )
+    {
+        const std::size_t j = batch[ k ];
+        answered[ j ]       = 1;
+        switch( parsed[ k ].status )
+        {
+            case BlobDefsStatus::Parsed:
+                labelJobRows( result, jobs[ j ], promotedHitLines( jobs[ j ].hitLines, parsed[ k ].lines ), true );
+                ++result.branchLabels.parsed;
+                break;
+            case BlobDefsStatus::NoGrammar:
+            case BlobDefsStatus::Unread:
+                labelJobRows( result, jobs[ j ], {}, true );   // the crawl defines nothing in such a file on HEAD either
+                break;
+            case BlobDefsStatus::Failed:
+                labelJobRows( result, jobs[ j ], {}, false );
+                ++result.branchLabels.failed;
+                break;
+        }
+    }
+    for( std::size_t j = 0; j < jobs.size(); ++j )
+    {
+        if( answered[ j ] == 0 )
+        {
+            labelJobRows( result, jobs[ j ], {}, false );   // left by the guard: confirms nothing
+        }
+    }
 }
 
 // ── the working-tree overlay (2026-10-01 freshness fix) ──────────────────────────────────────────────────
@@ -2392,7 +2804,9 @@ inline bool demoteTestLocalDefs( std::vector<WhereHit>& hits )
 // that page skips it. Nothing is erased: hits= still counts every row and listing=all prints each ref's own row.
 // A ref that holds the same text at TWO lines of one path (a macro twin, a copy in a #if branch) is two groups —
 // the k-th such line of a ref joins the k-th group — so N is exactly the number of refs holding the row, never more.
-// The checkout's rows (HEAD and worktree=) are the parsed answer and never fold; nor does any kind="ref" row.
+// The checkout's rows (HEAD and worktree=) are the parsed answer and never fold; nor does any kind="ref" row. A
+// kind="text" row (a parse-worthy line whose blob was not parsed, see labelBranchRowsByParse) folds the same way,
+// in groups of its own: the same line on N refs is one unconfirmed row with refs="N", never merged into a definition.
 inline void foldSharedBranchDefs( std::vector<WhereHit>& hits )
 {
     struct Group
@@ -2407,12 +2821,13 @@ inline void foldSharedBranchDefs( std::vector<WhereHit>& hits )
     for( std::size_t i = 0; i < hits.size(); ++i )
     {
         WhereHit& h = hits[ i ];
-        if( !h.isDef || h.inCheckout() )
+        if( ( !h.isDef && !h.unconfirmed ) || h.inCheckout() )
         {
             continue;
         }
         ++branchDefs;
-        key.assign( h.path );
+        key.assign( h.unconfirmed ? "text\n" : "def\n" );   // a confirmed and an unconfirmed copy of a line never share a group
+        key += h.path;
         key += '\n';   // a path never holds a newline, and text is one trimmed line: the join is unambiguous
         key += h.text;
         Group& g = groups[ key ];
@@ -2464,8 +2879,9 @@ inline bool whereHitBefore( const WhereHit& a, const WhereHit& b )
     {
         return at < bt;
     }
-    // Production definitions, then test-local ones (test_local="1", see demoteTestLocalDefs), then references.
-    const auto defRank = []( const WhereHit& h ) { return !h.isDef ? 2 : ( h.testLocal ? 1 : 0 ); };
+    // Production definitions, then test-local ones (test_local="1", see demoteTestLocalDefs), then the unconfirmed
+    // parse-worthy rows (kind="text", labelBranchRowsByParse), then references.
+    const auto defRank = []( const WhereHit& h ) { return h.isDef ? ( h.testLocal ? 1 : 0 ) : ( h.unconfirmed ? 2 : 3 ); };
     if( defRank( a ) != defRank( b ) )
     {
         return defRank( a ) < defRank( b );
@@ -2498,7 +2914,7 @@ inline bool whereHitBefore( const WhereHit& a, const WhereHit& b )
 // code. Nothing is dropped and no row's attributes change; a reader who wants the doc evidence still gets
 // every row of it.
 inline WhereResult computeWhereis( const std::string& root, std::string_view sym, std::string_view filter,
-                                   WhereisEvidence evidence = {} )
+                                   WhereisEvidence evidence = {}, const WhereisParseBudget& budget = {} )
 {
     WhereResult result;
     result.sym    = std::string( sym );
@@ -2536,7 +2952,16 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
         // is the serial one by construction. Measured on a 153-ref repo: 7.0 s of serial ls-tree wall → 2.1 s.
         std::vector<std::vector<RawRow>> trees( refs.size() );
         ParallelSweep                    treeSweep;
-        parallelIndexed( refs.size(), [ & ]( std::size_t i ) { trees[ i ] = lsTree( root, refs[ i ].tip ); }, treeSweep );
+        if( std::optional<std::vector<std::vector<RawRow>>> walked = listTreesOfRefs( root, refs ) )
+        {
+            trees = std::move( *walked );   // every distinct tree object read once (listTreesOfRefs); treeSweep never ran, so isDone holds
+        }
+        else
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "lsTree lists the same rows per ref: only slower",
+                      "crossref: the tree-object walk could not read every tree exactly — listing each ref with git ls-tree" );
+            parallelIndexed( refs.size(), [ & ]( std::size_t i ) { trees[ i ] = lsTree( root, refs[ i ].tip ); }, treeSweep );
+        }
         for( std::uint32_t i = 0; i < refs.size(); ++i )
         {
             const std::vector<RawRow>& rows = trees[ i ];
@@ -2558,24 +2983,108 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     result.distinctBlobs = shas.size();
     result.refsScanned   = refs.size() - 1;                                   // HEAD is not one of the swept refs
 
-    StreamBlobStats blobStats;   // T1: the degrade census that decides whether this scan may claim complete=
-    streamBlobs( root, shas, [ & ]( const std::string& sha, std::string_view bytes, bool isText )
-                 {
-        if( !isText || bytes.find( sym ) == std::string_view::npos ) { return;   // cheap reject before the line walk
-}
+    // The scan of every blob holding the name runs on the stream's own worker threads (streamBlobsInSlices): a pure
+    // function of the bytes — its hit rows (stamped with no ref yet), and the bytes themselves only when some row is
+    // parse-worthy. The loop after it walks the blobs in sha order on this thread, so the answer is the serial one.
+    struct BlobScan
+    {
+        bool                  hasSym = false;   // a text blob holding the name's bytes (the cheap reject passed)
+        std::vector<WhereHit> rows;             // its hits; empty ⇔ no whole-word occurrence (hasWholeWord)
+        std::string           bytes;            // kept only for a parse-worthy blob (labelBranchRowsByParse)
+    };
+    std::vector<BlobScan>       scans( shas.size() );
+    StreamBlobStats             blobStats;   // T1: the degrade census that decides whether this scan may claim complete=
+    streamBlobsInSlices( root, shas, kWhereisStreamSlices, [ & ]( std::size_t i, const std::string&, std::string_view bytes, bool isText )
+    {
+        if( !isText || bytes.find( sym ) == std::string_view::npos )
+        {
+            return;   // cheap reject before the line walk
+        }
+        BlobScan& b = scans[ i ];
+        b.hasSym    = true;
+        scanBlobForSymbol( bytes, sym, RefInfo{}, std::string(), b.rows );
+        if( std::any_of( b.rows.begin(), b.rows.end(), []( const WhereHit& h ) { return h.parseWorthy; } ) )
+        {
+            b.bytes.assign( bytes );
+        }
+    }, blobStats );
+    std::vector<BranchParseJob> branchJobs;  // one per distinct (blob, path) behind a non-HEAD row: labelBranchRowsByParse
+    for( std::size_t blobIndex = 0; blobIndex < shas.size(); ++blobIndex )
+    {
+        const BlobScan& scan = scans[ blobIndex ];
+        if( !scan.hasSym )
+        {
+            continue;
+        }
+        const std::string& sha = shas[ blobIndex ];
         const auto it = sites.find( sha );
-        if( it == sites.end() ) { return;
-}
+        if( it == sites.end() )
+        {
+            continue;
+        }
+        const std::vector<WhereHit>& blobRows = scan.rows;
+        const std::size_t firstJobOfBlob = branchJobs.size();
+        struct HeadRows { std::string_view path; std::size_t first, end; };
+        std::vector<HeadRows> headRows;   // HEAD's rows of THIS blob, per path (HEAD is the first site: refs[0])
         for( const Site& s : it->second )
         {
             const bool head   = refs[ s.refIndex ].name == "HEAD";
-            result.headHolds  = result.headHolds || ( head && ( !s.replaced || hasWholeWord( bytes, sym ) ) );
+            result.headHolds  = result.headHolds || ( head && ( !s.replaced || !blobRows.empty() ) );
             result.onHead     = result.onHead || ( head && !s.replaced );
-            if( !s.replaced )
+            if( s.replaced )
             {
-                scanBlobForSymbol( bytes, sym, refs[ s.refIndex ], s.path, result.hits );
+                continue;
             }
-        } }, &blobStats );
+            const std::size_t firstRow = result.hits.size();
+            for( const WhereHit& row : blobRows )
+            {
+                WhereHit& h = result.hits.emplace_back( row );
+                h.ref       = refs[ s.refIndex ].name;
+                h.tip       = refs[ s.refIndex ].tip;
+                h.date      = refs[ s.refIndex ].date;
+                h.path      = s.path;
+            }
+            if( head )
+            {
+                headRows.push_back( HeadRows{ s.path, firstRow, result.hits.size() } );   // the index labels these (relabelHeadHitsFromIndex)
+                continue;
+            }
+            if( firstRow == result.hits.size() )
+            {
+                continue;
+            }
+            auto job = std::find_if( branchJobs.begin() + std::ptrdiff_t( firstJobOfBlob ), branchJobs.end(),
+                                     [ & ]( const BranchParseJob& j ) { return j.path == s.path; } );
+            if( job == branchJobs.end() )
+            {
+                BranchParseJob fresh;
+                fresh.sha  = sha;
+                fresh.path = s.path;
+                for( std::size_t r = firstRow; r < result.hits.size(); ++r )
+                {
+                    fresh.hitLines.push_back( result.hits[ r ].line );
+                    fresh.shaped = fresh.shaped || result.hits[ r ].parseWorthy;   // parseWorthyLine(): worth a parse
+                }
+                const auto headCopy = std::find_if( headRows.begin(), headRows.end(), [ & ]( const HeadRows& h ) { return h.path == s.path; } );
+                if( headCopy != headRows.end() )
+                {
+                    fresh.headFirst = headCopy->first;
+                    fresh.headEnd   = headCopy->end;
+                }
+                if( fresh.shaped )
+                {
+                    fresh.bytes = scan.bytes;   // kept for the parse batch (a mirror of HEAD's labels may yet make it unneeded)
+                }
+                branchJobs.push_back( std::move( fresh ) );
+                job = branchJobs.end() - 1;
+            }
+            for( std::size_t r = firstRow; r < result.hits.size(); ++r )
+            {
+                job->rows.push_back( r );
+            }
+        }
+    }
+    std::vector<BlobScan>().swap( scans );   // the rows are stamped and the parse-worthy bytes copied into their jobs
 
     // T1: exhaustive-over-text iff every sha streamed clean AND no ref's tree listing was suspect. An empty
     // sha list (every scanned tree empty, or none) trivially streamed clean — anyEmptyTree covers that shape.
@@ -2586,6 +3095,8 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     // §A7: HEAD's rows are the INDEX's answer, not the shape test's — before the sort, because "definitions
     // before references" is a sort key and a wrong label re-orders the first screen.
     result.headLabelsFromIndex = relabelHeadHitsFromIndex( result.hits, evidence.indexDefs );
+    // …and the other refs' rows are a PARSER's answer too, after HEAD's: a ref holding HEAD's own blob takes HEAD's labels.
+    labelBranchRowsByParse( result, branchJobs, budget );
     demoteTestLocalDefs( result.hits );
 
     // The checkout first, then refs by name; within a group, SOURCE before test before docs (§P11.5, see this
@@ -2998,7 +3509,8 @@ inline std::string whereisDottedRetryOf( const IngestResult& ing, std::string_vi
 // SHARED DEFINITIONS clause of the legend, spliced by writeWhereisListedPage beside the tail below.
 inline constexpr char kWhereisSharedDefsLegend[] =
     "SHARED DEFINITIONS: refs=\"N\" on a kind=\"def\" row outside the checkout means N scanned refs hold this same "
-    "definition line (the same path and the same line text); the row is printed once, for the first of those "
+    "definition line (the same path and the same line text; on a kind=\"text\" row, the same unparsed line, never merged "
+    "with a confirmed one); the row is printed once, for the first of those "
     "refs by name, whose ref=, tip=, date= and l= it carries (another of the N may hold the line at a different "
     "line number). It appears only under listing=\"defs\" and only when N is at least 2: a definition one ref "
     "alone holds carries no refs=. hits= still counts every copy, and listing=all prints each ref's own row. ";
@@ -3021,6 +3533,17 @@ inline void writeWhereisLegendTail( std::FILE* out, const WhereResult& res )
                            "test-file name patterns), on any row. It appears only when the same answer also "
                            "holds a production definition, and those rows are ordered after the production definitions and before "
                            "the references of their tier. Nothing is dropped. " );
+    }
+    // The unparsed element's vocabulary (writeWhereisUnparsed), only on an answer that carries the element. No literal
+    // double dash inside this XML comment: the flag is spelled by name, the next= attribute carries its real spelling.
+    if( res.branchLabels.leftByGuard + res.branchLabels.failed > 0 )
+    {
+        rw::emitTo( out, "UNPARSED: the unparsed element counts the blobs of other refs that hold a line worth parsing but that "
+                           "no parse read: blobs= of them, either past the runaway guard on the parse batch ({} blobs or {} MB, filled "
+                           "most rows first, then by path and blob) or a parse that could not finish; rows= is the kind=\"text\" rows they "
+                           "gave. Those rows are neither a confirmed definition nor a confirmed reference, and the blobs' other rows read "
+                           "kind=\"ref\". Its next= rides when the guard left some: the same question with the detail flag at 1, which "
+                           "lifts the guard. ", kWhereisParseMaxBlobs, kWhereisParseMaxBytes >> 20 );
     }
     // The overlay's own vocabulary, only on an answer that carries it — a clean checkout pays no bytes for it.
     if( res.worktree != WorktreeOverlay::Clean )
@@ -3121,6 +3644,13 @@ struct ListedHits
     std::size_t              defsFolded = 0;   // def rows of other refs a listed row's refs= stands for (folded="N" on the root)
 };
 
+// kind= of a row: "def" (a parser's definition), "text" (a parse-worthy line on another ref no parse confirmed,
+// labelBranchRowsByParse) or "ref".
+inline const char* whereisKindOf( const WhereHit& h ) noexcept
+{
+    return h.isDef ? "def" : ( h.unconfirmed ? "text" : "ref" );
+}
+
 // The ` refs="N"` a row carries, or "": it rides ONLY the definitions page (foldSharedBranchDefs), where the row stands
 // for N refs' copies of the same definition line. listing=all prints each copy as its own row and never carries it; a
 // lone copy carries none. The legend's SHARED DEFINITIONS clause rides exactly the pages where this is non-empty.
@@ -3132,7 +3662,10 @@ inline std::string whereisSharedAttr( const ListedHits& listed, const WhereHit& 
 inline ListedHits listedHits( const WhereResult& res, WhereisListing listing )
 {
     EXPECTS( listing != WhereisListing::ShorterOfDefsAll, "the default is resolved to Defs or All (whereisServedListing) before the rows are picked" );
-    const std::size_t defs = std::size_t( std::count_if( res.hits.begin(), res.hits.end(), []( const WhereHit& h ) { return h.isDef; } ) );
+    // The definitions page lists the kind="def" rows AND the kind="text" ones (parse-worthy lines on another ref
+    // that no parse confirmed or refuted, labelBranchRowsByParse): a possible definition is printed, labelled, never
+    // counted away among the references. listing=refs and <refs count=> are the kind="ref" rows exactly.
+    const std::size_t defs = std::size_t( std::count_if( res.hits.begin(), res.hits.end(), []( const WhereHit& h ) { return h.isDef || h.unconfirmed; } ) );
     const std::size_t refs = res.hits.size() - defs;
     ListedHits out;
     // Defs with nothing to elide (no ref row) IS the whole list; Defs with no def row would list nothing but a count,
@@ -3151,7 +3684,7 @@ inline ListedHits listedHits( const WhereResult& res, WhereisListing listing )
     for( std::size_t i = 0; i < res.hits.size(); ++i )
     {
         const WhereHit& h = res.hits[ i ];
-        if( h.isDef != wantDefs ) { continue; }
+        if( ( h.isDef || h.unconfirmed ) != wantDefs ) { continue; }
         if( wantDefs && h.foldedDef ) { ++folded; continue; }
         out.rows.push_back( i );
     }
@@ -3250,8 +3783,12 @@ inline void writeWhereisRoot( std::FILE* out, const WhereResult& res, const Wher
     // folded= (foldSharedBranchDefs): the def rows of other refs that a listed row's refs= stands for, so the root's
     // arithmetic stays checkable in one place: shown + more + folded + refs count = hits. Only when a row folded,
     // so an answer with no shared branch definition is byte-identical to before.
+    // ref_labels="parsed": the answer holds rows of OTHER refs, whose kind= a parser gave (labelBranchRowsByParse). Only
+    // then, so an answer with no branch row — a repo with no other ref — is byte-identical to before.
+    const bool        anyBranchRow = std::any_of( res.hits.begin(), res.hits.end(), []( const WhereHit& h ) { return !h.inCheckout(); } );
     const std::string listingAttr  = ( listed.attr.empty() ? std::string() : ( " listing=\"" + std::string( listed.attr ) + "\"" ) )
-                                   + ( listed.defsFolded > 0 ? ( " folded=\"" + std::to_string( listed.defsFolded ) + "\"" ) : std::string() );
+                                   + ( listed.defsFolded > 0 ? ( " folded=\"" + std::to_string( listed.defsFolded ) + "\"" ) : std::string() )
+                                   + ( anyBranchRow ? std::string( " ref_labels=\"parsed\"" ) : std::string() );
     const std::string headDateAttr = anyHoist ? ( " head_date=\"" + ex( headDate ) + "\"" ) : std::string();
     rw::emitTo( out, "<whereis sym=\"{}\" on-head=\"{}\" refs_scanned=\"{}\" blobs=\"{}\" hits=\"{}\" head_labels=\"{}\"{}{}{}{} at=\"{:.9}{}\"{}{}>",
                   ex( res.sym ).c_str(), res.onHead ? 1 : 0, res.refsScanned, res.distinctBlobs, res.hits.size(),
@@ -3263,6 +3800,30 @@ inline void writeWhereisRoot( std::FILE* out, const WhereResult& res, const Wher
                   kWorktreeAttr[ std::size_t( res.worktree ) ],
                   completeClaim ? " complete=\"1\"" : "" );
 
+}
+
+// <unparsed blobs= rows= next=>: the other refs' (blob, path) pairs that held a parse-worthy row and confirm
+// nothing — the runaway guard left them (WhereisParseBudget) or the parser could not finish — and the rows of theirs
+// that read kind="text". next= rides only when the guard left some: --detail=1 lifts it. Absent when every
+// parse-worthy blob was parsed (or mirrored HEAD's), so an answer the guard never touched is byte-identical.
+inline void writeWhereisUnparsed( std::FILE* out, const WhereResult& res )
+{
+    const BranchLabelCensus& c = res.branchLabels;
+    if( c.leftByGuard + c.failed == 0 )
+    {
+        return;
+    }
+    std::string next;
+    if( c.leftByGuard > 0 )
+    {
+        std::string call = nextFlag( "--whereis=", res.sym );
+        if( !res.filter.empty() )
+        {
+            call += " " + nextFlag( "--stray-content=", res.filter );   // the ref filter that made this page
+        }
+        next = nextAttrXml( call + " --detail=1" );
+    }
+    rw::emitTo( out, "<unparsed blobs=\"{}\" rows=\"{}\"{}/>", c.leftByGuard + c.failed, c.textRows, next.c_str() );
 }
 
 // The rows of the page, its <more hits=> remainder and the <refs count= next=> element (writeWhereisPage).
@@ -3284,12 +3845,12 @@ inline void writeWhereisRows( std::FILE* out, const WhereResult& res, const List
         {
             rw::emitTo( out, "<hit ref=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{} t=\"{}\"/>",
                           ex( h.ref ).c_str(), ex( h.path ).c_str(),
-                          h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
+                          h.line, whereisKindOf( h ), h.testLocal ? " test_local=\"1\"" : "", ex( h.text ).c_str() );
             continue;
         }
         rw::emitTo( out, "<hit ref=\"{}\" tip=\"{:.9}\" date=\"{}\" p=\"{}\" l=\"{}\" kind=\"{}\"{}{} t=\"{}\"/>",
                       ex( h.ref ).c_str(), h.tip.c_str(), ex( h.date ).c_str(), ex( h.path ).c_str(),
-                      h.line, h.isDef ? "def" : "ref", h.testLocal ? " test_local=\"1\"" : "", whereisSharedAttr( listed, h ).c_str(), ex( h.text ).c_str() );
+                      h.line, whereisKindOf( h ), h.testLocal ? " test_local=\"1\"" : "", whereisSharedAttr( listed, h ).c_str(), ex( h.text ).c_str() );
     }
     ASSUME( shownCount == hitPage.end - hitPage.begin );
     // <more hits="N"/> = the LISTED rows AFTER this page, so shown + more == the listed rows from this page's offset
@@ -3335,14 +3896,18 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
 
     rw::emitRaw( out, "<!-- ripwire whereis: every LOCAL ref whose TREE contains this symbol, HEAD first, and within a ref "
                        "SOURCE files before test files before docs, then definitions before references, then path and line. "
-                       "The doc demotion is ORDER ONLY: a doc line that quotes a signature still reads as a definition to "
-                       "the heuristic below and still says kind=\"def\", it is simply printed after the code. kind= is answered "
-                       "by TWO different mechanisms, and head_labels= says which one answered for HEAD: with head_labels=\"index\" "
-                       "a HEAD row is kind=\"def\" iff the PARSED index puts a definition there (one row per index def site), "
-                       "while every NON-HEAD row — and every row when head_labels=\"lexical\" (no index was supplied, the index "
-                       "knows no def of this name, or the working tree has drifted from HEAD) — is a LEXICAL shape heuristic over "
-                       "raw blob text that was never ingested: it reads a quoted signature in a doc as a definition and can miss "
-                       "an unusual declarator. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a "
+                       "The doc demotion is ORDER ONLY: it changes no label, it prints doc rows after the code. kind= is a PARSER's "
+                       "answer: with head_labels=\"index\" a HEAD row is kind=\"def\" iff the PARSED index puts a definition there "
+                       "(one row per index def site); a row of ANOTHER ref (ref_labels=\"parsed\") is kind=\"def\" iff the index's own "
+                       "extraction, run over that ref's blob, captures a definition of the name there (once per distinct blob and path; "
+                       "a ref holding HEAD's own blob of the path takes HEAD's labels). Only a blob holding a line a loose LEXICAL test calls "
+                       "worth parsing is parsed: every row of a blob without one is kind=\"ref\", so a definition that test misses (a "
+                       "signature wrapped before its parameter list closes, a name alone under its return type), alone in its blob, is "
+                       "a counted ref. kind=\"text\" is a line worth parsing whose blob no parse read (the unparsed "
+                       "element counts them and says why): not a confirmed definition, not a confirmed reference. With "
+                       "head_labels=\"lexical\" (no index was supplied, the index knows no def of this name, or the working tree has "
+                       "drifted from HEAD) HEAD's rows fall back to a stricter lexical shape test, which reads a quoted signature in a doc as a "
+                       "definition and can miss an unusual declarator. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a "
                        "count of refs that matched — hits= and the rows are the matched set. on-head=\"0\" alongside ref hits is the case this verb exists "
                        "for: content that lives only on a branch. A TREE scan can only find content some ref still carries, "
                        "so hits=\"0\" on its own does not distinguish a name this repo never had from one it deleted; run "
@@ -3381,7 +3946,7 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "the other end (what this page did not print). Page with limit= and offset=; the more element is "
                        "absent exactly when this page reached the end of the hit list. "
                        // lean-answers lane — the default LISTING and the tip/date hoist, defined where they appear.
-                       "LISTING: by default only the kind=\"def\" rows are listed (listing=\"defs\" on the root) when that page lists "
+                       "LISTING: by default only the kind=\"def\" rows (and any kind=\"text\" row) are listed (listing=\"defs\" on the root) when that page lists "
                        "MORE definitions than the listing=all page lists under the same row cap (a capped all page can list fewer: "
                        "references can fill the cap before the branch definitions arrive), whatever its bytes, or, when both pages "
                        "list the same definitions, is STRICTLY shorter in bytes than the all page (both compared without limit= or "
@@ -3394,7 +3959,7 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "would neither list more definitions nor be shorter, or the whole list was asked for (the whereis-listing flag, value all; its value defs "
                        "lists the definitions whatever the size). Under listing=\"defs\" a definition line that several refs hold "
                        "(the same path and line text, outside the checkout) is one row with refs=\"N\", defined below when one rides, "
-                       "and folded= on the root counts the rows so folded: shown plus more plus folded plus the refs count equals hits. "
+                       "and folded= on the root counts the rows so folded: on the first page, shown plus more plus folded plus the refs count equals hits. "
                        "kind=\"def\" on a HEAD row is the parser's label, not a proof: a "
                        "definition the parser does not model (a Ruby define_method, a setattr, a name bound by assignment such as an "
                        "alias in a class body) is a kind=\"ref\" row, so under listing=\"defs\" it is among the counted refs. "
@@ -3405,7 +3970,7 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        // T1 — the completeness claim, the mirror of the truncation vocabulary, defined where it appears.
                        "COMPLETENESS: complete= on the root (value 1) means this listing is EXHAUSTIVE and a consumer need not "
                        "re-derive it: every occurrence of the symbol in every TEXT blob of every scanned ref's full tree is printed "
-                       "above, or under listing=\"defs\" every such kind=\"def\" row is printed and every kind=\"ref\" row counted "
+                       "above, or under listing=\"defs\" every such kind=\"def\" and kind=\"text\" row is printed and every kind=\"ref\" row counted "
                        "by the refs element (under listing=\"refs\", every kind=\"ref\" row) — nothing was capped or paged out, and "
                        "no blob was oversized (over the 2 MB blob ceiling), missing or cut short by the stream. The denominator is refs_scanned= plus HEAD, under SCOPE above (local heads only), "
                        "so with complete= present a ref absent from the rows genuinely lacks the symbol in its committed tree. "
@@ -3434,6 +3999,7 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
     // text hit), which is a claim strong enough to override the line-removal oracle outright. So the fate
     // row is printed unless the index itself already proved the symbol is defined on HEAD.
     writeWhereisFate( out, res, ex );
+    writeWhereisUnparsed( out, res );
 
     writeWhereisRows( out, res, listed, hitPage, headDate, ex );
     rw::emitRaw( out, "</whereis>" );

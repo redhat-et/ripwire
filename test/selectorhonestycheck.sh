@@ -75,9 +75,12 @@ void dispatch( int n )
 EOF
 g add -A; g commit -qm "core"
 
-# a branch carrying a DOC that QUOTES the signature — the ref-blob side, where the lexical heuristic is the
-# only thing there is (those blobs were never ingested) and its documented residual still applies.
+# a branch carrying a DOC that QUOTES the signature — the ref-blob side. Fix round 2 of lane whereis-defs-fix: a branch
+# row is now a PARSER's label too (crossref.h labelBranchRowsByParse), so the doc's quoted signature reads kind="ref" there
+# as it does on HEAD (the markdown holds no section of that name), and alt.cpp — a definition whose only parse-worthy line
+# is noexcept-terminated, the house style — must still earn its blob a parse and read kind="def".
 g checkout -q -b feat-doc
+printf 'int parseArgs( long argc ) noexcept\n{\n    return 0;\n}\n' > "$R/alt.cpp"
 cat > "$R/DOC.md" <<'EOF'
 # Design
 
@@ -123,10 +126,13 @@ grep -q 'head_labels="index"' "$W" \
     && ok '§A7: head_labels="index" — HEAD rows are the parsed answer, and say so' \
     || { no '§A7: head_labels="index" missing'; grep -o '<whereis[^>]*>' "$W"; }
 
-# ── §A7(ii) the ref-blob side keeps its LEXICAL heuristic — and now reads the same shape correctly ──────
-grep -q '^feat-doc def DOC\.md:' "$TMP/rows" \
-    && ok '§A7: a branch DOC quoting the signature still reads kind="def" (the lexical residual is intact, and now handles noexcept)' \
-    || { no '§A7: the feat-doc DOC.md row is not a def row (the blob-side heuristic still misreads the house style)'; cat "$TMP/rows"; }
+# ── §A7(ii) the ref-blob side reads the house style correctly ──────────────────────────────────────────
+# Fix round 2 (rule 4, by design): this arm asserted the lexical residual — "a branch DOC quoting the signature still reads
+# kind="def"" — and that residual is what the parser removed. Its two halves now: the doc's quoted signature is a ref on the
+# branch (as on HEAD), and the noexcept-terminated definition on the branch is a def (the chooser keeps the house style).
+{ grep -q '^feat-doc ref DOC\.md:' "$TMP/rows" && ! grep -q '^feat-doc def DOC\.md:' "$TMP/rows" && grep -q '^feat-doc def alt\.cpp:1$' "$TMP/rows"; } \
+    && ok '§A7: on the branch, the DOC quoting the signature reads kind="ref" (as on HEAD) and the noexcept-terminated alt.cpp definition reads kind="def"' \
+    || { no '§A7: the branch DOC.md row is still a def, or the noexcept-terminated branch definition lost its label'; cat "$TMP/rows"; }
 
 # ── §A7(iii) the scan denominator names its noun ────────────────────────────────────────────────────────
 { grep -q 'refs_scanned="' "$W" && ! grep -q '<whereis[^>]* refs="' "$W"; } \
@@ -134,16 +140,16 @@ grep -q '^feat-doc def DOC\.md:' "$TMP/rows" \
     || { no '§A7: whereis root still spells the scan denominator refs='; grep -o '<whereis[^>]*>' "$W"; }
 
 # determinism + well-formedness of the changed verb
-# TWIN on the default listing: the same def rows (HEAD's exactly the index def site, the branch doc's lexical def), no
+# TWIN on the default listing: the same def rows (HEAD's exactly the index def site, the branch's alt.cpp definition), no
 # ref row printed, and the ref rows of the whole list — core.cpp:11 among them — counted exactly by <refs count=>.
 WD="$TMP/wd.xml"
 "$BIN" "$R" --whereis=parseArgs --limit=200 >"$WD" 2>/dev/null
 tr '<' '\n' <"$WD" | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)".*/\1 \4 \2:\3/p' >"$TMP/rowsd"
 NREFALL="$( grep -c ' ref ' "$TMP/rows" )"
 { [ "$( grep ' def ' "$TMP/rowsd" )" = "$( grep ' def ' "$TMP/rows" )" ] && ! grep -q ' ref ' "$TMP/rowsd" \
-  && [ "$( sed -n 's/^HEAD //p' "$TMP/rowsd" | grep '^def ' )" = "def core.cpp:4" ] && grep -q '^feat-doc def DOC\.md:' "$TMP/rowsd" \
+  && [ "$( sed -n 's/^HEAD //p' "$TMP/rowsd" | grep '^def ' )" = "def core.cpp:4" ] && grep -q '^feat-doc def alt\.cpp:1$' "$TMP/rowsd" \
   && grep -q '^HEAD ref core\.cpp:11$' "$TMP/rows" && grep -q "<refs count=\"$NREFALL\"" "$WD" && grep -q 'head_labels="index"' "$WD"; } \
-    && ok "§A7 (default listing twin): the same def rows (HEAD exactly core.cpp:4, the branch doc's lexical def); the $NREFALL ref rows, core.cpp:11 among them, counted" \
+    && ok "§A7 (default listing twin): the same def rows (HEAD exactly core.cpp:4, the branch's alt.cpp:1); the $NREFALL ref rows, core.cpp:11 and the branch doc among them, counted" \
     || { no '§A7 (default listing twin): the default listing changed a label or miscounted the refs'; cat "$TMP/rowsd"; grep -o '<refs [^>]*>' "$WD"; }
 
 "$BIN" "$R" --whereis=parseArgs --limit=200 --whereis-listing=all >"$TMP/w2.xml" 2>/dev/null

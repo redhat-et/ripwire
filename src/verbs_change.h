@@ -1605,8 +1605,10 @@ std::optional<int> runCrossRef( const MainDispatch& d )
         // §A7: HEAD's rows are documented as the PARSED answer, so hand the tree scan what the index knows.
         const std::vector<crossref::IndexDefSite> indexDefs = crossref::whereisIndexDefSites( d.ing, whereisSel, root );
 
+        // --detail lifts both caps of this verb: the row cap below and the runaway guard on the other refs' blob parse.
+        const crossref::WhereisParseBudget parseBudget = cfg.detail ? crossref::WhereisParseBudget{ SIZE_MAX, SIZE_MAX } : crossref::WhereisParseBudget{};
         crossref::WhereResult result = crossref::computeWhereis( root, whereisSel, cfg.strayFilter,
-                                                                 crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs } );
+                                                                 crossref::WhereisEvidence{ cfg.withHistory ? &history : nullptr, indexDefs }, parseBudget );
         if( !result.ok )
         {
             rw::emitTo( stderr, "ripwire: --whereis: {} is not a git repository (or has no HEAD commit) — no refs to search\n", root.c_str() );

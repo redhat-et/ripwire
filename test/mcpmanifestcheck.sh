@@ -310,6 +310,9 @@ tools = json.loads( line )[ "result" ][ "tools" ]
 # 46,732: the quality_delta description's twelfth kind, +61 B) — and the merged tree carries both: 46,869 + 61 = 46,930,
 # every byte attributed (whereis schema 851 B and quality_delta's description as their lanes measured them; no other
 # tool moved; knob-honesty and the path-gap fix touch no tool description or schema). Headroom after this line: 20 B.
+# RE-MEASURED 2026-10-10 (lane whereis-defs-fix fix round 2), CEILING UNMOVED: 46,930 -> 46,925 B. whereis's description says
+# what labels another ref's row now (a parser, not a lexical heuristic) in the same 701 characters — (1c) holds — and the
+# sentence it replaced carried an em dash, six bytes as JSON. Every other tool unchanged. Headroom after this line: 25 B.
 CEILING = 46950
 manifest = len( json.dumps( { "tools": tools }, separators = ( ",", ":" ) ) )
 descBytes   = sum( len( t[ "description" ] ) for t in tools )

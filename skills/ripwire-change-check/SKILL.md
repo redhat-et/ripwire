@@ -146,8 +146,9 @@ emits a flat `<cand r= s= n= id= k= p= l=>` top-K — identity + score + signatu
 9c. **"Where does this content live?"** — `ripwire <dir> --whereis=SYM --legend=compact`. Which ref's tree defines or mentions
     a symbol, HEAD first; `on-head="0"` alongside branch hits is content that exists ONLY on a branch. Each
     distinct blob is read once (git is content-addressed), so 30 branches cost about one tree. `kind="def"`
-    on a branch row is a lexical heuristic — branch blobs are raw text, never ingested; for HEAD's parsed
-    answer use `--expand`/`--callers`. By default only the `kind="def"` rows are listed and the mentions are
+    is a parser's answer on every row — HEAD's from the index, a branch row's from the same extraction over that
+    branch's blob (only blobs holding a line a loose lexical test calls worth parsing are parsed; `kind="text"` is
+    such a line no parse read, never a definition). By default only the `kind="def"` rows are listed and the mentions are
     counted in one `<refs count=N next=…>` row (its `next=` lists them) when that page lists MORE definitions than
     the all page does under the same row cap (a capped all page can list fewer), or the same ones in strictly fewer
     bytes; otherwise, and with `--whereis-listing=all`, every row is listed.

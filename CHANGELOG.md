@@ -15,31 +15,40 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
-### Changed — `--whereis` labels a branch row `kind="def"` only for a definition's shape, lists a line several refs share once, and scans refs in parallel
+### Changed — `--whereis` labels another ref's row by parsing its blob, lists a line several refs share once, and reads refs from tree objects
 
-Measured on this repository (153 local refs), `--whereis=escapeXml`, warm, base and this build run turn about on the same
-loaded machine: the definitions page went from 60 rows (`total="2113"`, 59 of them call sites such as
-`if( !task.empty() ) { out += escapeXml( task, esc ); }` labelled `kind="def"`) to 2 rows, both the declaration; wall
-20.9–21.1 s → 10.1–10.8 s. Two repositories with no local refs answer byte for byte as before.
+A row on another ref used to take `kind="def"` from a lexical reading of its one line, and any such reading errs both ways:
+a looser one called call sites definitions (`if( !task.empty() ) { out += escapeXml( task, esc ); }`, `go f(a)`, `@f(1)`),
+a stricter one lost real definitions (`#define NAME(`, `decltype(auto) NAME(`, `@Test(…) public void NAME()`,
+`#[derive(Debug)] struct NAME`). Measured on this repository (162 local refs), `--whereis=escapeXml`: the default page
+went from 60 rows of `total="2197"` (54 of them call sites) to 2 rows, both the declaration.
 
-- **The lexical shape test reads the whole line.** On a non-HEAD ref (and on HEAD when `head_labels="lexical"`) a line is
-  `kind="def"` only when the text before the name is a declarator prefix — no operator, brace, paren, quote or statement
-  keyword (`return`, `if`, `await`, `match`…) — and what follows the parameter list is a definition's tail (`{`, an init
-  list, `->`, a qualifier, the end of the line), not a call's (`;`, `,`, `)`, `.`, `do`…). A declaration marker (`def `,
-  `fn `, `impl `…) counts only when it heads the declaration, never from inside a string literal or a comment, and
-  `using ns::name;` is a reference. What stays a floor: a bare `name( args )` alone on its line is a wrapped signature
-  in C and a semicolon-free call in JS or Python, and one line cannot tell them apart. Language-neutral (one heuristic
-  serves every ref blob); probed on C++, Python, JS, Ruby and shell shapes.
-- **A definition line several refs hold is one row.** Under `listing="defs"` a `kind="def"` row outside the checkout whose
-  path and line text other refs hold too is printed once, for the first of those refs by name, with `refs="N"`; the root's
-  `folded=` counts the rows it stands for (`shown + more + folded + refs count = hits`). `hits=` still counts every copy and
-  `--whereis-listing=all` prints each ref's own row. A ref holding the same text at two lines of one path is two rows.
-- **Faster, with no ref cut.** The per-ref `git ls-tree -r` runs through the stray-content sweep's pool (7.0 s → 2.1 s
-  serial vs parallel on 153 refs), and the blob walk jumps from occurrence to occurrence instead of reading every line.
-  `complete=` keeps its meaning: a tree a worker never listed forfeits it like an empty one.
+- **Another ref's `kind="def"` comes from a parser.** A ref holding HEAD's own blob of a path takes HEAD's index labels,
+  line for line. Any other blob is parsed once per distinct blob and path by the index's own extraction — the same
+  language rule, tags query and symbol model — and a definition it captures for the name labels the nearest row the way
+  HEAD's index labels HEAD's. Only a blob holding a line a loose lexical test calls worth parsing is parsed; a blob
+  without one reads `kind="ref"`. The root says `ref_labels="parsed"` whenever another ref's row is in the answer.
+  Arms: one well-formed file per language family (C, C++, ObjC, Python, TypeScript, JavaScript, Java, Ruby, Go, Rust,
+  Swift, C#, Bash, Markdown) whose every marked line reads as its marker says and as HEAD's index reads the same bytes;
+  the twelve definition shapes the stricter reading lost; a branch-only `#define` and annotated Java method.
+- **A runaway guard on that parse, disclosed.** At most 256 blobs or 64 MB per answer, most rows first. A blob the guard
+  leaves, or one the parser cannot finish, confirms nothing: its parse-worthy lines read `kind="text"` (listed beside the
+  definitions, never `kind="def"`) and an `<unparsed blobs= rows= next=>` element counts them; `--detail=1` lifts the guard.
+- **A definition line several refs hold is one row.** Under `listing="defs"` a `kind="def"` (or `kind="text"`) row outside
+  the checkout whose path and line text other refs hold too is printed once, for the first of those refs by name, with
+  `refs="N"`; the root's `folded=` counts the rows it stands for (on the first page, `shown + more + folded + refs count =
+  hits`). `hits=` still counts every copy and `--whereis-listing=all` prints each ref's own row.
+- **Faster.** Every ref's tree is read from git's content-addressed tree objects, each distinct tree once and a level at a
+  time through one `git cat-file --batch`, instead of one `git ls-tree -r` process per ref (the same rows in ls-tree's
+  order and spelling — an arm compares quoted and unquoted names with ls-tree itself); a blob several refs share is
+  scanned once.
 
-Gates: `test/crossrefcheck.sh` (5b: the shapes and the fold, red on the previous build), `test/pagingsweepcheck.sh` (its
-fixture's branches now define the symbol differently each, so the definitions page still pages).
+What stays a floor: a definition the loose lexical test misses (a signature wrapped before its parameter list closes, a
+name alone on the line under its return type) is a counted ref when nothing else in its blob earns the blob a parse.
+MCP `whereis` takes no `detail` argument, so there the guard's `next=` names the CLI flag. Its description keeps its 701
+characters, the sentence calling a branch row's label lexical replaced by the parser one, and the
+`tools/list` manifest grows 46,930 → 46,925 B, a 5 B shrink (the dropped em dash is six bytes of JSON). Gates: `test/crossrefcheck.sh` (5b–5e),
+`test/selectorhonestycheck.sh` (§A7), `test/pagingsweepcheck.sh`.
 
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 

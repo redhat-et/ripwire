@@ -350,9 +350,10 @@ page_verb "graph-query"      '<s t='         --graph-query='name("main")'
 PAGE_CORPUS="$PAGEFIX" page_verb "mentions"      '<doc p='    --mentions=renderWidget
 PAGE_CORPUS="$PAGEFIX" page_verb "stray-content" '<ref name=' --stray-content
 # --whereis runs there too, for a different reason: not rows ($ROOT has hits to spare) but its REF input, which on
-# $ROOT every session on the machine writes — see mkPagingFixture(). renderWidget keeps every branch the arm took
-# over rankGraph on $ROOT: its 90 hits (10 on HEAD, 10 on each of the 8 strays) exceed the 60-hit default cap, so
-# (E) still checks the CUT posture (M2), and the rows (C) and (G) page through are still HEAD's index-labelled rows.
+# $ROOT every session on the machine writes — see mkPagingFixture(). renderWidget's 98 hits sit on HEAD and on the
+# 8 strays, each stray defining its own renderWidget line (so the definitions page does not fold them into one row);
+# the default page is the definitions page, which is NOT cut on this fixture, so (E) reads the uncut posture here and
+# the CUT posture of --whereis stays pinned by crossrefcheck (L15 and §B8.2). (C) and (G) page through the listed rows.
 #
 # The isolation is asserted, not assumed. GUARD: (G)'s exact page must scan the fixture's 8 stray branches and
 # nothing else (refs_scanned= does not count HEAD); pointed back at a shared checkout it reads that clone's branch

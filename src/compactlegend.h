@@ -938,7 +938,11 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // whereis: src/crossref.h writeWhereisPage (root emit, trailing <more hits=>)
     { "hits", "hits=N: occurrences in HEAD plus every scanned local ref's full tree (the total rows)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "on-head", "on-head=1|0: whether HEAD's tree holds it; 0 beside hits = it lives only on a branch", false, "whereis", MapHeaderRead::No, {}, "whereis" },
-    { "head_labels", "head_labels=index: HEAD kind= from the parsed index; lexical: text heuristic (non-HEAD rows always are)", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "head_labels", "head_labels=index: HEAD kind= from the parsed index; lexical: text heuristic", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    // fix round 2 of the whereis-defs lane (crossref.h labelBranchRowsByParse): present only when a row of another ref is.
+    { "ref_labels", "ref_labels=parsed: another ref's kind= from the index's own tags parse of its blob (one per blob and path; HEAD's own blob takes HEAD's labels); a blob with no line a loose lexical test calls worth parsing is not parsed and its rows read ref; kind=text: such a line no parse read, never a def", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "blobs", "unparsed blobs=N: other refs' blobs holding a line worth parsing that no parse read (past the runaway guard, or the parser could not finish); those lines read kind=text; next= lifts the guard", true, "unparsed", MapHeaderRead::No, {}, "whereis" },
+    { "rows", "unparsed rows=N: the kind=text rows those blobs gave", true, "unparsed", MapHeaderRead::No, {}, "whereis" },
     // 2026-10-01 (selectorrefuse.h writeNotFoundAnswer): the not-found ANSWER the five answering verbs print beside exit 1.
     { "found", "found=0: no indexed definition matched the selector, nothing listed or counted (zero = none found, not none exists); exit stays 1", false, "callers", MapHeaderRead::No, {}, "callers" },
     { "near", "near=: the indexed name to retry with", false, "callers", MapHeaderRead::No, {}, "callers" },
@@ -958,13 +962,13 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "missing", "missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first", false, "path", MapHeaderRead::No, {}, "path" },
     // 2026-10-01 (crossref.h demoteTestLocalDefs): present only when an answer holds production AND test-local defs.
     { "test_local", "hit test_local=1: a definition in a test scope or under a test/bench/fixture path, ordered after the production definitions (only when both exist; nothing dropped)", true, "hit", MapHeaderRead::No, {}, "whereis" },
-    { "refs", "hit refs=N: N scanned refs hold this same definition line (path + text); printed once for the first by name, whose ref= tip= date= l= it carries; defs page only, absent = one ref; hits= counts every copy, listing=all prints each", true, "hit", MapHeaderRead::No, {}, "whereis" },
-    { "folded", "folded=N: def rows of other refs a listed row's refs= stands for; shown + more + folded + refs count = hits", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "refs", "hit refs=N: N scanned refs hold this same definition (or kind=text) line (path + text); printed once for the first by name, whose ref= tip= date= l= it carries; defs page only, absent = one ref; hits= counts every copy, listing=all prints each", true, "hit", MapHeaderRead::No, {}, "whereis" },
+    { "folded", "folded=N: def (or text) rows of other refs a listed row's refs= stands for; shown + more + folded + refs count = hits on the first page", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // 2026-10-01 freshness fix (crossref.h scanWorktree): present only on a checkout that differs from HEAD.
     { "worktree", "worktree=read|partial|unlisted: the checkout differs from HEAD (at= +dirty); each changed path is read from disk as ref=\"worktree\" rows replacing HEAD's, and on-head=/hits=/head_labels= count them; on-head= then reads the checkout, not HEAD's commit; partial = some changed path unreadable or a directory (nested repo, submodule), its HEAD rows may be stale; unlisted = git could not list the changes; either withholds complete=", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "hits", "more hits=N: rows after this page; page on with offset=next_offset", true, "more", MapHeaderRead::No, {}, "whereis" },
     // lean-answers lane (crossref.h WhereisListing / the tip-date hoist): each rides only the answer that carries it.
-    { "listing", "listing=defs|refs: only those kind= rows listed; under defs <refs count=N next=> counts the kind=ref rows and next= lists them; the window counts listed rows; default: defs if it lists more defs than all, else if shorter; a def the parser does not model (define_method, setattr, assignment) is a counted ref", false, "whereis", MapHeaderRead::No, {}, "whereis" },
+    { "listing", "listing=defs|refs: only those kind= rows listed (defs: def and text); under defs <refs count=N next=> counts the kind=ref rows and next= lists them; the window counts listed rows; default: defs if it lists more defs than all, else if shorter; a def the parser does not model (define_method, setattr, assignment) is a counted ref", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     { "head_date", "head_date=: a hit without tip= date= has tip= at=, date= this", false, "whereis", MapHeaderRead::No, {}, "whereis" },
     // the GREY ZONE of the same sweep: attributes the compact prose named in passing ("in/out, cx/ccx", "<g> groups") but never
     // DEFINED as name= — legendcoveragecheck's default rows hold the definitional predicate, so each gets its reading here.

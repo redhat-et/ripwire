@@ -238,7 +238,15 @@ srcRow="$(  grep -n 'engine\.'       "$TMP/w2rows" | tail -1 | cut -d: -f1 )"
 # branch's own row. The arm now asserts the fold's arithmetic instead of row-for-row equality: every def row of the
 # default is a def row of the whole list, in the same order, and the refs= counts (1 when absent) add up to the
 # whole list's def rows — nothing is dropped, it is counted.
-"$BIN" "$R" --whereis=computeBudget >"$TMP/w2d" 2>/dev/null
+#
+# FIX ROUND 2 (rule 4, by design): a branch row is now a PARSER's label, and a branch holding HEAD's own engine.h blob
+# takes HEAD's index labels: the index lists the prototype `int computeBudget( int frames );` (engine.h:2) as a
+# definition site, so it is kind="def" on the three branches as it already was on HEAD (the lexical test called the
+# same bytes a ref on the branches only, because the line ends in `;`). With 8 def rows against 3 refs the defs page
+# is no longer the SHORTER one (2470 B vs 2439 B), so the default serves the whole list; this arm's subject is the
+# defs page's fold arithmetic, so it asks for that page by name (--whereis-listing=defs). The default's choice keeps
+# its own arms (L15 and pagingsweepcheck).
+"$BIN" "$R" --whereis=computeBudget --whereis-listing=defs >"$TMP/w2d" 2>/dev/null
 tr '<' '\n' <"$TMP/w2d" | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)".*/\1 \4 \2:\3/p' >"$TMP/w2dall"
 tr '<' '\n' <"$TMP/w2d" | grep '^hit ' | grep 'kind="def"' | awk '{ n = 1; if( match( $0, / refs="[0-9]+"/ ) ) { n = substr( $0, RSTART + 7, RLENGTH - 8 ) } print n }' >"$TMP/w2dweights"
 W2REFS="$( grep -c ' ref ' "$TMP/w2all" )"
@@ -251,11 +259,12 @@ W2DEFS_SUM="$( awk '{s+=$1} END{print s+0}' "$TMP/w2dweights" )"
     && ok "whereis (default listing twin): the def rows of the whole list, source first, shared branch lines folded (refs= sums to $W2DEFS_ALL def rows); the $W2REFS kind=\"ref\" row(s), the doc row among them, counted by <refs count=>" \
     || { no "whereis (default listing twin): the default lost a def row, folded wrongly (refs= sum $W2DEFS_SUM vs $W2DEFS_ALL def rows) or miscounted the refs"; cat "$TMP/w2dall"; grep -o '<refs [^>]*>' "$TMP/w2d"; }
 # The fold's witness on this fixture: the three branches' identical engine.cpp:3 line is one row, refs="3", on the
-# first branch by name, and the whole list keeps all three (a count, never a drop).
+# first branch by name, and the whole list keeps all three (a count, never a drop). Fix round 2: engine.h:2 (HEAD's own
+# blob on every branch, the index's prototype definition) folds the same way — two refs="3" rows.
 W2FOLDED="$( tr '<' '\n' <"$TMP/w2d" | grep -c '^hit ref="feat-merged" .*kind="def" refs="3" ' )"
-[ "$W2FOLDED" -eq 1 ] && [ "$( grep -c ' def engine.cpp:3' "$TMP/w2all" )" -eq 4 ] && ! grep -q ' refs="' "$TMP/w2" \
-    && ok 'whereis (fold): the branches'"'"' shared engine.cpp:3 definition is one row refs="3" on feat-merged; listing=all keeps all four rows and carries no refs=' \
-    || { no "whereis (fold): expected one feat-merged def row with refs=\"3\" (got $W2FOLDED) and 4 engine.cpp:3 def rows in the whole list"; cat "$TMP/w2dall"; }
+[ "$W2FOLDED" -eq 2 ] && [ "$( grep -c ' def engine.cpp:3' "$TMP/w2all" )" -eq 4 ] && [ "$( grep -c ' def engine.h:2' "$TMP/w2all" )" -eq 4 ] && ! grep -q ' refs="' "$TMP/w2" \
+    && ok 'whereis (fold): the branches'"'"' shared engine.cpp:3 and engine.h:2 definitions are one row each, refs="3" on feat-merged; listing=all keeps all eight rows and carries no refs=' \
+    || { no "whereis (fold): expected two feat-merged def rows with refs=\"3\" (got $W2FOLDED) and 4+4 engine.cpp:3/engine.h:2 def rows in the whole list"; cat "$TMP/w2dall"; }
 
 # The finding's own repro, on this repo, when it is a git tree deep enough to answer. Skipped rather
 # than failed on a shallow/absent checkout: this arm is a bonus over the fixture arms above, which
@@ -273,15 +282,17 @@ else
     ok "whereis: repo root is not a git tree — real-repo arm skipped"
 fi
 
-# ── 5b) --whereis on the OTHER refs: the lexical shape test says kind="def" only for a definition's shape, and the
-#        definitions page lists a line that several refs hold ONCE (refs="N") ──────────────────────────────────
+# ── 5b) --whereis on the OTHER refs: kind="def" only where a parser finds the definition, and the definitions page
+#        lists a line that several refs hold ONCE (refs="N") ──────────────────────────────────────────────────────
 # The 26b sweep (ideas-fable-26b #9): with the definitions page listing every kind="def" row of every ref, a defs="1"
 # symbol listed 2113 "definitions" — 59 of the first 60 were call sites that merely ended in `}` or `)`
 # (`if( !task.empty() ) { out += escapeXml( task, esc ); }`), a string literal's `impl `, a comment's `def `, and every
 # ref's own copy of the one real line. Its own fixture: three branches hold the same shapes.cpp / calls.js (shape-b
 # byte-identical to shape-a, shape-c with one extra comment line so its lines are numbered differently), beside the
 # call shapes of C++, Python, JS, a string literal, a shell comment and a using-declaration. HEAD defines the name in
-# budget.cpp, so HEAD's label comes from the index and every branch row is the lexical heuristic's.
+# budget.cpp, so HEAD's label comes from the index.
+# FIX ROUND 2: every branch row is now a PARSER's label too (labelBranchRowsByParse): a branch holding HEAD's own blob of
+# a path takes HEAD's index labels, any other blob holding a parse-worthy line is parsed by the index's own extraction.
 SH="$TMP/shapes"; mkdir -p "$SH"
 gs(){ git -C "$SH" "$@" >/dev/null 2>&1; }
 gs init -q -b main
@@ -333,8 +344,11 @@ if [ $rcSd -ne 0 ] || [ $rcSa -ne 0 ] || ! grep -q '<whereis ' "$TMP/sd" || ! gr
 else
     # (i) RED on 93aeab1d: the nine call shapes read kind="def" on every branch. Every branch def row is one of the
     #     three definition shapes — the one-line body, the trailing return and the JS method — and no other line.
+    #     Fix round 2 (rule 4, by design): plus budget.h's prototype `int computeBudget( int frames );` — HEAD's own
+    #     budget.h blob on every branch takes HEAD's index label, and the index lists that prototype as a definition
+    #     site (HEAD said def and the branches said ref for the same bytes; now both say def).
     DEF_T="$( tr '<' '\n' <"$TMP/sa" | grep '^hit ref="shape-' | grep 'kind="def"' | sed -n 's/.* t="\(.*\)"\/>$/\1/p' | sort -u )"
-    EXPECT_T="$( printf '%s\n' 'computeBudget( frames ) {' 'auto computeBudget( long frames ) -&gt; long { return frames; }' 'static int computeBudget( int frames ) { return frames * 32; }' 'int computeBudget( int frames )' | sort -u )"
+    EXPECT_T="$( printf '%s\n' 'computeBudget( frames ) {' 'auto computeBudget( long frames ) -&gt; long { return frames; }' 'static int computeBudget( int frames ) { return frames * 32; }' 'int computeBudget( int frames )' 'int computeBudget( int frames );' | sort -u )"
     [ "$DEF_T" = "$EXPECT_T" ] \
         && ok 'whereis (shapes): on the branches only the definition shapes read kind="def" (base'"'"'s budget.cpp, the one-line body, the trailing return, the JS method)' \
         || { no 'whereis (shapes): a call shape reads kind="def" on a branch, or a definition shape lost its label'; printf '%s\n' "$DEF_T"; }
@@ -350,18 +364,20 @@ else
     # (iii) the fold: the definitions page lists each shared line once, on shape-a (first by name), refs="3" — shape-c
     #       holds the same text at other line numbers and still folds (the key is path + text, not the line).
     #       The base's budget.cpp:1 is on every branch too, so four shared lines: HEAD's two index rows + four shape-a rows.
-    [ "$( grep -c '^shape-a def .* refs="3"' "$TMP/sdrows" )" -eq 4 ] && ! grep -q '^shape-[bc] ' "$TMP/sdrows" \
-      && [ "$( sed -n 1p "$TMP/sdrows" )" = "HEAD def budget.cpp:1" ] && [ "$( grep -c ' def ' "$TMP/sdrows" )" -eq 6 ] \
+    #       Fix round 2: five — budget.h:2 (HEAD's index label on HEAD's own blob, see (i)) folds as well: folded="10".
+    [ "$( grep -c '^shape-a def .* refs="3"' "$TMP/sdrows" )" -eq 5 ] && ! grep -q '^shape-[bc] ' "$TMP/sdrows" \
+      && [ "$( sed -n 1p "$TMP/sdrows" )" = "HEAD def budget.cpp:1" ] && [ "$( grep -c ' def ' "$TMP/sdrows" )" -eq 7 ] \
       && grep -q '^shape-c def shapes.cpp:3$' "$TMP/sarows" && grep -q '^shape-a def shapes.cpp:2 refs="3"' "$TMP/sdrows" \
-      && grep -o '<whereis [^>]*>' "$TMP/sd" | grep -q ' listing="defs" folded="8" ' \
-        && ok 'whereis (fold): the four shared definition lines are one row each on shape-a with refs="3" (folded="8" on the root); shape-c holds one at another line number and folds by text' \
-        || { no 'whereis (fold): expected HEAD + four shape-a rows refs="3" and folded="8" on the definitions page'; cat "$TMP/sdrows"; grep -o '<whereis [^>]*>' "$TMP/sd"; }
+      && grep -o '<whereis [^>]*>' "$TMP/sd" | grep -q ' listing="defs" folded="10" ' \
+        && ok 'whereis (fold): the five shared definition lines are one row each on shape-a with refs="3" (folded="10" on the root); shape-c holds one at another line number and folds by text' \
+        || { no 'whereis (fold): expected HEAD + five shape-a rows refs="3" and folded="10" on the definitions page'; cat "$TMP/sdrows"; grep -o '<whereis [^>]*>' "$TMP/sd"; }
     # (iv) the whole list is the untouched twin: every branch's own row, no refs=/folded= anywhere, rows == hits=.
     SA_HITS="$( grep -o '<whereis [^>]*' "$TMP/sa" | grep -o ' hits="[0-9]*"' | grep -o '[0-9]*' )"
     SA_ROWS="$( grep -c . "$TMP/sarows" )"
-    [ -n "$SA_HITS" ] && [ "$SA_ROWS" = "$SA_HITS" ] && ! grep -q ' refs="' "$TMP/sa" && ! grep -q ' folded="' "$TMP/sa" && [ "$( grep -c ' def ' "$TMP/sarows" )" -eq 14 ] \
-        && ok "whereis (fold twin): --whereis-listing=all prints every row ($SA_ROWS == hits=$SA_HITS), 14 def rows, no refs= or folded=" \
-        || { no "whereis (fold twin): rows $SA_ROWS vs hits=$SA_HITS, def rows $( grep -c ' def ' "$TMP/sarows" ) (want 14), or refs=/folded= leaked into the whole list"; grep -o '<whereis [^>]*>' "$TMP/sa"; }
+    #      Fix round 2: 17 def rows = HEAD's 2 + 3 branches x 5 (budget.h:2 included, see (i)).
+    [ -n "$SA_HITS" ] && [ "$SA_ROWS" = "$SA_HITS" ] && ! grep -q ' refs="' "$TMP/sa" && ! grep -q ' folded="' "$TMP/sa" && [ "$( grep -c ' def ' "$TMP/sarows" )" -eq 17 ] \
+        && ok "whereis (fold twin): --whereis-listing=all prints every row ($SA_ROWS == hits=$SA_HITS), 17 def rows, no refs= or folded=" \
+        || { no "whereis (fold twin): rows $SA_ROWS vs hits=$SA_HITS, def rows $( grep -c ' def ' "$TMP/sarows" ) (want 17), or refs=/folded= leaked into the whole list"; grep -o '<whereis [^>]*>' "$TMP/sa"; }
     # (v) the counts agree across the two pages: hits= identical, and <refs count=> on the default equals the whole list's ref rows.
     SD_HITS="$( grep -o '<whereis [^>]*' "$TMP/sd" | grep -o ' hits="[0-9]*"' | grep -o '[0-9]*' )"
     [ "$SD_HITS" = "$SA_HITS" ] && grep -q "<refs count=\"$( grep -c ' ref ' "$TMP/sarows" )\"" "$TMP/sd" \
@@ -376,14 +392,16 @@ else
             && ok 'whereis (fold legend): the full legend defines refs= (SHARED DEFINITIONS) and the page is well-formed XML' \
             || no 'whereis (fold legend): the full page is malformed or its legend does not define refs='
     else
-        grep -q 'SHARED DEFINITIONS: refs="N"' "$TMP/sdf" && ok 'whereis (fold legend): the full legend defines refs= (xmllint absent: well-formedness not checked)' \
+        printf '  SKIP  whereis (fold legend): xmllint absent — the full page'"'"'s well-formedness is not checked\n'   # rv N2: a missing tool is a named SKIP
+        grep -q 'SHARED DEFINITIONS: refs="N"' "$TMP/sdf" && ok 'whereis (fold legend): the full legend defines refs= (SHARED DEFINITIONS)' \
             || no 'whereis (fold legend): the full legend does not define refs='
     fi
     grep -q 'hit refs=N' "$TMP/sdc" \
         && ok 'whereis (fold legend): the compact dictionary defines hit refs=N on the page that carries it' \
         || no 'whereis (fold legend): the compact dictionary lacks the hit refs=N reading'
-    "$BIN" "$SH" --whereis=computeBudget --whereis-listing=all --legend=compact >"$TMP/sac" 2>/dev/null
-    ! grep -q 'hit refs=N' "$TMP/sac" && ! grep -q 'SHARED DEFINITIONS' "$TMP/sa" \
+    "$BIN" "$SH" --whereis=computeBudget --whereis-listing=all --legend=compact >"$TMP/sac" 2>/dev/null; rcSac=$?
+    # rv N1: an ABSENCE is read only off a run that succeeded and printed its <whereis> root.
+    [ $rcSac -eq 0 ] && grep -q '<whereis ' "$TMP/sac" && ! grep -q 'hit refs=N' "$TMP/sac" && ! grep -q 'SHARED DEFINITIONS' "$TMP/sa" \
         && ok 'whereis (fold legend): neither legend carries the refs= reading on the whole list, which never prints it' \
         || no 'whereis (fold legend): the refs= reading rides a page without the attribute'
 fi
@@ -499,7 +517,9 @@ else
     no "§B8.2 whereis: --limit=1 produced no <more hits=> to check (fixture has too few hits)"
 fi
 # TWIN on the default listing: the same arithmetic, the counted refs included — shown + more + refs count == hits.
-W1D="$( "$BIN" "$R" --whereis=computeBudget --limit=1 2>/dev/null )"
+# Fix round 2 (by design, see the default listing twin in 5b): on this fixture the defs page is no longer the shorter
+# one, so the default serves the whole list; the arm names the defs page (--whereis-listing=defs) whose arithmetic it pins.
+W1D="$( "$BIN" "$R" --whereis=computeBudget --whereis-listing=defs --limit=1 2>/dev/null )"
 WD_SHOWN="$( printf '%s' "$W1D" | grep -oE '<whereis [^>]*' | grep -oE 'shown="[0-9]+"' | grep -oE '[0-9]+' )"
 WD_HITS="$(  printf '%s' "$W1D" | grep -oE '<whereis [^>]*' | grep -oE ' hits="[0-9]+"' | grep -oE '[0-9]+' )"
 WD_MORE="$(  printf '%s' "$W1D" | grep -oE '<more hits="[0-9]+"' | grep -oE '[0-9]+' )"
@@ -512,10 +532,10 @@ WD_FOLDED="$( printf '%s' "$W1D" | grep -oE '<whereis [^>]*' | grep -oE ' folded
 { [ -n "$WD_MORE" ] && [ -n "$WD_REFS" ] && [ "$(( WD_SHOWN + WD_MORE + ${WD_FOLDED:-0} + WD_REFS ))" = "$WD_HITS" ] && [ "$WD_ROWS" = "$WD_SHOWN" ]; } \
     && ok "§B8.2 whereis (default listing twin): shown($WD_SHOWN) + more($WD_MORE) + folded(${WD_FOLDED:-0}) + refs count($WD_REFS) == hits($WD_HITS)" \
     || no "§B8.2 whereis (default listing twin): shown=$WD_SHOWN more=$WD_MORE folded=${WD_FOLDED:-0} refs=$WD_REFS hits=$WD_HITS rows=$WD_ROWS"
-[ "$WD_FOLDED" = "2" ] \
-    && ok '§B8.2 whereis (default listing twin): folded="2" on the root — the two branch copies of engine.cpp:3 behind the refs="3" row' \
-    || no "§B8.2 whereis (default listing twin): folded=\"${WD_FOLDED:-absent}\" on the root, want 2"
-WDEND="$( "$BIN" "$R" --whereis=computeBudget --limit=1 --offset="$WD_HITS" 2>/dev/null )"
+[ "$WD_FOLDED" = "4" ] \
+    && ok '§B8.2 whereis (default listing twin): folded="4" on the root — the two branch copies each of engine.cpp:3 and engine.h:2 behind the two refs="3" rows' \
+    || no "§B8.2 whereis (default listing twin): folded=\"${WD_FOLDED:-absent}\" on the root, want 4"
+WDEND="$( "$BIN" "$R" --whereis=computeBudget --whereis-listing=defs --limit=1 --offset="$WD_HITS" 2>/dev/null )"
 if ! printf '%s' "$WDEND" | grep -q '<whereis '; then
     no "§B8.2 whereis (default listing twin): the past-the-end page produced no <whereis> root"
 elif printf '%s' "$WDEND" | grep -q '<more '; then
@@ -910,6 +930,354 @@ if command -v python3 >/dev/null 2>&1; then
 else
     printf '  SKIP  LEAN (L16-MCP) MCP twin (no python3)\n'
 fi
+
+# ── 5c) PARSED BRANCH LABELS (lane whereis-defs-fix, fix round 2; crossref.h labelBranchRowsByParse) ──────────────
+# A row of another ref is kind="def" only where a PARSER finds the definition: a branch holding HEAD's own blob of a path
+# takes HEAD's index labels; any other blob holding a parse-worthy line is parsed by the index's own extraction
+# (ingest.h definitionLinesInBlobs). The lexical shape test only CHOOSES blobs. One well-formed file per language family
+# under head/ on main; byte-identical copies under sib/ on branch `sib` (another path: those blobs are PARSED, not
+# mirrored); and under c1/ the definition shapes the round-1 lexical test lost (rv-whereis-defs-fix C1). Every line naming
+# probeName carries @D (a definition) or @R (a reference). Two claims per marked line: the branch row says what the
+# marker says, and it says what HEAD's index row says for the same bytes. RED on 93aeab1d (18 branch rows wrong: the C2
+# call shapes read def) and on f1f11a7b (22: the C1 definition shapes read ref).
+PB="$TMP/parsedlabels"; mkdir -p "$PB"
+gp(){ git -C "$PB" "$@" >/dev/null 2>&1; }
+mkp(){ mkdir -p "$( dirname "$PB/$1" )"; cat >"$PB/$1"; }
+gp init -q -b main; gp config commit.gpgsign false
+mkp head/a.c <<'EOF'
+#define probeName( a ) ( (a) + 1 ) /* @D */
+int caller( int a )
+{
+    if( a ) { a = probeName( a ); } /* @R */
+    return probeName( a ); /* @R */
+}
+EOF
+mkp head/b.cpp <<'EOF'
+#include <functional>
+struct T { int probeName( int a ) const; }; // @D
+int T::probeName( int a ) const { return a; } // @D
+void run( T& t, int a )
+{
+    t.probeName( a ); // @R
+    if( a ) { a = t.probeName( a ); } // @R
+    auto f = [ & ]( int x ) { return t.probeName( x ); }; // @R
+    // probeName( a ) { // @R
+}
+EOF
+mkp head/c.m <<'EOF'
+@interface Box
+- (int)probeName:(int)a; // @R (an @interface declaration its same-file @implementation shadows: one symbol, the definition)
+@end
+@implementation Box
+- (int)probeName:(int)a { return a; } // @D
+- (void)run { [self probeName:1]; } // @R
+@end
+EOF
+mkp head/d.py <<'EOF'
+def probeName(a):  # @D
+    return a
+
+
+class K:
+    async def other(self):
+        return probeName(1)  # @R
+
+
+@probeName  # @R
+def deco():
+    x = probeName(2)  # @R
+    print("probeName(x)")  # @R
+EOF
+mkp head/e.ts <<'EOF'
+export function probeName(a: number): number { // @D
+  return a;
+}
+export class Svc {
+  static probeName(a: number) { return a; } // @D
+  run(a: number) {
+    probeName(a).toString(); // @R
+    setTimeout(() => probeName(a), 0); // @R
+  }
+}
+EOF
+mkp head/f.js <<'EOF'
+function probeName(a) { // @D
+  return a;
+}
+describe('x', () => {
+  probeName('x', () => { // @R
+    return 1;
+  });
+});
+EOF
+mkp head/G.java <<'EOF'
+public class G {
+    public static int probeName(int a) { // @D
+        return a;
+    }
+    int run(int a) {
+        return probeName(a); // @R
+    }
+}
+EOF
+mkp head/h.rb <<'EOF'
+class H
+  def probeName(a) # @D
+    a
+  end
+  def run(a)
+    puts probeName(a) # @R
+    probeName(a) do |x| # @R
+      x
+    end
+  end
+end
+EOF
+mkp head/i.go <<'EOF'
+package p
+
+func probeName(a int) int { // @D
+	return a
+}
+
+func run(a int) {
+	go probeName(a) // @R
+	defer probeName(a) // @R
+	if v := probeName(a); v > 0 { // @R
+	}
+}
+EOF
+mkp head/j.rs <<'EOF'
+pub fn probe_other() {}
+pub fn probeName(a: i32) -> i32 { // @D
+    a
+}
+fn run(a: i32) -> i32 {
+    let v = probeName(a); // @R
+    probeName(v) // @R
+}
+EOF
+mkp head/k.swift <<'EOF'
+func probeName(_ a: Int) throws -> Int { // @D
+    return a
+}
+func run() throws {
+    let v = try probeName(1) // @R
+    _ = v
+}
+EOF
+mkp head/l.cs <<'EOF'
+public class L
+{
+    public static int probeName(int a) { return a; } // @D
+    public int Run(int a)
+    {
+        return probeName(a); // @R
+    }
+}
+EOF
+mkp head/m.sh <<'EOF'
+probeName() { # @D
+  echo "$1"
+}
+run() {
+  probeName x # @R
+}
+EOF
+mkp head/n.cpp <<'EOF'
+struct N { int probeName; }; // @R (a field: not a symbol in the index, so never a def site on HEAD either)
+EOF
+mkp head/o.md <<'EOF'
+# probeName
+
+Call `probeName()` from the loop. <!-- @R -->
+EOF
+gp add -A; gp commit -qm base
+gp checkout -qb sib
+mkdir -p "$PB/sib"; cp -R "$PB/head/." "$PB/sib/"
+mkp c1/m1.h <<'EOF'
+#define probeName( a ) ( (a) + 1 ) // @D
+EOF
+mkp c1/m2.h <<'EOF'
+#define probeName( a ) do { f( a ); } while( 0 ) // @D
+EOF
+mkp c1/d1.cpp <<'EOF'
+decltype(auto) probeName( int a ) { return a; } // @D
+EOF
+mkp c1/d2.cpp <<'EOF'
+__attribute__((noinline)) static int probeName( int a ) { return a; } // @D
+EOF
+mkp c1/d3.cpp <<'EOF'
+#include <functional>
+std::function<void()> probeName( int a ) { return [](){}; } // @D
+EOF
+mkp c1/d4.cpp <<'EOF'
+template <typename T, typename = void> T probeName( T a ) { return a; } // @D
+EOF
+mkp c1/T.java <<'EOF'
+public class T {
+    @Test(expected = Foo.class) public void probeName() { // @D
+    }
+}
+EOF
+mkp c1/c.ts <<'EOF'
+export class C {
+  @HostListener('click') probeName() { // @D
+  }
+}
+EOF
+mkp c1/a.cs <<'EOF'
+public class A
+{
+    [HttpGet("x")] public IActionResult probeName() { return null; } // @D
+}
+EOF
+mkp c1/s.rs <<'EOF'
+#[derive(Debug)] pub struct probeName { // @D
+    a: i32,
+}
+EOF
+mkp c1/e.js <<'EOF'
+module.exports = function probeName(req, res) { // @D
+  return req;
+};
+EOF
+mkp c1/h.js <<'EOF'
+const handler = function probeName() { // @D
+  return 1;
+};
+EOF
+# the reviewer's branch-only repro (rv C1 repro 1): names HEAD never holds, defined only on this branch
+printf '#define clampBudget( x ) ( (x) > 9 ? 9 : (x) )\n' >"$PB/c1/b.h"
+printf 'int use( int a ) { return clampBudget( a ); }\n' >"$PB/c1/u.c"
+printf 'public class T2 {\n    @Test(timeout = 10) public void checkBudget() {\n    }\n}\n' >"$PB/c1/T2.java"
+gp add -A; gp commit -qm sib; gp checkout -q main
+"$BIN" "$PB" --whereis=probeName --whereis-listing=all --limit=1000 --no-cache >"$TMP/pb.all" 2>/dev/null; rcPb=$?
+if [ $rcPb -ne 0 ] || ! grep -q '<whereis ' "$TMP/pb.all"; then
+    no "whereis (parsed labels): the fixture produced no <whereis> root (rc $rcPb)"
+else
+    sed 's/<!--.*-->//' "$TMP/pb.all" | tr '<' '\n' | sed -n 's/^hit ref="\([^"]*\)".* p="\([^"]*\)" l="\([0-9]*\)" kind="\([a-z]*\)".*/\1 \2:\3 \4/p' >"$TMP/pb.kinds"
+    PB_WRONG=""; PB_SPLIT=""; PB_N=0
+    for f in $( git -C "$PB" ls-tree -r --name-only sib -- head c1 | grep -v '^c1/\(b\.h\|u\.c\|T2\.java\)$' ); do
+        case "$f" in head/*) bp="sib/${f#head/}"; hp="$f";; *) bp="$f"; hp="";; esac
+        ln=0
+        while IFS= read -r line || [ -n "$line" ]; do
+            ln=$((ln+1))
+            case "$line" in *probeName*) ;; *) continue;; esac
+            want=ref; case "$line" in *@D*) want=def;; esac
+            case "$f:$line" in *.md:"# probeName") want=def;; esac   # a markdown heading is a section symbol (no room for a marker)
+            bk="$( awk -v k="$bp:$ln" '$1=="sib" && $2==k {print $3}' "$TMP/pb.kinds" | head -1 )"
+            PB_N=$((PB_N+1))
+            [ "$bk" = "$want" ] || PB_WRONG="$PB_WRONG [$bp:$ln $bk want $want]"
+            if [ -n "$hp" ]; then
+                hk="$( awk -v k="$hp:$ln" '$1=="HEAD" && $2==k {print $3}' "$TMP/pb.kinds" | head -1 )"
+                [ "$hk" = "$bk" ] || PB_SPLIT="$PB_SPLIT [$bp:$ln branch $bk HEAD $hk]"
+            fi
+        done < <( git -C "$PB" show "sib:$f" )
+    done
+    { [ "$PB_N" -ge 50 ] && [ -z "$PB_WRONG" ]; } \
+        && ok "whereis (parsed labels): $PB_N marked lines over C, C++, ObjC, Python, TS, JS, Java, Ruby, Go, Rust, Swift, C#, Bash and Markdown, plus the 12 C1 definition shapes — every branch row says what its marker says" \
+        || no "whereis (parsed labels): branch rows mislabelled (of $PB_N):$PB_WRONG"
+    [ -z "$PB_SPLIT" ] \
+        && ok 'whereis (parsed labels): every sib/ branch row says what HEAD'"'"'s index row says for the same bytes (the same way HEAD is labelled)' \
+        || no "whereis (parsed labels): the branch parse and HEAD's index disagree on the same bytes:$PB_SPLIT"
+    grep -o '<whereis [^>]*>' "$TMP/pb.all" | grep -q ' ref_labels="parsed" ' && ! grep -q '<unparsed ' "$TMP/pb.all" \
+        && ok 'whereis (parsed labels): ref_labels="parsed" on an answer with branch rows, and no <unparsed> (every parse-worthy blob was read)' \
+        || no 'whereis (parsed labels): ref_labels= missing, or an <unparsed> element on an answer the guard never touched'
+fi
+# the branch-only definitions (rv C1 repro 1): the definition is the answer, and the call beside it is not
+CB="$( "$BIN" "$PB" --whereis=clampBudget --whereis-listing=all --no-cache 2>/dev/null )"
+KB="$( "$BIN" "$PB" --whereis=checkBudget --whereis-listing=all --no-cache 2>/dev/null )"
+{ printf '%s' "$CB" | grep -q '<whereis [^>]* on-head="0"' && printf '%s' "$CB" | grep -q '<hit ref="sib" [^>]*p="c1/b.h" l="1" kind="def"' \
+  && printf '%s' "$CB" | grep -q '<hit ref="sib" [^>]*p="c1/u.c" l="1" kind="ref"' \
+  && printf '%s' "$KB" | grep -q '<hit ref="sib" [^>]*p="c1/T2.java" l="2" kind="def"'; } \
+    && ok 'whereis (branch-only): `#define clampBudget( x )` and `@Test(timeout = 10) public void checkBudget()` read kind="def" on the only ref holding them; the call beside the macro reads kind="ref"' \
+    || { no 'whereis (branch-only): a branch-only definition lost its label, or its call site gained one'; printf '%s\n%s\n' "$CB" "$KB" | sed 's/<!--.*-->//'; }
+# ref_labels= rides only an answer with another ref's row: a repo with no other ref answers as before
+NR="$TMP/norefs"; mkdir -p "$NR"; git -C "$NR" init -q -b main >/dev/null 2>&1; git -C "$NR" config commit.gpgsign false
+printf 'int lonelyName( int a ) { return a; }\nint z( void ) { return lonelyName( 1 ); }\n' >"$NR/x.c"
+git -C "$NR" add -A >/dev/null 2>&1; git -C "$NR" commit -qm one >/dev/null 2>&1
+NRO="$( "$BIN" "$NR" --whereis=lonelyName --no-cache 2>/dev/null )"; rcNr=$?
+[ $rcNr -eq 0 ] && printf '%s' "$NRO" | grep -q '<whereis ' && ! printf '%s' "$NRO" | grep -q 'ref_labels' && ! printf '%s' "$NRO" | grep -q '<unparsed' \
+    && ok 'whereis (parsed labels): no ref_labels= (and no reading of it) on a repo with no other ref' \
+    || no 'whereis (parsed labels): ref_labels= or <unparsed> rides an answer without a branch row'
+# CLI = MCP: the MCP whereis default is byte-identical to the CLI default on the parsed fixture
+if command -v python3 >/dev/null 2>&1; then
+    PBD="$( "$BIN" "$PB" --whereis=probeName --no-cache 2>/dev/null )"
+    PBM="$( printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whereis","arguments":{"path":"%s","symbol":"probeName"}}}\n' "$PB" \
+            | "$BIN" --mcp 2>/dev/null | python3 -c 'import sys,json
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    d=json.loads(line); c=d.get("result",{}).get("content")
+    if c: print(c[0].get("text",""),end="")' )"
+    [ -n "$PBD" ] && [ "$PBD" = "$PBM" ] \
+        && ok 'whereis (parsed labels): MCP whereis serves the CLI default byte for byte (one labeller on both surfaces)' \
+        || no 'whereis (parsed labels): the MCP answer differs from the CLI default on the parsed fixture'
+else
+    printf '  SKIP  whereis (parsed labels) MCP twin (no python3)\n'
+fi
+
+# ── 5d) the RUNAWAY GUARD on the parse batch (kWhereisParseMaxBlobs = 256) and what it leaves ─────────────────────────
+# 300 distinct blobs on one branch, each a one-line definition of guardName (g.h is HEAD's own blob there: mirrored, never
+# in the batch): the batch takes 256 (most rows first, then path: f000..f255), the other 44 confirm NOTHING — their parse-worthy rows read kind="text", never kind="def", and
+# <unparsed blobs="44" rows="44" next="… --detail=1"> says so. --detail=1 lifts the guard: all 300 are definitions and the
+# element is gone. The full legend carries the UNPARSED clause on exactly that answer and stays well-formed XML.
+GG="$TMP/guard"; mkdir -p "$GG"; git -C "$GG" init -q -b main >/dev/null 2>&1; git -C "$GG" config commit.gpgsign false
+printf 'int guardName( int a );\n' >"$GG/g.h"; git -C "$GG" add -A >/dev/null 2>&1; git -C "$GG" commit -qm base >/dev/null 2>&1
+git -C "$GG" checkout -qb many >/dev/null 2>&1
+i=0; while [ $i -lt 300 ]; do n=$( printf '%03d' $i ); printf 'int guardName( int a ) { return a + %d; }\n' $i >"$GG/f$n.c"; i=$((i+1)); done
+git -C "$GG" add -A >/dev/null 2>&1; git -C "$GG" commit -qm many >/dev/null 2>&1; git -C "$GG" checkout -q main >/dev/null 2>&1
+GA="$( "$BIN" "$GG" --whereis=guardName --whereis-listing=all --limit=1000 --no-cache 2>/dev/null )"; rcGa=$?
+GD="$( "$BIN" "$GG" --whereis=guardName --whereis-listing=all --limit=1000 --detail=1 --no-cache 2>/dev/null )"; rcGd=$?
+GT="$( printf '%s' "$GA" | sed 's/<!--.*-->//' | tr '<' '\n' | grep '^hit ref="many" .* p="f' | grep -c 'kind="text"' )"
+GF="$( printf '%s' "$GA" | sed 's/<!--.*-->//' | tr '<' '\n' | grep '^hit ref="many" .* p="f' | grep -c 'kind="def"' )"
+GTL="$( printf '%s' "$GA" | sed 's/<!--.*-->//' | tr '<' '\n' | grep '^hit ref="many" ' | grep 'kind="text"' | sed -n 's/.* p="\([^"]*\)".*/\1/p' | sort | sed -n '1p;$p' | tr '\n' ' ' )"
+if [ $rcGa -ne 0 ] || [ $rcGd -ne 0 ] || ! printf '%s' "$GA" | grep -q '<whereis ' || ! printf '%s' "$GD" | grep -q '<whereis '; then
+    no "whereis (guard): a run produced no <whereis> root (rc $rcGa / $rcGd)"
+else
+    { [ "$GT" = "44" ] && [ "$GF" = "256" ] && [ "$GTL" = "f256.c f299.c " ] \
+      && printf '%s' "$GA" | grep -q '<unparsed blobs="44" rows="44" next="--whereis=guardName --detail=1"/>'; } \
+        && ok 'whereis (guard): 256 parsed (f000..f255, most rows first then path), 44 left: their rows read kind="text" (never def) and <unparsed blobs="44" rows="44" next=…--detail=1> discloses them' \
+        || { no "whereis (guard): want 256 def + 44 text rows (f256..f299) and the <unparsed> element; got def=$GF text=$GT [$GTL]"; printf '%s' "$GA" | grep -o '<unparsed[^>]*>'; }
+    { [ "$( printf '%s' "$GD" | sed 's/<!--.*-->//' | tr '<' '\n' | grep '^hit ref="many" .* p="f' | grep -c 'kind="def"' )" = "300" ] \
+      && ! printf '%s' "$GD" | grep -q 'kind="text"' && ! printf '%s' "$GD" | grep -q '<unparsed'; } \
+        && ok 'whereis (guard): --detail=1 (the next= it names) lifts the guard: all 300 are definitions, no kind="text", no <unparsed>' \
+        || no 'whereis (guard): --detail=1 did not parse every blob'
+    GL="$( "$BIN" "$GG" --whereis=guardName --legend=full --no-cache 2>/dev/null )"
+    GC="$( "$BIN" "$GG" --whereis=guardName --legend=compact --no-cache 2>/dev/null )"
+    { printf '%s' "$GL" | grep -q 'UNPARSED: the unparsed element' && printf '%s' "$GC" | grep -q 'unparsed blobs=N' && printf '%s' "$GC" | grep -q 'unparsed rows=N' \
+      && printf '%s' "$GC" | grep -q 'ref_labels=parsed' && ! printf '%s' "$GD" | grep -q 'UNPARSED'; } \
+        && ok 'whereis (guard): the full legend explains <unparsed> and the compact dictionary reads blobs=/rows=/ref_labels= on the answer that carries them (and not on the --detail=1 answer)' \
+        || no 'whereis (guard): a legend lacks the <unparsed> / ref_labels= readings, or carries them where the element is absent'
+    if command -v xmllint >/dev/null 2>&1; then
+        printf '%s' "$GL" | xmllint --noout - 2>/dev/null \
+            && ok 'whereis (guard): the full-legend page with the UNPARSED clause spliced in is well-formed XML (checklist 25)' \
+            || no 'whereis (guard): the full-legend page with the UNPARSED clause is malformed XML'
+    else
+        printf '  SKIP  whereis (guard): xmllint absent — the UNPARSED clause'"'"'s well-formedness is not checked\n'
+    fi
+fi
+
+# ── 5e) every ref's tree from content-addressed tree objects (crossref.h listTreesOfRefs): ls-tree's own spelling ────
+# One branch holds files whose NAMES git must quote under core.quotepath=false (a double quote, a backslash, a tab) and
+# ones it must not (a space, UTF-8, a leading dash). The p= of every row equals `git ls-tree -r` for that ref, path for
+# path (XML-unescaped). RED on any walk that spells a path its own way.
+OD="$TMP/oddnames"; mkdir -p "$OD/d"; git -C "$OD" init -q -b main >/dev/null 2>&1; git -C "$OD" config commit.gpgsign false
+printf 'int oddName( int a );\n' >"$OD/d/plain.h"; git -C "$OD" add -A >/dev/null 2>&1; git -C "$OD" commit -qm base >/dev/null 2>&1
+git -C "$OD" checkout -qb odd >/dev/null 2>&1
+for nm in 'q"uote.h' 'back\slash.h' "$( printf 'ta\tb.h' )" 'sp ace.h' 'caf'"$( printf '\303\251' )"'.h' -- '-lead.h'; do
+    [ "$nm" = "--" ] && continue
+    printf 'int oddName( int a );\n' >"$OD/d/$nm"
+done
+git -C "$OD" add -A >/dev/null 2>&1; git -C "$OD" commit -qm odd >/dev/null 2>&1; git -C "$OD" checkout -q main >/dev/null 2>&1
+OO="$( "$BIN" "$OD" --whereis=oddName --whereis-listing=all --no-cache 2>/dev/null )"; rcOo=$?
+OGOT="$( printf '%s' "$OO" | sed 's/<!--.*-->//' | tr '<' '\n' | grep '^hit ref="odd" ' | sed -n 's/.* p="\([^"]*\)" l=.*/\1/p' \
+         | sed 's/&quot;/"/g; s/&apos;/'"'"'/g; s/&lt;/</g; s/&gt;/>/g; s/&amp;/\&/g' | sort )"
+OWANT="$( git -c core.quotepath=false -C "$OD" ls-tree -r --name-only odd | sort )"
+{ [ $rcOo -eq 0 ] && [ "$( printf '%s\n' "$OWANT" | grep -c . )" -ge 6 ] && [ "$OGOT" = "$OWANT" ]; } \
+    && ok 'whereis (tree walk): every row'"'"'s p= is git ls-tree'"'"'s own spelling — quoted (", \, tab) and unquoted (space, UTF-8, leading dash) alike' \
+    || { no "whereis (tree walk): p= differs from git ls-tree's spelling (rc $rcOo)"; printf 'got:\n%s\nwant:\n%s\n' "$OGOT" "$OWANT"; }
 
 if command -v xmllint >/dev/null 2>&1; then
     if printf '%s' "$SW" | xmllint --noout - 2>/dev/null; then ok "capped stray-content still G4 clean"; else no "capped stray-content XML malformed"; fi
