@@ -22,6 +22,7 @@
 #   (P6) next= is pasteable: running it serves the gap row's body.
 #   (P7) name: run(obj) calls obj.process(), bound by name alone (via="name") to the same-directory A.process only; the
 #        tree's other/B.process (same language, same kind, calls the target) is never searched — gaps=name, row run.
+#   (P8) next= is built with nextFlag: a gap row whose path holds a space is quoted, so the selector pastes as one argument.
 #   (N1) a fully resolved graph with truly no path keeps "no directed call path" and no gap attribute.
 #   (N2) a gap OUTSIDE the search cone (a declined call reachable only from elsewhere) does not count.
 #   (N3) ambiguous-only cone (a k-way split the search followed) with no path keeps "no directed call path".
@@ -284,6 +285,29 @@ if [ "$( grep -o '<s [^>]*n="process"[^>]*/>' "$f" | wc -l | tr -d ' ' )" = "1" 
     gapArm "(P7) name" "$TMP/lpy" "run,target" "name:1" "run"
 else
     no "(P7) premise: run's callees are not the one via=name A.process row: $( grep -o '<callees .*' "$f" | head -c 500 )"
+fi
+
+# P8 (CodeRabbit on #383, pathgaps.h:342): lpy with a space in a directory name. The row's p= is the same, and next= must
+# quote the selector (nextFlag), else `--expand=pkg x/c.py:run` splits into two argv words when pasted.
+mkdir -p "$TMP/lpysp/pkg x" "$TMP/lpysp/other"
+cp "$TMP/lpy/pkg/x/a.py" "$TMP/lpy/pkg/x/c.py" "$TMP/lpysp/pkg x/"
+cp "$TMP/lpy/other/b.py" "$TMP/lpysp/other/"
+f="$TMP/P8space.xml"; path "$TMP/lpysp" "run,target" "$f"; rc=$?
+if premise "(P8) space" "$rc" "$f"; then
+    nx="$( attr "$f" next )"
+    if [ "$( attr "$f" gaps )" = "name:1" ] && [ "$nx" = "--expand='pkg x/c.py:run'" ]; then
+        ok "(P8) a gap row under a directory with a space: next=\"$nx\" is one quoted selector"
+        # pasteable: split the way a shell would, run it, and the gap row's body is served
+        python3 -c 'import shlex,subprocess,sys; sys.exit(subprocess.run([sys.argv[1], sys.argv[2], "--no-cache"] + shlex.split(sys.argv[3]), stdout=open(sys.argv[4], "wb"), stderr=subprocess.STDOUT).returncode)' \
+            "$BIN" "$TMP/lpysp" "$nx" "$TMP/P8next.xml"; rc=$?
+        if [ "$rc" -eq 0 ] && grep -q 'obj.process()' "$TMP/P8next.xml"; then
+            ok "(P8) the quoted next= pastes as one argument and serves run's body"
+        else
+            no "(P8) the quoted next= did not serve run's body (rc=$rc): $( head -c 300 "$TMP/P8next.xml" )"
+        fi
+    else
+        no "(P8) want gaps=\"name:1\" and next=\"--expand='pkg x/c.py:run'\"; got gaps=\"$( attr "$f" gaps )\" next=\"$nx\""
+    fi
 fi
 
 echo "(P5) runaway guard: rows capped at 3, nearest first, the cut disclosed"

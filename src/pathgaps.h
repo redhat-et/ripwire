@@ -326,7 +326,7 @@ inline PathGapsXml pathUnreachedXml( const IngestResult& ing, const PathSearchGa
         return out;
     }
     const std::size_t shown = std::min( gaps.syms.size(), kPathGapRows );
-    std::string next = "--expand=";
+    std::string nextSelectors;   // the comma-joined file:name list; nextFlag quotes it when a shell would split or expand it
     for( std::size_t i = 0; i < shown; ++i )
     {
         const Symbol&          s  = ing.symbols[ gaps.syms[i].id ];
@@ -334,12 +334,12 @@ inline PathGapsXml pathUnreachedXml( const IngestResult& ing, const PathSearchGa
         out.rows += "<gap t=\"" + std::string( symTag( s.kind ) ) + "\" n=\"" + ex( s.name ) + "\" p=\"" + ex( rp ) + ":" + std::to_string( s.line )
                   + "\" gaps=\"" + pathGapCountsValue( gaps.syms[i].counts ) + "\"/>";
         // file:name, the selector spelling --expand resolves to this one definition (the same p= the row prints)
-        next += ( i == 0 ? "" : "," ) + std::string( rp ) + ":" + s.name;
+        nextSelectors += ( i == 0 ? "" : "," ) + std::string( rp ) + ":" + s.name;
     }
     out.rootAttrs = " searched=\"" + std::to_string( gaps.searched ) + "\" gaps=\"" + pathGapCountsValue( gaps.totals ) + "\" gap_syms=\""
                   + std::to_string( gaps.syms.size() ) + "\"" + ( gaps.syms.size() > shown ? " gap_syms_capped=\"1\"" : "" )
                   + " hint=\"no path through resolved call edges, but the search is incomplete: it met calls or hand-offs it could not follow in full (gaps=) — read the gap rows, or try "
-                  + ex( say.connect ) + " (undirected: finds a shared caller)" + std::string( say.tail ) + "\"" + nextAttrXml( next );
+                  + ex( say.connect ) + " (undirected: finds a shared caller)" + std::string( say.tail ) + "\"" + nextAttrXml( nextFlag( "--expand", nextSelectors ) );
     return out;
 }
 
