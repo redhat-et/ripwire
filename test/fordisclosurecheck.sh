@@ -98,9 +98,35 @@ CT="$TMP/c400"
 grep -q 'bundle="compact" bodies="0" reason="budget"' "$CT" \
     && ok "#1b compact route, ceiling exhausted: bodies=\"0\" reason=\"budget\" disclosed" \
     || no "#1b compact route, ceiling exhausted: no reason=\"budget\" disclosure (the silent shape, compact copy)"
-grep -q '<hops' "$CT" \
-    && no "#1b compact route, ceiling exhausted: a <hops> element leaked past a spent ceiling" \
-    || ok "#1b compact route, ceiling exhausted: no <hops> element (the attribute IS the disclosure there)"
+# BY-DESIGN CHANGE (lego-charge fix round 4, review rv-wrap-recipe-k29 F1, rule 5 "never a silent cut"; reported under
+# PROCESS rule 4): this arm used to require NO <hops> element at all, which made the cut silent — the hop rows vanished
+# with nothing naming them. What it protected still holds and is asserted: no hop ROW (<h>) and no hops section legend
+# leaks past a spent ceiling. The one <hops> allowed is the counted marker: empty, shown="0", capped="1", next= the same
+# question without the budget.
+ct_hops="$( grep -oE '<hops [^>]*>' "$CT" | head -1 )"
+if [ -z "$ct_hops" ]; then
+    no "#1b compact route, ceiling exhausted: no <hops> element — the cut hop rows are silent (rule 5)"
+elif printf '%s' "$ct_hops" | grep -qE "^<hops shown=\"0\" total=\"[1-9][0-9]*\" capped=\"1\" next=\"--for=&apos;$CONCTASK&apos;\"/>\$" && ! grep -q '<h ' "$CT"; then
+    ok "#1b compact route, ceiling exhausted: <hops> is the counted marker only, no hop row leaked ($ct_hops)"
+else
+    no "#1b compact route, ceiling exhausted: a <hops> other than the empty counted marker leaked past a spent ceiling ($ct_hops)"
+fi
+# #1c (fix round 4): the cut file tail under the same spent ceiling carries the call that lists the files it left out —
+# the --for file page — and that call answers (rc 0, a <files> page holding at least the tail's total). Negative: the
+# default regime's tail (no --token-budget) is unchanged — no next= (a named deferral).
+ct_tail="$( grep -oE '<tail [^>]*>' "$CT" | head -1 )"
+ct_ttot="$( printf '%s' "$ct_tail" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
+"$BIN" src --for="$CONCTASK" --limit=40 --no-cache >"$TMP/cpage" 2>/dev/null; cp_rc=$?
+cp_tot="$( grep -oE '^<files [^>]*>' "$TMP/cpage" | sed -nE 's/.* total="([0-9]+)".*/\1/p' )"
+{ printf '%s' "$ct_tail" | grep -qE "capped=\"1\" next=\"--for=&apos;$CONCTASK&apos; --limit=40\">\$" && [ "$cp_rc" -eq 0 ] \
+  && [ -n "$cp_tot" ] && [ -n "$ct_ttot" ] && [ "$cp_tot" -ge "$ct_ttot" ] 2>/dev/null; } \
+    && ok "#1c compact route, ceiling exhausted: the cut <tail> names the file page (next=), which pages $cp_tot files >= the tail's $ct_ttot" \
+    || no "#1c compact route, ceiling exhausted: the cut <tail> has no working next= (tail '$ct_tail', page rc=$cp_rc total='${cp_tot:-none}')"
+"$BIN" src --for="$CONCTASK" --no-cache >"$TMP/cdef" 2>/dev/null
+cd_tail="$( grep -oE '<tail [^>]*>' "$TMP/cdef" | head -1 )"
+{ [ -n "$cd_tail" ] && [ "${cd_tail#* next=}" = "$cd_tail" ]; } \
+    && ok "#1c default regime: <tail> unchanged, no next= added ($cd_tail)" \
+    || no "#1c default regime: <tail> changed or missing ('$cd_tail') — the explicit-budget next= leaked into the default"
 grep -q 'bundle=compact:' "$CT" \
     && no "#1b compact route, ceiling exhausted: the legend leaked past a spent ceiling (no reserve there)" \
     || ok "#1b compact route, ceiling exhausted: legend dropped (only the attribute's reserved bytes are spent)"

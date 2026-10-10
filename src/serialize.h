@@ -1075,12 +1075,20 @@ inline FileTail computeFileTail( const IngestResult& ing, const std::vector<floa
 // emitted (a total of 0 means genuinely none remain, never not-computed — the B1.4 rule for elements).
 // `shownCap` lets the explicit-budget caller trim rows below the collected count; the JSON twin below
 // renders the SAME decision so the dialects cannot diverge on what was served.
-inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, std::vector<char>& esc )
+// `cutNextAttr` (a ready ` next="…"` from nextAttrXml, or empty) rides the open tag ONLY when the tail is cut
+// (shown < total): the call that serves the files left out. Empty (every caller but the --for explicit-budget
+// regime) ⇒ byte-identical to before.
+inline std::string renderFileTailXml( const FileTail& t, std::size_t shownCap, std::vector<char>& esc, std::string_view cutNextAttr = {} )
 {
     const std::size_t shown = std::min( shownCap, t.paths.size() );
     std::string x = "<tail total=\"" + std::to_string( t.total )
                   + "\" shown=\"" + std::to_string( shown )
-                  + "\" capped=\"" + ( shown < t.total ? "1" : "0" ) + "\">";
+                  + "\" capped=\"" + ( shown < t.total ? "1" : "0" ) + "\"";
+    if( shown < t.total )
+    {
+        x += cutNextAttr;
+    }
+    x += ">";
     for( std::size_t i = 0; i < shown; ++i )
     {
         x += "<t p=\"";  x += escapeXml( t.paths[i], esc );  x += "\"/>";
@@ -1129,11 +1137,11 @@ inline constexpr std::string_view kForHdrLegend =
 
 // Explicit-budget row fit: the largest shown count whose rendered XML fits `budgetBytes` (0 rows always
 // "fits" — the shell is reserved by the caller). Walks down from the collected count; deterministic.
-inline std::size_t fileTailShownForBudget( const FileTail& t, std::size_t budgetBytes, std::vector<char>& esc )
+inline std::size_t fileTailShownForBudget( const FileTail& t, std::size_t budgetBytes, std::vector<char>& esc, std::string_view cutNextAttr = {} )
 {
     for( std::size_t shown = t.paths.size(); shown > 0; --shown )
     {
-        if( renderFileTailXml( t, shown, esc ).size() <= budgetBytes )
+        if( renderFileTailXml( t, shown, esc, cutNextAttr ).size() <= budgetBytes )
         {
             return shown;
         }
@@ -8403,6 +8411,82 @@ inline SectionStubPricing priceSectionStub( const char* tag, std::size_t preCapT
     ENSURES( !p.collapse || ( hasRenderedBytes && p.stubXml.size() < renderedBytes ),
              "priceSectionStub: a collapse was decided without measured bytes, or the stub is not smaller than the section" );
     return p;
+}
+
+// One stubbable --for section (<lego> or <compose>) as the stub plan reads it.
+struct ForStubbableSection
+{
+    bool        hasContent;      // the section would render non-empty
+    std::size_t preCapTotal;     // its own pre-cap row count: the stub's total=
+    bool        rendered;        // its bytes were measured (false = the open_memstream degrade path, never collapsed)
+    std::size_t renderedBytes;   // the measured full render (0 when !rendered)
+};
+
+// The <lego>/<compose> stub decision of a ranked --for answer: which section collapses (L2 / R2-L2', priceSectionStub) and
+// the ONE restoring spelling. One function for the CLI lens (verbs_for.h runForLens) and its MCP twin (mcpverbs.h
+// forTaskText), for both the final decision and the <sigs> charge (forSectionsSigCharge below).
+struct ForSectionStubPlan
+{
+    std::string        nextInvocation;   // empty when neither section is a candidate
+    SectionStubPricing lego{};
+    SectionStubPricing compose{};
+    bool               legoWillStub    = false;
+    bool               composeWillStub = false;
+
+    // the bytes the two sections occupy as served: a collapsing section at its stub, any other at its measured render.
+    // kForSectionStubLegend is not in it: a disclosure clause, exempt from the <sigs> charge like the e=/owner/tail clauses.
+    [[nodiscard]] std::size_t servedBytes( const ForStubbableSection& legoIn, const ForStubbableSection& composeIn ) const noexcept
+    {
+        return ( legoWillStub ? lego.stubXml.size() : legoIn.renderedBytes ) + ( composeWillStub ? compose.stubXml.size() : composeIn.renderedBytes );
+    }
+};
+
+inline ForSectionStubPlan planForSectionStubs( std::string_view sections, std::string_view forTask, const ForStubbableSection& legoIn,
+                                               const ForStubbableSection& composeIn )
+{
+    ForSectionStubPlan p;
+    // a CANDIDATE has content and was not opted back in by --sections=; it collapses only when its stub is cheaper
+    const bool legoCandidate    = legoIn.hasContent && !sectionsWant( sections, "lego" );
+    const bool composeCandidate = composeIn.hasContent && !sectionsWant( sections, "compose" );
+    if( legoCandidate || composeCandidate )
+    {
+        p.nextInvocation = nextFlag( "--for=", forTask );
+        p.nextInvocation += ' ';
+        p.nextInvocation += nextFlag( "--sections=", "lego,compose" );
+    }
+    if( legoCandidate )
+    {
+        p.lego = priceSectionStub( "lego", legoIn.preCapTotal, p.nextInvocation, legoIn.rendered, legoIn.renderedBytes );
+    }
+    if( composeCandidate )
+    {
+        p.compose = priceSectionStub( "compose", composeIn.preCapTotal, p.nextInvocation, composeIn.rendered, composeIn.renderedBytes );
+    }
+    p.legoWillStub    = legoCandidate && p.lego.collapse;
+    p.composeWillStub = composeCandidate && p.compose.collapse;
+    const std::size_t served = p.servedBytes( legoIn, composeIn );
+    ENSURES( served <= legoIn.renderedBytes + composeIn.renderedBytes,
+             "planForSectionStubs: a collapse made the two sections bigger than their measured renders" );
+    return p;
+}
+
+// lego-charge (K18 root cause): what <lego>/<compose> cost the <sigs> budget, computed BEFORE the sigs render. It used to be
+// the full pre-rendered bytes, while the default answer serves a collapsing section as a ~120 B stub: textual's 6.5 KB lego
+// left 71 B for <sigs> (4 rows shipped in a 4.6 KB answer under a 7.5 KB ceiling). Now a section is charged as it is SERVED.
+// Two rules decide what "served" means here:
+//  * Without an explicit ceiling, the charge is the DEFAULT answer's, also under --sections=: the stub's next= promises the
+//    sections back "byte-identically in one call" (kForSectionStubLegend), and only a call whose <sigs> match the stubbed
+//    answer's renders them so (the lego is narrowed to the rendered sigs' files, §P3×§P4). The restored sections then ride
+//    on top of that answer, priced in est_tokens=; charging them in full would serve FEWER rows than the stub promised.
+//  * Under an explicit ceiling (--token-budget / MCP budget_tokens), a section --sections= opts into is
+//    charged at its full render: the ceiling is a hard bound, and the stub's next= never carries one.
+// The charge is taken before the §P3×§P4 narrow, on the pre-narrow render and count. The narrow only empties implementor
+// lists, so a served stub's total= can only shrink (runForLens ENSURES it). A section served whole was charged at its
+// pre-narrow render, as it was before this change.
+inline ForSectionStubPlan forSectionsSigChargePlan( std::string_view sections, bool explicitCeiling, std::string_view forTask,
+                                                    const ForStubbableSection& legoIn, const ForStubbableSection& composeIn )
+{
+    return planForSectionStubs( explicitCeiling ? sections : std::string_view(), forTask, legoIn, composeIn );
 }
 
 // B6.3 HTTP-route cross-service view: for a set of relevant symbols, emit the synthesized route USE→DEF

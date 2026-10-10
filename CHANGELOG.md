@@ -15,6 +15,36 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Fixed — `--for`: the `<sigs>` budget is charged for the `<lego>`/`<compose>` stub it serves, not the full render
+
+The default answer collapses `<lego>`/`<compose>` to a ~120 B counted stub, but the `<sigs>` budget was charged the full
+render before the collapse. On a corpus whose question names many interfaces, the full `<lego>` filled the budget: one
+measured Python corpus served 4 of 40 signature rows in a ~4.6 KB answer under the 7.5 KB ceiling.
+
+- A section served as a stub is charged at the stub's size (the CLI lens and the MCP `for` tool share one rule).
+- Without an explicit ceiling, `--sections=lego,compose` keeps the stubbed answer's `<sigs>` budget, so the stub's `next=`
+  restores both sections with the same `<sigs>` rows, byte-identically. Under `--token-budget` (MCP `budget_tokens`)
+  the restored sections are charged in full, so the hard bound holds.
+- Measured on 32 `--for` questions over 8 corpora: 19 answers byte-identical, 13 carry more signature rows
+  (4 to 29-33 on the corpus above), and every row the old answer showed is still shown. Gate: `forsectioncollapsecheck` (13).
+- Under `--token-budget` with `--with-graph` or `--detail`, the `<sigs>` budget now leaves room for the graph block, or for
+  the first `--detail` body (whole up to a quarter of the budget, else cut with a `next=` for the rest). Before, they rode
+  past the budget and the first body shrank to its first line. With BOTH flags nothing is reserved: on the measured
+  questions that cut a needed signature row, so those answers keep their rows, serve the first body at its floor, and say
+  `over_ceiling="1"` when they overshoot. Without `--token-budget` nothing changes. Gate: `estchargecheck` #11 A7R.
+- By-design break, owner ruling 2026-10-09: `--token-budget=2000 --detail=20 --with-graph` on this repo's `src` no longer
+  fits its allowance (6029 B vs 5428 B). It keeps every signature row the same budget shows without the two flags, says
+  `over_ceiling="1"`, and the cut first body carries a `next=` that returns exactly the lines it cut. The over-budget note
+  now names the kept rows, the graph block and the first body's floor. It used to blame the header floor, which was false
+  here: the header alone is ~1.8 KB. The old bar still holds for each flag alone and for both flags when the rows fit.
+  Gates: `estchargecheck` #11 A7 twin / A7B / A7R kill+next, `ceilingverdictcheck` (2b).
+- Under `--token-budget`, a spent ceiling no longer drops the compact `<hops>` section without a trace: it ships as
+  `<hops shown="0" total="N" capped="1" next=…/>`, where `next=` is the same question without the budget. A partly cut
+  `<hops>` carries the same `next=`, and a cut `<tail>` carries the `--for … --limit=N` file page. These bytes are reserved
+  from the signature rows, so measured at 2000 tokens over 32 questions: 192 hop rows named on 32/32 answers (none before),
+  65 signature rows fewer (still disclosed by `<sigs>`'s own `next=`). Gates: `estchargecheck` #11 A7D, `fordisclosurecheck`
+  #1b/#1c.
+
 ### Changed — `--for`: the function a question names gets the first hop row, with all its callee names
 
 The compact `--for` answer hop-expanded only the six best-ranked rows, inside a ~1 KB allowance. A question that names

@@ -244,7 +244,13 @@ FMX="$TMP/fmx"; mkdir -p "$FMX/src"
 for i in $( seq -w 1 30 ); do
     printf '// Process one entry: trim the raw input and normalise it for lane %s.\nexport function processEntry%s( input: string ): string {\n    const trimmed = input.trim();\n    if( trimmed.length === 0 ) {\n        return "";\n    }\n    return trimmed.toLowerCase();\n}\n' "$i" "$i" > "$FMX/src/entry$i.ts"
 done
-"$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=800 --legend=full > "$TMP/fmx.xml" 2>/dev/null
+# RE-ANCHORED (lane/lego-charge fix round 4, reported under PROCESS rule 4): at 800 tokens the first --detail body is now
+# reserved a floor out of the sig claim and ships WHOLE (a 7-line body under a quarter of the budget), so the 800 run no
+# longer cuts anything and this arm measured nothing there. The property is unchanged — every truncated body is exactly
+# its whole lines — and is asserted at 300 tokens, where the floor (a quarter of the budget) is below the body and cuts
+# it; the 800 run is kept as a twin below asserting its first body is served whole, byte for byte.
+"$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=300 --legend=full > "$TMP/fmx.xml" 2>/dev/null
+"$BIN" "$FMX" --no-cache --for="processEntry input trim" --detail=30 --token-budget=800 --legend=full > "$TMP/fmx800.xml" 2>/dev/null
 B6="$( python3 - "$TMP/fmx.xml" "$BIN" "$FMX" <<'PY'
 import re, subprocess, sys, html
 doc = open( sys.argv[1], "rb" ).read()
@@ -263,7 +269,25 @@ for at, text in cut:
 print( "OK %d truncated body(ies), each exactly its whole lines%s" % ( len( cut ), " (over_ceiling)" if any( a.get( "over_ceiling" ) == "1" for a, _ in cut ) else "" ) )
 PY
 )"
-case "$B6" in OK*) ok "(B6) formaxtokens fixture: $B6" ;; *) no "(B6) formaxtokens fixture: $B6" ;; esac
+case "$B6" in OK*) ok "(B6) formaxtokens fixture @300: $B6" ;; *) no "(B6) formaxtokens fixture @300: $B6" ;; esac
+# (B6 twin @800) the old operating point: the first body is served whole (no truncated=, no over_ceiling=), byte-identical
+# to an uncut --expand of the same definition.
+B6W="$( python3 - "$TMP/fmx800.xml" "$BIN" "$FMX" <<'PY'
+import re, subprocess, sys, html
+doc = open( sys.argv[1], "rb" ).read()
+m = re.search( rb'<b ([^>]*)><!\[CDATA\[(.*?)\]\]>', doc, re.S )
+if not m:
+    print( "FAIL no body at all" ); sys.exit( 0 )
+at = dict( ( k.decode(), html.unescape( v.decode() ) ) for k, v in re.findall( rb'(\w+)="([^"]*)"', m.group( 1 ) ) )
+if "truncated" in at or "over_ceiling" in at:
+    print( "FAIL first body cut: %s" % m.group( 1 ).decode() ); sys.exit( 0 )
+out = subprocess.run( [ sys.argv[2], sys.argv[3], "--no-cache", "--top-k=0", "--legend=full", "--expand=%s:%s:%s" % ( at["p"], at["l"], at["n"] ) ],
+                      capture_output=True, timeout=300 ).stdout
+whole = re.search( rb'<b [^>]*><!\[CDATA\[(.*?)\]\]>(?:<calls|<note|</b>)', out, re.S ).group( 1 )
+print( "OK %s served whole (%d B)" % ( at["n"], len( whole ) ) if m.group( 2 ) == whole else "FAIL %s differs from its --expand" % at["n"] )
+PY
+)"
+case "$B6W" in OK*) ok "(B6 twin @800) $B6W" ;; *) no "(B6 twin @800) $B6W" ;; esac
 if xmllint --noout "$TMP/fmx.xml" 2>/dev/null; then
     ok "(B6) the document is well-formed"
 else
