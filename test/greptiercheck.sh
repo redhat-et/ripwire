@@ -396,11 +396,18 @@ fi
 for arm in '5|5' '["any"]|["any"]' '{"v":1}|{"v":1}' 'true|true'; do
     val="${arm%%|*}"; echo_="${arm#*|}"
     V_NS="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$SB"'","pattern":"TIERTOKEN_frob","in":'"$val"'}}}' )"
-    if printf '%s' "$V_NS" | grep -q 'invalid value for field: in' && printf '%s' "$V_NS" | grep -qF "got '$echo_'"; then
-        ok "(9e) the live MCP grep verb refuses a non-string in=$val through the shape gate and echoes '$echo_'"
-    else
-        no "(9e) the live MCP grep verb did not refuse in=$val echoing '$echo_' — got: $( printf '%s' "$V_NS" | cut -c1-300 )"
-    fi
+    # the message is read out of the JSON (a quote inside the echoed value is \" on the wire), as crossrefcheck (L10b) does
+    V_MSG="$( printf '%s' "$V_NS" | python3 -c 'import sys,json
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    d=json.loads(line)
+    if "error" in d: print("ERROR", d["error"].get("code"), d["error"].get("message",""), end="")
+    elif d.get("result",{}).get("content"): print("ANSWER", end="")' 2>/dev/null )"
+    case "$V_MSG" in
+        "ERROR -32602 invalid value for field: in"*"got '$echo_'"*) ok "(9e) the live MCP grep verb refuses a non-string in=$val through the shape gate and echoes '$echo_'" ;;
+        *) no "(9e) the live MCP grep verb did not refuse in=$val echoing '$echo_' — got: ${V_MSG:-nothing}" ;;
+    esac
 done
 
 # ═══════════════════════════════════════════════════════════════════════════
