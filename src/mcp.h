@@ -31,7 +31,7 @@
 #include <string>
 #include <algorithm>       // std::find — the --mcp-tools duplicate check and the batch-served lookup
 #include <bit>             // std::popcount — the --mcp-tools profile check
-#include "infra/tablelookup.h"   // findByField — mcpToolIndex, the same row lookup wrap and ingest use
+#include "infra/tablelookup.h"   // findIndexByField — mcpToolIndex, the same row lookup wrap and ingest use
 #include <cstdlib>         // ::realpath — the workspace-pin canonicalization (mcpCanonRoot)
 #include <climits>         // PATH_MAX
 #include "infra/os.h"      // rw::os::getcwd — R2a: the launch-cwd assumed root (resolved once at startup)
@@ -141,17 +141,10 @@ inline constexpr McpToolMask kMcpAllToolsMask = ( McpToolMask{ 1 } << kMcpVerbCo
 // kMcpVerbTable's row for `name`, or kMcpVerbCount when the name is not an advertised tool.
 constexpr std::size_t mcpToolIndex( std::string_view name ) noexcept
 {
-    // Index loop, not findByField's row-pointer arithmetic: g++ 15 rejects the
-    // (char*)&row + offsetof folding under -fsanitize=address ("not a constant
-    // expression", mcp.h static_assert on 33 rows) — same values on every compiler.
-    for( std::size_t i = 0; i < kMcpVerbCount; ++i )
-    {
-        if( kMcpVerbTable[ i ].name == name )
-        {
-            return i;
-        }
-    }
-    return kMcpVerbCount;
+    // The INDEX-shaped lookup, not findByField's row pointer: g++ 15 rejected the pointer form's
+    // row-address arithmetic in constant evaluation under -fsanitize=address (the static_asserts
+    // below) — the same GCC class findIndexByField exists for (#347). Same values on every compiler.
+    return findIndexByField( kMcpVerbTable, &McpVerbInfo::name, name );
 }
 
 // The named profiles. `members` is a comma list of tool names; "" means every tool.
