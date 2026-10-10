@@ -7479,6 +7479,10 @@ inline std::size_t healDefectSites( Snapshot& base, const IdentityAliases& al )
 {
     std::size_t healed = 0;
     std::vector<DefectSiteKey> addSites;
+    // ADD, NEVER OVERWRITE, per `to` anchor: two alias sources that converge on one current anchor (a scheme alias and a
+    // rename alias, CodeRabbit on #383) must not both copy their sites under it — the baseline check above only sees
+    // anchors the baseline already held, not ones this loop filled. The first alias in `from` order fills; the rest skip.
+    std::vector<std::uint64_t> filledTo;
     for( const auto& [ from, to ] : al.toCurrent )
     {
         const auto lo = std::lower_bound( base.defectSites.begin(), base.defectSites.end(), DefectSiteKey{ from, 0 } );
@@ -7487,6 +7491,15 @@ inline std::size_t healDefectSites( Snapshot& base, const IdentityAliases& al )
         {
             continue;
         }
+        if( lo == base.defectSites.end() || lo->anchor != from )
+        {
+            continue;   // nothing to copy: an alias with no recorded sites must not claim the anchor
+        }
+        if( std::find( filledTo.begin(), filledTo.end(), to ) != filledTo.end() )
+        {
+            continue;
+        }
+        filledTo.push_back( to );
         for( auto it = lo; it != base.defectSites.end() && it->anchor == from; ++it )
         {
             addSites.push_back( { to, it->site } );
