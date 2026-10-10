@@ -1115,8 +1115,12 @@ done
 # unpaid clause defining it, est_tokens pricing the bytes delivered (P3's rule), and the P4 claim itself (compact no further
 # over than full). Near miss at 750: paying is what makes it fit — est_tokens <= budget in both dialects, next= rides, no
 # over_ceiling= and no unpaid clause (a label riding every capped answer would pass the 500 half alone).
+# RE-PINNED 2026-10-10 (train 26c): the near miss moves 750 -> 900. lego-charge charges <lego>/<compose> at their served size
+# and #362's <tail next=> rides the bundle, so this fixture's 4-row floor answer prices est_tokens=918 compact / 963 full
+# (was 814 / 859): at 750 both dialects are still at the floor, unpaid and labelled; the paid next= first fits in both
+# dialects at 850 (784 / 829) and at 900 with margin (855 / 868). The 500 half is unchanged (4 rows, over, the clause).
 p4floor_bad=0
-for tb in 500 750; do
+for tb in 500 900; do
     for lg in compact full; do
         ( cd "$P4" && "$BIN" . --for="widget routine dispatcher" --token-budget=$tb --legend=$lg 2>/dev/null ) >"$TMP/p4f.$lg"
     done
@@ -1146,7 +1150,7 @@ for tb in 500 750; do
         p4floor_bad=$(( p4floor_bad + 1 )); no "(P4 floor twin) --token-budget=$tb: compact est_tokens=${pc:-?} over the budget AND over the full answer's ${pf:-?}"
     fi
 done
-[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) at 500 both dialects ship <sigs> next= unpaid at the rank 1..4 floor with over_ceiling=\"1\", the unpaid clause and an honest est_tokens, the 750 run's paid next= fits with no label, compact never further over than full"
+[ "$p4floor_bad" -eq 0 ] && ok "(P4 floor twin) at 500 both dialects ship <sigs> next= unpaid at the rank 1..4 floor with over_ceiling=\"1\", the unpaid clause and an honest est_tokens, the 900 run's paid next= fits with no label, compact never further over than full"
 
 # (P5) the BUDGET LEDGER survives compaction (orchestrator rule, METHODOLOGY §9.3/§9.4: never cut silently). --pack-task's
 # full legend ends with "budget=N bytes (T-token target, ceiling C) | ranking: … | bodies: … | callers: … | notes: … | tests:
