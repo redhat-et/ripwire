@@ -1223,8 +1223,12 @@ fi
 # in the batch): the batch takes 256 (most rows first, then path: f000..f255), the other 44 confirm NOTHING — their parse-worthy rows read kind="text", never kind="def", and
 # <unparsed blobs="44" rows="44" next="… --detail=1"> says so. --detail=1 lifts the guard: all 300 are definitions and the
 # element is gone. The full legend carries the UNPARSED clause on exactly that answer and stays well-formed XML.
+# u.c (HEAD's, 20 calls) gives the answer kind="ref" rows, so the default listing (defs) and listing=all are different
+# pages: the next= replay arm below tells "the same question" from "the default question".
 GG="$TMP/guard"; mkdir -p "$GG"; git -C "$GG" init -q -b main >/dev/null 2>&1; git -C "$GG" config commit.gpgsign false
-printf 'int guardName( int a );\n' >"$GG/g.h"; git -C "$GG" add -A >/dev/null 2>&1; git -C "$GG" commit -qm base >/dev/null 2>&1
+printf 'int guardName( int a );\n' >"$GG/g.h"
+i=0; : >"$GG/u.c"; while [ $i -lt 20 ]; do printf 'int use%d( void ) { return guardName( %d ); }\n' $i $i >>"$GG/u.c"; i=$((i+1)); done
+git -C "$GG" add -A >/dev/null 2>&1; git -C "$GG" commit -qm base >/dev/null 2>&1
 git -C "$GG" checkout -qb many >/dev/null 2>&1
 i=0; while [ $i -lt 300 ]; do n=$( printf '%03d' $i ); printf 'int guardName( int a ) { return a + %d; }\n' $i >"$GG/f$n.c"; i=$((i+1)); done
 git -C "$GG" add -A >/dev/null 2>&1; git -C "$GG" commit -qm many >/dev/null 2>&1; git -C "$GG" checkout -q main >/dev/null 2>&1
@@ -1237,13 +1241,40 @@ if [ $rcGa -ne 0 ] || [ $rcGd -ne 0 ] || ! printf '%s' "$GA" | grep -q '<whereis
     no "whereis (guard): a run produced no <whereis> root (rc $rcGa / $rcGd)"
 else
     { [ "$GT" = "44" ] && [ "$GF" = "256" ] && [ "$GTL" = "f256.c f299.c " ] \
-      && printf '%s' "$GA" | grep -q '<unparsed blobs="44" rows="44" next="--whereis=guardName --detail=1"/>'; } \
-        && ok 'whereis (guard): 256 parsed (f000..f255, most rows first then path), 44 left: their rows read kind="text" (never def) and <unparsed blobs="44" rows="44" next=…--detail=1> discloses them' \
+      && printf '%s' "$GA" | grep -q '<unparsed blobs="44" rows="44" next="--whereis=guardName --whereis-listing=all --detail=1"/>'; } \
+        && ok 'whereis (guard): 256 parsed (f000..f255, most rows first then path), 44 left: their rows read kind="text" (never def) and <unparsed blobs="44" rows="44" next=…--whereis-listing=all --detail=1> discloses them' \
         || { no "whereis (guard): want 256 def + 44 text rows (f256..f299) and the <unparsed> element; got def=$GF text=$GT [$GTL]"; printf '%s' "$GA" | grep -o '<unparsed[^>]*>'; }
     { [ "$( printf '%s' "$GD" | sed 's/<!--.*-->//' | tr '<' '\n' | grep '^hit ref="many" .* p="f' | grep -c 'kind="def"' )" = "300" ] \
       && ! printf '%s' "$GD" | grep -q 'kind="text"' && ! printf '%s' "$GD" | grep -q '<unparsed'; } \
         && ok 'whereis (guard): --detail=1 (the next= it names) lifts the guard: all 300 are definitions, no kind="text", no <unparsed>' \
         || no 'whereis (guard): --detail=1 did not parse every blob'
+    # X1 (rule 5, recoverable via next=): the next= REPLAYS the question. Its argv, run as written, answers the same
+    # listing with the guard lifted — byte for byte the explicit --whereis-listing=all --detail=1 page ($GD), not the
+    # default (defs) page — and draws no "IGNORED" verb-precedence note. The default page's next= names no listing.
+    GN="$( printf '%s' "$GA" | sed -n 's/.*<unparsed [^>]* next="\([^"]*\)".*/\1/p' )"
+    GR="$( "$BIN" "$GG" $GN --limit=1000 --no-cache 2>"$TMP/guard.replay.err" )"; rcGr=$?
+    { [ -n "$GN" ] && [ $rcGr -eq 0 ] && printf '%s' "$GR" | grep -q '<whereis ' && ! printf '%s' "$GR" | grep -q '<unparsed' \
+      && [ "$GR" = "$GD" ] && ! grep -q 'IGNORED' "$TMP/guard.replay.err"; } \
+        && ok "whereis (guard): the <unparsed next=> of a listing=all answer ($GN) replays it: the same listing=all page with the guard lifted" \
+        || { no "whereis (guard): next='$GN' (rc $rcGr) does not replay the listing=all question with the guard lifted"; grep -o '<whereis [^>]*>' <<<"$GR"; cat "$TMP/guard.replay.err"; }
+    GDN="$( "$BIN" "$GG" --whereis=guardName --no-cache 2>/dev/null | grep -o '<unparsed [^>]*>' )"
+    [ "$GDN" = '<unparsed blobs="44" rows="44" next="--whereis=guardName --detail=1"/>' ] \
+        && ok 'whereis (guard): the default page'"'"'s next= names no listing (the default stays the default)' \
+        || no "whereis (guard): the default page's <unparsed> is '$GDN'"
+    if command -v python3 >/dev/null 2>&1; then
+        # The MCP `kind` ref filter has no CLI whereis spelling: next= drops it (as <refs next=> does) instead of naming
+        # --stray-content=, a different verb that would take precedence over --whereis.
+        GM="$( mcpq "$GG" guardName ',"kind":"man","listing":"all"' )"
+        GMN="$( printf '%s' "$GM" | sed -n 's/.*<unparsed [^>]* next="\([^"]*\)".*/\1/p' )"
+        GMR="$( "$BIN" "$GG" $GMN --limit=1000 --no-cache 2>"$TMP/guard.mcpreplay.err" )"; rcGmr=$?
+        { printf '%s' "$GM" | grep -q '<whereis [^>]* filter="man"' && [ "$GMN" = '--whereis=guardName --whereis-listing=all --detail=1' ] \
+          && [ $rcGmr -eq 0 ] && printf '%s' "$GMR" | grep -q '<whereis ' && ! printf '%s' "$GMR" | grep -q '<unparsed' \
+          && ! grep -q 'IGNORED' "$TMP/guard.mcpreplay.err"; } \
+            && ok 'whereis (guard): an MCP answer under kind= gives a next= with no --stray-content= (no CLI whereis ref filter), and it runs whereis with the guard lifted' \
+            || { no "whereis (guard): the MCP kind= answer's next='$GMN' (rc $rcGmr) is not a whereis replay"; cat "$TMP/guard.mcpreplay.err"; }
+    else
+        printf '  SKIP  whereis (guard): MCP kind= next= arm (no python3)\n'
+    fi
     GL="$( "$BIN" "$GG" --whereis=guardName --legend=full --no-cache 2>/dev/null )"
     GC="$( "$BIN" "$GG" --whereis=guardName --legend=compact --no-cache 2>/dev/null )"
     { printf '%s' "$GL" | grep -q 'UNPARSED: the unparsed element' && printf '%s' "$GC" | grep -q 'unparsed blobs=N' && printf '%s' "$GC" | grep -q 'unparsed rows=N' \

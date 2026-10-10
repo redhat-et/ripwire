@@ -3647,8 +3647,9 @@ inline void writeWhereisLegendTail( std::FILE* out, const WhereResult& res )
                            "no parse read: blobs= of them, either past the runaway guard on the parse batch ({} blobs or {} MB, filled "
                            "most rows first, then by path and blob) or a parse that could not finish; rows= is the kind=\"text\" rows they "
                            "gave. Those rows are neither a confirmed definition nor a confirmed reference, and the blobs' other rows read "
-                           "kind=\"ref\". Its next= rides when the guard left some: the same question with the detail flag at 1, which "
-                           "lifts the guard. ", kWhereisParseMaxBlobs, kWhereisParseMaxBytes >> 20 );
+                           "kind=\"ref\". Its next= rides when the guard left some: the same question (the symbol and an explicitly named "
+                           "listing) with the detail flag at 1, which lifts the guard; a ref filter (the MCP kind argument) is not carried, "
+                           "as the CLI has no whereis ref filter. ", kWhereisParseMaxBlobs, kWhereisParseMaxBytes >> 20 );
     }
     // The overlay's own vocabulary, only on an answer that carries it — a clean checkout pays no bytes for it.
     if( res.worktree != WorktreeOverlay::Clean )
@@ -3747,6 +3748,7 @@ struct ListedHits
     std::string_view         attr;
     std::size_t              refsElided = 0;
     std::size_t              defsFolded = 0;   // def rows of other refs a listed row's refs= stands for (folded="N" on the root)
+    WhereisListing           asked      = WhereisListing::ShorterOfDefsAll;   // the listing the question named (whereisServedListing)
 };
 
 // kind= of a row: "def" (a parser's definition), "text" (a parse-worthy line on another ref no parse confirmed,
@@ -3917,7 +3919,11 @@ inline void writeWhereisRoot( std::FILE* out, const WhereResult& res, const Wher
 // nothing — the runaway guard left them (WhereisParseBudget) or the parser could not finish — and the rows of theirs
 // that read kind="text". next= rides only when the guard left some: --detail=1 lifts it. Absent when every
 // parse-worthy blob was parsed (or mirrored HEAD's), so an answer the guard never touched is byte-identical.
-inline void writeWhereisUnparsed( std::FILE* out, const WhereResult& res )
+// The <unparsed next=> replays the SAME question with the guard lifted: the symbol, the listing the question named
+// (an explicit one; the default stays the default) and the detail flag. A ref filter (the MCP `kind`) is NOT carried,
+// as <refs next=> does not carry it: the CLI has no whereis ref filter (--stray-content= is another verb, and naming it
+// would run that verb instead), and the legend's UNPARSED clause says so.
+inline void writeWhereisUnparsed( std::FILE* out, const WhereResult& res, WhereisListing asked )
 {
     const BranchLabelCensus& c = res.branchLabels;
     if( c.leftByGuard + c.failed == 0 )
@@ -3928,9 +3934,12 @@ inline void writeWhereisUnparsed( std::FILE* out, const WhereResult& res )
     if( c.leftByGuard > 0 )
     {
         std::string call = nextFlag( "--whereis=", res.sym );
-        if( !res.filter.empty() )
+        switch( asked )
         {
-            call += " " + nextFlag( "--stray-content=", res.filter );   // the ref filter that made this page
+            case WhereisListing::Defs: call += " --whereis-listing=defs"; break;
+            case WhereisListing::Refs: call += " --whereis-listing=refs"; break;
+            case WhereisListing::All:  call += " --whereis-listing=all"; break;
+            case WhereisListing::ShorterOfDefsAll: break;
         }
         next = nextAttrXml( call + " --detail=1" );
     }
@@ -4110,7 +4119,7 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
     // text hit), which is a claim strong enough to override the line-removal oracle outright. So the fate
     // row is printed unless the index itself already proved the symbol is defined on HEAD.
     writeWhereisFate( out, res, ex );
-    writeWhereisUnparsed( out, res );
+    writeWhereisUnparsed( out, res, listed.asked );
 
     writeWhereisRows( out, res, listed, hitPage, headDate, ex );
     rw::emitRaw( out, "</whereis>" );
@@ -4130,7 +4139,9 @@ inline ListedHits whereisServedListing( const WhereResult& res, std::size_t maxH
 {
     if( listing != WhereisListing::ShorterOfDefsAll )
     {
-        return listedHits( res, listing );
+        ListedHits named = listedHits( res, listing );
+        named.asked      = listing;   // an explicit listing rides the <unparsed next=> (writeWhereisUnparsed)
+        return named;
     }
     ListedHits defs = listedHits( res, WhereisListing::Defs );
     if( defs.attr.empty() )

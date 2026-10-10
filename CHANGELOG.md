@@ -33,7 +33,9 @@ went from 60 rows of `total="2197"` (54 of them call sites) to 2 rows, both the 
   the twelve definition shapes the stricter reading lost; a branch-only `#define` and annotated Java method.
 - **A runaway guard on that parse, disclosed.** At most 256 blobs or 64 MB per answer, most rows first. A blob the guard
   leaves, or one the parser cannot finish, confirms nothing: its parse-worthy lines read `kind="text"` (listed beside the
-  definitions, never `kind="def"`) and an `<unparsed blobs= rows= next=>` element counts them; `--detail=1` lifts the guard.
+  definitions, never `kind="def"`) and an `<unparsed blobs= rows= next=>` element counts them; `--detail=1` lifts the guard. Its `next=` replays the same question with `--detail=1` (an explicit
+  `--whereis-listing=` rides with it); an MCP `kind` ref filter is not carried, as `<refs next=>` does not carry it: the CLI
+  has no whereis ref filter.
 - **A definition line several refs hold is one row.** Under `listing="defs"` a `kind="def"` (or `kind="text"`) row outside
   the checkout whose path and line text other refs hold too is printed once, for the first of those refs by name, with
   `refs="N"`; the root's `folded=` counts the rows it stands for (on the first page, `shown + more + folded + refs count =
