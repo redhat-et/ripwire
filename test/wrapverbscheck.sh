@@ -289,27 +289,35 @@ else
 fi
 
 echo
-echo "=== 8. one-shot --for recipes budget with --token-budget, never --max-tokens ==="
+echo "=== 8. one-shot --for recipes name no budget (never --max-tokens, never a --token-budget) ==="
 
 # --for does not read --max-tokens: it warns on stderr and emits the full, unbudgeted result.
 # --token-budget is the flag that actually shapes --for's output. The wrap recipes are the tool's
 # own advice, so they must not teach the inert pairing (found live 2026-08-20: wrap claude
 # recommended `--for="<task>" --max-tokens=2000`, which produced an unbudgeted map + a warning).
-for _agent in claude codex cursor windsurf gemini opencode aider; do
+for _agent in claude codex cursor windsurf gemini opencode openclaw hermes aider; do
     _out="$( "$BIN" wrap "$_agent" 2>/dev/null )"
-    if echo "$_out" | grep -- '--for=' | grep -q -- '--max-tokens'; then
+    if ! echo "$_out" | grep -q -- '--for='; then
+        no "wrap $_agent printed no --for= line — the --max-tokens check below would pass on nothing"
+    elif echo "$_out" | grep -- '--for=' | grep -q -- '--max-tokens'; then
         no "wrap $_agent pairs --for with --max-tokens — inert advice, --for ignores that flag"
     else
         ok "wrap $_agent never pairs --for with --max-tokens"
     fi
 done
-# the three recipes that ship a budgeted one-shot --for line must budget it with --token-budget=
-for _agent in claude opencode aider; do
+# K29 (2026-10-08): the one-shot --for recipes name NO budget: all five CLI-first agents (claude, opencode, codex,
+# openclaw, hermes) print the same line, plus aider's repo-map line. A budget handed to an agent is a ceiling it
+# pastes for every task: in round-2 mechanical (provisional) scoring --token-budget=2000 answered fewer of the
+# measured questions than the default, and the owner rule is lean AND answered. The default budget shapes the
+# answer; the recipe must not narrow it.
+for _agent in claude opencode codex openclaw hermes aider; do
     _out="$( "$BIN" wrap "$_agent" 2>/dev/null )"
-    if echo "$_out" | grep -- '--for=' | grep -q -- '--token-budget='; then
-        ok "wrap $_agent one-shot --for recipe carries --token-budget="
+    if ! echo "$_out" | grep -q -- ' --for="<your task>"'; then
+        no "wrap $_agent lost its one-shot --for=\"<your task>\" recipe line"
+    elif echo "$_out" | grep -- '--for=' | grep -q -e '--token-budget' -e '--max-tokens'; then
+        no "wrap $_agent one-shot --for recipe carries a budget flag — it must recommend the default budget"
     else
-        no "wrap $_agent one-shot --for recipe lost its --token-budget= budget"
+        ok "wrap $_agent one-shot --for recipe is present and names no budget flag"
     fi
 done
 

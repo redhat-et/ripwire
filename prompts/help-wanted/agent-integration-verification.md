@@ -61,7 +61,7 @@ over it.
 | Windsurf | MCP | `~/.codeium/windsurf/mcp_config.json` | same as Cursor | `.windsurfrules` | none |
 | Gemini CLI | MCP | `~/.gemini/settings.json` | same as Cursor | `GEMINI.md` | none |
 | opencode | CLI first, MCP alternative | `opencode.json` or `~/.config/opencode/opencode.json` | `{"mcp":{"ripwire":{"type":"local","command":["ripwire","--mcp"]}}}` | `AGENTS.md` (also `~/.config/opencode/AGENTS.md`) | none |
-| aider | ranked repo map, no MCP | none | none — `ripwire . --for="<your task>" --token-budget=2000 > .ripwire-map.txt`, then `aider --read .ripwire-map.txt` | `CONVENTIONS.md` | none |
+| aider | ranked repo map, no MCP | none | none — `ripwire . --for="<your task>" > .ripwire-map.txt`, then `aider --read .ripwire-map.txt` | `CONVENTIONS.md` | none |
 
 Every MCP recipe advertises **31 tools**. A `tools/list` over the server's stdio answers 31 tools in
 41,908 bytes on that build.

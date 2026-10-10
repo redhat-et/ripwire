@@ -705,7 +705,7 @@ inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
     rw::emitTo( stdout,
         "# RECOMMENDED — this agent can run shell commands, so call the CLI directly. It costs\n"
         "# nothing until you invoke it, and it reads {}, so the paste block below IS the wiring:\n"
-        "{} . --for=\"<your task>\" --token-budget=2000\n"
+        "{} . --for=\"<your task>\"\n"
         "#\n"
         "# ...every follow-up call answers with the compact legend by default (terse definitions of only the\n"
         "# attributes the answer carries; the payload is byte-identical either way). Add --legend=full when a\n"
@@ -808,7 +808,7 @@ inline void wrapEmitAgent( const std::string_view agent, const WrapListing& list
     {
         rw::emitRaw( stdout,
             "# ripwire -> aider (no MCP; feed a ranked repo map as read-only context)\n"
-            "ripwire . --for=\"<your task>\" --token-budget=2000 > .ripwire-map.txt\n"
+            "ripwire . --for=\"<your task>\" > .ripwire-map.txt\n"
             "aider --read .ripwire-map.txt\n"
             "# re-run the first line when the tree changes; the warm cache makes it ~instant.\n" );
     }

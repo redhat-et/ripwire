@@ -38,6 +38,15 @@ that repeat the question's other words, so its callees — the names an agent ne
   answer. Measured on the 32 `--for` rows of the round-1 comparison set: the two in-scope rows now name 5 of 5 gold
   callee items they missed (were 0 of 5); 23 of 32 answers are byte-identical, 1 differs only in `noedge=`, and 8 grow by 0.2–1.1 KB (+1.4% over all 32). Gate:
   `test/ownerhopcheck.sh`.
+### Changed — `ripwire wrap` recommends `--for` at its default budget
+
+The CLI-first paste block (claude, codex, opencode, openclaw, hermes) and the aider repo-map line now read
+`--for="<your task>"` instead of adding `--token-budget=2000`. That budget is a ceiling. Over 40 `--for` questions in
+eight open-source repositories (one release binary, `--no-cache`) it halved the median answer (4.6 KB against 9.2 KB).
+It dropped signature rows on 35 questions and call-hop rows on 24. Only the signature cut carried `capped="1"` and a
+`next=`. The file tail and two partial hop cuts carried `capped="1"` alone, and on 24 questions the whole call-hop block
+was left out with no marker (22 of them had hop rows). The default budget and every other knob are unchanged, and
+`--token-budget=N` still works when passed by hand. Only the printed `wrap` text changes.
 
 ### Changed — a call bound by name alone keeps its rows, marked `via="name"`; typed receivers resolve
 
