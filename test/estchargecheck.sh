@@ -818,18 +818,27 @@ done
 [ "$a7s_inside_labelled" -gt 0 ] \
     && ok "#11 A7 sweep control: $a7s_inside_labelled budget(s) carry a root over_ceiling=\"1\" INSIDE the allowance — the sweep crosses the late-label band" \
     || no "#11 A7 sweep control: no budget carried over_ceiling=\"1\" inside the allowance — the sweep no longer reaches the est_tokens > N band, re-anchor its ranges"
+# TRAIN 26c RE-PIN (2026-10-10) of the three regime arms below — the floor twin, C3 and its near miss. lego-charge charges
+# <lego>/<compose> to the <sigs> budget at their served size and #362's <tail next=> rides the bundle, so on this corpus the
+# merged binary's 4-row floor answer costs ~270 B more than 26b's: at "serialize the map" the cut never leaves 5 rows while
+# both the unpaid and the paid answer land over (the paid 4-row answer fits from 920, the cut leaves 5 rows from 920 — no C3
+# window at any budget 700..1400, swept step 10 on the merged binary and on lego-charge's pre-continuation binary 1cfbfdcc).
+# The task "map row serializer" on the same corpus has all three regimes: the floor at 890..910 (4 rows, the handle unpaid,
+# no last-rung note; the pre-continuation binary fits with 4 rows), C3 at 920..939 (the cut leaves 5 rows — 1cfbfdcc serves
+# 5, over, last rung fired — and the paid 4-row answer is over too), the payable near miss from 940 (the paid 4-row answer
+# fits, no label). Pinned at 900 / 925 / 970. The sweep above keeps "serialize the map". Assertions unchanged.
 # A7 UNPAID TWIN, EXERCISED EVERY RUN (knob-honesty-068; rulings 2026-10-07). The A7 arm and the sweep accept the twin only
 # as an alternative, so a fixture that stopped reaching it would leave it untested. On this git-less corpus at
 # --token-budget=780 the default bundle's <sigs> sits at its rank 1..4 floor: the answer the cut alone leaves FITS (the
 # pre-continuation binary, 255dc199, serves it at est_tokens=774 with no label), its next= cannot be paid in rows, and the
 # document lands past the allowance only by the handle — the twin must hold, with no last-rung disclosure to lean on.
-( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=780 --no-cache ) >"$A7S/floor.xml" 2>/dev/null; fl_rc=$?
-fl_a="$( awk 'BEGIN{printf "%d", 780*2.36*1.15}' )"
+( cd "$A7S" && "$BIN" corpus --for="map row serializer" --token-budget=900 --no-cache ) >"$A7S/floor.xml" 2>/dev/null; fl_rc=$?
+fl_a="$( awk 'BEGIN{printf "%d", 900*2.36*1.15}' )"
 if [ "$fl_rc" -eq 0 ] && ! grep -aqF '[over_ceiling= is 1 on the root: the header floor' "$A7S/floor.xml" \
    && fl_why="$( sigs_unpaid_twin "$A7S/floor.xml" "$fl_a" )"; then
-    ok "#11 A7 unpaid twin @780: $fl_why — next= ships at the floor and the overshoot is labelled over_ceiling=\"1\" with its clause"
+    ok "#11 A7 unpaid twin @900: $fl_why — next= ships at the floor and the overshoot is labelled over_ceiling=\"1\" with its clause"
 else
-    no "#11 A7 unpaid twin @780 (exit $fl_rc): ${fl_why:-the ladder last rung fired, so the twin is not the only disclosure} — the <sigs> floor did not ship its next= with a labelled, honestly priced overshoot"
+    no "#11 A7 unpaid twin @900 (exit $fl_rc): ${fl_why:-the ladder last rung fired, so the twin is not the only disclosure} — the <sigs> floor did not ship its next= with a labelled, honestly priced overshoot"
 fi
 # C3 (orchestrator ruling 2026-10-07): NEVER DROP ROWS TO PAY FOR next= WHEN THE ANSWER IS OVER ITS CEILING ANYWAY. At 790 the
 # answer the cut alone leaves is past its ceiling already (255dc199 serves 5 rows there at est_tokens=952, last rung fired);
@@ -837,28 +846,28 @@ fi
 # own rows — at least 255dc199's 5 (re-pin from a pre-continuation binary if row bytes change; smaller rows only raise it) —
 # and MORE than the paid near miss at 850 serves (4 rows: there paying is what makes the answer fit), with next= riding
 # unpaid and over_ceiling="1" + the unpaid clause on the root. RED on dd6e4c8e (4 rows).
-( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=790 --no-cache ) >"$A7S/c3.xml" 2>/dev/null; c3_rc=$?
-( cd "$A7S" && "$BIN" corpus --for="serialize the map" --token-budget=850 --no-cache ) >"$A7S/paid.xml" 2>/dev/null; pd_rc=$?
+( cd "$A7S" && "$BIN" corpus --for="map row serializer" --token-budget=925 --no-cache ) >"$A7S/c3.xml" 2>/dev/null; c3_rc=$?
+( cd "$A7S" && "$BIN" corpus --for="map row serializer" --token-budget=970 --no-cache ) >"$A7S/paid.xml" 2>/dev/null; pd_rc=$?
 sigs_shown(){ grep -aoE '<sigs [^>]*>' "$1" | tail -1 | grep -oE ' shown="[0-9]+"' | tr -dc '0-9'; }
 c3_sh="$( sigs_shown "$A7S/c3.xml" )"; pd_sh="$( sigs_shown "$A7S/paid.xml" )"
 c3_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/c3.xml" | head -1 )"
 if [ "$c3_rc" -eq 0 ] && [ -n "$c3_sh" ] && [ -n "$pd_sh" ] && [ "$c3_sh" -ge 5 ] && [ "$c3_sh" -gt "$pd_sh" ] \
    && grep -aqE '<sigs [^>]* capped="1"[^>]* next="--for=' "$A7S/c3.xml" && [ "${c3_root#* over_ceiling=\"1\"}" != "$c3_root" ] \
    && grep -aqF 'next= rides unpaid: no row is dropped to pay for it' "$A7S/c3.xml"; then
-    ok "#11 A7 C3 @790: over its ceiling either way, the answer keeps the cut's own $c3_sh rows (>= 255dc199's 5, > the paid 850 answer's $pd_sh) — next= unpaid, over_ceiling=\"1\" + the unpaid clause"
+    ok "#11 A7 C3 @925: over its ceiling either way, the answer keeps the cut's own $c3_sh rows (>= the pre-continuation binary's 5, > the paid 970 answer's $pd_sh) — next= unpaid, over_ceiling=\"1\" + the unpaid clause"
 else
-    no "#11 A7 C3 @790 (exit $c3_rc): shown=${c3_sh:-?} (want >= 5 and > the paid 850 answer's ${pd_sh:-?}), next= + over_ceiling=\"1\" + the unpaid clause — rows were dropped to pay for a handle that cannot make the answer fit"
+    no "#11 A7 C3 @925 (exit $c3_rc): shown=${c3_sh:-?} (want >= 5 and > the paid 970 answer's ${pd_sh:-?}), next= + over_ceiling=\"1\" + the unpaid clause — rows were dropped to pay for a handle that cannot make the answer fit"
 fi
 # Its near miss, 850 — the PAYABLE case, unchanged: paying is what makes the answer fit (255dc199: 5 rows, est_tokens=911,
 # over), so the handle is paid (the block sheds its bytes above the floor) — next= rides inside the allowance, and neither
 # over_ceiling="1" nor the unpaid clause appears (a label that rode on every capped answer would pass the arms above alone).
-pd_b="$( bytes_of "$A7S/paid.xml" )"; pd_a="$( awk 'BEGIN{printf "%d", 850*2.36*1.15}' )"
+pd_b="$( bytes_of "$A7S/paid.xml" )"; pd_a="$( awk 'BEGIN{printf "%d", 970*2.36*1.15}' )"
 pd_root="$( grep -aoE '^<ctx [^>]*>' "$A7S/paid.xml" | head -1 )"
 if [ "$pd_rc" -eq 0 ] && [ "$pd_b" -le "$pd_a" ] && grep -aqE '<sigs [^>]* capped="1"[^>]* next="--for=' "$A7S/paid.xml" \
    && [ "${pd_root#* over_ceiling=\"1\"}" = "$pd_root" ] && ! grep -aqF 'next= rides unpaid' "$A7S/paid.xml"; then
-    ok "#11 A7 unpaid twin near miss @850: the capped <sigs> pays for its next= — $pd_b B <= $pd_a B, no over_ceiling=, no unpaid clause"
+    ok "#11 A7 unpaid twin near miss @970: the capped <sigs> pays for its next= — $pd_b B <= $pd_a B, no over_ceiling=, no unpaid clause"
 else
-    no "#11 A7 unpaid twin near miss @850 (exit $pd_rc): $pd_b B vs $pd_a B — expected a paid next= inside the allowance with no label"
+    no "#11 A7 unpaid twin near miss @970 (exit $pd_rc): $pd_b B vs $pd_a B — expected a paid next= inside the allowance with no label"
 fi
 
 # ── #11 A7R (lego-charge fix round 4): THE TRAILING-SECTION RESERVE. Under --token-budget, --with-graph's block and the
