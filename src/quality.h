@@ -4616,8 +4616,11 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     }
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
-    atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
+    if( !gitWalksAbandoned() )                                                     // an abandoned read is a prefix: never cached
+    {
+        atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );     // best-effort; a failed
                                                                                      // write just recomputes next time
+    }
     return raw;
 }
 

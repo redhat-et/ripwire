@@ -674,7 +674,22 @@ struct GitCommandLines
     std::vector<std::string> lines;
     bool                     isStarted = false;
     int                      status    = 0;
+    bool                     abandoned = false;   // the read stopped early (abandonGitWalks): lines is a prefix, never an answer
 };
+
+// A git walk this run no longer needs: --for / --metrics / --exemplar start the 18-month history walk beside the ingest
+// (main.cpp startHistoryWalks), and a memory-guard refusal used to join that walk's future before exiting — the refusal
+// line was on stderr, the exit code waited for the end of the log (CodeRabbit on #383, main.cpp:3721). Set once,
+// process-wide, only on an exit path: every git-pipe reader stops at its next line and pcloses, git gets SIGPIPE on its
+// next write, and the join ends there. A reader that stopped early says so (`abandoned`), and the stream cache
+// (quality.h gitRawCommitStreamCached) never writes a prefix. test/memguardcheck.sh (B21).
+inline std::atomic<bool>& gitWalkAbandonFlag() noexcept
+{
+    static std::atomic<bool> flag{ false };
+    return flag;
+}
+inline void abandonGitWalks() noexcept { gitWalkAbandonFlag().store( true, std::memory_order_relaxed ); }
+inline bool gitWalksAbandoned() noexcept { return gitWalkAbandonFlag().load( std::memory_order_relaxed ); }
 
 inline GitCommandLines gitCommandLines( const std::string& cmd )
 {
@@ -703,6 +718,11 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
     std::string line;
     while( readByteSafeLine( pipe, line ) )
     {
+        if( gitWalksAbandoned() )
+        {
+            out.abandoned = true;   // the rest of the stream is never read; pclose below ends the child at its next write
+            break;
+        }
         while( !line.empty() && ( line.back() == '\n' || line.back() == '\r' ) )
         {
             line.pop_back();

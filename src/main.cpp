@@ -5247,6 +5247,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                 DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit between workspace roots — exit 5, one stderr line" );
                 rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "ingest of workspace root " + std::to_string( parts.size() ) + " of "
                                                                                    + std::to_string( ws.size() ) + " (" + r.label + ")" ) );
+                rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
                 return 5;
             }
         }
@@ -5271,10 +5272,12 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         rw::memguard::answerStops();   // the refusal answers for any stop the ingest recorded
         DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the ingest — exit 5, one stderr line" );
         rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "ingest" ) );
+        rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;
     }
     if( const int rc = memoryStopExit( ing, cfg, verbPrec.winner ); rc != 0 )
     {
+        rw::abandonGitWalks();   // same: historyWalks joins on this return, and the answer it fed is refused
         return rc;
     }
     if( cfg.ignoreTests )
@@ -5343,6 +5346,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     {
         DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build — exit 5, one stderr line" );
         rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build" ) );
+        rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;
     }
 

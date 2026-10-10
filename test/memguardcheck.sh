@@ -515,6 +515,36 @@ if [ "$rc" = 0 ] && grep -q 'memory_stop=parse' "$TMP/b13c.out" && ! grep -q 'ca
 else
     no "(B13c) rc=$rc stderr: $( grep '^ripwire:' "$TMP/b13c.err" | head -c 250 )"
 fi
+# (B21) a refusal does not wait for the history walk (CodeRabbit on #383, main.cpp:3721). --for starts the 18-month git walk
+#        beside the ingest; a memory-guard refusal used to join that walk's future before exiting, so the exit code waited for
+#        the end of the log. With a git shim whose `log` streams one line every 0.1 s for 6 s (every other git call reaches the
+#        real git), the refusal must return well before the stream ends: the walker stops at its next line and the join ends
+#        there. Fresh TMPDIR, so no cached stream from an earlier arm stands in for the walk; the shim records that it served log.
+SHIM="$TMP/shim"; mkdir -p "$SHIM" "$TMP/b21tmp"
+REALGIT="$( command -v git )"
+cat > "$SHIM/git" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+    if [ "\$a" = log ]; then
+        : > "$SHIM/log-served"
+        i=0
+        while [ \$i -lt 60 ]; do echo "shim-line \$i" || exit 0; sleep 0.1; i=\$((i+1)); done
+        exit 0
+    fi
+done
+exec "$REALGIT" "\$@"
+EOF
+chmod +x "$SHIM/git"
+t0=$( date +%s )
+PATH="$SHIM:$PATH" TMPDIR="$TMP/b21tmp" run_trip crawl:30 "$FXG" --no-cache --for=d --max-memory=64M >"$TMP/b21.out" 2>"$TMP/b21.err"; rc=$?
+el=$(( $( date +%s ) - t0 ))
+if [ ! -e "$SHIM/log-served" ]; then
+    no "(B21) premise: the shim never served a git log — the history walk did not run against it (rc=$rc)"
+elif [ "$rc" = 5 ] && grep -q '^ripwire: .*cannot answer from a partial index' "$TMP/b21.err" && [ "$el" -le 3 ]; then
+    ok "(B21) --for over a crawl stop refuses in ${el}s while the shim's log still streams: the walk is abandoned, not joined"
+else
+    no "(B21) rc=$rc elapsed=${el}s (the shim's log streams for 6 s; a join waits it out) stderr: $( grep '^ripwire:' "$TMP/b21.err" | head -c 200 )"
+fi
 # (B16) --query --format=candidates is a report verb, so it refuses a partial index like the rest (pinned: its
 #       <candidates> root has no header to carry the cut)
 run_trip parse:10 "$FX" --no-cache --query=d_17 --format=candidates >"$TMP/b16.out" 2>"$TMP/b16.err"; rc=$?
