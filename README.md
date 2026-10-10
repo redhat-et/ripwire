@@ -190,6 +190,16 @@ you need — no follow-on grep, no three more whole-file reads to fill in what i
 followed by three greps is the same search paid for twice: it does not save you tokens and it does
 not make the coding faster.
 
+**Two jobs, one goal.** An agent meeting a codebase does two things, and ripwire is shaped for both:
+
+1. **Orient — `ripwire .`** One call gives the ranked map: the main subsystems, the program entry points,
+   the symbols that matter most, and a count of every file the ranking left out. The most important
+   information about a new tree, in as few calls as possible.
+2. **Ask — `--for`, `--expand`, `--callers`, `--path`, …** After that, each question gets a lean answer:
+   as few bytes as it can spend while still answering the question fully, so no follow-up grep is needed.
+
+That is the goal, and not every answer reaches it yet; the stair-steps below are how we get there.
+
 <details>
 <summary>The two stair-steps that make it reachable — <b>honest about what is missing</b>, <b>priced in what it spends</b></summary>
 
@@ -215,6 +225,9 @@ clue where to look next. So every change is judged on more than "was it right":
 - **False-confidence rate:** wrong answers that claim to be complete — the worst case, held near zero.
 - **Next-clue usefulness:** for partial and wrong answers, whether following the answer's first
   suggested next step reaches what the question needed, within one hop. Graded blind.
+- **Recoverability:** for every cut answer, whether following its `next=` returns everything that was cut.
+- **Tokens per complete answer:** total tokens an agent spends across a scenario, divided by the questions it got fully answered.
+- **Cut-row recoveries:** how often a needed item arrived only through a continuation.
 
 **Answering comes first; efficiency is how we get there.** We aim for answers about as lean as the
 leanest tools, but a byte budget is never allowed to cost an answer. We have gone too far toward short
@@ -222,6 +235,27 @@ answers before and cut information that was needed, so now every size limit has 
 runaway guard far above typical answers (it catches an output bug, and says so when it trips), or a
 stair-step target where anything over it must be explained. A capped answer is always measured
 against the same answer uncapped, and the one that answers better wins.
+
+**A cut is only honest if you can get the rest back.** Disclosing a cut is the floor, not the bar: a capped
+answer plus the `next=` it prints must return everything the uncapped answer had. A test that checks this for every
+budget option on every command is being built, so that "the answer was cut" always comes with "and here is the rest".
+
+**What a budget may spend first.** When a budget is tight, ripwire drops bytes that carry no answer before
+it drops answers: repeated legend text, duplicated paths, bodies whose signature already says what you need.
+Only then the lowest-ranked rows, each counted. A whole section never disappears without a marker.
+
+**Budgets are yours to set, never ours to impose.** The defaults and the setups `ripwire wrap` writes carry no
+budget that cuts a typical answer; a budget is a choice the caller makes, with its cost disclosed.
+
+**Efficiency is counted per complete answer, across the whole task.** Bytes per answer can fall while the task
+gets more expensive, if the agent then has to ask again. So the efficiency figure is tokens per complete answer
+over a whole scenario — orient, then the questions that follow — not bytes per call.
+
+**Ranking is the tool's best guess; the next= is the safety net — and we measure how often the net is needed.** ripwire cannot always
+know which row answers the question; it goes by ranking. When a needed item appears only after following an answer's next=, the
+honesty layer saved the answer but the ranking put that item below the cut. We count those per round:
+- **Recovered through next=:** the item was cut but recoverable — one extra call. Driving this down is ranking work.
+- **Lost:** the item was cut with no marker or no working next= — a bug, fixed first.
 </details>
 
 ### Same answer, a fraction of the tokens — read this table first if your agent is on a budget
@@ -1065,7 +1099,7 @@ every dependency is vendored in-tree, so the build completes with the network of
 git clone https://github.com/redhat-et/ripwire.git
 cd ripwire
 cmake -S . -B build && cmake --build build -j
-./build/ripwire . --max-tokens=3000   # the ranked map — start here on an unfamiliar repo (bare it is ~22 KB here; this keeps the head at ~6 KB)
+./build/ripwire .   # orient once: the ranked map of an unfamiliar repo (add --max-tokens=N only if your context is tight — it cuts the map and says so)
 ```
 
 <details>
@@ -1109,7 +1143,7 @@ skills/install.sh --codex       # Codex CLI: the task-shaped skills that say whe
 Four commands worth learning first:
 
 ```bash
-ripwire . --max-tokens=3000                        # the ranked map — start here (bare it is ~22 KB / ~9K est_tokens on this repo; this keeps the head at ~6 KB / ~2.5K)
+ripwire .                                          # orient once: the ranked map of an unfamiliar repo (add --max-tokens=N only if your context is tight — it cuts the map and says so)
 ripwire . --for="incremental cache invalidation"   # the task lens: what to touch, ranked
 ripwire . --callers=someFunction                   # who calls it
 ripwire . --test-gate                              # before you commit: which tests must run
@@ -2609,12 +2643,14 @@ every request cross the network in the clear: put a TLS-terminating reverse prox
 Change to the repository. Run the following command:
 
 ```bash
-ripwire . --max-tokens=3000   # start here on an unfamiliar repository
+ripwire .   # orient once on an unfamiliar repository
 ```
 
-The command writes the top of the ranked map within the token budget. Remove `--max-tokens=3000`
-for the complete map. The complete map is larger. On a large tree, use `--top-k=N` to limit the row
-count.
+The command writes the ranked map: the main subsystems, the entry points, the most important symbols,
+and a count of every file the ranking left out. Read it once per session, then ask lean questions
+(`--for`, `--expand`, `--callers`). If your context is tight, `--max-tokens=N` keeps only the head of
+the map; the cut is disclosed (`shown=` of `symbols=`), but it can drop what you need, so prefer the
+full map when it fits.
 
 The first call on a tree parses it; every call after that reads a cache and answers in a fraction of
 the time. Judge the cost of the tool by the second call, not the first. If the first call fails, or
@@ -2625,7 +2661,7 @@ identity of the index, and says which one is at fault.
 
 | Task | Command |
 | --- | --- |
-| Orient in a new tree | `ripwire . --max-tokens=3000` |
+| Orient in a new tree | `ripwire .` |
 | Prepare for a task | `ripwire . --for="<task description>"` |
 | Get everything for one task in a single call | `ripwire . --pack-task="<task description>"` |
 | Ask which command to run | `ripwire . --help-task="<task description>"` |

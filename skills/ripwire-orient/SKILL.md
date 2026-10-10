@@ -25,9 +25,11 @@ subsystem you're working in — also accepts a remote `ripwire <git-url>` (shall
 you can orient in a dependency before ever cloning it) — or several roots for a split checkout,
 `ripwire dir1 dir2 --report`: ONE merged, root-labeled map instead of two separate mental models.
 
-**Orient ONCE per session, then look up lean.** Run the map (`ripwire <dir>`, or `--for`) once to learn the
-subsystems and entry points; after that `--expand` / `--outline` / `--whereis` / `--callers` answer with no
-ride-along map. If you skipped the orient step, the `map_next=` on an `--expand` root is the call that prints it.
+**Orient ONCE per session, then look up lean.** Plain `ripwire <dir>` is the one-call orient: the ranked map with
+the subsystems, the program entries and every file the ranking left out (`<inv>`). Only that call carries `<inv>`:
+a `--for`, `--expand` or `--max-tokens` map does not, and `--max-tokens` drops the tier (use `--top-k` to keep it).
+After it, `--expand` / `--outline` / `--whereis` / `--callers` answer with no ride-along map. If you skipped the
+orient step, the `map_next=` on an `--expand` root is the call that prints it.
 
 ## The escalation ladder — climb only until you feel oriented
 
@@ -108,7 +110,7 @@ a positive, explicit `--top-k` is inert on plain `--for` (it warns on stderr and
 bound a `--for` call with `--signatures-only`, `--token-budget=N` or `--detail=N` instead.
 When the ranked rows leave files out, the map ends with `<inv>`: the program entries (`<entry>`, by each language's entry convention)
 and every unshown file, named or counted per directory (`<ls>`). Read it before concluding a file or entry point is
-not there; `--no-inventory` drops it (the rows are unchanged).
+not there; `--no-inventory` drops it (the rows are unchanged), and so does `--max-tokens` — `--top-k` keeps it.
 
 ## Orienting N agents at once, not yourself — `--partition=N`
 
