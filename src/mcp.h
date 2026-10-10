@@ -1498,6 +1498,10 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // whereis arm, a non-string `listing:5` decoded to "" after that gate had run, its shape refusal was dropped, and the
             // closed-set refusal then told the caller it sent '' (CodeRabbit 5468003465; test/crossrefcheck.sh LEAN (L10b)).
             const std::string listingArg = strArg( "listing" );
+            // grep: code|any (the CLI --grep-in twin). The `listing` sibling (CodeRabbit 5468003465, checklist 26): read inside the
+            // grep arm, a non-string `in:5` decoded to "" after the shape gate had run, its refusal was dropped, and the arm then
+            // answered the default tier as if nothing had been sent. test/greptiercheck.sh (9e).
+            const std::string grepInArg  = strArg( "in" );
             const std::string from    = strArg( "from" );     // path verb: source symbol
             const std::string to      = strArg( "to" );       // path verb: destination symbol
             const std::string trace   = strArg( "trace" );    // L4 from_trace: the raw trace TEXT
@@ -2206,7 +2210,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     // registers the field and the batch surface already refuses loudly. Both dialects now
                     // read the value through grepInModeFromArg, so they cannot disagree about the set.
                     rw::GrepIn        grepInMode = rw::GrepIn::Code;
-                    const std::string inRefusal  = rw::grepInModeFromArg( strArg( "in" ), grepInMode );
+                    const std::string inRefusal  = rw::grepInModeFromArg( grepInArg, grepInMode );
                     if( !inRefusal.empty() )
                     {
                         resp = errResultMsg( -32602, inRefusal );

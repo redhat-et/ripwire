@@ -390,6 +390,18 @@ fi
 [ "$( jkey total "$V_OK" )" = "$d_hits" ] \
     && ok "(9d-b) an explicit in=\"code\" still answers (the refusal is on unknown values, not on presence)" \
     || no "(9d-b) in=\"code\" was refused or changed the answer — the value check is too broad"
+# ── (9e) a NON-STRING in= refuses through the shared shape gate and echoes the value SENT (CodeRabbit 5468003465's
+# sibling: `in` used to be read inside the grep arm, after that gate, so in:5 decoded to "" and the verb answered the
+# default tier as if nothing had been sent). Near-miss twins: (9d) a string outside the set still refuses by name.
+for arm in '5|5' '["any"]|["any"]' '{"v":1}|{"v":1}' 'true|true'; do
+    val="${arm%%|*}"; echo_="${arm#*|}"
+    V_NS="$( mcpcall '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"grep","arguments":{"path":"'"$SB"'","pattern":"TIERTOKEN_frob","in":'"$val"'}}}' )"
+    if printf '%s' "$V_NS" | grep -q 'invalid value for field: in' && printf '%s' "$V_NS" | grep -qF "got '$echo_'"; then
+        ok "(9e) the live MCP grep verb refuses a non-string in=$val through the shape gate and echoes '$echo_'"
+    else
+        no "(9e) the live MCP grep verb did not refuse in=$val echoing '$echo_' — got: $( printf '%s' "$V_NS" | cut -c1-300 )"
+    fi
+done
 
 # ═══════════════════════════════════════════════════════════════════════════
 echo "=== (11) M17 — a class label decided under a budget says so ==="
