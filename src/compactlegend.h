@@ -696,6 +696,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "decorated-excluded", "decorated-excluded=N: decorated Python defs skipped (a decorator may register them; wrappers included); a floor", true, "dead-code", MapHeaderRead::No, {}, "dead-code" },
     // edit-check: src/editcheck.h (the <edit-check> root emit)
     { "defs", "defs=N: overloads at this site (same file, scope, name) folded into one contract; params compared by MAX", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
+    // idea #11: present-only — rides only the verdict-only (unchanged, nothing flagged) answer, which prints no c rows
+    { "rows_next", "rows_next=: the call listing the c rows", true, "edit-check", MapHeaderRead::No, {}, "edit-check" },
     { "shown_unflagged", "shown_unflagged=N: unflagged callers on this page; flagged ones always print, total= counts unflagged only", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
     // 2026-10-01: present-only — rides only a C/C++ definition whose declaration's defaults widened its accepted arity
     { "defaults_from", "defaults_from=decl: a C/C++ declaration of this definition (same types) has defaults; calls within them are never flagged", false, "edit-check", MapHeaderRead::No, {}, "edit-check" },
@@ -732,6 +734,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "gap_syms", "gap_syms=N: searched symbols carrying gaps; <gap t= n= p= gaps=> rows, nearest from= first, are where the search could not see, never a hop; gap_syms_capped=1 more than shown", false, "path", MapHeaderRead::No, {}, "path" },
     // quality-delta: src/verbs_quality.h (root emit) + src/quality.h identityDisclosure
     { "stale", "stale=N: ack ledger rows whose target no longer applies (sa rows); never gating", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    // idea #11 (lane lean-trio): present-only, on a regression-free answer whose stale sa rows were collapsed to counts
+    { "stale_by_kind", "stale_by_kind=: stale= split by ack kind (kind:N,...); the sa rows are collapsed", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "stale_next", "stale_next=: the call printing the sa rows and the full header", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "preexisting-worse", "preexisting-worse=N: regressions on symbols that existed at baseline; they gate when major", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "new-symbol", "new-symbol=N: findings on NEW code; new-symbol rows never gate, except defect-shape format-arity", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "register-macro-excluded", "register-macro-excluded=N: symbols kept out of dead-code as self-registering test/bench macros; a floor", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },

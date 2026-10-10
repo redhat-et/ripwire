@@ -1049,10 +1049,22 @@ inline bool editCheckShowsModuleScope( const IngestResult& ing, const std::vecto
 // definitions a file:name spelling found and could not tie to the file it named. callers=/incompatible= are read from
 // `focus` alone, so without it a declaration whose dropped definition carries the broken caller answered incompatible="0"
 // with nothing beside it. Defaults to 0 — absent attribute, absent clause — for a caller that resolved no file:name.
+// `page` (2026-09-10, folded into one value by lane lean-trio): --limit/--offset, and — idea #11 — the CLI's clean-answer
+// posture: `verdictOnly` makes an unchanged contract with nothing flagged print the verdict and the call that lists the
+// callers instead of 40 caller rows; `selector` is the CLI's own spelling of SYM, replayed in rows_next=. The MCP verb,
+// the preview and the full legend dialect keep the full document (verdictOnly false).
+struct EditCheckPage
+{
+    int              limit       = 0;
+    int              offset      = 0;
+    bool             verdictOnly = false;
+    std::string_view selector;
+};
+
 inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g, const std::string& root,
                                         std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus,
                                         const notes::NoteIndex* ni = nullptr, bool preview = false,
-                                        int pageLimit = 0, int pageOffset = 0, std::size_t unprovenDefs = 0,
+                                        EditCheckPage page = {}, std::size_t unprovenDefs = 0,
                                         // L3 follow-up (CodeRabbit 4053600616): read BEFORE the caller nulls `ni`
                                         // for emptiness (main.cpp's MainDispatch::notesDegraded), so a sidecar
                                         // that left EVERY line unparsed still reaches this root. Defaults false,
@@ -1061,6 +1073,8 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
                                         // the pre-apply preview's spliced file: its spans index these bytes, not the disk
                                         const EditCheckSpliced& spliced = {} )
 {
+    const int     pageLimit  = page.limit;
+    const int     pageOffset = page.offset;
     const Symbol& fsym = ing.symbols[ focus ];
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — the ONE
     // shared assembler for CLI --edit-check and the MCP edit_check verb, so the two dialects cannot diverge.
@@ -1106,6 +1120,32 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+
+    // idea #11: the VERDICT-ONLY answer. Taken only when every fact the full document could add beside the rows is
+    // absent — one definition, nothing flagged, no unproven or declined definition, no notes, no explicit window — so
+    // the rows are the ONLY thing left out, and rows_next= is the call that prints them (an explicit --limit is the
+    // full document). Placed after every verdict number is fixed, like the window above: it cannot move a count.
+    if( page.verdictOnly && !preview && std::string_view( verdict.status ) == "unchanged" && incompatibleCount == 0
+        && overloadNodes.size() == 1 && unprovenDefs == 0 && declinedCalls == 0 && !contract.defsUnmeasured
+        && !callee.declDefaults.fromDecl && !notesDegraded && pageLimit == 0 && pageOffset == 0
+        && renderNoteChildren( ni, symbolNoteTarget( ni, ing, fsym ), esc ).empty()
+        && renderNoteChildren( ni, fileNoteTarget( ni, ing.files[ fsym.fileId ] ), esc ).empty() )
+    {
+        const std::string rowsNext = callerIds.empty() ? std::string()
+            : nextFlag( "--edit-check=", page.selector.empty() ? std::string_view( fsym.name ) : page.selector ) + " --limit=" + std::to_string( callerIds.size() );
+        std::string out = "<!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD: status=\"unchanged\", and no "
+                          "caller is flagged incompatible. defs= is the one definition compared. callers= counts its 1-hop callers (a floor: an edge the resolver could not "
+                          "bind is not counted); rows_next= is the call that lists them. next= is the test gate on its file. est_tokens= prices "
+                          "this document. -->";
+        out += "<edit-check sym=\"" + ex( fsym.name ) + "\" t=\"" + symTag( fsym.kind ) + "\" p=\"" + ex( ecPathRel( fsym.fileId ) ) + ":"
+             + std::to_string( fsym.line ) + "\" status=\"unchanged\" defs=\"1\" callers=\"" + std::to_string( callerIds.size() ) + "\" incompatible=\"0\"";
+        out += gitstamp::atAttr( root );
+        out += nextAttrXml( rowsNext, "rows_next" );
+        out += nextAttrXml( nextFlag( "--test-gate=", ecPathRel( fsym.fileId ) ) );
+        out += "></edit-check>";
+        editCheckPriceRoot( out );   // M11: unconditional, like the full document's
+        return out;
+    }
 
     // card A1 — the preview sentence, FIRST, because every number below it is about bytes that are not on
     // disk and a reader who meets that fact at the end has already read the document as a fact about the tree.

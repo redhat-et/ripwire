@@ -55,6 +55,21 @@ printf '%s' "$OUT1" | grep -q '<edit-check sym="helper"' && printf '%s' "$OUT1" 
     && rows "$OUT1" | grep -q 'n="useit"' \
     && ok "clean tree: 1-hop caller useit() listed, not flagged incompatible" \
     || { no "clean tree: caller listing wrong"; printf '%s\n' "$OUT1"; }
+# lane lean-trio (idea #11): under the DEFAULT (compact) legend an unchanged contract with nothing flagged is the verdict
+# alone — callers= counted, defs= kept, no <c> rows, rows_next= naming the call that lists them, and that call lists
+# useit(). RED on main 0852bc0f: the default answer carries the <c> rows and no rows_next=.
+OUT1C="$( cd "$WORK" && "$BIN" . --edit-check=helper --no-cache 2>/dev/null )"
+{ printf '%s' "$OUT1C" | grep -q 'status="unchanged" defs="1" callers="1"' && [ -z "$( rows "$OUT1C" )" ] \
+  && printf '%s' "$OUT1C" | grep -q 'rows_next="--edit-check=helper --limit=1"'; } \
+    && ok "(1c) compact: the unchanged verdict alone, rows_next= names the listing call" \
+    || { no "(1c) compact: the unchanged verdict-only answer is wrong"; printf '%s\n' "$OUT1C"; }
+OUT1L="$( cd "$WORK" && "$BIN" . --edit-check=helper --limit=1 --no-cache 2>/dev/null )"
+rows "$OUT1L" | grep -q 'n="useit"' \
+    && ok "(1d) the rows_next= call lists the 1-hop caller useit()" \
+    || { no "(1d) the rows_next= call does not list useit()"; printf '%s\n' "$OUT1L"; }
+if command -v xmllint >/dev/null 2>&1; then
+    printf '%s' "$OUT1C" | xmllint --noout - 2>/dev/null && ok "(1e) the verdict-only answer is well-formed XML" || no "(1e) the verdict-only answer is not well-formed XML"
+fi
 rows "$OUT1" | grep -q 'incompatible="1"' \
     && no "clean tree: caller wrongly flagged incompatible (precision)" \
     || ok "clean tree: no false-positive incompatible flag"

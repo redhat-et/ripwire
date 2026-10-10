@@ -458,7 +458,7 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     // differently from the answer it predicts would be worth nothing (test/editpreviewcheck.sh compares
     // the two documents).
     oc.xml = editCheckBundleText( merged, mg, root, maxFileBytes, excludes, groups[0].lowestNode, ni, true,
-                                   pageLimit, pageOffset, previewUnprovenDefs, /*notesDegraded=*/false,
+                                   EditCheckPage{ pageLimit, pageOffset }, previewUnprovenDefs, /*notesDegraded=*/false,
                                    EditCheckSpliced{ newBytes, fsym.fileId, true } );   // the merged spans index the spliced bytes
     // E3 (terminality round A, 2026-09-05): the CURRENT span an apply would replace, as the bytes are on disk, so
     // the Read an agent makes before an edit "to see what I am about to overwrite" is already in the preview.

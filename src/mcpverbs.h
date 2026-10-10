@@ -4570,7 +4570,7 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
     }
 
     return EditCheckReply{ editCheckBundleText( ing, g, root, kDefaultMaxFileBytes, {}, groups[0].lowestNode,
-                                                 /*ni=*/nullptr, /*preview=*/false, pg.limit, pg.offset, unprovenDefs ), {} };
+                                                 /*ni=*/nullptr, /*preview=*/false, EditCheckPage{ pg.limit, pg.offset }, unprovenDefs ), {} };
 }
 
 // ─── `slice` verb (lane/tc-sliceat): the ARISE def-use slice over MCP, mirroring the CLI --slice ────────

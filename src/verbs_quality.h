@@ -824,6 +824,7 @@ struct QualityDeltaLegendParts
     const char*                                   headBasis;     // #228: head_basis= value on the root (nullptr = attribute absent)
     bool                                          anyDeclinedCallExcluded = false;   // declined-call-excluded= is on the root
     bool                                          anyValueRefExcluded     = false;   // value-ref-excluded= is on the root
+    bool                                          staleCollapsed          = false;   // idea #11: stale_by_kind=/stale_next= are on the root
 };
 
 // A DEFINITION IS EMITTED WHEN THE THING IT DEFINES IS IN THE DOCUMENT. Nothing is dropped and no limit is
@@ -954,6 +955,12 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p )
     if( p.anyForeignAck )
     {
         std::fputs( kForeignAcksLegend, stdout );
+    }
+    if( p.staleCollapsed )
+    {
+        // idea #11: the collapse, named where its attributes are. No flag spelling (a double dash is illegal in a comment).
+        std::fputs( "stale_by_kind= splits stale= by ack kind (kind:N, comma-separated): on an answer with no regression the stale "
+                    "sa rows are collapsed to these counts, and stale_next= is the call that prints them. ", stdout );
     }
     std::fputs( "-->", stdout );   // every section constant above ends with its own separating space
 }
@@ -1673,10 +1680,56 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // emitQualityDeltaLegend above holds the section table and the reasoning; it is passed the same
         // values the root element below prints, so "the legend defines what the header emits" is read off
         // one set of values rather than restated as a second condition that could drift from it.
+        // idea #11 — THE CLEAN-TREE PAYLOAD. A regression-free answer collapses its stale-ack rows to counts (stale= and
+        // stale_by_kind=), and stale_next= is the call that prints them; on a tree that IS its HEAD (head_basis="identity":
+        // the floor is this tree's own snapshot) with nothing else to disclose, the verdict is the whole answer. Foreign-
+        // scope rows are never collapsed: they are about findings suppressed RIGHT NOW. --show-stale restores today's
+        // document byte for byte, so every collapsed row and attribute is one flag away (PROCESS rule 5).
+        const bool collapseStale = regs.empty() && outOfScope.empty() && !cfg.showStale && !staleAcks.empty();
+        std::string staleCollapseAttrs;
+        if( collapseStale )
+        {
+            std::vector<std::pair<std::string, std::size_t>> byKind;   // first-appearance order of the ledger's own row order
+            for( const quality::StaleAck& a : staleAcks )
+            {
+                // the KIND, without the ack's :new-symbol/:preexisting facet — the rows (stale_next=) carry the facet
+                const std::string kind = a.kind.substr( 0, a.kind.find( ':' ) );
+                const auto it = std::find_if( byKind.begin(), byKind.end(), [ & ]( const auto& kv ) { return kv.first == kind; } );
+                if( it == byKind.end() ) { byKind.emplace_back( kind, 1 ); } else { ++it->second; }
+            }
+            std::string kinds;
+            for( const auto& [ kind, n ] : byKind )
+            {
+                kinds += ( kinds.empty() ? "" : "," ) + kind + ":" + std::to_string( n );
+            }
+            std::string replay = cfg.qualityDeltaRange.empty() ? std::string( "--quality-delta" ) : rw::nextFlag( "--quality-delta=", cfg.qualityDeltaRange );
+            if( scope.active() )
+            {
+                replay += " " + rw::nextFlag( "--scope=", cfg.qualityScope );
+            }
+            staleCollapseAttrs = " stale_by_kind=\"" + ex( kinds ) + "\"" + rw::nextAttrXml( replay + " --show-stale", "stale_next" );
+        }
+        const bool verdictOnly = collapseStale && !refPair && basis.headBasis != nullptr && std::string_view( basis.headBasis ) == "identity"
+                              && !scope.active() && foreignAcks.empty() && ackedCount == 0 && configDiag.total() == 0 && baselineAbsorbed == 0
+                              && basis.apiNewSurface == 0 && baseSel.sidecarBadLines == 0 && basis.acksBadLines == 0;
+        if( verdictOnly )
+        {
+            rw::emitTo( stdout, "<!-- ripwire quality-delta: the tracked files ARE their git HEAD (head_basis=\"identity\"), so the floor is this "
+                                "tree's own snapshot and nothing that existed can be worse: regressions= and gating= are 0. stale= counts ack "
+                                "ledger rows whose target no longer applies (never gating), by kind in stale_by_kind=; stale_next= is the call "
+                                "that prints them with the full header (its exclusion and rename counts included). at=: commit+dirty+shallow. -->"
+                                "<quality-delta baseline=\"{}\" regressions=\"0\" gating=\"0\" stale=\"{}\"{} head_basis=\"identity\"{}></quality-delta>",
+                        baseSel.marker, staleAcks.size(), gitstamp::atAttr( root ), staleCollapseAttrs );
+            return 0;
+        }
+        if( collapseStale )
+        {
+            saRows = foreignAcks;   // the stale rows are collapsed to staleCollapseAttrs; foreign-scope rows always print
+        }
         emitQualityDeltaLegend( { baseSel.marker, refPair, identityAttrs, !saRows.empty(), ackedCount > 0,
                                   basis.registerMacroExcluded > 0, configDiag.total() > 0, regs, outOfScope,
                                   scope.active() || !foreignAcks.empty(), !foreignAcks.empty(), baselineAbsorbed,
-                                  basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0 } );
+                                  basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, collapseStale } );
         const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
         // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
         std::string sidecarHealthAttrs;
@@ -1695,7 +1748,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                      // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
                      // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
                      refPair ? "" : gitstamp::atAttr( root ).c_str(), refs.attrs.c_str(), identityAttrs.c_str(),
-                     scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str(), sidecarHealthAttrs.c_str() );
+                     scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str(), ( sidecarHealthAttrs + staleCollapseAttrs ).c_str() );
         // P1: ONE row emitter for both halves of the scope partition — a disclosed row carries the identical
         // attribute set, because nothing about a finding changes by belonging to someone else. `gatingAllowed`
         // is the one difference: an out-of-scope row is not what the exit code fires on, and a gating
@@ -2384,8 +2437,10 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     // editCheckRowWindow). cli.h's honorsPaging() lists this verb, so the pair reaches here rather than
     // being refused, and 0/0 — the un-spelled window — is the default cap, not "unbounded".
     const std::string xml = editCheckBundleText( ing, d.g, d.root, cfg.maxFileBytes, cfg.excludes, focus, d.notesPtr,
-                                                  /*preview=*/false, cfg.pageLimit, cfg.pageOffset, ecUnprovenDefs,
-                                                  d.notesDegraded );   // L3 follow-up (CodeRabbit 4053600616)
+                                                  /*preview=*/false,
+                                                  // idea #11: an unchanged contract is one line; the full dialect keeps the rows
+                                                  EditCheckPage{ cfg.pageLimit, cfg.pageOffset, cfg.legend != "full", cfg.editCheckSym },
+                                                  ecUnprovenDefs, d.notesDegraded );   // L3 follow-up (CodeRabbit 4053600616)                                    // the full dialect keeps the rows
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;
 }
