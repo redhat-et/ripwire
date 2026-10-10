@@ -588,6 +588,32 @@ else
     no "(10) MCP budget_tokens=3800: shown/capped/handle/over/est = ${*:-<no output>} — want a paid handle inside the budget"
 fi
 
+# ── (10c) THE at= STAMP IS READ ONCE PER RUN, WHICHEVER PAYMENT MODE SERVES (CodeRabbit on #383, verbs_for.h:3843) ─────────────
+# A --token-budget run renders in up to three payment modes (unpaid, paid, unpaid again) before a byte reaches stdout; each
+# render re-read the git stamp (rev-parse + status --porcelain), so a run over its ceiling either way spawned three
+# `status --porcelain` children. The ranking is computed once per run and so is the stamp now. Fixture: fxcut as a one-commit
+# git repository (the stamp only reads a git root); budget 500 against an answer of ~1100 est tokens is over either way
+# (over_ceiling="1" — the premise); a PATH git shim logs every git call and runs the real git. RED on the pre-fix binary
+# (3 status children); GREEN: exactly 1, and at= still rides the answer.
+FXG="$TMP/fxcutgit"; cp -R "$TMP/fxcut" "$FXG"
+git -C "$FXG" init -q && git -C "$FXG" add -A && git -C "$FXG" -c user.name=t -c user.email=t@t commit -qm init
+GSHIM="$TMP/gitshim"; mkdir -p "$GSHIM"; REALGIT="$( command -v git )"
+cat > "$GSHIM/git" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$GSHIM/calls.log"
+exec "$REALGIT" "\$@"
+EOF
+chmod +x "$GSHIM/git"; : > "$GSHIM/calls.log"
+out="$( cd "$TMP" && PATH="$GSHIM:$PATH" "$BIN" fxcutgit --for="gadget assembler" --no-cache --token-budget=500 2>/dev/null )"
+st="$( grep -c 'status --porcelain' "$GSHIM/calls.log" | tr -d ' ' )"
+if ! printf '%s' "$out" | grep -q 'over_ceiling="1"'; then
+    no "(10c) premise: --token-budget=500 on fxcutgit is not over its ceiling either way (no over_ceiling=\"1\"): $( printf '%s' "$out" | grep -o '<ctx [^>]*>' | head -c 300 )"
+elif [ "$st" = 1 ] && printf '%s' "$out" | grep -q ' at="'; then
+    ok "(10c) a three-render --token-budget run reads the git stamp once (1 status --porcelain child), and at= rides the answer"
+else
+    no "(10c) status --porcelain children: $st (want 1; one per render = 3 before the fix); at= present: $( printf '%s' "$out" | grep -c ' at="' )"
+fi
+
 # ── (11) C3 COMPLETED: PAY FOR next= ONLY WHEN PAYING IS WHAT MAKES THE ANSWER FIT (orchestrator ruling 2026-10-08) ─────────────
 # The answer with every row the cut leaves PLUS the unpaid handle is the first candidate; it is served whenever it fits, and only
 # when it lands past its ceiling are rows dropped to pay (and served only if THAT fits — (10)'s @3800). 45a2eeba paid first and
