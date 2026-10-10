@@ -8526,6 +8526,17 @@ inline std::string legoClosureAttrs( const LegoClosurePage& page, std::string_vi
     return out;
 }
 
+// The TARGETED verb's own inputs to packLego, one parameter: the root's gauge + marker (M15) and the deeper-row page
+// (lane lego-transitive). The ranked --for bundle passes `{}` — no gauge on its section, no page to window.
+struct LegoTargetedArgs
+{
+    std::string_view graphCountFloorAttr;   // graphCountFloorAttrXml( g ) — the caller owns the graph
+    int              pageLimit  = 0;        // --limit / MCP limit over the deeper implementor rows (0 = the default page)
+    int              pageOffset = 0;        // --offset / MCP offset
+    LegoTargetedArgs() = default;
+    LegoTargetedArgs( std::string_view floorAttr, int limit = 0, int offset = 0 ) : graphCountFloorAttr( floorAttr ), pageLimit( limit ), pageOffset( offset ) {}
+};
+
 // One <impl> row. `line` (S2): the TARGETED answer puts the definition's line on p= (p="file:LINE", the --uses and
 // --callers spelling) so the reader can open the class itself; the ranked bundle rows keep p="file". `deep` is the
 // closure row of a depth >= 2 implementor (via= names the type it extends, depth= its hops), null for a direct one.
@@ -8569,7 +8580,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                       NodeId focusId = kNoNode, bool withPaths = false,
                       std::string_view rootArg = {},    // R-E (2026-08-17): same single-root-only root
                                                         // argument serialize() takes — see its comment.
-                      std::string_view graphCountFloorAttr = {},   // M15: the TARGETED root's gauge + marker
+                      const LegoTargetedArgs& targeted = {},   // M15: the TARGETED root's gauge + marker; lane lego-transitive: its page
                                                         // (graphCountFloorAttrXml( g ) — the caller owns the graph);
                                                         // the ranked --for section passes nothing and keeps its shape
                       std::size_t* outPreCapCount = nullptr,    // L2 (round-1 lever B1): the STUB's total= — this
@@ -8579,7 +8590,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                         // compute (no second, drifting tally — the notes_total
                                                         // precedent this repo already avoids: legoTotal at the JSON
                                                         // call site is a DIFFERENT, pre-dedup count, on purpose).
-                      const std::vector<std::vector<NodeId>>* graphImplementors = nullptr,
+                      const std::vector<std::vector<NodeId>>* graphImplementors = nullptr )
                                                         // count-floor: RANKED mode only — the UNSCOPED graph map. The bundle's
                                                         // `implementors` is scoped and then narrowed to the rendered sigs' files
                                                         // (legoImplementorsOnSurface, narrowLegoToRenderedSigs), so its row count
@@ -8587,11 +8598,9 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                         // implementors="1">` answered a tree with six. With this map the count is
                                                         // the targeted --lego=TYPE's own and a short list says so
                                                         // (implementors_shown= + implementors_next=). Null keeps the old shape.
-                      int pageLimit = 0, int pageOffset = 0 )   // lane lego-transitive: TARGETED only — the --limit/--offset
-                                                        // (MCP limit/offset) window over the deeper implementor rows
 {
     EXPECTS( graphImplementors == nullptr || focusId == kNoNode );   // the targeted verb's map IS the graph's
-    EXPECTS( focusId != kNoNode || ( pageLimit == 0 && pageOffset == 0 ) );   // the ranked bundle has no page to window
+    EXPECTS( focusId != kNoNode || ( targeted.pageLimit == 0 && targeted.pageOffset == 0 ) );   // the ranked bundle has no page to window
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
     {
@@ -8653,7 +8662,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     // floor. The marker rides on the TARGETED verb root (--lego=TYPE and its MCP twin); the --for bundle's
     // ranked <lego> section is described by the bundle's own legend and keeps its byte shape.
     w.write( "<lego" );
-    if( focusId != kNoNode ) { w.write( graphCountFloorAttr ); }   // graphCountFloorAttrXml( g ): gauge + kGraphCountFloorAttrXml
+    if( focusId != kNoNode ) { w.write( targeted.graphCountFloorAttr ); }   // graphCountFloorAttrXml( g ): gauge + kGraphCountFloorAttrXml
     w.write( ">" );
     for( std::size_t k = 0; k < keep; ++k )
     {
@@ -8674,11 +8683,11 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
                                                                   : ( impls.size() < 16 ? impls.size() : 16 );
         const std::size_t          implementorTotal = id < countMap.size() ? std::max( countMap[id].size(), impls.size() ) : impls.size();
         std::string hdr;
-        const LegoClosurePage deep = focusId != kNoNode ? legoClosurePage( implementors, id, pageLimit, pageOffset ) : LegoClosurePage{};
+        const LegoClosurePage deep = focusId != kNoNode ? legoClosurePage( implementors, id, targeted.pageLimit, targeted.pageOffset ) : LegoClosurePage{};
         if( focusId != kNoNode )
         {
             hdr = "\" defs=\"" + std::to_string( definitionCountOfName( ing, id ) ) + "\" implementors=\"" + std::to_string( impls.size() ) + "\""
-                + legoClosureAttrs( deep, std::string( pathRel( isym.fileId ) ) + ":" + isym.name, pageLimit );
+                + legoClosureAttrs( deep, std::string( pathRel( isym.fileId ) ) + ":" + isym.name, targeted.pageLimit );
         }
         else
         {
