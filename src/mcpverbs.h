@@ -764,7 +764,7 @@ inline std::string symbolQueryJson( const std::string& root, const std::string& 
     // CALLSITE-AT: the calledBy window's rows with their call sites — editcheck.h rowCallSites, the CLI --callers pass and path spelling.
     const PageWindow& calledByWin = referencingOnly ? pwPrimary : pwSecond;
     calledBySites = rowCallSites( ing, chRows.matches, std::span<const NodeId>( calledBy ).subspan( calledByWin.begin, calledByWin.end - calledByWin.begin ),
-                                  RootRelPath{ ing, sqRootPrefix, sqSingleRoot } );
+                                  VrRender{ sqSingleRoot, sqRootPrefix } );
     char        pab[ kPageDisclosureCap ];
 
     std::string out = "{";

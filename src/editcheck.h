@@ -24,7 +24,8 @@
 #include "gitstamp.h"       // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
 #include "graphlegend.h"    // §H4 §3.4: the shared counts_floor= marker + floor/counting-unit legend tail
 #include "pageview.h"       // LB-G: pageWindow / effectiveRowCap / pagingDisclosure — the ONE paging vocabulary
-#include "editcheckdecl.h"   // the C/C++ declaration/definition identity: editCheckTieDeclaration / editCheckDeclDefaults
+#include "editcheckdecl.h"
+#include "valuerefs.h"       // CALLSITE-AT: VrRender / vrPath — the one root-relative file spelling a site token shares with <vr> rows   // the C/C++ declaration/definition identity: editCheckTieDeclaration / editCheckDeclDefaults
 
 #include <algorithm>
 #include <compare>
@@ -855,34 +856,20 @@ inline std::span<const CallSiteAt> callSitesOf( std::span<const CallSiteAt> site
 
 // One caller's sites as pasteable `file:line` tokens, ascending, at most kCallSitesPerRowCap of them (pageview.h: a
 // runaway guard; the cut is disclosed by sites_total= and the uses verb lists the rest). `pathOf( fileId )` spells the file
-// exactly as the row's own p= does (root-relative on a single root). Unescaped: each dialect escapes its own way.
+// exactly as the row's own p= does (valuerefs.h vrPath: root-relative on a single root). Unescaped: each dialect escapes its own way.
 static_assert( kCallSitesPerRowCap == 16, "compactlegend.h's sites_total= readings spell this cap as 16: change both together" );
-template <class PathOf>
-inline std::vector<std::string> callSiteTokens( std::span<const CallSiteAt> mine, PathOf&& pathOf )
+inline std::vector<std::string> callSiteTokens( const IngestResult& ing, std::span<const CallSiteAt> mine, const VrRender& rr )
 {
     std::vector<std::string> tokens;
     const std::size_t        shown = std::min( mine.size(), kCallSitesPerRowCap );
     tokens.reserve( shown );
     for( std::size_t i = 0; i < shown; ++i )
     {
-        tokens.push_back( std::string( pathOf( mine[i].fileId ) ) + ":" + std::to_string( mine[i].line ) );
+        tokens.push_back( vrPath( ing, mine[i].fileId, rr ) + ":" + std::to_string( mine[i].line ) );
     }
     ENSURES( tokens.size() <= kCallSitesPerRowCap, "the per-row site cap holds" );
     return tokens;
 }
-
-// The file spelling every sites_at= token uses: the row p='s own (root-relative on a single root, the ingest path otherwise).
-struct RootRelPath
-{
-    const IngestResult& ing;
-    std::string_view    rootPrefix;
-    bool                singleRoot;
-
-    std::string_view operator()( std::uint32_t fileId ) const
-    {
-        return singleRoot ? sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix ) : std::string_view( ing.files[ fileId ] );
-    }
-};
 
 // A page of caller rows with their site tokens, computed ONCE and rendered by every dialect (XML, columnar, JSON, MCP):
 // tokens[i]/totals[i] belong to rows[i]; `any` = some row has a site (the legend clause rides exactly then), `anyCut` =
@@ -895,8 +882,7 @@ struct RowCallSites
     bool                                  anyCut;
 };
 
-template <class PathOf>
-inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> rows, PathOf&& pathOf )
+inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeId> defs, std::span<const NodeId> rows, const VrRender& rr )
 {
     RowCallSites out{};
     const std::vector<CallSiteAt> sites = callSitesAt( ing, defs, rows );
@@ -905,7 +891,7 @@ inline RowCallSites rowCallSites( const IngestResult& ing, std::span<const NodeI
     for( const NodeId r : rows )
     {
         const std::span<const CallSiteAt> mine = callSitesOf( sites, r );
-        out.tokens.push_back( callSiteTokens( mine, pathOf ) );
+        out.tokens.push_back( callSiteTokens( ing, mine, rr ) );
         out.totals.push_back( mine.size() );
         out.any    = out.any || !mine.empty();
         out.anyCut = out.anyCut || mine.size() > out.tokens.back().size();
