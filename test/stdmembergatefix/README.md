@@ -17,3 +17,7 @@ Controls: a name outside the table (`grow`) keeps the ladder; a bare call `size(
 holds a C function-pointer call (C has no member functions, so no gate); `rs/` is the Rust stated scope (no declared
 receiver types there yet), whose by-name split must stay unchanged. `far/` calls `w.empty()` where no namesake is in
 reach, so the ladder itself declines it (tier 3), and the `<stdm>` line still names it.
+
+`sib/` holds the field and expression receivers: a field written as the in-tree `Vec` (`this->items_`, `b.items_` on a
+`Box& b`) keeps the hedge, a field written in `std` is declined, and a dereference, a subscript, a range-for `auto` and
+a template parameter are the stated floor (declined even where the element is `Vec`).

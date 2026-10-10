@@ -6115,31 +6115,63 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         return ( ref.lang == Lang::TypeScript || ref.lang == Lang::JavaScript ) && rootRelPath( ing, cs.fileId ).ends_with( ".d.ts" );
     };
-    // StdMemberGate's receiver exception. A C++ named receiver may carry a WRITTEN type outside namespace std that the rules above
-    // could not map to a class — a local or parameter declared `SmallVec<NodeId, 2>` (an alias), or a member field Rule 2b has a
-    // type for. When that type's inheritance cone (its alias targets and bases included, chaUp) holds one of the candidates the
-    // ladder reached, the call keeps the ladder's hedge: the type may be that in-tree container. A written type whose cone holds
-    // none of them (`HashMap<K, V> m; m.find( k )` reaching UnionFind::find by name) is no evidence for them, and the gate applies.
-    // A declared local hides a same-named field (Rule 2b's own local-shadow veto), and a `std::`-typed declaration reads as "".
+    // StdMemberGate's receiver exception. A C++ receiver may carry a WRITTEN type outside namespace std that the rules above
+    // could not map to a class — a local or parameter declared `SmallVec<NodeId, 2>` (an alias), a member field Rule 2b has a type
+    // for (`items_`, `this->items_`), or one field hop off a typed root (`b.items_` with `Box& b`). When that type's inheritance
+    // cone (its alias targets and bases included, chaUp) holds one of the candidates the ladder reached, the call keeps the
+    // ladder's hedge: the type may be that in-tree container. A written type whose cone holds none of them (`HashMap<K, V> m;
+    // m.find( k )` reaching UnionFind::find by name) is no evidence for them, and the gate applies. A declared local hides a
+    // same-named field (Rule 2b's own local-shadow veto); a `std::`-typed declaration reads as "" in every lookup.
     std::string stdRecvKey;   // reused "<fromSymbol>#<recvVar>" buffer
-    const auto receiverWrittenType = [ & ]( const Reference& ref ) -> std::string_view
+    Reference   stdFieldProbe;   // reused: fieldEntryAt reads only recvVar, the member name it looks up
+    const auto  fieldTypeIn = [ & ]( const std::string& className, std::string_view member ) -> const FlatRecvType*
     {
-        if( ref.lang != Lang::Cpp || ref.recv != RecvKind::NamedVar || ref.recvVar.empty() || ref.fromSymbol == kNoNode )
-        {
-            return {};
-        }
-        if( const std::string_view local = narrower.recvVarTypeName( ref ); !local.empty() )
-        {
-            return local;
-        }
+        stdFieldProbe.recvVar.assign( member );
+        return narrower.fieldEntryAt( stdFieldProbe, className, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } );
+    };
+    // a named receiver's written type: its in-scope local or parameter declaration, else the caller's class's field of that name
+    const auto namedReceiverType = [ & ]( const Reference& ref, const std::string& callerScope ) -> const FlatRecvType*
+    {
         stdRecvKey.clear();  Narrower::appendUint( stdRecvKey, ref.fromSymbol );  stdRecvKey.push_back( '#' );  stdRecvKey.append( ref.recvVar );
         if( const auto lit = fieldNarrow.localNameSet.find( stdRecvKey ); lit != fieldNarrow.localNameSet.end() && ( lit->second & kLocalNameDeclared ) != 0 )
         {
-            return {};   // a declared local, untyped or written in std: not the field
+            return nullptr;   // a declared local, untyped or written in std (recvVarTypeName answered ""): not the field
         }
-        const FlatRecvType* field = narrower.fieldEntryAt( ref, ing.symbols[ ref.fromSymbol ].scope, { fieldNarrow.fieldTypeByClass, memberFields, chaUp } );
-        // a std smart pointer's pointee is reached through `->` alone: `w_.reset()` on `std::unique_ptr<W> w_;` is the pointer's own member
-        return ( field == nullptr || ( field->arrowOnly && !ref.viaArrow ) ) ? std::string_view{} : std::string_view( field->type );
+        return fieldTypeIn( callerScope, ref.recvVar );
+    };
+    const auto receiverWrittenType = [ & ]( const Reference& ref ) -> std::string_view
+    {
+        if( ref.lang != Lang::Cpp || ref.fromSymbol == kNoNode )
+        {
+            return {};
+        }
+        const std::string& callerScope = ing.symbols[ ref.fromSymbol ].scope;
+        const auto         typeOf      = []( const FlatRecvType* t, bool arrowHop ) -> std::string_view
+        {
+            // a std smart pointer's pointee is reached through `->` alone: `w_.reset()` on `std::unique_ptr<W> w_;` is the pointer's own member
+            return ( t == nullptr || ( t->arrowOnly && !arrowHop ) ) ? std::string_view{} : std::string_view( t->type );
+        };
+        if( ref.recv == RecvKind::NamedVar && !ref.recvVar.empty() )
+        {
+            const std::string_view local = narrower.recvVarTypeName( ref );
+            return !local.empty() ? local : typeOf( namedReceiverType( ref, callerScope ), ref.viaArrow );
+        }
+        if( ref.recv == RecvKind::FieldOfThis && !ref.fieldName.empty() )
+        {
+            return typeOf( fieldTypeIn( callerScope, ref.fieldName ), ref.viaArrow );   // `this->items_.m()`
+        }
+        if( ref.recv == RecvKind::FieldOfVar && !ref.recvVar.empty() && !ref.fieldName.empty() )
+        {
+            // one hop off a typed root (`b.items_.m()`): the root's own written type, then that class's field
+            std::string_view root = narrower.recvVarTypeName( ref );
+            if( root.empty() )
+            {
+                const FlatRecvType* rootField = namedReceiverType( ref, callerScope );
+                root = rootField != nullptr ? std::string_view( rootField->type ) : std::string_view{};
+            }
+            return root.empty() ? std::string_view{} : typeOf( fieldTypeIn( std::string( root ), ref.fieldName ), ref.viaArrow );
+        }
+        return {};
     };
     const auto writtenTypeReaches = [ & ]( std::string_view type, NodeId from, std::span<const NodeId> ids ) -> bool
     {

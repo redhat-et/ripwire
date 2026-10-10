@@ -27,9 +27,11 @@
 #       in another file), a local declared with an alias of a standard map — each callees answer has no in-tree row, the
 #       exact declined_calls= and the exact <stdm> line; a call the ladder itself declines (tier 3, far/) is on the line too
 #   (C) a local declared with an alias of the in-tree Vec keeps the ladder's via="name" hedge (the alias's cone reaches Vec)
+#   (H) field receivers: `this->items_` and `b.items_` (Box& b) written as Vec keep the hedge, std fields are declined; a
+#       dereference, a subscript, a range-for `auto` and a template parameter are the stated floor (declined)
 #   (D) controls: a name outside the table (`grow`) keeps the ladder; a bare `size( b )` binds the free function; a C
 #       function-pointer call (C has no member functions) and the Rust by-name split (stated scope) are unchanged
-#   (E) the callers side: Vec::push_back keeps exactly its typed callers and counts the five declined calls; the one-def
+#   (E) the callers side: Vec::push_back keeps exactly its typed callers and hedges and counts the eleven declined calls; the one-def
 #       Solo::append keeps soloTyped and counts stdAppend; Pool::clear keeps poolTyped and counts two
 #   (F) disclosure surfaces: the map header's declined= equals the census's declined bucket, the full map legend, the
 #       callers legend and the callees legend each carry their clause, the compact callees legend defines stdm, the
@@ -144,6 +146,25 @@ echo "=== (C) a written non-std type whose cone reaches a candidate keeps the la
 check "(C) SmallV<int> a (an alias of Vec); a.push_back() stays via=\"name\" on Vec" \
                                                                callees aliasTyped          'lib/vec.h:8:push_back~ lib/vec.h:9:push_back~' '' ''
 
+# ── (H) field and expression receivers (sib/) ───────────────────────────────────────────────────────────────
+echo "=== (H) a field written as the in-tree Vec keeps the hedge; std fields and expression receivers are declined ==="
+check "(H) this->items_.push_back() (a field written Vec<int>) keeps the ladder's via=\"name\" hedge" \
+                                                               callees sib/sib.cpp:thisField 'lib/vec.h:8:push_back~ lib/vec.h:9:push_back~' '' ''
+check "(H) b.items_.push_back() on Box& b (one field hop off a typed root) keeps the hedge" \
+                                                               callees fieldOfVar          'lib/vec.h:8:push_back~ lib/vec.h:9:push_back~' '' ''
+check "(H) this->raw_.push_back() (a field written in std) is declined" \
+                                                               callees sib/sib.cpp:thisRaw '' 1 'push_back:1'
+check "(H) b.raw_.push_back() (a std field one hop off a typed root) is declined" \
+                                                               callees fieldOfVarRaw       '' 1 'push_back:1'
+check "(H) STATED FLOOR: ( *p ).push_back() — a dereference carries no written type, declined" \
+                                                               callees derefPtr            '' 1 'push_back:1'
+check "(H) STATED FLOOR: vs[ 0 ].push_back() — a subscript carries no written type, declined" \
+                                                               callees subscript           '' 1 'push_back:1'
+check "(H) STATED FLOOR: for( auto& v : vs ) v.push_back() — a range-for auto, declined" \
+                                                               callees rangeFor            '' 1 'push_back:1'
+check "(H) template parameter C& c; c.push_back() — the receiver may be anything, declined" \
+                                                               callees tmplParam           '' 1 'push_back:1'
+
 # ── (D) controls ──────────────────────────────────────────────────────────────────────────────────────────────
 echo "=== (D) controls: outside the table, bare calls, C and Rust keep the ladder ==="
 check "(D) v.grow() — grow is no standard member name, the ladder is unchanged" \
@@ -156,8 +177,8 @@ check "(D) Rust v.push() — stated scope, the by-name split is unchanged" \
 
 # ── (E) the callers side ──────────────────────────────────────────────────────────────────────────────────────
 echo "=== (E) callers: the typed callers stay, the declined ones are counted ==="
-check "(E) --callers=Vec::push_back is exactly its typed callers + the alias hedge; declined_calls=\"5\"" \
-      callers Vec::push_back 'app/use.cpp:10:typedPtr app/use.cpp:16:add app/use.cpp:17:addOwned app/use.cpp:22:aliasTyped~ app/use.cpp:8:typedLocal app/use.cpp:9:typedParam lib/vec.h:15:pushTwice' 5 ''
+check "(E) --callers=Vec::push_back is exactly its typed callers + the alias and Vec-field hedges; declined_calls=\"11\"" \
+      callers Vec::push_back 'app/use.cpp:10:typedPtr app/use.cpp:16:add app/use.cpp:17:addOwned app/use.cpp:22:aliasTyped~ app/use.cpp:8:typedLocal app/use.cpp:9:typedParam lib/vec.h:15:pushTwice sib/sib.cpp:10:thisField~ sib/sib.cpp:13:fieldOfVar~' 11 ''
 check "(E) --callers=lib/vec.h:append (one definition) keeps soloTyped; declined_calls=\"1\"" \
       callers lib/vec.h:append 'app/use.cpp:20:soloTyped' 1 ''
 check "(E) --callers=Pool::clear keeps poolTyped; declined_calls=\"2\"" callers Pool::clear 'app/use.cpp:21:poolTyped' 2 ''
