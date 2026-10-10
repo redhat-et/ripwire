@@ -167,16 +167,21 @@ the whole point of a frozen `dataset.lock` is that the before/after comparison i
 Reproduce: see the one-command block above. Per-instance rows (including derived `gold_funcs`) are in
 `bench/multiswe/results/cpp.json`; the frozen instance list is `bench/multiswe/dataset.lock`.
 
-## Future set: MULocBench (documented, not yet built)
+## Future set: MULocBench (design + pre-registration written, no harness run yet)
 
 [**MULocBench**](https://arxiv.org/abs/2509.25242) (arXiv 2509.25242, 2025) is adopted here as the next
-public set — no harness built yet. It measures what this bench, `bench/cppbench`, and `bench/locbench`
-all structurally cannot: **non-code gold** — 1,100 issues (46 Python projects) localized to configs and
-docs, not just functions. R5 has now shipped the mechanism this benchmark
-would score (doc-mention surfacing on `--for`, `src/mention.h::applyDocMentionBoost` — proved by
-`test/docmentioncheck.sh` and a byte-identical LocBench Python held-out no-regression check), but building
-the full 46-repo/1,100-issue harness itself (mining, a frozen `dataset.lock`, an offline gate — the same
-shape of effort R3's Multi-SWE-bench harness took) was judged too heavy for that round and is carried
-forward as the explicit residual: an honest partial beats a rushed eval (B3). Scoring against it would
-still be the honest external check on R5's actual value once built (the paper reports every method
-tested, including LLM-prompted ones, under 40% Acc@5/F1 at file level — the ceiling is open).
+public set. It measures what this bench, `bench/cppbench`, and `bench/locbench` all structurally
+cannot: **non-code gold** — 1,100 issues (46 Python projects) localized to configs and docs, not just
+functions. R5 has shipped the mechanism this benchmark would score (doc-mention surfacing on `--for`,
+`src/mention.h::applyDocMentionBoost` — proved by `test/docmentioncheck.sh` and a byte-identical
+LocBench Python held-out no-regression check).
+
+The adapter's design, its pre-registration (verb mapping, metric definitions, eligibility rules, what
+we'd report vs withhold), the open questions worth putting to the benchmark's authors, and the
+owner-run fetch steps are now written up in full at
+[`docs/research/mulocbench-baseline.md`](../../docs/research/mulocbench-baseline.md) — a
+`bench/mulocbench/` skeleton (untested, no data behind it yet) lives alongside this directory. No
+MULocBench data is on disk anywhere and no number exists yet; that document says exactly what the
+owner needs to run before one can. Scoring against it, once it exists, is the honest external check on
+R5's actual value (the paper reports every method tested, including LLM-prompted ones, under 40%
+Acc@5/F1 at file level — the ceiling is open).
