@@ -130,7 +130,8 @@ occupies (model.h: a Section's isolation is a language property; the Ruby ones a
 edges) — span = the name token, both quote spellings and the `:symbol` form. Rails-generated attribute
 uses (`product.price`) then resolve to the column as a definition: it appears in `--uses`, `--grep`,
 `--whereis` and the map. THE COLUMNS ARE DEFINITIONS ONLY, by maintainer decision: buildGraph's
-byName skips Section-Ruby, so a column admits NO call edge and no PageRank weight — an untyped
+byName skips Section-Ruby, so a column admits NO call edge (it still takes the restart share of the ranking
+that every definition gets, so a Rails app's `k=` values are smaller; its map rows do not change) — an untyped
 `response.code` must not become a table's caller, and 200 `name` columns must not damp a model's real
 `def name` (both measured at review; edges may return behind an evidence rule, e.g. a receiver proven
 to be the owning model). The id rule covers the grounded spellings: no id column/spelling → an
@@ -159,7 +160,7 @@ to `spike_*` names; two spellings no dump emits are restored by hand and marked 
 which that dump actually failed on, and a literal `t.timestamps`). Stated capture floors, each pinned
 by a gate arm: `t.index` / `t.references` / `t.belongs_to` / `t.polymorphic` / `t.check_constraint` /
 `t.exclusion_constraint` / `t.unique_constraint` name no column (a `t.references`/`t.belongs_to` mints
-no `<x>_id`, and a `create_join_table` mints nothing — raws dumps render these as explicit columns);
+no `<x>_id`, and a `create_join_table` mints nothing — Rails dumps render these as explicit columns);
 a column call must be ON the block parameter (`helper.string "x"` names nothing); a symbol-named table
 (`create_table :users`) is a migration spelling, not a schema surface; `where("price > ?")` string
 fragments stay opaque; the picker splits honestly (`rec.name` on a plain local and a rich `X.new.name`

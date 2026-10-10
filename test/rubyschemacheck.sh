@@ -6,7 +6,7 @@
 # heading / YAML key (model.h) — with span = the name token. Rails-generated attribute uses
 # (`product.price`, pinned here as explicit-receiver model calls) resolve to the column as a def —
 # DEFINITIONS ONLY by maintainer decision: the defs answer --uses/--grep/--whereis but admit NO call
-# edges and no PageRank weight (graph.h buildGraph's byName skips Section-Ruby; §3 pins that). The DSL
+# edges, only the restart share every def gets (graph.h buildGraph's byName skips Section-Ruby; §3 pins that). The DSL
 # CALLS keep their reference posture exactly like the attr family (--uses=string/define/timestamps
 # stay defs=0 external=1). The four id spellings and t.timestamps name columns too, per the rules
 # below; a composite/symbol primary_key mints no implicit id.
@@ -67,8 +67,8 @@ callershead(){ "$BIN" "$FIX" --callers="$1" --no-cache 2>/dev/null | grep -oE "o
 [ "$( useshead event_id )"    = 'of="event_id" defs="1" external="0" count="0"' ] \
     && ok 'capture: `primary_key: "event_id"` mints the renamed key def, and NO implicit id beside it' \
     || no "capture: event_id: $( useshead event_id )"
-[ "$( useshead ref )"         = 'of="ref" defs="1" external="0" count="0"' ] \
-    && ok 'capture: the `id: false` table'"'"'s own column mints; the table has NO id def' \
+[ "$( useshead ref )"         = 'of="ref" defs="1" external="0" count="1"' ] \
+    && ok 'capture: the `id: false` table'"'"'s own column mints; the table has NO id def (its one use is the untyped unrelated_client.rb site)' \
     || no "capture: ref: $( useshead ref )"
 [ "$( useshead created_at )"  = 'of="created_at" defs="2" external="0" count="1"' ] \
     && ok 'capture: created_at — the rendered t.datetime column AND the literal t.timestamps call each mint one; the consumer call reaches them' \
@@ -121,12 +121,13 @@ done
 [ "$( callershead created_at )" = 'of="created_at" defs="2" count="0"' ] \
     && ok 'defs-only: `Timestamps.new.created_at` matches both defs but carries no call edge' \
     || no "defs-only: created_at callers: $( callershead created_at )"
-[ "$( callershead ref )"        = 'of="ref" defs="1" count="0"' ] \
-    && ok "defs-only false-binding: a COLUMN-ONLY name (ref) gains no caller from an unrelated 'obj.ref' style site — pre-change it did bind (untyped receivers)" \
+"$BIN" "$FIX" --uses=ref --no-cache 2>/dev/null | grep -q 'p="unrelated_client.rb:7"' \
+    && [ "$( callershead ref )"     = 'of="ref" defs="1" count="0"' ] \
+    && ok "defs-only false-binding: the untyped 'response.ref' in unrelated_client.rb:7 is a use of the column-only name ref, never its caller (RED without buildGraph's Section-Ruby byName skip: it binds by name alone)" \
     || no "defs-only: ref callers: $( callershead ref )"
 [ "$( callershead name )"       = 'of="name" defs="19" count="1"' ] \
     && [ "$( "$BIN" "$FIX" --callers=name --no-cache 2>/dev/null | grep -oE 't="method"' | head -1 )" = 't="method"' ] \
-    && ok 'defs-only: the name caller row is the METHOD render_label (consumer_ambiguous.rb:7) — the 9 columns contribute zero edges to the 19-def set (the other two fixture sites now decline as reads: hop_untested + declined_calls disclosed, train-26a ruby lane)' \
+    && ok 'defs-only: the name caller row is the METHOD render_label (consumer_ambiguous.rb:7) — the 9 columns contribute zero edges to the 19-def set (the other two sites bind nothing under the Ruby method lookup: the class-side self.name in pair_def_column.rb:15 is declined, declined_calls on lookup; SingleColumn.new.name finds no in-tree def on its model)' \
     || no "defs-only: name callers: $( callershead name )"
 
 # ── 4. AMBIGUITY + LOCALITY: the resolver splits honestly, pins on evidence ─────────────────────────
@@ -139,7 +140,7 @@ grep -q 'p="consumer_ambiguous.rb:8"' "$TMP/uses_name" \
     && ok 'ambiguous arm: rec.name on a plain local SPLITS over the whole def set (its row is in the gauge)' \
     || no 'ambiguous arm: consumer_ambiguous.rb:8 row missing'
 grep -q 'p="pair_def_column.rb:15"' "$TMP/uses_name" \
-    && ok 'locality arm: self.name inside PairDefColumn pins the in-class def — its row exists and is NOT in the ambiguous gauge' \
+    && ok 'locality arm: self.name inside PairDefColumn.lookup is a use row and NOT in the ambiguous gauge (class-side self: Ruby lookup declines it, never the instance def or a column)' \
     || no 'locality arm: pair_def_column.rb:15 row missing'
 grep -q 'p="column_consumers.rb:7"' "$TMP/uses_name" \
     && ok 'binding arm: SingleColumn.new.name is a real use row (explicit model receiver)' \
