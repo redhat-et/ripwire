@@ -339,7 +339,7 @@ inline PathGapsXml pathUnreachedXml( const IngestResult& ing, const PathSearchGa
     out.rootAttrs = " searched=\"" + std::to_string( gaps.searched ) + "\" gaps=\"" + pathGapCountsValue( gaps.totals ) + "\" gap_syms=\""
                   + std::to_string( gaps.syms.size() ) + "\"" + ( gaps.syms.size() > shown ? " gap_syms_capped=\"1\"" : "" )
                   + " hint=\"no path through resolved call edges, but the search is incomplete: it met calls or hand-offs it could not follow in full (gaps=) — read the gap rows, or try "
-                  + ex( say.connect ) + " (undirected: finds a shared caller)" + std::string( say.tail ) + "\"" + nextAttrXml( nextFlag( "--expand", nextSelectors ) );
+                  + ex( say.connect ) + " (undirected: finds a shared caller)" + std::string( say.tail ) + "\"" + nextAttrXml( nextFlag( "--expand=", nextSelectors ) );
     return out;
 }
 

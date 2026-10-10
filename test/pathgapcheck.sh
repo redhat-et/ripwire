@@ -294,11 +294,11 @@ cp "$TMP/lpy/pkg/x/a.py" "$TMP/lpy/pkg/x/c.py" "$TMP/lpysp/pkg x/"
 cp "$TMP/lpy/other/b.py" "$TMP/lpysp/other/"
 f="$TMP/P8space.xml"; path "$TMP/lpysp" "run,target" "$f"; rc=$?
 if premise "(P8) space" "$rc" "$f"; then
-    nx="$( attr "$f" next )"
-    if [ "$( attr "$f" gaps )" = "name:1" ] && [ "$nx" = "--expand='pkg x/c.py:run'" ]; then
+    nx="$( attr "$f" next )"   # the raw attribute text: the shell quote is &apos; on the wire, as every next= with a quote is
+    if [ "$( attr "$f" gaps )" = "name:1" ] && [ "$nx" = "--expand=&apos;pkg x/c.py:run&apos;" ]; then
         ok "(P8) a gap row under a directory with a space: next=\"$nx\" is one quoted selector"
-        # pasteable: split the way a shell would, run it, and the gap row's body is served
-        python3 -c 'import shlex,subprocess,sys; sys.exit(subprocess.run([sys.argv[1], sys.argv[2], "--no-cache"] + shlex.split(sys.argv[3]), stdout=open(sys.argv[4], "wb"), stderr=subprocess.STDOUT).returncode)' \
+        # pasteable: XML-unescape, split the way a shell would, run it, and the gap row's body is served
+        python3 -c 'import html,shlex,subprocess,sys; sys.exit(subprocess.run([sys.argv[1], sys.argv[2], "--no-cache"] + shlex.split(html.unescape(sys.argv[3])), stdout=open(sys.argv[4], "wb"), stderr=subprocess.STDOUT).returncode)' \
             "$BIN" "$TMP/lpysp" "$nx" "$TMP/P8next.xml"; rc=$?
         if [ "$rc" -eq 0 ] && grep -q 'obj.process()' "$TMP/P8next.xml"; then
             ok "(P8) the quoted next= pastes as one argument and serves run's body"
@@ -306,7 +306,7 @@ if premise "(P8) space" "$rc" "$f"; then
             no "(P8) the quoted next= did not serve run's body (rc=$rc): $( head -c 300 "$TMP/P8next.xml" )"
         fi
     else
-        no "(P8) want gaps=\"name:1\" and next=\"--expand='pkg x/c.py:run'\"; got gaps=\"$( attr "$f" gaps )\" next=\"$nx\""
+        no "(P8) want gaps=\"name:1\" and next=\"--expand=&apos;pkg x/c.py:run&apos;\"; got gaps=\"$( attr "$f" gaps )\" next=\"$nx\""
     fi
 fi
 
