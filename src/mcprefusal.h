@@ -1059,7 +1059,10 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "affected",                 "path paths files legend" },
     { "path_between",             "path paths from to legend" },
     { "connect",                  "path paths symbols radius legend" },
-    { "explore",                  "path paths task budget_tokens partition legend no_route" },
+    // PAGING-POC (issue #294, ask (b)): limit/offset are DECLARED because explore now HONORS them — the
+    // same file-grain widening page the `for` twin serves (one inputSchema row drives this table, the
+    // tools/list stanza and mcpw3fixcheck's enumeration together).
+    { "explore",                  "path paths task budget_tokens partition legend no_route limit offset" },
     { "from_trace",               "path paths trace budget_tokens legend" },
     // 2026-09-10: limit/offset are DECLARED here because the verb now HONORS them (mcpPageArgs -> the
     // unflagged-row window in editcheck.h), the same rule the `impact`/`uses` rows above state. They

@@ -506,5 +506,244 @@ print( "  PASS  (F) mutation: a drift= that followed the window IS caught by the
 PY
 [ $? = 0 ] || fail=1
 
+# ── ARM B of the paging spec (upstream issue #294, corrected scope): the BUDGETED-bundle continuation ──
+# `--for=TASK --limit=N` already pages (the file-grain widening page, forwidencheck owns it). What does
+# NOT exist yet: the byte-budgeted bundle (--token-budget) under --offset/--limit — today the pair is
+# refused, so an agent whose bundle was cut can only re-run blind. This arm is the SEAM contract for the
+# budget-mode continuation once it exists: --offset=N --limit=M must be the EXACT continuation of the
+# previous page over the ranked candidate set — page[0:3] + page[3:6] == page[0:6] in candidates, rank
+# order, no gap, no overlap (the same contract arm (A) holds for <a> rows, here measured on the sig rows
+# of the paged budgeted bundle). RED on the pre-feature binary is the intended state: gate written
+# BEFORE the code, red vs the pre-change binary — today both paged runs refuse and this records that.
+echo "=== (G) budgeted-bundle candidate continuation: page[0:3] + page[3:6] == page[0:6] ==="
+# at a NO-TRIM budget: the page's own legend rides the budget, so a small budget trims within every
+# page and the pure-window identity (page[0:3]+page[3:6] == page[0:6]) cannot hold — the identity is
+# the WINDOW's; the trim path is the (G4) trimming walk below (the #362 review's ask).
+# on src/ (cliff 40 > 6: the single-tier clamp never fires; the repo ROOT clamps every head
+# window to the 1-row cliff — a correct page, but not one this pure-window identity can test)
+run "$ROOT/src" g_budget_p0 --for="rank symbols" --token-budget=100000 --limit=3 --offset=0
+run "$ROOT/src" g_budget_p3 --for="rank symbols" --token-budget=100000 --limit=3 --offset=3
+run "$ROOT/src" g_budget_p6 --for="rank symbols" --token-budget=100000 --limit=6 --offset=0
+
+python3 - "$TMP" <<'PY'
+import os, sys, xml.etree.ElementTree as ET
+
+tmp = sys.argv[1]
+problems = []
+
+def sigs(name):
+    path = os.path.join(tmp, name)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        problems.append(f"{name}: no output — the paged budgeted bundle does not exist yet "
+                        "(today --token-budget refuses --offset/--limit; that refusal IS this arm's recorded red)")
+        return None
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as e:
+        problems.append(f"{name}: not parseable XML ({e})"); return None
+    q = [k for k in ("shown", "total", "capped", "has_more", "next_offset") if k not in root.attrib]
+    if q:
+        problems.append(f'{name}: paged budgeted root lacks the quintet (missing: {", ".join(q)})'); return None
+    # the bundle's sig rows are <d n="..."> elements (serialize.h's flat lens path) — the arm's first
+    # cut guessed <s>/<sig>, matched nothing, and produced a VACUOUS green (0+0 == 0); a seam that
+    # compares no rows proves nothing, so assert the rows EXIST too.
+    rows = [ el.attrib.get("n") or el.attrib.get("name") or el.text or "" for el in root.iter() if el.tag == "d" ]
+    if not rows:
+        problems.append(f"{name}: the page carries no <d> rows — the seam comparison below would be vacuous")
+    return rows
+
+p0 = sigs("g_budget_p0"); p3 = sigs("g_budget_p3"); p6 = sigs("g_budget_p6")
+if p0 is not None and p3 is not None and p6 is not None:
+    joined, whole = p0 + p3, p6
+    if len(joined) != len(whole):
+        problems.append(f"seam: page[0:3]+page[3:6] gives {len(joined)} rows, page[0:6] gives {len(whole)} — rows lost or duplicated across the seam")
+    else:
+        for i, (a, b) in enumerate(zip(joined, whole)):
+            if a != b:
+                problems.append(f"seam: row {i} disagrees across the seam (pages say {a!r}, whole says {b!r}) — not the exact continuation")
+                break
+    overlap = set(p0) & set(p3)
+    if overlap:
+        problems.append(f"seam: pages overlap on {sorted(overlap)[:3]} — a candidate served twice is a page that lies")
+    if not problems:
+        print(f"  PASS  (G) seam: {len(whole)} candidate rows, two pages == the whole, rank order, no overlap")
+
+# ARM B2 (issue #294 follow-up): the candidate page carries next= — the RESUMABLE ARGV, the same
+# contract the file page's next= serves (forwidencheck arm (5) reproduces its page from it). The handle
+# must name the offset the machine attribute next_offset= declares, so a client that pastes it walks the
+# exact continuation. RED until the page grows the attribute (next_offset= alone is machine-only).
+import re as _re
+next_attr = None; next_offset_attr = None
+for name in ("g_budget_p0", "g_budget_p3"):
+    path = os.path.join(tmp, name)
+    if not os.path.exists(path) or os.path.getsize(path) == 0: continue
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    # scope to the ROOT OPENING TAG (rows carry their own next= expand hints — the arm's first cut
+    # read the row's handle and mis-filed it as the page's)
+    o = raw.find( "<sigs" );  oend = raw.find( ">", o )
+    opentag = raw[ o : oend ] if o >= 0 and oend > o else ""
+    m = _re.search(r' next="([^"]*)"', opentag);  n = _re.search(r' next_offset="(\d+)"', opentag)
+    t = _re.search(r' next_tier="([^"]*)"', opentag)   # ruling suggestion 2: the tier the NEXT page carries
+    if m: next_attr = m.group(1)
+    if n: next_offset_attr = n.group(1)
+    if next_attr and next_offset_attr:
+        if ( "--offset=" + next_offset_attr ) not in next_attr:
+            problems.append(f"next= does not name the declared continuation: next={next_attr!r} vs next_offset={next_offset_attr}")
+        else:
+            print(f"  PASS  (G2) next= names the exact continuation (--offset={next_offset_attr})")
+        break
+if t and t.group(1) not in ("head", "below-cliff"):
+    problems.append(f"next_tier={t.group(1)!r} is not one of the two tier values")
+if not t and next_attr:
+    problems.append("next= present but next_tier= absent — the ruling's suggestion 2 (the handle must make the next page's tier visible)")
+if not next_attr:
+    problems.append("the candidate page root carries no next= — the resumable argv handle the file page's next= contract serves (next_offset= alone is machine-only)")
+
+# mutation: the seam shape can fail — an overlapping pair of fabricated pages must be DETECTED
+mut_a, mut_b = ["a", "b", "c"], ["b", "c", "d"]
+if len(set(mut_a) & set(mut_b)) != 2:
+    problems.append("mutation: an overlapping fabricated page pair was NOT detected — the seam arm cannot fail")
+else:
+    print("  PASS  (G) mutation: an overlapping fabricated page pair IS detected")
+
+for p in problems: print("  FAIL  " + p)
+sys.exit(1 if problems else 0)
+PY
+[ $? = 0 ] && ok '(G) budgeted-bundle pages are the exact continuation (candidates, rank order, no overlap)' \
+               || no '(G) the budgeted-bundle continuation seam (upstream issue #294) does not hold — see FAIL lines above'
+
+# ── (G3) END-TO-END WALK (issue #294 ruling, suggestion 5): every page concatenated equals the full ──
+# ranked candidate list — no gap, no overlap, same order — and the tier sequence is head* then
+# below-cliff* (exactly one boundary). Walked at a budget large enough that no within-page trim fires,
+# so the row NAMES are the ranked set itself. The un-paged bundle's served rows (top-40 of the same
+# order, same budget) must be a PREFIX of the walk.
+echo "=== (G3) end-to-end walk: all pages concatenated == the full ranked candidate list ==="
+WALK_BUDGET=100000
+# on the big src/ corpus: enough candidates (878 for this query) that the walk spans multiple pages
+# and crosses the tier boundary — the root corpus' 5 candidates fit one page and prove nothing about seams.
+run "$ROOT/src" g3_bundle --for="rank symbols" --token-budget=$WALK_BUDGET
+offset=0; page=0
+while [ "$page" -lt 12 ]; do
+    run "$ROOT/src" "g3_walk_$page" --for="rank symbols" --token-budget=$WALK_BUDGET --limit=200 --offset=$offset
+    shown="$( attr "$TMP/g3_walk_$page" sigs shown )"; has_more="$( attr "$TMP/g3_walk_$page" sigs has_more )"
+    nextoff="$( attr "$TMP/g3_walk_$page" sigs next_offset )"; tier="$( attr "$TMP/g3_walk_$page" sigs tier )"
+    total="$( attr "$TMP/g3_walk_$page" sigs total )"
+    [ -n "$shown" ] || { no "(G3) walk page $page produced no parseable root"; break; }
+    echo "$tier" >> "$TMP/g3_tiers.txt"
+    echo "$shown" >> "$TMP/g3_shown.txt"
+    # rows carry n= AFTER other attributes (<d l=... n=...) — extract per-row, not per-line prefix
+    python3 -c '
+import re, sys
+raw = open( sys.argv[1], encoding="utf-8", errors="replace" ).read()
+raw = re.sub( r"<!--.*?-->", "", raw, flags=re.S )   # the legend DEFINES <d r=N> in prose: never count prose as rows
+# candidate identity is the (file, line, name) TRIPLE — same-name definitions are distinct
+# candidates even in ONE file (DYNMAP_DEFINE_RANK_32 sits at two lines of dynamic_map.hpp),
+# so name or (file, name) alone false-flags them as seam overlap. n=/p=/l= may sit in any
+# order on the tag — three sub-extracts per tag.
+for tag in re.finditer( r"<d\s[^>]*>", raw ):
+    t = tag.group( 0 )
+    n = re.search( r"\sn=\"([^\"]*)\"", t )
+    p = re.search( r"\sp=\"([^\"]*)\"", t )
+    l = re.search( r"\sl=\"([^\"]*)\"", t )
+    print( ( p.group( 1 ) if p else "?" ) + "\x1f" + ( l.group( 1 ) if l else "?" ) + "\x1f" + ( n.group( 1 ) if n else "?" ) )
+' "$TMP/g3_walk_$page" >> "$TMP/g3_rows.txt"
+    page=$(( page + 1 ))
+    [ "$has_more" = "1" ] || break
+    offset="$nextoff"
+done
+walk_pages="$page"
+
+python3 - "$TMP" "$walk_pages" "$total" <<'PY'
+import os, sys
+tmp, pages, total = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+problems = []
+rows = [ l.rstrip("\n") for l in open(os.path.join(tmp, "g3_rows.txt")) if l.strip() ]
+tiers = [ l.rstrip("\n") for l in open(os.path.join(tmp, "g3_tiers.txt")) if l.strip() ]
+shown_sum = sum( int( x ) for x in open(os.path.join(tmp, "g3_shown.txt")) if x.strip() )
+dups = len(rows) - len(set(rows))
+if dups:
+    problems.append(f"walk: {dups} duplicate candidates across pages — a row served twice is a page that lies")
+# the tiling measure is the pages' own shown= arithmetic (candidates SERVED); the <d n= extraction
+# counts NAMED-DEF rows — a pseudo-symbol (e.g. <file-scope>) is counted as served but emits no row,
+# so shown-sum == total is the contract, and the row list tiles the named-def subset in order.
+# the tile under pseudo-symbols: a candidate slot can be SERVED without printing a row (<file-scope>),
+# so shown-sum <= total with the difference consumed by pseudo-slots; the coherence is rows-extracted
+# == shown-counted plus no duplicates plus the prefix below.
+if shown_sum > total:
+    problems.append(f"walk: shown sums to {shown_sum} vs total={total} — the pages over-serve the candidate set")
+if len(rows) != shown_sum:
+    problems.append(f"walk: {len(rows)} rows extracted vs shown summing {shown_sum} — the count and the rows disagree")
+# tier sequence: all head pages precede all below-cliff pages (exactly one boundary)
+seen_below = False
+for i, t in enumerate(tiers):
+    if t not in ("head", "below-cliff"):
+        problems.append(f"walk page {i}: tier={t!r} is not one of the two values"); break
+    if t == "below-cliff": seen_below = True
+    elif seen_below:
+        problems.append(f"walk page {i}: tier=head AFTER a below-cliff page — the boundary moved mid-walk"); break
+# the un-paged bundle's served rows are a PREFIX of the walk (same order, same budget)
+bp = os.path.join(tmp, "g3_bundle")
+if os.path.exists(bp) and os.path.getsize(bp) > 0:
+    import re
+    raw = open(bp, encoding="utf-8", errors="replace").read()
+    raw = re.sub( r'<!--.*?-->', '', raw, flags=re.S )   # the legend's prose <d r=N> is not a row
+    bundle = []
+    for m in re.finditer( r'<d\s[^>]*>', raw ):
+        t = m.group( 0 )
+        n = re.search( r'\sn="([^"]*)"', t )
+        pp = re.search( r'\sp="([^"]*)"', t )
+        ll = re.search( r'\sl="([^"]*)"', t )
+        bundle.append( ( pp.group(1) if pp else "?" ) + "\x1f" + ( ll.group(1) if ll else "?" ) + "\x1f" + ( n.group(1) if n else "?" ) )
+    if rows[:len(bundle)] != bundle:
+        problems.append("the un-paged bundle's served rows are NOT a prefix of the walk — the page and the bundle answer different orders")
+    else:
+        print(f"  PASS  (G3) the un-paged bundle's {len(bundle)} rows are a prefix of the walk (same order)")
+for p_ in problems: print("  FAIL  " + p_)
+print(f"  ..    (G3) walked {pages} pages, {len(rows)} rows, total={total}, tiers: {' -> '.join(tiers)}")
+sys.exit(1 if problems else 0)
+PY
+[ $? = 0 ] && ok '(G3) every page concatenated == the full ranked candidate list (no gap, no overlap, one tier boundary)' \
+               || no '(G3) the end-to-end walk (issue #294 ruling, suggestion 5) does not hold — see FAIL lines above'
+
+# ── (G4) THE TRIMMING WALK (#362 review, item 2): the same walk at a budget that TRIMS within ──
+# every page, asserting NO DUPLICATE candidate across the seam. The resume point is the last
+# PRINTED row's candidate index + 1 (a pseudo-symbol consumes a slot without printing a row), so
+# a served-count arithmetic lands one short and the next page re-serves a row — the walk catches it.
+echo "=== (G4) trimming walk: a budget that trims, no duplicate candidate across the seam ==="
+: > "$TMP/g4_rows.txt"
+offset=0; page=0
+while [ "$page" -lt 12 ]; do
+    run "$ROOT/src" "g4_walk_$page" --for="rank symbols" --token-budget=600 --limit=40 --offset=$offset
+    has_more="$( attr "$TMP/g4_walk_$page" sigs has_more )"
+    nextoff="$( attr "$TMP/g4_walk_$page" sigs next_offset )"
+    [ -n "$nextoff" ] || { no "(G4) walk page $page produced no parseable root"; break; }
+    python3 -c '
+import re, sys
+raw = open( sys.argv[1], encoding="utf-8", errors="replace" ).read()
+raw = re.sub( r"<!--.*?-->", "", raw, flags=re.S )   # the legend DEFINES <d r=N> in prose: never count prose as rows
+for tag in re.finditer( r"<d\s[^>]*>", raw ):
+    t = tag.group( 0 )
+    n = re.search( r"\sn=\"([^\"]*)\"", t )
+    p = re.search( r"\sp=\"([^\"]*)\"", t )
+    l = re.search( r"\sl=\"([^\"]*)\"", t )
+    print( ( p.group( 1 ) if p else "?" ) + "\x1f" + ( l.group( 1 ) if l else "?" ) + "\x1f" + ( n.group( 1 ) if n else "?" ) )
+' "$TMP/g4_walk_$page" >> "$TMP/g4_rows.txt"
+    page=$(( page + 1 ))
+    [ "$has_more" = "1" ] || break
+    offset="$nextoff"
+done
+TRIM_DUPS=$( python3 - "$TMP/g4_rows.txt" <<PYEOF
+import sys
+rows = [ l.rstrip( "\n" ) for l in open( sys.argv[1] ) if l.strip() ]
+print( len( rows ) - len( set( rows ) ) )
+PYEOF
+)
+if [ "$TRIM_DUPS" = "0" ]; then
+    ok "(G4) trimming walk (budget 600, $page pages): no duplicate candidate across the seam"
+else
+    no "(G4) trimming walk: $TRIM_DUPS duplicate candidate(s) across the seam — the resume point lands short"
+fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

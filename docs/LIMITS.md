@@ -323,7 +323,7 @@ Discloses: `capped`, `hosts_capped`
 
 ### `src/forpage.h`
 
-Discloses: **none**
+Discloses: `capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |

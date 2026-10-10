@@ -2146,6 +2146,12 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, bool payFr
     closeRosterGaps( out );
     mcpSigsCut.continuationRequest = nullptr;   // it pointed at this pass's mcpSigsNext, which ends here
     return McpForAssembly{ std::move( out ), mcpSigsCut };
+// #362 review round 4, follow-up (quality bar): the twins' B2 rank-flags fragment, named once -
+// the inline conditional appeared in both twins' page calls and the second read pushed
+// packTaskText past its complexity bar.
+inline std::string_view mcpPageRankFlags( bool noRoute )
+{
+    return noRoute ? std::string_view( " --no-route" ) : std::string_view();
 }
 
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
@@ -2302,6 +2308,25 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::string_view mcpRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
     if( page.limit > 0 || page.offset > 0 )
     {
+        // PAGING-POC follow-up (issue #294): budget + window is NOT this file page — it is the
+        // BUDGETED-BUNDLE CANDIDATE PAGE, the same document the CLI --for serves (forpage.h's
+        // forCandidatePageDoc, one implementation for every dialect). Serving the budgetless file
+        // page here would ignore budget_tokens — the accept-and-ignore class (mcpverbscheck 6e).
+        if( budgetTokens > 0 )
+        {
+            const AdaptiveCut cut = adaptiveCut( lensRank, 5, std::size_t( forTopN ), /*scanFullDistribution=*/true );
+            // #362 review round 4 (B1): the twins' inline pipeline always scored the full distribution
+            // (pruneTopK=0) and the CLI pages now force fullDistribution under a window, so the five page
+            // paths rank ONE list — the page carries the same pasteable CLI next= as the CLI pages, with
+            // no_route echoed (B2) so the pasted continuation re-ranks identically. The compact dialect
+            // emitted in-doc (schema= present) so the ref posture reduces it like any other spec-keyed
+            // answer — the outer layer sees AlreadyCompact and passes it through.
+            return forCandidatePageDoc( ing, lensRank, cut, ForCandidatePageReq{ task, "--for=",
+                                        mcpPageRankFlags( noRoute ),
+                                        /*pasteHandle=*/true, /*compactLegend=*/true,
+                                        routeNoteOf( rc, shape, noRoute ), mcpRootArg,
+                                        redact, gitstamp::stampAt( root ), budgetTokens, page.limit, page.offset } );
+        }
         const ForFilePage filePage = computeForFilePage( ing, lensRank, mcpEvidence );
         // PR #215 review item 4: this page composed "routed: " + rc.reason by hand and so answered in a spelling
         // row 6 retired everywhere else — a parity break with the CLI page AND with this server's own bundle two
@@ -4355,9 +4380,24 @@ inline std::pair<std::string, std::string> qualityBaselineJson( const std::strin
 // what it is FOR; a separate verb would duplicate the whole task/budget contract for one integer. 0 (or any
 // value outside 2..16, which is silently clamped OFF rather than erroring an otherwise valid explore call)
 // ⇒ the plain single-bundle form, byte-identical to before.
-inline std::string packTaskText( const std::string& root, const std::string& task, std::size_t budgetTokens,
-                                 RedactCounts* redact = nullptr, std::uint32_t partitionCount = 0, bool noRoute = false )
+// (#362 review, item 2): the form options in ONE struct — packTaskText's parameter list was the
+// quality gate's finding (6 -> 8 as the paging round grew it; the form bundles the family: the
+// partition fan-out, the route posture, and the page window, all of them optional knobs of the
+// same bundle). Aggregate-init order is the declaration order.
+struct PackTaskForm
 {
+    std::uint32_t partitionCount = 0;   // --partition=N over MCP (0 = one un-split bundle)
+    bool          noRoute        = false;   // the CLI --no-route twin
+    McpPageArgs   page;                     // limit/offset: the candidate page under a budget, the file page without
+};
+
+inline std::string packTaskText( const std::string& root, const std::string& task, std::size_t budgetTokens,
+                                 RedactCounts* redact = nullptr, const PackTaskForm& form = {} )
+{
+    const std::uint32_t partitionCount = form.partitionCount;
+    const bool         noRoute        = form.noRoute;
+    const int          pageLimit      = form.page.limit;
+    const int          pageOffset     = form.page.offset;
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
     const Graph&        g   = ix.g;
@@ -4450,6 +4490,32 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
 
     const notes::NoteIndex        noteIndex = notes::loadNoteIndex( root );
     const notes::NoteIndex* const notesPtr  = noteIndex.empty() ? nullptr : &noteIndex;
+
+    // PAGING-POC (#294 + the #362 review round, item 6): the page branch sits AFTER every ranking
+    // boost (the early position returned before applyDocMentionBoost above, and the page ranked a
+    // different candidate set than the un-paged answer this same function serves — total= 1155 vs
+    // 901 on the same task; the parity arm in test/mcpverbscheck.sh (6e) pins the two together).
+    // budget + window is the CANDIDATE PAGE; a window with no budget is the FILE-GRAIN WIDENING
+    // PAGE (computeForFilePage/renderForFilePageXml, forpage.h) — the for twin's own page, byte-identical.
+    if( pageLimit > 0 || pageOffset > 0 )
+    {
+        const std::string_view mcpRootArg = ing.realPaths.empty() ? std::string_view( root ) : std::string_view();
+        if( budgetTokens > 0 )
+        {
+            const AdaptiveCut cut = adaptiveCut( lr.rank, 5, std::size_t( kForLensDefaultTopN ), /*scanFullDistribution=*/true );
+            // #362 review round 4 (B1/B2): one list across all five page paths — the same pasteable
+            // next= as the CLI pages, no_route echoed so the pasted continuation re-ranks identically.
+            return forCandidatePageDoc( ing, lr.rank, cut, ForCandidatePageReq{ task, "--pack-task=",
+                                        mcpPageRankFlags( noRoute ),
+                                        /*pasteHandle=*/true, /*compactLegend=*/true,
+                                        lr.routeNote, mcpRootArg,
+                                        redact, gitstamp::stampAt( root ), budgetTokens, pageLimit, pageOffset } );
+        }
+        const ForFilePage filePage = computeForFilePage( ing, lr.rank, lr.evidence );
+        const std::string pageRootOpen = ctxRootOpen( task, lr.routeNote, mcpRootArg );
+        return renderForFilePageXml( ing, filePage, ForPageRenderParts{ task, pageRootOpen, forCoveragePct( lr.evidence, topLensId( lr.rank ) ),
+                                                                        pageLimit, pageOffset, mcpRootArg, /*compactLegend=*/false } );
+    }
 
     PackTaskInputs in;
     in.budgetTokens = budgetTokens;
@@ -5873,7 +5939,8 @@ inline bool mcpVerbDeclaresLegend( std::string_view verb ) noexcept
 inline std::string_view mcpCompactLegendHint( std::string_view verb ) noexcept
 {
     if( verb == "analyze" || verb == "rank_by" )        { return "map"; }   // lane/t10-mcp-coverage: rank_by's XML root is the SAME <r> shape analyze serves
-    if( verb == "explore" || verb == "pack_task" )     { return "pack-task"; }
+    if( verb == "explore" || verb == "pack_task" )     { return "pack-task"; }   // their CANDIDATE PAGE (root <sigs>) adjusts to candidate-page inside the layer
+    if( verb == "for" )                                { return "candidate-page"; }   // the for twin's candidate page (root <sigs>); the un-paged <ctx> answer has no spec row here and passes through, as it did under the empty hint
     if( verb == "from_trace" )                         { return "from-trace"; }
     if( verb == "lego" )                               { return "lego"; }
     if( verb == "exemplar" )                           { return "exemplar"; }
