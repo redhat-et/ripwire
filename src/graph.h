@@ -12032,8 +12032,8 @@ inline StdMemberCallsMade stdMemberCallsMadeBy( const Graph& g, std::span<const 
             out.names.append( out.names.empty() ? "" : "," ).append( externalnames::kCppStdMemberNames[ i ] );
         }
     }
-    ENSURES( out.names.empty() == ( out.calls == 0 ) && out.calls <= declinedCallsMadeBy( g, sources ),
-             "a named call and a listed name come together, and every one is a decline the sources made" );
+    ENSURES( out.names.empty() == ( out.calls == 0 ), "a named call and a listed name come together" );
+    DASSERT( out.calls <= declinedCallsMadeBy( g, sources ), "every listed call is one of the declines the sources made" );
     return out;
 }
 
