@@ -1051,8 +1051,8 @@ inline bool editCheckShowsModuleScope( const IngestResult& ing, const std::vecto
 // with nothing beside it. Defaults to 0 — absent attribute, absent clause — for a caller that resolved no file:name.
 // `page` (2026-09-10, folded into one value by lane lean-trio): --limit/--offset, and — idea #11 — the CLI's clean-answer
 // posture: `verdictOnly` makes an unchanged contract with nothing flagged print the verdict and the call that lists the
-// callers instead of 40 caller rows; `selector` is the CLI's own spelling of SYM, replayed in rows_next=. The MCP verb,
-// the preview and the full legend dialect keep the full document (verdictOnly false).
+// callers instead of 40 caller rows, under every legend posture; `selector` is the CLI's own spelling of SYM, replayed in
+// rows_next=. The MCP verb and the preview keep the full document (verdictOnly false).
 struct EditCheckPage
 {
     int              limit       = 0;
@@ -1060,6 +1060,74 @@ struct EditCheckPage
     bool             verdictOnly = false;
     std::string_view selector;
 };
+
+// idea #11: the facts the VERDICT-ONLY answer is decided on, gathered by editCheckBundleText once every verdict number is
+// fixed. The answer is taken only when there ARE caller rows and every fact the full document could add beside them is
+// absent — one definition, nothing flagged, no unproven or declined definition, no notes, no explicit window, not the
+// preview — so the rows are the ONLY thing left out, and rows_next= is the call that prints them (an explicit --limit is the full document).
+struct EditCheckVerdictFacts
+{
+    EditCheckPage    page;
+    bool             preview          = false;
+    std::string_view status;
+    std::size_t      incompatible     = 0;
+    std::size_t      defs             = 0;
+    std::size_t      unprovenDefs     = 0;
+    std::size_t      declinedCalls    = 0;
+    bool             defsUnmeasured   = false;
+    bool             defaultsFromDecl = false;
+    bool             notesDegraded    = false;
+    bool             noNotes          = true;
+    std::size_t      callers          = 0;
+};
+
+inline bool editCheckVerdictOnlyTaken( const EditCheckVerdictFacts& f ) noexcept
+{
+    // callers > 0: with no caller there is no row to leave out, so the full document is owed (its payload is the same line)
+    const bool cleanContract = f.status == "unchanged" && f.incompatible == 0 && f.defs == 1 && !f.defsUnmeasured && f.callers > 0;
+    const bool nothingBeside = f.unprovenDefs == 0 && f.declinedCalls == 0 && !f.defaultsFromDecl && !f.notesDegraded && f.noNotes;
+    return f.page.verdictOnly && !f.preview && f.page.limit == 0 && f.page.offset == 0 && cleanContract && nothingBeside;
+}
+
+// The verdict line, or "" when the full document is owed (editCheckVerdictOnlyTaken). Its legend states what the full
+// document's would about THESE attributes — the arity hedge (incompatible= is a fact about the tree, never a proof of
+// binding), the floor tail every graph-count verb splices — and nothing about rows it does not carry. It is the full
+// dialect; the compact layer rewrites it like any other (L1: the payload is the same under both postures).
+inline std::string editCheckVerdictOnlyText( const EditCheckVerdictFacts& f, const Graph& g, const std::string& root, const Symbol& fsym,
+                                             std::string_view relPath, bool singleRoot )
+{
+    if( !editCheckVerdictOnlyTaken( f ) )
+    {
+        return {};
+    }
+    std::vector<char> esc;
+    const auto        ex       = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    const std::string rowsNext = nextFlag( "--edit-check=", f.page.selector.empty() ? std::string_view( fsym.name ) : f.page.selector )
+                               + " --limit=" + std::to_string( f.callers );
+    std::string out = "<!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD: status=\"unchanged\" "
+                      "(nothing about the contract moved), and no 1-hop caller is flagged incompatible=\"1\" (flagged only when its "
+                      "argument count was reliably counted and every candidate definition has a FIXED arity that disagrees). That arity "
+                      "check is one-sided and is NOT a proof that a call site binds to THIS definition: call edges are matched by NAME. "
+                      "root= is the crawl root every p= is relative to (single-root runs only). defs= is the one definition compared. callers= "
+                      "counts its 1-hop callers; their rows are left out of this answer because none is flagged, and rows_next= is "
+                      "the call that lists them — call sites worth OPENING, not a verdict. next= is the test gate on the "
+                      "definition's file. est_tokens= prices THIS document, through the tool's ONE emitted-bytes estimator. ";
+    out += graphCountDisclosure( rw::graphGaugeClauses( g ) );
+    out += "-->";
+    out += "<edit-check sym=\"" + ex( fsym.name ) + "\" t=\"" + symTag( fsym.kind ) + "\" p=\"" + ex( relPath ) + ":"
+         + std::to_string( fsym.line ) + "\" status=\"unchanged\" defs=\"1\" callers=\"" + std::to_string( f.callers ) + "\" incompatible=\"0\"";
+    out += gitstamp::atAttr( root );
+    out += graphCountFloorAttrXml( g );   // M15: gauge + marker, as on the full document
+    if( singleRoot )
+    {
+        out += " root=\"" + ex( root ) + "\"";
+    }
+    out += nextAttrXml( rowsNext, "rows_next" );
+    out += nextAttrXml( nextFlag( "--test-gate=", relPath ) );
+    out += "></edit-check>";
+    editCheckPriceRoot( out );   // M11: unconditional, like the full document's
+    return out;
+}
 
 inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g, const std::string& root,
                                         std::size_t maxFileBytes, const std::vector<std::string>& excludes, NodeId focus,
@@ -1121,30 +1189,16 @@ inline std::string editCheckBundleText( const IngestResult& ing, const Graph& g,
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
 
-    // idea #11: the VERDICT-ONLY answer. Taken only when every fact the full document could add beside the rows is
-    // absent — one definition, nothing flagged, no unproven or declined definition, no notes, no explicit window — so
-    // the rows are the ONLY thing left out, and rows_next= is the call that prints them (an explicit --limit is the
-    // full document). Placed after every verdict number is fixed, like the window above: it cannot move a count.
-    if( page.verdictOnly && !preview && std::string_view( verdict.status ) == "unchanged" && incompatibleCount == 0
-        && overloadNodes.size() == 1 && unprovenDefs == 0 && declinedCalls == 0 && !contract.defsUnmeasured
-        && !callee.declDefaults.fromDecl && !notesDegraded && pageLimit == 0 && pageOffset == 0
-        && renderNoteChildren( ni, symbolNoteTarget( ni, ing, fsym ), esc ).empty()
-        && renderNoteChildren( ni, fileNoteTarget( ni, ing.files[ fsym.fileId ] ), esc ).empty() )
+    // idea #11: the VERDICT-ONLY answer (editCheckVerdictOnlyText). Placed after every verdict number is fixed, like the
+    // window above: it cannot move a count.
+    const EditCheckVerdictFacts verdictFacts{ page, preview, verdict.status, incompatibleCount, overloadNodes.size(), unprovenDefs, declinedCalls,
+                                              contract.defsUnmeasured, callee.declDefaults.fromDecl, notesDegraded,
+                                              renderNoteChildren( ni, symbolNoteTarget( ni, ing, fsym ), esc ).empty()
+                                                  && renderNoteChildren( ni, fileNoteTarget( ni, ing.files[ fsym.fileId ] ), esc ).empty(),
+                                              callerIds.size() };
+    if( std::string v = editCheckVerdictOnlyText( verdictFacts, g, root, fsym, ecPathRel( fsym.fileId ), ecSingleRoot ); !v.empty() )
     {
-        const std::string rowsNext = callerIds.empty() ? std::string()
-            : nextFlag( "--edit-check=", page.selector.empty() ? std::string_view( fsym.name ) : page.selector ) + " --limit=" + std::to_string( callerIds.size() );
-        std::string out = "<!-- ripwire edit-check: SYM's contract (param count + publicness) NOW vs git HEAD: status=\"unchanged\", and no "
-                          "caller is flagged incompatible. defs= is the one definition compared. callers= counts its 1-hop callers (a floor: an edge the resolver could not "
-                          "bind is not counted); rows_next= is the call that lists them. next= is the test gate on its file. est_tokens= prices "
-                          "this document. -->";
-        out += "<edit-check sym=\"" + ex( fsym.name ) + "\" t=\"" + symTag( fsym.kind ) + "\" p=\"" + ex( ecPathRel( fsym.fileId ) ) + ":"
-             + std::to_string( fsym.line ) + "\" status=\"unchanged\" defs=\"1\" callers=\"" + std::to_string( callerIds.size() ) + "\" incompatible=\"0\"";
-        out += gitstamp::atAttr( root );
-        out += nextAttrXml( rowsNext, "rows_next" );
-        out += nextAttrXml( nextFlag( "--test-gate=", ecPathRel( fsym.fileId ) ) );
-        out += "></edit-check>";
-        editCheckPriceRoot( out );   // M11: unconditional, like the full document's
-        return out;
+        return v;
     }
 
     // card A1 — the preview sentence, FIRST, because every number below it is about bytes that are not on

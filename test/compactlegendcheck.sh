@@ -551,8 +551,12 @@ probeFor()
 # the defs page whenever it lists MORE definitions than the all page under the row cap, whatever its bytes. Rides only a
 # page that carries listing=; nothing else moved. The OLD path keeps its pin: the whereis-listing=all twin holds the
 # whole-list page's legend at 700 B (measured 692, unchanged).
+# RE-PINNED 2026-10-10 (lane lean-trio, idea #11): ripwire.edit-check/v1 610 -> 650 (measured 636, the --edit-check=distance
+# probe; 595 on main 0852bc0f). The probe's contract is unchanged with nothing flagged, so the answer is now the verdict
+# line (no <c> rows), and the compact legend reads its two new facts: rows_next= (the --limit call listing the callers) and
+# callers= as the c rows' total (a floor). Nothing else moved.
 PIN_TABLE='
-ripwire.edit-check/v1             610   595
+ripwire.edit-check/v1             650   636
 ripwire.map/v1                   910   892
 ripwire.map-diff/v1              900   885
 ripwire.pack-signatures/v1       770   759

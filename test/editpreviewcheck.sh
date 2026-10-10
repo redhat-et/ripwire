@@ -98,8 +98,9 @@ statusOf(){ printf '%s' "$1" | sed -e 's/<!--.*-->//' | grep -oE 'status="[a-z-]
 
 # L1 (2026-09-19): the CLI default legend is compact; (D)/(R) read the FULL legend's prose and (N) compares against an MCP
 # document asked for in "legend": "full", so the preview (and the applied document it is swept against) ask for the full legend.
-preview(){ # $1 selector  $2 payload-path
-    ( cd "$BASE" && "$BIN" . --edit-check="$1" --edit-payload="$2" --dry-run --no-cache --legend=full 2>/dev/null )
+preview(){ # $1 selector  $2 payload-path  [$3 ...] extra flags
+    local sel="$1" pay="$2"; shift 2
+    ( cd "$BASE" && "$BIN" . --edit-check="$sel" --edit-payload="$pay" --dry-run --no-cache --legend=full "$@" 2>/dev/null )
 }
 previewrc(){
     ( cd "$BASE" && "$BIN" . --edit-check="$1" --edit-payload="$2" --dry-run --no-cache >/dev/null 2>&1; echo $? )
@@ -109,7 +110,10 @@ applied(){ # $1 name  $2 file  $3 payload-path  → the POST-apply --edit-check 
     local w="$WORK/apply.$$.$RANDOM"
     mkcorpus "$w"
     ( cd "$w" && "$BIN" . --replace-symbol-body="$1" --edit-target-file="$2" --edit-payload="$3" ) >/dev/null 2>&1
-    ( cd "$w" && "$BIN" . --edit-check="$2:$1" --no-cache --legend=full 2>/dev/null )
+    # lane lean-trio (idea #11): an unchanged, unflagged post-hoc contract answers with its verdict line alone; an explicit
+    # --limit (the verdict's rows_next= call, at the verb's own 40-row cap) is the FULL document, so the comparison below
+    # hands the SAME --limit=40 to both sides (an explicit window adds the same window attributes to each).
+    ( cd "$w" && "$BIN" . --edit-check="$2:$1" --no-cache --legend=full --limit=40 2>/dev/null )
     rm -rf "$w"
 }
 
@@ -134,7 +138,7 @@ while IFS=$'\t' read -r id cls name file pay note; do
     valid=$(( valid + 1 ))
     [ "$cls" = "change" ]   && nchange=$(( nchange + 1 ))
     [ "$cls" = "preserve" ] && npreserve=$(( npreserve + 1 ))
-    pre="$( preview "$file:$name" "$P" )"
+    pre="$( preview "$file:$name" "$P" --limit=40 )"
     post="$( applied "$name" "$file" "$P" )"
     [ -z "$firstPreview" ] && firstPreview="$pre"
     [ "$id" = "chg01" ] && changePreview="$pre"

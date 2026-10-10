@@ -40,7 +40,7 @@ echo "editcheckcheck: BIN=$BIN  (temp git repo)"
 
 # L1 (2026-09-19): the CLI default legend is compact (its root also carries schema= before sym=); these arms read the FULL
 # legend's prose and pin the full-default <edit-check sym= spelling, so ec()/sec() ask for the full legend.
-ec(){ ( cd "$WORK" && "$BIN" . --edit-check="$1" --no-cache --legend=full 2>/dev/null ); }
+ec(){ _s="$1"; shift; ( cd "$WORK" && "$BIN" . --edit-check="$_s" --no-cache --legend=full "$@" 2>/dev/null ); }
 ecrc(){ ( cd "$WORK" && "$BIN" . --edit-check="$1" --no-cache >/dev/null 2>&1; echo $? ); }
 
 # ── (1) clean tree -> unchanged, exit 0, and lists the one known caller ────────────────────────────────
@@ -51,26 +51,46 @@ OUT1="$( ec helper )"
 # pull just the <c .../> caller rows out of the ELEMENT (not the leading <!-- comment -->, which itself
 # prose-describes the incompatible="1" attribute and would false-positive a naive whole-output grep).
 rows(){ printf '%s' "$1" | grep -oE '<c [^>]*/>'; }
-printf '%s' "$OUT1" | grep -q '<edit-check sym="helper"' && printf '%s' "$OUT1" | grep -q 'callers="1"' \
-    && rows "$OUT1" | grep -q 'n="useit"' \
-    && ok "clean tree: 1-hop caller useit() listed, not flagged incompatible" \
-    || { no "clean tree: caller listing wrong"; printf '%s\n' "$OUT1"; }
-# lane lean-trio (idea #11): under the DEFAULT (compact) legend an unchanged contract with nothing flagged is the verdict
-# alone — callers= counted, defs= kept, no <c> rows, rows_next= naming the call that lists them, and that call lists
-# useit(). RED on main 0852bc0f: the default answer carries the <c> rows and no rows_next=.
+# lane lean-trio (idea #11): an unchanged contract with nothing flagged is the verdict alone under EVERY legend posture
+# (L1: the dial never moves the payload) — callers= counted, defs= kept, no <c> rows, rows_next= naming the call that lists
+# them — and that call (an explicit --limit, the full document) lists useit(). RED on main 0852bc0f: both postures carry
+# the <c> rows and no rows_next=.
 OUT1C="$( cd "$WORK" && "$BIN" . --edit-check=helper --no-cache 2>/dev/null )"
-{ printf '%s' "$OUT1C" | grep -q 'status="unchanged" defs="1" callers="1"' && [ -z "$( rows "$OUT1C" )" ] \
-  && printf '%s' "$OUT1C" | grep -q 'rows_next="--edit-check=helper --limit=1"'; } \
-    && ok "(1c) compact: the unchanged verdict alone, rows_next= names the listing call" \
-    || { no "(1c) compact: the unchanged verdict-only answer is wrong"; printf '%s\n' "$OUT1C"; }
-OUT1L="$( cd "$WORK" && "$BIN" . --edit-check=helper --limit=1 --no-cache 2>/dev/null )"
-rows "$OUT1L" | grep -q 'n="useit"' \
-    && ok "(1d) the rows_next= call lists the 1-hop caller useit()" \
-    || { no "(1d) the rows_next= call does not list useit()"; printf '%s\n' "$OUT1L"; }
-if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$OUT1C" | xmllint --noout - 2>/dev/null && ok "(1e) the verdict-only answer is well-formed XML" || no "(1e) the verdict-only answer is not well-formed XML"
+OUT1L="$( ec helper --limit=1 )"
+if printf '%s' "$OUT1" | grep -q '<edit-check sym="helper"' && printf '%s' "$OUT1" | grep -q 'status="unchanged" defs="1" callers="1"' \
+   && [ -z "$( rows "$OUT1" )" ] && printf '%s' "$OUT1" | grep -q 'rows_next="--edit-check=helper --limit=1"'; then
+    ok "(1c) --legend=full: the unchanged verdict alone, rows_next= names the listing call"
+else
+    no "(1c) --legend=full: the unchanged verdict-only answer is wrong"; printf '%s\n' "$OUT1"
 fi
-rows "$OUT1" | grep -q 'incompatible="1"' \
+if printf '%s' "$OUT1C" | grep -q 'status="unchanged" defs="1" callers="1"' && [ -z "$( rows "$OUT1C" )" ] \
+   && printf '%s' "$OUT1C" | grep -q 'rows_next="--edit-check=helper --limit=1"'; then
+    ok "(1c) default (compact): the same verdict alone"
+else
+    no "(1c) default (compact): the unchanged verdict-only answer is wrong"; printf '%s\n' "$OUT1C"
+fi
+if rows "$OUT1L" | grep -q 'n="useit"' && printf '%s' "$OUT1L" | grep -q 'callers="1"' && ! printf '%s' "$OUT1L" | grep -q 'rows_next='; then
+    ok "(1d) the rows_next= call is the full document: it lists the 1-hop caller useit()"
+else
+    no "(1d) the rows_next= call does not list useit()"; printf '%s\n' "$OUT1L"
+fi
+if command -v xmllint >/dev/null 2>&1; then
+    if printf '%s' "$OUT1C" | xmllint --noout - 2>/dev/null && printf '%s' "$OUT1" | xmllint --noout - 2>/dev/null; then
+        ok "(1e) the verdict-only answer is well-formed XML in both postures"
+    else
+        no "(1e) the verdict-only answer is not well-formed XML"
+    fi
+fi
+# (1f) the negative: a symbol with NO caller has no row to leave out, so it is the full document — no rows_next=, the
+# full legend's fold sentence — in every posture.
+OUT1Z="$( ec useit )"
+if printf '%s' "$OUT1Z" | grep -q 'status="unchanged" defs="1" callers="0"' && ! printf '%s' "$OUT1Z" | grep -q 'rows_next=' \
+   && printf '%s' "$OUT1Z" | grep -q 'defs_was=/defs_now='; then
+    ok "(1f) a caller-less unchanged contract is the full document (no rows_next=)"
+else
+    no "(1f) a caller-less unchanged contract took the verdict-only shape"; printf '%s\n' "$OUT1Z"
+fi
+rows "$OUT1L" | grep -q 'incompatible="1"' \
     && no "clean tree: caller wrongly flagged incompatible (precision)" \
     || ok "clean tree: no false-positive incompatible flag"
 

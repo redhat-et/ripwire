@@ -230,7 +230,9 @@ cwd_selector()
 }
 
 for form in typed abs cwdrel; do
-    cwd_selector "(6) --edit-check=<$form root>/pkg/store.py:load" "$PY" "$form" --edit-check pkg/store.py:load 'sym="load"' '<c n="handler" p="app/views.py:4"/>'
+    # lane lean-trio (idea #11): an unchanged, unflagged contract is its verdict line (no <c> rows), so the resolved
+    # definition and its one caller are read off the root: p= is the definition the selector named, callers="1" its caller.
+    cwd_selector "(6) --edit-check=<$form root>/pkg/store.py:load" "$PY" "$form" --edit-check pkg/store.py:load 'sym="load"' 'p="pkg/store.py:1"' 'callers="1"'
     cwd_selector "(6) --callers=<$form root>/pkg/store.py:load"    "$PY" "$form" --callers    pkg/store.py:load 'count="1"' '<s t="fn" n="handler" p="app/views.py:4"/>'
     cwd_selector "(6) --at=<$form root>/pkg/store.py:2"            "$PY" "$form" --at         pkg/store.py:2    'sym="load"'
     cwd_selector "(6) --affected=<$form root>/pkg/store.py"        "$PY" "$form" --affected   pkg/store.py      'seeds="1"' 'reached="1"'

@@ -1714,8 +1714,8 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                               && basis.apiNewSurface == 0 && baseSel.sidecarBadLines == 0 && basis.acksBadLines == 0;
         if( verdictOnly )
         {
-            rw::emitTo( stdout, "<!-- ripwire quality-delta: the tracked files ARE their git HEAD (head_basis=\"identity\"), so the floor is this "
-                                "tree's own snapshot and nothing that existed can be worse: regressions= and gating= are 0. stale= counts ack "
+            rw::emitTo( stdout, "<!-- ripwire quality-delta: the tracked files ARE their git HEAD (head_basis=\"identity\"), so the floor (baseline= "
+                                "names it) is this tree's own snapshot and nothing that existed can be worse: regressions= and gating= are 0. stale= counts ack "
                                 "ledger rows whose target no longer applies (never gating), by kind in stale_by_kind=; stale_next= is the call "
                                 "that prints them with the full header (its exclusion and rename counts included). at=: commit+dirty+shallow. -->"
                                 "<quality-delta baseline=\"{}\" regressions=\"0\" gating=\"0\" stale=\"{}\"{} head_basis=\"identity\"{}></quality-delta>",
@@ -2438,9 +2438,10 @@ std::optional<int> runEditCheck( const MainDispatch& d )
     // being refused, and 0/0 — the un-spelled window — is the default cap, not "unbounded".
     const std::string xml = editCheckBundleText( ing, d.g, d.root, cfg.maxFileBytes, cfg.excludes, focus, d.notesPtr,
                                                   /*preview=*/false,
-                                                  // idea #11: an unchanged contract is one line; the full dialect keeps the rows
-                                                  EditCheckPage{ cfg.pageLimit, cfg.pageOffset, cfg.legend != "full", cfg.editCheckSym },
-                                                  ecUnprovenDefs, d.notesDegraded );   // L3 follow-up (CodeRabbit 4053600616)                                    // the full dialect keeps the rows
+                                                  // idea #11: an unchanged, unflagged contract is its verdict line under EVERY legend
+                                                  // posture (L1: the legend dial never moves the payload); --limit lists the rows
+                                                  EditCheckPage{ cfg.pageLimit, cfg.pageOffset, /*verdictOnly=*/true, cfg.editCheckSym },
+                                                  ecUnprovenDefs, d.notesDegraded );   // L3 follow-up (CodeRabbit 4053600616)
     std::fwrite( xml.data(), 1, xml.size(), stdout );
     return 0;
 }

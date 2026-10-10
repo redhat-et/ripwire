@@ -209,6 +209,10 @@ RENAME = {
     "p":    { "file", "line" },            # row: p="file:line" splits into two JSON keys
     "l":    { "line" },
     "hits": { "total" },                   # grep: the CLI's hits= is the JSON total
+    # quality_delta (lane lean-trio, idea #11): a regression-free CLI answer collapses its <sa> rows to stale_by_kind= and
+    # stale_next= (the --show-stale call); the twin LISTS those rows as "sa", so the two facts survive as the rows themselves.
+    "stale_by_kind": { "sa" },
+    "stale_next":    { "sa" },
 }
 
 def report( label, cliNames, twinNames, lens ):
