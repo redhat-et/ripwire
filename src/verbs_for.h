@@ -2652,7 +2652,8 @@ inline std::string renderForHdrRowsXml( const rw::IngestResult& ing, const std::
 // computed once (`lr`). `sigsNextPayFromRows` is the charged <sigs> continuation's payment mode (serialize.h
 // SigsCutContinuation::payFromRows); with `sigsNextTryOther` set, a run whose capped, charged document lands past its ceiling
 // writes NOTHING to stdout and asks for the run in the other payment mode (runForLens below decides which answer ships).
-std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bool sigsNextPayFromRows, bool* sigsNextTryOther )
+std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bool sigsNextPayFromRows, bool* sigsNextTryOther,
+                                   const std::string& forAtStamp )
 {
     using namespace rw;
     const Config&                     cfg          = d.cfg;
@@ -2954,9 +2955,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, bo
         // flRootArg itself uses): "" on multi-root or a non-git root, same silence-means-omitted convention
         // every other stamped verb follows. ALWAYS present when non-empty, like confidence= — a root fact,
         // never budget-dropped, which is why it rides the SAME byte-exempt reserve as confidence= below.
-        // Computed once as the raw stamp (both dialects need it: XML wraps it as an attribute, JSON quotes
-        // it bare) so a single --token-budget run pays exactly one extra git subprocess, not two.
-        const std::string forAtStamp   = flSingleRoot ? gitstamp::stampAt( root ) : std::string();
+        // Computed once per RUN, in runForLens (both dialects need it: XML wraps it as an attribute, JSON quotes
+        // it bare), so a --token-budget run that renders in up to three payment modes pays the stamp's two git
+        // subprocesses once, not once per render (CodeRabbit on #383, verbs_for.h:3843; test/forrankordercheck.sh (10c)).
         const std::string forAtAttrStr = forAtStamp.empty() ? std::string() : ( " at=\"" + forAtStamp + "\"" );
 
         // R2-AF (round 2, S4): resolved once, ahead of the header build below, so its legend clause can be
@@ -4113,14 +4114,17 @@ std::optional<int> runForLens( const MainDispatch& d )
     }
     rw::LensRanking lr = computeLensRanking( d, cfg.forTask, forCompactPosture( cfg ),
                                              /*fullDistribution=*/!cfg.candidates );   // deep-tail: the bundle serves the file-grain tail; candidates has no tail and keeps the H2 pruning
+    // the at= stamp (gitstamp.h): one read per run — every payment-mode render below shares it, like the ranking
+    const bool        forSingleRoot = d.ing.realPaths.empty() && cfg.roots.size() == 1;
+    const std::string forAtStamp    = forSingleRoot ? rw::gitstamp::stampAt( d.root ) : std::string();
     // only an explicit --token-budget charges the handle (forSigsNextCharged), so only then can a render hand back
     if( cfg.tokenBudget == 0 )
     {
-        return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/true, nullptr );
+        return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/true, nullptr, forAtStamp );
     }
     const rw::RedactCounts tallyAtEntry = d.redactCounts;
     bool                   unpaidOver   = false;
-    std::optional<int>     rc           = runForLensPass( d, lr, /*sigsNextPayFromRows=*/false, &unpaidOver );
+    std::optional<int>     rc           = runForLensPass( d, lr, /*sigsNextPayFromRows=*/false, &unpaidOver, forAtStamp );
     if( !unpaidOver )
     {
         return rc;
@@ -4128,14 +4132,14 @@ std::optional<int> runForLens( const MainDispatch& d )
     ASSUME( !rc );   // the unpaid render that handed back wrote nothing
     d.redactCounts = tallyAtEntry;
     bool paidOver  = false;
-    rc             = runForLensPass( d, lr, /*sigsNextPayFromRows=*/true, &paidOver );
+    rc             = runForLensPass( d, lr, /*sigsNextPayFromRows=*/true, &paidOver, forAtStamp );
     if( !paidOver )
     {
         return rc;
     }
     ASSUME( !rc );   // the paid render that handed back wrote nothing
     d.redactCounts = tallyAtEntry;
-    return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/false, nullptr );
+    return runForLensPass( d, std::move( lr ), /*sigsNextPayFromRows=*/false, nullptr, forAtStamp );
 }
 
 std::optional<int> runTargetedViews( const MainDispatch& d )
