@@ -167,7 +167,7 @@ GF="$( printf '%s' "$LDEPS" | grep -o '<godfiles [^>]*>.*</godfiles>' )"
 if [ "$ldrc" != 0 ] || [ -z "$GF" ]; then
     no "9: --deps on the layer fixture failed (rc=$ldrc) or printed no <godfiles>"
 else
-    printf '%s' "$GF" | grep -q '<f p="test/lib/helper.sh" layer="test" afferent="4"/>' \
+    printf '%s' "$GF" | grep -q '<f p="test/lib/helper.sh" afferent="4" layer="test"/>' \
         && ok "9a: the test helper's godfiles row carries layer=\"test\"" || no "9a: no layer=\"test\" on test/lib/helper.sh: $GF"
     printf '%s' "$GF" | grep -q '<f p="testing/tool.sh" afferent="2"/>' \
         && ok "9b: near miss: testing/tool.sh has no layer= (not a built-in layer dir)" || no "9b: testing/tool.sh row wrong: $GF"

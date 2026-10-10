@@ -8852,11 +8852,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
             w.write( gfb );   // ranked by afferent = # files that #include this one
             for( std::size_t i = 0; i < capG; ++i )
             {
-                char gb[ 48 ];  rw::formatTo( gb, sizeof( gb ), " afferent=\"{}\"/>", afferent[ godRows[i] ] );
-                w.write( "<f p=\"" );  w.write( escapeXml( pathRel( godRows[i] ), esc ) );  w.write( "\"" );
-                // the built-in layer (P3), present-only: a layer=test row is a test helper with test dependents only
+                char gb[ 48 ];  rw::formatTo( gb, sizeof( gb ), "\" afferent=\"{}\"", afferent[ godRows[i] ] );
+                w.write( "<f p=\"" );  w.write( escapeXml( pathRel( godRows[i] ), esc ) );  w.write( gb );
+                // the built-in layer (P3), present-only and AFTER afferent= so the row's existing prefix is unchanged:
+                // a layer=test row is a test helper with test dependents only
                 if( const char* fl = builtinLayer( rootRelPath( ing, godRows[i] ) ); *fl ) { w.write( " layer=\"" );  w.write( fl );  w.write( "\"" ); }
-                w.write( gb );
+                w.write( "/>" );
             }
             w.write( "</godfiles>" );
         }
