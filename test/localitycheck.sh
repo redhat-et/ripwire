@@ -179,14 +179,19 @@ expectSite "(9)" Decoy::typedLocal pick "pick@1" receiver-rule
 #       file calls its own `ok` at module scope. The same-file tier must pick the caller's OWN file in the caller's OWN
 #       language for every file, whichever language filled the memo first: a memo keyed without the language, or a
 #       same-file run found in the wrong place, binds some file's call elsewhere (or nowhere) and turns these red.
+#       One directory per file (train 26c, 2026-10-09): since #383 a bare module-scope call whose same-named definitions
+#       sit in the SAME directory is hedged over that directory (the name-only tier: same file, same directory, each row
+#       via="name"), so 36 files in one directory answered 18 hedged callers per Python def and the arm read the resolver's
+#       hedge, not the memo. A directory per file keeps exactly the claim: the caller's own file, in its own language.
 MF="$( mktemp -d )"
 for i in $( seq 1 18 ); do
-    printf 'ok() { echo "$1"; }\nok "bash %s"\nok "again"\n' "$i" > "$MF/s$i.sh"
-    printf 'def ok(x):\n    return x\nok("py %s")\n' "$i" > "$MF/p$i.py"
+    mkdir -p "$MF/d$i"
+    printf 'ok() { echo "$1"; }\nok "bash %s"\nok "again"\n' "$i" > "$MF/d$i/s$i.sh"
+    printf 'def ok(x):\n    return x\nok("py %s")\n' "$i" > "$MF/d$i/p$i.py"
 done
 memoBad=0
 for i in 1 2 9 17 18; do
-    for f in "s$i.sh" "p$i.py"; do
+    for f in "d$i/s$i.sh" "d$i/p$i.py"; do
         out="$( "$BIN" "$MF" --no-cache --callers="$f:ok" 2>/dev/null )"
         if printf '%s' "$out" | grep -q 'count="1"' && printf '%s' "$out" | grep -q "p=\"$f:1\""; then :; else
             memoBad=1; no "(10) $f:ok should have exactly its own file's module scope as caller: $( printf '%s' "$out" | grep -o '<callers [^>]*>' | head -1 )"
