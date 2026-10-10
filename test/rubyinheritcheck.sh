@@ -474,7 +474,11 @@ else
     no "mutation: Child.build produced $( echo "$MQ" | grep -c '<c n="build"' ) build edges with no base clause: $MQ"
 fi
 MCU="$( "$BIN" "$MUT" --no-cache --callers=Unrelated::build 2>/dev/null )"
-if echo "$MCU" | grep -q 'n="call_inherited"'
+# an absence is read only off a run that produced its <callers> root (a crashed or empty run is not "not among them")
+if ! echo "$MCU" | grep -q '<callers '
+then
+    no "mutation: --callers=Unrelated::build printed no <callers> root, so the absence below cannot be read: $( echo "$MCU" | head -c 200 )"
+elif echo "$MCU" | grep -q 'n="call_inherited"'
 then
     no "mutation: Unrelated::build lists call_inherited — a class whose lookup leaves the tree bound to a namesake"
 else
