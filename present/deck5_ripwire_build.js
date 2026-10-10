@@ -9,8 +9,8 @@
 // doc or web page each figure was read from, quoted. A claim about a change that has not merged yet
 // says "pending merge: #N" in those notes and lives in a commit of its own, so it can be kept or dropped
 // when that PR lands; once it lands the note says "merged: #N (<merge commit>)" instead, and the figure
-// is re-checked against the merged tree. No note on this deck is pending as of main a5229aca (the 2026-09-30 refresh: 25 grammars, nine wrap agents, the
-// since-0.6.1 slide and the field-report slide). A double-braced MEASURE placeholder is a figure that moves with the tree and
+// is re-checked against the merged tree. No note on this deck is pending as of main 255dc199 (figures re-measured on the 255dc199 binary, 2026-10-04; the 2026-09-30 refresh
+// added 25 grammars, nine wrap agents, the since-0.6.1 slide and the field-report slide). A double-braced MEASURE placeholder is a figure that moves with the tree and
 // is re-measured on the merged binary before the deck is rendered; the deck is never rendered with one left in it.
 const pptxgen = require("pptxgenjs");
 
@@ -140,7 +140,7 @@ function storyCards(s, { kick, head, stories, footText }){
   foot(s, "Apache-2.0  ·  single binary  ·  hermetic build (proven with the network off)  ·  25 vendored tree-sitter grammars");
   notes(s, [
     "SOURCES (cover)",
-    "- \"25 vendored tree-sitter grammars\" — CHANGELOG.md [0.6.2], \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\", PR #233 (\"Thanks to @sclyde.\"). README.md on main a5229aca: \"25 vendored grammars\"; third_party/deps/ holds 24 grammar projects, tree-sitter-typescript supplying two (typescript and tsx). Astro (#320) adds no grammar: it rides the TypeScript one.",
+    "- \"25 vendored tree-sitter grammars\" — CHANGELOG.md [0.6.2], \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\", PR #233 (\"Thanks to @sclyde.\"). README.md on main 255dc199: \"25 vendored grammars\"; third_party/deps/ holds 24 grammar projects, tree-sitter-typescript supplying two (typescript and tsx). Astro (#320) adds no grammar: it rides the TypeScript one.",
     "- Before GDScript: 24 — merged: #126 (merge commit 1ad9184a, 2026-09-11), which vendors the Kotlin grammar (PR #126 body: \"vendored fwcd/tree-sitter-kotlin grammar\"). Before #126 the count was 23. On main 40a1895b: README.md, \"24 vendored grammars\", and third_party/deps/ holds a kotlin/ directory.",
     "- The 23 it builds on: commit 680a0a3d,\"It is 23: 22 upstream projects under third_party/deps/, with tree-sitter-typescript supplying both typescript and tsx\"; PR #106's title, \"Dart: a 23rd grammar …\"; README.md, \"23 vendored grammars\".",
     "- The wave under \"The ripgrep of AI context.\": present/assets/paddle-out.png, rendered from docs/assets/paddle-out.svg (commit 680a0a3d; PR #133 moved the wave from the README hero to this deck).",
@@ -230,7 +230,7 @@ function storyCards(s, { kick, head, stories, footText }){
     s.addText(flags, { x: MX+6.3,  y: y+0.04, w: 5.65, h: 0.58, fontFace: MONO, fontSize: 9, color: CYAN, valign: "middle", margin: 0 });
     y += 0.74;
   }
-  foot(s, "--help is generated from the binary's own flag table — 185 long flags; docs/COMMANDS.md carries an entry for every one of them, 162 with a recorded invocation and its output");
+  foot(s, "--help is generated from the binary's own flag table — 185 long flags; docs/COMMANDS.md carries an entry for every one of them, 163 with a recorded invocation and its output");
 }
 
 /* ── S5 · the moments ───────────────────────────────────────────────────── */
@@ -463,7 +463,8 @@ function storyCards(s, { kick, head, stories, footText }){
 /* ── S5e3 · since 0.6.1 ─────────────────────────────────────────────────── */
 {
   // Same four-quadrant listCard shape as 0.6.0 and 0.6.1. Window: after the v0.6.1 tag (2026-09-14) through main
-  // a5229aca — releases 0.6.2 to 0.6.5 and CHANGELOG.md [Unreleased] (merged: #365). Every row names its source in the
+  // a5229aca, where the rows were chosen — releases 0.6.2 to 0.6.5 and CHANGELOG.md [Unreleased] (merged: #365); the figures
+  // (the footer's parser and cache versions, the tool counts) are re-derived on main 255dc199. Every row names its source in the
   // comment beside it and again in the notes. The fn-literal figures move with the corpus and the binary, so they are
   // double-braced MEASURE placeholders until re-measured on the merged binary. Left out on purpose: skill scanning (not a
   // central feature) and any head-to-head figure (none has been re-measured).
@@ -521,10 +522,10 @@ function storyCards(s, { kick, head, stories, footText }){
     ["--mcp-tools", "the MCP server lists only the tools you name, or a core profile of 8; the full 33 stay the default, byte for byte", CYAN],
   ], { bigW: 1.75 });
 
-  // CHANGELOG [Unreleased] "### Changed — the versions this release moves, stated once"; src/ingest_cache.h kParserVer = 129, kCacheVersion = 27
-  foot(s, "upgrade note: parser 129 · cache 27 — a cached index from an earlier build re-indexes once on first use");
+  // CHANGELOG [Unreleased] "### Changed — the versions this release moves, stated once"; src/ingest_cache.h kParserVer = 143, kCacheVersion = 28
+  foot(s, "upgrade note: parser 143 · cache 28 — a cached index from an earlier build re-indexes once on first use");
   notes(s, [
-    "SOURCES (since 0.6.1). Window: after the v0.6.1 tag (2026-09-14) through main a5229aca (merge of #365, 2026-09-30): CHANGELOG.md [0.6.2] to [0.6.5], and [Unreleased] for what main carries into the next release.",
+    "SOURCES (since 0.6.1). Window: after the v0.6.1 tag (2026-09-14) through main a5229aca (merge of #365, 2026-09-30), the point the rows were chosen at: CHANGELOG.md [0.6.2] to [0.6.5], and [Unreleased] for what main carries into the next release. Every row's figure was re-checked on main 255dc199 (train 25, #372); that train's own entries are not added, so the slide keeps its a5229aca selection on purpose.",
     "LEFT OUT, DELIBERATELY: skill scanning (not a central feature of the tool), any head-to-head figure (none re-measured), and per-verb byte counts.",
     "WHERE AND HOW IT RUNS",
     "- Windows x64: CHANGELOG [0.6.2] '### Added — native Windows x64 (clang-cl, MSVC ABI), behind src/infra/os.h — thanks to @lennix1337 (#44)' and '### Added — Microsoft's cl.exe builds the tree, so both Windows front ends compile and both gate'; CHANGELOG [0.6.3] '### Added — a Windows x64 release asset (preview)'. The caveat is README.md's platform row: the gate suite does not run on Windows, and ASan is compiled there but never executed.",
@@ -543,7 +544,7 @@ function storyCards(s, { kick, head, stories, footText }){
     "- placeholder: CHANGELOG [Unreleased] '### Added — --quality-delta placeholder kind (the eleventh): stubs and TODOs a change adds' (merge f6d6cf05): 'Every row is origin=\"new-symbol\" and never gates'.",
     "- --impact depth: CHANGELOG [Unreleased] '### Changed — --impact lists the blast radius nearest first, with its hop depth' (merge 83f30561): rows run by hop depth first, the order is applied before the window cuts, and by_depth= counts reaches= per depth. Gate: test/impactdepthcheck.sh.",
     "- --mcp-tools: CHANGELOG [Unreleased] '### Added — --mcp-tools=LIST: the MCP server can list a subset of its tools' (merge 89f6beb6). The core profile is explore, batch, from_trace, impact, uses, fetch_body, edit_check and quality_delta (8); 'With no flag, or --mcp-tools=full, every byte the server sends is unchanged.'",
-    "FOOTER: CHANGELOG [Unreleased] '### Changed — the versions this release moves, stated once': kParserVer 124 → 129, kCacheVersion 25 → 27; 'Every ingest cache written by an earlier build is refused and re-indexed once'. src/ingest_cache.h on main a5229aca: kParserVer = 129, kCacheVersion = 27.",
+    "FOOTER: CHANGELOG [Unreleased] '### Changed — the versions this release moves, stated once': kParserVer 124 → 143, kCacheVersion 25 → 28; 'Every ingest cache written by an earlier build is refused and re-indexed once'. src/ingest_cache.h on main 255dc199: kParserVer = 143, kCacheVersion = 28.",
   ]);
 }
 
@@ -1163,14 +1164,14 @@ function storyCards(s, { kick, head, stories, footText }){
   card(s, 8.5, 5.25, 4.1, 1.45);
   s.addText([
     { text: "The map grades itself before it answers. ", options: { color: TEXT, bold: true } },
-    { text: "This repository's own src/: files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418.", options: { color: MUTED, fontFace: MONO } },   // re-measured: `ripwire ./src` on main a5229aca
+    { text: "This repository's own src/: files=195 symbols=8318 edges=25147 ambiguous=9391 unresolved=2008 declined=7742.", options: { color: MUTED, fontFace: MONO } },   // re-measured: `ripwire ./src` on main 255dc199
   ], { x: 8.68, y: 5.36, w: 3.8, h: 1.24, fontFace: SANS, fontSize: 10, margin: 0 });
   foot(s, "docs/EVALS.md §8 lists the numbers this project refuses to publish, each with its reason");
   notes(s, [
     "SOURCES (the tripwire)",
-    "- The src/ census is re-derived, not remembered: `ripwire ./src` on main a5229aca prints files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418 (warm and --no-cache identical). On main 40a1895b (2026-09-11) it read files=166 symbols=5778 edges=17150 ambiguous=7441 unresolved=1658 declined=4803. It read files=153 symbols=5122 edges=14182 ambiguous=5982 unresolved=1598 when the slide was written on 2026-09-06.",
+    "- The src/ census is re-derived, not remembered: `ripwire ./src` on main 255dc199 prints files=195 symbols=8318 edges=25147 ambiguous=9391 unresolved=2008 declined=7742 (warm and --no-cache identical). On main a5229aca (2026-09-30) it read files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418. On main 40a1895b (2026-09-11) it read files=166 symbols=5778 edges=17150 ambiguous=7441 unresolved=1658 declined=4803. It read files=153 symbols=5122 edges=14182 ambiguous=5982 unresolved=1598 when the slide was written on 2026-09-06.",
     "- declined= is new in 0.6.0 — #136, merge commit d752d953: a call the resolver refused to guess at is now counted instead of vanishing. It belongs on this slide because it is the same contract the other three rules state.",
-    "- The --callers example: `ripwire . --callers=rankGraphTeleport` answered defs=\"1\" count=\"6\" counts_floor=\"1\", with runEval and rankGraph as its first two rows, on main 40a1895b. On main a5229aca: defs=\"1\" count=\"7\" counts_floor=\"1\", with getIndex and rankGraph as its first two rows (a seventh caller, getIndex in src/mcpindex.h, joined since 40a1895b; the slide sample shows the a5229aca answer).",
+    "- The --callers example: `ripwire . --callers=rankGraphTeleport` answered defs=\"1\" count=\"6\" counts_floor=\"1\", with runEval and rankGraph as its first two rows, on main 40a1895b. On main a5229aca and again on main 255dc199: defs=\"1\" count=\"7\" counts_floor=\"1\", with getIndex and rankGraph as its first two rows (a seventh caller, getIndex in src/mcpindex.h, joined since 40a1895b; the slide sample shows the answer that still holds on 255dc199).",
   ]);
 }
 
@@ -1361,7 +1362,7 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// built for the agent's seat", CYAN);
   title(s, "One command wires it into your agent", { size: 32 });
   chip(s, "$ ripwire wrap claude", MX, 1.95, 4.35, GREEN, { size: 14, h: 0.55 });
-  // the nine agents: src/wrap.h's agent table on main a5229aca
+  // the nine agents: src/wrap.h's agent table on main 255dc199
   s.addText("claude · cursor · codex · windsurf · gemini · aider · opencode · openclaw · hermes — or --all to detect every one you have installed",
     { x: 5.2, y: 1.95, w: 7.4, h: 0.55, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
   const cards = [
@@ -1386,7 +1387,7 @@ function storyCards(s, { kick, head, stories, footText }){
   foot(s, "the MCP server exposes the same deterministic engine — one index, shared with the CLI, staleness-checked");
   notes(s, [
     "SOURCES (agent wiring)",
-    "- The nine agents after `wrap`: src/wrap.h's agent table on main a5229aca — claude, codex, cursor, windsurf, gemini, opencode, openclaw, hermes, aider. This line named six until 2026-09-30. On the merged binary, `ripwire wrap --help`: names the same nine (CLI-first: claude, codex, opencode, openclaw, hermes; MCP config: cursor, windsurf, gemini; repo-map: aider).",
+    "- The nine agents after `wrap`: src/wrap.h's agent table on main 255dc199 — claude, codex, cursor, windsurf, gemini, opencode, openclaw, hermes, aider. This line named six until 2026-09-30. On the merged binary, `ripwire wrap --help`: names the same nine (CLI-first: claude, codex, opencode, openclaw, hermes; MCP config: cursor, windsurf, gemini; repo-map: aider).",
     "- “33 MCP verbs … 17 read verbs … 13 flagship reflexes … 3 span-addressed edit verbs” — README.md, lane/t10-mcp-coverage: “One stdio server, 33 verbs — 17 read, 13 flagship-reflex, 3 span-addressed edit” (rank_by and affected joined the MCP surface, matching the CLI --rank-by / --affected twins).",
     "- “18 agent skills” — README.md: “skills/ ships eighteen task-shaped skills”; skills/ holds 18 directories.",
     "- “12 orchestrator loops” — README.md: “prompts/ holds twelve self-contained orchestrator prompts”, and prompts/ holds 12 .md files besides its own README.md. This card said 11 until 2026-09-11; test/readmedriftcheck.sh arm (I1) gates the README against the directory, and the deck now states the same number.",
@@ -1433,7 +1434,7 @@ function storyCards(s, { kick, head, stories, footText }){
   ], { x: MX+0.3, y: by+0.5, w: 11.5, h: 1.02, fontFace: SANS, fontSize: 12, valign: "top", margin: 0 });
   foot(s, "source: README.md field report (#361) · one engagement · the agent's own report · an older version · testimony, not measurement");
   notes(s, [
-    "SOURCES (in the field). README.md on main a5229aca, the collapsed 'Field report' section and its text version — merged: #361 (merge commit 99dc46eb). The README labels it: 'The model's own report of one engagement, on a version before 0.5; not a controlled measurement. Controlled measurements are in docs/EVALS.md.' This slide carries the same three labels: one engagement, the agent's own report, an older version.",
+    "SOURCES (in the field). README.md on main 255dc199, the collapsed 'Field report' section and its text version — merged: #361 (merge commit 99dc46eb). The README labels it: 'The model's own report of one engagement, on a version before 0.5; not a controlled measurement. Controlled measurements are in docs/EVALS.md.' This slide carries the same three labels: one engagement, the agent's own report, an older version.",
     "WHY NO NUMBERS: the 'Claims you can trust' slide states that no number on this deck lacks a committed instrument behind it. The report's figures (its token-spend estimate, per-call factors, call-site counts, defect counts, agent counts, codebase size) are testimony with no committed instrument, so none is quoted here. The outcomes are.",
     "- --callers card: the report, 'Two tasks had their direction changed by a single call': a task 'chartered to activate a steering behavior the team believed was in production'; one --callers query 'redirecting the task to the real gap (the data provider that behavior needed had never been wired anywhere)'.",
     "- --edit-check card: the same paragraph: a task that 'refactored a widely-shared computation'; --edit-check flagged call sites 'a text search had missed' that 'would otherwise have silently diverged from the canonical path the day the feature was enabled'.",
