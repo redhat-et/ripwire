@@ -4046,7 +4046,8 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
         return tree.root;
     }
 
-    const std::string extractCmd = "tar -x -f " + shSingleQuote( archiveFile ) + " -C " + shSingleQuote( tmpRoot ) + " 2>/dev/null";
+    // Feed the file through stdin: GNU tar treats a Windows drive colon in -f as a remote host.
+    const std::string extractCmd = "tar -x -f - -C " + shSingleQuote( tmpRoot ) + " < " + shSingleQuote( archiveFile ) + " 2>/dev/null";
     const int         extractRc  = os::system( extractCmd.c_str() );
     std::error_code   rmEc;
     fs::remove( fs::path( archiveFile ), rmEc );   // never leave the intermediate .tar behind, success or failure

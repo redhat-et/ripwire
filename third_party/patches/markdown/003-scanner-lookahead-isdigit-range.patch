@@ -1,0 +1,18 @@
+diff --git a/third_party/deps/markdown/src/scanner.c b/third_party/deps/markdown/src/scanner.c
+index 10946aea..b6082728 100644
+--- a/third_party/deps/markdown/src/scanner.c
++++ b/third_party/deps/markdown/src/scanner.c
+@@ -791,9 +791,11 @@ static bool parse_ordered_list_marker(Scanner *s, TSLexer *lexer,
+          valid_symbols[LIST_MARKER_PARENTHESIS_DONT_INTERRUPT] ||
+          valid_symbols[LIST_MARKER_DOT_DONT_INTERRUPT])) {
+         size_t digits = 1;
+-        bool dont_interrupt = !isdigit(lexer->lookahead);
++        // RIPWIRE_VENDOR_PATCH(markdown/003-scanner-lookahead-isdigit-range): lookahead is an int32
++        // codepoint; isdigit(lookahead) is UB for values > 255 and asserts on MSVC UCRT debug builds.
++        bool dont_interrupt = !(lexer->lookahead >= '0' && lexer->lookahead <= '9');
+         advance(s, lexer);
+-        while (isdigit(lexer->lookahead)) {
++        while (lexer->lookahead >= '0' && lexer->lookahead <= '9') {
+             dont_interrupt = true;
+             digits++;
+             advance(s, lexer);

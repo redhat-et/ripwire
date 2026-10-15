@@ -1155,7 +1155,9 @@ brace_start:
         advance(lexer);
         lexer->mark_end(lexer);
 
-        while (isdigit(lexer->lookahead)) {
+        // RIPWIRE_VENDOR_PATCH(bash/001-scanner-lookahead-isdigit-range): lookahead is an int32
+        // codepoint; isdigit(lookahead) is UB for values > 255 and asserts on MSVC UCRT debug builds.
+        while (lexer->lookahead >= '0' && lexer->lookahead <= '9') {
             advance(lexer);
         }
 
@@ -1169,7 +1171,7 @@ brace_start:
         }
         advance(lexer);
 
-        while (isdigit(lexer->lookahead)) {
+        while (lexer->lookahead >= '0' && lexer->lookahead <= '9') {
             advance(lexer);
         }
 

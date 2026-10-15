@@ -201,6 +201,27 @@ if command -v git >/dev/null 2>&1; then
     printf '%s' "$RGH" | grep -q 'kind="nesting" sym="simple"' \
         && ok "T0.1: nesting regression on simple() flagged vs HEAD" || no "T0.1: nesting regression missing"
 
+    # GNU tar treats paths with a colon in -f as a remote host (e.g. Windows C:\... drive letters,
+    # or POSIX paths with colons). materializeCommitTree feeds the archive through stdin (< archiveFile)
+    # so tar extracts cleanly without treating the archive path as a remote host.
+    COLON_DIR="C:x"
+    if ( cd "$GH" && mkdir -p "$COLON_DIR" 2>/dev/null ); then
+        # POSIX host (Linux, macOS): a cwd-relative directory named 'C:x'.
+        ( cd "$GH" && echo "C:x" >> .gitignore )
+        WHEAD="$( cd "$GH" && TMPDIR="$COLON_DIR" "$BIN" . --quality-delta --no-cache 2>/dev/null )"; WRC=$?
+        rm -rf "$GH/$COLON_DIR"
+    else
+        # Windows: NTFS disallows colons in directory names, but native absolute paths already contain C:.
+        WCACHE="$WORK/wincache"; mkdir -p "$WCACHE"
+        WHEAD="$( cd "$GH" && TMPDIR="$WCACHE" "$BIN" . --quality-delta --no-cache 2>/dev/null )"; WRC=$?
+        rm -rf "$WCACHE"
+    fi
+    if [ "$WRC" = 2 ] && printf '%s' "$WHEAD" | grep -q 'baseline="git-HEAD"'; then
+        ok "colon-bearing cache path: archived HEAD remains available and detects the regression"
+    else
+        no "colon-bearing cache path: archived HEAD unavailable (exit $WRC)"
+    fi
+
     # 7c) determinism: HEAD content is fixed → byte-identical run-to-run.
     if [ "$RGH" = "$( dgh )" ]; then ok "T0.1: auto-vs-HEAD delta byte-identical run-to-run (deterministic)"; else no "T0.1: non-deterministic auto-vs-HEAD delta"; fi
     if command -v xmllint >/dev/null 2>&1; then
