@@ -2268,7 +2268,9 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 31;   // MUST equal ingest.cpp's kCacheVersion (gated); 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 173;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 175;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 175 = 2026-10-16 (#409): cross-file markdown #slug binds to that file's
+                                                          //   heading. 175, not 174: 174 is 173's rich file tag.
                                                           // 173 = 2026-10-15 (slice 4a, #400): Ruby's mixin directives onto the shared
                                                           //   base-relations path — queries/ruby/tags.scm captures them as @reference.mixin
                                                           //   and captureTagsFacts emits the inherit reference; captureRubyMixinBases

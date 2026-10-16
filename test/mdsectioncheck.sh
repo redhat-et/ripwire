@@ -11,7 +11,8 @@
 #     canonical id is path::Parent::Child — identity stays PATH-QUALIFIED (the churn-keying
 #     lesson: same heading text across files must never collide);
 #   - markdown links are edges: [text](other.md) / [label]: other.md → doc→doc (file node, the
-#     wikilink machinery), [text](#anchor) → doc-section→doc-section IN-FILE; `backtick`
+#     wikilink machinery), [text](#anchor) → doc-section→doc-section IN-FILE,
+#     [text](other.md#slug) → that file's heading (stem if the heading is absent); `backtick`
 #     mentions stay doc→code and now attribute to their ENCLOSING SECTION;
 #   - fenced/tilde/indented code, html blocks, YAML front-matter and blockquoted headings are
 #     NOT document structure: nothing inside them becomes a symbol, and fenced code is never
@@ -76,6 +77,8 @@ guard "$G" '# zqhtmlphantom'               'the html-block decoy heading'
 guard "$G" '# zqindentphantom'             'the indented-code decoy heading'
 guard "$G" '> # Quoted Phantom'            'the blockquoted decoy heading'
 guard "$G" '(partner.md)'                  'the inline link to partner.md'
+guard "$G" '(partner.md#install-steps)'    'the cross-file heading link'
+guard "$G" '(alt.markdown#no-such-heading)'  'the cross-file link whose heading is absent'
 guard "$G" '(#result-tables)'              'the in-file anchor link'
 guard "$G" '[[decoy]]'                     'the wikilink to decoy'
 guard "$G" '[zqref]: decoy.md'             'the reference-style link definition'
@@ -252,6 +255,8 @@ for m in re.finditer(r'<s t="sec" n="([^"]*)"[^>]*>(.*?)</s>', xml, re.S):
 PYEOF
 edge(){ if grep -qF "$1 -> $2" "$TMP/edges.txt"; then ok "edge: $1 -> $2  ($3)"; else no "edge MISSING: $1 -> $2  ($3)"; fi; }
 edge "Cache Warm Path" "partner"        'inline [text](partner.md) link, attributed to its section'
+edge "Cache Warm Path" "Install Steps"  'cross-file [text](partner.md#install-steps) — that file'\''s heading'
+edge "Cache Warm Path" "alt"           'cross-file [text](alt.markdown#no-such-heading) falls back to the file stem'
 edge "Cache Warm Path" "Result Tables"  'in-file [text](#result-tables) anchor — doc-section→doc-section'
 edge "Result Tables"   "decoy"          '[[wikilink]], attributed to its section'
 edge "Deep Appendix"   "decoy"          'reference-style [zqref]: decoy.md definition'

@@ -320,7 +320,10 @@ constexpr std::uint32_t kCacheVersion = 31;           // 31: train 27 — lane l
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 173;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 175;          // bump on any grammar/.scm/extraction change
+                                                      // 175 = 2026-10-16 (#409): a cross-file markdown [text](other.md#slug) names the
+                                                      //   target file's heading instead of dropping the fragment. 175, not 174: 174 is
+                                                      //   173's rich file tag. Rich file tag 176. kCacheVersion stays 31.
                                                       // 173 = 2026-10-15 (slice 4a, #400): the Ruby mixin directives (`include` / `extend` / `prepend`)
                                                       //   move off the captureIncludes walk onto the shared base-relations path —
                                                       //   queries/ruby/tags.scm captures the directive as @reference.mixin and captureTagsFacts
