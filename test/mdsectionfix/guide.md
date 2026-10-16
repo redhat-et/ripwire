@@ -13,7 +13,9 @@ The orientation body carries zqorientbody as its unique marker token.
 
 The warm path body carries zqcachewarmbody and mentions `codeIdentFn` in a
 backtick. It links to [the partner doc](partner.md) and jumps to
-[result tables](#result-tables) further down. An archived copy
+[result tables](#result-tables) further down. The install section is
+[over there](partner.md#install-steps). A missing anchor stays on the file:
+[nowhere](alt.markdown#no-such-heading). An archived copy
 [lives here][zqref].
 
 ```cpp
