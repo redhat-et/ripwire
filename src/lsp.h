@@ -537,7 +537,7 @@ inline std::string lspReferences( const rw::IngestResult& ing, const std::string
     if( !at.found ) return "[]";
     const std::vector<rw::NodeId> defs = rw::resolveAllByName( ing, at.name );
     const UsesSelector            sel  = resolveUsesSelector( ing, at.name, defs );
-    const auto                    got  = collectUseSites( ing, sel, std::span<const char>{}, std::string_view{} );
+    const auto                    got  = collectUseSites( ing, sel, std::span<const char>{}, std::string_view{}, defs );
 
     std::vector<char>                                        seenDef( ing.symbols.size(), 0 );
     std::vector<std::pair<std::uint32_t, std::uint32_t>>     seenSite;
@@ -843,7 +843,7 @@ inline std::string lspHover( const rw::IngestResult& ing, const rw::Graph& g, co
     // Used at (D7): the same name-matched floor the references provider answers with. Def lines are
     // omitted — they are the block above.
     const UsesSelector sel  = resolveUsesSelector( ing, at.name, defs );
-    const auto         uses = collectUseSites( ing, sel, std::span<const char>{}, std::string_view{} );
+    const auto         uses = collectUseSites( ing, sel, std::span<const char>{}, std::string_view{}, defs );
     std::vector<std::pair<std::uint32_t, std::uint32_t>> defLines, usedAt, refAt;
     for( const rw::NodeId id : defs )
         if( id < ing.symbols.size() ) defLines.emplace_back( ing.symbols[ id ].fileId, ing.symbols[ id ].line );

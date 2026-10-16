@@ -6159,6 +6159,68 @@ inline void fillImplementorBound( Graph& g, const std::vector<ImplementorBoundEd
 }
 
 inline void internDeclinedList( Graph& g, HashMap<std::uint64_t, rw::SmallVec<std::uint32_t, 1>>& listsByHash, std::span<const NodeId> cand );   // defined beside declinedCallsNaming, its one reader
+// TS/JS literal receivers (issue #163 twin): candidate test for literal polyfills.
+// A definition is a polyfill candidate for a literal receiver when it is a scope-matched Method (e.g. JS Foo.prototype.NAME),
+// compatible in language, and within the reference's own root in multi-root workspaces.
+[[nodiscard]] inline bool
+isJsTsLitPolyfillCandidate( const rw::IngestResult& ing, rw::NodeId candSym, std::string_view ctor, const rw::Reference& r ) noexcept
+{
+    if( candSym >= ing.symbols.size() )
+    {
+        return false;
+    }
+    const rw::Symbol& sy = ing.symbols[ candSym ];
+    if( sy.kind != rw::SymKind::Method || sy.scope != ctor || !rw::langCompatible( sy.lang, r.lang ) )
+    {
+        return false;
+    }
+    if( !ing.fileRoot.empty() )
+    {
+        if( sy.fileId >= ing.fileRoot.size() || r.fileId >= ing.fileRoot.size()
+            || ing.fileRoot[ sy.fileId ] != ing.fileRoot[ r.fileId ] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// TS/JS literal receivers (issue #163 twin): only names that are built-in members of the literal's type
+// leave --uses when an in-repo definition shares the name. If no in-repo definition exists (valueDefs empty),
+// return false so external/stdlib queries (e.g. --uses=repeat on hono) answer with external="1" instead of refusing.
+// Python literal calls (e.g. "hello".replace) remain listed by --uses (scoping matches graph.h's #163 JS/TS block).
+// Named function-expression polyfills (String.prototype.padStart = function padStart(n) { ... }, indexed as plain functions)
+// and TS prototype assignments drop their literal calls from --uses, matching graph.h.
+[[nodiscard]] inline bool
+isBuiltinLiteralCall( const rw::IngestResult& ing, const rw::Reference& r,
+                      std::span<const rw::NodeId> valueDefs,
+                      std::span<const rw::NodeId> literalDefs = {} ) noexcept
+{
+    using namespace rw;
+    const std::span<const rw::NodeId> checkDefs = literalDefs.empty() ? valueDefs : literalDefs;
+    if( checkDefs.empty() )
+    {
+        return false;
+    }
+    if( !isJsTsLitRecv( r.recv ) )
+    {
+        return false;
+    }
+    const std::string_view ctor = jsLitCtorName( r.recv );
+    if( ctor.empty() || !isJsTsBuiltinMember( ctor, r.calleeName ) )
+    {
+        return false;
+    }
+    for( NodeId def : checkDefs )
+    {
+        if( isJsTsLitPolyfillCandidate( ing, def, ctor, r ) )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = nullptr, bool census = false )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph: resolve refs + build CSR" );
@@ -7388,9 +7450,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 for( NodeId c : it->second )
                 {
-                    const Symbol& sy = ing.symbols[c];
-                    if( sy.kind == SymKind::Method && sy.scope == ctor
-                        && langCompatible( sy.lang, r.lang ) && sameRoot( c, r.fileId ) )
+                    if( isJsTsLitPolyfillCandidate( ing, c, ctor, r ) )
                     {
                         cand.push_back( c );
                     }

@@ -339,6 +339,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "cross_kind",        "cross_kind=kind:N,...: the defs= definitions differ in kind; rows union all of them (narrow with file:name)" },
     // lane recall: absent at zero, callers and impact only (graphlegend.h kDeclinedIfaceLegend).
     { "declined_iface",    "declined_iface=K: K declined TS calls sharing a name with an interface/abstract signature, by name only (MAY go through it); not a subset of declined_calls=" },
+    { "declined_literal_calls", "declined_literal_calls=K: K built-in member calls on JS/TS literals dropped (shares an in-repo name), in no row" },
     // graph.h StdMemberGate: the callees answer's <stdm> line, absent when the definitions made no such call (graphlegend.h kStdMemberCallsLegend).
     // Keyed on n= (read on <stdm> only): the attribute the full clause opens with, which compactlegendcheck (S) reads.
     { "n",                 "stdm n= calls=: of declined_calls=, calls named like a C++ std container/string/optional/smart-pointer member (n=) on a receiver no rule tied to an in-tree class; no edge or row (may be the std member)", false, "stdm" },

@@ -697,6 +697,15 @@ inline std::string declinedCallsKeyJson( std::size_t declinedCalls )
     return declinedCalls > 0 ? ",\"declined_calls\":" + std::to_string( declinedCalls ) : std::string();
 }
 
+inline std::string declinedLiteralCallsAttrXml( std::size_t declinedLiteralCalls )
+{
+    return countAttrXmlOrEmpty( "declined_literal_calls", declinedLiteralCalls );
+}
+
+inline constexpr const char* kDeclinedLiteralCallsLegend =
+    "declined_literal_calls=K (absent when 0) counts built-in member call sites on JavaScript/TypeScript literals (such as \"string\".replace or [].map) dropped because an in-repo definition shares the member name. ";
+inline const char* declinedLiteralCallsLegend( bool on ) noexcept { return on ? kDeclinedLiteralCallsLegend : ""; }
+
 // ── declined_iface= on the callers and impact answers and their MCP twins (callhierarchy.h declinedIfaceCallsNaming) ──
 // Declined TypeScript calls that share their name with an interface or abstract signature. The resolver does not narrow
 // on a type annotation, so `r.match()` with `r: Router` is declined once `match` has several definitions, and the

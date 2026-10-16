@@ -61,7 +61,7 @@ def loopCount( root ):
     path = root / 'test' / 'regression.sh'
     if not path.is_file():
         sys.exit( 'gatecount_build: no test/regression.sh under %s' % root )
-    text = path.read_text( errors = 'replace' )
+    text = path.read_text( encoding = 'utf-8', errors = 'surrogateescape' )
     loops = re.findall( r'for _g in (.*?); do', text, re.S )
     if len( loops ) != 1:
         sys.exit( 'gatecount_build: expected exactly ONE `for _g in …; do` loop in test/regression.sh, '
@@ -79,7 +79,7 @@ def rewrite_marked_sites( root, count ):
         path = root / rel
         if not path.is_file():
             sys.exit( 'gatecount_build: site %s does not exist under %s' % ( rel, root ) )
-        lines = path.read_text( errors = 'replace' ).split( '\n' )
+        lines = path.read_text( encoding = 'utf-8', errors = 'surrogateescape' ).split( '\n' )
         out, seen = [], []
         for i, line in enumerate( lines, 1 ):
             marked = MARKER.search( line ) is not None
@@ -128,7 +128,7 @@ sites = sum( len( s ) for _, _, s in plans )
 if a.check:
     drift = []
     for rel, newText, seen in plans:
-        cur = ( ROOT / rel ).read_text( errors = 'replace' )
+        cur = ( ROOT / rel ).read_text( encoding = 'utf-8', errors = 'surrogateescape' )
         if cur != newText:
             named = [ '%s:%d says %s' % ( rel, ln, v ) for ln, v in seen if v != str( count ) ]
             # a difference this scan cannot name is still a difference — never report clean on one
@@ -142,8 +142,8 @@ else:
     changed = 0
     for rel, newText, _ in plans:
         path = ROOT / rel
-        if path.read_text( errors = 'replace' ) != newText:
-            path.write_text( newText )
+        if path.read_text( encoding = 'utf-8', errors = 'surrogateescape' ) != newText:
+            path.write_text( newText, encoding = 'utf-8', errors = 'surrogateescape' )
             changed += 1
     print( 'gatecount_build: wrote %d to %d marked site(s) across %d file(s) (%d file(s) changed)' %
            ( count, sites, len( SITES ), changed ) )

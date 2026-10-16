@@ -3261,6 +3261,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
 
     struct UseSite { std::uint32_t fileId; std::uint32_t line; RefRole role; std::string in; NodeId from; };   // from: rankUseSites' weight
     std::vector<UseSite> sites;
+    const std::vector<NodeId> literalDefs = resolveAllByName( ing, sym );
+    std::size_t declinedLiteralCalls = 0;
     const ElixirResolver elixirResolver( ing );
     // CLI parity (mcpclidiffcheck): the Elixir resolver path is gated on the selector's ELIXIR definitions —
     // the CLI's resolveUsesSelector filters exactly this way, off the RAW selector, before the @-seed rebind.
@@ -3290,6 +3292,11 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
         if( r.lang == Lang::Markdown )
         {
             continue; // markdown wikilink — not a code use-site
+        }
+        if( r.role == RefRole::Call && isBuiltinLiteralCall( ing, r, defs, literalDefs ) )
+        {
+            ++declinedLiteralCalls;
+            continue;
         }
         std::string in;
         if( r.fromSymbol != kNoNode && r.fromSymbol < ing.symbols.size() )
@@ -3340,7 +3347,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
                        "qualified file:name and \"::\" spellings whose bare name IS defined refuse instead (the CLI uses verb narrows them). "
                        "{}{}{}-->{}", kUsesLegendOpen,
                   ( std::string( usesValueRoleLegend( std::any_of( sites.begin(), sites.end(), []( const UseSite& u ) { return u.role == RefRole::Value; } ) ) )
-                    + valueRefsDepthLegend( usDepthCut.files > 0 ) ).c_str(),   // exactly when the root carries the depth disclosure, as the CLI
+                    + valueRefsDepthLegend( usDepthCut.files > 0 )
+                    + declinedLiteralCallsLegend( declinedLiteralCalls > 0 ) ).c_str(),   // exactly when the root carries the depth disclosure, as the CLI
                   capLegendClause( computePageDisclosure( upageRows, sites.size(), upw.end,
                                                           page.limit, page.offset, usDiscloseCap ).active ),
                   graphCountDisclosure( rw::graphGaugeClauses( ix.g ) ).c_str(),
@@ -3354,7 +3362,8 @@ inline std::optional<std::string> usesText( const std::string& root, const std::
     const std::string  usRootAttr   = usSingleRoot ? ( " root=\"" + ex( root ) + "\"" ) : std::string();
     rw::emitTo( mem, "<uses of=\"{}\" defs=\"{}\" external=\"{}\" count=\"{}\"{}{}{}{}>",
                   ex( symbol ).c_str(), defs.size(), external ? 1 : 0, sites.size(), usRootAttr.c_str(), upage, graphCountFloorAttrXml( ix.g ).c_str(),
-                  valueRefsDepthAttrXml( ing, usDepthCut, VrRender{ usSingleRoot, usRootPrefix } ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
+                  ( valueRefsDepthAttrXml( ing, usDepthCut, VrRender{ usSingleRoot, usRootPrefix } )
+                    + declinedLiteralCallsAttrXml( declinedLiteralCalls ) ).c_str() );   // of= echoes the selector as TYPED (an @-seed stays an @-seed)
     for( std::size_t siteIndex = upw.begin; siteIndex < upw.end; ++siteIndex )
     {
         const UseSite& u = sites[ siteIndex ];
