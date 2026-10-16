@@ -8788,7 +8788,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( NodeId baseId : *baseIds )
         {
             // lane lego-transitive (M1): a Ruby MODULE is a base here too. `include M` / `extend M` / `prepend M` put it in
-            // the class's ancestors (the @reference.mixin capture, parser version 131), so the class implements its contract the way
+            // the class's ancestors (parser version 131 put them there from the captureIncludes walk; since 173 the @reference.mixin capture reads them), so the class implements its contract the way
             // a subclass does — and --lego=M listed nobody (rake: `include Rake::DSL`). The test is BuiltinMethodGate's
             // class-like rule, the one that already counts a Ruby module (Ruby && SymKind::Other: @definition.module maps to
             // Other for every language, and only Ruby's tags have no other Other). Other languages need nothing here: an

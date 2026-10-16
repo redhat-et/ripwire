@@ -26,7 +26,7 @@
 #       only read as absent because the fixture defines no Struct. `class Built < Factory.fabricate( :x )` against
 #       an in-tree `Factory` pins it.
 #   (b) a MIXIN (`include Helper` / `extend` / `prepend`) is an ANCESTOR for the call graph since parser version
-#       131 — the base walk, the CHA cone and a bare call's reach read it (ingest_relations.h captureRubyMixinBases,
+#       131 — the base walk, the CHA cone and a bare call's reach read it (captureRubyMixinBases then; the @reference.mixin capture since 173,
 #       test/rubyreachcheck.sh) — and since lane lego-transitive it is an IMPLEMENTOR edge too: graph.h's implementors
 #       builder admits a Ruby module as a base (BuiltinMethodGate::isClassLike's Ruby-module rule), so --lego=Helper
 #       lists Mixed. Floor (b) is CLOSED; the arm below is inverted and says so (rake: `include Rake::DSL`).
@@ -524,9 +524,21 @@ fi
 
 # ---- slice 4a: the mixin read moved to queries/ruby/tags.scm (@reference.mixin) -------------------------------
 # The constants of a class-body `include`/`extend`/`prepend` are inherit references. Since slice 4a the tags query
-# states the SHAPE and the shared capture consumer owns the two guards a tags pattern cannot: the directive's TEXT
-# and its POSITION. The query matches ANY call holding a constant argument, so those two guards are the only thing
-# between `Logger.new( MixA )` and an invented ancestor — this fixture pins all three boundaries in one count.
+# states the SHAPE and the Ruby reader owns the two guards a tags pattern cannot: the directive's TEXT and its
+# POSITION. The query matches ANY call holding a constant argument, so those guards are the only thing between an
+# ordinary call and an invented ancestor. Each line below pins one of them:
+#
+#   include MixA, MixB      2 refs — one directive, N constants, in source order
+#   include Space::Mod      1      a scope_resolution is a base, as a superclass's is
+#   extend MixB             1   \
+#   prepend Space::Mod      1   /  all THREE mixin directives are read, not just `include`
+#   class << self/include   1      the enclosing class's own singleton is class-DSL position
+#   Logger.new( MixA )      0      refused by the RECEIVER half of the text guard
+#   raise MixA              0      receiverless, at class-body level: refused by the NAME half ALONE — a change
+#                                  that dropped only the name comparison would let this one through
+#   def f / include MixA    0      a method body is not class-DSL position (the POSITION guard)
+#
+# Total: 6. `raise MixA` mints no reference on this head (the maintainer measured the same).
 MIXQ="$DIR/mixq"; mkdir -p "$MIXQ"
 cat > "$MIXQ/q.rb" <<'RUBY'
 module MixA; end
@@ -537,7 +549,10 @@ end
 class Mixed
   include MixA, MixB
   include Space::Mod
+  extend MixB
+  prepend Space::Mod
   Logger.new( MixA )
+  raise MixA
   def f
     include MixA
   end
@@ -548,11 +563,11 @@ end
 RUBY
 if RIPWIRE_TEST_RUBY_BASE_UNSCOPED=1 runq MIXSEAM "$MIXQ" --no-cache --lego=MixA --legend=full
 then
-    if echo "$MIXSEAM" | grep -q ' ruby_bases_unscoped="4"'
+    if echo "$MIXSEAM" | grep -q ' ruby_bases_unscoped="6"'
     then
-        ok "slice 4a: 4 mixin inherit refs (2 off one directive, 1 scope_resolution, 1 under class << self) — and neither Logger.new( MixA ) nor the method-body include is one"
+        ok "slice 4a: 6 mixin inherit refs (include x2 + scope_resolution + extend + prepend + class << self) — and none of Logger.new( MixA ), raise MixA or the method-body include is one"
     else
-        no "slice 4a: expected ruby_bases_unscoped=\"4\" (2 + 1 + 1, the call and the method body refused), got: $( echo "$MIXSEAM" | grep -o 'ruby_bases_unscoped="[0-9]*"' )"
+        no "slice 4a: expected ruby_bases_unscoped=\"6\" (2+1+1+1+1, the two calls and the method body refused), got: $( echo "$MIXSEAM" | grep -o 'ruby_bases_unscoped="[0-9]*"' )"
     fi
     if echo "$MIXSEAM" | sed 's/></>\n</g' | grep -q '<impl n="Mixed"'
     then

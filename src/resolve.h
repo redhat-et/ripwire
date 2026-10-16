@@ -1954,7 +1954,7 @@ struct RubyDirectiveSite
 };
 
 // Every symbolic directive that is not a value use, per file in byte order — the records a MIXIN reference is joined to
-// (parser version 131: ingest_relations.h emitCapturedMixinBase puts the reference at its constant, the directive sits at
+// (parser version 131 put the reference at its constant from captureRubyMixinBases; since 173 the capture does; the directive sits at
 // its `include` call). Stable, so two constants of one `include A, B` keep their source order at their shared byte.
 inline std::vector<std::vector<RubyDirectiveSite>> rubyDirectiveSitesByFile( const IngestResult& ing, const RubyConstantIndex& ix )
 {

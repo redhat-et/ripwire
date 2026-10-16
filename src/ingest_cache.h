@@ -500,7 +500,9 @@ constexpr std::uint32_t kParserVer    = 173;          // bump on any grammar/.sc
                                                       // 131 = 2026-10-02 (test/rubyreachcheck.sh): a Ruby MIXIN is an
                                                       //   ancestor — `include`/`extend`/`prepend` at class-DSL
                                                       //   position mints one inherit RawRef per constant, at the
-                                                      //   constant's byte (ingest_relations.h emitCapturedMixinBase).
+                                                      //   constant's byte — ingest_relations.h captureRubyMixinBases
+                                                      //   then; since 173 the @reference.mixin capture, read by
+                                                      //   ingest_ruby.h emitCapturedRubyMixinBase.
                                                       //   New records, same layout: kCacheVersion unchanged (27). A
                                                       //   Ruby cache written at 130 holds none of them and must re-parse.
                                                       // 130 = 2026-10-01 (test/rubybarecallcheck.sh): Ruby's BARE-WORD call — an

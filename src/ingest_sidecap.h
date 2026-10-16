@@ -2434,12 +2434,15 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 }
 
                 // family 4 / slice 4a: a @reference.mixin capture is Ruby's `include`/`extend`/`prepend` — the shape
-                // lives in queries/ruby/tags.scm, so the capture IS the language gate and no Lang:: test is spent
+                // lives in queries/ruby/tags.scm, so the capture IS the language gate and no Lang:: branch is spent
                 // here. The two guards a tags pattern cannot state (the directive's TEXT, and its POSITION) live in
-                // the helper, beside the emitter. The directive's own CALL reference is a separate match, below.
+                // the Ruby reader, ingest_ruby.h emitCapturedRubyMixinBase, which takes the language from this call
+                // site and EXPECTS Ruby: Ruby is the capture's only emitter today, and a second language adds its own
+                // reader and dispatch here rather than reusing Ruby's. The directive's own CALL reference is a
+                // separate match, below.
                 if( refCapSv == "reference.mixin" )
                 {
-                    emitCapturedMixinBase( roleNode, nameNode, fileId, src, refs );
+                    emitCapturedRubyMixinBase( roleNode, nameNode, fileId, le.lang, src, refs );
                     continue;
                 }
 

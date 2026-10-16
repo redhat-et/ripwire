@@ -1077,7 +1077,7 @@ enum class LocalBindKind : std::uint8_t
                    //     ActiveSupport::Concern extends onto the includer (ingest_ruby.h rubyDefSide).
     RubyClassMixin, // parser version 145: a mixin the CLASS OBJECT's lookup reaches rather than its instances' — the constant
                    //     of an `extend M`, or of an `include`/`prepend` inside `class << self` — at startByte, the
-                   //     constant's own start, where ingest_relations.h emitCapturedMixinBase puts its inherit reference;
+                   //     constant's own start, where the mixin reader puts its inherit reference (ingest_ruby.h emitCapturedRubyMixinBase since 173, captureRubyMixinBases before it);
                    //     var and typeName empty; importedName=kRubyIncluderMark when the directive sits in a concern's
                    //     `included do … end`, which extends the includer, not the concern. A module body's `extend self`
                    //     has no constant: var="self", at the directive's own start byte (ingest_ruby.h

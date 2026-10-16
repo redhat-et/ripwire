@@ -615,7 +615,7 @@ inline void captureRubySingletonAccessors( TSNode root, std::uint32_t fileId, st
 
 // Parser version 145 (test/rubyclassrecvcheck.sh): each mixin the CLASS OBJECT's lookup reaches rather than its
 // instances' — the constants of an `extend M`, and of an `include`/`prepend` inside `class << self` — as a
-// LocalBindKind::RubyClassMixin binding at the constant's own start byte, where emitCapturedMixinBase puts its inherit
+// LocalBindKind::RubyClassMixin binding at the constant's own start byte, where emitCapturedRubyMixinBase puts its inherit
 // reference, read where that reads the directive (class-body level, or a concern's `included do`). One a concern's
 // `included do` writes extends the includer, not the concern: importedName kRubyIncluderMark. A class body's `extend self`
 // names no constant: its binding sits at the directive, var "self". A file that never writes `extend` or `<<` is not
@@ -627,7 +627,7 @@ inline bool rubyExtendsSelf( TSNode n ) noexcept
     return !ts_node_is_null( args ) && ts_node_named_child_count( args ) == 1 && kindIs( ts_node_type( ts_node_named_child( args, 0 ) ), "self" );
 }
 
-// The RubyClassMixin bindings of the mixin directive `n` (an `extend` when `extend`), read where emitCapturedMixinBase reads
+// The RubyClassMixin bindings of the mixin directive `n` (an `extend` when `extend`), read where emitCapturedRubyMixinBase reads
 // it: one per constant a class object's lookup reaches, and a module body's `extend self`.
 inline void rubyNoteClassMixins( TSNode n, bool extend, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
 {
@@ -867,6 +867,38 @@ inline void captureRubyFactories( TSNode root, std::uint32_t fileId, std::string
     {
         RubyFactoryWalk( fileId, src, binds ).run( root );
     }
+}
+
+// The Ruby mixin directive a @reference.mixin capture names (family 4, slice 4a): when `call` is a receiverless
+// `include`/`extend`/`prepend` at class-DSL position, its constant argument is an ANCESTOR of the enclosing class, so
+// it emits one inherit reference through the shared emitBaseRef — the shape a superclass mints. Both guards are here
+// because a tags pattern can state neither: the TEXT (tags predicates do not run, so `Logger.new( Config )` matches the
+// same call shape) and the POSITION (a method body, another block and the file top level emit nothing).
+//
+// This is RUBY's reader and lives in the Ruby lane for that reason. `@reference.mixin` is a language-neutral capture
+// name, so the shared consumer reaches it with no Lang:: test; the language therefore arrives FROM the call site and is
+// asserted here. Ruby is the only emitter of `@reference.mixin` today. A second language that adopts the capture must
+// NOT reuse this function — its guards are Ruby's fields and Ruby's directive names, and it mints Lang::Ruby refs, so a
+// non-Ruby call would be silently dropped — it must add its own emitCaptured<Lang>MixinBase and a per-language dispatch
+// at the consumer arm (PHP's in-body `use Trait;`, near captureBases' header, is the documented sibling).
+//
+// The one construction where this path is NOT byte-identical to the walk it replaced (the maintainer's #401 note, and
+// pathological): the Include record still comes from the captureIncludes walk, which stops at kMaxImportContainerDepth
+// (256 AST levels), while this inherit reference comes from the query, which has no such bound. Past that depth — 260
+// nested `module`s with an `include M` innermost — rubyDirectiveSitesByFile finds no directive for the reference, so
+// --lego lists the includer as an implementor while the walk's own depth-bound notice on stderr ("import-container
+// nesting past the depth bound — deeper imports not captured") stays the only degraded line: no ruby_bases_unscoped=
+// appears on any verb. No real code reaches 256 levels of nesting; the cut is stated here so "byte-identical" reads exactly.
+inline void emitCapturedRubyMixinBase( TSNode call, TSNode constant, std::uint32_t fileId, Lang lang, std::string_view src,
+                                       std::vector<RawRef>& refs )
+{
+    EXPECTS( lang == Lang::Ruby );   // the only emitter of @reference.mixin; see the note above
+    if( rubyNamedDirective( call, src, kRubyMixinDirectives ).empty()
+        || !( rubyAttrAtClassBodyLevel( call, src ) || rubyInConcernIncludedBlock( call, src ) ) )
+    {
+        return;
+    }
+    emitBaseRef( constant, fileId, lang, src, refs );
 }
 
 } // namespace - ingest_ruby.h section of ingest.cpp

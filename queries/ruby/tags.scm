@@ -100,18 +100,20 @@
 ; ---- mixin directives (family 4, slice 4a) ----
 ; `include M` / `extend M` / `prepend M` make M an ANCESTOR of the enclosing class or module: the class's own
 ; method lookup reaches M's methods, which is the edge `class C < B` mints. Each constant argument is captured
-; here as @name and read by the shared base-relations path (src/ingest_sidecap.h captureTagsFacts -> emitBaseRef,
-; the same emitter every language's base clause goes through), so no Ruby-only C++ function walks these
-; directives any more (slice 4a retired captureRubyMixinBases).
+; here as @name and read by the shared base-relations emitter (src/ingest_sidecap.h captureTagsFacts ->
+; src/ingest_ruby.h emitCapturedRubyMixinBase -> emitBaseRef, the same emitter every language's base clause goes
+; through), so no Ruby-only C++ function walks these directives any more (slice 4a retired captureRubyMixinBases).
 ;
 ; UNANCHORED on purpose, exactly like the import patterns above: the tags pass evaluates NO predicates
 ; (#eq?/#match? are silently ignored — test/matchgrammarcheck.sh), so this pattern states the call SHAPE and the
 ; C++ reader owns the two guards a query cannot state — the directive's own TEXT (without it `Logger.new( Config )`
 ; and `raise Error` at class-body level match the same shape) and the POSITION (class/module body, `class << self`,
 ; or a concern's `included do … end`; a method body, another block and the file top level emit nothing). Both guards
-; already existed for this lane and stayed where they were; the query is the language gate, so the reader spends no
-; Lang:: test on them. The division is the one the shared import vocabulary uses for `require` (issue #358,
-; src/ingest_importcap.h).
+; already existed for this lane and stayed where they were. The capture NAME is language-neutral, so the consumer
+; spends no Lang:: branch to reach it — but RUBY is its only emitter today, and the reader is Ruby's own
+; (emitCapturedRubyMixinBase EXPECTS Ruby). A second language adopts the mixin concept by adding its own reader and a
+; per-language dispatch at the consumer arm, never by reusing Ruby's guards. The shape/guard division is the one the
+; shared import vocabulary uses for `require` (issue #358, src/ingest_importcap.h).
 (call
   method: (identifier)
   arguments: (argument_list [(constant) (scope_resolution)] @name)) @reference.mixin

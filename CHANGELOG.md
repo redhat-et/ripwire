@@ -21,9 +21,13 @@ Ruby's `include`/`extend`/`prepend` are now captured by `queries/ruby/tags.scm` 
 inherit references by the shared capture consumer — the same emitter every language's base clause goes through. The
 Ruby-only `captureRubyMixinBases` and its `captureIncludes` call site are gone; the query states the call shape and
 the C++ reader keeps the two guards a tags pattern cannot state (the directive's text, and its class-body position).
-Output is byte-identical: the map, `--deps --limit=100000`, `--skipped`, `--callers`, `--callees`, `--impact` and
-`--uses` all match the base build over a real Rails corpus and the Ruby fixtures, and `--lego` lists the same
-implementors. `kParserVer` moves 171 -> 173 (the extraction path changed; 172 is 171's rich file tag).
+Output is byte-identical with ONE stated exception: the map, `--deps --limit=100000`, `--skipped`, `--callers`,
+`--callees`, `--impact` and `--uses` all match the base build over a real Rails corpus and the Ruby fixtures, and
+`--lego` lists the same implementors. The exception is pathological: the Include record still comes from the
+`captureIncludes` walk, which stops at `kMaxImportContainerDepth` (256 AST levels), while the inherit reference now
+comes from the query, which has no such bound — so past that depth (260 nested `module`s with an `include M` innermost) the reference has no directive to join to: `--lego` lists the includer as an implementor, while the
+existing depth-bound notice on stderr says deeper imports were not captured. No real code nests 256 levels deep.
+`kParserVer` moves 171 -> 173 (the extraction path changed; 172 is 171's rich file tag).
 
 ### Added — Clojure (`.clj`/`.cljs`/`.cljc`/`.bb`)
 

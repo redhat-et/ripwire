@@ -18,7 +18,7 @@
 #      An interface with no deeper row carries none of it (byte identity with the direct-only answer).
 # (S2) every <impl> row of the TARGETED answer says where the class is: p="file:LINE" (the --uses/--callers spelling); the
 #      <iface> row and the ranked --for <lego> section keep their bare p=.
-# (M1) a Ruby module mixed in with include/extend (captureRubyMixinBases) is an implements edge: --lego=DSL lists TaskLib.
+# (M1) a Ruby module mixed in with include/extend (the @reference.mixin capture, ingest_ruby.h emitCapturedRubyMixinBase) is an implements edge: --lego=DSL lists TaskLib.
 # (M2) a JS/TS class factory `const Sub = Base.extend('Sub', …)` is a class definition extending its receiver.
 # (M3) a bare name resolves to a CODE definition whenever one matched, never to a markdown heading sorted first.
 # (NS) fix 1: the closure descends only through extends edges the index PROVES (a same-file declaration in scope, an import,
