@@ -23,15 +23,15 @@
 #       (FROM and TO), a --match #match? predicate, a --lint-rules #match? predicate and --regex is REFUSED:
 #       exit 1, bounded time, never a signal death, the pattern and the construct named on stderr. Each entry
 #       point also has a POSITIVE CONTROL: an ordinary pattern on the same fixture still answers.
-#   (b) MATCH-TIME EXHAUSTION IS DISCLOSED, NEVER SILENT — the screen is a static approximation (overlapping
-#       alternation like (a|a)+z is a real bomb it cannot see), so a regex_error thrown DURING a match must
-#       refuse the answer by name rather than abort or report a count the engine never finished measuring.
-#       (b1) is portable: the non-NDEBUG fault switch RIPWIRE_FAULT_REGEX_MATCH=1 makes every guarded match
-#       throw, on every standard library, and each entry point must refuse. The flavour is ASKED of the binary
-#       with a sibling fault switch whose alert is independent of this seam (prcontextcheck's idiom), so a
-#       Release build reports the arm unobservable instead of passing or failing it for a switch it compiled
-#       out. (b2) drives the REAL engine with (a|a)+z where the binary links libc++, whose engine abandons
-#       that match; libstdc++ has no budget and would hang, which is the documented gap, not asserted.
+#   (b) MATCH-TIME EXHAUSTION IS DISCLOSED, NEVER SILENT — the screen is a static approximation, so a regex_error
+#       thrown DURING a match must refuse the answer by name rather than abort or report a count the engine never
+#       finished measuring. (b1) is portable: the non-NDEBUG fault switch RIPWIRE_FAULT_REGEX_MATCH=1 makes every
+#       guarded match throw, on every standard library, and each entry point must refuse. The flavour is ASKED of the
+#       binary with a sibling fault switch whose alert is independent of this seam (prcontextcheck's idiom), so a
+#       Release build reports the arm unobservable instead of passing or failing it for a switch it compiled out.
+#       (b2) is RE-SCOPED (Q7, 2026-10-12): the screen used to ADMIT the overlapping-alternation bomb (a|a)+z and
+#       leave it to libc++'s engine to abandon mid-match; Phase 1 now REFUSES it statically at every entry point, so
+#       (b2) asserts that closure instead. The abandonment path itself stays proven by (b1).
 #   (c) STATIC — no std::regex construction, match, iterator, result type or <regex> include in src/ outside
 #       src/regexguard.h, over source with comments and string literals blanked (so the words in prose do not
 #       count). The allowlist carries a reason per row, a stale row FAILS, and the detector is proved on a
@@ -56,9 +56,11 @@
 #       abandons the match. One counter and one sentence ("the regex engine abandoned the match") used to cover all
 #       three. Each cause now has its own run, fixture and wording; the refusal names the FIRST site (lowest file, then
 #       byte) with the captured text, is byte-identical run to run, and --lint-rules says the same.
-#   (i) --arch DECIDES DENY FIRST — an allow whose pattern the engine cannot finish must not turn a determinable "no
-#       deny can forbid this edge" into a refusal; an undecided allow matters only when a deny fires and no allow
-#       matches, and a later allow that matches still permits the edge.
+#   (i) --arch DECIDES DENY FIRST — an allow that cannot be judged must not turn a determinable "no deny can forbid
+#       this edge" into a refusal; an undecided allow matters only when a deny fires and no allow matches, and a
+#       later allow that matches still permits the edge. RE-SCOPED (Q7, 2026-10-12): the vehicle is now a
+#       substituted-TO match-time refusal (portable on every standard library), because the screen now refuses the
+#       old (a|a)+z vehicle at LOAD — see arm (b2).
 #   (j) THE LITERAL PATHS ARE THE ENGINE — src/regexguard.h answers a literal (or `|`-joined literals, one optionally
 #       `^`/`$`-anchored) with byte kernels, and never hands the engine a line holding none of a pattern's required
 #       literals. test/regexlines_harness.cpp diffs both, and the long-line skip policy, against std::regex itself over
@@ -264,23 +266,76 @@ else
         || no "(b1) consistency: a flavour without fault switches changed its answer under RIPWIRE_FAULT_REGEX_MATCH=1"
 fi
 
-# ── (b2) the REAL engine: overlapping alternation passes the structural screen and is abandoned mid-match ──────
+# ── (b2) the STATIC CLOSURE of the formerly-documented gap (RE-SCOPED 2026-10-12, Q7, PM-authorised) ───────────
+# This arm used to assert the OPPOSITE of what it asserts now: that `(a|a)+z` PASSES the structural screen and is
+# abandoned mid-match by the real engine on libc++. Phase 1 closes exactly that gap — `(a|a)+z` is now refused
+# STATICALLY at every entry point, before a byte reaches an engine, on every platform — which is the spec's Objective.
+# The arm is re-scoped to assert that closure. It is a strict IMPROVEMENT: the same pattern is stopped by the screen
+# rather than by a match-time catch only libc++ has.
+#
+# NO GUARANTEE LOSES ITS ARM (PM re-scope rule): the real-engine abandonment path is still proven, portably, by (b1)'s
+# fault switch above (every entry point, every standard library) and by test/regexbombcheck.sh (7). (The guard's
+# per-file match budget — round 5's second cause, whose (b2) note pointed at regexbombcheck (6) — was removed in the
+# PR #397 review; a stopped scan has one cause again.) What changes here is only the MECHANISM that catches `(a|a)+z`:
+# a match-time catch -> a static refusal. ROUND 6 re-vehicles the real-engine leg: the wrapped alternation forms it
+# used to ride are refused at admission since M2-d/M2-e, so the leg rides `a*a*a*a*a*b` — the multi-quantifier
+# residual the screen ADMITS, which is what makes it the real-engine vehicle.
 LINKS_LIBCXX=0
 if command -v otool >/dev/null 2>&1 && otool -L "$BIN" 2>/dev/null | grep -q 'libc++'; then LINKS_LIBCXX=1; fi
 if command -v ldd >/dev/null 2>&1 && ldd "$BIN" 2>/dev/null | grep -q 'libc++\.so'; then LINKS_LIBCXX=1; fi
-realExhaustion(){                # realExhaustion <label> <args…>   (the needle is the (a|a)+z pattern itself)
-    local label="$1"; shift
-    local rc; rc="$( capRun 30 "$TMP/r.out" "$TMP/r.err" "$FIX" --no-cache "$@" )"
-    abandonedContract "(b2)" "$label" "$rc" "$TMP/r.out" "$TMP/r.err" '(a|a)+z'
+closedStatically(){              # closedStatically <label> <pattern> <args…>
+    local label="$1" pat="$2"; shift 2
+    local rc; rc="$( capRun 20 "$TMP/r.out" "$TMP/r.err" "$FIX" --no-cache "$@" )"
+    if [ "$rc" = TIMEOUT ]; then
+        no "(b2) $label: still running after 20 s — the pattern reached an engine with no budget"
+        return
+    fi
+    if [ "$rc" -ge 128 ]; then
+        no "(b2) $label: signal death, exit $rc ($( grep -m1 -o 'terminating.*' "$TMP/r.err" | head -c 120 ))"
+        return
+    fi
+    if [ "$rc" -eq 1 ]; then ok "(b2) $label: refused STATICALLY at exit 1 (the gap is closed before the engine)"
+    else no "(b2) $label: exit $rc (expected a static refusal at exit 1)"; fi
+    grep -qF -- "$pat" "$TMP/r.err" && ok "(b2) $label: the refusal names the pattern" \
+        || no "(b2) $label: stderr does not name the pattern: $( head -c 200 "$TMP/r.err" )"
+    grep -qi 'backtrack' "$TMP/r.err" && ok "(b2) $label: the refusal names the construct (catastrophic backtracking)" \
+        || no "(b2) $label: stderr does not name the construct: $( head -c 200 "$TMP/r.err" )"
+    grep -qE 'count="|hits="|<lint|<arch |<match ' "$TMP/r.out" && no "(b2) $label: an answer element was printed beside the refusal" \
+        || ok "(b2) $label: no answer element on stdout"
 }
 if [ "$LINKS_LIBCXX" -eq 1 ]; then
-    realExhaustion "--graph-query file((a|a)+z)" --graph-query='file(all,"(a|a)+z")'
-    realExhaustion "--arch TO (a|a)+z"           --arch="$TMP/arch_alt.txt"
-    realExhaustion "--match #match? (a|a)+z"     "--match=$MATCH_ALT"
-    realExhaustion "--regex (a|a)+z"             --regex='(a|a)+z'
+    ok "(b2) this binary links libc++ (where the old gap was observable mid-match); the closure is asserted at every entry point below"
 else
-    printf '  INFO  (b2) this binary does not link libc++: libstdc++ has no match budget, so overlapping alternation backtracks\n'
-    printf '        without end (the structural screen'"'"'s documented gap); (b1) is the portable proof of the disclosure path\n'
+    printf '  INFO  (b2) this binary does not link libc++; the closure is asserted at every entry point below regardless\n'
+fi
+closedStatically "--graph-query file((a|a)+z)" '(a|a)+z' --graph-query='file(all,"(a|a)+z")'
+closedStatically "--arch TO (a|a)+z"           '(a|a)+z' --arch="$TMP/arch_alt.txt"
+closedStatically "--match #match? (a|a)+z"     '(a|a)+z' "--match=$MATCH_ALT"
+closedStatically "--regex (a|a)+z"             '(a|a)+z' --regex='(a|a)+z'
+
+# The REAL-ENGINE leg of (b2), re-vehicled (round 6, PR #397 review). The arm used to prove what a REAL engine does
+# with a pattern the screen LETS THROUGH; the wrapped-alternation forms that used to ride it are refused at
+# admission since M2-d/M2-e, so the vehicle is now `a*a*a*a*a*b` — the multi-quantifier residual the screen admits
+# BY CONSTRUCTION (docs/LIMITS.md, regex-screen-multiquantifier). What abandons below is the ENGINE and not the
+# screen, which is the whole point of the leg. libc++'s engine throws error_complexity on bait.md's 4000-a line
+# (--no-prefilter: the line must reach the engine, and the required-literal prefilter would rule it out); libstdc++
+# has no budget and would backtrack without end, so the no-switch leg runs where the engine has a budget, and the
+# fault-switch leg carries the refuse-don't-silence contract on every flavour.
+FIVESTAR='a*a*a*a*a*b'
+if [ "$LINKS_LIBCXX" -eq 1 ]; then
+    rc="$( capRun 30 "$TMP/r5.out" "$TMP/r5.err" "$FIX" --no-cache --no-prefilter "--regex=$FIVESTAR" )"
+    abandonedContract "(b2)" "--regex $FIVESTAR (real libc++ engine)" "$rc" "$TMP/r5.out" "$TMP/r5.err" "$FIVESTAR"
+else
+    printf '  INFO  (b2) real-engine leg: this binary links libstdc++, whose engine has no complexity budget —\n'
+    printf '        admitting %s over the 4000-a bait is the documented hang, not an assertable verdict\n' "$FIVESTAR"
+fi
+if [ "$FAULTS" -eq 1 ]; then
+    # abandonedContract directly, NOT exhaustedByName: that helper labels every row (b1), and an arm's output must
+    # name the arm that ran it — a (b1) line in the (b2) section would read as the wrong guarantee being proven.
+    b2rc="$( RIPWIRE_FAULT_REGEX_MATCH=1 capRun 20 "$TMP/r2f.out" "$TMP/r2f.err" "$FIX" --no-cache --no-prefilter "--regex=$FIVESTAR" )"
+    abandonedContract "(b2)" "--regex $FIVESTAR (screen-admitted, fault-injected)" "$b2rc" "$TMP/r2f.out" "$TMP/r2f.err" "$FIVESTAR"
+else
+    printf '  INFO  (b2) fault-switch leg: fault switches are compiled out (NDEBUG); (b1) proves the contract on this flavour\n'
 fi
 
 # ── (c) static: the engine is spelled in src/regexguard.h and nowhere else ─────────────────────────────────────
@@ -465,26 +520,32 @@ else
     printf '  INFO  (h) fault switches compiled out (NDEBUG): the abandoned cause is proved on the plain-flavour leg\n'
 fi
 
-# ── (i) --arch decides deny first: an allow that cannot be finished matters only when a deny fires ─────────────────
-printf 'allow path zz/.* -> (a|a)+z\ndeny path nomatch/.* -> .*\n' >"$TMP/arch_allow_nodeny.txt"
+# ── (i) --arch decides deny first: an allow that cannot be judged matters only when a deny fires ────────────────────
+# RE-SCOPED (2026-10-12, Q7, PM-authorised). This arm used to prove deny-first with an allow whose pattern the ENGINE
+# abandons mid-match (`(a|a)+z` on libc++). Phase 1 closes that gap STATICALLY — `(a|a)+z` is now refused at LOAD
+# (--arch rejects the whole rules file, arm (b2)) — so that vehicle can no longer load. The GUARANTEE is preserved
+# with a PORTABLE match-time-undecided vehicle instead: a TO template that only fails once an edge's captures are
+# substituted (`a{2,\1}` -> an invalid interval on every standard library — arm (e)). pathRuleForbids treats that
+# exactly as it treats an abandoned allow (undecidedPathRule), so all three legs below prove the SAME deny-first
+# property — and now on EVERY platform, not only where libc++ is linked (a strict widening of the arm's coverage).
+# NOTE: printf '%s\n' — NOT printf '...'. A bare printf interprets `\1` as an octal escape (byte 0x01), which would
+# mangle the backreference into a literal control byte and make the TO template `a{2,}` (unbalanced) rather than the
+# intended `a{2,\1}`. Arm (e) writes its fixtures the same way for the same reason.
+printf '%s\n' 'allow path zz/(.*) -> a{2,\1}' 'deny path nomatch/.* -> .*' >"$TMP/arch_allow_nodeny.txt"
 rc="$( capRun 20 "$TMP/i.out" "$TMP/i.err" "$FIX" --no-cache --arch="$TMP/arch_allow_nodeny.txt" )"
 if [ "$rc" = 0 ] && grep -q '<arch ' "$TMP/i.out"; then
-    ok "(i) no deny matches, so the edge is permitted without consulting the unfinishable allow (exit 0)"
+    ok "(i) no deny matches, so the edge is permitted without consulting the undecided allow (exit 0)"
 else
     no "(i) exit $rc — an allow nobody needed refused a determinable answer: $( head -c 200 "$TMP/i.err" )"
 fi
-if [ "$LINKS_LIBCXX" -eq 1 ]; then
-    printf 'allow path zz/.* -> (a|a)+z\nallow path zz/.* -> .*\ndeny path zz/.* -> .*\n' >"$TMP/arch_allow_later.txt"
-    rc="$( capRun 30 "$TMP/i2.out" "$TMP/i2.err" "$FIX" --no-cache --arch="$TMP/arch_allow_later.txt" )"
-    if [ "$rc" = 0 ] && grep -q '<arch ' "$TMP/i2.out"; then ok "(i) a deny fires, the first allow is abandoned, a later allow matches: permitted (exit 0)"
-    else no "(i) later matching allow after an abandoned one: exit $rc — $( head -c 200 "$TMP/i2.err" )"; fi
-    printf 'allow path zz/.* -> (a|a)+z\ndeny path zz/.* -> .*\n' >"$TMP/arch_allow_only.txt"
-    rc="$( capRun 30 "$TMP/i3.out" "$TMP/i3.err" "$FIX" --no-cache --arch="$TMP/arch_allow_only.txt" )"
-    if [ "$rc" = 1 ] && grep -qF "path-rule 'zz/.* -> (a|a)+z'" "$TMP/i3.err"; then ok "(i) a deny fires and the only allow is abandoned: refused, naming the ALLOW rule (exit 1)"
-    else no "(i) deny fires, allow abandoned: exit $rc — $( head -c 200 "$TMP/i3.err" )"; fi
-else
-    printf '  INFO  (i) the two abandoned-allow cases need libc++'"'"'s match budget; the deny-first arm above is the portable half\n'
-fi
+printf '%s\n' 'allow path zz/(.*) -> a{2,\1}' 'allow path zz/.* -> .*' 'deny path zz/.* -> .*' >"$TMP/arch_allow_later.txt"
+rc="$( capRun 20 "$TMP/i2.out" "$TMP/i2.err" "$FIX" --no-cache --arch="$TMP/arch_allow_later.txt" )"
+if [ "$rc" = 0 ] && grep -q '<arch ' "$TMP/i2.out"; then ok "(i) a deny fires, the first allow is undecided, a later allow matches: permitted (exit 0)"
+else no "(i) later matching allow after an undecided one: exit $rc — $( head -c 200 "$TMP/i2.err" )"; fi
+printf '%s\n' 'allow path zz/(.*) -> a{2,\1}' 'deny path zz/.* -> .*' >"$TMP/arch_allow_only.txt"
+rc="$( capRun 20 "$TMP/i3.out" "$TMP/i3.err" "$FIX" --no-cache --arch="$TMP/arch_allow_only.txt" )"
+if [ "$rc" = 1 ] && grep -qF "path-rule 'zz/(.*) -> a{2,\1}'" "$TMP/i3.err"; then ok "(i) a deny fires and the only allow is undecided: refused, naming the ALLOW rule (exit 1)"
+else no "(i) deny fires, allow undecided: exit $rc — $( head -c 200 "$TMP/i3.err" )"; fi
 
 # ── (f) the skill scanner: linear net-exfil agrees with its regex, bounded time, and undecided fails closed ───────
 SK="$TMP/skills"; mkdir -p "$SK"

@@ -790,22 +790,64 @@ void joinGrepScanPrefetch( std::thread& worker )
 // and the run printed hits= as a measurement at exit 0. Refused here, by name, before a byte reaches stdout —
 // the same shape and exit code as the pattern refusal above, so a caller handles both the one way it already
 // does. The file named is the lowest-fileId indexed one (else the first unindexed one): deterministic.
+//
+// A stopped scan has ONE cause: the ENGINE abandoning a match. It had two until the PR #397 review removed the
+// guard's per-file match budget (round 4 had split the message per cause, because one run could stop files both
+// ways); with the budget gone the split carried nothing, so the refusal is one sentence again — the engine's own
+// count, reason and first file.
+
+// One stopped scan resolved to the four facts its sentence needs: how many files it stopped, the reason sentence
+// to quote, the file to name, and the advice that fixes it.
+struct AbandonedRegexCause
+{
+    std::uint32_t    count = 0;
+    std::string_view reason;
+    std::string_view firstPath;
+    std::string_view advice;
+};
+
+// The file named for a stopped scan: the lowest-fileId INDEXED one, else the first UNINDEXED one. A single real
+// root rewrites an indexed path root-relative — the same spelling every other verb reports a file with.
+inline std::string_view abandonedRegexFirstPath( const rw::Config& cfg, const rw::IngestResult& ing,
+                                                 const rw::GrepCollection& found, const rw::GrepAuxCollection& aux )
+{
+    if( found.regexAbandonedFiles == 0 )
+    {
+        return std::string_view( aux.firstRegexAbandonedPath );
+    }
+    const std::uint32_t fileId     = found.firstRegexAbandonedFile;
+    const bool          singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    return singleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], rw::sarif::rootPrefixOf( std::string( cfg.roots[0] ) ) )
+                      : std::string_view( ing.files[ fileId ] );
+}
+
+// The trailing advice: the engine's own offence, fixed by narrowing what it must try — bounding the outer
+// quantifier or narrowing the search — never by rewriting an alternation the screen has already refused.
+inline constexpr std::string_view kAbandonedEngineAdvice =
+    "bound the OUTER quantifier of the pattern, or narrow the search, so it cannot backtrack on the subject";
+
+// The refusal sentence. Its head — the pattern, the reason, the count and the file — is one shape; the reason word
+// and the trailing advice name the one cause. When an engine abandonment reaches this seam the reason is
+// kRegexAbandonedReason and the advice kAbandonedEngineAdvice, on purpose (and NOT byte-identical to any
+// pre-round-4 message: the reason named the engine's give-up and the advice named the outer quantifier from that
+// round on).
+inline void emitAbandonedRegexRefusal( std::string_view pattern, const AbandonedRegexCause& cause )
+{
+    rw::emitTo( stderr, "ripwire: --regex='{}' refused, no hit is reported: {} in {} file(s), first {} — the hits collected before that "
+                        "point would be a floor this verb cannot state ({})\n",
+                pattern, cause.reason, cause.count, cause.firstPath, cause.advice );
+}
+
 static bool refuseAbandonedRegexScan( const rw::Config& cfg, const rw::IngestResult& ing, const rw::GrepCollection& found, const rw::GrepAuxCollection& aux )
 {
-    const std::uint32_t abandonedCount = found.regexAbandonedFiles + aux.regexAbandonedFiles;
-    if( !cfg.grepRegex || abandonedCount == 0 )
+    const std::uint32_t stoppedCount = found.regexAbandonedFiles + aux.regexAbandonedFiles;
+    if( !cfg.grepRegex || stoppedCount == 0 )
     {
         return false;
     }
-    const bool             singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
-    const std::string      rootPrefix = singleRoot ? rw::sarif::rootPrefixOf( std::string( cfg.roots[0] ) ) : std::string();
-    const std::string_view firstPath  = found.regexAbandonedFiles == 0 ? std::string_view( aux.firstRegexAbandonedPath )
-                                      : singleRoot ? rw::sarif::rootRelativeUri( ing.files[ found.firstRegexAbandonedFile ], rootPrefix )
-                                                   : std::string_view( ing.files[ found.firstRegexAbandonedFile ] );
-    rw::emitTo( stderr, "ripwire: --regex='{}' refused, no hit is reported: {} in {} file(s), first {} — the hits collected before that "
-                        "point would be a floor this verb cannot state (rewrite the pattern so no two of its alternatives can match the "
-                        "same text, e.g. (a|b)+ rather than (a|a)+)\n",
-                cfg.grep, rw::kRegexAbandonedReason, abandonedCount, firstPath );
+    const AbandonedRegexCause cause{ stoppedCount, rw::kRegexAbandonedReason,
+                                     abandonedRegexFirstPath( cfg, ing, found, aux ), kAbandonedEngineAdvice };
+    emitAbandonedRegexRefusal( cfg.grep, cause );
     return true;
 }
 

@@ -26,7 +26,9 @@
 //       library: a pattern one engine abandons and the other backtracks on forever gets one answer, not two.
 //   GuardedRegex::search / forEachMatch → RegexVerdict { Miss, Hit, Exhausted, Skipped }. Exhausted is a
 //       regex_error thrown DURING the match (libc++'s error_complexity / error_stack): the screen is a static
-//       approximation, and overlapping alternation — (a|a)+z — passes it. It is never Miss. METHODOLOGY §9: an
+//       approximation, and what it still cannot see is a CRAFTED SUBJECT under a pattern it admits — since
+//       M2-c the overlapping alternation it used to name here, (a|a)+z, is refused by the screen instead. It
+//       is never Miss. METHODOLOGY §9: an
 //       abandoned match is "unknown", and a caller that folds it into "no hit" reports a zero it did not
 //       measure. Every entry point refuses on it by name, quoting kRegexAbandonedReason. Skipped is a subject
 //       NEVER HANDED to the engine because it exceeds this thread's measured-safe bound (maxEngineSubjectBytes)
@@ -165,14 +167,48 @@ inline std::optional<std::string> nonPortableRegexEscape( const std::string& pat
 // '(a{3})+b'. A screen that must return ONE verdict on two different backtrackers cannot make that call.
 //
 // WHAT IS DELIBERATELY NOT CAUGHT, so the guard does not quietly eat working patterns: a group with no
-// quantifier inside passes however it is quantified, so (abc)+, (a|b)+ and (a)+b pass; a BOUNDED outer
+// quantifier inside passes however it is quantified, so (abc)+ and (a)+b pass; a BOUNDED outer
 // quantifier passes whatever the group contains, which is what keeps the workaround this very message
 // suggests — '(\s*\w+){1,20}' — legal; an UNQUANTIFIED group passes whatever it contains, so (a+)b, (a?)b
 // and (a+)(b)+ pass; '+' inside a character class or behind a backslash is a literal, so [a+]+ and (\+)+
 // pass; and the '?' that opens '(?:', '(?=' or '(?!' is a group MODIFIER, not a quantifier, so (?:abc)+
-// passes while (?:a+)+b is still refused. The known GAP is overlapping alternation — (a|a)+b is a real
-// bomb whose branches only overlap semantically — which is why GuardedRegex's match-time catch below is kept
-// as belt-and-braces rather than removed. Every one of these cases is an arm of test/regexbombcheck.sh.
+// passes while (?:a+)+b is still refused.
+//
+// THE SECOND ARM — overlapping alternation, closed 2026-10-12 (M2-c), widened 2026-10-15 (M2-e). A group whose
+// branches carried no quantifier at all used to pass however it was quantified, which made `(a|a)+b` a real bomb
+// the screen could not see; that was the audit's live PoC `^(a|aa)+b$`, and this file used to name it as the known
+// GAP. The screen cannot read semantics, so it now refuses a group's own top-level '|' under an unbounded outer
+// UNLESS it can prove the branches disjoint, and the proofs run in two strengths: M2-c's is the cheap whole-
+// footprint one — every branch consumes exactly ONE character, and all those characters must be pairwise
+// disjoint, which keeps `(a|b)+` and `(\d|[a-z])+` passing and refuses `(a|a)+b`, `^(a|aa)+b$`, `(x|xy)+c$` and
+// `(\w|\d)+$`; M2-e proves one level weaker so it reads branches M2-c cannot: a branch that is an UNQUANTIFIED
+// sequence of width-one atoms has a fixed width and matches deterministically once started, so the only question
+// left is which branch starts a position, and the branch's first character answers it in one. Pairwise-disjoint
+// first-character sets across every branch settle that — `'([^"\]|\\.)*'`, `(\r\n|\n)+`, `(cat|dog)+` and
+// `(foo|bar)+` are admitted — while the shapes M2-c was built for stay refused: `(a|aa)+` and
+// `(get|getResponse)+` repeat branches whose FIRST character is the same, so the split ambiguity the first
+// character cannot break is exactly what they have. What stays outside BOTH proofs is refused as before named:
+// a branch with a quantifier of its own (its width varies, the ambiguity is back), an anchor or other zero-width
+// head (no first character to decide with), a nested group (its choice structure is not modelled), an empty
+// branch (an empty-loop hazard). The price of M2-e is a smaller known false-positive class than M2-c's, still
+// stated rather than discovered: a NON-DETERMINISTIC alternation whose branches share a first character is
+// indistinguishable, without matching it, from one that overlaps another, and a screen that must return ONE
+// verdict cannot tell them apart. Refusal is a safe failure, a hang is not — and the refusal says what it
+// actually knows ("cannot PROVE are disjoint"), NOT that the branches overlap, because for disjoint branches it
+// is the PROOF that failed, not the branches; the only workaround it names is bounding the OUTER quantifier,
+// which works for the whole class (PM-1, 2026-10-12). Every one of these cases is an arm of
+// test/regexbombcheck.sh.
+//
+// M2-d (round 6, the PR #397 review's PAREN BYPASS). The alternation arm judged a group only when an
+// unbounded quantifier sat ON it — so an alternation one group deeper sailed past untouched:
+// '((a|aa))+b$' closes its inner group under NO quantifier, only hasQuantifierInside ever reached the
+// parent frame, and the outer '+' repeated an alternation the screen cannot prove disjoint without ever
+// judging it. The arm was checking the right fact in the wrong place. The screen now carries that verdict
+// up the frame stack exactly the way hasQuantifierInside travels: a group whose own top-level '|' is not
+// proven disjoint sets hasUnprovenAlternationInside on its parent when it closes (whatever quantified IT),
+// and a group that closes under an unbounded quantifier with that flag set is refused by the SAME
+// alternation sentence. '((a|aa))+b$' and '(?:(?:a|aa))+b$' are refused; every alternation the screen CAN
+// prove disjoint — (a|b)+, and one nested inside a quantified group — still scans.
 //
 // Scope: EVERY user-authored pattern, through compileGuardedRegex below — --regex, --graph-query file(), the
 // --arch path-rules and the #match?/#not-match? predicates of --match and --lint-rules. This paragraph used to
@@ -232,17 +268,58 @@ inline RegexQuantifier regexQuantifierAt( const std::string& pat, std::size_t at
 
 // '(?:' / '(?=' / '(?!' — a '?' immediately after '(' opens a NON-CAPTURING or lookaround group. It is a
 // group MODIFIER, not a quantifier, and reading it as one (which M2-b's widened flag otherwise would)
-// refuses every '(?:abc)+' ever written. Returns how many characters the scan must step over.
+// refuses every '(?:abc)+' ever written. Returns how many characters after the '(' the modifier occupies,
+// so the caller's `i += length` lands the scan on the group's BODY.
+//
+// M2-c fixes two things here that the quantifier scan alone could not see, and neither changes its verdict.
+// (1) The count is now the WHOLE modifier: '(?:' is 2, not 1, because the body of '(?:a|b)+' starts at the
+// 'a' and not at the ':' — the old count left the ':' to be re-scanned as an ordinary character, which was
+// harmless until the alternation arm started reading a group's body from this offset, at which point every
+// branch of a non-capturing group began with a stray ':' and a disjoint alternation was refused.
+// (2) The two '<' forms are now handled: '(?<name>' is a NAMED group whose name is part of the modifier,
+// and '(?<=' / '(?<!' are lookbehind. Both would otherwise be read as body text.
 inline std::size_t regexGroupModifierLength( const std::string& pat, std::size_t openAt )
 {
-    return ( openAt + 1 < pat.size() && pat[ openAt + 1 ] == '?' ) ? 1 : 0;
+    if( openAt + 1 >= pat.size() || pat[ openAt + 1 ] != '?' )
+    {
+        return 0;   // '(' … — an ordinary capturing group
+    }
+    if( openAt + 2 >= pat.size() )
+    {
+        return 1;   // a bare '(?' — malformed, and the compile probe below owns that error
+    }
+    if( pat[ openAt + 2 ] != '<' )
+    {
+        return 2;   // '(?:' / '(?=' / '(?!'
+    }
+    if( openAt + 3 < pat.size() && ( pat[ openAt + 3 ] == '=' || pat[ openAt + 3 ] == '!' ) )
+    {
+        return 3;   // '(?<=' / '(?<!' — lookbehind, no name
+    }
+    for( std::size_t cursor = openAt + 3; cursor < pat.size(); ++cursor )
+    {
+        if( pat[ cursor ] == '>' )
+        {
+            return cursor - openAt;   // '(?<name>' — everything through the '>' is the modifier
+        }
+    }
+    return 2;       // an unterminated name: the compile probe below owns that error
+}
+
+// The two refusal sentences below share their opening — the construct, and the quantifier applied to it. Spelled
+// out in both, that opening was twenty-four identical normalized tokens, which --quality-delta reports as a
+// duplication pair; it lives here once. The caller supplies the clause naming WHAT repeats, and the concatenation
+// is the same bytes either way (regexguardcheck.sh pins the wording at every entry point).
+inline std::string catastrophicRegexPrologue( char outerQuant )
+{
+    return std::string( "catastrophic backtracking: the unbounded quantifier '" ) + outerQuant + "' is applied to ";
 }
 
 // The one refusal this screen emits, kept out of the scan loop so the loop reads as the small state
 // machine it is. `outerQuant` is the quantifier character that was applied to the offending group.
 inline std::string catastrophicRegexMessage( char outerQuant )
 {
-    return   std::string( "catastrophic backtracking: the unbounded quantifier '" ) + outerQuant + "' is applied to a group whose contents "
+    return   catastrophicRegexPrologue( outerQuant ) + "a group whose contents "
              "already repeat (the (X+)+ / (X*)* / (X+)* / (X{n,})+ family, and equally the bounded-inner (X?)+ / (X{m,n})+ / (X{n})+ one). "
              "Every way of splitting the input between the inner and the outer repetition is a separate path, so matching a non-matching "
              "line costs time exponential in its length; a BOUNDED inner is no defence, because it is ambiguity and not unboundedness that "
@@ -254,14 +331,617 @@ inline std::string catastrophicRegexMessage( char outerQuant )
              "make the OUTER bounded with an explicit interval ('(\\s*\\w+){1,20}')";
 }
 
+// ── the ALTERNATION arm's character sets (M2-c, 2026-10-12) ─────────────────────────────────────────────
+//
+// To refuse `(a|a)+` the screen has to see that two branches can match the SAME text, and it cannot read
+// semantics. So it compares CHARACTER SETS, and only for a branch it can prove consumes exactly one
+// character. The sets are dense over ASCII 0..127 with one flag for "reaches past ASCII", which is what
+// makes the complements ('\D', '\W', '\S', '[^…]') answerable without a Unicode table: a byte outside ASCII
+// is matched by every complement and by '.', and by no shorthand and no literal. A branch the parser will
+// not commit to gets NO set, and the caller refuses — the conservative direction, and the reason '[]',
+// '[[:alpha:]]', '\p{L}', '\b' and a backreference are refusals rather than guesses.
+inline constexpr unsigned kRegexCharSetAscii = 128;   // dense range: 0..63 in asciiLow, 64..127 in asciiHigh
+
+struct RegexCharSet
+{
+    std::uint64_t asciiLow        = 0;
+    std::uint64_t asciiHigh       = 0;
+    bool          matchesNonAscii = false;
+
+    void add( unsigned char c ) { ( c < 64 ? asciiLow : asciiHigh ) |= std::uint64_t( 1 ) << ( c & 63 ); }
+    void remove( unsigned char c ) { ( c < 64 ? asciiLow : asciiHigh ) &= ~( std::uint64_t( 1 ) << ( c & 63 ) ); }
+    bool has( unsigned char c ) const { return ( ( c < 64 ? asciiLow : asciiHigh ) >> ( c & 63 ) ) & 1; }
+};
+
+inline RegexCharSet regexCharSetOfDigit()
+{
+    RegexCharSet set;
+    for( unsigned char c = '0'; c <= '9'; ++c ) { set.add( c ); }
+    return set;
+}
+
+inline RegexCharSet regexCharSetOfWord()
+{
+    RegexCharSet set = regexCharSetOfDigit();
+    for( unsigned char c = 'A'; c <= 'Z'; ++c ) { set.add( c ); }
+    for( unsigned char c = 'a'; c <= 'z'; ++c ) { set.add( c ); }
+    set.add( '_' );
+    return set;
+}
+
+inline RegexCharSet regexCharSetOfSpace()
+{
+    RegexCharSet        set;
+    const unsigned char bytes[] = { ' ', '\t', '\n', '\r', '\f', '\v' };
+    for( unsigned char c : bytes ) { set.add( c ); }
+    return set;
+}
+
+inline RegexCharSet regexCharSetOfAny()   // '.' — ECMAScript's dot without dotAll: every byte but a line terminator
+{
+    RegexCharSet set;
+    set.asciiLow        = ~std::uint64_t( 0 );
+    set.asciiHigh       = ~std::uint64_t( 0 );
+    set.matchesNonAscii = true;
+    set.remove( '\n' );
+    set.remove( '\r' );
+    return set;
+}
+
+inline RegexCharSet regexCharSetComplement( const RegexCharSet& base )
+{
+    RegexCharSet set;
+    set.asciiLow        = ~base.asciiLow;
+    set.asciiHigh       = ~base.asciiHigh;
+    set.matchesNonAscii = true;   // the complement of an ASCII-only set always reaches past ASCII
+    return set;
+}
+
+inline bool regexCharSetsIntersect( const RegexCharSet& a, const RegexCharSet& b )
+{
+    if( ( a.asciiLow & b.asciiLow ) != 0 || ( a.asciiHigh & b.asciiHigh ) != 0 )
+    {
+        return true;
+    }
+    return a.matchesNonAscii && b.matchesNonAscii;
+}
+
+// '\d' '\D' '\w' '\W' '\s' '\S' — the one-character classes ECMAScript spells with a backslash.
+inline bool regexCharSetOfShorthand( char escaped, RegexCharSet& out )
+{
+    switch( escaped )
+    {
+        case 'd': out = regexCharSetOfDigit();                           return true;
+        case 'D': out = regexCharSetComplement( regexCharSetOfDigit() );  return true;
+        case 'w': out = regexCharSetOfWord();                            return true;
+        case 'W': out = regexCharSetComplement( regexCharSetOfWord() );   return true;
+        case 's': out = regexCharSetOfSpace();                           return true;
+        case 'S': out = regexCharSetComplement( regexCharSetOfSpace() );  return true;
+        default:  return false;
+    }
+}
+
+// the set of ONE escaped character, when it consumes exactly one. false = the parser will not commit: a
+// zero-width assertion ('\b', '\B'), a backreference ('\1'…'\9', '\k'), a Unicode property, or a
+// decodable-but-undecoded '\x' / '\u' / '\c' escape. Every one of those is a REFUSAL at the call site.
+inline bool regexCharSetOfEscape( char escaped, RegexCharSet& out )
+{
+    if( regexCharSetOfShorthand( escaped, out ) )
+    {
+        return true;
+    }
+    switch( escaped )
+    {
+        case 'b': case 'B': case 'k': case 'p': case 'P': case 'x': case 'u': case 'c':
+            return false;
+        default:
+            break;
+    }
+    if( escaped >= '1' && escaped <= '9' )
+    {
+        return false;
+    }
+    out = {};
+    switch( escaped )
+    {
+        case 'n': out.add( '\n' ); break;
+        case 'r': out.add( '\r' ); break;
+        case 't': out.add( '\t' ); break;
+        case 'f': out.add( '\f' ); break;
+        case 'v': out.add( '\v' ); break;
+        case '0': out.add( '\0' ); break;
+        default:  out.add( static_cast<unsigned char>( escaped ) ); break;   // '\.', '\+', '\\', '\/' … a literal
+    }
+    return true;
+}
+
+// true when the set is EXACTLY one ASCII character — what a range endpoint must be. '\d' is ten characters
+// and '.' is a hundred and twenty-six, so neither may be an endpoint.
+inline bool regexCharSetAsOneAsciiByte( const RegexCharSet& set, unsigned char& byte )
+{
+    if( set.matchesNonAscii )
+    {
+        return false;
+    }
+    int found = -1;
+    for( unsigned char c = 0; c < kRegexCharSetAscii; ++c )
+    {
+        if( set.has( c ) )
+        {
+            if( found >= 0 )
+            {
+                return false;
+            }
+            found = c;
+        }
+    }
+    if( found < 0 )
+    {
+        return false;
+    }
+    byte = static_cast<unsigned char>( found );
+    return true;
+}
+
+// the set of ONE character class, '[' … ']'. `next` is left just past the closing ']'. false = the parser
+// will not commit: an empty class, an unterminated one, a nested '[', or a range whose endpoint is not a
+// single character ('[a-\d]', '[\w-z]') — all refusals rather than guesses.
+inline bool regexCharSetOfClass( const std::string& pat, std::size_t openAt, std::size_t end, RegexCharSet& out, std::size_t& next )
+{
+    out = {};
+    std::size_t cursor  = openAt + 1;
+    const bool  negated = cursor < end && pat[ cursor ] == '^';
+    if( negated )
+    {
+        ++cursor;
+    }
+
+    bool anyMember = false;
+    while( cursor < end && pat[ cursor ] != ']' )
+    {
+        RegexCharSet member;
+        std::size_t  memberEnd = cursor;
+        if( pat[ cursor ] == '\\' )
+        {
+            if( cursor + 2 > end || !regexCharSetOfEscape( pat[ cursor + 1 ], member ) )
+            {
+                return false;
+            }
+            memberEnd = cursor + 2;
+        }
+        else
+        {
+            if( pat[ cursor ] == '[' )
+            {
+                return false;   // a nested '[' is not a member of this screen's class model
+            }
+            member = {};
+            member.add( static_cast<unsigned char>( pat[ cursor ] ) );
+            memberEnd = cursor + 1;
+        }
+
+        // a RANGE is '-' between two single characters; anything else is refused
+        if( memberEnd < end && pat[ memberEnd ] == '-' && memberEnd + 1 < end && pat[ memberEnd + 1 ] != ']' )
+        {
+            RegexCharSet upper;
+            std::size_t  upperEnd = memberEnd + 1;
+            if( pat[ upperEnd ] == '\\' )
+            {
+                if( upperEnd + 2 > end || !regexCharSetOfEscape( pat[ upperEnd + 1 ], upper ) )
+                {
+                    return false;
+                }
+                upperEnd += 2;
+            }
+            else
+            {
+                upper = {};
+                upper.add( static_cast<unsigned char>( pat[ upperEnd ] ) );
+                ++upperEnd;
+            }
+            unsigned char lowerByte = 0, upperByte = 0;
+            if( !regexCharSetAsOneAsciiByte( member, lowerByte ) || !regexCharSetAsOneAsciiByte( upper, upperByte ) || lowerByte > upperByte )
+            {
+                return false;
+            }
+            for( unsigned char c = lowerByte; c <= upperByte; ++c )
+            {
+                out.add( c );
+            }
+            cursor    = upperEnd;
+            anyMember = true;
+            continue;
+        }
+
+        for( unsigned char c = 0; c < kRegexCharSetAscii; ++c )
+        {
+            if( member.has( c ) )
+            {
+                out.add( c );
+            }
+        }
+        out.matchesNonAscii = out.matchesNonAscii || member.matchesNonAscii;
+        cursor              = memberEnd;
+        anyMember           = true;
+    }
+
+    if( cursor >= end || pat[ cursor ] != ']' || !anyMember )
+    {
+        return false;
+    }
+    next = cursor + 1;
+    if( negated )
+    {
+        out = regexCharSetComplement( out );
+    }
+    return true;
+}
+
+// The character set of a branch that consumes EXACTLY ONE character, or false when the branch is anything
+// else — two characters, a quantifier, an anchor, an empty branch, a backreference. false is not an error:
+// it is the caller's signal that disjointness cannot be proven, so the caller refuses.
+inline bool regexCharSetOfSingleCharBranch( const std::string& pat, std::size_t begin, std::size_t end, RegexCharSet& out )
+{
+    if( begin >= end )
+    {
+        return false;   // an empty branch matches the EMPTY STRING — exactly the ambiguity this arm exists for
+    }
+    const char c = pat[ begin ];
+    if( c == '\\' )
+    {
+        return begin + 2 == end && regexCharSetOfEscape( pat[ begin + 1 ], out );
+    }
+    if( c == '[' )
+    {
+        std::size_t next = begin;
+        return regexCharSetOfClass( pat, begin, end, out, next ) && next == end;
+    }
+    if( c == '.' )
+    {
+        if( begin + 1 != end )
+        {
+            return false;
+        }
+        out = regexCharSetOfAny();
+        return true;
+    }
+    // a one-character atom cannot be an anchor, a group delimiter or a quantifier
+    if( c == '^' || c == '$' || c == '|' || c == '(' || c == ')' || c == '*' || c == '+' || c == '?' || c == '{' || c == '}' || c == ']' )
+    {
+        return false;
+    }
+    if( begin + 1 != end )
+    {
+        return false;
+    }
+    out = {};
+    out.add( static_cast<unsigned char>( c ) );
+    return true;
+}
+
+// ── M2-e (round 6, the PR #397 review): the FIRST-CHARACTER arm — prove disjointness one element deeper ──────
+//
+// M2-c could only prove a branch's WHOLE footprint, so every multi-character branch was refused wholesale and
+// the false-positive class was real code: the quoted-string matcher "([^"\]|\\.)*", a CRLF walker (\r\n|\n)+,
+// keyword pairs with no shared first character ((cat|dog)+, (foo|bar)+). A branch that is an UNQUANTIFIED
+// sequence of width-one atoms is decidable one level weaker. Its width is fixed, so once started it matches
+// deterministically — there is one path through it, no choices for a backtracker to enumerate — and the only
+// remaining ambiguity is WHICH branch starts a position, decided by the branch's first character alone. When
+// every branch parses as such a sequence and the branches' first-character sets are pairwise disjoint, at most
+// one branch is viable at any position and the repetition cannot multiply: proven disjoint, admit.
+//
+// Everything outside that model stays unproven, refused with the same sentence as before, and each residue is a
+// hazard this weaker proof cannot cover: a branch with a quantifier of its own varies in width, so the input can
+// be split between the branches and the repetition ambiguously; an anchor or other zero-width head has no first
+// character to decide with; a nested group's choice structure is not modelled; an empty branch matches the empty
+// string, an empty-loop hazard in its own right. (a|aa)+ and (get|getResponse)+ stay refused because their
+// branches' first-character sets are the SAME set — disjoint first characters are exactly what they lack.
+inline bool regexFirstCharSetOfQuantifierFreeBranch( const std::string& pat, std::size_t begin, std::size_t end, RegexCharSet& first )
+{
+    if( begin >= end )
+    {
+        return false;   // an empty branch matches the EMPTY STRING — the empty-loop hazard stays unproven
+    }
+    bool firstResolved = false;
+    for( std::size_t i = begin; i < end; )
+    {
+        const char c = pat[ i ];
+        if( c == '\\' )
+        {
+            RegexCharSet member;
+            if( i + 2 > end || !regexCharSetOfEscape( pat[ i + 1 ], member ) )
+            {
+                return false;   // trailing backslash, or an escape this screen will not commit to ('\b', '\1', '\x'…)
+            }
+            if( !firstResolved )
+            {
+                first         = member;
+                firstResolved = true;
+            }
+            i += 2;
+            continue;
+        }
+        if( c == '[' )
+        {
+            RegexCharSet member;
+            std::size_t  next = i;
+            if( !regexCharSetOfClass( pat, i, end, member, next ) )
+            {
+                return false;   // a class this model cannot read (nested '[', a bad range, unterminated)
+            }
+            if( !firstResolved )
+            {
+                first         = member;
+                firstResolved = true;
+            }
+            i = next;
+            continue;
+        }
+        // '.' is a plain width-one atom to this arm's width argument, but its first set is every byte but a
+        // line terminator — which intersects anything — so a wildcard-headed branch must not pretend to a
+        // smaller first set here or it would be admitted ambiguously.
+        if( c == '.' )
+        {
+            if( !firstResolved )
+            {
+                first         = regexCharSetOfAny();
+                firstResolved = true;
+            }
+            ++i;
+            continue;
+        }
+        // A quantifier ends the question (the branch's width would vary), and so do parentheses (a nested
+        // group's own choice structure is not modelled), anchors and the delimiters the single-char arm
+        // refuses as atoms — nothing here gets a first character one branch at a time can disagree on.
+        if( c == '*' || c == '+' || c == '?' || c == '{' || c == '(' || c == ')' || c == '^' || c == '$' || c == '}' || c == ']' )
+        {
+            return false;
+        }
+        if( !firstResolved )
+        {
+            first = {};
+            first.add( static_cast<unsigned char>( c ) );
+            firstResolved = true;
+        }
+        ++i;
+    }
+    return firstResolved;
+}
+
+// The alternation arm's refusal, in the same voice as catastrophicRegexMessage above: name the construct, say why
+// the paths multiply, and leave the reader a workaround. Every gate that greps a refusal for 'backtrack' and for
+// a workaround ('collapse' or 'bounded') reads this sentence too.
+//
+// PM-1 (2026-10-12, PM-directed). The wording used to ASSERT the branches "can match the same text". The refusal
+// now fires only when BOTH proofs fail — M2-c's whole-footprint single-character proof and M2-e's
+// first-character proof — so the branches are unmodelled (a quantifier, an anchor head, a nested group) or their
+// first characters are provably the SAME; for that class the old claim can still be false, and the workaround it
+// taught ("factor the branches so no two of them can match the same text") cannot be applied to branches that
+// are ALREADY disjoint. A screen that refuses a shape it cannot read must say what it actually knows: it cannot
+// PROVE the branches disjoint. The actionable workaround — bounding the OUTER quantifier — works for every
+// pattern this class can hold, so it carries alone.
+inline std::string catastrophicRegexAlternationMessage( char outerQuant )
+{
+    return   catastrophicRegexPrologue( outerQuant ) + "an alternation whose "
+             "branches the structural screen cannot PROVE are disjoint. A branch carries no quantifier of its own, so the "
+             "nested-repetition refusal cannot see this one, and the character-set proofs cover a branch only when it is an "
+             "unquantified sequence of width-one atoms whose FIRST character differs from every other branch's: a branch with a "
+             "quantifier, a zero-width head or a nested group — or one sharing its first character with another — leaves the "
+             "input splittable between the branches and the outer repetition, every split a separate path, so matching a "
+             "non-matching line costs time exponential in its length. Workaround: make the OUTER quantifier a small explicit bound "
+             "('(X){1,5}' for whatever the group is, a ceiling every engine honours identically)";
+}
+
+// The group's own top-level branch spans, in order. ONE splitter for the two disjointness proofs (M2-c's
+// whole-footprint sets and M2-e's first-character sets), so they cannot disagree about what a branch is.
+inline void regexTopLevelBranchSpans( std::size_t bodyBegin, std::size_t closeAt, const std::vector<std::size_t>& pipes,
+                                      std::vector<std::pair<std::size_t, std::size_t>>& out )
+{
+    out.clear();
+    std::size_t begin = bodyBegin;
+    for( std::size_t k = 0; k <= pipes.size(); ++k )
+    {
+        const std::size_t end = ( k < pipes.size() ) ? pipes[ k ] : closeAt;
+        out.push_back( { begin, end } );
+        begin = end + 1;
+    }
+}
+
+// What the two disjointness proofs decided about a group's own top-level '|'. ONE selector, two strengths — a
+// two-symbol clone (the shape --quality-delta gates on) is a negative outcome for proofs that must not be able
+// to disagree about what a branch or an intersection is. The pairwise-intersection test each proof ends with is
+// inlined here twice rather than raised to a helper on purpose: a standalone one-loop helper IS that test's own
+// clone shape (it duplicate-matched src/mergescout.h's overlap loop the moment it existed, measured
+// --quality-delta), and a helper shared across FILES would make the two proofs parse intersection through another
+// file's seam.
+//   DisjointWholeFootprint — M2-c: every branch consumes exactly ONE character and the characters are pairwise
+//                           disjoint; the strongest wording, and every verdict it makes is byte-identical to
+//                           round 5's.
+//   DisjointFirstChar      — M2-e: M2-c cannot read the branches, but every branch is an unquantified sequence
+//                           of width-one atoms and the branches' FIRST characters are pairwise disjoint, so at
+//                           most one branch is viable at any position and the repetition cannot multiply.
+//   Unproven               — neither proof reads the alternation (a quantified branch, a zero-width head, a
+//                           nested group, an empty branch, or first characters that intersect): refuse.
+enum class RegexAlternationProof
+{
+    Unproven,
+    DisjointWholeFootprint,
+    DisjointFirstChar
+};
+
+// The selector, M2-c first: the whole-footprint proof answers with the least reading, so every alternation it
+// could already rule keeps round 5's verdict; the first-character proof only widens what is provable for the
+// branches the whole-footprint proof always refused unread.
+inline RegexAlternationProof regexAlternationProof( const std::string& pat, std::size_t bodyBegin, std::size_t closeAt, const std::vector<std::size_t>& pipes )
+{
+    std::vector<std::pair<std::size_t, std::size_t>> spans;
+    regexTopLevelBranchSpans( bodyBegin, closeAt, pipes, spans );
+
+    {   // M2-c — the whole footprint of every branch, and all of them pairwise disjoint
+        std::vector<RegexCharSet> whole;
+        whole.reserve( spans.size() );
+        bool allRead = true;
+        for( const auto [ begin, end ] : spans )
+        {
+            RegexCharSet set;
+            if( !regexCharSetOfSingleCharBranch( pat, begin, end, set ) )
+            {
+                allRead = false;
+                break;
+            }
+            whole.push_back( set );
+        }
+        if( allRead )
+        {
+            bool pairwiseDisjoint = true;
+            for( std::size_t a = 0; a < whole.size() && pairwiseDisjoint; ++a )
+            {
+                for( std::size_t b = a + 1; b < whole.size(); ++b )
+                {
+                    if( regexCharSetsIntersect( whole[ a ], whole[ b ] ) )
+                    {
+                        pairwiseDisjoint = false;
+                        break;
+                    }
+                }
+            }
+            if( pairwiseDisjoint )
+            {
+                return RegexAlternationProof::DisjointWholeFootprint;
+            }
+        }
+    }
+
+    {   // M2-e — the first character of every branch, the branch an unquantified width-one sequence
+        std::vector<RegexCharSet> firsts;
+        firsts.reserve( spans.size() );
+        for( const auto [ begin, end ] : spans )
+        {
+            RegexCharSet first;
+            if( !regexFirstCharSetOfQuantifierFreeBranch( pat, begin, end, first ) )
+            {
+                return RegexAlternationProof::Unproven;
+            }
+            firsts.push_back( first );
+        }
+        for( std::size_t a = 0; a < firsts.size(); ++a )
+        {
+            for( std::size_t b = a + 1; b < firsts.size(); ++b )
+            {
+                if( regexCharSetsIntersect( firsts[ a ], firsts[ b ] ) )
+                {
+                    return RegexAlternationProof::Unproven;
+                }
+            }
+        }
+        return RegexAlternationProof::DisjointFirstChar;
+    }
+}
+
+// One frame per OPEN group. M2-c replaced the bare flag vector with a frame because the alternation arm needs
+// two more things about a group: where its own BODY starts (a group modifier is not body), and where its OWN
+// top-level '|' characters are — a '|' inside a nested group belongs to that group, not to this one, and
+// treating it as this group's would split a branch in the wrong place. File scope, not a local of the scan
+// below, because regexCloseGroup (which owns the group-close verdict) reads and writes these too.
+// M2-d adds the second travelling flag: hasUnprovenAlternationInside, set on a parent when a group it encloses
+// closes with a top-level '|' the screen could not prove disjoint, so a quantified ancestor the arm never saw
+// still refuses (see regexCloseGroupVerdict's M2-d arm).
+struct RegexGroupFrame
+{
+    bool                     hasQuantifierInside         = false;
+    bool                     hasUnprovenAlternationInside = false;
+    std::size_t              bodyBegin                    = 0;
+    std::vector<std::size_t> topLevelPipes;
+};
+
+// What closing a group decides. M2-d: the verdict PLUS whether the group's OWN top-level alternation is one the
+// screen cannot prove disjoint — a fact about the group's subtree that its parent must inherit even when the
+// group itself closes under no quantifier (the paren bypass; regexCloseGroup folds it into the parent frame).
+struct RegexGroupClose
+{
+    std::optional<std::string> refusal             = std::nullopt;
+    bool                       unprovenAlternation = false;
+};
+
+// The verdict made when a group CLOSES, in two arms and in this order:
+//   (1) a quantifier INSIDE the group, repeated by an unbounded quantifier ON the group — the (X+)+ family;
+//   (2) M2-c's alternation arm, widened by M2-d: a group closing under an unbounded quantifier whose own
+//       top-level branches the screen cannot prove disjoint — (a|a)+ — OR that carries the flag a NESTED
+//       group set on its frame — ((a|aa))+ — refused with the same alternation sentence. The nested form is
+//       the paren bypass closed: the inner group closed under no quantifier, so only this flag tells the
+//       outer '+' it is repeating an alternation the screen never proved disjoint.
+// Arm (2) runs ONLY when arm (1) has not refused, so every pattern refused before M2-c keeps the message it
+// had (regexguardcheck.sh asserts that wording at every entry point). `unprovenAlternation` is true when the
+// group's own top-level '|' exists and the screen could not prove its branches disjoint — a fact about the
+// group's SUBTREE its parent must inherit whether or not this close refused, which regexCloseGroup folds.
+inline RegexGroupClose regexCloseGroupVerdict( const std::string& pat, std::size_t closeAt, const RegexGroupFrame& frame )
+{
+    const RegexQuantifier quant = regexQuantifierAt( pat, closeAt + 1 );
+    RegexGroupClose       out;
+    // M2-c then M2-e, the selector above: the alternation is PROVEN DISJOINT when either proof passes — the
+    // whole-footprint single-character proof, or the first-character proof for branches the first cannot read.
+    // The whole-footprint proof keeps running FIRST so every verdict it already made stays byte-identical; the
+    // first-character proof only widens what is proven for the branches it always refused unread.
+    out.unprovenAlternation = !frame.topLevelPipes.empty()
+        && regexAlternationProof( pat, frame.bodyBegin, closeAt, frame.topLevelPipes ) == RegexAlternationProof::Unproven;
+    if( quant.isPresent && quant.isUnbounded && frame.hasQuantifierInside )
+    {
+        out.refusal = catastrophicRegexMessage( pat[ closeAt + 1 ] );
+        return out;
+    }
+    if( quant.isPresent && quant.isUnbounded && ( out.unprovenAlternation || frame.hasUnprovenAlternationInside ) )
+    {
+        out.refusal = catastrophicRegexAlternationMessage( pat[ closeAt + 1 ] );
+    }
+    return out;
+}
+
+// A ')' in the scan: pop the frame, judge it (regexCloseGroupVerdict), fold its verdict into the parent group,
+// and step `i` past the group's own quantifier so the scan does not re-read it. Returns the refusal when the
+// group is catastrophic, else nullopt. `i` holds the ')' index on entry and the quantifier's last index on exit.
+// Kept out of the scan loop so the loop reads as the small state machine it is.
+inline std::optional<std::string> regexCloseGroup( const std::string& pat, std::size_t& i, std::vector<RegexGroupFrame>& frames )
+{
+    if( frames.empty() )
+    {
+        return std::nullopt; // unbalanced: the compile probe below owns that error
+    }
+    const RegexGroupFrame frame = std::move( frames.back() );
+    frames.pop_back();
+
+    const RegexGroupClose close = regexCloseGroupVerdict( pat, i, frame );
+    if( close.refusal )
+    {
+        return close.refusal;
+    }
+
+    const RegexQuantifier quant = regexQuantifierAt( pat, i + 1 );
+    // the group is now an ATOM of its parent: a quantifier anywhere inside it — or ON it — is a quantifier
+    // inside the parent too, which is what makes ((a+))+, ((a)+)+ and ((a)?)+ visible
+    if( !frames.empty() && ( frame.hasQuantifierInside || quant.isPresent ) )
+    {
+        frames.back().hasQuantifierInside = true;
+    }
+    // M2-d — and an alternation the screen could not prove disjoint travels the same way: this group's own
+    // top-level '|' if the close could not prove it disjoint, or one a nested group already handed it. Whatever
+    // quantified THIS group is beside the point; a QUANTIFIED ANCESTOR repeating this group repeats the
+    // alternation, which is what ((a|aa))+b$ is and what the old arm, judging only an unbounded quantifier ON
+    // the group itself, never saw.
+    if( !frames.empty() && ( frame.hasUnprovenAlternationInside || close.unprovenAlternation ) )
+    {
+        frames.back().hasUnprovenAlternationInside = true;
+    }
+    if( quant.isPresent )
+    {
+        i += quant.lengthCount; // step over the quantifier we just judged
+    }
+    return std::nullopt;
+}
+
 inline std::optional<std::string> catastrophicRegexConstruct( const std::string& pat )
 {
-    // one flag per OPEN group: does anything inside it, at any depth, carry a quantifier — of ANY kind?
-    // (M2-b: this used to track only UNBOUNDED inner repetition, which let the libstdc++-hanging (a?)+ and
-    // (a{1,3})+ through. Unbounded is a subset of "any", so widening the flag is the whole behaviour change
-    // — the refusal condition below still requires the OUTER quantifier to be unbounded.)
-    std::vector<char> hasQuantifierInsideGroup;
-    bool              isInsideClass = false;
+    std::vector<RegexGroupFrame> frames;
+    bool                         isInsideClass = false;
 
     for( std::size_t i = 0; i < pat.size(); ++i )
     {
@@ -280,41 +960,37 @@ inline std::optional<std::string> catastrophicRegexConstruct( const std::string&
         if( c == '[' )      { isInsideClass = true; continue; }
 
         // group open / close — the close is where the whole verdict is made
-        if( c == '(' ) { hasQuantifierInsideGroup.push_back( 0 ); i += regexGroupModifierLength( pat, i ); continue; }
+        if( c == '(' )
+        {
+            const std::size_t modifier = regexGroupModifierLength( pat, i );
+            frames.push_back( { false, false, i + 1 + modifier, {} } );
+            i += modifier;
+            continue;
+        }
         if( c == ')' )
         {
-            if( hasQuantifierInsideGroup.empty() )
+            if( std::optional<std::string> refusal = regexCloseGroup( pat, i, frames ) )
             {
-                continue; // unbalanced: the compile probe below owns that error
+                return refusal;
             }
+            continue;
+        }
 
-            const bool isRepeatingInside = hasQuantifierInsideGroup.back() != 0;
-            hasQuantifierInsideGroup.pop_back();
-            const RegexQuantifier quant = regexQuantifierAt( pat, i + 1 );
-
-            if( quant.isPresent && quant.isUnbounded && isRepeatingInside )
+        // this group's own top-level '|' — the separator the alternation arm splits its branches on
+        if( c == '|' )
+        {
+            if( !frames.empty() )
             {
-                return catastrophicRegexMessage( pat[ i + 1 ] );
-            }
-
-            // the group is now an ATOM of its parent: a quantifier anywhere inside it — or ON it — is a
-            // quantifier inside the parent too, which is what makes ((a+))+, ((a)+)+ and ((a)?)+ visible
-            if( !hasQuantifierInsideGroup.empty() && ( isRepeatingInside || quant.isPresent ) )
-            {
-                hasQuantifierInsideGroup.back() = 1;
-            }
-            if( quant.isPresent )
-            {
-                i += quant.lengthCount; // step over the quantifier we just judged
+                frames.back().topLevelPipes.push_back( i );
             }
             continue;
         }
 
         // a plain quantifier: it marks the innermost enclosing group, if any (top-level repetition is fine)
         const RegexQuantifier quant = regexQuantifierAt( pat, i );
-        if( quant.isPresent && !hasQuantifierInsideGroup.empty() )
+        if( quant.isPresent && !frames.empty() )
         {
-            hasQuantifierInsideGroup.back() = 1;
+            frames.back().hasQuantifierInside = true;
         }
         if( quant.isPresent )
         {
@@ -417,9 +1093,8 @@ enum class RegexVerdict : std::uint8_t
 // words whichever verb it asked. Platform-independent on purpose: the engine's own what() differs per standard
 // library, and this refusal must read the same on every one that can produce it.
 inline constexpr std::string_view kRegexAbandonedReason =
-    "the regex engine abandoned the match (std::regex gave up part-way through it: the backtracking the structural "
-    "screen cannot see, such as overlapping alternation like (a|a)+z where two branches match the same text, or "
-    "its stack or memory limit)";
+    "the regex engine abandoned the match (std::regex gave up part-way through it: the backtracking a structural "
+    "screen cannot see — a crafted subject under a pattern the screen admits — or its stack or memory limit)";
 
 // The counterpart for RegexVerdict::Skipped — the sentence every entry point quotes when a subject was never
 // handed to the engine at all (too long for this thread's measured-safe bound, src/infra/stackthreads.h and
@@ -1149,8 +1824,8 @@ void regexScanLines( const std::regex& engine, const RegexLiteralPaths& paths, s
         } );
         return;
     }
-    const bool  canJump   = policy.useLiteralPaths && !hasPlan && paths.required.isLineFree;
-    const bool  canFilter = policy.useLiteralPaths && !hasPlan && !paths.required.anyOf.empty();
+    const bool canJump   = policy.useLiteralPaths && !hasPlan && paths.required.isLineFree;
+    const bool canFilter = policy.useLiteralPaths && !hasPlan && !paths.required.anyOf.empty();
     std::size_t lineBegin = 0;
     while( !isStopped )
     {
@@ -1207,10 +1882,12 @@ inline constexpr unsigned kRegexFaultStackShift = 22;   // RIPWIRE_FAULT_REGEX_L
 // release), read ONCE per process (determinism), exact "1" (the rule faultSwitchOn owns). Called ONLY inside
 // the try of a noexcept GuardedRegex member, so the throw it raises never leaves the seam — and before any literal
 // path, so a pattern the engine never sees still reaches it.
+// (Its former per-subject sibling RIPWIRE_FAULT_REGEX_MATCH_MIXED rode with the guard's per-file match budget —
+// it existed only so one run could carry both causes of a stopped scan — and was removed with the budget, PR #397.)
 inline void throwIfMatchFaultInjected()
 {
-    static const bool isOn = rw::faultSwitchOn( "RIPWIRE_FAULT_REGEX_MATCH" );
-    if( isOn )
+    static const bool isEverySubject = rw::faultSwitchOn( "RIPWIRE_FAULT_REGEX_MATCH" );
+    if( isEverySubject )
     {
         throw std::regex_error( std::regex_constants::error_complexity );
     }

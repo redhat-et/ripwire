@@ -230,12 +230,29 @@ inline bool faultSwitchOn( const char* envName ) noexcept
 inline constexpr bool faultSwitchOn( const char* ) noexcept { return false; }
 #endif
 
-// Each switch keeps its own named wrapper and its own once-per-process read: the name is what a reader greps
-// for, and the `static` is what keeps the answer from changing mid-document (determinism).
+// The once-per-process read itself, in ONE place, for a switch whose wrapper does nothing else. A switch cannot
+// pass its name as an ordinary argument and keep its own cache: a function-local `static` initialised from a
+// PARAMETER is set on the FIRST call, so every later call — from any switch — would get that first answer. The
+// switch therefore names itself with a TAG TYPE, and each instantiation owns its own `static`. The env name
+// stays in the wrapper body, which is what a reader greps for.
+template<typename Tag>
+inline bool faultSwitchOnOnce( const char* envName ) noexcept
+{
+    static const bool isOn = faultSwitchOn( envName );
+    return isOn;
+}
+
+// One tag per switch, so each gets its own cache (see faultSwitchOnOnce above). A tag is never constructed or
+// read — it exists only to select the instantiation.
+struct RenderEmitThrowFaultTag {};
+struct RenderCopyThrowFaultTag {};
+struct MemstreamFinishFaultTag {};
+
+// Each switch keeps its own named wrapper — the name is what a reader greps for — and reads through
+// faultSwitchOnOnce, whose per-tag `static` is what keeps the answer from changing mid-document (determinism).
 inline bool isRenderEmitThrowFaultInjected() noexcept
 {
-    static const bool isOn = faultSwitchOn( "INFRA_FAULT_RENDER_EMIT_THROW" );
-    return isOn;
+    return faultSwitchOnOnce<RenderEmitThrowFaultTag>( "INFRA_FAULT_RENDER_EMIT_THROW" );
 }
 
 // The SECOND throwing site, and its own switch for the same reason the first has one: the name is what a
@@ -243,8 +260,7 @@ inline bool isRenderEmitThrowFaultInjected() noexcept
 // is one too, and it sat outside the handler that the emitter's throw takes.
 inline bool isRenderCopyThrowFaultInjected() noexcept
 {
-    static const bool isOn = faultSwitchOn( "INFRA_FAULT_RENDER_COPY_THROW" );
-    return isOn;
+    return faultSwitchOnOnce<RenderCopyThrowFaultTag>( "INFRA_FAULT_RENDER_COPY_THROW" );
 }
 
 // ── THE MEMORY STREAM: an owned open_memstream whose bytes come back whole, or not at all ─────────────────
@@ -277,8 +293,7 @@ inline bool isRenderCopyThrowFaultInjected() noexcept
 // every finish() report failure AFTER really closing the stream. Read once per process; constexpr false in release.
 inline bool isMemstreamFinishFaultInjected() noexcept
 {
-    static const bool isOn = faultSwitchOn( "INFRA_FAULT_MEMSTREAM_FINISH" );
-    return isOn;
+    return faultSwitchOnOnce<MemstreamFinishFaultTag>( "INFRA_FAULT_MEMSTREAM_FINISH" );
 }
 
 struct MemoryStreamBytes

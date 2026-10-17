@@ -145,9 +145,11 @@ inline const char* builtinLayer( std::string_view path ) noexcept
 //   regex-escaped, so a captured path segment can never inject a sub-pattern the screen did not read. What the
 //   old note claimed here — "std::regex on a BOUNDED corpus terminates" — was false on both standard
 //   libraries: `deny path zz/.* -> (a+)+z` aborted the process on libc++ (an uncaught error_complexity, rc 134)
-//   and backtracks without end on libstdc++. A match the engine still abandons (RegexVerdict::Exhausted, e.g.
-//   overlapping alternation), and a TO pattern that only becomes invalid once an edge's captures are substituted
-//   into it (`a{2,\1}` → `a{2,1}`), are reported by pathRuleForbids and refused by the verb, never read as "no match".
+//   and backtracks without end on libstdc++. A match the engine still abandons (RegexVerdict::Exhausted — e.g.
+//   the multi-quantifier residual a*a*a*a*a*b, which the screen admits by construction; the overlapping
+//   alternation an earlier note named here is refused at admission since M2-c), and a TO pattern that only becomes
+//   invalid once an edge's captures are substituted into it (`a{2,\1}` → `a{2,1}`), are reported by pathRuleForbids
+//   and refused by the verb, never read as "no match".
 struct PathRule
 {
     std::string from;        // FROM_REGEX source (as written)

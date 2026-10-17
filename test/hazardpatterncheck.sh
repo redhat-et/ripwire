@@ -495,7 +495,7 @@ REGB1
 cat > "$TMP/reg_b2.tsv" <<'REGB2'
 alloccount.cpp	operator new	2	the one throw seam CONTRIBUTING §3 permits: operator new under RIPWIRE_ALLOC_COUNT, an A/B instrument no shipped build links
 infra/dynamic_map.hpp	at	1	vendored container API; no ripwire call site reaches it (rule C lists its one caller, the container's own non-const at)
-regexguard.h	throwIfMatchFaultInjected	1	the RIPWIRE_FAULT_REGEX_MATCH fault switch, off unless the variable is set; its three call sites are the first statement inside GuardedRegex's search, search and forEachMatch try blocks, which catch std::regex_error by type and return Exhausted
+regexguard.h	throwIfMatchFaultInjected	1	the RIPWIRE_FAULT_REGEX_MATCH fault switch, off unless the variable is set; its three call sites are the first statement inside GuardedRegex's search, search and forEachMatch try blocks, which catch std::regex_error by type and return Exhausted (a stopped --regex scan has one cause — the former MIXED sibling rode with the per-file match budget the PR #397 review removed)
 REGB2
 cat > "$TMP/reg_c.tsv" <<'REGC'
 crossref.h	listTreeRows	.at	2	readTreeLevels returns its table only when every level was served whole by catFileBatch and every child tree id was queued unless already read, so the root tree and each subtree id it walks are keys

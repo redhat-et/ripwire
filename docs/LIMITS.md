@@ -15,6 +15,15 @@ document. To reach a declaration, search its file for the name (`grep -n <name> 
 `ripwire . --grep=<name>`). A file that declares the same name, value and note more than once shows
 it once, marked `×N`.
 
+**Known residual — a single pathological match is unbounded on libstdc++.** One `std::regex` call is atomic to
+its caller, so no caller-side counter can see the work inside one, and libstdc++'s engine never throws; libc++
+returns only because its ENGINE throws `error_complexity`. The multi-quantifier family (`a*a*a*a*a*b`,
+`^(a)*(a)*(a)*(a)*(a)*$`) is admitted by the screen by construction: a subject that holds a required literal and
+then a long run is unbounded work, named and reachable, **tracked by `regex-screen-multiquantifier` (follow-on
+spec), never claimed closed**. (The guard's former per-file match budget — `kRegexFileMatchBudget`, removed in
+the PR #397 review — cannot be revived against this residual: it counted line-match attempts BETWEEN engine
+calls, so it refused fast linear answers and still bounded nothing inside one call.)
+
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
 | 259 | 102 | 151 | **108** |

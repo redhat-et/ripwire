@@ -1338,11 +1338,12 @@ struct ChargedSection
 // CA4 w1fix2-verifier G4: this once read `value[0] == '1'`, so `=10`, `=1x` and `=1000000` all injected the
 // fault — a prefix test where the contract is a switch. That rule now lives in ONE place, rw::faultSwitchOn
 // (infra/emit.h), which every fault switch reads through, so the next one cannot get it wrong again; the
-// once-per-process `static` stays here, where determinism needs it.
+// once-per-process read is likewise rw::faultSwitchOnOnce there, whose per-tag `static` is where determinism
+// needs it.
+struct ChargeBufferFaultTag {};   // this switch's own faultSwitchOnOnce cache (infra/emit.h)
 inline bool isChargeBufferFaultInjected() noexcept
 {
-    static const bool isOn = rw::faultSwitchOn( "RIPWIRE_FAULT_CHARGE_BUFFER" );
-    return isOn;
+    return rw::faultSwitchOnOnce<ChargeBufferFaultTag>( "RIPWIRE_FAULT_CHARGE_BUFFER" );
 }
 
 // Drop-in for `open_memstream` at every est_tokens-family measurement buffer. nullptr ⇒ the caller takes its
