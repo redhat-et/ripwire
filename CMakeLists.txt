@@ -201,9 +201,26 @@ if(RIPWIRE_PGO)
       "RIPWIRE_PGO must not be enabled in ${_ripwire_pgo_build_name}/ — that is the tree the gates and "
       "benches measure, and a silently PGO'd build/ripwire moves every recorded number. Use build_pgo/.")
   endif()
+  # The compiler-ID guard above already excludes cl.exe; share this driver distinction at both sites.
+  set(_ripwire_pgo_clang_cl OFF)
+  if(WIN32 AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set(_ripwire_pgo_clang_cl ON)
+  endif()
   if(RIPWIRE_PGO STREQUAL "generate")
     # Counters land in <build>/prof as default_*.profraw, one per process image.
     set(_ripwire_pgo_flag "-fprofile-generate=${CMAKE_BINARY_DIR}/prof")
+    if(_ripwire_pgo_clang_cl)
+      # Observed LLVM backend crash (Clang 22.1.8 / x86_64-v3); no upstream issue/reduced repro yet.
+      # Reproduction and removal criteria: docs/WINDOWS-PGO.md. Only clang-cl is covered/tested;
+      # Windows clang++ (GNU-style driver) is deliberately unchanged, not claimed unaffected.
+      # Profile generation with SLP active fails with "Cannot select: ch = brind ..., v2i64 CopyFromReg".
+      # Scoped strictly to the generate phase so the final 'use' build keeps SLP vectorization active.
+      # For direct compilation (non-LTO), /clang:-fno-slp-vectorize is passed to the compiler frontend.
+      # When LTO is active (e.g. Release builds), code generation is performed at link time by lld-link,
+      # which requires /mllvm:-vectorize-slp=false.
+      add_compile_options(/clang:-fno-slp-vectorize)
+      add_link_options(/mllvm:-vectorize-slp=false)
+    endif()
   elseif(RIPWIRE_PGO STREQUAL "use")
     if(NOT RIPWIRE_PGO_PROFILE OR NOT EXISTS "${RIPWIRE_PGO_PROFILE}")
       message(FATAL_ERROR
@@ -221,7 +238,14 @@ if(RIPWIRE_PGO)
   # must be linked in, and the vendored C is where the parse loop lives — profiling only our C++ would
   # profile the caller of the hot code and not the hot code.
   add_compile_options(${_ripwire_pgo_flag})
-  add_link_options(${_ripwire_pgo_flag})
+  # On Windows with MSVC frontend (clang-cl), CMake routes link options directly to lld-link/link.exe,
+  # which rejects clang driver flags like -fprofile-generate. clang-cl automatically injects the compiler-rt
+  # target-specific profiling library dependency (e.g. /DEFAULTLIB:clang_rt.profile-x86_64.lib on x64)
+  # into the compiled objects, so
+  # link options are unnecessary there and adding ${_ripwire_pgo_flag} would fail link invocation.
+  if(NOT _ripwire_pgo_clang_cl)
+    add_link_options(${_ripwire_pgo_flag})
+  endif()
   message(STATUS "RIPWIRE_PGO: ${RIPWIRE_PGO} — see docs/OPTREMARKS.md F2 and scripts/pgobuild.sh")
 endif()
 
