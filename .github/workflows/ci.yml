@@ -114,7 +114,7 @@ jobs:
               fi
               ;;
             workflow_dispatch|schedule)
-              full=true
+              full=false   # DEBUG BRANCH ONLY: the gcc Release leg alone
               ;;
           esac
           echo "event=$EVENT ref=$REF labels=$PR_LABELS -> full=$full"
@@ -130,9 +130,9 @@ jobs:
               {"os":"ubuntu-24.04","flavor":"plain","cc":"clang"}
             ]'
           else
-            legs='[{"os":"ubuntu-24.04","flavor":"Release","cc":"clang"}]'
+            legs='[{"os":"ubuntu-24.04","flavor":"Release","cc":"gcc"}]'
           fi
-          release_matrix="$( jq -c '{ include: [ .[] as $leg | range(1;5) as $shard | ($leg + {shard:$shard, shards:4}) ] }' <<<"$legs" )"
+          release_matrix="$( jq -c '{ include: [ .[] as $leg | range(1;2) as $shard | ($leg + {shard:$shard, shards:4}) ] }' <<<"$legs" )"
           echo "release_matrix=$release_matrix" >> "$GITHUB_OUTPUT"
 
   # ─── style: one gating clang-format check, one advisory clang-format report, one advisory clang-tidy ───
@@ -319,7 +319,7 @@ jobs:
                ! -name 'ubuntu*' -print -delete || true
           sudo apt-get update
           # poppler-utils is pdftotext: ripwirepubliccheck arm 1b FAILS a tracked PDF deck it cannot read.
-          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang poppler-utils
+          sudo apt-get install -y --no-install-recommends libxml2-utils ripgrep bc clang poppler-utils gdb
 
       - name: Install tooling (macOS)
         if: runner.os == 'macOS'
@@ -359,6 +359,31 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
+      # DEBUG BRANCH ONLY: the same Release + LTO configure with -g -fno-omit-frame-pointer (+ dangling warnings, which do
+      # not change codegen), and a third with -fno-lifetime-dse; then the crashing --mcp / --batch invocations under gdb.
+      - name: "SEGV debug: Release+LTO with -g"
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -S . -B build-g -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-g -fno-omit-frame-pointer -Wdangling-pointer=2 -Wdangling-reference -Wno-error" -DCMAKE_C_FLAGS="-g -fno-omit-frame-pointer"
+          cmake --build build-g -j 2>&1 | tee build-g.log | tail -3
+          echo "=== dangling/lifetime warnings in the -g build:"; grep -n -E 'warning: .*(dangl|lifetime|uninit|array-bounds|stringop)' -A6 build-g.log | head -300 || true
+          grep -E '^CMAKE_CXX_FLAGS(_RELEASE)?:|RIPWIRE_LTO' build-g/CMakeCache.txt
+      - name: "SEGV debug: Release+LTO with -fno-lifetime-dse"
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cmake -S . -B build-nldse -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-fno-lifetime-dse"
+          cmake --build build-nldse -j 2>&1 | tail -3
+      - name: "SEGV debug: backtraces"
+        run: |
+          gdb --version | head -1
+          bash scripts/segv-debug.sh build/ripwire exact
+          bash scripts/segv-debug.sh build-g/ripwire with-g
+          bash scripts/segv-debug.sh build-nldse/ripwire no-lifetime-dse 2>&1 | grep -E '^-----|^=====|rc=|SIGSEGV|^#[0-9]+ ' | head -80
+
       # The floor this matrix exists to hold, read off the BINARY rather than inferred from the compiler
       # version: emit= names the emitter that compiled in (src/infra/emit.h). A leg whose standard library
       # lacks <print> still builds — the emitter falls back to std::format+fputs by feature test — so
@@ -395,6 +420,7 @@ jobs:
       # never builds and never waits, and a missing or wrong binary FAILS the gate instead of rebuilding inside its
       # budget. test/headbinstagecheck.sh gates that this step exists, precedes the suite, verifies and exports.
       - name: Stage the HEAD comparison binary (once per job, before the suite, outside every gate budget)
+        if: false   # DEBUG BRANCH ONLY
         run: |
           export RIPWIRE_HEADBIN_BUILD_LOG="$RUNNER_TEMP/headbin-build.log"
           . test/lib/headbinlib.sh
@@ -411,6 +437,7 @@ jobs:
       # comment. The shard's own gates are still LPT-ordered by the scratch timings; -j 3 stays because
       # the 4-vCPU runners saturate (many gates are internally multi-threaded).
       - name: "gate suite, parallel, this job's shard (560+ gates: determinism, cache transparency, G4 XML, quality, …)"
+        if: false   # DEBUG BRANCH ONLY
         # --budget-scale 4: the harness's flat 300 s default is a hang tripwire calibrated on an idle dev machine;
         # here -j 3 on a 4-vCPU runner is a 3-8x multiplier (two gates hit rc=124 at exactly 300 s in the first
         # sharded runs). The scale applies to the default only; GATE_BUDGET_SEC's explicit entries stay as declared.
