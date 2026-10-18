@@ -361,28 +361,22 @@ jobs:
 
       # DEBUG BRANCH ONLY: the same Release + LTO configure with -g -fno-omit-frame-pointer (+ dangling warnings, which do
       # not change codegen), and a third with -fno-lifetime-dse; then the crashing --mcp / --batch invocations under gdb.
-      - name: "SEGV debug: Release+LTO with -g"
+      - name: "SEGV debug 2: standalone [[assume]] reproducer (g++-14 = image gcc 14.2)"
+        run: |
+          for cxx in g++-14 g++-13; do $cxx --version | head -1
+            for f in "-O2" "-O2 -flto" "-O3" "-O2 -DNO_ASSUME"; do $cxx -std=c++23 $f scripts/assume_repro.cpp -o /tmp/ar && /tmp/ar; echo "  [$cxx $f] rc=$?"; done; done
+      - name: "SEGV debug 2: Release+LTO with callHierarchyRowCap's ENSURES removed"
         env:
           CC: gcc-14
           CXX: g++-14
         run: |
-          cmake -S . -B build-g -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-g -fno-omit-frame-pointer -Wdangling-pointer=2 -Wdangling-reference -Wno-error" -DCMAKE_C_FLAGS="-g -fno-omit-frame-pointer"
-          cmake --build build-g -j 2>&1 | tee build-g.log | tail -3
-          echo "=== dangling/lifetime warnings in the -g build:"; grep -n -E 'warning: .*(dangl|lifetime|uninit|array-bounds|stringop)' -A6 build-g.log | head -300 || true
-          grep -E '^CMAKE_CXX_FLAGS(_RELEASE)?:|RIPWIRE_LTO' build-g/CMakeCache.txt
-      - name: "SEGV debug: Release+LTO with -fno-lifetime-dse"
-        env:
-          CC: gcc-14
-          CXX: g++-14
-        run: |
-          cmake -S . -B build-nldse -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-fno-lifetime-dse"
-          cmake --build build-nldse -j 2>&1 | tail -3
-      - name: "SEGV debug: backtraces"
-        run: |
-          gdb --version | head -1
-          bash scripts/segv-debug.sh build/ripwire exact
-          bash scripts/segv-debug.sh build-g/ripwire with-g
-          bash scripts/segv-debug.sh build-nldse/ripwire no-lifetime-dse 2>&1 | grep -E '^-----|^=====|rc=|SIGSEGV|^#[0-9]+ ' | head -80
+          grep -n 'ENSURES( cap > 0, "a call-hierarchy window' src/pageview.h
+          sed -i '/ENSURES( cap > 0, "a call-hierarchy window/d' src/pageview.h
+          git diff --stat
+          cmake -S . -B build-noens -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-noens -j 2>&1 | tail -2
+          bash scripts/segv-debug.sh build-noens/ripwire no-ensures 2>&1 | grep -E '^-----|^=====|rc=|SIGSEGV|^#[0-9]+ |^\{' | cut -c1-300 | head -60
+          git checkout src/pageview.h
 
       # The floor this matrix exists to hold, read off the BINARY rather than inferred from the compiler
       # version: emit= names the emitter that compiled in (src/infra/emit.h). A leg whose standard library
