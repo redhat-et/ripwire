@@ -361,21 +361,38 @@ jobs:
 
       # DEBUG BRANCH ONLY: the same Release + LTO configure with -g -fno-omit-frame-pointer (+ dangling warnings, which do
       # not change codegen), and a third with -fno-lifetime-dse; then the crashing --mcp / --batch invocations under gdb.
-      - name: "SEGV debug 2: standalone [[assume]] reproducer (g++-14 = image gcc 14.2)"
-        run: |
-          for cxx in g++-14 g++-13; do $cxx --version | head -1
-            for f in "-O2" "-O2 -flto" "-O3" "-O2 -DNO_ASSUME"; do $cxx -std=c++23 $f scripts/assume_repro.cpp -o /tmp/ar && /tmp/ar; echo "  [$cxx $f] rc=$?"; done; done
-      - name: "SEGV debug 2: Release+LTO with callHierarchyRowCap's ENSURES removed"
+      - name: "SEGV debug 3: candidate A (ENSURES kept) Release+LTO"
         env:
           CC: gcc-14
           CXX: g++-14
         run: |
-          grep -n 'ENSURES( cap > 0, "a call-hierarchy window' src/pageview.h
-          sed -i '/ENSURES( cap > 0, "a call-hierarchy window/d' src/pageview.h
-          git diff --stat
-          cmake -S . -B build-noens -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-noens -j 2>&1 | tail -2
-          bash scripts/segv-debug.sh build-noens/ripwire no-ensures 2>&1 | grep -E '^-----|^=====|rc=|SIGSEGV|^#[0-9]+ |^\{' | cut -c1-300 | head -60
+          cp scripts/pv/pageview_A.h src/pageview.h && git diff --stat
+          cmake -S . -B build-A -DCMAKE_BUILD_TYPE=Release > /dev/null
+          cmake --build build-A -j 2>&1 | tail -1
+          bash scripts/segv-debug.sh build-A/ripwire cand-A 2>&1 | grep -E '^-----|^=====|rc=|SIGSEGV|^#[0-9]+ ' | grep -v 'under gdb' | cut -c1-300 | head -40
+          ( cd test/fixture && ../../build-A/ripwire --mcp < /dev/null >/dev/null; echo ok )
+          git checkout src/pageview.h
+      - name: "SEGV debug 3: candidate B (ENSURES kept) Release+LTO"
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cp scripts/pv/pageview_B.h src/pageview.h && git diff --stat
+          cmake -S . -B build-B -DCMAKE_BUILD_TYPE=Release > /dev/null
+          cmake --build build-B -j 2>&1 | tail -1
+          bash scripts/segv-debug.sh build-B/ripwire cand-B 2>&1 | grep -E '^-----|^=====|rc=|SIGSEGV|^#[0-9]+ ' | grep -v 'under gdb' | cut -c1-300 | head -40
+          ( cd test/fixture && ../../build-B/ripwire --mcp < /dev/null >/dev/null; echo ok )
+          git checkout src/pageview.h
+      - name: "SEGV debug 3: candidate C (ENSURES kept) Release+LTO"
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: |
+          cp scripts/pv/pageview_C.h src/pageview.h && git diff --stat
+          cmake -S . -B build-C -DCMAKE_BUILD_TYPE=Release > /dev/null
+          cmake --build build-C -j 2>&1 | tail -1
+          bash scripts/segv-debug.sh build-C/ripwire cand-C 2>&1 | grep -E '^-----|^=====|rc=|SIGSEGV|^#[0-9]+ ' | grep -v 'under gdb' | cut -c1-300 | head -40
+          ( cd test/fixture && ../../build-C/ripwire --mcp < /dev/null >/dev/null; echo ok )
           git checkout src/pageview.h
 
       # The floor this matrix exists to hold, read off the BINARY rather than inferred from the compiler
