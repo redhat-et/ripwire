@@ -353,7 +353,7 @@ function storyCards(s, { kick, head, stories, footText }){
   ];
   s.addText(method.map((t) => ({ text: t, options: { bullet: { indent: 14 }, breakLine: true, paraSpaceAfter: 8 } })),
     { x: RX+0.2, y: 2.2, w: RW-0.4, h: 4.5, fontFace: SANS, fontSize: 12, color: MUTED, valign: "top", margin: 0 });
-  foot(s, "* 0.6.8 column: its first of four batches; later changes measured on their own questions · v0.6.8 release notes, CHANGELOG [0.6.8]");
+  foot(s, "* 0.6.8: its train-28 build, first of four batches; later changes measured on own questions · v0.6.8 release notes, CHANGELOG [0.6.8]");
   notes(s, [
     "SOURCES (complete first answers). Both are public: the v0.6.8 GitHub release notes, section \"Measured: the same 173 questions, 0.6.5 then 0.6.7 then 0.6.8\", and CHANGELOG.md [0.6.8], the \"Measured:\" bullet of its summary.",
     "- CHANGELOG [0.6.8]: \"on our fixed set of 173 questions over public repositories (10 of them from one repository sealed before any build ran), graded two ways, a stricter method (a rubric item counts only when the answer names its primary symbol or at least two of its listed terms) and a more lenient one (any one listed term), the questions answered completely in one call went 50, 83, 98 (stricter) and 78, 109, 127 (more lenient) for 0.6.5, 0.6.7 and 0.6.8; on the 10 sealed questions, 2, 5, 6 (stricter). The 0.6.8 figure was measured on the train-28 build of 0.6.8; the later changes in this release were measured only on their own target questions (release notes). Same machine, mechanical grading.\"",
@@ -1521,8 +1521,8 @@ function storyCards(s, { kick, head, stories, footText }){
   s.addText("claude · cursor · codex · windsurf · gemini · aider · opencode · openclaw · hermes — or --all to detect every one you have installed",
     { x: 5.2, y: 1.95, w: 7.4, h: 0.55, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
   const cards = [
-    ["33 MCP verbs", "17 read, 13 flagship reflexes (impact, uses, edit_check, from_trace …), 3 span-addressed edits. --mcp-tools=core lists 8 of them: tools/list is 13,834 B against 46,368 B for all"],
-    ["lazy bodies, one legend", "read verbs return signatures and a stable handle; a body is fetched only on request. Each definition is sent once per session: a ten-call session fell 45,463 → 29,679 B"],
+    ["33 MCP verbs", "17 read, 13 flagship reflexes (impact, uses, edit_check, from_trace …), 3 span-addressed edits. --mcp-tools=core lists 8 of them: tools/list is 13,834 B against 46,368 B for all (0.6.7)"],
+    ["lazy bodies, one legend", "read verbs return signatures and a stable handle; a body is fetched only on request. Each definition is sent once per session: a ten-call session fell 45,463 → 29,679 B (0.6.7)"],
     ["18 agent skills", "moment-matched workflows (orient, navigate, change-check, quality-bar …) — wrap prints the recipe, skills/install.sh installs them"],
     ["13 orchestrator loops", "copy-paste prompts in prompts/: run the same audit, eval and head-to-head machinery that built this tool, on your own repository"],
   ];
