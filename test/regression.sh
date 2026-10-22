@@ -1052,6 +1052,7 @@ for _g in \
     swiftcheck \
     swiftmemberscheck \
     swiftshapecheck \
+    tagspredicatecheck \
     tailsymtermscheck \
     taskechocheck \
     tempfilesymlinkcheck \
