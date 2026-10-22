@@ -26,7 +26,7 @@
 ; Deliberately NOT captured (first cut, disclosed floor, not an oversight):
 ;   - property_declaration (`val`/`var`, class or top-level): Kotlin's constant-vs-mutable
 ;     distinction is the `const` MODIFIER keyword, not a case convention, and tags-pass predicates
-;     never run — the same reason Rust's const_item/static_item skip constCaptureNeedsScreamingGate
+;     did not run before #355 — the same reason Rust's const_item/static_item skip constCaptureNeedsScreamingGate
 ;     entirely (the keyword IS the evidence there). Kotlin's `const val` needs that same
 ;     keyword-checked gate in ingest.cpp, not yet written; capturing every property unconditionally
 ;     here would flood the symbol table with every mutable field as a spurious "constant" the day

@@ -16,7 +16,7 @@
 // dependencyDialect already groups languages by exactly that. Dependency RESOLUTION stays in
 // src/resolve.h and is untouched by this round.
 //
-// WHAT IS STILL IN C++, AND WHY IT CANNOT LEAVE. Tags-pass predicates never run here (stated in
+// WHAT IS STILL IN C++, AND WHY IT CANNOT LEAVE. Tags-pass predicates did not run before #355 here (stated in
 // queries/python/tags.scm, pinned by test/matchgrammarcheck.sh, and the reason `using namespace ns;` is
 // gated in ingest.cpp rather than excluded by a query). So every gate that needs to READ TEXT stays in
 // C++: which preprocessor directive a captured `preproc_call` argument belongs to, whether a callee is
@@ -185,7 +185,7 @@ ImportSpec normaliseCFamilyImport( TSNode directive, std::string_view raw, std::
 //       gives all of them the same `source:` string, which is the whole capture; every other export_statement
 //       has no `source:` and is not matched by the query at all.
 //   call_expression — the CommonJS `require('x')` and the dynamic `import('x')`. A query cannot say "the
-//       callee's TEXT is require" (tags-pass predicates never run), so the three guards that keep an ordinary
+//       callee's TEXT is require" (tags-pass predicates did not run before #355), so the three guards that keep an ordinary
 //       call out of the dependency graph stay C++: jsModuleLoadTarget (src/ingest_relations.h), UNCHANGED by
 //       this round and shared with captureJsImportFacts, reads the callee text, the argument count and the
 //       string. The query only says where a candidate call is; the guards say whether it is a module load.

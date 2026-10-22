@@ -22,7 +22,7 @@
 ; arbitrarily (`- - key:`), so the ancestor chain between a pair and the document is unbounded.
 ; The patterns below therefore capture EVERY mapping pair, and the depth cut lives in ingest
 ; (dropGatedCapture's definition.yamlkey arm — the same in-C++ home as every other predicate a
-; tags pattern cannot express; tags-pass #eq?/#match? predicates never run in ripwire).
+; tags pattern cannot express; tags-pass predicates did not run in ripwire before #355, and #match? still does not).
 ;
 ; ── THE TABLE OF DECISIONS (each from measured frequency — PLAN 2026-08-10 / docs/EVALS.md) ──
 ;   mapping key           → a symbol IF its mapping-depth <= 2, sequences not counted (ingest

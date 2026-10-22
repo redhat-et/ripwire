@@ -74,7 +74,7 @@ struct PredicateRegexTable
 };
 
 // Walk every predicate of every pattern once and compile the constant #match?/#not-match? arguments.
-// Deliberately a mirror of passesPredicates' own step-group loop below — the two must agree about which
+// It walks with forEachPredicate, the same walk passesPredicates uses below — the two must agree about which
 // argument is the pattern, and a second spelling of that rule is how a filter quietly changes meaning.
 inline PredicateRegexTable buildPredicateRegexTable( const TSQuery* q )
 {
@@ -87,54 +87,31 @@ inline PredicateRegexTable buildPredicateRegexTable( const TSQuery* q )
     const std::uint32_t patterns = ts_query_pattern_count( q );
     for( std::uint32_t patternIndex = 0; patternIndex < patterns; ++patternIndex )
     {
-        std::uint32_t               pc    = 0;
-        const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern( q, patternIndex, &pc );
-        for( std::uint32_t i = 0; i < pc; )
+        forEachPredicate( q, patternIndex, [ & ]( std::span<const TSQueryPredicateStep> group )
         {
-            const std::uint32_t begin = i;
-            for( ; i < pc && steps[i].type != TSQueryPredicateStepTypeDone; ++i )
+            const std::string_view op = predicateOperator( q, group );
+            if( ( op != "match?" && op != "not-match?" ) || group.size() < 3 )
             {
+                return true;
             }
-            const std::uint32_t n = i - begin;
-            ++i;                                                        // skip the Done step
-            if( n < 3 || steps[begin].type != TSQueryPredicateStepTypeString )
-            {
-                continue;
-            }
-            std::uint32_t nl     = 0;                                   // two statements — see the sequencing note in passesPredicates
-            const char*   opText = ts_query_string_value_for_id( q, steps[begin].value_id, &nl );
-            if( opText == nullptr )
-            {
-                continue;
-            }
-            const std::string_view op( opText, nl );
-            if( op != "match?" && op != "not-match?" )
-            {
-                continue;
-            }
-            const TSQueryPredicateStep& arg = steps[ begin + 2 ];
+            const TSQueryPredicateStep& arg = group[2];
             if( arg.type != TSQueryPredicateStepTypeString || arg.value_id >= table.slotOfStringId.size()
                 || table.slotOfStringId[ arg.value_id ] != -1 )
             {
-                continue;                                               // capture-typed, out of range, or already decided
+                return true;                                            // capture-typed, out of range, or already decided
             }
-            std::uint32_t rl = 0;
-            const char*   rv = ts_query_string_value_for_id( q, arg.value_id, &rl );
-            if( rv == nullptr )
-            {
-                continue;
-            }
-            const std::string pattern( rv, rl );
+            const std::string pattern( queryString( q, arg.value_id ) );
             RegexCompile      compiled = compileGuardedRegex( pattern, kRegexEcmaScript );   // std::regex's default flags, as before
             if( compiled.refusal )
             {
                 table.slotOfStringId[ arg.value_id ] = -2;               // refused — the built-in packs keep the old per-match catch
                 table.refusals.push_back( "'" + pattern + "' refused: " + *compiled.refusal );
-                continue;
+                return true;
             }
             table.res.push_back( std::move( compiled.regex ) );
             table.slotOfStringId[ arg.value_id ] = static_cast<std::int32_t>( table.res.size() - 1 );
-        }
+            return true;
+        } );
     }
     return table;
 }
@@ -226,85 +203,56 @@ inline void noteUndecidedPredicate( const PredicateSite& site, const TSQueryMatc
                      site.fileId, byte, lineAtByte( site.nlOffsets, byte ), pattern, refused.refusal.value_or( std::string() ) );
 }
 
-// evaluate a pattern's query predicates against a match — #eq? / #not-eq? (string/capture equality) and
-// #match? / #not-match? (ECMAScript regex). ts_query never applies these itself; without this, #eq? is a no-op.
+// evaluate a pattern's query predicates against a match — the string predicates #eq? / #not-eq? / #any-of? /
+// #not-any-of? (src/infra/tspredicates.h, shared with the tags pass, #355) and #match? / #not-match? (ECMAScript
+// regex, --match/--lint only). ts_query never applies these itself; without this, #eq? is a no-op.
+// The step-group walk is forEachPredicate — the same one buildPredicateRegexTable walks, so the two agree about which
+// steps a predicate consumes by construction. The operator name is read in TWO statements (queryString, whose note
+// records the gcc-on-x86-64 evaluation-order bug that once made every predicate here a silent no-op).
 inline bool passesPredicates( const TSQuery* q, const PredicateRegexTable& rx, const TSQueryMatch& m, std::string_view src,
                               const PredicateSite& site )
 {
-    std::uint32_t pc = 0;
-    const TSQueryPredicateStep* steps = ts_query_predicates_for_pattern( q, m.pattern_index, &pc );
-    const auto argText = [ & ]( const TSQueryPredicateStep& s, std::string& out ) -> bool
+    bool ok = true;
+    forEachPredicate( q, m.pattern_index, [ & ]( std::span<const TSQueryPredicateStep> pr )
     {
-        if( s.type == TSQueryPredicateStepTypeCapture )
+        const StringPredicate decided = evalStringPredicate( q, pr, m, src );
+        if( decided != StringPredicate::NotString )
         {
-            return captureText( m, s.value_id, src, out );
+            ok = ( decided == StringPredicate::Pass );
+            return ok;
         }
-        if( s.type == TSQueryPredicateStepTypeString )
+        const std::string_view op = predicateOperator( q, pr );
+        if( ( op != "match?" && op != "not-match?" ) || pr.size() < 3 )
         {
-            std::uint32_t l = 0;
-            const char* v = ts_query_string_value_for_id( q, s.value_id, &l );
-            out.assign( v, l );
-            return true;
+            return true;                                                // unknown operator or short group ⇒ don't filter
         }
-        return false;
-    };
-    for( std::uint32_t i = 0; i < pc; )
-    {
-        std::vector<TSQueryPredicateStep> pr;
-        for( ; i < pc && steps[i].type != TSQueryPredicateStepTypeDone; ++i )
-        {
-            pr.push_back( steps[i] );
-        }
-        ++i;                                                            // skip the Done step
-        if( pr.size() < 3 || pr[0].type != TSQueryPredicateStepTypeString )
-        {
-            continue;
-        }
-        // TWO statements, deliberately. Written as ONE — `string_view( f( …, &nl ), nl )` — the length
-        // argument `nl` and the call that WRITES it are two arguments of the SAME call, and the order in
-        // which a call's arguments are evaluated is UNSPECIFIED. GCC on x86-64 evaluates them right-to-left,
-        // so it read `nl` while it was still 0: `op` came out EMPTY, matched none of the operator names
-        // below, and every #eq?/#not-eq?/#match?/#not-match? predicate was silently skipped (`ok` stays
-        // true ⇒ nothing filtered). GCC on aarch64 and Clang everywhere evaluate left-to-right and happened
-        // to get it right, which is why this only ever reddened on x86-64 Linux/gcc — measured 2026-08-02:
-        // g++-13 -O0 AND -O2 on x86-64 print len=0, the same g++-13 on aarch64 and clang-18 on x86-64 print
-        // len=6. Sequencing the write before the read IS the fix; do not re-inline these two lines.
-        std::uint32_t nl     = 0;
-        const char*   opText = ts_query_string_value_for_id( q, pr[0].value_id, &nl );
-        if( opText == nullptr )
-        {
-            continue; // no operator name ⇒ can't evaluate ⇒ don't filter
-        }
-        const std::string_view op( opText, nl );
         std::string lhs, rhs;
+        const auto argText = [ & ]( const TSQueryPredicateStep& s, std::string& out ) -> bool
+        {
+            if( s.type == TSQueryPredicateStepTypeCapture )
+            {
+                return captureText( m, s.value_id, src, out );
+            }
+            if( s.type == TSQueryPredicateStepTypeString )
+            {
+                out = std::string( queryString( q, s.value_id ) );
+                return true;
+            }
+            return false;
+        };
         if( !argText( pr[1], lhs ) || !argText( pr[2], rhs ) )
         {
-            continue; // can't evaluate → don't filter
+            return true;                                                // can't evaluate → don't filter
         }
-        bool ok = true;
-        if( op == "eq?" )
+        const MatchPredicateOutcome outcome = evalMatchPredicate( op == "not-match?", lhs, rhs, rx, pr[2] );
+        ok = ( outcome != MatchPredicateOutcome::Fail );                // undecided ⇒ filters nothing, as it always did
+        if( ok && outcome != MatchPredicateOutcome::Pass )
         {
-            ok = ( lhs == rhs );
+            noteUndecidedPredicate( site, m, outcome, rhs );
         }
-        else if( op == "not-eq?" )
-        {
-            ok = ( lhs != rhs );
-        }
-        else if( op == "match?" || op == "not-match?" )
-        {
-            const MatchPredicateOutcome outcome = evalMatchPredicate( op == "not-match?", lhs, rhs, rx, pr[2] );
-            ok = ( outcome != MatchPredicateOutcome::Fail );   // undecided ⇒ filters nothing, as it always did
-            if( ok && outcome != MatchPredicateOutcome::Pass )
-            {
-                noteUndecidedPredicate( site, m, outcome, rhs );
-            }
-        }
-        if( !ok )
-        {
-            return false;
-        }
-    }
-    return true;
+        return ok;
+    } );
+    return ok;
 }
 
 // ---- per-file newline-offset index → O(log n) 1-based line lookup (A4 perf) ----

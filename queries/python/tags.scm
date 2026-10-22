@@ -25,7 +25,7 @@
 ; Instance attribute bound in a method: `self.x = …` / `self.x: T = …` at ANY depth under the method — the ONE
 ; Python FIELD shape (IngestResult::fields, never a map symbol)
 ; (an `if` in __init__ still declares it). tree-sitter has no descendant operator and tags-pass
-; predicates never run, so the pattern is LOOSE — it matches `obj.x = …` too — and the gate lives in
+; predicates did not run before #355, so the pattern is LOOSE — it matches `obj.x = …` too — and the gate lives in
 ; ingest_names.h fieldCaptureKept: the receiver must be the bare identifier `self` and the assignment
 ; must sit inside a function inside a class. ONE symbol per (class, name): ingest_sidecap.h keeps the
 ; lowest-byte assignment per key (the definition), every later one is a role="write" use-site
@@ -34,7 +34,7 @@
 
 ; Plain class-body assignment, kept ONLY when the enclosing class's base NAME is an enum family
 ; (132 sites in django — stdlib enum plus the Choices family — and 108 in pydantic). The semantic
-; half lives in dropGatedCapture/isPyEnumMemberTarget — tags-pass predicates never run, so the name
+; half lives in dropGatedCapture/isPyEnumMemberTarget — tags-pass predicates did not run before #355, so the name
 ; test cannot live here.
 (class_definition body: (block (expression_statement (assignment left: (identifier) @name !type) @definition.enummember)))
 

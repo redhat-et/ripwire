@@ -66,7 +66,7 @@
 ; CJS export assignment — `module.exports.NAME = fn` / `exports.NAME = fn` mints a function ON the
 ; export object (47 webpack/lib sites, 0 extracted before this round). Structurally these patterns
 ; capture EVERY `a.b = fn` / `a.b.c = fn`; the object-text scoping (exports / module.exports) lives
-; in ingest.cpp (isCjsExportTarget) because tags-pass predicates never run — see the SCREAMING_SNAKE
+; in ingest.cpp (isCjsExportTarget) because tags-pass predicates did not run before #355 — see the SCREAMING_SNAKE
 ; precedent above. `!name`-scoped to ANONYMOUS values: a named function expression already defines
 ; its inner name, and capturing both would double the row.
 (assignment_expression
@@ -126,7 +126,7 @@
 
 ; lane lego-transitive (M2): a class FACTORY — `const Sub = Base.extend('Sub', …)` (nunjucks' node classes). The call
 ; returns a class extending its receiver, so the declarator is a class definition. Captured by shape here, kept only by
-; ingest_names.h isJsClassFactory (tags-pass predicates never run): property `extend`, first argument a string literal
+; ingest_names.h isJsClassFactory (tags-pass predicates did not run before #355): property `extend`, first argument a string literal
 ; spelling the declared name — `$.extend({}, a)` and an unnamed Backbone `Base.extend({…})` are object merges by shape and
 ; drop (a disclosed floor). The receiver becomes the base (ingest_sidecap.h, emitBaseRef).
 (lexical_declaration
@@ -181,7 +181,7 @@
 ; call_expression or a jsx_*_element). An intrinsic tag (`<div>`, `<h1>`) parses as the SAME
 ; (identifier) shape as a component tag — the grammar carries no case distinction — so the
 ; lower-case-first-letter filter lives in C++ at capture time (isJsxIntrinsicTagIdentifier,
-; src/ingest_names.h): tags-pass predicates never run (`(#match? @name "^[A-Z]")` here would be
+; src/ingest_names.h): tags-pass predicates did not run before #355 (`(#match? @name "^[A-Z]")` here would be
 ; silently ignored — see isCppCastKeyword's note above, measured, not assumed). A namespaced tag
 ; (`<svg:rect />`) needs no filter at all: verified with --match that its name field is a DIFFERENT
 ; grammar node, jsx_namespace_name, which no pattern below names, so it is never captured in the
@@ -213,7 +213,7 @@
 ;   require('x')  /  import('x')                                     — a call whose FIRST named argument is a string
 ;
 ; The call pattern is deliberately broader than a module load: it matches any bare-identifier (or `import`) call
-; with a leading string, `foo('x')` included, because a tags-pass predicate (`#eq? @f "require"`) is NOT evaluated
+; with a leading string, `foo('x')` included, because a tags-pass predicate (`#eq? @f "require"`) was NOT evaluated before #355
 ; in this tree (pinned by test/matchgrammarcheck.sh). So the C++ normaliser owns the three guards that keep an
 ; ordinary call out of the dependency graph: the callee TEXT is `require`/`import`, there is exactly ONE argument,
 ; and that argument is the string. The leading `.` anchors the capture to the first named child, so a 16 000-argument

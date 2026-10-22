@@ -86,8 +86,8 @@ inline std::string immediateScope( std::string_view full )
 // explicit-template-argument call — so the template_function reference pattern matches every cast in the
 // tree (171 sites in this repo's src/ alone). A cast is not a call and must not mint a reference: it is
 // VALID INPUT, not a corrupt invariant, so the capture loop simply skips it (never ASSUME, never
-// DISCLOSE — nothing degraded). Query predicates cannot do this: passesPredicates is wired into
-// --match/--lint only, not the tags pass (measured — a `#not-eq?` left --uses=static_cast at 165).
+// DISCLOSE — nothing degraded). Query predicates could not do this before #355: the tags pass ran
+// none (measured — a `#not-eq?` left --uses=static_cast at 165). It runs the string ones now, so this can move into the query.
 inline bool isCppCastKeyword( std::string_view name ) noexcept
 {
     return name == "static_cast" || name == "reinterpret_cast" || name == "const_cast" || name == "dynamic_cast";
@@ -99,8 +99,8 @@ inline bool isCppCastKeyword( std::string_view name ) noexcept
 // grammar carries no case distinction, so an intrinsic tag would otherwise mint a phantom call edge
 // to a symbol that is never defined. react.dev's own rule is the filter: a user component's tag name
 // MUST start with an uppercase letter for JSX to treat it as one rather than an HTML tag, so a
-// lower-case-first-letter name at this shape is never a component. Query predicates cannot do this:
-// passesPredicates is wired into --match/--lint only, not the tags pass (same measured fact
+// lower-case-first-letter name at this shape is never a component. Query predicates could not do this before
+// #355, when the tags pass ran none (the same measured fact
 // isCppCastKeyword's note above relies on) — so, exactly like that cast filter, this is VALID INPUT,
 // skipped at capture time, never ASSUME/DISCLOSE.
 //
@@ -136,7 +136,7 @@ inline bool isJsxIntrinsicTagIdentifier( TSNode roleNode, TSNode nameNode, std::
 // `using enum E;` (C++20; re-exports the ENUMERATORS, not the named type, so an import row for the type
 // would over-claim). Both are VALID INPUT, skipped at capture time exactly like the cast keywords above:
 // the grammar puts the keyword in an anonymous child with no field name, which a tags-query pattern
-// cannot negate (passesPredicates is wired into --match/--lint only, never the tags pass).
+// cannot negate (and before #355 the tags pass ran no predicate that could test its text).
 inline bool usingDeclarationIsDirective( TSNode n ) noexcept
 {
     return !ts_node_is_null( firstChildOfType( n, "namespace" ) ) || !ts_node_is_null( firstChildOfType( n, "enum" ) );
@@ -1889,7 +1889,7 @@ inline bool isScreamingSnakeName( std::string_view name ) noexcept
 // Which languages' @definition.constant captures are gated on SCREAMING_SNAKE. These grammars' new
 // constant patterns (queries/*/tags.scm, r3 q10) structurally capture EVERY module-level binding of the
 // right shape — the name gate is what scopes extraction to settings modules / feature-flag tables
-// instead of every literal. Enforced HERE because tags-pass predicates never run (#match? is wired into
+// instead of every literal. Enforced HERE because tags-pass predicates did not run before #355 (#match? is wired into
 // --match/--lint only — measured; see the note in queries/cpp/tags.scm). Deliberately NOT gated:
 // Python (vendored upstream pattern, case-blind since import — existing behavior pinned by constcheck),
 // Go (const/var patterns predate this and Go constants are conventionally CamelCase), Rust (const_item/
@@ -1973,7 +1973,7 @@ inline std::string_view childTokenAmong( TSNode node, std::string_view src, cons
 // CUDA memory-space qualifier of a module-scope declaration ("" = none). The uninitialized-declaration
 // patterns in queries/cpp/tags.scm are STRUCTURAL and unconstrained on purpose — that query also
 // compiles against tree-sitter-cpp (.cpp/.h/.metal), which has no `__constant__` token, so naming it
-// there would make ts_query_new reject the whole query; tags-pass predicates never run (measured; see
+// there would make ts_query_new reject the whole query; tags-pass predicates did not run before #355 (measured; see
 // the cast-keyword note in tags.scm); and a `(type_qualifier)` child constraint cannot see `__device__`
 // anyway — tree-sitter-cuda parses `__constant__`/`__managed__` as NAMED type_qualifier nodes but
 // `__device__` as an ANONYMOUS token child of the declaration. The qualifier test therefore lives here,
@@ -2010,7 +2010,7 @@ inline bool declarationCarriesConstQualifier( TSNode declNode, std::string_view 
 
 // The keep decision for the class-static-constant field_declaration captures (queries/cpp/tags.scm,
 // module-constant round). The pattern is deliberately loose — it matches EVERY default-member-
-// initializer, because tags-pass predicates never run and static/constexpr child order is free — so
+// initializer, because tags-pass predicates did not run before #355 and static/constexpr child order is free — so
 // this is where the real contract lives: keep iff the field carries BOTH a `static`
 // storage_class_specifier AND a const/constexpr/constinit type_qualifier. That keeps
 // `static constexpr int kMaxDepth = 3;` case-blind (one per-class constant, the census target) and
@@ -2024,7 +2024,7 @@ inline bool fieldConstantCaptureKept( TSNode fieldDeclNode, std::string_view src
 }
 
 // The keep decision for the @definition.field captures (member-variable round, card A3; queries/cpp,
-// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates never run
+// queries/c, queries/python tags.scm). The patterns are LOOSE on purpose — tags-pass predicates did not run before #355
 // — so the contract lives here, per language:
 //   C/C++ : keep iff the field_declaration carries NO `static` storage_class_specifier. A class-static
 //           CONSTANT keeps its own @definition.constant row (t="var", fieldConstantCaptureKept); a mutable
@@ -2331,7 +2331,7 @@ inline bool dropConstantCapture( Lang lang, std::string_view name, TSNode nameNo
 
 // YAML's @definition.yamlkey gate — the yaml tier's one in-C++ predicate (see queries/yaml/tags.scm's
 // header for why the depth cut cannot live in the query: sequence nesting between a pair and its
-// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates never run).
+// document is unbounded, so no finite pattern set expresses it, and tags-pass predicates did not run before #355).
 // A mapping key is a symbol iff its MAPPING depth is <= 2 — block and flow mappings counted alike
 // (flow is a presentation style of the same mapping node), sequences counted NOT AT ALL (sequence
 // transparency: 25.3% of real keys sit directly inside a sequence element — the steps:/containers:/
@@ -2370,7 +2370,7 @@ inline bool yamlKeyCaptureDropped( std::string_view name, TSNode roleNode ) noex
 // test/pyshapecheck.sh) drops when the enclosing class's base NAME is not an enum family;
 // @definition.cjsexport / @definition.protomethod (the JS shape round, test/jsshapecheck.sh) drop when
 // the LEFT side is not really exports/module.exports/.prototype. — the query captures every `a.b = fn`
-// shape and cannot text-test, because tags-pass predicates never run (see constCaptureNeedsScreamingGate
+// shape and cannot text-test, because tags-pass predicates did not run before #355 (see constCaptureNeedsScreamingGate
 // above).
 inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_view name, TSNode nameNode, TSNode roleNode, std::string_view src )   // NOT noexcept: the class-factory gate's scope lookup allocates
 {

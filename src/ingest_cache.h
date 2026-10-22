@@ -345,7 +345,11 @@ constexpr std::uint32_t kCacheVersion = 36;           // 36: train 30 — strict
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 206;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 216;          // bump on any grammar/.scm/extraction change
+                                                      // 216 = 2026-10-22 (#355): the tags pass evaluates tags.scm's string predicates, and Elixir's
+                                                      //   definition keywords and metadata attribute names move into queries/elixir/tags.scm. A
+                                                      //   placeholder strictly above every live number (main 206/207, PR #424 212/213, PR #420
+                                                      //   214/215); the number a maintainer reserves replaces it. Rich file tag 217. kCacheVersion stays 36.
                                                       // 206 = 2026-10-18 (#409, PR #414, renumbered again at merge with main 939dbb69): strictly above every
                                                       //   live number — main 196 (rich 197), train 31 198 (199), lane rust-receivers 202 (203), lane ix1-slot
                                                       //   204 (205). Rich file tag 207. kCacheVersion stays 36 (no record format change).

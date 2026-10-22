@@ -153,7 +153,7 @@
 ; field), so the module-scope patterns above never see it: pre-fix NO class-static constant was
 ; indexed, not even a SCREAMING one (probed 2026-08-12). This pattern is deliberately LOOSE — it
 ; also matches every plain default-member-initializer (`int retries = 3;`) — because tags-pass
-; predicates never run (see the cast-keyword note below) and child ORDER between `static` and
+; predicates did not run before #355 (see the cast-keyword note below) and child ORDER between `static` and
 ; `constexpr` is not fixed in source. The whole keep decision lives in ingest.cpp
 ; (fieldConstantCaptureKept): keep iff the field carries BOTH a `static` storage_class_specifier
 ; AND a const/constexpr/constinit type_qualifier — per-instance fields (default-initialized or
@@ -172,7 +172,7 @@
 ; ---- instance FIELDS (ripwire addition — the member-variable round, card A3, 2026-09-02) ----
 ; Every per-object data member of a class/struct/union body: `int count = 0;`, `char* label;`,
 ; `int& ref;`, `int buf[8];`, a bitfield `unsigned x : 3;` — declared or default-initialized alike.
-; Deliberately LOOSE like the class-static-constant pattern above (tags-pass predicates never run):
+; Deliberately LOOSE like the class-static-constant pattern above (tags-pass predicates did not run before #355):
 ; it also matches `static int live;` and `static constexpr int kMax = 3;`. The keep decision is
 ; ingest_names.h fieldCaptureKept: a `static` storage_class_specifier DROPS the capture — a class-static
 ; constant keeps its @definition.constant row above (t="var"), and a mutable static member is not a
@@ -203,7 +203,7 @@
 ; ANONYMOUS token child of the declaration (its only named children are the type and the declarator),
 ; invisible to any named-node constraint. The whole qualifier test therefore lives in ingest.cpp
 ; (cudaMemorySpaceQualifierOf), the same capture-time home as isCppCastKeyword, because tags-pass
-; predicates never run (see the cast-keyword note below). Policy enforced there: `__constant__`
+; predicates did not run before #355 (see the cast-keyword note below). Policy enforced there: `__constant__`
 ; extracts case-blind (the keyword is the evidence — the Rust const_item rationale);
 ; `__device__`/`__managed__` are mutable device globals and stay behind the SCREAMING gate; no
 ; memory-space token drops. The BLAST RADIUS of these unconstrained patterns is all of Lang::Cpp
@@ -360,8 +360,8 @@
 ;
 ; WHY THE CAST KEYWORDS ARE NOT EXCLUDED HERE. tree-sitter-cpp parses `static_cast<T>(x)` as this exact
 ; shape, so this pattern also matches all four C++ cast keywords (171 sites in src/ alone). The natural fix
-; — a `(#not-eq? @name "static_cast")` predicate — does NOT work: ripwire's passesPredicates is wired into
-; --match/--lint only, never into the tags pass (measured: the predicate left --uses=static_cast at 165).
+; — a `(#not-eq? @name "static_cast")` predicate — did NOT work before #355: the tags pass ran no predicates
+; (measured: the predicate left --uses=static_cast at 165). #355 runs the string ones, so this filter can move here.
 ; The exclusion therefore lives at capture time in ingest.cpp (isCppCastKeyword), where it is enforceable.
 (call_expression
   function: (template_function
@@ -398,8 +398,8 @@
 ;
 ; This pattern captures the SHAPE ONLY: any identifier-call statement whose immediate next named
 ; sibling is a compound_statement. It deliberately over-matches — a real `logCall( "x" );` followed by
-; an unrelated block inside a function body is this exact shape — because tags-pass predicates never
-; run (same story as the cast keywords above). The three real gates live at capture time in
+; an unrelated block inside a function body is this exact shape — because tags-pass predicates did not
+; run before #355 (same story as the cast keywords above). The three real gates live at capture time in
 ; ingest.cpp's testMacroBlockPartsOf: the callee must be a KNOWN test macro (kTestBlockMacroNames),
 ; the statement must carry the error-recovery MISSING ";" (a real semicolon disqualifies), and a title
 ; string literal must be present in the argument list (it becomes the symbol's name; the identifier
