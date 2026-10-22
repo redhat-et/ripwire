@@ -123,7 +123,8 @@ TOTAL="$( printf '%s' "$PREMISE" | grep -oE 'total="[0-9]+"' | head -1 | grep -o
 # ── (5) THE CORE ASSERTION — pruned top-k=40 == RIPWIRE_NO_PRUNE=1 (exhaustive), byte-identical, for a
 #    GRID of configured (k1,b) covering the clamp range's corners, its center, and the shipped default.
 #    Any divergence here means the bound understated a real achievable score for that (k1,b) and MaxScore
-#    pruning threw away a candidate that belonged in the top-K. ─────────────────────────────────────────
+#    pruning threw away a candidate that belonged in the top-K. T is the largest blended tf'
+#    (exact + 0.35 * stem-only / max stem-only), the same value the score loop saturates. ──────
 sweep_ok=1
 for kb in "1.5 0.75" "0.1 0.0" "0.1 1.0" "10.0 0.0" "10.0 1.0" "6.0 0.05" "0.15 0.95" "9.5 0.05" "9.5 0.95"; do
     K1="${kb%% *}"; B="${kb##* }"

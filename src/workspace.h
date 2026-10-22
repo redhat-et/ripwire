@@ -338,20 +338,25 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
         {
             allPartsHaveLexStats = allPartsHaveLexStats && p.hasLexStats
                                 && p.lexTokenRowOffsets.size() == p.symbols.size() + 1
+                                && p.lexStemTokenRowOffsets.size() == p.symbols.size() + 1
                                 && p.lexDocBodyDl.size()       == p.symbols.size()
                                 && p.lexFileSig.size()         == p.files.size() * kLexFileSigWords;
         }
         if( allPartsHaveLexStats )
         {
             std::size_t totPairs = 0;
+            std::size_t totStemPairs = 0;
             for( const IngestResult& p : parts )
             {
                 totPairs += p.lexTokenHashes.size();
+                totStemPairs += p.lexStemTokenHashes.size();
             }
             m.hasLexStats = true;
             m.lexTokenRowOffsets.reserve( totSyms + 1 );   m.lexTokenRowOffsets.push_back( 0 );
+            m.lexStemTokenRowOffsets.reserve( totSyms + 1 ); m.lexStemTokenRowOffsets.push_back( 0 );
             m.lexDocBodyDl.reserve( totSyms );             m.lexFileSig.reserve( totFiles * kLexFileSigWords );
             m.lexTokenHashes.reserve( totPairs );          m.lexTokenTfs.reserve( totPairs );
+            m.lexStemTokenHashes.reserve( totStemPairs );  m.lexStemTokenTfs.reserve( totStemPairs );
             for( const IngestResult& p : parts )
             {
                 const std::uint32_t pairOff = std::uint32_t( m.lexTokenHashes.size() );
@@ -359,8 +364,15 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
                 {
                     m.lexTokenRowOffsets.push_back( pairOff + p.lexTokenRowOffsets[ rowIndex ] );
                 }
+                const std::uint32_t stemOff = std::uint32_t( m.lexStemTokenHashes.size() );
+                for( std::size_t rowIndex = 1; rowIndex < p.lexStemTokenRowOffsets.size(); ++rowIndex )
+                {
+                    m.lexStemTokenRowOffsets.push_back( stemOff + p.lexStemTokenRowOffsets[ rowIndex ] );
+                }
                 m.lexTokenHashes.insert( m.lexTokenHashes.end(), p.lexTokenHashes.begin(), p.lexTokenHashes.end() );
                 m.lexTokenTfs.insert( m.lexTokenTfs.end(), p.lexTokenTfs.begin(), p.lexTokenTfs.end() );
+                m.lexStemTokenHashes.insert( m.lexStemTokenHashes.end(), p.lexStemTokenHashes.begin(), p.lexStemTokenHashes.end() );
+                m.lexStemTokenTfs.insert( m.lexStemTokenTfs.end(), p.lexStemTokenTfs.begin(), p.lexStemTokenTfs.end() );
                 m.lexDocBodyDl.insert( m.lexDocBodyDl.end(), p.lexDocBodyDl.begin(), p.lexDocBodyDl.end() );
                 m.lexFileSig.insert( m.lexFileSig.end(), p.lexFileSig.begin(), p.lexFileSig.end() );
             }

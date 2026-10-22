@@ -1787,6 +1787,9 @@ struct IngestResult
     std::vector<std::uint64_t> lexTokenHashes;       // sorted ascending within each symbol's row
     std::vector<std::uint32_t> lexTokenTfs;          // weighted tf, parallel to lexTokenHashes
     std::vector<std::uint32_t> lexDocBodyDl;         // size symbols.size() — weighted doc+body token count
+    std::vector<std::uint32_t> lexStemTokenRowOffsets;   // size symbols.size()+1 — CSR into the stem row
+    std::vector<std::uint64_t> lexStemTokenHashes;       // sorted ascending within each symbol's stem row
+    std::vector<std::uint32_t> lexStemTokenTfs;          // weighted tf of lightStem(token), parallel to the hashes
     std::vector<std::uint64_t> lexFileSig;           // size files.size()×kLexFileSigWords — B0.1 file Bloom
 
     // ── Multi-root workspace identity — ALL EMPTY on a single-root run (the

@@ -188,7 +188,11 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // The §P4 tier factor is divided back out for the same reason (maxScoreUndoingTier, filter.h).
     if( !lensRank.empty() )
     {
-        out.maxLexicalScore = maxScoreUndoingTier( lensRank, tierMul );
+        // The guarded score adds an exact-word tier, so the raw BM25 evidence is read from the scorer: the summed word score
+        // of the top-ranked symbol with the §P4 tier divided out (LexTermEvidence::bm25Max).
+        // The name-exact ranker has no tier, and its evidence pass is a separate scorer, so it keeps the old read.
+        const bool guarded  = !( routeOn && rc.which == LexMode::NameExact );
+        out.maxLexicalScore = guarded ? float( out.evidence.bm25Max ) : maxScoreUndoingTier( lensRank, tierMul );
     }
 
     // --anchor (EXPERIMENTAL): lexically-anchored graph expansion (byte-identical without the flag).

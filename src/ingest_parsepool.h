@@ -365,9 +365,11 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
     // stats (lexindex.h). Rich ingests only; a def's stats ride the RawDef through dedup/sort/cache
     // so alignment with the eventual Symbol is free. scratch is reused across defs (no rehash churn).
     HashMap<std::uint64_t, std::uint32_t> lexScratch;
+    HashMap<std::uint64_t, std::uint32_t> lexStemScratch;
     if( sh.captureValueUses )
     {
         lexScratch.reserve( 1024 );
+        lexStemScratch.reserve( 1024 );
     }
     MemberMacroReparse macroWork;                        // member-macro re-parse (src/macroreparse.h): per-worker scratch
     macroWork.captureValueUses = sh.captureValueUses;
@@ -379,7 +381,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         }
         for( std::size_t defIndex = firstNewDefIndex; defIndex < defs.size(); ++defIndex )
         {
-            buildDefLexStats( fileBytes, defs[ defIndex ].startByte, defs[ defIndex ].endByte, lexScratch, defs[ defIndex ].lex );
+            buildDefLexStats( fileBytes, defs[ defIndex ].startByte, defs[ defIndex ].endByte, lexScratch, lexStemScratch, defs[ defIndex ].lex );
         }
     };
 

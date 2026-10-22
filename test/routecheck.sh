@@ -67,6 +67,10 @@ CONCEPT="how does resolution work"
 #    the pre-routing golden (captured from plain subtoken+body). The DEFAULT run only ADDS a "[routed:
 #    subtoken+body …]" header note, so we compare the --no-route run (identical bytes) to the golden AND
 #    assert the DEFAULT run's ranking body matches by stripping just the header comment. ──────────────────
+# RE-PIN 2026-10-22 (guarded stem scoring, src/stemguard.h): margin_pct="82" -> "76", the ONLY byte that moved. CAUSE: the
+# exact-word tier adds k * (P + 1) to a symbol's score, so the same gap between first and second is a smaller share of a
+# larger top score. Verified before re-pinning: the diff against the old golden is that one attribute, so no ranking, body
+# or route byte moved.
 # RE-PIN 2026-10-18 (train 30, lane tail-sym merged; rule 4): golden_for.xml 4300 -> 4318 B (est_tokens "1643" -> "1650"),
 # re-captured from the merged binary and diffed by hand: the ONLY bytes that moved are the tail legend clause only: "first t p= alone" / "then t p= sym=" lose the `t p=` words and sym= reads "its top symbols by lens rank (a pointer, not the answer)".
 # RE-PIN 2026-10-15 (forbudget-soft round C, FOLD C; rule 4): golden_for.xml re-captured — the ONLY bytes that moved are the

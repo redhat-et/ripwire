@@ -6,6 +6,8 @@
 # Checks:
 #   (a) EQUIVALENCE — warm rich-cache --for (subtoken+body) output byte-identical to a --no-cache run of
 #       the same query on the same corpus, on test/retrievalfix AND on src/ (routed + --no-route).
+#       The stem posting row is part of this: a warm hit reads stem tf from the cache, a cold hit
+#       stems while it scans, and the blended scores must match.
 #   (b) CACHE-VERSION BUMP — a version-patched (old-version) rich cache is rejected and rebuilt cleanly:
 #       the patched run re-parses every file, the run after it reports reparsed=0 again.
 #   (c) DETERMINISM ×3 — three consecutive warm --for runs are byte-identical.

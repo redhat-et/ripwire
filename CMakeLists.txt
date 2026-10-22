@@ -841,7 +841,15 @@ if(RIPWIRE_TESTS)
   target_link_libraries(ripwire_test_oswin32logic PRIVATE doctest::doctest)
   add_test(NAME ripwire.oswin32logic COMMAND ripwire_test_oswin32logic)
 
-  foreach(_ripwire_test_target ripwire_test_csr ripwire_test_pagerank ripwire_test_radix ripwire_test_strkern ripwire_test_oswin32logic)
+  # src/stemguard.h — the guarded stem score: a stem-only match never outscores an exact one. Driven by
+  # test/stemguardcheck.sh, which adds the can-go-red arm (RIPWIRE_STEMGUARD_THETA=1.0).
+  add_executable(ripwire_test_stemguard
+    test/verify_stemguard.cpp)
+  target_include_directories(ripwire_test_stemguard PRIVATE src/infra third_party src)
+  target_link_libraries(ripwire_test_stemguard PRIVATE doctest::doctest)
+  add_test(NAME ripwire.stemguard COMMAND ripwire_test_stemguard)
+
+  foreach(_ripwire_test_target ripwire_test_csr ripwire_test_pagerank ripwire_test_radix ripwire_test_strkern ripwire_test_oswin32logic ripwire_test_stemguard)
     ripwire_windows_target(${_ripwire_test_target})   # the manifest too: a test binary runs under the same code page as the product
   endforeach()
 endif()

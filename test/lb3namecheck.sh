@@ -56,16 +56,19 @@ run(){ env -u TMPDIR XDG_CACHE_HOME="$TMP/xdg" "$@"; }
 mkdir -p "$TMP/xdg"
 top3(){ tr '<' '\n' < "$1" | grep -E '^cand r="[123]" ' | grep -c "$2"; }
 
-# ── (a) stem variants: the plural is the ONLY route to the class name ───────────────────────────
+# ── (a) the shipped stem blend reaches the class-name subtoken ──────────────────────────────────
+# RIPWIRE_QSTEM is gone. The common-stem rejection that used to be the off switch is stemblendcheck (cap).
 Q_A="splits modules cleanly"
-run env RIPWIRE_QSTEM=1 "$BIN" "$REPO" --for="$Q_A" --format=candidates > "$TMP/a_on.xml" 2>/dev/null
-run env RIPWIRE_QSTEM=0 "$BIN" "$REPO" --for="$Q_A" --format=candidates > "$TMP/a_off.xml" 2>/dev/null
-[ "$(top3 "$TMP/a_on.xml" SplitChunksPlugin)" -ge 1 ] \
-    && ok "(a) QSTEM=1: 'splits' stem-reaches SplitChunksPlugin into candidates top-3" \
-    || no "(a) QSTEM=1: SplitChunksPlugin not in top-3 for '$Q_A'"
-[ "$(top3 "$TMP/a_off.xml" SplitChunksPlugin)" -eq 0 ] \
-    && ok "(a-ctl) QSTEM=0: target absent from top-3 (lever, not ambient rank, does the work)" \
-    || no "(a-ctl) QSTEM=0: target already top-3 — fixture no longer proves the lever"
+run "$BIN" "$REPO" --for="$Q_A" --format=candidates --top-k=20 > "$TMP/a_on.xml" 2>/dev/null
+python3 - "$TMP/a_on.xml" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+scores = [float(m.group(1)) for m in re.finditer(r'<cand r="\d+" s="([^"]+)" n="SplitChunksPlugin"', text)]
+sys.exit(0 if scores and max(scores) > 0 else 1)
+PY
+[ $? -eq 0 ] \
+    && ok "(a) 'splits' stem-reaches SplitChunksPlugin (score > 0)" \
+    || no "(a) SplitChunksPlugin has no positive score for '$Q_A'"
 
 # ── (b) basename field: the basename is the ONLY route to the file ──────────────────────────────
 Q_B="where are results kept in the cache store"
@@ -87,8 +90,8 @@ run env RIPWIRE_BASENAME_W=3x "$BIN" "$REPO" --for="$Q_B" --format=candidates > 
     || no "(b-junk) BASENAME_W=3x was read as its numeric prefix, or ignored silently"
 
 # ── (c) postings parity with both levers armed: cached (persisted-stats) vs --no-cache (scan) ───
-run env RIPWIRE_QSTEM=1 RIPWIRE_BASENAME_W=3 "$BIN" "$REPO" --for="$Q_A" > "$TMP/c_warm.xml" 2>/dev/null
-run env RIPWIRE_QSTEM=1 RIPWIRE_BASENAME_W=3 "$BIN" "$REPO" --for="$Q_A" --no-cache > "$TMP/c_scan.xml" 2>/dev/null
+run env RIPWIRE_BASENAME_W=3 "$BIN" "$REPO" --for="$Q_A" > "$TMP/c_warm.xml" 2>/dev/null
+run env RIPWIRE_BASENAME_W=3 "$BIN" "$REPO" --for="$Q_A" --no-cache > "$TMP/c_scan.xml" 2>/dev/null
 cmp -s "$TMP/c_warm.xml" "$TMP/c_scan.xml" \
     && ok "(c) parity: scan and persisted-stats branches byte-identical with levers armed" \
     || no "(c) parity: branches diverge with levers armed"

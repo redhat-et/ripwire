@@ -480,14 +480,24 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
             pairCount += d.lex.tokenHashes.size();
         }
 
+        std::size_t stemPairCount = 0;
+        for( const RawDef& d : rawDefs )
+        {
+            stemPairCount += d.lex.stemHashes.size();
+        }
+
         result.hasLexStats = true;
         result.lexDocBodyDl.resize( symbolCount );
         result.lexTokenRowOffsets.resize( symbolCount + 1 );
         result.lexTokenHashes.reserve( pairCount );
         result.lexTokenTfs.reserve( pairCount );
+        result.lexStemTokenRowOffsets.resize( symbolCount + 1 );
+        result.lexStemTokenHashes.reserve( stemPairCount );
+        result.lexStemTokenTfs.reserve( stemPairCount );
         result.lexFileSig.assign( result.files.size() * kLexFileSigWords, 0 );
 
         result.lexTokenRowOffsets[ 0 ] = 0;
+        result.lexStemTokenRowOffsets[ 0 ] = 0;
         for( std::size_t i = 0; i < symbolCount; ++i )
         {
             const RawDefLex& lx = rawDefs[ i ].lex;
@@ -495,12 +505,19 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
             result.lexTokenHashes.insert( result.lexTokenHashes.end(), lx.tokenHashes.begin(), lx.tokenHashes.end() );
             result.lexTokenTfs.insert( result.lexTokenTfs.end(), lx.tokenTfs.begin(), lx.tokenTfs.end() );
             result.lexTokenRowOffsets[ i + 1 ] = std::uint32_t( result.lexTokenHashes.size() );
+            result.lexStemTokenHashes.insert( result.lexStemTokenHashes.end(), lx.stemHashes.begin(), lx.stemHashes.end() );
+            result.lexStemTokenTfs.insert( result.lexStemTokenTfs.end(), lx.stemTfs.begin(), lx.stemTfs.end() );
+            result.lexStemTokenRowOffsets[ i + 1 ] = std::uint32_t( result.lexStemTokenHashes.size() );
 
             const std::uint32_t fileId = rawDefs[ i ].fileId;
             if( fileId < result.files.size() )
             {
                 std::uint64_t* const sig = result.lexFileSig.data() + std::size_t( fileId ) * kLexFileSigWords;
                 for( const std::uint64_t hash : lx.tokenHashes )
+                {
+                    sig[lexSigWord( hash )] |= lexSigBit( hash );
+                }
+                for( const std::uint64_t hash : lx.stemHashes )
                 {
                     sig[lexSigWord( hash )] |= lexSigBit( hash );
                 }

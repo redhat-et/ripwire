@@ -152,9 +152,11 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
                 // stats come from that text — computed here, in the worker that owns the slot, so the
                 // stats path never needs docText at query time either. Pure function of the bytes.
                 HashMap<std::uint64_t, std::uint32_t> docLexScratch;
+                HashMap<std::uint64_t, std::uint32_t> docLexStemScratch;
                 if( captureValueUses )
                 {
                     docLexScratch.reserve( 1024 );
+                    docLexStemScratch.reserve( 1024 );
                 }
                 for( ;; )
                 {
@@ -173,7 +175,7 @@ inline void runDocPostPass( IngestResult& result, std::vector<RawDef>& rawDefs, 
                         {
                             if( captureValueUses )
                             { // whole-file Section span [0, len) — same span the RawDef gets below
-                                buildDefLexStats( text, 0, std::uint32_t( text.size() ), docLexScratch, docLex[ di ] );
+                                buildDefLexStats( text, 0, std::uint32_t( text.size() ), docLexScratch, docLexStemScratch, docLex[ di ] );
                             }
                             docTextOut[ di ] = std::move( text );
                             docHasText[ di ] = 1;
