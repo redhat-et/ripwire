@@ -280,7 +280,7 @@ NUMERIC_ONLY = {
                                       #   "{}" of one std::uint32_t, ten digits worst case against 15 usable + NUL, no %s and
                                       #   nothing escaped, so it does not join the string-interpolating population
     ( "src/serialize.h", "lineAttr" ): 1,
-    ( "src/serialize.h", "nb" ): 8,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
+    ( "src/serialize.h", "nb" ): 9,   # row 6 (2026-09-12): appendCalleeNameRow's `"\" l=\"{}\"/>"` buffer went with the merge.
                                       #   cut-fix lane A (2026-09-23): +2, sigsOpenTag's nb[96] — ' shown="{}" total="{}" capped="1"'
                                       #   (31 B literal + two size_t at 20 digits = 71 B worst case, against 95 usable + NUL) and
                                       #   ' docs_dropped="{}"' (16 B + 20 digits = 36 B). Counts only, no %s, nothing escaped.
@@ -292,6 +292,8 @@ NUMERIC_ONLY = {
                                       #   digits = 35 B). A count, no %s, nothing escaped.
                                       #   lane/hrr (2026-10-18): +1 in the same nb[96] — ' files_first="{}"' (15 B + 20
                                       #   digits = 35 B), the head round-robin's moved count. A count, no %s, nothing escaped.
+                                      #   lane/rank-fusion (2026-10-21): +1 in the same nb[96] — ' path_fused="{}"' (14 B + 20
+                                      #   digits = 34 B), the path fusion's moved-position count. A count, no %s, nothing escaped.
     ( "src/serialize.h", "precAttr" ): 1,
     ( "src/serialize.h", "rankAttr" ): 1,
     ( "src/serialize.h", "rc" ): 1,
@@ -626,7 +628,9 @@ if not bad:
 #            train 26c (cli-perf merged onto the train's 363/248/248/109): re-derived on the merged tree.
 #            2026-10-18 (lane/hrr): +1 call/+1 mention/+1 site, rows unchanged (363/248/248/109 -> 364/249/249/109): sigsOpenTag's
 #            nb[96] ' files_first="{}"' (35 B worst case, one size_t, nothing escaped) — re-read and sized before this pin.
-EXPECTED = { "mentions": 364, "calls": 249, "sites": 249, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=)
+#            2026-10-21 (lane/rank-fusion): +1 call/+1 mention/+1 site, rows unchanged (364/249/249/109 -> 365/250/250/109):
+#            sigsOpenTag's nb[96] ' path_fused="{}"' (34 B worst case, one size_t, nothing escaped) — re-read and sized before this pin.
+EXPECTED = { "mentions": 365, "calls": 250, "sites": 250, "rows": 109, "widthforms": 0 }   # lane/rank-fusion: +1 nb site (path_fused=)
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

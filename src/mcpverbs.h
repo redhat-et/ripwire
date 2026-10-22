@@ -20,6 +20,7 @@
 #include "filter.h"        // §P4: rankTierSymbolMultipliers — the fixture/present tier down-weight the CLI ranking lenses apply
 #include "redact.h"        // RedactCounts — the per-request redaction tally threaded through the body/doc verbs
 #include "forpage.h"    // L-W: the --for file page, coverage= and the thin rule — shared with the CLI twin
+#include "forpathfuse.h"   // forPathFusion — the CLI twin's path-token head fusion
 #include "forowner.h"   // for-body-slot: the one owner body of an explanatory question — shared with the CLI twin
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
@@ -2075,6 +2076,9 @@ struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by ref
     const LexTermEvidence&                     evidence;       // FOLD C: the term evidence the tail's page rows rank by
     const Graph&                               g;              // for-body-slot: the owner body's <calls> edges
     ForBodySlotOwner                           slotOwner;      // for-body-slot: the one owner body (forowner.h), none when not asked
+    const std::vector<float>&                  sigsRank;       // path-token fusion (forpathfuse.h): the <sigs> rank — lensRank when it
+    int                                        sigsTopN;       //   did not fire — its quota, and path_fused=; the tail keeps lensRank
+    std::size_t                                pathFused;
 };
 // round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST — the CLI twin's rule): under budget_tokens the sections are scoped and
 // served from the rows at the target cut, and the rows past the cut fill what the sections served before the tail (<hdr> rows,
@@ -2098,6 +2102,7 @@ inline void mcpForSoftRefill( const McpForAssemblyInputs& in, const Render& rend
     cut                     = rw::SigsCutReport {};
     cut.continuationRequest = next;
     cut.rowDropBudgetBytes  = rowDrop;
+    cut.pathFused           = in.pathFused;
     sigsStr                 = captureXml( renderSigs );   // assembleMcpFor's own render seam (its renderToString)
 }
 
@@ -2156,6 +2161,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     mcpSigsCut.continuationRequest = &mcpSigsNext;   // knob-honesty-068: IN — the capped block's machine continuation
     mcpSigsCut.rowDropBudgetBytes  = in.rowDropBudget;   // forbudget-soft: IN — the CLI twin's two budgets
     mcpSigsCut.pastTargetDisclosed = budgetTokens == 0;
+    mcpSigsCut.pathFused           = in.pathFused;   // IN: the path fusion's path_fused= (forpathfuse.h)
     // R2-AF (round 2, S4): first rows inside the root, right after the legend (forHdrRowsXml); rendered before the rows so the
     // round C refill below prices them
     const std::string mcpHdrXml = forHdrRowsXml( ing, mcpForHdrRows, flRootArg );   // forpage.h: the CLI twin's one render
@@ -2165,7 +2171,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
     const std::optional<RedactCounts> redactBeforeSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
     const auto renderSigs = [ & ]( std::FILE* m2 )
     {
-        packSignatures( m2, ing, lensRank, forTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
+        packSignatures( m2, ing, in.sigsRank, in.sigsTopN, 0 /* no byte budget in MCP (0 = unlimited) */, true, &fanIn, &impure, redact,
                         nullptr, nullptr, nullptr, nullptr,   // Q3 lens vectors — the MCP verb has no git/clone pass (as before)
                         /*rankAdaptivePayload=*/true,         // B0.3: same rank-adaptive payload rule as the CLI --for lens
                         sigsBudget,                           // H1: global payload budget (trim ladder; payload="capped" marker)
@@ -2839,16 +2845,22 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const notes::NoteIndex* const notesPtr  = noteIndex.empty() ? nullptr : &noteIndex;
 
     // knob-honesty-068 (orchestrator ruling C3): the assembly is one pass (assembleMcpFor above), run once or twice below.
+    // the CLI twin's head round-robin verdict (serialize.h forHeadRoundRobinOn), read once: the lens rules and the path fusion share it
+    const bool mcpHeadRR = rw::forHeadRoundRobinOn( std::strcmp( mcpRouteTag, "subtoken+body" ) == 0, rw::taskNamesIndexedFile( ing, task ), budgetTokens,
+                                                    /*bodyCeiling=*/false );
+    // the CLI twin's path-token fusion (forpathfuse.h): only the <sigs> rows read the fused rank
+    const std::optional<rw::ForPathFusion> mcpPathFused = rw::forPathFusionOn( mcpHeadRR ) ? rw::forPathFusion( ing, lensRank, forTopN, task, flRootArg )
+                                                                                         : std::nullopt;
     const McpForAssemblyInputs assemblyIn{ ing, lensRank, forTopN, fanIn, impure, redact, sigsBudget, mcpSigsBudgets.rowDrop, fixedBytes, budgetTokens,
                                            noteIndex, notesPtr, flRootArg, task, mcpTopRowNext, mcpForHdrRows, routeStr,
                                            composePreCapCount, sections,
                                            rw::forLensRules( !noRoute && !taskAsksAboutDocs( task ) && !std::getenv( "RIPWIRE_NO_DOCS_AFTER_CODE" )
                                                                  && rw::docsAfterCodeFitsCeiling( budgetTokens, /*bodyCeiling=*/false ),
                                                              rw::endLinesFitCeiling( budgetTokens, /*bodyCeiling=*/false ),
-                                                             // the CLI twin's head round-robin verdict (serialize.h forHeadRoundRobinOn)
-                                                             rw::forHeadRoundRobinOn( std::strcmp( mcpRouteTag, "subtoken+body" ) == 0,
-                                                                                      rw::taskNamesIndexedFile( ing, task ), budgetTokens, /*bodyCeiling=*/false ) ),   // LB-A, e=, docs reorder, head RR
-                                           ix.g.implementors, mcpEvidence, ix.g, mcpSlotOwner };
+                                                             mcpHeadRR ),   // LB-A, e=, docs reorder, head RR
+                                           ix.g.implementors, mcpEvidence, ix.g, mcpSlotOwner,
+                                           mcpPathFused ? mcpPathFused->rank : lensRank, mcpPathFused ? mcpPathFused->topN : forTopN,
+                                           mcpPathFused ? mcpPathFused->placed : 0u };
     // forbudget-soft: ONE assembly (the C3 unpaid/paid passes went with the hard ceiling they priced against)
     McpForAssembly chosen = assembleMcpFor( assemblyIn, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
     if( !chosen.doc )

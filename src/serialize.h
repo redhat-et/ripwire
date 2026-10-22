@@ -883,6 +883,11 @@ inline constexpr std::string_view kForFilesFirstNote =
     " [files_first=N: N rows moved so r=1..8 are distinct files' best rows, score order, a repeated name once; same rows; "
     "fold, hops keep score order]";
 
+// The path-token fusion's reading (forpathfuse.h), present-only on a tag that carries path_fused=. No "--" (G4).
+inline constexpr std::string_view kForPathFusedNote =
+    " [path_fused=N: N of r=2..8 moved by fusing score order with the query's words in file paths (RRF); r=1 kept; a moved "
+    "file's best row may be added (total= counts it)]";
+
 //   • next= on <sigs> (knob-honesty-068): the call that serves the block uncut (sigsCutNextInvocation). Not the r=1 row's
 //     next= (a body or the widening page), so it says which rows it serves.
 inline constexpr std::string_view kForSigsNextNote = " [sigs next=: one call serving all total= rows uncut]";
@@ -5310,6 +5315,8 @@ struct SigsCutReport
     bool        isCapped    = false;
     std::size_t docsAfterCode = 0;     // reorderDocsAfterCode's moved count: docs_after_code= (0 ⇒ absent)
     std::size_t filesFirst    = 0;     // reorderHeadRoundRobin's moved count: files_first= (0 ⇒ absent)
+    std::size_t pathFused     = 0;     // IN: head files the path-token fusion placed (forpathfuse.h): path_fused= (0 ⇒ absent);
+                                       //   read before the reset like rowDropBudgetBytes, carried onto the block's report
     std::string next;                  // knob-honesty-068: the cut's continuation (sigsCutNextInvocation), set only on a capped
                                        //   block whose caller asked for a PASTEABLE one; the tag's next= / the JSON "sigs_next"
     std::size_t nextBudgetTokens = 0;  // …or, on a surface with no pasteable argv (MCP), the budget_tokens a re-call needs:
@@ -5572,6 +5579,10 @@ inline std::string sigsCutReportLegend( const SigsCutReport& cut )
     {
         notes += kForFilesFirstNote;
     }
+    if( cut.pathFused > 0 )   // the path-token fusion's reading (forpathfuse.h)
+    {
+        notes += kForPathFusedNote;
+    }
     return notes;
 }
 // the same clauses from the four numbers a caller without a continuation holds (--from-trace, --pack-task)
@@ -5613,6 +5624,11 @@ inline std::string sigsOpenTag( const SigsCutReport& cut )
     if( cut.filesFirst > 0 )   // the head round-robin (reorderHeadRoundRobin): uncharged, like docs_after_code=
     {
         rw::formatTo( nb, sizeof( nb ), " files_first=\"{}\"", cut.filesFirst );
+        tag += nb;
+    }
+    if( cut.pathFused > 0 )   // the path-token fusion (forpathfuse.h): uncharged, like files_first=
+    {
+        rw::formatTo( nb, sizeof( nb ), " path_fused=\"{}\"", cut.pathFused );
         tag += nb;
     }
     // knob-honesty-068: the cut's continuation — the resume index, then the call (pasteable, or the MCP machine form)
@@ -5734,12 +5750,14 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
     // before the reset like the continuation request
     const std::size_t rowDropBudgetIn     = cutOut != nullptr ? cutOut->rowDropBudgetBytes : 0u;
     const bool        pastTargetDisclosed = cutOut != nullptr && cutOut->pastTargetDisclosed;
+    const std::size_t pathFusedIn         = cutOut != nullptr ? cutOut->pathFused : 0u;   // the path fusion's disclosure (forpathfuse.h)
     if( cutOut )
     {
         *cutOut = SigsCutReport {};
         cutOut->continuationRequest = cutNext;
         cutOut->rowDropBudgetBytes  = rowDropBudgetIn;
         cutOut->pastTargetDisclosed = pastTargetDisclosed;
+        cutOut->pathFused           = pathFusedIn;
     }
     if( droppedPositiveOut )
     {
@@ -6096,6 +6114,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             *cappedOut = plan.ladderFires;
         }
         SigsCutReport cut = sigsCutReportOf( entries, totalRows, plan );
+        cut.pathFused     = pathFusedIn;
         // HEAD ROUND-ROBIN, then CODE ABOVE DOCS: the shown set is final here (the ladder ran on score order); only its order
         // may change. The moved row keeps the row spelling it was charged and shown with (both reorders).
         const auto reheadXml = [ & ]( SigEntry& e, std::uint32_t newRank )
@@ -11359,6 +11378,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     const SigsCutContinuation* const cutNext = cutOut != nullptr ? cutOut->continuationRequest : nullptr;
     const std::size_t rowDropBudgetIn     = cutOut != nullptr ? cutOut->rowDropBudgetBytes : 0u;   // forbudget-soft: the XML twin's inputs
     const bool        pastTargetDisclosed = cutOut != nullptr && cutOut->pastTargetDisclosed;
+    const std::size_t pathFusedIn         = cutOut != nullptr ? cutOut->pathFused : 0u;   // the path fusion's disclosure (forpathfuse.h)
     const bool rankAdaptivePayload = lens.rankAdaptivePayload;
     if( outCapped )
     {
@@ -11370,6 +11390,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
         cutOut->continuationRequest = cutNext;   // knob-honesty-068: the request survives the reset
         cutOut->rowDropBudgetBytes  = rowDropBudgetIn;
         cutOut->pastTargetDisclosed = pastTargetDisclosed;
+        cutOut->pathFused           = pathFusedIn;
     }
     if( droppedPositiveOut )
     {
@@ -11471,6 +11492,7 @@ inline void packSignaturesJson( std::FILE* out, const IngestResult& ing, const s
     }
     {
         SigsCutReport cut = sigsCutReportOf( entries, totalRows, plan );
+        cut.pathFused     = pathFusedIn;
         // the XML twin's reorders, after the ladder and in its order: the shown set is final, only its order changes
         const auto reheadJson = [ & ]( JsonSigEntry& e, std::uint32_t newRank )
         { e.head = jsonSigRowHead( ing, e.id, ing.symbols[ e.id ].fileId, lens, e.pureSig, rootArg, newRank ); };

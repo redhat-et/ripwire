@@ -39,6 +39,10 @@ set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 unset RIPWIRE_NO_HEAD_RR RIPWIRE_NO_BODY_FOLD RIPWIRE_NO_DOCS_AFTER_CODE
+# lane rank-fusion (train 33): the routed default also fuses a path-token file order into r=2..8 (src/forpathfuse.h), which is
+# not the round-robin of the score order this gate models. Every run here holds the fusion OFF so the round-robin itself is pinned
+# exactly as before (PROCESS rule 4: a twin, not a weaker check); test/forpathfusecheck.sh pins the fused default.
+export RIPWIRE_NO_PATH_FUSION=1
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forheadrrcheck: BIN=$BIN"

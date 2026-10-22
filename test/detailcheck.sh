@@ -42,7 +42,7 @@ bodies(){ grep -o '<b t=' "$1" | wc -l | tr -d ' '; }
 # knob-honesty-068: a capped tag also carries its continuation, next="…" (the call that serves it uncut) — the block is the
 # same <sigs> block, so the shape admits the attribute; the count it asserts is unchanged.
 # forbudget-soft: the default answer's tag also carries past_target="K" (the rows past its 7.5 KB target) — the same block.
-sigblocks(){ grep -oE '<sigs( shown="[0-9]+" total="[0-9]+" capped="1")?( past_target="[0-9]+")?( docs_dropped="[0-9]+")?( docs_after_code="[0-9]+")?( files_first="[0-9]+")?( next_offset="[0-9]+")?( next="[^"]*")?( next_budget_tokens="[0-9]+")?>' "$1" | wc -l | tr -d ' '; }
+sigblocks(){ grep -oE '<sigs( shown="[0-9]+" total="[0-9]+" capped="1")?( past_target="[0-9]+")?( docs_dropped="[0-9]+")?( docs_after_code="[0-9]+")?( files_first="[0-9]+")?( path_fused="[0-9]+")?( next_offset="[0-9]+")?( next="[^"]*")?( next_budget_tokens="[0-9]+")?>' "$1" | wc -l | tr -d ' '; }
 
 # ── #1: --detail=0 == no --detail (byte-identical, golden-neutral) ──────────────────────────────────────
 "$BIN" src --for="$TASK" --no-cache >"$TMP/plain" 2>/dev/null

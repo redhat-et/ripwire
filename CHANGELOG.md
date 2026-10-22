@@ -15,6 +15,22 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 ## [Unreleased]
 
+### Changed — `--for`'s head files 2..8 also follow the question's words in file paths (path-token rank fusion)
+
+Where the head round-robin applies (a routed subtoken+body answer to a question that names no indexed file, with no explicit
+budget), the files at r=2..8 now follow a fused order: the score head's distinct files, plus a second ranked list of files whose
+path holds the question's words (a word in the basename counts fully, in a directory half, each weighted by how rare it is among
+paths), combined by reciprocal rank (k 60, the path list weighted 0.1 — the gortex hybrid search's fusion rule; ideas only, no code).
+Rank 1 never moves. A moved file whose best row was outside the shown rows brings that one row in; `total=` counts it and nothing
+is removed. Test, benchmark, demo, generated, example, sample, doc and spec trees, declaration twins and prose files never enter
+through the path list, and a path word must be a whole subtoken. The tag says so: `<sigs path_fused=N>` counts the head
+positions that moved, with a present-only legend reading, in the XML, `--json` (`"path_fused"`) and MCP `for` answers. The
+body-tail fold, the hops, lego/compose and the file tail keep score order. `RIPWIRE_NO_PATH_FUSION=1` restores the score head.
+Measured on the 44-row rank harness (19 rows with a missed gold file, 25 complete rows; in-sample): 3 of the 20 missed gold
+files enter the head-8 (tmux `cmd-copy-mode.c`, fastify `lib/handle-request.js`, textual `screen.py`), no complete row's gold
+file leaves it, and graded items are unchanged (Rule C 242, legacy 265). A random list fused the same way moves none. Gate:
+`test/forpathfusecheck.sh`.
+
 ### Added — `--for` names the members of its shown owner rows on the compact route (`mem=`)
 
 On a conceptual `--for` answer (root `bundle="compact"`), a shown class, struct or interface/trait row now carries

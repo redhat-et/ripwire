@@ -5,6 +5,7 @@
 
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "forpage.h"    // L-W: the --for --limit=N file page, coverage=, the thin rule and the widening next=
+#include "forpathfuse.h"   // forPathFusion — the path-token list fused into the --for head
 #include "forowner.h"   // the question's owner (owner-hop's found set) and the one owner body of an explanatory question
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
 #include "formembers.h" // member-names: mem= on the shown owner rows of a compact-route answer
@@ -435,6 +436,11 @@ struct ForLensJsonInputs
     std::string_view                  task;
     int                               packTopN;
     std::string_view                  rankFlags;   // forRankShapingFlags( cfg ), owned by the caller for the call's duration
+    // path-token fusion (forpathfuse.h): the XML twin's <sigs> rank and quota (lensRank / topN when it did not fire) and its
+    // path_fused= — REQUIRED like the verdicts above. `rank` keeps feeding the tail: only the rows read the fused order.
+    const std::vector<float>&         sigsRank;
+    int                               sigsTopN;
+    std::size_t                       pathFused;
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -1470,6 +1476,7 @@ inline void forLensJsonSoftRefill( const PackSigs& packSigs, const ForLensJsonIn
     st.cut                     = rw::SigsCutReport {};
     st.cut.continuationRequest = &cutNext;
     st.cut.rowDropBudgetBytes  = rowDrop;
+    st.cut.pathFused           = in.pathFused;
     rw::MemoryStream refillStream;
     std::FILE* const rm = rw::openChargeStream( refillStream );
     if( rm != nullptr )
@@ -1546,7 +1553,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     JsonSigNoteCounts noteCounts;
     const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped, std::size_t* outDroppedPositive,
                                  std::vector<rw::NodeId>* outShownIds, rw::SigsCutReport* outCut )
-    { packSignaturesJson( dst, in.ing, in.rank, in.topN, lens, in.redact, in.packBudgetBytes, budget, outCapped, &noteCounts,
+    { packSignaturesJson( dst, in.ing, in.sigsRank, in.sigsTopN, lens, in.redact, in.packBudgetBytes, budget, outCapped, &noteCounts,
                           in.rootArg, /*hasRelevanceFloor=*/true,        // LB-A: same admission rule as the XML twin (R-R: root-relative p/id)
                           outDroppedPositive,                            // A2: exact count, see droppedPositiveCount (serialize.h)
                           outShownIds,                                   // lane 2: the emitted rows' ids — the tail excludes these files
@@ -1581,6 +1588,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     sigsCut.continuationRequest = &cutNext;  // knob-honesty-068: IN — "sigs_next" / "sigs_next_offset" on a capped array
     sigsCut.rowDropBudgetBytes  = sigsBudgets.rowDrop;   // forbudget-soft: IN — the guard / the soft target's rows
     sigsCut.pastTargetDisclosed = in.tokenBudget == 0;
+    sigsCut.pathFused           = in.pathFused;   // IN: the path fusion's path_fused= (forpathfuse.h)
     std::size_t sigsDroppedPositive = 0;   // A2: set only by the memstream-buffered render below (nullptr on the ENOMEM degrade path)
     std::vector<rw::NodeId> jsonShownIds;   // lane 2: the sigs rows actually emitted (the XML twin's shownSigIds)
     std::string sigsJson;
@@ -1671,6 +1679,10 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     if( sigsCut.filesFirst > 0 )   // the XML tag's files_first= (the head round-robin's disclosure; uncharged likewise)
     {
         sigsCutStanza += ",\"files_first\":" + std::to_string( sigsCut.filesFirst );
+    }
+    if( sigsCut.pathFused > 0 )   // the XML tag's path_fused= (the path-token fusion's disclosure; uncharged likewise)
+    {
+        sigsCutStanza += ",\"path_fused\":" + std::to_string( sigsCut.pathFused );
     }
     const bool sigsCappedKey = sigsCut.isCapped;   // "capped": the XML tag's capped="1" (the ladder's verdict OR a gate cut)
 
@@ -2970,6 +2982,15 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // ✓ rows (their strongest rows' callees and bodies left the hop window); in score order they lose none.
         const bool forHeadRR = rw::forHeadRoundRobinOn( conceptualRoute, rw::taskNamesIndexedFile( ing, cfg.forTask ),
                                                         cfg.tokenBudget > 0 ? std::size_t( cfg.tokenBudget ) : 0u, forBodyCeiling );
+        // PATH-TOKEN RANK FUSION (forpathfuse.h): where the head round-robin applies, a second file order — the query's words
+        // in file paths — is fused with the score head by reciprocal rank. Only the <sigs> rows read the fused rank (sigsRank,
+        // sigsTopN): fold, hops, lego/compose and the tail keep lensRank, as they keep score order under the round-robin.
+        const std::optional<rw::ForPathFusion> forPathFused = rw::forPathFusionOn( forHeadRR )
+                                                                  ? rw::forPathFusion( ing, lensRank, forTopN, cfg.forTask, flRootArg )
+                                                                  : std::nullopt;
+        const std::vector<float>& sigsRank      = forPathFused ? forPathFused->rank : lensRank;
+        const int                 sigsTopN      = forPathFused ? forPathFused->topN : forTopN;
+        const std::size_t         sigsPathFused = forPathFused ? forPathFused->placed : 0u;
 
         // H1 (B0 r2): the bundle is emitted under a GLOBAL payload budget (serialize.h kForPayloadBudgetBytes; an
         // EXPLICIT --token-budget=N overrides it at the same conservative byte rate the --max-tokens fitter uses).
@@ -3243,7 +3264,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
                                                                    &forFileTail, &lr.evidence, d.notesDegraded, forDocsAfterCode, forHeadRR, cfg.forTask,
-                                                                   cfg.packTopN, forRankShapingFlags( cfg ) } );
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ), sigsRank, sigsTopN, sigsPathFused } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -3550,12 +3571,13 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         forSigsCut.continuationRequest = &forSigsNext;   // knob-honesty-068: IN — the capped block's continuation
         forSigsCut.rowDropBudgetBytes  = sigsBudgets.rowDrop;   // forbudget-soft: IN — where step F aims (guard / soft target)
         forSigsCut.pastTargetDisclosed = !forSoftTarget;        //   …and the default's rows past its target are disclosed
+        forSigsCut.pathFused           = sigsPathFused;         // IN: the path fusion's path_fused= (forpathfuse.h)
         // round C: the render is named so a soft target can narrow its rows past the cut once the sections are served (below);
         // the redaction tally around it is snapshotted so a second render replaces this one's count instead of adding to it
         const std::optional<RedactCounts> redactBeforeSigs = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
         const auto renderSigs = [ & ]( std::FILE* sm )
             {
-                packSignatures( sm, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
+                packSignatures( sm, ing, sigsRank, sigsTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                                 &forChurn, &forClone, testedPtr, ampPtr,     // Q3: churn/clone/tested/amp folded onto the <d> blocks
                                 /*rankAdaptivePayload=*/true,                // B0.3: tail entries excerpt-trimmed by global rank (serialize.h kForDoc*)
                                 sigsBudget,                                  // H1: global payload budget (trim ladder; payload="capped" marker)
@@ -3977,6 +3999,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                 forSigsCut.continuationRequest = &forSigsNext;
                 forSigsCut.rowDropBudgetBytes  = rowDropFill;
                 forSigsCut.pastTargetDisclosed = false;
+                forSigsCut.pathFused           = sigsPathFused;
                 std::string refill;
                 if( preRender( renderSigs, refill ) )
                 {
@@ -4075,7 +4098,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             degradeSigsCut.continuationRequest = &forSigsNext;
             degradeSigsCut.rowDropBudgetBytes  = sigsBudgets.rowDrop;   // forbudget-soft: the same two budgets
             degradeSigsCut.pastTargetDisclosed = !forSoftTarget;
-            packSignatures( stdout, ing, lensRank, forTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
+            degradeSigsCut.pathFused           = sigsPathFused;
+            packSignatures( stdout, ing, sigsRank, sigsTopN, cfg.packBudgetBytes, true, fanInPtr, impurePtr, redactPtr,
                             &forChurn, &forClone, testedPtr, ampPtr, /*rankAdaptivePayload=*/true, sigsBudget, notesPtr, flRootArg,
                             rw::forLensRules( forDocsAfterCode, forEndLines, forHeadRR ), nullptr, nullptr, nullptr,   // the degrade path selects identically
                             forTopRowNext,                                           // L-W: same next= rule on the degrade path
