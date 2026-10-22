@@ -16,6 +16,7 @@
                          //       fence scanner — a doc-side property, computed from the file's own bytes
 #include "layout.h"      // §L4.3: layout::lineOf — the ONE byte-offset-to-line-number helper (reused, not
                          //        re-derived, for the `lines="LO-HI"` section anchor below)
+#include <cstring>       // std::memcmp — stem equality in ownProseCarriesQueryTerm
 #include "lexical.h"     // lexicalScores — the recall lens's scorer. Included HERE so recallFor below can be
                          //        the ONE call both front doors make, arguments and all (see recallFor).
 #include "model.h"
@@ -872,10 +873,8 @@ struct RecallSectionBody
 // cannot come to mean two different things inside one binary — the rule this file already keeps for
 // "inside a fence" (docparse::scanMarkdownFences, the ONE scanner). An empty query never demotes
 // anything: there is nothing to have earned a rank against.
-// It walks `forEachLexSubtoken` — the state machine `subtokens` itself delegates to — rather than
-// calling `subtokens` and intersecting two vectors. Same tokens, same ≥2-byte drop, but no allocation
-// and an early exit on the first hit: this runs once per ambiguous ancestor per recalled document, and
-// the answer is almost always decided inside the heading line.
+// It asks accumulateRecallTermFreqs, the same walk the section scorer uses, so a stem hit and an exact
+// hit are the same question. This runs once per ambiguous ancestor per recalled document.
 // WHICH query term one already-delimited token equals, or `terms.size()` for none. The ONE place a doc
 // token is compared against the query table, shared by the boolean test below and §RP3.3's weighted
 // counter — two callers that ask different questions of the identical comparison, which is exactly the
@@ -904,24 +903,7 @@ inline std::size_t recallMatchedTermIndex( std::string_view text, std::size_t to
     return terms.size();
 }
 
-inline bool ownProseCarriesQueryTerm( std::string_view prose, const std::vector<std::string>& queryToks )
-{
-    if( queryToks.empty() )
-    {
-        return true;
-    }
-    bool isFound = false;
-    forEachLexSubtoken( prose, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
-    {
-        const std::size_t tokLen = tokEndByte - tokStartByte;
-        if( isFound || tokLen < 2 )
-        {
-            return;   // the ≥2-byte drop subtokens() applies — the query was tokenized under it too
-        }
-        isFound = recallMatchedTermIndex( prose, tokStartByte, tokLen, queryToks ) < queryToks.size();
-    } );
-    return isFound;
-}
+inline bool ownProseCarriesQueryTerm( std::string_view prose, const std::vector<std::string>& queryToks );
 
 // §RP3.3 — HOW MUCH of the query each own-prose span carries, on one scale, for one document. BM25 over
 // a collection of this document's own-prose units: the same formula src/lexical.h scores symbols with
@@ -950,7 +932,7 @@ inline bool ownProseCarriesQueryTerm( std::string_view prose, const std::vector<
 // tokens under 2 bytes dropped exactly as subtokens() drops them, at most one term row per token, and the
 // length accumulating the SAME weights the tf does so the BM25 normalisation stays consistent.
 inline void accumulateRecallTermFreqs( std::string_view text, int fieldWeight, const std::vector<std::string>& terms,
-                                       int* tfRow, int& lengthAccum )
+                                       int* tfRow, int* stemRow, int& lengthAccum )
 {
     forEachLexSubtoken( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
     {
@@ -964,7 +946,39 @@ inline void accumulateRecallTermFreqs( std::string_view text, int fieldWeight, c
         {
             tfRow[t] += fieldWeight;
         }
+        if( stemRow == nullptr )
+        {
+            return;
+        }
+        const std::uint64_t stemHash = lexStemHashOfToken( text.data() + tokStartByte, tokLen );
+        for( std::size_t t = 0; t < terms.size(); ++t )
+        {
+            if( lexStemHashOfToken( terms[t].data(), terms[t].size() ) == stemHash )
+            {
+                stemRow[t] += fieldWeight;
+            }
+        }
     } );
+}
+
+inline bool ownProseCarriesQueryTerm( std::string_view prose, const std::vector<std::string>& queryToks )
+{
+    if( queryToks.empty() )
+    {
+        return true;
+    }
+    std::vector<int> tf( queryToks.size(), 0 );
+    std::vector<int> stem( queryToks.size(), 0 );
+    int              lengthAccum = 0;
+    accumulateRecallTermFreqs( prose, 1, queryToks, tf.data(), stem.data(), lengthAccum );
+    for( std::size_t t = 0; t < queryToks.size(); ++t )
+    {
+        if( tf[t] > 0 || stem[t] > 0 )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const std::vector<std::uint32_t>& headingSyms,
@@ -991,6 +1005,7 @@ inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const
     // SoA, the house layout: tf[unit*termCount + term] weighted, dl[unit] weighted to match.
     constexpr int    kwHeading = 3, kwProse = kLexWeightBody;   // = lexicalScores' kwName / kwBody
     std::vector<int> tf( unitCount * termCount, 0 );
+    std::vector<int> tfStemAll( unitCount * termCount, 0 );
     std::vector<int> dl( unitCount, 0 );
     std::vector<int> df( termCount, 0 );
     for( std::size_t u = 0; u < unitCount; ++u )
@@ -1001,15 +1016,21 @@ inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const
             continue;   // a zero-width unit, or a span past a file that moved — no evidence, no demotion
         }
         int* const          tfRow      = tf.data() + u * termCount;
+        int* const          stemRow    = tfStemAll.data() + u * termCount;
         const std::uint32_t headingEnd = std::min( s.sigEndByte, ownEnds[u] );
-        accumulateRecallTermFreqs( raw.substr( s.sigStartByte, headingEnd - s.sigStartByte ), kwHeading, uniqueToks, tfRow, dl[u] );
+        accumulateRecallTermFreqs( raw.substr( s.sigStartByte, headingEnd - s.sigStartByte ), kwHeading, uniqueToks, tfRow, stemRow, dl[u] );
         if( headingEnd < ownEnds[u] )
         {
-            accumulateRecallTermFreqs( raw.substr( headingEnd, ownEnds[u] - headingEnd ), kwProse, uniqueToks, tfRow, dl[u] );
+            accumulateRecallTermFreqs( raw.substr( headingEnd, ownEnds[u] - headingEnd ), kwProse, uniqueToks, tfRow, stemRow, dl[u] );
         }
+    }
+    std::vector<double> tfPrime;
+    stemBlendedTermFreq( unitCount, termCount, tf.data(), tfStemAll.data(), tfPrime );
+    for( std::size_t u = 0; u < unitCount; ++u )
+    {
         for( std::size_t t = 0; t < termCount; ++t )
         {
-            df[t] += tfRow[t] > 0 ? 1 : 0;
+            df[t] += tfPrime[ u * termCount + t ] > 0.0 ? 1 : 0;
         }
     }
 
@@ -1026,7 +1047,7 @@ inline std::vector<float> recallOwnProseEvidence( const IngestResult& ing, const
         for( const std::string& q : queryToks )   // occurrence order: BM25 adds one contribution per occurrence
         {
             const std::size_t t = std::size_t( std::find( uniqueToks.begin(), uniqueToks.end(), q ) - uniqueToks.begin() );
-            const double      termFreq = tf[ u * termCount + t ];
+            const double termFreq = tfPrime[ u * termCount + t ];
             if( termFreq <= 0.0 )
             {
                 continue;

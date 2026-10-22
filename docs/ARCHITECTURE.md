@@ -538,6 +538,16 @@ prints which and why. Query-mention anchoring lifts a file, module, or `Type.met
 task text. A path-tier multiplier de-prioritizes fixture and generated-content paths. Every one of
 those is a measured change with a held-out number — see `docs/EVALS.md`.
 
+The subtoken BM25 path stems the query token and each document token with the same function
+(`lightStemInPlace` in `src/lexindex.h`). Muayyad AlSadi's definition of a good stemmer: it is a
+hash. Relevant inflections map to one hash, and irrelevant words map to different hashes. A bad
+stemmer is `stem(A) == stem(B)` when A and B are irrelevant, or `stem(A) != stem(B)` when they are
+relevant. The stored bytes are not required to be a word. Name-exact ranking does not stem. On the
+stemmed path the stem-only count is divided by the largest stem-only count of that term before the
+0.35 weight, so a stemmed hit cannot outrank one exact token of the same term. That bound is what
+makes a leftover collision acceptable. Irregular forms (`built`, `sent`, `indices`) are left for a
+synonym list.
+
 ### serialize — minified XML
 
 Nodes sort by **(rank DESC, nodeId ASC)**. The node-ID tiebreak is required: near-equal scores would

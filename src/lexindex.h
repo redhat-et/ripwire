@@ -246,13 +246,177 @@ inline std::uint64_t lexSubtokenHash( const char* tok, std::size_t tokLen ) noex
     return h;
 }
 
+// Muayyad AlSadi's contract: this is a hash, not a dictionary. Relevant inflections share one hash.
+// Irrelevant words keep different hashes. A step that would leave fewer than 3 characters is skipped,
+// and a result shorter than 2 characters keeps the original token.
+//
+// A collision that still gets through cannot outrank an exact hit. The stem-only count is divided by
+// the largest stem-only count of that term, so the strongest admitted stem adds 0.35, below one exact token.
+//
+// Order on an already-lowercased token. The kept bytes are a prefix, except where "ies", "ied", or "ie"
+// writes a final "y". Plural first ("ies" to "y", else "es", else a final "s" that is not "us" or "ss").
+// Then "-le" spelled as "-ly": "bly" drops only "y"; "ply" drops only "y" when the letter before it is a
+// consonant other than "p"; any other "ly" on a word longer than 5 characters drops both letters, and a
+// leftover "i" becomes "y". Then "ied", else "ing" or "ed" when the head still has a vowel. A doubled
+// final consonant other than l, s, z, or f then loses one letter. The "-ly" step runs again. If no "e"
+// was already removed, "ie" becomes "y" and a trailing "e" drops. A final "ll" drops one "l" only when
+// the stem has two or more vowels, so "cancelled" meets "canceled" and "filling" stays off "file".
+inline std::size_t lightStemInPlace( char* lowered, std::size_t len ) noexcept
+{
+    const std::size_t original = len;
+    if( len < 4 )
+    {
+        return original;
+    }
+    const auto ends = [ & ]( const char* suf, std::size_t sufLen ) noexcept
+    {
+        if( len < sufLen )
+        {
+            return false;
+        }
+        for( std::size_t k = 0; k < sufLen; ++k )
+        {
+            if( lowered[ len - sufLen + k ] != suf[ k ] )
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto vowel = []( char c ) noexcept
+    {
+        return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' || c == 'y';
+    };
+    const auto headHasVowel = [ & ]( std::size_t head ) noexcept
+    {
+        for( std::size_t k = 0; k < head; ++k )
+        {
+            if( vowel( lowered[ k ] ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto undouble = [ & ]() noexcept
+    {
+        if( len > 3 && lowered[ len - 1 ] == lowered[ len - 2 ] && !vowel( lowered[ len - 1 ] ) )
+        {
+            const char c = lowered[ len - 1 ];
+            if( c != 'l' && c != 's' && c != 'z' && c != 'f' )
+            {
+                len -= 1;
+            }
+        }
+    };
+    const auto leY = [ & ]() noexcept
+    {
+        if( ends( "bly", 3 ) && len >= 4 )
+        {
+            len -= 1;
+            return;
+        }
+        if( ends( "ply", 3 ) && len >= 5 && !vowel( lowered[ len - 4 ] ) && lowered[ len - 4 ] != 'p' )
+        {
+            len -= 1;
+            return;
+        }
+        if( len > 5 && ends( "ly", 2 ) && !ends( "ply", 3 ) )
+        {
+            len -= 2;
+            if( lowered[ len - 1 ] == 'i' )
+            {
+                lowered[ len - 1 ] = 'y';
+            }
+        }
+    };
+    bool ateE = false;
+    if( ends( "ies", 3 ) && len >= 5 && lowered[ len - 4 ] != 'a' && lowered[ len - 4 ] != 'e' )
+    {
+        lowered[ len - 3 ] = 'y';
+        len -= 2;
+    }
+    else if( ends( "es", 2 ) && len >= 5 )
+    {
+        len -= 2;
+        ateE = true;
+    }
+    else if( ends( "s", 1 ) && len >= 4 && !ends( "us", 2 ) && !ends( "ss", 2 ) )
+    {
+        len -= 1;
+    }
+    leY();
+    if( ends( "ied", 3 ) && len >= 5 )
+    {
+        lowered[ len - 3 ] = 'y';
+        len -= 2;
+    }
+    else if( ends( "ing", 3 ) && len >= 6 && headHasVowel( len - 3 ) )
+    {
+        len -= 3;
+        undouble();
+    }
+    else if( ends( "ed", 2 ) && len >= 5 && headHasVowel( len - 2 ) )
+    {
+        len -= 2;
+        ateE = true;
+        undouble();
+    }
+    leY();
+    if( !ateE && ends( "ie", 2 ) && len >= 4 )
+    {
+        lowered[ len - 2 ] = 'y';
+        len -= 1;
+    }
+    else if( !ateE && ends( "e", 1 ) && len >= 4 )
+    {
+        len -= 1;
+    }
+    if( ends( "ll", 2 ) && len >= 4 )
+    {
+        std::size_t vowels = 0;
+        for( std::size_t k = 0; k < len; ++k )
+        {
+            if( vowel( lowered[ k ] ) )
+            {
+                ++vowels;
+            }
+        }
+        if( vowels >= 2 )
+        {
+            len -= 1;
+        }
+    }
+    return len >= 2 ? len : original;
+}
+
+// Stem hash of one token. A token longer than 256 bytes is its own stem. The bytes are the raw span;
+// lexSubtokenHash folds case, so this matches the index-time walker on an unstemmed token.
+inline std::uint64_t lexStemHashOfToken( const char* bytes, std::size_t len ) noexcept
+{
+    if( len > 256 )
+    {
+        return lexSubtokenHash( bytes, len );
+    }
+    char lowered[ 256 ];
+    for( std::size_t k = 0; k < len; ++k )
+    {
+        lowered[ k ] = char( lexLowerByte( static_cast<unsigned char>( bytes[ k ] ) ) );
+    }
+    const std::size_t stemLen = lightStemInPlace( lowered, len );
+    return lexSubtokenHash( lowered, stemLen );
+}
+
 // per-definition persisted lexical statistics (B0.2) — SoA pair arrays sorted by hash (deterministic
 // regardless of accumulation order), plus the weighted doc/body token count (the def's Pass-2 dl share).
+// stemHashes is the same tokens after lightStemInPlace, same field weights, sorted on its own.
 struct RawDefLex
 {
     std::uint32_t              dlWeighted = 0;   // Σ field-weighted subtoken count over doc(×2)+body(×1)
     std::vector<std::uint64_t> tokenHashes;      // sorted ascending; parallel to tokenTfs
     std::vector<std::uint32_t> tokenTfs;         // weighted term frequency per hash (exact integers)
+    std::vector<std::uint64_t> stemHashes;       // sorted ascending; parallel to stemTfs
+    std::vector<std::uint32_t> stemTfs;
 };
 
 // ── the index-time walker: the same spans, plus each token's normalized hash ─────────────────────────
@@ -288,13 +452,35 @@ inline void forEachLexSubtokenHashed( std::string_view text, EmitFn&& emit )
     } );
 }
 
+// HashMap iteration order must never reach persisted bytes. One sorted row, used for the exact hashes and the stem hashes.
+inline void fillSortedLexRow( const HashMap<std::uint64_t, std::uint32_t>& scratch, std::vector<std::uint64_t>& hashes,
+                             std::vector<std::uint32_t>& tfs )
+{
+    hashes.clear();
+    tfs.clear();
+    hashes.reserve( scratch.size() );
+    for( const auto& [ hash, tf ] : scratch )
+    {
+        (void)tf;
+        hashes.push_back( hash );
+    }
+    std::sort( hashes.begin(), hashes.end() );
+    tfs.reserve( hashes.size() );
+    for( const std::uint64_t hash : hashes )
+    {
+        tfs.push_back( scratch.find( hash )->second );
+    }
+}
+
 // Build one def's stats from the SAME spans lexical.h Pass 2 scans: doc-comment [docCommentStart, bodyStart)
 // at ×kLexWeightDoc and body [bodyStart, endByte) at ×kLexWeightBody, tokens < 2 bytes dropped. `scratch`
 // is a caller-owned accumulator reused across defs (reserve once, clear per def — no rehash churn).
 inline void buildDefLexStats( const std::string& src, std::uint32_t startByte, std::uint32_t endByte,
-                              HashMap<std::uint64_t, std::uint32_t>& scratch, RawDefLex& out )
+                              HashMap<std::uint64_t, std::uint32_t>& scratch,
+                              HashMap<std::uint64_t, std::uint32_t>& stemScratch, RawDefLex& out )
 {
     scratch.clear();
+    stemScratch.clear();
     out.dlWeighted = 0;
     const std::string_view sv        = src;
     const std::size_t      bodyStart = std::min<std::size_t>( startByte, src.size() );
@@ -308,10 +494,14 @@ inline void buildDefLexStats( const std::string& src, std::uint32_t startByte, s
         std::uint32_t fieldTokenWt = 0;
         forEachLexSubtokenHashed( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte, std::uint64_t tokenHash )
                                   {
-            if( tokEndByte - tokStartByte < 2 ) { return;
-}
+            const std::size_t tokLen = tokEndByte - tokStartByte;
+            if( tokLen < 2 )
+            {
+                return;
+            }
             fieldTokenWt += w;
-            scratch[ tokenHash ] += w; } );
+            scratch[ tokenHash ] += w;
+            stemScratch[ lexStemHashOfToken( text.data() + tokStartByte, tokLen ) ] += w; } );
         out.dlWeighted += fieldTokenWt;
     };
     if( bodyStart > docStart )
@@ -323,20 +513,8 @@ inline void buildDefLexStats( const std::string& src, std::uint32_t startByte, s
         scanFieldStats( sv.substr( bodyStart, end - bodyStart ), std::uint32_t( kLexWeightBody ) );
     }
 
-    // extract sorted-by-hash pair arrays (HashMap iteration order must never reach persisted bytes)
-    out.tokenHashes.clear();
-    out.tokenTfs.clear();
-    out.tokenHashes.reserve( scratch.size() );
-    for( const auto& [hash, tf] : scratch )
-    {
-        out.tokenHashes.push_back( hash );
-    }
-    std::sort( out.tokenHashes.begin(), out.tokenHashes.end() );
-    out.tokenTfs.reserve( out.tokenHashes.size() );
-    for( const std::uint64_t hash : out.tokenHashes )
-    {
-        out.tokenTfs.push_back( scratch.find( hash )->second );
-    }
+    fillSortedLexRow( scratch, out.tokenHashes, out.tokenTfs );
+    fillSortedLexRow( stemScratch, out.stemHashes, out.stemTfs );
 }
 
 

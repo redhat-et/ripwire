@@ -34,6 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-22, stem hash bytes: RE-PINNED with UPDATE_GOLDEN=1. The only watched text that moved is kCacheVersion
+#   37 -> 38 (relevant inflections share one stem hash; the stem row layout is unchanged) and quality.h's
+#   kIngestCacheVersionMirror with it. kParserVer stays 206 and kQSnapCacheScheme stays 22.
+# 2026-10-21, stem posting row: RE-PINNED with UPDATE_GOLDEN=1. The only watched text that moved is kCacheVersion
+#   36 -> 37 (a def record gains a stem hash/tf row) and quality.h's kIngestCacheVersionMirror with it. kParserVer
+#   stays 206 and kQSnapCacheScheme stays 22: what a cached Snapshot represents is the same.
 # 2026-10-19, PR #414 (#409 markdown section links) merged with main 90f6fae6 (train 31): RE-PINNED with UPDATE_GOLDEN=1 (hash
 #   a667ffc55e…8a05, unchanged from the PR's own earlier pin: main moved its hash with 198, the watched text here is 206 again). The only watched text that moved is the kParserVer line and quality.h's mirror: renumbered again at
 #   merge to 206 (rich file tag 207), above main 198 / 199 (train 31), 196 / 197 and the live branch builds 202 and 204.

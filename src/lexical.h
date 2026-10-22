@@ -163,6 +163,59 @@ struct Bm25Params
 
 inline constexpr Bm25Params kBm25Default{ 1.5, 0.75 };
 
+// Stem-only term frequency is added before saturation, at this weight, after it is divided by the
+// largest stem-only count of that term. The strongest stem hit then adds 0.35, which is below one
+// exact token. Exact occurrences are not added again.
+inline constexpr double kLexStemAlpha = 0.35;
+
+// tf' = tf_exact + kLexStemAlpha * tf_stem_only / max(tf_stem_only). A stem whose stem-only document
+// frequency is above max(8, docCount/64) contributes nothing, so a later df over tf' > 0 is the union
+// of the exact hit and the admitted stem hit.
+inline void stemBlendedTermFreq( std::size_t docCount, std::size_t termCount, const int* tfExact, const int* tfStemAll,
+                                 std::vector<double>& tfPrime )
+{
+    tfPrime.assign( docCount * termCount, 0.0 );
+    std::vector<int> stemOnly( docCount * termCount, 0 );
+    std::vector<int> dfStemOnly( termCount, 0 );
+    std::vector<int> stemMax( termCount, 0 );
+    for( std::size_t i = 0; i < docCount; ++i )
+    {
+        for( std::size_t t = 0; t < termCount; ++t )
+        {
+            const std::size_t at = i * termCount + t;
+            int               only = tfStemAll[ at ] - tfExact[ at ];
+            if( only < 0 )
+            {
+                only = 0;
+            }
+            stemOnly[ at ] = only;
+            if( only > 0 )
+            {
+                ++dfStemOnly[ t ];
+                if( only > stemMax[ t ] )
+                {
+                    stemMax[ t ] = only;
+                }
+            }
+        }
+    }
+    const std::uint32_t stemCap = std::max( std::uint32_t( 8 ), std::uint32_t( docCount / 64 ) );
+    for( std::size_t t = 0; t < termCount; ++t )
+    {
+        const bool admitted = dfStemOnly[ t ] > 0 && std::uint32_t( dfStemOnly[ t ] ) <= stemCap && stemMax[ t ] > 0;
+        for( std::size_t i = 0; i < docCount; ++i )
+        {
+            const std::size_t at = i * termCount + t;
+            double            tf = double( tfExact[ at ] );
+            if( admitted )
+            {
+                tf += kLexStemAlpha * double( stemOnly[ at ] ) / double( stemMax[ t ] );
+            }
+            tfPrime[ at ] = tf;
+        }
+    }
+}
+
 // A RIPWIRE_* calibration knob. Unset, or set empty, is the caller's default. A set value must parse IN FULL as a
 // finite number, or it is refused back to that default with one stderr line naming it, so a sweep cannot run on the
 // default while believing it set something. atof/atoi were unchecked: "nan" read as NaN, which std::clamp passes
@@ -500,111 +553,23 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     std::vector<std::size_t>& uniqueIndexOfQtok  = dedup.uniqueIndexOfQtok;
     const std::size_t         uniqueCount        = uniqueToks.size();
 
-    // ── LB-3 arm S: conservative query-side stem variants ─────────────────────────────────────────────
-    // A plural/participle query token ("splits", "resolved", "hoisting") cannot exact-match the singular
-    // subtoken a compound name carries (SplitChunksPlugin → split; resolve.h → resolve) — the measured
-    // LB-3 anatomy (bench/r7 + r8, three independent confirmations). Variants are QUERY-side only and
-    // score into the ORIGINAL token's tf/idf row, so corpus stats and the cache format are untouched.
-    // ONE shared table drives the scan branch, the persisted-stats branch, and every field pass —
-    // parity by construction (test/postingscheck.sh; armed arm in test/lb3namecheck.sh). A variant
-    // string already claimed by an earlier token (or equal to any exact token) is dropped, first-wins,
-    // so a doc token maps to exactly one row in either branch. RIPWIRE_QSTEM=1 arms it; the shipped
-    // default stays OFF until the LB-3 acceptance verdict (scratchpad lb3/preregistration.md) lands.
+    // Exact query tokens only. Stemming is a second count, tf_stem_all, blended after both passes.
+    // The old RIPWIRE_QSTEM fold added a variant into this row at full weight. That arm is gone.
     struct LexMatchTok
     {
         std::string   tok;
         std::uint32_t u;
     };
     std::vector<LexMatchTok> matchToks;
-    matchToks.reserve( uniqueCount * 2 );
+    matchToks.reserve( uniqueCount );
+    std::vector<std::uint64_t> queryStemHash( uniqueCount, 0 );
     for( std::size_t u = 0; u < uniqueCount; ++u )
     {
         matchToks.push_back( { uniqueToks[u], std::uint32_t( u ) } );
-    }
-    {
-        const char* qstemEnv = std::getenv( "RIPWIRE_QSTEM" );
-        const bool  qstemOn  = qstemEnv != nullptr && *qstemEnv == '1';
-        // derived variants are CANDIDATES first: admission into the match table happens only after the
-        // IDF guard below — the guard sees the deduped candidate set, never the user's exact tokens
-        std::vector<LexMatchTok> stemCandidates;
-        const auto  pushVariant = [ & ]( std::string v, std::uint32_t u )
-        {
-            if( v.size() < 3 )
-            {
-                return;                                        // sub-3-byte stems are noise, frozen rule
-            }
-            for( const LexMatchTok& mt : matchToks )
-            {
-                if( mt.tok == v )
-                {
-                    return;                                    // first-wins: string already claimed
-                }
-            }
-            for( const LexMatchTok& cand : stemCandidates )
-            {
-                if( cand.tok == v )
-                {
-                    return;                                    // first-wins among candidates too
-                }
-            }
-            stemCandidates.push_back( { std::move( v ), u } );
-        };
-        const auto isConsonant = []( char c )
-        {
-            return c >= 'a' && c <= 'z' && c != 'a' && c != 'e' && c != 'i' && c != 'o' && c != 'u';
-        };
-        if( qstemOn )
-        {
-            for( std::size_t u = 0; u < uniqueCount; ++u )
-            {
-                const std::string& t    = uniqueToks[u];
-                const std::size_t  L    = t.size();
-                const auto         ends = [ & ]( std::string_view suf )
-                { return L >= suf.size() && t.compare( L - suf.size(), suf.size(), suf ) == 0; };
-                if( ends( "s" ) && !ends( "ss" ) && L >= 4 )
-                {
-                    pushVariant( t.substr( 0, L - 1 ), std::uint32_t( u ) );          // splits → split
-                    if( ends( "es" ) && L >= 5 )
-                    {
-                        pushVariant( t.substr( 0, L - 2 ), std::uint32_t( u ) );      // classes → class
-                    }
-                }
-                if( ends( "ed" ) && L >= 5 )
-                {
-                    pushVariant( t.substr( 0, L - 1 ), std::uint32_t( u ) );          // resolved → resolve
-                    pushVariant( t.substr( 0, L - 2 ), std::uint32_t( u ) );          // parsed → pars (rarely useful, harmless)
-                    if( L >= 6 && t[L - 3] == t[L - 4] && isConsonant( t[L - 3] ) )
-                    {
-                        pushVariant( t.substr( 0, L - 3 ), std::uint32_t( u ) );      // flagged → flag
-                    }
-                }
-                if( ends( "ing" ) && L >= 6 )
-                {
-                    pushVariant( t.substr( 0, L - 3 ), std::uint32_t( u ) );                // hoisting → hoist
-                    pushVariant( t.substr( 0, L - 3 ) + "e", std::uint32_t( u ) );          // caching → cache
-                    if( L >= 7 && t[L - 4] == t[L - 5] && isConsonant( t[L - 4] ) )
-                    {
-                        pushVariant( t.substr( 0, L - 4 ), std::uint32_t( u ) );            // running → run
-                    }
-                }
-            }
-        }
-        // ── IDF guard, rung R3 (LB-3 retry, scratchpad lb3retry/preregistration.md) ──────────────────
-        // The un-guarded round measured the failure: a corpus-common variant ("split" on webpack) hands
-        // its term-frequency mass to every competitor whose doc/body rides the same subtoken, displacing
-        // currently-hit truths (EVALS §7) — and the mass is BODY frequency (`.split()` call sites), which
-        // is why the name-carrier bound (rungs R1/R2) measured too low to catch it. So every candidate
-        // enters the match table PROVISIONALLY, owning its own tf column (m ≥ uniqueCount); admission is
-        // decided AFTER pass 2, when both scoring branches have measured the variant's doc/body document
-        // frequency as the SAME integers (postings rows on the rich path, the scan's own counts on the
-        // lean path — parity by construction), and only a corpus-rare variant (df ≤ max(8, S/64)) is
-        // folded into its original token's row; a common one is discarded untouched. The guard never
-        // sees a user's EXACT query token — only derived variants — so it structurally cannot drop a
-        // truth's own carrier (the LB-1 IDF-floor failure).
-        for( LexMatchTok& cand : stemCandidates )
-        {
-            matchToks.push_back( std::move( cand ) );
-        }
+        std::string stemmed = uniqueToks[u];
+        const std::size_t stemLen = lightStemInPlace( stemmed.data(), stemmed.size() );
+        stemmed.resize( stemLen );
+        queryStemHash[u] = lexSubtokenHash( stemmed.data(), stemmed.size() );
     }
     const std::size_t matchCount = matchToks.size();
 
@@ -618,6 +583,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // post-pass-2 guard folds the admitted ones and the array shrinks back to uniqueCount stride.
     std::vector<int> dl( S, 0 );
     std::vector<int> tfFlat( S * matchCount, 0 );
+    std::vector<int> tfStemAll( S * uniqueCount, 0 );   // weight of tokens whose stem equals stem(query term)
 
     // Field weights: a query term in a symbol's NAME outranks one in its DOC-COMMENT, which outranks one
     // buried in its BODY — so an exactly-named function beats a struct that merely mentions the word, and an
@@ -635,7 +601,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     // as ONE token, so a span's INTERIOR bytes can be uppercase and memcmp alone would miss it; the memcmp
     // stays as the fast path (it resolves every ordinary identifier token) and only a span already agreeing
     // on length AND head falls through to lexTokenEqualsLowered — the rare acronym case, arm D's seam.
-    const auto scanTextInto = [ & ]( int* tfRow, int& wtAccum, std::string_view text, int w )
+    const auto scanTextInto = [ & ]( int* tfRow, int* stemRow, int& wtAccum, std::string_view text, int w )
     {
         int fieldTokenWt = 0;
         forEachLexSubtoken( text, [ & ]( std::size_t tokStartByte, std::size_t tokEndByte )
@@ -651,12 +617,20 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             {
                 tfRow[m] += w;                        // exact tokens own rows 0..uniqueCount (m == u there)
             }
+            const std::uint64_t stemHash = lexStemHashOfToken( text.data() + tokStartByte, tokLen );
+            for( std::size_t u = 0; u < uniqueCount; ++u )
+            {
+                if( queryStemHash[u] == stemHash )
+                {
+                    stemRow[u] += w;
+                }
+            }
         } );
         wtAccum += fieldTokenWt;
     };
     const auto scanField = [ & ]( std::size_t docIndex, std::string_view text, int w )
     {
-        scanTextInto( tfFlat.data() + docIndex * matchCount, dl[ docIndex ], text, w );
+        scanTextInto( tfFlat.data() + docIndex * matchCount, tfStemAll.data() + docIndex * uniqueCount, dl[ docIndex ], text, w );
     };
 
     // ── SIRA term margin (docs/EVALS.md "Corpus-statistics term margin", PRE-REGISTERED 2026-09-05) ──
@@ -789,13 +763,14 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         {
             const std::size_t fileCount = ing.files.size();
             std::vector<int>  fileTf( fileCount * matchCount, 0 );
+            std::vector<int>  fileStem( fileCount * uniqueCount, 0 );
             std::vector<int>  fileWt( fileCount, 0 );
             for( std::size_t f = 0; f < fileCount; ++f )
             {
                 const std::string_view path = rw::sarif::rootRelativeUri( ing.files[f], pathRootPrefix );
                 const std::size_t      cut  = path.find_last_of( '/' );
                 const std::string_view base = cut == std::string_view::npos ? path : path.substr( cut + 1 );
-                scanTextInto( fileTf.data() + f * matchCount, fileWt[f], base, kwBase );
+                scanTextInto( fileTf.data() + f * matchCount, fileStem.data() + f * uniqueCount, fileWt[f], base, kwBase );
             }
             for( std::size_t i = 0; i < S; ++i )
             {
@@ -809,6 +784,12 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 for( std::size_t m = 0; m < matchCount; ++m )
                 {
                     tfRow[m] += fRow[m];
+                }
+                int* const       stemRow = tfStemAll.data() + i * uniqueCount;
+                const int* const sRow    = fileStem.data() + std::size_t( f ) * uniqueCount;
+                for( std::size_t u = 0; u < uniqueCount; ++u )
+                {
+                    stemRow[u] += sRow[u];
                 }
                 dl[i] += fileWt[f];
             }
@@ -862,14 +843,17 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         bool          lastFileMayMatch = true;
         for( std::size_t i = 0; i < S; ++i )
         {
+            const bool          haveStemRows = ing.lexStemTokenRowOffsets.size() == S + 1;
             const std::uint32_t rowBegin = ing.lexTokenRowOffsets[i];
             const std::uint32_t rowEnd   = ing.lexTokenRowOffsets[ i + 1 ];
-            if( rowBegin == rowEnd )
+            const std::uint32_t stemBegin = haveStemRows ? ing.lexStemTokenRowOffsets[i] : 0;
+            const std::uint32_t stemEnd   = haveStemRows ? ing.lexStemTokenRowOffsets[ i + 1 ] : 0;
+            if( rowBegin == rowEnd && stemBegin == stemEnd )
             {
                 continue; // no doc/body tokens → nothing to transfer
             }
 
-            // one membership probe per FILE against the query's subtoken bits (B0.1)
+            // one membership probe per FILE against the query's exact and stem bits (B0.1)
             if( const std::uint32_t f = ing.symbols[i].fileId; useFileSig && f < ing.files.size() )
             {
                 if( f != lastFileId )
@@ -880,6 +864,13 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                     for( std::size_t m = 0; m < matchCount && !lastFileMayMatch; ++m )
                     {
                         if( sig[lexSigWord( matchHash[m] )] & lexSigBit( matchHash[m] ) )
+                        {
+                            lastFileMayMatch = true;
+                        }
+                    }
+                    for( std::size_t u = 0; u < uniqueCount && !lastFileMayMatch; ++u )
+                    {
+                        if( sig[lexSigWord( queryStemHash[u] )] & lexSigBit( queryStemHash[u] ) )
                         {
                             lastFileMayMatch = true;
                         }
@@ -923,6 +914,20 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                         {
                             ++dfVariant[ m - uniqueCount ];
                         }
+                    }
+                }
+            }
+            if( stemBegin != stemEnd )
+            {
+                int* const           stemRow  = tfStemAll.data() + i * uniqueCount;
+                const std::uint64_t* stemHash = ing.lexStemTokenHashes.data();
+                for( std::size_t u = 0; u < uniqueCount; ++u )
+                {
+                    const std::uint64_t* lo = stemHash + stemBegin;
+                    const std::uint64_t* hi = stemHash + stemEnd;
+                    if( const std::uint64_t* it = std::lower_bound( lo, hi, queryStemHash[u] ); it != hi && *it == queryStemHash[u] )
+                    {
+                        stemRow[u] += int( ing.lexStemTokenTfs[ std::size_t( it - stemHash ) ] );
                     }
                 }
             }
@@ -1112,8 +1117,11 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         }
     }
 
-    // ── L-W: the term evidence, read off the FINAL tf rows (uniqueCount stride, every field, the fold applied)
-    // — one S×U integer scan, the same "tf > 0" fact dfreq counts in both scoring branches below.
+    // Stem-only count is the stem row minus the exact row. A stem above max(8, S/64) is left out of tf' and df.
+    std::vector<double> tfPrime;
+    stemBlendedTermFreq( S, uniqueCount, tfFlat.data(), tfStemAll.data(), tfPrime );
+
+    // ── L-W: the term evidence, read off tf' (exact, plus an admitted stem).
     if( evidenceOut )
     {
         evidenceOut->termsSeenTotal = dedup.uniqueSeenTotal;
@@ -1124,11 +1132,10 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         evidenceOut->symbolCount = S;
         for( std::size_t i = 0; i < S; ++i )
         {
-            const int* const row   = tfFlat.data() + i * uniqueCount;
-            std::uint64_t*   words = evidenceOut->anyMask.data() + i * evidenceWords;
+            std::uint64_t* words = evidenceOut->anyMask.data() + i * evidenceWords;
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
-                if( row[u] > 0 )
+                if( tfPrime[ i * uniqueCount + u ] > 0.0 )
                 {
                     ++evidenceOut->df[u];
                     words[ u / 64 ] |= std::uint64_t( 1 ) << ( u % 64 );
@@ -1175,10 +1182,9 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         std::vector<int> dfMargin( uniqueCount, 0 );
         for( std::size_t i = 0; i < S; ++i )
         {
-            const int* const tfRow = tfFlat.data() + i * uniqueCount;
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
-                dfMargin[u] += tfRow[u] > 0 ? 1 : 0;
+                dfMargin[u] += tfPrime[ i * uniqueCount + u ] > 0.0 ? 1 : 0;
             }
         }
         // "separates" at k bits: idf_u >= k*ln2  ⇔  (S-n+0.5)/(n+0.5) + 1 >= 2^k  ⇔  n <= (S+0.5)/2^k - 0.5,
@@ -1257,21 +1263,21 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         // one pass: candidates (any tf > 0 — every other doc scores EXACTLY the same +0.0f either way),
         // exact dfreq, and the per-term max weighted tf the impact bound needs. Ascending doc id.
         std::vector<int>           dfreq( uniqueCount, 0 );
-        std::vector<int>           tfMaxOf( uniqueCount, 0 );
+        std::vector<double>        tfMaxOf( uniqueCount, 0.0 );
         std::vector<std::uint32_t> candidateIds;
         candidateIds.reserve( 1024 );
         for( std::size_t i = 0; i < S; ++i )
         {
-            const int* tfRow = tfFlat.data() + i * uniqueCount;
-            bool       any   = false;
+            bool any = false;
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
-                if( tfRow[u] > 0 )
+                const double tf = tfPrime[ i * uniqueCount + u ];
+                if( tf > 0.0 )
                 {
                     ++dfreq[u];
-                    if( tfRow[u] > tfMaxOf[u] )
+                    if( tf > tfMaxOf[u] )
                     {
-                        tfMaxOf[u] = tfRow[u];
+                        tfMaxOf[u] = tf;
                     }
                     any = true;
                 }
@@ -1314,7 +1320,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 }
                 const int    n    = dfreq[u];
                 const double idf  = std::log( ( double( S ) - n + 0.5 ) / ( n + 0.5 ) + 1.0 );
-                const double T    = double( tfMaxOf[u] );
+                const double T    = tfMaxOf[u];
                 const double cap1 = bm25ImpactBound( idf, T, bm25Params );          // A4: shared bound, same (k1,b)
                 capOcc[u]         = cap1 * double( occCount[u] );
             }
@@ -1329,13 +1335,11 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
         double theta = -1.0;                                     // scores are ≥ 0 ⇒ no skips until K docs scored
         for( const std::uint32_t i : candidateIds )
         {
-            const int* tfRow = tfFlat.data() + std::size_t( i ) * uniqueCount;
-
             // cheap upper bound: adds only, fixed u-ascending order (deterministic)
             double ub = 0.0;
             for( std::size_t u = 0; u < uniqueCount; ++u )
             {
-                if( tfRow[u] > 0 )
+                if( tfPrime[ i * uniqueCount + u ] > 0.0 )
                 {
                     ub += capOcc[u];
                 }
@@ -1355,8 +1359,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
                 {
                     continue;               // capped past kMaxUniqueQueryTerms — owns no row, no contribution
                 }
-                const int         tf = tfRow[u];
-                if( tf == 0 || termKept[u] == 0 )
+                const double      tf = tfPrime[ i * uniqueCount + u ];
+                if( tf <= 0.0 || termKept[u] == 0 )
                 {
                     continue; // termKept is all-1 disarmed, so this reads as the historical `tf == 0`
                 }
@@ -1399,7 +1403,7 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
     {
         for( std::size_t u = 0; u < uniqueCount; ++u )
         {
-            if( tfFlat[i * uniqueCount + u] > 0 )
+            if( tfPrime[ i * uniqueCount + u ] > 0.0 )
             {
                 ++dfreq[u];
             }
@@ -1416,8 +1420,8 @@ inline std::vector<float> lexicalScoresTiered( const IngestResult& ing, const st
             {
                 continue;                   // capped past kMaxUniqueQueryTerms — owns no row, no contribution
             }
-            const int         tf = tfFlat[ i * uniqueCount + u ];
-            if( tf == 0 || termKept[u] == 0 )
+            const double      tf = tfPrime[ i * uniqueCount + u ];
+            if( tf <= 0.0 || termKept[u] == 0 )
             {
                 continue; // old: docs[i].find( qt ) == end — termKept is all-1 disarmed, so this is that
             }

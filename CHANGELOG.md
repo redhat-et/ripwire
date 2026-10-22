@@ -17,6 +17,16 @@ not published here — see `docs/EVALS.md` for the instruments behind the headli
 
 - `--quality-delta=A..B` extracts its per-commit archive through stdin (`tar -x -f -`), the same Windows drive-colon fix as #402 (thanks @lennix1337).
 
+### Changed — lexical search stems English suffixes, then blends the count before BM25
+
+A query token and each document token take the same stem. Muayyad AlSadi's rule for a good stemmer: it is a hash. Relevant inflections share one hash (`stem(A) == stem(B)`). Irrelevant words keep different hashes (`stem(A) != stem(B)`). The hash does not have to be a dictionary word. A bad stemmer is one that equates two irrelevant words, or splits two relevant ones. Irregular leftovers (`built`, `indices`, `axes`) stay out of the stemmer; a synonym list is the tool for those.
+
+The trim is Harman's s-endings plus the inflections that share a hash in code and docs: `ies` becomes `y`, `es` drops as a pair, a final `s` drops unless the word ends in `us` or `ss`, then `ly` / `ing` / `ed`, then a trailing `e` or `ie`. A doubled consonant added by `ing` or `ed` drops one letter, except `l`, `s`, `z`, and `f`. A final `ll` drops one `l` only when the stem has two or more vowels, so `cancelled` meets `canceled` and `filling` stays off `file`. `-ble` written as `-bly` drops only the `y`, so `assembly` meets `assembling`. `ply` drops the `y` only when the letter before it is a consonant other than `p`, so `simply` meets `simple` and `apply` stays off `apple`. `cookie` meets `cookies`. `copying` meets `copy`. `files` meets `file` (both `fil`). A step that would leave fewer than 3 characters is skipped.
+
+The score is one BM25. For each query term, term frequency is the exact count plus 0.35 times the stem-only count divided by the largest stem-only count of that term. The strongest stem hit adds 0.35, which is below one exact token, so a pile of stemmed tokens cannot outrank one exact token of the same term. That bound is why a leftover collision is acceptable: a stemmed hit cannot beat an exact hit of the same term. One idf covers every symbol that has either form. A stem whose stem-only document frequency is above `max(8, S/64)` is left out of both the count and the idf.
+
+Two earlier trials stayed off (`RIPWIRE_QSTEM`, `docs/EVALS.md` §7). They added the stem into the exact term's row at full weight, so a common stem such as `split` was scored with a rare term's idf and displaced hits that were already correct. A later guard dropped common stems and still let a rarer one (`compressed` to `compress`) displace a thin hit, because the admitted count was still full weight. This blend does not do that. The exact count is never increased by the stem, the stem that is admitted is weighted 0.35, and a stem above the cap does not change df. An exact section `copying file` ranks above a section `copy file`. A pile of `split` sections does not rank for `splits`, and a section that says `splits` still does. Caches rebuild once (`kCacheVersion` 38).
+
 ## [0.6.8] — 2026-10-19
 
 Four batches of reviewed changes in one release. What a user sees:

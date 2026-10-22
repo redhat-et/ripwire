@@ -144,7 +144,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 36;           // 36: train 30 — strictly above every number a train-30 build used: lane call-result-typing
+constexpr std::uint32_t kCacheVersion = 38;           // 38: stem hash bytes changed (relevant inflections share one hash). 37 blobs are rejected and rebuilt.
+                                                      // 37: rich def records gain a stem posting row (lightStem hashes + tf). 36 blobs are rejected and rebuilt.
+                                                      // 36: train 30 — strictly above every number a train-30 build used: lane call-result-typing
                                                       //    33 (RawBind resultIndex + unwrapDepth), lane fcall-forward 33, lane name-template-dispatch 35
                                                       //    (RefRole Pattern 11), main 34; so no blob a branch build wrote is read here.
                                                       // 35: train 30 lane name-template-dispatch (train renumbers) — RefRole gained
@@ -2316,91 +2318,95 @@ inline unsigned lexDictIndexWidth( std::size_t dictCount ) noexcept
 {
     return dictCount <= 0x100 ? 1u : dictCount <= 0x10000 ? 2u : 4u;   // indices go up to dictCount-1
 }
+inline void writeLexPostingRow( ByteW& w, const std::vector<std::uint64_t>& hashes, const std::vector<std::uint32_t>& tfs,
+                                std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
+{
+    ASSUME( hashes.size() == tfs.size() );
+    w.u32( std::uint32_t( hashes.size() ) );
+    std::uint32_t maxTf = 0;
+    for( const std::uint32_t tf : tfs )
+    {
+        if( tf > maxTf )
+        {
+            maxTf = tf;
+        }
+    }
+    const unsigned tfWidth  = maxTf <= 0xFFu ? 1u : maxTf <= 0xFFFFu ? 2u : 4u;
+    const unsigned idxWidth = lexDictIndexWidth( fileDictCount );
+    w.u8( std::uint8_t( tfWidth ) );
+    const std::size_t count = tfs.size();
+    char*             p     = w.extend( count * ( idxWidth + tfWidth ) );
+    ASSUME( count == 0 || rowDictIndex != nullptr );
+    if( idxWidth == 1 )
+    {
+        for( std::size_t k = 0; k < count; ++k )
+        {
+            *p++ = char( rowDictIndex[k] );
+        }
+    }
+    else if( idxWidth == 2 )
+    {
+        for( std::size_t k = 0; k < count; ++k )
+        {
+            const std::uint32_t v = rowDictIndex[k];
+            p[0] = char( v );
+            p[1] = char( v >> 8 );
+            p += 2;
+        }
+    }
+    else
+    {
+        for( std::size_t k = 0; k < count; ++k )
+        {
+            const std::uint32_t v = rowDictIndex[k];
+            p[0] = char( v );
+            p[1] = char( v >> 8 );
+            p[2] = char( v >> 16 );
+            p[3] = char( v >> 24 );
+            p += 4;
+        }
+    }
+    const std::uint32_t* tfData = tfs.data();
+    if( tfWidth == 1 )
+    {
+        for( std::size_t k = 0; k < count; ++k )
+        {
+            *p++ = char( tfData[k] );
+        }
+    }
+    else if( tfWidth == 2 )
+    {
+        for( std::size_t k = 0; k < count; ++k )
+        {
+            const std::uint32_t v = tfData[k];
+            p[0] = char( v );
+            p[1] = char( v >> 8 );
+            p += 2;
+        }
+    }
+    else
+    {
+        for( std::size_t k = 0; k < count; ++k )
+        {
+            const std::uint32_t v = tfData[k];
+            p[0] = char( v );
+            p[1] = char( v >> 8 );
+            p[2] = char( v >> 16 );
+            p[3] = char( v >> 24 );
+            p += 4;
+        }
+    }
+}
 inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileDictCount, const std::uint32_t* rowDictIndex )
 {
     w.u32( d.line ); w.u32( d.startByte ); w.u32( d.endByte ); w.u32( d.nameByte ); w.u32( d.bodyByte ); w.u32( d.cx ); w.u32( d.ccx ); w.u32( d.loc ); w.u32( d.locals ); w.u32( d.ppAlt ); w.u32( d.humps ); w.u32( d.deepLoc ); w.u32( d.ev ); w.u32( d.params ); w.u32( d.paramsMin ); w.u8( d.maxNest ); w.u8( d.arityExact ); w.u8( d.testScope ); w.u8( d.recovered ); w.u8( d.internalLinkage ); w.u8( d.scopeRootsStd ); w.u32( d.fnScopeStart ); w.u32( d.fnScopeEnd ); w.u8( std::uint8_t( d.kind ) ); w.u8( std::uint8_t( d.lang ) ); w.str( d.name ); w.str( d.scope );
     for( const std::uint8_t tagCount : d.evWhy ) { w.u8( tagCount ); }   // 8×u8, fixed order (model.h kEvWhyTagTable)
     if( withLex )
     {
-        ASSUME( d.lex.tokenHashes.size() == d.lex.tokenTfs.size() );
         w.u32( d.lex.dlWeighted );
-        w.u32( std::uint32_t( d.lex.tokenHashes.size() ) );
-        std::uint32_t maxTf = 0;
-        for( const std::uint32_t tf : d.lex.tokenTfs )
-        {
-            if( tf > maxTf )
-            {
-                maxTf = tf;
-            }
-        }
-        const unsigned tfWidth  = maxTf <= 0xFFu ? 1u : maxTf <= 0xFFFFu ? 2u : 4u;   // exact-preserving by construction
-        const unsigned idxWidth = lexDictIndexWidth( fileDictCount );
-        w.u8( std::uint8_t( tfWidth ) );
-        // rowDictIndex: this def's precomputed dict indices (saveCache assigns them during the k-way
-        // dict merge — no per-hash search here), ascending because the row is sorted. One bulk extend +
-        // specialized fill loops per width — no per-byte push_back on this multi-million-pair seam.
-        const std::size_t count = d.lex.tokenTfs.size();
-        char*             p     = w.extend( count * ( idxWidth + tfWidth ) );
-        ASSUME( count == 0 || rowDictIndex != nullptr );   // null only with an empty row: verifyCacheRecordMinimaTripwire's probe
-        if( idxWidth == 1 )
-        {
-            for( std::size_t k = 0; k < count; ++k )
-            {
-                *p++ = char( rowDictIndex[k] );
-            }
-        }
-        else if( idxWidth == 2 )
-        {
-            for( std::size_t k = 0; k < count; ++k )
-            {
-                const std::uint32_t v = rowDictIndex[k];
-                p[0] = char( v );
-                p[1] = char( v >> 8 );
-                p += 2;
-            }
-        }
-        else
-        {
-            for( std::size_t k = 0; k < count; ++k )
-            {
-                const std::uint32_t v = rowDictIndex[k];
-                p[0] = char( v );
-                p[1] = char( v >> 8 );
-                p[2] = char( v >> 16 );
-                p[3] = char( v >> 24 );
-                p += 4;
-            }
-        }
-        const std::uint32_t* tfs = d.lex.tokenTfs.data();
-        if( tfWidth == 1 )
-        {
-            for( std::size_t k = 0; k < count; ++k )
-            {
-                *p++ = char( tfs[k] );
-            }
-        }
-        else if( tfWidth == 2 )
-        {
-            for( std::size_t k = 0; k < count; ++k )
-            {
-                const std::uint32_t v = tfs[k];
-                p[0] = char( v );
-                p[1] = char( v >> 8 );
-                p += 2;
-            }
-        }
-        else
-        {
-            for( std::size_t k = 0; k < count; ++k )
-            {
-                const std::uint32_t v = tfs[k];
-                p[0] = char( v );
-                p[1] = char( v >> 8 );
-                p[2] = char( v >> 16 );
-                p[3] = char( v >> 24 );
-                p += 4;
-            }
-        }
+        writeLexPostingRow( w, d.lex.tokenHashes, d.lex.tokenTfs, fileDictCount, rowDictIndex );
+        writeLexPostingRow( w, d.lex.stemHashes, d.lex.stemTfs, fileDictCount,
+                            rowDictIndex == nullptr ? nullptr : rowDictIndex + d.lex.tokenHashes.size() );
     }
 }
 inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); w.str( r.memberVia ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
@@ -2429,7 +2435,7 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
 inline constexpr std::size_t kMinDefRecordBytesLean      = 92;   // 17×u32 + 16×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33)
-inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
+inline constexpr std::size_t kMinDefRecordBytesRichExtra = 14;   // dlWeighted u32 + exact row (count u32 + tfWidth u8) + stem row (count u32 + tfWidth u8)
 inline constexpr std::size_t kMinRefRecordBytes          = 60;   // 3×u32 + 12×u8 + 9×str(len u32, empty)
 
 inline std::size_t minDefRecordBytes( bool captureValueUses ) noexcept
@@ -2456,6 +2462,91 @@ inline void verifyCacheRecordMinimaTripwire() noexcept
     ASSUME( probe.b.size() == kMinRefRecordBytes );
 }
 
+inline bool readLexPostingRow( ByteR& r, const std::vector<std::uint64_t>& fileDict,
+                              std::vector<std::uint64_t>& hashes, std::vector<std::uint32_t>& tfs )
+{
+    const std::uint32_t tokenCount = r.u32();
+    const std::uint8_t  tfWidth    = r.u8();
+    if( !r.ok || ( tfWidth != 1 && tfWidth != 2 && tfWidth != 4 ) )
+    {
+        r.ok = false;
+        return false;
+    }
+    const unsigned    idxWidth  = lexDictIndexWidth( fileDict.size() );
+    const std::size_t needBytes = std::size_t( tokenCount ) * ( idxWidth + tfWidth );
+    if( std::size_t( r.end - r.p ) < needBytes )
+    {
+        r.ok = false;
+        return false;
+    }
+    hashes.resize( tokenCount );
+    tfs.resize( tokenCount );
+    const unsigned char* q         = reinterpret_cast<const unsigned char*>( r.p );
+    const std::uint64_t* dict      = fileDict.data();
+    const std::uint32_t  dictCount = std::uint32_t( fileDict.size() );
+    std::uint64_t*       hashOut   = hashes.data();
+    std::uint32_t        prevIndex = 0;
+    bool                 rowOk     = true;
+    const auto           decodeIndexRun = [ & ]( auto readOne )
+    {
+        for( std::uint32_t k = 0; k < tokenCount; ++k )
+        {
+            const std::uint32_t dictIndex = readOne();
+            if( dictIndex >= dictCount || ( k > 0 && dictIndex <= prevIndex ) )
+            {
+                rowOk = false;
+                return;
+            }
+            hashOut[k] = dict[ dictIndex ];
+            prevIndex  = dictIndex;
+        }
+    };
+    if( idxWidth == 1 )
+    {
+        decodeIndexRun( [ & ]() noexcept { return std::uint32_t( *q++ ); } );
+    }
+    else if( idxWidth == 2 )
+    {
+        decodeIndexRun( [ & ]() noexcept
+                        { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8; q += 2; return v; } );
+    }
+    else
+    {
+        decodeIndexRun( [ & ]() noexcept
+                        { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24; q += 4; return v; } );
+    }
+    if( !rowOk )
+    {
+        r.ok = false;
+        return false;
+    }
+    std::uint32_t* tfOut = tfs.data();
+    if( tfWidth == 1 )
+    {
+        for( std::uint32_t k = 0; k < tokenCount; ++k )
+        {
+            tfOut[k] = *q++;
+        }
+    }
+    else if( tfWidth == 2 )
+    {
+        for( std::uint32_t k = 0; k < tokenCount; ++k )
+        {
+            tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8;
+            q += 2;
+        }
+    }
+    else
+    {
+        for( std::uint32_t k = 0; k < tokenCount; ++k )
+        {
+            tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24;
+            q += 4;
+        }
+    }
+    r.p += needBytes;
+    return true;
+}
 inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>& fileDict )
 {
     RawDef d; d.line = r.u32(); d.startByte = r.u32(); d.endByte = r.u32(); d.nameByte = r.u32(); d.bodyByte = r.u32(); d.cx = r.u32(); d.ccx = r.u32(); d.loc = r.u32(); d.locals = r.u32(); d.ppAlt = r.u16Of32(); d.humps = r.u16Of32(); d.deepLoc = r.u16Of32(); d.ev = r.u16Of32(); d.params = r.u16Of32(); d.paramsMin = r.u16Of32(); d.maxNest = r.u8(); d.arityExact = r.u8(); d.testScope = r.u8(); d.recovered = r.u8(); d.internalLinkage = r.u8(); d.scopeRootsStd = r.u8(); d.fnScopeStart = r.u32(); d.fnScopeEnd = r.u32(); d.kind = r.enumU8<SymKind>( kSymKindCount ); d.lang = r.enumU8<Lang>( kLangCount ); d.name = r.str(); d.scope = r.str();
@@ -2472,78 +2563,14 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     if( withLex && r.ok )
     {
         d.lex.dlWeighted = r.u32();
-        const std::uint32_t tokenCount = r.u32();
-        const std::uint8_t  tfWidth    = r.u8();
-        // a corrupt on-disk count/width must never reach resize() (the throw would escape ingest()'s
-        // never-throw contract) — every honest count is bounded by remaining bytes / min pair bytes
-        if( !r.ok || ( tfWidth != 1 && tfWidth != 2 && tfWidth != 4 ) ) { r.ok = false; return d; }
-        const unsigned    idxWidth  = lexDictIndexWidth( fileDict.size() );
-        const std::size_t needBytes = std::size_t( tokenCount ) * ( idxWidth + tfWidth );
-        if( std::size_t( r.end - r.p ) < needBytes ) { r.ok = false; return d; }
-        d.lex.tokenHashes.resize( tokenCount );
-        d.lex.tokenTfs.resize( tokenCount );
-        // decode indices → hashes through the file dict; the dict is strictly ascending (validated at
-        // load) and honest rows store strictly-ascending indices, so the decoded row is sorted — the
-        // invariant the query-time binary search relies on. Violations ⇒ corrupt ⇒ self-healing reparse.
-        // The whole row was bounds-checked ONCE above, so these are tight raw-pointer loops (this is the
-        // warm-path deserialize hot spot — ~1M pairs on a jax-class rich blob).
-        const unsigned char* q         = reinterpret_cast<const unsigned char*>( r.p );
-        const std::uint64_t* dict      = fileDict.data();
-        const std::uint32_t  dictCount = std::uint32_t( fileDict.size() );
-        std::uint64_t*       hashOut   = d.lex.tokenHashes.data();
-        std::uint32_t        prevIndex = 0;
-        bool                 rowOk     = true;
-        const auto decodeIndexRun = [ & ]( auto readOne )
+        if( !readLexPostingRow( r, fileDict, d.lex.tokenHashes, d.lex.tokenTfs ) )
         {
-            for( std::uint32_t k = 0; k < tokenCount; ++k )
-            {
-                const std::uint32_t dictIndex = readOne();
-                if( dictIndex >= dictCount || ( k > 0 && dictIndex <= prevIndex ) ) { rowOk = false; return; }
-                hashOut[k] = dict[ dictIndex ];
-                prevIndex  = dictIndex;
-            }
-        };
-        if( idxWidth == 1 )
-        {
-            decodeIndexRun( [ & ]() noexcept
-                            { return std::uint32_t( *q++ ); } );
+            return d;
         }
-        else if( idxWidth == 2 )
+        if( !readLexPostingRow( r, fileDict, d.lex.stemHashes, d.lex.stemTfs ) )
         {
-            decodeIndexRun( [ & ]() noexcept
-                            { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8; q += 2; return v; } );
+            return d;
         }
-        else
-        {
-            decodeIndexRun( [ & ]() noexcept
-                            { const std::uint32_t v = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24; q += 4; return v; } );
-        }
-        if( !rowOk ) { r.ok = false; return d; }
-        std::uint32_t* tfOut = d.lex.tokenTfs.data();
-        if( tfWidth == 1 )
-        {
-            for( std::uint32_t k = 0; k < tokenCount; ++k )
-            {
-                tfOut[k] = *q++;
-            }
-        }
-        else if( tfWidth == 2 )
-        {
-            for( std::uint32_t k = 0; k < tokenCount; ++k )
-            {
-                tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8;
-                q += 2;
-            }
-        }
-        else
-        {
-            for( std::uint32_t k = 0; k < tokenCount; ++k )
-            {
-                tfOut[k] = std::uint32_t( q[0] ) | std::uint32_t( q[1] ) << 8 | std::uint32_t( q[2] ) << 16 | std::uint32_t( q[3] ) << 24;
-                q += 4;
-            }
-        }
-        r.p += needBytes;
     }
     return d;
 }
@@ -3287,6 +3314,15 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                     {
                         runOffsets.push_back( mergeA.size() );
                     }
+                    const std::vector<std::uint64_t>& stemRow = defs[i].lex.stemHashes;
+                    for( const std::uint64_t hash : stemRow )
+                    {
+                        mergeA.push_back( LexPair{ hash, slotCount++ } );
+                    }
+                    if( !stemRow.empty() )
+                    {
+                        runOffsets.push_back( mergeA.size() );
+                    }
                 }
                 std::vector<LexPair>* src = &mergeA;
                 std::vector<LexPair>* dst = &mergeB;
@@ -3335,7 +3371,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                     writeDef( w, defs[i], captureValueUses, fileDict.size(), pairDictIndex.data() + rowOffset );
                     if( captureValueUses )
                     {
-                        rowOffset += defs[i].lex.tokenHashes.size();
+                        rowOffset += defs[i].lex.tokenHashes.size() + defs[i].lex.stemHashes.size();
                     }
                 }
             }
