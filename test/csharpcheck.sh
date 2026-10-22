@@ -23,8 +23,8 @@
 #   - `class Greeter : IGreeter` (base_list) emits an extends use-site: --uses=IGreeter shows
 #     role="extends" in_id="Greeter"; --lego=IGreeter lists Greeter as its one implementor.
 #     (§P8 2026-07-28: the attribute was in=, renamed to in_id= — see src/main.cpp runUses.)
-#   - `using System;` / `using CsharpFix.Services;` are captured as imports (ingest.cpp::
-#     captureIncludes' using_directive branch, NOT tags.scm — matches every other language):
+#   - `using System;` / `using CsharpFix.Services;` are captured as imports (the
+#     shared @import.path capture and CSharp normaliser):
 #     --uses=System shows role="import" p="Program.cs:1"; --deps lists both <inc t="…"/> targets
 #     verbatim (System, CsharpFix.Services) — proving both the bare-identifier and the dotted
 #     qualified_name using-directive shapes are captured.
@@ -222,6 +222,12 @@ grep -q "SH_EDGE_GONE:True" "$TMP/mut_check" \
 grep -q "MAIN_EDGE_GONE:True" "$TMP/mut_check" \
     && ok "mutation: renamed Program.cs call site -> Main -> SayHello edge vanished (non-tautological)" \
     || no "mutation: Main -> SayHello edge survived a renamed call site — the edge assertion is a tautology"
+
+if python3 "$ROOT/test/csharpimportcap.py" "$BIN" "$ROOT" "$TMP"; then
+    ok "C# slice 1a capture, legacy aliases, negative controls and depth disclosure"
+else
+    no "C# slice 1a capture arms failed"
+fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo

@@ -310,7 +310,7 @@ Start this only after STEP 0 clears the bar. It follows the path Dart took (comm
 
 ### STEP 5: relations, in a separate round
 
-- **`Imports`.** VB `Imports` is C#'s `using`; see `csharpUsingTarget` and
+- **`Imports`.** VB `Imports` is C#'s `using`; see `normaliseCSharpImport` in `src/ingest_importcap.h` and
   `kCsharpImportContainers` in `src/ingest_relations.h`. C# is deliberately absent from the
   import-narrowing table in `src/resolve.h`, because a namespace has no one-to-one file.
   `test/csharpcheck.sh`'s header explains why. Do the same for VB: capture `Imports` for `--uses`

@@ -239,7 +239,7 @@ for n in ( 1000, 16000 ):
     # captureFields, the declarator walk — a reference_declarator `T & /*…*/ m`
     w( "fielddecl/n%d/big.cpp" % n, [ "struct T { int q; };", "struct S", "{", "    T &" ] + [ C ] * n + [ "    m;", "};" ] )
     w( "fielddecl_off/n%d/big.cpp" % n, [ "struct T { int q; };", "struct S", "{", "    T & m;" ] + [ C ] * n + [ "};" ] )
-    # csharpUsingTarget — a using_directive; its control floods a method BODY (see the header: a class body
+    # normaliseCSharpImport — a using_directive; its control floods a method BODY (see the header: a class body
     # or the file root is an ancestor of every def, and the ancestor scan would read the flood too)
     w( "csusing/n%d/big.cs" % n, [ "using" ] + [ C ] * n + [ "    System.Text;", "namespace A { class K { void M() {} } }" ] )
     w( "csusing_off/n%d/big.cs" % n, [ "using System.Text;", "namespace A { class K { void M() {" ] + [ C ] * n + [ "} } }" ] )
@@ -519,7 +519,7 @@ pair(){ # $1 = label, $2 = walk fixture, $3 = control fixture, $4 = what the pai
 pair "(B13) captureMacroBodyCalls"      macroparams  macroparams_off "a preproc_params list 16000 children wide vs the identical flood outside the #define"
 pair "(B14) captureFields/type"         fieldtype    fieldtype_off   "a field's qualified_identifier type 16000 children wide vs the identical flood after the field"
 pair "(B15) captureFields/declarator"   fielddecl    fielddecl_off   "a field's reference_declarator 16000 children wide vs the identical flood after the field"
-pair "(B16) csharpUsingTarget"          csusing      csusing_off     "a using_directive 16000 children wide vs the identical flood inside a method body"
+pair "(B16) normaliseCSharpImport"      csusing      csusing_off     "a using_directive 16000 children wide vs the identical flood inside a method body"
 pair "(B17) phpUseTarget"               phpuse       phpuse_off      "a namespace_use_declaration 16000 children wide vs the identical flood after it"
 pair "(B18) jsModuleLoadTarget"         jsrequire    jsrequire_off   "require()'s arguments 16000 children wide vs the identical flood after the statement"
 pair "(B19) rubyNamespaceOnly"          rubyns       rubyns_off      "a class body_statement 16000 children wide vs the identical flood after the class"

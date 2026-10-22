@@ -227,8 +227,24 @@ ImportSpec normaliseGoImport( TSNode declaration, std::string_view src )
     return out;
 }
 
+// ── DepDialect::CSharp ───────────────────────────────────────────────────────────────────────────────
+// Preserve the walk's target selection, including its known alias gap: with the pinned grammar,
+// `using X = Foo.Bar` has no `type` field, so the first matching child is X. Fixing that or emitting
+// alias bindings belongs to 2b, after the shared binds channel (2a). Namespaces remain deferred in resolve.h.
+ImportSpec normaliseCSharpImport( TSNode directive, std::string_view src )
+{
+    // Grammar-bump insurance: never taken on the pinned grammar (an alias directive has no `type` field), no arm pins it.
+    if( const TSNode aliasType = fieldChild( directive, NodeField::Type ); !ts_node_is_null( aliasType ) )
+    {
+        return { importSpecifierText( aliasType, src ) };
+    }
+    // One cursor scan, including comment-heavy directives (childwalkscalecheck B16).
+    const TSNode c = firstChildOfKind( directive, /*namedOnly=*/true, { "qualified_name", "identifier", "generic_name", "alias_qualified_name" } );
+    return { ts_node_is_null( c ) ? std::string {} : importSpecifierText( c, src ) };
+}
+
 // ── the dispatch: ONE normaliser per DepDialect ──────────────────────────────────────────────────────
-// CFamily, Web, Go and Python are the dialects that have moved over so far; every other arm returns an empty ImportSpec,
+// CFamily, Web, Go, Python and CSharp have moved over so far; every other arm returns an empty ImportSpec,
 // which is what makes the capture INERT rather than wrong on a language whose tags.scm has not adopted
 // `@import.path` yet. Each `case` is deleted as its language moves, and the compiler then names every
 // other dialect still to do — the same "one language at a time" landing the issue asks for.
@@ -240,6 +256,7 @@ ImportSpec normaliseImportSpecifier( DepDialect dialect, TSNode directive, std::
         case DepDialect::Web:     return normaliseWebImport( directive, raw, src );
         case DepDialect::Go:      return normaliseGoImport( directive, src );
         case DepDialect::Python:  return { std::string( raw ) };   // preserve the first plain clause's written alias
+        case DepDialect::CSharp:  return normaliseCSharpImport( directive, src );
         default:                  return {};   // no other language captures @import.path yet
     }
 }
@@ -255,6 +272,7 @@ inline bool importsFromCapture( DepDialect dialect ) noexcept
         case DepDialect::Web:
         case DepDialect::Go:
         case DepDialect::Python:
+        case DepDialect::CSharp:
             return true;
         default:
             return false;
@@ -266,9 +284,9 @@ inline bool importsFromCapture( DepDialect dialect ) noexcept
 // specifier sits in the call's `arguments`.
 TSNode importDirectiveOf( DepDialect dialect, TSNode pathNode ) noexcept
 {
-    if( dialect == DepDialect::Go )
+    if( dialect == DepDialect::Go || dialect == DepDialect::CSharp )
     {
-        return pathNode;   // the Go capture IS the whole import_declaration
+        return pathNode;   // these captures ARE whole directives
     }
     const TSNode parent = ts_node_parent( pathNode );
     const bool hasParent = !ts_node_is_null( parent );

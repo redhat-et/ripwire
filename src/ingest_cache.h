@@ -345,7 +345,11 @@ constexpr std::uint32_t kCacheVersion = 36;           // 36: train 30 — strict
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 212;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 214;          // bump on any grammar/.scm/extraction change
+                                                      // 214 = 2026-10-21 (#358 1a, PR #420, merged with main 320f8d8f): C# using directives move to shared
+                                                      //   captures; import-free deep containers no longer disclose a cut or lose whole-cache eligibility.
+                                                      //   Alias/edge facts unchanged. Reserved for #420 above main 206 (rich 207) and the train-32 numbers
+                                                      //   212/213 (32a); train 32b goes above. Rich file tag 215. kCacheVersion stays 36 (no record format change).
                                                       // 212 = 2026-10-21 (train 32a: member-names + rust-receivers): strictly above every live number — main 206 (rich 207),
                                                       //   lane rust-receivers 202 (203), lane ix1-slot 204 (205), lane l6-iface 210 (211); #420 reserves 214 (215), so train
                                                       //   32b can go above. Rich file tag 213. kCacheVersion stays 36: neither lane changed a record format (rust-receivers

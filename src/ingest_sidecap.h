@@ -1639,7 +1639,7 @@ void captureSideFacts( const LangEntry& le, std::uint32_t fileId, std::string_vi
 #endif
 
         // Elixir directives share the lexical tags context below (ElixirContext), and as of #358 so do the
-        // C-family, Go, Python and TypeScript/JavaScript ones: their `@import.path` captures are normalised and emitted
+        // C-family, C#, Go, Python and TypeScript/JavaScript ones: their `@import.path` captures are normalised and emitted
         // by captureTagsFacts, and captureIncludes no longer reads a preproc_include / preproc_call /
         // import_statement / export_statement / require() call at all. The walk is pure cost for those
         // languages — it descends only allowlisted containers, and the tags query already reaches the same

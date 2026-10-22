@@ -7,10 +7,14 @@
 ;   - type declarations: class / struct / interface / record / enum  -> def nodes (the containers)
 ;   - method / constructor / property declarations -> the def nodes calls resolve TO
 ;   - invocations + object creations -> the call references (edges)
-;   - `using` directives -> captured separately by ingest.cpp::captureIncludes (NOT here — matches
-;     how every other language's imports are handled: tags.scm never captures imports directly).
+;   - `using` directives -> shared @import.path plus the CSharp normaliser; alias bindings remain
+;     out of scope (slice 2b after the shared binds channel, 2a).
 ;
 ; Deliberately NOT captured (noise, matching Java/Ruby): fields, local variables, attributes.
+
+; Capture the whole directive, as Go does: the normaliser preserves the old target selection and
+; both Include and Import RawRef stay sited at the directive, including a leading `global`.
+(using_directive) @import.path
 
 ; ---- definitions ----
 

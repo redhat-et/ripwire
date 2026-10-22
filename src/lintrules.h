@@ -206,7 +206,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // ingest.cpp's captureIncludes(): every language below has a node-type branch there (Cpp/C/ObjC's
 // preproc_include/#import, Python/TS/JS's import_statement(_from), Rust's use_declaration/mod_item,
 // Go/Swift/Java's import_declaration — Java shares that node-type SPELLING with Go/Swift so it is
-// captured too, even though only best-effort resolved — and C#'s using_directive; PHP's
+// captured too, even though only best-effort resolved — and C#'s using_directive (captured via @import.path since #358); PHP's
 // namespace_use_declaration joined them in the PHP/Lua port round).
 //
 // kParserVer 81 (the four-language import round) ADDED Bash/Ruby/Lua/Elixir. Each now has its own
