@@ -112,6 +112,7 @@ pub mod igpriv;
 pub mod igprel;
 pub mod igtests;
 pub mod iguse;
+pub mod igmacwrap;
 pub mod iga1;
 pub mod iga2;
 pub mod iga3;
@@ -819,6 +820,8 @@ ig_make!(IgThing);
 @@@ rsrecv/src/igmacre.rs
 pub use crate::igmacsup::*;
 pub use crate::igsup::*;
+@@@ rsrecv/src/igmacwrap.rs
+pub use crate::igmac::*;
 @@@ rsrecv/src/igcfg.rs
 #[cfg(unix)]
 pub use crate::igsup::*;
@@ -866,6 +869,7 @@ pub fn mac_tgt(x: crate::igmacre::IgThing) -> u8 { x.ig_m() }
 pub fn cfg_glob(x: crate::igcfg::IgThing) -> u8 { x.ig_m() }
 pub fn cfg_item(x: crate::igcfgre::IgThing) -> u8 { x.ig_m() }
 pub fn self_ctor() -> u8 { let t = crate::igtop::IgThing::make(); t.ig_m() }
+pub fn mac_nested(x: crate::igmacwrap::IgThing) -> u8 { x.ig_m() }
 @@@ rsrecv/src/iga1.rs
 pub use crate::iga2::*;
 @@@ rsrecv/src/iga2.rs

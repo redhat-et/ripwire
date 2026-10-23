@@ -1746,18 +1746,20 @@ proven      rsrecv callees "src/gcto.rs:gcto_bare" "method as_os $NS:10"        
 # bring in names its class exactly when EVERY glob there is followed in-tree and ONE class answers. [P] each hedged on base
 # e8f39f1c: a 1- and 2-module `pub use m::*` chain by a `use` and by its path, the one name only one of two globs supplies,
 # a glob cycle entered from either module (and both in one fn), `use super::*` in `mod tests` and its parent's own glob
-# of the chain, `-> Self` through a glob-re-exported qualifier, an 8-module chain (the walk's hop cap).
+# of the chain, `-> Self` through a glob-re-exported qualifier, an 8-module chain (the walk's hop cap), and a glob of a
+# module holding only a macro beside the supplier's glob (had the macro written IgThing, Rust would refuse the two globs).
 IG="src/igsup.rs"; IGU="src/iguse.rs"
-for f in chain2 chain2_path chain1 cyc_b cyc_a cyc_both self_ctor; do proven rsrecv callees "$IGU:$f" "method ig_m $IG:3"; done   # [P]
+for f in chain2 chain2_path chain1 cyc_b cyc_a cyc_both self_ctor mac_tgt; do proven rsrecv callees "$IGU:$f" "method ig_m $IG:3"; done   # [P]
 proven      rsrecv callees "$IGU:two_one" "method ig_o $IG:5"                                                      # [P]
 for f in outer inner; do proven rsrecv callees "src/igtests.rs:$f" "method ig_m $IG:3"; done                    # [P]
 proven      rsrecv callees "src/igdeepuse.rs:deep8" "method ig_d src/igdeep.rs:2"                                 # [P]
 # [N] never proven onto the glob's class (the true callee stays visible, hedged): two globs supplying one name; a named
 # `use` and an explicit item beside the glob (they shadow it: their own class is proven, base too); a glob of an external
 # crate beside the in-tree one; a glob of an enum (`use self::IgKind::*`: its variant IgThing); an item-position macro at
-# the module's level (it may declare the name) and in a globbed module; cfg-gated globs of two suppliers and a cfg-gated
-# duplicate item; a private prelude namesake a glob chain reaches (`Vec` is std's there); a 9-module chain (a cut).
-for f in two ext en mac mac_tgt cfg_glob cfg_item; do
+# the level of a module whose glob brings the name (its item would shadow the glob), there and through a glob of that
+# module; cfg-gated globs of two suppliers and a cfg-gated duplicate item; a private prelude namesake a glob chain reaches
+# (`Vec` is std's there); a 9-module chain (a cut).
+for f in two ext en mac mac_nested cfg_glob cfg_item; do
     notproven rsrecv callees "$IGU:$f" "ig_m $IG:3" "ig_m src/igdecoy.rs:3"                                     # [N]
     visible   rsrecv callees "$IGU:$f" "ig_m $IG:3"
 done

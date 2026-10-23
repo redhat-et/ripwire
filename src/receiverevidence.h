@@ -1397,7 +1397,9 @@ struct CallResultTypes
         "DoubleEndedIterator", "ExactSizeIterator", "Eq", "PartialEq", "Ord", "PartialOrd", "TryFrom", "TryInto", "FromIterator" };
     // ind5: rustGlobItem's step for one file `mf` of the module: each glob at the module's own level votes the class its
     // in-tree target supplies (rustItemAt there, following its own globs), kNoNode when it may supply one unseen (an outside
-    // or unresolved target, an answer that is not one class, a macro there), and nothing when the target provably lacks it
+    // or unresolved target, an answer that is not one class), and nothing when the target has no item, `use` or glob of the
+    // name — a macro there that wrote one would make a second glob supplier, which Rust refuses (a macro at the level whose
+    // own globs bring the name may shadow them: rustGlobItem's unknown)
     template <class AtLevel>
     void rustGlobVotes( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, Ballot& ballot ) const
     {
@@ -1420,9 +1422,9 @@ struct CallResultTypes
             }
             bool         has = false;
             const NodeId c   = rustItemAt( gc, gm, cls, depth, has );   // a glob hop spends the walk's own budget, not `depth`
-            if( has || c != kNoNode || rustTargetUnparsed( gc, gm ) )
+            if( has )
             {
-                ballot.vote( has ? c : kNoNode );
+                ballot.vote( c );
             }
         }
     }
