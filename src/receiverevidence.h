@@ -1458,19 +1458,21 @@ struct CallResultTypes
                 continue;
             }
             globbed = globbed || b->var == "*";
-            if( b->var == cls )
+            bool         has = true;
+            const NodeId c   = b->var == cls ? rustNamedReexport( mf, *b, depth, has ) : kNoNode;
+            if( b->var == cls && has )
             {
-                const auto [ modPath, item ] = splitLast( b->importedName, "::" );
-                bool         has = true;
-                const NodeId c   = modPath.empty() ? kNoNode : rustClassAt( mf, b->startByte, modPath, item, depth + 1, &has );
-                if( !has )
-                {
-                    continue;   // ind5: an in-tree module that has no such item (a glob cycle's open module adds nothing new)
-                }
                 hit   = found ? kNoNode : c;
                 found = true;
             }
         }
+    }
+    // rustFollowReexports' named step: the class the `use` row `b` of file `mf` reaches; `has` false (ind5) when its path is
+    // an in-tree module that provably has no such item — a glob cycle's open module, which adds nothing new
+    NodeId rustNamedReexport( std::uint32_t mf, const Binding& b, int depth, bool& has ) const
+    {
+        const auto [ modPath, item ] = splitLast( b.importedName, "::" );
+        return modPath.empty() ? kNoNode : rustClassAt( mf, b.startByte, modPath, item, depth + 1, &has );
     }
     // (L) a qualified Rust call whose qualifier is a module path reaching `target`'s own module (`model::load()`,
     // `crate::nest::holder()`, a `use`d `nest::holder()`): the evidence the canonical tier, keyed by type scopes, lacks

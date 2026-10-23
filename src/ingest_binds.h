@@ -6137,6 +6137,15 @@ inline bool rustModuleItem( TSNode n )
     return kindIs( ts_node_type( up ), "declaration_list" ) && !ts_node_is_null( mod ) && kindIs( ts_node_type( mod ), "mod_item" );
 }
 
+// ind5: an item-position macro at a module's own level is a row that may declare any item of the module
+inline void captureRustItemMacro( BindCtx& cx, TSNode n, std::uint32_t at )
+{
+    if( rustModuleItem( n ) )
+    {
+        pushTypeBind( cx, at, { 0u, 0u }, "!", kTypeBindItemMacro );
+    }
+}
+
 // FE-B for Rust (train 29): every name a function binds is a tombstone over its span — `let` patterns, parameters, closure
 // parameters, `for` / `if let` / `while let` / `match` patterns — so a typed binding never leaks to a shadowing one; a `let`
 // whose value is a call (through `?` / `.unwrap()` / `.expect()`) records one CallResult per bound name (a tuple pattern by
@@ -6151,9 +6160,9 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     {
         captureRustUseTree( cx, at, fieldChild( n, NodeField::Argument ), std::string{}, 0 );   // (L) fix round 1: `use` names
     }
-    else if( kindIs( t, "macro_invocation" ) && rustModuleItem( n ) )
+    else if( kindIs( t, "macro_invocation" ) )
     {
-        pushTypeBind( cx, at, { 0u, 0u }, "!", kTypeBindItemMacro );   // ind5: an item-position macro at a module's own level
+        captureRustItemMacro( cx, n, at );
     }
     else if( kindIs( t, "let_declaration" ) )
     {
