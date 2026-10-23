@@ -1575,17 +1575,20 @@ rs_none "src/other.rs::Shelf::near_same_named_owner"                            
 proven      rsrecv callers "$RSM::Cfg::tune" "fn let_default $RSA"
 notproven   rsrecv callers "$RSM::Cfg::tune" "near_default_outside $RSA" "glob_default src/nest/inner.rs" "glob_of_glob_default src/glob2/leaf.rs"
 proven      rsrecv callers "$RSM::Knob::tune" "fn glob_default src/nest/inner.rs"
-notproven   rsrecv callers "$RSM::Knob::tune" "let_default $RSA" "near_default_outside $RSA" "glob_of_glob_default src/glob2/leaf.rs"
+notproven   rsrecv callers "$RSM::Knob::tune" "let_default $RSA" "near_default_outside $RSA"
+proven      rsrecv callers "$RSM::Knob::tune" "fn glob_of_glob_default src/glob2/leaf.rs"                     # ind5: was [N] floor
 # a glob `use super::*` brings in what the parent module's own `use` names (Rust: a glob imports the module's imports
-# too); a glob of a module that only globs in turn is not followed (stated floor: names nothing, proves nothing) — and
-# (fix round 1, rv-l3 M1) neither does its `T::default()`: a callee's declared `-> Self` types the local only through a
-# qualifier that resolves at the site, so glob_of_glob_default is declined exactly as on base
+# too); ind5: a glob of a module that only globs in turn is followed too (a child sees its parent's private glob import),
+# so glob_of_glob's Book and glob_of_glob_default's `Knob::default()` (a callee's `-> Self` through a qualifier that now
+# resolves at the site) are proven — the [N] floor of rust-receivers / rv-l3 M1 is lifted by design (red on e8f39f1c)
 exactproven rsrecv callees "src/nest/inner.rs:glob_param" "method spin $RSM"                                     # [P]
 proven      rsrecv callees "src/nest/inner.rs:glob_param" "method spin $RSM:5"
 proven      rsrecv callees "src/nest/inner.rs:glob_default" "method tune $RSM:20"                                # [P] Knob's
 notproven   rsrecv callees "src/nest/inner.rs:glob_default" "tune $RSM:16"
-rs_none "src/glob2/leaf.rs:glob_of_glob"                                                                        # [N] floor
-notproven   rsrecv callees "src/glob2/leaf.rs:glob_of_glob_default" "tune $RSM:20" "tune $RSM:16"                # [N] floor (= base)
+exactproven rsrecv callees "src/glob2/leaf.rs:glob_of_glob" "method spin $RSM"                                  # [P] ind5
+proven      rsrecv callees "src/glob2/leaf.rs:glob_of_glob" "method spin $RSM:5"
+proven      rsrecv callees "src/glob2/leaf.rs:glob_of_glob_default" "method tune $RSM:20"                        # [P] ind5: Knob's
+notproven   rsrecv callees "src/glob2/leaf.rs:glob_of_glob_default" "tune $RSM:16"
 # early gates review (rv-l3-gates A1-A12; src/adds.rs, alias.rs, samename.rs, kinds.rs's trait). [P]: the field below
 # `&mut self`, by-value `self`, `&'a self`, a field written `&'a Book`, a `&Self` parameter's field, a `Self::new()` local's
 # field, a `&'a Book` parameter, a `use … as` alias (by the path it names: other::Book, never the in-tree model::Other its
@@ -1738,6 +1741,33 @@ for f in gctn.rs:gctn_bare gctq.rs:gctq_full; do
     notproven rsrecv callees "src/$f" "as_os $NS:10"                                                           # [N]
 done
 proven      rsrecv callees "src/gcto.rs:gcto_bare" "method as_os $NS:10"                                      # [P]
+# ind5 (IDEAS IND5 = FC1 card F1): in-tree glob re-exports are followed with a ONE-SUPPLIER rule. Rust refuses a use of a
+# name two globs supply as different items and an explicit item or `use` shadows them all, so a name the globs at a module
+# bring in names its class exactly when EVERY glob there is followed in-tree and ONE class answers. [P] each hedged on base
+# e8f39f1c: a 1- and 2-module `pub use m::*` chain by a `use` and by its path, the one name only one of two globs supplies,
+# a glob cycle entered from either module (and both in one fn), `use super::*` in `mod tests` and its parent's own glob
+# of the chain, `-> Self` through a glob-re-exported qualifier, an 8-module chain (the walk's hop cap).
+IG="src/igsup.rs"; IGU="src/iguse.rs"
+for f in chain2 chain2_path chain1 cyc_b cyc_a cyc_both self_ctor; do proven rsrecv callees "$IGU:$f" "method ig_m $IG:3"; done   # [P]
+proven      rsrecv callees "$IGU:two_one" "method ig_o $IG:5"                                                      # [P]
+for f in outer inner; do proven rsrecv callees "src/igtests.rs:$f" "method ig_m $IG:3"; done                    # [P]
+proven      rsrecv callees "src/igdeepuse.rs:deep8" "method ig_d src/igdeep.rs:2"                                 # [P]
+# [N] never proven onto the glob's class (the true callee stays visible, hedged): two globs supplying one name; a named
+# `use` and an explicit item beside the glob (they shadow it: their own class is proven, base too); a glob of an external
+# crate beside the in-tree one; a glob of an enum (`use self::IgKind::*`: its variant IgThing); an item-position macro at
+# the module's level (it may declare the name) and in a globbed module; cfg-gated globs of two suppliers and a cfg-gated
+# duplicate item; a private prelude namesake a glob chain reaches (`Vec` is std's there); a 9-module chain (a cut).
+for f in two ext en mac mac_tgt cfg_glob cfg_item; do
+    notproven rsrecv callees "$IGU:$f" "ig_m $IG:3" "ig_m src/igdecoy.rs:3"                                     # [N]
+    visible   rsrecv callees "$IGU:$f" "ig_m $IG:3"
+done
+notproven   rsrecv callees "$IGU:sh_use" "ig_m $IG:3"                                                             # [N]
+proven      rsrecv callees "$IGU:sh_use" "method ig_m src/igdecoy.rs:3"
+notproven   rsrecv callees "$IGU:sh_item" "ig_m $IG:3"                                                            # [N]
+proven      rsrecv callees "$IGU:sh_item" "method ig_m src/igshitem.rs:3"
+notproven   rsrecv callees "src/igprel.rs:prelude_vec" "ig_len $IG:7"                                             # [N]
+notproven   rsrecv callees "src/igdeepuse.rs:deep9" "ig_e src/igdeep.rs:4"                                        # [N]
+visible     rsrecv callees "src/igdeepuse.rs:deep9" "ig_e src/igdeep.rs:4"
 # guard: `Book::new()` is a path call the canonical tier answers (rustqualcheck's shape), unchanged
 proven      rsrecv callees "$RSA:let_new" "method new $RSM:4"
 

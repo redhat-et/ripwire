@@ -91,6 +91,46 @@ pub mod gczuse;
 pub mod gctn;
 pub mod gcto;
 pub mod gctq;
+pub mod igsup;
+pub mod igdecoy;
+pub mod igmid;
+pub mod igtop;
+pub mod igtwo;
+pub mod igshuse;
+pub mod igshitem;
+pub mod igcyca;
+pub mod igcycb;
+pub mod igext;
+pub mod igenum;
+pub mod igmac;
+pub mod igmacsup;
+pub mod igmacre;
+pub mod igcfg;
+pub mod igcfgsup;
+pub mod igcfgre;
+pub mod igpriv;
+pub mod igprel;
+pub mod igtests;
+pub mod iguse;
+pub mod iga1;
+pub mod iga2;
+pub mod iga3;
+pub mod iga4;
+pub mod iga5;
+pub mod iga6;
+pub mod iga7;
+pub mod iga8;
+pub mod igb1;
+pub mod igb2;
+pub mod igb3;
+pub mod igb4;
+pub mod igb5;
+pub mod igb6;
+pub mod igb7;
+pub mod igb8;
+pub mod igb9;
+pub mod igdeep;
+pub mod igdeepuse;
 @@@ rsrecv/src/model.rs
 // Book and Other both define spin / iter; Cfg and Knob both define tune: a call proves one only through its receiver's type.
 pub struct Book { pub items: Vec<u32> }
@@ -266,7 +306,7 @@ use super::*;
 pub fn glob_param(b: &Book) -> u8 { b.spin() }
 pub fn glob_default() -> u8 { let k = Knob::default(); k.tune() }
 @@@ rsrecv/src/glob2.rs
-// a module that globs model in; its child globs it in turn (a glob of a glob is not followed)
+// a module that globs model in; its child globs it in turn (ind5: a glob of a glob is followed)
 use crate::model::*;
 pub mod leaf;
 @@@ rsrecv/src/glob2/leaf.rs
@@ -731,6 +771,144 @@ use crate::gdo4::OsString;
 pub fn gcto_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
 @@@ rsrecv/src/gctq.rs
 pub fn gctq_full() -> u8 { let s = crate::gcz1::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/igsup.rs
+// ind5: the in-tree supplier a glob chain reaches (IgThing / IgOther / a private prelude namesake)
+pub struct IgThing;
+impl IgThing { pub fn ig_m(&self) -> u8 { 1 } pub fn make() -> Self { IgThing } }
+pub struct IgOther;
+impl IgOther { pub fn ig_o(&self) -> u8 { 2 } }
+struct Vec;
+impl Vec { pub fn ig_len(&self) -> u8 { 3 } }
+@@@ rsrecv/src/igdecoy.rs
+// ind5: a namesake supplier in another module: two globs bringing IgThing decline
+pub struct IgThing;
+impl IgThing { pub fn ig_m(&self) -> u8 { 4 } }
+pub struct IgDecoy;
+impl IgDecoy { pub fn ig_o(&self) -> u8 { 5 } pub fn ig_len(&self) -> u8 { 6 } pub fn ig_d(&self) -> u8 { 7 } pub fn ig_e(&self) -> u8 { 7 } }
+@@@ rsrecv/src/igmid.rs
+pub use crate::igsup::*;
+@@@ rsrecv/src/igtop.rs
+pub use crate::igmid::*;
+@@@ rsrecv/src/igtwo.rs
+pub use crate::igsup::*;
+pub use crate::igdecoy::*;
+@@@ rsrecv/src/igshuse.rs
+pub use crate::igsup::*;
+pub use crate::igdecoy::IgThing;
+@@@ rsrecv/src/igshitem.rs
+pub use crate::igsup::*;
+pub struct IgThing;
+impl IgThing { pub fn ig_m(&self) -> u8 { 8 } }
+@@@ rsrecv/src/igcyca.rs
+pub use crate::igcycb::*;
+pub use crate::igsup::*;
+@@@ rsrecv/src/igcycb.rs
+pub use crate::igcyca::*;
+@@@ rsrecv/src/igext.rs
+pub use serde_json::*;
+pub use crate::igsup::*;
+@@@ rsrecv/src/igenum.rs
+pub enum IgKind { IgThing, IgNone }
+pub use self::IgKind::*;
+pub use crate::igsup::*;
+@@@ rsrecv/src/igmac.rs
+pub use crate::igsup::*;
+ig_make!(IgThing);
+@@@ rsrecv/src/igmacsup.rs
+ig_make!(IgThing);
+@@@ rsrecv/src/igmacre.rs
+pub use crate::igmacsup::*;
+pub use crate::igsup::*;
+@@@ rsrecv/src/igcfg.rs
+#[cfg(unix)]
+pub use crate::igsup::*;
+#[cfg(not(unix))]
+pub use crate::igdecoy::*;
+@@@ rsrecv/src/igcfgsup.rs
+#[cfg(unix)]
+pub struct IgThing;
+#[cfg(not(unix))]
+pub struct IgThing;
+impl IgThing { pub fn ig_m(&self) -> u8 { 9 } }
+@@@ rsrecv/src/igcfgre.rs
+pub use crate::igcfgsup::*;
+@@@ rsrecv/src/igpriv.rs
+pub use crate::igsup::*;
+@@@ rsrecv/src/igprel.rs
+// ind5: igsup's Vec is private, so a glob of igpriv does not bring it: `Vec` here is the prelude's
+use crate::igpriv::*;
+pub fn prelude_vec(x: Vec) -> u8 { x.ig_len() }
+@@@ rsrecv/src/igtests.rs
+use crate::igtop::*;
+pub fn outer(x: IgThing) -> u8 { x.ig_m() }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn inner(x: IgThing) -> u8 { x.ig_m() }
+}
+@@@ rsrecv/src/iguse.rs
+// ind5 arms: a receiver typed through in-tree glob re-exports (one supplier: exact; anything else: never proven)
+use crate::igtop::IgThing;
+pub fn chain2(x: IgThing) -> u8 { x.ig_m() }
+pub fn chain2_path(x: crate::igtop::IgThing) -> u8 { x.ig_m() }
+pub fn chain1(x: crate::igmid::IgThing) -> u8 { x.ig_m() }
+pub fn two(x: crate::igtwo::IgThing) -> u8 { x.ig_m() }
+pub fn two_one(x: crate::igtwo::IgOther) -> u8 { x.ig_o() }
+pub fn sh_use(x: crate::igshuse::IgThing) -> u8 { x.ig_m() }
+pub fn sh_item(x: crate::igshitem::IgThing) -> u8 { x.ig_m() }
+pub fn cyc_b(x: crate::igcycb::IgThing) -> u8 { x.ig_m() }
+pub fn cyc_a(x: crate::igcyca::IgThing) -> u8 { x.ig_m() }
+pub fn cyc_both(a: crate::igcyca::IgThing, b: crate::igcycb::IgThing) -> u8 { b.ig_m() + a.ig_m() }
+pub fn ext(x: crate::igext::IgThing) -> u8 { x.ig_m() }
+pub fn en(x: crate::igenum::IgThing) -> u8 { x.ig_m() }
+pub fn mac(x: crate::igmac::IgThing) -> u8 { x.ig_m() }
+pub fn mac_tgt(x: crate::igmacre::IgThing) -> u8 { x.ig_m() }
+pub fn cfg_glob(x: crate::igcfg::IgThing) -> u8 { x.ig_m() }
+pub fn cfg_item(x: crate::igcfgre::IgThing) -> u8 { x.ig_m() }
+pub fn self_ctor() -> u8 { let t = crate::igtop::IgThing::make(); t.ig_m() }
+@@@ rsrecv/src/iga1.rs
+pub use crate::iga2::*;
+@@@ rsrecv/src/iga2.rs
+pub use crate::iga3::*;
+@@@ rsrecv/src/iga3.rs
+pub use crate::iga4::*;
+@@@ rsrecv/src/iga4.rs
+pub use crate::iga5::*;
+@@@ rsrecv/src/iga5.rs
+pub use crate::iga6::*;
+@@@ rsrecv/src/iga6.rs
+pub use crate::iga7::*;
+@@@ rsrecv/src/iga7.rs
+pub use crate::iga8::*;
+@@@ rsrecv/src/iga8.rs
+pub use crate::igdeep::*;
+@@@ rsrecv/src/igb1.rs
+pub use crate::igb2::*;
+@@@ rsrecv/src/igb2.rs
+pub use crate::igb3::*;
+@@@ rsrecv/src/igb3.rs
+pub use crate::igb4::*;
+@@@ rsrecv/src/igb4.rs
+pub use crate::igb5::*;
+@@@ rsrecv/src/igb5.rs
+pub use crate::igb6::*;
+@@@ rsrecv/src/igb6.rs
+pub use crate::igb7::*;
+@@@ rsrecv/src/igb7.rs
+pub use crate::igb8::*;
+@@@ rsrecv/src/igb8.rs
+pub use crate::igb9::*;
+@@@ rsrecv/src/igb9.rs
+pub use crate::igdeep::*;
+@@@ rsrecv/src/igdeep.rs
+pub struct IgDeep8;
+impl IgDeep8 { pub fn ig_d(&self) -> u8 { 10 } }
+pub struct IgDeep9;
+impl IgDeep9 { pub fn ig_e(&self) -> u8 { 11 } }
+@@@ rsrecv/src/igdeepuse.rs
+// ind5: glob chains of 8 (iga1..iga8) and 9 (igb1..igb9) modules; the walk follows 8 glob hops, a 9th is a cut: unknown
+pub fn deep8(x: crate::iga1::IgDeep8) -> u8 { x.ig_d() }
+pub fn deep9(x: crate::igb1::IgDeep9) -> u8 { x.ig_e() }
 @@@ rsrecv/benches/nsb.rs
 // fc1: a file outside every crate's module tree (a bench target): its qualifier resolves nowhere, so the base rule holds
 use rsrecv::nsown::OsString;
