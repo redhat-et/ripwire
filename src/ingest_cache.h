@@ -345,7 +345,9 @@ constexpr std::uint32_t kCacheVersion = 36;           // 36: train 30 — strict
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 202;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 222;          // bump on any grammar/.scm/extraction change
+                                                      // 222 = 2026-10-22 (lane ind5-glob-imports, reservation 222 / rich 223; the train renumbers):
+                                                      //   Rust records an "itemmacro" row (var "!") for an item-position macro at a module's own level.
                                                       // 202 = 2026-10-18 (train 32 lane rust-receivers, reservation 202 / rich 203; the train renumbers):
                                                       //   Rust records a typed RecvType for a parameter / `let x: T` / `let x = T { .. }` / `T::default()`
                                                       //   written or constructed as a type, and a MemberType for a struct's named field (ingest_binds.h

@@ -3169,7 +3169,7 @@ inline std::string_view stdElementType( std::string_view written ) noexcept
 // receiver evidence types (receiverevidence.h narrowTypedLocal): a parameter, local or field WRITTEN as an in-tree type —
 // `s: &mut Stack<i32>`, `let s = Stack { .. }`, `self.inner` declared `Stack<i32>`, `book: &Book` where Book defines iter —
 // or a call result. The receiver exception itself reads nothing for Rust (stdReceiverOf reads C++ written types only), so
-// its STATED FLOOR is what Rust does not type: a generic bound, dyn / impl Trait, a type alias, a glob of a glob, a tuple-struct
+// its STATED FLOOR is what Rust does not type: a generic bound, dyn / impl Trait, a type alias, an ambiguous glob import, a tuple-struct
 // field, a non-plain pattern, a value behind Option / Result / Rc / Arc / RefCell / Cell / Mutex / RwLock — declined with the false edges, counted (declined_calls=, <stdm>), never silently dropped.
 // C has no member functions. GO has an EMPTY row: its common member names
 // (Len, Write, String, Error, Reset, Lock, Unlock) are methods in-tree types implement on purpose to satisfy an interface,

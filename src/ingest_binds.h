@@ -6116,6 +6116,27 @@ inline void captureRustField( BindCtx& cx, TSNode n, std::uint32_t at )
     }
 }
 
+// ind5: does the node stand where a module's items stand — a file's top level or an inline `mod`'s body (a statement-wrapped
+// macro there too)? An item-position macro there may declare any item of the module (ReceiverEvidence's glob walk)
+inline bool rustModuleItem( TSNode n )
+{
+    TSNode up = ts_node_parent( n );
+    if( !ts_node_is_null( up ) && kindIs( ts_node_type( up ), "expression_statement" ) )
+    {
+        up = ts_node_parent( up );
+    }
+    if( ts_node_is_null( up ) )
+    {
+        return false;
+    }
+    if( kindIs( ts_node_type( up ), "source_file" ) )
+    {
+        return true;
+    }
+    const TSNode mod = ts_node_parent( up );
+    return kindIs( ts_node_type( up ), "declaration_list" ) && !ts_node_is_null( mod ) && kindIs( ts_node_type( mod ), "mod_item" );
+}
+
 // FE-B for Rust (train 29): every name a function binds is a tombstone over its span — `let` patterns, parameters, closure
 // parameters, `for` / `if let` / `while let` / `match` patterns — so a typed binding never leaks to a shadowing one; a `let`
 // whose value is a call (through `?` / `.unwrap()` / `.expect()`) records one CallResult per bound name (a tuple pattern by
@@ -6129,6 +6150,10 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     else if( kindIs( t, "use_declaration" ) )
     {
         captureRustUseTree( cx, at, fieldChild( n, NodeField::Argument ), std::string{}, 0 );   // (L) fix round 1: `use` names
+    }
+    else if( kindIs( t, "macro_invocation" ) && rustModuleItem( n ) )
+    {
+        pushTypeBind( cx, at, { 0u, 0u }, "!", kTypeBindItemMacro );   // ind5: an item-position macro at a module's own level
     }
     else if( kindIs( t, "let_declaration" ) )
     {
