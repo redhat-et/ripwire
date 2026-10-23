@@ -6179,21 +6179,16 @@ inline void captureRustItemVisibility( BindCtx& cx, TSNode n, std::uint32_t at )
 
 // ind5 fix 1: the nodes whose facts the glob walk reads: an item-position macro (it may declare any item) and a type-like item (how
 // far it shows)
-inline constexpr std::string_view kRustModuleItemKinds[] = { "macro_invocation", "struct_item", "enum_item", "union_item", "trait_item" };
-inline bool rustModuleItemKind( const char* t )
+inline constexpr std::string_view kRustVisibleItemKinds[] = { "struct_item", "enum_item", "union_item", "trait_item" };
+inline bool captureRustModuleItem( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
 {
-    return std::ranges::find( kRustModuleItemKinds, std::string_view( t ) ) != std::end( kRustModuleItemKinds );
-}
-inline void captureRustModuleItem( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
-{
-    if( kindIs( t, "macro_invocation" ) )
+    const bool macro = kindIs( t, "macro_invocation" );
+    if( macro || std::ranges::find( kRustVisibleItemKinds, std::string_view( t ) ) != std::end( kRustVisibleItemKinds ) )
     {
-        captureRustItemMacro( cx, n, at );
+        macro ? captureRustItemMacro( cx, n, at ) : captureRustItemVisibility( cx, n, at );
+        return true;
     }
-    else
-    {
-        captureRustItemVisibility( cx, n, at );
-    }
+    return false;
 }
 
 // FE-B for Rust (train 29): every name a function binds is a tombstone over its span — `let` patterns, parameters, closure
@@ -6210,9 +6205,9 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     {
         captureRustUseTree( cx, at, fieldChild( n, NodeField::Argument ), std::string{}, 0 );   // (L) fix round 1: `use` names
     }
-    else if( rustModuleItemKind( t ) )
+    else if( captureRustModuleItem( cx, n, t, at ) )
     {
-        captureRustModuleItem( cx, n, t, at );
+        return;   // an item-position macro or a type-like item
     }
     else if( kindIs( t, "let_declaration" ) )
     {
