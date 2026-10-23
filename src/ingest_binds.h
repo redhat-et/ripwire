@@ -6177,6 +6177,24 @@ inline void captureRustItemVisibility( BindCtx& cx, TSNode n, std::uint32_t at )
     cx.binds->push_back( std::move( row ) );
 }
 
+// ind5 fix 1: the nodes whose facts the glob walk reads: an item-position macro (it may declare any item) and a type-like item (how
+// far it shows)
+inline bool rustModuleItemKind( const char* t )
+{
+    return kindIs( t, "macro_invocation" ) || kindIs( t, "struct_item" ) || kindIs( t, "enum_item" ) || kindIs( t, "union_item" ) || kindIs( t, "trait_item" );
+}
+inline void captureRustModuleItem( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
+{
+    if( kindIs( t, "macro_invocation" ) )
+    {
+        captureRustItemMacro( cx, n, at );
+    }
+    else
+    {
+        captureRustItemVisibility( cx, n, at );
+    }
+}
+
 // FE-B for Rust (train 29): every name a function binds is a tombstone over its span — `let` patterns, parameters, closure
 // parameters, `for` / `if let` / `while let` / `match` patterns — so a typed binding never leaks to a shadowing one; a `let`
 // whose value is a call (through `?` / `.unwrap()` / `.expect()`) records one CallResult per bound name (a tuple pattern by
@@ -6191,13 +6209,9 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     {
         captureRustUseTree( cx, at, fieldChild( n, NodeField::Argument ), std::string{}, 0 );   // (L) fix round 1: `use` names
     }
-    else if( kindIs( t, "macro_invocation" ) )
+    else if( rustModuleItemKind( t ) )
     {
-        captureRustItemMacro( cx, n, at );
-    }
-    else if( kindIs( t, "struct_item" ) || kindIs( t, "enum_item" ) || kindIs( t, "union_item" ) || kindIs( t, "trait_item" ) )
-    {
-        captureRustItemVisibility( cx, n, at );
+        captureRustModuleItem( cx, n, t, at );
     }
     else if( kindIs( t, "let_declaration" ) )
     {
