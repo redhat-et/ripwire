@@ -1802,6 +1802,20 @@ visible     rsrecv callees "src/igo.rs:call_no" "ig_mn src/ign/a.rs:2"
 # and then at igpa (igpa's answer under igpb's open walk is a part, never kept)
 proven      rsrecv callees "src/igdeepuse.rs:deep9_second" "method ig_e src/igdeep.rs:4"                          # [P]
 for f in part_b part_a; do proven rsrecv callees "src/igpartuse.rs:$f" "method ig_m $IG:3"; done                 # [P]
+# ind5 fix 2 (rv-ind5-delta1 C1; INVERTED RULE: a supplier reached through an import counts only when the import is KNOWN to show to the
+# importer): a PRIVATE named `use` / glob in an intermediate module is not the supplier beside a macro-made visible one. [N] one hop (p1 named,
+# p2 glob), two hops under a `pub use` glob (p13 named, p14 glob); the decoy row stays visible. p1 is FC1 pre-existing (red at e8f39f1c too)
+FP="src/igfixp.rs"
+for f in "call_p1 ig_q1 4" "call_p2 ig_q2 8" "call_p13 ig_q13 12" "call_p14 ig_q14 17"; do                       # fn, method, its definition line
+    read -r fn m line <<<"$f"
+    notproven rsrecv callees "$FP:$fn" "$m $FP:$line"                                                             # [N] C1
+    visible   rsrecv callees "$FP:$fn" "$m $FP:$line"
+done
+# [P] guards: a `pub(crate) use` glob and a `pub use` of a name stay the supplier; a private `use` seen by a module below its own stays seen
+proven      rsrecv callees "$FP:call_p3"  "method ig_q3 $FP:24"                                                   # [P] pub(crate) glob, only supplier
+proven      rsrecv callees "$FP:call_p16" "method ig_q16 $FP:27"                                                  # [P] pub named use beside another name's macro
+proven      rsrecv callees "$FP:call_p18" "method ig_q18 $FP:31"                                                  # [P] private use seen by a descendant (tests)
+visible     rsrecv callees "$FP:call_p15" "ig_q15 $FP:33"                                                         # private glob seen by a descendant: hedged or proven, never lost
 # guard: `Book::new()` is a path call the canonical tier answers (rustqualcheck's shape), unchanged
 proven      rsrecv callees "$RSA:let_new" "method new $RSM:4"
 

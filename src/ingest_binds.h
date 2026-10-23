@@ -6146,35 +6146,54 @@ inline void captureRustItemMacro( BindCtx& cx, TSNode n, std::uint32_t at )
     }
 }
 
-// ind5 fix 1: a struct / enum / union / trait that is not plain `pub` is a row (var "!", importedName = its name) naming how far it
-// shows; a glob imports only what the importing module can see (ReceiverEvidence's glob walk)
-inline void captureRustItemVisibility( BindCtx& cx, TSNode n, std::uint32_t at )
+// ind5 fix 2: the mark of the visibility modifier a Rust item or `use` (node `n`) carries — kTypeBindPublic for plain `pub`, kTypeBindCrate /
+// Super / Restricted for the `pub(...)` forms, kTypeBindPrivate for none or `pub(self)`
+inline std::string_view rustVisibilityMark( TSNode n, std::string_view src )
 {
-    const TSNode name = fieldChild( n, NodeField::Name );
-    if( ts_node_is_null( name ) )
-    {
-        return;
-    }
-    std::string_view mark = kTypeBindPrivate;
     for( std::uint32_t i = 0, k = ts_node_named_child_count( n ); i < k; ++i )
     {
         const TSNode c = ts_node_named_child( n, i );
         if( kindIs( ts_node_type( c ), "visibility_modifier" ) )
         {
-            const std::string_view text = nodeTextOf( c, cx.src );
-            if( text == "pub" )
-            {
-                return;   // visible to every importer: no row
-            }
-            mark = text == "pub(crate)" ? kTypeBindCrate : text == "pub(self)" ? kTypeBindPrivate : text == "pub(super)" ? kTypeBindSuper : kTypeBindRestricted;
-            break;
+            const std::string_view text = nodeTextOf( c, src );
+            return text == "pub" ? kTypeBindPublic : text == "pub(crate)" ? kTypeBindCrate : text == "pub(self)" ? kTypeBindPrivate : text == "pub(super)" ? kTypeBindSuper : kTypeBindRestricted;
         }
+    }
+    return kTypeBindPrivate;
+}
+
+// ind5 fix 1: a struct / enum / union / trait that is not plain `pub` is a row (var "!", importedName = its name) naming how far it
+// shows; a glob imports only what the importing module can see (ReceiverEvidence's glob walk)
+inline void captureRustItemVisibility( BindCtx& cx, TSNode n, std::uint32_t at )
+{
+    const TSNode name = fieldChild( n, NodeField::Name );
+    const std::string_view mark = rustVisibilityMark( n, cx.src );
+    if( ts_node_is_null( name ) || mark == kTypeBindPublic )
+    {
+        return;   // visible to every importer: no row
     }
     RawBind row{ .fileId = cx.fileId, .startByte = at, .lang = cx.lang, .kind = LocalBindKind::TypeAlias };
     row.var.assign( "!" );
     row.importedName.assign( nodeTextOf( name, cx.src ) );
     row.typeName.assign( mark );
     cx.binds->push_back( std::move( row ) );
+}
+
+// ind5 fix 2: a Rust `use` with a visibility modifier (`pub use`, `pub(crate) use`, ...) is a row (var "!", importedName = kTypeBindUse, startByte =
+// the `use`'s start) naming how far its names show; one without is private, shown to its module and below. A glob imports only the names the
+// importing module can see — through the module's `use`s too (ReceiverEvidence's glob walk)
+inline void captureRustUse( BindCtx& cx, TSNode n, std::uint32_t at )
+{
+    const std::string_view mark = rustVisibilityMark( n, cx.src );
+    if( mark != kTypeBindPrivate )
+    {
+        RawBind row{ .fileId = cx.fileId, .startByte = at, .lang = cx.lang, .kind = LocalBindKind::TypeAlias };
+        row.var.assign( "!" );
+        row.importedName.assign( kTypeBindUse );
+        row.typeName.assign( mark );
+        cx.binds->push_back( std::move( row ) );
+    }
+    captureRustUseTree( cx, at, fieldChild( n, NodeField::Argument ), std::string{}, 0 );   // (L) fix round 1: `use` names
 }
 
 // ind5 fix 1: the nodes whose facts the glob walk reads: an item-position macro (it may declare any item) and a type-like item (how
@@ -6203,7 +6222,7 @@ inline void captureRustEvidence( BindCtx& cx, TSNode n, const char* t, std::uint
     }
     else if( kindIs( t, "use_declaration" ) )
     {
-        captureRustUseTree( cx, at, fieldChild( n, NodeField::Argument ), std::string{}, 0 );   // (L) fix round 1: `use` names
+        captureRustUse( cx, n, at );
     }
     else if( captureRustModuleItem( cx, n, t, at ) )
     {

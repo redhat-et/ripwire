@@ -1261,6 +1261,11 @@ inline constexpr std::string_view kTypeBindPrivate    = "private";
 inline constexpr std::string_view kTypeBindCrate      = "crate";
 inline constexpr std::string_view kTypeBindSuper      = "super";
 inline constexpr std::string_view kTypeBindRestricted = "restricted";
+// ind5 fix 2: a Rust `use` that carries a visibility modifier is a row too (var "!", importedName = kTypeBindUse, startByte = the `use`'s start,
+// the same byte its TypeImport rows carry): "public" = plain `pub`, "crate" / "super" / "restricted" as above. A `use` WITHOUT a row is private
+// (or `pub(self)`): shown to its module and the modules below it. A glob imports only the names its module's imports show the importer
+inline constexpr std::string_view kTypeBindPublic = "public";
+inline constexpr std::string_view kTypeBindUse    = "use";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
 inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::TypeAlias ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).

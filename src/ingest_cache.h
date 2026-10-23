@@ -348,6 +348,11 @@ constexpr std::uint32_t kCacheVersion = 36;           // 36: train 30 — strict
 constexpr std::uint32_t kParserVer    = 222;          // bump on any grammar/.scm/extraction change
                                                       // 222 = 2026-10-22 (lane ind5-glob-imports, reservation 222 / rich 223; the train renumbers):
                                                       //   Rust records an "itemmacro" row (var "!") for an item-position macro at a module's own level.
+                                                      //   Fix round 1 adds the visibility rows (var "!", importedName = the item's name) of a struct / enum /
+                                                      //   union / trait that is not plain `pub`; fix round 2 adds one (importedName "use") for each `use`
+                                                      //   WITH a visibility modifier (`pub use`, `pub(crate) use`, ...) — a `use` without one is private. A
+                                                      //   cache written by an earlier build of this lane lacks them (every item reads as `pub`, every `pub use`
+                                                      //   as private): lane dev caches only, the train renumbers.
                                                       // 202 = 2026-10-18 (train 32 lane rust-receivers, reservation 202 / rich 203; the train renumbers):
                                                       //   Rust records a typed RecvType for a parameter / `let x: T` / `let x = T { .. }` / `T::default()`
                                                       //   written or constructed as a type, and a MemberType for a struct's named field (ingest_binds.h

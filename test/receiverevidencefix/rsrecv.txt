@@ -142,6 +142,7 @@ pub mod igb8;
 pub mod igb9;
 pub mod igdeep;
 pub mod igdeepuse;
+pub mod igfixp;
 @@@ rsrecv/src/model.rs
 // Book and Other both define spin / iter; Cfg and Knob both define tune: a call proves one only through its receiver's type.
 pub struct Book { pub items: Vec<u32> }
@@ -1002,6 +1003,41 @@ pub mod rcall { pub use crate::igfixa::rp::*; pub use crate::igfixa::rm::*; pub 
 // B2 in an inline mod: its own item macro beside a one-hop glob and beside a chain
 pub mod ci { use crate::igsup::*; ig_make!(IgThing); pub fn call_ci(x: &IgThing) -> u8 { x.ig_m() } }
 pub mod di { use crate::igtop::*; ig_make!(IgThing); pub fn call_di(x: &IgThing) -> u8 { x.ig_m() } }
+@@@ rsrecv/src/igfixp.rs
+// ind5 fix 2 (rv-ind5-delta1 C1, rustc-checked there): an import's OWN visibility. A PRIVATE `use` / glob in an intermediate module is invisible to
+// an importer outside it, so it is not the supplier a macro-made visible one beside it conflicts with (ig_make! stands for a macro_rules!
+// writing `pub struct $n` + an impl). One hop (p1: a named `use`; p2: a glob) and two hops (p13: a named `use`, p14: a glob, each under a `pub use` glob)
+pub mod p1_a { pub struct IgQ1; impl IgQ1 { pub fn ig_q1(&self) -> u8 { 1 } } }
+pub mod p1_b { use crate::igfixp::p1_a::IgQ1; }
+pub mod p1_mac { ig_make!(IgQ1); }
+pub mod p1_call { use crate::igfixp::p1_b::*; use crate::igfixp::p1_mac::*; pub fn call_p1(x: &IgQ1) -> u8 { x.ig_q1() } }
+pub mod p2_a { pub struct IgQ2; impl IgQ2 { pub fn ig_q2(&self) -> u8 { 1 } } }
+pub mod p2_b { use crate::igfixp::p2_a::*; }
+pub mod p2_mac { ig_make!(IgQ2); }
+pub mod p2_call { use crate::igfixp::p2_b::*; use crate::igfixp::p2_mac::*; pub fn call_p2(x: &IgQ2) -> u8 { x.ig_q2() } }
+pub mod p13_a { pub struct IgQ13; impl IgQ13 { pub fn ig_q13(&self) -> u8 { 1 } } }
+pub mod p13_b { use crate::igfixp::p13_a::IgQ13; }
+pub mod p13_c { pub use crate::igfixp::p13_b::*; }
+pub mod p13_mac { ig_make!(IgQ13); }
+pub mod p13_call { use crate::igfixp::p13_c::*; use crate::igfixp::p13_mac::*; pub fn call_p13(x: &IgQ13) -> u8 { x.ig_q13() } }
+pub mod p14_a { pub struct IgQ14; impl IgQ14 { pub fn ig_q14(&self) -> u8 { 1 } } }
+pub mod p14_b { use crate::igfixp::p14_a::*; }
+pub mod p14_c { pub use crate::igfixp::p14_b::*; }
+pub mod p14_mac { ig_make!(IgQ14); }
+pub mod p14_call { use crate::igfixp::p14_c::*; use crate::igfixp::p14_mac::*; pub fn call_p14(x: &IgQ14) -> u8 { x.ig_q14() } }
+// [P] guards: a `pub use` named / `pub(crate) use` glob is seen by the importer (the macro writes ANOTHER name, so the supplier stays one);
+// a private `use` seen by a module below its own (`mod tests { use super::*; }`, here an inline mod two ways)
+pub mod p3_a { pub struct IgQ3; impl IgQ3 { pub fn ig_q3(&self) -> u8 { 1 } } }
+pub mod p3_b { pub(crate) use crate::igfixp::p3_a::*; }
+pub mod p3_call { use crate::igfixp::p3_b::*; pub fn call_p3(x: &IgQ3) -> u8 { x.ig_q3() } }
+pub mod p16_a { pub struct IgQ16; impl IgQ16 { pub fn ig_q16(&self) -> u8 { 1 } } }
+pub mod p16_b { pub use crate::igfixp::p16_a::IgQ16; }
+pub mod p16_mac { ig_make!(IgQ16x); }
+pub mod p16_call { use crate::igfixp::p16_b::*; use crate::igfixp::p16_mac::*; pub fn call_p16(x: &IgQ16) -> u8 { x.ig_q16() } }
+pub mod p18_a { pub struct IgQ18; impl IgQ18 { pub fn ig_q18(&self) -> u8 { 1 } } }
+pub mod p18 { use crate::igfixp::p18_a::IgQ18; pub mod tests { use super::*; pub fn call_p18(x: &IgQ18) -> u8 { x.ig_q18() } } }
+pub mod p15_a { pub struct IgQ15; impl IgQ15 { pub fn ig_q15(&self) -> u8 { 1 } } }
+pub mod p15_b { use crate::igfixp::p15_a::*; pub mod d { use super::*; pub fn call_p15(x: &IgQ15) -> u8 { x.ig_q15() } } }
 @@@ rsrecv/benches/nsb.rs
 // fc1: a file outside every crate's module tree (a bench target): its qualifier resolves nowhere, so the base rule holds
 use rsrecv::nsown::OsString;
