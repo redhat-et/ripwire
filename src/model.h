@@ -1254,6 +1254,13 @@ inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // ind5: a Rust item-position macro at a module's own level (var "!", no span): it may declare any item of the module. Read
 // ONLY by ReceiverEvidence's glob walk (bindsWithoutTarget leaves it out, so every other reader of "!" rows is unchanged)
 inline constexpr std::string_view kTypeBindItemMacro = "itemmacro";
+// ind5 fix 1: a Rust struct / enum / union / trait that is not plain `pub` (var "!", importedName = its name, startByte = the item's
+// start). "private" = no visibility modifier or `pub(self)`, "crate" = `pub(crate)`, "super" = `pub(super)`, "restricted" = any other `pub(...)`. Read ONLY
+// by ReceiverEvidence's glob walk (a glob imports only what the importing module can see); bindsWithoutTarget leaves it out
+inline constexpr std::string_view kTypeBindPrivate    = "private";
+inline constexpr std::string_view kTypeBindCrate      = "crate";
+inline constexpr std::string_view kTypeBindSuper      = "super";
+inline constexpr std::string_view kTypeBindRestricted = "restricted";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
 inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::TypeAlias ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).

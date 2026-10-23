@@ -112,6 +112,16 @@ pub mod igpriv;
 pub mod igprel;
 pub mod igtests;
 pub mod iguse;
+pub mod igfixa;
+pub mod igfixc;
+pub mod igfixd;
+pub mod igfixt;
+pub mod ign;
+pub mod igo;
+pub mod igfixm;
+pub mod igpa;
+pub mod igpb;
+pub mod igpartuse;
 pub mod igmacwrap;
 pub mod iga1;
 pub mod iga2;
@@ -913,6 +923,85 @@ impl IgDeep9 { pub fn ig_e(&self) -> u8 { 11 } }
 // ind5: glob chains of 8 (iga1..iga8) and 9 (igb1..igb9) modules; the walk follows 8 glob hops, a 9th is a cut: unknown
 pub fn deep8(x: crate::iga1::IgDeep8) -> u8 { x.ig_d() }
 pub fn deep9(x: crate::igb1::IgDeep9) -> u8 { x.ig_e() }
+// ind5 fix 1 (rv-ind5 B4): the cut walk of deep9 above memoizes nothing, so a SECOND entry into the same chain, 6 hops from the supplier, is whole
+pub fn deep9_second(x: crate::igb3::IgDeep9) -> u8 { x.ig_e() }
+@@@ rsrecv/src/igpa.rs
+// ind5 fix 1 (rv-ind5 B4): a glob cycle igpa <-> igpb whose only supplier sits on igpb's side (the nushell ansi_coloring shape: the module
+// entered second is a PART of the walk that entered the cycle at igpb, and that part must not be kept as igpa's answer)
+pub use crate::igpb::*;
+@@@ rsrecv/src/igpb.rs
+pub use crate::igpa::*;
+pub use crate::igsup::*;
+@@@ rsrecv/src/igpartuse.rs
+pub fn part_b(x: crate::igpb::IgThing) -> u8 { x.ig_m() }
+pub fn part_a(x: crate::igpa::IgThing) -> u8 { x.ig_m() }
+@@@ rsrecv/src/igfixc.rs
+// ind5 fix 1 (rv-ind5 B2): this module's OWN item macro beside a one-hop glob: the macro's item shadows the glob (rustc-checked)
+use crate::igsup::*;
+ig_make!(IgThing);
+pub fn call_c(x: &IgThing) -> u8 { x.ig_m() }
+@@@ rsrecv/src/igfixd.rs
+// ind5 fix 1 (rv-ind5 B2): ... and beside a glob CHAIN (igtop -> igmid -> igsup)
+use crate::igtop::*;
+ig_make!(IgThing);
+pub fn call_d(x: &IgThing) -> u8 { x.ig_m() }
+@@@ rsrecv/src/ign.rs
+pub mod a;
+pub mod b;
+@@@ rsrecv/src/ign/a.rs
+pub(super) struct IgFn;
+impl IgFn { pub fn ig_mn(&self) -> u8 { 1 } }
+@@@ rsrecv/src/ign/b.rs
+// ind5 fix 1 (B3 guard): a `pub(super)` item is seen from a module below the parent (here ign::b, a sibling of ign::a)
+use super::a::*;
+pub fn call_nb(x: &IgFn) -> u8 { x.ig_mn() }
+@@@ rsrecv/src/igfixm.rs
+ig_make!(IgFn);
+@@@ rsrecv/src/igo.rs
+// ind5 fix 1 (B3): ... and is NOT seen from a module outside the parent, beside a macro-made visible IgFn
+use crate::ign::a::*;
+use crate::igfixm::*;
+pub fn call_no(x: &IgFn) -> u8 { x.ig_mn() }
+@@@ rsrecv/src/igfixt.rs
+// ind5 fix 1 (rv-ind5 B3 guard): a PRIVATE item seen by a module below its own (`use super::*` in tests) stays the supplier
+struct IgFt;
+impl IgFt { pub fn ig_mt(&self) -> u8 { 1 } }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn call_t(x: &IgFt) -> u8 { x.ig_mt() }
+}
+@@@ rsrecv/src/igfixa.rs
+// ind5 fix 1 (rv-ind5 B1-B3): the review's shapes (rustc-checked there); ig_make! stands for a macro_rules! writing `pub struct $n` + an impl
+// B1: a named `use` of a module that gets the name only through a glob of a macro-made item; the sibling glob supplies a namesake
+pub mod ua { ig_make!(IgFa); }
+pub mod ma { pub use crate::igfixa::ua::*; }
+pub mod oa { pub struct IgFa; impl IgFa { pub fn ig_ma(&self) -> u8 { 1 } } }
+pub mod ka { pub use crate::igfixa::ma::IgFa; pub use crate::igfixa::oa::*; }
+pub mod ca {
+    use crate::igfixa::ka::*;
+    pub fn call_a2(x: &IgFa) -> u8 { x.ig_ma() }
+    pub fn call_a(x: &crate::igfixa::ka::IgFa) -> u8 { x.ig_ma() }
+}
+// B3: a private item reached by a glob chain beside a visible macro-made supplier (and one hop away, without the chain)
+pub mod vp { struct IgFv; impl IgFv { pub fn ig_mv(&self) -> u8 { 1 } } }
+pub mod vc { pub use crate::igfixa::vp::*; }
+pub mod vm { ig_make!(IgFv); }
+pub mod vcall { pub use crate::igfixa::vc::*; pub use crate::igfixa::vm::*; pub fn call_v(x: &IgFv) -> u8 { x.ig_mv() } }
+pub mod np { struct IgFy; impl IgFy { pub fn ig_my(&self) -> u8 { 1 } } }
+pub mod nm { ig_make!(IgFy); }
+pub mod ncall { pub use crate::igfixa::np::*; pub use crate::igfixa::nm::*; pub fn call_vn(x: &IgFy) -> u8 { x.ig_my() } }
+// B3 guards: the same shapes with a plain `pub` / a `pub(crate)` supplier stay proven (visible suppliers)
+pub mod pp { pub struct IgFp; impl IgFp { pub fn ig_mp(&self) -> u8 { 1 } } }
+pub mod pc { pub use crate::igfixa::pp::*; }
+pub mod pm { ig_make!(IgFq); }
+pub mod pcall { pub use crate::igfixa::pc::*; pub use crate::igfixa::pm::*; pub fn call_p(x: &IgFp) -> u8 { x.ig_mp() } }
+pub mod rp { pub(crate) struct IgFr; impl IgFr { pub fn ig_mr(&self) -> u8 { 1 } } }
+pub mod rm { ig_make!(IgFs); }
+pub mod rcall { pub use crate::igfixa::rp::*; pub use crate::igfixa::rm::*; pub fn call_r(x: &IgFr) -> u8 { x.ig_mr() } }
+// B2 in an inline mod: its own item macro beside a one-hop glob and beside a chain
+pub mod ci { use crate::igsup::*; ig_make!(IgThing); pub fn call_ci(x: &IgThing) -> u8 { x.ig_m() } }
+pub mod di { use crate::igtop::*; ig_make!(IgThing); pub fn call_di(x: &IgThing) -> u8 { x.ig_m() } }
 @@@ rsrecv/benches/nsb.rs
 // fc1: a file outside every crate's module tree (a bench target): its qualifier resolves nowhere, so the base rule holds
 use rsrecv::nsown::OsString;

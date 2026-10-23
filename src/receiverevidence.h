@@ -279,6 +279,7 @@ struct CallResultTypes
             bool   supplied = true;
             bool   open     = true;   // the walk that computes it is still running (a glob cycle meets it)
             std::uint32_t stackAt = 0;   // while open: its place on the walk's stack
+            bool   quiet    = false;  // supplied is false only because every glob there met an open walk (a cycle), never "provably lacks"
         };
         HashMap<std::string, GlobItem>                    globItems;  // ind5: "<crate>#<module>#<name>" → rustGlobItem's answer
         std::uint32_t                                     globStack   = 0;            // ind5: rustGlobItem's open walks
@@ -520,6 +521,7 @@ struct CallResultTypes
     {
         bool   any   = false;
         bool   split = false;
+        bool   loud  = false;   // ind5: a silent voter that is not an open cycle member (rustGlobVotes): its silence proves nothing
         NodeId cls   = kNoNode;
         void   vote( NodeId c ) noexcept
         {
@@ -707,7 +709,7 @@ struct CallResultTypes
                 return kNoNode;
             }
             supplies = false;   // rust-receivers: rustItemAt sets it when the module has the item, re-exports it or may glob it in
-            return rustItemAt( crate, module, name, 0, supplies );
+            return rustSeenFrom( f, rustItemAt( crate, module, name, 0, supplies ) );
         }
         nameKey.assign( b.importedName );
         const auto files = packageFiles.find( nameKey );
@@ -776,7 +778,7 @@ struct CallResultTypes
             {
                 forEachImport( f, "!", [ & ]( const Binding& b )
                 {
-                    if( bindsWithoutTarget( b ) && levelAt( f, b.startByte ) == lv )
+                    if( rustMayDeclareItems( b ) && levelAt( f, b.startByte ) == lv )   // ind5 fix 1: a Rust module level's item macro (its row exists only there) too
                     {
                         named.vote( kNoNode );
                     }
@@ -1241,16 +1243,17 @@ struct CallResultTypes
         {
             return kNoNode;
         }
-        const NodeId c = rustItemAt( crate, module, cls, depth, found );
+        bool         quiet = false;
+        const NodeId c     = rustItemAt( crate, module, cls, depth, found, &quiet );
         if( has != nullptr )
         {
-            *has = found || rustTargetUnparsed( crate, module );   // ind5: false only when the in-tree module provably lacks it
+            *has = found || !quiet || rustTargetUnparsed( crate, module );   // ind5: false only when every glob there met an open (cycle) walk
         }
         return c;
     }
     // the item `cls` of module (crate, module): a class declared at the module's own level (a file module's file level, an
     // inline mod's body), else a re-export there; an alias there names nothing. `found` false when the module has none.
-    NodeId rustItemAt( std::uint32_t crate, const std::string& module, std::string_view cls, int depth, bool& found ) const
+    NodeId rustItemAt( std::uint32_t crate, const std::string& module, std::string_view cls, int depth, bool& found, bool* quiet = nullptr ) const
     {
         const auto   inl       = rust.inlineMods.find( rustModuleKey( crate, module ) );
         const NodeId inlineMod = inl == rust.inlineMods.end() ? kNoNode : inl->second;
@@ -1294,8 +1297,13 @@ struct CallResultTypes
         if( !found && globbed )
         {
             bool supplied = false;
-            hit   = rustGlobItem( crate, module, cls, depth, of, inlineMod, atLevel, supplied );
+            bool silent   = false;
+            hit   = rustGlobItem( crate, module, cls, depth, of, inlineMod, atLevel, supplied, silent );
             found = supplied;
+            if( quiet != nullptr )
+            {
+                *quiet = silent;
+            }
             return hit;
         }
         found = found || globbed;
@@ -1304,7 +1312,7 @@ struct CallResultTypes
     // ind5: does an unparsed region (a macro invocation) at the module's own level sit in one of its files — one that may
     // declare any name there?
     template <class AtLevel>
-    bool rustLevelUnparsed( const std::vector<std::uint32_t>& files, NodeId inlineMod, const AtLevel& atLevel ) const
+    bool rustLevelUnparsed( std::span<const std::uint32_t> files, NodeId inlineMod, const AtLevel& atLevel ) const
     {
         bool any = false;
         const auto scan = [ & ]( std::uint32_t mf )
@@ -1327,25 +1335,29 @@ struct CallResultTypes
     // whose target is not an in-tree module (std, an external crate, an enum's variants), a target that answers "may" (an
     // alias, two items, a re-export leading out, an unparsed region), a macro at this level, a prelude name, the hop cap
     // (kRustGlobHops open walks), or two different suppliers → kNoNode with `supplied` true (unknown: never proven).
-    // `supplied` false only when every glob there provably supplies nothing. A module whose walk is still open (a glob
-    // cycle) adds nothing new — the open walk counts its own suppliers — and every answer below it, a part, is not kept.
+    // `supplied` false only when no glob there voted. `quiet` (ind5 fix 1) says why: every silent glob there was an OPEN walk
+    // (a glob cycle: the open walk counts its own suppliers) — the only silence a named `use` may read as "adds nothing"; a
+    // target that merely has no such item may hold a macro-made one. Every answer below an open walk, a part, is not kept.
     // Memoized per (module, name), never across a cut.
     template <class AtLevel>
     NodeId rustGlobItem( std::uint32_t crate, const std::string& module, std::string_view cls, int depth, const std::vector<std::uint32_t>& files,
-                         NodeId inlineMod, const AtLevel& atLevel, bool& supplied ) const
+                         NodeId inlineMod, const AtLevel& atLevel, bool& supplied, bool& quiet ) const
     {
         std::string key = rustModuleKey( crate, module );   // a copy: rustModuleKey's buffer is reused by the walk below
         key.append( 1, '#' ).append( cls );
         supplied = true;
+        quiet    = false;
         if( const auto it = rust.globItems.find( key ); it != rust.globItems.end() )
         {
             if( it->second.open )
             {
                 rust.globLowOpen = std::min( rust.globLowOpen, it->second.stackAt );
                 supplied         = false;   // a glob cycle: the open walk adds what it has itself
+                quiet            = true;
                 return kNoNode;
             }
             supplied = it->second.supplied;
+            quiet    = it->second.quiet;
             return it->second.cls;
         }
         if( rust.globStack >= kRustGlobHops )
@@ -1355,14 +1367,14 @@ struct CallResultTypes
         }
         if( std::ranges::find( kRustPreludeTypes, cls ) != std::end( kRustPreludeTypes ) || rustLevelUnparsed( files, inlineMod, atLevel ) )
         {
-            rust.globItems.insert_or_assign( key, RustLayout::GlobItem{ kNoNode, true, false, 0 } );
+            rust.globItems.insert_or_assign( key, RustLayout::GlobItem{ kNoNode, true, false, 0, false } );
             return kNoNode;   // a prelude name (an in-tree namesake a glob reaches may be private: std's then), or a macro that may
                               // declare the name here and would shadow every glob: unknown
         }
         const std::uint32_t me       = rust.globStack++;
         const std::uint32_t lowAbove = std::exchange( rust.globLowOpen, 0xFFFFFFFFu );
         const bool          cutAbove = std::exchange( rust.globCut, false );
-        rust.globItems.insert_or_assign( key, RustLayout::GlobItem{ kNoNode, true, true, me } );
+        rust.globItems.insert_or_assign( key, RustLayout::GlobItem{ kNoNode, true, true, me, false } );
         Ballot ballot;   // each glob's supplier; kNoNode = unknown, which splits it
         for( std::uint32_t mf : files )
         {
@@ -1374,10 +1386,11 @@ struct CallResultTypes
         }
         const NodeId hit = ballot.verdict();
         supplied         = ballot.any;
+        quiet            = !ballot.any && !ballot.loud;   // nothing came back, and only open walks (a cycle) were silent
         --rust.globStack;
         if( rust.globLowOpen >= me && !rust.globCut )   // no walk below it met an open walk above it or a cap: the answer is whole
         {
-            rust.globItems.insert_or_assign( key, RustLayout::GlobItem{ hit, supplied, false, 0 } );
+            rust.globItems.insert_or_assign( key, RustLayout::GlobItem{ hit, supplied, false, 0, quiet } );
         }
         else
         {
@@ -1389,17 +1402,20 @@ struct CallResultTypes
     }
     // ind5: the glob hops one walk follows (a stack bound: a cycle ends at its open module first)
     static constexpr std::uint32_t kRustGlobHops = 8;
-    // ind5: the std prelude's type and trait names (Rust 2021). A glob brings only the items visible to the importer, and the
+    // ind5: the std prelude's type and trait names (Rust 2021, plus edition 2024's Future / IntoFuture). A glob brings only the items visible to the importer, and the
     // index does not record visibility, so an in-tree namesake a glob chain reaches may be a private one, the name then std's.
     static constexpr std::string_view kRustPreludeTypes[] = {
         "Option", "Result", "Vec", "String", "Box", "ToString", "ToOwned", "Clone", "Copy", "Send", "Sized", "Sync", "Unpin",
         "Drop", "Fn", "FnMut", "FnOnce", "AsRef", "AsMut", "Into", "From", "Default", "Iterator", "Extend", "IntoIterator",
-        "DoubleEndedIterator", "ExactSizeIterator", "Eq", "PartialEq", "Ord", "PartialOrd", "TryFrom", "TryInto", "FromIterator" };
+        "DoubleEndedIterator", "ExactSizeIterator", "Eq", "PartialEq", "Ord", "PartialOrd", "TryFrom", "TryInto", "FromIterator",
+        "Future", "IntoFuture" };
     // ind5: rustGlobItem's step for one file `mf` of the module: each glob at the module's own level votes the class its
     // in-tree target supplies (rustItemAt there, following its own globs), kNoNode when it may supply one unseen (an outside
-    // or unresolved target, an answer that is not one class), and nothing when the target has no item, `use` or glob of the
-    // name — a macro there that wrote one would make a second glob supplier, which Rust refuses (a macro at the level whose
-    // own globs bring the name may shadow them: rustGlobItem's unknown)
+    // or unresolved target, an answer that is not one class, a supplier the glob's module may not see: rustSeenFrom), and nothing
+    // when the target has no item, `use` or glob of the name — a macro there that wrote one would make a second glob supplier,
+    // which Rust refuses: exact when every supplier is visible, which is why a supplier that may be hidden votes unknown (a
+    // macro at the level whose own globs bring the name may shadow them: rustGlobItem's unknown). `ballot.loud` records a
+    // target that came back empty for any reason but an open cycle walk (the named re-export step reads it)
     template <class AtLevel>
     void rustGlobVotes( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, Ballot& ballot ) const
     {
@@ -1420,13 +1436,58 @@ struct CallResultTypes
                 ballot.vote( kNoNode );   // std, an external crate, an enum's variants, an unknown path: may supply it
                 continue;
             }
-            bool         has = false;
-            const NodeId c   = rustItemAt( gc, gm, cls, depth, has );   // a glob hop spends the walk's own budget, not `depth`
+            bool         has   = false;
+            bool         quiet = false;
+            const NodeId c     = rustItemAt( gc, gm, cls, depth, has, &quiet );   // a glob hop spends the walk's own budget, not `depth`
             if( has )
             {
-                ballot.vote( c );
+                ballot.vote( rustSeenFrom( mf, c ) );
+            }
+            else if( !quiet )
+            {
+                ballot.loud = true;   // it lacks the name as far as the index shows (a macro there may have written it), not a cycle's silence
             }
         }
+    }
+    // ind5 fix 1: the class `c` a glob in file `f` brings in — `c`, or kNoNode when `c` is not plain `pub` and the importing
+    // module may not see it. A glob imports only what its module can see, so a private item one glob away is not the supplier a
+    // macro-made visible one beside it would conflict with (Rust refuses two suppliers only when both are visible). Seen: a
+    // `pub(crate)` item from the same crate; a `pub(super)` one from a module below its parent; a private one from a module below its own (`mod tests { use super::*; }`)
+    NodeId rustSeenFrom( std::uint32_t f, NodeId c ) const
+    {
+        if( c == kNoNode )
+        {
+            return c;
+        }
+        const Symbol&    cs = ing.symbols[ c ];
+        std::string_view mark;
+        forEachImport( cs.fileId, "!", [ & ]( const Binding& b )
+        {
+            if( b.kind == LocalBindKind::TypeAlias && b.importedName == cs.name && b.startByte >= cs.sigStartByte && b.startByte < cs.endByte )
+            {
+                mark = b.typeName;
+            }
+        } );
+        if( mark.empty() )
+        {
+            return c;   // plain `pub` (no row)
+        }
+        if( f >= rust.crateOf.size() || cs.fileId >= rust.crateOf.size() || rust.crateOf[ f ] != rust.crateOf[ cs.fileId ] || mark == kTypeBindRestricted )
+        {
+            return kNoNode;
+        }
+        std::string_view base = rust.moduleOf[ cs.fileId ];   // seen from this module and every one below it
+        if( mark == kTypeBindCrate )
+        {
+            return c;
+        }
+        if( mark == kTypeBindSuper )
+        {
+            base = base.substr( 0, base.rfind( "::" ) == std::string_view::npos ? 0 : base.rfind( "::" ) );
+        }
+        const std::string_view from  = rust.moduleOf[ f ];
+        const bool             below = base.empty() || from == base || ( from.size() > base.size() && from.starts_with( base ) && from.compare( base.size(), 2, "::" ) == 0 );
+        return below && enclosingSymbol( c ) == kNoNode ? c : kNoNode;
     }
     // ind5: does module (crate, module) hold an unparsed region at its own level?
     bool rustTargetUnparsed( std::uint32_t crate, const std::string& module ) const
@@ -1435,12 +1496,7 @@ struct CallResultTypes
         std::uint32_t ownFile   = 0;
         const auto    mfs       = rustModuleFiles( crate, module, inlineMod, ownFile );
         const Level   level     = rustModuleLevel( inlineMod );
-        return std::ranges::any_of( mfs, [ & ]( std::uint32_t mf )
-        {
-            bool any = false;
-            forEachImport( mf, "!", [ & ]( const Binding& b ) { any = any || ( rustMayDeclareItems( b ) && levelAt( mf, b.startByte ) == level ); } );
-            return any;
-        } );
+        return rustLevelUnparsed( mfs, kNoNode, [ & ]( std::uint32_t mf, std::uint32_t pos ) { return levelAt( mf, pos ) == level; } );
     }
     // rustItemAt's re-export step for one file `mf` of the module: each `use … cls` at the module's own level (`atLevel`) names
     // the class its path reaches (two: none; `found` set by any), and a glob there sets `globbed`
@@ -1467,8 +1523,8 @@ struct CallResultTypes
             }
         }
     }
-    // rustFollowReexports' named step: the class the `use` row `b` of file `mf` reaches; `has` false (ind5) when its path is
-    // an in-tree module that provably has no such item — a glob cycle's open module, which adds nothing new
+    // rustFollowReexports' named step: the class the `use` row `b` of file `mf` reaches; `has` false (ind5) only when every
+    // glob at the path's in-tree module met an open walk — a glob cycle's open module, which adds nothing new (rustClassAt)
     NodeId rustNamedReexport( std::uint32_t mf, const Binding& b, int depth, bool& has ) const
     {
         const auto [ modPath, item ] = splitLast( b.importedName, "::" );

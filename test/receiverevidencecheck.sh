@@ -1770,6 +1770,38 @@ proven      rsrecv callees "$IGU:sh_item" "method ig_m src/igshitem.rs:3"
 notproven   rsrecv callees "src/igprel.rs:prelude_vec" "ig_len $IG:7"                                             # [N]
 notproven   rsrecv callees "src/igdeepuse.rs:deep9" "ig_e src/igdeep.rs:4"                                        # [N]
 visible     rsrecv callees "src/igdeepuse.rs:deep9" "ig_e src/igdeep.rs:4"
+# ind5 fix 1 (rv-ind5, rustc-checked shapes; INVERTED RULE: a name is PROVEN only when exactly one VISIBLE supplier is known at every
+# level walked, and "a glob adds nothing" is read only off an OPEN (cycle) walk, never off a module that merely has no such item):
+# [N] B1 a named `use` whose target gets the name only through a glob of a macro-made item (the explicit `use` shadows the sibling glob:
+# the decoy IgFa is NOT the callee), by `use` and by path; B2 a module's OWN item macro beside a one-hop glob and beside a glob chain
+# (file module and inline mod; the one-hop twin is red at e8f39f1c too: FC1 pre-existing); B3 a PRIVATE item reached through a glob
+# beside a macro-made visible supplier (a chain and one hop; the one-hop twin is red at e8f39f1c too). The decoy row stays visible.
+FA="src/igfixa.rs"
+for f in call_a call_a2; do
+    notproven rsrecv callees "$FA:$f" "ig_ma $FA:5"                                                               # [N] B1
+    visible   rsrecv callees "$FA:$f" "ig_ma $FA:5"
+done
+notproven   rsrecv callees "$FA:call_v"  "ig_mv $FA:13"                                                           # [N] B3 (chain)
+visible     rsrecv callees "$FA:call_v"  "ig_mv $FA:13"
+notproven   rsrecv callees "$FA:call_vn" "ig_my $FA:17"                                                           # [N] B3 (one hop; FC1 pre-existing)
+visible     rsrecv callees "$FA:call_vn" "ig_my $FA:17"
+for f in "$FA:call_ci" "$FA:call_di" "src/igfixc.rs:call_c" "src/igfixd.rs:call_d"; do                             # [N] B2 (call_c / call_ci: FC1 pre-existing)
+    notproven rsrecv callees "$f" "ig_m $IG:3"
+    visible   rsrecv callees "$f" "ig_m $IG:3"
+done
+# [P] guards: a plain `pub` and a `pub(crate)` supplier beside the same macro stay the exact supplier; a private item seen from the
+# module of its own file (`mod tests { use super::*; }`) is still seen
+proven      rsrecv callees "$FA:call_p" "method ig_mp $FA:21"                                                     # [P]
+proven      rsrecv callees "$FA:call_r" "method ig_mr $FA:25"                                                     # [P]
+proven      rsrecv callees "src/igfixt.rs:call_t" "method ig_mt src/igfixt.rs:3"                                  # [P]
+proven      rsrecv callees "src/ign/b.rs:call_nb" "method ig_mn src/ign/a.rs:2"                                   # [P] pub(super), seen from below the parent
+notproven   rsrecv callees "src/igo.rs:call_no" "ig_mn src/ign/a.rs:2"                                            # [N] pub(super), not seen from outside the parent
+visible     rsrecv callees "src/igo.rs:call_no" "ig_mn src/ign/a.rs:2"
+# [P] B4 (the two memo safeguards, each with a mutant that turns it red): a SECOND entry into the 9-module chain deep9 cut, 6 hops from
+# the supplier, is whole (a cut answer is never kept); a glob cycle whose only supplier sits on the other side, entered at igpb first
+# and then at igpa (igpa's answer under igpb's open walk is a part, never kept)
+proven      rsrecv callees "src/igdeepuse.rs:deep9_second" "method ig_e src/igdeep.rs:4"                          # [P]
+for f in part_b part_a; do proven rsrecv callees "src/igpartuse.rs:$f" "method ig_m $IG:3"; done                 # [P]
 # guard: `Book::new()` is a path call the canonical tier answers (rustqualcheck's shape), unchanged
 proven      rsrecv callees "$RSA:let_new" "method new $RSM:4"
 
