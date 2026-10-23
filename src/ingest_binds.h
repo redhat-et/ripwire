@@ -6179,9 +6179,10 @@ inline void captureRustItemVisibility( BindCtx& cx, TSNode n, std::uint32_t at )
 
 // ind5 fix 1: the nodes whose facts the glob walk reads: an item-position macro (it may declare any item) and a type-like item (how
 // far it shows)
+inline constexpr std::string_view kRustModuleItemKinds[] = { "macro_invocation", "struct_item", "enum_item", "union_item", "trait_item" };
 inline bool rustModuleItemKind( const char* t )
 {
-    return kindIs( t, "macro_invocation" ) || kindIs( t, "struct_item" ) || kindIs( t, "enum_item" ) || kindIs( t, "union_item" ) || kindIs( t, "trait_item" );
+    return std::ranges::find( kRustModuleItemKinds, std::string_view( t ) ) != std::end( kRustModuleItemKinds );
 }
 inline void captureRustModuleItem( BindCtx& cx, TSNode n, const char* t, std::uint32_t at )
 {
