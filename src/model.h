@@ -122,6 +122,53 @@ inline bool isStructOrNamedType( SymKind k ) noexcept
     return k == SymKind::Struct || k >= SymKind::NamedType;
 }
 
+// The specificity ladder, hoisted out of dedupRawDefs (ingest_model.h) by RIPWIRE-RUBY task C so the
+// resolver's tower (graph.h's name matchers) and the def dedup order the SAME way from ONE table — higher =
+// more specific / preferred when two matches collide on one name byte. A table, not a switch (§3's
+// table-over-switch rule; --quality-delta scored the hoisted switch as a clone of the SymKind readers).
+// Values are load-bearing: the dedup's total order and the picker's Method > Var > Section answer sequence
+// are byte-pinned (rubyattrs/rubyschema checks, lspcheck 18). Index order is the SymKind enumerator order
+// above; the size assert pins the length, so appending a kind without arming it is a build error, not a
+// silent 0. The three keyed asserts below pin the enumerator ORDER at three rungs — Method at 1, Section at 6, FuncType at
+// 13, each together with its table weight — so moving the top rung, the floor or the tail without its row is a build error.
+// They do not pin the other eleven: a swap of two unanchored enumerators (Var with Interface) leaves every guard true while
+// the position-indexed table reweights them, which is what the byte-pinned answers above are for. DISTINCT from gitmine.h's
+// §H6 "specificity-ordered mapper", which orders file PATHS on a different axis; nothing there reads or shares this ladder.
+inline constexpr std::array<int, kSymKindCount> kKindSpecificityTable = {
+    /* Function = */   2,   // a bare function definition
+    /* Method = */     5,   // most specific: a behaviour owned by a type
+    /* Class = */      3,
+    /* Struct = */     3,
+    /* Interface = */  4,
+    /* Var = */        1,
+    /* Section = */    0,   // doc headings, JSON/YAML keys, schema columns: never beat a code kind on one name byte
+    /* Macro = */      0,   // a #define comes from its own single capture, same value as Section/Other
+    /* Field = */      1,   // never collides with Var in practice: the static/non-static gates are complementary
+    /* Other = */      0,
+    /* ModuleScope = */ 0,  // minted after the dedup pass runs; it can never reach it
+    /* NamedType = */  1,   // Go's type_spec fires the generic definedtype AND functype on the same name byte for
+    /* Alias = */      1,   // `type F func(...)`: the form-specific kind must win — FuncType below — and an alias is
+                             // its own node (type_alias) that never collides
+    /* FuncType = */   2,
+};
+static_assert( kKindSpecificityTable.size() == kSymKindCount,
+               "kKindSpecificityTable: one weight per SymKind, in enum order" );
+// The size assert arms an APPENDED kind; these arm a REORDERED enumerator, which no length can see. House pattern
+// (serialize.h pins int(Lang::Unknown) == 12; the NamedType..FuncType assert above pins a range): ordinal and rung
+// are asserted TOGETHER, keyed by enumerator. Three anchors — the top of the ladder, its floor, its tail — so a reorder
+// that moves one of THOSE without its table row trips one of them; a permutation confined to the eleven unanchored
+// enumerators trips none, and arming one of those is a fourth keyed assert, not a stronger claim about these three.
+static_assert( unsigned( SymKind::Method ) == 1 && kKindSpecificityTable[ unsigned( SymKind::Method ) ] == 5,
+               "SymKind::Method is enumerator 1 with weight 5 — the tower's top rung; move the enumerator and the table row together" );
+static_assert( unsigned( SymKind::Section ) == 6 && kKindSpecificityTable[ unsigned( SymKind::Section ) ] == 0,
+               "SymKind::Section is enumerator 6 with weight 0 — headings, keys and schema columns never beat a code kind on one name byte" );
+static_assert( unsigned( SymKind::FuncType ) == 13 && kKindSpecificityTable[ unsigned( SymKind::FuncType ) ] == 2,
+               "SymKind::FuncType is enumerator 13 (the last) with weight 2 — the Go func-type rung over NamedType/Alias" );
+inline int kindSpecificity( SymKind k ) noexcept
+{
+    return enumTableAt( kKindSpecificityTable, k, 0 );   // a byte past the enum (a corrupt cache byte is VALIDATEd on read)
+}
+
 // The last segment of a scope (Symbol::scope) as written ("outer::Scanner" or "pkg.Outer" -> the innermost owner): the spelling the selector
 // resolves as Owner.name (graph.h scopeSuffixMatches).
 inline std::string_view scopeLastSegment( std::string_view sc ) noexcept

@@ -1767,8 +1767,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                 return 1;
             }
             // §B11.3's SHAPE, found by that item's sweep and closed here: this is a fold that reports a scalar.
-            // `defs[0]` is ONE of N definitions of the name — the lowest node id — and the report then covers
-            // that definition's file alone under files="1", which reads as "this symbol lives in one file"
+            // `defs[0]` is ONE of N definitions of the name — the tower front (kind, leading language, then the lowest id) — and
+            // the report then covers that definition's file alone under files="1", which reads as "this symbol lives in one file"
             // while --callers/--uses/--impact/--mentions on the same name all disclose defs="3". The pick is a
             // reasonable default (it matches --around/--lego's resolveFocus), but it was invisible.
             onlyFileId  = ing.symbols[ defs[0] ].fileId;
@@ -1837,7 +1837,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                      "files= means two different things by DEPTH here and is deliberately not renamed: on the ROOT it is how "
                      "many files were ANALYSED; on the <uniform/> fold it is how many of them collapsed into that one row. "
                      "With a SYM, of= echoes it and defs= is how many DEFINITIONS that name has: this report covers the file "
-                     "holding the FIRST of them (lowest node id), so defs= above 1 means "
+                     "holding the TOWER FRONT of them (most specific kind, leading language, then lowest node id), so defs= above 1 means "
                      "the other definitions' files were NOT analysed. Qualify with file:name to choose one. An @FILE:LINE "
                      "seed rebinds to the innermost definition enclosing that line (sym= names it) and covers exactly that "
                      "definition's file -->{}{}{}{}",

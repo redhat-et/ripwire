@@ -2999,13 +2999,13 @@ std::optional<int> runQualityViews( const MainDispatch& d )
 // grammar --for/--expand already use (editCheckBundleText's `ni` parameter defaults to nullptr, so the MCP
 // call site is untouched and stays notes-inert for now).
 //
-// §A6a — an AMBIGUOUS bare name is REFUSED, not silently narrowed. resolveFocus() answers "the lowest-id
+// §A6a — an AMBIGUOUS bare name is REFUSED, not silently narrowed. resolveFocus() answers "the tower-front
 // definition with this name", which is the right answer for --around's ego graph and the WRONG one here: this
 // verb's whole value is "did I break a contract?", and answered about a definition the agent never edited it
 // returns status="unchanged" — reassurance for the wrong symbol. Its siblings can union (--callers reports
 // defs="3" and lists the union); a CONTRACT cannot be unioned, so the only honest answers are one definition
 // or a refusal that says how to name one. The resolver moves to resolveAllByNameQualified (every match, not
-// the lowest id) — byte-identical on any selector that matched exactly one definition site, and it accepts a
+// one tower pick) — byte-identical on any selector that matched exactly one definition site, and it accepts a
 // canonical id too, which is the spelling the refusal has to offer when a file alone cannot separate two
 // scopes in one file.
 std::optional<int> runEditCheck( const MainDispatch& d )
@@ -3043,7 +3043,7 @@ std::optional<int> runEditCheck( const MainDispatch& d )
                       editCheckAmbiguousMessage( cfg.editCheckSym, groups, "--edit-check=", matches.size() ).c_str() );
         return 1;
     }
-    const NodeId focus = groups[0].lowestNode;
+    const NodeId focus = groups[0].focusNode;
 
     // card A1 — the PRE-APPLY fork. Everything above (resolution, the not-found refusal, the §A6a ambiguity
     // refusal) is shared verbatim, because a preview that resolved its target differently from the post-hoc

@@ -10675,7 +10675,7 @@ inline std::uint32_t exactRootRelFile( const IngestResult& ing, std::string_view
 }
 
 // shared "name" | "file:name" spec splitter (X9(b)) — the ONE disambiguation rule --around/--lego/
-// --edit-check (via resolveFocus, single lowest-id pick) and --callers/--impact (via
+// --edit-check (via resolveFocus, single tower-front pick) and --callers/--impact (via
 // resolveAllByNameQualified, every match) now both route through, so a same-named-across-files symbol
 // disambiguates identically everywhere instead of only some verbs supporting it. The LAST colon is the
 // separator (a file path itself never contains the trailing "name" after it), so a bare name with no
@@ -11220,6 +11220,96 @@ inline std::vector<NodeId> resolveAllByCanonicalId( const IngestResult& ing, std
     return resolveAllByCanonicalIdExact( ing, alt );
 }
 
+// A CONSTRUCTOR is not a more specific answer than the type it builds: `Widget::Widget()` (C++, scoped by its class)
+// and `public Shape() {}` (Java/C#, enclosed by its class, no scope recorded) are Methods — the top rung — so the plain
+// ladder put them ahead of the class for a bare type name, and --lego/--around/--connect then answered about the
+// constructor (implementors=0 for a class that has one). A Method whose own scope ends in its name, or that sits
+// inside a same-named Class/Struct/Interface of the match set, ranks just BELOW the type kinds and above a free
+// function. A method named like an UNRELATED type (a Go getter `func (s *Server) Config() Config`) is not a
+// constructor and keeps the Method rung. Ranks are doubled so the constructor rung sits between two ladder values.
+inline std::vector<int> nameTowerRanks( const IngestResult& ing, std::span<const NodeId> ids )
+{
+    const auto typeKind = []( SymKind k ) noexcept { return k == SymKind::Class || k == SymKind::Interface || isStructOrNamedType( k ); };
+    std::vector<NodeId> types;
+    for( const NodeId id : ids )
+    {
+        if( typeKind( ing.symbols[ id ].kind ) )
+        {
+            types.push_back( id );
+        }
+    }
+    std::vector<int> ranks;
+    ranks.reserve( ids.size() );
+    for( const NodeId id : ids )
+    {
+        const Symbol& m    = ing.symbols[ id ];
+        bool          ctor = false;
+        if( m.kind == SymKind::Method && !types.empty() )
+        {
+            ctor = scopeLastSegment( m.scope ) == m.name
+                || std::any_of( types.begin(), types.end(), [ & ]( NodeId t )
+                                {
+                                    const Symbol& ty = ing.symbols[ t ];
+                                    return ty.fileId == m.fileId && ty.sigStartByte <= m.sigStartByte && m.endByte <= ty.endByte;
+                                } );
+        }
+        ranks.push_back( ctor ? 2 * kindSpecificity( SymKind::Class ) - 1 : 2 * kindSpecificity( m.kind ) );
+    }
+    return ranks;
+}
+
+// The tower (RIPWIRE-RUBY task C): ONE total order for every multi-definition NAME answer, applied to the
+// RESULT LIST of the name resolvers below (query-time only — buildGraph's edge candidates are deliberately
+// NOT reordered, so no extraction moved and kParserVer stays; edge-vs-display disagreement is disclosed,
+// not hidden). Key: kindSpecificity DESC (the hoisted dedup ladder — a Method beats a Var beats a Section;
+// a constructor ranks just below its type, nameTowerRanks above), then the language of the most specific
+// symbol first — the tower's own leading symbol defines the reference language, so in a Ruby tree a Ruby def
+// leads a Python one on a same-kind tie — then id ASC for the deterministic tail. A list already in tower order
+// comes back untouched. DISTINCT from gitmine.h's §H6 "specificity-ordered mapper", which orders file PATHS on a
+// different axis.
+inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids )
+{
+    if( ids.size() < 2 )
+    {
+        return ids;
+    }
+    const std::vector<int> ranks = nameTowerRanks( ing, ids );
+    std::vector<std::pair<int, NodeId>> keyed;   // (rank, id): the comparator reads the rank without a lookup
+    keyed.reserve( ids.size() );
+    for( std::size_t i = 0; i < ids.size(); ++i )
+    {
+        keyed.emplace_back( ranks[ i ], ids[ i ] );
+    }
+    std::pair<int, NodeId> reference = keyed.front();
+    for( const auto& k : keyed )
+    {
+        if( k.first > reference.first || ( k.first == reference.first && k.second < reference.second ) )
+        {
+            reference = k;
+        }
+    }
+    const Lang referenceLang = ing.symbols[ reference.second ].lang;
+    std::sort( keyed.begin(), keyed.end(),
+               [ &ing, referenceLang ]( const std::pair<int, NodeId>& a, const std::pair<int, NodeId>& b ) noexcept
+               {
+                   if( a.first != b.first )
+                   {
+                       return a.first > b.first;
+                   }
+                   const bool refA = ing.symbols[ a.second ].lang == referenceLang, refB = ing.symbols[ b.second ].lang == referenceLang;
+                   if( refA != refB )
+                   {
+                       return refA;
+                   }
+                   return a.second < b.second;
+               } );
+    for( std::size_t i = 0; i < ids.size(); ++i )
+    {
+        ids[ i ] = keyed[ i ].second;
+    }
+    return ids;
+}
+
 // Bare name, or a canonical id. The "::" probe runs FIRST and only when the spec carries one, then falls
 // back to the name match — no indexed symbol NAME contains "::" in any grammar we parse, so this is purely
 // additive: every previously-working query resolves byte-identically.
@@ -11247,11 +11337,11 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
             out.push_back( s.id );
         }
     }
-    return out;
+    return applyNameTower( ing, std::move( out ) );   // the tower orders this tier (task C); the early "::" tiers are their own answers
 }
 
 // The number of definitions the NAME of `focus` has — what a single-pick verb must disclose when it
-// resolved a BARE name through resolveFocus's lowest-id pick (H6/F2). Named for the disclosure rather than
+// resolved a BARE name through resolveFocus's tower-front pick (H6/F2). Named for the disclosure rather than
 // the mechanism, because the mechanism is only resolveAllByName: the point is that the count printed on the
 // row and the pick printed on the row come from ONE resolver, so `defs="6"` beside `p="…/dynamic_map.hpp"`
 // can never disagree about which definitions exist. kNoNode (the ranked, selector-free mode) counts 0.
@@ -11551,7 +11641,11 @@ inline void declToDefFollowThrough( const IngestResult& ing, std::string_view fi
     {
         *unprovenDefCountOut = unprovenCount;
     }
-    std::sort( sel.begin(), sel.end() );   // NodeId order - the contract every caller of this already relies on
+    // NodeId order is the widening's OWN postcondition, not a caller contract. The sole caller feeds this list to
+    // applyNameTower on the very next statement, and that comparator is a TOTAL order (kind, leading language,
+    // id ASC) on distinct ids, so the tower's answer never reads this order - for today's call site the sort is
+    // vestigial; it is kept so the widening leaves this function canonical when it runs.
+    std::sort( sel.begin(), sel.end() );
 }
 
 // THE DOTTED SCOPE TIER (2026-10-01). Agents and docs write a method as `Class.method` (Python, JS, Java, the
@@ -11648,6 +11742,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     // #63: a header-qualified selector resolves to DECLARATIONS, which carry no call-graph edges.
     // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
     declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );
+    out = applyNameTower( ing, std::move( out ) );   // the tower orders the name/file tier (task C); the early tiers above stay as-is
     return resolveAllByDottedScope( ing, spec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
 }
 
@@ -12074,15 +12169,18 @@ inline std::string memberSelectorUnservedRefusal( const IngestResult& ing, std::
 }
 
 // resolve a --around/--lego/--connect spec to ONE matching symbol; kNoNode if none. A PROJECTION of
-// resolveAllByNameQualified — matches ascend by NodeId there (symbols are walked in id order and every tier preserves
-// that) — so one grammar, one resolver, and every tier the full resolver gains (canonical id, Scope::name) reaches the
-// single-pick verbs in the same commit. Declared here, below the full resolver, for exactly that reason.
+// resolveAllByNameQualified — the tower (applyNameTower) orders its name-tier matches (kindSpecificity desc, the
+// leading symbol's language first, id asc — task C) and the projection keeps that order; one grammar, one resolver,
+// and every tier the full resolver gains (canonical id, Scope::name) reaches the single-pick verbs in the same
+// commit. Declared here, below the full resolver, for exactly that reason.
 //
-// THE PICK is the lowest id, with ONE exception: a bodyless C/C++ lowest id (a header prototype, an in-class method
-// declaration, a forward-declared class) yields to the lowest-id C/C++ match WITH a body in the SAME scope, when the set
-// holds one. The lowest id alone made the declaration the focus whenever its header sorted first, and a declaration has
-// no call or extends edges — so --around served its own row, --connect found no join and --lego counted no implementor,
-// for a bare name and a fully proven file:name alike (decltodefcheck E3a..E3d). Everything else keeps the lowest id:
+// THE PICK is the tower front — the most specific kind, the leading language, then the lowest id — with ONE
+// exception: a bodyless C/C++ front (a header prototype, an in-class method declaration, a forward-declared class) yields to
+// the TOWER-FRONT bodied definition of the SAME scope, when the set holds one: the scan walks the tower-ordered matches and
+// returns the FIRST bodied same-scope candidate, so a mixed-kind same-name C collision (struct X + void X()) is won by its
+// kind, not by its id. The lowest id alone made the declaration the focus whenever its header sorted first, and a declaration
+// has no call or extends edges — so --around served its own row, --connect found no join and --lego counted no implementor,
+// for a bare name and a fully proven file:name alike (decltodefcheck E3a..E3d). Everything else keeps the tower front:
 //   * a set of declarations only, or a single match — nothing to prefer;
 //   * every other language — measured on this repository, an unscoped "bodied first" moved 69 non-C/C++ names (Python and
 //     JSON keys, Ruby classes, TypeScript overload signatures, even py -> cpp), none of them a declaration beside its
@@ -12101,8 +12199,8 @@ inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std:
     {
         return kNoNode;
     }
-    // lane lego-transitive (M3): a CODE definition is the focus whenever one matched. The lowest id is crawl order, and a
-    // docs/ heading sorted first answered `--lego=Loader` about docs/api.md (defs=3, implementors=0) while src/loader.js
+    // lane lego-transitive (M3): a CODE definition is the focus whenever one matched. Ids are crawl order and the tower
+    // ranks above them; pre-tower, a docs/ heading sorted first answered `--lego=Loader` about docs/api.md (defs=3, implementors=0) while src/loader.js
     // held the class. A non-code match (a markdown heading, a JSON/YAML/TOML key) stays reachable by its file:name
     // selector, and is still the answer when it is all that matched. Every verb that names one focus reads this
     // (--lego, --around, --connect and their MCP twins), so the rule is stated once, here.
@@ -12114,16 +12212,16 @@ inline NodeId resolveFocus( const IngestResult& ing, std::string_view spec, std:
             std::rotate( matches.begin(), code, code + 1 );   // the first code match leads; the rest keep their order
         }
     }
-    const Symbol& lowest = ing.symbols[ matches.front() ];
-    const auto    cOrCpp = []( Lang lang ) noexcept { return lang == Lang::Cpp || lang == Lang::C; };
-    if( isDefinitionNotDeclaration( lowest ) || !cOrCpp( lowest.lang ) )
+    const Symbol& towerFront = ing.symbols[ matches.front() ];
+    const auto    cOrCpp     = []( Lang lang ) noexcept { return lang == Lang::Cpp || lang == Lang::C; };
+    if( isDefinitionNotDeclaration( towerFront ) || !cOrCpp( towerFront.lang ) )
     {
         return matches.front();
     }
     for( NodeId id : matches )
     {
         const Symbol& candidate = ing.symbols[ id ];
-        if( isDefinitionNotDeclaration( candidate ) && cOrCpp( candidate.lang ) && candidate.scope == lowest.scope )
+        if( isDefinitionNotDeclaration( candidate ) && cOrCpp( candidate.lang ) && candidate.scope == towerFront.scope )
         {
             return id;
         }
@@ -14091,12 +14189,14 @@ inline ConnectResult connectSubgraph( const Graph& g, const std::vector<NodeId>&
 }
 
 // 0.6.6 D1: WHICH definition of a many-definition terminal name --connect searches from. connectSubgraph takes one node
-// per terminal, and the callers used to hand it resolveFocus's single pick (the lowest id), so `--connect=main,escapeXml`
+// per terminal, and the callers used to hand it resolveFocus's single pick (the tower front), so `--connect=main,escapeXml`
 // searched from the one `main` of 107 that happened to sort first (a Python bench script) and printed every terminal
 // <unconnected> beside a --path that joins main to escapeXml in 2 hops. The pick is now the definition that JOINS: every
 // definition of the name is scored by how many OTHER terminals it reaches within the radius on the same undirected view
-// connectSubgraph walks, then by the fewest summed hops; resolveFocus's pick wins a tie it is part of, the lowest id any
-// other tie. Two passes: the first scores against every definition of the other names, the second re-scores against the
+// connectSubgraph walks, then by the fewest summed hops; resolveFocus's pick wins a tie it is part of, the tower front any
+// other tie: joinTerminalPicks hands the scan resolveAllByNameQualified's list, which applyNameTower sorts for the
+// name/file tier and leaves id-ascending for the canonical-id and Scope::name tiers. Two passes: the first scores against
+// every definition of the other names, the second re-scores against the
 // picks the first made — the nodes connectSubgraph will actually search from. A name none of whose definitions reaches
 // another terminal keeps resolveFocus's pick (so <unconnected> there is true of EVERY definition). tiedOut[i] > 1 says
 // that many definitions joined exactly as well as the pick: the answer is about one of them, disclosed by the emitter
@@ -14150,8 +14250,10 @@ inline std::vector<std::uint16_t> connectUndirectedDistances( const Graph& g, st
 }
 
 // One terminal's choice among its definitions, against the other terminals' distance maps: the candidate reaching the
-// most of them, then the fewest summed hops; `preferred` (resolveFocus's pick) wins a tie it is part of, the lowest id any
-// other tie (candidates ascend by id). reached == 0 ⇒ no candidate joins anything, and `chosen` is `preferred`.
+// most of them, then the fewest summed hops; `preferred` (resolveFocus's pick) wins a tie it is part of, the first
+// candidate met any other tie — the scan keeps what it met first, and the list arrives tower-ordered for the name/file
+// tier (applyNameTower), id-ascending for the canonical-id and Scope::name tiers. reached == 0 ⇒ no candidate joins
+// anything, and `chosen` is `preferred`.
 struct TerminalChoice { NodeId chosen = kNoNode; std::uint32_t reached = 0, hops = 0, tied = 1; };
 
 inline TerminalChoice scoreTerminalCandidates( std::span<const NodeId> candidates, NodeId preferred, std::size_t self,

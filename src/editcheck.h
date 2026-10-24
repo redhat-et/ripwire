@@ -128,14 +128,20 @@ inline std::vector<NodeId> editCheckOverloadSet( const IngestResult& ing, const 
 // resolveAllByNameQualified), verified by editCheckRoundTripSpelling.
 struct EditCheckGroup
 {
-    NodeId      lowestNode;    // the lowest-id definition in the group — the focus resolveFocus would have picked
+    NodeId      focusNode;     // the group's tower-front member — its orientation node. resolveFocus picks the SAME node
+                               // from these matches EXCEPT where its C/C++ body-yield (graph.h) moves to the first bodied
+                               // same-scope member later in the group: a prototype beside its definition in one file keeps
+                               // the declaration here while the single-pick verbs answer at the definition. No answer is
+                               // wrong — editCheckOverloadSet unifies the contract from either node.
     std::string spelling;      // a selector that resolves to THIS group and no other (when `unique`)
     bool        declOnly;      // only C/C++ declarations, beside a group that holds a definition: never offered (M2)
     bool        unique;        // `spelling` was verified to resolve to this group alone
 };
 
-// The (file, contract) KEYS of a match list with each key's members, in first-seen order: matches arrive in ascending
-// node id (resolveAllByNameQualified walks ing.symbols in order), so members[i][0] IS group i's lowest id.
+// The (file, contract) KEYS of a match list with each key's members, in first-seen order: the name/file tier of
+// resolveAllByNameQualified comes back TOWER-ordered (applyNameTower), its early canonical-id/Scope::name tiers ascend by
+// id, so members[i][0] is group i's tower front on the name path — a POSITION, not a guarantee of the lowest id, which is
+// why editCheckRoundTripSpelling compares membership rather than first elements.
 struct EditCheckGroupKeys
 {
     std::vector<std::pair<std::uint32_t, std::string>> keys;
@@ -286,13 +292,16 @@ inline EditCheckGroupKeys editCheckGroupKeys( const IngestResult& ing, const Gra
 // the declaration AND the definition and was refused again. So each shown spelling is re-resolved here and must land on
 // exactly this group; otherwise the canonical id, then the `@FILE:LINE` seed (one place, one symbol) is tried. A
 // cwd-spelled path the file tier would read as a substring of another (`./lib.cpp` inside `./sub/lib.cpp`) now names
-// its own file exactly (graph.h preferExactFile), so it round-trips. When nothing does — a line holding two
+// its own file exactly (graph.h preferExactFile), so it round-trips. The comparison is ORDER-INDEPENDENT on purpose: the
+// tiers re-resolve in different orders (canonical id ascends by id, the name tier is tower-ordered), so the proof that a
+// spelling lands on THIS group is that the one rebuilt group CONTAINS the focus node — its (file, contract) key is derived
+// from that node, so containment pins the group whatever the arrival order. When nothing does — a line holding two
 // definitions — `unique` stays false and the refusal SAYS so beside that spelling, never offering it as the example.
 constexpr std::size_t kEditCheckSpellingsShown = 6;
 
 inline void editCheckRoundTripSpelling( const IngestResult& ing, const Graph& g, EditCheckGroup& group, const std::string& canon, bool foldDecls )
 {
-    const Symbol&            s = ing.symbols[ group.lowestNode ];
+    const Symbol&            s = ing.symbols[ group.focusNode ];
     std::vector<std::string> tries{ group.spelling };
     if( canon != s.name && canon != group.spelling )
     {
@@ -303,7 +312,7 @@ inline void editCheckRoundTripSpelling( const IngestResult& ing, const Graph& g,
     {
         const std::vector<NodeId> again = resolveAllByNameQualified( ing, spelling );
         const EditCheckGroupKeys  gk    = editCheckGroupKeys( ing, g, again, foldDecls );
-        if( gk.keys.size() == 1 && gk.members[0].front() == group.lowestNode )
+        if( gk.keys.size() == 1 && std::find( gk.members[ 0 ].begin(), gk.members[ 0 ].end(), group.focusNode ) != gk.members[ 0 ].end() )
         {
             group.spelling = spelling;
             group.unique   = true;
@@ -331,7 +340,7 @@ inline std::vector<EditCheckGroup> editCheckGroups( const IngestResult& ing, con
     // the canonical id has degraded to the bare name (a scope-less definition), which disambiguates nothing.
     for( std::size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex )
     {
-        const Symbol&      s            = ing.symbols[ groups[ groupIndex ].lowestNode ];
+        const Symbol&      s            = ing.symbols[ groups[ groupIndex ].focusNode ];
         const std::string& canonOfThis  = gk.keys[ groupIndex ].second;
         std::size_t        groupsInFile = 0;
         for( const auto& [fileId, canon] : gk.keys )

@@ -1372,7 +1372,7 @@ inline constexpr const char* kUnprovenDefsVerifyLegend =
 inline constexpr const char* kUnprovenDefsAffectedLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name item found and could not tie to the file it named, summed item by item (a path item adds 0): they are NOT in seeds=, the caller walk never started from them, and so a test that reaches only them is in neither tests=, reached= nor the rows. A bare NAME item that also matches an indexed path is read as that path. ";
 // AND ON edit-check, lego, connect, around AND slice (decltodefcheck arms E2n..E2t). --lego, --connect and --around resolve
-// through resolveFocus, the lowest-id projection of the same resolver, so a drop left the DECLARATION as their focus;
+// through resolveFocus, the tower-front projection of the same resolver, so a drop left the DECLARATION as their focus;
 // --edit-check and --slice read the whole match set, and a set holding that one declaration is answered about it. On the
 // same repro each read a zero with nothing beside it: edit-check callers="0" incompatible="0" — a false "no broken caller"
 // when the dropped definition is the one whose caller stopped binding — lego implementors="0", connect edges="0" groups="0",

@@ -28,37 +28,12 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: dedup defs" );
 
-    auto specificity = []( SymKind k ) noexcept -> int
-    {
-        // higher = more specific / preferred when two matches collide
-        switch( k )
-        {
-            case SymKind::Method:    return 5;
-            case SymKind::Interface: return 4;
-            case SymKind::Struct:    return 3;
-            case SymKind::Class:     return 3;
-            case SymKind::Function:  return 2;
-            case SymKind::Var:       return 1;
-            case SymKind::Field:     return 1;   // never collides with Var in practice: the static/non-static gates are complementary
-            case SymKind::Macro:     return 0;   // Macro and Section were folded into "Other" by a default; named now, same value:
-            case SymKind::Section:   return 0;   // each comes from its own single capture (a #define, a heading or data key), so
-            case SymKind::Other:     return 0;   // neither collides with a code kind on one name byte
-            case SymKind::ModuleScope: return 0; // minted after this pass runs; it can never reach the dedup
-            // Go's type_spec fires the generic @definition.definedtype AND, for `type F func(...)`, @definition.functype on the
-            // same name byte (struct/interface specs fire their own pattern too): the form-specific kind must win, and a
-            // struct/interface must beat the generic defined type. An alias is its own node (type_alias) and never collides.
-            case SymKind::FuncType:  return 2;
-            case SymKind::NamedType: return 1;
-            case SymKind::Alias:     return 1;
-        }
-        return 0;
-    };
-
     // identity = the declared identifier itself: (fileId, name-token start byte). Two tags
     // patterns that both name the same identifier are the same symbol regardless of which
-    // wrapper node each captured.
+    // wrapper node each captured. The specificity ladder lives in model.h::kindSpecificity
+    // (task C hoist — VERBATIM, same values) so the dedup and the resolver tower order from one table.
     std::sort( rawDefs.begin(), rawDefs.end(),
-               [ &specificity ]( const RawDef& a, const RawDef& b ) noexcept
+               []( const RawDef& a, const RawDef& b ) noexcept
                {
                    if( a.fileId != b.fileId )
                    {
@@ -74,7 +49,7 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
                        if( a.name != b.name ) { return a.name < b.name; }
                    }
                    // same identity: most-specific kind first so unique() keeps it
-                   const int specificityA = specificity( a.kind ), specificityB = specificity( b.kind );
+                   const int specificityA = kindSpecificity( a.kind ), specificityB = kindSpecificity( b.kind );
                    if( specificityA != specificityB )
                    {
                        return specificityA > specificityB;

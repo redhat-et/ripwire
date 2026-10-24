@@ -88,10 +88,11 @@
 #       written; a bare name and a refusal that dropped nothing print no such line.
 #   (E3a..E3f) THE FOCUS PICK. --lego, --connect and --around take ONE node from a match set (resolveFocus), and it was the
 #       lowest id — with the header sorting first, the DECLARATION, even where no definition was dropped: a bare name and a
-#       fully proven file:name answered the same zero as the dropping selector. A bodyless C/C++ lowest id now yields to the
-#       lowest-id bodied C/C++ match of the same scope: --around reaches the caller (E3a), --connect joins it and names the
-#       definition's file on its terminal row (E3b), --lego counts the implementor (E3c), and among several definitions the
-#       lowest id wins (E3d). Kept as they were: a set of declarations only (the dropping selector still carries its
+#       fully proven file:name answered the same zero as the dropping selector. A bodyless C/C++ front now yields to the
+#       tower-front bodied definition of the same scope: --around reaches the caller (E3a), --connect joins it and names
+#       the definition's file on its terminal row (E3b), --lego counts the implementor (E3c), and among several
+#       definitions the tower front wins (E3d). Kept as they were: a set of declarations only (the dropping
+#       selector still carries its
 #       residue). A TypeScript overload signature beside its implementation (E3e) and a C++ pure virtual beside an override
 #       of another class (E3f) keep resolveFocus's pick, but since 0.6.6 --connect searches from the definition that JOINS
 #       the other terminal (graph.h joinTerminalPicks), so its terminal row there names the implementation / the override.
@@ -1176,7 +1177,7 @@ for pair in "e2_us_cmp.xml:uses" "e2_mn_cmp.xml:mentions" "e2_vf_cmp.xml:verify"
 done
 
 # ── (E2n..E2t) THE SAME RESIDUE ON --edit-check, --lego, --connect, --around AND --slice ───────────────────────────────
-# Five more readers of the same resolver (--lego, --connect and --around through resolveFocus, its lowest-id projection)
+# Five more readers of the same resolver (--lego, --connect and --around through resolveFocus, its tower-front projection)
 # answered the drop with a zero and nothing beside it. The one a reader acts on first is --edit-check's: incompatible="0"
 # about the declaration, while the definition the selector dropped carries the caller that no longer binds.
 # Same four questions as (E2e), through two readers that find a root wherever it sits and read its zero off whichever
@@ -1736,7 +1737,7 @@ done
 e3Present "(E3c) kept: --lego=a_fwd.h:Shape drops the definition" "$TMP/e3_lg_drop.xml" lego 1 iface implementors 0
 
 echo
-echo "=== (E3d) among several definitions, the lowest id is chosen ==="
+echo "=== (E3d) among several definitions, the tower front is chosen ==="
 run "$TMP/free" --connect=helper,unrelatedCaller >"$TMP/e3_cn_free.xml"
 e3Pick "(E3d) --connect=helper,unrelatedCaller over api.h, other.cpp, third.cpp" "$TMP/e3_cn_free.xml" helper other.cpp:2 1
 
@@ -1913,8 +1914,8 @@ printf '<!-- <t n="helper" p="api.h:2"/> --><connect edges="1"><g><t n="useHelpe
     || no "(F) termP misread a terminal: helper=$( termP "$TMP/m_e3b.xml" helper ) useHelper=$( termP "$TMP/m_e3b.xml" useHelper ) absent=$( termP "$TMP/m_e3b.xml" absent )"
 # (E3g) shape: readingOf must read the NAMED head's reading alone — never another term whose name ends in the same bytes
 # (unproven_defs=K: holds the needle below), never a later term (rank_by= holds it too), and it must stop at "; qualify".
-L_E3G_BAD='<!-- unproven_defs=K: K defs of the same scope. defs=N: of= names N defs; the lowest-id one was walked, a C/C++ body over its declaration. rank_by=: the same scope -->'
-L_E3G_OK='<!-- defs=N: of= names N defs; the lowest-id one was walked, a C/C++ body in the same scope over its declaration. -->'
+L_E3G_BAD='<!-- unproven_defs=K: K defs of the same scope. defs=N: of= names N defs; most-specific kind walked first, a C/C++ body over its declaration. rank_by=: the same scope -->'
+L_E3G_OK='<!-- defs=N: of= names N defs; most-specific kind walked first, its language ahead, id last, code first, a C/C++ body in the same scope over its declaration. -->'
 L_E3G_FULL='<!-- defs= (only when >1) = N definitions (a declaration yields); qualify with file:name of its scope. -->'
 case "$( readingOf "$L_E3G_BAD" "defs=N:" )"  in *'same scope'*)   G_BAD=1 ;;  *) G_BAD=0 ;;  esac
 case "$( readingOf "$L_E3G_OK" "defs=N:" )"   in *'same scope'*)   G_OK=1 ;;   *) G_OK=0 ;;   esac

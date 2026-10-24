@@ -457,7 +457,7 @@ inline Outcome run( const IngestResult& ing, const Graph& g, const std::string& 
     // 2026-09-10: the same window the post-hoc verb takes, from the same flags — a preview that paged
     // differently from the answer it predicts would be worth nothing (test/editpreviewcheck.sh compares
     // the two documents).
-    oc.xml = editCheckBundleText( merged, mg, root, maxFileBytes, excludes, groups[0].lowestNode, ni, true,
+    oc.xml = editCheckBundleText( merged, mg, root, maxFileBytes, excludes, groups[0].focusNode, ni, true,
                                    EditCheckPage{ pageLimit, pageOffset }, previewUnprovenDefs, /*notesDegraded=*/false,
                                    EditCheckSpliced{ newBytes, fsym.fileId, true } );   // the merged spans index the spliced bytes
     // E3 (terminality round A, 2026-09-05): the CURRENT span an apply would replace, as the bytes are on disk, so

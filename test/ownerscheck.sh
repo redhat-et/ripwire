@@ -212,10 +212,11 @@ OUT_B="$( "$BIN" "$REPO" --owners --no-cache 2>/dev/null )"
 
 # ── §B11.3-class: --owners=SYM IS A FOLD, and the fold is now disclosed ───────────────────────────────────
 # Found by §B11.3's own sweep ("a verb that folds a group and reports a scalar as if the group were one
-# thing"). --owners=SYM resolves the name, takes defs[0] — ONE of N, the lowest node id — and reports that
-# definition's file under files="1", which reads as "this symbol lives in one file", while --callers/--uses/
-# --impact/--mentions on the SAME name all disclose defs="3". of=/defs= make the pick legible; the pick
-# itself is unchanged (it is resolveFocus' rule, and narrowing is what file:name is for).
+# thing"). --owners=SYM resolves the name, takes defs[0] — ONE of N, the tower front (kind, leading language,
+# then the lowest id) — and reports that definition's file under files="1", which reads as "this symbol lives in
+# one file", while --callers/--uses/--impact/--mentions on the SAME name all disclose defs="3". of=/defs= make
+# the pick legible; the pick itself is still resolveFocus' rule — it moved with the tower. Narrowing is what
+# file:name is for.
 if command -v git >/dev/null 2>&1; then
     OF="$( mktemp -d )"; mkdir -p "$OF/a" "$OF/b"
     printf 'int twinned( int q ) { return q; }\n'      > "$OF/a/one.h"
