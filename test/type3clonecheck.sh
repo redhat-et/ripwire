@@ -89,7 +89,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "  FAIL  PART 2 needs a ripwire binary at $BIN (build first, or set RIPWIRE_BIN)"; exit 2; }
 p2fail=0
-p2ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { p2fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 p2no(){ printf '  FAIL  %s\n' "$*"; p2fail=1; }
 echo "type3clonecheck: PART 2 (grouping + duplication %) BIN=$BIN"
 
@@ -144,21 +144,21 @@ N="$( cl "$W2/noclone" )"
 # first. If the detector found no near-miss pairs in grp/, the grouping arms would pass vacuously.
 t3="$( attr type3 "$G" )"
 [ "${t3:-0}" -ge 3 ] \
-    && p2ok "guard: grp/ yields $t3 Type-3 PAIRS (the grouping arms have something to group)" \
+    && ok "guard: grp/ yields $t3 Type-3 PAIRS (the grouping arms have something to group)" \
     || p2no "guard: grp/ yielded type3=${t3:-none} — expected >= 3 pairs; the grouping arms would be inert"
 
 # ── arm F: every emitted group row carries a gid= ────────────────────────────────────────────────────
 rows="$( printf '%s' "$G" | grep -oE '<group [^>]*>' | wc -l | tr -d ' ' )"
 gids="$( printf '%s' "$G" | grep -oE '<group [^>]*>' | grep -cE 'gid="[0-9]+"' | tr -d ' ' )"
 [ "$rows" -gt 0 ] && [ "$rows" = "$gids" ] \
-    && p2ok "arm F: all $rows group rows carry gid=" \
+    && ok "arm F: all $rows group rows carry gid=" \
     || p2no "arm F: $gids of $rows group rows carry gid="
 
 # ── arm G: UNION-FIND — three mutually-similar bodies collapse to ONE group id, not three ────────────
 distinct="$( printf '%s' "$G" | grep -oE 'gid="[0-9]+"' | sort -u | wc -l | tr -d ' ' )"
 cg="$( attr clone_groups "$G" )"
 if [ "$distinct" = 1 ] && [ "$cg" = 1 ]; then
-    p2ok "arm G: $t3 pairs over three mutual near-copies collapse to ONE component (clone_groups=1, 1 distinct gid)"
+    ok "arm G: $t3 pairs over three mutual near-copies collapse to ONE component (clone_groups=1, 1 distinct gid)"
 else
     p2no "arm G: expected 1 component, got clone_groups=${cg:-absent} with $distinct distinct gid values over $t3 pairs"
 fi
@@ -172,24 +172,24 @@ cp "$W2/dupexact/two.py" "$W2/two/pairA.py"
 T="$( cl "$W2/two" )"
 cg2="$( attr clone_groups "$T" )"
 [ "$cg2" = 2 ] \
-    && p2ok "arm G-mut: two independent clone relations report clone_groups=2 (grouping discriminates)" \
+    && ok "arm G-mut: two independent clone relations report clone_groups=2 (grouping discriminates)" \
     || p2no "arm G-mut: two independent clone relations reported clone_groups=${cg2:-absent}, expected 2"
 
 # ── arm H: the duplication percentage, computed by hand on dupexact/ ─────────────────────────────────
 dl="$( attr dup_loc "$D" )"; tl="$( attr total_loc "$D" )"; dp="$( attr dup_pct "$D" )"
 if [ -n "$dl" ] && [ -n "$tl" ] && [ "${tl:-0}" -gt 0 ] && [ "$(( dl * 2 ))" = "$tl" ]; then
-    p2ok "arm H1: two identical equal-LOC bodies ⇒ dup_loc($dl) is exactly half of total_loc($tl)"
+    ok "arm H1: two identical equal-LOC bodies ⇒ dup_loc($dl) is exactly half of total_loc($tl)"
 else
     p2no "arm H1: dup_loc=${dl:-absent} total_loc=${tl:-absent} — expected dup_loc*2 == total_loc"
 fi
 [ "$dp" = "50.0" ] \
-    && p2ok "arm H2: dup_pct=50.0 on the hand-computed corpus" \
+    && ok "arm H2: dup_pct=50.0 on the hand-computed corpus" \
     || p2no "arm H2: dup_pct=${dp:-absent}, expected 50.0"
 
 # ── arm I: a corpus with no clones reports a REAL zero (none found), not an absent attribute ─────────
 ndl="$( attr dup_loc "$N" )"; ndp="$( attr dup_pct "$N" )"; ncg="$( attr clone_groups "$N" )"
 if [ "$ndl" = 0 ] && [ "$ndp" = "0.0" ] && [ "$ncg" = 0 ]; then
-    p2ok "arm I: a clone-free corpus reports dup_loc=0 dup_pct=0.0 clone_groups=0 (none found, stated)"
+    ok "arm I: a clone-free corpus reports dup_loc=0 dup_pct=0.0 clone_groups=0 (none found, stated)"
 else
     p2no "arm I: clone-free corpus reported dup_loc=${ndl:-absent} dup_pct=${ndp:-absent} clone_groups=${ncg:-absent}"
 fi
@@ -204,10 +204,10 @@ fi
 if printf '%s' "$G" | grep -qE '<clones [^>]*(counts_floor|type3_capped)='; then
     p2no "arm J1: counts_floor=/type3_capped= on a run whose Type-3 pair cap did NOT fire — a floor claim with nothing dropped"
 else
-    p2ok "arm J1: no counts_floor=/type3_capped= when the pair cap did not fire (the counts are not floors on this run)"
+    ok "arm J1: no counts_floor=/type3_capped= when the pair cap did not fire (the counts are not floors on this run)"
 fi
 printf '%s' "$G" | grep -q 'dup_pct=duplicated-LOC' \
-    && p2ok "arm J2: the legend DEFINES dup_pct (numerator, denominator and the per-group counting rule)" \
+    && ok "arm J2: the legend DEFINES dup_pct (numerator, denominator and the per-group counting rule)" \
     || p2no "arm J2: the legend does not define dup_pct"
 
 # ── arm K: determinism + well-formedness of the extended output ──────────────────────────────────────
@@ -215,12 +215,12 @@ G2="$( cl "$W2/grp" )"
 if [ -z "$G" ]; then
     p2no "arm K1: EMPTY --clones output — vacuously identical, not deterministic"
 elif [ "$G" = "$G2" ]; then
-    p2ok "arm K1: two --clones runs byte-identical (determinism)"
+    ok "arm K1: two --clones runs byte-identical (determinism)"
 else
     p2no "arm K1: two --clones runs DIFFER"
 fi
 if command -v xmllint >/dev/null 2>&1; then
-    printf '%s' "$G" | xmllint --noout - 2>"$W2/xl" && p2ok "arm K2: extended --clones output is well-formed XML" \
+    printf '%s' "$G" | xmllint --noout - 2>"$W2/xl" && ok "arm K2: extended --clones output is well-formed XML" \
         || { p2no "arm K2: xmllint rejected the extended output"; sed 's/^/    /' "$W2/xl" | head -3; }
 else
     p2no "arm K2: xmllint missing — cannot verify well-formedness (install libxml2-utils)"
