@@ -46,20 +46,12 @@ never qualify (added lines are the anchor, and they must exist in the post-commi
 import argparse, json, re, subprocess, sys, tempfile, shutil, os
 from pathlib import Path
 
+from _common import sh, line_text                      # one definition, shared with the py-round harnesses
+
 CPP_EXT = { ".h", ".hpp", ".cpp", ".cc", ".cxx" }
 WORD    = re.compile( r"[A-Za-z_]\w*" )
 ROW_L   = re.compile( r'<s l="(\d+)"' )
 V_ROW   = re.compile( r'<v n="([^"]+)"' )
-
-def sh( args, cwd=None, ok_fail=False ):
-    # errors="replace": external corpora carry non-UTF-8 bytes (ugrep's own test fixtures are
-    # deliberately latin-1/binary), and a diff that touches one must not abort the mine. Only
-    # content bytes are ever mangled — hunk headers and funcnames are ASCII by git's own format —
-    # so qualification is unaffected.
-    r = subprocess.run( args, cwd=cwd, capture_output=True, text=True, errors="replace" )
-    if r.returncode != 0 and not ok_fail:
-        raise RuntimeError( f"{args}: rc={r.returncode}\n{r.stderr[:500]}" )
-    return r
 
 def fn_name_from_sig( sig ):
     """the identifier before the last '(' of a git funcname line, or the last identifier."""
@@ -163,8 +155,7 @@ def main():
                     continue
                 # the added lines, in the file at THIS commit
                 src_lines = ( wt / c["file"] ).read_text( errors="replace" ).splitlines()
-                def line_text( n ): return src_lines[ n-1 ] if 0 < n <= len( src_lines ) else ""
-                touched_vars = sorted( { v for n in c["added"] for v in WORD.findall( line_text( n ) ) if v in locals_ } )
+                touched_vars = sorted( { v for n in c["added"] for v in WORD.findall( line_text( src_lines, n ) ) if v in locals_ } )
                 if not touched_vars:
                     skips[ "no_touched_var" ] += 1
                     continue
@@ -176,7 +167,7 @@ def main():
                     if v1.returncode != 0:
                         continue
                     v1_lines = { int( x ) for x in ROW_L.findall( v1.stdout ) }
-                    relevant = [ n for n in c["added"] if re.search( r"\b%s\b" % re.escape( var ), line_text( n ) ) ]
+                    relevant = [ n for n in c["added"] if re.search( r"\b%s\b" % re.escape( var ), line_text( src_lines, n ) ) ]
                     if not relevant:
                         continue
                     v2 = run_ripwire( bin_, wt, [ f"--slice={sel}:{var}", "--slice-flow=both" ] )
