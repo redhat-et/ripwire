@@ -1,6 +1,8 @@
 // deck5_ripwire_build.js — the ripwire public showcase deck.
 // Every number is pinned by an instrument in the ripwire repo (docs/EVALS.md is the source of
-// truth; §8's refused claims are absent by construction). Every --flag named exists in
+// truth; §8's refused claims are absent by construction), with one exception stated on its slides: the 0.6.7/0.6.8
+// answer counts are quoted from the v0.6.8 release notes, whose question set is not in the repo yet. Papers are cited as
+// independent studies, never as ripwire results. Every --flag named exists in
 // `ripwire --help` — enforced by test/deckcheck.sh, which scans THIS FILE as its `present` family;
 // the slide count and the flag count are derived from this file and the binary by
 // test/deckclaimcheck.sh. Design: dark, two-tone on the name's own halves — cyan = ripgrep/speed,
@@ -9,8 +11,8 @@
 // doc or web page each figure was read from, quoted. A claim about a change that has not merged yet
 // says "pending merge: #N" in those notes and lives in a commit of its own, so it can be kept or dropped
 // when that PR lands; once it lands the note says "merged: #N (<merge commit>)" instead, and the figure
-// is re-checked against the merged tree. No note on this deck is pending as of main a5229aca (the 2026-09-30 refresh: 25 grammars, nine wrap agents, the
-// since-0.6.1 slide and the field-report slide). A double-braced MEASURE placeholder is a figure that moves with the tree and
+// is re-checked against the merged tree. No note on this deck is pending as of main f156be85 (the 2026-10-21 refresh: 26 grammars, the goal and
+// completeness slides, 0.6.7 and 0.6.8, what moved answers, the cross-file studies; the August head-to-head slides labelled historical). A double-braced MEASURE placeholder is a figure that moves with the tree and
 // is re-measured on the merged binary before the deck is rendered; the deck is never rendered with one left in it.
 const pptxgen = require("pptxgenjs");
 
@@ -137,9 +139,10 @@ function storyCards(s, { kick, head, stories, footText }){
     { x: wireX+0.3, y: 5.3, w: wireW-0.6, h: 0.62, fontFace: SANS, fontSize: 15, color: TEXT, valign: "top", margin: 0 });
   s.addText("Every truncation is disclosed, and every guess says how many it chose from.",
     { x: wireX+0.3, y: 5.98, w: wireW-0.6, h: 0.42, fontFace: SANS, fontSize: 12.5, color: MUTED, valign: "top", margin: 0 });
-  foot(s, "Apache-2.0  ·  single binary  ·  hermetic build (proven with the network off)  ·  25 vendored tree-sitter grammars");
+  foot(s, "Apache-2.0  ·  single binary  ·  hermetic build (proven with the network off)  ·  26 vendored tree-sitter grammars");
   notes(s, [
     "SOURCES (cover)",
+    "- \"26 vendored tree-sitter grammars\" — README.md on main f156be85: \"26 vendored grammars\"; CHANGELOG.md [0.6.8] \"Added — Clojure\" (#349, thanks @tag-und-nacht) vendors tree-sitter-clojure, and third_party/deps/ gains clojure/. The 25 below is the count before Clojure.",
     "- \"25 vendored tree-sitter grammars\" — CHANGELOG.md [0.6.2], \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\", PR #233 (\"Thanks to @sclyde.\"). README.md on main a5229aca: \"25 vendored grammars\"; third_party/deps/ holds 24 grammar projects, tree-sitter-typescript supplying two (typescript and tsx). Astro (#320) adds no grammar: it rides the TypeScript one.",
     "- Before GDScript: 24 — merged: #126 (merge commit 1ad9184a, 2026-09-11), which vendors the Kotlin grammar (PR #126 body: \"vendored fwcd/tree-sitter-kotlin grammar\"). Before #126 the count was 23. On main 40a1895b: README.md, \"24 vendored grammars\", and third_party/deps/ holds a kotlin/ directory.",
     "- The 23 it builds on: commit 680a0a3d,\"It is 23: 22 upstream projects under third_party/deps/, with tree-sitter-typescript supplying both typescript and tsx\"; PR #106's title, \"Dart: a 23rd grammar …\"; README.md, \"23 vendored grammars\".",
@@ -158,7 +161,7 @@ function storyCards(s, { kick, head, stories, footText }){
   ], { x: MX, y: 1.95, w: 6.1, h: 3.2, fontFace: SANS, fontSize: 16.5, color: TEXT, margin: 0 });
 
   card(s, 7.25, 1.95, 5.35, 2.15);
-  stat(s, "0.108 s", "median answer, warm index — round 4, all arms one machine one day, N = 60", 7.35, 2.2, 5.15, CYAN, {});
+  stat(s, "0.108 s", "median answer, warm index — round 4 (historical, 2026-08-08), all arms one machine one day, N = 60", 7.35, 2.2, 5.15, CYAN, {});
   card(s, 7.25, 4.3, 5.35, 2.15);
   stat(s, "−39.4%", "token ceiling vs the un-routed baseline — LocBench cost ledger, N = 243", 7.35, 4.55, 5.15, GREEN, {});
   s.addText("Speed caveat travels with the number: ripwire answers from a warm, pre-built index, and round 4 measured its index cost too — 0.31 s, tabulated beside the competitors' rather than omitted. Measured 2026-08-08, before 0.6.0's performance work; not re-measured since.",
@@ -172,13 +175,14 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// one binary, the whole pipeline", CYAN);
   notes(s, [
     "SOURCES (grammar count and language row)",
+    "- \"26 vendored grammars\" and Clojure in the language row — CHANGELOG.md [0.6.8] \"Added — Clojure\" (#349, thanks @tag-und-nacht); README.md on main f156be85: \"26 vendored grammars\" and Clojure in its language line. The 25 below is the count before Clojure.",
     "- \"25 vendored grammars\", GDScript and Astro in the language row — CHANGELOG.md [0.6.2] \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\" (#233, @sclyde); CHANGELOG.md [0.6.4] \"### Added — Astro (`.astro`) frontmatter is indexed on the TypeScript grammar (#320, #67)\". The language row wraps to three lines at 12 pt; check it is not clipped in the render.",
     "- Before GDScript: \"24 vendored grammars\" and Kotlin in the language row — merged: #126 (merge commit 1ad9184a, 2026-09-11); PR body, \"Adds Kotlin (.kt) language support: vendored fwcd/tree-sitter-kotlin grammar\". Before #126: 23 (commit 680a0a3d) and no Kotlin. README.md on main 40a1895b says \"24 vendored grammars\".",
   ]);
   title(s, "Crawl → parse → resolve → rank → emit. Deterministic, end to end.");
   const stages = [
     ["crawl",   "the tree, no VCS needed"],
-    ["parse",   "tree-sitter, 25 vendored grammars"],   // CHANGELOG [0.6.2] "the 25th vendored grammar" (GDScript, #233)
+    ["parse",   "tree-sitter, 26 vendored grammars"],   // CHANGELOG [0.6.8] Clojure (#349, @tag-und-nacht); README "26 vendored grammars"
     ["resolve", "references → call graph"],
     ["rank",    "Personalized PageRank"],
     ["emit",    "minified XML, one line"],
@@ -194,7 +198,7 @@ function storyCards(s, { kick, head, stories, footText }){
   const props = [
     ["byte-identical", "two runs, same bytes — a gate on every push, not a tendency; warm equals cold"],
     ["zero runtime deps", "CMake + a C++23 compiler; builds with the network off — vendored everything"],
-    ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Kotlin · Ruby · PHP · Lua · Elixir · Dart · GDScript · Bash · C# · JSON · TOML · YAML · Markdown — 25 vendored grammars, Astro frontmatter on the TypeScript one; markdown headings are real symbols"],   // GDScript: CHANGELOG [0.6.2] (#233); Astro: CHANGELOG [0.6.4] (#320)
+    ["the languages", "Rust · C++ · ObjC/C++ · C · Metal · CUDA · Python · Go · Swift · TypeScript · JavaScript · Java · Kotlin · Ruby · PHP · Lua · Elixir · Dart · GDScript · Clojure · Bash · C# · JSON · TOML · YAML · Markdown — 26 vendored grammars, Astro frontmatter on the TypeScript one; markdown headings are real symbols"],   // GDScript: CHANGELOG [0.6.2] (#233); Astro: CHANGELOG [0.6.4] (#320); Clojure: CHANGELOG [0.6.8] (#349)
     ["agent-native", "an MCP server and 192 long flags behind one `--help` that is always the authority"],
   ];
   // Row height carries the LONGEST body (the language line, which wraps to three at this width),
@@ -260,93 +264,245 @@ function storyCards(s, { kick, head, stories, footText }){
   foot(s, "and --pr-context when you are reviewing someone else's diff — per-file blast radius, tests-to-run, hotspot flags");
 }
 
-/* ── S5b · what shipped since the last deck refresh ─────────────────────── */
+/* ── S5n1 · the goal ────────────────────────────────────────────────────── */
 {
+  // README.md's "The goal: one question, one complete answer." and its "How we measure the climb" list, in its own words. The six
+  // measures are the scorecard every later slide is judged on; none of them carries a number here, because the number is the next slide.
   const s = p.addSlide(); bg(s);
-  kicker(s, "// new since 2026-08-15 — each figure re-derived on the binary that ships", CYAN);
-  title(s, "What 2026-08-15 to 2026-08-23 added", { size: 32 });
-  const shipped = [
-    ["--pattern", "search by code SHAPE, not by node kinds",
-     "foo($X, ...) across 13 grammar objects / 11 languages. On this repo VERIFY($X) finds 116 hits over 896 eligible files, each with its enclosing symbol. A pattern no served grammar resolves REFUSES (exit 1) instead of reporting hits=0.", CYAN],
-    ["--safe-delete", "“can I delete this?” in one call",
-     "callers + transitive radius + every read/write/import site + how much of that radius a test reaches. risk= names what was FOUND — never a go/no-go verdict.", CYAN],
-    ["--impact importers=", "the second, weaker reach",
-     "the files that include/require a file defining SYM, with their own cap pair — NEVER summed into reaches=, because files and symbols are different units. IngestResult: reaches=0, importers=70.", CYAN],
-    ["compact --for bundles", "bodies were 52.7% of every conceptual byte",
-     "the subtoken+body route now ships the ranked map plus one-hop edge context, disclosed as bundle=compact bodies=0. 15-query class B: 184,857 B → 95,256 B, −48.5%, all 11 decisive markers still present. --auto-bodies is a permanent opt-out.", GREEN],
-    ["corroborated callers", "shared= on --pack-task rows",
-     "a neighbour reached by four of the bundle's anchors sorts above one reached by a single anchor — omitted at 1, which is what every 1-hop row satisfies anyway.", CYAN],
-    ["per-rule --lint roll-up", "a capped view stops hiding whole rules",
-     "on this repository 16 of the 31 rules that fired contribute ZERO shown rows — 588 findings whose only evidence is their count=. A rule no corpus language registers carries applicable=0, so its zero is inertness, not a measurement.", AMBER],
-  ];
-  let y = 1.72;
-  for (const [flag, what, detail, c] of shipped){
-    card(s, MX, y, 12.09, 0.79);
-    s.addText(flag,   { x: MX+0.18, y: y+0.05, w: 2.55, h: 0.34, fontFace: MONO, fontSize: 12, bold: true, color: c, margin: 0 });
-    s.addText(what,   { x: MX+0.18, y: y+0.40, w: 2.55, h: 0.34, fontFace: SANS, fontSize: 9,  italic: true, color: MUTED, margin: 0 });
-    s.addText(detail, { x: MX+2.95, y: y+0.05, w: 9.0,  h: 0.69, fontFace: SANS, fontSize: 10.5, color: TEXT, valign: "middle", margin: 0 });
-    y += 0.87;
-  }
-  card(s, MX, 6.95, 12.09, 0.0, CARD2);
+  kicker(s, "// the goal, and the scorecard every change is judged on", CYAN);
+  title(s, "One question, one complete answer");
+  card(s, MX, 1.72, 5.0, 5.12, CARD2);
   s.addText([
-    { text: "And two languages: PHP and Lua, ", options: { color: TEXT, bold: true } },
-    { text: "each shipped with its floor stated rather than implied — PHP's run-time dispatch ($fn(), call_user_func, __call) names its callee at run time and is a declared floor; a Lua corpus reports no inheritance edges, because metatable inheritance has no syntax to read.", options: { color: MUTED } },
-  ], { x: MX, y: 6.92, w: 12.09, h: 0.5, fontFace: SANS, fontSize: 10, margin: 0 });
+    { text: "Terminality is the objective.\n", options: { color: TEXT, bold: true, fontSize: 18 } },
+    { text: "An answer should carry everything you need: no follow-up grep, no three whole-file reads to fill in what it left out. A call followed by three greps is the same search paid for twice.\n\n", options: { color: MUTED, fontSize: 14 } },
+    { text: "Not every answer gets there yet. ", options: { color: AMBER, bold: true, fontSize: 14 } },
+    { text: "Until one can, it owes you three things: it stays bounded in size, it is honest about what it does not know, and it says where to look next.\n\n", options: { color: MUTED, fontSize: 14 } },
+    { text: "Answering comes first. ", options: { color: TEXT, bold: true, fontSize: 14 } },
+    { text: "A byte budget is never allowed to cost an answer, and the budget is the caller's to set: the defaults carry none that cuts a typical answer.", options: { color: MUTED, fontSize: 14 } },
+  ], { x: MX+0.25, y: 1.9, w: 4.5, h: 4.8, fontFace: SANS, valign: "top", margin: 0 });
+  const measures = [
+    ["complete answers",           "the share of questions answered so you can act without re-checking", GREEN],
+    ["honest-partial rate",        "how often an incomplete answer says what it is missing, instead of sounding confident", AMBER],
+    ["false-confidence rate",      "wrong answers that claim to be complete: the worst case, held near zero", RED],
+    ["next-clue usefulness",       "for a partial or wrong answer, whether its first suggested next step reaches what was needed, within one hop; graded blind", CYAN],
+    ["recoverability",             "for every cut answer, whether following its next= returns everything that was cut", CYAN],
+    ["tokens per complete answer", "what a whole scenario costs (orient, then the questions that follow), divided by the questions it answered fully", CYAN],
+  ];
+  const RX = MX + 5.2, RW = W - MX - RX;
+  let y = 1.72;
+  for (const [n, d, c] of measures){
+    card(s, RX, y, RW, 0.78);
+    s.addText(n, { x: RX+0.2, y: y+0.04, w: 2.45, h: 0.7, fontFace: MONO, fontSize: 12, bold: true, color: c, valign: "middle", margin: 0 });
+    s.addText(d, { x: RX+2.75, y: y+0.04, w: RW-2.95, h: 0.7, fontFace: SANS, fontSize: 10.5, color: MUTED, valign: "middle", margin: 0 });
+    y += 0.868;
+  }
+  foot(s, "README.md, \"The goal: one question, one complete answer\" · bytes are counted per COMPLETE answer across a scenario, never per call");
   notes(s, [
-    "SOURCES (the two live-repo figures on this slide — both re-derived 2026-09-11 on main 40a1895b, because they move with the tree)",
-    "- --pattern: `git archive 40a1895b | tar -x -C DIR; ripwire DIR --pattern='VERIFY($X)' --no-cache` → hits=\"116\" eligible_files=\"896\" skipped_files=\"0\" of_files=\"1961\", grammars= naming 13 objects over 11 languages. It read 101 hits over 625 eligible files when the slide was written on 2026-09-06; the tree has grown since.",
-    "- --lint: `ripwire DIR --lint --no-cache` over the same archive → 39 rule rows, 31 with count>0, of which 16 carry shown_rows=\"0\", totalling 588 findings. It read 14 of 31 and 368 findings on 2026-09-06.",
+    "SOURCES (the goal). README.md on main f156be85, section \"The goal: one question, one complete answer.\" and its collapsed \"How we measure the climb\" list.",
+    "- \"Terminality is the objective. Ask the codebase a question and the answer should carry everything you need — no follow-on grep, no three more whole-file reads to fill in what it left out. A call followed by three greps is the same search paid for twice\".",
+    "- \"Until an answer can be complete, it owes you three things: it stays bounded in size, it is fully honest about what it does not know, and it gives you a clue where to look next.\"",
+    "- \"Answering comes first; efficiency is how we get there\" … \"a byte budget is never allowed to cost an answer\"; \"Budgets are yours to set, never ours to impose. The defaults and the setups ripwire wrap writes carry no budget that cuts a typical answer\".",
+    "- The six measures are the README's list, shortened: Complete answers, Honest-partial rate, False-confidence rate, Next-clue usefulness (\"Graded blind\"), Recoverability, Tokens per complete answer. The README also lists cut-row recoveries; it is left off for room and is the ranking half of recoverability.",
   ]);
 }
 
-/* ── S5b · new since 2026-08-23 ─────────────────────────────────────────── */
+/* ── S5n2 · the loop, and ripwire against its own past ─────────────────── */
 {
+  // The ONLY completeness figures on this deck, and they are ripwire against its own earlier releases: the v0.6.8 release notes'
+  // "Measured" table and CHANGELOG.md [0.6.8]'s "Measured" bullet. The same notes carry an unnamed comparison with other tools; it is
+  // left off on purpose — the named comparison is reserved for 0.7.0. Owner OK for these figures on the deck: 2026-10-21.
   const s = p.addSlide(); bg(s);
-  kicker(s, "// new since 2026-08-23 — each figure measured, dated, and re-derivable", CYAN);
-  title(s, "What 2026-08-23 to 2026-08-30 added", { size: 32 });
-  const rows = [
-    ["--slice-flow", "cross-statement data-flow slicing\n(ARISE, arXiv:2605.03117)",
-     "The paper's own slicer — reaching-definition edges, a seed plus a direction, a bounded BFS that stops at function boundaries — implemented and MEASURED on a registered fix-commit protocol: flow rows lift function-level added-line recall 0.163 → 0.198 at 25% of --expand's whole-body bytes (whose recall is 1.0 by construction). 7 commits / 38 instances, cpp only — a thin corpus, reported as thin.", CYAN],
-    ["--slice, first numbers", "the 2026-08-28 registered contract,\nfinally measured",
-     "Per-variable line-recall 0.726, hit-all rate 0.632 — a FLOOR under a noisy relevance oracle: every inspected miss was the protocol's word-regex matching identifiers inside comments and string literals, occurrences the slicer correctly refuses to call variable uses. No inspected instance showed a real occurrence the slice dropped.", CYAN],
-    ["~1350× on --expand", "the secret-redaction sweep was\nquadratic in LINE length",
-     "One selector in a 2.1 MB / 768-line minified yarn bundle NEVER completed — killed at 1,343.9 s of user CPU with an empty output file; 196.7 s is the only clean lower bound — and now answers in 0.46 s warm. The 20 KB single-line fixture: 23.02 s → 0.017 s. A pure memoization, so an output no-op: 120/120 invocations byte-identical; gated on behaviour, the timings a ledger row and never a red-CI threshold.", GREEN],
+  kicker(s, "// how we measure the climb: ripwire against its own earlier releases", AMBER);
+  title(s, "Complete first answers: 50 → 83 → 98 of 173", { size: 32 });
+  s.addChart("bar", [
+    { name: "stricter method",      labels: ["0.6.5", "0.6.7", "0.6.8*"], values: [50, 83, 98] },
+    { name: "more lenient method",  labels: ["0.6.5", "0.6.7", "0.6.8*"], values: [78, 109, 127] },
+  ], {
+    x: MX, y: 1.66, w: 6.6, h: 3.55, barDir: "col", barGrouping: "clustered",
+    chartColors: [CYAN, "3A6D78"],
+    showValue: true, dataLabelPosition: "outEnd", dataLabelFormatCode: "0", dataLabelColor: TEXT, dataLabelFontSize: 12, dataLabelFontFace: SANS,
+    catAxisLabelColor: TEXT, catAxisLabelFontSize: 12, catAxisLabelFontFace: MONO,
+    valAxisLabelColor: MUTED, valAxisLabelFontSize: 9, valAxisMaxVal: 173, valAxisMinVal: 0, valAxisMajorUnit: 50,
+    valGridLine: { color: "232D3D", size: 0.5 }, catGridLine: { style: "none" },
+    showLegend: true, legendPos: "t", legendColor: MUTED, legendFontSize: 10, legendFontFace: SANS,
+    showTitle: false, plotArea: { fill: { color: BG } }, chartArea: { fill: { color: BG }, border: { color: BG } },
+    barGapWidthPct: 60,
+  });
+  const minis = [
+    ["2 → 5 → 6",  "of the 10 questions set aside before any build ran (stricter)", CYAN],
+    ["3 → 0 → 0",  "answers that claimed a wrong target, checked against targets listed in advance", GREEN],
+    ["15 · 0",     "questions better, and worse, from 0.6.7 to 0.6.8 (stricter)", GREEN],
   ];
-  let y = 1.72;
-  for (const [flag, what, detail, c] of rows){
-    card(s, MX, y, 12.09, 1.52);
-    s.addText(flag,   { x: MX+0.18, y: y+0.10, w: 2.55, h: 0.40, fontFace: MONO, fontSize: 13, bold: true, color: c, margin: 0 });
-    s.addText(what,   { x: MX+0.18, y: y+0.52, w: 2.55, h: 0.85, fontFace: SANS, fontSize: 9,  italic: true, color: MUTED, margin: 0 });
-    s.addText(detail, { x: MX+2.95, y: y+0.10, w: 9.0,  h: 1.32, fontFace: SANS, fontSize: 11, color: TEXT, valign: "middle", margin: 0 });
-    y += 1.70;
-  }
-  foot(s, "sources: docs/EVALS.md §--slice-flow (registered protocol + per-instance ledger) · bench/PROFILE.md 2026-08-30 — no number travels without its caveat");
+  const mw = (6.6 - 0.2) / 3;
+  minis.forEach(([big, lbl, c], i) => {
+    const x = MX + i * (mw + 0.1);
+    card(s, x, 5.32, mw, 1.5);
+    s.addText(big, { x: x+0.1, y: 5.4, w: mw-0.2, h: 0.5, fontFace: MONO, fontSize: 18, bold: true, color: c, align: "center", valign: "middle", margin: 0 });
+    s.addText(lbl, { x: x+0.12, y: 5.92, w: mw-0.24, h: 0.84, fontFace: SANS, fontSize: 9.5, color: MUTED, align: "center", valign: "top", margin: 0 });
+  });
+  const RX = MX + 6.85, RW = W - MX - RX;
+  card(s, RX, 1.66, RW, 5.16, CARD2);
+  s.addText("The method", { x: RX+0.22, y: 1.78, w: RW-0.44, h: 0.34, fontFace: SANS, fontSize: 14, bold: true, color: AMBER, margin: 0 });
+  const method = [
+    "173 questions over public open-source repositories, each with a must-mention list written before the run: orient, locate, callers and callees, how it works, paths, blast radius.",
+    "Only the first answer counts. Complete means it covers the whole list, with no follow-up call.",
+    "Graded mechanically, two ways: stricter (an item counts only when the answer names its primary symbol, or two of its listed terms) and more lenient (any one term). A hand read falls between them.",
+    "A hand read samples the answers for false claims. Ten questions from one repository were sealed before any build of the release ran.",
+    "The question set is not in this repository yet, so these counts are quoted from the release notes rather than re-derivable here.",
+    "These rounds steer the work; they are not the comparison. The named comparison with other tools comes with 0.7.0.",
+  ];
+  s.addText(method.map((t) => ({ text: t, options: { bullet: { indent: 14 }, breakLine: true, paraSpaceAfter: 8 } })),
+    { x: RX+0.2, y: 2.2, w: RW-0.4, h: 4.5, fontFace: SANS, fontSize: 12, color: MUTED, valign: "top", margin: 0 });
+  foot(s, "* 0.6.8: its train-28 build, first of four batches; later changes measured on own questions · v0.6.8 release notes, CHANGELOG [0.6.8]");
+  notes(s, [
+    "SOURCES (complete first answers). Both are public: the v0.6.8 GitHub release notes, section \"Measured: the same 173 questions, 0.6.5 then 0.6.7 then 0.6.8\", and CHANGELOG.md [0.6.8], the \"Measured:\" bullet of its summary.",
+    "- CHANGELOG [0.6.8]: \"on our fixed set of 173 questions over public repositories (10 of them from one repository sealed before any build ran), graded two ways, a stricter method (a rubric item counts only when the answer names its primary symbol or at least two of its listed terms) and a more lenient one (any one listed term), the questions answered completely in one call went 50, 83, 98 (stricter) and 78, 109, 127 (more lenient) for 0.6.5, 0.6.7 and 0.6.8; on the 10 sealed questions, 2, 5, 6 (stricter). The 0.6.8 figure was measured on the train-28 build of 0.6.8; the later changes in this release were measured only on their own target questions (release notes). Same machine, mechanical grading.\"",
+    "- Release notes table, row \"answers that claimed a wrong target (mechanical check against pre-listed wrong targets) | 3 | 0 | 0\".",
+    "- Release notes: \"Since 0.6.7, 15 questions got better and none got worse (stricter method)\".",
+    "- Release notes: \"On an earlier 163-question round a hand read of the grader's output fell between the two methods (more lenient 99, stricter 75, hand read about 81 to 85), so treat the truth as between them.\" Hence \"A hand read falls between them\".",
+    "- Release notes: \"A hand read for false claims covered a sample of the 0.6.7 and 0.6.8 answers; the 0.6.5 answers were barely read, so their false-claim count is a lower bound.\" The slide quotes no false-claim count for that reason; the 3 → 0 → 0 row is the MECHANICAL wrong-target check, which ran on all three.",
+    "NOT RE-DERIVABLE FROM THIS TREE: the 173-question set and its grader are not committed to the repository, so these counts are quoted, not re-measured; the \"Claims you can trust\" slide names this as the deck's one exception to its committed-instrument rule, and the re-derive slide says so in its row.",
+    "LEFT OFF ON PURPOSE: the release notes' bullet comparing five unnamed other tools on 120 of the questions. No peer figure goes on this deck before the named 0.7.0 comparison.",
+  ]);
 }
 
-/* ── S5d · new since 2026-08-30 ───────────────────────────────── */
+/* ── S5n3 · 0.6.7 and 0.6.8 at a glance ─────────────────────────────────── */
 {
+  // Same four-quadrant listCard shape as 0.6.0 and 0.6.1. Window: after v0.6.5 (2026-09-27) through main f156be85 (2026-10-21) —
+  // releases 0.6.7 and 0.6.8 (there was no 0.6.6), plus #402 and #410, merged after the 0.6.8 tag. Every row names its source again in the notes.
   const s = p.addSlide(); bg(s);
-  kicker(s, "// new since 2026-08-30 — the window this deck did not cover until now", CYAN);
-  title(s, "What 2026-08-30 to 2026-09-06 added", { size: 32 });
-  const rows = [
-    [".gitignore, honoured\nby default", "named for ripgrep, whose\ndefining default this is",
-     "The crawl walked ignored files; in a git work tree it now consults git's own rules and skips what the repository already declared uninteresting. This root, three checkouts under an ignored bench/external/: files= 8,674 \u2192 1,522, cold 2.81 s \u2192 0.52 s, warm 0.63 s \u2192 0.10 s \u2014 and --no-ignore restores the previous walk exactly. Nothing drops silently: ignored_files= is exact, ignored_dirs= says the walk STOPPED there so those contents are UNKNOWN rather than zero, and both are ABSENT when the rules dropped nothing \u2014 so a tree with nothing ignored is byte-identical to what it produced before.", GREEN],
-    ["--html --color-by", "the map, rendered \u2014\nno server, no CDN",
-     "One self-contained HTML file: a force-directed call graph you click to recentre. --color-by=lang|community|cx|churn|tested sets the INITIAL colour only \u2014 the page embeds all five and keeps a live selector, so switching lens costs no second run. One five-stop blue-to-orange scale rather than the usual green-to-red, so reading it never depends on telling red from green.", CYAN],
-    ["--eval-retrieval,\nre-sampled", "the sampler was measuring\nthe corpus, not the ranker",
-     "For fourteen months the gold set was the first 150 doc-commented symbols in PATH order \u2014 and bench/ sorts before src/, so adding a docstring to a benchmark harness moved a published number without touching ranking code. One 60-symbol probe, one corpus, only its PATH varied: 0.105 and 0.356 MRR from spelling alone. Now exhaustive \u2014 population=3011 scored=3011 rule=exhaustive \u2014 and EVERY retrieval figure this project publishes was re-derived under it.", AMBER],
-    ["--plan-lanes", "which lanes would collide,\nBEFORE a line is written",
-     "Where --merge-scout says \"these branches already conflict\", this says \"these lanes WOULD conflict if assigned this way\" \u2014 no ref to resolve, no re-ingest. Each lane now also carries an advisory execution profile (model + reasoning effort) that labels its own evidence basis=\"structural-only\" and versions its policy separately from the schema, so a recommendation cannot quietly claim more than the structure it read.", CYAN],
+  kicker(s, "// 0.6.7 (2026-10-11) and 0.6.8 (2026-10-19); each row names its source", CYAN);
+  title(s, "0.6.7 and 0.6.8: more of the answer, fewer false edges", { size: 30 });
+  const CW = (W - 2*MX - 0.14) / 2, CH = 2.43, X2 = MX + CW + 0.14, Y2 = 1.72 + CH + 0.12;
+  listCard(s, MX, 1.72, CW, CH, "more of the answer in the first call", CYAN, [
+    ["3.96 → 8.00",     "distinct files in --for's first eight rows, on 44 questions: each file's best row first, before any file takes a second (0.6.8)", GREEN],
+    ["121 callers",     "tmux's --callers=options_get_number, about 10.8 KB of rows, is one answer instead of four pages: lists up to 50 rows are served whole (0.6.8)", GREEN],
+    ["5-hop chain",     "fzf's --path=Matcher::Loop,Pattern::extendedMatch was “endpoint not found”: a Go method now resolves in its receiver's scope (#403)", GREEN],
+  ], { bigW: 1.75 });
+  listCard(s, X2, 1.72, CW, CH, "exact, or no row", AMBER, [
+    ["<dc> rows",       "a call the resolver declined is named, not only counted: on hono, --impact=match names 16 of its 339 declined sites (0.6.8)", AMBER],
+    ["typed results",   "a local bound to a call takes the callee's declared result type in Go, Rust, Java, Kotlin and TypeScript; C++ and C are not typed yet, and the entry says so (0.6.8)", AMBER],
+    ["hedged",          "a method named at run time, as in getattr(obj, f\"watch_{name}\"), now reads risk=\"hedged\" on --safe-delete instead of none-found (0.6.8)", AMBER],
+  ], { bigW: 1.75 });
+  listCard(s, MX, Y2, CW, CH, "a check on what it writes", CYAN, [
+    ["12 kinds",        "--quality-delta's twelfth, defect-shape: its format-arity check had 0 false positives over this tree's 1,330 literal-format calls, and only it gates new code (0.6.7)", CYAN],
+    ["14,594 → 978 B",  "this repository's clean-tree --quality-delta: a clean verdict folds to one line (0.6.7)", GREEN],
+    ["exit 6",          "under a memory limit, --quality-delta=A..B answers the kinds it can and names the ones it skipped; a 20,356-file repository had been OOM-killed (#387, @tonibergholm-codento)", CYAN],
+  ], { bigW: 1.75 });
+  listCard(s, X2, Y2, CW, CH, "from the community", GREEN, [
+    ["Clojure",         "the 26th grammar, by @tag-und-nacht: 4,930 of 4,933 files parsed on four real checkouts; a parser figure, not call accuracy (#349)", GREEN],
+    ["languages",       "Elixir unquote calls count again (@LaimaWu, #380); Ruby mixins (@mpapis, #400); a markdown link edges to its exact heading (@muayyad-alsadi, #414)", GREEN],
+    ["Windows",         "a GNU tar stdin fix and a clang-cl PGO workaround, by @lennix1337 (#402, #410, merged after 0.6.8)", GREEN],
+  ], { bigW: 1.75 });
+  foot(s, "upgrade note: parser 206 · cache 36 — caches rebuild once; Go quality baselines, acks and notes re-pin once");
+  notes(s, [
+    "SOURCES (0.6.7 and 0.6.8). CHANGELOG.md [0.6.7] and [0.6.8] on main f156be85; #402 and #410 are merge commits on main after the v0.6.8 tag (f156be85, 413ab4d2). There was no 0.6.6 release.",
+    "MORE OF THE ANSWER",
+    "- 3.96 → 8.00: [0.6.8] \"### Changed — --for's first eight rows name up to eight distinct files before any file takes a second row (head round-robin)\": \"Measured on 44 round-5 rows … distinct head files 3.96 → 8.00\".",
+    "- 121 callers: [0.6.8] \"tmux's --callers=options_get_number, 121 callers and about 10.8 KB of rows, is one answer instead of four pages\"; the summary: \"--callers and --callees serve up to 50 rows whole (a callers list up to 16,000 B)\".",
+    "- 5-hop chain: [0.6.8] \"On fzf, --path=Matcher::Loop,Pattern::extendedMatch was \\\"endpoint not found\\\" and is now a 5-hop chain.\" (Go receiver scope, #403).",
+    "EXACT, OR NO ROW",
+    "- <dc>: [0.6.8] \"On hono, --impact=match now names 16 of its 339 declined sites\".",
+    "- typed results: [0.6.8] \"### Added — a local bound to a call takes the callee's declared result type\": \"C++ (and Objective-C) call results are NOT typed yet … C is not typed either.\"",
+    "- hedged: [0.6.8] \"### Fixed — a method a name-template lookup can name no longer reads risk=\\\"none-found\\\"\": \"getattr(obj, f\\\"watch_{name}\\\") … so --safe-delete printed risk=\\\"none-found\\\" for real dispatch targets\"; the summary: \"--safe-delete hedges constructed-name lookups instead of none-found\".",
+    "A CHECK ON WHAT IT WRITES",
+    "- 12 kinds / defect-shape: [0.6.7]: \"format-arity 0 false positives on this tree (1,330 literal-format calls)\"; README: \"twelve quality kinds\"; the ripwire-quality-bar skill: \"new-symbol rows never gate, except defect-shape format-arity\".",
+    "- 14,594 → 978 B: [0.6.7] \"This repository's clean-tree --quality-delta: 14,594 → 978 B.\"",
+    "- exit 6: [0.6.8] \"a 20,356-file repository's HEAD~1..HEAD was OOM-killed at an 8 GiB cgroup limit (#387)\"; \"Every cut is named in the header: kinds_skipped=, skipped_why=\\\"memory\\\"\"; release notes: \"exit 6 (new)\". #387 is credited to @tonibergholm-codento in the [0.6.8] Thanks line.",
+    "FROM THE COMMUNITY — the [0.6.8] Thanks line: \"@LaimaWu (#380, #382), @mpapis (#396, #400, #401, #412), @tonibergholm-codento (#387, #391, #392), @tag-und-nacht (#349), and @muayyad-alsadi (#409, #414 …)\".",
+    "- Clojure: [0.6.8] \"The grammar comparison parsed 4,930 of 4,933 files (99.94%, 55.5 MB) from Metabase, clojure-lsp, clj-kondo and Babashka checkouts in 2.24 seconds … This measures parser comple[tion]\". 26th: README \"26 vendored grammars\"; third_party/deps/ gains clojure/.",
+    "- Elixir: [0.6.8] \"### Fixed — an Elixir call inside unquote(...) under quote is a call again; quoted call sites are counted (#357, PR #380 by @LaimaWu)\". Ruby: \"### Changed — Ruby mixins read the shared base-relations path (#400, slice 4a)\" (@mpapis). Markdown: \"a [text](other.md#slug) link edges to that heading … (#414, thanks @muayyad-alsadi)\".",
+    "- Windows: #402 by @lennix1337, commit b47e6693 \"fix(platform): Windows GNU tar archive stdin pipe and tree-sitter isdigit range checks\"; #410 by @lennix1337, \"build(pgo): scope SLP vectorizer workaround to generate phase on Windows Clang\" (docs WINDOWS-PGO.md).",
+    "- Footer: [0.6.8] \"Upgrade: caches rebuild once (kParserVer 206, kCacheVersion 36); re-pin Go quality baselines, acks and notes once\". src/ingest_cache.h on f156be85: kParserVer = 206, kCacheVersion = 36.",
+  ]);
+}
+
+/* ── S5n4 · what moved answers ──────────────────────────────────────────── */
+{
+  // The compare loop's lessons, stated WITHOUT peer numbers. The two figures are ripwire's own and public (CHANGELOG [0.6.8], v0.6.8
+  // release notes). The bottom card's two negatives come from the project's round notes, which are not committed, so it quotes no number.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// what the loop taught us — lessons, not peer numbers", AMBER);
+  title(s, "What moved answers");
+  const lessons = [
+    ["find what a programmer would find", "One indirection at a time: a declined call, a receiver's type, a closure, a glob endpoint, a name built at run time. Each fix shows the next missing step, so a release adds a row that names the step instead of a guess.", CYAN],
+    ["exact, or no row", "Each resolver change's first pass shipped one confidently wrong class. A change now counts as done only after the known false-claim classes are tested, and a call result is typed only when exactly one in-tree class is proven.", AMBER],
+    ["the grader gap is the next fix", "Where the lenient grade says complete and the strict one does not, the answer usually found the right file but not the exact symbol, or showed an owner but not its member. That gap names the next change.", CYAN],
+    ["breadth before depth", "A --for head that spent its rows on one file hid the second file a question needed. Each file's best row first: distinct files in the first eight rows went 3.96 → 8.00 on 44 questions.", GREEN],
+    ["predict, then check", "Each change names the questions it should fix before it runs. On the final 0.6.8 build, 29 questions were re-run: 9 became complete by the stricter grade too, and none lost a matched item.", GREEN],
+    ["complete may cost bytes", "First answers to the 60 development questions grew 19.9% from 0.6.7 to 0.6.8, 356,443 → 427,247 B. That is the price of complete; a stop-when-complete target of 7,500 B and a disclosed 30,000 B guard bound it.", CYAN],
   ];
-  let y = 1.70;
-  for (const [flag, what, detail, c] of rows){
-    card(s, MX, y, 12.09, 1.17);
-    s.addText(flag,   { x: MX+0.18, y: y+0.09, w: 2.55, h: 0.50, fontFace: MONO, fontSize: 12, bold: true, color: c, margin: 0 });
-    s.addText(what,   { x: MX+0.18, y: y+0.60, w: 2.55, h: 0.50, fontFace: SANS, fontSize: 9, italic: true, color: MUTED, margin: 0 });
-    s.addText(detail, { x: MX+2.95, y: y+0.08, w: 9.0,  h: 1.01, fontFace: SANS, fontSize: 10, color: TEXT, valign: "middle", margin: 0 });
-    y += 1.25;
+  const cw = 3.95, ch = 2.08; let i = 0;
+  for (const [h2, b, c] of lessons){
+    const x = MX + (i % 3) * (cw + 0.12), y = 1.66 + Math.floor(i / 3) * (ch + 0.12);
+    card(s, x, y, cw, ch);
+    s.addText(h2, { x: x+0.18, y: y+0.12, w: cw-0.36, h: 0.34, fontFace: MONO, fontSize: 12, bold: true, color: c, margin: 0 });
+    s.addText(b,  { x: x+0.18, y: y+0.5, w: cw-0.36, h: 1.52, fontFace: SANS, fontSize: 12, color: MUTED, valign: "top", margin: 0 });
+    i++;
   }
-  foot(s, "CHANGELOG.md [Unreleased] carries the ignore-default measurement and its ledger in bench/PROFILE.md \u00b7 the sampler negative is docs/EVALS.md \u00a77, published as a counterexample against our own published numbers");
+  card(s, MX, 6.08, 12.09, 0.82, CARD2);
+  s.addText([
+    { text: "Killed by measurement, too. ", options: { color: RED, bold: true } },
+    { text: "Folding near-duplicate rows out of the --for head, and shortening the legend, were each measured on the same questions, moved almost nothing, and were dropped: nearly every legend byte defines something a shown row carries.", options: { color: MUTED } },
+  ], { x: MX+0.25, y: 6.14, w: 11.6, h: 0.7, fontFace: SANS, fontSize: 11, valign: "middle", margin: 0 });
+  foot(s, "figures: CHANGELOG.md [0.6.8] and the v0.6.8 release notes · no peer numbers: that comparison is reserved for 0.7.0");
+  notes(s, [
+    "SOURCES (what moved answers). The six lessons are the compare loop's (the project's round notes); every NUMBER on the slide is public and quoted here.",
+    "- 3.96 → 8.00 on 44: CHANGELOG [0.6.8], head round-robin: \"Measured on 44 round-5 rows … distinct head files 3.96 → 8.00\".",
+    "- 29 re-run, 9 complete, none lost: v0.6.8 release notes: \"A re-run on the final 0.6.8 build of the 29 questions the train-28 build had answered completely only by the more lenient method: 9 are now complete by the stricter method too, and none of the 29 lost a matched item (the other 144 questions were not re-run).\"",
+    "- 19.9%: release notes: \"What it costs: the first answers to the 60 development questions total 356,443 B with 0.6.7 and 427,247 B with the 0.6.8 build measured here (+19.9%).\"",
+    "- 7,500 / 30,000 B: CHANGELOG [0.6.8] \"### Changed — --for stops when its answer is complete\": \"a 7,500 B stair-step target with a 30,000 B runaway guard that discloses itself when it fires (over_ceiling=\\\"1\\\")\".",
+    "- typed only when exactly one class is proven: CHANGELOG [0.6.8], \"a local bound to a call takes the callee's declared result type\".",
+    "- the grader gap: the two methods are the release notes' stricter and more lenient grades.",
+    "- KILLED BY MEASUREMENT: both negatives were measured in the project's round notes (a head-collapse probe over the round's --for rows; a legend census of 163 first answers on a Release build of main f156be85). Neither instrument is committed, so under this deck's rule no figure from them is quoted.",
+  ]);
+}
+
+/* ── S5n5 · cross-file, and the independent evidence ────────────────────── */
+{
+  // The cross-file thesis, and two INDEPENDENT studies that support its direction. Neither is a ripwire result and the slide says so.
+  // Each figure was checked against the paper's full text on 2026-10-21 (arxiv.org/html/<id>). Deliberately NOT cited: TraceProbe
+  // (arXiv 2607.06184) for function-over-file — its own tables do not support that reading.
+  const s = p.addSlide(); bg(s);
+  kicker(s, "// where a map helps most — two independent studies, not ripwire results", AMBER);
+  title(s, "Agents lose most when the answer spans files", { size: 32 });
+  card(s, MX, 1.72, 5.0, 5.12, CARD2);
+  s.addText([
+    { text: "The thesis\n", options: { color: CYAN, bold: true, fontSize: 17 } },
+    { text: "An agent reasons well over code it can see. It loses the thread when the answer is split across files: a re-export chain, the method a call really reaches, the helper that already exists, the other place that must change too.\n\n", options: { color: MUTED, fontSize: 13 } },
+    { text: "ripwire hands over that cross-file structure in one answer ", options: { color: TEXT, bold: true, fontSize: 13 } },
+    { text: "— the exact symbol, its callers and callees in other files, what else must change — so the agent reasons locally on a complete picture. --quality-delta is the same idea at write time: it catches the duplicate while the code is still in context.\n\n", options: { color: MUTED, fontSize: 13 } },
+    { text: "Expected, not yet shown: ", options: { color: AMBER, bold: true, fontSize: 13 } },
+    { text: "the benefit grows with the size of the repository. A multi-file question set and larger sealed repositories are planned for the 0.7.0 round to test it.", options: { color: MUTED, fontSize: 13 } },
+  ], { x: MX+0.25, y: 1.88, w: 4.5, h: 4.85, fontFace: SANS, valign: "top", margin: 0 });
+  const RX = MX + 5.2, RW = W - MX - RX;
+  const studies = [
+    ["RepoMirage · arXiv 2605.26177", "Li, Zhang et al.",
+     "Rewriting repositories so the answer crosses files (an import behind a proxy chain, a masked runtime target, constants moved out to JSON) dropped eight models' average SWE-bench Verified resolve rate from 66.80% to 49.78%, while files opened rose from 4.77 to 13.24. Repository-structure hints lifted GPT-5 from 27.6 to 62.6, and DeepSeek-V3.2 from 39.8 to 76.8, on the harder Extend set."],
+    ["Deep Agentic Search · arXiv 2608.01507", "Rafiei Oskooei et al.",
+     "On repository-level code questions, 720 per condition over four models, an agent with retrieval over a pre-built index answered 65.2% correctly against 46.2% for an orchestrator with an exploring sub-agent, at 0.32 against 0.74 dollars per correct answer. Its index is 500-token text chunks with embeddings, not a call graph."],
+  ];
+  let y = 1.72;
+  for (const [t, who, d] of studies){
+    card(s, RX, y, RW, 2.06);
+    s.addText([{ text: t, options: { color: CYAN, bold: true } }, { text: "   " + who, options: { color: MUTED, fontFace: SANS, fontSize: 9.5 } }],
+      { x: RX+0.2, y: y+0.1, w: RW-0.4, h: 0.32, fontFace: MONO, fontSize: 11.5, margin: 0 });
+    s.addText(d, { x: RX+0.2, y: y+0.46, w: RW-0.4, h: 1.52, fontFace: SANS, fontSize: 12, color: MUTED, valign: "top", margin: 0 });
+    y += 2.18;
+  }
+  card(s, RX, 6.08, RW, 0.76, CARD2);
+  s.addText("Cited for the direction, not as measurements of ripwire. Each figure was checked against the paper's full text; their setups differ from ours, and the notes say how.",
+    { x: RX+0.2, y: 6.12, w: RW-0.4, h: 0.68, fontFace: SANS, fontSize: 11, italic: true, color: AMBER, valign: "middle", margin: 0 });
+  foot(s, "arxiv.org/abs/2605.26177 · arxiv.org/abs/2608.01507 — independent studies; no ripwire figure on this slide");
+  notes(s, [
+    "SOURCES (cross-file). Both papers were read in full text at arxiv.org/html/<id> on 2026-10-21; quotes below are the papers'.",
+    "- RepoMirage: \"RepoMirage: Probing Repository Context Reasoning in Code Agents with Perturbations\", Hanyu Li, Yichi Zhang (equal contribution), Speed Zhu, Hang Su, Jun Zhu, Yinpeng Dong. Section 3.2: \"with the average resolved rate dropping from 66.80% to 49.78%\" and \"with the average number of accessed files rising from 4.77 to 13.24\". The three perturbation families are the paper's (dependency-path indirection, runtime-target masking, local-value externalization).",
+    "- The hints figures are Table 3 (Section 5.2, \"Validating the Bottleneck with Structural Hints\"), Avg. column, \"+ Hints\" on RepoMirage-Extend; caption: \"Providing repository-structure hints substantially improves performance on RepoMirage-Extend.\" The hints describe the perturbation's structure; they are not a ripwire map. NOT used: the \"66.8 → 25.3%\" contrast, which compares different task sets.",
+    "- Deep Agentic Search: \"Deep Agentic Search for Repository-Level Code Question Answering: An Empirical Study\", Amirkia Rafiei Oskooei, Bora Ilci, Alperen Kayim, Mehmet Egemen Uzun, Berat Can, Kaan Emre Kara, Ozan Orhan, Mehmet S. Aktas. Abstract: \"Semantic search answered 65.2% of questions correctly against 46.2% for deep agentic search.\" Section 5.2: \"Pooled across the four models, a correct answer cost 0.32 dollars with Semantic against 0.74 dollars with Deep.\" Section 4.3: \"for a total of 720 questions per condition\". Appendix B.1: \"Chunk size. 500 tokens (about 2,000 characters)\"; B.2: text-embedding-3-small.",
+    "- How they differ from ripwire: RepoMirage measures agents on perturbed SWE-bench repositories and its hints are hand-written; Deep Agentic Search's index is a vector index of text chunks, not a symbol graph. Both support the DIRECTION (a pre-built structural answer beats exploration when the answer spans files); neither measures ripwire.",
+    "- NOT CITED: TraceProbe (arXiv 2607.06184) for a function-over-file claim — its own tables do not support it.",
+    "- \"planned for the 0.7.0 round\": the multi-file question set and the larger sealed repositories are planned work; no result is claimed.",
+  ]);
 }
 
 /* ── S5e · 0.6.0 at a glance ────────────────────────────────────────────── */
@@ -468,7 +624,7 @@ function storyCards(s, { kick, head, stories, footText }){
   // double-braced MEASURE placeholders until re-measured on the merged binary. Left out on purpose: skill scanning (not a
   // central feature) and any head-to-head figure (none has been re-measured).
   const s = p.addSlide(); bg(s);
-  kicker(s, "// since v0.6.1 (2026-09-14): 0.6.2–0.6.5 and main; each row names its PR", CYAN);
+  kicker(s, "// v0.6.1 (2026-09-14) to 2026-09-30: 0.6.2–0.6.5; each row names its PR", CYAN);
   title(s, "Since 0.6.1: more places it runs, more code it answers for", { size: 30 });
   const CW = (W - 2*MX - 0.14) / 2, CH = 2.43, X2 = MX + CW + 0.14, Y2 = 1.72 + CH + 0.12;
 
@@ -765,7 +921,7 @@ function storyCards(s, { kick, head, stories, footText }){
 /* ── S6 · head-to-head, round 4 ─────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
-  kicker(s, "// one harness, one machine, one day — N = 60 paired, zero exclusions", AMBER);
+  kicker(s, "// historical: 2026-08-08, before 0.6.0 — N = 60 paired; re-run for 0.7.0", AMBER);
   title(s, "Head-to-head: every competitor, one table");
   s.addChart("bar", [{
     name: "strict file@10",
@@ -807,7 +963,7 @@ function storyCards(s, { kick, head, stories, footText }){
 /* ── S6b · the oracle round ─────────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
-  kicker(s, "// scored against a third-party oracle, never against each other", AMBER);
+  kicker(s, "// historical: 2026-08-09 — scored against a third-party oracle, not each other", AMBER);
   title(s, "Graded by a compiler: zero silent misses");
   card(s, MX, 1.72, 6.05, 2.45);
   s.addText("Both tools were scored against a scip-clang compiler-grade index of this repository — 68 answers, 34 blind-authored queries × --uses and --callers.",
@@ -852,7 +1008,7 @@ function storyCards(s, { kick, head, stories, footText }){
 /* ── S6d · r10, the graph-database context server ───────────────────────── */
 {
   const s = p.addSlide(); bg(s);
-  kicker(s, "// 48 paired questions, zero exclusions, both arms exit 0 on all 48", AMBER);
+  kicker(s, "// historical: 2026-08-22 — 48 paired questions, zero exclusions", AMBER);
   title(s, "Against a graph-database context server: 27–7–14", { size: 32 });
 
   // This slide's table stops at TW so it never runs underneath the cards on its right.
@@ -938,7 +1094,7 @@ function storyCards(s, { kick, head, stories, footText }){
 /* ── S6c · the rounds ledger ────────────────────────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
-  kicker(s, "// the rule: numbers are held back until the loss list is worked", AMBER);
+  kicker(s, "// historical rounds, July–August 2026; the named comparison is re-run for 0.7.0", AMBER);
   title(s, "Every head-to-head round, and the ones that went against us", { size: 28 });   // 32 wrapped onto the first row
   const rounds = [
     ["r1", "2026-07-13/14", "Aider repo-map · codebase-memory-mcp · graphify", "superseded by r4", MUTED],
@@ -1007,7 +1163,7 @@ function storyCards(s, { kick, head, stories, footText }){
 /* ── S7b · speed, on numbers you can reproduce ──────────────────────────── */
 {
   const s = p.addSlide(); bg(s);
-  kicker(s, "// compiled, not interpreted — and measured on public corpora", CYAN);
+  kicker(s, "// compiled, not interpreted — measured on public corpora in August 2026", CYAN);
   title(s, "Fast enough to call on reflex");
   const cols = [
     ["0.213 s", "cold — nothing to an answer: parse, rank, reply, no cache (r4)", CYAN],
@@ -1163,14 +1319,14 @@ function storyCards(s, { kick, head, stories, footText }){
   card(s, 8.5, 5.25, 4.1, 1.45);
   s.addText([
     { text: "The map grades itself before it answers. ", options: { color: TEXT, bold: true } },
-    { text: "This repository's own src/: files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418.", options: { color: MUTED, fontFace: MONO } },   // re-measured: `ripwire ./src` on main a5229aca
+    { text: "This repository's own src/: files=213 symbols=10205 edges=17357 ambiguous=1871 unresolved=2348 declined=24508.", options: { color: MUTED, fontFace: MONO } },   // re-measured: `ripwire ./src` on main f156be85
   ], { x: 8.68, y: 5.36, w: 3.8, h: 1.24, fontFace: SANS, fontSize: 10, margin: 0 });
   foot(s, "docs/EVALS.md §8 lists the numbers this project refuses to publish, each with its reason");
   notes(s, [
     "SOURCES (the tripwire)",
-    "- The src/ census is re-derived, not remembered: `ripwire ./src` on main a5229aca prints files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418 (warm and --no-cache identical). On main 40a1895b (2026-09-11) it read files=166 symbols=5778 edges=17150 ambiguous=7441 unresolved=1658 declined=4803. It read files=153 symbols=5122 edges=14182 ambiguous=5982 unresolved=1598 when the slide was written on 2026-09-06.",
+    "- The src/ census is re-derived, not remembered: `ripwire ./src` on main f156be85 (Release build) prints files=213 symbols=10205 edges=17357 ambiguous=1871 unresolved=2348 declined=24508 (warm and --no-cache identical). edges= fell and declined= rose since a5229aca because 0.6.7's C++ std-member gate stopped binding std:: member calls to in-repo names: CHANGELOG [0.6.7], on this repository \"call edges 40,567 → 25,020, ambiguous= 12,576 → 2,774, declined= 12,240 → 25,840\" (a whole-repo figure). On main a5229aca it printed files=189 symbols=8020 edges=23968 ambiguous=8947 unresolved=1956 declined=7418 (warm and --no-cache identical). On main 40a1895b (2026-09-11) it read files=166 symbols=5778 edges=17150 ambiguous=7441 unresolved=1658 declined=4803. It read files=153 symbols=5122 edges=14182 ambiguous=5982 unresolved=1598 when the slide was written on 2026-09-06.",
     "- declined= is new in 0.6.0 — #136, merge commit d752d953: a call the resolver refused to guess at is now counted instead of vanishing. It belongs on this slide because it is the same contract the other three rules state.",
-    "- The --callers example: `ripwire . --callers=rankGraphTeleport` answered defs=\"1\" count=\"6\" counts_floor=\"1\", with runEval and rankGraph as its first two rows, on main 40a1895b. On main a5229aca: defs=\"1\" count=\"7\" counts_floor=\"1\", with getIndex and rankGraph as its first two rows (a seventh caller, getIndex in src/mcpindex.h, joined since 40a1895b; the slide sample shows the a5229aca answer).",
+    "- The --callers example: re-checked on main f156be85, defs=\"1\" count=\"7\" counts_floor=\"1\" with getIndex and rankGraph first, unchanged. Earlier: `ripwire . --callers=rankGraphTeleport` answered defs=\"1\" count=\"6\" counts_floor=\"1\", with runEval and rankGraph as its first two rows, on main 40a1895b. On main a5229aca: defs=\"1\" count=\"7\" counts_floor=\"1\", with getIndex and rankGraph as its first two rows (a seventh caller, getIndex in src/mcpindex.h, joined since 40a1895b; the slide sample shows the a5229aca answer).",
   ]);
 }
 
@@ -1244,8 +1400,8 @@ function storyCards(s, { kick, head, stories, footText }){
   stat(s, "8", "registered NEGATIVES — changes built, gated green, measured against a band written before the code, and reverted rather than tuned",
     4.83, 1.86, 3.56, RED, { bsize: 42, bh: 0.66, lsize: 9.5 });
   card(s, 8.76, 1.72, 3.86, 1.72);
-  stat(s, "0", "numbers on this deck without a committed instrument behind them — §8 lists the ones this project refuses to publish at all",
-    8.91, 1.86, 3.56, GREEN, { bsize: 42, bh: 0.66, lsize: 9.5 });
+  stat(s, "1", "exception to \"every number has a committed instrument\", stated where it appears: the question set behind the 0.6.7 and 0.6.8 answer counts is not in this repository yet. §8 lists what we refuse to publish",
+    8.91, 1.86, 3.56, AMBER, { bsize: 42, bh: 0.66, lsize: 9.5 });
 
   const arms = [
     ["the fresh-clone arm", "our own battery only ever ran inside a configured, long-lived worktree — one value of every AMBIENT input. It clones HEAD into a genuinely unconfigured checkout and re-runs the gates whose past failures were exactly that: a developer's git config, a fixture's inherited branch name, the checkout's own path length.", CYAN],
@@ -1365,10 +1521,10 @@ function storyCards(s, { kick, head, stories, footText }){
   s.addText("claude · cursor · codex · windsurf · gemini · aider · opencode · openclaw · hermes — or --all to detect every one you have installed",
     { x: 5.2, y: 1.95, w: 7.4, h: 0.55, fontFace: SANS, fontSize: 12, color: MUTED, valign: "middle", margin: 0 });
   const cards = [
-    ["33 MCP verbs", "17 read verbs mirroring the CLI, 13 flagship reflexes (impact, uses, affected, edit_check, from_trace, connect …), 3 span-addressed edit verbs with a safety contract"],
-    ["lazy-body handles", "read verbs return signatures and a stable handle; the agent fetches a body only when it decides it needs one — names by default, bytes on request"],
+    ["33 MCP verbs", "17 read, 13 flagship reflexes (impact, uses, edit_check, from_trace …), 3 span-addressed edits. --mcp-tools=core lists 8 of them: tools/list is 13,834 B against 46,368 B for all (0.6.7)"],
+    ["lazy bodies, one legend", "read verbs return signatures and a stable handle; a body is fetched only on request. Each definition is sent once per session: a ten-call session fell 45,463 → 29,679 B (0.6.7)"],
     ["18 agent skills", "moment-matched workflows (orient, navigate, change-check, quality-bar …) — wrap prints the recipe, skills/install.sh installs them"],
-    ["12 orchestrator loops", "copy-paste prompts in prompts/: run the same audit, eval and head-to-head machinery that built this tool, on your own repository"],
+    ["13 orchestrator loops", "copy-paste prompts in prompts/: run the same audit, eval and head-to-head machinery that built this tool, on your own repository"],
   ];
   const cw = 5.95, ch = 1.62; let i = 0;
   for (const [h2, b] of cards){
@@ -1389,7 +1545,10 @@ function storyCards(s, { kick, head, stories, footText }){
     "- The nine agents after `wrap`: src/wrap.h's agent table on main a5229aca — claude, codex, cursor, windsurf, gemini, opencode, openclaw, hermes, aider. This line named six until 2026-09-30. On the merged binary, `ripwire wrap --help`: names the same nine (CLI-first: claude, codex, opencode, openclaw, hermes; MCP config: cursor, windsurf, gemini; repo-map: aider).",
     "- “33 MCP verbs … 17 read verbs … 13 flagship reflexes … 3 span-addressed edit verbs” — README.md, lane/t10-mcp-coverage: “One stdio server, 33 verbs — 17 read, 13 flagship-reflex, 3 span-addressed edit” (rank_by and affected joined the MCP surface, matching the CLI --rank-by / --affected twins).",
     "- “18 agent skills” — README.md: “skills/ ships eighteen task-shaped skills”; skills/ holds 18 directories.",
-    "- “12 orchestrator loops” — README.md: “prompts/ holds twelve self-contained orchestrator prompts”, and prompts/ holds 12 .md files besides its own README.md. This card said 11 until 2026-09-11; test/readmedriftcheck.sh arm (I1) gates the README against the directory, and the deck now states the same number.",
+    "- “13 orchestrator loops” — README.md on main f156be85: “prompts/ holds thirteen self-contained orchestrator prompts”, and prompts/ holds 13 .md files besides its own README.md. It read twelve until the 2026-10-21 refresh.",
+    "- --mcp-tools bytes — CHANGELOG [0.6.7]: “Measured on this build with a bare stdio server, tools/list is 46,368 bytes for full, 13,834 for core”; re-counted on f156be85: tools/list names 33 tools, 8 with --mcp-tools=core.",
+    "- One legend per session — CHANGELOG [0.6.7] “MCP: the legend session opens on the first answer”: “A ten-call session on one repo: 45,463 → 32,622 B (inline) → 29,679 B.”",
+    "- (history) This card said 11 until 2026-09-11; test/readmedriftcheck.sh arm (I1) gates the README against the directory, and the deck now states the same number.",
   ]);
 }
 
@@ -1514,10 +1673,11 @@ function storyCards(s, { kick, head, stories, footText }){
     ["What-to-Retrieve · arXiv 2503.20589", "retrieval selection beats retrieval volume for coding agents → the selection-over-dumping thesis"],
     ["LocAgent / Loc-Bench (2025)", "the localization metric (strict Acc@k) and the frozen 560-instance dataset every accuracy number here is scored on"],
     ["scip-clang · Serena / clangd", "the compiler-grade oracle round 9 graded both tools against — an outside referee, not a rival"],
-    ["tree-sitter", "the incremental GLR parsing substrate — 25 grammars vendored, one parser per thread"],   // CHANGELOG [0.6.2] GDScript, "the 25th vendored grammar" (#233)
+    ["tree-sitter", "the incremental GLR parsing substrate — 26 grammars vendored, one parser per thread"],   // CHANGELOG [0.6.8] Clojure (#349); README "26 vendored grammars"
   ];
   notes(s, [
     "SOURCES (grammar count only)",
+    "- \"26 grammars vendored\" — README.md on main f156be85, \"26 vendored grammars\"; CHANGELOG.md [0.6.8] Clojure (#349, @tag-und-nacht). The 25 below is the count before Clojure.",
     "- \"25 grammars vendored\" — CHANGELOG.md [0.6.2], \"### Added — GDScript (`.gd`), the 25th vendored grammar (parser version 108)\" (#233, @sclyde).",
     "- Before GDScript: 24 — merged: #126, merge commit 1ad9184a (PR body: \"vendored fwcd/tree-sitter-kotlin grammar\"). Before #126 the count was 23 (commit 680a0a3d); README.md on main 40a1895b says \"24 vendored grammars\".",
   ]);
@@ -1537,7 +1697,7 @@ function storyCards(s, { kick, head, stories, footText }){
   kicker(s, "// do not take any of it on trust", AMBER);
   title(s, "Every claim, and the command that re-derives it");
   const claims = [
-    ["192 long flags · 36 slides",        "bash test/deckclaimcheck.sh"],
+    ["192 long flags · 38 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
     ["707 gate scripts",                  "bash test/manifestcheck.sh"], // gatecount
@@ -1545,14 +1705,15 @@ function storyCards(s, { kick, head, stories, footText }){
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
     ["the oracle round",                  "bench/headtohead/r9-2026-08-09/RESULTS.md"],
+    ["50 → 83 → 98 complete first answers","v0.6.8 release notes (question set not in repo yet)"],
   ];
-  let y = 1.7;
+  let y = 1.66;
   for (const [claim, cmd] of claims){
-    row(s, y, 0.5, [
+    row(s, y, 0.46, [
       { t: claim, w: 5.3,  color: TEXT, size: 12 },
       { t: cmd,   w: 6.2,  color: CYAN, size: 11.5, mono: true },
     ]);
-    y += 0.575;
+    y += 0.515;
   }
   card(s, MX, 6.32, 12.09, 0.62, CARD2);
   s.addText([
@@ -1575,7 +1736,7 @@ function storyCards(s, { kick, head, stories, footText }){
     ["ripwire .", "the ranked map — start here on any unfamiliar repo"],
     ["ripwire . --for=\"cache invalidation\"", "the task lens: what to touch, ranked"],
     ["ripwire . --callers=someFunction", "who calls it — with the honesty marker attached"],
-    ["ripwire . --quality-panel", "is this code actually rotten? six families, one shortlist"],
+    ["ripwire . --quality-delta", "before you call it done: only what your change made worse, twelve kinds"],
     ["ripwire . --test-gate", "before you commit: exactly which tests must run"],
     ["ripwire wrap claude", "wire it into your agent, in that agent's own config shape"],
   ];

@@ -1,12 +1,15 @@
 # present/ — the showcase deck
 
-`ripwire-showcase.pptx` (and its PDF render) is the tool in 36 slides: what it is, the verb
+`ripwire-showcase.pptx` (and its PDF render) is the tool in 38 slides: what it is, the verb
 surface, the measured numbers, and the honesty contract — for anyone who wants the pitch before
 the README.
 
 The deck follows the repository's claims discipline: every number on it is pinned by an instrument
 in this repo (`docs/EVALS.md` is the source of truth), every named `--flag` exists in
-`ripwire --help`, and the historical figures carry their caveats on the slide that shows them.
+`ripwire --help`, and the historical figures carry their caveats on the slide that shows them. One
+exception is stated on the slides it touches: the 0.6.7 and 0.6.8 answer counts are quoted from the
+v0.6.8 release notes, because their question set is not in this repo yet. Figures from published papers
+are cited as independent studies, never as ripwire results.
 
 ## Rebuild
 
