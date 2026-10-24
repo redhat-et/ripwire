@@ -1816,6 +1816,51 @@ proven      rsrecv callees "$FP:call_p3"  "method ig_q3 $FP:24"                 
 proven      rsrecv callees "$FP:call_p16" "method ig_q16 $FP:27"                                                  # [P] pub named use beside another name's macro
 proven      rsrecv callees "$FP:call_p18" "method ig_q18 $FP:31"                                                  # [P] private use seen by a descendant (tests)
 visible     rsrecv callees "$FP:call_p15" "ig_q15 $FP:33"                                                         # private glob seen by a descendant: hedged or proven, never lost
+# ind5 fix 3 (rv-ind5-delta2 C2; the cap along the chain): a re-exported import is seen only by an importer EVERY hop's visibility admits. [N] the importer is OUTSIDE the cap:
+# the chain supplies it nothing, so the real (macro-made) supplier beside it is the only one and the answer is hedged. One shape per visibility kind (s pub(super), c pub(crate)
+# from ANOTHER crate, i pub(in path), v private) x a named `use` (n) / a glob (g) capped x 2 / 3 hops; [P] controls: the importer INSIDE the cap keeps the proven row (pub(in path)
+# cannot be placed: hedged, never lost). s2n / s2g / c2n are rv-ind5-delta2's call_ca / call_ce / call_cc (rustc-checked: E0599 on the decoy-less probe)
+FQ="src/igcap.rs"; X1="igx1/src/lib.rs"; X2="igx2/src/lib.rs"
+notproven   rsrecv callees "$FQ:call_s2n" "ig_s2n $FQ:5"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_s2n" "ig_s2n $FQ:5"
+proven      rsrecv callees "$FQ:call_s2n_in" "method ig_s2n $FQ:5"                                               # [P] inside the cap
+notproven   rsrecv callees "$FQ:call_s2g" "ig_s2g $FQ:9"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_s2g" "ig_s2g $FQ:9"
+proven      rsrecv callees "$FQ:call_s2g_in" "method ig_s2g $FQ:9"                                               # [P] inside the cap
+notproven   rsrecv callees "$FQ:call_s3n" "ig_s3n $FQ:13"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_s3n" "ig_s3n $FQ:13"
+proven      rsrecv callees "$FQ:call_s3n_in" "method ig_s3n $FQ:13"                                               # [P] inside the cap
+notproven   rsrecv callees "$FQ:call_s3g" "ig_s3g $FQ:18"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_s3g" "ig_s3g $FQ:18"
+proven      rsrecv callees "$FQ:call_s3g_in" "method ig_s3g $FQ:18"                                               # [P] inside the cap
+notproven   rsrecv callees "$FQ:call_v2n" "ig_v2n $FQ:30"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_v2n" "ig_v2n $FQ:30"
+proven      rsrecv callees "$FQ:call_v2n_in" "method ig_v2n $FQ:30"                                               # [P] inside the cap
+notproven   rsrecv callees "$FQ:call_v3g" "ig_v3g $FQ:35"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_v3g" "ig_v3g $FQ:35"
+proven      rsrecv callees "$FQ:call_v3g_in" "method ig_v3g $FQ:35"                                               # [P] inside the cap
+notproven   rsrecv callees "$FQ:call_i2n" "ig_i2n $FQ:22"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_i2n" "ig_i2n $FQ:22"
+visible     rsrecv callees "$FQ:call_i2n_in" "ig_i2n $FQ:22"                                                    # pub(in path) cannot be placed: hedged, never lost
+notproven   rsrecv callees "$FQ:call_i2n_in" "ig_i2n $FQ:22"                                                    # ... and never proven
+notproven   rsrecv callees "$FQ:call_i3g" "ig_i3g $FQ:26"                                                      # [N] C2
+visible     rsrecv callees "$FQ:call_i3g" "ig_i3g $FQ:26"
+visible     rsrecv callees "$FQ:call_i3g_in" "ig_i3g $FQ:26"                                                    # pub(in path) cannot be placed: hedged, never lost
+notproven   rsrecv callees "$FQ:call_i3g_in" "ig_i3g $FQ:26"                                                    # ... and never proven
+notproven   rsrecv callees "$X2:call_c2n" "ig_c2n $X1:3"                                                      # [N] C2
+visible     rsrecv callees "$X2:call_c2n" "ig_c2n $X1:3"
+proven      rsrecv callees "$X1:call_c2n_in" "method ig_c2n $X1:3"                                               # [P] same crate, inside the cap
+notproven   rsrecv callees "$X2:call_c2g" "ig_c2g $X1:6"                                                      # [N] C2
+visible     rsrecv callees "$X2:call_c2g" "ig_c2g $X1:6"
+proven      rsrecv callees "$X1:call_c2g_in" "method ig_c2g $X1:6"                                               # [P] same crate, inside the cap
+notproven   rsrecv callees "$X2:call_c3n" "ig_c3n $X1:9"                                                      # [N] C2
+visible     rsrecv callees "$X2:call_c3n" "ig_c3n $X1:9"
+proven      rsrecv callees "$X1:call_c3n_in" "method ig_c3n $X1:9"                                               # [P] same crate, inside the cap
+notproven   rsrecv callees "$X2:call_c3g" "ig_c3g $X1:12"                                                      # [N] C2
+visible     rsrecv callees "$X2:call_c3g" "ig_c3g $X1:12"
+proven      rsrecv callees "$X1:call_c3g_in" "method ig_c3g $X1:12"                                               # [P] same crate, inside the cap
+notproven   rsrecv callees "$X2:call_pth" "ig_pth $X1:15"                                                      # [N] C2
+visible     rsrecv callees "$X2:call_pth" "ig_pth $X1:15"
 # guard: `Book::new()` is a path call the canonical tier answers (rustqualcheck's shape), unchanged
 proven      rsrecv callees "$RSA:let_new" "method new $RSM:4"
 

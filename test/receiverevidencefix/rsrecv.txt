@@ -143,6 +143,7 @@ pub mod igb9;
 pub mod igdeep;
 pub mod igdeepuse;
 pub mod igfixp;
+pub mod igcap;
 @@@ rsrecv/src/model.rs
 // Book and Other both define spin / iter; Cfg and Knob both define tune: a call proves one only through its receiver's type.
 pub struct Book { pub items: Vec<u32> }
@@ -1043,3 +1044,68 @@ pub mod p15_b { use crate::igfixp::p15_a::*; pub mod d { use super::*; pub fn ca
 use rsrecv::nsown::OsString;
 pub fn bench_own() -> u8 { let s = OsString::from("x"); s.as_os() }
 pub fn bench_std() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/igcap.rs
+// ind5 fix 3 (rv-ind5-delta2 C2, rustc-checked there for the first three kinds): a re-exported import is seen only by an importer EVERY hop admits (the cap).
+// ig_make! stands for a macro_rules! writing `pub struct $n` + an impl (a visible decoy supplier beside the chain). Each [N] shape: the importer sits OUTSIDE the cap, so the
+// chain supplies it nothing (the decoy is the only real supplier) and the answer must be hedged. s = pub(super), i = pub(in path), v = private (the cap is a private hop);
+// n = a named `use` is capped, g = a glob is capped; 2 / 3 = hops in the chain. [P] controls: the importer INSIDE the cap keeps the proven row; pub(in path) cannot be placed: hedged.
+pub mod s2n_a { pub struct IgS2n; impl IgS2n { pub fn ig_s2n(&self) -> u8 { 1 } } }
+pub mod s2n { pub mod inner { pub(super) use crate::igcap::s2n_a::IgS2n; } pub use inner::*; pub mod zin { use super::*; pub fn call_s2n_in(x: &IgS2n) -> u8 { x.ig_s2n() } } }
+pub mod s2n_mac { ig_make!(IgS2n); }
+pub mod s2n_call { use crate::igcap::s2n::*; use crate::igcap::s2n_mac::*; pub fn call_s2n(x: &IgS2n) -> u8 { x.ig_s2n() } }
+pub mod s2g_a { pub struct IgS2g; impl IgS2g { pub fn ig_s2g(&self) -> u8 { 1 } } }
+pub mod s2g { pub mod inner { pub(super) use crate::igcap::s2g_a::*; } pub use inner::*; pub mod zin { use super::*; pub fn call_s2g_in(x: &IgS2g) -> u8 { x.ig_s2g() } } }
+pub mod s2g_mac { ig_make!(IgS2g); }
+pub mod s2g_call { use crate::igcap::s2g::*; use crate::igcap::s2g_mac::*; pub fn call_s2g(x: &IgS2g) -> u8 { x.ig_s2g() } }
+pub mod s3n_a { pub struct IgS3n; impl IgS3n { pub fn ig_s3n(&self) -> u8 { 1 } } }
+pub mod s3n_mid { pub mod inner { pub(super) use crate::igcap::s3n_a::IgS3n; } pub use inner::*; pub mod zin { use super::*; pub fn call_s3n_in(x: &IgS3n) -> u8 { x.ig_s3n() } } }
+pub mod s3n { pub use crate::igcap::s3n_mid::*; }
+pub mod s3n_mac { ig_make!(IgS3n); }
+pub mod s3n_call { use crate::igcap::s3n::*; use crate::igcap::s3n_mac::*; pub fn call_s3n(x: &IgS3n) -> u8 { x.ig_s3n() } }
+pub mod s3g_a { pub struct IgS3g; impl IgS3g { pub fn ig_s3g(&self) -> u8 { 1 } } }
+pub mod s3g { pub mod mid { pub mod inner { pub use crate::igcap::s3g_a::*; } pub(super) use inner::*; } pub use mid::*; pub mod zin { use super::*; pub fn call_s3g_in(x: &IgS3g) -> u8 { x.ig_s3g() } } }
+pub mod s3g_mac { ig_make!(IgS3g); }
+pub mod s3g_call { use crate::igcap::s3g::*; use crate::igcap::s3g_mac::*; pub fn call_s3g(x: &IgS3g) -> u8 { x.ig_s3g() } }
+pub mod i2n_a { pub struct IgI2n; impl IgI2n { pub fn ig_i2n(&self) -> u8 { 1 } } }
+pub mod i2n { pub mod inner { pub(in crate::igcap::i2n) use crate::igcap::i2n_a::IgI2n; } pub use inner::*; pub mod zin { use super::*; pub fn call_i2n_in(x: &IgI2n) -> u8 { x.ig_i2n() } } }
+pub mod i2n_mac { ig_make!(IgI2n); }
+pub mod i2n_call { use crate::igcap::i2n::*; use crate::igcap::i2n_mac::*; pub fn call_i2n(x: &IgI2n) -> u8 { x.ig_i2n() } }
+pub mod i3g_a { pub struct IgI3g; impl IgI3g { pub fn ig_i3g(&self) -> u8 { 1 } } }
+pub mod i3g { pub mod mid { pub mod inner { pub use crate::igcap::i3g_a::*; } pub(in crate::igcap::i3g) use inner::*; } pub use mid::*; pub mod zin { use super::*; pub fn call_i3g_in(x: &IgI3g) -> u8 { x.ig_i3g() } } }
+pub mod i3g_mac { ig_make!(IgI3g); }
+pub mod i3g_call { use crate::igcap::i3g::*; use crate::igcap::i3g_mac::*; pub fn call_i3g(x: &IgI3g) -> u8 { x.ig_i3g() } }
+pub mod v2n_a { pub struct IgV2n; impl IgV2n { pub fn ig_v2n(&self) -> u8 { 1 } } }
+pub mod v2n_inner { use crate::igcap::v2n_a::IgV2n; pub mod zin { use super::*; pub fn call_v2n_in(x: &IgV2n) -> u8 { x.ig_v2n() } } }
+pub mod v2n { pub use crate::igcap::v2n_inner::*; }
+pub mod v2n_mac { ig_make!(IgV2n); }
+pub mod v2n_call { use crate::igcap::v2n::*; use crate::igcap::v2n_mac::*; pub fn call_v2n(x: &IgV2n) -> u8 { x.ig_v2n() } }
+pub mod v3g_a { pub struct IgV3g; impl IgV3g { pub fn ig_v3g(&self) -> u8 { 1 } } }
+pub mod v3g_mid { pub mod inner { pub use crate::igcap::v3g_a::*; } use inner::*; pub mod zin { use super::*; pub fn call_v3g_in(x: &IgV3g) -> u8 { x.ig_v3g() } } }
+pub mod v3g { pub use crate::igcap::v3g_mid::*; }
+pub mod v3g_mac { ig_make!(IgV3g); }
+pub mod v3g_call { use crate::igcap::v3g::*; use crate::igcap::v3g_mac::*; pub fn call_v3g(x: &IgV3g) -> u8 { x.ig_v3g() } }
+@@@ rsrecv/igx1/src/lib.rs
+// ind5 fix 3 (rv-ind5-delta2 C2, call_cc): a `pub(crate)` import re-exported by a `pub use` glob is invisible to another crate. c = pub(crate); n / g / 2 / 3 as in igcap.rs.
+// `cin` modules sit in the SAME crate: the cap admits them. p = a `pub(crate)` item two globs (one a macro-made visible decoy) supply, named by `use` from the other crate
+pub mod c2n_a { pub struct IgC2n; impl IgC2n { pub fn ig_c2n(&self) -> u8 { 1 } } }
+pub mod c2n { mod inner { pub(crate) use crate::c2n_a::IgC2n; } pub use inner::*; }
+pub mod c2n_cin { use crate::c2n::*; pub fn call_c2n_in(x: &IgC2n) -> u8 { x.ig_c2n() } }
+pub mod c2g_a { pub struct IgC2g; impl IgC2g { pub fn ig_c2g(&self) -> u8 { 1 } } }
+pub mod c2g { mod inner { pub(crate) use crate::c2g_a::*; } pub use inner::*; }
+pub mod c2g_cin { use crate::c2g::*; pub fn call_c2g_in(x: &IgC2g) -> u8 { x.ig_c2g() } }
+pub mod c3n_a { pub struct IgC3n; impl IgC3n { pub fn ig_c3n(&self) -> u8 { 1 } } }
+pub mod c3n { mod mid { pub mod inner { pub(crate) use crate::c3n_a::IgC3n; } pub use inner::*; } pub use mid::*; }
+pub mod c3n_cin { use crate::c3n::*; pub fn call_c3n_in(x: &IgC3n) -> u8 { x.ig_c3n() } }
+pub mod c3g_a { pub struct IgC3g; impl IgC3g { pub fn ig_c3g(&self) -> u8 { 1 } } }
+pub mod c3g { mod mid { pub mod inner { pub use crate::c3g_a::*; } pub(crate) use inner::*; } pub use mid::*; }
+pub mod c3g_cin { use crate::c3g::*; pub fn call_c3g_in(x: &IgC3g) -> u8 { x.ig_c3g() } }
+pub mod pth { mod inner { pub(crate) struct IgPth; impl IgPth { pub fn ig_pth(&self) -> u8 { 1 } } } pub use inner::*; pub use crate::pth_mac::*; }
+pub mod pth_mac { ig_make!(IgPth); }
+@@@ rsrecv/igx2/src/lib.rs
+// ind5 fix 3: the importers of rsrecv/igx1/src/lib.rs, in ANOTHER crate: each sees only what is `pub` all the way (the macro-made decoys are the real suppliers)
+pub mod mx { ig_make!(IgC2n); ig_make!(IgC2g); ig_make!(IgC3n); ig_make!(IgC3g); }
+pub mod c2n_call { use igx1::c2n::*; use crate::mx::*; pub fn call_c2n(x: &IgC2n) -> u8 { x.ig_c2n() } }
+pub mod c2g_call { use igx1::c2g::*; use crate::mx::*; pub fn call_c2g(x: &IgC2g) -> u8 { x.ig_c2g() } }
+pub mod c3n_call { use igx1::c3n::*; use crate::mx::*; pub fn call_c3n(x: &IgC3n) -> u8 { x.ig_c3n() } }
+pub mod c3g_call { use igx1::c3g::*; use crate::mx::*; pub fn call_c3g(x: &IgC3g) -> u8 { x.ig_c3g() } }
+pub mod pth_call { use igx1::pth::IgPth; pub fn call_pth(x: &IgPth) -> u8 { x.ig_pth() } }

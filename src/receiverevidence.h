@@ -674,7 +674,7 @@ struct CallResultTypes
             case CallResultFamily::Rust:
             {
                 const auto [ modPath, item ] = splitLast( b.importedName, "::" );
-                return modPath.empty() ? kNoNode : rustClassAt( f, b.startByte, modPath, item );
+                return modPath.empty() ? kNoNode : rustClassVia( f, b.startByte, modPath, item, 0, nullptr, nullptr );
             }
             case CallResultFamily::Jvm:        return jvmClassIn( b.importedName, b.typeName );
             case CallResultFamily::TypeScript:
@@ -711,7 +711,10 @@ struct CallResultTypes
             supplies = false;   // rust-receivers: rustItemAt sets it when the module has the item, re-exports it or may glob it in
             std::string from;   // ind5 fix 2: the module the glob is written in (an inline `mod` included)
             rustModuleAt( f, b.startByte, from );
-            return rustSeenFrom( f, rustItemAt( crate, module, name, 0, supplies, RustFrom{ rust.crateOf[ f ], from } ) );
+            RustFound fo;
+            const NodeId c = rustItemAt( RustMod{ crate, module }, name, 0, fo, RustFrom{ RustMod{ rust.crateOf[ f ], from }, RustMod{ rust.crateOf[ f ], from } } );
+            supplies       = fo.found;
+            return rustSeenFrom( f, c );
         }
         nameKey.assign( b.importedName );
         const auto files = packageFiles.find( nameKey );
@@ -1238,42 +1241,87 @@ struct CallResultTypes
         bool   globbed = false;
         bool   hidden  = false;
     };
-    // ind5 fix 2: the module an import is written in — its crate and path, an inline `mod` included — as the importer of the module it names
-    struct RustFrom
+    // ind5 fix 3: a module of the tree: its crate and path (the path is a view into a string the caller keeps alive)
+    struct RustMod
     {
         std::uint32_t    crate = kNoCrate;
         std::string_view module;
+    };
+    // ind5 fix 3: who asks. `here` is the importer of the module being read (the module whose glob or `use` names it), `origin` the module the
+    // whole lookup started in. Rust caps a binding re-exported along a chain at its narrowest hop (rustc_resolve `import()`), so an import counts
+    // only when EVERY hop admits the importer it is counted for: `here` takes it from the hop, `origin` only if the hop's visibility reaches it too
+    struct RustFrom
+    {
+        RustMod here;
+        RustMod origin;
+    };
+    // ind5 fix 3: how far one module's imports show to `here` and to `origin` (rustReach)
+    struct RustReach
+    {
+        std::uint8_t here   = 0;
+        std::uint8_t origin = 0;
+    };
+    // ind5 fix 3: one step of the walk: the module being read, as the importer of the modules it names (origin kept), and how far its imports show
+    struct RustStep
+    {
+        RustFrom  next;
+        RustReach reach;
+    };
+    // ind5 fix 3: rustItemAt's answer beside the class: the module has the item, re-exports it or may glob it in; every silent glob there was an open walk
+    struct RustFound
+    {
+        bool found = false;
+        bool quiet = false;
     };
     // is module `from` the module `base` or one below it (the crate root, "", holds every module)?
     static bool rustWithin( std::string_view from, std::string_view base ) noexcept
     {
         return base.empty() || from == base || ( from.size() > base.size() && from.starts_with( base ) && from.compare( base.size(), 2, "::" ) == 0 );
     }
-    // ind5 fix 2: how far the imports of module (crate, module) show to `from`: 0 = `from` is the module or below it (it sees every import
+    // ind5 fix 2: how far the imports of module `mod` show to `from`: 0 = `from` is the module or below it (it sees every import
     // there, private ones too), 1 = below the module's parent, 2 = elsewhere in the crate, 3 = another crate
-    static std::uint8_t rustReach( const RustFrom& from, std::uint32_t crate, std::string_view module ) noexcept
+    static std::uint8_t rustReach( const RustMod& from, const RustMod& mod ) noexcept
     {
-        if( from.crate != crate )
+        if( from.crate != mod.crate )
         {
             return 3;
         }
-        if( rustWithin( from.module, module ) )
+        if( rustWithin( from.module, mod.module ) )
         {
             return 0;
         }
-        const std::size_t up = module.rfind( "::" );
-        return rustWithin( from.module, module.substr( 0, up == std::string_view::npos ? 0 : up ) ) ? 1 : 2;
+        const std::size_t up = mod.module.rfind( "::" );
+        return rustWithin( from.module, mod.module.substr( 0, up == std::string_view::npos ? 0 : up ) ) ? 1 : 2;
+    }
+    static RustReach rustReachOf( const RustFrom& from, const RustMod& mod ) noexcept
+    {
+        return RustReach{ rustReach( from.here, mod ), rustReach( from.origin, mod ) };
     }
     // ind5 fix 2: what the `use` row `b` (file `mf`, at some module's own level) shows an importer of that module at `reach` (rustReach):
     // Shows, Hides (a private `use` seen from outside its module, a `pub(crate)` one from another crate, a `pub(super)` one from outside the
     // parent's modules: Rust gives the importer's glob nothing from it), or — only when the index cannot place it (`pub(in path)`) — Unknown.
-    // A supplier counts only through a Shows import; an Unknown one votes unknown; a Hides one adds nothing and is no evidence either way
+    // A supplier counts only through a Shows import; an Unknown one votes unknown; a Hides one adds nothing and is no evidence either way.
+    // ind5 fix 3: the import must show to BOTH the immediate importer and the origin (the cap along the chain): Hides if either says so,
+    // else Unknown if either does
     enum class RustShow : std::uint8_t { Shows, Hides, Unknown };
-    RustShow rustImportShows( std::uint32_t mf, const Binding& b, std::uint8_t reach ) const
+    static RustShow rustMarkShows( std::string_view mark, std::uint8_t reach ) noexcept
     {
         if( reach == 0 )
         {
             return RustShow::Shows;   // inside the module: private imports show too, and so does any `pub(in …)` (it names an ancestor)
+        }
+        if( mark == kTypeBindRestricted )
+        {
+            return RustShow::Unknown;
+        }
+        const bool shows = mark == kTypeBindPublic || ( mark == kTypeBindCrate && reach <= 2 ) || ( mark == kTypeBindSuper && reach <= 1 );
+        return shows ? RustShow::Shows : RustShow::Hides;
+    }
+    RustShow rustImportShows( std::uint32_t mf, const Binding& b, const RustReach& reach ) const
+    {
+        if( reach.here == 0 && reach.origin == 0 )
+        {
+            return RustShow::Shows;
         }
         std::string_view mark;   // no row = a private `use`
         forEachImport( mf, "!", [ & ]( const Binding& r )
@@ -1283,20 +1331,21 @@ struct CallResultTypes
                 mark = r.typeName;
             }
         } );
-        if( mark == kTypeBindRestricted )
+        const RustShow byHere   = rustMarkShows( mark, reach.here );
+        const RustShow byOrigin = rustMarkShows( mark, reach.origin );
+        if( byHere == RustShow::Hides || byOrigin == RustShow::Hides )
         {
-            return RustShow::Unknown;
+            return RustShow::Hides;
         }
-        const bool shows = mark == kTypeBindPublic || ( mark == kTypeBindCrate && reach <= 2 ) || ( mark == kTypeBindSuper && reach <= 1 );
-        return shows ? RustShow::Shows : RustShow::Hides;
+        return byHere == RustShow::Unknown || byOrigin == RustShow::Unknown ? RustShow::Unknown : RustShow::Shows;
     }
     // the ONE Rust class `cls` module `modPath` (seen from byte `at` of `f`) defines — or re-exports: a `use` of the name at
     // the module's own level (`pub use mdbook::MDBook;` in lib.rs) is followed to the module it names (depth-bounded)
-    NodeId rustClassAt( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::string_view cls, int depth = 0, bool* has = nullptr ) const
+    // `origin` (ind5 fix 3): the module the whole chain started in; null = the module the path is written in
+    NodeId rustClassVia( std::uint32_t f, std::uint32_t at, std::string_view modPath, std::string_view cls, int depth, bool* has, const RustMod* origin ) const
     {
         std::uint32_t crate = kNoCrate;
         std::string   module;
-        bool          found = false;
         if( depth > 4 )
         {
             rust.globCut = true;
@@ -1306,34 +1355,43 @@ struct CallResultTypes
         {
             return kNoNode;
         }
-        bool         quiet = false;
-        std::string  from;   // ind5 fix 2: the module the path is written in
+        std::string from;   // ind5 fix 2: the module the path is written in
         rustModuleAt( f, at, from );
-        const NodeId c     = rustItemAt( crate, module, cls, depth, found, RustFrom{ rust.crateOf[ f ], from }, &quiet );
+        const RustMod importer{ rust.crateOf[ f ], from };
+        RustFound     fo;
+        const NodeId  c = rustItemAt( RustMod{ crate, module }, cls, depth, fo, RustFrom{ importer, origin != nullptr ? *origin : importer } );
         if( has != nullptr )
         {
-            *has = found || !quiet || rustTargetUnparsed( crate, module );   // ind5: false only when every glob there met an open (cycle) walk
+            *has = fo.found || !fo.quiet || rustTargetUnparsed( crate, module );   // ind5: false only when every glob there met an open (cycle) walk
         }
         return c;
     }
     // the item `cls` of module (crate, module): a class declared at the module's own level (a file module's file level, an
     // inline mod's body), else a re-export there; an alias there names nothing. `found` false when the module has none.
-    NodeId rustItemAt( std::uint32_t crate, const std::string& module, std::string_view cls, int depth, bool& found, const RustFrom& from, bool* quiet = nullptr ) const
+    NodeId rustItemAt( const RustMod& target, std::string_view cls, int depth, RustFound& out, const RustFrom& from ) const
     {
-        const std::uint8_t reach = rustReach( from, crate, module );   // ind5 fix 2: how far the module's imports show to the importer
-        const auto   inl       = rust.inlineMods.find( rustModuleKey( crate, module ) );
+        const RustStep st{ RustFrom{ target, from.origin }, rustReachOf( from, target ) };   // ind5 fix 3: how far the module's imports show to the importer and the origin
+        const auto   inl       = rust.inlineMods.find( rustModuleKey( target.crate, target.module ) );
         const NodeId inlineMod = inl == rust.inlineMods.end() ? kNoNode : inl->second;
         const Level  level     = rustModuleLevel( inlineMod );
         const auto   atLevel   = [ & ]( std::uint32_t file, std::uint32_t pos )
         {
-            return inlineMod == kNoNode ? file < rust.crateOf.size() && rust.crateOf[ file ] == crate && rust.moduleOf[ file ] == module && levelAt( file, pos ).wholeFile()
+            return inlineMod == kNoNode ? file < rust.crateOf.size() && rust.crateOf[ file ] == target.crate && rust.moduleOf[ file ] == target.module && levelAt( file, pos ).wholeFile()
                                         : file == ing.symbols[ inlineMod ].fileId && levelAt( file, pos ) == level;
         };
+        const NodeId declared = rustDeclaredAt( target, inlineMod, cls, atLevel, out.found );
+        return out.found ? declared : rustItemVia( st, inlineMod, cls, depth, atLevel, out );
+    }
+    // rustItemAt's first step: the class declared at the module's own level (a file module's file level, an inline mod's body); `found` when a class
+    // or an alias of the name is there (an alias names nothing)
+    template <class AtLevel>
+    NodeId rustDeclaredAt( const RustMod& target, NodeId inlineMod, std::string_view cls, const AtLevel& atLevel, bool& found ) const
+    {
         NodeId            one = kNoNode;
         const std::size_t n   = classesNamed( cls, CallResultFamily::Rust, [ & ]( NodeId c )
         {
             const std::uint32_t cf = ing.symbols[ c ].fileId;   // an item of the module's own level, never of a mod or fn in it
-            return inlineMod == kNoNode ? cf < rust.crateOf.size() && rust.crateOf[ cf ] == crate && rust.moduleOf[ cf ] == module && enclosingSymbol( c ) == kNoNode
+            return inlineMod == kNoNode ? cf < rust.crateOf.size() && rust.crateOf[ cf ] == target.crate && rust.moduleOf[ cf ] == target.module && enclosingSymbol( c ) == kNoNode
                                         : enclosingSymbol( c ) == inlineMod;
         }, one );
         bool aliased = false;
@@ -1342,43 +1400,43 @@ struct CallResultTypes
         {
             aliased = std::ranges::any_of( aliases->second, [ & ]( const Binding* b ) { return atLevel( b->fileId, b->startByte ); } );   // a Rust file's (atLevel)
         }
-        if( n > 0 || aliased )
-        {
-            found = true;
-            return n == 1 && !aliased ? one : kNoNode;
-        }
-        const auto files = rust.filesOf.find( rustModuleKey( crate, module ) );
+        found = n > 0 || aliased;
+        return n == 1 && !aliased ? one : kNoNode;
+    }
+    // rustItemAt's second step (the module declares none): a re-export there (a named `use`), else the item its globs supply. `st` is the module
+    // being read as the importer of what it names, with how far its imports show to the importer and the origin
+    template <class AtLevel>
+    NodeId rustItemVia( const RustStep& st, NodeId inlineMod, std::string_view cls, int depth, const AtLevel& atLevel, RustFound& out ) const
+    {
+        const RustMod& target = st.next.here;
+        const auto     files  = rust.filesOf.find( rustModuleKey( target.crate, target.module ) );
         const std::vector<std::uint32_t> none;
         const std::vector<std::uint32_t>& of = inlineMod != kNoNode ? none : files == rust.filesOf.end() ? none : files->second;
         Reexports re;   // `found` is false here: a declared item or an alias returned above
         for( std::uint32_t mf : of )   // by reference: the layout's own list, never a copy
         {
-            rustFollowReexports( mf, atLevel, cls, depth, reach, re );
+            rustFollowReexports( mf, atLevel, cls, depth, st, re );
         }
         if( inlineMod != kNoNode )
         {
-            rustFollowReexports( ing.symbols[ inlineMod ].fileId, atLevel, cls, depth, reach, re );
+            rustFollowReexports( ing.symbols[ inlineMod ].fileId, atLevel, cls, depth, st, re );
         }
-        NodeId hit = re.hit;
-        found      = re.found;
-        if( re.hidden && !found )
+        out.found = re.found;
+        if( re.hidden && !re.found )
         {
             return kNoNode;   // ind5 fix 2: the module's own private `use` of the name shadows its globs' and shows the importer nothing
         }
-        if( !found && re.globbed )
+        if( !re.found && re.globbed )
         {
             bool supplied = false;
             bool silent   = false;
-            hit   = rustGlobItem( crate, module, cls, depth, reach, of, inlineMod, atLevel, supplied, silent );
-            found = supplied;
-            if( quiet != nullptr )
-            {
-                *quiet = silent;
-            }
+            const NodeId hit = rustGlobItem( st, cls, depth, of, inlineMod, atLevel, supplied, silent );
+            out.found = supplied;
+            out.quiet = silent;
             return hit;
         }
-        found = found || re.globbed;
-        return hit;
+        out.found = re.found || re.globbed;
+        return re.hit;
     }
     // ind5: does an unparsed region (a macro invocation) at the module's own level sit in one of its files — one that may
     // declare any name there?
@@ -1413,11 +1471,10 @@ struct CallResultTypes
     // (a private one) adds nothing: the supplier it names is not one a macro-made visible one beside it conflicts with.
     // Memoized per (module, name, reach), never across a cut.
     template <class AtLevel>
-    NodeId rustGlobItem( std::uint32_t crate, const std::string& module, std::string_view cls, int depth, std::uint8_t reach, const std::vector<std::uint32_t>& files,
+    NodeId rustGlobItem( const RustStep& st, std::string_view cls, int depth, const std::vector<std::uint32_t>& files,
                          NodeId inlineMod, const AtLevel& atLevel, bool& supplied, bool& quiet ) const
     {
-        std::string key = rustModuleKey( crate, module );   // a copy: rustModuleKey's buffer is reused by the walk below
-        key.append( 1, '#' ).append( cls ).append( 1, char( '0' + reach ) );   // ind5 fix 2: the answer is per reach — which of the module's imports the importer sees
+        const std::string key = rustGlobKey( st, cls );
         supplied = true;
         quiet    = false;
         if( const auto it = rust.globItems.find( key ); it != rust.globItems.end() )
@@ -1451,11 +1508,11 @@ struct CallResultTypes
         Ballot ballot;   // each glob's supplier; kNoNode = unknown, which splits it
         for( std::uint32_t mf : files )
         {
-            rustGlobVotes( mf, atLevel, cls, depth, RustFrom{ crate, module }, reach, ballot );
+            rustGlobVotes( mf, atLevel, cls, depth, st, ballot );
         }
         if( inlineMod != kNoNode )
         {
-            rustGlobVotes( ing.symbols[ inlineMod ].fileId, atLevel, cls, depth, RustFrom{ crate, module }, reach, ballot );
+            rustGlobVotes( ing.symbols[ inlineMod ].fileId, atLevel, cls, depth, st, ballot );
         }
         const NodeId hit = ballot.verdict();
         supplied         = ballot.any;
@@ -1472,6 +1529,14 @@ struct CallResultTypes
         rust.globLowOpen = std::min( lowAbove, rust.globLowOpen );
         rust.globCut     = rust.globCut || cutAbove;
         return hit;
+    }
+    // rustGlobItem's memo key (ind5 fix 2/3): the module and name, per reach (which of the module's imports the importer and the origin see) and per
+    // origin (the hops below see it differently)
+    std::string rustGlobKey( const RustStep& st, std::string_view cls ) const
+    {
+        std::string key = rustModuleKey( st.next.here.crate, st.next.here.module );   // a copy: rustModuleKey's buffer is reused by the walk below
+        key.append( 1, '#' ).append( cls ).append( 1, char( '0' + st.reach.here ) ).append( 1, char( '0' + st.reach.origin ) ).append( 1, '@' );
+        return key.append( std::to_string( st.next.origin.crate ) ).append( 1, '#' ).append( st.next.origin.module );
     }
     // ind5: the glob hops one walk follows (a stack bound: a cycle ends at its open module first)
     static constexpr std::uint32_t kRustGlobHops = 8;
@@ -1492,7 +1557,7 @@ struct CallResultTypes
     // either, and counts as a silence that is no cycle's. `ballot.loud` records a target that came back empty for any reason but
     // an open cycle walk (the named re-export step reads it)
     template <class AtLevel>
-    void rustGlobVotes( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, const RustFrom& here, std::uint8_t reach, Ballot& ballot ) const
+    void rustGlobVotes( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, const RustStep& st, Ballot& ballot ) const
     {
         if( mf >= importsByFile.size() )
         {
@@ -1511,7 +1576,7 @@ struct CallResultTypes
                 ballot.vote( kNoNode );   // std, an external crate, an enum's variants, an unknown path: may supply it
                 continue;
             }
-            if( const RustShow show = rustImportShows( mf, *g, reach ); show != RustShow::Shows )   // ind5 fix 2: only a glob the importer is KNOWN to see supplies
+            if( const RustShow show = rustImportShows( mf, *g, st.reach ); show != RustShow::Shows )   // ind5 fix 2: only a glob the importer is KNOWN to see supplies
             {
                 if( show == RustShow::Unknown )
                 {
@@ -1520,14 +1585,13 @@ struct CallResultTypes
                 ballot.loud = ballot.loud || show == RustShow::Hides;   // a hidden glob adds nothing, and its silence proves nothing (not a cycle's)
                 continue;
             }
-            bool         has   = false;
-            bool         quiet = false;
-            const NodeId c     = rustItemAt( gc, gm, cls, depth, has, here, &quiet );   // a glob hop spends the walk's own budget, not `depth`; its importer is this module
-            if( has )
+            RustFound    fo;
+            const NodeId c = rustItemAt( RustMod{ gc, gm }, cls, depth, fo, st.next );   // a glob hop spends the walk's own budget, not `depth`; its importer is this module
+            if( fo.found )
             {
-                ballot.vote( rustSeenFrom( mf, c ) );
+                ballot.vote( rustSeenBy( st.next.origin, rustSeenFrom( mf, c ) ) );   // ind5 fix 3: the supplier is capped at the chain's narrowest hop: the origin must see it too
             }
-            else if( !quiet )
+            else if( !fo.quiet )
             {
                 ballot.loud = true;   // it lacks the name as far as the index shows (a macro there may have written it), not a cycle's silence
             }
@@ -1538,6 +1602,11 @@ struct CallResultTypes
     // macro-made visible one beside it would conflict with (Rust refuses two suppliers only when both are visible). Seen: a
     // `pub(crate)` item from the same crate; a `pub(super)` one from a module below its parent; a private one from a module below its own (`mod tests { use super::*; }`)
     NodeId rustSeenFrom( std::uint32_t f, NodeId c ) const
+    {
+        return rustSeenBy( f < rust.crateOf.size() ? RustMod{ rust.crateOf[ f ], rust.moduleOf[ f ] } : RustMod{}, c );
+    }
+    // the same for an importer named by its module (ind5 fix 3: the chain's origin); a module of no crate sees nothing restricted
+    NodeId rustSeenBy( const RustMod& by, NodeId c ) const
     {
         if( c == kNoNode )
         {
@@ -1556,7 +1625,7 @@ struct CallResultTypes
         {
             return c;   // plain `pub` (no row)
         }
-        if( f >= rust.crateOf.size() || cs.fileId >= rust.crateOf.size() || rust.crateOf[ f ] != rust.crateOf[ cs.fileId ] || mark == kTypeBindRestricted )
+        if( by.crate == kNoCrate || cs.fileId >= rust.crateOf.size() || by.crate != rust.crateOf[ cs.fileId ] || mark == kTypeBindRestricted )
         {
             return kNoNode;
         }
@@ -1569,7 +1638,7 @@ struct CallResultTypes
         {
             base = base.substr( 0, base.rfind( "::" ) == std::string_view::npos ? 0 : base.rfind( "::" ) );
         }
-        return rustWithin( rust.moduleOf[ f ], base ) && enclosingSymbol( c ) == kNoNode ? c : kNoNode;
+        return rustWithin( by.module, base ) && enclosingSymbol( c ) == kNoNode ? c : kNoNode;
     }
     // ind5: does module (crate, module) hold an unparsed region at its own level?
     bool rustTargetUnparsed( std::uint32_t crate, const std::string& module ) const
@@ -1585,7 +1654,7 @@ struct CallResultTypes
     // importer cannot see at `reach` (rustImportShows) adds nothing and sets `hidden` (the module's globs are shadowed by it); one the
     // index cannot place names an unknown class
     template <class AtLevel>
-    void rustFollowReexports( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, std::uint8_t reach, Reexports& out ) const
+    void rustFollowReexports( std::uint32_t mf, const AtLevel& atLevel, std::string_view cls, int depth, const RustStep& st, Reexports& out ) const
     {
         if( mf >= importsByFile.size() )
         {
@@ -1598,31 +1667,30 @@ struct CallResultTypes
                 continue;
             }
             out.globbed = out.globbed || b->var == "*";
-            if( b->var != cls )
+            if( b->var == cls )
             {
-                continue;
-            }
-            const RustShow show = rustImportShows( mf, *b, reach );
-            out.hidden          = out.hidden || show == RustShow::Hides;
-            if( show == RustShow::Hides )
-            {
-                continue;
-            }
-            bool         has = true;
-            const NodeId c   = show == RustShow::Shows ? rustNamedReexport( mf, *b, depth, has ) : kNoNode;
-            if( has )
-            {
-                out.hit   = out.found ? kNoNode : c;
-                out.found = true;
+                rustReexportStep( mf, *b, depth, st, out );
             }
         }
     }
-    // rustFollowReexports' named step: the class the `use` row `b` of file `mf` reaches; `has` false (ind5) only when every
-    // glob at the path's in-tree module met an open walk — a glob cycle's open module, which adds nothing new (rustClassAt)
-    NodeId rustNamedReexport( std::uint32_t mf, const Binding& b, int depth, bool& has ) const
+    // rustFollowReexports' step for one named `use` of the name: followed when it shows (ind5 fix 3: to the importer AND the origin), nothing
+    // (and `hidden`) when it does not
+    void rustReexportStep( std::uint32_t mf, const Binding& b, int depth, const RustStep& st, Reexports& out ) const
     {
-        const auto [ modPath, item ] = splitLast( b.importedName, "::" );
-        return modPath.empty() ? kNoNode : rustClassAt( mf, b.startByte, modPath, item, depth + 1, &has );
+        const RustShow show = rustImportShows( mf, b, st.reach );
+        out.hidden          = out.hidden || show == RustShow::Hides;
+        if( show == RustShow::Hides )
+        {
+            return;
+        }
+        bool         has = true;
+        const auto [ modPath, item ] = splitLast( b.importedName, "::" );   // the class the `use` reaches; `has` false (ind5) only when every glob at the path's in-tree module met an open walk
+        const NodeId c   = show == RustShow::Shows && !modPath.empty() ? rustClassVia( mf, b.startByte, modPath, item, depth + 1, &has, &st.next.origin ) : kNoNode;
+        if( has )
+        {
+            out.hit   = out.found ? kNoNode : c;
+            out.found = true;
+        }
     }
     // (L) a qualified Rust call whose qualifier is a module path reaching `target`'s own module (`model::load()`,
     // `crate::nest::holder()`, a `use`d `nest::holder()`): the evidence the canonical tier, keyed by type scopes, lacks
@@ -1851,7 +1919,7 @@ struct CallResultTypes
     {
         if( !whole.empty() )
         {
-            return rustClassAt( fileId, at, splitLast( whole, "::" ).first, cls );
+            return rustClassVia( fileId, at, splitLast( whole, "::" ).first, cls, 0, nullptr, nullptr );
         }
         if( !rust.built )
         {
