@@ -1,0 +1,375 @@
+[
+  {
+    "corpus": "ripwire",
+    "label": "common_word",
+    "query": "value",
+    "default": {
+      "route": "name-exact(value); anchors: value(src/.../dynamic_map.hpp+3)",
+      "confidence": "high",
+      "margin_pct": 45,
+      "kept_disclosed": 5,
+      "scored": 6,
+      "corpus_n": 20219,
+      "served_rows": 6,
+      "top5": [
+        "value(src/infra/dynamic_map.hpp:143)",
+        "`--slice-flow` — ARISE rung 2, cross-statement data-flow slicing (2026-08-30) — REGISTERED CONTRACT(docs/EVALS.md:8158)",
+        "Background — the grammar, the surfaces, the bridge(prompts/help-wanted/scala-jvm-bridge.md:47)",
+        "value(test/emptyvaluerefusecheck.sh:86)",
+        "value(test/swiftfix/Purity.swift:9)"
+      ]
+    },
+    "adaptive": {
+      "route": "name-exact(value); anchors: value(src/.../dynamic_map.hpp+3)",
+      "confidence": "high",
+      "margin_pct": 45,
+      "kept_disclosed": 5,
+      "scored": 6,
+      "corpus_n": 20219,
+      "served_rows": 5,
+      "top5": [
+        "value(src/infra/dynamic_map.hpp:143)",
+        "`--slice-flow` — ARISE rung 2, cross-statement data-flow slicing (2026-08-30) — REGISTERED CONTRACT(docs/EVALS.md:8158)",
+        "Background — the grammar, the surfaces, the bridge(prompts/help-wanted/scala-jvm-bridge.md:47)",
+        "value(test/emptyvaluerefusecheck.sh:86)",
+        "value(test/swiftfix/Purity.swift:9)"
+      ]
+    }
+  },
+  {
+    "corpus": "ripwire",
+    "label": "two_words",
+    "query": "data flow",
+    "default": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 976,
+      "corpus_n": 20219,
+      "served_rows": 29,
+      "top5": [
+        "flowTaskChoice(src/taskroute.h:939)",
+        "kVariableSlotCues(src/taskroute.h:658)",
+        "SliceReply(src/mcpverbs.h:4161)",
+        "sliceText(src/mcpverbs.h:4173)",
+        "kSlotFillers(src/taskroute.h:666)"
+      ]
+    },
+    "adaptive": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 976,
+      "corpus_n": 20219,
+      "served_rows": 29,
+      "top5": [
+        "flowTaskChoice(src/taskroute.h:939)",
+        "kVariableSlotCues(src/taskroute.h:658)",
+        "SliceReply(src/mcpverbs.h:4161)",
+        "sliceText(src/mcpverbs.h:4173)",
+        "kSlotFillers(src/taskroute.h:666)"
+      ]
+    }
+  },
+  {
+    "corpus": "ripwire",
+    "label": "contentless",
+    "query": "summarize this",
+    "default": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 4297,
+      "corpus_n": 20219,
+      "served_rows": 35,
+      "top5": [
+        "summarize(bench/locbench/test_compare_gate.py:62)",
+        "summarize(test/estcalibfix/rates.py:33)",
+        "QUERIES(bench/adaptive_shortquery/run_adaptive_shortquery.py:22)",
+        "wrap(bench/locbench/test_compare_gate.py:67)",
+        "summarize(bench/routing_report.py:56)"
+      ]
+    },
+    "adaptive": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 4297,
+      "corpus_n": 20219,
+      "served_rows": 35,
+      "top5": [
+        "summarize(bench/locbench/test_compare_gate.py:62)",
+        "summarize(test/estcalibfix/rates.py:33)",
+        "QUERIES(bench/adaptive_shortquery/run_adaptive_shortquery.py:22)",
+        "wrap(bench/locbench/test_compare_gate.py:67)",
+        "summarize(bench/routing_report.py:56)"
+      ]
+    }
+  },
+  {
+    "corpus": "ripwire",
+    "label": "technical_multiword",
+    "query": "cut a ranked list at the largest relative score gap",
+    "default": {
+      "route": "subtoken+body",
+      "confidence": "high",
+      "margin_pct": 23,
+      "kept_disclosed": 5,
+      "scored": 9676,
+      "corpus_n": 20219,
+      "served_rows": 26,
+      "top5": [
+        "AdaptiveCut(src/lexical.h:2343)",
+        "kForConfidenceNote(src/lexical.h:2448)",
+        "buildMaskedRank(src/packtask.h:882)",
+        "adaptiveCut(src/lexical.h:2363)",
+        "RecallSelection(src/recall.h:186)"
+      ]
+    },
+    "adaptive": {
+      "route": "subtoken+body",
+      "confidence": "high",
+      "margin_pct": 23,
+      "kept_disclosed": 5,
+      "scored": 9676,
+      "corpus_n": 20219,
+      "served_rows": 5,
+      "top5": [
+        "AdaptiveCut(src/lexical.h:2343)",
+        "kForConfidenceNote(src/lexical.h:2448)",
+        "buildMaskedRank(src/packtask.h:882)",
+        "adaptiveCut(src/lexical.h:2363)",
+        "RecallSelection(src/recall.h:186)"
+      ]
+    }
+  },
+  {
+    "corpus": "ripwire",
+    "label": "named_symbol",
+    "query": "adaptiveCut",
+    "default": {
+      "route": "name-exact(adaptiveCut); anchors: adaptiveCut(src/lexical.h+1)",
+      "confidence": "high",
+      "margin_pct": 45,
+      "kept_disclosed": 4,
+      "scored": 4,
+      "corpus_n": 20219,
+      "served_rows": 4,
+      "top5": [
+        "AdaptiveCut(src/lexical.h:2343)",
+        "adaptiveCut(src/lexical.h:2363)",
+        "The paper-shape lane (2026-08-28) — motivation note, result-free(docs/EVALS.md:8112)",
+        "Agent Retrieval Bench — abstention round 2: the adaptive cut's corpus-support facts,(docs/EVALS.md:9177)"
+      ]
+    },
+    "adaptive": {
+      "route": "name-exact(adaptiveCut); anchors: adaptiveCut(src/lexical.h+1)",
+      "confidence": "high",
+      "margin_pct": 45,
+      "kept_disclosed": 4,
+      "scored": 4,
+      "corpus_n": 20219,
+      "served_rows": 4,
+      "top5": [
+        "AdaptiveCut(src/lexical.h:2343)",
+        "adaptiveCut(src/lexical.h:2363)",
+        "The paper-shape lane (2026-08-28) — motivation note, result-free(docs/EVALS.md:8112)",
+        "Agent Retrieval Bench — abstention round 2: the adaptive cut's corpus-support facts,(docs/EVALS.md:9177)"
+      ]
+    }
+  },
+  {
+    "corpus": "private-corpus",
+    "label": "common_word",
+    "query": "value",
+    "default": {
+      "route": "name-exact(‹redacted›)",
+      "confidence": "high",
+      "margin_pct": 45,
+      "kept_disclosed": 13,
+      "scored": 17,
+      "corpus_n": 46913,
+      "served_rows": 17,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "adaptive": {
+      "route": "name-exact(‹redacted›)",
+      "confidence": "high",
+      "margin_pct": 45,
+      "kept_disclosed": 13,
+      "scored": 17,
+      "corpus_n": 46913,
+      "served_rows": 13,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "redacted": "file paths, type names and the query text are removed; the corpus is private and not redistributable"
+  },
+  {
+    "corpus": "private-corpus",
+    "label": "two_words",
+    "query": "‹redacted — private corpus›",
+    "default": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 2199,
+      "corpus_n": 46913,
+      "served_rows": 35,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "adaptive": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 2199,
+      "corpus_n": 46913,
+      "served_rows": 35,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "redacted": "file paths, type names and the query text are removed; the corpus is private and not redistributable"
+  },
+  {
+    "corpus": "private-corpus",
+    "label": "contentless",
+    "query": "summarize this",
+    "default": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 9854,
+      "corpus_n": 46913,
+      "served_rows": 29,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "adaptive": {
+      "route": "subtoken+body:broad",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 9854,
+      "corpus_n": 46913,
+      "served_rows": 29,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "redacted": "file paths, type names and the query text are removed; the corpus is private and not redistributable"
+  },
+  {
+    "corpus": "private-corpus",
+    "label": "technical_multiword",
+    "query": "‹redacted — private corpus›",
+    "default": {
+      "route": "subtoken+body",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 12152,
+      "corpus_n": 46913,
+      "served_rows": 28,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "adaptive": {
+      "route": "subtoken+body",
+      "confidence": "low",
+      "margin_pct": 0,
+      "kept_disclosed": 40,
+      "scored": 12152,
+      "corpus_n": 46913,
+      "served_rows": 27,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "redacted": "file paths, type names and the query text are removed; the corpus is private and not redistributable"
+  },
+  {
+    "corpus": "private-corpus",
+    "label": "named_symbol",
+    "query": "‹redacted — private corpus›",
+    "default": {
+      "route": "name-exact(‹redacted›)",
+      "confidence": "high",
+      "margin_pct": 27,
+      "kept_disclosed": 5,
+      "scored": 8,
+      "corpus_n": 46913,
+      "served_rows": 8,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "adaptive": {
+      "route": "name-exact(‹redacted›)",
+      "confidence": "high",
+      "margin_pct": 27,
+      "kept_disclosed": 5,
+      "scored": 8,
+      "corpus_n": 46913,
+      "served_rows": 5,
+      "top5": [
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›",
+        "‹redacted — private corpus›"
+      ]
+    },
+    "redacted": "file paths, type names and the query text are removed; the corpus is private and not redistributable"
+  }
+]
