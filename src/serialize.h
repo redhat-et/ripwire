@@ -14,6 +14,7 @@
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
 #include "memberowner.h"   // QUALNAME-1: MemberOwners — the <d> row folds a member's sc= into n="Owner.name"
 #include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
+#include "langfacts.h"   // #404: langFacts(l).legoContract — which type definitions' --lego <m> contract is read
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
 #include "resolve.h"     // S6-C: canonicalId() — the `id=` canonical symbol string (shared with the resolver)
@@ -9356,12 +9357,15 @@ inline void packGraphBlock( std::FILE* out, const IngestResult& ing, const std::
 // as real method symbols with a signature span the tags query pins correctly. Measured: C++/ObjC in-class
 // methods are captured soundly (SymKind::Method, correct sigStartByte/sigEndByte). For TS/Java/Rust the
 // interface's OWN members are NOT captured as method symbols the same way — scanning the iface span there
-// grabs the interface's own declaration line and emits garbage (`<m>interface Animal</m>`). Declarative
-// allow-list (not a scattered if): emit <m> only for langs where the surface is correct; suppress it (emit
-// the <impl> list alone) elsewhere. A correct empty contract beats a broad wrong one.
-inline bool legoMethodContractSound( Lang lang ) noexcept
+// grabs the interface's own declaration line and emits garbage (`<m>interface Animal</m>`). Go (#404): an
+// interface's method_elem rows are methods scoped to the interface (ingest_names.h kScopeOwners type_spec),
+// so its contract is sound; a Go struct's methods are declared by receiver OUTSIDE its body, so a struct keeps
+// the caveat. Declarative (langfacts.h legoContract, not a scattered if): emit <m> only where the surface is
+// correct; suppress it (emit the <impl> list alone) elsewhere. A correct empty contract beats a broad wrong one.
+inline bool legoMethodContractSound( const Symbol& type ) noexcept
 {
-    return lang == Lang::Cpp || lang == Lang::ObjC;
+    const LegoContract reach = langFacts( type.lang ).legoContract;
+    return reach == LegoContract::EveryType || ( reach == LegoContract::InterfacesOnly && type.kind == SymKind::Interface );
 }
 
 // §A9.4 — the suppression above, SAID OUT LOUD on the targeted verb. A Rust `trait Vehicle` with two
@@ -9378,10 +9382,45 @@ inline const char* legoContractCaveat( bool isContractExtracted, bool isTargeted
     return ( isTargeted && !isContractExtracted ) ? "\" methods=\"0\" caveat=\"not-extracted-for-lang" : "";
 }
 
+// The members --lego lists as a type's method contract (<m>), in symbol order: a method in the type's file whose signature
+// starts inside the type's span, whose OWN nearest class-like scope is the type, and whose signature span reads in the file.
+// FIX #2 (nested-class over-list): span-containment alone lists a method of a class NESTED inside the iface (that method's
+// span sits within the iface's span too), so the scope must BE the iface — Symbol::scope carries exactly that (the nearest
+// enclosing class/struct name; enclosingScopeOf in ingest). Outer::Nested::nestedMethod (scope "Nested") is excluded.
+// #404 (Go): a method of an interface LITERAL written in a member's signature (`Visit(n interface{ Pos() int })`) is scoped
+// to the named interface too (the scope walker stops at the type_spec), but it belongs to the parameter's type, not to the
+// contract. Its signature sits inside a strictly wider member signature, so it is not listed.
+inline std::vector<const Symbol*> legoContractMembers( const IngestResult& ing, const Symbol& type, std::size_t srcSize )
+{
+    std::vector<const Symbol*> members;
+    for( const Symbol& m : ing.symbols )
+    {
+        if( m.kind != SymKind::Method || m.fileId != type.fileId || m.id == type.id || m.scope != type.name )
+        {
+            continue;
+        }
+        if( m.sigStartByte < type.sigStartByte || m.sigStartByte >= type.endByte || m.sigEndByte <= m.sigStartByte || m.sigEndByte > srcSize )
+        {
+            continue;
+        }
+        members.push_back( &m );
+    }
+    const auto insideAnotherMember = [ & ]( const Symbol* m ) noexcept
+    {
+        return std::any_of( members.begin(), members.end(), [ m ]( const Symbol* o )
+                            { return o->sigStartByte <= m->sigStartByte && m->sigEndByte <= o->sigEndByte
+                                  && o->sigEndByte - o->sigStartByte > m->sigEndByte - m->sigStartByte; } );
+    };
+    std::vector<const Symbol*> own;
+    own.reserve( members.size() );
+    std::copy_if( members.begin(), members.end(), std::back_inserter( own ), [ & ]( const Symbol* m ) { return !insideAnotherMember( m ); } );
+    return own;
+}
+
 // --lego's ROLE order over the tower (graph.h applyNameTower), view-local: the answer to "--lego=NAME" is a TYPE with
 // something to show, so every type kind (Class/Struct/Interface/named type) shares ONE rung, and on it the keys are,
 // in order: at least one implementor (the <impl> rows); a method contract that is extracted (legoMethodContractSound —
-// no not-extracted caveat, its <m> rows are read; today a C++ / Objective-C definition, decided by the language alone,
+// no not-extracted caveat, its <m> rows are read; today a C++ / Objective-C definition or a Go interface, decided by the language and kind,
 // so it must NOT outrank an implementor: a data-only C++ class would beat a Rust trait that has implementors,
 // rv-pr432-delta B1); then the tower's own key — kind rank (an Interface above a
 // Class), the leading symbol's language, id ASC. Every other rung keeps the tower rank (a Method above the types, a
@@ -9415,7 +9454,7 @@ inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::ve
         const Symbol& s      = ing.symbols[ id ];
         const bool    isType = namespaceCompatible( RefRole::Type, s.kind );   // graph.h's one statement of "a type definition"
         keys.push_back( RoleKey{ isType ? typeRung : towerRanks[ i ], isType && id < implementors.size() && !implementors[ id ].empty(),
-                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], id } );
+                                 isType && legoMethodContractSound( s ), towerRanks[ i ], id } );
     }
     const auto ahead = []( const RoleKey& a, const RoleKey& b ) noexcept
     {
@@ -9875,7 +9914,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
         const NodeId  id   = ifaces[k];
         const Symbol& isym = ing.symbols[id];
 
-        const bool  isContractExtracted = legoMethodContractSound( isym.lang );
+        const bool  isContractExtracted = legoMethodContractSound( isym );
         const char* caveatAttr          = legoContractCaveat( isContractExtracted, focusId != kNoNode );   // §A9.4
         // H6/F2 (capture-audit 2026-09-04): the TARGETED form resolves a bare name through resolveFocus,
         // which then picked the LOWEST-ID definition. `--lego=size` (6 definitions in 4 files) therefore answered
@@ -9942,29 +9981,9 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
             }
             const int maxMethods = ( focusId != kNoNode ) ? 64 : 6;   // targeted verb = full contract; --for = a taste
             int shown = 0;
-            for( const Symbol& m : ing.symbols )
+            for( const Symbol* member : legoContractMembers( ing, isym, src.size() ) )
             {
-                if( m.kind != SymKind::Method || m.fileId != isym.fileId || m.id == id )
-                {
-                    continue;
-                }
-                if( m.sigStartByte < isym.sigStartByte || m.sigStartByte >= isym.endByte )
-                {
-                    continue; // inside the class span
-                }
-                // FIX #2 (nested-class over-list): span-containment alone lists a method of a class NESTED
-                // inside the iface (that method's span sits within the iface's span too). Require the method's
-                // OWN nearest class-like scope to BE the iface — Symbol::scope carries exactly that (the nearest
-                // enclosing class/struct name; enclosingScopeOf in ingest). scope==name ⇒ the iface owns it;
-                // Outer::Nested::nestedMethod (scope "Nested") is correctly excluded from Outer's contract.
-                if( m.scope != isym.name )
-                {
-                    continue;
-                }
-                if( m.sigEndByte <= m.sigStartByte || m.sigEndByte > src.size() )
-                {
-                    continue;
-                }
+                const Symbol& m = *member;
                 if( ++shown > maxMethods ) { w.write( "<!-- +more methods -->" ); break; }
                 const std::string sig = cleanSig( src.data(), m.sigStartByte, m.sigEndByte, redact );
                 if( !sig.empty() )

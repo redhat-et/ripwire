@@ -55,6 +55,15 @@ enum class BaseImportEvidence : std::uint8_t
     JvmImport,      // `import org.ext.Base` / `extends org.ext.Base` of a package the tree does not declare
 };
 
+/// #404: which type definitions' --lego method contract (<m>) is read off the method symbols inside the type's own body
+/// (serialize.h legoMethodContractSound). None keeps the rows suppressed and the named verb says so (caveat=).
+enum class LegoContract : std::uint8_t
+{
+    None,             // members are not methods scoped to the type: TS/Java/Rust's span scan read the declaration line itself
+    EveryType,        // C++, Objective-C: a class's or interface's methods are declared in its body, each scoped to it
+    InterfacesOnly,   // Go: an interface's method_elem rows sit in its body; a struct's methods are declared by receiver outside it
+};
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -186,6 +195,9 @@ struct LangFacts
     /// it names neither the declaration nor a same-spelled definition — so it binds nothing (FC3: the LocalBindKind::JsRebind
     /// records of ingest_jsimports.h captureJsRebindFacts, read by graph.h buildGraph).
     bool writtenBindingUndecided = false;
+
+    /// C++, Objective-C (every type), Go (interfaces): the --lego method contract is read off the type's own body (LegoContract).
+    LegoContract legoContract = LegoContract::None;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -194,14 +206,14 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .memberSeparator = "::",
-      .transitiveIncludes = true },
+      .transitiveIncludes = true, .legoContract = LegoContract::EveryType },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true },
-    { .lang = Lang::Go, .structuralTyping = true },
+    { .lang = Lang::Go, .structuralTyping = true, .legoContract = LegoContract::InterfacesOnly },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse },
     { .lang = Lang::Swift },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .legoContract = LegoContract::EveryType },
     { .lang = Lang::Markdown, .linkSections = true },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true },

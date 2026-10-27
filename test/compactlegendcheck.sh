@@ -1943,7 +1943,7 @@ H1="$TMP/h1"; mkdir -p "$H1/a" "$H1/b"
 printf '#pragma once\nnamespace a {\nclass Store {\npublic:\n    int putObject(int x);\n};\n}\n' >"$H1/a/Store.h"
 printf '#pragma once\nnamespace b {\nclass Store {\npublic:\n    int putObject(int x);\n};\n}\n' >"$H1/b/Store.h"
 printf '#include "Store.h"\nnamespace b {\nint Store::putObject(int x)\n{\n    return x + 1;\n}\n}\nint callB(int x)\n{\n    b::Store s;\n    return s.putObject(x);\n}\n' >"$H1/b/Store.cpp"
-# --lego's caveat= rides a NAMED interface in a language whose method contract is not read (only C++/ObjC are).
+# --lego's caveat= rides a NAMED interface in a language whose method contract is not read (only C++/ObjC types and Go interfaces are).
 LEGOJ="$TMP/legojava"; mkdir -p "$LEGOJ"
 printf 'interface Shape {\n    double area();\n}\n' >"$LEGOJ/Shape.java"
 printf 'class Circle implements Shape {\n    public double area() { return 3.0; }\n}\n' >"$LEGOJ/Circle.java"
