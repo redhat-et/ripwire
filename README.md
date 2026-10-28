@@ -968,7 +968,7 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 </p>
 
 <p align="center">
-  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 36 slides</b></a> — every figure names the instrument that pins it<br>
+  <a href="present/ripwire-showcase.pdf"><b>▶ The whole tool in 38 slides</b></a> — every figure names the instrument that pins it<br>
   <sub>renders in your browser · <a href="present/ripwire-showcase.pptx">pptx</a> beside it · <a href="docs/EVALS.md">the numbers behind it</a></sub>
 </p>
 
@@ -3184,7 +3184,7 @@ record, and this line is only the pointer to it.
 | The compile-time cap inventory | [`docs/LIMITS.md`](docs/LIMITS.md) |
 | The measured cost of each cap | [`docs/TUNING.md`](docs/TUNING.md) |
 | Skill-file security checks | [`docs/COMMANDS.md`](docs/COMMANDS.md#--scan-skillsdir) |
-| The whole tool in 36 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
+| The whole tool in 38 slides — the showcase deck | [`present/ripwire-showcase.pdf`](present/ripwire-showcase.pdf) ([pptx](present/ripwire-showcase.pptx), rebuilt by [`present/deck5_ripwire_build.js`](present/deck5_ripwire_build.js)) |
 
 If a document disagrees with `--help`, the document is the bug.
 
