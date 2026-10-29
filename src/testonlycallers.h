@@ -11,6 +11,7 @@
 
 #include "filter.h"
 #include "graph.h"
+#include "epmanifest.h"       // collectManifestsAbove — the manifest entry points an in-tree caller never spells
 #include "docparse.h"         // lowerExtOf / isProseExtension — which skipped files could have held a caller
 #include "model.h"
 #include "valuerefindex.h"    // ValueRefIndex::narrowFor / isValueReferenced — a name a library holds as a VALUE is a use
@@ -119,6 +120,36 @@ inline std::vector<std::string_view> interfaceMethodNames( const IngestResult& i
     return methods;
 }
 
+// D1 fix round 1 (F2): drop every row a package manifest names as an entry point. setup.cfg and pyproject.toml entry-point
+// tables (`console_scripts`, plugin groups) call their target by `module:attr`, an invocation no source file spells; the
+// crawl does not index setup.cfg, so the name vetting never sees it. epmanifest.h already reads both formats (EP-MANIFEST); this
+// asks it for the manifests above the candidates' files and keeps off any def whose name is a target's attribute (last dotted
+// segment). The wide side on purpose: a same-named def in another module is dropped too, never listed.
+inline void dropTestOnlyEntryPoints( const IngestResult& ing, std::vector<NodeId>& testOnly )
+{
+    using namespace rw;
+    std::vector<std::string>        seenDirs;
+    std::vector<epdetail::Manifest> manifests;
+    for( NodeId id : testOnly )
+    {
+        epdetail::collectManifestsAbove( ing, ing.symbols[ id ].fileId, seenDirs, manifests );
+    }
+    const auto isEntryAttr = [ & ]( std::string_view name )
+    {
+        return std::ranges::any_of( manifests, [ & ]( const epdetail::Manifest& m )
+        {
+            return std::ranges::any_of( m.entries, [ & ]( const EpEntry& e )
+            {
+                const std::size_t colon = e.target.find( ':' );
+                if( colon == std::string::npos ) { return false; }
+                const std::string_view attr = std::string_view( e.target ).substr( colon + 1 );
+                return attr.substr( attr.rfind( '.' ) == std::string_view::npos ? 0 : attr.rfind( '.' ) + 1 ) == name;
+            } );
+        } );
+    };
+    std::erase_if( testOnly, [ & ]( NodeId id ) { return isEntryAttr( ing.symbols[ id ].name ); } );
+}
+
 // The edge half of FOR-TONLY: the ids that pass every check but the value-use vetting (see computeTestOnlyCallers).
 inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, const Graph& g, const std::vector<char>& declined )
 {
@@ -139,7 +170,7 @@ inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, cons
 
 // FOR-TONLY: per symbol, 1 iff it is a library function or method that has at least one indexed caller, every caller is a
 // test symbol, no library code holds it as a value (a dispatch table, a registering decorator: ValueRefIndex), no library call
-// the resolver declined names it, it is not a method an interface declares, and the index is whole. Empty vector (no flag
+// the resolver declined names it, no package manifest names it as an entry point, it is not a method an interface declares, and the index is whole. Empty vector (no flag
 // anywhere) when the index is cut or nothing qualifies. O(in-edges + declined records) for the edge pass; the value-use vetting
 // runs over the few names that pass it, on a narrow index.
 inline std::vector<std::uint8_t> computeTestOnlyCallers( const IngestResult& ing, const Graph& g )
@@ -151,7 +182,11 @@ inline std::vector<std::uint8_t> computeTestOnlyCallers( const IngestResult& ing
         return flags;
     }
     const std::vector<char>    declined = namedByLibraryDeclinedCall( ing, g, declinedUnknown );
-    const std::vector<NodeId>  cands    = declinedUnknown ? std::vector<NodeId>{} : testOnlyEdgeCandidates( ing, g, declined );
+    std::vector<NodeId>        cands    = declinedUnknown ? std::vector<NodeId>{} : testOnlyEdgeCandidates( ing, g, declined );
+    if( !cands.empty() )
+    {
+        dropTestOnlyEntryPoints( ing, cands );   // a package manifest's console_scripts / plugin target is an in-tree call no source spells
+    }
     if( cands.empty() )
     {
         return flags;

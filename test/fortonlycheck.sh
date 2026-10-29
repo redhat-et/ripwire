@@ -265,11 +265,32 @@ def test_all():
     assert ParcelStore().get(1) == 1
     assert parcel_store_only_tested(1) == 1
 P
+cat > "$DC/pkg/cli.py" <<'P'
+def launch_parcel_cli(args):
+    return len(args)
+P
+cat > "$DC/setup.cfg" <<'P'
+[options.entry_points]
+console_scripts =
+    parcel = pkg.cli:launch_parcel_cli
+P
+cat >> "$DC/tests/test_store.py" <<'P'
+
+
+def test_cli():
+    from pkg.cli import launch_parcel_cli
+    assert launch_parcel_cli([1]) == 1
+P
 ( cd "$DC" && "$BIN" "$DC" --no-cache "--for=parcel store get" </dev/null 2>/dev/null ) > "$TMP/dc.txt"
 r="$( row "$TMP/dc.txt" ParcelStore.get )"
 if [ -z "$r" ]; then no "A12 premise: the ParcelStore.get row is missing"
 elif echo "$r" | grep -q ' tonly="1"'; then no "A12 a method a declined library call could have meant carries tonly: $r"
 else ok "A12 a library call the resolver declined to bind keeps the method unflagged"; fi
+( cd "$DC" && "$BIN" "$DC" --no-cache "--for=launch parcel cli" </dev/null 2>/dev/null ) > "$TMP/dc2.txt"
+r="$( row "$TMP/dc2.txt" launch_parcel_cli )"
+if [ -z "$r" ]; then no "A13 premise: the launch_parcel_cli row is missing"
+elif echo "$r" | grep -q ' tonly="1"'; then no "A13 a console_scripts entry point only tests call in-tree carries tonly: $r"
+else ok "A13 a package manifest entry point (setup.cfg console_scripts) is a caller no source spells: unflagged"; fi
 if has "$TMP/dc.txt" parcel_store_only_tested; then ok "A12 a plain function only a test calls, beside it, is flagged (the arm can fire)"; else no "A12 premise: parcel_store_only_tested was not flagged: $( row "$TMP/dc.txt" parcel_store_only_tested )"; fi
 
 # A7 a tree with no test-only function

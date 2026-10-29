@@ -2766,35 +2766,7 @@ inline void dropTestOnlySpelledInLibrary( const rw::IngestResult& ing, std::vect
     sortDeadCodeRows( ing, testOnly );
 }
 
-// D1 fix round 1 (F2): drop every row a package manifest names as an entry point. setup.cfg and pyproject.toml entry-point
-// tables (`console_scripts`, plugin groups) call their target by `module:attr`, an invocation no source file spells; the
-// crawl does not index setup.cfg, so the name vetting never sees it. epmanifest.h already reads both formats (EP-MANIFEST); this
-// asks it for the manifests above the candidates' files and keeps off any def whose name is a target's attribute (last dotted
-// segment). The wide side on purpose: a same-named def in another module is dropped too, never listed.
-inline void dropTestOnlyEntryPoints( const rw::IngestResult& ing, std::vector<rw::NodeId>& testOnly )
-{
-    using namespace rw;
-    std::vector<std::string>        seenDirs;
-    std::vector<epdetail::Manifest> manifests;
-    for( NodeId id : testOnly )
-    {
-        epdetail::collectManifestsAbove( ing, ing.symbols[ id ].fileId, seenDirs, manifests );
-    }
-    const auto isEntryAttr = [ & ]( std::string_view name )
-    {
-        return std::ranges::any_of( manifests, [ & ]( const epdetail::Manifest& m )
-        {
-            return std::ranges::any_of( m.entries, [ & ]( const EpEntry& e )
-            {
-                const std::size_t colon = e.target.find( ':' );
-                if( colon == std::string::npos ) { return false; }
-                const std::string_view attr = std::string_view( e.target ).substr( colon + 1 );
-                return attr.substr( attr.rfind( '.' ) == std::string_view::npos ? 0 : attr.rfind( '.' ) + 1 ) == name;
-            } );
-        } );
-    };
-    std::erase_if( testOnly, [ & ]( NodeId id ) { return isEntryAttr( ing.symbols[ id ].name ); } );
-}
+// D1/FOR-TONLY: dropTestOnlyEntryPoints lives in testonlycallers.h (the --for tonly= flag vets entry points the same way).
 
 
 // The residual of §6.3's extraction: --dead-code, the only branch left in runQualityViews. main() calls it
