@@ -794,7 +794,9 @@ for _t in ".ripwire-manifest-v1" "settings.json"; do
 done
 rm -rf "${P_HOME:?}/.claude"; TMPDIR="$HD/P/tmp" HOME="$P_HOME" bash "$SK/install.sh" --claude --hook >/dev/null 2>&1
 pStray="$( find "$HD/P" \( -name '*.tmp.*' -o -name 'tmp.*' \) 2>/dev/null | tr '\n' ' ' )"
-[ -z "$pStray" ] && ok "(P) twin: an ordinary run leaves no temp file" || no "(P) an ordinary run left temp files: $pStray"
+[ -z "$pStray" ] \
+    && ok "(P) twin: an ordinary run leaves no temp file" \
+    || no "(P) an ordinary run left temp files: $pStray"
 # ── (Q) the PRUNE removes only what it can show is ITS OWN ───────────────────────────────────────────────────────
 #    #293 review: "a user's own unrelated symlink happening to be named ripwire-<something>" was fair game, the
 #    ownership test compared string PREFIXES (skills-mine counted as skills), and a real FILE with a ripwire- name
