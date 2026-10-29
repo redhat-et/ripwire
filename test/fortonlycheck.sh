@@ -126,10 +126,10 @@ elif echo "$r" | grep -q ' tonly="1"'; then no "A6 a test symbol only tests call
 else ok "A6 a test-dir symbol only tests call is never flagged (tonly is a library-function fact)"; fi
 
 # A9 legend + xml
-grep -q 'tonly=1 every caller' "$TMP/c.txt" && ok "A9 compact legend clause rides with the attribute" || no "A9 compact legend clause missing"
+if grep -q 'tonly=1 every caller' "$TMP/c.txt"; then ok "A9 compact legend clause rides with the attribute"; else no "A9 compact legend clause missing"; fi
 forx --legend=full > "$TMP/f.txt"
-grep -q 'tonly=\"1\" on a d row' "$TMP/f.txt" && ok "A9 full legend clause rides with the attribute" || no "A9 full legend clause missing"
-has "$TMP/f.txt" parcel_rate_tested_only && ok "A1 --legend=full carries tonly on the same row" || no "A1 --legend=full row lacks tonly"
+if grep -q 'tonly=\"1\" on a d row' "$TMP/f.txt"; then ok "A9 full legend clause rides with the attribute"; else no "A9 full legend clause missing"; fi
+if has "$TMP/f.txt" parcel_rate_tested_only; then ok "A1 --legend=full carries tonly on the same row"; else no "A1 --legend=full row lacks tonly"; fi
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/c.txt" 2>/dev/null && xmllint --noout "$TMP/f.txt" 2>/dev/null; then ok "A9 both answers are well-formed XML"; else no "A9 xmllint rejected a --for answer"; fi
 else
@@ -138,7 +138,7 @@ fi
 
 # A1 json
 forx --json > "$TMP/j.json"
-python3 - "$TMP/j.json" <<'PY' && ok "A1 --json: \"tonly\":true on the test-only row and on no other row" || no "A1 --json tonly rows wrong"
+if python3 - "$TMP/j.json" <<'PY'; then ok "A1 --json: \"tonly\":true on the test-only row and on no other row"; else no "A1 --json tonly rows wrong"; fi
 import json,sys
 d=json.load(open(sys.argv[1]))
 rows=d.get("sigs") or []
@@ -159,11 +159,11 @@ for line in open(sys.argv[1]):
     r=d.get("result") or {}
     for c in r.get("content",[]): print(c.get("text",""))
 PY
-has "$TMP/m.txt" parcel_rate_tested_only && ok "A1 MCP for: the test-only row carries tonly" || no "A1 MCP for: no tonly on parcel_rate_tested_only ($( row "$TMP/m.txt" parcel_rate_tested_only ))"
+if has "$TMP/m.txt" parcel_rate_tested_only; then ok "A1 MCP for: the test-only row carries tonly"; else no "A1 MCP for: no tonly on parcel_rate_tested_only ($( row "$TMP/m.txt" parcel_rate_tested_only ))"; fi
 for n in parcel_rate_with_library_user parcel_rate_without_callers parcel_rate_table_entry; do
-    has "$TMP/m.txt" $n && no "A2 MCP for: $n flagged" || true
+    if has "$TMP/m.txt" $n; then no "A2 MCP for: $n flagged"; fi
 done
-grep -q 'tonly=\"1\" on a d row' "$TMP/m.txt" && ok "A9 MCP for: the legend clause rides with the attribute" || no "A9 MCP for: legend clause missing"
+if grep -q 'tonly=\"1\" on a d row' "$TMP/m.txt"; then ok "A9 MCP for: the legend clause rides with the attribute"; else no "A9 MCP for: legend clause missing"; fi
 
 # A11 Go: a method an interface declares is reached through the interface (RPM.Package shape) — implementation only tests call
 # directly stays unflagged (the interface-method guard); a plain Go function only a test calls is flagged.
@@ -229,11 +229,11 @@ func TestBike(t *testing.T) {
 }
 P
 ( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee" </dev/null 2>/dev/null ) > "$TMP/go.txt"
-has "$TMP/go.txt" parcelFee && ok "A11 a Go function only a test calls carries tonly" || no "A11 parcelFee has no tonly: $( row "$TMP/go.txt" parcelFee )"
+if has "$TMP/go.txt" parcelFee; then ok "A11 a Go function only a test calls carries tonly"; else no "A11 parcelFee has no tonly: $( row "$TMP/go.txt" parcelFee )"; fi
 for n in Truck.Dispatch Van.Dispatch; do
     r="$( row "$TMP/go.txt" $n )"; [ -n "$r" ] || r="$( row "$TMP/go.txt" Dispatch )"
     [ -n "$r" ] || { no "A11 the $n row is missing"; continue; }
-    echo "$r" | grep -q ' tonly="1"' && no "A11 $n (an interface method's implementation) carries tonly: $r" || ok "A11 $n (reached through the Carrier interface) stays unflagged"
+    if echo "$r" | grep -q ' tonly="1"'; then no "A11 $n (an interface method's implementation) carries tonly: $r"; else ok "A11 $n (reached through the Carrier interface) stays unflagged"; fi
 done
 ( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee carry" </dev/null 2>/dev/null ) > "$TMP/go.txt"
 r="$( row "$TMP/go.txt" Bike.Carry )"
@@ -291,7 +291,7 @@ def test_all():
 P
 ( cd "$G" && "$BIN" "$G" --no-cache "--for=$TASK" </dev/null 2>/dev/null ) > "$TMP/n.txt"
 ( cd "$G" && "$BIN" "$G" --no-cache "--for=$TASK" --legend=full </dev/null 2>/dev/null ) > "$TMP/nf.txt"
-grep -q tonly "$TMP/n.txt" "$TMP/nf.txt" && no "A7 a tree with a library caller of every function prints tonly or its clause" || ok "A7 no test-only function: no tonly= and no legend clause (compact + full)"
+if grep -q tonly "$TMP/n.txt" "$TMP/nf.txt"; then no "A7 a tree with a library caller of every function prints tonly or its clause"; else ok "A7 no test-only function: no tonly= and no legend clause (compact + full)"; fi
 
 # A8 a dropped oversize code file hides callers: nothing is flagged
 H="$TMP/hx"; mkdir -p "$H/pkg" "$H/tests"
@@ -313,7 +313,7 @@ if grep -q 'biguser' "$TMP/h_callers.txt" || ! grep -q 'test_ship' "$TMP/h_calle
 if has "$TMP/h_cut.txt" parcel_rate_tested_only; then no "A8 an index missing the oversize caller file still prints tonly: $( row "$TMP/h_cut.txt" parcel_rate_tested_only )"; else ok "A8 a cut index (oversize code file dropped) flags nothing"; fi
 
 # A10 stripping the attribute leaves the same answer shape: the clause + attribute are the only difference vs a no-tonly run
-python3 - "$TMP/c.txt" <<'PY' && ok "A10 stripping tonly=\"1\" leaves every <d> row's other attributes in order" || no "A10 a row's other attributes moved"
+if python3 - "$TMP/c.txt" <<'PY'; then ok "A10 stripping tonly=\"1\" leaves every <d> row's other attributes in order"; else no "A10 a row's other attributes moved"; fi
 import re,sys
 t=open(sys.argv[1]).read()
 for m in re.finditer(r'<d [^>]*>', t):
