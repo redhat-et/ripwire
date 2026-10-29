@@ -641,7 +641,7 @@ do
     _var="${_c%%|*}"; _rest="${_c#*|}"; _val="${_rest%%|*}"; _flag="${_rest#*|}"
     # shellcheck disable=SC2086
     hd_run "J-$_var" "$_var=$_val" -- $_flag
-    { [ "$HD_RC" -eq 2 ] && [ ! -e "$HD_CWD/$_val" ] && printf '%s' "$HD_OUT" | grep -q "$_var"; } \
+    { [ "$HD_RC" -eq 2 ] && [ ! -e "$HD_CWD/$_val" ] && printf '%s' "$HD_OUT" | grep -q "'$_val'"; } \
         && ok "(J) a relative $_var is refused (status 2) and nothing is created under the current directory" \
         || no "(J) relative $_var=$_val: rc=$HD_RC, created=$( ls "$HD_CWD" | tr '\n' ' ' ) (expected rc 2 and nothing created)"
 done

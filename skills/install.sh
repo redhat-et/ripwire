@@ -51,7 +51,7 @@ is_abs_path()
     esac
     return 1
 }
-# abs_home / abs_root NAME VALUE SUBDIR — a destination root taken from the ENVIRONMENT must be absolute. A relative
+# abs_home / abs_root VALUE OVERRIDE — a destination root taken from the ENVIRONMENT must be absolute. A relative
 # CLAUDE_CONFIG_DIR / AGENTS_HOME / CODEX_HOME / HERMES_HOME used to install into ./relcfg, wherever the shell was,
 # and an empty HOME turned `$HOME/.claude` into `/.claude`. Refuse (status 2) instead of guessing. An explicit PATH
 # argument is typed on the command line and keeps resolving against the current directory.
@@ -70,16 +70,14 @@ abs_home()
 }
 abs_root()
 {
-    if [ -z "$2" ]; then
-        _h="$( abs_home )" || return 1
-        printf '%s/%s\n' "$_h" "$3"
-        return 0
-    fi
-    if ! is_abs_path "$2"; then
-        echo "skills/install.sh: $1 must be an absolute path (got '$2'); refusing to install relative to the current directory." >&2
+    # $1 = the root as resolved (`${VAR:-$HOME/.sub}`, spelled exactly as before so the census gates still read it);
+    # $2 = the override variable's own value, "" when the HOME fallback was taken (then HOME itself must be usable)
+    if [ -z "$2" ]; then abs_home >/dev/null || return 1; fi
+    if [ -z "$1" ] || ! is_abs_path "$1"; then
+        echo "skills/install.sh: the destination root '$1' is not an absolute path (HOME, CLAUDE_CONFIG_DIR, AGENTS_HOME, CODEX_HOME and HERMES_HOME must be absolute); refusing to install relative to the current directory." >&2
         return 1
     fi
-    printf '%s\n' "$2"
+    printf '%s\n' "$1"
 }
 
 # find_jq — set $jqBin to an ABSOLUTE path to jq, or "" when there is none. An empty or relative PATH entry means
@@ -287,7 +285,7 @@ install_claude_route()
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
 install_claude_hook()
 {
-    settings="$( abs_root CLAUDE_CONFIG_DIR "${CLAUDE_CONFIG_DIR:-}" .claude )/settings.json" || exit 2
+    settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
     hookScript="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     chmod +x "$hookScript" 2>/dev/null || true
     hookCmd="$( hook_cmd "$hookScript" )" || exit 1
@@ -356,7 +354,7 @@ install_claude_hook()
 
 install_codex_hook()
 {
-    settings="$( abs_root CODEX_HOME "${CODEX_HOME:-}" .codex )/hooks.json" || exit 2
+    settings="$( abs_root "${CODEX_HOME:-$HOME/.codex}" "${CODEX_HOME:-}" )/hooks.json" || exit 2
     hookScript="$( dirname "$src" )/hooks/ripwire-codex-nudge.sh"
     sharedHook="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     routeScript="$( dirname "$src" )/hooks/ripwire-codex-route.sh"
@@ -442,7 +440,7 @@ if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then
 fi
 
 case "$mode" in
-    codex) dst="$( abs_root AGENTS_HOME "${AGENTS_HOME:-}" .agents )/skills" || exit 2 ;;
+    codex) dst="$( abs_root "${AGENTS_HOME:-$HOME/.agents}" "${AGENTS_HOME:-}" )/skills" || exit 2 ;;
     # openclaw resolves to the SAME root Codex uses -- openclaw's docs call it a "compatibility skill
     # root". A repeated value, not a second code path. But it is conditional, and the condition is worth
     # a line of output rather than a support thread: openclaw skips this root entirely unless its state
@@ -459,9 +457,9 @@ case "$mode" in
                   echo "  openclaw only reads $dst when its state dir is the default $HOME/.openclaw." >&2
                   echo "  Installing there anyway; openclaw will not discover these skills until that is unset." >&2
               fi ;;
-    codex-legacy) dst="$( abs_root CODEX_HOME "${CODEX_HOME:-}" .codex )/skills" || exit 2 ;;
-    claude) dst="$( abs_root CLAUDE_CONFIG_DIR "${CLAUDE_CONFIG_DIR:-}" .claude )/skills" || exit 2 ;;
-    hermes) dst="$( abs_root HERMES_HOME "${HERMES_HOME:-}" .hermes )/skills" || exit 2 ;;
+    codex-legacy) dst="$( abs_root "${CODEX_HOME:-$HOME/.codex}" "${CODEX_HOME:-}" )/skills" || exit 2 ;;
+    claude) dst="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/skills" || exit 2 ;;
+    hermes) dst="$( abs_root "${HERMES_HOME:-$HOME/.hermes}" "${HERMES_HOME:-}" )/skills" || exit 2 ;;
     path) dst="$explicitPath" ;;
 esac
 mkdir -p "$dst"
