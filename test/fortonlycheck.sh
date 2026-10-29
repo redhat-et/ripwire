@@ -67,14 +67,19 @@ P
 cat > "$F/tests/helpers.py" <<'P'
 def parcel_rate_test_helper(weight):
     return weight
+
+
+def parcel_rate_test_fixture(weight):
+    return weight + 1
 P
 cat > "$F/tests/test_ship.py" <<'P'
 from pkg.shiplib import (parcel_rate_tested_only, parcel_rate_with_library_user, parcel_rate_without_callers,
                          parcel_rate_table_entry, RateHelper)
-from tests.helpers import parcel_rate_test_helper
+from tests.helpers import parcel_rate_test_helper, parcel_rate_test_fixture
 
 
 def test_all():
+    assert parcel_rate_test_fixture(1) == 2
     assert parcel_rate_tested_only(1) == 3
     assert parcel_rate_with_library_user(1) == 4
     assert parcel_rate_table_entry(1) == 6
@@ -115,6 +120,10 @@ r="$( row "$TMP/c.txt" parcel_rate_table_entry )"; [ -n "$r" ] || no "A5 the tab
 if echo "$r" | grep -q ' tonly="1"'; then no "A5 a function a library holds in a dispatch table carries tonly: $r"; else ok "A5 a library VALUE use (dispatch table) keeps it unflagged"; fi
 r="$( row "$TMP/c.txt" parcel_rate_test_helper )"
 if echo "$r" | grep -q ' tonly="1"'; then no "A6 a test helper itself carries tonly: $r"; else ok "A6 a test-dir helper (called from library code and tests) is never flagged"; fi
+r="$( row "$TMP/c.txt" parcel_rate_test_fixture )"
+if [ -z "$r" ]; then no "A6 premise: the test-dir fixture row is missing from the answer"
+elif echo "$r" | grep -q ' tonly="1"'; then no "A6 a test symbol only tests call carries tonly (a test is not library code): $r"
+else ok "A6 a test-dir symbol only tests call is never flagged (tonly is a library-function fact)"; fi
 
 # A9 legend + xml
 grep -q 'tonly=1 every caller' "$TMP/c.txt" && ok "A9 compact legend clause rides with the attribute" || no "A9 compact legend clause missing"
@@ -193,6 +202,30 @@ func TestAll(t *testing.T) {
 	}
 }
 P
+cat >> "$GO/ship/ship.go" <<'P'
+
+// Courier has ONE implementor, so a call through it binds to the interface declaration, not to Bike.Carry.
+type Courier interface {
+	Carry(weight int) int
+}
+
+type Bike struct{}
+
+func (Bike) Carry(weight int) int { return weight * 4 }
+
+func Deliver(c Courier, weight int) int { return c.Carry(weight) }
+P
+cat > "$GO/ship/bike_test.go" <<'P'
+package ship
+
+import "testing"
+
+func TestBike(t *testing.T) {
+	if (Bike{}).Carry(1) != 4 {
+		t.Fatal("bad")
+	}
+}
+P
 ( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee" </dev/null 2>/dev/null ) > "$TMP/go.txt"
 has "$TMP/go.txt" parcelFee && ok "A11 a Go function only a test calls carries tonly" || no "A11 parcelFee has no tonly: $( row "$TMP/go.txt" parcelFee )"
 for n in Truck.Dispatch Van.Dispatch; do
@@ -200,6 +233,11 @@ for n in Truck.Dispatch Van.Dispatch; do
     [ -n "$r" ] || { no "A11 the $n row is missing"; continue; }
     echo "$r" | grep -q ' tonly="1"' && no "A11 $n (an interface method's implementation) carries tonly: $r" || ok "A11 $n (reached through the Carrier interface) stays unflagged"
 done
+( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee carry" </dev/null 2>/dev/null ) > "$TMP/go.txt"
+r="$( row "$TMP/go.txt" Bike.Carry )"
+if [ -z "$r" ]; then no "A11 premise: the Bike.Carry row is missing"
+elif echo "$r" | grep -q ' tonly="1"'; then no "A11 Bike.Carry (the lone implementor of an interface a library calls through) carries tonly: $r"
+else ok "A11 the lone implementor of an interface (call binds to the declaration) stays unflagged"; fi
 
 # A12 a call the resolver DECLINED to bind (a library `table.get(key)` on an untyped receiver: the builtin-method name gate) is a
 # library call the edge pass cannot see; a method only a test calls directly, which that call could have meant, stays unflagged.
