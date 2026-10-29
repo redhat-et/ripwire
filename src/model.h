@@ -328,40 +328,59 @@ inline constexpr bool isCodeLang( Lang l ) noexcept
     return false;   // a byte past the enum (a corrupt cache value) is not a language
 }
 
-// The edge-bridging families as DATA (task D): langFamilyOf(a) == langFamilyOf(b) is exactly the bare-name
-// admission graph.h's langCompatible decides — {C, C++, ObjC} share a world, {Java, Kotlin} share one, every
-// other language is alone. The display order's SECOND tier reads this table: a middle ground between "this
-// language" and "all languages", never a synonym for either. The pair-for-pair equivalence assert beside
-// langCompatible in graph.h proves the table cannot quietly drift from the edge rule it mirrors — the derived-
-// table lesson the repo already learned once (htmlexport's langColor carried 9 keys against langTag's 19).
-inline constexpr std::array<std::uint8_t, kLangCount> kLangFamilyOf = []
-{
-    std::array<std::uint8_t, kLangCount> table {};
-    for( std::size_t i = 0; i < table.size(); ++i )
-    {
-        table[ i ] = static_cast<std::uint8_t>( i );   // singleton default: a language is its own family
-    }
-    table[ static_cast<std::size_t>( Lang::Cpp ) ]    = static_cast<std::uint8_t>( Lang::C );
-    table[ static_cast<std::size_t>( Lang::ObjC ) ]   = static_cast<std::uint8_t>( Lang::C );
-    table[ static_cast<std::size_t>( Lang::Kotlin ) ] = static_cast<std::uint8_t>( Lang::Java );
-    return table;
-}();
-constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
-{
-    const std::size_t i = static_cast<std::size_t>( l );
-    return i < kLangCount ? kLangFamilyOf[ i ] : static_cast<std::uint8_t>( i );   // past the enum: its own singleton, like isCodeLang's non-language
-}
+// The edge-bridging families are ONE column of the LangFacts row now (langfacts.h::edgeFamily, surfaced
+// by langFamilyOf there) — task D kept a second per-Lang table beside kLangFacts until #440's review
+// folded it in; the equivalence guard lives in graph.h beside langCompatible, where it always did.
 
 // langTag inverted (task D): the @lang selector's vocabulary is exactly the tags the emitter prints — a linear
 // scan over the 25 languages, called once per suffixed query, so the only cost is never a second tag list to drift
 // (the htmlexport langColor lesson again: 9 hand keys against 19 tags). The pair of asserts below makes the parser
 // and the emitter ONE source: an appended Lang without a distinct tag, or a tag that does not parse back, is a
 // build error, not a selector that silently never matches.
+//
+// tagEq compares the tags BYTE BY BYTE, never through string_view::operator==: that operator may short-circuit on
+// data-pointer equality, and comparing the addresses of two distinct literals has unspecified value — an OK answer
+// for runtime code, but it takes the constexpr verifier below out of constant-expression land on every compiler
+// that keeps the shortcut (CI's clang/gcc-13; newer libstdc++ alone made the container builds lie).
+constexpr bool tagEq( std::string_view a, std::string_view b ) noexcept
+{
+    if( a.size() != b.size() )
+    {
+        return false;
+    }
+    for( std::size_t i = 0; i < a.size(); ++i )
+    {
+        if( a[ i ] != b[ i ] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 constexpr bool langFromTag( std::string_view tag, Lang& out ) noexcept
 {
+    // Case-tolerance is PARSE-only (arm (36), task D5): @CPP and @C resolve to the same languages @cpp and @c do.
+    // The emitted tag keeps one canonical spelling everywhere (langTag), so a disclosure lane never grows variants —
+    // leniency where a human types, exactness where a machine reads.
+    char low[ 16 ];
+    if( tag.empty() || tag.size() > sizeof( low ) )
+    {
+        return false;   // no tag is 16+ bytes; oversized tails are not languages
+    }
+    for( std::size_t i = 0; i < tag.size(); ++i )
+    {
+        low[ i ] = ( tag[ i ] >= 'A' && tag[ i ] <= 'Z' ) ? static_cast< char >( tag[ i ] + 32 ) : tag[ i ];
+    }
+    const std::string_view v( low, tag.size() );
+    const std::size_t unknownIdx = static_cast< std::size_t >( Lang::Unknown );   // ONE index read, zero predicates (langidentity ratchet)
     for( std::size_t i = 0; i < kLangCount; ++i )
     {
-        if( tag == langTag( static_cast< Lang >( i ) ) )
+        if( i == unknownIdx )
+        {
+            continue;   // "?" is langTag's DISPLAY fallback, not vocabulary: no selector may ask for Unknown
+        }
+        if( tagEq( v, langTag( static_cast< Lang >( i ) ) ) )
         {
             out = static_cast< Lang >( i );
             return true;
@@ -373,14 +392,24 @@ namespace
 {
 constexpr bool kLangTagsUniqueAndRoundTrip = []
 {
+    const std::size_t unknownIdxA = static_cast< std::size_t >( Lang::Unknown );   // index reads, not predicates
+    Lang probe = Lang::Unknown;
+    if( langFromTag( "?", probe ) )
+    {
+        return false;   // "?" must NOT parse as a selector — the display fallback is not vocabulary
+    }
     for( std::size_t a = 0; a < kLangCount; ++a )
     {
         for( std::size_t b = a + 1; b < kLangCount; ++b )
         {
-            if( langTag( static_cast< Lang >( a ) ) == langTag( static_cast< Lang >( b ) ) )
+            if( tagEq( langTag( static_cast< Lang >( a ) ), langTag( static_cast< Lang >( b ) ) ) )
             {
                 return false;   // two languages, one tag: a selector could not address them apart
             }
+        }
+        if( a == unknownIdxA )
+        {
+            continue;           // Unknown's tag is the display fallback; its refusal is pinned above
         }
         Lang back = Lang::Unknown;
         if( !langFromTag( langTag( static_cast< Lang >( a ) ), back ) || back != static_cast< Lang >( a ) )

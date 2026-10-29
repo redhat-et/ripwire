@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -429,6 +430,10 @@ struct LangFacts
     /// Rust: a method named `drop` is `Drop::drop`, which the compiler runs when a value leaves scope, so no call names it
     /// (issue #494). rustDropImplMethodIds (quality.h) reads this column, and only for a method inside a Drop impl block.
     bool dropRunsAtScopeExit = false;
+    /// The language whose bare-name world this one shares (C/ObjC with C++, Kotlin with Java); empty =
+    /// alone. langCompatible's edge rule and the display order's family tier both read it, through
+    /// langFamilyOf below — one per-Lang row, the single source CONTRIBUTING's language-facts rule asks for.
+    std::optional<Lang> edgeFamily = {};
 };
 
 /// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
@@ -444,7 +449,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .basesAsCaptures = true, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .aliasTargetDefs = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved, .qualifierNamesScope = true,
-      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true },
+      .typedInstanceRows = true, .xMacroRows = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true, .armOpeners = ArmOpeners::PythonElif, .singleQuoteStrings = true },
@@ -460,7 +465,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
-      .qualifierNamesScope = true, .objectMacrosUnindexed = true },
+      .qualifierNamesScope = true, .objectMacrosUnindexed = true, .edgeFamily = Lang::C },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
@@ -486,7 +491,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Dart, .memberDecl = MemberDecl::TypeFirst, .singleQuoteStrings = true },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
       .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly,
-      .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true },
+      .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true, .edgeFamily = Lang::Java },
     { .lang = Lang::GDScript, .hashComment = true, .singleQuoteStrings = true },
     { .lang = Lang::Clojure },
     { .lang = Lang::Proto, .generatedSchema = true, .fileEdges = FileEdges::NotApplicable },   // a schema: `import "x.proto"` is not read as a file edge yet
@@ -540,5 +545,18 @@ static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang:
 static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
 static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
 
+// The edge-bridging family of `l` (task D's table, folded into the facts row per CONTRIBUTING's
+// one-row-per-language rule): langFamilyOf(a) == langFamilyOf(b) is exactly the bare-name admission
+// graph.h's langCompatible decides — {C, C++, ObjC} share a world, {Java, Kotlin} share one, every
+// other language is alone. The display order's SECOND tier reads this: a middle ground between "this
+// language" and "all languages", never a synonym for either. The pair-for-pair equivalence assert in
+// graph.h proves the data cannot quietly drift from the edge rule it mirrors — the derived-table lesson
+// the repo already learned once (htmlexport's langColor carried 9 keys against langTag's 19).
+constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
+{
+    const std::size_t i = static_cast<std::size_t>( l );
+    return i < kLangCount ? static_cast< std::uint8_t >( static_cast< std::size_t >( langFacts( l ).edgeFamily.value_or( l ) ) )
+                          : static_cast< std::uint8_t>( i );   // past the enum: its own singleton, like isCodeLang
+}
 
 }   // namespace rw

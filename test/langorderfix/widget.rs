@@ -2,5 +2,4 @@
 // id-ascending among the foreign pair follows lib/shape.ex (paths sort lib/ < widget.*).
 pub trait Shape
 {
-    fn side( &self );
 }
