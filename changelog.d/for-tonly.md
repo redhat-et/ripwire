@@ -20,3 +20,10 @@ virtual, Rust `impl Display`), a Python dunder, a Go method named for a std prot
 that is a library function merely named `test_*`. It rides a row only when the question can use it (a use word such as
 used/callers/tested/remove, the row's name, or its file or directory) and, like `e=`, not under an explicit token ceiling
 tighter than the default.
+
+Fix round 2: a function only called from code a package ships under a nested `test/` directory (django's test runner and client)
+is not flagged when library code imports that code; a Python starred line (`*head, tail = options.f(x)`) and a code line that
+starts with a block comment count as uses; the Go protocol list covers the standard-library interfaces (`WriteTo`, `Set`, `Push`,
+`Pop`, `Seek`, `Flush`, ...); a method of a TS/JS/Java/C# class that has any base (`implements OnInit`, `extends Component`) and
+a decorated or annotated def (a NestJS `@GrpcMethod`, a Flask `@app.route`, a Rust `#[get]`) are never flagged; and a path in the
+question names a row's file or directory only at whole path segments (`hono/...` no longer matches `src/hono-base.ts`).
