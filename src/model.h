@@ -328,6 +328,71 @@ inline constexpr bool isCodeLang( Lang l ) noexcept
     return false;   // a byte past the enum (a corrupt cache value) is not a language
 }
 
+// The edge-bridging families as DATA (task D): langFamilyOf(a) == langFamilyOf(b) is exactly the bare-name
+// admission graph.h's langCompatible decides — {C, C++, ObjC} share a world, {Java, Kotlin} share one, every
+// other language is alone. The display order's SECOND tier reads this table: a middle ground between "this
+// language" and "all languages", never a synonym for either. The pair-for-pair equivalence assert beside
+// langCompatible in graph.h proves the table cannot quietly drift from the edge rule it mirrors — the derived-
+// table lesson the repo already learned once (htmlexport's langColor carried 9 keys against langTag's 19).
+inline constexpr std::array<std::uint8_t, kLangCount> kLangFamilyOf = []
+{
+    std::array<std::uint8_t, kLangCount> table {};
+    for( std::size_t i = 0; i < table.size(); ++i )
+    {
+        table[ i ] = static_cast<std::uint8_t>( i );   // singleton default: a language is its own family
+    }
+    table[ static_cast<std::size_t>( Lang::Cpp ) ]    = static_cast<std::uint8_t>( Lang::C );
+    table[ static_cast<std::size_t>( Lang::ObjC ) ]   = static_cast<std::uint8_t>( Lang::C );
+    table[ static_cast<std::size_t>( Lang::Kotlin ) ] = static_cast<std::uint8_t>( Lang::Java );
+    return table;
+}();
+constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
+{
+    const std::size_t i = static_cast<std::size_t>( l );
+    return i < kLangCount ? kLangFamilyOf[ i ] : static_cast<std::uint8_t>( i );   // past the enum: its own singleton, like isCodeLang's non-language
+}
+
+// langTag inverted (task D): the @lang selector's vocabulary is exactly the tags the emitter prints — a linear
+// scan over the 25 languages, called once per suffixed query, so the only cost is never a second tag list to drift
+// (the htmlexport langColor lesson again: 9 hand keys against 19 tags). The pair of asserts below makes the parser
+// and the emitter ONE source: an appended Lang without a distinct tag, or a tag that does not parse back, is a
+// build error, not a selector that silently never matches.
+constexpr bool langFromTag( std::string_view tag, Lang& out ) noexcept
+{
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        if( tag == langTag( static_cast< Lang >( i ) ) )
+        {
+            out = static_cast< Lang >( i );
+            return true;
+        }
+    }
+    return false;
+}
+namespace
+{
+constexpr bool kLangTagsUniqueAndRoundTrip = []
+{
+    for( std::size_t a = 0; a < kLangCount; ++a )
+    {
+        for( std::size_t b = a + 1; b < kLangCount; ++b )
+        {
+            if( langTag( static_cast< Lang >( a ) ) == langTag( static_cast< Lang >( b ) ) )
+            {
+                return false;   // two languages, one tag: a selector could not address them apart
+            }
+        }
+        Lang back = Lang::Unknown;
+        if( !langFromTag( langTag( static_cast< Lang >( a ) ), back ) || back != static_cast< Lang >( a ) )
+        {
+            return false;   // an emitted tag the parser cannot route home
+        }
+    }
+    return true;
+}();
+static_assert( kLangTagsUniqueAndRoundTrip, "every Lang has a unique short tag and langFromTag(langTag(l)) == l" );
+} // namespace
+
 // Call-site RECEIVER classification (P2-D one-hop type narrowing). Captured at ingest from the AST shape
 // of `recv.method()` / `recv->method()` so resolve.h can narrow BEFORE the ambiguous §2a name spray:
 //   None    — a bare call `f()` or a qualified `A::f()` (no receiver expr) → §2a ladder, unchanged.

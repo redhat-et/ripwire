@@ -679,20 +679,38 @@ inline bool edgeViaImpl( const Graph& g, NodeId from, NodeId to ) noexcept
 // Narrowing by import or receiver type is still a resolver feature this port does not add.
 inline bool langCompatible( Lang a, Lang b ) noexcept
 {
-    if( a == b )
-    {
-        return true;
-    }
-    const bool aCish = ( a == Lang::Cpp || a == Lang::ObjC || a == Lang::C );
-    const bool bCish = ( b == Lang::Cpp || b == Lang::ObjC || b == Lang::C );
-    if( aCish && bCish )   // short-circuit before the JVM check below: langCompatible runs per candidate
-    {                       // in graph.h's hot reference-resolution loops, and the common C-family-only
-        return true;        // corpus case should not pay for two extra enum comparisons it doesn't need.
-    }
-    const bool aJvm = ( a == Lang::Kotlin || a == Lang::Java );
-    const bool bJvm = ( b == Lang::Kotlin || b == Lang::Java );
-    return aJvm && bJvm;
+    return a == b || langFamilyOf( a ) == langFamilyOf( b );   // a==b stays the hot-loop fast path (same-language pairs dominate the candidate scans); the family rule is model.h's table, proven beside this function
 }
+
+namespace
+{
+// The table IS the decision: for EVERY ordered pair of in-range languages, model.h::langFamilyOf agrees with
+// the original pair-set of this predicate (same | both-C-family | both-JVM). That pins the D1 refactor as
+// behavior-preserving at compile time — the equivalence edges and display tier D builds on can never drift
+// from the rule they mirror, and a new Lang appended on either side trips this rather than silently joining
+// or not joining a family.
+constexpr bool kLangFamilyMatchesBridge = []
+{
+    for( int a = 0; a < static_cast< int >( kLangCount ); ++a )
+    {
+        for( int b = 0; b < static_cast< int >( kLangCount ); ++b )
+        {
+            const auto la = static_cast< Lang >( a ), lb = static_cast< Lang >( b );
+            const bool bridge = langFamilyOf( la ) == langFamilyOf( lb );
+            const bool cishA  = la == Lang::Cpp || la == Lang::ObjC || la == Lang::C;
+            const bool cishB  = lb == Lang::Cpp || lb == Lang::ObjC || lb == Lang::C;
+            const bool jvmA   = la == Lang::Kotlin || la == Lang::Java;
+            const bool jvmB   = lb == Lang::Kotlin || lb == Lang::Java;
+            if( bridge != ( la == lb || ( cishA && cishB ) || ( jvmA && jvmB ) ) )
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}();
+static_assert( kLangFamilyMatchesBridge, "langFamilyOf must agree with the original langCompatible pair-set, pair for pair" );
+} // namespace
 
 // langCompatible's sibling: which definition KINDS a reference of a given ROLE may bind to. One predicate
 // so the rule is stated ONCE — before it, the same idea lived hard-coded in the inherit overlay
@@ -14714,6 +14732,87 @@ inline std::vector<int> nameTowerRanks( const IngestResult& ing, std::span<const
         ranks.push_back( ctor ? 2 * kindSpecificity( SymKind::Class ) - 1 : 2 * kindSpecificity( m.kind ) );
     }
     return ranks;
+}
+
+// The name-answer anchor (RIPWIRE-RUBY task D): which language leads the tower, and why it was chosen. The priority
+// is the owner's and it is fixed: an EXPLICIT @lang suffix beats query CONTEXT (the LSP document's INDEXED language,
+// a file:name selector's file, an @FILE:LINE seed — never a client-declared languageId), context beats the CORPUS
+// (the code language with the most extracted definitions), and anything beats no anchor at all. With no anchor the
+// tower keeps task C's order (ladder, id): the anchor tiers only ever ADD a front, they never subtract rows.
+enum class AnchorOrigin : std::uint8_t { None, Corpus, Context, Explicit };
+struct LangAnchor
+{
+    Lang         lang   = Lang::Unknown;
+    AnchorOrigin origin = AnchorOrigin::None;
+    constexpr bool active() const noexcept { return origin != AnchorOrigin::None; }
+};
+
+// The corpus census: per code language, its def count and first def id — recorded INSIDE the symbol walk the name
+// resolvers already perform (increments only; resolveAllByName already touches every symbol, so the per-query
+// census costs no second walk of the model). Data and document formats are barred from ever owning the anchor: a
+// YAML-heavy corpus stays code-anchored, or the disclosure lane the campaign just built would reorder itself.
+struct LangCensus
+{
+    std::array<std::uint32_t, kLangCount> counts{};
+    std::array<NodeId, kLangCount>        firstId{};   // indexed by the same live entries as counts — never read where count is 0
+
+    constexpr void record( const Symbol& s ) noexcept
+    {
+        if( !isCodeLang( s.lang ) )
+        {
+            return;
+        }
+        std::uint32_t& c = counts[ static_cast< std::size_t >( s.lang ) ];
+        NodeId&        f = firstId[ static_cast< std::size_t >( s.lang ) ];
+        if( c++ == 0 )
+        {
+            f = s.id;
+        }
+        else if( s.id < f )
+        {
+            f = s.id;
+        }
+    }
+
+    constexpr LangAnchor resolve() const noexcept   // count DESC, then first-def id ASC — a surviving tie is id-ordered, never coin-flipped
+    {
+        LangAnchor best;
+        for( std::size_t i = 0; i < kLangCount; ++i )
+        {
+            if( counts[ i ] == 0 )
+            {
+                continue;
+            }
+            const bool better = best.origin == AnchorOrigin::None
+                             || counts[ i ] > counts[ static_cast< std::size_t >( best.lang ) ]
+                             || ( counts[ i ] == counts[ static_cast< std::size_t >( best.lang ) ]
+                                  && firstId[ i ] < firstId[ static_cast< std::size_t >( best.lang ) ] );
+            if( better )
+            {
+                best.lang   = static_cast< Lang >( i );
+                best.origin = AnchorOrigin::Corpus;
+            }
+        }
+        return best;
+    }
+};
+
+// The fixed priority in one place, so no call site can quietly re-order it. "Memoization" note for the warm index:
+// none is needed — the census is FOLDED into the walk the resolver already does (see resolveAllByName), and a warm
+// cache replay still walks symbols, so the anchor is derived identically cold and warm (lspcheck arm (33)'s class
+// of bug cannot exist by construction here).
+constexpr LangAnchor makeLangAnchor( bool hasExplicit, Lang explicitLang, bool hasContext, Lang contextLang,
+                                     const LangCensus& census ) noexcept
+{
+    if( hasExplicit )
+    {
+        return { explicitLang, AnchorOrigin::Explicit };
+    }
+    if( hasContext )
+    {
+        return { contextLang, AnchorOrigin::Context };
+    }
+    return census.resolve();
 }
 
 // The tower (RIPWIRE-RUBY task C): ONE total order for every multi-definition NAME answer, applied to the
