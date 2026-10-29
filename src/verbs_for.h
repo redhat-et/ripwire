@@ -3635,7 +3635,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const std::size_t splitLegendEmitted = !headerParts.splitPresent ? 0u
                                              : ( compactLegendOn ? rw::kForCompactSplitClause.size() : rw::kForSplitClause.size() );
         // FOR-TONLY: the tonly= reading is a disclosure on the same contract — exempt, so the ranked rows a budget admits are the
-        // ones it admitted without the clause (the attribute's own bytes are exempt too: serialize.h tonlyExemptBytes)
+        // ones it admitted without the clause (the attribute's own bytes are exempt too: serialize.h kTonlyXmlAttr)
         const std::size_t tonlyLegendEmitted = !headerParts.tonlyPresent ? 0u
                                              : ( compactLegendOn ? rw::kForCompactTonlyLegend.size() : rw::kForTonlyLegend.size() );
         const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted + idRouteLegendEmitted

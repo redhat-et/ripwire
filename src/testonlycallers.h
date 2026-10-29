@@ -11,7 +11,7 @@
 
 #include "filter.h"
 #include "graph.h"
-#include "lintrules.h"        // langOfPath — which skipped files could have held a caller
+#include "docparse.h"         // lowerExtOf / isProseExtension — which skipped files could have held a caller
 #include "model.h"
 #include "valuerefindex.h"    // ValueRefIndex::narrowFor / isValueReferenced — a name a library holds as a VALUE is a use
 #include "infra/sortutil.h"   // svLess
@@ -44,8 +44,8 @@ inline bool testOnlyIndexWhole( const IngestResult& ing ) noexcept
     }
     return std::none_of( ing.skippedOversize.begin(), ing.skippedOversize.end(), []( const SkippedOversize& f )
     {
-        const Lang l = langOfPath( f.path );
-        return l != Lang::Unknown && l != Lang::Json && l != Lang::Toml && l != Lang::Yaml && l != Lang::Markdown;
+        const std::string ext = docparse::lowerExtOf( f.path );
+        return !docparse::isProseExtension( ext ) && ext != ".json" && ext != ".toml" && ext != ".yaml" && ext != ".yml";
     } );
 }
 

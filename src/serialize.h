@@ -5903,15 +5903,11 @@ inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<
 }
 
 // FOR-TONLY: the attribute's own bytes are a disclosure on the contract e= has (owner ruling: exempt from the signature-row
-// budget): the ledger (entryCost / jsonSigEntryCost) does not charge them, so the rows a budget keeps, and whether its trim
+// budget): the ledger (entryCost / jsonSigEntryCost) does not charge them (head.contains( kTonly… )), so the rows a budget keeps, and whether its trim
 // ladder fires at all, are the ones it had without the flag (fastify-03 went from an uncut block to a capped one on ten
 // charged bytes). The flag stays in the row's head, so it is printed; only the charge is waived.
 inline constexpr std::string_view kTonlyXmlAttr = " tonly=\"1\"";
 inline constexpr std::string_view kTonlyJsonKey = ",\"tonly\":true";
-inline std::size_t tonlyExemptBytes( std::string_view head, std::string_view attr ) noexcept
-{
-    return head.find( attr ) != std::string_view::npos ? attr.size() : 0u;
-}
 
 // lean-answers lane: packSignatures' row spelling, passed as a NAMED type rather than a trailing bool, so a parameter
 // another change appends after it cannot bind to it positionally (a bool argument does not convert to this aggregate).
@@ -6273,7 +6269,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
             {
                 return 0;
             }
-            std::size_t c = e.head.size() - tonlyExemptBytes( e.head, kTonlyXmlAttr ) + e.elidedBytes + 4;   // "<d …>" + "</d>" (+ the elided zeros, see SigEntry; tonly= is exempt)
+            std::size_t c = e.head.size() - ( e.head.contains( kTonlyXmlAttr ) ? kTonlyXmlAttr.size() : 0u ) + e.elidedBytes + 4;   // "<d …>" + "</d>" (+ the elided zeros, see SigEntry; tonly= is exempt)
             if( !e.doc.empty() )
             {
                 c += 11 + escapeXml( e.doc, esc ).size(); // "<doc>" + "</doc>"
@@ -11529,7 +11525,7 @@ inline std::size_t jsonSigEntryCost( const JsonSigEntry& e )
     {
         return 0;
     }
-    std::size_t c = 1 + e.head.size() - tonlyExemptBytes( e.head, kTonlyJsonKey ) + 1;   // `,` … `}` (tonly is exempt, see kTonlyXmlAttr)
+    std::size_t c = 1 + e.head.size() - ( e.head.contains( kTonlyJsonKey ) ? kTonlyJsonKey.size() : 0u ) + 1;   // `,` … `}` (tonly is exempt, see kTonlyXmlAttr)
     if( !e.doc.empty() )
     {
         c += 9 + jsonStr( e.doc ).size();
