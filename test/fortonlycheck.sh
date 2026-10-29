@@ -391,6 +391,7 @@ def _relay_private_modattr(x):
     return x + 10
 
 
+# relay_true_target is exercised by the tests alone: a comment that names it is documentation, not a library use
 def relay_true_target(x):
     return x + 11
 P
@@ -438,11 +439,16 @@ class RelayBase:
 class RelayImpl(RelayBase):
     def relay_render(self):
         return "impl"
+
+
+class RelayBox:
+    def __len__(self):
+        return 1
 P
 cat > "$RL/py/tests/test_relay.py" <<'P'
 from pkg.options import (relay_modattr_target, relay_alias_target, relay_getattr_target, relay_modlevel_target,
                          relay_callback_target, relay_named_test_target, _relay_private_modattr, relay_true_target)
-from pkg.shapes import RelayImpl
+from pkg.shapes import RelayImpl, RelayBox
 
 
 def test_all():
@@ -455,6 +461,7 @@ def test_all():
     assert _relay_private_modattr(1) == 11
     assert relay_true_target(1) == 12
     assert RelayImpl().relay_render() == "impl"
+    assert RelayBox().__len__() == 1
 P
 cat > "$RL/go/go.mod" <<'P'
 module example.com/relay
@@ -479,6 +486,7 @@ func RelayDescribe(c RelayCode) string { return fmt.Sprint(c) }
 
 func RelayFail() error { return &RelayErr{msg: "x"} }
 
+// relayOnlyTested is exercised by the tests alone: a doc comment that names it is not a library use.
 func relayOnlyTested(x int) int { return x + 5 }
 P
 cat > "$RL/go/relay/relay_test.go" <<'P'
@@ -583,6 +591,11 @@ rlcheck(){ # arm lang answer control name...
 rlrun py > "$TMP/rl_py.txt"
 rlcheck B1 py "$TMP/rl_py.txt" relay_true_target relay_modattr_target relay_alias_target relay_getattr_target relay_modlevel_target relay_callback_target \
     relay_named_test_target _relay_private_modattr RelayImpl.relay_render
+( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=RelayBox __len__ callers" </dev/null 2>/dev/null ) > "$TMP/rl_dunder.txt"
+r="$( rows "$TMP/rl_dunder.txt" RelayBox.__len__ )"
+if [ -z "$r" ]; then no "B1 dunder premise: the RelayBox.__len__ row is missing"
+elif echo "$r" | grep -q ' tonly="1"'; then no "B1 a Python dunder (the interpreter calls it) carries tonly: $r"
+else ok "B1 py a dunder method only a test spells stays unflagged"; fi
 rlrun go > "$TMP/rl_go.txt"
 rlcheck B2 go "$TMP/rl_go.txt" relayOnlyTested RelayQualifiedTarget RelayCode.String RelayErr.Error
 rlrun cpp > "$TMP/rl_cpp.txt"

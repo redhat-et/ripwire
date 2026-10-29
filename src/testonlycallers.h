@@ -310,11 +310,12 @@ inline bool goStdProtocolMethod( std::string_view name ) noexcept
     return std::ranges::find( kExact, name ) != std::end( kExact ) || name.starts_with( "Marshal" ) || name.starts_with( "Unmarshal" );
 }
 
-// May a call reach this METHOD without an edge to it? Off for: a method of a type that has any base (override / trait impl), a
+// May a call reach this METHOD (a Method, or a Function with an owner scope: Python/Ruby members) without an edge to it? Off for: a method of a type that has any base (override / trait impl), a
 // Python dunder (the interpreter calls it), a Go method named for a std protocol. A plain function is never asked.
 inline bool methodDispatchedElsewhere( const Symbol& s, const std::vector<std::string_view>& basedTypes ) noexcept
 {
-    if( s.kind != SymKind::Method )
+    // Python and Ruby members are SymKind::Function with an owner scope (ingest_metrics.h: @definition.function never marks them Method)
+    if( s.kind != SymKind::Method && !( s.kind == SymKind::Function && !s.scope.empty() ) )
     {
         return false;
     }
