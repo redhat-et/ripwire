@@ -131,7 +131,9 @@ forx --legend=full > "$TMP/f.txt"
 grep -q 'tonly=\"1\" on a d row' "$TMP/f.txt" && ok "A9 full legend clause rides with the attribute" || no "A9 full legend clause missing"
 has "$TMP/f.txt" parcel_rate_tested_only && ok "A1 --legend=full carries tonly on the same row" || no "A1 --legend=full row lacks tonly"
 if command -v xmllint >/dev/null 2>&1; then
-    xmllint --noout "$TMP/c.txt" 2>/dev/null && xmllint --noout "$TMP/f.txt" 2>/dev/null && ok "A9 both answers are well-formed XML" || no "A9 xmllint rejected a --for answer"
+    if xmllint --noout "$TMP/c.txt" 2>/dev/null && xmllint --noout "$TMP/f.txt" 2>/dev/null; then ok "A9 both answers are well-formed XML"; else no "A9 xmllint rejected a --for answer"; fi
+else
+    echo "  SKIP  A9 xmllint arm (xmllint is not installed)"
 fi
 
 # A1 json
