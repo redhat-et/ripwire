@@ -351,8 +351,7 @@ public:
     {
         const auto isWord = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
         const auto isPath = [ & ]( char c ) noexcept { return isWord( c ) || c == '.' || c == '/' || c == '-'; };
-        lower_.reserve( task.size() );
-        for( char c : task ) { lower_.push_back( static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ) ); }
+        lower_ = queryshape::detail::lowerAscii( task );
         std::string_view prev;
         for( std::size_t i = 0; i < lower_.size(); )
         {
@@ -393,15 +392,14 @@ public:
         {
             return true;
         }
-        std::string name( s.name );
-        for( char& c : name ) { c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); }
+        const std::string name = queryshape::detail::lowerAscii( s.name );
         // the bare name as a token, or (a name of 6+ characters, so `get` / `run` cannot match inside any word) spelled inside a longer
         // task word: `onRequestHookRunner` names hookRunner
         if( std::ranges::binary_search( idents_, std::string_view( name ), sortutil::svLess ) || ( name.size() >= 6 && lower_.find( name ) != std::string::npos ) )
         {
             return true;
         }
-        if( !s.scope.empty() && ( lower_.find( lowerOf( s.scope ) + "." + name ) != std::string::npos || lower_.find( lowerOf( s.scope ) + "::" + name ) != std::string::npos ) )
+        if( !s.scope.empty() && ( lower_.find( queryshape::detail::lowerAscii( s.scope ) + "." + name ) != std::string::npos || lower_.find( queryshape::detail::lowerAscii( s.scope ) + "::" + name ) != std::string::npos ) )
         {
             return true;
         }
@@ -409,19 +407,13 @@ public:
         const std::string_view base = path.substr( path.rfind( '/' ) == std::string_view::npos ? 0 : path.rfind( '/' ) + 1 );
         return std::ranges::any_of( paths_, [ & ]( const std::string_view& t )
         {
-            const std::string      lp   = lowerOf( path );
+            const std::string      lp   = queryshape::detail::lowerAscii( path );
             const std::string_view tb   = t.substr( t.rfind( '/' ) == std::string_view::npos ? 0 : t.rfind( '/' ) + 1 );
-            return lp.find( t ) != std::string::npos || lowerOf( base ) == tb;
+            return lp.find( t ) != std::string::npos || queryshape::detail::lowerAscii( base ) == tb;
         } );
     }
 
 private:
-    static std::string lowerOf( std::string_view v )
-    {
-        std::string out( v );
-        for( char& c : out ) { c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); }
-        return out;
-    }
     std::string                   lower_;
     std::vector<std::string_view> idents_;
     std::vector<std::string_view> paths_;
@@ -488,13 +480,8 @@ template<class Rank>
 inline std::vector<NodeId> tonlyHeadIds( const std::vector<NodeId>& surface, const Rank& rank, std::size_t limit )
 {
     std::vector<NodeId> out;
-    for( std::size_t i = 0; i < surface.size() && i < limit; ++i )
-    {
-        if( rank[ surface[ i ] ] > 0 )
-        {
-            out.push_back( surface[ i ] );
-        }
-    }
+    std::copy_if( surface.begin(), surface.begin() + static_cast<std::ptrdiff_t>( std::min( surface.size(), limit ) ), std::back_inserter( out ),
+                  [ & ]( NodeId id ) { return rank[ id ] > 0; } );
     return out;
 }
 
