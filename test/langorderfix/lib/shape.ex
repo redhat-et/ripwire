@@ -1,8 +1,5 @@
-# langorderfix: FOREIGN cluster (Elixir), top rung — defmodule indexes as Interface.
-# Lowest crawl id in the tree: pre-D the path accident elects this as the reference
-# language and it dominates — exactly the bug task D kills.
+# langorderfix: FOREIGN cluster (Elixir) — defmodule indexes as a Class here (rung 3), keeping the
+# foreign pair's ladder order visible: rs trait (4) must still precede ex module (3). The three-line
+# header is load-bearing: the (27) pin reads this defmodule at 0-based line 3.
 defmodule Shape do
-  def turn do
-    :ok
-  end
 end
