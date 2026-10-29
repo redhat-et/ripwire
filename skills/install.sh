@@ -26,6 +26,21 @@ src="$( cd "$( dirname "$0" )" && pwd )"
 # into the current mask, so a stricter user umask (077) stays stricter and the common 022 is unchanged.
 umask "$( printf '%04o' $(( 0$( umask ) | 022 )) )"
 
+# Temp files this run created (newline-separated) are removed on ANY exit and on HUP/INT/TERM. A temp file renamed
+# into place no longer exists, so the removal is then a no-op. `exit N` in the signal traps runs the EXIT trap.
+pendingTmps=""
+cleanup_tmps()
+{
+    printf '%s' "$pendingTmps" | while IFS= read -r _t; do
+        [ -z "$_t" ] || rm -f -- "$_t" 2>/dev/null || true
+    done
+    return 0
+}
+trap cleanup_tmps EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # is_abs_path P — absolute on POSIX, or a Windows drive/UNC path (Git Bash hands those through unchanged).
 is_abs_path()
 {
@@ -89,6 +104,45 @@ find_jq()
         if [ -n "$_c" ] && is_abs_path "$_c"; then jqBin="$_c"; fi
     fi
     return 0
+}
+
+# resolve_link FILE — FILE with symbolic links followed to the real file, so a dotfiles setup (settings.json ->
+# ~/dotfiles/claude/settings.json) has the hook written INTO the real file and the link kept. A temp-then-rename onto
+# the link itself would replace the link with a regular file and the dotfiles copy would never get the hook.
+resolve_link()
+{
+    _p="$1"; _n=0
+    while [ -L "$_p" ]; do
+        _n=$(( _n + 1 ))
+        if [ "$_n" -gt 40 ]; then
+            echo "skills/install.sh: too many levels of symbolic links resolving $1" >&2
+            return 1
+        fi
+        _l="$( readlink "$_p" )" || return 1
+        case "$_l" in
+            /*|[A-Za-z]:[/\\]*) _p="$_l" ;;
+            *) _p="$( dirname "$_p" )/$_l" ;;
+        esac
+    done
+    printf '%s\n' "$_p"
+}
+
+# mk_tmp FILE — set $tmp to a fresh temp file BESIDE FILE, tracked for removal. Beside, not in $TMPDIR, so the final
+# `mv` is a rename within one filesystem (atomic) and not a copy across two that a kill can leave half-written. It
+# starts as a copy of FILE's mode, so rewriting a 0640 config does not change it (CWE-732; mktemp alone makes 0600).
+# A read-only original (0444) ends up owner-writable. Falls back to a plain `mktemp` if the template is unusable.
+mk_tmp()
+{
+    tmp="$( mktemp "$1.tmp.XXXXXX" 2>/dev/null )" || tmp="$( mktemp )" || {
+        echo "skills/install.sh: could not create a temporary file for $1" >&2
+        exit 1
+    }
+    pendingTmps="$pendingTmps$tmp
+"
+    if [ -f "$1" ]; then
+        cp -p "$1" "$tmp" 2>/dev/null || true
+        chmod u+w "$tmp" 2>/dev/null || true
+    fi
 }
 
 # hook_cmd PATH — PATH as a hook `command` string. Written bare when it holds only characters a shell leaves alone
@@ -157,7 +211,7 @@ refresh_hook_matcher()
         echo "ripwire PreToolUse hook already registered in $1 ($2) — nothing to do."
         return 0
     fi
-    tmp="$( mktemp )"
+    mk_tmp "$1"
     if "$jqBin" --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
         .hooks.PreToolUse |= map( if any(.hooks[]?; isScript($n))
                                   then .matcher = $m | .hooks |= map( if isScript($n) then .command = $cmd else . end )
@@ -193,7 +247,7 @@ install_claude_route()
 
     if "$jqBin" -e --arg n "ripwire-claude-route.sh" "$jqIsScript"'
         any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1; then
-        tmp="$( mktemp )"
+        mk_tmp "$1"
         if "$jqBin" --arg cmd "$routeCmd" --arg n "ripwire-claude-route.sh" "$jqIsScript"'
             .hooks.UserPromptSubmit |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )' \
             "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
@@ -214,7 +268,7 @@ install_claude_route()
     echo "            byte length of the prompt and a hashed session id — never the prompt text."
     echo "            RIPWIRE_ROUTE_METER=0 opts out of that without disabling routing."
 
-    tmp="$( mktemp )"
+    mk_tmp "$1"
     if "$jqBin" --arg cmd "$routeCmd" '
         .hooks //= {} |
         .hooks.UserPromptSubmit //= [] |
@@ -249,6 +303,7 @@ install_claude_hook()
 
     mkdir -p "$( dirname "$settings" )"
     [ -f "$settings" ] || echo '{}' >"$settings"
+    settings="$( resolve_link "$settings" )" || exit 1
 
     if "$jqBin" -e --arg n "ripwire-nudge.sh" "$jqIsScript"'
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
@@ -282,7 +337,7 @@ install_claude_hook()
     echo "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md."
     echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
 
-    tmp="$( mktemp )"
+    mk_tmp "$settings"
     if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg m "$hookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
@@ -321,9 +376,10 @@ install_codex_hook()
 
     mkdir -p "$( dirname "$settings" )"
     [ -f "$settings" ] || echo '{}' >"$settings"
+    settings="$( resolve_link "$settings" )" || exit 1
 
     echo "skills/install.sh --codex --hook will add or refresh advisory-only entries in $settings."
-    tmp="$( mktemp )"
+    mk_tmp "$settings"
     if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg rcmd "$routeCmd" --arg m "$codexHookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
@@ -612,6 +668,8 @@ fi
 # --agent=codex` can distinguish a complete install from a stale/missing/extra skill without trusting the
 # checkout it came from. A skill that FAILED is not in it: listing it is the #334 lie in another file.
 manifestTmp="$( mktemp "$dst/.ripwire-manifest-v1.tmp.XXXXXX" )"
+pendingTmps="$pendingTmps$manifestTmp
+"
 {
     echo 'version=1'
     printf '%s' "$installedNames" | while IFS= read -r n; do echo "skill=$n"; done

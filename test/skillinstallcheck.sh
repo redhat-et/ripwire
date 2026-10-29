@@ -740,5 +740,60 @@ HOME="$MQ_HOME" bash "$MQ_ROOT/skills/install.sh" --hook >"$HD/MQ.out" 2>&1; MQ_
 { [ "$MQ_RC" -ne 0 ] && ! grep -q 'ripwire-nudge' "$MQ_HOME/.claude/settings.json" 2>/dev/null; } \
     && ok "(M) a path holding a single quote is refused for --hook rather than registered as a command that cannot run" \
     || no "(M) a path with a single quote was registered (rc=$MQ_RC): $( grep -o '"command"[^,}]*' "$MQ_HOME/.claude/settings.json" 2>/dev/null | head -1 )"
+# ── (L) settings.json: a symlinked file is written THROUGH, the merge is atomic, and its mode survives ────────
+#    #293 review: "when settings.json is a symlink (a dotfiles setup), the atomic rename replaces the link with a
+#    regular file, and the dotfiles copy never gets the hook" and CWE-732 (a 0600 config loosened by the rewrite).
+L_HOME="${HD:?}/L/home"; rm -rf "${HD:?}/L"; mkdir -p "$L_HOME/.claude" "$HD/L/dotfiles"
+printf '{"model":"opus"}\n' >"$HD/L/dotfiles/settings.json"
+ln -s "$HD/L/dotfiles/settings.json" "$L_HOME/.claude/settings.json"
+HOME="$L_HOME" bash "$SK/install.sh" --hook >"$HD/L.out" 2>&1
+{ [ -L "$L_HOME/.claude/settings.json" ] \
+  && jq -e '.model == "opus" and (.hooks.PreToolUse | length) >= 1' "$HD/L/dotfiles/settings.json" >/dev/null 2>&1; } \
+    && ok "(L) a symlinked settings.json stays a symlink and the target (the dotfiles copy) receives the hook, keeping its other keys" \
+    || no "(L) a symlinked settings.json was replaced by a regular file or the target did not get the hook: $( ls -l "$L_HOME/.claude/settings.json" )"
+# mode: 0640 survives (mktemp makes 0600, so the old code silently CHANGED it), for Claude and for Codex
+L2_HOME="${HD:?}/L2/home"; rm -rf "${HD:?}/L2"; mkdir -p "$L2_HOME/.claude" "$L2_HOME/.codex"
+printf '{"model":"opus"}\n' >"$L2_HOME/.claude/settings.json"; chmod 640 "$L2_HOME/.claude/settings.json"
+printf '{}\n' >"$L2_HOME/.codex/hooks.json"; chmod 640 "$L2_HOME/.codex/hooks.json"
+HOME="$L2_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1
+HOME="$L2_HOME" bash "$SK/install.sh" --codex --hook >/dev/null 2>&1
+lMode() { ls -l "$1" | cut -c2-10; }
+{ [ "$( lMode "$L2_HOME/.claude/settings.json" )" = "rw-r-----" ] && [ "$( lMode "$L2_HOME/.codex/hooks.json" )" = "rw-r-----" ] \
+  && jq -e '.hooks.PreToolUse | length >= 1' "$L2_HOME/.claude/settings.json" >/dev/null 2>&1; } \
+    && ok "(L) CWE-732: a pre-existing 0640 settings.json and hooks.json keep their mode across a --hook merge" \
+    || no "(L) CWE-732: settings.json is $( lMode "$L2_HOME/.claude/settings.json" ), hooks.json is $( lMode "$L2_HOME/.codex/hooks.json" ) after a merge (expected rw-r-----)"
+# atomic: the temp file is built in the SAME directory as the file it replaces (a rename within one filesystem),
+# never in $TMPDIR (a copy across filesystems that a kill can leave half-written).
+L3_HOME="${HD:?}/L3/home"; rm -rf "${HD:?}/L3"; mkdir -p "$L3_HOME" "$HD/L3/shim"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s"\nexec /bin/mv "$@"\n' "$HD/L3/mv.log" >"$HD/L3/shim/mv"; chmod +x "$HD/L3/shim/mv"
+PATH="$HD/L3/shim:$PATH" HOME="$L3_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1
+lCross=0; lSeen=0
+while IFS= read -r _l; do
+    case "$_l" in *"/settings.json") lSeen=$(( lSeen + 1 )); _from="${_l%% *}"; _to="${_l##* }"
+        [ "$( dirname "$_from" )" = "$( dirname "$_to" )" ] || lCross=$(( lCross + 1 )) ;; esac
+done <"$HD/L3/mv.log"
+{ [ "$lSeen" -ge 1 ] && [ "$lCross" -eq 0 ]; } \
+    && ok "(L) every rename onto settings.json comes from a temp file beside it ($lSeen rename(s), none across directories)" \
+    || no "(L) $lCross of $lSeen renames onto settings.json came from another directory (non-atomic across filesystems): $( cat "$HD/L3/mv.log" )"
+
+# ── (P) a killed run leaves no temp file behind ────────────────────────────────────────────────────────────────
+#    #293 review: stray `.tmp-<pid>-<key>` directories from killed runs stayed forever. Here the equivalents are the
+#    mktemp files built beside the manifest / settings.json. A `mv` shim delivers SIGTERM to the installer at the
+#    moment of the rename, i.e. while the temp file exists; the trap must remove it.
+P_HOME="${HD:?}/P/home"; rm -rf "${HD:?}/P"; mkdir -p "$P_HOME" "$HD/P/shim" "$HD/P/tmp"
+printf '#!/bin/sh\ncase "$*" in *"$MV_KILL_ON"*) kill -TERM "$PPID"; sleep 2; exit 1 ;; esac\nexec /bin/mv "$@"\n' >"$HD/P/shim/mv"; chmod +x "$HD/P/shim/mv"
+# macOS's mktemp ignores $TMPDIR when called bare; this makes it honour it so a stray lands where the arm looks
+printf '#!/bin/sh\nif [ "$#" -eq 0 ]; then exec /usr/bin/mktemp "${TMPDIR:-/tmp}/tmp.XXXXXX"; fi\nexec /usr/bin/mktemp "$@"\n' >"$HD/P/shim/mktemp"; chmod +x "$HD/P/shim/mktemp"
+for _t in ".ripwire-manifest-v1" "settings.json"; do
+    rm -rf "${P_HOME:?}/.claude"
+    MV_KILL_ON="$_t" TMPDIR="$HD/P/tmp" PATH="$HD/P/shim:$PATH" HOME="$P_HOME" bash "$SK/install.sh" --claude --hook >"$HD/P.out" 2>&1; P_RC=$?
+    pStray="$( find "$HD/P" \( -name '*.tmp.*' -o -name 'tmp.*' -o -name '.tmp-*' \) 2>/dev/null | sed "s|^$HD/P|~|" | tr '\n' ' ' )"
+    { [ "$P_RC" -ne 0 ] && [ -z "$pStray" ]; } \
+        && ok "(P) a SIGTERM during the rename onto $_t exits non-zero and leaves no temp file" \
+        || no "(P) SIGTERM during the rename onto $_t: rc=$P_RC, stray temp files: ${pStray:-none}"
+done
+rm -rf "${P_HOME:?}/.claude"; TMPDIR="$HD/P/tmp" HOME="$P_HOME" bash "$SK/install.sh" --claude --hook >/dev/null 2>&1
+pStray="$( find "$HD/P" \( -name '*.tmp.*' -o -name 'tmp.*' \) 2>/dev/null | tr '\n' ' ' )"
+[ -z "$pStray" ] && ok "(P) twin: an ordinary run leaves no temp file" || no "(P) an ordinary run left temp files: $pStray"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
