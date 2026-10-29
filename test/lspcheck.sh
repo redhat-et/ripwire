@@ -74,9 +74,10 @@
 #        and C++ `Widget::Widget()` beside a header-first class Widget — --lego names the class and its implementor,
 #        --around focuses the class row; a near-miss Java method named like ANOTHER class keeps the Method rung
 #   (25) a C prototype beside its body is counted in the (19) sentence but never described as a resolver split
-#   (26) the tower's tiers in ORDER: kind before language — a Python class (rung 3) sits between a Ruby method (5)
-#        and a Ruby attr (1) although the leading language is Ruby (arms 18-23 are single-language and cannot see a
-#        swap of the two tiers)
+#   (26) the tower's tiers in ORDER (RE-PINNED by task D — was "kind before language", the C2-era shape the
+#        owner's rule replaces): exact language first, the ladder WITHIN each group (Ruby method, Ruby attr,
+#        then the Python class), the edge-family between — arms 18-23 are single-language and cannot see a tier
+#        swap; this arm is the one that can
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/lspcheck.sh   |   bash test/lspcheck.sh path/to/ripwire
 
@@ -226,7 +227,7 @@ printf '%s' "$R8" | grep -q 'int scale( int f )' \
     || { no "(8) didChange content leaked into the answer, or the hover moved"; printf '%s\n' "$R8" | head -c 300; }
 
 # ── (9) protocol shape: 14 dialog messages, exactly 9 responses ──────────────────────────────────────
-NRESP="$( grep -c . "$WORK/resp" 2>/dev/null || echo 0 )"
+NRESP="$( grep -c '"id":' "$WORK/resp" 2>/dev/null || echo 0 )"   # responses carry an id; D4 disclosures ride window/logMessage frames (no id) and must not read as answers
 [ "$NRESP" = 9 ] \
     && ok "(9) exactly 9 responses to the 14-message dialog (notifications answered nothing)" \
     || { no "(9) response count wrong: got $NRESP, expected 9"; cat "$WORK/resp"; }
@@ -374,11 +375,11 @@ rm -rf "$W17"
 rows30="$( grep '"id":30,' "$WORK/r17" | grep -o '"name":"capfn' | wc -l | tr -d ' ' )"
 rows31="$( grep '"id":31,' "$WORK/r17" | grep -o '"name":"capfn' | wc -l | tr -d ' ' )"
 notices="$( grep -c '"method":"window/logMessage"' "$WORK/r17" )"
-noticeLine="$( grep -n '"method":"window/logMessage"' "$WORK/r17" | cut -d: -f1 )"; resp30Line="$( grep -n '"id":30,' "$WORK/r17" | cut -d: -f1 )"
-[ "$rows30" = 20 ] && [ "$rows31" = 10 ] && [ "$notices" = 1 ] \
+noticeLine="$( grep -n '"method":"window/logMessage"' "$WORK/r17" | head -1 | cut -d: -f1 )"; resp30Line="$( grep -n '"id":30,' "$WORK/r17" | head -1 | cut -d: -f1 )"   # head -1 since D4: two disclosures can ride one dialog, the FIRST must precede the capped response
+[ "$rows30" = 20 ] && [ "$rows31" = 10 ] && [ "$notices" = 2 ] \
     && grep -q 'shows the first 20 of 25 matches for .capfn.' "$WORK/r17" \
     && [ -n "$noticeLine" ] && [ "$noticeLine" -lt "$resp30Line" ] \
-    && ok "(17) workspace/symbol: 25 matches → 20 rows after one window/logMessage 'first 20 of 25'; 10 matches (capfn10-19) → 10 rows, no notice" \
+    && ok "(17) workspace/symbol: 25 matches → 20 rows after the window/logMessage 'first 20 of 25'; 10 matches → 10 rows; TWO notices = the cap sentence plus D4's anchor clause on the below-cap query — disclosures are frames, cap honesty unchanged" \
     || { no "(17) cap disclosure wrong: rows30=$rows30 rows31=$rows31 notices=$notices"; head -c 500 "$WORK/r17"; }
 # ── (18) picker order: the tower sorts every multi-def answer, byte-pinned on the collision fixture ───
 cp -r "$ROOT/test/rubyschemafix" "$WORK/collide"
@@ -628,16 +629,16 @@ grep -q 'splits over' "$WORK/r25" \
     && no "(25) the disclosure says the resolver SPLIT a call it bound to the body alone" \
     || ok "(25) prototype+body: counted as 2 definitions, no split claimed (the call binds to the body)"
 
-# ── (26) kind tier before language tier ──────────────────────────────────────────────────────────────
+# ── (26) the tier order itself: exact language first, ladder WITHIN it (re-pinned by task D) ──
 mkdir -p "$WORK/mixlang"
 printf 'class AllFour\n  attr_reader :name\nend\n' > "$WORK/mixlang/a.rb"
 printf 'class name:\n    pass\n' > "$WORK/mixlang/b.py"
 printf 'class Other\n  def name\n    1\n  end\nend\nOther.new.name\n' > "$WORK/mixlang/c.rb"
 o26="$( cd "$WORK/mixlang" && "$BIN" --impact=name . 2>/dev/null | grep -o '<def ix="[0-9]*" t="[a-z]*"[^>]*p="[^"]*"' | tr '\n' ' ' )"
 case "$o26" in
-    *'ix="1" t="method" sc="Other" p="c.rb:2"'*'ix="2" t="cls" sc="name" p="b.py:1"'*'ix="3" t="var" sc="AllFour" p="a.rb:2"'*)
-        ok "(26) kind before language: Ruby method, then the Python class, then the Ruby attr" ;;
-    *)  no "(26) tier order wrong (a language-first comparator puts the Ruby attr ahead of the Python class): $o26" ;;
+    *'ix="1" t="method" sc="Other" p="c.rb:2"'*'ix="2" t="var" sc="AllFour" p="a.rb:2"'*'ix="3" t="cls" sc="name" p="b.py:1"'*)
+        ok "(26) tiers in order: Ruby method then Ruby attr (the ladder WITHIN the anchor) then the Python class — language first, levels decide within" ;;
+    *)  no "(26) tier order wrong (family/foreign leakage, or the ladder still outranks the language): $o26" ;;
 esac
 
 # ── (22) determinism x2 on the collision dialog (house pattern) ───────────────────────────────────────
@@ -687,8 +688,8 @@ n28l="$( grep -n 'window/logMessage.*holds no definition' "$WORK/r28" | head -1 
 r28l="$( grep -n '"id":61,' "$WORK/r28" | head -1 | cut -d: -f1 )"
 R61="$( grep '"id":61,' "$WORK/r28" )"
 printf '%s' "$R61" | grep -qF "\"uri\":\"file://$WORK/lofb/impl.cpp\"" \
-    && printf '%s' "$R61" | grep -q 'reflang="ex"' \
     && [ "$n28" = 1 ] && [ -n "$n28l" ] && [ -n "$r28l" ] && [ "$n28l" -lt "$r28l" ] \
+    && grep -q 'window/logMessage.*holds no definition.*reflang=\\"ex\\"' "$WORK/r28" \
     && ok "(28) Shape@ex with no Elixir anywhere: impl.cpp answers, ONE 'holds no definition' notice precedes it, reflang=ex kept honest" \
     || { no "(28) fallback wrong: n=$n28 notice=$n28l resp=$r28l"; printf '%s\n' "$R61" | head -c 240; }
 
@@ -710,7 +711,7 @@ R63="$( grep '"id":63,' "$WORK/r29" )"
 row63="$( printf '%s' "$R63" | grep -o '"name":"Shape"' | wc -l | tr -d ' ' )"
 printf '%s' "$R63" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.rs\"" \
     && [ "$row63" = 1 ] \
-    && printf '%s' "$R63" | grep -q 'reflang="rs"' \
+    && grep -q 'window/logMessage.*reflang=\\"rs\\" origin=\\"explicit\\"' "$WORK/r29" \
     && ok "(29) Shape@rs answers ONLY the Rust trait with reflang=\"rs\" — a stated language outranks the opened document's" \
     || { no "(29) explicit-over-context wrong: rows=$row63"; printf '%s\n' "$R63" | head -c 320; }
 
@@ -749,8 +750,7 @@ decodeFrames "$WORK/raw32" > "$WORK/r32" 2>/dev/null
 R65="$( grep '"id":65,' "$WORK/r32" )"
 t65py="$( printf '%s' "$R65" | grep -bo 'top\.py' | cut -d: -f1 | head -1 )"
 t65rb="$( printf '%s' "$R65" | grep -bo 'one\.rb'  | cut -d: -f1 | head -1 )"
-printf '%s' "$R65" | grep -q 'reflang="py"' \
-    && printf '%s' "$R65" | grep -q 'origin="corpus"' \
+grep -q 'window/logMessage.*reflang=\\"py\\" origin=\\"corpus\\"' "$WORK/r32" \
     && [ -n "$t65py" ] && [ -n "$t65rb" ] && [ "$t65py" -lt "$t65rb" ] \
     && ok "(32) 5 Python defs beat 1 Ruby on the corpus anchor (top.py before one.rb, origin named)" \
     || { no "(32) corpus tie wrong: py=$t65py rb=$t65rb"; printf '%s\n' "$R65" | head -c 260; }
@@ -812,6 +812,161 @@ printf '%s' "$R68s" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.cpp\"" \
     && printf '%s' "$R69s" | grep -q '"result":\[\]' \
     && ok "(36) Shape@CPP resolves like Shape@cpp; shape@rs matches no symbol — suffix tolerant, names exact" \
     || { no "(36) case axes conflated"; printf '%s\n' "$R68s" | head -c 200; printf '%s\n' "$R69s" | head -c 200; }
+
+# ── (37)-(41) task E: the client's declared languageId as a validated anchor hint ───────────────────
+# Fixture: shape.h declares `Shape` (indexed Cpp by extension CONVENTION — the exact case where the
+# editor's declaration beats the path), shape.c defines it (indexed C). shape@rb pins explicit-over-client.
+# (37)(38) are behavior arms — RED before E1-E3; (39)(40)(41) are controls that must hold green before
+# AND after: garbage ids change nothing, explicit @lang outranks the declaration, and the document-free
+# workspace/symbol lane never sees it.
+mkdir -p "$WORK/loh"
+printf 'typedef struct Shape Shape;\n' > "$WORK/loh/shape.h"
+printf 'struct Shape { int x; };\n'   > "$WORK/loh/shape.c"
+cp "$ROOT/test/langorderfix/widget.rs" "$WORK/loh/widget.rs"
+lid_init(){ msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loh\",\"capabilities\":{}}}"; msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"; }
+lid_open(){ msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.h\",\"languageId\":\"$1\",\"version\":1,\"text\":\"typedef struct Shape Shape;\\n\"}}}"; }
+lid_def(){ msg "{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loh/shape.h\"},\"position\":{\"line\":0,\"character\":17}}}"; }
+lid_tail(){ msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"; msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"; }
+
+{
+  lid_init
+  lid_open "C"
+  lid_def
+  lid_tail
+} > "$WORK/d37"
+"$BIN" --lsp < "$WORK/d37" > "$WORK/raw37" 2>/dev/null
+decodeFrames "$WORK/raw37" > "$WORK/r37" 2>/dev/null
+R71c="$( grep '"id":71,' "$WORK/r37" )"
+first37="$( printf '%s' "$R71c" | grep -o '"uri":"[^"]*"' | head -1 )"
+printf '%s' "$R71c" | grep -q 'shape.c' && [ "$first37" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(37) languageId C on a .h buffer: shape.c leads the definition list — the declaration replaced the extension convention" \
+    || { no "(37) client hint ignored: first=$first37"; printf '%s\n' "$R71c" | head -c 240; }
+
+# ── (39) CONTROL: an unparseable declaration is NO hint, not a refusal — bytes match the no-hint default ─
+{
+  lid_init
+  lid_open "Cobol"
+  lid_def
+  lid_tail
+} > "$WORK/d39"
+"$BIN" --lsp < "$WORK/d39" > "$WORK/raw39" 2>/dev/null
+decodeFrames "$WORK/raw39" > "$WORK/r39" 2>/dev/null
+R71x="$( grep '"id":71,' "$WORK/r39" )"
+{
+  lid_init
+  lid_open ""
+  lid_def
+  lid_tail
+} > "$WORK/d39b"
+R71plain="$( "$BIN" --lsp < "$WORK/d39b" 2>/dev/null > "$WORK/raw39b"; decodeFrames "$WORK/raw39b" | grep '"id":71,' )"
+[ "$R71x" = "$R71plain" ] \
+    && ok "(39) languageId Cobol: byte-identical to the empty declaration — an unmappable id is no hint" \
+    || { no "(39) unknown languageId changed the answer"; printf '%s\n' "$R71x" | head -c 200; }
+
+# ── (40) CONTROL: explicit @lang outranks the client declaration (priority pin) ─────────────────────
+{
+  lid_init
+  lid_open "C"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":73,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@rs\"}}"
+  lid_tail
+} > "$WORK/d40"
+"$BIN" --lsp < "$WORK/d40" > "$WORK/raw40" 2>/dev/null
+decodeFrames "$WORK/raw40" > "$WORK/r40" 2>/dev/null
+R73="$( grep '"id":73,' "$WORK/r40" )"
+files40="$( printf '%s' "$R73" | grep -o '"uri":"[^"]*"' | sort -u | wc -l | tr -d ' ' )"   # files touched, not rows: the Rust trait alone carries 3 Shape defs
+printf '%s' "$R73" | grep -qF "widget.rs" && [ "$files40" = 1 ] \
+    && grep -q 'window/logMessage.*reflang=\\"rs\\" origin=\\"explicit\\"' "$WORK/r40" \
+    && ok "(40) Shape@rs under a C declaration: Rust-only answer, origin=explicit — the typed selector is not overridden" \
+    || { no "(40) explicit-over-client wrong: files=$files40"; printf '%s\n' "$R73" | head -c 240; }
+
+# ── (41) CONTROL: workspace/symbol is document-free — a declaration on an open buffer must not reach it ─
+{
+  lid_init
+  lid_open "C"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape\"}}"
+  lid_tail
+} > "$WORK/d41"
+{
+  lid_init
+  msg "{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape\"}}"
+  lid_tail
+} > "$WORK/d41b"
+"$BIN" --lsp < "$WORK/d41" 2>/dev/null > "$WORK/raw41"; decodeFrames "$WORK/raw41" > "$WORK/r41" 2>/dev/null; A41="$( grep '"id":74,' "$WORK/r41" )"
+"$BIN" --lsp < "$WORK/d41b" 2>/dev/null > "$WORK/raw41b"; decodeFrames "$WORK/raw41b" > "$WORK/r41b" 2>/dev/null; B41="$( grep '"id":74,' "$WORK/r41b" )"
+[ -n "$A41" ] && [ "$A41" = "$B41" ] \
+    && ok "(41) Shape (no @lang) with a C-declared buffer open: byte-identical to no buffer — the declaration never reaches the picker" \
+    || { no "(41) client hint leaked into workspace/symbol"; printf '%s\n' "$A41" | head -c 200; }
+
+# ── (38) the config file rewrites the map WITHOUT a recompile: an id defaults refuse, the file maps it ──
+printf 'mycustom-c = "c"\n' > "$WORK/loh-langmap.toml"
+{
+  lid_init
+  lid_open "MyCustom-C"
+  lid_def
+  lid_tail
+} > "$WORK/d38"
+"$BIN" --lsp --lsp-langmap="$WORK/loh-langmap.toml" < "$WORK/d38" > "$WORK/raw38" 2>/dev/null
+decodeFrames "$WORK/raw38" > "$WORK/r38" 2>/dev/null
+R38="$( grep '"id":71,' "$WORK/r38" )"
+first38="$( printf '%s' "$R38" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first38" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(38) --lsp-langmap maps MyCustom-C to c: shape.c leads — the alias map is config, not compiled vocabulary" \
+    || { no "(38) config map not honored: first=$first38"; printf '%s\n' "$R38" | head -c 240; }
+
+# ── (42) a didOpen BEFORE initialize records nothing (no root exists yet; CR #440) ─────────────────
+{
+  lid_open "C"
+  lid_init
+  lid_def
+  lid_tail
+} > "$WORK/d42"
+"$BIN" --lsp < "$WORK/d42" > "$WORK/raw42" 2>/dev/null
+decodeFrames "$WORK/raw42" > "$WORK/r42" 2>/dev/null
+R7142="$( grep '"id":71,' "$WORK/r42" )"
+{
+  lid_init
+  lid_def
+  lid_tail
+} > "$WORK/d42b"
+"$BIN" --lsp < "$WORK/d42b" > "$WORK/raw42b" 2>/dev/null
+R7142b="$( decodeFrames "$WORK/raw42b" | grep '"id":71,' )"
+[ -n "$R7142" ] && [ "$R7142" = "$R7142b" ] \
+    && ok "(42) didOpen before initialize changes nothing — the record waits for a root, the answer matches the never-opened session" \
+    || { no "(42) pre-initialize didOpen moved the answer"; printf '%s\n' "$R7142" | head -c 200; printf '%s\n' "$R7142b" | head -c 200; }
+
+# ── (43) the LAST declaration owns the buffer: re-open with a new id replaces the record (control) ──
+{
+  lid_init
+  lid_open "C"
+  lid_open "Rust"
+  lid_def
+  lid_tail
+} > "$WORK/d43"
+"$BIN" --lsp < "$WORK/d43" > "$WORK/raw43" 2>/dev/null
+decodeFrames "$WORK/raw43" > "$WORK/r43" 2>/dev/null
+R7143="$( grep '"id":71,' "$WORK/r43" )"
+first43="$( printf '%s' "$R7143" | grep -o '"uri":"[^"]*"' | head -1 )"
+printf '%s' "$R7143" | grep -q 'widget.rs' && [ "$first43" = "\"uri\":\"file://$WORK/loh/widget.rs\"" ] \
+    && ok "(43) C then Rust on the same buffer: the newest declaration leads (Rust→rs fronts the trait)" \
+    || { no "(43) last declaration did not win: first=$first43"; printf '%s\n' "$R7143" | head -c 240; }
+
+# ── (44) the plan's workspace slot: <root>/.ripwire/lsp-langmap.toml is found when the root rides the ───
+# ────── command line (editors launch `ripwire <root> --lsp`); canonicalKey lowercases both sides ────
+mkdir -p "$WORK/loh/.ripwire"
+printf 'myroot-c = "c"\n' > "$WORK/loh/.ripwire/lsp-langmap.toml"
+{
+  lid_init
+  lid_open "MyRoot-C"
+  lid_def
+  lid_tail
+} > "$WORK/d44"
+"$BIN" "$WORK/loh" --lsp < "$WORK/d44" > "$WORK/raw44" 2>/dev/null
+decodeFrames "$WORK/raw44" > "$WORK/r44" 2>/dev/null
+R7144="$( grep '"id":71,' "$WORK/r44" )"
+first44="$( printf '%s' "$R7144" | grep -o '"uri":"[^"]*"' | head -1 )"
+[ "$first44" = "\"uri\":\"file://$WORK/loh/shape.c\"" ] \
+    && ok "(44) <root>/.ripwire/lsp-langmap.toml maps MyRoot-C to c: the workspace slot from the plan is live" \
+    || { no "(44) root-local map not honored: first=$first44"; printf '%s\n' "$R7144" | head -c 240; }
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

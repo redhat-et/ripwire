@@ -17,6 +17,7 @@
 #include "workspace.h"             // multi-root workspaces: root hygiene + labels + the id-offset merge
 #include "graph.h"
 #include "warmsnap_graph.h"        // the warm snapshot: the crawl replayed, the resolved graph loaded instead of rebuilt
+#include "lsp_langmap.h"          // task E: the --lsp client languageId→tag alias map — after model.h (langFromTag) and docparse.h (its read helper)
 #include "scip.h"                  // SCIP precision overlay (--scip=index.scip)
 #include "serialize.h"
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
@@ -4746,7 +4747,7 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     // refused in validateConfig, so this block's position relative to the --mcp branch below is inert.
     if( cfg.lsp )
     {
-        return lsp::runLsp( std::string( cfg.rootPath ) );
+        return lsp::runLsp( std::string( cfg.rootPath ), cfg.lspLangMap );
     }
 
     if( cfg.mcp )
