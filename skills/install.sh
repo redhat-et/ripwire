@@ -67,6 +67,46 @@ abs_root()
     printf '%s\n' "$2"
 }
 
+# find_jq — set $jqBin to an ABSOLUTE path to jq, or "" when there is none. An empty or relative PATH entry means
+# "the current directory", i.e. whatever repository the user happens to be standing in: a planted ./jq would run
+# with the user's rights (CWE-426). Only absolute entries are searched. (The final `command -v` is for hosts, such
+# as Git Bash, whose PATH can hold forms this walk does not recognise; its answer is used only if it is absolute.)
+jqBin=""
+find_jq()
+{
+    jqBin=""
+    set -f; _oifs="$IFS"; IFS=:
+    for _d in $PATH; do
+        IFS="$_oifs"
+        is_abs_path "$_d" || continue
+        for _n in jq jq.exe; do
+            if [ -f "$_d/$_n" ] && [ -x "$_d/$_n" ]; then jqBin="$_d/$_n"; break 2; fi
+        done
+    done
+    IFS="$_oifs"; set +f
+    if [ -z "$jqBin" ]; then
+        _c="$( command -v jq 2>/dev/null )" || _c=""
+        if [ -n "$_c" ] && is_abs_path "$_c"; then jqBin="$_c"; fi
+    fi
+    return 0
+}
+
+# hook_cmd PATH — PATH as a hook `command` string. Written bare when it holds only characters a shell leaves alone
+# (so the ordinary install is byte-for-byte what it was); otherwise single-quoted, because the agent runs the string
+# through a shell and a checkout under a path with a space gave a hook that could not run. A path holding a single
+# quote cannot be both quoted here and recognised again on the next run, so it is refused.
+hook_cmd()
+{
+    case "$1" in
+        *[!A-Za-z0-9_./:@%+=,-]*)
+            case "$1" in
+                *\'*) echo "skills/install.sh: --hook cannot register a hook script whose path contains a single quote: $1" >&2; return 1 ;;
+            esac
+            printf "'%s'\n" "$1" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 # ── the PreToolUse matcher, in one place. It is not cosmetic: a matcher decides which tool calls the
 #    hook is ever SHOWN. Read/Glob are here because the whole-file read is the largest token sink in an
 #    agent loop and the one default a skill description cannot intercept; mcp__ripwire__.* is here for
@@ -100,7 +140,10 @@ codexHookMatcher="^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__r
 # trailing ` --session-start` argument. When an entry is found, both its matcher AND its command are
 # brought to the current values: refreshing one and not the other is how the stale half survives.
 # test/skillinstallcheck.sh arm (D) drives the exact scenario and counts the entries.
-jqIsScript='def isScript($n): (.command // "") | split(" ")[0] | endswith("/hooks/" + $n);'
+# A command registered from a path with a space is single-quoted (hook_cmd above): its script is what lies between the
+# quotes. \u0027 is the single quote, which cannot appear inside this single-quoted shell string.
+jqIsScript='def cmdWord: (.command // "") | if startswith("\u0027") then (.[1:] | split("\u0027")[0]) else split(" ")[0] end;
+def isScript($n): cmdWord | endswith("/hooks/" + $n);'
 
 # ── refresh_hook_matcher SETTINGS HOOKSCRIPT — bring an ALREADY-registered entry's matcher up to date.
 # An entry written by an older installer carries an older matcher, and a stale one undercounts forever,
@@ -108,14 +151,14 @@ jqIsScript='def isScript($n): (.command // "") | split(" ")[0] | endswith("/hook
 # agrees is left untouched, and this never adds, removes or reorders an entry.
 refresh_hook_matcher()
 {
-    if ! jq -e --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
+    if ! "$jqBin" -e --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
         any((.hooks.PreToolUse // [])[]?; (any(.hooks[]?; isScript($n))) and ((.matcher != $m) or (any(.hooks[]?; isScript($n) and .command != $cmd))))' \
         "$1" >/dev/null 2>&1; then
         echo "ripwire PreToolUse hook already registered in $1 ($2) — nothing to do."
         return 0
     fi
     tmp="$( mktemp )"
-    if jq --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
+    if "$jqBin" --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
         .hooks.PreToolUse |= map( if any(.hooks[]?; isScript($n))
                                   then .matcher = $m | .hooks |= map( if isScript($n) then .command = $cmd else . end )
                                   else . end )' \
@@ -146,14 +189,15 @@ install_claude_route()
         return 1
     }
     chmod +x "$routeScript" 2>/dev/null || true
+    routeCmd="$( hook_cmd "$routeScript" )" || return 1
 
-    if jq -e --arg n "ripwire-claude-route.sh" "$jqIsScript"'
+    if "$jqBin" -e --arg n "ripwire-claude-route.sh" "$jqIsScript"'
         any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1; then
         tmp="$( mktemp )"
-        if jq --arg cmd "$routeScript" --arg n "ripwire-claude-route.sh" "$jqIsScript"'
+        if "$jqBin" --arg cmd "$routeCmd" --arg n "ripwire-claude-route.sh" "$jqIsScript"'
             .hooks.UserPromptSubmit |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )' \
             "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
-            echo "ripwire UserPromptSubmit router already registered in $1 — command refreshed to $routeScript."
+            echo "ripwire UserPromptSubmit router already registered in $1 — command refreshed to $routeCmd."
         else
             rm -f "$tmp"
             echo "skills/install.sh: could not refresh the router command in $1 (is it valid JSON?); nothing changed." >&2
@@ -163,7 +207,7 @@ install_claude_route()
     fi
 
     echo "skills/install.sh --hook will add this OPT-IN, advisory-only entry to $1:"
-    echo "  hooks.UserPromptSubmit += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$routeScript\" }] }]"
+    echo "  hooks.UserPromptSubmit += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$routeCmd\" }] }]"
     echo "  behavior: asks ripwire --help-task before the first tool is chosen and, ONLY at high"
     echo "            confidence, adds one paste-ready command as context. It never blocks a prompt."
     echo "  counting: appends one row per prompt to ~/.ripwire/routing.jsonl carrying a CHECKSUM and"
@@ -171,7 +215,7 @@ install_claude_route()
     echo "            RIPWIRE_ROUTE_METER=0 opts out of that without disabling routing."
 
     tmp="$( mktemp )"
-    if jq --arg cmd "$routeScript" '
+    if "$jqBin" --arg cmd "$routeCmd" '
         .hooks //= {} |
         .hooks.UserPromptSubmit //= [] |
         .hooks.UserPromptSubmit += [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 8 }] }]
@@ -192,22 +236,24 @@ install_claude_hook()
     settings="$( abs_root CLAUDE_CONFIG_DIR "${CLAUDE_CONFIG_DIR:-}" .claude )/settings.json" || exit 2
     hookScript="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     chmod +x "$hookScript" 2>/dev/null || true
+    hookCmd="$( hook_cmd "$hookScript" )" || exit 1
 
-    if ! command -v jq >/dev/null 2>&1; then
+    find_jq
+    if [ -z "$jqBin" ]; then
         echo "skills/install.sh --hook needs jq on PATH to safely merge $settings (not found)." >&2
         echo "Add these by hand instead:" >&2
-        echo "  hooks.PreToolUse  += [{\"matcher\":\"$hookMatcher\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookScript\"}]}]" >&2
-        echo "  hooks.SessionStart += [{\"matcher\":\"startup|resume|clear\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookScript --session-start\"}]}]" >&2
+        echo "  hooks.PreToolUse  += [{\"matcher\":\"$hookMatcher\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd\"}]}]" >&2
+        echo "  hooks.SessionStart += [{\"matcher\":\"startup|resume|clear\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd --session-start\"}]}]" >&2
         exit 1
     fi
 
     mkdir -p "$( dirname "$settings" )"
     [ -f "$settings" ] || echo '{}' >"$settings"
 
-    if jq -e --arg n "ripwire-nudge.sh" "$jqIsScript"'
+    if "$jqBin" -e --arg n "ripwire-nudge.sh" "$jqIsScript"'
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
-        refresh_hook_matcher "$settings" "$hookScript" "$hookMatcher" || return $?
+        refresh_hook_matcher "$settings" "$hookCmd" "$hookMatcher" || return $?
         install_claude_route "$settings"
         return $?
     fi
@@ -221,8 +267,8 @@ install_claude_hook()
     # otherwise be a pure undercount (docs/SUBSTITUTION_METER.md). The hook never nudges those calls,
     # nor the native edit tools, which are metered only so the EDIT band can see them.
     echo "skills/install.sh --hook will add these OPT-IN, advisory-only entries to $settings:"
-    echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
-    echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookScript --session-start\" }] }]"
+    echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookCmd\" }] }]"
+    echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookCmd --session-start\" }] }]"
     echo "  behavior: never blocks/denies/rewrites a tool call, and since 2026-09-02 never speaks on it"
     echo "            either — the advisory nudge was measured inert and retired (docs/EVALS.md §4)."
     echo "            What remains on PreToolUse is the substitution meter and the router's adoption"
@@ -237,7 +283,7 @@ install_claude_hook()
     echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
 
     tmp="$( mktemp )"
-    if jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg m "$hookMatcher" '
+    if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg m "$hookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
         .hooks.PreToolUse += [{ matcher: $m, hooks: [{ type: "command", command: $cmd }] }] |
@@ -264,8 +310,11 @@ install_codex_hook()
         exit 1
     }
     chmod +x "$hookScript" "$sharedHook" "$routeScript" 2>/dev/null || true
+    hookCmd="$( hook_cmd "$hookScript" )" || exit 1
+    routeCmd="$( hook_cmd "$routeScript" )" || exit 1
 
-    if ! command -v jq >/dev/null 2>&1; then
+    find_jq
+    if [ -z "$jqBin" ]; then
         echo "skills/install.sh --codex --hook needs jq on PATH to safely merge $settings (not found)." >&2
         exit 1
     fi
@@ -275,7 +324,7 @@ install_codex_hook()
 
     echo "skills/install.sh --codex --hook will add or refresh advisory-only entries in $settings."
     tmp="$( mktemp )"
-    if jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg rcmd "$routeScript" --arg m "$codexHookMatcher" '
+    if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg rcmd "$routeCmd" --arg m "$codexHookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
         .hooks.SessionStart //= [] |

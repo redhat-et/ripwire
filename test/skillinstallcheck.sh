@@ -680,5 +680,65 @@ kOpen="$( find "$K2_HOME" -mindepth 1 ! -type l \( -perm -020 -o -perm -002 -o -
 { [ -z "$kOpen" ] && [ -f "$K2_HOME/.claude/settings.json" ]; } \
     && ok "(K) twin: under umask 077 the installer does not LOOSEN anything (a user's stricter umask stays)" \
     || no "(K) under umask 077 the installer created group/other-accessible entries: $kOpen"
+# ── (O) jq is found only through ABSOLUTE PATH entries (CWE-426) ───────────────────────────────────────────────
+#    #293 review: an empty or relative PATH entry resolved `jq` from the current directory, i.e. from whatever
+#    repository the user happened to run the installer in — a planted ./jq runs with the user's rights.
+O_HOME="${HD:?}/O/home"; rm -rf "${HD:?}/O"; mkdir -p "$O_HOME" "$HD/O/repo"
+printf '#!/bin/sh\ntouch "%s"\nexec "%s" "$@"\n' "$HD/O/planted-jq-ran" "$( command -v jq )" >"$HD/O/repo/jq"; chmod +x "$HD/O/repo/jq"
+cp "$HD/O/repo/jq" "$HD/O/jq"
+for _p in ".:$PATH" ":$PATH" "$PATH:" "repo:$PATH"; do
+    rm -f "$HD/O/planted-jq-ran"; rm -rf "${O_HOME:?}/.claude"
+    ( cd "$HD/O" && PATH="$_p" HOME="$O_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1 )
+    { [ ! -e "$HD/O/planted-jq-ran" ] && jq -e '.hooks.PreToolUse | length >= 1' "$O_HOME/.claude/settings.json" >/dev/null 2>&1; } \
+        && ok "(O) CWE-426: PATH='${_p%%:*}:…' (relative/empty entry) never runs a planted ./jq, and --hook still registers" \
+        || no "(O) CWE-426: with PATH starting '${_p%%:*}' a planted jq ran=$( [ -e "$HD/O/planted-jq-ran" ] && echo YES || echo no ), settings=$( [ -s "$O_HOME/.claude/settings.json" ] && echo ok || echo missing )"
+done
+
+# ── (M) the registered hook COMMAND is quoted when the install path needs it ─────────────────────────────────
+#    #293 review: "the hook command is written unquoted, so a data home with a space in it gives a hook that can't
+#    run". A checkout under a path with a space is the ordinary way to hit it. The normal path stays byte-identical.
+M_ROOT="${HD:?}/M/with space"; rm -rf "${HD:?}/M"; mkdir -p "$M_ROOT"; cp -R "$SK" "$M_ROOT/skills"; cp -R "$ROOT/hooks" "$M_ROOT/hooks"
+M_HOME="$HD/M/home"; mkdir -p "$M_HOME" "$HD/M/runhome"
+HOME="$M_HOME" bash "$M_ROOT/skills/install.sh" --hook >"$HD/M.out" 2>&1
+HOME="$M_HOME" bash "$M_ROOT/skills/install.sh" --hook >>"$HD/M.out" 2>&1          # a second run must not double the entries
+mSet="$M_HOME/.claude/settings.json"
+mRun=0
+for _k in PreToolUse SessionStart UserPromptSubmit; do
+    _c="$( jq -r --arg k "$_k" '.hooks[$k][0].hooks[0].command // empty' "$mSet" 2>/dev/null )"
+    if [ -z "$_c" ]; then mRun=$(( mRun + 1 )); continue; fi
+    _o="$( cd "$HD" && printf '{}' | env HOME="$HD/M/runhome" RIPWIRE_METER=0 RIPWIRE_ROUTE_METER=0 sh -c "$_c" 2>&1 )"; _rc=$?
+    case "$_rc" in 126|127) mRun=$(( mRun + 1 )); echo "    ($_k: $_c -> rc=$_rc: $_o)" ;; esac
+done
+[ "$mRun" -eq 0 ] \
+    && ok "(M) hook commands registered from a path with a space run when the shell executes them as written" \
+    || no "(M) $mRun of the three hook commands registered from a path with a space cannot be executed by sh"
+mN="$( jq '[ (.hooks | to_entries[] | .value[] | .hooks[]? | select(.command | test("ripwire-(nudge|claude-route)[.]sh"))) ] | length' "$mSet" 2>/dev/null )"
+[ "$mN" = "3" ] \
+    && ok "(M) re-running with a quoted command recognises the existing entries (3 ripwire entries, not doubled)" \
+    || no "(M) after two runs from a path with a space there are ${mN:-?} ripwire hook entries (expected 3: nudge, session-start, router)"
+N_HOME="${HD:?}/N/home"; rm -rf "${HD:?}/N"; mkdir -p "$N_HOME"
+HOME="$N_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1
+nCmd="$( jq -r '.hooks.PreToolUse[0].hooks[0].command' "$N_HOME/.claude/settings.json" 2>/dev/null )"
+[ "$nCmd" = "$ROOT/hooks/ripwire-nudge.sh" ] \
+    && ok "(M) twin: an ordinary path is registered byte-for-byte as before (no quotes added)" \
+    || no "(M) an ordinary path's hook command changed: [$nCmd] (expected $ROOT/hooks/ripwire-nudge.sh)"
+MC_HOME="$HD/M/codexhome"; mkdir -p "$MC_HOME"
+HOME="$MC_HOME" bash "$M_ROOT/skills/install.sh" --codex --hook >"$HD/MC.out" 2>&1
+mcBad=0
+for _k in PreToolUse SessionStart UserPromptSubmit; do
+    _c="$( jq -r --arg k "$_k" '.hooks[$k][0].hooks[0].command // empty' "$MC_HOME/.codex/hooks.json" 2>/dev/null )"
+    if [ -z "$_c" ]; then mcBad=$(( mcBad + 1 )); continue; fi
+    _o="$( cd "$HD" && printf '{}' | env HOME="$HD/M/runhome" RIPWIRE_METER=0 RIPWIRE_ROUTE_METER=0 sh -c "$_c" 2>&1 )"; _rc=$?
+    case "$_rc" in 126|127) mcBad=$(( mcBad + 1 )) ;; esac
+done
+[ "$mcBad" -eq 0 ] \
+    && ok "(M) the Codex hook commands from a path with a space run too" \
+    || no "(M) $mcBad of the three Codex hook commands from a path with a space cannot be executed by sh"
+MQ_ROOT="${HD:?}/MQ/it's here"; rm -rf "${HD:?}/MQ"; mkdir -p "$MQ_ROOT"; cp -R "$SK" "$MQ_ROOT/skills"; cp -R "$ROOT/hooks" "$MQ_ROOT/hooks"
+MQ_HOME="$HD/MQ/home"; mkdir -p "$MQ_HOME"
+HOME="$MQ_HOME" bash "$MQ_ROOT/skills/install.sh" --hook >"$HD/MQ.out" 2>&1; MQ_RC=$?
+{ [ "$MQ_RC" -ne 0 ] && ! grep -q 'ripwire-nudge' "$MQ_HOME/.claude/settings.json" 2>/dev/null; } \
+    && ok "(M) a path holding a single quote is refused for --hook rather than registered as a command that cannot run" \
+    || no "(M) a path with a single quote was registered (rc=$MQ_RC): $( grep -o '"command"[^,}]*' "$MQ_HOME/.claude/settings.json" 2>/dev/null | head -1 )"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
