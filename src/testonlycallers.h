@@ -509,6 +509,70 @@ inline bool methodDispatchedElsewhere( const IngestResult& ing, const Symbol& s,
     return !owner.empty() && std::ranges::binary_search( basedTypes, owner, sortutil::svLess );
 }
 
+// A def a decorator, annotation or attribute sits on: `@GrpcMethod(...)` / `@app.route(...)` / `@Override` / `#[get("/")]` / C# `[HttpGet]`.
+// A framework registers such a def and calls it (a NestJS gRPC handler, a Flask route, a Spring override); the call is no source line, so
+// "every indexed caller is a test" cannot be said of it. Read from the text just before the def's signature (modifier words may sit between).
+inline bool precededByDecorator( std::string_view text, std::size_t sigStart ) noexcept
+{
+    const auto isIdent  = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '$' || c == '.'; };
+    const auto skipBack = [ & ]( std::size_t i ) noexcept
+    {
+        while( i > 0 && std::isspace( static_cast<unsigned char>( text[ i - 1 ] ) ) ) { --i; }
+        return i;
+    };
+    const auto matchOpen = [ & ]( std::size_t close, char open, char shut ) noexcept   // index of the bracket opening the one closed at `close`, else npos
+    {
+        int depth = 0;
+        for( std::size_t j = close + 1; j-- > 0; )
+        {
+            depth += text[ j ] == shut ? 1 : text[ j ] == open ? -1 : 0;
+            if( depth == 0 ) { return j; }
+        }
+        return std::string_view::npos;
+    };
+    static constexpr std::string_view kModifiers[] = { "public", "private", "protected", "static", "async", "readonly", "override", "abstract", "export",
+                                                       "default", "final", "virtual", "unsafe", "pub" };
+    std::size_t i = std::min( sigStart, text.size() );
+    for( int hop = 0; hop < 6; ++hop )
+    {
+        i = skipBack( i );
+        if( i == 0 ) { return false; }
+        const char c = text[ i - 1 ];
+        if( c == ')' || c == ']' )
+        {
+            const std::size_t open = matchOpen( i - 1, c == ')' ? '(' : '[', c );
+            if( open == std::string_view::npos ) { return false; }
+            std::size_t b = skipBack( open );
+            if( c == ']' )
+            {   // `#[get("/")]` (Rust), `[HttpGet]` on a line of its own (C#); `x[ i ]` is an index
+                return open > 0 && ( text[ open - 1 ] == '#' || ( b < open && text.substr( b, open - b ).find( '\n' ) != std::string_view::npos ) );
+            }
+            std::size_t a = b;
+            while( a > 0 && isIdent( text[ a - 1 ] ) ) { --a; }
+            return a < b && a > 0 && text[ a - 1 ] == '@';
+        }
+        if( !isIdent( c ) ) { return false; }
+        std::size_t a = i;
+        while( a > 0 && isIdent( text[ a - 1 ] ) ) { --a; }
+        if( a > 0 && text[ a - 1 ] == '@' ) { return true; }   // a bare decorator / annotation: `@Override`, `@staticmethod`
+        if( std::ranges::find( kModifiers, text.substr( a, i - a ) ) == std::end( kModifiers ) ) { return false; }
+        i = a;
+    }
+    return false;
+}
+
+// FOR-TONLY fix round 2: drop every row whose def carries a decorator / annotation / attribute (precededByDecorator). --dead-code keeps its
+// own Python rule (pythonDecoratedDef, decorated-excluded=); --for asks it of every language. An unreadable file drops its rows.
+inline void dropDecoratedDefs( const IngestResult& ing, std::vector<NodeId>& testOnly )
+{
+    std::erase_if( testOnly, [ & ]( NodeId id )
+    {
+        const Symbol&                    def  = ing.symbols[ id ];
+        const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, def.fileId ) );
+        return !text || precededByDecorator( *text, def.sigStartByte );
+    } );
+}
+
 // ── --for task gate G3: the attribute rides a row only where the question can use it ──────────────────────────────────────────
 
 inline bool tonlyUseWord( std::string_view w ) noexcept
@@ -714,6 +778,7 @@ inline std::vector<std::uint8_t> computeTestOnlyCallers( const IngestResult& ing
     if( !cands.empty() )
     {
         dropTestOnlyEntryPoints( ing, cands );   // a package manifest's console_scripts / plugin target is an in-tree call no source spells
+        dropDecoratedDefs( ing, cands );         // a decorated / annotated def is registered with a framework that calls it
     }
     if( cands.empty() )
     {

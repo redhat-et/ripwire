@@ -979,4 +979,51 @@ if [ -n "$( row "$TMP/c5a.txt" Hono.mountApp )" ] && ! has "$TMP/c5a.txt" Hono.m
 c2run g3 "internal/sign package" > "$TMP/c5b.txt"
 if has "$TMP/c5b.txt" rsaSign; then ok "C5 the path token 'internal/sign' names internal/sign/rsa.go at segment boundaries: tonly kept"; else no "C5 internal/sign lost tonly: $( row "$TMP/c5b.txt" rsaSign )"; fi
 
+# C6 a decorated / annotated def is registered with a framework (a NestJS gRPC handler, a Flask route): only tests call it by name, a framework calls it
+mkdir -p "$C2D/dec/src" "$C2D/dec/test" "$C2D/dec/pkg" "$C2D/dec/tests"
+cat > "$C2D/dec/src/ctl.ts" <<'P'
+import { Controller, GrpcStreamCall } from '@nestjs/microservices';
+
+@Controller()
+export class Ctl {
+  @GrpcStreamCall('svc')
+  async relaySyncCall(stream: any) { return stream }
+
+  @GrpcStreamCall(
+    'svc',
+  )
+  relayWrapped(stream: any) { return stream }
+
+  relayPlainCall(x: number) { return x }
+}
+P
+cat > "$C2D/dec/test/ctl.test.ts" <<'P'
+import { Ctl } from '../src/ctl'
+test('ctl', async () => { const c = new Ctl(); await c.relaySyncCall(1); c.relayWrapped(2); c.relayPlainCall(3) })
+P
+: > "$C2D/dec/pkg/__init__.py"
+cat > "$C2D/dec/pkg/web.py" <<'P'
+from flask import app
+
+
+@app.route("/x")
+def relay_routed(x):
+    return x
+
+
+def relay_plain_c(x):
+    return x
+P
+cat > "$C2D/dec/tests/test_web.py" <<'P'
+from pkg.web import relay_routed, relay_plain_c
+
+
+def test_web():
+    assert relay_routed(1) == 1
+    assert relay_plain_c(1) == 1
+P
+c2run dec "relaySyncCall relayWrapped relayPlainCall relay_routed relay_plain_c callers" > "$TMP/c6.txt"
+c2check C6 dec "$TMP/c6.txt" relay_plain_c Ctl.relaySyncCall Ctl.relayWrapped relay_routed
+if has "$TMP/c6.txt" Ctl.relayPlainCall; then ok "C6 an undecorated method of the same class stays flagged (second control)"; else no "C6 Ctl.relayPlainCall lost tonly: $( row "$TMP/c6.txt" Ctl.relayPlainCall )"; fi
+
 [ "$fail" = 0 ] && echo "fortonlycheck: ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }
