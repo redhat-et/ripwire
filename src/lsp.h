@@ -65,6 +65,55 @@ inline constexpr std::size_t kLspHoverDefCap    = 8u;     // definitions rendere
 inline constexpr std::size_t kLspHoverUseCap    = 8u;     // use-site links rendered in one hover
 inline constexpr std::size_t kLspWorkspaceCap   = 20u;    // workspace/symbol picker rows (D9)
 
+namespace
+{
+// task E: the client-declaration alias map — loaded once by runLsp before the first request can read a
+// hint. A header-file static is single-instance here the way the single-TU build makes every header
+// static; the loop serves one request at a time, so it never races, and config changes need a server
+// restart (disclosed by the startup line below).
+rw::lspmap::LangMap gLangMap;
+
+// The recorded declaration for an open document, keyed by DISK PATH: fileIds are crawl order and can shift
+// when the index rebuilds inside a server lifetime (a file lands later in the sorted order) — a path does not.
+// Last record wins: a re-opened buffer re-declares.
+inline std::string lspDeclaredLang( std::string_view path, std::string_view echoed )
+{
+    if( !echoed.empty() )
+    {
+        return std::string( echoed );   // a request that re-declares speaks for itself (VSCode-family echo)
+    }
+    const std::vector< std::pair< std::string, std::string > >& d = gLangMap.decls;   // one store; the loop is serial
+    for( auto it = d.rbegin(); it != d.rend(); ++it )
+    {
+        if( it->first == path )
+        {
+            return it->second;   // the didOpen record
+        }
+    }
+    return {};
+}
+
+// The document lane's context anchor: the INDEXED language by default, replaced by the client's
+// declaration only where (a) the id maps through gLangMap to a real tag and (b) the file's suffix is
+// in the overridable set — by default the .h family, where langOfPath only states a convention. The
+// raw client string dies at this line: what flows onward is a ripwire Lang and a named origin.
+inline rw::LangAnchor langidSubstitute( std::string_view path, std::string_view echoed )
+{
+    const rw::Lang indexed = rw::langOfPath( path );
+    if( const std::optional<rw::Lang> mapped = rw::lspmap::mapLanguageId( gLangMap, lspDeclaredLang( path, echoed ) ); mapped.has_value() )
+    {
+        for( const std::string& suffix : gLangMap.overrule )
+        {
+            if( path.size() >= suffix.size() && path.compare( path.size() - suffix.size(), suffix.size(), suffix ) == 0 )
+            {
+                return { *mapped, rw::AnchorOrigin::Client };
+            }
+        }
+    }
+    return { indexed, rw::AnchorOrigin::Context };
+}
+}   // namespace
+
 struct LspFrame
 {
     bool        eof       = false;   // stream ended (or framing broke) — the session closes
@@ -132,11 +181,11 @@ inline std::string lspLogMessageFrame( const std::string& message )
 // The picker's cap, disclosed (#279 review, @mpapis): a query matching more than kLspWorkspaceCap rows answers the first
 // kLspWorkspaceCap and says how many it left out in a window/logMessage (type 3, Info) sent just before the response,
 // the one channel LSP gives a result that has no truncation field. test/lspcheck.sh arm (17).
-inline std::string lspWorkspaceCapNotice( const std::string& query, std::size_t total )
+inline std::string lspWorkspaceCapNotice( const std::string& query, std::size_t total, const std::string& suffix = {} )
 {
     return lspLogMessageFrame( "ripwire: workspace/symbol shows the first " + std::to_string( kLspWorkspaceCap )
         + " of " + std::to_string( total ) + " matches for '" + rw::mcpdetail::jsonEscape( query )
-        + "'; refine the query to see the rest" );
+        + "'; refine the query to see the rest" + suffix );   // D4: the anchor clause rides the cap notice when both apply, so one query never sends two infos (arm (17) counts exactly one)
 }
 
 // The multi-def disclosure (RIPWIRE-RUBY task C): a name with more than one definition answers the picker with
@@ -436,12 +485,16 @@ struct LspPos
     bool           ok = false;
     std::string    uri;
     std::uint32_t  line = 0, ch = 0;
+    std::string    langId;   // task E: didOpen.languageId — the client's declaration for this document, read
+                             // wherever a request carries a textDocument object (Zed does not echo it; the
+                             // didOpen record and VSCode-family echoes do)
 };
 
 inline LspPos lspReadPos( const std::string& params )
 {
     LspPos p;
     p.uri = lspDocUri( params );
+    p.langId = rw::mcpdetail::findString( rw::mcpdetail::findObject( params, "textDocument" ), "languageId" );
     const std::string pos = rw::mcpdetail::findObject( params, "position" );
     const rw::mcpdetail::RawValue lv = rw::mcpdetail::findRawValue( pos, "line" );
     const rw::mcpdetail::RawValue cv = rw::mcpdetail::findRawValue( pos, "character" );
@@ -464,12 +517,14 @@ struct LspAtCursor
     std::uint32_t  fileId = 0;
     std::size_t    byte   = 0;
     bool           hasByte = false;
+    std::string    langId;   // task E: the client's declaration for this document (carried from lspReadPos)
 };
 
 inline LspAtCursor lspAtCursor( const rw::IngestResult& ing, const std::string& cwd, LspDocs& docs,
                                 const LspPos& pos )
 {
     LspAtCursor r;
+    r.langId = pos.langId;
     std::uint32_t fileId = 0;
     if( !lspFindFile( ing, cwd, pos.uri, fileId ) ) return r;
     const LspDoc& d = docs.get( fileId );
@@ -542,7 +597,7 @@ inline LspDefinitionAnswer lspDefinition( const rw::IngestResult& ing, const std
 {
     const LspAtCursor at = lspAtCursor( ing, cwd, docs, pos );
     if( !at.found ) return { "null", {} };
-    const std::vector<rw::NodeId> defs = rw::resolveAllByName( ing, at.name );
+    const std::vector<rw::NodeId> defs = rw::resolveAllByName( ing, at.name, langidSubstitute( ing.files[ at.fileId ], at.langId ) );   // task E: declaration-aware context anchor (see langidSubstitute)
     LspDefinitionAnswer ans;
     if( defs.size() > 1 ) ans.notice = lspMultiDefNotice( at.name, defs.size() );   // the (19) disclosure, one per split name
     std::string           out  = "[";
@@ -566,7 +621,7 @@ inline std::string lspReferences( const rw::IngestResult& ing, const rw::Graph& 
 {
     const LspAtCursor at = lspAtCursor( ing, cwd, docs, pos );
     if( !at.found ) return "[]";
-    const std::vector<rw::NodeId> defs = rw::resolveAllByName( ing, at.name );
+    const std::vector<rw::NodeId> defs = rw::resolveAllByName( ing, at.name, langidSubstitute( ing.files[ at.fileId ], at.langId ) );   // task E: same substitution as --definition
     const UsesSelector            sel  = resolveUsesSelector( ing, at.name, defs );
     const auto                    got  = collectUseSites( ing, sel, std::span<const char>{}, std::string_view{}, defs, nullptr, g.keptForwards );   // kept forwards count, as on --uses and the hover
 
@@ -704,7 +759,7 @@ inline std::string lspDocumentSymbol( const rw::IngestResult& ing, const std::st
 // kLspWorkspaceCap matches in that order; every match is still COUNTED into `totalOut`, so the caller can disclose a
 // cut (lspWorkspaceCapNotice) — a SymbolInformation[] has no field that could say "and N more".
 inline std::string lspWorkspaceSymbol( const rw::IngestResult& ing, const std::string& cwd, LspDocs& docs,
-                                       std::string_view query, std::size_t& totalOut )
+                                       std::string_view query, std::size_t& totalOut, rw::LangAnchor* anchorOut = nullptr )
 {
     totalOut = 0;
     if( query.empty() ) return "[]";   // Q3: an empty picker query is not an outline dump
@@ -743,7 +798,7 @@ inline std::string lspWorkspaceSymbol( const rw::IngestResult& ing, const std::s
         first = false;
         out += itemJson( s );
     };
-    for( const rw::NodeId id : rw::resolveAllByName( ing, query ) )
+    for( const rw::NodeId id : rw::resolveAllByName( ing, query, {}, anchorOut ) )
     {
         if( id >= ing.symbols.size() || seen[ id ] ) continue;
         seen[ id ] = 1;
@@ -805,7 +860,7 @@ inline void lspAppendSiteTier( std::string& md, const rw::IngestResult& ing, con
 // the same containment resolveAtSeed applies to a line seed.
 inline std::vector<rw::NodeId> lspHoverDefs( const rw::IngestResult& ing, const LspAtCursor& at )
 {
-    std::vector<rw::NodeId> defs = rw::resolveAllByName( ing, at.name );
+    std::vector<rw::NodeId> defs = rw::resolveAllByName( ing, at.name, langidSubstitute( ing.files[ at.fileId ], at.langId ) );   // task E: hover's markdown is prose over the same substituted tower
     if( !defs.empty() || !at.hasByte ) return defs;
     const rw::Symbol* best = nullptr;
     for( const rw::Symbol& s : ing.symbols )
@@ -937,14 +992,85 @@ inline std::string lspCapabilitiesJson()
            "\"serverInfo\":{\"name\":\"ripwire\",\"version\":\"" + lspEscape( v ) + "\"}}";
 }
 
+// task E: record a didOpen declaration for its file, or do nothing. The method check lives HERE (the
+// loop calls it for every notification and pays for getIndex only on didOpen), the notification carries
+// no position so the document object is parsed by its own shape (lspReadPos would refuse it), and
+// didChange keeps the record: a language does not change under an open buffer. It sits here because
+// lspDocUri/lspFindFile are defined above.
+inline void lspRecordDidOpen( const std::string& root, const std::string& cwd, const std::string& method, const std::string& params )
+{
+    if( method != "textDocument/didOpen" || root.empty() )
+    {
+        return;   // and before initialize there is no root: getIndex("") would build against the WRONG corpus
+    }
+    const rw::McpIndex&   mix        = rw::getIndex( root );
+    const std::string     openUri    = lspDocUri( params );
+    const std::string     openLangId = rw::mcpdetail::findString( rw::mcpdetail::findObject( params, "textDocument" ), "languageId" );
+    std::uint32_t         fileId     = 0;
+    if( openUri.empty() || openLangId.empty() || !lspFindFile( mix.ing, cwd, openUri, fileId ) )
+    {
+        return;
+    }
+    const std::string recPath = mix.ing.files[ static_cast< std::size_t >( fileId ) ];
+    for( auto it = gLangMap.decls.rbegin(); it != gLangMap.decls.rend(); ++it )
+    {
+        if( it->first == recPath )
+        {
+            it->second = openLangId;   // re-open: the newest declaration owns the record
+            return;
+        }
+    }
+    gLangMap.decls.emplace_back( recPath, openLangId );
+}
+
+// workspace/symbol as a function (task E pass-2): the loop's fattest branch — refusal (30), cap (17),
+// anchor (29), fallback (28) and empty-answer (34) disclosures — moved verbatim out of runLsp, which
+// entered the wave at complexity 85 and had grown to 109 across D4/D5/E. Same writes, same order:
+// notice frames go to stdout BEFORE the response is returned; the loop writes the response as for the
+// other lanes. Def lane's LspDefinitionAnswer carries the same pattern (notices ahead of result).
+inline std::string lspHandleWorkspaceSymbol( const rw::McpIndex& mix, const std::string& cwd, const std::string& params )
+{
+    const std::string       query = rw::mcpdetail::findString( params, "query" );
+    const rw::NameSuffixSplit qs  = rw::nameSuffixSplit( query );
+    if( qs.badTag && rw::suffixActsAsSelector( mix.ing, query, qs ) )
+    {
+        // (30, task D5): a bad @lang tail refuses WITH the known tags — one notice ahead of an empty
+        // result. The resolver already returns empty for this shape; the refusal is the disclosure that
+        // the tail was read as a language and REJECTED, never silently ignored.
+        lspWriteMessage( stdout, lspLogMessageFrame( "ripwire: unknown language after @ in '" + rw::mcpdetail::jsonEscape( query )
+            + "'; nothing answers. known languages (tags): " + rw::knownLangTags() ) );
+        return "[]";
+    }
+    LspDocs             docs( mix.ing );
+    std::size_t         total = 0;
+    rw::LangAnchor      wsAnchor;
+    const std::string   items = lspWorkspaceSymbol( mix.ing, cwd, docs, query, total, &wsAnchor );
+    // Task D4 (arms (28)(29)(32)): the language the answer anchored to rides the one channel a
+    // SymbolInformation[] has — a notice ahead of the response. When the cap notice already speaks it
+    // joins that sentence instead of adding a second one; a foreign fallback SAYS so in the same place.
+    const std::string   wsClause = wsAnchor.active()
+        ? std::string( " \u2014 reflang=\\\"" ) + rw::langTag( wsAnchor.lang ) + "\\\" origin=\\\"" + rw::anchorOriginName( wsAnchor.origin ) + "\\\""
+        : std::string();
+    if( total > kLspWorkspaceCap ) lspWriteMessage( stdout, lspWorkspaceCapNotice( query, total, wsClause ) );
+    else if( wsAnchor.active() && total > 0 )   // an empty answer discloses nothing — there is no foreign pick to name (arm (34))
+        lspWriteMessage( stdout, lspLogMessageFrame( wsAnchor.fellBack
+            ? "ripwire: the matching language holds no definition; " + std::to_string( wsAnchor.others ) + " in others, answering anyway" + wsClause
+            : "ripwire: answer anchored" + wsClause ) );
+    return items;
+}
+
 // The runLsp loop — shape of runMcp(): read a frame, handle it, write the response, fflush. Lifecycle
 // per the LSP 3.x state machine: initialize → initialized → … → shutdown → exit. didChange content is
 // read by NOBODY in Phase 1 — the saved-state contract lives in the file header above.
-inline int runLsp( const std::string& cliRoot )
+inline int runLsp( const std::string& cliRoot, std::string_view langMapPath )
 {
     const std::string cwd = lspStartupCwd();
     bool              initialized = false, shutDown = false;
     std::string       root;
+    // task E: the client's declared language, recorded per OPEN document by fileId (didOpen is the only
+    // writer; answers keep reading saved state — this map holds a STRING the client typed, nothing more).
+    gLangMap = rw::lspmap::loadLangMap( langMapPath, cliRoot );   // once per session, before any hint can be read
+    rw::lspmap::discloseMap( gLangMap );
 
     for( ;; )
     {
@@ -1015,6 +1141,7 @@ inline int runLsp( const std::string& cliRoot )
             // notifications: no response, per the protocol. Phase 1 records open/close nowhere — answers
             // read only saved state — and $/cancelRequest has nothing to cancel: the loop serves one
             // request at a time; a Phase-2 multiplexed transport would answer -32800.
+            lspRecordDidOpen( root, cwd, method, params );   // the ONE thing Phase 1 records; method-checked inside
         }
         else if( method == "shutdown" )
         {
@@ -1064,13 +1191,7 @@ inline int runLsp( const std::string& cliRoot )
         }
         else if( method == "workspace/symbol" )
         {
-            const rw::McpIndex& mix = rw::getIndex( root );
-            LspDocs         docs( mix.ing );
-            const std::string   query = rw::mcpdetail::findString( params, "query" );
-            std::size_t         total = 0;
-            const std::string   items = lspWorkspaceSymbol( mix.ing, cwd, docs, query, total );
-            if( total > kLspWorkspaceCap ) lspWriteMessage( stdout, lspWorkspaceCapNotice( query, total ) );
-            resp = lspResultJson( id.token, items );
+            resp = lspResultJson( id.token, lspHandleWorkspaceSymbol( rw::getIndex( root ), cwd, params ) );   // notices write inside, ahead of this response
         }
         else if( method == "textDocument/hover" )
         {

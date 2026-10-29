@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -241,6 +242,10 @@ struct LangFacts
     /// Python: a string literal as a function's FIRST statement is its docstring, not code; hopbody.h bodyStatementLines does not
     /// count it (lane path-hop-body-fix1, review F4: a documented one-line delegator is still thin).
     bool leadingDocstring = false;
+    /// The language whose bare-name world this one shares (C/ObjC with C++, Kotlin with Java); empty =
+    /// alone. langCompatible's edge rule and the display order's family tier both read it, through
+    /// langFamilyOf below — one per-Lang row, the single source CONTRIBUTING's language-facts rule asks for.
+    std::optional<Lang> edgeFamily = {};
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -249,7 +254,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .memberSeparator = "::",
-      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true },
+      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .edgeFamily = Lang::C },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
@@ -258,7 +263,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .instanceReceiver = "self" },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .edgeFamily = Lang::C },
     { .lang = Lang::Markdown, .linkSections = true },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true },
@@ -279,7 +284,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Elixir, .hasInertQuoteRegions = true },
     { .lang = Lang::Dart },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
-      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly },
+      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly, .edgeFamily = Lang::Java },
     { .lang = Lang::GDScript },
     { .lang = Lang::Clojure },
 } };
@@ -298,6 +303,20 @@ static_assert( firstMisorderedRow( kLangFacts ) == kLangCount, "kLangFacts: one 
 inline constexpr LangFacts langFacts( Lang l ) noexcept
 {
     return enumTableAt( kLangFacts, l, LangFacts { .lang = Lang::Unknown } );
+}
+
+// The edge-bridging family of `l` (task D's table, folded into the facts row per CONTRIBUTING's
+// one-row-per-language rule): langFamilyOf(a) == langFamilyOf(b) is exactly the bare-name admission
+// graph.h's langCompatible decides — {C, C++, ObjC} share a world, {Java, Kotlin} share one, every
+// other language is alone. The display order's SECOND tier reads this: a middle ground between "this
+// language" and "all languages", never a synonym for either. The pair-for-pair equivalence assert in
+// graph.h proves the data cannot quietly drift from the edge rule it mirrors — the derived-table lesson
+// the repo already learned once (htmlexport's langColor carried 9 keys against langTag's 19).
+constexpr std::uint8_t langFamilyOf( Lang l ) noexcept
+{
+    const std::size_t i = static_cast<std::size_t>( l );
+    return i < kLangCount ? static_cast< std::uint8_t >( static_cast< std::size_t >( langFacts( l ).edgeFamily.value_or( l ) ) )
+                          : static_cast< std::uint8_t>( i );   // past the enum: its own singleton, like isCodeLang
 }
 
 }   // namespace rw

@@ -479,7 +479,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // defs= names resolveFocus's pick (graph.h), and the body preference there holds only IN THE DECLARATION'S SCOPE: a pure
     // virtual beside another class's override keeps the focus. Unconditional, this reading described that answer wrongly
     // (test/decltodefcheck.sh E3g, which also holds the full --around and --connect readings to the same condition).
-    { "defs",              "defs=N: of= names N defs; most-specific kind walked first, its language ahead, id last, code first, a C/C++ body in the same scope over its declaration", true, "r" },
+    { "defs",              "defs=N: of= names N defs; the anchor's exact language leads, its family next, then most-specific kind, id last; code first, a C/C++ body in the same scope over its declaration", true, "r" },
+    // reflang/reflang-origin are NOT defined here: the around first screen renders its verb-scoped dict (below,
+    // at the layer= "around" rows), and legendcoveragecheck (A) probes THAT document — MEASURED, not assumed.
     // The map HEADER's absent-at-zero gauges: `<!-- files=` is kept as data while the `<!-- hdr:` clauses that define
     // these fields go (kDeclinedMapLegend, kIgnoredLegend, kExtentSuspectHdrLegend, kMacroBlankedHdrLegend, the absent-if-0
     // half of the always-on legend, kMaxTokensFitLegend). Header-ONLY: several are quoted attributes elsewhere.
@@ -1610,6 +1612,15 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "f", MapHeaderRead::No, {}, "query" },
     // around: src/serialize.h (f layer= via builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "f", MapHeaderRead::No, {}, "around" },
+    // around: task D4 — the seed answer's LANGUAGE anchor, on the root row whenever an anchor decided the answer.
+    // legendcoveragecheck (A) settled where the definition belongs: the DEFAULT (compact) around doc renders the
+    // VERB-scoped dict below — not the shared map dict (the 466-area entries for reflang were invisible to the
+    // probe), and the full seed stanza is not in the default answer either. First screen, first responsibility.
+    { "reflang", "reflang=X: the language the answer ANCHORED to — its definitions lead the rows; reflang-origin= beside it says where X came from", true, "r", MapHeaderRead::No, {}, "around" },
+    { "reflang-origin", "reflang-origin=: explicit (the query's @lang suffix), context (the file the query asked from) or corpus (the language whose definitions own this name most in this root); under an explicit anchor that language cannot fill, foreign rows are served anyway and stderr says so", true, "r", MapHeaderRead::No, {}, "around" },
+    // D4 reflang/reflang-origin: the FULL legend defines them in the seed stanza itself (serialize.h, charged only
+    // when the row carries them) — the verb table proved NOT to reach around's first screen, and legendcoveragecheck
+    // (A) is what caught that. The COMPACT dialect rides the shared dict entries above.
     // for: src/serialize.h lens rows (d p= layer= via builtinLayer)
     { "layer", "layer=: built-in arch layer (game|infra|render|math|audio|ai|test) from a dir name in p=; absent if none", true, "d", MapHeaderRead::No, {}, "for" },
     // pack-task: src/serialize.h lens rows (d p= layer= via builtinLayer)

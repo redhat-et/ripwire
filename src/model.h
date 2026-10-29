@@ -291,6 +291,100 @@ inline constexpr bool isCodeLang( Lang l ) noexcept
     return false;   // a byte past the enum (a corrupt cache value) is not a language
 }
 
+// The edge-bridging families are ONE column of the LangFacts row now (langfacts.h::edgeFamily, surfaced
+// by langFamilyOf there) — task D kept a second per-Lang table beside kLangFacts until #440's review
+// folded it in; the equivalence guard lives in graph.h beside langCompatible, where it always did.
+
+// langTag inverted (task D): the @lang selector's vocabulary is exactly the tags the emitter prints — a linear
+// scan over the 25 languages, called once per suffixed query, so the only cost is never a second tag list to drift
+// (the htmlexport langColor lesson again: 9 hand keys against 19 tags). The pair of asserts below makes the parser
+// and the emitter ONE source: an appended Lang without a distinct tag, or a tag that does not parse back, is a
+// build error, not a selector that silently never matches.
+//
+// tagEq compares the tags BYTE BY BYTE, never through string_view::operator==: that operator may short-circuit on
+// data-pointer equality, and comparing the addresses of two distinct literals has unspecified value — an OK answer
+// for runtime code, but it takes the constexpr verifier below out of constant-expression land on every compiler
+// that keeps the shortcut (CI's clang/gcc-13; newer libstdc++ alone made the container builds lie).
+constexpr bool tagEq( std::string_view a, std::string_view b ) noexcept
+{
+    if( a.size() != b.size() )
+    {
+        return false;
+    }
+    for( std::size_t i = 0; i < a.size(); ++i )
+    {
+        if( a[ i ] != b[ i ] )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+constexpr bool langFromTag( std::string_view tag, Lang& out ) noexcept
+{
+    // Case-tolerance is PARSE-only (arm (36), task D5): @CPP and @C resolve to the same languages @cpp and @c do.
+    // The emitted tag keeps one canonical spelling everywhere (langTag), so a disclosure lane never grows variants —
+    // leniency where a human types, exactness where a machine reads.
+    char low[ 16 ];
+    if( tag.empty() || tag.size() > sizeof( low ) )
+    {
+        return false;   // no tag is 16+ bytes; oversized tails are not languages
+    }
+    for( std::size_t i = 0; i < tag.size(); ++i )
+    {
+        low[ i ] = ( tag[ i ] >= 'A' && tag[ i ] <= 'Z' ) ? static_cast< char >( tag[ i ] + 32 ) : tag[ i ];
+    }
+    const std::string_view v( low, tag.size() );
+    const std::size_t unknownIdx = static_cast< std::size_t >( Lang::Unknown );   // ONE index read, zero predicates (langidentity ratchet)
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        if( i == unknownIdx )
+        {
+            continue;   // "?" is langTag's DISPLAY fallback, not vocabulary: no selector may ask for Unknown
+        }
+        if( tagEq( v, langTag( static_cast< Lang >( i ) ) ) )
+        {
+            out = static_cast< Lang >( i );
+            return true;
+        }
+    }
+    return false;
+}
+namespace
+{
+constexpr bool kLangTagsUniqueAndRoundTrip = []
+{
+    const std::size_t unknownIdxA = static_cast< std::size_t >( Lang::Unknown );   // index reads, not predicates
+    Lang probe = Lang::Unknown;
+    if( langFromTag( "?", probe ) )
+    {
+        return false;   // "?" must NOT parse as a selector — the display fallback is not vocabulary
+    }
+    for( std::size_t a = 0; a < kLangCount; ++a )
+    {
+        for( std::size_t b = a + 1; b < kLangCount; ++b )
+        {
+            if( tagEq( langTag( static_cast< Lang >( a ) ), langTag( static_cast< Lang >( b ) ) ) )
+            {
+                return false;   // two languages, one tag: a selector could not address them apart
+            }
+        }
+        if( a == unknownIdxA )
+        {
+            continue;           // Unknown's tag is the display fallback; its refusal is pinned above
+        }
+        Lang back = Lang::Unknown;
+        if( !langFromTag( langTag( static_cast< Lang >( a ) ), back ) || back != static_cast< Lang >( a ) )
+        {
+            return false;   // an emitted tag the parser cannot route home
+        }
+    }
+    return true;
+}();
+static_assert( kLangTagsUniqueAndRoundTrip, "every Lang has a unique short tag and langFromTag(langTag(l)) == l" );
+} // namespace
+
 // Call-site RECEIVER classification (P2-D one-hop type narrowing). Captured at ingest from the AST shape
 // of `recv.method()` / `recv->method()` so resolve.h can narrow BEFORE the ambiguous §2a name spray:
 //   None    — a bare call `f()` or a qualified `A::f()` (no receiver expr) → §2a ladder, unchanged.

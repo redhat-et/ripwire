@@ -1906,6 +1906,10 @@ struct MapAnnotations
         // neighbourhood the bounds did not clip is byte-identical to before (presence has to mean something).
         std::uint32_t fanoutCut      = 0;       // symbols the fanout cap dropped that are absent from the whole answer (exact)
         bool          depthTruncated = false;   // ≥1 symbol one hop past the last emitted hop is absent
+        // Task D4: the language the seed answer ANCHORED to, and where that language came from. Null pair on every
+        // map and every un-anchored seed (byte-free); arms A1/A6 pin the row, (28)/A5 pin the fallback sentence.
+        const char*   reflang        = nullptr;   // langTag of the anchor (a static string — never freed, never escaped)
+        const char*   reflangOrigin  = nullptr;   // anchorOriginName: explicit / context / corpus
         // H1: the decl→def residue of a file:name seed — same-named definitions the selector found and could not tie to the
         // file it named, so the walk never started from them. unproven_defs= beside defs= and its clause in the legend,
         // both absent at zero (graphlegend.h unprovenDefsAttrXml / unprovenDefsVerbComment).
@@ -3348,6 +3352,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                   "ahead, id last: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
                   "the first bodied definition of its scope in that order); qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
+        if( ann.seed.reflang != nullptr )   // D4: the FULL dialect's definition for the anchor pair — legendcoveragecheck (A) flags the --legend=full row when the seed stanza is silent,
+            legend += std::string( "<!-- reflang=" ) + ann.seed.reflang + " names the language this answer ANCHORED to (its definitions lead the rows); reflang-origin=" + ann.seed.reflangOrigin
+                + " says where it came from — explicit (the query's @lang), context (the asked-from file), corpus (the language defining this name most here); a disclosed foreign fallback rides stderr. -->";   // charged only when the row carries the attributes (seedBiteLegend's rule)
         legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
         // H1: charged only on a run whose root carries unproven_defs= — the same rule, and part of the head est_tokens prices.
         legend += unprovenDefsVerbComment( UnprovenDefsVerb::Around, ann.seed.unprovenDefs > 0, "<!-- ripwire around: " );
@@ -3594,6 +3601,11 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
             if( ann.seed.defs > 1 ) { h += " defs=\"";  h += std::to_string( ann.seed.defs );  h += "\""; }
             h += unprovenDefsAttrXml( ann.seed.unprovenDefs );   // H1: beside defs=, the rest of what the seed name resolved to
             h += seedBiteAttrs( ann.seed );   // C2: each bound's BITE, right after the bound it qualifies (empty when neither bit)
+            if( ann.seed.reflang != nullptr )   // D4: after the bite pair, same slot logic — the anchor qualifies the whole seed stanza
+            {
+                h += " reflang=\""; h += ann.seed.reflang;
+                h += "\" reflang-origin=\""; h += ann.seed.reflangOrigin; h += "\"";
+            }
         }
         // §A9.6: after at= (so gitstampcheck's `<r at="<sha>` byte sequence is unmoved) — see MapAnnotations.
         if( churnWindow != nullptr ) { h += " rank_by=\"";  h += ann.churnRankLabel;  h += "\" window=\"";  h += escapeXml( *churnWindow, esc );  h += "\""; }

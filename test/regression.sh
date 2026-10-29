@@ -268,6 +268,15 @@ else
     RIPWIRE_BIN="$BIN" bash "$ROOT/test/lspcheck.sh" 2>&1 | grep -E 'FAIL|SOME' | head -8
 fi
 
+# task D (language-first name answers): its CLI-lane gate is a dedicated standalone gate beside the
+# LSP-lane arms (27)-(36) that ride lspcheck above; the fixtures are read in place, no build needed.
+if RIPWIRE_BIN="$BIN" bash "$ROOT/test/langordercheck.sh" >/dev/null 2>&1; then
+    ok "language-first name-answer gate (test/langordercheck.sh)"
+else
+    no "language-first name-answer gate (test/langordercheck.sh failed)"
+    RIPWIRE_BIN="$BIN" bash "$ROOT/test/langordercheck.sh" 2>&1 | grep -E 'FAIL|ABOVE' | head -8
+fi
+
 # 3n) absorb gates (P3-B arch layer(), S6-A lint completion, S6-B swift purity, S5-C owners) — each a
 #     dedicated standalone gate; run with the binary under test (skip any not yet present).
 if RIPWIRE_BIN="$BIN" bash "$ROOT/test/codexdoctorcheck.sh" >/dev/null 2>&1; then

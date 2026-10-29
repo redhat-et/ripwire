@@ -10,6 +10,7 @@ SCRATCH = os.environ.get("RIPWIRE_SHOWCASE_SCRATCH") or tempfile.mkdtemp(prefix=
 BIN = "./build/ripwire"
 ABIN = os.path.join(REPO, "build", "ripwire")
 DIRTY = os.path.join(SCRATCH, "dirty")          # throwaway --local clone with ONE deliberate regression
+CLEAN = os.path.join(SCRATCH, "clean")          # throwaway clean clone: seeds the --show-stale contrast pair
 AUX = os.path.join(SCRATCH, "aux")
 
 # The capture is a SHIPPED document, so it goes through the SAME public-export scrub docs/COMMANDS.md
@@ -441,12 +442,12 @@ add(S4, f"{BIN} . --owners", "Bus-factor: recency-weighted author ownership per 
 add(S4, f"{BIN} . --dead-code=src", "Internal functions with no caller found in the index — a name-based graph reading, not a confidence score. NOTE the filter is a path-COMPONENT match: 'src' matches any .../src/... segment; use ./src to pin the root directory.")
 add(S4, f"{BIN} . --exercises=test/regression.sh", "Which symbols a TEST FILE exercises — the reverse direction of --affected.")
 add(S4, f"{BIN} . --community=0", "Drill into ONE call-graph community by id — the drill= the --communities output itself advertises.")
-add(S4, f"{BIN} . --quality-delta", onTree(
-    "On a CLEAN tree: nothing got worse, exit 0. The gating shape is in the sandbox section below.",
-    "Recorded against a DIRTY tree, so any row below is a real regression in the working copy — the recorded exit code says whether anything gated. The sandbox section below shows the same gating shape on a known, deliberate edit."))
-add(S4, f"{BIN} . --quality-delta --show-stale", onTree(
-    "The same clean verdict with what it folded printed back: every stale acknowledgement as an <sa kind= key= why=> row and the full header. The regression-free answer above keeps only stale= and stale_by_kind= (and stale_next= names this call), and folds only when that saves a quarter of the bytes. Refused without --quality-delta.",
-    "The same verdict with every stale acknowledgement printed as an <sa kind= key= why=> row and the full header — recorded against a DIRTY tree, so the rows above it are the working copy's. Refused without --quality-delta."))
+add(S4, f"{ABIN} . --quality-delta",
+    "The regression-free answer on a clone whose ledger holds stale acknowledgements (its HEAD's own history plus one demo row keyed to a finding that no longer measures as worse): the verdict-only document, every stale row collapsed to stale= and stale_by_kind=, with stale_next= naming the call below. Recorded in a throwaway clean clone so the contrast is structural — not a race with the release checkout's drift — and every regeneration on every machine sees the same pair.",
+    cwd=CLEAN)
+add(S4, f"{ABIN} . --quality-delta --show-stale",
+    "The same run, the same clone, the folded rows printed back: each stale acknowledgement as an <sa kind= key= why=> row under the full header — the demo row included, and no quarter of the bytes saved by silence. Refused without --quality-delta.",
+    cwd=CLEAN)
 add(S4, f"{BIN} . --edit-check=rankGraphTeleport", onTree(
     "Fast per-symbol post-edit contract check vs git HEAD (unchanged on a clean tree).",
     "Fast per-symbol post-edit contract check vs git HEAD — recorded against a DIRTY tree, so the verdict describes the working copy, not HEAD alone, and the recorded exit code is the working copy's."))
@@ -800,6 +801,19 @@ def mustReplace( text, old, new, what ):
 if os.path.isdir( DIRTY ):
     shutil.rmtree( DIRTY )
 subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, DIRTY ], check=True )
+# the clean sandbox for the --show-stale contrast pair: HEAD's own ledger + ONE demo ack row whose key
+# no current measurement produces — stale by construction, so the collapsed/restored contrast regenerates
+# identically on every machine instead of depending on whatever drift the release checkout happens to have
+if os.path.isdir( CLEAN ):
+    shutil.rmtree( CLEAN )
+subprocess.run( [ "git", "clone", "--local", "--quiet", REPO, CLEAN ], check=True )
+# the clone carries REPO's own origin/main ref, so --quality-delta measures the SAME range there as here
+# (objects already exist via --local; this is ref metadata, no network, no new objects) — without it the
+# range mis-resolves and every historical ack reads stale, which would demo the flag honestly badly
+subprocess.run( [ "git", "-C", CLEAN, "update-ref", "refs/remotes/origin/main",
+                  subprocess.run( [ "git", "-C", REPO, "rev-parse", "origin/main" ], capture_output=True, text=True ).stdout.strip() ], check=True )
+with open( os.path.join( CLEAN, ".ripwire_quality_acks" ), "a" ) as _ackf:
+    _ackf.write( "ack api-surface 0123456789abcdef 1 showcase demo row: no current finding carries this key, so it folds silently until --show-stale prints it back\n" )
 subprocess.run( "git branch zz-orphan-lane $(git commit-tree 'HEAD^{tree}' -m 'zz-orphan-lane: parentless probe branch for the no-merge-base bucket')",
                 shell=True, cwd=DIRTY, check=True )
 
@@ -972,7 +986,7 @@ doc.append(f"- **Sandbox diff** (the last section only): `{sandbox_diffstat}` �
 doc.append("")
 doc.append("**How to read the blocks:** ripwire's real XML output is minified — often ONE long line. For scanability, long minified lines are displayed re-wrapped with a line break at every tag seam (`><`). Header COMMENT lines (the legends) always appear in full — they are exempt from the per-line cut; any OTHER display line over 300 bytes is cut with a `… [line truncated: N more bytes]` marker, which can hit a long root element or row. `--plan-lanes` emits JSON and is re-wrapped at object seams the same way. Long outputs are cut to their first ~30 display lines with a `… [N more display lines; full output is M bytes]` marker giving the true size. Exit codes are recorded when non-zero; wall time when >1s.")
 doc.append("")
-doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` (the editor transport — its one-shot dialogues are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
+doc.append(f"**Not run (and why):** `ripwire <git-url>` (network clone), `--listen` / `--mcp-token` / `--allow-remote-edits` (the HTTP-server posture; `--mcp` itself IS captured in its own section as a one-shot stdio JSON-RPC exchange, and `wrap claude` shows the wiring), `--arch --baseline[-update]` (state writer against the read-only repo — `--note-add` / `--quality-baseline` / `--quality-ack` / the three edit verbs / `--edit-plan` ARE shown, inside the throwaway sandbox clone; `--index-out` / `--pin-census` write to scratch), `--eval-mined` (needs a `minedpair.jsonl` artifact from `bench/mine_traces.py`; none present in the tree), `--refetch` (git-url only), `--lsp` / `--lsp-langmap` (the editor transport and its language-map config — their one-shot dialogues, including every map and hint arm, are gated by `test/lspcheck.sh`, not by showcase blocks), `--max-memory` (the memory guard is silent on this repo by construction; its stops are gated by `test/memguardcheck.sh`), `--force` (wrap-only modifier), `--scan-skills` bare form (would sweep `~/.claude/skills`; the explicit-DIR form is shown instead), `--help` ({help_line_count} lines — read it from the binary).")
 doc.append("")
 
 cur_section = None
