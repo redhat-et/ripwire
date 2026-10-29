@@ -4872,6 +4872,17 @@ inline constexpr std::string_view kForEndLineLegend =
     "; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known "
     "(extent_suspect, docs, config), never 0; l= is the line of the definition's name, so a definition can start above l=";
 
+// FOR-TONLY: the clauses defining tonly="1" on a <d> row, present-only (a document whose ranked head holds a function whose
+// every indexed caller is a test), in both --for dialects and the MCP twin. They say what it does NOT mean: no tonly= is not a
+// claim of a library caller (a function with no caller at all has neither), and the flag is one hop, not reachability.
+// No double hyphen: they ride inside an XML comment.
+inline constexpr std::string_view kForCompactTonlyLegend =
+    "; d tonly=1 every caller (in=) is a test, none in library code";
+inline constexpr std::string_view kForTonlyLegend =
+    "; tonly=\"1\" on a d row: every indexed caller of that function is test code (a test path or an in-file test scope; in= counts "
+    "them) and no library caller or value use was found; a function with no caller has no tonly=. It is one hop, not reachability, "
+    "and a call the index does not attribute (an aliased import, dynamic dispatch) is invisible, so verify before deleting";
+
 // The " e=\"N\"" run, spliced into a rendered <d …> head right after its l= value (the head always opens `<d l="N"`,
 // sigRowHead). Kept OUT of the head the budget ledger measures, so the ranked set a row budget admits is the one it
 // admitted before e= existed (owner ruling: exempt from the signature-row budget; its bytes are reported,
@@ -5896,6 +5907,9 @@ inline void pushShownSigId( std::vector<NodeId>* shownIdsOut, const std::vector<
 struct SigRowSpelling
 {
     bool elideZeroMetrics = false;   // omit a zero cx=/ccx=/in= on a row (SigRowFacts::elideZero); the legend says absent = 0
+    // FOR-TONLY: per symbol, 1 = every indexed caller is a test (testonlycallers.h computeTestOnlyCallers); the --for lens
+    // prints tonly="1" on that row. nullptr / short / 0 ⇒ no attribute (pack-task, from-trace and the map stay as they were).
+    const std::vector<std::uint8_t>* testOnlyCallers = nullptr;
 };
 
 inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::vector<float>& rank,
@@ -6192,6 +6206,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                     if( tested && id < tested->size() && (*tested)[id] )
                     {
                         appendf( " tested=\"1\"" );
+                    }
+                    if( spelling.testOnlyCallers && id < spelling.testOnlyCallers->size() && ( *spelling.testOnlyCallers )[id] )
+                    {
+                        appendf( " tonly=\"1\"" );   // FOR-TONLY: after tested=, in the same charged run
                     }
                 }
 
@@ -6538,6 +6556,10 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                 if( tested && id < tested->size() && (*tested)[id] )
                 {
                     appendf( " tested=\"1\"" );
+                }
+                if( spelling.testOnlyCallers && id < spelling.testOnlyCallers->size() && ( *spelling.testOnlyCallers )[id] )
+                {
+                    appendf( " tonly=\"1\"" );   // FOR-TONLY: the flat (non-ladder) path spells it the same way
                 }
             }
 
@@ -11407,6 +11429,8 @@ struct JsonSigLens
     bool                              docsAfterCode       = false;     // the XML sibling's SigLensRules::DocsAfterCode
     bool                              headRoundRobin      = false;     // the XML sibling's SigLensRules::HeadRoundRobin
                                                                        // (reorderDocsAfterCode) — --for only.
+    const std::vector<std::uint8_t>*  testOnlyCallers     = nullptr;   // FOR-TONLY: the XML sibling's SigRowSpelling::testOnlyCallers
+                                                                       // — a "tonly":true key after "tested"; nullptr ⇒ none.
 };
 
 // "e" right after "l" in a JSON row head (the XML sibling's writeSigHeadWithEnd; the head always opens {"l":N). 0 ⇒ untouched.
@@ -11466,6 +11490,10 @@ inline std::string jsonSigRowHead( const IngestResult& ing, NodeId id, std::uint
     if( lens.tested && id < lens.tested->size() && ( *lens.tested )[id] )
     {
         head += ",\"tested\":true";
+    }
+    if( lens.testOnlyCallers && id < lens.testOnlyCallers->size() && ( *lens.testOnlyCallers )[id] )
+    {
+        head += ",\"tonly\":true";   // FOR-TONLY: every indexed caller is a test (the XML tonly=\"1\")
     }
     if( pureSig )
     {

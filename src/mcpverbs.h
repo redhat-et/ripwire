@@ -21,6 +21,7 @@
 #include "redact.h"        // RedactCounts — the per-request redaction tally threaded through the body/doc verbs
 #include "forpage.h"    // L-W: the --for file page, coverage= and the thin rule — shared with the CLI twin
 #include "forowner.h"   // for-body-slot: the one owner body of an explanatory question — shared with the CLI twin
+#include "testonlycallers.h"   // FOR-TONLY: computeTestOnlyCallers — the CLI twin's tonly="1" verdict, one predicate
 #include "packtask.h"      // L4: the shared --pack-task / MCP explore+pack_task bundle assembler (packTaskBundleText)
 #include "partition.h"     // the explore verb's `partition` argument (packTaskPartitionText)
 #include "tracelocus.h"    // L4: the shared --from-trace / MCP from_trace bundle assembler (fromTraceBundleText)
@@ -2122,6 +2123,7 @@ struct McpForAssemblyInputs   // forTaskText's locals the assembly reads, by ref
     const LexTermEvidence&                     evidence;       // FOLD C: the term evidence the tail's page rows rank by
     const Graph&                               g;              // for-body-slot: the owner body's <calls> edges
     ForBodySlotOwner                           slotOwner;      // for-body-slot: the one owner body (forowner.h), none when not asked
+    const std::vector<std::uint8_t>*           testOnlyCallers;   // FOR-TONLY: tonly="1" per symbol (testonlycallers.h), nullptr = none
 };
 // round C (owner decision 2026-10-14, RESERVE SECTIONS FIRST — the CLI twin's rule): under budget_tokens the sections are scoped and
 // served from the rows at the target cut, and the rows past the cut fill what the sections served before the tail (<hdr> rows,
@@ -2225,7 +2227,7 @@ inline McpForAssembly assembleMcpFor( const McpForAssemblyInputs& in, std::strin
                         mcpTopRowNext,                        // L-W: the widening page on a thin answer, else the body
                         &mcpSigsCut,                          // cut-fix lane A: docs_dropped= / shrunk readings;
                                                               //   knob-honesty-068: carries mcpSigsNext IN
-                        SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: the CLI twin's row spelling
+                        SigRowSpelling{ .elideZeroMetrics = true, .testOnlyCallers = in.testOnlyCallers } );   // lean-answers lane: the CLI twin's row spelling; FOR-TONLY
     };
     std::string sigsStr = renderToString( renderSigs );
     const std::optional<RedactCounts> redactAfterSigs = redact != nullptr ? std::optional<RedactCounts>( *redact ) : std::nullopt;
@@ -2780,6 +2782,13 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         mcpForEndLinePresent = rw::endLinesFitCeiling( budgetTokens, false ) && lensRank[i] > 0 && rw::mayCarryEndLine( ing.symbols[i] );
     }
     const std::string_view mcpEndLineLegend = mcpForEndLinePresent ? rw::kForEndLineLegend : std::string_view();
+    // FOR-TONLY: the CLI twin's rule — computeTestOnlyCallers once, the clause present-only on the ranked head (lensSurfaceIds is the
+    // kept head), an over-approximation of the byte ladder; exempt from the sigs charge below like e=
+    const std::vector<std::uint8_t>  mcpTonly    = rw::computeTestOnlyCallers( ing, ix.g );
+    const std::vector<std::uint8_t>* mcpTonlyPtr = mcpTonly.empty() ? nullptr : &mcpTonly;
+    const bool                       mcpTonlyPresent = std::any_of( lensSurfaceIds.begin(), lensSurfaceIds.end(),
+        [ & ]( NodeId sid ) { return mcpTonlyPtr != nullptr && lensRank[sid] > 0.0f && sid < mcpTonly.size() && mcpTonly[sid] != 0u; } );
+    const std::string_view           mcpTonlyLegend  = mcpTonlyPresent ? rw::kForTonlyLegend : std::string_view();
     // ONE decision, read twice below: appended into the header here, subtracted from the sigs charge there.
     const rw::ForIdRouteLegendParts mcpIdRouteParts = rw::forIdRouteLegendParts( /*legendOn=*/true, mcpForScPresent, mcpForRouteAttrOn );
     // R2-AF (round 2, S4): the SAME resolver the CLI twin calls (rw::forNamedHeaderRows, mention.h) — one
@@ -2812,6 +2821,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                           + std::string( rw::kForFileTailLegend )   // deep-tail: r= + <tail> definitions, the CLI twin's exact clause (sigs-charge-exempt below)
                           + ( mcpForHdrRows.empty() ? std::string() : std::string( rw::kForHdrLegend ) )   // R2-AF: present-only
                           + std::string( mcpEndLineLegend )   // e=: present-only, the CLI twin's full clause (sig-charge exempt below)
+                          + std::string( mcpTonlyLegend )     // FOR-TONLY: present-only, the CLI twin's full clause (sig-charge exempt below)
                           + " -->"
                           // r2-LO: at= rides this root (mcpForAtAttrStr) and was defined nowhere in the document — the CLI twin passes
                           // its at= condition here and this twin did not. Its 24 B are exempt from the sigs charge below, so the served
@@ -2860,7 +2870,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::size_t mcpIdRouteExemptBytes = mcpIdRouteParts.bytes();
     const std::size_t mcpAtLegendExemptBytes = !flRootArg.empty() && !mcpForAtAttrStr.empty() ? rw::kForAtStampProse.size() : 0;   // r2-LO, above
     // e=: a disclosure on the same contract (the CLI twin exempts the same clause)
-    const std::size_t mcpEndLineExemptBytes = mcpEndLineLegend.size();
+    const std::size_t mcpEndLineExemptBytes = mcpEndLineLegend.size() + mcpTonlyLegend.size();   // FOR-TONLY: the same contract
     // lego-charge: <lego>/<compose> cost what they are SERVED as (the CLI twin's rule, rw::forSectionsSigChargePlan):
     // a collapsing section its stub; under an explicit budget_tokens, a section `sections` opts into its full render.
     const ForStubbableSection mcpLegoChargeIn{ .hasContent = !legoStr.empty(), .preCapTotal = legoPreCapCount, .rendered = true,
@@ -2900,7 +2910,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                                                              // the CLI twin's head round-robin verdict (serialize.h forHeadRoundRobinOn)
                                                              rw::forHeadRoundRobinOn( std::strcmp( mcpRouteTag, "subtoken+body" ) == 0,
                                                                                       rw::taskNamesIndexedFile( ing, task ), budgetTokens, /*bodyCeiling=*/false ) ),   // LB-A, e=, docs reorder, head RR
-                                           ix.g.implementors, mcpEvidence, ix.g, mcpSlotOwner };
+                                           ix.g.implementors, mcpEvidence, ix.g, mcpSlotOwner, mcpTonlyPtr };
     // forbudget-soft: ONE assembly (the C3 unpaid/paid passes went with the hard ceiling they priced against)
     McpForAssembly chosen = assembleMcpFor( assemblyIn, headerStr, legoStr, composeStr, legoScoped, legoPreCapCount );
     if( !chosen.doc )

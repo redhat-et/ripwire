@@ -7,6 +7,7 @@
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include "epmanifest.h"       // D1: collectManifestsAbove — the entry-point targets a setup.cfg / pyproject.toml names (unindexed by the crawl)
 #include "infra/sortutil.h"   // svLess: the explicit byte order the test-only name vetting sorts by (portablebuildcheck #6)
+#include "testonlycallers.h"   // everyCallerIsTest — the one "every caller is a test" predicate (--for tonly= reads it too)
 
 // verbs_quality.h — the quality family, moved VERBATIM from main.cpp in the 2026-08-29 split:
 // the delta-basis plumbing (noBaselineFatalMessage, loadRefPairDelta, resolveDeltaBasis),
@@ -2642,15 +2643,7 @@ inline void emitDeadCodeRow( const rw::IngestResult& ing, rw::NodeId id, std::st
     rw::emitTo( stdout, " p=\"{}\" l=\"{}\"/>", std::string_view( ep.data(), ep.size() ), s.line );
 }
 
-// D1 TESTONLY-DEAD: every in-edge of `id` comes from a test symbol (filter.h isTestSymbol: the shared test-path rule plus the
-// in-file test conventions). Only callers decide it, so an edge a test reaches by name alone can only add a test caller.
-inline bool everyCallerIsTest( const rw::IngestResult& ing, const rw::Graph& g, rw::NodeId id ) noexcept
-{
-    using namespace rw;
-    const auto* ro = g.inEdges.rowOffsets();
-    const auto* ci = g.inEdges.colIndices();
-    return std::all_of( ci + ro[ id ], ci + ro[ id + 1 ], [ & ]( NodeId caller ) { return isTestSymbol( ing, caller ); } );
-}
+// D1 TESTONLY-DEAD: everyCallerIsTest lives in testonlycallers.h — the ONE predicate --for's tonly= row attribute reads too.
 
 // D1: `name` spelled whole-word in `text` (file `fileId`) anywhere but inside the signature span of one of `rows` it names.
 inline bool spelledOutsideOwnSignature( const rw::IngestResult& ing, std::string_view text, std::uint32_t fileId, std::string_view name,

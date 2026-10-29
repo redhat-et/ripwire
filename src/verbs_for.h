@@ -13,6 +13,7 @@
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "forcallerhop.h"   // mf1-nx: a name-exact answer about ONE function carries that function's callers
 #include "epmanifest.h"     // ep-manifest: the manifest entry-point groups that register a shown row
+#include "testonlycallers.h"   // FOR-TONLY: computeTestOnlyCallers — tonly="1" on a row whose every indexed caller is a test
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -444,6 +445,8 @@ struct ForLensJsonInputs
     std::string_view                  task;
     int                               packTopN;
     std::string_view                  rankFlags;   // forRankShapingFlags( cfg ), owned by the caller for the call's duration
+    // FOR-TONLY: the XML twin's tonly="1" verdict per symbol (testonlycallers.h) — REQUIRED like the fields above (nullptr = none)
+    const std::vector<std::uint8_t>*  testOnlyCallers;
 };
 
 // The lens bundle's opening keys. Every note is absent-unless-present — the same silence-means-nothing-
@@ -593,6 +596,8 @@ struct ForLensHeaderParts
     bool             callerHopRanked = false;  // UPWARD-2HOP: that <callers> is the ranked seed's (by="rank"), so ITS clause rides instead
     bool             epPresent = false;        // ep-manifest (epmanifest.h): a manifest entry-point group registers a shown row in
                                             // the default regime, so an <ep> rides and its clause defines it; cleared with it
+    bool             tonlyPresent = false;     // FOR-TONLY (testonlycallers.h): may a <d> row carry tonly="1"? A ranked head row has
+                                            // indexed callers that are all tests. Over-approximates the byte ladder, like endLinePresent.
 };
 
 // Splice a pre-formatted fragment in front of a structural boundary, or leave the document exactly as it
@@ -947,6 +952,7 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
         { p.endLinePresent, rw::kForCompactEndLineLegend },
         { p.viaPresent, rw::kForCompactViaNameClause },        // FE-B
         { p.splitPresent, rw::kForCompactSplitClause },        // attrib-multidef Q1
+        { p.tonlyPresent, rw::kForCompactTonlyLegend },        // FOR-TONLY
     };
     for( const auto& [ on, clause ] : kPresentOnly )
     {
@@ -1106,6 +1112,10 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     if( p.splitPresent )
     {
         h.append( rw::kForSplitClause );   // attrib-multidef Q1: likewise
+    }
+    if( p.tonlyPresent )
+    {
+        h.append( rw::kForTonlyLegend );   // FOR-TONLY: present-only, on the same bit the compact strip reads
     }
     h.append( extraNotes );
     h += " -->";
@@ -1587,7 +1597,7 @@ inline int emitForLensJsonPass( std::FILE* out, const std::string& header, const
     const JsonSigLens lens{ /*metrics=*/true, in.fanIn, in.impure, in.churnPerFile, in.cloneMember,
                             in.tested, in.amp, /*rankAdaptivePayload=*/true, in.noteIndex,
                             /*endLines=*/rw::endLinesFitCeiling( in.tokenBudget, /*bodyCeiling=*/false ),   // serialize.h
-                            in.docsAfterCode, in.headRoundRobin };
+                            in.docsAfterCode, in.headRoundRobin, in.testOnlyCallers };
     JsonSigNoteCounts noteCounts;
     const auto packSigs = [ & ]( std::FILE* dst, std::size_t budget, bool* outCapped, std::size_t* outDroppedPositive,
                                  std::vector<rw::NodeId>* outShownIds, rw::SigsCutReport* outCut )
@@ -3241,6 +3251,17 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             forModScopePresent = forModScopePresent || ing.symbols[sid].kind == rw::SymKind::ModuleScope;
             forEndLinePresent  = forEndLinePresent || ( forEndLines && rw::mayCarryEndLine( ing.symbols[sid] ) );
         }
+        // FOR-TONLY: which functions have indexed callers that are ALL tests (testonlycallers.h, the --dead-code test-only rule), once
+        // per call; the tonly= clause is present-only on the same ranked-head walk as e= above (an over-approximation: only the
+        // byte ladder can drop the row inside that head). An empty vector means no function qualifies or the index is cut.
+        const std::vector<std::uint8_t>  forTonly    = rw::computeTestOnlyCallers( ing, g );
+        const std::vector<std::uint8_t>* forTonlyPtr = forTonly.empty() ? nullptr : &forTonly;
+        bool                             forTonlyPresent = false;
+        for( std::size_t i = 0; forTonlyPtr != nullptr && i < lensSurfaceIds.size() && i < forRowHead && !forTonlyPresent; ++i )
+        {
+            const rw::NodeId sid = lensSurfaceIds[i];
+            forTonlyPresent = lensRank[sid] > 0.0f && sid < forTonly.size() && forTonly[sid] != 0u;
+        }
         // FE-B: may a <calls> row of this bundle carry via="name"? Only the sections that render <calls> can, and each one's
         // node set is known before the header: the compact route's hop ids, T3's auto-body candidates, or --detail's head
         // (autoBundleMode excludes --detail). Their name-only out-edges decide it — over-approximating only the byte ladder
@@ -3296,6 +3317,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                         forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent,
                                         ownerPlan.any(), forViaByOwnerOnly, slotOwner.any() };
         headerParts.splitPresent = forSplitPresent;   // attrib-multidef Q1 (a trailing member: the aggregate above keeps its order)
+        headerParts.tonlyPresent = forTonlyPresent;   // FOR-TONLY (likewise a trailing member)
         // body-fold (forfold.h): the bodies of the top ranked rows, appended — decided here because the header's fold clause reads it.
         // The compact route's XML answer in the DEFAULT regime only: an explicit --token-budget is a size the caller named (that
         // answer stays byte-identical), and autoBundleMode already excludes --detail/--signatures-only/--auto-bodies. --max-tokens is
@@ -3448,7 +3470,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                                    cfg.packBudgetBytes, cfg.tokenBudget, notesPtr,
                                                                    legoTotal, composeTotal, routesTotal, flRootArg,
                                                                    &forFileTail, &lr.evidence, d.notesDegraded, forDocsAfterCode, forHeadRR, cfg.forTask,
-                                                                   cfg.packTopN, forRankShapingFlags( cfg ) } );
+                                                                   cfg.packTopN, forRankShapingFlags( cfg ), forTonlyPtr } );
             // §B0: this early return skipped the end-of-function tally below, so a --for --json run redacted
             // SILENTLY — the one stderr line that tells the user a secret was in their tree never appeared.
             reportRedactions( stderr, redactCounts );
@@ -3616,8 +3638,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // its continuation's budget) is byte-identical with and without it (fordisclosurecheck #2: auto vs --signatures-only)
         const std::size_t splitLegendEmitted = !headerParts.splitPresent ? 0u
                                              : ( compactLegendOn ? rw::kForCompactSplitClause.size() : rw::kForSplitClause.size() );
+        // FOR-TONLY: the tonly= reading is a disclosure on the same contract — exempt, so the ranked rows a budget admits are the
+        // ones it admitted without the clause (the attribute's own 10 B per flagged row stay charged, like tested=)
+        const std::size_t tonlyLegendEmitted = !headerParts.tonlyPresent ? 0u
+                                             : ( compactLegendOn ? rw::kForCompactTonlyLegend.size() : rw::kForTonlyLegend.size() );
         const std::size_t exemptBytes = adaptiveNote.size() + autoLegendBytes + confidenceExemptBytes + tailLegendEmitted + idRouteLegendEmitted
-                                      + endLineLegendEmitted + ownerLegendEmitted + bodySlotLegendEmitted + splitLegendEmitted
+                                      + endLineLegendEmitted + ownerLegendEmitted + bodySlotLegendEmitted + splitLegendEmitted + tonlyLegendEmitted
                                       + bodyFoldLegendEmitted + callerHopLegendEmitted;
         if( exemptBytes > headerStr.size() )
         {
@@ -3650,7 +3676,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                               + bodyFoldLegend( headerParts, /*compact=*/false ).size()   // body-fold
                                               + callerHopClause( headerParts, /*compact=*/false ).size()  // mf1-nx
                                               + presentOnlyClause( headerParts.epPresent, /*compact=*/false, rw::kForCompactEpManifestLegend, rw::kForEpManifestLegend ).size()  // ep-manifest
-                                              + ( headerParts.splitPresent ? rw::kForSplitClause.size() : 0u );   // attrib-multidef Q1
+                                              + ( headerParts.splitPresent ? rw::kForSplitClause.size() : 0u )   // attrib-multidef Q1
+                                              + ( headerParts.tonlyPresent ? rw::kForTonlyLegend.size() : 0u );   // FOR-TONLY
             std::size_t       fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
             fullCharged -= std::min( fullCharged, rw::forZeroNoteBytes( fullHeader ) );   // lean-answers: exempt, as above
             chargedHeaderBytes     = std::min( chargedHeaderBytes, fullCharged );
@@ -3779,7 +3806,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                 forTopRowNext,                               // L-W: the widening page on a thin answer, else the body
                                 &forSigsCut,                                 // cut-fix lane A: which cut readings the tag owes;
                                                                              //   knob-honesty-068: carries forSigsNext IN
-                                SigRowSpelling{ .elideZeroMetrics = true } );   // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0)
+                                SigRowSpelling{ .elideZeroMetrics = true, .testOnlyCallers = forTonlyPtr } );   // lean-answers lane: zero cx=/ccx=/in= omitted (legend: absent = 0); FOR-TONLY
             };
         sigsPreRendered = preRender( renderSigs, sigsStr );
         const std::optional<RedactCounts> redactAfterSigs = redactPtr != nullptr ? std::optional<RedactCounts>( *redactPtr ) : std::nullopt;
@@ -4395,7 +4422,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                             rw::forLensRules( forDocsAfterCode, forEndLines, forHeadRR ), nullptr, nullptr, nullptr,   // the degrade path selects identically
                             forTopRowNext,                                           // L-W: same next= rule on the degrade path
                             &degradeSigsCut,                                         // knob-honesty-068: and the same <sigs next=>
-                            SigRowSpelling{ .elideZeroMetrics = true } );            // lean-answers lane: the same row spelling
+                            SigRowSpelling{ .elideZeroMetrics = true, .testOnlyCallers = forTonlyPtr } );   // lean-answers lane: the same row spelling
         }
         if( legoPreRendered )
         {
