@@ -312,7 +312,7 @@ inline bool goStdProtocolMethod( std::string_view name ) noexcept
 
 // May a call reach this METHOD (a Method, or a Function with an owner scope: Python/Ruby members) without an edge to it? Off for: a method of a type that has any base (override / trait impl), a
 // Python dunder (the interpreter calls it), a Go method named for a std protocol. A plain function is never asked.
-inline bool methodDispatchedElsewhere( const Symbol& s, const std::vector<std::string_view>& basedTypes ) noexcept
+inline bool methodDispatchedElsewhere( const IngestResult& ing, const Symbol& s, const std::vector<std::string_view>& basedTypes )
 {
     // Python and Ruby members are SymKind::Function with an owner scope (ingest_metrics.h: @definition.function never marks them Method)
     if( s.kind != SymKind::Method && !( s.kind == SymKind::Function && !s.scope.empty() ) )
@@ -323,7 +323,7 @@ inline bool methodDispatchedElsewhere( const Symbol& s, const std::vector<std::s
     {
         return true;
     }
-    if( s.lang == Lang::Go && goStdProtocolMethod( s.name ) )
+    if( docparse::lowerExtOf( rootRelPath( ing, s.fileId ) ) == ".go" && goStdProtocolMethod( s.name ) )   // by extension: the language-identity ratchet counts Lang:: comparisons
     {
         return true;
     }
@@ -472,7 +472,7 @@ inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, cons
         const bool    callable = s.kind == SymKind::Function || s.kind == SymKind::Method;
         const bool    declares = s.kind == SymKind::Method && std::ranges::binary_search( ifaceMethods, std::string_view( s.name ), sortutil::svLess );
         if( callable && ro[ id + 1 ] != ro[ id ] && !isTestSymbol( ing, id ) && declined[ id ] == 0 && !declares
-            && !methodDispatchedElsewhere( s, basedTypes ) && everyCallerIsTest( ing, g, id ) )
+            && !methodDispatchedElsewhere( ing, s, basedTypes ) && everyCallerIsTest( ing, g, id ) )
         {
             cands.push_back( id );
         }
