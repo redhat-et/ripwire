@@ -813,6 +813,7 @@ inline std::string peerRowClauses( const ForLensHeaderParts& p, bool compact )
     out += presentOnlyClause( p.slotNamePresent, compact, rw::kForCompactSlotNameLegend, rw::kForSlotNameLegend );   // fix1 F-4
     out += presentOnlyClause( p.ctorHopPresent, compact, rw::kForCompactCtorHopLegend, rw::kForCtorHopLegend );
     out += presentOnlyClause( p.epPresent, compact, rw::kForCompactEpManifestLegend, rw::kForEpManifestLegend );   // ep-manifest
+    out += presentOnlyClause( p.tonlyPresent, compact, rw::kForCompactTonlyLegend, rw::kForTonlyLegend );   // FOR-TONLY: after the ep clause, both dialects
     return out;
 }
 inline std::string_view hopsCallsNextLegend( const ForLensHeaderParts& p, bool compact ) noexcept
@@ -952,7 +953,6 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
         { p.endLinePresent, rw::kForCompactEndLineLegend },
         { p.viaPresent, rw::kForCompactViaNameClause },        // FE-B
         { p.splitPresent, rw::kForCompactSplitClause },        // attrib-multidef Q1
-        { p.tonlyPresent, rw::kForCompactTonlyLegend },        // FOR-TONLY
     };
     for( const auto& [ on, clause ] : kPresentOnly )
     {
@@ -1112,10 +1112,6 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     if( p.splitPresent )
     {
         h.append( rw::kForSplitClause );   // attrib-multidef Q1: likewise
-    }
-    if( p.tonlyPresent )
-    {
-        h.append( rw::kForTonlyLegend );   // FOR-TONLY: present-only, on the same bit the compact strip reads
     }
     h.append( extraNotes );
     h += " -->";

@@ -119,6 +119,24 @@ inline std::vector<std::string_view> interfaceMethodNames( const IngestResult& i
     return methods;
 }
 
+// The edge half of FOR-TONLY: the ids that pass every check but the value-use vetting (see computeTestOnlyCallers).
+inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, const Graph& g, const std::vector<char>& declined )
+{
+    const auto*         ro = g.inEdges.rowOffsets();
+    const auto          ifaceMethods = interfaceMethodNames( ing );
+    std::vector<NodeId> cands;
+    for( const Symbol& s : ing.symbols )
+    {
+        const bool callable = s.kind == SymKind::Function || s.kind == SymKind::Method;
+        const bool declares = s.kind == SymKind::Method && std::ranges::binary_search( ifaceMethods, std::string_view( s.name ), sortutil::svLess );
+        if( callable && ro[ s.id + 1 ] != ro[ s.id ] && !isTestSymbol( ing, s.id ) && declined[ s.id ] == 0 && !declares && everyCallerIsTest( ing, g, s.id ) )
+        {
+            cands.push_back( s.id );
+        }
+    }
+    return cands;
+}
+
 // FOR-TONLY: per symbol, 1 iff it is a library function or method that has at least one indexed caller, every caller is a
 // test symbol, no library code holds it as a value (a dispatch table, a registering decorator: ValueRefIndex), no library call
 // the resolver declined names it, it is not a method an interface declares, and the index is whole. Empty vector (no flag
@@ -127,35 +145,13 @@ inline std::vector<std::string_view> interfaceMethodNames( const IngestResult& i
 inline std::vector<std::uint8_t> computeTestOnlyCallers( const IngestResult& ing, const Graph& g )
 {
     std::vector<std::uint8_t> flags;
+    bool                      declinedUnknown = false;
     if( !testOnlyIndexWhole( ing ) || g.inEdges.rowOffsets() == nullptr )
     {
         return flags;
     }
-    bool              declinedUnknown = false;
-    const std::vector<char> declined  = namedByLibraryDeclinedCall( ing, g, declinedUnknown );
-    if( declinedUnknown )
-    {
-        return flags;
-    }
-    const std::vector<std::string_view> ifaceMethods = interfaceMethodNames( ing );
-    const auto*         ro = g.inEdges.rowOffsets();
-    std::vector<NodeId> cands;
-    for( const Symbol& s : ing.symbols )
-    {
-        if( ( s.kind != SymKind::Function && s.kind != SymKind::Method ) || ro[ s.id + 1 ] == ro[ s.id ] || isTestSymbol( ing, s.id )
-            || declined[ s.id ] != 0 )
-        {
-            continue;
-        }
-        if( s.kind == SymKind::Method && std::ranges::binary_search( ifaceMethods, std::string_view( s.name ), sortutil::svLess ) )
-        {
-            continue;
-        }
-        if( everyCallerIsTest( ing, g, s.id ) )
-        {
-            cands.push_back( s.id );
-        }
-    }
+    const std::vector<char>    declined = namedByLibraryDeclinedCall( ing, g, declinedUnknown );
+    const std::vector<NodeId>  cands    = declinedUnknown ? std::vector<NodeId>{} : testOnlyEdgeCandidates( ing, g, declined );
     if( cands.empty() )
     {
         return flags;
