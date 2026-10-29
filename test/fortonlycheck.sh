@@ -687,4 +687,291 @@ if [ -z "$r" ]; then no "B8 premise: the Command.get_handler row is missing"
 elif echo "$r" | grep -q ' tonly="1"'; then no "B8 an override reached through its base (self.get_handler) carries tonly: $r"
 else ok "B8 a method of a class with a base (an override) stays unflagged"; fi
 
+# ── fix round 2 (rv-for-tonly-delta) ──────────────────────────────────────────────────────────────────────────
+# C1 (S1) a `*`-led line is a comment only inside an open /* */ block and never in Python/Ruby: a starred assignment/call is a USE.
+C2D="$TMP/c2"; mkdir -p "$C2D/py/pkg" "$C2D/py/tests" "$C2D/ts/src" "$C2D/ts/test"
+: > "$C2D/py/pkg/__init__.py"
+cat > "$C2D/py/pkg/options.py" <<'P'
+def relay_star_modattr(x):
+    return [x, x]
+
+
+def relay_star_call(x):
+    return [x, x]
+
+
+def relay_star_true(x):
+    return [x, x]
+P
+cat > "$C2D/py/pkg/runner.py" <<'P'
+from pkg import options
+
+
+def relay_split(x):
+    *head, tail = options.relay_star_modattr(x)
+    return tail
+
+
+def relay_wrap(x):
+    return print( *options.relay_star_call(x) )
+
+
+def relay_same_file_target(x):
+    return [x, x]
+
+
+def test_probe(x):
+    *head, tail = relay_same_file_target(x)
+    return tail
+
+
+def relay_probe_user(x):
+    return test_probe(x)
+P
+cat > "$C2D/py/tests/test_opts.py" <<'P'
+from pkg.options import relay_star_modattr, relay_star_call, relay_star_true
+from pkg.runner import relay_split, relay_wrap, relay_probe_user
+
+
+def test_all():
+    assert relay_star_modattr(1) == [1, 1]
+    assert relay_star_call(1) == [1, 1]
+    assert relay_star_true(1) == [1, 1]
+    assert relay_split(1) == 1
+    assert relay_wrap(1) is None
+    assert relay_probe_user(1) == 1
+P
+# the doc-comment control: a name only a /* */ block mentions is documentation, so a function only tests call stays flagged
+cat > "$C2D/ts/src/doc.ts" <<'P'
+/**
+ * relayDocOnly is documented here and only the tests call it.
+ * ** relayDocOnly again, as a continuation line
+ */
+export function relayDocOnly(x: number): number { return x + 1 }
+P
+cat > "$C2D/ts/test/doc.test.ts" <<'P'
+import { relayDocOnly } from '../src/doc'
+test('doc', () => { expect(relayDocOnly(1)).toBe(2) })
+P
+c2run(){ d="$1"; t="$2"; shift 2; ( cd "$C2D/$d" && "$BIN" "$C2D/$d" --no-cache "--for=$t" "$@" </dev/null 2>/dev/null ); }
+c2check(){ # arm lang answer control name...   (control "-": none)
+    arm="$1"; lang="$2"; ans="$3"; ctl="$4"; shift 4
+    if [ "$ctl" = "-" ]; then :
+    elif has "$ans" "$ctl"; then ok "$arm $lang control $ctl is flagged (the arm can fire)"; else no "$arm $lang control $ctl has no tonly: $( row "$ans" "$ctl" )"; fi
+    for n in "$@"; do
+        r="$( rows "$ans" "$n" )"
+        if [ -z "$r" ]; then no "$arm $lang premise: row $n missing from the answer"
+        elif echo "$r" | grep -q ' tonly="1"'; then no "$arm $lang $n carries tonly (a library use / dispatch the edge pass cannot see): $r"
+        else ok "$arm $lang $n stays unflagged"; fi
+    done
+}
+c2run py "relay_star_modattr relay_same_file_target relay_star_call relay_star_true callers" > "$TMP/c1.txt"
+c2check C1 py "$TMP/c1.txt" relay_star_true relay_star_modattr relay_same_file_target relay_star_call
+c2run ts "relayDocOnly callers" > "$TMP/c1t.txt"
+if has "$TMP/c1t.txt" relayDocOnly; then ok "C1 ts a name only a block comment's ' * ' lines mention stays flagged (comments are not uses)"; else no "C1 ts relayDocOnly lost tonly: $( row "$TMP/c1t.txt" relayDocOnly )"; fi
+
+# C2 (S2) Go standard-library protocol methods reached through io.Copy / flag.Var / heap / net/http
+mkdir -p "$C2D/go/impl" "$C2D/go/cmd"
+cat > "$C2D/go/go.mod" <<'P'
+module example.com/relay
+
+go 1.22
+P
+cat > "$C2D/go/impl/impl.go" <<'P'
+package impl
+
+import "io"
+
+type Walker struct{ n int }
+
+func (w *Walker) WriteTo(dst io.Writer) (int64, error) {
+	k, err := dst.Write([]byte("walker"))
+	return int64(k), err
+}
+
+func (w *Walker) ReadFrom(src io.Reader) (int64, error) { return 0, nil }
+func (w *Walker) Set(s string) error                    { w.n = len(s); return nil }
+func (w *Walker) Seek(o int64, wh int) (int64, error)   { return o, nil }
+func (w *Walker) Push(x any)                            {}
+func (w *Walker) Pop() any                              { return nil }
+func (w *Walker) Flush()                                {}
+func (w *Walker) GobEncode() ([]byte, error)            { return nil, nil }
+func (w Walker) PlainHelper() int                       { return 2 }
+
+func LoneFunc() int { return 3 }
+P
+cat > "$C2D/go/cmd/main.go" <<'P'
+package main
+
+import (
+	"flag"
+	"io"
+	"os"
+
+	"example.com/relay/impl"
+)
+
+func main() {
+	w := &impl.Walker{}
+	flag.Var(w, "x", "walker")
+	io.Copy(os.Stdout, w)
+}
+P
+cat > "$C2D/go/impl/impl_test.go" <<'P'
+package impl
+
+import (
+	"bytes"
+	"testing"
+)
+
+func TestAll(t *testing.T) {
+	w := &Walker{}
+	var b bytes.Buffer
+	w.WriteTo(&b)
+	w.ReadFrom(&b)
+	w.Set("x")
+	w.Seek(0, 0)
+	w.Push(1)
+	_ = w.Pop()
+	w.Flush()
+	_, _ = w.GobEncode()
+	_ = w.PlainHelper()
+	_ = LoneFunc()
+}
+P
+c2run go "WriteTo ReadFrom Set Seek Push Pop Flush GobEncode PlainHelper LoneFunc callers" > "$TMP/c2.txt"
+c2check C2 go "$TMP/c2.txt" LoneFunc Walker.WriteTo Walker.ReadFrom Walker.Set Walker.Seek Walker.Push Walker.Pop Walker.Flush Walker.GobEncode
+if has "$TMP/c2.txt" Walker.PlainHelper; then ok "C2 go a plain method only a test calls stays flagged (second control)"; else no "C2 go Walker.PlainHelper lost tonly: $( row "$TMP/c2.txt" Walker.PlainHelper )"; fi
+
+# C3 (S3) a TS class that implements / extends a type from outside the tree: its methods are called by the framework
+mkdir -p "$C2D/ts3/src" "$C2D/ts3/test"
+cat > "$C2D/ts3/src/model.ts" <<'P'
+import { OnInit } from '@angular/core';
+import { Component } from 'react';
+
+export class Cmp implements OnInit {
+  ngOnInit(): void {}
+  cmpExtra(): number { return 1; }
+}
+
+export class View extends Component {
+  viewExtra(): number { return 2; }
+}
+
+export class Plain {
+  plainOnly(): number { return 3; }
+}
+
+export function plainFn(): number { return 4; }
+P
+cat > "$C2D/ts3/test/model.test.ts" <<'P'
+import { Cmp, View, Plain, plainFn } from '../src/model';
+
+test('all', () => {
+  new Cmp().ngOnInit();
+  new Cmp().cmpExtra();
+  new View().viewExtra();
+  new Plain().plainOnly();
+  plainFn();
+});
+P
+c2run ts3 "ngOnInit cmpExtra viewExtra plainOnly plainFn callers" > "$TMP/c3.txt"
+c2check C3 ts "$TMP/c3.txt" plainFn Cmp.ngOnInit Cmp.cmpExtra View.viewExtra
+if has "$TMP/c3.txt" Plain.plainOnly; then ok "C3 ts a method of a class with no base stays flagged (second control)"; else no "C3 ts Plain.plainOnly lost tonly: $( row "$TMP/c3.txt" Plain.plainOnly )"; fi
+
+# C4 (S4) library code SHIPPED under a test-named directory (django/test/): a function only it calls is not called only by tests
+mkdir -p "$C2D/sh/pkg/test" "$C2D/sh/tests"
+: > "$C2D/sh/pkg/__init__.py"; : > "$C2D/sh/pkg/test/__init__.py"
+cat > "$C2D/sh/pkg/core.py" <<'P'
+def relay_clone_db(x):
+    return x + 1
+
+
+def relay_reset_cache(x):
+    return x + 2
+
+
+def relay_tests_only_helper(x):
+    return x + 3
+
+
+def relay_support_only(x):
+    return x + 4
+P
+cat > "$C2D/sh/pkg/test/utils.py" <<'P'
+from pkg.core import relay_clone_db
+from pkg.test.signals import reset
+
+
+def run_suite(x):
+    return relay_clone_db(x) + reset(x)
+P
+cat > "$C2D/sh/pkg/test/signals.py" <<'P'
+from pkg.core import relay_reset_cache
+
+
+def reset(x):
+    return relay_reset_cache(x)
+P
+cat > "$C2D/sh/pkg/test/orphan.py" <<'P'
+from pkg.core import relay_support_only
+
+
+def orphan(x):
+    return relay_support_only(x)
+P
+cat > "$C2D/sh/pkg/cli.py" <<'P'
+from pkg.test.utils import run_suite
+
+
+def main():
+    return run_suite(1)
+P
+cat > "$C2D/sh/tests/test_core.py" <<'P'
+from pkg.core import relay_tests_only_helper
+from pkg.test.orphan import orphan
+
+
+def test_core():
+    assert relay_tests_only_helper(1) == 4
+    assert orphan(1) == 5
+P
+c2run sh "relay_clone_db relay_reset_cache relay_tests_only_helper relay_support_only callers" > "$TMP/c4.txt"
+c2check C4 py "$TMP/c4.txt" relay_tests_only_helper relay_clone_db relay_reset_cache
+if has "$TMP/c4.txt" relay_support_only; then ok "C4 py a callee whose only callers sit in a test dir NOTHING outside the tests imports stays flagged"; else no "C4 py relay_support_only lost tonly: $( row "$TMP/c4.txt" relay_support_only )"; fi
+
+# C5 (G3) a path token names a file or directory at SEGMENT boundaries: `hono/...` is not a substring match on src/hono-base.ts
+mkdir -p "$C2D/g3/src" "$C2D/g3/internal/sign" "$C2D/g3/test"
+cat > "$C2D/g3/go.mod" <<'P'
+module example.com/g3
+
+go 1.22
+P
+cat > "$C2D/g3/src/hono-base.ts" <<'P'
+export class Hono {
+  mountApp(path: string): string { return path }
+}
+P
+cat > "$C2D/g3/test/hono.test.ts" <<'P'
+import { Hono } from '../src/hono-base'
+test('mount', () => { expect(new Hono().mountApp('/a')).toBe('/a') })
+P
+cat > "$C2D/g3/internal/sign/rsa.go" <<'P'
+package sign
+
+func rsaSign(b []byte) []byte { return b }
+P
+cat > "$C2D/g3/internal/sign/rsa_test.go" <<'P'
+package sign
+
+import "testing"
+
+func TestSign(t *testing.T) { _ = rsaSign(nil) }
+P
+c2run g3 "hono/<new-middleware> mount" > "$TMP/c5a.txt"
+if [ -n "$( row "$TMP/c5a.txt" Hono.mountApp )" ] && ! has "$TMP/c5a.txt" Hono.mountApp; then ok "C5 a path token 'hono' (no whole segment of any path) does not keep tonly on src/hono-base.ts"; else no "C5 hono substring token still keeps tonly (or the row is missing): $( row "$TMP/c5a.txt" Hono.mountApp )"; fi
+c2run g3 "internal/sign package" > "$TMP/c5b.txt"
+if has "$TMP/c5b.txt" rsaSign; then ok "C5 the path token 'internal/sign' names internal/sign/rsa.go at segment boundaries: tonly kept"; else no "C5 internal/sign lost tonly: $( row "$TMP/c5b.txt" rsaSign )"; fi
+
 [ "$fail" = 0 ] && echo "fortonlycheck: ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }

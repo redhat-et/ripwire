@@ -29,19 +29,130 @@
 #include <string_view>
 #include <vector>
 
+
 namespace rw
 {
+
+// S4 (fix round 2): code SHIPPED under a test-named directory. isTestPath calls every file under a `test/` or `tests/` segment test code, and
+// a package can ship a `test/` directory that library code runs (django.test: the test runner, the test client, the signal helpers; a
+// `pkg/test/client.py`). A function only such a file calls is not "called only by tests": deleting it breaks the shipped runner. A file
+// is SHIPPED TEST SUPPORT when (a) it is test by DIRECTORY alone (its own name is not test_*, *_test.*, *.spec.*, *.test.*, conftest*),
+// (b) the test directory is nested below the root (`django/test/`, not a root `tests/` or a maven `src/test/`), and (c) a non-test file
+// imports it, directly or through other such files (the include adjacency, so an `import`/`#include`/`require` edge); in a language
+// whose imports that adjacency does not resolve it is shipped unless proven otherwise (conservative: no tonly). Lazy: the adjacency is
+// built on the first nested-test-directory caller only.
+inline bool testSupportNestedDirOnly( std::string_view rel ) noexcept
+{
+    if( !isTestPath( rel ) )
+    {
+        return false;
+    }
+    const std::size_t      sl = rel.rfind( '/' );
+    const std::string_view fn = sl == std::string_view::npos ? rel : rel.substr( sl + 1 );
+    if( sl == std::string_view::npos || isTestPath( fn ) || fn.starts_with( "conftest" ) )
+    {
+        return false;   // a root file, or test-NAMED: a test file
+    }
+    if( rel.starts_with( "src/test/" ) || rel.find( "/src/test/" ) != std::string_view::npos )
+    {
+        return false;   // the maven/gradle layout: src/test/ is the test tree
+    }
+    std::size_t pos = 0;
+    for( std::size_t slash = rel.find( '/' ); slash != std::string_view::npos; pos = slash + 1, slash = rel.find( '/', pos ) )
+    {
+        const std::string_view seg = rel.substr( pos, slash - pos );
+        if( seg == "test" || seg == "tests" || seg == "__tests__" )
+        {
+            return pos > 0;   // the FIRST test segment decides: a root-level one is the test tree, a nested one may be shipped
+        }
+    }
+    return false;
+}
+
+class ShippedTestSupport
+{
+public:
+    explicit ShippedTestSupport( const IngestResult& ing ) noexcept : ing_( ing ) {}
+
+    bool contains( std::uint32_t fileId )
+    {
+        if( fileId >= ing_.files.size() || !testSupportNestedDirOnly( rootRelPath( ing_, fileId ) ) )
+        {
+            return false;
+        }
+        if( !built_ )
+        {
+            build();
+        }
+        return shipped_[ fileId ] != 0;
+    }
+
+private:
+    static bool importResolved( std::string_view ext ) noexcept
+    {
+        static constexpr std::string_view kExt[] = { ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
+                                                     ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx" };
+        return std::ranges::find( kExt, ext ) != std::end( kExt );
+    }
+
+    void build()
+    {
+        built_ = true;
+        const std::uint32_t F = static_cast<std::uint32_t>( ing_.files.size() );
+        shipped_.assign( F, 0 );
+        std::vector<char> support( F, 0 );
+        for( std::uint32_t f = 0; f < F; ++f )
+        {
+            const std::string_view rel = rootRelPath( ing_, f );
+            if( testSupportNestedDirOnly( rel ) )
+            {
+                support[ f ] = 1;
+                shipped_[ f ] = importResolved( docparse::lowerExtOf( rel ) ) ? 0 : 1;   // an unresolved language: shipped until proven otherwise
+            }
+        }
+        const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing_, /*dedup=*/true );
+        std::vector<std::uint32_t> work;
+        for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
+        {
+            if( !isTestPath( rootRelPath( ing_, f ) ) )
+            {
+                work.push_back( f );   // every non-test file is a root of the reach
+            }
+        }
+        while( !work.empty() )
+        {
+            const std::uint32_t f = work.back();
+            work.pop_back();
+            for( const std::uint32_t to : adj[ f ] )
+            {
+                if( to < F && support[ to ] != 0 && shipped_[ to ] == 0 )
+                {
+                    shipped_[ to ] = 1;
+                    work.push_back( to );
+                }
+            }
+        }
+    }
+
+    const IngestResult&  ing_;
+    bool                 built_ = false;
+    std::vector<char>    shipped_;
+};
 
 // A caller that is test code AS EVIDENCE. isTestSymbol also counts an in-file test scope (a Python module-level `def test_*`), and a
 // LIBRARY function may carry that name (a `test_connection` health probe): when it sits outside a test path and a non-test symbol
 // calls it, it is library code and its callee has a library caller. A test-scoped def nothing library calls stays a test.
-inline bool callerIsTestEvidence( const IngestResult& ing, const Graph& g, NodeId caller ) noexcept
+inline bool callerIsTestEvidence( const IngestResult& ing, const Graph& g, NodeId caller, ShippedTestSupport& shipped )
 {
     if( !isTestSymbol( ing, caller ) )
     {
         return false;
     }
     const Symbol& s = ing.symbols[ caller ];
+    if( shipped.contains( s.fileId ) )
+    {
+        return false;   // S4: the caller is library code that lives under a test-named directory
+    }
     if( s.testScope == 0 || s.fileId >= ing.files.size() || isTestPath( rootRelPath( ing, s.fileId ) ) )
     {
         return true;
@@ -53,11 +164,11 @@ inline bool callerIsTestEvidence( const IngestResult& ing, const Graph& g, NodeI
 
 // D1 TESTONLY-DEAD: every in-edge of `id` comes from test code. all_of over an empty row is TRUE, so a caller that wants
 // "test-only" (not "no callers") must also check the row is non-empty; computeTestOnlyCallers below does.
-inline bool everyCallerIsTest( const IngestResult& ing, const Graph& g, NodeId id ) noexcept
+inline bool everyCallerIsTest( const IngestResult& ing, const Graph& g, NodeId id, ShippedTestSupport& shipped )
 {
     const auto* ro = g.inEdges.rowOffsets();
     const auto* ci = g.inEdges.colIndices();
-    return std::all_of( ci + ro[ id ], ci + ro[ id + 1 ], [ & ]( NodeId caller ) { return callerIsTestEvidence( ing, g, caller ); } );
+    return std::all_of( ci + ro[ id ], ci + ro[ id + 1 ], [ & ]( NodeId caller ) { return callerIsTestEvidence( ing, g, caller, shipped ); } );
 }
 
 // Was the whole tree indexed? A "every caller is a test" claim rests on having seen every caller: a memory-guard stop
@@ -160,7 +271,32 @@ inline bool onCommentOnlyLine( std::string_view text, std::size_t at, bool hashI
         ++i;
     }
     const std::string_view rest = text.substr( i, 2 );
-    return rest == "//" || rest == "/*" || ( !rest.empty() && rest[ 0 ] == '*' ) || ( hashIsComment && !rest.empty() && rest[ 0 ] == '#' );
+    if( rest == "//" || ( hashIsComment && !rest.empty() && rest[ 0 ] == '#' ) )
+    {
+        return true;
+    }
+    if( rest == "/*" )
+    {   // `/* note */ f( x );` is a line of code with a comment in front: a comment-only line has nothing after the closing `*/`
+        const std::size_t       eol    = std::min( text.find( '\n', i ), text.size() );
+        const std::string_view  line   = text.substr( i, eol - i );
+        const std::size_t       closed = line.find( "*/", 2 );
+        if( closed == std::string_view::npos )
+        {
+            return true;
+        }
+        const std::size_t code = line.find_first_not_of( " \t\r", closed + 2 );
+        return code == std::string_view::npos || line.substr( code, 2 ) == "//";
+    }
+    // A `*`-led line is a block-comment continuation only INSIDE an open `/* … */` and only in a language that has one: in Python/Ruby it
+    // is a starred assignment or call (`*head, tail = options.f( x )`), and in C a dereference (`*p = f()`) or a continued product.
+    if( hashIsComment || rest.empty() || rest[ 0 ] != '*' || ( rest.size() > 1 && rest[ 1 ] != ' ' && rest[ 1 ] != '\t' && rest[ 1 ] != '/' && rest[ 1 ] != '\n' && rest[ 1 ] != '\r' ) )
+    {
+        return false;
+    }
+    const std::string_view before = text.substr( 0, i );
+    const std::size_t      open   = before.rfind( "/*" );
+    const std::size_t      close  = before.rfind( "*/" );
+    return open != std::string_view::npos && ( close == std::string_view::npos || close < open );
 }
 
 // D1: `name` spelled whole-word in `text` (file `fileId`) anywhere but inside the signature span of one of `rows` it names.
@@ -305,14 +441,61 @@ inline std::vector<std::string_view> typesWithBases( const IngestResult& ing )
 // database/sql through an interface the tree does not declare (`fmt.Println( code )` runs RelayCode.String).
 inline bool goStdProtocolMethod( std::string_view name ) noexcept
 {
-    static constexpr std::string_view kExact[] = { "String", "Error", "Format", "GoString", "ServeHTTP", "Read", "Write", "Close", "Len", "Less",
-                                                   "Swap", "Unwrap", "Is", "As", "Scan", "Value" };
+    static constexpr std::string_view kExact[] = {
+        // fmt, errors, sort, database/sql, net/http
+        "String", "Error", "Format", "GoString", "ServeHTTP", "Len", "Less", "Swap", "Unwrap", "Is", "As", "Scan", "Value", "Timeout", "Temporary",
+        "Header", "WriteHeader", "Flush", "Hijack", "Push", "Pop", "RoundTrip", "Cookies", "SetCookies",
+        // io, bufio, io/fs: Reader/Writer/Closer/Seeker and their At/Byte/Rune/String/From/To forms
+        "Read", "Write", "Close", "Seek", "ReadAt", "WriteAt", "ReadFrom", "WriteTo", "ReadByte", "WriteByte", "UnreadByte", "ReadRune", "WriteRune",
+        "UnreadRune", "WriteString", "Open", "Stat", "ReadDir", "ReadFile", "Sys", "Info", "IsDir", "Name", "Size", "Mode", "ModTime", "Type",
+        // flag.Value / flag.Getter, encoding/gob, encoding.Text*/Binary*, hash.Hash, sync.Locker, context.Context, net, log/slog, go/ast
+        "Set", "Get", "GobEncode", "GobDecode", "AppendText", "AppendBinary", "Sum", "Reset", "BlockSize", "Lock", "Unlock", "Deadline", "Done", "Err",
+        "Accept", "Addr", "LocalAddr", "RemoteAddr", "Network", "SetDeadline", "SetReadDeadline", "SetWriteDeadline", "Enabled", "Handle", "WithAttrs",
+        "WithGroup", "LogValue", "Visit" };
     return std::ranges::find( kExact, name ) != std::end( kExact ) || name.starts_with( "Marshal" ) || name.starts_with( "Unmarshal" );
 }
 
+// The innermost type (class, struct, interface …) that holds a symbol, by source span, for a method whose stored scope is empty: TS/JS
+// methods, and Java/C#/Kotlin/Swift members, carry no scope, so the base guard must find the class from where the method sits.
+class EnclosingTypes
+{
+public:
+    explicit EnclosingTypes( const IngestResult& ing ) : ing_( ing ), byFile_( ing.files.size() )
+    {
+        for( const Symbol& t : ing.symbols )
+        {
+            if( t.kind != SymKind::Other && namespaceCompatible( RefRole::Type, t.kind ) && t.fileId < byFile_.size() )
+            {
+                byFile_[ t.fileId ].push_back( t.id );
+            }
+        }
+    }
+
+    std::string_view of( const Symbol& s ) const
+    {
+        const Symbol* best = nullptr;
+        if( s.fileId < byFile_.size() )
+        {
+            for( const NodeId id : byFile_[ s.fileId ] )
+            {
+                const Symbol& t = ing_.symbols[ id ];
+                if( t.id != s.id && t.sigStartByte <= s.sigStartByte && s.endByte <= t.endByte && ( best == nullptr || t.sigStartByte >= best->sigStartByte ) )
+                {
+                    best = &t;
+                }
+            }
+        }
+        return best == nullptr ? std::string_view() : std::string_view( best->name );
+    }
+
+private:
+    const IngestResult&                    ing_;
+    std::vector<std::vector<NodeId>>       byFile_;
+};
+
 // May a call reach this METHOD (a Method, or a Function with an owner scope: Python/Ruby members) without an edge to it? Off for: a method of a type that has any base (override / trait impl), a
 // Python dunder (the interpreter calls it), a Go method named for a std protocol. A plain function is never asked.
-inline bool methodDispatchedElsewhere( const IngestResult& ing, const Symbol& s, const std::vector<std::string_view>& basedTypes )
+inline bool methodDispatchedElsewhere( const IngestResult& ing, const Symbol& s, const std::vector<std::string_view>& basedTypes, const EnclosingTypes& enclosing )
 {
     // Python and Ruby members are SymKind::Function with an owner scope (ingest_metrics.h: @definition.function never marks them Method)
     if( s.kind != SymKind::Method && !( s.kind == SymKind::Function && !s.scope.empty() ) )
@@ -327,7 +510,9 @@ inline bool methodDispatchedElsewhere( const IngestResult& ing, const Symbol& s,
     {
         return true;
     }
-    return !s.scope.empty() && std::ranges::binary_search( basedTypes, scopeLastSegment( s.scope ), sortutil::svLess );
+    // the owner type: the stored scope, else (TS/JS/Java/C#/Kotlin/Swift members store none) the class whose body holds the method
+    const std::string_view owner = !s.scope.empty() ? scopeLastSegment( s.scope ) : enclosing.of( s );
+    return !owner.empty() && std::ranges::binary_search( basedTypes, owner, sortutil::svLess );
 }
 
 // ── --for task gate G3: the attribute rides a row only where the question can use it ──────────────────────────────────────────
@@ -339,6 +524,21 @@ inline bool tonlyUseWord( std::string_view w ) noexcept
     static constexpr std::string_view kPrefix[] = { "reach", "remov", "delet", "deprecat", "refactor", "renam" };
     return std::ranges::find( kExact, w ) != std::end( kExact )
         || std::ranges::any_of( kPrefix, [ & ]( std::string_view p ) { return w.starts_with( p ); } );
+}
+
+// Does the path token `t` name `lp` at SEGMENT boundaries: `t` sits in `lp` with a `/` (or an end) on both sides, so `internal/sign` names
+// internal/sign/rsa.go and `hono` names nothing under src/hono-base.ts. A token that merely starts or ends inside a longer segment names no file.
+inline bool namesWholeSegments( std::string_view lp, std::string_view t ) noexcept
+{
+    for( std::size_t at = lp.find( t ); at != std::string_view::npos; at = lp.find( t, at + 1 ) )
+    {
+        const std::size_t end = at + t.size();
+        if( ( at == 0 || lp[ at - 1 ] == '/' ) && ( end == lp.size() || lp[ end ] == '/' ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // What the task says: a use-shaped word (is X used / safe to remove / who calls / tested), the row's bare name as a token, or a
@@ -405,11 +605,11 @@ public:
         }
         const std::string_view path = rootRelPath( ing, s.fileId );
         const std::string_view base = path.substr( path.rfind( '/' ) == std::string_view::npos ? 0 : path.rfind( '/' ) + 1 );
+        const std::string      lp   = queryshape::detail::lowerAscii( path );
         return std::ranges::any_of( paths_, [ & ]( const std::string_view& t )
         {
-            const std::string      lp   = queryshape::detail::lowerAscii( path );
-            const std::string_view tb   = t.substr( t.rfind( '/' ) == std::string_view::npos ? 0 : t.rfind( '/' ) + 1 );
-            return lp.find( t ) != std::string::npos || queryshape::detail::lowerAscii( base ) == tb;
+            const std::string_view tb = t.substr( t.rfind( '/' ) == std::string_view::npos ? 0 : t.rfind( '/' ) + 1 );
+            return namesWholeSegments( lp, t ) || queryshape::detail::lowerAscii( base ) == tb;
         } );
     }
 
@@ -456,9 +656,11 @@ inline void dropTestOnlyEntryPoints( const IngestResult& ing, std::vector<NodeId
 inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, const Graph& g, const std::vector<char>& declined,
                                                    const std::vector<NodeId>& wanted )
 {
+    ShippedTestSupport  shipped( ing );
     const auto*         ro = g.inEdges.rowOffsets();
     const auto          ifaceMethods = interfaceMethodNames( ing );
     const auto          basedTypes   = typesWithBases( ing );
+    const EnclosingTypes enclosing( ing );
     std::vector<NodeId> cands;
     for( const NodeId id : wanted )
     {
@@ -466,7 +668,7 @@ inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, cons
         const bool    callable = s.kind == SymKind::Function || s.kind == SymKind::Method;
         const bool    declares = s.kind == SymKind::Method && std::ranges::binary_search( ifaceMethods, std::string_view( s.name ), sortutil::svLess );
         if( callable && ro[ id + 1 ] != ro[ id ] && !isTestSymbol( ing, id ) && declined[ id ] == 0 && !declares
-            && !methodDispatchedElsewhere( ing, s, basedTypes ) && everyCallerIsTest( ing, g, id ) )
+            && !methodDispatchedElsewhere( ing, s, basedTypes, enclosing ) && everyCallerIsTest( ing, g, id, shipped ) )
         {
             cands.push_back( id );
         }

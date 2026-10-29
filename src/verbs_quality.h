@@ -2850,10 +2850,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         // name a non-test code file spells at all (a module-level call, an aliased import, a value), so a site the call
         // graph did not attribute cannot leave a used function on this list.
         std::vector<NodeId> testOnly;
+        ShippedTestSupport  shippedTestSupport( ing );   // S4: callers in shipped test-support code (django/test/) are library callers
         const auto testOnlyCandidate = [ & ]( const Symbol& s ) -> bool
         {
             return !isTestSymbol( ing, s.id ) && !quality::isConftestFile( ing.files[ s.fileId ] ) && !quality::pythonDecoratedDef( s, sourceFor( s.fileId ) ) && !dcVri.isValueReferenced( s.id )
-                && everyCallerIsTest( ing, g, s.id );
+                && everyCallerIsTest( ing, g, s.id, shippedTestSupport );
         };
 
         // collect candidates: in-degree == 0, not exported, sorted for determinism
