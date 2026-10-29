@@ -748,10 +748,14 @@ cat > "$C2D/ts/src/doc.ts" <<'P'
  * ** relayDocOnly again, as a continuation line
  */
 export function relayDocOnly(x: number): number { return x + 1 }
+export function relayBlockLine(x: number): number { return x + 2 }
+export function relayDispatch(o: any, x: number): number {
+  /* dynamic */ return o["relayBlockLine"](x)
+}
 P
 cat > "$C2D/ts/test/doc.test.ts" <<'P'
-import { relayDocOnly } from '../src/doc'
-test('doc', () => { expect(relayDocOnly(1)).toBe(2) })
+import { relayDocOnly, relayBlockLine, relayDispatch } from '../src/doc'
+test('doc', () => { expect(relayDocOnly(1)).toBe(2); expect(relayBlockLine(1)).toBe(3); expect(relayDispatch({}, 1)).toBe(0) })
 P
 c2run(){ d="$1"; t="$2"; shift 2; ( cd "$C2D/$d" && "$BIN" "$C2D/$d" --no-cache "--for=$t" "$@" </dev/null 2>/dev/null ); }
 c2check(){ # arm lang answer control name...   (control "-": none)
@@ -767,7 +771,8 @@ c2check(){ # arm lang answer control name...   (control "-": none)
 }
 c2run py "relay_star_modattr relay_same_file_target relay_star_call relay_star_true callers" > "$TMP/c1.txt"
 c2check C1 py "$TMP/c1.txt" relay_star_true relay_star_modattr relay_same_file_target relay_star_call
-c2run ts "relayDocOnly callers" > "$TMP/c1t.txt"
+c2run ts "relayDocOnly relayBlockLine callers" > "$TMP/c1t.txt"
+c2check C1 ts "$TMP/c1t.txt" - relayBlockLine
 if has "$TMP/c1t.txt" relayDocOnly; then ok "C1 ts a name only a block comment's ' * ' lines mention stays flagged (comments are not uses)"; else no "C1 ts relayDocOnly lost tonly: $( row "$TMP/c1t.txt" relayDocOnly )"; fi
 
 # C2 (S2) Go standard-library protocol methods reached through io.Copy / flag.Var / heap / net/http
