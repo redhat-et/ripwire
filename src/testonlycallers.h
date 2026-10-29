@@ -395,7 +395,9 @@ public:
         }
         std::string name( s.name );
         for( char& c : name ) { c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); }
-        if( std::ranges::binary_search( idents_, std::string_view( name ), sortutil::svLess ) )
+        // the bare name as a token, or (a name of 6+ characters, so `get` / `run` cannot match inside any word) spelled inside a longer
+        // task word: `onRequestHookRunner` names hookRunner
+        if( std::ranges::binary_search( idents_, std::string_view( name ), sortutil::svLess ) || ( name.size() >= 6 && lower_.find( name ) != std::string::npos ) )
         {
             return true;
         }

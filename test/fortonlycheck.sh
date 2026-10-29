@@ -616,6 +616,8 @@ if has "$TMP/g3n.txt" relay_true_target; then ok "B6 a task that NAMES the row k
 if has "$TMP/g3p.txt" relay_true_target; then ok "B6 a task that names the row's FILE keeps its tonly"; else no "B6 file-named row lost its tonly: $( row "$TMP/g3p.txt" relay_true_target )"; fi
 ( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=relay in pkg/" </dev/null 2>/dev/null ) > "$TMP/g3d.txt"
 if has "$TMP/g3d.txt" relay_true_target; then ok "B6 a task that names the row's DIRECTORY keeps its tonly"; else no "B6 dir-named row lost its tonly: $( row "$TMP/g3d.txt" relay_true_target )"; fi
+( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=onRelay_true_targetRunner" </dev/null 2>/dev/null ) > "$TMP/g3s.txt"
+if has "$TMP/g3s.txt" relay_true_target; then ok "B6 a task word that CONTAINS the row's 6+ character name keeps its tonly (onRequestHookRunner names hookRunner)"; else no "B6 substring-named row lost its tonly: $( row "$TMP/g3s.txt" relay_true_target )"; fi
 # G3 is per row: a task that names one row flags that row only
 ( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=relay_true_target relay_modattr_target" </dev/null 2>/dev/null ) > "$TMP/g3r.txt"
 if has "$TMP/g3r.txt" relay_true_target; then ok "B6 per-row: the named flagged row keeps tonly beside another named row"; else no "B6 per-row: relay_true_target lost tonly"; fi
