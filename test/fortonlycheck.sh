@@ -87,7 +87,7 @@ def test_helper_again():
 P
 TASK="parcel rate"
 forx(){ ( cd "$F" && "$BIN" "$F" --no-cache "--for=$TASK" "$@" </dev/null 2>/dev/null ); }
-forx "" > "$TMP/c.txt"
+forx > "$TMP/c.txt"
 row(){ python3 - "$1" "$2" <<'PY'
 import re,sys
 t=open(sys.argv[1]).read()
@@ -99,24 +99,26 @@ has(){ row "$1" "$2" | grep -q ' tonly="1"'; }
 [ -s "$TMP/c.txt" ] || { no "the fixture --for answer is empty"; echo "FAILURES ABOVE"; exit 1; }
 
 # A1
-has "$TMP/c.txt" parcel_rate_tested_only && ok "A1 the function only a test calls carries tonly=\"1\"" || no "A1 parcel_rate_tested_only row has no tonly: $( row "$TMP/c.txt" parcel_rate_tested_only )"
+if has "$TMP/c.txt" parcel_rate_tested_only; then ok "A1 the function only a test calls carries tonly=\"1\""; else no "A1 parcel_rate_tested_only row has no tonly: $( row "$TMP/c.txt" parcel_rate_tested_only )"; fi
 # A2-A6 near misses
 for n in parcel_rate_with_library_user parcel_rate_for_library_call; do
     r="$( row "$TMP/c.txt" $n )"; [ -n "$r" ] || { no "A2 $n row missing from the answer"; continue; }
-    has "$TMP/c.txt" $n && no "A2 $n has a library caller yet carries tonly: $r" || ok "A2 $n (a library caller) stays unflagged"
+    if has "$TMP/c.txt" $n; then no "A2 $n has a library caller yet carries tonly: $r"; else ok "A2 $n (a library caller) stays unflagged"; fi
 done
 r="$( row "$TMP/c.txt" RateHelper.parcel_rate_by_name )"; [ -n "$r" ] || r="$( row "$TMP/c.txt" parcel_rate_by_name )"
-[ -n "$r" ] && { echo "$r" | grep -q ' tonly="1"' && no "A3 a method a library calls on an unknown receiver (by name) is flagged: $r" || ok "A3 a library caller by NAME only keeps the method unflagged"; } || no "A3 the by-name method row is missing"
+if [ -z "$r" ]; then no "A3 the by-name method row is missing"
+elif echo "$r" | grep -q ' tonly="1"'; then no "A3 a method a library calls on an unknown receiver (by name) is flagged: $r"
+else ok "A3 a library caller by NAME only keeps the method unflagged"; fi
 r="$( row "$TMP/c.txt" parcel_rate_without_callers )"; [ -n "$r" ] || no "A4 the no-caller row is missing"
-echo "$r" | grep -q ' tonly="1"' && no "A4 a function with NO caller carries tonly: $r" || ok "A4 a function with no caller is not tonly (that is no callers)"
+if echo "$r" | grep -q ' tonly="1"'; then no "A4 a function with NO caller carries tonly: $r"; else ok "A4 a function with no caller is not tonly (that is no callers)"; fi
 r="$( row "$TMP/c.txt" parcel_rate_table_entry )"; [ -n "$r" ] || no "A5 the table-held row is missing"
-echo "$r" | grep -q ' tonly="1"' && no "A5 a function a library holds in a dispatch table carries tonly: $r" || ok "A5 a library VALUE use (dispatch table) keeps it unflagged"
+if echo "$r" | grep -q ' tonly="1"'; then no "A5 a function a library holds in a dispatch table carries tonly: $r"; else ok "A5 a library VALUE use (dispatch table) keeps it unflagged"; fi
 r="$( row "$TMP/c.txt" parcel_rate_test_helper )"
-echo "$r" | grep -q ' tonly="1"' && no "A6 a test helper itself carries tonly: $r" || ok "A6 a test-dir helper (called from library code and tests) is never flagged"
+if echo "$r" | grep -q ' tonly="1"'; then no "A6 a test helper itself carries tonly: $r"; else ok "A6 a test-dir helper (called from library code and tests) is never flagged"; fi
 
 # A9 legend + xml
 grep -q 'tonly=1 every caller' "$TMP/c.txt" && ok "A9 compact legend clause rides with the attribute" || no "A9 compact legend clause missing"
-forx "" --legend=full > "$TMP/f.txt"
+forx --legend=full > "$TMP/f.txt"
 grep -q 'tonly=\"1\" on a d row' "$TMP/f.txt" && ok "A9 full legend clause rides with the attribute" || no "A9 full legend clause missing"
 has "$TMP/f.txt" parcel_rate_tested_only && ok "A1 --legend=full carries tonly on the same row" || no "A1 --legend=full row lacks tonly"
 if command -v xmllint >/dev/null 2>&1; then
@@ -124,7 +126,7 @@ if command -v xmllint >/dev/null 2>&1; then
 fi
 
 # A1 json
-forx "" --json > "$TMP/j.json"
+forx --json > "$TMP/j.json"
 python3 - "$TMP/j.json" <<'PY' && ok "A1 --json: \"tonly\":true on the test-only row and on no other row" || no "A1 --json tonly rows wrong"
 import json,sys
 d=json.load(open(sys.argv[1]))
@@ -199,6 +201,37 @@ for n in Truck.Dispatch Van.Dispatch; do
     echo "$r" | grep -q ' tonly="1"' && no "A11 $n (an interface method's implementation) carries tonly: $r" || ok "A11 $n (reached through the Carrier interface) stays unflagged"
 done
 
+# A12 a call the resolver DECLINED to bind (a library `table.get(key)` on an untyped receiver: the builtin-method name gate) is a
+# library call the edge pass cannot see; a method only a test calls directly, which that call could have meant, stays unflagged.
+DC="$TMP/gx3"; mkdir -p "$DC/pkg" "$DC/tests"
+cat > "$DC/pkg/store.py" <<'P'
+class ParcelStore:
+    def get(self, key):
+        return key
+
+
+def parcel_store_only_tested(key):
+    return key
+P
+cat > "$DC/pkg/use.py" <<'P'
+def read(table, key):
+    return table.get(key)
+P
+cat > "$DC/tests/test_store.py" <<'P'
+from pkg.store import ParcelStore, parcel_store_only_tested
+
+
+def test_all():
+    assert ParcelStore().get(1) == 1
+    assert parcel_store_only_tested(1) == 1
+P
+( cd "$DC" && "$BIN" "$DC" --no-cache "--for=parcel store get" </dev/null 2>/dev/null ) > "$TMP/dc.txt"
+r="$( row "$TMP/dc.txt" ParcelStore.get )"
+if [ -z "$r" ]; then no "A12 premise: the ParcelStore.get row is missing"
+elif echo "$r" | grep -q ' tonly="1"'; then no "A12 a method a declined library call could have meant carries tonly: $r"
+else ok "A12 a library call the resolver declined to bind keeps the method unflagged"; fi
+if has "$TMP/dc.txt" parcel_store_only_tested; then ok "A12 a plain function only a test calls, beside it, is flagged (the arm can fire)"; else no "A12 premise: parcel_store_only_tested was not flagged: $( row "$TMP/dc.txt" parcel_store_only_tested )"; fi
+
 # A7 a tree with no test-only function
 G="$TMP/gx"; mkdir -p "$G/pkg" "$G/tests"
 cp "$F/pkg/shiplib.py" "$G/pkg/shiplib.py"
@@ -234,9 +267,10 @@ open(sys.argv[1],"w").write("\n".join(lines))
 PY
 ( cd "$H" && "$BIN" "$H" --no-cache "--for=$TASK" </dev/null 2>/dev/null ) > "$TMP/h_whole.txt"
 ( cd "$H" && "$BIN" "$H" --no-cache "--for=$TASK" --max-file-size=4K </dev/null 2>/dev/null ) > "$TMP/h_cut.txt"
-grep -q 'skipped_oversize' "$TMP/h_cut.txt" || no "A8 premise: --max-file-size=4K skipped no file (the cut arm measures nothing)"
-grep -q ' tonly="1"' "$TMP/h_whole.txt" && no "A8 premise: the whole index flagged a function the big file calls" || true
-grep -q ' tonly="1"' "$TMP/h_cut.txt" && no "A8 an index missing the oversize caller file still prints tonly" || ok "A8 a cut index (oversize code file dropped) flags nothing"
+if has "$TMP/h_whole.txt" parcel_rate_tested_only; then no "A8 premise: the whole index flagged parcel_rate_tested_only although biguser.py calls it: $( row "$TMP/h_whole.txt" parcel_rate_tested_only )"; else ok "A8 premise: a library caller in the big file keeps the whole index unflagged"; fi
+( cd "$H" && "$BIN" "$H" --no-cache --max-file-size=4K --callers=parcel_rate_tested_only </dev/null 2>/dev/null ) > "$TMP/h_callers.txt"
+if grep -q 'biguser' "$TMP/h_callers.txt" || ! grep -q 'test_ship' "$TMP/h_callers.txt"; then no "A8 premise: --max-file-size=4K must drop biguser.py and keep the test caller (the cut arm measures nothing otherwise)"; else ok "A8 premise: the 4K ceiling dropped the library caller file, the test caller remains"; fi
+if has "$TMP/h_cut.txt" parcel_rate_tested_only; then no "A8 an index missing the oversize caller file still prints tonly: $( row "$TMP/h_cut.txt" parcel_rate_tested_only )"; else ok "A8 a cut index (oversize code file dropped) flags nothing"; fi
 
 # A10 stripping the attribute leaves the same answer shape: the clause + attribute are the only difference vs a no-tonly run
 python3 - "$TMP/c.txt" <<'PY' && ok "A10 stripping tonly=\"1\" leaves every <d> row's other attributes in order" || no "A10 a row's other attributes moved"
