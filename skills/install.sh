@@ -559,6 +559,23 @@ wanted_skill() { [ "$wantContributor" -eq 1 ] || ! is_contributor_skill "$1"; }
 
 pruned=0
 kept=0
+# link_is_ours LINK NAME — may the prune remove this SYMLINK? Only one it can show ripwire made: dangling (nothing of the
+# user's is behind it), recorded by the previous manifest, or pointing into THIS checkout (compared by whole path
+# components: "$src"/*, never a string prefix, so a sibling directory sharing the checkout's name does not match).
+# A live link anywhere else is the user's own asset that merely happens to be named ripwire-* (#293 review).
+oldManifest="$dst/.ripwire-manifest-v1"
+link_is_ours()
+{
+    if [ ! -e "$1" ]; then return 0; fi
+    if [ -f "$oldManifest" ] && grep -qx "skill=$2" "$oldManifest" 2>/dev/null; then return 0; fi
+    _t="$( readlink "$1" 2>/dev/null )" || return 1
+    case "$_t" in
+        /*|[A-Za-z]:[/\\]*) ;;
+        *) _t="$( dirname "$1" )/$_t" ;;
+    esac
+    case "$_t" in "$src"/*) return 0 ;; esac
+    return 1
+}
 for existing in "$dst"/ripwire-*; do
     [ -e "$existing" ] || [ -L "$existing" ] || continue      # skip the literal glob when nothing matches
     name="$( basename "$existing" )"
@@ -575,6 +592,18 @@ for existing in "$dst"/ripwire-*; do
         why="$name (contributor-only; pass --contributor to activate it)"
     fi
     [ -n "$why" ] || continue
+    if [ -L "$existing" ]; then
+        if ! link_is_ours "$existing" "$name"; then
+            echo "kept $name: a symlink ripwire did not create (yours) — remove it yourself if it is stale"
+            kept=$(( kept + 1 ))
+            continue
+        fi
+    elif [ ! -d "$existing" ]; then
+        # a regular file is never something this installer made (it creates links, and copied directories)
+        echo "kept $name: not installed by ripwire (your own file) — remove it yourself if it is stale"
+        kept=$(( kept + 1 ))
+        continue
+    fi
     if foreign_dir "$existing" "$( shipped_src_for "$name" )"; then
         # Before #334 this was `rm -f` on a directory, which failed and aborted the whole install under set -e.
         # C4: a name this run once wrote to the manifest is not by itself proof this directory is still ours —

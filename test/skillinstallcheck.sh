@@ -795,5 +795,37 @@ done
 rm -rf "${P_HOME:?}/.claude"; TMPDIR="$HD/P/tmp" HOME="$P_HOME" bash "$SK/install.sh" --claude --hook >/dev/null 2>&1
 pStray="$( find "$HD/P" \( -name '*.tmp.*' -o -name 'tmp.*' \) 2>/dev/null | tr '\n' ' ' )"
 [ -z "$pStray" ] && ok "(P) twin: an ordinary run leaves no temp file" || no "(P) an ordinary run left temp files: $pStray"
+# ── (Q) the PRUNE removes only what it can show is ITS OWN ───────────────────────────────────────────────────────
+#    #293 review: "a user's own unrelated symlink happening to be named ripwire-<something>" was fair game, the
+#    ownership test compared string PREFIXES (skills-mine counted as skills), and a real FILE with a ripwire- name
+#    was `rm -f`'d. Ours = recorded in the previous manifest, dangling, or pointing into this checkout — compared by
+#    whole path components. Anything else is kept and said so.
+Q="${HD:?}/Q"; rm -rf "${Q:?}"; mkdir -p "$Q/dst" "$Q/mine/ripwire-mine" "$Q/old/ripwire-elsewhere"
+printf -- '---\nname: ripwire-mine\n---\n' >"$Q/mine/ripwire-mine/SKILL.md"; printf -- '---\nname: x\n---\n' >"$Q/old/ripwire-elsewhere/SKILL.md"
+mkdir -p "$Q/co"; cp -R "$SK" "$Q/co/skills"; cp -R "$ROOT/hooks" "$Q/co/hooks"; CS="$Q/co/skills"
+bash "$CS/install.sh" "$Q/dst" >/dev/null 2>&1                        # first run: writes the manifest
+ln -s "$Q/mine/ripwire-mine" "$Q/dst/ripwire-mine"                    # the user's own live link, never recorded
+SKSIB="$CS-mine"; mkdir -p "$SKSIB/ripwire-pre"; printf 'x\n' >"$SKSIB/ripwire-pre/SKILL.md"
+ln -s "$SKSIB/ripwire-pre" "$Q/dst/ripwire-prefixlink"                # LIVE, outside the checkout, but a string-prefix match
+printf 'my notes\n' >"$Q/dst/ripwire-notes.md"                        # a regular file that merely has the prefix
+ln -s "$Q/old/ripwire-elsewhere" "$Q/dst/ripwire-recorded"            # live, elsewhere, but the manifest recorded it
+echo "skill=ripwire-recorded" >>"$Q/dst/.ripwire-manifest-v1"
+ln -s "$CS/ripwire-router" "$Q/dst/ripwire-renamed-alias"             # live, into THIS checkout: ours
+bash "$CS/install.sh" "$Q/dst" >"$Q/out" 2>&1
+{ [ -L "$Q/dst/ripwire-mine" ] && grep -q '^kept ripwire-mine' "$Q/out"; } \
+    && ok "(Q) a user's own live symlink named ripwire-* is kept, with a 'kept' line" \
+    || no "(Q) the user's live ripwire-mine symlink was pruned or not reported: $( grep ripwire-mine "$Q/out" )"
+[ -L "$Q/dst/ripwire-prefixlink" ] \
+    && ok "(Q) a live link into a sibling path that merely shares the checkout's string prefix is kept (components, not prefixes)" \
+    || no "(Q) a link outside the checkout whose path starts with the checkout's string was pruned as 'ours'"
+{ [ -f "$Q/dst/ripwire-notes.md" ] && grep -q 'my notes' "$Q/dst/ripwire-notes.md"; } \
+    && ok "(Q) a regular file with a ripwire- name is never removed" \
+    || no "(Q) the user's regular file ripwire-notes.md was removed by the prune"
+{ [ ! -e "$Q/dst/ripwire-recorded" ] && [ ! -L "$Q/dst/ripwire-recorded" ]; } \
+    && ok "(Q) twin: a stale link the previous manifest recorded is still pruned" \
+    || no "(Q) a stale link the manifest recorded survived the prune"
+{ [ ! -L "$Q/dst/ripwire-renamed-alias" ]; } \
+    && ok "(Q) twin: a stale-named link into this checkout is still pruned" \
+    || no "(Q) a stale-named link into this very checkout survived the prune"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
