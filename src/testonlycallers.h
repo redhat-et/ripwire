@@ -88,11 +88,11 @@ public:
     }
 
 private:
+    // Python, JS/TS and C/C++: the languages whose import/include edges the adjacency resolves to files
     static bool importResolved( std::string_view ext ) noexcept
     {
-        static constexpr std::string_view kExt[] = { ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
-                                                     ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx" };
-        return std::ranges::find( kExt, ext ) != std::end( kExt );
+        return ext == ".py" || ext == ".pyi" || ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".cjs" || ext == ".ts" || ext == ".tsx" || ext == ".mts"
+            || ext == ".cts" || ext == ".c" || ext == ".h" || ext == ".cc" || ext == ".cpp" || ext == ".cxx" || ext == ".hpp" || ext == ".hh" || ext == ".hxx";
     }
 
     void build()
@@ -460,15 +460,9 @@ inline bool goStdProtocolMethod( std::string_view name ) noexcept
 class EnclosingTypes
 {
 public:
-    explicit EnclosingTypes( const IngestResult& ing ) : ing_( ing ), byFile_( ing.files.size() )
+    explicit EnclosingTypes( const IngestResult& ing )
+        : ing_( ing ), byFile_( symbolsByFileInIdOrder( ing, []( const Symbol& t ) { return t.kind != SymKind::Other && namespaceCompatible( RefRole::Type, t.kind ); } ) )
     {
-        for( const Symbol& t : ing.symbols )
-        {
-            if( t.kind != SymKind::Other && namespaceCompatible( RefRole::Type, t.kind ) && t.fileId < byFile_.size() )
-            {
-                byFile_[ t.fileId ].push_back( t.id );
-            }
-        }
     }
 
     std::string_view of( const Symbol& s ) const
@@ -489,8 +483,8 @@ public:
     }
 
 private:
-    const IngestResult&                    ing_;
-    std::vector<std::vector<NodeId>>       byFile_;
+    const IngestResult&  ing_;
+    SymbolsByFile        byFile_;
 };
 
 // May a call reach this METHOD (a Method, or a Function with an owner scope: Python/Ruby members) without an edge to it? Off for: a method of a type that has any base (override / trait impl), a
