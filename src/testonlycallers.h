@@ -1,8 +1,10 @@
 #pragma once
 
-// testonlycallers.h — FOR-TONLY (card A2 carrier): the ONE predicate "every indexed caller of this function is test code",
+// testonlycallers.h — FOR-TONLY (card A2 carrier): the ONE home of "every indexed caller of this function is test code",
 // read by --dead-code's test-only rows (verbs_quality.h) and by the --for lens's tonly="1" row attribute (CLI XML, --json and
-// the MCP `for` twin). One rule, two surfaces: a second copy is what would drift.
+// the MCP `for` twin). Both surfaces share the edge test (everyCallerIsTest), the entry-point vetting (dropTestOnlyEntryPoints)
+// and the library-text name vetting (dropTestOnlySpelledInLibrary); --for adds the dispatch guards (an override, a std-protocol
+// method) and the task gate that --dead-code, a list verb, has no use for. A second copy is what would drift.
 //
 // The rule is on CALLERS only. A caller is test code by filter.h isTestSymbol (the shared test-path rule plus the in-file
 // test scopes); a by-name (hedged) edge from a library symbol is still a library caller, so it keeps the flag off; an edge a
@@ -14,24 +16,48 @@
 #include "epmanifest.h"       // collectManifestsAbove — the manifest entry points an in-tree caller never spells
 #include "docparse.h"         // lowerExtOf / isProseExtension — which skipped files could have held a caller
 #include "model.h"
+#include "quality.h"          // pythonGlobImportTails / pythonModuleTail — the glob-import half of the name vetting
 #include "valuerefindex.h"    // ValueRefIndex::narrowFor / isValueReferenced — a name a library holds as a VALUE is a use
 #include "infra/sortutil.h"   // svLess
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <iterator>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace rw
 {
 
-// D1 TESTONLY-DEAD: every in-edge of `id` comes from a test symbol. all_of over an empty row is TRUE, so a caller that wants
+// A caller that is test code AS EVIDENCE. isTestSymbol also counts an in-file test scope (a Python module-level `def test_*`), and a
+// LIBRARY function may carry that name (a `test_connection` health probe): when it sits outside a test path and a non-test symbol
+// calls it, it is library code and its callee has a library caller. A test-scoped def nothing library calls stays a test.
+inline bool callerIsTestEvidence( const IngestResult& ing, const Graph& g, NodeId caller ) noexcept
+{
+    if( !isTestSymbol( ing, caller ) )
+    {
+        return false;
+    }
+    const Symbol& s = ing.symbols[ caller ];
+    if( s.testScope == 0 || s.fileId >= ing.files.size() || isTestPath( rootRelPath( ing, s.fileId ) ) )
+    {
+        return true;
+    }
+    const auto* ro = g.inEdges.rowOffsets();
+    const auto* ci = g.inEdges.colIndices();
+    return std::all_of( ci + ro[ caller ], ci + ro[ caller + 1 ], [ & ]( NodeId up ) { return isTestSymbol( ing, up ); } );
+}
+
+// D1 TESTONLY-DEAD: every in-edge of `id` comes from test code. all_of over an empty row is TRUE, so a caller that wants
 // "test-only" (not "no callers") must also check the row is non-empty; computeTestOnlyCallers below does.
 inline bool everyCallerIsTest( const IngestResult& ing, const Graph& g, NodeId id ) noexcept
 {
     const auto* ro = g.inEdges.rowOffsets();
     const auto* ci = g.inEdges.colIndices();
-    return std::all_of( ci + ro[ id ], ci + ro[ id + 1 ], [ & ]( NodeId caller ) { return isTestSymbol( ing, caller ); } );
+    return std::all_of( ci + ro[ id ], ci + ro[ id + 1 ], [ & ]( NodeId caller ) { return callerIsTestEvidence( ing, g, caller ); } );
 }
 
 // Was the whole tree indexed? A "every caller is a test" claim rests on having seen every caller: a memory-guard stop
@@ -120,6 +146,287 @@ inline std::vector<std::string_view> interfaceMethodNames( const IngestResult& i
     return methods;
 }
 
+// ── name vetting (moved verbatim from verbs_quality.h; --dead-code and --for call the same function) ──────────────────────────
+
+// D1: is the occurrence of a name at `at` inside a comment-only line? Only --for asks (SpellVetting::skipCommentLines): a doc comment
+// that names the function is documentation, not a use, and Go's doc-comment convention (`// rsaSign signs …`) would otherwise vet
+// off every documented function. `hashIsComment`: `#` opens a comment in Python/Ruby but a directive (`#if name`) in C.
+inline bool onCommentOnlyLine( std::string_view text, std::size_t at, bool hashIsComment ) noexcept
+{
+    const std::size_t lineStart = text.rfind( '\n', at == 0 ? 0 : at - 1 );
+    std::size_t       i         = lineStart == std::string_view::npos ? 0 : lineStart + 1;
+    while( i < at && ( text[ i ] == ' ' || text[ i ] == '\t' ) )
+    {
+        ++i;
+    }
+    const std::string_view rest = text.substr( i, 2 );
+    return rest == "//" || rest == "/*" || ( !rest.empty() && rest[ 0 ] == '*' ) || ( hashIsComment && !rest.empty() && rest[ 0 ] == '#' );
+}
+
+// D1: `name` spelled whole-word in `text` (file `fileId`) anywhere but inside the signature span of one of `rows` it names.
+inline bool spelledOutsideOwnSignature( const IngestResult& ing, std::string_view text, std::uint32_t fileId, std::string_view name,
+                                        const std::vector<NodeId>& rows, bool skipCommentLines = false, bool hashIsComment = false ) noexcept
+{
+    const auto isIdent = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
+    const auto ownSignature = [ & ]( std::size_t at )
+    {
+        return std::ranges::any_of( rows, [ & ]( NodeId id )
+        {
+            const Symbol& def = ing.symbols[ id ];
+            return def.fileId == fileId && def.name == name && at >= def.sigStartByte && at < def.sigEndByte;
+        } );
+    };
+    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
+    {
+        const std::size_t end      = at + name.size();
+        const bool        bounded  = ( at == 0 || !isIdent( text[ at - 1 ] ) ) && ( end == text.size() || !isIdent( text[ end ] ) );
+        if( bounded && !ownSignature( at ) && !( skipCommentLines && onCommentOnlyLine( text, at, hashIsComment ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// D1: the text a library file contributes to the name vetting, or nullopt when it contributes none: a test file, a prose file
+// (markdown, .txt: a mention there is documentation, not a use) or an unreadable one. A notebook is CODE in a JSON container,
+// so its code and markdown cells are read as text (docparse::extractIpynb) — a def only a notebook calls is in use.
+// CR 4396503875: an EXCLUDED file (libraryFileExcluded: a test or a prose file) and an UNREADABLE one both return nullopt here,
+// and the vetting tells them apart through libraryFileExcluded — a failed read is not an exclusion.
+inline bool libraryFileExcluded( const IngestResult& ing, std::uint32_t fileId )
+{
+    const std::string_view rel = rootRelPath( ing, fileId );
+    const std::string      ext = docparse::lowerExtOf( rel );
+    return isTestPath( rel ) || ( ext != ".ipynb" && docparse::isProseExtension( ext ) );
+}
+inline std::optional<std::string> libraryFileText( const IngestResult& ing, std::uint32_t fileId )
+{
+    if( libraryFileExcluded( ing, fileId ) )
+    {
+        return std::nullopt;
+    }
+    const std::string          ext   = docparse::lowerExtOf( rootRelPath( ing, fileId ) );
+    std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, fileId ) );
+    if( bytes && ext == ".ipynb" )
+    {
+        return docparse::extractIpynb( *bytes );
+    }
+    return bytes;
+}
+
+// D1 name vetting: drop every row whose name a NON-test, non-prose indexed file spells whole-word outside the def's own
+// signature, and every row whose module a library file glob-imports (`from ._impl import *` re-exports the module's public
+// names through the package). Text, not references: an aliased import (`from m import dump as binary_dump`), a module-level
+// call (`options.f()`), a getattr string and a bound `self.m` / `this.m` value carry no edge to the def, and a comment or string
+// mention costs only a missed row, never a used function on the list. Each file is read once, uncached (the scan may cover the
+// whole tree). A library file that cannot be read vets nothing: `unread` lists them and `testOnly` is emptied (the third state:
+// no claim). The survivors keep their order; --dead-code re-sorts them into its own row order.
+inline void dropTestOnlySpelledInLibrary( const IngestResult& ing, std::vector<NodeId>& testOnly, std::vector<std::uint32_t>& unread,
+                                          bool skipCommentLines = false )
+{
+    std::vector<std::string_view> names;
+    names.reserve( testOnly.size() );
+    for( NodeId id : testOnly ) { names.push_back( ing.symbols[ id ].name ); }
+    std::ranges::sort( names, sortutil::svLess );
+    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    std::vector<std::string_view> spelled;
+    std::vector<std::string>      globbed;   // module tails a library file glob-imports (owned: the file text is gone after its turn)
+    for( std::uint32_t fileId = 0; fileId < ing.files.size(); ++fileId )
+    {
+        if( libraryFileExcluded( ing, fileId ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> text = libraryFileText( ing, fileId );
+        if( !text )
+        {   // CR 4396503875: a file whose uses are unknown vets nothing, so no test-only claim is made on its behalf
+            unread.push_back( fileId );
+            continue;
+        }
+        const std::string ext         = docparse::lowerExtOf( rootRelPath( ing, fileId ) );
+        const bool        hashComment = ext == ".py" || ext == ".pyi" || ext == ".rb";
+        for( std::string_view name : names )
+        {
+            if( spelledOutsideOwnSignature( ing, *text, fileId, name, testOnly, skipCommentLines, hashComment ) )
+            {
+                spelled.push_back( name );
+            }
+        }
+        for( std::string_view tail : quality::pythonGlobImportTails( *text ) )
+        {
+            globbed.emplace_back( tail );
+        }
+    }
+    if( !unread.empty() )
+    {
+        testOnly.clear();
+        return;
+    }
+    std::ranges::sort( spelled, sortutil::svLess );
+    std::ranges::sort( globbed, sortutil::svLess );
+    std::erase_if( testOnly, [ & ]( NodeId id )
+    {
+        const Symbol& def = ing.symbols[ id ];
+        return std::ranges::binary_search( spelled, std::string_view( def.name ), sortutil::svLess )
+            || std::ranges::binary_search( globbed, quality::pythonModuleTail( rootRelPath( ing, def.fileId ) ), sortutil::svLess );
+    } );
+}
+
+// ── --for dispatch guards: a method something OTHER than a traced call reaches ────────────────────────────────────────────────
+
+// The names of the types that have any base: a class that extends or implements something, a struct with an `impl Trait for`, in
+// the tree or outside it (the base need not be indexed). A method of such a type may be an override or a trait implementation, and
+// the call that reaches it goes through the base (`self.get_handler()` in the base class, `const Base&`, `fmt::Display`), which
+// the graph binds to the BASE's method, not to this one. Sorted by svLess for binary search.
+inline std::vector<std::string_view> typesWithBases( const IngestResult& ing )
+{
+    std::vector<std::string_view> types;
+    for( const Reference& r : ing.references )
+    {
+        if( !r.isInherit )
+        {
+            continue;
+        }
+        // Rust stashes the derived type NAME in `qualifier`; every other language's inherit ref sits inside the derived class header
+        std::string_view name = !r.qualifier.empty() ? std::string_view( r.qualifier )
+                              : r.fromSymbol < ing.symbols.size() ? std::string_view( ing.symbols[ r.fromSymbol ].name ) : std::string_view();
+        name = scopeLastSegment( name );
+        if( !name.empty() )
+        {
+            types.push_back( name );
+        }
+    }
+    std::ranges::sort( types, sortutil::svLess );
+    types.erase( std::ranges::unique( types ).begin(), types.end() );
+    return types;
+}
+
+// Go's standard-library protocols: a method of one of these names is called by fmt, errors, sort, encoding/*, net/http, io and
+// database/sql through an interface the tree does not declare (`fmt.Println( code )` runs RelayCode.String).
+inline bool goStdProtocolMethod( std::string_view name ) noexcept
+{
+    static constexpr std::string_view kExact[] = { "String", "Error", "Format", "GoString", "ServeHTTP", "Read", "Write", "Close", "Len", "Less",
+                                                   "Swap", "Unwrap", "Is", "As", "Scan", "Value" };
+    return std::ranges::find( kExact, name ) != std::end( kExact ) || name.starts_with( "Marshal" ) || name.starts_with( "Unmarshal" );
+}
+
+// May a call reach this METHOD without an edge to it? Off for: a method of a type that has any base (override / trait impl), a
+// Python dunder (the interpreter calls it), a Go method named for a std protocol. A plain function is never asked.
+inline bool methodDispatchedElsewhere( const Symbol& s, const std::vector<std::string_view>& basedTypes ) noexcept
+{
+    if( s.kind != SymKind::Method )
+    {
+        return false;
+    }
+    if( s.name.size() > 4 && s.name.starts_with( "__" ) && s.name.ends_with( "__" ) )
+    {
+        return true;
+    }
+    if( s.lang == Lang::Go && goStdProtocolMethod( s.name ) )
+    {
+        return true;
+    }
+    return !s.scope.empty() && std::ranges::binary_search( basedTypes, scopeLastSegment( s.scope ), sortutil::svLess );
+}
+
+// ── --for task gate G3: the attribute rides a row only where the question can use it ──────────────────────────────────────────
+
+inline bool tonlyUseWord( std::string_view w ) noexcept
+{
+    static constexpr std::string_view kExact[]  = { "use", "used", "uses", "usage", "unused", "dead", "call", "calls", "called", "caller", "callers",
+                                                    "test", "tests", "tested", "testing", "coverage", "covered", "obsolete" };
+    static constexpr std::string_view kPrefix[] = { "reach", "remov", "delet", "deprecat", "refactor", "renam" };
+    return std::ranges::find( kExact, w ) != std::end( kExact )
+        || std::ranges::any_of( kPrefix, [ & ]( std::string_view p ) { return w.starts_with( p ); } );
+}
+
+// What the task says: a use-shaped word (is X used / safe to remove / who calls / tested), the row's bare name as a token, or a
+// path-shaped token (a `/` or a short extension) that names the row's file or directory. A row on a question with none of the
+// three is context the question did not ask for (measured: 70 of 70 fires on explanatory questions but the 12 that were GAIN).
+class TonlyTaskGate
+{
+public:
+    explicit TonlyTaskGate( std::string_view task )
+    {
+        const auto isWord = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
+        const auto isPath = [ & ]( char c ) noexcept { return isWord( c ) || c == '.' || c == '/' || c == '-'; };
+        lower_.reserve( task.size() );
+        for( char c : task ) { lower_.push_back( static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ) ); }
+        std::string_view prev;
+        for( std::size_t i = 0; i < lower_.size(); )
+        {
+            if( !isWord( lower_[ i ] ) ) { ++i; continue; }
+            std::size_t j = i;
+            while( j < lower_.size() && isWord( lower_[ j ] ) ) { ++j; }
+            const std::string_view w( lower_.data() + i, j - i );
+            useWord_ = useWord_ || tonlyUseWord( w ) || ( prev == "safe" && w == "to" );
+            idents_.push_back( w );
+            prev = w;
+            i = j;
+        }
+        std::ranges::sort( idents_, sortutil::svLess );
+        for( std::size_t i = 0; i < lower_.size(); )
+        {
+            if( !isPath( lower_[ i ] ) ) { ++i; continue; }
+            std::size_t j = i;
+            while( j < lower_.size() && isPath( lower_[ j ] ) ) { ++j; }
+            const std::string_view tok( lower_.data() + i, j - i );
+            i = j;
+            const std::size_t dot = tok.rfind( '.' );
+            const bool        ext = dot != std::string_view::npos && tok.size() - dot - 1 >= 1 && tok.size() - dot - 1 <= 4 && dot + 1 < tok.size();
+            if( tok.size() > 2 && ( tok.find( '/' ) != std::string_view::npos || ext ) )
+            {
+                const std::size_t a = tok.find_first_not_of( "./" );
+                const std::size_t b = tok.find_last_not_of( "./" );
+                if( a != std::string_view::npos )
+                {
+                    paths_.push_back( tok.substr( a, b - a + 1 ) );
+                }
+            }
+        }
+    }
+
+    bool keeps( const IngestResult& ing, const Symbol& s ) const
+    {
+        if( useWord_ )
+        {
+            return true;
+        }
+        std::string name( s.name );
+        for( char& c : name ) { c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); }
+        if( std::ranges::binary_search( idents_, std::string_view( name ), sortutil::svLess ) )
+        {
+            return true;
+        }
+        if( !s.scope.empty() && ( lower_.find( lowerOf( s.scope ) + "." + name ) != std::string::npos || lower_.find( lowerOf( s.scope ) + "::" + name ) != std::string::npos ) )
+        {
+            return true;
+        }
+        const std::string_view path = rootRelPath( ing, s.fileId );
+        const std::string_view base = path.substr( path.rfind( '/' ) == std::string_view::npos ? 0 : path.rfind( '/' ) + 1 );
+        return std::ranges::any_of( paths_, [ & ]( const std::string_view& t )
+        {
+            const std::string      lp   = lowerOf( path );
+            const std::string_view tb   = t.substr( t.rfind( '/' ) == std::string_view::npos ? 0 : t.rfind( '/' ) + 1 );
+            return lp.find( t ) != std::string::npos || lowerOf( base ) == tb;
+        } );
+    }
+
+private:
+    static std::string lowerOf( std::string_view v )
+    {
+        std::string out( v );
+        for( char& c : out ) { c = static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) ); }
+        return out;
+    }
+    std::string                   lower_;
+    std::vector<std::string_view> idents_;
+    std::vector<std::string_view> paths_;
+    bool                          useWord_ = false;
+};
+
+// ── the predicate ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
 // D1 fix round 1 (F2): drop every row a package manifest names as an entry point. setup.cfg and pyproject.toml entry-point
 // tables (`console_scripts`, plugin groups) call their target by `module:attr`, an invocation no source file spells; the
 // crawl does not index setup.cfg, so the name vetting never sees it. epmanifest.h already reads both formats (EP-MANIFEST); this
@@ -150,39 +457,74 @@ inline void dropTestOnlyEntryPoints( const IngestResult& ing, std::vector<NodeId
     std::erase_if( testOnly, [ & ]( NodeId id ) { return isEntryAttr( ing.symbols[ id ].name ); } );
 }
 
-// The edge half of FOR-TONLY: the ids that pass every check but the value-use vetting (see computeTestOnlyCallers).
-inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, const Graph& g, const std::vector<char>& declined )
+// The edge half of FOR-TONLY: of `wanted`, the ids that pass every check but the library-text vetting (see computeTestOnlyCallers).
+inline std::vector<NodeId> testOnlyEdgeCandidates( const IngestResult& ing, const Graph& g, const std::vector<char>& declined,
+                                                   const std::vector<NodeId>& wanted )
 {
     const auto*         ro = g.inEdges.rowOffsets();
     const auto          ifaceMethods = interfaceMethodNames( ing );
+    const auto          basedTypes   = typesWithBases( ing );
     std::vector<NodeId> cands;
-    for( const Symbol& s : ing.symbols )
+    for( const NodeId id : wanted )
     {
-        const bool callable = s.kind == SymKind::Function || s.kind == SymKind::Method;
-        const bool declares = s.kind == SymKind::Method && std::ranges::binary_search( ifaceMethods, std::string_view( s.name ), sortutil::svLess );
-        if( callable && ro[ s.id + 1 ] != ro[ s.id ] && !isTestSymbol( ing, s.id ) && declined[ s.id ] == 0 && !declares && everyCallerIsTest( ing, g, s.id ) )
+        const Symbol& s        = ing.symbols[ id ];
+        const bool    callable = s.kind == SymKind::Function || s.kind == SymKind::Method;
+        const bool    declares = s.kind == SymKind::Method && std::ranges::binary_search( ifaceMethods, std::string_view( s.name ), sortutil::svLess );
+        if( callable && ro[ id + 1 ] != ro[ id ] && !isTestSymbol( ing, id ) && declined[ id ] == 0 && !declares
+            && !methodDispatchedElsewhere( s, basedTypes ) && everyCallerIsTest( ing, g, id ) )
         {
-            cands.push_back( s.id );
+            cands.push_back( id );
         }
     }
     return cands;
 }
 
-// FOR-TONLY: per symbol, 1 iff it is a library function or method that has at least one indexed caller, every caller is a
-// test symbol, no library code holds it as a value (a dispatch table, a registering decorator: ValueRefIndex), no library call
-// the resolver declined names it, no package manifest names it as an entry point, it is not a method an interface declares, and the index is whole. Empty vector (no flag
-// anywhere) when the index is cut or nothing qualifies. O(in-edges + declined records) for the edge pass; the value-use vetting
-// runs over the few names that pass it, on a narrow index.
-inline std::vector<std::uint8_t> computeTestOnlyCallers( const IngestResult& ing, const Graph& g )
+// The ranked head a --for answer can print a <d> row for: `surface` in rank order, rank > 0, at most `limit` rows. The tonly verdict
+// is computed for these ids alone — the library-text vetting reads the tree, so it is paid for the rows that can carry the flag.
+template<class Rank>
+inline std::vector<NodeId> tonlyHeadIds( const std::vector<NodeId>& surface, const Rank& rank, std::size_t limit )
+{
+    std::vector<NodeId> out;
+    for( std::size_t i = 0; i < surface.size() && i < limit; ++i )
+    {
+        if( rank[ surface[ i ] ] > 0 )
+        {
+            out.push_back( surface[ i ] );
+        }
+    }
+    return out;
+}
+
+// FOR-TONLY: per symbol, 1 iff it is a function or method ON THE RANKED HEAD (`head`) that the question can use (TonlyTaskGate), has
+// at least one indexed caller, every caller is a test, is not a method something else dispatches to (typesWithBases, std protocols),
+// no library call the resolver declined names it, no package manifest names it as an entry point, no library code holds it as a
+// value (ValueRefIndex) or spells its name (dropTestOnlySpelledInLibrary: a module-attribute call, a getattr string, a bound
+// method), it is not a method an interface declares, and the index is whole. Empty vector (no flag anywhere) when the index is cut,
+// a library file is unreadable or nothing qualifies. Cheap checks first; the tree read runs over the few survivors.
+inline std::vector<std::uint8_t> computeTestOnlyCallers( const IngestResult& ing, const Graph& g, std::string_view task,
+                                                         const std::vector<NodeId>& head )
 {
     std::vector<std::uint8_t> flags;
     bool                      declinedUnknown = false;
-    if( !testOnlyIndexWhole( ing ) || g.inEdges.rowOffsets() == nullptr )
+    if( head.empty() || !testOnlyIndexWhole( ing ) || g.inEdges.rowOffsets() == nullptr )
     {
         return flags;
     }
-    const std::vector<char>    declined = namedByLibraryDeclinedCall( ing, g, declinedUnknown );
-    std::vector<NodeId>        cands    = declinedUnknown ? std::vector<NodeId>{} : testOnlyEdgeCandidates( ing, g, declined );
+    const TonlyTaskGate gate( task );
+    std::vector<NodeId> wanted;
+    for( const NodeId id : head )
+    {
+        if( id < ing.symbols.size() && gate.keeps( ing, ing.symbols[ id ] ) )
+        {
+            wanted.push_back( id );
+        }
+    }
+    if( wanted.empty() )
+    {
+        return flags;
+    }
+    const std::vector<char> declined = namedByLibraryDeclinedCall( ing, g, declinedUnknown );
+    std::vector<NodeId>     cands    = declinedUnknown ? std::vector<NodeId>{} : testOnlyEdgeCandidates( ing, g, declined, wanted );
     if( !cands.empty() )
     {
         dropTestOnlyEntryPoints( ing, cands );   // a package manifest's console_scripts / plugin target is an in-tree call no source spells
@@ -191,19 +533,29 @@ inline std::vector<std::uint8_t> computeTestOnlyCallers( const IngestResult& ing
     {
         return flags;
     }
-    std::vector<std::string_view> names;
-    names.reserve( cands.size() );
-    for( const NodeId id : cands )
+    std::vector<NodeId> unvalued;
     {
-        names.push_back( ing.symbols[ id ].name );
+        std::vector<std::string_view> names;
+        names.reserve( cands.size() );
+        for( const NodeId id : cands )
+        {
+            names.push_back( ing.symbols[ id ].name );
+        }
+        std::ranges::sort( names, sortutil::svLess );
+        names.erase( std::ranges::unique( names ).begin(), names.end() );
+        const ValueRefIndex vri = ValueRefIndex::narrowFor( ing, names );
+        std::ranges::copy_if( cands, std::back_inserter( unvalued ), [ & ]( NodeId id ) { return !vri.isValueReferenced( id ); } );
     }
-    std::ranges::sort( names, sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
-    const ValueRefIndex vri = ValueRefIndex::narrowFor( ing, names );
-    flags.assign( ing.symbols.size(), 0u );
-    for( const NodeId id : cands )
+    std::vector<std::uint32_t> unread;
+    dropTestOnlySpelledInLibrary( ing, unvalued, unread, /*skipCommentLines=*/true );   // an unreadable library file empties the list
+    if( unvalued.empty() )
     {
-        flags[ id ] = vri.isValueReferenced( id ) ? 0u : 1u;
+        return flags;
+    }
+    flags.assign( ing.symbols.size(), 0u );
+    for( const NodeId id : unvalued )
+    {
+        flags[ id ] = 1u;
     }
     return flags;
 }

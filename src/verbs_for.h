@@ -3247,10 +3247,14 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             forModScopePresent = forModScopePresent || ing.symbols[sid].kind == rw::SymKind::ModuleScope;
             forEndLinePresent  = forEndLinePresent || ( forEndLines && rw::mayCarryEndLine( ing.symbols[sid] ) );
         }
-        // FOR-TONLY: which functions have indexed callers that are ALL tests (testonlycallers.h, the --dead-code test-only rule), once
-        // per call; the tonly= clause is present-only on the same ranked-head walk as e= above (an over-approximation: only the
-        // byte ladder can drop the row inside that head). An empty vector means no function qualifies or the index is cut.
-        const std::vector<std::uint8_t>  forTonly    = rw::computeTestOnlyCallers( ing, g );
+        // FOR-TONLY: which ranked-head rows have indexed callers that are ALL tests (testonlycallers.h, the --dead-code test-only rule
+        // plus the --for dispatch guards and the task gate), once per call; the tonly= clause is present-only on the same ranked-head
+        // walk as e= above (an over-approximation: only the byte ladder can drop the row inside that head). e='s ceiling rule: an
+        // explicit ceiling tighter than the default prints neither the attribute nor the clause (its bytes are ledger-exempt).
+        // An empty vector means no row qualifies, the index is cut or the ceiling is tight.
+        const std::vector<std::uint8_t>  forTonly    = rw::explicitCeilingTighterThanDefault( forGateBudget ? std::size_t( cfg.tokenBudget ) : 0u, forBodyCeiling )
+                                                       ? std::vector<std::uint8_t>{}
+                                                       : rw::computeTestOnlyCallers( ing, g, cfg.forTask, rw::tonlyHeadIds( lensSurfaceIds, lensRank, forRowHead ) );
         const std::vector<std::uint8_t>* forTonlyPtr = forTonly.empty() ? nullptr : &forTonly;
         bool                             forTonlyPresent = false;
         for( std::size_t i = 0; forTonlyPtr != nullptr && i < lensSurfaceIds.size() && i < forRowHead && !forTonlyPresent; ++i )

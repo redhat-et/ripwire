@@ -4877,11 +4877,11 @@ inline constexpr std::string_view kForEndLineLegend =
 // claim of a library caller (a function with no caller at all has neither), and the flag is one hop, not reachability.
 // No double hyphen: they ride inside an XML comment.
 inline constexpr std::string_view kForCompactTonlyLegend =
-    "; d tonly=1 every caller (in=) is a test, none in library code";
+    "; d tonly=1 every indexed caller (in=) is a test; no library caller found";
 inline constexpr std::string_view kForTonlyLegend =
     "; tonly=\"1\" on a d row: every indexed caller of that function is test code (a test path or an in-file test scope; in= counts "
-    "them) and no library caller or value use was found; a function with no caller has no tonly=. It is one hop, not reachability, "
-    "and a call the index does not attribute (an aliased import, dynamic dispatch) is invisible, so verify before deleting";
+    "them) and no library caller, library spelling or value use was found; a function with no caller has no tonly=. It is one hop, "
+    "not reachability, and a call the index does not attribute (dynamic dispatch, a framework or external caller) is invisible, so verify before deleting";
 
 // The " e=\"N\"" run, spliced into a rendered <d …> head right after its l= value (the head always opens `<d l="N"`,
 // sigRowHead). Kept OUT of the head the budget ledger measures, so the ranked set a row budget admits is the one it

@@ -1,8 +1,8 @@
 ### Added — `--for` rows say when every caller is a test (`tonly="1"`)
 
 A `--for` signature row carries `tonly="1"` when the function (or method) has at least one indexed caller and every one of
-them is test code (a test path or an in-file test scope; the same rule `--dead-code`'s `test-only=` rows use, now one shared
-predicate). It answers "is X used, or only tested" without a second call: `in=` already counts the callers, `tonly=` says none
+them is test code (a test path or an in-file test scope; `--dead-code`'s `test-only=` rows and this flag share the edge test, the entry-point
+vetting and the library-text name vetting, in one header). It answers "is X used, or only tested" without a second call: `in=` already counts the callers, `tonly=` says none
 is library code. The legend clause rides only on an answer whose ranked head holds such a row, in both dialects, the
 `--json` twin (`"tonly":true`) and the MCP `for` verb.
 
@@ -12,3 +12,11 @@ resolver declined to bind that names it (an interface value or untyped receiver)
 implementation is reached through the interface), a test symbol itself, and any index that is cut (a memory-guard stop, or an
 oversize code file the crawl dropped). It is one hop, not reachability: a function only another test-only function calls is not
 flagged. A call the index does not attribute at all (an aliased import, run-time dispatch) is invisible, so verify before deleting.
+
+Fix round: the flag also stays off a function whose name any library code file spells outside its own signature (a module-
+attribute call `options.f()`, a `getattr` string, a bound `self.m` / `this.m` value; comment-only lines excluded), a method of a
+type that has any base (an override or trait implementation reached through the base: Python `self.get_handler()`, C++
+virtual, Rust `impl Display`), a Python dunder, a Go method named for a std protocol (`String`, `Error`, ...), and a caller
+that is a library function merely named `test_*`. It rides a row only when the question can use it (a use word such as
+used/callers/tested/remove, the row's name, or its file or directory) and, like `e=`, not under an explicit token ceiling
+tighter than the default.

@@ -90,7 +90,7 @@ def test_all():
 def test_helper_again():
     assert parcel_rate_test_helper(2) == 2
 P
-TASK="parcel rate"
+TASK="parcel rate callers"
 forx(){ ( cd "$F" && "$BIN" "$F" --no-cache "--for=$TASK" "$@" </dev/null 2>/dev/null ); }
 forx > "$TMP/c.txt"
 row(){ python3 - "$1" "$2" <<'PY'
@@ -98,6 +98,12 @@ import re,sys
 t=open(sys.argv[1]).read()
 m=re.search(r'<d [^>]*\bn="%s"[^>]*>' % re.escape(sys.argv[2]), t)
 print(m.group(0) if m else "")
+PY
+}
+rows(){ python3 - "$1" "$2" <<'PY'
+import re,sys
+t=open(sys.argv[1]).read()
+for m in re.finditer(r'<d [^>]*\bn="%s"[^>]*>' % re.escape(sys.argv[2]), t): print(m.group(0))
 PY
 }
 has(){ row "$1" "$2" | grep -q ' tonly="1"'; }
@@ -126,7 +132,7 @@ elif echo "$r" | grep -q ' tonly="1"'; then no "A6 a test symbol only tests call
 else ok "A6 a test-dir symbol only tests call is never flagged (tonly is a library-function fact)"; fi
 
 # A9 legend + xml
-if grep -q 'tonly=1 every caller' "$TMP/c.txt"; then ok "A9 compact legend clause rides with the attribute"; else no "A9 compact legend clause missing"; fi
+if grep -q 'tonly=1 every indexed caller' "$TMP/c.txt"; then ok "A9 compact legend clause rides with the attribute"; else no "A9 compact legend clause missing"; fi
 forx --legend=full > "$TMP/f.txt"
 if grep -q 'tonly=\"1\" on a d row' "$TMP/f.txt"; then ok "A9 full legend clause rides with the attribute"; else no "A9 full legend clause missing"; fi
 if has "$TMP/f.txt" parcel_rate_tested_only; then ok "A1 --legend=full carries tonly on the same row"; else no "A1 --legend=full row lacks tonly"; fi
@@ -228,14 +234,14 @@ func TestBike(t *testing.T) {
 	}
 }
 P
-( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee" </dev/null 2>/dev/null ) > "$TMP/go.txt"
+( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee callers" </dev/null 2>/dev/null ) > "$TMP/go.txt"
 if has "$TMP/go.txt" parcelFee; then ok "A11 a Go function only a test calls carries tonly"; else no "A11 parcelFee has no tonly: $( row "$TMP/go.txt" parcelFee )"; fi
 for n in Truck.Dispatch Van.Dispatch; do
     r="$( row "$TMP/go.txt" $n )"; [ -n "$r" ] || r="$( row "$TMP/go.txt" Dispatch )"
     [ -n "$r" ] || { no "A11 the $n row is missing"; continue; }
     if echo "$r" | grep -q ' tonly="1"'; then no "A11 $n (an interface method's implementation) carries tonly: $r"; else ok "A11 $n (reached through the Carrier interface) stays unflagged"; fi
 done
-( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee carry" </dev/null 2>/dev/null ) > "$TMP/go.txt"
+( cd "$GO" && "$BIN" "$GO" --no-cache "--for=dispatch parcel fee carry callers" </dev/null 2>/dev/null ) > "$TMP/go.txt"
 r="$( row "$TMP/go.txt" Bike.Carry )"
 if [ -z "$r" ]; then no "A11 premise: the Bike.Carry row is missing"
 elif echo "$r" | grep -q ' tonly="1"'; then no "A11 Bike.Carry (the lone implementor of an interface a library calls through) carries tonly: $r"
@@ -281,12 +287,12 @@ def test_cli():
     from pkg.cli import launch_parcel_cli
     assert launch_parcel_cli([1]) == 1
 P
-( cd "$DC" && "$BIN" "$DC" --no-cache "--for=parcel store get" </dev/null 2>/dev/null ) > "$TMP/dc.txt"
+( cd "$DC" && "$BIN" "$DC" --no-cache "--for=parcel store get callers" </dev/null 2>/dev/null ) > "$TMP/dc.txt"
 r="$( row "$TMP/dc.txt" ParcelStore.get )"
 if [ -z "$r" ]; then no "A12 premise: the ParcelStore.get row is missing"
 elif echo "$r" | grep -q ' tonly="1"'; then no "A12 a method a declined library call could have meant carries tonly: $r"
 else ok "A12 a library call the resolver declined to bind keeps the method unflagged"; fi
-( cd "$DC" && "$BIN" "$DC" --no-cache "--for=launch parcel cli" </dev/null 2>/dev/null ) > "$TMP/dc2.txt"
+( cd "$DC" && "$BIN" "$DC" --no-cache "--for=launch parcel cli callers" </dev/null 2>/dev/null ) > "$TMP/dc2.txt"
 r="$( row "$TMP/dc2.txt" launch_parcel_cli )"
 if [ -z "$r" ]; then no "A13 premise: the launch_parcel_cli row is missing"
 elif echo "$r" | grep -q ' tonly="1"'; then no "A13 a console_scripts entry point only tests call in-tree carries tonly: $r"
@@ -345,5 +351,298 @@ for m in re.finditer(r'<d [^>]*>', t):
         if not ('tested="1"' in pre) or ' r="' not in post:
             sys.exit(1)
 PY
+
+
+# ── fix round 1 (rv-for-tonly) ────────────────────────────────────────────────────────────────────────────
+# B1-B5: the reviewer's confident-wrong shapes. Every `relay_*` row below has a library use the edge pass cannot see (a module-
+# attribute call, a getattr string, a bound method value, an override reached through its base, an external-protocol method);
+# one control per tree (`*OnlyTested`) is a plain function only a test calls and MUST stay flagged, so the arms can fire.
+RL="$TMP/rl"; mkdir -p "$RL/py/pkg/test" "$RL/py/tests" "$RL/go/relay" "$RL/go/cmd" "$RL/cpp/src" "$RL/cpp/test" "$RL/rs/src" "$RL/rs/tests" "$RL/ts/src" "$RL/ts/test"
+cat > "$RL/py/pkg/options.py" <<'P'
+def relay_modattr_target(x):
+    return x + 1
+
+
+def relay_alias_target(x):
+    return x + 2
+
+
+def relay_getattr_target(x):
+    return x + 3
+
+
+def relay_modlevel_target(x):
+    return x + 4
+
+
+def relay_callback_target(x):
+    return x + 5
+
+
+def relay_named_test_target(x):
+    return x + 6
+
+
+def relay_decorated_target(x):
+    return x + 8
+
+
+def _relay_private_modattr(x):
+    return x + 10
+
+
+def relay_true_target(x):
+    return x + 11
+P
+cat > "$RL/py/pkg/runner.py" <<'P'
+import threading
+from pkg import options
+from pkg.options import relay_alias_target as aliased
+from pkg.options import relay_callback_target
+from pkg.options import relay_named_test_target
+from pkg import options as opts
+
+
+def relay_run(x):
+    a = options.relay_modattr_target(x)
+    b = aliased(x)
+    c = getattr(opts, "relay_getattr_target")(x)
+    t = threading.Thread(target=relay_callback_target, args=(x,))
+    return a + b + c
+
+
+def test_connection(x):
+    """A production health probe that happens to be named test_*."""
+    return relay_named_test_target(x)
+
+
+def relay_health(x):
+    return test_connection(x)
+
+
+SEED = options.relay_modlevel_target(1)
+
+
+def relay_private_user(x):
+    return options._relay_private_modattr(x)
+P
+cat > "$RL/py/pkg/shapes.py" <<'P'
+class RelayBase:
+    def relay_render(self):
+        raise NotImplementedError
+
+    def relay_show(self):
+        return self.relay_render()
+
+
+class RelayImpl(RelayBase):
+    def relay_render(self):
+        return "impl"
+P
+cat > "$RL/py/tests/test_relay.py" <<'P'
+from pkg.options import (relay_modattr_target, relay_alias_target, relay_getattr_target, relay_modlevel_target,
+                         relay_callback_target, relay_named_test_target, _relay_private_modattr, relay_true_target)
+from pkg.shapes import RelayImpl
+
+
+def test_all():
+    assert relay_modattr_target(1) == 2
+    assert relay_alias_target(1) == 3
+    assert relay_getattr_target(1) == 4
+    assert relay_modlevel_target(1) == 5
+    assert relay_callback_target(1) == 6
+    assert relay_named_test_target(1) == 7
+    assert _relay_private_modattr(1) == 11
+    assert relay_true_target(1) == 12
+    assert RelayImpl().relay_render() == "impl"
+P
+cat > "$RL/go/go.mod" <<'P'
+module example.com/relay
+go 1.21
+P
+cat > "$RL/go/relay/relay.go" <<'P'
+package relay
+
+import "fmt"
+
+type RelayCode int
+
+func (c RelayCode) String() string { return fmt.Sprintf("code-%d", int(c)) }
+
+type RelayErr struct{ msg string }
+
+func (e *RelayErr) Error() string { return e.msg }
+
+func RelayQualifiedTarget(x int) int { return x + 1 }
+
+func RelayDescribe(c RelayCode) string { return fmt.Sprint(c) }
+
+func RelayFail() error { return &RelayErr{msg: "x"} }
+
+func relayOnlyTested(x int) int { return x + 5 }
+P
+cat > "$RL/go/relay/relay_test.go" <<'P'
+package relay
+
+import "testing"
+
+func TestRelay(t *testing.T) {
+	if RelayCode(1).String() != "code-1" { t.Fatal() }
+	e := &RelayErr{msg: "m"}
+	if e.Error() != "m" { t.Fatal() }
+	if RelayQualifiedTarget(1) != 2 { t.Fatal() }
+	if relayOnlyTested(1) != 6 { t.Fatal() }
+}
+P
+cat > "$RL/go/cmd/main.go" <<'P'
+package main
+
+import (
+	"fmt"
+	"example.com/relay/relay"
+)
+
+func main() {
+	fmt.Println(relay.RelayQualifiedTarget(2), relay.RelayDescribe(3), relay.RelayFail())
+}
+P
+cat > "$RL/cpp/src/relay.h" <<'P'
+#pragma once
+struct RelayBase { virtual ~RelayBase() = default; virtual int relayRender() const { return 0; } int relayShow() const { return relayRender(); } };
+struct RelayImpl : RelayBase { int relayRender() const override; };
+P
+cat > "$RL/cpp/src/relay.cpp" <<'P'
+#include "relay.h"
+int RelayImpl::relayRender() const { return 7; }
+int relayUse( const RelayBase& b ) { return b.relayRender(); }
+int relayOnlyTested( int x ) { return x + 1; }
+P
+cat > "$RL/cpp/test/relay_test.cpp" <<'P'
+#include "../src/relay.h"
+int relayOnlyTested( int x );
+int testRelay() { RelayImpl i; return i.relayRender() == 7 && relayOnlyTested( 1 ) == 2 ? 0 : 1; }
+P
+cat > "$RL/rs/Cargo.toml" <<'P'
+[package]
+name = "relay"
+version = "0.1.0"
+edition = "2021"
+P
+cat > "$RL/rs/src/lib.rs" <<'P'
+pub trait RelayRender { fn relay_render(&self) -> i32; }
+pub struct RelayImpl;
+impl RelayRender for RelayImpl { fn relay_render(&self) -> i32 { 7 } }
+pub fn relay_use(r: &dyn RelayRender) -> i32 { r.relay_render() }
+impl std::fmt::Display for RelayImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "relay") }
+}
+pub fn relay_show(r: &RelayImpl) -> String { format!("{}", r) }
+pub fn relay_only_tested(x: i32) -> i32 { x + 1 }
+P
+cat > "$RL/rs/tests/relay.rs" <<'P'
+use relay::{RelayImpl, RelayRender, relay_only_tested};
+#[test]
+fn relay_test() { assert_eq!(RelayImpl.relay_render(), 7); let mut s = String::new(); use std::fmt::Write; write!(s, "{}", RelayImpl).unwrap(); let _ = std::fmt::Display::fmt(&RelayImpl, &mut std::fmt::Formatter::new(&mut s)); assert_eq!(relay_only_tested(1), 2); }
+P
+cat > "$RL/ts/src/relay.ts" <<'P'
+export abstract class RelayBase {
+  abstract relayRender(): string
+  relayShow(): string { return this.relayRender() }
+}
+export class RelayImpl extends RelayBase {
+  relayRender(): string { return 'impl' }
+}
+export class RelayButton {
+  relayClick(): number { return 1 }
+  relayWire(el: { on(ev: string, f: () => number): void }) { el.on('click', this.relayClick) }
+}
+export function relayOnlyTested(x: number): number { return x + 1 }
+P
+cat > "$RL/ts/test/relay.test.ts" <<'P'
+import { RelayImpl, RelayButton, relayOnlyTested } from '../src/relay'
+test('relay', () => {
+  expect(new RelayImpl().relayRender()).toBe('impl')
+  expect(new RelayButton().relayClick()).toBe(1)
+  expect(relayOnlyTested(1)).toBe(2)
+})
+P
+RLTASK="relay callers"
+rlrun(){ d="$1"; shift; ( cd "$RL/$d" && "$BIN" "$RL/$d" --no-cache "--for=$RLTASK" "$@" </dev/null 2>/dev/null ); }
+# $1 answer, then the names that must NOT carry tonly (an absent row is a FAIL: the arm must see the row), then control $2 must.
+rlcheck(){ # arm lang answer control name...
+    arm="$1"; lang="$2"; ans="$3"; ctl="$4"; shift 4
+    if [ "$ctl" = "-" ]; then :   # Rust: a tests/ caller of a crate function binds no edge, so the language has no positive control
+    elif has "$ans" "$ctl"; then ok "$arm $lang control $ctl is flagged (the arm can fire)"; else no "$arm $lang control $ctl has no tonly: $( row "$ans" "$ctl" )"; fi
+    for n in "$@"; do
+        r="$( rows "$ans" "$n" )"
+        if [ -z "$r" ]; then no "$arm $lang premise: row $n missing from the answer"
+        elif echo "$r" | grep -q ' tonly="1"'; then no "$arm $lang $n carries tonly (a library use the edge pass cannot see): $r"
+        else ok "$arm $lang $n stays unflagged"; fi
+    done
+}
+rlrun py > "$TMP/rl_py.txt"
+rlcheck B1 py "$TMP/rl_py.txt" relay_true_target relay_modattr_target relay_alias_target relay_getattr_target relay_modlevel_target relay_callback_target \
+    relay_named_test_target _relay_private_modattr RelayImpl.relay_render
+rlrun go > "$TMP/rl_go.txt"
+rlcheck B2 go "$TMP/rl_go.txt" relayOnlyTested RelayQualifiedTarget RelayCode.String RelayErr.Error
+rlrun cpp > "$TMP/rl_cpp.txt"
+rlcheck B3 cpp "$TMP/rl_cpp.txt" relayOnlyTested RelayImpl::relayRender
+rlrun rs > "$TMP/rl_rs.txt"
+rlcheck B4 rs "$TMP/rl_rs.txt" - RelayImpl::fmt RelayImpl::relay_render
+rlrun ts > "$TMP/rl_ts.txt"
+rlcheck B5 ts "$TMP/rl_ts.txt" relayOnlyTested RelayButton.relayClick RelayImpl.relayRender
+
+# B6 the noise gate G3 (task-shaped): a row keeps tonly only when the task has a use word, names the row, or names its file/dir.
+for t in "relay" "relay options"; do
+    ( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=$t" </dev/null 2>/dev/null ) > "$TMP/g3.txt"
+    if grep -q tonly "$TMP/g3.txt"; then no "B6 task '$t' (no use word, no name, no path) still prints tonly or its clause"; else ok "B6 task '$t': no tonly and no clause"; fi
+done
+( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=relay_true_target" </dev/null 2>/dev/null ) > "$TMP/g3n.txt"
+if has "$TMP/g3n.txt" relay_true_target; then ok "B6 a task that NAMES the row keeps its tonly"; else no "B6 named row lost its tonly: $( row "$TMP/g3n.txt" relay_true_target )"; fi
+( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=relay in pkg/options.py" </dev/null 2>/dev/null ) > "$TMP/g3p.txt"
+if has "$TMP/g3p.txt" relay_true_target; then ok "B6 a task that names the row's FILE keeps its tonly"; else no "B6 file-named row lost its tonly: $( row "$TMP/g3p.txt" relay_true_target )"; fi
+( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=relay in pkg/" </dev/null 2>/dev/null ) > "$TMP/g3d.txt"
+if has "$TMP/g3d.txt" relay_true_target; then ok "B6 a task that names the row's DIRECTORY keeps its tonly"; else no "B6 dir-named row lost its tonly: $( row "$TMP/g3d.txt" relay_true_target )"; fi
+# G3 is per row: a task that names one row flags that row only
+( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=relay_true_target relay_modattr_target" </dev/null 2>/dev/null ) > "$TMP/g3r.txt"
+if has "$TMP/g3r.txt" relay_true_target; then ok "B6 per-row: the named flagged row keeps tonly beside another named row"; else no "B6 per-row: relay_true_target lost tonly"; fi
+
+# B7 a tight explicit budget (e= rule, endLinesFitCeiling): no tonly and no clause, CLI + MCP
+( cd "$RL/py" && "$BIN" "$RL/py" --no-cache "--for=$RLTASK" --token-budget=300 </dev/null 2>/dev/null ) > "$TMP/b7.txt"
+if [ -s "$TMP/b7.txt" ] && ! grep -q tonly "$TMP/b7.txt"; then ok "B7 --token-budget=300: no tonly and no clause"; else no "B7 a tight explicit budget still prints tonly (or the answer is empty)"; fi
+printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s","budget_tokens":300}}}\n' "$RL/py" "$RLTASK" \
+    | "$BIN" --mcp 2>/dev/null > "$TMP/b7m.raw"
+if grep -q 'relay_run' "$TMP/b7m.raw" && ! grep -q tonly "$TMP/b7m.raw"; then ok "B7 MCP budget_tokens=300: no tonly and no clause"; else no "B7 MCP under a tight budget prints tonly (or the answer has no rows)"; fi
+
+# B8 dispatch guard pin shaped like django's staticfiles Command.get_handler: a method of a class that has a base, reached by a base-class self call
+mkdir -p "$RL/dj/core" "$RL/dj/tests"
+cat > "$RL/dj/core/base.py" <<'P'
+class BaseCommand:
+    def get_handler(self, *args):
+        return None
+
+    def run(self):
+        return self.get_handler(1)
+P
+cat > "$RL/dj/core/static.py" <<'P'
+from core.base import BaseCommand
+
+
+class Command(BaseCommand):
+    def get_handler(self, *args):
+        return "static"
+P
+cat > "$RL/dj/tests/test_static.py" <<'P'
+from core.static import Command
+
+
+def test_handler():
+    assert Command().get_handler(1) == "static"
+P
+( cd "$RL/dj" && "$BIN" "$RL/dj" --no-cache "--for=which get_handler runs" </dev/null 2>/dev/null ) > "$TMP/b8.txt"
+r="$( row "$TMP/b8.txt" Command.get_handler )"; [ -n "$r" ] || r="$( row "$TMP/b8.txt" get_handler )"
+if [ -z "$r" ]; then no "B8 premise: the Command.get_handler row is missing"
+elif echo "$r" | grep -q ' tonly="1"'; then no "B8 an override reached through its base (self.get_handler) carries tonly: $r"
+else ok "B8 a method of a class with a base (an override) stays unflagged"; fi
 
 [ "$fail" = 0 ] && echo "fortonlycheck: ALL PASS" || { echo "FAILURES ABOVE"; exit 1; }

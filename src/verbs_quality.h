@@ -2645,59 +2645,8 @@ inline void emitDeadCodeRow( const rw::IngestResult& ing, rw::NodeId id, std::st
 
 // D1 TESTONLY-DEAD: everyCallerIsTest lives in testonlycallers.h — the ONE predicate --for's tonly= row attribute reads too.
 
-// D1: `name` spelled whole-word in `text` (file `fileId`) anywhere but inside the signature span of one of `rows` it names.
-inline bool spelledOutsideOwnSignature( const rw::IngestResult& ing, std::string_view text, std::uint32_t fileId, std::string_view name,
-                                        const std::vector<rw::NodeId>& rows ) noexcept
-{
-    using namespace rw;
-    const auto isIdent = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
-    const auto ownSignature = [ & ]( std::size_t at )
-    {
-        return std::ranges::any_of( rows, [ & ]( NodeId id )
-        {
-            const Symbol& def = ing.symbols[ id ];
-            return def.fileId == fileId && def.name == name && at >= def.sigStartByte && at < def.sigEndByte;
-        } );
-    };
-    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
-    {
-        const std::size_t end      = at + name.size();
-        const bool        bounded  = ( at == 0 || !isIdent( text[ at - 1 ] ) ) && ( end == text.size() || !isIdent( text[ end ] ) );
-        if( bounded && !ownSignature( at ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-// D1: the text a library file contributes to the name vetting, or nullopt when it contributes none: a test file, a prose file
-// (markdown, .txt: a mention there is documentation, not a use) or an unreadable one. A notebook is CODE in a JSON container,
-// so its code and markdown cells are read as text (docparse::extractIpynb) — a def only a notebook calls is in use.
-// CR 4396503875: an EXCLUDED file (libraryFileExcluded: a test or a prose file) and an UNREADABLE one both return nullopt here,
-// and the vetting tells them apart through libraryFileExcluded — a failed read is not an exclusion.
-inline bool libraryFileExcluded( const rw::IngestResult& ing, std::uint32_t fileId )
-{
-    using namespace rw;
-    const std::string_view rel = rootRelPath( ing, fileId );
-    const std::string      ext = docparse::lowerExtOf( rel );
-    return isTestPath( rel ) || ( ext != ".ipynb" && docparse::isProseExtension( ext ) );
-}
-inline std::optional<std::string> libraryFileText( const rw::IngestResult& ing, std::uint32_t fileId )
-{
-    using namespace rw;
-    if( libraryFileExcluded( ing, fileId ) )
-    {
-        return std::nullopt;
-    }
-    const std::string          ext   = docparse::lowerExtOf( rootRelPath( ing, fileId ) );
-    std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, fileId ) );
-    if( bytes && ext == ".ipynb" )
-    {
-        return docparse::extractIpynb( *bytes );
-    }
-    return bytes;
-}
+// D1 name vetting: spelledOutsideOwnSignature / libraryFileExcluded / libraryFileText / dropTestOnlySpelledInLibrary live in testonlycallers.h
+// (the --for tonly= flag vets by the same text).
 
 // CR 4396503875: the stderr lines of a vetting that could not read every library file (each file, then the consequence).
 inline void reportUnreadLibraryFiles( const rw::IngestResult& ing, const std::vector<std::uint32_t>& unread )
@@ -2707,63 +2656,6 @@ inline void reportUnreadLibraryFiles( const rw::IngestResult& ing, const std::ve
         rw::emitTo( stderr, "ripwire: --dead-code: cannot read {} — its uses of the test-only candidates are unknown\n", rw::rootRelPath( ing, fileId ) );
     }
     rw::emitTo( stderr, "ripwire: --dead-code: {} library file(s) could not be read, so no test-only row is listed (a row fewer, never a use missed)\n", unread.size() );
-}
-
-// D1 name vetting: drop every row whose name a NON-test, non-prose indexed file spells whole-word outside the def's own
-// signature, and every row whose module a library file glob-imports (`from ._impl import *` re-exports the module's public
-// names through the package). Text, not references: an aliased import (`from m import dump as binary_dump`) and a module-level
-// call carry no edge to the def, and a comment or string mention costs only a missed row, never a used function on the list.
-// Each file is read once, uncached (the scan may cover the whole tree). The survivors are left in --dead-code's row order.
-inline void dropTestOnlySpelledInLibrary( const rw::IngestResult& ing, std::vector<rw::NodeId>& testOnly )
-{
-    using namespace rw;
-    std::vector<std::string_view> names;
-    names.reserve( testOnly.size() );
-    for( NodeId id : testOnly ) { names.push_back( ing.symbols[ id ].name ); }
-    std::ranges::sort( names, sortutil::svLess );
-    names.erase( std::ranges::unique( names ).begin(), names.end() );
-    std::vector<std::string_view> spelled;
-    std::vector<std::string>      globbed;   // module tails a library file glob-imports (owned: the file text is gone after its turn)
-    std::vector<std::uint32_t>    unread;   // library files the index lists that this vetting could not read
-    for( std::uint32_t fileId = 0; fileId < ing.files.size(); ++fileId )
-    {
-        if( libraryFileExcluded( ing, fileId ) )
-        {
-            continue;
-        }
-        const std::optional<std::string> text = libraryFileText( ing, fileId );
-        if( !text )
-        {   // CR 4396503875: a file whose uses are unknown vets nothing, so no test-only claim is made on its behalf
-            unread.push_back( fileId );
-            continue;
-        }
-        for( std::string_view name : names )
-        {
-            if( spelledOutsideOwnSignature( ing, *text, fileId, name, testOnly ) )
-            {
-                spelled.push_back( name );
-            }
-        }
-        for( std::string_view tail : quality::pythonGlobImportTails( *text ) )
-        {
-            globbed.emplace_back( tail );
-        }
-    }
-    if( !unread.empty() )
-    {
-        reportUnreadLibraryFiles( ing, unread );
-        testOnly.clear();
-        return;
-    }
-    std::ranges::sort( spelled, sortutil::svLess );
-    std::ranges::sort( globbed, sortutil::svLess );
-    std::erase_if( testOnly, [ & ]( NodeId id )
-    {
-        const Symbol& def = ing.symbols[ id ];
-        return std::ranges::binary_search( spelled, std::string_view( def.name ), sortutil::svLess )
-            || std::ranges::binary_search( globbed, quality::pythonModuleTail( rootRelPath( ing, def.fileId ) ), sortutil::svLess );
-    } );
-    sortDeadCodeRows( ing, testOnly );
 }
 
 // D1/FOR-TONLY: dropTestOnlyEntryPoints lives in testonlycallers.h (the --for tonly= flag vets entry points the same way).
@@ -3037,7 +2929,13 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         if( !testOnly.empty() )
         {
             dropTestOnlyEntryPoints( ing, testOnly );
-            dropTestOnlySpelledInLibrary( ing, testOnly );
+            std::vector<std::uint32_t> unreadLibrary;
+            dropTestOnlySpelledInLibrary( ing, testOnly, unreadLibrary );
+            if( !unreadLibrary.empty() )
+            {
+                reportUnreadLibraryFiles( ing, unreadLibrary );
+            }
+            sortDeadCodeRows( ing, testOnly );
         }
 
         rw::emitTo( stdout, "<!-- ripwire dead-code: source functions with internal linkage and no caller found in the indexed tree — a name-based "

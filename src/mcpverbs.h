@@ -2784,7 +2784,8 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const std::string_view mcpEndLineLegend = mcpForEndLinePresent ? rw::kForEndLineLegend : std::string_view();
     // FOR-TONLY: the CLI twin's rule — computeTestOnlyCallers once, the clause present-only on the ranked head (lensSurfaceIds is the
     // kept head), an over-approximation of the byte ladder; exempt from the sigs charge below like e=
-    const std::vector<std::uint8_t>  mcpTonly    = rw::computeTestOnlyCallers( ing, ix.g );
+    const std::vector<std::uint8_t>  mcpTonly    = rw::explicitCeilingTighterThanDefault( budgetTokens, false ) ? std::vector<std::uint8_t>{}
+        : rw::computeTestOnlyCallers( ing, ix.g, task, rw::tonlyHeadIds( lensSurfaceIds, lensRank, lensSurfaceIds.size() ) );   // e='s ceiling rule; the gate reads the task
     const std::vector<std::uint8_t>* mcpTonlyPtr = mcpTonly.empty() ? nullptr : &mcpTonly;
     const bool                       mcpTonlyPresent = std::any_of( lensSurfaceIds.begin(), lensSurfaceIds.end(),
         [ & ]( NodeId sid ) { return mcpTonlyPtr != nullptr && lensRank[sid] > 0.0f && sid < mcpTonly.size() && mcpTonly[sid] != 0u; } );
