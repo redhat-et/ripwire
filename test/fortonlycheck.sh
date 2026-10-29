@@ -652,6 +652,28 @@ from core.static import Command
 def test_handler():
     assert Command().get_handler(1) == "static"
 P
+cat > "$RL/dj/core/hook.py" <<'P'
+from framework import ExternalBase
+
+
+class RelayHook(ExternalBase):
+    def relay_on_event(self, event):
+        return event
+
+
+def relay_hook_plain(event):
+    return event
+P
+cat > "$RL/dj/tests/test_hook.py" <<'P'
+from core.hook import RelayHook, relay_hook_plain
+
+
+def test_hook():
+    assert RelayHook().relay_on_event(1) == 1
+    assert relay_hook_plain(1) == 1
+P
+( cd "$RL/dj" && "$BIN" "$RL/dj" --no-cache "--for=relay_on_event relay_hook_plain callers" </dev/null 2>/dev/null ) > "$TMP/b8h.txt"
+rlcheck B8 py "$TMP/b8h.txt" relay_hook_plain RelayHook.relay_on_event
 ( cd "$RL/dj" && "$BIN" "$RL/dj" --no-cache "--for=which get_handler runs" </dev/null 2>/dev/null ) > "$TMP/b8.txt"
 r="$( row "$TMP/b8.txt" Command.get_handler )"; [ -n "$r" ] || r="$( row "$TMP/b8.txt" get_handler )"
 if [ -z "$r" ]; then no "B8 premise: the Command.get_handler row is missing"
