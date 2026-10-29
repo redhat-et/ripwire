@@ -605,4 +605,80 @@ else
         || no "(U) after the documented uninstall these ripwire-* remain: $leftRw"
 fi
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+# INSTALLER HARDENING — ported from PR #293 (@s0undt3ch). #293 moved skill/hook installation into the binary and
+# went through four review rounds that turned up a list of ways an installer can be talked into writing, or
+# deleting, the wrong thing. The binary was declined (decided 2026-10-07); the list applies to this script too.
+# Every arm below ran RED against the previous skills/install.sh and is GREEN now. Sandboxed HOME/TMP only.
+# The `twin` arms pin the behaviour that must NOT change (the normal path, Windows-style paths, explicit PATH).
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+HD="$TMP/hardening"; mkdir -p "$HD"
+# hd_run NAME [VAR=value ...] -- [install.sh ARGS]: run install.sh in a fresh cwd with a fresh HOME.
+# Sets HD_RC, HD_OUT, HD_CWD, HD_HOME. Everything lives under $HD/NAME (a literal-safe path: HD and NAME are set).
+hd_run()
+{
+    _n="${1:?}"; shift
+    HD_CWD="${HD:?}/$_n/cwd"; HD_HOME="${HD:?}/$_n/home"
+    rm -rf "${HD:?}/${_n:?}"; mkdir -p "$HD_CWD" "$HD_HOME"
+    _envs=""
+    while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do _envs="$_envs $1"; shift; done
+    [ "$#" -gt 0 ] && shift
+    # shellcheck disable=SC2086
+    ( cd "$HD_CWD" && env HOME="$HD_HOME" $_envs bash "$SK/install.sh" "$@" ) >"$HD/$_n.out" 2>&1
+    HD_RC=$?
+    HD_OUT="$( cat "$HD/$_n.out" )"
+}
+
+# ── (J) a RELATIVE or EMPTY root is refused, never resolved against the current directory ───────────────────
+#    #293 review: `CLAUDE_CONFIG_DIR=relcfg` installed into ./relcfg/skills, and HOME unset/empty fell back to /tmp.
+#    Here an empty HOME gave /.claude/skills and a relative root landed wherever the shell happened to be.
+hd_run J1 HOME= --
+{ [ "$HD_RC" -eq 2 ] && printf '%s' "$HD_OUT" | grep -q 'HOME'; } \
+    && ok "(J) an empty HOME is refused with status 2 and a message naming HOME" \
+    || no "(J) an empty HOME exited $HD_RC (expected 2 + a HOME message): $HD_OUT"
+for _c in "CLAUDE_CONFIG_DIR|relcfg|" "AGENTS_HOME|relagents|--codex" "CODEX_HOME|relcodex|--codex-legacy" "HERMES_HOME|relhermes|--hermes"
+do
+    _var="${_c%%|*}"; _rest="${_c#*|}"; _val="${_rest%%|*}"; _flag="${_rest#*|}"
+    # shellcheck disable=SC2086
+    hd_run "J-$_var" "$_var=$_val" -- $_flag
+    { [ "$HD_RC" -eq 2 ] && [ ! -e "$HD_CWD/$_val" ] && printf '%s' "$HD_OUT" | grep -q "$_var"; } \
+        && ok "(J) a relative $_var is refused (status 2) and nothing is created under the current directory" \
+        || no "(J) relative $_var=$_val: rc=$HD_RC, created=$( ls "$HD_CWD" | tr '\n' ' ' ) (expected rc 2 and nothing created)"
+done
+hd_run J-hookonly CLAUDE_CONFIG_DIR=relcfg -- --hook
+{ [ "$HD_RC" -eq 2 ] && [ ! -e "$HD_CWD/relcfg" ]; } \
+    && ok "(J) --hook alone refuses a relative CLAUDE_CONFIG_DIR and writes no settings.json" \
+    || no "(J) --hook with a relative CLAUDE_CONFIG_DIR: rc=$HD_RC, created=$( ls "$HD_CWD" | tr '\n' ' ' )"
+hd_run J-codexhook CODEX_HOME=relcodex -- --codex --hook
+{ [ "$HD_RC" -eq 2 ] && [ ! -e "$HD_CWD/relcodex" ]; } \
+    && ok "(J) --codex --hook refuses a relative CODEX_HOME and writes no hooks.json" \
+    || no "(J) --codex --hook with a relative CODEX_HOME: rc=$HD_RC, created=$( ls "$HD_CWD" | tr '\n' ' ' )"
+# twins: what must still work. A Windows drive path is absolute (Git Bash passes them through unchanged), and an
+# explicit PATH argument is typed on the command line, so it keeps resolving against the current directory.
+hd_run J-win 'CLAUDE_CONFIG_DIR=D:/cfg/.claude' --
+{ [ "$HD_RC" -eq 0 ] && [ -d "$HD_CWD/D:/cfg/.claude/skills" ]; } \
+    && ok "(J) twin: a Windows-style drive path is still accepted as absolute" \
+    || no "(J) a Windows-style CLAUDE_CONFIG_DIR (C:/...) was refused: rc=$HD_RC $HD_OUT"
+hd_run J-explicit -- relskills
+{ [ "$HD_RC" -eq 0 ] && [ -L "$HD_CWD/relskills/ripwire-router" ]; } \
+    && ok "(J) twin: an explicit relative destination PATH argument still works" \
+    || no "(J) an explicit relative destination PATH argument stopped working: rc=$HD_RC"
+
+# ── (K) files and directories this installer CREATES are not group/world-writable, whatever the umask ─────────
+#    #293 review: first-time files came out 0666 & ~umask, directories 0777 & ~umask. Under `umask 000` that is a
+#    world-writable skills dir and settings.json the agent then trusts. The mask is only ever TIGHTENED here.
+K_HOME="${HD:?}/K/home"; rm -rf "${HD:?}/K"; mkdir -p "$K_HOME"
+( umask 000; HOME="$K_HOME" bash "$SK/install.sh" --hook >"$HD/K.out" 2>&1 )
+( umask 000; HOME="$K_HOME" bash "$SK/install.sh" --codex --hook >>"$HD/K.out" 2>&1 )
+kWritable="$( find "$K_HOME" ! -type l -perm -002 2>/dev/null | sed "s|^$K_HOME|~|" | tr '\n' ' ' )"
+{ [ -f "$K_HOME/.claude/settings.json" ] && [ -f "$K_HOME/.codex/hooks.json" ] && [ -z "$kWritable" ]; } \
+    && ok "(K) under umask 000 nothing the installer created is world-writable (dirs, settings.json, hooks.json, manifest)" \
+    || no "(K) under umask 000 these are world-writable: ${kWritable:-<none, but a file is missing>}"
+K2_HOME="${HD:?}/K2/home"; rm -rf "${HD:?}/K2"; mkdir -p "$K2_HOME"
+( umask 077; HOME="$K2_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1 )
+kOpen="$( find "$K2_HOME" -mindepth 1 ! -type l \( -perm -020 -o -perm -002 -o -perm -040 -o -perm -004 \) 2>/dev/null | head -3 | tr '\n' ' ' )"
+{ [ -z "$kOpen" ] && [ -f "$K2_HOME/.claude/settings.json" ]; } \
+    && ok "(K) twin: under umask 077 the installer does not LOOSEN anything (a user's stricter umask stays)" \
+    || no "(K) under umask 077 the installer created group/other-accessible entries: $kOpen"
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

@@ -13,6 +13,60 @@
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
+# ── HARDENING ported from PR #293 (2026-10, thanks @s0undt3ch). #293 proposed moving this installer into the
+#    ripwire binary; that was declined (2026-10-07), but its four review rounds produced a list of ways an installer
+#    can be talked into writing or deleting the wrong thing, and every item that applies to a shell installer lives
+#    here: absolute roots only, nothing created group/world-writable, a symlinked settings.json written through (not
+#    replaced), its mode kept (CWE-732), a quoted hook command, jq found only through absolute PATH entries
+#    (CWE-426), temp files removed on any exit or signal, and a prune that removes only what it can show is ours.
+#    test/skillinstallcheck.sh sections (J)-(Q) drive each one; every arm was red against the script before this.
+
+# A file or directory this script CREATES must not be group/world-writable, whatever the caller's umask: under
+# `umask 000` a first-time settings.json, hooks.json or skills directory came out 0666/0777. Only TIGHTENS: OR 022
+# into the current mask, so a stricter user umask (077) stays stricter and the common 022 is unchanged.
+umask "$( printf '%04o' $(( 0$( umask ) | 022 )) )"
+
+# is_abs_path P — absolute on POSIX, or a Windows drive/UNC path (Git Bash hands those through unchanged).
+is_abs_path()
+{
+    case "$1" in
+        /*) return 0 ;;
+        [A-Za-z]:[/\\]*) return 0 ;;
+        \\\\*) return 0 ;;
+    esac
+    return 1
+}
+# abs_home / abs_root NAME VALUE SUBDIR — a destination root taken from the ENVIRONMENT must be absolute. A relative
+# CLAUDE_CONFIG_DIR / AGENTS_HOME / CODEX_HOME / HERMES_HOME used to install into ./relcfg, wherever the shell was,
+# and an empty HOME turned `$HOME/.claude` into `/.claude`. Refuse (status 2) instead of guessing. An explicit PATH
+# argument is typed on the command line and keeps resolving against the current directory.
+abs_home()
+{
+    _h="${HOME-}"
+    if [ -z "$_h" ]; then
+        echo "skills/install.sh: HOME is unset or empty; refusing to guess a destination. Set HOME, name the destination (an explicit PATH argument), or set CLAUDE_CONFIG_DIR / AGENTS_HOME / CODEX_HOME / HERMES_HOME to an absolute path." >&2
+        return 1
+    fi
+    if ! is_abs_path "$_h"; then
+        echo "skills/install.sh: HOME must be an absolute path (got '$_h'); refusing to install relative to the current directory." >&2
+        return 1
+    fi
+    printf '%s\n' "$_h"
+}
+abs_root()
+{
+    if [ -z "$2" ]; then
+        _h="$( abs_home )" || return 1
+        printf '%s/%s\n' "$_h" "$3"
+        return 0
+    fi
+    if ! is_abs_path "$2"; then
+        echo "skills/install.sh: $1 must be an absolute path (got '$2'); refusing to install relative to the current directory." >&2
+        return 1
+    fi
+    printf '%s\n' "$2"
+}
+
 # ── the PreToolUse matcher, in one place. It is not cosmetic: a matcher decides which tool calls the
 #    hook is ever SHOWN. Read/Glob are here because the whole-file read is the largest token sink in an
 #    agent loop and the one default a skill description cannot intercept; mcp__ripwire__.* is here for
@@ -135,7 +189,7 @@ install_claude_route()
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
 install_claude_hook()
 {
-    settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+    settings="$( abs_root CLAUDE_CONFIG_DIR "${CLAUDE_CONFIG_DIR:-}" .claude )/settings.json" || exit 2
     hookScript="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     chmod +x "$hookScript" 2>/dev/null || true
 
@@ -201,7 +255,7 @@ install_claude_hook()
 
 install_codex_hook()
 {
-    settings="${CODEX_HOME:-$HOME/.codex}/hooks.json"
+    settings="$( abs_root CODEX_HOME "${CODEX_HOME:-}" .codex )/hooks.json" || exit 2
     hookScript="$( dirname "$src" )/hooks/ripwire-codex-nudge.sh"
     sharedHook="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     routeScript="$( dirname "$src" )/hooks/ripwire-codex-route.sh"
@@ -283,12 +337,12 @@ if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then
 fi
 
 case "$mode" in
-    codex) dst="${AGENTS_HOME:-$HOME/.agents}/skills" ;;
+    codex) dst="$( abs_root AGENTS_HOME "${AGENTS_HOME:-}" .agents )/skills" || exit 2 ;;
     # openclaw resolves to the SAME root Codex uses -- openclaw's docs call it a "compatibility skill
     # root". A repeated value, not a second code path. But it is conditional, and the condition is worth
     # a line of output rather than a support thread: openclaw skips this root entirely unless its state
     # dir is the default. Verified against docs.openclaw.ai, 2026-09-08.
-    openclaw) dst="$HOME/.agents/skills"
+    openclaw) dst="$( abs_home )/.agents/skills" || exit 2
               # NOT ${AGENTS_HOME:-...}: that is Codex's variable. openclaw honours no such override, so a
               # user who relocated AGENTS_HOME for Codex would be told to install where openclaw never looks.
               if [ -n "${AGENTS_HOME:-}" ] && [ "${AGENTS_HOME}" != "$HOME/.agents" ]; then
@@ -300,9 +354,9 @@ case "$mode" in
                   echo "  openclaw only reads $dst when its state dir is the default $HOME/.openclaw." >&2
                   echo "  Installing there anyway; openclaw will not discover these skills until that is unset." >&2
               fi ;;
-    codex-legacy) dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
-    claude) dst="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" ;;
-    hermes) dst="${HERMES_HOME:-$HOME/.hermes}/skills" ;;
+    codex-legacy) dst="$( abs_root CODEX_HOME "${CODEX_HOME:-}" .codex )/skills" || exit 2 ;;
+    claude) dst="$( abs_root CLAUDE_CONFIG_DIR "${CLAUDE_CONFIG_DIR:-}" .claude )/skills" || exit 2 ;;
+    hermes) dst="$( abs_root HERMES_HOME "${HERMES_HOME:-}" .hermes )/skills" || exit 2 ;;
     path) dst="$explicitPath" ;;
 esac
 mkdir -p "$dst"
