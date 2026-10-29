@@ -56,6 +56,20 @@
 #   (22) determinism x2 on the new collision dialog (house pattern)
 #   (23) the known gap stays COHERENT: --around's CLI row shows the tower front AND its defs= count, so
 #        edge-vs-display disagreement is visible on the row, never hidden
+#   (27) task D family tier under a CONTEXT anchor: opened widget.cpp — the exact-language Function
+#        fronts the same-family struct (higher rung) and the foreign trait/module; order byte-pinned
+#   (28) task D explicit @lang with NO such def and NO family: the foreign row answers, the fallback
+#        is DISCLOSED ahead of the result, and reflang= keeps saying which language was asked for
+#   (29) EXPLICIT beats CONTEXT: cursor in widget.cpp, 'Shape@rs' answers ONLY the Rust trait (the
+#        suffix RESTRICTS the list) and discloses reflang="rs" — a stated language outranks the document
+#   (30) unknown suffix on the LSP lane: 'Shape@bogus' answers nothing, ONE refusal naming known tags
+#   (32) corpus tie: 5 Python defs beat 1 Ruby and origin="corpus" is named — an absent language never
+#        wins the anchor
+#   (34) Nothing@rs: zero-match name with a valid suffix answers [] and claims NO fallback (nothing was
+#        given up); the suffix itself must not leak into the name
+#   (35) the language tier never rescues a declaration: cpp body, cpp decl, higher-rung C struct in that
+#        byte order — language tier and the same-scope yield compose
+#   (36) suffix case is tolerated, name case is NOT: 'Shape@CPP' = Shape@cpp; 'shape@rs' matches nothing
 #   (24) a constructor never outranks its class (maintainer, #432 review): Java `public Shape() {}` inside class Shape
 #        and C++ `Widget::Widget()` beside a header-first class Widget — --lego names the class and its implementor,
 #        --around focuses the class row; a near-miss Java method named like ANOTHER class keeps the Method rung
@@ -632,6 +646,172 @@ esac
 cmp -s "$WORK/raw22a" "$WORK/raw22b" && [ -s "$WORK/raw22a" ] \
     && ok "(22) collision dialog byte-identical across two runs" \
     || { no "(22) collision dialogs differ"; ls -l "$WORK/raw22a" "$WORK/raw22b"; }
+
+# ── (27) family tier under a context anchor: the ladder must not outrank the language (task D) ──────
+mkdir -p "$WORK/lof"
+for f in widget.c widget.cpp widget.rs; do cp "$ROOT/test/langorderfix/$f" "$WORK/lof/$f"; done
+mkdir -p "$WORK/lof/lib"; cp "$ROOT/test/langorderfix/lib/shape.ex" "$WORK/lof/lib/shape.ex"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lof\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lof/widget.cpp\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lof/widget.cpp\"},\"position\":{\"line\":10,\"character\":12}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d27"
+"$BIN" --lsp < "$WORK/d27" > "$WORK/raw27" 2>/dev/null
+decodeFrames "$WORK/raw27" > "$WORK/r27" 2>/dev/null
+R60="$( grep '"id":60,' "$WORK/r27" )"
+d_pp="$( printf '%s' "$R60" | grep -bo 'widget\.cpp","range":{"start":{"line":3' | cut -d: -f1 | head -1 )"
+d_c="$(  printf '%s' "$R60" | grep -bo 'widget\.c","range":{"start":{"line":3'  | cut -d: -f1 | head -1 )"
+d_rs="$( printf '%s' "$R60" | grep -bo 'widget\.rs","range":{"start":{"line":2' | cut -d: -f1 | head -1 )"
+d_ex="$( printf '%s' "$R60" | grep -bo 'shape\.ex","range":{"start":{"line":3' | cut -d: -f1 | head -1 )"
+[ -n "$d_pp" ] && [ -n "$d_c" ] && [ -n "$d_rs" ] && [ -n "$d_ex" ] \
+    && [ "$d_pp" -lt "$d_c" ] && [ "$d_c" -lt "$d_rs" ] && [ "$d_rs" -lt "$d_ex" ] \
+    && ok "(27) context anchor cpp: Function first despite rank 2 — exact < family < foreign-by-rank, order cpp<c<rs<ex" \
+    || { no "(27) family tier wrong: pp=$d_pp c=$d_c rs=$d_rs ex=$d_ex"; printf '%s\n' "$R60" | head -c 320; }
+
+# ── (28) explicit @lang with zero defs and zero family: foreign fallback, disclosed ────────────────
+mkdir -p "$WORK/lofb"; cp "$ROOT/test/langorderfix/widget.cpp" "$WORK/lofb/impl.cpp"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lofb\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@ex\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d28"
+"$BIN" --lsp < "$WORK/d28" > "$WORK/raw28" 2>/dev/null
+decodeFrames "$WORK/raw28" > "$WORK/r28" 2>/dev/null
+n28="$( grep -c 'window/logMessage.*holds no definition' "$WORK/r28" )"
+n28l="$( grep -n 'window/logMessage.*holds no definition' "$WORK/r28" | head -1 | cut -d: -f1 )"
+r28l="$( grep -n '"id":61,' "$WORK/r28" | head -1 | cut -d: -f1 )"
+R61="$( grep '"id":61,' "$WORK/r28" )"
+printf '%s' "$R61" | grep -qF "\"uri\":\"file://$WORK/lofb/impl.cpp\"" \
+    && printf '%s' "$R61" | grep -q 'reflang="ex"' \
+    && [ "$n28" = 1 ] && [ -n "$n28l" ] && [ -n "$r28l" ] && [ "$n28l" -lt "$r28l" ] \
+    && ok "(28) Shape@ex with no Elixir anywhere: impl.cpp answers, ONE 'holds no definition' notice precedes it, reflang=ex kept honest" \
+    || { no "(28) fallback wrong: n=$n28 notice=$n28l resp=$r28l"; printf '%s\n' "$R61" | head -c 240; }
+
+# ── (29) EXPLICIT beats CONTEXT and RESTRICTS the list to the stated language ──────────────────────
+mkdir -p "$WORK/loexp"
+for f in widget.c widget.cpp widget.rs; do cp "$ROOT/test/langorderfix/$f" "$WORK/loexp/$f"; done
+mkdir -p "$WORK/loexp/lib"; cp "$ROOT/test/langorderfix/lib/shape.ex" "$WORK/loexp/lib/shape.ex"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/loexp/widget.cpp\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":63,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@rs\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d29"
+"$BIN" --lsp < "$WORK/d29" > "$WORK/raw29" 2>/dev/null
+decodeFrames "$WORK/raw29" > "$WORK/r29" 2>/dev/null
+R63="$( grep '"id":63,' "$WORK/r29" )"
+row63="$( printf '%s' "$R63" | grep -o '"name":"Shape"' | wc -l | tr -d ' ' )"
+printf '%s' "$R63" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.rs\"" \
+    && [ "$row63" = 1 ] \
+    && printf '%s' "$R63" | grep -q 'reflang="rs"' \
+    && ok "(29) Shape@rs answers ONLY the Rust trait with reflang=\"rs\" — a stated language outranks the opened document's" \
+    || { no "(29) explicit-over-context wrong: rows=$row63"; printf '%s\n' "$R63" | head -c 320; }
+
+# ── (30) unknown suffix on the LSP lane: nothing answers, ONE refusal names the known tags ─────────
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":64,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@bogus\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d30"
+"$BIN" --lsp < "$WORK/d30" > "$WORK/raw30" 2>/dev/null
+decodeFrames "$WORK/raw30" > "$WORK/r30" 2>/dev/null
+R64="$( grep '"id":64,' "$WORK/r30" )"
+n64="$( grep -c 'window/logMessage.*unknown language' "$WORK/r30" )"
+printf '%s' "$R64" | grep -q '"result":\(null\|\[\]\)' \
+    && [ "$n64" = 1 ] \
+    && grep -q 'cpp' "$WORK/r30" && grep -q 'kt' "$WORK/r30" \
+    && ok "(30) Shape@bogus: nothing answers, ONE refusal naming the known tags precedes the empty result" \
+    || { no "(30) LSP refusal wrong: notices=$n64"; printf '%s\n' "$R64" | head -c 240; }
+
+# ── (32) corpus tie: the anchor lands on a language present and counted, never invented ───────────
+mkdir -p "$WORK/lotie"
+for k in 1 2 3 4; do printf 'def helper_%s():\n    return %s\n' "$k" "$k" > "$WORK/lotie/mod$k.py"; done
+printf 'def helper():\n    return helper_1()\n' > "$WORK/lotie/top.py"
+printf 'def helper\nend\n' > "$WORK/lotie/one.rb"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lotie\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"helper\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d32"
+"$BIN" --lsp < "$WORK/d32" > "$WORK/raw32" 2>/dev/null
+decodeFrames "$WORK/raw32" > "$WORK/r32" 2>/dev/null
+R65="$( grep '"id":65,' "$WORK/r32" )"
+t65py="$( printf '%s' "$R65" | grep -bo 'top\.py' | cut -d: -f1 | head -1 )"
+t65rb="$( printf '%s' "$R65" | grep -bo 'one\.rb'  | cut -d: -f1 | head -1 )"
+printf '%s' "$R65" | grep -q 'reflang="py"' \
+    && printf '%s' "$R65" | grep -q 'origin="corpus"' \
+    && [ -n "$t65py" ] && [ -n "$t65rb" ] && [ "$t65py" -lt "$t65rb" ] \
+    && ok "(32) 5 Python defs beat 1 Ruby on the corpus anchor (top.py before one.rb, origin named)" \
+    || { no "(32) corpus tie wrong: py=$t65py rb=$t65rb"; printf '%s\n' "$R65" | head -c 260; }
+
+# ── (34) a zero-match name with a valid suffix: empty, unclaimed, and the @ never leaks as the name ─
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Nothing@rs\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d34"
+"$BIN" --lsp < "$WORK/d34" > "$WORK/raw34" 2>/dev/null
+decodeFrames "$WORK/raw34" > "$WORK/r34" 2>/dev/null
+R66s="$( grep '"id":66,' "$WORK/r34" )"
+printf '%s' "$R66s" | grep -q '"result":\[\]' \
+    && ! grep -q 'holds no definition' "$WORK/r34" \
+    && ! grep -q '"name":"Nothing@rs"' "$WORK/r34" \
+    && ok "(34) Nothing@rs: [] with NO fallback claim — a name that matches nothing gives up nothing" \
+    || { no "(34) no-match lane over-discloses or leaked the suffix"; printf '%s\n' "$R66s" | head -c 200; }
+
+# ── (35) the language tier never rescues a declaration: body, its decl, then the higher-rung C struct ─
+mkdir -p "$WORK/lodecl"
+printf '// the decl is the EXACT-language answer the bare name first reaches; the yield below must still\n// pick the body as focus\nint thing( int f );\n' > "$WORK/lodecl/thing.h"
+printf 'int thing( int f )\n{\n    return f + 1;\n}\n\nint call_thing( int k )\n{\n    return thing( k );\n}\n' > "$WORK/lodecl/thing.cpp"
+printf '// a C struct named thing, one family step out and a HIGHER rung\nstruct thing\n{\n    int v;\n};\n' > "$WORK/lodecl/thing.c"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lodecl\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lodecl/thing.cpp\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":67,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/lodecl/thing.cpp\"},\"position\":{\"line\":7,\"character\":11}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d35"
+"$BIN" --lsp < "$WORK/d35" > "$WORK/raw35" 2>/dev/null
+decodeFrames "$WORK/raw35" > "$WORK/r35" 2>/dev/null
+R67d="$( grep '"id":67,' "$WORK/r35" )"
+e_cpp="$( printf '%s' "$R67d" | grep -bo 'thing\.cpp","range":{"start":{"line":0' | cut -d: -f1 | head -1 )"
+e_h="$(   printf '%s' "$R67d" | grep -bo 'thing\.h","range":{"start":{"line":2'  | cut -d: -f1 | head -1 )"
+e_c="$(   printf '%s' "$R67d" | grep -bo 'thing\.c","range":{"start":{"line":1'  | cut -d: -f1 | head -1 )"
+[ -n "$e_cpp" ] && [ -n "$e_h" ] && [ -n "$e_c" ] \
+    && [ "$e_cpp" -lt "$e_h" ] && [ "$e_h" -lt "$e_c" ] \
+    && ok "(35) cpp body first, its decl second, the higher-rung C struct last — tier order and yield compose, ladder never rescues" \
+    || { no "(35) decl/body/struct order wrong: cpp=$e_cpp h=$e_h c=$e_c"; printf '%s\n' "$R67d" | head -c 300; }
+
+# ── (36) suffix case is tolerated, name case is NOT (the two axes stay independently documented) ───
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/loexp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":68,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"Shape@CPP\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":69,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"shape@rs\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d36"
+"$BIN" --lsp < "$WORK/d36" > "$WORK/raw36" 2>/dev/null
+decodeFrames "$WORK/raw36" > "$WORK/r36" 2>/dev/null
+R68s="$( grep '"id":68,' "$WORK/r36" )"; R69s="$( grep '"id":69,' "$WORK/r36" )"
+printf '%s' "$R68s" | grep -qF "\"uri\":\"file://$WORK/loexp/widget.cpp\"" \
+    && printf '%s' "$R69s" | grep -q '"result":\[\]' \
+    && ok "(36) Shape@CPP resolves like Shape@cpp; shape@rs matches no symbol — suffix tolerant, names exact" \
+    || { no "(36) case axes conflated"; printf '%s\n' "$R68s" | head -c 200; printf '%s\n' "$R69s" | head -c 200; }
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
