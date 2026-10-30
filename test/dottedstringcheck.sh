@@ -905,6 +905,9 @@ if [ "$( wc -l < "$TMP/m1a.rows" | tr -d ' ' )" = 1 ] && grep -qF 'p="twin.py"' 
 
 # S-B4: the house container, not std::map
 if grep -q 'std::map<' "$ROOT/src/fordottedstring.h"; then no "S-B4 std::map in src/fordottedstring.h"; else ok "S-B4 no std::map in src/fordottedstring.h"; fi
+# S-U1: no ORDERED container keyed on string_view: libstdc++ 14's string_view ordering wraps an unsigned subtraction the sanitizer
+# ignorelist does not cover (CI run 41124745324, mcpreloadasancheck, asan ubuntu); std::string keys are covered
+if grep -Eq '(set|map)<[^;]*string_view' "$ROOT/src/fordottedstring.h"; then no "S-U1 an ordered container keyed on string_view in src/fordottedstring.h"; else ok "S-U1 no ordered container keyed on string_view in src/fordottedstring.h"; fi
 
 # ── X ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 run "$K" "$TMP/k1b" '--for=csrfproc'
