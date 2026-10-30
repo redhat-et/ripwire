@@ -10,6 +10,7 @@
 #include "formembers.h" // member-names: mem= on the shown owner rows of a compact-route answer
 #include "forslots.h"   // FOR-SLOTS: slots= on the shown initializer rows of a compact-route answer
 #include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
+#include "forimporters.h" // EXEMPLAR importers: who imports the model an add-a-new task names, before </ctx>
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -2707,7 +2708,7 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
 std::optional<int> runCallHierarchy( const MainDispatch& d );
 std::optional<int> runConnect( const MainDispatch& d );
 
-// DECL-ROW (src/fordeclrow.h): the task-read row blocks, just before </ctx> and outside every charge above: an element with its own
+// DECL-ROW (src/fordeclrow.h), EXEMPLAR importers (src/forimporters.h): the task-read row blocks, just before </ctx> and outside every charge above: an element with its own
 // byte allowance, so no auto-served body pays for it. XML only, and not under a token budget (the budget is a request the block
 // must obey): "" on every task they do not read as theirs, so the answer is byte-identical.
 inline void appendForTaskRowBlocks( const MainDispatch& d )
@@ -2717,7 +2718,7 @@ inline void appendForTaskRowBlocks( const MainDispatch& d )
     {
         return;
     }
-    rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask ).c_str() );
+    rw::emitRaw( stdout, ( rw::renderForDeclRows( d.ing, d.g, cfg.forTask ) + rw::renderForImporters( d.ing, d.g, cfg.forTask ) ).c_str() );
 }
 
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
@@ -4555,7 +4556,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
         }
-        appendForTaskRowBlocks( d );                                     // DECL-ROW: "" unless the task reads as a signature change of one C/C++/Go function
+        appendForTaskRowBlocks( d );                                     // DECL-ROW, EXEMPLAR importers: "" unless the task reads as theirs
         appendSubjectGraphVerbBlock( d, servedAnswerBodies().bodies );   // FOR-ROUTE-DECLINED: "" unless the task is spelled as a graph question that resolves; the bodies this answer carries print no second copy in its path hop bodies
 
         rw::emitRaw( stdout, "</ctx>" );
