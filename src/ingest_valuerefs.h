@@ -3378,9 +3378,9 @@ private:
     // Is an ancestor of m_anc[i] a function body? (a lambda counts: a local there is no module constant)
     bool insideFunctionBody( std::size_t i ) const noexcept
     {
-        for( std::size_t j = i; j-- > 0; )
+        for( std::size_t j = i; j > 0; --j )
         {
-            if( kindIs( m_anc[j].kind, "function_definition" ) || kindIs( m_anc[j].kind, "lambda" ) )
+            if( kindIs( m_anc[j - 1].kind, "function_definition" ) || kindIs( m_anc[j - 1].kind, "lambda" ) )
             {
                 return true;
             }
