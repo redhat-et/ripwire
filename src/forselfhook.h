@@ -26,6 +26,7 @@
 // crosses; a by-name base leaves the walk short and the element silent, a floor rather than a guess.
 // RIPWIRE_NO_SELF_HOOK (any value) turns it off — the A/B handle.
 
+#include "crossref.h"        // crossref::wholeWordAt
 #include "docparse.h"        // docparse::detail::readWholeFile — the one whole-file reader
 #include "filter.h"          // isTestSymbol
 #include "graph.h"
@@ -97,60 +98,54 @@ inline constexpr FamilyRow kFamilyRows[] = {
 };
 inline const FamilyRow* familyRow( Lang l ) noexcept
 {
-    const auto* row = std::ranges::find_if( kFamilyRows, [ l ]( const FamilyRow& r ) { return r.lang == l; } );
+    const auto* row = std::ranges::find( kFamilyRows, l, &FamilyRow::lang );
     return row == std::end( kFamilyRows ) ? nullptr : row;
 }
 
-inline bool identChar( char c ) noexcept
+// The text of `at`'s line before it (npos + 1 is the file's first line).
+inline std::string_view linePrefix( std::string_view text, std::size_t at ) noexcept
 {
-    return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_';
+    const std::string_view head = text.substr( 0, at );
+    return head.substr( head.rfind( '\n' ) + 1 );
 }
-inline bool isCommentedOut( std::string_view text, std::size_t at ) noexcept
+// The next non-space offset from `i`, text.size() when none is left.
+inline std::size_t nextToken( std::string_view text, std::size_t i ) noexcept
 {
-    const std::size_t lineStart = text.rfind( '\n', at );
-    const std::size_t from      = lineStart == std::string_view::npos ? 0 : lineStart + 1;
-    return text.substr( from, at - from ).find( '#' ) != std::string_view::npos;
+    return std::min( text.find_first_not_of( " \t\r\n", i ), text.size() );
 }
-inline std::size_t skipSpace( std::string_view text, std::size_t i ) noexcept
-{
-    while( i < text.size() && std::isspace( static_cast<unsigned char>( text[i] ) ) != 0 )
-    {
-        ++i;
-    }
-    return i;
-}
+
 // `<fn>( <recv>, "<name>"` at a word boundary, from `from` on: the offsets of the matches (a commented-out line holds none).
 inline std::vector<std::size_t> stringAttrUses( std::string_view text, std::string_view fn, std::string_view recv, std::string_view name )
 {
     std::vector<std::size_t> out;
     for( std::size_t at = text.find( fn ); at != std::string_view::npos; at = text.find( fn, at + 1 ) )
     {
-        if( at > 0 && identChar( text[ at - 1 ] ) )
+        if( !crossref::wholeWordAt( text, at, fn.size() ) )
         {
             continue;
         }
-        std::size_t i = skipSpace( text, at + fn.size() );
+        std::size_t i = nextToken( text, at + fn.size() );
         if( i >= text.size() || text[i] != '(' )
         {
             continue;
         }
-        i = skipSpace( text, i + 1 );
+        i = nextToken( text, i + 1 );
         if( text.substr( i, recv.size() ) != recv )
         {
             continue;
         }
-        i = skipSpace( text, i + recv.size() );
+        i = nextToken( text, i + recv.size() );
         if( i >= text.size() || text[i] != ',' )
         {
             continue;
         }
-        i = skipSpace( text, i + 1 );
+        i = nextToken( text, i + 1 );
         if( i >= text.size() || ( text[i] != '"' && text[i] != '\'' ) )
         {
             continue;
         }
         const char quote = text[i];
-        if( text.substr( i + 1, name.size() ) == name && i + 1 + name.size() < text.size() && text[ i + 1 + name.size() ] == quote && !isCommentedOut( text, at ) )
+        if( text.substr( i + 1, name.size() ) == name && i + 1 + name.size() < text.size() && text[ i + 1 + name.size() ] == quote && !linePrefix( text, at ).contains( '#' ) )
         {
             out.push_back( at );
         }
@@ -436,13 +431,20 @@ inline bool firstParamIs( std::string_view text, const FamilyRow& row, std::stri
     {
         return false;
     }
-    const std::size_t i = skipSpace( text, par + 1 );
-    return text.substr( i, param.size() ) == param && ( i + param.size() >= text.size() || !identChar( text[ i + param.size() ] ) );
+    const std::size_t i = nextToken( text, par + 1 );
+    return text.substr( i, param.size() ) == param && crossref::wholeWordAt( text, i, param.size() );
 }
 inline bool guardedBefore( std::string_view text, const FamilyRow& row, std::string_view recv, std::string_view name, std::size_t site )
 {
     const auto before = [ site ]( std::size_t at ) { return at < site; };
     return std::ranges::any_of( stringAttrUses( text, row.probe, recv, name ), before ) || std::ranges::any_of( stringAttrUses( text, row.fetch, recv, name ), before );
+}
+inline void orderSites( std::vector<Site>& sites, const IngestResult& ing )
+{
+    const auto key = [ & ]( const Site& s ) { return std::tuple( s.test, s.depth, ing.symbols[ s.caller ].fileId, s.line, s.form ); };
+    std::ranges::sort( sites, [ & ]( const Site& a, const Site& b ) { return key( a ) < key( b ); } );
+    const auto dup = std::ranges::unique( sites, [ & ]( const Site& a, const Site& b ) { return a.caller == b.caller && a.line == b.line && a.form == b.form; } );
+    sites.erase( dup.begin(), dup.end() );
 }
 struct Finder
 {
@@ -453,7 +455,7 @@ struct Finder
     std::optional<std::uint32_t> depthOf( std::span<const Ancestor> bases, const Symbol& caller ) const
     {
         const NodeId owner = classes.ownerOf( caller );
-        const auto   it    = std::ranges::find_if( bases, [ owner ]( const Ancestor& a ) { return a.id == owner; } );
+        const auto   it    = std::ranges::find( bases, owner, &Ancestor::id );
         return it == bases.end() ? std::nullopt : std::optional<std::uint32_t>( it->depth );
     }
     void addRef( std::vector<Site>& out, const Reference& r, std::span<const Ancestor> bases, const FamilyRow& row, std::string_view name )
@@ -482,6 +484,20 @@ struct Finder
         const std::size_t offset = r.startByte >= caller.sigStartByte ? r.startByte - caller.sigStartByte : text.size();
         out.push_back( Site{ r.fromSymbol, r.line, *depth, r.role == RefRole::Call ? SiteForm::Call : SiteForm::Ref, !throughSelf,
                              guardedBefore( text, row, throughSelf ? row.selfRecv : row.classRecv, name, offset ), isTestSymbol( ing, r.fromSymbol ) } );
+    }
+    std::vector<Site> sitesOf( std::span<const Ancestor> bases, const FamilyRow& row, std::string_view name )
+    {
+        std::vector<Site> out;
+        for( const Reference& r : ing.references )
+        {
+            addRef( out, r, bases, row, name );
+        }
+        for( NodeId s = 0; s < ing.symbols.size(); ++s )
+        {
+            addFetches( out, s, bases, row, name );
+        }
+        orderSites( out, ing );
+        return out;
     }
     // A fetch by string leaves no reference, so the bases' own functions are read for it.
     void addFetches( std::vector<Site>& out, NodeId id, std::span<const Ancestor> bases, const FamilyRow& row, std::string_view name )
@@ -512,8 +528,7 @@ inline std::vector<NodeId> withTaskNamedMembers( const IngestResult& ing, const 
     {
         for( std::size_t at = task.find( name ); at != std::string_view::npos; at = task.find( name, at + 1 ) )
         {
-            const std::size_t end = at + name.size();
-            if( ( at == 0 || !identChar( task[ at - 1 ] ) ) && ( end == task.size() || !identChar( task[end] ) ) )
+            if( crossref::wholeWordAt( task, at, name.size() ) )
             {
                 return true;
             }
@@ -540,13 +555,6 @@ inline std::vector<NodeId> withTaskNamedMembers( const IngestResult& ing, const 
     return out;
 }
 
-inline void orderSites( std::vector<Site>& sites, const IngestResult& ing )
-{
-    const auto key = [ & ]( const Site& s ) { return std::tuple( s.test, s.depth, ing.symbols[ s.caller ].fileId, s.line, s.form ); };
-    std::ranges::sort( sites, [ & ]( const Site& a, const Site& b ) { return key( a ) < key( b ); } );
-    const auto dup = std::ranges::unique( sites, [ & ]( const Site& a, const Site& b ) { return a.caller == b.caller && a.line == b.line && a.form == b.form; } );
-    sites.erase( dup.begin(), dup.end() );
-}
 }   // namespace selfhook_detail
 
 struct SelfHookInputs
@@ -556,6 +564,142 @@ struct SelfHookInputs
     std::string_view    rootArg;
     std::string_view    task;
 };
+
+namespace selfhook_detail
+{
+// The definitions of a method's name in its inheritance cone: never a namesake's. nearest = the closest base definition, tied = others at its depth.
+struct ConeDefs
+{
+    std::size_t   defs     = 0;
+    std::size_t   testDefs = 0;
+    NodeId        nearest  = kNoNode;
+    std::uint32_t depth    = 0;
+    std::size_t   tied     = 0;
+};
+inline ConeDefs coneDefsOf( const IngestResult& ing, const ClassIndex& classes, std::span<const std::pair<NodeId, NodeId>> parents, const Symbol& m, NodeId cls, std::span<const Ancestor> bases )
+{
+    std::vector<NodeId> roots{ cls };
+    for( const Ancestor& a : bases )
+    {
+        roots.push_back( a.id );
+    }
+    const std::vector<char> cone = coneOf( parents, ing.symbols.size(), roots );
+    ConeDefs                out;
+    for( NodeId d = 0; d < ing.symbols.size(); ++d )
+    {
+        const Symbol& def = ing.symbols[d];
+        if( def.name != m.name || def.lang != m.lang || def.fnLocal || !ReceiverEvidence::callableKind( def.kind ) )
+        {
+            continue;
+        }
+        const NodeId owner = classes.ownerOf( def );
+        if( owner == kNoNode || cone[ owner ] == 0 )
+        {
+            continue;
+        }
+        ++out.defs;
+        out.testDefs += isTestSymbol( ing, d ) ? 1u : 0u;
+        const auto base = std::ranges::find( bases, owner, &Ancestor::id );
+        if( base == bases.end() )
+        {
+            continue;
+        }
+        if( out.nearest == kNoNode || base->depth < out.depth )
+        {
+            out.nearest = d;
+            out.depth   = base->depth;
+            out.tied    = 0;
+        }
+        else if( base->depth == out.depth )
+        {
+            ++out.tied;
+        }
+    }
+    return out;
+}
+
+// One answer's rendering state: the row writers read it, and it lives as long as the element.
+struct RowWriter
+{
+    const IngestResult& ing;
+    const MemberOwners& owners;
+    std::string_view    rootArg;
+    SourceReader&       source;
+    std::vector<char>   esc;
+
+    std::string siteOf( std::uint32_t fileId, std::uint32_t line )
+    {
+        const std::string_view rel = rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : sarif::rootRelativeUri( ing.files[ fileId ], rootArg );
+        return std::string( escapeXml( rel, esc ) ) + ':' + std::to_string( line );
+    }
+    void relation( std::string& x, const ConeDefs& d, const FamilyRow& row )
+    {
+        if( d.nearest == kNoNode )
+        {
+            x += " hook=\"1\"";
+            return;
+        }
+        const Symbol& base = ing.symbols[ d.nearest ];
+        x += " overrides=\"";
+        x += escapeXml( qualifiedMemberName( owners, base ), esc );
+        x += "\" op=\"" + siteOf( base.fileId, base.line ) + '"';
+        if( d.tied > 0 )
+        {
+            x += " tied=\"" + std::to_string( d.tied ) + '"';
+        }
+        const std::string_view text = source.textOf( base );
+        if( text.find( row.abstractRaise ) != std::string_view::npos || text.find( row.abstractMark ) != std::string_view::npos )
+        {
+            x += " abstract=\"1\"";
+        }
+    }
+    void siteRow( std::string& x, const Site& site )
+    {
+        const Symbol& caller = ing.symbols[ site.caller ];
+        x += "<s n=\"";
+        x += escapeXml( qualifiedMemberName( owners, caller ), esc );
+        x += "\" p=\"" + siteOf( caller.fileId, site.line ) + '"';
+        if( site.viaCls )
+        {
+            x += " recv=\"cls\"";
+        }
+        if( site.form != SiteForm::Call )
+        {
+            x += site.form == SiteForm::Ref ? " form=\"ref\"" : " form=\"getattr\"";
+        }
+        if( site.guarded )
+        {
+            x += " guarded=\"1\"";
+        }
+        x += "/>";
+    }
+    void method( std::string& x, const Symbol& m, const ConeDefs& d, const FamilyRow& row, std::span<const Site> sites )
+    {
+        const std::size_t siteRows = std::min( sites.size(), kForSelfHookSiteRows );
+        const std::string qual( qualifiedMemberName( owners, m ) );
+        x += "<selfhook n=\"";
+        x += escapeXml( qual, esc );
+        x += "\" p=\"" + siteOf( m.fileId, m.line ) + '"';
+        relation( x, d, row );
+        x += " defs=\"" + std::to_string( d.defs ) + '"';
+        if( d.testDefs > 0 )
+        {
+            x += " test=\"" + std::to_string( d.testDefs ) + '"';
+        }
+        x += " sites=\"" + std::to_string( sites.size() ) + "\" shown=\"" + std::to_string( siteRows ) + "\" capped=\"" + ( siteRows < sites.size() ? "1" : "0" ) + '"';
+        if( siteRows < sites.size() )
+        {
+            x += nextAttrXml( nextFlag( "--callers=", qual ) );
+        }
+        x += '>';
+        for( const Site& site : sites.first( siteRows ) )
+        {
+            siteRow( x, site );
+        }
+        x += "</selfhook>";
+    }
+};
+}   // namespace selfhook_detail
 
 // The element for `served`, "" when no served method qualifies (see WHEN above). A method served twice counts once.
 inline std::string renderForSelfHooks( const SelfHookInputs& in, std::span<const NodeId> served )
@@ -571,13 +715,7 @@ inline std::string renderForSelfHooks( const SelfHookInputs& in, std::span<const
     const MemberOwners owners( ing );
     SourceReader       source( ing );
     Finder             finder{ ing, classes, source };
-    std::vector<char>  esc;
-    const auto         relPath = [ & ]( std::uint32_t fileId ) {
-        return in.rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : sarif::rootRelativeUri( ing.files[ fileId ], in.rootArg );
-    };
-    const auto siteOf = [ & ]( std::uint32_t fileId, std::uint32_t line ) {
-        return std::string( escapeXml( relPath( fileId ), esc ) ) + ':' + std::to_string( line );
-    };
+    RowWriter          writer{ ing, owners, in.rootArg, source, {} };
 
     std::vector<NodeId> seen;
     std::string         rows;
@@ -596,152 +734,34 @@ inline std::string renderForSelfHooks( const SelfHookInputs& in, std::span<const
         {
             continue;
         }
-        const NodeId cls = classes.ownerOf( m );
-        if( cls == kNoNode )
-        {
-            continue;
-        }
-        const std::vector<Ancestor> bases = ancestorsOf( parents, cls );
+        const NodeId                cls   = classes.ownerOf( m );
+        const std::vector<Ancestor> bases = cls == kNoNode ? std::vector<Ancestor>{} : ancestorsOf( parents, cls );
         if( bases.empty() )
         {
             continue;
         }
-        std::vector<Site> sites;
-        for( const Reference& r : ing.references )
-        {
-            finder.addRef( sites, r, bases, *row, m.name );
-        }
-        for( NodeId s = 0; s < ing.symbols.size(); ++s )
-        {
-            finder.addFetches( sites, s, bases, *row, m.name );
-        }
+        const std::vector<Site> sites = finder.sitesOf( bases, *row, m.name );
         if( sites.empty() )
         {
             continue;
         }
-        orderSites( sites, ing );
-        // the definitions of the name in the cone: this method's relatives, never a namesake's
-        std::vector<NodeId> roots{ cls };
-        for( const Ancestor& a : bases )
-        {
-            roots.push_back( a.id );
-        }
-        const std::vector<char> cone = coneOf( parents, ing.symbols.size(), roots );
-        std::size_t             defs = 0;
-        std::size_t             testDefs = 0;
-        NodeId                  nearest = kNoNode;
-        std::uint32_t           nearestDepth = 0;
-        std::size_t             tied = 0;
-        for( NodeId d = 0; d < ing.symbols.size(); ++d )
-        {
-            const Symbol& def = ing.symbols[d];
-            if( def.name != m.name || def.lang != m.lang || def.fnLocal || !ReceiverEvidence::callableKind( def.kind ) )
-            {
-                continue;
-            }
-            const NodeId owner = classes.ownerOf( def );
-            if( owner == kNoNode || cone[ owner ] == 0 )
-            {
-                continue;
-            }
-            ++defs;
-            testDefs += isTestSymbol( ing, d ) ? 1u : 0u;
-            const auto base = std::ranges::find_if( bases, [ owner ]( const Ancestor& a ) { return a.id == owner; } );
-            if( base == bases.end() )
-            {
-                continue;
-            }
-            if( nearest == kNoNode || base->depth < nearestDepth )
-            {
-                nearest      = d;
-                nearestDepth = base->depth;
-                tied         = 0;
-            }
-            else if( base->depth == nearestDepth )
-            {
-                ++tied;
-            }
-        }
-        if( defs < 2 )
+        const ConeDefs defs = coneDefsOf( ing, classes, parents, m, cls, bases );
+        if( defs.defs < 2 )
         {
             continue;   // no override relation: the caller hop's question, not this one
         }
         ++total;
-        if( shown == kForSelfHookMethodRows )
+        if( shown < kForSelfHookMethodRows )
         {
-            continue;
+            ++shown;
+            writer.method( rows, m, defs, *row, sites );
         }
-        ++shown;
-        const std::size_t siteRows = std::min( sites.size(), kForSelfHookSiteRows );
-        const std::string qual( qualifiedMemberName( owners, m ) );
-        rows += "<selfhook n=\"";
-        rows += escapeXml( qual, esc );
-        rows += "\" p=\"" + siteOf( m.fileId, m.line ) + '"';
-        if( nearest != kNoNode )
-        {
-            const Symbol& base = ing.symbols[ nearest ];
-            rows += " overrides=\"";
-            rows += escapeXml( qualifiedMemberName( owners, base ), esc );
-            rows += "\" op=\"" + siteOf( base.fileId, base.line ) + '"';
-            if( tied > 0 )
-            {
-                rows += " tied=\"" + std::to_string( tied ) + '"';
-            }
-            const std::string_view text = source.textOf( base );
-            if( text.find( row->abstractRaise ) != std::string_view::npos || text.find( row->abstractMark ) != std::string_view::npos )
-            {
-                rows += " abstract=\"1\"";
-            }
-        }
-        else
-        {
-            rows += " hook=\"1\"";
-        }
-        rows += " defs=\"" + std::to_string( defs ) + '"';
-        if( testDefs > 0 )
-        {
-            rows += " test=\"" + std::to_string( testDefs ) + '"';
-        }
-        rows += " sites=\"" + std::to_string( sites.size() ) + "\" shown=\"" + std::to_string( siteRows ) + "\" capped=\"" + ( siteRows < sites.size() ? "1" : "0" ) + '"';
-        if( siteRows < sites.size() )
-        {
-            rows += nextAttrXml( nextFlag( "--callers=", qual ) );
-        }
-        rows += '>';
-        for( std::size_t i = 0; i < siteRows; ++i )
-        {
-            const Site&   site   = sites[i];
-            const Symbol& caller = ing.symbols[ site.caller ];
-            rows += "<s n=\"";
-            rows += escapeXml( qualifiedMemberName( owners, caller ), esc );
-            rows += "\" p=\"" + siteOf( caller.fileId, site.line ) + '"';
-            if( site.viaCls )
-            {
-                rows += " recv=\"cls\"";
-            }
-            if( site.form != SiteForm::Call )
-            {
-                rows += site.form == SiteForm::Ref ? " form=\"ref\"" : " form=\"getattr\"";
-            }
-            if( site.guarded )
-            {
-                rows += " guarded=\"1\"";
-            }
-            rows += "/>";
-        }
-        rows += "</selfhook>";
     }
     if( rows.empty() )
     {
         return {};
     }
     return "<selfhooks total=\"" + std::to_string( total ) + "\" shown=\"" + std::to_string( shown ) + "\" capped=\"" + ( shown < total ? "1" : "0" ) + "\">" + rows + "</selfhooks>";
-}
-
-// The MCP twin's own comment: the element carries its definition beside it (the MCP for header's clauses are fixed at render time).
-inline std::string selfHookMcpXml( const std::string& xml )
-{
-    return xml.empty() ? std::string() : "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + xml;
 }
 
 }   // namespace rw
