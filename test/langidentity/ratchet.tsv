@@ -23,3 +23,4 @@ perlang	elixir_resolve.h
 perlang	ingest_clojure.h
 perlang	ingest_jsimports.h
 perlang	ingest_ruby.h
+perlang	ruby_groupself.h

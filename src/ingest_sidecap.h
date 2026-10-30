@@ -2653,6 +2653,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
         captureRubySingletonAccessors( root, fileId, src, binds );
         captureRubyClassMixins( root, fileId, src, binds );
         captureRubyMainMixins( root, fileId, src, binds );
+        captureRubyExampleGroups( root, fileId, src, binds );
         if( le.ext == kJbuilderExt )
         {
             typeRubyJbuilderLocal( fileId, refs );

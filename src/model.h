@@ -1552,14 +1552,36 @@ enum class LocalBindKind : std::uint8_t
     // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
     // filters by kind). APPENDED (cache u8).
     ReExport,
+    // Parser version 273 (test/rubygroupselfcheck.sh): an RSpec example group's block — the OUTERMOST group of a nest, or an
+    // `RSpec.configure` block, whose hooks run on examples — where a receiver-less call's self is the group's.
+    // spanStart/spanEnd = the block's bytes; var and typeName EMPTY. importedName kRubyGroupSharedMark marks a group whose defs
+    // every group reaches (a shared group, which `include_context` / `it_behaves_like` brings in, and a configure block, whose
+    // defs are main's); kRubyGroupHoleMark instead marks a block INSIDE a group that hands self to another object
+    // (`instance_eval`, `Class.new`): a call there is not the group's.
+    // Written by ingest_ruby.h captureRubyExampleGroups; read by graph.h RubyTopSelf ONLY. APPENDED (cache u8).
+    RubyGroupSelf,
+    // Parser version 273: a module every example group mixes in — `config.include M` in an `RSpec.configure` block, or
+    // `include M` written as a statement of a group's body. typeName = the constant as written, at its own start byte;
+    // var EMPTY and the record file-scope. importedName kRubyGroupHelperMark / kRubyGroupDescribedMark instead marks the
+    // constant an outermost group describes, which rspec-rails mixes in for a helper spec: one that says `type: :helper`
+    // (always kept) or any other (kept only in a file under spec/helpers/, ruby_groupself.h). Read by graph.h RubyTopSelf
+    // ONLY. APPENDED (cache u8).
+    RubyGroupMixin,
 };
+// LocalBindKind::RubyGroupSelf's importedName on a block inside a group whose self is another object's, and on a group whose
+// defs every group reaches
+inline constexpr std::string_view kRubyGroupHoleMark   = "hole";
+inline constexpr std::string_view kRubyGroupSharedMark = "shared";
+// LocalBindKind::RubyGroupMixin's importedName on the constant a group describes: with `type: :helper`, and without it
+inline constexpr std::string_view kRubyGroupHelperMark    = "helper";
+inline constexpr std::string_view kRubyGroupDescribedMark = "described";
 // fix round 4: the TypeAlias rows that bind a spelling with no alias target (model.h LocalBindKind::TypeAlias, typeName)
 inline constexpr std::string_view kTypeBindForward  = "forward";
 inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ReExport ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RubyGroupMixin ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two

@@ -5,6 +5,7 @@
 
 #include "model.h"
 #include "elixir_resolve.h"      // lexical module/name/arity resolution; reuses cached Binding records
+#include "ruby_groupself.h"      // an RSpec example group's self: its blocks and the modules it mixes in (RubyTopSelf reads it)
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
 #include "nextverb.h"            // cut-fix E: nextFlag / nextAttrXml — the import tier's importers_next=
@@ -4141,7 +4142,10 @@ inline RubySelfReach buildRubySelfReach( const IngestResult& ing, const HashMap<
 // defines is a method no lookup finds — the call names a partial's local, a route helper, ActionView's own — and so is a
 // def in test code (filter.h isTestSymbol: a def inside an example group's block has no class around it, and is the
 // group's method). A call left with none is refused as external. A `.rb` file's top level is left to RubySelfReach, which leaves it alone: a block
-// there may run with another self (`describe`, `routes.draw`, `FactoryBot.define`).
+// there may run with another self (`routes.draw`, `FactoryBot.define`) — except an RSpec example group's block (parser
+// version 273, ruby_groupself.h): self there is the group's, "<group>N" for file N, which reaches what main reaches, a def
+// in test code — its own file's group defs and the true top-level ones (a spec/support helper) — and a method of a module
+// the groups mix in.
 struct RubyTopSelf
 {
     enum class Kind : std::uint8_t { None, Main, View };
@@ -4149,6 +4153,7 @@ struct RubyTopSelf
     const RubySelfReach&  reach;
     std::vector<Kind>     byFile;        // per file: what self is outside any class
     HashMap<NodeId, char> viewMethods;   // the defs a view answers besides main's: helper modules', helper_methods'
+    RubyGroupSelf         groups;        // where a `.rb` file's self is an example group's, and what the groups mix in
 
     // the self a Ruby call outside any class runs against in r's file, as a key no class shares; nullptr when not known
     const std::string* selfOf( const Reference& r ) const
@@ -4157,9 +4162,17 @@ struct RubyTopSelf
         const Kind kind = r.fileId < byFile.size() ? byFile[ r.fileId ] : Kind::None;
         const bool call = r.lang == Lang::Ruby && r.role == RefRole::Call && r.qualifier.empty() && r.fromSymbol != kNoNode
                        && ( r.recv == RecvKind::None || r.recv == RecvKind::ThisObj ) && callerSelfScope( ing, r ).empty();
-        return !call || kind == Kind::None ? nullptr : kind == Kind::Main ? &kMain : &kView;
+        if( !call )
+        {
+            return nullptr;
+        }
+        if( kind == Kind::None )
+        {
+            return groups.contains( r.fileId, r.startByte ) ? &groups.keys[ r.fileId ] : nullptr;
+        }
+        return kind == Kind::Main ? &kMain : &kView;
     }
-    static bool owns( const std::string& self ) noexcept { return self == "<main>" || self == "<view>"; }
+    static bool owns( const std::string& self ) noexcept { return self == "<main>" || self == "<view>" || RubyGroupSelf::isKey( self ); }
     // FE-B: a class's self is RubySelfReach's proof; outside any class nothing is proven (a top-level script's call)
     bool proves( const std::string& self, NodeId c ) const
     {
@@ -4167,8 +4180,9 @@ struct RubyTopSelf
     }
 
     // The candidates of `ids` self reaches, into `out` (cleared first); true when any was left out. A class's self is
-    // RubySelfReach's to read; for "<main>" and "<view>", a candidate owned by no Ruby class or module the tree defines is
-    // reachable, as RubySelfReach reads it.
+    // RubySelfReach's to read; for "<main>", "<view>" and a group's, a candidate owned by no Ruby class or module the tree
+    // defines is reachable, as RubySelfReach reads it. A group also reaches test code and the modules the groups mix in, and
+    // never another language's definition or another file's group def (RubyGroupSelf::outOfReach).
     template<class In, class Out>
     bool reachableOf( const std::string& self, const In& ids, Out& out ) const
     {
@@ -4183,7 +4197,9 @@ struct RubyTopSelf
             const bool root  = owner.empty() || std::ranges::find( kRubyInstanceRoots, owner ) != std::end( kRubyInstanceRoots );
             const bool known = reach.qualifiedOwner.find( c ) != reach.qualifiedOwner.end() || reach.classNames.find( owner ) != reach.classNames.end();
             const bool view  = self == "<view>" && viewMethods.find( c ) != viewMethods.end();
-            if( ( root || !known || view ) && !isTestSymbol( ing, c ) )
+            const bool group = RubyGroupSelf::isKey( self );
+            const bool alien = group && groups.outOfReach( ing.symbols[ c ], RubyGroupSelf::fileOf( self ) );
+            if( ( root || !known || view || ( group && groups.mixes( owner ) ) ) && ( group || !isTestSymbol( ing, c ) ) && !alien )
             {
                 out.push_back( c );
             }
@@ -4195,8 +4211,7 @@ struct RubyTopSelf
 // Is `path` a helper file Rails' `helper :all` loads — a `*_helper.rb` under an app/helpers/ directory?
 inline bool rubyIsHelperFile( std::string_view path ) noexcept
 {
-    const std::size_t dir = path.rfind( "app/helpers/" );
-    return dir != std::string_view::npos && ( dir == 0 || path[ dir - 1 ] == '/' ) && path.ends_with( "_helper.rb" );
+    return rubyPathUnder( path, "app/helpers/" ) && path.ends_with( "_helper.rb" );
 }
 
 // What self is outside any class in the file at `path`: Rake's main in a task file, the view in a Jbuilder template.
@@ -4231,6 +4246,7 @@ inline RubyTopSelf buildRubyTopSelf( const IngestResult& ing, const RubySelfReac
             top.viewMethods.try_emplace( s.id, 1 );
         }
     }
+    top.groups = buildRubyGroupSelf( ing, [ & ]( const std::string& name ) -> const std::vector<std::string>& { return reach.ancestorsOf( name ); } );
     return top;
 }
 
@@ -5573,8 +5589,10 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
     }
     for( const Binding& b : ing.bindings )
     {
-        // FE-B's receiver evidence is read by ReceiverEvidence alone; a main mixin by --lego alone; a re-export by the --for hop rows alone
-        if( !isReceiverEvidenceKind( b.kind ) && b.kind != LocalBindKind::RubyMainMixin && b.kind != LocalBindKind::ReExport )
+        // FE-B's receiver evidence is read by ReceiverEvidence alone; a main mixin by --lego alone; a re-export by the --for hop rows
+        // alone; an example group's span and mixins by RubyTopSelf alone
+        if( !isReceiverEvidenceKind( b.kind ) && b.kind != LocalBindKind::RubyMainMixin && b.kind != LocalBindKind::ReExport
+            && b.kind != LocalBindKind::RubyGroupSelf && b.kind != LocalBindKind::RubyGroupMixin )
         {
             noteBindingClasses( gate, fileGated, b );
         }

@@ -712,6 +712,167 @@ inline void captureRubyMainMixins( TSNode root, std::uint32_t fileId, std::strin
     } );
 }
 
+// ─── RSpec example groups (parser version 273, test/rubygroupselfcheck.sh) ─────────────────────────────────────────────
+// Inside an example group's block self is the group's — the group class at its own body, an example inside `it`, `let` or
+// `before` — and graph.h RubyTopSelf answers a receiver-less call there from that lookup instead of the name tier. This
+// pass records what the lookup needs (model.h LocalBindKind::RubyGroupSelf / RubyGroupMixin): one span per OUTERMOST group
+// block and per `RSpec.configure` block (its hooks run on examples), the shared groups and the configure blocks marked as
+// the ones whose defs every group reaches; one hole span per block inside them that hands self
+// to another object; and one mixin per module the groups take in — `config.include M` on the configure block's parameter,
+// `include M` written as a statement of a group's own body. Ruby-only: the block whose self a test framework replaces is
+// RSpec's, and the language with no explicit receiver for it is Ruby.
+
+// The blocks whose self is another object: `x.instance_eval { }` and its kin, and a class or record built from a block.
+inline constexpr std::string_view kRubySelfRebinders[]   = { "class_eval", "class_exec", "instance_eval", "instance_exec", "module_eval", "module_exec" };
+inline constexpr std::string_view kRubyBlockClassMakers[] = { "Class", "Data", "Module", "Struct" };   // `Class.new do … end`, `Data.define do … end`
+
+// Is call `n`'s block run with another object as self?
+inline bool rubyRebindsSelf( TSNode n, std::string_view src )
+{
+    const std::string_view m = fieldIdentifierText( n, NodeField::Method, src );
+    if( std::ranges::find( kRubySelfRebinders, m ) != std::end( kRubySelfRebinders ) )
+    {
+        return true;
+    }
+    const TSNode recv = fieldChild( n, NodeField::Receiver );
+    return ( m == "new" || m == "define" ) && !ts_node_is_null( recv ) && kindIs( ts_node_type( recv ), "constant" )
+        && std::ranges::find( kRubyBlockClassMakers, pattern::nodeText( recv, src ) ) != std::end( kRubyBlockClassMakers );
+}
+
+// Is call `n` `RSpec.configure`?
+inline bool rspecConfigureCall( TSNode n, std::string_view src )
+{
+    const TSNode recv = fieldChild( n, NodeField::Receiver );
+    return !ts_node_is_null( recv ) && kindIs( ts_node_type( recv ), "constant" ) && pattern::nodeText( recv, src ) == "RSpec"
+        && fieldIdentifierText( n, NodeField::Method, src ) == "configure";
+}
+
+// The one identifier parameter of `block` (`do |config|`), or empty.
+inline std::string_view rubyBlockSoleParam( TSNode block, std::string_view src )
+{
+    const TSNode params = fieldChild( block, NodeField::Parameters );
+    if( ts_node_is_null( params ) )
+    {
+        return {};
+    }
+    ChildCursor cursor( params );
+    TSNode      only{};
+    std::size_t named = 0;
+    forEachNamedChild( params, cursor.cur, [ & ]( TSNode c ) { only = c; ++named; return true; } );
+    return named == 1 && kindIs( ts_node_type( only ), "identifier" ) ? nodeTextOf( only, src ) : std::string_view {};
+}
+
+// The modules `block`'s own statements mix into the groups, as LocalBindKind::RubyGroupMixin records: `<param>.include M`
+// when `param` names the configure block's parameter, else (a group's body) a receiver-less `include M`. A statement only:
+// `expect( x ).to include( Foo )` is RSpec's matcher, an argument, never one.
+inline void rubyNoteGroupMixins( TSNode block, bool configure, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    const std::string_view param = configure ? rubyBlockSoleParam( block, src ) : std::string_view {};
+    const TSNode           body  = fieldChild( block, NodeField::Body );
+    if( ts_node_is_null( body ) || ( configure && param.empty() ) )
+    {
+        return;
+    }
+    ChildCursor cursor( body );
+    forEachNamedChild( body, cursor.cur, [ & ]( TSNode c )
+    {
+        if( !kindIs( ts_node_type( c ), "call" ) || fieldIdentifierText( c, NodeField::Method, src ) != "include" )
+        {
+            return true;
+        }
+        const TSNode recv = fieldChild( c, NodeField::Receiver );
+        const bool   mine = configure ? !ts_node_is_null( recv ) && kindIs( ts_node_type( recv ), "identifier" ) && pattern::nodeText( recv, src ) == param
+                                      : ts_node_is_null( recv );
+        for( const TSNode a : mine ? rubyConstantArguments( c ) : std::vector<TSNode> {} )
+        {
+            binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( a ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyGroupMixin,
+                                       .typeName = rubyConstantText( a, src ) } );
+        }
+        return true;
+    } );
+}
+
+// The constant an outermost group describes (`RSpec.describe BadgeHelper`), as a RubyGroupMixin marked kRubyGroupHelperMark
+// when the group says `type: :helper` and kRubyGroupDescribedMark otherwise: rspec-rails mixes a helper spec's module into
+// its groups, and graph.h keeps the unmarked kind only where the location says helper spec (ruby_groupself.h).
+inline void rubyNoteDescribedModule( TSNode call, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    const TSNode args  = fieldChild( call, NodeField::Arguments );
+    const TSNode first = ts_node_is_null( args ) ? args : ts_node_named_child( args, 0 );
+    if( ts_node_is_null( first ) || !isRubyConstantNode( first ) )
+    {
+        return;
+    }
+    bool        helper = false;
+    ChildCursor cursor( args );
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode a )
+    {
+        const TSNode v = kindIs( ts_node_type( a ), "pair" ) && rubyPairKeyText( a, src ) == "type" ? fieldChild( a, NodeField::Value ) : TSNode {};
+        helper         = helper || ( !ts_node_is_null( v ) && nodeTextOf( v, src ) == ":helper" );
+        return true;
+    } );
+    binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( first ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyGroupMixin,
+                               .importedName = std::string( helper ? kRubyGroupHelperMark : kRubyGroupDescribedMark ), .typeName = rubyConstantText( first, src ) } );
+}
+
+// One block's RubyGroupSelf span, marked (a shared group's or a configure block's, a hole) or not (a group's).
+inline void rubyNoteGroupSpan( TSNode block, std::string_view mark, std::uint32_t fileId, std::vector<RawBind>& binds )
+{
+    binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( block ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyGroupSelf,
+                               .spanStart = ts_node_start_byte( block ), .spanEnd = ts_node_end_byte( block ), .importedName = std::string( mark ) } );
+}
+
+// A group or configure call `n`: the modules its block's statements mix in, and — when no group encloses it — its span (a
+// shared group's and a configure block's marked) and the constant a plain group describes.
+inline void rubyNoteExampleGroup( TSNode n, bool outermost, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    const TSNode block = rubyCallBlock( n );
+    const int    kind  = rspecGroupKind( n, src );   // 0: the configure block
+    rubyNoteGroupMixins( block, kind == 0, fileId, src, binds );
+    if( !outermost )
+    {
+        return;
+    }
+    rubyNoteGroupSpan( block, kind == 1 ? std::string_view {} : kRubyGroupSharedMark, fileId, binds );
+    if( kind == 1 )
+    {
+        rubyNoteDescribedModule( n, fileId, src, binds );
+    }
+}
+
+// The walk: an explicit stack, so a deep nest costs heap, not the worker's stack. A group or configure call's block is
+// walked as the group's; inside it a self-rebinding block is recorded as a hole and not walked further — a group written
+// inside one is that object's business.
+inline void captureRubyExampleGroups( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    static constexpr std::string_view kWords[] = { "describe", "context", "feature", "example_group", "shared_", "configure" };
+    const auto mentions = [ & ]( std::string_view w ) { return src.find( w ) != std::string_view::npos; };
+    if( ts_node_is_null( root ) || std::none_of( std::begin( kWords ), std::end( kWords ), mentions ) )
+    {
+        return;
+    }
+    std::vector<std::pair<TSNode, bool>> stack { { root, false } };   // (node, inside a group)
+    while( !stack.empty() )
+    {
+        const auto [ n, inGroup ] = stack.back();
+        stack.pop_back();
+        const TSNode block = kindIs( ts_node_type( n ), "call" ) ? rubyCallBlock( n ) : TSNode {};
+        if( !ts_node_is_null( block ) && ( rspecGroupKind( n, src ) != 0 || rspecConfigureCall( n, src ) ) )
+        {
+            rubyNoteExampleGroup( n, !inGroup, fileId, src, binds );
+            stack.emplace_back( block, true );
+            continue;
+        }
+        if( !ts_node_is_null( block ) && inGroup && rubyRebindsSelf( n, src ) )
+        {
+            rubyNoteGroupSpan( block, kRubyGroupHoleMark, fileId, binds );
+            continue;
+        }
+        ChildCursor cursor( n );
+        forEachNamedChild( n, cursor.cur, [ & ]( TSNode c ) { stack.emplace_back( c, inGroup ); return true; } );
+    }
+}
+
 // ─── FactoryBot's factory definitions (parser version 132, test/rubytypedrecvcheck.sh) ─────────────────────────────────
 // `factory :user do … end` inside a `FactoryBot.define` (or `FactoryGirl.define`) block defines what `create( :user )`
 // builds, and its class is FactoryBot's own rule: the `class:` option as written — a constant, or a string naming one (its

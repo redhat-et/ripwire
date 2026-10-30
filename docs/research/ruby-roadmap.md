@@ -112,6 +112,17 @@ These are suspects because nothing has been sampled yet. Round 0 samples them be
 
 ### R1: an example group's `self` has a lookup (M; the largest verified mass)
 
+**Status, 2026-10-31: done on `feat/ruby-rails-lookup`** (kParserVer placeholder 273, gate
+`test/rubygroupselfcheck.sh`, `changelog.d/ruby-example-group-self.md`). Measured against `main`: app B 15,302 bound sites
+became `external=` (12,301 of them the three names of §2.1) and 14,226 declined ones did too; app A 874 and 19,311. Gains,
+where a call now binds the `config.include` helper Ruby runs: 548 on B, 55 on A. Sampled 20 of 20 losses right on each app,
+the gains 10 of 10 and 8 of 8; ActiveRecord and ActiveSupport byte-identical; `langidentitycheck` 0 DIFF. Measuring found
+four rules the first cut lacked, each now an arm. A def written inside ANOTHER spec file's group is not this group's
+(`organization`, 1,990 sites, had bound one other spec file's `def`). A shared group's defs are everyone's. Another language's
+function is out of reach (app A's JavaScript `create` had turned 5,714 declines into `unresolved=`). A helper spec mixes in
+the module it describes. Floors kept: `type:` filters are not read, a `let` is not an indexed definition, and a
+`FactoryBot.define` block is still read by name.
+
 **Ruby's rule.** Inside `RSpec.describe … do`, the block is class-evaluated on a new `RSpec::Core::ExampleGroup`
 subclass; an `it`, `before` or `let` block runs on an instance of it. That instance looks a method up in this order:
 `def`s and `let`s written in the group and its parents, modules mixed in by `config.include M` (optionally filtered by

@@ -150,7 +150,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
+constexpr std::uint32_t kCacheVersion = 49;           // 49: feat/ruby-rails-lookup R1 — LocalBindKind RubyGroupSelf and
+                                                      //    RubyGroupMixin (appended; readBind's kind bound moves). The train renumbers.
+                                                      // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
                                                       //    moves; its placeholder 47), strictly above main 46 and that placeholder; no other
                                                       //    train-42b lane changed a record format.
                                                       // 46: train 40 — lane js-def-naming's LocalBindKind JsObjectLiteral (appended; its placeholder 45),
@@ -366,7 +368,11 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 271;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 273;          // bump on any grammar/.scm/extraction change
+                                                      // 273 = 2026-10-31 (feat/ruby-rails-lookup R1): a Ruby file's RSpec example
+                                                      //   groups record LocalBindKind::RubyGroupSelf spans and RubyGroupMixin modules (two appended
+                                                      //   kinds; ingest_ruby.h captureRubyExampleGroups). 273, not 272: 272 is main's rich file tag.
+                                                      //   Rich file tag 274. kCacheVersion 49 (the kind bound moves). The train renumbers.
                                                       // 271 = 2026-10-30 (train 42b: lanes iface-peel (placeholders 259/260: a C++ smart-pointer alias record carries its
                                                       //   pointee, a Rust `-> &dyn T` / `Box<dyn T>` / `impl T` result records a ReturnType with kDispatchResultBit, a C++
                                                       //   member whose written type is an enclosing template parameter carries kTemplateParamMemberType) and alias-import
