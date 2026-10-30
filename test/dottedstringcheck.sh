@@ -14,10 +14,11 @@
 #   N1 [G] a docstring mention, a comment, a log-call argument, a comparison, a dict KEY, a local scalar, a keyword scalar, a default,
 #          an f-string, bytes, a concatenation: no row
 #   N2 [G] bare name: a string spelling another module's same name resolves to that module, never this shown row
-#   N3 [G] two owners of one method name: `mod.A.run` names A.run, not B.run
+#   N3 [G] two owners of one method name: `mod.A.run` names A.run, not B.run   N4 [G] a sink's second argument
+#   N5 [G] a function whose word only STARTS with the constant, or a test function, is no loader   E5 [G] two definitions of the name
 #   T1 [P] a site in a test path is counted (tests=), never a row; test-only keeps s= next=
 #   C1 [P] the cap: 4 sites show 3, rows_capped="1" next="--grep=…" (a target's non-test sites first)
-#   F1 [P] a %-template filled by two shown directories: tmpl= cand= cands=2 sink=      F2 [G] filled by one: no row
+#   F1 [P] a %-template filled by two shown directories: tmpl= cand= cands=2 sink=      F2 [G] filled by one: no row   F3/F4 [G] second argument, test path: no row
 #   R1 [G] --json, --token-budget, RIPWIRE_NO_DOTTED_STRINGS=1: no element   R2 [G] the answer minus the element == the OFF answer byte for byte
 #   R3 [G] other languages: a JS file with the same shapes records no fact: no element
 #   V1 [P] --callers carries it, the caller rows byte-identical to OFF   V2 [G] callees carries none
@@ -162,6 +163,23 @@ P
 run "$E4" "$TMP/e4o" '--for=both inner'
 if [ -z "$( dsrows "$TMP/e4o" )" ]; then ok "E4 both a module and a name: nothing"; else no "E4 printed a row"; fi
 
+E5="$TMP/e5"
+fx "$E5/pkg/__init__.py" <<'P'
+P
+fx "$E5/pkg/mod.py" <<'P'
+try:
+    def dup():
+        return 1
+except ImportError:
+    def dup():
+        return 2
+P
+fx "$E5/use.py" <<'P'
+NAMES = ["pkg.mod.dup"]
+P
+run "$E5" "$TMP/e5o" '--for=dup'
+if [ -z "$( dsrows "$TMP/e5o" )" ]; then ok "E5 two definitions of the name in its module: nothing"; else no "E5 printed a row"; fi
+
 # ── N: strings that are not facts, and names that are not this row ────────────────────────────────────────────────────────────
 N="$TMP/n"
 fx "$N/pkg/__init__.py" <<'P'
@@ -219,6 +237,45 @@ P
 run "$N3" "$TMP/n3o" '--for=run'
 has "$TMP/n3o" 'tn="A.run" tp="mod.py:2"' "N3 the owner chain picks A.run"
 hasnt "$TMP/n3o" 'tp="mod.py:5"' "N3 never B.run"
+
+N4="$TMP/n4"
+fx "$N4/pkg/__init__.py" <<'P'
+P
+fx "$N4/pkg/mod.py" <<'P'
+def thing():
+    return 1
+P
+fx "$N4/pkg/second.py" <<'P'
+from importlib import import_module
+def second(x):
+    return import_module(x, "pkg.mod.thing")
+P
+run "$N4" "$TMP/n4o" '--for=thing'
+if [ -z "$( dsrows "$TMP/n4o" )" ]; then ok "N4 a sink's second argument is no fact"; else no "N4 printed a row"; fi
+N5="$TMP/n5"
+fx "$N5/pkg/__init__.py" <<'P'
+P
+fx "$N5/pkg/mod.py" <<'P'
+def thing():
+    return 1
+P
+fx "$N5/pkg/conf.py" <<'P'
+PROCS = ["pkg.mod.thing"]
+P
+fx "$N5/pkg/near_loader.py" <<'P'
+from importlib import import_module
+def near_loader(PROCS2):
+    return import_module(PROCS2)
+P
+fx "$N5/tests/test_loader.py" <<'P'
+from importlib import import_module
+from pkg.conf import PROCS
+def load_in_test():
+    return [import_module(p) for p in PROCS]
+P
+run "$N5" "$TMP/n5o" '--for=thing'
+has "$TMP/n5o" 's="pkg.mod.thing" tn="thing"' "N5 the string prints"
+if dsrows "$TMP/n5o" | grep -qF 'loader='; then no "N5 a longer word or a test function is no loader"; else ok "N5 a longer word or a test function is no loader"; fi
 
 # ── T / C: test paths, the cap ────────────────────────────────────────────────────────────────────────────────────────────────
 T="$TMP/t"
@@ -301,6 +358,21 @@ def quote_it():
 P
 run "$F2" "$TMP/f2o" '--for=quote_it'
 hasnt "$TMP/f2o" 'tmpl=' "F2 one directory fills it: no row"
+
+F3="$TMP/f3"
+cp -R "$F" "$F3"
+fx "$F3/pkg/utils.py" <<'P'
+from importlib import import_module
+def load_backend(name):
+    return import_module(name, "%s.base" % name)
+P
+run "$F3" "$TMP/f3o" '--for=quote_it'
+hasnt "$TMP/f3o" 'tmpl=' "F3 a template in a sink's second argument: no row"
+F4="$TMP/f4"
+cp -R "$F" "$F4"
+mkdir -p "$F4/tests"; mv "$F4/pkg/utils.py" "$F4/tests/utils.py"
+run "$F4" "$TMP/f4o" '--for=quote_it'
+hasnt "$TMP/f4o" 'tmpl=' "F4 a template in a test path: no row"
 
 # ── R: regimes, byte identity, other languages ────────────────────────────────────────────────────────────────────────────────
 run "$K" "$TMP/rj" '--for=csrfproc' --json

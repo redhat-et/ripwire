@@ -356,7 +356,7 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
                 at  = d->second;
                 hit = true;
             }
-            else if( const auto o = shownOwner.find( std::make_pair( target.fileId, std::string_view( target.name ) ) ); target.kind == SymKind::Class && o != shownOwner.end() )
+            else if( const auto o = shownOwner.find( std::make_pair( target.fileId, std::string_view( target.name ) ) ); o != shownOwner.end() )
             {
                 at  = o->second;
                 hit = true;
