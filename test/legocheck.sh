@@ -10,6 +10,8 @@
 #   animal.ts (TS)   interface Animal -> {Dog, Cat}                + makeAnimal
 #   Animal.java(Java)interface Animal -> {Wolf, Lion}, Cub:Wolf    + AnimalFactory
 #   vehicle.rs(Rust) trait Vehicle    -> {Car, Bike} (impl for T)  + make_vehicle
+#   go/packager.go (Go) interface Packager {Package, ConventionalFileName}, Deb (struct implementing both),
+#                    SignedPackager (embeds Packager only), Walker (a method taking an interface literal)
 #
 # `Animal` is DELIBERATELY shared between TS and Java to regression-test the cross-language
 # merge bug (P1a): the two must resolve to SEPARATE interfaces with own-language impls only.
@@ -27,6 +29,8 @@
 #  10) xmllint: --for and --lego output well-formed
 #  11) mutation-check: a deliberately-wrong assertion FAILS (the gate can detect regressions)
 #  12) --lego=Render: a Rust trait with implementors beats a data-only C++ class of the same name (rv-pr432-delta B1)
+#  16) Go (#404): --lego=Packager reads the interface's own two methods; an embed-only interface lists no <m>; a method of an
+#      interface literal in a signature is not the interface's; a Go struct and a Rust trait keep the caveat
 #
 # §P3 (2026-07-28): --for's embedded <lego> block now carries p= on <iface>/<impl> (identity parity with
 # the standalone verb) and is SCOPED to the task's resolved surface. Assertion 2 below was updated: it
@@ -231,7 +235,7 @@ fi
 # ── 15) rv-pr432-delta B1: implementors outrank "contract extracted" on --lego's type rung ───────────────────────
 # Kept in a throwaway corpus, not test/legofix (other gates pin that tree's bytes). A Rust `trait Render` with two
 # implementors and a same-named, data-only C++ class (no methods, no implementors) in a vendored header: the
-# extracted-contract key depends on the LANGUAGE only (C++/ObjC), so it must sort BELOW hasImplementor, or the
+# extracted-contract key depends on the language (C++/ObjC; Go interfaces since #404), so it must sort BELOW hasImplementor, or the
 # empty C++ answer would beat the trait. Red before the key swap, green after.
 XC="$TMP/xlangpick"; mkdir -p "$XC/src" "$XC/ext"
 cat > "$XC/src/render.rs" <<'RS'
@@ -263,6 +267,67 @@ if printf '%s' "$XP" | grep -q '<iface n="Render" [^>]*p="src/render.rs"[^>]*imp
 else
     no "--lego=Render: expected the Rust trait (src/render.rs, implementors=2, Button+Label), got: $XP"
 fi
+
+# ── 16) #404: a Go interface's method contract is read off its own body ──────────────────────────────────────────────
+# langfacts.h legoContract: Go = InterfacesOnly. Red on main: every Go type printed methods="0" caveat="not-extracted-for-lang".
+# What must hold for the contract to be SOUND (not merely present): each <m> is a method signature from the interface's own
+# body — never the `type Packager interface {` line, never an embedded interface's name, never a method of an interface
+# literal written in a parameter type (scoped to the named interface by the scope walker, serialize.h legoContractMembers).
+# Rows are counted by their CLOSING tag: the compact legend spells "<m>" in prose, never "</m>".
+"$BIN" "$CORPUS" --no-cache --lego=Packager       2>/dev/null > "$TMP/lego_go_packager"
+"$BIN" "$CORPUS" --no-cache --lego=SignedPackager 2>/dev/null > "$TMP/lego_go_signed"
+"$BIN" "$CORPUS" --no-cache --lego=Walker         2>/dev/null > "$TMP/lego_go_walker"
+"$BIN" "$CORPUS" --no-cache --lego=Deb            2>/dev/null > "$TMP/lego_go_deb"
+GOP="$( cat "$TMP/lego_go_packager" )"
+if printf '%s' "$GOP" | grep -q '<iface n="Packager" p="go/packager.go" defs="1"'; then
+    ok "--lego=Packager (Go): iface row present, no caveat between p= and defs="
+    NGOM="$( printf '%s' "$GOP" | grep -o '</m>' | wc -l | tr -d ' ' )"
+    if [ "$NGOM" = 2 ]; then
+        ok "--lego=Packager (Go): exactly 2 <m> rows"
+    else
+        no "--lego=Packager (Go): expected 2 <m> rows, got $NGOM: $GOP"
+    fi
+    printf '%s' "$GOP" | grep -q '<m>Package(info \*Info, w io.Writer) error</m>' \
+       && printf '%s' "$GOP" | grep -q '<m>ConventionalFileName(info \*Info) string</m>' \
+        && ok "--lego=Packager (Go): Package + ConventionalFileName signatures read from the interface body" \
+        || no "--lego=Packager (Go): contract rows missing or garbled: $GOP"
+    printf '%s' "$GOP" | grep -Eq '<m[^>]*>[^<]*(interface|type Packager)' \
+        && no "--lego=Packager (Go): the declaration line was passed off as a method: $GOP" \
+        || ok "--lego=Packager (Go): no <m> carries the interface's own declaration line"
+else
+    no "--lego=Packager (Go): expected the iface row without a caveat, got: $GOP"
+fi
+GOS="$( cat "$TMP/lego_go_signed" )"
+if printf '%s' "$GOS" | grep -q '<iface n="SignedPackager" p="go/packager.go" defs="1"'; then
+    printf '%s' "$GOS" | grep -q '</m>' \
+        && no "--lego=SignedPackager (Go, embed only): an embedded interface was passed off as a method: $GOS" \
+        || ok "--lego=SignedPackager (Go, embed only): no <m> row (the embedded Packager is not a method of its own)"
+else
+    no "--lego=SignedPackager (Go): expected the iface row without a caveat, got: $GOS"
+fi
+GOW="$( cat "$TMP/lego_go_walker" )"
+NGOW="$( printf '%s' "$GOW" | grep -o '</m>' | wc -l | tr -d ' ' )"
+# KNOWN GAP (pre-existing, not #404): cleanSig stops at the first '{', so a Go signature with an inline type literal prints
+# cut at it (`Walk(n interface`) on every signature surface (--pack-signatures, --for <sigs> as well). This arm asserts the
+# member SET, not that text; tighten it to the full `Walk(n interface{ Pos() int }) bool` when cleanSig learns Go's literals.
+if [ "$NGOW" = 1 ] && printf '%s' "$GOW" | grep -q '<m>Walk('; then
+    ok "--lego=Walker (Go): one <m>, Walk"
+else
+    no "--lego=Walker (Go): expected exactly one <m> (Walk), got $NGOW: $GOW"
+fi
+printf '%s' "$GOW" | grep -q 'Pos()' \
+    && no "--lego=Walker (Go): Pos, a method of the parameter's interface literal, was listed as Walker's: $GOW" \
+    || ok "--lego=Walker (Go): Pos (the parameter's interface literal) is not in Walker's contract"
+grep -q '<iface n="Deb" p="go/packager.go" methods="0" caveat="not-extracted-for-lang"' "$TMP/lego_go_deb" \
+    && ok "--lego=Deb (Go struct): keeps the caveat — its methods are declared by receiver, outside its body" \
+    || no "--lego=Deb (Go struct): expected methods=\"0\" caveat=\"not-extracted-for-lang\", got: $( cat "$TMP/lego_go_deb" )"
+grep -q '<iface n="Vehicle" p="vehicle.rs" methods="0" caveat="not-extracted-for-lang"' "$TMP/lego_vehicle" \
+    && ok "--lego=Vehicle (Rust trait): still carries the caveat (its members are not captured as methods)" \
+    || no "--lego=Vehicle (Rust trait): expected the caveat to stay, got: $VEH"
+"$BIN" "$CORPUS" --no-cache --legend=full --lego=SignedPackager 2>/dev/null \
+    | grep -q "a Go interface's embedded interfaces are not read, so its <m> rows are the methods its own body declares" \
+    && ok "--lego legend states the floor: a Go interface's embedded interfaces are not read" \
+    || no "--lego legend does not state the embedded-interface floor for Go"
 
 # ── 9) MCP `lego` verb parity with --lego=Shape ───────────────────────────────
 if printf '%s' "$SHP" | grep -q '<iface n="Shape"'; then
