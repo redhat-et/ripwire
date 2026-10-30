@@ -12,6 +12,7 @@
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
+#include "forselfhook.h"      // lane self-hook: a served Python override names where its base classes reach it through self
 #include "forcallerhop.h"   // mf1-nx: a name-exact answer about ONE function carries that function's callers
 #include "epmanifest.h"     // ep-manifest: the manifest entry-point groups that register a shown row
 #include "listedin.h"       // manifest-noncode: the build/package/registry manifest lines that list a shown file (creation tasks)
@@ -594,6 +595,7 @@ struct ForLensHeaderParts
                                             // defines it; set after construction, cleared with the section
     bool             callerHopRanked = false;  // UPWARD-2HOP: that <callers> is the ranked seed's (by="rank"), so ITS clause rides instead
     bool             dispatchHopPresent = false; // mf1-nx wave 4 (fordispatchhop.h): a <dispatch> rides; its clause defines it
+    bool             selfHookPresent = false;    // lane self-hook (forselfhook.h): a <selfhooks> rides; its clause defines it
     bool             epPresent = false;        // ep-manifest (epmanifest.h): a manifest entry-point group registers a shown row in
                                             // the default regime, so an <ep> rides and its clause defines it; cleared with it
     bool             listedPresent = false;    // manifest-noncode (listedin.h): a manifest lists a shown file on a creation task, so a
@@ -810,6 +812,7 @@ inline std::string hopClauses( const ForLensHeaderParts& p, bool compact )
 {
     std::string out( callerHopClause( p, compact ) );
     out += presentOnlyClause( p.dispatchHopPresent, compact, rw::kForCompactDispatchHopLegend, rw::kForDispatchHopLegend );
+    out += presentOnlyClause( p.selfHookPresent, compact, rw::kForCompactSelfHookLegend, rw::kForSelfHookLegend );
     return out;
 }
 // FOR-SLOTS (slots=) and OWNER-CTOR-HOP (ctor_l=/ctor_calls=): the two <sigs>-row splices' clauses, then ep-manifest's <ep> clause (epmanifest.h), each present-only, in that order
@@ -4192,6 +4195,36 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                             ( !sigsPreRendered && !enrich.surfaceOff ) ? kForDegradedBundleNote : std::string_view() );
             }
         }
+        // lane self-hook (forselfhook.h): decided HERE, after every body section rendered, because it reads what they served: nothing
+        // above was priced with it, so it draws on no byte that funds a body (RIPWIRE_NO_SELF_HOOK=1 is the rest of the answer byte for byte)
+        std::string selfHookXml;
+        if( autoBundleMode && !cfg.json && cfg.tokenBudget <= 0 && rw::forSelfHookOn() && sigsPreRendered && !enrich.surfaceOff )
+        {
+            std::vector<rw::NodeId> servedBodies = fold.bodies;
+            if( slot.served )
+            {
+                servedBodies.push_back( slotOwner.id );
+            }
+            if( plan.autoBodies )
+            {
+                // the auto <bodies> section's candidates that its rendered bytes hold (a candidate the allowance cut is not served)
+                for( const rw::NodeId id : computeAutoBodyCandidateIds( ing, lensSurfaceIds, lensRank, routeAnchorDefs ) )
+                {
+                    const rw::Symbol& s    = ing.symbols[id];
+                    const std::string key = " l=\"" + std::to_string( s.line ) + "\" p=\"" + std::string( flRootArg.empty() ? std::string_view( ing.files[s.fileId] ) : rw::sarif::rootRelativeUri( ing.files[s.fileId], flRootArg ) ) + "\" n=\"" + s.name + '"';
+                    if( enrich.section.xml.find( key ) != std::string::npos )
+                    {
+                        servedBodies.push_back( id );
+                    }
+                }
+            }
+            selfHookXml = rw::renderForSelfHooks( rw::SelfHookInputs{ ing, g, flRootArg, cfg.forTask }, servedBodies );
+            if( !selfHookXml.empty() )
+            {
+                headerParts.selfHookPresent = true;   // the clause rides beside the element it defines
+                headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+            }
+        }
         // ep-manifest: rides on top of the complete answer like the caller hop; none when the bodies section degraded
         if( headerParts.epPresent && ( !sigsPreRendered || enrich.surfaceOff ) )
         {
@@ -4428,7 +4461,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             // F2: everything OUTSIDE the header at the markup rate. enrich.markupBytes is the compact <hops> section,
             // folded in here rather than charged separately — one rate, one rounding (ForEnrichmentPlan).
             .nonHeaderMarkupBytes = forHdrXml.size() + sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + graphSection.xml.size()
-                                  + enrich.markupBytes + tailStr.size() + slot.markupBytes + fold.markupBytes + callerHop.xml.size() + epManifest.xml.size() + ( dispatchHop.xml.size() - dispatchHop.bodyBytes ) + listedIn.xml.size() + 6,   // + "</ctx>" (deep-tail: the tail at the markup rate)
+                                  + enrich.markupBytes + tailStr.size() + slot.markupBytes + fold.markupBytes + callerHop.xml.size() + epManifest.xml.size() + ( dispatchHop.xml.size() - dispatchHop.bodyBytes ) + selfHookXml.size() + listedIn.xml.size() + 6,   // + "</ctx>" (deep-tail: the tail at the markup rate)
             // T3: the body-rate sections; enrich.bodyTokens is zero on the compact route (markup, above); for-body-slot: the
             // owner body at the body rate (a skipped slot's element is markup, above)
             .bodyTokens           = detailSection.tokens + enrich.bodyTokens + slot.bodyTokens + fold.bodyTokens   // body-fold: its bodies
@@ -4509,6 +4542,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::fwrite( callerHop.xml.data(), 1, callerHop.xml.size(), stdout );
         // mf1-nx wave 4: the dispatch hop after the caller hop, before the body CDATA ("" when none)
         std::fwrite( dispatchHop.xml.data(), 1, dispatchHop.xml.size(), stdout );
+        // lane self-hook: where the base classes reach a served override, before the body CDATA ("" when none)
+        std::fwrite( selfHookXml.data(), 1, selfHookXml.size(), stdout );
 
         // §F1: the last two sections, from the bytes already RENDERED and CHARGED above — so what the header
         // priced and what stdout receives are the same bytes by construction, not by two pieces of code

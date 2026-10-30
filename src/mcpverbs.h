@@ -42,6 +42,7 @@
 #include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
+#include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2920,6 +2921,11 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             const DispatchHopRender r = renderForDispatchHop( ing, ix.g, sites, BodyFoldInputs{ ing, task, kNoNode, lensRank, flRootArg, redact, false }, /*withBody=*/false );
             out.insert( out.size() - 6, dispatchHopMcpXml( r ) );
         }
+    }
+    // lane self-hook (forselfhook.h): the CLI's <selfhooks>, over the head this surface names (it serves no inline body), same posture as <dispatch>
+    if( budgetTokens == 0 && isNameExactRouteTag( mcpRouteTag ) && forSelfHookOn() && out.ends_with( "</ctx>" ) )
+    {
+        out.insert( out.size() - 6, selfHookMcpXml( renderForSelfHooks( SelfHookInputs{ ing, ix.g, flRootArg, task }, dispatchHeadCandidates( ing, lensSurfaceIds ) ) ) );
     }
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
