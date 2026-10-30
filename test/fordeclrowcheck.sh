@@ -155,7 +155,7 @@ silent q1 "--for=Nope.run_it"
 run "--for=app::qfn" >"$TMP/q2.xml"
 if grep -q '<decl_rows of="app::qfn" rows="2">' "$TMP/q2.xml"; then ok "(q1) a bare qualified spelling that resolves whole fires"; else no "(q1) $( grep -o '<decl_rows [^>]*>' "$TMP/q2.xml" )"; fi
 run "--for=change the signature of unt_fn" >"$TMP/u1.xml"
-if grep -q '<d [^>]*decl_only="1" untied="1"/>' "$TMP/u1.xml"; then ok "(u1) a prototype not proven to declare the definition says untied=\"1\""; else no "(u1) $( grep -o '<decl_rows.*' "$TMP/u1.xml" | head -c 400 )"; fi
+if grep -q '<d [^>]*decl_only="1" untied="1"/>' "$TMP/u1.xml" && grep -q '<decl_rows of="unt_fn" rows="2">' "$TMP/u1.xml"; then ok "(u1) a prototype not proven to declare the definition says untied=\"1\" and is no second function"; else no "(u1) $( grep -o '<decl_rows.*' "$TMP/u1.xml" | head -c 400 )"; fi
 run "--for=change the signature of shad_x" >"$TMP/e1.xml"
 if grep -q '<decl_rows of="shad_x"' "$TMP/e1.xml" && ! grep -q 'sel=""' "$TMP/e1.xml"; then ok "(e1) past the sel= proof window the row still names a spelling"; else no "(e1) $( grep -o '<decl_rows.*' "$TMP/e1.xml" | head -c 400 )"; fi
 run "--for=run_it" --json >"$TMP/s1.json"
