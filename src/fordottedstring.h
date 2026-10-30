@@ -144,20 +144,6 @@ inline std::string_view moduleTailOf( std::string_view rel )
     return base.ends_with( ".py" ) ? base.substr( 0, base.size() - 3 ) : std::string_view();
 }
 
-inline bool holdsWord( std::string_view text, std::string_view word ) noexcept
-{
-    for( std::size_t at = text.find( word ); at != std::string_view::npos; at = text.find( word, at + 1 ) )
-    {
-        const bool leftOk  = at == 0 || !taskroute::wordByte( text[at - 1] );
-        const bool rightOk = at + word.size() >= text.size() || !taskroute::wordByte( text[at + word.size()] );
-        if( leftOk && rightOk )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 struct Row
 {
     int              rankClass = 2;
@@ -173,11 +159,7 @@ struct Row
 
 inline void attr( std::string& x, std::string_view key, std::string_view val, std::vector<char>& esc )
 {
-    x += ' ';
-    x += key;
-    x += "=\"";
-    x += escapeXml( val, esc );
-    x += '"';
+    x += std::format( " {}=\"{}\"", key, escapeXml( val, esc ) );
 }
 
 inline std::string siteInName( const IngestResult& ing, const Reference& r )
@@ -212,22 +194,18 @@ inline std::string dottedOfPath( std::string_view rel )
     return d;
 }
 
-}   // namespace dotteddetail
-
-// The element for the shown rows `shown` (in answer order): "" when no dotted string names one. Reads the fact stream once, resolves
-// only strings whose last segment matches a shown name, and reads a file only to confirm a loader of a printed candidate.
-inline std::string renderDottedStrings( const IngestResult& ing, std::span<const NodeId> shown )
+// The shown rows, by what a string could spell.
+struct ShownNames
 {
-    using namespace dotteddetail;
-    if( ing.crawlRoot.empty() || shown.empty() || !forDottedStringsOn() )
-    {
-        return {};
-    }
-    // the shown rows, by what a string could spell
     std::set<std::string_view>            wanted;
     std::map<NodeId, std::size_t>         shownDef;
     std::map<std::uint32_t, std::size_t>  shownFile;
     std::map<std::pair<std::uint32_t, std::string_view>, std::size_t> shownOwner;   // a method's class is what a string names
+};
+inline ShownNames shownNamesOf( const IngestResult& ing, std::span<const NodeId> shown )
+{
+    ShownNames n;
+    auto& [ wanted, shownDef, shownFile, shownOwner ] = n;
     for( std::size_t k = 0; k < shown.size(); ++k )
     {
         if( shown[k] >= ing.symbols.size() )
@@ -252,14 +230,20 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
             shownOwner.try_emplace( std::make_pair( s.fileId, owner ), k );
         }
     }
-    if( shownDef.empty() )
-    {
-        return {};
-    }
-    // the facts: candidates by last segment; the loaders; the templates
+    return n;
+}
+
+// The facts of the stream: candidates by last segment, the loaders, the templates.
+struct DottedFacts
+{
     std::vector<const Reference*> cand;
     std::vector<const Reference*> loaders;
     std::vector<const Reference*> templates;
+};
+inline DottedFacts dottedFactsFor( const IngestResult& ing, const std::set<std::string_view>& wanted )
+{
+    DottedFacts f;
+    auto& [ cand, loaders, templates ] = f;
     for( const Reference& r : ing.references )
     {
         if( r.role != RefRole::Value || r.qualifier.size() != 1 || r.qualifier[0] != kValueRefDottedStringScope )
@@ -283,7 +267,54 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
             }
         }
     }
-    // resolve each distinct string once
+    return f;
+}
+
+// One definition or one module for a split string, else why not.
+inline DottedTarget targetOfSplit( const IngestResult& ing, const ModuleSplit& sp, const SymbolsOfFile& syms )
+{
+    DottedTarget t;
+    t.state = sp.state;
+    NodeId      def  = kNoNode;
+    std::size_t hits = 0;
+    if( sp.file != kNoFile )
+    {
+        if( const auto f = syms.byFile.find( sp.file ); f != syms.byFile.end() )
+        {
+            for( const NodeId id : f->second )
+            {
+                if( epAttrNames( ing.symbols[id], sp.attr ) )
+                {
+                    def = id;
+                    ++hits;
+                }
+            }
+        }
+    }
+    if( sp.wholeFile != kNoFile && hits == 0 )
+    {
+        t = DottedTarget{ DottedTarget::State::Module, kNoNode, sp.wholeFile };
+    }
+    else if( sp.wholeFile == kNoFile && hits == 1 )
+    {
+        t = DottedTarget{ DottedTarget::State::Def, def, kNoFile };
+    }
+    else if( sp.wholeFile != kNoFile || hits > 1 || sp.file != kNoFile )
+    {
+        t.state = DottedTarget::State::Unresolved;   // both a module and a name, or not exactly one definition
+    }
+    return t;
+}
+
+// Each distinct candidate string, resolved once.
+struct ResolvedStrings
+{
+    std::map<std::string_view, DottedTarget> targets;
+    std::size_t                              unresolvedN = 0;
+    std::size_t                              externalN   = 0;
+};
+inline ResolvedStrings resolveStrings( const IngestResult& ing, std::span<const Reference* const> cand )
+{
     std::map<std::string_view, ModuleSplit> split;
     std::set<std::uint32_t>                 attrFiles;
     for( const Reference* r : cand )
@@ -298,101 +329,87 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
             }
         }
     }
-    const SymbolsOfFile                      syms( ing, attrFiles );
-    std::map<std::string_view, DottedTarget> resolved;
-    std::size_t                              unresolvedN = 0;
-    std::size_t                              externalN   = 0;
+    const SymbolsOfFile syms( ing, attrFiles );
+    ResolvedStrings     out;
     for( const auto& [ lit, sp ] : split )
     {
-        DottedTarget t;
-        t.state = sp.state;
-        NodeId      def  = kNoNode;
-        std::size_t hits = 0;
-        if( sp.file != kNoFile )
-        {
-            if( const auto f = syms.byFile.find( sp.file ); f != syms.byFile.end() )
-            {
-                for( const NodeId id : f->second )
-                {
-                    if( epAttrNames( ing.symbols[id], sp.attr ) )
-                    {
-                        def = id;
-                        ++hits;
-                    }
-                }
-            }
-        }
-        if( sp.wholeFile != kNoFile && hits == 0 )
-        {
-            t = DottedTarget{ DottedTarget::State::Module, kNoNode, sp.wholeFile };
-        }
-        else if( sp.wholeFile == kNoFile && hits == 1 )
-        {
-            t = DottedTarget{ DottedTarget::State::Def, def, kNoFile };
-        }
-        else if( sp.wholeFile != kNoFile || hits > 1 || sp.file != kNoFile )
-        {
-            t.state = DottedTarget::State::Unresolved;   // both a module and a name, or not exactly one definition
-        }
-        unresolvedN += t.state == DottedTarget::State::Unresolved ? 1 : 0;
-        externalN   += t.state == DottedTarget::State::External ? 1 : 0;
-        resolved.emplace( lit, t );
+        const DottedTarget t = targetOfSplit( ing, sp, syms );
+        out.unresolvedN += t.state == DottedTarget::State::Unresolved ? 1 : 0;
+        out.externalN   += t.state == DottedTarget::State::External ? 1 : 0;
+        out.targets.emplace( lit, t );
     }
-    // the sites whose target is a shown row
-    std::vector<Row>                   rows;
-    std::size_t                        testSites = 0;
-    std::string_view                   firstTestString;
+    return out;
+}
+
+// The answer position of the shown row a resolved string names; nullopt when it names none.
+inline std::optional<std::size_t> shownPositionOf( const IngestResult& ing, const DottedTarget& t, const ShownNames& n )
+{
+    if( t.state == DottedTarget::State::Def )
+    {
+        const Symbol& target = ing.symbols[ t.def ];
+        if( const auto d = n.shownDef.find( t.def ); d != n.shownDef.end() )
+        {
+            return d->second;
+        }
+        if( const auto o = n.shownOwner.find( std::make_pair( target.fileId, std::string_view( target.name ) ) ); o != n.shownOwner.end() )
+        {
+            return o->second;
+        }
+    }
+    else if( t.state == DottedTarget::State::Module )
+    {
+        if( const auto f = n.shownFile.find( t.file ); f != n.shownFile.end() )
+        {
+            return f->second;
+        }
+    }
+    return std::nullopt;
+}
+
+// The sites whose target is a shown row: non-test ones become rows, test ones a count.
+struct DottedSites
+{
+    std::vector<Row> rows;
+    std::size_t      testSites = 0;
+    std::string_view firstTestString;
+};
+inline DottedSites sitesNamingShown( const IngestResult& ing, std::span<const Reference* const> cand, const ResolvedStrings& res, const ShownNames& n )
+{
+    DottedSites                                     out;
     std::set<std::pair<std::uint32_t, std::string>> seenSite;
     for( const Reference* r : cand )
     {
-        const DottedTarget& t  = resolved.at( r->recvVar );
-        std::size_t         at = 0;
-        bool                hit = false;
-        if( t.state == DottedTarget::State::Def )
-        {
-            const Symbol& target = ing.symbols[ t.def ];
-            if( const auto d = shownDef.find( t.def ); d != shownDef.end() )
-            {
-                at  = d->second;
-                hit = true;
-            }
-            else if( const auto o = shownOwner.find( std::make_pair( target.fileId, std::string_view( target.name ) ) ); o != shownOwner.end() )
-            {
-                at  = o->second;
-                hit = true;
-            }
-        }
-        else if( t.state == DottedTarget::State::Module )
-        {
-            if( const auto f = shownFile.find( t.file ); f != shownFile.end() )
-            {
-                at  = f->second;
-                hit = true;
-            }
-        }
-        if( !hit || !seenSite.emplace( r->fileId, std::format( "{}:{}", r->line, r->recvVar ) ).second )
+        const DottedTarget&              t  = res.targets.at( r->recvVar );
+        const std::optional<std::size_t> at = shownPositionOf( ing, t, n );
+        if( !at || !seenSite.emplace( r->fileId, std::format( "{}:{}", r->line, r->recvVar ) ).second )
         {
             continue;
         }
         if( isTestPath( rootRelPath( ing, r->fileId ) ) )
         {
-            ++testSites;
-            if( firstTestString.empty() )
+            ++out.testSites;
+            if( out.firstTestString.empty() )
             {
-                firstTestString = r->recvVar;
+                out.firstTestString = r->recvVar;
             }
             continue;
         }
         Row row;
         row.rankClass = r->composeRel == kDottedShapeSink ? 0 : t.state == DottedTarget::State::Def ? 4 : 5;
-        row.shownAt   = at;
+        row.shownAt   = *at;
         row.site      = r;
         row.targetDef = t.def;
         row.targetMod = t.file;
-        rows.push_back( row );
+        out.rows.push_back( row );
     }
-    // a %-template handed to a sink, filled by the directories of shown files: at least kForDottedTemplateMinFills distinct ones (one
-    // directory that happens to hold a base.py is a bare-name coincidence; several siblings is the plugin layout the template loads)
+    return out;
+}
+
+// A %-template handed to a sink, filled by the directories of shown files: at least kForDottedTemplateMinFills distinct ones (one
+// directory that happens to hold a base.py is a bare-name coincidence; several siblings is the plugin layout the template loads).
+inline void appendTemplateRows( const IngestResult& ing, std::span<const Reference* const> templates, const std::map<std::uint32_t, std::size_t>& shownFile,
+                                std::size_t shownCount, std::vector<Row>& rows )
+{
     for( const Reference* r : templates )
     {
         const auto parts = templateParts( r->recvVar );
@@ -402,7 +419,7 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
         }
         const auto [ pre, post ] = *parts;
         std::set<std::uint32_t> fills;
-        std::size_t             firstShown = shown.size();
+        std::size_t             firstShown = shownCount;
         for( const auto& [ fileId, at ] : shownFile )
         {
             const std::string_view rel = rootRelPath( ing, fileId );
@@ -442,11 +459,11 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
         }
         rows.push_back( std::move( row ) );
     }
-    if( rows.empty() && testSites == 0 )
-    {
-        return {};
-    }
-    // loaders of the constants: a non-test function that calls a sink on a computed value and names the constant
+}
+
+// Loaders of the constants: a non-test function that calls a sink on a computed value and names the constant.
+inline void attachLoaders( const IngestResult& ing, std::span<const Reference* const> loaders, std::vector<Row>& rows )
+{
     std::map<NodeId, std::string> bodyOf;
     const auto                    bodyText = [ & ]( NodeId id ) -> const std::string&
     {
@@ -474,7 +491,7 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
             {
                 continue;
             }
-            if( holdsWord( bodyText( v->fromSymbol ), row.site->memberCtor ) )
+            if( taskroute::boundedFind( bodyText( v->fromSymbol ), row.site->memberCtor ) != std::string_view::npos )
             {
                 ++row.loaders;
                 if( row.loader == kNoNode || v->fileId == row.site->fileId )
@@ -488,6 +505,81 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
             row.rankClass = row.targetDef != kNoNode ? 1 : 3;
         }
     }
+}
+
+inline void appendDsRow( std::string& x, const IngestResult& ing, const Row& row, std::vector<char>& esc )
+{
+    const Reference& r = *row.site;
+    x += "<ds";
+    if( !row.candMod.empty() )
+    {
+        attr( x, "tmpl", r.recvVar, esc );
+        attr( x, "cand", row.candMod, esc );
+        x += std::format( " cands=\"{}\"", row.cands );
+    }
+    else
+    {
+        attr( x, "s", r.recvVar, esc );
+        if( row.targetDef != kNoNode )
+        {
+            const Symbol& t = ing.symbols[ row.targetDef ];
+            attr( x, "tn", displayName( t ), esc );
+            attr( x, "tp", std::format( "{}:{}", rootRelPath( ing, t.fileId ), t.line ), esc );
+        }
+        else
+        {
+            attr( x, "mod", rootRelPath( ing, row.targetMod ), esc );
+        }
+    }
+    attr( x, "p", rootRelPath( ing, r.fileId ), esc );
+    x += std::format( " l=\"{}\"", r.line );
+    if( const std::string in = siteInName( ing, r ); !in.empty() )
+    {
+        attr( x, "in", in, esc );
+    }
+    if( !r.memberPath.empty() )
+    {
+        attr( x, "sink", r.memberPath, esc );
+    }
+    if( row.loader != kNoNode )
+    {
+        const Symbol& l = ing.symbols[ row.loader ];
+        attr( x, "loader", displayName( l ), esc );
+        attr( x, "lp", std::format( "{}:{}", rootRelPath( ing, l.fileId ), l.line ), esc );
+        if( row.loaders > 1 )
+        {
+            x += std::format( " loaders=\"{}\"", row.loaders );
+        }
+    }
+    x += "/>";
+}
+
+}   // namespace dotteddetail
+
+// The element for the shown rows `shown` (in answer order): "" when no dotted string names one. Reads the fact stream once, resolves
+// only strings whose last segment matches a shown name, and reads a file only to confirm a loader of a printed candidate.
+inline std::string renderDottedStrings( const IngestResult& ing, std::span<const NodeId> shown )
+{
+    using namespace dotteddetail;
+    if( ing.crawlRoot.empty() || shown.empty() || !forDottedStringsOn() )
+    {
+        return {};
+    }
+    const ShownNames names = shownNamesOf( ing, shown );
+    if( names.shownDef.empty() )
+    {
+        return {};
+    }
+    const DottedFacts     facts = dottedFactsFor( ing, names.wanted );
+    const ResolvedStrings res   = resolveStrings( ing, facts.cand );
+    DottedSites           sites = sitesNamingShown( ing, facts.cand, res, names );
+    std::vector<Row>&     rows  = sites.rows;
+    appendTemplateRows( ing, facts.templates, names.shownFile, shown.size(), rows );
+    if( rows.empty() && sites.testSites == 0 )
+    {
+        return {};
+    }
+    attachLoaders( ing, facts.loaders, rows );
     std::ranges::stable_sort( rows, []( const Row& a, const Row& b )
     {
         return std::tie( a.rankClass, a.shownAt ) < std::tie( b.rankClass, b.shownAt );
@@ -498,17 +590,17 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
     const std::size_t shownRows = std::min( rows.size(), kForDottedStringRows );
     x += std::format( "<dotted_strings sites=\"{}\" rows=\"{}\"", rows.size(), shownRows );
     x += " hedge=\"a string in the source names this symbol; whether it flows to the import sink is not traced\"";   // on the element: --callers' legend layer keeps no comment
-    if( testSites > 0 )
+    if( sites.testSites > 0 )
     {
-        x += std::format( " tests=\"{}\"", testSites );
+        x += std::format( " tests=\"{}\"", sites.testSites );
     }
-    if( unresolvedN > 0 )
+    if( res.unresolvedN > 0 )
     {
-        x += std::format( " unresolved=\"{}\"", unresolvedN );
+        x += std::format( " unresolved=\"{}\"", res.unresolvedN );
     }
-    if( externalN > 0 )
+    if( res.externalN > 0 )
     {
-        x += std::format( " external=\"{}\"", externalN );
+        x += std::format( " external=\"{}\"", res.externalN );
     }
     if( rows.size() > shownRows )
     {
@@ -517,56 +609,13 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
     }
     else if( rows.empty() )
     {
-        attr( x, "s", firstTestString, esc );
-        attr( x, "next", std::format( "--grep={}", firstTestString ), esc );
+        attr( x, "s", sites.firstTestString, esc );
+        attr( x, "next", std::format( "--grep={}", sites.firstTestString ), esc );
     }
     x += '>';
     for( std::size_t k = 0; k < shownRows; ++k )
     {
-        const Row&       row = rows[k];
-        const Reference& r   = *row.site;
-        x += "<ds";
-        if( !row.candMod.empty() )
-        {
-            attr( x, "tmpl", r.recvVar, esc );
-            attr( x, "cand", row.candMod, esc );
-            x += std::format( " cands=\"{}\"", row.cands );
-        }
-        else
-        {
-            attr( x, "s", r.recvVar, esc );
-            if( row.targetDef != kNoNode )
-            {
-                const Symbol& t = ing.symbols[ row.targetDef ];
-                attr( x, "tn", displayName( t ), esc );
-                attr( x, "tp", std::format( "{}:{}", rootRelPath( ing, t.fileId ), t.line ), esc );
-            }
-            else
-            {
-                attr( x, "mod", rootRelPath( ing, row.targetMod ), esc );
-            }
-        }
-        attr( x, "p", rootRelPath( ing, r.fileId ), esc );
-        x += std::format( " l=\"{}\"", r.line );
-        if( const std::string in = siteInName( ing, r ); !in.empty() )
-        {
-            attr( x, "in", in, esc );
-        }
-        if( !r.memberPath.empty() )
-        {
-            attr( x, "sink", r.memberPath, esc );
-        }
-        if( row.loader != kNoNode )
-        {
-            const Symbol& l = ing.symbols[ row.loader ];
-            attr( x, "loader", displayName( l ), esc );
-            attr( x, "lp", std::format( "{}:{}", rootRelPath( ing, l.fileId ), l.line ), esc );
-            if( row.loaders > 1 )
-            {
-                x += std::format( " loaders=\"{}\"", row.loaders );
-            }
-        }
-        x += "/>";
+        appendDsRow( x, ing, rows[k], esc );
     }
     x += "</dotted_strings>";
     return x;

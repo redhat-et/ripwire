@@ -2855,15 +2855,22 @@ private:
         m_aliases.pairs.emplace_back( std::string( alias ), std::string( key ) );
     }
 
-    void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
+    // A record of this file at the node, the fields every slot and dotted-string fact shares.
+    RawRef factRecordAt( TSNode at, RefRole role, char scope ) const
     {
         RawRef r;
-        r.fileId     = m_fileId;
-        r.startByte  = ts_node_start_byte( at );
-        r.line       = ts_node_start_point( at ).row + 1;
-        r.lang       = m_lang;
-        r.role       = RefRole::Value;
-        r.qualifier  = std::string( 1, kValueRefSlotFactScope );   // name stays "": no identifier is empty, so no row
+        r.fileId    = m_fileId;
+        r.startByte = ts_node_start_byte( at );
+        r.line      = ts_node_start_point( at ).row + 1;
+        r.lang      = m_lang;
+        r.role      = role;
+        r.qualifier = std::string( 1, scope );
+        return r;
+    }
+
+    void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
+    {
+        RawRef r = factRecordAt( at, RefRole::Value, kValueRefSlotFactScope );   // name stays "": no identifier is empty, so no row
         r.recvVar    = std::move( owner );
         r.composeRel = std::string( field );
         r.memberCtor = type;
@@ -3251,13 +3258,7 @@ private:
     void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
     {
         const std::size_t dot = chain.rfind( '.' );
-        RawRef r;
-        r.fileId     = m_fileId;
-        r.startByte  = ts_node_start_byte( call );
-        r.line       = ts_node_start_point( call ).row + 1;
-        r.lang       = m_lang;
-        r.role       = RefRole::Through;
-        r.qualifier  = std::string( 1, kValueRefSlotCallScope );
+        RawRef r = factRecordAt( call, RefRole::Through, kValueRefSlotCallScope );
         r.name       = std::string( text( root ) );
         r.fieldName  = vrClean( text( f ) );
         r.composeRel = "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) );
@@ -3348,13 +3349,7 @@ private:
     }
     void noteDottedFact( TSNode at, std::string_view value, std::string_view shape, std::string_view sink, std::string_view assignedTo )
     {
-        RawRef r;
-        r.fileId     = m_fileId;
-        r.startByte  = ts_node_start_byte( at );
-        r.line       = ts_node_start_point( at ).row + 1;
-        r.lang       = m_lang;
-        r.role       = RefRole::Value;
-        r.qualifier  = std::string( 1, kValueRefDottedStringScope );   // name stays "": no identifier is empty, so no row
+        RawRef r = factRecordAt( at, RefRole::Value, kValueRefDottedStringScope );   // name stays "": no identifier is empty, so no row
         r.recvVar    = std::string( value );
         r.composeRel = std::string( shape );
         r.memberPath = std::string( sink );
