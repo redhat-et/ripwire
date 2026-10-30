@@ -30,6 +30,7 @@
 #include "flipimpact.h"   // SymbolLineIndex / innermostAtLine — the innermost def covering a line (the consumer's enclosing def)
 #include "infra/namesplit.h"   // isIdentChar
 #include "model.h"        // IngestResult, rootRelPath, diskPath, symbolsByFile
+#include "pydottedpath.h" // epModuleFile, epAttrNames: the one dotted-path resolver (shared with fordottedstring.h)
 #include "resolve.h"      // trimWs
 #include "serialize.h"    // escapeXml
 

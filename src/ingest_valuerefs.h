@@ -2855,26 +2855,21 @@ private:
         m_aliases.pairs.emplace_back( std::string( alias ), std::string( key ) );
     }
 
-    // A record of this file at the node, the fields every slot and dotted-string fact shares.
-    RawRef factRecordAt( TSNode at, RefRole role, char scope ) const
+    // One no-row fact record (role Value, name "": no identifier is empty, so no row): the slot facts and the dotted-string facts.
+    void emitValueFact( TSNode at, char scope, std::string recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
     {
-        RawRef r;
-        r.fileId    = m_fileId;
-        r.startByte = ts_node_start_byte( at );
-        r.line      = ts_node_start_point( at ).row + 1;
-        r.lang      = m_lang;
-        r.role      = role;
-        r.qualifier = std::string( 1, scope );
-        return r;
+        RawRef r     = rawRefAt( at, m_fileId, m_lang, RefRole::Value, {} );
+        r.qualifier  = std::string( 1, scope );
+        r.recvVar    = std::move( recvVar );
+        r.composeRel = std::string( composeRel );
+        r.memberCtor = std::string( memberCtor );
+        r.memberPath = std::string( memberPath );
+        m_out.push_back( std::move( r ) );
     }
 
     void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
     {
-        RawRef r = factRecordAt( at, RefRole::Value, kValueRefSlotFactScope );   // name stays "": no identifier is empty, so no row
-        r.recvVar    = std::move( owner );
-        r.composeRel = std::string( field );
-        r.memberCtor = type;
-        m_out.push_back( std::move( r ) );
+        emitValueFact( at, kValueRefSlotFactScope, std::move( owner ), field, type );
     }
 
     // The struct type a name is declared with, innermost scope first: declared = some scope declares it; key "" with
@@ -3258,8 +3253,8 @@ private:
     void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
     {
         const std::size_t dot = chain.rfind( '.' );
-        RawRef r = factRecordAt( call, RefRole::Through, kValueRefSlotCallScope );
-        r.name       = std::string( text( root ) );
+        RawRef r     = rawRefAt( call, m_fileId, m_lang, RefRole::Through, std::string( text( root ) ) );
+        r.qualifier  = std::string( 1, kValueRefSlotCallScope );
         r.fieldName  = vrClean( text( f ) );
         r.composeRel = "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) );
         r.memberCtor = slotCtor( std::move( key ), kw );
@@ -3349,12 +3344,7 @@ private:
     }
     void noteDottedFact( TSNode at, std::string_view value, std::string_view shape, std::string_view sink, std::string_view assignedTo )
     {
-        RawRef r = factRecordAt( at, RefRole::Value, kValueRefDottedStringScope );   // name stays "": no identifier is empty, so no row
-        r.recvVar    = std::string( value );
-        r.composeRel = std::string( shape );
-        r.memberPath = std::string( sink );
-        r.memberCtor = std::string( assignedTo );
-        m_out.push_back( std::move( r ) );
+        emitValueFact( at, kValueRefDottedStringScope, std::string( value ), shape, assignedTo, sink );
     }
     // A call of an import sink whose first argument is no literal or template: the loader half of a dotted string's story.
     void importSinkAt( TSNode call )

@@ -22,6 +22,7 @@
 // est_tokens: RIPWIRE_NO_DOTTED_STRINGS=1 is the rest of it byte for byte.
 
 #include "docparse.h"       // docparse::detail::readWholeFile
+#include "epmanifest.h"     // epdetail::appendAttr
 #include "filter.h"         // isTestPath
 #include "model.h"
 #include "pydottedpath.h"
@@ -156,11 +157,6 @@ struct Row
     NodeId           loader = kNoNode;
     std::size_t      loaders = 0;
 };
-
-inline void attr( std::string& x, std::string_view key, std::string_view val, std::vector<char>& esc )
-{
-    x += std::format( " {}=\"{}\"", key, escapeXml( val, esc ) );
-}
 
 inline std::string siteInName( const IngestResult& ing, const Reference& r )
 {
@@ -513,39 +509,39 @@ inline void appendDsRow( std::string& x, const IngestResult& ing, const Row& row
     x += "<ds";
     if( !row.candMod.empty() )
     {
-        attr( x, "tmpl", r.recvVar, esc );
-        attr( x, "cand", row.candMod, esc );
+        epdetail::appendAttr( x, "tmpl", r.recvVar, esc );
+        epdetail::appendAttr( x, "cand", row.candMod, esc );
         x += std::format( " cands=\"{}\"", row.cands );
     }
     else
     {
-        attr( x, "s", r.recvVar, esc );
+        epdetail::appendAttr( x, "s", r.recvVar, esc );
         if( row.targetDef != kNoNode )
         {
             const Symbol& t = ing.symbols[ row.targetDef ];
-            attr( x, "tn", displayName( t ), esc );
-            attr( x, "tp", std::format( "{}:{}", rootRelPath( ing, t.fileId ), t.line ), esc );
+            epdetail::appendAttr( x, "tn", displayName( t ), esc );
+            epdetail::appendAttr( x, "tp", std::format( "{}:{}", rootRelPath( ing, t.fileId ), t.line ), esc );
         }
         else
         {
-            attr( x, "mod", rootRelPath( ing, row.targetMod ), esc );
+            epdetail::appendAttr( x, "mod", rootRelPath( ing, row.targetMod ), esc );
         }
     }
-    attr( x, "p", rootRelPath( ing, r.fileId ), esc );
+    epdetail::appendAttr( x, "p", rootRelPath( ing, r.fileId ), esc );
     x += std::format( " l=\"{}\"", r.line );
     if( const std::string in = siteInName( ing, r ); !in.empty() )
     {
-        attr( x, "in", in, esc );
+        epdetail::appendAttr( x, "in", in, esc );
     }
     if( !r.memberPath.empty() )
     {
-        attr( x, "sink", r.memberPath, esc );
+        epdetail::appendAttr( x, "sink", r.memberPath, esc );
     }
     if( row.loader != kNoNode )
     {
         const Symbol& l = ing.symbols[ row.loader ];
-        attr( x, "loader", displayName( l ), esc );
-        attr( x, "lp", std::format( "{}:{}", rootRelPath( ing, l.fileId ), l.line ), esc );
+        epdetail::appendAttr( x, "loader", displayName( l ), esc );
+        epdetail::appendAttr( x, "lp", std::format( "{}:{}", rootRelPath( ing, l.fileId ), l.line ), esc );
         if( row.loaders > 1 )
         {
             x += std::format( " loaders=\"{}\"", row.loaders );
@@ -605,12 +601,12 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
     if( rows.size() > shownRows )
     {
         x += " rows_capped=\"1\"";
-        attr( x, "next", std::format( "--grep={}", rows[shownRows].site->recvVar ), esc );
+        epdetail::appendAttr( x, "next", std::format( "--grep={}", rows[shownRows].site->recvVar ), esc );
     }
     else if( rows.empty() )
     {
-        attr( x, "s", sites.firstTestString, esc );
-        attr( x, "next", std::format( "--grep={}", sites.firstTestString ), esc );
+        epdetail::appendAttr( x, "s", sites.firstTestString, esc );
+        epdetail::appendAttr( x, "next", std::format( "--grep={}", sites.firstTestString ), esc );
     }
     x += '>';
     for( std::size_t k = 0; k < shownRows; ++k )
