@@ -194,12 +194,8 @@ private:
     // The one module-level definition `name` has in file `f` (kNoNode: none, or several).
     NodeId topLevel( std::uint32_t f, std::string_view name ) const
     {
-        const auto it = m_top.find( fk( f, name ) );
-        if( it == m_top.end() || it->second == kAmbiguous )
-        {
-            return kNoNode;
-        }
-        return it->second;
+        const NodeId* one = m_top.contains( fk( f, name ) ) ? &m_top.at( fk( f, name ) ) : nullptr;
+        return one != nullptr && *one != kAmbiguous ? *one : kNoNode;
     }
     // The file an import's module resolves to (kNoFile: a package outside the tree): valuerefindex.h importedModuleFile's rule.
     std::uint32_t moduleFile( std::uint32_t importer, std::string_view module, bool python ) const
