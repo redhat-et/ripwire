@@ -408,7 +408,9 @@ export function wire() {
 }
 EOF
 run t1 "$TMP/t1" -- --for="which classes are provided for PLUGINS"
-if out=$( chk row "$TMP/t1.xml" PLUGINS n=2 D Z1 ); then ok "T1 a value is never paired with another object's provide (repeated calls share a prefix)"; else no "T1 $out"; fi
+# fix round 3: a pair is its OWN literal's (not the call count), so A and G (each a complete { provide: PLUGINS, useClass: X } literal in a repeated
+# callee) now list; B, C and H (a string provide, another token, no provide) must never join PLUGINS
+if out=$( chk row "$TMP/t1.xml" PLUGINS n=4 D Z1 A G ); then ok "T1 a value is never paired with another object's provide (repeated calls: only each literal's own class lists; B C H never)"; else no "T1 $out"; fi
 
 # D1: floor + keyword registration + consumers_more
 mk d1
@@ -562,6 +564,126 @@ printf 'from dispatch import Signal\n\nK = Signal()\n' > "$TMP/n1/pkg/signals.py
 printf 'from pkg import signals\n\ndef h1(): pass\ndef h2(): pass\n\nsignals.K.connect(h1)\nsignals.K.connect(h2)\n' > "$TMP/n1/use.py"
 run n1 "$TMP/n1" -- --for="which receivers are connected to K"
 if out=$( chk row "$TMP/n1.xml" K n=2 h1 h2 ); then ok "N1 'from . import signals' in the package __init__ keeps the submodule row"; else no "N1 $out"; fi
+
+# ── fix round 3 (review rv-registrar-delta2; every [P] arm below is RED on a1c95819): ALLOWLISTS, not refusal lists ─────────────────
+# F2r3 [P]: a provider value pairs only through the SAME object literal, and only when that literal is a direct call argument or a `const`
+# initialiser. Each bad shape below puts a `useClass: H<t>` object beside the `provide: T<t>` one without a second call of one callee.
+mkdir -p "$TMP/f2r"
+printf "export class InjectionToken<T> { constructor(public desc: string) {} }\n" > "$TMP/f2r/it.ts"
+printf "import { InjectionToken } from './it';\n" > "$TMP/f2r/tokens.ts"
+: > "$TMP/f2r/cl.ts"
+printf "import { T1, T2, T3, T4, T5, T6, T7, T8, T9, TA, TB, TC, TD } from './tokens';\nimport { H1, H2, H3, H4, H5, H6, H7, H8, DB, ZB, HA9, HB9, HC, HD } from './cl';\nexport function register(p: any) { return p; }\ndeclare const flag: any;\n" > "$TMP/f2r/app.ts"
+for t in 1 2 3 4 5 6 7 8 9 A B C D; do
+    printf "export const T%s = new InjectionToken<any>('t%s');\n" "$t" "$t" >> "$TMP/f2r/tokens.ts"
+    printf "export class D%s {}\nexport class Z%s {}\nexport class H%s {}\n" "$t" "$t" "$t" >> "$TMP/f2r/cl.ts"
+    case "$t" in A|B) continue ;; esac
+    printf "import { T%s } from './tokens';\nimport { D%s, Z%s } from './cl';\nexport const BASE_%s = [{ provide: T%s, useClass: D%s, multi: true }];\nexport const MORE_%s = [{ provide: T%s, useClass: Z%s, multi: true }];\n" "$t" "$t" "$t" "$t" "$t" "$t" "$t" "$t" "$t" > "$TMP/f2r/base_$t.ts"
+done
+cat >> "$TMP/f2r/app.ts" <<'EOF'
+export function w1() { register(flag ? { provide: T1, useValue: 1 } : { provide: 'x', useClass: H1 }); }
+export function w2() { register(flag ? { provide: T2 } : { useClass: H2 }); }
+export function w3() { register(flag && { provide: T3, useValue: 1 } || { useClass: H3 }); }
+export function w4() { const v = flag ? { provide: T4, useValue: 1 } : { provide: 'x', useClass: H4 }; return v; }
+export function w5() { let v: any; v = { provide: T5, useValue: 1 }; v = { useClass: H5 }; return v; }
+export function w6(o: any) { o.x = { provide: T6, useValue: 1 }; o.x = { useClass: H6 }; }
+export function w7() { if (flag) return { provide: T7, useValue: 1 }; return { provide: 'x', useClass: H7 }; }
+export function w8() { { const v = { provide: T8, useValue: 1 }; register(v); } { const v = { useClass: H8 }; register(v); } }
+export function w9() { register(flag ? { provide: T9, useClass: HA9 } : { provide: T9, useClass: HB9 }); }
+export function wc() { return [{ provide: TC, useClass: HC }]; }
+export function wd() { let v = { provide: TD, useClass: HD }; return v; }
+export const CA = { provide: TA, useClass: DA };
+export const CB = { provide: TA, useClass: ZA };
+export function wb() { register({ provide: TB, useClass: DB }); register({ provide: TB, useClass: ZB }); }
+EOF
+printf "import { DA, ZA } from './cl';\n" >> "$TMP/f2r/app.ts"
+f2rbad=""
+for t in 1 2 3 4 5 6 7 8 9 A B C D; do run "f2r$t" "$TMP/f2r" -- --for="which classes are provided for T$t"; done
+for t in 1 2 3 4 5 6 7 8 9 C D; do out=$( chk row "$TMP/f2r$t.xml" T$t n=2 D$t Z$t ) || f2rbad="$f2rbad T$t: $out;"; done
+if [ -z "$f2rbad" ]; then ok "F2r3 a ternary / || / const-ternary / reassigned / property / return / second-block literal never lends its class to another object's provide; two COMPLETE literals in a ternary, a returned literal and a `let` literal are conditional / unbound and not listed"; else no "F2r3 $f2rbad"; fi
+if out=$( chk row "$TMP/f2rA.xml" TA n=2 DA ZA ); then ok "F2r3 twin: two const-bound provider objects list (n=2)"; else no "F2r3 twin TA $out"; fi
+if out=$( chk row "$TMP/f2rB.xml" TB n=2 DB ZB ); then ok "F2r3 twin: ONE callee called twice, each with its own complete literal, lists both (the literal, not the call count, is the identity)"; else no "F2r3 twin TB $out"; fi
+
+# F4r3 [P] / B1 [P]: the registrar's other parameters are an allowlist
+mk f4r
+cat > "$TMP/f4r/reg.py" <<'EOF'
+def wrap(f):
+    return f
+
+class Reg:
+    def __init__(self):
+        self.rx = []
+        self.fl = []
+        self.d = {}
+        self.names = []
+
+    def conn_dflt(self, sender, receiver=None):
+        self.fl.append(sender)
+        self.rx.append(wrap(receiver))
+
+    def on(self, ev, fn=None):
+        self.fl.append(ev)
+        if fn is not None:
+            self.rx.append(fn)
+
+    def keyed(self, name, handler):
+        self.d[name] = handler
+
+    def keyed_first(self, handler, name):
+        self.d[name] = handler
+
+    def keyed_twice(self, name, handler):
+        self.d[name] = handler
+        self.names.append(name)
+
+    def keyed_use(self, name, handler):
+        self.d[name] = handler
+        print(name)
+
+    def django(self, receiver, sender=None, weak=True):
+        key = (id(receiver), id(sender))
+        self.rx.append((key, receiver))
+EOF
+cat > "$TMP/f4r/use.py" <<'EOF'
+from reg import Reg
+
+class Foo: pass
+class Bar: pass
+def h1(): pass
+def h2(): pass
+def h3(): pass
+def h4(): pass
+
+r1 = Reg()
+r1.conn_dflt(Foo, h1)
+r1.conn_dflt(Bar, h2)
+r2 = Reg()
+r2.on(Foo, h1)
+r2.on(Bar, h2)
+r3 = Reg()
+r3.keyed('a', h1)
+r3.keyed('b', h2)
+r4 = Reg()
+r4.keyed_first(h3, 'a')
+r4.keyed_first(h4, 'b')
+r5 = Reg()
+r5.keyed_twice('a', h1)
+r5.keyed_twice('b', h2)
+r6 = Reg()
+r6.keyed_use('a', h3)
+r6.keyed_use('b', h4)
+r7 = Reg()
+r7.django(h1)
+r7.django(h2, Foo)
+EOF
+for k in r1 r2 r3 r4 r5 r6 r7; do run "f4r$k" "$TMP/f4r" -- --for="which handlers are connected to $k"; done
+if out=$( chk nokey "$TMP/f4rr1.xml" r1 ) && out=$( chk nosym "$TMP/f4rr1.xml" Foo ); then ok "F4r3 the receiver is the DEFAULTED parameter (conn_dflt( sender, receiver=None )): Foo / Bar never listed"; else no "F4r3 dflt-receiver $out"; fi
+if out=$( chk nokey "$TMP/f4rr2.xml" r2 ) && out=$( chk nosym "$TMP/f4rr2.xml" Foo ); then ok "F4r3 on( ev, fn=None ) stores the event and (conditionally) fn: no row, Foo / Bar never listed"; else no "F4r3 on() $out"; fi
+if out=$( chk row "$TMP/f4rr3.xml" r3 n=2 h1 h2 ); then ok "B1 a key parameter used only as the subscript of the store ( self.d[ name ] = handler ) is a registrar again"; else no "B1 keyed $out"; fi
+if out=$( chk row "$TMP/f4rr4.xml" r4 n=2 h3 h4 ); then ok "B1 the same with the handler first ( keyed_first( handler, name ) )"; else no "B1 keyed_first $out"; fi
+if out=$( chk nokey "$TMP/f4rr5.xml" r5 ); then ok "F4r3 twin: the key parameter ALSO stored elsewhere is not provably beside the point: no row"; else no "F4r3 keyed_twice $out"; fi
+if out=$( chk nokey "$TMP/f4rr6.xml" r6 ); then ok "F4r3 twin: a required parameter used beyond the subscript key (print( name )) stays a no-row"; else no "F4r3 keyed_use $out"; fi
+if out=$( chk row "$TMP/f4rr7.xml" r7 n=2 h1 h2 ); then ok "F4r3 twin: Django's shape ( receiver, sender=None, weak=True used in a local key ) still lists"; else no "F4r3 django $out"; fi
+if out=$( chk legend "$TMP/f4rr3.xml" "only exact shapes are listed" "absent row" ); then ok "D3 the clause says listing is exact-shape only and an absent row proves nothing"; else no "D3 $out"; fi
 
 run f1 "$PY" RIPWIRE_NO_REG_ROWS=1 -- --for="$Q_PY"
 chk strip "$TMP/p1.xml" "$TMP/p1.strip"; chk strip "$TMP/f1.xml" "$TMP/f1.strip"

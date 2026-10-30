@@ -1095,9 +1095,88 @@ private:
         return at != names.end() && defaulted[ static_cast<std::size_t>( at - names.begin() ) ];
     }
 
-    // Python: does method `fn`'s body use (as a name; an attribute or keyword name is not a use) a parameter other than `self` and `keep`
-    // that is written WITHOUT a default? Then the one parameter a store shows is not provably the registered value (the receiver may be
-    // the one `wrap( receiver )` consumed). A body too large to scan counts as a use.
+    // Python: is store target `n` rooted at `self` (`self.x`, `self.x[ k ]`, `self.x.y[ k ]`)?
+    bool pySelfRooted( TSNode n ) const
+    {
+        for( int guard = 0; guard < 16 && !ts_node_is_null( n ); ++guard )
+        {
+            if( kindIs( ts_node_type( n ), "identifier" ) )
+            {
+                return text( n ) == "self";
+            }
+            if( kindIs( ts_node_type( n ), "attribute" ) )
+            {
+                n = child( n, m_fObject );
+            }
+            else if( kindIs( ts_node_type( n ), "subscript" ) )
+            {
+                n = child( n, m_fValue );
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    // Python: identifier `id` is the KEY of a subscript store into `self` (`self.d[ id ] = handler`): it is read only to say where the
+    // value goes, never stored itself.
+    bool pyStoreKey( TSNode id ) const
+    {
+        const TSNode sub = ts_node_parent( id );
+        if( ts_node_is_null( sub ) || !kindIs( ts_node_type( sub ), "subscript" ) || !ts_node_eq( child( sub, m_fSubscript ), id ) )
+        {
+            return false;
+        }
+        const TSNode as = ts_node_parent( sub );
+        return !ts_node_is_null( as ) && kindIs( ts_node_type( as ), "assignment" ) && ts_node_eq( child( as, m_fLeft ), sub )
+            && pySelfRooted( sub );
+    }
+
+    // Python: does the subtree `n` read identifier `name` (as a name, not as an attribute or keyword label)? A subtree too large to scan
+    // answers false (the caller then refuses).
+    bool pyReads( TSNode n, std::string_view name ) const
+    {
+        constexpr std::size_t kScanCap = 512;
+        std::vector<TSNode>   stack{ n };
+        for( std::size_t seen = 0; !stack.empty(); ++seen )
+        {
+            if( seen > kScanCap )
+            {
+                return false;
+            }
+            const TSNode cur = stack.back();
+            stack.pop_back();
+            if( kindIs( ts_node_type( cur ), "identifier" ) )
+            {
+                const TSNode parent = ts_node_parent( cur );
+                const bool   label  = !ts_node_is_null( parent )
+                    && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), cur ) )
+                         || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), cur ) ) );
+                if( !label && text( cur ) == name )
+                {
+                    return true;
+                }
+                continue;
+            }
+            for( std::uint32_t k = 0, cc = ts_node_named_child_count( cur ); k < cc; ++k )
+            {
+                stack.push_back( ts_node_named_child( cur, k ) );
+            }
+        }
+        return false;
+    }
+
+    // Python: is the one parameter a store shows (`keep`) provably the registered value? An ALLOWLIST over the method's other parameters
+    // (after `self`), refused as soon as one is not provably beside the point:
+    //   a parameter written WITHOUT a default is allowed only as the subscript key of the `self` store itself (`self.d[ name ] = handler`);
+    //     any other use of it (a condition, a call, a second store) refuses, because the receiver may be that one;
+    //   a parameter written WITH a default (`sender=None`, `weak=True`) is allowed anywhere EXCEPT inside a store into `self` that does not
+    //     also hold `keep` (the arguments of `self.<field>.<store>( … )`, the right side of `self.x = …` / `self.x[ k ] = …`): a second,
+    //     separate stored candidate (`self.rx.append( wrap( fn ) )` beside `self.fl.append( ev )`) makes the receiver unprovable, while
+    //     `self.rx.append( ( receiver, sender ) )` stores the option beside the value, as Django's `Signal.connect` does.
+    // An attribute or keyword name is no use. A body too large to scan counts as a use.
     bool pyOtherParamUsed( TSNode fn, std::string_view keep ) const
     {
         const TSNode params = child( fn, m_fParameters );
@@ -1108,12 +1187,12 @@ private:
         }
         std::vector<bool> defaulted;
         const auto        names = pyParamNames( params, &defaulted );
-        std::vector<std::string_view> others;
-        for( std::size_t k = 1; k < names.size(); ++k )   // names[0] is self
+        std::vector<std::pair<std::string_view, bool>> others;   // name, written with a default
+        for( std::size_t k = 1; k < names.size(); ++k )          // names[0] is self
         {
-            if( !names[k].empty() && names[k] != keep && !defaulted[k] )
+            if( !names[k].empty() && names[k] != keep )
             {
-                others.push_back( names[k] );
+                others.emplace_back( names[k], static_cast<bool>( defaulted[k] ) );
             }
         }
         if( others.empty() )
@@ -1121,31 +1200,46 @@ private:
             return false;
         }
         constexpr std::size_t kScanCap = 4096;
-        std::vector<TSNode>   stack{ body };
+        struct Item { TSNode node; bool stored; };
+        std::vector<Item> stack{ { body, false } };
         for( std::size_t seen = 0; !stack.empty(); ++seen )
         {
             if( seen > kScanCap )
             {
                 return true;
             }
-            const TSNode cur = stack.back();
+            const Item cur = stack.back();
             stack.pop_back();
-            if( kindIs( ts_node_type( cur ), "identifier" ) )
+            const char* kind = ts_node_type( cur.node );
+            if( kindIs( kind, "identifier" ) )
             {
-                const TSNode parent = ts_node_parent( cur );
+                const TSNode parent = ts_node_parent( cur.node );
                 const bool   label  = !ts_node_is_null( parent )
-                    && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), cur ) )
-                         || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), cur ) ) );
-                if( !label && std::ranges::find( others, text( cur ) ) != others.end() )
+                    && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), cur.node ) )
+                         || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), cur.node ) ) );
+                const auto   hit    = label ? others.end() : std::ranges::find( others, text( cur.node ), &std::pair<std::string_view, bool>::first );
+                if( hit != others.end() && ( hit->second ? cur.stored : !pyStoreKey( cur.node ) ) )
                 {
                     return true;
                 }
                 continue;
             }
-            const std::uint32_t cc = ts_node_named_child_count( cur );
+            const std::uint32_t cc = ts_node_named_child_count( cur.node );
+            // what the children inherit: the arguments of `self.<field>.<store>( … )` and the right side of a store into `self`
+            const TSNode storeFn = kindIs( kind, "call" ) ? child( cur.node, m_fFunction ) : TSNode{};
+            const bool   storeCall = !ts_node_is_null( storeFn ) && kindIs( ts_node_type( storeFn ), "attribute" )
+                && std::ranges::find( m_regStores, text( child( storeFn, m_fAttribute ) ) ) != m_regStores.end()
+                && !selfField( child( storeFn, m_fObject ) ).empty();
+            const bool   storeAssign = kindIs( kind, "assignment" ) && pySelfRooted( child( cur.node, m_fLeft ) );
             for( std::uint32_t k = 0; k < cc; ++k )
             {
-                stack.push_back( ts_node_named_child( cur, k ) );
+                const TSNode ch = ts_node_named_child( cur.node, k );
+                bool         st = cur.stored;
+                if( ( storeCall && kindIs( ts_node_type( ch ), "argument_list" ) ) || ( storeAssign && ts_node_eq( ch, child( cur.node, m_fRight ) ) ) )
+                {
+                    st = !pyReads( ch, keep );   // a store that also holds the registered value stores the option beside it
+                }
+                stack.push_back( { ch, st } );
             }
         }
         return false;
@@ -1656,6 +1750,8 @@ private:
         char        scope = 'x';
         std::uint16_t argIndex = 0;
         bool          isArg = false;
+        std::uint32_t litAt = 0;   // REGISTRAR (ProviderRecord): start byte of the object literal this pair is read from, when that
+                                   //   literal is proven (providerLiteralDirect) and the value is the pair's value written bare; 0 = none
     };
 
     std::string_view opText( TSNode n ) const noexcept
@@ -2132,8 +2228,9 @@ private:
     //   an argument of `self.<field>.<store>( … )` (store one of the language row's containerStores), or
     //   the right side of `self.<field>[ … ] = …`.
     // Records the fact (method, parameter position after self, field). A parameter with a default value (`sender=None`) records
-    // nothing: it is an option stored beside the receiver, and a positional argument there is not a registered value. Nor does a
-    // method whose body also uses another parameter written without a default (pyOtherParamUsed). Anything else — a store into a local, a store through
+    // nothing: it is an option stored beside the receiver, and a positional argument there is not a registered value. Nor does a method
+    // whose other parameters are not provably beside the point (pyOtherParamUsed: a required one used beyond the subscript key of the store,
+    // a defaulted one stored into `self`). Anything else — a store into a local, a store through
     // another object, a call of the parameter — records nothing (no fact: never a registrar).
     void paramRegFact( std::size_t i, std::size_t d, std::string_view name )
     {
@@ -2239,10 +2336,58 @@ private:
         r.fieldName     = std::move( s.into );
         r.argCount      = s.argIndex;
         r.argCountKnown = s.isArg;
+        if( s.litAt != 0 )
+        {
+            r.qualifier += "@" + std::to_string( s.litAt );   // REGISTRAR: the object literal (qualifier[2..], read only by regindex.h)
+        }
         valueSlot( j, r );   // IX-1: a struct-field slot's type and field (inert without a slot row)
         r.memberRoot = std::string( owner );   // IX1-V2: a method value's receiver type (methodValueAt), "" otherwise
         r.memberVia  = std::move( via );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise
         m_out.push_back( std::move( r ) );
+    }
+
+    // REGISTRAR (model.h kRegLangs, form ProviderRecord; read by src/regindex.h): is the object literal anc[k] in a position that is
+    // never conditional, repeated or rebound? An ALLOWLIST: it is a direct argument of a call (`register( { … } )`, `@Module( { … } )`),
+    // the initialiser of a `const` (bound exactly once, never reassigned), or an element / property value of an array / object literal
+    // that is itself in such a position. A ternary, `||` / `&&`, a `return`, an assignment, a `let` / `var`, a spread or a cast is none of
+    // these: a `provide` and a `useClass` read from there may belong to two different objects.
+    bool providerLiteralDirect( std::size_t k, int depth = 0 ) const
+    {
+        if( k == 0 || depth > 8 )
+        {
+            return false;
+        }
+        const VrAnc& p = m_anc[k - 1];
+        const VrAnc& c = m_anc[k];
+        if( kindIs( p.kind, "arguments" ) || kindIs( p.kind, "argument_list" ) )
+        {
+            return true;
+        }
+        if( kindIs( p.kind, "variable_declarator" ) )
+        {
+            return c.field == m_fValue && k >= 2 && kindIs( m_anc[k - 2].kind, "lexical_declaration" )
+                && text( ts_node_child( m_anc[k - 2].node, 0 ) ) == "const";
+        }
+        if( kindIs( p.kind, "array" ) )
+        {
+            return providerLiteralDirect( k - 1, depth + 1 );
+        }
+        if( kindIs( p.kind, "pair" ) && c.field == m_fValue && k >= 2 && kindIs( m_anc[k - 2].kind, "object" ) )
+        {
+            return providerLiteralDirect( k - 2, depth + 1 );
+        }
+        return false;
+    }
+    // Mark slot `s` with the object literal anc[k] it is read from (qualifier "@<start byte>"): only for a ProviderRecord language, a value
+    // written bare (`useClass: Impl`, not `Impl ? a : b`) and a literal providerLiteralDirect proves. regindex.h pairs a `provide` with a
+    // value only when both carry the SAME mark.
+    void markProviderLiteral( Slot& s, bool bare, std::size_t k ) const
+    {
+        const RegLang* row = regLang( m_lang );
+        if( bare && row != nullptr && row->form == RegForm::ProviderRecord && k > 0 && kindIs( m_anc[k].kind, "object" ) && providerLiteralDirect( k ) )
+        {
+            s.litAt = ts_node_start_byte( m_anc[k].node ) + 1;
+        }
     }
 
     // Classify the value position of identifier anc[i], whose effective position (after pass-through wrappers)
@@ -2266,6 +2411,7 @@ private:
             s.container = id;
             s.key = "." + std::string( text( self.node ) );
             s.scope = id.empty() ? 'x' : 'f';
+            markProviderLiteral( s, i == j, j - 1 );
             return true;
         }
         // keyed elements: the VALUE side only (a key or field NAME is never a value use) …
@@ -2305,6 +2451,7 @@ private:
             s.container = id;
             s.key = key;
             s.scope = id.empty() ? 'x' : 'f';
+            markProviderLiteral( s, i == j, j - 2 );
             return true;
         }
         // JS computed key `{ [f]: 1 }`: the function is coerced to a KEY.

@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-30, lane registrar fix round 3 (same base; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the fix-2 pin
+#   -> the pin above). Watched text: kParserVer 277 -> 279 (rich 280; 278 is 277's rich tag): a TS/JS provider-record Value row carries its
+#   object literal's start byte (qualifier "<scope><shadow>@<byte>") when the literal is a direct call argument or a `const` initialiser,
+#   and a Python registrar fact is refused unless the method's other parameters are provably beside the point; quality.h's
+#   kIngestParserVerMirror with it. kCacheVersion stays 46 and kQSnapCacheScheme stays 24: no record changes shape.
 # 2026-10-30, lane registrar fix round 2 (same base; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the fix-1 pin
 #   -> the pin above). Watched text: kParserVer 275 -> 277 (rich 278; 276 is 275's rich tag): a Python lambda parameter / comprehension
 #   target files a VarDecl `~name` (kPythonLocalScopePrefix, with the span it is local to), and a method whose body also uses another

@@ -78,15 +78,17 @@ inline bool forRegRowsOn()
 
 inline constexpr std::string_view kForCompactRegLegend =
     "; reg key= p= a registry key and its definition, r sym= p= what is registered under it at p= (as= the record field), n= AT LEAST "
-    "this many non-test registrations (a floor: decorator, keyword-argument, alias, forwardRef and unresolved-import registrations "
-    "are not counted), tests= test ones (counted only), by= the registrar, consumers= where the key is sent or injected "
+    "this many non-test registrations (a floor: only exact shapes are listed, so an absent row or site proves nothing, and decorator, "
+    "keyword-argument, forwardRef, unresolved-import, function-local-import, bound-method, conditional or non-literal provider "
+    "registrations are not counted), tests= test ones (counted only), by= the registrar, consumers= where the key is sent or injected "
     "(consumers_more= further ones not named), reg_more= further keys not shown, cut=1 a re-export chain over 3 hops was not "
     "followed, a static fact at the site (the call as written, conditional or dynamic registration may exist, sender=/weak=/"
     "dispatch_uid= are not read), not proof it ran";
 inline constexpr std::string_view kForRegLegend =
     "; reg rows: a registry key= (its definition at p=) joined to the registrations of that key by the index: each r is what a site "
     "registers (sym= as written, p= the site, as= the provider field), n= AT LEAST this many non-test registrations (a floor: "
-    "decorator, keyword-argument, alias, forwardRef and unresolved-import registrations are not counted), up to 4 are listed (capped=1 "
+    "only exact shapes are listed, so an absent row or site proves nothing, and decorator, keyword-argument, forwardRef, "
+    "unresolved-import, function-local-import, bound-method, conditional or non-literal provider registrations are not counted), up to 4 are listed (capped=1 "
     "next= greps every mention of the key), tests= test registrations (counted, not listed), by= the registrar method, consumers= "
     "the functions that send or inject the key (consumers_more= further ones not named), reg_more= further keys that passed the "
     "gate and are not shown, cut=1 a re-export chain over 3 hops was not followed so a registration through it is not counted, "
@@ -523,103 +525,59 @@ private:
         }
     }
 
-    // TS ProviderRecord: `{ provide: K, useClass: C }` — the value pair and the ONE `provide` pair of the same object literal.
+    // TS ProviderRecord: `{ provide: K, useClass: C }` — the value pair and the ONE `provide` pair of the same object literal. A pair
+    // counts only when the extractor marked it (qualifier "<scope><shadow>@<start byte of its object literal>"): the literal is a
+    // direct call argument or a `const` initialiser (or nested in such an array / object) and the value is written bare. Key and value
+    // pair only through the SAME literal, so a ternary / `||` / return / reassignment / second call can never join two objects.
     void collectProviderSites( std::vector<RegSite>& out ) const
     {
-        struct Pair { std::uint32_t ref; std::string_view prefix; std::string_view field; };
-        HashMap<std::uint32_t, std::vector<Pair>> keysByFile;
-        std::vector<Pair>                         values;
+        struct Pair { std::uint32_t ref; std::string_view lit; std::string_view field; };
+        HashMap<std::string, std::vector<Pair>> keysByLit;   // "<file>@<literal start>" → its `provide` pairs
+        std::vector<Pair>                       values;
+        const auto litKey = [ & ]( const Pair& p )
+        {
+            return std::to_string( m_ing.references[ p.ref ].fileId ) + "@" + std::string( p.lit );
+        };
         for( std::uint32_t i = 0; i < m_ing.references.size(); ++i )
         {
             const Reference& r   = m_ing.references[i];
             const RegLang*   row = r.role == RefRole::Value ? regLang( r.lang ) : nullptr;
             if( row == nullptr || row->form != RegForm::ProviderRecord || isSlotJoinRecord( r ) || r.calleeName.empty() || r.composeRel.size() < 2
-                || r.composeRel[0] != '.' )
+                || r.composeRel[0] != '.' || r.qualifier.size() < 4 || r.qualifier[2] != '@' )
             {
                 continue;
             }
             const std::string_view field = std::string_view( r.composeRel ).substr( 1 );
-            const std::string_view into  = r.fieldName;
-            if( !into.ends_with( r.composeRel ) )
+            if( !std::string_view( r.fieldName ).ends_with( r.composeRel ) )
             {
                 continue;   // the written slot was capped (vrClean): its object is not provable
             }
-            const Pair p{ i, into.substr( 0, into.size() - r.composeRel.size() ), field };
+            const Pair p{ i, std::string_view( r.qualifier ).substr( 3 ), field };
             if( field == row->keyField )
             {
-                keysByFile[ r.fileId ].push_back( p );
+                keysByLit[ litKey( p ) ].push_back( p );
             }
             else if( std::ranges::find( row->valueFields, field ) != row->valueFields.end() )
             {
                 values.push_back( p );
             }
         }
-        constexpr std::uint32_t kSameObjectBytes = 600;   // one object literal's pairs: a capped prefix never joins two objects
-        // the value pairs of one (file, enclosing symbol, prefix) group: two or more are two objects (repeated calls share a prefix)
-        HashMap<std::string, std::uint32_t> valuesIn;
-        const auto                          groupKey = [ & ]( const Pair& p )
-        {
-            const Reference& pr = m_ing.references[ p.ref ];
-            return std::to_string( pr.fileId ) + "#" + std::to_string( pr.fromSymbol ) + "#" + std::string( p.prefix );
-        };
+        HashMap<std::string, std::uint32_t> valuesIn;   // the value pairs of one literal: two or more are not one record
         for( const Pair& v : values )
         {
-            ++valuesIn[ groupKey( v ) ];
+            ++valuesIn[ litKey( v ) ];
         }
-        // the calls of each (file, enclosing symbol, callee name): a callee called twice from one symbol is two objects under one prefix,
-        // and a literal / arrow / absent value records no pair of its own, so the pair counts above cannot see the second object
-        HashMap<std::string, std::uint32_t> callsOf;
-        if( !values.empty() )
-        {
-            for( const Reference& c : m_ing.references )
-            {
-                if( c.role == RefRole::Call && !c.calleeName.empty() && regLang( c.lang ) != nullptr )
-                {
-                    ++callsOf[ std::to_string( c.fileId ) + "#" + std::to_string( c.fromSymbol ) + "#" + c.calleeName ];
-                }
-            }
-        }
-        const auto calledOnce = [ & ]( const Pair& p )
-        {
-            const std::size_t arg = p.prefix.find( "#arg" );
-            if( arg == std::string_view::npos )
-            {
-                return true;   // an array / variable initialiser: its own literal, indexed
-            }
-            const std::string_view callee = p.prefix.substr( 0, arg );
-            const Reference&       pr     = m_ing.references[ p.ref ];
-            const std::size_t      dot    = callee.rfind( '.' );
-            const auto             it     = callsOf.find( std::to_string( pr.fileId ) + "#" + std::to_string( pr.fromSymbol ) + "#"
-                                                        + std::string( dot == std::string_view::npos ? callee : callee.substr( dot + 1 ) ) );
-            return it == callsOf.end() || it->second == 1;   // no call row for the callee (a decorator): nothing says it repeats
-        };
         for( const Pair& v : values )
         {
             const Reference& r  = m_ing.references[ v.ref ];
-            const auto       kf = keysByFile.find( r.fileId );
-            if( kf == keysByFile.end() )
+            const auto       kf = keysByLit.find( litKey( v ) );
+            if( kf == keysByLit.end() || kf->second.size() != 1 || valuesIn[ litKey( v ) ] != 1 )
             {
-                continue;
+                continue;   // no `provide` pair in this literal, or the literal holds two of either: not provably one record
             }
-            const Pair* key = nullptr;
-            std::size_t n   = 0;
-            for( const Pair& k : kf->second )
-            {
-                const Reference& kr = m_ing.references[ k.ref ];
-                if( k.prefix == v.prefix && kr.fromSymbol == r.fromSymbol )
-                {
-                    ++n;
-                    key = &k;
-                }
-            }
-            if( n != 1 || valuesIn[ groupKey( v ) ] != 1 || !calledOnce( v ) )
-            {
-                continue;   // no `provide` pair, or two objects share the prefix: not provably one record
-            }
+            const Pair* key = &kf->second.front();
             const Reference& kr   = m_ing.references[ key->ref ];
-            const std::uint32_t d = kr.startByte > r.startByte ? kr.startByte - r.startByte : r.startByte - kr.startByte;
-            const NodeId     kdef = d <= kSameObjectBytes && !shadowed( kr.fileId, kr.calleeName, kr.startByte, kr.fromSymbol )
-                                    ? resolveIdent( r.fileId, kr.calleeName ) : kNoNode;
+            const NodeId     kdef = !shadowed( kr.fileId, kr.calleeName, kr.startByte, kr.fromSymbol ) ? resolveIdent( r.fileId, kr.calleeName ) : kNoNode;
             if( kdef == kNoNode )
             {
                 continue;

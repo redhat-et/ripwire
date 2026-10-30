@@ -363,7 +363,11 @@ constexpr std::uint32_t kCacheVersion = 46;           // 46: train 40 — lane j
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 277;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 279;          // bump on any grammar/.scm/extraction change
+                                                      // 279 = 2026-10-30 (lane registrar fix round 3, PLACEHOLDER: the train renumbers; 278 is 277's rich tag): a TS/JS Value row
+                                                      //   read from a ProviderRecord object literal carries that literal's start byte (qualifier "<scope><shadow>@<byte>") when the
+                                                      //   literal is a direct call argument or a `const` initialiser; a Python registrar fact is refused unless the method's other
+                                                      //   parameters are provably beside the point (a defaulted one stored into `self` refuses; a subscript key of the store is allowed).
                                                       // 277 = 2026-10-30 (lane registrar fix round 2, PLACEHOLDER: the train renumbers; 276 is 275's rich tag): a Python
                                                       //   lambda parameter / comprehension target files a VarDecl `~name` (kPythonLocalScopePrefix), and a method whose body also
                                                       //   uses another parameter written without a default records no registrar fact.
