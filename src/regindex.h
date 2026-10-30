@@ -224,7 +224,11 @@ private:
     NodeId topLevel( std::uint32_t f, std::string_view name ) const
     {
         const NodeId one = topRaw( f, name );
-        return one == kAmbiguous ? kNoNode : one;
+        if( one == kAmbiguous )
+        {
+            return kNoNode;
+        }
+        return one;
     }
     // File `f` defines `name` at module level (several definitions count: the name IS bound there).
     bool definesTop( std::uint32_t f, std::string_view name ) const { return topRaw( f, name ) != kNoNode; }
