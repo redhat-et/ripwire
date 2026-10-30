@@ -30,7 +30,7 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 302 | 118 | 183 | **119** |
+| 302 | 118 | 184 | **118** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
 are not counted as caps, and 302 + 7 is the 309 constants this generator parses out of `src/`.
@@ -411,7 +411,7 @@ Discloses: **none**
 
 ### `src/fordeclrow.h`
 
-Discloses: **none**
+Discloses: `capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
