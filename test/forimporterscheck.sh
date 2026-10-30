@@ -7,8 +7,9 @@
 #        counted not listed; of=, importers=, test_importers=; closes before </ctx>; well-formed; the legend hedges "not the only"
 #   (f2) "modeled after Model", a code-span name; (f3) "another ... like Model" (the other cue words)
 #   (n1) add-new words but no model named: silent; (n2) a model named but no add-new words: silent; (n3) the add-new words only
-#        inside a code span: silent; (n4) add ... new in another sentence: silent; (n5) a lowercase word after the cue: silent
+#        inside a code span: silent; (n4) add ... new in another sentence: silent; (n5) a lowercase name after the cue: silent
 #   (n6) the model does not resolve: silent; (n7) the model's file has only test importers: silent; (n8) no importer at all: silent
+#   (n9) the model is defined only in a test path: silent
 #   (c1) the cap: 6 rows, importers= the total, shown= and next=--impact=
 #   (s1) --json carries no block; (s2) a token budget carries no block; (x1) MCP `for`: the same element bytes
 set -u
@@ -41,6 +42,10 @@ printf 'export class TestedModel { run(): number { return 2; } }\n' > "$FX/src/c
 printf "import { TestedModel } from '../contrib/tested/tested';\nexport function caseTwo(): number { return new TestedModel().run(); }\n" > "$FX/src/test/tested.test.ts"
 printf 'export class LonelyModel { run(): number { return 3; } }\n' > "$FX/src/contrib/lonely/lonely.ts"
 printf 'export class PopularModel { run(): number { return 4; } }\n' > "$FX/src/contrib/popular/popular.ts"
+printf 'export function helper_fn(): number { return 5; }\n' > "$FX/src/contrib/helper.ts"
+printf "import { helper_fn } from './contrib/helper';\nexport function useHelper(): number { return helper_fn(); }\n" > "$FX/src/usehelper.ts"
+printf 'export class SpecOnlyModel { run(): number { return 6; } }\n' > "$FX/src/test/speconly.ts"
+printf "import { SpecOnlyModel } from './test/speconly';\nexport function useSpec(): number { return new SpecOnlyModel().run(); }\n" > "$FX/src/usespec.ts"
 for i in 0 1 2 3 4 5 6 7; do
     printf "import { PopularModel } from './contrib/popular/popular';\nexport function pop%s(): number { return new PopularModel().run(); }\n" "$i" > "$FX/src/pop$i.ts"
 done
@@ -74,10 +79,11 @@ silent n1 "--for=add a new editor feature following the existing pattern"
 silent n2 "--for=how does BracketModel work, use BracketModel as the model"
 silent n3 '--for=`add a new feature` like BracketModel'
 silent n4 "--for=add logging. The new code should look like BracketModel"
-silent n5 "--for=add a new feature like the bracket one"
+silent n5 "--for=add a new feature like helper_fn"
 silent n6 "--for=add a new feature like NoSuchModel"
 silent n7 "--for=add a new feature like TestedModel"
 silent n8 "--for=add a new feature like LonelyModel"
+silent n9 "--for=add a new feature like SpecOnlyModel"
 run "--for=add a new feature like PopularModel" >"$TMP/c1.xml"
 if python3 - "$TMP/c1.xml" <<'PY'
 import re, sys

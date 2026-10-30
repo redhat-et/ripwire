@@ -8,9 +8,10 @@
 #   (b1) bare subject fires; (b2) a bare name binding several definitions is silent, (b3) the same name WITH a task word fires
 #   (n1) no prototype: silent, task word or bare; (n2) no task word: silent; (n3) the task word only inside a code span: silent
 #   (n4) Python subject: silent; (n5) a prototype only in a test path: silent; (n6) a same-named struct, no callable: silent
+#   (n7) a function wholly in a test path: silent
 #   (c1) the runaway cap: 8 rows, rows= the total, shown= and next=--defs=
 #   (a1) additive: head minus legend + block == the answer's own bytes before them (est_tokens does not move); well-formed
-#   (s1) --json carries no block; (s2) a token budget carries no block; (x1) MCP `for`: the same element bytes
+#   (s1) --json carries no block; (s2) a token budget carries no block; (x1) MCP `for`: the same element bytes; (x2) MCP budget_tokens: none
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
@@ -41,6 +42,8 @@ printf 'int dup_fn( int a, int b ) { return a + b; }\n' > "$FX/dup_b.c"
 printf 'int only_tested( int a );\nint case_one( void ) { return only_tested( 1 ); }\n' > "$FX/tests/t_case.c"
 printf 'int only_tested( int a ) { return a; }\n' > "$FX/impl.c"
 printf 'struct type_only { int a; };\n' > "$FX/types.c"
+printf 'int test_only_fn( int a );\n' > "$FX/tests/t_only.h"
+printf '#include "t_only.h"\nint test_only_fn( int a ) { return a; }\n' > "$FX/tests/t_only.c"
 printf 'def py_fn(a):\n    return a\n\ndef py_user():\n    return py_fn(1)\n' > "$FX/mod.py"
 : > "$FX/many.h"
 for i in 0 1 2 3 4 5 6 7 8 9; do
@@ -81,6 +84,7 @@ silent n4 "--for=add a new argument to py_fn"
 silent n4 "--for=py_fn"
 silent n5 "--for=add a new argument to only_tested"
 silent n6 "--for=change the signature of type_only"
+silent n7 "--for=add a new argument to test_only_fn"
 run "--for=change the signature of many_fn" >"$TMP/c1.xml"
 if python3 - "$TMP/c1.xml" <<'PY'
 import re, sys
@@ -116,5 +120,8 @@ for line in sys.stdin:
 ' >"$TMP/x1.xml"
 if [ -n "$( grep -o '<decl_rows.*</decl_rows>' "$TMP/w1.xml" )" ] && [ "$( grep -o '<decl_rows.*</decl_rows>' "$TMP/x1.xml" )" = "$( grep -o '<decl_rows.*</decl_rows>' "$TMP/w1.xml" )" ]
 then ok "(x1) MCP for: the same element bytes"; else no "(x1) MCP: $( grep -o '<decl_rows.*' "$TMP/x1.xml" | head -c 300 )"; fi
+printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new argument to run_it","budget_tokens":4000}}}\n' "$FX" \
+  | ( cd "$FX" || exit 1; "$BIN" --mcp 2>/dev/null ) >"$TMP/x2.json"
+if grep -q '<ctx' "$TMP/x2.json" && ! grep -q 'decl_rows' "$TMP/x2.json"; then ok "(x2) MCP budget_tokens: no block"; else no "(x2) MCP budget"; fi
 [ "$fail" = 0 ] && echo "fordeclrowcheck: PASS" || echo "fordeclrowcheck: FAIL"
 exit "$fail"
