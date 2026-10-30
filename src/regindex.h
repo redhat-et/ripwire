@@ -164,6 +164,10 @@ private:
     // "fileId#name" → the function scopes writing `name` locally (a parameter, a loop variable, an assignment)
     struct Shadow { std::uint32_t start; std::uint32_t end; NodeId scope; bool fn; };
     HashMap<std::string, std::vector<Shadow>>   m_shadows;
+    // "fileId#name" → module-scope writes of `name` in a Python file (an assignment, a def, a for / with target: a VarDecl rebind
+    // fact past byte 0)
+    HashMap<std::string, std::uint32_t>         m_modWrites;
+    std::vector<char>                           m_pyFile;     // fileId → 1 python, 2 not, 0 not asked yet
     mutable HashMap<std::string, char>          m_cut;        // names whose re-export chain was cut at kRegReexportDepth
 
     static constexpr NodeId kAmbiguous = kNoNode - 1;
@@ -188,19 +192,38 @@ private:
         {
             m_fileIndex.emplace( lexicalNormalize( rootRelPath( m_ing, f ) ), f );
         }
+        m_pyFile.assign( m_ing.files.size(), 0 );
         for( const Binding& b : m_ing.bindings )
         {
             if( b.kind == LocalBindKind::Import || b.kind == LocalBindKind::JsImport )
             {
-                m_imports[ b.fileId ].push_back( &b );
+                // a Python import inside a def / class body binds the name there only: a shadow of the module-level key, never a file import
+                const NodeId sc = b.kind == LocalBindKind::Import ? pythonBindScope( m_ing, b ) : kNoNode;
+                if( sc != kNoNode && sc < m_ing.symbols.size() && !b.var.empty() )
+                {
+                    addShadow( b, sc, b.var );
+                }
+                else
+                {
+                    m_imports[ b.fileId ].push_back( &b );
+                }
             }
             else if( b.kind == LocalBindKind::VarDecl && !b.var.empty() )
             {
-                const NodeId sc = pythonBindScope( m_ing, b );   // the enclosing def / class; kNoNode: module scope (not a shadow)
-                if( sc != kNoNode && sc < m_ing.symbols.size() )
+                const bool             local = b.var.starts_with( kPythonLocalScopePrefix );   // a lambda parameter / comprehension target
+                const std::string_view name  = local ? std::string_view( b.var ).substr( kPythonLocalScopePrefix.size() ) : std::string_view( b.var );
+                const NodeId           sc    = pythonBindScope( m_ing, b );   // the enclosing def / class; kNoNode: module scope
+                if( local && b.spanEnd > b.spanStart )
                 {
-                    const Symbol& fs = m_ing.symbols[sc];
-                    m_shadows[ fk( b.fileId, b.var ) ].push_back( { fs.sigStartByte, fs.endByte, sc, fs.kind != SymKind::Class } );
+                    m_shadows[ fk( b.fileId, name ) ].push_back( { b.spanStart, b.spanEnd, kNoNode, true } );   // the lambda / comprehension itself
+                }
+                else if( sc != kNoNode && sc < m_ing.symbols.size() )
+                {
+                    addShadow( b, sc, name );
+                }
+                else if( !local && b.startByte > 0 && b.fileId < m_pyFile.size() && !b.var.starts_with( kPythonCondDefPrefix ) && isPyFile( b.fileId ) )
+                {
+                    ++m_modWrites[ fk( b.fileId, name ) ];   // `global K` (byte 0) is not a write here
                 }
             }
             else if( b.kind == LocalBindKind::Type && !b.typeName.empty()
@@ -218,6 +241,28 @@ private:
                 m_regFacts[ r.fromSymbol ].push_back( r.argCount );
             }
         }
+    }
+
+    void addShadow( const Binding& b, NodeId sc, std::string_view name )
+    {
+        const Symbol& fs = m_ing.symbols[sc];
+        m_shadows[ fk( b.fileId, name ) ].push_back( { fs.sigStartByte, fs.endByte, sc, fs.kind != SymKind::Class } );
+    }
+    bool isPyFile( std::uint32_t f )
+    {
+        char& c = m_pyFile[f];
+        if( c == 0 )
+        {
+            c = isPythonSourcePath( rootRelPath( m_ing, f ) ) ? char( 1 ) : char( 2 );
+        }
+        return c == 1;
+    }
+    // Module scope of Python file `f` writes `name` beyond its one definition (a second assignment, a `for` / `with` target, a def):
+    // `name` at any site of the file may then be another object.
+    bool moduleRebound( std::uint32_t f, std::string_view name ) const
+    {
+        const auto w = m_modWrites.find( fk( f, name ) );
+        return w != m_modWrites.end() && w->second >= ( definesTop( f, name ) ? 2u : 1u );
     }
 
     // The one module-level definition `name` has in file `f` (kNoNode: none, or several).
@@ -272,8 +317,11 @@ private:
             }
             const bool          js   = b->kind == LocalBindKind::JsImport;
             const std::uint32_t mf   = moduleFile( f, b->typeName, !js );
-            const std::string_view there = js && !b->importedName.empty() ? std::string_view( b->importedName ) : name;
-            NodeId              def  = mf == kNoFile || mf == f ? kNoNode
+            // the name the imported module defines: JS `import { a as b }` → a; Python `from m import a as b` → a (never the alias)
+            const std::string_view there = js ? ( b->importedName.empty() ? name : std::string_view( b->importedName ) )
+                                       : b->importedName.starts_with( kPythonFromMemberMark ) ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : name;
+            const bool          pyModule = !js && b->importedName == "module";   // `import m as K` binds a module, not a name of it
+            NodeId              def  = mf == kNoFile || mf == f || pyModule ? kNoNode
                                      : depth < kRegReexportDepth ? resolveIdent( mf, there, depth + 1 ) : topLevel( mf, there );
             if( def == kNoNode && depth >= kRegReexportDepth && mf != kNoFile && mf != f && importsName( mf, there ) )
             {
@@ -293,10 +341,33 @@ private:
         const auto imp = m_imports.find( f );
         return imp != m_imports.end() && std::ranges::any_of( imp->second, [ & ]( const Binding* b ) { return b != except && b->var == name; } );
     }
+    // File `pkg` binds `member` by an import other than `except` that is not the submodule `sub` itself (`from . import member` in a
+    // package __init__ binds the submodule: the attribute and the submodule are one file).
+    bool bindsOtherThanSubmodule( std::uint32_t pkg, std::string_view member, const Binding* except, std::uint32_t sub ) const
+    {
+        const auto imp = m_imports.find( pkg );
+        return imp != m_imports.end() && std::ranges::any_of( imp->second, [ & ]( const Binding* b )
+        {
+            if( b == except || b->var != member )
+            {
+                return false;
+            }
+            if( b->kind != LocalBindKind::Import || b->importedName == "module" || b->importedName.starts_with( kPythonFromMemberMark ) || sub == kNoFile )
+            {
+                return true;
+            }
+            const std::string here = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+            return moduleFile( pkg, here, true ) != sub;
+        } );
+    }
     // Does function `from`'s code at `byte` of file `f` write `name` locally (a parameter, loop variable, assignment)? Then `name`
     // there is not the module-level key. A class body shadows only its own statements, a def its whole extent (nested defs too).
     bool shadowed( std::uint32_t f, std::string_view name, std::uint32_t byte, NodeId from ) const
     {
+        if( moduleRebound( f, name ) )
+        {
+            return true;
+        }
         const auto it = m_shadows.find( fk( f, name ) );
         return it != m_shadows.end()
             && std::ranges::any_of( it->second, [ & ]( const Shadow& w ) { return w.start <= byte && byte <= w.end && ( w.fn || w.scope == from ); } );
@@ -340,12 +411,12 @@ private:
                 const std::string_view member = b->importedName.starts_with( kPythonFromMemberMark )
                                                     ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : mod;
                 const std::uint32_t    pkg    = moduleFile( f, b->typeName, true );
-                if( pkg != kNoFile && ( ( pkg != f && definesTop( pkg, member ) ) || importsName( pkg, member, b ) ) )
+                const std::string      sub    = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+                mf                            = moduleFile( f, sub, true );
+                if( pkg != kNoFile && ( ( pkg != f && definesTop( pkg, member ) ) || bindsOtherThanSubmodule( pkg, member, b, mf ) ) )
                 {
                     return kNoNode;   // the package's own attribute `member` wins over its submodule (a namespace package has none)
                 }
-                const std::string sub = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
-                mf                    = moduleFile( f, sub, true );
             }
             const NodeId def = mf == kNoFile ? kNoNode : topLevel( mf, name );
             if( def == kNoNode || ( found != kNoNode && found != def ) )
@@ -495,6 +566,33 @@ private:
         {
             ++valuesIn[ groupKey( v ) ];
         }
+        // the calls of each (file, enclosing symbol, callee name): a callee called twice from one symbol is two objects under one prefix,
+        // and a literal / arrow / absent value records no pair of its own, so the pair counts above cannot see the second object
+        HashMap<std::string, std::uint32_t> callsOf;
+        if( !values.empty() )
+        {
+            for( const Reference& c : m_ing.references )
+            {
+                if( c.role == RefRole::Call && !c.calleeName.empty() && regLang( c.lang ) != nullptr )
+                {
+                    ++callsOf[ std::to_string( c.fileId ) + "#" + std::to_string( c.fromSymbol ) + "#" + c.calleeName ];
+                }
+            }
+        }
+        const auto calledOnce = [ & ]( const Pair& p )
+        {
+            const std::size_t arg = p.prefix.find( "#arg" );
+            if( arg == std::string_view::npos )
+            {
+                return true;   // an array / variable initialiser: its own literal, indexed
+            }
+            const std::string_view callee = p.prefix.substr( 0, arg );
+            const Reference&       pr     = m_ing.references[ p.ref ];
+            const std::size_t      dot    = callee.rfind( '.' );
+            const auto             it     = callsOf.find( std::to_string( pr.fileId ) + "#" + std::to_string( pr.fromSymbol ) + "#"
+                                                        + std::string( dot == std::string_view::npos ? callee : callee.substr( dot + 1 ) ) );
+            return it == callsOf.end() || it->second == 1;   // no call row for the callee (a decorator): nothing says it repeats
+        };
         for( const Pair& v : values )
         {
             const Reference& r  = m_ing.references[ v.ref ];
@@ -514,7 +612,7 @@ private:
                     key = &k;
                 }
             }
-            if( n != 1 || valuesIn[ groupKey( v ) ] != 1 )
+            if( n != 1 || valuesIn[ groupKey( v ) ] != 1 || !calledOnce( v ) )
             {
                 continue;   // no `provide` pair, or two objects share the prefix: not provably one record
             }

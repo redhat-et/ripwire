@@ -34,6 +34,11 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-30, lane registrar fix round 2 (same base; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the fix-1 pin
+#   -> the pin above). Watched text: kParserVer 275 -> 277 (rich 278; 276 is 275's rich tag): a Python lambda parameter / comprehension
+#   target files a VarDecl `~name` (kPythonLocalScopePrefix, with the span it is local to), and a method whose body also uses another
+#   parameter written without a default records no registrar fact; quality.h's kIngestParserVerMirror with it. kCacheVersion stays 46
+#   and kQSnapCacheScheme stays 24: no record changes shape and no watched quality.h function moved.
 # 2026-10-30, lane registrar fix round 1 (base main 26e0fefc; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the
 #   lane's 269 -> 273 bump had not re-pinned). Watched text: kParserVer 269 -> 275 (rich 276; 274 is 273's rich tag): Python files record
 #   registrar facts (a method parameter stored into a container a field of self holds; a parameter written with a default records none),

@@ -1683,6 +1683,10 @@ struct RubyMainMixinRow
 // (`?f`). No identifier starts with it, so no name lookup ever matches the record; graph.h pythonRenamedImportPin reads it as "f may
 // be unbound", the case where a module `__getattr__` (PEP 562, consulted only for names the module lacks) answers instead.
 inline constexpr std::string_view kPythonCondDefPrefix = "?";
+// A Python lambda parameter or comprehension target `K` files a VarDecl spelled `~K` at the lambda / comprehension (its enclosing def's
+// scope, else module scope). No identifier starts with it, so no name lookup ever matches the record; src/regindex.h reads it as "K is
+// another variable here" (a registrar key named like a lambda parameter is not the key).
+inline constexpr std::string_view kPythonLocalScopePrefix = "~";
 
 struct Binding
 {

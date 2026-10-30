@@ -3447,6 +3447,47 @@ inline void capturePythonRebindShadowDecls( TSNode n, const char* t, std::uint32
         emitAll( n, ts_node_start_byte( n ) );
         return;
     }
+    if( kindIs( t, "for_in_clause" ) )   // a comprehension target: local to the comprehension, filed as `~name` (kPythonLocalScopePrefix)
+    {
+        targets.clear();
+        collectPythonNameTargets( fieldChild( n, NodeField::Left ), targets );
+        for( const TSNode& id : targets )
+        {
+            const TSNode scope = ts_node_parent( n );   // the comprehension the clause belongs to: the span the target is local to
+            pushRawBind( fileId, lang, std::string{ kPythonLocalScopePrefix }.append( nodeTextOf( id, src ) ), std::string{},
+                         BindSite{ ts_node_start_byte( n ), ts_node_start_byte( scope ), ts_node_end_byte( scope ) }, LocalBindKind::VarDecl, binds );
+        }
+        return;
+    }
+    if( kindIs( t, "lambda" ) )   // a lambda parameter, filed as `~name`
+    {
+        const TSNode params = fieldChild( n, NodeField::Parameters );
+        const std::uint32_t cc = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params );
+        for( std::uint32_t i = 0; i < cc; ++i )
+        {
+            const TSNode p  = ts_node_named_child( params, i );
+            const char*  pt = ts_node_type( p );
+            TSNode       ident{};
+            if( kindIs( pt, "identifier" ) )
+            {
+                ident = p;
+            }
+            else if( kindIs( pt, "default_parameter" ) )
+            {
+                ident = fieldChild( p, NodeField::Name );
+            }
+            else if( kindIs( pt, "list_splat_pattern" ) || kindIs( pt, "dictionary_splat_pattern" ) )
+            {
+                ident = ts_node_named_child( p, 0 );
+            }
+            if( !ts_node_is_null( ident ) && kindIs( ts_node_type( ident ), "identifier" ) )
+            {
+                pushRawBind( fileId, lang, std::string{ kPythonLocalScopePrefix }.append( nodeTextOf( ident, src ) ), std::string{},
+                             BindSite{ ts_node_start_byte( n ), ts_node_start_byte( n ), ts_node_end_byte( n ) }, LocalBindKind::VarDecl, binds );
+            }
+        }
+        return;
+    }
     if( kindIs( t, "named_expression" ) )   // walrus `(tm := …)` — the grammar allows only a bare name here
     {
         const TSNode nm = fieldChild( n, NodeField::Name );

@@ -1095,6 +1095,62 @@ private:
         return at != names.end() && defaulted[ static_cast<std::size_t>( at - names.begin() ) ];
     }
 
+    // Python: does method `fn`'s body use (as a name; an attribute or keyword name is not a use) a parameter other than `self` and `keep`
+    // that is written WITHOUT a default? Then the one parameter a store shows is not provably the registered value (the receiver may be
+    // the one `wrap( receiver )` consumed). A body too large to scan counts as a use.
+    bool pyOtherParamUsed( TSNode fn, std::string_view keep ) const
+    {
+        const TSNode params = child( fn, m_fParameters );
+        const TSNode body   = fieldChild( fn, NodeField::Body );
+        if( ts_node_is_null( params ) || ts_node_is_null( body ) )
+        {
+            return false;
+        }
+        std::vector<bool> defaulted;
+        const auto        names = pyParamNames( params, &defaulted );
+        std::vector<std::string_view> others;
+        for( std::size_t k = 1; k < names.size(); ++k )   // names[0] is self
+        {
+            if( !names[k].empty() && names[k] != keep && !defaulted[k] )
+            {
+                others.push_back( names[k] );
+            }
+        }
+        if( others.empty() )
+        {
+            return false;
+        }
+        constexpr std::size_t kScanCap = 4096;
+        std::vector<TSNode>   stack{ body };
+        for( std::size_t seen = 0; !stack.empty(); ++seen )
+        {
+            if( seen > kScanCap )
+            {
+                return true;
+            }
+            const TSNode cur = stack.back();
+            stack.pop_back();
+            if( kindIs( ts_node_type( cur ), "identifier" ) )
+            {
+                const TSNode parent = ts_node_parent( cur );
+                const bool   label  = !ts_node_is_null( parent )
+                    && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), cur ) )
+                         || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), cur ) ) );
+                if( !label && std::ranges::find( others, text( cur ) ) != others.end() )
+                {
+                    return true;
+                }
+                continue;
+            }
+            const std::uint32_t cc = ts_node_named_child_count( cur );
+            for( std::uint32_t k = 0; k < cc; ++k )
+            {
+                stack.push_back( ts_node_named_child( cur, k ) );
+            }
+        }
+        return false;
+    }
+
     // The positional parameter names of a function-like node, in order, and its own name.
     void functionSignature( TSNode fn, const char* t, VrScope& s ) const
     {
@@ -2076,7 +2132,8 @@ private:
     //   an argument of `self.<field>.<store>( … )` (store one of the language row's containerStores), or
     //   the right side of `self.<field>[ … ] = …`.
     // Records the fact (method, parameter position after self, field). A parameter with a default value (`sender=None`) records
-    // nothing: it is an option stored beside the receiver, and a positional argument there is not a registered value. Anything else — a store into a local, a store through
+    // nothing: it is an option stored beside the receiver, and a positional argument there is not a registered value. Nor does a
+    // method whose body also uses another parameter written without a default (pyOtherParamUsed). Anything else — a store into a local, a store through
     // another object, a call of the parameter — records nothing (no fact: never a registrar).
     void paramRegFact( std::size_t i, std::size_t d, std::string_view name )
     {
@@ -2097,6 +2154,10 @@ private:
         if( pyParamHasDefault( sc.node, name ) )
         {
             return;   // `sender=None`, `weak=True`: an option the registrar stores beside the receiver, never the registered value
+        }
+        if( pyOtherParamUsed( sc.node, name ) )
+        {
+            return;   // `self.rx.append( wrap( receiver ) ); self.fl.append( sender )`: the stored one may be the option, not the value
         }
         std::size_t j = i;
         while( j > 1 && ( kindIs( m_anc[j - 1].kind, "tuple" ) || kindIs( m_anc[j - 1].kind, "list" )

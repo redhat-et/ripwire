@@ -459,6 +459,104 @@ printf 'from dispatch import Signal\n\nbus = Signal()\n' > "$TMP/d1e/sigs.py"
 run d1e "$TMP/d1e" -- --for="which receivers are connected to bus"
 if nx=$( chk attr "$TMP/d1e.xml" bus next ) && [ "$nx" = "--grep=bus" ] && sh -n -c "x $nx" 2>/dev/null && [ "$( chk attr "$TMP/d1e.xml" bus capped )" = 1 ]; then ok "D1e capped row: next=--grep=bus, sh -n clean"; else no "D1e next= ($( chk attr "$TMP/d1e.xml" bus next 2>&1 ))"; fi
 
+# ── fix round 2 (review rv-registrar-delta; every [P] arm below is RED on 820946ee) ─────────────────────────────────────────────
+# F1 [P]: an aliased Python from-import is looked up under the written name in its module, never under the alias
+mk f1a
+printf 'from dispatch import Signal\n\npre_save = Signal()\npost_save = Signal()\n' > "$TMP/f1a/s.py"
+printf 'from s import post_save as pre_save\n\ndef h1(): pass\ndef h2(): pass\n\npre_save.connect(h1)\npre_save.connect(h2)\n' > "$TMP/f1a/app.py"
+printf 'from s import pre_save\n\ndef h3(): pass\ndef h4(): pass\n\npre_save.connect(h3)\npre_save.connect(h4)\n' > "$TMP/f1a/other.py"
+run f1a "$TMP/f1a" -- --for="which receivers are connected to pre_save and post_save"
+if out=$( chk row "$TMP/f1a.xml" pre_save n=2 h3 h4 ) && out=$( chk row "$TMP/f1a.xml" post_save n=2 h1 h2 ); then ok "F1 aliased from-import: post_save's handlers never list under pre_save (and list under post_save)"; else no "F1 $out"; fi
+mk f1b
+printf '\nclass Plain:\n    def connect(self, cb):\n        return cb\n' >> "$TMP/f1b/dispatch.py"
+printf 'from dispatch import Plain as Signal\n\nK = Signal()\n\ndef a1(): pass\ndef a2(): pass\n\nK.connect(a1)\nK.connect(a2)\n' > "$TMP/f1b/use.py"
+run f1b "$TMP/f1b" -- --for="which receivers are connected to K"
+if out=$( chk nokey "$TMP/f1b.xml" K ); then ok "F1b 'from dispatch import Plain as Signal': Plain's connect stores nothing, no row and no false by="; else no "F1b $out"; fi
+
+# F2 [P]: a value is never paired with another object's provide, whatever the other object's value looks like (a literal, an arrow, none)
+mkdir -p "$TMP/f2"
+printf "export class InjectionToken<T> { constructor(public desc: string) {} }\n" > "$TMP/f2/it.ts"
+printf "import { InjectionToken } from './it';\n" > "$TMP/f2/tokens.ts"
+: > "$TMP/f2/cl.ts"
+printf "import { PA, PB, PC, PD, PE, PF } from './tokens';\nimport { HA, HB, HC, HD, HE, GF } from './cl';\nexport function register(p: any) { return p; }\nexport function makeProviders(p: any[]) { return p; }\nexport const svc = { register(p: any) { return p; } };\n" > "$TMP/f2/app.ts"
+for t in A B C D E F; do
+    printf "export const P%s = new InjectionToken<any>('p%s');\n" "$t" "$t" >> "$TMP/f2/tokens.ts"
+    printf "export class D%s {}\nexport class Z%s {}\nexport class H%s {}\nexport class G%s {}\n" "$t" "$t" "$t" "$t" >> "$TMP/f2/cl.ts"
+    printf "import { P%s } from './tokens';\nimport { D%s, Z%s } from './cl';\nexport const BASE_%s = [{ provide: P%s, useClass: D%s, multi: true }];\nexport const MORE_%s = [{ provide: P%s, useClass: Z%s, multi: true }];\n" "$t" "$t" "$t" "$t" "$t" "$t" "$t" "$t" "$t" > "$TMP/f2/base_$t.ts"
+done
+cat >> "$TMP/f2/app.ts" <<'EOF'
+export function wireA() {
+  register({ provide: PA, useValue: 42 });
+  register({ provide: 'str', useClass: HA });
+}
+export function wireB() {
+  register({ provide: PB, useFactory: () => 1 });
+  register({ useClass: HB });
+}
+export function wireC() {
+  makeProviders([{ provide: PC, useValue: 'x' }]);
+  makeProviders([{ provide: 'other', useClass: HC }]);
+}
+export function wireD() {
+  register({ provide: PD });
+  register({ useClass: HD });
+}
+export function wireE() {
+  svc.register({ provide: PE, useValue: 1 });
+  svc.register({ useClass: HE });
+}
+export function wireF() {
+  register({ provide: PF, useClass: GF, multi: true });
+}
+EOF
+f2bad=""
+for t in A B C D E F; do run "f2$t" "$TMP/f2" -- --for="which classes are provided for P$t"; done
+for t in A B C D E; do out=$( chk row "$TMP/f2$t.xml" P$t n=2 D$t Z$t ) || f2bad="$f2bad P$t: $out;"; done
+if [ -z "$f2bad" ]; then ok "F2 a value never pairs with another object's provide (literal useValue, arrow useFactory, bare provide, array form, member call)"; else no "F2 $f2bad"; fi
+if out=$( chk row "$TMP/f2F.xml" PF n=3 GF DF ZF ); then ok "F2b twin: ONE register call in a function still lists its own class"; else no "F2b $out"; fi
+
+# F3 [P]: binders with no assignment-shaped fact (function-local import, comprehension target, lambda parameter), and module-level for / with
+mkf3(){   # NAME BODY: mod.py defines K = Signal(), connects h1 h2, then BODY
+    mk "f3_$1"
+    printf 'from dispatch import Signal\n\nK = Signal()\nZ = Signal()\n' > "$TMP/f3_$1/other.py"
+    printf 'from dispatch import Signal\n\ndef h1(): pass\ndef h2(): pass\ndef h3(): pass\n\nK = Signal()\nK.connect(h1)\nK.connect(h2)\n%b' "$2" > "$TMP/f3_$1/mod.py"
+}
+mkf3 base ''
+mkf3 localimp '\ndef f():\n    from other import K\n    K.connect(h3)\n'
+mkf3 localimpas '\ndef f():\n    from other import Z as K\n    K.connect(h3)\n'
+mkf3 localimpmod '\ndef f():\n    import other as K\n    K.connect(h3)\n'
+mkf3 compr '\ndef f(xs):\n    return [K.connect(h3) for K in xs]\n'
+mkf3 lam '\nlam = lambda K: K.connect(h3)\n'
+mkf3 modfor '\nfor K in (Signal(), Signal()):\n    K.connect(h3)\n'
+mkf3 modwith '\nwith open("x") as K:\n    K.connect(h3)\n'
+f3bad=""
+for c in base localimp localimpas localimpmod compr lam modfor modwith; do
+    run "f3_$c" "$TMP/f3_$c" -- --for="which receivers are connected to K"
+done
+if out=$( chk row "$TMP/f3_base.xml" K n=2 h1 h2 ); then ok "F3 twin: module-level connects list (h1 h2)"; else no "F3 twin $out"; fi
+for c in localimp localimpas localimpmod compr lam; do out=$( chk row "$TMP/f3_$c.xml" K n=2 h1 h2 ) || f3bad="$f3bad $c: $out;"; done
+if [ -z "$f3bad" ]; then ok "F3 a function-local import / comprehension target / lambda parameter named like the key is not the key (h3 never listed)"; else no "F3 $f3bad"; fi
+f3bad=""
+for c in modfor modwith; do out=$( chk nosym "$TMP/f3_$c.xml" h3 ) || f3bad="$f3bad $c: $out;"; done
+if [ -z "$f3bad" ]; then ok "F3 a module-level for / with target named like the key: h3 never listed under the module key"; else no "F3 $f3bad"; fi
+
+# F4 [P]: a required stored parameter beside a wrapped one is not the receiver
+mk f4
+printf 'import weakref\n\ndef wrap(f):\n    return f\n\nclass Reg:\n    def __init__(self):\n        self.rx = []\n        self.fl = []\n\n    def connect(self, receiver, sender):\n        self.rx.append(wrap(receiver))\n        self.fl.append(sender)\n\nclass Reg2:\n    def __init__(self):\n        self.rx = []\n        self.fl = []\n\n    def connect(self, receiver, sender):\n        self.rx.append(weakref.ref(receiver))\n        self.fl.append(sender)\n\nclass Reg3:\n    def __init__(self):\n        self.rx = []\n\n    def connect(self, receiver, tag):\n        self.rx.append(receiver)\n' > "$TMP/f4/reg.py"
+printf 'from reg import Reg, Reg2, Reg3\n\nclass Foo: pass\nclass Bar: pass\ndef h1(): pass\ndef h2(): pass\ndef h3(): pass\ndef h4(): pass\ndef h5(): pass\ndef h6(): pass\n\nsaved = Reg()\nsaved.connect(h1, Foo)\nsaved.connect(h2, Bar)\nweak = Reg2()\nweak.connect(h3, Foo)\nweak.connect(h4, Bar)\nplain = Reg3()\nplain.connect(h5, 1)\nplain.connect(h6, 2)\n' > "$TMP/f4/use.py"
+for k in saved weak plain; do run "f4$k" "$TMP/f4" -- --for="which receivers are connected to $k"; done
+if out=$( chk nokey "$TMP/f4saved.xml" saved ); then ok "F4 a required stored sender beside wrap( receiver ): no row (Foo, Bar never receivers)"; else no "F4 $out"; fi
+if out=$( chk nokey "$TMP/f4weak.xml" weak ); then ok "F4w a required stored sender beside weakref.ref( receiver ): no row"; else no "F4w $out"; fi
+if out=$( chk row "$TMP/f4plain.xml" plain n=2 h5 h6 ); then ok "F4b twin: an unused extra parameter does not block the registrar"; else no "F4b $out"; fi
+
+# N1: `from . import signals` in the package __init__ binds the submodule itself: the row is kept
+mk n1; mkdir -p "$TMP/n1/pkg"
+printf 'from . import signals\n' > "$TMP/n1/pkg/__init__.py"
+printf 'from dispatch import Signal\n\nK = Signal()\n' > "$TMP/n1/pkg/signals.py"
+printf 'from pkg import signals\n\ndef h1(): pass\ndef h2(): pass\n\nsignals.K.connect(h1)\nsignals.K.connect(h2)\n' > "$TMP/n1/use.py"
+run n1 "$TMP/n1" -- --for="which receivers are connected to K"
+if out=$( chk row "$TMP/n1.xml" K n=2 h1 h2 ); then ok "N1 'from . import signals' in the package __init__ keeps the submodule row"; else no "N1 $out"; fi
+
 run f1 "$PY" RIPWIRE_NO_REG_ROWS=1 -- --for="$Q_PY"
 chk strip "$TMP/p1.xml" "$TMP/p1.strip"; chk strip "$TMP/f1.xml" "$TMP/f1.strip"
 if chk none "$TMP/f1.xml" >/dev/null && cmp -s "$TMP/p1.strip" "$TMP/f1.strip"; then ok "F1 handle off: no rows, the rest byte-identical"; else no "F1 handle-off answer differs beyond the rows"; diff <( tr '>' '\n' <"$TMP/p1.strip" ) <( tr '>' '\n' <"$TMP/f1.strip" ) | head -5; fi
