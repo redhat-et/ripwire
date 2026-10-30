@@ -485,7 +485,7 @@ import sys
 p=sys.argv[1]; a=open(p,encoding="utf-8").read(); c=" rows_capped=: 1 = cut."
 sys.exit(0 if c in a and open(p,"w",encoding="utf-8").write(a.replace(c,"",1)) else 1)
 PY
-[ $? = 0 ] && ok "X4 --callers capped: the legend layer documents rows_capped=" || no "X4 --callers capped: rows_capped= clause missing"
+if [ $? = 0 ]; then ok "X4 --callers capped: the legend layer documents rows_capped="; else no "X4 --callers capped: rows_capped= clause missing"; fi
 if minus "$TMP/c2" "$TMP/c2off"; then ok "X4 --callers capped: minus the element and its clause == OFF"; else no "X4 --callers capped element moved other bytes"; fi
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/k1" 2>/dev/null; then ok "X2 xmllint well-formed"; else no "X2 not well-formed"; fi
