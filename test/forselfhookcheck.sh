@@ -29,7 +29,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 echo "forselfhookcheck: BIN=$BIN"
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
@@ -557,13 +557,14 @@ for k in range( 6 ):
     open( f"{root}/impl{k}.py", "w" ).write( f"from base import Base\n\nclass Impl{k}(Base):\n    def process_item(self):\n        total = 0\n{filler}        return total\n" )
 PY
 run u "--for=how do impl classes process items" --auto-bodies >"$TMP/u"
-python3 - "$TMP/u" <<'PY' && ok "(U) every selfhook row names a body the answer printed, and one candidate was cut" || no "(U) a selfhook row names a body the answer did not print, or the fixture no longer cuts one"
+python3 - "$TMP/u" <<'PY'
 import re, sys
 t = open( sys.argv[1], encoding="utf-8", errors="replace" ).read()
 hooks = set( re.findall( r'<selfhook n="[^"]*" p="([^":]+):', t ) )
 bodies = set( re.findall( r'<b [^>]*p="([^"]+)" n="process_item"', t ) )
 sys.exit( 0 if hooks and hooks <= bodies and len( bodies ) < 6 else 1 )
 PY
+if [ $? -eq 0 ]; then ok "(U) every selfhook row names a body the answer printed, and one candidate was cut"; else no "(U) a selfhook row names a body the answer did not print, or the fixture no longer cuts one"; fi
 
 # ── E ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run a "--for=what calls One.step" --legend=full >"$TMP/full"
@@ -572,9 +573,9 @@ for a in total shown capped n p overrides op tied abstract hook defs test sites 
     grep -qE "; selfhooks ([^;]*[ (,])?$a=" "$TMP/full" || no "(E1) the full clause does not define $a="
     grep -qE "; selfhooks ([^;]*[ (,])?$a=" "$TMP/compact" || no "(E1) the compact clause does not define $a="
 done
-grep -q 'never an edge' "$TMP/full" && grep -q 'other subclasses may run' "$TMP/full" && grep -q 'other subclasses may run' "$TMP/compact" && ok "(E2) both clauses carry the hedge" || no "(E2) the hedge is missing from a clause"
+if grep -q 'never an edge' "$TMP/full" && grep -q 'other subclasses may run' "$TMP/full" && grep -q 'other subclasses may run' "$TMP/compact"; then ok "(E2) both clauses carry the hedge"; else no "(E2) the hedge is missing from a clause"; fi
 ( cd "$F/a" && RIPWIRE_NO_SELF_HOOK=1 "$BIN" "$F/a" --no-cache "--for=what calls One.step" 2>/dev/null </dev/null ) >"$TMP/off"
-python3 - "$TMP/compact" "$TMP/off" <<'PY' && ok "(E3) the answer minus the element and its clause is the switched-off answer byte for byte; est_tokens grew" || no "(E3) a byte other than the element, the clause and est_tokens moved"
+python3 - "$TMP/compact" "$TMP/off" <<'PY'
 import re, sys
 on, off = ( open( f, encoding="utf-8", errors="replace" ).read() for f in sys.argv[1:3] )
 s = re.sub( r'<selfhooks [^>]*>.*?</selfhooks>', '', on, flags=re.S )
@@ -583,6 +584,7 @@ e = lambda t: int( re.search( r'est_tokens="(\d+)"', t ).group( 1 ) )
 m = lambda t: re.sub( r' est_tokens="\d+"', '', t )
 sys.exit( 0 if m( s ) == m( off ) and e( on ) > e( off ) else 1 )
 PY
+if [ $? -eq 0 ]; then ok "(E3) the answer minus the element and its clause is the switched-off answer byte for byte; est_tokens grew"; else no "(E3) a byte other than the element, the clause and est_tokens moved"; fi
 if has "$( run a "--for=what calls One.step" --legend=full | hook )" '<selfhook n="One.step"'; then ok "(E4) the element rides with --legend=full"; else no "(E4) no element under --legend=full"; fi
 # abstract=1 reads the base definition; tied= reads two bases at one depth
 mk e/base.py <<'E'
