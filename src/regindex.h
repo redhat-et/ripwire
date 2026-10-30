@@ -33,9 +33,9 @@
 // exist; it is not proof the receiver ran. weak=/dispatch_uid=/multi semantics are not read. Test registrations are counted,
 // not listed. Nothing here enters reaches=, a count, or the call graph.
 //
-// GATE (L-B, present-only): a key prints only when the question names the key or one of its non-test registered names, or a SHOWN
-// ranked row is a consumer of the key (the function that sends through it / the constructor that injects it, or that consumer's
-// class); and only with >= 2 non-test registrations, or >= 1 with a shown consumer. When the question names some key, only the
+// GATE (L-B, present-only): a key prints only with >= 2 non-test registrations, and only when the question names the key or one of
+// its non-test registered names, or a SHOWN ranked row is a consumer of the key (the function that sends through it / the
+// constructor that injects it, or that consumer's class) AND the question shares a word with the key's name. When the question names some key, only the
 // named keys print. At most kRegRowCap keys, kRegSiteCap sites each.
 // RIPWIRE_NO_REG_ROWS (any value) turns it off: the A/B handle.
 
@@ -561,6 +561,44 @@ inline std::vector<std::string> taskIdents( std::string_view task )
     }
     return out;
 }
+// The key's name subtokens (snake / camel split, lower-cased, >= 3 letters, a trailing plural `s` dropped) against the question's
+// plain words normalised the same way (an identifier in the question stays ONE word: `findPluginFor` is not "plugin").
+inline std::string normWord( std::string w )
+{
+    for( char& c : w )
+    {
+        c = ( c >= 'A' && c <= 'Z' ) ? static_cast<char>( c - 'A' + 'a' ) : c;
+    }
+    if( w.size() > 3 && w.back() == 's' )
+    {
+        w.pop_back();
+    }
+    return w;
+}
+inline bool sharesWord( std::string_view key, const std::vector<std::string>& words )
+{
+    std::vector<std::string> subs;
+    std::string              cur;
+    for( std::size_t i = 0; i <= key.size(); ++i )
+    {
+        const char c     = i < key.size() ? key[i] : '_';
+        const bool split = c == '_' || c == '$' || ( c >= '0' && c <= '9' )
+                        || ( c >= 'A' && c <= 'Z' && !cur.empty() && cur.back() >= 'a' && cur.back() <= 'z' );
+        if( split && !cur.empty() )
+        {
+            subs.push_back( normWord( std::move( cur ) ) );
+            cur.clear();
+        }
+        if( c != '_' && c != '$' && !( c >= '0' && c <= '9' ) )
+        {
+            cur += c;
+        }
+    }
+    return std::ranges::any_of( subs, [ & ]( const std::string& sub )
+    {
+        return sub.size() >= 3 && std::ranges::any_of( words, [ & ]( const std::string& w ) { return normWord( w ) == sub; } );
+    } );
+}
 }   // namespace reg_detail
 
 // THE RENDER: the <reg> rows a compact --for answer gains for the shown ranked rows `shownIds` and question `task` (the gate
@@ -602,7 +640,11 @@ inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeI
         }
         const bool asked = named( ing.symbols[ key.key ].name )
                         || std::ranges::any_of( key.sites, [ & ]( const RegSite& s ) { return !s.test && named( s.registered ); } );
-        if( ( asked || consumerShown ) && ( n >= 2 || ( n >= 1 && consumerShown ) ) )
+        // fire table (LD-2): a shown consumer alone fired on Angular DI tokens with one provider (ChangeDetectionScheduler on 4
+        // rows) and on a sibling signal (request_started on a runserver question): a registry needs >= 2 non-test registrations,
+        // and a shown consumer opens the gate only when the question shares a word with the key's name (EVENT_MANAGER_PLUGINS ~
+        // "which event plugin …")
+        if( n >= 2 && ( asked || ( consumerShown && reg_detail::sharesWord( std::string_view( ing.symbols[ key.key ].name ), words ) ) ) )
         {
             picks.push_back( { k, consumerShown, n, asked } );
         }

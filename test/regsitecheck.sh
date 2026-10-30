@@ -15,10 +15,12 @@
 #          useFactory: makeStore } ] } )`, consumer `@Inject( CACHE_STORE )` in CacheService's constructor
 #   G1 [G] a same-named `connect` of an unrelated class (`pool = Pool()`, Pool.connect returns its argument): no row, even with
 #          the question naming `pool`
-#   G2 [G] a token with ONE provider and no shown consumer, named by the question (LONE_TOKEN): no row
+#   G2 [G] a token with ONE provider, named by the question (LONE_TOKEN): no row (a registry needs >= 2 non-test registrations)
 #   G3 [G] a lookalike literal `{ name: EVENT_MANAGER_PLUGINS, useClass: LoneThing }` (no provide): LoneThing never listed
 #   G4 [G] a decorator registration `@register.filter` (not this slice): no row
 #   G5 [G] a question that names neither key nor registered name, with no consumer shown: no row
+#   G6 [G] the consumer (EventManager) is shown but the question shares no word with the key's name: no row (fire-table rule:
+#          Angular DI tokens and sibling signals fired through a shown consumer alone)
 #   F1 [G] RIPWIRE_NO_REG_ROWS=1: no <reg> and no clause; the P1 answer minus its <reg> rows and clause equals it (est_tokens masked)
 #   F2 [G] --json carries no <reg>
 #   L1 [P] the clause defines reg when a row prints; L2 [G] absent when none does
@@ -248,6 +250,11 @@ if grep -q '<d [^>]*n="EventManager' "$TMP/p2.xml"; then
     if out=$( chk row "$TMP/p2.xml" EVENT_MANAGER_PLUGINS n=2 tests=1 consumers=EventManager.constructor DomEventsPlugin KeyEventsPlugin ); then ok "P2 TS provider row via shown consumer"; else no "P2 $out"; fi
 else no "P2 vacuous: EventManager not a shown row"; fi
 if out=$( chk nosym "$TMP/p2.xml" LoneThing ); then ok "G3 lookalike literal without provide never listed"; else no "G3 $out"; fi
+
+run g6 "$TS" -- --for="how does EventManager findPluginFor reverse its list"
+if grep -q '<d [^>]*n="EventManager' "$TMP/g6.xml"; then
+    if out=$( chk nokey "$TMP/g6.xml" EVENT_MANAGER_PLUGINS ); then ok "G6 shown consumer but no word of the key in the question: no row"; else no "G6 $out"; fi
+else no "G6 vacuous: EventManager not a shown row"; fi
 
 run p3 "$TS" -- --for="$Q_NEST"
 if out=$( chk row "$TMP/p3.xml" CACHE_STORE n=2 consumers=CacheService.constructor RedisStore makeStore ); then ok "P3 NestJS-shaped providers"; else no "P3 $out"; fi
