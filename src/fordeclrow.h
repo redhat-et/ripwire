@@ -7,7 +7,7 @@
 // WHY. mf1-tmux-03 asks which prototypes change when server_start takes a new argument: --for prints the definition in
 // server.c and never the tmux.h prototype, while --defs prints both.
 //
-// WHEN (present-only). Either arm, and the subject must have a non-test declaration row that is callable and in C, C++ or Go:
+// WHEN (present-only). Either arm, and the subject must have a non-test declaration row that is a function or method in C, C++ or Go:
 //   - TASK WORD: outside code spans the task says signature / prototype / new|extra|additional [required] argument|parameter;
 //     the subject is the first code span or identifier-shaped word that resolves to such a row.
 //   - BARE SUBJECT: the whole task is one symbol spelling (`--for=server_start`), and its pick is provably unique. A symbol
@@ -19,7 +19,7 @@
 #include "forcallerhop.h"  // forTaskIdentWords — the one word split of a --for task
 #include "nextverb.h"      // nextFlag / nextAttrXml
 #include "resolve.h"       // trimWs
-#include "serialize.h"     // escapeXml / isCallableKind
+#include "serialize.h"     // escapeXml
 
 #include <algorithm>
 #include <array>
@@ -165,11 +165,12 @@ inline std::string_view forBareSymbolTask( std::string_view task ) noexcept
     return forIsSymbolSpelling( t ) ? t : std::string_view{};
 }
 
-// The row a signature change concerns: a non-test callable in C, C++ or Go. A same-named type or a data row is not it.
+// The row a signature change concerns: a non-test function or method in C, C++ or Go. A forward-declared class is callable by
+// name but has no signature of its own; a type, a macro or a data row is not it.
 inline bool forDeclRowCounts( const IngestResult& ing, const DefRow& r ) noexcept
 {
     const Symbol& s = ing.symbols[ r.rep ];
-    return !r.test && isCallableKind( s.kind ) && ( s.lang == Lang::C || s.lang == Lang::Cpp || s.lang == Lang::Go );
+    return !r.test && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && ( s.lang == Lang::C || s.lang == Lang::Cpp || s.lang == Lang::Go );
 }
 
 // A prototype the definition group folded in: --defs prints the group's one row ("a prototype with its definition is one"), and the
