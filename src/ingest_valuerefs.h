@@ -686,6 +686,8 @@ public:
         m_slotByName   = slotRow != nullptr && slotRow->callSide == VrSlotCallSide::MemberCallByName;
         m_fwd          = callForwardersOf( m_lang );
         m_fwdArmed     = !m_fwd.empty();
+        const RegLang* regRow = regLang( m_lang );   // REGISTRAR: a language whose registrars store a parameter into a container
+        m_regStores    = regRow != nullptr && regRow->form == RegForm::ReceiverMethod ? regRow->containerStores : std::span<const std::string_view>{};
 
         VrScope file;
         file.node = root;
@@ -1835,6 +1837,7 @@ private:
         if( const std::size_t d = declaringScope( name ); d != 0 )
         {
             paramSlotFact( i, d, name );   // IX1-V2: a parameter stored into a field slot is a fact, never a row
+            paramRegFact( i, d, name );    // REGISTRAR: a method parameter stored into a container a field of self holds
             return;   // a parameter or local of that name hides the function
         }
         if( m_fwdArmed && forwardCallAt( i, name ) )
@@ -2044,6 +2047,92 @@ private:
         r.argCount      = static_cast<std::uint16_t>( std::min<std::ptrdiff_t>( at - sc.params.begin(), 0xFFFF ) );
         r.argCountKnown = true;
         m_out.push_back( std::move( r ) );
+    }
+
+    // REGISTRAR (model.h kValueRefRegParamScope; read by src/regindex.h): parameter `name` of METHOD scope d (its enclosing scope
+    // is a class body, its first parameter `self`) at anc[i], reached through tuple/list/parenthesis wrappers only, is either
+    //   an argument of `self.<field>.<store>( … )` (store one of the language row's containerStores), or
+    //   the right side of `self.<field>[ … ] = …`.
+    // Records the fact (method, parameter position after self, field). Anything else — a store into a local, a store through
+    // another object, a call of the parameter — records nothing (no fact: never a registrar).
+    void paramRegFact( std::size_t i, std::size_t d, std::string_view name )
+    {
+        if( m_regStores.empty() || d == 0 || i < 3 )
+        {
+            return;
+        }
+        const VrScope& sc = m_scopes[d];
+        if( !sc.isFunction || sc.fnName.empty() || !m_scopes[d - 1].isClass || sc.params.empty() || sc.params.front() != "self" )
+        {
+            return;
+        }
+        const auto at = std::ranges::find( sc.params, name );
+        if( at == sc.params.begin() || at == sc.params.end() || std::ranges::count( sc.params, name ) != 1 )
+        {
+            return;
+        }
+        std::size_t j = i;
+        while( j > 1 && ( kindIs( m_anc[j - 1].kind, "tuple" ) || kindIs( m_anc[j - 1].kind, "list" )
+                          || kindIs( m_anc[j - 1].kind, "parenthesized_expression" ) ) )
+        {
+            --j;
+        }
+        std::string_view field;
+        const VrAnc&     p = m_anc[j - 1];
+        if( kindIs( p.kind, "argument_list" ) && j >= 2 && kindIs( m_anc[j - 2].kind, "call" ) )
+        {
+            // `self.<field>.<store>`: an attribute whose object is the attribute `self.<field>`
+            const TSNode fn = child( m_anc[j - 2].node, m_fFunction );
+            if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "attribute" ) )
+            {
+                return;
+            }
+            const std::string_view store = text( child( fn, m_fAttribute ) );
+            if( std::ranges::find( m_regStores, store ) == m_regStores.end() )
+            {
+                return;
+            }
+            field = selfField( child( fn, m_fObject ) );
+        }
+        else if( kindIs( p.kind, "assignment" ) && m_anc[j].field == m_fRight )
+        {
+            const TSNode lhs = child( p.node, m_fLeft );
+            if( ts_node_is_null( lhs ) || !kindIs( ts_node_type( lhs ), "subscript" ) )
+            {
+                return;
+            }
+            field = selfField( ts_node_named_child( lhs, 0 ) );
+        }
+        if( field.empty() )
+        {
+            return;
+        }
+        RawRef r;
+        r.fileId        = m_fileId;
+        r.startByte     = ts_node_start_byte( m_anc[i].node );
+        r.line          = ts_node_start_point( m_anc[i].node ).row + 1;
+        r.lang          = m_lang;
+        r.role          = RefRole::Value;
+        r.qualifier     = std::string( 1, kValueRefRegParamScope );   // name stays "": no identifier is empty, so no row
+        r.recvVar       = std::string( sc.fnName );
+        r.argCount      = static_cast<std::uint16_t>( std::min<std::ptrdiff_t>( at - sc.params.begin() - 1, 0xFFFF ) );
+        r.argCountKnown = true;
+        r.memberPath    = std::string( field );
+        m_out.push_back( std::move( r ) );
+    }
+    // `self.<field>` → field; anything else → "".
+    std::string_view selfField( TSNode n ) const
+    {
+        if( ts_node_is_null( n ) || !kindIs( ts_node_type( n ), "attribute" ) )
+        {
+            return {};
+        }
+        const TSNode obj = child( n, m_fObject );
+        if( ts_node_is_null( obj ) || !kindIs( ts_node_type( obj ), "identifier" ) || text( obj ) != "self" )
+        {
+            return {};
+        }
+        return text( child( n, m_fAttribute ) );
     }
 
     // The Value row of identifier anc[i] (effective position anc[j]) landing in slot `s`.
@@ -3526,6 +3615,7 @@ private:
     VrFam                          m_fam;
     Lang                           m_lang;
     const VrSlotLang*              m_slot = nullptr;    // IX-1: this language's slot row (nullptr: no slot capture)
+    std::span<const std::string_view> m_regStores;   // REGISTRAR: the language row's container stores (empty: no registrar facts)
     bool                           m_slotByName = false;   // IX1-V2: a MemberCallByName row (Go): the store side only (goValueSlot)
     std::vector<VrStructFields>    m_structs;           // IX-1: this file's struct bodies so far
     std::vector<std::pair<std::string, std::string_view>> m_callableFields;   // IX-1: (struct, function-pointer field) this file declares

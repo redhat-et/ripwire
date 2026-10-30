@@ -363,7 +363,11 @@ constexpr std::uint32_t kCacheVersion = 46;           // 46: train 40 — lane j
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 269;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 273;          // bump on any grammar/.scm/extraction change
+                                                      // 273 = 2026-10-30 (lane registrar, PLACEHOLDER: the train renumbers): Python files record
+                                                      //   registrar facts (model.h kValueRefRegParamScope: a method parameter stored into a container a
+                                                      //   field of self holds). Strictly above train-42b's 271 (rich 272). Rich file tag 274. kCacheVersion
+                                                      //   stays 46: no record changes shape (a new scope char in an existing field).
                                                       // 269 = 2026-10-29 (train 41b: lane fn-slot-s2 (placeholders 257/258, 259 and 260 over its fix rounds): C++ `&Cls::m`
                                                       //   value refs (memberRoot = Cls; memberVia = written qualifier / enclosing scope / `using namespace` directives),
                                                       //   `( o.*x.f )( … )` slot calls, C nested designated paths and macro-cast slot calls + their "()M" alias facts, a class
