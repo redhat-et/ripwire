@@ -42,6 +42,7 @@
 #include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
+#include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -2922,6 +2923,11 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
     }
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; not under a budget, as there
+    if( budgetTokens == 0 && out.ends_with( "</ctx>" ) )
+    {
+        out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task ) );
+    }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
     if( std::optional<GraphSubjectArgs> gsa = chooseGraphSubjectArgs( ing, task ); gsa && out.ends_with( "</ctx>" ) )
