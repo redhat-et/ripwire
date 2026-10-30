@@ -5,6 +5,7 @@
 #include "model.h"        // IngestResult, Symbol, rootRelPath, kNoFile
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -58,11 +59,13 @@ inline std::uint32_t epModuleFile( const IngestResult& ing, std::string_view mdi
 // A last segment that is a FILE extension ("index.html", "app.json"): such a string names a file, so a definition of that name in its
 // module is no proof it is the target. Data, not a rule per call site.
 inline constexpr std::string_view kFileExtensionSegments[] = { "html", "htm", "xhtml", "css", "scss", "js", "jsx", "tsx", "json", "yaml", "yml", "xml", "md", "rst", "csv", "tsv",
-                                                               "ini", "cfg", "toml", "sql", "png", "jpg", "jpeg", "gif", "svg", "ico", "pdf", "zip", "gz", "tar", "tgz", "pyc", "pyi", "whl", "txt" };
+                                                               "ini", "cfg", "toml", "sql", "png", "jpg", "jpeg", "gif", "svg", "ico", "pdf", "zip", "gz", "tar", "tgz", "pyc", "pyi", "whl", "txt", "py", "log", "conf", "sh", "j2", "docx", "lock" };   // lower case; the match is not
 inline bool isFileExtensionSegment( std::string_view attr )
 {
     const std::size_t dot = attr.rfind( '.' );
-    return std::ranges::find( kFileExtensionSegments, dot == std::string_view::npos ? attr : attr.substr( dot + 1 ) ) != std::end( kFileExtensionSegments );
+    std::string       ext( dot == std::string_view::npos ? attr : attr.substr( dot + 1 ) );
+    std::ranges::transform( ext, ext.begin(), []( unsigned char ch ) { return static_cast<char>( std::tolower( ch ) ); } );
+    return std::ranges::find( kFileExtensionSegments, std::string_view( ext ) ) != std::end( kFileExtensionSegments );
 }
 
 // Is `s` what the attribute path `attr` names in its module? The last segment is the name; the rest is the owner chain, which

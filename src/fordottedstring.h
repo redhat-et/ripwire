@@ -8,8 +8,8 @@
 // WHAT. <dotted_strings> with one <ds> row per literal SITE whose whole value resolves (pydottedpath.h: its module file, then
 // exactly one definition in it; or a module itself) to a row this answer shows: the string (s=), the target (tn= tp=, or mod=),
 // where the string sits (p= l= in=), and how it may be loaded: sink= when the string is that sink's own argument, else
-// loader= lp= for a function in which the constant's name reaches an import sink's argument through that function's own assignments (the parser's flow tokens,
-// ingest_valuerefs.h flowTokensOf; a comment, docstring, string, parameter or local shadow is never one). A `%`-template handed to a sink
+// loader= lp= for a function in which the constant's name reaches the argument of a call whose tail name is an import sink's through that function's own assignments (the parser's flow tokens,
+// ingest_valuerefs.h flowTokensOf; a comment, docstring, string, parameter, assignment, with/except/lambda binder or local import of another module is never one). A `%`-template handed to a sink
 // (`"%s.base" % x`) gets one hedged row when at least three sibling directories of shown files fill its hole: cand= those modules, cands=
 // how many; which one loads is not known.
 //
@@ -60,9 +60,9 @@ inline constexpr std::string_view kForDottedStringsLegend =
     "<!-- ripwire for dotted_strings: Python string literals whose whole dotted path names a shown row; hedge= is the whole "
     "claim: no edge, not in est_tokens or any count. ds s= the string; "
     "tn= tp= the definition it names, or mod= the module; p= l= in= where the string sits; sink= it is the argument of a call whose tail name is that (the callee is not resolved); "
-    "loader= lp= a function in which the constant's name reaches an import sink's argument through its own assignments (names only, not a proof of the value) (loaders= how many do; over 3 none is named, a generic word); tmpl= a %-template "
-    "passed to a sink, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
-    "tests= sites in test paths, counted only; unresolved= external= strings ending in a shown name that resolve to no one definition, "
+    "loader= lp= a function in which the constant's name reaches the argument of a call whose tail name is an import sink's (the callee is not resolved) through its own assignments (names only, not a proof of the value) (loaders= how many do; over 3 none is named, a generic word); tmpl= a %-template "
+    "passed to such a call, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
+    "tests= sites in test paths, counted only (with no row, s= is the first such string, next= a grep for it); unresolved= external= strings ending in a shown name that resolve to no one definition, "
     "or to no in-tree module; rows_capped=1 next= the list was cut. -->";
 
 struct DottedTarget
@@ -483,19 +483,99 @@ inline bool flowHasToken( std::string_view flow, std::string_view token )
 //  - a function-local constant (shape "m") is reached only inside its own function, by `NAME` or `=NAME`.
 struct ImportedNames
 {
-    std::set<std::tuple<std::uint32_t, std::string_view, std::string_view>> byFile;   // file, bound name, last segment of the module
+    std::set<std::tuple<std::uint32_t, std::string_view, std::string_view>> byFile;   // file, bound name, the module spelling as written
     explicit ImportedNames( const IngestResult& ing, const std::set<std::uint32_t>& files )
     {
         for( const Binding& b : ing.bindings )
         {
             if( b.kind == LocalBindKind::Import && files.contains( b.fileId ) )
             {
-                const std::string_view mod = b.typeName;
-                byFile.emplace( b.fileId, std::string_view( b.var ), mod.substr( mod.rfind( '.' ) == std::string_view::npos ? 0 : mod.rfind( '.' ) + 1 ) );
+                byFile.emplace( b.fileId, std::string_view( b.var ), std::string_view( b.typeName ) );
             }
         }
     }
 };
+// Is `spec` (a `from SPEC import` module as written in `fromFile`, relative dots included) the module file `target`? The WHOLE module,
+// never its last segment: `from b.conf import X` is not a/conf.py. A relative spec is resolved against the importing file's directory;
+// an absolute one by the indexed module of that path, else by the ONE file whose path ends in it.
+inline bool importSpecNamesFile( const IngestResult& ing, std::uint32_t fromFile, std::string_view spec, std::uint32_t target )
+{
+    const std::size_t dots = spec.find_first_not_of( '.' ) == std::string_view::npos ? spec.size() : spec.find_first_not_of( '.' );
+    std::string       path( spec.substr( dots ) );
+    std::ranges::replace( path, '.', '/' );
+    if( dots > 0 )
+    {
+        std::string_view dir = rootRelPath( ing, fromFile );
+        for( std::size_t up = 0; up < dots; ++up )   // one dot = the importing file's own directory
+        {
+            const std::size_t sl = dir.rfind( '/' );
+            if( sl == std::string_view::npos )
+            {
+                if( up + 1 < dots )
+                {
+                    return false;
+                }
+                dir = {};
+                break;
+            }
+            dir = dir.substr( 0, sl );
+        }
+        std::string base( dir );
+        if( !path.empty() )
+        {
+            base += base.empty() ? "" : "/";
+            base += path;
+        }
+        const std::string_view rel = rootRelPath( ing, target );
+        return rel == base + ".py" || rel == base + "/__init__.py";
+    }
+    if( path.empty() )
+    {
+        return false;
+    }
+    bool                inTree = false;
+    const std::uint32_t direct = epModuleFile( ing, {}, std::string( spec ), inTree );
+    if( direct != kNoFile )
+    {
+        return direct == target;
+    }
+    std::size_t    matches = 0;
+    bool           isTarget = false;
+    const std::string asFile = path + ".py";
+    const std::string asPkg  = path + "/__init__.py";
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view rel = rootRelPath( ing, f );
+        for( const std::string& want : { asFile, asPkg } )
+        {
+            if( rel == want || ( rel.size() > want.size() && rel.ends_with( want ) && rel[ rel.size() - want.size() - 1 ] == '/' ) )
+            {
+                ++matches;
+                isTarget = isTarget || f == target;
+            }
+        }
+    }
+    return matches == 1 && isTarget;
+}
+// Does `file` bind the bare `name` by any import (a function-local one too)?
+inline bool fileImportsName( const ImportedNames& imports, std::uint32_t file, std::string_view name )
+{
+    const auto it = imports.byFile.lower_bound( std::make_tuple( file, name, std::string_view() ) );
+    return it != imports.byFile.end() && std::get<0>( *it ) == file && std::get<1>( *it ) == name;
+}
+// Does `fromFile` import the bare `name` from the module file `target`?
+inline bool fileImportsNameFrom( const IngestResult& ing, const ImportedNames& imports, std::uint32_t fromFile, std::string_view name, std::uint32_t target )
+{
+    for( auto it = imports.byFile.lower_bound( std::make_tuple( fromFile, name, std::string_view() ) );
+         it != imports.byFile.end() && std::get<0>( *it ) == fromFile && std::get<1>( *it ) == name; ++it )
+    {
+        if( importSpecNamesFile( ing, fromFile, std::get<2>( *it ), target ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
 // Is the constant at `site` assigned at module level (no function or class around it)? The constant is itself a top-level variable
 // symbol, so a module-level site's enclosing symbol is that variable.
 inline bool siteIsModuleLevel( const IngestResult& ing, const Reference& site )
@@ -522,7 +602,11 @@ inline bool loaderReachesConstant( const IngestResult& ing, const Reference& loa
     {
         return false;
     }
-    return loaderFact.fileId == site.fileId || imports.byFile.contains( std::make_tuple( loaderFact.fileId, name, moduleTailOf( rootRelPath( ing, site.fileId ) ) ) );
+    if( loaderFact.fileId == site.fileId )
+    {
+        return !fileImportsName( imports, site.fileId, name );   // a same-named import in the constant's own file (a local one too) names another object
+    }
+    return fileImportsNameFrom( ing, imports, loaderFact.fileId, name, site.fileId );
 }
 
 // Loaders of the constants: a non-test function that calls a sink on a computed value that the constant's name reaches.

@@ -23,6 +23,10 @@
 #   R3 [G] other languages: a JS file with the same shapes records no fact: no element
 #   V1 [P] --callers carries it, the caller rows byte-identical to OFF   V2 [G] callees carries none
 #   G1 [P] on the first cut of this lane, [G] since: a fact's fields are no name evidence (graph.h file evidence)
+#   S-D1 [P] every attribute the element prints (mod=, loaders= over 3, a tests-only s= next=, ...) is defined in the legend of --callers and --for; a sweep over every answer here
+#   S-D2 [P] loader= / tmpl= claim only "a call whose tail name is an import sink's"   S-D3 [P] the import check compares the WHOLE module (b.conf is not a/conf.py)
+#   S-D4 [P] with-as, except-as, lambda parameter and a same-file other-module import are no loader (twins [G]: free name, from-import, lazy local import)
+#   S-D5 [P] a ternary condition decides, it does not flow   S-D6 [P] the extension list: py/log/conf/sh and upper case
 #   X1 [G] determinism   X2 [G] xmllint well-formed when present   X3 [G] no "--" inside the legend comment
 #
 # Usage:  bash test/dottedstringcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/dottedstringcheck.sh
@@ -450,7 +454,7 @@ then ok "V1 the caller answer is otherwise byte-identical"; else no "V1 the elem
 run "$K" "$TMP/v2" '--callees=csrfproc'
 hasnt "$TMP/v2" 'dotted_strings' "V2 --callees carries none"
 
-# ── G: a fact is no name evidence: its qualifier "D" must not read as this file naming class D (cpython: sys.path.insert bound by name) ──
+# ── G: a fact is no name evidence: its qualifier "%" must not read as this file naming class D (cpython: sys.path.insert bound by name) ──
 G="$TMP/g"
 fx "$G/other.py" <<'P'
 class D:
@@ -681,6 +685,175 @@ sys.exit(0 if not bad else 1)
 PY
 if [ $? = 0 ]; then ok "S-B3 --callers defines every dotted_strings/ds attribute it prints in its own legend"; else no "S-B3 --callers prints an attribute with no legend clause"; fi
 
+# S-D1: EVERY attribute the element can print is defined in the legend of the verb that prints it. legchk walks the printed
+# attributes against the legend text: --callers' schema clauses (head or body of an element's clause), --for's own comment. Fixtures
+# reach mod=, loaders= (over 3), a tests-only s= next=, tmpl= cand= cands=, sink=, loader= lp=, rows_capped= next=. A sweep at the end
+# of this file runs it over every dotted answer this file produced, so a NEW attribute cannot go undefined.
+legchk(){ python3 - "$1" <<'PY'
+import re,sys
+t=open(sys.argv[1],encoding="utf-8").read()
+m=re.search(r'<dotted_strings sites="\d+".*?</dotted_strings>',t,re.S)
+if not m: print("no element"); sys.exit(1)
+legend=t[:m.start()]
+bad=[]
+forc=re.search(r'<!-- ripwire for dotted_strings:.*?-->',legend,re.S)
+for tag,attrs in re.findall(r'<(dotted_strings|ds) ([^>]*)>',m.group(0)):
+    for a in sorted(set(re.findall(r'(\w+)="',attrs))):
+        if forc:
+            ok=re.search(r'\b%s='%a,forc.group(0)) is not None
+        else:
+            ok=False
+            heads=list(re.finditer(r'<(dotted_strings|ds) ([^>]*)>:',legend))
+            for i,h in enumerate(heads):
+                if h.group(1)!=tag: continue
+                body=legend[h.end():(heads[i+1].start() if i+1<len(heads) else h.end()+500)]
+                if re.search(r'\b%s='%a,h.group(2)) or re.search(r'\b%s='%a,body[:500]): ok=True
+        if not ok: bad.append(tag+"."+a)
+print("undefined:",sorted(set(bad)))
+sys.exit(1 if bad else 0)
+PY
+}
+lc(){ if legchk "$1" >"$1.lc" 2>&1; then ok "S-D1 $2: every attribute it prints is defined in its legend"; else no "S-D1 $2: $(tr '\n' ' ' <"$1.lc")"; fi }
+run "$K" "$TMP/d1k3" '--callers=subfn';   lc "$TMP/d1k3" "--callers mod= (a whole module)"
+has "$TMP/d1k3" 'mod="pkg/sub/__init__.py"' "S-D1 the mod= fixture prints mod="
+run "$N6" "$TMP/d1n6" '--callers=thing';  lc "$TMP/d1n6" "--callers loaders= over 3"
+has "$TMP/d1n6" 'loaders="4"' "S-D1 the over-3 fixture prints loaders="
+run "$T" "$TMP/d1t2" '--callers=alone';   lc "$TMP/d1t2" "--callers tests-only s= next="
+has "$TMP/d1t2" 'tests="1" s="pkg.mod.alone"' "S-D1 the tests-only fixture prints s="
+run "$K" "$TMP/d1k1" '--callers=csrfproc'; lc "$TMP/d1k1" "--callers loader= lp="
+run "$K" "$TMP/d1k2" '--callers=direct_thing'; lc "$TMP/d1k2" "--callers sink="
+run "$K" "$TMP/d1k3f" '--for=subfn';      lc "$TMP/d1k3f" "--for mod="
+run "$T" "$TMP/d1t2f" '--for=alone';      lc "$TMP/d1t2f" "--for tests-only s= next="
+run "$N6" "$TMP/d1n6f" '--for=thing';     lc "$TMP/d1n6f" "--for loaders="
+
+# S-D2: the loader= wording claims only what is known: a call whose TAIL name is an import sink's (the callee is not resolved)
+has "$TMP/d1k1" 'tail name is an import sink' "S-D2 --callers loader= says tail name"
+has "$TMP/k1" 'tail name is an import sink' "S-D2 --for loader= says tail name"
+
+# S-D3 / S-D4 / S-D5 fixtures
+B6="$TMP/b6"
+fx "$B6/pkg6/__init__.py" <<'P'
+P
+fx "$B6/pkg6/t6.py" <<'P'
+def tgt_same(): return 1
+def tgt_true(): return 2
+def tgt_px(): return 3
+def tgt_rel(): return 4
+def d4w(): return 5
+def d4e(): return 6
+def d4l(): return 7
+def d4i(): return 8
+def d4r(): return 9
+def d4lz(): return 10
+def d5t(): return 11
+def d5u(): return 12
+P
+fx "$B6/a/conf.py" <<'P'
+P_SAME = ["pkg6.t6.tgt_same"]
+P_TRUE = ["pkg6.t6.tgt_true"]
+P
+fx "$B6/b/conf.py" <<'P'
+P_SAME = ["elsewhere.thing"]
+P
+fx "$B6/pkgx/sub/__init__.py" <<'P'
+PX = ["pkg6.t6.tgt_px"]
+P
+fx "$B6/other/three.py" <<'P'
+from importlib import import_module
+from b.conf import P_SAME
+def sametail():
+    return [import_module(p) for p in P_SAME]
+P
+fx "$B6/other/four.py" <<'P'
+from importlib import import_module
+from a.conf import P_TRUE
+from pkgx.sub import PX
+def truejoin():
+    return [import_module(p) for p in P_TRUE]
+def initjoin():
+    return [import_module(p) for p in PX]
+P
+fx "$B6/rel/__init__.py" <<'P'
+P
+fx "$B6/rel/conf.py" <<'P'
+PR = ["pkg6.t6.tgt_rel"]
+P
+fx "$B6/rel/use.py" <<'P'
+from importlib import import_module
+from .conf import PR
+def reljoin():
+    return [import_module(p) for p in PR]
+P
+fx "$B6/binders.py" <<'P'
+from importlib import import_module
+BW = ["pkg6.t6.d4w"]
+BE = ["pkg6.t6.d4e"]
+BL = ["pkg6.t6.d4l"]
+BI = ["pkg6.t6.d4i"]
+BR = ["pkg6.t6.d4r"]
+TERN = ["pkg6.t6.d5t"]
+TERN2 = ["pkg6.t6.d5u"]
+def withas():
+    with open("x") as BW:
+        return import_module(BW)
+def exc():
+    try:
+        pass
+    except Exception as BE:
+        return import_module(BE)
+def lam():
+    f = lambda BL: import_module(BL)
+    return f
+def locimp():
+    from os.path import BI
+    return import_module(BI)
+def real():
+    return import_module(BR)
+def tern(a, b):
+    return import_module(a if TERN else b)
+def tern2(a, b):
+    return import_module(TERN2 if a else b)
+P
+fx "$B6/lazy/__init__.py" <<'P'
+P
+fx "$B6/lazy/c.py" <<'P'
+LZ = ["pkg6.t6.d4lz"]
+P
+fx "$B6/lazy/use.py" <<'P'
+from importlib import import_module
+def lazy():
+    from lazy.c import LZ
+    return [import_module(p) for p in LZ]
+P
+for n in tgt_same tgt_true tgt_px tgt_rel d4w d4e d4l d4i d4r d4lz d5t d5u; do run "$B6" "$TMP/b6$n" "--callers=$n"; done
+hasnt "$TMP/b6tgt_same" 'loader=' "S-D3 from b.conf import P_SAME is not a/conf.py's P_SAME (the whole module, not its last segment)"
+has "$TMP/b6tgt_true" 'loader="truejoin"' "S-D3t from a.conf import P_TRUE keeps its loader"
+has "$TMP/b6tgt_px" 'loader="initjoin"' "S-D3t from pkgx.sub import (an __init__.py) keeps its loader"
+has "$TMP/b6tgt_rel" 'loader="reljoin"' "S-D3t from .conf import keeps its loader"
+hasnt "$TMP/b6d4w" 'loader=' "S-D4 a with-as name that spells a module constant is no loader"
+hasnt "$TMP/b6d4e" 'loader=' "S-D4 an except-as name that spells a module constant is no loader"
+hasnt "$TMP/b6d4l" 'loader=' "S-D4 a lambda parameter that spells a module constant is no loader"
+hasnt "$TMP/b6d4i" 'loader=' "S-D4 a local import of another module's name is no loader of this file's constant"
+has "$TMP/b6d4r" 'loader="real"' "S-D4t a name no statement binds still joins"
+has "$TMP/b6d4lz" 'loader="lazy"' "S-D4t a function-local import of the constant's own module still joins"
+hasnt "$TMP/b6d5t" 'loader=' "S-D5 a ternary condition decides, it does not flow"
+has "$TMP/b6d5u" 'loader="tern2"' "S-D5t a ternary branch still flows"
+
+# S-D6: the file-extension list: case-insensitive, and py/log/conf/sh
+D6="$TMP/d6"
+fx "$D6/web/__init__.py" <<'P'
+P
+fx "$D6/web/index.py" <<'P'
+def py(): return 1
+def HTML(): return 2
+P
+fx "$D6/web/cfg.py" <<'P'
+A = ["web.index.py"]
+B = ["web.index.HTML"]
+P
+run "$D6" "$TMP/d6py" '--callers=py'; hasnt "$TMP/d6py" 'tn="py"' "S-D6 web.index.py names a file, not the def py"
+run "$D6" "$TMP/d6html" '--callers=HTML'; hasnt "$TMP/d6html" 'tn="HTML"' "S-D6 web.index.HTML names a file (upper case), not the def html"
+
 B5="$TMP/b5"
 fx "$B5/index.py" <<'P'
 def html():
@@ -768,6 +941,16 @@ m=re.search(r'<!-- ripwire for dotted_strings:(.*?)-->',open(sys.argv[1],encodin
 sys.exit(0 if m and "--" not in m.group(1) else 1)
 PY
 then ok "X3 no -- inside the legend comment"; else no "X3 legend comment missing or holds --"; fi
+
+# S-D1 sweep: every dotted answer this file produced defines every attribute it prints (c2 is rewritten by X4 above)
+swept=0; sweepbad=""
+for f in "$TMP"/*; do
+    case "$f" in *.err|*.lc|"$TMP/c2"|*off) continue;; esac
+    [ -f "$f" ] && grep -q '<dotted_strings sites=' "$f" 2>/dev/null || continue
+    swept=$((swept+1))
+    legchk "$f" >"$f.lc" 2>&1 || sweepbad="$sweepbad $(basename "$f"):$(tr '\n' ' ' <"$f.lc")"
+done
+if [ "$swept" -ge 20 ] && [ -z "$sweepbad" ]; then ok "S-D1 sweep: $swept dotted answers define every attribute they print"; else no "S-D1 sweep ($swept answers):$sweepbad"; fi
 
 [ "$fail" = 0 ] && echo "dottedstringcheck: PASS" || echo "dottedstringcheck: FAIL"
 exit "$fail"

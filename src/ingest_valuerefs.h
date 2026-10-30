@@ -3389,9 +3389,13 @@ private:
             }
             else
             {
+                const bool ternary = kindIs( t, "conditional_expression" );   // `a if COND else b`: COND decides, it does not flow (named children: a, COND, b)
                 for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
                 {
-                    stack.push_back( ts_node_named_child( c, k ) );
+                    if( !ternary || k != 1 )
+                    {
+                        stack.push_back( ts_node_named_child( c, k ) );
+                    }
                 }
             }
         }
@@ -3486,6 +3490,33 @@ private:
                 for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
                 {
                     globalNames.emplace( text( ts_node_named_child( c, k ) ) );
+                }
+            }
+            else if( kindIs( t, "as_pattern" ) )
+            {
+                // `with open(x) as NAME`, `except E as NAME`, `case ... as NAME`: the alias binds its identifiers
+                const TSNode alias = ts_node_child_by_field_name( c, "alias", 5 );
+                std::vector<TSNode> inner{ alias };
+                while( !ts_node_is_null( alias ) && !inner.empty() )
+                {
+                    const TSNode n = inner.back();
+                    inner.pop_back();
+                    if( kindIs( ts_node_type( n ), "identifier" ) )
+                    {
+                        bound.emplace( text( n ) );
+                    }
+                    for( std::uint32_t k = 0; k < ts_node_named_child_count( n ); ++k )
+                    {
+                        inner.push_back( ts_node_named_child( n, k ) );
+                    }
+                }
+            }
+            else if( kindIs( t, "lambda" ) )
+            {
+                const TSNode params = ts_node_child_by_field_name( c, "parameters", 10 );   // a lambda's parameters shadow for the whole function (over-binding only removes a join)
+                for( std::uint32_t k = 0; !ts_node_is_null( params ) && k < ts_node_named_child_count( params ); ++k )
+                {
+                    bindParam( ts_node_named_child( params, k ) );
                 }
             }
             else
