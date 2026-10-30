@@ -177,7 +177,11 @@ private:
 
 inline bool isType( TSNode n, std::string_view type ) noexcept
 {
-    return !ts_node_is_null( n ) && type == ts_node_type( n );
+    if( ts_node_is_null( n ) )
+    {
+        return false;
+    }
+    return std::string_view( ts_node_type( n ) ) == type;
 }
 
 // The function_definition a method symbol's span holds, a null node when the span holds anything else (a changed file, a syntax error).
