@@ -13,7 +13,8 @@
 #   V   self.x as an attribute (no method of that name; a write): silent.
 #   C   cls.x() in a classmethod is recv=cls; a local named cls is no site.
 #   I   a base spelled by a renamed import (absolute and relative): bases are read; an ambiguous module or a second binding leaves it silent.
-#   K   a fourth site: shown=3 capped=1 next=--callers=. Non-test sites come first.
+#   K   a fourth site: shown=3 capped=1 next=--callers=. K3: a non-test site comes before a nearer test-path one.
+#   U   an auto-body candidate the allowance cut carries no row.
 #   M   more served methods than the element carries: capped=1 on the wrapper.
 #   E   the clause rides both legends and defines every attribute; RIPWIRE_NO_SELF_HOOK=1 is the answer minus the element and clause; est_tokens prices it.
 #   L   JavaScript `this.x()` is not the family's row: silent. --json and --token-budget carry no element.
@@ -160,9 +161,16 @@ want B3 "$H" 'n="Mix.go" p="mix.py:8" form="getattr"'
 # ── G ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 mk g/mix.py <<'E'
 class Mix:
-    def other_recv(self, o):
-        if hasattr(o, "before"):
+    def other_recv(self, cell):
+        if hasattr(cell, "before"):
             self.before()
+
+    def foreign(self, cell):
+        return cell.before()
+
+    @classmethod
+    def foreign_cls(cls, cell):
+        return cell.before()
 
     def other_name(self):
         if hasattr(self, "beforehand"):
@@ -187,8 +195,9 @@ class Y(Mix):
         return "y"
 E
 H="$( run g "--for=what calls X.before" | hook )"
-want G1 "$H" 'n="Mix.other_recv" p="mix.py:4"' 'n="Mix.other_name" p="mix.py:8"' 'n="Mix.after_site" p="mix.py:11"'
-lack G2 "$H" 'guarded'
+want G1 "$H" 'n="Mix.other_recv" p="mix.py:4"' 'n="Mix.other_name" p="mix.py:15"'
+lack G2 "$H" 'guarded' 'Mix.foreign' 'foreign_cls'
+want G3 "$( run g "--for=what calls Y.before" | hook )" 'sites="3"'
 
 # ── N ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 mk n/alpha/__init__.py </dev/null
@@ -303,6 +312,9 @@ class Base:
     def show(self):
         return self.val
 
+    def fire(self):
+        return self.step()
+
     def step(self):
         return 0
 E
@@ -317,7 +329,8 @@ class D(Base):
         return 1
 E
 H="$( run v "--for=what calls D.step" | hook )"
-silent V1 "$H"
+want V1 "$H" 'sites="1"' 'n="Base.fire"'
+lack V1n "$H" '__init__'
 silent V2 "$( run v "--for=what calls D.val2" | hook )"
 
 # ── C ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -462,6 +475,31 @@ H="$( run k "--for=what calls D.step" | hook )"
 want K1 "$H" 'sites="4" shown="3" capped="1" next="--callers=D.step"' 'n="Top.a"' 'n="Top.b"' 'n="Top.c"'
 lack K2 "$H" 'n="Top.e"'
 
+mk k2/base.py <<'E'
+class Root:
+    def far(self):
+        return self.step()
+
+    def step(self):
+        return 0
+E
+mk k2/tests/helpers.py <<'E'
+from base import Root
+
+class Helper(Root):
+    def near(self):
+        return self.step()
+E
+mk k2/d.py <<'E'
+from tests.helpers import Helper
+
+class Driven(Helper):
+    def step(self):
+        return 1
+E
+H="$( run k2 "--for=what calls Driven.step" | hook )"
+want K3 "$H" 'sites="2"' '<s n="Root.far" p="base.py:3"/><s n="Helper.near"'
+
 # ── M ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 mk m/base.py <<'E'
 class Base:
@@ -508,6 +546,24 @@ class WidgetD(Base):
 E
 H="$( run m "--for=widgetalpha widgetbeta widgetgamma widgetdelta widgetomega of WidgetD" | hook )"
 want M1 "$H" 'total="5" shown="4" capped="1"'
+
+# an auto-body candidate the allowance cut is not served, so it carries no row
+python3 - "$F/u" <<'PY'
+import os, sys
+root = sys.argv[1]; os.makedirs( root, exist_ok=True )
+filler = "".join( f"        total += {i}\n" for i in range( 150 ) )
+open( f"{root}/base.py", "w" ).write( "class Base:\n    def run_it(self):\n        return self.process_item()\n" )
+for k in range( 6 ):
+    open( f"{root}/impl{k}.py", "w" ).write( f"from base import Base\n\nclass Impl{k}(Base):\n    def process_item(self):\n        total = 0\n{filler}        return total\n" )
+PY
+run u "--for=how do impl classes process items" --auto-bodies >"$TMP/u"
+python3 - "$TMP/u" <<'PY' && ok "(U) every selfhook row names a body the answer printed, and one candidate was cut" || no "(U) a selfhook row names a body the answer did not print, or the fixture no longer cuts one"
+import re, sys
+t = open( sys.argv[1], encoding="utf-8", errors="replace" ).read()
+hooks = set( re.findall( r'<selfhook n="[^"]*" p="([^":]+):', t ) )
+bodies = set( re.findall( r'<b [^>]*p="([^"]+)" n="process_item"', t ) )
+sys.exit( 0 if hooks and hooks <= bodies and len( bodies ) < 6 else 1 )
+PY
 
 # ── E ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run a "--for=what calls One.step" --legend=full >"$TMP/full"
@@ -568,22 +624,6 @@ E
 H="$( run e2 "--for=what calls D.step" | hook )"
 want E6 "$H" 'abstract="1"' 'overrides="Left.step"'
 
-# ── L ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-mk l/base.js <<'E'
-class Base {
-  run() { return this.step(); }
-  step() { return 0; }
-}
-class D extends Base {
-  step() { return 1; }
-}
-module.exports = { Base, D };
-E
-silent L1 "$( run l "--for=what calls D.step" | hook )"
-if run a "--for=what calls One.step" --json | grep -q 'selfhook'; then no "(L2) --json carries the element"; else ok "(L2) --json carries no element"; fi
-silent L3 "$( run a "--for=what calls One.step" --token-budget=4000 | hook )"
-
-# ── W ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 mk w/base.py <<'E'
 class BaseThing:
     def run_all(self):
@@ -599,6 +639,22 @@ class SpecialThing(BaseThing):
     def process_item(self):
         return 1
 E
+# ── L ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+mk l/base.js <<'E'
+class Base {
+  run() { return this.step(); }
+  step() { return 0; }
+}
+class D extends Base {
+  step() { return 1; }
+}
+module.exports = { Base, D };
+E
+silent L1 "$( run l "--for=what calls D.step" | hook )"
+if run a "--for=what calls One.step" --json | grep -q 'selfhook'; then no "(L2) --json carries the element"; else ok "(L2) --json carries no element"; fi
+silent L3 "$( run w "--for=what calls SpecialThing.process_item" --token-budget=40000 | hook )"
+
+# ── W ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run w "--for=what calls SpecialThing.process_item" >"$TMP/w"
 if grep -q 'route="name-exact(' "$TMP/w" && has "$( hook <"$TMP/w" )" 'n="SpecialThing.process_item" p="one.py:4"'; then ok "(W0) the name-exact route's auto body carries the element"; else no "(W0) no element on the name-exact route"; fi
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"%s"}}}\n' "$F/w" "what calls SpecialThing.process_item" \
