@@ -291,8 +291,8 @@ class Conf:
 P
 for i in 1 2 3 4; do fx "$N6/pkg/load$i.py" <<'P'
 from importlib import import_module
-def load(name):
-    return import_module(name)
+def load(cfg):
+    return import_module(cfg.name)
 P
 done
 run "$N6" "$TMP/n6o" '--for=thing'
@@ -319,7 +319,7 @@ run "$T" "$TMP/t1" '--for=thing'
 has "$TMP/t1" 'tests="1"' "T1 the test site is counted"
 hasnt "$TMP/t1" 'p="tests/test_x.py"' "T1 and never a row"
 run "$T" "$TMP/t2" '--for=alone'
-has "$TMP/t2" 'sites="0" rows="0" hedge="a string in the source names this symbol; whether it flows to the import sink is not traced" tests="1" s="pkg.mod.alone" next="--grep=pkg.mod.alone"' "T1 test-only: the count, the string, next="
+has "$TMP/t2" 'sites="0" rows="0" hedge="a string in the source names this symbol; whether any import sink loads it is not traced" tests="1" s="pkg.mod.alone" next="--grep=pkg.mod.alone"' "T1 test-only: the count, the string, next="
 C="$TMP/c"
 fx "$C/pkg/__init__.py" <<'P'
 P
@@ -422,7 +422,8 @@ hasnt "$TMP/roff" 'dotted_strings' "R1 RIPWIRE_NO_DOTTED_STRINGS=1 carries none"
 if python3 - "$TMP/k1" "$TMP/roff" <<'PY'
 import re,sys
 a=open(sys.argv[1],encoding="utf-8").read(); b=open(sys.argv[2],encoding="utf-8").read()
-s=re.sub(r'(<!-- ripwire for dotted_strings:.*?-->)?<dotted_strings .*?</dotted_strings>','',a,flags=re.S)
+s=re.sub(r'<(?:dotted_strings|ds) [^>]*>: .*?\. ','',a)   # the --callers legend layer's clauses for the element (S-B3)
+s=re.sub(r'(<!-- ripwire for dotted_strings:.*?-->)?<dotted_strings .*?</dotted_strings>','',s,flags=re.S)
 sys.exit(0 if s!=a and s==b else 1)
 PY
 then ok "R2 the answer minus the element == the OFF answer"; else no "R2 the element moved other bytes"; fi
@@ -442,6 +443,7 @@ RIPWIRE_NO_DOTTED_STRINGS=1 run "$K" "$TMP/v1off" '--callers=csrfproc'
 if python3 - "$TMP/v1" "$TMP/v1off" <<'PY'
 import re,sys
 a=open(sys.argv[1],encoding="utf-8").read(); b=open(sys.argv[2],encoding="utf-8").read()
+a=re.sub(r'<(?:dotted_strings|ds) [^>]*>: .*?\. ','',a)
 sys.exit(0 if re.sub(r'(<!-- ripwire for dotted_strings:.*?-->)?<dotted_strings .*?</dotted_strings>','',a,flags=re.S)==b else 1)
 PY
 then ok "V1 the caller answer is otherwise byte-identical"; else no "V1 the element moved caller bytes"; fi
@@ -464,6 +466,259 @@ P
 run "$G" "$TMP/g1" '--callees=go'
 hasnt "$TMP/g1" 'n="D.insert"' "G1 a dotted-string fact is no evidence for class D's insert"
 
+# ── S: fix round 1 (the two reviews of c434dc34). Each [P] arm is RED on the pre-fix binary c434dc34 ─────────────────────────────────
+#   S-F1 [P] the fact's scope is no type name: a C++ struct D is neither promoted into --for's dispatch by a Python string, nor demoted to a test double
+#   S-F1t [G] twin: a type D that production really names still lists    S-B2 [P] loader= only where the constant's NAME reaches a sink's argument
+#   S-B2t [G] twins: attribute, imported-bare and own-function-local joins keep their loader=    S-B3 [P] --callers defines every attribute it prints
+#   S-B5 [P] a file name is no dotted path    S-B5t [G] a module named html still resolves    S-M1 [P] a container that is compared/asserted/raised/logged records nothing
+SD="$TMP/sd"
+for v in a b c; do
+fx "$SD/$v/source.h" <<'P'
+#pragma once
+struct Source
+{
+    virtual ~Source() {}
+    virtual int Fetch( int k ) = 0;
+};
+struct DiskSource : Source
+{
+    int Fetch( int k ) override;
+};
+P
+fx "$SD/$v/loader.cc" <<'P'
+#include "source.h"
+struct Loader
+{
+    Source* src_;
+    explicit Loader( Source* s ) : src_( s ) {}
+    int Load( int k );
+};
+int Loader::Load( int k )
+{
+    int v = src_->Fetch( k );
+    return v + 1;
+}
+int DiskSource::Fetch( int k )
+{
+    int doubled = k * 2;
+    return doubled;
+}
+P
+fx "$SD/$v/double.h" <<'P'
+#pragma once
+#include "source.h"
+struct D : Source
+{
+    int Fetch( int k ) override { return k + 100; }
+};
+P
+done
+fx "$SD/a/main.cc" <<'P'
+#include "source.h"
+int RunAll() { DiskSource disk; return disk.Fetch( 1 ); }
+P
+fx "$SD/a/tests/loader_test.cc" <<'P'
+#include "../double.h"
+int TestLoad() { D f; return f.Fetch( 3 ); }
+P
+fx "$SD/a/settings.py" <<'P'
+APPS = ["pkg.pg.Pg", "pkg.mem.Mem"]
+P
+fx "$SD/b/main.cc" <<'P'
+#include "source.h"
+int RunAll() { DiskSource disk; return disk.Fetch( 1 ); }
+P
+fx "$SD/b/tests/test_a.py" <<'P'
+PATHS = ["a.b.C"]
+def test_x():
+    assert PATHS
+P
+fx "$SD/c/main.cc" <<'P'
+#include "double.h"
+int RunAll() { D disk; return disk.Fetch( 1 ); }
+P
+fx "$SD/c/settings.py" <<'P'
+APPS = ["pkg.pg.Pg", "pkg.mem.Mem"]
+P
+for v in a b c; do run "$SD/$v" "$TMP/sd$v" '--for=Loader::Load src_->Fetch'; done
+hasnt "$TMP/sda" 'n="D::Fetch"' "S-F1 a Python string is not a production use of the test double D"
+has "$TMP/sda" 'test="1"' "S-F1 the double stays counted as a test double with the Python file present"
+hasnt "$TMP/sdb" 'test="1"' "S-F1 a type D named by nothing is not turned into a test double by a Python string in a test"
+has "$TMP/sdc" 'D::Fetch' "S-F1t a type D that production really names is still listed beside the Python strings"
+RIPWIRE_NO_DOTTED_STRINGS=1 run "$SD/a" "$TMP/sdaoff" '--for=Loader::Load src_->Fetch'
+python3 - "$TMP/sda" "$TMP/sdaoff" <<'PY' && ok "S-F1 the answer needs no RIPWIRE_NO_DOTTED_STRINGS: it equals the OFF answer apart from the element" || no "S-F1 the Python string moved the C++ dispatch answer"
+import re,sys
+a=open(sys.argv[1],encoding="utf-8").read(); b=open(sys.argv[2],encoding="utf-8").read()
+n=lambda t: re.sub(r'(<!-- ripwire for dotted_strings:.*?-->)?<dotted_strings .*?</dotted_strings>','',re.sub(r' (at|est_tokens)="[^"]*"','',t),flags=re.S)
+sys.exit(0 if n(a)==n(b) else 1)
+PY
+
+B2="$TMP/b2"
+fx "$B2/core/__init__.py" <<'P'
+P
+fx "$B2/core/apps.py" <<'P'
+class CoreConfig:
+    name = "core.plug.hook"
+P
+fx "$B2/core/plug/__init__.py" <<'P'
+P
+fx "$B2/core/plug/hook.py" <<'P'
+def hook():
+    return 1
+P
+fx "$B2/other/unrelated.py" <<'P'
+from importlib import import_module
+def resolve(name):
+    return import_module(name)
+P
+fx "$B2/p/__init__.py" <<'P'
+P
+fx "$B2/p/t.py" <<'P'
+def one(): return 1
+def two(): return 2
+def three(): return 3
+def four(): return 4
+def five(): return 5
+def six(): return 6
+def seven(): return 7
+def eight(): return 8
+def nine(): return 9
+def ten(): return 10
+P
+fx "$B2/p/consts.py" <<'P'
+from importlib import import_module
+ONE = ["p.t.one"]
+TWO = ["p.t.two"]
+THREE = ["p.t.three"]
+FOUR = ["p.t.four"]
+FIVE = ["p.t.five"]
+EIGHT = ["p.t.eight"]
+NINE = ["p.t.nine"]
+def comment_only(x):
+    # ONE is documented here
+    return import_module(x)
+def doc_only(x):
+    """see TWO."""
+    return import_module(x)
+def string_only(x):
+    print("THREE is deprecated")
+    return import_module(x)
+def shadow(x):
+    FOUR = x
+    return import_module(FOUR)
+def configure(logging_config):
+    if logging_config:
+        fn = import_module(logging_config)
+    print(FIVE)
+    return fn
+def reaches(x):
+    for path in EIGHT:
+        import_module(path)
+class Holder:
+    ATTR = ["p.t.nine"]
+def via_attr(h):
+    return import_module(h.NINE)
+P
+fx "$B2/p/locals.py" <<'P'
+from importlib import import_module
+def build():
+    loaders = ["p.t.six"]
+    return find(loaders)
+def find(loader):
+    if not loader:
+        raise ValueError("Invalid value in loaders configuration")
+    return import_module(loader)
+def own():
+    paths = ["p.t.seven"]
+    for p in paths:
+        import_module(p)
+P
+fx "$B2/p/conf.py" <<'P'
+PLUGS = ["p.t.ten"]
+P
+fx "$B2/p/user.py" <<'P'
+from importlib import import_module
+from .conf import PLUGS
+def load_all():
+    return [import_module(p) for p in PLUGS]
+P
+for n in one two three four five six; do run "$B2" "$TMP/b2$n" "--callers=$n"; done
+for n in one two three four five; do hasnt "$TMP/b2$n" 'loader=' "S-B2 --callers=$n: a comment, docstring, string, shadow or call-argument mention is no loader"; done
+hasnt "$TMP/b2six" 'loader="find"' "S-B2 a function-local constant is joined by no other function (a word in an error string)"
+run "$B2" "$TMP/b2seven" '--callers=seven'; has "$TMP/b2seven" 'loader="own"' "S-B2t a function-local constant joins the loop in its own function"
+run "$B2" "$TMP/b2ten" '--callers=ten'; has "$TMP/b2ten" 'loader="load_all"' "S-B2t a bare name imported with from-import joins the sink it reaches through a comprehension"
+run "$B2" "$TMP/b2eight" '--callers=eight'; has "$TMP/b2eight" 'loader="reaches"' "S-B2t a same-file constant reaching a sink through a for target keeps its loader"
+run "$B2" "$TMP/b2hook" '--callers=hook'; hasnt "$TMP/b2hook" 'loader="resolve"' "S-B2 a parameter of the same spelling in a file that never imports the constant is no loader"
+run "$B2" "$TMP/b2nine" '--callers=nine'; has "$TMP/b2nine" 'loader="via_attr"' "S-B2t an attribute NINE reaching a sink joins any constant of that name"
+
+# S-B3: every attribute the default --callers element prints is defined in that answer
+run "$B2" "$TMP/b3" '--callers=ten'
+python3 - "$TMP/b3" <<'PY' && ok "S-B3 --callers defines every dotted_strings/ds attribute it prints in its own legend" || no "S-B3 --callers prints an attribute with no legend clause"
+import re,sys
+t=open(sys.argv[1],encoding="utf-8").read()
+body=re.search(r'<dotted_strings sites="\d+".*?</dotted_strings>',t,re.S)
+if not body: sys.exit(1)
+legend=t.replace(body.group(0),'')
+bad=[]
+for tag in re.findall(r'<(dotted_strings|ds) ([^>]*)>',body.group(0)):
+    for a in re.findall(r'(\w+)="',tag[1]):
+        if not re.search(r'<%s [^>]*\b%s='%(tag[0],a),legend) and not re.search(r'\b%s='%a,legend): bad.append(tag[0]+"."+a)
+print("undefined:",sorted(set(bad)))
+sys.exit(0 if not bad else 1)
+PY
+
+B5="$TMP/b5"
+fx "$B5/index.py" <<'P'
+def html():
+    return 1
+P
+fx "$B5/cfg.py" <<'P'
+TEMPLATES = ["index.html"]
+PAGE = "index.html"
+P
+fx "$B5/pkg/__init__.py" <<'P'
+P
+fx "$B5/pkg/html.py" <<'P'
+def render(): return 1
+P
+fx "$B5/pkg/use.py" <<'P'
+MODS = ["pkg.html"]
+P
+run "$B5" "$TMP/b5a" '--callers=html'
+hasnt "$TMP/b5a" 'tn="html"' "S-B5 a file name (index.html) is not read as the definition html of index.py"
+run "$B5" "$TMP/b5b" '--callers=render'
+has "$TMP/b5b" 'mod="pkg/html.py"' "S-B5t a real module named html still resolves"
+
+M1="$TMP/m1"
+fx "$M1/m1/__init__.py" <<'P'
+P
+fx "$M1/m1/t.py" <<'P'
+def tgt(): return 1
+P
+fx "$M1/neg1.py" <<'P'
+import logging
+log = logging.getLogger("x")
+def f():
+    log.info("%s", ["m1.t.tgt"])
+    print(("m1.t.tgt", 1))
+P
+fx "$M1/neg2.py" <<'P'
+def f(x):
+    assert x == ("m1.t.tgt",)
+    return x in {"m1.t.tgt"}
+def g(x):
+    raise ValueError(("m1.t.tgt",))
+P
+fx "$M1/twin.py" <<'P'
+ALL = ["m1.t.tgt"]
+P
+run "$M1" "$TMP/m1a" '--callers=tgt'
+dsrows "$TMP/m1a" > "$TMP/m1a.rows"
+if [ "$( wc -l < "$TMP/m1a.rows" | tr -d ' ' )" = 1 ] && grep -qF 'p="twin.py"' "$TMP/m1a.rows"; then ok "S-M1 a container that is logged, printed, compared, asserted or raised records nothing; the plain list is the one row"; else no "S-M1 rows: $( tr '\n' ' ' < "$TMP/m1a.rows" )"; fi
+
+# S-B4: the house container, not std::map
+if grep -q 'std::map<' "$ROOT/src/fordottedstring.h"; then no "S-B4 std::map in src/fordottedstring.h"; else ok "S-B4 no std::map in src/fordottedstring.h"; fi
+
 # ── X ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 run "$K" "$TMP/k1b" '--for=csrfproc'
 if cmp -s "$TMP/k1" "$TMP/k1b"; then ok "X1 deterministic"; else no "X1 two runs differ"; fi
@@ -471,7 +726,8 @@ if cmp -s "$TMP/k1" "$TMP/k1b"; then ok "X1 deterministic"; else no "X1 two runs
 minus(){ python3 - "$1" "$2" <<'PY'
 import re,sys
 a=open(sys.argv[1],encoding="utf-8").read(); b=open(sys.argv[2],encoding="utf-8").read()
-s=re.sub(r'(<!-- ripwire for dotted_strings:.*?-->)?<dotted_strings .*?</dotted_strings>','',a,flags=re.S)
+s=re.sub(r'<(?:dotted_strings|ds) [^>]*>: .*?\. ','',a)   # the --callers legend layer's clauses for the element (S-B3)
+s=re.sub(r'(<!-- ripwire for dotted_strings:.*?-->)?<dotted_strings .*?</dotted_strings>','',s,flags=re.S)
 sys.exit(0 if s!=a and s==b else 1)
 PY
 }

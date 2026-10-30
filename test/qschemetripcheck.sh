@@ -34,6 +34,10 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-30, lane string-import fix round 1 (PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: kParserVer
+#   269 -> 275 (rich 276; c434dc34 had a 274 placeholder), quality.h's kIngestParserVerMirror with it: the dotted-string fact's scope char is now
+#   a non-identifier byte and an import sink's fact carries the flow tokens of its argument. kCacheVersion stays 46 and kQSnapCacheScheme
+#   stays 24: no record changes shape and no watched quality.h function moved.
 # 2026-10-29, train 41b (lane fn-slot-s2 merged onto main 52896f51): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the composed tree
 #   (main's pin 7273ed82… and the fn-slot-s2 branch pin b9174e46… conflicted). Watched text: kParserVer 259 -> 269 (rich 270; above
 #   the lane placeholders 257/259/260 and the live placeholders 259, 261, 263, 265, 267), quality.h's kIngestParserVerMirror with it.

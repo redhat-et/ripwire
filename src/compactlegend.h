@@ -622,6 +622,19 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // map's own <s> rows never read it. The columnar form names the same list as its sites_at column.
     { "sites_at",          "<s sites_at=>: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },
     { "sites_total",       "<s sites_total=N>: N sites, sites_at= lists the first 16; next= (the uses verb) lists all", true, "s", MapHeaderRead::No, {}, "callers" },
+    // STRING-IMPORT (fordottedstring.h): the --callers element keeps no comment in the compact layer, so each attribute it prints is defined
+    // here, ELEMENT-qualified (<dotted_strings>/<ds>) and keyed to the callers schema; --for keeps the element's own comment.
+    { "hedge",             "<dotted_strings hedge=>: the whole claim: a string in the source names a shown symbol; no edge, in no count or est_tokens; whether an import sink loads it is not traced", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "sites",             "<dotted_strings sites=N rows=K>: N non-test string sites name a shown symbol, K printed (rows_capped=1 next= beyond)", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "tests",             "<dotted_strings tests=N>: N more sites are in test paths, counted only", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "unresolved",        "<dotted_strings unresolved=N>: N strings end in a shown name but resolve to no one definition", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "external",          "<dotted_strings external=N>: N strings end in a shown name but name no in-tree module", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "s",                 "<ds s=>: the dotted string as written in the source (tmpl= for a %-template)", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "tmpl",              "<ds tmpl= cand= cands=N>: a %-template handed to an import sink; cand= modules sibling directories of shown files would fill it with, cands=N how many; which one loads is not known", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "tn",                "<ds tn= tp=>: the definition the string names and where it is; mod= when it names a whole module", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "p",                 "<ds p= l= in=>: the file, line and enclosing name where the string sits", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "sink",              "<ds sink=>: the string is the argument of a call with that tail name (the callee is not resolved)", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "loader",            "<ds loader= lp=>: a function in which the constant's name reaches an import sink's argument through its own assignments; loaders=N how many (over 3 none is named)", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "fields",            "<sites_at> column: each row's calls of the leaf name, any receiver, as file:line, space-separated; not proof each binds", true, "cols", MapHeaderRead::No, "sites_at", "callers" },
     { "fields",            "<sites_total> column: a row's uncut site count; its sites_at cell lists the first 16, the uses verb all", true, "cols", MapHeaderRead::No, "sites_total", "callers" },
     // FE-B: a map <c> row merging N byte-identical via=name rows (serialize.h writeMapCalleeRows) carries x=N

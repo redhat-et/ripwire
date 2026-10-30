@@ -8,7 +8,8 @@
 // WHAT. <dotted_strings> with one <ds> row per literal SITE whose whole value resolves (pydottedpath.h: its module file, then
 // exactly one definition in it; or a module itself) to a row this answer shows: the string (s=), the target (tn= tp=, or mod=),
 // where the string sits (p= l= in=), and how it may be loaded: sink= when the string is that sink's own argument, else
-// loader= lp= for a function that names the constant and calls an import sink. A `%`-template handed to a sink
+// loader= lp= for a function in which the constant's name reaches an import sink's argument through that function's own assignments (the parser's flow tokens,
+// ingest_valuerefs.h flowTokensOf; a comment, docstring, string, parameter or local shadow is never one). A `%`-template handed to a sink
 // (`"%s.base" % x`) gets one hedged row when at least three sibling directories of shown files fill its hole: cand= those modules, cands=
 // how many; which one loads is not known.
 //
@@ -21,20 +22,18 @@
 // WHEN. The default regime of --for (XML, no --token-budget) and --callers, after every byte of the ordinary answer and outside
 // est_tokens: RIPWIRE_NO_DOTTED_STRINGS=1 is the rest of it byte for byte.
 
-#include "docparse.h"       // docparse::detail::readWholeFile
+#include "btree.hpp"        // gtl::btree_map — sorted iteration (house rule: never std::map)
 #include "epmanifest.h"     // epdetail::appendAttr
 #include "filter.h"         // isTestPath
 #include "model.h"
 #include "pydottedpath.h"
 #include "serialize.h"      // escapeXml
-#include "taskroute.h"      // taskroute::wordByte
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
-#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -60,8 +59,8 @@ inline bool forDottedStringsOn()
 inline constexpr std::string_view kForDottedStringsLegend =
     "<!-- ripwire for dotted_strings: Python string literals whose whole dotted path names a shown row; hedge= is the whole "
     "claim: no edge, not in est_tokens or any count. ds s= the string; "
-    "tn= tp= the definition it names, or mod= the module; p= l= in= where the string sits; sink= it is that import call's argument; "
-    "loader= lp= a function naming that constant and calling an import sink (loaders= how many do; over 3 none is named, a generic word); tmpl= a %-template "
+    "tn= tp= the definition it names, or mod= the module; p= l= in= where the string sits; sink= it is the argument of a call whose tail name is that (the callee is not resolved); "
+    "loader= lp= a function in which the constant's name reaches an import sink's argument through its own assignments (names only, not a proof of the value) (loaders= how many do; over 3 none is named, a generic word); tmpl= a %-template "
     "passed to a sink, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
     "tests= sites in test paths, counted only; unresolved= external= strings ending in a shown name that resolve to no one definition, "
     "or to no in-tree module; rows_capped=1 next= the list was cut. -->";
@@ -80,7 +79,7 @@ namespace dotteddetail
 // One pass per file over its symbols, memoised: a file's attribute lookups repeat across the strings of one package.
 struct SymbolsOfFile
 {
-    std::map<std::uint32_t, std::vector<NodeId>> byFile;
+    gtl::btree_map<std::uint32_t, std::vector<NodeId>> byFile;
     explicit SymbolsOfFile( const IngestResult& ing, const std::set<std::uint32_t>& files )
     {
         for( NodeId id = 0; id < ing.symbols.size(); ++id )
@@ -195,9 +194,9 @@ inline std::string dottedOfPath( std::string_view rel )
 struct ShownNames
 {
     std::set<std::string_view>            wanted;
-    std::map<NodeId, std::size_t>         shownDef;
-    std::map<std::uint32_t, std::size_t>  shownFile;
-    std::map<std::pair<std::uint32_t, std::string_view>, std::size_t> shownOwner;   // a method's class is what a string names
+    gtl::btree_map<NodeId, std::size_t>         shownDef;
+    gtl::btree_map<std::uint32_t, std::size_t>  shownFile;
+    gtl::btree_map<std::pair<std::uint32_t, std::string_view>, std::size_t> shownOwner;   // a method's class is what a string names
 };
 inline ShownNames shownNamesOf( const IngestResult& ing, std::span<const NodeId> shown )
 {
@@ -292,7 +291,7 @@ inline DottedTarget targetOfSplit( const IngestResult& ing, const ModuleSplit& s
     {
         t = DottedTarget{ DottedTarget::State::Module, kNoNode, sp.wholeFile };
     }
-    else if( sp.wholeFile == kNoFile && hits == 1 )
+    else if( sp.wholeFile == kNoFile && hits == 1 && !isFileExtensionSegment( sp.attr ) )
     {
         t = DottedTarget{ DottedTarget::State::Def, def, kNoFile };
     }
@@ -306,13 +305,13 @@ inline DottedTarget targetOfSplit( const IngestResult& ing, const ModuleSplit& s
 // Each distinct candidate string, resolved once.
 struct ResolvedStrings
 {
-    std::map<std::string_view, DottedTarget> targets;
+    gtl::btree_map<std::string_view, DottedTarget> targets;
     std::size_t                              unresolvedN = 0;
     std::size_t                              externalN   = 0;
 };
 inline ResolvedStrings resolveStrings( const IngestResult& ing, std::span<const Reference* const> cand )
 {
-    std::map<std::string_view, ModuleSplit> split;
+    gtl::btree_map<std::string_view, ModuleSplit> split;
     std::set<std::uint32_t>                 attrFiles;
     for( const Reference* r : cand )
     {
@@ -376,7 +375,7 @@ inline DottedSites sitesNamingShown( const IngestResult& ing, std::span<const Re
     std::set<std::pair<std::uint32_t, std::string>> seenSite;
     for( const Reference* r : cand )
     {
-        const DottedTarget&              t  = res.targets.at( r->recvVar );
+        const DottedTarget&              t  = res.targets.find( r->recvVar )->second;
         const std::optional<std::size_t> at = shownPositionOf( ing, t, n );
         if( !at || !seenSite.emplace( r->fileId, std::format( "{}:{}", r->line, r->recvVar ) ).second )
         {
@@ -404,7 +403,7 @@ inline DottedSites sitesNamingShown( const IngestResult& ing, std::span<const Re
 
 // A %-template handed to a sink, filled by the directories of shown files: at least kForDottedTemplateMinFills SIBLINGS under one parent
 // (measured: unrelated base.py files in 2 directories fired on 13 of 16 django rows; sibling backends are the layout the template loads).
-inline void appendTemplateRows( const IngestResult& ing, std::span<const Reference* const> templates, const std::map<std::uint32_t, std::size_t>& shownFile,
+inline void appendTemplateRows( const IngestResult& ing, std::span<const Reference* const> templates, const gtl::btree_map<std::uint32_t, std::size_t>& shownFile,
                                 std::size_t shownCount, std::vector<Row>& rows )
 {
     for( const Reference* r : templates )
@@ -415,8 +414,8 @@ inline void appendTemplateRows( const IngestResult& ing, std::span<const Referen
             continue;
         }
         const auto [ pre, post ] = *parts;
-        std::map<std::string, std::set<std::uint32_t>> fillsByParent;   // the plugin layout: sibling directories under one parent
-        std::map<std::uint32_t, std::size_t>           firstShownOf;
+        gtl::btree_map<std::string, std::set<std::uint32_t>> fillsByParent;   // the plugin layout: sibling directories under one parent
+        gtl::btree_map<std::uint32_t, std::size_t>           firstShownOf;
         for( const auto& [ fileId, at ] : shownFile )
         {
             const std::string_view rel = rootRelPath( ing, fileId );
@@ -449,7 +448,7 @@ inline void appendTemplateRows( const IngestResult& ing, std::span<const Referen
         std::size_t                    firstShown = shownCount;
         for( const std::uint32_t f : fills )
         {
-            firstShown = std::min( firstShown, firstShownOf.at( f ) );
+            firstShown = std::min( firstShown, firstShownOf.find( f )->second );
         }
         Row row;
         row.rankClass = 2;
@@ -468,23 +467,81 @@ inline void appendTemplateRows( const IngestResult& ing, std::span<const Referen
     }
 }
 
-// Loaders of the constants: a non-test function that calls a sink on a computed value and names the constant.
-inline void attachLoaders( const IngestResult& ing, std::span<const Reference* const> loaders, std::vector<Row>& rows )
+// Is `token` one of the space-separated flow tokens in `flow` (model.h kDottedFlowAttr / kDottedFlowBound)?
+inline bool flowHasToken( std::string_view flow, std::string_view token )
 {
-    std::map<NodeId, std::string> bodyOf;
-    const auto                    bodyText = [ & ]( NodeId id ) -> const std::string&
+    for( std::size_t at = 0; at < flow.size(); )
     {
-        const auto [ it, isNew ] = bodyOf.try_emplace( id );
-        if( isNew )
+        const std::size_t end = std::min( flow.find( ' ', at ), flow.size() );
+        if( flow.substr( at, end - at ) == token )
         {
-            const Symbol& s = ing.symbols[id];
-            if( const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ); text && s.sigStartByte < s.endByte && s.endByte <= text->size() )
+            return true;
+        }
+        at = end + 1;
+    }
+    return false;
+}
+
+// Does the sink function's flow (a "v" fact's tokens) reach the constant `row.site` assigns? The flow is the AST-true set of names
+// whose value can arrive at the sink's argument inside that function (ingest_valuerefs.h flowTokensOf): comments, docstrings,
+// strings, parameters and other functions' locals are not in it.
+//  - an attribute `.NAME` reaches any constant of that name (`settings.NAME`, `self.NAME`: the receiver is not typed);
+//  - a free bare `NAME` reaches a MODULE-level constant of that name that the function can see: same file, or a `from m import NAME`
+//    in the function's file whose module is the constant's file;
+//  - a function-local constant (shape "m") is reached only inside its own function, by `NAME` or `=NAME`.
+struct ImportedNames
+{
+    std::set<std::tuple<std::uint32_t, std::string_view, std::string_view>> byFile;   // file, bound name, last segment of the module
+    explicit ImportedNames( const IngestResult& ing, const std::set<std::uint32_t>& files )
+    {
+        for( const Binding& b : ing.bindings )
+        {
+            if( b.kind == LocalBindKind::Import && files.contains( b.fileId ) )
             {
-                it->second = text->substr( s.sigStartByte, s.endByte - s.sigStartByte );
+                const std::string_view mod = b.typeName;
+                byFile.emplace( b.fileId, std::string_view( b.var ), mod.substr( mod.rfind( '.' ) == std::string_view::npos ? 0 : mod.rfind( '.' ) + 1 ) );
             }
         }
-        return it->second;
-    };
+    }
+};
+// Is the constant at `site` assigned at module level (no function or class around it)? The constant is itself a top-level variable
+// symbol, so a module-level site's enclosing symbol is that variable.
+inline bool siteIsModuleLevel( const IngestResult& ing, const Reference& site )
+{
+    if( site.fromSymbol == kNoNode )
+    {
+        return true;
+    }
+    return site.fromSymbol < ing.symbols.size() && ing.symbols[ site.fromSymbol ].name == site.memberCtor && ing.symbols[ site.fromSymbol ].scope.empty();
+}
+inline bool loaderReachesConstant( const IngestResult& ing, const Reference& loaderFact, const Reference& site, const ImportedNames& imports )
+{
+    const std::string_view name = site.memberCtor;
+    const std::string_view flow = loaderFact.recvVar;
+    if( site.composeRel == kDottedShapeLocalListed )
+    {
+        return loaderFact.fromSymbol == site.fromSymbol && ( flowHasToken( flow, name ) || flowHasToken( flow, std::string( 1, kDottedFlowBound ) + std::string( name ) ) );
+    }
+    if( flowHasToken( flow, std::string( 1, kDottedFlowAttr ) + std::string( name ) ) )
+    {
+        return true;
+    }
+    if( !siteIsModuleLevel( ing, site ) || !flowHasToken( flow, name ) )
+    {
+        return false;
+    }
+    return loaderFact.fileId == site.fileId || imports.byFile.contains( std::make_tuple( loaderFact.fileId, name, moduleTailOf( rootRelPath( ing, site.fileId ) ) ) );
+}
+
+// Loaders of the constants: a non-test function that calls a sink on a computed value that the constant's name reaches.
+inline void attachLoaders( const IngestResult& ing, std::span<const Reference* const> loaders, std::vector<Row>& rows )
+{
+    std::set<std::uint32_t> loaderFiles;
+    for( const Reference* v : loaders )
+    {
+        loaderFiles.insert( v->fileId );
+    }
+    const ImportedNames imports( ing, loaderFiles );
     for( Row& row : rows )
     {
         if( row.site->memberCtor.empty() || row.site->composeRel == kDottedShapeSink || row.site->composeRel == kDottedShapeFormat )
@@ -494,12 +551,13 @@ inline void attachLoaders( const IngestResult& ing, std::span<const Reference* c
         std::set<NodeId> seen;
         for( const Reference* v : loaders )
         {
-            if( v->fromSymbol >= ing.symbols.size() || isTestPath( rootRelPath( ing, v->fileId ) ) || !seen.insert( v->fromSymbol ).second )
+            if( v->fromSymbol >= ing.symbols.size() || isTestPath( rootRelPath( ing, v->fileId ) ) || seen.contains( v->fromSymbol ) )
             {
                 continue;
             }
-            if( taskroute::boundedFind( bodyText( v->fromSymbol ), row.site->memberCtor ) != std::string_view::npos )
+            if( loaderReachesConstant( ing, *v, *row.site, imports ) )
             {
+                seen.insert( v->fromSymbol );
                 ++row.loaders;
                 if( row.loader == kNoNode || v->fileId == row.site->fileId )
                 {
@@ -600,7 +658,7 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
     std::string       x( kForDottedStringsLegend );
     const std::size_t shownRows = std::min( rows.size(), kForDottedStringRows );
     x += std::format( "<dotted_strings sites=\"{}\" rows=\"{}\"", rows.size(), shownRows );
-    x += " hedge=\"a string in the source names this symbol; whether it flows to the import sink is not traced\"";   // on the element: --callers' legend layer keeps no comment
+    x += " hedge=\"a string in the source names this symbol; whether any import sink loads it is not traced\"";   // on the element: --callers' legend layer keeps no comment
     if( sites.testSites > 0 )
     {
         x += std::format( " tests=\"{}\"", sites.testSites );

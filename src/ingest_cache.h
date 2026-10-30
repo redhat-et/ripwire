@@ -363,7 +363,7 @@ constexpr std::uint32_t kCacheVersion = 46;           // 46: train 40 — lane j
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 274;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 275;          // bump on any grammar/.scm/extraction change
                                                       // 269 = 2026-10-29 (train 41b: lane fn-slot-s2 (placeholders 257/258, 259 and 260 over its fix rounds): C++ `&Cls::m`
                                                       //   value refs (memberRoot = Cls; memberVia = written qualifier / enclosing scope / `using namespace` directives),
                                                       //   `( o.*x.f )( … )` slot calls, C nested designated paths and macro-cast slot calls + their "()M" alias facts, a class

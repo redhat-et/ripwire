@@ -221,7 +221,7 @@ inline bool ownerNamedByProduction( const IngestResult& ing, const Graph& g, Nod
     bool testNames = false;
     for( const Reference& r : ing.references )
     {
-        if( ( r.calleeName != owner && r.qualifier != owner ) || r.isDocLink )
+        if( ( r.calleeName != owner && r.qualifier != owner ) || r.isDocLink || isSlotJoinRecord( r ) )   // a Value-role fact's qualifier is a scope char, not a type
         {
             continue;
         }

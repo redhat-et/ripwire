@@ -581,13 +581,25 @@ inline constexpr char kValueRefSlotFactScope = 't';
 inline constexpr char kValueRefSlotParamScope = 'q';
 // STRING-IMPORT: a dotted-string FACT (role Value, name "": no row, no edge; fordottedstring.h is its one reader). recvVar = the
 // string as written, composeRel = the shape below, memberPath = the import sink's tail name (direct / format / variable shapes),
-// memberCtor = the name it is assigned to ("" none). Distinct from every other scope char.
-inline constexpr char kValueRefDottedStringScope = 'D';
+// memberCtor = the name it is assigned to ("" none). The scope char is a NON-identifier byte on purpose: a reader that takes the
+// qualifier for a type or scope name (fordispatchhop.h ownerNamedByProduction read "D" as a class D) can never match it.
+inline constexpr char kValueRefDottedStringScope = '%';
 inline constexpr std::string_view kDottedShapeConstant = "c";   // a module-level or class-level `NAME = "a.b.C"`
 inline constexpr std::string_view kDottedShapeListed   = "l";   // an element of a list/tuple/set or a dict VALUE, anywhere
+inline constexpr std::string_view kDottedShapeLocalListed = "m";   // as "l", assigned to a plain local NAME inside a function: only that function can name it
 inline constexpr std::string_view kDottedShapeSink     = "s";   // the first positional argument of an import sink
 inline constexpr std::string_view kDottedShapeFormat   = "f";   // `"%s.base" % x` as that argument (recvVar = the template)
-inline constexpr std::string_view kDottedShapeVariable = "v";   // an import sink called with anything else (recvVar "")
+inline constexpr std::string_view kDottedShapeVariable = "v";   // an import sink called with anything else: recvVar = the FLOW TOKENS (below), space-separated
+// The flow tokens of a "v" fact: the names whose value can reach the sink's first argument inside its function (the argument's own
+// names, then through assignments / for targets / walrus / comprehension targets of that function, to a fixpoint): `.NAME` an
+// attribute tail, `NAME` a bare name no statement of the function binds, `=NAME` a bare name the function itself binds. Capped by
+// kVrDottedFlowMaxBytes: over it the fact carries none and joins nothing. A name that reaches the argument only through another
+// function, a parameter or a call result is not here, so no constant joins it.
+inline constexpr char kDottedFlowAttr  = '.';
+inline constexpr char kDottedFlowBound = '=';
+// A call whose arguments are printed, compared or logged, never loaded: a container handed to one records nothing.
+inline constexpr std::string_view kDottedNonLoadCallees[] = { "print", "debug", "info", "warning", "warn", "error", "exception", "critical", "fatal", "log", "write", "writelines",
+                                                              "assertEqual", "assertNotEqual", "assertIn", "assertNotIn", "assertListEqual", "assertCountEqual", "assertTrue", "assertFalse" };
 // The import sinks, by the callee's tail name: language DATA, one row per language; a language with no row records nothing.
 struct DottedImportSinkLang
 {
