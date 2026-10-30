@@ -35,6 +35,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <memory>       // gitFileAuthors' per-file author maps, built on first touch
 #include <optional>     // CoCouplingCache — the lazily-built StaticIncludeCoupling shared across probes
 #include <mutex>        // gitRepoToplevel's per-directory memo — one rev-parse probe per root, not per miner
 #include <string>
@@ -2879,10 +2880,19 @@ inline std::vector<FileOwnership> gitFileAuthors(
     // rather than a growth. Coverage 84.9%/77.2% across the two census corpora against 73.0%/59.9% at N=1;
     // marginal coverage per byte then falls 2.16 → 0.70 going 2→4, so 2 is the knee. Most (file, author)
     // pairs are one commit — 1 613/3 002 inner lists on the two corpora, nearly all of them singletons.
-    // Flat table accumulators indexed directly by fileId: eliminates HashMap hashing, probing and
-    // bucket allocations on every path row, and visits naturally in ascending fileId order.
-    std::vector<HashMap<std::string, rw::SmallVec<std::int64_t, 2>>> perFile( fileCount );
-    std::vector<std::int64_t>                                        newestTsByFile( fileCount, 0 );
+    // fileId is dense (0..fileCount-1), so the whole-repo accumulator is a flat table indexed by it, with
+    // each file's author map built on first touch (files without mined history allocate nothing). A
+    // single-file query uses one map. Reducing in ascending fileId order leaves the result sorted.
+    using AuthorTimestamps = HashMap<std::string, rw::SmallVec<std::int64_t, 2>>;
+    AuthorTimestamps                               singleAuthorTs;
+    std::int64_t                                   singleNewestTs = 0;
+    std::vector<std::unique_ptr<AuthorTimestamps>> perFile;
+    std::vector<std::int64_t>                      newestTsByFile;
+    if( !singleFile )
+    {
+        perFile.resize( fileCount );
+        newestTsByFile.resize( fileCount, 0 );
+    }
 
     // F6 companion: this used to be a SIXTH hand-rolled index, and a DIVERGENT one — it keyed on the
     // root-stripped `relPath` where the shared builder keyed on the full ingested path, so the fit measure the
@@ -2947,24 +2957,29 @@ inline std::vector<FileOwnership> gitFileAuthors(
             {
                 continue;
             }
-            perFile[ f ][ curEmail ].push_back( curTs );
-            std::int64_t& newest = newestTsByFile[ f ];
-            if( curTs > newest )
+            if( singleFile )
             {
-                newest = curTs;
+                singleAuthorTs[ curEmail ].push_back( curTs );
+                singleNewestTs = std::max( singleNewestTs, curTs );
+                continue;
             }
+            std::unique_ptr<AuthorTimestamps>& slot = perFile[ f ];
+            if( !slot )
+            {
+                slot = std::make_unique<AuthorTimestamps>();
+            }
+            ( *slot )[ curEmail ].push_back( curTs );
+            newestTsByFile[ f ] = std::max( newestTsByFile[ f ], curTs );
         }
     } );
 
     std::vector<FileOwnership> result;
-    for( std::uint32_t fid = 0; fid < fileCount; ++fid )
+    const auto reduceFile = [ & ]( std::uint32_t fid, const AuthorTimestamps& authorTs, std::int64_t newestTs )
     {
-        auto& authorTs = perFile[ fid ];
         if( authorTs.empty() )
         {
-            continue;
+            return;
         }
-        const std::int64_t newestTs = newestTsByFile[ fid ];
 
         // Compute decay scores
         double totalScore = 0.0;
@@ -3006,6 +3021,21 @@ inline std::vector<FileOwnership> gitFileAuthors(
                    { return x.score != y.score ? x.score > y.score : x.email < y.email; } );
 
         result.push_back( { fid, std::move( authors ), std::uint32_t( authorTs.size() ), topOver80 } );
+    };
+
+    if( singleFile )
+    {
+        reduceFile( onlyFileId, singleAuthorTs, singleNewestTs );
+    }
+    else
+    {
+        for( std::uint32_t fid = 0; fid < fileCount; ++fid )
+        {
+            if( perFile[ fid ] )
+            {
+                reduceFile( fid, *perFile[ fid ], newestTsByFile[ fid ] );
+            }
+        }
     }
 
     return result;
