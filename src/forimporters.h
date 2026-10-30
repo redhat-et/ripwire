@@ -11,7 +11,7 @@
 // after use / copy / following / like / alongside / modeled on|after as a capitalised identifier that resolves to a non-test
 // definition, and that file has a non-test importer. The block names one model, as an example: the hedge is in its legend.
 #include "defslookup.h"    // lookupDefs — the model's definition
-#include "fordeclrow.h"    // forTaskMaskCodeSpans / forWordIsOneOf — the masked reading of the task
+#include "fordeclrow.h"    // forTaskMaskCodeSpans — the masked reading of the task
 #include "graph.h"         // impactImportTier — the --impact import tier, one derivation
 #include "mapinventory.h"  // isInventoryCodeSymbol — a file of only data sections defines no code
 #include "nextverb.h"      // nextFlag / nextAttrXml
@@ -31,8 +31,6 @@ inline constexpr std::size_t kForImporterRowsCap = 6;   // <f> rows in one <impo
 inline constexpr std::size_t kForModelTries      = 3;   // model spellings resolved per task
 inline constexpr std::size_t kForAddNewGapBytes  = 40;  // add ... new: how far apart in one sentence, in bytes
 
-inline bool forIsWordChar( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_'; }
-
 struct ForTaskWord
 {
     std::size_t begin = 0;
@@ -44,28 +42,18 @@ inline std::vector<ForTaskWord> forTaskWordSpans( std::string_view text )
     std::vector<ForTaskWord> out;
     for( std::size_t i = 0; i < text.size(); )
     {
-        if( !forIsWordChar( text[i] ) )
+        if( !namesplit::isIdentChar( text[i] ) )
         {
             ++i;
             continue;
         }
         std::size_t e = i;
-        while( e < text.size() && forIsWordChar( text[e] ) )
+        while( e < text.size() && namesplit::isIdentChar( text[e] ) )
         {
             ++e;
         }
         out.push_back( { i, e } );
         i = e;
-    }
-    return out;
-}
-
-inline std::string forLowerCopy( std::string_view s )
-{
-    std::string out( s );
-    for( char& c : out )
-    {
-        c = char( std::tolower( static_cast<unsigned char>( c ) ) );
     }
     return out;
 }
@@ -76,12 +64,12 @@ inline bool forAddNewAsked( std::string_view task )
     static constexpr std::array<std::string_view, 9> kAdd{ "add", "adding", "write", "writing", "implement", "implementing", "create", "creating", "build" };
     static constexpr std::array<std::string_view, 2> kNew{ "new", "another" };
     const std::string              masked = forTaskMaskCodeSpans( task );
-    const std::string              lower  = forLowerCopy( masked );
+    const std::string              lower  = routeLower( masked );
     const std::vector<ForTaskWord> spans  = forTaskWordSpans( lower );
     const auto word = [ & ]( const ForTaskWord& w ) { return std::string_view( lower ).substr( w.begin, w.end - w.begin ); };
     for( std::size_t i = 0; i < spans.size(); ++i )
     {
-        if( !forWordIsOneOf( word( spans[i] ), kAdd ) )
+        if( !std::ranges::contains( kAdd, word( spans[i] ) ) )
         {
             continue;
         }
@@ -92,7 +80,7 @@ inline bool forAddNewAsked( std::string_view task )
             {
                 break;
             }
-            if( forWordIsOneOf( word( spans[k] ), kNew ) )
+            if( std::ranges::contains( kNew, word( spans[k] ) ) )
             {
                 return true;
             }
@@ -108,14 +96,14 @@ inline std::vector<std::string> forTaskModelNames( std::string_view task )
     static constexpr std::array<std::string_view, 5> kCue{ "use", "copy", "following", "like", "alongside" };
     static constexpr std::array<std::string_view, 2> kModeled{ "model", "modeled" };
     static constexpr std::array<std::string_view, 2> kOnAfter{ "on", "after" };
-    const std::string              lower = forLowerCopy( task );
+    const std::string              lower = routeLower( task );
     const std::vector<ForTaskWord> spans = forTaskWordSpans( lower );
     const auto word = [ & ]( std::size_t i ) { return std::string_view( lower ).substr( spans[i].begin, spans[i].end - spans[i].begin ); };
     std::vector<std::string> out;
     for( std::size_t i = 0; i + 1 < spans.size(); ++i )
     {
-        const bool plain   = forWordIsOneOf( word( i ), kCue );
-        const bool modeled = !plain && i + 2 < spans.size() && forWordIsOneOf( word( i ), kModeled ) && forWordIsOneOf( word( i + 1 ), kOnAfter );
+        const bool plain   = std::ranges::contains( kCue, word( i ) );
+        const bool modeled = !plain && i + 2 < spans.size() && std::ranges::contains( kModeled, word( i ) ) && std::ranges::contains( kOnAfter, word( i + 1 ) );
         if( !plain && !modeled )
         {
             continue;
@@ -131,28 +119,22 @@ inline std::vector<std::string> forTaskModelNames( std::string_view task )
     return out;
 }
 
-// The file holds no code symbol: only imports and data, a list of what gets loaded.
-inline bool forFileDefinesNoCode( const IngestResult& ing, std::uint32_t file )
-{
-    return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.fileId == file && isInventoryCodeSymbol( s ); } );
-}
-
 inline std::string forImportersXml( const IngestResult& ing, const std::string& model, const std::vector<std::uint32_t>& source, std::size_t testRows, std::uint64_t unresolved )
 {
     std::vector<std::uint32_t> ordered = source;   // the lists of imports first, each kind in the tier's own order
-    std::vector<char>          isList( ing.files.size(), 0 );
-    for( const std::uint32_t f : ordered )
+    std::vector<char>          holdsCode( ing.files.size(), 0 );   // a file with no code symbol holds only imports and data: a list of what gets loaded
+    for( const Symbol& s : ing.symbols )
     {
-        isList[f] = forFileDefinesNoCode( ing, f ) ? 1 : 0;
+        holdsCode[ s.fileId ] = holdsCode[ s.fileId ] != 0 || isInventoryCodeSymbol( s ) ? 1 : 0;
     }
-    std::ranges::stable_partition( ordered, [ & ]( std::uint32_t f ) { return isList[f] != 0; } );
+    std::ranges::stable_partition( ordered, [ & ]( std::uint32_t f ) { return holdsCode[f] == 0; } );
     std::string       rows;
     std::vector<char> esc;
     const std::size_t shown = std::min( ordered.size(), kForImporterRowsCap );
     for( std::size_t i = 0; i < shown; ++i )
     {
         rows += "<f p=\"" + std::string( escapeXml( rootRelPath( ing, ordered[i] ), esc ) ) + "\"";
-        rows += isList[ ordered[i] ] != 0 ? " aggregator=\"1\"/>" : "/>";
+        rows += holdsCode[ ordered[i] ] == 0 ? " aggregator=\"1\"/>" : "/>";
     }
     std::string out = "<!-- ripwire for importers: the task adds a new thing modeled on of= (named in the task, matched by name; an exemplar, not the only "
                       "valid model), so the source files importing its file follow: a new file may need the same import to be loaded. <f> p= the importer; "

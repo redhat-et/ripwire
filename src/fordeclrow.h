@@ -18,6 +18,7 @@
 #include "defslookup.h"    // lookupDefs / defRowXml / defPickProvablyUnique — the --defs lookup
 #include "forcallerhop.h"  // forTaskIdentWords — the one word split of a --for task
 #include "nextverb.h"      // nextFlag / nextAttrXml
+#include "resolve.h"       // trimWs
 #include "serialize.h"     // escapeXml / isCallableKind
 
 #include <algorithm>
@@ -25,7 +26,6 @@
 #include <cctype>
 #include <cstddef>
 #include <string>
-#include <span>
 #include <string_view>
 #include <vector>
 
@@ -62,11 +62,6 @@ inline std::vector<std::string> forTaskMaskedLowerWords( std::string_view task )
     return words;
 }
 
-inline bool forWordIsOneOf( std::string_view w, std::span<const std::string_view> set ) noexcept
-{
-    return std::ranges::find( set, w ) != set.end();
-}
-
 // signature(s) | prototype(s) | (new|extra|additional) [required] (argument|arg|parameter|param)(s)
 inline bool forDeclTaskWord( std::string_view task )
 {
@@ -76,16 +71,16 @@ inline bool forDeclTaskWord( std::string_view task )
     const std::vector<std::string> w = forTaskMaskedLowerWords( task );
     for( std::size_t i = 0; i < w.size(); ++i )
     {
-        if( forWordIsOneOf( w[i], kShape ) )
+        if( std::ranges::contains( kShape, w[i] ) )
         {
             return true;
         }
-        if( !forWordIsOneOf( w[i], kAdded ) || i + 1 >= w.size() )
+        if( !std::ranges::contains( kAdded, w[i] ) || i + 1 >= w.size() )
         {
             continue;
         }
         const std::size_t next = w[ i + 1 ] == "required" ? i + 2 : i + 1;
-        if( next < w.size() && forWordIsOneOf( w[next], kArg ) )
+        if( next < w.size() && std::ranges::contains( kArg, w[next] ) )
         {
             return true;
         }
@@ -166,12 +161,7 @@ inline std::vector<std::string> forDeclSubjects( std::string_view task )
 // The whole task when it is one symbol spelling, trimmed; empty otherwise.
 inline std::string_view forBareSymbolTask( std::string_view task ) noexcept
 {
-    const std::size_t a = task.find_first_not_of( " \t\n\r" );
-    if( a == std::string_view::npos )
-    {
-        return {};
-    }
-    const std::string_view t = task.substr( a, task.find_last_not_of( " \t\n\r" ) - a + 1 );
+    const std::string_view t = trimWs( task );
     return forIsSymbolSpelling( t ) ? t : std::string_view{};
 }
 
