@@ -253,6 +253,25 @@ struct LangFacts
     /// Python: a string literal as a function's FIRST statement is its docstring, not code; hopbody.h bodyStatementLines does not
     /// count it (lane path-hop-body-fix1, review F4: a documented one-line delegator is still thin).
     bool leadingDocstring = false;
+
+    /// The languages where a bare `m()` inside a method is an implicit `this.m()` (or reaches a free/top-level function):
+    /// Java, Kotlin, C#, Swift, C++, Ruby.
+    bool implicitReceiver = false;
+
+    /// The languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias):
+    /// a free function is never what `x.f()` calls. Python, Go, C++, Rust, Ruby, Java, C#, Swift.
+    bool memberNeverReachesFreeFunction = false;
+
+    /// A call through a module alias (`pkg.F()`) reaches the module's package-level functions only, never a method: Go.
+    bool moduleCallReachesFunctionsOnly = false;
+
+    /// The languages where `Cls.m()` is a call on the CLASS (a static or an unbound method):
+    /// JavaScript, TypeScript, Python, Java, Kotlin, C#, Swift.
+    bool classNameReceiver = false;
+
+    /// The languages where `#` opens a line comment (in the C family `#` opens a preprocessor directive):
+    /// Python, Bash, Ruby, Elixir, Toml, Yaml, GDScript.
+    bool hashComment = false;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -261,38 +280,48 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
-      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true },
+      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
-      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true },
+      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true },
-    { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir },
+      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .classNameReceiver = true },
+    { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
+      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self" },
-    { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
+      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true },
+    { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true },
     { .lang = Lang::Markdown, .linkSections = true },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true },
-    { .lang = Lang::Bash },
+      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .classNameReceiver = true },
+    { .lang = Lang::Bash, .hashComment = true },
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
-      .writtenModule = WrittenModuleRule::DirsOnly },
+      .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
-      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self" },
+      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true },
     { .lang = Lang::Unknown },
     { .lang = Lang::Json },
-    { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly },
+    { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
       .staticLinkage = true },
-    { .lang = Lang::Toml },
-    { .lang = Lang::Yaml },
+    { .lang = Lang::Toml, .hashComment = true },
+    { .lang = Lang::Yaml, .hashComment = true },
     { .lang = Lang::Php, .memberSeparator = "::" },
     { .lang = Lang::Lua, .dashDashComments = true },
-    { .lang = Lang::Elixir, .hasInertQuoteRegions = true },
+    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true },
     { .lang = Lang::Dart },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
-      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly },
-    { .lang = Lang::GDScript },
+      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .classNameReceiver = true },
+    { .lang = Lang::GDScript, .hashComment = true },
     { .lang = Lang::Clojure },
 } };
 
@@ -311,5 +340,38 @@ inline constexpr LangFacts langFacts( Lang l ) noexcept
 {
     return enumTableAt( kLangFacts, l, LangFacts { .lang = Lang::Unknown } );
 }
+
+// Slice 6c compile-time assertions: verify all 5 columns against the exact original language sets for every Lang.
+static_assert( []() constexpr
+{
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        const Lang l = static_cast<Lang>( i );
+        const bool expectedImplicit = ( l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp ||
+                                        l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby );
+        const bool expectedMemberNeverReachesFree = ( l == Lang::Python || l == Lang::Go || l == Lang::Cpp ||
+                                                     l == Lang::Rust || l == Lang::Ruby || l == Lang::Java ||
+                                                     l == Lang::CSharp || l == Lang::Swift );
+        const bool expectedModuleCallReachesFnsOnly = ( l == Lang::Go );
+        const bool expectedClassNameReceiver = ( l == Lang::JavaScript || l == Lang::TypeScript ||
+                                                l == Lang::Python || l == Lang::Java || l == Lang::Kotlin ||
+                                                l == Lang::CSharp || l == Lang::Swift );
+        const bool expectedHashComment = ( l == Lang::Python || l == Lang::Bash || l == Lang::Ruby ||
+                                           l == Lang::Elixir || l == Lang::Toml || l == Lang::Yaml ||
+                                           l == Lang::GDScript );
+
+        const auto& f = kLangFacts[ i ];
+        if( f.implicitReceiver != expectedImplicit ) return false;
+        if( f.memberNeverReachesFreeFunction != expectedMemberNeverReachesFree ) return false;
+        if( f.moduleCallReachesFunctionsOnly != expectedModuleCallReachesFnsOnly ) return false;
+        if( f.classNameReceiver != expectedClassNameReceiver ) return false;
+        if( f.hashComment != expectedHashComment ) return false;
+    }
+    return true;
+}(), "Slice 6c: all 5 columns in kLangFacts must match the exact original language predicate sets" );
+static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang::Unknown ).memberNeverReachesFreeFunction );
+static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
+static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
+
 
 }   // namespace rw

@@ -17,7 +17,8 @@
 #   rows; the lane wrote 336), and main at f156be85 already counted 338 against its 339 ceiling. Lane member-names adds none.
 # 335 -> 333 (train 36, recount on the composed tree #431 + #438 + #437 over train 35): train 35's head counted 335; the
 #   composed tree counts 333 (net two fewer shared-file predicates from the merged branches).
-ceiling	333
+# 333 -> 326 (slice 6c, #447): implicitReceiver, memberNeverReachesFreeFunction, classNameReceiver and hashComment moved to LangFacts.
+ceiling	326
 perlang	ingest_elixir.h
 perlang	elixir_resolve.h
 perlang	ingest_clojure.h

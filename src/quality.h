@@ -1,6 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
+#include "langfacts.h"
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -1474,15 +1475,11 @@ inline std::vector<NodeId> pythonDispatchedMethodIds( const IngestResult& ing, c
 // descendants, `#` for the shell/Python/Ruby/Elixir/config family (in the C family `#` opens a PREPROCESSOR
 // directive, which is code — that is why this is per-language and not one union set), `--` for Lua. Markdown
 // and JSON have no comment syntax, so every non-blank line there is content.
-inline bool langUsesHashComment( Lang l ) noexcept
-{
-    return l == Lang::Python || l == Lang::Bash || l == Lang::Ruby || l == Lang::Elixir
-        || l == Lang::Toml   || l == Lang::Yaml || l == Lang::GDScript;
-}
+// Slice 6c: hashComment moved to langFacts(l) in langfacts.h
 
 inline std::uint32_t codeLinesInBody( std::string_view body, Lang lang ) noexcept
 {
-    const bool hash   = langUsesHashComment( lang );
+    const bool hash   = langFacts( lang ).hashComment;
     const bool cLike  = !hash && lang != Lang::Markdown && lang != Lang::Json && lang != Lang::Lua;
     const bool lua    = lang == Lang::Lua;
     std::uint32_t  code    = 0;
