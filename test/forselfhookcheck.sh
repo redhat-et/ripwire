@@ -38,8 +38,8 @@ export HOME="$TMP/home"; mkdir -p "$HOME"
 F="$TMP/fx"
 
 mk(){ mkdir -p "$( dirname "$F/$1" )"; cat >"$F/$1"; }
-run(){ local d="$1"; shift; ( cd "$F/$d" && "$BIN" "$F/$d" --no-cache "$@" 2>/dev/null </dev/null ); }
-hook(){ python3 -c 'import re,sys; print("".join(re.findall(r"<selfhooks [^>]*>.*?</selfhooks>", sys.stdin.read(), re.S)))'; }
+run(){ local d="$1" rc; shift; ( cd "$F/$d" && "$BIN" "$F/$d" --no-cache "$@" 2>/dev/null </dev/null ); rc=$?; [ "$rc" -eq 0 ] || printf '[[rc=%s]]' "$rc"; return 0; }
+hook(){ python3 -c 'import re,sys; t=sys.stdin.read(); print("".join(re.findall(r"<selfhooks [^>]*/>|<selfhooks [^>]*>.*?</selfhooks>|\[\[rc=\d+\]\]", t, re.S)) + ("" if t.strip() else "[[empty]]"))'; }
 has(){ printf '%s' "$1" | grep -qF -- "$2"; }
 want(){ local id="$1" text="$2"; shift 2; local p; for p in "$@"; do has "$text" "$p" || { no "($id) expected [$p] in: [$text]"; return; }; done; ok "($id) ${#} attributes present"; }
 lack(){ local id="$1" text="$2"; shift 2; local p; for p in "$@"; do has "$text" "$p" && { no "($id) did not expect [$p] in: [$text]"; return; }; done; ok "($id) ${#} absences hold"; }
@@ -317,6 +317,12 @@ class Base:
 
     def step(self):
         return 0
+
+    def set_step(self):
+        self.step = 1
+
+    def bump(self):
+        self.step += 1
 E
 mk v/d.py <<'E'
 from base import Base
@@ -330,7 +336,7 @@ class D(Base):
 E
 H="$( run v "--for=what calls D.step" | hook )"
 want V1 "$H" 'sites="1"' 'n="Base.fire"'
-lack V1n "$H" '__init__'
+lack V1n "$H" '__init__' 'set_step' 'bump'
 silent V2 "$( run v "--for=what calls D.val2" | hook )"
 
 # ── C ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -472,8 +478,77 @@ class D(Base):
         return 1
 E
 H="$( run k "--for=what calls D.step" | hook )"
-want K1 "$H" 'sites="4" shown="3" capped="1" next="--callers=D.step"' 'n="Top.a"' 'n="Top.b"' 'n="Top.c"'
+want K1 "$H" 'sites="4" shown="3" capped="1" next="--callers=Base.step"' 'n="Top.a"' 'n="Top.b"' 'n="Top.c"'
 lack K2 "$H" 'n="Top.e"'
+nx="$( printf '%s' "$H" | python3 -c 'import re,sys; print(re.search(r"n=.D.step.[^>]*? next=.([^\"]+).", sys.stdin.read()).group(1))' )"
+if [ "$nx" = "--callers=Base.step" ] && has "$( run k "$nx" )" 'Top.e'; then ok "(K4) the printed next= ($nx) names the base's definition and lists the hidden site"; else no "(K4) the printed next= ($nx) is not --callers=Base.step or does not list Top.e"; fi
+# K7: base and overrides in different directories, where a by-name hop does not bind: the printed next= still lists the hidden site
+mk k7/lib/base.py <<'E2'
+class Mix:
+    def a(self):
+        return self.hk()
+
+    def b(self):
+        return self.hk()
+
+    def c(self):
+        return self.hk()
+
+    def e(self):
+        return self.hk()
+
+    def hk(self):
+        return 0
+E2
+mk k7/a/x.py <<'E2'
+from lib.base import Mix
+
+class X(Mix):
+    def hk(self):
+        return 1
+E2
+mk k7/b/y.py <<'E2'
+from lib.base import Mix
+
+class Y(Mix):
+    def hk(self):
+        return 2
+E2
+H="$( run k7 "--for=what calls X.hk" | hook )"
+nx="$( printf '%s' "$H" | python3 -c 'import re,sys; print(re.search(r"n=.X.hk.[^>]*? next=.([^\"]+).", sys.stdin.read()).group(1))' )"
+if has "$( run k7 "$nx" )" 'lib/base.py:12'; then ok "(K7) the printed next= ($nx) lists the hidden site across directories"; else no "(K7) the printed next= ($nx) does not list lib/base.py:12"; fi
+mk k5/base.py <<'E2'
+class Base:
+    def a(self):
+        return self.hk()
+
+    def b(self):
+        return self.hk()
+
+    def c(self):
+        return self.hk()
+
+    def e(self):
+        return self.hk()
+E2
+mk k5/x.py <<'E2'
+from base import Base
+
+class X(Base):
+    def hk(self):
+        return 1
+E2
+mk k5/y.py <<'E2'
+from base import Base
+
+class Y(Base):
+    def hk(self):
+        return 2
+E2
+H="$( run k5 "--for=what calls X.hk" | hook )"
+nx="$( printf '%s' "$H" | python3 -c 'import re,sys; print(re.search(r"n=.X.hk.[^>]*? next=.([^\"]+).", sys.stdin.read()).group(1))' )"
+want K5 "$H" 'hook="1"' 'capped="1"' 'next="--uses=hk"'
+if has "$( run k5 "$nx" )" 'base.py:12'; then ok "(K6) the hook form's next= ($nx) lists the hidden site"; else no "(K6) the hook form's next= ($nx) does not list base.py:12"; fi
 
 mk k2/base.py <<'E'
 class Root:
@@ -566,13 +641,283 @@ sys.exit( 0 if hooks and hooks <= bodies and len( bodies ) < 6 else 1 )
 PY
 if [ $? -eq 0 ]; then ok "(U) every selfhook row names a body the answer printed, and one candidate was cut"; else no "(U) a selfhook row names a body the answer did not print, or the fixture no longer cuts one"; fi
 
+# ── X (fix round 1) ────────────────────────────────────────────────────────────────────────────────────────────
+# B1: a docstring, a string, a local class's method and a nested def are no sites; the one real call is, and an unguarded call under a docstring
+# that mentions hasattr is not guarded. skipped= counts the nested def (spelled like a site, not proven).
+mk x1/base.py <<'E'
+class Base:
+    def doc(self):
+        """Fetches getattr(self, 'hk', None) and hasattr(self, 'hk')."""
+        return 1
+
+    def text(self):
+        return "getattr(self, 'hk')"
+
+    def local(self):
+        class Local:
+            def g(self):
+                return getattr(self, 'hk', None)
+        return Local
+
+    def nested(self):
+        def inner(self):
+            return self.hk()
+        return inner
+
+    def plain(self):
+        '''Older versions used hasattr(self, 'hk') here.'''
+        return self.hk()
+E
+mk x1/d.py <<'E'
+from base import Base
+
+class X(Base):
+    def hk(self):
+        return 1
+
+class Y(Base):
+    def hk(self):
+        return 2
+E
+H="$( run x1 "--for=what calls X.hk" | hook )"
+want X1 "$H" 'sites="1"' 'n="Base.plain" p="base.py:22"' 'skipped="1"'
+lack X1n "$H" 'Base.doc' 'Base.text' 'Base.local' 'Local' 'inner' 'getattr' 'guarded'
+# B2: a rebound self, a loop or with target, a comprehension target, a lambda parameter and a static method are no sites; `good` is
+mk x2/base.py <<'E'
+class Base:
+    def rebind(self):
+        self = Helper()
+        return self.hk()
+
+    def loop(self, xs):
+        for self in xs:
+            self.hk()
+
+    def comp(self, xs):
+        return [self.hk() for self in xs]
+
+    def lam(self):
+        return lambda self: self.hk()
+
+    def wth(self, xs):
+        with xs as self:
+            self.hk()
+
+    @staticmethod
+    def stat(self):
+        return self.hk()
+
+    def good(self):
+        return self.hk()
+E
+mk x2/d.py <<'E'
+from base import Base
+
+class X(Base):
+    def hk(self):
+        return 1
+
+class Y(Base):
+    def hk(self):
+        return 2
+E
+H="$( run x2 "--for=what calls X.hk" | hook )"
+want X2 "$H" 'sites="1"' 'n="Base.good"' 'skipped="6"'
+lack X2n "$H" 'Base.rebind' 'Base.loop' 'Base.comp' 'Base.lam' 'Base.wth' 'Base.stat'
+# B3: the written name is rebound, a class of that name sits beside it, a plain import is the other reading, a nested class is no module member
+for c in rebound local both nested; do
+mk x3$c/m.py <<'E'
+class Base:
+    def run(self):
+        return self.step()
+
+    def step(self):
+        return 0
+
+class Outer:
+    class Inner:
+        def run(self):
+            return self.step()
+
+        def step(self):
+            return 0
+E
+done
+mk x3rebound/d.py <<'E'
+from m import Base as B
+B = other.Thing
+
+class D(B):
+    def step(self):
+        return 1
+E
+mk x3local/d.py <<'E'
+from m import Base as B
+
+class B:
+    pass
+
+class E(B):
+    def step(self):
+        return 1
+E
+mk x3both/d.py <<'E'
+try:
+    from m import Base as B
+except ImportError:
+    from n import B
+
+class F(B):
+    def step(self):
+        return 1
+E
+mk x3nested/d.py <<'E'
+from m import Inner as I
+
+class G(I):
+    def step(self):
+        return 1
+E
+mk x3clean/m.py <<'E'
+class Base:
+    def run(self):
+        return self.step()
+
+    def step(self):
+        return 0
+E
+mk x3clean/d.py <<'E'
+from m import Base as B
+
+class H(B):
+    def step(self):
+        return 1
+E
+silent X3a "$( run x3rebound "--for=what calls D.step" | hook )"
+silent X3b "$( run x3local "--for=what calls E.step" | hook )"
+silent X3c "$( run x3both "--for=what calls F.step" | hook )"
+silent X3d "$( run x3nested "--for=what calls G.step" | hook )"
+want X3t "$( run x3clean "--for=what calls H.step" | hook )" 'n="H.step"' 'overrides="Base.step"' 'n="Base.run"'
+# F3: an absolute module needs its whole path: `logging` is the standard library's, not a vendored compat/logging.py
+mk x4/compat/logging.py <<'E'
+class Handler:
+    def emit_all(self):
+        return self.emit()
+
+    def emit(self):
+        return 0
+E
+mk x4/app.py <<'E'
+from logging import Handler as H
+
+class Eff(H):
+    def emit(self):
+        return 1
+E
+silent X4 "$( run x4 "--for=what calls Eff.emit" | hook )"
+# F5: depth is not the method resolution order. Two unrelated bases define it: candidates=, no winner. A definition whose class derives from the
+# other definitions' classes IS provably the pick, whatever the depth.
+mk x5/a.py <<'E'
+class Root:
+    def go(self):
+        return self.step()
+
+    def step(self):
+        return 0
+
+class L(Root):
+    pass
+
+class R:
+    def step(self):
+        return 1
+
+class D(L, R):
+    def step(self):
+        return 2
+
+class Mid(Root):
+    def step(self):
+        return 3
+
+class T(Mid):
+    def step(self):
+        return 4
+E
+H="$( run x5 "--for=what calls D.step" | hook )"
+want X5 "$H" 'n="D.step"' 'candidates="R.step,Root.step"'
+lack X5n "$H" 'overrides=' 'tied='
+mk x5b/a.py <<'E'
+class Root:
+    def go(self):
+        return self.step()
+
+    def step(self):
+        return 0
+
+class Mid(Root):
+    def step(self):
+        return 3
+
+class T(Mid):
+    def step(self):
+        return 4
+E
+H="$( run x5b "--for=what calls T.step" | hook )"
+want X5t "$H" 'n="T.step"' 'overrides="Mid.step"'
+lack X5tn "$H" 'candidates=' 'tied='
+# C3: a stub overload is not the definition, `except NotImplementedError` is not abstract
+mk x6/a.py <<'E'
+from typing import overload
+
+class Base:
+    @overload
+    def hk(self, x: int) -> int: ...
+    @overload
+    def hk(self, x: str) -> str: ...
+    def hk(self, x):
+        try:
+            return x
+        except NotImplementedError:
+            return None
+
+    def run(self):
+        return self.hk(1)
+
+class D(Base):
+    def hk(self, x):
+        return 0
+E
+H="$( run x6 "--for=what calls D.hk" | hook )"
+want X6 "$H" 'overrides="Base.hk" op="a.py:8"' 'n="Base.run"'
+lack X6n "$H" 'tied=' 'abstract='
+# F7: a site in a base on a test path says so
+mk x7/tests/helpers.py <<'E'
+class TestHelperBase:
+    def go(self):
+        return self.tested()
+
+    def tested(self):
+        return 0
+E
+mk x7/prod.py <<'E'
+from tests.helpers import TestHelperBase
+
+class Prod(TestHelperBase):
+    def tested(self):
+        return 1
+E
+want X7 "$( run x7 "--for=what calls Prod.tested" | hook )" '<s n="TestHelperBase.go" p="tests/helpers.py:3" test="1"/>'
+
 # ── E ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run a "--for=what calls One.step" --legend=full >"$TMP/full"
 run a "--for=what calls One.step" >"$TMP/compact"
-for a in total shown capped n p overrides op tied abstract hook defs test sites next recv form guarded; do
+for a in total shown capped held n p overrides op candidates abstract hook defs test sites next skipped recv form guarded; do
     grep -qE "; selfhooks ([^;]*[ (,])?$a=" "$TMP/full" || no "(E1) the full clause does not define $a="
     grep -qE "; selfhooks ([^;]*[ (,])?$a=" "$TMP/compact" || no "(E1) the compact clause does not define $a="
 done
+if grep -q 'guarded=1 a hasattr or getattr on that name' "$TMP/full" && grep -q 'guarded=1 a hasattr or getattr on the name' "$TMP/compact" && grep -q 'text order only' "$TMP/full" && grep -q 'text order only' "$TMP/compact"; then ok "(E1g) both clauses define guarded= as a text-order fact"; else no "(E1g) a clause does not define guarded= as text order"; fi
+if grep -q 'neither listed nor counted' "$TMP/full"; then ok "(E1f) the full clause discloses the silent floor"; else no "(E1f) the full clause does not disclose the silent floor"; fi
 if grep -q 'never an edge' "$TMP/full" && grep -q 'other subclasses may run' "$TMP/full" && grep -q 'other subclasses may run' "$TMP/compact"; then ok "(E2) both clauses carry the hedge"; else no "(E2) the hedge is missing from a clause"; fi
 ( cd "$F/a" && RIPWIRE_NO_SELF_HOOK=1 "$BIN" "$F/a" --no-cache "--for=what calls One.step" 2>/dev/null </dev/null ) >"$TMP/off"
 python3 - "$TMP/compact" "$TMP/off" <<'PY'
@@ -586,7 +931,7 @@ sys.exit( 0 if m( s ) == m( off ) and e( on ) > e( off ) else 1 )
 PY
 if [ $? -eq 0 ]; then ok "(E3) the answer minus the element and its clause is the switched-off answer byte for byte; est_tokens grew"; else no "(E3) a byte other than the element, the clause and est_tokens moved"; fi
 if has "$( run a "--for=what calls One.step" --legend=full | hook )" '<selfhook n="One.step"'; then ok "(E4) the element rides with --legend=full"; else no "(E4) no element under --legend=full"; fi
-# abstract=1 reads the base definition; tied= reads two bases at one depth
+# abstract=1 reads the base definition; two unrelated bases define it: candidates=, no winner
 mk e/base.py <<'E'
 class Left:
     def run(self):
@@ -607,7 +952,9 @@ class D(Left, Right):
         return 1
 E
 H="$( run e "--for=what calls D.step" | hook )"
-want E5 "$H" 'tied="1"' 'overrides=' 'n="Left.run"'
+want E5 "$H" 'candidates="Left.step,Right.step"' 'n="Left.run"'
+lack E5n "$H" 'tied=' 'overrides=' 'abstract='
+lack E5n "$H" 'tied=' 'overrides=' 'abstract='
 mk e2/base.py <<'E'
 class Left:
     def run(self):
@@ -654,7 +1001,9 @@ module.exports = { Base, D };
 E
 silent L1 "$( run l "--for=what calls D.step" | hook )"
 if run a "--for=what calls One.step" --json | grep -q 'selfhook'; then no "(L2) --json carries the element"; else ok "(L2) --json carries no element"; fi
-silent L3 "$( run w "--for=what calls SpecialThing.process_item" --token-budget=40000 | hook )"
+H="$( run w "--for=what calls SpecialThing.process_item" --token-budget=40000 | hook )"
+want L3 "$H" '<selfhooks held="budget" total="1"/>'
+lack L3n "$H" '<selfhook n=' '<s n='
 
 # ── W ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run w "--for=what calls SpecialThing.process_item" >"$TMP/w"

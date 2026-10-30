@@ -2923,9 +2923,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
     }
     // lane self-hook (forselfhook.h): the CLI's <selfhooks>, over the head this surface names (it serves no inline body), same posture as <dispatch>
-    if( budgetTokens == 0 && isNameExactRouteTag( mcpRouteTag ) && forSelfHookOn() && out.ends_with( "</ctx>" ) )
+    if( isNameExactRouteTag( mcpRouteTag ) && forSelfHookOn() && out.ends_with( "</ctx>" ) )   // under budget_tokens: the held marker only
     {
-        if( const std::string hooks = renderForSelfHooks( SelfHookInputs{ ing, ix.g, flRootArg, task }, dispatchHeadCandidates( ing, lensSurfaceIds ) ); !hooks.empty() )
+        if( const std::string hooks = renderForSelfHooks( SelfHookInputs{ ing, ix.g, flRootArg, task }, dispatchHeadCandidates( ing, lensSurfaceIds ), budgetTokens != 0 ); !hooks.empty() )
         {
             out.insert( out.size() - 6, "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + hooks );   // the clause beside it, as <dispatch>: the header's are fixed
         }

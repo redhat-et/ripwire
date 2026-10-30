@@ -4198,7 +4198,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // lane self-hook (forselfhook.h): decided HERE, after every body section rendered, because it reads what they served: nothing
         // above was priced with it, so it draws on no byte that funds a body (RIPWIRE_NO_SELF_HOOK=1 is the rest of the answer byte for byte)
         std::string selfHookXml;
-        if( autoBundleMode && !cfg.json && cfg.tokenBudget <= 0 && rw::forSelfHookOn() && sigsPreRendered && !enrich.surfaceOff )
+        if( autoBundleMode && !cfg.json && rw::forSelfHookOn() && sigsPreRendered && !enrich.surfaceOff )   // under a token budget: the held marker only
         {
             std::vector<rw::NodeId> servedBodies = fold.bodies;
             if( slot.served )
@@ -4218,7 +4218,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                     }
                 }
             }
-            selfHookXml = rw::renderForSelfHooks( rw::SelfHookInputs{ ing, g, flRootArg, cfg.forTask }, servedBodies );
+            selfHookXml = rw::renderForSelfHooks( rw::SelfHookInputs{ ing, g, flRootArg, cfg.forTask }, servedBodies, /*held=*/cfg.tokenBudget > 0 );
             if( !selfHookXml.empty() )
             {
                 headerParts.selfHookPresent = true;   // the clause rides beside the element it defines
