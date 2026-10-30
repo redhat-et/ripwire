@@ -193,10 +193,10 @@ inline std::string dottedOfPath( std::string_view rel )
 // The shown rows, by what a string could spell.
 struct ShownNames
 {
-    std::set<std::string_view>            wanted;
+    std::set<std::string>                 wanted;   // std::string keys, never string_view: libstdc++ 14's string_view ordering wraps unsigned (UBSan, CI asan ubuntu)
     gtl::btree_map<NodeId, std::size_t>         shownDef;
     gtl::btree_map<std::uint32_t, std::size_t>  shownFile;
-    gtl::btree_map<std::pair<std::uint32_t, std::string_view>, std::size_t> shownOwner;   // a method's class is what a string names
+    gtl::btree_map<std::pair<std::uint32_t, std::string>, std::size_t> shownOwner;   // a method's class is what a string names
 };
 inline ShownNames shownNamesOf( const IngestResult& ing, std::span<const NodeId> shown )
 {
@@ -217,13 +217,13 @@ inline ShownNames shownNamesOf( const IngestResult& ing, std::span<const NodeId>
         shownDef.try_emplace( shown[k], k );
         shownFile.try_emplace( s.fileId, k );
         wanted.insert( s.name );
-        wanted.insert( moduleTailOf( rel ) );
+        wanted.insert( std::string( moduleTailOf( rel ) ) );
         if( !s.scope.empty() && s.scope != s.name )
         {
             const std::size_t      sep   = s.scope.find_last_of( ".:" );
             const std::string_view owner = sep == std::string::npos ? std::string_view( s.scope ) : std::string_view( s.scope ).substr( sep + 1 );
-            wanted.insert( owner );
-            shownOwner.try_emplace( std::make_pair( s.fileId, owner ), k );
+            wanted.emplace( owner );
+            shownOwner.try_emplace( std::make_pair( s.fileId, std::string( owner ) ), k );
         }
     }
     return n;
@@ -236,7 +236,7 @@ struct DottedFacts
     std::vector<const Reference*> loaders;
     std::vector<const Reference*> templates;
 };
-inline DottedFacts dottedFactsFor( const IngestResult& ing, const std::set<std::string_view>& wanted )
+inline DottedFacts dottedFactsFor( const IngestResult& ing, const std::set<std::string>& wanted )
 {
     DottedFacts f;
     auto& [ cand, loaders, templates ] = f;
@@ -257,7 +257,7 @@ inline DottedFacts dottedFactsFor( const IngestResult& ing, const std::set<std::
         else
         {
             const std::size_t dot = r.recvVar.rfind( '.' );
-            if( dot != std::string::npos && wanted.contains( std::string_view( r.recvVar ).substr( dot + 1 ) ) )
+            if( dot != std::string::npos && wanted.contains( r.recvVar.substr( dot + 1 ) ) )
             {
                 cand.push_back( &r );
             }
@@ -305,13 +305,13 @@ inline DottedTarget targetOfSplit( const IngestResult& ing, const ModuleSplit& s
 // Each distinct candidate string, resolved once.
 struct ResolvedStrings
 {
-    gtl::btree_map<std::string_view, DottedTarget> targets;
+    gtl::btree_map<std::string, DottedTarget> targets;
     std::size_t                              unresolvedN = 0;
     std::size_t                              externalN   = 0;
 };
 inline ResolvedStrings resolveStrings( const IngestResult& ing, std::span<const Reference* const> cand )
 {
-    gtl::btree_map<std::string_view, ModuleSplit> split;
+    gtl::btree_map<std::string, ModuleSplit> split;
     std::set<std::uint32_t>                 attrFiles;
     for( const Reference* r : cand )
     {
@@ -347,7 +347,7 @@ inline std::optional<std::size_t> shownPositionOf( const IngestResult& ing, cons
         {
             return d->second;
         }
-        if( const auto o = n.shownOwner.find( std::make_pair( target.fileId, std::string_view( target.name ) ) ); o != n.shownOwner.end() )
+        if( const auto o = n.shownOwner.find( std::make_pair( target.fileId, target.name ) ); o != n.shownOwner.end() )
         {
             return o->second;
         }
@@ -483,14 +483,14 @@ inline bool flowHasToken( std::string_view flow, std::string_view token )
 //  - a function-local constant (shape "m") is reached only inside its own function, by `NAME` or `=NAME`.
 struct ImportedNames
 {
-    std::set<std::tuple<std::uint32_t, std::string_view, std::string_view>> byFile;   // file, bound name, the module spelling as written
+    std::set<std::tuple<std::uint32_t, std::string, std::string>> byFile;   // std::string, not string_view: see ShownNames::wanted   // file, bound name, the module spelling as written
     explicit ImportedNames( const IngestResult& ing, const std::set<std::uint32_t>& files )
     {
         for( const Binding& b : ing.bindings )
         {
             if( b.kind == LocalBindKind::Import && files.contains( b.fileId ) )
             {
-                byFile.emplace( b.fileId, std::string_view( b.var ), std::string_view( b.typeName ) );
+                byFile.emplace( b.fileId, b.var, b.typeName );
             }
         }
     }
@@ -560,13 +560,13 @@ inline bool importSpecNamesFile( const IngestResult& ing, std::uint32_t fromFile
 // Does `file` bind the bare `name` by any import (a function-local one too)?
 inline bool fileImportsName( const ImportedNames& imports, std::uint32_t file, std::string_view name )
 {
-    const auto it = imports.byFile.lower_bound( std::make_tuple( file, name, std::string_view() ) );
+    const auto it = imports.byFile.lower_bound( std::make_tuple( file, std::string( name ), std::string() ) );
     return it != imports.byFile.end() && std::get<0>( *it ) == file && std::get<1>( *it ) == name;
 }
 // Does `fromFile` import the bare `name` from the module file `target`?
 inline bool fileImportsNameFrom( const IngestResult& ing, const ImportedNames& imports, std::uint32_t fromFile, std::string_view name, std::uint32_t target )
 {
-    for( auto it = imports.byFile.lower_bound( std::make_tuple( fromFile, name, std::string_view() ) );
+    for( auto it = imports.byFile.lower_bound( std::make_tuple( fromFile, std::string( name ), std::string() ) );
          it != imports.byFile.end() && std::get<0>( *it ) == fromFile && std::get<1>( *it ) == name; ++it )
     {
         if( importSpecNamesFile( ing, fromFile, std::get<2>( *it ), target ) )
