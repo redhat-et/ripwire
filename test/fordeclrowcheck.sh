@@ -7,7 +7,8 @@
 #   (w2) task word + code-span subject (a qualified spelling falls back to its last segment)
 #   (b1) bare subject fires; (b2) a bare name binding several definitions is silent, (b3) the same name WITH a task word fires
 #   (n1) no prototype: silent, task word or bare; (n2) no task word: silent; (n3) the task word only inside a code span: silent
-#   (n4) Python subject: silent; (n5) a prototype only in a test path: silent; (n6) a same-named struct, no callable: silent
+#   (n4) Python or Java subject (Java has a bodyless contract row): silent; (n5) a prototype only in a test path, untied or tied: silent
+#   (n6) a same-named struct or an extern variable, no callable: silent
 #   (n7) a function wholly in a test path: silent; (n8) the first function named has no prototype: silent, a later name is not the subject
 #   (c1) the runaway cap: 8 rows, rows= the total, shown= and next=--defs=
 #   (a1) additive: head minus legend + block == the answer's own bytes before them (est_tokens does not move); well-formed
@@ -44,6 +45,11 @@ printf 'int only_tested( int a ) { return a; }\n' > "$FX/impl.c"
 printf 'struct type_only { int a; };\n' > "$FX/types.c"
 printf 'int test_only_fn( int a );\n' > "$FX/tests/t_only.h"
 printf '#include "t_only.h"\nint test_only_fn( int a ) { return a; }\n' > "$FX/tests/t_only.c"
+printf 'int fold_tested( int a );\n' > "$FX/tests/fold_proto.h"
+printf '#include "tests/fold_proto.h"\nint fold_tested( int a ) { return a; }\nint use_fold( void ) { return fold_tested( 1 ); }\n' > "$FX/fold.c"
+printf 'extern int data_var;\n' > "$FX/data.h"
+printf '#include "data.h"\nint data_var = 1;\n' > "$FX/data.c"
+printf 'interface JApi {\n    int jfn( int a );\n}\nclass JImpl implements JApi {\n    public int jfn( int a ) { return a; }\n}\n' > "$FX/JApi.java"
 printf 'def py_fn(a):\n    return a\n\ndef py_user():\n    return py_fn(1)\n' > "$FX/mod.py"
 : > "$FX/many.h"
 for i in 0 1 2 3 4 5 6 7 8 9; do
@@ -85,6 +91,9 @@ silent n4 "--for=py_fn"
 silent n5 "--for=add a new argument to only_tested"
 silent n6 "--for=change the signature of type_only"
 silent n7 "--for=add a new argument to test_only_fn"
+silent n5 "--for=add a new argument to fold_tested"
+silent n6 "--for=change the signature of data_var"
+silent n4 "--for=add a new argument to jfn"
 silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers'
 run "--for=change the signature of many_fn" >"$TMP/c1.xml"
 if python3 - "$TMP/c1.xml" <<'PY'

@@ -25,11 +25,11 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
-FX="$TMP/fx"; mkdir -p "$FX/src/contrib/brackets" "$FX/src/contrib/tested" "$FX/src/contrib/lonely" "$FX/src/contrib/popular" "$FX/src/test" "$FX/src/all"
+FX="$TMP/fx"; mkdir -p "$FX/src/contrib/brackets" "$FX/src/contrib/tested" "$FX/src/contrib/lonely" "$FX/src/contrib/popular" "$FX/src/test" "$FX/src/zlist"
 cat > "$FX/src/contrib/brackets/brackets.ts" <<'T'
 export class BracketModel { run(): number { return 1; } }
 T
-printf "import '../contrib/brackets/brackets';\nimport '../contrib/popular/popular';\n" > "$FX/src/all/editor.all.ts"
+printf "import '../contrib/brackets/brackets';\nimport '../contrib/popular/popular';\n" > "$FX/src/zlist/editor.all.ts"
 cat > "$FX/src/user.ts" <<'T'
 import { BracketModel } from './contrib/brackets/brackets';
 export function makeOne(): number { return new BracketModel().run(); }
@@ -61,7 +61,7 @@ M.parseString( s )
 m = re.search( r'<importers of="BracketModel" importers="2" test_importers="1"[^>]*>(.*?)</importers></ctx>$', s )
 if not m: sys.exit( 1 )
 rows = re.findall( r'<f [^>]*/>', m.group( 1 ) )
-if rows != [ '<f p="src/all/editor.all.ts" aggregator="1"/>', '<f p="src/user.ts"/>' ]: sys.exit( 1 )
+if rows != [ '<f p="src/zlist/editor.all.ts" aggregator="1"/>', '<f p="src/user.ts"/>' ]: sys.exit( 1 )
 i = s.index( "<!-- ripwire for importers:" )
 leg = s[ i: s.index( "-->", i ) ]
 if "not the only" not in leg or "--" in leg[ 4: ]: sys.exit( 1 )
