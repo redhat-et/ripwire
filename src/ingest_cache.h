@@ -363,7 +363,9 @@ constexpr std::uint32_t kCacheVersion = 46;           // 46: train 40 — lane j
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 273;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 275;          // bump on any grammar/.scm/extraction change
+                                                      // 275 = 2026-10-30 (lane registrar fix round 1, PLACEHOLDER: the train renumbers; 274 is 273's rich tag): a Python
+                                                      //   parameter written with a default (`sender=None`) records no registrar fact.
                                                       // 273 = 2026-10-30 (lane registrar, PLACEHOLDER: the train renumbers): Python files record
                                                       //   registrar facts (model.h kValueRefRegParamScope: a method parameter stored into a container a
                                                       //   field of self holds). Strictly above train-42b's 271 (rich 272). Rich file tag 274. kCacheVersion

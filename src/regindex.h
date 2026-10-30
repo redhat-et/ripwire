@@ -27,22 +27,30 @@
 //     must be `K = C()` (a module-scope typed binding), C must resolve the same way to a class, C's method m must exist once and
 //     carry a registrar fact (kValueRefRegParamScope) at the call's argument position. An unrelated `Pool().connect( f )` or a
 //     `pool.connect( f )` whose class does not store the parameter gives nothing.
-//   * TS: the key and the value are pairs of ONE object literal (same into= prefix, one `provide` pair under it); a lookalike
-//     literal without `provide` gives nothing.
-// HONESTY: a registration row is a static fact at a site — registered at import time; conditional or dynamic registration may
-// exist; it is not proof the receiver ran. weak=/dispatch_uid=/multi semantics are not read. Test registrations are counted,
-// not listed. Nothing here enters reaches=, a count, or the call graph.
+//   * TS: the key and the value are pairs of ONE object literal: the same into= prefix inside one enclosing symbol holds exactly
+//     ONE `provide` pair and exactly ONE value pair (repeated `makeProviders( [ … ] )` calls share a prefix, and the index records
+//     no literal boundary, so a group of several values pairs nothing); a lookalike literal without `provide` gives nothing.
+//   * A name a function writes locally (a parameter, a loop variable, an assignment: the shadow-suppression VarDecl bindings)
+//     is not the module-level key: the site is skipped, never keyed to the module's definition.
+//   * `import pkg` / `import pkg.sub` binds `pkg` (the package's own file); `from pkg import m [as a]` binds the SUBMODULE
+//     pkg.m unless pkg's own file defines or binds `m` (Python reads the attribute first: no row then).
+// HONESTY: a registration row is a static fact at a site — a call as written; conditional or dynamic registration may exist; it
+// is not proof the receiver ran. sender=/weak=/dispatch_uid=/multi semantics are not read. n= is a FLOOR (decorator, keyword
+// argument, alias, forwardRef and unresolved-import registrations are not counted; a re-export chain over kReexportDepth hops
+// is not followed: cut=1). A key past kRegRowCap is counted (reg_more=). Test registrations are counted, not listed. Nothing
+// here enters reaches=, a count, or the call graph.
 //
 // GATE (L-B, present-only): a key prints only with >= 2 non-test registrations, and only when the question names the key or one of
 // its non-test registered names, or a SHOWN ranked row is a consumer of the key (the function that sends through it / the
 // constructor that injects it, or that consumer's class) AND the question shares a word with the key's name. When the question names some key, only the
-// named keys print. At most kRegRowCap keys, kRegSiteCap sites each.
+// named keys print. At most kRegRowCap keys (reg_more= counts the rest), kRegSiteCap sites each.
 // RIPWIRE_NO_REG_ROWS (any value) turns it off: the A/B handle.
 
 #include "filter.h"            // isTestPath — test registrations are counted, not listed
 #include "graph.h"             // jsImportKey — the "fileId#name" key
 #include "langfacts.h"         // langFacts().memberSeparator — a consumer named as its rows are
 #include "model.h"
+#include "nextverb.h"         // nextAttrXml / nextFlag — the capped row's shell-safe follow-up
 #include "resolve.h"           // resolvePreciseInclude, resolvePythonModuleSuffix, lexicalNormalize — an import's module file
 #include "serialize.h"         // escapeXml
 
@@ -61,6 +69,7 @@ namespace rw
 inline constexpr std::size_t kRegRowCap  = 2;   // keys per answer (a spew guard)
 inline constexpr std::size_t kRegSiteCap = 4;   // listed non-test registrations per key; the rest is counted (n=, capped=1 next=)
 inline constexpr std::size_t kRegConsumerCap = 2;
+inline constexpr int         kRegReexportDepth = 3;   // re-export hops followed; a longer chain is cut and disclosed (cut=1)
 
 inline bool forRegRowsOn()
 {
@@ -68,18 +77,24 @@ inline bool forRegRowsOn()
 }
 
 inline constexpr std::string_view kForCompactRegLegend =
-    "; reg key= p= a registry key and its definition, r sym= p= what is registered under it at p= (as= the record field), n= non-test "
-    "registrations, tests= test ones (counted only), by= the registrar, consumers= where the key is sent or injected, a static fact "
-    "at the site (registered at import time, conditional or dynamic registration may exist), not proof it ran";
+    "; reg key= p= a registry key and its definition, r sym= p= what is registered under it at p= (as= the record field), n= AT LEAST "
+    "this many non-test registrations (a floor: decorator, keyword-argument, alias, forwardRef and unresolved-import registrations "
+    "are not counted), tests= test ones (counted only), by= the registrar, consumers= where the key is sent or injected "
+    "(consumers_more= further ones not named), reg_more= further keys not shown, cut=1 a re-export chain over 3 hops was not "
+    "followed, a static fact at the site (the call as written, conditional or dynamic registration may exist, sender=/weak=/"
+    "dispatch_uid= are not read), not proof it ran";
 inline constexpr std::string_view kForRegLegend =
     "; reg rows: a registry key= (its definition at p=) joined to the registrations of that key by the index: each r is what a site "
-    "registers (sym= as written, p= the site, as= the provider field), n= the non-test registrations (up to 4 listed, capped=1 next= "
-    "lists every site), tests= test registrations (counted, not listed), by= the registrar method, consumers= the functions that send "
-    "or inject the key, a static fact at the site (registered at import time, conditional or dynamic registration may exist, and it "
-    "is not proof the receiver ran)";
+    "registers (sym= as written, p= the site, as= the provider field), n= AT LEAST this many non-test registrations (a floor: "
+    "decorator, keyword-argument, alias, forwardRef and unresolved-import registrations are not counted), up to 4 are listed (capped=1 "
+    "next= greps every mention of the key), tests= test registrations (counted, not listed), by= the registrar method, consumers= "
+    "the functions that send or inject the key (consumers_more= further ones not named), reg_more= further keys that passed the "
+    "gate and are not shown, cut=1 a re-export chain over 3 hops was not followed so a registration through it is not counted, "
+    "a static fact at the site (the call as written, conditional or dynamic registration may exist, sender=/weak=/dispatch_uid= "
+    "are not read, and it is not proof the receiver ran)";
 static_assert( kForCompactRegLegend.find( ';', 1 ) == std::string_view::npos && kForRegLegend.find( ';', 1 ) == std::string_view::npos,
                "one clause each: a ';' inside would split it (the legend's clause separator)" );
-static_assert( kRegSiteCap == 4, "kForRegLegend states the cap: move the sentence with the constant" );
+static_assert( kRegSiteCap == 4 && kRegReexportDepth == 3, "kForRegLegend states the cap: move the sentence with the constant" );
 
 struct RegSite
 {
@@ -136,7 +151,8 @@ public:
         return keys;
     }
 
-    const IngestResult& ing() const noexcept { return m_ing; }
+    // Names whose re-export chain ran past kRegReexportDepth (a registration or definition through it is uncounted).
+    bool reexportCut( std::string_view name ) const { return m_cut.contains( std::string( name ) ); }
 
 private:
     const IngestResult&                         m_ing;
@@ -145,6 +161,10 @@ private:
     HashMap<std::uint32_t, std::vector<const Binding*>> m_imports;   // fileId → its import bindings
     HashMap<std::string, std::vector<const Binding*>>   m_types;     // "fileId#var" → module-scope typed bindings
     HashMap<NodeId, std::vector<std::uint16_t>> m_regFacts;   // registrar method → the parameter positions it stores
+    // "fileId#name" → the function scopes writing `name` locally (a parameter, a loop variable, an assignment)
+    struct Shadow { std::uint32_t start; std::uint32_t end; NodeId scope; bool fn; };
+    HashMap<std::string, std::vector<Shadow>>   m_shadows;
+    mutable HashMap<std::string, char>          m_cut;        // names whose re-export chain was cut at kRegReexportDepth
 
     static constexpr NodeId kAmbiguous = kNoNode - 1;
     static std::string fk( std::uint32_t f, std::string_view n ) { return jsImportKey( f, n ); }
@@ -173,6 +193,15 @@ private:
             if( b.kind == LocalBindKind::Import || b.kind == LocalBindKind::JsImport )
             {
                 m_imports[ b.fileId ].push_back( &b );
+            }
+            else if( b.kind == LocalBindKind::VarDecl && !b.var.empty() )
+            {
+                const NodeId sc = pythonBindScope( m_ing, b );   // the enclosing def / class; kNoNode: module scope (not a shadow)
+                if( sc != kNoNode && sc < m_ing.symbols.size() )
+                {
+                    const Symbol& fs = m_ing.symbols[sc];
+                    m_shadows[ fk( b.fileId, b.var ) ].push_back( { fs.sigStartByte, fs.endByte, sc, fs.kind != SymKind::Class } );
+                }
             }
             else if( b.kind == LocalBindKind::Type && !b.typeName.empty()
                      && ( b.fromSymbol == kNoNode
@@ -214,8 +243,7 @@ private:
     }
     // Identifier `name` as file `f` sees it: its own module-level definition, else the one its import of `name` binds.
     // A module that only re-imports the name (`from .dispatcher import Signal` in a package __init__) is followed, at most
-    // kReexportDepth hops.
-    static constexpr int kReexportDepth = 3;
+    // kRegReexportDepth hops; a longer chain is not followed and its name is recorded (reexportCut: cut=1 on that key's row).
     NodeId resolveIdent( std::uint32_t f, std::string_view name, int depth = 0 ) const
     {
         if( const NodeId own = topLevel( f, name ); own != kNoNode )
@@ -237,8 +265,12 @@ private:
             const bool          js   = b->kind == LocalBindKind::JsImport;
             const std::uint32_t mf   = moduleFile( f, b->typeName, !js );
             const std::string_view there = js && !b->importedName.empty() ? std::string_view( b->importedName ) : name;
-            const NodeId        def  = mf == kNoFile || mf == f ? kNoNode
-                                     : depth < kReexportDepth ? resolveIdent( mf, there, depth + 1 ) : topLevel( mf, there );
+            NodeId              def  = mf == kNoFile || mf == f ? kNoNode
+                                     : depth < kRegReexportDepth ? resolveIdent( mf, there, depth + 1 ) : topLevel( mf, there );
+            if( def == kNoNode && depth >= kRegReexportDepth && mf != kNoFile && mf != f && importsName( mf, there ) )
+            {
+                m_cut.try_emplace( std::string( there ), char( 1 ) );   // the chain goes on: a registration through it is not counted
+            }
             if( def == kNoNode || ( found != kNoNode && found != def ) )
             {
                 return kNoNode;   // an unresolved import of the name, or two that disagree: no definition
@@ -247,7 +279,30 @@ private:
         }
         return found;
     }
-    // `mod.K` (Python): `mod` is a module import of file `f` (`from pkg import mod` → pkg.mod first, `import pkg.mod as mod`).
+    // File `f` binds `name` by an import other than `except` (the binding being resolved).
+    bool importsName( std::uint32_t f, std::string_view name, const Binding* except = nullptr ) const
+    {
+        const auto imp = m_imports.find( f );
+        return imp != m_imports.end() && std::ranges::any_of( imp->second, [ & ]( const Binding* b ) { return b != except && b->var == name; } );
+    }
+    // File `f` defines `name` at module level (several definitions count: the name IS bound there).
+    bool definesTop( std::uint32_t f, std::string_view name ) const
+    {
+        const auto it = m_top.find( fk( f, name ) );
+        return it != m_top.end() && it->second != kNoNode;
+    }
+    // Does function `from`'s code at `byte` of file `f` write `name` locally (a parameter, loop variable, assignment)? Then `name`
+    // there is not the module-level key. A class body shadows only its own statements, a def its whole extent (nested defs too).
+    bool shadowed( std::uint32_t f, std::string_view name, std::uint32_t byte, NodeId from ) const
+    {
+        const auto it = m_shadows.find( fk( f, name ) );
+        return it != m_shadows.end()
+            && std::ranges::any_of( it->second, [ & ]( const Shadow& w ) { return w.start <= byte && byte <= w.end && ( w.fn || w.scope == from ); } );
+    }
+    // `mod.K` (Python): `mod` is a module import of file `f`. Python's binding rules decide which module:
+    //   `import pkg[.sub]` binds `pkg` — the package's own file (`import pkg.sub as mod` binds the module pkg.sub itself);
+    //   `from pkg import m [as mod]` binds the attribute `m` of pkg: its submodule pkg.m, unless pkg's own file defines or binds
+    //   `m` (the attribute is read first: not a module this index can name, no definition).
     NodeId resolveDotted( std::uint32_t f, std::string_view text ) const
     {
         const std::size_t dot = text.find( '.' );
@@ -272,11 +327,23 @@ private:
             {
                 continue;
             }
-            const std::string sub = b->typeName.ends_with( '.' ) ? b->typeName + std::string( mod ) : b->typeName + "." + std::string( mod );
-            std::uint32_t     mf  = moduleFile( f, sub, true );
-            if( mf == kNoFile )
+            std::uint32_t mf = kNoFile;
+            if( b->importedName == "module" )
             {
-                mf = moduleFile( f, b->typeName, true );
+                const bool plain = b->typeName.size() > mod.size() && b->typeName.starts_with( mod ) && b->typeName[ mod.size() ] == '.';
+                mf               = moduleFile( f, plain ? mod : std::string_view( b->typeName ), true );
+            }
+            else
+            {
+                const std::string_view member = b->importedName.starts_with( kPythonFromMemberMark )
+                                                    ? std::string_view( b->importedName ).substr( kPythonFromMemberMark.size() ) : mod;
+                const std::uint32_t    pkg    = moduleFile( f, b->typeName, true );
+                if( pkg != kNoFile && ( ( pkg != f && definesTop( pkg, member ) ) || importsName( pkg, member, b ) ) )
+                {
+                    return kNoNode;   // the package's own attribute `member` wins over its submodule (a namespace package has none)
+                }
+                const std::string sub = b->typeName.ends_with( '.' ) ? b->typeName + std::string( member ) : b->typeName + "." + std::string( member );
+                mf                    = moduleFile( f, sub, true );
             }
             const NodeId def = mf == kNoFile ? kNoNode : topLevel( mf, name );
             if( def == kNoNode || ( found != kNoNode && found != def ) )
@@ -331,7 +398,12 @@ private:
             }
         }
         const auto facts = m == kNoNode ? m_regFacts.end() : m_regFacts.find( m );
-        return facts != m_regFacts.end() && std::ranges::find( facts->second, arg ) != facts->second.end() ? m : kNoNode;
+        if( facts == m_regFacts.end() || std::ranges::find( facts->second, arg ) == facts->second.end() )
+        {
+            return kNoNode;
+        }
+        // two parameters without a default stored (`connect( self, sender, receiver )`): which one is the receiver is not provable
+        return std::ranges::any_of( facts->second, [ & ]( std::uint16_t a ) { return a != arg; } ) ? kNoNode : m;
     }
 
     // Python ReceiverMethod: a Value row at argument k of `K.m( … )` / `mod.K.m( … )` (into= "<receiver>.<m>#arg<k>").
@@ -366,7 +438,9 @@ private:
             {
                 continue;
             }
-            const NodeId key = resolveDotted( r.fileId, into.substr( 0, dot ) );
+            const std::string_view recv = into.substr( 0, dot );
+            const std::string_view head = recv.substr( 0, recv.find( '.' ) );
+            const NodeId key = shadowed( r.fileId, head, r.startByte, r.fromSymbol ) ? kNoNode : resolveDotted( r.fileId, recv );
             const NodeId reg = key == kNoNode ? kNoNode : registrarOf( key, method, r.argCount );
             if( reg == kNoNode )
             {
@@ -408,6 +482,17 @@ private:
             }
         }
         constexpr std::uint32_t kSameObjectBytes = 600;   // one object literal's pairs: a capped prefix never joins two objects
+        // the value pairs of one (file, enclosing symbol, prefix) group: two or more are two objects (repeated calls share a prefix)
+        HashMap<std::string, std::uint32_t> valuesIn;
+        const auto                          groupKey = [ & ]( const Pair& p )
+        {
+            const Reference& pr = m_ing.references[ p.ref ];
+            return std::to_string( pr.fileId ) + "#" + std::to_string( pr.fromSymbol ) + "#" + std::string( p.prefix );
+        };
+        for( const Pair& v : values )
+        {
+            ++valuesIn[ groupKey( v ) ];
+        }
         for( const Pair& v : values )
         {
             const Reference& r  = m_ing.references[ v.ref ];
@@ -427,13 +512,14 @@ private:
                     key = &k;
                 }
             }
-            if( n != 1 )
+            if( n != 1 || valuesIn[ groupKey( v ) ] != 1 )
             {
                 continue;   // no `provide` pair, or two objects share the prefix: not provably one record
             }
             const Reference& kr   = m_ing.references[ key->ref ];
             const std::uint32_t d = kr.startByte > r.startByte ? kr.startByte - r.startByte : r.startByte - kr.startByte;
-            const NodeId     kdef = d <= kSameObjectBytes ? resolveIdent( r.fileId, kr.calleeName ) : kNoNode;
+            const NodeId     kdef = d <= kSameObjectBytes && !shadowed( kr.fileId, kr.calleeName, kr.startByte, kr.fromSymbol )
+                                    ? resolveIdent( r.fileId, kr.calleeName ) : kNoNode;
             if( kdef == kNoNode )
             {
                 continue;
@@ -482,7 +568,7 @@ private:
                 {
                     continue;
                 }
-                const NodeId def = resolveIdent( r.fileId, r.calleeName );
+                const NodeId def = shadowed( r.fileId, r.calleeName, r.startByte, r.fromSymbol ) ? kNoNode : resolveIdent( r.fileId, r.calleeName );
                 for( const std::size_t k : it->second )
                 {
                     if( keys[k].key == def )
@@ -499,7 +585,8 @@ private:
                 {
                     continue;
                 }
-                const NodeId def = resolveDotted( r.fileId, r.fieldName.empty() ? r.recvVar : r.recvVar + "." + r.fieldName );
+                const NodeId def = shadowed( r.fileId, r.recvVar.substr( 0, r.recvVar.find( '.' ) ), r.startByte, r.fromSymbol )
+                                       ? kNoNode : resolveDotted( r.fileId, r.fieldName.empty() ? r.recvVar : r.recvVar + "." + r.fieldName );
                 for( const std::size_t k : it->second )
                 {
                     const RegKey& key = keys[k];
@@ -607,7 +694,7 @@ inline bool sharesWord( std::string_view key, const std::vector<std::string>& wo
 inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeId> shownIds, std::string_view task )
 {
     RegIndex                  idx( ing );
-    const std::vector<RegKey> keys = idx.build();
+    const std::vector<RegKey> keys = idx.build();   // build() before reexportCut(): the cut names are found while resolving
     if( keys.empty() )
     {
         return {};
@@ -719,9 +806,15 @@ inline std::string renderRegRows( const IngestResult& ing, std::span<const NodeI
         }
         if( n > kRegSiteCap )
         {
-            out += " capped=\"1\" next=\"--grep=";
-            out += escapeXml( ks.name, esc );
-            out += "\"";
+            out += " capped=\"1\"" + nextAttrXml( nextFlag( "--grep=", ks.name ) );
+        }
+        if( idx.reexportCut( ks.name ) )
+        {
+            out += " cut=\"1\"";
+        }
+        if( p + 1 == std::min( picks.size(), kRegRowCap ) && picks.size() > kRegRowCap )
+        {
+            out += " reg_more=\"" + std::to_string( picks.size() - kRegRowCap ) + "\"";   // keys that passed the gate and are not shown
         }
         out += ">";
         std::size_t listed = 0;

@@ -1073,6 +1073,28 @@ private:
         return names;
     }
 
+    // Python: parameter `name` of function node `fn` is written with a default value (`x=1`, `x: int = 1`).
+    bool pyParamHasDefault( TSNode fn, std::string_view name ) const
+    {
+        const TSNode params = child( fn, m_fParameters );
+        if( ts_node_is_null( params ) )
+        {
+            return false;
+        }
+        bool        found = false;
+        ChildCursor c( params );
+        forEachNamedChild( params, c.cur, [ & ]( TSNode k )
+        {
+            const char* t = ts_node_type( k );
+            if( ( kindIs( t, "default_parameter" ) || kindIs( t, "typed_default_parameter" ) ) && text( child( k, m_fName ) ) == name )
+            {
+                found = true;
+            }
+            return !found;
+        } );
+        return found;
+    }
+
     // The positional parameter names of a function-like node, in order, and its own name.
     void functionSignature( TSNode fn, const char* t, VrScope& s ) const
     {
@@ -2053,7 +2075,8 @@ private:
     // is a class body, its first parameter `self`) at anc[i], reached through tuple/list/parenthesis wrappers only, is either
     //   an argument of `self.<field>.<store>( … )` (store one of the language row's containerStores), or
     //   the right side of `self.<field>[ … ] = …`.
-    // Records the fact (method, parameter position after self, field). Anything else — a store into a local, a store through
+    // Records the fact (method, parameter position after self, field). A parameter with a default value (`sender=None`) records
+    // nothing: it is an option stored beside the receiver, and a positional argument there is not a registered value. Anything else — a store into a local, a store through
     // another object, a call of the parameter — records nothing (no fact: never a registrar).
     void paramRegFact( std::size_t i, std::size_t d, std::string_view name )
     {
@@ -2070,6 +2093,10 @@ private:
         if( at == sc.params.begin() || at == sc.params.end() || std::ranges::count( sc.params, name ) != 1 )
         {
             return;
+        }
+        if( pyParamHasDefault( sc.node, name ) )
+        {
+            return;   // `sender=None`, `weak=True`: an option the registrar stores beside the receiver, never the registered value
         }
         std::size_t j = i;
         while( j > 1 && ( kindIs( m_anc[j - 1].kind, "tuple" ) || kindIs( m_anc[j - 1].kind, "list" )
