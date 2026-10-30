@@ -140,7 +140,7 @@ public:
 
 private:
     const IngestResult&                         m_ing;
-    HashMap<std::string, NodeId>                m_top;        // "fileId#name" → its one module-level definition (kAmbiguous: several)
+    mutable HashMap<std::string, NodeId>        m_top;        // "fileId#name" → its one module-level definition (kAmbiguous: several)
     HashMap<std::string, std::uint32_t>         m_fileIndex;  // root-relative normalised path → fileId
     HashMap<std::uint32_t, std::vector<const Binding*>> m_imports;   // fileId → its import bindings
     HashMap<std::string, std::vector<const Binding*>>   m_types;     // "fileId#var" → module-scope typed bindings
@@ -194,8 +194,9 @@ private:
     // The one module-level definition `name` has in file `f` (kNoNode: none, or several).
     NodeId topLevel( std::uint32_t f, std::string_view name ) const
     {
-        const NodeId* one = m_top.contains( fk( f, name ) ) ? &m_top.at( fk( f, name ) ) : nullptr;
-        return one != nullptr && *one != kAmbiguous ? *one : kNoNode;
+        // a name with no definition files an entry that reads as none (try_emplace never overwrites a definition)
+        const NodeId one = m_top.try_emplace( fk( f, name ), kNoNode ).first->second;
+        return one == kAmbiguous ? kNoNode : one;
     }
     // The file an import's module resolves to (kNoFile: a package outside the tree): valuerefindex.h importedModuleFile's rule.
     std::uint32_t moduleFile( std::uint32_t importer, std::string_view module, bool python ) const
