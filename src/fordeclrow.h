@@ -98,7 +98,14 @@ inline bool forIsSymbolChar( char c ) noexcept
 
 inline bool forIsSymbolSpelling( std::string_view s ) noexcept
 {
-    return !s.empty() && std::ranges::all_of( s, forIsSymbolChar );
+    for( const char c : s )
+    {
+        if( !forIsSymbolChar( c ) )
+        {
+            return false;
+        }
+    }
+    return !s.empty();
 }
 
 // A prose word that can only be a code name: an underscore, a scope, or a capital after its first letter.
@@ -257,22 +264,57 @@ inline bool forDeclNameIsMacro( const IngestResult& ing, const DefLookup& L ) no
     return std::ranges::any_of( L.matches, [ & ]( NodeId n ) { return ing.symbols[n].kind == SymKind::Macro; } );
 }
 
-// The rows of one subject: how many separate functions they are (the candidate groups: a definition with its declarations is one, an
-// untied prototype is none), counted for a function or method row the block keeps.
-inline std::size_t forDeclFunctionCount( const IngestResult& ing, const DefLookup& L )
+// A row the block keeps that is its own function: a function or method row, not an untied prototype (a definition with its
+// declarations is one function; an untied prototype is none until the index ties it).
+inline bool forDeclOwnFunction( const IngestResult& ing, const DefLookup& L, const DefRow& r ) noexcept
 {
-    return std::size_t( std::ranges::count_if( L.rows, [ & ]( const DefRow& r ) { return forDeclRowCounts( ing, r ) && L.groups.untied[ r.group ] == 0; } ) );
+    return forDeclRowCounts( ing, r ) && L.groups.untied[ r.group ] == 0;
+}
+
+// One counted row: the defs row's spelling; an empty sel= (past lookupDefs's proof window) takes the unproven spelling it falls back
+// to, and a prototype the index cannot tie to a definition says so.
+inline std::string forDeclRowXml( const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners )
+{
+    DefRow row = r;
+    if( row.sel.empty() )
+    {
+        const Symbol& s = ing.symbols[ r.rep ];
+        row.sel         = std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::string( qualifiedMemberName( owners, s ) );
+    }
+    std::string one;
+    defRowXml( one, ing, L, row, owners, /*compact=*/false );
+    if( L.groups.untied[ r.group ] != 0 )
+    {
+        one.insert( one.size() - 2, " untied=\"1\"" );
+    }
+    return one;
+}
+
+inline constexpr std::string_view kForDeclLegend =
+    "<!-- ripwire for decl_rows: of= (matched by name) may change its signature; its non-test definition and declaration rows in the index follow, "
+    "so a change reaches them in step. <d> n= name, t= kind, p=file:line, sel= the spelling that picks this row alone (absent on a decl_only row "
+    "that follows the definition it declares; a decl_only row with sel= declares none of them), sel_proven=\"0\": no spelling was proven to, lang=, "
+    "class=, in= graph callers (a floor), decl_only=\"1\": no body (a header prototype, forward declaration or interface contract), untied=\"1\": "
+    "its link to a definition is unproven (it may be another function). rows= counts them; functions=N only when of= names N separate functions (a static "
+    "elsewhere, an overload, another scope): a change reaches its own definition row and the decl_only rows right after it, not another "
+    "function's; shown=, capped=\"1\" and next= only when the list is cut (next= lists definitions, prototypes folded in). Call sites, and the implementations "
+    "of a contract (lego), are not listed; the answer above is unchanged, and these bytes are not in est_tokens -->";
+
+// A token budget is a request the block must obey: the rows are not printed, the tag names the call that prints them.
+inline std::string forDeclHeldXml( std::string_view spell, const std::string& next )
+{
+    std::vector<char> esc;
+    return "<!-- ripwire for decl_rows: held=\"budget\": a token budget is set, so the declaration rows of of= are not printed here; "
+           "next= is the call that lists them; the answer above is unchanged -->"
+           "<decl_rows of=\"" + std::string( escapeXml( spell, esc ) ) + "\" held=\"budget\"" + next + "/>";
 }
 
 inline std::string forDeclRowsXml( const IngestResult& ing, const DefLookup& L, std::string_view spell, bool held )
 {
-    std::vector<char> esc;
     const std::string next = nextAttrXml( nextFlag( "--defs=", spell ) );
-    if( held )   // a token budget is a request the block must obey: the rows are not printed, the tag names the call that prints them
+    if( held )
     {
-        return "<!-- ripwire for decl_rows: held=\"budget\": a token budget is set, so the declaration rows of of= are not printed here; "
-               "next= is the call that lists them; the answer above is unchanged -->"
-               "<decl_rows of=\"" + std::string( escapeXml( spell, esc ) ) + "\" held=\"budget\"" + next + "/>";
+        return forDeclHeldXml( spell, next );
     }
     const MemberOwners owners( ing );
     std::string        rows;
@@ -282,46 +324,26 @@ inline std::string forDeclRowsXml( const IngestResult& ing, const DefLookup& L, 
         ++total;
         if( shown < kForDeclRowsCap )
         {
-            render();
+            rows += render();
             ++shown;
         }
     };
+    std::size_t functions = 0;
     for( const DefRow& r : L.rows )
     {
         if( !forDeclRowCounts( ing, r ) )
         {
             continue;
         }
-        counted( [ & ]
-                 {
-                     DefRow row = r;
-                     if( row.sel.empty() )   // past lookupDefs's proof window: the same unproven spelling it falls back to, never an empty sel=
-                     {
-                         const Symbol& s = ing.symbols[ r.rep ];
-                         row.sel         = std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::string( qualifiedMemberName( owners, s ) );
-                     }
-                     std::string one;
-                     defRowXml( one, ing, L, row, owners, /*compact=*/false );
-                     if( L.groups.untied[ r.group ] != 0 )   // a prototype the index cannot tie to a definition: it may declare another function
-                     {
-                         one.insert( one.size() - 2, " untied=\"1\"" );
-                     }
-                     rows += one;
-                 } );
+        functions += forDeclOwnFunction( ing, L, r ) ? 1 : 0;
+        counted( [ & ] { return forDeclRowXml( ing, L, r, owners ); } );
         for( const NodeId n : forDeclFoldedPrototypes( ing, L, r ) )
         {
-            counted( [ & ] { rows += forDeclFoldedRowXml( ing, owners, n ); } );
+            counted( [ & ] { return forDeclFoldedRowXml( ing, owners, n ); } );
         }
     }
-    const std::size_t functions = forDeclFunctionCount( ing, L );
-    std::string       out = "<!-- ripwire for decl_rows: of= (matched by name) may change its signature; its non-test definition and declaration rows in the index follow, "
-                            "so a change reaches them in step. <d> n= name, t= kind, p=file:line, sel= the spelling that picks this row alone (absent on a decl_only row "
-                            "that follows the definition it declares; a decl_only row with sel= declares none of them), sel_proven=\"0\": no spelling was proven to, lang=, "
-                            "class=, in= graph callers (a floor), decl_only=\"1\": no body (a header prototype, forward declaration or interface contract), untied=\"1\": "
-                            "its link to a definition is unproven (it may be another function). rows= counts them; functions=N only when of= names N separate functions (a static "
-                            "elsewhere, an overload, another scope): a change reaches its own definition row and the decl_only rows right after it, not another "
-                            "function's; shown=, capped=\"1\" and next= only when the list is cut (next= lists definitions, prototypes folded in). Call sites, and the implementations "
-                            "of a contract (lego), are not listed; the answer above is unchanged, and these bytes are not in est_tokens -->";
+    std::vector<char> esc;
+    std::string       out( kForDeclLegend );
     out += "<decl_rows of=\"" + std::string( escapeXml( spell, esc ) ) + "\" rows=\"" + std::to_string( total ) + "\"";
     if( functions > 1 )
     {
