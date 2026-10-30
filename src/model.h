@@ -579,6 +579,23 @@ inline constexpr char kValueRefSlotFactScope = 't';
 // the field, memberCtor = the slot's type ("" unknown). valuerefindex.h SlotIndex re-slots an ARGUMENT row of a bare call of
 // that function at that position (`Reg( Put )`) into the same field. Distinct from every other scope char.
 inline constexpr char kValueRefSlotParamScope = 'q';
+// STRING-IMPORT: a dotted-string FACT (role Value, name "": no row, no edge; fordottedstring.h is its one reader). recvVar = the
+// string as written, composeRel = the shape below, memberPath = the import sink's tail name (direct / format / variable shapes),
+// memberCtor = the name it is assigned to ("" none). Distinct from every other scope char.
+inline constexpr char kValueRefDottedStringScope = 'D';
+inline constexpr std::string_view kDottedShapeConstant = "c";   // a module-level or class-level `NAME = "a.b.C"`
+inline constexpr std::string_view kDottedShapeListed   = "l";   // an element of a list/tuple/set or a dict VALUE, anywhere
+inline constexpr std::string_view kDottedShapeSink     = "s";   // the first positional argument of an import sink
+inline constexpr std::string_view kDottedShapeFormat   = "f";   // `"%s.base" % x` as that argument (recvVar = the template)
+inline constexpr std::string_view kDottedShapeVariable = "v";   // an import sink called with anything else (recvVar "")
+// The import sinks, by the callee's tail name: language DATA, one row per language; a language with no row records nothing.
+struct DottedImportSinkLang
+{
+    Lang                             lang;
+    std::span<const std::string_view> sinks;
+};
+inline constexpr std::string_view kPythonImportSinks[] = { "import_string", "import_module", "__import__" };
+inline constexpr DottedImportSinkLang kDottedImportSinks[] = { { Lang::Python, kPythonImportSinks } };
 
 // IX-1 / IX1-V2: which languages record a slot join, and how — the one table both the extractor (ingest_valuerefs.h) and the
 // join (valuerefindex.h) read. A language's row supplies the per-language pieces of the language-blind join (SlotIndex):
@@ -2460,7 +2477,7 @@ inline bool isSlotJoinRecord( const Reference& r ) noexcept
     {
         return false;
     }
-    return ( r.role == RefRole::Value && ( r.qualifier[0] == kValueRefSlotFactScope || r.qualifier[0] == kValueRefSlotParamScope ) )
+    return ( r.role == RefRole::Value && ( r.qualifier[0] == kValueRefSlotFactScope || r.qualifier[0] == kValueRefSlotParamScope || r.qualifier[0] == kValueRefDottedStringScope ) )
         || ( r.role == RefRole::Through && r.qualifier[0] == kValueRefSlotCallScope );
 }
 

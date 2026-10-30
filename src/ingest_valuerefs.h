@@ -67,6 +67,7 @@ namespace
 
 using VrFam = ValueRefFamily;   // model.h: the one armed-language table the resolver indexes too
 
+inline constexpr std::size_t kVrDottedStringMaxBytes = 200;   // STRING-IMPORT: a longer string is no module path (no fact, no disclosure: nothing is cut)
 inline constexpr std::uint32_t kVrMaxDepth   = 512;   // the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h)
 inline constexpr std::size_t   kVrTextCap    = 96;    // a written slot / callee longer than this is cut with "…"
 
@@ -686,6 +687,10 @@ public:
         m_slotByName   = slotRow != nullptr && slotRow->callSide == VrSlotCallSide::MemberCallByName;
         m_fwd          = callForwardersOf( m_lang );
         m_fwdArmed     = !m_fwd.empty();
+        if( const DottedImportSinkLang* sinkRow = findByField( kDottedImportSinks, &DottedImportSinkLang::lang, m_lang ); sinkRow != nullptr )
+        {
+            m_importSinks = sinkRow->sinks;
+        }
 
         VrScope file;
         file.node = root;
@@ -1333,8 +1338,13 @@ private:
         {
             memberValueAt( i );
         }
+        else if( !m_importSinks.empty() && kindIs( a.kind, "string" ) )
+        {
+            dottedStringAt( i );   // STRING-IMPORT (inert on a language with no sink row)
+        }
         else if( isCallKind( a.kind ) )
         {
+            importSinkAt( n );    // STRING-IMPORT (inert on a language with no sink row)
             slotThroughAt( n );   // IX-1 (inert without a slot row)
             throughAt( n );
             patternAtCall( n );
@@ -3275,6 +3285,195 @@ private:
         std::string suffix;
         bool        callable = true;   // false: the name is tested or stored, never called through (hasattr, `o[ 'p' + e ] = fn`)
     };
+    // ── STRING-IMPORT: dotted-string facts (model.h kValueRefDottedStringScope; fordottedstring.h reads them) ──────────
+    // The string's content when the node is ONE plain literal: no interpolation, not bytes. "" otherwise.
+    std::string_view plainStringContent( TSNode n ) const noexcept
+    {
+        if( !isPlainStringNode( n ) || ts_node_named_child_count( n ) != 3 || !kindIs( ts_node_type( ts_node_named_child( n, 1 ) ), "string_content" ) )
+        {
+            return {};
+        }
+        const std::string_view open = text( ts_node_named_child( n, 0 ) );
+        for( const char c : open )
+        {
+            if( c != '"' && c != '\'' && c != 'r' && c != 'R' && c != 'u' && c != 'U' )
+            {
+                return {};   // b'' bytes, f'' with no hole
+            }
+        }
+        return text( ts_node_named_child( n, 1 ) );
+    }
+    // `ident(.ident)+`, ASCII; with `allowHole` a segment may be exactly %s. Over the cap: no module path.
+    static bool isDottedPathText( std::string_view s, bool allowHole ) noexcept
+    {
+        if( s.size() > kVrDottedStringMaxBytes || s.find( '.' ) == std::string_view::npos )
+        {
+            return false;
+        }
+        bool sawHole = false;
+        for( std::size_t at = 0; at <= s.size(); )
+        {
+            const std::size_t      dot = std::min( s.find( '.', at ), s.size() );
+            const std::string_view seg = s.substr( at, dot - at );
+            if( allowHole && seg == "%s" )
+            {
+                sawHole = true;
+            }
+            else
+            {
+                const auto idByte = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+                if( seg.empty() || ( seg[0] >= '0' && seg[0] <= '9' ) || !std::ranges::all_of( seg, idByte ) )
+                {
+                    return false;
+                }
+            }
+            at = dot + 1;
+        }
+        return !allowHole || sawHole;
+    }
+    // The call's import-sink tail name ("" when its callee is not one).
+    std::string_view importSinkOf( TSNode call ) const noexcept
+    {
+        TSNode fn = ts_node_child_by_field_id( call, m_fFunction );
+        if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "attribute" ) )
+        {
+            fn = ts_node_child_by_field_id( fn, m_fAttribute );
+        }
+        if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "identifier" ) )
+        {
+            return {};
+        }
+        const std::string_view tail = text( fn );
+        return std::ranges::find( m_importSinks, tail ) != m_importSinks.end() ? tail : std::string_view();
+    }
+    void noteDottedFact( TSNode at, std::string_view value, std::string_view shape, std::string_view sink, std::string_view assignedTo )
+    {
+        RawRef r;
+        r.fileId     = m_fileId;
+        r.startByte  = ts_node_start_byte( at );
+        r.line       = ts_node_start_point( at ).row + 1;
+        r.lang       = m_lang;
+        r.role       = RefRole::Value;
+        r.qualifier  = std::string( 1, kValueRefDottedStringScope );   // name stays "": no identifier is empty, so no row
+        r.recvVar    = std::string( value );
+        r.composeRel = std::string( shape );
+        r.memberPath = std::string( sink );
+        r.memberCtor = std::string( assignedTo );
+        m_out.push_back( std::move( r ) );
+    }
+    // A call of an import sink whose first argument is no literal or template: the loader half of a dotted string's story.
+    void importSinkAt( TSNode call )
+    {
+        if( m_importSinks.empty() )
+        {
+            return;
+        }
+        const std::string_view sink = importSinkOf( call );
+        if( sink.empty() )
+        {
+            return;
+        }
+        const TSNode args  = ts_node_child_by_field_id( call, m_fArguments );
+        const TSNode first = ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 ? TSNode{} : ts_node_named_child( args, 0 );
+        if( !isPlainStringNode( first ) )   // a %-template is a computed value too (dottedStringAt records the template beside this)
+        {
+            noteDottedFact( call, {}, kDottedShapeVariable, sink, {} );
+        }
+    }
+    // The assignment target's last name: `NAME`, `self.NAME`, `a.b.NAME`; "" for anything else (a tuple target, a subscript).
+    std::string_view assignedNameOf( TSNode assignment ) const noexcept
+    {
+        TSNode left = ts_node_child_by_field_id( assignment, m_fLeft );
+        if( !ts_node_is_null( left ) && kindIs( ts_node_type( left ), "attribute" ) )
+        {
+            left = ts_node_child_by_field_id( left, m_fAttribute );
+        }
+        return !ts_node_is_null( left ) && kindIs( ts_node_type( left ), "identifier" ) ? text( left ) : std::string_view();
+    }
+    // Is an ancestor of m_anc[i] a function body? (a lambda counts: a local there is no module constant)
+    bool insideFunctionBody( std::size_t i ) const noexcept
+    {
+        for( std::size_t j = i; j-- > 0; )
+        {
+            if( kindIs( m_anc[j].kind, "function_definition" ) || kindIs( m_anc[j].kind, "lambda" ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // m_anc[i] is a `string` node. The PARSE decides the shape: a docstring (an expression statement), a comparison operand, a log
+    // call's argument and a dict KEY record nothing; the text is never scanned.
+    void dottedStringAt( std::size_t i )
+    {
+        const TSNode           n       = m_anc[i].node;
+        const std::string_view content = plainStringContent( n );
+        if( content.empty() )
+        {
+            return;
+        }
+        if( i >= 3 && kindIs( m_anc[i - 1].kind, "binary_operator" ) && kindIs( m_anc[i - 2].kind, "argument_list" ) && m_anc[i].namedIndex == 0
+            && text( ts_node_child_by_field_id( m_anc[i - 1].node, m_fOperator ) ) == "%" && isDottedPathText( content, /*allowHole=*/true ) )
+        {
+            const std::string_view sink = importSinkOf( m_anc[i - 3].node );
+            if( !sink.empty() && m_anc[i - 2].childNamed == 1 )
+            {
+                noteDottedFact( n, content, kDottedShapeFormat, sink, {} );
+            }
+            return;
+        }
+        if( !isDottedPathText( content, /*allowHole=*/false ) )
+        {
+            return;
+        }
+        bool        inContainer = false;
+        std::size_t j           = i;
+        while( j > 0 )
+        {
+            const char* up = m_anc[j - 1].kind;
+            if( kindIs( up, "list" ) || kindIs( up, "tuple" ) || kindIs( up, "set" ) || kindIs( up, "expression_list" ) )
+            {
+                inContainer = true;
+            }
+            else if( kindIs( up, "pair" ) )
+            {
+                if( m_anc[j].field != m_fValue )
+                {
+                    return;   // a dict KEY names a slot, not a value (LOGGING's "django.request": { … })
+                }
+                inContainer = true;
+            }
+            else if( !kindIs( up, "parenthesized_expression" ) && !kindIs( up, "dictionary" ) )
+            {
+                break;
+            }
+            --j;
+        }
+        if( j == 0 )
+        {
+            return;
+        }
+        const char*            top      = m_anc[j - 1].kind;
+        const bool             isAssign = ( kindIs( top, "assignment" ) || kindIs( top, "augmented_assignment" ) ) && m_anc[j].field == m_fRight;
+        const std::string_view name     = isAssign ? assignedNameOf( m_anc[j - 1].node ) : std::string_view();
+        if( inContainer )
+        {
+            noteDottedFact( n, content, kDottedShapeListed, {}, name );
+        }
+        else if( isAssign && kindIs( top, "assignment" ) && !insideFunctionBody( j ) )
+        {
+            noteDottedFact( n, content, kDottedShapeConstant, {}, name );
+        }
+        else if( kindIs( top, "argument_list" ) && j >= 2 && j == i && m_anc[j - 1].childNamed == 1 )
+        {
+            const std::string_view sink = importSinkOf( m_anc[j - 2].node );
+            if( !sink.empty() )
+            {
+                noteDottedFact( n, content, kDottedShapeSink, sink, {} );
+            }
+        }
+    }
+
     bool isPlainStringNode( TSNode n ) const noexcept
     {
         if( ts_node_is_null( n ) || !kindIs( ts_node_type( n ), "string" ) )
@@ -3543,6 +3742,7 @@ private:
     // call forwarders (model.h kCallForwarders): the sites `f.call( … )` / `f.apply( … )` whose f no enclosing parameter or
     // local declares, and the file's two proofs that a bare f names a function — its function declarations (any depth:
     // a declaration is hoisted and the walk's scopes do not record it) and its file-scope relative imports.
+    std::span<const std::string_view> m_importSinks;   // STRING-IMPORT: this language's import sinks (model.h kDottedImportSinks; empty: no facts)
     std::span<const CallForwarder> m_fwd;
     bool                           m_fwdArmed = false;
     std::vector<RawRef>            m_fwdSites;
