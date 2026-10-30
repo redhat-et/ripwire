@@ -2481,6 +2481,13 @@ inline bool isSlotJoinRecord( const Reference& r ) noexcept
         || ( r.role == RefRole::Through && r.qualifier[0] == kValueRefSlotCallScope );
 }
 
+// STRING-IMPORT: a dotted-string fact (kValueRefDottedStringScope): its qualifier is a scope char and its recvVar a string, neither a
+// name the file spells, so no name-evidence scan may read them.
+inline bool isDottedStringFact( const Reference& r ) noexcept
+{
+    return r.role == RefRole::Value && r.qualifier.size() == 1 && r.qualifier[0] == kValueRefDottedStringScope;
+}
+
 inline void buildShadowKey( std::string& key, std::uint32_t fromSymbol, std::string_view name )
 {
     key.clear();

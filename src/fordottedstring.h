@@ -9,7 +9,7 @@
 // exactly one definition in it; or a module itself) to a row this answer shows: the string (s=), the target (tn= tp=, or mod=),
 // where the string sits (p= l= in=), and how it may be loaded: sink= when the string is that sink's own argument, else
 // loader= lp= for a function that names the constant and calls an import sink. A `%`-template handed to a sink
-// (`"%s.base" % x`) gets one hedged row when the directories of at least two shown files fill its hole: cand= those modules, cands=
+// (`"%s.base" % x`) gets one hedged row when at least three sibling directories of shown files fill its hole: cand= those modules, cands=
 // how many; which one loads is not known.
 //
 // HONESTY. A string in the source names this symbol; whether it reaches the sink is NOT traced, so nothing here enters reaches=,
@@ -48,7 +48,8 @@ namespace rw
 {
 
 inline constexpr std::size_t kForDottedStringRows = 3;   // <ds> rows per answer (capped=1 next= beyond it)
-inline constexpr std::size_t kForDottedTemplateMinFills = 2;      // distinct shown directories that must fill a %-template's hole
+inline constexpr std::size_t kForDottedTemplateMinFills = 3;      // sibling shown directories that must fill a %-template's hole
+inline constexpr std::size_t kForDottedLoaderNamedMax = 3;        // more functions than this name the constant: a generic word, no loader= (loaders= counts them)
 inline constexpr std::size_t kForDottedTemplateFillsListed = 4;   // modules listed in cand= (cands= counts all that shown directories fill)
 
 inline bool forDottedStringsOn()
@@ -60,8 +61,8 @@ inline constexpr std::string_view kForDottedStringsLegend =
     "<!-- ripwire for dotted_strings: Python string literals whose whole dotted path names a shown row; hedge= is the whole "
     "claim: no edge, not in est_tokens or any count. ds s= the string; "
     "tn= tp= the definition it names, or mod= the module; p= l= in= where the string sits; sink= it is that import call's argument; "
-    "loader= lp= a function naming that constant and calling an import sink (loaders= how many do, by name, a floor); tmpl= a %-template "
-    "passed to a sink, cand= modules that directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
+    "loader= lp= a function naming that constant and calling an import sink (loaders= how many do; over 3 none is named, a generic word); tmpl= a %-template "
+    "passed to a sink, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
     "tests= sites in test paths, counted only; unresolved= external= strings ending in a shown name that resolve to no one definition, "
     "or to no in-tree module; rows_capped=1 next= the list was cut. -->";
 
@@ -242,7 +243,7 @@ inline DottedFacts dottedFactsFor( const IngestResult& ing, const std::set<std::
     auto& [ cand, loaders, templates ] = f;
     for( const Reference& r : ing.references )
     {
-        if( r.role != RefRole::Value || r.qualifier.size() != 1 || r.qualifier[0] != kValueRefDottedStringScope )
+        if( !isDottedStringFact( r ) )
         {
             continue;
         }
@@ -401,8 +402,8 @@ inline DottedSites sitesNamingShown( const IngestResult& ing, std::span<const Re
     return out;
 }
 
-// A %-template handed to a sink, filled by the directories of shown files: at least kForDottedTemplateMinFills distinct ones (one
-// directory that happens to hold a base.py is a bare-name coincidence; several siblings is the plugin layout the template loads).
+// A %-template handed to a sink, filled by the directories of shown files: at least kForDottedTemplateMinFills SIBLINGS under one parent
+// (measured: unrelated base.py files in 2 directories fired on 13 of 16 django rows; sibling backends are the layout the template loads).
 inline void appendTemplateRows( const IngestResult& ing, std::span<const Reference* const> templates, const std::map<std::uint32_t, std::size_t>& shownFile,
                                 std::size_t shownCount, std::vector<Row>& rows )
 {
@@ -414,8 +415,8 @@ inline void appendTemplateRows( const IngestResult& ing, std::span<const Referen
             continue;
         }
         const auto [ pre, post ] = *parts;
-        std::set<std::uint32_t> fills;
-        std::size_t             firstShown = shownCount;
+        std::map<std::string, std::set<std::uint32_t>> fillsByParent;   // the plugin layout: sibling directories under one parent
+        std::map<std::uint32_t, std::size_t>           firstShownOf;
         for( const auto& [ fileId, at ] : shownFile )
         {
             const std::string_view rel = rootRelPath( ing, fileId );
@@ -431,14 +432,24 @@ inline void appendTemplateRows( const IngestResult& ing, std::span<const Referen
             }
             bool                inTree = false;
             const std::uint32_t f      = epModuleFile( ing, {}, dirMod + std::string( post ), inTree );
-            if( f != kNoFile && fills.insert( f ).second )
+            if( f != kNoFile )
             {
-                firstShown = std::min( firstShown, at );
+                const std::size_t up = dirMod.rfind( '.' );
+                fillsByParent[ up == std::string::npos ? std::string() : dirMod.substr( 0, up ) ].insert( f );
+                const auto [ it, isNew ] = firstShownOf.try_emplace( f, at );
+                it->second = isNew ? at : std::min( it->second, at );
             }
         }
-        if( fills.size() < kForDottedTemplateMinFills )
+        const auto widest = std::ranges::max_element( fillsByParent, {}, []( const auto& kv ) { return kv.second.size(); } );
+        if( widest == fillsByParent.end() || widest->second.size() < kForDottedTemplateMinFills )
         {
             continue;
+        }
+        const std::set<std::uint32_t>& fills      = widest->second;
+        std::size_t                    firstShown = shownCount;
+        for( const std::uint32_t f : fills )
+        {
+            firstShown = std::min( firstShown, firstShownOf.at( f ) );
         }
         Row row;
         row.rankClass = 2;
@@ -496,6 +507,10 @@ inline void attachLoaders( const IngestResult& ing, std::span<const Reference* c
                 }
             }
         }
+        if( row.loaders > kForDottedLoaderNamedMax )
+        {
+            row.loader = kNoNode;   // `name`, `path`: every loader spells it, so naming one would be a guess
+        }
         if( row.loader != kNoNode )
         {
             row.rankClass = row.targetDef != kNoNode ? 1 : 3;
@@ -542,10 +557,10 @@ inline void appendDsRow( std::string& x, const IngestResult& ing, const Row& row
         const Symbol& l = ing.symbols[ row.loader ];
         epdetail::appendAttr( x, "loader", displayName( l ), esc );
         epdetail::appendAttr( x, "lp", std::format( "{}:{}", rootRelPath( ing, l.fileId ), l.line ), esc );
-        if( row.loaders > 1 )
-        {
-            x += std::format( " loaders=\"{}\"", row.loaders );
-        }
+    }
+    if( row.loaders > 1 )
+    {
+        x += std::format( " loaders=\"{}\"", row.loaders );
     }
     x += "/>";
 }

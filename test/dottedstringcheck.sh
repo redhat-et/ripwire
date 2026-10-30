@@ -15,13 +15,14 @@
 #          an f-string, bytes, a concatenation: no row
 #   N2 [G] bare name: a string spelling another module's same name resolves to that module, never this shown row
 #   N3 [G] two owners of one method name: `mod.A.run` names A.run, not B.run   N4 [G] a sink's second argument
-#   N5 [G] a function whose word only STARTS with the constant, or a test function, is no loader   E5 [G] two definitions of the name
+#   N5 [G] a function whose word only STARTS with the constant, or a test function, is no loader   N6 [G] over 3 loaders: none named   E5 [G] two definitions of the name
 #   T1 [P] a site in a test path is counted (tests=), never a row; test-only keeps s= next=
 #   C1 [P] the cap: 4 sites show 3, rows_capped="1" next="--grep=…" (a target's non-test sites first)
-#   F1 [P] a %-template filled by two shown directories: tmpl= cand= cands=2 sink=      F2 [G] filled by one: no row   F3/F4 [G] second argument, test path: no row
+#   F1 [P] a %-template filled by three sibling shown directories: tmpl= cand= cands=3 sink=      F2 [G] filled by one, or by three directories under different parents: no row   F3/F4 [G] second argument, test path: no row
 #   R1 [G] --json, --token-budget, RIPWIRE_NO_DOTTED_STRINGS=1: no element   R2 [G] the answer minus the element == the OFF answer byte for byte
 #   R3 [G] other languages: a JS file with the same shapes records no fact: no element
 #   V1 [P] --callers carries it, the caller rows byte-identical to OFF   V2 [G] callees carries none
+#   G1 [P] on the first cut of this lane, [G] since: a fact's fields are no name evidence (graph.h file evidence)
 #   X1 [G] determinism   X2 [G] xmllint well-formed when present   X3 [G] no "--" inside the legend comment
 #
 # Usage:  bash test/dottedstringcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/dottedstringcheck.sh
@@ -277,6 +278,27 @@ run "$N5" "$TMP/n5o" '--for=thing'
 has "$TMP/n5o" 's="pkg.mod.thing" tn="thing"' "N5 the string prints"
 if dsrows "$TMP/n5o" | grep -qF 'loader='; then no "N5 a longer word or a test function is no loader"; else ok "N5 a longer word or a test function is no loader"; fi
 
+N6="$TMP/n6"
+fx "$N6/pkg/__init__.py" <<'P'
+P
+fx "$N6/pkg/mod.py" <<'P'
+def thing():
+    return 1
+P
+fx "$N6/pkg/conf.py" <<'P'
+class Conf:
+    name = "pkg.mod.thing"
+P
+for i in 1 2 3 4; do fx "$N6/pkg/load$i.py" <<'P'
+from importlib import import_module
+def load(name):
+    return import_module(name)
+P
+done
+run "$N6" "$TMP/n6o" '--for=thing'
+has "$TMP/n6o" 'in="Conf.name" loaders="4"' "N6 a constant every loader spells: the count"
+if dsrows "$TMP/n6o" | grep -qF ' loader='; then no "N6 and no named loader"; else ok "N6 and no named loader"; fi
+
 # ── T / C: test paths, the cap ────────────────────────────────────────────────────────────────────────────────────────────────
 T="$TMP/t"
 fx "$T/pkg/__init__.py" <<'P'
@@ -323,7 +345,7 @@ from importlib import import_module
 def load_backend(name):
     return import_module("%s.base" % name)
 P
-for b in one two; do
+for b in one two three; do
 fx "$F/pkg/$b/__init__.py" <<'P'
 P
 fx "$F/pkg/$b/base.py" <<'P'
@@ -337,7 +359,7 @@ class Ops:
 P
 done
 run "$F" "$TMP/f1" '--for=quote_it'
-has "$TMP/f1" 'tmpl="%s.base" cand="pkg/one/base.py,pkg/two/base.py" cands="2" p="pkg/utils.py" l="3" in="load_backend" sink="import_module"' "F1 template with two fills"
+has "$TMP/f1" 'tmpl="%s.base" cand="pkg/one/base.py,pkg/three/base.py,pkg/two/base.py" cands="3" p="pkg/utils.py" l="3" in="load_backend" sink="import_module"' "F1 template with three sibling fills"
 F2="$TMP/f2"
 fx "$F2/pkg/__init__.py" <<'P'
 P
@@ -358,6 +380,22 @@ def quote_it():
 P
 run "$F2" "$TMP/f2o" '--for=quote_it'
 hasnt "$TMP/f2o" 'tmpl=' "F2 one directory fills it: no row"
+F5="$TMP/f5"
+cp -R "$F2" "$F5"
+for b in x/a y/b z/c; do
+fx "$F5/pkg/$b/__init__.py" <<'P'
+P
+fx "$F5/pkg/$b/base.py" <<'P'
+class W:
+    pass
+P
+fx "$F5/pkg/$b/ops.py" <<'P'
+def quote_it():
+    return 1
+P
+done
+run "$F5" "$TMP/f5o" '--for=quote_it'
+hasnt "$TMP/f5o" 'tmpl=' "F2 three directories under different parents: no row"
 
 F3="$TMP/f3"
 cp -R "$F" "$F3"
@@ -409,6 +447,22 @@ PY
 then ok "V1 the caller answer is otherwise byte-identical"; else no "V1 the element moved caller bytes"; fi
 run "$K" "$TMP/v2" '--callees=csrfproc'
 hasnt "$TMP/v2" 'dotted_strings' "V2 --callees carries none"
+
+# ── G: a fact is no name evidence: its qualifier "D" must not read as this file naming class D (cpython: sys.path.insert bound by name) ──
+G="$TMP/g"
+fx "$G/other.py" <<'P'
+class D:
+    def insert(self, a, b):
+        return a
+P
+fx "$G/runner.py" <<'P'
+import sys
+def go(x):
+    sys.path.insert(0, x)
+    return __import__(x)
+P
+run "$G" "$TMP/g1" '--callees=go'
+hasnt "$TMP/g1" 'n="D.insert"' "G1 a dotted-string fact is no evidence for class D's insert"
 
 # ── X ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 run "$K" "$TMP/k1b" '--for=csrfproc'
