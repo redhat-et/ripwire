@@ -473,6 +473,12 @@ printf 'from dispatch import Plain as Signal\n\nK = Signal()\n\ndef a1(): pass\n
 run f1b "$TMP/f1b" -- --for="which receivers are connected to K"
 if out=$( chk nokey "$TMP/f1b.xml" K ); then ok "F1b 'from dispatch import Plain as Signal': Plain's connect stores nothing, no row and no false by="; else no "F1b $out"; fi
 
+mk f1c
+printf 'from dispatch import Signal\n\nK = Signal()\n' > "$TMP/f1c/other.py"
+printf 'import other as K\n\ndef a1(): pass\ndef a2(): pass\n\nK.connect(a1)\nK.connect(a2)\n' > "$TMP/f1c/use.py"
+run f1c "$TMP/f1c" -- --for="which receivers are connected to K"
+if out=$( chk nokey "$TMP/f1c.xml" K ); then ok "F1c 'import other as K' binds the module: K.connect( a1 ) is not other.K's registration"; else no "F1c $out"; fi
+
 # F2 [P]: a value is never paired with another object's provide, whatever the other object's value looks like (a literal, an arrow, none)
 mkdir -p "$TMP/f2"
 printf "export class InjectionToken<T> { constructor(public desc: string) {} }\n" > "$TMP/f2/it.ts"
