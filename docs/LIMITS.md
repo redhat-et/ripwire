@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 305 | 118 | 187 | **118** |
+| 306 | 118 | 188 | **118** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 305 + 7 is the 312 constants this generator parses out of `src/`.
+are not counted as caps, and 306 + 7 is the 313 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 305 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 163 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 306 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 164 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -102,7 +102,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 118 files that declare a cap — the 305 caps counted above, and no parameter.
+One table for each of the 118 files that declare a cap — the 306 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -663,6 +663,7 @@ Discloses: `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kScanCap` | `4096` | — | — |
 | `kVrMaxDepth` | `512` | INDEXING | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h) |
 | `kVrTextCap` | `96` | — | a written slot / callee longer than this is cut with "…" |
 
