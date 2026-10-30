@@ -3417,6 +3417,54 @@ inline void pushPythonCondDefMark( TSNode n, std::string_view name, std::uint32_
     }
 }
 
+// A Python lambda parameter or comprehension target is local to that lambda / comprehension: filed as a VarDecl `~name`
+// (kPythonLocalScopePrefix) whose span is the lambda / comprehension (src/regindex.h reads it as "name is another variable here").
+inline void pushPythonLocalScopeDecl( TSNode id, TSNode scope, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( !ts_node_is_null( id ) && kindIs( ts_node_type( id ), "identifier" ) )
+    {
+        pushRawBind( fileId, lang, std::string{ kPythonLocalScopePrefix }.append( nodeTextOf( id, src ) ), std::string{},
+                     BindSite{ ts_node_start_byte( scope ), ts_node_start_byte( scope ), ts_node_end_byte( scope ) }, LocalBindKind::VarDecl, binds );
+    }
+}
+
+inline void capturePythonLocalScopeDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( kindIs( t, "for_in_clause" ) )
+    {
+        std::vector<TSNode> targets;
+        collectPythonNameTargets( fieldChild( n, NodeField::Left ), targets );
+        for( const TSNode& id : targets )
+        {
+            pushPythonLocalScopeDecl( id, ts_node_parent( n ), fileId, lang, src, binds );
+        }
+        return;
+    }
+    if( !kindIs( t, "lambda" ) )
+    {
+        return;
+    }
+    const TSNode        params = fieldChild( n, NodeField::Parameters );
+    const std::uint32_t cc     = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params );
+    for( std::uint32_t i = 0; i < cc; ++i )
+    {
+        const TSNode p  = ts_node_named_child( params, i );
+        const char*  pt = ts_node_type( p );
+        if( kindIs( pt, "default_parameter" ) )
+        {
+            pushPythonLocalScopeDecl( fieldChild( p, NodeField::Name ), n, fileId, lang, src, binds );
+        }
+        else if( kindIs( pt, "list_splat_pattern" ) || kindIs( pt, "dictionary_splat_pattern" ) )
+        {
+            pushPythonLocalScopeDecl( ts_node_named_child( p, 0 ), n, fileId, lang, src, binds );
+        }
+        else
+        {
+            pushPythonLocalScopeDecl( p, n, fileId, lang, src, binds );
+        }
+    }
+}
+
 inline void capturePythonRebindShadowDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
 {
     std::vector<TSNode> targets;   // reused scratch, cleared before each shape below
@@ -3445,47 +3493,6 @@ inline void capturePythonRebindShadowDecls( TSNode n, const char* t, std::uint32
         targets.clear();
         collectPythonNameTargets( fieldChild( n, NodeField::Left ), targets );
         emitAll( n, ts_node_start_byte( n ) );
-        return;
-    }
-    if( kindIs( t, "for_in_clause" ) )   // a comprehension target: local to the comprehension, filed as `~name` (kPythonLocalScopePrefix)
-    {
-        targets.clear();
-        collectPythonNameTargets( fieldChild( n, NodeField::Left ), targets );
-        for( const TSNode& id : targets )
-        {
-            const TSNode scope = ts_node_parent( n );   // the comprehension the clause belongs to: the span the target is local to
-            pushRawBind( fileId, lang, std::string{ kPythonLocalScopePrefix }.append( nodeTextOf( id, src ) ), std::string{},
-                         BindSite{ ts_node_start_byte( n ), ts_node_start_byte( scope ), ts_node_end_byte( scope ) }, LocalBindKind::VarDecl, binds );
-        }
-        return;
-    }
-    if( kindIs( t, "lambda" ) )   // a lambda parameter, filed as `~name`
-    {
-        const TSNode params = fieldChild( n, NodeField::Parameters );
-        const std::uint32_t cc = ts_node_is_null( params ) ? 0u : ts_node_named_child_count( params );
-        for( std::uint32_t i = 0; i < cc; ++i )
-        {
-            const TSNode p  = ts_node_named_child( params, i );
-            const char*  pt = ts_node_type( p );
-            TSNode       ident{};
-            if( kindIs( pt, "identifier" ) )
-            {
-                ident = p;
-            }
-            else if( kindIs( pt, "default_parameter" ) )
-            {
-                ident = fieldChild( p, NodeField::Name );
-            }
-            else if( kindIs( pt, "list_splat_pattern" ) || kindIs( pt, "dictionary_splat_pattern" ) )
-            {
-                ident = ts_node_named_child( p, 0 );
-            }
-            if( !ts_node_is_null( ident ) && kindIs( ts_node_type( ident ), "identifier" ) )
-            {
-                pushRawBind( fileId, lang, std::string{ kPythonLocalScopePrefix }.append( nodeTextOf( ident, src ) ), std::string{},
-                             BindSite{ ts_node_start_byte( n ), ts_node_start_byte( n ), ts_node_end_byte( n ) }, LocalBindKind::VarDecl, binds );
-            }
-        }
         return;
     }
     if( kindIs( t, "named_expression" ) )   // walrus `(tm := …)` — the grammar allows only a bare name here
@@ -3592,6 +3599,7 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
             capturePythonParamShadowDecls( n, fileId, lang, src, binds );   // Phase 4b: veto evidence only (empty span)
         }
         capturePythonRebindShadowDecls( n, t, fileId, lang, src, binds );   // issue #287 round 2: rebind veto evidence
+        capturePythonLocalScopeDecls( n, t, fileId, lang, src, binds );   // lambda parameters / comprehension targets (`~name`)
         capturePythonPatternDecls( n, fileId, src, binds );        // ind4b fix 4: match captures and `type` statements
         capturePythonTypeParamDecls( n, fileId, src, binds );   // ind4b fix 5: PEP 695 type parameters
         return;
