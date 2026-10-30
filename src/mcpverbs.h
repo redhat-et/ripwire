@@ -2923,10 +2923,10 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         }
     }
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
-    // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; not under a budget, as there
-    if( budgetTokens == 0 && out.ends_with( "</ctx>" ) )
+    // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
+    if( out.ends_with( "</ctx>" ) )
     {
-        out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task ) );
+        out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
     }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)

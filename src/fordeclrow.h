@@ -10,8 +10,11 @@
 // WHEN (present-only). Either arm, and the subject must have a non-test declaration row that is a function or method in C, C++ or Go:
 //   - TASK WORD: outside code spans the task says signature / prototype / new|extra|additional [required] argument|parameter;
 //     the subject is the first code span or identifier-shaped word that resolves to such a row.
-//   - BARE SUBJECT: the whole task is one symbol spelling (`--for=server_start`), and its pick is provably unique. A symbol
-//     alone has no task word to read; a name that binds several definitions stays silent here.
+//   - BARE SUBJECT: the whole task is one symbol spelling (`--for=server_start`), and that WHOLE spelling resolves to a function
+//     whose pick is provably unique. A symbol alone has no task word to read; a name that binds several definitions stays silent
+//     here, and a qualifier that does not resolve (`api.c`, `Nope::f`) is no function: it never falls to its last segment.
+//   - A name with a macro definition is not a function here (`PyAPI_FUNC(int) f(int)` names f, not the macro).
+//   - A token budget holds the block: <decl_rows held="budget" next=...> names the call, as the sibling graph_verb block does.
 // The block reads what the index holds: no new analysis, and the ordinary answer before it is unchanged. A name that has no
 // declaration prints nothing: a definition row alone would repeat the answer. --defs folds a tied prototype into its definition's
 // row; this block unfolds it, because that prototype is the row asked for.
@@ -88,10 +91,14 @@ inline bool forDeclTaskWord( std::string_view task )
     return false;
 }
 
+inline bool forIsSymbolChar( char c ) noexcept
+{
+    return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == ':' || c == '.' || c == '~' || c == '#';
+}
+
 inline bool forIsSymbolSpelling( std::string_view s ) noexcept
 {
-    return !s.empty() && std::ranges::all_of( s, [ ]( char c )
-                                              { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == ':' || c == '.' || c == '~' || c == '#'; } );
+    return !s.empty() && std::ranges::all_of( s, forIsSymbolChar );
 }
 
 // A prose word that can only be a code name: an underscore, a scope, or a capital after its first letter.
@@ -99,6 +106,44 @@ inline bool forIsIdentShaped( std::string_view s ) noexcept
 {
     return s.find( '_' ) != std::string_view::npos || s.find( "::" ) != std::string_view::npos
         || std::ranges::any_of( s.substr( s.empty() ? 0 : 1 ), [ ]( char c ) { return std::isupper( static_cast<unsigned char>( c ) ) != 0; } );
+}
+
+// The callee a code span names: the identifier just before its LAST top-level `(`, so a macro wrapper or a return type is not it
+// (`PyAPI_FUNC(int) PyObject_Print(PyObject *, FILE *, int)` -> PyObject_Print, `int server_start(struct tmuxproc *)` ->
+// server_start). A span with no top-level `(` is returned whole.
+inline std::string_view forSpanCallee( std::string_view span ) noexcept
+{
+    span = trimWs( span );
+    std::size_t last = std::string_view::npos;
+    int         depth = 0;
+    for( std::size_t i = 0; i < span.size(); ++i )
+    {
+        if( span[i] == '(' )
+        {
+            last = depth == 0 ? i : last;
+            ++depth;
+        }
+        else if( span[i] == ')' && depth > 0 )
+        {
+            --depth;
+        }
+    }
+    if( last == std::string_view::npos )
+    {
+        return span;
+    }
+    std::string_view head = trimWs( span.substr( 0, last ) );
+    std::size_t      b    = head.size();
+    while( b > 0 && forIsSymbolChar( head[ b - 1 ] ) )
+    {
+        --b;
+    }
+    head = head.substr( b );
+    while( !head.empty() && ( head.front() == ':' || head.front() == '.' ) )
+    {
+        head.remove_prefix( 1 );
+    }
+    return head;
 }
 
 // `Foo::bar(int)` -> Foo::bar, then bar: the qualified spelling first, then its last segment.
@@ -128,7 +173,7 @@ inline std::vector<std::string> forDeclSubjects( std::string_view task )
         {
             break;
         }
-        appendForSymbolSpellings( out, task.substr( open + 1, close - open - 1 ) );
+        appendForSymbolSpellings( out, forSpanCallee( task.substr( open + 1, close - open - 1 ) ) );
         open = close;
     }
     const std::string masked = forTaskMaskCodeSpans( task );
@@ -205,8 +250,30 @@ inline std::string forDeclFoldedRowXml( const IngestResult& ing, const MemberOwn
     return out + std::string( " lang=\"" ) + langTag( s.lang ) + "\" class=\"source\" decl_only=\"1\"/>";
 }
 
-inline std::string forDeclRowsXml( const IngestResult& ing, const DefLookup& L, std::string_view spell )
+// A function the task could mean is a function row, never a macro: `PyAPI_FUNC(int) f(int);` is filed under the macro's name too, and
+// the macro's own prototype rows are not a prototype of anything the task asks about.
+inline bool forDeclNameIsMacro( const IngestResult& ing, const DefLookup& L ) noexcept
 {
+    return std::ranges::any_of( L.matches, [ & ]( NodeId n ) { return ing.symbols[n].kind == SymKind::Macro; } );
+}
+
+// The rows of one subject: how many separate functions they are (the candidate groups: a definition with its declarations is one, an
+// untied prototype is none), counted for a function or method row the block keeps.
+inline std::size_t forDeclFunctionCount( const IngestResult& ing, const DefLookup& L )
+{
+    return std::size_t( std::ranges::count_if( L.rows, [ & ]( const DefRow& r ) { return forDeclRowCounts( ing, r ) && L.groups.untied[ r.group ] == 0; } ) );
+}
+
+inline std::string forDeclRowsXml( const IngestResult& ing, const DefLookup& L, std::string_view spell, bool held )
+{
+    std::vector<char> esc;
+    const std::string next = nextAttrXml( nextFlag( "--defs=", spell ) );
+    if( held )   // a token budget is a request the block must obey: the rows are not printed, the tag names the call that prints them
+    {
+        return "<!-- ripwire for decl_rows: held=\"budget\": a token budget is set, so the declaration rows of of= are not printed here; "
+               "next= is the call that lists them; the answer above is unchanged -->"
+               "<decl_rows of=\"" + std::string( escapeXml( spell, esc ) ) + "\" held=\"budget\"" + next + "/>";
+    }
     const MemberOwners owners( ing );
     std::string        rows;
     std::size_t        total = 0, shown = 0;
@@ -225,34 +292,56 @@ inline std::string forDeclRowsXml( const IngestResult& ing, const DefLookup& L, 
         {
             continue;
         }
-        counted( [ & ] { defRowXml( rows, ing, L, r, owners, /*compact=*/false ); } );
+        counted( [ & ]
+                 {
+                     DefRow row = r;
+                     if( row.sel.empty() )   // past lookupDefs's proof window: the same unproven spelling it falls back to, never an empty sel=
+                     {
+                         const Symbol& s = ing.symbols[ r.rep ];
+                         row.sel         = std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::string( qualifiedMemberName( owners, s ) );
+                     }
+                     std::string one;
+                     defRowXml( one, ing, L, row, owners, /*compact=*/false );
+                     if( L.groups.untied[ r.group ] != 0 )   // a prototype the index cannot tie to a definition: it may declare another function
+                     {
+                         one.insert( one.size() - 2, " untied=\"1\"" );
+                     }
+                     rows += one;
+                 } );
         for( const NodeId n : forDeclFoldedPrototypes( ing, L, r ) )
         {
             counted( [ & ] { rows += forDeclFoldedRowXml( ing, owners, n ); } );
         }
     }
-    std::vector<char> esc;
-    std::string       out = "<!-- ripwire for decl_rows: the task is about the signature of of= (matched by name), so every definition and "
-                            "declaration of it follows: a change to its signature must reach each row. <d> p=file:line, "
-                            "sel= the spelling that picks this row alone (absent on a prototype of the row before it), sel_proven=\"0\": no spelling was proven to, lang=, class=, "
-                            "in= graph callers (a floor), decl_only=\"1\": no body, a header prototype or interface contract; rows= counts them, shown= and next= only when the list is cut; "
-                            "a call site is not listed here; the answer above is unchanged, and these bytes are not in est_tokens -->";
+    const std::size_t functions = forDeclFunctionCount( ing, L );
+    std::string       out = "<!-- ripwire for decl_rows: of= (matched by name) may change its signature; its non-test definition and declaration rows in the index follow, "
+                            "so a change reaches them in step. <d> n= name, t= kind, p=file:line, sel= the spelling that picks this row alone (absent on a decl_only row "
+                            "that follows the definition it declares; a decl_only row with sel= declares none of them), sel_proven=\"0\": no spelling was proven to, lang=, "
+                            "class=, in= graph callers (a floor), decl_only=\"1\": no body (a header prototype, forward declaration or interface contract), untied=\"1\": "
+                            "its link to a definition is unproven (it may be another function). rows= counts them; functions=N only when of= names N separate functions (a static "
+                            "elsewhere, an overload, another scope): a change reaches its own definition row and the decl_only rows right after it, not another "
+                            "function's; shown=, capped=\"1\" and next= only when the list is cut (next= lists definitions, prototypes folded in). Call sites, and the implementations "
+                            "of a contract (lego), are not listed; the answer above is unchanged, and these bytes are not in est_tokens -->";
     out += "<decl_rows of=\"" + std::string( escapeXml( spell, esc ) ) + "\" rows=\"" + std::to_string( total ) + "\"";
+    if( functions > 1 )
+    {
+        out += " functions=\"" + std::to_string( functions ) + "\"";
+    }
     if( shown < total )
     {
-        out += " shown=\"" + std::to_string( shown ) + "\"" + nextAttrXml( nextFlag( "--defs=", spell ) );
+        out += " shown=\"" + std::to_string( shown ) + "\" capped=\"1\"" + next;
     }
     return out + ">" + rows + "</decl_rows>";
 }
 
-// The <decl_rows> block of this task, or "" (see WHEN above).
-inline std::string renderForDeclRows( const IngestResult& ing, const Graph& g, std::string_view task )
+// The <decl_rows> block of this task, or "" (see WHEN above). `held`: a token budget is set; the block that would have fired is named, not printed.
+inline std::string renderForDeclRows( const IngestResult& ing, const Graph& g, std::string_view task, bool held = false )
 {
     const std::string_view   bare = forBareSymbolTask( task );
     std::vector<std::string> subjects;
     if( !bare.empty() )
     {
-        appendForSymbolSpellings( subjects, bare );
+        subjects.emplace_back( bare );   // the whole spelling only: `api.c` is a file, `Nope::f` names no function, neither is its last segment
     }
     else if( forDeclTaskWord( task ) )
     {
@@ -261,12 +350,12 @@ inline std::string renderForDeclRows( const IngestResult& ing, const Graph& g, s
     for( std::size_t i = 0; i < subjects.size() && i < kForDeclSubjectTries; ++i )
     {
         const DefLookup L = lookupDefs( ing, g, subjects[i] );
-        if( std::ranges::none_of( L.rows, [ & ]( const DefRow& r ) { return forDeclRowCounts( ing, r ); } ) )
+        if( forDeclNameIsMacro( ing, L ) || std::ranges::none_of( L.rows, [ & ]( const DefRow& r ) { return forDeclRowCounts( ing, r ); } ) )
         {
-            continue;   // not a function here (a qualifier, a word): the next spelling
+            continue;   // not a function here (a macro, a qualifier, a word): the next spelling
         }
         const bool fires = forDeclHasDeclRow( ing, L ) && ( bare.empty() || defPickProvablyUnique( L ) );
-        return fires ? forDeclRowsXml( ing, L, subjects[i] ) : std::string();   // the first function named is the subject: a later name is not it
+        return fires ? forDeclRowsXml( ing, L, subjects[i], held ) : std::string();   // the first function named is the subject: a later name is not it
     }
     return {};
 }

@@ -2708,16 +2708,16 @@ std::optional<int> runCallHierarchy( const MainDispatch& d );
 std::optional<int> runConnect( const MainDispatch& d );
 
 // DECL-ROW (src/fordeclrow.h): the task-read row blocks, just before </ctx> and outside every charge above: an element with its own
-// byte allowance, so no auto-served body pays for it. XML only, and not under a token budget (the budget is a request the block
-// must obey): "" on every task they do not read as theirs, so the answer is byte-identical.
+// byte allowance, so no auto-served body pays for it. XML only; under a token budget the block is named, not printed
+// (held="budget", next= the call that lists the rows): "" on every task they do not read as theirs, so the answer is byte-identical.
 inline void appendForTaskRowBlocks( const MainDispatch& d )
 {
     const rw::Config& cfg = d.cfg;
-    if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot || cfg.tokenBudget > 0 )
+    if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
     {
         return;
     }
-    rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask ).c_str() );
+    rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0 ).c_str() );
 }
 
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
