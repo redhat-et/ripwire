@@ -5073,7 +5073,16 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // newest prefix of the window) as if it were the window, and the key cannot tell that blob from a real read. K51 never
 // stores one, but a blob already on disk would keep serving its silent zero or prefix, with no history_unread=, until HEAD
 // moved. The bump makes every pre-K51 blob a clean miss; the cost is one cold walk per repository.
-constexpr std::uint32_t kQChurnCacheScheme = 3;
+// SCHEME 4 (2026-10-23, the git-porcelain-framing lane): the walk's READER was rebuilt — the line-framed
+// `__C__` marker parse became one NUL-framed reader with a whole-field sentinel and one field of lookahead
+// (test/gitframingcheck.sh). On a repository whose committed paths spell the marker bytes, carry a
+// newline, or sort after a path that does, the OLD reader's stream was corrupted (forged commit headers,
+// swallowed paths), so a blob written by a pre-lane binary would keep serving that corrupted stream to a
+// fixed one until HEAD moved — the same wrong-answer-from-cache as scheme 2, one layer down: there the
+// COMMAND changed under an unchanged key, here the PARSE did. Neither is visible to the key, which is why
+// this bump is manual. On ordinary trees the two readers' streams are byte-identical (the lane's golden
+// arm over owners/hotspots/cochange), so the bump costs those repos one cold walk and changes no answer.
+constexpr std::uint32_t kQChurnCacheScheme = 4;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )
