@@ -470,16 +470,8 @@ inline void appendTemplateRows( const IngestResult& ing, std::span<const Referen
 // Is `token` one of the space-separated flow tokens in `flow` (model.h kDottedFlowAttr / kDottedFlowBound)?
 inline bool flowHasToken( std::string_view flow, std::string_view token )
 {
-    for( std::size_t at = 0; at < flow.size(); )
-    {
-        const std::size_t end = std::min( flow.find( ' ', at ), flow.size() );
-        if( flow.substr( at, end - at ) == token )
-        {
-            return true;
-        }
-        at = end + 1;
-    }
-    return false;
+    const std::string padded = " " + std::string( flow ) + " ";
+    return padded.find( " " + std::string( token ) + " " ) != std::string::npos;
 }
 
 // Does the sink function's flow (a "v" fact's tokens) reach the constant `row.site` assigns? The flow is the AST-true set of names

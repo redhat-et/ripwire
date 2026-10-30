@@ -3342,7 +3342,11 @@ private:
     std::string_view importSinkOf( TSNode call ) const noexcept
     {
         const std::string_view tail = calleeTailOf( call );
-        return std::ranges::find( m_importSinks, tail ) != m_importSinks.end() ? tail : std::string_view();
+        if( std::ranges::find( m_importSinks, tail ) == m_importSinks.end() )
+        {
+            return {};
+        }
+        return tail;
     }
     void noteDottedFact( TSNode at, std::string_view value, std::string_view shape, std::string_view sink, std::string_view assignedTo )
     {

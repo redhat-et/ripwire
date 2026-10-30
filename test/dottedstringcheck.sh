@@ -546,12 +546,13 @@ has "$TMP/sda" 'test="1"' "S-F1 the double stays counted as a test double with t
 hasnt "$TMP/sdb" 'test="1"' "S-F1 a type D named by nothing is not turned into a test double by a Python string in a test"
 has "$TMP/sdc" 'D::Fetch' "S-F1t a type D that production really names is still listed beside the Python strings"
 RIPWIRE_NO_DOTTED_STRINGS=1 run "$SD/a" "$TMP/sdaoff" '--for=Loader::Load src_->Fetch'
-python3 - "$TMP/sda" "$TMP/sdaoff" <<'PY' && ok "S-F1 the answer needs no RIPWIRE_NO_DOTTED_STRINGS: it equals the OFF answer apart from the element" || no "S-F1 the Python string moved the C++ dispatch answer"
+python3 - "$TMP/sda" "$TMP/sdaoff" <<'PY'
 import re,sys
 a=open(sys.argv[1],encoding="utf-8").read(); b=open(sys.argv[2],encoding="utf-8").read()
 n=lambda t: re.sub(r'(<!-- ripwire for dotted_strings:.*?-->)?<dotted_strings .*?</dotted_strings>','',re.sub(r' (at|est_tokens)="[^"]*"','',t),flags=re.S)
 sys.exit(0 if n(a)==n(b) else 1)
 PY
+if [ $? = 0 ]; then ok "S-F1 the answer needs no RIPWIRE_NO_DOTTED_STRINGS: it equals the OFF answer apart from the element"; else no "S-F1 the Python string moved the C++ dispatch answer"; fi
 
 B2="$TMP/b2"
 fx "$B2/core/__init__.py" <<'P'
@@ -584,6 +585,7 @@ def seven(): return 7
 def eight(): return 8
 def nine(): return 9
 def ten(): return 10
+def eleven(): return 11
 P
 fx "$B2/p/consts.py" <<'P'
 from importlib import import_module
@@ -618,16 +620,25 @@ class Holder:
     ATTR = ["p.t.nine"]
 def via_attr(h):
     return import_module(h.NINE)
+class Holder2:
+    SEL = ["p.t.eleven"]
+def bare_sel():
+    return import_module(SEL)
+P
+fx "$B2/p/other.py" <<'P'
+from importlib import import_module
+def load_other():
+    return [import_module(q) for q in PLUGS]
 P
 fx "$B2/p/locals.py" <<'P'
 from importlib import import_module
 def build():
     loaders = ["p.t.six"]
     return find(loaders)
-def find(loader):
-    if not loader:
+def find(loaders):
+    if not loaders:
         raise ValueError("Invalid value in loaders configuration")
-    return import_module(loader)
+    return import_module(loaders)
 def own():
     paths = ["p.t.seven"]
     for p in paths:
@@ -647,13 +658,15 @@ for n in one two three four five; do hasnt "$TMP/b2$n" 'loader=' "S-B2 --callers
 hasnt "$TMP/b2six" 'loader="find"' "S-B2 a function-local constant is joined by no other function (a word in an error string)"
 run "$B2" "$TMP/b2seven" '--callers=seven'; has "$TMP/b2seven" 'loader="own"' "S-B2t a function-local constant joins the loop in its own function"
 run "$B2" "$TMP/b2ten" '--callers=ten'; has "$TMP/b2ten" 'loader="load_all"' "S-B2t a bare name imported with from-import joins the sink it reaches through a comprehension"
+if dsrows "$TMP/b2ten" | grep -qF 'loaders='; then no "S-B2 a function that spells PLUGS without importing it from the constant's module is a second loader"; else ok "S-B2 a function that spells PLUGS without importing it from the constant's module is no second loader"; fi
 run "$B2" "$TMP/b2eight" '--callers=eight'; has "$TMP/b2eight" 'loader="reaches"' "S-B2t a same-file constant reaching a sink through a for target keeps its loader"
+run "$B2" "$TMP/b2eleven" '--callers=eleven'; hasnt "$TMP/b2eleven" 'loader=' "S-B2 a class-level constant is reached by no bare name (only .NAME)"
 run "$B2" "$TMP/b2hook" '--callers=hook'; hasnt "$TMP/b2hook" 'loader="resolve"' "S-B2 a parameter of the same spelling in a file that never imports the constant is no loader"
 run "$B2" "$TMP/b2nine" '--callers=nine'; has "$TMP/b2nine" 'loader="via_attr"' "S-B2t an attribute NINE reaching a sink joins any constant of that name"
 
 # S-B3: every attribute the default --callers element prints is defined in that answer
 run "$B2" "$TMP/b3" '--callers=ten'
-python3 - "$TMP/b3" <<'PY' && ok "S-B3 --callers defines every dotted_strings/ds attribute it prints in its own legend" || no "S-B3 --callers prints an attribute with no legend clause"
+python3 - "$TMP/b3" <<'PY'
 import re,sys
 t=open(sys.argv[1],encoding="utf-8").read()
 body=re.search(r'<dotted_strings sites="\d+".*?</dotted_strings>',t,re.S)
@@ -666,6 +679,7 @@ for tag in re.findall(r'<(dotted_strings|ds) ([^>]*)>',body.group(0)):
 print("undefined:",sorted(set(bad)))
 sys.exit(0 if not bad else 1)
 PY
+if [ $? = 0 ]; then ok "S-B3 --callers defines every dotted_strings/ds attribute it prints in its own legend"; else no "S-B3 --callers prints an attribute with no legend clause"; fi
 
 B5="$TMP/b5"
 fx "$B5/index.py" <<'P'
