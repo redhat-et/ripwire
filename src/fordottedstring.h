@@ -62,7 +62,7 @@ inline constexpr std::string_view kForDottedStringsLegend =
     "loader= lp= a function naming that constant and calling an import sink (loaders= how many do, by name, a floor); tmpl= a %-template "
     "passed to a sink, cand= modules that directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
     "tests= sites in test paths, counted only; unresolved= external= strings ending in a shown name that resolve to no one definition, "
-    "or to no in-tree module; capped=1 next= the list was cut. -->";
+    "or to no in-tree module; rows_capped=1 next= the list was cut. -->";
 
 struct DottedTarget
 {
@@ -512,7 +512,7 @@ inline std::string renderDottedStrings( const IngestResult& ing, std::span<const
     }
     if( rows.size() > shownRows )
     {
-        x += " capped=\"1\"";
+        x += " rows_capped=\"1\"";
         attr( x, "next", std::format( "--grep={}", rows[shownRows].site->recvVar ), esc );
     }
     else if( rows.empty() )

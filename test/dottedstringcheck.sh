@@ -16,7 +16,7 @@
 #   N2 [G] bare name: a string spelling another module's same name resolves to that module, never this shown row
 #   N3 [G] two owners of one method name: `mod.A.run` names A.run, not B.run
 #   T1 [P] a site in a test path is counted (tests=), never a row; test-only keeps s= next=
-#   C1 [P] the cap: 4 sites show 3, capped="1" next="--grep=…" (a target's non-test sites first)
+#   C1 [P] the cap: 4 sites show 3, rows_capped="1" next="--grep=…" (a target's non-test sites first)
 #   F1 [P] a %-template filled by two shown directories: tmpl= cand= cands=2 sink=      F2 [G] filled by one: no row
 #   R1 [G] --json, --token-budget, RIPWIRE_NO_DOTTED_STRINGS=1: no element   R2 [G] the answer minus the element == the OFF answer byte for byte
 #   R3 [G] other languages: a JS file with the same shapes records no fact: no element
@@ -254,7 +254,7 @@ P
 done
 run "$C" "$TMP/c1" '--for=thing'
 has "$TMP/c1" 'sites="4" rows="3"' "C1 the cap counts"
-has "$TMP/c1" 'capped="1" next="--grep=pkg.mod.thing"' "C1 cap and next="
+has "$TMP/c1" 'rows_capped="1" next="--grep=pkg.mod.thing"' "C1 cap and next="
 if [ "$( dsrows "$TMP/c1" | wc -l | tr -d ' ' )" = 3 ]; then ok "C1 three rows"; else no "C1 row count"; fi
 
 # ── F: a %-template ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -353,7 +353,14 @@ RIPWIRE_NO_DOTTED_STRINGS=1 run "$C" "$TMP/c1off" '--for=thing'
 if minus "$TMP/c1" "$TMP/c1off"; then ok "X4 --for capped: minus the element == OFF"; else no "X4 --for capped element moved other bytes"; fi
 run "$C" "$TMP/c2" '--callers=thing'
 RIPWIRE_NO_DOTTED_STRINGS=1 run "$C" "$TMP/c2off" '--callers=thing'
-if minus "$TMP/c2" "$TMP/c2off"; then ok "X4 --callers capped: minus the element == OFF"; else no "X4 --callers capped element moved other bytes"; fi
+# the verb's legend layer documents a *_capped attribute it meets: that one present-only clause is the element's own
+python3 - "$TMP/c2" <<'PY'
+import sys
+p=sys.argv[1]; a=open(p,encoding="utf-8").read(); c=" rows_capped=: 1 = cut."
+sys.exit(0 if c in a and open(p,"w",encoding="utf-8").write(a.replace(c,"",1)) else 1)
+PY
+[ $? = 0 ] && ok "X4 --callers capped: the legend layer documents rows_capped=" || no "X4 --callers capped: rows_capped= clause missing"
+if minus "$TMP/c2" "$TMP/c2off"; then ok "X4 --callers capped: minus the element and its clause == OFF"; else no "X4 --callers capped element moved other bytes"; fi
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/k1" 2>/dev/null; then ok "X2 xmllint well-formed"; else no "X2 not well-formed"; fi
 else
