@@ -19,6 +19,1176 @@ Entries for the next release are files under [`changelog.d/`](changelog.d/README
 stays this one paragraph. At release, the step in CONTRIBUTING.md ("Cutting a release") folds the files in
 under the new version's heading.
 
+## [0.6.9] — 2026-10-29
+
+Twelve merged batches of reviewed changes (pull requests #424 to #463). What a user sees (each entry below states its own measurement and its floors):
+- Hedged or declined instead of confidently wrong: a call through an interface-, trait- or abstract-typed receiver names the implementors
+  that can run, with a floor stated when the list cannot be complete; a by-name hedge needs an import; hedged hops are never counted as
+  proven; a Rust `&dyn Trait` call, a JS/TS name written after its declaration and a Kotlin scope function (#438) no longer bind a
+  same-named method; `--dead-code` stops over-reporting (`static` outside C-family code, Django and unittest hooks, #437).
+- `--path` prints the bodies that hold its answer: the middle hop of a short path, the route an unreached path names, every reaching
+  definition pair and the other definitions of an endpoint; `--impact` counts who reaches a hedged caller.
+- New and changed verbs: `--defs=NAME[,NAME…]` answers which definitions a name binds, with the spelling that picks each one alone;
+  member rows print their owner (`n="Owner.name"`) on `--callers`, `--callees`, `--impact`, `--path` and signature rows, and
+  `Class.method`-style spellings resolve; `--situ` and `--test-gate` start from the changed symbols (#423).
+- Language specifics: Rust receivers typed by their written type; Python renamed imports, annotated fields, queue and message hand-offs;
+  functions stored in struct fields joined to the calls through them in Go, Rust and C / C++; JS/TS object-literal and private-member names.
+- More for a `--for` question: the callers chain of the narrow function an error-shaped question ranks, a thin wrapper followed, a
+  constructor's calls, a table initializer's functions, a shown owner's members, a function's callers, and a task spelled as a graph
+  question answered with that verb.
+- Contributors: `--uses` on a JS/TS literal receiver (#411); Windows `--quality-delta=A..B` and clang-cl PGO builds (#402, #410, #422);
+  one order for every multi-definition name answer (#432); the pattern screen refuses overlapping alternation (#397); a changelog
+  entry is one file under `changelog.d/`.
+- Upgrade: caches rebuild once (`kParserVer` 259, `kCacheVersion` 46); quality snapshots of the older scheme are not used (scheme 24).
+- Thanks: @lennix1337 (#402, #410, #411, #422), @llvm-x86 (#423, #437, #438), @mpapis (#432), @pt-act (#397) and @liziye627-design (#431);
+  reports that led to fixes: @hnipps (#228) and @s0undt3ch (#305).
+
+### Fixed — Kotlin scope functions no longer bind Java methods (#438, thanks @llvm-x86)
+
+A Kotlin call with a trailing lambda to `let`, `run`, `with`, `apply` or `also` now stays off the Java
+method of the same name. Before this change, `s.run { }` bound `Job.run`, and `with( sb ) { }` bound
+`Builder.with`. Ripwire now reads the call as the stdlib scope function. It drops the Java candidates and
+keeps the Kotlin ones. A call with no Kotlin target reports `external=` with that proof.
+
+Calls without a trailing lambda keep their edges. `j.run()` still binds `Job.run`, and `b.with( "x" )` still
+binds `Builder.with`.
+
+Known floors:
+
+- A parenthesised lambda, such as `s.let( { } )`, is not a trailing lambda. Its edge is unchanged.
+- A Java method called from Kotlin with a trailing lambda is dropped when its name is a scope-function name.
+  The spelling alone does not tell the two apart.
+- A receiver of a Java type is not checked. A receiver whose type is an in-tree Kotlin class that defines the method
+  keeps its own binding (`t.run { }` on a `t: Task` binds `Task.run`).
+- A qualified `kotlin.run { }` can still bind an in-tree Kotlin `run`, hedged.
+
+### Fixed — Django and unittest hooks no longer read as dead code (#437, thanks @llvm-x86; reported by @hnipps in #228)
+
+Before: `--quality-delta` reported a Python hook as dead when no call in the tree named it. unittest and Django call
+`setUp`, `tearDown`, `setUpClass` and `setUpTestData` themselves. The runner calls each `test*` method. A closure inside a
+method that called `self.hook()` also lost the call. Each such method appeared as dead code.
+
+Now: the tool treats these names as called. It covers `setUpModule`, `tearDownModule`, `load_tests`, `runTest`, `asyncSetUp` and `asyncTearDown` too. The pytest xunit hooks `setup_module`, `teardown_module`,
+`setup_function`, `teardown_function`, `setup_class`, `teardown_class`, `setup_method` and `teardown_method` count as called too. A `test*`
+method (any name that starts with `test`) and an xunit hook count as called only in a test module: a path `isTestPath` accepts, or a Django `tests.py`. A closure
+that calls `self.` or `cls.` keeps the overrides of the method it calls live. A closure that binds `self` or `cls` as its own
+parameter does not.
+
+The HEAD snapshot scheme moves from 22 to 24. Old cached snapshots are not used.
+
+Not covered, still reported: pytest's conftest hooks such as `pytest_configure`. (`@pytest.fixture` functions are not reported as dead code here.)
+
+The hook names live in one table per framework (`kUnittestHooks`, `kXunitHooks`, `kUnittestModuleHooks` in `quality.h`), shared with `--dead-code` and `--safe-delete`, which now also skip `setUpTestData` and `runTest` in a TestCase subclass.
+
+Limit: the name check ignores types and scope. A method named `setUp`, `tearDown` or `load_tests` in application code is also treated as called. In a test module, any def named `test*` counts as called, nested defs and helper functions included. The tool errs toward live here.
+
+A closure that binds `self` or `cls` as its own parameter does not count, even for `def cb(self=self)`.
+
+### Security — the pattern screen refuses overlapping alternation, one group deeper (#397, thanks @pt-act)
+
+A pattern whose group carries a top-level `|` under an unbounded outer quantifier could backtrack catastrophically
+on a subject it fails to match. The screen that guards every user-authored pattern surface (`--regex`,
+`--graph-query file()`, `--arch` path-rules, `#match?`/`#not-match?`) already refused every unbounded quantifier over
+a group containing a quantifier, but it passed a group whose branches merely *overlap* — the classic `(a|aa)+b$`, and
+the `(get|getResponse)+` shape that reads as innocent. It now refuses those too, and the refusal states what the
+screen actually knows: it **cannot PROVE the branches disjoint**. It does not claim the branches overlap, and it does
+not teach a factoring an already-disjoint alternation could not perform. The verdict also travels one group deeper:
+`((a|aa))+b$` and `(?:(?:a|aa))+b$` close their alternation under no quantifier of its own, but its quantified
+ancestor repeats it all the same, and the same refusal fires there.
+
+A first-character proof narrows the false-positive class (round 6): an alternation the whole-footprint proof cannot
+read is now **proven disjoint when every branch is an unquantified sequence of width-one atoms and the branches'
+first-character sets are pairwise disjoint** — at most one branch is viable at any position, so the repetition cannot
+multiply. The quoted-string matcher `"([^"\\]|\\.)*"`, a CRLF walker `(\r\n|\n)+`, and keyword pairs `(cat|dog)+` and
+`(foo|bar)+` are admitted where the shape was refused wholesale. `(a|aa)+` and `(get|getResponse)+` stay refused:
+their branches share a first character, which is exactly the split ambiguity no proof can break.
+
+**The per-file match budget this change carried in earlier rounds is gone** (PR #397 review). It counted engine
+line-match attempts per file, so it refused fast linear answers — `^9\d\d$` under `--no-prefilter`,
+`\d{4}-\d{2}-\d{2}` over a log — while bounding nothing new: one `std::regex` call is atomic to its caller, so a
+counter between calls cannot see the work inside one. A stopped `--regex` scan has ONE cause again — **the engine
+abandoning a match** — and its refusal is one sentence: the engine's own reason, the whole stopped count, the first
+(lowest-fileId) stopped file, and rewritten advice. The advice no longer suggests rewriting the pattern "so no two of
+its alternatives can match the same text": its own example of what to avoid, `(a|a)+`, is refused by the screen at
+admission now, so a reader reaching this message can no longer have written it — the reason sentence and the advice
+were both changed on purpose, not carried over.
+
+Honest patterns are untouched: the 17-pattern golden set is byte-identical on stdout, stderr and exit code, and the
+corpus sweep over 99,845 literals newly refuses 33 and newly admits 0 (round 1's rule). Round 6 re-ran the same
+instrument over the grown tree — 100,065 distinct literals, round-5 head against the round-6 screen: the only
+newly refused rows are this round's own two paren-bypass gate fixtures, and the 22 newly admitted rows are the
+disjoint-first shapes the first-character proof reads, every one of them verified to still terminate on a 4000-byte
+pathological line under `--no-prefilter` (`corpus-sweep-round6.txt` in the spec's evidence bundle).
+
+**A single pathological match remains unbounded on libstdc++, tracked by `regex-screen-multiquantifier` (follow-on
+spec).** The new rule targets a group with a top-level `|`; a pattern carrying several quantified atoms and no such
+group — `a*a*a*a*a*b`, `^(a)*(a)*(a)*(a)*(a)*$` — is admitted, and on libstdc++ a subject that holds its required
+literal and then a long run is unbounded work: one `std::regex` call is atomic to its caller, and its backtracking
+never throws. libc++ returns only because its engine throws `error_complexity`. The follow-on spec owns it; this
+change does not claim it closed. The same holds for a bounded quantifier over a group that itself repeats —
+`((a|aa){2,5}){2,5}b$` is admitted (both quantifiers are bounded, by design) and is exponential on libstdc++ — so the
+refusal's advice to make the outer quantifier a small explicit bound is safe only when nothing inside the group
+repeats; it is the same class as `(a|aa){1,100}b$`.
+
+Contributed by **@pt-act** in #397.
+
+### Fixed — Windows: `--quality-delta=A..B` extracts its commit trees through stdin; two vendored scanners stop calling `isdigit` on code points (#402, thanks @lennix1337)
+
+GNU tar on MSYS2 / Git for Windows read the colon of a drive path (`C:\…`) given to `-f` as a remote host, so materializing a
+commit tree failed there; the archive now reaches `tar -x -f -` on stdin on every platform, and `test/qualitycheck.sh` runs that
+arm under a colon-bearing temporary directory. The vendored tree-sitter bash and markdown external scanners called `isdigit()` on
+an `int32_t` lookahead (undefined above 255, and an assertion in Microsoft UCRT debug builds); both use an explicit `'0'..'9'`
+range check now, recorded as patches under `third_party/patches/`. No output change.
+
+### Changed — source builds: Windows clang-cl PGO builds link, and keep SLP vectorization in the final binary (#410, thanks @lennix1337)
+
+With `clang-cl` + `lld-link`, `RIPWIRE_PGO=generate` crashed Clang 22.1.8's backend (x86_64-v3); the instrumented `generate`
+build now turns SLP vectorization off for that phase only (`/clang:-fno-slp-vectorize` on compiles, `/mllvm:-vectorize-slp=false`
+on the link, where LTO code generation runs), so the `use` build keeps it. `lld-link` no longer receives the clang driver's
+`-fprofile-generate` / `-fprofile-use`, which it rejects (clang-cl links the profile runtime itself). Reproduction and removal
+criteria: `docs/WINDOWS-PGO.md`. No other compiler changes; no output change.
+
+### Fixed — `--uses` on a JS/TS literal receiver no longer lists built-in member calls as uses of a same-named in-tree method (#411, thanks @lennix1337)
+
+- `--uses` on JS/TS literal receivers no longer lists built-in member calls (e.g. `"abc".trim()`) as uses of an in-tree method of the same name; a `declined_literal_calls=` count discloses what was filtered (thanks @lennix1337, #411). A call stays a use when an in-repo definition is a prototype polyfill of that built-in on the same literal type. The MCP `uses` twin, `--safe-delete`, `--verify` and the LSP references / hover answers apply the same filter, and Python literal calls are unchanged.
+
+### Fixed — test infrastructure: a type-3 clone gate arm is renamed so the gate checks it (#431, thanks @liziye627-design)
+
+In `test/type3clonecheck.sh` the arm `p2ok` was named so that the gate's G1 check skipped it; it is now `ok`, with a write
+guard and an explicit `return 0`. Part of the duplicated-helper cleanup asked for in #305 (thanks @s0undt3ch). Test-only; no
+product change.
+
+### Fixed — test infrastructure: `cppqualcheck` gives a Linux ASan binary the sanitizer alarm (#421)
+
+The gate scales its per-call alarm (30 s plain, 90 s sanitizer) from the binary's flavour, which it read only off the
+binary's undefined symbols. Linux clang links the sanitizer runtime statically, so every ubuntu ASan run was read as
+plain and its one cold whole-repo call (22-30 s under ASan) timed out twice in nightly CI. The flavour now also comes
+from the runtime's symbol names inside the binary or from the runtime answering `ASAN_OPTIONS=help=1`; the alarms
+themselves, every arm and every literal are unchanged. Test-only; no output change.
+
+### Fixed — Windows: `--quality-delta=A..B` extracts its per-commit archive through stdin (#422, thanks @lennix1337)
+
+- `--quality-delta=A..B` extracts its per-commit archive through stdin (`tar -x -f -`), the same Windows drive-colon fix as #402 (thanks @lennix1337).
+
+### Changed — `--situ` and `--test-gate` start from the changed symbols, not from the changed files (#423, thanks @llvm-x86)
+
+Before: both verbs started the caller walk from every symbol of every changed file. A small edit in a large shared file
+gave a very large answer. A 3-line edit in `QuerySet.exists()` (django, `query.py`, 191 symbols) gave 4,748 symbols
+in 442 files and 323 tests to run. Most of those tests did not relate to the edit.
+
+Now: the verbs run one `git diff -U0 HEAD` for the whole tree. A function or method is a start symbol when a hunk
+overlaps its body. The walk starts from those symbols only. The same edit gives 282 symbols in 74 files and 56 tests.
+On sentry (`crashreports_exceeded`) the result goes from 11,534 to 3,036 symbols and from 1,333 to 385 tests.
+
+The change has a safe failure direction. A hunk that no function body fully holds sends its whole file back to the old
+file-level treatment. These hunks are a module-level edit, a deletion, a class or variable edit, a decorator edit, and a
+hunk that is only partly inside a body (a changed last line plus a module-level line under it). A hunk inside a member that
+callers reach through its class also falls back: a constructor, destructor or initializer, a Python dunder, and a
+property, getter or setter. Nobody calls `__init__` by name, so narrowing there would walk zero callers and turn the gate
+green on an edit every user of the class feels. With no hunk evidence (no git, no HEAD) the result equals the old result,
+and an explicit file list (`--situ=F`, `--test-gate=F`, the MCP `diff` argument) is never narrowed by the working-tree diff.
+One more effect: an edit that only adds a new function to a tracked file seeds that function alone, and a new function has no
+callers yet, so its blast radius is 0 and `--test-gate` can exit 0 where it exited 4 before.
+
+The report names the treatment it used. `--situ` always prints a `change_set:` line. The `--test-gate` XML and JSON add
+`change_granularity=`, `changed_symbols=`, `file_symbols=`, `files_narrowed=`, `files_file_granular=` and `diff_hunks*=`
+when the diff has hunks. The MCP `situational_awareness` verb carries the same keys. The legend
+dictionary gains four entries.
+
+Limit: a name-based graph cannot model readers of a constant. Because of this, a constant edit keeps its whole file.
+Measured on two public repositories with one edit each. These are not suite-wide figures.
+
+### Changed — one order for every multi-definition name answer, and `--lsp` says when a name has several definitions (#432, thanks @mpapis)
+
+- When a bare name has several definitions, every verb now orders them the same way: the most specific kind first (a method before a variable before a doc heading or config key; a constructor ranks just below its own class), then the leading definition's language, then crawl order. Single-pick verbs (`--around`, `--lego`, `--connect`'s preferred definition, `--impact`'s focus, `--owners`, `--edit-check`) answer at the front of that order; union verbs (`--callers`, `--uses`, `--impact`'s `of_def=` rows, `--lsp` definition/workspace-symbol lists) keep every definition and only reorder it. Train 33's code-first rule and the C/C++ declaration-to-body rule still apply on top; the latter now keeps the declaration's family, so a forward-declared `struct W;` stays the pick beside an unrelated `void W() {}` instead of handing the focus to the function. `defs=` still says how many definitions the name has, so a pick among several stays disclosed (thanks @mpapis, #432).
+- `--lego` reads the order by role: it asks for a type, so a class, struct, interface or named type all share one rung. On that rung a type with at least one implementor comes first, then a type whose method contract is read (`<m>` rows, no `not-extracted-for-lang` caveat; today that is C++ and Objective-C, the languages whose `<m>` rows are read), then the order above. So `--lego=Shape` answers the C++ `Shape` with its contract, not an Elixir module that has none, and a Kotlin `interface` (tagged as a class) that has an implementor is not passed over for a same-named Java one that has none (diagnosis @mpapis, #432).
+- `--lsp` definition sends one `window/logMessage` before the list, and hover adds one sentence, when the name has more than one definition. This is a count of same-named definitions, prototypes included. It does not mean the call graph split a call between them.
+- The name order changes no map ranking and no cached graph data: it applies at query time only, so call-edge candidates, `kParserVer` and caches do not move. (The separate `stem="1"` map rows below are a different change.)
+
+### Changed — contributors: a changelog entry is one new file under `changelog.d/`, not an edit to this file
+
+Every merge to main used to leave every open pull request conflicting on this file's `[Unreleased]` section, because
+each one appended to the same lines. A change now adds one file, `changelog.d/<pr-number-or-slug>.md`, holding its
+entry exactly as it will read here (format: `changelog.d/README.md`); `scripts/changelog_assemble.py` folds the files
+under the new version's heading when a release is cut, and the release workflow refuses a tag while any are left.
+`test/changelogfragcheck.sh` validates the fragments (known section, one change per file, no private paths, credit
+form), refuses an entry written under `[Unreleased]` with a pointer to the fragment to write instead, and pins the
+fold against a golden. The entries already under `[Unreleased]` moved into fragments byte for byte. No output change.
+
+### Fixed — two gates that timed out on slow macOS runners: the impact-partition seed loop and the C++ localization smoke gate
+
+Neither is a product change; both were gates whose own cost outgrew the budget a slow shared runner leaves them.
+
+- `test/impactpartitioncheck.sh`: the gate compares `--impact` against `--test-gate` for every symbol `src/graph.h` defines. That
+  file now defines 577 distinct names, and the loop spawned one `ripwire . --impact=` process per name, each loading the cache and
+  building the call graph of the ~4,400-file repo again (1.7 s each on an idle 10-core Mac, 870 s on a macOS CI runner, 1200 s
+  budget: killed on 2026-10-27). The loop now asks one persistent `--mcp` server, started with `--mcp-legend=inline` so each answer
+  is the document the command line prints. Every assertion reads the same documents as before. To keep the swap honest, every
+  15th seed plus the first three type seeds are also run through the command line and must be byte-identical to the server's answer
+  (root path aside), with a planted-difference control; `IMPACTPARTITION_CLI=1` runs every seed through the command line as before.
+  Wall time on a busy 10-core Mac: 1980 s before, 156 to 210 s after.
+- `test/cppbenchcheck.sh` and `test/pargates.py`: the gate ran three scoring passes, the middle one only to restore a lock it had
+  just tampered with. The tamper now edits a copy, the determinism comparison is two independent cold index builds, and the re-mine
+  is its own arm on one benchmark arm instead of three that also checks the re-mined lock hash matches. That is 57 `ripwire`
+  calls instead of 69. The gate was still killed at its 1200 s budget on three slow macOS draws (2026-10-13, 10-23, 10-27; 640 s
+  when green), so its declared budget is now 2400 s, twice the figure the slowest-runner arithmetic gives (worst green 856 s times
+  the 1.5 slowdown seen on every gate that day).
+
+### Fixed — three flaky gate arms: memguardcheck (B6b, B21) and pargatescheck (I control)
+
+None is a product change; each arm depended on something the gate did not control.
+
+- `test/memguardcheck.sh` (B6b): the arm sent a `find_symbol a_02` as the second MCP call against an index cut by the crawl
+  trip at entry 30. Which fixture files survive that cut is the filesystem's directory order (the crawl does not sort before it
+  stops): on macOS `a/f02.c` is kept; on a Linux runner whose directory order places it later, `a_02` is outside the cut index and
+  the answer is a not-found error, which carries no `_memory_stop` envelope field, so the arm read an empty string (red on main
+  and on both train-40 PR runs, ubuntu release shard 4/4, green on rerun). The follow-up call is now `grep`, whose answer is a
+  result on any partial index, so the arm checks the same thing (a later answer from the same cut index keeps the disclosure) on
+  every filesystem; the `find_symbol` call stays as a third probe asserted on the shape it returns, with a NOTE line when it fell outside the cut.
+- `test/pargatescheck.sh` (I control): the control copy that puts the old "wait, then look at the stop" loop back waited 0.5 s
+  before looking, leaving 0.2 s for the probe gate to start and pass its 0.3 s mark; at load average 9 to 13 it failed three
+  runs of three on unmodified main. The control's first wait is now 3.0 s; the ordering defect it models is unchanged.
+- `test/memguardcheck.sh` (B21): the arm required the refusal to return within 4 s of a 6 s git-log stream, but the shim's 60
+  spawned sleeps stretch that stream on a busy host and the refusal took 5 s at load average 13 to 19. The arm now asks what a
+  join would do, which is wait for the stream's end: the shim writes a marker after its last line and the refusal must return
+  without it.
+
+### Fixed — two recurring macOS CI reds: the C++ qualified-call gate's cold parse and the memory guard's parse-stop arm
+
+Neither is a product change; both were gates whose own calibration did not survive a shared macOS runner.
+
+- `test/cppqualcheck.sh`: the first `ripwire . --uses=…` call at the repo root parses all ~4,400 tracked files cold. That
+  is CPU-bound, so it slows in step with the load: 3.8 s alone on a 10-core Mac, 11.7 s next to three more cold parses,
+  28.7 s next to seven. A macOS CI runner has 3 or 4 cores shared by three gates, and the gate's 30 s per-call alarm sat
+  just under that, so the macOS Release shard that held it went red on most runs of 2026-10-26. `test/pargates.py` now
+  hands the gate the same budget scale the harness already applies to the gate's whole budget
+  (`PARGATES_BUDGET_SCALE`, 4 on CI, 1 locally). A cold repo-root call gets the alarm times that factor, a warm call keeps
+  the plain alarm, and a hang still trips either. The gate prints each cold call's time against its budget.
+- `test/memguardcheck.sh` (B12/B12b): the arm's fixture reached the memory guard's parse line (half the limit) through the facts the
+  parse retains, and that shape depends on the worker count. With the pool forced to the macOS runner's 3 workers, the parse
+  needed 33 to 34 files to read 32 MB, almost all of it facts the graph build then roughly doubles, so the run ended on the
+  hard line right after the stop (macOS Release, run of 2026-10-27: "34 of them parsed", then exit 5), while the 10-core
+  development host stopped after 10 files and passed. The arm now builds a few big files whose parse trees carry the footprint
+  (one array-holding function each, no calls) and walks a short ladder of sizes by outcome: no stop means heavier, the hard line
+  after the stop means lighter. A red arm now prints the rungs it tried and the unguarded peak in the failing line itself. The
+  product's parse line and cut rule are unchanged.
+
+### Added — hedged hops compose: `--impact` counts who reaches a hedged caller, tables called by index join both walks
+
+`--impact`'s `reaches_hedged=` (the functions that MAY reach the answer through a call the graph holds no edge for) now
+composes. It adds every function that reaches one of those hedged callers through ordinary proven calls (only past hops
+whose join names at most 16 calling functions), takes a third struct-field hop when every hop on the chain is a field call
+(`<ring d="3">`, `<rh … d="3">`), and follows a new hop kind, `container`: a call through a table element
+(`handlers[i]()`, or a parameter's default), the caller that `--callers` already printed as `called_by=`. Each `<rh>` row now prints its
+call's forward width (`slot_fns=` for a field, `cands=` for a container). On tmux, `--impact=cmd_split_window_exec` went
+from `reaches_hedged="1"` to `"10"` (cmdq_fire_command and its 9 proven callers) and `--impact=window_copy_cmd_cancel`
+from 2 to 12; `reaches=` did not change on any of the 235 slot-bound functions measured. `--path`'s hedged `<bridge>` crosses
+a container call (`via="container" cands=K`, at most 16) and lets a declined or container crossing with at most 4
+candidates be one of the three crossings a slot-only chain could already take.
+
+What it does NOT mean: every one of these is a hedge. A chain with one hedged hop is hedged, so none of them is ever
+counted in `reaches=`, `reachable=`, `hops=`, `by_depth=` or `radius_*`, and `<bridge proven="0">` stays. A wider crossing
+is not followed and nothing says "not reached" because of it. Gate: `test/composedhopscheck.sh`.
+
+### Added — `--defs=NAME[,NAME…]`: which definitions a name binds, with the spelling that picks each one alone
+
+One call answers "which definitions does this name bind?" for up to 16 names in one index load. Each definition group (a C-family
+prototype with the definition it declares is one; a TypeScript overload with its implementation is one) is a row with its
+owner-qualified name, kind, `file:line`, language, `class=source|test` and its distinct graph callers (a floor), plus `sel=`: a
+spelling every symbol verb accepts that the lookup re-resolved and proved binds that definition and nothing else (`name`,
+`file:name`, `file:Owner.name`, then the `@file:line` seed; `sel_proven="0"` when none does). Source rows come first, then by
+callers. A JSON/YAML key or a markdown heading of the same name is counted as `data_defs=` and never listed as code; a definition
+the parser does not model (an assignment, `define_method`, `setattr`) is not one. More than 16 rows page with `--offset`; a single
+name that binds nothing answers with the shared "not found" refusal. `--json` gives the same rows. The lookup lives in one header
+(`src/defslookup.h`, `rw::lookupDefs`), reusing the definition-group rule the callers/impact tables use.
+
+### Added — `--for` shows how a shown Python def is registered through a manifest entry point
+
+When a ranked row of a `--for` answer is a Python definition that a manifest entry point names, the answer now carries the registration after the file tail: `<ep p= l= group=>` for the manifest group (setup.cfg `[options.entry_points]`, pyproject.toml `[project.entry-points.*]`, `[project.scripts]`, `[project.gui-scripts]`, `[tool.poetry.plugins.*]`, `[tool.poetry.scripts]`), each entry as written with the in-tree definition it names (`def=file:line`, else `external="1"` or `unresolved="1"`), and `used_at=`/`used_in=`: the code that compares or loads the group's string literal (`ep.group == "…"`, `entry_points(group=…)`, `.select(group=…)`, `iter_entry_points(…)`, `entry_points()[…]`), matched by literal text, not resolved (a docstring or a parameter default that quotes the group is listed too). A module is taken only at its import path under the manifest's directory (or its `src/`); a same-named file deeper in the tree is `unresolved="1"`, never a `def=`. A group no code reads carries no `used_at=`. Default regime and XML only (`--json`, `--token-budget=N`, `--signatures-only`, `--detail=N` unchanged); `RIPWIRE_NO_EP_MANIFEST=1` turns it off. The MCP `for` tool is unchanged (CLI `--for` only). Not read: setup.py `entry_points={…}`, package.json `bin`/`exports`, pyproject inline tables, multi-root runs. On flake8's "how is a formatter registered" question the answer now names setup.cfg and the loader `_classify_plugins` (+1.3 KB); the other in-sample answers measured are unchanged unless a shown row is an entry-point target. The gap was found by comparing answers with graphify (Apache-2.0); the mechanism here is ripwire's own, no code was taken from it.
+
+### Fixed — `--lego` stops listing an implementor whose own file imports its base from outside the tree
+
+`--lego` no longer lists a class as an implementor of an in-tree type when the class's own file imports its base from
+outside the tree: `class Sub(ext.Base)`, `from ext import Base`, `import { Base } from 'lib'` / `lib.Base`, `use ext::Base;
+impl Base for S`, Java/Kotlin `import org.ext.Base` / `extends org.ext.Base` (a package the tree does not declare). A star or
+wildcard import, an import the tree cannot place, an import of the tree's own package name (Node self-reference, also on a
+multi-root run; a single-root Python repo whose root is the package, by its directory or `[project] name`) and a same-file
+declaration still keep the by-name row, and a clause dropped as outside adds no `implementors_floor=`.
+For Rust the decision is inverted: a `use` head is decided OUTSIDE only when it is `std`/`core`/`alloc`/`proc_macro`/`test`, or
+a registry or git dependency that some Cargo.toml of the tree declares (any dependency table, `[workspace.dependencies]`
+included; the key and its `package =` name; a `path =` crate or a key `[patch]`/`[replace]` names is not one), also through
+an alias the file itself spells (`use serde as sd;`, `use std::io::{Write as _};` moves no other head). A head that is a
+crate of the tree keeps its row: a Cargo `[package]`/`[lib]` name from its tests/, examples/ and main.rs, a module of the
+using file's OWN crate (a workspace crate directory of it spelled with `_` for its `-` directory; a name that is only another
+member's directory or module, `crates/foo_core/` beside a registry `foo-core = "1"`, is no module of this file's crate), a dependency key with `path =` under the indexed root (only a path puts a key in the tree)
+(`core2 = { package = "foo-core", path = "../core" }`, also a `[dependencies.core2]` table or a dotted key), a leading `::`,
+an `extern crate foo_core as fc;` or `use foo_core as fc;` the file spells. EVERY other head — an unknown crate, an alias or
+re-export this scan did not see (`pub extern crate foo_core as fc;` in lib.rs, `use fc::T` from another file), a rename only
+`[patch]`, `[replace]` or `.cargo/config` names, a `path =` crate outside the indexed root — is undecided: it lists no row
+and the interface carries `implementors_floor=`, never a confident `implementors="0"`. A tree with no Cargo.toml decides
+nothing outside but `std` and its siblings. A key that two members of the tree mean differently (in the tree for one, a registry
+crate for another, also when it spells a package name of the tree) and a key a `.cargo/config(.toml)` `[patch]` names — read in
+each manifest's directory and above it, within the indexed root, so a config ABOVE the indexed root is not read — are undecided
+too, as is a renamed key with no `path =` (`fc = { package = "foo-core", version = "1" }`: a registry crate, or a `[patch]`'s), an
+inline table that does not close on its line, and a key one manifest writes as a registry crate in one dependency table and as a
+`path =` crate in another; a Cargo file the run cannot read decides nothing outside. This does NOT
+cover a C++ `ext::Base` or `using ext::Base`, a C# `using`, a Swift `import`, a PHP `use`, a JS `require` destructure or a
+Rust `impl ext::Base for S` with no `use`: those rows are still listed by name. Gate: `test/legotransitivecheck.sh` (XP).
+
+### Fixed — JS/TS calls through a name written after its declaration are no longer read as the declared class
+
+`let { Eng, Foo } = require('a'); Eng = Foo; new Eng()` builds a `Foo`, so a BARE call by a name written in its scope is
+unresolved (`unresolved=`), never its declared target nor a same-spelled class. A MEMBER call through such a root (`Eng.make()`,
+`tank.spill()`) is not receiver-typed: the root's spelling does not name a class, so the call keeps only the by-name hedge
+(`via="name"`, every candidate), with or without a declaration (`let Eng;`, an undeclared global). A write whose value keeps the
+name (`Environment = require('x').Environment` over `var Environment;`) and a stated constructor (`let app; app = new Hono()`) are
+unchanged. Residual, not fixed: a member call whose receiver is a typed chain the tool does not follow (kysely
+`ctx.db.selectFrom('person').selectAll().limit(100)`) still falls to the by-name ladder, and the merged caller row carries the
+sites of a bare imported `limit(…)` call in the same file unhedged. Refusing every member call a free function (which JS/TS allow
+through an object property) changed about 9,000 census rows on six in-sample repos (hono, kysely, nunjucks, fastify, commander, koa),
+so it is left to a later card. Gate: `test/falseedgecheck.sh` arm (S).
+
+### Added — `--for` names what the top method's class constructor calls (`ctor_l=`, `ctor_calls=`)
+
+On a conceptual `--for` answer (root `bundle="compact"`), when the first row (r=1) is a method whose innermost enclosing class
+defines a constructor (JS/TS `constructor`, Python `__init__`, Ruby `initialize`, PHP `__construct`, Swift `init`, a
+Java/C#/C++/Kotlin/Dart member named as its class), that row now carries `ctor_l="N"` (the constructor's line) and
+`ctor_calls="a,b"`: up to 16 distinct callee names the index resolved from the constructor, in name order (so the 16 kept do not depend on which file defines each), with `ctor_calls_more="N"` counting the
+rest. Names only, not a claim they answer. Not on a class with no constructor, an r=1 class row, or a constructor whose text the
+answer already serves (the body fold, the body slot). Measured on koa's "how does Koa create the per-request ctx" question:
+`createContext` now names `ctor_calls="getAsyncLocalStorage"` (+176 B on a 12,850 B answer). The constructor's `this.f =`
+field writes are not listed. The idea (a one-hop walk from the top seed over containment) was learned from code-review-graph's
+graph traversal; no code was taken. `RIPWIRE_NO_CTOR_HOP=1` turns it off. Gate: `test/forctorhopcheck.sh`.
+
+### Added — a `--for` task spelled as a graph question also gets that verb's answer
+
+A `--for` (and MCP `for`) task written as `path from A to B`, `callers of X` or `common callers of A and B` now ends with the
+`--path=A,B`, `--callers=X` or `--connect=A,B` answer, run on the index the `--for` run already built, inside
+`<graph_verb endpoints="subject" verb=… from_span= to_span=|of_span= [and_span=] [tried=]>` just before `</ctx>`. The endpoints
+are read from the task's own words: each span is cut at its first qualifier word (for/with/via/in/on/when/using/during/at/near)
+and its code-like tokens (a `.`, `_`, `::`, `()` or an inner capital) are tried last-first, at most four combinations, the first
+that the verb's own resolver finds runs; no plain word is an endpoint except `main`, so a description ("serialising a dict",
+"spawning ripgrep") never fires. The block's legend says the endpoints are a name match read from prose. Everything before the
+block is byte-identical to the answer without it, and nothing is appended when no combination resolves or the task is not one
+of the three forms. The verb runs with its default caps and next= paging, so the block is the bare call's own bytes (CLI:
+byte-identical, compact legend included). Measured on a set of large-repository tasks: 7 rows move a tier (5 to complete), 13 of 15 missing
+chain items recovered, none lost; the parser fires on 0 of 258 non-graph subjects. Gate: `test/forroutecheck.sh`.
+
+### Fixed — the `--for` graph-verb block obeys `--token-budget` / MCP `budget_tokens`
+
+With a token budget set, the `<graph_verb>` block no longer appends the verb's answer (it was priced outside `est_tokens`): it is a
+self-closed tag, `held="budget"`, whose `verb=` is the one call to run, and its legend says so. Gate: `test/forroutecheck.sh` (b1a, b2).
+
+### Fixed — the `--for` graph-verb block reads its endpoints from the right sentence
+
+The endpoints of the `<graph_verb endpoints="subject">` block (`path from A to B`, `callers of X`, `common callers of A and B`) are
+now cut at the end of their own phrase: a word ending in `.` `;` `:` `!` `?` `,` (or the full-width `。；：！？，、`), or a clause word
+(and, or, then, also, but, how, which, where, while, because, afterwards, explain, check, …). Before, the last endpoint ran to the end of the
+task and the candidates were tried last-first, so `path from App.run to Widget.refresh. Afterwards summarise MessagePump.post_message`
+ran the path to `MessagePump.post_message`. A phrase with no code-like token now fires nothing. `` `compose()` ``, `«Context.json»`
+and `Context.json？` are read as endpoints, and `e.g.` / `i.e.` never are. Gate: `test/forroutecheck.sh` (n5, n6, n7, c3, s4a-c).
+
+### Fixed — the MCP `for` callers block carries its JSON as CDATA
+
+The MCP twin of the graph-verb block answers `callers of X` with `find_referencing_symbols` JSON. It was XML-escaped (every quote
+`&quot;`, 1.38x the bytes); it now rides in a CDATA section, and the tag says `dialect="json"` (legend clause only with it). Gate:
+`test/forroutecheck.sh` (x2).
+
+### Added — the graph-verb block flags path hops matched by name into test files
+
+`name_test_hops="N"` on a `--path` block counts the hops matched by name alone (`via="name"`) whose `p=` is a test or fixture
+path, the case the endpoint-only `from_test=` / `to_test=` cannot see (a `Markdown::new(` call bound to a test constructor in the
+middle of a chain). A hedge, never a proof; present only when above 0. Gate: `test/forroutecheck.sh` (h1, h2).
+
+### Added — the graph-verb block names the spellings that did not resolve
+
+When `tried=` is above 1, `unresolved="a b"` lists the spellings of the task the resolver did not find before the combination that
+ran. Gate: `test/forroutecheck.sh` (t1b).
+
+### Added — `--for` names the functions a shown table initializer binds (`slots=`)
+
+On a conceptual `--for` answer (root `bundle="compact"`), a shown variable or constant row whose initializer stores functions
+now carries `slots="k=fn,…"`: up to 16 slot=function pairs in source order, where `k` is the slot as `--callers`/`--callees`
+`into=` spells it less the row's own name (`.command = window_copy_command` → `command=window_copy_command`; a positional C
+entry stays `[0]`; a Python key stays `["run"]`), and `slots_more="N"` counts the pairs it did not list. A pair is a
+reference-as-value binding by the index, not a call and not a relevance claim. A row whose body the answer already serves (the
+body fold, the body slot) carries none, and neither does a struct, class or function row. Measured on tmux's "orient me on copy
+mode" question: the `window_copy_mode` row now names `command=window_copy_command` (+352 B on an 18,401 B answer).
+The mechanism (a constant initializer treated as a node whose bindings are shown) was learned from codegraph's explore tool;
+no code was taken. `RIPWIRE_NO_INIT_SLOTS=1` turns it off. Gate: `test/forinitslotscheck.sh`.
+
+### Added — `--for` names the members of its shown owner rows on the compact route (`mem=`)
+
+On a conceptual `--for` answer (root `bundle="compact"`), a shown class, struct or interface/trait row now carries
+`mem="a,b,…"`: up to 8 names of its direct members by the index (a def whose scope names the owner, such as a Rust `impl` or a
+C++ out-of-line method, or whose span lies inside the owner's, such as a C++ in-class declaration or a JS/TS/Python method; never a
+closure nested in a method), the names holding the most question words first, then by line. `mem_more="N"` counts the member names
+it did not list. A name already shown as a row, and the owner's own name (a constructor), are not repeated. No list on an owner
+whose text the answer already carries (the body-tail fold or the body slot serves its body, or the fold served its member slice),
+nor on an owner whose name another indexed class shares (its members' scope cannot say which one they belong to). The names are
+spliced after the rows are chosen, so they never cost a ranked row, and `est_tokens` prices them. Not under an explicit
+`--token-budget`, `--json`, `--signatures-only`, `--auto-bodies`, `--detail=N`, the name-exact route, the `--limit=N` file page,
+`--expand` or the map; `RIPWIRE_NO_MEMBER_NAMES=1` turns it off. CLI only, as the fold. Measured on the 163 stored round-5 argv that
+may be run (handlebars, helix and waybar never run; base lane/body-fold b112e8ac, frozen round-5 grader): Rule C ✓ 124 → 128
+(mdbook-02, nunjucks-02, nunjucks-12, starlette-13), legacy ✓ 149 → 149, 0 items lost under either grading; the 60 `--for` answers
+grow +332 B median (max +1,340 B), every other answer is unchanged. Gate: `test/formembernamescheck.sh`.
+
+### Added — the `--for` body fold follows a one-line wrapper into the function it calls
+
+When a body the `--for` fold serves is a thin delegator (one proven callee, no other call, at most 3 statement lines, such as
+`fetch` returning `this.#dispatch(...)`), the callee's body is now printed right after it as `<b follow_of="fetch">`, up to two
+levels (`handle -> fetch -> #dispatch`). A callee bound by name alone, a body with a second call or a fourth statement line, and
+a body the answer already carries are never followed. The followed bodies ride outside the fold's `budget_bytes=`, each whole up
+to 4000 bytes (a longer one is cut and says so). `RIPWIRE_NO_HOP_BODY=1` turns it off.
+
+Measured: hono's default `--for "How does a request flow from app.fetch to a handler's Response?"` now carries `#dispatch`'s body
+(router match, Context, the one-handler fast path, `compose`, error handling) after `fetch` (+1.9 KB). Over the in-sample tables
+the follow fires on 3 of 163 S1 rows (+4.3 KB, all already complete), 2 of 39 MF1-DEV rows (+3.0 KB; ninja `Plan::AddTarget ->
+AddSubTarget`) and 3 of 56 LARGE-DEV rows (+5.7 KB, one body cut at the 4000-byte guard); no row loses an item.
+Gate: `test/hopbodycheck.sh`.
+
+### Added — Go functions stored in struct fields are joined to the calls through those fields (`--callers`, `--callees`, `--for`)
+
+A Go function stored in a struct field — a keyed composite-literal element (`Command{ EvalRW: Put }`), a field assignment
+(`c.EvalRW = Put`), or an argument of a registrar that stores its parameter there (`RegisterReadWriteCommand( kvpb.Put,
+declareKeysPut, Put )` with `Command{ EvalRW: impl }` in its body) — is now joined to every member call through a field of that
+name (`cmd.EvalRW( … )`): `--callers=Put` gains `called_by= called_at= via="slot-name" cands=K` on its `<vr>` row (K = the
+distinct functions that slot holds), `--callees` of the dispatcher lists `<vs through="cmd.EvalRW" slot=".EvalRW" targets=K>`, and
+a `--for` answer marks a shown function row with `slot_by=` (the functions that may call it through a slot) and a shown struct
+row with `slot_fields="F=K@C"`; a caller that matches by the field name alone is marked `~` (`slot_by="~evaluateCommand"`,
+`@~C`): a candidate, not a fact. A method value of the method's own receiver (`f = b.opPlan; … f( … )`) binds to that
+receiver type's method only. Slot types are keyed by their package DIRECTORY (`x/types.Cmd` and `y/types.Cmd` are two types; a
+qualified literal `pkg.T{…}` maps `pkg` through the file's import), a registrar by its definition (a same-named function of
+another package, or a method, never feeds the slot), and a slot never joins across languages. Every row is a MAY-call clue,
+never a proven call and never in `count=`. Not joined: a field named like any Go method in the tree (the call may be that
+method), a nested literal without its own type, a map or slice literal or a named map type, a registrar reached through a
+method or a qualified call, one registrar storing a parameter in two fields; a `slot_by=` whose only store is in test code is
+not printed on a non-test row. The same `cands=K` now also rides on the existing C-family `<vr via="slot">` rows (a function-pointer table such as tmux's
+command table prints `cands="62"`), with one legend clause beside it; across 235 sampled `--impact` answers on tmux and htop that
+is 230 answers, +5.1 % bytes, and no count, reach or hedge moved. Measured on cockroach (batcheval `Command.EvalRW`, 29 commands, called by `evaluateCommand`)
+and terraform (`Local.opPlan` stored in `f`, called by `Local.Operation`). Gate: `test/fnslotcheck.sh`.
+
+### Changed — `--grep`: a carrier `<enc>` row that lists `vals=` now names its own definition as `p=file:line`
+
+A grep `<enc>` row for a variable, constant or initialiser that stores function values (a command table, a route map)
+printed `vals="exec=cmd_split_window_exec@76"`: the line of each stored function, but no file for the row itself, so a
+reader could not tell which file `@76` was in or where the table was defined. That row now also carries
+`p="cmd-split-window.c:58"`, the carrier's own definition; a `vals=` entry without a path is in that file. It is printed
+only when the row stands for exactly one definition and lists `vals=`. A row that groups two same-named definitions
+(`defs=2`), and a carrier with no stored functions, stay as they were. The MCP `grep` verb's `enclosing` entries carry
+the same value under `p`. Measured on the 163 in-sample rows of the round-5 replay: one answer changes (tmux
+`--grep=split-window`, +125 bytes: 26 for the attribute, 99 for its compact legend line), and its two missing definition items (`cmd_split_window_entry` at line 58,
+`cmd_split_window_exec` at line 76) are now named with their file. Gate: `test/countfloorcheck.sh` (P/A3).
+
+### Fixed — `--grep` says when a literal pattern reads as a regex, and prints one row per line
+
+A literal `--grep='compose|HTTPException'` answered `hits="0" complete="1"` with `next=` the conceptual lens, while 31 hono
+files hold one of the names; `--grep='CHANGELOG\.md'` found the one line spelling the backslash. The root now carries
+`pattern_meta="…"` (the regex-shaped pieces: `|` between words, a backslash escape, `.*`/`.+` inside the pattern, a leading `^`
+or trailing `$`, a `[^…]`/`[a-z]` class; a lone `.` as in `CHANGELOG.md` is not one) and `next=` is `--regex=<pattern>`
+whatever the hit count (a basic-grep `a\|b` is offered as `a|b`; nothing is offered when `--regex` would refuse it). The literal
+answer itself, and its `complete=`, are unchanged: the scan still matched the text as written. Folded in: a line holding the
+pattern twice used to print as two `<hit>` rows and count twice; it is now one row with `occ="2"`, and `hits=`, `shown=` and the
+window count lines, not occurrences (the unindexed list too). The MCP `grep` verb carries `pattern_meta`, the same `next` and
+`occ` per row. Gate: `test/honestlexcheck.sh` (B, M arms).
+
+### Fixed — `--whereis` no longer labels comment, prose and string lines `kind="def"` on the lexical fallback
+
+When the parsed index has no definition of the name (or the checkout drifted from it), HEAD rows are labelled by a lexical shape
+test (`head_labels="lexical"`). That test took a declaration word anywhere earlier on the line, so `// a class published its
+name`, a help string `"struct (like --lego)"`, a markdown line and every `struct T *data` local read `kind="def"`: 241 false
+definition rows over 30 cells (10 words with no definition × this repo, hono, tmux). Now the word must sit directly before the
+name (qualifiers, `*`/`&`, template or generic arguments, a qualification chain, a Go receiver, one ALL-CAPS export macro after
+`class`/`struct` may sit between; `template<…> RetType NAME(` too); a line that opens a comment (`//`, `#`, `;`, `-- `, ` * `,
+`"""`…), a name after a trailing comment opener and a name inside a `"…"`/`` `…` `` literal are never definitions; `#define NAME`
+(object-like as well as function-like) is; a typedef defines only its own last declarator; `struct T` followed by a declarator,
+`*`, `)` or `,` uses the tag and defines nothing; `using std::x;` and `using namespace x` define nothing (`using X = …` does), nor does Rust's `impl Trait for X`. The
+root gains `head_defs="0"` when the lexical labels stand and the index defines no symbol of the name at all. Still a floor in both
+directions, and named as one: prose whose declaration word sits right before the name reads as a definition, and an unusual
+declarator (a wrapped signature, an enumerator, a field) reads as a reference. The parse chooser for other refs' blobs keeps the
+old, looser reading as well, so no blob that used to be parsed goes unparsed. Control: 12 real definitions forced onto the lexical
+path (C, C++, TS, Python, Rust, Go, Ruby) keep their `kind="def"` rows. Gate: `test/honestlexcheck.sh` (A, H arms).
+
+### Added — one backward hop step for `--path` and `--impact` (slot and declined callers)
+
+`--callers=X` already names, one hop per call, who MAY call X without a graph edge: a `<vr via="slot">` row's
+`called_by=` (a call through a struct field X is stored in) and a `<dc>` row (a declined call whose candidate list holds
+X). The answers that join hops now read the same rows, from one provider (`src/backhops.h`):
+
+- `--path`'s hedged `<bridge>` crosses a slot hop (`via="slot"`, `via="slot-name"` for a field-name-only join) while the
+  join names at most 16 calling functions (`slot_callers=`), and `slot_fns=` says how many functions the field holds
+  (not capped: a wide table such as tmux's 92-entry `cmd_entry.exec` is still crossed, and the row says how wide it is); a
+  chain whose every crossing is a slot may take three crossings, any other chain keeps two. On tmux, `--path=cmdq_fire_command,window_copy_cmd_cancel` now prints the
+  three-field-call chain (`cmd_entry.exec`, `window_mode.command`, the command table's `.f`); before, no chain.
+- A `reachable="0"` path answer whose search met gaps and whose `to=` has such a hop ends with `next="--callers=<to>"`
+  (CLI and MCP `path_between`) instead of the gap rows' bodies.
+- `--impact` (XML, `--json`, columnar count, MCP `impact`) adds `reaches_hedged=N` beside `reaches=`: the functions that
+  may reach the symbol through one or two calls through struct fields, with the two-hop ones listed as
+  `<ring d="2"><rh called_by= called_at= via= calls=/></ring>` (16 shown, no width bound on the d=1 set; `next=` pages the callers of the first unshown row's `calls=`, not every hidden row). Never counted in
+  `reaches=`, `by_depth=` or the radius counts.
+
+Every crossing stays a hedge: `proven="0"`, `via=` named, its width beside it (a slot crossing's `slot_callers=` is bounded at 16, its `slot_fns=` is printed, not capped), and never in `reachable=`/`hops=`/`reaches=`.
+
+### Fixed — a declined call on a typed in-tree receiver is no longer read as the builtin method its name spells
+
+The bridge and the `<near_sink>` frontier skipped every declined call spelled like a builtin type's method, so hono's
+`this.router.match( method, path )` (`router!: Router`, an in-tree interface with eight implementations) was dropped as
+`String.prototype.match`. The skip now lifts for one field of `this`/`self` or of a parameter whose class the source
+states, when every same-named class types that field as an in-tree class and the call's candidate list is complete (2
+to 16). A `.match` on a string parameter, an un-annotated local, a field typed `string`, or a field another same-named
+class types outside the tree stays skipped.
+
+### Changed — `--impact` folds a hub in the hedged ring and orders the rows that stay
+
+A hedged ring member with more than 16 proven callers behind it now prints one row instead of leaving its tail implicit:
+`<hub n= via= d= behind= tested= sample= next="--impact=file:member">` (behind= the functions of `reaches_hedged=` that sit
+behind it, sample= the first three by the ring order, next= lists them as proven rows). The root says how much is folded
+(`reaches_hedged_hubs=K`) and its `next=` points at the widest hub when hubs hold more than half of `reaches_hedged=`
+(tmux `--impact=window_copy_formats`: 779 of 780 behind `format_defaults_pane`). The `<rh>` rows (and the samples) are
+ordered: one hedged hop before composed, narrow crossings first, then tested, functions with no proven caller (the top of
+their chain), the answer's own directory and rank. Under an explicit `--limit`, the proven `<s>` rows keep the page and hedged rows are cut first, disclosed as
+`ring_cut=N` with the replay in `next=`. What it does NOT mean: the fold changes rows, never counts (`reaches=` and
+`reaches_hedged=` did not move on any of the 235 slot-bound functions measured), and behind= is still a hedge, never a
+proven caller of the answer. Gate: `test/composedhopscheck.sh`.
+
+### Changed — by-name hedges: a free namesake needs an import, an override is a way in
+
+
+- A by-name hedge (`<near_sink>` `why="name"`, a `<bridge>` `via="namesake"` crossing) to a namesake with no class (a free
+  function, or a JavaScript/TypeScript method, whose class the extractor does not record) now needs the caller's file to be,
+  or to import, the namesake's file (a direct import edge). A namesake file the search merely touched no longer counts. For
+  C, C++ and Objective-C the rule follows the transitive `#include` closure, but no probe of ours produced a by-name hedge
+  to a C-family free function: those calls are declined, not bound by name. On the 880-pair seed-18 `--path` draw over 11 in-sample repos this
+  withholds the 2 shown by-name sites a hand-check had rejected (koa's `delegate( proto, 'response' ).method( … )` reaching
+  `request.js`'s `get method`, and a bundled Bootstrap `this.init( … )` reaching nunjucks' `Parser.init`). The one accepted
+  site, flake8's `report()`, stays. 16 rows that already showed a value or declined site keep it and now also count a by-name way in.
+- A class method namesake is now also a way in when its class derives from the class of the definition the call was bound
+  to, at any depth, and every step of that derivation is bound in its own file: the base name a class writes resolves,
+  through that file's own declaration or its import of that name (a package re-export, and for Python a `src/` layout
+  import that resolves by package name, count), to the next class. This is override dispatch. A base clause that names a
+  different same-named class (one elsewhere in the tree, or an external one: `class Sub(ext.Base)`, `from ext import Base`)
+  does not count, however the file's other imports reach the parent's file; neither does a base no import binds. On the
+  same draw this shows 6 sites, and a hand-check read all 6 as correct: textual's `driver.start_application_mode()` /
+  `stop_application_mode()` → `LinuxDriver`, `widget.render_line( y )` → `TextArea`, and `node.compose()` → three `App`
+  subclasses in examples. Like every by-name hedge, each is a hedge and never a proven edge. What stays withheld: a base
+  the binding does not read (a dotted `a.b.Base`), and a Python base name that has any binding other than its import in
+  the class statement's own scope chain (its class body or function, the enclosing functions, then the module; an
+  enclosing class body is skipped, as Python skips it): an assignment of any form (`Base = Other`, `Base: type = Other`),
+  a def, class, loop, `with` or `except` target, a parameter, a `global` or `nonlocal` (also in a def that starts the
+  file), a `match` capture (`case Base:`, `case P as Base`, `*Base`), a PEP 695 `type Base = …` or a class or def type
+  parameter (`class Sub[Base](Base)`), a second import, an import under another name (`from m import Other as Base`, which
+  binds m's `Other`, never `Base`), a `try:
+  from a import Base / except ImportError: Base = None` fallback, or a star import that could bind it (one from a module
+  outside the tree, or from a module that defines, imports or star-imports the name), wherever in the scope it sits and
+  in either order. A qualified base (`q.Base`) is also withheld when another function or class imports `q` as a module
+  (`import a.b as q`), since the import tables are per file; this over-hedges the same import repeated in two scopes,
+  and a star import from an in-tree module whose `__all__` omits the name. `from pkg import other as a` with `a.Base` now
+  reads `other` (the member's own name), not `a`; a dotted `import pkg.x` binds the root `pkg`, which no table names, so
+  `pkg.Base` is withheld (this also over-hedges `import pkg.x as pkg`). `from pkg import a` (aliased or not) with `a.Base`
+  reads the submodule `a` only when the package's `__init__` does not bind `a` itself (an import, def, class or assignment of
+  it, a star import that could bind it, or a module `__getattr__`). A re-export chain (`from pkg.x import Base`, where the
+  package or a middle module re-exports the name) is followed only through files that bind the name by ONE plain import,
+  at every hop: a hop that renames it (`from pkg.x.a import Other as Base`), reassigns it afterwards (`Base = Other`, `Base +=`,
+  a `for`, `with` or walrus target, a def or class of it, a `global Base` in any def), star-imports after it, or has no
+  record of it ends the chain, and the site is withheld. A hop file that calls `globals()` or `setattr(...)` anywhere, or
+  defines a module `__getattr__`, counts as unknown for every name (a dynamic write no table sees; this over-hedges any such
+  file, and `sys.modules[__name__].a = x`, which is not a call, stays a floor). The import must be the name's one binding;
+  otherwise the site is withheld, never shown. Not read, and not detectable statically: a rebinding made from outside
+  the file (`a.Base = Other` on an imported module).
+  The chain's endpoint is held to the same standard: the class it finds is the name's meaning only when its own `class`
+  statement is the name's one module-scope binding in that file and no star import there could bind the name, so a later
+  `Base = Other`, a `global Base` in a def, a second def or class of it, or a trailing `from m import *` now withholds the
+  site (this over-hedges a class defined in both arms of an `if`/`try`). Residual: an endpoint file's `globals()` or
+  `setattr(...)` write is not read there (a hop file's is), so that shape may still be shown.
+
+### Added — a function stored in a struct field is joined to the calls through that field (IX-1, C / C++)
+
+`--callers=cmd_split_window_exec` on tmux listed the two `.exec =` command-table entries with no dispatcher, and
+`--callees=cmdq_fire_command` had no row for `entry->exec( cmd, item )`. The value row now names the dispatcher —
+`called_by="cmdq_fire_command" called_at="cmd-queue.c:625" via="slot"` — and `--callees` of the dispatcher carries
+`slot_calls=N` and one `<vs l= through= slot="cmd_entry.exec" via= targets= shown= next=>` row per call, listing the
+functions stored in that field (16 shown, the rest behind next=). The join is by the declared struct type of both
+sides (`via="slot"`): a designated `.f = fn`, a positional entry of a struct the file defines, an anonymous struct
+table, or a field assignment, against `x->f( … )`, `x->a->f( … )` or `t[ i ].f( … )`, typed field by field through the
+struct bodies and typedefs of the tree. When one side's type is not known the field name alone joins (`via="slot-name"`,
+the lower tier); two known, different struct types never join. It is a may-call clue, never a proven call: no count=,
+reaches= or call-graph edge changes. On the tmux tree 77 of 79 calls through a struct field get a typed receiver. C++
+reads a call through a field only when the receiver is declared with `struct` / `union` or its struct declares the field
+as a function pointer in the same file. Not yet: typedef'd function-pointer fields copied between structs (htop's
+`this->draw = mode->draw`), macro bodies, Go / Rust / TypeScript function-typed fields.
+
+### Added — `--affected` lists tests that construct a reached class (class-new backstop)
+
+A test that builds a class and then drives it through an interface-typed helper (`runTest( () => new TrieRouter() )`, then
+`router.add( … )` inside the helper) is a test a reviewer checks, but the call walk cannot prove the dispatch, so `--affected`
+never listed it. `--affected` now adds a separate, hedged group after the proven rows: `<g via="class-new" total= shown= capped= next=>`
+with one `<new p= l= class=/>` row per test file that constructs a class owning a reached method (or the changed class),
+naming the construction line and the class (`l=` only when exact: in TS/JS the earliest construction whose callee the import resolver pins to that class — a named, default or `require` binding, or a namespace member — never one that merely shares its name, and absent when none resolves, e.g. through a re-export barrel, a tsconfig alias or a CommonJS export (`module.exports = { … }`, `exports.X = …`), which the export table does not record; elsewhere absent when two constructions of one name are written differently). The group is never counted in `tests=`/`reached=`, an already-listed test is
+never repeated, a class built only in non-test code adds nothing, and more than 8 rows cap with `next=--callers=…`. The
+group and its legend clause are absent when empty, so every other answer is byte-identical. Construction is read from call
+edges the parser already records: `new T(` (JS/TS, Java, C#), `T(` (Python, Kotlin, C++) and Rust `T::new` (a new
+`constructorMethod` column in the per-language facts table). Go `T{…}` literals, C++ `T x;` declarations and Ruby `T.new`
+are not recorded as constructions, so they add no row. On the in-sample hono checkout, `--affected=src/utils/url.ts` now
+names `src/router/trie-router/router.test.ts` (via `new TrieRouter()` at line 6); `tests=` stays 68. Gate:
+`test/affectedcheck.sh` section (9).
+
+### Fixed — a line selector never picks the innermost of two definitions, a namespaced class's printed name resolves, and a refusal counts what it refused
+
+A `file:LINE` selector (the `p=` a row prints) used to bind the innermost of two definitions starting on one line
+(`class P { q() {} }`, an arrow nested on its parent's line) without saying which. It now refuses, lists the `n=` of each
+candidate on stderr, and a line where one definition starts selects it as before. A TS class inside a `namespace` or `module`
+prints `C.m`; that name and the namespace-qualified `NS.C.m` both resolve now, and two namespaces holding a class of one name make
+the short spelling a refusal instead of a silent pick. A refusal over several fitting definitions (`Widget.run` beside a class
+and an object literal of that name, or a line selector with several definitions) adds `refused="N"` to its `found="0"` answer (N definitions
+fit, none chosen): refused, not absent. Gate: `test/jsdefnamingcheck.sh` (fix-1 arms, and its absence arms now fail on a non-zero exit).
+
+### Fixed — a JavaScript or TypeScript method row names its class, and a printed `file:LINE` selects that definition
+
+JavaScript and TypeScript store no owner scope, so every member row printed a bare name: nunjucks' `environment.js` has two
+`render` methods, and `--path=render,compile`, `--callers`, `--impact` and the `<d>` signature rows printed `render` twice with
+nothing to tell them apart. A method row now prints the one class whose body holds it (`Environment.render`, `Template.render`),
+read by the same containment rule the `Class.method` spelling binds by, so the printed name resolves back. A method of an object
+literal, a method a function or method encloses, and a method inside two nested classes stay bare, and so do the member names in the hedged `<bridge>`, `<gap>` and `<near_sink>` rows of an
+unreached `--path` answer (their `p=` tells definitions apart). The `p=` a row prints is a
+selector too: `--callers=nunjucks/src/environment.js:445` answers about `Template.render`. It is tried only after every name
+spelling found nothing, so a numeric JSON key keeps resolving as a name, and it binds only the definition whose own signature line
+it is (a body line stays "not found"). The legend says how a TS/JS owner was read only when such a row is shown. Measured on the
+163 S1 rows: 35 JS/TS rows change, Rule C lower on none, nunjucks-14 gains three rubric items (`Template.render`,
+`Template.compile`, `Compiler.compile`). Gate: `test/jsdefnamingcheck.sh`.
+
+### Fixed — a bare `module.exports = (…) => …` is a function, named by its file
+
+`module.exports = (stream) => { … }` in koa's `lib/is-stream.js` defined no symbol: its body's calls sat in the file's
+`<file-scope>` row and no verb could name it. The anonymous function a module exports is now a function named by the file's stem
+(`is-stream`), the rule a Markdown file's own node is named by; a named function expression keeps its own name
+(`module.exports = function onlyNamed() {}`), and `module.exports.NAME = fn` is unchanged. Side effect, measured on koa: test helpers
+written this way (`test-helpers/context.js`) are now named like the local that requires them, so their callers bind by name
+(unresolved calls 210 → 50). Not fixed: a call through a different local name (`const isStream = require('./is-stream.js')`)
+still has no edge, so koa-11's rubric item for `lib/is-stream.js` is not yet credited. The test is the spelling, like `exports.NAME = fn` before it: a file that declares its own `module` (`const module = {}`) and assigns
+`module.exports = fn` is read as CommonJS too (a floor, carried). Gate: `test/jsdefnamingcheck.sh` (3).
+
+### Fixed — `Widget.run` no longer binds a class's method when an object literal named `Widget` has a `run` too
+
+`const Widget = { run() {} }` in one file and `class Widget { run() {} }` in another: the written spelling `Widget.run` bound the
+class method, because the literal's name was stored nowhere. A module-scope `const|let|var NAME = { … }` now records its binding
+name, so that spelling names both and is refused ("not found"); a file-qualified `src/widget.ts:Widget.run` still binds the class,
+and a literal with another name (`const mock = { run() {} }`) is not `Widget.run`. A literal with no binding name (`export default
+{ … }`, `module.exports = { … }`) keeps the earlier rule: its owner is unknown. Gate: `test/jsdefnamingcheck.sh` (2).
+
+### Added — calls through an interface-, trait- or abstract-typed receiver name the implementors that can run
+
+A call such as `r.render( 2 )` on `r: &dyn Renderer`, `p.pack( t )` on `p: Packager` or `command_runner_->StartCommand( e )`
+on a `std::unique_ptr<CommandRunner>` field used to answer by NAME: every in-tree definition of `render`, including the
+implementor of a different `Renderer` trait in another module and an overload of another arity, or a `prov="split"` edge to
+each override. A tier of the resolver now reads the receiver's recorded type first. When it is an interface, a trait, or a
+class that declares the callee without a body, the candidates are the methods of that name its implementors own — the
+`implements` / `extends` / `impl Trait for X` types, at any depth — plus the type's own bodied default:
+
+- **one candidate**, every `implements` edge to it proven, and no implementor possible without a clause: an edge rendered
+  `via="impl"` (the only implementor in the tree; one outside it, or one a macro writes, may exist);
+- **two or more**: the call is declined with exactly that list, a `<dc ... cands="K" via="declined" gate="iface"/>` row
+  (`--legend=full` names the candidates with `cand=`). It is never an edge and never in `count=`.
+
+Receivers read: Rust `&dyn T`, `Box<dyn T>`, `impl T`, `&impl T` parameters, `let x: &dyn T`, a struct field
+`Box<dyn T>` (through `self` or a typed local), and a generic parameter bounded by one trait (`R: T` inline or in a `where`
+clause; marker traits such as `Send` or `Clone` beside it are ignored), whose rows also carry `bound="R: T"`. C++ a
+pure-virtual member through a base pointer, reference or field (a `std::unique_ptr` / `std::shared_ptr` field through `->`).
+Java, Kotlin and TypeScript a typed parameter, local or field whose type is an interface or an abstract class. A Rust
+`impl Trait for X` is now proven onto the trait its header names when the written path or the file's `use`s resolve it, and
+a TypeScript `implements I` onto the interface of the module its import names, so `--lego` lists fewer by-name implementors.
+
+Not read (floors): a Go interface value — Go interfaces are structural and nothing in the source names an implementor (a
+method-set cover would); a Rust `for` loop variable over a collection of trait objects (`for p in self.preprocessors.values()`);
+a Rust `dyn A + B`, `Option<Box<dyn T>>`, `Rc<dyn T>` / `Arc<dyn T>`, a bound with two non-marker traits; a standard-member
+name (`clone`, `iter`) on a trait object, which stays with the standard-member gate; a Python ABC or Protocol; a C# or Swift interface (their written types resolve to no class yet); a TypeScript
+interface reached through a re-export barrel. A type with no implementor in the tree, or with an
+implements clause the index cannot place (`impl T for &X`, a blanket `impl<U> T for U`, two same-named implementing
+types), keeps the answer it had; a single candidate that is not proven does too. A C++ subclass reached through a field
+never makes a one-implementor edge, and one subclass of a local or parameter keeps its proven edge unlabelled.
+
+Exact or no row: a type an implementor can join with no clause the index reads keeps the answer it had (the by-name rows) —
+a Java or Kotlin interface or class with an anonymous class or object expression in the tree (`new T() { … }`,
+`object : T { … }`), a Kotlin `fun interface`, a Java interface with one abstract method (a lambda implements it; the
+`equals` / `hashCode` / `toString` it redeclares do not count, and an unrelated same-named interface in another package
+does not make it two), a Kotlin interface with one abstract method in a tree that holds Java (a Java lambda converts it), and a
+Rust trait under a mock attribute (`#[automock]` in any `cfg_attr` spelling writes `MockT`). TypeScript types structurally
+(an object literal or a class with the right members conforms unnamed), so one TypeScript candidate is never an edge, and
+a TypeScript `gate="iface"` row's `cands=K` is a floor. A Rust candidate is a method inside an `impl T for X` block or T's
+own default; an inherent method of X never is, and a supertrait's method keeps the by-name answer. Still unseen: an
+implementor another macro writes (`mock!`, a `macro_rules!` that expands to `impl T for X`, gMock's `MOCK_METHOD` with no
+default above it); a `via="impl"` edge may miss it.
+
+A decline replaces by-name rows, and those rows sometimes named the implementor that runs. On ninja-build/ninja,
+`command_runner_->StartCommand` (3 implementors) and `file_reader_->ReadFile` (4) are now `gate="iface"` declines:
+`--path=Build,Start` no longer routes through the subprocess runner, and the right `ReadFile` is named only under
+`--legend=full` (`cand=`). The qualified-member-name and caller-hop entries measured their rows without this tier.
+
+### Changed — tests: legend byte pins are stair-step targets under a runaway guard
+
+- The five legend size gates keep every pinned number as a target; a registered present-only clause may pass it (printed `OVER-TARGET`), a hard runaway guard fails as a bug signal, and `RIPWIRE_LEGEND_PINS=strict` keeps the old hard pins (tests only; no output change).
+
+### Added — the map shows the type a file is named for when the rank cut left it out (`stem="1"`)
+
+On the default map (also `--json` and the MCP map), a shown file whose top-K rows leave out its stem-namesake type now gains
+that type as one more row after its kept rows, marked `stem="1"` (JSON `"stem":1`) and counted in `shown=`. The namesake is the
+class, struct or interface of that file with the most name subtokens (3+ bytes) found inside the file's lowercased name, and only a
+COMPLETE namesake counts: at least 2 subtokens, every one of the name's 3+ byte subtokens inside the file name (`FormParser` in
+`formparsers.py`; not `BaseHTTPMiddleware` in `base.py`, which names one word of three). Starlette's `formparsers.py` showed only
+`MultiPartException` and `MultipartPart`, and now also shows `FormParser`.
+No kept row is dropped. A file whose kept rows already hold a complete namesake with as many shared subtokens gets none (a kept
+`FormParserError` does not hold off `FormParser`), and so does a test file. Measured on starlette's default map: +278 B on 19,056 B (the loose one-subtoken rule gave 8 rows for +847 B; over the 14 map
+questions of the 163-row set the complete rule costs +5.7 KB where the loose one cost +16.9 KB, with no grade lowered). The idea (a cluster lists its members
+regardless of centrality) was learned from graphify's report; no code was taken. Under `--max-tokens=N` the stem rows are the first to go: none is printed (a stem row is extra bytes that would crowd ranked
+rows out of the budgeted cut) and the root says how many it left out, `stem_cut=N` (JSON `"stem_cut":N`). `RIPWIRE_NO_MAP_STEM=1`
+turns it off; `RIPWIRE_NO_MAP_STEM_TIGHT=1` restores the loose one-subtoken rule.
+Gate: `test/mapstemcheck.sh`.
+
+### Changed — MCP `quality_delta` and `edit_check` fold their bookkeeping rows like the CLI (`show_stale`)
+
+- MCP `quality_delta`: a regression-free answer with stale acks now drops its `sa` rows and carries `stale_by_kind` (the
+  stale count split by ack kind, the same string the CLI prints) and `stale_next` (`show_stale=true`), when that saves at
+  least a quarter of the bytes. Every count stays on the answer. The new boolean argument `show_stale=true` (the CLI
+  `--show-stale` twin) returns the full document unchanged. Measured on ripwire's own tree: 15,015 B to 567 B; on the eight
+  other sweep repos the answer has no stale acks and is byte-identical.
+- MCP `edit_check`: an unchanged contract at git HEAD with no flagged caller answers the verdict and `rows_next=` (the
+  MCP call, `edit_check symbol=SYM limit=N`, that lists the callers), as `--edit-check` already does; `callers=` keeps the count. Median 1.72x smaller on the
+  repos where it applies (1.62x to 3.46x). A dirty tree, a flagged caller, `new_body` previews and an explicit `limit` or
+  `offset` still list every row.
+- It does NOT drop a regression row, a flagged caller or any count: the folded rows are one argument away.
+
+### Added — a posted message class names its handlers (`via="name-key"`, `<handler_rule>` on `--path`)
+
+A Python message framework dispatches by a name the message's class carries: textual's `Message.__init_subclass__` writes
+`cls.handler_name = f"on_{name}"`, and the pump looks the handler up with `cls.__dict__.get( method_name )`. That lookup takes a
+parameter, so it can name every `on_*` method. The class is known where the message is posted, though:
+`self.post_message( Button.Pressed( self ) )` names `Button.Pressed`, and its handler is `on_button_pressed`. Such a post site
+is now a name-key hop to the methods of that name, with `cands=K` beside it. The hop shows in `--impact`
+(`reaches_hedged_via="name-key"`), in the `--path` hedged bridge (at most 16 candidates), and in `near_sink`, where a
+dispatched handler is now `why="declined:N" via="name-key"`, no longer `why="external"`. When `from=` is a poster and the
+posted classes name a `to=` handler, a reachable="0" `--path` also prints `<handler_rule>`. It holds the rule's `p=` and its
+spelling, the functions that read the handler-name attribute with the method each one passes it to (textual:
+`MessagePump._on_message` passes it to `MessagePump._get_dispatch_methods`, the MRO walk), and the posted classes, widest
+first. The handler definitions are listed only when there are at most 16 of them. Above that, the answer gives a count and
+`next=`, never a cut list.
+
+The rule is read from the repo's own source, never from a framework list. It needs a Python `__init_subclass__` with ONE
+top-level write `cls.A = f"P{v}"` (not under an `if`/`else`/`for`/`while`/`try`/`match`), where every assignment of the local
+`v` calls a camel-to-snake converter (a body holding the `[a-z][A-Z]` regex and `.lower()`) on `__qualname__`'s last two parts
+or on `cls.__name__`. A `{namespace}_` branch reads a `namespace="x"` class keyword. A class takes the NEAREST rule base (the
+most derived one); a class below an intermediate class whose own `__init_subclass__` also writes `cls.A` is not named, and two
+unrelated rule bases decline. A base written by name that several classes carry binds only through the deriving file's own
+import. Readers and posters are kept per rule. A post site is a call to a method of a class that reads `.A` outside test
+paths, with a first argument that constructs a subclass: `X( … )`, `self.X( … )`, `Owner.X( … )` or `module.X( … )`.
+
+What it does NOT mean: the name is matched, not traced. Which candidate runs depends on the receiving object's class, and the
+index does not decide that. A hop is never counted in `reaches=`, `reachable=` or `hops=`. The floors are: a variable
+argument (`msg = Tick(); post_message( msg )`); a factory (`events.Click.from_event( … )`); a converter or qualname cut of any
+other shape; `@on( Message )`-decorated handlers (already shown as value refs); and a class body's own `handler_name =`
+(the rule runs after the class body and overwrites it). Gate: `test/handlerrulecheck.sh`.
+
+### Added — `--for` about one function lists that function's callers (name-exact route)
+
+`--for` with a subject that names ONE function (the name-exact route) now also lists that function's callers: a `<callers of= shown= total= capped= next="--impact=…">` section after the file tail — the callers verb's rows with their call sites (`sites_at=`) and `via="name"` hedge, then up to four `d="2"` rows (callers of those callers), at most 16 first-hop rows with the rest counted. A change-propagation question no longer stops at the definition. Default regime and XML only (`--json`, `--token-budget=N`, `--signatures-only`, `--detail=N` unchanged); `RIPWIRE_NO_CALLER_HOP=1` turns it off. Measured on the 39 in-sample MF1-DEV rows: Rule C 5→6 complete, 10→8 missed, 0 rows lower; +0.5–1.3 KB per answer that carries it; the 163 non-sealed round-5 first calls are byte-identical. Those figures are this change alone: composed with the interface-dispatch change (a call on an interface-typed receiver declines instead of listing every same-named method), `mf1-ninja-02` loses required items (outcome unchanged, still partial).
+
+### Fixed — name-key hops: the class family holds in JS/TS and across files, and a wide or d=1-only lookup says so
+
+Four answers about the name-keyed hop (`via="name-key"`) were wrong or silent, found in review. (1) A JavaScript or TypeScript
+`this[ 'handle' + e ]` named every `handle*` method of the tree, not the class family it claimed (`cands=` and
+`reaches_hedged=` were inflated); the family is now the class definition that encloses the call, its ancestors and its subclasses.
+(2) Two classes of the same name in different files (every Django `Command`) counted as one family; a class is now told apart by its
+definition, so `a.py`'s `Shell` no longer reaches `b.py`'s `Shell.do_rm`. (3) A lookup naming more than 16 definitions is not crossed
+by the `--path` bridge, and the answer said nothing: the sink's `<near_sink>` row read `why="external"`, "no indexed way in". It now
+reads `why="declined:N"` (the word a declined call already uses) with `via="name-key" cands="17"`, and so does a narrow lookup whose
+dispatcher the search never reached. (4) `--impact` counts a dispatcher that is a direct name-key hop in `reaches_hedged=` with no
+`<rh>` row to explain it; the root now carries `reaches_hedged_via="name-key"` (and the legend clause) exactly then. A `hasattr` test
+and a JS/TS store `o[ 'p' + e ] = fn` made no call and no longer draw a hop (they remain `<pd>` clues); a function that holds
+only such sites is not a dispatcher. Gate: `test/namekeyhopcheck.sh`.
+
+### Added — name-keyed lookups join both hedged walks (`via="name-key"`)
+
+A function that looks a method up by a name built from a template now hops to the definitions that name fits, in both hedged
+walks. The sites are the template lookups that make a call, which `--callers` already listed as `<pd>` rows: `getattr( self, 'do_' + cmd )`,
+`X.__dict__.get( f"on_{n}" )` in Python, and `o[ 'handle' + e ]` or ``o[ `handle${e}` ]`` in JavaScript and
+TypeScript. The `--path` hedged `<bridge>` crosses such a lookup (`<s … via="name-key" cands=K/>`) when the template names at
+most 16 definitions. `--impact` follows it in its hedged ring, so `reaches_hedged=` counts the dispatcher and its proven
+callers, and a two-hop chain prints `<rh … via="name-key" …/>`. This is slice 7a of issue #375 (a shared capture for calls by
+method name), built on the IX-3 template capture.
+
+What it does NOT mean: the name is matched, not traced. A hop is never counted in `reaches=`, `reachable=`, `hops=` or
+`by_depth=`, and `<bridge proven="0">` stays. A fitting definition may never be looked up at run time. A `self`, `this` or
+`cls` receiver keeps the site's class family only (the class definition that encloses the call, its ancestors and its subclasses),
+so a sibling class's `do_rm` is no candidate, in Python, JavaScript and TypeScript, and a class of the same name in another file
+is another class. A `hasattr( self, 'do_' + c )` test and a store `this[ 'on' + e ] = fn` are still listed as `<pd>` clues but
+draw no hop: neither makes a call through the name. The floors: a lookup by a
+plain variable (`getattr( self, name )`), by a literal name (`getattr( self, "do_ls" )`, `obj[ "m" ]()`, Go
+`MethodByName( "M" )`), or by a template whose literal side is under three identifier characters (`'on' + e`, `f"_{m}"`)
+draws no hop. A name assigned to a local first (`mname = 'do_' + self.command; getattr( self, mname )`) draws no hop either.
+Gate: `test/namekeyhopcheck.sh`.
+
+### Fixed — the middle-hop body and the wrapper follow say what they prove
+
+- A middle hop reached by name (`obj.process(x)` with two `process` definitions) prints its body with `via="name" cands="2"` on
+  the `<b>`, never as if it were the proven callee.
+- A `--for` wrapper follow needs a function or method whose text holds exactly one call site of any kind, that call its last
+  statement: a declined, external or undefined call beside it, logic around it, a loop aggregator or a class field initializer
+  is no wrapper. A C `*out = v;` line counts as a statement; a Python docstring does not.
+- `follow_of=` names the wrapper as its row does (`ChildRunner.launch`), and one answer follows at most 3 bodies; past that
+  `<follow_cut n= next=>` counts the wrappers left and names the first callee.
+
+### Added — a short `--path` answer prints the body of its middle hop
+
+A reached `--path` (and MCP `path_between`) whose chain has 2 hops now prints, after its hop rows, the body of its
+middle hop inside `<bodies of="hops">`: the same `<b>` element `--expand` prints, without callee rows. The endpoints never get a
+body. Each body is whole up to 4000 bytes; a longer one is cut at a line end and says so on the element (`truncated="1"
+lines="1-K/T" next=` the call that serves the rest). A chain of more hops prints no body, and its root carries
+`next="--expand=…"` naming the first middle hop. Inside a `--for` answer's graph-verb block on the CLI, a middle hop whose body the
+answer already prints is not printed twice (MCP `for` has no served set to compare: a known divergence). `RIPWIRE_NO_HOP_BODY=1` turns it off.
+
+Why: `--path=fetch,compose` on hono named `Hono.fetch -> Hono.#dispatch -> compose` and stopped there, while the whole request
+flow (path extraction, router match, Context, the one-handler fast path, compose, error handling) lives in `#dispatch`'s body.
+Measured on the 163-row S1 replay: hono-12 goes from 0 to 6 of 7 required items (✗ -> ◐ by Rule C, ✗ -> ✓ legacy), 0 rows
+lower; 9 of the 15 `--path` rows change, +3.1 KB in total (hono-12 +2.1 KB, kysely-14 +0.5 KB, six longer chains +~90 B of
+`next=` each). The 2-hop gate is measured: 3 hops would add 1.6 KB on one already-complete row, 4 hops 13 KB on two more, and no
+item. On LARGE-DEV one `--for` graph-verb path block gains a middle body (zed `get_any_active_multi_workspace`, +1.0 KB) and seven
+gain only `next=`. Gate: `test/hopbodycheck.sh`.
+
+### Changed — `--path` lists the other definitions of an endpoint whose pick is not provably unique
+
+`--path=fetch,compose` on hono printed `from_defs="7"`, bound one `fetch` and named none of the others, so an agent had to guess a
+`file:name` spelling and retry. When an endpoint's name binds two or more definition groups, the answer (CLI and MCP
+`path_between`) now ends with `<alts side="from|to" of=NAME>`: one compact row per other definition with `p=`, `class=` and a
+pasteable `sel=`, and `decl_only="1"` when the row has no body (a header declaration or an interface contract). Up to 16 rows;
+past that `alts_shown=K defs=N next=--defs=NAME` pages the rest. A definition the answer already prints (the bound one, the
+endpoint of a listed `<pair>`, or a function whose body sits in `<bodies>`) is not listed again, and a C prototype no `#include` ties to a definition is not a second candidate
+(the rule `from_defs`/`to_defs` use), so an endpoint that binds one definition, or a `*` glob endpoint, adds nothing.
+
+### Changed — `--path` prints first the reaching pair whose owner you named
+
+When several definition pairs reach, a pair whose `from=` owner (the `to=` owner only when no pair has a `from=` owner word) equals a word of the path argument as typed
+(words of three letters or more, so in `--path=Loop,matcher.go:extendedMatch` the file name's `matcher` equals `Matcher.Loop`'s owner) now prints first among the chains of the same proof class, marked
+`qword=`; an all-proven chain still leads every hedged one. What it does NOT mean: `qword=` is a name match, not a resolution.
+Answers whose argument names no owner keep their bytes.
+
+### Added — an unreached `--path` prints the bodies of the route it names
+
+A `reachable="0"` `--path` (and MCP `path_between`) that names a route it could not trace — the bridge rows (a poster, the queue
+consumer, the dispatcher) and the `<handler_rule>` readers — now prints those functions' bodies in `<bodies of="route"
+proven="0">`: the bridge rows within 2 hops of `from=` (never `to=`), then the readers, at most 4 bodies (past that `capped="1"`
+and `next=` the first one left out), each whole up to 4000 bytes. Every body is a hedge: one under a crossing carries that hop's
+`via=` and `cands=` (`via="queue" cands="3"`), a reader's carries `via="name-key"`, and none of it enters `reachable=` or `hops=`.
+Inside a `--for` answer's graph-verb block it stays off (that answer serves its own bodies; the one in-sample fire there, a
+vscode `--for`, added 7.7 KB that named nothing the question asked). `RIPWIRE_NO_HOP_BODY=1` turns it off.
+
+Why: textual's `--path=post_message,on_*` named `post_message -> _process_messages_loop -> _dispatch_message` and the reader
+`_on_message`, but the answer to "how does a posted message reach its handler" lives in their bodies (the queue put, the loop's
+get, the bubble to `_parent`). Measured: textual-11 goes from 4 to 6 of 6 required items by Rule C (◐ -> ✓), +7.0 KB.
+
+### Changed — `--path` says when it bound a test or fixture copy of a name
+
+When `--path=A,B` binds `from=` (or `to=`) to a definition inside a test or fixture directory while a definition of the same
+name exists outside them, the root now says so — `from_test="1"` (or `to_test="1"`) — and `next=` runs the same path from the
+nearest other definition that reaches the other endpoint (none reaches: no `next=`). When `next=` prints beside
+`alt=` or `pairs_unlisted=`, that continuation is named `alt_next=` / `unlisted_next=`. The binding itself is unchanged: the answer discloses it, it never re-picks silently. On zed,
+`Editor::backspace` has an evals fixture copy whose chain to `Buffer::edit` is shorter than the editor crate's, so the shortest
+answer could bind the fixture. Answers without such a binding keep their bytes; MCP `path_between` prints the same attributes.
+
+### Fixed — a JS/TS private member resolves as the rows print it: `Hono.#dispatch`
+
+Train 40 started printing owner-qualified names (`n="Hono.#dispatch"`) on `--path`, `--callers` and `--callees` rows, but pasting
+one back failed: `--callees=Hono.#dispatch` answered "not found" and `--path=Hono.#dispatch,compose` exited 1 on hono, because the
+spelling splitter read the `#` as Ruby's `Class#method` separator and saw an empty segment. A `#` that starts a segment is now part
+of the name, so `Owner.#name` and `file:Owner.#name` bind the one private member they name; Ruby `Cart#total` reads as before, and
+`Owner.name` without the `#` still names nothing. Found while grading `--path` answers on hono. Gate: `test/writtenspellingcheck.sh` (1b).
+
+### Fixed — a module `__getattr__` no longer withholds a renamed-import call to a function the module defines
+
+A Python call through a renamed import (`from m import f as g; g()`) stayed undecided whenever `m` defined a module-level
+`__getattr__` (PEP 562), as if `__getattr__` could replace `m.f`. It cannot: Python consults it only for a name the module
+does not bind. The call now binds `m.f` as a proven edge in that case too, and a module `__getattr__` in the calling file no
+longer withholds it either. It still stays undecided when `f`'s definition in `m` sits inside an `if`, `try`, `with`, `match` or
+loop at module scope (it may not run, and `__getattr__` then answers), when `m` writes its namespace dynamically (`globals()[...]`,
+`setattr(...)`), and in every case listed for the renamed-import change. Known limit, unchanged: a module that rebinds a
+name some other way (`vars()[...]`, `locals()[...]`, `exec(...)`, `__dict__[...]`, `sys.modules[__name__].name = ...`) is not
+recognized as a dynamic write, so a pin into it can be wrong, now also in files that define `__getattr__`. On CPython's standard library this restores 11
+call sites (`re.sub`, `re.escape`, `re.compile`, `platform.system`, `platform.architecture`). Gate: `test/pyaliascallcheck.sh`.
+
+### Fixed — Python: annotated fields and `mod.X( … )` constructors type a receiver
+
+`self.f: T`, `self.f: T | None`, `Optional[ T ]` (and `typing.Optional`) annotations now type the field, an annotation types the
+field when the value names no class (`self.f: T | None = None` stays a `T`), but a constructed value beats it, as it does for a
+local (`self.s: Strategy = FastStrategy()` holds a `FastStrategy`), and a constructor called through a module (`self.m = checker.Manager()`,
+`x = checker.Manager()`) types the field or local when the module is in the tree (the written-qualifier check `x: mod.T` already
+used: `requests.Session()` proves nothing). A parameter `p: T | None` is read the same way. Before, only a bare `X( … )` value
+typed anything, so `self.file_checker_manager.start()` bound the caller's own `start` by name (flake8 `Application`, hop 1 of
+`main` → `run_checks` is now proven). A type two in-tree classes share by name stays a split, never proven; a union of two
+classes types nothing. Gate: `test/receiverfixescheck.sh` (Y).
+
+### Fixed — a Python call through a renamed import (`from m import f as g; g()`) now reaches `m.f`
+
+`--callers=f` listed no caller for a function only ever called under its import alias, and the call bound by its local
+spelling instead, to any unrelated definition named `g` (a hedged `via="name"` row). The call now binds m's `f` as a proven
+edge when the rename is the name's one binding where the call runs and `m` is one indexed file that binds `f` only by one
+module-scope definition. It stays undecided (the previous answer) when a parameter, a local, a comprehension target or lambda
+parameter covering the call, an enclosing function, a later module-scope assignment, a `def g`, a `global`, a star import or a
+dynamic namespace write may rebind the name, when two imports of the name disagree (`try: from m import f as g / except: from n
+import f as g`), when the import sits inside another function, and when `m` is a package that only re-exports `f` (a known
+floor). It also stays undecided when `m` itself rebinds `f` after the definition (`from fast import f`, a try-import,
+`f = other`, `f = deco(f)`, a `globals()` write, a `global f` in a function) or ends in a star import that may bind `f`: a
+star import of a file outside the indexed tree (`from _operator import *`) is unknown, so the call keeps the previous answer
+there. The rename is read from the shared binds channel added for CONTRIBUTING slice 2a (`@import.names` / `@import.alias`
+captures → one `RawBind` kind for every language, Python moved onto it with byte-identical output). Gate:
+`test/pyaliascallcheck.sh`.
+
+### Changed — a member row names its owner: `n="Owner.name"` on `--callers`, `--callees`, `--impact`, `--path` and signature rows
+
+A list of `run`, `run`, `run` made the reader work out which class each one belongs to. A row for a member now prints its
+owner from the parser's stored scope (the `sc=` other rows print), in the language's own spelling: `Builder::Build` in C,
+C++ and Rust, `Task#execute` in Ruby (a `def self.x` singleton prints `#` too, because the index does not tell the two
+apart), `Pattern.match` elsewhere. Every spelling is one the selectors already resolve, so a row can be pasted back as
+`--callers=Owner.name`. The owner is printed only when the index defines it as a class, struct, interface, named type or
+module in that language; otherwise the row stays bare: a free function, a type row, a closure, an extent-suspect symbol, a
+C++ namespace-scope function (unless a class of the same name exists in that language, when it prints `Name::f`), and
+every TypeScript, JavaScript, Java, C#, Swift and Kotlin `object` member, whose definitions store no scope today. On a
+signature `<d>` row the owner folds into `n=` and `sc=` is dropped. A `--for` answer about one function lists its callers
+the same way. `--json` keys, `<c>` callee rows, tail rows and the map are unchanged. Measured on the 163 non-sealed
+round-5 first calls (frozen grader): Rule C +12 items, −7 (rake-21, where the grader reads `Task#execute` as no match for
+`execute`), 106 answers byte-identical, net −217 B; on the 39 MF1-DEV questions +12 items, 0 lost. Those figures are this change alone: composed with the interface-dispatch change (a call on an interface-typed receiver declines instead of listing every same-named method), `mf1-ninja-02` and `ninja-14` lose required items (outcomes unchanged). Gate:
+`test/qualnamecheck.sh`.
+
+### Added — queue hand-offs join both hedged walks (`via="queue"`)
+
+A Python producer that puts onto a queue field of its own object (`self.q.put( item )`, `self.q.put_nowait( item )`) now
+hands off to the functions that take from it (`self.q.get()`, `self.q.get_nowait()`) in the same class or a base or subclass
+of it, and to their proven callers in that family, one level up (`message = await self._get_message()`). `--impact` lists
+such a hop as a `<rh … via="queue" … d="1" cands=K/>` row and counts it in `reaches_hedged=`. The `--path` hedged
+`<bridge>` crosses it. On textual, `--path=post_message,_dispatch_message` used to end with no bridge. It now prints
+post_message → `_process_messages_loop` (`via="queue" cands="3"`) → `_dispatch_message`, and `--path=post_message,on_*`
+reaches `on_event` the same way.
+
+What it does NOT mean: a hand-off is not a call. It is never counted in `reaches=`, `reachable=`, `hops=` or `by_depth=`,
+and `<bridge proven="0">` stays. The pairing reads the attribute name, the class family and the argument count: a
+`put( k, v )` or `get( k )` is no queue operation, and a sibling class or another class with the same attribute name never
+pairs. The family is the resolved class: a base counts only where the index proves it (the same-file declaration the clause
+binds to, or an import that names it), never a base spelled the same in another file. `timeout=` and `block=` are the queue
+signature's own keywords and count as no argument (`get( timeout=2 )`, `put( v, block=False )` pair); the floors are that
+a call with any other keyword is read as no queue operation, and that a base imported under an alias (`from a import Base as B`)
+or by a star import draws no hop. A queue the class hands to a worker as an argument, or reads
+through a local alias, has readers this rule does not see, so the readers listed are a floor. The rule reads Python only:
+Go channels, Rust split handles (`mpsc::channel` sender and receiver) and JS/TS event emitters are not covered yet. Gate:
+`test/queuehopcheck.sh`.
+
+### Fixed — `--path`: a `.match()` / `.get()` call on an interface-typed field no longer reads as the built-in when its implementors are one or more than sixteen
+
+A call spelled like a built-in method (`this.router.match( … )`, `this.cache.get( … )`) on a field the class states as an in-tree
+interface is not read as the built-in when the receiver is typed in the tree (the earlier receiver-typed lift). That lift required two to
+sixteen implementors, so two shapes fell back to the built-in reading: an interface with ONE in-tree implementor (no hedged bridge
+crossing and no `reachable="1"`, where the by-name edge of earlier builds had given one) and one with more than sixteen (the sink's
+`<near_sink>` row said `why="external"`, "no indexed way in", although the declined call is one). Now the one-implementor field crosses
+as a hedged `<bridge proven="0">` row `via="declined" cands="1"` (never proven: an open interface may have implementors outside the
+tree), and a sink behind a seventeen-wide interface says `why="declined:N"` with the calling definition. A sixteen-wide set keeps its
+bridge; a seventeen-wide one still has none (the bridge fans out to at most sixteen). A field typed `string` or outside the tree keeps
+the built-in reading. Gate: `test/receiverfixescheck.sh` (F).
+
+### Fixed — Rust: a `&dyn Trait` call never binds a same-file impl by name when the trait's implementor list is open
+
+When a trait's implementors could not all be listed (two same-named implementor types — mdbook's test crate has two `Spy`
+structs —, `impl T for &X`, a blanket impl), the dispatch tier stepped aside and the name tiers bound `renderer.render( … )` on a
+`&dyn Renderer` to the one impl in the caller's file (mdbook `execute_build_process` → `TestRenderer::render`, via="name"). Now
+the call declines as `<dc gate="iface">` over every bodied method of that name inside one of the trait's `impl T for X` blocks
+(plus the trait's own default): mdbook's five renderers. It is never a proof (a macro-made impl writes no body the index sees),
+an open list with a single candidate (the trait's default) declines too, never a by-name inherent method of the caller's file, an
+`impl other_crate::Renderer for X` is no in-tree implementor, and a trait name another in-tree type shares answers nothing. Every `gate="iface"` row now lists its non-test candidates first
+(`cand=` order on `--legend=full`; the set and its count are unchanged). Gate: `test/receiverfixescheck.sh` (R).
+
+### Added — Rust functions stored in struct fields are joined to the `(x.f)( … )` calls through those fields (`--callers`, `--callees`, `--for`)
+
+A Rust function stored in a struct field — a struct expression (`CallEval { eval: direct_eval }`, `Self { eval }`), a value
+wrapped in `Box::new` / `Rc::new` / `Arc::new`, a field assignment (`self.h = h`), or an argument of a registrar reached by a
+path call that stores its parameter there (`CallEval::new( stack, eval_block_with_early_return::<D> )` with `Self { …, eval }`
+in its body; a method's `self` is position 0) — is now joined to the calls through that field, `(self.eval)( … )` (the only
+spelling Rust has for calling a function-valued field). `--callers` gains `called_by= called_at= via= cands=K` on a `<vr>`
+row, `--callees` lists `<vs through="self.eval" slot="CallEval.eval" targets=K>`, and `--for` prints `slot_by=` /
+`slot_fields="F=K@C"` on shown rows. A slot type, a stored function and a registrar are the in-tree definition their path AS
+WRITTEN reaches: a module path (`crate::a::Cfg`, `super::eval::f`, `mod a; a::f`) the one file it names, never the writing
+file's own namesake; a path led by an in-tree crate's name that crate; a bare name its own file's, else its crate's, else the
+repo's only one in a crate the file `use`s (`Self` is the impl type). `std` / `core` / `alloc`, an out-of-tree crate
+(`use tokio::spawn`, `use extcrate::Hook`), a `use … as` rename or an unknown module reach no in-tree definition: no join. Two
+crates' same-named structs are two slots; a bare name in a file that `use`s an out-of-tree glob (`use extcrate::*`) is its own
+file's definition only, since another file's namesake is one guess beside the glob's (it joins by the field name, `via="slot-name"`); a `self.f` call is typed
+(`via="slot"`), a call or store through another receiver joins by the field name only (`via="slot-name"`, `~` on `--for`). Not
+joined (floors): a closure stored in a field, a method-call registrar (`r.set( f )`), a value inside a macro, an enum variant's
+field, a value or registrar inside an inline `mod m { … }` (including `#[cfg(test)] mod tests`: its functions are module
+members). Rust value references are read only as path-call arguments and field stores: a method-call argument
+(`iter().map( helper )`), `let g = f`, an array element or a returned function is not read, so `--safe-delete` / `--dead-code`
+can still call such a function unreferenced. Every row is a MAY-call clue, never a proven call and never in `count=`. Measured on nushell (`CallEval.eval`, called
+by `CallEval::run` / `run_prebound`). Gate: `test/fnslotcheck.sh` (R*/N8-N12/X2/F3 arms).
+
+### Fixed — Rust files using an empty `+ use<>` bound (precise capturing) no longer lose every impl owner
+
+The bundled Rust grammar predates precise capturing (Rust 1.82). It reads a `use<..>` bound as a generic type named
+`use`, and an EMPTY list (`-> impl Future<Output = T> + use<>`) needs a missing type node; around a long enough
+function body the parser's recovery then turned the WHOLE file into one error node (`--skipped`: `err_ratio="1.000"`),
+so every method in it was indexed as a free `fn` with no owner and `Type::method` selectors did not bind. Measured on
+the zed repository: 25 of 2,033 Rust files, including the workspace pane, the workspace itself and the language
+buffer. A Rust file whose first parse holds error bytes is now parsed a second time with its precise-capturing bounds
+replaced by spaces (every byte offset and line unchanged), and the second parse is kept only when it holds strictly
+fewer error bytes, the rule the C-family member-macro re-parse already uses. On zed: 0 files left at err_ratio >= 0.5
+(was 25); in those 25 files method rows rose from 1,601 to 2,925 and scope-less `fn` rows fell from 1,502 to 231;
+`Pane::save_item`, `Workspace::new_local` and the language crate's `Buffer::edit` now bind. A `use<..>` list names only
+generic parameters and lifetimes already in scope, so nothing the index records comes from the blanked bytes.
+`--skipped` discloses each such file (`why="use-bounds-blanked"`, `use_bounds_blanked=` on the row,
+`use_bounds_blanked_files=` on the root). It does NOT teach the grammar the construct: a file whose first parse has
+no error bytes (a short body recovers with a zero-width missing node) is not re-parsed, and nushell, mdbook and the
+other in-sample Rust repositories, which do not use the bound, parse byte-for-byte as before.
+
+### Added — Rust receivers typed by their written type: parameters, `let` bindings and struct fields
+
+A Rust member call used to bind every in-tree method of its name, hedged `via="name"` (or, for a standard-member name such
+as `iter` or `push`, was declined), because Rust recorded no parameter, local or field type. Now a receiver written as a
+type proves that type's method: a parameter (`book: &Book`, `&mut T`, `Box<T>`, a path such as `crate::model::Book`, a
+user generic `Stack<u8>`), `let x: T`, a struct literal `T { .. }`, `T::default()`, a closure's typed parameter, and a
+field path below such a receiver or below `self` (`self.book.iter()`, `self.inner.book.spin()`), each field by its own
+written type. The written name resolves exactly as a declared call result does (the item scopes, `use` declarations —
+a `use … as` alias by the path it names, a glob `use super::*` through the module's own `use` — and module paths in force
+at the binding), so `use std::fs::File` beside an in-tree `File` proves nothing. A declared `-> Self`
+result now types its call too (`let b = Book::new(); b.spin()`) when the call's qualifier, resolved the same way, names
+that in-tree type: `fs::File::open()`, `std::path::PathBuf::from()`, a glob's or the prelude's `String::new()` or an
+external crate's glob reach an in-tree namesake only by name and type nothing. The same holds for a result written by
+the type's own name (`-> PathBuf`, a path, `Result<PathBuf, _>` / `Option<..>` / `Box<..>`): a qualified `T::f()` whose `T`
+leads out of the tree types nothing — `std` / `core` / `alloc` (a glob brings such a root only when its module declares
+one, so `mod tests { use super::*; }` never does, and a glob cycle ends with that same answer; a named `use` of the name
+shadows that module's globs, as in Rust), an external crate, a `use` or glob re-export of one, an inline module's re-export of
+one, cfg-gated duplicate `use`s that all lead out — while a `T` the walk cannot follow (cfg-gated `use`s that disagree,
+an unparsed region of the file, a file outside every crate's module tree) keeps the earlier call-result rule; a re-export
+chain longer than the walk's depth cap is cut, and a cut is hedged, never proven onto an in-tree type, whether it falls in a glob's chain or in the written path itself (an in-tree twin cut the same way is hedged too). A generic result's head names its class. On
+rust-lang/mdBook, `--callers=Book::iter` now lists `make_data` (`book: &Book`) and `MDBook::iter` (`self.book.iter()`)
+as plain edges. Stated floor (still declined or hedged): a generic bound `T: Trait`, `dyn` / `impl Trait` and a trait
+written as a type (which implementation runs is dispatch; the interface-dispatch entry reads those receivers), a `type` alias, a glob of a module that only globs, a value behind `Option` / `Result` / `Rc` / `Arc` / `RefCell` /
+`Cell` / `Mutex` / `RwLock`, a tuple-struct field (`self.0`), and any pattern other than a plain name. A macro that
+rebinds a name (`shadow!(b); b.spin()`) is not read: the written type still types the name after it. The wrapper list is
+one data row per family (`Box` transparent; `Option` / `Result` one unwrap layer; the pointers and cells hide their argument).
+
+### Fixed — `--dead-code` and `--safe-delete` read `static` as internal linkage only in C, C++ and Objective-C
+
+The internal-linkage evidence behind `--dead-code` rows (and `--safe-delete`'s `dead_code_candidate=`) was a whole-word `static`
+anywhere in the function's signature, in every language. A Python parameter `static=False`, a TypeScript literal type
+`'static' | 'dynamic'` and a Rust `'static` lifetime are the same four letters and no linkage, so public functions in those
+languages were listed as high-confidence candidates. The token now counts only for a language whose row in
+`LangFacts` says the keyword is the storage class (`staticLinkage`: C, C++, Objective-C); a function in the others needs
+other evidence and is not a `<d>` row. Found while adding the `<to>` rows of `--dead-code`.
+
+### Added — `--dead-code` lists library functions that only tests call (`test-only=`)
+
+`--dead-code` now prints `<to n= t= p= l=>` rows after its `<d>` rows: library functions whose every indexed
+caller is test code (a test path, or an in-file test scope). They are not dead and are not in `count=`; the
+index holds no library caller for them. `test-only=N` on the root counts them and is absent at 0. The rows
+carry the same internal evidence as the `<d>` rows (`static`), or a Python module-level def with a
+leading-underscore name or module/package (PEP 8's internal-interface convention). Any whole-word spelling of
+the name in a non-test code file, outside its own signature, keeps a function off the list, so an aliased
+import or a module-level call never leaves a used function on it.
+
+Kept off the list: a def that a `setup.cfg` or `pyproject.toml` entry point names, a def that a package glob-imports
+(`from ._impl import *`), a def that a notebook cell spells, and any `conftest.py` def (pytest's own test file).
+
+Known floors (a candidate, not proof; the default legend names them):
+
+- A use only in a file the crawl does not index (an `.inc` table), in a docs page, or through a name built at run time
+  (`globals()["_cmd_" + name]()`) is invisible.
+- A public helper package such as `testing/` (numpy.testing's shape) is listed as library code when only tests call it.
+- A test helper outside a test path, fixture files, Go `_test` packages outside the `_test.go` file rule and test
+  binaries named only in a build file read as library callers (a miss).
+- A comment, string or namesake mention in a library file keeps a test-only function off the list.
+- Methods are not listed (a class in a private module is often public API).
+
+### Changed — `--path` lists every reaching definition pair when a name has several definitions
+
+`--path=A,B` used to print the first chain one search met when `A` or `B` names several definitions, with nothing to say
+that another pair also reaches: `--path=Loop,extendedMatch` on fzf printed `Terminal.Loop`'s 4 hops while `Matcher.Loop`
+reaches `extendedMatch` in 5 proven hops. When two or more definition pairs reach, the answer now carries
+`pairs_reaching=N` and prints up to three `<pair hops= hedged=>` chains: an all-proven chain before any hedged one, then
+fewest hedged hops, then fewest hops, in the order the endpoint tie-break of #432 (thanks @mpapis) set for `--connect`, which
+now shares the one rank. `hedged=` counts the chain's `via=`/`prov="split"`/`anchor="missing"` rows, so a chain bound by name
+never reads as proven. A to= definition no chain reaches may add one hedged bridge (`bridge="1"`), searched for the first four such definitions; `bridges_unsearched=K` counts the ones past those four. More than three pairs add
+`alt=N`, one `<alt>` row per alternative and `next=` running the first; a chain whose tail repeats an earlier one stops where
+it meets it (`joins=J`). The chain the old answer printed is always among the printed ones. One reaching pair, no reaching
+pair and a glob endpoint keep their old bytes; MCP `path_between` prints the same rows. What it does NOT mean: the order is
+not a claim that the first pair is the one meant — it lists, it does not pick. 7 of the 15 stored `--path` argvs change. Two definitions nested on one line (JS `compile: function compile`) are one
+site, not two pairs; minified same-line siblings (`class A{render(){}}class B{render(){}}`) stay two. A `to=` name with more than 16 definition groups keeps its one chain and now says so: `pairs_unlisted=G` and
+`next=` to another definition.
+
+### Fixed — TypeScript: `this.f.m()` on a field the class types never binds the caller's own `m`, and never vanishes
+
+A call such as `this.pub.provide( x )` inside `class Executor` with `pub: Provider` was bound by NAME to `Executor.provide`
+itself — a false caller and callee row — and inside `provide` the same call on a `#private` field (`this.#provider.provide()`)
+disappeared: the caller's own method was the one same-file candidate, the self-loop was then dropped, and `--callees` said the
+method calls nothing (kysely `DefaultQueryExecutor`). Now a member call whose receiver is `this.<field>` (`self.<field>` in
+Python) and whose field the class states as an in-tree class or interface other than the caller's class or one of its bases
+never binds the caller's own definition: an interface answers through the dispatch tier as a `<dc gate="iface">` row listing its
+implementors (one structural candidate included, as `cands="1"`), a class through its own member. `#private` field declarations,
+`this.#f = …` and `field!: T` carry their declared type, and an `import type { T }` names T's module, so an interface it imports
+is found. An untyped field, one typed outside the tree, or one typed by a TypeScript `type` alias (a union, an alias of a base class:
+it may hold the caller's own class) keeps the by-name rows (a stated floor). Measured on the 163 stored
+S1 answers: 36 change, Rule C 122 → 123 and legacy 134 → 135 (kysely-06 ✗ → ✓), none lower. Gate: `test/receiverfixescheck.sh` (T).
+
+### Added — a `--for` task about an error carries the callers chain of the narrow-funnel function it ranks
+
+A `--for` task that names an error (a whole word of error, exception, panic, raise, throw, fail, crash, segfault, Traceback and their inflections, or an error type written as one identifier such as `DependencyCycleError` or `dependency_cycle_error`; not a "How does ..." explanation question) but no function now
+carries the same `<callers>` element the name-exact route carries, marked `by="rank"`, when one of the answer's r=1..3 rows is
+ONE function (the callers verb's own resolution, exact or no row) with one to three callers: its 1-hop callers, then their
+callers as `d="2"` rows (at most 4), `next=` the whole caller radius. The seed is read from the rows `<sigs>` emitted; a row
+whose every caller is a test path, or whose every caller was matched by name alone (an interface or duck-typed call), is
+skipped; among the rest the seed is the first whose own body holds a string literal with two of the task's words (the function
+that raises the message), else the first, and only for a statement, not a question. And the element has its own present-only legend clause saying it is a lead found
+by rank, not a function the task named. Everything outside the element and its clause is byte-identical to the answer without
+it (`RIPWIRE_NO_CALLER_HOP=1`); `--json`, `--signatures-only` and an explicit `--token-budget` carry none. Measured on in-sample
+tasks: three error-message questions (two Go large-repository rows, one C++) now name the chain above the function that
+detects the error; it fires on 0 of 163, 1 of 39 and 5 of 56 questions in three in-sample sets (0 %, +0.15 % and +0.35 % bytes). Gate: `test/forcallerhopcheck.sh` (R arms).
+
+### Fixed — a symbol written the way the source spells it now resolves: `Class.method` in TypeScript, `json.dump`, `batcheval.Put`, `ns::Outer::Inner::f`
+
+Every verb that takes a symbol (`--callers`, `--callees`, `--path`, `--impact`, `--connect`, `--expand` and the MCP twins)
+answered "symbol not found" for three spellings that name exactly one definition: a TypeScript/JavaScript method as
+`Class.method` (those grammars store no owner scope, so the owner is now read from the enclosing class), a module, crate or
+package prefix (`asyncio.run`, `json.dump`, Go `batcheval.Put` and `batcheval.Cmd.Eval`, Rust `crate::buf::Buffer::edit` or
+`my_crate::Buffer::edit`; in Python and Rust every prefix component must name a path component, in order, and a skipped path component is the re-export, in
+Go the prefix names the file's own directory and nothing else, in Swift, Kotlin, Java and C# it names directories only: a file there
+is never a namespace), and a C++ owner the index keeps only the innermost label of
+(an out-of-line `ConnectionManagerImpl::ActiveStream::decodeHeaders`; read from the source's namespaces and written qualifier,
+and the written prefix must be the tail of that chain). The new rule runs only after every existing spelling rule found nothing,
+so a symbol that resolved before resolves exactly as before. It binds only when the spelling names one definition (a declaration
+beside its definition on the same owner chain counts as one); two same-named classes, a prefix two crates both satisfy, an
+import alias (`be.Put`), a type alias, a module no path names, a definition nested in a function, method, object literal or
+class expression, a spelling a TypeScript `namespace` member or an object-literal member could carry (`Zone.f`, `NSX.Inner.act` and `Api.run` are refused even
+when a `Zone.ts`, `NSX.ts` or `Api.ts` has its own; an object-literal member only counts against a spelling whose head is a file or directory name), and a C++ chain it cannot read, and a C++ definition inside an unnamed namespace (`namespace A { namespace { struct C {...}; } }`, which `A::C` also names) keep the "not found" answer. Known floors, all refusals: a C++ file with a
+scope-macro line at namespace scope (`FOO_REGISTRATION(x);`) is unreadable, so `HttpConnectionManager::Utility::createSingletons`
+(envoy) still answers "not found", and so does `Router::Filter::decodeHeaders` (envoy), because a same-named
+`Filter::decodeHeaders` in a macro-line file makes the spelling unknown; an anonymous or inline namespace in the middle of a
+C++ chain; a TypeScript interface and an unrelated same-named class in another file bind together as a disclosed `defs=2`. An object literal named like the class (`const Widget = { run() {} }` beside `class Widget { run() {} }` in another file) now makes the spelling unknown (see js-object-literal-owner.md). Measured
+on the 15 failing listed argvs of the round-6 tables: of the 11 that name one definition, 6 now resolve (one Go, two Python, three
+TypeScript, one of them a `--connect`), 2 stay refused behind the C++ macro-line floor, and the 3 that sat in Rust files the grammar
+failed to parse now resolve through the Rust precise-capture re-parse (zed `Pane::save_item`, `Editor::backspace`, `Workspace::new_local`). Gate: `test/writtenspellingcheck.sh`.
+
+### Changed — the versions this change moves, stated once
+
+`kParserVer` 206 → 259 (file tag 260): the Rust written-type receivers carried 202 (203) on their branch and the struct-field
+slot join 204 (205), and its fix rounds changed what 204 extracts, so a cache from that branch would replay the older slot
+rows; the interface-dispatch records carried 210 and 212 on theirs; the JS/TS written-binding records carried 218 and the
+Python rebind-withholding records a 224 placeholder on theirs; train 34 took 226; the Kotlin trailing-lambda capture (#155)
+carried a 228 placeholder and the Rust precise-capture re-parse 229 (230) — it re-parses a Rust file whose first parse holds
+error bytes with its `use<..>` bounds blanked, so the defs differ — and train 37b took 233 (234); the queue hand-off
+records (a Python queue call's keyword arguments on its call reference) carried another 228 placeholder on their branch and
+train 38 took 235 (236); the receiver typing of TS `#private` fields and of Python annotations and `mod.X( … )` constructors
+carried a 237 (238) placeholder on its branch and train 39 took 239 (240); the JS/TS naming records (a bare `module.exports`
+function, a named object literal's binding) carried 238, the name-keyed lookup qualifier 241 (242) and the Go function-valued
+slots 247 (248) on their branches and train 40 took 251 (252); the Rust slot join carried 249 (250) and the Python conditional
+module-scope definition record (a `def` or `class` inside an `if`/`try`/`with`/loop at module scope) 255 (256) on theirs, and the
+C/C++ slot join carries 257 (258) on its, so 259 sits above every live branch and pull-request number. A cache
+written by 0.6.8 is re-parsed once. `kCacheVersion` 36 → 46: a Rust binding typed only through a trait
+(`&dyn T`, `impl T`, a bound), a Rust `impl T for X` block and a JS/TS binding written after its declaration are new binding
+records, as is a JS/TS module-scope object literal's binding name, a Kotlin call's trailing-lambda byte (#155) widens the reference record, and a file's parse-health record gains the
+Rust re-parse count, so a cache written before them is rejected and rebuilt (the branches that added them used 37, 38, 39, 41, 42 and 45). The quality-snapshot scheme moves 22 → 24 (#228: Django and
+unittest hooks and closure self-dispatch change the dead set; old snapshots are not used; the branch used 23). The session legend dictionary is `dictv=05b48ed93c807ee2 entries=981`.
+
 ## [0.6.8] — 2026-10-19
 
 Four batches of reviewed changes in one release. What a user sees:

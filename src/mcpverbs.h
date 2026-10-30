@@ -41,7 +41,11 @@
 #include "slice.h"         // lane/tc-sliceat: the shared --slice / MCP slice def-use core (sliceBundleText — ONE emitter, two surfaces)
 #include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
+#include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
+#include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
+#include "pathpairs.h"     // TRACE-EP: the reaching definition pairs of --path / path_between
+#include "defslookup.h"    // D2 part 5: pathAltsOf — path_between's inline alternatives, as on the CLI
 
 #include <filesystem>      // §B6 M3: the shared root-path existence/directory check (mcpRootRefusal below)
 #include <optional>        // mcpAnswerText / usesText: nullopt is an answer buffer that failed, never an empty answer
@@ -1023,6 +1027,10 @@ inline std::string grepCarrierJson( const GrepCarrier& c, bool singleRoot, std::
         return list + "]";
     };
     std::string out;
+    if( !t.at.empty() )
+    {
+        out += ",\"p\":\"" + mcpdetail::jsonEscape( t.at ) + "\"";   // A3: the CLI <enc> p= twin
+    }
     if( !t.readsAt.empty() )
     {
         out += ",\"reads\":" + std::to_string( c.reads ) + ",\"reads_at\":" + jsonList( t.readsAt );
@@ -2435,6 +2443,11 @@ inline std::string_view mcpPageRankFlags( bool noRoute )
     return noRoute ? std::string_view( " --no-route" ) : std::string_view();
 }
 
+// defined below; forTaskText's FOR-ROUTE-DECLINED block calls them (the path_between / connect twins)
+inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, bool inForBlock = false );
+inline std::string connectText( const std::string& root, const std::vector<std::string>& symbolSpecs, std::uint32_t radius, std::string& err, RedactCounts* redact );
+inline std::string batchCdata( const std::string& s );   // the callers twin's JSON rides as CDATA
+
 inline std::optional<std::string> forTaskText( const std::string& root, const std::string& task, RedactCounts* redact = nullptr,
                                 std::size_t budgetTokens = 0, bool noRoute = false,
                                 McpPageArgs page = {},   // L-W: limit/offset select the FILE PAGE (forpage.h), the CLI --for --limit twin
@@ -2896,6 +2909,40 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     }
     std::string out = std::move( *chosen.doc );
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
+    // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
+    if( std::optional<GraphSubjectArgs> gsa = chooseGraphSubjectArgs( ing, task ); gsa && out.ends_with( "</ctx>" ) )
+    {
+        if( budgetTokens > 0 )
+        {
+            // budget_tokens is a request the block must obey (S2): the verb does not run, the tag names it (held="budget", verb= is the call)
+            out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, GraphSubjectOpen{ .held = true } ) );
+            return out;
+        }
+        std::string verb;
+        GraphSubjectOpen opts;
+        if( gsa->form == GraphSubjectForm::Path )
+        {
+            verb              = pathText( root, gsa->endpoints[0], gsa->endpoints[1], /*inForBlock=*/true ).value_or( std::string() );
+            opts.nameTestHops = graphSubjectNameTestHops( verb );
+        }
+        else if( gsa->form == GraphSubjectForm::Common )
+        {
+            std::string err;
+            verb = connectText( root, gsa->endpoints, connectcfg::kDefaultRadius, err, redact );
+        }
+        else
+        {
+            // the MCP callers twin answers JSON: carried as CDATA text (S1; escaping it cost x1.38 bytes), dialect="json" says why it is not <callers>
+            const std::string json = symbolQueryJson( root, gsa->endpoints[0], /*referencingOnly=*/true );
+            verb                   = json.empty() ? std::string() : batchCdata( json );
+            opts.jsonDialect       = true;
+        }
+        if( !verb.empty() )
+        {
+            out.insert( out.size() - 6, graphSubjectOpenXml( *gsa, opts ) + verb + std::string( kGraphSubjectCloseXml ) );
+        }
+    }
     return out;
 }
 
@@ -3245,8 +3292,9 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     // Reference-as-value round: SYM's binding sites, the CLI --impact's value_refs=/<vrs> by the same call.
     const ValueRefRows  imValueRefs = valueRefCallerRows( ing, valueRefIndexOf( ix ), seeds );
     const BackwardHops  imBackHops( ing, g, valueRefIndexOf( ix ) );                  // HOP1: the CLI --impact's hedged slot ring, by the same calls
-    const ImpactRing    imRing      = impactSlotRing( ing, imBackHops, seeds, reach );
     const PageWindow    ipw         = pageWindow( show.size(), effectiveRowCap( page.limit, 40 ), page.offset );
+    ImpactRing          imRing      = impactSlotRing( ing, imBackHops, seeds, reach, ImpactRingLens{ &impTestReach, rank } );
+    sizeImpactRing( imRing, page.limit, ipw.end - ipw.begin, show.size(), symbol );   // hub-fold (c), as on the CLI
     // idea #6: the CLI arm's rollup, under the same rule — it rides only beside a CUT symbol window
     ImpactTypeFold   typeFold;
     ImpactFileRollup imFiles = impactFileRollup( ing, reach, depth, page.limit, symbol, ipw.end - ipw.begin < show.size(),
@@ -3276,12 +3324,12 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   declinedIfaceLegend( declinedIface > 0 ),                                          // likewise declined_iface=, as on the CLI
                   ( std::string( valueRefsReachLegend( !imValueRefs.rows.empty() ) )                  // exactly when the root carries value_refs=, as on the CLI
                     + valueRefsDepthLegendFor( imValueRefs )                                             // ... and the depth disclosure, as on the CLI
-                    + std::string( slotJoinLegend( imValueRefs.slotCallers, true ) )                 // IX-1: exactly when a <vr> row carries via=, as on the CLI
-                    + impactRingLegend( imRing.hedged > 0, !imRing.rows.empty() )                     // HOP1: exactly when reaches_hedged= / <ring> ride, as on the CLI
+                    + std::string( slotJoinLegend( imValueRefs.slotCallers, true, imValueRefs.slotCands ) )                 // IX-1: exactly when a <vr> row carries via=, as on the CLI
+                    + impactRingLegend( imRing, true )                     // HOP1: exactly when reaches_hedged= / <ring> ride, as on the CLI
                     + impactRollupLegend( !imFiles.rows.empty(), imports.umbrella, impactRollupHedged( imFiles ), !imports.next.empty(),
                                           ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )   // idea #6; FIX1 R1; L7, as on the CLI
                     + defTableLegend( imAttr.groups.multi(), imListing.cut )                                                         // attrib-multidef, as on the CLI
-                    + memberOwnerLegend( anyMemberOwnerRow( ing, std::span<const NodeId>( show ).subspan( ipw.begin, ipw.end - ipw.begin ) ) ) ).c_str(),   // QUALNAME-1, as on the CLI
+                    + memberOwnerLegendFor( memberOwnerRows( ing, std::span<const NodeId>( show ).subspan( ipw.begin, ipw.end - ipw.begin ) ) ) ).c_str(),   // QUALNAME-1, as on the CLI
                   graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), renderDisclosure( prD, DiscloseAs::LegendClause ).c_str() );
     // r27-emitters §P2.1: the listing is capped at 40 by rank. Without shown=/capped= a 40-row answer to
     // "is it safe to change X?" reads as the WHOLE blast radius when it can be 3% of it. Same attributes,
@@ -3301,7 +3349,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
                   ( valueRefsCountAttrXml( imValueRefs.rows.size() ) + valueRefsDepthAttrXml( ing, imValueRefs.depthCut, VrRender{ imSingleRoot, imRootPrefix } ) ), imRootAttr.c_str(),
                   pageDisclosure( ipab, sizeof( ipab ), shownRows, show.size(), ipw.end, page.limit, page.offset, true ),
                   graphCountFloorAttrXml( g ).c_str(), renderDisclosure( prD, DiscloseAs::XmlAttrs ).c_str(),   // M15: gauge + marker
-                  nextAttrXml( nextFlag( "--safe-delete=", symbol ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same root attribute set (mcpclidiffcheck)
+                  nextAttrXml( impactRootNext( ing, imRing, VrRender{ imSingleRoot, imRootPrefix }, nextFlag( "--safe-delete=", symbol ) ) ).c_str()  );   // P3 (L7): the CLI twin's next=, same rule (mcpclidiffcheck)
     rw::emitRaw( mem, defTableXml( ing, imAttr.groups, imListing, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() ).c_str() );   // attrib-multidef
     emitImpactFileRollupXml( mem, ing, imFiles, imSingleRoot ? std::string_view( imRootPrefix ) : std::string_view() );   // idea #6, as on the CLI
     const MemberOwners imOwners( ing );   // QUALNAME-1: n="Owner.name" on a member row, as on the CLI (memberowner.h)
@@ -3700,18 +3748,11 @@ inline McpAffectedResult affectedText( const std::string& root, std::string_view
     return { mcpAnswerText( stream ), false, {}, false };
 }
 
-inline std::string pathKindLegend( const Graph& g, std::span<const NodeId> path )
-{
-    return std::string( viaNameLegend( pathHasNameOnlyHop( g, path ) ) )
-         + viaLinkLegend( pathHasNameOnlyHop( g, path, kEdgeLink ) )
-         + anchorMissLegend( pathHasNameOnlyHop( g, path, 0 ) );
-}
-
 // `path` verb: the shortest directed CALL path from `from` to `to` (does A reach B, and how?). Reuses
 // resolveFocus + shortestPath, exactly as the CLI --path=A,B. Returns the <path>…</path> XML fragment (with
 // reachable="0" hops="0" and no <s> children when B is NOT reachable from A — a valid answer, not an error),
 // or "" (caller → not-found error) when EITHER endpoint fails to resolve.
-inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to )
+inline std::optional<std::string> pathText( const std::string& root, const std::string& from, const std::string& to, bool inForBlock )
 {
     const McpIndex&     ix  = getIndex( root );
     const IngestResult& ing = ix.ing;
@@ -3734,8 +3775,6 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     }
 
     const std::vector<NodeId> pth     = shortestPathAny( g, srcDefs, dstDefs );
-    const NodeId              srcUsed = pth.empty() ? srcDefs.front() : pth.front();
-    const NodeId              dstUsed = pth.empty() ? dstDefs.front() : pth.back();
 
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -3762,40 +3801,79 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     const ToValueRefs ptToValueRefs = toValueRefs( ing, pth.empty(), dstDefs, &valueRefIndexOf( ix ) );
     // PATH-GAP: the CLI --path's gap clause, by the same analysis and emitter (src/pathgaps.h).
     const PathSearchGaps ptGaps = pth.empty() ? pathSearchGaps( ing, g, srcDefs, valueRefIndexOf( ix ) ) : PathSearchGaps{};
-    const PathNearSink        ptNear       = pth.empty() ? pathNearSink( ing, g, dstDefs, ptGaps.cone, valueRefIndexOf( ix ) ) : PathNearSink{};   // ix2-slice, as on the CLI
     std::optional<BackwardHops> ptBackHops;   // HOP1: the CLI's one backward hop provider, as on the CLI
     if( pth.empty() )
     {
         ptBackHops.emplace( ing, g, valueRefIndexOf( ix ) );
     }
+    const PathNearSink        ptNear       = pth.empty() ? pathNearSink( ing, g, dstDefs, ptGaps.cone, valueRefIndexOf( ix ), ptBackHops->names() ) : PathNearSink{};   // ix2-slice, as on the CLI
+    const PathHandlerRule     ptHandler    = pth.empty() ? pathHandlerRule( ing, ptBackHops->names(), srcDefs, dstDefs ) : PathHandlerRule{};   // ON-NAME-HANDLERS-V2, as on the CLI
+    // TRACE-EP: the CLI's reaching definition pairs, by the same call (src/pathpairs.h)
+    const PathPairs ptPairs = pth.empty() || srcGlob || dstGlob ? PathPairs{}
+        : pathReachingPairs( ing, g, srcDefs, dstDefs, pth, std::string( from ) + "," + std::string( to ), [ & ]( std::span<const NodeId> dstMembers )
+          {
+              if( !ptBackHops )
+              {
+                  ptBackHops.emplace( ing, g, valueRefIndexOf( ix ) );
+              }
+              return pathBridge( ing, g, srcDefs, dstMembers, valueRefIndexOf( ix ), *ptBackHops );
+          } );
+    const std::vector<NodeId>& ptShown = pathShownChain( ptPairs, pth );
+    const NodeId               srcUsed = ptShown.empty() ? srcDefs.front() : ptShown.front();
+    const NodeId               dstUsed = ptShown.empty() ? dstDefs.front() : ptShown.back();
     const PathBridge          ptBridge     = pth.empty() ? pathBridge( ing, g, srcDefs, dstDefs, valueRefIndexOf( ix ), *ptBackHops ) : PathBridge{};      // ix2-slice, as on the CLI
     const std::string         ptSinkCallers = pth.empty() && ptGaps.any() && !dstGlob ? pathSinkCallersSelector( ing, *ptBackHops, dstDefs, to, ptSingleRoot, ptRootPrefix ) : std::string();   // HOP1 #6, as on the CLI
-    const std::string         ptKindLegend = pathKindLegend( g, pth );
-    const PathEndpointBinding ptBound      = pathEndpointBinding( g, endpointDefinitionCount( ing, srcDefs ), endpointDefinitionCount( ing, dstDefs ), pth );   // attrib-multidef, as on the CLI
-    const bool                ptHasSplit = ptBound.splitHop;
+    const PathShownMarks      ptMarks      = pathShownMarks( ing, g, ptPairs, pth );   // TRACE-EP: the CLI's legend marks, by the same call
+    const std::string         ptKindLegend = std::string( viaNameLegend( ptMarks.via ) ) + viaLinkLegend( ptMarks.link ) + anchorMissLegend( ptMarks.miss );
+    const PathEndpointBinding ptBound      = pathEndpointBinding( g, endpointDefinitionCount( ing, srcDefs ), endpointDefinitionCount( ing, dstDefs ), ptShown );   // attrib-multidef, as on the CLI
+    const bool                ptHasSplit = ptMarks.split;
+    const PathTestTwin        ptTwin     = srcGlob || dstGlob ? PathTestTwin{} : pathTestTwins( ing, g, { srcDefs, from, ptBound.from }, { dstDefs, to, ptBound.to }, ptShown );   // zed-03, as on the CLI
     const std::vector<std::string_view> ptOwners = pathHopOwners( ing, pth );   // PATH-OWNERS, as on the CLI
+    const bool                ptHasOwner = ptMarks.owner;
+    // PATH-HOP-BODY (src/hopbody.h), as on the CLI
+    const std::string_view    ptBodyRoot  = ptSingleRoot ? std::string_view( root ) : std::string_view();
+    const bool                ptBodiesOn  = !pth.empty() && hopBodiesOn();
+    // F8: no served set here — the MCP `for` answer's graph-verb block calls this twin by name only, so a middle hop that `for`
+    // answer already carries prints a second copy on MCP (the CLI passes its served bodies: runPathServed); a known, bounded divergence
+    const RouteBodiesXml      ptHopBodyEl = ptBodiesOn ? pathHopBodiesXml( ing, pathMiddleHops( ing, g, ptShown, {} ), ptBodyRoot ) : RouteBodiesXml{};
+    const RouteBodiesXml      ptRouteEl   = pth.empty() && !inForBlock && hopBodiesOn() ? pathRouteBodies( ing, g, ptBridge, ptHandler, ptBodyRoot ) : RouteBodiesXml{};   // BODY-ON-ROUTE, as on the CLI
+    const std::string&        ptHopBodies = ptHopBodyEl.xml;
+    std::vector<NodeId>       ptBodyIds   = ptHopBodyEl.ids;   // D2 part 5, as on the CLI: <alts> after the bodies, never listing a definition they printed
+    ptBodyIds.insert( ptBodyIds.end(), ptRouteEl.ids.begin(), ptRouteEl.ids.end() );
+    const PathAlts            ptAlts      = pathAltsOf( ing, g, from, to, srcGlob, dstGlob, ptBound.from ? srcUsed : kNoNode, ptBound.to ? dstUsed : kNoNode, ptPairs, ptBodyIds );
+    std::string               ptRootAttrs = pathTestTwinRootAttrs( ing, pathPairsRootAttrs( ing, ptPairs, ptSingleRoot, ptRootPrefix ).rootAttrs, ptTwin, ptSingleRoot, ptRootPrefix );
+    const std::string         ptHopNext   = ptBodiesOn && ptRootAttrs.find( " next=\"" ) == std::string::npos ? pathMiddleHopNext( ing, ptShown, ptBodyRoot ) : std::string();
+    ptRootAttrs += ptHopNext.empty() ? std::string() : nextAttrXml( ptHopNext );
     rw::emitTo( mem, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                       "graph holds none. {}{}{}{}-->{}", ( unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ) + ptKindLegend
+                       "graph holds none. {}{}{}{}-->{}", ( defAltsLegend( ptAlts ) + unprovenDefsVerbLegend( UnprovenDefsVerb::Path, unprovenDefs > 0 ) + ptKindLegend
                                                            + splitArmLegend( ptHasSplit ) + pathUnboundLegend( !ptBound.from || !ptBound.to )
-                                                           + memberOwnerLegend( anyPathHopOwner( ptOwners ) ) ).c_str(),
+                                                           + memberOwnerLegend( ptHasOwner ) + memberOwnerContainedLegend( ptMarks.ownerContained ) + std::string( pathPairsLegend( ptPairs ) ) + pathOrderLegend( ptPairs, ptTwin )
+                                                           + std::string( pathHopBodiesLegend( !ptHopBodies.empty() ) ) + std::string( pathHopNextLegend( !ptHopNext.empty() ) )
+                                                           + std::string( routeBodyHedgeLegend( ptHopBodyEl.hedged || ptRouteEl.hedged ) ) ).c_str(),
                   ( std::string( toValueRefsLegend( ptToValueRefs.count > 0 ) ) + valueRefsDepthLegend( ptToValueRefs.depthCut.files > 0 ) ).c_str(),
-                  ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + std::string( pathBridgeLegend( ptBridge.found() ) )
-                    + std::string( nearSinkLegend( !ptNear.rows.empty() ) ) + std::string( pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
+                  ( pathGapsLegend( ptGaps.any(), !ptSinkCallers.empty() ) + pathBridgeLegend( ptBridge )
+                    + nearSinkLegend( ptNear ) + std::string( pathHandlerRuleLegend( ptHandler ) ) + std::string( pathRouteBodiesLegend( !ptRouteEl.xml.empty() ) )
+                    + std::string( pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
                   graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rootRelPathsLegend( ptSingleRoot ) );
     rw::emitTo( mem, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                   ex( from ).c_str(), ex( to ).c_str(), ptBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                   ptBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
                   srcDefs.size(), dstDefs.size(), ( unprovenDefsAttrXml( unprovenDefs ) + pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: as the CLI root carries it; ix2-slice: a glob endpoint
-                  pth.empty() ? 0 : 1, pth.empty() ? std::size_t( 0 ) : pth.size() - 1, ptRootAttr.c_str(),
+                  pth.empty() ? 0 : 1, ptShown.empty() ? std::size_t( 0 ) : ptShown.size() - 1,
+                  ( ptRootAttrs + ptRootAttr ).c_str(),
                   graphCountFloorAttrXml( g ).c_str()  );   // M15: gauge + marker
     rw::emitTo( mem, "{}{}", countAttrXmlOrEmpty( "to_value_refs", ptToValueRefs.count ),   // absent at zero, as on the CLI
                   valueRefsDepthAttrXml( ing, ptToValueRefs.depthCut, VrRender{ ptSingleRoot, ptRootPrefix } ).c_str() );   // + the depth cut, as the CLI
     const PathGapsXml ptUnreached = pth.empty()
         ? pathUnreachedXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, { "the connect verb on " + from + "," + to, "uses/impact", "" }, ptSinkCallers )
         : PathGapsXml{};
-    rw::emitTo( mem, "{}>{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
-                  pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ) );
-    emitPathHopRows( mem, ing, g, pth, ptOwners, ptSingleRoot, ptRootPrefix );   // the CLI's own row emitter (defattrib.h)
+    rw::emitTo( mem, "{}>{}{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
+                  pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ),
+                  pth.empty() ? pathHandlerRuleXml( ing, ptBackHops->names(), ptHandler, ptSingleRoot, ptRootPrefix ) : std::string() );
+    emitPathAnswerRows( mem, ing, g, ptPairs, pth, ptOwners, ptSingleRoot, ptRootPrefix );   // the CLI's own row emitter (pathpairs.h / defattrib.h)
+    rw::emitRaw( mem, ptHopBodies.c_str() );      // PATH-HOP-BODY, as on the CLI
+    rw::emitRaw( mem, ptRouteEl.xml.c_str() );    // BODY-ON-ROUTE, as on the CLI
+    rw::emitRaw( mem, ptAlts.xml.c_str() );   // D2 part 5, as on the CLI
     rw::emitRaw( mem, "</path>" );
     return mcpAnswerText( stream );   // nullopt = the buffer lost bytes (dispatch answers -32603), "" stays not-found
 }

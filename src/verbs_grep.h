@@ -61,6 +61,10 @@ std::string grepCarrierAttrs( const rw::GrepCarrier& c, bool singleRoot, std::st
         return out;
     };
     std::string out;
+    if( !t.at.empty() )
+    {
+        out += " p=\"" + std::string( rw::escapeXml( t.at, esc ) ) + "\"";   // A3: the anchor of a path-less vals= @line
+    }
     if( !t.readsAt.empty() )
     {
         out += " reads=\"" + std::to_string( c.reads ) + "\" reads_at=\"" + joined( t.readsAt ) + "\"";
@@ -327,8 +331,13 @@ inline constexpr const char* kGrepCarrierClause =
     "file:line in tier, path, line order (source before tests, then path and line, not the order the uses verb prints); vals= names up to three function values the "
     "carrier itself stores (resolved by name to an indexed function), as slot=function@line: the slot key (absent for a "
     "plain assignment) and the line of the one definition that name resolves to (path:line when it is in another file, no "
-    "line when the name resolves to several); vals_total= counts all of them when more than three. When the top hit sits in a carrier with "
-    "reads=, the root next= is the uses verb on that carrier instead of the at verb. ";
+    "line when the name resolves to several); vals_total= counts all of them when more than three. When the top hit sits in a "
+    "carrier with reads=, the root next= is the uses verb on that carrier instead of the at verb. ";
+
+// A3: p= beside vals= — its own present-only clause (the full legend's reading of the attribute), spliced only when a row on the
+// page PRINTS p= (a reads-only carrier page and a defs=2 row with vals= define no p=). Same rules as the clause above.
+inline constexpr const char* kGrepCarrierAtClause =
+    "p= beside vals= is the carrier's own definition as file:line (a row of one definition), the file a path-less line is in. ";
 
 // L4: the root's disclosure when the memory guard stopped the rich ingest that counts reads (grepReadsIngest) — spliced
 // only on such an answer. Same rules as the clause above.
@@ -1042,6 +1051,7 @@ int emitGrepReport( const MainDispatch& d )
     const GrepPageCarriers         pageCarriers = grepPageCarriers( d, hits, encRows );   // L4, before the legend
     const std::vector<GrepCarrier>& encCarriers = pageCarriers.carriers;
     const bool anyCarrierAttr = std::ranges::any_of( encCarriers, []( const GrepCarrier& c ) { return ( c.readsKnown && c.reads > 0 ) || !c.vals.empty(); } );
+    const bool anyCarrierAt   = std::ranges::any_of( encCarriers, []( const GrepCarrier& c ) { return !grepCarrierAt( c, true, {} ).empty(); } );   // p= prints iff this is non-empty
     const std::vector<GrepHitRef> hitRefs = grepHitRefs( cfg, ing, tierReport, encRows, hits );   // idea #5: ref= (empty off a code+string answer)
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -1190,7 +1200,7 @@ int emitGrepReport( const MainDispatch& d )
                  // parse this verb's header counters by grep, and a quoted numeric example here would be matched first — the quality-delta legend's rule.
                  "After the hit rows, <enc> rows list each DISTINCT enclosing symbol NAME of THIS page (first-appearance order, bounded by the page) with callers= its 1-hop DISTINCT-caller count, "
                  "unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), defs= how many defs the name grouped (only when more than one), cx= complexity; "
-                 "{}{}{}"   // count-floor: kGrepEncFloorClause, present-only (a row on this page carries callers_floor=); L4: kGrepCarrierClause and kGrepCarrierSkipClause, the same
+                 "{}{}{}{}"   // count-floor: kGrepEncFloorClause, present-only (a row on this page carries callers_floor=); L4: kGrepCarrierClause, kGrepCarrierAtClause (p=) and kGrepCarrierSkipClause, the same
                  "amp=/tested= join only when a metrics co-run already computed that lens. On a zero-hit answer a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed "
                  "symbol name (did-you-mean), next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. "
                  // T1: the completeness claim, defined where it appears (no attribute=value literal in these
@@ -1243,7 +1253,7 @@ int emitGrepReport( const MainDispatch& d )
                  // P3 (L7): next= on the root, defined where the reader meets it
                  "next= is the one pasteable follow-up: the at verb on the top hit; the next page (compact legend) when cut; "
                  "the conceptual lens on a zero-hit answer. "
-                 "{}{} -->", anyEncFloor ? kGrepEncFloorClause : "", anyCarrierAttr ? kGrepCarrierClause : "",
+                 "{}{} -->", anyEncFloor ? kGrepEncFloorClause : "", anyCarrierAttr ? kGrepCarrierClause : "", anyCarrierAt ? kGrepCarrierAtClause : "",
                  pageCarriers.skippedAttrs.empty() ? "" : kGrepCarrierSkipClause,
                  grepHonestLexClause( !grepMetaAttr( cfg, pat, esc ).empty(), !found.occ.empty() ), rw::kPageRaiseCapClause );
     }

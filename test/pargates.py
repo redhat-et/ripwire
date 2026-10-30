@@ -323,12 +323,32 @@ GATE_BUDGET_SEC = {
     # red CI leg and the hour spent re-deciding whether it was a hang. 1200 is the tier
     # cppbenchcheck/regexbombcheck already use for exactly this reason. compactlegendcheck's 141 s is real
     # headroom and is left alone -- the row that needs the margin is the one that gets it.
-    "compactlegendcheck.sh":      900,
+    # 2026-10-27 (CI-FLAKES FIX1): 900 -> 1800. PR #444 run 40431017609 (macOS plain shard 1/4) was killed at 1200.8 s (900 declared,
+    # scaled to 1200 by the harness) with every arm up to the kill PASS (the kill landed in the (UD) arm's dialectpin.py, which is
+    # NOT slow: the arm took 62 s of 2115 s below); the same job passed in 871.8 s on run 40417160699. So the wall is the runner's
+    # contention, not one arm. Measured here, build/ripwire plain, per-arm timestamps, host load average 12-13 on 10 cores with
+    # five other lanes' gates running: 2115 s total ((A) 7-52 s, (A-PIN) 25 s, (R) 25 s, (U) 758 s, (F) 29 s, (P) 384 s,
+    # (L) 56 s, (M) 17 s, (N) 201 s, (D) 487 s, (UD) 62 s, (UW) 13 s), against 50-70 s on an idle host: a 30-40x swing for the
+    # same gate. No arm dominates (the largest, (U), is 36 %), so splitting one out would not move the total; the budget is a hang
+    # tripwire, never a perf bar, and 1800 clears the observed CI kill by 1.5x.
+    # 2026-10-27 (CR harvest of PR #457, 4392937909): 1800 -> 3600. Two COMPLETED runs on a loaded host outlast 1800: the 2115 s one
+    # above and a standalone 3072 s run on the train branch (344 PASS / 0 FAIL, host load 12-16). A budget under a measured completed run
+    # reads contention as a hang, and this table's rule is that a generous tripwire costs nothing. 3600 clears 3072 by 17 % (and the
+    # observed CI kill at 1200 by 3x); a real hang still dies, an hour on.
+    "compactlegendcheck.sh":     3600,
     "shapingflagcheck.sh":       1200,
     "collectioncapcheck.sh":      900,
                                           # under -j6, rc=124 at the flat cap on both ubuntu PLAIN legs of run
                                           # 33762934972 (Release legs and macOS fit). Warm replay landed with this row.
-    "cppbenchcheck.sh":          1200,
+    # 2026-10-27 (CI-FLAKES-2): 1200 -> 2400. Killed at exactly 1200 s on macOS plain shard 4/4 three times (10-13 #394, 10-23
+    # #434, 10-27 train-39 run 40474282856 attempt 1); green on the retry at 640 s, and ~856 s is the worst green in the comment
+    # above. The 10-27 runner was ~1.5x slower on EVERY gate (paginationcheck 297 -> 466 s, shapingflagcheck 282 -> 453 s), so the
+    # honest slow-draw figure is worst green 856 s x 1.5 = ~1285 s, ALREADY past the 1200 that killed it; a kill proves only
+    # "> 1200", so the budget takes 2x that floor. The gate itself got ~17 % cheaper in the same change (69 -> 57 ripwire calls: the
+    # lock-restoring re-mine no longer re-scores every arm; test/cppbenchcheck.sh header), which is margin, not the basis. Local
+    # (plain, loaded host, load 8-12): 423 s before, 407 s after with 17 % fewer calls at a 14 % higher per-call mean (load, not
+    # code). A budget here is a hang tripwire, never a perf bar.
+    "cppbenchcheck.sh":          2400,
     "regexbombcheck.sh":         1200,
 }
 parallel_gates = [g for g in gates if g not in exclusive]
@@ -706,6 +726,10 @@ def run(g):
     # (corpus_pruned_dirs=). Created between the two re-crawls of pagingsweepcheck's cold grep (G) pair, it
     # made that pair disagree on main twice (CI runs 34534320580, 34536435376). pargatescheck.sh pins it.
     env = dict(os.environ, RIPWIRE_BIN=binp, PYTHONDONTWRITEBYTECODE="1")
+    # The gate's own inner alarms (a perl `alarm` around one ripwire call) were calibrated on an idle dev machine too;
+    # the factor this harness already applies to the gate's whole budget is handed down so a gate can scale the one
+    # call that is CPU-bound by tree size (cppqualcheck's cold repo-root parse; CI-FLAKES 2026-10-27). pargatescheck pins it.
+    env["PARGATES_BUDGET_SCALE"] = f"{budget_scale:g}"
     scaled_default = int( round( DEFAULT_TIMEOUT_SEC * budget_scale ) )
     if g in GATE_BUDGET_SEC:
         # A declared entry is a FLOOR, not a ceiling: it is the number below which this gate would be a

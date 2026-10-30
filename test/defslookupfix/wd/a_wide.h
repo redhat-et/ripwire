@@ -1,0 +1,1 @@
+void wide( int x );

@@ -1438,7 +1438,8 @@ struct MemberMacroReparse
 };
 
 // §L1 health of the parse this file's symbols will come from. For a C-family file whose FIRST parse holds error bytes,
-// try the re-parse with its semicolon-less member macro invocations blanked, and swap `tree` for it only when
+// try the re-parse with its semicolon-less member macro invocations blanked (for a Rust file: its precise-capturing
+// `use<..>` bounds, src/rustusebounds.h, counted in useBoundsBlanked instead), and swap `tree` for it only when
 // macroreparse::adoptsReparse says it holds strictly fewer error bytes. The returned health then describes the ADOPTED
 // tree (errNodes/errBytes measured on it, wsBytes on the original bytes) and carries macroBlanked; otherwise it is the
 // first parse's, byte for byte what measureFileHealth always returned. A clean first parse pays one comparison.
@@ -1446,16 +1447,24 @@ inline FileHealth measureHealthAdoptingMemberMacroReparse( TSParser* parser, Lan
 {
     const FileHealth first = measureFileHealth( ts_tree_root_node( tree.get() ), bytes );
     work.spans.clear();
-    if( first.errBytes == 0 || !macroreparse::isMacroReparseLang( lang ) )
+    const bool isRust = rustusebounds::isUseBoundsReparseLang( lang );   // the Rust layer (src/rustusebounds.h): use<..> bounds
+    if( first.errBytes == 0 || ( !isRust && !macroreparse::isMacroReparseLang( lang ) ) )
     {
         return first;
     }
-    macroreparse::findMemberMacroInvocations( bytes, work.spans, work.scan );
+    if( isRust )
+    {
+        rustusebounds::findPreciseCaptureBounds( bytes, work.spans );
+    }
+    else
+    {
+        macroreparse::findMemberMacroInvocations( bytes, work.spans, work.scan );
+    }
     if( work.spans.empty() )
     {
         return first;
     }
-    PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: member-macro re-parse" );
+    PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: blank-and-re-parse" );
     macroreparse::blankInvocations( bytes, work.spans, work.blanked );
     TreeGuard  second( parseTree( parser, work.blanked ) );
     FileHealth reparsed = second.get() != nullptr ? measureFileHealth( ts_tree_root_node( second.get() ), bytes ) : first;
@@ -1464,7 +1473,7 @@ inline FileHealth measureHealthAdoptingMemberMacroReparse( TSParser* parser, Lan
         work.spans.clear();
         return first;
     }
-    reparsed.macroBlanked = std::uint32_t( work.spans.size() );
+    ( isRust ? reparsed.useBoundsBlanked : reparsed.macroBlanked ) = std::uint32_t( work.spans.size() );
     tree = std::move( second );
     return reparsed;
 }
@@ -1837,7 +1846,8 @@ enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly };
 /// file's tags pass runs later, at the prewarm flush).
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
-                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full )
+                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full,
+                       std::string_view fileStem = {} )   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
 {
     const bool full = mode == TagsCapture::Full;
     if( cursor == nullptr )
@@ -1893,7 +1903,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             uint32_t         nameRow  = 0;   // 0-based row of the @name identifier
             bool             haveName = false;
             TSNode           nameNode {};    // the @name identifier node — for C++ scope/qualifier (E#4)
-            TSNode           importNamesNode {};   // Python: one clause's target, paired with its optional alias
+            TSNode           importNamesNode {};   // one clause's target, paired with its optional alias (emitCapturedImportBind)
             TSNode           importAliasNode {};
 
             for( uint16_t ci = 0; ci < match.capture_count; ++ci )
@@ -1973,11 +1983,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         {
                             emitCapturedImport( cap.node, fileId, le.lang, src, includes, refs, shortfall );
                         }
-                        else if( full && le.lang == Lang::Python && capSv == "import.names" )
+                        else if( full && capSv == "import.names" )
                         {
                             importNamesNode = cap.node;
                         }
-                        else if( full && le.lang == Lang::Python && capSv == "import.alias" )
+                        else if( full && capSv == "import.alias" )
                         {
                             importAliasNode = cap.node;
                         }
@@ -1988,7 +1998,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
             if( !ts_node_is_null( importNamesNode ) )
             {
-                emitCapturedPythonImportBind( importNamesNode, importAliasNode, fileId, src, binds );
+                emitCapturedImportBind( importNamesNode, importAliasNode, fileId, le.lang, src, binds );
             }
             if( !haveName )
             {
@@ -2300,6 +2310,14 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.kind      = kind;
             d.lang      = le.lang;
             d.name      = isTestMacroBlock ? std::string( nameTxt ) : defNameFromCapture( le.lang, nameTxt );   // LB-E: a title is a display string — see testMacroTitleOf
+            if( defCapSv == "definition.cjsexport" && isCjsModuleExportsItself( nameNode, src ) )
+            {   // lane js-def-naming: the module's own export function, named by the file's stem (ingest_names.h isCjsModuleExportsItself)
+                if( fileStem.empty() )
+                {
+                    continue;   // no path to name it by: no row, as before
+                }
+                d.name = std::string( fileStem );
+            }
             if( le.lang == Lang::Elixir && elixirTarget( roleNode, src ) == "test" )
             {
                 // Static ExUnit title; interpolation was rejected by elixirKeepCapture.
@@ -2559,6 +2577,13 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     if( langFacts( le.lang ).trailingLambdaScopeFns )
                     {
                         r.trailingLambda = kotlinTrailingLambda( roleNode );   // #155: `x.run { }` / `with( x ) { }` — graph.h FalseEdgeRules' Kotlin arm
+                    }
+                    if( isQueueLang( le.lang ) && isQueueCallName( r.name ) )
+                    {
+                        if( const std::uint8_t kw = callKeywords( nameNode, src ); kw != 0 )
+                        {
+                            r.composeRel = pyKwTag( kw );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
+                        }
                     }
                 }
                 refs.push_back( std::move( r ) );

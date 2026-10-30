@@ -51,6 +51,21 @@
 # FLOORS this gate cannot see (the type tier has no clause to read, so no row and no extra): a Python STRING annotation
 # (`c: "Cell"`), a Go type satisfying an interface IMPLICITLY (no implements clause), a qualified Python base (`mod.Base`).
 #
+# ONE INDEX FOR THE SEED LOOP (CI-FLAKES-2, 2026-10-27). src/graph.h now defines 577 distinct names, and the loop used to spawn
+# one `ripwire . --impact=` PROCESS per name: 577 cache loads + graph builds of the 4,400-file repo, ~1.7 s each on an idle
+# 10-core Mac (1980 s with the host loaded, ~870 s on a macos-26 runner, against a 1200 s budget: CI run 40481639494 killed it).
+# The loop now asks ONE persistent `ripwire . --mcp` server (parse once, many warm queries) for the same `impact` document. That
+# is a different front door onto the identical renderer, so three things keep it honest: (a) the doc the loop reads has its
+# root= attribute (the only byte that differs, absolute vs ".") normalized and nothing else; (b) a deterministic sample of seeds
+# (every 15th, plus the first 3 type seeds) is ALSO run through the CLI and must be byte-identical to the MCP doc -- a PASS/FAIL
+# arm of its own, with a planted-difference control; (c) IMPACTPARTITION_CLI=1 runs every seed through the CLI exactly as before
+# (the slow deep path, for a local audit). Every assertion below is unchanged and reads the same documents.
+# WHY NOT THE CLI WITH ONE SHARED WARM --cache=FILE (measured, plain binary, same host, interleaved): that keeps the CLI path for
+# all 577 seeds but not the cost, because a warm CLI call still loads the cache and rebuilds the call graph every time (the parse is
+# not what is slow). 577 calls with one shared cache file: 547 / 684 / 998 s (load avg 6-9) against 156-210 / 106 / 111 s for
+# this MCP loop, 3.3x-9x, past the 2x bar this choice was held to, and the 998 s run is the slow-runner shape that was killed at
+# 1200 s. So the CLI keeps 42 seeds here and the byte-parity arm above is what ties the two doors together.
+#
 # Usage:  bash test/impactpartitioncheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/impactpartitioncheck.sh
 # Exits non-zero on any failure; prints PASS/FAIL per check, ALL PASS on success.
 
@@ -65,7 +80,7 @@ echo "impactpartitioncheck: BIN=$BIN"
 cd "$ROOT"
 
 ROOT="$ROOT" python3 - "$BIN" <<'PY'
-import html, os, re, subprocess, sys
+import html, os, re, select, subprocess, sys, json, time
 sys.path.insert(0, os.path.join(os.environ.get("ROOT", "."), "test"))
 import testrowpaths                                   # THE shared tests_to_run row reader
 
@@ -90,6 +105,63 @@ def norm_path(p):
     return p
 
 SAMPLE_FILE = "src/graph.h"
+
+# ── ONE persistent MCP server answers the per-seed `impact` calls (see the header) ────────────────────────────────────────
+CLI_ONLY = os.environ.get("IMPACTPARTITION_CLI") == "1"
+# A hang guard, not a speed gate: a warm query is milliseconds, the first one may parse the repo cold (the cache may be absent).
+try:
+    _scale = float(os.environ.get("PARGATES_BUDGET_SCALE", "1"))
+except ValueError:
+    _scale = 1.0
+MCP_WAIT = 120.0 * max(_scale, 1.0)
+
+class McpImpact:
+    def __init__(self):
+        # --mcp-legend=inline: the default "session" posture sends the legend once and then trims later answers (the <impact>
+        # root loses its attributes), which is a DIFFERENT document; inline prints every answer as the CLI does.
+        self.p = subprocess.Popen([BIN, ".", "--mcp", "--mcp-legend=inline"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, bufsize=0)
+        self.buf = b""
+        self.nid = 0
+        self.call("initialize", {})
+    def _line(self):
+        end = time.time() + MCP_WAIT
+        while b"\n" not in self.buf:
+            left = end - time.time()
+            if left <= 0 or not select.select([self.p.stdout], [], [], left)[0]:
+                raise TimeoutError("no answer from the --mcp server within %.0f s" % MCP_WAIT)
+            chunk = os.read(self.p.stdout.fileno(), 1 << 20)
+            if not chunk:
+                raise EOFError("the --mcp server closed its stdout")
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        return line.decode("utf-8", "replace")
+    def call(self, method, params):
+        self.nid += 1
+        self.p.stdin.write((json.dumps({"jsonrpc": "2.0", "id": self.nid, "method": method, "params": params}) + "\n").encode())
+        while True:
+            msg = json.loads(self._line())
+            if msg.get("id") == self.nid:
+                return msg
+    def impact(self, symbol):
+        msg = self.call("tools/call", {"name": "impact", "arguments": {"symbol": symbol, "limit": 5000}})
+        try:
+            return msg["result"]["content"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            return ""
+    def close(self):
+        try:
+            self.p.stdin.close()
+            self.p.wait(timeout=30)
+        except Exception:
+            self.p.kill()
+
+def twin_norm(doc):
+    """the one byte the two front doors spell differently: root= is the absolute crawl root over MCP, "." on the CLI"""
+    return re.sub(r' root="[^"]*"', ' root="."', doc, count=1)
+
+def same_doc(a, b):
+    return twin_norm(a) == twin_norm(b)
 
 # ── the sample: every symbol src/graph.h defines, name-deduplicated (an --impact=path:name selector
 #    unions every same-named def within that one file on its own, so a within-file duplicate name is
@@ -159,8 +231,26 @@ type_seed_recs = []
 qualified_rows = [0]      # QUALNAME-1 floor: how many --impact rows printed an `Owner::` prefix (see the join-key note)
 row_count_ok = True
 radius_sum_ok = True
-for name in seed_names:
-    doc = run(["--impact=%s:%s" % (SAMPLE_FILE, name), "--limit=5000"])
+TWIN_STRIDE = 15            # every 15th seed is ALSO run through the CLI and compared byte-for-byte (the twin arm below)
+TWIN_TYPE_EXTRA = 3         # ... plus the first 3 type seeds, whose rollup rows are the richest part of the document
+twin_checked, twin_bad, twin_type_seen = [0], [], [0]
+mcp = None
+if not CLI_ONLY:
+    try:
+        mcp = McpImpact()
+    except Exception as e:
+        no("could not start `%s . --mcp --mcp-legend=inline` for the seed loop: %s (IMPACTPARTITION_CLI=1 runs the CLI path)" % (BIN, e))
+        print("impactpartitioncheck: FAILURES"); sys.exit(1)
+for seed_i, name in enumerate(seed_names):
+    sel = "%s:%s" % (SAMPLE_FILE, name)
+    if mcp is not None:
+        try:
+            doc = twin_norm(mcp.impact(sel))
+        except Exception as e:
+            no("--impact=%s over --mcp: %s" % (sel, e))
+            print("impactpartitioncheck: FAILURES"); sys.exit(1)
+    else:
+        doc = run(["--impact=%s" % sel, "--limit=5000"])
     root = re.search(r'<impact ([^>]*)>', doc)
     if not root:
         no("--impact=%s:%s produced no <impact> root" % (SAMPLE_FILE, name))
@@ -192,6 +282,13 @@ for name in seed_names:
     files_hdr = re.search(r'<files ([^>]*)>', doc)
     files_attrs = dict(re.findall(r'(\w[\w-]*)="([^"]*)"', files_hdr.group(1))) if files_hdr else {}
     is_type_seed = "type_users" in files_attrs
+    if mcp is not None:
+        if is_type_seed:
+            twin_type_seen[0] += 1
+        if seed_i % TWIN_STRIDE == 0 or (is_type_seed and twin_type_seen[0] <= TWIN_TYPE_EXTRA):
+            twin_checked[0] += 1
+            if not same_doc(doc, run(["--impact=%s" % sel, "--limit=5000"])):
+                twin_bad.append(sel)
     rec = None
     if is_type_seed:
         if files_attrs.get("files_capped") != "0":
@@ -240,6 +337,26 @@ for name in seed_names:
             rec["rows"].append((rn, np, tested))
         else:
             observe(fn_rows, def_key, tested)
+
+if mcp is not None:
+    mcp.close()
+    if twin_bad:
+        no("TWIN: %d of %d CLI-compared seeds differ from the --mcp document (first: %s) — the loop above read a different document than --impact prints" % (len(twin_bad), twin_checked[0], twin_bad[0]))
+    elif twin_checked[0] < 20:
+        no("TWIN: only %d seeds were compared with the CLI (floor 20) — the sample went inert" % twin_checked[0])
+    else:
+        ok("TWIN: %d seeds (every %dth + the first %d type seeds) are byte-identical over --mcp and the CLI, root= aside" % (twin_checked[0], TWIN_STRIDE, TWIN_TYPE_EXTRA))
+    # control: the comparison can FAIL — a planted one-byte change and a planted dropped row are both seen
+    probe = run(["--impact=%s:%s" % (SAMPLE_FILE, "Graph" if "Graph" in seed_names else seed_names[-1]), "--limit=5000"])
+    planted = re.sub(r'reaches="(\d+)"', lambda m: 'reaches="%d"' % (int(m.group(1)) + 1), probe, count=1)
+    dropped = re.sub(r'<s [^>]*/>', '', probe, count=1)
+    if probe and same_doc(probe, probe) and not same_doc(probe, planted) and not same_doc(probe, dropped) \
+       and same_doc(probe, probe.replace(' root=".', ' root="/abs/where.', 1)):
+        ok("MUTATION CONTROL (TWIN): a bumped reaches= and a dropped row are NOT the same document; a different root= spelling is")
+    else:
+        no("MUTATION CONTROL (TWIN): the byte comparison cannot tell a planted change from the identical document")
+else:
+    ok("TWIN: skipped — IMPACTPARTITION_CLI=1 ran every seed through the CLI itself")
 
 if qualified_rows[0] > 0:
     ok("QUALNAME-1: %d --impact row(s) printed an Owner::-qualified n= (the join below strips it to --test-gate's bare <u sym=>)" % qualified_rows[0])

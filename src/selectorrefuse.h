@@ -26,6 +26,7 @@
 #include "graph.h"   // filePathContainsRootRel / resolveAllByName — A1 (found-items 2026-09-17): this file's
                       // own diagnosis must match the file half the SAME way resolveAllByNameQualified does
 #include "graph.h"          // splitQualifiedSpec / resolveAllByName — the SAME grammar the callers resolve with
+#include "memberowner.h"    // qualifiedMemberName: the n= a candidate row prints, so the refusal lists names the answer would
 #include "didyoumean.h"     // §P12.1: the near-miss suggester, for the "the name is wrong too" fallback
 #include "degradedscan.h"   // degradedTextHit — the ONE degraded-parse text scan (mcprefusal.h words the same facts for MCP)
 #include "crossref.h"       // worktreeRenameOf — the not-found answer offers the working tree's rename first
@@ -171,11 +172,39 @@ inline std::string atSeedFaultClause( const IngestResult& ing, const AtSeed& see
     return {};
 }
 
+// lane js-def-naming fix 1: the clause for a selector refused because SEVERAL definitions fit it ("" when it is simply absent). A printed
+// p= (`file:LINE`) where several definitions start lists each n= the answer would print, never the innermost of them; a written spelling
+// that several definitions fit says how many and how to qualify it.
+inline std::string fittedRefusalClause( const IngestResult& ing, std::string_view spec, std::string_view retryForm )
+{
+    const std::vector<NodeId> starts = defLineStarts( ing, spec );
+    if( starts.size() > 1 )
+    {
+        const MemberOwners owners( ing );
+        const std::size_t  colon  = spec.rfind( ':' );
+        std::string        clause = " (" + std::to_string( starts.size() ) + " definitions start on line " + std::string( spec.substr( colon + 1 ) )
+                                  + " of " + std::string( spec.substr( 0, colon ) ) + ", so a line selector cannot pick one: ";
+        for( std::size_t i = 0; i < starts.size() && i < kSelectorFilesShown; ++i )
+        {
+            clause += ( i ? ", " : "" ) + std::string( "n=" ) + qualifiedMemberName( owners, ing.symbols[ starts[ i ] ] );
+        }
+        return clause + "; select one by its name, e.g. " + std::string( retryForm ) + std::string( ing.symbols[ starts[ 0 ] ].name ) + ")";
+    }
+    const std::size_t fitted = refusedMatchCount( ing, spec );
+    return fitted != 0 ? " (" + std::to_string( fitted ) + " definitions fit '" + std::string( spec ) + "' and the spelling cannot tell which, so none is chosen; "
+                        "qualify it with its file, e.g. " + std::string( retryForm ) + "FILE:" + std::string( spec ) + ")"
+                      : std::string();
+}
+
 inline std::string selectorFaultClause( const IngestResult& ing, std::string_view spec, std::string_view retryForm )
 {
     if( !spec.empty() && spec.front() == '@' )
     { // a line seed that resolved to nothing — re-run the SAME diagnosis the resolver made and speak it
         return atSeedFaultClause( ing, resolveAtSeed( ing, spec.substr( 1 ) ) );
+    }
+    if( std::string refusal = fittedRefusalClause( ing, spec, retryForm ); !refusal.empty() )
+    {   // lane js-def-naming fix 1: refused over several fitting definitions, not absent
+        return refusal;
     }
     std::string_view file, bareName;
     splitQualifiedSpec( spec, file, bareName );      // did-you-mean and the site match both want the NAME half only
@@ -295,6 +324,13 @@ struct NotFoundAnswer
     std::vector<std::pair<std::string_view, std::string>> echo;
     std::string_view                                       missing;
     NotFoundNear                                           near;
+    std::size_t                                            refused = 0;   // N != 0 (> 1): N definitions fit the selector and none was chosen (a refusal, not an absence); found= stays 0, the contract
+
+    // the legend sentence of a refused answer (refused != 0), spelled with the JSON/XML member by countFieldOrEmpty
+    std::string_view refusedLegend() const
+    {
+        return refused != 0 ? " refused=N: found=0 counts what was listed; N indexed definitions fit the selector and it cannot pick one (a refusal, not an absence), and stderr names them." : "";
+    }
 };
 
 inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool json )
@@ -306,7 +342,7 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
         {
             body += "\"" + std::string( key ) + "\":\"" + jsonStr( value ) + "\",";
         }
-        body += "\"found\":0";
+        body += "\"found\":0" + countFieldOrEmpty( "refused", a.refused, /*json=*/true );
         if( !a.missing.empty() ) { body += ",\"missing\":\"" + std::string( a.missing ) + "\""; }
         if( !a.near.name.empty() ) { body += ",\"near\":\"" + jsonStr( a.near.name ) + "\""; }
         if( a.near.renamed ) { body += ",\"near_renamed\":true"; }
@@ -319,17 +355,18 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
     {
         root += " " + std::string( key ) + "=\"" + std::string( escapeXml( value, esc ) ) + "\"";
     }
-    root += " found=\"0\"";
+    root += " found=\"0\"" + countAttrXmlOrEmpty( "refused", a.refused );
     if( !a.missing.empty() ) { root += " missing=\"" + std::string( a.missing ) + "\""; }
     if( !a.near.name.empty() ) { root += " near=\"" + std::string( escapeXml( a.near.name, esc ) ) + "\""; }
     if( a.near.renamed ) { root += " near_renamed=\"1\""; }
     rw::emitTo( out, "<!-- ripwire {}: NOT FOUND, an answer and a refusal at once. found=0: no indexed definition matched the "
                      "selector echoed on this element, so nothing was listed or counted. Zero means none found, not none exists: "
-                     "an unindexed file, a typo or an uncommitted rename can each hide the definition.{} near=: the indexed name "
+                     "an unindexed file, a typo or an uncommitted rename can each hide the definition.{}{} near=: the indexed name "
                      "to retry with; near_renamed=1: the working tree renamed the selector to it (a DEFINITION of the selector left "
                      "a changed file that now defines near=; a mere mention is not a rename). On the CLI the exit status stays 1, a "
                      "refusal, and stderr carries the same diagnosis; over MCP this document rides the refusal's error data. -->{}/>",
-                 a.tag, a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.", root );
+                 a.tag, a.refusedLegend(),
+                 a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.", root );
 }
 
 }   // namespace rw

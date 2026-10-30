@@ -34,6 +34,63 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-29, train 41b (lane fn-slot-s2 merged onto main 52896f51): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the composed tree
+#   (main's pin 7273ed82… and the fn-slot-s2 branch pin b9174e46… conflicted). Watched text: kParserVer 259 -> 269 (rich 270; above
+#   the lane placeholders 257/259/260 and the live placeholders 259, 261, 263, 265, 267), quality.h's kIngestParserVerMirror with it.
+#   kCacheVersion stays 46 and kQSnapCacheScheme stays 24: no record changes shape and no watched quality.h function moved.
+# 2026-10-28, train 41 (lanes ci-flakes-3, defs-lookup, py-split-marker, fn-slot-2, path-hop-body-fix1, upward-2hop merged onto main
+#   12056c16): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the composed tree (main's pin f4d5b120… and the py-split-marker and fn-slot-2
+#   (127443d5…) branch pins conflicted). Watched text: kParserVer 251 -> 259 (rich 260; above the placeholders 249, 255 and fn-slot-s2's
+#   257), quality.h's kIngestParserVerMirror with it. kCacheVersion stays 46 and kQSnapCacheScheme stays 24: no record changes shape
+#   and no watched quality.h function moved.
+# 2026-10-27, lane py-split-marker (PY-ALIAS-SPLIT-MARKER, base integration/train-40 1318069a; PLACEHOLDER, the train renumbers):
+#   RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: kParserVer 251 -> 255 (rich 256; above fn-slot-2's 249 and train 40's 251/252:
+#   a Python module-scope def/class inside an if/try/with/loop files a second VarDecl `?name`), quality.h's kIngestParserVerMirror with it.
+#   kCacheVersion stays 46 (no record changes shape) and kQSnapCacheScheme stays 24: no watched quality.h function moved.
+# 2026-10-27, train 40 (lanes ci-flakes-2, r1-followup, js-def-naming, testonly-dead, string-keyed, alias-channel, fn-slot, for-route
+#   merged onto main aba4d28e): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the composed tree (main's pin b4eb6e92… and the js-def-naming, string-keyed and
+#   fn-slot (18dfbcac…) branch pins conflicted -> f4d5b120…). Watched text: kParserVer 239 -> 251 (rich 252; above the placeholders 238, 241, 247 and
+#   fn-slot-2's 249) and kCacheVersion 44 -> 46 (js-def-naming's JsObjectLiteral bind record; its placeholder 45), quality.h's two
+#   kIngest*Mirror constants with them. kQSnapCacheScheme stays 24: no watched quality.h function moved (testonly-dead's
+#   symbolHasStaticLinkage / underscorePrivateDef are view-side, outside the manifest).
+# 2026-10-27, lane string-keyed fix round 1 (placeholder 241 / rich 242; the train renumbers and re-pins again): RE-PINNED ONCE with
+#   UPDATE_GOLDEN=1 (b4eb6e92… -> the pin above). The only watched text that moved is kParserVer 239 -> 241 (rich file tag 242; quality.h's
+#   kIngestParserVerMirror with it): an IX-3 Pattern reference at a Python hasattr test or a JS/TS subscript store records qualifier "t".
+#   kCacheVersion stays 44 and kQSnapCacheScheme stays 24: no record layout and no watched quality.h function moved.
+# 2026-10-28, lane fn-slot-s2 fix round 1: RE-PINNED ONCE with UPDATE_GOLDEN=1 (c39e21bb… -> b9174e46…).
+#   Watched text: kParserVer 257 -> 259 (258 is 257's rich tag; a PLACEHOLDER, the train renumbers; a C++ `&Cls::m` row records where it was
+#   written and a class body fact its scope path), its quality.h mirror with it. kCacheVersion stays 44 (no record changes shape).
+# 2026-10-28, lane fn-slot-s2 (C/C++ slots, base lane/fn-slot-2 7c1b7db5): RE-PINNED ONCE with UPDATE_GOLDEN=1 (127443d5… -> c39e21bb…).
+#   Watched text: kParserVer 249 -> 257, a PLACEHOLDER (the train renumbers; C++ member-pointer values and C nested / macro-cast
+#   slot rows are new extraction), its quality.h mirror with it. kCacheVersion stays 44 (no record changes shape).
+# 2026-10-27, lane fn-slot-2 (part 2: Rust slots, base lane/fn-slot f2e6ef1f): RE-PINNED ONCE with UPDATE_GOLDEN=1 (18dfbcac… -> 127443d5…).
+#   Watched text: kParserVer 247 -> 249, a PLACEHOLDER (train 41 renumbers; Rust files now record slot-join value rows, so the dead
+#   set is extraction-dependent), its quality.h mirror with it. kCacheVersion stays 44 (no record changes shape).
+#   kQSnapCacheScheme stays 24: no watched quality.h function moved.
+# 2026-10-27, lane fn-slot (IX1-V2, base integration/train-39 3d03da53): RE-PINNED ONCE with UPDATE_GOLDEN=1 (b4eb6e92… -> 18dfbcac…).
+#   Watched text: kParserVer 239 -> 247, a PLACEHOLDER (train 40 renumbers; Go value refs now include field assignments, method
+#   values and registrar-parameter slot facts, so the dead set is extraction-dependent), its quality.h mirror with it.
+#   kCacheVersion stays 44 (no record changes shape). kQSnapCacheScheme stays 24: no watched quality.h function moved.
+# 2026-10-27, train 39 (lanes ci-flakes, for-small, path-order, receiver-fixes merged onto integration/train-38 aaadc628): RE-DERIVED
+#   ONCE with UPDATE_GOLDEN=1 on the composed tree (the two branch pins f9ffa1bf… / dc0d4c67… conflicted -> b4eb6e92…). Watched text: kParserVer
+#   235 -> 239 (rich 240; receiver-fixes' typing, its placeholder 237) and quality.h's kIngestParserVerMirror with it.
+#   kCacheVersion stays 44 and kQSnapCacheScheme stays 24: no record layout and no watched quality.h function moved.
+# 2026-10-27, lane js-def-naming (PLACEHOLDERS; train 39 renumbers): watched text kParserVer 235 -> 238 (above lane receiver-fixes'
+#   237: a JS bare `module.exports = <anonymous fn>` is a function named by its file's stem; a module-scope `NAME = { … }` literal
+#   records LocalBindKind::JsObjectLiteral) and kCacheVersion 44 -> 45 (that appended bind kind), quality.h's two kIngest*Mirror
+#   constants with them. No watched quality.h function changed, so kQSnapCacheScheme stays. Re-pinned with UPDATE_GOLDEN=1.
+# 2026-10-27, train 38 (lanes composed-hops, queue-hop, trace-ep merged onto integration/train-37b c585f48b): RE-DERIVED ONCE
+#   with UPDATE_GOLDEN=1 on the composed tree (the two branch pins 2a76ac24… / f428b9f4… conflicted -> f9ffa1bf…). Watched text:
+#   kParserVer 233 -> 235 (rich 236; queue-hop's keyword tag on a Python queue call, its placeholder 228) and quality.h's
+#   kIngestParserVerMirror with it. kCacheVersion stays 44 and kQSnapCacheScheme stays 24: no record layout and no watched
+#   quality.h function moved.
+# 2026-10-27, lane receiver-fixes (base integration/train-37b c585f48b): RE-PINNED ONCE with UPDATE_GOLDEN=1 (2a76ac24… -> dc0d4c67…).
+#   Watched text: kParserVer 233 -> 237 (rich 238), a PLACEHOLDER above train 38's 235 / 236 (the train renumbers), its quality.h
+#   mirror with it. kCacheVersion stays 44 (no record changes shape). kQSnapCacheScheme stays 24: no watched quality.h function moved.
+# 2026-10-26, train 37b (lane rust-degraded merged onto integration/train-37a 8ed64e64): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the
+#   composed tree (the two branch pins f7bd2b61… / e7026b6b… conflicted -> 2a76ac24…). Watched text: kParserVer 231 -> 233 (rich 234)
+#   and kCacheVersion 43 -> 44 (above train 36's 231 / 43 and the lane's placeholders 229 / 42), both mirrors with them.
+#   kQSnapCacheScheme stays 24: no watched quality.h function moved (the snapshot is keyed on kParserVer, which moved).
 # 2026-10-25, train 36 (#431, #438, #437 merged onto integration/train-35 5b7924e0): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the
 #   composed tree (the two branch pins 89afd39c… / 957e1fb2… conflicted -> f7bd2b61…). Watched text: kParserVer 228 -> 231 (rich 232)
 #   and kCacheVersion 41 -> 43 (above main / train 35 226 / 40, #438's placeholders 228 / 41, lane rust-degraded's 229 / 42), both
@@ -48,6 +105,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   PR's placeholder: the train renumbers it and re-pins again.
 # 2026-10-24, #228 (Django/unittest hooks, closure self-dispatch): RE-PINNED with UPDATE_GOLDEN=1 after isDeadCandidate gained
 #   pythonFrameworkInvokedSymbol and pythonMethodOwners / pythonDispatchRequests gained the closure host. kQSnapCacheScheme 22 -> 23.
+# 2026-10-26, lane queue-hop fix round 2 (the train renumbers; expect another re-pin then): RE-PINNED with UPDATE_GOLDEN=1
+#   (ec5455c6c9…ca188 -> f428b9f401…14915). The only watched text that moved is kParserVer 226 -> 228 (its rich file
+#   tag 227 with it; quality.h's kIngestParserVerMirror with it): the queue calls' keywords are a new ingest record.
+#   kCacheVersion stays 40 and kQSnapCacheScheme stays 22: no record format and no watched quality.h function moved.
 # 2026-10-24, train 34 (lean2b, fc2-lego-extparent, honest-lex, ind4b-k5-tighten-k5c, hop1, fc3-js-rebind merged onto main
 #   7abad955): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the merged tree (3e88ca157f…36842 -> ec5455c6c9…ca188). Watched text:
 #   kParserVer 224 -> 226 (rich file tag 227; above main / #432 224 / 225, lane ind4b's placeholder 224, lane ind5-glob-imports

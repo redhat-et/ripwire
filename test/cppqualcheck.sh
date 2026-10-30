@@ -88,7 +88,20 @@ fi
 # call (220-300 s) or a true hang still trips it; the plain build keeps 30 s (its call costs ~6-9 s on a loaded Mac).
 ALARM=30
 [ "$BINFLAV" = sanitizer ] && ALARM=90
-echo "cppqualcheck: BIN=$BIN  CORPUS=test/cppqualfix + repo root  flavour=$BINFLAV  alarm=${ALARM}s per call"
+# THE COLD REPO-ROOT PARSE FOLLOWS THE HARNESS SCALE (CI-FLAKES, 2026-10-27). The first call of each verb at the repo root
+# parses all ~4,400 tracked files cold; it is CPU-bound and splits the cores with whatever else the shard runs. Measured on
+# a 10-core Mac with a plain build: 3.8 s alone, 11.7 s next to 3 more cold parses, 28.7 s next to 7 (linear in the load) —
+# and a CI runner has 3-4 cores with `-j 3` gates sharing them, which is the "3-8x multiplier" test/pargates.py already
+# declares and passes down as --budget-scale. macOS Release shard 3 crossed the 30 s alarm on that first call on most
+# runs of 2026-10-26 (CI runs 40380040283, 40417160699, 40382636401, 40388958004: both --uses=selectBaseline and
+# --uses=readWholeFile timed out, the killed parse writing no cache for the second to reuse). The harness exports that
+# factor as PARGATES_BUDGET_SCALE; a COLD repo-root call gets ALARM x it (never less than ALARM: a stray 0.5 or a word
+# does not shrink the guard), a WARM call (cache file present: ~1 s alone) keeps ALARM, and a hang still trips either.
+# A local run has no harness, so the scale is 1 and nothing changes there.
+SCALE="${PARGATES_BUDGET_SCALE:-1}"
+COLDALARM="$( awk -v a="$ALARM" -v s="$SCALE" 'BEGIN { if( s !~ /^[0-9]+([.][0-9]+)?$/ || s + 0 < 1 ) s = 1; v = a * s; printf "%d", ( v == int( v ) ) ? v : int( v ) + 1 }' )"
+case "$COLDALARM" in ''|*[!0-9]*) COLDALARM="$ALARM";; esac
+echo "cppqualcheck: BIN=$BIN  CORPUS=test/cppqualfix + repo root  flavour=$BINFLAV  alarm=${ALARM}s per call (cold repo-root parse: ${COLDALARM}s, harness scale ${SCALE})"
 
 # A call that is KILLED or FAILS prints nothing on stdout, and an empty output reads as a count of '' — which
 # used to surface as "expected 32", a wrong-answer verdict for what was a timeout (CHECKLIST 14). So `run`
@@ -236,8 +249,12 @@ RCDIR="$( mktemp -d )"; trap 'rm -rf "$RCDIR"' EXIT
 # rrun VAR --VERB=SYM… — one repo-root call on that verb's cache: stdout into VAR, returns the call's own rc
 # (non-zero has already printed its TIMEOUT/ERROR line). An arm compares a count only when the call succeeded.
 rrun(){
-    local __out __rc __verb="${2%%=*}"
-    __out="$( run . "${@:2}" --cache="$RCDIR/${__verb#--}.cache" )"; __rc=$?
+    local __out __rc __verb="${2%%=*}" __cache __budget="$ALARM" __cold=0 __t0
+    __cache="$RCDIR/${__verb#--}.cache"
+    [ -e "$__cache" ] || { __cold=1; __budget="$COLDALARM"; }   # no cache file yet: this call parses the whole tree cold
+    __t0="$( date +%s )"
+    __out="$( ALARM="$__budget" run . "${@:2}" --cache="$__cache" )"; __rc=$?
+    [ "$__cold" = 1 ] && printf '  ..    cold repo-root parse (%s): rc=%s in %ss of its %ss budget\n' "$2" "$__rc" "$(( $( date +%s ) - __t0 ))" "$__budget"
     printf -v "$1" '%s' "$__out"
     return "$__rc"
 }
@@ -326,10 +343,17 @@ rrun US --uses=selectBaseline \
 # pyproject.toml through the canonical helper (two call sites, fix 1), and rustFileAlias (called by rustOutsideUses) reads a .rs file to find its
 # `extern crate … as` / `use … as` crate aliases (one more, fix 2) — three new call sites, same helper.
 # 35 -> 36 (lane/ep-manifest): findGroupConsumers reads each indexed .py file once for the entry-point group literals.
+# 36 -> 37 (lane/qn-input, train 37b): the written-spelling seed tier (graph.h resolveAllByWrittenSpelling) reads a C/C++ candidate's
+# source through the canonical helper to read its namespace and class chain — one new call site, same helper.
+# 37 -> 38 (lane/testonly-dead, D1): --dead-code's test-only name vetting (verbs_quality.h dropTestOnlySpelledInLibrary) reads each
+# non-test code file once through the canonical helper — one new call site, same helper, no new fopen/fread.
+# 38 -> 39 2026-10-28 (train 41, lane/upward-2hop): the ranked caller hop's seed choice (forcallerhop.h ForRankedSources::of)
+# reads a candidate's file once through the canonical helper to find its message literal — one new call site, same helper
+# (measured: the one new <u> row at src/forcallerhop.h:322 on the composed tree; main 12056c16 answers 38).
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 36 ] \
-    && ok "repo: --uses=readWholeFile count=36 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 36, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 39 ] \
+    && ok "repo: --uses=readWholeFile count=39 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 39, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \

@@ -43,6 +43,22 @@ struct Must
     constexpr operator T() const noexcept { return value; }
 };
 
+/// Lane qn-input: how a WRITTEN seed prefix names this language's module (graph.h resolveAllByWrittenSpelling). FilePath: the
+/// prefix's head names directories or the file stem of the definition's path, verbatim (`-` read as `_`), and the module — the
+/// one-entity identity — is the file. PackageDir: the same reading, but the module is the directory (Go: a package is its
+/// directory, so build-tag twins are one entity). ConstantPath: FilePath, and a CamelCase segment also reads as its snake_case
+/// file or directory name (Ruby's loader convention: `Shop::Cart` in shop/cart.rb). SourceChain: no path is read; the
+/// definition's enclosing namespaces and classes plus its written qualifier, off the source, are the module (C, C++). DirsOnly:
+/// FilePath without the stem — a file is not a namespace (Swift, Kotlin, Java, C#: `Foo.bar` never names a top-level `bar` in Foo.swift).
+enum class WrittenModuleRule : std::uint8_t
+{
+    FilePath,
+    PackageDir,
+    ConstantPath,
+    SourceChain,
+    DirsOnly,
+};
+
 /// Lane fc2-lego-extparent: which of the file's own import facts can show that an extends / implements clause names a type
 /// from OUTSIDE the tree (graph.h baseBoundOutsideTree), so no in-tree namesake is listed as its base. None: the language's
 /// imports cannot rule one out here (a C# `using`, a Swift `import`, a C++ include: the clause keeps its by-name edge).
@@ -196,6 +212,45 @@ struct LangFacts
     /// records of ingest_jsimports.h captureJsRebindFacts, read by graph.h buildGraph).
     bool writtenBindingUndecided = false;
 
+    /// How a written seed prefix names this language's module (WrittenModuleRule above).
+    WrittenModuleRule writtenModule = WrittenModuleRule::FilePath;
+
+    /// TypeScript: a `namespace` / `module` body holds members the index stores no owner for (the Namespace binds, model.h), so the
+    /// written-spelling tier (graph.h resolveAllByWrittenSpelling) reads the body's name off those binds. The other languages' owners are symbols.
+    bool namespaceBodies = false;
+
+    /// TypeScript, JavaScript: an object literal's members are indexed with no owner (an unnamed container), so the written-spelling
+    /// tier treats such a member as a candidate whose object name is unknown (graph.h resolveAllByWrittenSpelling).
+    bool objectLiteralMembers = false;
+
+    /// The keyword a method names its own instance by, as a receiver chain's ROOT spells it (lane receiver-fixes: a `this.f.m()` /
+    /// `self.f.m()` field receiver, receiverevidence.h foreignFieldOwner / dispatchReceiverOf). `this` unless the language says
+    /// otherwise; elsewhere the same text is an ordinary name (a JS `const self = …`, a Python local `this`) that proves nothing.
+    std::string_view instanceReceiver = "this";
+
+    /// TypeScript, JavaScript: a class member is indexed with no Symbol::scope; its owner is the one class whose body holds it
+    /// (graph.h containedOwnersOf), the rule the written-spelling tier binds `Class.method` by and memberowner.h prints n= by.
+    bool containmentOwners = false;
+
+    /// Python: a leading underscore on a module-level name, or on a module/package path component, marks an internal interface (PEP 8),
+    /// the language's only stand-in for the `static` linkage C/C++ spells; --dead-code's test-only rows read it (quality.h
+    /// underscorePrivateDef). Elsewhere a leading underscore is a naming habit that hides nothing.
+    bool underscorePrivacy = false;
+
+    /// C, C++, Objective-C: the `static` keyword on a free function in its signature is INTERNAL LINKAGE (the storage class), the one
+    /// internal-interface mark --dead-code's rows rest on (quality.h symbolHasStaticLinkage). Elsewhere the word is not that keyword: a
+    /// Python parameter `static=False`, a TypeScript literal type `'static'`, a Rust `'static` lifetime, a string default all spell it
+    /// without meaning linkage, and a function in those languages carries no `static` storage class at all.
+    bool staticLinkage = false;
+
+    /// Lua: a line starting `--` is a comment (elsewhere it is a decrement, `--n;`). hopbody.h isStatementLine reads it when it
+    /// counts a thin delegator's statement lines (lane path-hop-body-fix1, review F3).
+    bool dashDashComments = false;
+
+    /// Python: a string literal as a function's FIRST statement is its docstring, not code; hopbody.h bodyStatementLines does not
+    /// count it (lane path-hop-body-fix1, review F4: a documented one-line delegator is still thin).
+    bool leadingDocstring = false;
+
     /// C++, Objective-C (every type), Go (interfaces): the --lego method contract is read off the type's own body (LegoContract).
     LegoContract legoContract = LegoContract::None;
 };
@@ -206,33 +261,37 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .memberSeparator = "::",
-      .transitiveIncludes = true, .legoContract = LegoContract::EveryType },
-    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport },
+      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .legoContract = LegoContract::EveryType },
+    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
+      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true },
-    { .lang = Lang::Go, .structuralTyping = true, .legoContract = LegoContract::InterfacesOnly },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse },
-    { .lang = Lang::Swift },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .legoContract = LegoContract::EveryType },
+      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true },
+    { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir, .legoContract = LegoContract::InterfacesOnly },
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+      .instanceReceiver = "self" },
+    { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .legoContract = LegoContract::EveryType },
     { .lang = Lang::Markdown, .linkSections = true },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true },
+      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true },
     { .lang = Lang::Bash },
-    { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport },
+    { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
+      .writtenModule = WrittenModuleRule::DirsOnly },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
-      .memberSeparator = "#" },
+      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self" },
     { .lang = Lang::Unknown },
     { .lang = Lang::Json },
-    { .lang = Lang::CSharp, .overloadsWithoutArity = true },
-    { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true },
+    { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly },
+    { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
+      .staticLinkage = true },
     { .lang = Lang::Toml },
     { .lang = Lang::Yaml },
     { .lang = Lang::Php, .memberSeparator = "::" },
-    { .lang = Lang::Lua },
+    { .lang = Lang::Lua, .dashDashComments = true },
     { .lang = Lang::Elixir, .hasInertQuoteRegions = true },
     { .lang = Lang::Dart },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
-      .baseImportEvidence = BaseImportEvidence::JvmImport },
+      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly },
     { .lang = Lang::GDScript },
     { .lang = Lang::Clojure },
 } };

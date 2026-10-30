@@ -5,6 +5,8 @@
 
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
+#include "epmanifest.h"       // D1: collectManifestsAbove — the entry-point targets a setup.cfg / pyproject.toml names (unindexed by the crawl)
+#include "infra/sortutil.h"   // svLess: the explicit byte order the test-only name vetting sorts by (portablebuildcheck #6)
 
 // verbs_quality.h — the quality family, moved VERBATIM from main.cpp in the 2026-08-29 split:
 // the delta-basis plumbing (noBaselineFatalMessage, loadRefPairDelta, resolveDeltaBasis),
@@ -2608,6 +2610,200 @@ int runQualityPanel( const MainDispatch& d )
     return qpanel::writePanelReport( ing, d.g, churnOk ? &churn : nullptr, d.root, preset, cfg.pageLimit, cfg.pageOffset );
 }
 
+// --dead-code's row order, shared by its <d> and <to> rows: file path asc, then line asc, then name asc (stable across runs).
+inline void sortDeadCodeRows( const rw::IngestResult& ing, std::vector<rw::NodeId>& rows )
+{
+    using namespace rw;
+    std::sort( rows.begin(), rows.end(), [ & ]( NodeId a, NodeId b )
+    {
+        const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
+        const std::string& pa = ing.files[ sa.fileId ];  const std::string& pb = ing.files[ sb.fileId ];
+        if( pa != pb )
+        {
+            return pa < pb;
+        }
+        if( sa.line != sb.line )
+        {
+            return sa.line < sb.line;
+        }
+        return sa.name < sb.name;
+    } );
+}
+
+// One --dead-code row, `<TAG n= t= p= l=/>`; name and path may contain & < > " — both are escaped so output is valid XML.
+inline void emitDeadCodeRow( const rw::IngestResult& ing, rw::NodeId id, std::string_view tag, bool singleRoot, std::string_view rootPrefix, std::vector<char>& esc )
+{
+    using namespace rw;
+    const Symbol& s = ing.symbols[ id ];
+    const auto en = rw::escapeXml( s.name, esc );
+    rw::emitTo( stdout, "<{} n=\"{}\" t=\"{}\"", tag, std::string_view( en.data(), en.size() ), symTag( s.kind ) );
+    const std::string_view rp = singleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], rootPrefix ) : std::string_view( ing.files[ s.fileId ] );
+    const auto ep = rw::escapeXml( rp, esc );
+    rw::emitTo( stdout, " p=\"{}\" l=\"{}\"/>", std::string_view( ep.data(), ep.size() ), s.line );
+}
+
+// D1 TESTONLY-DEAD: every in-edge of `id` comes from a test symbol (filter.h isTestSymbol: the shared test-path rule plus the
+// in-file test conventions). Only callers decide it, so an edge a test reaches by name alone can only add a test caller.
+inline bool everyCallerIsTest( const rw::IngestResult& ing, const rw::Graph& g, rw::NodeId id ) noexcept
+{
+    using namespace rw;
+    const auto* ro = g.inEdges.rowOffsets();
+    const auto* ci = g.inEdges.colIndices();
+    return std::all_of( ci + ro[ id ], ci + ro[ id + 1 ], [ & ]( NodeId caller ) { return isTestSymbol( ing, caller ); } );
+}
+
+// D1: `name` spelled whole-word in `text` (file `fileId`) anywhere but inside the signature span of one of `rows` it names.
+inline bool spelledOutsideOwnSignature( const rw::IngestResult& ing, std::string_view text, std::uint32_t fileId, std::string_view name,
+                                        const std::vector<rw::NodeId>& rows ) noexcept
+{
+    using namespace rw;
+    const auto isIdent = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
+    const auto ownSignature = [ & ]( std::size_t at )
+    {
+        return std::ranges::any_of( rows, [ & ]( NodeId id )
+        {
+            const Symbol& def = ing.symbols[ id ];
+            return def.fileId == fileId && def.name == name && at >= def.sigStartByte && at < def.sigEndByte;
+        } );
+    };
+    for( std::size_t at = text.find( name ); at != std::string_view::npos; at = text.find( name, at + 1 ) )
+    {
+        const std::size_t end      = at + name.size();
+        const bool        bounded  = ( at == 0 || !isIdent( text[ at - 1 ] ) ) && ( end == text.size() || !isIdent( text[ end ] ) );
+        if( bounded && !ownSignature( at ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// D1: the text a library file contributes to the name vetting, or nullopt when it contributes none: a test file, a prose file
+// (markdown, .txt: a mention there is documentation, not a use) or an unreadable one. A notebook is CODE in a JSON container,
+// so its code and markdown cells are read as text (docparse::extractIpynb) — a def only a notebook calls is in use.
+// CR 4396503875: an EXCLUDED file (libraryFileExcluded: a test or a prose file) and an UNREADABLE one both return nullopt here,
+// and the vetting tells them apart through libraryFileExcluded — a failed read is not an exclusion.
+inline bool libraryFileExcluded( const rw::IngestResult& ing, std::uint32_t fileId )
+{
+    using namespace rw;
+    const std::string_view rel = rootRelPath( ing, fileId );
+    const std::string      ext = docparse::lowerExtOf( rel );
+    return isTestPath( rel ) || ( ext != ".ipynb" && docparse::isProseExtension( ext ) );
+}
+inline std::optional<std::string> libraryFileText( const rw::IngestResult& ing, std::uint32_t fileId )
+{
+    using namespace rw;
+    if( libraryFileExcluded( ing, fileId ) )
+    {
+        return std::nullopt;
+    }
+    const std::string          ext   = docparse::lowerExtOf( rootRelPath( ing, fileId ) );
+    std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, fileId ) );
+    if( bytes && ext == ".ipynb" )
+    {
+        return docparse::extractIpynb( *bytes );
+    }
+    return bytes;
+}
+
+// CR 4396503875: the stderr lines of a vetting that could not read every library file (each file, then the consequence).
+inline void reportUnreadLibraryFiles( const rw::IngestResult& ing, const std::vector<std::uint32_t>& unread )
+{
+    for( const std::uint32_t fileId : unread )
+    {
+        rw::emitTo( stderr, "ripwire: --dead-code: cannot read {} — its uses of the test-only candidates are unknown\n", rw::rootRelPath( ing, fileId ) );
+    }
+    rw::emitTo( stderr, "ripwire: --dead-code: {} library file(s) could not be read, so no test-only row is listed (a row fewer, never a use missed)\n", unread.size() );
+}
+
+// D1 name vetting: drop every row whose name a NON-test, non-prose indexed file spells whole-word outside the def's own
+// signature, and every row whose module a library file glob-imports (`from ._impl import *` re-exports the module's public
+// names through the package). Text, not references: an aliased import (`from m import dump as binary_dump`) and a module-level
+// call carry no edge to the def, and a comment or string mention costs only a missed row, never a used function on the list.
+// Each file is read once, uncached (the scan may cover the whole tree). The survivors are left in --dead-code's row order.
+inline void dropTestOnlySpelledInLibrary( const rw::IngestResult& ing, std::vector<rw::NodeId>& testOnly )
+{
+    using namespace rw;
+    std::vector<std::string_view> names;
+    names.reserve( testOnly.size() );
+    for( NodeId id : testOnly ) { names.push_back( ing.symbols[ id ].name ); }
+    std::ranges::sort( names, sortutil::svLess );
+    names.erase( std::ranges::unique( names ).begin(), names.end() );
+    std::vector<std::string_view> spelled;
+    std::vector<std::string>      globbed;   // module tails a library file glob-imports (owned: the file text is gone after its turn)
+    std::vector<std::uint32_t>    unread;   // library files the index lists that this vetting could not read
+    for( std::uint32_t fileId = 0; fileId < ing.files.size(); ++fileId )
+    {
+        if( libraryFileExcluded( ing, fileId ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> text = libraryFileText( ing, fileId );
+        if( !text )
+        {   // CR 4396503875: a file whose uses are unknown vets nothing, so no test-only claim is made on its behalf
+            unread.push_back( fileId );
+            continue;
+        }
+        for( std::string_view name : names )
+        {
+            if( spelledOutsideOwnSignature( ing, *text, fileId, name, testOnly ) )
+            {
+                spelled.push_back( name );
+            }
+        }
+        for( std::string_view tail : quality::pythonGlobImportTails( *text ) )
+        {
+            globbed.emplace_back( tail );
+        }
+    }
+    if( !unread.empty() )
+    {
+        reportUnreadLibraryFiles( ing, unread );
+        testOnly.clear();
+        return;
+    }
+    std::ranges::sort( spelled, sortutil::svLess );
+    std::ranges::sort( globbed, sortutil::svLess );
+    std::erase_if( testOnly, [ & ]( NodeId id )
+    {
+        const Symbol& def = ing.symbols[ id ];
+        return std::ranges::binary_search( spelled, std::string_view( def.name ), sortutil::svLess )
+            || std::ranges::binary_search( globbed, quality::pythonModuleTail( rootRelPath( ing, def.fileId ) ), sortutil::svLess );
+    } );
+    sortDeadCodeRows( ing, testOnly );
+}
+
+// D1 fix round 1 (F2): drop every row a package manifest names as an entry point. setup.cfg and pyproject.toml entry-point
+// tables (`console_scripts`, plugin groups) call their target by `module:attr`, an invocation no source file spells; the
+// crawl does not index setup.cfg, so the name vetting never sees it. epmanifest.h already reads both formats (EP-MANIFEST); this
+// asks it for the manifests above the candidates' files and keeps off any def whose name is a target's attribute (last dotted
+// segment). The wide side on purpose: a same-named def in another module is dropped too, never listed.
+inline void dropTestOnlyEntryPoints( const rw::IngestResult& ing, std::vector<rw::NodeId>& testOnly )
+{
+    using namespace rw;
+    std::vector<std::string>        seenDirs;
+    std::vector<epdetail::Manifest> manifests;
+    for( NodeId id : testOnly )
+    {
+        epdetail::collectManifestsAbove( ing, ing.symbols[ id ].fileId, seenDirs, manifests );
+    }
+    const auto isEntryAttr = [ & ]( std::string_view name )
+    {
+        return std::ranges::any_of( manifests, [ & ]( const epdetail::Manifest& m )
+        {
+            return std::ranges::any_of( m.entries, [ & ]( const EpEntry& e )
+            {
+                const std::size_t colon = e.target.find( ':' );
+                if( colon == std::string::npos ) { return false; }
+                const std::string_view attr = std::string_view( e.target ).substr( colon + 1 );
+                return attr.substr( attr.rfind( '.' ) == std::string_view::npos ? 0 : attr.rfind( '.' ) + 1 ) == name;
+            } );
+        } );
+    };
+    std::erase_if( testOnly, [ & ]( NodeId id ) { return isEntryAttr( ing.symbols[ id ].name ); } );
+}
+
+
 // The residual of §6.3's extraction: --dead-code, the only branch left in runQualityViews. main() calls it
 // immediately after runQualityDelta, i.e. in the position the old two-branch chain evaluated it.
 std::optional<int> runQualityViews( const MainDispatch& d )
@@ -2712,7 +2908,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         // --dead-code's own: the per-file sourceFor() cache amortizing the scan across every candidate.
         const auto hasStaticToken = [ & ]( const Symbol& symbol ) -> bool
         {
-            return sourceHasStaticToken( sourceFor( symbol.fileId ), symbol.sigStartByte, symbol.sigEndByte );
+            return quality::symbolHasStaticLinkage( symbol, sourceFor( symbol.fileId ) );
         };
 
         // P2.2 (agent-friction round, 2026-08-29): a symbol whose OWN signature text is a registered
@@ -2789,6 +2985,20 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             }
         }
 
+        // D1 TESTONLY-DEAD: a library function (not itself test code) whose EVERY indexed caller is a test symbol
+        // (filter.h isTestSymbol: the shared test-path rule plus the in-file test conventions). Not dead and never in
+        // count=: a test reaches it, a library caller nowhere in the index does. Only callers decide it, so an edge a
+        // test reaches by name alone can only add a test caller, never hide a library one. Decorated and value-held
+        // defs stay off (a registry or table may be the library's use). The name vetting below drops any row whose
+        // name a non-test code file spells at all (a module-level call, an aliased import, a value), so a site the call
+        // graph did not attribute cannot leave a used function on this list.
+        std::vector<NodeId> testOnly;
+        const auto testOnlyCandidate = [ & ]( const Symbol& s ) -> bool
+        {
+            return !isTestSymbol( ing, s.id ) && !quality::isConftestFile( ing.files[ s.fileId ] ) && !quality::pythonDecoratedDef( s, sourceFor( s.fileId ) ) && !dcVri.isValueReferenced( s.id )
+                && everyCallerIsTest( ing, g, s.id );
+        };
+
         // collect candidates: in-degree == 0, not exported, sorted for determinism
         std::vector<NodeId> candidates;
         candidates.reserve( 64 );
@@ -2806,7 +3016,10 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             {
                 continue; // may be instantiated by external TUs
             }
-            if( !hasStaticToken( s ) )
+            // D1 TESTONLY-DEAD: Python's module-private convention is internal-interface evidence for the test-only rows
+            // ONLY; a zero-caller row (count=) still needs the `static` token, exactly as before.
+            const bool staticLinkage = hasStaticToken( s );
+            if( !staticLinkage && !quality::underscorePrivateDef( rootRelPath( ing, s.fileId ), s ) )
             {
                 continue; // external linkage may be an entry point/API
             }
@@ -2821,7 +3034,15 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             const std::uint32_t inDeg = inRo[ s.id + 1 ] - inRo[ s.id ];
             if( inDeg != 0 )
             {
+                if( testOnlyCandidate( s ) )
+                {
+                    testOnly.push_back( s.id );   // vetted by name below, against every non-test reference
+                }
                 continue;
+            }
+            if( !staticLinkage )
+            {
+                continue; // Python private, zero callers: no `static` evidence, so never a count= row
             }
             if( isRegisteredMacroSymbol( s ) )
             {
@@ -2847,21 +3068,12 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             candidates.push_back( s.id );
         }
 
-        // deterministic order: file path asc, then line asc, then name asc (stable across runs)
-        std::sort( candidates.begin(), candidates.end(), [ & ]( NodeId a, NodeId b )
+        sortDeadCodeRows( ing, candidates );   // deterministic order: file path asc, then line asc, then name asc
+        if( !testOnly.empty() )
         {
-            const Symbol& sa = ing.symbols[a];  const Symbol& sb = ing.symbols[b];
-            const std::string& pa = ing.files[ sa.fileId ];  const std::string& pb = ing.files[ sb.fileId ];
-            if( pa != pb )
-            {
-                return pa < pb;
-            }
-            if( sa.line != sb.line )
-            {
-                return sa.line < sb.line;
-            }
-            return sa.name < sb.name;
-        } );
+            dropTestOnlyEntryPoints( ing, testOnly );
+            dropTestOnlySpelledInLibrary( ing, testOnly );
+        }
 
         rw::emitTo( stdout, "<!-- ripwire dead-code: source functions with internal linkage and no caller found in the indexed tree — a name-based "
                      "graph reading, not a confidence judgement (dynamic dispatch, reflection and macro-generated callers are invisible to it). "
@@ -2880,10 +3092,22 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "TestCase); decorated-excluded= counts decorated Python defs, excluded because a decorator MAY register "
                      "them (wrappers such as @staticmethod/@property/@lru_cache are included, and register nothing): Python has "
                      "no internal linkage, so such a row rested on a `static` token alone. Both are FLOORS, never findings, "
-                     "absent at 0. A `static` inside a comment is not linkage evidence. "
+                     "absent at 0. A `static` inside a comment, or in a language where it is not the storage class (a Python "
+                     "parameter, a TypeScript literal, a Rust lifetime), is not linkage evidence. "
                      "Graph evidence is local to the indexed tree; verify before deleting. {}{}-->",
                      // Reference-as-value round: beside its hyphenated siblings above, exactly when the root carries it.
-                     ( std::string( valueRefExcluded > 0 ? "value-ref-excluded=N (absent when 0): internal functions kept off this list because "
+                     ( std::string( testOnly.empty() ? "" : "test-only=N (absent when 0): library functions whose every indexed caller "
+                                                           "is test code (a test path, or an in-file test scope), listed as <to n= t= p= l=> rows "
+                                                           "after the d rows on the first page; not dead and not in count=, the index holds no "
+                                                           "library caller. Internal evidence as for d rows, or a Python leading-underscore name or "
+                                                           "module/package (module-level defs); the name spelled whole-word in any non-test code file, outside its own "
+                                                           "signature, or in a setup.cfg or pyproject entry point, or glob-imported (from m import *), keeps it off; "
+                                                           "conftest.py defs are test code. A test helper "
+                                                           "outside a test path, fixture files and test binaries named only in a build "
+                                                           "file read as library callers (a miss), and a public helper package such as testing/ is listed as library code. A candidate, not proof: a use only in an unindexed "
+                                                           "file (an .inc table, setup.py), a docs page or a name built at run time is invisible, so "
+                                                           "verify before deleting. " )
+                       + std::string( valueRefExcluded > 0 ? "value-ref-excluded=N (absent when 0): internal functions kept off this list because "
                                                            "a table, field or argument in ANOTHER function or at file scope holds them as a VALUE "
                                                            "(matched by name; it is not a proven call; the callers verb lists the sites); a function "
                                                            "that only stores itself is still listed. One entity, one reason: a def a reason above "
@@ -2910,8 +3134,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                                          + ( decoratedExcluded == 0 ? std::string() : std::format( " decorated-excluded=\"{}\"", decoratedExcluded ) )
                                          + ( valueRefExcluded == 0 ? std::string() : std::format( " value-ref-excluded=\"{}\"", valueRefExcluded ) )
                                          + rw::valueRefsDepthAttrXml( ing, dcDepthCut, rw::VrRender{ qvSingleRoot, qvRootPrefix } );   // absent when no cut
-        rw::emitTo( stdout, "<dead-code count=\"{}\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"{}\"{}{}{}{}{}{}>",
-                     candidates.size(), registerMacroExcluded, runnerRootAttr,
+        const std::string testOnlyAttr = testOnly.empty() ? std::string() : std::format( " test-only=\"{}\"", testOnly.size() );   // D1: absent at 0
+        rw::emitTo( stdout, "<dead-code count=\"{}\" evidence=\"internal-linkage+zero-callers\" register-macro-excluded=\"{}\"{}{}{}{}{}{}{}>",
+                     candidates.size(), registerMacroExcluded, runnerRootAttr, testOnlyAttr,
                      dcFilterAttr.c_str(),
                      pageDisclosure( dcAb, sizeof( dcAb ), dcPw.end - dcPw.begin, candidates.size(), dcPw.end,
                                      cfg.pageLimit, cfg.pageOffset, false ),
@@ -2920,14 +3145,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         std::vector<char> dcEsc;
         for( std::size_t candidateIndex = dcPw.begin; candidateIndex < dcPw.end; ++candidateIndex )
         {
-            const NodeId candidateId = candidates[ candidateIndex ];
-            const Symbol& s = ing.symbols[ candidateId ];
-            // name and path may contain & < > " — escape both so output is valid XML.
-            const auto en = rw::escapeXml( s.name, dcEsc );
-            rw::emitTo( stdout, "<d n=\"{}\" t=\"{}\"", std::string_view( en.data(), en.size() ), symTag( s.kind ) );
-            const std::string_view rp = qvSingleRoot ? rw::sarif::rootRelativeUri( ing.files[ s.fileId ], qvRootPrefix ) : std::string_view( ing.files[ s.fileId ] );
-            const auto ep = rw::escapeXml( rp, dcEsc );
-            rw::emitTo( stdout, " p=\"{}\" l=\"{}\"/>", std::string_view( ep.data(), ep.size() ), s.line );
+            emitDeadCodeRow( ing, candidates[ candidateIndex ], "d", qvSingleRoot, qvRootPrefix, dcEsc );
+        }
+        for( std::size_t testOnlyIndex = 0; cfg.pageOffset == 0 && testOnlyIndex < testOnly.size(); ++testOnlyIndex )   // first page only (offset 0): never repeated
+        {
+            emitDeadCodeRow( ing, testOnly[ testOnlyIndex ], "to", qvSingleRoot, qvRootPrefix, dcEsc );
         }
         rw::emitRaw( stdout, "</dead-code>" );
         return 0;

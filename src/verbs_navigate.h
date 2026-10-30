@@ -4,6 +4,7 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
+#include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
@@ -150,10 +151,11 @@ inline std::string notFoundGitRoot( const rw::IngestResult& ing, const rw::Confi
     return ing.realPaths.empty() && cfg.roots.size() == 1 ? std::string( cfg.roots[0] ) : std::string();
 }
 
-inline int refuseNotFoundWithAnswer( const rw::IngestResult& ing, const rw::Config& cfg, const rw::NotFoundAnswer& answer,
+inline int refuseNotFoundWithAnswer( const rw::IngestResult& ing, const rw::Config& cfg, rw::NotFoundAnswer answer,
                                      std::string_view prefix, std::string_view spec, std::string_view retryForm )
 {
     rw::emitTo( stderr, "{}{}{}{}\n", prefix, spec, rw::notFoundRenameClause( answer.near ), rw::selectorFaultClause( ing, spec, retryForm ) );
+    answer.refused = rw::refusedMatchCount( ing, spec );   // js-def-naming fix 1: several definitions fit and none was chosen: refused=N beside found=0
     rw::writeNotFoundAnswer( stdout, answer, cfg.json );
     return 1;
 }
@@ -336,9 +338,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
         const bool        chDiscloseCap = ( pw.end - pw.begin ) < result.size();
         // QUALNAME-1: n="Owner.name" on a member row (memberowner.h) — the rows MF1-NX's <callers> block shares; its legend clause
         // rides exactly when a shown row carries an owner.
-        const rw::MemberOwners chOwners( ing );
-        const bool             chHasOwner = std::any_of( result.begin() + std::ptrdiff_t( pw.begin ), result.begin() + std::ptrdiff_t( pw.end ),
-                                                         [ & ]( rw::NodeId id ) { return !chOwners.ownerOf( ing.symbols[ id ] ).empty(); } );
+        const rw::MemberOwners    chOwners( ing );
+        const rw::MemberOwnerRows chOwnerRows = rw::memberOwnerRows( ing, std::span<const rw::NodeId>( result ).subspan( pw.begin, pw.end - pw.begin ) );
         char              pab[ kPageDisclosureCap ];
 
         const auto [ chNextSelector, chNextIsBare ] = rw::callHierarchyNextSelector( ing, chRows, sym, wantCallers );
@@ -418,13 +419,13 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                            + rw::viaNameLegend( chHasVia, false, cfg.columnar )                   // FE-B: likewise for via="name"
                            + rw::viaLinkLegend( chHasLink )
                            + rw::defTableLegend( chAttr.groups.multi(), chListing.cut ) + rw::splitArmLegend( chHasSplit )   // attrib-multidef: likewise
-                           + rw::memberOwnerLegend( chHasOwner ) ).c_str(),   // QUALNAME-1: likewise, exactly when a shown row names its owner
+                           + rw::memberOwnerLegendFor( chOwnerRows ) ).c_str(),   // QUALNAME-1: likewise, exactly when a shown row names its owner
                          ( std::string( rw::modScopeLegend( chHasModScope ) )   // #60: likewise, exactly when a t="modscope" row is
                            + rw::callSitesAtLegend( chSites.any, chSites.anyCut, rw::kCallSitesPerRowCap ) ).c_str(),   // CALLSITE-AT: likewise for sites_at=/sites_total=
                          ( rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ) + rw::valueRefsLegend( !chRows.valueRefs.rows.empty(), wantCallers )
                            + rw::valueRefsDepthLegendFor( chRows.valueRefs )   // exactly when the root carries the depth disclosure
                            + rw::patternDispatchLegend( !chRows.valueRefs.patternSites.empty() || !chRows.valueRefs.patternWideSites.empty(), wantCallers )
-                           + std::string( rw::slotJoinLegend( wantCallers ? chRows.valueRefs.slotCallers : !chRows.valueRefs.slotSites.empty(), wantCallers ) )   // IX-1: exactly when a slot join rides
+                           + std::string( rw::slotJoinLegend( wantCallers ? chRows.valueRefs.slotCallers : !chRows.valueRefs.slotSites.empty(), wantCallers, wantCallers && chRows.valueRefs.slotCands ) )   // IX-1: exactly when a slot join rides
                            + std::string( rw::closureBlocksLegend( !chClosures.empty() ) ) ).c_str(),   // IX-3: exactly when pattern_dispatch= rides; ix2-slice: exactly when an <in> block rides
                          rw::rootRelPathsLegend( chSingleRoot ),
                          rw::multiRootTableLegend( ing.rootLabels.size() >= 2 ) );
@@ -1060,6 +1061,7 @@ struct SafeDeleteLegendFlags
     bool        patternDispatch = false; // IX-3: pattern_dispatch= / pattern_too_wide= on the root (valuerefs.h)
     bool        patternWideRows = false; // IX-3: the <pdw> rows ride (risk=hedged and a too-wide template can name SYM)
     bool        slotJoin        = false; // IX-1: a <vr> row carries via=slot|slot-name
+    bool        slotCands       = false; // IX1-V2: a <vr> row carries cands=
     bool        callersFloor  = false;   // callers_floor= on the root (countfloor.h): callers= may be short for THIS definition
     bool        usesFloor     = false;   // uses_floor= on the root: this kind's reads/type mentions are not indexed in this run
     bool        hasSitesAt    = false;   // a <c sites_at=> row is on this page (CALLSITE-AT)
@@ -1174,7 +1176,7 @@ inline void emitSafeDeleteLegend( std::size_t defCount, std::size_t unprovenDefs
                                + rw::declinedSitesLegend( flags.declinedSites );
     declinedClause += rw::valueRefsSafeDeleteLegend( flags.valueRefs > 0 );   // exactly when the root carries value_refs=
     declinedClause += rw::patternDispatchLegend( flags.patternDispatch, true, flags.patternWideRows );     // IX-3: exactly when the root carries pattern_dispatch=/pattern_too_wide=
-    declinedClause += rw::slotJoinLegend( flags.slotJoin, true );   // IX-1: exactly when a <vr> row carries via=
+    declinedClause += rw::slotJoinLegend( flags.slotJoin, true, flags.slotCands );   // IX-1: exactly when a <vr> row carries via=
     declinedClause += rw::valueRefsDepthLegend( flags.valueRefDepthCut );      // exactly when it carries the depth disclosure
     declinedClause += safeDeleteFloorLegend( flags, risk );   // count-floor + CALLSITE-AT: present-only clauses
     rw::emitTo( stdout, "<!-- ripwire safe-delete: composes signals the tool already computes into one \"can I delete this?\" READ "
@@ -1373,7 +1375,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                 }
                 std::fclose( file );
                 // 0.6.6 D4: the dead-code verb's own shape — a Python test-runner or decorator root is never a candidate
-                deadCodeCandidate = sourceHasStaticToken( source, only.sigStartByte, only.sigEndByte )
+                deadCodeCandidate = quality::symbolHasStaticLinkage( only, source )
                                     && !quality::pythonDecoratedDef( only, source ) && !quality::pythonRunnerRoot( ing.files[ only.fileId ], only, source );
             }
         }
@@ -1453,7 +1455,7 @@ std::optional<int> runSafeDelete( const MainDispatch& d )
                           SafeDeleteLegendFlags{ .singleRoot = sdSingleRoot, .hasUnindexed = rw::graphGaugeClauses( g ),
                                                  .hasModScope = anyModuleScopeRow( ing, std::span<const NodeId>( callerIds ).subspan( sdLw.begin, sdLw.end - sdLw.begin ) ),
                                                  .declinedCalls = sdDeclinedCalls, .gateDeclined = g.gateDeclinedCalls > 0, .stdDeclined = g.stdMemberDeclinedCalls > 0,
-                                                 .valueRefs = sdValueRefs.rows.size(), .patternDispatch = !sdPatterns.empty() || !sdWide.empty(), .patternWideRows = sdWideRows, .slotJoin = sdValueRefs.slotCallers, .callersFloor = sdFloor.isFloor, .usesFloor = usesFloor,
+                                                 .valueRefs = sdValueRefs.rows.size(), .patternDispatch = !sdPatterns.empty() || !sdWide.empty(), .patternWideRows = sdWideRows, .slotJoin = sdValueRefs.slotCallers, .slotCands = sdValueRefs.slotCands, .callersFloor = sdFloor.isFloor, .usesFloor = usesFloor,
                                                  .hasSitesAt = sdSites.any, .sitesCut = sdSites.anyCut, .valueRefDepthCut = sdValueRefs.depthCut.files > 0,
                                                  .defTable = sdAttr.groups.multi(), .defTableCut = sdListing.cut, .splitArms = sdHasSplit,
                                                  .linkRows = sdHasLink, .anchorRows = sdHasMiss,
@@ -2475,7 +2477,182 @@ std::optional<int> runExternalSurface( const MainDispatch& d )
     return std::nullopt;
 }
 
-std::optional<int> runPath( const MainDispatch& d )
+// --defs=NAME[,NAME…] (lane D2 DEFS-LOOKUP): which definitions each name binds — src/defslookup.h lookupDefs, the one lookup
+// --path's inline alternatives read too. One index load for up to kDefsNamesMax names; a single name that binds nothing gets
+// the shared refusal (selectorrefuse.h), a missing name among several a defs="0" row whose next= is that refusal.
+std::optional<int> runDefs( const MainDispatch& d )
+{
+    using namespace rw;
+    const Config&       cfg = d.cfg;
+    const IngestResult& ing = d.ing;
+    if( cfg.defsSpec.empty() )
+    {
+        return std::nullopt;
+    }
+    std::vector<std::string_view> names;
+    for( std::string_view rest = cfg.defsSpec; ; )
+    {
+        const std::size_t comma = rest.find( ',' );
+        names.push_back( rest.substr( 0, comma ) );
+        if( comma == std::string_view::npos )
+        {
+            break;
+        }
+        rest.remove_prefix( comma + 1 );
+    }
+    for( std::size_t i = 0; i < names.size(); ++i )
+    {
+        if( names[i].empty() )
+        {
+            rw::emitTo( stderr, "{}\n", rw::emptyListItemMessage( "--defs", i + 1, "--defs=parseArgs" ).c_str() );
+            return 1;
+        }
+    }
+    if( names.size() > kDefsNamesMax )
+    {
+        rw::refuseFlagValue( "--defs", "up to 16 symbol names, A[,B…]", cfg.defsSpec, "--defs=parseArgs,rankGraph" );
+        return 1;
+    }
+    if( names.size() > 1 && cfg.pageOffset > 0 )
+    {
+        rw::refuseFlagValue( "--offset", "a page of ONE --defs name (several names each print their first page)", std::to_string( cfg.pageOffset ), "--defs=parseArgs --offset=16" );
+        return 1;
+    }
+    // the page: kDefRowsCap rows unless --limit names another size; --offset pages one name only
+    const std::size_t      pageRows = cfg.pageLimit > 0 ? std::size_t( cfg.pageLimit ) : kDefRowsCap;
+    std::vector<DefLookup> looks;
+    looks.reserve( names.size() );
+    for( const std::string_view n : names )
+    {
+        looks.push_back( lookupDefs( ing, d.g, n, names.size() == 1 ? std::size_t( std::max( cfg.pageOffset, 0 ) ) : 0, pageRows ) );
+    }
+    if( names.size() == 1 && looks[0].matches.empty() && looks[0].dataDefs == 0 )
+    {
+        return refuseNotFoundWithAnswer( ing, cfg, rw::NotFoundAnswer{ "defs", { { "of", std::string( names[0] ) } }, {},
+                                                                       rw::notFoundNear( ing, names[0], notFoundGitRoot( ing, cfg ) ) },
+                                         "ripwire: --defs symbol not found: ", names[0], "--defs=" );   // the shared refusal
+    }
+    const std::size_t offset = names.size() == 1 ? std::size_t( std::max( cfg.pageOffset, 0 ) ) : 0;   // --offset pages one name's rows
+    const MemberOwners owners( ing );
+    const bool         singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    std::vector<char>  esc;
+    bool               anyProvenMiss = false, anyCut = false, anyMissing = false, anyBodyless = false, anyUnproven = false, anyData = false;
+    std::string        body;
+    for( const DefLookup& L : looks )
+    {
+        const std::size_t begin = std::min( offset, L.defs() );
+        const std::size_t end   = std::min( begin + pageRows, L.defs() );
+        if( cfg.json )
+        {
+            body += std::string( body.empty() ? "" : "," ) + "{\"q\":\"" + jsonStr( L.spec ) + "\",\"defs\":" + std::to_string( L.defs() );
+        }
+        else
+        {
+            body += "<name q=\"" + std::string( escapeXml( L.spec, esc ) ) + "\" defs=\"" + std::to_string( L.defs() ) + "\"";
+        }
+        if( L.unprovenDefs > 0 )
+        {
+            anyUnproven = true;
+            body += cfg.json ? ",\"unproven_defs\":" + std::to_string( L.unprovenDefs ) : rw::unprovenDefsAttrXml( L.unprovenDefs );
+        }
+        if( L.dataDefs > 0 )
+        {
+            anyData = true;
+            body += cfg.json ? ",\"data_defs\":" + std::to_string( L.dataDefs ) : " data_defs=\"" + std::to_string( L.dataDefs ) + "\"";
+        }
+        std::string next;
+        if( L.matches.empty() && L.dataDefs == 0 )
+        {
+            anyMissing = true;
+            next       = nextFlag( "--defs=", L.spec );   // the single-name call answers with the shared refusal and its near=
+        }
+        else if( end < L.defs() || begin > 0 )
+        {
+            anyCut = true;
+            body += cfg.json ? ",\"shown\":" + std::to_string( end - begin ) + ",\"offset\":" + std::to_string( begin )
+                             : " shown=\"" + std::to_string( end - begin ) + "\" offset=\"" + std::to_string( begin ) + "\"";
+            if( end < L.defs() )
+            {
+                next = nextFlag( "--defs=", L.spec ) + " --offset=" + std::to_string( end ) + ( cfg.pageLimit > 0 ? " --limit=" + std::to_string( cfg.pageLimit ) : std::string() );
+            }
+        }
+        if( cfg.json )
+        {
+            body += next.empty() ? std::string() : ",\"next\":\"" + jsonStr( next ) + "\"";
+            body += ",\"rows\":[";
+        }
+        else
+        {
+            body += nextAttrXml( next ) + ">";
+        }
+        for( std::size_t i = begin; i < end; ++i )
+        {
+            const DefRow& r = L.rows[i];
+            anyProvenMiss  = anyProvenMiss || !r.selProven;
+            anyBodyless    = anyBodyless || L.groups.bodyless[ r.group ];
+            if( cfg.json )
+            {
+                if( i > begin )
+                {
+                    body += ",";
+                }
+                defRowJson( body, ing, L, r, owners );
+            }
+            else
+            {
+                defRowXml( body, ing, L, r, owners, /*compact=*/false );
+            }
+        }
+        body += cfg.json ? "]}" : "</name>";
+    }
+    std::string rootAttr;
+    if( singleRoot )
+    {
+        rootAttr = cfg.json ? ",\"root\":\"" + jsonStr( cfg.roots[0] ) + "\"" : " root=\"" + std::string( escapeXml( cfg.roots[0], esc ) ) + "\"";
+    }
+    if( cfg.json )
+    {
+        rw::emitTo( stdout, "{{\"schema\":\"ripwire.defs/v1\"{},\"names\":[{}]}}\n", rootAttr, body );
+        return 0;
+    }
+    // present-only legend: every clause rides only when an attribute it defines is on the page
+    std::string legend = "<!-- ripwire defs schema=ripwire.defs/v1: per <name q=> the definitions the name binds (defs=N groups: a prototype "
+                         "with the definition it declares is one), each <d>: n= owner-qualified name, t= kind, p= file:line, sel= the "
+                         "spelling that binds that one alone in any SYM verb, lang=, class=source|test, in= distinct callers (a floor). "
+                         "Only parsed definitions count: an assignment, define_method or setattr is none (the grep verb finds text). Order: "
+                         "source first, then in=, then path. ";
+    if( anyProvenMiss )
+    {
+        legend += "sel_proven=0: no spelling tried binds it alone; sel= names its file and owner and may bind more. ";
+    }
+    if( anyBodyless )
+    {
+        legend += "decl_only=1: no body: an interface or trait contract, or a declaration no listed definition ties to. ";
+    }
+    if( anyCut )
+    {
+        legend += "shown=K offset=M: rows M..M+K of defs=; next= pages the rest. ";
+    }
+    if( anyMissing )
+    {
+        legend += "defs=0: the name binds nothing; next= gives the refusal with near names. ";
+    }
+    if( anyData )
+    {
+        legend += "data_defs=K: K data keys or doc headings of that name (a JSON/YAML key, a markdown heading), never code definitions; "
+                  "not in defs= (the grep verb finds them). ";
+    }
+    if( anyUnproven )
+    {
+        legend += "unproven_defs=K: same-named definitions a file:name spelling found and could not tie to that file; not in defs= or the rows. ";
+    }
+    rw::emitTo( stdout, "{}-->{}<defs schema=\"ripwire.defs/v1\"{}>{}</defs>", legend, rw::rootRelPathsLegend( singleRoot ), rootAttr, body );
+    return 0;
+}
+
+// served: bodies the enclosing answer already carries (the --for graph-verb block passes its fold's and slot's); a middle hop among them
+// prints no second copy (hopbody.h). The bare --path passes none.
+std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::NodeId> served, bool inForBlock )
 {
     using namespace rw;
     const Config&                     cfg          = d.cfg;
@@ -2541,8 +2718,6 @@ std::optional<int> runPath( const MainDispatch& d )
         }
 
         const std::vector<NodeId> path    = rw::shortestPathAny( g, srcDefs, dstDefs );   // ONE BFS over every def pair
-        const NodeId              srcUsed = path.empty() ? srcDefs.front() : path.front();
-        const NodeId              dstUsed = path.empty() ? dstDefs.front() : path.back();
 
         std::vector<char> esc;
         const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -2570,40 +2745,89 @@ std::optional<int> runPath( const MainDispatch& d )
         }
         const rw::ToValueRefs pthToValueRefs = path.empty() ? rw::toValueRefs( ing, true, dstDefs, &*pthValueIdx ) : rw::ToValueRefs{};
         const rw::PathSearchGaps pthGaps = path.empty() ? rw::pathSearchGaps( ing, g, srcDefs, *pthValueIdx ) : rw::PathSearchGaps{};
-        // ix2-slice: the sink-side frontier beside the forward gap rows (src/pathgaps.h pathNearSink), reachable="0" only
-        const rw::PathNearSink   pthNear = path.empty() ? rw::pathNearSink( ing, g, dstDefs, pthGaps.cone, *pthValueIdx ) : rw::PathNearSink{};
         // HOP1 (src/backhops.h): the ONE backward hop provider the bridge's slot crossings and the root next= below read
         std::optional<rw::BackwardHops> pthBackHops;
         if( path.empty() )
         {
             pthBackHops.emplace( ing, g, *pthValueIdx );
         }
+        // ix2-slice: the sink-side frontier beside the forward gap rows (src/pathgaps.h pathNearSink), reachable="0" only; its name-key
+        // ways in come from the same provider
+        const rw::PathNearSink   pthNear = path.empty() ? rw::pathNearSink( ing, g, dstDefs, pthGaps.cone, *pthValueIdx, pthBackHops->names() ) : rw::PathNearSink{};
+        // ON-NAME-HANDLERS-V2: a poster from= whose posted message classes name to= handlers (src/pathgaps.h pathHandlerRule)
+        const rw::PathHandlerRule pthHandler = path.empty() ? rw::pathHandlerRule( ing, pthBackHops->names(), srcDefs, dstDefs ) : rw::PathHandlerRule{};
+        // TRACE-EP (src/pathpairs.h): a reached answer whose names have several definitions lists EVERY reaching definition pair
+        // (up to kPathPairChains chains, the rest alt=), never one silently; a glob endpoint keeps its any-of-these meaning
+        const rw::PathPairs pthPairs = path.empty() || srcGlob || dstGlob ? rw::PathPairs{}
+            : rw::pathReachingPairs( ing, g, srcDefs, dstDefs, path, spec, [ & ]( std::span<const NodeId> dstMembers )
+              {
+                  if( !pthValueIdx )
+                  {
+                      pthValueIdx.emplace( ing );
+                  }
+                  if( !pthBackHops )
+                  {
+                      pthBackHops.emplace( ing, g, *pthValueIdx );
+                  }
+                  return rw::pathBridge( ing, g, srcDefs, dstMembers, *pthValueIdx, *pthBackHops );
+              } );
+        const std::vector<NodeId>& pthShown = rw::pathShownChain( pthPairs, path );   // the root's from_p=/to_p=/hops=
+        const NodeId               srcUsed  = pthShown.empty() ? srcDefs.front() : pthShown.front();
+        const NodeId               dstUsed  = pthShown.empty() ? dstDefs.front() : pthShown.back();
         // ix2-slice (IX-2 P1): the hedged bridge — the fewest-crossings chain over declined / value / closure / namesake / slot hops
         const rw::PathBridge     pthBridge = path.empty() ? rw::pathBridge( ing, g, srcDefs, dstDefs, *pthValueIdx, *pthBackHops ) : rw::PathBridge{};
         // HOP1 (#6): to= has a backward hop the provider follows → the root next= is the callers verb on to=, not the gap bodies
         const std::string        pthSinkCallers = path.empty() && pthGaps.any() && !dstGlob ? rw::pathSinkCallersSelector( ing, *pthBackHops, dstDefs, dstN, pthSingleRoot, pthRootPrefix )
                                                                                              : std::string();
-        const bool pthHasVia = rw::pathHasNameOnlyHop( g, path );   // FE-B: exactly when a hop of THIS path is via="name"
-        const bool pthHasLink = rw::pathHasNameOnlyHop( g, path, rw::kEdgeLink );
-        const bool pthHasMiss = rw::pathHasNameOnlyHop( g, path, 0 );
+        // FE-B: exactly when a printed hop is via="name" (every printed chain when pairs are listed); link, anchor, split, owner alike
+        const rw::PathShownMarks pthMarks = rw::pathShownMarks( ing, g, pthPairs, path );
+        const bool pthHasVia  = pthMarks.via;
+        const bool pthHasLink = pthMarks.link;
+        const bool pthHasMiss = pthMarks.miss;
         // attrib-multidef (defattrib.h): from_p=/to_p= only for an endpoint the path bound; prov="split" on a split-arm hop
-        const rw::PathEndpointBinding pthBound = rw::pathEndpointBinding( g, rw::endpointDefinitionCount( ing, srcDefs ), rw::endpointDefinitionCount( ing, dstDefs ), path );
-        const bool                    pthHasSplit = pthBound.splitHop;
+        const rw::PathEndpointBinding pthBound = rw::pathEndpointBinding( g, rw::endpointDefinitionCount( ing, srcDefs ), rw::endpointDefinitionCount( ing, dstDefs ), pthShown );
+        const bool                    pthHasSplit = pthMarks.split;
+        // zed-03 (src/pathpairs.h): a bound endpoint that is a test/fixture copy while a source definition exists is disclosed
+        const rw::PathTestTwin        pthTwin = srcGlob || dstGlob ? rw::PathTestTwin{} : rw::pathTestTwins( ing, g, { srcDefs, srcN, pthBound.from }, { dstDefs, dstN, pthBound.to }, pthShown );
         const std::vector<std::string_view> pthOwners = rw::pathHopOwners( ing, path );   // PATH-OWNERS: n="Owner.name" per hop
+        const bool pthHasOwner = pthMarks.owner;
+        // PATH-HOP-BODY (src/hopbody.h): a reached chain of 2 hops prints its middle hop's body (hedged when that hop is no proven
+        // call); a longer one names the first in next=. BODY-ON-ROUTE (src/pathgaps.h pathRouteBodies): a reachable=0 answer prints
+        // the bodies of the route it names (bridge rows, handler_rule readers), every one a hedge. ONE printer for both.
+        const std::string_view   pthBodyRoot  = pthSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view();
+        const bool               pthBodiesOn  = !path.empty() && rw::hopBodiesOn();
+        const rw::RouteBodiesXml pthHopBodyEl = pthBodiesOn ? rw::pathHopBodiesXml( ing, rw::pathMiddleHops( ing, g, pthShown, served ), pthBodyRoot ) : rw::RouteBodiesXml{};
+        // GAIN GATE (fix1 fire table): never inside a --for graph-verb block — the --for answer serves its own bodies, and the one
+        // in-sample fire there (LARGE-DEV vscode-03, +7.7 KB) named nothing its question asked for
+        const rw::RouteBodiesXml pthRouteEl   = path.empty() && !inForBlock && rw::hopBodiesOn()
+                                                    ? rw::pathRouteBodies( ing, g, pthBridge, pthHandler, pthBodyRoot ) : rw::RouteBodiesXml{};
+        const std::string&       pthHopBodies = pthHopBodyEl.xml;
+        // D2 part 5 (defslookup.h): the other definitions of an endpoint whose pick is not provably unique, inline — after the bodies, so a
+        // definition a <bodies> element printed is not listed again
+        std::vector<rw::NodeId>  pthBodyIds   = pthHopBodyEl.ids;
+        pthBodyIds.insert( pthBodyIds.end(), pthRouteEl.ids.begin(), pthRouteEl.ids.end() );
+        const rw::PathAlts       pthAlts      = rw::pathAltsOf( ing, g, srcN, dstN, srcGlob, dstGlob, pthBound.from ? srcUsed : rw::kNoNode, pthBound.to ? dstUsed : rw::kNoNode, pthPairs, pthBodyIds );
+        std::string              pthRootAttrs = rw::pathTestTwinRootAttrs( ing, rw::pathPairsRootAttrs( ing, pthPairs, pthSingleRoot, pthRootPrefix ).rootAttrs, pthTwin, pthSingleRoot, pthRootPrefix );
+        const std::string        pthHopNext   = pthBodiesOn && pthRootAttrs.find( " next=\"" ) == std::string::npos ? rw::pathMiddleHopNext( ing, pthShown, pthBodyRoot ) : std::string();
+        pthRootAttrs += pthHopNext.empty() ? std::string() : rw::nextAttrXml( pthHopNext );
         rw::emitTo( stdout, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
-                     "graph holds none. {}{}{}{}-->{}", ( rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ) + rw::viaNameLegend( pthHasVia )
+                     "graph holds none. {}{}{}{}-->{}", ( rw::defAltsLegend( pthAlts ) + rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ) + rw::viaNameLegend( pthHasVia )
                                                          + rw::viaLinkLegend( pthHasLink ) + rw::anchorMissLegend( pthHasMiss )
                                                          + rw::splitArmLegend( pthHasSplit ) + rw::pathUnboundLegend( !pthBound.from || !pthBound.to )
-                                                         + rw::memberOwnerLegend( rw::anyPathHopOwner( pthOwners ) ) ).c_str(),
+                                                         + rw::memberOwnerLegend( pthHasOwner ) + rw::memberOwnerContainedLegend( pthMarks.ownerContained ) + std::string( rw::pathPairsLegend( pthPairs ) ) + rw::pathOrderLegend( pthPairs, pthTwin )
+                                                         + std::string( rw::pathHopBodiesLegend( !pthHopBodies.empty() ) ) + std::string( rw::pathHopNextLegend( !pthHopNext.empty() ) )
+                                                         + std::string( rw::routeBodyHedgeLegend( pthHopBodyEl.hedged || pthRouteEl.hedged ) ) ).c_str(),
                      ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
-                     ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + std::string( rw::pathBridgeLegend( pthBridge.found() ) )
-                       + std::string( rw::nearSinkLegend( !pthNear.rows.empty() ) ) + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
+                     ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + rw::pathBridgeLegend( pthBridge )
+                       + rw::nearSinkLegend( pthNear ) + std::string( rw::pathHandlerRuleLegend( pthHandler ) ) + std::string( rw::pathRouteBodiesLegend( !pthRouteEl.xml.empty() ) )
+                       + std::string( rw::pathGlobLegend( srcGlob || dstGlob ) ) ).c_str(),
                      rw::graphCountFloorBrief( rw::graphGaugeClauses( g ) ).c_str(), rw::rootRelPathsLegend( pthSingleRoot ) );
         rw::emitTo( stdout, "<path from=\"{}\" to=\"{}\"{}{} from_defs=\"{}\" to_defs=\"{}\"{} reachable=\"{}\" hops=\"{}\"{}{}",
                      ex( srcN ).c_str(), ex( dstN ).c_str(), pthBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                      pthBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
                      srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint
-                     path.empty() ? 0 : 1, path.empty() ? std::size_t( 0 ) : path.size() - 1, pthRootAttr.c_str(),
+                     path.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
+                     ( pthRootAttrs + pthRootAttr ).c_str(),
                      rw::graphCountFloorAttrXml( g ).c_str() );
         // absent at zero: byte-identical otherwise; the depth cut beside it makes the count (or its absence) a floor
         rw::emitTo( stdout, "{}{}", rw::countAttrXmlOrEmpty( "to_value_refs", pthToValueRefs.count ),
@@ -2616,14 +2840,23 @@ std::optional<int> runPath( const MainDispatch& d )
                                       ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" },
                                     pthSinkCallers )
             : rw::PathGapsXml{};
-        rw::emitTo( stdout, "{}>{}{}{}", pthUnreached.rootAttrs, pthUnreached.rows, rw::pathBridgeXml( ing, g, pthBridge, pthSingleRoot, pthRootPrefix ),
-                     rw::pathNearSinkXml( ing, pthNear, pthSingleRoot, pthRootPrefix ) );
+        rw::emitTo( stdout, "{}>{}{}{}{}", pthUnreached.rootAttrs, pthUnreached.rows, rw::pathBridgeXml( ing, g, pthBridge, pthSingleRoot, pthRootPrefix ),
+                     rw::pathNearSinkXml( ing, pthNear, pthSingleRoot, pthRootPrefix ),
+                     path.empty() ? rw::pathHandlerRuleXml( ing, pthBackHops->names(), pthHandler, pthSingleRoot, pthRootPrefix ) : std::string() );
         // FE-B via="name", #409 via="link"/anchor="missing", attrib-multidef prov="split", PATH-OWNERS n="Owner.name": one emitter, shared with MCP path_between
-        rw::emitPathHopRows( stdout, ing, g, path, pthOwners, pthSingleRoot, pthRootPrefix );
+        rw::emitPathAnswerRows( stdout, ing, g, pthPairs, path, pthOwners, pthSingleRoot, pthRootPrefix );   // TRACE-EP: pairs or today's rows, shared with MCP
+        rw::emitRaw( stdout, pthHopBodies.c_str() );    // PATH-HOP-BODY: after the hop rows they explain ("" when none)
+        rw::emitRaw( stdout, pthRouteEl.xml.c_str() );  // BODY-ON-ROUTE: after the route rows they explain (reachable=0 only)
+        rw::emitRaw( stdout, pthAlts.xml.c_str() );   // D2 part 5: empty when both picks are provably unique
         rw::emitTo( stdout, "</path>" );
         return 0;
     }
     return std::nullopt;
+}
+
+std::optional<int> runPath( const MainDispatch& d )
+{
+    return runPathServed( d, {}, /*inForBlock=*/false );
 }
 
 std::optional<int> runConnect( const MainDispatch& d )
@@ -2842,7 +3075,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + ( v.imports.next.empty() ? " lens=\"shown_importers,importers_capped\""
                                                             : " lens=\"shown_importers,importers_capped,importers_next\"" )
                                  + rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs )   // W2-F
-                                 + rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) );   // P3 (L7): the XML root's next=, same set
+                                 + rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) );   // P3 (L7); hub-fold: the XML root's next=, same rule
     const std::vector<char> via    = impactJsonVia( v );
     const std::vector<char> rowVia( via.begin() + v.page.begin, via.begin() + v.page.end );   // FE-B: in `rows` order
     std::vector<std::string> rowOfDef;   // attrib-multidef: of_def per row, only on a multi-group selector
@@ -2937,7 +3170,7 @@ int emitImpactXml( const ImpactView& v )
                  pageDisclosure( ipab, sizeof( ipab ), shownRows, v.show.size(), v.page.end,
                                  v.pageLimit, v.pageOffset, true ),
                  rw::graphCountFloorAttrXml( v.g ).c_str(), rw::renderDisclosure( v.prD, rw::DiscloseAs::XmlAttrs ).c_str(),
-                 rw::nextAttrXml( rw::nextFlag( "--safe-delete=", v.sym ) ).c_str() );   // P3 (L7): "is it safe to change" → "can it go"
+                 rw::nextAttrXml( rw::impactRootNext( v.ing, *v.ring, rw::VrRender{ v.singleRoot, v.rootPrefix }, rw::nextFlag( "--safe-delete=", v.sym ) ) ).c_str() );   // P3 (L7): "is it safe to change" → "can it go"; hub-fold: a ring cut / the widest hub first
     rw::emitRaw( stdout, rw::defTableXml( v.ing, v.attrib.groups, v.defListing, v.rootPrefix ).c_str() );   // attrib-multidef: the groups, by ix=
     rw::emitImpactFileRollupXml( stdout, v.ing, v.fileRollup, v.rootPrefix );   // idea #6: before the symbol window
     const rw::MemberOwners imOwners( v.ing );   // QUALNAME-1: n="Owner.name" on a member row (memberowner.h)
@@ -2998,12 +3231,12 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                    + rw::impactRollupLegend( !imFiles.rows.empty() && !cfg.columnar, imports.umbrella, rw::impactRollupHedged( imFiles ),
                                              !imports.next.empty() && !cfg.columnar, rw::ImpactRollupTypeClauses{ imFiles.typed, imFiles.typeDefs, imFiles.typeCapped } )
                    + rw::defTableLegend( imAttr.groups.multi(), imListing.cut )
-                   + rw::memberOwnerLegend( rw::anyMemberOwnerRow( ing, std::span<const rw::NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) ) ) ).c_str(),   // QUALNAME-1
+                   + rw::memberOwnerLegendFor( rw::memberOwnerRows( ing, std::span<const rw::NodeId>( show ).subspan( imPage.begin, imPage.end - imPage.begin ) ) ) ).c_str(),   // QUALNAME-1
                  ( std::string( rw::valueRefsReachLegend( !imValueRefs.rows.empty() ) )
                    + rw::valueRefsDepthLegendFor( imValueRefs )
                    + rw::patternDispatchLegend( !imValueRefs.patternSites.empty() || !imValueRefs.patternWideSites.empty(), true )   // IX-3: exactly when pattern_dispatch=/pattern_too_wide= rides
-                   + std::string( rw::slotJoinLegend( imValueRefs.slotCallers, true ) )   // IX-1: exactly when a <vr> row carries via=slot|slot-name
-                   + std::string( rw::impactRingLegend( imRing.hedged > 0, !imRing.rows.empty() && !cfg.columnar ) ) ).c_str(),   // HOP1: exactly when reaches_hedged= / <ring> ride
+                   + std::string( rw::slotJoinLegend( imValueRefs.slotCallers, true, imValueRefs.slotCands ) )   // IX-1: exactly when a <vr> row carries via=slot|slot-name
+                   + std::string( rw::impactRingLegend( imRing, !cfg.columnar ) ) ).c_str(),   // HOP1: exactly when reaches_hedged= / <ring> ride
                  rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
 }
 
@@ -3093,7 +3326,8 @@ std::optional<int> runImpact( const MainDispatch& d )
         const rw::ValueRefRows  imValueRefs = rw::withPatternRows( rw::valueRefCallerRows( ing, imVri, seeds ), rw::PatternIndex( ing, imVri ), seeds, true );
         // HOP1 (src/backhops.h): the hedged slot ring — one or two slot hops back from SYM, beside reaches=, never in it
         const rw::BackwardHops  imBackHops( ing, g, imVri );
-        const rw::ImpactRing    imRing      = rw::impactSlotRing( ing, imBackHops, seeds, reach );
+        rw::ImpactRing          imRing      = rw::impactSlotRing( ing, imBackHops, seeds, reach, rw::ImpactRingLens{ &imTestReach, rank } );
+        rw::sizeImpactRing( imRing, cfg.pageLimit, imPage.end - imPage.begin, show.size(), cfg.impactSym );   // hub-fold (c): proven rows keep the --limit page
         const std::vector<std::uint32_t>& imPatterns = imValueRefs.patternSites;   // IX-3: beside the radius, never in it
         // ix2-slice (IX-4, declinedsites.h): the <dc> rows of exactly the declines declined_calls= counts, cut as --callers cuts;
         // no cand= under any legend (as the MCP twin): --help promises the rows byte-identical across postures (legendcostcheck C)

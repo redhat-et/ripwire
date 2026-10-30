@@ -1161,6 +1161,11 @@ inline constexpr const char* kMemberOwnerLegend =
     "(Owner::name C/C++/Rust, Owner#name Ruby, a singleton too; a C++ namespace sharing a name with a class prints alike); "
     "bare: a free function, a type, a closure, or no such owner. ";
 inline const char* memberOwnerLegend( bool on ) noexcept { return on ? kMemberOwnerLegend : ""; }
+// lane js-def-naming: TS/JS store no scope, so a member row's owner there is read by containment (memberowner.h). Present-only: rides
+// beside the clause above exactly when a shown row's owner came that way, so every other answer is unchanged. No double hyphen.
+inline constexpr const char* kMemberOwnerContainedLegend =
+    "On a TS/JS row Owner is the class whose body holds it (no stored scope); an object-literal or nested member stays bare. ";
+inline const char* memberOwnerContainedLegend( bool on ) noexcept { return on ? kMemberOwnerContainedLegend : ""; }
 
 // ── issue #60: the module-scope owner's clause, emitted exactly when a t="modscope" ROW is in the answer ──
 // A file-scope call (a top-level statement, or a call inside an anonymous callback body) used to have no

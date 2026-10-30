@@ -463,6 +463,18 @@ if [ "$( attr "$R_PI" next )" = "--at=lib/conf.py:11" ]; then ok "(P) negative: 
 ROW_PC="$( enc_row "$( run cc --grep=C_ENT_MARK )" ent )"
 if [ "$( attr "$ROW_PC" vals )" = "exec=local_exec@3 undo=other_exec@other.c:1" ]; then ok "(P) C initialiser: vals=\"exec=local_exec@3 undo=other_exec@other.c:1\""; else no "(P) C initialiser row: $ROW_PC"; fi
 case "$ROW_PC" in *reads=*) no "(P) C reads are not indexed, yet reads= printed: $ROW_PC" ;; *) ok "(P) C: no reads= (the uses verb indexes no C reads; floor_next stays the literal scan)" ;; esac
+# P/A3 (lane for-small, tmux-05): a carrier row that prints vals= names its own ONE definition as p=file:line — the file a
+# path-less @line is in (cmd_split_window_entry's vals="exec=cmd_split_window_exec@76" named no file at all). Exact or none:
+# a row grouping two same-named carrier defs, and a carrier without vals=, carry no p=.
+if [ "$( attr "$ROW_PC" p )" = "ent.c:4" ]; then ok "(P/A3) C initialiser carrier: p=\"ent.c:4\" anchors vals= exec=local_exec@3"; else no "(P/A3) C initialiser p=: $ROW_PC"; fi
+if [ "$( attr "$ROW_PT" p )" = "lib/conf.py:8" ]; then ok "(P/A3) dict carrier: p=\"lib/conf.py:8\""; else no "(P/A3) dict carrier p=: $ROW_PT"; fi
+case "$ROW_P" in *' p="'*) no "(P/A3) near miss: a carrier without vals= got p=: $ROW_P" ;; *) ok "(P/A3) near miss: a carrier with reads= and no vals= carries no p=" ;; esac
+mkdir -p "$W/cd"
+printf 'struct entry { const char *name; int (*exec)(int); };\nstatic int a_exec(int v) { return v; }\nconst struct entry dup = {\n\t.name = "C_DUP_MARK",\n\t.exec = a_exec\n};\n' > "$W/cd/a.c"
+printf 'struct entry { const char *name; int (*exec)(int); };\nstatic int b_exec(int v) { return v + 1; }\n\nconst struct entry dup = {\n\t.name = "C_DUP_MARK",\n\t.exec = b_exec\n};\n' > "$W/cd/b.c"
+ROW_PD="$( enc_row "$( run cd --grep=C_DUP_MARK )" dup )"
+case "$ROW_PD" in *'defs="2"'*vals=*) ;; *) no "(P/A3) premise: the two same-named carriers do not group into one row with vals=: $ROW_PD" ;; esac
+case "$ROW_PD" in *' p="'*) no "(P/A3) near miss: a row grouping two carrier definitions got one p=: $ROW_PD" ;; *) ok "(P/A3) near miss: a row of two same-named carrier definitions carries no p= (no one place)" ;; esac
 ROW_PCP="$( enc_row "$( run cc --grep=C_PLAIN_MARK )" plain )"
 [ -n "$ROW_PCP" ] || no "(P) premise: no <enc n=\"plain\"> row"
 case "$ROW_PCP" in *vals=*|*reads=*) no "(P) near miss: a C string constant got carrier attributes: $ROW_PCP" ;; *) ok "(P) near miss: a C constant holding a string and read in C carries neither attribute" ;; esac
@@ -490,6 +502,11 @@ import json, sys
 d = json.loads( sys.stdin.read() )
 r = { x["n"]: x for x in d.get( "enclosing", [] ) }.get( "ent", {} )
 sys.exit( 0 if r.get( "vals" ) == [ "exec=local_exec@3", "undo=other_exec@other.c:1" ] and "reads" not in r else 1 )'; then ok "(P) MCP grep enclosing ent: the same vals as the CLI, no reads key"; else no "(P) MCP grep ent: $MCP_PC"; fi
+if printf '%s' "$MCP_PC" | python3 -c '
+import json, sys
+d = json.loads( sys.stdin.read() )
+r = { x["n"]: x for x in d.get( "enclosing", [] ) }.get( "ent", {} )
+sys.exit( 0 if r.get( "p" ) == "ent.c:4" else 1 )'; then ok "(P/A3) MCP grep enclosing ent: p ent.c:4, the CLI p= twin"; else no "(P/A3) MCP grep ent p: $MCP_PC"; fi
 
 # P/top (train-28 fix N1): reads are counted only when the TOP hit's carrier is readable. A page whose top hit is in a
 # function and whose lower hit is in a readable carrier pays NO second ingest (the hard-line seam set for the reading
@@ -564,7 +581,7 @@ for dialect in compact full; do
     L_K="$( run tsl '--for=which router classes implement the Router interface' --legend=$dialect )"
     L_P="$( run pc --grep=PC_TABLE_MARK --legend=$dialect )"; L_PN="$( run pc --grep=PC_NAMED_MARK --legend=$dialect )"
     for pair in "L_A:callers_floor=" "L_A:uses_floor=" "L_A:unmodelled" "L_C:sites_at=" "L_E:callers_floor=" "L_E:floor_next=" \
-                "L_K:implementors_floor=" "L_K:implementors_shown=" "L_K:floor_next=" "L_P:vals=" "L_PN:reads=" "L_PN:reads_at="; do
+                "L_K:implementors_floor=" "L_K:implementors_shown=" "L_K:floor_next=" "L_P:vals=" "L_P:p= beside vals=" "L_PN:reads=" "L_PN:reads_at="; do
         var="${pair%%:*}"; term="${pair#*:}"
         comments "${!var}" | grep -qF -- "$term" \
             && ok "(N/$dialect) $term defined in the legend of the $var answer" || no "(N/$dialect) $term is not defined in the $var legend"
@@ -577,6 +594,18 @@ for dialect in compact full; do
     OUT_NP="$( run pc --grep=PC_INNER_MARK --legend=$dialect )"
     [ -n "$( root_tag "$OUT_NP" grep )" ] || no "(N) premise: no <grep> answer for PC_INNER_MARK"
     case "$OUT_NP" in *reads_at*|*vals=*) no "(N/$dialect) a legend defines a carrier term its answer does not carry" ;; *) ok "(N/$dialect) present-only: no carrier term on an answer without a carrier attribute" ;; esac
+done
+
+# F1 (rv-for-small): the p= sentence is its own present-only clause, gated on a row that PRINTS p= (not on reads=/vals= alone):
+# a reads-only carrier page (PC_NAMED_MARK) and a defs=2 row with vals= but no p= (C_DUP_MARK) define no "p= beside".
+for dialect in compact full; do
+    for spec in "pc:PC_NAMED_MARK" "cd:C_DUP_MARK"; do
+        OUT_NQ="$( run "${spec%%:*}" --grep="${spec#*:}" --legend=$dialect )"
+        case "$( nocomment "$OUT_NQ" | grep -oE '<enc [^>]*>' )" in *' p="'*) no "(N/$dialect) premise: ${spec#*:} prints a p= (the arm needs a page without one)" ;; esac
+        [ -n "$( root_tag "$OUT_NQ" grep )" ] || no "(N/$dialect) premise: no <grep> answer for ${spec#*:}"
+        comments "$OUT_NQ" | grep -qF -- "p= beside" \
+            && no "(N/$dialect) the legend of ${spec#*:} (no p= on any row) defines p= beside" || ok "(N/$dialect) present-only: no p= beside on ${spec#*:}, which prints no p="
+    done
 done
 
 # ── O: determinism + xmllint ─────────────────────────────────────────────────────────────────────────────

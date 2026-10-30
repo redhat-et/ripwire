@@ -31,7 +31,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -2208,6 +2210,246 @@ inline std::vector<std::string_view> splitRouteWords( std::string_view query )
         }
     }
     return words;
+}
+
+// FOR-ROUTE-DECLINED (src/verbs_for.h appendSubjectGraphVerbBlock): a --for task that is SPELLED as a graph question —
+// `path from A to B`, `callers of X`, `common callers of A and B` — gets the --path / --callers / --connect verb
+// appended to its ordinary answer. This is the subject-only half: no index, no gold, the words of the task alone.
+// Each span is cut at its first qualifier word (for/with/via/in/on/when/using/during/at/near); a slot's candidates
+// are its CODE-LIKE tokens last-first (a `.`/`_`/`::`/`()` or an inner capital), and no plain word is ever a
+// candidate except the exact entry name `main` — "serialising a dict" / "spawning ripgrep" describe an endpoint,
+// they do not name one, so such a task does not fire (test/forroutecheck.sh (n1)/(n2)). Stage 0:
+// reports/for-route-s0.md (the ORCH measurement); the rules are its parse.py, minus the plain-word fallback.
+enum class GraphSubjectForm : std::uint8_t
+{
+    Path,      // path from A to B        → --path=A,B
+    Callers,   // callers of X            → --callers=X
+    Common,    // common callers of A and B → --connect=A,B
+};
+
+struct GraphSubject
+{
+    GraphSubjectForm                       form = GraphSubjectForm::Path;
+    std::vector<std::string>               spans;   // the words each slot was read from, after the qualifier cut (for the disclosure)
+    std::vector<std::vector<std::string>>  slots;   // per endpoint slot, the candidates in preference order (never empty)
+};
+
+namespace detail
+{
+// a keyword word, case-folded, after its LEADING quote/bracket punctuation only (parse.py's `\b` before the keyword;
+// the keyword must still end at whitespace, so `callers,` is not the form)
+inline bool graphSubjectWordIs( std::string_view w, std::initializer_list<std::string_view> any )
+{
+    while( !w.empty() && std::string_view( "`'\"([{" ).find( w.front() ) != std::string_view::npos ) { w.remove_prefix( 1 ); }
+    const std::string lw = routeLower( w );
+    return std::find( any.begin(), any.end(), std::string_view( lw ) ) != any.end();
+}
+
+inline bool graphSubjectIsUpper( char c ) noexcept { return c >= 'A' && c <= 'Z'; }
+inline bool graphSubjectIsLower( char c ) noexcept { return c >= 'a' && c <= 'z'; }
+
+// parse.py code_like: a `.` `_` `::` or `()`; or a lower/digit then an upper (camelCase); or a capitalised word of
+// length > 3 with another capital after the first letter and a lower case letter after a capital (HTTPServer).
+inline bool graphSubjectCodeLike( std::string_view t ) noexcept
+{
+    if( t.find_first_of( "._" ) != std::string_view::npos || t.find( "::" ) != std::string_view::npos || t.find( "()" ) != std::string_view::npos )
+    {
+        return true;
+    }
+    for( std::size_t k = 1; k < t.size(); ++k )
+    {
+        if( graphSubjectIsUpper( t[k] ) && ( graphSubjectIsLower( t[k - 1] ) || ( t[k - 1] >= '0' && t[k - 1] <= '9' ) ) )
+        {
+            return true;
+        }
+    }
+    if( t.size() > 3 && graphSubjectIsUpper( t[0] ) )
+    {
+        bool upperLater = false;
+        for( std::size_t k = 1; k < t.size(); ++k ) { upperLater = upperLater || graphSubjectIsUpper( t[k] ); }
+        bool lowerAfterUpper = false;
+        for( std::size_t k = 1; k < t.size(); ++k ) { lowerAfterUpper = lowerAfterUpper || graphSubjectIsLower( t[k] ); }
+        return upperLater && lowerAfterUpper;
+    }
+    return false;
+}
+
+// parse.py QUALW: a qualifier word ends the span (the word itself, case-folded, without surrounding punctuation);
+// FOR-ROUTE fix1 (B1): so does a CLAUSE word — the span is one noun phrase, and "… to Widget.refresh and explain how X works"
+// or "… then check Y" must not hand the NEXT clause's symbol to the verb.
+inline bool graphSubjectQualifier( std::string_view w )
+{
+    while( !w.empty() && std::string_view( "`'\"([{" ).find( w.front() ) != std::string_view::npos ) { w.remove_prefix( 1 ); }
+    while( !w.empty() && std::string_view( "`'\")]},;:?!." ).find( w.back() ) != std::string_view::npos ) { w.remove_suffix( 1 ); }
+    return graphSubjectWordIs( w, { "for", "with", "via", "in", "on", "when", "using", "during", "at", "near",
+                                    "and", "or", "then", "also", "but", "plus", "versus", "vs", "how", "what", "which", "where", "why", "while",
+                                    "since", "because", "so", "if", "afterwards", "explain", "check", "however", "finally", "next", "after",
+                                    "before", "whether", "who", "summarise", "summarize", "describe" } );
+}
+
+// non-ASCII quotes / brackets / sentence stops (S4): a span word is stripped of these at its edges, and a full-width stop ends the span
+// (inside a word too: "Widget.refresh。然后" — no code token holds one)
+inline constexpr std::string_view kSubjectOpenQuotes[]  = { "\xC2\xAB", "\xE2\x80\x9C", "\xE2\x80\x98", "\xE3\x80\x8C", "\xE3\x80\x8E", "\xEF\xBC\x88" };   // « “ ‘ 「 『 （
+inline constexpr std::string_view kSubjectCloseQuotes[] = { "\xC2\xBB", "\xE2\x80\x9D", "\xE2\x80\x99", "\xE3\x80\x8D", "\xE3\x80\x8F", "\xEF\xBC\x89" };   // » ” ’ 」 』 ）
+inline constexpr std::string_view kSubjectFullStops[]   = { "\xE3\x80\x82", "\xEF\xBC\x9B", "\xEF\xBC\x9A", "\xEF\xBC\x81", "\xEF\xBC\x9F", "\xEF\xBC\x8C", "\xE3\x80\x81" };   // 。 ； ： ！ ？ ， 、
+
+// One span word, stripped: `raw` = the word up to a full-width stop (the disclosure keeps it), `text` = raw without its edge
+// quotes / brackets / sentence punctuation, `stop` = a sentence stop ended it (`. , ; : ! ?` or a full-width one), `parens` = it
+// ended in `()` (a call: code-like although the `()` is dropped).
+struct GraphSubjectWord
+{
+    std::string_view raw, text;
+    bool             stop   = false;
+    bool             parens = false;
+};
+
+inline GraphSubjectWord graphSubjectTrimWord( std::string_view w )
+{
+    GraphSubjectWord r;
+    for( const std::string_view fs : kSubjectFullStops )
+    {
+        if( const std::size_t at = w.find( fs ); at != std::string_view::npos )
+        {
+            w      = w.substr( 0, at );
+            r.stop = true;
+        }
+    }
+    r.raw = w;
+    for( bool moved = true; moved && !w.empty(); )   // leading quote/bracket
+    {
+        moved = std::string_view( "`'\"([{" ).find( w.front() ) != std::string_view::npos;
+        w.remove_prefix( moved ? 1 : 0 );
+        for( const std::string_view q : kSubjectOpenQuotes )
+        {
+            if( !moved && w.starts_with( q ) ) { w.remove_prefix( q.size() ); moved = true; }
+        }
+    }
+    for( bool moved = true; moved && !w.empty(); )   // trailing quote/bracket/sentence punctuation; `()` is remembered, then dropped
+    {
+        const char c = w.back();
+        moved        = true;
+        if( w.size() > 2 && w.ends_with( "()" ) ) { r.parens = true; w.remove_suffix( 2 ); }
+        else if( std::string_view( ".,;:?!" ).find( c ) != std::string_view::npos ) { r.stop = true; w.remove_suffix( 1 ); }
+        else if( std::string_view( "`'\")]}[{(" ).find( c ) != std::string_view::npos ) { w.remove_suffix( 1 ); }
+        else
+        {
+            moved = false;
+            for( const std::string_view q : kSubjectCloseQuotes )
+            {
+                if( !moved && w.ends_with( q ) ) { w.remove_suffix( q.size() ); moved = true; }
+            }
+        }
+    }
+    r.text = w;
+    return r;
+}
+
+// `e.g.` / `i.e.` are prose, `*` would be a --path glob: neither is a name the task wrote
+inline bool graphSubjectNameable( std::string_view t ) noexcept
+{
+    return !t.empty() && t.find( '*' ) == std::string_view::npos && t != "e.g" && t != "i.e" && t != "E.g" && t != "I.e";
+}
+
+// one slot: the span's words up to its first qualifier / clause word or its first sentence stop (the stop word is the span's LAST
+// word); candidates = code-like tokens last-first, then `main` if the span holds it. Writes the read span.
+inline std::vector<std::string> graphSubjectCandidates( std::span<const std::string_view> words, std::string& spanOut )
+{
+    std::vector<std::string> codeLike;
+    bool                     hasMain = false;
+    for( std::string_view w : words )
+    {
+        if( graphSubjectQualifier( w ) )
+        {
+            break;
+        }
+        const GraphSubjectWord t = graphSubjectTrimWord( w );
+        spanOut += spanOut.empty() ? "" : " ";
+        spanOut += t.raw;
+        if( graphSubjectNameable( t.text ) )
+        {
+            if( t.parens || graphSubjectCodeLike( t.text ) ) { codeLike.emplace_back( t.text ); }
+            else if( t.text == "main" ) { hasMain = true; }
+        }
+        if( t.stop )
+        {
+            break;
+        }
+    }
+    std::vector<std::string> out( codeLike.rbegin(), codeLike.rend() );
+    if( hasMain )
+    {
+        out.emplace_back( "main" );
+    }
+    return out;
+}
+}   // namespace detail
+
+// nullopt unless the task holds one of the three forms AND every slot has a candidate. Forms are tried common,
+// path, callers (parse.py PATS order); the first keyword occurrence of a form anchors it; the first span ends at
+// the form's first separator word (`to` / `and`), the last span runs to the end of the task.
+inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
+{
+    const std::vector<std::string_view> w = splitRouteWords( task );
+    const auto fill = [ & ]( GraphSubjectForm form, std::initializer_list<std::pair<std::size_t, std::size_t>> ranges ) -> std::optional<GraphSubject>
+    {
+        GraphSubject gs;
+        gs.form = form;
+        for( const auto& [ b, e ] : ranges )
+        {
+            std::string span;
+            std::vector<std::string> c = detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + b, e - b ), span );
+            if( c.empty() )
+            {
+                return std::nullopt;
+            }
+            gs.spans.push_back( std::move( span ) );
+            gs.slots.push_back( std::move( c ) );
+        }
+        return gs;
+    };
+    // the first separator word at or after `from` (needs >= 1 word before it and >= 1 after it)
+    const auto sep = [ & ]( std::size_t from, std::string_view word ) -> std::size_t
+    {
+        for( std::size_t k = from + 1; k + 1 < w.size(); ++k )
+        {
+            if( routeLower( w[k] ) == word )
+            {
+                return k;
+            }
+        }
+        return w.size();
+    };
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // common callers of A and B
+    {
+        if( detail::graphSubjectWordIs( w[i], { "common" } ) && detail::graphSubjectWordIs( w[i + 1], { "caller", "callers" } )
+            && routeLower( w[i + 2] ) == "of" )
+        {
+            const std::size_t a = sep( i + 3, "and" );
+            if( a < w.size() )
+            {
+                return fill( GraphSubjectForm::Common, { { i + 3, a }, { a + 1, w.size() } } );   // the form matched: its slots decide
+            }
+        }
+    }
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )   // [call] path from A to B
+    {
+        if( detail::graphSubjectWordIs( w[i], { "path" } ) && routeLower( w[i + 1] ) == "from" )
+        {
+            const std::size_t t = sep( i + 2, "to" );
+            if( t < w.size() )
+            {
+                return fill( GraphSubjectForm::Path, { { i + 2, t }, { t + 1, w.size() } } );
+            }
+        }
+    }
+    for( std::size_t i = 0; i + 2 < w.size(); ++i )   // callers of X
+    {
+        if( detail::graphSubjectWordIs( w[i], { "caller", "callers" } ) && routeLower( w[i + 1] ) == "of" )
+        {
+            return fill( GraphSubjectForm::Callers, { { i + 2, w.size() } } );
+        }
+    }
+    return std::nullopt;
 }
 
 inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )

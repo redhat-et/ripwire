@@ -41,6 +41,8 @@ kExtendedLengthThresholdUnits	BOUNDARY
 kFieldWalkCap	INDEXING
 kForPageRowsDefault	OUTPUT
 kForPageUnionSymbolCap	INDEXING
+kForRankedHopHeadRows	BOUNDARY
+kForRankedHopMaxCallers	BOUNDARY
 kHandoffCochangeRows	OUTPUT
 kHandoffDocRows	OUTPUT
 kHandoffNoteRows	OUTPUT

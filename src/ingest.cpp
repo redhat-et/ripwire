@@ -31,6 +31,7 @@
 #include "preprocdead.h"       // #62: the ONE literal `#if 0` rule (shared with slice.h) — dead call sites never become edges
 #include "extentsuspect.h"     // extent honesty: the containment rules + the recovered/suspect bit vocabulary
 #include "macroreparse.h"      // member-macro re-parse: the scanner, the offset-preserving blank, the adoption rule
+#include "rustusebounds.h"     // its Rust layer: precise-capturing use<..> bounds blanked for the same re-parse
 #include "regexguard.h"        // #match?/#not-match?: the screen, the compile and the guarded match (ingest_astquery.h)
 #include "infra/stackthreads.h"   // kCallerStackBytesFloor — #match? bounds a captured node's text the same way skillscan.h/--arch do (F-B4)
 
@@ -202,6 +203,7 @@ extern "C"
 #include "ingest_ruby.h"      // Ruby Rails/DSL capture lane (schema columns, Jbuilder typing, factories, class-side DSL walks) - carved verbatim 2026-10-12
 #include "ingest_importcap.h"
 #include "ingest_valuerefs.h"
+#include "ingest_rustslots.h"   // FN-SLOT part 2: Rust's slot-join records (callSide ParenFieldCall)
 #include "ingest_sidecap.h"
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"

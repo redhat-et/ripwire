@@ -2020,6 +2020,17 @@ constexpr const char* kMacroBlankedSkippedLegend =
     " it) but is no call edge, and identifiers inside its parentheses are not recorded. macro_blanked_files= on the root"
     " counts such rows. Nothing is dropped. -->";
 
+// RUST PRECISE-CAPTURE RE-PARSE (src/rustusebounds.h, gate test/macroreparsecheck.sh section R) — the reading of
+// why=use-bounds-blanked, use_bounds_blanked= and use_bounds_blanked_files=, written only into a report that carries them.
+constexpr const char* kUseBoundsBlankedSkippedLegend =
+    "<!-- why=use-bounds-blanked on an <h> row = this Rust file's symbols come from a SECOND parse. Its first parse held"
+    " error bytes, so use_bounds_blanked= precise-capturing bounds (a use<..> list on an impl Trait, which this build's"
+    " Rust grammar predates) were replaced by spaces with every offset and line unchanged, and that re-parse was adopted"
+    " because it held STRICTLY FEWER error bytes; names, spans and bodies still read the original bytes. A use<..> list"
+    " names only generic parameters and lifetimes already in scope, so no definition, call or type use is lost. err=,"
+    " err_ratio= and degraded-parse on such a row describe the ADOPTED parse. use_bounds_blanked_files= on the root"
+    " counts such rows. Nothing is dropped. -->";
+
 // §L1 — one indexed file the health pass flagged. `fileIndex` indexes IngestResult::files.
 struct SkipHealthFinding
 {
@@ -2028,6 +2039,7 @@ struct SkipHealthFinding
     bool        minified  = false;   // whitespace frequency under the threshold
     std::uint32_t extentSuspectSyms = 0;   // extent honesty: definitions here carrying extent_suspect= (0 ⇒ none flagged)
     std::uint32_t macroBlanked      = 0;   // member-macro re-parse: invocations blanked for the adopted parse (0 ⇒ first parse)
+    std::uint32_t useBoundsBlanked  = 0;   // its Rust layer: use<..> bounds blanked for the adopted parse (0 ⇒ first parse)
 };
 
 // §L1 — the health pass's whole answer: the flagged files, plus the counts the root discloses.
@@ -2039,6 +2051,7 @@ struct SkipHealthReport
     std::size_t                    unmeasured = 0;   // indexed but never parsed — NOT the same as clean
     std::size_t                    extentSuspectFiles = 0;   // extent honesty: files holding >= 1 flagged definition
     std::size_t                    macroBlankedFiles  = 0;   // member-macro re-parse: files whose symbols come from a re-parse
+    std::size_t                    useBoundsBlankedFiles = 0;   // its Rust layer: files re-parsed with use<..> bounds blanked
 };
 
 // §L1 — classify every indexed file's recorded health against the two disclosure thresholds.
@@ -2086,12 +2099,14 @@ SkipHealthReport classifySkipHealth( const rw::IngestResult& ing )
         const bool          degraded = rw::fileParseDegraded( ing, f );   // the ONE predicate (model.h) — grep + refusals route through it too
         const bool          minified = h.fileBytes >= kMinifiedMinBytes && wsPerMil < kMinifiedWsPerMille;
         const bool          blanked  = rw::isMacroBlankedHealth( h );   // member-macro re-parse: rowed even when the adopted parse is clean
+        const bool          useBlank = rw::isUseBoundsBlankedHealth( h );   // its Rust layer: the same rule
         out.degraded += degraded ? 1u : 0u;
         out.minified += minified ? 1u : 0u;
         out.macroBlankedFiles += blanked ? 1u : 0u;
-        if( degraded || minified || suspect > 0 || blanked )
+        out.useBoundsBlankedFiles += useBlank ? 1u : 0u;
+        if( degraded || minified || suspect > 0 || blanked || useBlank )
         {
-            out.findings.push_back( { f, degraded, minified, suspect, h.macroBlanked } );
+            out.findings.push_back( { f, degraded, minified, suspect, h.macroBlanked, h.useBoundsBlanked } );
         }
     }
     return out;
@@ -2168,10 +2183,11 @@ void writeUnindexedExtRows( rw::XmlWriter& w, std::vector<char>& esc, const std:
 // §L1 + extent honesty — an <h> row's why=: the reasons that fired, in their fixed order, comma-joined.
 std::string healthWhyList( const SkipHealthFinding& hr )
 {
-    const std::array<std::pair<bool, std::string_view>, 4> reasons = { { { hr.degraded, "degraded-parse" },
+    const std::array<std::pair<bool, std::string_view>, 5> reasons = { { { hr.degraded, "degraded-parse" },
                                                                          { hr.minified, "minified-suspect" },
                                                                          { hr.extentSuspectSyms > 0, "extent-suspect" },
-                                                                         { hr.macroBlanked > 0, "macro-blanked" } } };
+                                                                         { hr.macroBlanked > 0, "macro-blanked" },
+                                                                         { hr.useBoundsBlanked > 0, "use-bounds-blanked" } } };
     std::string why;
     for( const auto& [ isFired, token ] : reasons )
     {
@@ -2190,7 +2206,8 @@ std::string healthWhyList( const SkipHealthFinding& hr )
 // composed, never the fixed `row`/`hdr` buffers, so the fixed-buffer sweep's population is unchanged.
 std::string skippedHealthRootAttrs( const SkipHealthReport& health )
 {
-    return rw::countAttrXmlOrEmpty( "extent_suspect_files", health.extentSuspectFiles ) + rw::countAttrXmlOrEmpty( "macro_blanked_files", health.macroBlankedFiles );
+    return rw::countAttrXmlOrEmpty( "extent_suspect_files", health.extentSuspectFiles ) + rw::countAttrXmlOrEmpty( "macro_blanked_files", health.macroBlankedFiles )
+         + rw::countAttrXmlOrEmpty( "use_bounds_blanked_files", health.useBoundsBlankedFiles );
 }
 
 // extent honesty + member-macro re-parse — each reading rides ONLY a report that carries its rows, so a corpus with
@@ -2207,6 +2224,10 @@ void writeSkippedHealthLegends( rw::XmlWriter& w, const SkipHealthReport& health
     if( health.macroBlankedFiles > 0 )
     {
         w.write( kMacroBlankedSkippedLegend );
+    }
+    if( health.useBoundsBlankedFiles > 0 )
+    {
+        w.write( kUseBoundsBlankedSkippedLegend );
     }
 }
 
@@ -2228,6 +2249,7 @@ void writeHealthRows( rw::XmlWriter& w, std::vector<char>& esc, const rw::Ingest
         w.write( row );
         w.write( rw::countAttrXmlOrEmpty( "extent_suspect_syms", hr.extentSuspectSyms ) );
         w.write( rw::countAttrXmlOrEmpty( "macro_blanked", hr.macroBlanked ) );
+        w.write( rw::countAttrXmlOrEmpty( "use_bounds_blanked", hr.useBoundsBlanked ) );
         w.write( "/>" );
     }
 }

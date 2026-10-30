@@ -409,7 +409,8 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 ExtractShortfall  tagsShortfall;
                 underExtractScope<ExtractPhase::TagsFacts>( pending.le->lang, [ & ]
                 {
-                    captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall );
+                    captureTagsFacts( cursor, *pending.le, pending.fileId, pending.bytes, root, out.defs, out.refs, out.binds, out.incs, pending.ppDead, tagsShortfall,
+                                      TagsCapture::Full, cjsExportStem( pending.le->lang, sh.files[ pending.fileId ] ) );
                 } );
                 notePartialExtract( scan, pending.fileId, tagsShortfall, pending.bytes.size() );
                 buildLexForNewDefs( out.defs, firstNewDefIndex, pending.bytes );   // B0.2: bytes still in memory
@@ -644,7 +645,8 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 const std::size_t firstNewDefIndex = out.defs.size();
                 underExtractScope<ExtractPhase::TagsFacts>( le->lang, [ & ]
                 {
-                    captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs, ppDead, shortfall );
+                    captureTagsFacts( cursor, *le, static_cast<std::uint32_t>( fileId ), bytes, root, out.defs, out.refs, out.binds, out.incs, ppDead, shortfall,
+                                      TagsCapture::Full, cjsExportStem( le->lang, path ) );
                 } );
                 notePartialExtract( scan, fileId, shortfall, bytes.size() );
                 buildLexForNewDefs( out.defs, firstNewDefIndex, bytes );   // B0.2: bytes still in memory

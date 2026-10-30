@@ -646,9 +646,10 @@ done
 #   CPython (3.13) truth per variant: starmid/starinit/starqual/starqualmid: the hop's star import `from pkg.y.base2 import *` follows the import, so
 #   Base is pkg.y.base2.Base; assignmid/assigninit/assignqual/globalmid: `Base = Other` (or a `global Base; Base = Other` in a def that runs) makes it
 #   pkg.x.a.Other; globalsinit: `globals()['a'] = base2` in the package binds `a` to pkg.y.base2; setattrinit: setattr(sys.modules[__name__], 'a', ...)
-#   does the same; augmid/forinit/withinit/walrusinit/defmid/classmid: later rebinds of every other form. Controls (stay a way in): the K22 pair.
+#   does the same; globalsmid/setattrmid/globalsinitre: the same two writes after the hop's own re-export of Base (`globals()['Base'] = Other`), in a mid.py hop and in
+#   an __init__ hop, which reads the write marker in pythonFileBindsOnlyByImport (the re-export hop, not the package-attribute path); augmid/forinit/withinit/walrusinit/defmid/classmid: later rebinds of every other form. Controls (stay a way in): the K22 pair.
 # K23 begin
-for v in starmid starinit starqual starqualmid assignmid assigninit assignqual globalmid globalsinit setattrinit augmid forinit withinit walrusinit defmid classmid; do d="$TMP/c7_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+for v in starmid starinit starqual starqualmid assignmid assigninit assignqual globalmid globalsinit setattrinit globalsmid setattrmid globalsinitre augmid forinit withinit walrusinit defmid classmid; do d="$TMP/c7_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
     printf 'class Base:\n    def render_line(self):\n        return 1\n\nclass Other:\n    pass\n' > "$d/pkg/x/a.py"
     printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
     printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
@@ -677,6 +678,12 @@ for v in starmid starinit starqual starqualmid assignmid assigninit assignqual g
                       out="from pkg.x import a as q\n\n${tgt}$(sub q.Base)\n" ;;
         setattrinit)  printf "import sys\nfrom pkg.y import base2 as _b\nsetattr(sys.modules[__name__], 'a', _b)\n" > "$d/pkg/x/__init__.py"
                       out="from pkg.x import a as q\n\n${tgt}$(sub q.Base)\n" ;;
+        globalsmid)   printf "${hop}globals()['Base'] = Other\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        setattrmid)   printf "import sys\n${hop}setattr(sys.modules[__name__], 'Base', Other)\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        globalsinitre) printf "${hop}globals()['Base'] = Other\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
         augmid)       printf "${hop}Base += Other\n" > "$d/pkg/x/mid.py"
                       out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
         forinit)      printf "${hop}for Base in (Other,):\n    pass\n" > "$d/pkg/x/__init__.py"
@@ -1289,7 +1296,7 @@ done
 
 # K23 (lane ind4b fix 7): a hop file whose binding of the name is not its one unrenamed import ends the chain - at EVERY hop, whatever the shape.
 # Every arm is shown + bridged at fix 6's head (a02e8439); the K22 controls above stay a way in.
-for v in starmid starinit starqual starqualmid assignmid assigninit assignqual globalmid globalsinit setattrinit augmid forinit withinit walrusinit defmid classmid; do
+for v in starmid starinit starqual starqualmid assignmid assigninit assignqual globalmid globalsinit setattrinit globalsmid setattrmid globalsinitre augmid forinit withinit walrusinit defmid classmid; do
     nsArm "(K23) 2c hop file rebinds the name ($v) - withheld" "$TMP/c7_$v" "run,target" \
         '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
         "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:7\" withheld=\"name:1\"/>"

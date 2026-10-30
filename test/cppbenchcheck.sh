@@ -13,6 +13,13 @@
 #   (iv)  determinism x2 — two independent runs against the SAME frozen dataset.lock produce
 #         byte-for-byte identical scoring (modulo wall-clock fields, stripped before compare).
 #
+# Cost (CI-FLAKES-2, 2026-10-27): the gate is ~70 ripwire calls over three ~340 MB extracted trees and was killed at its
+# 1200 s budget on slow macOS runners three times (10-13, 10-23, 10-27; 640 s on a green run). Three scoring passes ran: run 1
+# (cold WORK1), a re-mine that re-scored every arm only to restore the tampered lock, and run 2 (cold WORK2). The tamper now
+# hits a COPY of the lock, so the lock never needs restoring and the (iv) comparison is run 1 against run 2 -- two independent
+# COLD index builds, a stricter pair than the old cold-vs-warm one. The re-mine survives as its own arm: it still exercises
+# --refresh-dataset, on one arm (`for`) instead of all three, and now also asserts that re-mining reproduces the lock hash.
+#
 # Usage:  bash test/cppbenchcheck.sh   |   RIPWIRE_BIN=asan/ripwire bash test/cppbenchcheck.sh
 
 set -u
@@ -60,15 +67,17 @@ got = hashlib.sha256(blob).hexdigest()
 sys.exit(0 if got == lock["content_sha256"] else 1)
 PY
 
-    # tampering must be REJECTED on the next run (fail-closed contract)
-    python3 - "$LOCK" <<'PY'
+    # tampering must be REJECTED on the next run (fail-closed contract). The tamper edits a COPY: $LOCK stays the frozen lock
+    # both scoring runs below read.
+    TLOCK="$TMP/tampered.lock"
+    python3 - "$LOCK" "$TLOCK" <<'PY'
 import json, sys
 lock = json.load(open(sys.argv[1]))
 lock["instances"][0]["gold_files"] = ["tampered.cpp"]
-json.dump(lock, open(sys.argv[1], "w"))
+json.dump(lock, open(sys.argv[2], "w"))
 PY
     RIPWIRE="$BIN" python3 "$HARNESS" --source-repo "$ROOT" --branch-scope head --cap 3 \
-        --work-dir "$WORK1" --dataset-lock "$LOCK" >"$TMP/tamper.log" 2>&1
+        --work-dir "$WORK1" --dataset-lock "$TLOCK" >"$TMP/tamper.log" 2>&1
     trc=$?
     if [ $trc -ne 0 ] && grep -q "content hash mismatch" "$TMP/tamper.log"; then
         ok "tampered dataset.lock is rejected (fail-closed)"
@@ -94,18 +103,15 @@ else
     no "missing $OUT1 — harness did not write JSON"
 fi
 
-# ── (iv) determinism x2 — rerun against the SAME frozen lock, compare modulo wall-clock ─────────────
-# restore the untampered lock by re-mining fresh (deterministic given the same repo state) rather than
-# reusing the tampered copy above.
-RIPWIRE="$BIN" python3 "$HARNESS" \
-    --source-repo "$ROOT" --branch-scope head --cap 3 --max-scan 400 --refresh-dataset \
-    --work-dir "$WORK1" --dataset-lock "$LOCK" --json-out "$OUT1" >"$TMP/run_a.log" 2>&1
+# ── (iv) determinism x2 — a second, fully independent run against the SAME frozen lock, compared with run 1 ─────────────────
+# Run 1 built its indexes cold in WORK1; this run builds its own in an empty WORK2 (own archives, own caches), so the pair is two
+# independent cold builds. Modulo wall-clock fields the scoring must be byte-identical.
 WORK2="$TMP/work2"; OUT2="$TMP/out2.json"
 RIPWIRE="$BIN" python3 "$HARNESS" \
     --source-repo "$ROOT" --branch-scope head --cap 3 \
     --work-dir "$WORK2" --dataset-lock "$LOCK" --json-out "$OUT2" >"$TMP/run_b.log" 2>&1
 rc2=$?
-if [ $rc2 -eq 0 ] && [ -f "$OUT2" ]; then
+if [ $rc2 -eq 0 ] && [ -f "$OUT2" ] && [ -f "$OUT1" ]; then
     python3 - "$OUT1" "$OUT2" <<'PY' && ok "determinism x2 (scoring byte-identical modulo wall-clock)" \
         || no "determinism x2 FAILED — scoring differs between runs"
 import json, sys
@@ -121,6 +127,32 @@ sys.exit(0 if a == b else 1)
 PY
 else
     no "determinism run 2 failed rc=$rc2 (see $TMP/run_b.log)"
+fi
+
+# ── (v) --refresh-dataset re-mines from scratch and reproduces the lock ──────────────────────────────────────────────────────
+# Reuses WORK1's indexes (no cold build) and scores ONE arm: this arm is about the mining path, not the scoring one (the two
+# runs above cover that). The refreshed lock goes to its own file; its content hash must equal the frozen lock's.
+RLOCK="$TMP/refreshed.lock"
+# CR 4396503879 (train 40): RLOCK starts as a TAMPERED copy of the frozen lock. The harness mines a MISSING lock anyway, so an arm that
+# starts without one passes when --refresh-dataset stops working; with a lock present, only the refresh replaces it (a plain run on
+# this one refuses: the hash does not match its instances).
+python3 - "$LOCK" "$RLOCK" <<'PY' || { no "(v) could not seed the tampered lock"; }
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["content_sha256"] = "0" * 64
+json.dump(d, open(sys.argv[2], "w"), indent=2)
+PY
+RIPWIRE="$BIN" python3 "$HARNESS" \
+    --source-repo "$ROOT" --branch-scope head --cap 3 --max-scan 400 --refresh-dataset --arms=for \
+    --work-dir "$WORK1" --dataset-lock "$RLOCK" >"$TMP/run_r.log" 2>&1
+rcr=$?
+if [ $rcr -eq 0 ] && [ -f "$RLOCK" ]; then
+    h0="$( python3 -c "import json; print(json.load(open('$LOCK'))['content_sha256'])" 2>/dev/null )"
+    h1="$( python3 -c "import json; print(json.load(open('$RLOCK'))['content_sha256'])" 2>/dev/null )"
+    if [ -n "$h0" ] && [ "$h0" = "$h1" ]; then ok "--refresh-dataset re-mines the same lock (content_sha256 identical)"
+    else no "--refresh-dataset mined a different lock (frozen ${h0:-?} vs refreshed ${h1:-?})"; fi
+else
+    no "--refresh-dataset run failed rc=$rcr (see $TMP/run_r.log)"; cat "$TMP/run_r.log" >&2
 fi
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'

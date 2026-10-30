@@ -35,6 +35,7 @@
 #include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
 #include "memguard.h"           // #387: loadRefTree reads the hard line between a commit's ingest and its graph
 #include "infra/Diagnostics.h"  // DISCLOSE — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
+#include "infra/namesplit.h"    // afterLast — a path's last component (isConftestFile, pythonModuleTail), not a third hand-rolled basename
 #include "infra/jsonesc.h"      // L2 — rw::jsonesc::escapeMcp for staleAcksJsonArray's kind= field (the same posture serialize.h's jsonStr uses)
 #include "infra/platform.h"     // RW_LIFETIMEBOUND — the DefectSiteKey projection lambdas; owned here, not transitively
 #include "sourceidentity.h"    // rw::kRipwireSourceIdentity — the producer identity the qsnap/qbody keys and blob header carry
@@ -2439,8 +2440,20 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 43;   // MUST equal ingest.cpp's kCacheVersion (gated); 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 231;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 46;   // MUST equal ingest.cpp's kCacheVersion (gated); 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestParserVerMirror    = 269;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 269 = 2026-10-29 (train 41b: fn-slot-s2 C/C++ member-pointer / nested-designator /
+                                                          //   macro-cast slot extraction, placeholders 257, 259, 260; above train 41's 259/260)
+                                                          // 259 = 2026-10-28 (train 41: fn-slot-2 Rust slot records / py-split-marker `?name`,
+                                                          //   placeholders 249, 255; above fn-slot-s2's 257/258)
+                                                          // 251 = 2026-10-27 (train 40: js-def-naming / string-keyed / fn-slot extraction,
+                                                          //   placeholders 238, 241, 247; above train 39's 239/240 and fn-slot-2's 249)
+                                                          // 239 = 2026-10-27 (train 39: receiver-fixes typing, placeholder 237/238; above train 38
+                                                          //   235/236; see the kParserVer note)
+                                                          // 235 = 2026-10-27 (train 38: queue-hop keyword tag on a Python queue call, placeholder
+                                                          //   228/229; above train 37b 233/234; see the kParserVer note)
+                                                          // 233 = 2026-10-26 (train 37b: rust-degraded use<..> re-parse, placeholder 229/230;
+                                                          //   above train 36 231/232; see the kParserVer note)
                                                           // 231 = 2026-10-25 (train 36: above main 226/227, #438 228, rust-degraded 229/230;
                                                           //   see the kParserVer note)
                                                           // 226 = 2026-10-24 (train 34: above main / #432 / ind4b 224/225, ind5 222/223,
@@ -10086,6 +10099,17 @@ inline bool offsetInComment( std::string_view source, std::size_t spanBegin, std
     return open != std::string_view::npos && span.find( "*/", open + 2 ) == std::string_view::npos;
 }
 
+// CR 4396503844: C99 `int api(int values[static 1])` — `static` inside [ ] qualifies the array parameter, it is no storage class.
+inline bool insideSquareBrackets( std::string_view source, std::size_t begin, std::size_t position ) noexcept
+{
+    int depth = 0;
+    for( std::size_t at = begin; at < position; ++at )
+    {
+        depth += source[ at ] == '[' ? 1 : source[ at ] == ']' && depth > 0 ? -1 : 0;
+    }
+    return depth > 0;
+}
+
 inline bool sourceHasStaticToken( std::string_view source, std::size_t sigStartByte, std::size_t sigEndByte ) noexcept
 {
     const std::size_t begin = std::min( sigStartByte, source.size() );
@@ -10101,13 +10125,22 @@ inline bool sourceHasStaticToken( std::string_view source, std::size_t sigStartB
         const auto isIdentifier = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
         const bool leftBoundary  = position == begin || !isIdentifier( source[ position - 1 ] );
         const bool rightBoundary = position + token.size() == end || !isIdentifier( source[ position + token.size() ] );
-        if( leftBoundary && rightBoundary && !offsetInComment( source, begin, position ) )
+        if( leftBoundary && rightBoundary && !offsetInComment( source, begin, position ) && !insideSquareBrackets( source, begin, position ) )
         {
             return true;
         }
         position += token.size();
     }
     return false;
+}
+
+// D1 fix round 1: internal linkage of ONE definition. The token is the C-family storage class, so the scan runs only for a
+// language whose LangFacts row says `staticLinkage` (C, C++, Objective-C). A Python parameter `static=False`, a TypeScript literal
+// type `'static'` and a Rust `'static` lifetime are the same four letters and no linkage: before this gate they made a public
+// function an "internal-linkage" row (--dead-code `<d>`: zed listed 67 Rust rows; the test-only `<to>` rows inherited it).
+inline bool symbolHasStaticLinkage( const Symbol& s, std::string_view source ) noexcept
+{
+    return langFacts( s.lang ).staticLinkage && sourceHasStaticToken( source, s.sigStartByte, s.sigEndByte );
 }
 
 // The nearest non-blank, non-comment line above a Python def at `defByte` (or the def's own first byte) opens with '@'.
@@ -10191,6 +10224,120 @@ inline bool pythonRunnerRoot( std::string_view path, const Symbol& s, std::strin
     const std::size_t scopeSep = s.scope.rfind( "::" );
     return pythonClassBasesNameTestCase( source, scopeSep == std::string::npos ? std::string_view( s.scope ) : std::string_view( s.scope ).substr( scopeSep + 2 ),
                                          s.sigStartByte );
+}
+
+// D1 TESTONLY-DEAD: Python's own internal-interface evidence, standing in for the `static` token C/C++ spells — PEP 8's
+// "internal interfaces" convention: a leading-underscore name, or a def inside a module or package whose path component
+// starts with one underscore (`_segment_tools.py`, `_internal/x.py`). A dunder component (`__init__.py`, `__main__.py`)
+// is the language's own spelling, not a privacy mark. `relPath` is ROOT-relative, so a directory above the root never
+// counts. MODULE-LEVEL defs only (empty scope): a method's reach is its class's, and a class in a private module is often
+// re-exported as public API (textual's widgets/_data_table.py DataTable), with methods a framework dispatches by name
+// (action_*, _on_*). Only a language whose LangFacts row sets underscorePrivacy (Python); every other language is false.
+// Read only by --dead-code's test-only rows (test-only=).
+inline bool underscorePrivateDef( std::string_view relPath, const Symbol& s ) noexcept
+{
+    if( !langFacts( s.lang ).underscorePrivacy || !s.scope.empty() )
+    {
+        return false;
+    }
+    const auto privateMark = []( std::string_view part ) noexcept { return part.size() > 1 && part[ 0 ] == '_' && part[ 1 ] != '_'; };
+    if( privateMark( s.name ) )
+    {
+        return true;
+    }
+    std::size_t start = 0;
+    while( start < relPath.size() )
+    {
+        const std::size_t slash = relPath.find( '/', start );
+        const std::size_t end   = slash == std::string_view::npos ? relPath.size() : slash;
+        if( privateMark( relPath.substr( start, end - start ) ) )
+        {
+            return true;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
+// D1 fix round 1 (F4): pytest's own test file. A root `conftest.py` sits outside every test/ directory, so the shared test-path
+// rule (filter.h isTestPath) reads its helpers as library code; --dead-code's test-only rows must not list them as library
+// functions. The base name alone decides (any conftest.py, at any depth).
+inline bool isConftestFile( std::string_view path ) noexcept
+{
+    return namesplit::afterLast( path, "/" ) == "conftest.py";
+}
+
+// D1 fix round 1 (F3): the module name a Python file answers to at its tail: the file stem, or the package directory's name for
+// `__init__.py`. "" for a path that is not a .py file (or an __init__.py with no directory).
+inline std::string_view pythonModuleTail( std::string_view relPath ) noexcept
+{
+    if( !relPath.ends_with( ".py" ) )
+    {
+        return {};
+    }
+    relPath.remove_suffix( 3 );
+    if( namesplit::afterLast( relPath, "/" ) != "__init__" )
+    {
+        return namesplit::afterLast( relPath, "/" );
+    }
+    relPath.remove_suffix( relPath.size() == 8 ? 8 : 9 );   // "__init__" or "/__init__"
+    return namesplit::afterLast( relPath, "/" );
+}
+
+// CR 4396503848: the offset of the `import` keyword of a `from <module> import …` line, or npos for any other line. Any run of
+// spaces or tabs may stand around the keyword (`from ._impl  import *`); the keyword is a whole word between two of them.
+inline std::size_t pythonImportKeywordAt( std::string_view line ) noexcept
+{
+    const auto blank = [ & ]( std::size_t at ) noexcept { return at < line.size() && ( line[ at ] == ' ' || line[ at ] == '\t' ); };
+    if( !line.starts_with( "from" ) || !blank( 4 ) )
+    {
+        return std::string_view::npos;
+    }
+    for( std::size_t imp = line.find( "import" ); imp != std::string_view::npos; imp = line.find( "import", imp + 1 ) )
+    {
+        if( blank( imp - 1 ) && blank( imp + 6 ) )
+        {
+            return imp;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// D1 fix round 1 (F3): the tail of every module a `from <module> import *` line in `text` names (`from ._impl import *` and
+// `from pkg._impl import *` both give "_impl"). A glob re-exports the module's public names through the importing package, so a
+// def in that module is part of the package's public surface even when no other file spells its name. Line-based text, not
+// parsed Python: a glob inside a string or a comment reads as one too (a row fewer, never one more).
+inline std::vector<std::string_view> pythonGlobImportTails( std::string_view text )
+{
+    std::vector<std::string_view> tails;
+    for( std::size_t at = 0; at < text.size(); )
+    {
+        const std::size_t eol  = std::min( text.find( '\n', at ), text.size() );
+        std::string_view  line = text.substr( at, eol - at );
+        at                     = eol + 1;
+        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
+        const std::size_t imp = pythonImportKeywordAt( line );
+        if( imp == std::string_view::npos )
+        {
+            continue;
+        }
+        std::string_view after = line.substr( imp + 7 );
+        after.remove_prefix( std::min( after.find_first_not_of( " \t" ), after.size() ) );
+        if( !after.starts_with( '*' ) )
+        {
+            continue;
+        }
+        std::string_view module = line.substr( 5, imp - 5 );
+        module.remove_prefix( std::min( module.find_first_not_of( " \t" ), module.size() ) );
+        module.remove_suffix( module.size() - std::min( module.find_last_not_of( " \t" ) + 1, module.size() ) );
+        const std::size_t dot = module.rfind( '.' );
+        const std::string_view tail = dot == std::string_view::npos ? module : module.substr( dot + 1 );
+        if( !tail.empty() )
+        {
+            tails.push_back( tail );
+        }
+    }
+    return tails;
 }
 
 // lane/safe-delete: the --dead-code high-confidence PRECONDITIONS on symbol KIND/PLACEMENT alone — a

@@ -27,6 +27,7 @@
 // decision.
 
 #include "model.h"
+#include "filter.h"   // isTestSymbol — a declined list names the non-test implementors first
 #include "langfacts.h"
 #include "receiverevidence.h"
 #include "smallvec.h"
@@ -55,6 +56,7 @@ struct IfaceDispatchAnswer
 {
     bool                fired  = false;
     bool                proven = false;
+    bool                open   = false;   // the list is what the tree shows of an implementors list it cannot close (openTraitAnswer): never a proof
     std::vector<NodeId> cand;
 };
 
@@ -289,6 +291,14 @@ public:
             {
                 key_.assign( b.var ).push_back( '\x1f' );
                 implBlocks_[ key_.append( b.typeName ) ].push_back( &b );
+                traitBlocks_[ b.var ].push_back( &b );
+            }
+        }
+        for( const Symbol& s : ing.symbols )   // RUST-DYN-NAMESAKE: the bodied callables of a trait-impl-block language, by name
+        {
+            if( langFacts( s.lang ).traitImplBlocks && ReceiverEvidence::callableKind( s.kind ) && s.endByte > s.sigEndByte )
+            {
+                blockCallables_[ s.name ].push_back( s.id );
             }
         }
     }
@@ -304,9 +314,13 @@ public:
         }
         const std::vector<Row>& rows   = closureOf( type );
         const auto              opened = [ & ]( NodeId t ) { return ( t < open_.size() && open_[ t ] != 0 ) || lambdaImplements( t ); };
-        if( rows.empty() || opened( type ) || std::ranges::any_of( rows, [ & ]( const Row& row ) { return opened( row.id ); } ) )
+        if( opened( type ) || std::ranges::any_of( rows, [ & ]( const Row& row ) { return opened( row.id ); } ) )
         {
-            return out;   // no implementor in the tree, or one the map cannot list: the name tiers answer, as before
+            return openTraitAnswer( type, callee );   // one the map cannot list: Rust reads the impl blocks, else the name tiers answer
+        }
+        if( rows.empty() )
+        {
+            return out;   // no implementor in the tree: the name tiers answer, as before
         }
         bool provenAll = true;
         collect( type, callee, out.cand );   // T's own bodied default runs for every implementor without an override
@@ -325,14 +339,60 @@ public:
             const bool unseen = !hasDefault && out.cand.size() == before && ( row.id >= implementors_.size() || implementors_[ row.id ].empty() );
             provenAll = provenAll && row.proven && !unseen;
         }
-        std::sort( out.cand.begin(), out.cand.end() );
-        out.cand.erase( std::unique( out.cand.begin(), out.cand.end() ), out.cand.end() );
-        out.fired  = !out.cand.empty();
+        settle( out );
         out.proven = provenAll && !langFacts( ing_.symbols[ type ].lang ).structuralTyping;   // structural: the list is a floor
         return out;
     }
 
 private:
+    // the candidates once, ascending, then the non-test ones first (filter.h isTestSymbol; each part keeps id order): the list a
+    // <dc gate="iface"> row names leads with what production code runs (RUST-DYN-NAMESAKE: mdbook's renderers before the
+    // testsuite's Spy). Order only: the set, its count and the one-candidate proof are unchanged.
+    void settle( IfaceDispatchAnswer& out ) const
+    {
+        std::sort( out.cand.begin(), out.cand.end() );
+        out.cand.erase( std::unique( out.cand.begin(), out.cand.end() ), out.cand.end() );
+        std::stable_partition( out.cand.begin(), out.cand.end(), [ & ]( NodeId c ) { return !isTestSymbol( ing_, c ); } );
+        out.fired = !out.cand.empty();
+    }
+
+    // lane receiver-fixes (RUST-DYN-NAMESAKE; dispatch classes #5 candidate-set completeness, #11 name-keyed identity): a trait
+    // whose implementors list the map cannot list (an implementor two same-named types share — mdbook's tests hold two `Spy`
+    // structs —, `impl T for &X`, a blanket impl). Before, the tier stepped aside, and the name tiers bound a `&dyn T` call by
+    // name to the one same-file impl (mdbook execute_build_process → TestRenderer::render). A language whose trait methods sit in
+    // `impl T for X` blocks (langfacts.h traitImplBlocks) still knows every in-tree body of the callee written for T: the bodied
+    // callables of that name inside one of T's ImplBlock spans, plus T's own default. That list is the decline (never a proof:
+    // a mock attribute's or macro's impl writes no body the index sees); a trait name another in-tree type shares answers
+    // nothing (the blocks are keyed by name), and every other language keeps the name tiers.
+    IfaceDispatchAnswer openTraitAnswer( NodeId type, std::string_view callee ) const
+    {
+        IfaceDispatchAnswer out;
+        const Symbol&       t = ing_.symbols[ type ];
+        if( !langFacts( t.lang ).traitImplBlocks || t.kind != SymKind::Interface || recvEv_.types.sameNamedClasses( type ) != 1 )
+        {
+            return out;
+        }
+        const auto blocks = traitBlocks_.find( std::string_view( t.name ) );
+        const auto named  = blockCallables_.find( callee );
+        if( blocks == traitBlocks_.end() || named == blockCallables_.end() )
+        {
+            return out;
+        }
+        collect( type, callee, out.cand );   // T's own bodied default
+        for( NodeId c : named->second )
+        {
+            const Symbol& m = ing_.symbols[ c ];
+            if( std::ranges::any_of( blocks->second, [ & ]( const Binding* b )
+                { return b->fileId == m.fileId && b->spanStart <= m.sigStartByte && m.endByte <= b->spanEnd && !recvEv_.types.rustPathProvablyOutside( b->fileId, b->startByte, b->importedName ); } ) )
+            {
+                out.cand.push_back( c );
+            }
+        }
+        settle( out );
+        out.open = out.fired;
+        return out;
+    }
+
     // the bodyless members are an interface's or abstract class's contract; in a lambda-convertible language (langfacts.h) they are
     // also counted per owning class identity, and every class is listed under its name
     void indexSymbol( const Symbol& s )
@@ -495,6 +555,8 @@ private:
     const ReceiverEvidence&                       recvEv_;
     const std::vector<std::vector<NodeId>>&       implementors_;
     const std::vector<std::vector<std::uint8_t>>& bound_;
+    HashMap<std::string_view, std::vector<const Binding*>> traitBlocks_;      // RUST-DYN-NAMESAKE: a trait name → its ImplBlock records
+    HashMap<std::string_view, std::vector<NodeId>>         blockCallables_;   // … and a callable name → its bodied definitions (traitImplBlocks languages)
     const std::vector<char>&                      open_;       // graph.h implementorsOpen: a clause names an implementor the map cannot list
     HashMap<std::string, char>                    contract_;   // "Owner::name" of every bodyless member
     SamCounter                                          sam_;   // the SAM count: abstract members per class identity

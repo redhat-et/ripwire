@@ -10,10 +10,12 @@
 # 0.6.6 D4 (arms R1-R4, a temp tree): a pytest test method was a high-confidence row because the Python def's
 # signature span runs on through the comment that opens its body ("# the static type is unchanged").
 #   R1  a `static` inside a comment is not linkage evidence (Python `#`, C `//` and `/* */`) — no row;
-#   R2  a Python def a test runner or a decorator reaches is never a row, even with a real `static` token in its
-#       signature (pytest test*/xunit hook in test_*.py, a test*/setUp method of a TestCase subclass, @decorated).
-#       The two reasons are counted apart (review of 0.6.6 D4): runner-root-excluded= counts the test-runner roots only,
-#       decorated-excluded= the decorated defs (a decorator MAY register the def; a wrapper such as @property may not);
+#   R2  a Python def a test runner or a decorator reaches is never a row, even with a `static` token in its
+#       signature (pytest test*/xunit hook in test_*.py, a test*/setUp method of a TestCase subclass, @decorated). Since
+#       the D1 fix round the stronger form holds: `static` is the storage class only in C, C++ and Objective-C
+#       (LangFacts::staticLinkage), so a Python `static=` parameter is not evidence and no Python def is a candidate at all;
+#       runner-root-excluded= and decorated-excluded= (the 0.6.6 D4 counters) are therefore ABSENT on this tree, and the
+#       arm pins that absence (a Python def listed here would be a regression of the language gate);
 #   R3  the C control: a real `static` orphan is still a row;
 #   R4  --safe-delete's dead_code_candidate= asks the same shape: 0 on a runner root, 1 on the C orphan.
 
@@ -129,11 +131,9 @@ root = ET.parse(sys.argv[1]).getroot()
 names = [node.get("n") for node in root.findall("d")]
 if names != ["orphan_c"]:
     raise SystemExit(f"FAIL R1/R2/R3 expected only the C static orphan, found {names}")
-if root.get("runner-root-excluded") != "6":
-    raise SystemExit(f"FAIL R2 runner-root-excluded= should count the 6 test-runner roots (test_param, setup_module, setUp, test_case, setUpTestData, runTest), found {root.get('runner-root-excluded')!r}")
-if root.get("decorated-excluded") != "2":
-    raise SystemExit(f"FAIL R2 decorated-excluded= should count the 2 decorated defs (@pytest.fixture resource, @app_route handler), found {root.get('decorated-excluded')!r}")
-print("PASS R1-R3 comment static is not linkage; test-runner roots (runner-root-excluded=6) and decorated defs (decorated-excluded=2) counted apart; C orphan kept")
+if root.get("runner-root-excluded") is not None or root.get("decorated-excluded") is not None:
+    raise SystemExit(f"FAIL R2 a Python def with a static= parameter reached the runner-root/decorated checks (runner-root-excluded={root.get('runner-root-excluded')!r}, decorated-excluded={root.get('decorated-excluded')!r}): static is not linkage in Python")
+print("PASS R1-R3 comment static is not linkage; a Python static= parameter is no linkage evidence (no runner-root-excluded=/decorated-excluded=, no Python row); C orphan kept")
 PY
 [ $? -eq 0 ] || exit 1
 if grep -qE 'runner-root-excluded|decorated-excluded' "$TMP/a"; then echo "FAIL R2 runner-root-excluded=/decorated-excluded= must be absent at 0 (deadfix corpus)"; exit 1; fi

@@ -1,0 +1,1 @@
+void work( int x );

@@ -551,6 +551,33 @@ inline TemplateParameterLists templateParameterListsAbove( TSNode node ) noexcep
     return lists;
 }
 
+// fn-slot S2 fix 2: does `base` (a bare identifier, as written in a class header) name a type parameter of a `template <…>` list above
+// the class `self`? Then it is a dependent base: no in-tree class of that name is meant (kBaseBindTemplateParam).
+inline bool baseNamesTemplateParameter( TSNode self, std::string_view base, std::string_view src )
+{
+    if( ts_node_is_null( self ) || base.empty() )
+    {
+        return false;
+    }
+    const TemplateParameterLists lists = templateParameterListsAbove( self );
+    for( std::size_t l = 0; l < lists.count; ++l )
+    {
+        for( std::uint32_t p = 0, n = ts_node_named_child_count( lists.innerFirst[ l ] ); p < n; ++p )
+        {
+            const TSNode param = ts_node_named_child( lists.innerFirst[ l ], p );
+            if( kindIs( ts_node_type( param ), "parameter_declaration" ) )
+            {
+                continue;   // a non-type parameter names a value, never a base
+            }
+            if( cppTemplateParameterName( nodeTextOf( param, src ) ) == base )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // How many `scope:` links of the qualified class name `name` are template-ids.
 inline std::size_t templateScopeLinksIn( TSNode name ) noexcept
 {
@@ -2279,6 +2306,7 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
 
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
+inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline TSNode jsClassFactoryReceiver( TSNode nameNode, std::string_view src ) noexcept;
@@ -2406,7 +2434,7 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     }
     if( defCapSv == "definition.cjsexport" )
     {
-        return !isCjsExportTarget( nameNode, src );
+        return !isCjsExportTarget( nameNode, src ) && !isCjsModuleExportsItself( nameNode, src );   // the bare form is named by captureTagsFacts
     }
     if( defCapSv == "definition.classfactory" )
     {
@@ -2475,6 +2503,21 @@ inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
             && nodeTextOf( fieldChild( obj, NodeField::Property ), src ) == "exports";
     }
     return false;
+}
+
+// Lane js-def-naming (koa-11: lib/is-stream.js): the bare `module.exports = ( … ) => …` / `module.exports = function ( … ) {…}`. The
+// @name capture is then the `exports` property itself — the left side IS module.exports — so the function the module exports has no
+// name of its own (a named function expression already defines its own, the query's `!name`). captureTagsFacts names it by the
+// file's stem, the rule a Markdown file's own node is named by (ingest_parsepool.h: `fs::path( path ).stem()`).
+inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept
+{
+    const TSNode member = ts_node_parent( nameNode );
+    if( ts_node_is_null( member ) || !kindIs( ts_node_type( member ), "member_expression" ) || nodeTextOf( nameNode, src ) != "exports" )
+    {
+        return false;
+    }
+    const TSNode obj = fieldChild( member, NodeField::Object );
+    return !ts_node_is_null( obj ) && kindIs( ts_node_type( obj ), "identifier" ) && nodeTextOf( obj, src ) == "module";
 }
 
 // `Foo.prototype.NAME = fn` at any qualifier depth: the member_expression under `object:` must name

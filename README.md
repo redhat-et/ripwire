@@ -22,6 +22,21 @@ when to reach for each command.
 **Want every detail?** [The reference guide](#reference-guide) near the bottom covers install, commands, output
 format, exit codes and limits. You do not need it to get started.
 
+## Working toward the best code helper for agents
+
+Our goal is for ripwire to be the best tool an agent can have for understanding and changing code: complete answers, nothing stated wrongly, and as few bytes as possible. We measure every release against that goal. Each release answers the same questions with the same commands, graded the same way. These are **in-sample** questions: ripwire was developed against them, so the table shows progress between releases, not held-out performance. A held-out comparison comes with 0.7.0.
+
+| | 0.6.5 | 0.6.7 | 0.6.8 | 0.6.9 |
+|---|---|---|---|---|
+| Everyday code questions (163): complete / partial / none | 50 / 69 / 44 | 81 / 57 / 25 | 112 / 38 / 13 | **129 / 31 / 3** |
+| Questions whose answer spans several files (39) | 4 / 26 / 9 | 4 / 27 / 8 | 5 / 27 / 7 | **12 / 23 / 4** |
+| Questions on large repositories (56) | 2 / 35 / 19 | 5 / 38 / 13 | 14 / 37 / 5 | **23 / 29 / 4** |
+| Everyday answers that stated something wrong | 3 | 0 | 0 | **0** |
+| Bytes per complete answer (everyday / large repos) | 22.5 KB / 182 KB | 14.8 KB / 123 KB | 16.5 KB / 91 KB | **15.1 KB / 60 KB** |
+| Median answer size (everyday) | 4.8 KB | 5.7 KB | 8.5 KB | 10.6 KB |
+
+*Complete* means every required item is in the answer; *partial*, at least one but not every required item, and nothing wrong; *none*, no required item, or something wrong. A bare name printed next to its file or qualifier counts. Large repositories: envoy, nushell, terraform, cpython, vscode, cockroach and zed. There was no 0.6.6. Answers got longer as they got more complete, and bytes per complete answer fell overall: from 22.5 KB to 15.1 KB on everyday questions and from 182 KB to 60 KB on large repositories. Earlier release notes quoted a 173-question set that included 10 held-out questions, graded with the rules of that time (0.6.8: 50, 83, 98 complete under the stricter method); this table re-runs every release on the 163 in-sample questions with today's grader, so its numbers differ.
+
 <p align="center"><a href="https://trendshift.io/repositories/217924?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-217924"><img src="https://trendshift.io/api/badge/trendshift/repositories/217924/weekly?language=C%2B%2B" alt="Trendshift: C++ Repository of the Week badge for redhat-et/ripwire" width="250" height="55"></a></p>
 
 <details>
@@ -139,9 +154,9 @@ claim cannot quietly drift. The row-by-row ledger is
 JavaScript · Java · Ruby · PHP · Lua · Elixir · Dart · Kotlin · GDScript · Clojure · Bash · C# · JSON · TOML · YAML · Markdown — see
 [language support and limits](#languages).
 
-**Latest: 0.6.8** — more complete first answers and fewer false edges. [Release notes](#release-notes) ·
+**Latest: 0.6.9** — hedged or declined answers instead of confident wrong ones, `--path` that prints the bodies it names, `--defs` and owner-named rows. [Release notes](#release-notes) ·
 [the presentation](present/ripwire-showcase.pdf) · [the changelog](CHANGELOG.md) — with thanks to the
-contributors named there; this release is largely theirs.
+contributors named there.
 
 ---
 
@@ -982,9 +997,9 @@ Full retrieval tables — including the MRR figures behind the router numbers ab
 ## What it answers
 
 <details>
-<summary><b>192 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
+<summary><b>193 long flags</b> across seven families, plus the MCP server — and <code>--help-task</code> names the ONE command a task wants, or abstains honestly when the evidence is too thin</summary>
 
-Around the core sit 192 long flags advertised in `--help`, across seven families — plus an MCP
+Around the core sit 193 long flags advertised in `--help`, across seven families — plus an MCP
 server, so a coding agent can call any of them mid-task instead of grepping and reading whole files.
 `--help` prints one line per flag (~4.5K tokens); `--help=--FLAG` prints that flag's full entry with
 every caveat, `--help=SECTION` one family, and `--help=all` the whole catalog.
@@ -1058,7 +1073,7 @@ report back. The exe is not code-signed. `Expand-Archive` does not pass the down
 files it extracts, so SmartScreen does not prompt for an exe unpacked this way; no prompt is not a verdict. In PowerShell:
 
 ```powershell
-$v = "0.6.8"; $a = "ripwire-$v-windows-x64"; $u = "https://github.com/redhat-et/ripwire/releases/download/v$v"
+$v = "0.6.9"; $a = "ripwire-$v-windows-x64"; $u = "https://github.com/redhat-et/ripwire/releases/download/v$v"
 Invoke-WebRequest "$u/$a.zip" -OutFile "$a.zip"; Invoke-WebRequest "$u/$a.zip.sha256" -OutFile "$a.zip.sha256"
 # extracts only when the SHA-256 matches; on a mismatch it throws and nothing is unpacked
 if ((Get-FileHash "$a.zip" -Algorithm SHA256).Hash -eq (Get-Content "$a.zip.sha256").Split(" ")[0]) { Expand-Archive "$a.zip" -DestinationPath "$env:LOCALAPPDATA\Programs" } else { throw "SHA-256 mismatch: do not run $a.zip" }
@@ -2120,9 +2135,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>715 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>729 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **715 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **729 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2684,7 +2699,7 @@ identity of the index, and says which one is at fault.
 
 ### 5. Command families
 
-The `--help` output groups 192 long flags advertised in `--help` into seven families. The `--help=`
+The `--help` output groups 193 long flags advertised in `--help` into seven families. The `--help=`
 column below is the argument that prints one family: `ripwire --help=navigate`. `ripwire
 --help=--FLAG` prints one flag's full text — the caveats, the units, what it refuses and why.
 `ripwire --help=all` is the whole catalog, about 46,000 tokens.
@@ -2878,7 +2893,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 283 compile-time caps and 7 ranking parameters.
+Another gate derives the cap inventory. The tool has 298 compile-time caps and 7 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.
@@ -3091,6 +3106,8 @@ terms.
 ---
 
 ## Release notes
+
+**ripwire 0.6.9 — hedged or declined answers instead of confident wrong ones, `--path` that prints the bodies it names, `--defs` and owner-named rows.** A call through an interface-, trait- or abstract-typed receiver names the implementors that can run, with a floor stated when the list cannot be complete; a by-name hedge needs an import, and hedged hops are never counted as proven; a Rust `&dyn Trait` call, a JS/TS name written after its declaration and a Kotlin scope function no longer bind a same-named method; `--dead-code` stops over-reporting (`static` outside C-family code, Django and unittest hooks) and lists library functions only tests call; `--impact` counts who reaches a hedged caller. A short `--path` prints the body of its middle hop, an unreached one prints the bodies of the route it names, and `--path` lists every reaching definition pair when a name has several. `--defs=NAME` answers which definitions a name binds, with the spelling that picks each one alone; member rows print their owner (`Owner.name`, `Owner::name` in C, C++ and Rust, `Owner#name` in Ruby) on `--callers`, `--callees`, `--impact`, `--path` and signature rows, and `Class.method`-style spellings resolve; `--situ` and `--test-gate` start from the changed symbols, not the changed files; `--affected` adds tests that construct a reached class. By language: Rust receivers are typed by their written type; Python renamed imports, annotated fields and queue or message hand-offs resolve; functions stored in struct fields are joined to the calls through them in Go, Rust and C / C++. A `--for` question about an error carries the callers chain of the narrow function it ranks, and `--for` also follows a thin wrapper into the function it calls, names what a constructor calls, the functions a table initializer binds and the members of a shown owner, lists the callers of a function it is about, and answers a task spelled as a graph question with that verb. Each entry in the changelog gives its own measurement and its floors. Caches are rebuilt once on first run and quality snapshots of the older scheme are not used. Thanks to @lennix1337 (Windows `--quality-delta=A..B` and clang-cl PGO builds, `--uses` on a JS/TS literal receiver: #402, #410, #411, #422), @llvm-x86 (`--situ` and `--test-gate` from the changed symbols, Django and unittest hooks, Kotlin scope functions: #423, #437, #438), @mpapis (one order for every multi-definition name answer, `--lsp` says when a name has several definitions: #432), @pt-act (the pattern screen refuses overlapping alternation: #397) and @liziye627-design (a clone-gate arm fix: #431); and for reports that led to fixes, @hnipps (#228) and @s0undt3ch (#305).
 
 **ripwire 0.6.8 — more complete first answers and fewer false edges.** `--for` stops when its answer is complete, names one owner body for a "how does X work" question, appends the whole bodies of its top ranked rows and puts eight different files in its first eight rows; `--callers` and `--callees` serve up to 50 rows whole (a callers list whole while its rows fit 16,000 B); `--impact` of a type starts from the symbols that name it; and the calls the resolver declined are named as hedged rows. Fewer edges are false: Go methods carry their receiver type, a local bound to a call takes the callee's declared result type (Go, Rust, Java, Kotlin, TypeScript), Rust standard-type members no longer bind an in-tree namesake, and a method a constructed-name lookup can reach is `risk="hedged"` in `--safe-delete`, not `none-found`. On our fixed set of 173 questions, graded two ways (a stricter method and a more lenient one), the questions answered completely in one call went from 50 with 0.6.5 to 83 with 0.6.7 to 98 with 0.6.8 under the stricter method, and from 78 to 109 to 127 under the more lenient one (same machine, mechanical grading; 15 answers better and none worse since 0.6.7; on the 60 development questions the first answers are 19.9% larger). The 0.6.8 figure was measured on the train-28 build of 0.6.8; the later changes in this release were measured only on their own target questions. Clojure is a supported language (thanks @tag-und-nacht, #349). `--quality-delta=A..B` holds one commit's index at a time and answers what it can under a memory limit, and the guard counts a Linux cgroup's real charge (thanks @tonibergholm-codento, #387, #391, #392). Ruby mixins and Rails capture moved onto the shared path (thanks @mpapis, #396, #400, #401, #412), Python imports and Elixir `unquote` calls too (thanks @LaimaWu, #382, #380). A markdown section link `[text](other.md#slug)` edges to that heading, and a link no call shares is marked `via="link"` (thanks @muayyad-alsadi, #409, #414). Caches are rebuilt once on first run, and Go quality baselines, acks and notes pinned to a method need re-pinning once (see the changelog).
 

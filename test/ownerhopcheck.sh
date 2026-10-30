@@ -206,11 +206,12 @@ fi
 # ── (F) false-claim hedges — FE-B is in the base now: a missing hedge is a FAIL, never a SKIP (C9) ────────────────────
 f="$TMP/ts.cl.xml"; run ts "$f" --callees=src/middleware/gateway.ts:gateway
 if ran_ok "$f" "(F) capability probe"; then
-    if grep -q 'n="remember"[^>]*via="name"' "$f"; then
+    # js-def-naming: a TS method row names its class (Context.remember); the hedge is what is pinned, so the owner prefix is optional
+if grep -Eq 'n="([A-Za-z]+\.)?remember"[^>]*via="name"' "$f"; then
         J "[(c['n'], c.get('via','')) for r in d['rows'] if r['n']=='gateway' for c in r['calls']]" <"$TMP/ts.p.json" >"$TMP/ts.f.txt" 2>/dev/null || echo "[]" >"$TMP/ts.f.txt"
-        if grep -q "('remember', 'name')" "$TMP/ts.f.txt"; then ok "(F) owner row: remember (untyped receiver) carries via=\"name\""; else no "(F) owner row callee rows $(cat "$TMP/ts.f.txt"): remember must be present AND via=\"name\""; fi
+        if grep -Eq "\('([A-Za-z]+\.)?remember', 'name'\)" "$TMP/ts.f.txt"; then ok "(F) owner row: remember (untyped receiver) carries via=\"name\""; else no "(F) owner row callee rows $(cat "$TMP/ts.f.txt"): remember must be present AND via=\"name\""; fi
         if grep -q "('encode', 'name')" "$TMP/ts.f.txt"; then ok "(F) owner row: encode (test-file def of a builtin method name) carries via=\"name\""; else no "(F) owner row callee rows $(cat "$TMP/ts.f.txt"): encode must be present AND via=\"name\""; fi
-        if grep -q "('encode', '')\|('remember', '')" "$TMP/ts.f.txt"; then no "(F) an owner callee row asserts a name-only edge unhedged"
+        if grep -Eq "\('encode', ''\)|\('([A-Za-z]+\.)?remember', ''\)" "$TMP/ts.f.txt"; then no "(F) an owner callee row asserts a name-only edge unhedged"
         else ok "(F) no unhedged name-only callee row under the owner"; fi
     else
         no "(F) FE-B hedge missing: --callees rows carry no via=\"name\" on the fixture's untyped receiver call (FE-B is in the base; this is a regression)"

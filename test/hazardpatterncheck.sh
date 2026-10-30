@@ -559,6 +559,7 @@ verbs_change.h	runCommandCapture	pipe	1	both ends closed in the child, the write
 verbs_doctor.h	doctorParseProbe	ts_parser_new	1	deleted before the return
 verbs_doctor.h	doctorParseProbe	ts_parser_parse_string	1	deleted inside the same if
 verbs_doctor.h	doctorProbeGrammars	ts_query_new	1	a compile probe, deleted inside the same if
+verbs_for.h	appendSubjectGraphVerbBlock	dup	1	closed on the failure path and after the restore on the success path (runWithCompactLegend's capture, for the --for graph-verb block)
 REGE
 
 judge_static(){   # $1 = scan output dir, $2 = label (src | probe); echoes one line per violation

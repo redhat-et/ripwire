@@ -82,6 +82,7 @@ HOT_FILES = (
     "src/ingest_metrics.h",       # cc_walk / complexityOf — a per-symbol AST walk for the quality metrics
     "src/ingest_cache.h",         # loadCache / saveCache / readFileRecord, per file record — ~10% of a WARM run, which is the run an agent actually pays for
     "src/ingest_valuerefs.h",     # the reference-as-value walk, per node over every C/JS/TS/Python/Go file — +3.6..6.3% of a cold run
+    "src/ingest_rustslots.h",     # the Rust slot-join walk, per node over every Rust file — ~+5% of a cold zed run (lane fn-slot-2)
     "src/ingest_model.h",         # build-model: dedup, symbol-id assignment, the def-span index, the ref radix sort — per symbol and per reference, ~18% warm
 
     "src/resolve.h",              # reference resolution into the call graph

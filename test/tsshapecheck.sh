@@ -223,8 +223,8 @@ EOF
     [ "$got" = "a2" ] && ok "$ext: --callers=g is a2 (await o.svc.g<T>(), the member form)" \
                       || no "$ext: --callers=g got [$got], want [a2] — the member form of await-with-type-arguments is no reference"
     got="$( rowsOf '#p' )"
-    [ "$got" = "a3" ] && ok "$ext: --callers=#p is a3 (await this.#p<T>(), the private form)" \
-                      || no "$ext: --callers=#p got [$got], want [a3] — the private form of await-with-type-arguments is no reference"
+    [ "$got" = "K.a3" ] && ok "$ext: --callers=#p is K.a3 (await this.#p<T>(), the private form; js-def-naming: the row names its class)" \
+                      || no "$ext: --callers=#p got [$got], want [K.a3] — the private form of await-with-type-arguments is no reference"
     got="$( rowsOf parseBody )"
     [ "$got" = "methodOverride" ] && ok "$ext: --callers=parseBody is methodOverride (the hono middleware shape: a named function expression returned by an arrow)" \
                                   || no "$ext: --callers=parseBody got [$got], want [methodOverride]"
@@ -238,8 +238,8 @@ EOF
     [ "$got" = "u5" ] && ok "$ext: --callers=fm is u5 (!o.q.fm<T>(), the member form)" \
                       || no "$ext: --callers=fm got [$got], want [u5] — the member form under a unary operator is no reference"
     got="$( rowsOf '#fq' )"
-    [ "$got" = "u6" ] && ok "$ext: --callers=#fq is u6 (!this.#fq<T>(), the private form)" \
-                      || no "$ext: --callers=#fq got [$got], want [u6] — the private form under a unary operator is no reference"
+    [ "$got" = "Q.u6" ] && ok "$ext: --callers=#fq is Q.u6 (!this.#fq<T>(), the private form)" \
+                      || no "$ext: --callers=#fq got [$got], want [Q.u6] — the private form under a unary operator is no reference"
     for neg in na nb nc nd nf; do
         got="$( rowsOf "$neg" )"
         [ -z "$got" ] && ok "$ext: --callers=$neg is empty (a comparison operand, an instantiation expression or a type argument is no call)" \

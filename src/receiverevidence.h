@@ -1355,6 +1355,13 @@ struct CallResultTypes
         }
         return rustReexportOutside( crate, module, item, depth );
     }
+    // rustPathOutside, as a verdict: the path provably leaves the tree (an `impl other_crate::Renderer for X` names ANOTHER crate's
+    // trait, not the in-tree one of that name). A cut walk, an empty path or a path into the tree is false.
+    bool rustPathProvablyOutside( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        pathCut = false;
+        return rustPathOutside( f, at, path ) && !pathCut;
+    }
     // the files holding module (crate, module)'s own level: a file module's files, or (`inlineMod` set) the one file of an
     // inline `mod`, kept in `ownFile`; empty when no such module
     std::span<const std::uint32_t> rustModuleFiles( std::uint32_t crate, const std::string& module, NodeId& inlineMod, std::uint32_t& ownFile ) const
@@ -2998,8 +3005,9 @@ struct ReceiverEvidence
     // recorded. Rust (receiverLocalsOnly): a parameter, local or field typed only through a trait (noteDispatchWritten), reached
     // from a local or from `self` through the fields' resolved classes. The typed languages: the receiver root's written type
     // (rootClass: a typed parameter or local, a field of the caller's class) and its stated fields (fieldOf), resolved to ONE
-    // in-tree class at the call site (classAtSite) — a field path only below a class no other in-tree class names. Never
-    // `this` / `self` / `super` or a class-name receiver: those name the caller's own class or a static call, no dispatch.
+    // in-tree class at the call site (classAtSite) — a field path only below a class no other in-tree class names. Never a bare
+    // `this` / `self` / `super` or a class-name receiver: those name the caller's own class or a static call, no dispatch;
+    // `this.f.m()` (lane receiver-fixes, TS-FIELD-SELF) is f's stated type, as for any other root.
     struct DispatchReceiver
     {
         NodeId           type = kNoNode;
@@ -3020,7 +3028,10 @@ struct ReceiverEvidence
         {
             return traitDispatchReceiver( r, ch );
         }
-        if( isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) )
+        // TS-FIELD-SELF: `this.f.m()` is a call on f's stated type, as `f.m()` on a typed local is; a bare `this.m()` (or one inside a
+        // static member, whose `this` is the class object) names the caller's own class, no dispatch
+        if( ( isThisRoot( ch.root ) && ( ch.path.empty() || ch.root != langFacts( r.lang ).instanceReceiver || callerIsStatic( r.fromSymbol ) ) )
+            || isSuperRoot( r, ch.root ) )
         {
             return {};
         }
@@ -3053,6 +3064,48 @@ struct ReceiverEvidence
             }
         }
         return { cls, {} };
+    }
+    // lane receiver-fixes (TS-FIELD-SELF, PY-CTOR-ANNOT; dispatch classes #10 receiver peeling, #11 name-keyed identity): the
+    // caller's own class when a member call's receiver is `this.<path>` / `self.<path>` whose last field the classes state as
+    // an in-tree class or interface T (fieldOf: a written or constructed type, never a tombstone) that is neither the caller's
+    // class nor one of its bases (inCone). The object such a call reaches is a T, so the caller's OWN definition of the callee
+    // is no candidate: graph.h cuts it from the name tiers (before, `this.pub.provide()` with `pub: Provider` bound the
+    // caller's own `provide` by name, and with that one same-file candidate the self-loop then vanished). kNoNode otherwise:
+    // no path, a static side, an unknown field, a T the tree does not define, or no one class owning the caller.
+    NodeId foreignFieldOwner( const Reference& r ) const
+    {
+        if( !active || r.fromSymbol >= ing.symbols.size() || !r.qualifier.empty() || !isMemberCallRef( r ) || receiverLocalsOnly( r.lang ) )
+        {
+            return kNoNode;
+        }
+        const Chain ch = chainOf( r );
+        if( !ch.valid || !ch.ctor.empty() || ch.path.empty() || ch.root != langFacts( r.lang ).instanceReceiver || callerIsStatic( r.fromSymbol ) )
+        {
+            return kNoNode;
+        }
+        const std::string_view own  = callerClass( r.fromSymbol );
+        std::string_view       type = own;
+        for( std::string_view rest = ch.path; !rest.empty() && !type.empty(); )
+        {
+            const std::size_t dot = rest.find( '.' );
+            type = fieldOf( type, rest.substr( 0, dot ) );
+            rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( dot + 1 );
+        }
+        if( own.empty() || type.empty() || type == own || inCone( own, type ) )
+        {
+            return kNoNode;
+        }
+        key.assign( type );
+        return classNames.contains( key ) && !namesTypeAlias( r.lang, type ) ? selfClass( r.fromSymbol ) : kNoNode;
+    }
+    // a TypeScript `type T = …` is indexed as a Struct (queries/typescript/tags.scm @definition.type), and TS has no struct of its
+    // own: T then names whatever the alias spells (a union, a base class), not "a class that is not the caller's". Any alias of the
+    // name in the tree keeps foreignFieldOwner from cutting (a union holds the caller's class too; `type B = Base` may hold a D).
+    bool namesTypeAlias( Lang lang, std::string_view name ) const
+    {
+        NodeId one = kNoNode;
+        return callResultFamilyOf( lang ) == CallResultFamily::TypeScript
+            && types.classesNamed( name, CallResultFamily::TypeScript, [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Struct; }, one ) != 0;
     }
     // TypeScript: a type name the caller's file imports by name from a module (`import { Router } from "./fmt/router"`) that the
     // import tables pin to no class — their export table holds functions and classes, never an interface — names the ONE

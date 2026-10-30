@@ -38,6 +38,7 @@
 #include "filter.h"           // pathTierIndexOver — the near-sink rows' tier key within a depth
 #include "arch.h"             // wildcardMatch — the ONE `*` match, which a glob endpoint reads
 #include "closures.h"         // ClosureIndex — a near-sink row written inside another function's body (why=closure)
+#include "hopbody.h"           // BODY-ON-ROUTE: RouteBody, routeBodiesXml — the one edge-kind-aware body printer
 #include "backhops.h"          // HOP1: BackwardHops (slot + declined hops of a sink), DeclinedCrossRule, builtinSpelledCall
 #include "infra/sortutil.h"   // svLess: the explicit byte order every string_view sort here takes (portablebuildcheck #6)
 #include "infra/enumcount.h"  // enumCountIsExact — the kNearSinkKindCount / kBridgeViaCount sizes follow their enums
@@ -45,6 +46,7 @@
 #include "infra/namesplit.h"  // afterLast — a bound scope's final segment, the base index key (K5 rule 2c)
 
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -442,6 +444,7 @@ struct NearSinkSite
     NodeId        in     = kNoNode;    // its enclosing definition (kNoNode: file scope)
     NearSinkKind  kind   = NearSinkKind::Declined;
     bool          met    = false;      // the forward search reached `in`
+    std::uint32_t cands  = 0;          // a NAME-KEY lookup's width (the definitions its template can name): 0 = not a name-key site
 };
 
 struct NearSinkRow
@@ -755,7 +758,7 @@ inline bool nearSinkSiteBetter( const IngestResult& ing, const NearSinkSite& a, 
 // forward search reached. Deterministic: BFS in in-edge order from the to= definitions in the order given, one pass over the
 // declined records, the value index in reference order, one pass over the name-only edges, and a total order on the rows.
 inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::span<const NodeId> dstDefs, std::span<const NodeId> forwardCone,
-                                  const ValueRefIndex& values )
+                                  const ValueRefIndex& values, const NameKeyHops& names )
 {
     constexpr std::uint32_t kNone = std::numeric_limits<std::uint32_t>::max();
     const std::size_t       S     = ing.symbols.size();
@@ -800,11 +803,11 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
         }
     }
     out.callers = out.rows.size() - std::size_t( std::ranges::count_if( out.rows, []( const NearSinkRow& r ) { return r.depth == 0; } ) );
-    const auto offerAt = [ & ]( std::uint32_t row, NearSinkKind kind, std::uint32_t fileId, std::uint32_t line, std::uint32_t order, NodeId in )
+    const auto offerAt = [ & ]( std::uint32_t row, NearSinkKind kind, std::uint32_t fileId, std::uint32_t line, std::uint32_t order, NodeId in, std::uint32_t cands = 0 )
     {
         NearSinkRow& r = out.rows[row];
         ++r.counts[ std::size_t( kind ) ];
-        const NearSinkSite cand{ true, fileId, line, order, in, kind, in < S && met[in] != 0 };
+        const NearSinkSite cand{ true, fileId, line, order, in, kind, in < S && met[in] != 0, cands };
         if( nearSinkSiteBetter( ing, cand, r.site ) )
         {
             r.site = cand;
@@ -855,6 +858,18 @@ inline PathNearSink pathNearSink( const IngestResult& ing, const Graph& g, std::
             {
                 offer( row, NearSinkKind::Declined, g.declinedSiteRef[site], g.declinedSiteCaller[site] );
             }
+        }
+    }
+
+    // NAME-KEY (string-keyed, the same vocabulary as a declined call: why=declined): a function that looks a method up by a name built
+    // from a template (backhops.h NameKeyHops) which fits the row names it with no edge, whatever the width of its candidate set (the
+    // bridge crosses at most kBridgeFanOut: a wider lookup is a way in the answer would otherwise call external). cands= says the width.
+    for( std::uint32_t row = 0; row < out.rows.size(); ++row )
+    {
+        for( const std::uint32_t site : names.sitesNaming( out.rows[row].id ) )
+        {
+            const Reference& sr = ing.references[site];
+            offerAt( row, NearSinkKind::Declined, sr.fileId, sr.line, site, sr.fromSymbol, std::uint32_t( names.targets( site ).size() ) );
         }
     }
 
@@ -1028,9 +1043,17 @@ inline constexpr std::string_view kNearSinkLegend =
     "fail a name rule (either one): not counted as a way in, and never read as external; in= site= name one such site (its enclosing definition, file:line), met=1 when the forward search reached in= (it met that "
     "hand-off and could not follow it). A row is where the backward search could not see, never a hop and not proof a path exists; "
     "rows= counts them, rows_capped=1 = more than shown; next= on the block lists the first row's callers and declined sites. ";
-inline std::string_view nearSinkLegend( bool on ) noexcept
+// Present-only: rides with a SHOWN <ns> row whose site is a name-key lookup (via="name-key" cands=).
+inline constexpr std::string_view kNearSinkNameKeyLegend =
+    "ns via=name-key cands=K: the declined site is a NAME-KEYED lookup, not a call: in= looks a method up by a name built from a template "
+    "(getattr(o, 'do_' + c), o['on' + e]) that fits this row, a template that can name K definitions including it; matched, never traced; "
+    "the bridge crosses a lookup of at most 16, so a wider one is a way in with no bridge row. Or a posted message: in= passes a construction of a "
+    "message class whose handler name (the repo's own __init_subclass__ rule) is this row's name, at site=; K the methods of that name. ";
+inline std::string nearSinkLegend( const PathNearSink& ns )
 {
-    return on ? kNearSinkLegend : std::string_view();
+    const std::size_t shown = std::min( ns.rows.size(), kNearSinkRows );
+    const bool        nameKey = std::any_of( ns.rows.begin(), ns.rows.begin() + std::ptrdiff_t( shown ), []( const NearSinkRow& r ) { return r.site.valid && r.site.cands > 0; } );
+    return ns.rows.empty() ? std::string() : std::string( kNearSinkLegend ) + ( nameKey ? std::string( kNearSinkNameKeyLegend ) : std::string() );
 }
 
 // The <near_sink> block (empty string when there is no row). `rootPrefix` empty ⇒ p= stays as indexed (multi-root).
@@ -1061,7 +1084,8 @@ inline std::string pathNearSinkXml( const IngestResult& ing, const PathNearSink&
         if( r.site.valid )
         {
             rows += ( r.site.in < ing.symbols.size() ? " in=\"" + ex( ing.symbols[ r.site.in ].name ) + "\"" : std::string() ) + " site=\""
-                  + ex( rel( r.site.fileId ) ) + ":" + std::to_string( r.site.line ) + "\"" + ( r.site.met ? " met=\"1\"" : "" );
+                  + ex( rel( r.site.fileId ) ) + ":" + std::to_string( r.site.line ) + "\"" + ( r.site.met ? " met=\"1\"" : "" )
+                  + ( r.site.cands > 0 ? " via=\"name-key\" cands=\"" + std::to_string( r.site.cands ) + "\"" : std::string() );
         }
         rows += "/>";
     }
@@ -1128,8 +1152,13 @@ inline std::string pathGlobAttrXml( bool fromGlob, bool toGlob )
 //             field-name tier), only while that join names at most kBridgeFanOut calling functions (slot_callers=). That bound is
 //             on the BACKWARD width only; how many functions the field holds (slot_fns=, the forward width) is printed, never
 //             capped — a cap would delete the gold hop through a wide table (tmux's 92-entry cmd_entry.exec).
-// A chain whose EVERY crossing is a slot hop may take kBridgeSlotCrossings of them (tmux's send-keys chain is three field
+//   container (composed hops) from a function that calls through a container element (or a parameter's default) (`handlers[i]()`)
+//             to each function that container may hold (backhops.h forwardHops: the --callers <vr called_by=> join read
+//             forward), only while it may hold at most kBridgeFanOut (cands=) and its join names at most kBridgeFanOut callers.
+// A chain whose EVERY crossing is COMPOSABLE may take kBridgeSlotCrossings of them (tmux's send-keys chain is three field
 // calls deep: cmd_entry.exec, window_mode.command, the command table's .f); any other chain keeps kBridgeCrossings.
+// Composable = a slot crossing (bounded on its callers), or (composed hops) a declined or container crossing that is NARROW:
+// at most kBridgeNarrowFan candidates. A wider declined/container crossing still counts toward kBridgeCrossings, never past it.
 // Layer by layer — every symbol reachable with k crossings over resolved edges before any with k+1 — so the chain printed
 // has the FEWEST crossings, then is the first found in deterministic (id-ascending) order. <bridge proven="0" crossings=
 // hops=> lists it as <s> rows like a path's, the crossing into a row named by via= (and cands= its fan-out).
@@ -1137,18 +1166,29 @@ inline std::string pathGlobAttrXml( bool fromGlob, bool toGlob )
 // What it does NOT mean: a bridge is NOT a path — reachable= stays 0, hops= stays 0, and no count includes it. It is the
 // closest chain the index can show, every crossing a hedge. Absent (with no clause) when no chain exists within the bounds.
 inline constexpr std::uint32_t kBridgeCrossings     = 2;
-inline constexpr std::uint32_t kBridgeSlotCrossings = 3;               // HOP1: a chain of slot crossings only may take one more
+inline constexpr std::uint32_t kBridgeSlotCrossings = 3;               // HOP1: a chain of composable crossings only may take one more
 inline constexpr std::size_t   kBridgeFanOut        = kBackHopWidth;   // 16, the backward provider's own width bound
+inline constexpr std::size_t   kBridgeNarrowFan     = 4;   // composed hops: a declined/container crossing this narrow composes like a slot one
+static_assert( kImpactRingSlotDepth == kBridgeSlotCrossings, "the --impact ring's field-only depth mirrors the bridge's composable allowance" );
 inline constexpr std::size_t   kBridgeMaxHops       = 8;   // a longer chain is no answer a reader would follow: none is printed
 
-enum class BridgeVia : std::uint8_t { Edge, Declined, Value, Closure, Namesake, Slot, SlotName };
-inline constexpr std::size_t                                    kBridgeViaCount = 7;
+enum class BridgeVia : std::uint8_t { Edge, Declined, Value, Closure, Namesake, Container, Queue, NameKey, Slot, SlotName };   // Container, Queue, NameKey before the slot pair
+inline constexpr std::size_t kBridgeViaCount = 10;
 static_assert( enumCountIsExact<BridgeVia, kBridgeViaCount>(), "kBridgeViaCount must equal the BridgeVia count — raise it with the append" );
-inline constexpr std::array<std::string_view, kBridgeViaCount> kBridgeViaNames = { "", "declined", "value", "closure", "namesake", "slot", "slot-name" };
+inline constexpr std::array      kBridgeViaNames = { std::string_view( "" ), std::string_view( "declined" ), std::string_view( "value" ), std::string_view( "closure" ),
+                                                     std::string_view( "namesake" ), std::string_view( "container" ), std::string_view( "queue" ), std::string_view( "name-key" ), std::string_view( "slot" ),
+                                                     std::string_view( "slot-name" ) };   // indexed by BridgeVia
+static_assert( kBridgeViaNames.size() == kBridgeViaCount, "one name per BridgeVia value (the extent is deduced from the names)" );
 static_assert( std::size_t( BridgeVia::SlotName ) + 1 == kBridgeViaCount && std::size_t( BridgeVia::Slot ) + 2 == kBridgeViaCount, "the two slot crossings close the enum" );
 inline bool bridgeViaIsSlot( BridgeVia v ) noexcept
 {
     return v >= BridgeVia::Slot;   // Slot or SlotName, the enum's last two (static_assert above)
+}
+// Whether a crossing composes past kBridgeCrossings (composed hops): a slot one (already bounded on its callers), or a declined /
+// container one fanning out to at most kBridgeNarrowFan.
+inline bool bridgeCrossingComposes( BridgeVia v, std::size_t fan ) noexcept
+{
+    return bridgeViaIsSlot( v ) || ( ( v == BridgeVia::Declined || v == BridgeVia::Container || v == BridgeVia::Queue || v == BridgeVia::NameKey ) && fan <= kBridgeNarrowFan );
 }
 
 struct PathBridge
@@ -1162,40 +1202,32 @@ struct PathBridge
     bool found() const noexcept { return !hops.empty(); }
 };
 
-// SLOT crossings out of `u` (HOP1): each function a struct-field call in u may call, kept only when that function's own backward
-// hops name u (the --callers join and its tier rule, read from the provider: one copy) within the width bound. `cross( to, via,
-// width, fieldFns )` decides whether the target is new; fieldFns = the distinct functions the call's field holds (never capped).
+// The bridge crossing a forward hop of each kind takes, indexed by BackHopVia (a declined hop has no forward twin).
+inline constexpr std::array kBridgeViaOfHop = { BridgeVia::Slot, BridgeVia::SlotName, BridgeVia::Declined, BridgeVia::Container, BridgeVia::Queue, BridgeVia::NameKey };
+static_assert( kBridgeViaOfHop.size() == kBackHopViaCount, "one bridge crossing per hop kind" );
+
+// SLOT and CONTAINER crossings out of `u`: the provider's forward hops (backhops.h forwardHops, each confirmed by the target's own
+// backward hop naming u within the width bound — one copy of the join), fields first. `cross( to, via, width, stored )`
+// decides whether the target is new. A slot crossing is bounded on its callers (width) and prints its forward width
+// (slot_fns=, never capped); a container crossing is bounded on both and prints its forward width as cands=.
 template<class Cross>
-inline void bridgeSlotCrossings( const ValueRefIndex& values, const BackwardHops& backHops, NodeId u, Cross&& cross )
+inline void bridgeHopCrossings( const ForwardHops& fwdHops, NodeId u, bool fieldCalls, Cross&& cross )
 {
-    for( const std::uint32_t call : values.slots().callsIn( u ) )
+    for( const ForwardHop& h : fwdHops.forwardHops( u ) )
     {
-        const std::vector<SlotIndex::Hit> held = values.slots().valuesFor( call );
-        std::vector<NodeId>               fns;   // the distinct functions this call's field holds: the forward width, printed and never capped
-        for( const SlotIndex::Hit& stored : held )
+        if( hopKind( h.via ).fieldCall != fieldCalls || h.width > kBridgeFanOut || ( !fieldCalls && h.stored > kBridgeFanOut ) )
         {
-            const std::vector<NodeId> t = values.targetsOf( stored.ref );
-            fns.insert( fns.end(), t.begin(), t.end() );
+            continue;
         }
-        std::ranges::sort( fns );
-        fns.erase( std::unique( fns.begin(), fns.end() ), fns.end() );
-        for( const SlotIndex::Hit& stored : held )
-        {
-            for( const NodeId f : values.targetsOf( stored.ref ) )
-            {
-                const std::span<const BackHop> hops = backHops.backwardHops( f );
-                const auto it = std::ranges::find_if( hops, [ & ]( const BackHop& h ) { return h.from == u && h.via != BackHopVia::Declined && h.width <= kBridgeFanOut; } );
-                if( it != hops.end() )
-                {
-                    cross( f, it->via == BackHopVia::Slot ? BridgeVia::Slot : BridgeVia::SlotName, it->width, fns.size() );
-                }
-            }
-        }
+        // a field crossing is bounded on its callers and prints the field's holders; any other (container, queue readers,
+        // a name-key template's definitions) prints its forward width as cands=
+        cross( h.to, kBridgeViaOfHop[ std::size_t( h.via ) ], fieldCalls ? h.width : h.stored, fieldCalls ? h.stored : 0u );
     }
 }
 
 // DECLINED crossings of record `site`: each candidate of its stored list, unless the list is missing or wider than kBridgeFanOut,
-// or the call reads as the builtin method it spells (DeclinedCrossRule, HOP1 #11).
+// or the call reads as the builtin method it spells (DeclinedCrossRule, HOP1 #11). `cross( to, via, fan )` sees the fan, so a walk
+// may narrow it further (composed hops: past the general crossing bound only fan <= kBridgeNarrowFan composes).
 template<class Cross>
 inline void bridgeDeclinedCrossings( const Graph& g, const DeclinedCrossRule& rule, std::uint32_t site, Cross&& cross )
 {
@@ -1278,9 +1310,9 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
     std::vector<std::uint32_t> fanOf( S, 0 );
     std::vector<std::uint32_t> fwdOf( S, 0 );   // HOP1: a slot crossing's forward width (slot_fns=)
     std::vector<char>          isDst( S, 0 );
-    std::vector<char>          slotOnly( S, 0 );   // HOP1: every crossing on the symbol's chain so far is a slot hop (layer 0: none)
-    // Known limit: within one layer a symbol is claimed by the FIRST chain to meet it (slot-only seeds sort first, but a mixed chain at a
-    // shallower BFS depth still wins), so a slot-only chain through that symbol may lose its third crossing: a bridge is lost, never a wrong one.
+    std::vector<char>          composable( S, 0 );   // every crossing on the symbol's chain so far composes (slot, or a narrow declined/container; layer 0: none)
+    // Known limit: within one layer a symbol is claimed by the FIRST chain to meet it (composable seeds sort first, but a mixed chain at a
+    // shallower BFS depth still wins), so a composable chain through that symbol may lose its third crossing: a bridge is lost, never a wrong one.
     // a chain may not route THROUGH a de-prioritized symbol — a test, bench, demo or generated file, a minified bundle, or (since
     // train 31's head round-robin lane) a .d.ts / .pyi declaration twin whose package ships its implementation (filter.h's rank
     // tiers: any multiplier below 1) — only start or end at one: the runtime path a reader asks for runs through the code itself
@@ -1293,6 +1325,7 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
             isDst[t] = 1;
         }
     }
+    const ForwardHops     fwdHops( ing, backHops );   // composed hops: the provider read forward (slot + container crossings), memoised per answer
     const ByNameCallSites byNameSites( ing, {} );   // K5 rule 1: a namesake crossing needs a call of the name not builtin-spelled
     NamesakeRule          ownerReach( ing, g );     // K5 rule 2 (2b/2c): the owners of every symbol layers 0..k reached
     std::vector<NodeId> frontier;
@@ -1301,7 +1334,7 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
         if( s < S && layer[s] == kUnseen )
         {
             layer[s]    = 0;
-            slotOnly[s] = 1;
+            composable[s] = 1;
             frontier.push_back( s );
         }
     }
@@ -1325,7 +1358,7 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
                 {
                     layer[v]    = k;
                     parent[v]   = u;
-                    slotOnly[v] = slotOnly[u];
+                    composable[v] = composable[u];
                     queue.push_back( v );
                 }
             }
@@ -1334,7 +1367,7 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
         {
             break;
         }
-        const bool slotStepOnly = k >= kBridgeCrossings;   // past the general bound only a slot-only chain crosses, and only by a slot
+        const bool composeOnly = k >= kBridgeCrossings;   // past the general bound only a composable chain crosses, and only by a composable crossing
         for( const NodeId u : queue )   // this layer is complete: its owners join the reach (cumulative over layers)
         {
             ownerReach.add( ing.symbols[u] );
@@ -1349,25 +1382,29 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
                 viaOf[to]    = via;
                 fanOf[to]    = std::uint32_t( fan );
                 fwdOf[to]    = std::uint32_t( fwd );
-                slotOnly[to] = char( slotOnly[from] != 0 && bridgeViaIsSlot( via ) );
+                composable[to] = char( composable[from] != 0 && bridgeCrossingComposes( via, fan ) );
                 frontier.push_back( to );
             }
         };
         for( const NodeId u : queue )
         {
-            if( slotStepOnly && slotOnly[u] == 0 )
+            if( composeOnly && composable[u] == 0 )
             {
                 continue;
             }
-            bridgeSlotCrossings( values, backHops, u, [ & ]( NodeId to, BridgeVia via, std::size_t fan, std::size_t fwd ) { cross( u, to, via, fan, fwd ); } );   // HOP1
-            if( slotStepOnly )
-            {
-                continue;
-            }
+            const auto crossTo = [ & ]( NodeId to, BridgeVia via, std::size_t fan, std::size_t fwd ) { cross( u, to, via, fan, fwd ); };
+            bridgeHopCrossings( fwdHops, u, /*fieldCalls=*/true, crossTo );   // HOP1: slot crossings
             const std::pair<NodeId, std::uint32_t> lo( u, 0u ), hi( u, std::numeric_limits<std::uint32_t>::max() );
+            // composed hops: past the general bound, only a narrow declined or container crossing composes like a slot one
+            const auto crossNarrow = [ & ]( NodeId to, BridgeVia via, std::size_t fan, std::size_t fwd = 0 ) { if( fan <= kBridgeNarrowFan ) { crossTo( to, via, fan, fwd ); } };
             for( auto it = std::ranges::lower_bound( declinedBy, lo ); it != declinedBy.end() && *it <= hi; ++it )
             {
-                bridgeDeclinedCrossings( g, backHops.declinedRule(), it->second, [ & ]( NodeId to, BridgeVia via, std::size_t fan ) { cross( u, to, via, fan ); } );
+                bridgeDeclinedCrossings( g, backHops.declinedRule(), it->second, [ & ]( NodeId to, BridgeVia via, std::size_t fan ) { composeOnly ? crossNarrow( to, via, fan ) : crossTo( to, via, fan, 0 ); } );
+            }
+            if( composeOnly )
+            {
+                bridgeHopCrossings( fwdHops, u, /*fieldCalls=*/false, crossNarrow );
+                continue;
             }
             for( auto it = std::ranges::lower_bound( valueBy, lo ); it != valueBy.end() && *it <= hi; ++it )
             {
@@ -1407,11 +1444,12 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
                     }
                 }
             }
+            bridgeHopCrossings( fwdHops, u, /*fieldCalls=*/false, crossTo );   // composed hops: container crossings, after every older kind
         }
-        // the next layer's seeds in id order — a slot-only seed first (HOP1), so a symbol both kinds of chain reach keeps the one
-        // that may still take a slot crossing past the general bound; with no slot crossing anywhere this is the plain id order.
+        // the next layer's seeds in id order — a composable seed first (HOP1, composed hops), so a symbol both kinds of chain reach
+        // keeps the one that may still cross past the general bound; with no composable crossing anywhere this is the plain id order.
         // The walk below them is order-independent of how they were met.
-        std::ranges::sort( frontier, [ & ]( NodeId a, NodeId b ) { return slotOnly[a] != slotOnly[b] ? slotOnly[a] > slotOnly[b] : a < b; } );
+        std::ranges::sort( frontier, [ & ]( NodeId a, NodeId b ) { return composable[a] != composable[b] ? composable[a] > composable[b] : a < b; } );
     }
     if( hit == kNoNode )
     {
@@ -1436,14 +1474,14 @@ inline PathBridge pathBridge( const IngestResult& ing, const Graph& g, std::span
     // crossings >= 1 holds because every caller asks only on reachable=0 (a caller precondition, not something this function
     // makes true), so it is checked in debug and never promised in release (review nit)
     DASSERT( out.crossings >= 1
-                 && ( out.crossings <= kBridgeCrossings || ( out.crossings <= kBridgeSlotCrossings && slotOnly[ hit ] != 0 ) ),
-             "only reached when the proven search was not (reachable=0), within the bound (slot-only chains: one more)" );
+                 && ( out.crossings <= kBridgeCrossings || ( out.crossings <= kBridgeSlotCrossings && composable[ hit ] != 0 ) ),
+             "only reached when the proven search was not (reachable=0), within the bound (composable chains: one more)" );
     return out;
 }
 
 inline constexpr std::string_view kPathBridgeLegend =
     "<bridge proven=\"0\" crossings= hops=>: a HEDGED chain from= to to= of at most 8 hops that crosses at most 2 the graph holds no "
-    "edge for (3 when every crossing is a slot), each declined, value or namesake one fanning out to at most 16 candidates, each slot one bounded on its callers (a declined call spelled like a builtin type's method is not crossed, "
+    "edge for (3 when every crossing is a slot, or a declined or container one of at most 4 candidates), each declined, value, namesake or container one fanning out to at most 16 candidates, each slot one bounded on its callers (a declined call spelled like a builtin type's method is not crossed, "
     "unless its receiver is a this/self field whose class the source states and the tree defines), and "
     "runs through no test, bench, demo, generated or minified symbol, nor a .d.ts/.pyi declaration twin whose package ships its implementation; its <s> rows read like a path's, and via= on a row names the crossing INTO it: declined = "
     "one of cands= candidates of a declined call in the previous row, value = a function the previous row stores or passes as a value, "
@@ -1452,11 +1490,19 @@ inline constexpr std::string_view kPathBridgeLegend =
     "else whose class owns something the chain's earlier layers reached or derives from the bound definition's class in a file that imports "
     "that one, slot = the previous row calls through a struct field this row is stored in (same declared struct "
     "type; slot-name = field name only), slot_callers=N the functions that field join names, at most 16, and slot_fns=K the functions the field holds, NOT capped "
-    "(a wide table is still crossed: K says how wide) (via=name rows are proven edges bound by name). Fewest crossings first. It is NOT a path: reachable= and "
+    "(a wide table is still crossed: K says how wide), container = the previous row calls through a container element (or a parameter's default) "
+    "this row may be held in (cands= the functions it may hold) (via=name rows are proven edges bound by name). Fewest crossings first. It is NOT a path: reachable= and "
     "hops= on the root stay 0, no count includes it, and every crossing is a hedge. ";
-inline std::string_view pathBridgeLegend( bool on ) noexcept
+// The bridge clause rides with a bridge; the queue clause (present-only) when it crosses a queue hand-off, the name-key clause
+// (present-only) when it crosses a name-keyed lookup.
+inline std::string pathBridgeLegend( const PathBridge& br )
 {
-    return on ? kPathBridgeLegend : std::string_view();
+    if( !br.found() )
+    {
+        return {};
+    }
+    return std::string( kPathBridgeLegend ) + std::string( std::ranges::contains( br.via, BridgeVia::Queue ) ? kQueueHopLegend : std::string_view() )
+           + std::string( std::ranges::contains( br.via, BridgeVia::NameKey ) ? kNameKeyHopLegend : std::string_view() );
 }
 
 inline std::string pathBridgeXml( const IngestResult& ing, const Graph& g, const PathBridge& br, bool singleRoot, std::string_view rootPrefix )
@@ -1490,6 +1536,333 @@ inline std::string pathBridgeXml( const IngestResult& ing, const Graph& g, const
         out += "/>";
     }
     return out + "</bridge>";
+}
+
+// ── ON-NAME-HANDLERS-V2: the message-handler rule on a reachable=0 --path ─────────────────────────────────────────────────
+// When from= is a poster (handlerrule.h: a method of a class that reads the rule attribute) called at post sites whose
+// message class names a to= handler, the answer says HOW the message gets there by name: the rule (where the repo writes the
+// handler name and its spelling), the readers that pass the name on (the dispatch side, by name on the read's own line),
+// and the posted classes with the width of each handler name. All of it is a HEDGE: matched by name, never traced, never in
+// reachable=/hops=; a handler name with more than kHandlerRuleListMax definitions is a count with next=, never a cut list.
+inline constexpr std::size_t kHandlerRuleShown   = 3;    // <hm> rows: the widest posted classes first
+inline constexpr std::size_t kHandlerRuleReaders = 4;    // <hrd> rows
+inline constexpr std::size_t kHandlerRuleListMax = 16;   // the bridge's own width limit: at most this many defs are listed as <h>
+
+struct PathHandlerRow
+{
+    NodeId        cls   = kNoNode;
+    std::uint32_t site  = 0;   // the first post site of that class
+    std::uint32_t posts = 0;
+    std::uint32_t cands = 0;
+    std::string   handler;
+};
+struct PathHandlerRule
+{
+    const HandlerRule*          rule = nullptr;
+    std::uint32_t               posts = 0;
+    std::uint32_t               defs  = 0;
+    std::vector<PathHandlerRow> rows;      // every posted class, widest first
+    std::vector<NodeId>         listed;    // the handler defs when defs <= kHandlerRuleListMax
+    bool found() const noexcept { return rule != nullptr && !rows.empty(); }
+};
+
+inline PathHandlerRule pathHandlerRule( const IngestResult& ing, const NameKeyHops& names, std::span<const NodeId> srcDefs, std::span<const NodeId> dstDefs )
+{
+    PathHandlerRule     out;
+    const HandlerRules& hr = names.rules();
+    if( !hr.any() )
+    {
+        return out;
+    }
+    std::vector<std::string_view> fromNames;
+    for( const NodeId s : srcDefs )
+    {
+        fromNames.push_back( ing.symbols[s].name );
+    }
+    std::vector<std::string_view> toNames;
+    for( const NodeId d : dstDefs )
+    {
+        toNames.push_back( ing.symbols[d].name );
+    }
+    std::ranges::sort( toNames, sortutil::svLess );
+    toNames.erase( std::ranges::unique( toNames ).begin(), toNames.end() );
+    std::vector<std::string> hit;   // the handler names a counted post site carries that to= names
+    for( const HandlerPostSite& site : hr.sites() )
+    {
+        const Reference& r = ing.references[ site.ref ];
+        if( !std::ranges::contains( fromNames, std::string_view( r.calleeName ) ) )
+        {
+            continue;
+        }
+        bool counted = false;
+        for( std::size_t k = 0; k < site.classes.size(); ++k )
+        {
+            const std::string h = hr.handlerNameOf( site.classes[k] );
+            if( !std::ranges::binary_search( toNames, std::string_view( h ), sortutil::svLess ) )
+            {
+                continue;
+            }
+            counted = true;
+            hit.push_back( h );
+            const auto row = std::ranges::find( out.rows, site.classes[k], &PathHandlerRow::cls );
+            if( row != out.rows.end() )
+            {
+                ++row->posts;
+                continue;
+            }
+            const std::vector<NodeId> t = hr.targets( site.ref );
+            out.rows.push_back( PathHandlerRow{ site.classes[k], site.ref, 1, std::uint32_t( std::ranges::count_if( t, [ & ]( NodeId d ) { return ing.symbols[d].name == h; } ) ), h } );
+        }
+        out.posts += counted ? 1 : 0;
+    }
+    if( out.rows.empty() )
+    {
+        return out;
+    }
+    std::ranges::sort( hit, sortutil::svLess );
+    hit.erase( std::ranges::unique( hit ).begin(), hit.end() );
+    for( const NodeId d : dstDefs )
+    {
+        if( std::ranges::binary_search( hit, std::string_view( ing.symbols[d].name ), sortutil::svLess ) && hr.classes().ownerOf( d ) != kNoNode )
+        {
+            ++out.defs;
+            out.listed.push_back( d );
+        }
+    }
+    if( out.defs > kHandlerRuleListMax )
+    {
+        out.listed.clear();
+    }
+    std::ranges::stable_sort( out.rows, []( const PathHandlerRow& a, const PathHandlerRow& b ) { return a.cands > b.cands; } );
+    out.rule = hr.ruleOf( out.rows.front().cls );   // the ONE rule pick (handlerrule.h): the nearest rule base
+    return out;
+}
+
+// Owner.name for a definition inside a class, else the name.
+inline std::string handlerRuleQualified( const IngestResult& ing, const HandlerRules& hr, NodeId d )
+{
+    const NodeId owner = hr.classes().ownerOf( d );
+    return owner != kNoNode ? ing.symbols[ owner ].name + "." + ing.symbols[d].name : ing.symbols[d].name;
+}
+
+// The line `n` of `text` (1-based), or empty.
+inline std::string_view handlerRuleLine( std::string_view text, std::uint32_t n )
+{
+    std::size_t at = 0;
+    for( std::uint32_t k = 1; k < n && at != std::string_view::npos; ++k )
+    {
+        at = text.find( '\n', at );
+        at = at == std::string_view::npos ? at : at + 1;
+    }
+    if( at == std::string_view::npos || at >= text.size() )
+    {
+        return {};
+    }
+    return text.substr( at, std::min( text.find( '\n', at ), text.size() ) - at );
+}
+// Does `line` pass word `w` as a call argument (`(w` or `, w` before a `,` or `)`)?
+inline bool handlerRulePassesWord( std::string_view line, std::string_view w )
+{
+    for( std::size_t at = line.find( w ); at != std::string_view::npos && !w.empty(); at = line.find( w, at + 1 ) )
+    {
+        std::size_t b = at;
+        while( b > 0 && line[ b - 1 ] == ' ' )
+        {
+            --b;
+        }
+        std::size_t e = at + w.size();
+        while( e < line.size() && line[e] == ' ' )
+        {
+            ++e;
+        }
+        if( b > 0 && ( line[ b - 1 ] == '(' || line[ b - 1 ] == ',' ) && e < line.size() && ( line[e] == ',' || line[e] == ')' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+// The definition a reader passes the name to: a call of a method of the reader's own class (same file) on the line of its
+// read, or on a later line that passes the local the read was assigned to (`n = m.attr` … `self.f( n, m )`).
+inline NodeId handlerRulePassee( const IngestResult& ing, const HandlerRules& hr, const HandlerReader& reader )
+{
+    const Symbol&          fn    = ing.symbols[ reader.fn ];
+    const NodeId           owner = hr.classes().ownerOf( reader.fn );
+    const std::string_view text( hr.text( fn.fileId ) );
+    const std::string_view read  = handlerRuleLine( text, reader.line );
+    std::string_view       local;
+    if( const std::size_t eq = read.find( '=' ); eq != std::string_view::npos && read.find( "==" ) == std::string_view::npos )
+    {
+        local = read.substr( 0, eq );
+        while( !local.empty() && ( local.front() == ' ' || local.front() == '\t' ) )
+        {
+            local.remove_prefix( 1 );
+        }
+        while( !local.empty() && local.back() == ' ' )
+        {
+            local.remove_suffix( 1 );
+        }
+        if( !std::ranges::all_of( local, []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; } ) )
+        {
+            local = {};
+        }
+    }
+    for( const Reference& c : ing.references )
+    {
+        if( c.fromSymbol != reader.fn || c.role != RefRole::Call || c.line < reader.line
+            || ( c.line != reader.line && !handlerRulePassesWord( handlerRuleLine( text, c.line ), local ) ) )
+        {
+            continue;
+        }
+        for( const Symbol& s : ing.symbols )
+        {
+            if( s.name == c.calleeName && s.fileId == fn.fileId && hr.classes().ownerOf( s.id ) == owner && s.id != reader.fn )
+            {
+                return s.id;
+            }
+        }
+    }
+    return kNoNode;
+}
+
+inline std::string pathHandlerRuleXml( const IngestResult& ing, const NameKeyHops& names, const PathHandlerRule& hrule, bool singleRoot, std::string_view rootPrefix )
+{
+    if( !hrule.found() || hrule.rule == nullptr )
+    {
+        return {};
+    }
+    const HandlerRules& hr = names.rules();
+    const HandlerRule&  rule = *hrule.rule;
+    std::vector<char>   esc;
+    const auto          ex  = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
+    const auto          rel = [ & ]( std::uint32_t fileId ) -> std::string
+    {
+        return ex( singleRoot ? sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix ) : std::string_view( ing.files[ fileId ] ) );
+    };
+    const auto loc = [ & ]( NodeId n ) { return rel( ing.symbols[n].fileId ) + ":" + std::to_string( ing.symbols[n].line ); };
+    const std::string spelled = rule.prefix + ( rule.qualified ? "{snake(Owner)_}" : "" ) + "{snake(Class)}" + ( rule.nsKeyword ? " | " + rule.prefix + "{namespace}_{snake(Class)}" : std::string() );
+    const std::size_t shown = std::min( hrule.rows.size(), kHandlerRuleShown );
+    std::string out = "<handler_rule via=\"name-key\" base=\"" + ex( ing.symbols[ rule.base ].name ) + "\" attr=\"" + ex( rule.attr ) + "\" name=\"" + ex( spelled )
+                    + "\" p=\"" + rel( rule.fileId ) + ":" + std::to_string( rule.line ) + "\" posts=\"" + std::to_string( hrule.posts ) + "\" classes=\""
+                    + std::to_string( hrule.rows.size() ) + "\" handlers=\"" + std::to_string( hrule.defs ) + "\" shown=\"" + std::to_string( shown ) + "\"";
+    if( hrule.listed.empty() )
+    {
+        out += nextAttrXml( nextFlag( "--regex=", "def " + hrule.rows.front().handler + "\\(" ) );
+    }
+    out += ">";
+    std::size_t readers = 0;
+    for( const HandlerReader& reader : rule.readers )
+    {
+        const NodeId rd = reader.fn;
+        if( readers == kHandlerRuleReaders )
+        {
+            break;
+        }
+        ++readers;
+        const NodeId passee = handlerRulePassee( ing, hr, reader );
+        out += "<hrd n=\"" + ex( handlerRuleQualified( ing, hr, rd ) ) + "\" p=\"" + loc( rd ) + "\""
+             + ( passee != kNoNode ? " passes=\"" + ex( handlerRuleQualified( ing, hr, passee ) ) + "\" passes_p=\"" + loc( passee ) + "\"" : std::string() ) + "/>";
+    }
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        const PathHandlerRow& row  = hrule.rows[i];
+        const Reference&      site = ing.references[ row.site ];
+        out += "<hm n=\"" + ex( handlerRuleQualified( ing, hr, row.cls ) ) + "\" h=\"" + ex( row.handler ) + "\" in=\"" + ex( handlerRuleQualified( ing, hr, site.fromSymbol ) )
+             + "\" site=\"" + rel( site.fileId ) + ":" + std::to_string( site.line ) + "\" posts=\"" + std::to_string( row.posts ) + "\" cands=\"" + std::to_string( row.cands ) + "\"/>";
+    }
+    for( const NodeId d : hrule.listed )
+    {
+        out += "<h n=\"" + ex( handlerRuleQualified( ing, hr, d ) ) + "\" p=\"" + loc( d ) + "\"/>";
+    }
+    return out + "</handler_rule>";
+}
+
+// Present-only: rides exactly when <handler_rule> prints.
+inline constexpr std::string_view kHandlerRuleLegend =
+    "<handler_rule via=name-key base= attr= name= p= posts= classes= handlers= shown=>: HOW a posted message reaches a to= handler BY NAME, not a call: "
+    "base='s __init_subclass__ writes attr= (p=) as name= (snake: an underscore between a lower and an upper letter, then lower case; Owner = the class it is "
+    "nested in), read from this repo's own source; posts= calls of from= whose first argument constructs a subclass of base= that names a to= handler, "
+    "classes= those classes, handlers= the to= definitions those names match (methods; which one runs depends on the receiver's class). "
+    "<hrd n= p= passes=>: a function that reads attr= (outside tests) and, in passes=, the method it hands the name to: a call on the line of the read, or a later call passing the local it was read into (the lookup side; no such call found: no passes=). "
+    "<hm n= h= in= site= posts= cands=>: one posted class (widest first, shown= of classes=), its handler name, its first post site, cands=K definitions of h=. "
+    "<h n= p=>: every handler definition when handlers= is at most 16; above that next= lists one name's definitions. Matched, never traced; a hedge, never a hop. ";
+inline std::string_view pathHandlerRuleLegend( const PathHandlerRule& hrule ) noexcept
+{
+    return hrule.found() ? kHandlerRuleLegend : std::string_view();
+}
+
+
+// ── BODY-ON-ROUTE (lane path-hop-body-fix1, textual-11): the bodies of the route a reachable=0 answer already names ──────────
+// A reachable=0 answer names a route it never traced: the bridge rows (poster -> queue consumer -> dispatcher) and the handler_rule
+// readers (where the handler name is read and dispatched). The question is usually what those functions DO (textual-11: the post
+// puts onto _message_queue, the loop takes from it, _on_message dispatches and bubbles to _parent) and the answer printed only names.
+// GAIN GATE (the FOR-ROUTE lesson: 25 KB of rows that gained nothing): only symbols the answer already prints on its route, the
+// bridge rows within kRouteBodyMaxHops of from= (never to=, nor the row whose next step is a slot crossing into to=: that body holds a call
+// through a field and no call to to=) and the <hrd> readers shown; each body under the per-body guard
+// (kHopBodyCapBytes); at most kRouteBodyMax bodies, capped="1" + next= past it. HONESTY: the envelope says proven="0"; a body under a
+// crossing carries that crossing's via= cands= (one candidate's body, never the proven callee), a reader's via="name-key"; nothing
+// here enters reachable=, hops= or any proven count.
+inline constexpr std::size_t kRouteBodyMaxHops = 2;   // bridge rows 0..2 (from= and the next two), never the to= row
+inline constexpr std::size_t kRouteBodyMax     = 4;   // spew guard: bodies per answer; past it capped="1" next= the first unshown
+
+// The route's <bodies of="route" proven="0"> element (routeBodiesXml, the one printer); "" when the answer names no route body.
+inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, const PathBridge& br, const PathHandlerRule& hrule, std::string_view rootArg )
+{
+    std::vector<RouteBody> out;
+    std::vector<NodeId>    seen;
+    const auto add = [ & ]( NodeId n, std::string hedge )
+    {
+        if( n >= ing.symbols.size() || ing.symbols[n].kind == SymKind::ModuleScope || ing.symbols[n].endByte <= ing.symbols[n].sigStartByte
+            || fold_detail::overlapsServed( ing, n, seen, /*orHolds=*/true ) )
+        {
+            return;
+        }
+        seen.push_back( n );
+        out.push_back( { n, std::move( hedge ) } );
+    };
+    if( br.found() && br.hops.size() >= 2 )
+    {
+        const std::size_t last = std::min( kRouteBodyMaxHops, br.hops.size() - 2 );   // the to= row is the last one: never printed
+        for( std::size_t i = 0; i <= last; ++i )
+        {
+            if( i + 2 == br.hops.size() && bridgeViaIsSlot( br.via[i + 1] ) )
+            {
+                continue;   // the row whose only next step is the slot crossing INTO to=: its body holds a call through a field, not a call to to= (train 41b)
+            }
+            std::string hedge;
+            if( i > 0 && br.via[i] != BridgeVia::Edge )
+            {
+                hedge = " via=\"" + std::string( kBridgeViaNames[ std::size_t( br.via[i] ) ] ) + ( bridgeViaIsSlot( br.via[i] ) ? "\" slot_callers=\"" : "\" cands=\"" )
+                      + std::to_string( br.fan[i] ) + "\"" + ( bridgeViaIsSlot( br.via[i] ) ? " slot_fns=\"" + std::to_string( br.fwd[i] ) + "\"" : std::string() );   // the bridge row's own widths
+            }
+            else if( i > 0 )
+            {
+                hedge = chainHopHedge( ing, g, br.hops[i - 1], br.hops[i] );   // an edge row: by name / link / split / impl, as on a reached chain
+            }
+            add( br.hops[i], std::move( hedge ) );
+        }
+    }
+    if( hrule.found() && hrule.rule != nullptr )
+    {
+        std::size_t readers = 0;
+        for( const HandlerReader& reader : hrule.rule->readers )
+        {
+            if( readers++ == kHandlerRuleReaders )
+            {
+                break;   // exactly the <hrd> rows pathHandlerRuleXml prints
+            }
+            add( reader.fn, " via=\"name-key\"" );
+        }
+    }
+    return routeBodiesXml( ing, out, "route", " proven=\"0\"", kRouteBodyMax, rootArg );
+}
+static_assert( kRouteBodyMaxHops == 2 && kRouteBodyMax == 4 && kHopBodyCapBytes == 4000, "the route clause spells the bounds: re-word it with the knobs" );
+inline std::string_view pathRouteBodiesLegend( bool on ) noexcept
+{
+    return on ? "bodies of=route proven=0: the bodies of the route this answer names but never traced: the bridge rows within 2 hops of "
+                "from= (never to=, nor the row calling through a slot into it), then the hrd readers; at most 4 (capped=1, next= the first unshown), each whole up to 4000 bytes "
+                "(truncated=1 past it); a hedge, never in reachable= or hops=. "
+              : "";
 }
 
 }   // namespace rw

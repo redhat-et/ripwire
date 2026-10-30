@@ -81,8 +81,8 @@ inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role
 // it. A name no enclosing scope declares records nothing here: graph.h then asks the file's imports / includes / package.
 // What it does NOT read: a `using namespace`, a star import, an alias assignment (`Base = make_base()`), a class declared
 // inside a function the reference is not in. Those leave the reference without a local binding — never a wrong one.
-inline constexpr std::uint32_t kBaseBindNone    = 0;            // no enclosing scope declares the name
-inline constexpr std::uint32_t kBaseBindUnknown = 0xFFFFFFFFu;  // a scope was too large to scan: nothing proven either way
+// kBaseBindNone / kBaseBindUnknown / kBaseBindTemplateParam live in model.h beside RawRef::baseBind (CR 5701607593: three readers share them).
+inline bool                    baseNamesTemplateParameter( TSNode self, std::string_view base, std::string_view src );   // ingest_names.h
 // kBaseScopeScanCap bounds the two SCANS only: the unindexed lookupInScope fallback and the reopened-namespace sibling scan
 // (a runaway guard: past it those two bind nothing and the edge stays name-only). The indexed path (lookupInScopeIndexed,
 // the one captureTagsFacts installs) reads the scope's table and has no cap: a 32,000-class module scope binds every base.
@@ -496,6 +496,13 @@ inline std::uint32_t localBaseBinding( TSNode site, TSNode self, const std::vect
     return ts_node_start_byte( foundName ) + 1u;   // never 0 (kBaseBindNone) — and below ~0u: a TSNode byte is a u32 < src.size()
 }
 
+// RawRef::baseBind of a base clause written `text` (segments `segs`): a bare name that is a template parameter of the deriving
+// class is a dependent base (kBaseBindTemplateParam), else the same-file declaration the name binds to.
+inline std::uint32_t baseBindOf( TSNode site, TSNode self, std::string_view text, const std::vector<std::string_view>& segs, bool absolute, std::string_view src )
+{
+    return !absolute && segs.size() == 1 && baseNamesTemplateParameter( self, text, src ) ? kBaseBindTemplateParam : localBaseBinding( site, self, segs, absolute, src );
+}
+
 // Emit one inherit RawRef (derived → base) for a base-type node. startByte sits inside the class header
 // (the type node's own start), so the byte-span enclosing attribution binds fromSymbol = the derived class.
 // `self` is the declaration whose header writes the base (its own name never answers the lookup). lane lego-transitive
@@ -516,7 +523,7 @@ inline void emitBaseRef( TSNode typeNode, std::uint32_t fileId, Lang lang, std::
     {
         bool                                absolute = false;
         const std::vector<std::string_view> segs     = baseSegments( text, absolute );
-        r.baseBind = localBaseBinding( typeNode, self, segs, absolute, src );
+        r.baseBind = baseBindOf( typeNode, self, text, segs, absolute, src );
         if( segs.size() > 1 )
         {
             const std::size_t last = text.rfind( segs.back() );
@@ -1102,7 +1109,8 @@ inline std::string_view writtenTypeNamespace( TSNode typeNode, std::string_view 
 
 // the class NAME a type specifier denotes by itself — its final segment with template arguments dropped: `IRBuilder<F, I>`
 // and `llvm::IRBuilder<F>` → IRBuilder, `ir::QBase` → QBase, `struct Node` → Node. "" for every specifier that names no class
-// on its own: a primitive, `auto`, `decltype( … )`, a dependent `typename T::X`, an enum, an anonymous struct.
+// on its own: a primitive, `auto`, `decltype( … )`, a dependent `typename T::X`, an enum, an anonymous struct. Also Go's
+// `pkg.T` (qualified_type, a Go-only kind: ingest_valuerefs.h goValueSlot reads a composite literal's type through this).
 inline std::string_view aliasTargetName( TSNode spec, std::string_view src ) noexcept
 {
     for( int guard = 0; guard < 16 && !ts_node_is_null( spec ); ++guard )
@@ -1112,7 +1120,7 @@ inline std::string_view aliasTargetName( TSNode spec, std::string_view src ) noe
         {
             return nodeTextOf( spec, src );
         }
-        if( !kindIs( kind, "qualified_identifier" ) && !kindIs( kind, "template_type" )
+        if( !kindIs( kind, "qualified_identifier" ) && !kindIs( kind, "template_type" ) && !kindIs( kind, "qualified_type" )
             && !kindIs( kind, "struct_specifier" ) && !kindIs( kind, "class_specifier" ) && !kindIs( kind, "union_specifier" ) )
         {
             return {};

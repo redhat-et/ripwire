@@ -1292,6 +1292,12 @@ fi
 #   docs/captures/COMMANDS_showcase_2026-10-11.md:580,595 — the same two prose lines, byte for byte (same content hashes), in the
 #       train 27 re-capture: the recorded --recall run again follows a block that ends inside a truncated "```bash" fence. Re-keyed
 #       under the new date, as the entry above says a regenerated capture does.
+#   docs/captures/COMMANDS_showcase_2026-10-27.md:606,621 — the same two prose lines, byte for byte (same content hashes), in the
+#       train 40 re-capture (the recall picks that docs/COMMANDS.md section again after the regenerated COMMANDS.md). Re-keyed under
+#       this date as above; nothing walks git history there.
+#   docs/captures/COMMANDS_showcase_2026-10-28.md:618,633 — the same two prose lines, byte for byte (same content hashes), in the
+#       lane/defs-lookup re-capture (adds --defs; the recall picks that docs/COMMANDS.md section again). Re-keyed under this date
+#       as above; nothing walks git history there.
 ARM9_OK='bench/cppbench/run_cppbench.py:e5d3f485c59b0187
 bench/cppbench/run_cppbench.py:7e89ac16d50cd5d2
 bench/cppbench/run_cppbench.py:5d65fe73e9406e01
@@ -1306,7 +1312,11 @@ docs/docs_commands_build.py:f10f0b8021b7b6c2
 docs/captures/COMMANDS_showcase_2026-10-08.md:118fbfbb8f6823fe
 docs/captures/COMMANDS_showcase_2026-10-08.md:22be6025a57af773
 docs/captures/COMMANDS_showcase_2026-10-11.md:118fbfbb8f6823fe
-docs/captures/COMMANDS_showcase_2026-10-11.md:22be6025a57af773'
+docs/captures/COMMANDS_showcase_2026-10-11.md:22be6025a57af773
+docs/captures/COMMANDS_showcase_2026-10-27.md:118fbfbb8f6823fe
+docs/captures/COMMANDS_showcase_2026-10-27.md:22be6025a57af773
+docs/captures/COMMANDS_showcase_2026-10-28.md:118fbfbb8f6823fe
+docs/captures/COMMANDS_showcase_2026-10-28.md:22be6025a57af773'
 python3 - "$TMP/tracked.z" "$ARM9_OK" > "$TMP/arm9" <<'PY'
 import hashlib, os, re, sys
 paths = [p.decode('utf-8', 'surrogateescape')

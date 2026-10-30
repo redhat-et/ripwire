@@ -1689,14 +1689,11 @@ inline bool kotlinTrailingLambda( TSNode call )
     return !ts_node_is_null( suffix ) && !ts_node_is_null( firstChildOfKind( suffix, /*namedOnly=*/true, { "annotated_lambda" } ) );
 }
 
-// B2.2 CALL-SITE ARITY: count the positional arguments of the call whose callee identifier is `nameNode`.
-// Returns { argCount, known }. `known` is true ONLY when a recognized call node + argument container is
-// found for a supported language AND no spread/splat/apply/pack-expansion argument is present (which would make the count
-// unreliable). Any uncertainty → { 0, false } so the resolver never arity-filters that call (zero false
-// negatives). Pure-syntactic, deterministic, allocation-free. Languages: C++/Python/TS/JS/Java/Swift/C#.
-inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std::string_view /*src*/ ) noexcept
+// The argument-list node of the call whose callee identifier is `nameNode`: walks up a bounded number of parents to the enclosing
+// CALL node (the callee sits 1-2 levels below it), then takes its `arguments` field, else the first child of a known list type.
+// A null node when no call or no list is found.
+inline TSNode callArgumentList( TSNode nameNode ) noexcept
 {
-    // walk up a bounded number of parents to the enclosing CALL node (the callee sits 1-2 levels below it).
     TSNode call{};
     bool   found = false;
     TSNode n = nameNode;
@@ -1717,10 +1714,8 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
     }
     if( !found )
     {
-        return { 0, false };
+        return TSNode{};
     }
-
-    // find the argument container: the `arguments` field, else the first child of a known list type.
     TSNode args = fieldChild( call, NodeField::Arguments );
     if( ts_node_is_null( args ) )
     {
@@ -1731,6 +1726,17 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
             args = c;
             return false; } );
     }
+    return args;
+}
+
+// B2.2 CALL-SITE ARITY: count the positional arguments of the call whose callee identifier is `nameNode`.
+// Returns { argCount, known }. `known` is true ONLY when a recognized call node + argument container is
+// found for a supported language AND no spread/splat/apply/pack-expansion argument is present (which would make the count
+// unreliable). Any uncertainty → { 0, false } so the resolver never arity-filters that call (zero false
+// negatives). Pure-syntactic, deterministic, allocation-free. Languages: C++/Python/TS/JS/Java/Swift/C#.
+inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std::string_view /*src*/ ) noexcept
+{
+    const TSNode args = callArgumentList( nameNode );
     if( ts_node_is_null( args ) )
     {
         return { 0, false };
@@ -1756,6 +1762,31 @@ inline std::pair<std::uint16_t, bool> callArity( TSNode nameNode, Lang lang, std
         return true; } );
     (void)lang;
     return unreliable ? std::pair<std::uint16_t,bool>{ 0, false } : std::pair<std::uint16_t,bool>{ count, true };
+}
+
+// The KEYWORD arguments of the Python call whose callee identifier is `nameNode`, as the byte pyKwTag writes (model.h): the count
+// (low 7 bits, saturating) and kCallKwOther when any keyword is spelled other than `timeout` / `block`, the two the queue
+// signatures (queue.Queue.put/get, asyncio.Queue) take. Read only for the queue operations (isQueueCallName); the resolver's
+// arity filter keeps counting them in argCount. 0 when there is none.
+inline std::uint8_t callKeywords( TSNode nameNode, std::string_view src ) noexcept
+{
+    const TSNode args = callArgumentList( nameNode );
+    if( ts_node_is_null( args ) )
+    {
+        return 0;
+    }
+    std::uint8_t kw = 0;
+    ChildCursor  argsCursor( args );
+    forEachNamedChild( args, argsCursor.cur, [ & ]( TSNode c )
+    {   if( !kindIs( ts_node_type( c ), "keyword_argument" ) ) { return true; }
+        const TSNode           nameN   = fieldChild( c, NodeField::Name );
+        const std::uint32_t    a       = ts_node_is_null( nameN ) ? 0 : ts_node_start_byte( nameN );
+        const std::uint32_t    b       = ts_node_is_null( nameN ) ? 0 : ts_node_end_byte( nameN );
+        const std::string_view spelled = a < b && b <= src.size() ? src.substr( a, b - a ) : std::string_view();
+        const bool             queueKw = spelled == "timeout" || spelled == "block";
+        kw = std::uint8_t( std::min<unsigned>( ( kw & kCallKwCount ) + 1u, kCallKwCount ) | ( kw & kCallKwOther ) | ( queueKw ? 0u : kCallKwOther ) );
+        return true; } );
+    return kw;
 }
 }   // namespace — ingest_metrics.h section of ingest.cpp
 

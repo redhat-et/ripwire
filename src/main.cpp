@@ -19,6 +19,8 @@
 #include "pageview.h"              // §P8: the ONE --limit/--offset window + root-element shown=/capped= disclosure
 #include "graphlegend.h"           // §H4 §3.4: the ONE counts_floor= marker + the shared graph-count legend wording
 #include "pathgaps.h"              // PATH-GAP: --path's gap analysis + clause, shared with MCP path_between
+#include "defslookup.h"            // D2: --defs and --path's inline alternatives (lookupDefs)
+#include "pathpairs.h"             // TRACE-EP: --path's reaching definition pairs, shared with MCP path_between
 #include "columnar.h"              // RESEARCH lever 1: opt-in columnar re-serialization for the flat list verbs (--format=columnar)
 #include "redact.h"                // RedactCounts + reportRedactions for the emitted-body secret redaction
 #include "filter.h"
@@ -3061,6 +3063,7 @@ VerbPrecedence scanReportVerbPrecedence( const rw::Config& c )
         { "--callers",          !c.callers.empty()        }, { "--callees",      !c.callees.empty()       },
         { "--graph-query",      !c.graphQuery.empty()     }, { "--uses",         !c.usesSym.empty()       },
         { "--verify",           !c.verifyClaim.empty()    },   // G4: dispatches between --uses and --external-surface (runVerify)
+        { "--defs",             !c.defsSpec.empty()       },   // D2: dispatches between --verify and --external-surface (runDefs)
         { "--external-surface",  c.externalSurface        }, { "--path",         !c.pathSpec.empty()      },
         { "--connect",          !c.connectSpec.empty()    }, { "--impact",       !c.impactSym.empty()     },
         { "--mentions",         !c.mentionsSym.empty()    }, { "--affected",     !c.affectedFiles.empty() },
@@ -3232,7 +3235,7 @@ void warnMapModifierDiscarded( const rw::Config& c, const VerbPrecedence& prec )
 // the verbs with a JSON twin — the read sites of cfg.json outside this refusal (`ripwire . --grep=cfg.json`)
 inline constexpr std::string_view kJsonVerbs[] =
 {
-    "--for", "--pack-task", "--callers", "--callees", "--impact", "--quality-delta", "--test-gate", "--metrics",
+    "--for", "--pack-task", "--callers", "--callees", "--impact", "--quality-delta", "--test-gate", "--metrics", "--defs",
     "--plan-lanes",   // JSON-NATIVE: emits JSON with or without the flag, and says so (the redundancy note in main)
 };
 
@@ -4334,7 +4337,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                 // The sentence is the allow-list (kJsonVerbs) spelled out; keep the two in step.
                 rw::emitTo( stderr, "ripwire: --json is not yet supported for {} — supported: the default map, "
                               "--for, --pack-task, --callers/--callees, --impact, --quality-delta, --test-gate, "
-                              "--metrics, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
+                              "--metrics, --defs, and --plan-lanes which is JSON-native (e.g. ripwire <dir> --callers=SYM --json)\n", std::string_view( unsupported.data(), unsupported.size() ) );
             }
             return 1;
         }
@@ -5675,6 +5678,11 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     }
 
     if( std::optional<int> handled = runVerify( dsp ) )
+    {
+        return *handled;
+    }
+
+    if( std::optional<int> handled = runDefs( dsp ) )
     {
         return *handled;
     }

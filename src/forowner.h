@@ -30,6 +30,7 @@
 
 #include "filter.h"     // isTestSymbol
 #include "graph.h"      // langCompatible
+#include "hopbody.h"    // insertOpenTagAttrs — the one open-tag attribute splice
 #include "lexical.h"    // isRouteStopword
 #include "model.h"
 #include "serialize.h"  // kForLensDefaultTopN, kForDocExcerptRankCount, packBodies
@@ -334,16 +335,7 @@ inline ForBodySlotOwner forBodySlotOwner( const IngestResult& ing, const std::ve
 // pick= on the rendered <bodies> element (packBodies writes the element; the slot names how its one body was chosen)
 inline void spliceBodySlotPick( std::string& xml, BodySlotPick pick )
 {
-    const std::size_t at = xml.find( "<bodies shown=" );
-    if( at == std::string::npos )
-    {
-        return;
-    }
-    const std::size_t close = xml.find( '>', at );
-    if( close != std::string::npos )
-    {
-        xml.insert( close, std::string( " pick=\"" ) + std::string( kBodySlotPickNames[std::size_t( pick )] ) + "\"" );
-    }
+    insertOpenTagAttrs( xml, "<bodies shown=", std::string( " pick=\"" ) + std::string( kBodySlotPickNames[std::size_t( pick )] ) + "\"" );
 }
 
 // The slot SKIPPED under an explicit target (its whole render did not fit the share the rows at the cut left it): the element
