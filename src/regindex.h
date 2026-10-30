@@ -40,6 +40,7 @@
 // RIPWIRE_NO_REG_ROWS (any value) turns it off: the A/B handle.
 
 #include "filter.h"            // isTestPath — test registrations are counted, not listed
+#include "graph.h"             // jsImportKey — the "fileId#name" key
 #include "langfacts.h"         // langFacts().memberSeparator — a consumer named as its rows are
 #include "model.h"
 #include "resolve.h"           // resolvePreciseInclude, resolvePythonModuleSuffix, lexicalNormalize — an import's module file
@@ -139,13 +140,14 @@ public:
 
 private:
     const IngestResult&                         m_ing;
-    HashMap<std::string, std::vector<NodeId>>   m_top;        // "fileId#name" → module-level definitions
+    HashMap<std::string, NodeId>                m_top;        // "fileId#name" → its one module-level definition (kAmbiguous: several)
     HashMap<std::string, std::uint32_t>         m_fileIndex;  // root-relative normalised path → fileId
     HashMap<std::uint32_t, std::vector<const Binding*>> m_imports;   // fileId → its import bindings
     HashMap<std::string, std::vector<const Binding*>>   m_types;     // "fileId#var" → module-scope typed bindings
     HashMap<NodeId, std::vector<std::uint16_t>> m_regFacts;   // registrar method → the parameter positions it stores
 
-    static std::string fk( std::uint32_t f, std::string_view n ) { return std::to_string( f ) + "#" + std::string( n ); }
+    static constexpr NodeId kAmbiguous = kNoNode - 1;
+    static std::string fk( std::uint32_t f, std::string_view n ) { return jsImportKey( f, n ); }
 
     void indexFacts()
     {
@@ -155,7 +157,11 @@ private:
             if( ( s.scope.empty() || ( s.kind == SymKind::Class && s.scope == s.name ) ) && s.kind != SymKind::Method && s.kind != SymKind::Section && s.kind != SymKind::ModuleScope && s.kind != SymKind::Field
                 && regLang( s.lang ) != nullptr )
             {
-                m_top[ fk( s.fileId, s.name ) ].push_back( s.id );
+                const auto [ it, fresh ] = m_top.try_emplace( fk( s.fileId, s.name ), s.id );
+                if( !fresh )
+                {
+                    it->second = kAmbiguous;
+                }
             }
         }
         for( std::uint32_t f = 0; f < m_ing.files.size(); ++f )
@@ -189,7 +195,11 @@ private:
     NodeId topLevel( std::uint32_t f, std::string_view name ) const
     {
         const auto it = m_top.find( fk( f, name ) );
-        return it != m_top.end() && it->second.size() == 1 ? it->second.front() : kNoNode;
+        if( it == m_top.end() || it->second == kAmbiguous )
+        {
+            return kNoNode;
+        }
+        return it->second;
     }
     // The file an import's module resolves to (kNoFile: a package outside the tree): valuerefindex.h importedModuleFile's rule.
     std::uint32_t moduleFile( std::uint32_t importer, std::string_view module, bool python ) const
