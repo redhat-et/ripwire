@@ -1048,13 +1048,16 @@ private:
         }
     }
 
-    std::vector<std::string_view> pyParamNames( TSNode params ) const
+    // `defaulted` (optional): one flag per returned name, true for a parameter written with a default value.
+    std::vector<std::string_view> pyParamNames( TSNode params, std::vector<bool>* defaulted = nullptr ) const
     {
         std::vector<std::string_view> names;
         ChildCursor c( params );
         forEachNamedChild( params, c.cur, [ & ]( TSNode k )
         {
-            const char* t = ts_node_type( k );
+            const char*       t      = ts_node_type( k );
+            const std::size_t before = names.size();
+            bool              dflt   = false;
             if( kindIs( t, "identifier" ) )
             {
                 names.push_back( text( k ) );
@@ -1062,11 +1065,16 @@ private:
             else if( kindIs( t, "default_parameter" ) || kindIs( t, "typed_default_parameter" ) )
             {
                 names.push_back( text( child( k, m_fName ) ) );
+                dflt = true;
             }
             else if( kindIs( t, "typed_parameter" ) || kindIs( t, "list_splat_pattern" ) || kindIs( t, "dictionary_splat_pattern" ) )
             {
                 const TSNode id = ts_node_named_child( k, 0 );
                 names.push_back( !ts_node_is_null( id ) && kindIs( ts_node_type( id ), "identifier" ) ? text( id ) : std::string_view() );
+            }
+            if( defaulted != nullptr && names.size() > before )
+            {
+                defaulted->push_back( dflt );
             }
             return true;
         } );
@@ -1081,18 +1089,10 @@ private:
         {
             return false;
         }
-        bool        found = false;
-        ChildCursor c( params );
-        forEachNamedChild( params, c.cur, [ & ]( TSNode k )
-        {
-            const char* t = ts_node_type( k );
-            if( ( kindIs( t, "default_parameter" ) || kindIs( t, "typed_default_parameter" ) ) && text( child( k, m_fName ) ) == name )
-            {
-                found = true;
-            }
-            return !found;
-        } );
-        return found;
+        std::vector<bool> defaulted;
+        const auto        names = pyParamNames( params, &defaulted );
+        const auto        at    = std::ranges::find( names, name );
+        return at != names.end() && defaulted[ static_cast<std::size_t>( at - names.begin() ) ];
     }
 
     // The positional parameter names of a function-like node, in order, and its own name.

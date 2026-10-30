@@ -223,10 +223,14 @@ private:
     // The one module-level definition `name` has in file `f` (kNoNode: none, or several).
     NodeId topLevel( std::uint32_t f, std::string_view name ) const
     {
-        // a name with no definition files an entry that reads as none (try_emplace never overwrites a definition)
-        const NodeId one = m_top.try_emplace( fk( f, name ), kNoNode ).first->second;
+        const NodeId one = topRaw( f, name );
         return one == kAmbiguous ? kNoNode : one;
     }
+    // File `f` defines `name` at module level (several definitions count: the name IS bound there).
+    bool definesTop( std::uint32_t f, std::string_view name ) const { return topRaw( f, name ) != kNoNode; }
+    // The raw table entry: the definition, kAmbiguous (several), kNoNode (none; a name with no definition files an entry that
+    // reads as none, and try_emplace never overwrites a definition)
+    NodeId topRaw( std::uint32_t f, std::string_view name ) const { return m_top.try_emplace( fk( f, name ), kNoNode ).first->second; }
     // The file an import's module resolves to (kNoFile: a package outside the tree): valuerefindex.h importedModuleFile's rule.
     std::uint32_t moduleFile( std::uint32_t importer, std::string_view module, bool python ) const
     {
@@ -284,12 +288,6 @@ private:
     {
         const auto imp = m_imports.find( f );
         return imp != m_imports.end() && std::ranges::any_of( imp->second, [ & ]( const Binding* b ) { return b != except && b->var == name; } );
-    }
-    // File `f` defines `name` at module level (several definitions count: the name IS bound there).
-    bool definesTop( std::uint32_t f, std::string_view name ) const
-    {
-        const auto it = m_top.find( fk( f, name ) );
-        return it != m_top.end() && it->second != kNoNode;
     }
     // Does function `from`'s code at `byte` of file `f` write `name` locally (a parameter, loop variable, assignment)? Then `name`
     // there is not the module-level key. A class body shadows only its own statements, a def its whole extent (nested defs too).
