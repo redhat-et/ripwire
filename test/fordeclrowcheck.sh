@@ -8,7 +8,7 @@
 #   (b1) bare subject fires; (b2) a bare name binding several definitions is silent, (b3) the same name WITH a task word fires
 #   (n1) no prototype: silent, task word or bare; (n2) no task word: silent; (n3) the task word only inside a code span: silent
 #   (n4) Python subject: silent; (n5) a prototype only in a test path: silent; (n6) a same-named struct, no callable: silent
-#   (n7) a function wholly in a test path: silent
+#   (n7) a function wholly in a test path: silent; (n8) the first function named has no prototype: silent, a later name is not the subject
 #   (c1) the runaway cap: 8 rows, rows= the total, shown= and next=--defs=
 #   (a1) additive: head minus legend + block == the answer's own bytes before them (est_tokens does not move); well-formed
 #   (s1) --json carries no block; (s2) a token budget carries no block; (x1) MCP `for`: the same element bytes; (x2) MCP budget_tokens: none
@@ -85,6 +85,7 @@ silent n4 "--for=py_fn"
 silent n5 "--for=add a new argument to only_tested"
 silent n6 "--for=change the signature of type_only"
 silent n7 "--for=add a new argument to test_only_fn"
+silent n8 '--for=if `solo_fn` gains a new parameter, what happens to run_it callers'
 run "--for=change the signature of many_fn" >"$TMP/c1.xml"
 if python3 - "$TMP/c1.xml" <<'PY'
 import re, sys

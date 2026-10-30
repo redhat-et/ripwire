@@ -260,10 +260,12 @@ inline std::string renderForDeclRows( const IngestResult& ing, const Graph& g, s
     for( std::size_t i = 0; i < subjects.size() && i < kForDeclSubjectTries; ++i )
     {
         const DefLookup L = lookupDefs( ing, g, subjects[i] );
-        if( forDeclHasDeclRow( ing, L ) && ( bare.empty() || defPickProvablyUnique( L ) ) )
+        if( std::ranges::none_of( L.rows, [ & ]( const DefRow& r ) { return forDeclRowCounts( ing, r ); } ) )
         {
-            return forDeclRowsXml( ing, L, subjects[i] );
+            continue;   // not a function here (a qualifier, a word): the next spelling
         }
+        const bool fires = forDeclHasDeclRow( ing, L ) && ( bare.empty() || defPickProvablyUnique( L ) );
+        return fires ? forDeclRowsXml( ing, L, subjects[i] ) : std::string();   // the first function named is the subject: a later name is not it
     }
     return {};
 }
