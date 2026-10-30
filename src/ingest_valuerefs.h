@@ -1134,27 +1134,27 @@ private:
             && pySelfRooted( sub );
     }
 
-    // Python: does the subtree `n` read identifier `name` (as a name, not as an attribute or keyword label)? A subtree too large to scan
-    // answers false (the caller then refuses).
+    // Python: is identifier `id` only a label (an attribute name or a keyword-argument name), never a read of a variable?
+    bool pyLabel( TSNode id ) const
+    {
+        const TSNode parent = ts_node_parent( id );
+        return !ts_node_is_null( parent )
+            && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), id ) )
+                 || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), id ) ) );
+    }
+
+    // Python: does the subtree `n` read identifier `name`? A subtree too large to scan answers false (the caller then refuses).
     bool pyReads( TSNode n, std::string_view name ) const
     {
         constexpr std::size_t kScanCap = 512;
         std::vector<TSNode>   stack{ n };
-        for( std::size_t seen = 0; !stack.empty(); ++seen )
+        for( std::size_t seen = 0; !stack.empty() && seen <= kScanCap; ++seen )
         {
-            if( seen > kScanCap )
-            {
-                return false;
-            }
             const TSNode cur = stack.back();
             stack.pop_back();
             if( kindIs( ts_node_type( cur ), "identifier" ) )
             {
-                const TSNode parent = ts_node_parent( cur );
-                const bool   label  = !ts_node_is_null( parent )
-                    && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), cur ) )
-                         || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), cur ) ) );
-                if( !label && text( cur ) == name )
+                if( text( cur ) == name && !pyLabel( cur ) )
                 {
                     return true;
                 }
@@ -1166,6 +1166,34 @@ private:
             }
         }
         return false;
+    }
+
+    // Python: is `ch`, a child of `node`, what `node` stores into `self` — the arguments of `self.<field>.<store>( … )` or the right side of
+    // a store into `self` — in a store that does not also hold `keep`?
+    bool pyStoredChild( TSNode node, TSNode ch, std::string_view keep ) const
+    {
+        const char* kind = ts_node_type( node );
+        bool        into = false;
+        if( kindIs( kind, "call" ) )
+        {
+            const TSNode fn = child( node, m_fFunction );
+            into = kindIs( ts_node_type( ch ), "argument_list" ) && !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "attribute" )
+                && std::ranges::find( m_regStores, text( child( fn, m_fAttribute ) ) ) != m_regStores.end()
+                && !selfField( child( fn, m_fObject ) ).empty();
+        }
+        else if( kindIs( kind, "assignment" ) )
+        {
+            into = ts_node_eq( ch, child( node, m_fRight ) ) && pySelfRooted( child( node, m_fLeft ) );
+        }
+        return into && !pyReads( ch, keep );
+    }
+
+    // Python: is identifier `id` a use of one of the `others` that the allowlist refuses (see pyOtherParamUsed)? `stored`: it sits inside a
+    // store into `self` that does not hold the registered value.
+    bool pyOtherHit( TSNode id, bool stored, const std::vector<std::pair<std::string_view, bool>>& others ) const
+    {
+        const auto hit = std::ranges::find( others, text( id ), &std::pair<std::string_view, bool>::first );
+        return hit != others.end() && !pyLabel( id ) && ( hit->second ? stored : !pyStoreKey( id ) );
     }
 
     // Python: is the one parameter a store shows (`keep`) provably the registered value? An ALLOWLIST over the method's other parameters
@@ -1210,36 +1238,18 @@ private:
             }
             const Item cur = stack.back();
             stack.pop_back();
-            const char* kind = ts_node_type( cur.node );
-            if( kindIs( kind, "identifier" ) )
+            if( kindIs( ts_node_type( cur.node ), "identifier" ) )
             {
-                const TSNode parent = ts_node_parent( cur.node );
-                const bool   label  = !ts_node_is_null( parent )
-                    && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), cur.node ) )
-                         || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), cur.node ) ) );
-                const auto   hit    = label ? others.end() : std::ranges::find( others, text( cur.node ), &std::pair<std::string_view, bool>::first );
-                if( hit != others.end() && ( hit->second ? cur.stored : !pyStoreKey( cur.node ) ) )
+                if( pyOtherHit( cur.node, cur.stored, others ) )
                 {
                     return true;
                 }
                 continue;
             }
-            const std::uint32_t cc = ts_node_named_child_count( cur.node );
-            // what the children inherit: the arguments of `self.<field>.<store>( … )` and the right side of a store into `self`
-            const TSNode storeFn = kindIs( kind, "call" ) ? child( cur.node, m_fFunction ) : TSNode{};
-            const bool   storeCall = !ts_node_is_null( storeFn ) && kindIs( ts_node_type( storeFn ), "attribute" )
-                && std::ranges::find( m_regStores, text( child( storeFn, m_fAttribute ) ) ) != m_regStores.end()
-                && !selfField( child( storeFn, m_fObject ) ).empty();
-            const bool   storeAssign = kindIs( kind, "assignment" ) && pySelfRooted( child( cur.node, m_fLeft ) );
-            for( std::uint32_t k = 0; k < cc; ++k )
+            for( std::uint32_t k = 0, cc = ts_node_named_child_count( cur.node ); k < cc; ++k )
             {
                 const TSNode ch = ts_node_named_child( cur.node, k );
-                bool         st = cur.stored;
-                if( ( storeCall && kindIs( ts_node_type( ch ), "argument_list" ) ) || ( storeAssign && ts_node_eq( ch, child( cur.node, m_fRight ) ) ) )
-                {
-                    st = !pyReads( ch, keep );   // a store that also holds the registered value stores the option beside it
-                }
-                stack.push_back( { ch, st } );
+                stack.push_back( { ch, cur.stored || pyStoredChild( cur.node, ch, keep ) } );
             }
         }
         return false;
