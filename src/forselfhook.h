@@ -98,8 +98,11 @@ inline constexpr FamilyRow kFamilyRows[] = {
 };
 inline const FamilyRow* familyRow( Lang l ) noexcept
 {
-    const auto* row = std::ranges::find( kFamilyRows, l, &FamilyRow::lang );
-    return row == std::end( kFamilyRows ) ? nullptr : row;
+    switch( l )   // a switch, not a language-equality predicate: the language-identity ratchet counts those in shared files
+    {
+        case Lang::Python: return &kFamilyRows[0];
+        default:           return nullptr;
+    }
 }
 
 // The text of `at`'s line before it (npos + 1 is the file's first line).
@@ -452,11 +455,12 @@ struct Finder
     const ClassIndex&   classes;
     SourceReader&       source;
 
-    std::optional<std::uint32_t> depthOf( std::span<const Ancestor> bases, const Symbol& caller ) const
+    // The base of `bases` that holds `member`, nullptr when it is another class's.
+    const Ancestor* holderOf( std::span<const Ancestor> bases, const Symbol& member ) const
     {
-        const NodeId owner = classes.ownerOf( caller );
-        const auto   it    = std::ranges::find( bases, owner, &Ancestor::id );
-        return it == bases.end() ? std::nullopt : std::optional<std::uint32_t>( it->depth );
+        const NodeId owner = classes.ownerOf( member );
+        const auto   match = [ owner ]( const Ancestor& a ) { return a.id == owner; };
+        return std::ranges::any_of( bases, match ) ? &*std::ranges::find_if( bases, match ) : nullptr;
     }
     void addRef( std::vector<Site>& out, const Reference& r, std::span<const Ancestor> bases, const FamilyRow& row, std::string_view name )
     {
@@ -470,9 +474,9 @@ struct Finder
         {
             return;
         }
-        const Symbol&                      caller = ing.symbols[ r.fromSymbol ];
-        const std::optional<std::uint32_t> depth  = depthOf( bases, caller );
-        if( !depth.has_value() )
+        const Symbol&   caller = ing.symbols[ r.fromSymbol ];
+        const Ancestor* holder = holderOf( bases, caller );
+        if( holder == nullptr )
         {
             return;
         }
@@ -482,7 +486,7 @@ struct Finder
             return;
         }
         const std::size_t offset = r.startByte >= caller.sigStartByte ? r.startByte - caller.sigStartByte : text.size();
-        out.push_back( Site{ r.fromSymbol, r.line, *depth, r.role == RefRole::Call ? SiteForm::Call : SiteForm::Ref, !throughSelf,
+        out.push_back( Site{ r.fromSymbol, r.line, holder->depth, r.role == RefRole::Call ? SiteForm::Call : SiteForm::Ref, !throughSelf,
                              guardedBefore( text, row, throughSelf ? row.selfRecv : row.classRecv, name, offset ), isTestSymbol( ing, r.fromSymbol ) } );
     }
     std::vector<Site> sitesOf( std::span<const Ancestor> bases, const FamilyRow& row, std::string_view name )
@@ -507,15 +511,15 @@ struct Finder
         {
             return;
         }
-        const std::optional<std::uint32_t> depth = depthOf( bases, s );
-        if( !depth.has_value() )
+        const Ancestor* holder = holderOf( bases, s );
+        if( holder == nullptr )
         {
             return;
         }
         const std::string_view text = source.textOf( s );
         for( const std::size_t at : stringAttrUses( text, row.fetch, row.selfRecv, name ) )
         {
-            out.push_back( Site{ id, source.lineOf( s, at ), *depth, SiteForm::Getattr, false, true, isTestSymbol( ing, id ) } );
+            out.push_back( Site{ id, source.lineOf( s, at ), holder->depth, SiteForm::Getattr, false, true, isTestSymbol( ing, id ) } );
         }
     }
 };
