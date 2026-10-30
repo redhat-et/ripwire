@@ -2357,11 +2357,13 @@ private:
     }
 
     // REGISTRAR (model.h kRegLangs, form ProviderRecord; read by src/regindex.h): is the object literal anc[k] in a position that is
-    // never conditional, repeated or rebound? An ALLOWLIST: it is a direct argument of a call (`register( { … } )`, `@Module( { … } )`),
-    // the initialiser of a `const` (bound exactly once, never reassigned), or an element / property value of an array / object literal
-    // that is itself in such a position. A ternary, `||` / `&&`, a `return`, an assignment, a `let` / `var`, a spread or a cast is none of
-    // these: a `provide` and a `useClass` read from there may belong to two different objects.
-    bool providerLiteralDirect( std::size_t k, int depth = 0 ) const
+    // never conditional, repeated or rebound? An ALLOWLIST: it is an ELEMENT of an array literal, and that array is a direct argument of a
+    // call (`register( [ { … } ] )`, `makeProviders( [ … ] )`), the initialiser of a `const` (bound exactly once, never reassigned), the
+    // value of a `providers` / `viewProviders` property, or an element of such an array. A bare `f( { … } )` (`reg.remove( { … } )`,
+    // `console.log( { … } )`), a `const o = { … }` (mutable by `o.provide = …`), a ternary, `||` / `&&`, a `return`, an assignment,
+    // a `let` / `var`, a spread or a cast is none of these: a `provide` and a `useClass` read from there may belong to two different objects.
+    bool providerLiteralDirect( std::size_t k ) const { return k > 0 && kindIs( m_anc[k - 1].kind, "array" ) && providerArrayDirect( k - 1, 0 ); }
+    bool providerArrayDirect( std::size_t k, int depth ) const
     {
         if( k == 0 || depth > 8 )
         {
@@ -2380,13 +2382,45 @@ private:
         }
         if( kindIs( p.kind, "array" ) )
         {
-            return providerLiteralDirect( k - 1, depth + 1 );
+            return providerArrayDirect( k - 1, depth + 1 );
         }
-        if( kindIs( p.kind, "pair" ) && c.field == m_fValue && k >= 2 && kindIs( m_anc[k - 2].kind, "object" ) )
+        if( kindIs( p.kind, "pair" ) && c.field == m_fValue )
         {
-            return providerLiteralDirect( k - 2, depth + 1 );
+            const std::string_view key = text( child( p.node, m_fKey ) );
+            return key == "providers" || key == "viewProviders";
         }
         return false;
+    }
+    // Is every entry of the object literal `obj` one plain pair or shorthand with a non-computed key written once? A spread, method,
+    // accessor, computed key or duplicate key can override the `provide` / value pair read from the same literal.
+    bool providerLiteralPlain( TSNode obj ) const
+    {
+        std::vector<std::string_view> seen;
+        for( std::uint32_t i = 0, n = ts_node_named_child_count( obj ); i < n; ++i )
+        {
+            const TSNode e = ts_node_named_child( obj, i );
+            if( kindIs( ts_node_type( e ), "comment" ) )
+            {
+                continue;
+            }
+            const bool        pair = kindIs( ts_node_type( e ), "pair" );
+            const TSNode      kn   = pair ? child( e, m_fKey ) : e;
+            std::string_view  key  = ( pair || kindIs( ts_node_type( e ), "shorthand_property_identifier" ) ) ? text( kn ) : std::string_view{};
+            if( pair && kindIs( ts_node_type( kn ), "string" ) && key.size() >= 2 )
+            {
+                key = key.substr( 1, key.size() - 2 );
+            }
+            else if( pair && !kindIs( ts_node_type( kn ), "property_identifier" ) )
+            {
+                key = {};   // computed / numeric / private key
+            }
+            if( key.empty() || std::ranges::find( seen, key ) != seen.end() )
+            {
+                return false;
+            }
+            seen.push_back( key );
+        }
+        return true;
     }
     // Mark slot `s` with the object literal anc[k] it is read from (qualifier "@<start byte>"): only for a ProviderRecord language, a value
     // written bare (`useClass: Impl`, not `Impl ? a : b`) and a literal providerLiteralDirect proves. regindex.h pairs a `provide` with a
@@ -2394,7 +2428,8 @@ private:
     void markProviderLiteral( Slot& s, bool bare, std::size_t k ) const
     {
         const RegLang* row = regLang( m_lang );
-        if( bare && row != nullptr && row->form == RegForm::ProviderRecord && k > 0 && kindIs( m_anc[k].kind, "object" ) && providerLiteralDirect( k ) )
+        if( bare && row != nullptr && row->form == RegForm::ProviderRecord && k > 0 && kindIs( m_anc[k].kind, "object" ) && providerLiteralDirect( k )
+            && providerLiteralPlain( m_anc[k].node ) )
         {
             s.litAt = ts_node_start_byte( m_anc[k].node ) + 1;
         }

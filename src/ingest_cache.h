@@ -363,7 +363,9 @@ constexpr std::uint32_t kCacheVersion = 46;           // 46: train 40 — lane j
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 279;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 281;          // bump on any grammar/.scm/extraction change
+                                                      // 281 = 2026-10-30 (lane registrar fix round 4, PLACEHOLDER; 280 is 279's rich tag): a ProviderRecord literal is marked only when it is an element of an
+                                                      //   array (call argument / const / `providers` property) and holds only plain unique pairs (no spread, method, accessor, computed or duplicate key)
                                                       // 279 = 2026-10-30 (lane registrar fix round 3, PLACEHOLDER: the train renumbers; 278 is 277's rich tag): a TS/JS Value row
                                                       //   read from a ProviderRecord object literal carries that literal's start byte (qualifier "<scope><shadow>@<byte>") when the
                                                       //   literal is a direct call argument or a `const` initialiser; a Python registrar fact is refused unless the method's other

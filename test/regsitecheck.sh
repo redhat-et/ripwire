@@ -37,6 +37,13 @@
 #   F1 [G] RIPWIRE_NO_REG_ROWS=1: no <reg> and no clause; the P1 answer minus its <reg> rows and clause equals it (est_tokens masked)
 #   F2 [G] --json carries no <reg>
 #   L1 [P] the clause defines reg when a row prints; L2 [G] absent when none does
+#   FIX ROUND 4 (review rv-registrar-delta3; the [P] arms are RED on 5fb82f85):
+#   P4 [P] Python: a site counts only when its value resolves to a def: an event class (BUS.on( Foo, h1 )), a label (tag( h1, Foo )) or a class
+#          registry (REG.register( PluginA )) is never listed (the class registry is lost by design); a function-only registrar still lists
+#   T4 [P] TS: a spread / duplicate / computed / accessor / method entry, reg.remove( { … } ), console.log( { … } ), a mutable const object and
+#          reg.configure( { excluded: [ { … } ] } ) never list a class; only a plain literal that is an ARRAY element (const / call argument /
+#          providers / viewProviders) counts; F2r4/TA/TB/T1 pin the rows lost by design (a bare call argument, a const object)
+#   T3 [P] TS: a function-local `function K(){}` in a file that imports K gives no row (the sites are not filed under the local symbol)
 #   X1 [G] determinism   X2 [G] xmllint well-formed (when xmllint is present)
 #
 # Usage:  bash test/regsitecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/regsitecheck.sh
@@ -410,7 +417,7 @@ EOF
 run t1 "$TMP/t1" -- --for="which classes are provided for PLUGINS"
 # fix round 3: a pair is its OWN literal's (not the call count), so A and G (each a complete { provide: PLUGINS, useClass: X } literal in a repeated
 # callee) now list; B, C and H (a string provide, another token, no provide) must never join PLUGINS
-if out=$( chk row "$TMP/t1.xml" PLUGINS n=4 D Z1 A G ); then ok "T1 a value is never paired with another object's provide (repeated calls: only each literal's own class lists; B C H never)"; else no "T1 $out"; fi
+if out=$( chk row "$TMP/t1.xml" PLUGINS n=3 D Z1 A ); then ok "T1 a value is never paired with another object's provide (array-held literals only: D Z1 A list; B C never; the bare register( { … } ) literal G no longer counts: fix round 4)"; else no "T1 $out"; fi
 
 # D1: floor + keyword registration + consumers_more
 mk d1
@@ -521,7 +528,7 @@ f2bad=""
 for t in A B C D E F; do run "f2$t" "$TMP/f2" -- --for="which classes are provided for P$t"; done
 for t in A B C D E; do out=$( chk row "$TMP/f2$t.xml" P$t n=2 D$t Z$t ) || f2bad="$f2bad P$t: $out;"; done
 if [ -z "$f2bad" ]; then ok "F2 a value never pairs with another object's provide (literal useValue, arrow useFactory, bare provide, array form, member call)"; else no "F2 $f2bad"; fi
-if out=$( chk row "$TMP/f2F.xml" PF n=3 GF DF ZF ); then ok "F2b twin: ONE register call in a function still lists its own class"; else no "F2b $out"; fi
+if out=$( chk row "$TMP/f2F.xml" PF n=2 DF ZF ); then ok "F2b a bare register( { … } ) call in a function no longer lists its class (fix round 4: only array-held literals count; lost by design)"; else no "F2b $out"; fi
 
 # F3 [P]: binders with no assignment-shaped fact (function-local import, comprehension target, lambda parameter), and module-level for / with
 mkf3(){   # NAME BODY: mod.py defines K = Signal(), connects h1 h2, then BODY
@@ -600,8 +607,9 @@ f2rbad=""
 for t in 1 2 3 4 5 6 7 8 9 A B C D; do run "f2r$t" "$TMP/f2r" -- --for="which classes are provided for T$t"; done
 for t in 1 2 3 4 5 6 7 8 9 C D; do out=$( chk row "$TMP/f2r$t.xml" T$t n=2 D$t Z$t ) || f2rbad="$f2rbad T$t: $out;"; done
 if [ -z "$f2rbad" ]; then ok "F2r3 a ternary / || / const-ternary / reassigned / property / return / second-block literal never lends its class to another object's provide; two COMPLETE literals in a ternary, a returned literal and a `let` literal are conditional / unbound and not listed"; else no "F2r3 $f2rbad"; fi
-if out=$( chk row "$TMP/f2rA.xml" TA n=2 DA ZA ); then ok "F2r3 twin: two const-bound provider objects list (n=2)"; else no "F2r3 twin TA $out"; fi
-if out=$( chk row "$TMP/f2rB.xml" TB n=2 DB ZB ); then ok "F2r3 twin: ONE callee called twice, each with its own complete literal, lists both (the literal, not the call count, is the identity)"; else no "F2r3 twin TB $out"; fi
+# fix round 4: a literal outside an array (a bare call argument, a `const X = { … }`) is NOT counted (reg.remove( { … } ), console.log( { … } ) and o.provide = … are not registrations): rows lost by design
+if out=$( chk nokey "$TMP/f2rA.xml" TA ); then ok "F2r4 const-bound provider OBJECTS (not an array element) are not counted (lost by design: o.provide = … can rebind them)"; else no "F2r4 TA $out"; fi
+if out=$( chk nokey "$TMP/f2rB.xml" TB ); then ok "F2r4 a bare register( { … } ) call argument is not counted (lost by design: reg.remove( { … } ) has the same shape)"; else no "F2r4 TB $out"; fi
 
 # F4r3 [P] / B1 [P]: the registrar's other parameters are an allowlist
 mk f4r
@@ -684,6 +692,107 @@ if out=$( chk nokey "$TMP/f4rr5.xml" r5 ); then ok "F4r3 twin: the key parameter
 if out=$( chk nokey "$TMP/f4rr6.xml" r6 ); then ok "F4r3 twin: a required parameter used beyond the subscript key (print( name )) stays a no-row"; else no "F4r3 keyed_use $out"; fi
 if out=$( chk row "$TMP/f4rr7.xml" r7 n=2 h1 h2 ); then ok "F4r3 twin: Django's shape ( receiver, sender=None, weak=True used in a local key ) still lists"; else no "F4r3 django $out"; fi
 if out=$( chk legend "$TMP/f4rr3.xml" "only exact shapes are listed" "absent row" ); then ok "D3 the clause says listing is exact-shape only and an absent row proves nothing"; else no "D3 $out"; fi
+
+# ── fix round 4 (review rv-registrar-delta3; every [P] arm below is RED on 5fb82f85): the value must be a function; plain array-held literals ──
+# P4 [P]: Python — the site's value must resolve to a def (an event class / constant / dict key is not a receiver)
+mkdir -p "$TMP/p4"
+cat > "$TMP/p4/reg.py" <<'EOF'
+from collections import defaultdict
+class Reg:
+    def __init__(self):
+        self.events = []
+        self.subs = defaultdict(list)
+        self.rx = []
+        self.names = {}
+        self.items = []
+    def on(self, ev, fn=None):
+        self.events.append(ev)
+        self.subs[ev].append(fn)
+    def conn(self, ev, fn=None):
+        self.rx.append((ev, fn))
+    def tag(self, fn, label):
+        self.names[fn] = label
+    def plain(self, fn):
+        self.rx.append(fn)
+    def register(self, cls):
+        self.items.append(cls)
+EOF
+cat > "$TMP/p4/use.py" <<'EOF'
+from reg import Reg
+
+class Foo: pass
+class Bar: pass
+class PluginA: pass
+class PluginB: pass
+def h1(): pass
+def h2(): pass
+
+BUS = Reg()
+BUS.on(Foo, h1)
+BUS.on(Bar, h2)
+CON = Reg()
+CON.conn(Foo, h1)
+CON.conn(Bar, h2)
+TAG = Reg()
+TAG.tag(h1, Foo)
+TAG.tag(h2, Bar)
+PLN = Reg()
+PLN.plain(h1)
+PLN.plain(h2)
+CLS = Reg()
+CLS.register(PluginA)
+CLS.register(PluginB)
+EOF
+for k in BUS CON TAG PLN CLS; do run "p4$k" "$TMP/p4" -- --for="which handlers are connected to $k"; done
+for k in BUS CON TAG; do
+    if out=$( chk nokey "$TMP/p4$k.xml" $k ) && out=$( chk nosym "$TMP/p4$k.xml" Foo ) && out=$( chk nosym "$TMP/p4$k.xml" Bar ); then ok "P4 $k: the event / label (a class) is never listed as the registered handler"; else no "P4 $k $out"; fi
+done
+if out=$( chk row "$TMP/p4PLN.xml" PLN n=2 h1 h2 ); then ok "P4 twin: a registrar storing only its function parameter still lists module-level defs"; else no "P4 twin PLN $out"; fi
+if out=$( chk nokey "$TMP/p4CLS.xml" CLS ); then ok "P4 a class registry ( REG.register( PluginA ) ) is not counted (lost by design: the value must be a function)"; else no "P4 CLS $out"; fi
+
+# T4 [P]: TS — a later spread / duplicate / computed / accessor / method entry can override the pair; a bare call argument or a mutable const object is no registration
+mkdir -p "$TMP/t4"
+printf "export class InjectionToken<T> { constructor(public desc: string) {} }\nexport const OTHER = new InjectionToken<any>('other');\n" > "$TMP/t4/tokens.ts"
+: > "$TMP/t4/cl.ts"
+for t in 1 2 3 4 5 6 7 8 9 A B C D; do
+    printf "export const S%s = new InjectionToken<any>('s%s');\n" "$t" "$t" >> "$TMP/t4/tokens.ts"
+    printf "export class D%s {}\nexport class Z%s {}\nexport class H%s {}\n" "$t" "$t" "$t" >> "$TMP/t4/cl.ts"
+    printf "import { OTHER, S%s } from './tokens';\nimport { D%s, Z%s, H%s } from './cl';\ndeclare const o: any; declare const reg: any; declare const register: any; declare const makeProviders: any;\n" "$t" "$t" "$t" "$t" > "$TMP/t4/u_$t.ts"
+    printf "export const BASE_%s = [{ provide: S%s, useClass: D%s }, { provide: S%s, useClass: Z%s }];\n" "$t" "$t" "$t" "$t" "$t" >> "$TMP/t4/u_$t.ts"
+done
+w4(){ printf '%s\n' "$2" >> "$TMP/t4/u_$1.ts"; }
+w4 1 "export const B1 = [{ provide: S1, useClass: H1, ...o }];"
+w4 2 "export const B2 = [{ provide: S2, useClass: H2, useClass: null }];"
+w4 3 "export const B3 = [{ provide: S3, useClass: H3, [\"provide\"]: OTHER }];"
+w4 4 "export const B4 = [{ provide: S4, get provide() { return OTHER; }, useClass: H4 }];"
+w4 5 "export const B5 = [{ provide: S5, useClass: H5, useClass() {} }];"
+w4 6 "export const B6 = [{ provide: S6, /* a comment */ useClass: H6, multi: true, deps: [OTHER] }];"
+w4 7 "reg.remove({ provide: S7, useClass: H7 });"
+w4 8 "console.log({ provide: S8, useClass: H8 });"
+w4 9 "const O9 = { provide: S9, useClass: H9 }; O9.provide = OTHER; register(O9);"
+w4 A "reg.configure({ excluded: [{ provide: SA, useClass: HA }] });"
+w4 B "register({ provide: SB, useClass: HB });"
+w4 C "makeProviders([{ provide: SC, useClass: HC }]);"
+w4 D "export const VP = { viewProviders: [{ provide: SD, useClass: HD }] };"
+for t in 1 2 3 4 5 6 7 8 9 A B C D; do run "t4$t" "$TMP/t4" -- --for="which classes are provided for S$t"; done
+t4bad=""
+for t in 1 2 3 4 5 7 8 9 A B; do out=$( chk row "$TMP/t4$t.xml" S$t n=2 D$t Z$t ) || t4bad="$t4bad S$t: $out;"; done
+if [ -z "$t4bad" ]; then ok "T4 a spread / duplicate / computed / accessor / method entry, reg.remove( { … } ), console.log( { … } ), a const object rebound by o.provide = …, reg.configure( { excluded: [ { … } ] } ) and a bare register( { … } ) never list their class (only the two plain array-held literals count)"; else no "T4 $t4bad"; fi
+if out=$( chk row "$TMP/t46.xml" S6 n=3 D6 Z6 H6 ); then ok "T4 twin: a plain literal with a comment, multi and deps (an array element in a const) still lists"; else no "T4 twin S6 $out"; fi
+if out=$( chk row "$TMP/t4C.xml" SC n=3 DC ZC HC ); then ok "T4 twin: a literal in an array passed to a call lists"; else no "T4 twin SC $out"; fi
+if out=$( chk row "$TMP/t4D.xml" SD n=3 DD ZD HD ); then ok "T4 twin: a literal in a viewProviders property lists"; else no "T4 twin SD $out"; fi
+
+# T3 [P]: a function-local `function K() {}` in a file that imports K must not move the file's sites off the imported key
+mkdir -p "$TMP/t3" "$TMP/t3b"
+printf "export class InjectionToken<T> { constructor(public desc: string) {} }\nexport const HJ = new InjectionToken<any>('hj');\n" > "$TMP/t3/tokens.ts"
+printf "export class D {}\nexport class G {}\n" > "$TMP/t3/cl.ts"
+cp "$TMP/t3/tokens.ts" "$TMP/t3/cl.ts" "$TMP/t3b/"
+printf "import { HJ } from './tokens';\nimport { D, G } from './cl';\nexport const PS = [{ provide: HJ, useClass: D }, { provide: HJ, useClass: G }];\nexport function make() { function HJ() {} return HJ; }\n" > "$TMP/t3/hijack.ts"
+printf "import { HJ } from './tokens';\nimport { D, G } from './cl';\nexport const PS = [{ provide: HJ, useClass: D }, { provide: HJ, useClass: G }];\n" > "$TMP/t3b/hijack.ts"
+run t3 "$TMP/t3" -- --for="which classes are provided for HJ"
+run t3b "$TMP/t3b" -- --for="which classes are provided for HJ"
+if out=$( chk nokey "$TMP/t3.xml" HJ ); then ok "T3 a local function HJ in a file that imports HJ: no row (the key is not provable; the sites are not filed under the local symbol)"; else no "T3 $out"; fi
+if out=$( chk rowat "$TMP/t3b.xml" HJ tokens.ts n=2 D G ); then ok "T3 twin: the same file without the local function lists D G under the imported key"; else no "T3 twin $out"; fi
 
 run f1 "$PY" RIPWIRE_NO_REG_ROWS=1 -- --for="$Q_PY"
 chk strip "$TMP/p1.xml" "$TMP/p1.strip"; chk strip "$TMP/f1.xml" "$TMP/f1.strip"

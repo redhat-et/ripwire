@@ -78,17 +78,22 @@ inline bool forRegRowsOn()
 
 inline constexpr std::string_view kForCompactRegLegend =
     "; reg key= p= a registry key and its definition, r sym= p= what is registered under it at p= (as= the record field), n= AT LEAST "
-    "this many non-test registrations (a floor: only exact shapes are listed, so an absent row or site proves nothing, and decorator, "
-    "keyword-argument, forwardRef, unresolved-import, function-local-import, bound-method, conditional or non-literal provider "
-    "registrations are not counted), tests= test ones (counted only), by= the registrar, consumers= where the key is sent or injected "
+    "this many non-test registrations (a floor: only exact shapes are listed, so an absent row or site proves nothing. Not counted: a "
+    "Python decorated def, keyword-argument, bound-method, class or constant value, forwardRef, unresolved-import, function-local-import, "
+    "a provider object outside an array literal or with a spread, computed or duplicate key, a ternary or non-literal provider. Counted "
+    "without proof it ran: a TS decorator's providers and `if ( flag ) register( ... )`. Unproven: a module-level block / for / catch "
+    "shadow of the key, a barrel `export { OTHER as K }` beside a local K, an event that is itself a def, a verb such as ignore (read by=)), tests= test ones (counted only), by= the registrar, consumers= where the key is sent or injected "
     "(consumers_more= further ones not named), reg_more= further keys not shown, cut=1 a re-export chain over 3 hops was not "
     "followed, a static fact at the site (the call as written, conditional or dynamic registration may exist, sender=/weak=/"
     "dispatch_uid= are not read), not proof it ran";
 inline constexpr std::string_view kForRegLegend =
     "; reg rows: a registry key= (its definition at p=) joined to the registrations of that key by the index: each r is what a site "
     "registers (sym= as written, p= the site, as= the provider field), n= AT LEAST this many non-test registrations (a floor: "
-    "only exact shapes are listed, so an absent row or site proves nothing, and decorator, keyword-argument, forwardRef, "
-    "unresolved-import, function-local-import, bound-method, conditional or non-literal provider registrations are not counted), up to 4 are listed (capped=1 "
+    "only exact shapes are listed, so an absent row or site proves nothing. Not counted: a Python decorated def, keyword-argument, "
+    "bound-method, class or constant value, forwardRef, unresolved-import, function-local-import, a provider object outside an array "
+    "literal or with a spread, computed or duplicate key, a ternary or non-literal provider. Counted without proof it ran: a TS "
+    "decorator's providers and `if ( flag ) register( ... )`. Unproven: a module-level block / for / catch shadow of the key, a barrel "
+    "`export { OTHER as K }` beside a local K, an event that is itself a def, a verb such as ignore (read by=)), up to 4 are listed (capped=1 "
     "next= greps every mention of the key), tests= test registrations (counted, not listed), by= the registrar method, consumers= "
     "the functions that send or inject the key (consumers_more= further ones not named), reg_more= further keys that passed the "
     "gate and are not shown, cut=1 a re-export chain over 3 hops was not followed so a registration through it is not counted, "
@@ -301,11 +306,14 @@ private:
     // kRegReexportDepth hops; a longer chain is not followed and its name is recorded (reexportCut: cut=1 on that key's row).
     NodeId resolveIdent( std::uint32_t f, std::string_view name, int depth = 0 ) const
     {
+        const auto imp = m_imports.find( f );
         if( const NodeId own = topLevel( f, name ); own != kNoNode )
         {
-            return own;
+            // JS: a file that both imports `name` and defines it (a function-local `function K(){}` is filed at top level) gives no key
+            const bool both = imp != m_imports.end()
+                && std::ranges::any_of( imp->second, [ & ]( const Binding* b ) { return b->kind == LocalBindKind::JsImport && b->var == name; } );
+            return both ? kNoNode : own;
         }
-        const auto imp = m_imports.find( f );
         if( imp == m_imports.end() )
         {
             return kNoNode;
@@ -518,6 +526,13 @@ private:
             const NodeId key = shadowed( r.fileId, head, r.startByte, r.fromSymbol ) ? kNoNode : resolveDotted( r.fileId, recv );
             const NodeId reg = key == kNoNode ? kNoNode : registrarOf( key, method, r.argCount );
             if( reg == kNoNode )
+            {
+                continue;
+            }
+            // the value must BE a function: a class / constant passed where an event or key sits (`BUS.on( UserCreated, h1 )` beside
+            // `self.subs[ ev ].append( fn )`) is not a receiver, and no signature rule can tell the two apart
+            const NodeId val = resolveIdent( r.fileId, r.calleeName );
+            if( val == kNoNode || ( m_ing.symbols[ val ].kind != SymKind::Function && m_ing.symbols[ val ].kind != SymKind::Method ) )
             {
                 continue;
             }
