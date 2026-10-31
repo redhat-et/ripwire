@@ -10,6 +10,7 @@
 #include "forfold.h"    // body-fold: the whole bodies of the top ranked rows, appended to a compact-route answer
 #include "formembers.h" // member-names: mem= on the shown owner rows of a compact-route answer
 #include "forslots.h"   // FOR-SLOTS: slots= on the shown initializer rows of a compact-route answer
+#include "fordeclrow.h"   // DECL-ROW: a signature task's declaration rows, before </ctx>
 #include "forgraphverb.h" // FOR-ROUTE-DECLINED: the graph verb a `path from A to B` / `callers of X` task names, appended
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
@@ -2727,6 +2728,19 @@ inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view ro
     std::fwrite( r.xml.data(), 1, r.xml.size(), stdout );
 }
 
+// DECL-ROW (src/fordeclrow.h): the task-read row blocks, just before </ctx> and outside every charge above: an element with its own
+// byte allowance, so no auto-served body pays for it. XML only; under a token budget the block is named, not printed
+// (held="budget", next= the call that lists the rows): "" on every task they do not read as theirs, so the answer is byte-identical.
+inline void appendForTaskRowBlocks( const MainDispatch& d )
+{
+    const rw::Config& cfg = d.cfg;
+    if( cfg.json || cfg.columnar || cfg.candidates || d.multiRoot )
+    {
+        return;
+    }
+    rw::emitRaw( stdout, rw::renderForDeclRows( d.ing, d.g, cfg.forTask, /*held=*/cfg.tokenBudget > 0 ).c_str() );
+}
+
 // FOR-ROUTE-DECLINED (src/forgraphverb.h): a task spelled `path from A to B` / `callers of X` / `common callers of A and B`
 // gets that verb's DEFAULT answer inside <graph_verb endpoints="subject">, just before </ctx>, on the graph this run built
 // (no re-index). Every byte before it is the ordinary answer; nothing resolves → nothing is printed. XML only (the
@@ -4562,6 +4576,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             rw::emitChargedSection( stdout, graphSection, [ & ]{ packGraphBlock( stdout, ing, lensRank, g.outOff, g.outTargets ); } );
         }
+        appendForTaskRowBlocks( d );                                     // DECL-ROW: "" unless the task reads as a signature change of one C/C++/Go function
         appendSubjectGraphVerbBlock( d, servedAnswerBodies().bodies );   // FOR-ROUTE-DECLINED: "" unless the task is spelled as a graph question that resolves; the bodies this answer carries print no second copy in its path hop bodies
         // ALIAS-IMPORT (forreexport.h): the `pub use` / `export … from` hops to a definition the task names; "" when none. XML only, like the block above.
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot && rw::forReexportOn() )
