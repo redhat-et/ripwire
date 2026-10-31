@@ -2787,7 +2787,7 @@ inline std::string buildPrunedPackagesBlock( const CrawlSkips& skips, std::strin
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const std::size_t shown      = std::min( skips.prunedPackageRows.size(), kMaxPrunedPackagesShown );
     std::string       out = "<pruned_packages count=\"" + std::to_string( skips.prunedPackages ) + "\" shown=\"" + std::to_string( shown )
-                          + "\" next=\"--skipped\" reading=\"packages the crawl denylist removed by name: not indexed, so edges to and from them are missing here\">";
+                          + "\" next=\"--skipped\" note=\"packages the crawl denylist removed by name: not indexed, so edges to and from them are missing here\">";
     std::vector<char> esc;
     for( std::size_t i = 0; i < shown; ++i )
     {
@@ -10183,6 +10183,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     }
     w.write( rw::depsImportsUnresolvedLegend( tsImports.unresolved > 0 ) );   // #220: exactly when the root carries the pair
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
+    w.write( rw::prunedPackagesLegend( ing.crawlSkips.prunedPackages > 0, /*leadingSpace=*/ false ) );   // #478 gap 3: exactly when the block below is printed
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at

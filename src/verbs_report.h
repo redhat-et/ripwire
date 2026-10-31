@@ -471,7 +471,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const auto&                adj               = archSa.adj;
         const std::uint64_t        importsUnresolved = archSa.importsUnresolved;
         const std::string          archPartialAttr   = rw::tsImportRootAttrXml( importsUnresolved, archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread );
-        const std::string          archExtrasLegend  = rw::archTsImportExtrasLegend( archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread );
+        const std::string          archExtrasLegend  = rw::archTsImportExtrasLegend( archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread )
+                                                     + rw::prunedPackagesLegend( ing.crawlSkips.prunedPackages > 0, /*leadingSpace=*/ true );   // #478 gap 3
 
         // ── EVERY rule is matched against the ROOT-RELATIVE path, never the emitted one ────────────────────
         // ing.files spells each file `<ingest-root>/<relative>` verbatim, so matching a user regex or a layer

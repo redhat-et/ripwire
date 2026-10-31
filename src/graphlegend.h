@@ -1060,6 +1060,14 @@ inline constexpr const char* kDepsTsconfigUnreadLegend =
 inline constexpr const char* kArchImportsDtsLegend = " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration.";
 inline constexpr const char* kArchTsconfigUnreadLegend =
     " tsconfig_unread=N graph_partial=1 (absent at 0): N config files that could declare an alias or a workspace package were not read (an extends base or referenced project not in the tree, one that does not parse, or a tsconfig/jsconfig/workspace root above the crawl root, looked for up to the git top-level), so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
+// #478 gap 3: <pruned_packages> in --deps and --arch (serialize.h buildPrunedPackagesBlock), exactly when the block is printed.
+inline constexpr const char* kPrunedPackagesLegend =
+    "<pruned_packages count=N shown=M next= note=> (present only when the crawl denylist removed a real package, one that holds its own __init__.py, by a build-output name such as build, dist, out or target): p path= names one of the first M; the skipped verb (next=) lists all N as why=pruned-package. They are not indexed, so edges to and from them are missing from every number here.";
+// --deps' legend clauses end in a space (the last one is followed by the cap sentence), --arch's start with one.
+inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
+{
+    return !on ? std::string() : leadingSpace ? std::string( " " ) + kPrunedPackagesLegend : std::string( kPrunedPackagesLegend ) + " ";
+}
 // Two legend clauses, each exactly when its count is non-zero (the #220 composers below all have this shape).
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
 {

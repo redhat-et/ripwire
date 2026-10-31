@@ -1853,7 +1853,7 @@ $ ./build/ripwire . --deps
 ... [17 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--arch`, `--limit`
+**Shaped by:** `--arch`, `--skipped`, `--limit`
 
 **Caveats (stated by the binary):**
 
@@ -2377,7 +2377,7 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 ... [20 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--graph-query`, `--deps`
+**Shaped by:** `--graph-query`, `--deps`, `--skipped`
 
 **Caveats (stated by the binary):**
 
@@ -2407,7 +2407,7 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 ... [20 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--graph-query`, `--deps`
+**Shaped by:** `--graph-query`, `--deps`, `--skipped`
 
 ### `--arch=FILE --baseline-update`
 
@@ -2433,7 +2433,7 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 ... [20 more line(s); run it to see the whole thing]
 ```
 
-**Shaped by:** `--graph-query`, `--deps`
+**Shaped by:** `--graph-query`, `--deps`, `--skipped`
 
 ### `--lint`
 
@@ -4369,7 +4369,7 @@ $ ./build/ripwire . --doctor --agent=claude
 
 **Answers:** say WHY a file is missing from the index, and which indexed files it cannot vouch for WHY the index does not contain a file, and which files it DOES contain but cannot vouch for.
 
-<f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise), why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build — the class that hides a whole LANGUAGE). <h p= why= err= err_ratio= ws_freq=/> per INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or why=minified-suspect (ws_freq under 0.070 over the leading 4KB). <e x= files=/> per unindexed extension — what the map header rolls up as unindexed=. <lang n= files= symbols=/> per LANGUAGE this build DID extract from — the mirror of unindexed= (which names what it could NOT read at all); sorted files DESC then name ASC, absent means the language contributed nothing, never a printed zero; files= is a floor (a file with zero extracted symbols is not attributed to any language), symbols= is exact. The root states the ACCOUNTING INVARIANT indexed= + oversize= + excluded= = the enumerated candidate population, plus unsupported_ext=, excluded_dirs= (SUBTREES --exclude pruned: contents UNKNOWN, not zero), pruned_dirs= (SUBTREES this build always prunes by policy — the committed noise/vendor/build denylist and any dir holding a CMakeCache.txt — contents likewise UNKNOWN), degraded_parse=, minified_suspect=, extent_suspect_files= (files holding a definition whose extent/scope failed a containment check; the <h> row says why=extent-suspect with extent_suspect_syms=), macro_blanked_files= (files whose symbols come from a re-parse with semicolon-less member macro invocations blanked; the <h> row says why=macro-blanked with macro_blanked=), use_bounds_blanked_files= (Rust files re-parsed with precise-capturing use<..> bounds blanked; the <h> row says why=use-bounds-blanked with use_bounds_blanked=), unmeasured= (indexed files this run never parsed) and the effective ceilings, so a zero-row report still states its bounds. rows_capped="1" ⇒ rows are a sample of an exact count. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/<rel> spelling). Read-only; exit 0 always: a report, not a gate.
+<f p= why= bytes=/> per DROPPED file: why=oversize (limit= names the ceiling — --max-file-size, or the fixed .json/.yaml config ceilings it does not raise), why=excluded (--exclude hit), why=unsupported-ext (ext= has no grammar in this build — the class that hides a whole LANGUAGE). <h p= why= err= err_ratio= ws_freq=/> per INDEXED-but-suspect file, nothing dropped: why=degraded-parse (the parse holds ERROR/MISSING nodes — a parser-state fact, never a syntax verdict) and/or why=minified-suspect (ws_freq under 0.070 over the leading 4KB). <e x= files=/> per unindexed extension — what the map header rolls up as unindexed=. <lang n= files= symbols=/> per LANGUAGE this build DID extract from — the mirror of unindexed= (which names what it could NOT read at all); sorted files DESC then name ASC, absent means the language contributed nothing, never a printed zero; files= is a floor (a file with zero extracted symbols is not attributed to any language), symbols= is exact. The root states the ACCOUNTING INVARIANT indexed= + oversize= + excluded= = the enumerated candidate population, plus unsupported_ext=, excluded_dirs= (SUBTREES --exclude pruned: contents UNKNOWN, not zero), pruned_dirs= (SUBTREES this build always prunes by policy — the committed noise/vendor/build denylist and any dir holding a CMakeCache.txt — contents likewise UNKNOWN; each is rowed bytes=0: why=pruned-package when a build-output name (build, dist, out, target, captures) holds its own __init__.py, a real package the denylist removed, else why=pruned-dir; --deps and --arch name the packages), degraded_parse=, minified_suspect=, extent_suspect_files= (files holding a definition whose extent/scope failed a containment check; the <h> row says why=extent-suspect with extent_suspect_syms=), macro_blanked_files= (files whose symbols come from a re-parse with semicolon-less member macro invocations blanked; the <h> row says why=macro-blanked with macro_blanked=), use_bounds_blanked_files= (Rust files re-parsed with precise-capturing use<..> bounds blanked; the <h> row says why=use-bounds-blanked with use_bounds_blanked=), unmeasured= (indexed files this run never parsed) and the effective ceilings, so a zero-row report still states its bounds. rows_capped="1" ⇒ rows are a sample of an exact count. Rows sort by path; composes with --max-file-size/--exclude and multi-root (rows carry the <label>/<rel> spelling). Read-only; exit 0 always: a report, not a gate.
 
 **Try it**
 
