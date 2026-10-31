@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <vector>
 
@@ -52,10 +53,10 @@ class FileAdjacency
 {
 public:
     FileAdjacency() = default;
-    explicit FileAdjacency( std::uint32_t files ) : off_( std::size_t( files ) + 1, 0 ) {}
+    explicit FileAdjacency( std::uint32_t files ) : files_( files ), off_( std::size_t( files ) + 1, 0 ) {}
 
-    std::size_t size() const noexcept { return off_.empty() ? 0 : off_.size() - 1; }
-    bool        empty() const noexcept { return size() == 0; }
+    std::size_t size() const noexcept { return files_; }
+    bool        empty() const noexcept { return files_ == 0; }
     std::size_t edgeCount() const noexcept { return tgt_.size(); }
     std::size_t bytes() const noexcept { return off_.capacity() * 4 + tgt_.capacity() * 4; }
 
@@ -118,6 +119,7 @@ public:
     }
 
 private:
+    std::uint32_t              files_ = 0;
     std::vector<std::uint32_t> off_;   // file -> first target; files + 1 entries
     std::vector<std::uint32_t> tgt_;
 };
@@ -503,82 +505,182 @@ struct FileClosureStats
     std::size_t   workPeakBytes = 0;
 };
 
-// The transitive closure: for each file, every file it reaches over >= 1 edge, never itself. `adj` needs size() and
-// operator[] giving a range of u32; duplicate ids, self edges and ids >= adj.size() are tolerated and contribute nothing.
-//
-// A word-parallel fold over the strongly connected components, sinks first: a component's row is the OR of its
-// successors' rows plus their ids, so each edge costs universe / 64 word operations whatever the closure's size, where
-// a walk per file costs the closure's size per file. A row is compressed into the store as soon as it is known and its
-// working bitset is reused once every predecessor has read it, so the bitsets alive at once are the fold's frontier,
-// not N. Each component's members share one row, which holds them all when the component is a cycle.
-//
-// Result is a pure function of `adj`: Tarjan runs in file-id order, the row a file gets is decided by its set alone.
-// chunkBitsOverride != 0 forces the chunk size (tests); otherwise it comes from a fixed stride of up to 64 files.
+// Strongly connected components, sinks first: order[ start[c] .. start[c + 1] ) are component c's files.
+struct FileComponents
+{
+    std::vector<std::uint32_t> compOf, order, start;
+    std::uint32_t              count() const noexcept { return std::uint32_t( start.size() - 1 ); }
+};
+
+// Tarjan, iterative: no recursion on any thread. Runs in file-id order, so it is a pure function of `adj`.
 template <class Adj>
-inline FileSetStore buildFileClosure( const Adj& adj, std::uint32_t chunkBitsOverride = 0, FileClosureStats* statsOut = nullptr )
+inline FileComponents fileComponents( const Adj& adj )
 {
     static constexpr std::uint32_t kNone = ~std::uint32_t( 0 );
     const std::uint32_t            F     = std::uint32_t( adj.size() );
-    const std::uint32_t            words = ( F + 63 ) / 64;
-
-    // Tarjan, iterative: no recursion on any thread. Components come out sinks first.
-    std::vector<std::uint32_t> index( F, 0 ), low( F, 0 ), comp( F, kNone ), edgePos( F, 0 ), onStack, callStack, order, compStart;
+    FileComponents                 c;
+    c.compOf.assign( F, kNone );
+    std::vector<std::uint32_t> index( F, 0 ), low( F, 0 ), edgePos( F, 0 ), onStack, callStack;
     std::uint32_t              counter = 0;
+    const auto                 enter   = [ & ]( std::uint32_t v )
+    {
+        index[v] = low[v] = ++counter;
+        onStack.push_back( v );
+        callStack.push_back( v );
+    };
+    const auto leave = [ & ]( std::uint32_t v )
+    {
+        if( !callStack.empty() )
+        {
+            low[callStack.back()] = std::min( low[callStack.back()], low[v] );
+        }
+        if( low[v] != index[v] )
+        {
+            return;
+        }
+        const std::uint32_t id = std::uint32_t( c.start.size() );
+        c.start.push_back( std::uint32_t( c.order.size() ) );
+        std::uint32_t w = kNone;
+        do
+        {
+            w = onStack.back();
+            onStack.pop_back();
+            c.compOf[w] = id;
+            c.order.push_back( w );
+        } while( w != v );
+    };
     for( std::uint32_t r = 0; r < F; ++r )
     {
         if( index[r] != 0 )
         {
             continue;
         }
-        index[r] = low[r] = ++counter;
-        onStack.push_back( r );
-        callStack.push_back( r );
+        enter( r );
         while( !callStack.empty() )
         {
             const std::uint32_t v   = callStack.back();
             const auto&         row = adj[v];
-            if( edgePos[v] < row.size() )
+            if( edgePos[v] == row.size() )
             {
-                const std::uint32_t w = row[edgePos[v]++];
-                if( w >= F )
-                {
-                    continue;
-                }
-                if( index[w] == 0 )
-                {
-                    index[w] = low[w] = ++counter;
-                    onStack.push_back( w );
-                    callStack.push_back( w );
-                }
-                else if( comp[w] == kNone )
-                {
-                    low[v] = std::min( low[v], index[w] );
-                }
+                callStack.pop_back();
+                leave( v );
                 continue;
             }
-            callStack.pop_back();
-            if( !callStack.empty() )
+            const std::uint32_t w = row[edgePos[v]++];
+            if( w < F && index[w] == 0 )
             {
-                low[callStack.back()] = std::min( low[callStack.back()], low[v] );
+                enter( w );
             }
-            if( low[v] == index[v] )
+            else if( w < F && c.compOf[w] == kNone )
             {
-                const std::uint32_t id = std::uint32_t( compStart.size() );
-                compStart.push_back( std::uint32_t( order.size() ) );
-                std::uint32_t w = kNone;
-                do
-                {
-                    w = onStack.back();
-                    onStack.pop_back();
-                    comp[w] = id;
-                    order.push_back( w );
-                } while( w != v );
+                low[v] = std::min( low[v], index[w] );
             }
         }
     }
-    compStart.push_back( F );
-    const std::uint32_t C = std::uint32_t( compStart.size() - 1 );
-    index = {};  low = {};  edgePos = {};  onStack = {};  callStack = {};
+    c.start.push_back( F );
+    return c;
+}
+
+// Up to 64 files with an edge, at a fixed stride, walked once each; what each candidate costs them is arithmetic.
+template <class Adj>
+inline std::vector<std::vector<std::uint32_t>> fileClosureSample( const Adj& adj )
+{
+    const std::uint32_t                     F = std::uint32_t( adj.size() );
+    std::vector<std::vector<std::uint32_t>> sample;
+    std::vector<std::uint32_t>              seen( F, ~std::uint32_t( 0 ) ), stack;
+    const std::uint32_t                     stride = std::max( F / 64, std::uint32_t( 1 ) );
+    for( std::uint32_t s = 0; s < F && sample.size() < 64; s += stride )
+    {
+        std::vector<std::uint32_t> row;
+        stack.assign( 1, s );
+        seen[s] = s;
+        while( !stack.empty() )
+        {
+            const std::uint32_t v = stack.back();
+            stack.pop_back();
+            for( const std::uint32_t w : adj[v] )
+            {
+                if( w < F && seen[w] != s )
+                {
+                    seen[w] = s;
+                    stack.push_back( w );
+                    row.push_back( w );
+                }
+            }
+        }
+        if( !row.empty() )
+        {
+            std::sort( row.begin(), row.end() );
+            sample.push_back( std::move( row ) );
+        }
+    }
+    return sample;
+}
+
+// The fold's working bitsets, handed back once their last reader has read them, so the bitsets alive at once are the
+// fold's frontier and not N.
+class FileBitRowPool
+{
+public:
+    explicit FileBitRowPool( std::uint32_t words ) : words_( words ) {}
+
+    std::uint64_t* acquire()
+    {
+        if( free_.empty() )
+        {
+            all_.push_back( std::make_unique<std::uint64_t[]>( words_ ) );
+            free_.push_back( all_.back().get() );
+        }
+        std::uint64_t* p = free_.back();
+        free_.pop_back();
+        std::fill_n( p, words_, std::uint64_t( 0 ) );
+        alivePeak_ = std::max( alivePeak_, ++alive_ );
+        return p;
+    }
+    void release( std::uint64_t* p )
+    {
+        free_.push_back( p );
+        --alive_;
+    }
+    std::uint32_t alivePeak() const noexcept { return alivePeak_; }
+
+private:
+    std::uint32_t                                 words_;
+    std::uint32_t                                 alive_ = 0, alivePeak_ = 0;
+    std::vector<std::uint64_t*>                   free_;
+    std::vector<std::unique_ptr<std::uint64_t[]>> all_;
+};
+
+// True when component `k` reaches anything: it is a cycle, or one of its files has an edge leaving it.
+template <class Adj>
+inline bool fileComponentReaches( const Adj& adj, const FileComponents& c, std::uint32_t k )
+{
+    const std::uint32_t a = c.start[k], z = c.start[k + 1];
+    if( z - a > 1 )
+    {
+        return true;
+    }
+    const std::uint32_t F = std::uint32_t( adj.size() );
+    return std::ranges::any_of( adj[c.order[a]], [ & ]( std::uint32_t w ) { return w < F && c.compOf[w] != k; } );
+}
+
+// The transitive closure: for each file, every file it reaches over >= 1 edge, never itself. `adj` needs size() and
+// operator[] giving a range of u32; duplicate ids, self edges and ids >= adj.size() are tolerated and contribute nothing.
+//
+// A word-parallel fold over the strongly connected components, sinks first: a component's row is the OR of its
+// successors' rows plus their ids, so each edge costs universe / 64 word operations whatever the closure's size, where
+// a walk per file costs the closure's size per file. A row is compressed into the store as soon as it is known. Each
+// component's members share one row, which holds them all when the component is a cycle.
+//
+// The result is a pure function of `adj`; the row a file gets is decided by its set alone.
+// chunkBitsOverride != 0 forces the chunk size (tests); otherwise it comes from fileClosureSample.
+template <class Adj>
+inline FileSetStore buildFileClosure( const Adj& adj, std::uint32_t chunkBitsOverride = 0, FileClosureStats* statsOut = nullptr )
+{
+    const std::uint32_t  F     = std::uint32_t( adj.size() );
+    const std::uint32_t  words = ( F + 63 ) / 64;
+    const FileComponents comps = fileComponents( adj );
+    const std::uint32_t  C     = comps.count();
 
     // A component's readers: every edge that enters it from another component. Its bitset is free after the last.
     std::vector<std::uint32_t> readers( C, 0 );
@@ -586,126 +688,67 @@ inline FileSetStore buildFileClosure( const Adj& adj, std::uint32_t chunkBitsOve
     {
         for( const std::uint32_t w : adj[v] )
         {
-            if( w < F && comp[w] != comp[v] )
+            if( w < F && comps.compOf[w] != comps.compOf[v] )
             {
-                ++readers[comp[w]];
+                ++readers[comps.compOf[w]];
             }
         }
     }
 
-    std::uint32_t chunkBits = chunkBitsOverride;
-    std::size_t   estimatedRows = 0, estimatedChunks = 0, estimatedWords = 0;
+    std::uint32_t      chunkBits = chunkBitsOverride;
+    FileSetChunkChoice choice;
+    std::size_t        scale = 0;
     if( chunkBits == 0 )
     {
-        // Sample: up to 64 files with an edge, at a fixed stride, walked once each; the bytes per candidate are arithmetic.
-        std::vector<std::vector<std::uint32_t>> sample;
-        std::vector<std::uint32_t>              seen( F, kNone ), stack;
-        const std::uint32_t                     stride = std::max( F / 64, std::uint32_t( 1 ) );
-        for( std::uint32_t s = 0; s < F && sample.size() < 64; s += stride )
-        {
-            std::vector<std::uint32_t> row;
-            stack.assign( 1, s );
-            seen[s] = s;
-            while( !stack.empty() )
-            {
-                const std::uint32_t v = stack.back();
-                stack.pop_back();
-                for( const std::uint32_t w : adj[v] )
-                {
-                    if( w < F && seen[w] != s )
-                    {
-                        seen[w] = s;
-                        stack.push_back( w );
-                        row.push_back( w );
-                    }
-                }
-            }
-            if( !row.empty() )
-            {
-                std::sort( row.begin(), row.end() );
-                sample.push_back( std::move( row ) );
-            }
-        }
-        const FileSetChunkChoice choice = fileSetChooseChunkBits( sample, F );
+        const std::vector<std::vector<std::uint32_t>> sample = fileClosureSample( adj );
+        choice    = fileSetChooseChunkBits( sample, F );
         chunkBits = choice.bits;
-        // Scaled to every file with an edge at the sample's rate, plus a quarter, since the sample can run light.
-        if( !sample.empty() )
-        {
-            const std::size_t scale = std::size_t( F ) / sample.size() + 1;
-            estimatedRows           = std::size_t( F ) + 1;
-            estimatedChunks         = ( choice.chunks * scale ) / 4 * 5;
-            estimatedWords          = ( choice.words * scale ) / 4 * 5;
-        }
+        scale     = sample.empty() ? 0 : std::size_t( F ) / sample.size() + 1;
+    }
+    FileSetBuilder b( F, F, chunkBits );
+    if( scale != 0 )
+    {
+        // Scaled to every file at the sample's rate, plus a quarter, since the sample can run light.
+        b.reserve( std::size_t( F ) + 1, ( choice.chunks * scale ) / 4 * 5, ( choice.words * scale ) / 4 * 5 );
     }
 
-    FileSetBuilder                b( F, F, chunkBits );
-    b.reserve( estimatedRows, estimatedChunks, estimatedWords );
-    std::vector<std::uint64_t*>   slotOfComp( C, nullptr );
-    std::vector<std::uint64_t*>   freeSlots;
-    std::vector<std::unique_ptr<std::uint64_t[]>> slots;
-    std::uint32_t                 alive = 0, alivePeak = 0;
-    const auto release = [ & ]( std::uint64_t* p )
-    {
-        freeSlots.push_back( p );
-        --alive;
-    };
+    FileBitRowPool              pool( words );
+    std::vector<std::uint64_t*> slotOfComp( C, nullptr );
     for( std::uint32_t k = 0; k < C; ++k )
     {
-        const std::uint32_t a = compStart[k], z = compStart[k + 1];
-        bool                any = z - a > 1;
-        for( std::uint32_t i = a; i < z && !any; ++i )
+        if( !fileComponentReaches( adj, comps, k ) )
         {
-            for( const std::uint32_t w : adj[order[i]] )
-            {
-                if( w < F && comp[w] != k )
-                {
-                    any = true;
-                    break;
-                }
-            }
+            continue;   // a sink with no cycle: stays on the shared empty row, costs no bitset
         }
-        if( !any )
-        {
-            continue;   // a sink with no cycle: reaches nothing, stays on the shared empty row, costs no bitset
-        }
-        std::uint64_t* dst = nullptr;
-        if( !freeSlots.empty() )
-        {
-            dst = freeSlots.back();
-            freeSlots.pop_back();
-        }
-        else
-        {
-            slots.push_back( std::make_unique<std::uint64_t[]>( words ) );
-            dst = slots.back().get();
-        }
-        alivePeak = std::max( alivePeak, ++alive );
-        std::fill_n( dst, words, std::uint64_t( 0 ) );
+        const std::uint32_t a = comps.start[k], z = comps.start[k + 1];
+        std::uint64_t*      dst = pool.acquire();
         for( std::uint32_t i = a; i < z; ++i )
         {
-            const std::uint32_t v = order[i];
+            const std::uint32_t v = comps.order[i];
             if( z - a > 1 )
             {
                 dst[v / 64] |= std::uint64_t( 1 ) << ( v % 64 );
             }
             for( const std::uint32_t w : adj[v] )
             {
-                if( w >= F || comp[w] == k )
+                if( w >= F || comps.compOf[w] == k )
                 {
                     continue;
                 }
                 dst[w / 64] |= std::uint64_t( 1 ) << ( w % 64 );
-                const std::uint32_t cw = comp[w];
-                if( const std::uint64_t* src = slotOfComp[cw]; src != nullptr )
+                const std::uint32_t  cw  = comps.compOf[w];
+                const std::uint64_t* src = slotOfComp[cw];
+                if( src == nullptr )
                 {
-                    for( std::uint32_t q = 0; q < words; ++q )
-                    {
-                        dst[q] |= src[q];
-                    }
+                    continue;
                 }
-                if( --readers[cw] == 0 && slotOfComp[cw] != nullptr )
+                for( std::uint32_t q = 0; q < words; ++q )
                 {
-                    release( slotOfComp[cw] );
+                    dst[q] |= src[q];
+                }
+                if( --readers[cw] == 0 )
+                {
+                    pool.release( slotOfComp[cw] );
                     slotOfComp[cw] = nullptr;
                 }
             }
@@ -713,11 +756,11 @@ inline FileSetStore buildFileClosure( const Adj& adj, std::uint32_t chunkBitsOve
         const std::uint32_t row = b.addBits( dst, words );
         for( std::uint32_t i = a; i < z; ++i )
         {
-            b.setRow( order[i], row );
+            b.setRow( comps.order[i], row );
         }
         if( readers[k] == 0 )
         {
-            release( dst );
+            pool.release( dst );
         }
         else
         {
@@ -727,8 +770,8 @@ inline FileSetStore buildFileClosure( const Adj& adj, std::uint32_t chunkBitsOve
     if( statsOut != nullptr )
     {
         statsOut->sccs          = C;
-        statsOut->bitRowsPeak   = alivePeak;
-        statsOut->workPeakBytes = std::size_t( alivePeak ) * words * 8;
+        statsOut->bitRowsPeak   = pool.alivePeak();
+        statsOut->workPeakBytes = std::size_t( pool.alivePeak() ) * words * 8;
     }
     return b.finish();
 }

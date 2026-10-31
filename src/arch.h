@@ -39,6 +39,7 @@
 #include "infra/stackthreads.h" // kCallerStackBytesFloor — path-rule matching runs on whatever thread --arch is on, never one it sized itself
 
 #include <algorithm>
+#include <numeric>
 #include <array>
 #include <cctype>
 #include <cerrno>      // ELOOP — the one errno openArchBaselineSidecar re-words into its own symlink alert
@@ -1231,12 +1232,10 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 inline std::uint64_t sumReachableClosure( const rw::FileAdjacency& adj, const std::vector<std::uint32_t>& roots ) noexcept
 {
     const rw::FileSetStore closure = rw::buildFileClosure( adj );
-    std::uint64_t          total   = 0;
-    for( const std::uint32_t s : roots )
+    return std::accumulate( roots.begin(), roots.end(), std::uint64_t( 0 ), [ & ]( const std::uint64_t sum, const std::uint32_t root )
     {
-        total += std::uint64_t( closure.setSize( s ) ) + 1;   // unit diagonal: a file reaches itself
-    }
-    return total;
+        return sum + closure.setSize( root ) + 1;   // unit diagonal: a file reaches itself
+    } );
 }
 
 // §P9.4: N restricted to a ROOT SET of dependency-capable files (depCapable — see
