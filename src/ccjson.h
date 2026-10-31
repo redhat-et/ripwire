@@ -47,7 +47,7 @@ struct CcFileMetrics
     std::uint32_t ccx        = 0;   // Σ cognitive complexity over the file's symbols
     std::uint32_t fanOut     = 0;   // # distinct in-corpus files this file depends on (its #include targets)
     std::uint32_t fanIn      = 0;   // # in-corpus files that depend on this file (afferent coupling)
-    bool          edgesUnknown = false;   // arch-honest: a no-edge language and no observed edge either way: fan_in/fan_out are unknown, not 0
+    bool          noFileEdgeLang = false; // arch-honest: a language whose imports this build does not resolve to files: a nonzero fan_in/fan_out is a floor, a zero one is unknown, not 0
     std::uint32_t churn      = 0;   // # commits touching this file in the window (0 without git)
 };
 
@@ -165,7 +165,7 @@ inline std::vector<CcFileMetrics> ccComputeMetrics( const IngestResult& ing, con
     }
     for( std::uint32_t f = 0; f < F; ++f )
     {
-        m[f].edgesUnknown = m[f].fanIn == 0 && m[f].fanOut == 0 && langHasNoFileEdges( langOfPath( ing.files[f] ) );
+        m[f].noFileEdgeLang = langHasNoFileEdges( langOfPath( ing.files[f] ) );
     }
     return m;
 }
@@ -244,18 +244,27 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     std::string esc;   // reused escape scratch
     const auto emitAttrs = [ & ]( const CcFileMetrics& e )
     {
-        if( e.edgesUnknown )   // arch-honest: omitted, not 0 — a city view would draw the zero as a measured, uncoupled file
+        if( e.noFileEdgeLang )   // arch-honest: a zero is omitted, not printed (a city view would draw it as a measured, uncoupled file); a nonzero one is a floor, said in the descriptors
         {
-            rw::emitTo( out, "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"churn\":{}}}", e.loc, e.symbols, e.cx, e.ccx, e.churn );
+            rw::emitTo( out, "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{}", e.loc, e.symbols, e.cx, e.ccx );
+            if( e.fanIn > 0 )
+            {
+                rw::emitTo( out, ",\"fan_in\":{}", e.fanIn );
+            }
+            if( e.fanOut > 0 )
+            {
+                rw::emitTo( out, ",\"fan_out\":{}", e.fanOut );
+            }
+            rw::emitTo( out, ",\"churn\":{}}}", e.churn );
             return;
         }
         rw::emitTo( out,
             "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"fan_in\":{},\"fan_out\":{},\"churn\":{}}}",
             e.loc, e.symbols, e.cx, e.ccx, e.fanIn, e.fanOut, e.churn );
     };
-    const bool anyUnknown = std::any_of( metrics.begin(), metrics.end(), []( const CcFileMetrics& e ) { return e.edgesUnknown; } );
+    const bool anyUnknown = std::any_of( metrics.begin(), metrics.end(), []( const CcFileMetrics& e ) { return e.noFileEdgeLang; } );
     // Present-only: a tree without such a file keeps the descriptors it always had, byte for byte.
-    const char* const unknownNote = anyUnknown ? "; absent for a file in a language whose imports this build does not resolve to files: unknown, not 0" : "";
+    const char* const unknownNote = anyUnknown ? "; for a file in a language whose imports this build does not resolve to files, a value is a floor over the resolved edges and an absent one is unknown, not 0" : "";
 
     // recursive emit of one node.
     auto emitNode = [ & ]( auto&& self, std::uint32_t id ) -> void

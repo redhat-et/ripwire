@@ -44,7 +44,18 @@ report(){ ( cd "$1" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$1" --report --no-
 row(){ printf '%s' "$1" | grep -o '<m [^>]*/>' | grep "path=\"$2\""; }
 metrics(){ printf '%s' "$1" | grep -o '<metrics [^>]*>' | sed 's/ note=.*//'; }
 root(){ printf '%s' "$1" | grep -o "<$2 [^>]*>" | head -1; }
-command -v xmllint >/dev/null 2>&1 || { echo "archhonestcheck: SKIP (no xmllint: the duplicate-attribute arms need it)"; exit 0; }
+# Well-formedness (a duplicate attribute, a double hyphen in a comment) is read by xmllint when it exists and by expat (python3) when it does
+# not: both refuse the same documents, so a host without xmllint loses no arm. CR 5725024918: the gate used to exit 0 here before any arm,
+# and test/regression.sh records that as a PASS.
+if command -v xmllint >/dev/null 2>&1; then
+    wf(){ xmllint --noout - 2>/dev/null; }
+elif command -v python3 >/dev/null 2>&1; then
+    echo "archhonestcheck: no xmllint, well-formedness is read by python3 expat"
+    wf(){ python3 -I -c 'import sys,xml.etree.ElementTree as E; E.fromstring(sys.stdin.buffer.read())' 2>/dev/null; }
+else
+    echo "archhonestcheck: no xmllint and no python3: the well-formedness arms SKIP, every other arm runs"
+    wf(){ return 0; }
+fi
 put(){ mkdir -p "$( dirname "$1" )"; printf '%b' "$2" > "$1"; }
 
 # a typed file per language, importing the other directory's file in that language's own spelling
@@ -116,7 +127,7 @@ for l in $NOEDGE; do
     printf '%s' "$m" | grep -qE 'zone_unknown="[1-9]' || no "(A) $l: no zone_unknown=: $m"
     printf '%s' "$m" | grep -q 'propagation_cost=' && no "(A) $l: propagation_cost printed over no edges: $m"
     root "$o" arch | grep -q "no_file_edges=\"$l\" unmeasured_files=\"[0-9]*\" graph_partial=\"1\"" || no "(A) $l: root disclosure missing: $( root "$o" arch )"
-    printf '%s' "$o" | xmllint --noout - 2>/dev/null || no "(A) $l: not well-formed"
+    printf '%s' "$o" | wf || no "(A) $l: not well-formed"
     [ "$fail" = 0 ] && ok "(A) $l: unknown, why named, no zone tally, no propagation_cost"
     [ "$f0" = 0 ] || fail=1
 done
@@ -127,6 +138,8 @@ m="$( metrics "$o" )"
 if printf '%s' "$m" | grep -q 'typed_modules="2"'; then ok "(A) typed_modules= still counts modules with types"; else no "(A) typed_modules wrong: $m"; fi
 n="$( printf '%s' "$o" | grep -o '<metrics [^>]*note="[^"]*"' )"
 if printf '%s' "$n" | grep -q 'zone_unknown'; then ok "(A) note= defines zone_unknown in the partition"; else no "(A) note= silent on zone_unknown"; fi
+# CR 5725024918 (thread 4433389591): the printed sum names every term of the partition when zone_unknown= rides
+if printf '%s' "$n" | grep -q 'zone_pain+zone_useless+zone_ok+zone_na+zone_unknown = modules'; then ok "(A) note= states the partition sum with zone_unknown"; else no "(A) note= sum omits zone_unknown: $( printf '%s' "$n" | grep -o 'zone_pain+[^;]*' )"; fi
 
 # a typeless Go module is unknown too, and typed_modules= counts types, not "not n/a"
 d="$TMP/a_typeless"; mkfix go "$d"; put "$d/c/c.go" 'package c\n\nfunc H() {}\n'; put "$d/docs/x.md" '# doc\n'
@@ -162,7 +175,7 @@ if printf '%s' "$rg" | grep -q 'zone="unknown"' && printf '%s' "$rg" | grep -q '
 m="$( metrics "$o" )"
 if printf '%s' "$m" | grep -q 'propagation_cost='; then ok "(B) propagation_cost stays where edges exist"; else no "(B) propagation_cost lost: $m"; fi
 if root "$o" arch | grep -q 'no_file_edges="go" unmeasured_files="2" graph_partial="1"'; then ok "(B) root: no_file_edges= names Go, 2 files"; else no "(B) root: $( root "$o" arch )"; fi
-printf '%s' "$o" | xmllint --noout - 2>/dev/null || no "(B) not well-formed"
+printf '%s' "$o" | wf || no "(B) not well-formed"
 
 # ── (C) a C++ repo: nothing new ───────────────────────────────────────────────────────────────────────────
 d="$TMP/c_cpp"; mkfix cpp "$d"; o="$( arch "$d" )"; dd="$( deps "$d" )"
@@ -198,7 +211,7 @@ h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"
 if printf '%s' "$h" | grep -qE ' (ccd|acd|nccd|shape)='; then no "(F) Go <health> states a verdict: $h"; else ok "(F) Go <health>: no ccd/acd/nccd/shape"; fi
 printf '%s' "$h" | grep -q 'files="[0-9]*" dep_files="[0-9]*"' && printf '%s' "$h" | grep -q 'dep_langs=' || no "(F) <health> lost its denominators: $h"
 if root "$dd" deps | grep -q 'no_file_edges="go" unmeasured_files="2" graph_partial="1"'; then ok "(F) Go <deps> root discloses"; else no "(F) <deps> root: $( root "$dd" deps )"; fi
-printf '%s' "$dd" | xmllint --noout - 2>/dev/null || no "(F) Go deps not well-formed"
+printf '%s' "$dd" | wf || no "(F) Go deps not well-formed"
 dd="$( deps "$TMP/b_mix" )"
 if printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -o '<f p="a/a.py[^>]*>' | grep -q 'afferent="0" instab="1.00" transitive="2"'; then ok "(F) mixed: Python <f> keeps its numbers"; else no "(F) mixed Python row: $( printf '%s' "$dd" | grep -o '<f p="a/a.py[^>]*>' )"; fi
 printf '%s' "$dd" | grep -o '<f p="gomod/a/a.go[^>]*>' | grep -q 'afferent=' && no "(F) mixed Go row states a number"
@@ -232,7 +245,7 @@ for pair in "arch:$o" "deps:$dd"; do
     n="${pair%%:*}"; v="${pair#*:}"
     root "$v" "$n" | grep -q 'imports_unresolved=' || no "(I) $n: premise: no imports_unresolved= ($( root "$v" "$n" ))"
     c="$( root "$v" "$n" | grep -o 'graph_partial=' | wc -l | tr -d ' ' )"
-    if [ "$c" = 1 ] && printf '%s' "$v" | xmllint --noout - 2>/dev/null; then ok "(I) $n: one graph_partial=, well-formed"; else no "(I) $n: graph_partial x$c: $( root "$v" "$n" )"; fi
+    if [ "$c" = 1 ] && printf '%s' "$v" | wf; then ok "(I) $n: one graph_partial=, well-formed"; else no "(I) $n: graph_partial x$c: $( root "$v" "$n" )"; fi
 done
 
 # ── (J) every --arch exit path; the stderr floor line ────────────────────────────────────────────────────
@@ -275,7 +288,7 @@ for v in arch deps; do   # present-only: a C++ tree's full legend defines neithe
     if [ "$v" = arch ]; then o="$( arch "$TMP/c_cpp" --legend=full )"; else o="$( deps "$TMP/c_cpp" --legend=full )"; fi
     if printf '%s' "$o" | grep -qE 'masked_files|no_file_edges'; then no "(L) near miss: the $v full legend of a C++ tree defines the no-edge vocabulary"; else ok "(L) near miss: the $v full legend of a C++ tree is silent on masked_files/no_file_edges"; fi
 done
-if printf '%s' "$dd" | xmllint --noout - 2>/dev/null; then ok "(L) the clause holds no double hyphen (well-formed comment)"; else no "(L) deps legend not well-formed"; fi
+if printf '%s' "$dd" | wf; then ok "(L) the clause holds no double hyphen (well-formed comment)"; else no "(L) deps legend not well-formed"; fi
 for v in arch deps; do
     if [ "$v" = arch ]; then c="$( arch "$TMP/a_go" --legend=compact )"; else c="$( deps "$TMP/a_go" --legend=compact )"; fi
     lc="$( printf '%s' "$c" | grep -o '<!--.*-->' | head -1 )"
@@ -372,6 +385,12 @@ if printf '%s' "$cc" | grep -o '"fan_in":{[^}]*}' | grep -q 'unknown'; then ok "
 # NEAR MISS: a Go file WITH an observed edge (go.mod replace across two roots) keeps its fan_in/fan_out
 ccw="$( cd "$TMP/k" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$TMP/k/app" "$TMP/k/lib" --export=cc.json --no-cache 2>/dev/null )"
 if printf '%s' "$ccw" | grep -o '"name":"main.go"[^}]*}' | grep -q '"fan_out":1' && printf '%s' "$ccw" | grep -o '"name":"lib.go"[^}]*}' | grep -q '"fan_in":1'; then ok "(N) near miss: Go files with an observed edge keep fan_in/fan_out in cc.json"; else no "(N) cc.json dropped a measured Go edge: $( printf '%s' "$ccw" | grep -o '"name":"[a-z]*.go"[^}]*}' )"; fi
+# CR 5725024918 (thread 4433389558): an observed edge in ONE direction does not make the other direction a measured zero. A zero side is omitted,
+# a nonzero side is a floor the descriptors say so; the Python near miss above is unchanged
+if printf '%s' "$ccw" | grep -o '"name":"main.go"[^}]*}' | grep -q '"fan_in"'; then no "(N) cc.json: main.go prints fan_in:0 for a no-edge language"; else ok "(N) cc.json: main.go (an observed fan_out) prints no fan_in"; fi
+if printf '%s' "$ccw" | grep -o '"name":"lib.go"[^}]*}' | grep -q '"fan_out"'; then no "(N) cc.json: lib.go prints fan_out:0 for a no-edge language"; else ok "(N) cc.json: lib.go (an observed fan_in) prints no fan_out"; fi
+if printf '%s' "$ccw" | grep -o '"fan_in":{[^}]*}' | grep -q 'floor'; then ok "(N) cc.json: the descriptors call a no-edge language's value a floor"; else no "(N) cc.json: descriptors do not call a partial value a floor"; fi
+if printf '%s' "$ccw" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "(N) cc.json with a partial file stays valid JSON"; else no "(N) partial cc.json not JSON"; fi
 # the cochange legends define it where it fires, and only there
 for lg in full compact; do
     if co "$d" --cochange --legend=$lg | grep -o '<!--.*-->' | head -1 | grep -q 'no_file_edges'; then ok "(N) --cochange $lg legend defines no_file_edges"; else no "(N) --cochange $lg legend silent"; fi

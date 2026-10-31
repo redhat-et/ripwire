@@ -12,5 +12,5 @@ on those files, and `--report` no longer calls such a tree acyclic. Roots carry 
 and `--arch` says on stderr that `violations=` is a floor. The same missing data used to print elsewhere as a measured zero, and no
 longer does: `--cochange` (and the MCP `cochange`, and `--pr-context`) put `no_file_edges=` where `surprising="1"` claimed hidden
 coupling for a Go pair with a real import; `--impact` (and the MCP `impact`) carries `no_file_edges=` on the root, because its
-`importers=` is then a floor; `--export=cc.json` omits `fan_in`/`fan_out` for such a file instead of writing 0. Which languages is the
+`importers=` is then a floor; `--export=cc.json` omits a zero `fan_in`/`fan_out` for such a file instead of writing it, and a nonzero one is a floor (the attribute descriptors say so). Which languages is the
 `fileEdges` column in `src/langfacts.h`. Trees with no such file are byte-identical. Thanks to @jflowers, whose #478 led to this finding.
