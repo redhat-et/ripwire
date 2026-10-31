@@ -57,7 +57,8 @@
 // parse:N count per INGEST (each ingest's own Watch). Three more for the range form (test/qddegradecheck.sh): project:N —
 // the Nth target-phase projection reads "does not fit"; ingest:N — the Nth ingest of the process stops its crawl at its
 // first entry (a stop in ONE chosen ingest, e.g. the target's after the base fit); peak:N — the Nth post-answer peak
-// reading reads as over the limit.
+// reading reads as over the limit; fold:N — the Nth include-closure fold of the process (buildGraph's is the first, the one
+// `--deps` and `--arch=FILE` run again the second) stops at its first component (test/propcostcheck.sh).
 //
 // REPEATABILITY. A crawl stop keeps what the walk had seen, then sorts it. A parse stop keeps the first K slots of the
 // parse ORDER (cache misses, then cache hits, then grammarless files, each largest first, then fileId — or plain fileId
