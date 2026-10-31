@@ -366,7 +366,25 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 271;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 283;          // bump on any grammar/.scm/extraction change
+                                                      // 283 = 2026-10-31 (train 43b: lanes registrar (placeholders 273..281), string-import (274, 275) and their extraction: Python registrar facts,
+                                                      //   TS/JS provider-record literal marks, Python dotted-string and import-sink facts). Strictly above 281 (rich 282) and every lane value. Rich file tag 284.
+                                                      //   kCacheVersion stays 48: no record changes shape.
+                                                      // 281 = 2026-10-30 (lane registrar fix round 4, PLACEHOLDER; 280 is 279's rich tag): a ProviderRecord literal is marked only when it is an element of an
+                                                      //   array (call argument / const / `providers` property) and holds only plain unique pairs (no spread, method, accessor, computed or duplicate key)
+                                                      // 279 = 2026-10-30 (lane registrar fix round 3, PLACEHOLDER: the train renumbers; 278 is 277's rich tag): a TS/JS Value row
+                                                      //   read from a ProviderRecord object literal carries that literal's start byte (qualifier "<scope><shadow>@<byte>") when the
+                                                      //   literal is a direct call argument or a `const` initialiser; a Python registrar fact is refused unless the method's other
+                                                      //   parameters are provably beside the point (a defaulted one stored into `self` refuses; a subscript key of the store is allowed).
+                                                      // 277 = 2026-10-30 (lane registrar fix round 2, PLACEHOLDER: the train renumbers; 276 is 275's rich tag): a Python
+                                                      //   lambda parameter / comprehension target files a VarDecl `~name` (kPythonLocalScopePrefix), and a method whose body also
+                                                      //   uses another parameter written without a default records no registrar fact.
+                                                      // 275 = 2026-10-30 (lane registrar fix round 1, PLACEHOLDER: the train renumbers; 274 is 273's rich tag): a Python
+                                                      //   parameter written with a default (`sender=None`) records no registrar fact.
+                                                      // 273 = 2026-10-30 (lane registrar, PLACEHOLDER: the train renumbers): Python files record
+                                                      //   registrar facts (model.h kValueRefRegParamScope: a method parameter stored into a container a
+                                                      //   field of self holds). Strictly above train-42b's 271 (rich 272). Rich file tag 274. kCacheVersion
+                                                      //   stays 46: no record changes shape (a new scope char in an existing field).
                                                       // 271 = 2026-10-30 (train 42b: lanes iface-peel (placeholders 259/260: a C++ smart-pointer alias record carries its
                                                       //   pointee, a Rust `-> &dyn T` / `Box<dyn T>` / `impl T` result records a ReturnType with kDispatchResultBit, a C++
                                                       //   member whose written type is an enclosing template parameter carries kTemplateParamMemberType) and alias-import

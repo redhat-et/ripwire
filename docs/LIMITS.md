@@ -716,6 +716,8 @@ Discloses: `value_refs_depth_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kScanCap` | `4096` | — | — |
+| `kScanCap` | `512` | — | — |
 | `kVrMaxDepth` | `512` | INDEXING | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h) |
 | `kVrTextCap` | `96` | — | a written slot / callee longer than this is cut with "…" |
 
@@ -1074,6 +1076,17 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kRegexMaxGroupDepth` | `64` | BOUNDARY | deeper group nesting is REFUSED by name — the same stack bound, for nesting |
 | `kRegexMaxPatternBytes` | `2048` | BOUNDARY | a longer pattern is REFUSED by name, never truncated — the compile-recursion stack bound |
+
+### `src/regindex.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kRegConsumerCap` | `2` | — | — |
+| `kRegReexportDepth` | `3` | — | re-export hops followed; a longer chain is cut and disclosed (cut=1) |
+| `kRegRowCap` | `2` | — | keys per answer (a spew guard) |
+| `kRegSiteCap` | `4` | — | listed non-test registrations per key; the rest is counted (n=, capped=1 next=) |
 
 ### `src/renamemine.h`
 

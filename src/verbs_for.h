@@ -14,6 +14,7 @@
 #include "forctorhop.h" // OWNER-CTOR-HOP: ctor_l=/ctor_calls= on the r=1 method row of a compact-route answer
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
 #include "forcallerhop.h"   // mf1-nx: a name-exact answer about ONE function carries that function's callers
+#include "regindex.h"       // registrar: <reg> rows joining a registry key to its registrations
 #include "epmanifest.h"     // ep-manifest: the manifest entry-point groups that register a shown row
 #include "listedin.h"       // manifest-noncode: the build/package/registry manifest lines that list a shown file (creation tasks)
 #include "forreexport.h"    // ALIAS-IMPORT: the re-export hop rows of a definition the task names
@@ -594,6 +595,7 @@ struct ForLensHeaderParts
                                             // <sigs> splice), so its clause defines it
     bool             initSlotsPresent = false;   // FOR-SLOTS (forslots.h): a shown initializer row carries slots= (set after the
                                             // <sigs> splice), so its clause defines it
+    bool             regPresent = false;         // registrar (regindex.h spliceRegRows): a <reg> row rides in <sigs>
     bool             slotJoinPresent = false;    // IX1-V2 (forslots.h spliceSlotJoinRows): a shown row carries slot_by= / slot_fields=
     bool             slotNamePresent = false;    // fix1 F-4: a printed slot caller carries the field-name-only mark (`~`)
     bool             ctorHopPresent = false;     // OWNER-CTOR-HOP (forctorhop.h): the r=1 row carries ctor_l= (set after the splice)
@@ -828,6 +830,7 @@ inline std::string peerRowClauses( const ForLensHeaderParts& p, bool compact )
     out += presentOnlyClause( p.slotJoinPresent, compact, rw::kForCompactSlotJoinLegend, rw::kForSlotJoinLegend );   // IX1-V2
     out += presentOnlyClause( p.slotNamePresent, compact, rw::kForCompactSlotNameLegend, rw::kForSlotNameLegend );   // fix1 F-4
     out += presentOnlyClause( p.ctorHopPresent, compact, rw::kForCompactCtorHopLegend, rw::kForCtorHopLegend );
+    out += presentOnlyClause( p.regPresent, compact, rw::kForCompactRegLegend, rw::kForRegLegend );   // registrar
     out += presentOnlyClause( p.epPresent, compact, rw::kForCompactEpManifestLegend, rw::kForEpManifestLegend );   // ep-manifest
     out += presentOnlyClause( p.listedPresent, compact, rw::kForCompactListedInLegend, rw::kForListedInLegend );   // manifest-noncode
     out += presentOnlyClause( p.filePagePresent, compact, rw::kForCompactFilePageLegend, rw::kForFilePageLegend );   // FOR-FILE-ANCHOR
@@ -4419,6 +4422,17 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             if( rw::spliceSlotJoinRows( sigsStr, ing, shownSigIds, &headerParts.slotNamePresent ) > 0 )
             {
                 headerParts.slotJoinPresent = true;   // the clause rides beside the attributes it defines
+                headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+            }
+        }
+        // ── REGISTRAR (regindex.h): <reg> rows — a registry key joined to its registrations — the same posture; gated by the
+        // question naming the key / a registered name, or a shown row consuming the key
+        if( autoBundleMode && plan.compact && !cfg.json && cfg.tokenBudget <= 0 && rw::forRegRowsOn() && sigsPreRendered
+            && !enrich.surfaceOff && !enrich.hopsCutMarker )
+        {
+            if( rw::spliceRegRows( sigsStr, ing, shownSigIds, cfg.forTask ) > 0 )
+            {
+                headerParts.regPresent = true;   // the clause rides beside the rows it defines
                 headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
             }
         }

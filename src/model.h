@@ -579,6 +579,12 @@ inline constexpr char kValueRefSlotFactScope = 't';
 // the field, memberCtor = the slot's type ("" unknown). valuerefindex.h SlotIndex re-slots an ARGUMENT row of a bare call of
 // that function at that position (`Reg( Put )`) into the same field. Distinct from every other scope char.
 inline constexpr char kValueRefSlotParamScope = 'q';
+// REGISTRAR (lane registrar, Python first slice): a METHOD PARAMETER stored into a container held by a field of `self`
+// (`self.receivers.append( ( key, receiver ) )`, `self.filters[ k ] = f`, tuple/list elements included): role Value, name ""
+// (no row), recvVar = the method's name, argCount = the parameter's position AFTER `self` (argCountKnown), memberPath = the field.
+// Written by src/ingest_valuerefs.h (kRegLangs rows with containerStores), read by src/regindex.h only. Distinct from every
+// other scope char.
+inline constexpr char kValueRefRegParamScope = 'g';
 
 // IX-1 / IX1-V2: which languages record a slot join, and how — the one table both the extractor (ingest_valuerefs.h) and the
 // join (valuerefindex.h) read. A language's row supplies the per-language pieces of the language-blind join (SlotIndex):
@@ -631,6 +637,38 @@ inline constexpr std::array<const VrSlotLang*, kLangCount> kVrSlotLangOf = []
 inline const VrSlotLang* vrSlotLang( Lang l ) noexcept
 {
     return enumTableAt( kVrSlotLangOf, l, static_cast<const VrSlotLang*>( nullptr ) );
+}
+// REGISTRAR (lane registrar; reports/dispatch-register-design.md REGISTRY half, the Py/TS first slice): which languages join a
+// registry KEY to its registration sites, and how — the language layer src/regindex.h reads (one place for the join itself).
+//   ReceiverMethod (Python): a call `K.m( f )` / `mod.K.m( f )` whose receiver K is a module variable `K = C()` and whose method
+//     C.m stores parameter k into a container held by a field of self (kValueRefRegParamScope facts; containerStores names the
+//     store calls); f at argument k is registered under the key K. consumerSkip: methods on K that are neither a registration
+//     nor a consumer (the unregister side).
+//   ProviderRecord (TypeScript): an object literal `{ provide: K, useClass: C }` (keyField + valueFields) registers C under K;
+//     a consumer is a `consumerCalls` call naming K (`@Inject( K )`, `inject( K )`).
+enum class RegForm : std::uint8_t { ReceiverMethod, ProviderRecord };
+inline constexpr std::string_view kPyRegStores[]   = { "add", "append", "appendleft", "extend", "insert" };
+inline constexpr std::string_view kPyRegSkip[]     = { "disconnect", "discard", "remove", "unregister" };
+inline constexpr std::string_view kTsRegValues[]   = { "useClass", "useExisting", "useFactory", "useValue" };
+inline constexpr std::string_view kTsRegConsumer[] = { "Inject", "inject" };
+struct RegLang
+{
+    Lang                              lang;
+    RegForm                           form;
+    std::span<const std::string_view> containerStores;   // ReceiverMethod: `self.f.<store>( … param … )`; `self.f[ k ] = param` always
+    std::span<const std::string_view> consumerSkip;      // ReceiverMethod
+    std::string_view                  keyField;          // ProviderRecord
+    std::span<const std::string_view> valueFields;       // ProviderRecord
+    std::span<const std::string_view> consumerCalls;     // ProviderRecord
+};
+inline constexpr RegLang kRegLangs[] = {
+    { Lang::Python, RegForm::ReceiverMethod, kPyRegStores, kPyRegSkip, "", {}, {} },
+    { Lang::TypeScript, RegForm::ProviderRecord, {}, {}, "provide", kTsRegValues, kTsRegConsumer },
+};
+// The registrar row of language `l`, nullptr when it joins no registry (the mechanism is then inert: byte-identical answers).
+inline const RegLang* regLang( Lang l ) noexcept
+{
+    return findByField( kRegLangs, &RegLang::lang, l );
 }
 inline bool slotJoinsByFieldName( Lang l ) noexcept
 {
@@ -1675,6 +1713,10 @@ struct RubyMainMixinRow
 // (`?f`). No identifier starts with it, so no name lookup ever matches the record; graph.h pythonRenamedImportPin reads it as "f may
 // be unbound", the case where a module `__getattr__` (PEP 562, consulted only for names the module lacks) answers instead.
 inline constexpr std::string_view kPythonCondDefPrefix = "?";
+// A Python lambda parameter or comprehension target `K` files a VarDecl spelled `~K` at the lambda / comprehension (its enclosing def's
+// scope, else module scope). No identifier starts with it, so no name lookup ever matches the record; src/regindex.h reads it as "K is
+// another variable here" (a registrar key named like a lambda parameter is not the key).
+inline constexpr std::string_view kPythonLocalScopePrefix = "~";
 
 struct Binding
 {
@@ -2490,7 +2532,8 @@ inline bool isSlotJoinRecord( const Reference& r ) noexcept
     {
         return false;
     }
-    return ( r.role == RefRole::Value && ( r.qualifier[0] == kValueRefSlotFactScope || r.qualifier[0] == kValueRefSlotParamScope ) )
+    return ( r.role == RefRole::Value
+             && ( r.qualifier[0] == kValueRefSlotFactScope || r.qualifier[0] == kValueRefSlotParamScope || r.qualifier[0] == kValueRefRegParamScope ) )
         || ( r.role == RefRole::Through && r.qualifier[0] == kValueRefSlotCallScope );
 }
 
