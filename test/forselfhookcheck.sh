@@ -1102,7 +1102,10 @@ class D extends Base {
 module.exports = { Base, D };
 E
 silent L1 "$( run l "--for=what calls D.step" | hook )"
-if run a "--for=what calls One.step" --json | grep -q 'selfhook'; then no "(L2) --json carries the element"; else ok "(L2) --json carries no element"; fi
+J="$( run a "--for=what calls One.step" --json )"
+if [ -z "$J" ] || has "$J" '[[rc='; then no "(L2) the --json run failed or printed nothing: [$J]"
+elif has "$J" 'selfhook'; then no "(L2) --json carries the element"
+else ok "(L2) --json carries no element"; fi
 H="$( run w "--for=what calls SpecialThing.process_item" --token-budget=40000 | hook )"
 want L3 "$H" '<selfhooks held="budget" total="1"/>'
 lack L3n "$H" '<selfhook n=' '<s n='
@@ -1121,6 +1124,108 @@ for line in sys.stdin:
             print( c.get( "text", "" ) )
 ' >"$TMP/mcp"
 if grep -q '<selfhook n="SpecialThing.process_item"' "$TMP/mcp" && grep -q 'ripwire for; selfhooks total=' "$TMP/mcp"; then ok "(W) the MCP for twin carries the element and its clause"; else no "(W) the MCP for twin lacks the element or its clause"; fi
+
+# ── H (CR 4431867581) ──────────────────────────────────────────────────────────────────────────────────────────
+# A class with a by-name (unproven) base beside a proven one: the method resolution order may run the by-name base first, so the walk is
+# short and the element stays silent (no overrides= naming the proven base, no hook=1 saying no base defines it).
+mk h/alpha.py <<'E'
+class Alpha:
+    def run(self):
+        return self.step()
+
+    def step(self):
+        return 0
+E
+mk h/dup1.py <<'E'
+class Dup:
+    def step(self):
+        return 5
+E
+mk h/dup2.py <<'E'
+class Dup:
+    def other(self):
+        return 6
+E
+mk h/child.py <<'E'
+from alpha import Alpha
+
+class Child(Dup, Alpha):
+    def step(self):
+        return 1
+E
+silent H1 "$( run h "--for=what calls Child.step" | hook )"
+# hook=1 twin: no proven base defines the name, a by-name one does; a sibling gives the cone its second definition
+mk h2/alpha.py <<'E'
+class Alpha:
+    def run(self):
+        return self.step()
+E
+mk h2/dup1.py <<'E'
+class Dup:
+    def step(self):
+        return 5
+E
+mk h2/dup2.py <<'E'
+class Dup:
+    def other(self):
+        return 6
+E
+mk h2/child.py <<'E'
+from alpha import Alpha
+
+class Child(Dup, Alpha):
+    def step(self):
+        return 1
+E
+mk h2/sib.py <<'E'
+from alpha import Alpha
+
+class Sib(Alpha):
+    def step(self):
+        return 2
+E
+silent H2 "$( run h2 "--for=what calls Child.step" | hook )"
+# the sibling with only the proven base keeps its row: all its own bases are proven
+want H3 "$( run h2 "--for=what calls Sib.step" | hook )" 'n="Sib.step"' 'hook="1"'
+
+# ── R (CR 4431867577) ──────────────────────────────────────────────────────────────────────────────────────────
+# A base-class file that cannot be read when the answer is built (made unreadable after the cache was written) is said in unread=, not
+# read as a receiver verdict (skipped=) and not dropped silently. Skipped when the user can read anything (root).
+mk r/base1.py <<'E'
+class Base1:
+    def run(self):
+        return self.step()
+E
+mk r/base2.py <<'E'
+class Base2:
+    def go(self):
+        return self.step()
+E
+mk r/d.py <<'E'
+from base1 import Base1
+from base2 import Base2
+
+class D(Base1, Base2):
+    def step(self):
+        return 1
+
+class E(Base1):
+    def step(self):
+        return 2
+E
+RC="$TMP/rcache"
+( cd "$F/r" && "$BIN" "$F/r" --cache="$RC" "--for=what calls D.step" 2>/dev/null </dev/null ) >"$TMP/r0"
+want R0 "$( hook <"$TMP/r0" )" 'n="Base1.run"' 'n="Base2.go"'
+lack R0n "$( hook <"$TMP/r0" )" 'unread='
+chmod 000 "$F/r/base2.py"
+if [ -r "$F/r/base2.py" ]; then
+    ok "(R1) SKIP: base2.py is still readable (running as a user who can read anything)"
+else
+    ( cd "$F/r" && "$BIN" "$F/r" --cache="$RC" "--for=what calls D.step" 2>/dev/null </dev/null ) >"$TMP/r1"
+    want R1 "$( hook <"$TMP/r1" )" 'n="Base1.run"' 'unread="1"'
+    lack R1n "$( hook <"$TMP/r1" )" 'Base2.go' 'skipped='
+fi
+chmod 644 "$F/r/base2.py"
 
 # ── D ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run a "--for=what calls One.step" >"$TMP/d2"

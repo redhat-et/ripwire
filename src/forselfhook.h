@@ -86,13 +86,14 @@ inline constexpr std::string_view kForSelfHookLegend =
     "candidates= the base definitions the order chooses among when that is not provable here, abstract=1 the overrides definition raises NotImplementedError or is marked abstract, "
     "hook=1 no base class in this tree defines it, defs= definitions in the inheritance cone, test= of them on test paths, not named, "
     "sites= shown= capped=1 next= runs the verb that lists the rest, skipped= base-class uses through a receiver the parse does not prove is the instance (rebound, a closure, a lambda, a static method), counted and never listed, "
+    "unread= base-class files that could not be read again, so their uses or an abstract mark are missing (a floor), "
     "s n= p=file:line a site in a base class (test=1 that base is on a test path, recv=cls through cls, form=ref a read with no call syntax, a property read still runs it, "
     "form=getattr by string, guarded=1 a hasattr or getattr on that name for that receiver comes earlier in that function: text order only, it does not say the call is conditional). "
     "A call through self reaches this override only for instances of this class and other subclasses may run their own: which one runs is unproven, never an edge";
 inline constexpr std::string_view kForCompactSelfHookLegend =
     "; selfhooks total= shown= capped=: served methods reached through self or cls from a base class (one definition in the cone, or no base site: not listed), held=budget not rendered under a token budget, "
     "selfhook n= p=, overrides= op= the base def the order picks when provable, candidates= the base defs it chooses among, abstract=1, hook=1 no base defines it, "
-    "defs= in the cone, test= not named, sites= shown= capped=1 next= runs the verb listing the rest, skipped= uses through a receiver not proven the instance, counted, "
+    "defs= in the cone, test= not named, sites= shown= capped=1 next= runs the verb listing the rest, skipped= uses through a receiver not proven the instance, counted, unread= base files that could not be read again, uses there missing (a floor), "
     "s n= p=file:line the base site (test=1 base on a test path, recv=cls, form=ref read not called, form=getattr by string, guarded=1 a hasattr or getattr on the name earlier in the function: text order only). "
     "Reaches this override only for its own instances, other subclasses may run theirs: never an edge";
 static_assert( kForSelfHookLegend.find( ';', 1 ) == std::string_view::npos && kForCompactSelfHookLegend.find( ';', 1 ) == std::string_view::npos
@@ -543,7 +544,12 @@ public:
         }
         bool                       unreadable = false;
         std::optional<std::string> bytes      = readTextIfPresent( diskPath( m_ing, file ), unreadable );
-        m_kept.push_back( Entry{ file, bytes.has_value() ? std::make_unique<ParsedFile>( std::move( *bytes ) ) : nullptr } );
+        std::unique_ptr<ParsedFile> parse = bytes.has_value() ? std::make_unique<ParsedFile>( std::move( *bytes ) ) : nullptr;
+        if( parse != nullptr && !parse->usable() )
+        {
+            parse.reset();   // no tree: as unread as a missing file, and counted the same (unread=)
+        }
+        m_kept.push_back( Entry{ file, std::move( parse ) } );
         return m_kept.back().parse.get();
     }
 
@@ -778,6 +784,25 @@ inline std::vector<std::pair<NodeId, NodeId>> provenParents( const IngestResult&
     std::ranges::sort( out );
     return out;
 }
+// The classes (ascending) with a base edge the index does not prove: a by-name base binds every same-named class, so it may be a namesake.
+// The method resolution order can run such a base ahead of a proven one, so the walk up from such a class is short and stays silent.
+inline std::vector<NodeId> classesWithUnprovenBase( const Graph& g )
+{
+    std::vector<NodeId> out;
+    for( NodeId base = 0; base < g.implementors.size(); ++base )
+    {
+        for( std::size_t i = 0; i < g.implementors[ base ].size(); ++i )
+        {
+            if( !provenEdge( g, base, i ) )
+            {
+                out.push_back( g.implementors[ base ][ i ] );
+            }
+        }
+    }
+    std::ranges::sort( out );
+    out.erase( std::ranges::unique( out ).begin(), out.end() );
+    return out;
+}
 // Breadth-first up the proven edges from `cls`, each base once at its shallowest depth; `cls` itself is never listed.
 inline std::vector<Ancestor> ancestorsOf( std::span<const std::pair<NodeId, NodeId>> parents, NodeId cls )
 {
@@ -841,6 +866,16 @@ struct SiteSet
 {
     std::vector<Site> list;
     std::size_t       skipped = 0;
+    // The files a use or a definition sat in that could not be read again (missing, unreadable, changed since the index): their uses are
+    // in neither list nor skipped=, so the row says how many files it lost (a floor).
+    std::vector<std::uint32_t> unread;
+    void noteUnread( std::uint32_t file )
+    {
+        if( std::ranges::find( unread, file ) == unread.end() )
+        {
+            unread.push_back( file );
+        }
+    }
 };
 
 inline void orderSites( std::vector<Site>& sites, const IngestResult& ing )
@@ -958,7 +993,14 @@ private:
         }
         if( !receiverOf( r.fromSymbol, row, !throughSelf ) )
         {
-            ++out.skipped;   // spelled like a site, not proven to be one
+            if( m_source.parsed( caller.fileId ) == nullptr )
+            {
+                out.noteUnread( caller.fileId );   // no parse to decide on: not a receiver verdict
+            }
+            else
+            {
+                ++out.skipped;   // spelled like a site, not proven to be one
+            }
             return;
         }
         out.list.push_back( Site{ r.fromSymbol, r.line, holder->depth, r.role == RefRole::Call ? SiteForm::Call : SiteForm::Ref, !throughSelf,
@@ -977,7 +1019,12 @@ private:
             return;
         }
         const ParsedFile* file = m_source.parsed( p.fileId );
-        if( file == nullptr || !stringAttrCall( *file, p.startByte, row.fetch, row.selfRecv, name ) )
+        if( file == nullptr )
+        {
+            out.noteUnread( p.fileId );   // a getattr in a base class that cannot be read: it may be a use of the name
+            return;
+        }
+        if( !stringAttrCall( *file, p.startByte, row.fetch, row.selfRecv, name ) )
         {
             return;
         }
@@ -1143,12 +1190,13 @@ struct RowWriter
         const std::string_view rel = rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : sarif::rootRelativeUri( ing.files[ fileId ], rootArg );
         return std::string( xmlText( rel, esc ) ) + ':' + std::to_string( line );
     }
-    void relation( std::string& x, const ConeDefs& d, const FamilyRow& row )
+    // Appends the override relation; returns the file of the overrides definition when it could not be read (abstract= is then unknown), else kNoFile.
+    std::uint32_t relation( std::string& x, const ConeDefs& d, const FamilyRow& row )
     {
         if( !d.hasBase )
         {
             x += " hook=\"1\"";
-            return;
+            return kNoFile;
         }
         if( d.winner == kNoNode )
         {
@@ -1161,17 +1209,22 @@ struct RowWriter
             }
             x += xmlText( names, esc );
             x += '"';
-            return;
+            return kNoFile;
         }
         const Symbol& base = ing.symbols[ d.winner ];
         x += " overrides=\"";
         x += xmlText( qualifiedMemberName( owners, base ), esc );
         x += "\" op=\"" + placeOf( base.fileId, base.line ) + '"';
         const ParsedFile* file = source.parsed( base.fileId );
-        if( file != nullptr && isAbstractDef( *file, functionOf( *file, base ), row ) )
+        if( file == nullptr )
+        {
+            return base.fileId;
+        }
+        if( isAbstractDef( *file, functionOf( *file, base ), row ) )
         {
             x += " abstract=\"1\"";
         }
+        return kNoFile;
     }
     void siteRow( std::string& x, const Site& site )
     {
@@ -1205,7 +1258,15 @@ struct RowWriter
         x += "<selfhook n=\"";
         x += xmlText( qual, esc );
         x += "\" p=\"" + placeOf( m.fileId, m.line ) + '"';
-        relation( x, d, row );
+        SiteSet unreadAll;
+        if( const std::uint32_t lost = relation( x, d, row ); lost != kNoFile )
+        {
+            unreadAll.noteUnread( lost );
+        }
+        for( const std::uint32_t f : found.unread )
+        {
+            unreadAll.noteUnread( f );
+        }
         x += " defs=\"" + std::to_string( d.defs ) + '"';
         if( d.testDefs > 0 )
         {
@@ -1220,6 +1281,10 @@ struct RowWriter
         if( found.skipped > 0 )
         {
             x += " skipped=\"" + std::to_string( found.skipped ) + '"';
+        }
+        if( !unreadAll.unread.empty() )
+        {
+            x += " unread=\"" + std::to_string( unreadAll.unread.size() ) + '"';
         }
         x += '>';
         for( const Site& site : std::span( sites ).first( siteRows ) )
@@ -1243,6 +1308,7 @@ inline std::string renderForSelfHooks( const SelfHookInputs& in, std::span<const
     }
     const ClassIndex   classes( ing );
     const auto         parents = provenParents( ing, in.g );
+    const auto         partial = classesWithUnprovenBase( in.g );
     const MemberOwners owners( ing );
     SourceReader       source( ing );
     Finder             finder( ing, classes, source );
@@ -1268,6 +1334,12 @@ inline std::string renderForSelfHooks( const SelfHookInputs& in, std::span<const
         const NodeId                cls   = classes.ownerOf( m );
         const std::vector<Ancestor> bases = cls == kNoNode ? std::vector<Ancestor>{} : ancestorsOf( parents, cls );
         if( bases.empty() )
+        {
+            continue;
+        }
+        // an unproven (by-name) base of cls or of an ancestor may define the name ahead of a proven one: the walk is short, stay silent
+        const auto unproven = [ & ]( NodeId c ) { return std::ranges::binary_search( partial, c ); };
+        if( unproven( cls ) || std::ranges::any_of( bases, [ & ]( const Ancestor& a ) { return unproven( a.id ); } ) )
         {
             continue;
         }
