@@ -235,7 +235,7 @@ mention="".join("  \"see #files.autoSave# in row %d\",\n"%i for i in range(12))
 open(d+"/app/registry.ts","w").write("export const R = {\n  \"files.autoSave\": {\n    \"type\": \"string\",\n    \"default\": \"off\",\n  },\n  \"files.autoSaveDelay\": { \"type\": \"number\" },\n  \"files.autoSave.onWindowChange\": { \"type\": \"boolean\" },\n};\n")
 open(d+"/app/aaa_mentions.ts","w").write("export const D = [\n"+mention+"];\n")
 open(d+"/app/service.ts","w").write("export function readAuto(c: any) {\n  return c.getValue(\"files.autoSave\");\n}\nexport function other(c: any) {\n  return c.getValue(\"myfiles.autoSave\") + c.getValue(\"files.autoSaveDelay\");\n}\n")
-open(d+"/app/cfg.py","w").write("def load(cfg):\n    return cfg.get(\"sql.stats.collection.enabled\")\n\ndef fail():\n    # Stale cache entry found\n    raise ValueError(\"Invalid user settings file\")\n\ndef chain(n):\n    raise ValueError(\"terminal {} must be the last filter in a chain\".format(n))\n\ndef nameit():\n    return \"Widget.render\" + \"config.settings.json\" + \"self.alpha.beta\" + \"why does retry fail\" + \"bad state\" + \"Widget.render.now\" + \"a.b.c\" + \"foo(x) bar baz\"\n\ndef codeonly(alpha, beta):\n    x = alpha if beta else 0\n    return x\n\ndef caller():\n    return \"foo.bar.baz\"\n")
+open(d+"/app/cfg.py","w").write("def load(cfg):\n    return cfg.get(\"sql.stats.collection.enabled\")\n\ndef fail():\n    # Stale cache entry found\n    raise ValueError(\"Invalid user settings file\")\n\ndef chain(n):\n    raise ValueError(\"terminal {} must be the last filter in a chain\".format(n))\n\ndef nameit():\n    return \"Widget.render\" + \"config.settings.json\" + \"self.alpha.beta\" + \"why does retry fail\" + \"bad state\" + \"Widget.render.now\" + \"a.b.c\" + \"foo(x) bar baz\" + \"a.b.k\" + \"no outer cue message here\"\n\ndef codeonly(alpha, beta):\n    x = alpha if beta else 0\n    return x\n\ndef caller():\n    return \"foo.bar.baz\"\n")
 open(d+"/app/cfg.go","w").write("package app\n\nfunc Reg() string {\n\treturn \"go.only.key\"\n}\n")
 open(d+"/app/test/registry.test.ts","w").write("const a = \"only.test.key\";\nconst m = \"Only a test message here\";\n")
 open(d+"/app/note.py","w").write("# only.comment.key is mentioned here\nX = 1\n")
@@ -264,7 +264,7 @@ if has "$K3G" 'p="app/cfg.go"' && has "$K3G" 'in="Reg"'; then ok "K3b [P] the sa
 K4="$( krun '--for=Widget.render option' | lit )"
 if has "$K4" 's="Widget.render" shape="dotted"'; then ok "K4 [P] Class.method WITH a cue is a key"; else no "K4 cued Class.method: ${K4:0:300}"; fi
 for near in 'files.autoSave flow' 'files.autoSave' 'Widget.render flow' 'config.settings.json option' 'app/service.ts setting' 'service.ts setting' \
-            'self.alpha.beta flow' 'foo.bar.baz() flow' 'only.test.key' 'only.test.key setting' 'files.autoSave keyboard flow' 'files.autoSave hotkeys flow' 'Widget.render.now flow' 'a.b.c' 'only.comment.key' 'only.doc.key' 'absent.dotted.key' '1.2.3 setting'; do
+            'self.alpha.beta flow' 'foo.bar.baz() flow' 'only.test.key' 'only.test.key setting' 'files.autoSave keyboard flow' 'files.autoSave hotkeys flow' 'Widget.render.now flow' 'a.b.c' 'a.b.k' 'only.comment.key' 'only.doc.key' 'absent.dotted.key' '1.2.3 setting'; do
     N="$( krun "--for=$near" )"
     if ! has "$N" '<lit ' && [ "$N" = "$( koff "--for=$near" )" ]; then ok "K5 [G] near miss, no <lit and byte-identical: $near"
     else no "K5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
