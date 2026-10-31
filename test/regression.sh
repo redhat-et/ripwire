@@ -940,6 +940,7 @@ for _g in \
     regexbombcheck \
     regexcheck \
     regexguardcheck \
+    regexmultiquantcheck \
     regexrefusecheck \
     registermacrocheck \
     regsitecheck \
