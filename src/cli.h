@@ -1684,7 +1684,7 @@ inline constexpr char kHelpHead[] =
         "                               propagation_cost's N is dependency-capable files only, same denominator as --deps <health>.\n"
         "                               A module with no edge observed and a file in a language with no file edges (Go, Java, Kotlin,\n"
         "                               C#, PHP, Swift, Dart, GDScript, Clojure) reads zone=\"unknown\" no_file_edges=LANGS with no\n"
-        "                               ca/ce/I/D/reachable: unknown, not zero; violations= is then a floor.\n"
+        "                               ca/ce/I/D/reachable: unknown, not zero, and violations= is then a floor.\n"
         "                               Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the\n"
         "                               spelling you passed, so a rules file means the same thing in every checkout\n"
         "    --arch=FILE --baseline     write .ripwire_arch_baseline (accept current debt as baseline), exit 0\n"

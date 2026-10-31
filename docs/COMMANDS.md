@@ -2355,7 +2355,7 @@ $ ./build/ripwire . --hotspots --since="2 weeks ago"
 
 **Answers:** enforce layering rules from a rules file;
 
-exit 2 on a violation enforce layering rules (exit 2 on violation); the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates). propagation_cost's N is dependency-capable files only, same denominator as --deps <health>. A module with no edge observed and a file in a language with no file edges (Go, Java, Kotlin, C#, PHP, Swift, Dart, GDScript, Clojure) reads zone="unknown" no_file_edges=LANGS with no ca/ce/I/D/reachable: unknown, not zero; violations= is then a floor. Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the spelling you passed, so a rules file means the same thing in every checkout
+exit 2 on a violation enforce layering rules (exit 2 on violation); the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates). propagation_cost's N is dependency-capable files only, same denominator as --deps <health>. A module with no edge observed and a file in a language with no file edges (Go, Java, Kotlin, C#, PHP, Swift, Dart, GDScript, Clojure) reads zone="unknown" no_file_edges=LANGS with no ca/ce/I/D/reachable: unknown, not zero, and violations= is then a floor. Layer substrings and regex path-rules match the ROOT-RELATIVE path (src/core/x.cpp), not the spelling you passed, so a rules file means the same thing in every checkout
 
 **Try it**
 
@@ -2382,7 +2382,7 @@ $ ./build/ripwire . --arch=test/archfix/rules.txt
 **Caveats (stated by the binary):**
 
 - the Martin Ca/Ce/I/A/D block it emits is a design heuristic, not independently outcome-validated (never gates).
-- violations= is then a floor.
+- A module with no edge observed and a file in a language with no file edges (Go, Java, Kotlin, C#, PHP, Swift, Dart, GDScript, Clojure) reads zone="unknown" no_file_edges=LANGS with no ca/ce/I/D/reachable: unknown, not zero, and violations= is then a floor.
 
 ### `--arch=FILE --baseline`
 
