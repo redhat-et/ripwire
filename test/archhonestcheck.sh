@@ -270,7 +270,7 @@ printf '%s' "$dd" | xmllint --noout - 2>/dev/null && ok "(L) the clause holds no
 for v in arch deps; do
     if [ "$v" = arch ]; then c="$( arch "$TMP/a_go" --legend=compact )"; else c="$( deps "$TMP/a_go" --legend=compact )"; fi
     lc="$( printf '%s' "$c" | grep -o '<!--.*-->' | head -1 )"
-    printf '%s' "$lc" | grep -q 'no_file_edges=' && printf '%s' "$lc" | grep -q 'unmeasured_files=' && ok "(L) $v compact legend defines both" || no "(L) $v compact legend: $( printf '%s' "$lc" | cut -c1-300 )"
+    printf '%s' "$lc" | grep -q 'no_file_edges=LANGS:' && printf '%s' "$lc" | grep -q 'unmeasured_files=N:' && ok "(L) $v compact legend defines both" || no "(L) $v compact legend: $( printf '%s' "$lc" | cut -c1-300 )"
 done
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

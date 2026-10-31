@@ -172,7 +172,8 @@ inline std::string lexicalNormalize( std::string_view path )
 
 // The import dialect a file's imports resolve in, keyed off its extension. C-family covers the quote
 // `#include`; Other (Swift/Java/C#/PHP/Markdown/…) never precise-resolves (deferred / no path in import).
-// Bash/Ruby/Lua/Elixir joined at kParserVer 81 — see their Step-As below.
+// Bash/Ruby/Lua/Elixir joined at kParserVer 81 — see their Step-As below. A language that gains a Step-A moves its
+// LangFacts::fileEdges to Resolved in the same commit (langfacts.h; test/archhonestcheck.sh (H) pins the fact to the index).
 enum class IncludeLang : std::uint8_t { CFamily, Python, Ts, Rust, Go, Bash, Ruby, Lua, Elixir, Other };
 
 // extension → dialect, a declarative constexpr table (NOT a scattered if-chain). Extension includes the
