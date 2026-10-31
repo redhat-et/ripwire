@@ -141,7 +141,7 @@ inline constexpr std::string_view kForLiteralKeyLegend =
 static_assert( kForLiteralKeyLegend.find( "--", 4 ) == kForLiteralKeyLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 // the walk's cap, printed alone (no <lit>) when the task names more literals than kForLiteralCandidates scans and none of those anchored
 inline constexpr std::string_view kForLiteralCapLegend =
-    "<!-- ripwire for lit: the task names more literals than one answer scans; scanned= whole-repo scans made, none found a source site; "
+    "<!-- ripwire for lit: lit_capped = the task names more literals than one answer scans; scanned= whole-repo scans made, none found a source site; "
     "skipped= literals not scanned; next= scans the first of them. -->";
 static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
