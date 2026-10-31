@@ -16,6 +16,7 @@
 // and wrap it into the array below. Version skew is a few names (asynchat, distutils and imp left the stdlib in 3.12 and 3.13) and
 // errs on the safe side: a name missing here only keeps the layout-root binding it had before. The static_assert below is the
 // compile-time proof that the binary search is valid.
+#include "externalnames.h"   // inSortedTable: the house lookup of a strictly sorted name table
 #include "infra/sortutil.h"
 
 #include <algorithm>
@@ -58,7 +59,7 @@ static_assert( std::is_sorted( std::begin( kPythonStdlibModules ), std::end( kPy
 /// Is `name` (a module's FIRST dotted segment) a CPython 3.13 standard-library module?
 inline bool isPythonStdlibModule( std::string_view name ) noexcept
 {
-    return std::binary_search( std::begin( kPythonStdlibModules ), std::end( kPythonStdlibModules ), name, rw::sortutil::svLess );
+    return rw::externalnames::inSortedTable( kPythonStdlibModules, name );
 }
 } // namespace pythonstdlib
 } // namespace rw
