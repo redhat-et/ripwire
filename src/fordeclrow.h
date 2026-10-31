@@ -20,6 +20,7 @@
 // row; this block unfolds it, because that prototype is the row asked for.
 #include "defslookup.h"    // lookupDefs / defRowXml / defPickProvablyUnique — the --defs lookup
 #include "forcallerhop.h"  // forTaskIdentWords — the one word split of a --for task
+#include "langfacts.h"     // langFacts(l).signatureRows — which languages repeat a function's signature
 #include "nextverb.h"      // nextFlag / nextAttrXml
 #include "resolve.h"       // trimWs
 #include "serialize.h"     // escapeXml
@@ -115,42 +116,69 @@ inline bool forIsIdentShaped( std::string_view s ) noexcept
         || std::ranges::any_of( s.substr( s.empty() ? 0 : 1 ), [ ]( char c ) { return std::isupper( static_cast<unsigned char>( c ) ) != 0; } );
 }
 
-// The callee a code span names: the identifier just before its LAST top-level `(`, so a macro wrapper or a return type is not it
-// (`PyAPI_FUNC(int) PyObject_Print(PyObject *, FILE *, int)` -> PyObject_Print, `int server_start(struct tmuxproc *)` ->
-// server_start). A span with no top-level `(` is returned whole.
+// A parenthesis group that opens a function's parameter list, not an attribute or a specifier: `__attribute__((noreturn))`,
+// `noexcept(false)`, `throw()`, `requires(..)`, `decltype(..)`, `alignas(..)` and `__declspec(..)` follow a signature.
+inline bool forIsSpecifierWord( std::string_view w ) noexcept
+{
+    static constexpr std::array<std::string_view, 10> kSpec{ "__attribute__", "__attribute", "noexcept", "throw", "requires", "decltype", "alignas", "_Alignas", "__declspec", "asm" };
+    return std::ranges::contains( kSpec, w );
+}
+
+// The callee a code span names: the identifier directly before a top-level `(`, so a macro wrapper, a return type or a trailing
+// specifier is not it (`PyAPI_FUNC(int) PyObject_Print(PyObject *, FILE *, int)` -> PyObject_Print, `int server_start(struct tmuxproc *)` ->
+// server_start, `f(int a) noexcept(false)` -> f, `f(a int) (int, error)` -> f, `run_me(1) + c(2)` -> run_me). Of several groups after
+// identifiers the LAST wins only when nothing but blanks, `*`, `&` and angle brackets separates it from the one before (a macro
+// wrapper then the name; an operator or a comma starts another expression); a group after `)` is a Go result list or a declarator.
+// A span with no top-level `(` is returned whole.
 inline std::string_view forSpanCallee( std::string_view span ) noexcept
 {
     span = trimWs( span );
-    std::size_t last = std::string_view::npos;
-    int         depth = 0;
+    std::string_view pick;
+    bool             any = false;
+    std::size_t      prevClose = 0;   // one past the last group's `)`
+    int              depth = 0;
     for( std::size_t i = 0; i < span.size(); ++i )
     {
-        if( span[i] == '(' )
-        {
-            last = depth == 0 ? i : last;
-            ++depth;
-        }
-        else if( span[i] == ')' && depth > 0 )
+        if( span[i] == ')' && depth > 0 )
         {
             --depth;
+            prevClose = depth == 0 ? i + 1 : prevClose;
+        }
+        if( span[i] != '(' )
+        {
+            continue;
+        }
+        const bool top = depth++ == 0;
+        if( !top )
+        {
+            continue;
+        }
+        any = true;
+        std::string_view head = span.substr( 0, i );
+        const std::size_t trimmed = trimWs( head ).size();   // trimWs trims both ends; the head starts at 0 after the span trim
+        head = head.substr( 0, trimmed );
+        std::size_t b = head.size();
+        while( b > 0 && forIsSymbolChar( head[ b - 1 ] ) )
+        {
+            --b;
+        }
+        std::string_view name = head.substr( b );
+        while( !name.empty() && ( name.front() == ':' || name.front() == '.' ) )
+        {
+            name.remove_prefix( 1 );
+        }
+        if( name.empty() || forIsSpecifierWord( name ) )
+        {
+            continue;   // directly after `)`, an operator or nothing: a result list or a specifier, never the callee
+        }
+        const std::string_view between = span.substr( prevClose, b > prevClose ? b - prevClose : 0 );
+        const bool chained = !pick.empty() && std::ranges::all_of( between, [ ]( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '*' || c == '&' || c == '<' || c == '>'; } );
+        if( pick.empty() || chained )
+        {
+            pick = name;
         }
     }
-    if( last == std::string_view::npos )
-    {
-        return span;
-    }
-    std::string_view head = trimWs( span.substr( 0, last ) );
-    std::size_t      b    = head.size();
-    while( b > 0 && forIsSymbolChar( head[ b - 1 ] ) )
-    {
-        --b;
-    }
-    head = head.substr( b );
-    while( !head.empty() && ( head.front() == ':' || head.front() == '.' ) )
-    {
-        head.remove_prefix( 1 );
-    }
-    return head;
+    return any ? pick : span;
 }
 
 // `Foo::bar(int)` -> Foo::bar, then bar: the qualified spelling first, then its last segment.
@@ -222,7 +250,7 @@ inline std::string_view forBareSymbolTask( std::string_view task ) noexcept
 inline bool forDeclRowCounts( const IngestResult& ing, const DefRow& r ) noexcept
 {
     const Symbol& s = ing.symbols[ r.rep ];
-    return !r.test && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && ( s.lang == Lang::C || s.lang == Lang::Cpp || s.lang == Lang::Go );
+    return !r.test && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && langFacts( s.lang ).signatureRows;
 }
 
 // A prototype the definition group folded in: --defs prints the group's one row ("a prototype with its definition is one"), and the
@@ -293,9 +321,10 @@ inline std::string forDeclRowXml( const IngestResult& ing, const DefLookup& L, c
 inline constexpr std::string_view kForDeclLegend =
     "<!-- ripwire for decl_rows: of= (matched by name) may change its signature; its non-test definition and declaration rows in the index follow, "
     "so a change reaches them in step. <d> n= name, t= kind, p=file:line, sel= the spelling that picks this row alone (absent on a decl_only row "
-    "that follows the definition it declares; a decl_only row with sel= declares none of them), sel_proven=\"0\": no spelling was proven to, lang=, "
+    "that follows the definition it declares), sel_proven=\"0\": no spelling was proven to pick this row alone, lang=, "
     "class=, in= graph callers (a floor), decl_only=\"1\": no body (a header prototype, forward declaration or interface contract), untied=\"1\": "
-    "its link to a definition is unproven (it may be another function). rows= counts them; functions=N only when of= names N separate functions (a static "
+    "the index could not tie this prototype to a definition, so it is listed by a name match: it is still a declaration of that name at p=, "
+    "and may declare another function of the same name (read that line). rows= counts them; functions=N only when of= names N separate functions (a static "
     "elsewhere, an overload, another scope): a change reaches its own definition row and the decl_only rows right after it, not another "
     "function's; shown=, capped=\"1\" and next= only when the list is cut (next= lists definitions, prototypes folded in). Call sites, and the implementations "
     "of a contract (lego), are not listed; the answer above is unchanged, and these bytes are not in est_tokens -->";
@@ -305,17 +334,18 @@ inline std::string forDeclHeldXml( std::string_view spell, const std::string& ne
 {
     std::vector<char> esc;
     return "<!-- ripwire for decl_rows: held=\"budget\": a token budget is set, so the declaration rows of of= are not printed here; "
-           "next= is the call that lists them; the answer above is unchanged -->"
+           "next= is this same --for call without the budget, which prints them (--defs= would fold a tied prototype into its definition's row); "
+           "the answer above is unchanged -->"
            "<decl_rows of=\"" + std::string( escapeXml( spell, esc ) ) + "\" held=\"budget\"" + next + "/>";
 }
 
-inline std::string forDeclRowsXml( const IngestResult& ing, const DefLookup& L, std::string_view spell, bool held )
+inline std::string forDeclRowsXml( const IngestResult& ing, const DefLookup& L, std::string_view spell, std::string_view task, bool held )
 {
-    const std::string next = nextAttrXml( nextFlag( "--defs=", spell ) );
     if( held )
     {
-        return forDeclHeldXml( spell, next );
+        return forDeclHeldXml( spell, nextAttrXml( nextFlag( "--for=", task ) ) );   // --defs= folds the tied prototypes, the rows this block exists to print
     }
+    const std::string next = nextAttrXml( nextFlag( "--defs=", spell ) );
     const MemberOwners owners( ing );
     std::string        rows;
     std::size_t        total = 0, shown = 0;
@@ -372,12 +402,17 @@ inline std::string renderForDeclRows( const IngestResult& ing, const Graph& g, s
     for( std::size_t i = 0; i < subjects.size() && i < kForDeclSubjectTries; ++i )
     {
         const DefLookup L = lookupDefs( ing, g, subjects[i] );
-        if( forDeclNameIsMacro( ing, L ) || std::ranges::none_of( L.rows, [ & ]( const DefRow& r ) { return forDeclRowCounts( ing, r ); } ) )
+        const bool anyFunction = std::ranges::any_of( L.rows, [ & ]( const DefRow& r ) { return forDeclRowCounts( ing, r ); } );
+        if( forDeclNameIsMacro( ing, L ) && anyFunction )
+        {
+            return {};   // a name that is both a macro and a function is ambiguous: the first function named is the subject, and a later name is not it
+        }
+        if( forDeclNameIsMacro( ing, L ) || !anyFunction )
         {
             continue;   // not a function here (a macro, a qualifier, a word): the next spelling
         }
         const bool fires = forDeclHasDeclRow( ing, L ) && ( bare.empty() || defPickProvablyUnique( L ) );
-        return fires ? forDeclRowsXml( ing, L, subjects[i], held ) : std::string();   // the first function named is the subject: a later name is not it
+        return fires ? forDeclRowsXml( ing, L, subjects[i], task, held ) : std::string();   // the first function named is the subject: a later name is not it
     }
     return {};
 }

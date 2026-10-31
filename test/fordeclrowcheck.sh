@@ -18,7 +18,11 @@
 #        identifier before its last top-level `(`: a return type or a macro wrapper is not it
 #   (q1) the bare arm resolves the whole spelling: `--for=api.c` (a file) and `--for=Nope::run_it` are silent, `--for=app::qfn` fires
 #   (u1) a prototype not proven to declare a listed definition is marked untied="1"; (e1) sel= is never empty past the proof window
-#   (s1) --json carries no block; (s2) a token budget holds the block: held="budget" and next=, no rows (and none where nothing would fire)
+#   (r1) a span's callee survives what 588305c1 read and the last-paren rule lost: a trailing __attribute__, noexcept(..), a Go result list, and
+#        `f(1) + c(2)` (an operator ends the chain: the first call is the subject); twins: a macro wrapper and a return type still pick the last group
+#   (t1) the legend does not deny an untied row (no "declares none of them"); it says the index could not tie the prototype and that it is a name match
+#   (v1) a name that is both a macro and a function is silent, and a later name in the task is not the subject
+#   (s1) --json carries no block; (s2) a token budget holds the block: held="budget" and next= (the same --for call; running it prints the tied prototype), no rows (and none where nothing would fire)
 #   (x1) MCP `for`: the same element bytes; (x2) MCP budget_tokens: held
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -69,6 +73,13 @@ printf 'int unt_fn( int a );\n' > "$FX/unt.h"
 printf 'int unt_fn( int a ) { return a; }\n' > "$FX/unt.c"
 printf 'namespace app { int qfn( int a ); }\n' > "$FX/qfn.h"
 printf '#include "qfn.h"\nnamespace app { int qfn( int a ) { return a; } }\n' > "$FX/qfn.cpp"
+printf 'void noret_fn( const char *m ) __attribute__((noreturn));\n' > "$FX/noret.h"
+printf '#include "noret.h"\nvoid noret_fn( const char *m ) { for( ;; ) { (void) m; } }\n' > "$FX/noret.c"
+printf 'int nx_fn( int a );\n' > "$FX/nx.h"
+printf '#include "nx.h"\nint nx_fn( int a ) { return a; }\n' > "$FX/nx.cpp"
+printf 'package main\n\ntype GI interface {\n\tgoFn(k string) (string, error)\n}\n\ntype St struct{}\n\nfunc (s *St) goFn(k string) (string, error) { return k, nil }\n' > "$FX/gofn.go"
+printf 'int sh_fn( int a );\n#define sh_fn( x ) sh_fn( x )\nint oth_fn( int a );\n' > "$FX/sh.h"
+printf '#include "sh.h"\nint sh_fn( int a ) { return a; }\nint oth_fn( int a ) { return a; }\n' > "$FX/sh.c"
 for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19; do printf 'struct shad_x { int a; };\n' > "$FX/s_$i.c"; done
 printf 'int shad_x( int a );\n' > "$FX/z_shad.h"
 printf '#include "z_shad.h"\nint shad_x( int a ) { return a; }\n' > "$FX/z_shad.c"
@@ -133,8 +144,9 @@ M.parseString( s )
 i = s.index( "<!-- ripwire for decl_rows:" )
 leg = s[ i: s.index( "-->", i ) ]
 if "--" in leg[ 4: ]: sys.exit( 1 )
-for attr in ( "of=", "n=", "t=", "rows=", "functions=", "shown=", "capped=", "next=", "decl_only", "untied=", "sel=", "sel_proven", "lang=", "class=", "in=", "p=" ):
+for attr in ( "of=", " n= ", " t= ", "rows=", "functions=", "shown=", "capped=", "next=", "decl_only", "untied=", "sel=", "sel_proven", "lang=", "class=", "in=", "p=" ):
     if attr not in leg: sys.exit( 1 )
+if "declares none of them" in leg or "could not tie" not in leg or "name match" not in leg: sys.exit( 1 )   # B2: no sentence denies an untied row
 if "must reach each row" in leg or "every definition" in leg: sys.exit( 1 )   # C1: the claim that was false for same-named separate functions
 if s.count( "<decl_rows" ) != 1 or "<decl_rows" in s[ :i ] or not s.endswith( "</decl_rows></ctx>" ): sys.exit( 1 )
 PY
@@ -155,13 +167,33 @@ silent q1 "--for=Nope.run_it"
 run "--for=app::qfn" >"$TMP/q2.xml"
 if grep -q '<decl_rows of="app::qfn" rows="2">' "$TMP/q2.xml"; then ok "(q1) a bare qualified spelling that resolves whole fires"; else no "(q1) $( grep -o '<decl_rows [^>]*>' "$TMP/q2.xml" )"; fi
 run "--for=change the signature of unt_fn" >"$TMP/u1.xml"
-if grep -q '<d [^>]*decl_only="1" untied="1"/>' "$TMP/u1.xml" && grep -q '<decl_rows of="unt_fn" rows="2">' "$TMP/u1.xml"; then ok "(u1) a prototype not proven to declare the definition says untied=\"1\" and is no second function"; else no "(u1) $( grep -o '<decl_rows.*' "$TMP/u1.xml" | head -c 400 )"; fi
+if grep -q '<d [^>]*decl_only="1" untied="1"/>' "$TMP/u1.xml" && grep -q '<decl_rows of="unt_fn" rows="2">' "$TMP/u1.xml" && ! grep -q 'declares none of them' "$TMP/u1.xml" && grep -q 'could not tie this prototype' "$TMP/u1.xml"; then ok "(u1) a prototype not proven to declare the definition says untied=\"1\" and is no second function"; else no "(u1) $( grep -o '<decl_rows.*' "$TMP/u1.xml" | head -c 400 )"; fi
 run "--for=change the signature of shad_x" >"$TMP/e1.xml"
 if grep -q '<decl_rows of="shad_x"' "$TMP/e1.xml" && ! grep -q 'sel=""' "$TMP/e1.xml"; then ok "(e1) past the sel= proof window the row still names a spelling"; else no "(e1) $( grep -o '<decl_rows.*' "$TMP/e1.xml" | head -c 400 )"; fi
+callee(){ # arm, task, expected of=
+    run "--for=$2" >"$TMP/r.xml"
+    if grep -q "<decl_rows of=\"$3\" rows=\"[0-9]*\"" "$TMP/r.xml"; then ok "($1) $2 -> of=$3"; else no "($1) $2: $( grep -o '<decl_rows [^>]*>' "$TMP/r.xml" | head -c 200 ) (want of=$3)"; fi
+}
+callee r1 'add a new argument to `void noret_fn(const char *m) __attribute__((noreturn))`' noret_fn
+callee r1 'add a new argument to `int nx_fn(int a) noexcept(false)`' nx_fn
+callee r1 'add a new argument to `func (s *St) goFn(k string) (string, error)`' goFn
+callee r1 'add a new argument to `run_it(1) + c(2)`' run_it
+callee r1 'add a new argument to `API_FUNC(int) api_proto(int a)`' api_proto
+callee r1 'add a new argument to `static inline int run_it(int a)`' run_it
+silent v1 '--for=change the signature of `sh_fn` used by `oth_fn`'
+callee v1 'change the signature of `oth_fn`' oth_fn
+run "--for=run_it" --token-budget=4000 >"$TMP/s2n.xml"
+nxt="$( grep -o 'held="budget" next="[^"]*"' "$TMP/s2n.xml" | sed 's/^held="budget" next="//; s/"$//; s/&apos;/'"'"'/g' )"
+if [ -n "$nxt" ] && python3 -c '
+import shlex, subprocess, sys, os
+argv = shlex.split( sys.argv[1] )
+r = subprocess.run( [ sys.argv[2], sys.argv[3], "--no-cache" ] + argv, capture_output=True, text=True, cwd=sys.argv[3], stdin=subprocess.DEVNULL )
+sys.exit( 0 if "p=\"api.h:1\"" in r.stdout and "decl_only=\"1\"" in r.stdout else 1 )
+' "$nxt" "$BIN" "$FX"; then ok "(s2) the held next= ($nxt) prints the tied prototype row api.h:1"; else no "(s2) the held next= ($nxt) does not reach api.h:1"; fi
 run "--for=run_it" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'decl_rows' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
 run "--for=run_it" --token-budget=4000 >"$TMP/s2.xml"
-if [ -s "$TMP/s2.xml" ] && grep -q '<decl_rows of="run_it" held="budget" next="--defs=run_it"/></ctx>$' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
+if [ -s "$TMP/s2.xml" ] && grep -q '<decl_rows of="run_it" held="budget" next="--for=run_it"/></ctx>$' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
 run "--for=fix the off by one in run_it" --token-budget=4000 >"$TMP/s3.xml"
 if [ -s "$TMP/s3.xml" ] && ! grep -q 'decl_rows' "$TMP/s3.xml"; then ok "(s2) a token budget on a task the block does not read: nothing"; else no "(s2) budget, no fire"; fi
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new argument to run_it"}}}\n' "$FX" \
@@ -176,6 +208,6 @@ if [ -n "$( grep -o '<decl_rows.*</decl_rows>' "$TMP/w1.xml" )" ] && [ "$( grep 
 then ok "(x1) MCP for: the same element bytes"; else no "(x1) MCP: $( grep -o '<decl_rows.*' "$TMP/x1.xml" | head -c 300 )"; fi
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new argument to run_it","budget_tokens":4000}}}\n' "$FX" \
   | ( cd "$FX" || exit 1; "$BIN" --mcp 2>/dev/null ) >"$TMP/x2.json"
-if grep -q '<ctx' "$TMP/x2.json" && grep -q 'held=\\"budget\\" next=\\"--defs=run_it\\"/>' "$TMP/x2.json"; then ok "(x2) MCP budget_tokens: held=\"budget\" and next=, no rows"; else no "(x2) MCP budget: $( grep -o 'decl_rows.\{0,200\}' "$TMP/x2.json" | head -c 300 )"; fi
+if grep -q '<ctx' "$TMP/x2.json" && grep -q 'held=\\"budget\\" next=\\"--for=&apos;add a new argument to run_it&apos;\\"/>' "$TMP/x2.json"; then ok "(x2) MCP budget_tokens: held=\"budget\" and next=, no rows"; else no "(x2) MCP budget: $( grep -o 'decl_rows.\{0,200\}' "$TMP/x2.json" | head -c 300 )"; fi
 [ "$fail" = 0 ] && echo "fordeclrowcheck: PASS" || echo "fordeclrowcheck: FAIL"
 exit "$fail"
