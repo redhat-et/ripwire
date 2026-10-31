@@ -201,10 +201,7 @@ public:
         }
     }
 
-    std::size_t bytes() const noexcept
-    {
-        return rowOfFile_.capacity() * 4 + heads_.capacity() * 8 + chunkOff_.capacity() * 4 + words_.capacity() * 2;
-    }
+    std::size_t bytes() const noexcept { return rowOfFile_.size() * 4 + heads_.size() * 8 + chunkOff_.size() * 4 + words_.size() * 2; }
     std::size_t payloadBytes() const noexcept { return words_.size() * 2; }
 
     // How many chunks hold a sorted array; the rest hold a bitset. Reports and gates only.
@@ -348,13 +345,20 @@ public:
         s_.rowOfFile_[file] = row;
     }
 
+    // An estimate, so a growing array never holds its old and new copies at once: that doubling, not the store, was the
+    // peak on a large graph. Over-reserving costs address space only; pages past the end are never touched.
+    void reserve( std::size_t rows, std::size_t chunks, std::size_t words )
+    {
+        s_.heads_.reserve( rows * s_.headWords_ );
+        s_.chunkOff_.reserve( chunks + 1 );
+        s_.words_.reserve( words );
+    }
+
+    // No shrink_to_fit: it would hold two copies at the peak, to return pages that were never touched.
     FileSetStore finish()
     {
         firstRowOfHash_ = {};
         scratch_        = {};
-        s_.heads_.shrink_to_fit();
-        s_.chunkOff_.shrink_to_fit();
-        s_.words_.shrink_to_fit();
         return std::move( s_ );
     }
 
@@ -448,17 +452,24 @@ private:
     std::uint64_t                                              hash_     = 0;
 };
 
-// Picks the chunk size with the fewest bytes for a set of sample rows. Candidates, widest first; a tie keeps the wider.
-// Deterministic: a pure function of the sample.
-inline std::uint32_t fileSetChooseChunkBits( std::span<const std::vector<std::uint32_t>> sample, std::uint32_t universe ) noexcept
+// The chunk size with the fewest bytes for a set of sample rows, and what that size costs the sample. Candidates, widest
+// first; a tie keeps the wider. Deterministic: a pure function of the sample.
+struct FileSetChunkChoice
+{
+    std::uint32_t bits   = 16;
+    std::size_t   chunks = 0;
+    std::size_t   words  = 0;
+};
+
+inline FileSetChunkChoice fileSetChooseChunkBits( std::span<const std::vector<std::uint32_t>> sample, std::uint32_t universe ) noexcept
 {
     static constexpr std::uint32_t kCandidates[] = { 16, 12, 10, 8 };
-    std::uint32_t                  best          = 16;
-    std::size_t                    bestBytes     = ~std::size_t( 0 );
+    FileSetChunkChoice             best;
+    std::size_t                    bestBytes = ~std::size_t( 0 );
     for( const std::uint32_t bits : kCandidates )
     {
-        const std::uint32_t highs = universe == 0 ? 1 : ( ( universe - 1 ) >> bits ) + 1;
-        std::size_t         bytes = std::size_t( 1 + ( highs + 63 ) / 64 ) * 8 * sample.size();
+        const std::uint32_t highs  = universe == 0 ? 1 : ( ( universe - 1 ) >> bits ) + 1;
+        std::size_t         chunks = 0, words = 0;
         for( const std::vector<std::uint32_t>& row : sample )
         {
             for( std::size_t i = 0; i < row.size(); )
@@ -470,14 +481,16 @@ inline std::uint32_t fileSetChooseChunkBits( std::span<const std::vector<std::ui
                     ++j;
                 }
                 const std::uint32_t width = std::min( std::uint32_t( 1 ) << bits, universe - ( high << bits ) );
-                bytes += std::min( j - i, std::size_t( ( width + 15 ) / 16 ) ) * 2 + 4;
+                words += std::min( j - i, std::size_t( ( width + 15 ) / 16 ) );
+                ++chunks;
                 i = j;
             }
         }
+        const std::size_t bytes = std::size_t( 1 + ( highs + 63 ) / 64 ) * 8 * sample.size() + chunks * 4 + words * 2;
         if( bytes < bestBytes )
         {
             bestBytes = bytes;
-            best      = bits;
+            best      = { bits, chunks, words };
         }
     }
     return best;
@@ -581,6 +594,7 @@ inline FileSetStore buildFileClosure( const Adj& adj, std::uint32_t chunkBitsOve
     }
 
     std::uint32_t chunkBits = chunkBitsOverride;
+    std::size_t   estimatedRows = 0, estimatedChunks = 0, estimatedWords = 0;
     if( chunkBits == 0 )
     {
         // Sample: up to 64 files with an edge, at a fixed stride, walked once each; the bytes per candidate are arithmetic.
@@ -612,10 +626,20 @@ inline FileSetStore buildFileClosure( const Adj& adj, std::uint32_t chunkBitsOve
                 sample.push_back( std::move( row ) );
             }
         }
-        chunkBits = fileSetChooseChunkBits( sample, F );
+        const FileSetChunkChoice choice = fileSetChooseChunkBits( sample, F );
+        chunkBits = choice.bits;
+        // Scaled to every file with an edge at the sample's rate, plus a quarter, since the sample can run light.
+        if( !sample.empty() )
+        {
+            const std::size_t scale = std::size_t( F ) / sample.size() + 1;
+            estimatedRows           = std::size_t( F ) + 1;
+            estimatedChunks         = ( choice.chunks * scale ) / 4 * 5;
+            estimatedWords          = ( choice.words * scale ) / 4 * 5;
+        }
     }
 
     FileSetBuilder                b( F, F, chunkBits );
+    b.reserve( estimatedRows, estimatedChunks, estimatedWords );
     std::vector<std::uint64_t*>   slotOfComp( C, nullptr );
     std::vector<std::uint64_t*>   freeSlots;
     std::vector<std::unique_ptr<std::uint64_t[]>> slots;
