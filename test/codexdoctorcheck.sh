@@ -124,6 +124,57 @@ printf '%s' "$HOUT" | grep -q 'skills/install.sh --codex --hook' \
     && ok "hook failure names the exact repair command" || no "hook failure omitted repair command"
 chmod +x "$HOOKDIR/ripwire-codex-route.sh"
 
+# F1 (install-hardening review): skills/install.sh single-quotes a hook path that needs it, e.g. a checkout under a
+# path with a space. The doctor reads such a command as the script BETWEEN the quotes; before, the quotes stayed in the
+# path it looked up, so a hook that ran was reported broken and the repair hint could never clear the row.
+QDIR="$TMP/hook dir"; mkdir -p "$QDIR"
+for h in ripwire-codex-nudge.sh ripwire-codex-route.sh; do
+    printf '#!/bin/sh\nexit 0\n' >"$QDIR/$h"; chmod +x "$QDIR/$h"
+done
+cp "$CODEX_FAKE/hooks.json" "$TMP/hooks.json.plain"
+quoted_hooks() # $1 = directory holding the two scripts
+{
+    cat >"$CODEX_FAKE/hooks.json" <<EOF
+{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"'$1/ripwire-codex-nudge.sh'"}]}],
+"SessionStart":[{"hooks":[{"type":"command","command":"'$1/ripwire-codex-nudge.sh' --session-start"}]}],
+"UserPromptSubmit":[{"hooks":[{"type":"command","command":"'$1/ripwire-codex-route.sh'"}]}]}}
+EOF
+}
+quoted_hooks "$QDIR"
+QOUT="$( run_doctor )"; QRC=$?
+{ [ "$QRC" -eq 0 ] && printf '%s' "$QOUT" | grep -q '<c n="codex-hooks" ok="1"'; } \
+    && ok "a quoted Codex hook command (path with a space) resolves to its script: codex-hooks ok" \
+    || no "a quoted Codex hook command was reported broken (exit $QRC): $( printf '%s' "$QOUT" | grep -o '<c n="codex-hooks"[^>]*>' )"
+quoted_hooks "$TMP/no such dir"
+QOUT="$( run_doctor )"; QRC=$?
+{ [ "$QRC" -eq 1 ] && printf '%s' "$QOUT" | grep -q '<c n="codex-hooks" ok="0"'; } \
+    && ok "a quoted Codex hook command naming a missing script still fails codex-hooks" \
+    || no "a quoted command to a missing script passed codex-hooks (exit $QRC): $( printf '%s' "$QOUT" | grep -o '<c n="codex-hooks"[^>]*>' )"
+cat >"$CODEX_FAKE/hooks.json" <<EOF
+{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-nudge.sh"}]}],
+"SessionStart":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-nudge.sh --session-start"}]}],
+"UserPromptSubmit":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-route.sh"}]}]}}
+EOF
+QOUT="$( run_doctor )"
+printf '%s' "$QOUT" | grep -q '<c n="codex-hooks" ok="0"' \
+    && ok "an UNTERMINATED quote names no script: codex-hooks fails" \
+    || no "an unterminated quoted command passed codex-hooks: $( printf '%s' "$QOUT" | grep -o '<c n="codex-hooks"[^>]*>' )"
+cp "$TMP/hooks.json.plain" "$CODEX_FAKE/hooks.json"
+# the Claude row reads the same command shape: install from a checkout under a path with a space, as a user would
+CHK="$TMP/sp ace"; CL_HOME="$TMP/clhome"; mkdir -p "$CHK" "$CL_HOME"
+cp -R "$ROOT/skills" "$CHK/skills"; cp -R "$ROOT/hooks" "$CHK/hooks"
+HOME="$CL_HOME" bash "$CHK/skills/install.sh" --hook >/dev/null 2>&1
+claude_doctor() { HOME="$CL_HOME" PATH="$BINDIR:/usr/bin:/bin" TMPDIR="$CACHE" "$BINDIR/ripwire" "$REPO" --doctor --agent=claude --no-cache 2>&1; }
+CLOUT="$( claude_doctor )"
+printf '%s' "$CLOUT" | grep -q '<c n="claude-hooks" ok="1"' \
+    && ok "a hook installed from a path with a space is reported working by --doctor --agent=claude" \
+    || no "claude-hooks reported a quoted, working hook as broken: $( printf '%s' "$CLOUT" | grep -o '<c n="claude-hooks"[^>]*>' )"
+rm -f "$CHK/hooks/ripwire-nudge.sh"
+CLOUT="$( claude_doctor )"
+printf '%s' "$CLOUT" | grep -q '<c n="claude-hooks" ok="0"' \
+    && ok "the same quoted registration fails claude-hooks once its script is gone" \
+    || no "claude-hooks passed with the quoted script deleted: $( printf '%s' "$CLOUT" | grep -o '<c n="claude-hooks"[^>]*>' )"
+
 sed "s#command = \"$BINDIR/ripwire\"#command = \"$TMP/missing-ripwire\"#" "$CODEX_FAKE/config.toml" >"$TMP/bad.toml"
 mv "$TMP/bad.toml" "$CODEX_FAKE/config.toml"
 MOUT="$( run_doctor )"; MRC=$?

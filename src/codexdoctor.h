@@ -145,6 +145,13 @@ inline bool everyCommandExecutable( const std::vector<std::string>& commands )
 {
     return std::all_of( commands.begin(), commands.end(), []( const std::string& command )
     {
+        // skills/install.sh single-quotes a hook path that needs it (a checkout under a path with a space): the script is
+        // the text up to the closing quote, an unterminated quote names nothing. Otherwise it is everything before ` --`.
+        if( !command.empty() && command.front() == '\'' )
+        {
+            const std::size_t close = command.find( '\'', 1 );
+            return close != std::string::npos && !resolveExecutable( command.substr( 1, close - 1 ) ).empty();
+        }
         const std::size_t arg = command.find( " --" );
         return !resolveExecutable( command.substr( 0, arg ) ).empty();
     } );
