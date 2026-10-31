@@ -128,6 +128,7 @@ w "$KP/scripts/run.py" 'from utils import uu\nimport logging\ndef r():\n    uu()
 w "$KP/run.py" 'from src.train import tr\n'
 w "$KP/mypkg/__init__.py" ''; w "$KP/mypkg/src/__init__.py" ''; w "$KP/mypkg/src/utils2.py" ''; w "$KP/mypkg/a.py" 'import utils2\n'
 w "$KP/mypkg/sub/__init__.py" ''; w "$KP/mypkg/sub/b.py" 'import utils2\n'
+w "$KP/pk2/__init__.py" ''; w "$KP/pk2/src/utils3.py" ''; w "$KP/pk2/a.py" 'import utils3\n'
 E=$(edges "$KP")
 deny K1.1-script-not-through-package-src "$E" 'scripts/run.py -> src/utils.py'
 deny K1.2-test-not-through-package-src "$E" 'tests/test_a.py -> src/utils.py'
@@ -137,6 +138,7 @@ deny K1.5-gap4-inside-package-src-stdlib "$E" 'src/train.py -> src/logging.py'
 want K1.6-dotted-import-of-package-src-still-binds "$E" 'run.py -> src/train.py'
 deny K1.7-src-inside-a-package "$E" 'mypkg/a.py -> mypkg/src/utils2.py'
 deny K1.8-src-inside-a-package-deeper "$E" 'mypkg/sub/b.py -> mypkg/src/utils2.py'
+deny K1.8b-plain-src-inside-a-package "$E" 'pk2/a.py -> pk2/src/utils3.py'
 wantkind K1.9-call-graph "$KP" uu scripts/run.py name
 KN=$T/srcplain
 w "$KN/src/utils.py" 'def uu():\n    return 1\n'; w "$KN/scripts/run.py" 'from utils import uu\ndef r():\n    uu()\n'; w "$KN/tests/test_a.py" 'import utils\n'
