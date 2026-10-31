@@ -3076,17 +3076,16 @@ inline CoPairVerdict coPairVerdict( const IngestResult& ing, std::uint32_t a, st
 }
 inline std::string coPairAttr( bool isDepCapable, bool isSurprising, std::uint32_t noEdgeLangs = 0 )
 {
-    if( !isDepCapable )
-    {
-        return " dep_capable=\"0\"";
-    }
-    if( noEdgeLangs != 0 )
-    {
-        return noFileEdgesAttrXml( noEdgeLangs );
-    }
-    return isSurprising ? " surprising=\"1\"" : "";
+    return !isDepCapable ? std::string( " dep_capable=\"0\"" )
+         : noEdgeLangs != 0 ? noFileEdgesAttrXml( noEdgeLangs )
+                            : std::string( isSurprising ? " surprising=\"1\"" : "" );
 }
 inline std::string coPairAttr( const CoPartner& p ) { return coPairAttr( p.depCapable, p.surprising, p.noEdgeLangs ); }
+// The MCP twin's JSON key for the same fourth state: present only where the XML row carries no_file_edges=.
+inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
+{
+    return p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string();
+}
 
 // Partners of `fileSubstr`: files that historically change in the same commit. deg = fraction of the
 // file's commits the partner also appears in; surprising = no transitive static #include either way (A4-F22:

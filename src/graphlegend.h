@@ -1080,11 +1080,11 @@ inline const char* archMaskedFilesLegend( bool on ) noexcept { return on ? kArch
 inline constexpr const char* kImpactNoFileEdgesLegend =
     "no_file_edges=LANGS (absent when none): a definition's file is in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace), so importers= is a floor: 0 means none resolved, not none exist. ";
 inline const char* impactNoFileEdgesLegend( bool on ) noexcept { return on ? kImpactNoFileEdgesLegend : ""; }
-// --cochange / --pr-context (gitmine.h coPairAttr): a pair with a side in such a language, and no observed edge between the files.
+// --cochange / --pr-context (gitmine.h coPairAttr): a pair with a side in such a language, and no observed edge between the files. Its own
+// comment (the kind the history verbs append after their legend), present-only, opening like the verb's legend so the compact layer reads it as prose.
 inline constexpr const char* kCochangeNoFileEdgesLegend =
-    "no_file_edges=LANGS replaces surprising= on a pair with a side in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace): no edge between the two files was observed, and that proves nothing there, so the hidden-coupling question is unknown, not answered. ";
-// Its own comment (the kind the history verbs append after their legend), present-only, opening like the verb's legend so the compact layer reads it as prose.
-inline std::string cochangeNoFileEdgesLegend( bool on ) { return on ? std::string( "<!-- ripwire cochange: " ) + kCochangeNoFileEdgesLegend + "-->" : std::string(); }
+    "<!-- ripwire cochange: no_file_edges=LANGS replaces surprising= on a pair with a side in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace): no edge between the two files was observed, and that proves nothing there, so the hidden-coupling question is unknown, not answered. -->";
+inline const char* cochangeNoFileEdgesLegend( bool on ) noexcept { return on ? kCochangeNoFileEdgesLegend : ""; }
 inline constexpr const char* kDepsImportsDtsLegend =
     "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
 inline constexpr const char* kDepsTsconfigUnreadLegend =

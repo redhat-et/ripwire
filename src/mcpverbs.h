@@ -1542,7 +1542,7 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ccRel( p.fileId ) ) + "\",\"together\":" + std::to_string( p.together )
              + ",\"deg\":" + deg + ",\"surprising\":" + ( p.surprising ? "true" : "false" )
              + ",\"dep_capable\":" + ( p.depCapable ? "true" : "false" )
-             + ( p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string() ) + "}";   // arch-honest: surprising is unknown here
+             + coPairNoEdgeKeyJson( p ) + "}";   // arch-honest: surprising is unknown where this key rides
     }
     out += "]}";
     return out;
