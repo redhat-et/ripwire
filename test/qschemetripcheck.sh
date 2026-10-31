@@ -58,6 +58,10 @@ PIN="$ROOT/test/qschemetrip.hash"
 #   kParserVer 269 -> 271 (rich 272; above the lane placeholders 259, 260, 261 and the live 263, 265, 267) and kCacheVersion 46 -> 48
 #   (alias-import's LocalBindKind ReExport appended; its placeholder 47), quality.h's two kIngest*Mirror constants with them.
 #   kQSnapCacheScheme stays 24: no watched quality.h function moved.
+# 2026-10-30, lane string-import fix round 1 (PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: kParserVer
+#   269 -> 275 (rich 276; c434dc34 had a 274 placeholder), quality.h's kIngestParserVerMirror with it: the dotted-string fact's scope char is now
+#   a non-identifier byte and an import sink's fact carries the flow tokens of its argument. kCacheVersion stays 46 and kQSnapCacheScheme
+#   stays 24: no record changes shape and no watched quality.h function moved.
 # 2026-10-29, train 41b (lane fn-slot-s2 merged onto main 52896f51): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the composed tree
 #   (main's pin 7273ed82… and the fn-slot-s2 branch pin b9174e46… conflicted). Watched text: kParserVer 259 -> 269 (rich 270; above
 #   the lane placeholders 257/259/260 and the live placeholders 259, 261, 263, 265, 267), quality.h's kIngestParserVerMirror with it.

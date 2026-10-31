@@ -67,6 +67,8 @@ namespace
 
 using VrFam = ValueRefFamily;   // model.h: the one armed-language table the resolver indexes too
 
+inline constexpr std::size_t kVrDottedFlowMaxBytes = 400;    // STRING-IMPORT: a sink's flow-token list over this carries none (it joins no constant)
+inline constexpr std::size_t kVrDottedStringMaxBytes = 200;   // STRING-IMPORT: a longer string is no module path (no fact, no disclosure: nothing is cut)
 inline constexpr std::uint32_t kVrMaxDepth   = 512;   // the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h)
 inline constexpr std::size_t   kVrTextCap    = 96;    // a written slot / callee longer than this is cut with "…"
 
@@ -688,6 +690,10 @@ public:
         m_fwdArmed     = !m_fwd.empty();
         const RegLang* regRow = regLang( m_lang );   // REGISTRAR: a language whose registrars store a parameter into a container
         m_regStores    = regRow != nullptr && regRow->form == RegForm::ReceiverMethod ? regRow->containerStores : std::span<const std::string_view>{};
+        if( const DottedImportSinkLang* sinkRow = findByField( kDottedImportSinks, &DottedImportSinkLang::lang, m_lang ); sinkRow != nullptr )
+        {
+            m_importSinks = sinkRow->sinks;
+        }
 
         VrScope file;
         file.node = root;
@@ -1517,8 +1523,13 @@ private:
         {
             memberValueAt( i );
         }
+        else if( !m_importSinks.empty() && kindIs( a.kind, "string" ) )
+        {
+            dottedStringAt( i );   // STRING-IMPORT (inert on a language with no sink row)
+        }
         else if( isCallKind( a.kind ) )
         {
+            importSinkAt( n );    // STRING-IMPORT (inert on a language with no sink row)
             slotThroughAt( n );   // IX-1 (inert without a slot row)
             throughAt( n );
             patternAtCall( n );
@@ -3214,19 +3225,21 @@ private:
         m_aliases.pairs.emplace_back( std::string( alias ), std::string( key ) );
     }
 
+    // One no-row fact record (role Value, name "": no identifier is empty, so no row): the slot facts and the dotted-string facts.
+    void emitValueFact( TSNode at, char scope, std::string recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
+    {
+        RawRef r     = rawRefAt( at, m_fileId, m_lang, RefRole::Value, {} );
+        r.qualifier  = std::string( 1, scope );
+        r.recvVar    = std::move( recvVar );
+        r.composeRel = std::string( composeRel );
+        r.memberCtor = std::string( memberCtor );
+        r.memberPath = std::string( memberPath );
+        m_out.push_back( std::move( r ) );
+    }
+
     void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
     {
-        RawRef r;
-        r.fileId     = m_fileId;
-        r.startByte  = ts_node_start_byte( at );
-        r.line       = ts_node_start_point( at ).row + 1;
-        r.lang       = m_lang;
-        r.role       = RefRole::Value;
-        r.qualifier  = std::string( 1, kValueRefSlotFactScope );   // name stays "": no identifier is empty, so no row
-        r.recvVar    = std::move( owner );
-        r.composeRel = std::string( field );
-        r.memberCtor = type;
-        m_out.push_back( std::move( r ) );
+        emitValueFact( at, kValueRefSlotFactScope, std::move( owner ), field, type );
     }
 
     // The struct type a name is declared with, innermost scope first: declared = some scope declares it; key "" with
@@ -3610,14 +3623,8 @@ private:
     void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
     {
         const std::size_t dot = chain.rfind( '.' );
-        RawRef r;
-        r.fileId     = m_fileId;
-        r.startByte  = ts_node_start_byte( call );
-        r.line       = ts_node_start_point( call ).row + 1;
-        r.lang       = m_lang;
-        r.role       = RefRole::Through;
+        RawRef r     = rawRefAt( call, m_fileId, m_lang, RefRole::Through, std::string( text( root ) ) );
         r.qualifier  = std::string( 1, kValueRefSlotCallScope );
-        r.name       = std::string( text( root ) );
         r.fieldName  = vrClean( text( f ) );
         r.composeRel = "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) );
         r.memberCtor = slotCtor( std::move( key ), kw );
@@ -3644,6 +3651,456 @@ private:
         std::string suffix;
         bool        callable = true;   // false: the name is tested or stored, never called through (hasattr, `o[ 'p' + e ] = fn`)
     };
+    // ── STRING-IMPORT: dotted-string facts (model.h kValueRefDottedStringScope; fordottedstring.h reads them) ──────────
+    // The string's content when the node is ONE plain literal: no interpolation, not bytes. "" otherwise.
+    std::string_view plainStringContent( TSNode n ) const noexcept
+    {
+        if( !isPlainStringNode( n ) || ts_node_named_child_count( n ) != 3 || !kindIs( ts_node_type( ts_node_named_child( n, 1 ) ), "string_content" ) )
+        {
+            return {};
+        }
+        const std::string_view open = text( ts_node_named_child( n, 0 ) );
+        for( const char c : open )
+        {
+            if( c != '"' && c != '\'' && c != 'r' && c != 'R' && c != 'u' && c != 'U' )
+            {
+                return {};   // b'' bytes, f'' with no hole
+            }
+        }
+        return text( ts_node_named_child( n, 1 ) );
+    }
+    // `ident(.ident)+`, ASCII; with `allowHole` a segment may be exactly %s. Over the cap: no module path.
+    static bool isDottedPathText( std::string_view s, bool allowHole ) noexcept
+    {
+        if( s.size() > kVrDottedStringMaxBytes || s.find( '.' ) == std::string_view::npos )
+        {
+            return false;
+        }
+        bool sawHole = false;
+        for( std::size_t at = 0; at <= s.size(); )
+        {
+            const std::size_t      dot = std::min( s.find( '.', at ), s.size() );
+            const std::string_view seg = s.substr( at, dot - at );
+            if( allowHole && seg == "%s" )
+            {
+                sawHole = true;
+            }
+            else
+            {
+                const auto idByte = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+                if( seg.empty() || ( seg[0] >= '0' && seg[0] <= '9' ) || !std::ranges::all_of( seg, idByte ) )
+                {
+                    return false;
+                }
+            }
+            at = dot + 1;
+        }
+        return !allowHole || sawHole;
+    }
+    // The call's callee tail name: `f` of `f(...)` and of `a.b.f(...)`; "" for any other callee shape.
+    std::string_view calleeTailOf( TSNode call ) const noexcept
+    {
+        TSNode fn = ts_node_child_by_field_id( call, m_fFunction );
+        if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "attribute" ) )
+        {
+            fn = ts_node_child_by_field_id( fn, m_fAttribute );
+        }
+        return !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) ? text( fn ) : std::string_view();
+    }
+    // The call's import-sink tail name ("" when its callee is not one). A tail name only: the callee is not resolved.
+    std::string_view importSinkOf( TSNode call ) const noexcept
+    {
+        const std::string_view tail = calleeTailOf( call );
+        if( std::ranges::find( m_importSinks, tail ) == m_importSinks.end() )
+        {
+            return {};
+        }
+        return tail;
+    }
+    void noteDottedFact( TSNode at, std::string_view value, std::string_view shape, std::string_view sink, std::string_view assignedTo )
+    {
+        emitValueFact( at, kValueRefDottedStringScope, std::string( value ), shape, assignedTo, sink );
+    }
+    // ── the flow of a sink's argument (kDottedFlowAttr / kDottedFlowBound tokens, model.h) ────────────────────────────────────────
+    // The names an expression mentions: a bare identifier, an attribute's tail as `.tail` (its object is walked too).
+    void flowNamesOf( TSNode root, std::vector<std::string>& out ) const
+    {
+        std::vector<TSNode> stack{ root };
+        while( !stack.empty() )
+        {
+            const TSNode c = stack.back();
+            stack.pop_back();
+            const char* t = ts_node_type( c );
+            if( kindIs( t, "identifier" ) )
+            {
+                out.emplace_back( text( c ) );
+            }
+            else if( kindIs( t, "attribute" ) )
+            {
+                const TSNode attr = ts_node_child_by_field_name( c, "attribute", 9 );
+                const TSNode obj  = ts_node_child_by_field_name( c, "object", 6 );
+                if( !ts_node_is_null( attr ) )
+                {
+                    out.push_back( std::string( 1, kDottedFlowAttr ) + std::string( text( attr ) ) );
+                }
+                if( !ts_node_is_null( obj ) )
+                {
+                    stack.push_back( obj );
+                }
+            }
+            else if( kindIs( t, "keyword_argument" ) )
+            {
+                const TSNode v = ts_node_child_by_field_name( c, "value", 5 );
+                if( !ts_node_is_null( v ) )
+                {
+                    stack.push_back( v );
+                }
+            }
+            else
+            {
+                const bool ternary = kindIs( t, "conditional_expression" );   // `a if COND else b`: COND decides, it does not flow (named children: a, COND, b)
+                for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
+                {
+                    if( !ternary || k != 1 )
+                    {
+                        stack.push_back( ts_node_named_child( c, k ) );
+                    }
+                }
+            }
+        }
+    }
+    // The names an assignment-like left side binds: `x`, `self.x` (as `.x`), the elements of a tuple/list pattern, a subscript's object.
+    void flowTargetsOf( TSNode left, std::vector<std::string>& out, bool& bareBinds ) const
+    {
+        const char* t = ts_node_type( left );
+        if( kindIs( t, "identifier" ) )
+        {
+            out.emplace_back( text( left ) );
+            bareBinds = true;
+        }
+        else if( kindIs( t, "attribute" ) )
+        {
+            const TSNode attr = ts_node_child_by_field_name( left, "attribute", 9 );
+            out.push_back( std::string( 1, kDottedFlowAttr ) + std::string( ts_node_is_null( attr ) ? std::string_view() : text( attr ) ) );
+        }
+        else if( kindIs( t, "subscript" ) )
+        {
+            const TSNode v = ts_node_child_by_field_name( left, "value", 5 );
+            bool         ignored = false;
+            if( !ts_node_is_null( v ) )
+            {
+                flowTargetsOf( v, out, ignored );
+            }
+        }
+        else if( kindIs( t, "pattern_list" ) || kindIs( t, "tuple_pattern" ) || kindIs( t, "list_pattern" ) || kindIs( t, "list_splat_pattern" ) )
+        {
+            for( std::uint32_t k = 0; k < ts_node_named_child_count( left ); ++k )
+            {
+                flowTargetsOf( ts_node_named_child( left, k ), out, bareBinds );
+            }
+        }
+    }
+    // The space-separated flow tokens of the sink call `call` inside function `fn`: every name whose value can reach the call's first
+    // argument through that function's own assignments. A bare name some statement of the function binds is `=name`.
+    std::string flowTokensOf( TSNode fn, TSNode first ) const
+    {
+        std::vector<std::pair<std::string, std::vector<std::string>>> edges;   // target <- names
+        std::set<std::string>                                          bound;
+        std::set<std::string>                                          globalNames;
+        const auto                                                     bindParam = [ & ]( TSNode p )
+        {
+            const char* t = ts_node_type( p );
+            if( kindIs( t, "identifier" ) )
+            {
+                bound.emplace( text( p ) );
+            }
+            else if( kindIs( t, "default_parameter" ) || kindIs( t, "typed_default_parameter" ) )
+            {
+                const TSNode nm = ts_node_child_by_field_name( p, "name", 4 );
+                if( !ts_node_is_null( nm ) && kindIs( ts_node_type( nm ), "identifier" ) )
+                {
+                    bound.emplace( text( nm ) );
+                }
+            }
+            else if( ts_node_named_child_count( p ) > 0 )
+            {
+                const TSNode in = ts_node_named_child( p, 0 );
+                if( kindIs( ts_node_type( in ), "identifier" ) )
+                {
+                    bound.emplace( text( in ) );
+                }
+            }
+        };
+        std::vector<TSNode> stack{ fn };
+        while( !stack.empty() )
+        {
+            const TSNode c = stack.back();
+            stack.pop_back();
+            const char* t = ts_node_type( c );
+            if( kindIs( t, "function_definition" ) || kindIs( t, "class_definition" ) )
+            {
+                const TSNode nm = ts_node_child_by_field_name( c, "name", 4 );
+                if( c.id != fn.id )
+                {
+                    if( !ts_node_is_null( nm ) )
+                    {
+                        bound.emplace( text( nm ) );
+                    }
+                    continue;   // a nested scope binds its own names
+                }
+                const TSNode params = ts_node_child_by_field_name( c, "parameters", 10 );
+                for( std::uint32_t k = 0; !ts_node_is_null( params ) && k < ts_node_named_child_count( params ); ++k )
+                {
+                    bindParam( ts_node_named_child( params, k ) );
+                }
+            }
+            else if( kindIs( t, "global_statement" ) || kindIs( t, "nonlocal_statement" ) )
+            {
+                for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
+                {
+                    globalNames.emplace( text( ts_node_named_child( c, k ) ) );
+                }
+            }
+            else if( kindIs( t, "as_pattern" ) )
+            {
+                // `with open(x) as NAME`, `except E as NAME`, `case ... as NAME`: the alias binds its identifiers
+                const TSNode alias = ts_node_child_by_field_name( c, "alias", 5 );
+                std::vector<TSNode> inner{ alias };
+                while( !ts_node_is_null( alias ) && !inner.empty() )
+                {
+                    const TSNode n = inner.back();
+                    inner.pop_back();
+                    if( kindIs( ts_node_type( n ), "identifier" ) )
+                    {
+                        bound.emplace( text( n ) );
+                    }
+                    for( std::uint32_t k = 0; k < ts_node_named_child_count( n ); ++k )
+                    {
+                        inner.push_back( ts_node_named_child( n, k ) );
+                    }
+                }
+            }
+            else if( kindIs( t, "lambda" ) )
+            {
+                const TSNode params = ts_node_child_by_field_name( c, "parameters", 10 );   // a lambda's parameters shadow for the whole function (over-binding only removes a join)
+                for( std::uint32_t k = 0; !ts_node_is_null( params ) && k < ts_node_named_child_count( params ); ++k )
+                {
+                    bindParam( ts_node_named_child( params, k ) );
+                }
+            }
+            else
+            {
+                const bool isAssign = kindIs( t, "assignment" ) || kindIs( t, "augmented_assignment" );
+                const bool isFor    = kindIs( t, "for_statement" ) || kindIs( t, "for_in_clause" );
+                const bool isWalrus = kindIs( t, "named_expression" );
+                if( isAssign || isFor || isWalrus )
+                {
+                    const TSNode l = ts_node_child_by_field_name( c, isWalrus ? "name" : "left", 4 );
+                    const TSNode r = ts_node_child_by_field_name( c, isWalrus ? "value" : "right", 5 );
+                    if( !ts_node_is_null( l ) && !ts_node_is_null( r ) )
+                    {
+                        std::pair<std::string, std::vector<std::string>> e;
+                        std::vector<std::string>                         targets;
+                        bool                                             bareBinds = false;
+                        flowTargetsOf( l, targets, bareBinds );
+                        flowNamesOf( r, e.second );
+                        for( const std::string& tg : targets )
+                        {
+                            if( tg[0] != kDottedFlowAttr )
+                            {
+                                bound.insert( tg );
+                            }
+                            edges.emplace_back( tg, e.second );
+                        }
+                    }
+                }
+            }
+            for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
+            {
+                stack.push_back( ts_node_named_child( c, k ) );
+            }
+        }
+        for( const std::string& g : globalNames )
+        {
+            bound.erase( g );
+        }
+        std::vector<std::string> start;
+        flowNamesOf( first, start );
+        std::set<std::string> reach( start.begin(), start.end() );
+        for( bool grew = true; grew; )
+        {
+            grew = false;
+            for( const auto& [ target, from ] : edges )
+            {
+                if( reach.contains( target ) )
+                {
+                    for( const std::string& f : from )
+                    {
+                        grew = reach.insert( f ).second || grew;
+                    }
+                }
+            }
+        }
+        std::string out;
+        for( const std::string& name : reach )
+        {
+            const bool isBound = name[0] != kDottedFlowAttr && bound.contains( name );
+            out += ( out.empty() ? "" : " " );
+            if( isBound )
+            {
+                out += kDottedFlowBound;
+            }
+            out += name;
+        }
+        return out.size() > kVrDottedFlowMaxBytes ? std::string() : out;
+    }
+    // A call of an import sink whose first argument is no literal or template: the loader half of a dotted string's story.
+    void importSinkAt( TSNode call )
+    {
+        if( m_importSinks.empty() )
+        {
+            return;
+        }
+        const std::string_view sink = importSinkOf( call );
+        if( sink.empty() )
+        {
+            return;
+        }
+        const TSNode args  = ts_node_child_by_field_id( call, m_fArguments );
+        const TSNode first = ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 ? TSNode{} : ts_node_named_child( args, 0 );
+        if( !isPlainStringNode( first ) )   // a %-template is a computed value too (dottedStringAt records the template beside this)
+        {
+            std::string flow;
+            for( std::size_t j = m_anc.size(); j > 0 && !ts_node_is_null( first ); --j )
+            {
+                if( kindIs( m_anc[j - 1].kind, "function_definition" ) )
+                {
+                    flow = flowTokensOf( m_anc[j - 1].node, first );
+                    break;
+                }
+            }
+            emitValueFact( call, kValueRefDottedStringScope, std::move( flow ), kDottedShapeVariable, {}, sink );
+        }
+    }
+    // The assignment target's last name: `NAME`, `self.NAME`, `a.b.NAME`; "" for anything else (a tuple target, a subscript).
+    std::string_view assignedNameOf( TSNode assignment ) const noexcept
+    {
+        TSNode left = ts_node_child_by_field_id( assignment, m_fLeft );
+        if( !ts_node_is_null( left ) && kindIs( ts_node_type( left ), "attribute" ) )
+        {
+            left = ts_node_child_by_field_id( left, m_fAttribute );
+        }
+        return !ts_node_is_null( left ) && kindIs( ts_node_type( left ), "identifier" ) ? text( left ) : std::string_view();
+    }
+    // Is an ancestor of m_anc[i] a function body? (a lambda counts: a local there is no module constant)
+    bool insideFunctionBody( std::size_t i ) const noexcept
+    {
+        for( std::size_t j = i; j > 0; --j )
+        {
+            if( kindIs( m_anc[j - 1].kind, "function_definition" ) || kindIs( m_anc[j - 1].kind, "lambda" ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The climb of dottedStringAt ended at m_anc[j - 1] (`top`) above a container: is that a comparison, an assert, a raise, or the
+    // argument of a print/log-like call (kDottedNonLoadCallees)?
+    bool containerIsNotLoaded( std::size_t j, const char* top ) const noexcept
+    {
+        if( kindIs( top, "comparison_operator" ) || kindIs( top, "assert_statement" ) || kindIs( top, "raise_statement" ) || kindIs( top, "not_operator" ) )
+        {
+            return true;
+        }
+        std::size_t k = j - 1;
+        if( kindIs( top, "keyword_argument" ) && j >= 2 )
+        {
+            k = j - 2;
+        }
+        if( !kindIs( m_anc[k].kind, "argument_list" ) || k < 1 || !isCallKind( m_anc[k - 1].kind ) )
+        {
+            return false;
+        }
+        const bool raised = k >= 2 && kindIs( m_anc[k - 2].kind, "raise_statement" );
+        return raised || std::ranges::find( kDottedNonLoadCallees, calleeTailOf( m_anc[k - 1].node ) ) != std::end( kDottedNonLoadCallees );
+    }
+    // m_anc[i] is a `string` node. The PARSE decides the shape: a docstring (an expression statement), a comparison operand, a log
+    // call's argument and a dict KEY record nothing; the text is never scanned.
+    void dottedStringAt( std::size_t i )
+    {
+        const TSNode           n       = m_anc[i].node;
+        const std::string_view content = plainStringContent( n );
+        if( content.empty() )
+        {
+            return;
+        }
+        if( i >= 3 && kindIs( m_anc[i - 1].kind, "binary_operator" ) && kindIs( m_anc[i - 2].kind, "argument_list" ) && m_anc[i].namedIndex == 0
+            && text( ts_node_child_by_field_id( m_anc[i - 1].node, m_fOperator ) ) == "%" && isDottedPathText( content, /*allowHole=*/true ) )
+        {
+            const std::string_view sink = importSinkOf( m_anc[i - 3].node );
+            if( !sink.empty() && m_anc[i - 2].childNamed == 1 )
+            {
+                noteDottedFact( n, content, kDottedShapeFormat, sink, {} );
+            }
+            return;
+        }
+        if( !isDottedPathText( content, /*allowHole=*/false ) )
+        {
+            return;
+        }
+        bool        inContainer = false;
+        std::size_t j           = i;
+        while( j > 0 )
+        {
+            const char* up = m_anc[j - 1].kind;
+            if( kindIs( up, "list" ) || kindIs( up, "tuple" ) || kindIs( up, "set" ) || kindIs( up, "expression_list" ) )
+            {
+                inContainer = true;
+            }
+            else if( kindIs( up, "pair" ) )
+            {
+                if( m_anc[j].field != m_fValue )
+                {
+                    return;   // a dict KEY names a slot, not a value (LOGGING's "django.request": { … })
+                }
+                inContainer = true;
+            }
+            else if( !kindIs( up, "parenthesized_expression" ) && !kindIs( up, "dictionary" ) )
+            {
+                break;
+            }
+            --j;
+        }
+        if( j == 0 )
+        {
+            return;
+        }
+        const char*            top      = m_anc[j - 1].kind;
+        const bool             isAssign = ( kindIs( top, "assignment" ) || kindIs( top, "augmented_assignment" ) ) && m_anc[j].field == m_fRight;
+        const std::string_view name     = isAssign ? assignedNameOf( m_anc[j - 1].node ) : std::string_view();
+        if( inContainer )
+        {
+            if( containerIsNotLoaded( j, top ) )
+            {
+                return;   // compared, asserted, raised or logged: a string in it is data to look at, never a path to load
+            }
+            const bool localName = isAssign && kindIs( top, "assignment" ) && insideFunctionBody( j ) && kindIs( ts_node_type( ts_node_child_by_field_id( m_anc[j - 1].node, m_fLeft ) ), "identifier" );
+            noteDottedFact( n, content, localName ? kDottedShapeLocalListed : kDottedShapeListed, {}, name );
+        }
+        else if( isAssign && kindIs( top, "assignment" ) && !insideFunctionBody( j ) )
+        {
+            noteDottedFact( n, content, kDottedShapeConstant, {}, name );
+        }
+        else if( kindIs( top, "argument_list" ) && j >= 2 && j == i && m_anc[j - 1].childNamed == 1 )
+        {
+            const std::string_view sink = importSinkOf( m_anc[j - 2].node );
+            if( !sink.empty() )
+            {
+                noteDottedFact( n, content, kDottedShapeSink, sink, {} );
+            }
+        }
+    }
+
     bool isPlainStringNode( TSNode n ) const noexcept
     {
         if( ts_node_is_null( n ) || !kindIs( ts_node_type( n ), "string" ) )
@@ -3913,6 +4370,7 @@ private:
     // call forwarders (model.h kCallForwarders): the sites `f.call( … )` / `f.apply( … )` whose f no enclosing parameter or
     // local declares, and the file's two proofs that a bare f names a function — its function declarations (any depth:
     // a declaration is hoisted and the walk's scopes do not record it) and its file-scope relative imports.
+    std::span<const std::string_view> m_importSinks;   // STRING-IMPORT: this language's import sinks (model.h kDottedImportSinks; empty: no facts)
     std::span<const CallForwarder> m_fwd;
     bool                           m_fwdArmed = false;
     std::vector<RawRef>            m_fwdSites;

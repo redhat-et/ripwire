@@ -5564,7 +5564,7 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
         // a backtick mention in prose is not code evidence; a read/write USE-site is recorded only by the rich ingest (--uses,
         // MCP), so reading it here made the same call bind on MCP and decline on the CLI map — evidence must not depend on
         // which ingest ran (FE-B found it through mcpclidiffcheck's stanza on a Python `set().update()` beside a method)
-        if( !r.isDocLink && r.role != RefRole::Read && r.role != RefRole::Write && r.role != RefRole::Subscript )   // a subscript names an operator, and is a call only once proven
+        if( !r.isDocLink && !isDottedStringFact( r ) && r.role != RefRole::Read && r.role != RefRole::Write && r.role != RefRole::Subscript )   // a subscript names an operator, and is a call only once proven
         {
             note( r.fileId, r.calleeName );
             note( r.fileId, r.recvVar );
