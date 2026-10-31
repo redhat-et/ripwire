@@ -122,6 +122,28 @@ inline std::uint32_t childNamed( std::vector<CcNode>& pool, std::uint32_t parent
     pool[ parent ].children.push_back( id );   // NOTE: pool may reallocate; do not hold a CcNode& across this
     return id;
 }
+// One File leaf's attributes. A file in a language this build draws no file edges for (arch-honest) omits a zero fan_in/fan_out, because a city
+// view would draw it as a measured, uncoupled file; a nonzero one is a floor over the resolved edges, which the attribute descriptors say.
+inline void emitCcAttrs( std::FILE* out, const CcFileMetrics& e )
+{
+    if( !e.noFileEdgeLang )
+    {
+        rw::emitTo( out,
+            "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"fan_in\":{},\"fan_out\":{},\"churn\":{}}}",
+            e.loc, e.symbols, e.cx, e.ccx, e.fanIn, e.fanOut, e.churn );
+        return;
+    }
+    rw::emitTo( out, "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{}", e.loc, e.symbols, e.cx, e.ccx );
+    if( e.fanIn > 0 )
+    {
+        rw::emitTo( out, ",\"fan_in\":{}", e.fanIn );
+    }
+    if( e.fanOut > 0 )
+    {
+        rw::emitTo( out, ",\"fan_out\":{}", e.fanOut );
+    }
+    rw::emitTo( out, ",\"churn\":{}}}", e.churn );
+}
 }   // namespace ccdetail
 
 // Build the per-file metrics for every ingested file. `churn` is filled by the caller (it owns the
@@ -242,26 +264,6 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     //      captures itself through a reference wrapper is awkward; use an index-driven recursion with a
     //      plain recursive lambda declared as `auto&&` self-parameter. ----------------------------------
     std::string esc;   // reused escape scratch
-    const auto emitAttrs = [ & ]( const CcFileMetrics& e )
-    {
-        if( e.noFileEdgeLang )   // arch-honest: a zero is omitted, not printed (a city view would draw it as a measured, uncoupled file); a nonzero one is a floor, said in the descriptors
-        {
-            rw::emitTo( out, "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{}", e.loc, e.symbols, e.cx, e.ccx );
-            if( e.fanIn > 0 )
-            {
-                rw::emitTo( out, ",\"fan_in\":{}", e.fanIn );
-            }
-            if( e.fanOut > 0 )
-            {
-                rw::emitTo( out, ",\"fan_out\":{}", e.fanOut );
-            }
-            rw::emitTo( out, ",\"churn\":{}}}", e.churn );
-            return;
-        }
-        rw::emitTo( out,
-            "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"fan_in\":{},\"fan_out\":{},\"churn\":{}}}",
-            e.loc, e.symbols, e.cx, e.ccx, e.fanIn, e.fanOut, e.churn );
-    };
     const bool anyUnknown = std::any_of( metrics.begin(), metrics.end(), []( const CcFileMetrics& e ) { return e.noFileEdgeLang; } );
     // Present-only: a tree without such a file keeps the descriptors it always had, byte for byte.
     const char* const unknownNote = anyUnknown ? "; for a file in a language whose imports this build does not resolve to files, a value is a floor over the resolved edges and an absent one is unknown, not 0" : "";
@@ -276,7 +278,7 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
         if( n.fileId >= 0 )   // File leaf
         {
             rw::emitRaw( out, "\"type\":\"File\"," );
-            emitAttrs( metrics[ std::uint32_t( n.fileId ) ] );
+            emitCcAttrs( out, metrics[ std::uint32_t( n.fileId ) ] );
             rw::emitRaw( out, "}" );
             return;
         }
