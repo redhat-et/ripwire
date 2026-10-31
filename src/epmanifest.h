@@ -18,8 +18,9 @@
 //
 // READERS (one per manifest format, language data separate from the shared row): setup.cfg `[options.entry_points]` (INI keys
 // and continuation lines), pyproject.toml `[project.entry-points.G]`, `[project.scripts]` (console_scripts), `[project.gui-scripts]`
-// (gui_scripts), `[tool.poetry.plugins.G]`, `[tool.poetry.scripts]` (string values only). A manifest is read where a shown
-// Python row's directory or one of its ancestors up to the root holds one — a package's manifest always sits above its modules.
+// (gui_scripts), `[tool.poetry.plugins.G]`, `[tool.poetry.scripts]` (string values only), Cargo.toml `[[bin]]` (name, path,
+// default `src/main.rs` when a crate declares none). A manifest is read where a shown row whose language has a reader lives:
+// its directory or one of its ancestors up to the root holds one — a package's manifest always sits above its modules.
 // FLOORS (stated in the legend's absence of them, and in the lane report): setup.py `entry_points={…}` (a call, not a table),
 // package.json "bin"/"exports" (a file, not a symbol: no def to tie), pyproject inline tables, a group literal built at run
 // time, a multi-root run. The DEFAULT regime and the XML dialect only, as the caller hop: --json, --token-budget=N,
@@ -340,6 +341,197 @@ inline void parsePyprojectEntryPoints( std::string_view text, std::vector<EpEntr
     } );
 }
 
+// A TOML value that is a quoted string or a bare token (Cargo `path = tools/gen.rs`).
+inline std::optional<std::string> tomlBareOrString( std::string_view v )
+{
+    if( const std::optional<std::string_view> q = epdetail::tomlStringValue( v ) )
+    {
+        return std::string( *q );
+    }
+    v = trimWs( v );
+    if( v.empty() || v.find_first_of( " 	#" ) != std::string_view::npos )
+    {
+        return std::nullopt;
+    }
+    return std::string( v );
+}
+
+inline std::string cargoTableName( std::string_view line )
+{
+    const std::string_view t = trimWs( line );
+    if( t.empty() || t.front() != '[' || t.starts_with( "[[" ) )
+    {
+        return {};
+    }
+    std::size_t close = std::string_view::npos;
+    for( std::size_t i = 1, q = 0; i < t.size(); ++i )
+    {
+        if( q != 0 )
+        {
+            q = std::size_t( t[i] ) == q ? 0 : q;
+        }
+        else if( t[i] == '"' || t[i] == '\'' )
+        {
+            q = std::size_t( t[i] );
+        }
+        else if( t[i] == ']' )
+        {
+            close = i;
+            break;
+        }
+    }
+    if( close == std::string_view::npos )
+    {
+        return {};
+    }
+    const std::vector<std::string> parts = epdetail::tomlKeyParts( t.substr( 1, close - 1 ) );
+    return parts.size() == 1 ? parts[0] : std::string();
+}
+
+inline std::string cargoArrayTableName( std::string_view line )
+{
+    const std::string_view t = trimWs( line );
+    if( !t.starts_with( "[[" ) )
+    {
+        return {};
+    }
+    const std::size_t close = t.find( ']', 2 );
+    if( close == std::string_view::npos || close <= 2 )
+    {
+        return {};
+    }
+    const std::vector<std::string> parts = epdetail::tomlKeyParts( t.substr( 2, close - 2 ) );
+    return parts.size() == 1 ? parts[0] : std::string();
+}
+
+inline void parseCargoBins( std::string_view text, std::vector<EpEntry>& out )
+{
+    bool          inBin     = false;
+    bool          inPackage = false;
+    bool          sawBin    = false;
+    std::string   pkgName;
+    std::uint32_t pkgLine   = 0;
+    std::string   curName;
+    std::string   curPath;
+    std::uint32_t binLine   = 0;
+    const auto    flushBin  = [ & ]()
+    {
+        if( !inBin || curName.empty() )
+        {
+            curName.clear();
+            curPath.clear();
+            return;
+        }
+        // Cargo target inference when `path` is omitted: the package's own bin is src/main.rs, a named one src/bin/<name>.rs.
+        // (src/bin/<name>/main.rs is not tried: a floor, the entry then reads unresolved.)
+        std::string path = !curPath.empty() ? curPath : ( curName == pkgName ? std::string( "src/main.rs" ) : "src/bin/" + curName + ".rs" );
+        out.push_back( EpEntry{ "bin", binLine, curName, path, binLine } );
+        sawBin = true;
+        curName.clear();
+        curPath.clear();
+    };
+    std::string_view multiline;   // the delimiter of an open multi-line string: its lines are values, never keys or tables
+    darkflags::forEachLine( text, [ & ]( std::string_view line, std::uint32_t lineNo )
+    {
+        const std::string_view t = trimWs( line );
+        if( !multiline.empty() )
+        {
+            multiline = t.find( multiline ) == std::string_view::npos ? multiline : std::string_view();
+            return;
+        }
+        if( t.empty() || t.front() == '#' )
+        {
+            return;
+        }
+        if( t.starts_with( "[[" ) )
+        {
+            flushBin();
+            inPackage = false;
+            const std::string table = cargoArrayTableName( t );
+            inBin     = table == "bin";
+            binLine   = inBin ? lineNo : 0;
+            return;
+        }
+        if( t.front() == '[' )
+        {
+            flushBin();
+            inBin = false;
+            const std::string table = cargoTableName( t );
+            inPackage = table == "package";
+            if( inPackage )
+            {
+                pkgLine = lineNo;
+            }
+            return;
+        }
+        std::size_t eq = std::string_view::npos;
+        char        q  = 0;
+        for( std::size_t i = 0; i < t.size(); ++i )
+        {
+            if( q != 0 )
+            {
+                q = t[i] == q ? char( 0 ) : q;
+            }
+            else if( t[i] == '"' || t[i] == '\'' )
+            {
+                q = t[i];
+            }
+            else if( t[i] == '=' )
+            {
+                eq = i;
+                break;
+            }
+        }
+        if( eq == std::string_view::npos )
+        {
+            return;
+        }
+        const std::string_view rhs = trimWs( t.substr( eq + 1 ) );
+        for( const std::string_view d : { std::string_view( "\"\"\"" ), std::string_view( "\'\'\'" ) } )
+        {
+            if( rhs.starts_with( d ) && rhs.find( d, 3 ) == std::string_view::npos )
+            {
+                multiline = d;
+            }
+        }
+        const std::vector<std::string> key = epdetail::tomlKeyParts( t.substr( 0, eq ) );
+        if( key.size() != 1 || key[0].empty() )
+        {
+            return;
+        }
+        if( inBin )
+        {
+            const std::optional<std::string> val = tomlBareOrString( t.substr( eq + 1 ) );
+            if( !val )
+            {
+                return;
+            }
+            if( key[0] == "name" )
+            {
+                curName = *val;
+            }
+            else if( key[0] == "path" )
+            {
+                curPath = *val;
+            }
+            return;
+        }
+        if( inPackage && key[0] == "name" )
+        {
+            if( const std::optional<std::string> val = tomlBareOrString( t.substr( eq + 1 ) ) )
+            {
+                pkgName = *val;
+            }
+        }
+    } );
+    flushBin();
+    if( !sawBin && !pkgName.empty() )
+    {
+        out.push_back( EpEntry{ "bin", pkgLine, pkgName, "src/main.rs", pkgLine } );
+    }
+}
+
+
 // ── the consumer shapes: a quoted occurrence of the group literal whose line reads it as an entry-point group ──────────────
 namespace epdetail
 {
@@ -515,6 +707,27 @@ struct EpTarget
     NodeId        def   = kNoNode;
 };
 
+// The indexed file of a manifest path target within crate directory `mdir`.
+inline std::uint32_t epPathFile( const IngestResult& ing, std::string_view mdir, std::string_view path, bool& inTree )
+{
+    const std::string rel = mdir.empty() ? std::string( path ) : std::string( mdir ) + "/" + std::string( path );
+    std::vector<std::uint32_t> hit;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( rootRelPath( ing, f ) == rel )
+        {
+            hit.push_back( f );
+        }
+    }
+    inTree = !hit.empty();
+    return hit.size() == 1 ? hit.front() : kNoFile;
+}
+
+inline bool epIsMainFn( const Symbol& s ) noexcept
+{
+    return s.name == "main" && s.kind == SymKind::Function;
+}
+
 // The indexed module file of `module` (dotted) for a manifest in directory `mdir` (root-relative, "" = the root): a .py file
 // under mdir whose path within it is `a/b/c.py` or `a/b/c/__init__.py`, or ends with "/" + one of those (a package directory
 // such as src/). Several: the one directly under mdir or under mdir/src wins when it is the only such; else ambiguous (kNoFile).
@@ -616,7 +829,7 @@ inline void collectManifestsAbove( const IngestResult& ing, std::uint32_t fileId
         if( std::find( seenDirs.begin(), seenDirs.end(), dir ) == seenDirs.end() )
         {
             seenDirs.emplace_back( dir );
-            for( const char* name : { "setup.cfg", "pyproject.toml" } )
+            for( const char* name : { "setup.cfg", "pyproject.toml", "Cargo.toml" } )
             {
                 const std::optional<std::string> text = docparse::detail::readRegularFile( name, ( disk / name ).string() );
                 if( !text )
@@ -628,9 +841,13 @@ inline void collectManifestsAbove( const IngestResult& ing, std::uint32_t fileId
                 {
                     parseSetupCfgEntryPoints( *text, m.entries );
                 }
-                else
+                else if( std::string_view( name ) == "pyproject.toml" )
                 {
                     parsePyprojectEntryPoints( *text, m.entries );
+                }
+                else
+                {
+                    parseCargoBins( *text, m.entries );
                 }
                 if( !m.entries.empty() )
                 {
@@ -653,6 +870,38 @@ inline void appendAttr( std::string& x, std::string_view key, std::string_view v
     x += std::format( " {}=\"{}\"", key, escapeXml( val, esc ) );
 }
 
+inline std::uint32_t epEntryFile( const IngestResult& ing, std::string_view mdir, const EpEntry& e, bool& inTree )
+{
+    const std::size_t colon = e.target.find( ':' );
+    return colon == std::string::npos ? epPathFile( ing, mdir, e.target, inTree )
+                                      : epModuleFile( ing, mdir, std::string_view( e.target ).substr( 0, colon ), inTree );
+}
+
+inline EpTargetState epEntryInitState( bool inTree ) noexcept
+{
+    return inTree ? EpTargetState::Unresolved : EpTargetState::External;
+}
+
+inline void epApplyTargetDef( const IngestResult& ing, const EpEntry& e, const FileSymbols& fs, EpTarget& out )
+{
+    const std::size_t colon = e.target.find( ':' );
+    if( colon == std::string::npos )
+    {
+        const auto hit = [ & ]( NodeId id ) { return epIsMainFn( ing.symbols[id] ); };
+        if( std::ranges::count_if( fs, hit ) == 1 )
+        {
+            out = EpTarget{ EpTargetState::Def, *std::ranges::find_if( fs, hit ) };
+        }
+        return;
+    }
+    const std::string_view attr = std::string_view( e.target ).substr( colon + 1 );
+    const auto             hit  = [ & ]( NodeId id ) { return epAttrNames( ing.symbols[id], attr ); };
+    if( std::ranges::count_if( fs, hit ) == 1 )
+    {
+        out = EpTarget{ EpTargetState::Def, *std::ranges::find_if( fs, hit ) };
+    }
+}
+
 // Each entry's target, resolved: its module's indexed file (epModuleFile), then ONE pass over the symbols of those files for
 // the attribute (epAttrNames): exactly one definition → Def; none or several in a module of the tree → Unresolved; no module
 // file at all → External.
@@ -666,9 +915,9 @@ inline std::vector<std::vector<EpTarget>> resolveEpTargets( const IngestResult& 
         for( const EpEntry& e : manifests[m].entries )
         {
             bool                inTree = false;
-            const std::uint32_t f      = epModuleFile( ing, manifests[m].dir, std::string_view( e.target ).substr( 0, e.target.find( ':' ) ), inTree );
+            const std::uint32_t f      = epEntryFile( ing, manifests[m].dir, e, inTree );
             moduleFile[m].push_back( f );
-            targets[m].push_back( EpTarget{ inTree ? EpTargetState::Unresolved : EpTargetState::External, kNoNode } );
+            targets[m].push_back( EpTarget{ epEntryInitState( inTree ), kNoNode } );
             if( f != kNoFile )
             {
                 wantFile[f] = 1;
@@ -681,19 +930,11 @@ inline std::vector<std::vector<EpTarget>> resolveEpTargets( const IngestResult& 
     {
         for( std::size_t k = 0; k < manifests[m].entries.size(); ++k )
         {
-            const std::string& tg    = manifests[m].entries[k].target;
-            const std::size_t  colon = tg.find( ':' );
-            if( moduleFile[m][k] == kNoFile || colon == std::string::npos )
+            if( moduleFile[m][k] == kNoFile )
             {
                 continue;
             }
-            const std::string_view attr = std::string_view( tg ).substr( colon + 1 );
-            const auto             hit  = [ & ]( NodeId id ) { return epAttrNames( ing.symbols[id], attr ); };
-            const FileSymbols&     fs   = byFile[ moduleFile[m][k] ];
-            if( std::ranges::count_if( fs, hit ) == 1 )
-            {
-                targets[m][k] = EpTarget{ EpTargetState::Def, *std::ranges::find_if( fs, hit ) };
-            }
+            epApplyTargetDef( ing, manifests[m].entries[k], byFile[ moduleFile[m][k] ], targets[m][k] );
         }
     }
     return targets;
@@ -832,16 +1073,22 @@ inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const No
     }
     std::vector<std::string>        seenDirs;
     std::vector<epdetail::Manifest> manifests;
-    for( const NodeId id : shown )   // the manifests above every shown Python row
+    for( const NodeId id : shown )   // the manifests above every shown row whose language has a reader
     {
-        if( id < ing.symbols.size() && rootRelPath( ing, ing.symbols[id].fileId ).ends_with( ".py" ) )
+        if( id >= ing.symbols.size() )
         {
-            epdetail::collectManifestsAbove( ing, ing.symbols[id].fileId, seenDirs, manifests );
+            continue;
         }
+        const std::string_view rel = rootRelPath( ing, ing.symbols[id].fileId );
+        if( !rel.ends_with( ".py" ) && !rel.ends_with( ".rs" ) )   // the languages that have a manifest reader
+        {
+            continue;
+        }
+        epdetail::collectManifestsAbove( ing, ing.symbols[id].fileId, seenDirs, manifests );
     }
     if( manifests.empty() )
     {
-        return out;   // no manifest above a shown Python row: resolveEpTargets and consumerLineIndex would each walk every symbol for nothing
+        return out;   // no manifest above a shown row: resolveEpTargets and consumerLineIndex would each walk every symbol for nothing
     }
     const std::vector<std::vector<EpTarget>> targets     = epdetail::resolveEpTargets( ing, manifests );
     std::size_t                              groupsTotal = 0;
@@ -861,11 +1108,13 @@ inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const No
     const std::vector<std::vector<EpConsumer>> consumers = findGroupConsumers( ing, literals );
     const flipimpact::SymbolLineIndex          lineIx    = epdetail::consumerLineIndex( ing, consumers );
     std::vector<char>                          esc;
+    const std::vector<EpConsumer>              noConsumers;
     for( std::size_t pi = 0; pi < picks.size(); ++pi )
     {
+        const bool cargo = manifests[ picks[pi].m ].rel.ends_with( "Cargo.toml" );   // a bin name is no group literal: nothing to scan
         const std::string groupsCap = ( pi == 0 && groupsTotal > picks.size() ) ? std::format( " groups_capped=\"1\" groups_total=\"{}\"", groupsTotal ) : std::string();
         epdetail::appendEpGroup( out.xml, ing, lineIx, manifests[ picks[pi].m ], targets[ picks[pi].m ], picks[pi].group,
-                                 consumers[ std::size_t( std::ranges::find( literals, picks[pi].group ) - literals.begin() ) ], groupsCap, esc );
+                                 cargo ? noConsumers : consumers[ std::size_t( std::ranges::find( literals, picks[pi].group ) - literals.begin() ) ], groupsCap, esc );
     }
     return out;
 }
@@ -873,15 +1122,15 @@ inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const No
 // The element's legend clauses, present-only beside it: the full and the compact dialect. No "--": they ride inside an XML comment.
 inline constexpr std::string_view kForEpManifestLegend =
     "; ep p= l= group=: a manifest entry-point group (setup.cfg [options.entry_points], pyproject [project.entry-points.*], "
-    "[project.scripts], [project.gui-scripts], [tool.poetry.plugins.*]/[tool.poetry.scripts]) that registers a shown row, l= the group's line; "
-    "e n= target=: each entry as written, def=file:line the in-tree definition it names, external=1 no indexed file is its module, "
+    "[project.scripts], [project.gui-scripts], [tool.poetry.plugins.*]/[tool.poetry.scripts], Cargo.toml [[bin]]) that registers a shown row, l= the group's line; "
+    "e n= target=: each entry as written, def=file:line the in-tree definition it names, external=1 no indexed file is its module or path, "
     "unresolved=1 the module or the name is not exactly one file or definition in the tree; used_at=file:line used_in=: code that "
     "compares or loads that group's string literal (by literal text, not resolved, so a docstring or a parameter default that quotes it is listed too; a floor); "
     "no used_at= means no such code was found; used_capped=1 used_total=, entries_capped=1 entries_total=, groups_capped=1 "
     "groups_total=: that list was cut, the total it was cut from";
 inline constexpr std::string_view kForCompactEpManifestLegend =
     "; ep p= l= group=: a manifest entry-point group registering a shown row; e n= target= as written, def=file:line in tree, "
-    "external=1 module not in tree, unresolved=1 not one def; used_at=file:line used_in=: code reading that group literal "
+    "external=1 module or path not in tree, unresolved=1 not one def; used_at=file:line used_in=: code reading that group literal "
     "(by text, a floor); used_capped=1/entries_capped=1/groups_capped=1 with used_total=/entries_total=/groups_total= if cut";
 
 }   // namespace rw

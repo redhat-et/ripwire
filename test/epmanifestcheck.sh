@@ -4,7 +4,7 @@
 # THE CONTRACT THIS PINS (arms tagged [P] are RED on the pre-change binary 681b49e5; [G] arms are twins and near-miss negatives
 # that hold on both binaries and must keep holding — PROCESS rule 4, no gate erosion):
 #
-#   TRIGGER  CLI --for (XML, default regime) whose ranked head shows a Python def that a manifest entry point names.
+#   TRIGGER  CLI --for (XML, default regime) whose ranked head shows a def a manifest entry point names (Python module:attr or Rust [[bin]] main).
 #   WHAT     <ep p= l= group= [used_at= used_in= used_total=]><e n= target= def=|external=1|unresolved=1/>…</ep> after the tail.
 #   NOT      a non-manifest file, --json, --token-budget=N, --signatures-only, RIPWIRE_NO_EP_MANIFEST=1 carry none.
 #
@@ -29,6 +29,14 @@
 #   E3 [P] an empty group name (`= bare = pkg.mod:Fmt`) yields no <ep>
 #   E4 [P] pyproject `[project.entry-points."x.report"]  # see [docs]`: group="x.report", not a name bent by the comment's `]`
 #   (C2/C3 also pin the closing quote: loader.py `prefix_only` compares "x.report.extra", which must not be listed for x.report)
+#   B1 [P] Cargo.toml `[[bin]]` gen-docs + app: <ep p="Cargo.toml" … group="bin"> with e n="gen-docs" target="tools/gen.rs"
+#          def="tools/gen.rs:3" and e n="app" target="src/app.rs" def="src/app.rs:3"
+#   B2 [G] a [[bin]] path not in the tree: external="1", never a def guess (cargoabs ghost)
+#   B3 [G] a [[bin]] file with no fn main: unresolved="1" (cargonommain empty)
+#   B4 [G] [[example]] / [[test]] tables are not binaries: no <ep> (cargoex)
+#   B5 [G] a workspace root Cargo.toml with no [[bin]]: no <ep> (cargows root)
+#   B6 [P] workspace member crates each with src/main.rs: implicit bin row from member Cargo.toml (cargows/crate-a)
+#   B7 [P] an omitted [[bin]] path follows Cargo inference (package bin src/main.rs, named bin src/bin/NAME.rs); a [[bin]] inside a multi-line string is no entry (cargoinf)
 #   N1 [G] a non-manifest .cfg (config.cfg, same text): no <ep>
 #   N2 [G] no <ep>, byte-identical to RIPWIRE_NO_EP_MANIFEST=1: --json, --token-budget=3000, --signatures-only
 #   N3 [G] prefix identity: the answer minus <ep> and its clause, est_tokens masked, equals RIPWIRE_NO_EP_MANIFEST=1
@@ -56,7 +64,7 @@ verdict(){ if [ "$1" -eq 0 ]; then ok "$2"; else no "$3"; fi; }   # rc, the PASS
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 FX="$ROOT/test/epmanifestfix"
-[ -f "$FX/edge/setup.cfg" ] && [ -f "$FX/edgetoml/pyproject.toml" ] && [ -f "$FX/cfg/setup.cfg" ] && [ -f "$FX/pyp/pyproject.toml" ] && [ -f "$FX/negcfg/config.cfg" ] && [ -f "$FX/sib/setup.cfg" ] || { echo "fixture test/epmanifestfix missing"; exit 2; }
+[ -f "$FX/edge/setup.cfg" ] && [ -f "$FX/edgetoml/pyproject.toml" ] && [ -f "$FX/cfg/setup.cfg" ] && [ -f "$FX/pyp/pyproject.toml" ] && [ -f "$FX/negcfg/config.cfg" ] && [ -f "$FX/sib/setup.cfg" ] && [ -f "$FX/cargo/Cargo.toml" ] && [ -f "$FX/cargoabs/Cargo.toml" ] && [ -f "$FX/cargonommain/Cargo.toml" ] && [ -f "$FX/cargoex/Cargo.toml" ] && [ -f "$FX/cargows/Cargo.toml" ] || { echo "fixture test/epmanifestfix missing"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -75,7 +83,15 @@ run "$FX/negcfg" "$TMP/neg" "$Q"
 run "$FX/sib" "$TMP/sib" '--for=how are the report formatter render and init hooks registered'
 run "$FX/edge" "$TMP/edge" "$Q"
 run "$FX/edgetoml" "$TMP/edgetoml" "$Q"
-for a in cfg cfg2 cfgfull cfgoff pyp neg sib edge edgetoml; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
+QCARGO='--for=cargo run --bin gen-docs entry'
+run "$FX/cargo" "$TMP/cargo" "$QCARGO"
+run "$FX/cargoabs" "$TMP/cargoabs" "$QCARGO"
+run "$FX/cargonommain" "$TMP/cargonommain" "$QCARGO"
+run "$FX/cargoinf" "$TMP/cargoinf" '--for=cargo run --bin tool entry'
+run "$FX/cargoex" "$TMP/cargoex" '--for=how does the sample example run'
+run "$FX/cargows" "$TMP/cargows" '--for=how does this workspace root start'
+run "$FX/cargows/crate-a" "$TMP/cargowsa" '--for=how does crate-a main start'
+for a in cfg cfg2 cfgfull cfgoff pyp neg sib edge edgetoml cargo cargoabs cargonommain cargoinf cargoex cargows cargowsa; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
 
 # eps FILE -> one JSON line: [{attrs..., "e": [{attrs}]}] of every <ep> element
 eps(){ python3 - "$1" <<'PY'
@@ -92,6 +108,8 @@ PY
 }
 CFG="$( eps "$TMP/cfg" )"; PYP="$( eps "$TMP/pyp" )"; NEG="$( eps "$TMP/neg" )"; SIB="$( eps "$TMP/sib" )"
 EDGE="$( eps "$TMP/edge" )"; EDGETOML="$( eps "$TMP/edgetoml" )"
+CARGO="$( eps "$TMP/cargo" )"; CARGOABS="$( eps "$TMP/cargoabs" )"; CARGONM="$( eps "$TMP/cargonommain" )"
+CARGOINF="$( eps "$TMP/cargoinf" )"; CARGOEX="$( eps "$TMP/cargoex" )"; CARGOWS="$( eps "$TMP/cargows" )"; CARGOWSA="$( eps "$TMP/cargowsa" )"
 has(){ python3 -c "import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if ($2) else 1)" "$1"; }
 grp(){ echo "[g for g in d if g.get('group')=='$1']"; }
 
@@ -131,6 +149,28 @@ if has "$EDGE" "not any(g.get('group','x')=='' for g in d) and len(d)==1"; then
 # E4: a TOML header with a trailing comment holding a `]` names the right group
 if has "$EDGETOML" "any(g['e']==[{'n':'fmt','target':'pkg.mod:Fmt','def':'pkg/mod.py:1'}] for g in $(grp x.report)) and len(d)==1"; then
     ok "E4 a [..]  # see [docs] header comment does not bend the group name"; else no "E4 header comment: $EDGETOML"; fi
+
+# B1
+if has "$CARGO" "len(d)==1 and d[0]['p']=='Cargo.toml' and d[0]['group']=='bin' and sorted((e['n'],e['target'],e.get('def','')) for e in d[0]['e'])==[('app','src/app.rs','src/app.rs:3'),('gen-docs','tools/gen.rs','tools/gen.rs:3')]"; then
+    ok "B1 Cargo.toml [[bin]] links gen-docs and app to their main fns"; else no "B1 cargo [[bin]]: $CARGO"; fi
+# B2
+if has "$CARGOABS" "any(e=={'n':'ghost','target':'missing/nowhere.rs','external':'1'} for g in d for e in g['e']) and not any('def' in e for g in d for e in g['e'] if e['n']=='ghost')"; then
+    ok "B2 a [[bin]] path outside the tree is external=1, never a def"; else no "B2 missing bin path: $CARGOABS"; fi
+# B3
+if has "$CARGONM" "any(e=={'n':'empty','target':'tools/empty.rs','unresolved':'1'} for g in d for e in g['e'])"; then
+    ok "B3 a [[bin]] file without fn main is unresolved=1"; else no "B3 no-main bin file: $CARGONM"; fi
+# B4
+if has "$CARGOEX" "d==[]" && grep -q 'examples/sample.rs' "$TMP/cargoex"; then   # the example file is shown: the empty answer is the reader's
+    ok "B4 [[example]] is not a binary manifest row"; else no "B4 example produced ep: $CARGOEX"; fi
+# B5
+if has "$CARGOWS" "d==[]"; then
+    ok "B5 workspace root Cargo.toml with no [[bin]] yields no <ep>"; else no "B5 workspace root ep: $CARGOWS"; fi
+# B6
+if has "$CARGOWSA" "any(g['p']=='Cargo.toml' and g['group']=='bin' and any(e=={'n':'crate-a','target':'src/main.rs','def':'src/main.rs:3'} for e in g['e']) for g in d)"; then
+    ok "B6 workspace member implicit src/main.rs bin row"; else no "B6 workspace member bin: $CARGOWSA"; fi
+# B7
+if has "$CARGOINF" "any(g['group']=='bin' and sorted((e['n'],e['target'],e.get('def','')) for e in g['e'])==[('demo','src/main.rs','src/main.rs:3'),('tool','src/bin/tool.rs','src/bin/tool.rs:3')] for g in d)"; then
+    ok "B7 an omitted [[bin]] path follows Cargo inference; a [[bin]] inside a multi-line string is no entry"; else no "B7 inferred bin paths: $CARGOINF"; fi
 # N1
 [ "$NEG" = "[]" ]; verdict $? "N1 a non-manifest .cfg yields no <ep>" "N1 config.cfg produced rows: $NEG"
 # N2
@@ -193,7 +233,7 @@ done
 # X1 X2 X3
 cmp -s "$TMP/cfg" "$TMP/cfg2"; verdict $? "X1 deterministic" "X1 two runs differ"
 if command -v xmllint >/dev/null 2>&1; then
-    for f in cfg cfgfull pyp; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "X2 $f well-formed" "X2 $f not well-formed"; done
+    for f in cfg cfgfull pyp cargo; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "X2 $f well-formed" "X2 $f not well-formed"; done
 else
     echo "  SKIP  X2 xmllint not installed"
 fi
