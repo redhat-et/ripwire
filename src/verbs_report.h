@@ -4,6 +4,7 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo / rw::formatTo — THE emitter and its buffer-shaped sibling
+#include <format>            // arch-honest: the present-only <metrics> attributes and the --report clause
 #include <string_view>       // the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_report.h — the report family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -470,8 +471,13 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const StructuralIncludeAdj archSa            = resolveStructuralIncludeAdj( ing );
         const auto&                adj               = archSa.adj;
         const std::uint64_t        importsUnresolved = archSa.importsUnresolved;
-        const std::string          archPartialAttr   = rw::tsImportRootAttrXml( importsUnresolved, archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread );
-        const std::string          archExtrasLegend  = rw::archTsImportExtrasLegend( archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread );
+        // Lane arch-honest: files in a language with no file edges (LangFacts::fileEdges). A no-edge file was never judged either, so the root says so beside the TS counts.
+        const rw::NoFileEdgeFiles  archNoEdge        = rw::noFileEdgeFiles( ing );
+        const std::string          archNoEdgeLangs   = rw::noFileEdgeLangTags( archNoEdge.langs );
+        const std::string          archPartialAttr   = rw::tsImportRootAttrXml( importsUnresolved, archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread )
+                                                       + rw::noFileEdgesRootAttrXml( archNoEdgeLangs, archNoEdge.files, importsUnresolved > 0 || archSa.tsExtras.extendsUnread > 0 );
+        const std::string          archExtrasLegend  = rw::archTsImportExtrasLegend( archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread )
+                                                       + rw::archNoFileEdgesLegend( archNoEdge.files > 0 );
 
         // ── EVERY rule is matched against the ROOT-RELATIVE path, never the emitted one ────────────────────
         // ing.files spells each file `<ingest-root>/<relative>` verbatim, so matching a user regex or a layer
@@ -594,6 +600,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
                                 "alias, so an edge through one was never judged: violations= is a floor\n", archSa.tsExtras.extendsUnread );
         }
 
+        if( archNoEdge.files != 0 )   // arch-honest: an exit 0 over files no edge can reach is not a pass the log may read as one
+        {
+            rw::emitTo( stderr, "ripwire arch: {} file(s) in {} have no file edges in this build, so an edge through one was never judged: violations= is a floor\n",
+                        archNoEdge.files, archNoEdgeLangs );
+        }
+
         const std::string sidecarPath = archBaselinePath( std::string( cfg.archRules ) );
 
         // ABS-4: per-MODULE Martin metrics (Ca/Ce/I/A/D + zone) + reachability/orphan, computed ONCE from
@@ -635,10 +647,16 @@ std::optional<int> runArchViews( const MainDispatch& d )
             // useless corners) but never emitted, so the header's own bucket sum fell 13 short of modules=
             // on the real repo with no attribute admitting the gap. zone_pain + zone_useless + zone_ok +
             // zone_na now partitions modules= exactly — every module lands in exactly one bucket.
-            std::uint32_t zonePain = 0, zoneUseless = 0, zoneNa = 0, zoneOk = 0;
+            // arch-honest: zone="unknown" (ModuleMetric::couplingUnknown) is its own bucket, and joins the partition only when it is non-empty.
+            std::uint32_t zonePain = 0, zoneUseless = 0, zoneNa = 0, zoneOk = 0, zoneUnknown = 0, typedModules = 0;
             for( const ModuleMetric& mm : mods )
             {
-                if( mm.zone == std::string_view( "pain" ) )
+                typedModules += mm.totalTypes > 0 ? 1 : 0;
+                if( mm.couplingUnknown )
+                {
+                    ++zoneUnknown;
+                }
+                else if( mm.zone == std::string_view( "pain" ) )
                 {
                     ++zonePain;
                 }
@@ -655,15 +673,29 @@ std::optional<int> runArchViews( const MainDispatch& d )
                     ++zoneOk;
                 }
             }
-            rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\" propagation_cost=\"{:.3f}\" note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file\">",
-                         mods.size(), mods.size() - zoneNa, zonePain, zoneUseless, zoneOk, zoneNa, propCost );
+            // Present-only: zone_unknown= rides beside its note clause, and propagation_cost goes when the whole index holds no edge to
+            // count and a file that could not have had one (its 1/N would read as a measurement of a tree no edge was ever seen in).
+            const std::string unknownAttr = zoneUnknown != 0 ? std::format( " zone_unknown=\"{}\"", zoneUnknown ) : std::string();
+            const std::string propAttr    = archNoEdge.files != 0 && !rw::anyFileEdge( adj ) ? std::string() : std::format( " propagation_cost=\"{:.3f}\"", propCost );
+            const char* const unknownNote = zoneUnknown != 0
+                ? "; zone_unknown = modules with no edge observed and a file in a language with no file edges (no_file_edges=): coupling unknown, not zero, and part of the partition"
+                : "";
+            rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{} note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file{}\">",
+                         mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr, unknownNote );
             for( const ModuleMetric& mm : mods )
             {
                 const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
-                rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" I=\"{:.2f}\" A=\"{:.2f}\" D=\"{:.2f}\" zone=\"{}\" reachable=\"{}\"{}{}/>",
+                const std::string noEdgeAttr = mm.noFileEdgeLangs != 0 ? " no_file_edges=\"" + rw::noFileEdgeLangTags( mm.noFileEdgeLangs ) + "\"" : std::string();
+                if( mm.couplingUnknown )   // arch-honest: an absent number is the honest spelling of unknown; types=/abstract=/A= need no edge
+                {
+                    rw::emitTo( stdout, "<m path=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
+                                 ep.c_str(), mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
+                    continue;
+                }
+                rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" I=\"{:.2f}\" A=\"{:.2f}\" D=\"{:.2f}\" zone=\"{}\" reachable=\"{}\"{}{}{}/>",
                              ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes,
                              mm.instability, mm.abstractness, mm.distance, mm.zone, mm.reachable ? 1 : 0,
-                             mm.isolated ? " isolated=\"1\"" : "", mm.isLeaf ? " leaf=\"1\"" : "" );
+                             mm.isolated ? " isolated=\"1\"" : "", mm.isLeaf ? " leaf=\"1\"" : "", noEdgeAttr );
             }
             rw::emitTo( stdout, "</metrics>" );
         };
@@ -3571,6 +3603,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
             rw::emitTo( stdout, "- **{}** — {} symbols\n", presentation.label[c].c_str(), std::size_t( members[c].size() ) );
         }
 
+        // arch-honest: files in a language with no file edges are in neither list below, and "none" must not read as a finding about them.
+        const rw::NoFileEdgeFiles reportNoEdge = rw::noFileEdgeFiles( ing );
+        const std::string         reportNoEdgeWhy = reportNoEdge.files != 0 ? std::format( "{} files in {} have no file edges", reportNoEdge.files, rw::noFileEdgeLangTags( reportNoEdge.langs ) ) : std::string();
+        if( reportNoEdge.files != 0 )
+        {
+            rw::emitTo( stdout, "\nNot measured: {}, so the god files and cycles below cover the resolved edges only.\n", reportNoEdgeWhy );
+        }
         emitReportGodFiles( ing, afferent, rw::testLayerGroup( ing, adj ), stSingleRoot, stRootPrefix );
 
         const std::size_t reportCycles = std::min<std::size_t>( cycles.size(), 6 );
@@ -3578,19 +3617,25 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // floor: a missing edge can merge two of these cycles into one — and an empty list is not "acyclic". Part 2: an
         // unread tsconfig `extends`/`references` hides aliases the same way, so it qualifies the line too.
         const std::uint64_t reportUnread  = reportSa.tsExtras.extendsUnread;
-        const bool          reportPartial = reportSa.importsUnresolved != 0 || reportUnread != 0;
+        const bool          reportTsPartial = reportSa.importsUnresolved != 0 || reportUnread != 0;
+        const bool          reportPartial   = reportTsPartial || reportNoEdge.files != 0;
+        // One clause per cause, in a fixed order: a tree with neither no-edge files nor unread configs keeps its older wording byte for byte.
+        std::string         reportWhy = reportTsPartial ? std::format( "{} imports unresolved", reportSa.importsUnresolved ) : std::string();
+        if( reportUnread != 0 )
+        {
+            reportWhy += std::format( ", {} tsconfig files unread", reportUnread );
+        }
+        if( reportNoEdge.files != 0 )
+        {
+            reportWhy += ( reportWhy.empty() ? "" : ", " ) + reportNoEdgeWhy;
+        }
         if( !reportPartial )
         {
             rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {})\n", reportCycles, cycles.size() );
         }
-        else if( reportUnread == 0 )
-        {
-            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {} imports unresolved)\n", reportCycles, cycles.size(), reportSa.importsUnresolved );
-        }
         else
         {
-            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {} imports unresolved, {} tsconfig files unread)\n",
-                         reportCycles, cycles.size(), reportSa.importsUnresolved, reportUnread );
+            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {})\n", reportCycles, cycles.size(), reportWhy );
         }
         if( cycles.empty() )
         {

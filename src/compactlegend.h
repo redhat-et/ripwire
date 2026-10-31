@@ -390,6 +390,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // Its reading on --deps/--arch, the same sentence both full legends carry (graphlegend.h kGraphPartialAttrXml): not a
     // floor, because a missing edge can merge two cycles into one and moves a ratio either way.
     { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },
+    { "no_file_edges",     "no_file_edges=LANGS: no import in these languages resolves to a file; a coupling number absent beside it is unknown, not zero" },
+    { "unmeasured_files",  "unmeasured_files=N: files in the no_file_edges= languages; no edge to or from them is in any count" },
     // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
     // tsconfig_unread= makes the root partial exactly as imports_unresolved= does (graph_partial= above is its reading).
     { "imports_dts",       "imports_dts=N: N TS/JS imports resolved only to a .d.ts declaration, not source" },

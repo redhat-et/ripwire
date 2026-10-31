@@ -10158,6 +10158,10 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     }
     w.write( rw::depsImportsUnresolvedLegend( tsImports.unresolved > 0 ) );   // #220: exactly when the root carries the pair
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
+    // arch-honest: files in a language with no file edges (lintrules.h noFileEdgeFiles); every attribute below is absent at files == 0
+    const rw::NoFileEdgeFiles noEdge       = rw::noFileEdgeFiles( ing );
+    const bool                healthUnknown = noEdge.files != 0 && !rw::anyFileEdge( adj );   // nothing behind ccd/nccd/shape but the missing data
+    w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -10173,6 +10177,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         // (the V1-1 truncation class main.cpp's own history warns about) — written separately.
         if( !rootArg.empty() ) { w.write( " root=\"" );  w.write( escapeXml( rootArg, esc ) );  w.write( "\"" ); }
         w.write( rw::tsImportRootAttrXml( tsImports.unresolved, tsImports.dts, tsImports.unread ) );   // #220: absent at 0; partial, not a floor — see graphlegend.h
+        w.write( rw::noFileEdgesRootAttrXml( rw::noFileEdgeLangTags( noEdge.langs ), noEdge.files, tsImports.unresolved > 0 || tsImports.unread > 0 ) );
         w.write( ">" );
     }
 
@@ -10187,9 +10192,16 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // it is the SAME predicate --arch's propagation_cost N and --cochange's dep_capable= are built on.
     const std::string depLangs = rw::dependencyCapableLangTags();
     char hb[ 176 ];
-    rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
-                   ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
-                   nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+    if( healthUnknown )
+    {
+        rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\"", ing.files.size(), depFiles );
+    }
+    else
+    {
+        rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
+                       ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
+                       nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+    }
     w.write( hb );
     if( lazyEdges > 0 )   // absent exactly when nothing was left out — never a hidden 0, and byte-identical for every corpus without a lazy directive
     {
@@ -10344,7 +10356,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         const double inst = ( ce_ + ca_ ) > 0.0 ? ce_ / ( ce_ + ca_ ) : 0.0;   // instability I = Ce/(Ca+Ce), project-only
         const std::uint32_t lazyHere = f < lazyEdgesByFile.size() ? lazyEdgesByFile[f] : 0u;
         char hdr[ 144 ];
-        if( lazyHere > 0 )   // the resolved pairs this row's directives make that the structure leaves out (parser version 83)
+        const Lang rowLang = langOfPath( ing.files[f] );
+        if( langHasNoFileEdges( rowLang ) && ce_ == 0.0 && ca_ == 0.0 )   // arch-honest: its imports were captured, none could resolve: unknown, not zero
+        {
+            rw::formatTo( hdr, sizeof( hdr ), "\" includes=\"{}\" no_file_edges=\"{}\">", byFile[f].size(), langTag( rowLang ) );
+        }
+        else if( lazyHere > 0 )   // the resolved pairs this row's directives make that the structure leaves out (parser version 83)
         {
             rw::formatTo( hdr, sizeof( hdr ), "\" includes=\"{}\" lazy_edges=\"{}\" afferent=\"{}\" instab=\"{:.2f}\" transitive=\"{}\">",
                            byFile[f].size(), lazyHere, f < afferent.size() ? afferent[f] : 0u, inst, trans( f ) );

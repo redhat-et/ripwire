@@ -28,9 +28,11 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "model.h"              // Lang enum
+#include "langfacts.h"          // LangFacts::fileEdges — which languages can carry a file edge
 #include "depdialect.h"         // DepDialect + dependencyDialect — moved out of here for #358
 #include "ingest.h"             // AstQuerySpec, AstMatch, astQuery, IngestResult
 #include "docparse.h"           // detail::readWholeFile — THE canonical whole-file byte read; never re-rolled
@@ -253,7 +255,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // `preload`/`load("res://…")` resolution is a later round, so no `.gd` file carries a dependency edge yet, and claiming
 // capability without edges would make the dep_files= denominator lie.
 /// Return whether this language has syntax-backed dependency extraction for dependency rules.
-inline bool dependencyCapable( Lang lang ) noexcept
+inline constexpr bool dependencyCapable( Lang lang ) noexcept
 {
     switch( lang )
     {
@@ -272,6 +274,15 @@ inline bool dependencyCapable( Lang lang ) noexcept
     }
     return false;   // a byte past the enum
 }
+
+// A language whose files can carry an edge is capable, and docs and data never are: LangFacts::fileEdges and this predicate can
+// differ only on a language that has code and no edge (the Unmeasured middle), never across that line.
+template<std::size_t... I>
+constexpr bool fileEdgesAgreeWithCapable( std::index_sequence<I...> ) noexcept
+{
+    return ( ( langFacts( Lang( I ) ).fileEdges != ( dependencyCapable( Lang( I ) ) ? FileEdges::NotApplicable : FileEdges::Resolved ) ) && ... );
+}
+static_assert( fileEdgesAgreeWithCapable( std::make_index_sequence<kLangCount>() ), "LangFacts::fileEdges contradicts dependencyCapable" );
 
 // DepDialect + dependencyDialect now live in depdialect.h: the import-capture round (#358) picks a
 // specifier normaliser per dialect from the ingest TU, which cannot include this header. The enum's
@@ -320,6 +331,58 @@ inline std::vector<char> dependencyCapableMask( const IngestResult& ing )
         mask[f] = dependencyCapable( langOfPath( ing.files[f] ) ) ? 1 : 0;
     }
     return mask;
+}
+
+// Lane arch-honest: the files of this index in a language that cannot carry a file edge (LangFacts::fileEdges), the count and the
+// languages. Every coupling number over them is unknown, not zero. Absent from an answer when files == 0, so a tree with no such
+// file is byte-identical to the build before it.
+struct NoFileEdgeFiles
+{
+    std::size_t   files = 0;
+    std::uint32_t langs = 0;   // bit i = Lang( i )
+};
+static_assert( kLangCount <= 32, "NoFileEdgeFiles::langs is one bit per Lang" );
+
+inline bool langHasNoFileEdges( Lang lang ) noexcept
+{
+    return langFacts( lang ).fileEdges == FileEdges::Unmeasured;
+}
+inline std::uint32_t noFileEdgeLangBit( Lang lang ) noexcept
+{
+    return langHasNoFileEdges( lang ) ? std::uint32_t( 1 ) << static_cast<std::uint32_t>( lang ) : 0;
+}
+inline NoFileEdgeFiles noFileEdgeFiles( const IngestResult& ing )
+{
+    NoFileEdgeFiles out;
+    for( const auto& path : ing.files )
+    {
+        if( const std::uint32_t bit = noFileEdgeLangBit( langOfPath( path ) ); bit != 0 )
+        {
+            ++out.files;
+            out.langs |= bit;
+        }
+    }
+    return out;
+}
+// The value of no_file_edges=: the languages' terse labels, comma-joined in Lang-enum order, so an answer's bytes do not depend on file order.
+inline std::string noFileEdgeLangTags( std::uint32_t langs )
+{
+    std::string out;
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        if( ( langs >> i ) & 1u )
+        {
+            if( !out.empty() ) { out.push_back( ',' ); }
+            out.append( langTag( Lang( i ) ) );
+        }
+    }
+    return out;
+}
+// Does the index hold a single file→file edge? With none and a no-edge file present, a system-level number (ccd, nccd, shape,
+// propagation_cost) is arithmetic over missing data, so it is left out; with one, the number stands and the root says it is partial.
+inline bool anyFileEdge( const std::vector<std::vector<std::uint32_t>>& adj ) noexcept
+{
+    return std::any_of( adj.begin(), adj.end(), []( const std::vector<std::uint32_t>& outs ) { return !outs.empty(); } );
 }
 
 // ── the tiny YAML-subset parser ──────────────────────────────────────────────────────────────────

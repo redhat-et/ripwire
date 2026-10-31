@@ -71,6 +71,19 @@ enum class BaseImportEvidence : std::uint8_t
     JvmImport,      // `import org.ext.Base` / `extends org.ext.Base` of a package the tree does not declare
 };
 
+/// Lane arch-honest: can this language's files carry a file→file edge in this build? Resolved: a directive resolves to an indexed
+/// file (resolve.h includeLangOf has a Step-A), so an absent edge means none was written. Unmeasured: the language has code, and no
+/// sound string→file rule (a Go package path, a Java/Kotlin/C#/PHP namespace, a Swift whole-module import) or no import capture at
+/// all (Dart, GDScript, Clojure), so an absent edge means nothing: its Ca/Ce/I/D/zone are unknown, not zero. NotApplicable: docs and
+/// data, which the dependency verbs exclude by decision (lintrules.h dependencyCapable); a directory of them keeps its row.
+/// Unmeasured is the default, the honest answer for a language that says nothing; test/archhonestcheck.sh (H) pins each row to the index.
+enum class FileEdges : std::uint8_t
+{
+    Unmeasured,
+    Resolved,
+    NotApplicable,
+};
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -253,6 +266,9 @@ struct LangFacts
     /// Python: a string literal as a function's FIRST statement is its docstring, not code; hopbody.h bodyStatementLines does not
     /// count it (lane path-hop-body-fix1, review F4: a documented one-line delegator is still thin).
     bool leadingDocstring = false;
+
+    /// Whether this language's files can carry a file→file edge in this build (FileEdges above).
+    FileEdges fileEdges = FileEdges::Unmeasured;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -261,34 +277,34 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
-      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true },
+      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
-      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true },
+      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true },
+      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self" },
+      .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true },
-    { .lang = Lang::Markdown, .linkSections = true },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Markdown, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true },
-    { .lang = Lang::Bash },
+      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Bash, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
-      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self" },
-    { .lang = Lang::Unknown },
-    { .lang = Lang::Json },
+      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Unknown, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Json, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true },
-    { .lang = Lang::Toml },
-    { .lang = Lang::Yaml },
+      .staticLinkage = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Toml, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Yaml, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Php, .memberSeparator = "::" },
-    { .lang = Lang::Lua, .dashDashComments = true },
-    { .lang = Lang::Elixir, .hasInertQuoteRegions = true },
+    { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Dart },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
       .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly },

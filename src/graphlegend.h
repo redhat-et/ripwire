@@ -1053,6 +1053,23 @@ inline std::string tsImportRootAttrXml( std::uint64_t importsUnresolved, std::ui
     std::string s = importsUnresolvedAttrXml( importsUnresolved ) + countAttrXmlOrEmpty( "imports_dts", std::size_t( importsDts ) ) + countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( tsconfigUnread ) );
     return importsUnresolved > 0 || tsconfigUnread > 0 ? s + kGraphPartialAttrXml : s;
 }
+// Lane arch-honest: the root's disclosure of files in a language with no file edges (lintrules.h noFileEdgeFiles). Absent at zero, and
+// graph_partial="1" rides once: alreadyPartial says tsImportRootAttrXml wrote it, and a second copy would be malformed XML.
+inline std::string noFileEdgesRootAttrXml( std::string_view langs, std::size_t files, bool alreadyPartial )
+{
+    if( files == 0 )
+    {
+        return {};
+    }
+    std::string s = " no_file_edges=\"" + std::string( langs ) + "\"" + countAttrXmlOrEmpty( "unmeasured_files", files );
+    return alreadyPartial ? s : s + kGraphPartialAttrXml;
+}
+inline constexpr const char* kDepsNoFileEdgesLegend =
+    "no_file_edges=LANGS unmeasured_files=N graph_partial=1 (root, absent when none): N files are in languages whose imports this build does not resolve to files, so the index holds no edge for them and a zero would come from the missing data, not the design. A <f> row with no_file_edges= has no afferent=/instab=/transitive=: unknown, not zero. <health> has no ccd=/acd=/nccd=/shape= when the whole index holds no edge. godfiles, stabledeps and cycles cover the resolved edges only. ";
+inline constexpr const char* kArchNoFileEdgesLegend =
+    " no_file_edges=LANGS unmeasured_files=N graph_partial=1 (absent when none): N files are in languages whose imports this build does not resolve to files, so an edge through one was never judged and violations= is a floor. <m zone=unknown no_file_edges=LANGS> found no edge and holds such a file: its ca/ce/I/D/reachable are absent, unknown rather than zero. A <m> with both ca= and no_file_edges= has numbers over its resolved edges only. propagation_cost is absent when the whole index holds no edge.";
+inline const char* depsNoFileEdgesLegend( bool on ) noexcept { return on ? kDepsNoFileEdgesLegend : ""; }
+inline const char* archNoFileEdgesLegend( bool on ) noexcept { return on ? kArchNoFileEdgesLegend : ""; }
 inline constexpr const char* kDepsImportsDtsLegend =
     "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
 inline constexpr const char* kDepsTsconfigUnreadLegend =

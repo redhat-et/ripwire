@@ -31,6 +31,7 @@
 //   --baseline-update merges current violations into the sidecar and exits 0 (accept new debt deliberately).
 
 #include "model.h"
+#include "lintrules.h"          // langOfPath, noFileEdgeLangBit — a module with a no-edge language reads unknown
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — THE one atomic no-follow open the sidecar writers share
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on a malformed path-regex (never throw at match time)
 #include "regexguard.h"          // path-rules: the screen, the compile and the guarded match every user-authored pattern takes
@@ -959,6 +960,7 @@ inline bool archWriteBaseline( const std::string&                         sideca
 //   zone: "pain"    = concrete + stable  (A small, I small) and D high — rigid, hard to change
 //         "useless" = abstract + unstable (A large, I large) and D high — abstractions nothing uses
 //         "ok"      = otherwise
+//         "unknown" = no edge observed and a file in a language that cannot carry one (ModuleMetric::couplingUnknown)
 //
 // Abstractness proxy (from the tags ripwire already has — NO new parser pass):
 //   a TYPE = a Class/Struct/Interface symbol. It is ABSTRACT when it is SymKind::Interface (a TS/Go
@@ -994,10 +996,14 @@ struct ModuleMetric
     double        instability = 0.0;   // I
     double        abstractness = 0.0;  // A
     double        distance = 0.0;      // D
-    const char*   zone = "ok";         // "pain" | "useless" | "ok"
+    const char*   zone = "ok";         // "pain" | "useless" | "ok" | "n/a" | "unknown"
     bool          reachable = true;    // false ⇒ not reachable from any entry point (candidate dead)
     bool          isolated = false;    // Ca==0 && Ce==0
     bool          isLeaf = false;      // Ce==0 && Ca>0  (depends on nothing, but depended on)
+    // Lane arch-honest: the module's files in a language with no file edges (bit i = Lang( i ), lintrules.h NoFileEdgeFiles). Non-zero
+    // beside an observed edge = the numbers cover the resolved edges only; non-zero with none observed = couplingUnknown.
+    std::uint32_t noFileEdgeLangs = 0;
+    bool          couplingUnknown = false;   // Ca/Ce/I/D and reachable are UNKNOWN, not zero: zone="unknown", and the row omits them
 };
 
 // Compute the per-module Martin metrics + reachability. `adj` = the file→file dependency graph
@@ -1031,6 +1037,11 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
         fileMod[f] = it->second;
     }
     const std::uint32_t M = std::uint32_t( modPath.size() );
+    std::vector<std::uint32_t> noEdgeLangs( M, 0 );   // per module: which of its files' languages cannot carry a file edge
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        noEdgeLangs[ fileMod[f] ] |= noFileEdgeLangBit( langOfPath( ing.files[f] ) );
+    }
 
     // module → module forward edges (deduped, sorted). Folds the file→file graph up to the directory.
     // N=2 is free (rw::svector<uint32,1> and <uint32,2> are both 16 B, vs a std::vector's 24) and covers
@@ -1173,6 +1184,11 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
         mm.isolated      = ( ca[m] == 0 && ce[m] == 0 );
         mm.isLeaf        = ( ce[m] == 0 && ca[m] > 0 );
         mm.reachable     = ( reach[m] != 0 );
+        mm.noFileEdgeLangs = noEdgeLangs[m];
+        // Lane arch-honest: no edge observed, and a file here whose edges could not have been: the zeros above are the missing data
+        // (nfpm: 11 of 11 typed Go modules read "pain" this way). An observed edge is real, so that module keeps its numbers, and its row
+        // carries no_file_edges= for the part never seen: Go across roots through go.mod replace, a Python directory with a stray .kt.
+        mm.couplingUnknown = mm.noFileEdgeLangs != 0 && mm.isolated;
         // §P6.5: a module with NO types (totalTypes==0 — a pure doc/bench/free-function dir) cannot
         // meaningfully have an abstractness score: A is forced to 0 by definition (line 661), which pins
         // D = |0 + I - 1| = 1 - I close to 1 for any low-instability module, so EVERY such module reads as
@@ -1180,7 +1196,11 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
         // nearly all typeless. zone="n/a" says "not classifiable", not "classified and bad"; excluded from
         // the zone_pain/zone_useless header tally below (main.cpp emitMetrics) so the ratio a reader
         // computes is over modules that CAN carry the metric, not the whole corpus.
-        if( mm.totalTypes == 0 )
+        if( mm.couplingUnknown )
+        {
+            mm.zone = "unknown";
+        }
+        else if( mm.totalTypes == 0 )
         {
             mm.zone = "n/a";
         // zone only when D is past the threshold; pain = concrete+stable corner, useless = abstract+unstable.

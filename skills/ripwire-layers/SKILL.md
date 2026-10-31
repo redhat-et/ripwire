@@ -54,6 +54,8 @@ reviewing whether the codebase is trending toward or away from clean layering.
    - `shape` — "horizontal" (layered, good) vs "vertical" (coupled, risk)
    Then `<godfiles>` ranked by `afferent` (dependents) — each godfile is an implicit layer
    boundary that hasn't been formalized. **`afferent`/cycles are validated defect predictors;
+   A row with `no_file_edges=` is a language whose imports this build cannot resolve to files (Go, Java, Kotlin, C#, PHP,
+   Swift, Dart, GDScript, Clojure): `zone="unknown"` and an absent number mean not measured, never zero or uncoupled.
    `nccd` (Lakos) and the `--arch` Martin Ca/Ce/I/A/D `I`/`A`/`D`/`zone=` block are design
    heuristics — mechanistically plausible, widely implemented, but no independent
    outcome-based study has validated them. Trust the god-file/cycle read hardest; treat
