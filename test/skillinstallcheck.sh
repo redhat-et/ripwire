@@ -645,6 +645,15 @@ do
         && ok "(J) a relative $_var is refused (status 2) and nothing is created under the current directory" \
         || no "(J) relative $_var=$_val: rc=$HD_RC, created=$( ls "$HD_CWD" | tr '\n' ' ' ) (expected rc 2 and nothing created)"
 done
+# a relative HOME is refused in EVERY mode that falls back to it, --openclaw's own `$HOME/.agents` included
+for _f in "" --codex --codex-legacy --openclaw --hermes
+do
+    # shellcheck disable=SC2086
+    hd_run "J-relhome${_f:-claude}" HOME=relhome -- $_f
+    { [ "$HD_RC" -eq 2 ] && [ ! -e "$HD_CWD/relhome" ] && printf '%s' "$HD_OUT" | grep -q 'HOME'; } \
+        && ok "(J) a relative HOME is refused (status 2) for ${_f:-the default Claude install}, nothing created" \
+        || no "(J) relative HOME with ${_f:-the default install}: rc=$HD_RC, created=$( ls "$HD_CWD" | tr '\n' ' ' ) (expected rc 2 and nothing created)"
+done
 hd_run J-hookonly CLAUDE_CONFIG_DIR=relcfg -- --hook
 { [ "$HD_RC" -eq 2 ] && [ ! -e "$HD_CWD/relcfg" ]; } \
     && ok "(J) --hook alone refuses a relative CLAUDE_CONFIG_DIR and writes no settings.json" \
@@ -658,7 +667,11 @@ hd_run J-codexhook CODEX_HOME=relcodex -- --codex --hook
 hd_run J-win 'CLAUDE_CONFIG_DIR=D:/cfg/.claude' --
 { [ "$HD_RC" -eq 0 ] && [ -d "$HD_CWD/D:/cfg/.claude/skills" ]; } \
     && ok "(J) twin: a Windows-style drive path is still accepted as absolute" \
-    || no "(J) a Windows-style CLAUDE_CONFIG_DIR (C:/...) was refused: rc=$HD_RC $HD_OUT"
+    || no "(J) a Windows-style CLAUDE_CONFIG_DIR (D:/...) was refused: rc=$HD_RC $HD_OUT"
+hd_run J-unc 'CLAUDE_CONFIG_DIR=\\srv\share\cfg' --
+{ [ "$HD_RC" -eq 0 ] && [ -d "$HD_CWD/"'\\srv\share\cfg'"/skills" ]; } \
+    && ok "(J) twin: a Windows UNC root (\\\\server\\share) is still accepted as absolute" \
+    || no "(J) a Windows UNC CLAUDE_CONFIG_DIR was refused: rc=$HD_RC $HD_OUT"
 hd_run J-explicit -- relskills
 { [ "$HD_RC" -eq 0 ] && [ -L "$HD_CWD/relskills/ripwire-router" ]; } \
     && ok "(J) twin: an explicit relative destination PATH argument still works" \
@@ -670,10 +683,10 @@ hd_run J-explicit -- relskills
 K_HOME="${HD:?}/K/home"; rm -rf "${HD:?}/K"; mkdir -p "$K_HOME"
 ( umask 000; HOME="$K_HOME" bash "$SK/install.sh" --hook >"$HD/K.out" 2>&1 )
 ( umask 000; HOME="$K_HOME" bash "$SK/install.sh" --codex --hook >>"$HD/K.out" 2>&1 )
-kWritable="$( find "$K_HOME" ! -type l -perm -002 2>/dev/null | sed "s|^$K_HOME|~|" | tr '\n' ' ' )"
+kWritable="$( find "$K_HOME" ! -type l \( -perm -002 -o -perm -020 \) 2>/dev/null | sed "s|^$K_HOME|~|" | tr '\n' ' ' )"
 { [ -f "$K_HOME/.claude/settings.json" ] && [ -f "$K_HOME/.codex/hooks.json" ] && [ -z "$kWritable" ]; } \
-    && ok "(K) under umask 000 nothing the installer created is world-writable (dirs, settings.json, hooks.json, manifest)" \
-    || no "(K) under umask 000 these are world-writable: ${kWritable:-<none, but a file is missing>}"
+    && ok "(K) under umask 000 nothing the installer created is group- or world-writable (dirs, settings.json, hooks.json, manifest)" \
+    || no "(K) under umask 000 these are group/world-writable: ${kWritable:-<none, but a file is missing>}"
 K2_HOME="${HD:?}/K2/home"; rm -rf "${HD:?}/K2"; mkdir -p "$K2_HOME"
 ( umask 077; HOME="$K2_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1 )
 kOpen="$( find "$K2_HOME" -mindepth 1 ! -type l \( -perm -020 -o -perm -002 -o -perm -040 -o -perm -004 \) 2>/dev/null | head -3 | tr '\n' ' ' )"
@@ -693,6 +706,16 @@ for _p in ".:$PATH" ":$PATH" "$PATH:" "repo:$PATH"; do
         && ok "(O) CWE-426: PATH='${_p%%:*}:…' (relative/empty entry) never runs a planted ./jq, and --hook still registers" \
         || no "(O) CWE-426: with PATH starting '${_p%%:*}' a planted jq ran=$( [ -e "$HD/O/planted-jq-ran" ] && echo YES || echo no ), settings=$( [ -s "$O_HOME/.claude/settings.json" ] && echo ok || echo missing )"
 done
+
+# the final `command -v jq` fallback must also insist on an ABSOLUTE answer: with no jq on any absolute PATH entry,
+# a relative entry leads `command -v` to ./jq, and that planted file must not run (bash prints it as `repo/jq`)
+O2="${HD:?}/O2"; rm -rf "${O2:?}"; mkdir -p "$O2/repo" "$O2/bin" "$O2/home"
+printf '#!/bin/sh\n: >"%s"\nexit 0\n' "$O2/planted-ran" >"$O2/repo/jq"; chmod +x "$O2/repo/jq"
+for _t in dirname chmod mkdir cat mktemp; do ln -s "$( command -v "$_t" )" "$O2/bin/$_t"; done
+( cd "$O2" && PATH="repo:$O2/bin" HOME="$O2/home" "$( command -v bash )" "$SK/install.sh" --hook ) >"$O2/out" 2>&1; O2_RC=$?
+{ [ ! -e "$O2/planted-ran" ] && [ "$O2_RC" -eq 1 ] && grep -q 'needs jq' "$O2/out"; } \
+    && ok "(O) CWE-426: with no jq on an absolute PATH entry the relative \`command -v jq\` answer is refused (needs-jq, rc 1)" \
+    || no "(O) CWE-426: relative-only jq: planted ran=$( [ -e "$O2/planted-ran" ] && echo YES || echo no ), rc=$O2_RC: $( head -2 "$O2/out" )"
 
 # ── (M) the registered hook COMMAND is quoted when the install path needs it ─────────────────────────────────
 #    #293 review: "the hook command is written unquoted, so a data home with a space in it gives a hook that can't
@@ -762,6 +785,26 @@ lMode() { ls -l "$1" | cut -c2-10; }
   && jq -e '.hooks.PreToolUse | length >= 1' "$L2_HOME/.claude/settings.json" >/dev/null 2>&1; } \
     && ok "(L) CWE-732: a pre-existing 0640 settings.json and hooks.json keep their mode across a --hook merge" \
     || no "(L) CWE-732: settings.json is $( lMode "$L2_HOME/.claude/settings.json" ), hooks.json is $( lMode "$L2_HOME/.codex/hooks.json" ) after a merge (expected rw-r-----)"
+# a FIRST-TIME settings.json / hooks.json stays owner-only (0600), as it was before this lane: the lane's mktemp-free
+# `echo '{}' >` first came out 0644 under the usual umask 022
+L6_HOME="${HD:?}/L6/home"; rm -rf "${HD:?}/L6"; mkdir -p "$L6_HOME"
+( umask 022; HOME="$L6_HOME" bash "$SK/install.sh" --hook >/dev/null 2>&1; HOME="$L6_HOME" bash "$SK/install.sh" --codex --hook >/dev/null 2>&1 )
+{ [ "$( lMode "$L6_HOME/.claude/settings.json" )" = "rw-------" ] && [ "$( lMode "$L6_HOME/.codex/hooks.json" )" = "rw-------" ]; } \
+    && ok "(L) a first-time settings.json and hooks.json are created owner-only (0600) under umask 022, as before" \
+    || no "(L) first-time settings.json is $( lMode "$L6_HOME/.claude/settings.json" ), hooks.json is $( lMode "$L6_HOME/.codex/hooks.json" ) (expected rw-------)"
+# the Codex hooks.json is written THROUGH a symlink too, and a RELATIVE link target resolves from the link's directory
+L4_HOME="${HD:?}/L4/home"; rm -rf "${HD:?}/L4"; mkdir -p "$L4_HOME/.codex" "$L4_HOME/.claude" "$HD/L4/home/dotfiles"
+printf '{"keep":1}\n' >"$L4_HOME/dotfiles/hooks.json"; printf '{"model":"opus"}\n' >"$L4_HOME/dotfiles/settings.json"
+ln -s "$L4_HOME/dotfiles/hooks.json" "$L4_HOME/.codex/hooks.json"        # absolute link: Codex
+ln -s ../dotfiles/settings.json "$L4_HOME/.claude/settings.json"         # RELATIVE link: Claude
+HOME="$L4_HOME" bash "$SK/install.sh" --codex --hook >"$HD/L4.out" 2>&1
+HOME="$L4_HOME" bash "$SK/install.sh" --hook >>"$HD/L4.out" 2>&1
+{ [ -L "$L4_HOME/.codex/hooks.json" ] && jq -e '.keep == 1 and (.hooks.PreToolUse | length) >= 1' "$L4_HOME/dotfiles/hooks.json" >/dev/null 2>&1; } \
+    && ok "(L) a symlinked Codex hooks.json stays a symlink and the target receives the hook" \
+    || no "(L) the Codex hooks.json link was replaced or its target not updated: $( ls -l "$L4_HOME/.codex/hooks.json" )"
+{ [ -L "$L4_HOME/.claude/settings.json" ] && jq -e '.model == "opus" and (.hooks.PreToolUse | length) >= 1' "$L4_HOME/dotfiles/settings.json" >/dev/null 2>&1; } \
+    && ok "(L) a RELATIVE symlink target is resolved from the link's own directory and the link is kept" \
+    || no "(L) a relative settings.json link was replaced or mis-resolved: $( ls -l "$L4_HOME/.claude/settings.json" )"
 # atomic: the temp file is built in the SAME directory as the file it replaces (a rename within one filesystem),
 # never in $TMPDIR (a copy across filesystems that a kill can leave half-written).
 L3_HOME="${HD:?}/L3/home"; rm -rf "${HD:?}/L3"; mkdir -p "$L3_HOME" "$HD/L3/shim"
@@ -813,6 +856,10 @@ printf 'my notes\n' >"$Q/dst/ripwire-notes.md"                        # a regula
 ln -s "$Q/old/ripwire-elsewhere" "$Q/dst/ripwire-recorded"            # live, elsewhere, but the manifest recorded it
 echo "skill=ripwire-recorded" >>"$Q/dst/.ripwire-manifest-v1"
 ln -s "$CS/ripwire-router" "$Q/dst/ripwire-renamed-alias"             # live, into THIS checkout: ours
+ln -s "$Q/nowhere/ripwire-vanished" "$Q/dst/ripwire-dangling-away"    # DANGLING, target outside the checkout and unrecorded: nothing of the user's is behind it
+echo "skill=ripwire-axb" >>"$Q/dst/.ripwire-manifest-v1"              # a recorded name that, read as a regex, also matches ripwire-a.b
+ln -s "$Q/mine/ripwire-mine" "$Q/dst/ripwire-a.b"                     # the user's live link
+ln -s "$CS/../../mine/ripwire-mine" "$Q/dst/ripwire-dotdot"           # starts with "$CS/" yet a `..` leaves the checkout
 bash "$CS/install.sh" "$Q/dst" >"$Q/out" 2>&1
 { [ -L "$Q/dst/ripwire-mine" ] && grep -q '^kept ripwire-mine' "$Q/out"; } \
     && ok "(Q) a user's own live symlink named ripwire-* is kept, with a 'kept' line" \
@@ -826,8 +873,74 @@ bash "$CS/install.sh" "$Q/dst" >"$Q/out" 2>&1
 { [ ! -e "$Q/dst/ripwire-recorded" ] && [ ! -L "$Q/dst/ripwire-recorded" ]; } \
     && ok "(Q) twin: a stale link the previous manifest recorded is still pruned" \
     || no "(Q) a stale link the manifest recorded survived the prune"
+{ [ ! -e "$Q/dst/ripwire-dangling-away" ] && [ ! -L "$Q/dst/ripwire-dangling-away" ]; } \
+    && ok "(Q) twin: a dangling link is still pruned even when its (missing) target lies outside the checkout" \
+    || no "(Q) a dangling link pointing outside the checkout survived the prune"
+[ -L "$Q/dst/ripwire-a.b" ] \
+    && ok "(Q) a manifest name is compared as a LITERAL line (skill=ripwire-axb does not make the user's ripwire-a.b ours)" \
+    || no "(Q) the manifest entry skill=ripwire-axb was read as a regex and pruned the user's live link ripwire-a.b"
+[ -L "$Q/dst/ripwire-dotdot" ] \
+    && ok "(Q) a link whose path starts with the checkout but climbs out through '..' is kept as the user's" \
+    || no "(Q) a '..' link that resolves outside the checkout was pruned because its text starts with the checkout path"
 { [ ! -L "$Q/dst/ripwire-renamed-alias" ]; } \
     && ok "(Q) twin: a stale-named link into this checkout is still pruned" \
     || no "(Q) a stale-named link into this very checkout survived the prune"
+
+# ── (R) round-1 review of the lane (F2, F3, F4) ──────────────────────────────────────────────────────────────────
+#    F3: the #293 promise "refuse foreign files" — a user's REGULAR FILE at a shipped skill's name was `rm -f`'d and
+#    replaced, silently. A real directory there was already kept; a file is now kept the same way.
+R="${HD:?}/R"; rm -rf "${R:?}"; mkdir -p "$R/dst"
+printf 'my notes\n' >"$R/dst/ripwire-router"
+ln -s "$R/nowhere" "$R/dst/ripwire-orient"                            # twin: a link at a shipped name is still repaired
+bash "$SK/install.sh" "$R/dst" >"$R/out" 2>&1; R_RC=$?
+{ [ "$R_RC" -eq 0 ] && [ ! -L "$R/dst/ripwire-router" ] && [ "$( cat "$R/dst/ripwire-router" )" = "my notes" ] \
+  && grep -q '^kept ripwire-router' "$R/out" && ! grep -q '^skill=ripwire-router$' "$R/dst/.ripwire-manifest-v1"; } \
+    && ok "(R) a user's regular file at a SHIPPED skill's name is kept (contents intact), reported, and not claimed in the manifest" \
+    || no "(R) the file at ripwire-router was replaced or not reported: rc=$R_RC, $( ls -l "$R/dst/ripwire-router" ), $( grep ripwire-router "$R/out" | head -2 )"
+{ [ -L "$R/dst/ripwire-orient" ] && [ -f "$R/dst/ripwire-orient/SKILL.md" ]; } \
+    && ok "(R) twin: a dangling link at another shipped name is still replaced by the real link" \
+    || no "(R) a dangling link at a shipped skill's name was not repaired: $( ls -l "$R/dst/ripwire-orient" )"
+#    F4: the temp-file cleanup split a newline-separated list and ran `rm -f` on each piece, so a root whose name holds
+#    a newline made it delete the file named by the part before the newline. Both temp kinds (settings.json and the
+#    manifest) are tried; the "victim" is a regular file the root's first line spells.
+R4="${HD:?}/R4"; rm -rf "${R4:?}"; mkdir -p "$R4/home"
+R4_NL='
+'
+printf 'precious\n' >"$R4/victim"
+( cd "$R4" && env HOME="$R4/home" CLAUDE_CONFIG_DIR="$R4/victim${R4_NL}frag/cfg" bash "$SK/install.sh" --hook ) >"$R4/out1" 2>&1; R4_RC1=$?
+( cd "$R4" && env HOME="$R4/home" CLAUDE_CONFIG_DIR="$R4/victim${R4_NL}frag/cfg" bash "$SK/install.sh" ) >"$R4/out2" 2>&1; R4_RC2=$?
+{ [ "$( cat "$R4/victim" 2>/dev/null )" = "precious" ] && [ "$R4_RC1" -eq 0 ] && [ "$R4_RC2" -eq 0 ] \
+  && [ -f "$R4/victim${R4_NL}frag/cfg/settings.json" ] && [ -f "$R4/victim${R4_NL}frag/cfg/skills/.ripwire-manifest-v1" ]; } \
+    && ok "(R) a root whose name holds a newline: the installer works there and its temp cleanup deletes no other file" \
+    || no "(R) newline root: victim=$( cat "$R4/victim" 2>&1 | head -1 ), rc=$R4_RC1/$R4_RC2, files=$( cd "$R4" && find . -type f | head -6 | tr '\n' ' ' )"
+#    F2: INSTALL.md's documented hook strip read the command's first word with split(" ")[0], which for a quoted
+#    command ('/path/with space/hooks/ripwire-nudge.sh') is a fragment, so a hook the installer registers could not be
+#    removed. The block is run as written, against a space-path install (Claude and Codex) and an ordinary one.
+S="${HD:?}/S"; rm -rf "${S:?}"; mkdir -p "$S/with space" "$S/home" "$S/home2"
+cp -R "$SK" "$S/with space/skills"; cp -R "$ROOT/hooks" "$S/with space/hooks"
+HOME="$S/home" bash "$S/with space/skills/install.sh" --hook >/dev/null 2>&1
+HOME="$S/home" bash "$S/with space/skills/install.sh" --codex --hook >/dev/null 2>&1
+HOME="$S/home2" bash "$SK/install.sh" --hook >/dev/null 2>&1
+HOME="$S/home2" bash "$SK/install.sh" --codex --hook >/dev/null 2>&1
+mine="'/my tools/other hook.sh'"
+for _f in "$S/home/.claude/settings.json" "$S/home/.codex/hooks.json"; do
+    jq --arg c "$mine" '.hooks.PreToolUse += [{matcher:"*",hooks:[{type:"command",command:$c}]}]' "$_f" >"$_f.n" && mv "$_f.n" "$_f"
+done
+STRIP="$( awk '/^\*\*3\. Hooks\*\*/{s=1} s&&/^```bash$/{c=1;next} c&&/^```$/{exit} c' "$ROOT/INSTALL.md" )"
+countRw() { jq '[.. | objects | select(has("command")) | .command | select(test("/hooks/ripwire-"))] | length' "$1" 2>/dev/null; }
+cntBefore="$( countRw "$S/home/.claude/settings.json" ),$( countRw "$S/home/.codex/hooks.json" ),$( countRw "$S/home2/.claude/settings.json" ),$( countRw "$S/home2/.codex/hooks.json" )"
+if [ -z "$STRIP" ]; then
+    no "(R) INSTALL.md has no \`\`\`bash block after \"**3. Hooks**\" — the hook strip this arm runs is gone"
+else
+    for _h in home home2; do ( cd "$S" && env HOME="$S/$_h" sh -c "$STRIP" ) >"$S/strip-$_h.out" 2>&1; done
+    cntAfter="$( countRw "$S/home/.claude/settings.json" ),$( countRw "$S/home/.codex/hooks.json" ),$( countRw "$S/home2/.claude/settings.json" ),$( countRw "$S/home2/.codex/hooks.json" )"
+    { [ "$cntBefore" = "3,3,3,3" ] && [ "$cntAfter" = "0,0,0,0" ]; } \
+        && ok "(R) the documented hook strip removes ripwire's entries from Claude and Codex configs, space path and ordinary path alike" \
+        || no "(R) hook strip: ripwire entries before $cntBefore, after $cntAfter (settings, hooks.json for the space-path home, then the ordinary home; want 3,3,3,3 then 0,0,0,0)"
+    otherKept="$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.claude/settings.json" 2>/dev/null ),$( jq --arg c "$mine" '[.. | objects | select(.command? == $c)] | length' "$S/home/.codex/hooks.json" 2>/dev/null )"
+    [ "$otherKept" = "1,1" ] \
+        && ok "(R) the same strip keeps a user's own hook (quoted, with spaces) in both files" \
+        || no "(R) the hook strip removed or duplicated the user's own hook: kept=$otherKept (want 1,1)"
+fi
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

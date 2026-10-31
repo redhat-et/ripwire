@@ -18,7 +18,8 @@ src="$( cd "$( dirname "$0" )" && pwd )"
 #    can be talked into writing or deleting the wrong thing, and every item that applies to a shell installer lives
 #    here: absolute roots only, nothing created group/world-writable, a symlinked settings.json written through (not
 #    replaced), its mode kept (CWE-732), a quoted hook command, jq found only through absolute PATH entries
-#    (CWE-426), temp files removed on any exit or signal, and a prune that removes only what it can show is ours.
+#    (CWE-426), temp files removed on a normal exit and on HUP, INT and TERM (not on SIGKILL, which no script can catch),
+#    and a prune that removes only what it can show is ours.
 #    test/skillinstallcheck.sh sections (J)-(Q) drive each one; every arm was red against the script before this.
 
 # A file or directory this script CREATES must not be group/world-writable, whatever the caller's umask: under
@@ -26,14 +27,17 @@ src="$( cd "$( dirname "$0" )" && pwd )"
 # into the current mask, so a stricter user umask (077) stays stricter and the common 022 is unchanged.
 umask "$( printf '%04o' $(( 0$( umask ) | 022 )) )"
 
-# Temp files this run created (newline-separated) are removed on ANY exit and on HUP/INT/TERM. A temp file renamed
-# into place no longer exists, so the removal is then a no-op. `exit N` in the signal traps runs the EXIT trap.
-pendingTmps=""
+# The temp files this run created are removed on a normal exit and on HUP/INT/TERM. A SIGKILL cannot be trapped: it can
+# leave one `.tmp.*` file beside the file being written, and a later run does not sweep it. A temp file renamed into
+# place no longer exists, so the removal is then a no-op. `exit N` in the signal traps runs the EXIT trap. At most one
+# settings temp ($tmp) and one manifest temp ($manifestTmp) are live at a time, so there is no list to split: a list
+# of paths cut at newlines would `rm` a piece of a root that itself holds a newline.
+tmp=""
+manifestTmp=""
 cleanup_tmps()
 {
-    printf '%s' "$pendingTmps" | while IFS= read -r _t; do
-        [ -z "$_t" ] || rm -f -- "$_t" 2>/dev/null || true
-    done
+    [ -z "$tmp" ] || rm -f -- "$tmp" 2>/dev/null || true
+    [ -z "$manifestTmp" ] || rm -f -- "$manifestTmp" 2>/dev/null || true
     return 0
 }
 trap cleanup_tmps EXIT
@@ -41,7 +45,9 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# is_abs_path P — absolute on POSIX, or a Windows drive/UNC path (Git Bash hands those through unchanged).
+# is_abs_path P — absolute on POSIX, or a Windows drive/UNC path (Git Bash hands those through unchanged). The drive and
+# UNC forms are accepted on every platform: on POSIX a root spelled `x:/y` is therefore taken as absolute and created
+# under the current directory (a known gap; the Windows arms pin the drive form).
 is_abs_path()
 {
     case "$1" in
@@ -135,8 +141,6 @@ mk_tmp()
         echo "skills/install.sh: could not create a temporary file for $1" >&2
         exit 1
     }
-    pendingTmps="$pendingTmps$tmp
-"
     if [ -f "$1" ]; then
         cp -p "$1" "$tmp" 2>/dev/null || true
         chmod u+w "$tmp" 2>/dev/null || true
@@ -300,7 +304,7 @@ install_claude_hook()
     fi
 
     mkdir -p "$( dirname "$settings" )"
-    [ -f "$settings" ] || echo '{}' >"$settings"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )   # a first-time config stays owner-only, as it always was
     settings="$( resolve_link "$settings" )" || exit 1
 
     if "$jqBin" -e --arg n "ripwire-nudge.sh" "$jqIsScript"'
@@ -373,7 +377,7 @@ install_codex_hook()
     fi
 
     mkdir -p "$( dirname "$settings" )"
-    [ -f "$settings" ] || echo '{}' >"$settings"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )   # a first-time config stays owner-only, as it always was
     settings="$( resolve_link "$settings" )" || exit 1
 
     echo "skills/install.sh --codex --hook will add or refresh advisory-only entries in $settings."
@@ -565,12 +569,13 @@ oldManifest="$dst/.ripwire-manifest-v1"
 link_is_ours()
 {
     if [ ! -e "$1" ]; then return 0; fi
-    if [ -f "$oldManifest" ] && grep -qx "skill=$2" "$oldManifest" 2>/dev/null; then return 0; fi
+    if [ -f "$oldManifest" ] && grep -qxF "skill=$2" "$oldManifest" 2>/dev/null; then return 0; fi
     _t="$( readlink "$1" 2>/dev/null )" || return 1
     case "$_t" in
         /*|[A-Za-z]:[/\\]*) ;;
         *) _t="$( dirname "$1" )/$_t" ;;
     esac
+    case "$_t" in */..|*/../*) return 1 ;; esac                # a `..` can leave the checkout after the prefix matched
     case "$_t" in "$src"/*) return 0 ;; esac
     return 1
 }
@@ -629,6 +634,13 @@ install_skill()
         # attempting either. It is not a FAILURE (nothing this run was asked to do went wrong) — it is the
         # user's own directory (C4), so it is left exactly as it is and not counted as installed.
         echo "kept $2: not installed by ripwire (your own directory)"
+        kept=$(( kept + 1 ))
+        return 0
+    fi
+    if [ -f "$target" ] && [ ! -L "$target" ]; then
+        # a regular file is never something this installer made (it creates links, and copied directories): the user's
+        # own file at a shipped skill's name is kept, like a foreign directory, not replaced (#293: refuse foreign files)
+        echo "kept $2: not installed by ripwire (your own file)"
         kept=$(( kept + 1 ))
         return 0
     fi
@@ -695,8 +707,6 @@ fi
 # --agent=codex` can distinguish a complete install from a stale/missing/extra skill without trusting the
 # checkout it came from. A skill that FAILED is not in it: listing it is the #334 lie in another file.
 manifestTmp="$( mktemp "$dst/.ripwire-manifest-v1.tmp.XXXXXX" )"
-pendingTmps="$pendingTmps$manifestTmp
-"
 {
     echo 'version=1'
     printf '%s' "$installedNames" | while IFS= read -r n; do echo "skill=$n"; done
