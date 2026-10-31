@@ -476,5 +476,21 @@ else ok "X2 SKIP: xmllint not installed"; fi
 C="$( python3 -I -c 'import sys,re;m=re.search(r"<!-- ripwire for lit:(.*?)-->",sys.stdin.read(),re.S);print(m.group(1) if m else "MISSING")' <<<"$A" )"
 if [ "$C" != "MISSING" ] && ! has "$C" '--'; then ok "X3 the lit legend comment holds no --"; else no "X3 legend comment missing or holds --"; fi
 
+# ── Y1 (train 44): the changelog text states the shapes and the literal caps as the code has them. The numbers are read from the constants, so a
+# moved cap fails here. The fragment folds into CHANGELOG.md at a release, so both are read (rc of the read checked: a missing file set is a FAIL). ──
+Y_TXT="$( cat "$ROOT"/changelog.d/*.md "$ROOT"/CHANGELOG.md 2>/dev/null )"
+Y_SRC="$ROOT/src/forliteral.h"
+y_cap(){ sed -n "s/^inline constexpr std::size_t $1 *= *\([0-9][0-9]*\);.*/\1/p" "$Y_SRC"; }
+Y_CAND="$( y_cap kForLiteralCandidates )"; Y_TRIES="$( y_cap kForLiteralMessageTries )"; Y_SLOTS="$( y_cap kForLiteralRegistrationRows )"; Y_SEG="$( y_cap kForLiteralFileMaxSegments )"
+if [ -z "$Y_TXT" ] || [ -z "$Y_CAND" ] || [ -z "$Y_TRIES" ] || [ -z "$Y_SLOTS" ] || [ -z "$Y_SEG" ]; then
+    no "Y1 could not read the changelog text or a cap constant (cand=$Y_CAND tries=$Y_TRIES slots=$Y_SLOTS seg=$Y_SEG)"
+elif has "$Y_TXT" 'shape="dotted"' && has "$Y_TXT" 'shape="message"' && has "$Y_TXT" '<lit_capped scanned= skipped= next=>' \
+     && has "$Y_TXT" "literal caps: $Y_CAND scans of a quoted span, CONST word or dotted key" && has "$Y_TXT" "$Y_TRIES scans for a message" \
+     && has "$Y_TXT" "$Y_SLOTS row slots kept" && has "$Y_TXT" "$Y_SEG or more segments"; then
+    ok "Y1 changelog names shape=dotted, shape=message, <lit_capped> and the caps ($Y_CAND, $Y_TRIES, $Y_SLOTS, $Y_SEG) as src/forliteral.h has them"
+else
+    no "Y1 the changelog text does not state the shapes, the disclosure or the caps (cand=$Y_CAND tries=$Y_TRIES slots=$Y_SLOTS seg=$Y_SEG)"
+fi
+
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
