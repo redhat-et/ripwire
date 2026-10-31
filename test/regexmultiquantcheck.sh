@@ -96,7 +96,7 @@ capRun(){                        # capRun <seconds> <outfile> <errfile> <args…
 # One directory per shape, ONE file each — so "the subject" is unambiguous and a later arm cannot be polluted by
 # a neighbour's file (this gate's own evidence bundle carries the story of a probe dir that stopped being the
 # fixture it claimed to be).
-FIX="$TMP/fix"; mkdir -p "$FIX/i" "$FIX/ii" "$FIX/iii" "$FIX/clean"
+FIX="$TMP/fix"; mkdir -p "$FIX/i" "$FIX/ii" "$FIX/iii" "$FIX/clean" "$FIX/lazy" "$FIX/nest" "$FIX/nestnc" "$FIX/comp"
 
 python3 - "$FIX" <<'PY'
 import sys, os
@@ -109,6 +109,21 @@ open(os.path.join(root, 'ii', 'a_then_z.c'), 'w').write('a' * 60 + 'z\n')
 open(os.path.join(root, 'iii', 'dots.c'), 'w').write('abw' + '.' * 19 + 'Z\n')
 # the clean control: must stay CLEAN under the very patterns the arms above refuse with.
 open(os.path.join(root, 'clean', 'plain.c'), 'w').write('int plainFunction() { return 0; }\n')
+# section (8), lazy: NO 'b' anywhere. A lazy prefix can match EMPTY, so any line that CONTAINS the required
+# literal matches at the literal itself, and a MATCHING subject costs the engine nothing — the lazy walk on
+# a FAILING subject is where the enumeration lives. A b-less line is also the one the literal prefilter
+# drops, which is why the lazy arm passes --no-prefilter and writes the flag down instead of defaulting it.
+open(os.path.join(root, 'lazy', 'a_then_z.c'), 'w').write('a' * 400 + 'z\n')
+# section (8), nested capturing: the pattern needs a b-then-c arrangement ((a*a*a*a*)b then c); the line
+# carries c-then-b instead, so every offset fails. Literals a, b, c present, so holdsRequired passes the
+# file to the engine and the pre-change engine does the work this arm's red baseline needs.
+open(os.path.join(root, 'nest', 'cb_then_a.c'), 'w').write('c' + 'b' + 'a' * 400 + '\n')
+# section (8), nested non-capturing: (?:x(?:a*a*)y) needs x, an a-run, then y — the line has y-then-x, so
+# every offset fails with the literals on board.
+open(os.path.join(root, 'nestnc', 'yx_then_a.c'), 'w').write('y' + 'x' + 'a' * 400 + '\n')
+# section (8), the composed evasion: ((?:a*?a*?)x)c needs an a-run, then x, then c IMMEDIATELY after x —
+# the line's x is followed by more a's, so every offset fails with a, x, c all present.
+open(os.path.join(root, 'comp', 'axac.c'), 'w').write('a' * 200 + 'x' + 'a' * 200 + 'c' + '\n')
 PY
 
 [ -f "$FIX/i/b_then_a.c" ] || { echo "fixture generation failed — python3 missing?"; exit 2; }
@@ -121,8 +136,13 @@ PY
 #   • the refusal names the construct (content check, never the discriminator)
 #   • no hits= element reached stdout (a refusal that still reported a measurement would be worse than neither)
 shapeCase(){
-    local label="$1" pat="$2" subjectDir="$3"
-    local rc; rc="$( capRun 25 "$TMP/out" "$TMP/err" "$subjectDir" --regex="$pat" --no-cache )"
+    local label="$1" pat="$2" subjectDir="$3" at
+    # $at: extra flags for this arm only. Passed as ONE STRING and expanded UNQUOTED, on purpose: bash 3.2
+    # (the Darwin /bin/bash this gate must ride on CI-adjacent macOS) has no arrays in the position, and
+    # under `set -u` an unset expansion is an error — so the default is empty-quoted-once at the CALL and
+    # split here. One flag as of section (8) (`--no-prefilter`); two would split the same way.
+    at="${4:-}"
+    local rc; rc="$( capRun 25 "$TMP/out" "$TMP/err" "$subjectDir" --regex="$pat" $at --no-cache )"
     if [ "$rc" = TIMEOUT ]; then
         no "$label: still running after 25 s — the shape was HANDED TO THE ENGINE and never came back (this is the libstdc++ hang)"
         return
@@ -223,11 +243,18 @@ fi
 # ── (5) THE VERDICT IS A PURE FUNCTION OF (file, pattern) ────────────────────────────────────────────────────
 # This spec's AC5, and the AC that forbids the obvious "cap the wall time" fix: a clock-reading bound would make
 # the verdict depend on the machine and the run. Refusal is a pure function, so stdout AND stderr are
-# byte-identical across runs.
-"$BIN" "$FIX/i" --regex='a*a*a*a*a*b' --no-cache >"$TMP/d1" 2>"$TMP/e1"
-"$BIN" "$FIX/i" --regex='a*a*a*a*a*b' --no-cache >"$TMP/d2" 2>"$TMP/e2"
-{ diff -q "$TMP/d1" "$TMP/d2" >/dev/null && diff -q "$TMP/e1" "$TMP/e2" >/dev/null; } \
-    && ok "deterministic: two refusals byte-identical on stdout AND stderr" || no "non-deterministic refusal"
+# byte-identical across runs. Every run here is capped as everywhere else — a regression on THESE invocations
+# turned this section into the one arm that could hang CI (found in the #484 review):
+#   • a wall-time cap proves nothing about the message, and the COPY below is what makes this an AC5 arm;
+#   • the uncapped run's rc is never asserted, so there is nothing to preserve by staying uncapped.
+d1rc="$( capRun 25 "$TMP/d1" "$TMP/e1" "$FIX/i" --regex='a*a*a*a*a*b' --no-cache )"
+d2rc="$( capRun 25 "$TMP/d2" "$TMP/e2" "$FIX/i" --regex='a*a*a*a*a*b' --no-cache )"
+if [ "$d1rc" = TIMEOUT ] || [ "$d2rc" = TIMEOUT ]; then
+    no "determinism arm: TIMEOUT after 25 s — a refusal that never returns is no verdict to compare"
+else
+    { diff -q "$TMP/d1" "$TMP/d2" >/dev/null && diff -q "$TMP/e1" "$TMP/e2" >/dev/null; } \
+        && ok "deterministic: two refusals byte-identical on stdout AND stderr" || no "non-deterministic refusal"
+fi
 
 # ── (6) THE VOCABULARY IS EXTENDED, NOT BLURRED (AC8) ────────────────────────────────────────────────────────
 # A structural refusal must not be spelled as an engine abandonment. Since both exit 1, this is a MESSAGE
@@ -240,7 +267,13 @@ fi
 # row whose atoms are not proven disjoint", clause 2's is the alternation sentence. Pinning one clause's sentence
 # here would make the other clause's arm fail on wording, which is the "arm asserts a phrasing, not a contract"
 # defect that turns a green gate into a rubber stamp.
-"$BIN" "$FIX/i" --regex='a*a*a*a*a*b' --no-cache >/dev/null 2>"$TMP/refuse.err"
+# The reference run that produces the message below is capped like every other run: it was the THIRD
+# uncapped invocation of this file (same #484 finding) — a regression here left the suite with no message
+# to pin and no run left alive to say so.
+rrc="$( capRun 25 "$TMP/refuse.out" "$TMP/refuse.err" "$FIX/i" --regex='a*a*a*a*a*b' --no-cache )"
+if [ "$rrc" = TIMEOUT ]; then
+    no "vocabulary arm: the reference refusal never returned (TIMEOUT after 25 s) — no message to pin"
+else
 grep -qiF 'catastrophic backtracking' "$TMP/refuse.err" \
     && ok "the refusal opens on the family's construct phrase" \
     || no "the refusal does not open on the construct phrase: $( head -c 300 "$TMP/refuse.err" )"
@@ -253,6 +286,7 @@ grep -qiE 'collapse|bounded|workaround' "$TMP/refuse.err" \
 grep -qi 'match budget' "$TMP/refuse.err" \
     && no "the refusal names a match budget — the PR #397 removal is being reintroduced under another name" \
     || ok "no match-budget sentence anywhere in the refusal (the removal stands)"
+fi
 
 # ── (7) THE PRECEDING FAMILIES STILL REFUSE WITH THEIR OWN MESSAGES ──────────────────────────────────────────
 # AC3, in miniature and inside this gate: the two families closed BEFORE this spec must be untouched by it. Both
@@ -269,6 +303,42 @@ legacyCase(){
 }
 legacyCase "nested-repetition (a+)+b"  '(a+)+b'
 legacyCase "unproven-alternation (a|a)+b" '(a|a)+b'
+
+# ── (8) THE TWO EVASION CLASSES THE #484 REVIEW FOUND — nested scopes and lazy suffixes ─────────────────────
+# Two cover reviewers found (and both were real, measured on the shipped v1 screen): a nested group's body
+# never became a scope (only outermost groups did), and a lazy `?` suffix after a quantifier was read as a
+# DELIMITER that breaks adjacency instead of as part of the same quantified atom. Both are members of the
+# family this gate exists to refuse, both reach the engine pre-fix (see the arms), and both are closed
+# clause-1-structurally post-fix. The four arms below re-use `shapeCase`, the same contract and the same
+# discriminator as the three original shapes — because they are the same family; the review only found
+# spellings the v1 scope walk could not see.
+#
+# WHY THE LAZY ARM'S SUBJECT HAS NO 'b'. A lazy quantifier prefers ZERO, so any line that CONTAINS the
+# required literal matches AT the literal and costs the engine nothing — a MATCHING subject is a dud
+# fixture for a lazy pattern (measured: sub-second and clean on both legs pre-fix). The lazy walk on a
+# FAILING subject is where the enumeration lives. The potential prefilter drops exactly the line this
+# arm needs, so the arm passes `--no-prefilter` and writes the flag down rather than defaulting it — the
+# same discipline as shape (i)'s note at the top of this file.
+shapeCase "lazy a*?a*?a*?a*?b (evasion: lazy suffixes, group-free)" 'a*?a*?a*?a*?b' "$FIX/lazy" '--no-prefilter'
+# nested capturing: the inner adjacency sits at GROUP DEPTH 2 — exactly what the v1 depth-0-only scope
+# collector never learned about. `((a*a*a*a*)b)c` vs `((a*?)b)c` in the admit set is the depth-2 pair:
+# ONE unbounded atom is repetition, TWO is the family.
+shapeCase "nested ((a*a*a*a*)b)c (evasion: clause-1 scopes never ran below depth 0)" '((a*a*a*a*)b)c' "$FIX/nest"
+# nested NON-CAPTURING groups, the CR suggested spelling: the scoping rule is blind to the capturing flag
+# (it ate the (?: modifier through regexGroupModifierLength before, and eats it at every depth now).
+shapeCase "nested-noncap (?:x(?:a*a*)y (evasion: non-capturing nesting)" '(?:x(?:a*a*)y)' "$FIX/nestnc"
+# the composed evasion — nested AND lazy. Pre-fix the composed probe was exit 0 on both legs over the
+# 400-byte line (the lazy suffixes broke adjacency AND the nesting hid the scope); post-fix both clauses
+# see it and the refusal is the same word.
+shapeCase "compound ((?:a*?a*?)x)c (both evasions: nested scope + lazy suffix)" '((?:a*?a*?)x)c' "$FIX/comp"
+
+# The evade-REFUSED pair — the same two new classes as above, in ADMIT positions. ONE unbounded atom
+# needs no pair to intersect with (it is `ab*c`'s case wrapped in punctuation and laziness), and one
+# lazy atom on one side of a literal needs no pair at all: refusing these would tighten clean patterns,
+# not members. These two arms stop exactly that over-refusal.
+safeCase "\d+\s*?\w+ (lazy quantifiers, disjoint sets, all mixes)" '\d+\s*?\w+'
+safeCase "((a*?)b*)c (one lazy atom inside a nested group, ONE unbounded atom per scope)" '((a*?)b*)c'
+safeCase "a{1,4}?b{1,4}? (lazy BOUNDED intervals — bounded atoms are never participants)" 'a{1,4}?b{1,4}?'
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
