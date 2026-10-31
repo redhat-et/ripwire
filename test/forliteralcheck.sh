@@ -298,6 +298,105 @@ for near in 'Invalid user settings file' 'bad state error' 'Stale cache entry fo
     if ! has "$N" '<lit ' && [ "$N" = "$( koff "--for=$near" )" ]; then ok "M5 [G] near miss, no <lit and byte-identical: $near"
     else no "M5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
 done
+# ── Q (lane LITERAL-ANCHOR fix round 1; [P] arms are RED on a4ac4941): the review's C1-C5 and the mid-sentence cue; fixture built at runtime ──
+QF="$TMP/qfix"; mkdir -p "$QF/app" "$QF/pkg"
+python3 -I -c 'import sys
+d=sys.argv[1]
+for i in range(9):
+    open(d+"/app/r%d.ts"%i,"w").write("export function rd%d(c: any) {\n  return c.getValue(\x27svc.retry.limit\x27);\n}\n"%i)
+open(d+"/app/reg.ts","w").write("export const R = {\n  \x27svc.retry.limit\x27: { type: \x27number\x27 },\n};\n")
+open(d+"/app/long.ts","w").write("export function lng(c: any) {\n  const pad = \""+"x"*230+"\"; return c.getValue(\x27svc.long.line\x27);\n}\n")
+open(d+"/app/dev.ts","w").write("export const D = {\n  \x27svc.dev.mode\x27: { type: \x27boolean\x27 },\n};\nexport function dm(c: any) {\n  return c.getValue(\x27svc.dev.mode\x27);\n}\n")
+open(d+"/app/field.py","w").write("def is_set(self):\n    return \"the value of this field isn\x27t null\"\n")
+open(d+"/app/forms.py","w").write("def clean(self):\n    raise ValueError(\"This field is required.\")\n")
+open(d+"/app/net.py","w").write("def pool():\n    return \"cannot connect to servers pool\"\n")
+open(d+"/app/tx_a.go","w").write("package app\n\nfunc closedMsg() string {\n\treturn \"the transaction is closed\"\n}\n")
+open(d+"/app/tx_b.go","w").write("package app\n\nfunc abortedMsg() string {\n\treturn \"transaction is aborted\"\n}\n")
+open(d+"/app/fw.py","w").write("def plan():\n    return \"the value of the plan\"\n")
+names=[".terraform.lock.hcl","terraform.tfstate","terraform.tfvars","BUILD.bazel","insiders.vscode.dev","vscode.dev","application.properties",".env.local","CHANGES.rst","api.acme.dev","views.jbuilder"]
+open(d+"/app/names.py","w").write("def names():\n    return [" + ", ".join("\""+n+"\"" for n in names)+"]\n")
+open(d+"/app/views.jbuilder","w").write("json.x = 1\n")
+open(d+"/app/lit.py","w").write("def pick(left, right, other):\n    value = left if right else other\n    return value\n\ndef msg():\n    return \"left if right else other\"\n")
+open(d+"/app/cmds.ts","w").write("export function reg(r: any) {\n  r.register(\x27workbench.action.files.save\x27, 1);\n}\n")
+open(d+"/app/zed.ts","w").write("export const Z = {\n  \x27zed.autoSave\x27: { type: \x27string\x27 },\n  \x27files.autoSave\x27: { type: \x27string\x27 },\n};\nexport function rz(c: any) {\n  return c.getValue(\x27zed.autoSave\x27) + c.getValue(\x27files.autoSave\x27);\n}\n")
+open(d+"/app/widget.py","w").write("def boot():\n    raise RuntimeError(\"the widget failed to start\")\n")
+open(d+"/app/us_a.py","w").write("def ua():\n    return \"the user settings are stale\"\n")
+open(d+"/app/us_b.py","w").write("def ub():\n    return \"user settings file missing\"\n")
+open(d+"/app/nu.py","w").write("def nf():\n    return \"Command not found\"\n")' "$QF"
+qrun(){ ( cd "$QF" || exit 1; "$BIN" "$QF" --no-cache "$@" </dev/null 2>/dev/null ); }
+qoff(){ ( cd "$QF" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$QF" --no-cache "$@" </dev/null 2>/dev/null ); }
+rowsOf(){ python3 -I -c 'import sys,re;print("\n".join(m.group(0) for m in re.finditer(r"<ls [^>]*>.*?</ls>",sys.stdin.read(),re.S)))'; }
+# C1: nine in-function readers and one top-level quoted registration: the registration survives the 8-row cap
+Q1="$( qrun '--for=svc.retry.limit setting' | lit )"
+if has "$Q1" 's="svc.retry.limit" shape="dotted"' && has "$Q1" '<ls p="app/reg.ts" l="2" k="string"' && has "$Q1" 'shown="8"' && has "$Q1" 'capped="1"' \
+   && [ "$( grep -o '<ls ' <<<"$Q1" | wc -l | tr -d ' ' )" = "8" ]; then
+    ok "Q1 [P] 9 readers + 1 quoted registration: the registration keeps a row slot (8 rows, capped=1 still disclosed)"
+else no "Q1 registration cut by the readers: $( grep -o '<ls p="[^"]*" l="[0-9]*"' <<<"$Q1" | tr '\n' ' ' )"; fi
+# C1: a row whose key sits past byte 200 is cut around the key
+Q2="$( qrun '--for=svc.long.line setting' | lit | rowsOf )"
+if [ -n "$Q2" ] && [ "$( grep -c 'svc.long.line' <<<"$Q2" )" = "$( grep -c '<ls ' <<<"$Q2" )" ]; then ok "Q2 [P] a row whose key sits past byte 200 shows the key (window around it)"
+else no "Q2 key hidden by the 200-byte cut: ${Q2:0:500}"; fi
+# the same registration-slot guard does not move a key the old order already served: the K2b order stands (checked above)
+# C2: a fragment is bounded by word edges and holds two content words; a start-anchored stop-word fragment never wins
+Q3="$( qrun '--for=this field is required error' | lit )"
+if has "$Q3" 'frag="1"' && has "$Q3" 'p="app/forms.py"' && ! has "$Q3" 'app/field.py'; then ok "Q3 [P] 'this field is' is not found inside 'this field isn't': the real message row (forms.py) prints"
+else no "Q3 message fragment: ${Q3:0:500}"; fi
+Q4="$( qrun '--for=the transaction is aborted error' | lit )"
+if has "$Q4" 's="transaction is aborted"' && has "$Q4" 'in="abortedMsg"' && ! has "$Q4" 'closedMsg'; then ok "Q4 [P] 'the transaction is' (start-anchored, one content word) does not win: transaction is aborted prints abortedMsg"
+else no "Q4 try order: ${Q4:0:500}"; fi
+for near in 'the value of the error' 'cannot connect to server error'; do
+    N="$( qrun "--for=$near" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( qoff "--for=$near" )" ]; then ok "Q5 [P] near miss, no <lit and byte-identical: $near"; else no "Q5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
+done
+# C3: file names and hosts are no key (a leading dot; an extension or host suffix; the name of an indexed file)
+for near in '.terraform.lock.hcl' 'terraform.tfstate key' 'terraform.tfvars setting' 'BUILD.bazel flag' 'insiders.vscode.dev' 'vscode.dev option' 'application.properties setting' \
+            '.env.local setting' 'CHANGES.rst option' 'api.acme.dev' 'views.jbuilder setting'; do
+    N="$( qrun "--for=$near" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( qoff "--for=$near" )" ]; then ok "Q6 [P] file name or host, no <lit and byte-identical: $near"; else no "Q6 file or host fired: $near: $( lit <<<"$N" | cut -c1-200 )"; fi
+done
+Q6="$( qrun '--for=svc.dev.mode setting' | lit )"
+if has "$Q6" 's="svc.dev.mode" shape="dotted"'; then ok "Q6b [G] a key with dev in the middle is a key (only the last segment names a host)"; else no "Q6b key with a dev segment refused: ${Q6:0:300}"; fi
+# C4: a message never prints a code row; the legend says what rows hold
+Q7="$( qrun '--for=left if right else other error' | lit )"
+if has "$Q7" 'shape="message"' && has "$Q7" 'k="string" in="msg"' && ! has "$Q7" 'k="code"'; then ok "Q7 [P] a message block holds string rows only (the code line 'left if right else other' is no row)"
+else no "Q7 code row on a message: ${Q7:0:500}"; fi
+QL="$( qrun '--for=svc.retry.limit setting' )"
+if ! has "$QL" 'rows hold the whole key' && has "$QL" 'prefix'; then ok "Q8 [P] the legend no longer claims rows hold the whole key and says a dotted prefix may stand before it"; else no "Q8 legend still says the whole key"; fi
+# C5: more than the first literal gets a try, capped and disclosed (try=N)
+Q9="$( qrun '--for=workbench.action.files.save files.autoSave setting' | lit )"
+if has "$Q9" 's="files.autoSave" shape="dotted"' && ! has "$Q9" 'workbench.action'; then ok "Q9 [P] the key beside the cue leads: files.autoSave, not the command id before it"; else no "Q9 cue-adjacent key: ${Q9:0:400}"; fi
+Q10="$( qrun '--for=foo.bar zed.autoSave option' | lit )"
+if has "$Q10" 's="zed.autoSave" shape="dotted"'; then ok "Q10 [P] 'foo.bar zed.autoSave option': the key beside the cue"; else no "Q10: ${Q10:0:300}"; fi
+Q11="$( qrun '--for=API_KEY zed.autoSave setting' | lit )"; Q12="$( qrun '--for="not in repo words" zed.autoSave setting' | lit )"
+if has "$Q11" 's="zed.autoSave" shape="dotted"' && has "$Q11" 'try="2"' && has "$Q12" 's="zed.autoSave" shape="dotted"' && has "$Q12" 'try="2"'; then
+    ok "Q11 [P] a CONST word or a quoted span with no site does not hide the key after it; try=\"2\" says it was the second literal"
+else no "Q11: ${Q11:0:300} | ${Q12:0:300}"; fi
+Q13="$( qrun '--for=foo.bar.baz the widget failed to start error' | lit )"
+if has "$Q13" 's="the widget failed to start" shape="message"' && has "$Q13" 'try="2"'; then ok "Q12 [P] a dotted word with no site does not hide the message after it (try=\"2\")"; else no "Q12: ${Q13:0:300}"; fi
+Q14="$( qrun '--for=files.autoSave setting' | lit )"
+if ! has "$Q14" 'try='; then ok "Q12b [G] a first-literal fire carries no try="; else no "Q12b try= on a first literal"; fi
+# mid-sentence cue (ld-nushell-05 shape)
+Q15="$( qrun '--for=Command not found error for an unknown word' | lit )"
+if has "$Q15" 's="Command not found" shape="message"' && has "$Q15" 'in="nf"'; then ok "Q13 [P] a cue inside the sentence: the words before it are the message"; else no "Q13 mid-sentence cue: ${Q15:0:300}"; fi
+for near in 'how to report an error when disk is full' 'the message queue handler' 'files.autoSave' 'files.autoSave config' '"files.autoSave setting"x'; do
+    N="$( qrun "--for=$near" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( qoff "--for=$near" )" ]; then ok "Q14 [G] near miss, no <lit and byte-identical: $near"; else no "Q14 near miss fired: $near: $( lit <<<"$N" | cut -c1-200 )"; fi
+done
+for twin in '`svc.retry.limit` setting' '"svc.retry.limit" setting' 'When a user turns on svc.retry.limit, what code reads that setting'; do
+    N="$( qrun "--for=$twin" | lit )"
+    if has "$N" 's="svc.retry.limit" shape="dotted"'; then ok "Q15 [G] paraphrase fires: $twin"; else no "Q15 paraphrase misses: $twin: ${N:0:200}"; fi
+done
+if command -v xmllint >/dev/null 2>&1; then
+    if printf '%s' "$( qrun '--for=this field is required error' )" | xmllint --noout - 2>/dev/null && printf '%s' "$( qrun '--for=API_KEY zed.autoSave setting' --legend=full )" | xmllint --noout - 2>/dev/null; then ok "Q16 [P] xmllint well-formed (message fragment, try=)"; else no "Q16 not well-formed"; fi
+fi
+Q5b="$( qrun '--for=the value of the plan error' | lit )"
+if has "$Q5b" 's="the value of the plan" shape="message"'; then ok "Q5b [G] twin: a message with two content words (the value of the plan) still fires"; else no "Q5b twin lost: ${Q5b:0:200}"; fi
+Q4b="$( qrun '--for=the user settings file error' | lit )"
+if has "$Q4b" 's="user settings file"' && has "$Q4b" 'in="ub"' && ! has "$Q4b" 'in="ua"'; then ok "Q4b [P] tries are ordered by content words: 'user settings file' (3) before 'the user settings' (2)"
+else no "Q4b try order by content: ${Q4b:0:400}"; fi
+Q17="$( qrun '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.mode' )"
+if ! has "$Q17" '<lit ' && [ "$Q17" = "$( qoff '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.mode' )" ]; then ok "Q17 [G] the walk is capped (4 literals scanned): a fifth key is not tried"
+else no "Q17 the candidate walk is not capped: $( lit <<<"$Q17" | cut -c1-200 )"; fi
 # ── X1-X3 ──
 if [ "$A" = "$( run --for=APPTOOL_RENDER_MODE )" ]; then ok "X1 deterministic"; else no "X1 two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then
