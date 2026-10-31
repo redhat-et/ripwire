@@ -150,7 +150,7 @@ inline std::vector<CcFileMetrics> ccComputeMetrics( const IngestResult& ing, con
     const auto adj = resolveIncludeAdj( ing );   // forward = includes; the same graph --deps uses
     for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
     {
-        std::vector<std::uint32_t> outs = adj[f];
+        std::vector<std::uint32_t> outs( adj[f].begin(), adj[f].end() );
         std::sort( outs.begin(), outs.end() );
         outs.erase( std::unique( outs.begin(), outs.end() ), outs.end() );
         m[f].fanOut = std::uint32_t( outs.size() );

@@ -35,6 +35,7 @@
 #include "infra/Diagnostics.h"  // DISCLOSE — graceful-degrade on a malformed path-regex (never throw at match time)
 #include "regexguard.h"          // path-rules: the screen, the compile and the guarded match every user-authored pattern takes
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
+#include "infra/fileSetStore.h" // rw::FileAdjacency: the file graph the metrics and the propagation walk read
 #include "infra/stackthreads.h" // kCallerStackBytesFloor — path-rule matching runs on whatever thread --arch is on, never one it sized itself
 
 #include <algorithm>
@@ -1006,7 +1007,7 @@ struct ModuleMetric
 // out of a hash map into output. `distThreshold` flags zone when D exceeds it (defaults to the named
 // kZoneDistanceThreshold constexpr above; every current call site uses the default).
 inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
-                                                       const std::vector<std::vector<std::uint32_t>>& adj,
+                                                       const rw::FileAdjacency& adj,
                                                        double distThreshold = kZoneDistanceThreshold )
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
@@ -1214,14 +1215,11 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 // This is a SYSTEM-level architecture fact, so it is emitted as a single reported NUMBER (fixed 3-decimal
 // precision → byte-identical run-to-run; it is a report value, not a rank input, so no tolerance band).
 //
-// Determinism: a per-node BFS over a `visited` bitset in ascending file-id order; the RATIO is order-
-// independent (a sum of set sizes), and the fixed formatting pins the emitted string. adj[f] may hold
-// duplicate or out-of-range ids (see resolveIncludeAdj) — the bitset dedups and `g < F` skips the latter.
+// Determinism: the RATIO is a sum of set sizes, order-independent, and the fixed formatting pins the emitted string.
+// adj[f] may hold duplicate or out-of-range ids (see resolveIncludeAdj): buildFileClosure tolerates both.
 //
-// Complexity: O( N · (N + E) ) worst case (one BFS per file). For a file→file graph (hundreds–thousands
-// of files) this is trivial; NOT the O(N³) Floyd-Warshall closure. A dense 2000-file tree is ~a few M
-// edge-visits — sub-millisecond. If a pathologically large + dense tree ever makes it material, a bitset-
-// per-node reachability fold (word-parallel OR) is the drop-in upgrade; unneeded at current scale.
+// Complexity: one word-parallel fold, O( (N + E) · N / 64 ) worst case, whatever the closures' sizes: the per-file BFS
+// this replaced took O( N · (N + E) ), 23 s against 3.4 s on a 100,000-file graph of mean closure 11,000 (bench/FILEGRAPH.md).
 //
 // Degrade / edge cases (never divides by zero):
 //   N == 0 → 0.0 (empty graph, documented: no files → no propagation)
@@ -1230,48 +1228,13 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 // The traversal core (sum of |reachable(root)| over a ROOT SET) is factored into sumReachableClosure below
 // so §P9.4's dependency-capable-only view (dsmPropagationCostCapable) shares the exact same walk instead of
 // a second copy of it — only the root set and the denominator N differ between the two views.
-inline std::uint64_t sumReachableClosure( const std::vector<std::vector<std::uint32_t>>& adj,
-                                          const std::vector<std::uint32_t>&              roots,
-                                          std::uint32_t                                  F ) noexcept
+inline std::uint64_t sumReachableClosure( const rw::FileAdjacency& adj, const std::vector<std::uint32_t>& roots ) noexcept
 {
-    std::uint64_t              total = 0;
-    std::vector<char>          visited( F, 0 );    // reused across BFS roots (reset for touched nodes only)
-    std::vector<std::uint32_t> stack;              // explicit stack — no recursion on any thread
-    stack.reserve( F );
-
+    const rw::FileSetStore closure = rw::buildFileClosure( adj );
+    std::uint64_t          total   = 0;
     for( const std::uint32_t s : roots )
     {
-        std::uint32_t              reachedCount = 0;
-        std::vector<std::uint32_t> touched;       // nodes we set visited=1 for, to clear after this root
-        touched.reserve( F );
-
-        visited[s] = 1; touched.push_back( s ); ++reachedCount;   // unit diagonal: a file reaches itself
-        stack.clear();
-        stack.push_back( s );
-        while( !stack.empty() )
-        {
-            const std::uint32_t v = stack.back();
-            stack.pop_back();
-            for( const std::uint32_t g : adj[v] )
-            {
-                if( g >= F )
-                {
-                    continue; // out-of-range id (resolveIncludeAdj can't, but guard)
-                }
-                if( visited[g] )
-                {
-                    continue; // bitset dedups duplicate adjacency entries + revisits
-                }
-                visited[g] = 1; touched.push_back( g ); ++reachedCount;
-                stack.push_back( g );
-            }
-        }
-        total += reachedCount;
-
-        for( const std::uint32_t t : touched )
-        {
-            visited[t] = 0; // O(reached) reset — no full-vector wipe
-        }
+        total += std::uint64_t( closure.setSize( s ) ) + 1;   // unit diagonal: a file reaches itself
     }
     return total;
 }
@@ -1283,8 +1246,8 @@ inline std::uint64_t sumReachableClosure( const std::vector<std::vector<std::uin
 // are .sh/.md). Only capable files seed a root and count toward N; a root's reachable SET can still legally
 // pass through any node adj[] leads to (an edge into a non-capable path is possible in principle) —
 // unchanged, only WHICH files seed a walk and the denominator are restricted.
-inline double dsmPropagationCostCapable( const IngestResult&                            ing,
-                                         const std::vector<std::vector<std::uint32_t>>& adj,
+inline double dsmPropagationCostCapable( const IngestResult&     ing,
+                                         const rw::FileAdjacency& adj,
                                          const std::vector<char>&                       depCapable ) noexcept
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
@@ -1307,7 +1270,7 @@ inline double dsmPropagationCostCapable( const IngestResult&                    
         return 0.0; // no dependency-capable file at all → 0 (documented)
     }
 
-    const std::uint64_t reachableTotal = sumReachableClosure( adj, roots, F );
+    const std::uint64_t reachableTotal = sumReachableClosure( adj, roots );
     const double        n              = double( roots.size() );
     return double( reachableTotal ) / ( n * n );
 }
@@ -1316,7 +1279,7 @@ inline double dsmPropagationCostCapable( const IngestResult&                    
 // wrapper over dsmPropagationCostCapable (an all-ones mask) rather than a second copy of the same body, so
 // the two views can never drift apart structurally.
 inline double dsmPropagationCost( const IngestResult&                            ing,
-                                  const std::vector<std::vector<std::uint32_t>>& adj ) noexcept
+                                  const rw::FileAdjacency& adj ) noexcept
 {
     return dsmPropagationCostCapable( ing, adj, std::vector<char>( ing.files.size(), 1 ) );
 }

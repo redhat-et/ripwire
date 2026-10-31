@@ -425,9 +425,9 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // from h.transitive (a post-pass, not a second BFS; see graph.h::restrictDependencyHealth).
         const RestrictedDepHealth rh = restrictDependencyHealth( ing, h.transitive );
         std::vector<std::uint32_t> afferent( ing.files.size(), 0 );   // Ca: # files that include each file (blast radius)
-        for( const auto& outs : adj )
+        for( std::size_t from = 0; from < adj.size(); ++from )
         {
-            for( std::uint32_t g : outs )
+            for( std::uint32_t g : adj[from] )
             {
                 if( g < afferent.size() )
                 {

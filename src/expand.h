@@ -113,7 +113,7 @@ inline bool applyStructuralExpansion( const IngestResult& ing, std::vector<float
 
     // Resolved include/import adjacency, and its reverse: a sibling is as often the file that IMPORTS
     // the primary as the one it imports (the change flows both ways along a contract).
-    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing );
+    const rw::FileAdjacency                 adj = buildPreciseIncludeAdj( ing );
     std::vector<std::vector<std::uint32_t>>       rev( F );
     for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
     {

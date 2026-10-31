@@ -10040,7 +10040,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 // directory name: test/, tests/, bench/) AND every file that depends on it is a test path (isTestPath) — both
 // by path, nothing is parsed. A production file under test/ (src/*.cpp includes ../test/lib/hooks.h) therefore
 // stays ranked. `adj` is the same file→file graph the afferent counts come from; the result is indexed by file id.
-inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const rw::FileAdjacency& adj )
 {
     const std::uint32_t       F = std::uint32_t( ing.files.size() );
     std::vector<std::uint8_t> prodDependent( F, 0 );
@@ -10097,7 +10097,7 @@ inline std::vector<std::uint32_t> depsGodfileRows( const IngestResult& ing, cons
 inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       const std::vector<std::vector<std::uint32_t>>& cycles,
                       const std::vector<std::uint32_t>& transitive, const std::vector<std::uint32_t>& afferent,
-                      const std::vector<std::vector<std::uint32_t>>& adj,
+                      const rw::FileAdjacency& adj,
                       std::uint64_t ccd, double acd, double nccd,
                       // parser version 83: the lazy pairs the load-time structure leaves out — per file (a row's
                       // lazy_edges=, written only when > 0) and in total (<health lazy_edges=>, same rule). See
