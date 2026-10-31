@@ -331,5 +331,57 @@ if grep -q 'why="pruned-package"' <<<"$O"; then ok "P6 warm cache keeps the rows
 O=$( cd "$P" && "$BIN" "$P" --cache="$CC" --deps 2>/dev/null )
 if grep -q '<pruned_packages count="1"' <<<"$O"; then ok "P6.1 warm cache keeps the --deps block"; else no "P6.1"; fi
 
+# ── Rule 3 must not bind a Python name the external-name veto refuses (PY-RULE3-VETO) ───────────────────────────────────────
+# Rule 3 narrows a name-only call to the caller's imported closure. For a bare builtin (`dict(...)`, `type(...)`) with no local,
+# import or same-file def, or a member of a stdlib or third-party import, the Phase 5 veto says "bound outside the tree"; narrowing
+# first handed the call to a same-named def in an imported file (cpython 1,262 and textual 10 such edges). The veto now decides.
+# The other direction is the risk: every shape below that really binds in-tree must keep its edge.
+cpaths() {   # cpaths ROOT FN: the p= of every callee row of FN, sorted, space separated ("" = no edge)
+    ( cd "$1" && "$BIN" "$1" --no-cache --callees="$2" 2>/dev/null ) | grep -o '<s [^>]*>' | grep -o ' p="[^"]*"' | sed 's/ p="//; s/:[0-9]*"$//' | sort | tr '\n' ' '
+}
+wantpaths() { local got; got=$(cpaths "$2" "$3"); if [ "$got" = "$4" ]; then ok "$1: $3 -> '${4:-no edge}'"; else no "$1: $3 -> '$got', want '${4:-no edge}'"; fi; }
+R=$T/rule3veto
+w "$R/helpers.py" 'def dict(kw):\n    return kw\ndef bool(x):\n    return x\ndef type(x):\n    return x\ndef float(x):\n    return x\nclass Signer:\n    def signature(self):\n        return 1\n'
+w "$R/decoy.py" 'def dict(kw):\n    return kw\ndef bool(x):\n    return x\ndef type(x):\n    return x\ndef float(x):\n    return x\nclass Signer2:\n    def signature(self):\n        return 2\n'
+for n in dict bool type float; do w "$R/b_$n.py" "import helpers\ndef f_$n(x):\n    return $n(x)\n"; done
+w "$R/b_sig.py" 'import helpers\nimport inspect\ndef f_sig(x):\n    return inspect.signature(x)\n'
+w "$R/b_param.py" 'import helpers\ndef f_param(dict):\n    return dict(1)\n'
+w "$R/t_imptype.py" 'from helpers import type\ndef f_imptype(x):\n    return type(x)\n'
+w "$R/t_star.py" 'from helpers import *\ndef f_star(x):\n    return bool(x)\n'
+w "$R/t_nested.py" 'import helpers\ndef f_nested(x):\n    def float(y):\n        return y\n    return float(x)\n'
+w "$R/t_samefile.py" 'import helpers\ndef bool(x):\n    return x\ndef f_samefile(x):\n    return bool(x)\n'
+# R1 bare builtins: no edge to the imported namesake (red before the fix)
+wantpaths R1.1-dict "$R" f_dict ''
+wantpaths R1.2-bool "$R" f_bool ''
+wantpaths R1.3-type "$R" f_type ''
+wantpaths R1.4-float "$R" f_float ''
+# R2 a member of a stdlib import: no edge to Signer.signature (the veto already decided; this pins it stays that way)
+wantpaths R2.1-inspect.signature "$R" f_sig ''
+# R3 the true binds the veto must not lose
+wantpaths R3.1-from-import-type "$R" f_imptype 'helpers.py '
+wantpaths R3.2-star-import-of-indexed-module "$R" f_star 'helpers.py '
+got=$(cpaths "$R" f_nested); case "$got" in *t_nested.py*) ok "R3.3 nested def float() shadows the builtin: keeps its edge to t_nested.py ('$got')" ;; *) no "R3.3 nested def lost its edge: '$got'" ;; esac
+wantpaths R3.4-same-file-def-shadows-builtin "$R" f_samefile 't_samefile.py '
+# R3.5 a parameter named like a builtin is local evidence: the veto does not refuse it as external (no `C external` census row)
+( cd "$R" && "$BIN" "$R" --no-cache --pin-census="$T/r3.census" >/dev/null 2>&1 )
+if awk -F'\t' '$1=="C" && index($6,"b_param.py::f_param#")==1 && $2=="external" {f=1} END{exit f?0:1}' "$T/r3.census"; then no "R3.5 a parameter named dict was vetoed as external"; else ok "R3.5 parameter named dict is local evidence, not vetoed"; fi
+R=$T/rule3veto2
+w "$R/dom.py" 'class DOMNode:\n    def query_one(self, s):\n        return s\n'
+w "$R/app.py" 'from dom import DOMNode\nclass App(DOMNode):\n    pass\n'
+w "$R/decoy.py" 'class Decoy:\n    def query_one(self, s):\n        return s\n'
+w "$R/test_q.py" 'from app import App\nasync def t_q(pilot):\n    return pilot.app.query_one("x")\n'
+w "$R/base.py" 'class Base:\n    def hm(self):\n        return 1\n'
+w "$R/decoy2.py" 'class D:\n    def hm(self):\n        return 1\n'
+w "$R/child.py" 'from base import Base\nclass Child(Base):\n    def go_hm(self):\n        return self.hm()\n    def dict(self):\n        return 1\n    def go_dict(self):\n        return self.dict()\n'
+w "$R/pkgr/__init__.py" ''
+w "$R/pkgr/logging.py" 'def info(m):\n    return m\n'
+w "$R/pkgr/other.py" 'def info(m):\n    return m\n'
+w "$R/pkgr/user.py" 'from .logging import info\ndef f_rel(m):\n    return info(m)\n'
+# textual's shapes
+wantpaths R4.1-pilot.app.query_one-unchanged "$R" t_q 'decoy.py dom.py '
+wantpaths R4.2-self.hm-inherited "$R" go_hm 'base.py '
+wantpaths R4.3-self.dict-method-named-like-a-builtin "$R" go_dict 'child.py '
+wantpaths R4.4-relative-import-named-like-the-stdlib "$R" f_rel 'pkgr/logging.py '
+
 if [ "$fail" = 0 ]; then echo "pyimportlayoutcheck: PASS"; exit 0; fi
 echo "pyimportlayoutcheck: FAIL"; exit 1
