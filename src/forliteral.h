@@ -142,7 +142,7 @@ static_assert( kForLiteralKeyLegend.find( "--", 4 ) == kForLiteralKeyLegend.size
 // the walk's cap, printed alone (no <lit>) when the task names more literals than kForLiteralCandidates scans and none of those anchored
 inline constexpr std::string_view kForLiteralCapLegend =
     "<!-- ripwire for lit: lit_capped = the task names more literals than one answer scans; scanned= whole-repo scans made, none found a source site; "
-    "skipped= literals not scanned; next= scans the first of them. -->";
+    "skipped= literals not scanned; next= scans the first of them; this note is not in est_tokens. -->";
 static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
 inline bool forLiteralOn()
@@ -533,7 +533,7 @@ inline std::vector<std::string> forMessageTries( std::string_view message )
     return out;
 }
 
-// the CONST_SHAPED words of the task, in order (trailing/leading punctuation stripped)
+// the CONST_SHAPED words of the task, in order (trailing/leading punctuation stripped), each once
 inline std::vector<std::string> constWordsOf( std::string_view task )
 {
     std::vector<std::string> out;
@@ -547,7 +547,7 @@ inline std::vector<std::string> constWordsOf( std::string_view task )
         {
             w.remove_suffix( 1 );
         }
-        if( lit_detail::isConstShaped( w ) )
+        if( lit_detail::isConstShaped( w ) && std::find( out.begin(), out.end(), w ) == out.end() )   // a name repeated in the task is one scan, one slot
         {
             out.emplace_back( w );
         }

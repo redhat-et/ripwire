@@ -404,6 +404,8 @@ Q17b="$( qrun '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.
 if [ "$Q17b" = "$( qoff '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.mode' )" ]; then ok "Q17b [G] prefix identity: minus the disclosure the answer equals RIPWIRE_NO_LITERAL_ANCHOR=1"; else no "Q17b the ordinary answer moved"; fi
 Q17c="$( qrun '--for=no.such.one no.such.two no.such.three svc.dev.mode' )"
 if ! has "$Q17c" 'lit_capped'; then ok "Q17c [G] a fourth key within the cap, nothing skipped: no disclosure"; else no "Q17c disclosure without a cap"; fi
+# CR pre-pass 44, card C2: the capped note is outside est_tokens like <lit> and its own legend says so
+if has "$Q17" 'this note is not in est_tokens'; then ok "Q17d [P] the lit_capped legend says it is not in est_tokens"; else no "Q17d lit_capped legend silent on est_tokens: $( grep -o '<!-- ripwire for lit: lit_capped[^>]*>' <<<"$Q17" | cut -c1-300 )"; fi
 # ── R (lane LITERAL-ANCHOR fix round 2; [P] arms are RED on c6aa775f): F1 escape/printf edges, F2 content floor, F4 file table, F5 legend, F6 cap ──
 RF="$TMP/rfix"; mkdir -p "$RF/app"
 python3 -I -c 'import sys
@@ -491,6 +493,13 @@ elif has "$Y_TXT" 'shape="dotted"' && has "$Y_TXT" 'shape="message"' && has "$Y_
 else
     no "Y1 the changelog text does not state the shapes, the disclosure or the caps (cand=$Y_CAND tries=$Y_TRIES slots=$Y_SLOTS seg=$Y_SEG)"
 fi
+
+# ── Z (CR 5725024918, thread 4433389581; [P] RED on 44c4c1ba): a CONST word repeated in the task is one candidate, one scan, one slot ──
+ZF="$TMP/zfix"; mkdir -p "$ZF/app"
+printf 'export const SVC_REAL_CONST = 7;\nexport function zf() { return SVC_REAL_CONST + 1; }\n' > "$ZF/app/c.ts"
+Z1="$( cd "$ZF" || exit 1; "$BIN" "$ZF" --no-cache '--for=where is NO_SUCH_AAAA and NO_SUCH_AAAA and NO_SUCH_AAAA and NO_SUCH_AAAA and SVC_REAL_CONST used' </dev/null 2>/dev/null )"
+if has "$Z1" 's="SVC_REAL_CONST"' && ! has "$Z1" 'lit_capped'; then ok "Z1 [P] four repeats of one CONST word cost one candidate slot: the fifth word is tried and nothing is reported skipped"
+else no "Z1 repeated CONST words took the candidate slots: $( grep -o '<lit_capped[^>]*>' <<<"$Z1" ) $( lit <<<"$Z1" | cut -c1-160 )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
