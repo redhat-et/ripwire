@@ -3083,7 +3083,12 @@ inline const char* coPairAttr( bool isDepCapable, bool isSurprising ) noexcept
     return isSurprising ? " surprising=\"1\"" : "";
 }
 // The fourth state rides beside it: noEdgeLangs != 0 only on a dependency-capable pair whose surprising is false (coPairVerdict).
-inline std::string coPairAttr( const CoPartner& p ) { return std::string( coPairAttr( p.depCapable, p.surprising ) ) + noFileEdgesAttrXml( p.noEdgeLangs ); }
+inline std::string coPairAttr( const CoPartner& p )
+{
+    std::string attr( coPairAttr( p.depCapable, p.surprising ) );
+    attr += noFileEdgesAttrXml( p.noEdgeLangs );
+    return attr;
+}
 // The MCP twin's JSON key for the same fourth state: present only where the XML row carries no_file_edges=.
 inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
 {
