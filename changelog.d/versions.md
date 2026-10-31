@@ -9,6 +9,6 @@ smart-pointer alias carries its pointee, a member whose written type is a templa
 branches (257–262), so a cache written before them would replay the older rows. 271 sits above every live branch and
 pull-request number (the string/literal records carry 263, 265 and 267 on theirs). `kCacheVersion` 46 → 48: a re-export
 specifier is a new binding kind appended to the cache record (its branch carried 47). A cache written by 0.6.9 is re-parsed
-once. The quality-snapshot scheme stays 24: no snapshot record changes shape. The session legend dictionary is `dictv=e6a63e3fef4ab876 entries=1006`.
+once. The quality-snapshot scheme stays 24: no snapshot record changes shape. The session legend dictionary is `dictv=5d2bfc931304d618 entries=1006`.
 
 The history-walk cache's `kQChurnCacheScheme` moves 3 → 4 (#433: a blob written by a pre-fix binary holds the old line-frame reader's stream, which for the repositories the framing fix targets is the corrupted one, and no key component can tell that blob from a fresh read; every repository's history is walked once more after the upgrade, and on trees with ordinary names the walk produces the same stream, so the cost is one cold walk and no changed answer).

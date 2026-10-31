@@ -390,7 +390,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // Its reading on --deps/--arch, the same sentence both full legends carry (graphlegend.h kGraphPartialAttrXml): not a
     // floor, because a missing edge can merge two cycles into one and moves a ratio either way.
     { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },
-    { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (--arch ca/ce, violations=) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero" },
+    { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero" },
     { "unmeasured_files",  "unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it" },
     { "masked_files",      "masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor)", true },
     // --cochange-groups root (verbs_report.h countAttrXmlOrEmpty): a countAttrXmlOrEmpty attribute takes its row here, test/compactlegendcheck.sh (S). onTag + onKey: only that root.
