@@ -393,6 +393,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them cover resolved edges only, and a coupling number absent beside it is unknown, not zero" },
     { "unmeasured_files",  "unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it" },
     { "masked_files",      "masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor)", true },
+    // --cochange-groups root (verbs_report.h countAttrXmlOrEmpty): a countAttrXmlOrEmpty attribute takes its row here, test/compactlegendcheck.sh (S). onTag + onKey: only that root.
+    { "unknown_pairs", "unknown_pairs=N: pairs left out of groups= because surprising= is unknown for them, not 0; drop the cochange-groups flag to list them", true, "cochange", MapHeaderRead::No, {}, "cochange" },
     // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
     // tsconfig_unread= makes the root partial exactly as imports_unresolved= does (graph_partial= above is its reading).
     // #478 gap 3: <pruned_packages count=> (serialize.h buildPrunedPackagesBlock), a block rather than a root attribute, so the row is keyed
@@ -997,7 +999,6 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "no_file_edges", "no_file_edges=LANGS: a side's imports are almost never resolved to files and none links this pair, so surprising= is unknown, not 0", true, "pair", MapHeaderRead::No, {}, "cochange" },
     // --cochange-groups root: pairs of that kind are in no group, so groups= is a floor on the violations (graphlegend.h kCochangeGroupsNoFileEdgesLegend)
     { "no_file_edges", "no_file_edges=LANGS: with unknown_pairs=N, pairs whose side imports are almost never resolved to files and none links them are in no group; groups= may be low", true, "cochange", MapHeaderRead::No, {}, "cochange" },
-    { "unknown_pairs", "unknown_pairs=N: pairs left out of groups= because surprising= is unknown for them, not 0; drop the cochange-groups flag to list them", true, "cochange", MapHeaderRead::No, {}, "cochange" },
     // context-ratio: src/contextratio.h writeContextRatioReport (root element is <contextratio>)
     { "units", "units=N: symbols measured (the s row population)", false, "contextratio", MapHeaderRead::No, {}, "context-ratio" },
     { "file_units", "file_units=N: files measured (the f row population)", false, "contextratio", MapHeaderRead::No, {}, "context-ratio" },
