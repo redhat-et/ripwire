@@ -407,6 +407,32 @@ inline std::vector<std::string> pythonLayoutRoots( std::string_view dir, const H
     return moduleRootCandidates( dir, [ & ]( std::string_view d ) { return pythonDirIsPackage( d, fileIndex, ws, includerFileId ); }, "src" );
 }
 
+// Where a Python import is probed. Relative: its own directory only. Absolute: the repo root, the layout roots, and the file's own
+// directory unless that is a package (#478 gap 4): Python 3 has no implicit relative import, so inside a package `import logging`
+// never means the sibling logging.py. A plain script directory keeps it: it is sys.path[0] when the script runs.
+inline std::vector<std::string> pythonProbeBases( std::string_view dir, bool isRelative, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                  const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    if( isRelative )
+    {
+        return { std::string( dir ) };
+    }
+    std::vector<std::string> bases = pythonLayoutRoots( dir, fileIndex, ws, includerFileId );
+    bases.emplace_back();
+    if( !pythonDirIsPackage( dir, fileIndex, ws, includerFileId ) )
+    {
+        bases.emplace_back( dir );
+    }
+    return bases;
+}
+
+// #478 gap 4: does this path-tail hit start INSIDE a package? Then it is not the module asked for: `import logging` never names
+// pkg/utils/logging.py.
+inline bool pythonTailStartsInPackage( std::string_view path, std::size_t tailLen, const HashMap<std::string, std::uint32_t>& fileIndex )
+{
+    return path.size() > tailLen && fileIndex.find( std::string( path.substr( 0, path.size() - tailLen - 1 ) ) + "/__init__.py" ) != fileIndex.end();
+}
+
 // ── Python Step-A — SOUND. `import a` / `import pkg.mod` / `from pkg.mod import Z` / `from .rel import Z`.
 // The captured target is the CLEAN module path (B0): `a`, `pkg.mod`, or a relative `.`/`.rel`/`..up`.
 // Rule: dots→slashes (leading relative dots handled as `.`/`..` path steps), then probe TWO candidate
@@ -476,23 +502,12 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
             hit = kNoFile - 1; // a SECOND distinct file → ambiguous marker (≠ any real id)
         }
     };
-    // #478 gap 4: Python 3 has no implicit relative import, so inside a package an absolute `import logging` never means the
-    // sibling logging.py. A plain script directory keeps it: it is sys.path[0] when the script runs.
-    const bool fileRelative = isRelative || !pythonDirIsPackage( dir, fileIndex, ws, includerFileId );
-    const std::vector<std::string> layoutRoots = isRelative ? std::vector<std::string> {} : pythonLayoutRoots( dir, fileIndex, ws, includerFileId );
+    const std::vector<std::string> bases = pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId );
     for( const std::string& c : cand )
     {
-        if( fileRelative )
+        for( const std::string& base : bases )
         {
-            probe( dir, c );                             // relative-to-file (the only mode for a relative import)
-        }
-        if( !isRelative )
-        {
-            probe( std::string_view {}, c ); // relative-to-repo-root (absolute import only)
-            for( const std::string& r : layoutRoots )
-            {
-                probe( r, c );                           // #478 src-layout, under the same unique-or-degrade rule
-            }
+            probe( base, c );
         }
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
@@ -645,15 +660,9 @@ inline std::uint32_t resolvePythonModuleSuffix( std::string_view target, const H
     {
         if( samePathTail( kv.first, tailPy ) || samePathTail( kv.first, tailInit ) )
         {
-            // #478 gap 4: a tail that starts INSIDE a package is not this module: `import logging` never names pkg/utils/logging.py.
-            const std::size_t tailLen = samePathTail( kv.first, tailPy ) ? tailPy.size() : tailInit.size();
-            if( kv.first.size() > tailLen )
+            if( pythonTailStartsInPackage( kv.first, samePathTail( kv.first, tailPy ) ? tailPy.size() : tailInit.size(), fileIndex ) )
             {
-                const std::string_view prefix = std::string_view( kv.first ).substr( 0, kv.first.size() - tailLen - 1 );
-                if( fileIndex.find( std::string( prefix ) + "/__init__.py" ) != fileIndex.end() )
-                {
-                    continue;
-                }
+                continue;
             }
             if( rootScoped && ( kv.second >= fileRoot->size() || ( *fileRoot )[ kv.second ] != importerRoot ) )
             {

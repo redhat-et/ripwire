@@ -113,45 +113,45 @@ w "$P/vendor/__init__.py" ''; w "$P/vendor/junk/j.py" ''
 w "$P/build/lib/pkg/__init__.py" ''
 skipped() { ( cd "$1" && "$BIN" "$1" --no-cache --skipped 2>/dev/null ); }
 O=$(skipped "$P")
-grep -q 'pruned_dirs="3"' <<<"$O" && ok "P1.0 pruned_dirs=3" || no "P1.0: $(grep -o 'pruned_dirs="[^"]*"' <<<"$O")"
-grep -q '<f p="pkg/operations/build" why="pruned-package" bytes="0"' <<<"$O" && ok "P1.1 real package rowed" || no "P1.1"
-grep -q '<f p="vendor" why="pruned-dir"' <<<"$O" && ok "P1.2 vendored dir with __init__.py is pruned-dir" || no "P1.2"
-grep -q '<f p="build" why="pruned-dir"' <<<"$O" && ok "P1.3 build output (no __init__.py at its top) is pruned-dir" || no "P1.3"
-grep -q 'rows_capped' <<<"$O" && no "P1.4 rows_capped on a complete listing" || ok "P1.4 no rows_capped"
+if grep -q 'pruned_dirs="3"' <<<"$O"; then ok "P1.0 pruned_dirs=3"; else no "P1.0: $(grep -o 'pruned_dirs="[^"]*"' <<<"$O")"; fi
+if grep -q '<f p="pkg/operations/build" why="pruned-package" bytes="0"' <<<"$O"; then ok "P1.1 real package rowed"; else no "P1.1"; fi
+if grep -q '<f p="vendor" why="pruned-dir"' <<<"$O"; then ok "P1.2 vendored dir with __init__.py is pruned-dir"; else no "P1.2"; fi
+if grep -q '<f p="build" why="pruned-dir"' <<<"$O"; then ok "P1.3 build output (no __init__.py at its top) is pruned-dir"; else no "P1.3"; fi
+if grep -q 'rows_capped' <<<"$O"; then no "P1.4 rows_capped on a complete listing"; else ok "P1.4 no rows_capped"; fi
 for verb in "--deps" "--arch=$T/all.rules"; do
     O=$( cd "$P" && "$BIN" "$P" --no-cache "$verb" 2>/dev/null )
-    grep -q '<pruned_packages count="1" shown="1" next="--skipped"[^>]*><p path="pkg/operations/build"/></pruned_packages>' <<<"$O" && ok "P2 ${verb%%=*} names the package" || no "P2 ${verb%%=*}: $(grep -o '<pruned_packages.*</pruned_packages>' <<<"$O")"
-    grep -q 'path="vendor"\|path="build"' <<<"$O" && no "P2 ${verb%%=*} names junk" || ok "P2 ${verb%%=*} names no junk"
+    if grep -q '<pruned_packages count="1" shown="1" next="--skipped"[^>]*><p path="pkg/operations/build"/></pruned_packages>' <<<"$O"; then ok "P2 ${verb%%=*} names the package"; else no "P2 ${verb%%=*}: $(grep -o '<pruned_packages.*</pruned_packages>' <<<"$O")"; fi
+    if grep -q 'path="vendor"\|path="build"' <<<"$O"; then no "P2 ${verb%%=*} names junk"; else ok "P2 ${verb%%=*} names no junk"; fi
     if command -v xmllint >/dev/null 2>&1; then
-        printf '<r>%s</r>' "$(grep -o '<pruned_packages.*</pruned_packages>' <<<"$O")" | xmllint --noout - 2>/dev/null && ok "P2 ${verb%%=*} block well-formed" || no "P2 ${verb%%=*} malformed"
+        if printf '<r>%s</r>' "$(grep -o '<pruned_packages.*</pruned_packages>' <<<"$O")" | xmllint --noout - 2>/dev/null; then ok "P2 ${verb%%=*} block well-formed"; else no "P2 ${verb%%=*} malformed"; fi
     fi
 done
 J=$T/junkonly
 w "$J/a.py" ''; w "$J/vendor/__init__.py" ''; w "$J/node_modules/x/__init__.py" ''
 O=$( cd "$J" && "$BIN" "$J" --no-cache --deps 2>/dev/null )
-grep -q '<deps ' <<<"$O" && ! grep -q 'pruned_packages' <<<"$O" && ok "P3 vendored junk alone: no block" || no "P3"
+if grep -q '<deps ' <<<"$O" && ! grep -q 'pruned_packages' <<<"$O"; then ok "P3 vendored junk alone: no block"; else no "P3"; fi
 # the name allowlist cuts one side only: a build-output name without __init__.py
 K=$T/many
 for i in 1 2 3 4 5 6 7 8 9 10; do w "$K/p$i/__init__.py" ''; w "$K/p$i/build/__init__.py" ''; done
 O=$( cd "$K" && "$BIN" "$K" --no-cache --deps 2>/dev/null )
-grep -q '<pruned_packages count="10" shown="8" next="--skipped"' <<<"$O" && ok "P4.1 shown cap disclosed by count= shown= next=" || no "P4.1 $(grep -o '<pruned_packages [^>]*' <<<"$O")"
-[ "$(grep -o '<p path="' <<<"$O" | wc -l | tr -d ' ')" = 8 ] && ok "P4.2 8 rows" || no "P4.2"
+if grep -q '<pruned_packages count="10" shown="8" next="--skipped"' <<<"$O"; then ok "P4.1 shown cap disclosed by count= shown= next="; else no "P4.1 $(grep -o '<pruned_packages [^>]*' <<<"$O")"; fi
+if [ "$(grep -o '<p path="' <<<"$O" | wc -l | tr -d ' ')" = 8 ]; then ok "P4.2 8 rows"; else no "P4.2"; fi
 O=$(skipped "$K")
-[ "$(grep -o 'why="pruned-package"' <<<"$O" | wc -l | tr -d ' ')" = 10 ] && ok "P4.3 --skipped holds all 10" || no "P4.3"
+if [ "$(grep -o 'why="pruned-package"' <<<"$O" | wc -l | tr -d ' ')" = 10 ]; then ok "P4.3 --skipped holds all 10"; else no "P4.3"; fi
 # the row cap: 501 pruned dirs is disclosed, not silent
 Z=$T/rowcap
 w "$Z/a.py" ''
 python3 -I -c 'import os,sys
 for i in range(501): os.makedirs(f"{sys.argv[1]}/d{i:03d}/vendor")' "$Z"
 O=$(skipped "$Z")
-grep -q 'pruned_dirs="501"' <<<"$O" && grep -q 'rows_capped="1"' <<<"$O" && [ "$(grep -o 'why="pruned-dir"' <<<"$O" | wc -l | tr -d ' ')" = 500 ] && ok "P5 row cap: count exact, rows_capped=1, 500 rows" || no "P5 $(grep -o 'pruned_dirs="[^"]*"\|rows_capped="[^"]*"' <<<"$O" | tr '\n' ' ')"
+if grep -q 'pruned_dirs="501"' <<<"$O" && grep -q 'rows_capped="1"' <<<"$O" && [ "$(grep -o 'why="pruned-dir"' <<<"$O" | wc -l | tr -d ' ')" = 500 ]; then ok "P5 row cap: count exact, rows_capped=1, 500 rows"; else no "P5 $(grep -o 'pruned_dirs="[^"]*"\|rows_capped="[^"]*"' <<<"$O" | tr '\n' ' ')"; fi
 # a warm cache must not lose the rows
 CC=$T/cc
 ( cd "$P" && "$BIN" "$P" --cache="$CC" --skipped >/dev/null 2>&1 )
 O=$( cd "$P" && "$BIN" "$P" --cache="$CC" --skipped 2>/dev/null )
-grep -q 'why="pruned-package"' <<<"$O" && ok "P6 warm cache keeps the rows" || no "P6 warm cache lost the rows"
+if grep -q 'why="pruned-package"' <<<"$O"; then ok "P6 warm cache keeps the rows"; else no "P6 warm cache lost the rows"; fi
 O=$( cd "$P" && "$BIN" "$P" --cache="$CC" --deps 2>/dev/null )
-grep -q '<pruned_packages count="1"' <<<"$O" && ok "P6.1 warm cache keeps the --deps block" || no "P6.1"
+if grep -q '<pruned_packages count="1"' <<<"$O"; then ok "P6.1 warm cache keeps the --deps block"; else no "P6.1"; fi
 
-[ "$fail" = 0 ] && { echo "pyimportlayoutcheck: PASS"; exit 0; }
+if [ "$fail" = 0 ]; then echo "pyimportlayoutcheck: PASS"; exit 0; fi
 echo "pyimportlayoutcheck: FAIL"; exit 1
