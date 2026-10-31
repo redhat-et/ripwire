@@ -392,6 +392,8 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },
     // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
     // tsconfig_unread= makes the root partial exactly as imports_unresolved= does (graph_partial= above is its reading).
+    // #478 gap 3: serialize.h buildPrunedPackagesBlock; its reading= says the rest on the answer itself.
+    { "pruned_packages",   "pruned_packages count=N: real packages the crawl denylist removed; p path= names them, --skipped has all" },
     { "imports_dts",       "imports_dts=N: N TS/JS imports resolved only to a .d.ts declaration, not source" },
     { "tsconfig_unread",   "tsconfig_unread=N: N configs not read (not in the tree, unparseable, above the root) could declare aliases; edges may be missing" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so

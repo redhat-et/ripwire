@@ -223,6 +223,8 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     relabel( part.crawlSkips.unsupported, m.crawlSkips.unsupported );
     relabel( part.crawlSkips.ignored,        m.crawlSkips.ignored );          // §N6-C, per root, labeled like its siblings
     relabel( part.crawlSkips.ignoredDirRows, m.crawlSkips.ignoredDirRows );   // §N6-C
+    relabel( part.crawlSkips.prunedDirRows,  m.crawlSkips.prunedDirRows );    // #478 gap 3
+    relabel( part.crawlSkips.prunedPackageRows, m.crawlSkips.prunedPackageRows );
     relabel( part.crawlSkips.nestRefused,    m.crawlSkips.nestRefused );      // the Kotlin nesting guard's refusals
     relabel( part.crawlSkips.extractPartial, m.crawlSkips.extractPartial );   // files whose extraction came back partial
     // §SEC1 — the crawl boundary is applied PER ROOT (a file is bounded by the root it was crawled under, not
@@ -237,6 +239,7 @@ inline void mergeCrawlDisclosures( IngestResult& m, IngestResult& part, const Wo
     m.crawlSkips.unsupportedFiles += part.crawlSkips.unsupportedFiles;
     m.crawlSkips.excludedDirs     += part.crawlSkips.excludedDirs;
     m.crawlSkips.prunedDirs       += part.crawlSkips.prunedDirs;   // built-in policy prunes sum the same way
+    m.crawlSkips.prunedPackages   += part.crawlSkips.prunedPackages;
     m.crawlSkips.ignoredFiles     += part.crawlSkips.ignoredFiles; // §N6-C: the rule is applied PER ROOT, so the counts sum
     m.crawlSkips.ignoredDirs      += part.crawlSkips.ignoredDirs;
     // §N6-C: one merged header, N roots, and the modes can differ (a git checkout beside a plain directory).

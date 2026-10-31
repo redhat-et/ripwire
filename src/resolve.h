@@ -360,13 +360,52 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
     return ( ait == ws->absIndex.end() ) ? kNoFile : ait->second;
 }
 
+// Is `dir` a Python package, i.e. does it hold an indexed __init__.py? `dir` empty = the root.
+inline bool pythonDirIsPackage( std::string_view dir, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    return joinNormalizeLookup( dir, "__init__.py", fileIndex, ws, includerFileId ) != kNoFile;
+}
+
+// #478 src-layout: the directories an ABSOLUTE import may also be rooted at, past the repo root. Two proven shapes, nothing
+// found by scanning: (1) the source root of the includer's own package chain, its first ancestor that is not a package
+// (`lib/mypkg/a.py` -> `lib`, `python/core/x.py` -> `python`); (2) a `src` directory beside the includer or any ancestor, the
+// src layout at the root (textual, flake8) or inside a monorepo member. An importer outside both shapes (`tests/t.py` importing a
+// package under a `lib/` root) stays unresolved: no edge, never a guess. Depth-bounded hash lookups, no walk over the index.
+inline std::vector<std::string> pythonLayoutRoots( std::string_view dir, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                   const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    std::vector<std::string> roots;
+    if( pythonDirIsPackage( dir, fileIndex, ws, includerFileId ) )
+    {
+        std::string_view up = dir;
+        while( !up.empty() && pythonDirIsPackage( up, fileIndex, ws, includerFileId ) )
+        {
+            up = includerDir( up );
+        }
+        if( !up.empty() )   // an empty source root is the repo root, which the caller already probes
+        {
+            roots.emplace_back( up );
+        }
+    }
+    for( std::string_view up = dir;; up = includerDir( up ) )
+    {
+        roots.push_back( up.empty() ? std::string( "src" ) : std::string( up ) + "/src" );
+        if( up.empty() )
+        {
+            break;
+        }
+    }
+    return roots;
+}
+
 // ── Python Step-A — SOUND. `import a` / `import pkg.mod` / `from pkg.mod import Z` / `from .rel import Z`.
 // The captured target is the CLEAN module path (B0): `a`, `pkg.mod`, or a relative `.`/`.rel`/`..up`.
 // Rule: dots→slashes (leading relative dots handled as `.`/`..` path steps), then probe TWO candidate
-// files in a FIXED order — `mod.py` then `mod/__init__.py` — resolved BOTH relative-to-file and
-// relative-to-repo-root. Resolve IFF exactly ONE distinct fileId is hit across all probes; 0 or ≥2 → kNoFile
+// files in a FIXED order — `mod.py` then `mod/__init__.py` — resolved relative-to-file (unless the includer's
+// directory is a package and the import is absolute) and relative-to-repo-root plus pythonLayoutRoots. Resolve IFF exactly ONE distinct fileId is hit across all probes; 0 or ≥2 → kNoFile
 // (degrade, no guess). `mod.py` and `mod/__init__.py` are mutually exclusive for one module on disk, so the
-// only ambiguity is file-relative vs root-relative naming the same-shaped path in two dirs → degrade.
+// only ambiguity is two roots naming the same-shaped path in two dirs → degrade.
 inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::string_view target,
                                           const HashMap<std::string, std::uint32_t>& fileIndex,
                                           const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
@@ -429,12 +468,23 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
             hit = kNoFile - 1; // a SECOND distinct file → ambiguous marker (≠ any real id)
         }
     };
+    // #478 gap 4: Python 3 has no implicit relative import, so inside a package an absolute `import logging` never means the
+    // sibling logging.py. A plain script directory keeps it: it is sys.path[0] when the script runs.
+    const bool fileRelative = isRelative || !pythonDirIsPackage( dir, fileIndex, ws, includerFileId );
+    const std::vector<std::string> layoutRoots = isRelative ? std::vector<std::string> {} : pythonLayoutRoots( dir, fileIndex, ws, includerFileId );
     for( const std::string& c : cand )
     {
-        probe( dir, c );                                 // relative-to-file (always; the only mode for a relative import)
+        if( fileRelative )
+        {
+            probe( dir, c );                             // relative-to-file (the only mode for a relative import)
+        }
         if( !isRelative )
         {
             probe( std::string_view {}, c ); // relative-to-repo-root (absolute import only)
+            for( const std::string& r : layoutRoots )
+            {
+                probe( r, c );                           // #478 src-layout, under the same unique-or-degrade rule
+            }
         }
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
@@ -587,6 +637,16 @@ inline std::uint32_t resolvePythonModuleSuffix( std::string_view target, const H
     {
         if( samePathTail( kv.first, tailPy ) || samePathTail( kv.first, tailInit ) )
         {
+            // #478 gap 4: a tail that starts INSIDE a package is not this module: `import logging` never names pkg/utils/logging.py.
+            const std::size_t tailLen = samePathTail( kv.first, tailPy ) ? tailPy.size() : tailInit.size();
+            if( kv.first.size() > tailLen )
+            {
+                const std::string_view prefix = std::string_view( kv.first ).substr( 0, kv.first.size() - tailLen - 1 );
+                if( fileIndex.find( std::string( prefix ) + "/__init__.py" ) != fileIndex.end() )
+                {
+                    continue;
+                }
+            }
             if( rootScoped && ( kv.second >= fileRoot->size() || ( *fileRoot )[ kv.second ] != importerRoot ) )
             {
                 continue;   // a real path-tail hit, but in an unrelated labeled root — no import evidence connects them

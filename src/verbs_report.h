@@ -623,6 +623,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
         };
         const auto emitMetrics = [ & ]()
         {
+            // #478 gap 3: before the module rows it qualifies, in all three emit paths
+            rw::emitRaw( stdout, buildPrunedPackagesBlock( ing.crawlSkips, ing.realPaths.empty() && cfg.roots.size() == 1 ? std::string_view( cfg.roots[ 0 ] ) : std::string_view {} ).c_str() );
             // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
             // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
             // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
@@ -1929,7 +1931,9 @@ constexpr const char* kSkippedLegend =
                  " excluded_dirs= counts SUBTREES an exclude pruned: the walk stopped at the directory, so how many files"
                  " are under them is UNKNOWN, not zero, and they are in no count here. pruned_dirs= counts the subtrees this build ALWAYS"
                  " prunes by policy — the committed noise/vendor/build denylist and any directory holding a CMakeCache.txt — with the same"
-                 " consequence: the walk stopped there, their contents are UNKNOWN rather than zero, and they are in no count here. The two"
+                 " consequence: the walk stopped there, their contents are UNKNOWN rather than zero, and they are in no count here. Each is rowed:"
+                 " why=\"pruned-package\" when a build-output name (build, dist, out, target, captures) holds its own __init__.py, a real package"
+                 " this denylist removed, else why=\"pruned-dir\", both bytes=\"0\". The two"
                  " are separate because the answer to \"why is my tree missing\" differs: one is a rule you passed, the other is a rule this"
                  " build carries. degraded_parse= / minified_suspect= count the h rows."
                  " ignored= is ignored_files= on the map: files git's OWN ignore rules cover"
@@ -2347,6 +2351,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
     const std::size_t effectiveMax = maxFileBytes == 0 ? kDefaultMaxFileBytes : maxFileBytes;
     const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles
                                   || cs.ignored.size() < cs.ignoredFiles || cs.ignoredDirRows.size() < cs.ignoredDirs   // §N6-C
+                                  || cs.prunedDirRows.size() + cs.prunedPackageRows.size() < cs.prunedDirs              // #478 gap 3
                                   || cs.nestRefused.size() < cs.nestRefusedFiles
                                   || cs.extractPartial.size() < cs.extractPartialFiles
                                   || cs.escaped.size() < cs.escapedFiles;                                               // §SEC1
@@ -2439,6 +2444,8 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeDropRows( w, esc, cs.escaped,        "escaped-root", skRootPrefix );  // §SEC1: links whose target left the root
+        writeDropRows( w, esc, cs.prunedPackageRows, "pruned-package", skRootPrefix );   // #478 gap 3: a real package the denylist took
+        writeDropRows( w, esc, cs.prunedDirRows,  "pruned-dir",  skRootPrefix );   // #478 gap 3: every other policy prune
         writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered
         writeDropRows( w, esc, cs.ignoredDirRows, "ignored-dir", skRootPrefix );   // §N6-C: the subtrees they pruned
         writeDropRows( w, esc, cs.nestRefused,    "nest-refused", skRootPrefix );  // indexed, then refused by the Kotlin nesting guard
