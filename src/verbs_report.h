@@ -1228,7 +1228,7 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
         rw::emitTo( stdout, "<pair a=\"{}\" b=\"{}\" together=\"{}\" deg=\"{:.2f}\" conf_ab=\"{:.2f}\" conf_ba=\"{:.2f}\"{} recur=\"{}\"{}/>",
                      ex( ra ).c_str(), ex( rb ).c_str(),
                      pr.n, pr.deg, pr.confAb, pr.confBa, driverAttr, pr.recur,
-                     rw::coPairAttr( pr.depCapable, pr.surprising, pr.noEdgeLangs ) );
+                     std::string( rw::coPairAttr( pr.depCapable, pr.surprising ) ) + rw::noFileEdgesAttrXml( pr.noEdgeLangs ) );
     }
     rw::emitTo( stdout, "</cochange>" );
 }
