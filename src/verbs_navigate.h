@@ -3,6 +3,7 @@
 #error "verbs_navigate.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
 
+#include "fordottedstring.h"   // STRING-IMPORT: the dotted strings that name a --callers target
 #include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
 #include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
 #include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
@@ -505,7 +506,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                        + ( wantCallers                  ? rw::patternDispatchXml( ing, chRows.valueRefs.patternSites, chVr )
                            : chRows.valueRefs.patternSites.empty() ? std::string()
                                                          : rw::patternCalleesXml( ing, rw::PatternIndex( ing, rw::ValueRefIndex( ing ) ), chRows.valueRefs.patternSites, chVr ) )
-                       + rw::slotCalleesXml( ing, chRows.valueRefs.slotSites, chVr ), tag );   // IX-1: calls through a struct field (callees only)
+                       + rw::slotCalleesXml( ing, chRows.valueRefs.slotSites, chVr )   // IX-1: calls through a struct field (callees only)
+                       + ( wantCallers ? rw::renderDottedStrings( ing, matches ) : std::string() ), tag );   // STRING-IMPORT: strings naming a target; never a caller row or a count
         return 0;
     }
     return std::nullopt;
