@@ -92,6 +92,31 @@ graphs. If one had to give, wall on a 100,000-file dense graph is the one to giv
 the frontier was a peak that scales with fan-out. A frontier-free form that kept the first form's speed on dense graphs was not
 found.
 
+## Whole-program resource table (SAFETY (e))
+
+Real binaries, `--no-cache`, one run at a time, three builds interleaved base, previous head, head, head, previous, base (two
+runs each, mean wall, larger of the two memory readings). The Mac was shared and loaded (load 17-19, 37-46 % memory free, under
+the 40 % the table asks for), and two identical runs differ by up to 15 % in wall and 10 % in footprint, so a step under that is
+not resolved by this table. Cells are wall s / max RSS MB / peak footprint MB; base = 092184c3 (before the lane), previous =
+8c5d0446, head = 28ca4a00.
+
+| repo, step | base | previous | head |
+|---|---|---|---|
+| vscode index | 76.9 / 2110 / 2757 | 82.4 / 2143 / 2761 | 75.8 / 1926 / 2681 |
+| vscode --arch | 49.0 / 2538 / 3049 | 58.6 / 1988 / 2881 | 54.7 / 2363 / 2969 |
+| vscode --deps | 76.7 / 1996 / 2757 | 73.1 / 2276 / 2791 | 64.1 / 2346 / 2977 |
+| vscode --impact | 75.2 / 2211 / 2443 | 89.7 / 2317 / 2952 | 80.2 / 2156 / 2618 |
+| vscode --for | 91.8 / 2138 / 2835 | 91.5 / 1838 / 2606 | 86.3 / 2104 / 2718 |
+| cockroach index | 22.0 / 1720 / 1818 | 24.1 / 1831 / 1993 | 21.2 / 1674 / 1928 |
+| cockroach --arch | 22.9 / 1707 / 1974 | 23.3 / 1636 / 2017 | 24.4 / 1673 / 1865 |
+| cockroach --deps | 24.7 / 1685 / 1984 | 19.9 / 1827 / 2074 | 18.4 / 1817 / 1954 |
+| cockroach --impact | 24.0 / 1779 / 2073 | 25.3 / 1875 / 1965 | 24.8 / 1689 / 2006 |
+| cockroach --for | 23.6 / 2094 / 2105 | 22.2 / 2003 / 2257 | 24.9 / 1532 / 2007 |
+
+Head against base is inside that noise on every step; no step shows a memory-guard degrade. The fold itself is 40-50 ms of vscode's
+indexing, so it cannot move these totals; the umbrella tree is where it matters (80,001 files, `--deps`: 633 MB RSS before the
+fix, 172 MB after, 183 MB at base).
+
 ## What the fold does when it cannot finish
 
 - Memory: every `kFoldCheckComponents` (4,096) components or 4 MiB of payload the fold asks `memguard::foldShouldStop()`,
