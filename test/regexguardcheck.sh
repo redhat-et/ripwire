@@ -278,8 +278,8 @@ fi
 # per-file match budget — round 5's second cause, whose (b2) note pointed at regexbombcheck (6) — was removed in the
 # PR #397 review; a stopped scan has one cause again.) What changes here is only the MECHANISM that catches `(a|a)+z`:
 # a match-time catch -> a static refusal. ROUND 6 re-vehicles the real-engine leg: the wrapped alternation forms it
-# used to ride are refused at admission since M2-d/M2-e, so the leg rides `a*a*a*a*a*b` — the multi-quantifier
-# residual the screen ADMITS, which is what makes it the real-engine vehicle.
+# used to ride are refused at admission since M2-d/M2-e, so the leg rides a pattern the screen still admits —
+# see the vehicle note at FIVESTAR below for why it is `(a*){20}b` and not the `a*a*a*a*a*b` round 6 chose.
 LINKS_LIBCXX=0
 if command -v otool >/dev/null 2>&1 && otool -L "$BIN" 2>/dev/null | grep -q 'libc++'; then LINKS_LIBCXX=1; fi
 if command -v ldd >/dev/null 2>&1 && ldd "$BIN" 2>/dev/null | grep -q 'libc++\.so'; then LINKS_LIBCXX=1; fi
@@ -313,15 +313,22 @@ closedStatically "--arch TO (a|a)+z"           '(a|a)+z' --arch="$TMP/arch_alt.t
 closedStatically "--match #match? (a|a)+z"     '(a|a)+z' "--match=$MATCH_ALT"
 closedStatically "--regex (a|a)+z"             '(a|a)+z' --regex='(a|a)+z'
 
-# The REAL-ENGINE leg of (b2), re-vehicled (round 6, PR #397 review). The arm used to prove what a REAL engine does
-# with a pattern the screen LETS THROUGH; the wrapped-alternation forms that used to ride it are refused at
-# admission since M2-d/M2-e, so the vehicle is now `a*a*a*a*a*b` — the multi-quantifier residual the screen admits
-# BY CONSTRUCTION (docs/LIMITS.md, regex-screen-multiquantifier). What abandons below is the ENGINE and not the
-# screen, which is the whole point of the leg. libc++'s engine throws error_complexity on bait.md's 4000-a line
-# (--no-prefilter: the line must reach the engine, and the required-literal prefilter would rule it out); libstdc++
-# has no budget and would backtrack without end, so the no-switch leg runs where the engine has a budget, and the
-# fault-switch leg carries the refuse-don't-silence contract on every flavour.
-FIVESTAR='a*a*a*a*a*b'
+# The REAL-ENGINE leg of (b2), re-vehicled TWICE. The arm used to prove what a REAL engine does with a pattern the
+# screen LETS THROUGH; the wrapped-alternation forms that first rode it are refused at admission since M2-d/M2-e,
+# so round 6 moved it to `a*a*a*a*a*b` — then the multi-quantifier residual, ADMITTED by the screen by
+# construction (docs/LIMITS.md, regex-screen-multiquantifier). THIS SPEC CLOSES THAT RESIDUAL, so that vehicle is
+# now refused at admission too and the leg went red — correctly: a vehicle is only a vehicle while the screen
+# admits it, and the arm's guarantee (the ENGINE abandons, and the verb refuses rather than report a floor) must
+# not be lost with it. `(a*){20}b` is the replacement, and it is admitted for a NON-accidental reason: it is one
+# bounded repeat of a group containing one unbounded quantifier, which neither the nested arm (the OUTER `{20}` is
+# bounded), nor the alternation arm (no top-level '|'), nor multi-quantifier clause 1 (one quantified atom in the
+# scope) nor clause 2 (no unproven alternation) refuses. Its cost is the counted repetition of an inner star over
+# a 4000-byte line — the same real-engine abandonment the leg exists to exercise.
+# libc++'s engine throws error_complexity on bait.md's 4000-a line (--no-prefilter: the line must reach the
+# engine, and the required-literal prefilter would rule it out); libstdc++ has no budget and would backtrack
+# without end, so the no-switch leg runs where the engine has a budget, and the fault-switch leg carries the
+# refuse-don't-silence contract on every flavour.
+FIVESTAR='(a*){20}b'
 if [ "$LINKS_LIBCXX" -eq 1 ]; then
     rc="$( capRun 30 "$TMP/r5.out" "$TMP/r5.err" "$FIX" --no-cache --no-prefilter "--regex=$FIVESTAR" )"
     abandonedContract "(b2)" "--regex $FIVESTAR (real libc++ engine)" "$rc" "$TMP/r5.out" "$TMP/r5.err" "$FIVESTAR"
