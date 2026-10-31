@@ -371,41 +371,48 @@ inline std::string noFileEdgesAttrXml( std::uint32_t langs )
     return langs == 0 ? std::string() : " no_file_edges=\"" + noFileEdgeLangTags( langs ) + "\"";
 }
 
-// The files a SYSTEM-level number (ccd, nccd, shape, propagation_cost) can be computed over: dependencyCapableMask minus every file
-// in a no-edge language that drew no observed edge, in or out. Such a file sits in the denominator as a cone of one, and with
-// enough of them a tangled tree reads horizontal (cockroach: nccd 0.81 printed, ~9.16 over the rest). Its cone does not touch a
-// measured file's, so dropping it changes no other cone: the numbers over `mask` are exact over the rest. A tree with no no-edge
-// file gets dependencyCapableMask itself, byte for byte.
+// The files a SYSTEM-level number (ccd, nccd, shape, propagation_cost) can be computed over: dependencyCapableMask minus EVERY file
+// in a no-edge language, whether or not it drew an observed edge. An edgeless one sits in the denominator as a cone of one, and with
+// enough of them a tangled tree reads horizontal (cockroach: nccd 0.81 printed, ~9.16 over the rest). One that drew an edge (Go across
+// a go.mod replace) has a cone that is only a floor, because its other imports are unseen, so it stays out too. The numbers over `mask`
+// are then exact over the rest. A tree with no no-edge file gets dependencyCapableMask itself, byte for byte.
+// `measuredEdge` says whether any edge has both ends inside `mask`: with none, a cone is a file alone and nothing behind ccd/nccd/shape or
+// propagation_cost is a measurement (one edgeless sh file beside masked Go files read propagation_cost 1.000 on a tree with no edge).
 struct DependencyMeasure
 {
     std::vector<char> mask;                 // 1 = in the denominator
     std::size_t       depFiles = 0;         // mask's population: dep_files=
     std::size_t       masked   = 0;         // no-edge files left out: masked_files=
+    bool              measuredEdge = false; // an edge with both ends in mask
 };
 inline DependencyMeasure dependencyMeasure( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
 {
     DependencyMeasure m;
     m.mask = dependencyCapableMask( ing );
     const std::size_t F = m.mask.size();
-    std::vector<char> touched( F, 0 );   // a file with an edge in either direction was measured
-    for( std::size_t f = 0; f < adj.size() && f < F; ++f )
-    {
-        for( const std::uint32_t g : adj[f] )
-        {
-            touched[f] = 1;
-            if( g < F ) { touched[g] = 1; }
-        }
-    }
     for( std::size_t f = 0; f < F; ++f )
     {
-        if( m.mask[f] && !touched[f] && langHasNoFileEdges( langOfPath( ing.files[f] ) ) )
+        if( m.mask[f] && langHasNoFileEdges( langOfPath( ing.files[f] ) ) )
         {
             m.mask[f] = 0;
             ++m.masked;
         }
     }
+    for( std::size_t f = 0; f < adj.size() && f < F && !m.measuredEdge; ++f )
+    {
+        if( !m.mask[f] ) { continue; }
+        for( const std::uint32_t g : adj[f] )
+        {
+            if( g < F && m.mask[g] ) { m.measuredEdge = true; break; }
+        }
+    }
     m.depFiles = std::size_t( std::count( m.mask.begin(), m.mask.end(), char( 1 ) ) );
     return m;
+}
+// healthUnknown / shownPropCost: a system number is withheld exactly when a no-edge file exists and no edge is measured.
+inline bool systemNumbersUnknown( const NoFileEdgeFiles& noEdge, const DependencyMeasure& m ) noexcept
+{
+    return noEdge.files != 0 && !m.measuredEdge;
 }
 
 // ── the tiny YAML-subset parser ──────────────────────────────────────────────────────────────────

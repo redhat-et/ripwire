@@ -19,6 +19,7 @@
 #   (L) legends: compact defines the new attributes; the arch and deps comments carry the clause only when fired
 #   (M) fix round 1, C2: a no-edge file with no observed edge is out of BOTH system denominators (dep_files=, propagation_cost), counted in masked_files=
 #   (N) fix round 1, C3: --cochange, --impact (CLI, json, columnar, MCP) and --export=cc.json do not print a measured-looking zero for a no-edge file
+#   (Q) fix round 2: F1 a zero-edge tree with one edgeless measured file has no verdict; F2 --cochange-groups says no_file_edges + unknown_pairs; F3 a touched no-edge file is masked too; m15 --impact full legend present-only
 #   (P) fix round 1, C4: a module with an observed edge AND a no-edge file keeps ca/ce as floors and drops the verdict; the wording is true on go.mod replace
 #
 # Usage: bash test/archhonestcheck.sh [BIN]
@@ -257,13 +258,13 @@ o="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d/app" "$d/lib" --arch=
 r="$( row "$o" '[^"]*app' )"
 if printf '%s' "$r" | grep -q ' ce="1" '; then
     if printf '%s' "$r" | grep -q 'no_file_edges="go"'; then ok "(K) Go across roots: observed edge keeps its numbers, attribute says the rest is unseen"; else no "(K) $r"; fi
-    if printf '%s' "$o" | grep -o '<metrics [^>]*>' | grep -q 'propagation_cost='; then ok "(K) propagation_cost stays once an edge exists"; else no "(K) propagation_cost lost"; fi
+    if printf '%s' "$o" | grep -o '<metrics [^>]*>' | grep -q 'propagation_cost='; then no "(K) propagation_cost over two Go files whose other imports are unseen"; else ok "(K) fix round 2, F3: propagation_cost is absent while only Go files carry the edge (a cone over them is a floor)"; fi
 else
     no "(K) premise: go.mod replace drew no edge across roots: [$r]"
 fi
 dd="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d/app" "$d/lib" --deps --no-cache 2>/dev/null | sed 's/<!--.*-->//' )"
 if printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' | grep -q 'afferent="0" instab="1.00"'; then ok "(K) --deps: a Go file with an observed edge keeps its numbers"; else no "(K) deps main.go: $( printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' )"; fi
-if printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape='; then ok "(K) --deps: <health> stays once an edge exists"; else no "(K) deps health"; fi
+if printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape='; then no "(K) --deps: <health> gives a verdict over two Go files whose other imports are unseen"; else ok "(K) fix round 2, F3: --deps <health> has no verdict while only Go files carry the edge"; fi
 
 # ── (L) legends ──────────────────────────────────────────────────────────────────────────────────────────
 o="$( arch "$TMP/a_go" --legend=full )"; lg="$( printf '%s' "$o" | grep -o '<!--.*-->' | head -1 )"
@@ -305,9 +306,11 @@ d="$TMP/m_py"; mkm py "$d"; dd="$( deps "$d" )"; o="$( arch "$d" )"
 h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"; m="$( metrics "$o" )"
 if printf '%s' "$h$m" | grep -q 'masked_files'; then no "(M) near miss: edgeless Python files were masked: $h $m"; else ok "(M) near miss: edgeless Python files are not masked"; fi
 if printf '%s' "$h" | grep -q 'dep_files="13"' && printf '%s' "$h" | grep -q 'shape="horizontal"'; then ok "(M) near miss: Python tree keeps dep_files=13 and its verdict"; else no "(M) near miss health: $h"; fi
-# NEAR MISS: Go files WITH an observed edge (go.mod replace) are measured, so nothing is masked
+# fix round 2, F3 (retires the round-1 near miss that pinned the opposite): a Go file WITH an observed edge (go.mod replace) is masked too, its cone
+# is only a floor (its other imports are unseen), so the two Go files of fixture k leave the denominator and nothing measured is left
 dd="$( cd "$TMP/k" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$TMP/k/app" "$TMP/k/lib" --deps --no-cache 2>/dev/null )"
-if printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q 'masked_files'; then no "(M) near miss: Go files with an edge were masked"; else ok "(M) near miss: Go files with an observed edge are not masked"; fi
+h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"
+if printf '%s' "$h" | grep -q 'masked_files="2"' && ! printf '%s' "$h" | grep -qE ' (ccd|nccd|shape)='; then ok "(M) F3: Go files with an observed edge are masked (masked_files=2) and leave no verdict"; else no "(M) F3: touched Go files stayed in the denominator: $h"; fi
 # zero-edge trees keep the rule they had: nothing left to measure, so no verdict, and the count is said
 dd="$( deps "$TMP/a_go" )"; h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"
 if printf '%s' "$h" | grep -q 'masked_files="2"' && ! printf '%s' "$h" | grep -qE ' (ccd|nccd|shape)='; then ok "(M) a tree of only masked files has no verdict and says masked_files=2"; else no "(M) all-masked health: $h"; fi
@@ -358,6 +361,7 @@ j="$( mcp "$d" impact '{"path":"'"$d"'","symbol":"G"}' )"
 if printf '%s' "$j" | grep -q 'no_file_edges=\\"go\\"'; then ok "(N) MCP impact carries no_file_edges"; else no "(N) MCP impact silent: $( printf '%s' "$j" | cut -c1-200 )"; fi
 if printf '%s' "$imp" | grep -o '<!--.*-->' | head -1 | grep -q 'no_file_edges='; then ok "(N) --impact legend defines it when fired"; else no "(N) --impact legend silent"; fi
 if co "$dp" --impact=g | grep -o '<!--.*-->' | head -1 | grep -q 'no_file_edges'; then no "(N) near miss: --impact legend rides without the attribute"; else ok "(N) --impact legend present-only"; fi
+if co "$dp" --impact=g --legend=full | grep -o '<!--.*-->' | head -1 | grep -q 'no_file_edges'; then no "(N) near miss: --impact full legend rides without the attribute"; else ok "(N) --impact full legend present-only"; fi
 # cc.json
 cc="$( co "$d" --export=cc.json )"; ccp="$( co "$dp" --export=cc.json )"
 if printf '%s' "$cc" | grep -o '"name":"a.go"[^}]*}' | grep -qE 'fan_in|fan_out'; then no "(N) cc.json: a.go prints fan_in/fan_out over no edge"; else ok "(N) cc.json: a no-edge file prints neither fan_in nor fan_out"; fi
@@ -391,6 +395,44 @@ if printf '%s' "$r" | grep -q ' I="' && printf '%s' "$r" | grep -q ' D="' && pri
 cs="$( cd "$TMP/k" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$TMP/k/app" "$TMP/k/lib" --arch="$RULES" --legend=compact --no-cache 2>/dev/null | grep -o '<!--.*-->' | head -1 )"
 if printf '%s' "$cs" | grep -q 'no import in these languages resolves to a file' || printf '%s' "$cs" | grep -q 'no edge to or from them is in any count'; then no "(P) compact legend still says none resolves, on a tree where one does"; else ok "(P) compact legend makes no claim the go.mod replace fixture refutes"; fi
 if grep -q 'have no file edges' "$TMP/stderr"; then no "(P) stderr still says no file edges, on a tree that has one"; else ok "(P) stderr makes no claim the fixture refutes"; fi
+
+# ── (Q) fix round 2 ───────────────────────────────────────────────────────────────────────────────────────
+# F1: two Go files (no go.mod, so the import draws no edge) and ONE edgeless shell file. The shell file is measured, so it survives the
+# mask, but there is no edge anywhere: a verdict or a propagation_cost over it would read "every file reaches every file" on a tree with none.
+d="$TMP/q_g3"; put "$d/a/a.go" 'package a\n\nimport "example.com/m/b"\n\ntype A struct{}\n\nfunc F() int { return b.G() }\n'
+put "$d/b/b.go" 'package b\n\ntype B struct{}\n\nfunc G() int { return 1 }\n'; put "$d/run.sh" '#!/bin/sh\necho hi\n'
+dd="$( deps "$d" )"; h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"; m="$( metrics "$( arch "$d" )" )"
+if printf '%s' "$h" | grep -q 'masked_files="2"' && ! printf '%s' "$h" | grep -qE ' (ccd|acd|nccd|shape)='; then ok "(Q) F1: --deps has no verdict on a tree with no edge, one edgeless sh file left"; else no "(Q) F1 health: $h"; fi
+if printf '%s' "$m" | grep -q 'masked_files="2"' && ! printf '%s' "$m" | grep -q 'propagation_cost='; then ok "(Q) F1: --arch prints no propagation_cost there, masked_files=2"; else no "(Q) F1 metrics: $m"; fi
+# NEAR MISS: a tree of only edgeless sh files has no no-edge file, so it keeps the verdict it always had
+d="$TMP/q_sh"; put "$d/a.sh" '#!/bin/sh\necho a\n'; put "$d/b.sh" '#!/bin/sh\necho b\n'
+h="$( deps "$d" | grep -o '<health [^>]*>' )"
+if printf '%s' "$h" | grep -q ' nccd=' && ! printf '%s' "$h" | grep -q 'masked_files'; then ok "(Q) F1 near miss: a pure edgeless sh tree keeps its verdict"; else no "(Q) F1 near miss: $h"; fi
+# NEAR MISS: an edge between two Resolved-language files keeps the verdict beside masked Go files (fixture m_go: 11 masked, a Ruby pair with one edge)
+h="$( deps "$TMP/m_go" | grep -o '<health [^>]*>' )"
+if printf '%s' "$h" | grep -q ' nccd=' && printf '%s' "$h" | grep -q 'masked_files="11"'; then ok "(Q) F1 near miss: one real edge among Resolved files keeps the verdict"; else no "(Q) F1 near miss, Ruby edge: $h"; fi
+
+# F3: fixture k (two Go files, one observed edge) plus 20 Go packages whose imports never resolve: the 2 touched files stay masked with the 21 others
+d="$TMP/q_k2"; mkdir -p "$d"; cp -R "$TMP/k/app" "$TMP/k/lib" "$d/"
+for i in $( seq 1 20 ); do put "$d/app/p$i/p.go" "package p$i\n\nimport \"example.com/nowhere/b\"\n\ntype P$i struct{}\n"; done
+dd="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d/app" "$d/lib" --deps --no-cache 2>/dev/null )"; h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"
+o="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d/app" "$d/lib" --arch="$RULES" --no-cache 2>/dev/null )"; m="$( metrics "$o" )"
+if printf '%s' "$h" | grep -q 'masked_files="22"' && ! printf '%s' "$h" | grep -qE ' (ccd|nccd|shape)='; then ok "(Q) F3: 22 Go files masked, none measured: no verdict"; else no "(Q) F3 health: $h"; fi
+if printf '%s' "$m" | grep -q 'masked_files="22"' && ! printf '%s' "$m" | grep -q 'propagation_cost='; then ok "(Q) F3: --arch prints no propagation_cost"; else no "(Q) F3 metrics: $m"; fi
+# NEAR MISS: Ruby pair beside masked Go files (m_go) still measures its edge
+m="$( metrics "$( arch "$TMP/m_go" )" )"
+if printf '%s' "$m" | grep -q 'propagation_cost="0.750"'; then ok "(Q) F3 near miss: a Resolved-language edge keeps propagation_cost beside masked Go files"; else no "(Q) F3 near miss: $m"; fi
+
+# F2: --cochange-groups over a Go pair with an unseen import. groups="0" read as "no modularity violation"; it must say what it could not judge.
+d="$TMP/n_go"; dp="$TMP/n_py"
+g="$( co "$d" --cochange --cochange-groups )"; gr="$( printf '%s' "$g" | grep -o '<cochange [^>]*>' | head -1 )"
+if printf '%s' "$gr" | grep -q 'no_file_edges="go"' && printf '%s' "$gr" | grep -qE 'unknown_pairs="[1-9]'; then ok "(Q) F2: --cochange-groups on Go carries no_file_edges=go and unknown_pairs=N on the root"; else no "(Q) F2 root: $gr"; fi
+if printf '%s' "$g" | grep -o '<!--.*-->' | head -1 | grep -q 'unknown_pairs'; then ok "(Q) F2: its legend defines unknown_pairs"; else no "(Q) F2 legend silent"; fi
+gp="$( co "$dp" --cochange --cochange-groups )"
+if printf '%s' "$gp" | grep -q 'no_file_edges\|unknown_pairs'; then no "(Q) F2 near miss: the Python groups answer mentions the disclosure"; else ok "(Q) F2 near miss: the Python groups answer is silent on it"; fi
+if printf '%s' "$gp" | grep -q '<group '; then ok "(Q) F2 near miss: the Python groups answer still has its group"; else no "(Q) F2 near miss: Python groups lost: $( printf '%s' "$gp" | cut -c1-300 )"; fi
+gc="$( co "$d" --cochange --cochange-groups --legend=compact | grep -o '<!--.*-->' | head -1 )"
+if printf '%s' "$gc" | grep -q 'unknown_pairs'; then ok "(Q) F2: the compact legend defines unknown_pairs"; else no "(Q) F2 compact legend silent: $( printf '%s' "$gc" | cut -c1-200 )"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

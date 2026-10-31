@@ -10161,7 +10161,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
     // arch-honest: files in a language with no file edges (lintrules.h noFileEdgeFiles); every attribute below is absent at files == 0
     const rw::NoFileEdgeFiles noEdge       = rw::noFileEdgeFiles( ing );
-    const bool                healthUnknown = noEdge.files != 0 && depFiles == 0;   // no measured file left: nothing behind ccd/nccd/shape but the missing data
+    const bool                healthUnknown = rw::systemNumbersUnknown( noEdge, measure );   // no measured edge left: every cone is one file, nothing behind ccd/nccd/shape but the missing data
     w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
     w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );

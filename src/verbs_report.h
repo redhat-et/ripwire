@@ -711,7 +711,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stdout, "<v from=\"{}\" fromLayer=\"{}\" to=\"{}\" toLayer=\"{}\"{}/>",
                          ef.c_str(), efl.c_str(), et.c_str(), etl.c_str(), showBaselined ? " baselined=\"1\"" : "" );
         };
-        const std::optional<double> shownPropCost = archNoEdge.files != 0 && archMeasure.depFiles == 0 ? std::nullopt : std::optional<double>( propCost );
+        const std::optional<double> shownPropCost = rw::systemNumbersUnknown( archNoEdge, archMeasure ) ? std::nullopt : std::optional<double>( propCost );
         const auto emitMetrics = [ & ]() { emitArchMetrics( mods, shownPropCost, archMeasure.masked, ae ); };
 
         // The match domain, said ONCE and appended to all three emit paths (normal / baseline /
@@ -1241,7 +1241,8 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
 inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& cfg,
                                 const std::vector<rw::CoViolation>& viol, const std::vector<rw::CoGroup>& groups,
                                 const std::string& windowLabel, std::uint32_t subWindows, const char* minRecAttr,
-                                int cap, const std::string& root, bool cgShallow )
+                                int cap, const std::string& root, bool cgShallow,
+                                std::size_t unknownPairs, std::uint32_t unknownLangs )
 {
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
@@ -1257,9 +1258,11 @@ inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& c
     {
         coveredTotal += g.members.size();
     }
-    rw::emitTo( stdout, "{}{}{}{}", kCochangeGroupLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( cgSingleRoot ), rw::gitstamp::shallowLegend( cgShallow ) );
-    rw::emitTo( stdout, "<cochange groups=\"{}\" pairs_covered=\"{}\" cover=\"greedy\" window=\"{}\" sub_windows=\"{}\"{}{}{}{}{}>",
-                 groups.size(), coveredTotal, windowLabel.c_str(), subWindows, minRecAttr,
+    // arch-honest: pairs that left the cover because surprising= is unknown for them (a Go side, no observed edge). Present-only.
+    const std::string unknownAttr = unknownPairs != 0 ? rw::noFileEdgesAttrXml( unknownLangs ) + rw::countAttrXmlOrEmpty( "unknown_pairs", unknownPairs ) : std::string();
+    rw::emitTo( stdout, "{}{}{}{}{}", kCochangeGroupLegend, rw::cochangeGroupsNoFileEdgesLegend( unknownPairs != 0 ), rw::kAtStampLegend, rw::rootRelPathsLegend( cgSingleRoot ), rw::gitstamp::shallowLegend( cgShallow ) );
+    rw::emitTo( stdout, "<cochange groups=\"{}\" pairs_covered=\"{}\" cover=\"greedy\" window=\"{}\" sub_windows=\"{}\"{}{}{}{}{}{}>",
+                 groups.size(), coveredTotal, windowLabel.c_str(), subWindows, minRecAttr, unknownAttr.c_str(),
                  rw::pageDisclosure( gab, sizeof( gab ), gpw.end - gpw.begin, groups.size(), gpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
                  cgRootAttr.c_str(),                        // R-E fix: root= before at= — at= stays LAST (r26)
@@ -1770,15 +1773,22 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         if( cfg.cochangeGroups )
         {
             std::vector<CoViolation> viol;
+            std::size_t              unknownPairs = 0;   // arch-honest: dep-capable pairs with no observed edge and a no-edge side: surprising= unknown, so in no group
+            std::uint32_t            unknownLangs = 0;
             for( const CoPairRow& p : prs )
             {
                 if( p.surprising )
                 {
                     viol.push_back( { p.a, p.b, p.n, p.recur, p.confAb, p.confBa } );
                 }
+                else if( p.depCapable && p.noEdgeLangs != 0 )
+                {
+                    ++unknownPairs;
+                    unknownLangs |= p.noEdgeLangs;
+                }
             }
             const std::vector<CoGroup> groups = cochangeViolationGroups( viol, ing.files.size() );
-            emitCochangeGroups( ing, cfg, viol, groups, coWindowLabel, subWindows, coMinRec, cap, root, anyMinedRootShallow( root, multiRoot, ws ) );
+            emitCochangeGroups( ing, cfg, viol, groups, coWindowLabel, subWindows, coMinRec, cap, root, anyMinedRootShallow( root, multiRoot, ws ), unknownPairs, unknownLangs );
             return 0;
         }
 
