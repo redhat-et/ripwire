@@ -22,9 +22,13 @@ It does **not** claim the residual closed. Any *admitted* pattern whose cost in 
 is still unbounded on libstdc++, including a *single-level* bounded quantifier over an unproven-disjoint alternation (`(a|aa){1,100}b$`, measured 7.8 ms at a 21-byte subject rising to 99.1 s at 41 B, roughly 7x per 4 bytes), which no disjointness proof can answer. That is disclosed in `docs/LIMITS.md`, and
 it is why the screen refuses rather than guesses: a refusal is a bounded, named failure; a hang is not.
 
-Gate: `test/regexmultiquantcheck.sh` (new, 31 arms). The two preceding families are asserted undisplaced
-in the same gate, and `test/regexguardcheck.sh` arm (b2)'s real-engine vehicle moved from `a*a*a*a*a*b`
-(now refused at admission, correctly) to `(a*){20}b`, so that arm keeps proving what it was written to
-prove.
+Gate: `test/regexmultiquantcheck.sh` (new, 54 assertions over 19 patterns). The two preceding families are
+asserted undisplaced in the same gate, and `test/regexguardcheck.sh` arm (b2)'s real-engine vehicle moved from
+`a*a*a*a*a*b` (now refused at admission, correctly) to `(a*){20}b`, so that arm keeps proving what it was
+written to prove. Two evasion classes found in the PR review are asserted in the same gate: clause-1's scope
+collector now reads a nested group's body at every depth (`((a*a*a*a*)b)c`, `(?:x(?:a*a*)y`), and a lazy `?`
+suffix after a quantifier is part of the same atom, not a delimiter that breaks adjacency
+(`a*?a*?a*?a*?b`) — both refused with the same message; the admit set keeps its lazy and nested members
+(`\d+\s*?\w+`, `((a*?)b*)c`, `a{1,4}?b{1,4}?`).
 
 Fixed by @pt-act.
