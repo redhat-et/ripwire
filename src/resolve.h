@@ -59,8 +59,10 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>     // from_chars: the test-only chunk-size knob
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cstdio>       // fopen/fread — workspace-only config-file evidence (go.mod / tsconfig.json), §3.2
 #include <climits>      // PATH_MAX — the ancestor-config walk's realpath buffer
 #include <limits>
@@ -4693,8 +4695,10 @@ inline rw::FileSetStore transitiveIncludeSet( const rw::FileAdjacency& adj )
     std::uint32_t chunkBits = 0;
     if( const char* forced = std::getenv( "RIPWIRE_TEST_FILESET_CHUNK_BITS" ); forced != nullptr )
     {
-        const int bits = std::atoi( forced );
-        chunkBits      = bits >= 1 && bits <= 16 ? std::uint32_t( bits ) : 0;
+        std::uint32_t  bits = 0;
+        const char*    end  = forced + std::strlen( forced );
+        const auto     got  = std::from_chars( forced, end, bits );
+        chunkBits           = got.ec == std::errc() && got.ptr == end && bits >= 1 && bits <= 16 ? bits : 0;
     }
     return rw::buildFileClosure( adj, chunkBits );
 }
