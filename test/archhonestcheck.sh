@@ -427,9 +427,10 @@ if printf '%s' "$m" | grep -q 'propagation_cost="0.750"'; then ok "(Q) F3 near m
 d="$TMP/n_go"; dp="$TMP/n_py"
 g="$( co "$d" --cochange --cochange-groups )"; gr="$( printf '%s' "$g" | grep -o '<cochange [^>]*>' | head -1 )"
 if printf '%s' "$gr" | grep -q 'no_file_edges="go"' && printf '%s' "$gr" | grep -qE 'unknown_pairs="[1-9]'; then ok "(Q) F2: --cochange-groups on Go carries no_file_edges=go and unknown_pairs=N on the root"; else no "(Q) F2 root: $gr"; fi
-if printf '%s' "$g" | grep -o '<!--.*-->' | head -1 | grep -q 'unknown_pairs'; then ok "(Q) F2: its legend defines unknown_pairs"; else no "(Q) F2 legend silent"; fi
+if co "$d" --cochange --cochange-groups --legend=full | grep -o '<!--.*-->' | head -1 | grep -q 'unknown_pairs'; then ok "(Q) F2: its full legend defines unknown_pairs"; else no "(Q) F2 full legend silent"; fi
 gp="$( co "$dp" --cochange --cochange-groups )"
 if printf '%s' "$gp" | grep -q 'no_file_edges\|unknown_pairs'; then no "(Q) F2 near miss: the Python groups answer mentions the disclosure"; else ok "(Q) F2 near miss: the Python groups answer is silent on it"; fi
+if co "$dp" --cochange --cochange-groups --legend=full | grep -q 'no_file_edges\|unknown_pairs'; then no "(Q) F2 near miss: the Python full legend rides without the attribute"; else ok "(Q) F2 near miss: the Python full legend is present-only"; fi
 if printf '%s' "$gp" | grep -q '<group '; then ok "(Q) F2 near miss: the Python groups answer still has its group"; else no "(Q) F2 near miss: Python groups lost: $( printf '%s' "$gp" | cut -c1-300 )"; fi
 gc="$( co "$d" --cochange --cochange-groups --legend=compact | grep -o '<!--.*-->' | head -1 )"
 if printf '%s' "$gc" | grep -q 'unknown_pairs'; then ok "(Q) F2: the compact legend defines unknown_pairs"; else no "(Q) F2 compact legend silent: $( printf '%s' "$gc" | cut -c1-200 )"; fi
