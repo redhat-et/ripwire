@@ -182,5 +182,92 @@ else
     no "fold:2 on the bare map: rc=$rc"
 fi
 
+# ── a stopped fold is a FAILED BUILD: nothing answers from it, nothing is written from it (rv-file-graph-delta F1) ─────────────
+# test/filegraphstopfix: util_a.h and util_b.h each define `helper`; use_a.cpp reaches only util_a.h through two includes, so the
+# include closure decides which `helper` the call is. A partial closure splits the call and strands util_b.h's `helper`, which
+# --quality-delta reads as a NEW dead symbol: exit 2 and a persisted false floor. Every surface that builds a graph must refuse
+# instead. fold:N trips the Nth fold of the process, so a seam on the path's OWN graph reaches the site under test.
+FGS="$TMP/fgs"; mkdir -p "$FGS" "$TMP/xdg"; cp "$ROOT"/test/filegraphstopfix/* "$FGS"/
+git -C "$FGS" init -q 2>/dev/null
+git -C "$FGS" add -A 2>/dev/null
+git -C "$FGS" -c user.name=t -c user.email=t@example.invalid commit -q -m one 2>/dev/null
+echo '// two' >>"$FGS/lib.cpp"
+git -C "$FGS" add -A 2>/dev/null
+git -C "$FGS" -c user.name=t -c user.email=t@example.invalid commit -q -m two 2>/dev/null
+echo '// edit' >>"$FGS/lib.cpp"
+stopline(){ grep -c '^ripwire: memory limit reached during the include-closure fold' "$1"; }
+fgs_cli(){   # $1 = label, $2 = seam, $3.. = argv; a fresh cache per label, kept for the "not poisoned" re-run
+    local label="$1" seam="$2"; shift 2
+    mkdir -p "$TMP/xdg/$label"
+    XDG_CACHE_HOME="$TMP/xdg/$label" TMPDIR="$TMP/xdg/$label" RIPWIRE_TEST_MEMGUARD="$seam" "$BIN" "$FGS" "$@" >"$TMP/$label.out" 2>"$TMP/$label.err"; echo $?
+}
+rc="$( fgs_cli qd fold:2 --quality-delta --legend=compact )"
+if [ "$rc" = 5 ] && [ ! -s "$TMP/qd.out" ] && [ "$( stopline "$TMP/qd.err" )" = 1 ] && [ "$( grep -c '^ripwire:' "$TMP/qd.err" )" = 1 ]; then
+    ok "--quality-delta, HEAD snapshot's fold stopped: exit 5, one line, nothing on stdout"
+else
+    no "--quality-delta fold:2: rc=$rc stdout=$( wc -c <"$TMP/qd.out" ) bytes stderr: $( head -c 250 "$TMP/qd.err" )"
+fi
+rc="$( XDG_CACHE_HOME="$TMP/xdg/qd" TMPDIR="$TMP/xdg/qd" "$BIN" "$FGS" --quality-delta --legend=compact >"$TMP/qd2.out" 2>/dev/null; echo $? )"
+if [ "$rc" = 0 ] && grep -q 'regressions="0"' "$TMP/qd2.out"; then
+    ok "--quality-delta again on that cache, no seam: exit 0, regressions=0 (the stop persisted no snapshot)"
+else
+    no "--quality-delta after a stopped fold, same cache: rc=$rc out: $( head -c 300 "$TMP/qd2.out" )"
+fi
+rc="$( fgs_cli ec fold:2 --edit-check=use_a --legend=compact )"
+if [ "$rc" = 5 ] && [ ! -s "$TMP/ec.out" ] && [ "$( stopline "$TMP/ec.err" )" = 1 ]; then
+    ok "--edit-check, HEAD snapshot's fold stopped: exit 5, one line, nothing on stdout"
+else
+    no "--edit-check=use_a fold:2: rc=$rc stdout=$( wc -c <"$TMP/ec.out" ) bytes stderr: $( head -c 250 "$TMP/ec.err" )"
+fi
+rc="$( fgs_cli rg fold:2 --quality-delta=HEAD~1..HEAD --legend=compact )"
+if [ "$rc" = 6 ] && grep -q 'answered from the changed files only' "$TMP/rg.err"; then ok "--quality-delta=A..B, a full tree's fold stopped: no score from it; the range form degrades to the changed files, disclosed (exit 6, the design of qd-memory-degrade)"
+elif [ "$rc" = 5 ] && [ ! -s "$TMP/rg.out" ]; then ok "--quality-delta=A..B, a stopped fold: exit 5, nothing printed"
+else no "range form fold:2: rc=$rc out=$( wc -c <"$TMP/rg.out" ) stderr: $( head -c 200 "$TMP/rg.err" )"; fi
+
+# the MCP envelope: the call that hit the stop is refused by name; the server is NOT stuck — the next call is served, and from a
+# whole index (the `of_def` of the call is one definition, not the split ["1~s","2~s"] a partial closure gives)
+mcp_fgs(){   # $1 = seam, stdin = tool lines (ids 2..); stdout = responses
+    { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}'; cat; } \
+        | ( cd "$FGS" && XDG_CACHE_HOME="$TMP/xdg/mcp" TMPDIR="$TMP/xdg/mcp" RIPWIRE_TEST_MEMGUARD="$1" perl -e 'alarm shift; exec @ARGV' 60 "$BIN" --mcp 2>/dev/null )
+}
+mkdir -p "$TMP/xdg/mcp"
+mcp_resp(){ python3 - "$1" "$2" <<'PY'
+import json, sys
+for line in open( sys.argv[1], encoding="utf-8", errors="replace" ):
+    line = line.strip()
+    if line.startswith( "{" ):
+        try:
+            r = json.loads( line )
+        except ValueError:
+            continue
+        if r.get( "id" ) == int( sys.argv[2] ):
+            e = r.get( "error" )
+            print( "ERR " + e.get( "message", "" ) if e else "OK " + "".join( c.get( "text", "" ) for c in r.get( "result", {} ).get( "content", [] ) ) )
+PY
+}
+printf '%s\n%s\n' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"find_referencing_symbols\",\"arguments\":{\"path\":\"$FGS\",\"symbol\":\"helper\"}}}" \
+    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"find_referencing_symbols\",\"arguments\":{\"path\":\"$FGS\",\"symbol\":\"helper\"}}}" \
+    | mcp_fgs fold:1 >"$TMP/m1.out"
+r2="$( mcp_resp "$TMP/m1.out" 2 )"; r3="$( mcp_resp "$TMP/m1.out" 3 )"
+case "$r2" in "ERR memory limit reached during the include-closure fold"*) ok "MCP first call, index build's fold stopped: refused by name, no answer";; *) no "MCP fold:1 id=2: ${r2:0:250}";; esac
+case "$r3" in OK*'"of_def":["1"]'*) ok "MCP next call: served, whole index (the stop is not sticky; mcp.h's promise holds)";; *) no "MCP fold:1 id=3: ${r3:0:300}";; esac
+find "$FGS" "$TMP/xdg/mcp" -name '.ripwire_quality_baseline*' 2>/dev/null | head -1 | grep -q . && no "a baseline sidecar exists before any quality_baseline call"
+for verb in quality_baseline quality_delta edit_check; do
+    case "$verb" in edit_check) a=",\"symbol\":\"use_a\"";; *) a="";; esac
+    rm -rf "$TMP/xdg/mcp"; mkdir -p "$TMP/xdg/mcp"
+    printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$verb\",\"arguments\":{\"path\":\"$FGS\"$a}}}" | mcp_fgs fold:1 >"$TMP/mv.out"
+    r="$( mcp_resp "$TMP/mv.out" 2 )"
+    case "$r" in "ERR memory limit reached during the include-closure fold"*) ok "MCP $verb: its own graph's fold stopped, refused by name";; *) no "MCP $verb fold:1: ${r:0:250}";; esac
+    if [ "$verb" = quality_baseline ]; then
+        if find "$FGS" "$TMP/xdg/mcp" -name '.ripwire_quality_baseline*' 2>/dev/null | grep -q .; then no "MCP quality_baseline wrote a sidecar from a stopped fold"; else ok "MCP quality_baseline: no sidecar written from a stopped fold"; fi
+    fi
+done
+rm -f "$FGS"/.ripwire_quality_baseline*   # an old binary's sidecar would stand in for the HEAD snapshot below
+rm -rf "$TMP/xdg/mcp"; mkdir -p "$TMP/xdg/mcp"
+printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"quality_delta\",\"arguments\":{\"path\":\"$FGS\"}}}" | mcp_fgs fold:2 >"$TMP/mq.out"
+r="$( mcp_resp "$TMP/mq.out" 2 )"
+case "$r" in "ERR memory limit reached during the include-closure fold"*) ok "MCP quality_delta: the HEAD snapshot's fold stopped, refused, no false regression";; *) no "MCP quality_delta fold:2: ${r:0:250}";; esac
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

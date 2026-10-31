@@ -15594,7 +15594,7 @@ inline DepHealth dependencyHealth( const rw::FileAdjacency& adj )
     DepHealth h;
     h.transitive.assign( F, 0 );
     PROFILE_SCOPE_DESCRIBE( "--deps/2nd include-closure fold (dependencyHealth)" );
-    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop is recorded: the caller checks overHardLimit()
+    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop throws FileGraphStopped: no partial store is returned
     for( std::uint32_t s = 0; s < F; ++s )
     {
         const std::uint32_t reached = closure.setSize( s ) + 1;

@@ -3888,6 +3888,7 @@ static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( con
 }
 
 static int dispatchMain( const rw::Config& cfg, char** argv );
+static int dispatchMainBody( const rw::Config& cfg, char** argv );
 
 // The key for a SHARED root (`r` = the map family, `ctx` = the bundle family) is read off the ANSWER, never off a flag order.
 // The ROOT picks the family: one flag order across both families cannot be right, because verb precedence interleaves them, and
@@ -4307,7 +4308,7 @@ static int memoryStopExit( const rw::IngestResult& ing, const rw::Config& cfg, c
     return 0;
 }
 
-static int dispatchMain( const rw::Config& cfg, char** argv )
+static int dispatchMainBody( const rw::Config& cfg, char** argv )
 {
     using namespace rw;
 
@@ -5363,8 +5364,20 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
-    const Graph       g               = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
-    joinGrepScanPrefetch( grepPhaseWorker );
+    const Graph       g               = [ & ]
+    {
+        try   // a failed build (fileGraphStop.h) unwinds past a joinable worker, which would std::terminate: join it, then let the stop go on
+        {
+            Graph built = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+            joinGrepScanPrefetch( grepPhaseWorker );
+            return built;
+        }
+        catch( ... )
+        {
+            joinGrepScanPrefetch( grepPhaseWorker );
+            throw;
+        }
+    }();
     if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build and the verbs
     {
         DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build — exit 5, one stderr line" );
@@ -5826,4 +5839,23 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     }
 
     return runDefaultMap( dsp );
+}
+
+// A stopped file-graph fold, or an adjacency past its edge limit, FAILED a build (fileGraphStop.h): no store was returned,
+// so no verb below answered from one and none printed. This is the one place that turns that failure into the run's
+// answer for every verb: the one line, exit 5. The backstop's second line is not wanted, so the stops are answered for.
+static int dispatchMain( const rw::Config& cfg, char** argv )
+{
+    try
+    {
+        return dispatchMainBody( cfg, argv );
+    }
+    catch( const rw::FileGraphStopped& stopped )
+    {
+        rw::memguard::answerStops();
+        DISCLOSE( Diagnostics::answerRefused, "main: the file graph's fold stopped, so the build failed — exit 5, one stderr line, nothing printed from a partial store" );
+        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build", {}, stopped.why() ) );
+        rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
+        return 5;
+    }
 }

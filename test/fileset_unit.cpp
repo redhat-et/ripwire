@@ -302,13 +302,22 @@ int main()
         check( rw::FileAdjacency().size() == 0 && rw::FileAdjacency( 3 ).edgeCount() == 0, "adjacency: empty forms" );
         rw::FileAdjacency moved( std::move( d ) );
         check( d.size() == 0 && d.empty() && moved.size() == 4, "adjacency: a moved-from adjacency is empty, not a count of rows it no longer has" );
-        // 2^32 - 1 edges is 16 GB of targets, so the limit is a parameter; one edge over it stops, and the stop is recorded.
-        rw::fileGraphStopClear();
-        const rw::FileAdjacency over = rw::FileAdjacency::fromEdges( 4, from, to, false, from.size() - 1 );
-        check( rw::fileGraphStopped() == rw::FileGraphStop::Capacity && over.edgeCount() == 0 && over.size() == 4, "adjacency: past the edge limit the stop is recorded and no row is stored" );
-        rw::fileGraphStopClear();
+        // 2^32 - 1 edges is 16 GB of targets, so the limit is a parameter; one edge over it throws, and no adjacency exists to read.
+        bool          threw = false;
+        rw::FileGraphStop cause = rw::FileGraphStop::None;
+        try
+        {
+            const rw::FileAdjacency over = rw::FileAdjacency::fromEdges( 4, from, to, false, from.size() - 1 );
+            (void)over;
+        }
+        catch( const rw::FileGraphStopped& stopped )
+        {
+            threw = true;
+            cause = stopped.why();
+        }
+        check( threw && cause == rw::FileGraphStop::Capacity, "adjacency: past the edge limit the build fails with FileGraphStopped(Capacity); no partial adjacency is returned" );
         const rw::FileAdjacency at = rw::FileAdjacency::fromEdges( 4, from, to, false, from.size() );
-        check( rw::fileGraphStopped() == rw::FileGraphStop::None && at.edgeCount() == 5, "adjacency: exactly the limit is stored" );
+        check( at.edgeCount() == 5, "adjacency: exactly the limit is stored" );
     }
     std::printf( "fileset_unit: %s\n", g_fail == 0 ? "PASS" : "FAIL" );
     return g_fail == 0 ? 0 : 1;

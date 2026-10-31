@@ -86,8 +86,10 @@ decode of the stored rows 0.25 % (16 ms in `closure/4a`). Touching only the word
 every run.
 
 The trade, stated: the OR-from-the-store form decodes a stored row (a bitset chunk four words at a time) where the first form
-ORed whole `u64` words, so on DENSE graphs it can cost 10-15 % more wall (chain 100,000: 20.7 to 22.8 s), and on layered
-graphs it is within the noise of the first form. It saves 99 % of the memory on umbrellas, and the full-width clear on sparse
+ORed whole `u64` words, so on DENSE graphs it may cost more wall: one pair measured chain 100,000 at 20.7 to 22.8 s, but an
+interleaved re-measure under load 36 had the new form FASTER (40.1 s against 32.3 s, 61.6 against 40.6), so the wall difference is NOT
+resolved under load (a quiet re-measure is open); peak (667-679 MB) and store (653.6 MB) hold. On layered graphs it is within the
+noise of the first form. It saves 99 % of the memory on umbrellas, and the full-width clear on sparse
 graphs. If one had to give, wall on a 100,000-file dense graph is the one to give: it is a build step that runs once, where
 the frontier was a peak that scales with fan-out. A frontier-free form that kept the first form's speed on dense graphs was not
 found.
@@ -96,8 +98,10 @@ found.
 
 Real binaries, `--no-cache`, one run at a time, three builds interleaved base, previous head, head, head, previous, base (two
 runs each, mean wall, larger of the two memory readings). The Mac was shared and loaded (load 17-19, 37-46 % memory free, under
-the 40 % the table asks for), and two identical runs differ by up to 15 % in wall and 10 % in footprint, so a step under that is
-not resolved by this table. Cells are wall s / max RSS MB / peak footprint MB; base = 092184c3 (before the lane), previous =
+the 40 % the table asks for), and two identical runs differ widely: the 30 identical-binary pairs of this table differ by up to 75 % in wall, 67 % in RSS and
+27 % in footprint (20 of 30 pairs over 15 % in wall, 6 over 10 % in footprint), so this table cannot resolve a +10 % or +25 % step at
+all. The fold's own phase cost (profile, below) and its peak and store bytes are the evidence for the fold; this table only shows
+that no step is a large outlier. Cells are wall s / max RSS MB / peak footprint MB; base = 092184c3 (before the lane), previous =
 8c5d0446, head = 28ca4a00.
 
 | repo, step | base | previous | head |
@@ -113,17 +117,22 @@ not resolved by this table. Cells are wall s / max RSS MB / peak footprint MB; b
 | cockroach --impact | 24.0 / 1779 / 2073 | 25.3 / 1875 / 1965 | 24.8 / 1689 / 2006 |
 | cockroach --for | 23.6 / 2094 / 2105 | 22.2 / 2003 / 2257 | 24.9 / 1532 / 2007 |
 
-Head against base is inside that noise on every step; no step shows a memory-guard degrade. The fold itself is 40-50 ms of vscode's
+Head against base is inside that noise on every step; no step shows a memory-guard degrade. The fold itself is some 50-100 ms of vscode's
 indexing, so it cannot move these totals; the umbrella tree is where it matters (80,001 files, `--deps`: 633 MB RSS before the
 fix, 172 MB after, 183 MB at base).
 
 ## What the fold does when it cannot finish
 
 - Memory: every `kFoldCheckComponents` (4,096) components or 4 MiB of payload the fold asks `memguard::foldShouldStop()`,
-  one footprint reading against the hard line. Over it, the fold stops, records why (`src/infra/fileGraphStop.h`), and
-  `memguard::overHardLimit()` reads true from then on, so the CLI's hard line, the MCP per-request check and the second fold
-  on `--deps` and `--arch=FILE` all refuse (exit 5, one stderr line) instead of answering from a partial store. An
-  allocation failure inside the fold is caught the same way. `RIPWIRE_TEST_MEMGUARD=fold:N` stops the Nth fold of the process
+  one footprint reading against the hard line. Over it, the fold stops and THROWS `FileGraphStopped` (`src/infra/fileGraphStop.h`):
+  a stopped fold is a failed build, never a partial store handed back, so no reader can answer from one and none has to remember to
+  check. There is no process-wide stop flag, so nothing is sticky. Each surface refuses in its own words: `dispatchMain` (every CLI
+  verb: exit 5, one stderr line), the MCP request envelope (the call is refused by name, the half-built index is released, the next
+  call rebuilds and is served), `--quality-delta=A..B` (the phase is recorded and the changed files answer, disclosed), and the
+  qsnap prefetch worker (drops the result, writes nothing). `computeHeadSnapshot` never reaches its score or its write, so no
+  qsnap, sidecar or cache is written from a stopped fold (`test/propcostcheck.sh` pins every path). An allocation failure anywhere
+  in the fold, the component scan and the reach scan included, is a stop of the same kind (`fileSetStore.h`: the whole fold is
+  inside its `try`); `FileAdjacency::fromEdges` past its edge limit throws the same exception. `RIPWIRE_TEST_MEMGUARD=fold:N` stops the Nth fold of the process
   (buildGraph's is the first), for the gates.
 - Width: chunk offsets are `u32`, so 2^32 - 1 payload words (8 GiB) is the most a store holds, and `FileAdjacency` offsets cap
   at 2^32 - 1 edges. Both limits are parameters, and the unit tests reach the stop at a small limit; the real wrap needs 8 GiB

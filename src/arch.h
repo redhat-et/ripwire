@@ -1222,8 +1222,8 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 //
 // Complexity: one fold over the components (infra/fileSetStore.h), each edge costing the successor's stored row, whatever the
 // closures' sizes: the per-file BFS this replaced took O( N · (N + E) ), 20 s against 5 s on a 100,000-file graph of mean
-// closure 11,000 (bench/FILEGRAPH.md). The fold can stop at the memory guard's hard line (memguard::guardedFileClosure): the
-// caller then reads overHardLimit() before it prints, and a number from a stopped fold is never printed.
+// closure 11,000 (bench/FILEGRAPH.md). The fold can stop at the memory guard's hard line (memguard::guardedFileClosure): it then throws
+// FileGraphStopped, so a number from a stopped fold is never computed, let alone printed.
 //
 // Degrade / edge cases (never divides by zero):
 //   N == 0 → 0.0 (empty graph, documented: no files → no propagation)
@@ -1235,7 +1235,7 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 inline std::uint64_t sumReachableClosure( const rw::FileAdjacency& adj, const std::vector<std::uint32_t>& roots )
 {
     PROFILE_SCOPE_DESCRIBE( "--arch/2nd include-closure fold (sumReachableClosure)" );
-    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop is recorded: the caller checks overHardLimit()
+    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop throws FileGraphStopped: no partial store is returned
     return std::accumulate( roots.begin(), roots.end(), std::uint64_t( 0 ), [ & ]( const std::uint64_t sum, const std::uint32_t root )
     {
         return sum + closure.setSize( root ) + 1;   // unit diagonal: a file reaches itself

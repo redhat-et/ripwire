@@ -1272,7 +1272,15 @@ inline const McpIndex& getIndex( const std::string& root )
             ix.ing  = ingest( root.c_str(), {}, ix.cacheFile );          // warm rebuild via content-hash cache
         }
     }
-    ix.g    = buildGraph( ix.ing );
+    try
+    {
+        ix.g = buildGraph( ix.ing );
+    }
+    catch( const FileGraphStopped& )   // a failed build: `ing` is new and `g` is not, so the slot must not be served as it stands
+    {
+        releaseMcpIndexMemory();       // valid=false and the bulk gone; the request envelope refuses this call (mcp.h), the next one rebuilds
+        throw;
+    }
 
     // working-set personalization (Cody-style): teleport the PageRank prior toward files with uncommitted
     // changes, mirroring --map-diff's diffTeleport weighting (main.cpp) — β=0.7 of the mass on changed-file

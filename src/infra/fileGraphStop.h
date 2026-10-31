@@ -1,12 +1,16 @@
 #pragma once
 
-// fileGraphStop.h: why the file graph's fold or adjacency stopped, kept process-wide so every hard-line reading sees it.
-// The stores in fileSetStore.h record a stop here and return a PARTIAL store; memguard::overHardLimit() reads this slot, so
-// the CLI's hard line, the MCP per-request check and the verbs that fold a second time all refuse instead of answering from it.
-// First stop wins. Tests clear it.
+// fileGraphStop.h: why the file graph's fold or adjacency gave up, and the exception that carries it.
+// A stopped fold, or an adjacency past its edge limit, is a FAILED BUILD: memguard::guardedFileClosure and
+// FileAdjacency::fromEdges throw FileGraphStopped instead of returning a partial store, so no reader can answer from one
+// and none has to remember to check. There is no process-wide "a stop happened" slot, so a stop cannot outlive the build it
+// stopped (an MCP server that released the index serves the next call). The catch sites are few and each one refuses
+// in its own surface: main.cpp's dispatchMain (exit 5, one line), mcp.h's request envelope (an MCP error naming the stop)
+// and the places that own a half-built state (mcpindex.h getIndex, quality.h loadRefTree). A background worker catches and
+// writes nothing.
 
-#include <atomic>
 #include <cstdint>
+#include <exception>
 
 namespace rw
 {
@@ -19,14 +23,15 @@ enum class FileGraphStop : std::uint8_t
     AllocFailure,   // std::bad_alloc inside the fold
 };
 
-inline std::atomic<FileGraphStop> g_fileGraphStop{ FileGraphStop::None };
-
-inline void fileGraphStopRecord( FileGraphStop why ) noexcept
+class FileGraphStopped final : public std::exception
 {
-    FileGraphStop none = FileGraphStop::None;
-    g_fileGraphStop.compare_exchange_strong( none, why, std::memory_order_relaxed );
-}
-inline FileGraphStop fileGraphStopped() noexcept { return g_fileGraphStop.load( std::memory_order_relaxed ); }
-inline void          fileGraphStopClear() noexcept { g_fileGraphStop.store( FileGraphStop::None, std::memory_order_relaxed ); }
+public:
+    explicit FileGraphStopped( FileGraphStop why ) noexcept : why_( why ) {}
+    FileGraphStop why() const noexcept { return why_; }
+    const char*   what() const noexcept override { return "the file graph stopped: no answer from a partial store"; }
+
+private:
+    FileGraphStop why_;
+};
 
 } // namespace rw

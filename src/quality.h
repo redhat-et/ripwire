@@ -4540,7 +4540,9 @@ inline std::pair<Snapshot, bool> computeHeadSnapshot( const std::string& root, c
     { DISCLOSE( "quality: HEAD tree ingested empty — falling back to run --quality-baseline first" ); return { Snapshot{}, false }; }
     // #350: a HEAD tree the memory guard cut is never scored and never persisted as the qsnap — a partial floor would
     // be served as complete by every later run. The no-snapshot path leaves the stop UNANSWERED, so the CLI backstop
-    // exits 5 with its line and the MCP envelope carries _memory_stop (memguard.h).
+    // exits 5 with its line and the MCP envelope carries _memory_stop (memguard.h). A stopped FOLD below is a failed build:
+    // buildGraph throws FileGraphStopped, which skips the scoring and the qsnap write, and reaches the surface's own catch
+    // (dispatchMain: exit 5; the MCP envelope: a refusal; the prefetch worker: dropped, nothing written).
     if( headIng.memoryStop.isSet() )
     {
         return { Snapshot{}, false };
@@ -4598,6 +4600,7 @@ struct RefTree
     std::string  root;      // the materialized temp root — empty until this call succeeds
     IngestResult ing;
     Graph        g;
+    FileGraphStop graphStop = FileGraphStop::None;   // set when buildGraph's fold stopped: OverHardLimit with no graph
 };
 
 // `tag` MUST differ between the two sides of a pair. materializeCommitTree spells its temp root
@@ -4645,7 +4648,15 @@ inline RefTreeLoad loadRefTree( const std::string& repoRoot, const std::string& 
     {
         return RefTreeLoad::OverHardLimit;
     }
-    out.g    = buildGraph( out.ing, nullptr );
+    try
+    {
+        out.g = buildGraph( out.ing, nullptr );
+    }
+    catch( const FileGraphStopped& stopped )   // a failed build: no graph, so nothing is scored; the range form records the phase and degrades
+    {
+        out.graphStop = stopped.why();
+        return RefTreeLoad::OverHardLimit;
+    }
     out.root = tmpRoot;
     return RefTreeLoad::Loaded;
 }
@@ -4955,7 +4966,15 @@ inline RefTreeLoad loadRefSubset( const std::string& repoRoot, const std::string
     {
         return RefTreeLoad::OverHardLimit;
     }
-    out.g    = buildGraph( out.ing, nullptr );
+    try
+    {
+        out.g = buildGraph( out.ing, nullptr );
+    }
+    catch( const FileGraphStopped& stopped )   // a failed build: no graph, so nothing is scored; the range form records the phase and degrades
+    {
+        out.graphStop = stopped.why();
+        return RefTreeLoad::OverHardLimit;
+    }
     out.root = tmpRoot;
     return RefTreeLoad::Loaded;
 }

@@ -78,7 +78,7 @@
 #include <string_view>
 
 #include "infra/Diagnostics.h"   // VALIDATE — the environment is external input
-#include "infra/fileGraphStop.h"  // a stopped file-graph fold reads as over the hard line
+#include "infra/fileGraphStop.h"  // FileGraphStopped: a stopped file-graph fold fails the build
 #include "infra/fileSetStore.h"   // guardedFileClosure: the fold asks this guard whether to go on
 #include "infra/os.h"            // rw::os::mem_footprint / mem_physical / mem_cgroup_max / mem_cgroup_unreclaimable / mem_pressure
 #include "model.h"               // MemoryStop — the disclosure sink
@@ -167,7 +167,7 @@ enum class TripAt : std::uint8_t
     Project,    // project:N  — the Nth target-phase projection (projectTargetPhase) reads as "does not fit"
     Ingest,     // ingest:N   — the Nth ingest of the process stops its crawl at its first entry (a crawl stop)
     Peak,       // peak:N     — the Nth post-answer peak reading (peakOverLimit) reads as over the limit
-    Fold,       // fold:N     — the Nth footprint reading inside the file graph's closure fold reads as over the hard limit
+    Fold,       // fold:N     — the Nth fold of the process (buildGraph's is the first) reads as over the hard limit at its first component
 };
 struct TestTrip
 {
@@ -400,10 +400,6 @@ private:
 // is called — its callers run it once per phase or once per request, never per unit of work.
 inline bool overHardLimit()
 {
-    if( fileGraphStopped() != FileGraphStop::None )
-    {
-        return true;   // the closure fold gave up (guardedFileClosure): its store is partial, so every hard-line reading refuses
-    }
     const Limits& l = limits();
     if( l.hardBytes == 0 )
     {
@@ -431,13 +427,10 @@ inline bool requestSeamTrips()
 // ── the file graph's fold ─────────────────────────────────────────────────────────────────────────────────────
 // The closure fold (infra/fileSetStore.h) runs inside buildGraph, and again for --deps and --arch=FILE, where the hard line
 // between phases cannot see it. It asks this every kFoldCheckComponents components or 4 MiB of payload: one footprint reading,
-// the same test as overHardLimit. A stop is recorded process-wide (fileGraphStop.h), so every later hard-line reading refuses.
+// the same test as overHardLimit. A stop makes guardedFileClosure throw FileGraphStopped (fileGraphStop.h): nothing is
+// answered from the partial store, and nothing is remembered once the build that stopped has been abandoned.
 inline bool foldShouldStop() noexcept
 {
-    if( fileGraphStopped() != FileGraphStop::None )
-    {
-        return true;
-    }
     const Limits& l = limits();
     if( l.hardBytes == 0 )
     {
@@ -471,8 +464,8 @@ inline std::uint32_t testChunkBits() noexcept
     return bits;
 }
 
-// buildFileClosure under the guard. On a stop the store is partial: the stop is recorded here, and the caller's next
-// overHardLimit() (or its own check) refuses. Every caller of the fold goes through this.
+// buildFileClosure under the guard. On a stop the store is partial, so it is never returned: FileGraphStopped is thrown, and
+// the build that asked for the fold fails. Every caller of the fold goes through this, so none can forget to look.
 inline FileSetStore guardedFileClosure( const FileAdjacency& adj )
 {
     FileClosureStats st;
@@ -488,7 +481,7 @@ inline FileSetStore guardedFileClosure( const FileAdjacency& adj )
     FileSetStore store = buildFileClosure( adj, opts );
     if( st.stop != FileGraphStop::None )
     {
-        fileGraphStopRecord( st.stop );
+        throw FileGraphStopped( st.stop );
     }
     return store;
 }
@@ -613,9 +606,9 @@ inline std::string_view limitSourceClause() noexcept
 
 // the hard stop's one line: nothing was built that could answer. `also` is said between the limit and the verdict — the
 // range form's "the changed files were not tried" / "were cut too" — and is empty everywhere else (the line keeps its bytes).
-inline std::string hardStopLine( std::string_view where, std::string_view also = {} )
+inline std::string hardStopLine( std::string_view where, std::string_view also = {}, FileGraphStop why = FileGraphStop::None )
 {
-    switch( fileGraphStopped() )   // a file-graph stop reads as over the line, and says its own cause
+    switch( why )   // a file-graph stop reads as over the line, and says its own cause
     {
     case FileGraphStop::Capacity:
         return "the file graph passed a 32-bit offset during the include-closure fold (more than 4 Gi payload words or edges); stopped cleanly without an answer — pass a smaller root";

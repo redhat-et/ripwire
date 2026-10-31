@@ -76,9 +76,8 @@ public:
     }
 
     // `from` and `to` are parallel; every from[i] < files. dedup sorts each row and drops repeats. Offsets are u32, so more
-    // than `edgeLimit` (default 2^32 - 1) edges cannot be stored: the stop is recorded (fileGraphStop.h) and the result has
-    // `files` empty rows, which callers must not answer from. 4 G edges is 16 GB of targets, so no real tree reaches it;
-    // the limit is a parameter so a test can.
+    // than `edgeLimit` (default 2^32 - 1) edges cannot be stored: FileGraphStopped is thrown (fileGraphStop.h) and no adjacency
+    // exists to answer from. 4 G edges is 16 GB of targets, so no real tree reaches it; the limit is a parameter so a test can.
     static FileAdjacency fromEdges( std::uint32_t files, std::span<const std::uint32_t> from, std::span<const std::uint32_t> to, bool dedup,
                                     std::uint64_t edgeLimit = std::numeric_limits<std::uint32_t>::max() )
     {
@@ -86,9 +85,8 @@ public:
         ASSUME( from.size() == to.size() );
         if( to.size() > edgeLimit )
         {
-            DISCLOSE( Diagnostics::answerRefused, "fileSetStore: more file-graph edges than a 32-bit offset holds — stop recorded, no answer from this graph" );
-            fileGraphStopRecord( FileGraphStop::Capacity );
-            return a;
+            DISCLOSE( Diagnostics::answerRefused, "fileSetStore: more file-graph edges than a 32-bit offset holds — the build fails, no answer from this graph" );
+            throw FileGraphStopped( FileGraphStop::Capacity );
         }
         for( const std::uint32_t f : from )
         {
@@ -365,7 +363,8 @@ public:
             orWord( id0 / 64, v );
         }
     }
-    // `v` is up to 16 bits that start at bit `id0` (a multiple of 16), so they never straddle a word.
+    // `v` is up to 16 bits that start at bit `id0`; a chunk never straddles a word, so neither do they. (id0 is a multiple of 16 only at
+    // the default chunk sizes; the forced test sizes below 16 bits use shorter chunks, and the behaviour is the same.)
     void orBits16( std::uint32_t id0, std::uint64_t v )
     {
         if( v != 0 )
@@ -374,7 +373,6 @@ public:
         }
     }
 
-    std::size_t wordCount() const noexcept { return bits_.size(); }
     std::size_t bytes() const noexcept { return bits_.capacity() * 8 + touched_.capacity() * 4; }
 
     // The row's ids in ascending order into `out`, then the row is cleared. A row that touched more than a sixteenth of the
@@ -414,7 +412,7 @@ private:
     std::vector<std::uint32_t> touched_;
 };
 
-// Takes rows in any order. A row arrives as sorted ids, or as a working row: a row identical to an earlier one is rolled
+// Takes rows in any order. A row arrives as sorted ids (addSorted): a row identical to an earlier one is rolled
 // back and shared, so the build needs no per-row allocation. The hash map is build-only and freed by finish().
 //
 // `hashMask` is a test seam: the row hash is ANDed with it, so a gate can force every row onto one hash and prove the
@@ -655,7 +653,6 @@ struct FileClosureStats
 {
     std::uint32_t sccs          = 0;
     std::size_t   workPeakBytes = 0;   // the working row and its touched list: one row, whatever the graph
-    std::size_t   reservedWords = 0;   // payload words reserved up front, after the clamp
     std::uint32_t checks        = 0;   // how many times the stop callback was asked
     FileGraphStop stop          = FileGraphStop::None;
 };
@@ -843,29 +840,30 @@ inline constexpr std::size_t   kFoldCheckWords      = std::size_t( 1 ) << 21;   
 template <class Adj>
 inline FileSetStore buildFileClosure( const Adj& adj, const FileClosureOptions& opts = {} )
 {
-    const std::uint32_t  F     = std::uint32_t( adj.size() );
-    const FileComponents comps = [ & ]
-    {
-        PROFILE_SCOPE_DESCRIBE( "closure/1 strongly connected components (Tarjan)" );
-        return fileComponents( adj );
-    }();
-    const std::uint32_t C = comps.count();
+    const std::uint32_t F = std::uint32_t( adj.size() );
     FileClosureStats    local;
-    FileClosureStats&    st = opts.stats != nullptr ? *opts.stats : local;
-    st                      = FileClosureStats{};
-    st.sccs                 = C;
+    FileClosureStats&   st = opts.stats != nullptr ? *opts.stats : local;
+    st                     = FileClosureStats{};
 
-    std::uint32_t reaching = 0;
+    try   // everything that allocates is inside: a bad_alloc anywhere in the fold is a disclosed stop, not an escape (rv F2)
     {
-        PROFILE_SCOPE_DESCRIBE( "closure/2 components that reach something (the reserve's scale)" );
-        for( std::uint32_t k = 0; k < C; ++k )
+        const FileComponents comps = [ & ]
         {
-            reaching += fileComponentReaches( adj, comps, k ) ? 1 : 0;
-        }
-    }
+            PROFILE_SCOPE_DESCRIBE( "closure/1 strongly connected components (Tarjan)" );
+            return fileComponents( adj );
+        }();
+        const std::uint32_t C = comps.count();
+        st.sccs               = C;
 
-    try
-    {
+        std::uint32_t reaching = 0;
+        {
+            PROFILE_SCOPE_DESCRIBE( "closure/2 components that reach something (the reserve's scale)" );
+            for( std::uint32_t k = 0; k < C; ++k )
+            {
+                reaching += fileComponentReaches( adj, comps, k ) ? 1 : 0;
+            }
+        }
+
         std::uint32_t      chunkBits = opts.chunkBits;
         FileSetChunkChoice choice;
         std::size_t        sampleRows = 0;
@@ -882,7 +880,6 @@ inline FileSetStore buildFileClosure( const Adj& adj, const FileClosureOptions& 
         {
             const FileSetReservePlan plan = fileSetReservePlan( choice, sampleRows, reaching );
             b.reserve( plan.rows, plan.chunks, plan.words );
-            st.reservedWords = plan.words;
         }
 
         PROFILE_SCOPE_DESCRIBE( "closure/4 fold over the components, sinks first (includes 4a-4c)" );

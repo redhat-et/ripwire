@@ -2133,7 +2133,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // dispatch chain below, which is what makes room for this.
                 // #350 layer 3: over the memory guard's hard limit, no tool call starts work — the call is refused by
                 // name and the server stays up (a later call, after memory is released, is served). One footprint
-                // reading per tool call; nothing is measured on any other method.
+                // reading per tool call; nothing is measured on any other method. The reading is the LIVE footprint, never a
+                // remembered stop: a fold that stops throws FileGraphStopped, caught at this try's end, so nothing is sticky.
                 // Over the line, the resident index is released first (it is usually most of the footprint) and the
                 // footprint read once more: under the line again, the call proceeds and rebuilds for its own root; still
                 // over, it is refused, and the sentence names what is over: this server (restart it), or the cgroup leaf
@@ -2917,6 +2918,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         resp = errResultMsg( -32602, mcprefuse::unknownVerbRefusal( knownVerbs, name, advertisedCount ) );
                     }
                 }
+            }
+            catch( const FileGraphStopped& stopped )
+            {
+                // A failed build (infra/fileGraphStop.h): the fold stopped at the hard line, or the file graph passed a 32-bit offset, or an
+                // allocation failed inside it. No store was returned, so nothing answered, and nothing is remembered: the half-built index is
+                // released (valid=false, bulk gone) and the next call rebuilds, under the same limit it is checked against again.
+                releaseMcpIndexMemory();
+                memguard::answerStops();
+                DISCLOSE( Diagnostics::answerRefused, "mcp: a call whose file-graph fold stopped is refused with an MCP error naming the stop; the index is released, the next call rebuilds" );
+                resp = errResultMsg( -32000, memguard::hardStopLine( "graph build", {}, stopped.why() ) + "; this call was refused, the index was released and the next call rebuilds" );
             }
             catch( ... )
             {
