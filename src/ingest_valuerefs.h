@@ -2269,14 +2269,6 @@ private:
         {
             return;
         }
-        if( pyParamHasDefault( sc.node, name ) )
-        {
-            return;   // `sender=None`, `weak=True`: an option the registrar stores beside the receiver, never the registered value
-        }
-        if( pyOtherParamUsed( sc.node, name ) )
-        {
-            return;   // `self.rx.append( wrap( receiver ) ); self.fl.append( sender )`: the stored one may be the option, not the value
-        }
         std::size_t j = i;
         while( j > 1 && ( kindIs( m_anc[j - 1].kind, "tuple" ) || kindIs( m_anc[j - 1].kind, "list" )
                           || kindIs( m_anc[j - 1].kind, "parenthesized_expression" ) ) )
@@ -2312,6 +2304,15 @@ private:
         if( field.empty() )
         {
             return;
+        }
+        // after the store shape: both are pure predicates, and pyOtherParamUsed re-reads the parameters and scans the body (most uses of a parameter are no store)
+        if( pyParamHasDefault( sc.node, name ) )
+        {
+            return;   // `sender=None`, `weak=True`: an option the registrar stores beside the receiver, never the registered value
+        }
+        if( pyOtherParamUsed( sc.node, name ) )
+        {
+            return;   // `self.rx.append( wrap( receiver ) ); self.fl.append( sender )`: the stored one may be the option, not the value
         }
         RawRef r;
         r.fileId        = m_fileId;

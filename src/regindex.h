@@ -168,6 +168,9 @@ private:
     HashMap<std::uint32_t, std::vector<const Binding*>> m_imports;   // fileId → its import bindings
     HashMap<std::string, std::vector<const Binding*>>   m_types;     // "fileId#var" → module-scope typed bindings
     HashMap<NodeId, std::vector<std::uint16_t>> m_regFacts;   // registrar method → the parameter positions it stores
+    // "fileId#Class::method" → the one def of that method of a class, for the methods that carry a registrar fact only (kAmbiguous: several);
+    // registrarOf looks a candidate up here, not by a scan of every symbol per call site
+    HashMap<std::string, NodeId>                m_methods;
     // "fileId#name" → the function scopes writing `name` locally (a parameter, a loop variable, an assignment)
     struct Shadow { std::uint32_t start; std::uint32_t end; NodeId scope; bool fn; };
     HashMap<std::string, std::vector<Shadow>>   m_shadows;
@@ -246,6 +249,26 @@ private:
             if( r.role == RefRole::Value && !r.qualifier.empty() && r.qualifier[0] == kValueRefRegParamScope && r.fromSymbol != kNoNode && r.argCountKnown )
             {
                 m_regFacts[ r.fromSymbol ].push_back( r.argCount );
+            }
+        }
+        if( m_regFacts.empty() )
+        {
+            return;
+        }
+        std::vector<std::string_view> factNames;
+        for( const auto& [ id, args ] : m_regFacts )
+        {
+            factNames.push_back( m_ing.symbols[id].name );
+        }
+        for( const Symbol& s : m_ing.symbols )
+        {
+            if( !s.scope.empty() && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) && std::ranges::find( factNames, s.name ) != factNames.end() )
+            {
+                const auto [ it, fresh ] = m_methods.try_emplace( fk( s.fileId, std::string( s.scope ) + "::" + s.name ), s.id );
+                if( !fresh )
+                {
+                    it->second = kAmbiguous;   // two definitions of C.m
+                }
             }
         }
     }
@@ -468,18 +491,8 @@ private:
             return kNoNode;
         }
         const Symbol& cs = m_ing.symbols[c];
-        NodeId        m  = kNoNode;
-        for( const Symbol& s : m_ing.symbols )
-        {
-            if( s.fileId == cs.fileId && s.scope == cs.name && s.name == method && ( s.kind == SymKind::Function || s.kind == SymKind::Method ) )
-            {
-                if( m != kNoNode )
-                {
-                    return kNoNode;   // two definitions of C.m: no registrar (exact or no row)
-                }
-                m = s.id;
-            }
-        }
+        const auto    mi = m_methods.find( fk( cs.fileId, std::string( cs.name ) + "::" + std::string( method ) ) );
+        const NodeId  m  = mi == m_methods.end() || mi->second == kAmbiguous ? kNoNode : mi->second;   // two definitions of C.m: no registrar (exact or no row)
         const auto facts = m == kNoNode ? m_regFacts.end() : m_regFacts.find( m );
         if( facts == m_regFacts.end() || std::ranges::find( facts->second, arg ) == facts->second.end() )
         {
@@ -541,8 +554,8 @@ private:
     }
 
     // TS ProviderRecord: `{ provide: K, useClass: C }` — the value pair and the ONE `provide` pair of the same object literal. A pair
-    // counts only when the extractor marked it (qualifier "<scope><shadow>@<start byte of its object literal>"): the literal is a
-    // direct call argument or a `const` initialiser (or nested in such an array / object) and the value is written bare. Key and value
+    // counts only when the extractor marked it (qualifier "<scope><shadow>@<start byte of its object literal>"): the literal is an
+    // ELEMENT of an array (a call argument, a `const` initialiser or a `providers` / `viewProviders` property) and the value is written bare. Key and value
     // pair only through the SAME literal, so a ternary / `||` / return / reassignment / second call can never join two objects.
     void collectProviderSites( std::vector<RegSite>& out ) const
     {

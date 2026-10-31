@@ -607,7 +607,7 @@ printf "import { DA, ZA } from './cl';\n" >> "$TMP/f2r/app.ts"
 f2rbad=""
 for t in 1 2 3 4 5 6 7 8 9 A B C D; do run "f2r$t" "$TMP/f2r" -- --for="which classes are provided for T$t"; done
 for t in 1 2 3 4 5 6 7 8 9 C D; do out=$( chk row "$TMP/f2r$t.xml" T$t n=2 D$t Z$t ) || f2rbad="$f2rbad T$t: $out;"; done
-if [ -z "$f2rbad" ]; then ok "F2r3 a ternary / || / const-ternary / reassigned / property / return / second-block literal never lends its class to another object's provide; two COMPLETE literals in a ternary, a returned literal and a `let` literal are conditional / unbound and not listed"; else no "F2r3 $f2rbad"; fi
+if [ -z "$f2rbad" ]; then ok "F2r3 a ternary / || / const-ternary / reassigned / property / return / second-block literal never lends its class to another object's provide; two COMPLETE literals in a ternary, a returned literal and a 'let' literal are conditional / unbound and not listed"; else no "F2r3 $f2rbad"; fi
 # fix round 4: a literal outside an array (a bare call argument, a `const X = { … }`) is NOT counted (reg.remove( { … } ), console.log( { … } ) and o.provide = … are not registrations): rows lost by design
 if out=$( chk nokey "$TMP/f2rA.xml" TA ); then ok "F2r4 const-bound provider OBJECTS (not an array element) are not counted (lost by design: o.provide = … can rebind them)"; else no "F2r4 TA $out"; fi
 if out=$( chk nokey "$TMP/f2rB.xml" TB ); then ok "F2r4 a bare register( { … } ) call argument is not counted (lost by design: reg.remove( { … } ) has the same shape)"; else no "F2r4 TB $out"; fi
