@@ -62,12 +62,13 @@
 #include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <initializer_list>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -223,7 +224,12 @@ inline std::string_view stripWordPunct( std::string_view w ) noexcept
     return w;
 }
 
-inline bool wordIsOneOf( std::string_view word, std::initializer_list<std::string_view> set )
+inline constexpr std::array<std::string_view, 10> kForLiteralSettingCues{ "setting", "settings", "option", "options", "key", "keys", "command", "commands", "flag", "flags" };
+inline constexpr std::array<std::string_view, 6>  kForLiteralMessageCues{ "error", "errors", "notification", "notifications", "message", "messages" };
+inline constexpr std::array<std::string_view, 20> kForLiteralFileSuffixes{ "json", "jsonc", "toml", "yaml", "yml", "md", "txt", "html", "css", "xml", "ini", "cfg", "conf", "lock", "log", "csv", "com", "org", "net", "io" };
+inline constexpr std::array<std::string_view, 17> kForLiteralLeadWords{ "where", "which", "what", "who", "why", "when", "how", "does", "do", "is", "path", "callers", "common", "lowest", "call", "trace", "thread" };
+
+inline bool wordIsOneOf( std::string_view word, std::span<const std::string_view> set )
 {
     std::string low( stripWordPunct( word ) );
     std::transform( low.begin(), low.end(), low.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
@@ -232,12 +238,12 @@ inline bool wordIsOneOf( std::string_view word, std::initializer_list<std::strin
 
 inline bool isSettingCue( std::string_view w )
 {
-    return wordIsOneOf( w, { "setting", "settings", "option", "options", "key", "keys", "command", "commands", "flag", "flags" } );
+    return wordIsOneOf( w, kForLiteralSettingCues );
 }
 
 inline bool isMessageCue( std::string_view w )
 {
-    return wordIsOneOf( w, { "error", "errors", "notification", "notifications", "message", "messages" } );
+    return wordIsOneOf( w, kForLiteralMessageCues );
 }
 
 // a key's last segment that says the dotted word is a file or a host: every extension the linter table knows (langOfPath), the data and
@@ -248,7 +254,7 @@ inline bool isFileOrHostSuffix( std::string_view lastSegment )
     {
         return true;
     }
-    return wordIsOneOf( lastSegment, { "json", "jsonc", "toml", "yaml", "yml", "md", "txt", "html", "css", "xml", "ini", "cfg", "conf", "lock", "log", "csv", "com", "org", "net", "io" } );
+    return wordIsOneOf( lastSegment, kForLiteralFileSuffixes );
 }
 
 // ALLOWLIST (SAFETY (d)1): segments of letters, digits, `_` and `-` that open with a letter or `_`, no `-` at a segment's end. Returns the
@@ -298,34 +304,36 @@ inline std::optional<std::string> dottedKeyOf( const std::vector<std::string_vie
     return std::nullopt;
 }
 
-// the first ` or ' delimited span of 3+ words with a message cue outside it. A ' only opens after a space or the start and only closes
-// before one or the end (`wasn't` is no quote)
+// the first span `q` delimits, its delimiters included. A ' only opens after a space or the start and never closes before a letter or
+// digit (`wasn't` is no quote)
+inline std::optional<std::string_view> delimitedSpan( std::string_view task, char q )
+{
+    for( std::size_t a = task.find( q ); a != std::string_view::npos; a = task.find( q, a + 1 ) )
+    {
+        if( q == '\'' && a > 0 && task[a - 1] != ' ' )
+        {
+            continue;
+        }
+        std::size_t b = task.find( q, a + 1 );
+        while( q == '\'' && b != std::string_view::npos && b + 1 < task.size() && std::isalnum( static_cast<unsigned char>( task[b + 1] ) ) != 0 )
+        {
+            b = task.find( q, b + 1 );
+        }
+        if( b == std::string_view::npos )
+        {
+            return std::nullopt;
+        }
+        return task.substr( a, b - a + 1 );
+    }
+    return std::nullopt;
+}
+
+// the first ` or ' delimited span of 3+ words with a message cue outside it
 inline std::optional<std::string> quotedMessageOf( std::string_view task )
 {
-    const auto spanOf = [ & ]( char q ) -> std::optional<std::string_view>
-    {
-        for( std::size_t a = task.find( q ); a != std::string_view::npos; a = task.find( q, a + 1 ) )
-        {
-            if( q == '\'' && a > 0 && task[a - 1] != ' ' )
-            {
-                continue;
-            }
-            std::size_t b = task.find( q, a + 1 );
-            while( q == '\'' && b != std::string_view::npos && b + 1 < task.size() && task[b + 1] != ' ' && std::isalnum( static_cast<unsigned char>( task[b + 1] ) ) != 0 )
-            {
-                b = task.find( q, b + 1 );
-            }
-            if( b == std::string_view::npos )
-            {
-                return std::nullopt;
-            }
-            return task.substr( a, b - a + 1 );
-        }
-        return std::nullopt;
-    };
     for( const char q : { '`', '\'' } )
     {
-        const std::optional<std::string_view> span = spanOf( q );
+        const std::optional<std::string_view> span = delimitedSpan( task, q );
         if( !span )
         {
             continue;
@@ -364,7 +372,7 @@ inline std::optional<std::string> bareMessageOf( std::vector<std::string_view> w
         cue = true;
     }
     if( !cue || words.size() < kForLiteralMessageWords
-        || wordIsOneOf( words.front(), { "where", "which", "what", "who", "why", "when", "how", "does", "do", "is", "path", "callers", "common", "lowest", "call", "trace", "thread" } ) )
+        || wordIsOneOf( words.front(), kForLiteralLeadWords ) )
     {
         return std::nullopt;
     }
