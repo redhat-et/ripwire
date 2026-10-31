@@ -1238,12 +1238,22 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
 // disclosure rules (cover="greedy", pairs_covered= reconciling with the membership rows, conf_core= fixed
 // to the core's direction) are easier to check when they sit together. Pure output: the cover is already
 // computed by gitmine.h's cochangeViolationGroups, and `viol` is the vector its members index into.
+// What rides on the root beside the cover: min_recur=, and (arch-honest) the pairs that left the cover because surprising= is unknown for them
+// (a Go side with no observed edge): `unknownPairs` of them, in the languages `unknownLangs` names. Both absent at their zero.
+struct CoGroupsRootExtras
+{
+    const char*   minRecAttr   = "";
+    std::size_t   unknownPairs = 0;
+    std::uint32_t unknownLangs = 0;
+};
 inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& cfg,
                                 const std::vector<rw::CoViolation>& viol, const std::vector<rw::CoGroup>& groups,
-                                const std::string& windowLabel, std::uint32_t subWindows, const char* minRecAttr,
-                                int cap, const std::string& root, bool cgShallow,
-                                std::size_t unknownPairs, std::uint32_t unknownLangs )
+                                const std::string& windowLabel, std::uint32_t subWindows, const CoGroupsRootExtras& extras,
+                                int cap, const std::string& root, bool cgShallow )
 {
+    const char* const        minRecAttr   = extras.minRecAttr;
+    const std::size_t        unknownPairs = extras.unknownPairs;
+    const std::uint32_t      unknownLangs = extras.unknownLangs;
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
@@ -1788,7 +1798,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
                 }
             }
             const std::vector<CoGroup> groups = cochangeViolationGroups( viol, ing.files.size() );
-            emitCochangeGroups( ing, cfg, viol, groups, coWindowLabel, subWindows, coMinRec, cap, root, anyMinedRootShallow( root, multiRoot, ws ), unknownPairs, unknownLangs );
+            emitCochangeGroups( ing, cfg, viol, groups, coWindowLabel, subWindows, { coMinRec, unknownPairs, unknownLangs }, cap, root, anyMinedRootShallow( root, multiRoot, ws ) );
             return 0;
         }
 
