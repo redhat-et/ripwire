@@ -622,35 +622,38 @@ inline void cutAround( std::string& line, std::string_view needle, std::size_t c
     truncateUtf8WithEllipsis( line, cap );
 }
 
-// the rows to show, as positions in the rank order: the first `cap`, except that up to `reserve` rows `reg` marks (a quoted registration
-// outside any function) from past the cap replace the lowest-ranked unmarked ones; ascending, so the rank order is kept
+// the rows to show, as positions in the rank order: the first `cap`, except that rows `reg` marks (2 = a registration: a quoted key outside
+// any function that is itself a property key, 1 = another quoted site outside any function) from past the cap replace the lowest-ranked
+// rows of a lower mark until `reserve` rows of that mark or higher are shown, property keys first; ascending, so the rank order is kept
 inline std::vector<std::size_t> pickRows( const std::vector<char>& reg, std::size_t cap, std::size_t reserve )
 {
     std::vector<std::size_t> pick;
-    std::size_t              have = 0;
     for( std::size_t i = 0; i < reg.size() && i < cap; ++i )
     {
         pick.push_back( i );
-        have += reg[i] != 0 ? 1 : 0;
     }
-    for( std::size_t p = pick.size(); p < reg.size() && have < reserve; ++p )
+    for( char level = 2; level >= 1; --level )
     {
-        if( reg[p] == 0 )
+        std::size_t have = std::size_t( std::count_if( pick.begin(), pick.end(), [ & ]( std::size_t i ) { return reg[i] >= level; } ) );
+        for( std::size_t p = cap; p < reg.size() && have < reserve; ++p )
         {
-            continue;
+            if( reg[p] != level )
+            {
+                continue;
+            }
+            std::size_t q = pick.size();
+            while( q > 0 && reg[pick[q - 1]] >= level )
+            {
+                --q;
+            }
+            if( q == 0 )
+            {
+                break;   // every shown row is as much a registration already
+            }
+            pick.erase( pick.begin() + std::ptrdiff_t( q - 1 ) );
+            pick.push_back( p );
+            ++have;
         }
-        std::size_t q = pick.size();
-        while( q > 0 && reg[pick[q - 1]] != 0 )
-        {
-            --q;
-        }
-        if( q == 0 )
-        {
-            break;   // every shown row is a registration already
-        }
-        pick.erase( pick.begin() + std::ptrdiff_t( q - 1 ) );
-        pick.push_back( p );
-        ++have;
     }
     std::sort( pick.begin(), pick.end() );
     return pick;
@@ -664,10 +667,27 @@ inline KeyHit literalHitAt( bool dotted, bool message, std::string_view text, st
     return h;
 }
 
-// shape=dotted: a quoted string site outside any function or method (a registration)
-inline bool isRegistration( const IngestResult& ing, const Site& s, NodeId owner )
+// `'files.autoSave': {`: the quoted key is followed by a colon on its line (a property key, the way a schema registers a setting)
+inline bool keyIsProperty( std::string_view line, std::string_view key ) noexcept
 {
-    return s.quotedKey && s.k == 's' && !( owner != kNoNode && ReceiverEvidence::callableKind( ing.symbols[owner].kind ) );
+    const std::size_t at = line.find( key );
+    if( at == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::size_t colon = line.find_first_not_of( " \t", at + key.size() + 1 );
+    return colon != std::string_view::npos && line[colon] == ':';
+}
+
+// shape=dotted: how much of a registration a site is, 0 none: 1 a quoted string site outside any function or method, 2 one whose key is a
+// property key (`'files.autoSave': {`)
+inline char registrationMark( const IngestResult& ing, const Site& s, NodeId owner, std::string_view line, std::string_view key )
+{
+    if( !s.quotedKey || s.k != 's' || ( owner != kNoNode && ReceiverEvidence::callableKind( ing.symbols[owner].kind ) ) )
+    {
+        return 0;
+    }
+    return keyIsProperty( line, key ) ? 2 : 1;
 }
 
 // shape=message: the rows that are not code (a task's words met outside a string are no message)
@@ -1079,7 +1099,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     std::vector<char> registration( order.size(), 0 );   // by rank position: a quoted key outside any function (shape=dotted)
     for( std::size_t i = 0; dotted && i < order.size(); ++i )
     {
-        registration[i] = lit_detail::isRegistration( ing, rows[order[i]], enriched[order[i]].enclosingId ) ? 1 : 0;
+        registration[i] = lit_detail::registrationMark( ing, rows[order[i]], enriched[order[i]].enclosingId, enriched[order[i]].text, lit.text );
     }
     const std::vector<std::size_t> pick = lit_detail::pickRows( registration, kForLiteralSiteRows, dotted ? kForLiteralRegistrationRows : 0 );
     const std::size_t shown = pick.size();

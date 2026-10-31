@@ -304,6 +304,8 @@ python3 -I -c 'import sys
 d=sys.argv[1]
 for i in range(9):
     open(d+"/app/r%d.ts"%i,"w").write("export function rd%d(c: any) {\n  return c.getValue(\x27svc.retry.limit\x27);\n}\n"%i)
+for i in range(3):
+    open(d+"/app/a_top%d.ts"%i,"w").write("export const T%d = [\x27svc.retry.limit\x27, %d];\n"%(i,i))
 open(d+"/app/reg.ts","w").write("export const R = {\n  \x27svc.retry.limit\x27: { type: \x27number\x27 },\n};\n")
 open(d+"/app/long.ts","w").write("export function lng(c: any) {\n  const pad = \""+"x"*230+"\"; return c.getValue(\x27svc.long.line\x27);\n}\n")
 open(d+"/app/dev.ts","w").write("export const D = {\n  \x27svc.dev.mode\x27: { type: \x27boolean\x27 },\n};\nexport function dm(c: any) {\n  return c.getValue(\x27svc.dev.mode\x27);\n}\n")
@@ -330,7 +332,7 @@ rowsOf(){ python3 -I -c 'import sys,re;print("\n".join(m.group(0) for m in re.fi
 Q1="$( qrun '--for=svc.retry.limit setting' | lit )"
 if has "$Q1" 's="svc.retry.limit" shape="dotted"' && has "$Q1" '<ls p="app/reg.ts" l="2" k="string"' && has "$Q1" 'shown="8"' && has "$Q1" 'capped="1"' \
    && [ "$( grep -o '<ls ' <<<"$Q1" | wc -l | tr -d ' ' )" = "8" ]; then
-    ok "Q1 [P] 9 readers + 1 quoted registration: the registration keeps a row slot (8 rows, capped=1 still disclosed)"
+    ok "Q1 [P] 9 readers, 3 top-level quoted mentions that sort first and 1 property-key registration: the registration keeps a row slot (8 rows, capped=1 still disclosed)"
 else no "Q1 registration cut by the readers: $( grep -o '<ls p="[^"]*" l="[0-9]*"' <<<"$Q1" | tr '\n' ' ' )"; fi
 # C1: a row whose key sits past byte 200 is cut around the key
 Q2="$( qrun '--for=svc.long.line setting' | lit | rowsOf )"
