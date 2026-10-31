@@ -20,7 +20,7 @@
 //
 // LOOKUP COST, in cache lines touched: rowOfFile, row head, then on a present chunk chunkOff and payload. A sorted array
 // adds its binary search's lines, up to about 7 at 16-bit chunks and at most one at 8-bit chunks, where an array holds
-// fewer than 16 lows. A miss on the bitmap, 90 % or more of real probes, stops at the row head.
+// fewer than 16 lows. A miss on the bitmap, 82-100 % of real probes on six repos, stops at the row head.
 //
 // CHUNK SIZE IS DATA-DEPENDENT, so it is a field of the store, picked at build from a fixed sample of rows
 // (fileSetChooseChunkBits) and overridable for tests. bench/FILEGRAPH.md has the measurements and the forms that lost.
