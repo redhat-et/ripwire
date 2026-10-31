@@ -365,11 +365,47 @@ inline std::string noFileEdgeLangTags( std::uint32_t langs )
 {
     return langTagsWhere( [ langs ]( Lang l ) { return ( ( langs >> static_cast<std::uint32_t>( l ) ) & 1u ) != 0; } );
 }
-// Does the index hold a single file→file edge? With none and a no-edge file present, a system-level number (ccd, nccd, shape,
-// propagation_cost) is arithmetic over missing data, so it is left out; with one, the number stands and the root says it is partial.
-inline bool anyFileEdge( const std::vector<std::vector<std::uint32_t>>& adj ) noexcept
+// no_file_edges="go" (present-only, leading space): the one spelling every row and root that names these languages shares.
+inline std::string noFileEdgesAttrXml( std::uint32_t langs )
 {
-    return std::any_of( adj.begin(), adj.end(), []( const std::vector<std::uint32_t>& outs ) { return !outs.empty(); } );
+    return langs == 0 ? std::string() : " no_file_edges=\"" + noFileEdgeLangTags( langs ) + "\"";
+}
+
+// The files a SYSTEM-level number (ccd, nccd, shape, propagation_cost) can be computed over: dependencyCapableMask minus every file
+// in a no-edge language that drew no observed edge, in or out. Such a file sits in the denominator as a cone of one, and with
+// enough of them a tangled tree reads horizontal (cockroach: nccd 0.81 printed, ~9.16 over the rest). Its cone does not touch a
+// measured file's, so dropping it changes no other cone: the numbers over `mask` are exact over the rest. A tree with no no-edge
+// file gets dependencyCapableMask itself, byte for byte.
+struct DependencyMeasure
+{
+    std::vector<char> mask;                 // 1 = in the denominator
+    std::size_t       depFiles = 0;         // mask's population: dep_files=
+    std::size_t       masked   = 0;         // no-edge files left out: masked_files=
+};
+inline DependencyMeasure dependencyMeasure( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+{
+    DependencyMeasure m;
+    m.mask = dependencyCapableMask( ing );
+    const std::size_t F = m.mask.size();
+    std::vector<char> touched( F, 0 );   // a file with an edge in either direction was measured
+    for( std::size_t f = 0; f < adj.size() && f < F; ++f )
+    {
+        for( const std::uint32_t g : adj[f] )
+        {
+            touched[f] = 1;
+            if( g < F ) { touched[g] = 1; }
+        }
+    }
+    for( std::size_t f = 0; f < F; ++f )
+    {
+        if( m.mask[f] && !touched[f] && langHasNoFileEdges( langOfPath( ing.files[f] ) ) )
+        {
+            m.mask[f] = 0;
+            ++m.masked;
+        }
+    }
+    m.depFiles = std::size_t( std::count( m.mask.begin(), m.mask.end(), char( 1 ) ) );
+    return m;
 }
 
 // ── the tiny YAML-subset parser ──────────────────────────────────────────────────────────────────

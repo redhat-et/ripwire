@@ -1541,7 +1541,8 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
         // never have carried a static dependency, and dep_capable says WHY it is false.
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ccRel( p.fileId ) ) + "\",\"together\":" + std::to_string( p.together )
              + ",\"deg\":" + deg + ",\"surprising\":" + ( p.surprising ? "true" : "false" )
-             + ",\"dep_capable\":" + ( p.depCapable ? "true" : "false" ) + "}";
+             + ",\"dep_capable\":" + ( p.depCapable ? "true" : "false" )
+             + ( p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string() ) + "}";   // arch-honest: surprising is unknown here
     }
     out += "]}";
     return out;
@@ -3326,7 +3327,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
                   ( std::string( kImpactImportTierLegend ) + importersNextLegend( !imports.next.empty() ) ).c_str(),   // cut-fix E, as on the CLI
-                  ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread )   // #220: exactly when the root carries them, as on the CLI
+                  ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )   // #220: exactly when the root carries them, as on the CLI
                     + viaNameLegend( imHasVia, true )
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6

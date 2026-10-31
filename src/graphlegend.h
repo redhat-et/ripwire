@@ -1065,11 +1065,26 @@ inline std::string noFileEdgesRootAttrXml( std::string_view langs, std::size_t f
     return alreadyPartial ? s : s + kGraphPartialAttrXml;
 }
 inline constexpr const char* kDepsNoFileEdgesLegend =
-    "no_file_edges=LANGS unmeasured_files=N graph_partial=1 (root, absent when none): N files are in languages whose imports this build does not resolve to files, so the index holds no edge for them and a zero would come from the missing data, not the design. A <f> row with no_file_edges= has no afferent=/instab=/transitive=: unknown, not zero. <health> has no ccd=/acd=/nccd=/shape= when the whole index holds no edge. godfiles, stabledeps and cycles cover the resolved edges only. ";
+    "no_file_edges=LANGS unmeasured_files=N graph_partial=1 (root, absent when none): N files are in languages whose imports this build almost never resolves to a file (Go only across a go.mod replace), so the index holds few or no edges for them and a zero would come from the missing data, not the design. A <f> row with no_file_edges= and no edge observed has no afferent=/instab=/transitive=: unknown, not zero. <health> has no ccd=/acd=/nccd=/shape= when no measured file is left (see masked_files=). godfiles, stabledeps and cycles cover the resolved edges only. ";
 inline constexpr const char* kArchNoFileEdgesLegend =
-    " no_file_edges=LANGS unmeasured_files=N graph_partial=1 (absent when none): N files are in languages whose imports this build does not resolve to files, so an edge through one was never judged and violations= is a floor. <m zone=unknown no_file_edges=LANGS> found no edge and holds such a file: its ca/ce/I/D/reachable are absent, unknown rather than zero. A <m> with both ca= and no_file_edges= has numbers over its resolved edges only. propagation_cost is absent when the whole index holds no edge.";
+    " no_file_edges=LANGS unmeasured_files=N graph_partial=1 (absent when none): N files are in languages whose imports this build almost never resolves to a file (Go only across a go.mod replace), so an edge through one was mostly never judged and violations= is a floor. <m zone=unknown no_file_edges=LANGS> holds such a file: with no edge observed its ca/ce/I/D/reachable are absent, unknown rather than zero; with one observed, ca/ce are floors over the resolved edges and I/D/leaf/isolated/reachable are absent, as no verdict is drawn from them. propagation_cost is absent when no measured file is left.";
+inline constexpr const char* kDepsMaskedFilesLegend =
+    "masked_files=N (<health>, absent at 0): N no_file_edges= files that drew no edge in either direction are left out of dep_files= and of ccd/acd/nccd/shape, each would sit there as a cone of one and pull the verdict toward horizontal; the numbers cover the other dep_files= files. ";
+inline constexpr const char* kArchMaskedFilesLegend =
+    " masked_files=N (<metrics>, absent at 0): N no_file_edges= files that drew no edge in either direction are left out of the propagation_cost denominator, each would add a cone of one; the number covers the other dependency-capable files.";
 inline const char* depsNoFileEdgesLegend( bool on ) noexcept { return on ? kDepsNoFileEdgesLegend : ""; }
 inline const char* archNoFileEdgesLegend( bool on ) noexcept { return on ? kArchNoFileEdgesLegend : ""; }
+inline const char* depsMaskedFilesLegend( bool on ) noexcept { return on ? kDepsMaskedFilesLegend : ""; }
+inline const char* archMaskedFilesLegend( bool on ) noexcept { return on ? kArchMaskedFilesLegend : ""; }
+// --impact (CLI and the MCP twin): the root's no_file_edges= (graph.h ImportTier::noFileEdgeLangs), exactly when it rides.
+inline constexpr const char* kImpactNoFileEdgesLegend =
+    "no_file_edges=LANGS (absent when none): a definition's file is in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace), so importers= is a floor: 0 means none resolved, not none exist. ";
+inline const char* impactNoFileEdgesLegend( bool on ) noexcept { return on ? kImpactNoFileEdgesLegend : ""; }
+// --cochange / --pr-context (gitmine.h coPairAttr): a pair with a side in such a language, and no observed edge between the files.
+inline constexpr const char* kCochangeNoFileEdgesLegend =
+    "no_file_edges=LANGS replaces surprising= on a pair with a side in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace): no edge between the two files was observed, and that proves nothing there, so the hidden-coupling question is unknown, not answered. ";
+// Its own comment (the kind the history verbs append after their legend), present-only, opening like the verb's legend so the compact layer reads it as prose.
+inline std::string cochangeNoFileEdgesLegend( bool on ) { return on ? std::string( "<!-- ripwire cochange: " ) + kCochangeNoFileEdgesLegend + "-->" : std::string(); }
 inline constexpr const char* kDepsImportsDtsLegend =
     "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
 inline constexpr const char* kDepsTsconfigUnreadLegend =

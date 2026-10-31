@@ -3052,6 +3052,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + " importers=\"" + std::to_string( v.imports.files.size() ) + "\""
                                  + rw::importsUnresolvedAttrXml( v.imports.importsUnresolved )   // #220: the XML root's, absent at 0
                                  + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ) )
+                                 + rw::noFileEdgesAttrXml( v.imports.noFileEdgeLangs )           // arch-honest: the XML root's, absent when every def's language draws edges
                                  + " radius_tested=\"" + std::to_string( v.radiusTested )       // A6
                                  + "\" radius_untested=\"" + std::to_string( v.radiusUntested ) + "\""
                                  + rw::declinedCallsAttrXml( v.declinedCalls )                    // tier-3 declines into the radius
@@ -3121,8 +3122,9 @@ int emitImpactJson( const ImpactView& v )
     {
         rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( v.imports.next ).c_str() );
     }
-    rw::emitTo( stdout, "{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
-                 rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ) );
+    rw::emitTo( stdout, "{}{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
+                 rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ),
+                 v.imports.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( v.imports.noFileEdgeLangs ) + "\"" : std::string() );   // arch-honest: likewise
     rw::emitTo( stdout, ",\"radius_tested\":{},\"radius_untested\":{}{}{}", v.radiusTested, v.radiusUntested,
                  rw::declinedCallsKeyJson( v.declinedCalls ) + rw::declinedSiteCutKeyJson( v.dc.cut ) + rw::declinedIfaceKeyJson( v.declinedIface ),   // A6; then the XML root's declined_calls=/dc_shown=/dc_next=/declined_iface=
                  ( rw::valueRefsCountKeyJson( v.valueRefs.rows.size() ) + rw::valueRefsDepthKeyJson( v.ing, v.valueRefs.depthCut, rw::VrRender{ v.singleRoot, v.rootPrefix } )
@@ -3216,7 +3218,7 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                                                                                 [ & ]( rw::NodeId n ) { return n < imWalk.typeOnly.size() && imWalk.typeOnly[ n ] != 0; } ) ),
                  ( std::string( cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend )
                    + rw::importersNextLegend( !imports.next.empty() && !cfg.columnar ) ).c_str(),
-                 ( rw::impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread )
+                 ( rw::impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + rw::impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )
                    + rw::viaNameLegend( std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
                    + rw::impactLinkLegendFor( g, seeds, imDepth, show, imPage.begin, imPage.end )

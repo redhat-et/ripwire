@@ -52,8 +52,9 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
     }
 }
 
-// The <metrics> block of --arch (every exit path of runArchViews). propCost is empty when no edge stands behind it (arch-honest).
-void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<double> propCost, std::vector<char>& ae )
+// The <metrics> block of --arch (every exit path of runArchViews). propCost is empty when no measured file stands behind it, and
+// masked is the count of no-edge files left out of its denominator (arch-honest).
+void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<double> propCost, std::size_t masked, std::vector<char>& ae )
 {
     // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
     // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
@@ -93,12 +94,12 @@ void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<d
             ++zoneOk;
         }
     }
-    // Present-only: zone_unknown= rides beside its note clause, and propagation_cost is empty when the whole index holds no edge to
-    // count and a file that could not have had one (its 1/N would read as a measurement of a tree no edge was ever seen in).
+    // Present-only: zone_unknown= rides beside its note clause; propagation_cost is empty when no measured file is left (its 1/N would
+    // read as a measurement of files no edge was ever seen in); masked_files= says how many no-edge files its denominator left out.
     const std::string unknownAttr = zoneUnknown != 0 ? std::format( " zone_unknown=\"{}\"", zoneUnknown ) : std::string();
-    const std::string propAttr    = propCost ? std::format( " propagation_cost=\"{:.3f}\"", *propCost ) : std::string();
+    const std::string propAttr    = ( propCost ? std::format( " propagation_cost=\"{:.3f}\"", *propCost ) : std::string() ) + rw::countAttrXmlOrEmpty( "masked_files", masked );
     const char* const unknownNote = zoneUnknown != 0
-        ? "; zone_unknown = modules with no edge observed and a file in a language with no file edges (no_file_edges=): coupling unknown, not zero, and part of the partition"
+        ? "; zone_unknown = modules holding a file in a language this build draws no file edges for (no_file_edges=): zone and coupling unknown, not zero, and part of the partition"
         : "";
     rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{} note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file{}\">",
                  mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr, unknownNote );
@@ -108,8 +109,16 @@ void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<d
         const std::string noEdgeAttr = mm.noFileEdgeLangs != 0 ? " no_file_edges=\"" + rw::noFileEdgeLangTags( mm.noFileEdgeLangs ) + "\"" : std::string();
         if( mm.couplingUnknown )   // arch-honest: an absent number is the honest spelling of unknown; types=/abstract=/A= need no edge
         {
-            rw::emitTo( stdout, "<m path=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
-                         ep.c_str(), mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
+            if( mm.isolated )
+            {
+                rw::emitTo( stdout, "<m path=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
+                             ep.c_str(), mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
+            }
+            else   // an edge was observed: ca/ce are floors; I/D/leaf/reachable would read them as exact
+            {
+                rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
+                             ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
+            }
             continue;
         }
         rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" I=\"{:.2f}\" A=\"{:.2f}\" D=\"{:.2f}\" zone=\"{}\" reachable=\"{}\"{}{}{}/>",
@@ -493,7 +502,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const DepHealth h      = dependencyHealth( adj );    // per-file transitive cone (unrestricted BFS)
         // §P9.4: <health>'s ccd/acd/nccd are the RESTRICTED (dependency-capable-only) numbers — recomputed
         // from h.transitive (a post-pass, not a second BFS; see graph.h::restrictDependencyHealth).
-        const RestrictedDepHealth rh = restrictDependencyHealth( ing, h.transitive );
+        const RestrictedDepHealth rh = restrictDependencyHealth( dependencyMeasure( ing, adj ).mask, h.transitive );
         std::vector<std::uint32_t> afferent( ing.files.size(), 0 );   // Ca: # files that include each file (blast radius)
         for( const auto& outs : adj )
         {
@@ -542,11 +551,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const std::uint64_t        importsUnresolved = archSa.importsUnresolved;
         // Lane arch-honest: files in a language with no file edges (LangFacts::fileEdges). A no-edge file was never judged either, so the root says so beside the TS counts.
         const rw::NoFileEdgeFiles  archNoEdge        = rw::noFileEdgeFiles( ing );
+        const rw::DependencyMeasure archMeasure      = rw::dependencyMeasure( ing, adj );   // no-edge files nothing touches are out of propagation_cost's N
         const std::string          archNoEdgeLangs   = rw::noFileEdgeLangTags( archNoEdge.langs );
         const std::string          archPartialAttr   = rw::tsImportRootAttrXml( importsUnresolved, archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread )
                                                        + rw::noFileEdgesRootAttrXml( archNoEdgeLangs, archNoEdge.files, importsUnresolved > 0 || archSa.tsExtras.extendsUnread > 0 );
         const std::string          archExtrasLegend  = rw::archTsImportExtrasLegend( archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread )
-                                                       + rw::archNoFileEdgesLegend( archNoEdge.files > 0 );
+                                                       + rw::archNoFileEdgesLegend( archNoEdge.files > 0 ) + rw::archMaskedFilesLegend( archMeasure.masked > 0 );
 
         // ── EVERY rule is matched against the ROOT-RELATIVE path, never the emitted one ────────────────────
         // ing.files spells each file `<ingest-root>/<relative>` verbatim, so matching a user regex or a layer
@@ -671,7 +681,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
 
         if( archNoEdge.files != 0 )   // arch-honest: an exit 0 over files no edge can reach is not a pass the log may read as one
         {
-            rw::emitTo( stderr, "ripwire arch: {} file(s) in {} have no file edges in this build, so an edge through one was never judged: violations= is a floor\n",
+            rw::emitTo( stderr, "ripwire arch: {} file(s) in {}: this build resolves almost none of their imports to files, so an edge through one was mostly never judged: violations= is a floor\n",
                         archNoEdge.files, archNoEdgeLangs );
         }
 
@@ -687,8 +697,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // (MacCormack). A single SYSTEM-level number on <metrics> (fixed 3dp → byte-identical). Reported,
         // never a gate. Computed + documented in arch.h::dsmPropagationCostCapable. §P9.4: N is restricted
         // to the SAME dependency-capable mask --deps <health> uses, so the two verbs' denominator agrees.
-        const auto   depCapable = dependencyCapableMask( ing );
-        const double propCost   = rw::dsmPropagationCostCapable( ing, adj, depCapable );
+        const double propCost = rw::dsmPropagationCostCapable( ing, adj, archMeasure.mask );
 
         // ── shared emitters (one definition → the three return paths can't drift) ──────────────────────
         std::vector<char> ae;   // escapeXml scratch (cleared per call); captured by the lambdas below
@@ -702,8 +711,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stdout, "<v from=\"{}\" fromLayer=\"{}\" to=\"{}\" toLayer=\"{}\"{}/>",
                          ef.c_str(), efl.c_str(), et.c_str(), etl.c_str(), showBaselined ? " baselined=\"1\"" : "" );
         };
-        const std::optional<double> shownPropCost = archNoEdge.files != 0 && !rw::anyFileEdge( adj ) ? std::nullopt : std::optional<double>( propCost );
-        const auto emitMetrics = [ & ]() { emitArchMetrics( mods, shownPropCost, ae ); };
+        const std::optional<double> shownPropCost = archNoEdge.files != 0 && archMeasure.depFiles == 0 ? std::nullopt : std::optional<double>( propCost );
+        const auto emitMetrics = [ & ]() { emitArchMetrics( mods, shownPropCost, archMeasure.masked, ae ); };
 
         // The match domain, said ONCE and appended to all three emit paths (normal / baseline /
         // baseline-update). It is a property of the VERB, not of the mode it ran in, and three hand-written
@@ -1175,7 +1184,7 @@ inline std::string minedRootShallowCause( const std::string& root, bool multiRoo
 
 // §CLIO — one repo-wide co-change pair, and the document that renders them. `PR` used to be a struct local
 // to the --cochange branch; it moved out with the loop for the same reason the legends and the group form did.
-struct CoPairRow { std::uint32_t a, b, n; double deg, confAb, confBa; std::uint32_t recur; bool surprising; bool depCapable; };
+struct CoPairRow { std::uint32_t a, b, n; double deg, confAb, confBa; std::uint32_t recur; bool surprising; bool depCapable; std::uint32_t noEdgeLangs = 0; };
 
 inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cfg, const std::vector<CoPairRow>& prs,
                                const std::string& windowLabel, std::uint32_t subWindows, const char* minRecAttr,
@@ -1193,7 +1202,8 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
     // capped= reconcile pairs= against the rows that follow even with no --limit at all.
     const rw::PageWindow prpw = rw::pageWindow( prs.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
     char                 prab[ 192 ];
-    rw::emitTo( stdout, "{}{}{}{}", kCochangeRepoLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( coSingleRoot ), rw::gitstamp::shallowLegend( coShallow ) );   // sweep: ditto
+    rw::emitTo( stdout, "{}{}{}{}{}", kCochangeRepoLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( coSingleRoot ), rw::gitstamp::shallowLegend( coShallow ),
+                 rw::cochangeNoFileEdgesLegend( std::any_of( prs.begin() + prpw.begin, prs.begin() + prpw.end, []( const CoPairRow& pr ) { return pr.noEdgeLangs != 0; } ) ) );   // sweep: ditto
     rw::emitTo( stdout, "<cochange pairs=\"{}\" window=\"{}\" sub_windows=\"{}\"{}{}{}{}{}>", prs.size(), windowLabel.c_str(), subWindows, minRecAttr,
                  rw::pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
@@ -1218,7 +1228,7 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
         rw::emitTo( stdout, "<pair a=\"{}\" b=\"{}\" together=\"{}\" deg=\"{:.2f}\" conf_ab=\"{:.2f}\" conf_ba=\"{:.2f}\"{} recur=\"{}\"{}/>",
                      ex( ra ).c_str(), ex( rb ).c_str(),
                      pr.n, pr.deg, pr.confAb, pr.confBa, driverAttr, pr.recur,
-                     rw::coPairAttr( pr.depCapable, pr.surprising ) );
+                     rw::coPairAttr( pr.depCapable, pr.surprising, pr.noEdgeLangs ) );
     }
     rw::emitTo( stdout, "</cochange>" );
 }
@@ -1605,7 +1615,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             char              pminrec[ 40 ];
             coMinRecurAttr( pminrec, sizeof( pminrec ), cfg.cochangeRecur );
             const bool cfShallow = gitstamp::isShallow( fidRepo );   // 0.6.6: this file's repo is depth-limited — qualified on the root
-            rw::emitTo( stdout, "{}{}{}{}", kCochangeFileLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ), gitstamp::shallowLegend( cfShallow ) );   // sweep: at= was undefined on this screen
+            rw::emitTo( stdout, "{}{}{}{}{}", kCochangeFileLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ), gitstamp::shallowLegend( cfShallow ),
+                         rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + ppw.begin, ps.begin() + ppw.end, []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) );   // sweep: at= was undefined on this screen
             // §P8 vocabulary: at="<sha>[+dirty]" — cochange is a PURE git-history product (every number in
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
@@ -1734,9 +1745,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // divides by the SMALLER count, so it is by construction max(confAb, confBa) — the same magnitude
             // it has always been, now with the direction it came from recoverable.
             const bool isDepCapable = coPairDependencyCapable( ing, a, b );   // §A9.3, the same predicate the per-file path uses
+            const CoPairVerdict verdict = coPairVerdict( ing, a, b, isDepCapable, isDepCapable && staticDep( a, b ) );
             prs.push_back( { a, b, cell.n, mn ? double( cell.n ) / mn : 0.0,
                              coConfidence( cell.n, freq[a] ), coConfidence( cell.n, freq[b] ), recur,
-                             isDepCapable && !staticDep( a, b ), isDepCapable } );
+                             verdict.surprising, isDepCapable, verdict.noEdgeLangs } );
         }
         std::sort( prs.begin(), prs.end(), [ & ]( const CoPairRow& x, const CoPairRow& y ) { // surprising-and-strong first
             if( x.surprising != y.surprising )
@@ -3610,7 +3622,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
 
         // arch-honest: files in a language with no file edges are in neither list below, and "none" must not read as a finding about them.
         const rw::NoFileEdgeFiles reportNoEdge = rw::noFileEdgeFiles( ing );
-        const std::string         reportNoEdgeWhy = reportNoEdge.files != 0 ? std::format( "{} files in {} have no file edges", reportNoEdge.files, rw::noFileEdgeLangTags( reportNoEdge.langs ) ) : std::string();
+        const std::string         reportNoEdgeWhy = reportNoEdge.files != 0 ? std::format( "{} files in {} (imports almost never resolved to files)", reportNoEdge.files, rw::noFileEdgeLangTags( reportNoEdge.langs ) ) : std::string();
         if( reportNoEdge.files != 0 )
         {
             rw::emitTo( stdout, "\nNot measured: {}, so the god files and cycles below cover the resolved edges only.\n", reportNoEdgeWhy );

@@ -960,7 +960,7 @@ inline bool archWriteBaseline( const std::string&                         sideca
 //   zone: "pain"    = concrete + stable  (A small, I small) and D high — rigid, hard to change
 //         "useless" = abstract + unstable (A large, I large) and D high — abstractions nothing uses
 //         "ok"      = otherwise
-//         "unknown" = no edge observed and a file in a language that cannot carry one (ModuleMetric::couplingUnknown)
+//         "unknown" = a file in a language that draws no file edge (ModuleMetric::couplingUnknown): the zeros may be missing data
 //
 // Abstractness proxy (from the tags ripwire already has — NO new parser pass):
 //   a TYPE = a Class/Struct/Interface symbol. It is ABSTRACT when it is SymKind::Interface (a TS/Go
@@ -1000,10 +1000,11 @@ struct ModuleMetric
     bool          reachable = true;    // false ⇒ not reachable from any entry point (candidate dead)
     bool          isolated = false;    // Ca==0 && Ce==0
     bool          isLeaf = false;      // Ce==0 && Ca>0  (depends on nothing, but depended on)
-    // Lane arch-honest: the module's files in a language with no file edges (bit i = Lang( i ), lintrules.h NoFileEdgeFiles). Non-zero
-    // beside an observed edge = the numbers cover the resolved edges only; non-zero with none observed = couplingUnknown.
+    // Lane arch-honest: the module's files in a language with no file edges (bit i = Lang( i ), lintrules.h NoFileEdgeFiles). Non-zero =
+    // the numbers cover the resolved edges only, so the verdict is not drawn: zone="unknown". With no edge observed (isolated) ca/ce are
+    // absent too; with one observed they stay as floors, and I/D/leaf/isolated/reachable are dropped (ce=0 may be an import never resolved).
     std::uint32_t noFileEdgeLangs = 0;
-    bool          couplingUnknown = false;   // Ca/Ce/I/D and reachable are UNKNOWN, not zero: zone="unknown", and the row omits them
+    bool          couplingUnknown = false;   // zone="unknown": see above
 };
 
 // Compute the per-module Martin metrics + reachability. `adj` = the file→file dependency graph
@@ -1185,10 +1186,11 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
         mm.isLeaf        = ( ce[m] == 0 && ca[m] > 0 );
         mm.reachable     = ( reach[m] != 0 );
         mm.noFileEdgeLangs = noEdgeLangs[m];
-        // Lane arch-honest: no edge observed, and a file here whose edges could not have been: the zeros above are the missing data
-        // (nfpm: 11 of 11 typed Go modules read "pain" this way). An observed edge is real, so that module keeps its numbers, and its row
-        // carries no_file_edges= for the part never seen: Go across roots through go.mod replace, a Python directory with a stray .kt.
-        mm.couplingUnknown = mm.noFileEdgeLangs != 0 && mm.isolated;
+        // Lane arch-honest: a file here whose edges this build cannot draw: the zeros above may be the missing data
+        // (nfpm: 11 of 11 typed Go modules read "pain" this way). An observed edge is real, but a module holding such a file has more it
+        // never saw (Go across roots through go.mod replace: lib's own imports did not resolve, so its ce=0 read leaf="1" zone="pain"):
+        // it keeps ca/ce as floors and its row says so with no_file_edges=, without a verdict.
+        mm.couplingUnknown = mm.noFileEdgeLangs != 0;
         // §P6.5: a module with NO types (totalTypes==0 — a pure doc/bench/free-function dir) cannot
         // meaningfully have an abstractness score: A is forced to 0 by definition (line 661), which pins
         // D = |0 + I - 1| = 1 - I close to 1 for any low-instability module, so EVERY such module reads as

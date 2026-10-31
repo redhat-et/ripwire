@@ -10097,9 +10097,10 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     {
         return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
     };
-    // §P9.4: dep_files= denominator (see graph.h::restrictDependencyHealth) — derived from `ing`, already a param.
-    const auto        depCapableMask = dependencyCapableMask( ing );
-    const std::size_t depFiles       = std::size_t( std::count( depCapableMask.begin(), depCapableMask.end(), char( 1 ) ) );
+    // §P9.4: dep_files= denominator (see graph.h::restrictDependencyHealth) — derived from `ing` and the graph; arch-honest: a
+    // no-edge file nothing touches is left out of it (lintrules.h dependencyMeasure), and masked_files= says how many.
+    const rw::DependencyMeasure measure  = rw::dependencyMeasure( ing, adj );
+    const std::size_t           depFiles = measure.depFiles;
     std::vector<std::vector<std::uint32_t>> byFile( F );   // file → indices into ing.includes
     for( std::uint32_t i = 0; i < ing.includes.size(); ++i )
     {
@@ -10160,8 +10161,9 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
     // arch-honest: files in a language with no file edges (lintrules.h noFileEdgeFiles); every attribute below is absent at files == 0
     const rw::NoFileEdgeFiles noEdge       = rw::noFileEdgeFiles( ing );
-    const bool                healthUnknown = noEdge.files != 0 && !rw::anyFileEdge( adj );   // nothing behind ccd/nccd/shape but the missing data
+    const bool                healthUnknown = noEdge.files != 0 && depFiles == 0;   // no measured file left: nothing behind ccd/nccd/shape but the missing data
     w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
+    w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -10203,6 +10205,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                        nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
     }
     w.write( hb );
+    w.write( rw::countAttrXmlOrEmpty( "masked_files", measure.masked ) );   // arch-honest: absent at 0, so a tree without a no-edge file is byte-identical
     if( lazyEdges > 0 )   // absent exactly when nothing was left out — never a hidden 0, and byte-identical for every corpus without a lazy directive
     {
         char lb[ 40 ];  rw::formatTo( lb, sizeof( lb ), " lazy_edges=\"{}\"", static_cast<unsigned long long>( lazyEdges ) );

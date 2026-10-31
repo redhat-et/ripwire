@@ -17,10 +17,14 @@
 #   (J) every --arch exit path carries the root disclosure; the stderr floor line rides exactly when it fires
 #   (K) a no-edge language that DOES have an observed edge (Go across roots through go.mod replace) keeps its numbers + attribute
 #   (L) legends: compact defines the new attributes; the arch and deps comments carry the clause only when fired
+#   (M) fix round 1, C2: a no-edge file with no observed edge is out of BOTH system denominators (dep_files=, propagation_cost), counted in masked_files=
+#   (N) fix round 1, C3: --cochange, --impact (CLI, json, columnar, MCP) and --export=cc.json do not print a measured-looking zero for a no-edge file
+#   (P) fix round 1, C4: a module with an observed edge AND a no-edge file keeps ca/ce as floors and drops the verdict; the wording is true on go.mod replace
 #
 # Usage: bash test/archhonestcheck.sh [BIN]
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
@@ -74,6 +78,8 @@ mkfix(){ # lang dir
            put "$d/b/b.js" 'export class B { g() { return 1; } }\n' ;;
     cpp)   put "$d/a/a.cpp" '#include "../b/b.h"\n\nstruct A { int f() { return B().g(); } };\n'
            put "$d/b/b.h" 'struct B { int g() { return 1; } };\n' ;;
+    objc)  put "$d/a/a.m" '#import "../b/b.h"\n\n@implementation A\n- (int)f { return 1; }\n@end\n'
+           put "$d/b/b.h" '@interface B\n@end\n' ;;
     c)     put "$d/a/a.c" '#include "../b/b.h"\n\nint f( void ) { return g(); }\n'
            put "$d/b/b.h" 'int g( void );\n' ;;
     rs)    put "$d/src/main.rs" 'mod net;\n\nfn main() { net::conn::g(); }\n'
@@ -92,7 +98,7 @@ mkfix(){ # lang dir
 }
 
 NOEDGE="go java kt cs php swift dart gd clj"
-EDGED="py ts js cpp c rs sh rb lua ex"
+EDGED="py ts js cpp c rs sh rb lua ex objc"
 
 # ── (A) one fixture per no-edge language ──────────────────────────────────────────────────────────────────
 for l in $NOEDGE; do
@@ -160,7 +166,7 @@ printf '%s' "$o" | xmllint --noout - 2>/dev/null || no "(B) not well-formed"
 # ── (C) a C++ repo: nothing new ───────────────────────────────────────────────────────────────────────────
 d="$TMP/c_cpp"; mkfix cpp "$d"; o="$( arch "$d" )"; dd="$( deps "$d" )"
 [ -n "$( root "$o" arch )" ] || no "(C) no <arch> root"
-if printf '%s%s' "$o" "$dd" | grep -qE 'no_file_edges|unmeasured_files|zone_unknown|zone="unknown"'; then no "(C) a C++ tree carries the new vocabulary"; else ok "(C) C++ tree: no new attribute, no legend clause"; fi
+if printf '%s%s' "$o" "$dd" | grep -qE 'no_file_edges|unmeasured_files|masked_files|zone_unknown|zone="unknown"'; then no "(C) a C++ tree carries the new vocabulary"; else ok "(C) C++ tree: no new attribute, no legend clause"; fi
 if printf '%s' "$( row "$o" "$d/a" )" | grep -q ' ca="0" ce="1" '; then ok "(C) C++ numbers stand"; else no "(C) C++ row: $( row "$o" "$d/a" )"; fi
 
 # ── (D) NEAR MISS: a language with edges and a genuinely uncoupled typed module ───────────────────────────
@@ -175,7 +181,7 @@ put "$d/lone2/lone.py" 'class L2:\n    pass\n'; put "$d/lone2/x.go" 'package lon
 put "$d/shgo/run.sh" '#!/bin/sh\necho hi\n'; put "$d/shgo/main.go" 'package main\n\ntype Y struct{}\n\nfunc main() {}\n'
 o="$( arch "$d" )"
 r="$( row "$o" "$d/a" )"
-if printf '%s' "$r" | grep -q ' ce="1" ' && printf '%s' "$r" | grep -q 'no_file_edges="go"'; then ok "(E) edges observed: numbers stay, no_file_edges= says they cover part of the module"; else no "(E) mixed dir with edges: $r"; fi
+if printf '%s' "$r" | grep -q ' ce="1" ' && printf '%s' "$r" | grep -q 'no_file_edges="go"'; then ok "(E) edges observed: ca/ce stay as floors, no_file_edges= says they cover part of the module"; else no "(E) mixed dir with edges: $r"; fi
 for sub in lone2 shgo; do
     r="$( row "$o" "$d/$sub" )"
     if printf '%s' "$r" | grep -q 'zone="unknown"' && ! printf '%s' "$r" | grep -q ' ca='; then ok "(E) $sub: no edge observed with a no-edge file in it: unknown"; else no "(E) $sub: $r"; fi
@@ -201,7 +207,7 @@ if printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape='; then ok "(F
 ro="$( report "$TMP/a_go" )"
 printf '%s' "$ro" | grep -q '## Dependency cycles' || no "(G) no cycles section in the Go report"
 if printf '%s' "$ro" | grep -q 'none (acyclic)'; then no "(G) a Go tree reads acyclic"; else ok "(G) Go report does not say acyclic"; fi
-if printf '%s' "$ro" | grep -q 'have no file edges' && printf '%s' "$ro" | grep -q 'none found over the resolved edges'; then ok "(G) Go report names the gap"; else no "(G) Go report: $( printf '%s' "$ro" | grep -A1 'Dependency cycles' )"; fi
+if printf '%s' "$ro" | grep -q 'imports almost never resolved to files' && printf '%s' "$ro" | grep -q 'none found over the resolved edges'; then ok "(G) Go report names the gap"; else no "(G) Go report: $( printf '%s' "$ro" | grep -A1 'Dependency cycles' )"; fi
 ro="$( report "$TMP/c_cpp" )"
 if printf '%s' "$ro" | grep -q 'none (acyclic)' && ! printf '%s' "$ro" | grep -q 'no file edges'; then ok "(G) C++ report unchanged"; else no "(G) C++ report moved"; fi
 
@@ -231,7 +237,7 @@ done
 # ── (J) every --arch exit path; the stderr floor line ────────────────────────────────────────────────────
 d="$TMP/j_go"; mkfix go "$d"
 o="$( arch "$d" )"
-if grep -q 'have no file edges' "$TMP/stderr" && grep -q 'violations= is a floor' "$TMP/stderr"; then ok "(J) stderr: violations= is a floor"; else no "(J) no stderr floor line: $( cat "$TMP/stderr" )"; fi
+if grep -q 'almost none of their imports' "$TMP/stderr" && grep -q 'violations= is a floor' "$TMP/stderr" && ! grep -q 'have no file edges' "$TMP/stderr"; then ok "(J) stderr: violations= is a floor, and says almost none (go.mod replace resolves some)"; else no "(J) no stderr floor line: $( cat "$TMP/stderr" )"; fi
 cp "$RULES" "$TMP/j.arch"
 for mode in --baseline --baseline-update; do
     o="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d" --arch="$TMP/j.arch" "$mode" --no-cache 2>/dev/null )"
@@ -239,7 +245,7 @@ for mode in --baseline --baseline-update; do
 done
 o="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d" --arch="$TMP/j.arch" --no-cache 2>/dev/null )"
 if root "$o" arch | grep -q 'no_file_edges="go"'; then ok "(J) a baselined run carries it"; else no "(J) baselined: $( root "$o" arch )"; fi
-if arch "$TMP/c_cpp" >/dev/null; grep -q 'no file edges' "$TMP/stderr"; then no "(J) C++ stderr has the line"; else ok "(J) C++ stderr: no line"; fi
+if arch "$TMP/c_cpp" >/dev/null; grep -q 'almost none of their imports' "$TMP/stderr"; then no "(J) C++ stderr has the line"; else ok "(J) C++ stderr: no line"; fi
 
 # ── (K) an observed edge in a no-edge language keeps its numbers ─────────────────────────────────────────
 d="$TMP/k"; mkdir -p "$d"
@@ -270,6 +276,117 @@ for v in arch deps; do
     lc="$( printf '%s' "$c" | grep -o '<!--.*-->' | head -1 )"
     if printf '%s' "$lc" | grep -q 'no_file_edges=LANGS:' && printf '%s' "$lc" | grep -q 'unmeasured_files=N:'; then ok "(L) $v compact legend defines both"; else no "(L) $v compact legend: $( printf '%s' "$lc" | cut -c1-300 )"; fi
 done
+
+# ── (M) C2: a no-edge file with no observed edge is out of BOTH system denominators ───────────────────────
+# 9 Go packages + 2 more Go files that import nothing the index can see, plus 2 Ruby files with ONE require_relative: the one edge used to
+# bring back <health shape="horizontal"> and a 0.083 propagation_cost, both over a denominator of 13 whose 11 members could not have an edge.
+mkm(){ # lang dir : eleven single-file units in lang, plus a Ruby pair with one edge
+    local l="$1" d="$2" i
+    for i in 1 2 3 4 5 6 7 8 9; do
+        if [ "$l" = go ]; then put "$d/p$i/p.go" "package p$i\n\nimport \"example.com/m/b\"\n\ntype P$i struct{}\n"
+        else put "$d/p$i/p$i.py" "class P$i:\n    pass\n"; fi
+    done
+    if [ "$l" = go ]; then put "$d/go.mod" 'module example.com/m\n\ngo 1.21\n'; put "$d/a/a.go" 'package a\n\ntype A struct{}\n'; put "$d/b/b.go" 'package b\n\ntype B struct{}\n'
+    else put "$d/a/a.py" 'class A:\n    pass\n'; put "$d/b/b.py" 'class B:\n    pass\n'; fi
+    put "$d/t/t.rb" "require_relative 'lib/h'\nclass T; end\n"; put "$d/t/lib/h.rb" 'class H; end\n'
+}
+d="$TMP/m_go"; mkm go "$d"; dd="$( deps "$d" )"; o="$( arch "$d" )"
+h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"
+if printf '%s' "$h" | grep -q 'dep_files="2"' && printf '%s' "$h" | grep -q 'masked_files="11"'; then ok "(M) --deps: dep_files= is the 2 measured files, masked_files=11 says how many were left out"; else no "(M) --deps health: $h"; fi
+if printf '%s' "$h" | grep -q 'nccd="1.09" shape="vertical"'; then ok "(M) --deps: nccd/shape are over the measured files (1.09 vertical, not 0.35 horizontal)"; else no "(M) --deps verdict: $h"; fi
+m="$( metrics "$o" )"
+if printf '%s' "$m" | grep -q 'propagation_cost="0.750"' && printf '%s' "$m" | grep -q 'masked_files="11"'; then ok "(M) --arch: propagation_cost is over the 2 measured files (0.750), masked_files=11"; else no "(M) --arch metrics: $m"; fi
+# NEAR MISS: eleven edgeless PYTHON files draw no mask, and the numbers are the ones a Python tree always had
+d="$TMP/m_py"; mkm py "$d"; dd="$( deps "$d" )"; o="$( arch "$d" )"
+h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"; m="$( metrics "$o" )"
+if printf '%s' "$h$m" | grep -q 'masked_files'; then no "(M) near miss: edgeless Python files were masked: $h $m"; else ok "(M) near miss: edgeless Python files are not masked"; fi
+if printf '%s' "$h" | grep -q 'dep_files="13"' && printf '%s' "$h" | grep -q 'shape="horizontal"'; then ok "(M) near miss: Python tree keeps dep_files=13 and its verdict"; else no "(M) near miss health: $h"; fi
+# NEAR MISS: Go files WITH an observed edge (go.mod replace) are measured, so nothing is masked
+dd="$( cd "$TMP/k" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$TMP/k/app" "$TMP/k/lib" --deps --no-cache 2>/dev/null )"
+if printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q 'masked_files'; then no "(M) near miss: Go files with an edge were masked"; else ok "(M) near miss: Go files with an observed edge are not masked"; fi
+# zero-edge trees keep the rule they had: nothing left to measure, so no verdict, and the count is said
+dd="$( deps "$TMP/a_go" )"; h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"
+if printf '%s' "$h" | grep -q 'masked_files="2"' && ! printf '%s' "$h" | grep -qE ' (ccd|nccd|shape)='; then ok "(M) a tree of only masked files has no verdict and says masked_files=2"; else no "(M) all-masked health: $h"; fi
+# legends define it where it fires
+for v in arch deps; do
+    if [ "$v" = arch ]; then c="$( arch "$TMP/m_go" --legend=compact )"; f="$( arch "$TMP/m_go" --legend=full )"; else c="$( deps "$TMP/m_go" --legend=compact )"; f="$( deps "$TMP/m_go" --legend=full )"; fi
+    if printf '%s' "$c" | grep -o '<!--.*-->' | head -1 | grep -q 'masked_files=N:' && printf '%s' "$f" | grep -o '<!--.*-->' | head -1 | grep -q 'masked_files'; then ok "(M) $v: compact and full legends define masked_files="; else no "(M) $v legends silent on masked_files="; fi
+done
+
+# ── (N) C3: the other surfaces that printed a measured-looking zero ────────────────────────────────────────
+# a git tree, four co-change waves, so a pair reaches the support floor of 3
+mkco(){ # lang dir
+    local l="$1" d="$2"; mkfix "$l" "$d"
+    case "$l" in py) put "$d/c/c.py" 'class C:\n    pass\n'; put "$d/e/e.py" 'class E:\n    pass\n' ;; esac
+    ( cd "$d" && git init -q . && git config user.email t@example.invalid && git config user.name t && git config commit.gpgsign false \
+        && git add -A && git commit -qm base && for i in 1 2 3 4; do
+            for f in $( git ls-files | grep -E '\.(go|py)$' ); do printf '\n# pad %s\n' "$i" >> "$f"; done
+            git add -A && git commit -qm "wave $i"
+          done ) >/dev/null 2>&1
+}
+co(){ ( cd "$1" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$1" "${@:2}" --no-cache 2>/dev/null ); }
+mcp(){ # dir tool args-json
+    printf '%s\n%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"'"$2"'","arguments":'"$3"'}}' \
+        | ( cd "$1" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$1" --mcp --no-cache 2>/dev/null | tail -1 ); }
+d="$TMP/n_go"; mkco go "$d"; dp="$TMP/n_py"; mkco py "$dp"
+pair="$( co "$d" --cochange | grep -o '<pair [^>]*/>' )"
+[ -n "$pair" ] || no "(N) premise: no Go co-change pair: $( co "$d" --cochange | cut -c1-200 )"
+if printf '%s' "$pair" | grep -q 'surprising="1"'; then no "(N) --cochange: a Go pair with an unseen import reads surprising=1: $pair"
+elif printf '%s' "$pair" | grep -q 'no_file_edges="go"'; then ok "(N) --cochange: a Go pair says no_file_edges=go instead of a hidden-coupling claim"; else no "(N) --cochange: neither claim nor disclosure: $pair"; fi
+f="$( co "$d" --cochange=a/a.go | grep -o '<f [^>]*/>' )"
+if ! printf '%s' "$f" | grep -q 'surprising="1"' && printf '%s' "$f" | grep -q 'no_file_edges="go"'; then ok "(N) --cochange=FILE: the same"; else no "(N) --cochange=FILE: $f"; fi
+j="$( mcp "$d" cochange '{"path":"'"$d"'","file":"a/a.go"}' )"
+if printf '%s' "$j" | grep -q 'surprising\\":false' && printf '%s' "$j" | grep -q 'no_file_edges\\":\\"go'; then ok "(N) MCP cochange: surprising false and no_file_edges=go"; else no "(N) MCP cochange: $( printf '%s' "$j" | cut -c1-400 )"; fi
+# NEAR MISSES: an uncoupled Python pair still says surprising=1; a coupled one says nothing; no Python row names no_file_edges
+pp="$( co "$dp" --cochange --pack-top-n=1000 | grep -o '<pair [^>]*/>' )"
+if printf '%s' "$pp" | grep 'c/c.py' | grep 'e/e.py' | grep -q 'surprising="1"'; then ok "(N) near miss: an uncoupled Python pair is still surprising=1"; else no "(N) positive control lost: $pp"; fi
+if printf '%s' "$pp" | grep 'a/a.py' | grep 'b/b.py' | grep -qE 'surprising|no_file_edges'; then no "(N) near miss: a coupled Python pair carries a claim: $pp"; else ok "(N) near miss: a coupled Python pair carries neither attribute"; fi
+if printf '%s' "$pp" | grep -q 'no_file_edges'; then no "(N) near miss: Python rows carry no_file_edges"; else ok "(N) near miss: no Python row carries no_file_edges"; fi
+# --impact: CLI xml, json, columnar, MCP
+imp="$( co "$d" --impact=G )"; impp="$( co "$dp" --impact=g )"
+if printf '%s' "$imp" | grep -o '<impact [^>]*>' | grep -q 'no_file_edges="go"'; then ok "(N) --impact: a Go def's root says no_file_edges=go (importers= is a floor)"; else no "(N) --impact root: $( printf '%s' "$imp" | grep -o '<impact [^>]*>' )"; fi
+if printf '%s' "$impp" | grep -q 'no_file_edges'; then no "(N) near miss: a Python def's --impact carries no_file_edges"; else ok "(N) near miss: a Python def's --impact carries none"; fi
+if co "$d" --impact=G --json | grep -q '"no_file_edges":"go"'; then ok "(N) --impact --json carries no_file_edges"; else no "(N) --impact --json silent"; fi
+if co "$d" --impact=G --format=columnar | grep -q 'no_file_edges="go"'; then ok "(N) --impact --format=columnar carries no_file_edges"; else no "(N) --impact columnar silent"; fi
+j="$( mcp "$d" impact '{"path":"'"$d"'","symbol":"G"}' )"
+if printf '%s' "$j" | grep -q 'no_file_edges=\\"go\\"'; then ok "(N) MCP impact carries no_file_edges"; else no "(N) MCP impact silent: $( printf '%s' "$j" | cut -c1-200 )"; fi
+if printf '%s' "$imp" | grep -o '<!--.*-->' | head -1 | grep -q 'no_file_edges='; then ok "(N) --impact legend defines it when fired"; else no "(N) --impact legend silent"; fi
+if co "$dp" --impact=g | grep -o '<!--.*-->' | head -1 | grep -q 'no_file_edges'; then no "(N) near miss: --impact legend rides without the attribute"; else ok "(N) --impact legend present-only"; fi
+# cc.json
+cc="$( co "$d" --export=cc.json )"; ccp="$( co "$dp" --export=cc.json )"
+if printf '%s' "$cc" | grep -o '"name":"a.go"[^}]*}' | grep -qE 'fan_in|fan_out'; then no "(N) cc.json: a.go prints fan_in/fan_out over no edge"; else ok "(N) cc.json: a no-edge file prints neither fan_in nor fan_out"; fi
+if printf '%s' "$cc" | grep -o '"name":"a.go"[^}]*}' | grep -q '"churn":'; then ok "(N) cc.json: its other metrics stay"; else no "(N) cc.json lost the file's other metrics"; fi
+if printf '%s' "$ccp" | grep -o '"name":"a.py"[^}]*}' | grep -q '"fan_out":1' && ! printf '%s' "$ccp" | grep -q 'unknown'; then ok "(N) near miss: Python cc.json keeps fan_out and its descriptors"; else no "(N) Python cc.json moved"; fi
+if printf '%s' "$cc" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then ok "(N) cc.json stays valid JSON"; else no "(N) cc.json not JSON"; fi
+if printf '%s' "$cc" | grep -o '"fan_in":{[^}]*}' | grep -q 'unknown'; then ok "(N) cc.json descriptor says an absent value is unknown (only when fired)"; else no "(N) cc.json descriptor silent"; fi
+# NEAR MISS: a Go file WITH an observed edge (go.mod replace across two roots) keeps its fan_in/fan_out
+ccw="$( cd "$TMP/k" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$TMP/k/app" "$TMP/k/lib" --export=cc.json --no-cache 2>/dev/null )"
+if printf '%s' "$ccw" | grep -o '"name":"main.go"[^}]*}' | grep -q '"fan_out":1' && printf '%s' "$ccw" | grep -o '"name":"lib.go"[^}]*}' | grep -q '"fan_in":1'; then ok "(N) near miss: Go files with an observed edge keep fan_in/fan_out in cc.json"; else no "(N) cc.json dropped a measured Go edge: $( printf '%s' "$ccw" | grep -o '"name":"[a-z]*.go"[^}]*}' )"; fi
+# the cochange legends define it where it fires, and only there
+for lg in full compact; do
+    if co "$d" --cochange --legend=$lg | grep -o '<!--.*-->' | head -1 | grep -q 'no_file_edges'; then ok "(N) --cochange $lg legend defines no_file_edges"; else no "(N) --cochange $lg legend silent"; fi
+    if co "$dp" --cochange --legend=$lg | grep -q 'no_file_edges'; then no "(N) near miss: the Python --cochange $lg answer mentions no_file_edges"; else ok "(N) near miss: the Python --cochange $lg answer is silent on no_file_edges"; fi
+done
+
+# ── (P) C4: a module with an observed edge AND a no-edge file keeps floors, not a verdict ──────────────────
+o="$( cd "$TMP/k" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$TMP/k/app" "$TMP/k/lib" --arch="$RULES" --no-cache 2>"$TMP/stderr" )"
+for sub in app lib; do
+    r="$( row "$o" "[^\"]*$sub" )"
+    if printf '%s' "$r" | grep -q 'zone="unknown"' && printf '%s' "$r" | grep -q 'no_file_edges="go"' && printf '%s' "$r" | grep -qE ' (ca|ce)="[0-9]+"' \
+        && ! printf '%s' "$r" | grep -qE ' (I|D|reachable|isolated|leaf)='; then ok "(P) go.mod replace: $sub keeps ca/ce as floors and states no I/D/leaf/zone verdict"; else no "(P) $sub: $r"; fi
+done
+if printf '%s' "$o" | grep -o '<metrics [^>]*>' | grep -q 'zone_unknown="2"'; then ok "(P) both modules are in zone_unknown"; else no "(P) zone_unknown: $( metrics "$o" )"; fi
+d="$TMP/e_dir"; o="$( arch "$d" )"; r="$( row "$o" "$d/a" )"
+if printf '%s' "$r" | grep -q 'zone="unknown"' && ! printf '%s' "$r" | grep -qE ' (I|D|reachable|isolated|leaf)=' && printf '%s' "$r" | grep -q ' ce="1" '; then ok "(P) a Python module with a stray .go and a real edge: floors, no verdict"; else no "(P) stray-go module: $r"; fi
+# NEAR MISS: the same Python module without the stray file keeps every number and its verdict
+d="$TMP/p_clean"; mkfix py "$d"; o="$( arch "$d" )"; r="$( row "$o" "$d/a" )"
+if printf '%s' "$r" | grep -q ' I="' && printf '%s' "$r" | grep -q ' D="' && printf '%s' "$r" | grep -q ' reachable="' && ! printf '%s' "$r" | grep -qE 'zone="unknown"|no_file_edges'; then ok "(P) near miss: a clean Python module keeps I/D/reachable/zone"; else no "(P) near miss moved: $r"; fi
+# the wording is true on the same fixture: it HAS a resolved Go edge
+cs="$( cd "$TMP/k" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$TMP/k/app" "$TMP/k/lib" --arch="$RULES" --legend=compact --no-cache 2>/dev/null | grep -o '<!--.*-->' | head -1 )"
+if printf '%s' "$cs" | grep -q 'no import in these languages resolves to a file' || printf '%s' "$cs" | grep -q 'no edge to or from them is in any count'; then no "(P) compact legend still says none resolves, on a tree where one does"; else ok "(P) compact legend makes no claim the go.mod replace fixture refutes"; fi
+if grep -q 'have no file edges' "$TMP/stderr"; then no "(P) stderr still says no file edges, on a tree that has one"; else ok "(P) stderr makes no claim the fixture refutes"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
