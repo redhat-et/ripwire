@@ -367,36 +367,44 @@ inline bool pythonDirIsPackage( std::string_view dir, const HashMap<std::string,
     return joinNormalizeLookup( dir, "__init__.py", fileIndex, ws, includerFileId ) != kNoFile;
 }
 
-// #478 src-layout: the directories an ABSOLUTE import may also be rooted at, past the repo root. Two proven shapes, nothing
-// found by scanning: (1) the source root of the includer's own package chain, its first ancestor that is not a package
-// (`lib/mypkg/a.py` -> `lib`, `python/core/x.py` -> `python`); (2) a `src` directory beside the includer or any ancestor, the
-// src layout at the root (textual, flake8) or inside a monorepo member. An importer outside both shapes (`tests/t.py` importing a
-// package under a `lib/` root) stays unresolved: no edge, never a guess. Depth-bounded hash lookups, no walk over the index.
-inline std::vector<std::string> pythonLayoutRoots( std::string_view dir, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                                   const WsIncludeCtx* ws, std::uint32_t includerFileId )
+// The module-root rule, language-neutral: the directories a non-relative import written in `dir` may also be rooted at, past
+// the repo root. Two proven shapes, nothing found by scanning: (1) when `dir` belongs to a module unit (`isUnitDir`, the language's
+// own test), the first ancestor outside the unit chain, its source root; an empty one is the repo root, which every caller already
+// probes; (2) a `sourceDir` directory beside `dir` or any ancestor, nearest first, the conventional layout at the root or inside a
+// monorepo member. An importer outside both shapes finds nothing here: no edge, never a guess. Depth-bounded, no walk over the index.
+template< typename IsUnitDir >
+inline std::vector<std::string> moduleRootCandidates( std::string_view dir, IsUnitDir&& isUnitDir, std::string_view sourceDir )
 {
     std::vector<std::string> roots;
-    if( pythonDirIsPackage( dir, fileIndex, ws, includerFileId ) )
+    if( isUnitDir( dir ) )
     {
         std::string_view up = dir;
-        while( !up.empty() && pythonDirIsPackage( up, fileIndex, ws, includerFileId ) )
+        while( !up.empty() && isUnitDir( up ) )
         {
             up = includerDir( up );
         }
-        if( !up.empty() )   // an empty source root is the repo root, which the caller already probes
+        if( !up.empty() )
         {
             roots.emplace_back( up );
         }
     }
     for( std::string_view up = dir;; up = includerDir( up ) )
     {
-        roots.push_back( up.empty() ? std::string( "src" ) : std::string( up ) + "/src" );
+        roots.push_back( up.empty() ? std::string( sourceDir ) : std::string( up ) + "/" + std::string( sourceDir ) );
         if( up.empty() )
         {
             break;
         }
     }
     return roots;
+}
+
+// #478 src-layout, the Python layer: a module unit is a package, and the conventional source directory is `src`
+// (`lib/mypkg/a.py` -> `lib`; textual, flake8 -> `src`).
+inline std::vector<std::string> pythonLayoutRoots( std::string_view dir, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                   const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    return moduleRootCandidates( dir, [ & ]( std::string_view d ) { return pythonDirIsPackage( d, fileIndex, ws, includerFileId ); }, "src" );
 }
 
 // ── Python Step-A — SOUND. `import a` / `import pkg.mod` / `from pkg.mod import Z` / `from .rel import Z`.
