@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 333 | 122 | 212 | **121** |
+| 347 | 126 | 226 | **121** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 333 + 7 is the 340 constants this generator parses out of `src/`.
+are not counted as caps, and 347 + 7 is the 354 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 333 caps are classified
-(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 190 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 347 caps are classified
+(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 204 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -102,7 +102,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 122 files that declare a cap — the 333 caps counted above, and no parameter.
+One table for each of the 126 files that declare a cap — the 347 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -435,6 +435,15 @@ Discloses: `capped`
 | `kForDispatchCtorRows` | `4` | — | constructor-caller rows per call |
 | `kForDispatchHopRows` | `8` | — | candidate rows per call |
 
+### `src/fordottedstring.h`
+
+Discloses: `rows_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForDottedLoaderNamedMax` | `3` | — | more functions than this name the constant: a generic word, no loader= (loaders= counts them) |
+| `kForDottedStringRows` | `3` | — | <ds> rows per answer (capped=1 next= beyond it) |
+
 ### `src/forfilepage.h`
 
 Discloses: `capped`, `bytes_capped`, `dirs_capped`
@@ -736,6 +745,8 @@ Discloses: `value_refs_depth_capped`
 | --- | --- | --- | --- |
 | `kScanCap` | `4096` | — | — |
 | `kScanCap` | `512` | — | — |
+| `kVrDottedFlowMaxBytes` | `400` | — | STRING-IMPORT: a sink's flow-token list over this carries none (it joins no constant) |
+| `kVrDottedStringMaxBytes` | `200` | — | STRING-IMPORT: a longer string is no module path (no fact, no disclosure: nothing is cut) |
 | `kVrMaxDepth` | `512` | INDEXING | the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h) |
 | `kVrTextCap` | `96` | — | a written slot / callee longer than this is cut with "…" |
 
