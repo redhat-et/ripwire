@@ -102,6 +102,10 @@ struct LangFacts
     /// declined fact, never an edge (ingest_sidecap.h; the predicate itself lives in ingest_elixir.h).
     bool hasInertQuoteRegions = false;
 
+    /// Not a code language — prose, configuration or data (and no recognised language at all): a bare basename with such an
+    /// extension (`book.toml`, `SUMMARY.md`) named in a --for task is context, never a file anchor (mention.h isCodeExtension).
+    bool notCode = false;
+
     /// C++: defect-shape's whole-tree input is the macro-name set, and a changed C++ file (a .h reads as C++) can only be
     /// judged against the base's whole set. A changed C or Objective-C file does not need it, by today's behaviour
     /// (verbs_quality.h; pinned by test/qddegradecheck.sh (E3)).
@@ -272,6 +276,11 @@ struct LangFacts
     /// The languages where `#` opens a line comment (in the C family `#` opens a preprocessor directive):
     /// Python, Bash, Ruby, Elixir, Toml, Yaml, GDScript.
     bool hashComment = false;
+
+    /// C, C++, Go: a function's signature is a unit other declarations repeat (a header prototype, a forward declaration, a Go interface
+    /// method), so a signature change reaches those rows in step; fordeclrow.h counts only these languages' function and method rows
+    /// (DECL-ROW). Objective-C is not here: its message selectors are not C signatures.
+    bool signatureRows = false;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -281,7 +290,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true },
@@ -289,13 +298,13 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
-      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true },
+      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .instanceReceiver = "self", .memberNeverReachesFreeFunction = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true },
-    { .lang = Lang::Markdown, .linkSections = true },
+    { .lang = Lang::Markdown, .notCode = true, .linkSections = true },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true },
@@ -306,14 +315,14 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
       .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true },
-    { .lang = Lang::Unknown },
-    { .lang = Lang::Json },
+    { .lang = Lang::Unknown, .notCode = true },
+    { .lang = Lang::Json, .notCode = true },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true },
-    { .lang = Lang::Toml, .hashComment = true },
-    { .lang = Lang::Yaml, .hashComment = true },
+      .staticLinkage = true, .signatureRows = true },
+    { .lang = Lang::Toml, .notCode = true, .hashComment = true },
+    { .lang = Lang::Yaml, .notCode = true, .hashComment = true },
     { .lang = Lang::Php, .memberSeparator = "::" },
     { .lang = Lang::Lua, .dashDashComments = true },
     { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true },

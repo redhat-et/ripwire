@@ -37,6 +37,8 @@
 #include "model.h"
 #include "filter.h"   // rankTierMultiplierOf / isTestSymbol — the §P4 test/fixture tier a named identifier may not lift (rule b);
                       // queryshape::classify — the shipped trace classifier (rule a)
+#include "langfacts.h"   // langFacts().notCode — FOR-FILE-ANCHOR
+#include "lintrules.h"   // langOfPath — FOR-FILE-ANCHOR: is a bare basename's extension a code language (isCodeExtension)
 #include "infra/namesplit.h"   // isIdentChar — the ONE ASCII identifier-character predicate
 #include "infra/sortutil.h"    // svLess — string_view order without libstdc++'s length subtraction (portablebuildcheck #6)
 #include "docparse.h"   // docparse::detail::readWholeFile — countUnbacktickedDocFiles reads the markdown the index holds
@@ -257,9 +259,69 @@ namespace mention_detail
 struct RawMention
 {
     std::vector<std::string> segments;   // path or dotted segments, in order
-    bool                     isPath = false;   // came with '/' (or an extension-bearing basename) → match as path
+    bool                     isPath = false;   // came with '/' → match as path
     std::size_t              pos    = 0;       // byte offset of the token in the task — the text order rule (c) keeps
+    // FOR-FILE-ANCHOR (#466 F1): a slash-free dotted token whose last segment is a code-language extension
+    // (`DynamicScreen.c`, `sync_ledger.py`, `ls.rs`) is FIRST read as a whole basename (`whole`). It used to be split
+    // into the dotted chain [name, ext] only, which no indexed path can suffix-match, so a bare basename never anchored
+    // in any language. The dotted reading stays: a token no indexed file has as its basename (`Location.go`, a method)
+    // falls through to it unchanged. baseOnly: the token is ONLY a basename candidate — the dotted-chain prose filter
+    // below dropped it before (`ls.rs`: both segments under 3 bytes), so with no such file it is skipped exactly as then.
+    std::string              whole;
+    bool                     baseOnly = false;
 };
+
+// FOR-FILE-ANCHOR (#466 F1): is `ext` (no dot) a code language's extension? Prose, config and data extensions are not:
+// a `book.toml` / `SUMMARY.md` / `tsconfig.json` named as context keeps the reading it always had.
+inline bool isCodeExtension( std::string_view ext ) noexcept
+{
+    if( ext.empty() || ext.size() > 6 )
+    {
+        return false;
+    }
+    std::string probe( "x." );
+    probe.append( ext );
+    return !langFacts( langOfPath( probe ) ).notCode;
+}
+
+// the indexed files whose basename is exactly `base` (fileId order); `out` gets at most `cap` of them, the return is the count
+inline std::uint32_t filesWithBaseName( const IngestResult& ing, std::string_view base, std::vector<std::uint32_t>* out = nullptr,
+                                        std::size_t cap = SIZE_MAX )
+{
+    std::uint32_t n = 0;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( rw::namesplit::afterLast( std::string_view( ing.files[f] ), "/" ) == base )
+        {
+            if( out && out->size() < cap ) { out->push_back( f ); }
+            ++n;
+        }
+    }
+    return n;
+}
+
+// How a mention's whole-basename reading resolves (RawMention::whole): how many indexed files carry that basename and the
+// first of them. files == 0 for a mention with no basename reading.
+struct BaseReading
+{
+    std::uint32_t files = 0;
+    std::uint32_t file  = 0;
+};
+inline BaseReading wholeBaseReading( const IngestResult& ing, const RawMention& m )
+{
+    BaseReading r;
+    if( m.whole.empty() )
+    {
+        return r;
+    }
+    std::vector<std::uint32_t> first;
+    r.files = filesWithBaseName( ing, m.whole, &first, 1 );
+    if( !first.empty() )
+    {
+        r.file = first.front();
+    }
+    return r;
+}
 
 // Hoisted to infra/namesplit.h (a leaf header) when pattern.h needed the same predicate; the spelling
 // stays via a using-declaration so every call site below — and its gates — are byte-identical.
@@ -394,6 +456,74 @@ inline void liftPackageDirMention( const IngestResult& ing, const RawMention& m,
     }
 }
 
+// FOR-FILE-ANCHOR (#466 F1): the hyphenated / snake_case WORDS of a task (`document-remind`, `sync_ledger`) — a token of identifier
+// characters and '-' with an interior '-' or '_', at least 3 bytes, not joined to a '.' or '/' (those are extractMentions' paths and
+// dotted chains). Text order; a word is a FILE-STEM candidate only, resolved by resolveStemFile.
+inline std::vector<std::string_view> extractStemTokens( std::string_view task )
+{
+    std::vector<std::string_view> out;
+    std::size_t                   i = 0;
+    while( i < task.size() )
+    {
+        if( !isIdentChar( task[i] ) )
+        {
+            ++i;
+            continue;
+        }
+        const std::size_t start = i;
+        while( i < task.size() && ( isIdentChar( task[i] ) || task[i] == '-' ) )
+        {
+            ++i;
+        }
+        std::size_t end = i;
+        while( end > start && task[end - 1] == '-' )
+        {
+            --end;   // "re-" / "built-in-": a trailing joiner is punctuation
+        }
+        const bool joined = ( start > 0 && ( task[start - 1] == '.' || task[start - 1] == '/' ) )
+                         || ( i < task.size() && ( task[i] == '.' || task[i] == '/' ) && i + 1 < task.size() && isIdentChar( task[i + 1] ) );
+        const std::string_view tok = task.substr( start, end - start );
+        const std::size_t      joint = tok.size() > 2 ? tok.substr( 1, tok.size() - 2 ).find_first_of( "-_" ) : std::string_view::npos;
+        if( !joined && tok.size() >= 3 && tok.size() <= 200 && joint != std::string_view::npos
+            && std::find( out.begin(), out.end(), tok ) == out.end() )
+        {
+            out.push_back( tok );
+        }
+    }
+    return out;
+}
+
+// Does the word name exactly ONE indexed code file by its STEM (basename minus extension, case-sensitive)? Never when an
+// indexed symbol has exactly that name — the name-exact route and the named-identifier lift keep those — and never a
+// prose/config stem (isCodeExtension). `total` gets how many code files have that stem (0, 1 or more).
+inline bool resolveStemFile( const IngestResult& ing, std::string_view word, std::uint32_t& outFile, std::uint32_t* total = nullptr )
+{
+    std::uint32_t n = 0;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view base = baseNameOf( ing.files[f] );
+        const std::string_view stem = stripExt( base );
+        if( stem.size() == base.size() || stem != word || !isCodeExtension( base.substr( stem.size() + 1 ) ) )
+        {
+            continue;
+        }
+        if( n == 0 )
+        {
+            outFile = f;
+        }
+        ++n;
+    }
+    if( total )
+    {
+        *total = n;
+    }
+    if( n != 1 )
+    {
+        return false;
+    }
+    return std::none_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == word; } );
+}
+
 // Did kMentionMaxFiles CUT a file this mention names, or only STOP a scan? The anchor's scans stop the instant the
 // list is full, so files left unexamined prove nothing: at exactly kMentionMaxFiles matches, or when an earlier
 // mention already filled the list, the corpus tail may hold no file the mention names at all. Reading the stop as
@@ -409,6 +539,18 @@ inline bool definesScopeName( const IngestResult& ing, const std::string& scope,
     return std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == name && s.scope == scope; } );
 }
 
+// FOR-FILE-ANCHOR: the (a0) whole-basename reading of mentionUnkeptFiles — true when it ENDS resolution (the token is a basename the
+// tree has, or only ever a basename candidate); the one file it names is appended when `kept` lacks it.
+inline bool wholeBaseUnkept( const IngestResult& ing, const RawMention& m, const std::vector<std::uint32_t>& kept, std::vector<std::uint32_t>& out )
+{
+    const BaseReading br = wholeBaseReading( ing, m );
+    if( br.files == 1 && std::find( kept.begin(), kept.end(), br.file ) == kept.end() )
+    {
+        out.push_back( br.file );
+    }
+    return br.files > 0 || m.baseOnly;
+}
+
 // WHICH files this mention names that `kept` does not — appended, never cleared, so a caller can union
 // across mentions. This is the old first-hit predicate's body with "return true on the first one" replaced by "collect
 // them all": a bare boolean told the caller something was withheld and neither how much nor how to get it,
@@ -419,6 +561,10 @@ inline void mentionUnkeptFiles( const IngestResult& ing, const RawMention& m, co
                                 std::vector<std::uint32_t>& out )
 {
     ASSUME_NO_ALIAS( kept, out );
+    if( wholeBaseUnkept( ing, m, kept, out ) )   // FOR-FILE-ANCHOR: applyMentionBoost's (a0) reading ends resolution
+    {
+        return;
+    }
     const std::size_t fileCount = ing.files.size();
     for( std::size_t suffixLen = m.segments.size(); suffixLen >= 1; --suffixLen )
     {
@@ -462,7 +608,7 @@ inline void mentionUnkeptFiles( const IngestResult& ing, const RawMention& m, co
 // and the two can never disagree. The union is only computed on the runs where the list is full, so the
 // common anchored query pays the same one size test it always did.
 inline std::uint32_t mentionFilesNamedTotal( const IngestResult& ing, const std::vector<RawMention>& raw,
-                                             const std::vector<std::uint32_t>& kept )
+                                             const std::vector<std::uint32_t>& kept, std::span<const std::uint32_t> stemNamed = {} )
 {
     if( kept.size() < kMentionMaxFiles )
     {
@@ -473,6 +619,7 @@ inline std::uint32_t mentionFilesNamedTotal( const IngestResult& ing, const std:
     {
         mentionUnkeptFiles( ing, m, kept, named );
     }
+    named.insert( named.end(), stemNamed.begin(), stemNamed.end() );   // FOR-FILE-ANCHOR: the stem-named files (resolveStemFile)
     std::sort( named.begin(), named.end() );
     named.erase( std::unique( named.begin(), named.end() ), named.end() );
     return std::uint32_t( named.size() );
@@ -546,12 +693,22 @@ inline std::vector<RawMention> extractMentions( std::string_view task, std::uint
             continue;
         }
 
+        // FOR-FILE-ANCHOR (#466 F1): an extension-bearing basename is read whole first (RawMention::whole)
+        if( !hasSlash && m.segments.size() >= 2 && isCodeExtension( m.segments.back() ) )
+        {
+            m.whole.assign( tok );
+        }
+
         // dotted chains need a real identifier somewhere ("e.g", "i.e", version numbers "3.10" stay prose)
         if( !hasSlash && !backticked )
         {
             if( m.segments.size() < 2 || maxSegmentLen < 3 )
             {
-                continue;
+                if( m.whole.empty() )
+                {
+                    continue;
+                }
+                m.baseOnly = true;   // `ls.rs`: a basename candidate only — dropped as prose when no file has that basename
             }
             bool allDigits = true;
             for( const std::string& s : m.segments )
@@ -997,7 +1154,17 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
     noteCap( outInfo, "mention_tokens_capped", "mention_tokens_total", qualifiedTokens > kMentionMaxRawTokens, qualifiedTokens );
     std::vector<NamedIdentTok> identToks;   // (d): bare / call-syntax / `::`-qualified identifiers — NAMED IDENTIFIERS above
     extractNamedIdentifiers( task, identToks, /*callSyntaxIsEvidence=*/!taskHasPastedCode( task ) );
-    if( raw.empty() && identToks.empty() )
+    // (e) FOR-FILE-ANCHOR (#466 F1): the words that name exactly one code file by its stem (resolveStemFile), text order
+    std::vector<std::uint32_t> stemFiles;
+    for( const std::string_view w : extractStemTokens( task ) )
+    {
+        std::uint32_t f = 0;
+        if( resolveStemFile( ing, w, f ) && std::find( stemFiles.begin(), stemFiles.end(), f ) == stemFiles.end() )
+        {
+            stemFiles.push_back( f );
+        }
+    }
+    if( raw.empty() && identToks.empty() && stemFiles.empty() )
     {
         return false;
     }
@@ -1027,7 +1194,19 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         //     Deterministic: files are lexicographically sorted at ingest, first match by ascending fileId
         //     is stable; a basename naming MANY files (a `utils.py` everywhere) still yields at most the
         //     first few via the global file cap — bounded noise, and the ablation gate judges the trade.
+        // (a0) FOR-FILE-ANCHOR (#466 F1): an extension-bearing basename names the ONE indexed file with that basename; several →
+        //      it names none of them (never a silent pick: the --for file page lists them), and the dotted reading is not
+        //      consulted either, since the token IS a file name the tree has. No such file → the reading it always had.
         bool matchedFile = false;
+        if( const BaseReading br = wholeBaseReading( ing, m ); br.files > 0 || m.baseOnly )
+        {
+            if( br.files == 1 && mentionedFiles.size() < kMentionMaxFiles
+                && std::find( mentionedFiles.begin(), mentionedFiles.end(), br.file ) == mentionedFiles.end() )
+            {
+                mentionedFiles.push_back( br.file );
+            }
+            continue;
+        }
         for( std::size_t suffixLen = m.segments.size(); suffixLen >= 1 && !matchedFile; --suffixLen )
         {
             const std::vector<std::string> suffix( m.segments.end() - suffixLen, m.segments.end() );
@@ -1087,6 +1266,15 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
         }
     }
 
+    // (e) continued: the stem-named files take the room the mentions above left, after them (text order within)
+    for( const std::uint32_t f : stemFiles )
+    {
+        if( mentionedFiles.size() < kMentionMaxFiles && std::find( mentionedFiles.begin(), mentionedFiles.end(), f ) == mentionedFiles.end() )
+        {
+            mentionedFiles.push_back( f );
+        }
+    }
+
     // (d) continued — the bare, call-syntax and `::`-qualified identifiers extractMentions does not read, then one
     //     resolution for all of them. Each lifted symbol is one more direct symbol: same slot, same total, and at most
     //     kMentionMaxIdentLifts of them per task, taken in TASK-TEXT order (each identifier at its first spelling,
@@ -1120,7 +1308,15 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
     ENSURES( directSymbols.size() <= kMentionMaxDirectSymbols && directSymbols.size() <= directSymbolTotal && identLifts <= kMentionMaxIdentLifts );
     // a STOP is not a CUT (mentionUnkeptFiles), and a CUT without a total is a fact the caller cannot act on:
     // mention_files_total= is every distinct file the task names, so `total - shown` is what the cap withheld.
-    const std::uint32_t mentionFilesTotal = mentionFilesNamedTotal( ing, raw, mentionedFiles );
+    std::vector<std::uint32_t> stemUnkept;   // FOR-FILE-ANCHOR: a stem-named file the room ran out for is a CUT like any other
+    for( const std::uint32_t f : stemFiles )
+    {
+        if( std::find( mentionedFiles.begin(), mentionedFiles.end(), f ) == mentionedFiles.end() )
+        {
+            stemUnkept.push_back( f );
+        }
+    }
+    const std::uint32_t mentionFilesTotal = mentionFilesNamedTotal( ing, raw, mentionedFiles, stemUnkept );
     noteCap( outInfo, "mention_files_capped", "mention_files_total",
              mentionFilesTotal > mentionedFiles.size(), mentionFilesTotal );
     // total > kept: the kMentionMaxDirectSymbols cut (the same verdict as `total > cap` on the Scope.name path alone, whose
@@ -1601,8 +1797,13 @@ inline int forHeaderPartnerKind( std::string_view ext ) noexcept
 // requires the match to be UNIQUE at that length: 0 or >1 files name nothing this lookup can act on, and
 // a shorter suffix is never tried once a longer one has matched anything (ambiguous or not) — the same
 // "longest suffix ends resolution" rule mentionUnkeptFiles states above.
-inline bool resolveUniqueMentionFile( const IngestResult& ing, const RawMention& m, std::uint32_t& outFile ) noexcept
+inline bool resolveUniqueMentionFile( const IngestResult& ing, const RawMention& m, std::uint32_t& outFile )
 {
+    if( const BaseReading br = wholeBaseReading( ing, m ); br.files > 0 || m.baseOnly )   // FOR-FILE-ANCHOR: a bare basename, unique or not
+    {
+        outFile = br.file;
+        return br.files == 1;
+    }
     if( !m.isPath || m.segments.empty() )
     {
         return false;

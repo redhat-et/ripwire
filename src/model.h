@@ -579,6 +579,41 @@ inline constexpr char kValueRefSlotFactScope = 't';
 // the field, memberCtor = the slot's type ("" unknown). valuerefindex.h SlotIndex re-slots an ARGUMENT row of a bare call of
 // that function at that position (`Reg( Put )`) into the same field. Distinct from every other scope char.
 inline constexpr char kValueRefSlotParamScope = 'q';
+// REGISTRAR (lane registrar, Python first slice): a METHOD PARAMETER stored into a container held by a field of `self`
+// (`self.receivers.append( ( key, receiver ) )`, `self.filters[ k ] = f`, tuple/list elements included): role Value, name ""
+// (no row), recvVar = the method's name, argCount = the parameter's position AFTER `self` (argCountKnown), memberPath = the field.
+// Written by src/ingest_valuerefs.h (kRegLangs rows with containerStores), read by src/regindex.h only. Distinct from every
+// other scope char.
+inline constexpr char kValueRefRegParamScope = 'g';
+// STRING-IMPORT: a dotted-string FACT (role Value, name "": no row, no edge; fordottedstring.h is its one reader). recvVar = the
+// string as written, composeRel = the shape below, memberPath = the import sink's tail name (direct / format / variable shapes),
+// memberCtor = the name it is assigned to ("" none). The scope char is a NON-identifier byte on purpose: a reader that takes the
+// qualifier for a type or scope name (fordispatchhop.h ownerNamedByProduction read "D" as a class D) can never match it.
+inline constexpr char kValueRefDottedStringScope = '%';
+inline constexpr std::string_view kDottedShapeConstant = "c";   // a module-level or class-level `NAME = "a.b.C"`
+inline constexpr std::string_view kDottedShapeListed   = "l";   // an element of a list/tuple/set or a dict VALUE, anywhere
+inline constexpr std::string_view kDottedShapeLocalListed = "m";   // as "l", assigned to a plain local NAME inside a function: only that function can name it
+inline constexpr std::string_view kDottedShapeSink     = "s";   // the first positional argument of an import sink
+inline constexpr std::string_view kDottedShapeFormat   = "f";   // `"%s.base" % x` as that argument (recvVar = the template)
+inline constexpr std::string_view kDottedShapeVariable = "v";   // an import sink called with anything else: recvVar = the FLOW TOKENS (below), space-separated
+// The flow tokens of a "v" fact: the names whose value can reach the sink's first argument inside its function (the argument's own
+// names, then through assignments / for targets / walrus / comprehension targets of that function, to a fixpoint): `.NAME` an
+// attribute tail, `NAME` a bare name no assignment, for/with/except/lambda binder of the function binds (a local import is a bind too, but is left free here and decided by the joiner, which sees the module imported), `=NAME` a bare name the function itself binds. Capped by
+// kVrDottedFlowMaxBytes: over it the fact carries none and joins nothing (an empty list is read as untraced: the row of a constant such a call could name says loaders_floor=1). A name that reaches the argument only through another
+// function, a parameter or a call result is not here, so no constant joins it.
+inline constexpr char kDottedFlowAttr  = '.';
+inline constexpr char kDottedFlowBound = '=';
+// A call whose arguments are printed, compared or logged, never loaded: a container handed to one records nothing.
+inline constexpr std::string_view kDottedNonLoadCallees[] = { "print", "debug", "info", "warning", "warn", "error", "exception", "critical", "fatal", "log", "write", "writelines",
+                                                              "assertEqual", "assertNotEqual", "assertIn", "assertNotIn", "assertListEqual", "assertCountEqual", "assertTrue", "assertFalse" };
+// The import sinks, by the callee's tail name: language DATA, one row per language; a language with no row records nothing.
+struct DottedImportSinkLang
+{
+    Lang                             lang;
+    std::span<const std::string_view> sinks;
+};
+inline constexpr std::string_view kPythonImportSinks[] = { "import_string", "import_module", "__import__" };
+inline constexpr DottedImportSinkLang kDottedImportSinks[] = { { Lang::Python, kPythonImportSinks } };
 
 // IX-1 / IX1-V2: which languages record a slot join, and how — the one table both the extractor (ingest_valuerefs.h) and the
 // join (valuerefindex.h) read. A language's row supplies the per-language pieces of the language-blind join (SlotIndex):
@@ -631,6 +666,38 @@ inline constexpr std::array<const VrSlotLang*, kLangCount> kVrSlotLangOf = []
 inline const VrSlotLang* vrSlotLang( Lang l ) noexcept
 {
     return enumTableAt( kVrSlotLangOf, l, static_cast<const VrSlotLang*>( nullptr ) );
+}
+// REGISTRAR (lane registrar; reports/dispatch-register-design.md REGISTRY half, the Py/TS first slice): which languages join a
+// registry KEY to its registration sites, and how — the language layer src/regindex.h reads (one place for the join itself).
+//   ReceiverMethod (Python): a call `K.m( f )` / `mod.K.m( f )` whose receiver K is a module variable `K = C()` and whose method
+//     C.m stores parameter k into a container held by a field of self (kValueRefRegParamScope facts; containerStores names the
+//     store calls); f at argument k is registered under the key K. consumerSkip: methods on K that are neither a registration
+//     nor a consumer (the unregister side).
+//   ProviderRecord (TypeScript): an object literal `{ provide: K, useClass: C }` (keyField + valueFields) registers C under K;
+//     a consumer is a `consumerCalls` call naming K (`@Inject( K )`, `inject( K )`).
+enum class RegForm : std::uint8_t { ReceiverMethod, ProviderRecord };
+inline constexpr std::string_view kPyRegStores[]   = { "add", "append", "appendleft", "extend", "insert" };
+inline constexpr std::string_view kPyRegSkip[]     = { "disconnect", "discard", "remove", "unregister" };
+inline constexpr std::string_view kTsRegValues[]   = { "useClass", "useExisting", "useFactory", "useValue" };
+inline constexpr std::string_view kTsRegConsumer[] = { "Inject", "inject" };
+struct RegLang
+{
+    Lang                              lang;
+    RegForm                           form;
+    std::span<const std::string_view> containerStores;   // ReceiverMethod: `self.f.<store>( … param … )`; `self.f[ k ] = param` always
+    std::span<const std::string_view> consumerSkip;      // ReceiverMethod
+    std::string_view                  keyField;          // ProviderRecord
+    std::span<const std::string_view> valueFields;       // ProviderRecord
+    std::span<const std::string_view> consumerCalls;     // ProviderRecord
+};
+inline constexpr RegLang kRegLangs[] = {
+    { Lang::Python, RegForm::ReceiverMethod, kPyRegStores, kPyRegSkip, "", {}, {} },
+    { Lang::TypeScript, RegForm::ProviderRecord, {}, {}, "provide", kTsRegValues, kTsRegConsumer },
+};
+// The registrar row of language `l`, nullptr when it joins no registry (the mechanism is then inert: byte-identical answers).
+inline const RegLang* regLang( Lang l ) noexcept
+{
+    return findByField( kRegLangs, &RegLang::lang, l );
 }
 inline bool slotJoinsByFieldName( Lang l ) noexcept
 {
@@ -1675,6 +1742,10 @@ struct RubyMainMixinRow
 // (`?f`). No identifier starts with it, so no name lookup ever matches the record; graph.h pythonRenamedImportPin reads it as "f may
 // be unbound", the case where a module `__getattr__` (PEP 562, consulted only for names the module lacks) answers instead.
 inline constexpr std::string_view kPythonCondDefPrefix = "?";
+// A Python lambda parameter or comprehension target `K` files a VarDecl spelled `~K` at the lambda / comprehension (its enclosing def's
+// scope, else module scope). No identifier starts with it, so no name lookup ever matches the record; src/regindex.h reads it as "K is
+// another variable here" (a registrar key named like a lambda parameter is not the key).
+inline constexpr std::string_view kPythonLocalScopePrefix = "~";
 
 struct Binding
 {
@@ -2490,8 +2561,24 @@ inline bool isSlotJoinRecord( const Reference& r ) noexcept
     {
         return false;
     }
-    return ( r.role == RefRole::Value && ( r.qualifier[0] == kValueRefSlotFactScope || r.qualifier[0] == kValueRefSlotParamScope ) )
+    return ( r.role == RefRole::Value
+             && ( r.qualifier[0] == kValueRefSlotFactScope || r.qualifier[0] == kValueRefSlotParamScope || r.qualifier[0] == kValueRefRegParamScope
+                  || r.qualifier[0] == kValueRefDottedStringScope ) )
         || ( r.role == RefRole::Through && r.qualifier[0] == kValueRefSlotCallScope );
+}
+
+// STRING-IMPORT: a dotted-string fact (kValueRefDottedStringScope): its qualifier is a scope char and its recvVar a string, neither a
+// name the file spells, so no name-evidence scan may read them.
+inline bool isDottedStringFact( const Reference& r ) noexcept
+{
+    return r.role == RefRole::Value && r.qualifier.size() == 1 && r.qualifier[0] == kValueRefDottedStringScope;
+}
+
+// REGISTRAR: a registrar fact (kValueRefRegParamScope): its qualifier is a scope char and its recvVar the registrar METHOD's name, neither a
+// class the file names, so no name-evidence scan (graph.h collectFileClassEvidence) may read them.
+inline bool isRegistrarFact( const Reference& r ) noexcept
+{
+    return r.role == RefRole::Value && r.qualifier.size() == 1 && r.qualifier[0] == kValueRefRegParamScope;
 }
 
 inline void buildShadowKey( std::string& key, std::uint32_t fromSymbol, std::string_view name )

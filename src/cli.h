@@ -1311,7 +1311,7 @@ inline constexpr char kHelpHead[] =
         "                               vitest/jest dependency -- never guessed from the .ts/.js extension alone). Spelled RELATIVE to\n"
         "                               the root= the document declares, so it pastes into a shell run from there, and the document\n"
         "                               does not change with where the tree is checked out (a MULTI-ROOT run declares no single root,\n"
-        "                               so it stays absolute). A TS/JS package below root= runs as 'cd <pkg> && <runner> <path>': cd first, then the path\n"
+        "                               so it stays absolute). A TS/JS package below root= runs as '(cd <pkg> && <runner> <path>)': a subshell, cd first, then the path\n"
         "                               relative to that package. NO run= means NOT DERIVABLE -- never a guessed suite command\n"
         "    --grep=STR | --regex=PAT   search for a literal or a regex; every hit comes back with its enclosing symbol\n"
         "                               literal / regex search + enclosing symbol + the matched line. SPAN-TIERED by default (see\n"

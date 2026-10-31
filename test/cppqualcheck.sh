@@ -355,10 +355,13 @@ rrun US --uses=selectBaseline \
 # `pub` check and the row's line). Two new call sites, same helper, no new fopen/fread.
 # 41 -> 44 2026-10-30 (train 42b, composition of lane/alias-import and lane/mf1-lit): the literal block (forliteral.h) reads the
 # shown sites' files through the same helper at three sites (the docstring/tier read, the owner body, the context rows). No new fopen.
+# 44 -> 45 2026-10-30 (train 43a, composition of lane/for-file-anchor over train 42b): src/forfilepage.h loadFileText reads the named
+# file's whole text (the page's top-level lines) through the same canonical helper — one new call site, same helper
+# (the lane's own step was 39 -> 40, CI run 41021256300 answered 40 at fa51be6b).
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 44 ] \
-    && ok "repo: --uses=readWholeFile count=44 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 44, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 45 ] \
+    && ok "repo: --uses=readWholeFile count=45 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 45, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \

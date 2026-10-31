@@ -3,8 +3,10 @@
 #error "verbs_navigate.h is a SECTION of src/main.cpp's translation unit - include it only from main.cpp (see the verb-family split note there)"
 #endif
 
+#include "fordottedstring.h"   // STRING-IMPORT: the dotted strings that name a --callers target
 #include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
 #include "hopbody.h"   // PATH-HOP-BODY: the middle hops' bodies of a reached --path
+#include "pathroute.h" // PATH-ROUTE v2: the route verdict (hedged / refused name-stitched chain), shared with MCP path_between
 #include "typeuse.h"   // L7: --impact of a type seeds its walk from the symbols that name it
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
@@ -504,7 +506,8 @@ std::optional<int> runCallHierarchy( const MainDispatch& d )
                        + ( wantCallers                  ? rw::patternDispatchXml( ing, chRows.valueRefs.patternSites, chVr )
                            : chRows.valueRefs.patternSites.empty() ? std::string()
                                                          : rw::patternCalleesXml( ing, rw::PatternIndex( ing, rw::ValueRefIndex( ing ) ), chRows.valueRefs.patternSites, chVr ) )
-                       + rw::slotCalleesXml( ing, chRows.valueRefs.slotSites, chVr ), tag );   // IX-1: calls through a struct field (callees only)
+                       + rw::slotCalleesXml( ing, chRows.valueRefs.slotSites, chVr )   // IX-1: calls through a struct field (callees only)
+                       + ( wantCallers ? rw::renderDottedStrings( ing, matches ) : std::string() ), tag );   // STRING-IMPORT: strings naming a target; never a caller row or a count
         return 0;
     }
     return std::nullopt;
@@ -2771,31 +2774,37 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                   }
                   return rw::pathBridge( ing, g, srcDefs, dstMembers, *pthValueIdx, *pthBackHops );
               } );
-        const std::vector<NodeId>& pthShown = rw::pathShownChain( pthPairs, path );   // the root's from_p=/to_p=/hops=
-        const NodeId               srcUsed  = pthShown.empty() ? srcDefs.front() : pthShown.front();
-        const NodeId               dstUsed  = pthShown.empty() ? dstDefs.front() : pthShown.back();
+        // PATH-ROUTE v2 (src/pathroute.h pathRouteChains): the chain the answer prints after the route verdict (refused: none; proven-preferred:
+        // the proven chain), shared with the MCP twin
+        const rw::PathRouteChains   pthChains = rw::pathRouteChains( ing, g, pthPairs, path, srcDefs, dstDefs );
+        const rw::PathRouteVerdict& pthRoute  = pthChains.verdict;
+        const std::vector<NodeId>&  pthRows   = pthChains.rows;    // the rows the answer prints
+        const std::vector<NodeId>&  pthShown  = pthChains.shown;   // the root's hops=
+        const std::vector<NodeId>&  pthBind   = pthChains.bind;    // from_p=/to_p= (a refused chain still bound its endpoints)
+        const NodeId                srcUsed   = pthChains.from;
+        const NodeId                dstUsed   = pthChains.to;
         // ix2-slice (IX-2 P1): the hedged bridge — the fewest-crossings chain over declined / value / closure / namesake / slot hops
         const rw::PathBridge     pthBridge = path.empty() ? rw::pathBridge( ing, g, srcDefs, dstDefs, *pthValueIdx, *pthBackHops ) : rw::PathBridge{};
         // HOP1 (#6): to= has a backward hop the provider follows → the root next= is the callers verb on to=, not the gap bodies
         const std::string        pthSinkCallers = path.empty() && pthGaps.any() && !dstGlob ? rw::pathSinkCallersSelector( ing, *pthBackHops, dstDefs, dstN, pthSingleRoot, pthRootPrefix )
                                                                                              : std::string();
         // FE-B: exactly when a printed hop is via="name" (every printed chain when pairs are listed); link, anchor, split, owner alike
-        const rw::PathShownMarks pthMarks = rw::pathShownMarks( ing, g, pthPairs, path );
+        const rw::PathShownMarks pthMarks = rw::pathShownMarks( ing, g, pthPairs, pthRows );
         const bool pthHasVia  = pthMarks.via;
         const bool pthHasLink = pthMarks.link;
         const bool pthHasMiss = pthMarks.miss;
         // attrib-multidef (defattrib.h): from_p=/to_p= only for an endpoint the path bound; prov="split" on a split-arm hop
-        const rw::PathEndpointBinding pthBound = rw::pathEndpointBinding( g, rw::endpointDefinitionCount( ing, srcDefs ), rw::endpointDefinitionCount( ing, dstDefs ), pthShown );
+        const rw::PathEndpointBinding pthBound = rw::pathEndpointBinding( g, rw::endpointDefinitionCount( ing, srcDefs ), rw::endpointDefinitionCount( ing, dstDefs ), pthBind );
         const bool                    pthHasSplit = pthMarks.split;
         // zed-03 (src/pathpairs.h): a bound endpoint that is a test/fixture copy while a source definition exists is disclosed
-        const rw::PathTestTwin        pthTwin = srcGlob || dstGlob ? rw::PathTestTwin{} : rw::pathTestTwins( ing, g, { srcDefs, srcN, pthBound.from }, { dstDefs, dstN, pthBound.to }, pthShown );
-        const std::vector<std::string_view> pthOwners = rw::pathHopOwners( ing, path );   // PATH-OWNERS: n="Owner.name" per hop
+        const rw::PathTestTwin        pthTwin = srcGlob || dstGlob ? rw::PathTestTwin{} : rw::pathTestTwins( ing, g, { srcDefs, srcN, pthBound.from }, { dstDefs, dstN, pthBound.to }, pthBind );
+        const std::vector<std::string_view> pthOwners = rw::pathHopOwners( ing, pthRows );   // PATH-OWNERS: n="Owner.name" per hop
         const bool pthHasOwner = pthMarks.owner;
         // PATH-HOP-BODY (src/hopbody.h): a reached chain of 2 hops prints its middle hop's body (hedged when that hop is no proven
         // call); a longer one names the first in next=. BODY-ON-ROUTE (src/pathgaps.h pathRouteBodies): a reachable=0 answer prints
         // the bodies of the route it names (bridge rows, handler_rule readers), every one a hedge. ONE printer for both.
         const std::string_view   pthBodyRoot  = pthSingleRoot ? std::string_view( cfg.roots[0] ) : std::string_view();
-        const bool               pthBodiesOn  = !path.empty() && rw::hopBodiesOn();
+        const bool               pthBodiesOn  = !pthRows.empty() && rw::hopBodiesOn();
         const rw::RouteBodiesXml pthHopBodyEl = pthBodiesOn ? rw::pathHopBodiesXml( ing, rw::pathMiddleHops( ing, g, pthShown, served ), pthBodyRoot ) : rw::RouteBodiesXml{};
         // GAIN GATE (fix1 fire table): never inside a --for graph-verb block — the --for answer serves its own bodies, and the one
         // in-sample fire there (LARGE-DEV vscode-03, +7.7 KB) named nothing its question asked for
@@ -2810,13 +2819,14 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         std::string              pthRootAttrs = rw::pathTestTwinRootAttrs( ing, rw::pathPairsRootAttrs( ing, pthPairs, pthSingleRoot, pthRootPrefix ).rootAttrs, pthTwin, pthSingleRoot, pthRootPrefix );
         const std::string        pthHopNext   = pthBodiesOn && pthRootAttrs.find( " next=\"" ) == std::string::npos ? rw::pathMiddleHopNext( ing, pthShown, pthBodyRoot ) : std::string();
         pthRootAttrs += pthHopNext.empty() ? std::string() : rw::nextAttrXml( pthHopNext );
+        pthRootAttrs += rw::pathRouteRootAttrs( ing, pthRoute, srcUsed, pthRootAttrs.find( " next=\"" ) != std::string::npos, pthSingleRoot, pthRootPrefix );
         rw::emitTo( stdout, "<!-- ripwire path: one DIRECTED call path from= to to= (each <s> a hop); reachable= is 0 and hops= 0 when the "
                      "graph holds none. {}{}{}{}-->{}", ( rw::defAltsLegend( pthAlts ) + rw::unprovenDefsVerbLegend( rw::UnprovenDefsVerb::Path, pthUnprovenDefs > 0 ) + rw::viaNameLegend( pthHasVia )
                                                          + rw::viaLinkLegend( pthHasLink ) + rw::anchorMissLegend( pthHasMiss )
                                                          + rw::splitArmLegend( pthHasSplit ) + rw::pathUnboundLegend( !pthBound.from || !pthBound.to )
                                                          + rw::memberOwnerLegend( pthHasOwner ) + rw::memberOwnerContainedLegend( pthMarks.ownerContained ) + std::string( rw::pathPairsLegend( pthPairs ) ) + rw::pathOrderLegend( pthPairs, pthTwin )
                                                          + std::string( rw::pathHopBodiesLegend( !pthHopBodies.empty() ) ) + std::string( rw::pathHopNextLegend( !pthHopNext.empty() ) )
-                                                         + std::string( rw::routeBodyHedgeLegend( pthHopBodyEl.hedged || pthRouteEl.hedged ) ) ).c_str(),
+                                                         + std::string( rw::routeBodyHedgeLegend( pthHopBodyEl.hedged || pthRouteEl.hedged ) ) + std::string( rw::pathRouteLegend( pthRoute ) ) ).c_str(),
                      ( std::string( rw::toValueRefsLegend( pthToValueRefs.count > 0 ) ) + rw::valueRefsDepthLegend( pthToValueRefs.depthCut.files > 0 ) ).c_str(),
                      ( rw::pathGapsLegend( pthGaps.any(), !pthSinkCallers.empty() ) + rw::pathBridgeLegend( pthBridge )
                        + rw::nearSinkLegend( pthNear ) + std::string( rw::pathHandlerRuleLegend( pthHandler ) ) + std::string( rw::pathRouteBodiesLegend( !pthRouteEl.xml.empty() ) )
@@ -2826,7 +2836,7 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                      ex( srcN ).c_str(), ex( dstN ).c_str(), pthBound.from ? " from_p=\"" + loc( srcUsed ) + "\"" : std::string(),
                      pthBound.to ? " to_p=\"" + loc( dstUsed ) + "\"" : std::string(),
                      srcDefs.size(), dstDefs.size(), ( rw::unprovenDefsAttrXml( pthUnprovenDefs ) + rw::pathGlobAttrXml( srcGlob, dstGlob ) ).c_str(),   // H1: beside the defs counts it is not in; ix2-slice: a glob endpoint
-                     path.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
+                     pthRows.empty() ? 0 : 1, pthShown.empty() ? std::size_t( 0 ) : pthShown.size() - 1,
                      ( pthRootAttrs + pthRootAttr ).c_str(),
                      rw::graphCountFloorAttrXml( g ).c_str() );
         // absent at zero: byte-identical otherwise; the depth cut beside it makes the count (or its absence) a floor
@@ -2844,7 +2854,7 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
                      rw::pathNearSinkXml( ing, pthNear, pthSingleRoot, pthRootPrefix ),
                      path.empty() ? rw::pathHandlerRuleXml( ing, pthBackHops->names(), pthHandler, pthSingleRoot, pthRootPrefix ) : std::string() );
         // FE-B via="name", #409 via="link"/anchor="missing", attrib-multidef prov="split", PATH-OWNERS n="Owner.name": one emitter, shared with MCP path_between
-        rw::emitPathAnswerRows( stdout, ing, g, pthPairs, path, pthOwners, pthSingleRoot, pthRootPrefix );   // TRACE-EP: pairs or today's rows, shared with MCP
+        rw::emitPathAnswerRows( stdout, ing, g, pthPairs, pthRows, pthOwners, pthSingleRoot, pthRootPrefix );   // TRACE-EP: pairs or today's rows, shared with MCP
         rw::emitRaw( stdout, pthHopBodies.c_str() );    // PATH-HOP-BODY: after the hop rows they explain ("" when none)
         rw::emitRaw( stdout, pthRouteEl.xml.c_str() );  // BODY-ON-ROUTE: after the route rows they explain (reachable=0 only)
         rw::emitRaw( stdout, pthAlts.xml.c_str() );   // D2 part 5: empty when both picks are provably unique

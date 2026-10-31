@@ -533,6 +533,45 @@ inline bool looksLikeJsTestFile( std::string_view path ) noexcept
     return false;
 }
 
+/// Whether `rootRelPath` (relative to the crawl root, ancestors kept) is a file vitest's or jest's DEFAULT
+/// include collects. The vitest rule is `defaultVitestFileName` from #330 by @rainhuang0220. looksLikeJsTestFile
+/// above is the broad pre-filter: it accepts `.test.` anywhere in the name and a `__tests__/` segment for every
+/// runner. Measured with vitest 5.0.2 and jest 30.5.2: `x.test.helper.ts` exits 1 on both ("No test files found" /
+/// "No tests found"), and `__tests__/y.ts` exits 1 on vitest.
+///   vitest  `**/*.{test,spec}.?(c|m)[jt]s?(x)`
+///   jest    `**/?(*.)+(spec|test).?([mc])[jt]s?(x)` and `**/__tests__/**/*.?([mc])[jt]s?(x)`
+/// jest matches its `__tests__` glob against the whole path, so a `__tests__` directory ABOVE the package also
+/// collects (measured, jest 30.5.2: `__tests__/pkg/src/example.js` run from `pkg` passes); hence the root-relative path.
+/// FLOORS, stated: jest 29's default lacks the `.mjs`/`.cjs`/`.mts`/`.cts` extensions, so a jest 29 package gets a
+/// command for such a file that exits 1; and a vitest.config.* / jest.config.* `include`/`testMatch` is NOT read.
+/// A config that narrows the default still gets a command, and one that widens it gets run_unknown="1" for the
+/// files only it adds.
+inline bool matchesDefaultInclude( Framework fw, std::string_view rootRelPath ) noexcept
+{
+    static constexpr std::string_view kExts[] = { ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts" };
+    std::string_view stem;
+    for( const std::string_view ext : kExts )
+    {
+        if( rootRelPath.size() > ext.size() && rootRelPath.ends_with( ext ) )
+        {
+            stem = rootRelPath.substr( 0, rootRelPath.size() - ext.size() );
+            break;
+        }
+    }
+    if( stem.empty() )
+    {
+        return false;   // none of the eight extensions either runner's default names
+    }
+    const std::size_t      slash = stem.rfind( '/' );
+    const std::string_view name  = ( slash == std::string_view::npos ) ? stem : stem.substr( slash + 1 );
+    const bool             named = name.size() > 5 && ( name.ends_with( ".test" ) || name.ends_with( ".spec" ) );
+    if( named || fw != Framework::Jest )
+    {
+        return named;
+    }
+    return rootRelPath.starts_with( "__tests__/" ) || rootRelPath.find( "/__tests__/" ) != std::string_view::npos;
+}
+
 /// The CLI verb for a detected framework, or nullptr for `Framework::None` — nullptr propagates to testmap.h
 /// as "no runner", the same contract runnerVerb() already uses for an unrecognized extension. A table, not a
 /// switch, matching testmap.h::runnerVerb's own kRunnerKinds shape (a small sorted-by-nothing row scan reads

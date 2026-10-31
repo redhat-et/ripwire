@@ -104,7 +104,7 @@ inline constexpr CompactLegendSpec kCompactLegendSpecs[] =
     // files whose include/import resolves to a def's file. shown_importers= is a present-only term: the columnar form omits it.
     { "impact",      "impact",      "transitive blast radius of of=: <s t= n= p=> reach set, <f via= p=> importers; defs= matched, reaches= their transitive callers, radius_tested= non-tests an indexed test reaches, radius_untested= the rest; importers= files that #include/import a def's file" },
     { "defs",        "defs",        "per <name q= defs=> the parsed definitions the name binds (defs= groups; a prototype with its definition is one): <d n= t= p= sel= lang= class=source|test in=>, sel= binds that one alone in any SYM verb, in= distinct callers (a floor); source first, then in=, then path" },
-    { "path",        "path",        "one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none" },
+    { "path",        "path",        "one DIRECTED call path from= to to=, each <s t= n= p=> a hop; reachable=0 hops=0 when none shown" },
     { "connect",     "connect",     "minimal joining subgraph: <g> groups, <t> terminals, <s connects=> joins, <e f= t=> edges, <unconnected>" },
     { "at",          "at",          "enclosing-definition chain at p=:l=: sym= innermost, chain= outermost-first, <s n= t= l= el=> spans" },
     { "mentions",    "mentions",    "markdown FILES naming of= in backticks (docs=, sections=): <doc p= mentions=>; not a call edge" },
@@ -622,6 +622,23 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // map's own <s> rows never read it. The columnar form names the same list as its sites_at column.
     { "sites_at",          "<s sites_at=>: its calls of the leaf name, any receiver, as file:line (p= is its def line); not proof each binds", true, "s", MapHeaderRead::No, {}, "callers" },
     { "sites_total",       "<s sites_total=N>: N sites, sites_at= lists the first 16; next= (the uses verb) lists all", true, "s", MapHeaderRead::No, {}, "callers" },
+    // STRING-IMPORT (fordottedstring.h): the --callers element keeps no comment in the compact layer, so each attribute it prints is defined
+    // here, ELEMENT-qualified (<dotted_strings>/<ds>) and keyed to the callers schema; --for keeps the element's own comment.
+    { "hedge",             "<dotted_strings hedge=>: the whole claim: a string in the source names a shown symbol; no edge, in no count or est_tokens; whether an import sink loads it is not traced", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "sites",             "<dotted_strings sites=N rows=K>: N non-test string sites name a shown symbol, K printed (rows_capped=1 next= beyond)", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "tests",             "<dotted_strings tests=N>: N more sites are in test paths, counted only", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "unresolved",        "<dotted_strings unresolved=N>: N strings end in a shown name but resolve to no one definition", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "external",          "<dotted_strings external=N>: N strings end in a shown name but name no in-tree module", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
+    { "s",                 "<ds s=>: the dotted string as written in the source (tmpl= for a %-template)", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "tmpl",              "<ds tmpl= cand= cands=N>: a %-template handed to a call whose tail name is an import sink's (the callee is not resolved); cand= modules sibling directories of shown files would fill it with, cands=N how many; which one loads is not known", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "tn",                "<ds tn= tp=>: the definition the string names and where it is", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "mod",               "<ds mod=>: the module file the string names, when it names a whole module and no definition", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "p",                 "<ds p= l= in=>: the file, line and enclosing name where the string sits", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "sink",              "<ds sink=>: the string is the argument of a call with that tail name (the callee is not resolved)", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "loader",            "<ds loader= lp=>: a function in which the constant's name reaches the argument of a call whose tail name is an import sink's (the callee is not resolved) through its own assignments; names only, not a proof of the value", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "loaders",           "<ds loaders=N>: N functions spell the constant that way; over 3 none is named (a generic word)", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "loaders_floor",     "<ds loaders_floor=1>: a sink call in a file that can name the constant traced no names (too many assignments, or none), so loaders= may be short", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "s",                 "<dotted_strings s= next=>: no row is printed: s= is the first string found in a test path (counted in tests=), next= a grep command for it", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
     { "fields",            "<sites_at> column: each row's calls of the leaf name, any receiver, as file:line, space-separated; not proof each binds", true, "cols", MapHeaderRead::No, "sites_at", "callers" },
     { "fields",            "<sites_total> column: a row's uncut site count; its sites_at cell lists the first 16, the uses verb all", true, "cols", MapHeaderRead::No, "sites_total", "callers" },
     // FE-B: a map <c> row merging N byte-identical via=name rows (serialize.h writeMapCalleeRows) carries x=N
@@ -868,6 +885,8 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "slot_fns", "s slot_fns=K: K functions that struct field holds (the width the crossing picks from); NOT capped, a wide table is still crossed; a hedge", true, {}, MapHeaderRead::No, {}, "path" },
     { "to_glob", "to_glob=1: to='s * matched every function or method definition fitting it (to_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
     { "from_glob", "from_glob=1: from='s * matched every function or method definition fitting it (from_defs= counts them)", false, "path", MapHeaderRead::No, {}, "path" },
+    // PATH-ROUTE v2 (src/pathroute.h pathRouteLegend): present-only, on a single-chain reached answer of >= 2 by-name hops
+    { "route_hedged", "route_hedged=name-stitched route_by_name=K route_cands=P: K hops of the shown chain are via=name (receiver unproven), P same-named candidate chains (route_cands counts in-repo same-named definitions along the route; builtin and external receivers are not counted, so a low count is no proof; route_cands_capped=1: at least P): a hedge, the true route may be another; =unlikely K>=4: probably not the real route, read next=; =not-proven route_len=N: the shortest chain found (N hops, K by name) is NOT printed, reachable=0 here is a refusal, not none (never no route); next= from='s callees; =proven-preferred: the shortest chain (route_len=, route_by_name= by name) is not shown, a proven-only chain is", false, "path", MapHeaderRead::No, {}, "path" },   // also defines route_by_name= route_cands= route_cands_capped= route_len=
     // SINK-SIDE FRONTIER (src/pathgaps.h kNearSinkLegend), present on a reachable=0 answer: the <near_sink> block and its <ns> rows.
     { "rows", "near_sink depth= callers= rows=: to='s proven callers up to depth= back; rows_capped=1 cut; next= the first row's callers", true, "near_sink", MapHeaderRead::No, {}, "path" },
     { "d", "ns d= t= n= p= callers= why=: hops back, symbol, its callers; why= un-edged ways in (declined|value|through|name|closure), external: none found; never a hop", true, "ns", MapHeaderRead::No, {}, "path" },
