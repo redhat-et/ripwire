@@ -19,17 +19,14 @@ enum class FileGraphStop : std::uint8_t
     AllocFailure,   // std::bad_alloc inside the fold
 };
 
-inline std::atomic<std::uint8_t>& fileGraphStopSlot() noexcept
-{
-    static std::atomic<std::uint8_t> slot{ 0 };
-    return slot;
-}
+inline std::atomic<FileGraphStop> g_fileGraphStop{ FileGraphStop::None };
+
 inline void fileGraphStopRecord( FileGraphStop why ) noexcept
 {
-    std::uint8_t none = 0;
-    fileGraphStopSlot().compare_exchange_strong( none, static_cast<std::uint8_t>( why ), std::memory_order_relaxed );
+    FileGraphStop none = FileGraphStop::None;
+    g_fileGraphStop.compare_exchange_strong( none, why, std::memory_order_relaxed );
 }
-inline FileGraphStop fileGraphStopped() noexcept { return static_cast<FileGraphStop>( fileGraphStopSlot().load( std::memory_order_relaxed ) ); }
-inline void          fileGraphStopClear() noexcept { fileGraphStopSlot().store( 0, std::memory_order_relaxed ); }
+inline FileGraphStop fileGraphStopped() noexcept { return g_fileGraphStop.load( std::memory_order_relaxed ); }
+inline void          fileGraphStopClear() noexcept { g_fileGraphStop.store( FileGraphStop::None, std::memory_order_relaxed ); }
 
 } // namespace rw

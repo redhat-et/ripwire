@@ -64,7 +64,7 @@ public:
     explicit FileAdjacency( std::uint32_t files ) : off_( std::size_t( files ) + 1, 0 ) {}
 
     // Derived from off_, so a moved-from adjacency is empty (size 0), not a count of rows it no longer has.
-    std::size_t size() const noexcept { return off_.empty() ? 0 : off_.size() - 1; }
+    std::size_t size() const noexcept { return std::max<std::size_t>( off_.size(), 1 ) - 1; }
     bool        empty() const noexcept { return size() == 0; }
     std::size_t edgeCount() const noexcept { return tgt_.size(); }
     std::size_t bytes() const noexcept { return off_.capacity() * 4 + tgt_.capacity() * 4; }
@@ -460,14 +460,6 @@ public:
         return endRow( std::uint32_t( n ) );
     }
 
-    // Adds the working row's ids as a row, and clears the working row.
-    std::uint32_t addWork( FileWorkRow& work )
-    {
-        work.drain( scratch_ );
-        // scratch_ is reused by nothing below addSorted, so a row costs no allocation once it has grown.
-        return addSorted( scratch_.data(), scratch_.size() );
-    }
-
     // ORs a finished row into a working row. Row 0 is empty.
     void orRowInto( std::uint32_t row, FileWorkRow& work ) const { s_.orRowInto( row, work ); }
 
@@ -501,7 +493,6 @@ public:
     FileSetStore finish()
     {
         firstRowOfHash_ = {};
-        scratch_        = {};
         return std::move( s_ );
     }
 
@@ -607,7 +598,6 @@ private:
 
     FileSetStore                                               s_;
     ankerl::unordered_dense::map<std::uint64_t, std::uint32_t> firstRowOfHash_;
-    std::vector<std::uint32_t>                                 scratch_;
     std::size_t                                                rowStart_ = 0;
     std::uint64_t                                              hash_     = 0;
     std::uint64_t                                              hashMask_;
@@ -897,7 +887,7 @@ inline FileSetStore buildFileClosure( const Adj& adj, const FileClosureOptions& 
 
         PROFILE_SCOPE_DESCRIBE( "closure/4 fold over the components, sinks first (includes 4a-4c)" );
         FileWorkRow                work( F );
-        std::vector<std::uint32_t> rowOfComp( C, 0 ), mergedInto( std::size_t( reaching ) + 2, 0 );
+        std::vector<std::uint32_t> rowOfComp( C, 0 ), mergedInto( std::size_t( reaching ) + 2, 0 ), ids;
         std::uint32_t              sinceCheck = 0;
         std::size_t                wordsAtCheck = 0;
         for( std::uint32_t k = 0; k < C; ++k )
@@ -933,7 +923,8 @@ inline FileSetStore buildFileClosure( const Adj& adj, const FileClosureOptions& 
             std::uint32_t row = 0;
             {
                 PROFILE_SCOPE_DESCRIBE( "closure/4b row compression (working row -> ids -> hash, verify, store)" );
-                row = b.addWork( work );
+                work.drain( ids );   // ascending, and the working row is clear again; `ids` is reused, so a row costs no allocation once it has grown
+                row = b.addSorted( ids.data(), ids.size() );
             }
             if( b.overflowed() )
             {
