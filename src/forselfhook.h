@@ -868,14 +868,8 @@ struct SiteSet
     std::size_t       skipped = 0;
     // The files a use or a definition sat in that could not be read again (missing, unreadable, changed since the index): their uses are
     // in neither list nor skipped=, so the row says how many files it lost (a floor).
-    std::vector<std::uint32_t> unread;
-    void noteUnread( std::uint32_t file )
-    {
-        if( std::ranges::find( unread, file ) == unread.end() )
-        {
-            unread.push_back( file );
-        }
-    }
+    std::vector<std::uint32_t> unread;   // may repeat a file: the row counts the distinct ones
+    void noteUnread( std::uint32_t file ) { unread.push_back( file ); }
 };
 
 inline void orderSites( std::vector<Site>& sites, const IngestResult& ing )
@@ -1258,15 +1252,13 @@ struct RowWriter
         x += "<selfhook n=\"";
         x += xmlText( qual, esc );
         x += "\" p=\"" + placeOf( m.fileId, m.line ) + '"';
-        SiteSet unreadAll;
+        std::vector<std::uint32_t> unread = found.unread;
         if( const std::uint32_t lost = relation( x, d, row ); lost != kNoFile )
         {
-            unreadAll.noteUnread( lost );
+            unread.push_back( lost );
         }
-        for( const std::uint32_t f : found.unread )
-        {
-            unreadAll.noteUnread( f );
-        }
+        std::ranges::sort( unread );
+        unread.erase( std::ranges::unique( unread ).begin(), unread.end() );
         x += " defs=\"" + std::to_string( d.defs ) + '"';
         if( d.testDefs > 0 )
         {
@@ -1282,9 +1274,9 @@ struct RowWriter
         {
             x += " skipped=\"" + std::to_string( found.skipped ) + '"';
         }
-        if( !unreadAll.unread.empty() )
+        if( !unread.empty() )
         {
-            x += " unread=\"" + std::to_string( unreadAll.unread.size() ) + '"';
+            x += " unread=\"" + std::to_string( unread.size() ) + '"';
         }
         x += '>';
         for( const Site& site : std::span( sites ).first( siteRows ) )
