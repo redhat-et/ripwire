@@ -423,7 +423,7 @@ inline std::vector<std::string> pythonFallbackRoots( std::string_view dir, std::
                                                      const WsIncludeCtx* ws, std::uint32_t includerFileId )
 {
     std::vector<std::string> roots = moduleRootCandidates( dir, [ & ]( std::string_view d ) { return pythonDirIsPackage( d, fileIndex, ws, includerFileId ); }, "src" );
-    if( pythonstdlib::isPythonStdlibModule( module.substr( 0, module.find( '.' ) ) ) )
+    if( pythonstdlib::isPythonUnbindableModule( module.substr( 0, module.find( '.' ) ) ) )
     {
         std::erase_if( roots, [ & ]( const std::string& root ) { return !pythonRootHoldsStdlib( root, fileIndex, ws, includerFileId ); } );
     }
@@ -484,11 +484,34 @@ inline bool pythonPathIsModule( std::string_view path, std::string_view tailPy, 
     return path.size() == tailLen || fileIndex.find( std::string( path.substr( 0, path.size() - tailLen - 1 ) ) + "/__init__.py" ) == fileIndex.end();
 }
 
+// The bases a Python import is probed at, one tier at a time, each read only when the tiers before it found nothing (so a layout root
+// can add an edge and never take one away): 0 the importer's own package chain root when the import names that package (D1), 1 the
+// repo root and a plain script directory (or the importer's directory for a relative import), 2 the layout roots.
+inline std::vector<std::string> pythonTierBases( int tier, std::string_view dir, std::string_view tail, bool isRelative,
+                                                 const HashMap<std::string, std::uint32_t>& fileIndex, const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    if( tier == 1 )
+    {
+        return pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId );
+    }
+    if( isRelative )
+    {
+        return {};
+    }
+    if( tier == 2 )
+    {
+        return pythonFallbackRoots( dir, tail, fileIndex, ws, includerFileId );
+    }
+    std::string selfRoot = pythonSelfChainRoot( dir, tail, fileIndex, ws, includerFileId );
+    return selfRoot.empty() ? std::vector<std::string>() : std::vector<std::string>{ std::move( selfRoot ) };
+}
+
 // ── Python Step-A — SOUND. `import a` / `import pkg.mod` / `from pkg.mod import Z` / `from .rel import Z`.
 // The captured target is the CLEAN module path (B0): `a`, `pkg.mod`, or a relative `.`/`.rel`/`..up`.
 // Rule: dots→slashes (leading relative dots handled as `.`/`..` path steps), then probe TWO candidate
 // files in a FIXED order — `mod.py` then `mod/__init__.py` — resolved relative-to-file (unless the includer's
-// directory is a package and the import is absolute) and relative-to-repo-root; only when those find NOTHING, the layout roots
+// directory is a package and the import is absolute) and relative-to-repo-root, after the importer's own package chain root when the
+// import names that package (pythonSelfChainRoot); only when those find NOTHING, the layout roots
 // (pythonFallbackRoots). Resolve IFF exactly ONE distinct fileId is hit across the probes of the tier that answered; 0 or ≥2 → kNoFile
 // (degrade, no guess). `mod.py` and `mod/__init__.py` are mutually exclusive for one module on disk, so the
 // only ambiguity is two roots of one tier naming the same-shaped path in two dirs → degrade.
@@ -564,21 +587,9 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
             }
         }
     };
-    if( !isRelative )
+    for( int tier = 0; tier < 3 && hit == kNoFile; ++tier )
     {
-        const std::string selfRoot = pythonSelfChainRoot( dir, tail, fileIndex, ws, includerFileId );
-        if( !selfRoot.empty() )
-        {
-            probeAll( { selfRoot } );   // D1: the package's own chain root first; a miss falls through to the ordinary tiers
-        }
-    }
-    if( hit == kNoFile )
-    {
-        probeAll( pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId ) );
-    }
-    if( hit == kNoFile && !isRelative )
-    {
-        probeAll( pythonFallbackRoots( dir, tail, fileIndex, ws, includerFileId ) );
+        probeAll( pythonTierBases( tier, dir, tail, isRelative, fileIndex, ws, includerFileId ) );
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
 }

@@ -18,7 +18,7 @@
 // removed the PEP 594 set (cgi, telnetlib and so on). A name missing here is treated like any project name, so a layout root holding
 // it binds; the base resolver had no layout roots, so that is a new edge: true for 3.13 code, false for older code. The static_assert
 // below is the compile-time proof that the binary search is valid. `__main__` is not in the interpreter's list and is tested beside
-// the lookup (isPythonStdlibModule).
+// the lookup (isPythonUnbindableModule).
 #include "externalnames.h"   // inSortedTable: the house lookup of a strictly sorted name table
 #include "infra/sortutil.h"
 
@@ -59,11 +59,17 @@ inline constexpr std::string_view kPythonStdlibModules[] = {
 static_assert( std::is_sorted( std::begin( kPythonStdlibModules ), std::end( kPythonStdlibModules ), rw::sortutil::svLess ),
                "kPythonStdlibModules must be sorted (binary search)" );
 
-/// Is `name` (a module's FIRST dotted segment) a CPython 3.13 standard-library module? The table is an exact copy of the
-/// interpreter's list, which omits `__main__` (always in sys.modules, never found on a path), so it is tested beside the lookup.
+/// Is `name` (a module's FIRST dotted segment) a CPython 3.13 standard-library module?
 inline bool isPythonStdlibModule( std::string_view name ) noexcept
 {
-    return name == "__main__" || rw::externalnames::inSortedTable( kPythonStdlibModules, name );
+    return rw::externalnames::inSortedTable( kPythonStdlibModules, name );
+}
+
+/// Does a layout root never bind `name`? The stdlib names, plus `__main__`: it is the running program, in sys.modules and on no path,
+/// so the interpreter's list omits it and it is tested beside the lookup.
+inline bool isPythonUnbindableModule( std::string_view name ) noexcept
+{
+    return name == "__main__" || isPythonStdlibModule( name );
 }
 } // namespace pythonstdlib
 } // namespace rw
