@@ -426,11 +426,16 @@ inline std::vector<std::string> pythonProbeBases( std::string_view dir, bool isR
     return bases;
 }
 
-// #478 gap 4: does this path-tail hit start INSIDE a package? Then it is not the module asked for: `import logging` never names
-// pkg/utils/logging.py.
-inline bool pythonTailStartsInPackage( std::string_view path, std::size_t tailLen, const HashMap<std::string, std::uint32_t>& fileIndex )
+// Does this indexed path end in the module's file? #478 gap 4: not when the tail starts INSIDE a package, because `import logging`
+// never names pkg/utils/logging.py. A tail at the root or under a plain directory (`src/`, `lib/`) counts.
+inline bool pythonPathIsModule( std::string_view path, std::string_view tailPy, std::string_view tailInit, const HashMap<std::string, std::uint32_t>& fileIndex )
 {
-    return path.size() > tailLen && fileIndex.find( std::string( path.substr( 0, path.size() - tailLen - 1 ) ) + "/__init__.py" ) != fileIndex.end();
+    const std::size_t tailLen = samePathTail( path, tailPy ) ? tailPy.size() : samePathTail( path, tailInit ) ? tailInit.size() : 0;
+    if( tailLen == 0 )
+    {
+        return false;
+    }
+    return path.size() == tailLen || fileIndex.find( std::string( path.substr( 0, path.size() - tailLen - 1 ) ) + "/__init__.py" ) == fileIndex.end();
 }
 
 // ── Python Step-A — SOUND. `import a` / `import pkg.mod` / `from pkg.mod import Z` / `from .rel import Z`.
@@ -658,12 +663,8 @@ inline std::uint32_t resolvePythonModuleSuffix( std::string_view target, const H
     std::uint32_t hit = kNoFile;
     for( const auto& kv : fileIndex )
     {
-        if( samePathTail( kv.first, tailPy ) || samePathTail( kv.first, tailInit ) )
+        if( pythonPathIsModule( kv.first, tailPy, tailInit, fileIndex ) )
         {
-            if( pythonTailStartsInPackage( kv.first, samePathTail( kv.first, tailPy ) ? tailPy.size() : tailInit.size(), fileIndex ) )
-            {
-                continue;
-            }
             if( rootScoped && ( kv.second >= fileRoot->size() || ( *fileRoot )[ kv.second ] != importerRoot ) )
             {
                 continue;   // a real path-tail hit, but in an unrelated labeled root — no import evidence connects them
