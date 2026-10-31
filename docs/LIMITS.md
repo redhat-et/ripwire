@@ -504,6 +504,16 @@ Discloses: `capped`
 | `kReexportSpellingCap` | `256` | — | spellings one walk visits; past it total= is a floor (capped="1") |
 | `kReexportUseCap` | `2` | — | use-site rows per definition, from task-named files |
 
+### `src/forselfhook.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForSelfHookCandidateRows` | `4` | — | base definitions named when the order picks none provably |
+| `kForSelfHookMethodRows` | `4` | — | served methods per answer |
+| `kForSelfHookSiteRows` | `3` | — | base-class sites per served method |
+
 ### `src/forslots.h`
 
 Discloses: **none**
