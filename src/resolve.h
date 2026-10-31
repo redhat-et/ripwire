@@ -2215,6 +2215,19 @@ inline RubyBaseScope buildRubyBaseScope( const IngestResult& ing )
     return sc;
 }
 
+// The call graph resolves an import over the MERGED index of a multi-root run, with no WsIncludeCtx, so a probe that climbs to the
+// top of the labeled path (`src`, the layout fallback's last candidate) can land on another root whose LABEL happens to be `src`.
+// The file graph refuses that in joinNormalizeLookup (rule 1); this is the same refusal for the call graph's three Step-A sites: a
+// hit outside the importer's own root is a label coincidence, not evidence. `fileRoot` is empty on a single-root run (no-op).
+inline std::uint32_t inImporterRoot( const std::vector<std::uint32_t>& fileRoot, std::uint32_t importerFileId, std::uint32_t hit ) noexcept
+{
+    if( hit == kNoFile || fileRoot.empty() || importerFileId >= fileRoot.size() || hit >= fileRoot.size() )
+    {
+        return hit;
+    }
+    return fileRoot[ hit ] == fileRoot[ importerFileId ] ? hit : kNoFile;
+}
+
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on
 // the INCLUDER's language (its file extension). `fileIndex` maps each canonical `ing.files` path → its
 // fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust);
