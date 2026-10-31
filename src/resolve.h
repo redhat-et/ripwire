@@ -47,6 +47,7 @@
 
 #include "model.h"
 #include "langfacts.h"   // langFacts(l).aliasPeelsSmartPointer — SmartAliasPeel (lane iface-peel)
+#include "pythonstdlib.h"  // isPythonStdlibModule — the stdlib-name guard on the Python layout-root fallback
 #include "arch.h"        // §B1.3: relForHash — the root-relative path segment canonicalIdRelTo keys on
 #include "smallvec.h"
 #include "infra/namesplit.h"   // stripTemplateArgs — a C++ template-id scope's family (appendTemplateFamilyKey), a `using Base<T>::m;` qualifier (buildUsingReexports)
@@ -371,7 +372,9 @@ inline bool pythonDirIsPackage( std::string_view dir, const HashMap<std::string,
 // the repo root. Two proven shapes, nothing found by scanning: (1) when `dir` belongs to a module unit (`isUnitDir`, the language's
 // own test), the first ancestor outside the unit chain, its source root; an empty one is the repo root, which every caller already
 // probes; (2) a `sourceDir` directory beside `dir` or any ancestor, nearest first, the conventional layout at the root or inside a
-// monorepo member. An importer outside both shapes finds nothing here: no edge, never a guess. Depth-bounded, no walk over the index.
+// monorepo member, and only where `sourceDir` is a plain directory outside every unit: a `sourceDir` that is itself a unit, or sits
+// inside one, is a module of that unit (`import src.x`), never a place the language looks for top-level modules. An importer outside
+// both shapes finds nothing here: no edge, never a guess. Depth-bounded, no walk over the index.
 template< typename IsUnitDir >
 inline std::vector<std::string> moduleRootCandidates( std::string_view dir, IsUnitDir&& isUnitDir, std::string_view sourceDir )
 {
@@ -390,7 +393,11 @@ inline std::vector<std::string> moduleRootCandidates( std::string_view dir, IsUn
     }
     for( std::string_view up = dir;; up = includerDir( up ) )
     {
-        roots.push_back( up.empty() ? std::string( sourceDir ) : std::string( up ) + "/" + std::string( sourceDir ) );
+        std::string source = up.empty() ? std::string( sourceDir ) : std::string( up ) + "/" + std::string( sourceDir );
+        if( !isUnitDir( up ) && !isUnitDir( source ) )
+        {
+            roots.push_back( std::move( source ) );
+        }
         if( up.empty() )
         {
             break;
@@ -399,17 +406,34 @@ inline std::vector<std::string> moduleRootCandidates( std::string_view dir, IsUn
     return roots;
 }
 
-// #478 src-layout, the Python layer: a module unit is a package, and the conventional source directory is `src`
-// (`lib/mypkg/a.py` -> `lib`; textual, flake8 -> `src`).
-inline std::vector<std::string> pythonLayoutRoots( std::string_view dir, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                                   const WsIncludeCtx* ws, std::uint32_t includerFileId )
+// Does this root hold the Python standard library itself (cpython `Lib/`)? Its `os.py` and `importlib/` are the marker: a stdlib
+// name resolved there IS the stdlib module, so the stdlib-name guard below does not apply to it.
+inline bool pythonRootHoldsStdlib( std::string_view root, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                   const WsIncludeCtx* ws, std::uint32_t includerFileId )
 {
-    return moduleRootCandidates( dir, [ & ]( std::string_view d ) { return pythonDirIsPackage( d, fileIndex, ws, includerFileId ); }, "src" );
+    return joinNormalizeLookup( root, "os.py", fileIndex, ws, includerFileId ) != kNoFile
+        && joinNormalizeLookup( root, "importlib/__init__.py", fileIndex, ws, includerFileId ) != kNoFile;
 }
 
-// Where a Python import is probed. Relative: its own directory only. Absolute: the repo root, the layout roots, and the file's own
-// directory unless that is a package (#478 gap 4): Python 3 has no implicit relative import, so inside a package `import logging`
-// never means the sibling logging.py. A plain script directory keeps it: it is sys.path[0] when the script runs.
+// #478 src-layout, the Python layer: a module unit is a package, and the conventional source directory is `src`
+// (`lib/mypkg/a.py` -> `lib`; textual, flake8 -> `src`). A FALLBACK for an absolute import `module` (dotted, no leading dots) that
+// pythonProbeBases found nothing for. A stdlib-named first segment never binds through these roots (pythonstdlib.h says why),
+// except at a root that holds the stdlib itself.
+inline std::vector<std::string> pythonFallbackRoots( std::string_view dir, std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                     const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    std::vector<std::string> roots = moduleRootCandidates( dir, [ & ]( std::string_view d ) { return pythonDirIsPackage( d, fileIndex, ws, includerFileId ); }, "src" );
+    if( pythonstdlib::isPythonStdlibModule( module.substr( 0, module.find( '.' ) ) ) )
+    {
+        std::erase_if( roots, [ & ]( const std::string& root ) { return !pythonRootHoldsStdlib( root, fileIndex, ws, includerFileId ); } );
+    }
+    return roots;
+}
+
+// Where a Python import is probed FIRST. Relative: its own directory only. Absolute: the repo root, and the file's own directory
+// unless that is a package (#478 gap 4): Python 3 has no implicit relative import, so inside a package `import logging` never
+// means the sibling logging.py. A plain script directory keeps it: it is sys.path[0] when the script runs. The layout roots
+// (pythonFallbackRoots) are probed only when these find nothing, so they add edges and cannot take one away.
 inline std::vector<std::string> pythonProbeBases( std::string_view dir, bool isRelative, const HashMap<std::string, std::uint32_t>& fileIndex,
                                                   const WsIncludeCtx* ws, std::uint32_t includerFileId )
 {
@@ -417,8 +441,7 @@ inline std::vector<std::string> pythonProbeBases( std::string_view dir, bool isR
     {
         return { std::string( dir ) };
     }
-    std::vector<std::string> bases = pythonLayoutRoots( dir, fileIndex, ws, includerFileId );
-    bases.emplace_back();
+    std::vector<std::string> bases{ std::string() };
     if( !pythonDirIsPackage( dir, fileIndex, ws, includerFileId ) )
     {
         bases.emplace_back( dir );
@@ -442,9 +465,10 @@ inline bool pythonPathIsModule( std::string_view path, std::string_view tailPy, 
 // The captured target is the CLEAN module path (B0): `a`, `pkg.mod`, or a relative `.`/`.rel`/`..up`.
 // Rule: dots→slashes (leading relative dots handled as `.`/`..` path steps), then probe TWO candidate
 // files in a FIXED order — `mod.py` then `mod/__init__.py` — resolved relative-to-file (unless the includer's
-// directory is a package and the import is absolute) and relative-to-repo-root plus pythonLayoutRoots. Resolve IFF exactly ONE distinct fileId is hit across all probes; 0 or ≥2 → kNoFile
+// directory is a package and the import is absolute) and relative-to-repo-root; only when those find NOTHING, the layout roots
+// (pythonFallbackRoots). Resolve IFF exactly ONE distinct fileId is hit across the probes of the tier that answered; 0 or ≥2 → kNoFile
 // (degrade, no guess). `mod.py` and `mod/__init__.py` are mutually exclusive for one module on disk, so the
-// only ambiguity is two roots naming the same-shaped path in two dirs → degrade.
+// only ambiguity is two roots of one tier naming the same-shaped path in two dirs → degrade.
 inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::string_view target,
                                           const HashMap<std::string, std::uint32_t>& fileIndex,
                                           const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
@@ -507,13 +531,20 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
             hit = kNoFile - 1; // a SECOND distinct file → ambiguous marker (≠ any real id)
         }
     };
-    const std::vector<std::string> bases = pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId );
-    for( const std::string& c : cand )
+    const auto probeAll = [ & ]( const std::vector<std::string>& bases )
     {
-        for( const std::string& base : bases )
+        for( const std::string& c : cand )
         {
-            probe( base, c );
+            for( const std::string& base : bases )
+            {
+                probe( base, c );
+            }
         }
+    };
+    probeAll( pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId ) );
+    if( hit == kNoFile && !isRelative )
+    {
+        probeAll( pythonFallbackRoots( dir, tail, fileIndex, ws, includerFileId ) );
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
 }
