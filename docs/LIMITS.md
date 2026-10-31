@@ -1182,6 +1182,7 @@ Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importer
 | `kLegoClosureRowCap` | `200` | OUTPUT | — |
 | `kMaxExpandIncludes` | `24` | — | inc= cap |
 | `kMaxExpandSibs` | `100` | — | sibs= cap — a BLOW-UP GUARD, set above the tail, not a trim of the |
+| `kMaxPrunedPackagesShown` | `8` | — | — |
 | `kMaxSig` | `240` | OUTPUT | — |
 | `kWithGraphNodeCap` | `8` | — | — |
 

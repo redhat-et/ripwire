@@ -2391,7 +2391,7 @@ inline std::uint32_t pythonIncludeFile( const IngestResult& ing, const Include& 
     {
         return kNoFile;
     }
-    const std::uint32_t f = resolvePreciseInclude( from, inc.target, /*isAngle=*/ false, fileIndex );
+    const std::uint32_t f = inImporterRoot( ing.fileRoot, inc.fileId, resolvePreciseInclude( from, inc.target, /*isAngle=*/ false, fileIndex ) );
     return ( f == kNoFile && inc.target.front() != '.' ) ? memo.resolve( inc.target, fileIndex, inc.fileId ) : f;
 }
 
@@ -2462,7 +2462,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // the module fileId Step-A pins, computed unconditionally (even for a relative spec, where
         // `verdict` below is already 'i' without needing it) — recordImportBindFile wants the REAL file,
         // not just verdict's "cannot leave the package" evidence.
-        const std::uint32_t resolved = resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex );
+        const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
         char verdict = 'x';
         if( b.typeName.front() == '.' )
         {

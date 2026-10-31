@@ -2775,6 +2775,31 @@ inline std::string buildIgnoredAttr( const CrawlSkips& skips )
     return attr;
 }
 
+// #478 gap 3: --arch and --deps report on modules, and a real package the crawl denylist removed reads there as if it did not exist
+// (pip's operations/build). Names them, present only when one was pruned; the rows are capped and count= with next= carry the rest.
+inline constexpr std::size_t kMaxPrunedPackagesShown = 8;
+inline std::string buildPrunedPackagesBlock( const CrawlSkips& skips, std::string_view rootArg )
+{
+    if( skips.prunedPackages == 0 )
+    {
+        return {};
+    }
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const std::size_t shown      = std::min( skips.prunedPackageRows.size(), kMaxPrunedPackagesShown );
+    std::string       out = "<pruned_packages count=\"" + std::to_string( skips.prunedPackages ) + "\" shown=\"" + std::to_string( shown )
+                          + "\" next=\"--skipped\" note=\"packages the crawl denylist removed by name: not indexed, so edges to and from them are missing here\">";
+    std::vector<char> esc;
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        const std::string& p = skips.prunedPackageRows[ i ].path;
+        out += "<p path=\"";
+        out += escapeXml( rootArg.empty() ? std::string_view( p ) : rw::sarif::rootRelativeUri( p, rootPrefix ), esc );
+        out += "\"/>";
+    }
+    out += "</pruned_packages>";
+    return out;
+}
+
 // §SEC1 — how many files the crawl REFUSED because a symlink took them out of the root (ingest.h carries the
 // rule). On the DEFAULT map, not only on --skipped, because the default map is the surface an agent actually
 // reads and a corpus that quietly shrank is precisely what the honesty contract forbids: files= would
@@ -10158,6 +10183,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     }
     w.write( rw::depsImportsUnresolvedLegend( tsImports.unresolved > 0 ) );   // #220: exactly when the root carries the pair
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
+    w.write( rw::prunedPackagesLegend( ing.crawlSkips.prunedPackages > 0, /*leadingSpace=*/ false ) );   // #478 gap 3: exactly when the block below is printed
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -10175,6 +10201,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         w.write( rw::tsImportRootAttrXml( tsImports.unresolved, tsImports.dts, tsImports.unread ) );   // #220: absent at 0; partial, not a floor — see graphlegend.h
         w.write( ">" );
     }
+    w.write( buildPrunedPackagesBlock( ing.crawlSkips, rootArg ) );   // #478 gap 3: absent when no real package was pruned
 
     // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >1 vertical, >2 tangled.
     // §P9.4: files=corpus size, dep_files=the ccd/acd/nccd/shape denominator (dependency-capable only).

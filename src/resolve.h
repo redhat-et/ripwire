@@ -47,6 +47,7 @@
 
 #include "model.h"
 #include "langfacts.h"   // langFacts(l).aliasPeelsSmartPointer — SmartAliasPeel (lane iface-peel)
+#include "pythonstdlib.h"  // isPythonStdlibModule — the stdlib-name guard on the Python layout-root fallback
 #include "arch.h"        // §B1.3: relForHash — the root-relative path segment canonicalIdRelTo keys on
 #include "smallvec.h"
 #include "infra/namesplit.h"   // stripTemplateArgs — a C++ template-id scope's family (appendTemplateFamilyKey), a `using Base<T>::m;` qualifier (buildUsingReexports)
@@ -360,13 +361,160 @@ inline std::uint32_t joinNormalizeLookup( std::string_view baseDir, std::string_
     return ( ait == ws->absIndex.end() ) ? kNoFile : ait->second;
 }
 
+// Is `dir` a Python package, i.e. does it hold an indexed __init__.py? `dir` empty = the root.
+inline bool pythonDirIsPackage( std::string_view dir, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    return joinNormalizeLookup( dir, "__init__.py", fileIndex, ws, includerFileId ) != kNoFile;
+}
+
+// The module-root rule, language-neutral: the directories a non-relative import written in `dir` may also be rooted at, past
+// the repo root. Two proven shapes, nothing found by scanning: (1) when `dir` belongs to a module unit (`isUnitDir`, the language's
+// own test), the first ancestor outside the unit chain, its source root; an empty one is the repo root, which every caller already
+// probes; (2) a `sourceDir` directory beside `dir` or any ancestor, nearest first, the conventional layout at the root or inside a
+// monorepo member, and only where `sourceDir` is a plain directory outside every unit: a `sourceDir` that is itself a unit, or sits
+// inside one, is a module of that unit (`import src.x`), never a place the language looks for top-level modules. An importer outside
+// both shapes finds nothing here: no edge, never a guess. Depth-bounded, no walk over the index.
+template< typename IsUnitDir >
+inline std::vector<std::string> moduleRootCandidates( std::string_view dir, IsUnitDir&& isUnitDir, std::string_view sourceDir )
+{
+    std::vector<std::string> roots;
+    if( isUnitDir( dir ) )
+    {
+        std::string_view up = dir;
+        while( !up.empty() && isUnitDir( up ) )
+        {
+            up = includerDir( up );
+        }
+        if( !up.empty() )
+        {
+            roots.emplace_back( up );
+        }
+    }
+    for( std::string_view up = dir;; up = includerDir( up ) )
+    {
+        std::string source = up.empty() ? std::string( sourceDir ) : std::string( up ) + "/" + std::string( sourceDir );
+        if( !isUnitDir( up ) && !isUnitDir( source ) )
+        {
+            roots.push_back( std::move( source ) );
+        }
+        if( up.empty() )
+        {
+            break;
+        }
+    }
+    return roots;
+}
+
+// Does this root hold the Python standard library itself (cpython `Lib/`)? Its `os.py` and `importlib/` are the marker: a stdlib
+// name resolved there IS the stdlib module, so the stdlib-name guard below does not apply to it.
+inline bool pythonRootHoldsStdlib( std::string_view root, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                   const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    return joinNormalizeLookup( root, "os.py", fileIndex, ws, includerFileId ) != kNoFile
+        && joinNormalizeLookup( root, "importlib/__init__.py", fileIndex, ws, includerFileId ) != kNoFile;
+}
+
+// #478 src-layout, the Python layer: a module unit is a package, and the conventional source directory is `src`
+// (`lib/mypkg/a.py` -> `lib`; textual, flake8 -> `src`). A FALLBACK for an absolute import `module` (dotted, no leading dots) that
+// pythonProbeBases found nothing for. A stdlib-named first segment never binds through these roots (pythonstdlib.h says why),
+// except at a root that holds the stdlib itself.
+inline std::vector<std::string> pythonFallbackRoots( std::string_view dir, std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                     const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    std::vector<std::string> roots = moduleRootCandidates( dir, [ & ]( std::string_view d ) { return pythonDirIsPackage( d, fileIndex, ws, includerFileId ); }, "src" );
+    if( pythonstdlib::isPythonUnbindableModule( module.substr( 0, module.find( '.' ) ) ) )
+    {
+        std::erase_if( roots, [ & ]( const std::string& root ) { return !pythonRootHoldsStdlib( root, fileIndex, ws, includerFileId ); } );
+    }
+    return roots;
+}
+
+// D1: a package importing ITSELF. When the first segment of an absolute import names the importer's own top package (the directory
+// directly under its chain root), the chain root is the one place that name can mean: `src/email/sender.py` writing
+// `from email.templates import t` means `src/email/templates.py`, with no stdlib guard and no repo-root namesake in the way. Empty
+// when the importer is not in a package, the chain ends at the repo root (tier 1 already probes it), or the name differs. A package
+// that imports another project package, or a script, gets nothing here: its run mode is unknowable.
+inline std::string pythonSelfChainRoot( std::string_view dir, std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    std::string_view top = dir;
+    std::string_view up  = dir;
+    while( !up.empty() && pythonDirIsPackage( up, fileIndex, ws, includerFileId ) )
+    {
+        top = up;
+        up  = includerDir( up );
+    }
+    if( up.empty() || top.size() == up.size() )
+    {
+        return {};
+    }
+    const std::string_view first = module.substr( 0, module.find( '.' ) );
+    return top.substr( up.size() + 1 ) == first ? std::string( up ) : std::string();
+}
+
+// Where a Python import is probed FIRST. Relative: its own directory only. Absolute: the repo root, and the file's own directory
+// unless that is a package (#478 gap 4): Python 3 has no implicit relative import, so inside a package `import logging` never
+// means the sibling logging.py. A plain script directory keeps it: it is sys.path[0] when the script runs. The layout roots
+// (pythonFallbackRoots) are probed only when these find nothing, so they add edges and cannot take one away.
+inline std::vector<std::string> pythonProbeBases( std::string_view dir, bool isRelative, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                  const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    if( isRelative )
+    {
+        return { std::string( dir ) };
+    }
+    std::vector<std::string> bases{ std::string() };
+    if( !pythonDirIsPackage( dir, fileIndex, ws, includerFileId ) )
+    {
+        bases.emplace_back( dir );
+    }
+    return bases;
+}
+
+// Does this indexed path end in the module's file? #478 gap 4: not when the tail starts INSIDE a package, because `import logging`
+// never names pkg/utils/logging.py. A tail at the root or under a plain directory (`src/`, `lib/`) counts.
+inline bool pythonPathIsModule( std::string_view path, std::string_view tailPy, std::string_view tailInit, const HashMap<std::string, std::uint32_t>& fileIndex )
+{
+    const std::size_t tailLen = samePathTail( path, tailPy ) ? tailPy.size() : samePathTail( path, tailInit ) ? tailInit.size() : 0;
+    if( tailLen == 0 )
+    {
+        return false;
+    }
+    return path.size() == tailLen || fileIndex.find( std::string( path.substr( 0, path.size() - tailLen - 1 ) ) + "/__init__.py" ) == fileIndex.end();
+}
+
+// The bases a Python import is probed at, one tier at a time, each read only when the tiers before it found nothing (so a layout root
+// can add an edge and never take one away): 0 the importer's own package chain root when the import names that package (D1), 1 the
+// repo root and a plain script directory (or the importer's directory for a relative import), 2 the layout roots.
+inline std::vector<std::string> pythonTierBases( int tier, std::string_view dir, std::string_view tail, bool isRelative,
+                                                 const HashMap<std::string, std::uint32_t>& fileIndex, const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    if( tier == 1 )
+    {
+        return pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId );
+    }
+    if( isRelative )
+    {
+        return {};
+    }
+    if( tier == 2 )
+    {
+        return pythonFallbackRoots( dir, tail, fileIndex, ws, includerFileId );
+    }
+    std::string selfRoot = pythonSelfChainRoot( dir, tail, fileIndex, ws, includerFileId );
+    return selfRoot.empty() ? std::vector<std::string>() : std::vector<std::string>{ std::move( selfRoot ) };
+}
+
 // ── Python Step-A — SOUND. `import a` / `import pkg.mod` / `from pkg.mod import Z` / `from .rel import Z`.
 // The captured target is the CLEAN module path (B0): `a`, `pkg.mod`, or a relative `.`/`.rel`/`..up`.
 // Rule: dots→slashes (leading relative dots handled as `.`/`..` path steps), then probe TWO candidate
-// files in a FIXED order — `mod.py` then `mod/__init__.py` — resolved BOTH relative-to-file and
-// relative-to-repo-root. Resolve IFF exactly ONE distinct fileId is hit across all probes; 0 or ≥2 → kNoFile
+// files in a FIXED order — `mod.py` then `mod/__init__.py` — resolved relative-to-file (unless the includer's
+// directory is a package and the import is absolute) and relative-to-repo-root, after the importer's own package chain root when the
+// import names that package (pythonSelfChainRoot); only when those find NOTHING, the layout roots
+// (pythonFallbackRoots). Resolve IFF exactly ONE distinct fileId is hit across the probes of the tier that answered; 0 or ≥2 → kNoFile
 // (degrade, no guess). `mod.py` and `mod/__init__.py` are mutually exclusive for one module on disk, so the
-// only ambiguity is file-relative vs root-relative naming the same-shaped path in two dirs → degrade.
+// only ambiguity is two roots of one tier naming the same-shaped path in two dirs → degrade.
 inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::string_view target,
                                           const HashMap<std::string, std::uint32_t>& fileIndex,
                                           const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile )
@@ -429,13 +577,19 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
             hit = kNoFile - 1; // a SECOND distinct file → ambiguous marker (≠ any real id)
         }
     };
-    for( const std::string& c : cand )
+    const auto probeAll = [ & ]( const std::vector<std::string>& bases )
     {
-        probe( dir, c );                                 // relative-to-file (always; the only mode for a relative import)
-        if( !isRelative )
+        for( const std::string& c : cand )
         {
-            probe( std::string_view {}, c ); // relative-to-repo-root (absolute import only)
+            for( const std::string& base : bases )
+            {
+                probe( base, c );
+            }
         }
+    };
+    for( int tier = 0; tier < 3 && hit == kNoFile; ++tier )
+    {
+        probeAll( pythonTierBases( tier, dir, tail, isRelative, fileIndex, ws, includerFileId ) );
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
 }
@@ -585,7 +739,7 @@ inline std::uint32_t resolvePythonModuleSuffix( std::string_view target, const H
     std::uint32_t hit = kNoFile;
     for( const auto& kv : fileIndex )
     {
-        if( samePathTail( kv.first, tailPy ) || samePathTail( kv.first, tailInit ) )
+        if( pythonPathIsModule( kv.first, tailPy, tailInit, fileIndex ) )
         {
             if( rootScoped && ( kv.second >= fileRoot->size() || ( *fileRoot )[ kv.second ] != importerRoot ) )
             {
@@ -2104,6 +2258,19 @@ inline RubyBaseScope buildRubyBaseScope( const IngestResult& ing )
     rubyScopeMixinReferences( sc, ing );   // parser version 131: mixins first, then the superclass half skips them
     rubyScopeBaseReferences( sc, ing );
     return sc;
+}
+
+// The call graph resolves an import over the MERGED index of a multi-root run, with no WsIncludeCtx, so a probe that climbs to the
+// top of the labeled path (`src`, the layout fallback's last candidate) can land on another root whose LABEL happens to be `src`.
+// The file graph refuses that in joinNormalizeLookup (rule 1); this is the same refusal for the call graph's three Step-A sites: a
+// hit outside the importer's own root is a label coincidence, not evidence. `fileRoot` is empty on a single-root run (no-op).
+inline std::uint32_t inImporterRoot( const std::vector<std::uint32_t>& fileRoot, std::uint32_t importerFileId, std::uint32_t hit ) noexcept
+{
+    if( hit == kNoFile || fileRoot.empty() || importerFileId >= fileRoot.size() || hit >= fileRoot.size() )
+    {
+        return hit;
+    }
+    return fileRoot[ hit ] == fileRoot[ importerFileId ] ? hit : kNoFile;
 }
 
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on

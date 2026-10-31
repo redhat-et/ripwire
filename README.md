@@ -2063,7 +2063,7 @@ across the tree; a rise there means the map is disclosing more overloading, not 
 | `counts_floor="1"` | a floor, not a total — a zero means *none found*, never *none exists* |
 | `unresolved=N` | call sites recognized and deliberately not resolved — counted, never dropped in silence |
 | `external="1"` | no definition anywhere in the indexed tree — stdlib or third-party, not a miss |
-| `--skipped` | every file the index does not contain, itemized with its reason — `oversize`, `excluded`, `unsupported-ext`, a pruned vendor tree (`pruned_dirs=`, contents unknown, not zero) — plus the files it DOES contain but cannot vouch for: `degraded-parse` (tree-sitter error spans, with `err_ratio=`) and `minified-suspect` (`ws_freq=`) |
+| `--skipped` | every file the index does not contain, itemized with its reason — `oversize`, `excluded`, `unsupported-ext`, a pruned vendor tree (`pruned-dir`, or `pruned-package` for a real package the denylist removed by name; `pruned_dirs=` counts both, contents unknown, not zero) — plus the files it DOES contain but cannot vouch for: `degraded-parse` (tree-sitter error spans, with `err_ratio=`) and `minified-suspect` (`ws_freq=`) |
 
 </details>
 
