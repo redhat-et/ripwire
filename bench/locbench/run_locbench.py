@@ -234,7 +234,7 @@ def parse_candidates( xml, repo_path ):
         path = os.path.relpath( real, base ).replace( os.sep, "/" )
         if path == ".." or path.startswith( "../" ): path = raw.replace( os.sep, "/" )
         out.append( dict( path=path, name=c.attrib.get( "n", "" ), canon=c.attrib.get( "id", "" ),
-                          rank=int( c.attrib.get( "r", len(out)+1 ) ) ) )
+                          kind=c.attrib.get( "k", "" ), rank=int( c.attrib.get( "r", len(out)+1 ) ) ) )
     return out
 
 # ── scoring ──────────────────────────────────────────────────────────────────
