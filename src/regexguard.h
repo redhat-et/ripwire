@@ -1063,12 +1063,15 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
     // belongs to the scope it sits in, and adjacency is a fact about that scope only.
     std::vector<std::pair<std::size_t, std::size_t>> scopes;   // (bodyBegin, bodyEnd)
     scopes.push_back( { 0, pat.size() } );
-    // Every group's body is a scope as well. Collected with the same scan the screen already trusts, so a
-    // quantifier inside a class or behind a backslash is never mistaken for a group delimiter.
+    // Every group's body is a scope as well, at EVERY depth — a depth-0-only collector never learns
+    // about `((a*a*a*a*)b)`, whose inner adjacency sits at depth 2 and reaches the engine unrefused.
+    // Collected with the same scan the screen already trusts, so a quantifier inside a class or behind
+    // a backslash is never mistaken for a group delimiter. One body begin per OPEN GROUP, pushed on
+    // '(' and popped on its ')': the push of an inner scope stops the outer scope's own walk at the
+    // inner '(' (group branch below), so nothing inside a nested group is judged twice.
     {
-        bool          isInsideClass = false;
-        std::uint32_t depth         = 0;
-        std::size_t   bodyBegin     = 0;
+        bool                     isInsideClass = false;
+        std::vector<std::size_t> bodyBegins;
         for( std::size_t i = 0; i < pat.size(); ++i )
         {
             const char c = pat[i];
@@ -1078,21 +1081,14 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
             if( c == '(' )
             {
                 const std::size_t modifier = regexGroupModifierLength( pat, i );
-                if( depth == 0 )
-                {
-                    bodyBegin = i + 1 + modifier;
-                }
-                ++depth;
+                bodyBegins.push_back( i + 1 + modifier );
                 i += modifier;
                 continue;
             }
-            if( c == ')' && depth > 0 )
+            if( c == ')' && !bodyBegins.empty() )
             {
-                --depth;
-                if( depth == 0 )
-                {
-                    scopes.push_back( { bodyBegin, i } );
-                }
+                scopes.push_back( { bodyBegins.back(), i } );
+                bodyBegins.pop_back();
                 continue;
             }
         }
@@ -1118,6 +1114,7 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
                     if( havePrevious && regexCharSetsIntersect( previous, member ) ) { return i; }
                     previous = member; havePrevious = true;
                     i = atomEnd + quant.lengthCount;
+                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: same atom, same ambiguity
                     continue;
                 }
                 havePrevious = false;
@@ -1135,6 +1132,7 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
                     if( havePrevious && regexCharSetsIntersect( previous, member ) ) { return i; }
                     previous = member; havePrevious = true;
                     i = next + quant.lengthCount;
+                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
                     continue;
                 }
                 havePrevious = false;
@@ -1150,6 +1148,7 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
                     if( havePrevious && regexCharSetsIntersect( previous, member ) ) { return i; }
                     previous = member; havePrevious = true;
                     i += 1 + quant.lengthCount;
+                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
                     continue;
                 }
                 havePrevious = false;
@@ -1188,6 +1187,7 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
                     if( havePrevious && regexCharSetsIntersect( previous, member ) ) { return i; }
                     previous = member; havePrevious = true;
                     i = close + 1 + quant.lengthCount;
+                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
                     continue;
                 }
                 // not a readable quantified atom: it breaks adjacency, and its body is its own scope (already
@@ -1213,6 +1213,7 @@ inline std::optional<std::size_t> regexAdjacentAmbiguousQuantifierAt( const std:
                     if( havePrevious && regexCharSetsIntersect( previous, member ) ) { return i; }
                     previous = member; havePrevious = true;
                     i += 1 + quant.lengthCount;
+                    if( i < scope.second && pat[i] == '?' ) { ++i; }   // lazy suffix: the escape-site rule, repeated
                     continue;
                 }
                 havePrevious = false;
