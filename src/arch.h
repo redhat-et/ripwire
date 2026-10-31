@@ -1220,7 +1220,7 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 // adj[f] may hold duplicate or out-of-range ids (see resolveIncludeAdj): buildFileClosure tolerates both.
 //
 // Complexity: one word-parallel fold, O( (N + E) · N / 64 ) worst case, whatever the closures' sizes: the per-file BFS
-// this replaced took O( N · (N + E) ), 23 s against 3.4 s on a 100,000-file graph of mean closure 11,000 (bench/FILEGRAPH.md).
+// this replaced took O( N · (N + E) ), 20 s against 5 s on a 100,000-file graph of mean closure 11,000 (bench/FILEGRAPH.md).
 //
 // Degrade / edge cases (never divides by zero):
 //   N == 0 → 0.0 (empty graph, documented: no files → no propagation)
