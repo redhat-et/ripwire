@@ -27,7 +27,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 echo "archhonestcheck: BIN=$BIN"
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 RULES="$TMP/rules.arch"
 printf 'layer a = zzz_none_a\nlayer b = zzz_none_b\ndeny a -> b\n' > "$RULES"
@@ -115,19 +115,19 @@ for l in $NOEDGE; do
 done
 # the abstractness half does not depend on an edge: types=/abstract=/A= stay.
 o="$( arch "$TMP/a_go" )"; r="$( row "$o" '[^"]*/a' )"
-printf '%s' "$r" | grep -qE 'types="1" abstract="0" A="0\.00"' && ok "(A) types=/abstract=/A= stay (no edge behind them)" || no "(A) types half lost: $r"
+if printf '%s' "$r" | grep -qE 'types="1" abstract="0" A="0\.00"'; then ok "(A) types=/abstract=/A= stay (no edge behind them)"; else no "(A) types half lost: $r"; fi
 m="$( metrics "$o" )"
-printf '%s' "$m" | grep -q 'typed_modules="2"' && ok "(A) typed_modules= still counts modules with types" || no "(A) typed_modules wrong: $m"
+if printf '%s' "$m" | grep -q 'typed_modules="2"'; then ok "(A) typed_modules= still counts modules with types"; else no "(A) typed_modules wrong: $m"; fi
 n="$( printf '%s' "$o" | grep -o '<metrics [^>]*note="[^"]*"' )"
-printf '%s' "$n" | grep -q 'zone_unknown' && ok "(A) note= defines zone_unknown in the partition" || no "(A) note= silent on zone_unknown"
+if printf '%s' "$n" | grep -q 'zone_unknown'; then ok "(A) note= defines zone_unknown in the partition"; else no "(A) note= silent on zone_unknown"; fi
 
 # a typeless Go module is unknown too, and typed_modules= counts types, not "not n/a"
 d="$TMP/a_typeless"; mkfix go "$d"; put "$d/c/c.go" 'package c\n\nfunc H() {}\n'; put "$d/docs/x.md" '# doc\n'
 o="$( arch "$d" )"; m="$( metrics "$o" )"
-printf '%s' "$m" | grep -q 'typed_modules="2"' && printf '%s' "$( row "$o" "$d/c" )" | grep -q 'zone="unknown"' && ok "(A) typeless Go module unknown; typed_modules=2 of its modules" || no "(A) typeless: $m / $( row "$o" "$d/c" )"
+if printf '%s' "$m" | grep -q 'typed_modules="2"' && printf '%s' "$( row "$o" "$d/c" )" | grep -q 'zone="unknown"'; then ok "(A) typeless Go module unknown; typed_modules=2 of its modules"; else no "(A) typeless: $m / $( row "$o" "$d/c" )"; fi
 # NotApplicable: a docs directory draws no edge by decision and keeps its row beside them
-printf '%s' "$( row "$o" "$d/docs" )" | grep -q ' ca="0" ce="0" types="0" .*zone="n/a"' && ! printf '%s' "$( row "$o" "$d/docs" )" | grep -q no_file_edges && ok "(A) a docs directory keeps its row" || no "(A) docs row: $( row "$o" "$d/docs" )"
-python3 - "$ROOT/src/lintrules.h" "$ROOT/src/langfacts.h" <<'PY' && ok "(A) fileEdges agrees with dependencyCapable: capable is never NotApplicable, not capable is never Resolved" || no "(A) fileEdges contradicts dependencyCapable"
+if printf '%s' "$( row "$o" "$d/docs" )" | grep -q ' ca="0" ce="0" types="0" .*zone="n/a"' && ! printf '%s' "$( row "$o" "$d/docs" )" | grep -q no_file_edges; then ok "(A) a docs directory keeps its row"; else no "(A) docs row: $( row "$o" "$d/docs" )"; fi
+if python3 - "$ROOT/src/lintrules.h" "$ROOT/src/langfacts.h" <<'PY'; then ok "(A) fileEdges agrees with dependencyCapable: capable is never NotApplicable, not capable is never Resolved"; else no "(A) fileEdges contradicts dependencyCapable"; fi
 import re,sys
 lint=open(sys.argv[1]).read(); facts=open(sys.argv[2]).read()
 body=lint[lint.index('inline bool dependencyCapable( Lang lang )'):]
@@ -148,26 +148,25 @@ o="$( arch "$d" )"
 sq(){ sed -E 's#path="[^"]*/(a|b)"#path="\1"#' ; }
 ra="$( row "$o" "$d/a" | sq )"; rb="$( row "$o" "$d/b" | sq )"
 pa="$( row "$pyonly" "$TMP/b_py/a" | sq )"; pb="$( row "$pyonly" "$TMP/b_py/b" | sq )"
-[ -n "$ra" ] && [ "$ra" = "$pa" ] && [ "$rb" = "$pb" ] && ok "(B) Python rows byte-identical to a Python-only tree" || no "(B) Python row moved: [$ra] vs [$pa], [$rb] vs [$pb]"
-printf '%s' "$ra" | grep -q 'ce="1"' && ok "(B) Python module a/ keeps Ce=1" || no "(B) Python a/ lost its edge: $ra"
+if [ -n "$ra" ] && [ "$ra" = "$pa" ] && [ "$rb" = "$pb" ]; then ok "(B) Python rows byte-identical to a Python-only tree"; else no "(B) Python row moved: [$ra] vs [$pa], [$rb] vs [$pb]"; fi
+if printf '%s' "$ra" | grep -q 'ce="1"'; then ok "(B) Python module a/ keeps Ce=1"; else no "(B) Python a/ lost its edge: $ra"; fi
 rg="$( row "$o" "$d/gomod/a" )"
-printf '%s' "$rg" | grep -q 'zone="unknown"' && printf '%s' "$rg" | grep -q 'no_file_edges="go"' && ok "(B) Go module unknown in the same tree" || no "(B) Go module: $rg"
+if printf '%s' "$rg" | grep -q 'zone="unknown"' && printf '%s' "$rg" | grep -q 'no_file_edges="go"'; then ok "(B) Go module unknown in the same tree"; else no "(B) Go module: $rg"; fi
 m="$( metrics "$o" )"
-printf '%s' "$m" | grep -q 'propagation_cost=' && ok "(B) propagation_cost stays where edges exist" || no "(B) propagation_cost lost: $m"
-root "$o" arch | grep -q 'no_file_edges="go" unmeasured_files="2" graph_partial="1"' && ok "(B) root: no_file_edges= names Go, 2 files" || no "(B) root: $( root "$o" arch )"
+if printf '%s' "$m" | grep -q 'propagation_cost='; then ok "(B) propagation_cost stays where edges exist"; else no "(B) propagation_cost lost: $m"; fi
+if root "$o" arch | grep -q 'no_file_edges="go" unmeasured_files="2" graph_partial="1"'; then ok "(B) root: no_file_edges= names Go, 2 files"; else no "(B) root: $( root "$o" arch )"; fi
 printf '%s' "$o" | xmllint --noout - 2>/dev/null || no "(B) not well-formed"
 
 # ── (C) a C++ repo: nothing new ───────────────────────────────────────────────────────────────────────────
 d="$TMP/c_cpp"; mkfix cpp "$d"; o="$( arch "$d" )"; dd="$( deps "$d" )"
 [ -n "$( root "$o" arch )" ] || no "(C) no <arch> root"
-printf '%s%s' "$o" "$dd" | grep -qE 'no_file_edges|unmeasured_files|zone_unknown|zone="unknown"' && no "(C) a C++ tree carries the new vocabulary" || ok "(C) C++ tree: no new attribute, no legend clause"
-printf '%s' "$( row "$o" "$d/a" )" | grep -q ' ca="0" ce="1" ' && ok "(C) C++ numbers stand" || no "(C) C++ row: $( row "$o" "$d/a" )"
+if printf '%s%s' "$o" "$dd" | grep -qE 'no_file_edges|unmeasured_files|zone_unknown|zone="unknown"'; then no "(C) a C++ tree carries the new vocabulary"; else ok "(C) C++ tree: no new attribute, no legend clause"; fi
+if printf '%s' "$( row "$o" "$d/a" )" | grep -q ' ca="0" ce="1" '; then ok "(C) C++ numbers stand"; else no "(C) C++ row: $( row "$o" "$d/a" )"; fi
 
 # ── (D) NEAR MISS: a language with edges and a genuinely uncoupled typed module ───────────────────────────
 d="$TMP/d_near"; mkfix py "$d"; put "$d/lone/lone.py" 'class Lone:\n    def z(self):\n        return 1\n'
 o="$( arch "$d" )"; r="$( row "$o" "$d/lone" )"
-printf '%s' "$r" | grep -q ' ca="0" ce="0" types="1"' && printf '%s' "$r" | grep -q 'zone="pain"' && printf '%s' "$r" | grep -q 'isolated="1"' \
-    && ok "(D) uncoupled Python module stays Ca=Ce=0, zone=pain, isolated=1" || no "(D) near miss moved: $r"
+if printf '%s' "$r" | grep -q ' ca="0" ce="0" types="1"' && printf '%s' "$r" | grep -q 'zone="pain"' && printf '%s' "$r" | grep -q 'isolated="1"'; then ok "(D) uncoupled Python module stays Ca=Ce=0, zone=pain, isolated=1"; else no "(D) near miss moved: $r"; fi
 printf '%s' "$r" | grep -q 'no_file_edges' && no "(D) near miss carries no_file_edges: $r"
 
 # ── (E) one directory holding both kinds of file ─────────────────────────────────────────────────────────
@@ -176,10 +175,10 @@ put "$d/lone2/lone.py" 'class L2:\n    pass\n'; put "$d/lone2/x.go" 'package lon
 put "$d/shgo/run.sh" '#!/bin/sh\necho hi\n'; put "$d/shgo/main.go" 'package main\n\ntype Y struct{}\n\nfunc main() {}\n'
 o="$( arch "$d" )"
 r="$( row "$o" "$d/a" )"
-printf '%s' "$r" | grep -q ' ce="1" ' && printf '%s' "$r" | grep -q 'no_file_edges="go"' && ok "(E) edges observed: numbers stay, no_file_edges= says they cover part of the module" || no "(E) mixed dir with edges: $r"
+if printf '%s' "$r" | grep -q ' ce="1" ' && printf '%s' "$r" | grep -q 'no_file_edges="go"'; then ok "(E) edges observed: numbers stay, no_file_edges= says they cover part of the module"; else no "(E) mixed dir with edges: $r"; fi
 for sub in lone2 shgo; do
     r="$( row "$o" "$d/$sub" )"
-    printf '%s' "$r" | grep -q 'zone="unknown"' && ! printf '%s' "$r" | grep -q ' ca=' && ok "(E) $sub: no edge observed with a no-edge file in it: unknown" || no "(E) $sub: $r"
+    if printf '%s' "$r" | grep -q 'zone="unknown"' && ! printf '%s' "$r" | grep -q ' ca='; then ok "(E) $sub: no edge observed with a no-edge file in it: unknown"; else no "(E) $sub: $r"; fi
 done
 
 # ── (F) --deps ───────────────────────────────────────────────────────────────────────────────────────────
@@ -187,35 +186,34 @@ dd="$( deps "$TMP/a_go" )"
 f="$( printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -o '<f p="a/a.go[^>]*>' )"
 [ -n "$f" ] || no "(F) no <f> row for a/a.go"
 printf '%s' "$f" | grep -qE 'afferent=|instab=|transitive=' && no "(F) Go row still states a number: $f"
-printf '%s' "$f" | grep -q 'no_file_edges="go"' && printf '%s' "$f" | grep -q 'includes="1"' && ok "(F) Go <f>: includes= stays, afferent/instab/transitive unknown" || no "(F) Go row: $f"
+if printf '%s' "$f" | grep -q 'no_file_edges="go"' && printf '%s' "$f" | grep -q 'includes="1"'; then ok "(F) Go <f>: includes= stays, afferent/instab/transitive unknown"; else no "(F) Go row: $f"; fi
 h="$( printf '%s' "$dd" | grep -o '<health [^>]*>' )"
-printf '%s' "$h" | grep -qE ' (ccd|acd|nccd|shape)=' && no "(F) Go <health> states a verdict: $h" || ok "(F) Go <health>: no ccd/acd/nccd/shape"
+if printf '%s' "$h" | grep -qE ' (ccd|acd|nccd|shape)='; then no "(F) Go <health> states a verdict: $h"; else ok "(F) Go <health>: no ccd/acd/nccd/shape"; fi
 printf '%s' "$h" | grep -q 'files="[0-9]*" dep_files="[0-9]*"' && printf '%s' "$h" | grep -q 'dep_langs=' || no "(F) <health> lost its denominators: $h"
-root "$dd" deps | grep -q 'no_file_edges="go" unmeasured_files="2" graph_partial="1"' && ok "(F) Go <deps> root discloses" || no "(F) <deps> root: $( root "$dd" deps )"
+if root "$dd" deps | grep -q 'no_file_edges="go" unmeasured_files="2" graph_partial="1"'; then ok "(F) Go <deps> root discloses"; else no "(F) <deps> root: $( root "$dd" deps )"; fi
 printf '%s' "$dd" | xmllint --noout - 2>/dev/null || no "(F) Go deps not well-formed"
 dd="$( deps "$TMP/b_mix" )"
-printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -o '<f p="a/a.py[^>]*>' | grep -q 'afferent="0" instab="1.00" transitive="2"' && ok "(F) mixed: Python <f> keeps its numbers" || no "(F) mixed Python row: $( printf '%s' "$dd" | grep -o '<f p="a/a.py[^>]*>' )"
+if printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -o '<f p="a/a.py[^>]*>' | grep -q 'afferent="0" instab="1.00" transitive="2"'; then ok "(F) mixed: Python <f> keeps its numbers"; else no "(F) mixed Python row: $( printf '%s' "$dd" | grep -o '<f p="a/a.py[^>]*>' )"; fi
 printf '%s' "$dd" | grep -o '<f p="gomod/a/a.go[^>]*>' | grep -q 'afferent=' && no "(F) mixed Go row states a number"
-printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape=' && ok "(F) mixed: <health> keeps its verdict over the resolved edges" || no "(F) mixed health lost shape"
+if printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape='; then ok "(F) mixed: <health> keeps its verdict over the resolved edges"; else no "(F) mixed health lost shape"; fi
 
 # ── (G) --report ─────────────────────────────────────────────────────────────────────────────────────────
 ro="$( report "$TMP/a_go" )"
 printf '%s' "$ro" | grep -q '## Dependency cycles' || no "(G) no cycles section in the Go report"
-printf '%s' "$ro" | grep -q 'none (acyclic)' && no "(G) a Go tree reads acyclic" || ok "(G) Go report does not say acyclic"
-printf '%s' "$ro" | grep -q 'have no file edges' && printf '%s' "$ro" | grep -q 'none found over the resolved edges' && ok "(G) Go report names the gap" || no "(G) Go report: $( printf '%s' "$ro" | grep -A1 'Dependency cycles' )"
+if printf '%s' "$ro" | grep -q 'none (acyclic)'; then no "(G) a Go tree reads acyclic"; else ok "(G) Go report does not say acyclic"; fi
+if printf '%s' "$ro" | grep -q 'have no file edges' && printf '%s' "$ro" | grep -q 'none found over the resolved edges'; then ok "(G) Go report names the gap"; else no "(G) Go report: $( printf '%s' "$ro" | grep -A1 'Dependency cycles' )"; fi
 ro="$( report "$TMP/c_cpp" )"
-printf '%s' "$ro" | grep -q 'none (acyclic)' && ! printf '%s' "$ro" | grep -q 'no file edges' && ok "(G) C++ report unchanged" || no "(G) C++ report moved"
+if printf '%s' "$ro" | grep -q 'none (acyclic)' && ! printf '%s' "$ro" | grep -q 'no file edges'; then ok "(G) C++ report unchanged"; else no "(G) C++ report moved"; fi
 
 # ── (H) the fact matches the index ───────────────────────────────────────────────────────────────────────
 for l in $EDGED; do
     d="$TMP/h_$l"; mkfix "$l" "$d"; dd="$( deps "$d" )"
-    printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -qE 'afferent="[1-9]' && ! printf '%s' "$dd" | grep -q 'no_file_edges' \
-        && ok "(H) $l: fileEdges=Resolved draws a real edge" || no "(H) $l: Resolved in the facts but no edge: $( printf '%s' "$dd" | sed 's/<!--.*-->//' | cut -c1-300 )"
+if printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -qE 'afferent="[1-9]' && ! printf '%s' "$dd" | grep -q 'no_file_edges'; then ok "(H) $l: fileEdges=Resolved draws a real edge"; else no "(H) $l: Resolved in the facts but no edge: $( printf '%s' "$dd" | sed 's/<!--.*-->//' | cut -c1-300 )"; fi
 done
 for l in $NOEDGE; do
     dd="$( deps "$TMP/a_$l" )"
     [ -n "$( root "$dd" deps )" ] || { no "(H) $l: no <deps> root"; continue; }
-    printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -qE 'afferent="[1-9]' && no "(H) $l: Unmeasured in the facts but the index drew an edge: move its row" || ok "(H) $l: fileEdges=Unmeasured, and no edge"
+    if printf '%s' "$dd" | sed 's/<!--.*-->//' | grep -qE 'afferent="[1-9]'; then no "(H) $l: Unmeasured in the facts but the index drew an edge: move its row"; else ok "(H) $l: fileEdges=Unmeasured, and no edge"; fi
 done
 
 # ── (I) graph_partial stays single beside a TS unresolved import ─────────────────────────────────────────
@@ -227,21 +225,21 @@ for pair in "arch:$o" "deps:$dd"; do
     n="${pair%%:*}"; v="${pair#*:}"
     root "$v" "$n" | grep -q 'imports_unresolved=' || no "(I) $n: premise: no imports_unresolved= ($( root "$v" "$n" ))"
     c="$( root "$v" "$n" | grep -o 'graph_partial=' | wc -l | tr -d ' ' )"
-    [ "$c" = 1 ] && printf '%s' "$v" | xmllint --noout - 2>/dev/null && ok "(I) $n: one graph_partial=, well-formed" || no "(I) $n: graph_partial x$c: $( root "$v" "$n" )"
+    if [ "$c" = 1 ] && printf '%s' "$v" | xmllint --noout - 2>/dev/null; then ok "(I) $n: one graph_partial=, well-formed"; else no "(I) $n: graph_partial x$c: $( root "$v" "$n" )"; fi
 done
 
 # ── (J) every --arch exit path; the stderr floor line ────────────────────────────────────────────────────
 d="$TMP/j_go"; mkfix go "$d"
 o="$( arch "$d" )"
-grep -q 'have no file edges' "$TMP/stderr" && grep -q 'violations= is a floor' "$TMP/stderr" && ok "(J) stderr: violations= is a floor" || no "(J) no stderr floor line: $( cat "$TMP/stderr" )"
+if grep -q 'have no file edges' "$TMP/stderr" && grep -q 'violations= is a floor' "$TMP/stderr"; then ok "(J) stderr: violations= is a floor"; else no "(J) no stderr floor line: $( cat "$TMP/stderr" )"; fi
 cp "$RULES" "$TMP/j.arch"
 for mode in --baseline --baseline-update; do
     o="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d" --arch="$TMP/j.arch" "$mode" --no-cache 2>/dev/null )"
-    root "$o" arch | grep -q 'no_file_edges="go"' && printf '%s' "$o" | grep -q 'zone="unknown"' && ok "(J) $mode carries it" || no "(J) $mode: $( root "$o" arch )"
+    if root "$o" arch | grep -q 'no_file_edges="go"' && printf '%s' "$o" | grep -q 'zone="unknown"'; then ok "(J) $mode carries it"; else no "(J) $mode: $( root "$o" arch )"; fi
 done
 o="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d" --arch="$TMP/j.arch" --no-cache 2>/dev/null )"
-root "$o" arch | grep -q 'no_file_edges="go"' && ok "(J) a baselined run carries it" || no "(J) baselined: $( root "$o" arch )"
-arch "$TMP/c_cpp" >/dev/null; grep -q 'no file edges' "$TMP/stderr" && no "(J) C++ stderr has the line" || ok "(J) C++ stderr: no line"
+if root "$o" arch | grep -q 'no_file_edges="go"'; then ok "(J) a baselined run carries it"; else no "(J) baselined: $( root "$o" arch )"; fi
+if arch "$TMP/c_cpp" >/dev/null; grep -q 'no file edges' "$TMP/stderr"; then no "(J) C++ stderr has the line"; else ok "(J) C++ stderr: no line"; fi
 
 # ── (K) an observed edge in a no-edge language keeps its numbers ─────────────────────────────────────────
 d="$TMP/k"; mkdir -p "$d"
@@ -252,25 +250,25 @@ put "$d/lib/lib.go" 'package lib\n\ntype L struct{}\n\nfunc G() {}\n'
 o="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d/app" "$d/lib" --arch="$RULES" --no-cache 2>/dev/null )"
 r="$( row "$o" '[^"]*app' )"
 if printf '%s' "$r" | grep -q ' ce="1" '; then
-    printf '%s' "$r" | grep -q 'no_file_edges="go"' && ok "(K) Go across roots: observed edge keeps its numbers, attribute says the rest is unseen" || no "(K) $r"
-    printf '%s' "$o" | grep -o '<metrics [^>]*>' | grep -q 'propagation_cost=' && ok "(K) propagation_cost stays once an edge exists" || no "(K) propagation_cost lost"
+    if printf '%s' "$r" | grep -q 'no_file_edges="go"'; then ok "(K) Go across roots: observed edge keeps its numbers, attribute says the rest is unseen"; else no "(K) $r"; fi
+    if printf '%s' "$o" | grep -o '<metrics [^>]*>' | grep -q 'propagation_cost='; then ok "(K) propagation_cost stays once an edge exists"; else no "(K) propagation_cost lost"; fi
 else
     no "(K) premise: go.mod replace drew no edge across roots: [$r]"
 fi
 dd="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d/app" "$d/lib" --deps --no-cache 2>/dev/null | sed 's/<!--.*-->//' )"
-printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' | grep -q 'afferent="0" instab="1.00"' && ok "(K) --deps: a Go file with an observed edge keeps its numbers" || no "(K) deps main.go: $( printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' )"
-printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape=' && ok "(K) --deps: <health> stays once an edge exists" || no "(K) deps health"
+if printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' | grep -q 'afferent="0" instab="1.00"'; then ok "(K) --deps: a Go file with an observed edge keeps its numbers"; else no "(K) deps main.go: $( printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' )"; fi
+if printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape='; then ok "(K) --deps: <health> stays once an edge exists"; else no "(K) deps health"; fi
 
 # ── (L) legends ──────────────────────────────────────────────────────────────────────────────────────────
 o="$( arch "$TMP/a_go" --legend=full )"; lg="$( printf '%s' "$o" | grep -o '<!--.*-->' | head -1 )"
-printf '%s' "$lg" | grep -q 'no_file_edges=' && ok "(L) arch full legend defines it when fired" || no "(L) arch full legend silent"
-o="$( arch "$TMP/c_cpp" --legend=full )"; printf '%s' "$o" | grep -q 'no_file_edges' && no "(L) arch legend rides without the attribute" || ok "(L) arch legend present-only"
-dd="$( deps "$TMP/a_go" --legend=full )"; printf '%s' "$dd" | grep -o '<!--.*-->' | grep -q 'no_file_edges=' && ok "(L) deps full legend defines it when fired" || no "(L) deps full legend silent"
-printf '%s' "$dd" | xmllint --noout - 2>/dev/null && ok "(L) the clause holds no double hyphen (well-formed comment)" || no "(L) deps legend not well-formed"
+if printf '%s' "$lg" | grep -q 'no_file_edges='; then ok "(L) arch full legend defines it when fired"; else no "(L) arch full legend silent"; fi
+if o="$( arch "$TMP/c_cpp" --legend=full )"; printf '%s' "$o" | grep -q 'no_file_edges'; then no "(L) arch legend rides without the attribute"; else ok "(L) arch legend present-only"; fi
+if dd="$( deps "$TMP/a_go" --legend=full )"; printf '%s' "$dd" | grep -o '<!--.*-->' | grep -q 'no_file_edges='; then ok "(L) deps full legend defines it when fired"; else no "(L) deps full legend silent"; fi
+if printf '%s' "$dd" | xmllint --noout - 2>/dev/null; then ok "(L) the clause holds no double hyphen (well-formed comment)"; else no "(L) deps legend not well-formed"; fi
 for v in arch deps; do
     if [ "$v" = arch ]; then c="$( arch "$TMP/a_go" --legend=compact )"; else c="$( deps "$TMP/a_go" --legend=compact )"; fi
     lc="$( printf '%s' "$c" | grep -o '<!--.*-->' | head -1 )"
-    printf '%s' "$lc" | grep -q 'no_file_edges=LANGS:' && printf '%s' "$lc" | grep -q 'unmeasured_files=N:' && ok "(L) $v compact legend defines both" || no "(L) $v compact legend: $( printf '%s' "$lc" | cut -c1-300 )"
+    if printf '%s' "$lc" | grep -q 'no_file_edges=LANGS:' && printf '%s' "$lc" | grep -q 'unmeasured_files=N:'; then ok "(L) $v compact legend defines both"; else no "(L) $v compact legend: $( printf '%s' "$lc" | cut -c1-300 )"; fi
 done
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"

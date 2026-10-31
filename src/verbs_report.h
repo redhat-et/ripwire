@@ -5,6 +5,7 @@
 
 #include "infra/emit.h" // rw::emitTo / rw::formatTo — THE emitter and its buffer-shaped sibling
 #include <format>            // arch-honest: the present-only <metrics> attributes and the --report clause
+#include <optional>
 #include <string_view>       // the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_report.h — the report family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -49,6 +50,74 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
         const std::size_t sl = p.rfind( '/' );
         symDir[i] = idOf( sl == std::string_view::npos ? std::string_view( "." ) : p.substr( 0, sl ) );
     }
+}
+
+// The <metrics> block of --arch (every exit path of runArchViews). propCost is empty when no edge stands behind it (arch-honest).
+void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<double> propCost, std::vector<char>& ae )
+{
+    // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
+    // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
+    // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
+    // NOTE above computeModuleMetrics in arch.h); the summary
+    // carries the same "heuristic, not proof" caveat as the rest of the note= text below.
+    // §P6.5: zone="n/a" (arch.h: totalTypes==0, cannot carry an abstractness score) is counted
+    // separately, never folded into zone_pain/zone_useless — typed_modules is the honest
+    // denominator for those two counts (modules= stays the raw total, facts unchanged on <m> rows).
+    // §A10.8: zone_ok was computed (arch.h's default zone, "ok" — outside both the pain and
+    // useless corners) but never emitted, so the header's own bucket sum fell 13 short of modules=
+    // on the real repo with no attribute admitting the gap. zone_pain + zone_useless + zone_ok +
+    // zone_na now partitions modules= exactly — every module lands in exactly one bucket.
+    // arch-honest: zone="unknown" (ModuleMetric::couplingUnknown) is its own bucket, and joins the partition only when it is non-empty.
+    std::uint32_t zonePain = 0, zoneUseless = 0, zoneNa = 0, zoneOk = 0, zoneUnknown = 0, typedModules = 0;
+    for( const rw::ModuleMetric& mm : mods )
+    {
+        typedModules += mm.totalTypes > 0 ? 1 : 0;
+        if( mm.couplingUnknown )
+        {
+            ++zoneUnknown;
+        }
+        else if( mm.zone == std::string_view( "pain" ) )
+        {
+            ++zonePain;
+        }
+        else if( mm.zone == std::string_view( "useless" ) )
+        {
+            ++zoneUseless;
+        }
+        else if( mm.zone == std::string_view( "n/a" ) )
+        {
+            ++zoneNa;
+        }
+        else if( mm.zone == std::string_view( "ok" ) )
+        {
+            ++zoneOk;
+        }
+    }
+    // Present-only: zone_unknown= rides beside its note clause, and propagation_cost is empty when the whole index holds no edge to
+    // count and a file that could not have had one (its 1/N would read as a measurement of a tree no edge was ever seen in).
+    const std::string unknownAttr = zoneUnknown != 0 ? std::format( " zone_unknown=\"{}\"", zoneUnknown ) : std::string();
+    const std::string propAttr    = propCost ? std::format( " propagation_cost=\"{:.3f}\"", *propCost ) : std::string();
+    const char* const unknownNote = zoneUnknown != 0
+        ? "; zone_unknown = modules with no edge observed and a file in a language with no file edges (no_file_edges=): coupling unknown, not zero, and part of the partition"
+        : "";
+    rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{} note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file{}\">",
+                 mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr, unknownNote );
+    for( const rw::ModuleMetric& mm : mods )
+    {
+        const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
+        const std::string noEdgeAttr = mm.noFileEdgeLangs != 0 ? " no_file_edges=\"" + rw::noFileEdgeLangTags( mm.noFileEdgeLangs ) + "\"" : std::string();
+        if( mm.couplingUnknown )   // arch-honest: an absent number is the honest spelling of unknown; types=/abstract=/A= need no edge
+        {
+            rw::emitTo( stdout, "<m path=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
+                         ep.c_str(), mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
+            continue;
+        }
+        rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" I=\"{:.2f}\" A=\"{:.2f}\" D=\"{:.2f}\" zone=\"{}\" reachable=\"{}\"{}{}{}/>",
+                     ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes,
+                     mm.instability, mm.abstractness, mm.distance, mm.zone, mm.reachable ? 1 : 0,
+                     mm.isolated ? " isolated=\"1\"" : "", mm.isLeaf ? " leaf=\"1\"" : "", noEdgeAttr );
+    }
+    rw::emitTo( stdout, "</metrics>" );
 }
 
 // --report "## God files": the files a change ripples through most (afferent = files that include/import/source
@@ -633,72 +702,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stdout, "<v from=\"{}\" fromLayer=\"{}\" to=\"{}\" toLayer=\"{}\"{}/>",
                          ef.c_str(), efl.c_str(), et.c_str(), etl.c_str(), showBaselined ? " baselined=\"1\"" : "" );
         };
-        const auto emitMetrics = [ & ]()
-        {
-            // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
-            // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
-            // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
-            // NOTE above computeModuleMetrics in arch.h); the summary
-            // carries the same "heuristic, not proof" caveat as the rest of the note= text below.
-            // §P6.5: zone="n/a" (arch.h: totalTypes==0, cannot carry an abstractness score) is counted
-            // separately, never folded into zone_pain/zone_useless — typed_modules is the honest
-            // denominator for those two counts (modules= stays the raw total, facts unchanged on <m> rows).
-            // §A10.8: zone_ok was computed (arch.h's default zone, "ok" — outside both the pain and
-            // useless corners) but never emitted, so the header's own bucket sum fell 13 short of modules=
-            // on the real repo with no attribute admitting the gap. zone_pain + zone_useless + zone_ok +
-            // zone_na now partitions modules= exactly — every module lands in exactly one bucket.
-            // arch-honest: zone="unknown" (ModuleMetric::couplingUnknown) is its own bucket, and joins the partition only when it is non-empty.
-            std::uint32_t zonePain = 0, zoneUseless = 0, zoneNa = 0, zoneOk = 0, zoneUnknown = 0, typedModules = 0;
-            for( const ModuleMetric& mm : mods )
-            {
-                typedModules += mm.totalTypes > 0 ? 1 : 0;
-                if( mm.couplingUnknown )
-                {
-                    ++zoneUnknown;
-                }
-                else if( mm.zone == std::string_view( "pain" ) )
-                {
-                    ++zonePain;
-                }
-                else if( mm.zone == std::string_view( "useless" ) )
-                {
-                    ++zoneUseless;
-                }
-                else if( mm.zone == std::string_view( "n/a" ) )
-                {
-                    ++zoneNa;
-                }
-                else if( mm.zone == std::string_view( "ok" ) )
-                {
-                    ++zoneOk;
-                }
-            }
-            // Present-only: zone_unknown= rides beside its note clause, and propagation_cost goes when the whole index holds no edge to
-            // count and a file that could not have had one (its 1/N would read as a measurement of a tree no edge was ever seen in).
-            const std::string unknownAttr = zoneUnknown != 0 ? std::format( " zone_unknown=\"{}\"", zoneUnknown ) : std::string();
-            const std::string propAttr    = archNoEdge.files != 0 && !rw::anyFileEdge( adj ) ? std::string() : std::format( " propagation_cost=\"{:.3f}\"", propCost );
-            const char* const unknownNote = zoneUnknown != 0
-                ? "; zone_unknown = modules with no edge observed and a file in a language with no file edges (no_file_edges=): coupling unknown, not zero, and part of the partition"
-                : "";
-            rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{} note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file{}\">",
-                         mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr, unknownNote );
-            for( const ModuleMetric& mm : mods )
-            {
-                const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
-                const std::string noEdgeAttr = mm.noFileEdgeLangs != 0 ? " no_file_edges=\"" + rw::noFileEdgeLangTags( mm.noFileEdgeLangs ) + "\"" : std::string();
-                if( mm.couplingUnknown )   // arch-honest: an absent number is the honest spelling of unknown; types=/abstract=/A= need no edge
-                {
-                    rw::emitTo( stdout, "<m path=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
-                                 ep.c_str(), mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
-                    continue;
-                }
-                rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" I=\"{:.2f}\" A=\"{:.2f}\" D=\"{:.2f}\" zone=\"{}\" reachable=\"{}\"{}{}{}/>",
-                             ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes,
-                             mm.instability, mm.abstractness, mm.distance, mm.zone, mm.reachable ? 1 : 0,
-                             mm.isolated ? " isolated=\"1\"" : "", mm.isLeaf ? " leaf=\"1\"" : "", noEdgeAttr );
-            }
-            rw::emitTo( stdout, "</metrics>" );
-        };
+        const std::optional<double> shownPropCost = archNoEdge.files != 0 && !rw::anyFileEdge( adj ) ? std::nullopt : std::optional<double>( propCost );
+        const auto emitMetrics = [ & ]() { emitArchMetrics( mods, shownPropCost, ae ); };
 
         // The match domain, said ONCE and appended to all three emit paths (normal / baseline /
         // baseline-update). It is a property of the VERB, not of the mode it ran in, and three hand-written

@@ -290,24 +290,29 @@ inline bool dependencyPairCapable( Lang a, Lang b ) noexcept
     return da != DepDialect::None && da == dependencyDialect( b );
 }
 
+// The terse labels of the languages a predicate holds for, comma-joined in Lang-enum order, so an answer's bytes never depend on file order.
+template<class Pred>
+inline std::string langTagsWhere( Pred holds )
+{
+    std::string out;
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        if( holds( Lang( i ) ) )
+        {
+            if( !out.empty() ) { out.push_back( ',' ); }
+            out.append( langTag( Lang( i ) ) );
+        }
+    }
+    return out;
+}
+
 // The capable SET, as the terse output labels, comma-joined in Lang-enum order — derived from
 // dependencyCapable() and langTag() so it can never drift from the predicate it documents. `--deps
 // <health dep_langs=>` publishes it: a `dep_files=` denominator that changed between two releases is
 // otherwise an unexplained number, and this makes the set that produced it readable off the same line.
 inline std::string dependencyCapableLangTags()
 {
-    std::string out;
-    for( std::size_t i = 0; i < kLangCount; ++i )
-    {
-        const Lang l = Lang( i );
-        if( l == Lang::Unknown || !dependencyCapable( l ) )
-        {
-            continue;
-        }
-        if( !out.empty() ) { out.push_back( ',' ); }
-        out.append( langTag( l ) );
-    }
-    return out;
+    return langTagsWhere( []( Lang l ) { return l != Lang::Unknown && dependencyCapable( l ); } );
 }
 
 // One mask, built once, shared by --deps <health> (graph.h::dependencyHealth) and --arch's
@@ -354,19 +359,10 @@ inline NoFileEdgeFiles noFileEdgeFiles( const IngestResult& ing )
     }
     return out;
 }
-// The value of no_file_edges=: the languages' terse labels, comma-joined in Lang-enum order, so an answer's bytes do not depend on file order.
+// The value of no_file_edges=.
 inline std::string noFileEdgeLangTags( std::uint32_t langs )
 {
-    std::string out;
-    for( std::size_t i = 0; i < kLangCount; ++i )
-    {
-        if( ( langs >> i ) & 1u )
-        {
-            if( !out.empty() ) { out.push_back( ',' ); }
-            out.append( langTag( Lang( i ) ) );
-        }
-    }
-    return out;
+    return langTagsWhere( [ langs ]( Lang l ) { return ( ( langs >> static_cast<std::uint32_t>( l ) ) & 1u ) != 0; } );
 }
 // Does the index hold a single file→file edge? With none and a no-edge file present, a system-level number (ccd, nccd, shape,
 // propagation_cost) is arithmetic over missing data, so it is left out; with one, the number stands and the root says it is partial.
