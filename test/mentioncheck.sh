@@ -98,6 +98,7 @@ sig "path mention"      "widget pipeline process records — the fix belongs in 
 sig "URL mention"       "widget pipeline process records, see https://github.com/x/y/blob/main/pkg/beta.py#L2"   flush_stale_cache
 sig "dotted module"     "widget pipeline process records regression traced to pkg.beta"                          flush_stale_cache
 sig "Scope.symbol"      "widget pipeline process records break inside Widget.render"                             render
+sig "bare file mention" "widget pipeline process records — the fix belongs in beta.py"                           flush_stale_cache
 
 # ── (vi) package-dir mention: bare backticked name / dotted chain naming a DIRECTORY ─────────────────
 sig "pkg-dir backtick"  'widget pipeline process records leak inside the `requests` module'                      open_http_session
@@ -382,6 +383,52 @@ else no "vii identifier bound: expected mention_idents_capped=\"1\" mention_iden
 D1="$( headOf "How does hybrid_search rank search results" )"; D2="$( headOf "How does hybrid_search rank search results" )"
 if [ -n "$D1" ] && [ "$D1" = "$D2" ]; then ok "vii determinism (anchored twice, byte-identical)"
 else no "vii anchored output not deterministic"; fi
+
+
+# ── (viii) ISSUE #466: bare filename / stem query surfaces script; test- down-weights sibling test ───────────
+FIX466="$TMP/fix466"
+mkdir -p "$FIX466/plugins/exo/scripts"
+cat > "$FIX466/plugins/exo/scripts/document-remind.sh" <<'SH'
+#!/usr/bin/env bash
+emit() {
+    echo "emitting reminder"
+}
+emit
+SH
+cat > "$FIX466/plugins/exo/scripts/test-document-remind.sh" <<'SH'
+#!/usr/bin/env bash
+rm_degradado() {
+    echo "test rm degradado"
+}
+SH
+cat > "$FIX466/sync_ledger.py" <<'PY'
+def run_sync():
+    print("sync")
+PY
+cat > "$FIX466/writer.py" <<'PY'
+def document_remind_writer():
+    pass
+PY
+
+cands466(){ "$BIN" "$FIX466" --for="$1" --format=candidates --top-k=20 --no-cache "${@:2}" 2>/dev/null; }
+C466="$( cands466 "document-remind" )"
+rEmit="$( rankOf "$C466" "emit" )"
+rTest="$( rankOf "$C466" "rm_degradado" )"
+if [ -n "$rEmit" ] && [ "$rEmit" -le 3 ] && [ -n "$rTest" ] && [ "$rEmit" -lt "$rTest" ]; then
+    ok "viii bare stem anchors script: emit r=$rEmit outranks sibling test rm_degradado r=$rTest"
+else no "viii bare stem failed: emit r=${rEmit:-absent} test r=${rTest:-absent}"; fi
+
+C466_EXT="$( cands466 "document-remind.sh" )"
+rEmitExt="$( rankOf "$C466_EXT" "emit" )"
+if [ -n "$rEmitExt" ] && [ "$rEmitExt" -le 3 ]; then
+    ok "viii bare extension-bearing filename anchors script: emit r=$rEmitExt"
+else no "viii bare filename failed: emit r=${rEmitExt:-absent}"; fi
+
+C466_SYNC="$( cands466 "sync_ledger" )"
+rSync="$( rankOf "$C466_SYNC" "run_sync" )"
+if [ -n "$rSync" ] && [ "$rSync" -le 3 ]; then
+    ok "viii snake_case stem anchors script: run_sync r=$rSync"
+else no "viii snake_case stem failed: run_sync r=${rSync:-absent}"; fi
 
 [ "$fail" = 0 ] && echo 'ALL PASS' || echo 'FAILURES ABOVE'
 exit "$fail"

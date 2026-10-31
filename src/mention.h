@@ -348,6 +348,45 @@ inline std::string_view stripExt( std::string_view name ) noexcept
 // which is exactly the new-clone-of-a-reused-helper --quality-delta reports. One name, one composition.
 inline std::string_view pathStem( std::string_view path ) noexcept { return stripExt( baseNameOf( path ) ); }
 
+// Known source, config, and document file extensions indexed or recognized by ripwire.
+// Used to classify extension-bearing basenames without path slashes ("foo.py", "document-remind.sh").
+inline constexpr bool isKnownFileExt( std::string_view ext ) noexcept
+{
+    // C / C++ / CUDA
+    if( ext == "c" || ext == "cc" || ext == "cpp" || ext == "cxx" || ext == "h" || ext == "hpp"
+        || ext == "hh" || ext == "hxx" || ext == "cu" || ext == "cuh" || ext == "metal" )
+    {
+        return true;
+    }
+    // Python, Go, Rust, Swift, Java, Kotlin, C#
+    if( ext == "py" || ext == "pyi" || ext == "go" || ext == "rs" || ext == "swift"
+        || ext == "java" || ext == "kt" || ext == "cs" )
+    {
+        return true;
+    }
+    // JS / TS / Astro
+    if( ext == "ts" || ext == "tsx" || ext == "mts" || ext == "cts"
+        || ext == "js" || ext == "jsx" || ext == "mjs" || ext == "cjs" || ext == "astro" )
+    {
+        return true;
+    }
+    // ObjC, Bash, Ruby, PHP, Lua, Elixir, Dart, GDScript, Clojure
+    if( ext == "m" || ext == "mm" || ext == "sh" || ext == "bash" || ext == "zsh"
+        || ext == "rb" || ext == "rake" || ext == "jbuilder" || ext == "php" || ext == "phtml"
+        || ext == "lua" || ext == "ex" || ext == "exs" || ext == "dart" || ext == "gd"
+        || ext == "clj" || ext == "cljs" || ext == "cljc" || ext == "bb" )
+    {
+        return true;
+    }
+    // Doc / Data
+    if( ext == "md" || ext == "markdown" || ext == "json" || ext == "toml"
+        || ext == "yaml" || ext == "yml" || ext == "xml" || ext == "txt" || ext == "rst" || ext == "sql" )
+    {
+        return true;
+    }
+    return false;
+}
+
 // does `path` end with the mention's segments as whole path components (extension-agnostic on the last)?
 // e.g. segments [transformers, optimization] matches "src/transformers/optimization.py".
 inline bool pathSuffixMatches( std::string_view path, const std::vector<std::string>& segments ) noexcept
@@ -660,11 +699,33 @@ inline std::vector<RawMention> extractMentions( std::string_view task, std::uint
             continue;
         }
 
-        const bool hasSlash = tok.find( '/' ) != std::string_view::npos;
-        const bool hasDot   = tok.find( '.' ) != std::string_view::npos;
-        if( !hasSlash && !hasDot && !backticked )
+        const bool hasSlash  = tok.find( '/' ) != std::string_view::npos;
+        const bool hasDot    = tok.find( '.' ) != std::string_view::npos;
+        const bool hasHyphen = tok.find( '-' ) != std::string_view::npos;
+        if( !hasSlash && !hasDot && !hasHyphen && !backticked )
         {
             continue; // plain word — not a mention
+        }
+
+        const std::size_t      lastDot   = tok.rfind( '.' );
+        const std::string_view dotExt    = ( lastDot != std::string_view::npos ) ? tok.substr( lastDot + 1 ) : std::string_view();
+        const bool             isExtFile = !hasSlash && !dotExt.empty() && isKnownFileExt( dotExt );
+
+        if( isExtFile || ( hasHyphen && !hasSlash && !hasDot ) )
+        {
+            RawMention m;
+            m.pos    = start;
+            m.isPath = true;
+            m.segments.emplace_back( tok );
+            if( outQualified )
+            {
+                ++*outQualified;
+            }
+            if( raw.size() < kMentionMaxRawTokens )
+            {
+                raw.push_back( std::move( m ) );
+            }
+            continue;
         }
 
         // split on the joiner ('/' wins: a URL/path token's dots live inside its basename segment)
@@ -1077,10 +1138,15 @@ inline std::vector<std::pair<std::uint32_t, NodeId>> matchNamedIdents( const Ing
 // B8's resolved file mentions). The ambiguity bound counts EVERY definition first, fixtures and prototypes included.
 // Appends to `out`, deduplicated.
 inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float>& lensRank, const std::vector<NamedIdent>& named,
-                                const std::vector<std::uint32_t>& namedFiles, std::vector<NodeId>& out )
+                                const std::vector<std::uint32_t>& namedFiles, std::vector<NodeId>& out,
+                                std::vector<bool>* resolvedMask = nullptr )
 {
     EXPECTS( lensRank.size() == ing.symbols.size() );
     ASSUME_NO_ALIAS( lensRank, out );
+    if( resolvedMask != nullptr )
+    {
+        resolvedMask->assign( named.size(), false );
+    }
     const std::vector<std::pair<std::uint32_t, NodeId>> matches = matchNamedIdents( ing, named );
     std::vector<std::pair<std::uint32_t, NodeId>>       perFile;   // (fileId, best symbol in it) for one identifier
     for( std::size_t m = 0; m < matches.size(); )
@@ -1107,6 +1173,10 @@ inline void resolveNamedIdents( const IngestResult& ing, const std::vector<float
         if( perFile.empty() || perFile.size() > kMentionMaxNameFiles )
         {
             continue;   // unmatched, or ambiguous: precision over recall — no lift, no reordering
+        }
+        if( resolvedMask != nullptr )
+        {
+            ( *resolvedMask )[ k ] = true;
         }
         // definition over declaration (model.h isDefinitionNotDeclaration, the house test), for callables: a C-family
         // prototype or an abstract method beside a real definition of the same name does not spend a lift of its own
@@ -1283,7 +1353,47 @@ inline bool applyMentionBoost( const IngestResult& ing, std::string_view task, s
     const std::size_t       namedDistinct = finalizeNamedIdents( identToks, named );
     noteCap( outInfo, "mention_idents_capped", "mention_idents_total", namedDistinct > named.size(), namedDistinct );
     std::vector<NodeId> namedSymbols;
-    resolveNamedIdents( ing, lensRank, named, mentionedFiles, namedSymbols );
+    std::vector<bool>   identResolved;
+    resolveNamedIdents( ing, lensRank, named, mentionedFiles, namedSymbols, &identResolved );
+
+    // If an identifier in named did not match any symbol, check if it matches an indexed file's stem (e.g. sync_ledger -> sync_ledger.py)
+    for( std::size_t i = 0; i < named.size(); ++i )
+    {
+        if( i < identResolved.size() && identResolved[ i ] )
+        {
+            continue;
+        }
+        if( mentionedFiles.size() >= kMentionMaxFiles )
+        {
+            break;
+        }
+        const NamedIdent&          n = named[ i ];
+        std::vector<std::uint32_t> stemMatches;
+        std::uint32_t              matchCount = 0;
+        for( std::uint32_t f = 0; f < fileCount; ++f )
+        {
+            if( stripExt( baseNameOf( ing.files[ f ] ) ) == n.name )
+            {
+                ++matchCount;
+                stemMatches.push_back( f );
+            }
+        }
+        if( matchCount >= 1 && matchCount <= kMentionMaxNameFiles )
+        {
+            for( const std::uint32_t matchFile : stemMatches )
+            {
+                if( mentionedFiles.size() >= kMentionMaxFiles )
+                {
+                    break;
+                }
+                if( std::find( mentionedFiles.begin(), mentionedFiles.end(), matchFile ) != mentionedFiles.end() )
+                {
+                    continue;
+                }
+                mentionedFiles.push_back( matchFile );
+            }
+        }
+    }
     // A refused identifier symbol is a CUT only when the lift would have moved it: one already scoring at or above the
     // direct slot is served exactly where it is either way, so counting it would announce content the answer shows.
     const float   directSlot  = topScore * ( 1.0f - kMentionTopGapStep );
