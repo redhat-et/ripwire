@@ -121,6 +121,26 @@ printf '%s' "$m" | grep -q 'typed_modules="2"' && ok "(A) typed_modules= still c
 n="$( printf '%s' "$o" | grep -o '<metrics [^>]*note="[^"]*"' )"
 printf '%s' "$n" | grep -q 'zone_unknown' && ok "(A) note= defines zone_unknown in the partition" || no "(A) note= silent on zone_unknown"
 
+# a typeless Go module is unknown too, and typed_modules= counts types, not "not n/a"
+d="$TMP/a_typeless"; mkfix go "$d"; put "$d/c/c.go" 'package c\n\nfunc H() {}\n'; put "$d/docs/x.md" '# doc\n'
+o="$( arch "$d" )"; m="$( metrics "$o" )"
+printf '%s' "$m" | grep -q 'typed_modules="2"' && printf '%s' "$( row "$o" "$d/c" )" | grep -q 'zone="unknown"' && ok "(A) typeless Go module unknown; typed_modules=2 of its modules" || no "(A) typeless: $m / $( row "$o" "$d/c" )"
+# NotApplicable: a docs directory draws no edge by decision and keeps its row beside them
+printf '%s' "$( row "$o" "$d/docs" )" | grep -q ' ca="0" ce="0" types="0" .*zone="n/a"' && ! printf '%s' "$( row "$o" "$d/docs" )" | grep -q no_file_edges && ok "(A) a docs directory keeps its row" || no "(A) docs row: $( row "$o" "$d/docs" )"
+python3 - "$ROOT/src/lintrules.h" "$ROOT/src/langfacts.h" <<'PY' && ok "(A) fileEdges agrees with dependencyCapable: capable is never NotApplicable, not capable is never Resolved" || no "(A) fileEdges contradicts dependencyCapable"
+import re,sys
+lint=open(sys.argv[1]).read(); facts=open(sys.argv[2]).read()
+body=lint[lint.index('inline bool dependencyCapable( Lang lang )'):]
+head=body[:body.index('return true;')]; capable=set(re.findall(r'Lang::(\w+)',head))
+table=facts[facts.index('kLangFacts = { {'):]
+rows=re.findall(r'\{ \.lang = Lang::(\w+)(.*?) \},\n',table,re.S)
+assert len(rows)==25 and len(capable)==17,(len(rows),len(capable))
+for lang,rest in rows:
+    m=re.search(r'\.fileEdges = FileEdges::(\w+)',rest); v=m[1] if m else 'Unmeasured'
+    assert not (lang in capable and v=='NotApplicable'),lang
+    assert not (lang not in capable and v=='Resolved'),lang
+PY
+
 # ── (B) mixed Go + Python ─────────────────────────────────────────────────────────────────────────────────
 d="$TMP/b_py"; mkfix py "$d"; pyonly="$( arch "$d" )"
 d="$TMP/b_mix"; mkfix py "$d"; mkfix go "$d/gomod"
@@ -237,6 +257,9 @@ if printf '%s' "$r" | grep -q ' ce="1" '; then
 else
     no "(K) premise: go.mod replace drew no edge across roots: [$r]"
 fi
+dd="$( cd "$d" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$d/app" "$d/lib" --deps --no-cache 2>/dev/null | sed 's/<!--.*-->//' )"
+printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' | grep -q 'afferent="0" instab="1.00"' && ok "(K) --deps: a Go file with an observed edge keeps its numbers" || no "(K) deps main.go: $( printf '%s' "$dd" | grep -o '<f p="[^"]*main.go[^>]*>' )"
+printf '%s' "$dd" | grep -o '<health [^>]*>' | grep -q ' shape=' && ok "(K) --deps: <health> stays once an edge exists" || no "(K) deps health"
 
 # ── (L) legends ──────────────────────────────────────────────────────────────────────────────────────────
 o="$( arch "$TMP/a_go" --legend=full )"; lg="$( printf '%s' "$o" | grep -o '<!--.*-->' | head -1 )"

@@ -28,7 +28,6 @@
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 #include "model.h"              // Lang enum
@@ -255,7 +254,7 @@ inline Lang langOfPath( std::string_view path ) noexcept
 // `preload`/`load("res://…")` resolution is a later round, so no `.gd` file carries a dependency edge yet, and claiming
 // capability without edges would make the dep_files= denominator lie.
 /// Return whether this language has syntax-backed dependency extraction for dependency rules.
-inline constexpr bool dependencyCapable( Lang lang ) noexcept
+inline bool dependencyCapable( Lang lang ) noexcept
 {
     switch( lang )
     {
@@ -274,15 +273,6 @@ inline constexpr bool dependencyCapable( Lang lang ) noexcept
     }
     return false;   // a byte past the enum
 }
-
-// A language whose files can carry an edge is capable, and docs and data never are: LangFacts::fileEdges and this predicate can
-// differ only on a language that has code and no edge (the Unmeasured middle), never across that line.
-template<std::size_t... I>
-constexpr bool fileEdgesAgreeWithCapable( std::index_sequence<I...> ) noexcept
-{
-    return ( ( langFacts( Lang( I ) ).fileEdges != ( dependencyCapable( Lang( I ) ) ? FileEdges::NotApplicable : FileEdges::Resolved ) ) && ... );
-}
-static_assert( fileEdgesAgreeWithCapable( std::make_index_sequence<kLangCount>() ), "LangFacts::fileEdges contradicts dependencyCapable" );
 
 // DepDialect + dependencyDialect now live in depdialect.h: the import-capture round (#358) picks a
 // specifier normaliser per dialect from the ingest TU, which cannot include this header. The enum's
