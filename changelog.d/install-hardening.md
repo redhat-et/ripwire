@@ -12,16 +12,24 @@ and every item that applies to a shell installer now lives in `skills/install.sh
   0777 skills directory or a 0666 `settings.json`, and a stricter `umask 077` is left alone.
 - **`settings.json` / `hooks.json` are merged safely.** A symlinked file (a dotfiles setup) is written through and the
   link kept, the temp file is built beside the target so the final rename is atomic, and the file's mode survives the
-  merge (CWE-732).
+  merge (CWE-732). A first-time file is still created owner-only (0600), as before.
 - **The hook command is quoted** when its path needs it, so a checkout under a path with a space registers a hook
   that runs; the ordinary path is registered byte-for-byte as before, and re-runs still recognise the entry.
+  `ripwire --doctor --agent=claude|codex` and the hook-removal step in `INSTALL.md` read the quoted form too, so a
+  working hook is not reported broken and the documented removal takes it out. A path holding a single quote is
+  refused.
 - **`jq` is found only through absolute `PATH` entries** (CWE-426): an empty or relative entry no longer runs a
   `jq` planted in the current directory.
-- **No stray temp files.** The installer's temp files are removed on any exit, including a killed run.
+- **No stray temp files.** The installer's temp files are removed on a normal exit and on HUP, INT and TERM. A
+  SIGKILL cannot be trapped, so it can still leave one `.tmp.*` file beside the file being written.
 - **The prune removes only what is provably ripwire's:** a symlink the previous manifest recorded, a dangling one, or
-  one pointing into this checkout (compared by whole path components, never a string prefix). A live symlink of your
-  own that happens to be named `ripwire-*`, and a regular file with such a name, are kept and reported.
+  one pointing into this checkout (compared by whole path components, never a string prefix, and never through a `..`).
+  A live symlink of your own that happens to be named `ripwire-*`, and a regular file with such a name, are kept and
+  reported. Likewise a regular file of yours sitting at the name of a skill ripwire ships is kept, not replaced.
 
-The items that apply only to the embedded store (byte-comparing it against the binary, `lstat` of its key and
-intermediate directories) have no counterpart here: this installer links straight to the checkout. Windows behaviour is
-unchanged. Gate: `test/skillinstallcheck.sh` sections (J)-(Q), each red against the previous script.
+Not carried over from #293, and why: the items that apply only to the embedded store (byte-comparing it against the
+binary, `lstat` of its key and intermediate directories) have no counterpart here, because this installer links
+straight to the checkout; the release-archive lookup of the `ripwire` binary does not apply, because this script never
+needs the binary; the Windows copy fallback and the link-loop/link-failure reporting that #293 also added were already
+here (the copy fallback and the `FAILED` report came with #334, and a loop at a shipped name is repaired). Thanks again
+@s0undt3ch. Windows behaviour is unchanged. Gate: `test/skillinstallcheck.sh` sections (J)-(Q), each red against the previous script.
