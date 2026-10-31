@@ -270,6 +270,10 @@ o="$( arch "$TMP/a_go" --legend=full )"; lg="$( printf '%s' "$o" | grep -o '<!--
 if printf '%s' "$lg" | grep -q 'no_file_edges='; then ok "(L) arch full legend defines it when fired"; else no "(L) arch full legend silent"; fi
 if o="$( arch "$TMP/c_cpp" --legend=full )"; printf '%s' "$o" | grep -q 'no_file_edges'; then no "(L) arch legend rides without the attribute"; else ok "(L) arch legend present-only"; fi
 if dd="$( deps "$TMP/a_go" --legend=full )"; printf '%s' "$dd" | grep -o '<!--.*-->' | grep -q 'no_file_edges='; then ok "(L) deps full legend defines it when fired"; else no "(L) deps full legend silent"; fi
+for v in arch deps; do   # present-only: a C++ tree's full legend defines neither the root clause nor masked_files
+    if [ "$v" = arch ]; then o="$( arch "$TMP/c_cpp" --legend=full )"; else o="$( deps "$TMP/c_cpp" --legend=full )"; fi
+    if printf '%s' "$o" | grep -qE 'masked_files|no_file_edges'; then no "(L) near miss: the $v full legend of a C++ tree defines the no-edge vocabulary"; else ok "(L) near miss: the $v full legend of a C++ tree is silent on masked_files/no_file_edges"; fi
+done
 if printf '%s' "$dd" | xmllint --noout - 2>/dev/null; then ok "(L) the clause holds no double hyphen (well-formed comment)"; else no "(L) deps legend not well-formed"; fi
 for v in arch deps; do
     if [ "$v" = arch ]; then c="$( arch "$TMP/a_go" --legend=compact )"; else c="$( deps "$TMP/a_go" --legend=compact )"; fi
