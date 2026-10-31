@@ -4253,7 +4253,7 @@ $ ./build/ripwire . --for="pagerank power iteration" --with-graph
 
 **Answers:** export per-file metrics as CodeCharta cc.json for its 3D city view export per-file metrics (loc/symbols/cx/cognitive_cx/fan-in/fan-out/churn) as CodeCharta cc.json (apiVersion 1.3) — write FILE or redirect stdout;
 
-feeds a CodeCharta 3D city. A file in a language this build draws almost no file edges for has fan_in/fan_out only when nonzero, a floor over the resolved edges; an absent one is unknown, not 0.
+feeds a CodeCharta 3D city. A file in a language this build draws almost no file edges for has fan_in/fan_out only when nonzero, and then it is a floor over the resolved edges. An absent one is unknown, not 0.
 
 **Try it**
 
@@ -4265,6 +4265,10 @@ $ ./build/ripwire . --export=cc.json:<scratch>/aux/ripwire2.cc.json
 ```
 
 **Shaped by:** `--legend`
+
+**Caveats (stated by the binary):**
+
+- A file in a language this build draws almost no file edges for has fan_in/fan_out only when nonzero, and then it is a floor over the resolved edges.
 
 ### `--batch=FILE`
 

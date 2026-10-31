@@ -2524,7 +2524,7 @@ inline constexpr char kHelpTail[] =
         "                               export per-file metrics (loc/symbols/cx/cognitive_cx/fan-in/fan-out/churn) as CodeCharta\n"
         "                               cc.json (apiVersion 1.3) — write FILE or redirect stdout; feeds a CodeCharta 3D city.\n"
         "                               A file in a language this build draws almost no file edges for has fan_in/fan_out only when\n"
-        "                               nonzero, a floor over the resolved edges; an absent one is unknown, not 0.\n"
+        "                               nonzero, and then it is a floor over the resolved edges. An absent one is unknown, not 0.\n"
         "    --batch=FILE               run several lookups in one turn: FILE is newline-delimited `verb:arg` sub-queries\n"
         "                               one-turn context sweep: FILE ('-'=stdin) is newline-delimited `verb:arg` sub-queries\n"
         "                               (for/grep/callers/callees/impact/uses/mentions/analyze/lego/owners/cochange/exemplar,\n"
