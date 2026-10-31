@@ -39,6 +39,8 @@
 #   L9 [G] bytes= is the element's own size (open tag to </lit>)
 #   X1 [G] determinism  X2 [G] xmllint well-formed  X3 [G] no "--" inside the lit legend comment
 #   N2 [train 42b T-5] `x = x + 1  # note:` is no def header: the bare string after it is a row, not a docstring (twin: the same without the comment)
+#   K1-K10, M1-M5 (lane LITERAL-ANCHOR; RED on base 4e8bfde7 where [P], fixture built at runtime): a dotted key (3+ segments, or 2 with a setting/option/key/command/flag word) or
+#          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
 #   N1 [train 42b T-3] an <x> excerpt line over 200 bytes is cut on a UTF-8 boundary with cut="1" (a 48.9 KB minified body); twin: none
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
@@ -225,6 +227,76 @@ FO="$( cd "$FL" && "$BIN" "$FL" --no-cache --for=APPTOOL_FLOOR_FLAG </dev/null 2
 if has "$FO" 'floor="1"'; then ok "F1 a literal in more than 64 source files: floor=\"1\" (comment= cannot see the unclassified ones)"
 else no "F1 floor flag missing with unclassified sites: ${FO:0:400}"; fi
 if ! has "$L" 'floor="1"'; then ok "F1 twin: a fully classified answer carries no floor"; else no "F1 twin: floor on a clean answer"; fi
+# ── K / M (lane LITERAL-ANCHOR): a dotted key or an unquoted cued message read from the --for text; fixture built here at runtime ──
+KF="$TMP/keys"; mkdir -p "$KF/app/test" "$KF/docs" "$KF/pkg"
+python3 -I -c 'import sys
+d=sys.argv[1]
+mention="".join("  \"see #files.autoSave# in row %d\",\n"%i for i in range(12))
+open(d+"/app/registry.ts","w").write("export const R = {\n  \"files.autoSave\": {\n    \"type\": \"string\",\n    \"default\": \"off\",\n  },\n  \"files.autoSaveDelay\": { \"type\": \"number\" },\n  \"files.autoSave.onWindowChange\": { \"type\": \"boolean\" },\n};\nexport const D = [\n"+mention+"];\n")
+open(d+"/app/service.ts","w").write("export function readAuto(c: any) {\n  return c.getValue(\"files.autoSave\");\n}\nexport function other(c: any) {\n  return c.getValue(\"myfiles.autoSave\") + c.getValue(\"files.autoSaveDelay\");\n}\n")
+open(d+"/app/cfg.py","w").write("def load(cfg):\n    return cfg.get(\"sql.stats.collection.enabled\")\n\ndef fail():\n    # Stale cache entry found\n    raise ValueError(\"Invalid user settings file\")\n\ndef chain(n):\n    raise ValueError(\"terminal {} must be the last filter in a chain\".format(n))\n\ndef nameit():\n    return \"Widget.render\" + \"config.settings.json\" + \"self.alpha.beta\" + \"why does retry fail\" + \"bad state\"\n\ndef caller():\n    return \"foo.bar.baz\"\n")
+open(d+"/app/cfg.go","w").write("package app\n\nfunc Reg() string {\n\treturn \"go.only.key\"\n}\n")
+open(d+"/app/test/registry.test.ts","w").write("const a = \"only.test.key\";\nconst m = \"Only a test message here\";\n")
+open(d+"/app/note.py","w").write("# only.comment.key is mentioned here\nX = 1\n")
+open(d+"/docs/guide.md","w").write("only.doc.key is documented\n")
+many="".join("def r%d():\n    return \"many.sites.key\"\n\n"%i for i in range(11))
+open(d+"/pkg/many.py","w").write(many)' "$KF"
+krun(){ ( cd "$KF" || exit 1; "$BIN" "$KF" --no-cache "$@" </dev/null 2>/dev/null ); }
+koff(){ ( cd "$KF" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$KF" --no-cache "$@" </dev/null 2>/dev/null ); }
+K1="$( krun '--for=files.autoSave afterDelay setting flow' )"; KL="$( lit <<<"$K1" )"
+if has "$KL" 's="files.autoSave" shape="dotted"' && has "$KL" '<ls p="app/registry.ts" l="2" k="string"' && has "$KL" 'lines="2-4"' \
+   && has "$KL" '<ls p="app/service.ts" l="2" k="string" in="readAuto"' && has "$KL" 'in="readAuto" ink="fn" body="above"'; then
+    ok "K1 [P] a two-segment key with a setting cue, bare in the --for text: the registration (lines after it) and the reader, whose body the answer already printed"
+else no "K1 dotted key block wrong: ${KL:0:900}"; fi
+# K2: rows are the WHOLE key; a longer name or a child key is counted, never a row; quoted whole-key sites rank above the mentions past the row cap
+if has "$KL" 'longer="4"' && has "$KL" 'capped="1"' && ! has "$KL" 'autoSaveDelay":' && ! has "$KL" 'onWindowChange' && ! has "$KL" 'myfiles.autoSave'; then
+    ok "K2 [P] files.autoSaveDelay, a child key and myfiles.autoSave are counted in longer=, never rows"
+else no "K2 whole-key filter wrong: ${KL:0:900}"; fi
+frs="$( grep -o '<ls p="[^"]*" l="[0-9]*"' <<<"$KL" | head -2 | tr '\n' ' ' )"
+if [ "$frs" = '<ls p="app/service.ts" l="2" <ls p="app/registry.ts" l="2" ' ] && [ "$( grep -o '<ls ' <<<"$KL" | wc -l | tr -d ' ' )" = "8" ]; then
+    ok "K2b [P] whole-key sites first (in-function, then the top-level registration), the row cap (8) cuts mentions and says so"
+else no "K2b order wrong: $frs"; fi
+K3="$( krun '--for=which code reads sql.stats.collection.enabled' | lit )"
+if has "$K3" 's="sql.stats.collection.enabled" shape="dotted"' && has "$K3" 'in="load"'; then ok "K3 [P] three segments need no cue"; else no "K3 three-segment key: ${K3:0:500}"; fi
+K3G="$( krun '--for=go.only.key' | lit )"
+if has "$K3G" 'p="app/cfg.go"' && has "$K3G" 'in="Reg"'; then ok "K3b [P] the same in a Go file of the polyglot fixture"; else no "K3b: ${K3G:0:500}"; fi
+K4="$( krun '--for=Widget.render option' | lit )"
+if has "$K4" 's="Widget.render" shape="dotted"'; then ok "K4 [P] Class.method WITH a cue is a key"; else no "K4 cued Class.method: ${K4:0:300}"; fi
+for near in 'files.autoSave flow' 'files.autoSave' 'Widget.render flow' 'config.settings.json option' 'app/service.ts setting' 'service.ts setting' \
+            'self.alpha.beta flow' 'foo.bar.baz() flow' 'only.test.key' 'only.test.key setting' 'only.comment.key' 'only.doc.key' 'absent.dotted.key' '1.2.3 setting'; do
+    N="$( krun "--for=$near" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( koff "--for=$near" )" ]; then ok "K5 [G] near miss, no <lit and byte-identical: $near"
+    else no "K5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
+done
+K6="$( krun '--for=files.autoSave setting' )"; K6O="$( koff '--for=files.autoSave setting' )"
+K6S="$( python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit:.*?-->","",s,flags=re.S);print(re.sub(r"<lit .*?</lit>","",s,flags=re.S),end="")' <<<"$K6" )"
+if [ "$K6S" = "$K6O" ] && has "$K6" '<lit '; then ok "K6 [P] prefix identity: minus legend and block, the answer equals RIPWIRE_NO_LITERAL_ANCHOR=1"; else no "K6 the ordinary answer moved"; fi
+if has "$K6" 'shape=dotted' && has "$K6" 'longer=' && has "$( krun '--for=sql.stats.collection.enabled' --legend=full )" 'shape=dotted'; then
+    ok "K7 [P] the key legend clause rides with a dotted fire, compact and full"; else no "K7 legend clause missing"; fi
+KT="$( run --for=APPTOOL_RENDER_MODE )"
+if ! has "$KT" 'shape=dotted'; then ok "K7b [G] a const fire carries no key clause (its bytes do not move)"; else no "K7b clause on a const fire"; fi
+if command -v xmllint >/dev/null 2>&1; then
+    if printf '%s' "$K1" | xmllint --noout - 2>/dev/null; then ok "K8 [P] xmllint well-formed"; else no "K8 not well-formed"; fi
+else ok "K8 SKIP: xmllint not installed"; fi
+K9="$( krun '--for=many.sites.key' | lit )"
+if has "$K9" 'src="11" shown="8" capped="1"' && has "$K9" 'next="--grep=many.sites.key"'; then ok "K9 [P] the row guard discloses the cut with next="; else no "K9 cap: ${K9:0:300}"; fi
+for j in --json --token-budget=3000; do
+    if [ "$( krun '--for=files.autoSave setting' "$j" )" = "$( koff '--for=files.autoSave setting' "$j" )" ]; then ok "K10 [G] $j carries no block"; else no "K10 $j moved"; fi
+done
+# messages: the stored --for subject is unquoted, so the text around the cue word IS the message
+M1="$( krun '--for=Invalid user settings file notification' | lit )"
+if has "$M1" 's="Invalid user settings file" shape="message"' && has "$M1" 'k="string" in="fail"' && ! has "$M1" 'frag='; then ok "M1 [P] an unquoted message with a trailing cue"; else no "M1: ${M1:0:500}"; fi
+M2="$( krun '--for=error Invalid user settings file' | lit )"; M2b="$( krun '--for=Invalid user settings file error message' | lit )"
+if has "$M2" 's="Invalid user settings file"' && has "$M2b" 's="Invalid user settings file"'; then ok "M2 [P] a leading cue; a two-word trailing cue"; else no "M2: ${M2:0:300} / ${M2b:0:300}"; fi
+M3="$( krun '--for=the `Invalid user settings file` error' | lit )"; M3b="$( krun "--for=it shows the 'Invalid user settings file' message" | lit )"
+if has "$M3" 'shape="message"' && has "$M3b" 'shape="message"'; then ok "M3 [P] a backticked or single-quoted span with a cue outside it"; else no "M3: ${M3:0:300} / ${M3b:0:300}"; fi
+M4="$( krun '--for=terminal foo must be the last filter in a chain error' | lit )"
+if has "$M4" 's="must be the last filter in a chain" shape="message"' && has "$M4" 'frag="1"' && has "$M4" 'in="chain"'; then ok "M4 [P] no whole hit: the longest end-anchored fragment, frag=1 says so"; else no "M4: ${M4:0:500}"; fi
+for near in 'Invalid user settings file' 'bad state error' 'Stale cache entry found error' 'Only a test message here error' 'why does retry fail error' '`no outer cue message here`' 'Zzq yyx wwv uut error'; do
+    N="$( krun "--for=$near" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( koff "--for=$near" )" ]; then ok "M5 [G] near miss, no <lit and byte-identical: $near"
+    else no "M5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
+done
 # ── X1-X3 ──
 if [ "$A" = "$( run --for=APPTOOL_RENDER_MODE )" ]; then ok "X1 deterministic"; else no "X1 two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then

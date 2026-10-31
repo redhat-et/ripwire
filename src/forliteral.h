@@ -36,6 +36,17 @@
 // (a message fragment; a backticked span is code the ranked answer already reads as names, and measured as noise on S1), else the first CONST_SHAPED word (upper-case letters and digits joined by at least one underscore, 5 bytes or more,
 // or 10 or more upper-case letters and digits). A task with neither carries no block. The block is not in est_tokens (the
 // FOR-ROUTE-DECLINED precedent: the bytes are counted on the element instead, bytes=). MCP `for` is not changed.
+//
+// LITERAL-ANCHOR V1. Failing both, the same block for two more shapes read from the --for text itself (an agent's or a stored subject
+// is bare: `files.autoSave afterDelay setting flow`, `Invalid user settings file notification`, no backticks survive into it):
+//   * shape="dotted": a dotted key of 3+ segments, or 2 with a whole word setting/option/key/command/flag beside it. Identity is an
+//     allowlist (forliteral.h dottedKeyOf): identifier segments only; never a file name or host, a `self.`/`this.` chain or a call; a
+//     capitalised first segment (Class.method) only with a cue. Rows are the WHOLE key: a site inside a longer name or a child key is
+//     counted in longer=, never a row, and sites the quotes delimit rank above mentions, so a registration survives the row cap.
+//   * shape="message": 3+ words with a whole word error/notification/message: a backticked or single-quoted span (cue outside it),
+//     else the whole task minus a leading or trailing cue. Bytes are tried longest first, at most kForLiteralMessageTries scans, then
+//     end-anchored fragments of the longest placeholder-free word run, down to 3 words (frag="1": s= is only part of the task's
+//     words). Only a string site anchors a message: no such site, no block, next try.
 
 #include "filter.h"          // pathTierOf — source / test / doc, the reader's tier
 #include "layout.h"          // layout::lineOf — a byte offset's line
@@ -55,6 +66,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -77,6 +89,9 @@ inline constexpr std::size_t kForLiteralLineBytes     = 200;    // the matched l
 inline constexpr std::size_t kForLiteralMinQuoted     = 6;
 inline constexpr std::size_t kForLiteralMinConst      = 5;
 inline constexpr std::size_t kForLiteralMinBareCaps   = 10;
+inline constexpr std::size_t kForLiteralMinKeyBytes   = 6;      // a dotted key shorter than this is not a key (`a.b.c`)
+inline constexpr std::size_t kForLiteralMessageWords  = 3;      // a message or a fragment of one has at least this many words
+inline constexpr std::size_t kForLiteralMessageTries  = 8;      // whole-repo scans a message may cost (a runaway guard on a task's word count)
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
 // text rides --legend=full. Both name every attribute the element prints.
@@ -98,6 +113,15 @@ inline constexpr std::string_view kForCompactLiteralLegend =
 static_assert( kForLiteralLegend.find( "--", 4 ) == kForLiteralLegend.size() - 3 && kForCompactLiteralLegend.find( "--", 4 ) == kForCompactLiteralLegend.size() - 3,
                "the only double hyphen in a legend comment is its closing: one inside is not well-formed XML" );
 
+// present only with shape=dotted|message, so the bytes of a quoted or const fire do not move; the name of the shape is the row's whole
+// reading, the base legend above still defines every other attribute
+inline constexpr std::string_view kForLiteralKeyLegend =
+    "<!-- ripwire for lit: shape=dotted a dotted key in the task (3 or more segments, or 2 with a setting, option, key, command or flag "
+    "word): rows hold the whole key, quoted sites first; longer= source sites inside a longer name or child key, counted, never rows. "
+    "shape=message the task's words as a message (3 or more, with an error, notification or message word): string sites only; frag=1: "
+    "the whole text has no site, s= is the part that does. -->";
+static_assert( kForLiteralKeyLegend.find( "--", 4 ) == kForLiteralKeyLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+
 inline bool forLiteralOn()
 {
     return std::getenv( "RIPWIRE_NO_LITERAL_ANCHOR" ) == nullptr;
@@ -106,7 +130,8 @@ inline bool forLiteralOn()
 struct ForLiteral
 {
     std::string text;
-    std::string_view shape;   // "quoted" | "const"
+    std::string_view shape;   // "quoted" | "const" | "dotted" | "message"
+    bool             frag = false;   // shape=message: `text` is a fragment of the task's words, the whole text has no site
 };
 
 namespace lit_detail
@@ -164,10 +189,245 @@ inline std::optional<std::string> quotedSpan( std::string_view task, char q )
     }
     return std::nullopt;
 }
+
+// the task's whitespace-separated words, in order
+inline std::vector<std::string_view> taskWords( std::string_view task )
+{
+    std::vector<std::string_view> out;
+    for( std::size_t i = 0; i < task.size(); )
+    {
+        const std::size_t a = task.find_first_not_of( " \t", i );
+        if( a == std::string_view::npos )
+        {
+            break;
+        }
+        const std::size_t b = std::min( task.find_first_of( " \t", a ), task.size() );
+        out.push_back( task.substr( a, b - a ) );
+        i = b;
+    }
+    return out;
+}
+
+// a word without the quotes and sentence punctuation around it (never parentheses: `f.g.h()` stays a call, dottedKeyOf refuses it)
+inline std::string_view stripWordPunct( std::string_view w ) noexcept
+{
+    constexpr std::string_view kPunct = "\"'`,;:.!?<>[]{}";
+    while( !w.empty() && kPunct.find( w.front() ) != std::string_view::npos )
+    {
+        w.remove_prefix( 1 );
+    }
+    while( !w.empty() && kPunct.find( w.back() ) != std::string_view::npos )
+    {
+        w.remove_suffix( 1 );
+    }
+    return w;
+}
+
+inline bool wordIsOneOf( std::string_view word, std::initializer_list<std::string_view> set )
+{
+    std::string low( stripWordPunct( word ) );
+    std::transform( low.begin(), low.end(), low.begin(), []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+    return std::find( set.begin(), set.end(), std::string_view( low ) ) != set.end();
+}
+
+inline bool isSettingCue( std::string_view w )
+{
+    return wordIsOneOf( w, { "setting", "settings", "option", "options", "key", "keys", "command", "commands", "flag", "flags" } );
+}
+
+inline bool isMessageCue( std::string_view w )
+{
+    return wordIsOneOf( w, { "error", "errors", "notification", "notifications", "message", "messages" } );
+}
+
+// a key's last segment that says the dotted word is a file or a host: every extension the linter table knows (langOfPath), the data and
+// doc files it does not, and the common host suffixes
+inline bool isFileOrHostSuffix( std::string_view lastSegment )
+{
+    if( langOfPath( "x." + std::string( lastSegment ) ) != Lang::Unknown )
+    {
+        return true;
+    }
+    return wordIsOneOf( lastSegment, { "json", "jsonc", "toml", "yaml", "yml", "md", "txt", "html", "css", "xml", "ini", "cfg", "conf", "lock", "log", "csv", "com", "org", "net", "io" } );
+}
+
+// ALLOWLIST (SAFETY (d)1): segments of letters, digits, `_` and `-` that open with a letter or `_`, no `-` at a segment's end. Returns the
+// segment count, 0 when the word is not of that shape
+inline std::size_t keySegments( std::string_view w ) noexcept
+{
+    std::size_t segments = 0;
+    for( std::size_t at = 0; at <= w.size(); ++segments )
+    {
+        const std::size_t end = std::min( w.find( '.', at ), w.size() );
+        const std::string_view seg = w.substr( at, end - at );
+        if( seg.empty() || !( std::isalpha( static_cast<unsigned char>( seg[0] ) ) != 0 || seg[0] == '_' ) || seg.back() == '-' )
+        {
+            return 0;
+        }
+        for( const char c : seg )
+        {
+            if( std::isalnum( static_cast<unsigned char>( c ) ) == 0 && c != '_' && c != '-' )
+            {
+                return 0;
+            }
+        }
+        at = end + 1;
+    }
+    return segments;
+}
+
+// the first dotted key of the task's words, or none
+inline std::optional<std::string> dottedKeyOf( const std::vector<std::string_view>& words )
+{
+    const bool cue = std::any_of( words.begin(), words.end(), []( std::string_view w ) { return isSettingCue( w ); } );
+    for( const std::string_view raw : words )
+    {
+        const std::string_view w = stripWordPunct( raw );
+        const std::size_t      n = keySegments( w );
+        if( n < 2 || w.size() < kForLiteralMinKeyBytes || isFileOrHostSuffix( w.substr( w.rfind( '.' ) + 1 ) )
+            || w.starts_with( "self." ) || w.starts_with( "this." ) )
+        {
+            continue;
+        }
+        const bool classShaped = std::isupper( static_cast<unsigned char>( w[0] ) ) != 0;
+        if( cue || ( n >= 3 && !classShaped ) )
+        {
+            return std::string( w );
+        }
+    }
+    return std::nullopt;
+}
+
+// the first ` or ' delimited span of 3+ words with a message cue outside it. A ' only opens after a space or the start and only closes
+// before one or the end (`wasn't` is no quote)
+inline std::optional<std::string> quotedMessageOf( std::string_view task )
+{
+    const auto spanOf = [ & ]( char q ) -> std::optional<std::string_view>
+    {
+        for( std::size_t a = task.find( q ); a != std::string_view::npos; a = task.find( q, a + 1 ) )
+        {
+            if( q == '\'' && a > 0 && task[a - 1] != ' ' )
+            {
+                continue;
+            }
+            std::size_t b = task.find( q, a + 1 );
+            while( q == '\'' && b != std::string_view::npos && b + 1 < task.size() && task[b + 1] != ' ' && std::isalnum( static_cast<unsigned char>( task[b + 1] ) ) != 0 )
+            {
+                b = task.find( q, b + 1 );
+            }
+            if( b == std::string_view::npos )
+            {
+                return std::nullopt;
+            }
+            return task.substr( a, b - a + 1 );
+        }
+        return std::nullopt;
+    };
+    for( const char q : { '`', '\'' } )
+    {
+        const std::optional<std::string_view> span = spanOf( q );
+        if( !span )
+        {
+            continue;
+        }
+        const std::string_view inner = span->substr( 1, span->size() - 2 );
+        if( taskWords( inner ).size() < kForLiteralMessageWords )
+        {
+            continue;
+        }
+        const std::size_t at = std::size_t( span->data() - task.data() );
+        const std::string outside = std::string( task.substr( 0, at ) ) + " " + std::string( task.substr( at + span->size() ) );
+        for( const std::string_view w : taskWords( outside ) )
+        {
+            if( isMessageCue( w ) )
+            {
+                return std::string( inner );
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// the whole task minus its leading or trailing cue words, when that is 3+ plain words: a stored subject is `<message> <cue>`. Refused:
+// a task that opens with a question or a verb's own lead word, or holds code punctuation
+inline std::optional<std::string> bareMessageOf( std::vector<std::string_view> words )
+{
+    bool cue = false;
+    while( !words.empty() && isMessageCue( words.back() ) )
+    {
+        words.pop_back();
+        cue = true;
+    }
+    while( !words.empty() && isMessageCue( words.front() ) )
+    {
+        words.erase( words.begin() );
+        cue = true;
+    }
+    if( !cue || words.size() < kForLiteralMessageWords
+        || wordIsOneOf( words.front(), { "where", "which", "what", "who", "why", "when", "how", "does", "do", "is", "path", "callers", "common", "lowest", "call", "trace", "thread" } ) )
+    {
+        return std::nullopt;
+    }
+    std::string out;
+    for( const std::string_view w : words )
+    {
+        if( w.find_first_of( "(){}=;`" ) != std::string_view::npos )
+        {
+            return std::nullopt;
+        }
+        out += out.empty() ? "" : " ";
+        out += w;
+    }
+    return out;
+}
 }   // namespace lit_detail
 
+// The tries of a message, in order, at most kForLiteralMessageTries: the whole text, then the longest word run free of placeholders and
+// dotted or path words (`asyncio.run`, `{}`, `%s`), that run and its end-anchored fragments, longest first, down to 3 words. A source
+// message is usually split by a placeholder the task does not spell, so the fragment may be anchored at either end.
+inline std::vector<std::string> forMessageTries( std::string_view message )
+{
+    const std::vector<std::string_view> words = lit_detail::taskWords( message );
+    std::vector<std::string>            out{ std::string( message ) };
+    std::size_t bestAt = 0, bestLen = 0;
+    for( std::size_t i = 0; i < words.size(); )
+    {
+        std::size_t j = i;
+        const auto  plain = [ & ]( std::string_view w ) { return lit_detail::stripWordPunct( w ).find_first_of( ".:/\\%{}$" ) == std::string_view::npos; };
+        while( j < words.size() && plain( words[j] ) )
+        {
+            ++j;
+        }
+        if( j - i > bestLen )
+        {
+            bestAt  = i;
+            bestLen = j - i;
+        }
+        i = j == i ? i + 1 : j;
+    }
+    const auto joined = [ & ]( std::size_t at, std::size_t n )
+    {
+        const char* const b = words[at].data();
+        const char* const e = words[at + n - 1].data() + words[at + n - 1].size();
+        return std::string( lit_detail::stripWordPunct( std::string_view( b, std::size_t( e - b ) ) ) );
+    };
+    const auto addTry = [ & ]( std::string t )
+    {
+        if( out.size() < kForLiteralMessageTries && std::find( out.begin(), out.end(), t ) == out.end() )
+        {
+            out.push_back( std::move( t ) );
+        }
+    };
+    for( std::size_t n = bestLen; n >= kForLiteralMessageWords; --n )
+    {
+        addTry( joined( bestAt, n ) );
+        addTry( joined( bestAt + bestLen - n, n ) );
+    }
+    return out;
+}
+
 // The literal the task names, or none. Quoted spans first (the task's own quoting is the strongest evidence), then the first
-// CONST_SHAPED word (trailing/leading punctuation stripped).
+// CONST_SHAPED word (trailing/leading punctuation stripped), then a dotted key, then a message.
 inline std::optional<ForLiteral> forLiteralOf( std::string_view task )
 {
     if( std::optional<std::string> s = lit_detail::quotedSpan( task, '"' ) )
@@ -201,6 +461,19 @@ inline std::optional<ForLiteral> forLiteralOf( std::string_view task )
         }
         i = j;
     }
+    const std::vector<std::string_view> words = lit_detail::taskWords( task );
+    if( std::optional<std::string> key = lit_detail::dottedKeyOf( words ) )
+    {
+        return ForLiteral{ std::move( *key ), "dotted" };
+    }
+    if( std::optional<std::string> m = lit_detail::quotedMessageOf( task ) )
+    {
+        return ForLiteral{ std::move( *m ), "message" };
+    }
+    if( std::optional<std::string> m = lit_detail::bareMessageOf( words ) )
+    {
+        return ForLiteral{ std::move( *m ), "message" };
+    }
     return std::nullopt;
 }
 
@@ -217,7 +490,25 @@ struct Site
 {
     GrepRawHit raw;
     char       k = '?';   // 's' string, 'c' code, '?' unclassified
+    bool       quotedKey = false;   // shape=dotted: quotes delimit the key on both sides (`'files.autoSave'`), not a mention inside a sentence
 };
+
+// shape=dotted: where a hit of a key of `n` bytes at `at` of `text` stands. longer: inside a longer name or a child key (an identifier byte
+// on either side, or `.` plus an identifier byte after it); `config.a.b` keeps a.b whole, a prefix is how a context key spells it.
+struct KeyHit
+{
+    bool longer = false;
+    bool quoted = false;
+};
+inline KeyHit keyHitAt( std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    const auto ident = []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '-'; };
+    const auto quote = []( char c ) { return c == '"' || c == '\'' || c == '`'; };
+    const char before = at > 0 ? text[at - 1] : ' ';
+    const char after  = at + n < text.size() ? text[at + n] : ' ';
+    const char after2 = at + n + 1 < text.size() ? text[at + n + 1] : ' ';
+    return KeyHit{ ident( before ) || ident( after ) || ( after == '.' && ident( after2 ) ), quote( before ) && quote( after ) };
+}
 
 // text-line helpers for the docstring position test: the previous line of the one starting at `ls` (its start moves back to that
 // line's start), trimmed of '\r'; false at the top of the file
@@ -475,7 +766,19 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         return rootArg.empty() ? std::string( ing.files[f] ) : std::string( rw::sarif::rootRelativeUri( ing.files[f], rootPrefix ) );
     };
     // ── path tiers, then the span tier of every source hit file (bounded, in the scan's order: classified files first) ─────────
-    std::size_t testHits = 0, docHits = 0, commentHits = 0;
+    const bool  dotted  = lit.shape == "dotted";
+    const bool  message = lit.shape == "message";
+    std::uint32_t loadedFile = UINT32_MAX;
+    std::string   loadedText;
+    const auto loadFile = [ & ]( std::uint32_t fileId )
+    {
+        if( loadedFile != fileId )
+        {
+            loadedFile = fileId;
+            loadedText = docparse::detail::readWholeFile( diskPath( ing, fileId ) ).value_or( std::string() );
+        }
+    };
+    std::size_t testHits = 0, docHits = 0, commentHits = 0, longerHits = 0;
     std::vector<lit_detail::Site> src;
     std::vector<std::uint32_t>    srcFiles;
     for( const GrepRawHit& r : collected.raw )
@@ -492,11 +795,22 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         }
         else
         {
+            lit_detail::KeyHit keyHit;
+            if( dotted )
+            {
+                loadFile( r.fileId );
+                keyHit = lit_detail::keyHitAt( loadedText, r.byteOffset, lit.text.size() );
+                if( keyHit.longer )
+                {
+                    ++longerHits;
+                    continue;
+                }
+            }
             if( srcFiles.empty() || srcFiles.back() != r.fileId )
             {
                 srcFiles.push_back( r.fileId );
             }
-            src.push_back( lit_detail::Site{ r, '?' } );
+            src.push_back( lit_detail::Site{ r, '?', keyHit.quoted } );
         }
     }
     std::vector<std::string> tierPaths;
@@ -505,8 +819,6 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         tierPaths.push_back( diskPath( ing, srcFiles[i] ) );
     }
     const SpanTierBatch batch = spanTiersOfFiles( std::span<const std::string>( tierPaths ), useMemo );
-    std::uint32_t loadedFile = UINT32_MAX;
-    std::string   loadedText;
     std::vector<lit_detail::Site> rows;
     bool anyUnclassified = false;   // CR (train 42b harvest): a source site the span tier never saw is invisible to comment=, which is then a floor
     for( lit_detail::Site& s : src )
@@ -534,11 +846,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                 // a Python docstring (the first statement of a module / class / def body): documentation, counted with the comments
                 const auto        it    = std::upper_bound( m.startByte.begin(), m.startByte.end(), s.raw.byteOffset );
                 const std::size_t start = it == m.startByte.begin() ? 0 : m.startByte[std::size_t( it - m.startByte.begin() ) - 1];
-                if( loadedFile != s.raw.fileId )
-                {
-                    loadedFile = s.raw.fileId;
-                    loadedText = docparse::detail::readWholeFile( diskPath( ing, s.raw.fileId ) ).value_or( std::string() );
-                }
+                loadFile( s.raw.fileId );
                 if( lit_detail::isPythonDocstringAt( loadedText, start ) )
                 {
                     ++commentHits;
@@ -568,6 +876,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             {
                 lines.back().k = 's';
             }
+            if( lines.back().raw.fileId == r.raw.fileId && lines.back().raw.line == r.raw.line )
+            {
+                lines.back().quotedKey = lines.back().quotedKey || r.quotedKey;
+            }
         }
         rows = std::move( lines );
     }
@@ -575,6 +887,11 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     if( rows.empty() )
     {
         return out;   // no source site: nothing to anchor on (test/doc/comment counts alone answer nothing; measured as noise, ld2-django-09)
+    }
+    if( message && std::none_of( rows.begin(), rows.end(), []( const lit_detail::Site& r ) { return r.k != 'c'; } ) )
+    {
+        out.sites = 0;
+        return out;   // a task's words met only outside a string are no message
     }
     const std::size_t ranked = std::min( rows.size(), kForLiteralRankedRows );
     for( std::size_t i = 0; i < ranked; ++i )
@@ -591,7 +908,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     const auto rankOf = [ & ]( std::size_t i )
     {
         const bool callable = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        return ( callable ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
+        return ( dotted && !rows[i].quotedKey ? 6 : 0 ) + ( callable ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
     };
     std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b ) { return rankOf( a ) < rankOf( b ); } );
     const std::size_t shown = std::min( order.size(), kForLiteralSiteRows );
@@ -712,6 +1029,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
 
     std::string& x = out.xml;
     x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
+    x += dotted || message ? kForLiteralKeyLegend : std::string_view();
     x += "<lit s=\"";
     x += escapeXml( lit.text, esc );
     x += "\" shape=\"";
@@ -722,6 +1040,8 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         x += " capped=\"1\"";
     }
+    x += longerHits > 0 ? " longer=\"" + std::to_string( longerHits ) + "\"" : std::string();
+    x += lit.frag ? " frag=\"1\"" : "";
     x += " comment=\"" + std::to_string( commentHits ) + "\" test=\"" + std::to_string( testHits ) + "\" doc=\"" + std::to_string( docHits ) + "\"";
     if( !collected.cleanScan() || anyUnclassified )
     {
@@ -741,5 +1061,30 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     x += inner;
     ENSURES( x.size() - openAt == bytes, "bytes= is the element's own size" );
     return out;
+}
+
+// the block of the task's literal: a message walks its tries (forMessageTries) until one has a string site in source, every other shape
+// has the one try
+inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
+                                                RedactCounts* redact, bool useMemo, bool compactLegend )
+{
+    const std::optional<ForLiteral> lit = forLiteralOf( task );
+    if( !lit )
+    {
+        return {};
+    }
+    if( lit->shape != "message" )
+    {
+        return renderForLiteral( ing, *lit, rootArg, served, redact, useMemo, compactLegend );
+    }
+    for( const std::string& t : forMessageTries( lit->text ) )
+    {
+        ForLiteralRender r = renderForLiteral( ing, ForLiteral{ t, lit->shape, t != lit->text }, rootArg, served, redact, useMemo, compactLegend );
+        if( !r.xml.empty() )
+        {
+            return r;
+        }
+    }
+    return {};
 }
 }   // namespace rw
