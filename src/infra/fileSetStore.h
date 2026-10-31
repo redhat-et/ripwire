@@ -47,7 +47,7 @@
 #include "hashutil.h"
 #include "Diagnostics.h"
 #include "fileGraphStop.h"
-#include "profileScope.h"   // PROFILE_SCOPE_DESCRIBE: the closure build's phases; ((void)0) unless -DRIPWIRE_PROFILE=ON
+#include "profileScope.h"   // PROFILE_SCOPE_DESCRIBE: the closure build's phases; ((void)0) unless profiling is compiled in
 #include "unordered_dense.h"
 
 namespace rw
