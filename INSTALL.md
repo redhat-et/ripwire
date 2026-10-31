@@ -119,11 +119,15 @@ block a tool call, they need `jq`, and they are registered only when you pass `-
 
 The CLI is the cheaper interface; the MCP server is a second way in. `ripwire wrap <agent>` prints the exact
 configuration for `claude`, `codex`, `cursor`, `gemini`, `windsurf`, `opencode`, `hermes` or `openclaw`, plus
-a short block to paste into that agent's rules file. For Claude Code it is:
+a short block to paste into that agent's rules file. For Claude Code, `ripwire wrap claude` prints:
 
 ```bash
-claude mcp add ripwire -- ripwire --mcp
+claude mcp add ripwire -- ripwire --mcp --mcp-tools=no-edit
 ```
+
+`--mcp-tools=no-edit` leaves out the three edit twins (Claude Code edits through a ranged Read and its native
+Edit); `ripwire wrap claude --mcp-tools=full` keeps them, and a bare `claude mcp add ripwire -- ripwire --mcp`
+serves all 33 tools.
 
 ## Check and upgrade
 

@@ -59,7 +59,8 @@
 # NAMED FLOORS (each asserted as a floor arm, never as a pass of the contract):
 #   F1 a call through a TYPED pointer or receiver field (`p->open(x)`, p a `struct ops *` parameter): through= matches a
 #      container by NAME, and p names none. --callees=use_ptr stays silent.
-#   F2 a member or qualified value (`run(obj.lone)`, `self.f`, `ns::qf`, `&Cls::sm`, `this.handler`) is no row.
+#   F2 a member or qualified value (`run(obj.lone)`, `self.f`, `ns::qf`, `this.handler`) is no row; C++ `&Cls::sm` is a row since
+#      FN-SLOT S2 (model.h kVrSlotLangs memberPointers), F2b.
 #   F3 a value spelled by an import ALIAS (`import { aliasFn as af }`, `from m import alias_fn as af`) or bound by a
 #      destructured require (`const { reqFn } = require(…)`) is a local binding: no row under the original name.
 #   F4 a function as the OBJECT of a member access (`lone2.name`, `f.__name__`) is no row. JS/TS call forwarders are the
@@ -1200,7 +1201,7 @@ arm "X2 callers myOpen: a designated initialiser" \
 arm "X3 negatives: lone (a string, a comment, decltype, an init-capture, a captured parameter, a range-for variable) has its one call and no value row" \
     cpp --callers=lone attr:count=1 ns:1 noattr:value_refs nvr:0
 arm "F2 floor: ns::qf passed as a qualified value — no row" cpp --callers=qf attr:defs=1 noattr:value_refs nvr:0
-arm "F2 floor: &Cls::sm passed as a qualified value — no row" cpp --callers=sm attr:defs=1 noattr:value_refs nvr:0
+arm "F2b &Cls::sm (a pointer to a member of Cls) is a value row since FN-SLOT S2" cpp --callers=sm attr:defs=1 attr:value_refs=1
 
 # ── Class members and bare names (final review R1) ───────────────────────────────────────────────────────
 echo "-- members are not bare names"

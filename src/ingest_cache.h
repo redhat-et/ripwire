@@ -150,7 +150,10 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 46;           // 46: train 40 — lane js-def-naming's LocalBindKind JsObjectLiteral (appended; its placeholder 45),
+constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
+                                                      //    moves; its placeholder 47), strictly above main 46 and that placeholder; no other
+                                                      //    train-42b lane changed a record format.
+                                                      // 46: train 40 — lane js-def-naming's LocalBindKind JsObjectLiteral (appended; its placeholder 45),
                                                       //    strictly above main 44 and that placeholder; no other train-40 lane changed a record format.
                                                       // 44: train 37b — rust-degraded FileHealth::useBoundsBlanked (above 43 / placeholder 42)
                                                       // 43: train 36 — #155 Kotlin trailingLambda ref byte (above 40 / 41 / 42)
@@ -363,7 +366,20 @@ constexpr std::uint32_t kCacheVersion = 46;           // 46: train 40 — lane j
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 259;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 271;          // bump on any grammar/.scm/extraction change
+                                                      // 271 = 2026-10-30 (train 42b: lanes iface-peel (placeholders 259/260: a C++ smart-pointer alias record carries its
+                                                      //   pointee, a Rust `-> &dyn T` / `Box<dyn T>` / `impl T` result records a ReturnType with kDispatchResultBit, a C++
+                                                      //   member whose written type is an enclosing template parameter carries kTemplateParamMemberType) and alias-import
+                                                      //   (261/262: TS/TSX/JS re-export specifiers captured as LocalBindKind::ReExport records)). Strictly above train
+                                                      //   41b's 269 (rich 270) and every live lane placeholder (259, 260, 261, 263, 265, 267). Rich file tag 272.
+                                                      //   kCacheVersion 48 (ReExport appended).
+                                                      // 269 = 2026-10-29 (train 41b: lane fn-slot-s2 (placeholders 257/258, 259 and 260 over its fix rounds): C++ `&Cls::m`
+                                                      //   value refs (memberRoot = Cls; memberVia = written qualifier / enclosing scope / `using namespace` directives),
+                                                      //   `( o.*x.f )( … )` slot calls, C nested designated paths and macro-cast slot calls + their "()M" alias facts, a class
+                                                      //   body fact's scope path, and a C++ base that is a template parameter of the deriving class (baseBind 0xFFFFFFFE)).
+                                                      //   Strictly above train 41's 259 (rich 260) and every live lane placeholder (iface-peel 259, alias-import 261,
+                                                      //   the string/literal lanes 263/265/267; train 42 goes above 269). Rich file tag 270. kCacheVersion stays 46:
+                                                      //   no record changes shape.
                                                       // 259 = 2026-10-28 (train 41: lanes fn-slot-2 (placeholder 249/250; Rust files record the slot join's records:
                                                       //   function-path arguments of path calls, field stores, registrar parameter facts, `(x.f)( … )` slot calls) and
                                                       //   py-split-marker (255/256; a Python module-scope def/class inside an if/try/with/loop files a second VarDecl

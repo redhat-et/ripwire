@@ -1,0 +1,2 @@
+struct Widget;
+fn main() {}

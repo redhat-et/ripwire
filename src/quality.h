@@ -1972,7 +1972,10 @@ inline std::string cacheDirLadder()
     os::stat_t st {};
     if( mkdirRc == 0 || ( os::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == os::getuid() ) )
     {
-        if( os::chmod( d.c_str(), 0700 ) == 0
+        // Win32 chmod propagates inheritable ACLs through the whole cache tree, even when unchanged.
+        // lstat already verifies a protected owner-only DACL; repair only a missing/private-mode mismatch.
+        const bool alreadyOwnerOnly = ( st.st_mode & 0777 ) == 0700;
+        if( ( alreadyOwnerOnly || os::chmod( d.c_str(), 0700 ) == 0 )
             && os::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == os::getuid()
             && ( st.st_mode & 0777 ) == 0700 )
         {
@@ -2440,8 +2443,12 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 46;   // MUST equal ingest.cpp's kCacheVersion (gated); 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 259;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestCacheVersionMirror   = 48;   // MUST equal ingest.cpp's kCacheVersion (gated); 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestParserVerMirror    = 271;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 271 = 2026-10-30 (train 42b: iface-peel alias pointee / dyn-result / template-param
+                                                          //   member records and alias-import ReExport records, placeholders 259, 260, 261; above 41b's 269/270)
+                                                          // 269 = 2026-10-29 (train 41b: fn-slot-s2 C/C++ member-pointer / nested-designator /
+                                                          //   macro-cast slot extraction, placeholders 257, 259, 260; above train 41's 259/260)
                                                           // 259 = 2026-10-28 (train 41: fn-slot-2 Rust slot records / py-split-marker `?name`,
                                                           //   placeholders 249, 255; above fn-slot-s2's 257/258)
                                                           // 251 = 2026-10-27 (train 40: js-def-naming / string-keyed / fn-slot extraction,
@@ -5071,7 +5078,16 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // newest prefix of the window) as if it were the window, and the key cannot tell that blob from a real read. K51 never
 // stores one, but a blob already on disk would keep serving its silent zero or prefix, with no history_unread=, until HEAD
 // moved. The bump makes every pre-K51 blob a clean miss; the cost is one cold walk per repository.
-constexpr std::uint32_t kQChurnCacheScheme = 3;
+// SCHEME 4 (2026-10-23, the git-porcelain-framing lane): the walk's READER was rebuilt — the line-framed
+// `__C__` marker parse became one NUL-framed reader with a whole-field sentinel and one field of lookahead
+// (test/gitframingcheck.sh). On a repository whose committed paths spell the marker bytes, carry a
+// newline, or sort after a path that does, the OLD reader's stream was corrupted (forged commit headers,
+// swallowed paths), so a blob written by a pre-lane binary would keep serving that corrupted stream to a
+// fixed one until HEAD moved — the same wrong-answer-from-cache as scheme 2, one layer down: there the
+// COMMAND changed under an unchanged key, here the PARSE did. Neither is visible to the key, which is why
+// this bump is manual. On ordinary trees the two readers' streams are byte-identical (the lane's golden
+// arm over owners/hotspots/cochange), so the bump costs those repos one cold walk and changes no answer.
+constexpr std::uint32_t kQChurnCacheScheme = 4;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )

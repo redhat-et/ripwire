@@ -41,6 +41,7 @@
 #include "slice.h"         // lane/tc-sliceat: the shared --slice / MCP slice def-use core (sliceBundleText — ONE emitter, two surfaces)
 #include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
+#include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -1370,7 +1371,8 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
     // after hits_capped so the historic key order other gates read is byte-untouched; absent when any
     // condition fails (the floor vocabulary already covers partial answers).
     // R-H adds the tier arm the CLI emitter also adds: a listing that held comment/string rows back did not
-    // print every hit it found, so it may not claim to be exhaustive.
+    // print every hit it found, so it may not claim to be exhaustive. notfound-on-cut: nor may an index the memory
+    // guard cut (the files it never read may hold a hit) — the claim line below carries that fifth term.
     const bool scanExhaustive  = collected.cleanScan();
     const bool windowWhole     = grepPage.begin == 0 && grepPage.end == collected.raw.size();
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
@@ -1402,7 +1404,7 @@ inline std::string grepHitsJson( const std::string& root, const std::string& pat
                                       page.limit, page.offset, /*discloseCap=*/true, kJsonPageSyntax,
                                       /*collectionCapped=*/collected.isBudgetReached )   // H8/N2: the cap hits_capped names floors this root (CLI parity)
                     + ",\"hits_capped\":" + ( collected.isBudgetReached ? "true" : "false" )
-                    + ( scanExhaustive && windowWhole && nothingHeldBack ? ",\"complete\":true" : "" )
+                    + ( scanExhaustive && windowWhole && nothingHeldBack && !ing.memoryStop.isSet() ? ",\"complete\":true" : "" )   // notfound-on-cut: a cut index never claims it
                     // P3 (L7): the CLI grep root's next= — the same three-way rule (verbs_grep.h), mcpclidiffcheck LENS2
                     + nextFieldJson( grepMetaNextOr( pattern, [ & ] { return ( grepPage.end < collected.raw.size() || collected.isBudgetReached )
                                          ? nextFlag( "--grep=", pattern ) + " --offset=" + std::to_string( grepPage.end ) + " --legend=compact"
@@ -2908,6 +2910,17 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         return std::nullopt;
     }
     std::string out = std::move( *chosen.doc );
+    // mf1-nx wave 4 (fordispatchhop.h): the CLI --for's <dispatch> element, rows only (this surface serves no inline body), with its
+    // own clause beside it, before </ctx>, BEFORE the price (est_tokens prices the element); the default regime only (budget_tokens names a size, as the CLI's explicit --token-budget)
+    if( budgetTokens == 0 && isNameExactRouteTag( mcpRouteTag ) && forDispatchHopOn() && out.ends_with( "</ctx>" ) )
+    {
+        const std::vector<std::uint32_t> sites = forDispatchSites( ing, ix.g, dispatchHeadCandidates( ing, lensSurfaceIds ), task );
+        if( !sites.empty() )
+        {
+            const DispatchHopRender r = renderForDispatchHop( ing, ix.g, sites, BodyFoldInputs{ ing, task, kNoNode, lensRank, flRootArg, redact, false }, /*withBody=*/false );
+            out.insert( out.size() - 6, dispatchHopMcpXml( r ) );
+        }
+    }
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
@@ -4568,6 +4581,7 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
         std::lock_guard<std::mutex> ingestLk( rw::quality::headSnapshotIngestMutex() );
         ing = ingest( root.c_str(), {}, {} );
     }
+    noteOwnIngestCut( ing );   // notfound-on-cut: a refusal below ends with the shared partial-index sentence when this ingest was cut
     const Graph  g   = buildGraph( ing, nullptr );
 
     const std::string sidecar = qualityBaselinePath( root );   // root-qualified (see SIDECAR LOCATION note)
@@ -5051,6 +5065,7 @@ inline EditCheckReply editCheckText( const std::string& root, const std::string&
         std::lock_guard<std::mutex> ingestLk( rw::quality::headSnapshotIngestMutex() );
         ing = ingest( root.c_str(), {}, {} );
     }
+    noteOwnIngestCut( ing );   // notfound-on-cut: a refusal below ends with the shared partial-index sentence when this ingest was cut
     const Graph g = buildGraph( ing, nullptr );
 
     // H1: the decl→def residue, the CLI --edit-check's unproven_defs= — same resolver, same assembler parameter, so the two

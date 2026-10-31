@@ -2439,6 +2439,36 @@ struct ReceiverEvidence
         return false;
     }
 
+    // lane iface-peel (LangFacts::returnTypedDispatchLet): the local `b` (a CallResult) holds the result of a call whose ONE
+    // proven callee declares `-> &dyn T` / `Box<dyn T>` / `impl T` (`rt`, a ReturnType carrying kDispatchResultBit). The trait
+    // resolves in the CALLEE's file like a written type (noteDispatchWritten's rule) and must be a trait; the local's own
+    // untyped tombstone (same span) then carries it, exactly as `let x: &dyn T` would. False when nothing was typed: no
+    // tombstone, a class of that name, an unresolved or ambiguous trait.
+    bool typeCallResultDispatch( const Binding& b, const Binding& rt )
+    {
+        const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
+        if( it == localType.end() )
+        {
+            return false;
+        }
+        const std::string_view written = rt.importedName;
+        const NodeId trait = types.rustResultClass( rt.fileId, rt.startByte, written.find( "::" ) == std::string_view::npos ? std::string_view{} : written, rt.typeName );
+        if( trait == kNoNode || ing.symbols[ trait ].kind != SymKind::Interface )
+        {
+            return false;
+        }
+        const bool spanned = b.spanEnd > b.spanStart;
+        for( LocalFact& f : it->second )
+        {
+            if( f.start == ( spanned ? b.spanStart : 0u ) && f.end == ( spanned ? b.spanEnd : 0u ) && f.type.empty() && f.iface == kNoNode )
+            {
+                f.iface = trait;
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ── queries ───────────────────────────────────────────────────────────────────────────────────────────────────────
     // the innermost function/method of the same file whose span strictly holds `id`; kNoNode when none
     NodeId enclosingFn( NodeId id ) const { return innermostEnclosingFn( ing, fnsByFile, id ); }

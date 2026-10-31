@@ -54,7 +54,7 @@
 // values arrive from callers elsewhere.
 //
 // FLOORS (stated in the legend and pinned by recallshapecheck; this walk's families — Rust records its own slot rows,
-// ingest_rustslots.h): a member or qualified value (obj.f, self.f, ns::f, &Cls::m) and a function as the OBJECT of a member access (f.bind, f.name) are not rows; an import
+// ingest_rustslots.h): a member or qualified value (obj.f, self.f, ns::f; C++ `&Cls::m` IS a row: memberPointerValueAt) and a function as the OBJECT of a member access (f.bind, f.name) are not rows; an import
 // alias is a local binding; a macro body is opaque; classes are not functions; Python attribute calls never
 // count as a call through a dict; nodes deeper than kVrMaxDepth are not visited — DISCLOSED, never silent: the file's
 // depth-cut record (below) makes value_refs= / --dead-code say the count is a floor and name the first cut site.
@@ -525,6 +525,121 @@ struct VrAnc
     bool          opensScope = false;
 };
 
+// ── FN-SLOT S2 fix 1: where a C++ class is defined and a `&Cls::m` is written (model.h VrMemberScope) ───────────────────────
+// One scope segment as a qualifier writes it: a template-id `W<int>` is W.
+inline std::string_view vrScopeSegment( TSNode seg, std::string_view src ) noexcept
+{
+    if( !ts_node_is_null( seg ) && kindIs( ts_node_type( seg ), "template_type" ) )
+    {
+        seg = fieldChild( seg, NodeField::Name );
+    }
+    return ts_node_is_null( seg ) ? std::string_view() : nodeTextOf( seg, src );
+}
+inline void vrAppendScope( std::string& path, std::string_view seg )
+{
+    if( !seg.empty() )
+    {
+        path += path.empty() ? "" : "::";
+        path += seg;
+    }
+}
+// `inline namespace v1 { … }`: the keyword is the namespace_definition's first, anonymous child. Qualifiers need not write it.
+inline bool vrInlineNamespace( TSNode ns, std::string_view src ) noexcept
+{
+    const TSNode first = ts_node_child( ns, 0 );
+    return !ts_node_is_null( first ) && !ts_node_is_named( first ) && nodeTextOf( first, src ) == "inline";
+}
+// The scope an out-of-line definition's declarator writes (`int a::C::f() { … }` is inside a::C), appended to `path`.
+inline void vrDeclaratorScope( TSNode fn, std::string_view src, std::string& path )
+{
+    TSNode d = fieldChild( fn, NodeField::Declarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( d ) && !kindIs( ts_node_type( d ), "qualified_identifier" ); ++guard )
+    {
+        d = fieldChild( d, NodeField::Declarator );   // pointer / reference / function declarator
+    }
+    for( int guard = 0; guard < 8 && !ts_node_is_null( d ) && kindIs( ts_node_type( d ), "qualified_identifier" ); ++guard )
+    {
+        vrAppendScope( path, vrScopeSegment( fieldChild( d, NodeField::Scope ), src ) );
+        d = fieldChild( d, NodeField::Name );
+    }
+}
+// The named namespaces and classes enclosing anc[0..end) outermost first, "::"-joined (an anonymous or inline namespace is
+// transparent), then the scope of an out-of-line function definition among them.
+inline std::string vrEnclosingScopePath( std::span<const VrAnc> anc, std::size_t end, std::string_view src )
+{
+    std::string path;
+    for( const VrAnc& a : anc.first( end ) )
+    {
+        if( kindIs( a.kind, "namespace_definition" ) )
+        {
+            if( !vrInlineNamespace( a.node, src ) )
+            {
+                const TSNode nm = fieldChild( a.node, NodeField::Name );
+                vrAppendScope( path, ts_node_is_null( nm ) ? std::string_view() : nodeTextOf( nm, src ) );
+            }
+        }
+        else if( kindIs( a.kind, "class_specifier" ) || kindIs( a.kind, "struct_specifier" ) || kindIs( a.kind, "union_specifier" ) )
+        {
+            vrAppendScope( path, vrScopeSegment( fieldChild( a.node, NodeField::Name ), src ) );
+        }
+        else if( kindIs( a.kind, "function_definition" ) )
+        {
+            vrDeclaratorScope( a.node, src, path );
+        }
+    }
+    return path;
+}
+// This file's `using ns::Cls;` declarations and `using namespace ns;` directives so far (anywhere in the file: a floor in the
+// declining direction only — a qualifier that is not the class's own scope declines, never binds).
+struct VrUsings
+{
+    std::vector<std::pair<std::string, std::string>> declared;     // (Cls, the qualifier `ns` written before it)
+    std::vector<std::string>                         directives;   // `ns` of each `using namespace ns;`
+
+    // `n` is a using_declaration: `using namespace ns;` (the anonymous `namespace` token is its second child) or `using ns::Cls;`.
+    void note( TSNode n, std::string_view src )
+    {
+        const TSNode target = ts_node_named_child( n, 0 );
+        if( ts_node_is_null( target ) )
+        {
+            return;
+        }
+        const TSNode           second = ts_node_child( n, 1 );
+        const std::string_view full   = nodeTextOf( target, src );
+        if( !ts_node_is_named( second ) && nodeTextOf( second, src ) == "namespace" )
+        {
+            directives.emplace_back( full );
+            return;
+        }
+        if( const std::size_t cut = full.rfind( "::" ); cut != std::string_view::npos )
+        {
+            declared.emplace_back( std::string( full.substr( cut + 2 ) ), std::string( full.substr( 0, cut ) ) );
+        }
+    }
+    // The qualifier a `using` of class `owner` writes ("" when none).
+    std::string_view qualifierOf( std::string_view owner ) const noexcept
+    {
+        for( const auto& [ cls, qualifier ] : declared )
+        {
+            if( cls == owner )
+            {
+                return qualifier;
+            }
+        }
+        return {};
+    }
+    std::string directivesJoined() const
+    {
+        std::string out;
+        for( const std::string& d : directives )
+        {
+            out += out.empty() ? "" : ",";
+            out += d;
+        }
+        return out;
+    }
+};
+
 class ValueRefWalk
 {
 public:
@@ -565,6 +680,7 @@ public:
         m_fArguments   = fieldIdFor( tl, NodeField::Arguments );
         m_fSource      = ts_language_field_id_for_name( tl, "source", 6 );
         m_fReceiver    = ts_language_field_id_for_name( tl, "receiver", 8 );
+        m_fScope       = ts_language_field_id_for_name( tl, "scope", 5 );
         const VrSlotLang* slotRow = vrSlotLang( m_lang );
         m_slot         = slotRow != nullptr && slotRow->callSide == VrSlotCallSide::ThroughRows ? slotRow : nullptr;
         m_slotByName   = slotRow != nullptr && slotRow->callSide == VrSlotCallSide::MemberCallByName;
@@ -1198,6 +1314,7 @@ private:
             noteSlotTypes( n, a.kind );   // IX-1: the declared struct types, beside the names (inert without a slot row)
         }
         noteStructBody( n, a.kind );      // IX-1: a struct body's field order and facts (m_anc.back() is the parent)
+        noteUsing( n, a.kind );           // FN-SLOT S2 fix 1: where a bare `&Cls::m` may name an external class (m_anc.back() is the parent)
         if( m_fwdArmed )
         {
             noteForwardProof( n, a.kind );
@@ -1212,9 +1329,9 @@ private:
         {
             valueRefAt( i );
         }
-        else if( m_slotByName && kindIs( a.kind, "selector_expression" ) )
+        else if( memberValueKind( a.kind ) )
         {
-            methodValueAt( i );   // IX1-V2: Go `f = b.opPlan` (a method value of the enclosing method's own receiver)
+            memberValueAt( i );
         }
         else if( isCallKind( a.kind ) )
         {
@@ -1740,7 +1857,7 @@ private:
 
     // The classified value `name` at anc[i] (effective position anc[j]): a container it fills is marked fed (its scope's, or
     // the file's), then its Value row. `owner` non-empty: a method value of that receiver type (methodValueAt).
-    void landValue( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner )
+    void landValue( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via = {} )
     {
         if( !s.container.empty() && ( s.scope == 'f' || s.scope == 'l' ) )
         {
@@ -1757,7 +1874,25 @@ private:
             }
         }
 
-        emitValueRef( i, j, name, s, fileShadow, owner );
+        emitValueRef( i, j, name, s, fileShadow, owner, std::move( via ) );
+    }
+
+    // A node a method value may be written as: Go `b.opPlan` (methodValueAt), C++ `&Cls::m` (memberPointerValueAt).
+    bool memberValueKind( const char* t ) const noexcept
+    {
+        return ( m_slotByName && kindIs( t, "selector_expression" ) )
+            || ( m_slot != nullptr && m_slot->memberPointers && kindIs( t, "qualified_identifier" ) );
+    }
+    void memberValueAt( std::size_t i )
+    {
+        if( m_slotByName )
+        {
+            methodValueAt( i );   // IX1-V2: Go `f = b.opPlan` (a method value of the enclosing method's own receiver)
+        }
+        else
+        {
+            memberPointerValueAt( i );   // FN-SLOT S2: C++ `&Cls::m` (a pointer to member function)
+        }
     }
 
     // IX1-V2 (Go): `recv.m` in a value position, where recv is the enclosing METHOD's own receiver (no closer scope redeclares
@@ -1807,6 +1942,68 @@ private:
         landValue( i, j, text( fld ), s, false, owner );
     }
 
+    // FN-SLOT S2 (C++, model.h kVrSlotLangs memberPointers): `&Cls::m` in a value position — a Value row naming m with memberRoot
+    // = Cls (the class segment written last before m; a template `Cls<T>` is Cls), resolved to that class's method m only
+    // (valuerefindex.h ownedBy). A bare `Cls::m` (a static member or a namespace function), an operator or destructor name, and
+    // a member pointer to data (no method m) are no rows.
+    void memberPointerValueAt( std::size_t i )
+    {
+        if( i < 2 || !kindIs( m_anc[i - 1].kind, "pointer_expression" ) || text( ts_node_child( m_anc[i - 1].node, 0 ) ) != "&" )
+        {
+            return;
+        }
+        // the written chain `[::]a::b::Cls::m`: every scope segment, the class last
+        std::vector<std::string_view> segs;
+        TSNode                        scope = child( m_anc[i].node, m_fScope );
+        TSNode                        name  = child( m_anc[i].node, m_fName );
+        const bool                    anchored = ts_node_is_null( scope );
+        for( int guard = 0; guard < 8; ++guard )
+        {
+            if( !ts_node_is_null( scope ) )
+            {
+                segs.push_back( vrScopeSegment( scope, m_src ) );
+            }
+            if( ts_node_is_null( name ) || !kindIs( ts_node_type( name ), "qualified_identifier" ) )
+            {
+                break;
+            }
+            scope = child( name, m_fScope );
+            name  = child( name, m_fName );
+        }
+        if( segs.empty() || segs.back().empty() || ts_node_is_null( name ) || !kindIs( ts_node_type( name ), "identifier" ) )
+        {
+            return;   // `&::f`: the global namespace, no class
+        }
+        const std::string_view owner = segs.back();
+        std::size_t j = i;
+        while( j > 1 && transparent( j ) )
+        {
+            --j;
+        }
+        Slot s;
+        if( !classify( i, j, s ) )
+        {
+            return;
+        }
+        landValue( i, j, text( name ), s, false, owner, memberScopeOf( segs, anchored ) );
+    }
+
+    // model.h VrMemberScope of a `&[::]a::Cls::m` written in segs (the class last): the qualifier, the enclosing scope, the directives.
+    std::string memberScopeOf( const std::vector<std::string_view>& segs, bool anchored ) const
+    {
+        std::string qualifier = anchored ? "::" : "";
+        for( std::size_t k = 0; k + 1 < segs.size(); ++k )
+        {
+            qualifier += k == 0 ? "" : "::";
+            qualifier += segs[k];
+        }
+        if( segs.size() == 1 && !anchored )
+        {
+            qualifier = std::string( m_usings.qualifierOf( segs.back() ) );   // `using ns::Cls;` then a bare `&Cls::m`
+        }
+        return qualifier + kVrMemberScopeSep + vrEnclosingScopePath( m_anc, m_anc.size() - 1, m_src ) + kVrMemberScopeSep + m_usings.directivesJoined();
+    }
+
     // IX1-V2: a PARAMETER (`impl`, position k of the function `fnName` declared at scope d) stored into a field slot
     // (goValueSlot: `Command{ EvalRW: impl }`, `x.F = impl`) — a slot fact (model.h kValueRefSlotParamScope), no row.
     void paramSlotFact( std::size_t i, std::size_t d, std::string_view name )
@@ -1850,7 +2047,7 @@ private:
     }
 
     // The Value row of identifier anc[i] (effective position anc[j]) landing in slot `s`.
-    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner )
+    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via )
     {
         RawRef r;
         r.fileId        = m_fileId;
@@ -1867,6 +2064,7 @@ private:
         r.argCountKnown = s.isArg;
         valueSlot( j, r );   // IX-1: a struct-field slot's type and field (inert without a slot row)
         r.memberRoot = std::string( owner );   // IX1-V2: a method value's receiver type (methodValueAt), "" otherwise
+        r.memberVia  = std::move( via );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise
         m_out.push_back( std::move( r ) );
     }
 
@@ -2372,7 +2570,7 @@ private:
     // of a struct is a slot fact (alias → struct).
     void noteSlotTypes( TSNode n, const char* t )
     {
-        if( m_slot == nullptr )
+        if( m_slot == nullptr || noteMacroCast( n, t ) )
         {
             return;
         }
@@ -2434,6 +2632,21 @@ private:
 
     // A struct / union / class BODY as the walk enters its specifier: its field order (positional initializers), its
     // function-pointer fields (the C++ gate) and one slot fact per field declared with a struct type.
+    // A file-scope or block-scope `using ns::Cls;` / `using namespace ns;` (C++ member-pointer rows only) feeds m_usings. A CLASS MEMBER's
+    // `using B::B;` (inheriting constructors) / `using B::m;` names a member, never a class a bare spelling reaches: its parent is the
+    // class body (field_declaration_list), and noting it would make the later bare `&B::m` decline as an external class (CR 4415276397).
+    void noteUsing( TSNode n, const char* t )
+    {
+        if( m_slot == nullptr || !m_slot->memberPointers || !kindIs( t, "using_declaration" ) )
+        {
+            return;
+        }
+        if( !m_anc.empty() && kindIs( m_anc.back().kind, "field_declaration_list" ) )
+        {
+            return;
+        }
+        m_usings.note( n, m_src );
+    }
     void noteStructBody( TSNode n, const char* t )
     {
         if( m_slot == nullptr || !( kindIs( t, "struct_specifier" ) || kindIs( t, "union_specifier" ) || kindIs( t, "class_specifier" ) ) )
@@ -2453,7 +2666,7 @@ private:
         }
         if( owner.front() != '@' )   // an anonymous struct's "@LINE" key is its own file's already
         {
-            emitSlotFact( n, owner, std::string_view( &kValueRefSlotBodyRel, 1 ), vrBodyDigest( text( body ) ) );
+            emitSlotFact( n, owner, kValueRefSlotBodyRel + vrEnclosingScopePath( m_anc, m_anc.size(), m_src ), vrBodyDigest( text( body ) ) );
         }
         VrStructFields sf;
         sf.key = owner;
@@ -2526,6 +2739,101 @@ private:
 
     // A typedef / using alias of a struct type: a slot fact (valuerefindex.h unaliases a receiver through it) and this file's
     // own alias map (the C++ gate reads the struct an alias names in this file).
+    // FN-SLOT S2 (c): a function-like macro whose whole body is ONE pointer cast to a named type, `#define As_Row( x )
+    // ( ( const RowClass* )( … ) )`, is an alias fact of the key "()As_Row" (kVrSlotMacroCastMark + name) for that type, so a
+    // slot call `As_Row( this )->writeField( … )` (slotThroughAt) keys RowClass wherever the macro is defined. Anything else
+    // in the body (`( ( T* )( x ) )->klass`, two casts, a non-pointer cast) records nothing.
+    // Returns whether `n` is a macro definition (handled here).
+    bool noteMacroCast( TSNode n, const char* t )
+    {
+        if( !kindIs( t, "preproc_function_def" ) )
+        {
+            return false;
+        }
+        emitMacroCast( n );
+        return true;
+    }
+    void emitMacroCast( TSNode n )
+    {
+        const std::string_view name = text( child( n, m_fName ) );
+        std::string_view       v    = text( child( n, m_fValue ) );
+        const auto trim = [ & ]()
+        {
+            while( !v.empty() && ( v.front() == ' ' || v.front() == '\t' || v.front() == '\\' || v.front() == '\n' || v.front() == '\r' ) )
+            {
+                v.remove_prefix( 1 );
+            }
+            while( !v.empty() && ( v.back() == ' ' || v.back() == '\t' || v.back() == '\n' || v.back() == '\r' ) )
+            {
+                v.remove_suffix( 1 );
+            }
+        };
+        trim();
+        if( name.empty() || v.size() < 6 || v.front() != '(' || v.back() != ')' )
+        {
+            return;
+        }
+        int depth = 0;
+        for( std::size_t k = 0; k < v.size(); ++k )
+        {
+            depth += v[k] == '(' ? 1 : v[k] == ')' ? -1 : 0;
+            if( depth == 0 && k + 1 != v.size() )
+            {
+                return;   // the first parenthesis closes before the end: not one parenthesised cast expression
+            }
+        }
+        v = v.substr( 1, v.size() - 2 );
+        trim();
+        if( v.empty() || v.front() != '(' )
+        {
+            return;
+        }
+        const std::size_t close = v.find( ')' );
+        if( close == std::string_view::npos )
+        {
+            return;
+        }
+        std::string_view cast = v.substr( 1, close - 1 );
+        bool             kw   = false;
+        std::string_view type;
+        std::size_t      stars = 0;
+        while( !cast.empty() )
+        {
+            std::size_t w = 0;
+            while( w < cast.size() && ( cast[w] == '_' || ( cast[w] >= 'a' && cast[w] <= 'z' ) || ( cast[w] >= 'A' && cast[w] <= 'Z' ) || ( cast[w] >= '0' && cast[w] <= '9' ) ) )
+            {
+                ++w;
+            }
+            const std::string_view tok = w > 0 ? cast.substr( 0, w ) : cast.substr( 0, 1 );
+            cast.remove_prefix( tok.size() );
+            if( tok == " " || tok == "\t" || tok == "const" || tok == "volatile" )
+            {
+                continue;
+            }
+            if( tok == "struct" || tok == "union" )
+            {
+                kw = true;
+            }
+            else if( tok == "*" )
+            {
+                ++stars;
+            }
+            else if( w > 0 && type.empty() && stars == 0 )
+            {
+                type = tok;
+            }
+            else
+            {
+                return;   // a second type word (`unsigned long`), a template, a reference: not one named pointer type
+            }
+        }
+        if( type.empty() || stars != 1 )
+        {
+            return;
+        }
+        emitSlotFact( n, std::string( kVrSlotMacroCastMark ) + std::string( name ), {}, slotCtor( std::string( type ), kw ) );
+    }
+
     void noteSlotAlias( TSNode at, std::string_view alias, const std::string& ctor )   // ctor: slotCtor( key, kw )
     {
         const std::string_view key = ctor.starts_with( kValueRefSlotTagMark ) ? std::string_view( ctor ).substr( 1 ) : std::string_view( ctor );
@@ -2635,7 +2943,7 @@ private:
 
     // The field chain of a member access, root first: `wme->mode->command` → root `wme`, chain "mode.command";
     // subscripts and parentheses are crossed (`t[ i ].f` → root `t`, chain "f"). A null root: not an identifier.
-    TSNode fieldChain( TSNode f, std::string& chain ) const
+    TSNode fieldChain( TSNode f, std::string& chain, TSNode* base = nullptr ) const
     {
         chain = std::string( text( child( f, m_fField ) ) );
         TSNode x = child( f, m_fArgument );
@@ -2660,7 +2968,73 @@ private:
                 break;
             }
         }
+        if( base != nullptr )
+        {
+            *base = x;
+        }
         return !ts_node_is_null( x ) && kindIs( ts_node_type( x ), "identifier" ) ? x : TSNode{};
+    }
+
+    // The type of the literal list anc[k] a designated field `path` is written in. FN-SLOT S2 (c): a NESTED designated literal
+    // `.super = { .super = { .display = f } }` with no type of its own is a field of the enclosing literal's field, so the path
+    // climbs (super.super.display) to the first literal with a type; `path` keeps the field alone when none has one.
+    std::pair<std::string, bool> designatedType( std::size_t k, std::string& path ) const
+    {
+        std::string climbed = path;
+        for( int guard = 0; guard < 4; ++guard, k -= 2 )
+        {
+            auto typed = literalType( k );
+            if( !typed.first.empty() )
+            {
+                path = std::move( climbed );
+                return typed;
+            }
+            if( k < 3 || !kindIs( m_anc[k].kind, "initializer_list" ) || !kindIs( m_anc[k - 1].kind, "initializer_pair" ) )
+            {
+                break;
+            }
+            const std::string_view up = vrDesignatedField( m_anc[k - 1].node, m_fDesignator, m_src );
+            if( up.empty() )
+            {
+                break;
+            }
+            climbed = std::string( up ) + "." + climbed;
+        }
+        return {};
+    }
+
+    // FN-SLOT S2 (C++): the member-pointer operand of a `( obj.*x.f )( … )` callee — the grammar reads `obj.*x.f` as the field
+    // chain obj → x → f whose FIRST hop is the `.*` operator, so the operand's root is that hop's field (`x`) and its chain the
+    // hops after it ("f"). A null root: no `.*`, `.*` last (`( obj.*pmf )( … )`, a member pointer in a plain variable: no field
+    // slot), or a non-field hop after it.
+    TSNode memberPointerChain( TSNode f, std::string& chain ) const
+    {
+        if( ts_node_is_null( f ) || !kindIs( ts_node_type( f ), "parenthesized_expression" ) )
+        {
+            return {};
+        }
+        TSNode x = ts_node_named_child( f, 0 );
+        std::string tail;
+        for( int guard = 0; guard < 8 && !ts_node_is_null( x ) && kindIs( ts_node_type( x ), "field_expression" ); ++guard )
+        {
+            const TSNode fld = child( x, m_fField );
+            if( ts_node_is_null( fld ) || !kindIs( ts_node_type( fld ), "field_identifier" ) )
+            {
+                return {};
+            }
+            if( ts_node_child_count( x ) >= 2 && text( ts_node_child( x, 1 ) ) == ".*" )
+            {
+                if( tail.empty() )
+                {
+                    return {};
+                }
+                chain = std::move( tail );
+                return fld;
+            }
+            tail = tail.empty() ? std::string( text( fld ) ) : std::string( text( fld ) ) + "." + tail;
+            x    = child( x, m_fArgument );
+        }
+        return {};
     }
 
     // IX1-V2 (Go): the type NAME a composite literal's or receiver's type node spells — `Command`, `batcheval.Command` (its final
@@ -2753,8 +3127,8 @@ private:
             {
                 return;   // a nested `.a.b =` / array `[i] =` designator: not one field of this literal's type
             }
-            const auto [ lt, ltKw ] = literalType( j - 2 );
             r.memberPath = std::string( fld );
+            const auto [ lt, ltKw ] = designatedType( j - 2, r.memberPath );
             r.memberCtor = slotCtor( lt, ltKw );
             return;
         }
@@ -2808,12 +3182,9 @@ private:
             return;
         }
         const TSNode f = vrDerefCallee( child( call, m_fFunction ), m_fArgument );
-        if( ts_node_is_null( f ) || !kindIs( ts_node_type( f ), "field_expression" ) )
-        {
-            return;
-        }
         std::string  chain;
-        const TSNode root = fieldChain( f, chain );
+        bool         viaMemberPointer = false;
+        const TSNode root = slotCallRoot( call, f, chain, viaMemberPointer );
         if( ts_node_is_null( root ) )
         {
             return;
@@ -2825,17 +3196,51 @@ private:
         }
         const std::size_t      dot   = chain.rfind( '.' );
         const std::string_view field = dot == std::string::npos ? std::string_view( chain ) : std::string_view( chain ).substr( dot + 1 );
-        if( !m_slot->everyFieldCall
-            && !( ty.declared
-                  && ( ty.structKw
-                       || ( dot == std::string::npos
-                            && std::ranges::find( m_callableFields, std::pair<std::string_view, std::string_view>( m_aliases.resolve( ty.key ), field ),
-                                                  []( const auto& cf ) { return std::pair<std::string_view, std::string_view>( cf.first, cf.second ); } )
-                                   != m_callableFields.end() ) ) ) )
+        if( !m_slot->everyFieldCall && !viaMemberPointer && !cppFieldCall( ty, dot == std::string::npos, field ) )
         {
             return;   // C++: a struct-keyword receiver, or a direct call through a function-pointer field its type (through this
                       // file's typedef / using aliases) declares in this file
         }
+        emitSlotCall( call, f, root, chain, std::string( ty.key ), ty.structKw );
+    }
+    // The C++ gate on a field call: a struct-keyword receiver, or a direct call through a function-pointer field its type
+    // (through this file's typedef / using aliases) declares in this file.
+    bool cppFieldCall( const VrTypeOf& ty, bool direct, std::string_view field ) const
+    {
+        return ty.declared
+            && ( ty.structKw
+                 || ( direct
+                      && std::ranges::find( m_callableFields, std::pair<std::string_view, std::string_view>( m_aliases.resolve( ty.key ), field ),
+                                            []( const auto& cf ) { return std::pair<std::string_view, std::string_view>( cf.first, cf.second ); } )
+                             != m_callableFields.end() ) );
+    }
+    // The root of slot call `call`'s callee `f` and its field chain: `x->a.f`, or (C++) the member-pointer operand of
+    // `( o.*x.f )`; null when there is none. FN-SLOT S2 (c): a C call receiver `M( … )->f( … )` is emitted here (keyed "()M":
+    // the macro's cast type when noteMacroCast recorded one, else the name tier) and answers null.
+    TSNode slotCallRoot( TSNode call, TSNode f, std::string& chain, bool& viaMemberPointer )
+    {
+        if( !ts_node_is_null( f ) && kindIs( ts_node_type( f ), "field_expression" ) )
+        {
+            TSNode       base;
+            const TSNode root = fieldChain( f, chain, &base );
+            if( ts_node_is_null( root ) && m_slot->everyFieldCall && macroCastCall( base ) )
+            {
+                emitSlotCall( call, f, child( base, m_fFunction ), chain, std::string( kVrSlotMacroCastMark ) + std::string( text( child( base, m_fFunction ) ) ), false );
+            }
+            return root;
+        }
+        if( !m_slot->memberPointers )
+        {
+            return {};
+        }
+        const TSNode root = memberPointerChain( f, chain );
+        viaMemberPointer  = !ts_node_is_null( root );
+        return root;
+    }
+    // A slot call Through (model.h kValueRefSlotCallScope): root `root`, field chain `chain`, the root's type key `key`.
+    void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
+    {
+        const std::size_t dot = chain.rfind( '.' );
         RawRef r;
         r.fileId     = m_fileId;
         r.startByte  = ts_node_start_byte( call );
@@ -2845,10 +3250,17 @@ private:
         r.qualifier  = std::string( 1, kValueRefSlotCallScope );
         r.name       = std::string( text( root ) );
         r.fieldName  = vrClean( text( f ) );
-        r.composeRel = "." + std::string( field );
-        r.memberCtor = slotCtor( std::string( ty.key ), ty.structKw );
+        r.composeRel = "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) );
+        r.memberCtor = slotCtor( std::move( key ), kw );
         r.memberPath = std::move( chain );
         m_out.push_back( std::move( r ) );
+    }
+    // FN-SLOT S2 (c): a call of a bare identifier (a function-like macro, or a function returning a struct pointer) as a field
+    // chain's base — the join keys its noteMacroCast fact, and a name with none joins by the field name only.
+    bool macroCastCall( TSNode base ) const noexcept
+    {
+        return !ts_node_is_null( base ) && kindIs( ts_node_type( base ), "call_expression" ) && !ts_node_is_null( child( base, m_fFunction ) )
+            && kindIs( ts_node_type( child( base, m_fFunction ) ), "identifier" );
     }
 
     // ── name-template dispatch (IX-3) ─────────────────────────────────────────────────────────────────
@@ -3118,6 +3530,7 @@ private:
     std::vector<VrStructFields>    m_structs;           // IX-1: this file's struct bodies so far
     std::vector<std::pair<std::string, std::string_view>> m_callableFields;   // IX-1: (struct, function-pointer field) this file declares
     VrAliases                                             m_aliases;          // IX-1: this file's typedef / using alias → struct type key
+    VrUsings                                              m_usings;           // FN-SLOT S2 fix 1: this file's `using` declarations and directives so far (C++)
     VrScalarTypedefs                                      m_scalarTypedefs;   // IX-1: this file's typedefs of scalar types
     std::uint32_t                  m_fileId;
     std::string_view               m_src;
@@ -3136,6 +3549,7 @@ private:
     std::vector<std::string_view>  m_fnDeclNames;
     std::vector<std::string_view>  m_relImportNames;
     TSFieldId m_fArguments = 0, m_fSource = 0, m_fReceiver = 0;
+    TSFieldId m_fScope = 0;   // FN-SLOT S2: a C++ qualified_identifier's scope
     TSFieldId m_fValue = 0, m_fKey = 0, m_fLeft = 0, m_fRight = 0, m_fFunction = 0, m_fName = 0, m_fDeclarator = 0;
     TSFieldId m_fConsequence = 0, m_fAlternative = 0, m_fParameters = 0, m_fParameter = 0, m_fObject = 0, m_fProperty = 0, m_fField = 0;
     TSFieldId m_fArgument = 0, m_fOperand = 0, m_fAttribute = 0, m_fOperator = 0, m_fPattern = 0, m_fDefinition = 0;

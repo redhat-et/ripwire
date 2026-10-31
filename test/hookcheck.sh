@@ -272,6 +272,25 @@ if [ -x "$REALBIN" ]; then
     OUT3I2="$( printf '%s' "$SS_JSON" | PATH="$WITH_REAL" TMPDIR="$T3I" bash "$HOOK" --session-start )"; RC3I2=$?
     [ "$RC3I2" -eq 0 ] && [ -z "$OUT3I2" ] && ok "SessionStart dedup: silent on 2nd call" \
         || no "SessionStart dedup: 2nd call was not silent"
+    # ── (3i1) claude-edit-route F1: the primer is built for the agent the hook RUNS for. ripwire-codex-nudge.sh
+    # reuses this hook with RIPWIRE_METER_AGENT=codex; the primer must then be `wrap codex`'s blurb (keeps
+    # --replace-symbol-body, no ranged-Read route), and Claude's must be `wrap claude`'s (the reverse).
+    # RED when the hook hardcodes `wrap claude`: the codex arm would carry Claude's offset/limit text.
+    # The arm is pinned to treatment (as A4 does): the default auto split could put a session id in control, silent.
+    T3IC="$TMP/t3ic"; mkdir -p "$T3IC"; T3IX="$TMP/t3ix"; mkdir -p "$T3IX"
+    # CR 5712563408 (hookcheck.sh:281): the Codex wrapper's output adapter is jq; without jq it exits 0 silent, so the shared hook is
+    # driven directly under RIPWIRE_METER_AGENT=codex there (the agent selection is the shared hook's)
+    CODEX_ENTRY="$ROOT/hooks/ripwire-codex-nudge.sh"; command -v jq >/dev/null 2>&1 || CODEX_ENTRY="$HOOK"
+    OUT3IC="$( printf '%s' '{"session_id":"sscodex","cwd":"'"$REPO"'","source":"startup"}' \
+        | env RIPWIRE_METER_AGENT=codex RIPWIRE_METER_ARM=treatment PATH="$WITH_REAL" TMPDIR="$T3IC" bash "$CODEX_ENTRY" --session-start )"
+    OUT3IX="$( printf '%s' '{"session_id":"ssclaude","cwd":"'"$REPO"'","source":"startup"}' \
+        | env RIPWIRE_METER_AGENT=claude RIPWIRE_METER_ARM=treatment PATH="$WITH_REAL" TMPDIR="$T3IX" bash "$HOOK" --session-start )"
+    if printf '%s' "$OUT3IC" | grep -Fq -e '--replace-symbol-body' && ! printf '%s' "$OUT3IC" | grep -Fq 'offset/limit'; then
+        ok "SessionStart F1: the Codex primer keeps --replace-symbol-body and carries no ranged-Read route"
+    else no "SessionStart F1: the Codex primer is not wrap codex's blurb (replace-body=$( printf '%s' "$OUT3IC" | grep -Fc -e '--replace-symbol-body' ) ranged-read=$( printf '%s' "$OUT3IC" | grep -Fc 'offset/limit' ))"; fi
+    if printf '%s' "$OUT3IX" | grep -Fq 'offset/limit' && ! printf '%s' "$OUT3IX" | grep -Fq -e '--replace-symbol-body'; then
+        ok "SessionStart F1: the Claude primer carries the ranged-Read route and no --replace-symbol-body"
+    else no "SessionStart F1: the Claude primer is not wrap claude's blurb (len=${#OUT3IX})"; fi
     T3I3="$TMP/t3i3"; mkdir -p "$T3I3"
     SS_NONGIT='{"session_id":"ssnongit","cwd":"'"$NONREPO"'","source":"startup"}'
     OUT3I3="$( printf '%s' "$SS_NONGIT" | PATH="$WITH_REAL" TMPDIR="$T3I3" bash "$HOOK" --session-start )"; RC3I3=$?

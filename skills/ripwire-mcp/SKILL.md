@@ -34,7 +34,7 @@ question `git cherry` cannot, since it compares commit ancestry and every other 
 the case `git cherry` calls unmerged forever; `whereis` lists the definitions and counts the references
 (`listing="defs"` on the root) when that page lists MORE definitions than the whole list would under the same row
 cap, or the same ones in strictly fewer bytes — `listing:"all"` asks for every row) + the 3 span-addressed
-edit verbs (`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol`). Only `find_symbol` and
+edit verbs (`replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol`; `ripwire wrap claude` omits these three with `--mcp-tools=no-edit`, since Claude Code edits through its native Edit). Only `find_symbol` and
 `find_referencing_symbols` attach a stable `handle=` instead of the body (fetch it only when you need it,
 via `fetch_body`); the edit verbs enforce a safety contract (staleness refusal, ambiguity refusal, atomic
 writes) detailed below and in full in [`mcp-reference.md`](mcp-reference.md).
@@ -46,7 +46,7 @@ verbs (`affected`/`connect`/`explore`/`from_trace`/`edit_check` and the cross-br
 ## Wiring — `ripwire wrap <agent>` prints the recipe
 
 ```
-ripwire wrap claude      # → claude mcp add ripwire -- ripwire --mcp
+ripwire wrap claude      # → claude mcp add ripwire -- ripwire --mcp --mcp-tools=no-edit
 ripwire wrap cursor      # → JSON mcpServers stanza for .cursor/mcp.json (also: windsurf, gemini)
 ripwire wrap codex       # → TOML stanza for ~/.codex/config.toml
 ripwire wrap opencode    # → CLI first (AGENTS.md is read automatically); its config key is "mcp", NOT mcpServers
@@ -207,7 +207,9 @@ legend inline.
 `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` — the last 3 of the 30 (see above),
 ripwire's MCP WRITE verbs. The preferred shell front door is
 `ripwire ROOT --replace-symbol-body=SYM --edit-payload=FILE|-` (or the matching insert flag); use MCP when
-the server is already warm or a client has no shell. Both fronts call the same safety engine. Each locates
+the server is already warm or a client has no shell. Both fronts call the same safety engine. (Claude Code
+reads before it edits, so `ripwire wrap claude` registers the server with `--mcp-tools=no-edit`: it takes the
+symbol's line range from ripwire, Reads that range, then uses the native Edit; `--mcp-tools=full` restores these.) Each locates
 a symbol's definition in the parsed index and splices text at its byte span: `replace_symbol_body`
 swaps signature-through-closing-brace verbatim, `insert_before_symbol`/`insert_after_symbol` splice text at
 the def's first/final byte (auto-adding the separating newline so you don't have to guess).
@@ -225,7 +227,9 @@ stamps, warm content-hash rebuilds, working-set PageRank personalization, the ba
 large workspaces). Short version: every edit-verb failure leaves the file byte-for-byte unchanged, writes are
 atomic (`tmp` + `rename(2)`), and the server never goes stale silently — it rebuilds warm from mtime checks
 before every verb call. **Lead with this MCP form when the body already came from `fetch_body` this
-session**; after a CLI `--expand`, keep the zero-standing-schema CLI path and use `--edit-payload=-`.
+session AND your server lists the edit verbs** (the default `ripwire wrap claude` server omits them with `--mcp-tools=no-edit`:
+there, take the ranged-Read plus native-Edit route, or the CLI `--replace-symbol-body` below); after a CLI `--expand`, keep the
+zero-standing-schema CLI path and use `--edit-payload=-`.
 Several harnesses' native Edit tool
 needs a fresh Read of the file immediately before the edit, even when you already have the body from
 elsewhere in the session — these verbs check their own staleness hash instead of requiring one, so under any

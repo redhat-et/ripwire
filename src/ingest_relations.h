@@ -81,8 +81,8 @@ inline RawRef rawRefAt( TSNode at, std::uint32_t fileId, Lang lang, RefRole role
 // it. A name no enclosing scope declares records nothing here: graph.h then asks the file's imports / includes / package.
 // What it does NOT read: a `using namespace`, a star import, an alias assignment (`Base = make_base()`), a class declared
 // inside a function the reference is not in. Those leave the reference without a local binding — never a wrong one.
-inline constexpr std::uint32_t kBaseBindNone    = 0;            // no enclosing scope declares the name
-inline constexpr std::uint32_t kBaseBindUnknown = 0xFFFFFFFFu;  // a scope was too large to scan: nothing proven either way
+// kBaseBindNone / kBaseBindUnknown / kBaseBindTemplateParam live in model.h beside RawRef::baseBind (CR 5701607593: three readers share them).
+inline bool                    baseNamesTemplateParameter( TSNode self, std::string_view base, std::string_view src );   // ingest_names.h
 // kBaseScopeScanCap bounds the two SCANS only: the unindexed lookupInScope fallback and the reopened-namespace sibling scan
 // (a runaway guard: past it those two bind nothing and the edge stays name-only). The indexed path (lookupInScopeIndexed,
 // the one captureTagsFacts installs) reads the scope's table and has no cap: a 32,000-class module scope binds every base.
@@ -496,6 +496,13 @@ inline std::uint32_t localBaseBinding( TSNode site, TSNode self, const std::vect
     return ts_node_start_byte( foundName ) + 1u;   // never 0 (kBaseBindNone) — and below ~0u: a TSNode byte is a u32 < src.size()
 }
 
+// RawRef::baseBind of a base clause written `text` (segments `segs`): a bare name that is a template parameter of the deriving
+// class is a dependent base (kBaseBindTemplateParam), else the same-file declaration the name binds to.
+inline std::uint32_t baseBindOf( TSNode site, TSNode self, std::string_view text, const std::vector<std::string_view>& segs, bool absolute, std::string_view src )
+{
+    return !absolute && segs.size() == 1 && baseNamesTemplateParameter( self, text, src ) ? kBaseBindTemplateParam : localBaseBinding( site, self, segs, absolute, src );
+}
+
 // Emit one inherit RawRef (derived → base) for a base-type node. startByte sits inside the class header
 // (the type node's own start), so the byte-span enclosing attribution binds fromSymbol = the derived class.
 // `self` is the declaration whose header writes the base (its own name never answers the lookup). lane lego-transitive
@@ -516,7 +523,7 @@ inline void emitBaseRef( TSNode typeNode, std::uint32_t fileId, Lang lang, std::
     {
         bool                                absolute = false;
         const std::vector<std::string_view> segs     = baseSegments( text, absolute );
-        r.baseBind = localBaseBinding( typeNode, self, segs, absolute, src );
+        r.baseBind = baseBindOf( typeNode, self, text, segs, absolute, src );
         if( segs.size() > 1 )
         {
             const std::size_t last = text.rfind( segs.back() );
@@ -1183,66 +1190,6 @@ inline std::string_view stdElementContainerText( TSNode typeNode, std::string_vi
     return externalnames::cppStdElementArgIndex( nodeFieldText( tmpl, NodeField::Name, src ) ) < 0 ? std::string_view{} : nodeTextOf( typeNode, src );
 }
 
-// one alias record: `aliasNode` names `target`, the class `spec` spells (see captureTypeAlias for the record's fields)
-inline void emitTypeAlias( TypeAliasCtx& cx, TSNode aliasNode, TSNode spec, std::string_view target )
-{
-    const std::string_view alias = nodeTextOf( aliasNode, cx.src );
-    if( alias.empty() || alias == target )
-    {
-        return;   // a self-alias (`typedef struct Node Node;`) adds nothing to walk
-    }
-    RawRef r;
-    r.fileId     = cx.fileId;
-    r.startByte  = ts_node_start_byte( aliasNode );
-    r.line       = ts_node_start_point( aliasNode ).row + 1;
-    r.lang       = cx.lang;
-    r.isCompose  = true;
-    r.composeRel = "alias";
-    r.name       = target;
-    r.recvVar    = alias;
-    r.qualifier  = writtenTypeNamespace( spec, cx.src );
-    r.memberPath = stdElementContainerText( spec, cx.src );   // `typedef std::map<K, V> Bindings;`: the text its element type is read from
-    cx.out.push_back( std::move( r ) );
-}
-
-// C/C++/ObjC TYPE ALIAS → the class it names, for the resolver's inheritance NAME graph (resolve.h addTypeAliasBases). An alias
-// declares no class, so a base walk keyed by class names dead-ended at one: `class CGBuilderTy : public CGBuilderBaseTy` with
-// `typedef llvm::IRBuilder<F, I> CGBuilderBaseTy;` stopped at CGBuilderBaseTy, and a member `CGBuilderTy Builder;` never reached
-// IRBuilderBase::CreateCall (test/fieldnarrowcheck.sh arm t). Rides the compose record shape — cached field for field, so the blob
-// format is unchanged — marked composeRel "alias" with an EMPTY fieldName, the one shape no member record has: `recvVar` = the
-// alias, `name` = the target's class name, `qualifier` = the namespace the target was written in (a `std` target is refused by
-// its reader), `memberPath` = the target's whole text when it is a std element container (stdElementContainerText, parser
-// version 166; graph.h StdMemberGate's element receivers read it, nothing else does). Only a PLAIN alias of a named class records: a pointer/reference/array/function declarator, a target that names no
-// class (aliasTargetName), a self-alias and an alias local to a function body (it types no member, and the name graph has no
-// scopes to keep it local) record nothing.
-inline void captureTypeAlias( TypeAliasCtx& cx, TSNode n, const char* t )
-{
-    const auto [ spec, nameNode ] = aliasSpecifierAndName( n, t );
-    const std::string_view target = aliasTargetName( spec, cx.src );
-    if( target.empty() || insideFunctionBody( n ) )
-    {
-        return;
-    }
-    if( !ts_node_is_null( nameNode ) )
-    {
-        if( kindIs( ts_node_type( nameNode ), "type_identifier" ) )
-        {
-            emitTypeAlias( cx, nameNode, spec, target );
-        }
-        return;
-    }
-    ChildCursor cursor( n );
-    forEachChild( n, cursor.cur, [ & ]( TSNode c )
-    {
-        const char* field = ts_tree_cursor_current_field_name( &cursor.cur );
-        if( field != nullptr && kindIs( field, "declarator" ) && kindIs( ts_node_type( c ), "type_identifier" ) )
-        {
-            emitTypeAlias( cx, c, spec, target );
-        }
-        return true;
-    } );
-}
-
 // The std smart pointers whose `->` reaches their FIRST template argument. No other template is read through: an in-repo
 // Holder<T> or util::Box<T> may overload `->` onto anything, std::weak_ptr has no `->`, and std::auto_ptr left in C++17.
 inline constexpr std::array<std::string_view, 2> kStdSmartPointers{ "unique_ptr", "shared_ptr" };
@@ -1294,6 +1241,169 @@ inline WrittenPointee stdSmartPointee( TSNode typeNode, std::string_view src ) n
     return {};
 }
 
+// The text of a class-like node's name with a template-id's arguments cut (`Box<T>` → Box); "" for an anonymous one.
+inline std::string cppClassNameText( TSNode classNode, std::string_view src )
+{
+    const TSNode name = fieldChild( classNode, NodeField::Name );
+    std::string  text = ts_node_is_null( name ) ? std::string() : std::string( nodeTextOf( name, src ) );
+    text.resize( std::min( text.find( '<' ), text.size() ) );
+    return text;
+}
+
+// The lexical scope `node` is declared in, as model.h kAnonScopeElement documents it (memberRoot of an alias / member record).
+inline std::string cppScopePath( TSNode node, std::string_view src )
+{
+    std::vector<std::string> innerFirst;
+    int                      guard = 0;
+    for( TSNode up = ts_node_parent( node ); !ts_node_is_null( up ) && guard < 128; up = ts_node_parent( up ), ++guard )
+    {
+        const char* t = ts_node_type( up );
+        if( kindIs( t, "function_definition" ) || kindIs( t, "compound_statement" ) || kindIs( t, "lambda_expression" ) )
+        {
+            return std::string( kLocalScope );
+        }
+        if( kindIs( t, "namespace_definition" ) )
+        {
+            const bool isInline = ts_node_child_count( up ) > 0 && kindIs( ts_node_type( ts_node_child( up, 0 ) ), "inline" );
+            const TSNode name   = fieldChild( up, NodeField::Name );
+            if( !isInline )
+            {
+                innerFirst.push_back( ts_node_is_null( name ) ? std::string( kAnonScopeElement ) : std::string( nodeTextOf( name, src ) ) );
+            }
+        }
+        else if( kindIs( t, "class_specifier" ) || kindIs( t, "struct_specifier" ) || kindIs( t, "union_specifier" ) )
+        {
+            if( const std::string name = cppClassNameText( up, src ); !name.empty() )
+            {
+                innerFirst.push_back( "#" + name );   // an anonymous struct's members belong to the class around it
+            }
+        }
+    }
+    std::string path;
+    for( auto it = innerFirst.rbegin(); it != innerFirst.rend(); ++it )
+    {
+        path.append( path.empty() ? "" : "::" ).append( *it );
+    }
+    return path;
+}
+
+inline std::vector<std::string> enclosingTemplateParameterNames( TSNode classNode, std::string_view src );   // below (one translation unit)
+
+// one alias record: `aliasNode` names `target`, the class `spec` spells (see captureTypeAlias for the record's fields)
+inline void emitTypeAlias( TypeAliasCtx& cx, TSNode aliasNode, TSNode spec, std::string_view target )
+{
+    const std::string_view alias = nodeTextOf( aliasNode, cx.src );
+    if( alias.empty() || alias == target )
+    {
+        return;   // a self-alias (`typedef struct Node Node;`) adds nothing to walk
+    }
+    RawRef r;
+    r.fileId     = cx.fileId;
+    r.startByte  = ts_node_start_byte( aliasNode );
+    r.line       = ts_node_start_point( aliasNode ).row + 1;
+    r.lang       = cx.lang;
+    r.isCompose  = true;
+    r.composeRel = "alias";
+    r.name       = target;
+    r.recvVar    = alias;
+    r.qualifier  = writtenTypeNamespace( spec, cx.src );
+    r.memberPath = stdElementContainerText( spec, cx.src );   // `typedef std::map<K, V> Bindings;`: the text its element type is read from
+    if( langFacts( cx.lang ).aliasPeelsSmartPointer )
+    {
+        // lane iface-peel: `using FilterSharedPtr = std::shared_ptr<Filter>;` — the pointee `->` reaches (memberCtor) and the
+        // namespace it was written in (memberVia; `std` is refused by the reader), beside the unchanged `shared_ptr` target
+        // every other reader keeps reading (graph.h buildFieldNarrowTables is the one reader of the pair)
+        if( const WrittenPointee pointee = stdSmartPointee( spec, cx.src ); !pointee.name.empty() )
+        {
+            // CR (review 5712563408, ingest_relations.h:1309): `template <class Handler> struct S { using HPtr = std::shared_ptr<Handler>; }`
+            // names the PARAMETER, never an in-tree class `Handler`: no pointee is recorded (the member keeps its base reading)
+            const std::vector<std::string> params = enclosingTemplateParameterNames( aliasNode, cx.src );
+            if( pointee.qualifier.empty() && std::ranges::find( params, std::string( pointee.name ) ) != params.end() )
+            {
+                r.memberCtor.clear();
+            }
+            else
+            {
+                r.memberCtor = pointee.name;
+                r.memberVia  = pointee.qualifier;
+            }
+        }
+        r.memberRoot = cppScopePath( aliasNode, cx.src );   // fix round 1: the lexical scope the alias is declared in (its target is looked up there)
+    }
+    cx.out.push_back( std::move( r ) );
+}
+
+// C/C++/ObjC TYPE ALIAS → the class it names, for the resolver's inheritance NAME graph (resolve.h addTypeAliasBases). An alias
+// declares no class, so a base walk keyed by class names dead-ended at one: `class CGBuilderTy : public CGBuilderBaseTy` with
+// `typedef llvm::IRBuilder<F, I> CGBuilderBaseTy;` stopped at CGBuilderBaseTy, and a member `CGBuilderTy Builder;` never reached
+// IRBuilderBase::CreateCall (test/fieldnarrowcheck.sh arm t). Rides the compose record shape — cached field for field, so the blob
+// format is unchanged — marked composeRel "alias" with an EMPTY fieldName, the one shape no member record has: `recvVar` = the
+// alias, `name` = the target's class name, `qualifier` = the namespace the target was written in (a `std` target is refused by
+// its reader), `memberPath` = the target's whole text when it is a std element container (stdElementContainerText, parser
+// version 166; graph.h StdMemberGate's element receivers read it, nothing else does). Only a PLAIN alias of a named class records: a pointer/reference/array/function declarator, a target that names no
+// class (aliasTargetName), a self-alias and an alias local to a function body (it types no member, and the name graph has no
+// scopes to keep it local) record nothing.
+inline void captureTypeAlias( TypeAliasCtx& cx, TSNode n, const char* t )
+{
+    const auto [ spec, nameNode ] = aliasSpecifierAndName( n, t );
+    const std::string_view target = aliasTargetName( spec, cx.src );
+    if( target.empty() || insideFunctionBody( n ) )
+    {
+        return;
+    }
+    if( !ts_node_is_null( nameNode ) )
+    {
+        if( kindIs( ts_node_type( nameNode ), "type_identifier" ) )
+        {
+            emitTypeAlias( cx, nameNode, spec, target );
+        }
+        return;
+    }
+    ChildCursor cursor( n );
+    forEachChild( n, cursor.cur, [ & ]( TSNode c )
+    {
+        const char* field = ts_tree_cursor_current_field_name( &cursor.cur );
+        if( field != nullptr && kindIs( field, "declarator" ) && kindIs( ts_node_type( c ), "type_identifier" ) )
+        {
+            emitTypeAlias( cx, c, spec, target );
+        }
+        return true;
+    } );
+}
+
+inline std::string cppTemplateParameterName( std::string_view text );   // ingest_names.h (included after this section; one translation unit)
+
+// The names the `template <…>` declarations ENCLOSING a class declare as parameters (`template <class Handle, int N> class S`:
+// Handle, N), innermost list first; empty for a class that is no template or nested in none. A member of the class that writes
+// one of them as its type names the parameter, whatever alias of that spelling exists in the tree (captureFields marks it).
+inline std::vector<std::string> enclosingTemplateParameterNames( TSNode classNode, std::string_view src )
+{
+    std::vector<std::string> names;
+    int                      guard = 0;
+    for( TSNode up = ts_node_parent( classNode ); !ts_node_is_null( up ) && guard < 64; up = ts_node_parent( up ), ++guard )
+    {
+        if( !kindIs( ts_node_type( up ), "template_declaration" ) )
+        {
+            continue;
+        }
+        const TSNode list = fieldChild( up, NodeField::Parameters );
+        if( ts_node_is_null( list ) )
+        {
+            continue;
+        }
+        ChildCursor cursor( list );
+        forEachChild( list, cursor.cur, [ & ]( TSNode p )
+        {
+            if( ts_node_is_named( p ) && !kindIs( ts_node_type( p ), "comment" ) )
+            {
+                names.push_back( cppTemplateParameterName( nodeTextOf( p, src ) ) );
+            }
+            return true;
+        } );
+    }
+    return names;
+}
+
 // S5-E HAS-A composition edges: walk a class/struct node's field_declaration_list and emit a
 // compose RawRef for each typed member variable whose type name matches a known class/struct name.
 // Two sub-relations:
@@ -1311,6 +1421,15 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
     if( lang != Lang::Cpp )
     {
         return; // C++ only for S5-E; extend for Python/TS later
+    }
+    const std::vector<std::string> templateParams = enclosingTemplateParameterNames( classNode, src );
+    std::string                    classScope     = cppScopePath( classNode, src );   // the members' scope: the class's own, then the class
+    if( classScope != kLocalScope )
+    {
+        if( const std::string className = cppClassNameText( classNode, src ); !className.empty() )
+        {
+            classScope.append( classScope.empty() ? "#" : "::#" ).append( className );
+        }
     }
 
     ChildCursor         cursor( classNode );
@@ -1502,6 +1621,15 @@ void captureFields( TSNode classNode, std::uint32_t fileId, Lang lang, std::stri
             r.qualifier  = writtenTypeNamespace( typeNode, src );   // `std` for `std::string name_;`, "" unqualified
             r.fieldName  = std::move( fieldName );
             r.composeRel = ( isRefOrPtr || declIsRefOrPtr ) ? "uses" : "creates";
+            r.memberRoot = classScope;   // the lexical scope the written type is looked up in (model.h kAnonScopeElement)
+            if( pointee.name.empty() && kindIs( dt, "pointer_declarator" ) )
+            {
+                r.memberVia = std::string( kPointerMemberType );   // CR (review 5712563408, :1612): `FilterSharedPtr* p_;` — `p_->` reaches the smart pointer
+            }
+            else if( pointee.name.empty() && std::ranges::find( templateParams, r.name ) != templateParams.end() )
+            {
+                r.memberVia = std::string( kTemplateParamMemberType );   // `Handle h_;` under `template <class Handle>`: the parameter, not an alias
+            }
             if( !pointee.name.empty() )
             {
                 r.qualifier = std::string( pointee.qualifier );   // the POINTEE's namespace: `std` for `std::unique_ptr<std::string>`

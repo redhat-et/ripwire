@@ -1102,7 +1102,7 @@ int emitGrepReport( const MainDispatch& d )
     //            absent above is absent from every indexed file", and that is false the moment a comment or
     //            string row was held back. --grep-in=any (no filtering) keeps the claim, which is what makes
     //            the claim recoverable rather than lost.
-    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex;
+    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex && !ing.memoryStop.isSet();   // notfound-on-cut: a cut index never claims it (the CLI refuses one first; this is the twin of the MCP term)
     const bool windowWhole    = grepPage.begin == 0 && grepPage.end == hitCount;
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
     const char* const completeAttr = ( scanExhaustive && windowWhole && nothingHeldBack ) ? " complete=\"1\"" : "";

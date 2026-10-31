@@ -1736,9 +1736,91 @@ struct CrawlResult
     CrawlSkips                   skips;
 };
 
+// The crawl's directory walk in a DETERMINISTIC order: pre-order, each directory's entries visited in byte order of
+// their file name. fs::recursive_directory_iterator yields the filesystem's own readdir order (ext4: hash order, tmpfs:
+// creation order, APFS: neither, measured), and the memory guard stops the walk after N entries — so WHICH files survive a cut
+// depended on the filesystem: the same tree under the same limit answered from different corpora (notfound-on-cut; CI
+// memguardcheck B6b on ubuntu only). Sorting the finished list afterwards cannot fix that, the cut is already made.
+// Same surface as the iterator the loop used (*it, it->, disable_recursion_pending, increment(ec), != end): symlinked
+// directories are not entered (recursive_directory_iterator's default), a directory that cannot be opened is skipped,
+// and a directory's entries are held (sorted) only while it is being walked, so a pruned subtree is never listed.
+// `dir`'s entries in file-name byte order; empty when it cannot be opened (ec says why) or has none. An error part-way keeps
+// the entries read so far.
+inline std::vector<fs::directory_entry> sortedDirEntries( const fs::path& dir, fs::directory_options opts, std::error_code& ec )
+{
+    std::vector<fs::directory_entry> entries;
+    for( fs::directory_iterator it( dir, opts, ec ), last; !ec && it != last; it.increment( ec ) )
+    {
+        entries.push_back( *it );
+    }
+    if( !entries.empty() )
+    {
+        ec.clear();
+    }
+    // the whole native path, not filename(): every entry here shares `dir` + separator as a prefix, so the order is the file-name
+    // order and a comparison allocates nothing (filename() builds a path per call)
+    std::sort( entries.begin(), entries.end(), []( const fs::directory_entry& a, const fs::directory_entry& b )
+               { return a.path().native() < b.path().native(); } );
+    return entries;
+}
+
+class SortedDirWalk
+{
+public:
+    SortedDirWalk( const fs::path& root, fs::directory_options opts, std::error_code& ec ) : opts_( opts ) { push( root, ec ); }
+    [[nodiscard]] bool atEnd() const noexcept { return levels_.empty(); }
+    [[nodiscard]] const fs::directory_entry& operator*() const noexcept { return levels_.back().entries[ levels_.back().next ]; }
+    [[nodiscard]] const fs::directory_entry* operator->() const noexcept { return &**this; }
+    void disable_recursion_pending() noexcept { recurse_ = false; }
+    // the next entry: the current directory's first child when it is a real directory and not pruned, else its next sibling
+    void increment( std::error_code& ec )
+    {
+        ec.clear();
+        if( levels_.empty() )
+        {
+            return;
+        }
+        const bool descend = recurse_;
+        recurse_           = true;
+        std::error_code tec;
+        if( descend && ( **this ).is_directory( tec ) && !( **this ).is_symlink( tec ) && push( ( **this ).path(), tec ) )
+        {
+            return;
+        }
+        for( ++levels_.back().next; levels_.back().next == levels_.back().entries.size(); ++levels_.back().next )
+        {
+            levels_.pop_back();
+            if( levels_.empty() )
+            {
+                return;
+            }
+        }
+    }
+
+private:
+    struct Level
+    {
+        std::vector<fs::directory_entry> entries;
+        std::size_t                      next = 0;
+    };
+    bool push( fs::path dir, std::error_code& ec )   // by value: `dir` may name an entry of a level that growing levels_ moves
+    {
+        Level level{ sortedDirEntries( dir, opts_, ec ), 0 };
+        const bool any = !level.entries.empty();
+        if( any )
+        {
+            levels_.push_back( std::move( level ) );
+        }
+        return any;
+    }
+    fs::directory_options opts_;
+    std::vector<Level>    levels_;
+    bool                  recurse_ = true;
+};
+
 // #350: `memWatch` (null = unguarded) is consulted once per directory entry — memguard::Watch decides how rarely it
 // actually measures — and a stop ends the walk where it is. What was seen so far is sorted and returned exactly as a
-// finished walk's list is, so a partial corpus is still a deterministic one; ingest() discloses the stop.
+// finished walk's list is, and the walk itself is in SortedDirWalk's order, so a partial corpus is a deterministic one; ingest() discloses the stop.
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
                             std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true,
                             memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr )
@@ -1792,7 +1874,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
 
     // Otherwise treat root as a directory.
     auto opts = fs::directory_options::skip_permission_denied;
-    fs::recursive_directory_iterator it( root, opts, ec );
+    SortedDirWalk it( root, opts, ec );
     if( ec )
     {
         DISCLOSE( "ingest: cannot open root directory — empty result" );
@@ -1801,11 +1883,10 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
 
     const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode, ignoreSpeculation, rootReal );   // §N6-C
 
-    const fs::recursive_directory_iterator end;
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
         std::uint64_t entryCount = 0;
-        for( ; it != end; it.increment( ec ) )
+        for( ; !it.atEnd(); it.increment( ec ) )
         {
             if( memWatch != nullptr && memWatch->crawlShouldStop( entryCount++ ) )
             {

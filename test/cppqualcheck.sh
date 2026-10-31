@@ -350,10 +350,15 @@ rrun US --uses=selectBaseline \
 # 38 -> 39 2026-10-28 (train 41, lane/upward-2hop): the ranked caller hop's seed choice (forcallerhop.h ForRankedSources::of)
 # reads a candidate's file once through the canonical helper to find its message literal — one new call site, same helper
 # (measured: the one new <u> row at src/forcallerhop.h:322 on the composed tree; main 12056c16 answers 38).
+# 39 -> 41 2026-10-29 (lane/alias-import): the re-export hop rows (forreexport.h) read two kinds of file through the canonical helper — a
+# crate's Cargo.toml (buildRustCrates, once per manifest) and a statement's source file (Sources::of, once per file, memoised, for the
+# `pub` check and the row's line). Two new call sites, same helper, no new fopen/fread.
+# 41 -> 44 2026-10-30 (train 42b, composition of lane/alias-import and lane/mf1-lit): the literal block (forliteral.h) reads the
+# shown sites' files through the same helper at three sites (the docstring/tier read, the owner body, the context rows). No new fopen.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 39 ] \
-    && ok "repo: --uses=readWholeFile count=39 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 39, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 44 ] \
+    && ok "repo: --uses=readWholeFile count=44 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 44, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \

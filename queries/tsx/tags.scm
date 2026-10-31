@@ -251,6 +251,20 @@
 (export_statement
   source: (string) @import.path)
 
+; Lane alias-import: a RE-EXPORT's names, through the binds channel (src/ingest_importcap.h webReexportBindOf → LocalBindKind
+; ReExport, read only by the --for re-export hop rows). One match per specifier of `export { a [as b] } from 'm'` (`!alias`
+; keeps an aliased specifier to the second pattern alone), and the source string of `export * from 'm'`. `export * as ns from`
+; (namespace_export) has no bare `*` child and matches neither; a clause WITHOUT `source:` is a local export and matches nothing.
+(export_statement
+  (export_clause (export_specifier name: (identifier) @import.names !alias))
+  source: (string))
+(export_statement
+  (export_clause (export_specifier name: (identifier) @import.names alias: (identifier) @import.alias))
+  source: (string))
+(export_statement
+  "*"
+  source: (string) @import.names)
+
 (call_expression
   function: [ (identifier) (import) ]
   arguments: (arguments . (string) @import.path))

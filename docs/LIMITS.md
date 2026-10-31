@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 298 | 115 | 180 | **118** |
+| 312 | 119 | 193 | **119** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 298 + 7 is the 305 constants this generator parses out of `src/`.
+are not counted as caps, and 312 + 7 is the 319 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **142 of 298 caps are classified
-(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 156 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **142 of 312 caps are classified
+(50 INDEXING, 46 OUTPUT, 46 BOUNDARY); the remaining 170 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -102,7 +102,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 115 files that declare a cap — the 298 caps counted above, and no parameter.
+One table for each of the 119 files that declare a cap — the 312 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -409,6 +409,15 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kForCtorHopCap` | `16` | — | callee names listed on ctor_calls=; the rest counted in ctor_calls_more= |
 
+### `src/fordispatchhop.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForDispatchCtorRows` | `4` | — | constructor-caller rows per call |
+| `kForDispatchHopRows` | `8` | — | candidate rows per call |
+
 ### `src/forfold.h`
 
 Discloses: **none**
@@ -417,6 +426,18 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kForBodyFoldBudgetBytes` | `4000` | — | — |
 | `kForBodyFoldRows` | `3` | — | — |
+
+### `src/forliteral.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForLiteralBodyCapBytes` | `3000` | — | a short body over this many bytes is still served as an excerpt <x> |
+| `kForLiteralContextRows` | `2` | — | string sites outside any function served with the lines after them |
+| `kForLiteralMinBareCaps` | `10` | — | — |
+| `kForLiteralRankedRows` | `256` | — | source sites ordered for the rows (past it: counted in src=, not ranked) |
+| `kForLiteralSiteRows` | `8` | — | <ls> rows shown (a runaway guard: shown=/src= count, next= lists all) |
 
 ### `src/formembers.h`
 
@@ -442,6 +463,18 @@ Discloses: `capped`
 | --- | --- | --- | --- |
 | `kForPageRowsDefault` | `40` | OUTPUT | `--for --limit=N` with no N is never accepted (the flag refuses 0); |
 | `kForPageUnionSymbolCap` | `8` | INDEXING | symbols per file whose term masks join that file's union |
+
+### `src/forreexport.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kReexportDefCap` | `2` | — | definitions per word that carry a chain |
+| `kReexportNameCap` | `3` | — | task words served |
+| `kReexportRowCap` | `8` | — | hop rows per definition (BFS order); the rest counted in total= |
+| `kReexportSpellingCap` | `256` | — | spellings one walk visits; past it total= is a floor (capped="1") |
+| `kReexportUseCap` | `2` | — | use-site rows per definition, from task-named files |
 
 ### `src/forslots.h`
 
@@ -721,6 +754,14 @@ Discloses: `count_capped`
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kLintMaxPerRule` | `5000` | — | — |
+
+### `src/listedin.h`
+
+Discloses: `capped`, `files_capped`, `manifests_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kListedShownFiles` | `16` | — | distinct shown files whose ancestors are read |
 
 ### `src/main.cpp`
 
@@ -1013,6 +1054,7 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
+| `kAliasPeelDepth` | `4` | — | — |
 | `kFieldWalkCap` | `16` | INDEXING | total visited names — bounds depth and width together (methodOnTypeOrBases, memberFieldHides and fieldEntryAt) |
 | `kMaxDepth` | `64` | — | — |
 

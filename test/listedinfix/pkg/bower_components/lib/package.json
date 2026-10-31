@@ -1,0 +1,7 @@
+{
+  "name": "lib",
+  "files": [
+    "lib.js",
+    "lib2.js"
+  ]
+}

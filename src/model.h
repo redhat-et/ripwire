@@ -597,6 +597,10 @@ inline constexpr char kValueRefSlotParamScope = 'q';
 //     slot_join::RustTypeKeys; `Self` is resolved to the impl type by the extractor).
 // pathSep — a registrar may be an associated function reached by a PATH call (`CallEval::new( … )`): the argument row's callee
 //   is written `Owner<pathSep>name`, resolved to the owner type's function of that name ("" = bare callees only, never a method).
+// memberPointers — FN-SLOT S2 (C++): a pointer to MEMBER is a function value and its call a slot call. `&Cls::m` in a value
+//   position is a Value row naming m with memberRoot = Cls (resolved to Cls's method m only, never a namesake: valuerefindex.h
+//   ownedBy); `( obj.*x.f )( … )` is a slot call through field f of x's type (the `.*` proves f holds a member pointer, so no C++
+//   gate applies). Floors: `->*` (the grammar reads it as an ERROR node), a member pointer held in a plain variable.
 enum class VrSlotCallSide : std::uint8_t { ThroughRows, MemberCallByName, ParenFieldCall };
 enum class VrSlotTypeKey : std::uint8_t { TypedefFacts, PackageDir, ModuleType };
 struct VrSlotLang
@@ -606,12 +610,13 @@ struct VrSlotLang
     VrSlotCallSide   callSide;
     VrSlotTypeKey    typeKey;
     std::string_view pathSep;
+    bool             memberPointers = false;
 };
 inline constexpr VrSlotLang kVrSlotLangs[] = {
-    { Lang::C, true, VrSlotCallSide::ThroughRows, VrSlotTypeKey::TypedefFacts, "" },
-    { Lang::Cpp, false, VrSlotCallSide::ThroughRows, VrSlotTypeKey::TypedefFacts, "" },
-    { Lang::Go, false, VrSlotCallSide::MemberCallByName, VrSlotTypeKey::PackageDir, "" },
-    { Lang::Rust, false, VrSlotCallSide::ParenFieldCall, VrSlotTypeKey::ModuleType, "::" },
+    { Lang::C, true, VrSlotCallSide::ThroughRows, VrSlotTypeKey::TypedefFacts, "", false },
+    { Lang::Cpp, false, VrSlotCallSide::ThroughRows, VrSlotTypeKey::TypedefFacts, "", true },
+    { Lang::Go, false, VrSlotCallSide::MemberCallByName, VrSlotTypeKey::PackageDir, "", false },
+    { Lang::Rust, false, VrSlotCallSide::ParenFieldCall, VrSlotTypeKey::ModuleType, "::", false },
 };
 inline constexpr std::array<const VrSlotLang*, kLangCount> kVrSlotLangOf = []
 {
@@ -653,7 +658,39 @@ inline bool slotKeysOwnTypes( Lang l ) noexcept
 // name, so the join never reads it through an alias. A slot fact whose composeRel is kValueRefSlotBodyRel declares that its
 // owner's struct BODY is in this file (no field): one tag with bodies in two files is two types, so it joins nothing.
 inline constexpr char kValueRefSlotTagMark = '\x02';
+// FN-SLOT S2 (c): the slot type key of a call of a function-like macro `M( … )->f( … )` is "()M"; a macro whose body is one
+// pointer cast to a named type records an alias fact "()M" → that type (ingest_valuerefs.h noteMacroCast). A "()M" no fact
+// resolves (a function returning a pointer, a macro of another shape) is an unknown type: the name tier.
+inline constexpr std::string_view kVrSlotMacroCastMark = "()";
 inline constexpr char kValueRefSlotBodyRel = '{';
+// FN-SLOT S2 fix 1 (F-2): a body fact's composeRel is kValueRefSlotBodyRel followed by the SCOPE PATH of the class (its enclosing named
+// namespaces and classes, outermost first, "::"-joined; an anonymous or inline namespace is transparent; "" = the global scope).
+// A C++ `&Cls::m` Value row's memberVia says where the pointer was written, so the join can tell the in-tree class from an external
+// namesake: the written QUALIFIER (`grpc` in `&grpc::Server::start`, a leading "::" kept; `using ns::Cls;` supplies it for a bare
+// `Cls`), the SITE (the named namespaces and classes enclosing the pointer, plus the scope an out-of-line definition's declarator
+// writes) and the `using namespace` DIRECTIVES in the file (',' joined), the three joined by kVrMemberScopeSep.
+inline constexpr char kVrMemberScopeSep = '\x1f';
+struct VrMemberScope
+{
+    std::string_view qualifier;
+    std::string_view site;
+    std::string_view directives;
+};
+inline VrMemberScope vrMemberScopeOf( std::string_view via ) noexcept
+{
+    VrMemberScope out;
+    const std::size_t a = via.find( kVrMemberScopeSep );
+    if( a == std::string_view::npos )
+    {
+        out.qualifier = via;
+        return out;
+    }
+    const std::size_t b = via.find( kVrMemberScopeSep, a + 1 );
+    out.qualifier       = via.substr( 0, a );
+    out.site            = via.substr( a + 1, b == std::string_view::npos ? std::string_view::npos : b - a - 1 );
+    out.directives      = b == std::string_view::npos ? std::string_view() : via.substr( b + 1 );
+    return out;
+}
 
 // Essential-complexity ev_why= reason vocabulary (the essential-complexity design note, §5.1). PUBLIC the
 // moment it ships (test/attrvocabcheck.sh's standing posture; test/essentialcxcheck.sh pins the spellings):
@@ -1108,6 +1145,12 @@ struct Reference
     //   Sits in memberFactory's alignment padding: sizeof(Reference) is unchanged.
     std::uint32_t baseBind = 0;
 };
+// The sentinels Reference::baseBind holds besides a real binding (1 + a name byte): ONE definition for the writer (ingest_relations.h
+// localBaseBinding) and every reader (graph.h provenBasesOf, valuerefindex.h inheritEdges / ClassFamilies::bindBase).
+inline constexpr std::uint32_t kBaseBindNone          = 0;            // no enclosing scope declares the name
+inline constexpr std::uint32_t kBaseBindUnknown       = 0xFFFFFFFFu;  // a scope was too large to scan: nothing proven either way
+inline constexpr std::uint32_t kBaseBindTemplateParam = 0xFFFFFFFEu;  // fn-slot S2 fix 2: the written base is a TEMPLATE PARAMETER of the deriving class (`template <class B> struct M : B`): it names no declaration
+static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= kBaseBindTemplateParam` for both sentinels" );
 
 // ONE rule for every reader of the reference table that counts a call SITE (train 30, fcall-forward nit N1): a FORWARDED
 // reference counts only where buildGraph kept its call — `keptForwards` is Graph::keptForwards, the ascending
@@ -1501,6 +1544,14 @@ enum class LocalBindKind : std::uint8_t
     // literal's name (`Widget.run`) could name that member, so beside a class of that name it is unknown, never the class alone.
     // APPENDED (cache u8).
     JsObjectLiteral,
+    // Lane alias-import (ALIAS-IMPORT): a JS/TS RE-EXPORT clause — `export { a } from './m'`, `export { a as b } from './m'`,
+    // `export * from './m'` (and the `export type` spellings). var = the EXPORTED name ("*" for a star re-export), typeName = the
+    // module specifier as written (quotes stripped), importedName = the name it takes from that module ("*" for a star).
+    // `export * as ns from` records nothing (it binds a namespace, not a name). fromSymbol kNoNode, spans {0,0}, sited at the
+    // statement. Written by ingest_importcap.h emitCapturedImportBind (the binds channel's Web arm) and read by forreexport.h
+    // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
+    // filters by kind). APPENDED (cache u8).
+    ReExport,
 };
 // fix round 4: the TypeAlias rows that bind a spelling with no alias target (model.h LocalBindKind::TypeAlias, typeName)
 inline constexpr std::string_view kTypeBindForward  = "forward";
@@ -1508,7 +1559,7 @@ inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::JsObjectLiteral ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ReExport ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two
@@ -1577,6 +1628,28 @@ inline TypeWrap typeWrapOf( CallResultFamily f, std::string_view name ) noexcept
 }
 // Binding::resultIndex of a record about a WHOLE result (a single non-tuple result; a Rust `let t = pair()?` binding all of it).
 inline constexpr std::uint8_t kWholeResult = 0xFF;
+// lane iface-peel (LangFacts::returnTypedDispatchLet): a ReturnType whose unwrapDepth carries this bit names a TRAIT the result
+// dispatches through (Rust `-> &dyn T` / `-> Box<dyn T>` / `-> impl T`), never a class: typeName = the trait, importedName = its
+// path when qualified. No call-result reader that compares depths can match it by accident (a call's own depth never has the
+// bit); graph.h typeCallResults alone reads it, and types the local as SOME implementor of the trait (ReceiverEvidence::LocalFact
+// iface). The low bits stay the Result/Option layers (always 0 today: a layered trait object is not read).
+inline constexpr std::uint8_t kDispatchResultBit = 0x80;
+// lane iface-peel fix 1 (B1): the memberVia of a C++ MEMBER record (isCompose, a field name) whose written type is a TEMPLATE
+// PARAMETER of an enclosing `template <…>` (`template <class Handle> class S { Handle h_; }`): the name is the parameter, never
+// the smart-pointer alias of that spelling in some namespace. resolve.h SmartAliasPeel::pointeeOf alone reads it, to keep the
+// member's base reading; every other reader of a compose record ignores memberVia (a C++ member record carries none otherwise).
+inline constexpr std::string_view kTemplateParamMemberType = "<tparam>";
+// train 42b CR harvest: the memberVia of a C++ MEMBER record declared as a POINTER to a non-smart written type (`FilterSharedPtr* p_;`):
+// `p_->` reaches the alias's smart pointer, never the pointee. resolve.h SmartAliasPeel::pointeeOf alone reads it (base reading kept).
+inline constexpr std::string_view kPointerMemberType = "<ptr>";
+// lane iface-peel fix 1 (B1): the LEXICAL SCOPE of a C++ declaration, written on its record's memberRoot (a compose record's only
+// use of that field): the enclosing namespaces and classes, outermost first, joined by "::" — a class element is prefixed "#"
+// (`Envoy::Network::#ConnectionImpl`), an anonymous namespace is kAnonScopeElement, an inline namespace is transparent (left
+// out). kLocalScope is a declaration inside a function body (its scope is a block this index does not model). Written by
+// ingest_relations.h cppScopePath on an alias record and on a member record (the member's class last); read by resolve.h
+// SmartAliasPeel alone. The C++ call-result bindings are OFF (callResultFamilyOf), so no Namespace record exists to read.
+inline constexpr std::string_view kAnonScopeElement = "(anon)";
+inline constexpr std::string_view kLocalScope       = "(local)";
 // The importedName of a Ruby class-object binding that acts on each class INCLUDING the module, not on the module
 // (LocalBindKind::RubySingletonDef, RubyClassMixin; parser version 145): written in a concern's `included do`, or a def
 // in its `class_methods do`.

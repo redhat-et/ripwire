@@ -54,6 +54,7 @@ printf '%s\n%s\n' "$INIT" "$LIST" | serve                      >"$TMP/default.ou
 printf '%s\n%s\n' "$INIT" "$LIST" | serve --mcp-tools=full     >"$TMP/full.out"
 printf '%s\n%s\n' "$INIT" "$LIST" | serve --mcp-tools=core     >"$TMP/core.out"
 printf '%s\n%s\n' "$INIT" "$LIST" | serve --mcp-tools=grep,impact,uses >"$TMP/three.out"
+printf '%s\n%s\n' "$INIT" "$LIST" | serve --mcp-tools=no-edit  >"$TMP/noedit.out"
 
 echo; echo "=== (A) no flag == --mcp-tools=full, byte for byte ==="
 if [ -s "$TMP/default.out" ] && cmp -s "$TMP/default.out" "$TMP/full.out"; then
@@ -90,7 +91,7 @@ if mode == "list":
     hidden = [n for n in alltools if n not in want and n != "for"]
     named_hidden = [n for n in hidden if re.search(r"(?<![a-z_])%s(?![a-z_])" % re.escape(n), ins)]
     print(("PASS" if not named_hidden else "FAIL") + " %s: instructions name no hidden tool%s" % (tag, (" (named: %s)" % named_hidden) if named_hidden else ""))
-    m = re.search(r"TOOL SUBSET: this server lists (\d+) of (\d+) tools \(--mcp-tools=([a-z_,]+)\)", ins)
+    m = re.search(r"TOOL SUBSET: this server lists (\d+) of (\d+) tools \(--mcp-tools=([a-z_,-]+)\)", ins)
     good = m and m.group(1) == str(len(want)) and m.group(2) == str(len(alltools))
     print(("PASS" if good else "FAIL") + " %s: instructions announce the subset (%s)" % (tag, m.group(0) if m else "no TOOL SUBSET sentence"))
     if len(sys.argv) > 6:   # the base text must survive unchanged when every tool it names is listed
@@ -102,6 +103,12 @@ report(){ while IFS= read -r l; do case "$l" in PASS*) ok "${l#PASS }";; *) no "
 echo; echo "=== (B)+(C) core and a 3-tool allowlist: what is listed, and what initialize says ==="
 judge list "$TMP/full.out" "$TMP/core.out" "$CORE" "(B/C) core" keepbase | report
 judge list "$TMP/full.out" "$TMP/three.out" "grep impact uses" "(B/C) grep,impact,uses" | report
+# `no-edit` (what `ripwire wrap claude` registers) = the whole catalog minus the three span-addressed edit twins.
+NOEDIT="$( python3 -c '
+import json, sys
+t = [x["name"] for x in json.loads(open(sys.argv[1]).readlines()[1])["result"]["tools"]]
+print(" ".join(n for n in t if n not in ("replace_symbol_body", "insert_before_symbol", "insert_after_symbol")))' "$TMP/full.out" )"
+judge list "$TMP/full.out" "$TMP/noedit.out" "$NOEDIT" "(B/C) no-edit" keepbase | report
 python3 - "$TMP/three.out" <<'PY' | report
 import json, sys
 ins = json.loads(open(sys.argv[1]).readline())["result"]["instructions"]
@@ -155,7 +162,7 @@ refuse(){ # $1 = label, $2 = stderr substring, rest = args
     else no "(G) $label: rc=$rc stderr=$( head -c 240 "$TMP/g.err" ) stdout=$( head -c 80 "$TMP/g.out" )"; fi
 }
 refuse "unknown name + near miss"  "unknown tool 'fro' (did you mean 'for'?)" --mcp --mcp-tools=core,fro
-refuse "unknown name lists valid"   "core, full (profiles); analyze"           --mcp --mcp-tools=nope
+refuse "unknown name lists valid"   "core, no-edit, full (profiles); analyze"  --mcp --mcp-tools=nope
 refuse "duplicate"                  "names 'impact' twice"                     --mcp --mcp-tools=impact,uses,impact
 refuse "empty item"                 "empty name"                               --mcp --mcp-tools=impact,,uses
 refuse "empty value"                "--mcp-tools="                             --mcp --mcp-tools=
@@ -184,9 +191,18 @@ wrap(){ ( cd "$WRAPDIR" && "$BIN" wrap "$@" 2>"$TMP/wrap.err" ); }
 wrap claude >"$TMP/w.default"; wrap claude --mcp-tools=full >"$TMP/w.full"; wrap claude --mcp-tools=core >"$TMP/w.core"
 # check LABEL CMD... — one verdict per arm, through if/else (a failed PASS write must never read as FAIL)
 check(){ local label="$1"; shift; if "$@"; then ok "$label"; else no "$label"; fi; }
-same_recipe(){ [ -s "$TMP/w.default" ] && cmp -s "$TMP/w.default" "$TMP/w.full"; }
+same_recipe(){ [ -s "$TMP/w.cursor.default" ] && cmp -s "$TMP/w.cursor.default" "$TMP/w.cursor.full"; }
+# claude is the one agent whose DEFAULT recipe is a subset: Claude Code must Read before it edits, so it registers the
+# server WITHOUT the three edit twins (--mcp-tools=no-edit); an explicit --mcp-tools=full gets the whole catalog back.
+claude_default_no_edit(){ grep -qE -- '^claude mcp add ripwire -- .* --mcp --mcp-tools=no-edit$' "$TMP/w.default" \
+                          && grep -qF '(30 total)' "$TMP/w.default" && ! grep -qE '^#   edit:' "$TMP/w.default"; }
+claude_full_has_edit(){ grep -qE -- '^claude mcp add ripwire -- .* --mcp$' "$TMP/w.full" \
+                        && grep -qF '(33 total)' "$TMP/w.full" && grep -qE '^#   edit:' "$TMP/w.full"; }
 core_listing(){ grep -qF '(8 total)' "$TMP/w.core" && ! grep -qE '^#   edit:' "$TMP/w.core"; }
-check "(I) wrap claude: --mcp-tools=full prints the unchanged recipe" same_recipe
+wrap cursor >"$TMP/w.cursor.default"; wrap cursor --mcp-tools=full >"$TMP/w.cursor.full"
+check "(I) wrap cursor: --mcp-tools=full prints the unchanged recipe (no flag == full for an agent with no read-before-edit rule)" same_recipe
+check "(I) wrap claude: the DEFAULT server command carries --mcp-tools=no-edit and lists 30 tools, no edit group" claude_default_no_edit
+check "(I) wrap claude: --mcp-tools=full restores the unflagged command, 33 tools, the edit group" claude_full_has_edit
 check "(I) wrap claude: the server command carries --mcp-tools=core" grep -qE -- '^claude mcp add ripwire -- .* --mcp --mcp-tools=core$' "$TMP/w.core"
 check "(I) wrap claude: the verb list counts the 8 listed tools and drops the empty edit group" core_listing
 wrap cursor --mcp-tools=core >"$TMP/w.cursor"

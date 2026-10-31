@@ -1789,11 +1789,32 @@ inline void shadowJavaFieldsOntoMethods( const IngestResult& ing, const JavaFiel
     }
 }
 
+// one member's declared type into Rule 2b's field table: same class-name#field-name with different declared types, or one reached
+// through `->` alone (a smart pointer's pointee) → tombstone. A member written as a C++ smart-pointer ALIAS that is in scope at the
+// member (lane iface-peel, resolve.h SmartAliasPeel) records the alias's pointee, reached by `->` alone, exactly as
+// `std::shared_ptr<I>` would. The reader is gated on the MEMBER's language, as the alias records are: a C struct member that
+// spells a C++ alias's name is a C pointer.
+inline void recordMemberTypeFact( HashMap<std::string, FlatRecvType>& table, const std::string& key, const Reference& cr, const SmartAliasPeel& aliases )
+{
+    const bool inStd = fieldTypeWrittenInStd( cr );
+    if( !cr.viaArrow && !inStd && langFacts( cr.lang ).aliasPeelsSmartPointer )
+    {
+        if( const std::optional<FlatRecvType> peeled = aliases.pointeeOf( cr ) )
+        {
+            recordFlatRecvTypeFact( table, key, peeled->type, peeled->writtenQualified, /*arrowOnly=*/true );
+            return;
+        }
+    }
+    recordFlatRecvTypeFact( table, key, inStd ? std::string_view{} : std::string_view( cr.calleeName ), !cr.qualifier.empty(), cr.viaArrow );
+}
+
 inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const HashMap<std::string, char>& classNames )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2d: Rule-2b field-narrow tables" );
     FieldNarrowTables t;
     std::string       key;   // reused "Class#field" / "<fromSymbol>#var" key buffer
+    // lane iface-peel: a member written as a C++ smart-pointer alias in scope there (`Http::FilterSharedPtr handle_;`) is its pointee through `->`
+    const SmartAliasPeel aliasPeel( ing );
     for( const Reference& cr : ing.references )
     {
         if( !cr.isCompose || cr.fromSymbol == kNoNode || cr.fieldName.empty() || cr.calleeName.empty() )
@@ -1803,8 +1824,7 @@ inline FieldNarrowTables buildFieldNarrowTables( const IngestResult& ing, const 
         key.clear();
         key.append( ing.symbols[ cr.fromSymbol ].name ).push_back( '#' );
         key.append( cr.fieldName );
-        // same class-name#field-name with different declared types, or one reached through `->` alone (a smart pointer's pointee) → tombstone
-        recordFlatRecvTypeFact( t.fieldTypeByClass, key, fieldTypeWrittenInStd( cr ) ? std::string_view{} : std::string_view( cr.calleeName ), !cr.qualifier.empty(), cr.viaArrow );
+        recordMemberTypeFact( t.fieldTypeByClass, key, cr, aliasPeel );
     }
     t.localNameSet.reserve( ing.bindings.size() );
     t.localShadowSpans.reserve( ing.bindings.size() );
@@ -3588,7 +3608,8 @@ inline std::string_view stdElementType( std::string_view written ) noexcept
 // `std::unique_ptr<ns::List> up; up->size()` (kCppStdArrowTemplates); a `->` through an in-tree class with its own
 // `operator->`, `SP<ns::List>& p; p->size()`, or through a class the tree does not define, `QSharedPointer<ns::List>& p` —
 // their pointee is unrecorded; a `->` through a typedef or using alias whose recorded target is one of those, `typedef
-// std::shared_ptr<ns::List> ListSP; ListSP p; p->size()` (the alias record keeps no template argument, so `typedef
+// std::shared_ptr<ns::List> ListSP; ListSP p; p->size()` (the alias record's target keeps no template argument — a MEMBER
+// written such an alias is typed by its pointee instead, lane iface-peel, resolve.h SmartAliasPeel — so `typedef
 // std::unique_ptr<std::string> StrUP` keeps the hedge too); `HashMap<K, V> m; m.find( k )` reaching UnionFind::find by name,
 // `std::unique_ptr<std::string> p; p->size()`, `std::vector<int>* pv; pv->size()` and `IntVec* p; p->size()` through
 // `typedef std::vector<int> IntVec` do not keep it); ONE element access of a container whose recorded written type is a std
@@ -5552,7 +5573,8 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
     }
     for( const Binding& b : ing.bindings )
     {
-        if( !isReceiverEvidenceKind( b.kind ) && b.kind != LocalBindKind::RubyMainMixin )   // FE-B's receiver evidence is read by ReceiverEvidence alone; a main mixin by --lego alone
+        // FE-B's receiver evidence is read by ReceiverEvidence alone; a main mixin by --lego alone; a re-export by the --for hop rows alone
+        if( !isReceiverEvidenceKind( b.kind ) && b.kind != LocalBindKind::RubyMainMixin && b.kind != LocalBindKind::ReExport )
         {
             noteBindingClasses( gate, fileGated, b );
         }
@@ -6437,9 +6459,10 @@ inline HashMap<std::string, char> rustModuleNames( const IngestResult& ing )
     return names;
 }
 
-// Every `name = "x"` line of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
+// Every `name = "x"` line (or `key = "x"` for another key: the --for re-export rows read `[lib] path`) of a TOML text's `[section]` tables listed in `sections`, appended to `out` (a bare line scan: a
 // dotted key, an inline table or a multi-line string is not read, which can only miss a name, never invent one).
-inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out )
+inline void tomlSectionNames( std::string_view text, std::initializer_list<std::string_view> sections, std::vector<std::string>& out,
+                              std::string_view key = "name" )
 {
     bool inSection = false;
     while( !text.empty() )
@@ -6453,11 +6476,11 @@ inline void tomlSectionNames( std::string_view text, std::initializer_list<std::
             inSection = std::ranges::any_of( sections, [ & ]( std::string_view h ) { return line.starts_with( h ); } );
             continue;
         }
-        if( !inSection || !line.starts_with( "name" ) )
+        if( !inSection || !line.starts_with( key ) )
         {
             continue;
         }
-        line.remove_prefix( 4 );
+        line.remove_prefix( key.size() );
         line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
         if( !line.starts_with( '=' ) )
         {
@@ -7860,9 +7883,9 @@ inline void provenBasesOf( const BaseEvidenceTables& t, const Reference& r, cons
         out = cand;   // Ruby's constant lookup placed the base (resolve.h RubyBaseScope): every candidate is that one constant
         return;
     }
-    if( r.baseBind == 0xFFFFFFFFu )
+    if( r.baseBind >= kBaseBindTemplateParam )   // both sentinels (kBaseBindUnknown is above it)
     {
-        return;   // a scope too large to read: the local lookup could not rule a shadowing declaration out
+        return;   // a template parameter names no declaration, or a scope too large to read: the local lookup could not rule a shadowing declaration out
     }
     if( r.baseBind != 0 )
     {
@@ -9031,6 +9054,18 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 const std::uint32_t ri = rtIt->second;
                 const Binding&      rt = ing.bindings[ ri ];
+                if( ( rt.unwrapDepth & kDispatchResultBit ) != 0 )
+                {
+                    // lane iface-peel: `-> &dyn T` — the local is SOME implementor of T (the dispatch tier reads it); same
+                    // position, no unwrap at the call, and the Rust path qualifier check as for a class result
+                    if( langFacts( cs.lang ).returnTypedDispatchLet && rt.resultIndex == cr.resultIndex && cr.unwrapDepth == 0
+                        && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment ) )
+                    {
+                        recvEv.typeCallResultDispatch( cr, rt );
+                        break;
+                    }
+                    continue;
+                }
                 const bool          match = rt.resultIndex == cr.resultIndex && ( rule2Sink ? rt.unwrapDepth <= 1 : rt.unwrapDepth == cr.unwrapDepth )
                                             && recvEv.rustQualifierTypes( r, cr.importedName, callee, rt.isFromAssignment );   // Rust T::f(): its T reaches f's class
                 if( !match )

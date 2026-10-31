@@ -140,3 +140,4 @@
 --no-ext-diff	git's own flag, named in the CHANGELOG's git-subprocess hardening entry as an option ripwire passes to its own git diff/log/show/blame children, not a ripwire flag
 --no-textconv	git's own flag, same CHANGELOG hardening entry as --no-ext-diff above, not a ripwire flag
 --ignore-submodules	git's own flag ("--ignore-submodules=dirty" on status/diff), same CHANGELOG hardening entry as --no-ext-diff above, not a ripwire flag
+--dashdash	not a flag at all — the leading bytes of the hostile fixture's FILENAME `--dashdash.cpp` (test/gitframingcheck.sh), quoted in the CHANGELOG's git-log framing entry where that fixture's file names are enumerated; a filename, never a ripwire flag

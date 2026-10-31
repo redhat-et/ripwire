@@ -291,6 +291,25 @@ else
     ok "M1b multi-root: the cross-root link is refused — bounded by the root it was crawled under"
 fi
 
+# ── L1. a symlinked DIRECTORY that points outside the root ───────────────────────────────────────────────────
+# The file links above are refused one by one (crawlPathStaysInRoot). A link to a whole directory is different: the files
+# under it are ordinary files, not links, so the per-file check never sees a link at all — the only thing that keeps
+# them out is that the crawl's walk (SortedDirWalk) does not descend into a symlinked directory. A non-git root, so the
+# crawl (not `git ls-files`) is what lists it. The in-root file is the positive control: the arm can fail.
+R2="$TMP/repo2"; mkdir -p "$R2/src"
+printf 'int rw_dirlink_benign_fn( void ) { return 3; }\n' > "$R2/src/benign.c"
+ln -s ../VICTIM "$R2/linkdir"
+rw "$R2" --grep=rw_dirlink_benign_fn > "$TMP/l1ctl.xml"
+rw "$R2" --grep=rw_victim_source_fn  > "$TMP/l1.grep.xml"
+rw "$R2" > "$TMP/l1.map.xml"
+if ! grep -q 'rw_dirlink_benign_fn' "$TMP/l1ctl.xml"; then
+    no "L1 control: the in-root file is not found, so the arm below proves nothing"
+elif grep -q -e 'VICTIM_SRC_NONCE_A1' -e 'linkdir' "$TMP/l1.grep.xml" "$TMP/l1.map.xml"; then
+    no "L1 a symlinked directory out of the root was walked: its files are served under the root (linkdir)"
+else
+    ok "L1 a symlinked directory pointing outside the root is not walked (control file found, no out-of-root bytes, no linkdir path)"
+fi
+
 # ── X1. determinism + well-formedness on the fixture that exercises the new path ──────────────────────────
 rw "$R" > "$TMP/d1.xml"; rw "$R" > "$TMP/d2.xml"
 if cmp -s "$TMP/d1.xml" "$TMP/d2.xml"; then ok "X1 determinism on the escaping fixture (byte-identical)"; else no "X1 determinism broken on the escaping fixture"; fi

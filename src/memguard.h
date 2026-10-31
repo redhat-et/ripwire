@@ -584,4 +584,14 @@ inline std::string softStopLine( const IngestResult& ing )
     return line + ", a floor of the tree — " + std::string( kOverride );
 }
 
+// An ABSENCE or an error served from a partial index (notfound-on-cut): "symbol not found", "0 callers" and a refusal
+// built after the index was read all describe the CUT corpus, not the tree. softStopLine already says what the answer
+// covered (the file count, the parsed count) and how to get the whole tree; this prefixes the one thing a not-found
+// reader needs, that the absence is unproven. It rides on EVERY error from a cut index, usage errors included: the clause
+// is true of the index whatever the error was, and a cut index is the state an agent most needs to hear about. The CLI never reaches it (a verb other than the map refuses with exit 5).
+inline std::string partialAbsenceLine( const IngestResult& ing )
+{
+    return "the index this server holds is partial, so a not-found or empty answer from it is not proof of absence — " + softStopLine( ing );
+}
+
 }   // namespace rw::memguard

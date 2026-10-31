@@ -307,6 +307,7 @@ inline std::string slotCalleesXml( const IngestResult& ing, std::span<const Slot
         const Reference& r = ing.references[ site.ref ];
         out += "<vs l=\"" + std::to_string( r.line ) + "\" through=\"" + std::string( escapeXml( slotCallWritten( r ), esc ) ) + "\" slot=\""
              + std::string( escapeXml( site.slot, esc ) ) + "\" via=\"" + ( site.typed ? "slot" : "slot-name" ) + "\"";
+        out += site.nameAlso > 0 ? " slot_name_also=\"" + std::to_string( site.nameAlso ) + "\"" : std::string();   // L-1: name-only stores the typed tier hides
         out += vrTargetWindowXml( ing, site.targets, kSlotTargetCap, "targets", slotSiteNext( ing, site ), rr, esc ) + "</vs>";
     }
     return out;
@@ -326,7 +327,8 @@ inline std::string slotCalleesJson( const IngestResult& ing, std::span<const Slo
         const std::size_t  shown = std::min( site.targets.size(), kSlotTargetCap );
         out += ( i == 0 ? "{" : ",{" );
         out += "\"l\":" + std::to_string( r.line ) + ",\"through\":\"" + jsonStr( slotCallWritten( r ) ) + "\",\"slot\":\"" + jsonStr( site.slot )
-             + "\",\"via\":\"" + ( site.typed ? "slot" : "slot-name" ) + "\",\"targets\":" + std::to_string( site.targets.size() ) + ",\"shown\":" + std::to_string( shown );
+             + "\",\"via\":\"" + ( site.typed ? "slot" : "slot-name" ) + "\"" + ( site.nameAlso > 0 ? ",\"slot_name_also\":" + std::to_string( site.nameAlso ) : std::string() )
+             + ",\"targets\":" + std::to_string( site.targets.size() ) + ",\"shown\":" + std::to_string( shown );
         if( shown < site.targets.size() )
         {
             out += ",\"next\":\"" + jsonStr( slotSiteNext( ing, site ) ) + "\"";
@@ -362,7 +364,7 @@ inline constexpr std::string_view slotJoinClause( bool callersSide ) noexcept
           "receiver is not read), first 16 as <t n= p=>, next= the rest; slot=@N.f: an "
           "anonymous struct declared at line N of this file. via=slot: same declared struct type (one tag with the same body text "
           "in two files is one type); via=slot-name: field name "
-          "only (one side's type unknown). MAY be called; never a proven call, never in count=. ";
+          "only (one side's type unknown; slot_name_also=K: K such functions the same-type ones hide). MAY be called; never a proven call, never in count=. ";
 }
 
 inline std::string slotJoinLegend( bool any, bool callersSide, bool cands = false )

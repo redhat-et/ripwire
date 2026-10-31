@@ -169,6 +169,18 @@ struct LangFacts
     /// methods sit inside the class's scope, not directly in the function, so neither is a closure either way.
     bool noNestedNamedFunctions = false;
 
+    /// C++: a `using X = std::shared_ptr<I>;` / `typedef std::unique_ptr<I> X;` alias (the std smart pointers whose `->` reaches
+    /// their first template argument, ingest_relations.h kStdSmartPointers) types a member written X as I for `->` alone, like a
+    /// member written `std::shared_ptr<I>` itself (lane iface-peel; the alias record carries the pointee, graph.h
+    /// buildFieldNarrowTables follows a bounded alias chain). A `.` call on such a member reaches the smart pointer, never I.
+    bool aliasPeelsSmartPointer = false;
+
+    /// Rust: a function whose declared result is a trait object or an opaque type (`&dyn T`, `Box<dyn T>`, `impl T`) types the
+    /// local its call initialises as SOME implementor of T, exactly as a local written `let x: &dyn T` (lane iface-peel; the
+    /// dispatch tier, ifacedispatch.h, then declines the call on it or proves its one implementor). Only through the call's own
+    /// ONE proven edge (graph.h typeCallResults); a by-name callee types nothing, and a generic `-> T` is never read.
+    bool returnTypedDispatchLet = false;
+
     /// Rust: a construction is a call to the type's conventional constructor METHOD (`T::new( … )`), not to the type itself, so
     /// --affected's class-new backstop (testmap.h classNewTestRows) reads a call to this method of a class as building it. Empty =
     /// the language constructs by calling the class (`new T(` JS/TS/Java/C#, `T(` Python/Kotlin/C++), which needs no column.
@@ -248,14 +260,14 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
-    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .memberSeparator = "::",
+    { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .instanceReceiver = "self" },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true },

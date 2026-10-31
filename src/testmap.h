@@ -1202,7 +1202,7 @@ private:
     // row in eight emitters: 13 literal command assertions across 7 gates, docs/COMMANDS.md, 15 committed
     // capture snapshots, README, and the printf_parity pins — a documented output-format change for every
     // user. Every path `git ls-files` tracks in this repo, and every runner path under test/, is in the safe
-    // set (measured: 0 of either outside it), so the conditional form is byte-identical on every real corpus
+    // set (measured: 0 of either outside it, apart from the bracket-named test/testgatenestedfix fixtures), so the conditional form is byte-identical on every real corpus
     // while a hostile name is still quoted. The predicate is an ALLOWLIST, so a byte nobody enumerated is
     // quoted by default instead of passed through — which is the direction a quoting bug should fail in.
     static bool isShellSafePath( std::string_view p ) noexcept
@@ -1272,7 +1272,7 @@ private:
     // extension refusal, F2 relative-import resolvability) in addition to `engines.node` (F3) — a run=
     // that fails is worse than an honest run_unknown="1" — so `source` is read on BOTH paths that can reach
     // it, not only the import-fallback path below.
-    const char* resolveJsVerb( std::uint32_t runnerFile, const std::string& disk ) const
+    const char* resolveJsVerb( std::uint32_t runnerFile, const std::string& disk, std::size_t& climbs ) const
     {
         const std::string_view relPath = rootRelPath( *ing_, runnerFile );
         if( !jsrunner::looksLikeJsTestFile( relPath ) )
@@ -1281,6 +1281,7 @@ private:
         }
         const jsrunner::PackageManifests manifests = jsrunner::nearestPackageManifests( disk, evidenceRoot( runnerFile ) );   // train20-cr C8: + Node's package scope
         const std::string&               manifest  = manifests.evidence;
+        climbs                                     = manifests.evidenceClimbs;   // #335: the package directory, for spellJsRun's cd
         const jsrunner::Framework        fw        = jsrunner::detectFramework( manifest );
         if( fw == jsrunner::Framework::NodeTest )
         {
@@ -1291,7 +1292,9 @@ private:
         }
         if( const char* verb = jsrunner::verbFor( fw ); verb != nullptr )
         {
-            return verb;   // vitest/jest: explicit package.json evidence, never overridden by import evidence
+            // vitest/jest: explicit package.json evidence, never overridden by import evidence. The evidence names WHICH
+            // runner; the runner's default include says whether it would collect this file (#330, @rainhuang0220).
+            return jsrunner::matchesDefaultInclude( fw, relPath ) ? verb : nullptr;
         }
         if( !manifest.empty() && jsrunner::hasAuthoritativeScript( manifest ) )
         {
@@ -1305,10 +1308,86 @@ private:
         return jsrunner::nodeTestVerb( relPath, manifests, source, disk );
     }
 
+    /// #335: the first `n` '/'-separated components of a root-relative path (n >= 1; the whole path when it has
+    /// fewer). A package directory is a prefix of its test files' root-relative path.
+    static std::string_view leadingComponents( std::string_view p, std::size_t n ) noexcept
+    {
+        std::size_t end = 0;   // one past the last '/' consumed
+        for( std::size_t i = 0; i < n; ++i )
+        {
+            end = p.find( '/', end );
+            if( end == std::string_view::npos )
+            {
+                return p;
+            }
+            ++end;
+        }
+        return p.substr( 0, end - 1 );
+    }
+
+    /// #335: the TS/JS run= for one test file, given its verb (resolveJsVerb) and how many directories the
+    /// manifest walk climbed to find the deciding manifest (`climbs`, npos = none decided). vitest and jest find a
+    /// package's config, path aliases and node_modules from the package directory, so a package BELOW root= is
+    /// entered in a subshell, `(cd <pkg> && <runner> <path>)`, and the path after the cd is package-relative. The parentheses keep
+    /// the cd from outliving the command, so a second pasted row still starts at root= (an agent shell that keeps its cwd between calls).
+    /// A package AT root= needs no cd, and a multi-root run has no root= to cd from, so both keep the plain spelling.
+    /// vitest and jest take the path as a substring filter, so it is one quoted argument with no `--` (which ended
+    /// their options and dropped the filter, so a bracketed route ran the whole suite). A path a CLI would read as
+    /// an option (leading '-') has no spelling that runs it, and node's own runner globs its file arguments
+    /// (`c[1].test.js` matched no file; node exits 1): both get no run=, the honest run_unknown.
+    std::string spellJsRun( const char* verb, std::string_view p, std::size_t climbs ) const
+    {
+        const auto token = []( std::string_view s )
+        { return isShellSafePath( s ) ? std::string( s ) : rw::shSingleQuote( std::string( s ) ); };
+        std::string_view rel = p;
+        std::string      cd;
+        std::string      closeSub;   // ")" when cd opened a subshell
+        std::size_t      dirs = 0;   // directory components of the file: its '/' count
+        for( const char c : p )
+        {
+            dirs += ( c == '/' ) ? 1 : 0;
+        }
+        if( rootRelative() && climbs < dirs )
+        {
+            const std::string_view pkgDir = leadingComponents( p, dirs - climbs );
+            rel                           = p.substr( pkgDir.size() + 1 );
+            // a directory named "-x" would read as a cd option; "./" makes it a path
+            const std::string dir = pkgDir.front() == '-' ? "./" + std::string( pkgDir ) : std::string( pkgDir );
+            cd                    = "(cd " + token( dir ) + " && ";
+            closeSub              = ")";
+        }
+        if( rel.empty() || rel.front() == '-' )
+        {
+            return {};
+        }
+        if( std::string_view( verb ).starts_with( "node " ) && rel.find_first_of( "*?[]{}()!\\" ) != std::string_view::npos )
+        {
+            return {};
+        }
+        std::string arg( rel );
+        if( std::string_view( verb ).ends_with( "jest" ) && ( !cd.empty() || !isShellSafePath( rel ) ) )
+        {
+            // jest reads the argument as a regex: escape the metacharacters a route path carries. A package below root= always
+            // gets it (a plain dot would also match `aXtest.js`); a package at root= keeps its stored spelling unless it needs quoting
+            std::string esc;
+            for( const char c : rel )
+            {
+                if( std::string_view( "[](){}.+*?^$|\\" ).find( c ) != std::string_view::npos )
+                {
+                    esc += '\\';
+                }
+                esc += c;
+            }
+            arg = std::move( esc );
+        }
+        return cd + std::string( verb ) + " " + token( arg ) + closeSub;
+    }
+
     /// Validate a candidate script and format its disk path as one shell argument.
     /// runnerFile must have a supported extension; Python without main-guard or pytest evidence, or TS/JS
     /// without a package.json naming vitest/jest/node --test, yields empty (never a guessed default).
-    /// Commands are root-relative only for single-root scans, with quoting and option separation as needed.
+    /// Commands are root-relative only for single-root scans, with quoting and option separation as needed. A TS/JS
+    /// package below root= is entered in a `(cd <pkg> && ...)` subshell (spellJsRun).
     std::string spellUncached( std::uint32_t runnerFile ) const
     {
         const std::string& disk = diskPath( *ing_, runnerFile );
@@ -1327,11 +1406,13 @@ private:
         }
         else if( verb == kJsEvidenceVerb )
         {
-            verb = resolveJsVerb( runnerFile, disk );
+            std::size_t climbs = std::string::npos;
+            verb               = resolveJsVerb( runnerFile, disk, climbs );
             if( verb == nullptr )
             {
                 return {};   // no package.json in the crawl boundary, or none of the three named runners it declares
             }
+            return spellJsRun( verb, rw::sarif::rootRelativeUri( disk, rootPrefix_ ), climbs );
         }
         // A3: root-relative, like every p= beside it. rootRelativeUri strips a leading "./" unconditionally,
         // so the readability strip the pre-A3 code did by hand is the SAME call now, not a second rule.

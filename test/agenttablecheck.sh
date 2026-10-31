@@ -171,6 +171,36 @@ while IFS= read -r row; do
         || fail "(K) '$name': its home dir $homedir exists, yet 'wrap --all' emits $n surfaces, no more than an empty HOME ($BASE) — detection is not reading the table"
 done < "$TMP/rows"
 
+# (L) THE EDIT-ROUTE COLUMN IS A CLAIM ABOUT THE AGENT, SO THE RECIPE MUST HONOUR IT BOTH WAYS. The last bool on a row is
+# readBeforeEdit: true = the agent refuses a native Edit on a file it has not Read (Claude Code), so its blurb routes an
+# edit through "line range from ripwire -> ranged Read -> native Edit" and its MCP server is registered WITHOUT the three
+# edit twins (--mcp-tools=no-edit); false = the agent can use the edit verbs without a Read, and keeps both unchanged.
+# Parsed from the row with its quoted strings removed (a caveat may contain the words true/false), so a new agent row is
+# covered here without anyone editing this file.
+rbe_true=0; rbe_false=0
+while IFS= read -r row; do
+    name="$( printf '%s' "$row" | awk -F'"' '{ print $2 }' )"
+    rbe="$(  printf '%s' "$row" | sed 's/"[^"]*"//g' | grep -oE 'true|false' | tail -1 )"
+    "$BIN" wrap "$name" --force >"$TMP/out" 2>/dev/null
+    if [ "$rbe" = "true" ]; then
+        rbe_true=$(( rbe_true + 1 ))
+        grep -qF 'native Edit' "$TMP/out" || fail "(L) '$name' is readBeforeEdit=true but its blurb never routes an edit through the native Edit"
+        ! grep -qF -- '--replace-symbol-body=SYM' "$TMP/out" || fail "(L) '$name' is readBeforeEdit=true but its blurb still sends it to --replace-symbol-body"
+        # every NON-comment line that starts the ripwire MCP server must carry the no-edit profile
+        bad="$( grep -v '^#' "$TMP/out" | grep -E ' --mcp( |$)' | grep -vF -- '--mcp-tools=no-edit' | head -1 )"
+        [ -z "$bad" ] || fail "(L) '$name' is readBeforeEdit=true but registers the full server (edit twins included): $bad"
+    elif [ "$rbe" = "false" ]; then
+        rbe_false=$(( rbe_false + 1 ))
+        grep -qF -- '--replace-symbol-body=SYM' "$TMP/out" || fail "(L) '$name' is readBeforeEdit=false but its blurb lost the --replace-symbol-body line"
+        ! grep -qF 'native Edit' "$TMP/out" || fail "(L) '$name' is readBeforeEdit=false but its blurb routes edits through the native Edit"
+        ! grep -qF -- 'no-edit' "$TMP/out" || fail "(L) '$name' is readBeforeEdit=false but its recipe drops the edit twins (--mcp-tools=no-edit)"
+    else
+        fail "(L) could not read the readBeforeEdit column out of row '$name' (got '$rbe')"
+    fi
+done < "$TMP/rows"
+# MUTATION CONTROL: a parser reading nothing would pass the loop above vacuously.
+{ [ "$rbe_true" -ge 1 ] && [ "$rbe_false" -ge 7 ]; } || fail "(L) read $rbe_true read-before-edit and $rbe_false other rows; wanted >=1 and >=7 (claude, and the rest)"
+
 if [ "$FAILED" -ne 0 ]; then
     echo "agenttablecheck: $FAILED failure(s) above"
     exit 1

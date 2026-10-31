@@ -1797,7 +1797,8 @@ inline std::string_view pathHandlerRuleLegend( const PathHandlerRule& hrule ) no
 // readers (where the handler name is read and dispatched). The question is usually what those functions DO (textual-11: the post
 // puts onto _message_queue, the loop takes from it, _on_message dispatches and bubbles to _parent) and the answer printed only names.
 // GAIN GATE (the FOR-ROUTE lesson: 25 KB of rows that gained nothing): only symbols the answer already prints on its route, the
-// bridge rows within kRouteBodyMaxHops of from= (never to=) and the <hrd> readers shown; each body under the per-body guard
+// bridge rows within kRouteBodyMaxHops of from= (never to=, nor the row whose next step is a slot crossing into to=: that body holds a call
+// through a field and no call to to=) and the <hrd> readers shown; each body under the per-body guard
 // (kHopBodyCapBytes); at most kRouteBodyMax bodies, capped="1" + next= past it. HONESTY: the envelope says proven="0"; a body under a
 // crossing carries that crossing's via= cands= (one candidate's body, never the proven callee), a reader's via="name-key"; nothing
 // here enters reachable=, hops= or any proven count.
@@ -1824,6 +1825,10 @@ inline RouteBodiesXml pathRouteBodies( const IngestResult& ing, const Graph& g, 
         const std::size_t last = std::min( kRouteBodyMaxHops, br.hops.size() - 2 );   // the to= row is the last one: never printed
         for( std::size_t i = 0; i <= last; ++i )
         {
+            if( i + 2 == br.hops.size() && bridgeViaIsSlot( br.via[i + 1] ) )
+            {
+                continue;   // the row whose only next step is the slot crossing INTO to=: its body holds a call through a field, not a call to to= (train 41b)
+            }
             std::string hedge;
             if( i > 0 && br.via[i] != BridgeVia::Edge )
             {
@@ -1855,7 +1860,7 @@ static_assert( kRouteBodyMaxHops == 2 && kRouteBodyMax == 4 && kHopBodyCapBytes 
 inline std::string_view pathRouteBodiesLegend( bool on ) noexcept
 {
     return on ? "bodies of=route proven=0: the bodies of the route this answer names but never traced: the bridge rows within 2 hops of "
-                "from= (never to=), then the hrd readers; at most 4 (capped=1, next= the first unshown), each whole up to 4000 bytes "
+                "from= (never to=, nor the row calling through a slot into it), then the hrd readers; at most 4 (capped=1, next= the first unshown), each whole up to 4000 bytes "
                 "(truncated=1 past it); a hedge, never in reachable= or hops=. "
               : "";
 }

@@ -50,7 +50,7 @@ struct Config
                                                  // default); forces the token requirement even on loopback.
     std::string_view mcpLegend;                  // --mcp-legend=session|inline: the stdio server's legend posture (default session)
     std::string_view mcpTools;                   // --mcp-tools=SPEC: list (and answer) only these MCP tools — names and/or the
-                                                 // core/full profiles, validated against the tool table in main.cpp (mcp.h).
+                                                 // core/no-edit/full profiles, validated against the tool table in main.cpp (mcp.h).
     std::vector<std::string> excludes;           // --exclude=SUBSTR (repeatable): drop matching paths
     RankBy           rankBy          = RankBy::PageRank;   // --rank-by=  (default keeps output unchanged)
     bool             columnar        = false;              // --format=columnar|rows (RESEARCH lever 1): re-serialize the FLAT
@@ -1311,7 +1311,8 @@ inline constexpr char kHelpHead[] =
         "                               vitest/jest dependency -- never guessed from the .ts/.js extension alone). Spelled RELATIVE to\n"
         "                               the root= the document declares, so it pastes into a shell run from there, and the document\n"
         "                               does not change with where the tree is checked out (a MULTI-ROOT run declares no single root,\n"
-        "                               so it stays absolute). NO run= means NOT DERIVABLE -- never a guessed suite command\n"
+        "                               so it stays absolute). A TS/JS package below root= runs as '(cd <pkg> && <runner> <path>)': a subshell, cd first, then the path\n"
+        "                               relative to that package. NO run= means NOT DERIVABLE -- never a guessed suite command\n"
         "    --grep=STR | --regex=PAT   search for a literal or a regex; every hit comes back with its enclosing symbol\n"
         "                               literal / regex search + enclosing symbol + the matched line. SPAN-TIERED by default (see\n"
         "                               --grep-in below): the scan itself is exhaustive, the ANSWER serves one tier and discloses\n"
@@ -2852,17 +2853,20 @@ inline constexpr char kHelpTail[] =
         "                               by a human and is answered. On the CLI a typed root (`ripwire ~`) is always answered,\n"
         "                               and a run without <dir> prints usage, or that same line from such a directory. Each\n"
         "                               tool call over the --max-memory limit is refused by name; an answer from an index the\n"
-        "                               memory guard cut carries _memory_stop in its envelope.\n"
+        "                               memory guard cut carries _memory_stop in its envelope, and every error from it\n"
+        "                               says so in its message (a not-found included).\n"
         "    --mcp-legend=WHEN          the stdio MCP server's legend posture: session (the default) or inline\n"
         "                               session: the first answer of a session carries its legend inline; later answers list\n"
         "                               rows first, carry each definition only the first time the session meets it, and end\n"
         "                               with <about legend=\"ref\" dict= dictv=/> (the first of them also carries the core).\n"
         "                               inline: every answer keeps its legend until the client reads ripwire://legend-dict.\n"
         "                               legend:\"compact\"/\"full\" on a call keeps that answer inline either way. Stdio only.\n"
-        "    --mcp-tools=LIST           list only these MCP tools (names and/or the core/full profiles, default full).\n"
+        "    --mcp-tools=LIST           list only these MCP tools (names and/or the core/no-edit/full profiles, default full).\n"
         "                               A comma list of tool names and/or profiles, unioned. core = explore, batch, from_trace,\n"
         "                               impact, uses, fetch_body, edit_check, quality_delta (the loop the server's own\n"
-        "                               instructions teach); full = all tools, the default. A client that loads every schema\n"
+        "                               instructions teach); no-edit = every tool but the three edit twins (replace_symbol_body,\n"
+        "                               insert_before_symbol, insert_after_symbol; `ripwire wrap claude` registers it); full = all\n"
+        "                               tools, the default. A client that loads every schema\n"
         "                               at session start pays only for the listed ones. initialize announces the subset;\n"
         "                               calling an unlisted tool is refused with the flag that enables it. The list is not\n"
         "                               access control: batch sub-queries still reach hidden verbs.\n"
@@ -3333,7 +3337,7 @@ inline constexpr ViewFlag kViewFlags[] =
 {
     // server + self-eval inputs
     { "--mcp-token=",   &Config::mcpToken        , EmptyValue::Refuse, "a shared bearer token",                  "--mcp-token=$RIPWIRE_MCP_TOKEN" },
-    { "--mcp-tools=",   &Config::mcpTools        , EmptyValue::Refuse, "tool names and/or a profile (core, full)", "--mcp-tools=core" },
+    { "--mcp-tools=",   &Config::mcpTools        , EmptyValue::Refuse, "tool names and/or a profile (core, no-edit, full)", "--mcp-tools=core" },
     { "--agent=",      &Config::agent           , EmptyValue::Refuse, "codex",                                 "--agent=codex" },   // also accepts claude — see validateAgent
     { "--eval-mined=",  &Config::evalMined       , EmptyValue::Refuse, "a minedpair.jsonl file path",            "--eval-mined=bench/minedpair.jsonl" },
     { "--eval-skills=", &Config::evalSkills      , EmptyValue::Refuse, "a labelled TSV file path",               "--eval-skills=bench/skillroute.tsv" },

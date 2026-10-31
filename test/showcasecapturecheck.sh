@@ -695,6 +695,83 @@ else
     no "(S) showcase_capture.py no longer routes the root and scratch scrub through exportscrub.scrub_root"
 fi
 
+# ── (J) the --in= window may rest on ONE lane merge (train 41b) ──────────────────────────────────────────────
+# A train whose only source change is one merge commit (then a pin and the capture, which touch no source) has an
+# empty margin HEAD~1, and every N >= 3 spans the previous train: the generator refused and (I) stayed red. chooseInWindow
+# now falls back to a margin held by the merge behind it (its first-parent diff touches src/, nothing after it does) —
+# only when the ordinary scan finds no N. Pure arms: the REAL chooseInWindow / marginHeldByMerge are pulled out of the live
+# script with `ast` (module level runs the whole capture) and driven with fakes and throwaway git repos.
+cat >"$TMP/j_window.py" <<'PYEOF'
+import ast, subprocess, sys, os, tempfile, shutil
+src = open(sys.argv[1], encoding="utf-8").read()
+want = ("chooseInWindow", "marginHeldByMerge", "firstWindow")
+funcs = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in want]
+if len(funcs) != 3:
+    print("EXTRACT_FAIL got %d of 3 functions" % len(funcs)); sys.exit(0)
+ns = {"subprocess": subprocess, "sys": sys, "REPO": ".", "_IN_DIR": "src", "_IN_LIMIT": 3, "_IN_LIMIT_NARROW": 2}
+exec(compile(ast.Module(body=funcs, type_ignores=[]), "<extract>", "exec"), ns)
+choose, held = ns["chooseInWindow"], ns["marginHeldByMerge"]
+res = []
+def chk(name, cond): res.append((name, bool(cond)))
+def pick(unshown, holds):
+    try:
+        return choose(1, 14, unshown, holds)
+    except SystemExit:
+        return "refused"
+GONE = ["gone"]
+# one lane merge: N=2 shows, its margin HEAD~1 shows nothing, N>=3 spans the previous train (past the display cut)
+one = lambda n, lim=3: [] if n == 2 else GONE
+chk("one-merge train: N=2 when the margin is held by the merge", pick(one, lambda m: m == 1) == (2, 3))
+chk("one-merge train: the fallback off refuses (red on the pre-fix generator)", pick(one, lambda m: False) == "refused")
+# multi-merge train: the ordinary scan finds N=3 (margin HEAD~2 shows); a true mergeHolds must not pull it down to N=2
+multi = lambda n, lim=3: GONE if n in (1, 4) else []
+chk("multi-merge train: unchanged N=3 even with mergeHolds always true", pick(multi, lambda m: True) == (3, 3))
+chk("everything shows: unchanged N=2, page 3", pick(lambda n, lim=3: [], lambda m: True) == (2, 3))
+chk("N never accepted when its own window does not show", pick(lambda n, lim=3: GONE, lambda m: True) == "refused")
+# a one-merge train with a few source fixes after the merge: the margin holds 3 source files, enough for --limit=2 only
+few = lambda n, lim=3: [] if lim == 2 and n >= 2 else GONE
+chk("few post-merge source files: the last resort derives N=3 with --limit=2", pick(few, lambda m: False) == (3, 2))
+chk("the narrower page is never tried while --limit=3 works", pick(lambda n, lim=3: [] if n >= 3 else GONE, lambda m: False) == (4, 3))
+# the real git predicate on throwaway repos
+def mk(steps):
+    d = tempfile.mkdtemp(prefix="rw_j_")
+    def g(*a): subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", *a], cwd=d, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    for kind, path in steps:
+        if kind == "c":
+            os.makedirs(os.path.dirname(os.path.join(d, path)) or d, exist_ok=True)
+            open(os.path.join(d, path), "a").write("x\n"); g("add", "-A"); g("commit", "-q", "-m", path)
+        elif kind == "b": g("checkout", "-q", "-b", path)
+        elif kind == "m": g("checkout", "-q", "main"); g("merge", "-q", "--no-ff", "-m", "merge", path)
+    return d
+base = [("c", "src/a.c"), ("b", "lane")]
+oneMerge = mk(base + [("c", "src/b.c"), ("m", "lane"), ("c", "test/pin.txt")])
+srcAfter = mk(base + [("c", "src/b.c"), ("m", "lane"), ("c", "src/c.c")])
+docMerge = mk(base + [("c", "docs/d.md"), ("m", "lane"), ("c", "test/pin.txt")])
+chk("git: a source merge followed by a source-free pin holds the margin", held(1, oneMerge, "src"))
+chk("git: HEAD itself / a non-merge commit does not", not held(0, oneMerge, "src") and not held(2, oneMerge, "src"))
+chk("git: a source commit after the merge breaks the hold", not held(1, srcAfter, "src"))
+chk("git: a merge whose first-parent diff has no src/ does not hold", not held(1, docMerge, "src"))
+for d in (oneMerge, srcAfter, docMerge): shutil.rmtree(d, ignore_errors=True)
+for name, ok in res: print(("OK " if ok else "BAD ") + name)
+PYEOF
+jOut="$( python3 "$TMP/j_window.py" "$SCRIPT" 2>&1 )"
+if printf '%s\n' "$jOut" | grep -q '^EXTRACT_FAIL\|Traceback'; then
+    no "(J) could not run the window arms: $( printf '%s' "$jOut" | tail -2 | tr '\n' '|' )"
+else
+    jBad="$( printf '%s\n' "$jOut" | grep '^BAD ' || true )"; jOk="$( printf '%s\n' "$jOut" | grep -c '^OK ' || true )"
+    if [ -z "$jBad" ] && [ "$jOk" -eq 11 ]; then
+        ok "(J) --in= window: a one-merge train derives N=2 from the merge's first-parent diff; multi-merge N unchanged; fallback off refuses ($jOk arms)"
+    else
+        no "(J) --in= window arms: ok=$jOk of 11 $( printf '%s' "$jBad" | tr '\n' '|' )"
+    fi
+fi
+if grep -q 'chooseInWindow()' "$SCRIPT"; then
+    ok "(J) the generator derives its --in= window through chooseInWindow()"
+else
+    no "(J) showcase_capture.py no longer calls chooseInWindow()"
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
     echo "ALL PASS"

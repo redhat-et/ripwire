@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iterator>
+#include <numeric>
 #include <span>
 #include <string>
 #include <string_view>
@@ -69,6 +70,15 @@ static_assert( kForSlotCap == 16, "kForInitSlotsLegend states the cap: move the 
 
 namespace slot_detail
 {
+// One struct field of a slot_fields= run before the cap: its printed item, whether a caller was found, how many functions it holds,
+// whether that caller joins by the field name alone.
+struct SlotFieldItem
+{
+    std::string item;
+    bool        hasCaller = false;
+    std::size_t stored    = 0;
+    bool        nameOnly  = false;   // its caller joins by the field NAME alone (`@~C`): printed, it sets the name-tier legend
+};
 // The slot key as into= spells it, less the row's own name: `o.run` → `run`, `po[0]` → `[0]`, `T["k"]` → `["k"]`.
 inline std::string_view slotKey( std::string_view fieldName, std::string_view owner ) noexcept
 {
@@ -428,6 +438,7 @@ inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& in
                 }
                 it->second.push_back( ref );
             }
+            std::vector<slot_detail::SlotFieldItem> items;
             for( const auto& [ field, refs ] : fields )
             {
                 std::vector<NodeId> fns;
@@ -462,18 +473,29 @@ inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& in
                     continue;
                 }
                 // fix1 F-4: `@~C` — C joins by the field NAME alone (its receiver's type is not read): a candidate, not a fact
-                std::string item = std::string( field ) + "=" + std::to_string( fns.size() )
-                                 + ( caller.empty() ? "" : "@" + ( callerTyped ? std::string() : std::string( kForSlotNameMark ) ) + caller );
-                if( std::ssize( names ) < kForSlotByCap )
-                {
-                    names.push_back( std::move( item ) );
-                    printedNameOnly = printedNameOnly || ( !callerTyped && !caller.empty() );
-                }
-                else
-                {
-                    ++more;
-                }
+                items.push_back( { std::string( field ) + "=" + std::to_string( fns.size() )
+                                       + ( caller.empty() ? "" : "@" + ( callerTyped ? std::string() : std::string( kForSlotNameMark ) ) + caller ),
+                                   !caller.empty(), fns.size(), !callerTyped && !caller.empty() } );
             }
+            // fix1 F-4: the cap is a spew guard, so it cuts the LEAST informative fields: a field with a caller first, then the most
+            // stored functions, then the name (`writeField=11@Row_display` is never cut for `isVisible=1`). The kept fields print in
+            // their first-seen order, as before.
+            std::vector<std::size_t> rank( items.size() );
+            std::iota( rank.begin(), rank.end(), std::size_t{ 0 } );
+            std::ranges::stable_sort( rank, [ & ]( std::size_t x, std::size_t y )
+            {
+                const slot_detail::SlotFieldItem& a = items[x];
+                const slot_detail::SlotFieldItem& b = items[y];
+                return a.hasCaller != b.hasCaller ? a.hasCaller : ( a.stored != b.stored ? a.stored > b.stored : a.item < b.item );
+            } );
+            const std::size_t keep = std::min<std::size_t>( items.size(), static_cast<std::size_t>( kForSlotByCap ) );
+            std::ranges::sort( rank.begin(), rank.begin() + static_cast<std::ptrdiff_t>( keep ) );
+            for( std::size_t k = 0; k < keep; ++k )
+            {
+                printedNameOnly = printedNameOnly || items[ rank[k] ].nameOnly;   // CR 4396503829: the mark of a PRINTED name-only caller
+                names.push_back( std::move( items[ rank[k] ].item ) );
+            }
+            more += items.size() - keep;
             if( !names.empty() )
             {
                 run = slot_detail::joinedRun( "slot_fields", names, more, esc );

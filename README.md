@@ -11,6 +11,8 @@
 
 **The ripgrep of AI context. A map before your agent reads the repo — and a check on what it writes.**
 
+<p align="center"><a href="https://trendshift.io/repositories/217924?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-217924"><img src="https://trendshift.io/api/badge/trendshift/repositories/217924/weekly?language=C%2B%2B" alt="Trendshift: C++ Repository of the Week badge for redhat-et/ripwire" width="250" height="55"></a></p>
+
 Ranked, deterministic call graph: what to touch, what it breaks, which tests to run. On the edit: blast
 radius, tests that reach it, twelve quality kinds reporting only what got worse, forgotten co-changes, fields
 read and written, names that resolve more than one way.
@@ -21,8 +23,6 @@ when to reach for each command.
 
 **Want every detail?** [The reference guide](#reference-guide) near the bottom covers install, commands, output
 format, exit codes and limits. You do not need it to get started.
-
-<p align="center"><a href="https://trendshift.io/repositories/217924?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-217924"><img src="https://trendshift.io/api/badge/trendshift/repositories/217924/weekly?language=C%2B%2B" alt="Trendshift: C++ Repository of the Week badge for redhat-et/ripwire" width="250" height="55"></a></p>
 
 <details>
 <summary><b>Field report: what ripwire contributed to a large multi-agent coding engagement</b> — written by Claude Fable 5.0, the frontier model orchestrating ~20 coding agents over two days on a ~1,500-file C++/Metal codebase. Click for the full report.</summary>
@@ -1643,6 +1643,25 @@ cmake --build build 2>&1 | ./build/ripwire . --from-trace=-
 
 ## Measured
 
+### Working toward the best code helper for agents
+
+Our goal is for ripwire to be the best tool an agent can have for understanding and changing code: complete answers, nothing stated wrongly, and as few bytes as possible. We measure every release against that goal. Each release answers the same questions with the same commands, graded the same way. These are **in-sample** questions: ripwire was developed against them, so the table shows progress between releases, not held-out performance. A held-out comparison comes with 0.7.0.
+
+| | 0.6.5 | 0.6.7 | 0.6.8 | 0.6.9 |
+|---|---|---|---|---|
+| Everyday code questions (163): complete / partial / none | 50 / 69 / 44 | 81 / 57 / 25 | 112 / 38 / 13 | **129 / 31 / 3** |
+| Questions whose answer spans several files (39) | 4 / 26 / 9 | 4 / 27 / 8 | 5 / 27 / 7 | **12 / 23 / 4** |
+| Questions on large repositories (56) | 2 / 35 / 19 | 5 / 38 / 13 | 14 / 37 / 5 | **23 / 29 / 4** |
+| Everyday answers that stated something wrong | 3 | 0 | 0 | **0** |
+| Bytes per complete answer (everyday / large repos) | 22.5 KB / 182 KB | 14.8 KB / 123 KB | 16.5 KB / 91 KB | **15.1 KB / 60 KB** |
+| Bytes per required item delivered (everyday) | 1.7 KB | 1.4 KB | 1.7 KB | **1.7 KB** |
+| Newly complete (everyday): questions, median size | 50, 4.7 KB | +31, 4.6 KB | +31, 16.8 KB | **+18, 11.9 KB** |
+| Size change, questions already complete (everyday) | — | +4 % | 0 % | **+1 %** |
+
+Harder questions take more bytes to answer. 0.6.5 already answered questions such as *Where is the `Compositor` class defined?* (one definition, 3.2 KB). The questions that first became complete in 0.6.8 and 0.6.9 include *How does Hono choose its router, and how does SmartRouter work?* (16.8 KB), *Who calls `options_get_number`?* (all 121 direct callers, 11.5 KB) and *How does a message get from `post_message` to a handler method like `on_button_pressed`?* (14.0 KB): several functions across files, or a long list. That is why the newly complete questions need more bytes while questions already complete stay about the same size.
+
+*Complete* means every required item is in the answer; *partial*, at least one but not every required item, and nothing wrong; *none*, no required item, or something wrong. A bare name printed next to its file or qualifier counts. Large repositories: envoy, nushell, terraform, cpython, vscode, cockroach and zed. There was no 0.6.6. Bytes per complete answer fell overall: from 22.5 KB to 15.1 KB on everyday questions and from 182 KB to 60 KB on large repositories. *Bytes per required item delivered* divides all answer bytes by the required items credited, partial answers included (682 items in 0.6.5, 1,142 in 0.6.9). *Newly complete* counts the questions a release answered completely for the first time (for 0.6.5, all its complete answers): the harder questions that became complete later need more bytes. *Size change* is the median per-question change on questions complete in both this and the previous release. Earlier release notes quoted a 173-question set that included 10 held-out questions, graded with the rules of that time (0.6.8: 50, 83, 98 complete under the stricter method); this table re-runs every release on the 163 in-sample questions with today's grader, so its numbers differ.
+
 <details>
 <summary><b>Read this first if you are here to check whether the tool is oversold</b> — every number with its instrument and corpus, plus the claims this project deliberately does <i>not</i> publish</summary>
 
@@ -2120,9 +2139,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>729 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>735 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **729 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **735 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2626,7 +2645,9 @@ profile (explore, batch, from_trace, impact, uses, fetch_body, edit_check, quali
 instructions teach). A client that loads every tool schema at session start then pays for 8 schemas instead of 33
 (`tools/list` measured at 13,834 bytes instead of 46,368). A call to a tool that is not listed is refused with the
 flag that enables it. The list is not access control: `batch` sub-queries still reach hidden verbs. `ripwire wrap AGENT --mcp-tools=core` writes the flag
-into the recipe it prints. The default stays the full catalog.
+into the recipe it prints. The default stays the full catalog, except in `ripwire wrap claude`'s recipe, which passes
+`--mcp-tools=no-edit` (every tool but the three edit twins: Claude Code must Read before it edits, so it takes a symbol's
+line range from ripwire, Reads that range, and uses its native Edit; `--mcp-tools=full` restores them).
 
 For a socket instead of standard input and output, run `ripwire --listen=HOST:PORT`. A non-loopback
 bind requires `--mcp-token`. The three edit verbs are disabled on a remote bind unless you pass
@@ -2878,7 +2899,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 298 compile-time caps and 7 ranking parameters.
+Another gate derives the cap inventory. The tool has 312 compile-time caps and 7 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.

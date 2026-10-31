@@ -20,7 +20,10 @@
 // The comment names which cause this run hit. A verb that runs no history walk (a plain map, --callers) never carries it.
 //
 // NOT COVERED (pre-existing, deferred): the other git walks — --cochange and the MCP cochange tool, --rank-by=churn and
-// --owners — do not yet tell a failed walk from an empty one (CHANGELOG, the K51 entry).
+// --owners — do not yet tell a failed walk from an empty one (CHANGELOG, the K51 entry). Those walks, and
+// gitLogNameOnlyRaw, also discard GitLogWalk::epochUnparsed, so a commit whose epoch field would not parse (read as 0)
+// lowers a window count or an ownership row without a tell: carried with this deferral, to be disclosed at one place
+// when these walks learn to say history_unread (PR #433 review, CodeRabbit on #469).
 //
 // ONE RENDERER (the prconverge.h rule): the forms differ only in the syntax of their host, never in what they say, so a
 // new host adds a DiscloseAs case here, never a sibling function. XmlAttrs and the comment form (LegendComment) go on every

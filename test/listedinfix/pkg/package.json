@@ -1,0 +1,13 @@
+{
+  "name": "demo",
+  "exports": {
+    "./logger": {
+      "types": "./dist/types/middleware/logger/index.d.ts",
+      "import": "./dist/middleware/logger/index.js"
+    },
+    "./cors": {
+      "import": "./dist/middleware/cors/index.js"
+    },
+    "./internal": "./dist/middleware/cors/internal/helpers.js"
+  }
+}

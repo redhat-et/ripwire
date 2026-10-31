@@ -321,8 +321,8 @@ t17 = path( tmp + "/w17", "c01", "sink" ); t16 = path( tmp + "/w16", "c01", "sin
 check( "(B4) a field 17 functions call through is not crossed", t17 != "" and bridge( t17 ) == "", repr( bridge( t17 ) ) )
 check( "(B4) a field 16 functions call through is (slot_callers=16)", 'via="slot" slot_callers="16"' in bridge( t16 ), repr( bridge( t16 ) ) )
 sj = repo + "/test/slotjoinfix"
-ts5 = path( sj, "run_outer", "on_cb" )
-check( "(B5) a slot joined by field name only is crossed as via=slot-name", 'n="on_cb" p="mode.c:7" via="slot-name" slot_callers="1"' in bridge( ts5 ), repr( bridge( ts5 ) ) )
+ts5 = path( sj, "run_nest", "on_go" )   # FN-SLOT S2: run_outer's nested literal is typed now; set_go's store (g_unknown) is untyped
+check( "(B5) a slot joined by field name only is crossed as via=slot-name", 'n="on_go" p="mode.c:12" via="slot-name" slot_callers="1"' in bridge( ts5 ), repr( bridge( ts5 ) ) )
 neg = tmp + "/neg"
 def crossed( a, b ):
     return bridge( path( neg, a, b ) ) != ""

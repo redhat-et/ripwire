@@ -6338,6 +6338,8 @@ inline std::string_view rustResultClass( TSNode type, TSNode fn, std::string_vie
     return rustResultClass( type, fn, src, depth, whole, tuple, spelledSelf );
 }
 
+inline std::string_view rustDispatchTrait( TSNode type, TSNode owner, std::string_view src, std::string_view& whole, std::string_view& generic );
+
 // Rust: one ReturnType per declared result of a fn — the whole value (kWholeResult) or, for a tuple at the core
 // (`Result<(Book, Ctx)>`), one per element by position; each element is read through the transparent wrappers only.
 inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
@@ -6355,6 +6357,19 @@ inline void captureRustReturnTypes( BindCtx& cx, TSNode fn )
     const std::string_view cls = rustResultClass( ret, fn, cx.src, depth, whole, &tuple, spelledSelf );
     if( ts_node_is_null( tuple ) )
     {
+        if( cls.empty() && depth == 0 && langFacts( cx.lang ).returnTypedDispatchLet )
+        {
+            // lane iface-peel: `-> &dyn T` / `-> Box<dyn T>` / `-> impl T` — the trait the result dispatches through. A generic
+            // `-> R` bounded by T (rustDispatchTrait's `generic`) is not read: the CALLER picks R, so it is no implementor set.
+            std::string_view traitWhole;
+            std::string_view generic;
+            const std::string_view trait = rustDispatchTrait( ret, fn, cx.src, traitWhole, generic );
+            if( !trait.empty() && generic.empty() )
+            {
+                pushReturnType( cx, defStart, kWholeResult, trait, traitWhole, kDispatchResultBit );
+            }
+            return;
+        }
         pushReturnType( cx, defStart, kWholeResult, cls, whole, depth, spelledSelf );
         return;
     }
