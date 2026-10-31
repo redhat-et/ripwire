@@ -824,16 +824,18 @@ done <"$HD/L3/mv.log"
 #    mktemp files built beside the manifest / settings.json. A `mv` shim delivers SIGTERM to the installer at the
 #    moment of the rename, i.e. while the temp file exists; the trap must remove it.
 P_HOME="${HD:?}/P/home"; rm -rf "${HD:?}/P"; mkdir -p "$P_HOME" "$HD/P/shim" "$HD/P/tmp"
-printf '#!/bin/sh\ncase "$*" in *"$MV_KILL_ON"*) kill -TERM "$PPID"; sleep 2; exit 1 ;; esac\nexec /bin/mv "$@"\n' >"$HD/P/shim/mv"; chmod +x "$HD/P/shim/mv"
+# The shim leaves a marker before it signals, so the arm can tell "the kill was delivered" from "the installer failed earlier".
+printf '#!/bin/sh\ncase "$*" in *"$MV_KILL_ON"*) : >"$MV_KILLED"; kill -TERM "$PPID"; sleep 2; exit 1 ;; esac\nexec /bin/mv "$@"\n' >"$HD/P/shim/mv"; chmod +x "$HD/P/shim/mv"
 # macOS's mktemp ignores $TMPDIR when called bare; this makes it honour it so a stray lands where the arm looks
-printf '#!/bin/sh\nif [ "$#" -eq 0 ]; then exec /usr/bin/mktemp "${TMPDIR:-/tmp}/tmp.XXXXXX"; fi\nexec /usr/bin/mktemp "$@"\n' >"$HD/P/shim/mktemp"; chmod +x "$HD/P/shim/mktemp"
+pMktemp="$( command -v mktemp )"
+printf '#!/bin/sh\nif [ "$#" -eq 0 ]; then exec "%s" "${TMPDIR:-/tmp}/tmp.XXXXXX"; fi\nexec "%s" "$@"\n' "$pMktemp" "$pMktemp" >"$HD/P/shim/mktemp"; chmod +x "$HD/P/shim/mktemp"
 for _t in ".ripwire-manifest-v1" "settings.json"; do
-    rm -rf "${P_HOME:?}/.claude"
-    MV_KILL_ON="$_t" TMPDIR="$HD/P/tmp" PATH="$HD/P/shim:$PATH" HOME="$P_HOME" bash "$SK/install.sh" --claude --hook >"$HD/P.out" 2>&1; P_RC=$?
+    rm -rf "${P_HOME:?}/.claude"; rm -f "$HD/P/killed"
+    MV_KILLED="$HD/P/killed" MV_KILL_ON="$_t" TMPDIR="$HD/P/tmp" PATH="$HD/P/shim:$PATH" HOME="$P_HOME" bash "$SK/install.sh" --claude --hook >"$HD/P.out" 2>&1; P_RC=$?
     pStray="$( find "$HD/P" \( -name '*.tmp.*' -o -name 'tmp.*' -o -name '.tmp-*' \) 2>/dev/null | sed "s|^$HD/P|~|" | tr '\n' ' ' )"
-    { [ "$P_RC" -ne 0 ] && [ -z "$pStray" ]; } \
+    { [ -e "$HD/P/killed" ] && [ "$P_RC" -ne 0 ] && [ -z "$pStray" ]; } \
         && ok "(P) a SIGTERM during the rename onto $_t exits non-zero and leaves no temp file" \
-        || no "(P) SIGTERM during the rename onto $_t: rc=$P_RC, stray temp files: ${pStray:-none}"
+        || no "(P) SIGTERM during the rename onto $_t: killed=$( [ -e "$HD/P/killed" ] && echo yes || echo NO ), rc=$P_RC, stray temp files: ${pStray:-none}"
 done
 rm -rf "${P_HOME:?}/.claude"; TMPDIR="$HD/P/tmp" HOME="$P_HOME" bash "$SK/install.sh" --claude --hook >/dev/null 2>&1
 pStray="$( find "$HD/P" \( -name '*.tmp.*' -o -name 'tmp.*' \) 2>/dev/null | tr '\n' ' ' )"
