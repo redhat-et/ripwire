@@ -60,7 +60,7 @@ inline constexpr std::string_view kForDottedStringsLegend =
     "<!-- ripwire for dotted_strings: Python string literals whose whole dotted path names a shown row; hedge= is the whole "
     "claim: no edge, not in est_tokens or any count. ds s= the string; "
     "tn= tp= the definition it names, or mod= the module; p= l= in= where the string sits; sink= it is the argument of a call whose tail name is that (the callee is not resolved); "
-    "loader= lp= a function in which the constant's name reaches the argument of a call whose tail name is an import sink's (the callee is not resolved) through its own assignments (names only, not a proof of the value) (loaders= how many do; over 3 none is named, a generic word); tmpl= a %-template "
+    "loader= lp= a function in which the constant's name reaches the argument of a call whose tail name is an import sink's (the callee is not resolved) through its own assignments (names only, not a proof of the value) (loaders= how many do; over 3 none is named, a generic word; loaders_floor=1 a sink call in a file that can name the constant traced no names, too many assignments or none, so loaders= may be short); tmpl= a %-template "
     "passed to such a call, cand= modules that sibling directories of shown files would fill it with, cands= how many, which one loads is not known. sites= non-test sites, rows= printed; "
     "tests= sites in test paths, counted only (with no row, s= is the first such string, next= a grep for it); unresolved= external= strings ending in a shown name that resolve to no one definition, "
     "or to no in-tree module; rows_capped=1 next= the list was cut. -->";
@@ -156,6 +156,7 @@ struct Row
     std::size_t      cands = 0;
     NodeId           loader = kNoNode;
     std::size_t      loaders = 0;
+    bool             loadersFloor = false;   // a sink call whose flow traced no names (over the size cap, or none) sits where it could name the constant
 };
 
 inline std::string siteInName( const IngestResult& ing, const Reference& r )
@@ -609,6 +610,18 @@ inline bool loaderReachesConstant( const IngestResult& ing, const Reference& loa
     return fileImportsNameFrom( ing, imports, loaderFact.fileId, name, site.fileId );
 }
 
+// A sink call that traced no names (flowTokensOf returns "" over kVrDottedFlowMaxBytes, and when the argument names nothing) joins no
+// constant. Could it have named this one, by the visibility rules of loaderReachesConstant? Then loaders= is a floor for the row.
+inline bool untracedLoaderCouldReach( const IngestResult& ing, const Reference& loaderFact, const Reference& site, const ImportedNames& imports )
+{
+    if( site.composeRel == kDottedShapeLocalListed )
+    {
+        return loaderFact.fromSymbol == site.fromSymbol;
+    }
+    return loaderFact.fileId == site.fileId
+           || ( siteIsModuleLevel( ing, site ) && fileImportsNameFrom( ing, imports, loaderFact.fileId, site.memberCtor, site.fileId ) );
+}
+
 // Loaders of the constants: a non-test function that calls a sink on a computed value that the constant's name reaches.
 inline void attachLoaders( const IngestResult& ing, std::span<const Reference* const> loaders, std::vector<Row>& rows )
 {
@@ -629,6 +642,11 @@ inline void attachLoaders( const IngestResult& ing, std::span<const Reference* c
         {
             if( v->fromSymbol >= ing.symbols.size() || isTestPath( rootRelPath( ing, v->fileId ) ) || seen.contains( v->fromSymbol ) )
             {
+                continue;
+            }
+            if( v->recvVar.empty() )
+            {
+                row.loadersFloor = row.loadersFloor || untracedLoaderCouldReach( ing, *v, *row.site, imports );
                 continue;
             }
             if( loaderReachesConstant( ing, *v, *row.site, imports ) )
@@ -695,6 +713,10 @@ inline void appendDsRow( std::string& x, const IngestResult& ing, const Row& row
     if( row.loaders > 1 )
     {
         x += std::format( " loaders=\"{}\"", row.loaders );
+    }
+    if( row.loadersFloor )
+    {
+        x += " loaders_floor=\"1\"";
     }
     x += "/>";
 }

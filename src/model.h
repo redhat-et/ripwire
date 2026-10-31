@@ -599,7 +599,7 @@ inline constexpr std::string_view kDottedShapeVariable = "v";   // an import sin
 // The flow tokens of a "v" fact: the names whose value can reach the sink's first argument inside its function (the argument's own
 // names, then through assignments / for targets / walrus / comprehension targets of that function, to a fixpoint): `.NAME` an
 // attribute tail, `NAME` a bare name no assignment, for/with/except/lambda binder of the function binds (a local import is a bind too, but is left free here and decided by the joiner, which sees the module imported), `=NAME` a bare name the function itself binds. Capped by
-// kVrDottedFlowMaxBytes: over it the fact carries none and joins nothing. A name that reaches the argument only through another
+// kVrDottedFlowMaxBytes: over it the fact carries none and joins nothing (an empty list is read as untraced: the row of a constant such a call could name says loaders_floor=1). A name that reaches the argument only through another
 // function, a parameter or a call result is not here, so no constant joins it.
 inline constexpr char kDottedFlowAttr  = '.';
 inline constexpr char kDottedFlowBound = '=';

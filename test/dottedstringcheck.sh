@@ -124,6 +124,51 @@ has "$TMP/k4" 's="pkg.procs.Fmt" tn="Fmt" tp="pkg/procs.py:3" p="pkg/engine.py" 
 run "$K" "$TMP/k5" '--for=Fmt.render'
 has "$TMP/k5" 's="pkg.procs.Fmt" tn="Fmt"' "K5 a shown method's class named through the whole path"
 
+# ── FL [P] (CR 4431867587): a sink call whose flow tokens are over the cap (400 bytes) traces no names, so a loader it would have been is
+# not counted; the row of a constant it could name says loaders_floor="1". A short flow keeps loader= and says nothing.
+FL="$TMP/fl"
+fx "$FL/pkg/__init__.py" <<'P'
+P
+fx "$FL/pkg/procs.py" <<'P'
+def shortproc(request):
+    return request
+def longproc(request):
+    return request
+P
+python3 - "$FL/pkg/cfg.py" <<'PY'
+import sys
+names = ["chain_link_%03d" % i for i in range(60)]
+out = ["from importlib import import_module", "", "LONG_PROCS = [\"pkg.procs.longproc\"]", "",
+       "def load_long():", "    %s = LONG_PROCS" % names[0]]
+for a, b in zip(names[1:], names):
+    out.append("    %s = %s" % (a, b))
+out.append("    return import_module(%s)" % names[-1])
+open(sys.argv[1], "w").write("\n".join(out) + "\n")
+PY
+run "$FL" "$TMP/fl1" '--for=longproc'
+has "$TMP/fl1" 's="pkg.procs.longproc"' "FL1 the over-cap fixture's row prints"
+has "$TMP/fl1" 'loaders_floor="1"' "FL1 loaders_floor=1: the over-cap sink call is disclosed, not dropped"
+hasnt "$TMP/fl1" 'loader="load_long"' "FL1 the over-cap sink call joins no constant"
+FS="$TMP/fs"
+fx "$FS/pkg/__init__.py" <<'P'
+P
+fx "$FS/pkg/procs.py" <<'P'
+def shortproc(request):
+    return request
+P
+fx "$FS/pkg/cfg.py" <<'P'
+from importlib import import_module
+
+SHORT_PROCS = ["pkg.procs.shortproc"]
+
+def load_short():
+    p = SHORT_PROCS
+    return import_module(p)
+P
+run "$FS" "$TMP/fl2" '--for=shortproc'
+has "$TMP/fl2" 'loader="load_short"' "FL2 a short flow keeps its loader="
+hasnt "$TMP/fl2" 'loaders_floor="1"' "FL2 and says no floor"
+
 # ── E: what resolves to no target ─────────────────────────────────────────────────────────────────────────────────────────────
 E="$TMP/e"
 fx "$E/pkg/__init__.py" <<'P'
@@ -131,13 +176,19 @@ P
 fx "$E/pkg/mod.py" <<'P'
 def thing():
     return 1
-CONFIG = ["requests.sessions.thing", "pkg.mod.absent", "pkg.mod.thing"]
+CONFIG = ["requests.sessions.thing", "pkg.mod.absent", "pkg.mod.thing", "pkg.other.thing"]
+P
+fx "$E/pkg/other.py" <<'P'
+def unrelated():
+    return 2
 P
 run "$E" "$TMP/e1" '--for=thing'
 has "$TMP/e1" 'external="1"' "E1 external counted"
 hasnt "$TMP/e1" 'requests.sessions' "E1 external never printed"
 run "$E" "$TMP/e2" '--for=absent thing'
 has "$TMP/e1" 's="pkg.mod.thing" tn="thing"' "E2 the resolved twin prints"
+has "$TMP/e1" 'unresolved="1"' "E2 module present, attribute missing: unresolved= counts it"
+hasnt "$TMP/e1" 's="pkg.other.thing"' "E2 an unresolved string prints no row"
 hasnt "$TMP/e2" 's="pkg.mod.absent"' "E2 attribute missing prints no target"
 E3="$TMP/e3"
 fx "$E3/a/b.py" <<'P'
@@ -943,8 +994,14 @@ fi
 if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/d1t2" 2>/dev/null && xmllint --noout "$TMP/d1t2f" 2>/dev/null; then ok "X5 the tests-only s= next= answers (--callers, --for) are well-formed"; else no "X5 a tests-only answer is not well-formed XML ($( xmllint --noout "$TMP/d1t2" 2>&1 | head -1 | cut -c1-120 ))"; fi
 else
-    ok "X5 SKIP xmllint absent"
+    ok "X5 SKIP xmllint absent (the always-on check below still runs)"
 fi
+if python3 - "$TMP/d1t2" "$TMP/d1t2f" <<'PY'
+import re,sys
+bad=[c for p in sys.argv[1:] for c in re.findall(r'<!--(.*?)-->',open(p,encoding="utf-8").read(),re.S) if "--" in c]
+sys.exit(1 if bad else 0)
+PY
+then ok "X5 no -- inside any comment of the tests-only answers (needs no xmllint)"; else no "X5 a tests-only answer's comment holds --"; fi
 if python3 - "$TMP/k1" <<'PY'
 import re,sys
 m=re.search(r'<!-- ripwire for dotted_strings:(.*?)-->',open(sys.argv[1],encoding="utf-8").read(),re.S)

@@ -637,6 +637,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "sink",              "<ds sink=>: the string is the argument of a call with that tail name (the callee is not resolved)", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "loader",            "<ds loader= lp=>: a function in which the constant's name reaches the argument of a call whose tail name is an import sink's (the callee is not resolved) through its own assignments; names only, not a proof of the value", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "loaders",           "<ds loaders=N>: N functions spell the constant that way; over 3 none is named (a generic word)", true, "ds", MapHeaderRead::No, {}, "callers" },
+    { "loaders_floor",     "<ds loaders_floor=1>: a sink call in a file that can name the constant traced no names (too many assignments, or none), so loaders= may be short", true, "ds", MapHeaderRead::No, {}, "callers" },
     { "s",                 "<dotted_strings s= next=>: no row is printed: s= is the first string found in a test path (counted in tests=), next= a grep command for it", true, "dotted_strings", MapHeaderRead::No, {}, "callers" },
     { "fields",            "<sites_at> column: each row's calls of the leaf name, any receiver, as file:line, space-separated; not proof each binds", true, "cols", MapHeaderRead::No, "sites_at", "callers" },
     { "fields",            "<sites_total> column: a row's uncut site count; its sites_at cell lists the first 16, the uses verb all", true, "cols", MapHeaderRead::No, "sites_total", "callers" },
