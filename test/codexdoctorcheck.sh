@@ -150,6 +150,22 @@ QOUT="$( run_doctor )"; QRC=$?
 { [ "$QRC" -eq 1 ] && printf '%s' "$QOUT" | grep -q '<c n="codex-hooks" ok="0"'; } \
     && ok "a quoted Codex hook command naming a missing script still fails codex-hooks" \
     || no "a quoted command to a missing script passed codex-hooks (exit $QRC): $( printf '%s' "$QOUT" | grep -o '<c n="codex-hooks"[^>]*>' )"
+# CodeRabbit 4430258800: text glued to the closing quote ('path'bad) is ONE shell word, path+bad, which does not exist;
+# only the end of the command or a space may follow the quote.
+cat >"$CODEX_FAKE/hooks.json" <<EOF
+{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-nudge.sh'bad"}]}],
+"SessionStart":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-nudge.sh' --session-start"}]}],
+"UserPromptSubmit":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-route.sh'"}]}]}}
+EOF
+QOUT="$( run_doctor )"; QRC=$?
+{ [ "$QRC" -eq 1 ] && printf '%s' "$QOUT" | grep -q '<c n="codex-hooks" ok="0"'; } \
+    && ok "text glued to a quoted hook path ('path'bad) names no script: codex-hooks fails" \
+    || no "a quoted hook command with text glued to the closing quote passed codex-hooks (exit $QRC): $( printf '%s' "$QOUT" | grep -o '<c n="codex-hooks"[^>]*>' )"
+quoted_hooks "$QDIR"
+QOUT="$( run_doctor )"; QRC=$?
+{ [ "$QRC" -eq 0 ] && printf '%s' "$QOUT" | grep -q '<c n="codex-hooks" ok="1"'; } \
+    && ok "twin: the same quoted commands without the glued text pass codex-hooks" \
+    || no "twin: the well-formed quoted commands failed codex-hooks (exit $QRC): $( printf '%s' "$QOUT" | grep -o '<c n="codex-hooks"[^>]*>' )"
 cat >"$CODEX_FAKE/hooks.json" <<EOF
 {"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-nudge.sh"}]}],
 "SessionStart":[{"hooks":[{"type":"command","command":"'$QDIR/ripwire-codex-nudge.sh --session-start"}]}],
