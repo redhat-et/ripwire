@@ -503,22 +503,12 @@ inline std::vector<std::string> forMessageTries( std::string_view message )
     return out;
 }
 
-// the first CONST_SHAPED word of the task from `from` on (trailing/leading punctuation stripped): its bytes and the offset past it
-inline std::optional<std::string> constWordOf( std::string_view task, std::size_t& from )
+// the CONST_SHAPED words of the task, in order (trailing/leading punctuation stripped)
+inline std::vector<std::string> constWordsOf( std::string_view task )
 {
-    std::size_t i = from;
-    while( i < task.size() )
+    std::vector<std::string> out;
+    for( std::string_view w : lit_detail::taskWords( task ) )
     {
-        while( i < task.size() && ( task[i] == ' ' || task[i] == '\t' ) )
-        {
-            ++i;
-        }
-        std::size_t j = i;
-        while( j < task.size() && task[j] != ' ' && task[j] != '\t' )
-        {
-            ++j;
-        }
-        std::string_view w = task.substr( i, j - i );
         while( !w.empty() && std::string_view( "$(['{<,;:.!?)]}>'`" ).find( w.front() ) != std::string_view::npos )
         {
             w.remove_prefix( 1 );
@@ -527,14 +517,12 @@ inline std::optional<std::string> constWordOf( std::string_view task, std::size_
         {
             w.remove_suffix( 1 );
         }
-        i = j;
         if( lit_detail::isConstShaped( w ) )
         {
-            from = i;
-            return std::string( w );
+            out.emplace_back( w );
         }
     }
-    return std::nullopt;
+    return out;
 }
 
 // The literals the task names, in the order they are tried: a quoted span (the task's own quoting is the strongest evidence), the
@@ -547,10 +535,9 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     {
         out.push_back( ForLiteral{ std::move( *s ), "quoted" } );
     }
-    std::size_t from = 0;
-    while( std::optional<std::string> c = constWordOf( task, from ) )
+    for( std::string& c : constWordsOf( task ) )
     {
-        out.push_back( ForLiteral{ std::move( *c ), "const" } );
+        out.push_back( ForLiteral{ std::move( c ), "const" } );
     }
     const std::vector<std::string_view> words = lit_detail::taskWords( task );
     for( std::string& k : lit_detail::dottedKeysOf( words ) )
@@ -667,6 +654,26 @@ inline std::vector<std::size_t> pickRows( const std::vector<char>& reg, std::siz
     }
     std::sort( pick.begin(), pick.end() );
     return pick;
+}
+
+// where a hit of the literal at `at` of `text` stands: shape=dotted keyHitAt; shape=message a hit inside a longer word is `longer`
+inline KeyHit literalHitAt( bool dotted, bool message, std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    KeyHit h = dotted ? keyHitAt( text, at, n ) : KeyHit{};
+    h.longer = h.longer || ( message && !wordBounded( text, at, n ) );
+    return h;
+}
+
+// shape=dotted: a quoted string site outside any function or method (a registration)
+inline bool isRegistration( const IngestResult& ing, const Site& s, NodeId owner )
+{
+    return s.quotedKey && s.k == 's' && !( owner != kNoNode && ReceiverEvidence::callableKind( ing.symbols[owner].kind ) );
+}
+
+// shape=message: the rows that are not code (a task's words met outside a string are no message)
+inline void dropCodeRows( std::vector<Site>& rows )
+{
+    rows.erase( std::remove_if( rows.begin(), rows.end(), []( const Site& r ) { return r.k == 'c'; } ), rows.end() );
 }
 
 // text-line helpers for the docstring position test: the previous line of the one starting at `ls` (its start moves back to that
@@ -958,8 +965,8 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
             if( dotted || message )
             {
                 loadFile( r.fileId );
-                keyHit = dotted ? lit_detail::keyHitAt( loadedText, r.byteOffset, lit.text.size() ) : lit_detail::KeyHit{};
-                if( keyHit.longer || ( message && !lit_detail::wordBounded( loadedText, r.byteOffset, lit.text.size() ) ) )
+                keyHit = lit_detail::literalHitAt( dotted, message, loadedText, r.byteOffset, lit.text.size() );
+                if( keyHit.longer )
                 {
                     ++longerHits;
                     continue;
@@ -1044,8 +1051,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     }
     if( message )
     {
-        // a task's words met outside a string are no message: a code row is never printed (all code: no block)
-        rows.erase( std::remove_if( rows.begin(), rows.end(), []( const lit_detail::Site& r ) { return r.k == 'c'; } ), rows.end() );
+        lit_detail::dropCodeRows( rows );   // a code row is never printed (all code: no block)
     }
     out.sites = rows.size();
     if( rows.empty() )
@@ -1073,8 +1079,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     std::vector<char> registration( order.size(), 0 );   // by rank position: a quoted key outside any function (shape=dotted)
     for( std::size_t i = 0; dotted && i < order.size(); ++i )
     {
-        const NodeId owner = enriched[order[i]].enclosingId;
-        registration[i]    = rows[order[i]].quotedKey && rows[order[i]].k == 's' && !( owner != kNoNode && ReceiverEvidence::callableKind( ing.symbols[owner].kind ) ) ? 1 : 0;
+        registration[i] = lit_detail::isRegistration( ing, rows[order[i]], enriched[order[i]].enclosingId ) ? 1 : 0;
     }
     const std::vector<std::size_t> pick = lit_detail::pickRows( registration, kForLiteralSiteRows, dotted ? kForLiteralRegistrationRows : 0 );
     const std::size_t shown = pick.size();
@@ -1144,6 +1149,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     }
 
     // ── the rows ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+    const std::string_view needle = dotted || message ? std::string_view( lit.text ) : std::string_view();   // a cut row opens near it
     std::string rowsXml;
     std::size_t contextRows = 0;
     for( std::size_t i = 0; i < hits.size(); ++i )
@@ -1171,7 +1177,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         const std::size_t lead = line.find_first_not_of( " \t" );
         line = lead == std::string::npos ? std::string() : line.substr( lead );
         redactInPlace( line, redact );   // CR 4423843223: the matched line is raw source text; redact before the cut
-        lit_detail::cutAround( line, dotted || message ? std::string_view( lit.text ) : std::string_view(), kForLiteralLineBytes );
+        lit_detail::cutAround( line, needle, kForLiteralLineBytes );
         const bool callableOwner = h.enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind );
         if( rows[i].k == 's' && !callableOwner && contextRows < kForLiteralContextRows )
         {
@@ -1237,35 +1243,40 @@ inline bool namesIndexedFile( const IngestResult& ing, std::string_view name )
                         [ & ]( const auto& f ) { const std::string_view p( f ); return p.ends_with( name ) && ( p.size() == name.size() || p[p.size() - name.size() - 1] == '/' ); } );
 }
 
+// the first try of a message (forMessageTries) that has a string site, or nothing
+inline ForLiteralRender renderMessageTries( const IngestResult& ing, const ForLiteral& lit, std::string_view rootArg, std::string_view served,
+                                            RedactCounts* redact, bool useMemo, bool compactLegend )
+{
+    for( const std::string& t : forMessageTries( lit.text ) )
+    {
+        ForLiteral tried = lit;
+        tried.text       = t;
+        tried.frag       = t != lit.text;
+        ForLiteralRender r = renderForLiteral( ing, tried, rootArg, served, redact, useMemo, compactLegend );
+        if( !r.xml.empty() )
+        {
+            return r;
+        }
+    }
+    return {};
+}
+
 // the block of the task's literals: each in order (forLiteralCandidates) until one has a source site, at most kForLiteralCandidates scans
-// besides a message, which walks its tries (forMessageTries) until one has a string site
+// besides a message, which walks its tries
 inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
                                                 RedactCounts* redact, bool useMemo, bool compactLegend )
 {
     std::size_t scans = 0;
     for( const ForLiteral& lit : forLiteralCandidates( task ) )
     {
-        if( lit.shape == "message" )
-        {
-            for( const std::string& t : forMessageTries( lit.text ) )
-            {
-                ForLiteral tried = lit;
-                tried.text       = t;
-                tried.frag       = t != lit.text;
-                ForLiteralRender r = renderForLiteral( ing, tried, rootArg, served, redact, useMemo, compactLegend );
-                if( !r.xml.empty() )
-                {
-                    return r;
-                }
-            }
-            continue;
-        }
-        if( scans >= kForLiteralCandidates || ( lit.shape == "dotted" && namesIndexedFile( ing, lit.text ) ) )
+        const bool message = lit.shape == "message";
+        if( !message && ( scans >= kForLiteralCandidates || ( lit.shape == "dotted" && namesIndexedFile( ing, lit.text ) ) ) )
         {
             continue;
         }
-        ++scans;
-        ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend );
+        scans += message ? 0 : 1;
+        ForLiteralRender r = message ? renderMessageTries( ing, lit, rootArg, served, redact, useMemo, compactLegend )
+                                     : renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend );
         if( !r.xml.empty() )
         {
             return r;
