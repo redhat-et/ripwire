@@ -315,6 +315,25 @@ inline std::string catastrophicRegexPrologue( char outerQuant )
     return std::string( "catastrophic backtracking: the unbounded quantifier '" ) + outerQuant + "' is applied to ";
 }
 
+// The BOUNDED-quantifier opening, added by the multi-quantifier clause 2. That clause fires on a repeated
+// alternation whose outer quantifier may be BOUNDED (`((.|.){1,3}){1,3}` — the `{1,3}` and not a '*' or '+'),
+// and reusing catastrophicRegexPrologue there produced a sentence that was FALSE twice over: it said
+// "the unbounded quantifier '{'" — a bounded repeat called unbounded, and '{' is not a quantifier character
+// but the first byte of an interval. A refusal that misdescribes the pattern is worse than a vague one, because
+// the workaround it teaches (bound the outer quantifier) is exactly what the reader has already done.
+// The clause-2 message therefore states the bounded case as what it is.
+// `quantSpelling` is the quantifier AS WRITTEN — 'a', '*', '+', or a whole interval like '{2,5}'. The char-only
+// form printed the first byte of an interval, which read as "the quantifier '{'": true of the pattern's bytes and
+// useless to a reader. Callers that pass a char keep the historical one-character behaviour.
+inline std::string catastrophicRegexBoundedPrologue( const std::string& quantSpelling )
+{
+    return std::string( "catastrophic backtracking: the quantifier '" ) + quantSpelling + "' is applied to ";
+}
+inline std::string catastrophicRegexBoundedPrologue( char outerQuant )
+{
+    return catastrophicRegexBoundedPrologue( std::string( 1, outerQuant ) );
+}
+
 // The one refusal this screen emits, kept out of the scan loop so the loop reads as the small state
 // machine it is. `outerQuant` is the quantifier character that was applied to the offending group.
 inline std::string catastrophicRegexMessage( char outerQuant )
@@ -726,9 +745,14 @@ inline bool regexFirstCharSetOfQuantifierFreeBranch( const std::string& pat, std
 // are ALREADY disjoint. A screen that refuses a shape it cannot read must say what it actually knows: it cannot
 // PROVE the branches disjoint. The actionable workaround — bounding the OUTER quantifier — works for every
 // pattern this class can hold, so it carries alone.
-inline std::string catastrophicRegexAlternationMessage( char outerQuant )
+inline std::string catastrophicRegexAlternationMessage( const std::string& outerQuantSpelling, bool outerIsUnbounded = true )
 {
-    return   catastrophicRegexPrologue( outerQuant ) + "an alternation whose "
+    // `outerIsUnbounded` distinguishes the M2-c/M2-d arm (the outer quantifier IS '*' or '+', or '{n,}') from
+    // multi-quantifier clause 2 (which fires on a BOUNDED repeat). It defaults to true so every existing caller
+    // and every byte they pinned stay identical.
+    const std::string opening = outerIsUnbounded ? catastrophicRegexPrologue( outerQuantSpelling[0] )
+                                                 : catastrophicRegexBoundedPrologue( outerQuantSpelling );
+    return   opening + "an alternation whose "
              "branches the structural screen cannot PROVE are disjoint. A branch carries no quantifier of its own, so the "
              "nested-repetition refusal cannot see this one, and the character-set proofs cover a branch only when it is an "
              "unquantified sequence of width-one atoms whose FIRST character differs from every other branch's: a branch with a "
@@ -736,6 +760,10 @@ inline std::string catastrophicRegexAlternationMessage( char outerQuant )
              "input splittable between the branches and the outer repetition, every split a separate path, so matching a "
              "non-matching line costs time exponential in its length. Workaround: make the OUTER quantifier a small explicit bound "
              "('(X){1,5}' for whatever the group is, a ceiling every engine honours identically)";
+}
+inline std::string catastrophicRegexAlternationMessage( char outerQuant, bool outerIsUnbounded = true )
+{
+    return catastrophicRegexAlternationMessage( std::string( 1, outerQuant ), outerIsUnbounded );
 }
 
 // ── MULTI-QUANTIFIER CLAUSE 1's refusal: adjacent ambiguous quantifiers ─────────────────────────────────────
@@ -946,7 +974,10 @@ inline RegexGroupClose regexCloseGroupVerdict( const std::string& pat, std::size
     // overlap repeated again", and the flag travels up the frames to answer it.
     if( quant.isPresent && frame.hasRepeatedUnprovenAlternationInside )
     {
-        out.refusal = catastrophicRegexAlternationMessage( pat[ closeAt + 1 ] );
+        // clause 2 fires on a repeat of a repeat, and that outer repeat may be BOUNDED — so it must not borrow
+        // the unbounded-quantifier opening. `quant.isUnbounded` decides which sentence is true here, and the
+        // spelling is the quantifier AS WRITTEN so an interval reads as '{2,5}' rather than as '{'.
+        out.refusal = catastrophicRegexAlternationMessage( pat.substr( closeAt + 1, quant.lengthCount ), quant.isUnbounded );
         return out;
     }
     // this group is a repeated overlap when it carries an unproven alternation AND a quantifier of its own
