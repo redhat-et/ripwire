@@ -37,11 +37,13 @@ for a,b in sorted(set(re.findall(r"<v from=\"([^\"]*)\"[^>]*? to=\"([^\"]*)\"", 
     print(a.replace(root+"/","")+" -> "+b.replace(root+"/",""))' "$out" "$1"
 }
 has()  { grep -qxF "$2" <<<"$1"; }
-# callkind ROOT SYM PATH-PREFIX [ROOT...]: how --callers=SYM reports its caller row under PATH-PREFIX: firm (no via=), name (via="name"), none.
+# callkind ROOT SYM PATH-PREFIX [ROOT...]: how --callers=SYM reports its caller row under PATH-PREFIX: firm (no via=), name (via="name"), none; error(rc=N) when the run failed or found no def.
 callkind() {
-    local o row r=$1 sym=$2 pre=$3; shift 3
+    local o rc row r=$1 sym=$2 pre=$3; shift 3
     [ $# -gt 0 ] || set -- "$r"
-    o=$( cd "$r" && "$BIN" "$@" --no-cache --callers="$sym" 2>/dev/null )
+    o=$( cd "$r" && "$BIN" "$@" --no-cache --callers="$sym" 2>/dev/null ); rc=$?
+    # A premise that fails is a failure: "none" is read off a run that exited 0 and printed its root with the def found.
+    if [ "$rc" != 0 ] || ! grep -qE "<callers [^>]*of=\"$sym\" defs=\"[1-9]" <<<"$o"; then echo "error(rc=$rc)"; return; fi
     row=$(grep -o "<s [^>]*p=\"[^\"]*$pre[^\"]*\"[^>]*>" <<<"$o" | head -1)
     if [ -z "$row" ]; then echo none; elif grep -q 'via="name"' <<<"$row"; then echo name; else echo firm; fi
 }
@@ -308,6 +310,19 @@ python3 -I -c 'import os,sys
 for i in range(501): os.makedirs(f"{sys.argv[1]}/d{i:03d}/vendor")' "$Z"
 O=$(skipped "$Z")
 if grep -q 'pruned_dirs="501"' <<<"$O" && grep -q 'rows_capped="1"' <<<"$O" && [ "$(grep -o 'why="pruned-dir"' <<<"$O" | wc -l | tr -d ' ')" = 500 ]; then ok "P5 row cap: count exact, rows_capped=1, 500 rows"; else no "P5 $(grep -o 'pruned_dirs="[^"]*"\|rows_capped="[^"]*"' <<<"$O" | tr '\n' ' ')"; fi
+# the same cap over PACKAGES (CR 5725024918, threads 4433389578 and 4433389589): 501 pruned packages row 500 in --skipped, rows_capped=1 says
+# the cut, and the legends of the block that points at --skipped say it lists at most 500, not all
+Z2=$T/pkgcap
+w "$Z2/a.py" ''
+python3 -I -c 'import os,sys
+for i in range(501):
+    os.makedirs(f"{sys.argv[1]}/d{i:03d}/build"); open(f"{sys.argv[1]}/d{i:03d}/build/__init__.py", "w").close()' "$Z2"
+O=$(skipped "$Z2")
+if grep -q 'pruned_dirs="501"' <<<"$O" && grep -q 'rows_capped="1"' <<<"$O" && [ "$(grep -o 'why="pruned-package"' <<<"$O" | wc -l | tr -d ' ')" = 500 ]; then ok "P5.1 package row cap: count exact, rows_capped=1, 500 rows"; else no "P5.1 $(grep -o 'pruned_dirs="[^"]*"\|rows_capped="[^"]*"' <<<"$O" | tr '\n' ' ')"; fi
+O=$( cd "$Z2" && "$BIN" "$Z2" --no-cache --deps 2>/dev/null )
+OF=$( cd "$Z2" && "$BIN" "$Z2" --no-cache --deps --legend=full 2>/dev/null )
+if grep -q '<pruned_packages count="501" shown="8"' <<<"$O" && grep -q 'at most 500 (rows_capped=1 there marks a cut' <<<"$O"; then ok "P5.2 compact legend says the skipped verb rows at most 500"; else no "P5.2 compact legend promises a complete list: $(grep -o 'pruned_packages count=N[^\"]*' <<<"$O" | cut -c1-400)"; fi
+if grep -q 'at most 500 rows (rows_capped=1 there' <<<"$OF"; then ok "P5.3 full legend says the skipped verb rows at most 500"; else no "P5.3 full legend promises a complete list"; fi
 # a warm cache must not lose the rows
 CC=$T/cc
 ( cd "$P" && "$BIN" "$P" --cache="$CC" --skipped >/dev/null 2>&1 )

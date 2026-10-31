@@ -390,7 +390,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // Its reading on --deps/--arch, the same sentence both full legends carry (graphlegend.h kGraphPartialAttrXml): not a
     // floor, because a missing edge can merge two cycles into one and moves a ratio either way.
     { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },
-    { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them cover resolved edges only, and a coupling number absent beside it is unknown, not zero" },
+    { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (--arch ca/ce, violations=) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero" },
     { "unmeasured_files",  "unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it" },
     { "masked_files",      "masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor)", true },
     // --cochange-groups root (verbs_report.h countAttrXmlOrEmpty): a countAttrXmlOrEmpty attribute takes its row here, test/compactlegendcheck.sh (S). onTag + onKey: only that root.
@@ -399,7 +399,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // tsconfig_unread= makes the root partial exactly as imports_unresolved= does (graph_partial= above is its reading).
     // #478 gap 3: <pruned_packages count=> (serialize.h buildPrunedPackagesBlock), a block rather than a root attribute, so the row is keyed
     // by its count= on that element only; the same sentence stands in the full legends (graphlegend.h kPrunedPackagesLegend).
-    { "count",             "pruned_packages count=N: real packages (they hold an __init__.py) the crawl denylist removed by name; not indexed, so edges to and from them are missing; p path= names one, the skipped verb lists all (why=pruned-package)", true, "pruned_packages" },
+    { "count",             "pruned_packages count=N: real packages (they hold an __init__.py) the crawl denylist removed by name; not indexed, so edges to and from them are missing; p path= names one, the skipped verb rows them as why=pruned-package, at most 500 (rows_capped=1 there marks a cut; count= stays exact)", true, "pruned_packages" },
     { "imports_dts",       "imports_dts=N: N TS/JS imports resolved only to a .d.ts declaration, not source" },
     { "tsconfig_unread",   "tsconfig_unread=N: N configs not read (not in the tree, unparseable, above the root) could declare aliases; edges may be missing" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
