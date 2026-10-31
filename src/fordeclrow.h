@@ -124,61 +124,90 @@ inline bool forIsSpecifierWord( std::string_view w ) noexcept
     return std::ranges::contains( kSpec, w );
 }
 
+// A top-level `( .. )` group of a span: where it opens and one past where it closes (the span's end when it never does).
+struct ForParenGroup
+{
+    std::size_t open;
+    std::size_t end;
+};
+
+inline std::vector<ForParenGroup> forTopLevelGroups( std::string_view span )
+{
+    std::vector<ForParenGroup> out;
+    int                        depth = 0;
+    for( std::size_t i = 0; i < span.size(); ++i )
+    {
+        if( span[i] == '(' )
+        {
+            if( depth++ == 0 )
+            {
+                out.push_back( { i, span.size() } );
+            }
+        }
+        else if( span[i] == ')' && depth > 0 && --depth == 0 )
+        {
+            out.back().end = i + 1;
+        }
+    }
+    return out;
+}
+
+// The symbol spelling that ends right before `open` (blanks skipped), without a leading scope colon or dot; `start` is where its run
+// began. Empty when a `)`, an operator or nothing precedes the group: a result list or a declarator, never a callee.
+inline std::string_view forNameBeforeGroup( std::string_view span, std::size_t open, std::size_t& start )
+{
+    std::string_view head = span.substr( 0, open );
+    while( !head.empty() && std::isspace( static_cast<unsigned char>( head.back() ) ) != 0 )
+    {
+        head.remove_suffix( 1 );
+    }
+    start = head.size();
+    while( start > 0 && forIsSymbolChar( head[ start - 1 ] ) )
+    {
+        --start;
+    }
+    std::string_view name = head.substr( start );
+    while( !name.empty() && ( name.front() == ':' || name.front() == '.' ) )
+    {
+        name.remove_prefix( 1 );
+    }
+    return name;
+}
+
+// What may sit between one call group and the next for the second still to be the declarator: blanks, `*`, `&` and angle brackets (a macro
+// wrapper then the name, a template return type). An operator or a comma starts another expression.
+inline bool forIsDeclaratorGap( std::string_view between ) noexcept
+{
+    return std::ranges::all_of( between, [ ]( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '*' || c == '&' || c == '<' || c == '>'; } );
+}
+
 // The callee a code span names: the identifier directly before a top-level `(`, so a macro wrapper, a return type or a trailing
 // specifier is not it (`PyAPI_FUNC(int) PyObject_Print(PyObject *, FILE *, int)` -> PyObject_Print, `int server_start(struct tmuxproc *)` ->
 // server_start, `f(int a) noexcept(false)` -> f, `f(a int) (int, error)` -> f, `run_me(1) + c(2)` -> run_me). Of several groups after
-// identifiers the LAST wins only when nothing but blanks, `*`, `&` and angle brackets separates it from the one before (a macro
-// wrapper then the name; an operator or a comma starts another expression); a group after `)` is a Go result list or a declarator.
+// identifiers the LAST wins only across a declarator gap (forIsDeclaratorGap); a group after `)` is a Go result list or a declarator.
 // A span with no top-level `(` is returned whole.
-inline std::string_view forSpanCallee( std::string_view span ) noexcept
+inline std::string_view forSpanCallee( std::string_view span )
 {
     span = trimWs( span );
-    std::string_view pick;
-    bool             any = false;
-    std::size_t      prevClose = 0;   // one past the last group's `)`
-    int              depth = 0;
-    for( std::size_t i = 0; i < span.size(); ++i )
+    const std::vector<ForParenGroup> groups = forTopLevelGroups( span );
+    if( groups.empty() )
     {
-        if( span[i] == ')' && depth > 0 )
-        {
-            --depth;
-            prevClose = depth == 0 ? i + 1 : prevClose;
-        }
-        if( span[i] != '(' )
-        {
-            continue;
-        }
-        const bool top = depth++ == 0;
-        if( !top )
-        {
-            continue;
-        }
-        any = true;
-        std::string_view head = span.substr( 0, i );
-        const std::size_t trimmed = trimWs( head ).size();   // trimWs trims both ends; the head starts at 0 after the span trim
-        head = head.substr( 0, trimmed );
-        std::size_t b = head.size();
-        while( b > 0 && forIsSymbolChar( head[ b - 1 ] ) )
-        {
-            --b;
-        }
-        std::string_view name = head.substr( b );
-        while( !name.empty() && ( name.front() == ':' || name.front() == '.' ) )
-        {
-            name.remove_prefix( 1 );
-        }
-        if( name.empty() || forIsSpecifierWord( name ) )
-        {
-            continue;   // directly after `)`, an operator or nothing: a result list or a specifier, never the callee
-        }
-        const std::string_view between = span.substr( prevClose, b > prevClose ? b - prevClose : 0 );
-        const bool chained = !pick.empty() && std::ranges::all_of( between, [ ]( char c ) { return c == ' ' || c == '\t' || c == '\n' || c == '*' || c == '&' || c == '<' || c == '>'; } );
-        if( pick.empty() || chained )
+        return span;
+    }
+    std::string_view pick;
+    std::size_t      prevEnd = 0;
+    for( const ForParenGroup& g : groups )
+    {
+        std::size_t            start = 0;
+        const std::string_view name  = forNameBeforeGroup( span, g.open, start );
+        const std::size_t      from  = std::min( prevEnd, start );
+        if( !name.empty() && !forIsSpecifierWord( name ) && ( pick.empty() || forIsDeclaratorGap( span.substr( from, start - from ) ) ) )
         {
             pick = name;
         }
+        prevEnd = g.end;
     }
-    return any ? pick : span;
+    return pick;
 }
 
 // `Foo::bar(int)` -> Foo::bar, then bar: the qualified spelling first, then its last segment.
