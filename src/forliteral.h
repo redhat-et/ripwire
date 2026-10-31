@@ -47,21 +47,24 @@
 //     site outside any function (a registration), whatever the reader count. A row cut at 200 bytes opens near the key.
 //   * shape="message": 3+ words with a whole word error/notification/message: a backticked or single-quoted span (cue outside it),
 //     else the task minus a leading or trailing cue, else the words before a cue inside the sentence. Tries: the whole text, then
-//     fragments of the longest placeholder-free word run, down to 3 words (frag="1": s= is only part of the task's words); a try
-//     with fewer than kForLiteralMessageContent words that are not function words is dropped, the rest are ordered by that count.
-//     Hits stand on word edges (a hit inside a longer word is counted in longer=). Only a string site anchors a message; a code
-//     row is never printed.
+//     fragments of the longest placeholder-free word run, down to 3 words (frag="1": s= is only part of the task's words); a
+//     FRAGMENT with fewer than kForLiteralMessageContent words that are not function words is dropped, the whole text needs one and
+//     must end in it (`must not be empty` passes, `the value of the` does not); the rest are ordered by that count.
+//     Hits stand on word edges (a hit inside a longer word is counted in longer=; the letter of an escape, `\n`, or of a printf
+//     verb, `%s`, right before the hit is no word byte). A code row (k=code) is never printed; a k=? row stays.
 // Literals are tried in order (forLiteralCandidates: quoted span, CONST words, dotted keys, message), kForLiteralCandidates scans, until
-// one has a source site; try="N" says it was the task's Nth.
+// one has a source site; try="N" says it was the task's Nth. Literals past the cap are not scanned: when none of the scanned ones
+// anchors, <lit_capped scanned= skipped= next=> says so (a task of five keys no longer reads as five misses).
 
 #include "filter.h"          // pathTierOf — source / test / doc, the reader's tier
 #include "layout.h"          // layout::lineOf — a byte offset's line
 #include "hopbody.h"         // renderBodyElement — the --expand body element, no callee rows; pythonDocstringQuote
 #include "langfacts.h"       // langFacts(...).leadingDocstring — which languages have a docstring convention
-#include "lintrules.h"       // langOfPath
+#include "lintrules.h"       // kLintExtRows — the extensions of every indexed language
 #include "model.h"
 #include "nextverb.h"        // nextFlag / nextAttrXml
 #include "receiverevidence.h"   // ReceiverEvidence::callableKind
+#include "resolve.h"       // tsimport::isAssetSpecifier — an asset extension is no key segment
 #include "redact.h"          // redactInPlace — raw source text is redacted before it is emitted
 #include "sarif.h"           // rootPrefixOf / rootRelativeUri
 #include "search.h"          // grepCollect / grepEnrich / isBareWordCodePath
@@ -99,9 +102,11 @@ inline constexpr std::size_t kForLiteralMinBareCaps   = 10;
 inline constexpr std::size_t kForLiteralMinKeyBytes   = 6;      // a dotted key shorter than this is not a key (`a.b.c`)
 inline constexpr std::size_t kForLiteralMessageWords  = 3;      // a message or a fragment of one has at least this many words
 inline constexpr std::size_t kForLiteralMessageTries  = 8;      // whole-repo scans a message may cost (a runaway guard on a task's word count)
-inline constexpr std::size_t kForLiteralMessageContent = 2;      // a message or fragment holds at least this many words that are not function words
+inline constexpr std::size_t kForLiteralMessageContent = 2;      // a message FRAGMENT holds at least this many words that are not function words
+inline constexpr std::size_t kForLiteralWholeContent   = 1;      // the WHOLE text holds at least this many, and ends in one (`must not be empty`)
 inline constexpr std::size_t kForLiteralCandidates    = 4;      // literals (quoted span, CONST words, dotted keys) a task may have scanned, in order, until one has a source site
 inline constexpr std::size_t kForLiteralRegistrationRows = 2;   // shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count
+inline constexpr std::size_t kForLiteralFileMaxSegments = 4;    // a dotted word of this many segments or more is a key even when its last one is an extension (`envoy.filters.http.lua`)
 inline constexpr std::size_t kForLiteralKeyLead       = 40;     // a cut row starts this many bytes before the key
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
@@ -128,11 +133,17 @@ static_assert( kForLiteralLegend.find( "--", 4 ) == kForLiteralLegend.size() - 3
 // reading, the base legend above still defines every other attribute
 inline constexpr std::string_view kForLiteralKeyLegend =
     "<!-- ripwire for lit: shape=dotted a dotted key in the task (3 or more segments, or 2 with a setting, option, key, command or flag "
-    "word): rows hold the key (a dotted prefix may stand before it), quoted sites first, two row slots kept for a quoted site outside any "
-    "function; longer= source sites inside a longer name, child key or word, counted, never rows. shape=message the task's words as a "
+    "word): rows hold the key (a dotted prefix may stand before it), quoted sites first, up to two row slots kept for a quoted string "
+    "site outside any function (a registration or table the parse classified as a string; a C #define is not one); longer= source "
+    "sites inside a longer name, child key or word, counted, never rows. shape=message the task's words as a "
     "message (3 or more, with an error, notification or message word): never a code row; frag=1: the whole text has no site, s= is "
-    "the part that does. try=N: the task's Nth literal anchored, the earlier ones have no source site. -->";
+    "the part that does. try=N: the task's Nth literal anchored; the ones before it had no source site or were not scanned. -->";
 static_assert( kForLiteralKeyLegend.find( "--", 4 ) == kForLiteralKeyLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+// the walk's cap, printed alone (no <lit>) when the task names more literals than kForLiteralCandidates scans and none of those anchored
+inline constexpr std::string_view kForLiteralCapLegend =
+    "<!-- ripwire for lit: the task names more literals than one answer scans; scanned= whole-repo scans made, none found a source site; "
+    "skipped= literals not scanned; next= scans the first of them. -->";
+static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
 inline bool forLiteralOn()
 {
@@ -238,12 +249,12 @@ inline std::string_view stripWordPunct( std::string_view w ) noexcept
 
 inline constexpr std::array<std::string_view, 10> kForLiteralSettingCues{ "setting", "settings", "option", "options", "key", "keys", "command", "commands", "flag", "flags" };
 inline constexpr std::array<std::string_view, 6>  kForLiteralMessageCues{ "error", "errors", "notification", "notifications", "message", "messages" };
+// the data, doc, build and host words no language table or asset table holds (isFileOrHostSuffix reads those: kLintExtRows, isAssetSpecifier).
+// A REFUSAL list (SAFETY (d)1): a word not here and in neither table is a segment of a key.
 inline constexpr auto kForLiteralFileSuffixes = std::to_array<std::string_view>(
-    { "json", "jsonc", "json5", "toml", "yaml", "yml", "md", "mdx", "txt", "rst", "html", "htm", "css", "scss", "xml", "ini", "cfg", "conf",
-      "properties", "env", "lock", "log", "csv", "tsv", "sql", "proto", "gradle", "cmake", "bazel", "bzl", "hcl", "tf", "tfvars", "tfstate",
-      "plist", "svg", "png", "jpg", "gif", "pdf", "zip", "tar", "gz", "com", "org", "net", "io", "dev", "ai",
-      "py", "pyi", "go", "rs", "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "sh", "bash", "zsh", "java", "rb", "cs", "php", "lua",
-      "ex", "exs", "dart", "kt", "clj", "cljs", "swift", "cpp", "cc", "cxx", "h", "hpp", "hh", "hxx", "c", "m", "mm" } );
+    { "jsonc", "json5", "mdx", "rst", "htm", "ini", "cfg", "conf", "properties", "env", "lock", "log", "tsv", "sql", "proto", "gradle", "cmake",
+      "bazel", "bzl", "hcl", "tf", "tfvars", "tfstate", "plist", "pdf", "zip", "tar", "gz", "jar", "so", "vue", "scala",
+      "com", "org", "net", "io", "dev", "ai", "co", "app" } );
 // function words: a message or fragment of nothing but these (`the value of the`) says nothing about the code
 inline constexpr auto kForLiteralStopWords = std::to_array<std::string_view>(
     { "the", "a", "an", "of", "is", "are", "was", "were", "be", "been", "to", "in", "on", "at", "for", "and", "or", "not", "no", "by", "with",
@@ -268,11 +279,22 @@ inline bool isMessageCue( std::string_view w )
     return wordIsOneOf( w, kForLiteralMessageCues );
 }
 
-// a key's last segment that says the dotted word is a file or a host: the extension table above (source, data, doc and build files and
-// the common host suffixes). A file the index holds is refused by its name in renderForLiteralOfTask, whatever its extension.
+// a key's last segment that says the dotted word is a file or a host: an extension of kLintExtRows (every indexed language), of
+// isAssetSpecifier's assets, or a word of the table above (data, doc and build files, the common host suffixes). A file the index holds is
+// refused by its name in renderForLiteralOfTask, whatever its extension. dottedKeysOf applies it below kForLiteralFileMaxSegments segments only.
 inline bool isFileOrHostSuffix( std::string_view lastSegment )
 {
-    return wordIsOneOf( lastSegment, kForLiteralFileSuffixes );
+    if( wordIsOneOf( lastSegment, kForLiteralFileSuffixes ) )
+    {
+        return true;
+    }
+    std::string dotted( "." );   // `.rake`, `.astro`: an extension of lintrules.h kLintExtRows (the crawl's own table, 10 rows the first table missed)
+    for( const char c : lastSegment )
+    {
+        dotted += static_cast<char>( std::tolower( static_cast<unsigned char>( c ) ) );
+    }
+    return std::any_of( std::begin( kLintExtRows ), std::end( kLintExtRows ), [ & ]( const LintExtRow& r ) { return r.ext == dotted; } )
+           || tsimport::isAssetSpecifier( "x" + dotted );
 }
 
 // `.env.local`, `".terraform.lock.hcl"`: a word that opens with a dot (behind quotes or brackets) is a dotfile, never a key
@@ -317,7 +339,8 @@ inline std::vector<std::string> dottedKeysOf( const std::vector<std::string_view
     {
         const std::string_view w = stripWordPunct( words[i] );
         const std::size_t      n = keySegments( w );
-        if( n < 2 || w.size() < kForLiteralMinKeyBytes || opensWithDot( words[i] ) || isFileOrHostSuffix( w.substr( w.rfind( '.' ) + 1 ) )
+        if( n < 2 || w.size() < kForLiteralMinKeyBytes || opensWithDot( words[i] )
+            || ( n < kForLiteralFileMaxSegments && isFileOrHostSuffix( w.substr( w.rfind( '.' ) + 1 ) ) )
             || w.starts_with( "self." ) || w.starts_with( "this." ) )
         {
             continue;
@@ -447,7 +470,8 @@ inline std::size_t contentWords( std::string_view text )
 // The tries of a message, in order, at most kForLiteralMessageTries: the whole text, then the longest word run free of placeholders and
 // dotted or path words (`asyncio.run`, `{}`, `%s`), that run and its end-anchored fragments, down to 3 words. A source message is
 // usually split by a placeholder the task does not spell, so the fragment may be anchored at either end. A try with fewer than
-// kForLiteralMessageContent words that are not function words is dropped (`the transaction is`), and the rest are ordered by that count,
+// kForLiteralMessageContent words that are not function words is dropped (`the transaction is`; the whole text needs one and must end in
+// it), and the rest are ordered by that count,
 // the longest first among equals: a start-anchored stop-word fragment never wins over the fragment that holds the content.
 inline std::vector<std::string> forMessageTries( std::string_view message )
 {
@@ -488,11 +512,17 @@ inline std::vector<std::string> forMessageTries( std::string_view message )
         addTry( joined( bestAt + bestLen - n, n ) );
     }
     std::vector<std::string> out;
-    for( std::string& t : all )
+    for( std::size_t i = 0; i < all.size(); ++i )
     {
-        if( contentWords( t ) >= kForLiteralMessageContent )
+        // a fragment needs kForLiteralMessageContent content words; the whole text, the task's own words, needs kForLiteralWholeContent
+        // and must end in a content word (`must not be empty` yes, `the value of the` no)
+        const std::size_t content = contentWords( all[i] );
+        const std::vector<std::string_view> tw = lit_detail::taskWords( all[i] );
+        const bool        wholeOk = i == 0 && content >= kForLiteralWholeContent && !tw.empty()
+                                    && !lit_detail::wordIsOneOf( tw.back(), lit_detail::kForLiteralStopWords );
+        if( content >= kForLiteralMessageContent || wholeOk )
         {
-            out.push_back( std::move( t ) );
+            out.push_back( std::move( all[i] ) );
         }
     }
     std::stable_sort( out.begin(), out.end(), []( const std::string& a, const std::string& b ) { return contentWords( a ) > contentWords( b ); } );
@@ -583,6 +613,41 @@ struct KeyHit
     bool longer = false;
     bool quoted = false;
 };
+// the byte before `at` is the LETTER OF AN ESCAPE or of a printf conversion, not a letter of the text: `\n`, `\t`, `\0` (an odd run of
+// backslashes before it: `\\n` is a backslash and a real n) or `%s`, `%d`, `%5.2f`, `%ld` (an odd run of `%` before the flags, width and
+// length modifiers). The message or key begins right after it: `"\nFailed to get document"`.
+inline bool afterEscapeOrVerb( std::string_view text, std::size_t at ) noexcept
+{
+    if( at < 2 || at > text.size() )
+    {
+        return false;
+    }
+    std::size_t slashes = 0;
+    for( std::size_t i = at - 1; i > 0 && text[i - 1] == '\\'; --i )
+    {
+        ++slashes;
+    }
+    if( slashes % 2 == 1 )
+    {
+        return true;
+    }
+    constexpr std::string_view kVerbs = "diouxXeEfFgGaAcspnvTtqb", kMods = "0123456789.+-# *lhzjtLq";
+    if( kVerbs.find( text[at - 1] ) == std::string_view::npos )
+    {
+        return false;
+    }
+    std::size_t i = at - 1;
+    for( std::size_t steps = 0; i > 0 && steps < 8 && kMods.find( text[i - 1] ) != std::string_view::npos; --i, ++steps )
+    {
+    }
+    std::size_t percents = 0;
+    for( ; i > 0 && text[i - 1] == '%'; --i )
+    {
+        ++percents;
+    }
+    return percents % 2 == 1;
+}
+
 inline KeyHit keyHitAt( std::string_view text, std::size_t at, std::size_t n ) noexcept
 {
     const auto ident = []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_' || c == '-'; };
@@ -590,11 +655,16 @@ inline KeyHit keyHitAt( std::string_view text, std::size_t at, std::size_t n ) n
     const char before = at > 0 && at <= text.size() ? text[at - 1] : ' ';   // a file that shrank since the scan: unknown, not out of range
     const char after  = at + n < text.size() ? text[at + n] : ' ';
     const char after2 = at + n + 1 < text.size() ? text[at + n + 1] : ' ';
-    return KeyHit{ ident( before ) || ident( after ) || ( after == '.' && ident( after2 ) ), quote( before ) && quote( after ) };
+    // an identifier byte before the key joins it to a longer name, except the letter of an escape (`"\nsvc.x.y"`) and a leading `--` (a
+    // flag spelled with the key): a `-` joins only behind an identifier byte (`a-svc.x.y`)
+    const bool joinsBefore = ident( before ) && !afterEscapeOrVerb( text, at )
+                             && !( before == '-' && !( at >= 2 && ident( text[at - 2] ) && text[at - 2] != '-' ) );
+    return KeyHit{ joinsBefore || ident( after ) || ( after == '.' && ident( after2 ) ), quote( before ) && quote( after ) };
 }
 
 // shape=message: the hit stands on word edges (`this field is` inside `this field isn't` does not). An edge byte that is not a letter,
-// digit or `_` (a message that ends in a punctuation mark) needs no check.
+// digit or `_` (a message that ends in a punctuation mark) needs no check; the letter of an escape or a printf verb before the hit is
+// no word byte (afterEscapeOrVerb).
 inline bool wordBounded( std::string_view text, std::size_t at, std::size_t n ) noexcept
 {
     const auto word = []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_'; };
@@ -602,7 +672,8 @@ inline bool wordBounded( std::string_view text, std::size_t at, std::size_t n ) 
     {
         return true;   // a file that changed since the scan: unknown, kept
     }
-    return !( word( text[at] ) && at > 0 && word( text[at - 1] ) ) && !( word( text[at + n - 1] ) && at + n < text.size() && word( text[at + n] ) );
+    return !( word( text[at] ) && at > 0 && word( text[at - 1] ) && !afterEscapeOrVerb( text, at ) )
+           && !( word( text[at + n - 1] ) && at + n < text.size() && word( text[at + n] ) );
 }
 
 // a row's line cut to `cap` bytes; when the literal sits past the cap the row opens `kForLiteralKeyLead` bytes before it (an ellipsis
@@ -1286,12 +1357,19 @@ inline ForLiteralRender renderMessageTries( const IngestResult& ing, const ForLi
 inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
                                                 RedactCounts* redact, bool useMemo, bool compactLegend )
 {
-    std::size_t scans = 0;
+    std::size_t scans = 0, skipped = 0;
+    std::string firstSkipped;
     for( const ForLiteral& lit : forLiteralCandidates( task ) )
     {
         const bool message = lit.shape == "message";
-        if( !message && ( scans >= kForLiteralCandidates || ( lit.shape == "dotted" && namesIndexedFile( ing, lit.text ) ) ) )
+        if( !message && lit.shape == "dotted" && namesIndexedFile( ing, lit.text ) )
         {
+            continue;
+        }
+        if( !message && scans >= kForLiteralCandidates )
+        {
+            skipped += 1;
+            firstSkipped = firstSkipped.empty() ? lit.text : firstSkipped;
             continue;
         }
         scans += message ? 0 : 1;
@@ -1301,6 +1379,14 @@ inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::st
         {
             return r;
         }
+    }
+    if( skipped > 0 )
+    {
+        // the cap was hit and nothing scanned anchored: say so (no <lit>: no site was found, so the block's attributes would claim one)
+        ForLiteralRender capped;
+        capped.xml = std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scans ) + "\" skipped=\"" + std::to_string( skipped )
+                     + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>";
+        return capped;
     }
     return {};
 }

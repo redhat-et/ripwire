@@ -397,8 +397,77 @@ Q4b="$( qrun '--for=the user settings file error' | lit )"
 if has "$Q4b" 's="user settings file"' && has "$Q4b" 'in="ub"' && ! has "$Q4b" 'in="ua"'; then ok "Q4b [P] tries are ordered by content words: 'user settings file' (3) before 'the user settings' (2)"
 else no "Q4b try order by content: ${Q4b:0:400}"; fi
 Q17="$( qrun '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.mode' )"
-if ! has "$Q17" '<lit ' && [ "$Q17" = "$( qoff '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.mode' )" ]; then ok "Q17 [G] the walk is capped (4 literals scanned): a fifth key is not tried"
-else no "Q17 the candidate walk is not capped: $( lit <<<"$Q17" | cut -c1-200 )"; fi
+if ! has "$Q17" '<lit ' && has "$Q17" '<lit_capped scanned="4" skipped="1" next="--grep=svc.dev.mode"/>' && has "$Q17" 'not scanned'; then
+    ok "Q17 [P] the walk is capped (4 literals scanned): a fifth key is not tried, and the answer says so (lit_capped scanned=4 skipped=1)"
+else no "Q17 the candidate walk is not capped or not disclosed: $( grep -o '<lit_capped[^>]*>' <<<"$Q17" ) $( lit <<<"$Q17" | cut -c1-200 )"; fi
+Q17b="$( qrun '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.mode' | python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit:.*?-->","",s,flags=re.S);print(re.sub(r"<lit_capped[^>]*/>","",s),end="")' )"
+if [ "$Q17b" = "$( qoff '--for=no.such.one no.such.two no.such.three no.such.four svc.dev.mode' )" ]; then ok "Q17b [G] prefix identity: minus the disclosure the answer equals RIPWIRE_NO_LITERAL_ANCHOR=1"; else no "Q17b the ordinary answer moved"; fi
+Q17c="$( qrun '--for=no.such.one no.such.two no.such.three svc.dev.mode' )"
+if ! has "$Q17c" 'lit_capped'; then ok "Q17c [G] a fourth key within the cap, nothing skipped: no disclosure"; else no "Q17c disclosure without a cap"; fi
+# ── R (lane LITERAL-ANCHOR fix round 2; [P] arms are RED on c6aa775f): F1 escape/printf edges, F2 content floor, F4 file table, F5 legend, F6 cap ──
+RF="$TMP/rfix"; mkdir -p "$RF/app"
+python3 -I -c 'import sys
+d=sys.argv[1]+"/app/"
+w=lambda n,t: open(d+n,"w").write(t)
+w("esc1.c","void a(void) {\n  puts(\"\\nDatabase connection refused\\n\");\n}\n")
+w("esc2.go","package app\n\nfunc b() string {\n\treturn \"\\tcluster quorum lost\"\n}\n")
+w("esc3.c","void c(char *s) {\n  printf(\"%sdisk quota exceeded\", s);\n}\n")
+w("esc4.ts","export function wk() {\n  return \x60\\nworker pool drained\x60;\n}\n")
+w("esc5.c","void e(void) {\n  puts(\"\\rbuffer overflow detected\");\n  puts(\"\\0nul byte seen\");\n  puts(\"\\aalarm bell stuck\");\n}\n")
+w("esc6.c","void f(int n, double x, long j) {\n  printf(\"%dretry budget spent\", n);\n  printf(\"%5.2fmeter reading stale\", x);\n  printf(\"%ldjobs requeued twice\", j);\n}\n")
+w("twin1.c","void g(void) {\n  puts(\"\\\\nfoo bar baz\");\n}\n")
+w("twin2.c","void h(char *s) {\n  printf(\"%s: xdisk quota gone\", s);\n}\n")
+w("kesc.ts","export function ke(c: any) {\n  c.log(\"\\nsvc.esc.limit exceeded\");\n  return cli(\"--svc.esc.flag\") + c.get(\"x-svc.esc.hy\");\n}\n")
+w("emp.py","def chk(v):\n    raise ValueError(\"must not be empty\")\n")
+w("dir.py","def chd(p):\n    raise OSError(\"not a directory\")\n")
+w("ce.go","package app\n\nfunc ce() error {\n\treturn errors.New(\"cannot be empty\")\n}\n")
+w("fw.py","def plan():\n    return \"the value of the plan, it is not the one\"\n")
+names=["tasks.rake","page.astro","kernel.cu","kernel.cuh","shader.metal","deps.cljc","build.bb","view.phtml","logo.webp","loader.wasm","styles.less","main.vue","main.scala","app.jar","libfoo.so","api.acme.co","api.acme.app","svc.pkg.lua"]
+w("names.py","def names():\n    return [" + ", ".join("\""+n+"\"" for n in names)+"]\n")
+w("reg.ts","export function rg(r: any) {\n  r.register(\x27envoy.filters.http.lua\x27, 1);\n}\n")
+w("other.ts","export function ot(c: any) {\n  return c.get(\x27svc.rf.key\x27);\n}\n")' "$RF"
+rrun(){ ( cd "$RF" || exit 1; "$BIN" "$RF" --no-cache "$@" </dev/null 2>/dev/null ); }
+roff(){ ( cd "$RF" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$RF" --no-cache "$@" </dev/null 2>/dev/null ); }
+# F1: a word byte that is the letter of an escape (\n \t \r \0 \a) or of a printf verb (%s %d %5.2f %ld) right before the message is an edge
+for m in 'Database connection refused' 'cluster quorum lost' 'disk quota exceeded' 'worker pool drained' 'buffer overflow detected' 'nul byte seen' 'alarm bell stuck' \
+         'retry budget spent' 'meter reading stale' 'jobs requeued twice'; do
+    R="$( rrun "--for=$m error" | lit )"
+    if has "$R" "s=\"$m\" shape=\"message\"" && ! has "$R" 'frag=' && ! has "$R" 'longer=' && has "$R" 'k="string"'; then ok "R1 [P] escape/printf letter before the message is an edge, the whole text prints: $m"
+    else no "R1 escape-led message lost: $m: ${R:0:300}"; fi
+done
+for near in 'foo bar baz error' 'disk quota gone error'; do
+    N="$( rrun "--for=$near" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( roff "--for=$near" )" ]; then ok "R1b [G] a real letter before the hit (even backslash run; a word) stays inside a longer word: $near"
+    else no "R1b fired: $near: $( lit <<<"$N" | cut -c1-200 )"; fi
+done
+for k in svc.esc.limit svc.esc.flag; do
+    R="$( rrun "--for=$k setting" | lit )"
+    if has "$R" "s=\"$k\" shape=\"dotted\"" && ! has "$R" 'longer=' && has "$R" 'p="app/kesc.ts"'; then ok "R1c [P] a key after an escape letter or a double hyphen is an edge: $k"; else no "R1c key after an escape/dashes lost: $k: ${R:0:300}"; fi
+done
+R="$( rrun '--for=svc.esc.hy setting' )"
+if ! has "$R" '<lit ' && [ "$R" = "$( roff '--for=svc.esc.hy setting' )" ]; then ok "R1d [G] x-svc.esc.hy (a hyphenated longer name) stays inside a longer name"; else no "R1d hyphenated name fired"; fi
+# F2: the floor drops a fragment, not the whole text; a whole text with one content word passes when it ends in it
+for m in 'must not be empty' 'not a directory' 'cannot be empty'; do
+    R="$( rrun "--for=$m error" | lit )"
+    if has "$R" "s=\"$m\" shape=\"message\"" && ! has "$R" 'frag='; then ok "R2 [P] a whole one-content-word message ending in its content word prints: $m"; else no "R2 whole message dropped by the floor: $m: ${R:0:300}"; fi
+done
+for near in 'the value of the error' 'it is not the error'; do
+    N="$( rrun "--for=$near" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( roff "--for=$near" )" ]; then ok "R2b [G] a whole text ending in a function word stays out: $near"; else no "R2b fired: $near: $( lit <<<"$N" | cut -c1-200 )"; fi
+done
+# F4: the file/host refusal reads kLintExtRows (every indexed language's extension) and the asset table; a 4+ segment key is not a file
+for f in tasks.rake page.astro kernel.cu kernel.cuh shader.metal deps.cljc build.bb view.phtml logo.webp loader.wasm styles.less main.vue main.scala app.jar libfoo.so api.acme.co api.acme.app svc.pkg.lua; do
+    N="$( rrun "--for=$f setting" )"
+    if ! has "$N" '<lit ' && [ "$N" = "$( roff "--for=$f setting" )" ]; then ok "R3 [P] file or host, no <lit and byte-identical: $f"; else no "R3 file or host fired: $f: $( lit <<<"$N" | cut -c1-200 )"; fi
+done
+R="$( rrun '--for=envoy.filters.http.lua setting' | lit )"
+if has "$R" 's="envoy.filters.http.lua" shape="dotted"' && has "$R" 'p="app/reg.ts"'; then ok "R3b [P] a 4-segment key ending in a language extension (envoy.filters.http.lua) is a key"; else no "R3b envoy-style key refused: ${R:0:300}"; fi
+R="$( rrun '--for=svc.rf.key tasks.rake setting' | lit )"
+if has "$R" 's="svc.rf.key"' && ! has "$R" 'try='; then ok "R3c [P] try= counts only literals the task names as keys: tasks.rake is no literal, so svc.rf.key is the first"; else no "R3c try= after a refused file: ${R:0:300}"; fi
+# F5: the legend clauses say what is printed
+R="$( rrun '--for=svc.rf.key setting' )"
+if ! has "$R" 'the earlier ones have no source site' && ! has "$R" 'two row slots kept for a quoted site outside any function' && has "$R" 'were not scanned' && has "$R" 'C #define'; then
+    ok "R4 [P] legend: try= says the earlier literals had no site or were not scanned; the slot clause names its limits"; else no "R4 legend clauses still overstate: $( grep -o 'try=N[^.]*' <<<"$R" | head -1 )"; fi
 # ── X1-X3 ──
 if [ "$A" = "$( run --for=APPTOOL_RENDER_MODE )" ]; then ok "X1 deterministic"; else no "X1 two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then
