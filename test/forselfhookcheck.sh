@@ -16,6 +16,7 @@
 #   K   a fourth site: shown=3 capped=1 next=--callers=. K3: a non-test site comes before a nearer test-path one.
 #   U   an auto-body candidate the allowance cut carries no row.
 #   M   more served methods than the element carries: capped=1 on the wrapper.
+#   Y   closing patch: a write through self is no site (twin: the read); nonlocal self and f = staticmethod(f) are counted, not named; the held marker rides a subtoken route.
 #   E   the clause rides both legends and defines every attribute; RIPWIRE_NO_SELF_HOOK=1 is the answer minus the element and clause; est_tokens prices it.
 #   L   JavaScript `this.x()` is not the family's row: silent. --json and --token-budget carry no element.
 #   W   the name-exact auto body carries the element (W0); the MCP `for` twin carries the element and its clause on a name-exact route.
@@ -908,6 +909,107 @@ class Prod(TestHelperBase):
         return 1
 E
 want X7 "$( run x7 "--for=what calls Prod.tested" | hook )" '<s n="TestHelperBase.go" p="tests/helpers.py:3" test="1"/>'
+
+# ── Y (closing patch) ──────────────────────────────────────────────────────────────────────────────────────────
+# C3: a write through self (a tuple target, a for target, a with target, del) is no site; the plain read beside them is (twin: form=ref).
+mk y1/base.py <<'E'
+class Root:
+    def tup(self):
+        self.hkk, y = 1, 2
+
+    def loop(self, xs):
+        for self.hkk in xs:
+            pass
+
+    def wth(self, c):
+        with c as self.hkk:
+            pass
+
+    def rm(self):
+        del self.hkk
+
+    def read(self):
+        return self.hkk
+
+    def hkk(self):
+        return 0
+E
+mk y1/d.py <<'E'
+from base import Root
+
+class D(Root):
+    def hkk(self):
+        return 1
+E
+H="$( run y1 "--for=what calls D.hkk" | hook )"
+want Y1 "$H" 'sites="1"' '<s n="Root.read" p="base.py:17" form="ref"/>'
+lack Y1n "$H" 'Root.tup' 'Root.loop' 'Root.wth' 'Root.rm' 'skipped'
+# B2/nits: a nested def that declares `nonlocal self` (Y2) and `f = staticmethod(f)` after the def (Y2w) are not provably the instance (counted in
+# skipped=, never named); `good` beside each is the twin that stays a site
+for c in nl wrapped; do
+mkdir -p "$F/y2$c"
+cat >"$F/y2$c/d.py" <<'E'
+from base import Base
+
+class D(Base):
+    def hkk(self):
+        return 1
+
+class E(Base):
+    def hkk(self):
+        return 2
+E
+done
+mk y2nl/base.py <<'E'
+class Base:
+    def nl(self):
+        def inner():
+            nonlocal self
+            self = object()
+        inner()
+        return self.hkk()
+
+    def good(self):
+        return self.hkk()
+E
+mk y2wrapped/base.py <<'E'
+class Base:
+    def wrapped(self):
+        return self.hkk()
+    wrapped = staticmethod(wrapped)
+
+    def good(self):
+        return self.hkk()
+E
+H="$( run y2nl "--for=what calls D.hkk" | hook )"
+want Y2 "$H" 'sites="1"' 'n="Base.good"' 'skipped="1"'
+lack Y2n "$H" 'Base.nl'
+H="$( run y2wrapped "--for=what calls D.hkk" | hook )"
+want Y2w "$H" 'sites="1"' 'n="Base.good"' 'skipped="1"'
+lack Y2wn "$H" 'Base.wrapped'
+# F4: under a token budget the held marker also rides a route that is not name-exact (subtoken+body); the default regime still prints the element
+mk y3/base.py <<'E'
+class Root:
+    def hkk(self):
+        return 0
+
+    def go(self):
+        return self.hkk()
+E
+mk y3/d.py <<'E'
+from base import Root
+
+class D(Root):
+    def hkk(self):
+        return 0
+E
+run y3 "--for=what calls D.hkk" --token-budget=40000 >"$TMP/y3b"
+H="$( hook <"$TMP/y3b" )"
+if grep -q 'route="subtoken' "$TMP/y3b"; then ok "(Y3r) the fixture takes a subtoken route"; else no "(Y3r) the fixture no longer takes a subtoken route"; fi
+want Y3 "$H" '<selfhooks held="budget" total="1"/>'
+lack Y3n "$H" '<selfhook n=' '<s n='
+run y3 "--for=what calls D.hkk" >"$TMP/y3"
+want Y3t "$( hook <"$TMP/y3" )" '<selfhook n="D.hkk" p="d.py:4"' '<s n="Root.go" p="base.py:6"/>'
 
 # ── E ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 run a "--for=what calls One.step" --legend=full >"$TMP/full"

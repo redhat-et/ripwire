@@ -291,6 +291,110 @@ inline bool readsName( TSNode id )
     return std::ranges::find( kReads, t ) != std::end( kReads );
 }
 
+// Is the attribute whose NAME identifier starts at byte `at` a binding target (`self.x, y = ..`, `for self.x in ..`, `with c as self.x`, `del self.x`),
+// not a read? The index records only a plain assignment's left side as a write; these four are read here from the parse. A write is no site.
+inline bool bindsAttribute( const ParsedFile& f, std::uint32_t at )
+{
+    if( !f.usable() )
+    {
+        return false;
+    }
+    TSNode child = ts_node_descendant_for_byte_range( f.root(), at, at + 1 );
+    if( !isType( child, "identifier" ) || ts_node_start_byte( child ) != at )
+    {
+        return false;
+    }
+    child = ts_node_parent( child );
+    if( !isType( child, "attribute" ) )
+    {
+        return false;
+    }
+    static constexpr std::string_view kContainers[] = { "tuple", "list", "expression_list", "parenthesized_expression", "pattern_list", "tuple_pattern",
+                                                         "list_pattern", "list_splat", "list_splat_pattern", "parenthesized_pattern" };
+    TSNode parent = ts_node_parent( child );
+    while( !ts_node_is_null( parent ) && std::ranges::find( kContainers, std::string_view( ts_node_type( parent ) ) ) != std::end( kContainers ) )
+    {
+        child  = parent;
+        parent = ts_node_parent( child );
+    }
+    if( ts_node_is_null( parent ) )
+    {
+        return false;
+    }
+    const std::string_view t = ts_node_type( parent );
+    if( t == "delete_statement" || t == "as_pattern_target" )
+    {
+        return true;
+    }
+    return ( t == "assignment" || t == "for_statement" || t == "for_in_clause" ) && ts_node_eq( fieldChild( parent, NodeField::Left ), child );
+}
+
+// Does a `nonlocal <recv>` sit anywhere under `scope`? A nested def that declares it rebinds the enclosing method's name.
+inline bool declaresNonlocal( const ParsedFile& f, TSNode scope, std::string_view recv )
+{
+    std::vector<TSNode> todo{ scope };
+    while( !todo.empty() )
+    {
+        const TSNode n = todo.back();
+        todo.pop_back();
+        if( isType( n, "nonlocal_statement" ) )
+        {
+            for( std::uint32_t i = 0; i < ts_node_named_child_count( n ); ++i )
+            {
+                if( f.text( ts_node_named_child( n, i ) ) == recv )
+                {
+                    return true;
+                }
+            }
+            continue;
+        }
+        for( std::uint32_t i = 0; i < ts_node_child_count( n ); ++i )
+        {
+            todo.push_back( ts_node_child( n, i ) );
+        }
+    }
+    return false;
+}
+
+// Is `fn` re-bound in its class body as `fn = staticmethod(fn)` / `fn = classmethod(fn)`: a method that takes no instance receiver by assignment?
+inline bool wrappedAfterDef( const ParsedFile& f, TSNode fn, const FamilyRow& row )
+{
+    TSNode self = fn;
+    if( isType( ts_node_parent( self ), "decorated_definition" ) )
+    {
+        self = ts_node_parent( self );
+    }
+    const TSNode block = ts_node_parent( self );
+    if( !isType( block, "block" ) )
+    {
+        return false;
+    }
+    const std::string_view name = f.text( fieldChild( fn, NodeField::Name ) );
+    for( std::uint32_t i = 0; i < ts_node_named_child_count( block ); ++i )
+    {
+        TSNode st = ts_node_named_child( block, i );
+        if( isType( st, "expression_statement" ) && ts_node_named_child_count( st ) == 1 )
+        {
+            st = ts_node_named_child( st, 0 );
+        }
+        if( !isType( st, "assignment" ) )
+        {
+            continue;
+        }
+        const TSNode left  = fieldChild( st, NodeField::Left );
+        const TSNode right = fieldChild( st, NodeField::Right );
+        if( isType( left, "identifier" ) && f.text( left ) == name && isType( right, "call" ) )
+        {
+            const std::string_view callee = f.text( fieldChild( right, NodeField::Function ) );
+            if( callee.ends_with( row.staticMark ) || callee.ends_with( row.classMark ) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Is `recv` bound nowhere in `fn`'s own scope but as its first parameter? Every identifier spelled like it must be a read; a nested def or
 // class keeps its own scope (its uses are its own symbol's) but must not be named like it; a lambda's parameters are this scope's names.
 inline bool neverRebound( const ParsedFile& f, TSNode fn, std::string_view recv )
@@ -306,7 +410,7 @@ inline bool neverRebound( const ParsedFile& f, TSNode fn, std::string_view recv 
         }
         if( isType( n, "function_definition" ) || isType( n, "class_definition" ) )
         {
-            if( f.text( fieldChild( n, NodeField::Name ) ) == recv )
+            if( f.text( fieldChild( n, NodeField::Name ) ) == recv || declaresNonlocal( f, n, recv ) )
             {
                 return false;
             }
@@ -330,6 +434,10 @@ inline bool receiverProven( const ParsedFile& f, TSNode fn, const FamilyRow& row
     if( ts_node_is_null( fn ) )
     {
         return false;
+    }
+    if( wrappedAfterDef( f, fn, row ) )
+    {
+        return false;   // `f = staticmethod(f)`: what the receiver is, is no longer the def's to say
     }
     const bool isStatic = decoratedWith( f, fn, row.staticMark, false );
     const bool isClass  = decoratedWith( f, fn, row.classMark, false );
@@ -839,6 +947,14 @@ private:
         if( holder == nullptr )
         {
             return;
+        }
+        if( r.role == RefRole::Read )
+        {
+            const ParsedFile* file = m_source.parsed( r.fileId );
+            if( file != nullptr && bindsAttribute( *file, r.startByte ) )
+            {
+                return;   // a write through the receiver, not a use of the method
+            }
         }
         if( !receiverOf( r.fromSymbol, row, !throughSelf ) )
         {

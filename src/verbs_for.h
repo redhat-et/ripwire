@@ -4201,6 +4201,12 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         if( autoBundleMode && !cfg.json && rw::forSelfHookOn() && sigsPreRendered && !enrich.surfaceOff )   // under a token budget: the held marker only
         {
             std::vector<rw::NodeId> servedBodies = fold.bodies;
+            if( cfg.tokenBudget > 0 && plan.compact && rw::forBodyFoldOn() )
+            {
+                // a budgeted answer folds nothing, so the held count reads the rows the fold WOULD have served (an upper bound: the
+                // default regime may cut one): the marker discloses that the list exists, it carries no row
+                servedBodies = rw::forBodyFoldCandidates( ing, lensSurfaceIds, lensRank, std::size_t( std::max( forTopN, 0 ) ), slotOwner.id );
+            }
             if( slot.served )
             {
                 servedBodies.push_back( slotOwner.id );
