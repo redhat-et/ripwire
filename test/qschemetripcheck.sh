@@ -34,11 +34,38 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-10-31, train 43b (lanes registrar, string-import, self-hook, decl-row merged onto main 65210e86): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the
+#   composed tree (main's pin and the registrar / string-import branch pins conflicted). Watched text: kParserVer 271 -> 283 (rich 284; above the
+#   lane placeholders up to 281, rich 282), quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:
+#   no record changes shape and no watched quality.h function moved.
+# 2026-10-30, lane registrar fix round 4 (same base; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the fix-3 pin
+#   -> the pin above). Watched text: kParserVer 279 -> 281 (rich 282; 280 is 279's rich tag): a TS/JS provider-record literal is marked only
+#   when it is an element of an array (call argument / const / `providers` property) and holds only plain unique pairs; quality.h's
+#   kIngestParserVerMirror with it. kCacheVersion stays 46 and kQSnapCacheScheme stays 24: no record changes shape.
+# 2026-10-30, lane registrar fix round 3 (same base; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the fix-2 pin
+#   -> the pin above). Watched text: kParserVer 277 -> 279 (rich 280; 278 is 277's rich tag): a TS/JS provider-record Value row carries its
+#   object literal's start byte (qualifier "<scope><shadow>@<byte>") when the literal is a direct call argument or a `const` initialiser,
+#   and a Python registrar fact is refused unless the method's other parameters are provably beside the point; quality.h's
+#   kIngestParserVerMirror with it. kCacheVersion stays 46 and kQSnapCacheScheme stays 24: no record changes shape.
+# 2026-10-30, lane registrar fix round 2 (same base; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the fix-1 pin
+#   -> the pin above). Watched text: kParserVer 275 -> 277 (rich 278; 276 is 275's rich tag): a Python lambda parameter / comprehension
+#   target files a VarDecl `~name` (kPythonLocalScopePrefix, with the span it is local to), and a method whose body also uses another
+#   parameter written without a default records no registrar fact; quality.h's kIngestParserVerMirror with it. kCacheVersion stays 46
+#   and kQSnapCacheScheme stays 24: no record changes shape and no watched quality.h function moved.
+# 2026-10-30, lane registrar fix round 1 (base main 26e0fefc; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1 (the
+#   lane's 269 -> 273 bump had not re-pinned). Watched text: kParserVer 269 -> 275 (rich 276; 274 is 273's rich tag): Python files record
+#   registrar facts (a method parameter stored into a container a field of self holds; a parameter written with a default records none),
+#   quality.h's kIngestParserVerMirror with it. kCacheVersion stays 46 and kQSnapCacheScheme stays 24: no record changes shape and no
+#   watched quality.h function moved.
 # 2026-10-30, train 42b (lanes iface-peel, alias-import, mf1-lit, claude-edit-route merged onto main 3cb89d54): RE-DERIVED ONCE
 #   with UPDATE_GOLDEN=1 on the composed tree (main's pin and the iface-peel / alias-import branch pins conflicted). Watched text:
 #   kParserVer 269 -> 271 (rich 272; above the lane placeholders 259, 260, 261 and the live 263, 265, 267) and kCacheVersion 46 -> 48
 #   (alias-import's LocalBindKind ReExport appended; its placeholder 47), quality.h's two kIngest*Mirror constants with them.
 #   kQSnapCacheScheme stays 24: no watched quality.h function moved.
+# 2026-10-30, lane string-import fix round 1 (PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: kParserVer
+#   269 -> 275 (rich 276; c434dc34 had a 274 placeholder), quality.h's kIngestParserVerMirror with it: the dotted-string fact's scope char is now
+#   a non-identifier byte and an import sink's fact carries the flow tokens of its argument. kCacheVersion stays 46 and kQSnapCacheScheme
+#   stays 24: no record changes shape and no watched quality.h function moved.
 # 2026-10-29, train 41b (lane fn-slot-s2 merged onto main 52896f51): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the composed tree
 #   (main's pin 7273ed82… and the fn-slot-s2 branch pin b9174e46… conflicted). Watched text: kParserVer 259 -> 269 (rich 270; above
 #   the lane placeholders 257/259/260 and the live placeholders 259, 261, 263, 265, 267), quality.h's kIngestParserVerMirror with it.

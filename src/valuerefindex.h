@@ -812,6 +812,10 @@ public:
             m_params.take( i );   // IX1-V2: a registrar's parameter stored into a field slot
             return true;
         }
+        if( r.role == RefRole::Value && sc == kValueRefRegParamScope )
+        {
+            return true;   // REGISTRAR: a container-store fact, read by src/regindex.h only — never a value row here
+        }
         return false;
     }
     // fix1 F-1: how an argument row's bare callee resolves to its definitions (the registrars, ParamSlots) — before build().
