@@ -27,7 +27,7 @@
 #   S-D2 [P] loader= / tmpl= claim only "a call whose tail name is an import sink's"   S-D3 [P] the import check compares the WHOLE module (b.conf is not a/conf.py)
 #   S-D4 [P] with-as, except-as, lambda parameter and a same-file other-module import are no loader (twins [G]: free name, from-import, lazy local import)
 #   S-D5 [P] a ternary condition decides, it does not flow   S-D6 [P] the extension list: py/log/conf/sh and upper case
-#   X1 [G] determinism   X2 [G] xmllint well-formed when present   X3 [G] no "--" inside the legend comment
+#   X1 [G] determinism   X2 [G] xmllint well-formed when present   X3 [G] no "--" inside the legend comment   X5 [P] a tests-only answer's compact legend entry has no "--" (cr-prepass 43b)
 #
 # Usage:  bash test/dottedstringcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/dottedstringcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -937,6 +937,13 @@ if command -v xmllint >/dev/null 2>&1; then
     if xmllint --noout "$TMP/k1" 2>/dev/null; then ok "X2 xmllint well-formed"; else no "X2 not well-formed"; fi
 else
     ok "X2 SKIP xmllint absent"
+fi
+# X5 [P] (CR pre-pass 43b): a tests-only fact in the DEFAULT --callers legend splices the compact dictionary entry for `s=` into the header comment; its
+# text said "a --grep= for it", a double hyphen in an XML comment, so the whole answer was ill-formed (RED on 506801bd)
+if command -v xmllint >/dev/null 2>&1; then
+    if xmllint --noout "$TMP/d1t2" 2>/dev/null && xmllint --noout "$TMP/d1t2f" 2>/dev/null; then ok "X5 the tests-only s= next= answers (--callers, --for) are well-formed"; else no "X5 a tests-only answer is not well-formed XML ($( xmllint --noout "$TMP/d1t2" 2>&1 | head -1 | cut -c1-120 ))"; fi
+else
+    ok "X5 SKIP xmllint absent"
 fi
 if python3 - "$TMP/k1" <<'PY'
 import re,sys
