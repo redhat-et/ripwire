@@ -3,6 +3,13 @@
 `src/infra/fileSetStore.h` holds the file graph's direct edges (`FileAdjacency`) and its transitive closure
 (`FileSetStore`). This records the trial behind the closure's form, including the forms that lost.
 
+History. The shape is old. Purdom (1970) collapsed cycles before closing a relation, Tarjan (1972) found the strong components in
+linear time and in the sinks-first order the fold needs, and Nuutila (1995) built closure algorithms on them and measured
+large digraphs. The row form borrows two later ideas: rank over a presence bitmap (Jacobson, 1989) and chunks that are
+a sorted array or a bitset, whichever is smaller (Roaring bitmaps, 2015), minus the run containers and with the chunk size
+chosen per graph. Hash sharing of identical rows, with a verify, is ordinary practice here, with no source checked for it.
+A 1970 idea on today's cache lines; the citations are in `docs/LINEAGE.md`.
+
 Method: ripwire's own include adjacency and the real membership probes of one index, captured from an instrumented build
 and replayed single-threaded in order; the static-truth edge sets of the same repos (`-truth`, what the coming edge lanes
 approach); generated layered graphs of 50,000 and 100,000 files (`sNNK-mMEAN`). Times are best of 3 on a loaded 16 GB Mac
@@ -18,13 +25,86 @@ cache behaviour is reported as wall time and as lines touched by construction.
 - Chunk size is a store field. Fewest bytes: 8 bits on the in-sample repos, 12 at 100,000 files and mean closure 3,497 or
   11,098, 16 at mean 258 or 606. A stride sample of up to 64 rows picked the byte-best size on 12 of 14 corpora, and the two
   misses were under 1 % (zed, zed-truth). The sample costs 64 file walks.
-- Build: a word-parallel fold over SCCs, sinks first, with each row compressed into the store and its working bitset reused
-  after its last reader. The peak working set is the fold's frontier, 909 to 2,674 rows (11 to 33 MB) at 100,000 files, not
-  N rows (1,250 MB). At mean 11,098 the process peak is 580 MB against 4.4 GB for the rows alone in sorted vectors.
+- Build: a fold over SCCs, sinks first. Each component's row is the OR of its successors' rows plus their ids, and goes into
+  the store the moment it is known; a successor's row is then ORed back FROM THE STORE, into one working row that is cleared
+  by the words it touched. The fold holds one working row (N / 8 bytes) whatever the graph. At mean 11,098 the process peak
+  is 580 MB against 4.4 GB for the rows alone in sorted vectors.
+  The first form kept each component's bitset until its last reader had run, and measured a "frontier" of 909 to 2,674 rows
+  (11 to 33 MB) at 100,000 files on layered graphs. That bound does not hold in general: see the umbrella below.
 - Row form: a row is true reachability, so a cycle's members share it, and the read skips the file itself. At 8 bits:
   cpython 0.169 to 0.108 MB, vscode 4.31 to 3.74 MB, Envoy's static truth unchanged.
-- Directory: a presence bitmap per row, popcount rank. It replaces a `high` field per chunk and a hash over (row, high), and
-  a miss, the common real probe (82-100 % on the six repos), stops at the row head.
+- Directory: a presence bitmap per row, popcount rank. It replaces a `high` field per chunk and a hash over (row, high). A
+  probe that misses the BITMAP stops at the row head; a miss inside a present chunk goes on to the chunk offset and payload.
+  The set-miss rate is 82-100 % on the six repos, but the share that stops at the head is lower, measured on the real traces
+  at the chosen chunk size:
+
+  | repo | chunk bits | set miss | stops at head | array | bitset |
+  |---|---|---|---|---|---|
+  | terraform | 16 | 100 % | 100 % | 0 | 0 |
+  | cockroach | 8 | 96.3 % | 94.3 % | 2.4 % | 3.3 % |
+  | envoy | 16 | 99.9 % | 90.7 % | 9.3 % | 0 |
+  | vscode | 8 | 88.6 % | 63.5 % | 9.7 % | 26.8 % |
+  | cpython | 8 | 82.5 % | 51.5 % | 8.0 % | 40.4 % |
+  | zed | 16 | 99.4 % | 0.0 % | 100 % | 0 |
+
+  (array / bitset: the share of probes that end in a sorted-array search or a bitset word.) A head is 16 bytes at 16-bit
+  chunks up to 128 K files and `heads_` is not aligned, so a longer head can straddle two cache lines; the cache-line counts in
+  this file are by construction, with no hardware counter behind them.
+
+## The fold's working set, and the umbrella shape
+
+A file that imports many modules is the shape that broke the first fold: `umbrella.h` including 40,000 `x.h`, each of which
+includes its own `y.h`. A component's bitset lived until its last reader, a reader only runs after all its successors, so the
+umbrella held one N / 8-byte bitset per module it imports: N^2 / 32 bytes. Real repos are not at the synthetics' share
+(vscode's frontier was 3,417 rows, 19.5 % of its files), and Go and Java edges make umbrellas of this kind common.
+
+The harness (generated graphs, `-O2`, one process per arm, peak = `/usr/bin/time -l` footprint; the machine was loaded,
+load 17-19, so wall times carry noise):
+
+| shape | files | form | peak | wall |
+|---|---|---|---|---|
+| umbrella, mean closure 2.5 | 100,000 | first fold | 744 MB | 0.38 s |
+| umbrella | 100,000 | OR from the store | 12 MB | 0.16 s |
+| umbrella | 100,000 | + touched-word list | 11 MB | 0.01 s |
+| umbrella | 200,000 | + touched-word list | 21 MB | 0.02 s |
+| sparse (chains of 8, mean 3.5) | 200,000 | first fold | 30 MB | 1.64 s |
+| sparse | 200,000 | OR from the store | 28 MB | 1.75 s |
+| sparse | 200,000 | + touched-word list | 33 MB | 0.02 s |
+| sparse (stress, not a target) | 1,000,000 | first fold | 132 MB | 34.6 s |
+| sparse | 1,000,000 | OR from the store | 154 MB | 34.4 s |
+| sparse | 1,000,000 | + touched-word list | 158 MB | 0.13 s |
+| chain, mean closure 50,000 | 100,000 | first fold | 679 MB | 20.7 s |
+| chain | 100,000 | + touched-word list, 4 words per OR | 674 MB | 22.8 s |
+| layered (`synth 0.5 100 0 30`, mean 8,851) | 100,000 | first fold | 607 MB | 3.6-4.5 s |
+| layered | 100,000 | OR from the store alone | 583 MB | 6.5-7.5 s |
+| layered | 100,000 | + touched-word list, 4 words per OR | 582 MB | 4.0-5.1 s |
+
+The sparse loss was never the decode. With the profile scopes on (`-DRIPWIRE_PROFILE=ON`; the harness at 1,000,000
+sparse), the full-width clear and scan of the working row was 99 % of the fold (6,388 of 6,429 ms in `closure/4b`), and the
+decode of the stored rows 0.25 % (16 ms in `closure/4a`). Touching only the words a component sets takes `closure/4` to
+234 ms, of which the profile's own 875,000 scope entries are most. A cached run pays the fold too, since the graph is built on
+every run.
+
+The trade, stated: the OR-from-the-store form decodes a stored row (a bitset chunk four words at a time) where the first form
+ORed whole `u64` words, so on DENSE graphs it can cost 10-15 % more wall (chain 100,000: 20.7 to 22.8 s), and on layered
+graphs it is within the noise of the first form. It saves 99 % of the memory on umbrellas, and the full-width clear on sparse
+graphs. If one had to give, wall on a 100,000-file dense graph is the one to give: it is a build step that runs once, where
+the frontier was a peak that scales with fan-out. A frontier-free form that kept the first form's speed on dense graphs was not
+found.
+
+## What the fold does when it cannot finish
+
+- Memory: every `kFoldCheckComponents` (4,096) components or 4 MiB of payload the fold asks `memguard::foldShouldStop()`,
+  one footprint reading against the hard line. Over it, the fold stops, records why (`src/infra/fileGraphStop.h`), and
+  `memguard::overHardLimit()` reads true from then on, so the CLI's hard line, the MCP per-request check and the second fold
+  on `--deps` and `--arch=FILE` all refuse (exit 5, one stderr line) instead of answering from a partial store. An
+  allocation failure inside the fold is caught the same way. `RIPWIRE_TEST_MEMGUARD=fold:N` stops the Nth fold of the process
+  (buildGraph's is the first), for the gates.
+- Width: chunk offsets are `u32`, so 2^32 - 1 payload words (8 GiB) is the most a store holds, and `FileAdjacency` offsets cap
+  at 2^32 - 1 edges. Both limits are parameters, and the unit tests reach the stop at a small limit; the real wrap needs 8 GiB
+  and was NOT run. A row that would pass the limit is rolled back, the fold stops, and the stop is disclosed.
+- Reserve: the up-front reserve is the sample scaled to the components that reach something, then clamped (2 GiB of payload,
+  512 MiB of offsets, address space only), and an allocation the OS refuses is no reserve. One giant cycle reserves one row.
 
 ## Rejected, with their numbers
 

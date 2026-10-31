@@ -52,6 +52,7 @@
 #include "smallvec.h"
 #include "infra/namesplit.h"   // stripTemplateArgs — a C++ template-id scope's family (appendTemplateFamilyKey), a `using Base<T>::m;` qualifier (buildUsingReexports)
 #include "infra/fileSetStore.h"   // FileAdjacency, FileSetStore, buildFileClosure — the file graph's stores
+#include "memguard.h"                 // guardedFileClosure
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/os.h"           // os::realpath / os::stat — the ancestor-config walk (#220: configs above the crawl root)
 #include "infra/Diagnostics.h"   // ASSUME — buildScopedRecvDecls' index-range precondition
@@ -4687,20 +4688,12 @@ inline rw::FileAdjacency buildPreciseIncludeAdj( const IngestResult& ing, bool d
 // EXCLUDED, read in ascending id order. Cycle-safe (mutually-including headers each reach the other). A pure function of
 // the adjacency. See infra/fileSetStore.h for the store and the fold, test/fileset_unit.cpp and
 // test/includeprecisecheck.sh for the independent oracles.
-// RIPWIRE_TEST_FILESET_CHUNK_BITS forces the chunk size, so the multi-chunk read paths run on repos too small to reach
-// them: no real row crosses a 16-bit chunk below 65,536 files. An answer never depends on it.
+// The fold runs under the memory guard (memguard::guardedFileClosure): it stops, disclosed, at the hard line, and
+// RIPWIRE_TEST_FILESET_CHUNK_BITS (test only) forces its chunk size there.
 inline rw::FileSetStore transitiveIncludeSet( const rw::FileAdjacency& adj )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2b: transitive include closure (resolve.h)" );
-    std::uint32_t chunkBits = 0;
-    if( const char* forced = std::getenv( "RIPWIRE_TEST_FILESET_CHUNK_BITS" ); forced != nullptr )
-    {
-        std::uint32_t  bits = 0;
-        const char*    end  = forced + std::strlen( forced );
-        const auto     got  = std::from_chars( forced, end, bits );
-        chunkBits           = got.ec == std::errc() && got.ptr == end && bits >= 1 && bits <= 16 ? bits : 0;
-    }
-    return rw::buildFileClosure( adj, chunkBits );
+    return rw::memguard::guardedFileClosure( adj );
 }
 
 // ── S6-C canonical SCIP-style symbol strings ───────────────────────────────────────────────────────
@@ -6610,11 +6603,11 @@ struct Narrower
     // Rule 2's LEXICAL table for names with a ParamType declaration (see ScopedRecvDecl above). A name found here is
     // answered here ONLY — varType is not consulted.
     const ScopedRecvDecls&                               scopedDecls;
-    // P2-D Rule 3 include table: caller fileId → the sorted, deduped set of fileIds it #includes / imports
-    // (resolved file→file by basename, exactly like graph.h::resolveIncludeAdj; the caller's own file is NEVER
+    // P2-D Rule 3 include table: caller fileId → every file it reaches over >= 1 include / import edge, read in ascending
+    // id order (resolved file→file by basename, exactly like graph.h::resolveIncludeAdj; the caller's own file is NEVER
     // in its own set). buildGraph builds it once from IngestResult::includes. Empty when the repo has no
-    // include/import edges, so Rule 3 simply never fires (degrades to the unchanged ladder). A `std::span`
-    // seam: buildGraph owns the storage (a `std::vector<std::vector<NodeId>>`), the Narrower only reads it.
+    // include/import edges, so Rule 3 simply never fires (degrades to the unchanged ladder). A read-only seam:
+    // buildGraph owns the rw::FileSetStore (infra/fileSetStore.h), the Narrower only reads it.
     const rw::FileSetStore&                              fileIncludes;
     // per-symbol fileId (view into ing.symbols' fileIds), so Rule 3 can group candidate defs by their file
     // without a reference to the whole IngestResult. buildGraph owns the backing vector.

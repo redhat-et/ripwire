@@ -36,6 +36,7 @@
 #include "regexguard.h"          // path-rules: the screen, the compile and the guarded match every user-authored pattern takes
 #include "infra/hashutil.h"     // sanitizer-clean modulo-2^64 FNV multiplication
 #include "infra/fileSetStore.h" // rw::FileAdjacency: the file graph the metrics and the propagation walk read
+#include "memguard.h"           // guardedFileClosure: the propagation fold stops at the hard line
 #include "infra/stackthreads.h" // kCallerStackBytesFloor — path-rule matching runs on whatever thread --arch is on, never one it sized itself
 
 #include <algorithm>
@@ -1219,8 +1220,10 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 // Determinism: the RATIO is a sum of set sizes, order-independent, and the fixed formatting pins the emitted string.
 // adj[f] may hold duplicate or out-of-range ids (see resolveIncludeAdj): buildFileClosure tolerates both.
 //
-// Complexity: one word-parallel fold, O( (N + E) · N / 64 ) worst case, whatever the closures' sizes: the per-file BFS
-// this replaced took O( N · (N + E) ), 20 s against 5 s on a 100,000-file graph of mean closure 11,000 (bench/FILEGRAPH.md).
+// Complexity: one fold over the components (infra/fileSetStore.h), each edge costing the successor's stored row, whatever the
+// closures' sizes: the per-file BFS this replaced took O( N · (N + E) ), 20 s against 5 s on a 100,000-file graph of mean
+// closure 11,000 (bench/FILEGRAPH.md). The fold can stop at the memory guard's hard line (memguard::guardedFileClosure): the
+// caller then reads overHardLimit() before it prints, and a number from a stopped fold is never printed.
 //
 // Degrade / edge cases (never divides by zero):
 //   N == 0 → 0.0 (empty graph, documented: no files → no propagation)
@@ -1229,9 +1232,10 @@ inline std::vector<ModuleMetric> computeModuleMetrics( const IngestResult& ing,
 // The traversal core (sum of |reachable(root)| over a ROOT SET) is factored into sumReachableClosure below
 // so §P9.4's dependency-capable-only view (dsmPropagationCostCapable) shares the exact same walk instead of
 // a second copy of it — only the root set and the denominator N differ between the two views.
-inline std::uint64_t sumReachableClosure( const rw::FileAdjacency& adj, const std::vector<std::uint32_t>& roots ) noexcept
+inline std::uint64_t sumReachableClosure( const rw::FileAdjacency& adj, const std::vector<std::uint32_t>& roots )
 {
-    const rw::FileSetStore closure = rw::buildFileClosure( adj );
+    PROFILE_SCOPE_DESCRIBE( "--arch/2nd include-closure fold (sumReachableClosure)" );
+    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop is recorded: the caller checks overHardLimit()
     return std::accumulate( roots.begin(), roots.end(), std::uint64_t( 0 ), [ & ]( const std::uint64_t sum, const std::uint32_t root )
     {
         return sum + closure.setSize( root ) + 1;   // unit diagonal: a file reaches itself
@@ -1247,7 +1251,7 @@ inline std::uint64_t sumReachableClosure( const rw::FileAdjacency& adj, const st
 // unchanged, only WHICH files seed a walk and the denominator are restricted.
 inline double dsmPropagationCostCapable( const IngestResult&     ing,
                                          const rw::FileAdjacency& adj,
-                                         const std::vector<char>&                       depCapable ) noexcept
+                                         const std::vector<char>&                       depCapable )
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     if( F == 0 )
@@ -1278,7 +1282,7 @@ inline double dsmPropagationCostCapable( const IngestResult&     ing,
 // wrapper over dsmPropagationCostCapable (an all-ones mask) rather than a second copy of the same body, so
 // the two views can never drift apart structurally.
 inline double dsmPropagationCost( const IngestResult&                            ing,
-                                  const rw::FileAdjacency& adj ) noexcept
+                                  const rw::FileAdjacency& adj )
 {
     return dsmPropagationCostCapable( ing, adj, std::vector<char>( ing.files.size(), 1 ) );
 }

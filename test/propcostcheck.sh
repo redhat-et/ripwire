@@ -141,5 +141,36 @@ SH_PC="$( pc "$( "$BIN" "$DCAPSH" --arch="$DCAPSH/sibling.arch" --no-cache 2>/de
     && ok "P9.4 positive: --arch propagation_cost moved with it (17/100 = 0.170, same N as --deps)" \
     || no "P9.4 positive: propagation_cost is '$SH_PC', expected 0.170 — the two denominators disagree"
 
+# ── the closure fold on a fixture that is too small to cross a 16-bit chunk ─────────────────────────────────────
+# RIPWIRE_TEST_FILESET_CHUNK_BITS forces the fold's chunk size on EVERY fold (buildGraph's, --deps' and --arch=FILE's second
+# one), so the multi-chunk read paths run here. Same numbers at every size; a knob that reached only one fold would move one.
+DEPS_REF="$( "$BIN" "$FIX" --deps --no-cache 2>/dev/null | grep -o '<health[^/]*/>' )"
+for bits in 1 2 4 8; do
+    GOTB="$( pc "$( RIPWIRE_TEST_FILESET_CHUNK_BITS=$bits "$BIN" "$FIX" --arch="$FIX/sibling.arch" --no-cache 2>/dev/null )" )"
+    DEPSB="$( RIPWIRE_TEST_FILESET_CHUNK_BITS=$bits "$BIN" "$FIX" --deps --no-cache 2>/dev/null | grep -o '<health[^/]*/>' )"
+    [ "$GOTB" = "$EXPECT" ] && [ -n "$DEPS_REF" ] && [ "$DEPSB" = "$DEPS_REF" ] \
+        && ok "chunk bits forced to $bits: propagation_cost $EXPECT and --deps <health> unchanged" \
+        || no "chunk bits $bits: propagation_cost '$GOTB' (want $EXPECT), health '$DEPSB' (want '$DEPS_REF')"
+done
+
+# ── the second fold stops at the memory guard, disclosed ──────────────────────────────────────────────────────────
+# fold:N is the memory guard's seam (memguard.h): the Nth fold of the process reads as over the hard limit at its first component.
+# buildGraph's fold is the first, --deps' and --arch=FILE's the second, so fold:2 reaches ONLY the second. A number from a
+# stopped fold is never printed: exit 5, one stderr line, nothing on stdout. Without a seam the same run answers.
+for mode in deps arch; do
+    if [ "$mode" = deps ]; then args=( --deps ); else args=( --arch="$FIX/sibling.arch" ); fi
+    RIPWIRE_TEST_MEMGUARD=fold:2 "$BIN" "$FIX" "${args[@]}" --no-cache >"$TMP/f2.out" 2>"$TMP/f2.err"; rc=$?
+    [ "$rc" = 5 ] && [ ! -s "$TMP/f2.out" ] && [ "$( grep -c '^ripwire:' "$TMP/f2.err" )" = 1 ] \
+        && grep -q '^ripwire: memory limit reached during the include-closure fold' "$TMP/f2.err" \
+        && ok "fold:2 on --$mode: the second fold stops, exit 5, one stderr line, no number printed" \
+        || no "fold:2 on --$mode: rc=$rc stdout=$( wc -c <"$TMP/f2.out" ) bytes stderr: $( head -c 250 "$TMP/f2.err" )"
+done
+RIPWIRE_TEST_MEMGUARD=fold:1 "$BIN" "$FIX" --no-cache >"$TMP/f1.out" 2>"$TMP/f1.err"; rc=$?
+[ "$rc" = 5 ] && [ ! -s "$TMP/f1.out" ] && grep -q '^ripwire: memory limit reached during the include-closure fold' "$TMP/f1.err" \
+    && ok "fold:1 on the bare map: buildGraph's fold stops at the hard line after the graph build (exit 5)" \
+    || no "fold:1 on the bare map: rc=$rc stderr: $( head -c 250 "$TMP/f1.err" )"
+RIPWIRE_TEST_MEMGUARD=fold:2 "$BIN" "$FIX" --no-cache >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && ok "fold:2 on the bare map: there is no second fold, the map answers (exit 0)" || no "fold:2 on the bare map: rc=$rc"
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

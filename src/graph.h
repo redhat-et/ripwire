@@ -15593,7 +15593,8 @@ inline DepHealth dependencyHealth( const rw::FileAdjacency& adj )
     const std::uint32_t F = std::uint32_t( adj.size() );
     DepHealth h;
     h.transitive.assign( F, 0 );
-    const rw::FileSetStore closure = rw::buildFileClosure( adj );
+    PROFILE_SCOPE_DESCRIBE( "--deps/2nd include-closure fold (dependencyHealth)" );
+    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop is recorded: the caller checks overHardLimit()
     for( std::uint32_t s = 0; s < F; ++s )
     {
         const std::uint32_t reached = closure.setSize( s ) + 1;
