@@ -173,7 +173,7 @@ A skill you copied by hand carries no marker, so this keeps it; delete that copy
 Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.
 
 ```bash
-strip='def ripwire: (.command // "") | split(" ")[0] | test("/hooks/ripwire-[a-z-]+\\.sh$");
+strip='def ripwire: (.command // "") | (if startswith("\u0027") then (.[1:] | split("\u0027")[0]) else split(" ")[0] end) | test("/hooks/ripwire-[a-z-]+\\.sh$");
   if .hooks then .hooks |= with_entries(.value |= (map(.hooks |= map(select(ripwire | not))) | map(select((.hooks | length) > 0)))) else . end'
 for f in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" "${CODEX_HOME:-$HOME/.codex}/hooks.json"; do
   [ -f "$f" ] && cp "$f" "$f.bak" && jq "$strip" "$f.bak" > "$f.tmp" && mv "$f.tmp" "$f"
