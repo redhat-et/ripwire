@@ -2574,6 +2574,13 @@ inline bool isDottedStringFact( const Reference& r ) noexcept
     return r.role == RefRole::Value && r.qualifier.size() == 1 && r.qualifier[0] == kValueRefDottedStringScope;
 }
 
+// REGISTRAR: a registrar fact (kValueRefRegParamScope): its qualifier is a scope char and its recvVar the registrar METHOD's name, neither a
+// class the file names, so no name-evidence scan (graph.h collectFileClassEvidence) may read them.
+inline bool isRegistrarFact( const Reference& r ) noexcept
+{
+    return r.role == RefRole::Value && r.qualifier.size() == 1 && r.qualifier[0] == kValueRefRegParamScope;
+}
+
 inline void buildShadowKey( std::string& key, std::uint32_t fromSymbol, std::string_view name )
 {
     key.clear();

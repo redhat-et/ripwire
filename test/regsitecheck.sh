@@ -44,6 +44,7 @@
 #          reg.configure( { excluded: [ { … } ] } ) never list a class; only a plain literal that is an ARRAY element (const / call argument /
 #          providers / viewProviders) counts; F2r4/TA/TB/T1 pin the rows lost by design (a bare call argument, a const object)
 #   T3 [P] TS: a function-local `function K(){}` in a file that imports K gives no row (the sites are not filed under the local symbol)
+#   GF1 [P] a registrar fact's scope char "g" is no name evidence for a class g in another file (graph.h file evidence; cr-prepass 43b F-G1); GF2-GF4 [G] twins
 #   X1 [G] determinism   X2 [G] xmllint well-formed (when xmllint is present)
 #
 # Usage:  bash test/regsitecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/regsitecheck.sh
@@ -793,6 +794,27 @@ run t3 "$TMP/t3" -- --for="which classes are provided for HJ"
 run t3b "$TMP/t3b" -- --for="which classes are provided for HJ"
 if out=$( chk nokey "$TMP/t3.xml" HJ ); then ok "T3 a local function HJ in a file that imports HJ: no row (the key is not provable; the sites are not filed under the local symbol)"; else no "T3 $out"; fi
 if out=$( chk rowat "$TMP/t3b.xml" HJ tokens.ts n=2 D G ); then ok "T3 twin: the same file without the local function lists D G under the imported key"; else no "T3 twin $out"; fi
+
+# ── CR pre-pass 43b: a registrar FACT is no name evidence (graph.h file-evidence loop). Its qualifier is the scope char "g" and its recvVar the
+# registrar METHOD's name, neither a class the file names: read as evidence the scope char made `sys.path.insert` bind by name to an unrelated class `g`
+# in another file (GF1 [P], RED on 506801bd). The method's name as recvVar adds nothing the def does not already (GF2 pins that equality); twins GF3 and GF4
+# prove real evidence still binds ──────────────────────────────────────────
+GF="$TMP/gf"; mkdir -p "$GF/a" "$GF/b" "$GF/c" "$GF/d"
+for v in a b c d; do
+    printf 'import sys\n\nclass Bus:\n    def on(self, fn):\n        self.subs.append(fn)\n\ndef boot(p):\n    sys.path.insert(0, p)\n' > "$GF/$v/reg.py"
+done
+printf 'class g:\n    def insert(self, i, v):\n        return (i, v)\n' > "$GF/a/kinds.py"      # the scope char as a class name
+printf 'class on:\n    def insert(self, i, v):\n        return (i, v)\n' > "$GF/b/kinds.py"     # the method name as a class name: the DEF is evidence on its own (main, no registrar fact needed)
+mkdir -p "$GF/e"; cp "$GF/b/kinds.py" "$GF/e/kinds.py"
+printf 'import sys\n\nclass Bus:\n    def on(self, fn):\n        return fn\n\ndef boot(p):\n    sys.path.insert(0, p)\n' > "$GF/e/reg.py"   # the same file with a method that stores nothing: no fact
+printf 'class g:\n    def insert(self, i, v):\n        return (i, v)\n' > "$GF/c/kinds.py"      # twin: reg.py really names the class
+printf 'class Other:\n    pass\n' > "$GF/d/kinds.py"
+printf '\nfrom kinds import g\n\ndef mk():\n    return g()\n' >> "$GF/c/reg.py"
+for v in a b c d e; do run "gf$v" "$GF/$v" -- --callees=boot; done
+if ! grep -q 'n="g.insert"' "$TMP/gfa.xml"; then ok "GF1 [P] a registrar fact's scope char is no evidence for a class g (sys.path.insert not bound by name)"; else no "GF1 g.insert bound by name: $( grep -o '<s t="[^>]*>' "$TMP/gfa.xml" | head -2 )"; fi
+if cmp -s <( sed "s#$GF/b#R#g" "$TMP/gfb.xml" ) <( sed "s#$GF/e#R#g" "$TMP/gfe.xml" ); then ok "GF2 the registrar method's name adds nothing: the answer is byte-identical to the same file whose method stores nothing (a def named like a class is evidence on its own, on main; carded)"; else no "GF2 the fact moved the answer: $( diff <( sed "s#$GF/b#R#g" "$TMP/gfb.xml" | tr '>' '\n' ) <( sed "s#$GF/e#R#g" "$TMP/gfe.xml" | tr '>' '\n' ) | head -3 )"; fi
+if grep -q 'n="g.insert"' "$TMP/gfc.xml"; then ok "GF3 twin: a file that really names class g (import + call) still binds g.insert by name"; else no "GF3 twin lost the by-name edge: $( head -c 300 "$TMP/gfc.xml" )"; fi
+if ! grep -q 'n="insert"' "$TMP/gfd.xml" || grep -q 'declined' "$TMP/gfd.xml"; then ok "GF4 twin: no class of that method name: the builtin call stays declined"; else no "GF4 $( grep -o '<[sd][c ] [^>]*>' "$TMP/gfd.xml" | head -2 )"; fi
 
 run f1 "$PY" RIPWIRE_NO_REG_ROWS=1 -- --for="$Q_PY"
 chk strip "$TMP/p1.xml" "$TMP/p1.strip"; chk strip "$TMP/f1.xml" "$TMP/f1.strip"
