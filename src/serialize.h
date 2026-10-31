@@ -10122,9 +10122,10 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     {
         return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
     };
-    // §P9.4: dep_files= denominator (see graph.h::restrictDependencyHealth) — derived from `ing`, already a param.
-    const auto        depCapableMask = dependencyCapableMask( ing );
-    const std::size_t depFiles       = std::size_t( std::count( depCapableMask.begin(), depCapableMask.end(), char( 1 ) ) );
+    // §P9.4: dep_files= denominator (see graph.h::restrictDependencyHealth) — derived from `ing` and the graph; arch-honest: a
+    // no-edge file nothing touches is left out of it (lintrules.h dependencyMeasure), and masked_files= says how many.
+    const rw::DependencyMeasure measure  = rw::dependencyMeasure( ing, adj );
+    const std::size_t           depFiles = measure.depFiles;
     std::vector<std::vector<std::uint32_t>> byFile( F );   // file → indices into ing.includes
     for( std::uint32_t i = 0; i < ing.includes.size(); ++i )
     {
@@ -10184,6 +10185,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     w.write( rw::depsImportsUnresolvedLegend( tsImports.unresolved > 0 ) );   // #220: exactly when the root carries the pair
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
     w.write( rw::prunedPackagesLegend( ing.crawlSkips.prunedPackages > 0, /*leadingSpace=*/ false ) );   // #478 gap 3: exactly when the block below is printed
+    // arch-honest: files in a language with no file edges (lintrules.h noFileEdgeFiles); every attribute below is absent at files == 0
+    const rw::NoFileEdgeFiles noEdge       = rw::noFileEdgeFiles( ing );
+    const bool                healthUnknown = rw::systemNumbersUnknown( noEdge, measure );   // no measured edge left: every cone is one file, nothing behind ccd/nccd/shape but the missing data
+    w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
+    w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -10199,6 +10205,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         // (the V1-1 truncation class main.cpp's own history warns about) — written separately.
         if( !rootArg.empty() ) { w.write( " root=\"" );  w.write( escapeXml( rootArg, esc ) );  w.write( "\"" ); }
         w.write( rw::tsImportRootAttrXml( tsImports.unresolved, tsImports.dts, tsImports.unread ) );   // #220: absent at 0; partial, not a floor — see graphlegend.h
+        w.write( rw::noFileEdgesRootAttrXml( rw::noFileEdgeLangTags( noEdge.langs ), noEdge.files, tsImports.unresolved > 0 || tsImports.unread > 0 ) );
         w.write( ">" );
     }
     w.write( buildPrunedPackagesBlock( ing.crawlSkips, rootArg ) );   // #478 gap 3: absent when no real package was pruned
@@ -10214,10 +10221,18 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // it is the SAME predicate --arch's propagation_cost N and --cochange's dep_capable= are built on.
     const std::string depLangs = rw::dependencyCapableLangTags();
     char hb[ 176 ];
-    rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
-                   ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
-                   nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+    if( healthUnknown )
+    {
+        rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\"", ing.files.size(), depFiles );
+    }
+    else
+    {
+        rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
+                       ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
+                       nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+    }
     w.write( hb );
+    w.write( rw::countAttrXmlOrEmpty( "masked_files", measure.masked ) );   // arch-honest: absent at 0, so a tree without a no-edge file is byte-identical
     if( lazyEdges > 0 )   // absent exactly when nothing was left out — never a hidden 0, and byte-identical for every corpus without a lazy directive
     {
         char lb[ 40 ];  rw::formatTo( lb, sizeof( lb ), " lazy_edges=\"{}\"", static_cast<unsigned long long>( lazyEdges ) );
@@ -10371,7 +10386,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         const double inst = ( ce_ + ca_ ) > 0.0 ? ce_ / ( ce_ + ca_ ) : 0.0;   // instability I = Ce/(Ca+Ce), project-only
         const std::uint32_t lazyHere = f < lazyEdgesByFile.size() ? lazyEdgesByFile[f] : 0u;
         char hdr[ 144 ];
-        if( lazyHere > 0 )   // the resolved pairs this row's directives make that the structure leaves out (parser version 83)
+        const Lang rowLang = langOfPath( ing.files[f] );
+        if( langHasNoFileEdges( rowLang ) && ce_ == 0.0 && ca_ == 0.0 )   // arch-honest: its imports were captured, none could resolve: unknown, not zero
+        {
+            rw::formatTo( hdr, sizeof( hdr ), "\" includes=\"{}\" no_file_edges=\"{}\">", byFile[f].size(), langTag( rowLang ) );
+        }
+        else if( lazyHere > 0 )   // the resolved pairs this row's directives make that the structure leaves out (parser version 83)
         {
             rw::formatTo( hdr, sizeof( hdr ), "\" includes=\"{}\" lazy_edges=\"{}\" afferent=\"{}\" instab=\"{:.2f}\" transitive=\"{}\">",
                            byFile[f].size(), lazyHere, f < afferent.size() ? afferent[f] : 0u, inst, trans( f ) );

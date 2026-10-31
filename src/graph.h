@@ -15161,6 +15161,7 @@ struct ImportTier
     std::uint64_t              importsUnresolved = 0;   // #220 part 1: importers= is a floor while > 0
     std::uint64_t              tsconfigUnread    = 0;   // #220 part 2: configs with an unread extends/references base (tsconfig_unread=)
     bool                       umbrella          = false;   // idea #6: an umbrella header — see impactImportTier
+    std::uint32_t              noFileEdgeLangs   = 0;       // arch-honest: the def files' languages this build draws no file edge for (lintrules.h)
 };
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
@@ -15194,7 +15195,8 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
                + rw::nextAttrXml( t.next, "importers_next" )
                + rw::importsUnresolvedAttrXml( t.importsUnresolved )   // #220: absent at zero; the root's counts_floor covers it
                + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) )   // #220 part 2: likewise
-               + ( t.umbrella ? " importers_umbrella=\"1\"" : "" );                              // idea #6: present-only
+               + ( t.umbrella ? " importers_umbrella=\"1\"" : "" )                               // idea #6: present-only
+               + rw::noFileEdgesAttrXml( t.noFileEdgeLangs );                                   // arch-honest: importers= is a floor for these defs
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
 }
@@ -15233,6 +15235,10 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
 
     ImportTier t;
+    for( const std::uint32_t f : defFiles )
+    {
+        t.noFileEdgeLangs |= f < ing.files.size() ? noFileEdgeLangBit( langOfPath( ing.files[f] ) ) : 0u;
+    }
     std::vector<char>          lazyByFileOrder;   // importersOfFiles' own order (ascending file id) — see below
     std::vector<std::uint32_t> fileFanIn;         // per file: how many files import it — the rank-before-cap weight
     // #220 part 1: the tier's floor concerns it only when a TS/JS import could land on one of its def files — a C++
@@ -15642,13 +15648,14 @@ inline DepHealth dependencyHealth( const std::vector<std::vector<std::uint32_t>>
 // and `--arch`'s propagation_cost (arch.h::dsmPropagationCostCapable) both key off the same
 // dependencyCapableMask(), so the two verbs' N is provably the same denominator.
 struct RestrictedDepHealth { std::uint64_t ccd = 0; double acd = 0, nccd = 0; std::size_t depFileCount = 0; };
-inline RestrictedDepHealth restrictDependencyHealth( const IngestResult& ing, const std::vector<std::uint32_t>& transitive )
+// `mask` is the denominator (lintrules.h dependencyMeasure: dependencyCapableMask minus the no-edge files nothing touches).
+inline RestrictedDepHealth restrictDependencyHealth( const std::vector<char>& mask, const std::vector<std::uint32_t>& transitive )
 {
     RestrictedDepHealth r;
-    const std::size_t F = std::min( transitive.size(), ing.files.size() );
+    const std::size_t F = std::min( transitive.size(), mask.size() );
     for( std::size_t f = 0; f < F; ++f )
     {
-        if( dependencyCapable( langOfPath( ing.files[f] ) ) ) { r.ccd += transitive[f]; ++r.depFileCount; }
+        if( mask[f] ) { r.ccd += transitive[f]; ++r.depFileCount; }
     }
     const double N = double( r.depFileCount );
     r.acd  = r.depFileCount ? double( r.ccd ) / N : 0.0;

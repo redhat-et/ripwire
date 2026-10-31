@@ -3052,13 +3052,28 @@ inline bool coPairDependencyCapable( const IngestResult& ing, std::uint32_t a, s
 //   degRev  = conf(partner => probed): the other direction, over the PARTNER's own commit count.
 //             The pair form's symmetric deg= is max(deg, degRev) — see coConfidence above.
 //   recur   = how many of `subWindows` sub-windows contain a joint commit (Clio recurrence).
-struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; double degRev; std::uint32_t recur; bool surprising; bool depCapable; };
+struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; double degRev; std::uint32_t recur; bool surprising; bool depCapable;
+                   std::uint32_t noEdgeLangs = 0; };   // arch-honest: non-zero = a side's language draws no file edge, so surprising= is unknown (coPairVerdict)
 
 // The row's verdict attribute, rendered ONCE for all four emitters (--cochange repo-wide `<pair>`, its
 // per-file `<f>`, --pr-context's `<partner>`, and — via the JSON pair below — the MCP verb). Three states,
 // two spellings: hidden coupling ⇒ surprising="1"; coupled and explained ⇒ nothing (the quiet default);
 // the question undefined for this pair ⇒ dep_capable="0". Spelled here so a later edit cannot teach one
 // emitter a vocabulary the others do not speak — the §P9.1 defect, one attribute over.
+//
+// arch-honest: a fourth state. A pair with a side in a language this build draws no file edge for (Go, Java, ...) and no observed
+// edge between the files proves nothing: the missing edge is the missing resolver, not an absent dependency. It carries
+// no_file_edges="go" where surprising="1" would be, never the hidden-coupling claim (nfpm: 20 of 64 Go pairs read it).
+struct CoPairVerdict { bool surprising = false; std::uint32_t noEdgeLangs = 0; };
+inline CoPairVerdict coPairVerdict( const IngestResult& ing, std::uint32_t a, std::uint32_t b, bool isDepCapable, bool isStaticallyCoupled ) noexcept
+{
+    if( !isDepCapable || isStaticallyCoupled )
+    {
+        return {};
+    }
+    const std::uint32_t langs = noFileEdgeLangBit( langOfPath( ing.files[a] ) ) | noFileEdgeLangBit( langOfPath( ing.files[b] ) );
+    return langs != 0 ? CoPairVerdict{ false, langs } : CoPairVerdict{ true, 0 };
+}
 inline const char* coPairAttr( bool isDepCapable, bool isSurprising ) noexcept
 {
     if( !isDepCapable )
@@ -3067,7 +3082,18 @@ inline const char* coPairAttr( bool isDepCapable, bool isSurprising ) noexcept
     }
     return isSurprising ? " surprising=\"1\"" : "";
 }
-inline const char* coPairAttr( const CoPartner& p ) noexcept { return coPairAttr( p.depCapable, p.surprising ); }
+// The fourth state rides beside it: noEdgeLangs != 0 only on a dependency-capable pair whose surprising is false (coPairVerdict).
+inline std::string coPairAttr( const CoPartner& p )
+{
+    std::string attr( coPairAttr( p.depCapable, p.surprising ) );
+    attr += noFileEdgesAttrXml( p.noEdgeLangs );
+    return attr;
+}
+// The MCP twin's JSON key for the same fourth state: present only where the XML row carries no_file_edges=.
+inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
+{
+    return p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string();
+}
 
 // Partners of `fileSubstr`: files that historically change in the same commit. deg = fraction of the
 // file's commits the partner also appears in; surprising = no transitive static #include either way (A4-F22:
@@ -3147,9 +3173,10 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
             // §A9.3: surprising= is gated on BOTH sides being dependency-capable — see coPairDependencyCapable.
             const bool isDepCapable = coPairDependencyCapable( ing, fid, other );
             const auto maskIt       = recurMask.find( other );
+            const CoPairVerdict verdict = coPairVerdict( ing, fid, other, isDepCapable, isDepCapable && cache.get( ing ).isStaticallyCoupled( fid, other ) );
             res.push_back( { other, n, coConfidence( n, freq[fid] ), coConfidence( n, freq[other] ),
                              coRecurrenceOf( maskIt == recurMask.end() ? 0u : maskIt->second ),
-                             isDepCapable && !cache.get( ing ).isStaticallyCoupled( fid, other ), isDepCapable } );
+                             verdict.surprising, isDepCapable, verdict.noEdgeLangs } );
         }
     }
     std::sort( res.begin(), res.end(), [ & ]( const CoPartner& x, const CoPartner& y )

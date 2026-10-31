@@ -47,6 +47,7 @@ struct CcFileMetrics
     std::uint32_t ccx        = 0;   // Σ cognitive complexity over the file's symbols
     std::uint32_t fanOut     = 0;   // # distinct in-corpus files this file depends on (its #include targets)
     std::uint32_t fanIn      = 0;   // # in-corpus files that depend on this file (afferent coupling)
+    bool          edgesUnknown = false;   // arch-honest: a no-edge language and no observed edge either way: fan_in/fan_out are unknown, not 0
     std::uint32_t churn      = 0;   // # commits touching this file in the window (0 without git)
 };
 
@@ -162,6 +163,10 @@ inline std::vector<CcFileMetrics> ccComputeMetrics( const IngestResult& ing, con
             }
         }
     }
+    for( std::uint32_t f = 0; f < F; ++f )
+    {
+        m[f].edgesUnknown = m[f].fanIn == 0 && m[f].fanOut == 0 && langHasNoFileEdges( langOfPath( ing.files[f] ) );
+    }
     return m;
 }
 
@@ -239,10 +244,18 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
     std::string esc;   // reused escape scratch
     const auto emitAttrs = [ & ]( const CcFileMetrics& e )
     {
+        if( e.edgesUnknown )   // arch-honest: omitted, not 0 — a city view would draw the zero as a measured, uncoupled file
+        {
+            rw::emitTo( out, "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"churn\":{}}}", e.loc, e.symbols, e.cx, e.ccx, e.churn );
+            return;
+        }
         rw::emitTo( out,
             "\"attributes\":{{\"loc\":{},\"symbols\":{},\"cx\":{},\"cognitive_cx\":{},\"fan_in\":{},\"fan_out\":{},\"churn\":{}}}",
             e.loc, e.symbols, e.cx, e.ccx, e.fanIn, e.fanOut, e.churn );
     };
+    const bool anyUnknown = std::any_of( metrics.begin(), metrics.end(), []( const CcFileMetrics& e ) { return e.edgesUnknown; } );
+    // Present-only: a tree without such a file keeps the descriptors it always had, byte for byte.
+    const char* const unknownNote = anyUnknown ? "; absent for a file in a language whose imports this build does not resolve to files: unknown, not 0" : "";
 
     // recursive emit of one node.
     auto emitNode = [ & ]( auto&& self, std::uint32_t id ) -> void
@@ -284,9 +297,12 @@ inline void writeCcJson( std::FILE* out, const std::string& root, const IngestRe
         "\"loc\":{\"title\":\"Lines of Code\",\"description\":\"Physical line count\",\"direction\":-1},"
         "\"symbols\":{\"title\":\"Symbols\",\"description\":\"Definitions in the file\",\"direction\":-1},"
         "\"cx\":{\"title\":\"Cyclomatic Complexity\",\"description\":\"Sum of per-symbol cyclomatic complexity\",\"direction\":-1},"
-        "\"cognitive_cx\":{\"title\":\"Cognitive Complexity\",\"description\":\"Sum of per-symbol cognitive complexity\",\"direction\":-1},"
-        "\"fan_in\":{\"title\":\"Fan In\",\"description\":\"In-corpus files that depend on this file\",\"direction\":-1},"
-        "\"fan_out\":{\"title\":\"Fan Out\",\"description\":\"In-corpus files this file depends on\",\"direction\":-1},"
+        "\"cognitive_cx\":{\"title\":\"Cognitive Complexity\",\"description\":\"Sum of per-symbol cognitive complexity\",\"direction\":-1}," );
+    rw::emitTo( out,
+        "\"fan_in\":{{\"title\":\"Fan In\",\"description\":\"In-corpus files that depend on this file{}\",\"direction\":-1}},"
+        "\"fan_out\":{{\"title\":\"Fan Out\",\"description\":\"In-corpus files this file depends on{}\",\"direction\":-1}},",
+        unknownNote, unknownNote );
+    rw::emitRaw( out,
         "\"churn\":{\"title\":\"Churn\",\"description\":\"Commits touching this file in the recent window\",\"direction\":-1}"
         "}," );
     rw::emitRaw( out, "\"nodes\":[" );
