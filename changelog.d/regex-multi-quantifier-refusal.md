@@ -19,8 +19,7 @@ answer on every platform, exits 1, and says what is wrong and what to write inst
 all but one (`a{0,3}a*b`).
 
 It does **not** claim the residual closed. Any *admitted* pattern whose cost in the subject is super-linear
-is still unbounded on libstdc++, including a bounded quantifier over a group that itself repeats
-(`((a|aa){2,5}){2,5}b$`), which no disjointness proof can answer. That is disclosed in `docs/LIMITS.md`, and
+is still unbounded on libstdc++, including a *single-level* bounded quantifier over an unproven-disjoint alternation (`(a|aa){1,100}b$`, measured 7.8 ms at a 21-byte subject rising to 99.1 s at 41 B, roughly 7x per 4 bytes), which no disjointness proof can answer. That is disclosed in `docs/LIMITS.md`, and
 it is why the screen refuses rather than guesses: a refusal is a bounded, named failure; a hang is not.
 
 Gate: `test/regexmultiquantcheck.sh` (new, 31 arms). The two preceding families are asserted undisplaced
