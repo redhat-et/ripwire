@@ -194,6 +194,13 @@ run "--for=run_it" --json >"$TMP/s1.json"
 if [ -s "$TMP/s1.json" ] && ! grep -q 'decl_rows' "$TMP/s1.json"; then ok "(s1) --json carries no block"; else no "(s1) --json"; fi
 run "--for=run_it" --token-budget=4000 >"$TMP/s2.xml"
 if [ -s "$TMP/s2.xml" ] && grep -q '<decl_rows of="run_it" held="budget" next="--for=run_it"/></ctx>$' "$TMP/s2.xml" && ! grep -q '</decl_rows>' "$TMP/s2.xml"; then ok "(s2) a token budget holds the block: held=\"budget\" and next=, no rows"; else no "(s2) budget: $( grep -o '<decl_rows.*' "$TMP/s2.xml" | head -c 300 )"; fi
+if python3 -c '
+import sys, xml.dom.minidom as M
+s = open( sys.argv[1], encoding="utf8" ).read()
+M.parseString( s )
+i = s.index( "<!-- ripwire for decl_rows:" )
+if "--" in s[ i + 4: s.index( "-->", i ) ]: sys.exit( 1 )
+' "$TMP/s2.xml" 2>/dev/null; then ok "(s2) the held answer is well formed XML and its comment holds no double hyphen"; else no "(s2) the held block's comment or the answer is not well formed XML"; fi
 run "--for=fix the off by one in run_it" --token-budget=4000 >"$TMP/s3.xml"
 if [ -s "$TMP/s3.xml" ] && ! grep -q 'decl_rows' "$TMP/s3.xml"; then ok "(s2) a token budget on a task the block does not read: nothing"; else no "(s2) budget, no fire"; fi
 printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":"%s","task":"add a new argument to run_it"}}}\n' "$FX" \

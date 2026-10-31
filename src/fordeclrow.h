@@ -363,7 +363,7 @@ inline std::string forDeclHeldXml( std::string_view spell, const std::string& ne
 {
     std::vector<char> esc;
     return "<!-- ripwire for decl_rows: held=\"budget\": a token budget is set, so the declaration rows of of= are not printed here; "
-           "next= is this same --for call without the budget, which prints them (--defs= would fold a tied prototype into its definition's row); "
+           "next= repeats this call without the token budget, which prints them (the defs verb folds a tied prototype into its definition's row); "
            "the answer above is unchanged -->"
            "<decl_rows of=\"" + std::string( escapeXml( spell, esc ) ) + "\" held=\"budget\"" + next + "/>";
 }
