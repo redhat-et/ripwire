@@ -293,7 +293,7 @@ M3="$( krun '--for=the `Invalid user settings file` error' | lit )"; M3b="$( kru
 if has "$M3" 'shape="message"' && has "$M3b" 'shape="message"'; then ok "M3 [P] a backticked or single-quoted span with a cue outside it"; else no "M3: ${M3:0:300} / ${M3b:0:300}"; fi
 M4="$( krun '--for=terminal foo must be the last filter in a chain error' | lit )"
 if has "$M4" 's="must be the last filter in a chain" shape="message"' && has "$M4" 'frag="1"' && has "$M4" 'in="chain"'; then ok "M4 [P] no whole hit: the longest end-anchored fragment, frag=1 says so"; else no "M4: ${M4:0:500}"; fi
-for near in 'Invalid user settings file' 'bad state error' 'Stale cache entry found error' 'Only a test message here error' 'why does retry fail error' '`no outer cue message here`' 'Zzq yyx wwv uut error' 'alpha if beta error' 'foo(x) bar baz error' 'Invalid user settings file errorHandler' 'Invalid user settings file terror'; do
+for near in 'Invalid user settings file' 'bad state error' 'Stale cache entry found error' 'Only a test message here error' 'why does retry fail error' '`no outer cue message here`' 'the `no outer cue message here` text' 'Zzq yyx wwv uut error' 'alpha if beta error' 'foo(x) bar baz error' 'Invalid user settings file errorHandler' 'Invalid user settings file terror'; do
     N="$( krun "--for=$near" )"
     if ! has "$N" '<lit ' && [ "$N" = "$( koff "--for=$near" )" ]; then ok "M5 [G] near miss, no <lit and byte-identical: $near"
     else no "M5 near miss fired: $near: $( lit <<<"$N" | cut -c1-300 )"; fi
