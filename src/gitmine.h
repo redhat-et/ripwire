@@ -3076,9 +3076,16 @@ inline CoPairVerdict coPairVerdict( const IngestResult& ing, std::uint32_t a, st
 }
 inline std::string coPairAttr( bool isDepCapable, bool isSurprising, std::uint32_t noEdgeLangs = 0 )
 {
-    return !isDepCapable ? std::string( " dep_capable=\"0\"" )
-         : noEdgeLangs != 0 ? noFileEdgesAttrXml( noEdgeLangs )
-                            : std::string( isSurprising ? " surprising=\"1\"" : "" );
+    std::string attr = noFileEdgesAttrXml( noEdgeLangs );   // empty unless a side's language draws no file edge
+    if( !isDepCapable )
+    {
+        attr = " dep_capable=\"0\"";
+    }
+    else if( attr.empty() && isSurprising )
+    {
+        attr = " surprising=\"1\"";
+    }
+    return attr;
 }
 inline std::string coPairAttr( const CoPartner& p ) { return coPairAttr( p.depCapable, p.surprising, p.noEdgeLangs ); }
 // The MCP twin's JSON key for the same fourth state: present only where the XML row carries no_file_edges=.
