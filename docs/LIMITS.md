@@ -418,6 +418,14 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kForCtorHopCap` | `16` | — | callee names listed on ctor_calls=; the rest counted in ctor_calls_more= |
 
+### `src/fordeclrow.h`
+
+Discloses: `capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForDeclRowsCap` | `8` | — | <d> rows in one <decl_rows> (runaway guard; a cut says shown= and next=) |
+
 ### `src/fordispatchhop.h`
 
 Discloses: `capped`
