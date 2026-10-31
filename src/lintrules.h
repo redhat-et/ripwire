@@ -294,13 +294,14 @@ inline bool dependencyPairCapable( Lang a, Lang b ) noexcept
 template<class Pred>
 inline std::string langTagsWhere( Pred holds )
 {
-    std::string out;
+    std::string      out;
+    std::string_view sep;
     for( std::size_t i = 0; i < kLangCount; ++i )
     {
         if( holds( Lang( i ) ) )
         {
-            if( !out.empty() ) { out.push_back( ',' ); }
-            out.append( langTag( Lang( i ) ) );
+            out.append( sep ).append( langTag( Lang( i ) ) );
+            sep = ",";
         }
     }
     return out;
