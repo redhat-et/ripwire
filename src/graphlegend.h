@@ -1066,7 +1066,8 @@ inline constexpr const char* kPrunedPackagesLegend =
 // --deps' legend clauses end in a space (the last one is followed by the cap sentence), --arch's start with one.
 inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
 {
-    return !on ? std::string() : leadingSpace ? std::string( " " ) + kPrunedPackagesLegend : std::string( kPrunedPackagesLegend ) + " ";
+    return !on ? std::string() : leadingSpace ? std::string( " " ) + kPrunedPackagesLegend
+                                              : std::string( kPrunedPackagesLegend ) + " ";
 }
 // Two legend clauses, each exactly when its count is non-zero (the #220 composers below all have this shape).
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )

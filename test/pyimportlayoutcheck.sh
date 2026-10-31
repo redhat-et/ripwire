@@ -207,6 +207,49 @@ w "$MR/b/tools/t.py" 'import helperlib\nfrom lp.m import lm\ndef w():\n    helpe
 wantkind F4.1-no-cross-root-call-edge "$MR" hl tools/t.py none "$MR/a/src" "$MR/b/tools"
 w "$MR/a/src/own.py" 'from lp.m import lm\ndef o():\n    lm()\n'
 wantkind F4.3-near-miss-own-root-still-binds "$MR" lm own.py firm "$MR/a/src" "$MR/b/tools"
+# D1: a package importing ITSELF is decided at its own chain root: no stdlib guard, no repo-root namesake in the way. A non-self importer stays
+# unresolved (its run mode is unknowable). Stdlib-named (email) and non-stdlib-named (foo, mytool) packages.
+DE=$T/selfemail
+w "$DE/src/email/__init__.py" ''; w "$DE/src/email/templates.py" 'def tp():\n    return 1\n'
+w "$DE/src/email/sender.py" 'from email.templates import tp\nimport email.utils\ndef send():\n    tp()\n'
+w "$DE/src/api/__init__.py" ''; w "$DE/src/api/routes.py" 'from email.sender import send\nimport logging\n'; w "$DE/src/logging.py" "$LG"
+w "$DE/tests/test_e.py" 'from email.sender import send\n'
+E=$(edges "$DE")
+want D1.1-stdlib-named-package-imports-itself "$E" 'src/email/sender.py -> src/email/templates.py'
+deny D1.2-non-self-importer-stays-dropped "$E" 'src/api/routes.py -> src/email/sender.py'
+deny D1.3-test-importer-stays-dropped "$E" 'tests/test_e.py -> src/email/sender.py'
+deny D1.4-near-miss-other-stdlib-name-stays-guarded "$E" 'src/api/routes.py -> src/logging.py'
+wantkind D1.5-call-graph-self-import "$DE" tp src/email/sender.py firm
+DR=$T/selfroot
+w "$DR/foo/__init__.py" ''; w "$DR/foo/a.py" 'def fa():\n    return 1\n'; w "$DR/foo/b.py" 'from foo.a import fa\n'
+w "$DR/src/foo/__init__.py" ''; w "$DR/src/foo/a.py" 'def fa():\n    return 2\n'; w "$DR/src/foo/b.py" 'from foo.a import fa\n'
+w "$DR/tests/t.py" 'import foo.a\n'; w "$DR/src/foo/sub/__init__.py" ''; w "$DR/src/foo/sub/d.py" 'import foo.a\n'
+w "$DR/mytool.py" 'from mytool.cli import main\n'; w "$DR/src/mytool/__init__.py" ''; w "$DR/src/mytool/cli.py" 'def main():\n    return 1\n'
+w "$DR/src/mytool/core.py" 'import mytool\nfrom mytool import cli\n'
+w "$DR/bar/bar.py" ''; w "$DR/src/bar/__init__.py" ''; w "$DR/src/bar/bar.py" ''; w "$DR/src/bar/c.py" 'import bar.bar\n'
+E=$(edges "$DR")
+want D1.6-self-beats-root-namesake "$E" 'src/foo/b.py -> src/foo/a.py'
+deny D1.7-self-beats-root-namesake "$E" 'src/foo/b.py -> foo/a.py'
+want D1.7b-nested-module-names-its-top-package "$E" 'src/foo/sub/d.py -> src/foo/a.py'
+want D1.8-near-miss-root-package-still-binds-itself "$E" 'foo/b.py -> foo/a.py'
+want D1.9-near-miss-test-keeps-root-tier "$E" 'tests/t.py -> foo/a.py'
+want D1.10-self-beats-root-script-namesake "$E" 'src/mytool/core.py -> src/mytool/__init__.py'
+want D1.11-near-miss-root-script-keeps-its-fallback "$E" 'mytool.py -> src/mytool/cli.py'
+want D1.12-self-beats-root-namespace-portion "$E" 'src/bar/c.py -> src/bar/bar.py'
+deny D1.13-self-beats-root-namespace-portion "$E" 'src/bar/c.py -> bar/bar.py'
+# D2: `__main__` is in no path (it is the running program), so it is guarded like a stdlib name; a plain script sibling still binds
+DM=$T/dunder
+w "$DM/src/__main__.py" ''; w "$DM/src/pk/__init__.py" ''; w "$DM/src/pk/a.py" 'import __main__\n'; w "$DM/tests/t.py" 'import __main__\n'
+w "$DM/scripts/__main__.py" ''; w "$DM/scripts/run.py" 'import __main__\n'
+E=$(edges "$DM")
+deny D2.1-main-not-through-layout-root "$E" 'tests/t.py -> src/__main__.py'
+deny D2.2-main-not-through-chain-root "$E" 'src/pk/a.py -> src/__main__.py'
+want D2.3-near-miss-script-sibling "$E" 'scripts/run.py -> scripts/__main__.py'
+# D5: the stdlib-root marker is os.py AND importlib/__init__.py; a backport holding only importlib/ is not the stdlib
+DB=$T/importlibbackport
+w "$DB/src/importlib/__init__.py" ''; w "$DB/src/logging.py" "$LG"; w "$DB/pkg/__init__.py" ''; w "$DB/pkg/a.py" 'import logging\n'
+E=$(edges "$DB")
+deny D5.1-importlib-alone-is-not-the-stdlib "$E" 'pkg/a.py -> src/logging.py'
 # call-graph twins of the src-layout arms (S1, S3, S5 read --arch only)
 SC=$T/callsrc
 w "$SC/src/mypkg/__init__.py" ''; w "$SC/src/mypkg/m.py" 'def fm():\n    return 1\n'; w "$SC/tests/test_m.py" 'from mypkg.m import fm\ndef t():\n    fm()\n'

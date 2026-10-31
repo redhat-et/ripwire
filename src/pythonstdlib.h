@@ -7,15 +7,18 @@
 // directory a build puts on sys.path, so a file there named like a stdlib module (`src/logging.py`, `lib/json.py`) shadows the
 // stdlib only if that directory comes FIRST on the path, which an installed package root never does. Resolution alone cannot decide
 // that (both files exist), so a stdlib-named FIRST segment does not bind through a layout root, and the import stays unresolved
-// the way the stdlib itself is. Not consulted anywhere else: a plain script directory really can shadow the stdlib (it is
+// the way the stdlib itself is. A package importing ITSELF is probed at its own chain root before any of this
+// (resolve.h pythonSelfChainRoot), so the guard never hides a package's own `email/`. Not consulted anywhere else: a plain script directory really can shadow the stdlib (it is
 // sys.path[0]), the repo root is probed as before, and the older suffix scan is untouched (a card, not this table). A layout root
 // that IS the stdlib (cpython `Lib/`) is exempt: resolve.h pythonRootHoldsStdlib.
 //
 // PROVENANCE. CPython 3.13.3 `sorted(sys.stdlib_module_names)`, 290 names. Regenerate the list with
 //   python3 -c 'import sys; print(*sorted(sys.stdlib_module_names), sep="\n")'
-// and wrap it into the array below. Version skew is a few names (asynchat, distutils and imp left the stdlib in 3.12 and 3.13) and
-// errs on the safe side: a name missing here only keeps the layout-root binding it had before. The static_assert below is the
-// compile-time proof that the binary search is valid.
+// and wrap it into the array below. Version skew is a few names: asynchat, distutils and imp left the stdlib in 3.12, and 3.13
+// removed the PEP 594 set (cgi, telnetlib and so on). A name missing here is treated like any project name, so a layout root holding
+// it binds; the base resolver had no layout roots, so that is a new edge: true for 3.13 code, false for older code. The static_assert
+// below is the compile-time proof that the binary search is valid. `__main__` is not in the interpreter's list and is tested beside
+// the lookup (isPythonStdlibModule).
 #include "externalnames.h"   // inSortedTable: the house lookup of a strictly sorted name table
 #include "infra/sortutil.h"
 
@@ -56,10 +59,11 @@ inline constexpr std::string_view kPythonStdlibModules[] = {
 static_assert( std::is_sorted( std::begin( kPythonStdlibModules ), std::end( kPythonStdlibModules ), rw::sortutil::svLess ),
                "kPythonStdlibModules must be sorted (binary search)" );
 
-/// Is `name` (a module's FIRST dotted segment) a CPython 3.13 standard-library module?
+/// Is `name` (a module's FIRST dotted segment) a CPython 3.13 standard-library module? The table is an exact copy of the
+/// interpreter's list, which omits `__main__` (always in sys.modules, never found on a path), so it is tested beside the lookup.
 inline bool isPythonStdlibModule( std::string_view name ) noexcept
 {
-    return rw::externalnames::inSortedTable( kPythonStdlibModules, name );
+    return name == "__main__" || rw::externalnames::inSortedTable( kPythonStdlibModules, name );
 }
 } // namespace pythonstdlib
 } // namespace rw

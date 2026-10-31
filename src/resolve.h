@@ -430,6 +430,29 @@ inline std::vector<std::string> pythonFallbackRoots( std::string_view dir, std::
     return roots;
 }
 
+// D1: a package importing ITSELF. When the first segment of an absolute import names the importer's own top package (the directory
+// directly under its chain root), the chain root is the one place that name can mean: `src/email/sender.py` writing
+// `from email.templates import t` means `src/email/templates.py`, with no stdlib guard and no repo-root namesake in the way. Empty
+// when the importer is not in a package, the chain ends at the repo root (tier 1 already probes it), or the name differs. A package
+// that imports another project package, or a script, gets nothing here: its run mode is unknowable.
+inline std::string pythonSelfChainRoot( std::string_view dir, std::string_view module, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                        const WsIncludeCtx* ws, std::uint32_t includerFileId )
+{
+    std::string_view top = dir;
+    std::string_view up  = dir;
+    while( !up.empty() && pythonDirIsPackage( up, fileIndex, ws, includerFileId ) )
+    {
+        top = up;
+        up  = includerDir( up );
+    }
+    if( up.empty() || top.size() == up.size() )
+    {
+        return {};
+    }
+    const std::string_view first = module.substr( 0, module.find( '.' ) );
+    return top.substr( up.size() + 1 ) == first ? std::string( up ) : std::string();
+}
+
 // Where a Python import is probed FIRST. Relative: its own directory only. Absolute: the repo root, and the file's own directory
 // unless that is a package (#478 gap 4): Python 3 has no implicit relative import, so inside a package `import logging` never
 // means the sibling logging.py. A plain script directory keeps it: it is sys.path[0] when the script runs. The layout roots
@@ -541,7 +564,18 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
             }
         }
     };
-    probeAll( pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId ) );
+    if( !isRelative )
+    {
+        const std::string selfRoot = pythonSelfChainRoot( dir, tail, fileIndex, ws, includerFileId );
+        if( !selfRoot.empty() )
+        {
+            probeAll( { selfRoot } );   // D1: the package's own chain root first; a miss falls through to the ordinary tiers
+        }
+    }
+    if( hit == kNoFile )
+    {
+        probeAll( pythonProbeBases( dir, isRelative, fileIndex, ws, includerFileId ) );
+    }
     if( hit == kNoFile && !isRelative )
     {
         probeAll( pythonFallbackRoots( dir, tail, fileIndex, ws, includerFileId ) );
