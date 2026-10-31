@@ -17,14 +17,15 @@ fi
 SAN="-fsanitize=address,undefined,integer,float-divide-by-zero,float-cast-overflow"
 printf 'int main(){return 0;}\n' > "$WORK/probe.cpp"
 "$CXX" $SAN -fsyntax-only "$WORK/probe.cpp" 2>/dev/null || SAN="-fsanitize=address,undefined"
+fail=0
+no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 SRC="${FILESET_UNIT_INCLUDE:-$ROOT/src}"   # a mutant copy of the header, for proving this gate can go red
-if ! "$CXX" "$CXXSTD" -O1 -g $SAN -fno-sanitize-recover=all -I"$SRC" -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" \
+if "$CXX" "$CXXSTD" -O1 -g $SAN -fno-sanitize-recover=all -I"$SRC" -I"$ROOT/src" -I"$ROOT/src/infra" -I"$ROOT/third_party" \
      "$ROOT/test/fileset_unit.cpp" "$ROOT/src/infra/diagnostics.cpp" -o "$WORK/unit" 2> "$WORK/cc.log"; then
+    "$WORK/unit" || no "the unit exited $?"
+else
     sed -n 1,20p "$WORK/cc.log"
-    echo "filesetcheck: FAIL: the unit did not compile"
-    exit 1
+    no "the unit did not compile"
 fi
-"$WORK/unit"
-rc=$?
-[ "$rc" -eq 0 ] && echo "filesetcheck: PASS" || echo "filesetcheck: FAIL"
-exit "$rc"
+[ "$fail" -eq 0 ] && echo "filesetcheck: PASS" || echo "filesetcheck: FAIL"
+exit "$fail"
