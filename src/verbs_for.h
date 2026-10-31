@@ -2724,7 +2724,7 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
 std::optional<int> runCallHierarchy( const MainDispatch& d );
 std::optional<int> runConnect( const MainDispatch& d );
 
-// MF1-LIT (src/forliteral.h): a task naming a literal (a quoted span or a CONST_SHAPED word) gets the literal's byte-exact sites
+// MF1-LIT (src/forliteral.h): a task naming a literal (a quoted span, a CONST_SHAPED word, a dotted key, a cued message) gets the literal's byte-exact sites
 // and their owner bodies inside <lit>, just before </ctx>, after every byte of the ordinary answer. `served` is the answer's own
 // body text: a body it already printed is not repeated. XML, the default regime and a single root only.
 inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view rootArg, std::string_view served )
@@ -2734,12 +2734,7 @@ inline void appendLiteralAnchorBlock( const MainDispatch& d, std::string_view ro
     {
         return;
     }
-    const std::optional<rw::ForLiteral> lit = rw::forLiteralOf( cfg.forTask );
-    if( !lit )
-    {
-        return;
-    }
-    const rw::ForLiteralRender r = rw::renderForLiteral( d.ing, *lit, rootArg, served, d.redactPtr, /*useMemo=*/!cfg.noCache, /*compactLegend=*/cfg.legend == "compact" );
+    const rw::ForLiteralRender r = rw::renderForLiteralOfTask( d.ing, cfg.forTask, rootArg, served, d.redactPtr, /*useMemo=*/!cfg.noCache, /*compactLegend=*/cfg.legend == "compact" );
     std::fwrite( r.xml.data(), 1, r.xml.size(), stdout );
 }
 
