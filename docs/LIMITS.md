@@ -15,18 +15,21 @@ document. To reach a declaration, search its file for the name (`grep -n <name> 
 `ripwire . --grep=<name>`). A file that declares the same name, value and note more than once shows
 it once, marked `×N`.
 
-**Known residual — a single pathological match is unbounded on libstdc++.** One `std::regex` call is atomic to
-its caller, so no caller-side counter can see the work inside one, and libstdc++'s engine never throws; libc++
-returns only because its ENGINE throws `error_complexity`. The multi-quantifier family (`a*a*a*a*a*b`,
-`^(a)*(a)*(a)*(a)*(a)*$`) is admitted by the screen by construction: a subject that holds a required literal and
-then a long run is unbounded work, named and reachable, **tracked by `regex-screen-multiquantifier` (follow-on
-spec), never claimed closed**. (The guard's former per-file match budget — `kRegexFileMatchBudget`, removed in
-the PR #397 review — cannot be revived against this residual: it counted line-match attempts BETWEEN engine
-calls, so it refused fast linear answers and still bounded nothing inside one call.) A second admitted shape is a
-bounded quantifier over a group that itself repeats: `((a|aa){2,5}){2,5}b$` passes the screen because both
-quantifiers are bounded, yet it is exponential on libstdc++ (and abandoned by libc++), so "make the outer quantifier
-a small explicit bound" is safe only when nothing inside the group repeats; it is the same class as
-`(a|aa){1,100}b$`, tracked with the multi-quantifier family above.
+**Residual — a single pathological match is unbounded on libstdc++, narrowed but NOT closed.**
+One `std::regex` call is atomic to its caller, so no caller-side counter can see the work inside one, and
+libstdc++'s engine never throws; libc++ returns only because its ENGINE throws `error_complexity`. The screen now
+REFUSES the two multi-quantifier shapes it used to admit — `a*a*a*a*a*b` (adjacent unbounded quantifiers whose
+atoms are not proven disjoint, flat or grouped as `^(a)*(a)*(a)*(a)*(a)*$`) and
+`^(ab\w|((.|.){1,3}){1,3}){1,3}$` (an unprovable alternation repeated within a repeat) — by name and before any
+engine sees the pattern, which is `regex-screen-multiquantifier`'s closure
+(`test/regexmultiquantcheck.sh`). **What remains open is the general case**, and it is still reachable: any
+ADMITTED pattern whose cost in the subject is super-linear. The family is not provable shape-by-shape — a bounded
+quantifier over a group that itself repeats, `((a|aa){2,5}){2,5}b$`, passes the screen because both quantifiers
+are bounded and no proof of disjointness can answer it, yet it is exponential on libstdc++ (and abandoned by
+libc++); it is the same class as `(a|aa){1,100}b$`. So "make the outer quantifier a small explicit bound" is safe
+only when nothing inside the group repeats. (The guard's former per-file match budget — `kRegexFileMatchBudget`,
+removed in the PR #397 review — cannot be revived against this residual: it counted line-match attempts BETWEEN
+engine calls, so it refused fast linear answers and still bounded nothing inside one call.)
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |

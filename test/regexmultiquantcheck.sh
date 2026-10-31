@@ -144,7 +144,9 @@ shapeCase(){
         return
     fi
 
-    [ "$rc" -eq 1 ] && ok "$label: exit 1" || no "$label: exit $rc (a structural refusal is exit 1)"
+    # An if/else, NOT `cond && ok … || no …`: in `A && B || C`, C also runs when B fails, and ok()'s printf
+    # CAN fail on a pipe (gateexitcheck.sh G1/G2 measure exactly this — 21 spurious FAILs on a stalled reader).
+    if [ "$rc" -eq 1 ]; then ok "$label: exit 1"; else no "$label: exit $rc (a structural refusal is exit 1)"; fi
     grep -q 'hits=' "$TMP/out" && no "$label: printed a hits= element — a refusal was reported as a measurement" \
         || ok "$label: no hits= element on stdout"
     if grep -qF -- "$pat" "$TMP/err"; then ok "$label: refusal names the pattern"; else no "$label: refusal does not name the pattern"; fi
@@ -229,13 +231,22 @@ fi
 
 # ── (6) THE VOCABULARY IS EXTENDED, NOT BLURRED (AC8) ────────────────────────────────────────────────────────
 # A structural refusal must not be spelled as an engine abandonment. Since both exit 1, this is a MESSAGE
-# assertion and nothing else: the refusal's own words name the construct and the quantifier it objects to, and
-# the string this spec must NOT reintroduce (`kRegexBudgetReason`'s per-file match budget, removed by the PR #397
+# assertion and nothing else: the refusal's own words name the construct and the atoms it objects to, and the
+# string this spec must NOT reintroduce (`kRegexBudgetReason`'s per-file match budget, removed by the PR #397
 # review) stays absent from every message this gate provokes.
+#
+# The content check is on the FAMILY OPENING and on `quantifier`, not on one phrasing: this spec's family has two
+# clauses and they say different things after the opening — clause 1's refusal is "two unbounded quantifiers in a
+# row whose atoms are not proven disjoint", clause 2's is the alternation sentence. Pinning one clause's sentence
+# here would make the other clause's arm fail on wording, which is the "arm asserts a phrasing, not a contract"
+# defect that turns a green gate into a rubber stamp.
 "$BIN" "$FIX/i" --regex='a*a*a*a*a*b' --no-cache >/dev/null 2>"$TMP/refuse.err"
-grep -qF 'the unbounded quantifier' "$TMP/refuse.err" \
-    && ok "the refusal names the construct as a quantifier ('the unbounded quantifier ...')" \
-    || no "the refusal does not name the quantifier: $( head -c 300 "$TMP/refuse.err" )"
+grep -qiF 'catastrophic backtracking' "$TMP/refuse.err" \
+    && ok "the refusal opens on the family's construct phrase" \
+    || no "the refusal does not open on the construct phrase: $( head -c 300 "$TMP/refuse.err" )"
+grep -qi 'quantifier' "$TMP/refuse.err" \
+    && ok "the refusal names what it objects to as a quantifier" \
+    || no "the refusal does not name the quantifier construct: $( head -c 300 "$TMP/refuse.err" )"
 grep -qiE 'collapse|bounded|workaround' "$TMP/refuse.err" \
     && ok "the refusal offers a workaround" \
     || no "the refusal offers no workaround: $( head -c 300 "$TMP/refuse.err" )"
