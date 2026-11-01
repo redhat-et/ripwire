@@ -628,6 +628,15 @@ ask "$N" "unused functions in pkg/ext/alpha.py" > "$T/f6h.out"
 want F6h "$T/f6h.out" setup_alpha unknown built-name
 ask "$N" "unused functions in pkg2/isx_t.py" > "$T/f6i.out"
 want F6i "$T/f6i.out" is_private_addr unknown built-name   # the lookup's object is the target module: no stem-length rule
+# F10 (over-hedge, safe to tighten): a def's own line naming itself is no use; pub(crate) has no consumer outside the crate
+printf 'from typing import TypeVar\nW = TypeVar("W")\n' > "$O/pkg/tv.py"
+ask "$O" "unused functions in pkg/tv.py" > "$T/f10a.out"
+want F10a "$T/f10a.out" W unused
+mkdir -p "$T/f10/src"; printf '[package]\nname = "l"\nversion = "0.1.0"\n' > "$T/f10/Cargo.toml"
+printf 'pub fn pub_api_f10() -> i32 { 1 }\npub(crate) fn crate_only_dead() -> i32 { 2 }\n' > "$T/f10/src/lib.rs"
+ask "$T/f10" "unused functions in src/lib.rs" > "$T/f10b.out"
+want F10b "$T/f10b.out" pub_api_f10 unknown api
+want F10c "$T/f10b.out" crate_only_dead unused
 grep -q 'kForUnusedForeignStem' "$(dirname "$0")/../src/forunused.h" 2>/dev/null && fail "F6j: the stem-length rule is back" || pass "F6j: no stem-length rule"
 
 # ---- the trigger, on the words of the stored argv ----

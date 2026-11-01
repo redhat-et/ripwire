@@ -369,6 +369,12 @@ inline bool sigOpensPub( const Symbol& s, std::string_view src ) noexcept
     return s.sigStartByte <= src.size() && trimWs( src.substr( ls, s.sigStartByte - ls + 4 ) ).starts_with( "pub" );
 }
 
+inline bool sigOpensRestrictedPub( const Symbol& s, std::string_view src ) noexcept
+{
+    const std::size_t ls = lineStartOf( src, s.sigStartByte );
+    return s.sigStartByte <= src.size() && trimWs( src.substr( ls, s.sigStartByte - ls + 5 ) ).starts_with( "pub(" );
+}
+
 // Is the def a public row of its language? `owner` is the class symbol of a method, when the file holds one.
 inline bool isPublicDef( const IngestResult& ing, const Symbol& s, std::string_view src, std::span<const std::string_view> jsExports, const Symbol* owner ) noexcept
 {
@@ -515,7 +521,7 @@ inline std::uint16_t languageHedges( const Symbol& s, std::string_view rel, std:
             {
                 why |= kWhyFramework;
             }
-            if( rustLibCrate )
+            if( rustLibCrate && !sigOpensRestrictedPub( s, src ) ) // pub(crate), pub(super), pub(in ..) cannot be named outside the crate
             {
                 why |= kWhyApi;
             }
@@ -963,7 +969,11 @@ private:
         const char close = src[e];
         if( close == q )
         {
-            if( Row* r = find( lit ); r != nullptr )
+            if( Row* r = find( lit ); r != nullptr && std::ranges::binary_search( r->ownLines, ( std::uint64_t( fileId ) << 32 ) | lineNo ) )
+            {
+                // `T = TypeVar("T")`: the def's own line naming itself is no use of it
+            }
+            else if( r != nullptr )
             {
                 r->why |= kWhyString;
                 ++r->strings;
