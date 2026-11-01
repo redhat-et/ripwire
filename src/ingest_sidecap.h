@@ -3,6 +3,7 @@
 #error "ingest_sidecap.h is a SECTION of src/ingest.cpp's translation unit - include it only from ingest.cpp (see the ingest-family split note there)"
 #endif
 
+#include "mapinventory.h"  // inventoryEntryStyle: the #452 extraction gate reads the style, not a Lang compare
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 
 // ingest_sidecap.h — parse infrastructure + the fused side-capture passes, moved VERBATIM from
@@ -2297,6 +2298,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             // are themselves symbols, and dropping the members while keeping the shell would be a worse
             // answer than either). Runs on defNode, whose ancestors are the enclosing scopes.
             d.testScope = isTestMacroBlock ? std::uint8_t( 1 ) : std::uint8_t( inFileTestScope( defNode, src, le.lang ) );   // LB-E: a test macro IS the in-file convention
+            // #452: Swift's entry-declaration type — `@main struct Tool { static func main() }`. Judged on the
+            // SAME defNode walk as testScope (an existing channel, no new walk); only a Swift type declaration
+            // can carry it, so every other language pays one field check.
+            d.entryDecl = ( inventoryEntryStyle( le.lang ) == InventoryEntryStyle::EntryAttrType && kind == SymKind::Class && swiftDeclCarriesMainAttr( defNode, src ) )
+                              ? std::uint8_t( 1 ) : std::uint8_t( 0 );
             d.maxNest   = fnOrMethod ? std::uint8_t( nestVal > 255u ? 255u : nestVal ) : std::uint8_t( 0 );
             // The nesting profile (model.h Symbol::humps/deepLoc). Saturating at 65535 on purpose: a def past
             // either bound is beyond every triage threshold, and deepLoc is a floor already, so a clamp there

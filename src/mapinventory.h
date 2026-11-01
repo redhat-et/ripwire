@@ -20,10 +20,11 @@
 //         file's module scope calls it and nothing else does (Python's `if __name__ == "__main__": main()`, Bash's
 //         `main "$@"`, a script's top-level `main()`): an uncalled `main` there is a library function or dead code;
 //       – a Python `__main__.py` module scope.
-//     A method named main anywhere else (a Python/JS/Ruby class member) is never an entry. Any other language: no
+//     A method named main anywhere else (a Python/JS/Ruby class member) is never an entry; in Swift the @main
+//     attribute's TYPE is the entry (Symbol::entryDecl, #452). Any other language: no
 //     claim (a missed entry is disclosed by the legend; a false one would not be). Outside test paths and the
 //     rolled-up directories below. Not detected (stated in the legend): entries declared in a manifest
-//     (package.json main/bin/exports, console_scripts, Cargo [[bin]]) or by an attribute (Swift @main, Kotlin
+//     (package.json main/bin/exports, console_scripts, Cargo [[bin]]) or by a later attribute convention (Kotlin
 //     @JvmStatic) — the index does not read those as entry declarations.
 //   • ls rows — per directory, the unshown files: code files NAMED (basename), every other file COUNTED. A file under
 //     a test/bench/fixture/example/doc directory rolls up to that directory (counted, never named): those trees are
@@ -123,13 +124,14 @@ inline bool isInventoryCodeSymbol( const Symbol& s ) noexcept
 // How a language spells its program entry (the header's entry rule). EntryFn: a caller-less Function `main` IS the
 // entry. EntryStaticMethod: a caller-less Method `main`/`Main` is (Java/C# static main). ModuleScopeCall: a Function
 // `main` is an entry only when its own file's module scope calls it. None: no claim.
-enum class InventoryEntryStyle : std::uint8_t { None, EntryFn, EntryStaticMethod, ModuleScopeCall };
+enum class InventoryEntryStyle : std::uint8_t { None, EntryFn, EntryStaticMethod, ModuleScopeCall, EntryAttrType };
 
 // The languages of each style, as data (a reader checks one list, not a switch).
 inline constexpr Lang kInventoryEntryFnLangs[]       = { Lang::C, Lang::Cpp, Lang::ObjC, Lang::Go, Lang::Rust, Lang::Kotlin, Lang::Dart };
 inline constexpr Lang kInventoryStaticMethodLangs[]  = { Lang::Java, Lang::CSharp };
 inline constexpr Lang kInventoryModuleScopeLangs[]   = { Lang::Python, Lang::JavaScript, Lang::TypeScript, Lang::Ruby, Lang::Bash,
                                                          Lang::Php, Lang::Lua };
+inline constexpr Lang kInventoryAttrTypeLangs[]      = { Lang::Swift };
 
 inline constexpr InventoryEntryStyle inventoryEntryStyle( Lang l ) noexcept
 {
@@ -137,11 +139,13 @@ inline constexpr InventoryEntryStyle inventoryEntryStyle( Lang l ) noexcept
     return in( kInventoryEntryFnLangs )      ? InventoryEntryStyle::EntryFn
          : in( kInventoryStaticMethodLangs ) ? InventoryEntryStyle::EntryStaticMethod
          : in( kInventoryModuleScopeLangs )  ? InventoryEntryStyle::ModuleScopeCall
+         : in( kInventoryAttrTypeLangs )     ? InventoryEntryStyle::EntryAttrType
                                              : InventoryEntryStyle::None;
 }
 
-// A def whose name and kind fit its language's entry convention (callers are judged separately).
-inline bool isInventoryEntryShape( const Symbol& s ) noexcept
+// A def whose name and kind fit its language's entry convention (callers are judged separately). Takes the
+// IngestResult for the #452 side table (a Swift @main entry type's fact lives there, not on Symbol).
+inline bool isInventoryEntryShape( const IngestResult& ing, const Symbol& s, NodeId id ) noexcept
 {
     switch( inventoryEntryStyle( s.lang ) )
     {
@@ -150,9 +154,44 @@ inline bool isInventoryEntryShape( const Symbol& s ) noexcept
         // only a TOP-LEVEL main is the script's entry
         case InventoryEntryStyle::ModuleScopeCall:   return s.kind == SymKind::Function && s.name == "main" && s.scope.empty();
         case InventoryEntryStyle::EntryStaticMethod: return s.kind == SymKind::Method && ( s.name == "main" || s.name == "Main" );
+        // an attribute names the entry TYPE itself (Swift `@main struct Tool`): the fact was computed at
+        // extraction (Symbol::entryDecl); the type's name is the entry's name, any name fits
+        case InventoryEntryStyle::EntryAttrType:
+            return id < ing.entryDeclTypes.size() && ing.entryDeclTypes[ id ] != 0;
         case InventoryEntryStyle::None:              break;
     }
     return false;
+}
+
+// #452 (CodeRabbit major on the first #452 PR): an EntryAttrType entry's own static main() — the callee its
+// convention promises ("the type is the entry, its static main() the callee"). The type does not CALL its
+// main in source, so no graph edge carries it; the two inventory serializers append this one row for the
+// attribute style only, never into the graph itself. Symbol ids are (fileId, line, name) order, so this
+// file's defs are the contiguous run around the entry — the scan is proportional to the file, not the corpus.
+// kNoNode when the type declares no main (an unsatisfiable Swift program, or one the parser missed): nothing
+// is invented. Membership is by CONTAINMENT — the main's definition sits inside the entry type's own
+// byte span (Swift methods carry no scope name on their Symbol) — so another file's or another type's
+// main never rides an entry row.
+inline NodeId inventoryAttrTypeMainCallee( const IngestResult& ing, NodeId entryId )
+{
+    const Symbol& s = ing.symbols[ entryId ];
+    if( inventoryEntryStyle( s.lang ) != InventoryEntryStyle::EntryAttrType || s.fileId >= ing.files.size() )
+    {
+        return kNoNode;
+    }
+    NodeId lo = entryId;
+    while( lo > 0 && ing.symbols[ lo - 1 ].fileId == s.fileId ) { --lo; }
+    NodeId hi = entryId;
+    while( hi + 1 < ing.symbols.size() && ing.symbols[ hi + 1 ].fileId == s.fileId ) { ++hi; }
+    for( NodeId id = lo; id <= hi; ++id )
+    {
+        const Symbol& m = ing.symbols[ id ];
+        if( m.name == "main" && m.kind == SymKind::Function && m.sigStartByte > s.sigStartByte && m.sigStartByte < s.endByte )
+        {
+            return id;
+        }
+    }
+    return kNoNode;
 }
 
 inline bool isInventoryMainModule( const IngestResult& ing, const Symbol& s ) noexcept
@@ -208,7 +247,7 @@ inline void collectInventoryEntries( MapInventory& inv, const IngestResult& ing,
     for( NodeId id = 0; id < S; ++id )
     {
         const Symbol& s = ing.symbols[ id ];
-        candidate[ id ] = isInventoryEntryShape( s ) && s.fileId < F && !isTestSymbol( ing, id ) && entryEligibleFile( s.fileId );
+        candidate[ id ] = isInventoryEntryShape( ing, s, id ) && s.fileId < F && !isTestSymbol( ing, id ) && entryEligibleFile( s.fileId );
     }
     // a candidate with an in-repo caller other than its own file's module scope is a library function, not an entry
     for( NodeId caller = 0; caller < S; ++caller )
@@ -373,10 +412,10 @@ inline constexpr std::string_view kMapInventoryLegend =
     "evidence than a ranked row. listed= files shown above, unlisted= the rest (listed+unlisted = files=). entry p= n=: a "
     "program entry by its language's convention: a main nothing in the repo calls in C, C++, ObjC, Go, Rust, Kotlin or "
     "Dart; a static Main/main method nothing calls in Java or C#; in a script language (Python, JS, TS, Ruby, Bash, PHP, "
-    "Lua) a main that its own file's module scope calls and nothing else does; or a __main__.py module scope; its "
+    "Lua) a main that its own file's module scope calls and nothing else does; in Swift the @main attribute's type "
+    "(the type is the entry, its static main() the callee); or a __main__.py module scope; its "
     "resolved callees as c rows. A method named main elsewhere, or a script main nothing runs, is not an entry; entries "
-    "declared only in a manifest (package.json main/bin, console_scripts) or by an attribute (Swift @main) are not "
-    "detected. ls p= n= f=: n= unshown files under directory p=, f= the code files among them by name; test, doc and "
+    "declared only in a manifest (package.json main/bin, console_scripts) are not detected. ls p= n= f=: n= unshown files under directory p=, f= the code files among them by name; test, doc and "
     "config files are counted, not named, and a test/e2e/bench/benchmark/fixture/example/_examples/doc directory rolls "
     "up whole. ripwire on p= ranks that directory. Runaway guards: entries_capped=1 entries_total=N when more than 256 "
     "entries exist (the first 256 by path shown), entries_next= the argv listing every def that could be a cut entry (a "

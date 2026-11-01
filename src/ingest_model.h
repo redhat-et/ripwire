@@ -437,6 +437,10 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
             s.fnLocal = 1;
             result.fnLocalScopes.push_back( FnLocalScope{ s.id, d.fnScopeStart, d.fnScopeEnd } );
         }
+        // #452: the Swift @main entry-type bit rides a SoA side table (Symbol has no byte left).
+        // Pushed for EVERY def — a parallel array, so a reader indexes it by symbol id unchecked-free
+        // only up to its own size (the nestRefusedFile discipline).
+        result.entryDeclTypes.push_back( ( d.entryDecl != 0 ) ? std::uint8_t( 1 ) : std::uint8_t( 0 ) );
         result.symbols.push_back( std::move( s ) );
     }
 

@@ -2165,6 +2165,12 @@ struct IngestResult
                                            // startByte)); reachable only through graph.h's resolveFieldSelector.
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
+    // #452: per-def, 1 ⇒ this def is a Swift `@main` entry type — the attribute computed at extraction
+    // (ingest_names.h swiftDeclCarriesMainAttr), the entry being the TYPE itself and its static main()
+    // the callee. Parallel to `symbols` (readers bounds-check by size, the nestRefusedFile discipline);
+    // a SoA side table because Symbol has no byte left for the bit — the same answer as fnLocalScopes.
+    // Read by mapinventory.h isInventoryEntryShape under the EntryAttrType style.
+    std::vector<std::uint8_t> entryDeclTypes;
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)

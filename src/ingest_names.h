@@ -1531,6 +1531,39 @@ inline bool rustItemCarriesMockAttr( TSNode item, std::string_view src )
     } );
 }
 
+// #452: does this Swift type declaration carry the `@main` attribute — the language's program-entry
+// convention (`@main struct Tool { static func main() { … } }`)? Node shape VERIFIED with --match probes
+// on alex-pinkus/tree-sitter-swift, not assumed (the grammar's own names differ from what a guess would
+// spell): the attribute is an `attribute` child of the `modifiers` child of `class_declaration`, and
+// only a declaration with a `name:` field introduces a NEW type — an `extension` parses to the same
+// class_declaration kind but has no `name:` field, so it is excluded here (Swift itself rejects
+// `@main` on an extension; an illegal spelling must not claim an entry).
+inline bool swiftDeclCarriesMainAttr( TSNode decl, std::string_view src ) noexcept
+{
+    if( ts_node_is_null( ts_node_child_by_field_name( decl, "name", 4 ) ) )
+    {
+        return false;   // an extension (or otherwise not a new-type declaration): never the entry
+    }
+    const auto isModifiers = []( const char* k ) { return kindIs( k, "modifiers" ); };
+    for( std::uint32_t ch = 0; ch < ts_node_child_count( decl ); ++ch )
+    {
+        TSNode c = ts_node_child( decl, ch );
+        if( !isModifiers( ts_node_type( c ) ) )
+        {
+            continue;
+        }
+        for( std::uint32_t a = 0; a < ts_node_child_count( c ); ++a )
+        {
+            TSNode attr = ts_node_child( c, a );
+            if( kindIs( ts_node_type( attr ), "attribute" ) && nodeTextOf( attr, src ) == "@main" )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Python `class Test<Something>` — the unittest/pytest convention. The character after `Test` MUST be
 // uppercase or '_', which is exactly what stops `class Testament` (a real English word, and the
 // gate's negative control) from matching. A class named exactly `Test` is also left alone: four

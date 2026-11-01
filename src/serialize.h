@@ -3079,6 +3079,12 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
         w.write( "<entry p=\"" );  w.write( escapeXml( pathRel( s.fileId ), esc ) );
         w.write( "\" n=\"" );      w.write( escapeXml( s.name, esc ) );  w.write( "\">" );
         writeMapCalleeRows( w, ing, outOff[ id ], outOff[ id + 1 ], outTargets, outProv, outNameOnly, esc, scratch );
+        // #452: an attribute-style entry's own static main(), the callee its convention promises — no edge
+        // carries it (the type does not call its own main), so it is appended here for this row only
+        if( const NodeId mainId = inventoryAttrTypeMainCallee( ing, id ); mainId != kNoNode )
+        {
+            w.write( "<c n=\"" );  w.write( escapeXml( ing.symbols[ mainId ].name, esc ) );  w.write( "\"/>" );
+        }
         w.write( "</entry>" );
     }
     for( const MapInventoryDir& d : inv.dirs )
@@ -10997,6 +11003,11 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
             {
                 writeMapCalleeJsonKind( w, ( *outNameOnly )[ e ] );
             }
+            w.write( "}" );
+        }
+        if( const NodeId mainId = inventoryAttrTypeMainCallee( ing, id ); mainId != kNoNode )
+        {
+            w.write( outOff[ id + 1 ] > outOff[ id ] ? ",{\"n\":" : "{\"n\":" );  writeJsonStr( w, ing.symbols[ mainId ].name, esc );
             w.write( "}" );
         }
         w.write( "]}" );
