@@ -85,14 +85,10 @@ struct Spelling
     bool             valid = false;
 };
 
-inline bool allIdentChars( std::string_view t ) noexcept
-{
-    return !t.empty() && std::ranges::all_of( t, []( char c ) { return namesplit::isIdentChar( c ); } );
-}
-
 inline Spelling parseSpelling( std::string_view w ) noexcept
 {
     Spelling          s;
+    const auto        identOnly = []( std::string_view t ) { return !t.empty() && std::ranges::all_of( t, namesplit::isIdentChar ); };
     const std::size_t colon = w.rfind( "::" );
     const std::size_t dot   = w.rfind( '.' );
     if( colon != std::string_view::npos && ( dot == std::string_view::npos || colon > dot ) )
@@ -108,7 +104,7 @@ inline Spelling parseSpelling( std::string_view w ) noexcept
     else
     {
         s.leaf  = w;
-        s.valid = allIdentChars( w );
+        s.valid = identOnly( w );
         return s;
     }
     const std::size_t prevColon = w.rfind( "::" );
@@ -116,7 +112,7 @@ inline Spelling parseSpelling( std::string_view w ) noexcept
     const std::size_t cut       = prevColon != std::string_view::npos && ( prevDot == std::string_view::npos || prevColon > prevDot ) ? prevColon + 2
                                 : prevDot != std::string_view::npos ? prevDot + 1 : 0;
     s.qualifier = w.substr( cut );
-    s.valid     = allIdentChars( s.leaf ) && allIdentChars( s.qualifier );
+    s.valid     = identOnly( s.leaf ) && identOnly( s.qualifier );
     return s;
 }
 
@@ -125,11 +121,6 @@ inline bool hasNameSyntax( std::string_view w ) noexcept
 {
     return !w.empty() && w.front() != '-' && w.find( '/' ) == std::string_view::npos
         && ( namesplit::hasIdentifierShape( w ) || w.find( "::" ) != std::string_view::npos || w.find( '.' ) != std::string_view::npos );
-}
-
-inline bool isJoinWord( std::string_view w )
-{
-    return detail::graphSubjectWordIs( w, { "+", "->", "=>", "=", "|", "<-", "&" } );
 }
 
 // a question opens with one of these
@@ -199,7 +190,7 @@ inline bool sortSubjectWords( const std::vector<std::string_view>& words, Subjec
 {
     for( const std::string_view w : words )
     {
-        if( isJoinWord( w ) )
+        if( detail::graphSubjectWordIs( w, { "+", "->", "=>", "=", "|", "<-", "&" } ) )   // two named endpoints: a connect question
         {
             return false;
         }
