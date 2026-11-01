@@ -2933,7 +2933,7 @@ std::optional<int> runQualityViews( const MainDispatch& d )
             {
                 return false;
             }
-            return quality::startsWithRegisteredMacro( std::string_view( src ).substr( symbol.sigStartByte ), registerMacroNames );
+            return quality::registersItself( symbol, src, std::string_view( src ).substr( symbol.sigStartByte ), registerMacroNames );
         };
         std::size_t registerMacroExcluded = 0;   // P2.2: disclosed count — see the header comment below
         std::size_t runnerRootExcluded    = 0;   // 0.6.6 D4: disclosed count (runner-root-excluded=, absent at 0)

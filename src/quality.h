@@ -1221,8 +1221,10 @@ struct DefectSiteAt
 // three call sites — which is precisely the finding that kind exists to catch, on the run that was adding
 // it. Two copies of "read each file once and hand me each body" is two places for the degrade rules to
 // drift, and those rules are the honesty contract here, not an implementation detail.
+// visit( NodeId, const Symbol&, body, fileBytes ): the body slice plus the whole file, for a rule that reads text OUTSIDE
+// the slice (forEachSymbolBody below is the three-argument spelling every other caller uses).
 template<class Fn>
-inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
+inline void forEachSymbolFile( const IngestResult& ing, Fn&& visit )
 {
     // per-file def ids with a real body (see constructCountsBySym above on `symbols[i].id == i`).
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
@@ -1244,9 +1246,18 @@ inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
             {
                 continue;
             }
-            visit( i, s, std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ) );
+            visit( i, s, std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ), std::string_view( bytes ) );
         }
     }
+}
+
+template<class Fn>
+inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
+{
+    forEachSymbolFile( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view )
+    {
+        visit( i, s, body );
+    } );
 }
 
 // Direct Python class members get an owner: the enclosing class. A def nested inside a method gets a host: the
@@ -1660,6 +1671,81 @@ inline std::vector<std::uint8_t> trailingDefaultByNode( const IngestResult& ing 
 }
 
 
+// ---- Rust test-harness registration (issue #493) ---------------------------------------------------------------
+// `#[test]` and `#[tokio::test]` (optionally with an argument list) register a function with the test harness,
+// which calls it by name without any call in the tree. They are attributes, not macro calls, so the signature-
+// text check above never sees them: the attribute stacks ABOVE the item, outside [sigStartByte, endByte).
+// isRustTestAttribute answers whether the text between "#[" and "]" is one of the two spellings.
+inline bool isRustTestAttribute( std::string_view attr ) noexcept
+{
+    if( attr == "test" )
+    {
+        return true;
+    }
+    constexpr std::string_view tokio = "tokio::test";
+    if( attr.substr( 0, tokio.size() ) == tokio )
+    {
+        return attr.size() == tokio.size() || attr[ tokio.size() ] == '(';
+    }
+    return false;
+}
+
+// rustTestAttributed reads backwards from the item's signature start over blank lines, `//` comments and other
+// attribute lines (`#[inline]`, `#[allow(...)]`), and answers true when one of them is a test attribute. Whole-token
+// compare: `#[testing]` and a `#[test]` inside a comment do not count.
+// FLOOR, stated: a multi-line attribute, or a block comment between attribute and item, ends the scan and the item
+// stays a dead-code candidate. That is a miss in the reporting direction, never a false exemption.
+inline bool rustTestAttributed( std::string_view file, std::size_t sigStart ) noexcept
+{
+    std::size_t end = std::min( sigStart, file.size() );   // everything before `end` is still unread
+    for( ;; )
+    {
+        while( end > 0 && std::isspace( static_cast<unsigned char>( file[ end - 1 ] ) ) )
+        {
+            --end;
+        }
+        if( end == 0 )
+        {
+            return false;
+        }
+        const std::size_t nl   = file.rfind( '\n', end - 1 );
+        const std::size_t from = nl == std::string_view::npos ? 0 : nl + 1;
+        std::string_view  line = file.substr( from, end - from );
+        while( !line.empty() && std::isspace( static_cast<unsigned char>( line.front() ) ) )
+        {
+            line.remove_prefix( 1 );
+        }
+        if( line.substr( 0, 2 ) == "//" )
+        {
+            end = from;   // a comment or doc line: keep reading upward
+            continue;
+        }
+        const std::size_t open = line.rfind( "#[" );
+        if( open == std::string_view::npos || line.back() != ']' )
+        {
+            return false; // any other code ends the attribute block
+        }
+        if( isRustTestAttribute( line.substr( open + 2, line.size() - open - 3 ) ) )
+        {
+            return true;
+        }
+        end = from;       // another attribute on the way up: keep reading
+    }
+}
+
+// The exemption a definition gets for registering itself with a runner the call graph cannot see: its own signature
+// begins with a registered macro call (the list above), or, for Rust only, a test attribute stacks above it. Both
+// --dead-code and --quality-delta read this one predicate, so the two verbs cannot disagree about one symbol.
+inline bool registersItself( const Symbol& s, std::string_view file, std::string_view sigRegion,
+                             const std::vector<std::string>& names ) noexcept
+{
+    if( startsWithRegisteredMacro( sigRegion, names ) )
+    {
+        return true;
+    }
+    return langFacts( s.lang ).attributeRegistersTests && rustTestAttributed( file, s.sigStartByte );
+}
+
 // P2.2 — every symbol in THIS tree whose own signature text is a registered-macro call (built ONCE per
 // computeSnapshot/computeDelta run, exactly like topLevelCallees above), reading each file's bytes once via
 // forEachSymbolBody — whose per-symbol `body` view already starts at sigStartByte, which is precisely where
@@ -1674,9 +1760,9 @@ inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, co
     {
         return ids;
     }
-    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol&, std::string_view body )
+    forEachSymbolFile( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view file )
     {
-        if( startsWithRegisteredMacro( body, names ) )
+        if( registersItself( s, file, body, names ) )
         {
             ids.push_back( i );
         }
@@ -3787,7 +3873,11 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // The producer identity already keeps this build's blobs apart; bumped 22 -> 23 so the history above stays complete.
 // v24 (2026-10-25, train 36) — #228's v23 was the PR's placeholder; renumbered above every live value (main / train 35 / every
 // other ref 22, #437 23). No further shape change.
-constexpr std::uint32_t kQSnapCacheScheme = 24;
+// v25 (2026-11-02, #493: Rust test-attribute functions) — no blob shape change; the dead SET's inputs moved. registeredMacroSymbolIds,
+// which isDeadCandidate's register-macro exemption reads, now also holds a Rust definition that a #[test] or #[tokio::test] attribute
+// stacks above (registersItself). The harness calls such a function, so it is no dead candidate. Bumped 24 -> 25 so the history above
+// stays complete. Lane note: v25 is this PR's number; a second scheme bump from another open PR renumbers on the merge.
+constexpr std::uint32_t kQSnapCacheScheme = 25;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
