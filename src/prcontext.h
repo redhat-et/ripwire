@@ -253,6 +253,39 @@ inline bool nameOnlyChangedPaths( const std::string& root, const std::string& re
     return true;
 }
 
+enum class NumstatRead : std::uint8_t { NotStarted, Read, Failed };
+
+// `git diff --numstat` under the walk budget: its rows into out.paths/skippedModeOnly. Failed = the caller falls back to the tree-level list
+// (git exited non-zero with no row, or the budget ended it, in which case no row is kept: a prefix of the rows is not a list).
+inline NumstatRead readNumstatRows( const std::string& cmd, NumstatDiff& out )
+{
+    const GitTimedLines run = gitCommandLinesBy( cmd, gitWalkDeadline() );
+    if( !run.isStarted )
+    {
+        return NumstatRead::NotStarted;
+    }
+    if( run.timedOut )
+    {
+        rw::emitTo( stderr, "ripwire: git diff --numstat did not finish within the {} s git budget (RIPWIRE_GIT_WALK_SECONDS); the changed files are listed from "
+                            "--name-only instead\n", gitWalkMaxSeconds() );
+        return NumstatRead::Failed;
+    }
+    for( const std::string& row : run.lines )
+    {
+        auto [ path, isModeOnly ] = numstatRowPath( row );
+        if( isModeOnly )
+        {
+            ++out.skippedModeOnly;
+        }
+        else if( !path.empty() )
+        {
+            out.paths.push_back( std::move( path ) );
+        }
+    }
+    const bool noRows = out.paths.empty() && out.skippedModeOnly == 0;
+    return run.status != 0 && noRows ? NumstatRead::Failed : NumstatRead::Read;
+}
+
 inline NumstatDiff numstatChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree = false )
 {
     NumstatDiff out;
@@ -269,56 +302,30 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
     // the tree-level list is the answer, said once on stderr. A clone that is not partial runs it under the walk budget instead, for a
     // git that stalls: a read that outlives the budget is dropped whole (a prefix of the rows is not a list) and the tree-level list stands in.
     const bool partial = gitIsPartialClone( root );
-    bool       viaNameOnly = partial;
     if( !partial )
     {
-        const GitTimedLines run = gitCommandLinesBy( cmd, gitWalkDeadline() );
-        if( !run.isStarted )
+        switch( readNumstatRows( cmd, out ) )
         {
-            return out;
-        }
-        if( !run.timedOut )
-        {
-            for( const std::string& row : run.lines )
-            {
-                auto [ path, isModeOnly ] = numstatRowPath( row );
-                if( isModeOnly )
-                {
-                    ++out.skippedModeOnly;
-                }
-                else if( !path.empty() )
-                {
-                    out.paths.push_back( std::move( path ) );
-                }
-            }
-        }
-        viaNameOnly = run.timedOut || ( run.status != 0 && out.paths.empty() && out.skippedModeOnly == 0 );
-        if( run.timedOut )
-        {
-            rw::emitTo( stderr, "ripwire: git diff --numstat did not finish within the {} s git budget (RIPWIRE_GIT_WALK_SECONDS); the changed files are listed from "
-                                "--name-only instead\n", gitWalkMaxSeconds() );
+            case NumstatRead::NotStarted: return out;
+            case NumstatRead::Read: out.ok = true; return out;
+            case NumstatRead::Failed: break;
         }
     }
-    if( viaNameOnly )
+    if( !nameOnlyChangedPaths( root, revArgs, againstWorkingTree, out.paths ) )
     {
-        out.paths.clear();
-        out.skippedModeOnly = 0;
-        if( !nameOnlyChangedPaths( root, revArgs, againstWorkingTree, out.paths ) )
-        {
-            return out;
-        }
-        if( partial )
-        {
-            static std::atomic<bool> told{ false };
-            if( !told.exchange( true ) )
-            {
-                rw::emitTo( stderr, "ripwire: this is a partial clone (blobs are fetched on demand and ripwire never downloads them), so the changed files are "
-                                    "listed from git diff --name-only: a mode-only change is not told from a content change\n" );
-            }
-        }
-        DISCLOSE( Diagnostics::answerUnchanged, "the changed files are listed; a mode-only change is not told from a content change",
-                  "prcontext: the changed paths come from --name-only (a partial clone, or git diff --numstat failed or stalled)" );
+        return out;
     }
+    if( partial )
+    {
+        static std::atomic<bool> told{ false };
+        if( !told.exchange( true ) )
+        {
+            rw::emitTo( stderr, "ripwire: this is a partial clone (blobs are fetched on demand and ripwire never downloads them), so the changed files are "
+                                "listed from git diff --name-only: a mode-only change is not told from a content change\n" );
+        }
+    }
+    DISCLOSE( Diagnostics::answerUnchanged, "the changed files are listed; a mode-only change is not told from a content change",
+              "prcontext: the changed paths come from --name-only (a partial clone, or git diff --numstat failed or stalled)" );
     out.ok = true;
     return out;
 }

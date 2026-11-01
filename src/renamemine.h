@@ -303,6 +303,16 @@ inline void foldHunk( HunkBuffer& hunk, HashMap<std::string, std::uint32_t>& vot
     hunk.clear();
 }
 
+// Why a harvest has no answer, as the `r=` the report prints.
+inline const char* probeFailureReason( const RenameHarvest& harvest )
+{
+    if( harvest.nonGitRoot )
+    {
+        return "not-a-git-repo";
+    }
+    return harvest.partialClone ? "partial-clone" : "probe-failed";
+}
+
 }   // namespace detail
 
 // ── the miner ────────────────────────────────────────────────────────────────────────────────────────────
@@ -756,7 +766,7 @@ inline int writeNamingCalibrationReport( const IngestResult& ing, const std::str
     if( !report.harvest.ok )
     {
         rw::emitTo( stdout, "<naming-calibration probed=\"0\" r=\"{}\"{}/>",
-                     report.harvest.nonGitRoot ? "not-a-git-repo" : report.harvest.partialClone ? "partial-clone" : "probe-failed", atStamp.c_str() );
+                     detail::probeFailureReason( report.harvest ), atStamp.c_str() );
         return 0;
     }
 
