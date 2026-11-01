@@ -42,6 +42,7 @@
 //
 // PRESENT-ONLY: no cue or no file, no block, and the answer is byte-identical. The block takes its own allowance, like the file page: it draws
 // nothing from the bytes that fund bodies. Caps are runaway guards, each cut disclosed.
+#include "docdrift.h" // hasWholeWord
 #include "filter.h" // isTestPath, isTestSymbol
 #include "forfilepage.h" // resolveFileAnchors, FileAnchor, filepage::fileDefsInLineOrder, trimWordPunct
 #include "infra/namesplit.h" // isIdentChar
@@ -157,26 +158,21 @@ inline bool cueObjectFits( std::span<const std::string> words, std::size_t next 
 inline constexpr auto wordIn = []( std::string_view w, std::initializer_list<std::string_view> set ) noexcept
 { return taskroute::isOneOf( w, set.begin(), set.size() ); };
 
-// The words that may sit between `not`/`never` and the verb: `never get called`, `not being used`, `aren't even called`.
-inline bool isGapWord( std::string_view w ) noexcept
+// The cue vocabulary, one table per role; membership is one helper.
+inline constexpr std::array<std::string_view, 14> kGapWords = { "being", "get", "gets", "getting", "ever", "even", "actually", "currently", "be", "been", "really", "yet", "directly", "anywhere" }; // `never get called`, `not being used`
+inline constexpr std::array<std::string_view, 6> kUseVerbs = { "called", "used", "referenced", "invoked", "imported", "exercised" };
+inline constexpr std::array<std::string_view, 8> kCallVerbs = { "calls", "uses", "references", "imports", "invokes", "call", "use", "reference" };
+inline constexpr std::array<std::string_view, 9> kCallerNouns = { "caller", "callers", "users", "usages", "references", "callsites", "call-sites", "call-site", "callsite" };
+
+inline bool inWords( std::string_view w, std::span<const std::string_view> set ) noexcept
 {
-    return wordIn( w, { "being", "get", "gets", "getting", "ever", "even", "actually", "currently", "be", "been", "really", "yet", "directly", "anywhere" } );
+    return std::ranges::contains( set, w );
 }
 
-inline bool isUseVerb( std::string_view w ) noexcept
-{
-    return wordIn( w, { "called", "used", "referenced", "invoked", "imported", "exercised" } );
-}
-
-inline bool isCallVerb( std::string_view w ) noexcept
-{
-    return wordIn( w, { "calls", "uses", "references", "imports", "invokes", "call", "use", "reference" } );
-}
-
-inline bool isCallerNoun( std::string_view w ) noexcept
-{
-    return wordIn( w, { "caller", "callers", "users", "usages", "references", "callsites", "call-sites", "call-site", "callsite" } );
-}
+inline bool isGapWord( std::string_view w ) noexcept { return inWords( w, kGapWords ); }
+inline bool isUseVerb( std::string_view w ) noexcept { return inWords( w, kUseVerbs ); }
+inline bool isCallVerb( std::string_view w ) noexcept { return inWords( w, kCallVerbs ); }
+inline bool isCallerNoun( std::string_view w ) noexcept { return inWords( w, kCallerNouns ); }
 
 inline bool subjectAsksUnused( std::string_view task )
 {
@@ -287,6 +283,7 @@ inline bool subjectAsksUnused( std::string_view task )
 inline constexpr std::array<Lang, 7> kServedLangs = { Lang::Python, Lang::TypeScript, Lang::JavaScript, Lang::Go, Lang::Rust, Lang::C, Lang::Cpp };
 inline constexpr std::array<Lang, 2> kCFamilyLangs = { Lang::C, Lang::Cpp };
 inline constexpr std::array<Lang, 2> kJsFamilyLangs = { Lang::TypeScript, Lang::JavaScript };
+inline constexpr std::array<Lang, 1> kPythonLangs = { Lang::Python };
 inline constexpr std::array<Lang, 3> kScopedMemberLangs = { Lang::Python, Lang::TypeScript, Lang::JavaScript }; // a scoped function is a member here
 
 
@@ -449,7 +446,7 @@ inline bool frameworkRoutedPath( std::string_view rel, Lang lang ) noexcept
     static constexpr std::array<std::string_view, 9> kPyDirs = { "commands", "templatetags", "migrations", "routes", "api", "handlers", "plugins", "blueprints", "views" };
     static constexpr std::array<std::string_view, 12> kPyStems = { "views", "urls", "admin", "apps", "signals", "consumers", "routing", "tasks", "serializers", "forms", "models", "wsgi" };
     const bool js = std::ranges::contains( kJsFamilyLangs, lang );
-    if( !js && lang != Lang::Python )
+    if( !js && !std::ranges::contains( kPythonLangs, lang ) )
     {
         return false;
     }
@@ -708,19 +705,6 @@ inline std::string withoutExt( std::string_view rel )
     return std::string( dot != std::string_view::npos && ( sl == std::string_view::npos || dot > sl ) ? rel.substr( 0, dot ) : rel );
 }
 
-// Does `src` hold `word` as a whole identifier?
-inline bool holdsWord( std::string_view src, std::string_view word ) noexcept
-{
-    for( std::size_t p = src.find( word ); p != std::string_view::npos; p = src.find( word, p + 1 ) )
-    {
-        if( ( p == 0 || !isIdent( src[p - 1] ) ) && ( p + word.size() >= src.size() || !isIdent( src[p + word.size()] ) ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 // The one pass: every word of every scanned file, looked up in the table's sorted names. A two-byte prefilter keeps the lookup off most words.
 class NameScan
 {
@@ -854,7 +838,7 @@ private:
         {
             mentionFile_ = fileId;
             mentionVal_ = std::ranges::any_of( stems_, [&]( const std::string& st )
-                                               { return !st.empty() && holdsWord( src, st ); } );
+                                               { return !st.empty() && docdrift::hasWholeWord( src, st ); } );
         }
         return mentionVal_;
     }
@@ -1145,7 +1129,8 @@ private:
 // `export * from`, `export * as ns from`, `export type * from`
 inline bool isExportStar( std::string_view t ) noexcept
 {
-    return t.starts_with( "export *" ) || t.starts_with( "export type *" );
+    static constexpr std::array<std::string_view, 2> kHeads = { "export *", "export type *" };
+    return opensWithAny( t, kHeads );
 }
 
 inline bool lineStarExportsStem( std::string_view line, std::string_view stem, Lang lang ) noexcept
@@ -1269,6 +1254,12 @@ inline std::optional<std::string> readText( const std::string& path )
     return docparse::detail::readWholeFile( path );
 }
 
+inline bool holdsAny( std::string_view text, std::span<const std::string_view> needles ) noexcept
+{
+    return std::ranges::any_of( needles, [&]( std::string_view n )
+                                { return text.find( n ) != std::string_view::npos; } );
+}
+
 // A package.json that publishes something: a main, module, exports, types or bin, and not `"private": true`. Its exported defs have consumers outside the tree.
 inline bool packageJsonPublishes( std::string_view json ) noexcept
 {
@@ -1285,14 +1276,14 @@ inline bool packageJsonPublishes( std::string_view json ) noexcept
         }
     }
     static constexpr std::array<std::string_view, 6> kKeys = { "\"main\"", "\"module\"", "\"exports\"", "\"types\"", "\"typings\"", "\"bin\"" };
-    return std::ranges::any_of( kKeys, [&]( std::string_view key )
-                                { return json.find( key ) != std::string_view::npos; } );
+    return holdsAny( json, kKeys );
 }
 
 // A pyproject.toml that builds a distribution: a [project] or [tool.poetry] table, or a [build-system].
 inline bool pyprojectBuilds( std::string_view toml ) noexcept
 {
-    return toml.find( "[project]" ) != std::string_view::npos || toml.find( "[tool.poetry]" ) != std::string_view::npos || toml.find( "[build-system]" ) != std::string_view::npos;
+    static constexpr std::array<std::string_view, 3> kTables = { "[project]", "[tool.poetry]", "[build-system]" };
+    return holdsAny( toml, kTables );
 }
 
 // A Python module path with a private component (`_impl/`, `_compat.py`) is not a public surface; `__init__` and `__main__` are.
@@ -1588,7 +1579,7 @@ inline FileTable buildFileTable( const IngestResult& ing, const Graph& g, const 
         {
             it->listed = true;
             it->isPublic = it->isPublic || isPublicDef( ing, s, text.src, jsExports, owner );
-            it->derived = it->derived || ( s.lang == Lang::Python && s.kind == SymKind::Class && sigHolds( s, text.src, "(" ) && !sigHolds( s, text.src, "(object)" ) );
+            it->derived = it->derived || ( std::ranges::contains( kPythonLangs, s.lang ) && s.kind == SymKind::Class && sigHolds( s, text.src, "(" ) && !sigHolds( s, text.src, "(object)" ) );
             it->why = std::uint16_t( it->why | languageHedges( s, rel, text.src, owner, rustLib ) );
         }
         else
@@ -1956,7 +1947,7 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
         scans[t].finish();
         const Lang fileLang = table.rows.empty() ? Lang::Unknown : ing.symbols[table.rows.front().defs.front()].lang;
         const bool barrel = fileIsStarExported( rootRelPath( ing, table.file ), fileLang, table.file, starTexts, starIds );
-        const bool library = ( fileLang == Lang::Python && pyPackaged && !pythonModulePrivate( rootRelPath( ing, table.file ) ) ) || ( std::ranges::contains( kJsFamilyLangs, fileLang ) && jsPublished );
+        const bool library = ( std::ranges::contains( kPythonLangs, fileLang ) && pyPackaged && !pythonModulePrivate( rootRelPath( ing, table.file ) ) ) || ( std::ranges::contains( kJsFamilyLangs, fileLang ) && jsPublished );
         for( Row& r : table.rows )
         {
             if( barrel )
