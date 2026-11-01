@@ -137,7 +137,7 @@ inline bool isTableNoun( std::string_view w ) noexcept
     static constexpr std::string_view kNouns[] = { "function", "functions", "func", "funcs", "fn", "fns", "method", "methods", "export", "exports", "exported", "public", "class",
                                                    "classes", "def", "defs", "definition", "definitions", "symbol", "symbols", "helper", "helpers", "api", "apis", "code", "name", "names",
                                                    "type", "types", "constant", "constants", "const", "consts", "utility", "utilities", "util", "utils", "member", "members", "routine",
-                                                   "routines", "procedure", "procedures", "item", "items", "thing", "things", "entry", "entries", "struct", "structs" };
+                                                   "routines", "procedure", "procedures", "item", "items", "thing", "things", "entry", "entries", "struct", "structs", "macro", "macros", "enum", "enums", "interface", "interfaces", "trait", "traits", "global", "globals", "hook", "hooks", "component", "components" };
     return taskroute::isOneOf( w, kNouns, std::size( kNouns ) );
 }
 
@@ -157,6 +157,27 @@ inline bool cueObjectFits( std::span<const std::string> words, std::size_t next 
 inline constexpr auto wordIn = []( std::string_view w, std::initializer_list<std::string_view> set ) noexcept
 { return taskroute::isOneOf( w, set.begin(), set.size() ); };
 
+// The words that may sit between `not`/`never` and the verb: `never get called`, `not being used`, `aren't even called`.
+inline bool isGapWord( std::string_view w ) noexcept
+{
+    return wordIn( w, { "being", "get", "gets", "getting", "ever", "even", "actually", "currently", "be", "been", "really", "yet", "directly", "anywhere" } );
+}
+
+inline bool isUseVerb( std::string_view w ) noexcept
+{
+    return wordIn( w, { "called", "used", "referenced", "invoked", "imported", "exercised" } );
+}
+
+inline bool isCallVerb( std::string_view w ) noexcept
+{
+    return wordIn( w, { "calls", "uses", "references", "imports", "invokes", "call", "use", "reference" } );
+}
+
+inline bool isCallerNoun( std::string_view w ) noexcept
+{
+    return wordIn( w, { "caller", "callers", "users", "usages", "references", "callsites", "call-sites", "call-site", "callsite" } );
+}
+
 inline bool subjectAsksUnused( std::string_view task )
 {
     std::vector<std::string> words;
@@ -169,10 +190,19 @@ inline bool subjectAsksUnused( std::string_view task )
     }
     const auto at = [&]( std::size_t k ) -> std::string_view
     { return k < words.size() ? std::string_view( words[k] ) : std::string_view {}; };
+    // `no one`, `nobody`, `nothing`, `noone` at k: the index after them, or 0
+    const auto nobodyEnd = [&]( std::size_t k ) -> std::size_t
+    {
+        if( wordIn( at( k ), { "nobody", "nothing", "noone" } ) )
+        {
+            return k + 1;
+        }
+        return at( k ) == "no" && at( k + 1 ) == "one" ? k + 2 : 0;
+    };
     for( std::size_t k = 0; k < words.size(); ++k )
     {
         const std::string_view w = words[k];
-        if( wordIn( w, { "unused", "uncalled", "unreferenced", "unexercised-by-code" } ) && cueObjectFits( words, k + 1 ) )
+        if( wordIn( w, { "unused", "uncalled", "unreferenced", "unexercised-by-code", "orphaned", "orphan", "unreachable", "stale" } ) && cueObjectFits( words, k + 1 ) )
         {
             return true;
         }
@@ -185,23 +215,66 @@ inline bool subjectAsksUnused( std::string_view task )
                 return true;
             }
         }
-        if( wordIn( w, { "never", "not", "isn't", "aren't", "isnt", "arent" } ) && wordIn( at( k + 1 ), { "called", "used", "referenced", "invoked", "imported" } ) )
+        if( wordIn( w, { "never", "not", "isn't", "aren't", "isnt", "arent" } ) )
+        {
+            std::size_t j = k + 1;
+            for( int gap = 0; gap < 2 && isGapWord( at( j ) ); ++gap )
+            {
+                ++j;
+            }
+            if( isUseVerb( at( j ) ) )
+            {
+                return true;
+            }
+        }
+        if( const std::size_t after = nobodyEnd( k ); after != 0 && isCallVerb( at( after ) ) )
         {
             return true;
         }
-        if( wordIn( w, { "nobody", "nothing", "noone" } ) && wordIn( at( k + 1 ), { "calls", "uses", "references", "imports", "invokes", "call", "use", "reference" } ) )
+        if( wordIn( w, { "no", "without", "zero" } ) )
         {
-            return true;
+            std::size_t j = k + 1;
+            if( wordIn( at( j ), { "a", "an", "any", "the" } ) )
+            {
+                ++j;
+            }
+            const bool callSites = at( j ) == "call" && wordIn( at( j + 1 ), { "site", "sites" } );
+            if( isCallerNoun( at( j ) ) || callSites || ( wordIn( at( j ), { "non-test", "production", "library", "external", "outside" } ) && isCallerNoun( at( j + 1 ) ) ) )
+            {
+                return true;
+            }
         }
-        if( wordIn( w, { "no", "without", "zero" } ) && ( wordIn( at( k + 1 ), { "caller", "callers", "users", "usages", "references" } ) || ( wordIn( at( k + 1 ), { "non-test", "production", "library", "external", "outside" } ) && wordIn( at( k + 2 ), { "caller", "callers", "users", "usages", "references" } ) ) ) )
+        if( w == "by" && wordIn( at( k - 1 ), { "used", "called", "referenced", "imported", "invoked" } ) && nobodyEnd( k + 1 ) != 0 )
         {
-            return true;
+            return true; // `used by nothing`, `called by no one`
         }
         if( w == "test-only" )
         {
             return true;
         }
-        if( w == "only" && wordIn( at( k + 1 ), { "called", "used", "referenced", "exercised" } ) && wordIn( at( k + 2 ), { "by", "from", "in" } ) && wordIn( at( k + 3 ), { "test", "tests" } ) )
+        if( w == "only" && isUseVerb( at( k + 1 ) ) && wordIn( at( k + 2 ), { "by", "from", "in" } ) && wordIn( at( k + 3 ), { "test", "tests" } ) )
+        {
+            return true;
+        }
+        if( w == "only" && wordIn( at( k + 1 ), { "test", "tests" } ) && isCallVerb( at( k + 2 ) ) )
+        {
+            return true; // `only tests use`
+        }
+        // delete intent: the question is whether code can go
+        if( wordIn( w, { "safe", "safely" } ) && wordIn( at( k + 1 ), { "delete", "remove", "drop", "deleted", "removed", "dropped" } ) )
+        {
+            return true;
+        }
+        if( w == "can" && at( k + 1 ) == "be" && wordIn( at( k + 2 ), { "removed", "deleted", "dropped" } ) )
+        {
+            return true;
+        }
+        if( wordIn( w, { "removable", "deletable" } ) )
+        {
+            return true;
+        }
+        // `does anything call the functions in f`
+        if( w == "anything" && isCallVerb( at( k + 1 ) ) && ( isTableNoun( at( k + 2 ) ) || ( at( k + 2 ) == "the" && isTableNoun( at( k + 3 ) ) ) ) )
         {
             return true;
         }

@@ -633,7 +633,13 @@ grep -q 'kForUnusedForeignStem' "$(dirname "$0")/../src/forunused.h" 2>/dev/null
 # ---- the trigger, on the words of the stored argv ----
 for q in "unused functions in pkg/util.py" "pkg/util.py unused functions" "which functions in pkg/util.py are never called" \
          "dead code in pkg/util.py" "what in pkg/util.py has no callers" "functions in pkg/util.py that nobody calls" "which functions of pkg/util.py does nothing use" \
-         "functions in pkg/util.py only used by tests" "which public functions in pkg/util.py are unused" "pkg/util.py functions with no non-test callers"; do
+         "functions in pkg/util.py only used by tests" "which public functions in pkg/util.py are unused" "pkg/util.py functions with no non-test callers" \
+         "functions in pkg/util.py that are not being used" "functions in pkg/util.py that aren't being called" "functions in pkg/util.py that never get called" \
+         "functions in pkg/util.py with no call sites" "functions in pkg/util.py without a caller" "pkg/util.py functions no one calls" "pkg/util.py functions used by nothing" \
+         "functions in pkg/util.py called by no one" "functions in pkg/util.py only tests use" "unused macros in pkg/util.py" "unused enums in pkg/util.py" "unused interfaces in pkg/util.py" \
+         "unused traits in pkg/util.py" "unused globals in pkg/util.py" "unused hooks in pkg/util.py" "unused components in pkg/util.py" "orphaned functions in pkg/util.py" \
+         "unreachable functions in pkg/util.py" "stale functions in pkg/util.py" "which functions in pkg/util.py can I safely delete" "what can be removed from pkg/util.py" \
+         "does anything call the functions in pkg/util.py"; do
   if ask "$P" "$q" | grep -q '<unused_in_file '; then pass "T1: fires: $q"; else fail "T1: did not fire: $q"; fi
 done
 for q in "unused imports in pkg/util.py" "unused parameter in pkg/util.py" "dead code elimination in pkg/util.py" "unused functions" "pkg/util.py" \
