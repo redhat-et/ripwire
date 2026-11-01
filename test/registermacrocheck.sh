@@ -358,5 +358,79 @@ printf '%s' "$DC8B_TAG" | grep -q 'config-warnings=' \
     && { no "arm8: a genuinely-used register_macros= name still warned as inert"; printf '%s\n' "$DC8B_TAG"; } \
     || ok "arm8: a genuinely-used config name draws no warning (negative control)"
 
+# ── ARM 9: Rust test-harness registration, via --quality-delta (issue #493) ──────────────────────────────
+# A #[test] (or #[tokio::test…]) function is called by the test harness, and no line in the tree names it, so the
+# name-based call graph sees zero callers. The attribute sits ABOVE the item, outside the signature text the macro
+# check reads, so it needed its own rule (quality.h rustTestAttributed). Positive shapes must be exempt; each
+# negative lookalike must still be flagged: an attribute inside a comment, '#[testing]', '#[test_case]', a dead fn
+# placed directly after a #[test] item, and an ordinary dead fn.
+A9="$WORK/a9"; newrepo "$A9"
+cat > "$A9/lib.rs" <<'EOF'
+fn live_helper() -> u32 { 1 }
+EOF
+commit "$A9" "baseline: no tests yet"
+cat > "$A9/lib.rs" <<'EOF'
+fn live_helper() -> u32 { 1 }
+
+#[test]
+fn plain_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "current_thread")]
+async fn flavored_case() { assert_eq!(live_helper(), 1); }
+
+#[inline]
+#[test]
+fn stacked_case() { assert_eq!(live_helper(), 1); }
+
+#[test]
+
+fn blank_line_case() { assert_eq!(live_helper(), 1); }
+
+/// A documented harness case: the doc line sits between the attribute and the item.
+#[test]
+fn doc_comment_case() { assert_eq!(live_helper(), 1); }
+
+#[testing]
+fn testing_attribute_is_not_a_test() { }
+
+// #[test]
+fn commented_attribute_is_not_a_test() { }
+
+#[test_case]
+fn test_case_attribute_is_not_a_test() { }
+
+#[test]
+fn test_is_here() { assert_eq!(live_helper(), 1); }
+fn dead_after_test_attribute() { }
+
+fn dead_plain() { }
+EOF
+QD9="$( cd "$A9" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+for sym in plain_case flavored_case stacked_case blank_line_case doc_comment_case test_is_here; do
+    printf '%s' "$QD9" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && no "arm9: '$sym' is a #[test] function but was reported as dead-code" \
+        || ok "arm9: '$sym' (#[test] shape) excluded from dead-code"
+done
+for sym in testing_attribute_is_not_a_test commented_attribute_is_not_a_test test_case_attribute_is_not_a_test dead_after_test_attribute dead_plain; do
+    printf '%s' "$QD9" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && ok "arm9: '$sym' (negative lookalike) still flagged" \
+        || { no "arm9: '$sym' should still be flagged — the test-attribute exemption leaked"; printf '%s\n' "$QD9" | grep -oE 'sym="[^"]*"' | head -12; }
+done
+printf '%s' "$QD9" | grep -q 'kind="dead-code" sym="live_helper"' \
+    && no "arm9: live_helper (called from tests) wrongly reported" \
+    || ok "arm9: live_helper (called from the tests) not reported"
+printf '%s' "$QD9" | grep -q 'register-macro-excluded="6"' \
+    && ok "arm9: register-macro-excluded=\"6\" (the six #[test] functions)" \
+    || { no "arm9: register-macro-excluded count wrong"; printf '%s\n' "$QD9" | grep -oE 'register-macro-excluded="[0-9]*"'; }
+
+# ── ARM 10: a test attribute with no item after it must not break the scan ─────────────────────────────
+A10="$WORK/a10"; newrepo "$A10"
+printf 'fn live() -> u32 { 1 }\n\n#[test]\n' > "$A10/lib.rs"
+commit "$A10" "a dangling test attribute at end of file"
+"$BIN" "$A10" --quality-delta --no-cache >/dev/null 2>&1; RC10=$?
+# 0 = clean, 2 = a gating finding; anything else (a signal, an abort) is the crash this arm guards against.
+if [ "$RC10" -eq 0 ] || [ "$RC10" -eq 2 ]; then ok "arm10: a dangling #[test] at end of file does not crash the scan (exit $RC10)"
+else no "arm10: a dangling #[test] at end of file made ripwire exit $RC10"; fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
