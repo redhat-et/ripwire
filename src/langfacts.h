@@ -162,6 +162,10 @@ struct LangFacts
     /// through the host's overrides (quality.h pythonReceiverParameters, pythonDispatchRequests). A separate fact from the hooks.
     bool closureReceiverDispatch = false;
 
+    /// Python: a bare builtin or an import from outside the tree is bound there whatever namesake an imported file defines, so the
+    /// Phase-5 external-name veto (graph.h ExternalVeto) decides a call BEFORE Rule 3 narrows it to that namesake.
+    bool externalVetoBeforeRule3 = false;
+
     /// Kotlin: an `interface` is a class_declaration like a class (queries/kotlin/tags.scm: "both land here as @definition.class"),
     /// so the symbol's kind cannot tell the two apart; shared code that needs an interface (ifacedispatch.h's lambda test) reads a
     /// class of such a language as a possible one.
@@ -287,7 +291,7 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
+    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },

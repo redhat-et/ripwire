@@ -10669,13 +10669,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             nameIds = &rubyReachable;
         }
-        // Python: Rule 3 is a name-only narrowing to the caller's imported closure, so it must not decide a call the Phase 5 veto below
-        // refuses: a bare builtin (`dict(...)`, `type(...)`) or an imported stdlib or third-party name is bound outside the tree
-        // whatever namesake an imported file defines. The veto's own conditions, and not in a file with a star import of an indexed
-        // module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding as before.
-        const bool pyExternalSite = r.lang == Lang::Python && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
+        // Python (LangFacts::externalVetoBeforeRule3): Rule 3 is a name-only narrowing to the caller's imported closure, so it must not
+        // decide a call the Phase 5 veto below refuses: a bare builtin (`dict(...)`, `type(...)`) or an imported stdlib or third-party
+        // name is bound outside the tree whatever namesake an imported file defines. The veto's own conditions, and not in a file with
+        // a star import of an indexed module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding.
+        const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
                                     && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
-        if( !scipPinned && !canonical && !narrowed && it != byName.end() && !pyExternalSite )
+        if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
             const auto rule3 = [ & ]( const rw::SmallVec<NodeId, 2>& ids, std::size_t minCands )
