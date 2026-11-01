@@ -143,7 +143,8 @@ inline bool cueObjectFits( std::span<const std::string> words, std::size_t next 
     return isTableNoun( w ) || taskroute::isOneOf( w, kLinks, std::size( kLinks ) ) || w.find_first_of( "./" ) != std::string_view::npos;
 }
 
-inline bool wordIn( std::string_view w, std::initializer_list<std::string_view> set ) noexcept { return taskroute::isOneOf( w, set.begin(), set.size() ); }
+inline constexpr auto wordIn = []( std::string_view w, std::initializer_list<std::string_view> set ) noexcept
+{ return taskroute::isOneOf( w, set.begin(), set.size() ); };
 
 inline bool subjectAsksUnused( std::string_view task )
 {
@@ -516,11 +517,9 @@ inline bool isPrototypeLine( std::string_view line, std::size_t col, std::size_t
     return last == ';' || last == ',' || last == '(';
 }
 
-inline bool opensWithAny( std::string_view t, std::span<const std::string_view> heads ) noexcept
-{
-    return std::ranges::contains( heads, true, [t]( std::string_view head )
-                                  { return t.starts_with( head ); } );
-}
+inline constexpr auto opensWithAny = []( std::string_view t, std::span<const std::string_view> heads ) noexcept
+{ return std::ranges::contains( heads, true, [t]( std::string_view head )
+                                { return t.starts_with( head ); } ); };
 
 inline bool isCommentLine( std::string_view line, bool hashComments ) noexcept
 {
