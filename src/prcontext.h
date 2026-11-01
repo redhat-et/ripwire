@@ -422,7 +422,9 @@ inline PrContextMask gitDiffChangedMaskNumstat( const std::string& root, const I
     const NumstatDiff mine = numstatChangedPaths( root, anchor.revArgs, true );
     if( !mine.ok )
     {
-        result.diffFailed = true;   // the callers refuse and name the cause: a list that could not be read is not an empty list
+        // The callers refuse and name the cause: a list that could not be read is not an empty list. Only for a root that HAS a HEAD - a
+        // directory that is no repository (or has no commit yet) keeps the exit-0 degrade, whose message is true of it.
+        result.diffFailed = !quality::gitOneLine( root, "rev-parse --verify --quiet HEAD 2>/dev/null" ).empty();
         return result;
     }
 
