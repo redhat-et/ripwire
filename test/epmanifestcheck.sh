@@ -34,6 +34,13 @@
 #   N3 [G] prefix identity: the answer minus <ep> and its clause, est_tokens masked, equals RIPWIRE_NO_EP_MANIFEST=1
 #   R1 [P] (CodeRabbit 4381174525) the groups register rows <sigs> EMITS: --pack-budget-bytes=1 leaves only Fmt in <sigs> (shown=1), so only x.report rides (Other / Lonely were dropped)
 #   R2 [P] every head row that a group registers dropped (load_other alone shown): no <ep> and no clause   R3 [G] --pack-budget-bytes=300 drops only reload_reports (no target): all three groups stay
+#   J1 [P] package.json bin object: <ep p="package.json" group="bin"> e n="tool-cli" target="bin/cli.js" def="bin/cli.js:…"
+#   J2 [P] "bin": "cli.js" (string): entry name = package name
+#   J3 [P] bin path missing in tree: external="1"
+#   J4 [G] "exports" only: no <ep>
+#   J5 [G] no bin/main: no <ep>
+#   J6 [G] package.json under node_modules: no <ep>
+#   J7 [G] TS main -> dist/ not in tree: no <ep> (main target never matches a shown row)
 #   L1 [P] the clause rides (compact and full) and defines every attribute <ep>/<e> carry, searched in the ep clause alone as whole names (CodeRabbit 4381174537),
 #          capped attributes included; L1-MUT [G] a clause missing one definition makes the same check fail (the arm can fail)
 #   X1 [G] determinism  X2 [G] xmllint well-formed (when xmllint exists)  X3 [G] no "--" inside the legend comment
@@ -56,7 +63,7 @@ verdict(){ if [ "$1" -eq 0 ]; then ok "$2"; else no "$3"; fi; }   # rc, the PASS
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 required"; exit 2; }
 FX="$ROOT/test/epmanifestfix"
-[ -f "$FX/edge/setup.cfg" ] && [ -f "$FX/edgetoml/pyproject.toml" ] && [ -f "$FX/cfg/setup.cfg" ] && [ -f "$FX/pyp/pyproject.toml" ] && [ -f "$FX/negcfg/config.cfg" ] && [ -f "$FX/sib/setup.cfg" ] || { echo "fixture test/epmanifestfix missing"; exit 2; }
+[ -f "$FX/edge/setup.cfg" ] && [ -f "$FX/edgetoml/pyproject.toml" ] && [ -f "$FX/cfg/setup.cfg" ] && [ -f "$FX/pyp/pyproject.toml" ] && [ -f "$FX/negcfg/config.cfg" ] && [ -f "$FX/sib/setup.cfg" ] && [ -f "$FX/pkgjson/package.json" ] && [ -f "$FX/pkgjsonstr/package.json" ] && [ -f "$FX/pkgjsonmiss/package.json" ] && [ -f "$FX/pkgjsonexp/package.json" ] && [ -f "$FX/pkgjsonempty/package.json" ] && [ -f "$FX/pkgjsonnm/package.json" ] && [ -f "$FX/pkgjsonnm/node_modules/dep/package.json" ] && [ -f "$FX/pkgjsonts/package.json" ] || { echo "fixture test/epmanifestfix missing"; exit 2; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
@@ -75,7 +82,22 @@ run "$FX/negcfg" "$TMP/neg" "$Q"
 run "$FX/sib" "$TMP/sib" '--for=how are the report formatter render and init hooks registered'
 run "$FX/edge" "$TMP/edge" "$Q"
 run "$FX/edgetoml" "$TMP/edgetoml" "$Q"
-for a in cfg cfg2 cfgfull cfgoff pyp neg sib edge edgetoml; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
+QPKG='--for=how does the tool-cli command start'
+QSTR='--for=how does the cli.js main export start'
+QMISS='--for=how does the miss-pkg ok bin command start'
+QEXP='--for=how does the exp-pkg package export run'
+QEMPTY='--for=how does the empty-pkg package idle export'
+QNM='--for=how does rootStart start the root cli command'
+QTS='--for=how does the ts-pkg package main export run'
+run "$FX/pkgjson" "$TMP/pkgjson" "$QPKG"
+run "$FX/pkgjsonstr" "$TMP/pkgjsonstr" "$QSTR"
+run "$FX/pkgjsonmiss" "$TMP/pkgjsonmiss" "$QMISS"
+run "$FX/pkgjsonexp" "$TMP/pkgjsonexp" "$QEXP"
+run "$FX/pkgjsonempty" "$TMP/pkgjsonempty" "$QEMPTY"
+run "$FX/pkgjsonnm" "$TMP/pkgjsonnm" "$QNM"
+run "$FX/pkgjsonnm/node_modules/dep" "$TMP/pkgjsonnmdep" '--for=how does depStart start'
+run "$FX/pkgjsonts" "$TMP/pkgjsonts" "$QTS"
+for a in cfg cfg2 cfgfull cfgoff pyp neg sib edge edgetoml pkgjson pkgjsonstr pkgjsonmiss pkgjsonexp pkgjsonempty pkgjsonnm pkgjsonnmdep pkgjsonts; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
 
 # eps FILE -> one JSON line: [{attrs..., "e": [{attrs}]}] of every <ep> element
 eps(){ python3 - "$1" <<'PY'
@@ -92,6 +114,8 @@ PY
 }
 CFG="$( eps "$TMP/cfg" )"; PYP="$( eps "$TMP/pyp" )"; NEG="$( eps "$TMP/neg" )"; SIB="$( eps "$TMP/sib" )"
 EDGE="$( eps "$TMP/edge" )"; EDGETOML="$( eps "$TMP/edgetoml" )"
+PKGJSON="$( eps "$TMP/pkgjson" )"; PKGJSONSTR="$( eps "$TMP/pkgjsonstr" )"; PKGJSONMISS="$( eps "$TMP/pkgjsonmiss" )"
+PKGJSONEXP="$( eps "$TMP/pkgjsonexp" )"; PKGJSONEMPTY="$( eps "$TMP/pkgjsonempty" )"; PKGJSONNM="$( eps "$TMP/pkgjsonnm" )"; PKGJSONNMDEP="$( eps "$TMP/pkgjsonnmdep" )"; PKGJSONTS="$( eps "$TMP/pkgjsonts" )"
 has(){ python3 -c "import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if ($2) else 1)" "$1"; }
 grp(){ echo "[g for g in d if g.get('group')=='$1']"; }
 
@@ -131,6 +155,31 @@ if has "$EDGE" "not any(g.get('group','x')=='' for g in d) and len(d)==1"; then
 # E4: a TOML header with a trailing comment holding a `]` names the right group
 if has "$EDGETOML" "any(g['e']==[{'n':'fmt','target':'pkg.mod:Fmt','def':'pkg/mod.py:1'}] for g in $(grp x.report)) and len(d)==1"; then
     ok "E4 a [..]  # see [docs] header comment does not bend the group name"; else no "E4 header comment: $EDGETOML"; fi
+
+# J1
+if has "$PKGJSON" "any(g['p']=='package.json' and g.get('group')=='bin' and any(e.get('n')=='tool-cli' and e.get('target')=='bin/cli.js' and str(e.get('def','')).startswith('bin/cli.js:') for e in g['e']) for g in d)"; then
+    ok "J1 package.json bin object links tool-cli -> bin/cli.js"; else no "J1 package.json bin: $PKGJSON"; fi
+# J2
+if has "$PKGJSONSTR" "any(g.get('group')=='bin' and any(e.get('n')=='cli-pkg' and e.get('target')=='cli.js' and 'def' in e for e in g['e']) for g in d)"; then
+    ok "J2 string bin uses the package name as the entry name"; else no "J2 string bin: $PKGJSONSTR"; fi
+# J3
+if has "$PKGJSONMISS" "any(g.get('group')=='bin' and any(e.get('n')=='tool' and e.get('target')=='missing/cli.js' and e.get('external')=='1' for e in g['e']) and any(e.get('n')=='ok' and e.get('target')=='index.js' and 'def' in e for e in g['e']) for g in d)"; then
+    ok "J3 a bin path outside the tree is external=1 beside an in-tree bin"; else no "J3 missing bin path: $PKGJSONMISS"; fi
+# J4
+if grep -q 'n="run"' "$TMP/pkgjsonexp"; then ok "J4 positive: run row shown"; else no "J4 positive: run row not shown (query did not reach src/index.js)"; fi
+[ "$PKGJSONEXP" = "[]" ]; verdict $? "J4 exports-only package.json yields no <ep>" "J4 exports produced rows: $PKGJSONEXP"
+# J5
+if grep -q 'n="idle"' "$TMP/pkgjsonempty"; then ok "J5 positive: idle row shown"; else no "J5 positive: idle row not shown"; fi
+[ "$PKGJSONEMPTY" = "[]" ]; verdict $? "J5 no bin/main yields no <ep>" "J5 empty manifest produced rows: $PKGJSONEMPTY"
+# J6
+if has "$PKGJSONNM" "any(g['p']=='package.json' and g.get('group')=='bin' for g in d) and not any('node_modules' in g.get('p','') for g in d)"; then
+    ok "J6 node_modules package.json is ignored; root bin still rides"; else no "J6 node_modules: $PKGJSONNM"; fi
+if grep -q 'n="depStart"' "$TMP/pkgjsonnmdep"; then ok "J6b positive: depStart row shown"; else no "J6b positive: depStart row not shown"; fi
+if grep -q 'n="rootStart"' "$TMP/pkgjsonnm"; then ok "J6b positive: root bin row shown in sibling root fixture"; else no "J6b positive: rootStart row not shown in pkgjsonnm"; fi
+[ "$PKGJSONNMDEP" = "[]" ]; verdict $? "J6b a package.json under node_modules yields no <ep>" "J6b node_modules package.json produced rows: $PKGJSONNMDEP" 
+# J7
+if grep -q 'n="run"' "$TMP/pkgjsonts"; then ok "J7 positive: run row shown (src/index.ts)"; else no "J7 positive: run row not shown"; fi
+[ "$PKGJSONTS" = "[]" ]; verdict $? "J7 TS main -> missing dist/ yields no <ep>" "J7 TS dist main produced rows: $PKGJSONTS" 
 # N1
 [ "$NEG" = "[]" ]; verdict $? "N1 a non-manifest .cfg yields no <ep>" "N1 config.cfg produced rows: $NEG"
 # N2

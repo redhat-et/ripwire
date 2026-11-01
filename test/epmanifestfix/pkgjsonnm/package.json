@@ -1,0 +1,6 @@
+{
+  "name": "root-pkg",
+  "bin": {
+    "root-cli": "cli.js"
+  }
+}

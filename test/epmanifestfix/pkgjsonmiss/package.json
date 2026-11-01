@@ -1,0 +1,7 @@
+{
+  "name": "miss-pkg",
+  "bin": {
+    "tool": "missing/cli.js",
+    "ok": "index.js"
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "name": "cli-pkg",
+  "bin": "cli.js"
+}

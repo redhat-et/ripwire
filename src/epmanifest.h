@@ -18,11 +18,12 @@
 //
 // READERS (one per manifest format, language data separate from the shared row): setup.cfg `[options.entry_points]` (INI keys
 // and continuation lines), pyproject.toml `[project.entry-points.G]`, `[project.scripts]` (console_scripts), `[project.gui-scripts]`
-// (gui_scripts), `[tool.poetry.plugins.G]`, `[tool.poetry.scripts]` (string values only). A manifest is read where a shown
-// Python row's directory or one of its ancestors up to the root holds one — a package's manifest always sits above its modules.
+// (gui_scripts), `[tool.poetry.plugins.G]`, `[tool.poetry.scripts]` (string values only), package.json `"bin"` / `"main"`
+// (file-path targets). A manifest is read where a shown row whose language has a reader sits in a directory or an ancestor that
+// holds one — a package's manifest always sits above its modules.
 // FLOORS (stated in the legend's absence of them, and in the lane report): setup.py `entry_points={…}` (a call, not a table),
-// package.json "bin"/"exports" (a file, not a symbol: no def to tie), pyproject inline tables, a group literal built at run
-// time, a multi-root run. The DEFAULT regime and the XML dialect only, as the caller hop: --json, --token-budget=N,
+// package.json `"exports"` maps, pyproject inline tables, a group literal built at run time, a multi-root run. The DEFAULT regime
+// and the XML dialect only, as the caller hop: --json, --token-budget=N,
 // --signatures-only and --detail=N carry none. RIPWIRE_NO_EP_MANIFEST (any value) turns it off — the A/B handle.
 
 #include "docparse.h"     // readRegularFile — a fixed-name file in the tree, refused when it is not a regular file
@@ -341,6 +342,79 @@ inline void parsePyprojectEntryPoints( std::string_view text, std::vector<EpEntr
     } );
 }
 
+// package.json: `"bin"` (a string or an object of name → path) and `"main"`, each target a file path as written (not module:attr).
+inline std::uint32_t jsonKeyLine( std::string_view text, std::string_view key )
+{
+    std::uint32_t found = 0;
+    const std::string needle = std::format( "\"{}\"", key );
+    darkflags::forEachLine( text, [ & ]( std::string_view line, std::uint32_t lineNo )
+    {
+        if( found != 0 )
+        {
+            return;
+        }
+        const std::size_t at = line.find( needle );
+        if( at == std::string_view::npos || !trimWs( line.substr( at + needle.size() ) ).starts_with( ':' ) )
+        {
+            return;
+        }
+        found = lineNo;
+    } );
+    return found;
+}
+
+inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>& out )
+{
+    tsimport::JsonNode root;
+    if( !tsimport::parseJsonObject( std::string( text ), root ) )
+    {
+        return;
+    }
+    std::string pkgName;
+    if( const tsimport::JsonNode* nm = root.get( "name" ); nm != nullptr && nm->kind == tsimport::JsonNode::Kind::Str && !nm->str.empty() )
+    {
+        pkgName = nm->str;
+    }
+    if( pkgName.empty() )
+    {
+        pkgName = "pkg";
+    }
+    const auto add = [ & ]( std::string_view group, std::uint32_t groupLine, std::string_view name, std::string_view target, std::uint32_t line )
+    {
+        if( !name.empty() && !target.empty() )
+        {
+            out.push_back( EpEntry{ std::string( group ), groupLine, std::string( name ), std::string( target ), line } );
+        }
+    };
+    if( const tsimport::JsonNode* bin = root.get( "bin" ) )
+    {
+        const std::uint32_t binLine = jsonKeyLine( text, "bin" );
+        if( bin->kind == tsimport::JsonNode::Kind::Str && !bin->str.empty() )
+        {
+            add( "bin", binLine, pkgName, bin->str, binLine );
+        }
+        else if( bin->kind == tsimport::JsonNode::Kind::Obj )
+        {
+            for( std::size_t i = 0; i < bin->keys.size(); ++i )
+            {
+                const tsimport::JsonNode& v = bin->vals[i];
+                if( v.kind == tsimport::JsonNode::Kind::Str && !v.str.empty() && !bin->keys[i].empty() )
+                {
+                    add( "bin", binLine, bin->keys[i], v.str, binLine );
+                }
+            }
+        }
+    }
+    if( const tsimport::JsonNode* main = root.get( "main" ) )
+    {
+        const std::uint32_t mainLine = jsonKeyLine( text, "main" );
+        if( main->kind == tsimport::JsonNode::Kind::Str && !main->str.empty() )
+        {
+            add( "main", mainLine, pkgName, main->str, mainLine );
+        }
+    }
+}
+
 // ── the consumer shapes: a quoted occurrence of the group literal whose line reads it as an entry-point group ──────────────
 namespace epdetail
 {
@@ -524,6 +598,80 @@ struct EpRender
 namespace epdetail
 {
 
+inline bool packageJsonManifestOk( std::string_view rel, std::string_view diskPath ) noexcept
+{
+    return !rel.contains( "/node_modules/" ) && !rel.starts_with( "node_modules/" ) && !diskPath.contains( "/node_modules/" );
+}
+
+inline std::uint32_t epFileTargetFile( const IngestResult& ing, std::string_view mdir, std::string_view target )
+{
+    std::string rel( target );
+    while( rel.starts_with( "./" ) )
+    {
+        rel.erase( 0, 2 );
+    }
+    if( !mdir.empty() )
+    {
+        rel = std::string( mdir ) + "/" + rel;
+    }
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        if( rootRelPath( ing, f ) == rel )
+        {
+            return f;
+        }
+    }
+    return kNoFile;
+}
+
+inline bool epPackageJsonManifest( std::string_view rel ) noexcept
+{
+    return rel.ends_with( "package.json" );
+}
+
+inline NodeId epFileEntryDef( const IngestResult& ing, const FileSymbols& fs, std::uint32_t fileId )
+{
+    NodeId modScope = kNoNode;
+    NodeId exportFn = kNoNode;
+    std::uint32_t exportLine = UINT32_MAX;
+    std::vector<const Binding*> exports;
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.fileId == fileId && b.kind == LocalBindKind::JsExport )
+        {
+            exports.push_back( &b );
+        }
+    }
+    for( const NodeId id : fs )
+    {
+        const Symbol& s = ing.symbols[id];
+        if( s.kind == SymKind::ModuleScope )
+        {
+            modScope = id;
+        }
+        if( s.kind != SymKind::Function || ( !s.scope.empty() && s.scope != s.name ) )
+        {
+            continue;
+        }
+        for( const Binding* bp : exports )
+        {
+            const Binding&         b     = *bp;
+            const std::string_view local = b.importedName.empty() ? std::string_view( b.var ) : std::string_view( b.importedName );
+            if( local != s.name || s.sigStartByte < b.spanStart || s.endByte > b.spanEnd )
+            {
+                continue;
+            }
+            if( s.line < exportLine )
+            {
+                exportLine = s.line;
+                exportFn   = id;
+            }
+            break;
+        }
+    }
+    return exportFn != kNoNode ? exportFn : modScope;
+}
+
 struct Manifest
 {
     std::string          rel;   // root-relative path of the manifest file
@@ -531,8 +679,41 @@ struct Manifest
     std::vector<EpEntry> entries;
 };
 
-// The manifests above one root-relative file path: its own directory and each ancestor up to the root, setup.cfg then
-// pyproject.toml in each, read once per directory (`seen`). Only manifests that hold entries are kept.
+
+inline void epTryReadManifest( const std::filesystem::path& disk, std::string_view dir, std::string_view name, std::vector<Manifest>& out )
+{
+    const std::string manRel  = dir.empty() ? std::string( name ) : std::string( dir ) + "/" + std::string( name );
+    const std::string manDisk = ( disk / std::string( name ) ).generic_string();
+    if( name == "package.json" && !packageJsonManifestOk( manRel, manDisk ) )
+    {
+        return;
+    }
+    const std::optional<std::string> text = docparse::detail::readRegularFile( std::string( name ), manDisk );
+    if( !text )
+    {
+        return;
+    }
+    Manifest m{ manRel, std::string( dir ), {} };
+    if( name == "setup.cfg" )
+    {
+        parseSetupCfgEntryPoints( *text, m.entries );
+    }
+    else if( name == "pyproject.toml" )
+    {
+        parsePyprojectEntryPoints( *text, m.entries );
+    }
+    else
+    {
+        parsePackageJsonEntries( *text, m.entries );
+    }
+    if( !m.entries.empty() )
+    {
+        out.push_back( std::move( m ) );
+    }
+}
+
+// The manifests above one root-relative file path: its own directory and each ancestor up to the root, setup.cfg,
+// pyproject.toml and package.json in each, read once per directory (`seen`). Only manifests that hold entries are kept.
 inline void collectManifestsAbove( const IngestResult& ing, std::uint32_t fileId, std::vector<std::string>& seenDirs, std::vector<Manifest>& out )
 {
     const std::string_view rel  = rootRelPath( ing, fileId );
@@ -543,26 +724,9 @@ inline void collectManifestsAbove( const IngestResult& ing, std::uint32_t fileId
         if( std::find( seenDirs.begin(), seenDirs.end(), dir ) == seenDirs.end() )
         {
             seenDirs.emplace_back( dir );
-            for( const char* name : { "setup.cfg", "pyproject.toml" } )
+            for( const char* name : { "setup.cfg", "pyproject.toml", "package.json" } )
             {
-                const std::optional<std::string> text = docparse::detail::readRegularFile( name, ( disk / name ).string() );
-                if( !text )
-                {
-                    continue;
-                }
-                Manifest m{ dir.empty() ? std::string( name ) : std::string( dir ) + "/" + name, std::string( dir ), {} };
-                if( std::string_view( name ) == "setup.cfg" )
-                {
-                    parseSetupCfgEntryPoints( *text, m.entries );
-                }
-                else
-                {
-                    parsePyprojectEntryPoints( *text, m.entries );
-                }
-                if( !m.entries.empty() )
-                {
-                    out.push_back( std::move( m ) );
-                }
+                epTryReadManifest( disk, dir, name, out );
             }
         }
         if( dir.empty() )
@@ -583,6 +747,34 @@ inline void appendAttr( std::string& x, std::string_view key, std::string_view v
 // Each entry's target, resolved: its module's indexed file (epModuleFile), then ONE pass over the symbols of those files for
 // the attribute (epAttrNames): exactly one definition → Def; none or several in a module of the tree → Unresolved; no module
 // file at all → External.
+inline void epFillOneTarget( const IngestResult& ing, const EpEntry& entry, std::uint32_t fileId, const FileSymbols& fs, EpTarget& t,
+                             bool packageJson )
+{
+    if( fileId == kNoFile )
+    {
+        return;
+    }
+    if( packageJson )
+    {
+        if( const NodeId def = epFileEntryDef( ing, fs, fileId ); def != kNoNode )
+        {
+            t = EpTarget{ EpTargetState::Def, def };
+        }
+        return;
+    }
+    const std::size_t colon = entry.target.find( ':' );
+    if( colon == std::string_view::npos )
+    {
+        return;
+    }
+    const std::string_view attr = std::string_view( entry.target ).substr( colon + 1 );
+    const auto             hit  = [ & ]( NodeId id ) { return epAttrNames( ing.symbols[id], attr ); };
+    if( std::ranges::count_if( fs, hit ) == 1 )
+    {
+        t = EpTarget{ EpTargetState::Def, *std::ranges::find_if( fs, hit ) };
+    }
+}
+
 inline std::vector<std::vector<EpTarget>> resolveEpTargets( const IngestResult& ing, const std::vector<Manifest>& manifests )
 {
     std::vector<std::vector<EpTarget>>      targets( manifests.size() );
@@ -592,6 +784,17 @@ inline std::vector<std::vector<EpTarget>> resolveEpTargets( const IngestResult& 
     {
         for( const EpEntry& e : manifests[m].entries )
         {
+            if( epPackageJsonManifest( manifests[m].rel ) )
+            {
+                const std::uint32_t f = epFileTargetFile( ing, manifests[m].dir, e.target );
+                moduleFile[m].push_back( f );
+                targets[m].push_back( EpTarget{ f == kNoFile ? EpTargetState::External : EpTargetState::Unresolved, kNoNode } );
+                if( f != kNoFile )
+                {
+                    wantFile[f] = 1;
+                }
+                continue;
+            }
             bool                inTree = false;
             const std::uint32_t f      = epModuleFile( ing, manifests[m].dir, std::string_view( e.target ).substr( 0, e.target.find( ':' ) ), inTree );
             moduleFile[m].push_back( f );
@@ -606,21 +809,14 @@ inline std::vector<std::vector<EpTarget>> resolveEpTargets( const IngestResult& 
                                                 []( NodeId a, NodeId b ) { return a < b; } );
     for( std::size_t m = 0; m < manifests.size(); ++m )
     {
+        const bool packageJson = epPackageJsonManifest( manifests[m].rel );
         for( std::size_t k = 0; k < manifests[m].entries.size(); ++k )
         {
-            const std::string& tg    = manifests[m].entries[k].target;
-            const std::size_t  colon = tg.find( ':' );
-            if( moduleFile[m][k] == kNoFile || colon == std::string::npos )
+            if( moduleFile[m][k] == kNoFile )
             {
                 continue;
             }
-            const std::string_view attr = std::string_view( tg ).substr( colon + 1 );
-            const auto             hit  = [ & ]( NodeId id ) { return epAttrNames( ing.symbols[id], attr ); };
-            const FileSymbols&     fs   = byFile[ moduleFile[m][k] ];
-            if( std::ranges::count_if( fs, hit ) == 1 )
-            {
-                targets[m][k] = EpTarget{ EpTargetState::Def, *std::ranges::find_if( fs, hit ) };
-            }
+            epFillOneTarget( ing, manifests[m].entries[k], moduleFile[m][k], byFile[ moduleFile[m][k] ], targets[m][k], packageJson );
         }
     }
     return targets;
@@ -749,6 +945,25 @@ inline void appendEpGroup( std::string& x, const IngestResult& ing, const flipim
 
 }   // namespace epdetail
 
+
+inline void collectEpManifestsForShown( const IngestResult& ing, std::span<const NodeId> shown, std::vector<std::string>& seenDirs,
+                                        std::vector<epdetail::Manifest>& manifests )
+{
+    for( const NodeId id : shown )
+    {
+        if( id >= ing.symbols.size() )
+        {
+            continue;
+        }
+        const std::string_view rel = rootRelPath( ing, ing.symbols[id].fileId );
+        if( !rel.ends_with( ".py" ) && !rel.ends_with( ".js" ) && !rel.ends_with( ".ts" ) )   // the languages that have a manifest reader
+        {
+            continue;
+        }
+        epdetail::collectManifestsAbove( ing, ing.symbols[id].fileId, seenDirs, manifests );
+    }
+}
+
 // The element(s). `shown` is the answer's ranked head (the rows <sigs> serves, rank order). Single-root runs only.
 inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const NodeId> shown )
 {
@@ -759,16 +974,10 @@ inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const No
     }
     std::vector<std::string>        seenDirs;
     std::vector<epdetail::Manifest> manifests;
-    for( const NodeId id : shown )   // the manifests above every shown Python row
-    {
-        if( id < ing.symbols.size() && rootRelPath( ing, ing.symbols[id].fileId ).ends_with( ".py" ) )
-        {
-            epdetail::collectManifestsAbove( ing, ing.symbols[id].fileId, seenDirs, manifests );
-        }
-    }
+    collectEpManifestsForShown( ing, shown, seenDirs, manifests );
     if( manifests.empty() )
     {
-        return out;   // no manifest above a shown Python row: resolveEpTargets and consumerLineIndex would each walk every symbol for nothing
+        return out;   // no manifest above a shown row: resolveEpTargets and consumerLineIndex would each walk every symbol for nothing
     }
     const std::vector<std::vector<EpTarget>> targets     = epdetail::resolveEpTargets( ing, manifests );
     std::size_t                              groupsTotal = 0;
@@ -800,15 +1009,15 @@ inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const No
 // The element's legend clauses, present-only beside it: the full and the compact dialect. No "--": they ride inside an XML comment.
 inline constexpr std::string_view kForEpManifestLegend =
     "; ep p= l= group=: a manifest entry-point group (setup.cfg [options.entry_points], pyproject [project.entry-points.*], "
-    "[project.scripts], [project.gui-scripts], [tool.poetry.plugins.*]/[tool.poetry.scripts]) that registers a shown row, l= the group's line; "
-    "e n= target=: each entry as written, def=file:line the in-tree definition it names, external=1 no indexed file is its module, "
-    "unresolved=1 the module or the name is not exactly one file or definition in the tree; used_at=file:line used_in=: code that "
+    "[project.scripts], [project.gui-scripts], [tool.poetry.plugins.*]/[tool.poetry.scripts], package.json bin/main) that registers a shown row, "
+    "l= the group's line; e n= target=: each entry as written, def=file:line the in-tree definition it names, external=1 no indexed file is its "
+    "module or path, unresolved=1 the module, path, or name is not exactly one file or definition in the tree; used_at=file:line used_in=: code that "
     "compares or loads that group's string literal (by literal text, not resolved, so a docstring or a parameter default that quotes it is listed too; a floor); "
     "no used_at= means no such code was found; used_capped=1 used_total=, entries_capped=1 entries_total=, groups_capped=1 "
     "groups_total=: that list was cut, the total it was cut from";
 inline constexpr std::string_view kForCompactEpManifestLegend =
     "; ep p= l= group=: a manifest entry-point group registering a shown row; e n= target= as written, def=file:line in tree, "
-    "external=1 module not in tree, unresolved=1 not one def; used_at=file:line used_in=: code reading that group literal "
+    "external=1 module or path not in tree, unresolved=1 not one def; used_at=file:line used_in=: code reading that group literal "
     "(by text, a floor); used_capped=1/entries_capped=1/groups_capped=1 with used_total=/entries_total=/groups_total= if cut";
 
 }   // namespace rw
