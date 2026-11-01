@@ -1402,6 +1402,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             {
                 rw::emitTo( stderr, "ripwire --hotspots: {}\n", shallowWhy );
             }
+            else if( const std::string cutWhy = gitWalkCutRefusalCause(); !cutWhy.empty() )
+            {
+                rw::emitTo( stderr, "ripwire --hotspots: {}\n", cutWhy );   // M4: a budget cut is not an unavailable git
+            }
             else
             {
                 rw::emitTo( stderr, "ripwire --hotspots: git unavailable / no history (need a git repo)\n" );
@@ -1705,6 +1709,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             {
                 rw::emitTo( stderr, "ripwire --cochange: {}\n", shallowWhy );
             }
+            else if( const std::string cutWhy = gitWalkCutRefusalCause(); !cutWhy.empty() )
+            {
+                rw::emitTo( stderr, "ripwire --cochange: {}\n", cutWhy );   // M4: a budget cut is not an unavailable git
+            }
             else
             {
                 rw::emitTo( stderr, "ripwire --cochange: git unavailable / no history (need a git repo)\n" );
@@ -1884,6 +1892,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             if( const std::string shallowWhy = minedRootShallowCause( root, multiRoot, ws, ( multiRoot && onlyFileId != UINT32_MAX ) ? ing.fileRoot[ onlyFileId ] : UINT32_MAX ); !shallowWhy.empty() )   // 0.6.6: on any mined root
             {
                 rw::emitTo( stderr, "ripwire --owners: {}\n", shallowWhy );
+            }
+            else if( const std::string cutWhy = gitWalkCutRefusalCause(); !cutWhy.empty() )
+            {
+                rw::emitTo( stderr, "ripwire --owners: {}\n", cutWhy );   // M4: a budget cut is not an unavailable git
             }
             else
             {

@@ -91,7 +91,7 @@ inline std::string renderHistoryUnread( DiscloseAs as )
     {
         return "<!--history_unread=1: the git history walk behind churn= and amp= hit its budget after the newest "
              + std::to_string( historyRead().cutCommits ) + " commits, so churn= and amp= count only those: both are floors, and an absent "
-             "churn= here is not zero churn. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget; the cut is cached until HEAD moves.-->";
+             "churn= here is not zero churn. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget. Where the clock cut it, the prefix reached moves with machine load, so two runs can differ; a stored cut stands until HEAD moves, and a no-cache run walks again.-->";
     }
     std::string comment = "<!--history_unread=1: the git history walk behind churn= and amp= could not be read in full in this run (";
     if( historyRead().stoppedRoots + historyRead().cutRoots == 0 )

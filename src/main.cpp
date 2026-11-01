@@ -417,8 +417,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // URL string that starts with `-` from ever being parsed as a `git clone` OPTION even if isGitUrl's
     // own leading-dash guard were ever bypassed or loosened — belt-and-suspenders, not the only gate.
     fs::remove_all( fs::path( cacheDir ), ec );
-    const rw::GitNetworkForClone networkForThisClone;   // the one git command that means to download (gitcmd.h NEVER DOWNLOAD)
-    const std::string cmd = rw::gitCmd( " -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
+    const std::string cmd = rw::gitCmdForClone( " -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
                                          "clone --depth=1 -q -- " ) + rw::shSingleQuote( urlOrPath )
                           + " " + rw::shSingleQuote( cacheDir ) + " 2>&1";
     rw::emitTo( stderr, "ripwire: cloning {} → {}\n", urlOrPath.c_str(), cacheDir.c_str() );
@@ -3868,28 +3867,28 @@ static std::string_view scipIndexUnreadableReason( const std::string& scipPath )
     return {};
 }
 
-// --for / --metrics / --exemplar mine 18 months of history after the graph build (the amp=/churn= block in
+// --for / --metrics mine 18 months of history after the graph build (the amp=/churn= block in
 // dispatchMain). That walk is `git` subprocesses plus a blob read and touches nothing the ingest produces, so it
 // starts BEFORE the ingest, one thread per root, and runs beside it; the amp=/churn= block only resolves each walk's
 // paths against `ing`. Empty when no such verb runs — and for --help-task, the one verb that answers between the
 // two, because a run that stops before the block still waits for its walks (a std::async future joins).
 //
-// THE WAIT, and why it stays. These three verbs are the walk's only readers, and each prints what it feeds into every row: amp= on
-// all three, churn= on --for. Answering without it would lose both, on a timing that varies per run, where the wait is instead
-// bounded: the walk's own budget ends it (gitmine.h THE BUDGET, 20 s from the walk's start, even against a git that went silent),
+// THE WAIT, and why it stays. These two verbs are the walk's only readers, and each prints what it feeds into every row: amp= on
+// both, churn= on --for. (--exemplar used to start it and printed neither; it selects by tested, fan-in and complexity.)
+// Answering without it would lose both, on a timing that varies per run, where the wait is instead bounded: the walk's own budget ends it (gitmine.h THE BUDGET, 20 s from the walk's start, even against a git that went silent),
 // the budget's clock runs beside the ingest, and a cut is cached, so only the first call after HEAD moves pays it. Every other
 // verb runs no walk here; those that mine history do it themselves, on the same budget.
 static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( const rw::Config& cfg, bool multiRoot,
                                                                          const std::vector<rw::WorkspaceRoot>& ws, const std::string& root )
 {
     std::vector<std::future<rw::quality::HistoryWalk>> walks;
-    if( ( !cfg.metrics && cfg.forTask.empty() && cfg.exemplar.empty() ) || !cfg.helpTask.empty() )
+    if( ( !cfg.metrics && cfg.forTask.empty() ) || !cfg.helpTask.empty() )
     {
         return walks;
     }
     for( std::size_t r = 0; r < ( multiRoot ? ws.size() : 1u ); ++r )
     {
-        walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root ]() { return rw::quality::gitHistoryWalk( rootArg ); } ) );
+        walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root, noCache = cfg.noCache ]() { return rw::quality::gitHistoryWalk( rootArg, noCache ); } ) );
     }
     return walks;
 }
@@ -4128,12 +4127,14 @@ static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
     const std::uint64_t commits = cuts.commitsRead.load( std::memory_order_relaxed );
     DISCLOSE( Diagnostics::answerUnchanged, "the walk's numbers are floors and the answer says so",
               "main: a git history walk hit its budget — its counts cover only the newest commits" );
-    if( !cfg.json && !cfg.candidates && !cfg.sarif && !certainlyNonXmlAnswer( cfg, argv ) )
+    const std::string sentence = rw::gitWalkCutSentence( walks, commits );
+    // The servers' stdout is the protocol, so a comment there is a line no client can parse: they carry the sentence per request in the
+    // envelope (`_history_cut`, mcp.h) and here only on stderr.
+    if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
     {
-        rw::emitTo( stdout, "<!--history_cut={}: that many git history walks hit their budget and read only the newest commits ({} read in all), so "
-                            "co-change, owner and churn numbers from history in this answer are floors. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget.-->\n", walks, commits );
+        rw::emitTo( stdout, "<!--{}-->\n", sentence.c_str() );
     }
-    rw::emitTo( stderr, "ripwire: history_cut={}: git history walks hit their budget after {} commits; counts from history are floors (RIPWIRE_GIT_WALK_SECONDS, RIPWIRE_GIT_WALK_COMMITS)\n", walks, commits );
+    rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
 }
 
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
@@ -4205,7 +4206,6 @@ int main( int argc, char** argv )
     using namespace rw;
 
     rw::os::init_process( argc, argv );   // POSIX: nothing. Windows: UTF-8 argv, binary stdio, path-valued environment in the program's spelling
-    rw::denyGitLazyFetch();               // before any thread and any git child: no git of ours downloads on a partial clone (gitcmd.h)
 
     if( argc >= 2 && std::string_view( argv[1] ) == "wrap" )
     { // adoption recipe (subcommand, not a flag)
@@ -5462,6 +5462,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // shared by every symbol in that file, ADDED to that symbol's direct-caller count. No git / no history
         // → coPartnersPerFile stays 0 (clean degrade to callers-only). The single popen is measured (§ gate f).
         std::vector<std::uint32_t> coPartnersPerFile( ing.files.size(), 0u );
+        if( cfg.metrics || !cfg.forTask.empty() )   // --exemplar selects by tested/fan-in/ccx and prints neither amp= nor churn=: no history, no wait
         {
             // ONE popen: 18-month co-change file-sets (for amp) + — only when --for needs it — the 12-month
             // per-file churn (folded into the same walk, A4-P6). --metrics/--exemplar pass churnMonths=0 → no

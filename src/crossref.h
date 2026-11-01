@@ -505,6 +505,7 @@ inline bool isRevisionToken( std::string_view s ) noexcept
 struct StreamBlobStats
 {
     std::uint32_t missing    = 0;      // "<oid> missing" / malformed header — the object could not be read
+    std::vector<std::string> missingShas;   // those objects' names, in the order asked: a partial clone's blobs (git will not download them)
     std::uint32_t nonBlob    = 0;      // wrong object type or negative size — never scanned
     std::uint32_t oversized  = 0;      // > kMaxBlobBytes, consumed but DISCARDED unread
     std::uint32_t binary     = 0;      // NUL in the probe window — outside a text-scoped claim, not a failure
@@ -593,7 +594,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
 
         const std::size_t sp2 = header.rfind( ' ' );
         const std::size_t sp1 = ( sp2 == std::string::npos ) ? std::string::npos : header.rfind( ' ', sp2 - 1 );
-        if( sp1 == std::string::npos ) { ++st.missing;  onBlob( shas[ served ], std::string_view{}, false ); continue; }
+        if( sp1 == std::string::npos ) { ++st.missing;  st.missingShas.push_back( shas[ served ] );  onBlob( shas[ served ], std::string_view{}, false ); continue; }
 
         const std::string_view type( header.data() + sp1 + 1, sp2 - sp1 - 1 );
         const long long        size = std::strtoll( header.c_str() + sp2 + 1, nullptr, 10 );
@@ -709,6 +710,15 @@ public:
             facts_.emplace( sha, std::move( f ) );
             ++fetched_;
         }, &stats_ );
+        std::sort( stats_.missingShas.begin(), stats_.missingShas.end() );
+        stats_.missingShas.erase( std::unique( stats_.missingShas.begin(), stats_.missingShas.end() ), stats_.missingShas.end() );
+    }
+
+    // An object git could not read (a partial clone's blob: ripwire never downloads one, gitcmd.h NEVER DOWNLOAD). Its facts are the
+    // shared empty record, which is "this side contributed no lines" - a measurement it is not, so a verdict that rests on it is Unknown.
+    bool absent( const std::string& sha ) const noexcept
+    {
+        return std::binary_search( stats_.missingShas.begin(), stats_.missingShas.end(), sha );
     }
 
     // K75: a batch that never started (the sha list could not be written under the cache dir, git did not spawn) or died
@@ -1308,6 +1318,17 @@ inline RefRow analyzeRef( const RefInfo& ref, const RefPlumbing& plumb, const st
         if( r.bSha == headSide )
         {
             continue; // byte-identical on the live line
+        }
+
+        if( blobs.absent( r.aSha ) || blobs.absent( r.bSha ) || blobs.absent( headSide ) )
+        {
+            // A side git could not read reads as an EMPTY side, and an empty side makes added work look like it was never there
+            // ("merged"). Not known, so Unknown, never Merged (Verdict's own comment).
+            row.ok      = false;
+            row.verdict = Verdict::Unknown;
+            row.files.clear();
+            row.strayLines = row.strayFiles = row.supersededLines = 0;
+            return row;
         }
 
         const BlobFacts& base = blobs.get( r.aSha );

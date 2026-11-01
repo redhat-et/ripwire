@@ -5209,7 +5209,10 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
 // degrades to an empty stream; no resolvable HEAD to the uncached walk (which itself degrades to an empty stream —
 // gitLogNameOnlyRaw's contract). Thread-safe: every memo it reaches (the HEAD anchor, the toplevel) takes its own
 // mutex, and the blob write is an atomic rename. K51: a walk git could not complete comes back with `unread` set and is never stored.
-inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince )
+// A prefix the BUDGET cut (gitmine.h THE BUDGET) is stored only when it is worth keeping: a Time cut under kMinStoredTimeCutCommits is a git
+// that stalled, not a slow repo, and `noCache` (--no-cache) neither reads nor writes any cut, so the flag that asks for a fresh answer gets one.
+inline constexpr std::size_t kMinStoredTimeCutCommits = 1024;
+inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince, bool noCache = false )
 {
     if( !hasEnclosingGitRepo( root ) )
     {
@@ -5247,10 +5250,11 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
 
     RawCommitStream                  raw;
     const std::optional<std::string> blob = readQSnapBlob( cachePath );
-    if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) )
+    if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) && !( noCache && raw.cut != GitWalkCut::None ) )
     {
         return raw;                                                                // warm hit — no walk
     }
+    raw = RawCommitStream{};   // a stored cut that --no-cache refused to read is walked again
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
     if( raw.unread || gitWalksAbandoned() )
@@ -5261,12 +5265,14 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
         // An abandoned read (a memory-guard refusal stopped the walk) is a prefix too, even when git exited 0: never cached.
         return raw;
     }
-    if( raw.cut != GitWalkCut::None && raw.commits.empty() )
+    if( raw.cut != GitWalkCut::None
+        && ( noCache || ( raw.cut == GitWalkCut::Time && raw.commits.size() < kMinStoredTimeCutCommits ) ) )
     {
-        return raw;   // the budget ran out before one commit: a stalled git, not a prefix worth keeping until HEAD moves
+        return raw;   // --no-cache keeps no cut; a clock that ran out within the first ~1,000 commits is a stalled git, not a prefix worth keeping until HEAD moves
     }
-    // A cut prefix IS stored: re-walking would cost the whole budget on every call of a repo that will only cut again, and the
-    // blob carries the cut, so the next answer still discloses it. It is the same prefix until HEAD moves.
+    // A cut prefix IS stored (a Commits cut, or a Time cut of a slow repo): re-walking would cost the whole budget on every call of a repo
+    // that will only cut again, and the blob carries the cut, so the next answer still discloses it. Where the clock decided, WHICH commits
+    // it reached moves with machine load, so the answer says so (renderHistoryUnread). It is the same prefix until HEAD moves.
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                    // write just recomputes next time
     return raw;
@@ -5280,9 +5286,9 @@ struct HistoryWalk
     RawCommitStream raw;
 };
 
-inline HistoryWalk gitHistoryWalk( std::string root )
+inline HistoryWalk gitHistoryWalk( std::string root, bool noCache = false )
 {
-    RawCommitStream raw = gitRawCommitStreamCached( root, "18 months ago" );
+    RawCommitStream raw = gitRawCommitStreamCached( root, "18 months ago", noCache );
     return HistoryWalk{ std::move( root ), std::move( raw ) };
 }
 

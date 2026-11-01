@@ -833,6 +833,44 @@ inline GitWalkCutReport& gitWalkCutsToDisclose() noexcept
     return report;
 }
 
+// What the process has cut so far, read before and after one unit of work (an MCP request) to say what THAT work cut.
+struct GitWalkCutMark
+{
+    std::uint32_t walks   = 0;
+    std::uint64_t commits = 0;
+};
+inline GitWalkCutMark gitWalkCutMark() noexcept
+{
+    const GitWalkCutReport& report = gitWalkCutsToDisclose();
+    return GitWalkCutMark{ report.walks.load( std::memory_order_relaxed ), report.commitsRead.load( std::memory_order_relaxed ) };
+}
+
+// The one sentence for "N history walks hit their budget": the CLI's stdout comment, its stderr line and the MCP envelope's
+// `_history_cut` all print it. `walks`/`commits` are the cut walks and the commits they read. "" when nothing was cut.
+inline std::string gitWalkCutSentence( std::uint32_t walks, std::uint64_t commits )
+{
+    if( walks == 0 )
+    {
+        return {};
+    }
+    return "history_cut=" + std::to_string( walks ) + ": that many git history walks hit their budget and read only the newest commits ("
+         + std::to_string( commits ) + " read in all), so co-change, owner and churn numbers from history in this answer are floors, and the prefix a time "
+           "cut reaches moves with machine load, so two runs can differ. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget.";
+}
+
+// A refusal that would say "git unavailable / no history" when the history walk was ended by its budget before it read one commit
+// names that instead: git ran, there IS history, the clock or the commit cap stopped the read. "" when no walk was cut.
+inline std::string gitWalkCutRefusalCause()
+{
+    const GitWalkCutMark mark = gitWalkCutMark();
+    if( mark.walks == 0 )
+    {
+        return {};
+    }
+    return "the git history walk hit its budget before it read a commit that answers this (git ran; the history exists but was not read in time) - raise "
+           "RIPWIRE_GIT_WALK_SECONDS or RIPWIRE_GIT_WALK_COMMITS";
+}
+
 struct GitLogWalk
 {
     bool                      unread   = false;

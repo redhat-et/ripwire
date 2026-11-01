@@ -81,6 +81,14 @@
 namespace rw
 {
 
+// The words of the refusal for a diff git could not read. The likeliest cause is a partial clone: the diff needs a blob the clone does
+// not hold, and ripwire never downloads one (gitcmd.h NEVER DOWNLOAD). The user's own `git fetch` or `git diff` does, and then this runs.
+inline std::string prContextDiffFailedCause( const std::string& root )
+{
+    return "could not read the diff in " + root + " (git failed: on a partial clone, --filter=blob:none, the diff needs a blob this clone does not hold and "
+           "ripwire does not download one) - refusing rather than print files=\"0\". Run `git diff --stat` in that repository yourself to fetch what it needs, then rerun";
+}
+
 // result of a --numstat-based diff mask build: the mask itself, whether git ran cleanly, and how many
 // entries were dropped for being content-identical (mode-only flips, e.g. chmod 644→755) — see
 // PrContextMask::skippedModeOnly below. A3-F10.
@@ -107,6 +115,8 @@ struct PrContextMask
                                              // (the class --abi names head-moved: the other line moved, not us).
 
     // ── refusal (P0.1 security + P2.8 honesty) ───────────────────────────────────────────────────────────
+    bool              diffFailed = false;    // git has history and the ref resolved, but no diff could be read (a partial clone's blob
+                                             // ripwire will not download, with no tree-level answer either): REFUSE, never print files="0"
     bool              badRef = false;        // a BASEREF was given, the root HAS git history, and the ref does not
                                              // resolve to a commit. `ok` is false, but this is NOT the non-git
                                              // degrade: the caller must REFUSE with exit 1 and name the ref (the
@@ -212,7 +222,7 @@ inline NumstatRow numstatRowPath( std::string row )
     return NumstatRow{ resolveNumstatPath( std::move( pathCol ) ), false };
 }
 
-inline NumstatDiff numstatChangedPaths( const std::string& root, const std::string& revArgs )
+inline NumstatDiff numstatChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree = false )
 {
     NumstatDiff out;
 
@@ -249,15 +259,31 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
         // git failed outright. On a partial clone that is numstat wanting a blob ripwire will not download (gitcmd.h NEVER DOWNLOAD),
         // and "no changed files" would be a confident wrong answer. The tree-level list needs no blob, at the one cost of not telling
         // a mode-only row from a content row, so such a row is listed.
-        const GitCommandLines listed = gitCommandLines( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                                                        + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --no-renames --name-only " + revArgs + " -- 2>/dev/null" );
+        // `diff <rev>` compares the WORKING TREE, and git reads the base blob of every modified file to check it (a blob the partial clone
+        // does not hold: it dies). So a dirty tree's list is two tree-level reads: the work already committed (<rev> against HEAD) and the
+        // uncommitted edits (HEAD against the tree, whose blobs a checkout has). `againstWorkingTree` is false for a diff of two commits.
+        const std::string listHead = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                                   + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --no-renames --name-only ";
+        const GitCommandLines listed = gitCommandLines( listHead + revArgs + ( againstWorkingTree ? " HEAD" : "" ) + " -- 2>/dev/null" );
         if( !listed.isStarted || listed.status != 0 )
         {
             return out;
         }
+        out.paths = listed.lines;
+        if( againstWorkingTree )
+        {
+            const GitCommandLines dirty = gitCommandLines( listHead + "HEAD -- 2>/dev/null" );
+            if( !dirty.isStarted || dirty.status != 0 )
+            {
+                out.paths.clear();
+                return out;
+            }
+            out.paths.insert( out.paths.end(), dirty.lines.begin(), dirty.lines.end() );
+            std::sort( out.paths.begin(), out.paths.end() );
+            out.paths.erase( std::unique( out.paths.begin(), out.paths.end() ), out.paths.end() );
+        }
         DISCLOSE( Diagnostics::answerUnchanged, "the changed files are listed; a mode-only change is not told from a content change",
                   "prcontext: git diff --numstat failed (a partial clone's missing blob?) — the changed paths come from --name-only" );
-        out.paths = listed.lines;
     }
     out.ok = true;
     return out;
@@ -393,9 +419,10 @@ inline PrContextMask gitDiffChangedMaskNumstat( const std::string& root, const I
         return result;
     }
 
-    const NumstatDiff mine = numstatChangedPaths( root, anchor.revArgs );
+    const NumstatDiff mine = numstatChangedPaths( root, anchor.revArgs, true );
     if( !mine.ok )
     {
+        result.diffFailed = true;   // the callers refuse and name the cause: a list that could not be read is not an empty list
         return result;
     }
 
