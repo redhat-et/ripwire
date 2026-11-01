@@ -27,12 +27,15 @@
 //     (verbs_for.h). The prose words there are real retrieval terms and the ranked map may hold the answer, so nothing is taken.
 
 #include "filter.h"            // isTestSymbol, pathTierOf
+#include "forcallerhop.h"      // forCallerHopTargets — the ONE-function test a flip needs (its callers are served)
+#include "graph.h"
 #include "infra/namesplit.h"   // hasIdentifierShape, isIdentChar
 #include "langfacts.h"         // langFacts().notCode
 #include "lexical.h"           // chooseForRanker, RouteChoice, parseGraphSubject, isRouteStopword, kMaxAnchorDefs
 #include "mention.h"           // mention_detail::qualifierPlaces — the ONE "does this qualifier place this symbol" test
 #include "model.h"
 #include "queryshape.h"
+#include "serialize.h"         // kForAnchorBodyBudgetBytes
 
 #include <algorithm>
 #include <cstddef>
@@ -319,13 +322,18 @@ inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice&
     {
         return true;
     }
-    std::vector<std::string> leaves;
+    std::vector<std::string> leaves;     // every word that spells a symbol
+    std::vector<std::string> idLeaves;   // the identifier-syntax ones: a subject that SPELLS a name is about that name
     for( const std::string_view w : splitRouteWords( rankQuery ) )
     {
         const std::string_view t = detail::graphSubjectTrimWord( w ).text;
         if( const Spelling sp = parseSpelling( t ); sp.valid )
         {
             leaves.push_back( routeLower( sp.leaf ) );
+            if( hasNameSyntax( t ) )
+            {
+                idLeaves.push_back( routeLower( sp.leaf ) );
+            }
         }
     }
     // a subject that is a FILE ("DynamicScreen.c", "src/x.cc") anchors that file, not a symbol: a source file is a source anchor
@@ -344,14 +352,18 @@ inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice&
             }
         }
     }
+    // A plain word never vouches for a subject that spells a name: `max_concurrent_queries read` is about the key, whose only home is
+    // a data file, and `read` has a source definition anywhere. With no identifier-syntax word, the plain words ARE the anchor.
+    const std::vector<std::string>& judge = idLeaves.empty() ? leaves : idLeaves;
+    const auto inJudge = [ & ]( const std::string& lower ) { return std::ranges::find( judge, lower ) != judge.end(); };
     const auto named = [ & ]( const Symbol& s )
     {
+        const std::string lower = routeLower( s.name );
         if( rc.anchorDefs.empty() )
         {
-            return std::ranges::any_of( leaves, [ & ]( const std::string& l ) { return l.size() == s.name.size() && l == routeLower( s.name ); } );
+            return inJudge( lower );
         }
-        return std::ranges::any_of( rc.anchorDefs, [ & ]( const RouteAnchorDef& a )
-                                    { return a.fileId == s.fileId && a.lowerName.size() == s.name.size() && a.lowerName == routeLower( s.name ); } );
+        return inJudge( lower ) && std::ranges::any_of( rc.anchorDefs, [ & ]( const RouteAnchorDef& a ) { return a.fileId == s.fileId && a.lowerName == lower; } );
     };
     for( NodeId id = 0; id < NodeId( ing.symbols.size() ); ++id )
     {
@@ -382,8 +394,56 @@ inline bool subjectAnchoredPlainWord( const IngestResult& ing, const RouteChoice
     return false;
 }
 
-// The route the subject reading picks, before the CONFIDENCE-ANCHOR check.
-inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, std::string_view task )
+// Would the bare symbol's route SERVE what a flip takes away? A declined or conceptual route is a ranked map; the name-exact route that
+// replaces it is one definition's body plus its callers, and nothing else. That trade is worth it only when both really print:
+//   * the anchor resolved to a definition (rc.anchorDefs): the single-anchor body allowance (kForAnchorBodyBudgetBytes) funds ITS body.
+//     A spelling the route could only read by shape ("ProcessList::insert(syntax)") binds nothing, so the body is omitted: no flip;
+//   * that definition's body fits the allowance, so it is printed and not "omitted (over budget)";
+//   * the name is ONE function over the whole index, by the callers verb's own resolution (forCallerHopTargets): its callers are
+//     served and no namesake, in any directory, is a second candidate for the body. This is the class, not a path list: a copy under
+//     devtools/, ci/, examples/, deps/ or anywhere else makes the name two functions and the map stays.
+inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, const RouteChoice& bare )
+{
+    if( bare.anchorDefs.empty() )
+    {
+        return false;
+    }
+    std::vector<NodeId> defs;
+    for( NodeId id = 0; id < NodeId( ing.symbols.size() ); ++id )
+    {
+        const Symbol& s = ing.symbols[id];
+        if( s.kind == SymKind::Section )
+        {
+            continue;
+        }
+        const std::string lower = routeLower( s.name );
+        for( const RouteAnchorDef& a : bare.anchorDefs )
+        {
+            if( a.fileId == s.fileId && a.lowerName == lower )
+            {
+                defs.push_back( id );
+                break;
+            }
+        }
+    }
+    if( defs.empty() )
+    {
+        return false;
+    }
+    for( const NodeId id : defs )
+    {
+        const Symbol& s = ing.symbols[id];
+        if( s.endByte > s.sigStartByte && std::size_t( s.endByte - s.sigStartByte ) > kForAnchorBodyBudgetBytes )
+        {
+            return false;
+        }
+    }
+    return !forCallerHopTargets( ing, g, defs ).empty();
+}
+
+// The route the subject reading picks, before the CONFIDENCE-ANCHOR check. `servesBodiesAndCallers`: the surface prints the anchor's
+// body and <callers> (the CLI --for does; the MCP `for` verb serves signatures only), so it may trade a ranked map for them.
+inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
 {
     SubjectRoute out;
     out.route = chooseForRanker( ing, task );
@@ -394,15 +454,22 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, std::s
     }
     const bool lift     = reading.descriptive && reading.sourceDef;
     const bool declined = out.route.reason.starts_with( "subtoken+body:declined(" );
+    const bool plainAnchored = subjectAnchoredPlainWord( ing, out.route, reading );
     // Two exact symbols on a declined route ("add a UrlSerializer parameter to createSegmentGroupFromRoute") name no ONE anchor, and
     // name-exact would serve neither's callers: the conceptual answer stands with the first function's callers on top.
-    if( subjectAnchoredPlainWord( ing, out.route, reading ) || ( declined && lift && reading.exact.size() == 1 ) )
+    if( plainAnchored || ( declined && lift && reading.exact.size() == 1 ) )
     {
         RouteChoice bare = chooseForRanker( ing, reading.reduced );
-        // A flip from a declined route gives up the conceptual map, so the definition the anchor would SERVE must be source-class, not
-        // merely some definition of the name: the anchor binds the first body-carrying one in path order, and that can be a CI or
-        // vendored copy. A name-exact route had no map to lose, and CONFIDENCE-ANCHOR reads that answer low.
-        if( bare.which == LexMode::NameExact && ( !declined || routeAnchorHasSourceDef( ing, bare, reading.reduced ) ) )
+        // The words go only for a route that is still name-exact on the symbol and whose anchor has a SOURCE definition: a test, doc or
+        // data-file anchor leaves the route as it was (CONFIDENCE-ANCHOR reads it low), since dropping the words there leaves an answer
+        // with no lead, where the full route kept one. A name-exact route had no map to lose; a declined one does, so it flips only
+        // where the surface prints the body AND the callers (flipServesBodyAndCallers); otherwise the map stands and the callers ride.
+        bool flip = bare.which == LexMode::NameExact && routeAnchorHasSourceDef( ing, bare, reading.reduced );
+        if( flip && !plainAnchored )
+        {
+            flip = servesBodiesAndCallers && flipServesBodyAndCallers( ing, g, bare );
+        }
+        if( flip )
         {
             bare.reason += subjectDroppedClause( ing, reading.dropped );
             out.route     = std::move( bare );
@@ -427,9 +494,9 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, std::s
 
 // THE entry point both the CLI lens and the MCP verbs call in place of chooseForRanker. No reading and a source-backed anchor: exactly
 // chooseForRanker. confidence= reads low on anchorNoSource, and route= says why, so the answer explains itself in every legend dialect.
-inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, std::string_view task )
+inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
 {
-    SubjectRoute out = chooseSubjectRouteUnchecked( ing, task );
+    SubjectRoute out = chooseSubjectRouteUnchecked( ing, g, task, servesBodiesAndCallers );
     out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, out.rankQuery.empty() ? task : std::string_view( out.rankQuery ) );
     if( out.anchorNoSource )
     {

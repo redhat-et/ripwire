@@ -2478,7 +2478,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // them is part of the routed reading. A default-constructed RouteChoice IS that reading: SubtokenBody,
     // no reason, no anchors, so there is no route= to disclose and ctxRootOpen omits the attribute, which is
     // byte-for-byte what the CLI emits under --no-route.
-    const SubjectRoute       subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, task );   // SUBJECT-ANCHOR, the CLI twin's
+    const SubjectRoute       subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, ix.g, task, /*servesBodiesAndCallers=*/false );   // SUBJECT-ANCHOR, the CLI twin's
     const RouteChoice&       rc        = subjectRoute.route;
     const std::string_view   rankTask  = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     // NOT const: LB-A's relevance floor narrows it below, once every boost has landed on lensRank. The
@@ -4895,7 +4895,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     LensRanking       lr;
     // See forTaskText's own note: `noRoute` is the CLI --no-route over MCP, and it skips the shape demotion,
     // the mention anchor and the co-change prior with the ranker, because all four are the routed reading.
-    const SubjectRoute     subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, task );   // SUBJECT-ANCHOR, the CLI twin's
+    const SubjectRoute     subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, g, task, /*servesBodiesAndCallers=*/false );   // SUBJECT-ANCHOR, the CLI twin's
     const RouteChoice&     rc           = subjectRoute.route;
     const std::string_view rankTask     = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     std::vector<char> ifaceExact( ing.symbols.size(), 0 );

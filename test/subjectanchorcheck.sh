@@ -6,6 +6,9 @@
 #   N1-N8  near misses: namesake flood, symbol only in tests, question, graph form, join, plain-only subject, too many plain words, no word to drop
 #   D      dotted beats bare; a polyglot name splits and carries no row until a qualifier places it
 #   H      confidence: an anchor served from a test, doc or data file reads low; a source definition keeps it
+#   F      FIX ROUND: F6 a declined route flips only where the body AND the callers print (one function, resolved anchor, body fits),
+#          F2 a namesake in ANY directory keeps the map, F1 the MCP `for` verb never trades its map, F4 a plain word never vouches
+#          for a spelled name, F10 an angle-bracketed owner is a name
 # Usage: bash test/subjectanchorcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/subjectanchorcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -74,9 +77,10 @@ int fresh( int a ) { return a; }
 X
 for i in 1 2 3 4 5 6; do printf 'struct S%s { int parameter( int a ) { return a; } };\n' "$i" > "$CX/src/s$i.cpp"; done
 A="$( ask "$CX" 'RegistryMap::insert fresh parameter' )"; R="$( route "$A" )"
-has   "$R" 'name-exact(RegistryMap::insert)' "B cpp: a qualified symbol is not declined for a word"
-has   "$R" 'parameter(6-defs)' "B cpp: the refused word's definitions are disclosed"
-hasnt "$R" 'declined' "B cpp: no decline"
+# a qualified spelling binds no anchor definition (anchors: X(syntax)), so no body is known to print: the declined map stands (F6/F3)
+has   "$R" 'declined(parameter;6-carriers' "B cpp: a qualified symbol beside a refused word: the declined route stands and names the word"
+hasnt "$R" 'dropped:' "B cpp: no flip on an unbound anchor"
+has   "$( blk "$A" )" 'callOne' "B cpp: the symbol's callers ride on top of the map"
 # ── TypeScript, Rust: same class, unqualified ──
 TS="$TMP/ts"; mkdir -p "$TS/src"
 cat > "$TS/src/a.ts" <<'X'
@@ -136,7 +140,7 @@ hasnt "$( route "$A" )" 'dropped:' "N1 flood: 14 namesakes prove nothing, no rea
 A="$( ask "$FL" 'family_name new' )"
 has "$( route "$A" )" 'dropped: new(1-defs)' "N1 family: one definition per backend is still a name"
 A="$( ask "$PY" 'helper_only_tests new parameter' )"
-has "$( route "$A" )" 'dropped:' "N2 test-only: a word anchor still goes"
+hasnt "$( route "$A" )" 'dropped:' "N2 test-only: the words stay (a test anchor leaves the route as it was; it reads low)"
 A="$( ask "$PY" 'helper_only_tests zznope sturdy' )"
 hasnt "$A" 'by="subject"' "N2 test-only: a symbol only in tests lifts no callers onto a conceptual route"
 A="$( ask "$PY" 'where is prepare_setup_platform new' )"
@@ -198,6 +202,92 @@ has "$( blk "$A" )" 'bundledUser' "V .github first: the source def's callers rid
 A="$( ask "$VN" 'BundledThing parameter' )"; has "$( route "$A" )" 'anchor has no source definition' "V two words, already name-exact at base: no map to lose, and the CI anchor says so"
 A="$( ask "$VN" 'VendorOnlyThing' )"; if [ "$( conf "$A" )" = low ]; then ok "V vendored anchor: confidence low"; else no "V vendored anchor: $( conf "$A" )"; fi
 A="$( ask "$VN" 'VendorOnlyThing zznope sturdy' )"; hasnt "$A" 'by="subject"' "V vendored only: lifts nothing"
+
+# ════ FIX ROUND (review rv-subject-anchor-v2) ════
+# F6: a declined route flips to the bare symbol only when that answer serves the body AND the callers
+FX="$TMP/f6"; mkdir -p "$FX/src"
+printf 'export function SoloThing(a: number) { return a; }\nexport function soloUser() { return SoloThing(1); }\n' > "$FX/src/thing.ts"
+for i in 1 2 3 4 5; do printf 'export function parameter(a: number) { return a; }\n' > "$FX/src/p$i.ts"; done
+printf 'export function fresh(a: number) { return a; }\n' > "$FX/src/fresh.ts"
+A="$( ask "$FX" 'SoloThing fresh parameter' )"; R="$( route "$A" )"
+has "$R" 'name-exact(SoloThing)' "F6 one function, body fits: the declined route flips to the symbol"
+has "$R" 'dropped:' "F6 flip: dropped words named"
+has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "F6 flip: the body is printed"
+has "$( blk "$A" )" 'soloUser' "F6 flip: the callers are printed"
+hasnt "$A" 'body omitted' "F6 flip: no body omitted for budget"
+# F2: the class, not a path list. A namesake under ANY directory makes the name two functions: the map stays.
+for d in playground e2e deps contrib benchmarks tools_x zz_other; do
+    CP="$TMP/cp_$d"; mkdir -p "$CP/$d" "$CP/src"
+    printf 'export function SoloThing(a: number) { return a; }\nexport function parameter(a: number) { return a; }\n' > "$CP/$d/main.ts"
+    cp "$FX/src/"*.ts "$CP/src/"
+    A="$( ask "$CP" 'SoloThing fresh parameter' )"; R="$( route "$A" )"
+    hasnt "$R" 'dropped:' "F2 a namesake under $d/: no flip, the map is not given up"
+    has "$R" 'declined' "F2 a namesake under $d/: the declined route stands and says so"
+done
+# F6: a body past the single-anchor allowance cannot print, so the map stays
+BG="$TMP/big"; mkdir -p "$BG/src"
+python3 - "$BG/src/big.ts" <<'X'
+import sys
+open(sys.argv[1],'w').write('export function SoloBig(a: number) {\n' + '  a = a + 1;\n'*2400 + '  return a;\n}\nexport function bigUser() { return SoloBig(1); }\n')
+X
+cp "$FX/src/"p*.ts "$FX/src/fresh.ts" "$BG/src/"
+A="$( ask "$BG" 'SoloBig fresh parameter' )"; R="$( route "$A" )"
+hasnt "$R" 'dropped:' "F6 a body over the anchor allowance: no flip"
+hasnt "$A" 'body omitted (over budget): SoloBig' "F6 over-budget body: the answer never claims a body it omits"
+# F3/F6: several same-named definitions (one per backend): no body can be chosen, the map stands
+SY="$TMP/sync"; mkdir -p "$SY/src"
+for i in 1 2 3 4; do printf 'export function syncRules(a: number) { return a + %s; }\n' "$i" > "$SY/src/b$i.ts"; done
+cp "$FX/src/"p*.ts "$FX/src/fresh.ts" "$SY/src/"
+A="$( ask "$SY" 'syncRules fresh parameter' )"; R="$( route "$A" )"
+hasnt "$R" 'dropped:' "F3 four definitions: no flip"
+hasnt "$A" 'body omitted (over budget): syncRules' "F3 four definitions: no claim of a body"
+# F3: ch-08's shape: a qualified symbol whose definition is large. The flip printed an omitted body and dropped the map.
+QB="$TMP/qbig"; mkdir -p "$QB/src"
+python3 - "$QB/src/big.cpp" <<'X'
+import sys
+open(sys.argv[1],'w').write('struct BigList { int run( int a ); };\nint BigList::run( int a )\n{\n' + '    a = a + 1;\n'*1100 + '    return a;\n}\nint callBig( BigList& r ) { return r.run( 1 ); }\n')
+X
+for i in 1 2 3 4 5 6; do printf 'struct T%s { int parameter( int a ) { return a; } };\n' "$i" > "$QB/src/t$i.cpp"; done
+printf 'int fresh( int a ) { return a; }\n' > "$QB/src/fresh.cpp"
+A="$( ask "$QB" 'BigList::run fresh parameter' )"; R="$( route "$A" )"
+hasnt "$R" 'dropped:' "F3 a large qualified definition: no flip"
+hasnt "$A" 'body omitted (over budget)' "F3 a large qualified definition: the answer never claims a body it omits"
+has "$( blk "$A" )" 'callBig' "F3 a large qualified definition: its callers ride on the map"
+# F1: the MCP `for` verb serves signatures only, so it never trades a map for the symbol
+mcpfor(){ ( cd "$1" && HOME="$TMP/mcphome" TMPDIR="$TMP/mcphome/" python3 - "$BIN" "$1" "$2" <<'X'
+import json,subprocess,sys
+b,repo,q=sys.argv[1:4]
+req=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"for","arguments":{"path":repo,"task":q}}})+"\n"
+p=subprocess.run([b,"--mcp"],input=req.encode(),capture_output=True,timeout=300,cwd=repo)
+for l in p.stdout.decode('utf8','replace').splitlines():
+    try:d=json.loads(l)
+    except Exception:continue
+    if d.get("id")==1:
+        print("".join(x.get("text","") for x in d["result"]["content"]))
+X
+) ; }
+mkdir -p "$TMP/mcphome"
+M="$( mcpfor "$FX" 'SoloThing fresh parameter' )"; R="$( route "$M" )"
+hasnt "$R" 'dropped:' "F1 MCP: a declined route keeps its map"
+has "$R" 'declined' "F1 MCP: the declined route is disclosed"
+# F4: a plain word never vouches for a spelled name. The key lives in a data file; `read` is a function.
+P4="$TMP/p4"; mkdir -p "$P4/src" "$P4/conf"
+printf 'def read(x):\n    return x\n\ndef use_read():\n    return read(1)\n' > "$P4/src/reader.py"
+printf 'def prepare_knob(x):\n    return x\n\ndef knob_user():\n    return prepare_knob(1)\n' > "$P4/src/knob.py"
+printf 'max_concurrent_things: 100\n' > "$P4/conf/limits.yaml"
+A="$( ask "$P4" 'max_concurrent_things read' )"
+if [ "$( conf "$A" )" != high ]; then ok "F4 a data-file key beside a source word: not high"; else no "F4 a data-file key beside a source word reads high"; fi
+has "$A" "$NOSRC" "F4 a data-file key beside a source word: the route says why"
+A="$( ask "$P4" 'where is max_concurrent_things read' )"
+if [ "$( conf "$A" )" != high ]; then ok "F4 question form: not high"; else no "F4 question form reads high"; fi
+A="$( ask "$P4" 'prepare_knob read' )"
+if [ "$( conf "$A" )" = high ]; then ok "F4 control: a source symbol beside a plain word stays high"; else no "F4 control: $( conf "$A" )"; fi
+# F10: an angle-bracketed owner is a name (xmlwellformed #60: the module-scope owner was dropped as a plain word)
+MS="$TMP/modscope"; mkdir -p "$MS/src"
+printf 'export function setPhase(phase: string): void {\n  console.log(phase)\n}\n' > "$MS/src/lifecycle.ts"
+printf "import { setPhase } from './lifecycle'\n\nexport function boot(): void {\n  setPhase('booting')\n}\n\nsetPhase('starting')\n" > "$MS/src/index.ts"
+PT="$( cd "$MS" && "$BIN" "$MS" --no-cache '--pack-task=<file-scope> setPhase' 2>/dev/null )"
+case "$PT" in *'capped="0" bodyless="1"'*) ok "F10 --pack-task keeps the owner in the body set (bodyless)";; *) no "F10 the module-scope owner was dropped from the body set";; esac
 # determinism + well-formed
 A1="$( ask "$PY" 'prepare_setup_platform new parameter' )"; A2="$( ask "$PY" 'prepare_setup_platform new parameter' )"
 if [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ]; then ok "determinism"; else no "determinism"; fi

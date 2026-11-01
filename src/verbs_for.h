@@ -122,7 +122,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // chosen ONCE here and reused below rather than classified twice — chooseForRanker is pure over
     // (ing, task), so hoisting it is byte-neutral by construction.
     const bool        routeOn      = !cfg.noRoute;
-    SubjectRoute      subjectRoute = routeOn ? chooseSubjectRoute( ing, task ) : SubjectRoute{};
+    SubjectRoute      subjectRoute = routeOn ? chooseSubjectRoute( ing, g, task, /*servesBodiesAndCallers=*/true ) : SubjectRoute{};
     const RouteChoice& rc          = subjectRoute.route;
     // SUBJECT-ANCHOR: the ranker and the mention anchor read the names alone when the words were dropped from the route
     const std::string_view rankTask = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
