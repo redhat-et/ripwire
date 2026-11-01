@@ -1,4 +1,4 @@
-### Changed — Slice 6c: language receiver and comment rules moved to LangFacts columns (#447)
+### Changed — Slice 6c: language receiver and comment rules moved to LangFacts columns (#447, thanks @lennix1337)
 
 Move the language predicates `implicitReceiverLang`, `memberNeverReachesFreeFunction`,
 `moduleCallReachesFunctionsOnly`, `classNameReceiverLang`, and `langUsesHashComment`
