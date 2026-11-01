@@ -41,6 +41,7 @@
 #   N2 [train 42b T-5] `x = x + 1  # note:` is no def header: the bare string after it is a row, not a docstring (twin: the same without the comment)
 #   K1-K10, M1-M5 (lane LITERAL-ANCHOR; RED on base 4e8bfde7 where [P], fixture built at runtime): a dotted key (3+ segments, or 2 with a setting/option/key/command/flag word) or
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
+#   T23-T27, T24g-h (fix round; RED on e2df59ee where [P]): natural wording near `add a new argument to run_it` prints no block, a statement in a function body carries no tbl=, the capped note is true, no silent anchor
 #   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
 #          add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names; near misses keep the answer byte-identical
 #   N1 [train 42b T-3] an <x> excerpt line over 200 bytes is cut on a UTF-8 boundary with cut="1" (a 48.9 KB minified body); twin: none
@@ -750,6 +751,132 @@ else no "T22c byte cap: $CAPJ"; fi
 if has "$A" '<lit_capped scanned="2" skipped="1"' && has "$A" 'next="--grep=cap_anchor_three"'; then ok "T22d an anchor with sites and no room left is counted by <lit_capped> with next="
 else no "T22d later anchor unsaid: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$A" | cut -c1-200 | tr '\n' ' ' )"; fi
 if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22e the capped answer is well-formed"; else no "T22e not well-formed"; fi
+
+# ── T23-T29 (lane TABLE-CONST V2, fix round; [P] RED on e2df59ee): natural task wording, statements in function bodies, the capped note, silent anchors ──
+NF="$TMP/nfix"; mkdir -p "$NF/py" "$NF/src" "$NF/rs" "$NF/go"
+cat > "$NF/py/run.py" <<'PY'
+def run_it(a):
+    return lookup_user(a)
+
+
+def lookup_user(a):
+    return a
+
+
+def caller_one():
+    run_it(1)
+    run_it(2)
+    return lookup_user(3)
+PY
+cat > "$NF/src/more.py" <<'PY'
+max_conn = 5
+
+
+def print_it(x):
+    return x
+
+
+def check_value(a, b):
+    return a == b
+
+
+def dump():
+    print_it("max_conn")
+    print_it("max_conn_b")
+
+
+def test_like():
+    check_value(max_conn, 2)
+    check_value(max_conn, 3)
+
+
+def build():
+    table = {
+        "alpha_key": 1,
+        "beta_key": 2,
+    }
+    return table
+PY
+cat > "$NF/src/f.c" <<'CC'
+void log_info(const char *s);
+void f(void) {
+    log_info("abspath");
+    log_info("basename");
+}
+CC
+cat > "$NF/rs/t.rs" <<'RS'
+fn table_size() -> usize { 3 }
+fn build() {
+    assert_eq!(table_size(), 3);
+    assert_eq!(table_size(), 4);
+}
+RS
+cat > "$NF/go/init.go" <<'GO'
+package g
+
+func init() {
+	Register("go_key_one", handlerOne)
+	Register("go_key_two", handlerTwo)
+}
+func handlerOne() {}
+func handlerTwo() {}
+GO
+cat > "$NF/go/set.go" <<'GO'
+package g
+
+func decide(x int) {
+	if x > 0 {
+		v.Set(Opt{
+			Name: "kw_one",
+			Kind: "kw_two",
+		})
+	}
+}
+
+var SecretTable = map[string]string{ // aws
+	"aws_key_one": "a",
+	"aws_key_two": "b",
+}
+GO
+nf1(){ ( cd "$NF" || exit 1; "$BIN" "$NF" --no-cache "$@" </dev/null 2>/dev/null ); }
+# T23 [P] the neighbours of `add a new argument to run_it`: the function being changed is no table, whatever the preposition or the noun
+bad=""
+for T in 'add a new argument to the run_it function' 'add a new argument for run_it' 'add a new argument in run_it' 'add a new parameter on run_it' 'add new logging inside run_it' \
+         'add another retry around run_it' 'add a new test for run_it' 'adding new tests for lookup_user' 'implement a new overload of run_it' 'add a new caller of run_it' \
+         'add a new argument to run_it and lookup_user' 'run_it returns the wrong row from the table' 'fix register allocation in run_it' 'reduce compile time of run_it' \
+         'the users table is empty when lookup_user runs' 'add a new argument to `run_it`'; do
+    if has "$( lits <<<"$( nf1 "--for=$T" )" )" 'shape="table"'; then bad="$bad [$T]"; fi
+done
+if [ -z "$bad" ]; then ok "T23 [P] a bare identifier prints only beside a real table row: 16 natural phrasings of a change to a function, no block"; else no "T23 false fires:$bad"; fi
+# T23b [G] twin: a bare identifier with a real table row (T2's macro row) and a backticked or like-named sibling still print
+if has "$( lits <<<"$( nf1 '--for=register a new conn like max_conn' )" )" 's="max_conn" shape="table"'; then ok "T23b [G] a sibling named after like prints without a table row"; else no "T23b sibling lost"; fi
+if has "$( lits <<<"$( tr1 '--for=where is HashJoinNode registered' )" )" 'tbl="item"'; then ok "T23c [G] a bare identifier with a real table row prints"; else no "T23c bare word with a row lost"; fi
+# T24 [P] a statement in a function body is no table row, in any language: no tbl= on a same-callee call in a Python, C or Rust body, or in a Go init
+A="$( nf1 '--for=register a new conn like max_conn' )"; L="$( lits <<<"$A" )"
+if has "$L" 'print_it(' && has "$L" 'check_value(' && ! has "$L" 'tbl='; then ok "T24 [P] Python: same-callee calls in function bodies print as sites, with no tbl="; else no "T24 python body rows: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+A="$( nf1 '--for=register `abspath`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'log_info("abspath")' && ! has "$L" 'tbl='; then ok "T24b [P] C: a call statement in a function body, no tbl="; else no "T24b c body: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+A="$( nf1 '--for=register `table_size`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'assert_eq!(table_size()' && ! has "$L" 'tbl='; then ok "T24c [P] Rust: a macro statement in a function body, no tbl="; else no "T24c rust body: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+A="$( nf1 '--for=register `go_key_one`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'Register("go_key_one"' && ! has "$L" 'tbl='; then ok "T24d [P] Go: a call in init() is a statement, no tbl="; else no "T24d go init: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+A="$( nf1 '--for=register `kw_one`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'Name: "kw_one"' && ! has "$L" 'tbl='; then ok "T24g [P] a key row in an options literal passed to a call in a function body: its opener is a statement, no tbl="; else no "T24g call-argument literal: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+# T24h [P] an opener with a trailing line comment is still the opener: a top level table row never reads as no opener ("item")
+A="$( nf1 '--for=register `aws_key_one`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'tbl="var SecretTable = map[string]string{ // aws"'; then ok "T24h [P] a trailing comment on the opener line: tbl= names the opener, not item"; else no "T24h opener with a comment: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+# T24e [G] twin: a data table inside a function keeps its opener (a dict literal assigned in a Python body)
+A="$( nf1 '--for=register `alpha_key`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'tbl="table = {"'; then ok "T24e [G] twin: a dict literal in a function body keeps tbl= (its opener is an assignment)"; else no "T24e in-function table lost: ${L:0:300}"; fi
+if has "$( lits <<<"$( tr1 '--for=add a new function; use `abspath` as the model' )" )" 'tbl="baseFunctions := map[string]Function{"'; then ok "T24f [G] twin: a Go map literal in a method keeps tbl="; else no "T24f go local map lost"; fi
+# T25 [P] the capped note's legend is true when the skipped anchor WAS scanned and had sites (the byte cap), and still true for a walk that found none
+A="$( cd "$BL" || exit 1; "$BIN" "$BL" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' </dev/null 2>/dev/null )"
+if has "$A" '<lit_capped' && ! has "$A" 'none found a source site' && has "$A" 'no room'; then ok "T25 [P] the byte-cap skip is not described as 'none found a source site'"; else no "T25 legend: $( grep -o '<!-- ripwire for lit: lit_capped[^>]*>' <<<"$A" | cut -c1-400 )"; fi
+# T26 [P] a fourth anchor is counted, never dropped silently; anchors with no site do not eat the slots of one that has
+A="$( tr1 '--for=register `abspath` `basename` `concat` `Each`' )"
+if [ "$( grep -o '<lit s=' <<<"$A" | wc -l | tr -d ' ' )" = "3" ] && has "$A" '<lit_capped scanned="3" skipped="1" next="--grep=Each"'; then ok "T26 [P] the fourth anchor: three scanned, one skipped, next= names it"; else no "T26 fourth anchor: $( grep -o '<lit_capped[^>]*>' <<<"$A" )"; fi
+A="$( tr1 '--for=register `no_a_thing` `no_b_thing` `no_c_thing` `abspath`' )"
+if has "$A" 's="abspath"' || ( has "$A" '<lit_capped' && has "$A" 'next="--grep=abspath"' ); then ok "T27 [P] anchors with no site never make a later one vanish: it prints or next= names it"; else no "T27 silent drop: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$A" | cut -c1-160 | tr '\n' ' ' )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"

@@ -61,11 +61,13 @@
 // X-macro line). Trigger (forTableCueOf), whole words: a registration, table or compile-time word; "add a new", the exemplar form, whose
 // anchor is the named sibling; or default/handler, which print only when a table row exists. Anchors (forTableAnchorsOf): backticked
 // spans first, then identifier-shaped words (snake_case, camelCase, Pascal with an inner capital, a::b, a.b), then a plain word after
-// like/alongside/following; a backticked span stands as it is, any other word must be a symbol of the index (forTableAnchorKeeps), at
-// most kForTableAnchors. Each anchor with a site prints one <lit>, its own row limit (kForTableRows) and all of them under one byte cap
-// (kForTableByteCap, cut on a row boundary, capped=1 and next=; an anchor the cap left out is counted by <lit_capped>). A row whose line
-// reads as a table row (lit_detail::tableRowOf) ranks first and carries tbl= (the line that opens the table, "item" at top level) and the
-// lines after it: the members beside it. Hits stand on word edges.
+// like/alongside/following; a backticked span stands as it is, any other word must be a symbol of the index (forTableAnchorKeeps). A backticked
+// span or a word after like is firm: it prints its sites. A bare identifier-shaped word, or a span right after to/into in an add task (the thing
+// changed), prints only beside a real table row (TableAnchor::firm). At most kForTableAnchors <lit> print and kForLiteralCandidates scans are made
+// (an anchor with no site costs one); all of them under one byte cap (kForTableByteCap, cut on a row boundary, capped=1 and next=). An anchor past a
+// cap, or with no room left, is counted by <lit_capped>, never dropped. A row whose line reads as a table row (lit_detail::tableRowOf) ranks first
+// and carries tbl= (the line that opens the table, "item" at top level) and the lines after it: the members beside it. Inside a function body a
+// call is a statement, never a row, and a key, member or brace row needs a data opener (opensDataLiteral). Hits stand on word edges.
 
 #include "infra/namesplit.h" // isIdentChar
 #include "filter.h"          // pathTierOf — source / test / doc, the reader's tier
@@ -165,8 +167,9 @@ inline constexpr std::string_view kForLiteralKeyLegend =
 static_assert( kForLiteralKeyLegend.find( "--", 4 ) == kForLiteralKeyLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 // the walk's cap, printed alone (no <lit>) when the task names more literals than kForLiteralCandidates scans and none of those anchored
 inline constexpr std::string_view kForLiteralCapLegend =
-    "<!-- ripwire for lit: lit_capped = the task names more literals than one answer scans; scanned= whole-repo scans made, none found a source site; "
-    "skipped= literals not scanned; next= scans the first of them; this note is not in est_tokens. -->";
+    "<!-- ripwire for lit: lit_capped = the task names more literals than this answer prints; scanned= whole-repo scans made; skipped= literals not scanned (past "
+    "the scan cap) or scanned with no room left in the byte cap, their sites not shown; next= scans the first of them; a scanned literal without a <lit> had no "
+    "source site (shape=table: or no table row); this note is not in est_tokens. -->";
 static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
 // present only with shape=table (the first of its elements), so the bytes of every other fire do not move
@@ -745,15 +748,25 @@ inline bool addsToTarget( std::span<const std::string_view> words, std::size_t i
            && std::any_of( words.begin(), words.begin() + std::ptrdiff_t( i ), []( std::string_view w ) { return lit_detail::wordIsOneOf( lit_detail::stripWordPunct( w ), std::span<const std::string_view>( kAdd ) ); } );
 }
 
-// the anchors of shape=table, in order, before the index filter: {text, quoted}
-inline std::vector<std::pair<std::string, bool>> forTableAnchorsOf( std::string_view task )
+// one anchor of shape=table, before the index filter. quoted: a backticked span (stands without an index symbol). firm: the task points at it as the
+// thing to read (a backticked span, or the sibling after like/alongside/following), so it prints whatever the trigger allows; a bare identifier-shaped
+// word, or a backticked span right after `to`/`into` in an add task (the thing changed), prints only beside a real table row.
+struct TableAnchor
 {
-    std::vector<std::pair<std::string, bool>> out;
-    const auto add = [ & ]( std::string_view w, bool quoted )
+    std::string text;
+    bool        quoted = false;
+    bool        firm   = false;
+};
+
+// the anchors of shape=table, in order, before the index filter
+inline std::vector<TableAnchor> forTableAnchorsOf( std::string_view task )
+{
+    std::vector<TableAnchor> out;
+    const auto add = [ & ]( std::string_view w, bool quoted, bool firm )
     {
-        if( std::none_of( out.begin(), out.end(), [ & ]( const auto& a ) { return a.first == w; } ) )
+        if( std::none_of( out.begin(), out.end(), [ & ]( const TableAnchor& a ) { return a.text == w; } ) )
         {
-            out.emplace_back( std::string( w ), quoted );
+            out.push_back( TableAnchor{ std::string( w ), quoted, firm } );
         }
     };
     for( std::size_t at = task.find( '`' ); at != std::string_view::npos; )
@@ -769,7 +782,9 @@ inline std::vector<std::pair<std::string, bool>> forTableAnchorsOf( std::string_
         span = call == std::string_view::npos ? span : span.substr( call + 3 );
         if( lit_detail::isTableAnchorSpan( span ) )
         {
-            add( span, true );
+            const std::string before = lit_detail::withoutBackticks( task.substr( 0, at ) );
+            const std::vector<std::string_view> beforeWords = lit_detail::taskWords( before );
+            add( span, true, !addsToTarget( beforeWords, beforeWords.size() ) );
         }
         at = task.find( '`', end + 1 );
     }
@@ -783,10 +798,14 @@ inline std::vector<std::pair<std::string, bool>> forTableAnchorsOf( std::string_
         {
             continue;   // `add a new argument to run_it`: the thing changed, no sibling to read
         }
-        if( lit_detail::isIdentifierShaped( w ) || ( afterLead && w.size() >= kForTableMinAnchor && !lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForLiteralStopWords ) )
-                                                     && std::all_of( w.begin(), w.end(), namesplit::isIdentChar ) ) )
+        if( afterLead && w.size() >= kForTableMinAnchor && !lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForLiteralStopWords ) )
+            && std::all_of( w.begin(), w.end(), namesplit::isIdentChar ) )
         {
-            add( w, false );
+            add( w, false, true );
+        }
+        else if( lit_detail::isIdentifierShaped( w ) )
+        {
+            add( w, false, afterLead );
         }
     }
     return out;
@@ -1102,6 +1121,17 @@ inline std::optional<std::string_view> siblingLine( std::string_view text, std::
 inline bool linesOpensBlock( std::string_view line ) noexcept
 {
     std::string_view t = trimWs( line );
+    // a trailing line comment (` // aws`, ` # aws`, outside quotes) is no part of the opener: `var T = map[string]string{ // aws` opens a table
+    bool quoted = false;
+    for( std::size_t i = 0; i < t.size(); ++i )
+    {
+        quoted = t[i] == '"' ? !quoted : quoted;
+        if( !quoted && i > 0 && ( t[i - 1] == ' ' || t[i - 1] == '\t' ) && ( t.substr( i, 2 ) == "//" || ( t[i] == '#' && i + 1 < t.size() && t[i + 1] == ' ' ) ) )
+        {
+            t = trimWs( t.substr( 0, i ) );
+            break;
+        }
+    }
     t = t.ends_with( '\\' ) ? trimWs( t.substr( 0, t.size() - 1 ) ) : t;
     return !t.empty() && ( t.back() == '{' || t.back() == '[' || t.back() == '(' || t.starts_with( "#define" ) );
 }
@@ -1150,8 +1180,41 @@ inline bool opensImport( std::string_view opener ) noexcept
     return first == "use" || first == "import" || first == "from" || first == "export" || first == "package" || first == "extern" || first == "pub";
 }
 
+// the line that opens the literal a row of a function body belongs to is a data opener: an assignment or declaration (`t = {`, `m := map[..]{`,
+// `static const T t[] = {`), a macro invocation (`bind_command! {`, `vec![`) or a return (`return []T{`). `if (..) {`, `} else {`, a bare `{` and the
+// function's own header open statements, not a table. Allowlist: any other opener is no table.
+inline bool opensDataLiteral( std::string_view opener )
+{
+    const std::string_view first = taskroute::identifierRunOf( opener );
+    if( opener.empty() || opener.front() == '}' || wordIsOneOf( first, kForTableNotCallee ) || first == "else" || first == "do" || first == "try" || first == "case" || first == "default" )
+    {
+        return false;
+    }
+    if( first == "return" )
+    {
+        return true;
+    }
+    for( std::size_t i = 0; i < opener.size(); ++i )
+    {
+        const char c = opener[i];
+        const char prev = i > 0 ? opener[i - 1] : ' ';
+        const char next = i + 1 < opener.size() ? opener[i + 1] : ' ';
+        if( c == '=' && prev != '=' && prev != '!' && prev != '<' && prev != '>' && next != '=' && next != '>' )
+        {
+            return true;   // an assignment; `==`, `!=`, `<=`, `>=` and `=>` are not
+        }
+        if( c == '!' && i > 0 && namesplit::isIdentChar( prev ) && ( next == '{' || next == '[' || next == '(' || next == ' ' ) )
+        {
+            return true;   // a macro invocation `name!` + bracket
+        }
+    }
+    return false;
+}
+
 // The table this source line is a row of, or "": a row of an allowed shape with a sibling of the same shape at its indent, or a macro row at
 // top level (a Rust `name!(`, an ALLCAPS callee, outside any function), which is a registration with no sibling needed.
+// A row inside a function body is read more strictly: a call there is a statement, never a row (`log_info("x");` twice is two statements, not a
+// table), and a key, member or brace row counts only when the literal it stands in opens with a data opener (opensDataLiteral).
 inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bool callableOwner )
 {
     if( byteOffset >= text.size() )
@@ -1168,7 +1231,7 @@ inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bo
     }
     const std::size_t indent = lintdetail::indentOf( line );
     const std::string_view opener = openerOf( text, start, indent );
-    if( opensImport( opener ) )
+    if( opensImport( opener ) || ( callableOwner && ( shape.kind == RowKind::Call || !opensDataLiteral( opener ) ) ) )
     {
         return {};
     }
@@ -1893,36 +1956,41 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
     {
         return out;
     }
-    std::size_t kept = 0, scanned = 0, skipped = 0, used = 0;
+    std::size_t printed = 0, scanned = 0, skipped = 0, used = 0;
     std::string firstSkipped;
-    for( const auto& [word, quoted] : forTableAnchorsOf( task ) )
+    const auto skip = [ & ]( const std::string& word )
     {
-        if( kept >= kForTableAnchors || namesIndexedFile( ing, word ) || !forTableAnchorKeeps( ing, word, quoted ) )
+        ++skipped;
+        firstSkipped = firstSkipped.empty() ? word : firstSkipped;
+    };
+    for( const TableAnchor& anchor : forTableAnchorsOf( task ) )
+    {
+        const std::string& word = anchor.text;
+        if( namesIndexedFile( ing, word ) || !forTableAnchorKeeps( ing, word, anchor.quoted ) )
         {
             continue;
         }
-        ++kept;
-        if( used + kForTableElementBytes >= kForTableByteCap )
+        // the caps are on work done: scans (an anchor with no site costs one too) and elements printed. An anchor past either is counted, never dropped.
+        if( printed >= kForTableAnchors || scanned + skipped >= kForLiteralCandidates || used + kForTableElementBytes >= kForTableByteCap )
         {
-            ++skipped;
-            firstSkipped = firstSkipped.empty() ? word : firstSkipped;
+            skip( word );
             continue;
         }
         ++scanned;
-        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly };
+        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm };
         ForLiteral lit{ word, "table" };
         ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits );
         if( r.noRoom )
         {
             --scanned;
-            ++skipped;
-            firstSkipped = firstSkipped.empty() ? word : firstSkipped;
+            skip( word );
             continue;
         }
         if( r.xml.empty() )
         {
             continue;
         }
+        ++printed;
         used += r.xml.size() - r.xml.find( "<lit " );   // element bytes: the legend comments before the first are not
         out.xml += r.xml;
         out.sites += r.sites;
