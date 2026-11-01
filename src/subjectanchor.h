@@ -407,9 +407,14 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, std::s
     }
     if( lift && out.route.which != LexMode::NameExact )
     {
+        // the source-class definitions only: a CI or vendored copy of the name is not a second function to split the callers over
         for( SubjectExactSymbol& e : reading.exact )
         {
-            out.callerCandidates.push_back( std::move( e.defs ) );
+            std::erase_if( e.defs, [ & ]( NodeId id ) { return !subject_detail::sourceClassDef( ing, id ); } );
+            if( !e.defs.empty() )
+            {
+                out.callerCandidates.push_back( std::move( e.defs ) );
+            }
         }
     }
     return out;
