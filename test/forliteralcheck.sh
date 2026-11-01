@@ -663,6 +663,7 @@ if has "$L" 's="Filter" shape="table"'; then ok "T7b a plain word after like tha
 nomiss(){ local T="$1" W="$2"; local X; X="$( tr1 "--for=$1" )"; if ! has "$( lits <<<"$X" )" 'shape="table"' && [ "$X" = "$( trf "--for=$1" )" ]; then ok "$W"; else no "$W: $( lits <<<"$X" | cut -c1-240 )"; fi; }
 nomiss 'where is HashJoinNode used' 'T8 no cue: an identifier alone, no block, byte-identical to the switch off'
 nomiss 'register the widget' 'T9 a cue with a stop word and a plain word: no anchor'
+nomiss 'add a new argument to HashJoinNode' 'T9b the word after to in an add-a-new task is the target, no anchor'
 nomiss 'register no_such_symbol_here' 'T10 an identifier-shaped word that is no symbol: no anchor'
 nomiss 'register `no_such_site_here`' 'T11 a backticked identifier with no site: no block, no claim'
 nomiss 'register `test_only_anchor`' 'T12 a test-only site: no block (counts alone anchor nothing)'

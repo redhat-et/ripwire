@@ -736,6 +736,15 @@ inline TableCue forTableCueOf( std::string_view task )
     return cue;
 }
 
+// the word after to/into in an add-a-new task names what is added to, not an exemplar of what is added
+inline bool addsToTarget( std::span<const std::string_view> words, std::size_t i ) noexcept
+{
+    static constexpr std::array<std::string_view, 2> kInto{ "to", "into" };
+    static constexpr std::array<std::string_view, 4> kAdd{ "add", "adding", "implement", "implementing" };
+    return i > 0 && lit_detail::wordIsOneOf( lit_detail::stripWordPunct( words[i - 1] ), std::span<const std::string_view>( kInto ) )
+           && std::any_of( words.begin(), words.begin() + std::ptrdiff_t( i ), []( std::string_view w ) { return lit_detail::wordIsOneOf( lit_detail::stripWordPunct( w ), std::span<const std::string_view>( kAdd ) ); } );
+}
+
 // the anchors of shape=table, in order, before the index filter: {text, quoted}
 inline std::vector<std::pair<std::string, bool>> forTableAnchorsOf( std::string_view task )
 {
@@ -770,6 +779,10 @@ inline std::vector<std::pair<std::string, bool>> forTableAnchorsOf( std::string_
     {
         const std::string_view w = lit_detail::stripWordPunct( words[i] );
         const bool afterLead = i > 0 && lit_detail::wordIsOneOf( lit_detail::stripWordPunct( words[i - 1] ), std::span<const std::string_view>( lit_detail::kForTableExemplarLeads ) );
+        if( addsToTarget( words, i ) )
+        {
+            continue;   // `add a new argument to run_it`: the thing changed, no sibling to read
+        }
         if( lit_detail::isIdentifierShaped( w ) || ( afterLead && w.size() >= kForTableMinAnchor && !lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForLiteralStopWords ) )
                                                      && std::all_of( w.begin(), w.end(), namesplit::isIdentChar ) ) )
         {
