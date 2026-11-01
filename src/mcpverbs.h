@@ -2662,7 +2662,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // it; synthesize the same three-state tag verbs_for.h's routeTag carries so all three read one string.
     const char* const   mcpRouteTag        = noRoute ? "no-route" : ( rc.which == LexMode::NameExact ? "name-exact" : "subtoken+body" );
     const bool          mcpHomonymDecline = isAdaptiveHomonymDecline( isNameExactRouteTag( mcpRouteTag ), mcpForCut, 5 );
-    ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline );
+    ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, subjectRoute.anchorNoSource );   // CONFIDENCE-ANCHOR
     // THE BUNDLE'S RESOLVED SURFACE (top-N by lensRank — the set <sigs> selects), shared by the compose
     // view, the B6.3 route view and (§P3) the <lego> scope filter. Same order the CLI --for uses. Hoisted
     // above the header (L-W): the thin verdict reads it.

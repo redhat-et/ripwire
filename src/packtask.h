@@ -87,6 +87,8 @@ struct LensRanking
     std::vector<RouteAnchorDef> anchorDefs;
     // SUBJECT-ANCHOR (subjectanchor.h): the definitions of each symbol a conceptual route's descriptive subject names, subject order
     std::vector<std::vector<NodeId>> subjectCallerCandidates;
+    // CONFIDENCE-ANCHOR (subjectanchor.h): a name-exact route whose anchor no source-class definition backs
+    bool anchorNoSource = false;
     // L-W (forpage.h): the term evidence behind the RAW lexical pass — which query subtokens each symbol
     // matched and how rare each is — read back out of the scorer (lexical.h LexTermEvidence) so coverage=
     // and the --for --limit=N file page are computed from the same integers that ranked the head.

@@ -34,6 +34,7 @@
 #include "model.h"
 #include "queryshape.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -71,6 +72,7 @@ struct SubjectRoute
     RouteChoice         route;
     std::string         rankQuery;     // non-empty only when the words were dropped from the route
     std::vector<std::vector<NodeId>> callerCandidates;   // conceptual route: each exact symbol's definitions, for <callers by="subject">
+    bool                anchorNoSource = false;   // CONFIDENCE-ANCHOR: name-exact, and no source-class definition backs the anchor
 };
 
 namespace subject_detail
@@ -287,6 +289,44 @@ inline std::string subjectDroppedClause( const IngestResult& ing, const std::vec
     return out;
 }
 
+// CONFIDENCE-ANCHOR: does the name-exact route's anchor have a source-class definition? A resolved anchor is judged at the file its
+// answer is served from (RouteAnchorDef, the same pick the auto bodies read), an identifier-syntax anchor with no whole-name symbol by
+// its leaf anywhere. Every other route answers true: confidence= there says nothing about a name.
+inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice& rc, std::string_view rankQuery )
+{
+    using namespace subject_detail;
+    if( rc.which != LexMode::NameExact )
+    {
+        return true;
+    }
+    std::vector<std::string> leaves;
+    for( const std::string_view w : splitRouteWords( rankQuery ) )
+    {
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        if( const Spelling sp = parseSpelling( t ); sp.valid )
+        {
+            leaves.push_back( routeLower( sp.leaf ) );
+        }
+    }
+    const auto named = [ & ]( const Symbol& s )
+    {
+        if( rc.anchorDefs.empty() )
+        {
+            return std::ranges::any_of( leaves, [ & ]( const std::string& l ) { return l.size() == s.name.size() && l == routeLower( s.name ); } );
+        }
+        return std::ranges::any_of( rc.anchorDefs, [ & ]( const RouteAnchorDef& a )
+                                    { return a.fileId == s.fileId && a.lowerName.size() == s.name.size() && a.lowerName == routeLower( s.name ); } );
+    };
+    for( NodeId id = 0; id < NodeId( ing.symbols.size() ); ++id )
+    {
+        if( named( ing.symbols[id] ) && sourceClassDef( ing, id ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Is a plain word among a name-exact route's anchors?
 inline bool subjectAnchoredPlainWord( const IngestResult& ing, const RouteChoice& whole, const SubjectReading& r )
 {
@@ -306,8 +346,8 @@ inline bool subjectAnchoredPlainWord( const IngestResult& ing, const RouteChoice
     return false;
 }
 
-// THE entry point both the CLI lens and the MCP verbs call in place of chooseForRanker. No reading: exactly chooseForRanker.
-inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, std::string_view task )
+// The route the subject reading picks, before the CONFIDENCE-ANCHOR check.
+inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, std::string_view task )
 {
     SubjectRoute out;
     out.route = chooseForRanker( ing, task );
@@ -335,6 +375,19 @@ inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, std::string_vie
         {
             out.callerCandidates.push_back( std::move( e.defs ) );
         }
+    }
+    return out;
+}
+
+// THE entry point both the CLI lens and the MCP verbs call in place of chooseForRanker. No reading and a source-backed anchor: exactly
+// chooseForRanker. confidence= reads low on anchorNoSource, and route= says why, so the answer explains itself in every legend dialect.
+inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, std::string_view task )
+{
+    SubjectRoute out = chooseSubjectRouteUnchecked( ing, task );
+    out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, out.rankQuery.empty() ? task : std::string_view( out.rankQuery ) );
+    if( out.anchorNoSource )
+    {
+        out.route.reason += "; anchor has no source definition (test, doc or data only)";
     }
     return out;
 }

@@ -5,7 +5,7 @@
 #   C      a prose tail keeps the conceptual answer, byte for byte, and <callers by="subject"> rides on top
 #   N1-N8  near misses: namesake flood, symbol only in tests, question, graph form, join, plain-only subject, too many plain words, no word to drop
 #   D      dotted beats bare; a polyglot name splits and carries no row until a qualifier places it
-#   (confidence arms: commit 2)
+#   H      confidence: an anchor served from a test, doc or data file reads low; a source definition keeps it
 # Usage: bash test/subjectanchorcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/subjectanchorcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -157,6 +157,16 @@ hasnt "$A" 'by="subject"' "D poly: two languages, one name: no row, exact or non
 A="$( ask "$PG" 'pyside.shared_name zzgains zzknob sturdy' )"
 has "$( blk "$A" )" 'py_user' "D poly: a qualifier places the Python one"
 hasnt "$( blk "$A" )" 'tsUser' "D poly: not the TypeScript one"
+# ── CONFIDENCE-ANCHOR ──
+conf(){ printf '%s' "$1" | python3 -c 'import re,sys; m=re.search(r"confidence=\"(\w+)\"",sys.stdin.read()); print(m.group(1) if m else "@@NONE")'; }
+NOSRC='anchor has no source definition'
+A="$( ask "$PY" 'helper_only_tests' )"
+[ "$( conf "$A" )" = low ] && ok "H test-only: confidence low" || no "H test-only: confidence $( conf "$A" )"; has "$A" "$NOSRC" "H test-only: the note says why"
+printf '{"json_only_key": true}\n' > "$PY/app/conf.json"
+A="$( ask "$PY" 'json_only_key' )"; [ "$( conf "$A" )" = low ] && ok "H data file: low" || no "H data file: $( conf "$A" )"
+A="$( ask "$PY" 'prepare_setup_platform' )"; [ "$( conf "$A" )" = high ] && ok "H source: high" || no "H source: $( conf "$A" )"; hasnt "$A" "$NOSRC" "H source: no note"
+A="$( ask "$PY" 'helper_only_tests new parameter' )"; [ "$( conf "$A" )" = low ] && ok "H test-only beside dropped words: low" || no "H test-only beside words: $( conf "$A" )"
+A="$( ask "$PY" 'zznope sturdy words' )"; hasnt "$A" "$NOSRC" "H conceptual route: no note"
 # determinism + well-formed
 A1="$( ask "$PY" 'prepare_setup_platform new parameter' )"; A2="$( ask "$PY" 'prepare_setup_platform new parameter' )"
 [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ] && ok "determinism" || no "determinism"

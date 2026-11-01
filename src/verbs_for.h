@@ -187,6 +187,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         out.routeNote  = routeNoteOf( rc, shape, /*noRoute=*/false );   // row 6: the code itself, no "routed: " prose prefix — ONE producer (filter.h)
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
+        out.anchorNoSource = subjectRoute.anchorNoSource;   // CONFIDENCE-ANCHOR
         out.anchorDefs = std::move( subjectRoute.route.anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
         out.subjectCallerCandidates = std::move( subjectRoute.callerCandidates );   // SUBJECT-ANCHOR: empty unless a conceptual route's subject names a symbol
     }
@@ -3104,7 +3105,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             lensSurfaceIds.resize( cap );
         }
 
-        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline );
+        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
 
         // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): budget + explicit window ⇒ the
         // resumable candidate page (shared inline; the un-paged bundle below stays byte-identical).
