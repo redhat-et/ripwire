@@ -73,6 +73,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -479,18 +480,23 @@ inline std::uint64_t replayLimitBytes( std::uint64_t needBytes, std::uint64_t in
     const std::uint64_t ceiling = std::uint64_t( SIZE_MAX ) / kMiB * kMiB;
     return std::min( want, ceiling );
 }
+#if defined( RIPWIRE_LARGE_ALLOC_LINKED )
+inline constexpr bool kDisclosePeakOnThisBuild = true;
+#else
+inline constexpr bool kDisclosePeakOnThisBuild = false;
+#endif
 // The peak after the answer was computed, when it went over the limit (or the peak:N seam says so), else 0. computeDelta
 // runs after the last hard-line reading, so a full answer can finish over --max-memory (rv-pr391 N1: 1.09-1.11x); this
 // is the reading that SAYS so instead of answering silently over it. It never changes the exit code.
-inline std::uint64_t peakOverLimit()
+inline std::uint64_t peakOverLimit( bool realReading = true, bool seamLaterToo = false )
 {
     const std::uint64_t limit = limits().hardBytes;
     if( limit == 0 )
     {
         return 0;
     }
-    std::uint64_t peak = os::mem_footprint_peak();
-    if( seamCallTrips( TripAt::Peak, seamCounters().peaks, /*laterToo=*/false ) )
+    std::uint64_t peak = realReading ? os::mem_footprint_peak() : 0;
+    if( seamCallTrips( TripAt::Peak, seamCounters().peaks, seamLaterToo ) )
     {
         peak = std::max( peak, limit + kMiB );   // the seam: the reading says over, whatever the real peak was
     }
@@ -506,6 +512,7 @@ struct StopCounts
 {
     std::atomic<std::uint32_t> recorded{ 0 };
     std::atomic<std::uint32_t> answered{ 0 };
+    std::atomic<bool>          peakSaid{ false };   // an emitter already told the reader about the overshoot (main() need not)
 };
 inline StopCounts& stopCounts() noexcept
 {
@@ -604,42 +611,17 @@ inline std::string partialAbsenceLine( const IngestResult& ing )
 // in the default map's header, `_memory_peak` in the MCP envelope. Builds that link the route read the real peak
 // (RIPWIRE_LARGE_ALLOC_LINKED, CMakeLists.txt); on any other build the real reading is off here — the hard line already
 // held there as before — and only the test seam (peak:N, the Nth and every later reading) can make it speak.
-#if defined( RIPWIRE_LARGE_ALLOC_LINKED )
-inline constexpr bool kDisclosePeakOnThisBuild = true;
-#else
-inline constexpr bool kDisclosePeakOnThisBuild = false;
-#endif
 
-// the peak when it went over the limit, else 0
-inline std::uint64_t runPeakOverLimit()
-{
-    const std::uint64_t limit = limits().hardBytes;
-    if( limit == 0 )
-    {
-        return 0;
-    }
-    std::uint64_t peak = kDisclosePeakOnThisBuild ? os::mem_footprint_peak() : 0;
-    if( seamCallTrips( TripAt::Peak, seamCounters().peaks, /*laterToo=*/true ) )
-    {
-        peak = std::max( peak, limit + kMiB );
-    }
-    return peak > limit ? peak : 0;
-}
-// set by an emitter that already told this run's reader about the overshoot (the range form's memory_peak=), so main()
-// does not say it twice
-inline std::atomic<bool>& peakSaidSlot() noexcept
-{
-    static std::atomic<bool> said{ false };
-    return said;
-}
+// the peak when it went over the limit, else 0: the real reading only on a build that routes, the seam on every build
+inline std::uint64_t runPeakOverLimit() { return peakOverLimit( kDisclosePeakOnThisBuild, /*seamLaterToo=*/true ); }
 
-// the overshoot as information: the run finished and answered, by how far it went over, and what the limit is for
+// the peak line: the run finished and answered, by how far it went over, and what the limit is for
 inline std::string peakOverLine( std::uint64_t peak )
 {
-    return "memory peak " + limitSpelling( peak ) + " went over the " + limitSpelling( limits().hardBytes ) + " limit ("
-         + std::string( limitSourceClause() ) + "), and the run finished and answered: the guard reads the limit between phases, and by then this run had "
-           "given that memory back. The limit is a rule of thumb that keeps the machine from running out of memory, not an exact line — "
-         + std::string( kOverride );
+    return std::format( "memory peak {} went over the {} limit ({}), and the run finished and answered: the guard reads the limit between "
+                        "phases, and by then this run had given that memory back. The limit is a rule of thumb that keeps the machine from "
+                        "running out of memory, not an exact line — {}",
+                        limitSpelling( peak ), limitSpelling( limits().hardBytes ), limitSourceClause(), kOverride );
 }
 
 // the MCP envelope's `_memory_peak`: the sentence when this server's peak has risen over the limit since the last time it

@@ -4244,7 +4244,7 @@ int main( int argc, char** argv )
     }
     // The hard line reads the footprint between phases; a run whose peak went over the limit and was given back before a
     // reading finishes and answers. Owner decision 2026-11-01: disclosed, not enforced. The range form says it itself.
-    if( !cfg.mcp && !cfg.lsp && rc != 5 && !rw::memguard::peakSaidSlot().load( std::memory_order_relaxed ) )
+    if( !cfg.mcp && !cfg.lsp && rc != 5 && !rw::memguard::stopCounts().peakSaid.load( std::memory_order_relaxed ) )
     {
         if( const std::uint64_t peak = rw::memguard::runPeakOverLimit(); peak != 0 )
         {
