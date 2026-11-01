@@ -488,7 +488,7 @@ inline constexpr bool kDisclosePeakOnThisBuild = false;
 // The peak after the answer was computed, when it went over the limit (or the peak:N seam says so), else 0. computeDelta
 // runs after the last hard-line reading, so a full answer can finish over --max-memory (rv-pr391 N1: 1.09-1.11x); this
 // is the reading that SAYS so instead of answering silently over it. It never changes the exit code.
-inline std::uint64_t peakOverLimit( bool realReading = true, bool seamLaterToo = false )
+inline std::uint64_t peakOverLimitWith( bool realReading, bool seamLaterToo )
 {
     const std::uint64_t limit = limits().hardBytes;
     if( limit == 0 )
@@ -502,6 +502,7 @@ inline std::uint64_t peakOverLimit( bool realReading = true, bool seamLaterToo =
     }
     return peak > limit ? peak : 0;
 }
+inline std::uint64_t peakOverLimit() { return peakOverLimitWith( true, false ); }
 // ── the backstop: a stop nobody answered for ────────────────────────────────────────────────────────────
 // ingest() counts every stop it discloses; the caller that decides what the partial ingest may answer (main.cpp's
 // memoryStopExit) marks every stop so far as answered for. A CLI run that ends with a stop nobody answered for — an
@@ -613,7 +614,7 @@ inline std::string partialAbsenceLine( const IngestResult& ing )
 // held there as before — and only the test seam (peak:N, the Nth and every later reading) can make it speak.
 
 // the peak when it went over the limit, else 0: the real reading only on a build that routes, the seam on every build
-inline std::uint64_t runPeakOverLimit() { return peakOverLimit( kDisclosePeakOnThisBuild, /*seamLaterToo=*/true ); }
+inline std::uint64_t runPeakOverLimit() { return peakOverLimitWith( kDisclosePeakOnThisBuild, /*seamLaterToo=*/true ); }
 
 // the peak line: the run finished and answered, by how far it went over, and what the limit is for
 inline std::string peakOverLine( std::uint64_t peak )
