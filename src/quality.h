@@ -1,6 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
+#include "langfacts.h"
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -1474,15 +1475,11 @@ inline std::vector<NodeId> pythonDispatchedMethodIds( const IngestResult& ing, c
 // descendants, `#` for the shell/Python/Ruby/Elixir/config family (in the C family `#` opens a PREPROCESSOR
 // directive, which is code — that is why this is per-language and not one union set), `--` for Lua. Markdown
 // and JSON have no comment syntax, so every non-blank line there is content.
-inline bool langUsesHashComment( Lang l ) noexcept
-{
-    return l == Lang::Python || l == Lang::Bash || l == Lang::Ruby || l == Lang::Elixir
-        || l == Lang::Toml   || l == Lang::Yaml || l == Lang::GDScript;
-}
+// Slice 6c: hashComment moved to langFacts(l) in langfacts.h
 
 inline std::uint32_t codeLinesInBody( std::string_view body, Lang lang ) noexcept
 {
-    const bool hash   = langUsesHashComment( lang );
+    const bool hash   = langFacts( lang ).hashComment;
     const bool cLike  = !hash && lang != Lang::Markdown && lang != Lang::Json && lang != Lang::Lua;
     const bool lua    = lang == Lang::Lua;
     std::uint32_t  code    = 0;
@@ -2444,7 +2441,8 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 48;   // MUST equal ingest.cpp's kCacheVersion (gated); 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 271;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 283;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                          // 283 = 2026-10-31 (train 43b: registrar + string-import extraction; above the lane placeholders up to 281, rich 282)
                                                           // 271 = 2026-10-30 (train 42b: iface-peel alias pointee / dyn-result / template-param
                                                           //   member records and alias-import ReExport records, placeholders 259, 260, 261; above 41b's 269/270)
                                                           // 269 = 2026-10-29 (train 41b: fn-slot-s2 C/C++ member-pointer / nested-designator /

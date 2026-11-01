@@ -4,6 +4,8 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo / rw::formatTo — THE emitter and its buffer-shaped sibling
+#include <format>            // arch-honest: the present-only <metrics> attributes and the --report clause
+#include <optional>
 #include <string_view>       // the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_report.h — the report family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -48,6 +50,83 @@ void computeDirModules( const rw::IngestResult& ing, std::vector<std::uint32_t>&
         const std::size_t sl = p.rfind( '/' );
         symDir[i] = idOf( sl == std::string_view::npos ? std::string_view( "." ) : p.substr( 0, sl ) );
     }
+}
+
+// The <metrics> block of --arch (every exit path of runArchViews). propCost is empty when no measured file stands behind it, and
+// masked is the count of no-edge files left out of its denominator (arch-honest).
+void emitArchMetrics( const std::vector<rw::ModuleMetric>& mods, std::optional<double> propCost, std::size_t masked, std::vector<char>& ae )
+{
+    // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
+    // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
+    // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
+    // NOTE above computeModuleMetrics in arch.h); the summary
+    // carries the same "heuristic, not proof" caveat as the rest of the note= text below.
+    // §P6.5: zone="n/a" (arch.h: totalTypes==0, cannot carry an abstractness score) is counted
+    // separately, never folded into zone_pain/zone_useless — typed_modules is the honest
+    // denominator for those two counts (modules= stays the raw total, facts unchanged on <m> rows).
+    // §A10.8: zone_ok was computed (arch.h's default zone, "ok" — outside both the pain and
+    // useless corners) but never emitted, so the header's own bucket sum fell 13 short of modules=
+    // on the real repo with no attribute admitting the gap. zone_pain + zone_useless + zone_ok +
+    // zone_na now partitions modules= exactly — every module lands in exactly one bucket.
+    // arch-honest: zone="unknown" (ModuleMetric::couplingUnknown) is its own bucket, and joins the partition only when it is non-empty.
+    std::uint32_t zonePain = 0, zoneUseless = 0, zoneNa = 0, zoneOk = 0, zoneUnknown = 0, typedModules = 0;
+    for( const rw::ModuleMetric& mm : mods )
+    {
+        typedModules += mm.totalTypes > 0 ? 1 : 0;
+        if( mm.couplingUnknown )
+        {
+            ++zoneUnknown;
+        }
+        else if( mm.zone == std::string_view( "pain" ) )
+        {
+            ++zonePain;
+        }
+        else if( mm.zone == std::string_view( "useless" ) )
+        {
+            ++zoneUseless;
+        }
+        else if( mm.zone == std::string_view( "n/a" ) )
+        {
+            ++zoneNa;
+        }
+        else if( mm.zone == std::string_view( "ok" ) )
+        {
+            ++zoneOk;
+        }
+    }
+    // Present-only: zone_unknown= rides beside its note clause; propagation_cost is empty when no measured file is left (its 1/N would
+    // read as a measurement of files no edge was ever seen in); masked_files= says how many no-edge files its denominator left out.
+    const std::string unknownAttr = zoneUnknown != 0 ? std::format( " zone_unknown=\"{}\"", zoneUnknown ) : std::string();
+    const std::string propAttr    = ( propCost ? std::format( " propagation_cost=\"{:.3f}\"", *propCost ) : std::string() ) + rw::countAttrXmlOrEmpty( "masked_files", masked );
+    const char* const unknownNote = zoneUnknown != 0
+        ? "; zone_unknown = modules holding a file in a language this build draws no file edges for (no_file_edges=): zone and coupling unknown, not zero, and part of the partition"
+        : "";
+    rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\"{}{} note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na{} = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file{}\">",
+                 mods.size(), typedModules, zonePain, zoneUseless, zoneOk, zoneNa, unknownAttr, propAttr, zoneUnknown != 0 ? "+zone_unknown" : "", unknownNote );
+    for( const rw::ModuleMetric& mm : mods )
+    {
+        const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
+        const std::string noEdgeAttr = mm.noFileEdgeLangs != 0 ? " no_file_edges=\"" + rw::noFileEdgeLangTags( mm.noFileEdgeLangs ) + "\"" : std::string();
+        if( mm.couplingUnknown )   // arch-honest: an absent number is the honest spelling of unknown; types=/abstract=/A= need no edge
+        {
+            if( mm.isolated )
+            {
+                rw::emitTo( stdout, "<m path=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
+                             ep.c_str(), mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
+            }
+            else   // an edge was observed: ca/ce are floors; I/D/leaf/reachable would read them as exact
+            {
+                rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" A=\"{:.2f}\" zone=\"{}\"{}/>",
+                             ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes, mm.abstractness, mm.zone, noEdgeAttr );
+            }
+            continue;
+        }
+        rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" I=\"{:.2f}\" A=\"{:.2f}\" D=\"{:.2f}\" zone=\"{}\" reachable=\"{}\"{}{}{}/>",
+                     ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes,
+                     mm.instability, mm.abstractness, mm.distance, mm.zone, mm.reachable ? 1 : 0,
+                     mm.isolated ? " isolated=\"1\"" : "", mm.isLeaf ? " leaf=\"1\"" : "", noEdgeAttr );
+    }
+    rw::emitTo( stdout, "</metrics>" );
 }
 
 // --report "## God files": the files a change ripples through most (afferent = files that include/import/source
@@ -423,7 +502,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const DepHealth h      = dependencyHealth( adj );    // per-file transitive cone (unrestricted BFS)
         // §P9.4: <health>'s ccd/acd/nccd are the RESTRICTED (dependency-capable-only) numbers — recomputed
         // from h.transitive (a post-pass, not a second BFS; see graph.h::restrictDependencyHealth).
-        const RestrictedDepHealth rh = restrictDependencyHealth( ing, h.transitive );
+        const RestrictedDepHealth rh = restrictDependencyHealth( dependencyMeasure( ing, adj ).mask, h.transitive );
         std::vector<std::uint32_t> afferent( ing.files.size(), 0 );   // Ca: # files that include each file (blast radius)
         for( const auto& outs : adj )
         {
@@ -470,8 +549,15 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const StructuralIncludeAdj archSa            = resolveStructuralIncludeAdj( ing );
         const auto&                adj               = archSa.adj;
         const std::uint64_t        importsUnresolved = archSa.importsUnresolved;
-        const std::string          archPartialAttr   = rw::tsImportRootAttrXml( importsUnresolved, archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread );
-        const std::string          archExtrasLegend  = rw::archTsImportExtrasLegend( archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread );
+        // Lane arch-honest: files in a language with no file edges (LangFacts::fileEdges). A no-edge file was never judged either, so the root says so beside the TS counts.
+        const rw::NoFileEdgeFiles  archNoEdge        = rw::noFileEdgeFiles( ing );
+        const rw::DependencyMeasure archMeasure      = rw::dependencyMeasure( ing, adj );   // no-edge files nothing touches are out of propagation_cost's N
+        const std::string          archNoEdgeLangs   = rw::noFileEdgeLangTags( archNoEdge.langs );
+        const std::string          archPartialAttr   = rw::tsImportRootAttrXml( importsUnresolved, archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread )
+                                                       + rw::noFileEdgesRootAttrXml( archNoEdgeLangs, archNoEdge.files, importsUnresolved > 0 || archSa.tsExtras.extendsUnread > 0 );
+        const std::string          archExtrasLegend  = rw::archTsImportExtrasLegend( archSa.tsExtras.declarationOnly, archSa.tsExtras.extendsUnread )
+                                                       + rw::prunedPackagesLegend( ing.crawlSkips.prunedPackages > 0, /*leadingSpace=*/ true )   // #478 gap 3
+                                                       + rw::archNoFileEdgesLegend( archNoEdge.files > 0 ) + rw::archMaskedFilesLegend( archMeasure.masked > 0 );
 
         // ── EVERY rule is matched against the ROOT-RELATIVE path, never the emitted one ────────────────────
         // ing.files spells each file `<ingest-root>/<relative>` verbatim, so matching a user regex or a layer
@@ -594,6 +680,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
                                 "alias, so an edge through one was never judged: violations= is a floor\n", archSa.tsExtras.extendsUnread );
         }
 
+        if( archNoEdge.files != 0 )   // arch-honest: an exit 0 over files no edge can reach is not a pass the log may read as one
+        {
+            rw::emitTo( stderr, "ripwire arch: {} file(s) in {}: this build resolves almost none of their imports to files, so an edge through one was mostly never judged: violations= is a floor\n",
+                        archNoEdge.files, archNoEdgeLangs );
+        }
+
         const std::string sidecarPath = archBaselinePath( std::string( cfg.archRules ) );
 
         // ABS-4: per-MODULE Martin metrics (Ca/Ce/I/A/D + zone) + reachability/orphan, computed ONCE from
@@ -606,8 +698,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // (MacCormack). A single SYSTEM-level number on <metrics> (fixed 3dp → byte-identical). Reported,
         // never a gate. Computed + documented in arch.h::dsmPropagationCostCapable. §P9.4: N is restricted
         // to the SAME dependency-capable mask --deps <health> uses, so the two verbs' denominator agrees.
-        const auto   depCapable = dependencyCapableMask( ing );
-        const double propCost   = rw::dsmPropagationCostCapable( ing, adj, depCapable );
+        const double propCost = rw::dsmPropagationCostCapable( ing, adj, archMeasure.mask );
 
         // ── shared emitters (one definition → the three return paths can't drift) ──────────────────────
         std::vector<char> ae;   // escapeXml scratch (cleared per call); captured by the lambdas below
@@ -621,51 +712,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
             rw::emitTo( stdout, "<v from=\"{}\" fromLayer=\"{}\" to=\"{}\" toLayer=\"{}\"{}/>",
                          ef.c_str(), efl.c_str(), et.c_str(), etl.c_str(), showBaselined ? " baselined=\"1\"" : "" );
         };
+        const std::optional<double> shownPropCost = rw::systemNumbersUnknown( archNoEdge, archMeasure ) ? std::nullopt : std::optional<double>( propCost );
         const auto emitMetrics = [ & ]()
         {
-            // zone summary: pure counts over `mods` (already deterministic: sorted by path, computed once
-            // above) — a one-line at-a-glance rollup next to the per-module detail. Zone itself is FOLKLORE
-            // (Martin main-sequence heuristic, no independent outcome-based validation — see the EVIDENCE
-            // NOTE above computeModuleMetrics in arch.h); the summary
-            // carries the same "heuristic, not proof" caveat as the rest of the note= text below.
-            // §P6.5: zone="n/a" (arch.h: totalTypes==0, cannot carry an abstractness score) is counted
-            // separately, never folded into zone_pain/zone_useless — typed_modules is the honest
-            // denominator for those two counts (modules= stays the raw total, facts unchanged on <m> rows).
-            // §A10.8: zone_ok was computed (arch.h's default zone, "ok" — outside both the pain and
-            // useless corners) but never emitted, so the header's own bucket sum fell 13 short of modules=
-            // on the real repo with no attribute admitting the gap. zone_pain + zone_useless + zone_ok +
-            // zone_na now partitions modules= exactly — every module lands in exactly one bucket.
-            std::uint32_t zonePain = 0, zoneUseless = 0, zoneNa = 0, zoneOk = 0;
-            for( const ModuleMetric& mm : mods )
-            {
-                if( mm.zone == std::string_view( "pain" ) )
-                {
-                    ++zonePain;
-                }
-                else if( mm.zone == std::string_view( "useless" ) )
-                {
-                    ++zoneUseless;
-                }
-                else if( mm.zone == std::string_view( "n/a" ) )
-                {
-                    ++zoneNa;
-                }
-                else if( mm.zone == std::string_view( "ok" ) )
-                {
-                    ++zoneOk;
-                }
-            }
-            rw::emitTo( stdout, "<metrics modules=\"{}\" typed_modules=\"{}\" zone_pain=\"{}\" zone_useless=\"{}\" zone_ok=\"{}\" zone_na=\"{}\" propagation_cost=\"{:.3f}\" note=\"Martin Ca/Ce/I/A/D + zone (main-sequence heuristic, no independent outcome-based validation — folklore, not proof) + reachability — directory-level estimate from name-based deps; zone_na = types=0 modules excluded from zone_pain/zone_useless (no meaningful abstractness score); zone_ok = typed modules in neither corner (the main-sequence middle); zone_pain+zone_useless+zone_ok+zone_na = modules, the full partition; propagation_cost = density of the file-dep transitive closure (MacCormack, validated coupling form) — fraction of files reachable from an average file\">",
-                         mods.size(), mods.size() - zoneNa, zonePain, zoneUseless, zoneOk, zoneNa, propCost );
-            for( const ModuleMetric& mm : mods )
-            {
-                const std::string ep = std::string( rw::escapeXml( mm.path, ae ) );
-                rw::emitTo( stdout, "<m path=\"{}\" ca=\"{}\" ce=\"{}\" types=\"{}\" abstract=\"{}\" I=\"{:.2f}\" A=\"{:.2f}\" D=\"{:.2f}\" zone=\"{}\" reachable=\"{}\"{}{}/>",
-                             ep.c_str(), mm.ca, mm.ce, mm.totalTypes, mm.abstractTypes,
-                             mm.instability, mm.abstractness, mm.distance, mm.zone, mm.reachable ? 1 : 0,
-                             mm.isolated ? " isolated=\"1\"" : "", mm.isLeaf ? " leaf=\"1\"" : "" );
-            }
-            rw::emitTo( stdout, "</metrics>" );
+            // #478 gap 3: before the module rows it qualifies, in all three emit paths
+            rw::emitRaw( stdout, buildPrunedPackagesBlock( ing.crawlSkips, ing.realPaths.empty() && cfg.roots.size() == 1 ? std::string_view( cfg.roots[ 0 ] ) : std::string_view {} ).c_str() );
+            emitArchMetrics( mods, shownPropCost, archMeasure.masked, ae );
         };
 
         // The match domain, said ONCE and appended to all three emit paths (normal / baseline /
@@ -1138,7 +1190,7 @@ inline std::string minedRootShallowCause( const std::string& root, bool multiRoo
 
 // §CLIO — one repo-wide co-change pair, and the document that renders them. `PR` used to be a struct local
 // to the --cochange branch; it moved out with the loop for the same reason the legends and the group form did.
-struct CoPairRow { std::uint32_t a, b, n; double deg, confAb, confBa; std::uint32_t recur; bool surprising; bool depCapable; };
+struct CoPairRow { std::uint32_t a, b, n; double deg, confAb, confBa; std::uint32_t recur; bool surprising; bool depCapable; std::uint32_t noEdgeLangs = 0; };
 
 inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cfg, const std::vector<CoPairRow>& prs,
                                const std::string& windowLabel, std::uint32_t subWindows, const char* minRecAttr,
@@ -1156,7 +1208,8 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
     // capped= reconcile pairs= against the rows that follow even with no --limit at all.
     const rw::PageWindow prpw = rw::pageWindow( prs.size(), rw::effectiveRowCap( cfg.pageLimit, cap ), cfg.pageOffset );
     char                 prab[ 192 ];
-    rw::emitTo( stdout, "{}{}{}{}", kCochangeRepoLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( coSingleRoot ), rw::gitstamp::shallowLegend( coShallow ) );   // sweep: ditto
+    rw::emitTo( stdout, "{}{}{}{}{}", kCochangeRepoLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( coSingleRoot ), rw::gitstamp::shallowLegend( coShallow ),
+                 rw::cochangeNoFileEdgesLegend( std::any_of( prs.begin() + prpw.begin, prs.begin() + prpw.end, []( const CoPairRow& pr ) { return pr.noEdgeLangs != 0; } ) ) );   // sweep: ditto
     rw::emitTo( stdout, "<cochange pairs=\"{}\" window=\"{}\" sub_windows=\"{}\"{}{}{}{}{}>", prs.size(), windowLabel.c_str(), subWindows, minRecAttr,
                  rw::pageDisclosure( prab, sizeof( prab ), prpw.end - prpw.begin, prs.size(), prpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
@@ -1181,7 +1234,7 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
         rw::emitTo( stdout, "<pair a=\"{}\" b=\"{}\" together=\"{}\" deg=\"{:.2f}\" conf_ab=\"{:.2f}\" conf_ba=\"{:.2f}\"{} recur=\"{}\"{}/>",
                      ex( ra ).c_str(), ex( rb ).c_str(),
                      pr.n, pr.deg, pr.confAb, pr.confBa, driverAttr, pr.recur,
-                     rw::coPairAttr( pr.depCapable, pr.surprising ) );
+                     std::string( rw::coPairAttr( pr.depCapable, pr.surprising ) ) + rw::noFileEdgesAttrXml( pr.noEdgeLangs ) );
     }
     rw::emitTo( stdout, "</cochange>" );
 }
@@ -1191,11 +1244,22 @@ inline void emitCochangePairs( const rw::IngestResult& ing, const rw::Config& cf
 // disclosure rules (cover="greedy", pairs_covered= reconciling with the membership rows, conf_core= fixed
 // to the core's direction) are easier to check when they sit together. Pure output: the cover is already
 // computed by gitmine.h's cochangeViolationGroups, and `viol` is the vector its members index into.
+// What rides on the root beside the cover: min_recur=, and (arch-honest) the pairs that left the cover because surprising= is unknown for them
+// (a Go side with no observed edge): `unknownPairs` of them, in the languages `unknownLangs` names. Both absent at their zero.
+struct CoGroupsRootExtras
+{
+    const char*   minRecAttr   = "";
+    std::size_t   unknownPairs = 0;
+    std::uint32_t unknownLangs = 0;
+};
 inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& cfg,
                                 const std::vector<rw::CoViolation>& viol, const std::vector<rw::CoGroup>& groups,
-                                const std::string& windowLabel, std::uint32_t subWindows, const char* minRecAttr,
+                                const std::string& windowLabel, std::uint32_t subWindows, const CoGroupsRootExtras& extras,
                                 int cap, const std::string& root, bool cgShallow )
 {
+    const char* const        minRecAttr   = extras.minRecAttr;
+    const std::size_t        unknownPairs = extras.unknownPairs;
+    const std::uint32_t      unknownLangs = extras.unknownLangs;
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( rw::escapeXml( s, esc ) ); };
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h).
@@ -1210,9 +1274,11 @@ inline void emitCochangeGroups( const rw::IngestResult& ing, const rw::Config& c
     {
         coveredTotal += g.members.size();
     }
-    rw::emitTo( stdout, "{}{}{}{}", kCochangeGroupLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( cgSingleRoot ), rw::gitstamp::shallowLegend( cgShallow ) );
-    rw::emitTo( stdout, "<cochange groups=\"{}\" pairs_covered=\"{}\" cover=\"greedy\" window=\"{}\" sub_windows=\"{}\"{}{}{}{}{}>",
-                 groups.size(), coveredTotal, windowLabel.c_str(), subWindows, minRecAttr,
+    // arch-honest: pairs that left the cover because surprising= is unknown for them (a Go side, no observed edge). Present-only.
+    const std::string unknownAttr = unknownPairs != 0 ? rw::noFileEdgesAttrXml( unknownLangs ) + rw::countAttrXmlOrEmpty( "unknown_pairs", unknownPairs ) : std::string();
+    rw::emitTo( stdout, "{}{}{}{}{}", kCochangeGroupLegend, rw::cochangeGroupsNoFileEdgesLegend( unknownPairs != 0 ), rw::kAtStampLegend, rw::rootRelPathsLegend( cgSingleRoot ), rw::gitstamp::shallowLegend( cgShallow ) );
+    rw::emitTo( stdout, "<cochange groups=\"{}\" pairs_covered=\"{}\" cover=\"greedy\" window=\"{}\" sub_windows=\"{}\"{}{}{}{}{}{}>",
+                 groups.size(), coveredTotal, windowLabel.c_str(), subWindows, minRecAttr, unknownAttr.c_str(),
                  rw::pageDisclosure( gab, sizeof( gab ), gpw.end - gpw.begin, groups.size(), gpw.end,
                                      cfg.pageLimit, cfg.pageOffset, true ),
                  cgRootAttr.c_str(),                        // R-E fix: root= before at= — at= stays LAST (r26)
@@ -1568,7 +1634,8 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             char              pminrec[ 40 ];
             coMinRecurAttr( pminrec, sizeof( pminrec ), cfg.cochangeRecur );
             const bool cfShallow = gitstamp::isShallow( fidRepo );   // 0.6.6: this file's repo is depth-limited — qualified on the root
-            rw::emitTo( stdout, "{}{}{}{}", kCochangeFileLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ), gitstamp::shallowLegend( cfShallow ) );   // sweep: at= was undefined on this screen
+            rw::emitTo( stdout, "{}{}{}{}{}", kCochangeFileLegend, rw::kAtStampLegend, rw::rootRelPathsLegend( mvSingleRoot ), gitstamp::shallowLegend( cfShallow ),
+                         rw::cochangeNoFileEdgesLegend( std::any_of( ps.begin() + ppw.begin, ps.begin() + ppw.end, []( const CoPartner& p ) { return p.depCapable && p.noEdgeLangs != 0; } ) ) );   // sweep: at= was undefined on this screen
             // §P8 vocabulary: at="<sha>[+dirty]" — cochange is a PURE git-history product (every number in
             // it is mined from `git log`), and it was one of the last two verbs of that kind emitting numbers
             // with no anchor to the HEAD that produced them. Same gitstamp::atAttr every other repo-reading
@@ -1697,9 +1764,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // divides by the SMALLER count, so it is by construction max(confAb, confBa) — the same magnitude
             // it has always been, now with the direction it came from recoverable.
             const bool isDepCapable = coPairDependencyCapable( ing, a, b );   // §A9.3, the same predicate the per-file path uses
+            const CoPairVerdict verdict = coPairVerdict( ing, a, b, isDepCapable, isDepCapable && staticDep( a, b ) );
             prs.push_back( { a, b, cell.n, mn ? double( cell.n ) / mn : 0.0,
                              coConfidence( cell.n, freq[a] ), coConfidence( cell.n, freq[b] ), recur,
-                             isDepCapable && !staticDep( a, b ), isDepCapable } );
+                             verdict.surprising, isDepCapable, verdict.noEdgeLangs } );
         }
         std::sort( prs.begin(), prs.end(), [ & ]( const CoPairRow& x, const CoPairRow& y ) { // surprising-and-strong first
             if( x.surprising != y.surprising )
@@ -1721,15 +1789,22 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
         if( cfg.cochangeGroups )
         {
             std::vector<CoViolation> viol;
+            std::size_t              unknownPairs = 0;   // arch-honest: dep-capable pairs with no observed edge and a no-edge side: surprising= unknown, so in no group
+            std::uint32_t            unknownLangs = 0;
             for( const CoPairRow& p : prs )
             {
                 if( p.surprising )
                 {
                     viol.push_back( { p.a, p.b, p.n, p.recur, p.confAb, p.confBa } );
                 }
+                else if( p.depCapable && p.noEdgeLangs != 0 )
+                {
+                    ++unknownPairs;
+                    unknownLangs |= p.noEdgeLangs;
+                }
             }
             const std::vector<CoGroup> groups = cochangeViolationGroups( viol, ing.files.size() );
-            emitCochangeGroups( ing, cfg, viol, groups, coWindowLabel, subWindows, coMinRec, cap, root, anyMinedRootShallow( root, multiRoot, ws ) );
+            emitCochangeGroups( ing, cfg, viol, groups, coWindowLabel, subWindows, { coMinRec, unknownPairs, unknownLangs }, cap, root, anyMinedRootShallow( root, multiRoot, ws ) );
             return 0;
         }
 
@@ -1929,7 +2004,9 @@ constexpr const char* kSkippedLegend =
                  " excluded_dirs= counts SUBTREES an exclude pruned: the walk stopped at the directory, so how many files"
                  " are under them is UNKNOWN, not zero, and they are in no count here. pruned_dirs= counts the subtrees this build ALWAYS"
                  " prunes by policy — the committed noise/vendor/build denylist and any directory holding a CMakeCache.txt — with the same"
-                 " consequence: the walk stopped there, their contents are UNKNOWN rather than zero, and they are in no count here. The two"
+                 " consequence: the walk stopped there, their contents are UNKNOWN rather than zero, and they are in no count here. Each is rowed:"
+                 " why=\"pruned-package\" when a build-output name (build, dist, out, target, captures) holds its own __init__.py, a real package"
+                 " this denylist removed, else why=\"pruned-dir\", both bytes=\"0\". The two"
                  " are separate because the answer to \"why is my tree missing\" differs: one is a rule you passed, the other is a rule this"
                  " build carries. degraded_parse= / minified_suspect= count the h rows."
                  " ignored= is ignored_files= on the map: files git's OWN ignore rules cover"
@@ -2347,6 +2424,7 @@ void writeSkippedHeader( rw::XmlWriter& w, const rw::IngestResult& ing, const Sk
     const std::size_t effectiveMax = maxFileBytes == 0 ? kDefaultMaxFileBytes : maxFileBytes;
     const bool        rowsCapped   = cs.excluded.size() < cs.excludedFiles || cs.unsupported.size() < cs.unsupportedFiles
                                   || cs.ignored.size() < cs.ignoredFiles || cs.ignoredDirRows.size() < cs.ignoredDirs   // §N6-C
+                                  || cs.prunedDirRows.size() + cs.prunedPackageRows.size() < cs.prunedDirs              // #478 gap 3
                                   || cs.nestRefused.size() < cs.nestRefusedFiles
                                   || cs.extractPartial.size() < cs.extractPartialFiles
                                   || cs.escaped.size() < cs.escapedFiles;                                               // §SEC1
@@ -2439,6 +2517,8 @@ std::optional<int> runSkipped( const MainDispatch& d )
         writeDropRows( w, esc, cs.excluded,    "excluded", skRootPrefix );
         writeDropRows( w, esc, cs.unsupported, "unsupported-ext", skRootPrefix );
         writeDropRows( w, esc, cs.escaped,        "escaped-root", skRootPrefix );  // §SEC1: links whose target left the root
+        writeDropRows( w, esc, cs.prunedPackageRows, "pruned-package", skRootPrefix );   // #478 gap 3: a real package the denylist took
+        writeDropRows( w, esc, cs.prunedDirRows,  "pruned-dir",  skRootPrefix );   // #478 gap 3: every other policy prune
         writeDropRows( w, esc, cs.ignored,        "ignored",     skRootPrefix );   // §N6-C: the files git's rules covered
         writeDropRows( w, esc, cs.ignoredDirRows, "ignored-dir", skRootPrefix );   // §N6-C: the subtrees they pruned
         writeDropRows( w, esc, cs.nestRefused,    "nest-refused", skRootPrefix );  // indexed, then refused by the Kotlin nesting guard
@@ -3571,6 +3651,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
             rw::emitTo( stdout, "- **{}** — {} symbols\n", presentation.label[c].c_str(), std::size_t( members[c].size() ) );
         }
 
+        // arch-honest: files in a language with no file edges are in neither list below, and "none" must not read as a finding about them.
+        const rw::NoFileEdgeFiles reportNoEdge = rw::noFileEdgeFiles( ing );
+        const std::string         reportNoEdgeWhy = reportNoEdge.files != 0 ? std::format( "{} files in {} (imports almost never resolved to files)", reportNoEdge.files, rw::noFileEdgeLangTags( reportNoEdge.langs ) ) : std::string();
+        if( reportNoEdge.files != 0 )
+        {
+            rw::emitTo( stdout, "\nNot measured: {}, so the god files and cycles below cover the resolved edges only.\n", reportNoEdgeWhy );
+        }
         emitReportGodFiles( ing, afferent, rw::testLayerGroup( ing, adj ), stSingleRoot, stRootPrefix );
 
         const std::size_t reportCycles = std::min<std::size_t>( cycles.size(), 6 );
@@ -3578,19 +3665,25 @@ std::optional<int> runStructureText( const MainDispatch& d )
         // floor: a missing edge can merge two of these cycles into one — and an empty list is not "acyclic". Part 2: an
         // unread tsconfig `extends`/`references` hides aliases the same way, so it qualifies the line too.
         const std::uint64_t reportUnread  = reportSa.tsExtras.extendsUnread;
-        const bool          reportPartial = reportSa.importsUnresolved != 0 || reportUnread != 0;
+        const bool          reportTsPartial = reportSa.importsUnresolved != 0 || reportUnread != 0;
+        const bool          reportPartial   = reportTsPartial || reportNoEdge.files != 0;
+        // One clause per cause, in a fixed order: a tree with neither no-edge files nor unread configs keeps its older wording byte for byte.
+        std::string         reportWhy = reportTsPartial ? std::format( "{} imports unresolved", reportSa.importsUnresolved ) : std::string();
+        if( reportUnread != 0 )
+        {
+            reportWhy += std::format( ", {} tsconfig files unread", reportUnread );
+        }
+        if( reportNoEdge.files != 0 )
+        {
+            reportWhy += ( reportWhy.empty() ? "" : ", " ) + reportNoEdgeWhy;
+        }
         if( !reportPartial )
         {
             rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {})\n", reportCycles, cycles.size() );
         }
-        else if( reportUnread == 0 )
-        {
-            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {} imports unresolved)\n", reportCycles, cycles.size(), reportSa.importsUnresolved );
-        }
         else
         {
-            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {} imports unresolved, {} tsconfig files unread)\n",
-                         reportCycles, cycles.size(), reportSa.importsUnresolved, reportUnread );
+            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {})\n", reportCycles, cycles.size(), reportWhy );
         }
         if( cycles.empty() )
         {

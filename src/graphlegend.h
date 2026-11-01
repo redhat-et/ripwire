@@ -1053,6 +1053,43 @@ inline std::string tsImportRootAttrXml( std::uint64_t importsUnresolved, std::ui
     std::string s = importsUnresolvedAttrXml( importsUnresolved ) + countAttrXmlOrEmpty( "imports_dts", std::size_t( importsDts ) ) + countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( tsconfigUnread ) );
     return importsUnresolved > 0 || tsconfigUnread > 0 ? s + kGraphPartialAttrXml : s;
 }
+// Lane arch-honest: the root's disclosure of files in a language with no file edges (lintrules.h noFileEdgeFiles). Absent at zero, and
+// graph_partial="1" rides once: alreadyPartial says tsImportRootAttrXml wrote it, and a second copy would be malformed XML.
+inline std::string noFileEdgesRootAttrXml( std::string_view langs, std::size_t files, bool alreadyPartial )
+{
+    if( files == 0 )
+    {
+        return {};
+    }
+    std::string s = " no_file_edges=\"" + std::string( langs ) + "\"" + countAttrXmlOrEmpty( "unmeasured_files", files );
+    return alreadyPartial ? s : s + kGraphPartialAttrXml;
+}
+inline constexpr const char* kDepsNoFileEdgesLegend =
+    "no_file_edges=LANGS unmeasured_files=N graph_partial=1 (root, absent when none): N files are in languages whose imports this build almost never resolves to a file (Go only across a go.mod replace), so the index holds few or no edges for them and a zero would come from the missing data, not the design. A <f> row with no_file_edges= and no edge observed has no afferent=/instab=/transitive=: unknown, not zero. <health> has no ccd=/acd=/nccd=/shape= when no edge is left among the measured files (see masked_files=). godfiles, stabledeps and cycles cover the resolved edges only. ";
+inline constexpr const char* kArchNoFileEdgesLegend =
+    " no_file_edges=LANGS unmeasured_files=N graph_partial=1 (absent when none): N files are in languages whose imports this build almost never resolves to a file (Go only across a go.mod replace), so an edge through one was mostly never judged and violations= is a floor. <m zone=unknown no_file_edges=LANGS> holds such a file: with no edge observed its ca/ce/I/D/reachable are absent, unknown rather than zero; with one observed, ca/ce are floors over the resolved edges and I/D/leaf/isolated/reachable are absent, as no verdict is drawn from them. propagation_cost is absent when no edge is left among the measured files.";
+inline constexpr const char* kDepsMaskedFilesLegend =
+    "masked_files=N (<health>, absent at 0): N no_file_edges= files are left out of dep_files= and of ccd/acd/nccd/shape, an edgeless one would sit there as a cone of one and pull the verdict toward horizontal and one with an edge has a cone that is only a floor; the numbers cover the other dep_files= files. ";
+inline constexpr const char* kArchMaskedFilesLegend =
+    " masked_files=N (<metrics>, absent at 0): N no_file_edges= files are left out of the propagation_cost denominator, an edgeless one would add a cone of one and one with an edge has a cone that is only a floor; the number covers the other dependency-capable files.";
+inline const char* depsNoFileEdgesLegend( bool on ) noexcept { return on ? kDepsNoFileEdgesLegend : ""; }
+inline const char* archNoFileEdgesLegend( bool on ) noexcept { return on ? kArchNoFileEdgesLegend : ""; }
+inline const char* depsMaskedFilesLegend( bool on ) noexcept { return on ? kDepsMaskedFilesLegend : ""; }
+inline const char* archMaskedFilesLegend( bool on ) noexcept { return on ? kArchMaskedFilesLegend : ""; }
+// --impact (CLI and the MCP twin): the root's no_file_edges= (graph.h ImportTier::noFileEdgeLangs), exactly when it rides.
+inline constexpr const char* kImpactNoFileEdgesLegend =
+    "no_file_edges=LANGS (absent when none): a definition's file is in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace), so importers= is a floor: 0 means none resolved, not none exist. ";
+inline const char* impactNoFileEdgesLegend( bool on ) noexcept { return on ? kImpactNoFileEdgesLegend : ""; }
+// --cochange / --pr-context (gitmine.h coPairAttr): a pair with a side in such a language, and no observed edge between the files. Its own
+// comment (the kind the history verbs append after their legend), present-only, opening like the verb's legend so the compact layer reads it as prose.
+inline constexpr const char* kCochangeNoFileEdgesLegend =
+    "<!-- ripwire cochange: no_file_edges=LANGS replaces surprising= on a pair with a side in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace): no edge between the two files was observed, and that proves nothing there, so the hidden-coupling question is unknown, not answered. -->";
+inline const char* cochangeNoFileEdgesLegend( bool on ) noexcept { return on ? kCochangeNoFileEdgesLegend : ""; }
+// --cochange-groups: the same fourth state on the group form's root (verbs_report.h emitCochangeGroups). Groups are built from the surprising=1 pairs
+// only, so pairs with a side in such a language and no observed edge left them silently and groups=0 read as "no modularity violation".
+inline constexpr const char* kCochangeGroupsNoFileEdgesLegend =
+    "<!-- ripwire cochange groups: no_file_edges=LANGS unknown_pairs=N (root, absent when none): N pairs with a side in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace) and no observed edge between the two files are in no group and not counted in groups= or pairs_covered=. Whether each is hidden coupling is unknown, so a low or zero groups= here is not a finding of no violation; drop the cochange-groups flag to list those pairs. -->";
+inline const char* cochangeGroupsNoFileEdgesLegend( bool on ) noexcept { return on ? kCochangeGroupsNoFileEdgesLegend : ""; }
 inline constexpr const char* kDepsImportsDtsLegend =
     "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
 inline constexpr const char* kDepsTsconfigUnreadLegend =
@@ -1060,6 +1097,15 @@ inline constexpr const char* kDepsTsconfigUnreadLegend =
 inline constexpr const char* kArchImportsDtsLegend = " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration.";
 inline constexpr const char* kArchTsconfigUnreadLegend =
     " tsconfig_unread=N graph_partial=1 (absent at 0): N config files that could declare an alias or a workspace package were not read (an extends base or referenced project not in the tree, one that does not parse, or a tsconfig/jsconfig/workspace root above the crawl root, looked for up to the git top-level), so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
+// #478 gap 3: <pruned_packages> in --deps and --arch (serialize.h buildPrunedPackagesBlock), exactly when the block is printed.
+inline constexpr const char* kPrunedPackagesLegend =
+    "<pruned_packages count=N shown=M next= note=> (present only when the crawl denylist removed a real package, one that holds its own __init__.py, by a build-output name such as build, dist, out or target): p path= names one of the first M; the skipped verb (next=) rows them as why=pruned-package, at most 500 rows (rows_capped=1 there says N is more than it lists; N stays exact). They are not indexed, so edges to and from them are missing from every number here.";
+// --deps' legend clauses end in a space (the last one is followed by the cap sentence), --arch's start with one.
+inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
+{
+    return !on ? std::string() : leadingSpace ? std::string( " " ) + kPrunedPackagesLegend
+                                              : std::string( kPrunedPackagesLegend ) + " ";
+}
 // Two legend clauses, each exactly when its count is non-zero (the #220 composers below all have this shape).
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
 {

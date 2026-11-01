@@ -43,6 +43,8 @@
 #include "fielduses.h"     // the member-variable round: the ONE --uses=Owner.field renderer (renderFieldUses — CLI ≡ MCP)
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
+#include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
+#include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
 #include "hopbody.h"       // PATH-HOP-BODY: the middle hops' bodies of a reached path_between
@@ -1543,7 +1545,8 @@ inline std::string cochangePartnersJson( const std::string& root, const std::str
         // never have carried a static dependency, and dep_capable says WHY it is false.
         out += "{\"file\":\"" + mcpdetail::jsonEscape( ccRel( p.fileId ) ) + "\",\"together\":" + std::to_string( p.together )
              + ",\"deg\":" + deg + ",\"surprising\":" + ( p.surprising ? "true" : "false" )
-             + ",\"dep_capable\":" + ( p.depCapable ? "true" : "false" ) + "}";
+             + ",\"dep_capable\":" + ( p.depCapable ? "true" : "false" )
+             + coPairNoEdgeKeyJson( p ) + "}";   // arch-honest: surprising is unknown where this key rides
     }
     out += "]}";
     return out;
@@ -2928,7 +2931,20 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
             out.insert( out.size() - 6, dispatchHopMcpXml( r ) );
         }
     }
+    // lane self-hook (forselfhook.h): the CLI's <selfhooks>, over the head this surface names (it serves no inline body), same posture as <dispatch>
+    if( isNameExactRouteTag( mcpRouteTag ) && forSelfHookOn() && out.ends_with( "</ctx>" ) )   // under budget_tokens: the held marker only
+    {
+        if( const std::string hooks = renderForSelfHooks( SelfHookInputs{ ing, ix.g, flRootArg, task }, dispatchHeadCandidates( ing, lensSurfaceIds ), budgetTokens != 0 ); !hooks.empty() )
+        {
+            out.insert( out.size() - 6, "<!-- ripwire for" + std::string( kForSelfHookLegend ) + " -->" + hooks );   // the clause beside it, as <dispatch>: the header's are fixed
+        }
+    }
     priceForTaskRoot( out, chosen.cut.rowDropCut && budgetTokens == 0 );   // R1: est_tokens=; over_ceiling="1" only past the runaway guard
+    // DECL-ROW (src/fordeclrow.h): the CLI --for's task-read row blocks, one renderer, before </ctx>, not priced; under a budget the tag is held="budget", as there
+    if( out.ends_with( "</ctx>" ) )
+    {
+        out.insert( out.size() - 6, renderForDeclRows( ing, ix.g, task, /*held=*/budgetTokens > 0 ) );
+    }
     // FOR-ROUTE-DECLINED (src/forgraphverb.h): the CLI --for's <graph_verb endpoints="subject"> block, the same wrapper around
     // this surface's twin of the verb (path_between / find_referencing_symbols / connect), before </ctx>; priced like the CLI's (not)
     if( std::optional<GraphSubjectArgs> gsa = chooseGraphSubjectArgs( ing, task ); gsa && out.ends_with( "</ctx>" ) )
@@ -3333,7 +3349,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
                   ( std::string( kImpactImportTierLegend ) + importersNextLegend( !imports.next.empty() ) ).c_str(),   // cut-fix E, as on the CLI
-                  ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread )   // #220: exactly when the root carries them, as on the CLI
+                  ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )   // #220: exactly when the root carries them, as on the CLI
                     + viaNameLegend( imHasVia, true )
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
                   kTestedRowLegend, kImpactTestedPartitionLegend,   // A6
