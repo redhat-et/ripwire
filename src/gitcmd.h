@@ -53,7 +53,7 @@
 //                                   download fails even when git tries. Beats any protocol.* config. Ignored by 2.11-.
 // A read that needs a missing object then FAILS, exactly as a corrupt object does, and takes that verb's existing
 // git-failed path. The one command of ours that means to use the network, resolveRemoteRoot's `clone`, lifts the second
-// layer around itself (GitNetworkForClone). test/lazyfetchcheck.sh.
+// layer around itself (GitNetworkForClone). test/historywalkcheck.sh.
 //
 // Gated by test/githardencheck.sh: behavioural arms run the git-backed verbs through several root shapes and
 // the MCP and --plan-lint entry points and assert a hook-form core.fsmonitor stays unfired; a PATH shim arm

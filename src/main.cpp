@@ -3873,6 +3873,12 @@ static std::string_view scipIndexUnreadableReason( const std::string& scipPath )
 // starts BEFORE the ingest, one thread per root, and runs beside it; the amp=/churn= block only resolves each walk's
 // paths against `ing`. Empty when no such verb runs — and for --help-task, the one verb that answers between the
 // two, because a run that stops before the block still waits for its walks (a std::async future joins).
+//
+// THE WAIT, and why it stays. These three verbs are the walk's only readers, and each prints what it feeds into every row: amp= on
+// all three, churn= on --for. Answering without it would lose both, on a timing that varies per run, where the wait is instead
+// bounded: the walk's own budget ends it (gitmine.h THE BUDGET, 20 s from the walk's start, even against a git that went silent),
+// the budget's clock runs beside the ingest, and a cut is cached, so only the first call after HEAD moves pays it. Every other
+// verb runs no walk here; those that mine history do it themselves, on the same budget.
 static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( const rw::Config& cfg, bool multiRoot,
                                                                          const std::vector<rw::WorkspaceRoot>& ws, const std::string& root )
 {
@@ -4109,6 +4115,27 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     return 1;
 }
 
+// A history walk that has no history_unread of its own (--cochange, --owners, --hotspots, --situ, …) and hit its budget: said
+// once, after the answer, in the answer's stream when that stream can hold a comment, and always on stderr (gitmine.h THE BUDGET).
+static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
+{
+    const rw::GitWalkCutReport& cuts = rw::gitWalkCutsToDisclose();
+    const std::uint32_t walks = cuts.walks.load( std::memory_order_relaxed );
+    if( walks == 0 )
+    {
+        return;
+    }
+    const std::uint64_t commits = cuts.commitsRead.load( std::memory_order_relaxed );
+    DISCLOSE( Diagnostics::answerUnchanged, "the walk's numbers are floors and the answer says so",
+              "main: a git history walk hit its budget — its counts cover only the newest commits" );
+    if( !cfg.json && !cfg.candidates && !cfg.sarif && !certainlyNonXmlAnswer( cfg, argv ) )
+    {
+        rw::emitTo( stdout, "<!--history_cut={}: that many git history walks hit their budget and read only the newest commits ({} read in all), so "
+                            "co-change, owner and churn numbers from history in this answer are floors. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget.-->\n", walks, commits );
+    }
+    rw::emitTo( stderr, "ripwire: history_cut={}: git history walks hit their budget after {} commits; counts from history are floors (RIPWIRE_GIT_WALK_SECONDS, RIPWIRE_GIT_WALK_COMMITS)\n", walks, commits );
+}
+
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 {
     EXPECTS( !cfg.legendDefaulted || cfg.legend == rw::kDefaultLegendPosture, "a defaulted posture is the registered default" );
@@ -4234,6 +4261,7 @@ int main( int argc, char** argv )
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
     const int rc = runWithCompactLegend( cfg, argv );
+    discloseGitWalkCuts( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
     // The servers answer for their own stops per request (the MCP envelope's _memory_stop), so they are exempt.
     // Whatever exit code the verb chose becomes 5: a verdict (0, a gate's 2, a budget's 3, an obligation's 4) computed
@@ -5447,7 +5475,13 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             const auto         joinWalk      = [ & ]( std::size_t r )
             {
                 quality::HistoryWalk walk = historyWalks[ r ].get();
-                if( walk.raw.unread && walk.raw.notRun )
+                if( walk.raw.cut != GitWalkCut::None )
+                {
+                    historyReport.cutCommits += walk.raw.commits.size();
+                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkCut,
+                              "main: the git history walk hit its budget — churn= and amp= count only the newest commits (floors), and the document says so" );
+                }
+                else if( walk.raw.unread && walk.raw.notRun )
                 {
                     DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkNotRun,
                               "main: git did not run for the history walk — churn= is absent and amp= counts callers only, and the document says so" );

@@ -5089,7 +5089,8 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // this bump is manual. On ordinary trees the two readers' streams are byte-identical (the lane's golden
 // arm over owners/hotspots/cochange), so the bump costs those repos one cold walk and changes no answer.
 // SCHEME 5 (2026-11-01, HISTORY-WALK-HANG): the COMMAND changed under an unchanged key again (--no-renames, gitLogRecordsCmd:
-// a rename now lists its old path too), the scheme 2 case.
+// a rename now lists its old path too), the scheme 2 case. The blob also carries the walk's budget cut, so a cached prefix
+// still says it is one.
 constexpr std::uint32_t kQChurnCacheScheme = 5;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
@@ -5099,6 +5100,7 @@ inline std::string serializeRawCommitStream( const RawCommitStream& raw, const s
     buf.append( kQChurnMagic, 4 );
     qsnapPut( buf, kQChurnCacheScheme );
     qsnapPut( buf, fnv1a64( keyMat ) );
+    qsnapPut( buf, std::uint32_t( raw.cut ) );
     qsnapPut( buf, std::uint32_t( raw.commits.size() ) );
     for( const RawCommitStream::Commit& c : raw.commits )
     {
@@ -5152,12 +5154,18 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
     // both counts are measured against the bytes left before either sizes a reserve (qsnapCountFits).
     constexpr std::size_t kMinCommitRecordBytes = sizeof( RawCommitStream::Commit::epoch ) + sizeof( std::uint32_t );
     constexpr std::size_t kMinPathRecordBytes   = sizeof( std::uint32_t );
+    std::uint32_t cutCode = 0;
+    if( !qsnapGet( p, end, cutCode ) || cutCode > std::uint32_t( GitWalkCut::Time ) )
+    {
+        return false;
+    }
     std::uint32_t nCommits = 0;
     if( !qsnapGet( p, end, nCommits ) || !qsnapCountFits( p, end, nCommits, kMinCommitRecordBytes ) )
     {
         return false;
     }
     RawCommitStream r;
+    r.cut = GitWalkCut( cutCode );
     r.commits.reserve( nCommits );
     for( std::uint32_t i = 0; i < nCommits; ++i )
     {
@@ -5232,6 +5240,9 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     keyMat.push_back( '\x1f' ); keyMat += coSince;
     keyMat.push_back( '\x1f' ); keyMat += boundary;
     keyMat += "qchurn" + std::to_string( kQChurnCacheScheme );
+    // The budget is in the key: a prefix cut under one budget must not answer a run that raised it.
+    keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxCommits() );
+    keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxSeconds() );
     const std::string cachePath = shaKeyedCachePath( "qchurn", repoHex, std::string{}, keyMat );
 
     RawCommitStream                  raw;
@@ -5250,6 +5261,12 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
         // An abandoned read (a memory-guard refusal stopped the walk) is a prefix too, even when git exited 0: never cached.
         return raw;
     }
+    if( raw.cut != GitWalkCut::None && raw.commits.empty() )
+    {
+        return raw;   // the budget ran out before one commit: a stalled git, not a prefix worth keeping until HEAD moves
+    }
+    // A cut prefix IS stored: re-walking would cost the whole budget on every call of a repo that will only cut again, and the
+    // blob carries the cut, so the next answer still discloses it. It is the same prefix until HEAD moves.
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                    // write just recomputes next time
     return raw;

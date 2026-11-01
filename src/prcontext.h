@@ -246,7 +246,18 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
     const int rc = os::pclose( pipe );
     if( rc != 0 && out.paths.empty() && out.skippedModeOnly == 0 )
     {
-        return out; // git failed outright
+        // git failed outright. On a partial clone that is numstat wanting a blob ripwire will not download (gitcmd.h NEVER DOWNLOAD),
+        // and "no changed files" would be a confident wrong answer. The tree-level list needs no blob, at the one cost of not telling
+        // a mode-only row from a content row, so such a row is listed.
+        const GitCommandLines listed = gitCommandLines( gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                                                        + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --no-renames --name-only " + revArgs + " -- 2>/dev/null" );
+        if( !listed.isStarted || listed.status != 0 )
+        {
+            return out;
+        }
+        DISCLOSE( Diagnostics::answerUnchanged, "the changed files are listed; a mode-only change is not told from a content change",
+                  "prcontext: git diff --numstat failed (a partial clone's missing blob?) — the changed paths come from --name-only" );
+        out.paths = listed.lines;
     }
     out.ok = true;
     return out;

@@ -17,10 +17,13 @@
 // a prefix changed at least 3 times); the attribute is what stops it reading as the full count. An absent churn= under
 // the attribute is not zero churn. It does NOT mean the repository is damaged beyond that walk, that the other numbers
 // in the document are affected, or that a retry will fail: the failed walk is never cached, so the next call walks again.
+// A THIRD CAUSE, the budget (gitmine.h THE BUDGET): the walk read fine and was ended on purpose at a commit count or a wall
+// time, a prefix like the second cause and FLOORS in the same sense, except that the prefix is cached until HEAD moves.
 // The comment names which cause this run hit. A verb that runs no history walk (a plain map, --callers) never carries it.
 //
 // NOT COVERED (pre-existing, deferred): the other git walks — --cochange and the MCP cochange tool, --rank-by=churn and
-// --owners — do not yet tell a failed walk from an empty one (CHANGELOG, the K51 entry). Those walks, and
+// --owners — do not yet tell a failed walk from an empty one (CHANGELOG, the K51 entry). A BUDGET cut of those walks IS told,
+// on the CLI, by main()'s one history_cut comment after the answer (gitWalkCutsToDisclose in gitmine.h). Those walks, and
 // gitLogNameOnlyRaw, also discard GitLogWalk::epochUnparsed, so a commit whose epoch field would not parse (read as 0)
 // lowers a window count or an ownership row without a tell: carried with this deferral, to be disclosed at one place
 // when these walks learn to say history_unread (PR #433 review, CodeRabbit on #469).
@@ -49,14 +52,17 @@ struct HistoryReadReport
     {
         WalkNotRun,    // git did not run (not on PATH, not executable, no popen): the root's stream is empty
         WalkStopped,   // git ran and exited non-zero part-way: the root's stream is a newest-first prefix (possibly empty)
+        WalkCut,       // the budget ended the walk (gitmine.h THE BUDGET): the root's stream is a newest-first prefix
     };
     std::uint32_t unreadRoots  = 0;
     std::uint32_t notRunRoots  = 0;
     std::uint32_t stoppedRoots = 0;
+    std::uint32_t cutRoots     = 0;
+    std::uint64_t cutCommits   = 0;   // commits the cut roots did read
     void          disclose( DisclosureWhy why ) noexcept
     {
         ++unreadRoots;
-        ++( why == DisclosureWhy::WalkNotRun ? notRunRoots : stoppedRoots );
+        ++( why == DisclosureWhy::WalkNotRun ? notRunRoots : why == DisclosureWhy::WalkStopped ? stoppedRoots : cutRoots );
     }
 };
 
@@ -81,14 +87,20 @@ inline std::string renderHistoryUnread( DiscloseAs as )
     {
         return ",\"history_unread\":true";
     }
+    if( historyRead().cutRoots == historyRead().unreadRoots )
+    {
+        return "<!--history_unread=1: the git history walk behind churn= and amp= hit its budget after the newest "
+             + std::to_string( historyRead().cutCommits ) + " commits, so churn= and amp= count only those: both are floors, and an absent "
+             "churn= here is not zero churn. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget; the cut is cached until HEAD moves.-->";
+    }
     std::string comment = "<!--history_unread=1: the git history walk behind churn= and amp= could not be read in full in this run (";
-    if( historyRead().stoppedRoots == 0 )
+    if( historyRead().stoppedRoots + historyRead().cutRoots == 0 )
     {
         comment += "the walk did not run), so churn= is absent and amp= counts callers only (a floor)";
     }
     else
     {
-        comment += historyRead().notRunRoots == 0 ? "the walk stopped part-way" : "the walk did not run for one root and stopped part-way for another";
+        comment += historyRead().notRunRoots == 0 ? "the walk stopped part-way or hit its budget" : "the walk did not run for one root and stopped part-way or hit its budget for another";
         comment += "), so churn= and amp= count only the commits that were read: both are floors";
     }
     comment += "; an absent churn= here is not zero churn. The failed walk is not cached, so the next call walks again.-->";

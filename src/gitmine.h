@@ -20,6 +20,9 @@
                                  // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
+#include <cstring>
 #include <array>        // popenTrimmed's 64 KB read block
 #include <atomic>       // the join's once-per-process disclosure flags
 #include <bit>          // std::popcount — the recurrence mask's set-bit count (Clio sub-windows)
@@ -782,6 +785,47 @@ struct GitLogRecord
 // executable), so there is no prefix either.
 // The visitor form streams: there is no records vector to keep, which is the point — one record in
 // memory at a time, the whole-history walk costs what it always cost.
+//
+// THE BUDGET (HISTORY-WALK-HANG). No walk runs past a commit count or a wall time; `--since` alone bounded nothing on a repo
+// that commits fast. Rates measured on `-c --no-renames` (git 2.50.1, this Mac): kubernetes' WHOLE history, 142 K commits, 9.8 s
+// (its 18-month window, 12.8 K, 1.0 s); textual 1.7 K, 0.12 s; risingwave 2.5 K, 0.18 s; ClickHouse 10 K in 26 s, 50 K in 112 s,
+// 124 K of the 134 K window still unfinished at 300 s, git itself at 1.9 GB RSS. A walk now reads no blob, so a full clone and a
+// blobless one pay the same. 20 s is twice the slowest whole history that finished in reasonable time and is what an agent
+// tolerates on top of an ingest; the walk runs beside the ingest, so on any big repo most of it is hidden anyway. 200 K commits
+// never trips before the clock on a repo like ClickHouse; it bounds memory on a repo fast enough to beat the clock.
+// RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS move them (0 = no limit), for a user willing to wait.
+// A cut walk is a prefix, newest first, and is DISCLOSED: amp=/churn= by history_unread (historyread.h), every other walk by
+// gitWalkCutsToDisclose, which main() prints once after the answer.
+enum class GitWalkCut : std::uint8_t { None, Commits, Time };
+inline constexpr std::uint64_t kGitWalkMaxCommits = 200'000;
+inline constexpr std::uint64_t kGitWalkMaxSeconds = 20;
+
+inline std::uint64_t gitWalkBudgetValue( const char* envName, std::uint64_t fallback ) noexcept
+{
+    const char* raw = std::getenv( envName );
+    if( raw == nullptr || *raw == '\0' )
+    {
+        return fallback;
+    }
+    char*               end   = nullptr;
+    const std::uint64_t value = std::strtoull( raw, &end, 10 );
+    return *end == '\0' && *raw != '-' ? value : fallback;   // external input: anything but a plain number keeps the default
+}
+inline std::uint64_t gitWalkMaxCommits() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_COMMITS", kGitWalkMaxCommits ); }
+inline std::uint64_t gitWalkMaxSeconds() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_SECONDS", kGitWalkMaxSeconds ); }
+
+// The DISCLOSE sink for a walk whose consumer has no history_unread of its own. Worker threads write it; main() reads it last.
+struct GitWalkCutReport
+{
+    std::atomic<std::uint32_t> walks{ 0 };
+    std::atomic<std::uint64_t> commitsRead{ 0 };
+};
+inline GitWalkCutReport& gitWalkCutsToDisclose() noexcept
+{
+    static GitWalkCutReport report;
+    return report;
+}
+
 struct GitLogWalk
 {
     bool                      unread   = false;
@@ -795,24 +839,85 @@ struct GitLogWalk
     // COVERED; CodeRabbit on #469). git itself never prints a non-numeric %at/%ct: a non-zero count
     // means a malformed stream or the disclosed `__C__` merge collision.
     int                       epochUnparsed = 0;
+    GitWalkCut                cut           = GitWalkCut::None;   // the budget ended the walk: the records are the newest part
+    std::uint64_t             commitsVisited = 0;
 };
 
-// One field of lookahead over a NUL-framed stream: `next` is readNulSafeField or the held field, which
-// the boundary rule in forEachGitLogRecord parks here while it decides what an empty field means.
-// `abandon` rides into the field read itself — the walkers' stop-at-the-next-field contract, polled
-// once per byte, so a stream whose fields never arrive (a git answering in its default line format, or
-// a shim streaming bare lines) cannot park the reader inside one field until end-of-stream.
+// One field of lookahead over a NUL-framed stream: `next` reads a field or hands back the one the boundary rule in
+// forEachGitLogRecord parked in `held` while it decided what an empty field means. It reads the pipe's descriptor itself, in
+// blocks, because a read through stdio cannot keep a deadline against a git that stopped writing. Between blocks, and at least
+// every 100 ms while none arrives, it checks `abandon` (the walkers' stop-at-the-next-unit contract) and `deadline`. Either one
+// drops a partial field and reads as end of stream; the caller tells them apart by the flag and `timedOut`. An end of stream
+// inside a field still returns that field: a final unterminated field counts.
 struct NulFieldStream
 {
-    std::FILE*               pipe    = nullptr;
-    std::string              held;
-    bool                     hasHeld = false;
-    const std::atomic<bool>* abandon = nullptr;
+    std::FILE*                            pipe    = nullptr;
+    std::string                           held;
+    bool                                  hasHeld = false;
+    const std::atomic<bool>*              abandon = nullptr;
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
+    bool                                  timedOut = false;
+    std::vector<char>                     block    = std::vector<char>( 64u * 1024u );
+    std::size_t                           pos      = 0;
+    std::size_t                           len      = 0;
+
+    bool stopping() const noexcept { return timedOut || ( abandon != nullptr && abandon->load( std::memory_order_relaxed ) ); }
+
+    bool refill()
+    {
+        constexpr std::int64_t kPollMs = 100;
+        pos = len = 0;
+        while( !stopping() )
+        {
+            const auto now = std::chrono::steady_clock::now();
+            if( now >= deadline )
+            {
+                timedOut = true;
+                return false;
+            }
+            std::int64_t waitMs = kPollMs;
+            if( deadline != std::chrono::steady_clock::time_point::max() )
+            {
+                waitMs = std::min<std::int64_t>( kPollMs, std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now ).count() + 1 );
+            }
+            const long got = os::pipeReadSome( pipe, block.data(), block.size(), int( waitMs ) );
+            if( got == os::kPipeNothingYet )
+            {
+                continue;
+            }
+            if( got <= 0 )
+            {
+                return false;
+            }
+            len = std::size_t( got );
+            return true;
+        }
+        return false;
+    }
 
     bool next( std::string& field )
     {
         if( hasHeld ) { field = std::move( held ); hasHeld = false; return true; }
-        return readNulSafeField( pipe, field, abandon );
+        field.clear();
+        bool readAny = false;
+        for( ;; )
+        {
+            if( pos == len && !refill() )
+            {
+                return readAny && !stopping();
+            }
+            readAny = true;
+            const char* start = block.data() + pos;
+            const char* nul   = static_cast<const char*>( std::memchr( start, '\0', len - pos ) );
+            if( nul != nullptr )
+            {
+                field.append( start, nul );
+                pos += std::size_t( nul - start ) + 1;
+                return true;
+            }
+            field.append( start, len - pos );
+            pos = len;
+        }
     }
 };
 
@@ -860,18 +965,27 @@ inline int decodedExitCode( int status ) noexcept
 // join; one that exists again was in fact touched by that commit, so it counts. Nothing here follows a file through a rename.
 inline std::string gitLogRecordsCmd( const std::string& root, const std::string& extraArgs )
 {
+    // One past the budget, so the walk can tell "the budget ended it" from "the history ended exactly there".
+    const std::uint64_t maxCommits  = gitWalkMaxCommits();
+    const std::string   maxCountArg = maxCommits == 0 ? std::string{} : "-n " + std::to_string( maxCommits + 1 ) + " ";
     return gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
          + " log --no-ext-diff --no-textconv --no-renames " + kMergeDiffArgs
-         + "-z --name-only --format=%x00__C__%x00%ae%x00%at%x00%ct " + extraArgs + "2>/dev/null";
+         + maxCountArg + "-z --name-only --format=%x00__C__%x00%ae%x00%at%x00%ct " + extraArgs + "2>/dev/null";
 }
 
 // Stream every record of one `git log --name-only` walk to `visit`, one record in memory at a time, so
 // the whole-history walk costs what it always cost. Returns the walk's exit status; the records arrive
-// through the visitor in the stream's order (newest commit first, git's order).
+// through the visitor in the stream's order (newest commit first, git's order). The budget (above) ends the walk early with
+// `cut` set and a clean exit status; `cutSink` then hears of it, unless this walk's consumer carries the cut itself.
+enum class GitWalkCutDisclosure : std::uint8_t { ProcessTail, CarriedByCaller };
+
 template<typename Visitor>
-inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::string& extraArgs, Visitor&& visit )
+inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::string& extraArgs, Visitor&& visit,
+                                       GitWalkCutDisclosure cutSink = GitWalkCutDisclosure::ProcessTail )
 {
     GitLogWalk walk;
+    const std::uint64_t maxCommits = gitWalkMaxCommits();
+    const std::uint64_t maxSeconds = gitWalkMaxSeconds();
     const std::string cmd = gitLogRecordsCmd( root, extraArgs );
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
@@ -886,7 +1000,11 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
     // stream whose fields never arrive (the default-format degrade, a test shim's bare lines) stops
     // the read where the old line reader stopped it — at its next unit — instead of blocking to
     // end-of-stream inside one unterminated field.
-    NulFieldStream fields{ pipe, {}, false, &gGitWalksAbandoned };
+    NulFieldStream fields{ .pipe = pipe, .abandon = &gGitWalksAbandoned };
+    if( maxSeconds != 0 )
+    {
+        fields.deadline = std::chrono::steady_clock::now() + std::chrono::seconds( maxSeconds );
+    }
     std::string    field;
     std::string    lookahead;
     bool           haveLookahead = false;
@@ -904,12 +1022,16 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
 
     const auto closeRecord = [ & ]()
     {
-        if( inRecord && sawMarker ) { visit( cur ); }
+        if( inRecord && sawMarker )
+        {
+            if( maxCommits != 0 && walk.commitsVisited == maxCommits ) { walk.cut = GitWalkCut::Commits; }
+            else                                                       { visit( cur ); ++walk.commitsVisited; }
+        }
         cur        = GitLogRecord{};
         sawMarker  = false;
     };
 
-    while( !atEnd )
+    while( !atEnd && walk.cut == GitWalkCut::None )
     {
         if( gitWalksAbandoned() ) { break; }   // the walk readers' abandon contract: stop at the next field; pclose ends the child
         // COPY, not move: the slot is a reusable buffer, and a copy hands the held value over while
@@ -1002,7 +1124,26 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
         }
         cur.paths.push_back( std::move( field ) );
     }
-    closeRecord();
+    if( fields.timedOut )
+    {
+        walk.cut = GitWalkCut::Time;   // the open record lost its tail: not visited
+    }
+    else if( walk.cut == GitWalkCut::None )
+    {
+        closeRecord();
+    }
+    if( walk.cut != GitWalkCut::None )
+    {
+        // The pipe closes now and git dies at its next write, but a git that is not writing would hold pclose's wait for as long
+        // as it stays silent, which is what the deadline exists to end. So the wait goes to a thread of its own.
+        std::thread( [ pipe ]() { os::pclose( pipe ); } ).detach();
+        if( cutSink == GitWalkCutDisclosure::ProcessTail )
+        {
+            gitWalkCutsToDisclose().walks.fetch_add( 1, std::memory_order_relaxed );
+            gitWalkCutsToDisclose().commitsRead.fetch_add( walk.commitsVisited, std::memory_order_relaxed );
+        }
+        return walk;
+    }
 
     walk.exitCode = decodedExitCode( os::pclose( pipe ) );
     if( walk.exitCode != 0 )
@@ -1863,6 +2004,8 @@ struct RawCommitStream
     bool notRun = false;
     // git's decoded exit code (WEXITSTATUS), -1 when it did not exit normally or never started; 0 on a clean read.
     int exitCode = 0;
+    // The budget ended the walk (GitWalkCut above): `commits` is the newest part of the window, disclosed, and cached with this set.
+    GitWalkCut cut = GitWalkCut::None;
 };
 
 inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::string& coSince )
@@ -1874,12 +2017,13 @@ inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::st
     const GitLogWalk walk      = forEachGitLogRecord( root, extraArgs, [ & ]( const GitLogRecord& rec )
     {
         out.commits.push_back( RawCommitStream::Commit{ rec.committerTs, rec.paths } );
-    } );
+    }, GitWalkCutDisclosure::CarriedByCaller );   // main.cpp's amp=/churn= block turns it into history_unread
     // K51: git died (a missing or corrupt object, a bad ref) — the records above are a prefix, not the
     // window — or the shell never ran it (127: not on PATH, 126: not executable), and there are none.
     out.unread   = walk.unread;
     out.notRun   = walk.notRun;
     out.exitCode = walk.exitCode;
+    out.cut      = walk.cut;
     return out;
 }
 
@@ -1899,6 +2043,7 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
     // the output to one line, so `.back()` is that line; gitCommandLines has already stripped its CR/LF tail.
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                           + " log --no-ext-diff --no-textconv --since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: the probe must resolve the window it guards, by the same rule
+                          + ( gitWalkMaxCommits() == 0 ? std::string{} : " -n " + std::to_string( gitWalkMaxCommits() + 1 ) )   // the walk it guards never reads past this
                           + " --format=%H 2>/dev/null | tail -1";
     const GitCommandLines res = gitCommandLines( cmd );
     if( !res.isStarted || res.lines.empty() )
@@ -3545,17 +3690,18 @@ inline bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing
                      std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: count ONLY files of that root
 {
     const std::string windowArgs = rw::historyWindowArgs( root, scope, since );
-    const rw::GitCommandLines touched = rw::gitCommandLines(
-        gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " log --no-ext-diff --no-textconv " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
-    if( !touched.isStarted )
+    // Through THE record walk (forEachGitLogRecord): the same paths, with its --no-renames, its budget and its cut disclosure.
+    rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
+    const rw::GitLogWalk walk = rw::forEachGitLogRecord( root, windowArgs, [ & ]( const rw::GitLogRecord& rec )
+    {
+        for( const std::string& p : rec.paths )
+        {
+            ++counts[p];
+        }
+    } );
+    if( walk.notRun )
     {
         return false;
-    }
-
-    rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
-    for( const std::string& p : touched.lines )
-    {
-        ++counts[p];
     }
     if( counts.empty() )
     {
