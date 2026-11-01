@@ -21,8 +21,8 @@ BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
-no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
+no(){ fail=1; printf '  FAIL  %s\n' "$*"; return 0; }
 
 # ---- U ----
 CXX="${CXX:-clang++}"
