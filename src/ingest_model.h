@@ -455,6 +455,10 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
             s.fnLocal = 1;
             result.fnLocalScopes.push_back( FnLocalScope{ s.id, d.fnScopeStart, d.fnScopeEnd } );
         }
+        // #452: the Swift @main entry-type fact rides a sorted-id side table (model.h entryDeclTypes,
+        // the fnLocalScopes shape) — pushed ONLY for a def that carries it (ids ascend with the loop,
+        // so the list stays sorted) and an empty vector on a repo with no Swift.
+        if( d.entryDecl != 0 ) { result.entryDeclTypes.push_back( s.id ); }
         result.symbols.push_back( std::move( s ) );
     }
 

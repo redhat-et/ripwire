@@ -2300,6 +2300,13 @@ struct IngestResult
                                                // a Function/Method body's exact-clone key (clones.h cloneBodyKey), 0 = none. findClones
                                                // groups by it with no file I/O and reads a body's file only to key a 0 or to verify a
                                                // shared key; a size mismatch (an IngestResult built without it) makes it read every file.
+    // #452: ASCENDING symbol ids of the Swift `@main` entry-type defs — the attribute computed at extraction
+    // (ingest_names.h swiftDeclCarriesMainAttr), the entry being the TYPE itself and its static main()
+    // the callee. A sorted id list, the fnLocalScopes shape, so it rides the symbol renumbering
+    // (filter.h applyIgnoreTests), the workspace merge (workspace.h) and the edit-preview splice
+    // (editpreview.h) by the same remaps those seams already apply — and a repo with no Swift pays an
+    // empty vector. Read by mapinventory.h isInventoryEntryShape (binary search) under EntryAttrType.
+    std::vector<NodeId>      entryDeclTypes;
     std::vector<Reference>   references;   // unresolved calls
     std::vector<Include>     includes;     // #include / import directives (physical dependencies)
     std::vector<ConstOpen>   constOpens;   // parser version 82: Ruby class/module opens, for the constant index (resolve.h)

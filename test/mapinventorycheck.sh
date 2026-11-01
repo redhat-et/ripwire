@@ -200,18 +200,52 @@ printf 'main() { echo hi; }\n' >"$Q/lib/lib.sh"
 printf 'class Runner:\n    def main(self):\n        return 2\n\nRunner().main()\n' >"$Q/lib/runner_called.py"
 printf 'class Job { main() { return 3 } }\nnew Job().main()\n' >"$Q/web/job_called.js"
 printf 'class Tool\n  def self.main\n    1\n  end\nend\nTool.main\n' >"$Q/lib/tool_called.rb"
-# a language with no main convention the index can read (Swift's entry is @main / main.swift): a method main is no claim
+# a language whose entry convention is an ATTRIBUTE (#452): a method main is no claim, but @main on a new type is
 printf 'class App {\n    func main() {}\n}\n' >"$Q/lib/App.swift"
+# the entry's main also CONSTRUCTS the type and calls a method on it (#486 pt 2): the attribute is the claim,
+# a reference must not veto the entry; run/go also pin main's own callees riding the row (#486 pt 3)
+printf '@main\nstruct Tool {\n    static func main() {\n        run()\n        Tool().go()\n    }\n\n    func go() {}\n}\n\nfunc run() {}\n' >"$Q/lib/Tool.swift"
+# the same attribute on an EXTENSION (no `name:` field — no new type) must not claim an entry
+printf 'struct S {}\n@main\nextension S {\n    func go() {}\n}\n' >"$Q/lib/Ext.swift"
+# a second @main type (#486 pt 7): two entries is a Swift package's normal shape
+printf '@main\nstruct Second {\n    static func main() {}\n}\n' >"$Q/lib/Second.swift"
+# a @main type whose only main sits NESTED one type deeper (#486 pt 6): Inner's main, not Outer's —
+# Outer is still the entry but carries no main callee row
+printf '@main\nstruct Outer {\n    struct Inner {\n        static func main() { _ = Inner.self }\n    }\n}\n' >"$Q/lib/Outer.swift"
+# another file constructs the entry type (#486 pt 2): the entry stays
+printf 'let tool = Tool()\n_ = tool\n' >"$Q/lib/uses_tool.swift"
+# a TEST-classified Swift file sorting before the entry files (#486 pt 1): --ignore-tests renumbers
+# symbols, the entry fact must ride the renumbering or a wrong type gets named. `test_` prefix is the
+# one language-neutral test-file convention (isTestPath); it sorts before bin/tool.py and every lib/ file
+printf '@main\nstruct WrongOne {\n    static func main() {}\n}\n' >"$Q/bin/test_aaa.swift"
+# a @main type under a test path: never an entry
+mkdir -p "$Q/tests/swift"
+printf '@main\nstruct TestApp {\n    static func main() {}\n}\n' >"$Q/tests/swift/TestApp.swift"
 printf '#!/bin/sh\nwork() { echo w; }\nmain() { work; }\nmain "$@"\n' >"$Q/bin/run.sh"
 printf 'def go():\n    return 1\n\ndef main():\n    return go()\n\nif __name__ == "__main__":\n    main()\n' >"$Q/bin/tool.py"
 printf 'int step( void ) { return 0; }\nint main( void ) { return step(); }\n' >"$Q/prog.c"
 i=0; while [ "$i" -lt 30 ]; do printf 'def g%d():\n    return %d\n' "$i" "$i" >"$Q/pkg/m$i.py"; i=$(( i + 1 )); done
 "$BIN" "$Q" --no-cache --top-k=5 >"$TMP/langs.out" 2>/dev/null
 QE="$( grep -o '<entry p="[^"]*" n="[^"]*"' "$TMP/langs.out" | sed 's/<entry p="\([^"]*\)" n="\([^"]*\)"/\1:\2/' | tr '\n' ' ' )"
-for neg in lib/runner.py web/job.js lib/foo.rb lib/unused_main.py web/lib.ts lib/lib.sh lib/runner_called.py web/job_called.js lib/tool_called.rb lib/App.swift; do
+for neg in lib/runner.py web/job.js lib/foo.rb lib/unused_main.py web/lib.ts lib/lib.sh lib/runner_called.py web/job_called.js lib/tool_called.rb lib/App.swift lib/Ext.swift bin/test_aaa.swift tests/swift/TestApp.swift; do
     if printf '%s' "$QE" | grep -q "$neg:"; then fail "(Q) $neg claimed as a program entry [$QE]"; else ok "(Q) $neg (a method main / an uncalled script main) is not an entry"; fi
 done
-if [ "$QE" = 'bin/run.sh:main bin/tool.py:main prog.c:main ' ]; then ok "(Q) entries = a Bash main its script runs, a guarded Python main, a C main"; else fail "(Q) positive controls: got [$QE] want [bin/run.sh:main bin/tool.py:main prog.c:main ]"; fi
+if [ "$QE" = 'bin/run.sh:main bin/tool.py:main lib/Outer.swift:Outer lib/Second.swift:Second lib/Tool.swift:Tool prog.c:main ' ]; then ok "(Q) entries = a Bash main its script runs, a guarded Python main, two Swift @main types (one referenced, one nested-main), a C main"; else fail "(Q) positive controls: got [$QE] want [bin/run.sh:main bin/tool.py:main lib/Outer.swift:Outer lib/Second.swift:Second lib/Tool.swift:Tool prog.c:main ]"; fi
+# the Tool row carries its static main AND what main itself calls (#486 pt 3), in XML
+entryRowOf() { awk -v pat="<entry p=\"$1\" n=\"$2\">" 'index($0, pat) { s = $0; i = index(s, pat); t = substr(s, i); j = index(t, "</entry>"); print substr(t, 1, j + 7) }' "$TMP/langs.out"; }
+TOOLROW="$( entryRowOf lib/Tool.swift Tool )"
+if printf '%s' "$TOOLROW" | grep -q '<c n="main"/>' && printf '%s' "$TOOLROW" | grep -q '<c n="run"/>'; then ok "(Q) a @main entry's row carries its static main and main's own callees"; else fail "(Q) the Tool entry row lost main/run [$TOOLROW]"; fi
+OUTERROW="$( entryRowOf lib/Outer.swift Outer )"
+if [ -n "$OUTERROW" ] && ! printf '%s' "$OUTERROW" | grep -q '<c n='; then ok "(Q) a main nested one type deeper belongs to Inner: Outer's row carries no main (#486 pt 6)"; else fail "(Q) Outer's row wrongly carries a nested main [$OUTERROW]"; fi
+# the same rows in JSON (#486 pt 3)
+"$BIN" "$Q" --no-cache --top-k=5 --json >"$TMP/langs.json" 2>/dev/null
+if grep -q '"p":"lib/Tool.swift","n":"Tool"' "$TMP/langs.json" 2>/dev/null; then ok "(Q) the JSON inventory carries the @main entry"; else fail "(Q) the JSON inventory lost the Tool entry"; fi
+JSONTOOL="$( awk 'index($0, "\"p\":\"lib/Tool.swift\",\"n\":\"Tool\"") { s = $0; i = index(s, "\"p\":\"lib/Tool.swift\",\"n\":\"Tool\""); print substr(s, i, 400) }' "$TMP/langs.json" )"
+if printf '%s' "$JSONTOOL" | grep -q '"n":"main"' && printf '%s' "$JSONTOOL" | grep -q '"n":"run"'; then ok "(Q) the JSON entry row carries main and its callees too"; else fail "(Q) the JSON Tool row lost main/run [$JSONTOOL]"; fi
+# --ignore-tests renumbers symbols: the entry fact must ride the remap or a wrong type gets named (#486 pt 1)
+"$BIN" "$Q" --ignore-tests --no-cache --top-k=5 >"$TMP/igt.out" 2>/dev/null
+QI="$( grep -o '<entry p="[^"]*" n="[^"]*"' "$TMP/igt.out" | sed 's/<entry p="\([^"]*\)" n="\([^"]*\)"/\1:\2/' | tr '\n' ' ' )"
+if [ "$QI" = 'bin/run.sh:main bin/tool.py:main lib/Outer.swift:Outer lib/Second.swift:Second lib/Tool.swift:Tool prog.c:main ' ]; then ok "(Q) --ignore-tests renumbering keeps every @main entry on its own type"; else fail "(Q) --ignore-tests named a wrong entry [$QI]"; fi
 
 # (R) bench/example siblings roll up like examples/: benchmark/ (grpc-go's benchmark mains), Go's _examples/ and
 # _example/, e2e/ — no entry claimed, a count-only <ls> row. integration/ and testing/ stay named (real package names,
