@@ -422,6 +422,10 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
             f.id += symOff;
             m.fnLocalScopes.push_back( f );
         }
+        for( const NodeId e : p.entryDeclTypes )   // the #452 entry-decl id list rides it too — offsets keep it ascending
+        {
+            m.entryDeclTypes.push_back( NodeId( e + symOff ) );
+        }
         const std::uint32_t fieldOff = std::uint32_t( m.fields.size() );   // member-variable round: the field side table merges alike
         for( Symbol& f : p.fields )
         {
