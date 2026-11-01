@@ -2391,7 +2391,7 @@ inline std::uint32_t pythonIncludeFile( const IngestResult& ing, const Include& 
     {
         return kNoFile;
     }
-    const std::uint32_t f = resolvePreciseInclude( from, inc.target, /*isAngle=*/ false, fileIndex );
+    const std::uint32_t f = inImporterRoot( ing.fileRoot, inc.fileId, resolvePreciseInclude( from, inc.target, /*isAngle=*/ false, fileIndex ) );
     return ( f == kNoFile && inc.target.front() != '.' ) ? memo.resolve( inc.target, fileIndex, inc.fileId ) : f;
 }
 
@@ -2462,7 +2462,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // the module fileId Step-A pins, computed unconditionally (even for a relative spec, where
         // `verdict` below is already 'i' without needing it) — recordImportBindFile wants the REAL file,
         // not just verdict's "cannot leave the package" evidence.
-        const std::uint32_t resolved = resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex );
+        const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
         char verdict = 'x';
         if( b.typeName.front() == '.' )
         {
@@ -2655,6 +2655,14 @@ struct ExternalVeto
             }
         }
         return false;
+    }
+    // A `from m import *` of an INDEXED module in the caller's file binds names no table lists: the veto's "no evidence" is then
+    // not proof, so a decision that must not lose a star-bound name asks this first. A star import of a module outside the tree
+    // (kNoFile) can bind no in-tree def, so it is not evidence here.
+    bool pythonStarImports( const Reference& ref ) const
+    {
+        const auto& stars = tables.pythonScopes.starTargets;
+        return ref.fileId < stars.size() && std::ranges::any_of( stars[ ref.fileId ], []( std::uint32_t t ) { return t != kNoFile; } );
     }
     bool isExternalBound( const Reference& ref ) const
     {
@@ -10661,7 +10669,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             nameIds = &rubyReachable;
         }
-        if( !scipPinned && !canonical && !narrowed && it != byName.end() )
+        // Python (LangFacts::externalVetoBeforeRule3): Rule 3 is a name-only narrowing to the caller's imported closure, so it must not
+        // decide a call the Phase 5 veto below refuses: a bare builtin (`dict(...)`, `type(...)`) or an imported stdlib or third-party
+        // name is bound outside the tree whatever namesake an imported file defines. The veto's own conditions, and not in a file with
+        // a star import of an indexed module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding.
+        const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
+                                    && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
+        if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
             const auto rule3 = [ & ]( const rw::SmallVec<NodeId, 2>& ids, std::size_t minCands )
@@ -15161,6 +15175,7 @@ struct ImportTier
     std::uint64_t              importsUnresolved = 0;   // #220 part 1: importers= is a floor while > 0
     std::uint64_t              tsconfigUnread    = 0;   // #220 part 2: configs with an unread extends/references base (tsconfig_unread=)
     bool                       umbrella          = false;   // idea #6: an umbrella header — see impactImportTier
+    std::uint32_t              noFileEdgeLangs   = 0;       // arch-honest: the def files' languages this build draws no file edge for (lintrules.h)
 };
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
@@ -15194,7 +15209,8 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
                + rw::nextAttrXml( t.next, "importers_next" )
                + rw::importsUnresolvedAttrXml( t.importsUnresolved )   // #220: absent at zero; the root's counts_floor covers it
                + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) )   // #220 part 2: likewise
-               + ( t.umbrella ? " importers_umbrella=\"1\"" : "" );                              // idea #6: present-only
+               + ( t.umbrella ? " importers_umbrella=\"1\"" : "" )                               // idea #6: present-only
+               + rw::noFileEdgesAttrXml( t.noFileEdgeLangs );                                   // arch-honest: importers= is a floor for these defs
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
 }
@@ -15233,6 +15249,10 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
 
     ImportTier t;
+    for( const std::uint32_t f : defFiles )
+    {
+        t.noFileEdgeLangs |= f < ing.files.size() ? noFileEdgeLangBit( langOfPath( ing.files[f] ) ) : 0u;
+    }
     std::vector<char>          lazyByFileOrder;   // importersOfFiles' own order (ascending file id) — see below
     std::vector<std::uint32_t> fileFanIn;         // per file: how many files import it — the rank-before-cap weight
     // #220 part 1: the tier's floor concerns it only when a TS/JS import could land on one of its def files — a C++
@@ -15642,13 +15662,14 @@ inline DepHealth dependencyHealth( const std::vector<std::vector<std::uint32_t>>
 // and `--arch`'s propagation_cost (arch.h::dsmPropagationCostCapable) both key off the same
 // dependencyCapableMask(), so the two verbs' N is provably the same denominator.
 struct RestrictedDepHealth { std::uint64_t ccd = 0; double acd = 0, nccd = 0; std::size_t depFileCount = 0; };
-inline RestrictedDepHealth restrictDependencyHealth( const IngestResult& ing, const std::vector<std::uint32_t>& transitive )
+// `mask` is the denominator (lintrules.h dependencyMeasure: dependencyCapableMask minus the no-edge files nothing touches).
+inline RestrictedDepHealth restrictDependencyHealth( const std::vector<char>& mask, const std::vector<std::uint32_t>& transitive )
 {
     RestrictedDepHealth r;
-    const std::size_t F = std::min( transitive.size(), ing.files.size() );
+    const std::size_t F = std::min( transitive.size(), mask.size() );
     for( std::size_t f = 0; f < F; ++f )
     {
-        if( dependencyCapable( langOfPath( ing.files[f] ) ) ) { r.ccd += transitive[f]; ++r.depFileCount; }
+        if( mask[f] ) { r.ccd += transitive[f]; ++r.depFileCount; }
     }
     const double N = double( r.depFileCount );
     r.acd  = r.depFileCount ? double( r.ccd ) / N : 0.0;

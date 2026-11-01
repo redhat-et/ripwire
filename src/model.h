@@ -1998,6 +1998,12 @@ struct CrawlSkips
     // disable_recursion_pending() and only the --exclude one incremented anything, so `--skipped` over a
     // tree with node_modules/ reported EVERY counter zero while whole subtrees had been dropped.
     std::uint64_t             prunedDirs      = 0;
+    // #478 gap 3: the rows behind prunedDirs (capped, path-sorted, bytes 0, ext ""). A directory that is a real Python package
+    // (ingest_crawl.h isPrunedPythonPackage) rows in prunedPackageRows and not in prunedDirRows, and has its own exact count,
+    // because --arch and --deps name those: a module they would otherwise report on as if it did not exist.
+    std::vector<SkippedFile>  prunedDirRows;
+    std::vector<SkippedFile>  prunedPackageRows;
+    std::uint64_t             prunedPackages  = 0;
     std::vector<UnindexedExt> unindexedExts;        // EXACT histogram, sorted files desc then ext asc
 
     // §N6-C — the .gitignore lane. TWO counters for the same reason excludedDirs and prunedDirs are two:
