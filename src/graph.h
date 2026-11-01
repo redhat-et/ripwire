@@ -9141,7 +9141,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             }
             if( recvEv.moduleNames( ref, ch.root, c ) )
             {
-                return !( moduleCallReachesFunctionsOnly( ref.lang ) && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
+                return !( langFacts( ref.lang ).moduleCallReachesFunctionsOnly && cs.kind == SymKind::Method );   // Go `pkg.F()`: never a method
             }
             if( ref.lang == Lang::Python && ref.recv == RecvKind::NamedVar )
             {
@@ -9155,7 +9155,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             return !owner.empty() && recvEv.namesClass( ref, ch.root, cls ) && recvEv.inCone( cls, owner )   // a class-name receiver: the class or a base,
                 && recvEv.onSide( ref, c, /*classSide=*/true );                                                 // its CLASS side
         }
-        if( implicitReceiverLang( ref.lang ) )
+        if( langFacts( ref.lang ).implicitReceiver )
         {
             const std::string_view owner = ownerIsClass( c );
             if( owner.empty() )
@@ -10687,7 +10687,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 // an implicit receiver's bare call is the same question: the included file's definition must be one the
                 // language's lookup reaches (a free function, the class's own cone) — decided with the ladder's proof below
-                std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || implicitReceiverLang( r.lang ) ) ) ? memberRule3 : cand;
+                std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || langFacts( r.lang ).implicitReceiver ) ) ? memberRule3 : cand;
                 for( NodeId c : rule3Out )
                 {
                     if( langCompatible( symLang[ c ], r.lang ) )
@@ -10937,7 +10937,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             // Rust, Ruby, Java, C#, Swift: a function is reached through a member only as a method, or through a module
             // alias, which proves itself above) — JS/TS object properties, Kotlin extensions and C function-pointer fields
             // can hold one, so those keep it. Nothing left: no in-repo definition can answer the call (external=).
-            if( nameOnly && isMemberCallRef( r ) && memberNeverReachesFreeFunction( r.lang ) )
+            if( nameOnly && isMemberCallRef( r ) && langFacts( r.lang ).memberNeverReachesFreeFunction )
             {
                 std::erase_if( cand, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
                 std::erase_if( memberRule3, [ & ]( NodeId c ) { return ownerIsClass( c ).empty() && ing.symbols[ c ].kind == SymKind::Function; } );
