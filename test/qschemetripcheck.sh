@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-02, PR fix/rust-drop-dead-code (#494): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: languageInvokedSymbol joins the manifest
+#   (it is part of isDeadCandidate's exemption chain) and now exempts a Rust method named drop; kQSnapCacheScheme 24 -> 25 (quality.h's v25
+#   note). kParserVer and kCacheVersion stay: no extraction change, no record shape change.
 # 2026-10-31, train 43b (lanes registrar, string-import, self-hook, decl-row merged onto main 65210e86): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the
 #   composed tree (main's pin and the registrar / string-import branch pins conflicted). Watched text: kParserVer 271 -> 283 (rich 284; above the
 #   lane placeholders up to 281, rich 282), quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:

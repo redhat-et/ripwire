@@ -133,6 +133,46 @@ rows "$ODC" | grep 'kind="dead-code"' | grep -q 'Extra' \
     && ok "dead-code: byte-identical run to run (deterministic)" || no "dead-code: non-deterministic delta"
 
 
+# ── 2b) the Rust Drop::drop exemption (issue #494) ─────────────────────────────────────────────────────────
+# `impl Drop for T { fn drop(&mut self) }` is run by the compiler when a T leaves scope, and nothing in the source
+# names it, so its zero in-edges say nothing. Positive: that method is exempt. Negatives, which must stay reported:
+# a free function named `drop` (not a method, so the language does not invoke it), a C++ method named `drop` (the
+# exemption is Rust-only), and an ordinary orphan helper beside them.
+RD="$WORK/rustdrop"; mkdir -p "$RD/src"
+( cd "$RD" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'pub fn api() -> u32 { 2 }\n' > "$RD/src/lib.rs"
+( cd "$RD" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+cat > "$RD/src/lib.rs" <<'RS'
+pub fn api() -> u32 { use_guard() }
+
+struct Guard(u32);
+
+impl Drop for Guard {
+    fn drop(&mut self) { self.0 = 0; }
+}
+
+fn use_guard() -> u32 { let guard = Guard(3); guard.0 }
+fn drop() { }
+fn orphan_helper() -> u32 { 7 }
+RS
+cat > "$RD/src/holder.cpp" <<'CPP'
+struct Holder { void drop() { } };
+CPP
+RDQ="$( cd "$RD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+RDDEAD="$( rows "$RDQ" | grep 'kind="dead-code"' )"
+printf '%s' "$RDDEAD" | grep -q 'Guard::drop' \
+    && { no "rust-drop: Drop::drop of 'impl Drop for Guard' reported as dead-code"; printf '%s\n' "$RDDEAD"; } \
+    || ok "rust-drop: Drop::drop of 'impl Drop for Guard' is not reported (the compiler runs it at scope exit)"
+printf '%s' "$RDDEAD" | grep -q 'sym="drop"' \
+    && ok "rust-drop: a free function named drop is still reported (the language does not invoke it)" \
+    || { no "rust-drop: free function 'drop' wrongly exempt"; printf '%s\n' "$RDDEAD"; }
+printf '%s' "$RDDEAD" | grep -q 'Holder::drop' \
+    && ok "rust-drop: a C++ method named drop is still reported (the exemption is Rust-only)" \
+    || { no "rust-drop: C++ method Holder::drop wrongly exempt"; printf '%s\n' "$RDDEAD"; }
+printf '%s' "$RDDEAD" | grep -q 'orphan_helper' \
+    && ok "rust-drop: an ordinary orphan helper is still reported (negative control)" \
+    || { no "rust-drop: orphan_helper not reported"; printf '%s\n' "$RDDEAD"; }
+
 # ── 3) verbosity counts CODE lines; verbosity + complexity gate on a CROSSING or >= 25% growth ───────────
 # Q1 measured the median growth of a GATING verbosity row at 6% and of a gating complexity row at 6%, while
 # 60 pure BLANK lines added to an 18-LOC body produced `was="18" now="78"`, gating, exit 2. Both halves are

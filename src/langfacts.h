@@ -301,6 +301,10 @@ struct LangFacts
 
     /// Whether this language's files can carry a file→file edge in this build (FileEdges above).
     FileEdges fileEdges = FileEdges::Unmeasured;
+
+    /// Rust: a method named `drop` is `Drop::drop`, which the compiler runs when a value leaves scope, so no call names it
+    /// (issue #494). languageInvokedSymbol reads this column; nothing else does.
+    bool dropRunsAtScopeExit = false;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -320,7 +324,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved },
+      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .dropRunsAtScopeExit = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },

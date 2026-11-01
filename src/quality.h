@@ -771,6 +771,8 @@ inline std::vector<std::uint64_t> topLevelCalleeNameHashes( const IngestResult& 
 //   * `main` is invoked by the runtime;
 //   * `operator...` is invoked by the OPERATOR'S SYNTAX (`a + b`, `p[i]`, `new T`, `f( x )` on a functor);
 //   * a leading `~` is a C++ destructor — the language runs it at scope exit;
+//   * a Rust `drop` method is `Drop::drop` — the compiler runs it when the value goes out of scope, and no call
+//     names it (issue #494). Read by name and kind only, so an inherent method named `drop` is treated the same way;
 //   * name == the innermost scope segment is a CONSTRUCTOR in every language that spells one that way
 //     (C++, Java, C#, PHP-in-part), built by object creation rather than by a call to that name;
 //   * a Python-style dunder (`__enter__`, `__repr__`, `__init__`) is invoked by a protocol, never by name;
@@ -797,6 +799,12 @@ inline bool languageInvokedSymbol( const Symbol& s ) noexcept
     if( !s.name.empty() && s.name.front() == '~' )
     {
         return true; // C++ destructor
+    }
+    if( langFacts( s.lang ).dropRunsAtScopeExit && s.kind == SymKind::Method && s.name == "drop" )
+    {
+        // Drop::drop, run by the compiler at scope exit. FLOOR: an inherent method named `drop` is read the same way,
+        // which errs toward live, the direction this predicate is required to err in.
+        return true;
     }
     if( s.name.size() > 4 && s.name.rfind( "__", 0 ) == 0
         && s.name.compare( s.name.size() - 2, 2, "__" ) == 0 )
@@ -3644,6 +3652,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   pythonRecordParent         (quality.h) — fills the closure host and owner that pythonReceiverScope reads (#228)
 //   pythonReceiverScope        (quality.h) — which method a self./cls. call in a closure belongs to (#228)
 //   isFixturePath              (quality.h) — a fixture-path exemption isDeadCandidate calls into
+//   languageInvokedSymbol       (quality.h) — the language-invoked exemption isDeadCandidate calls into (Rust Drop::drop, #494)
 //   isTestScriptPath           (quality.h) — the test-script exemption isDeadCandidate calls into (the exact
 //                                             helper B10.1a added without a bump — the finding this guards)
 //   topLevelCalleeNameHashes   (quality.h) — the file-scope (top-level script statement) call-site evidence
@@ -3787,7 +3796,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // The producer identity already keeps this build's blobs apart; bumped 22 -> 23 so the history above stays complete.
 // v24 (2026-10-25, train 36) — #228's v23 was the PR's placeholder; renumbered above every live value (main / train 35 / every
 // other ref 22, #437 23). No further shape change.
-constexpr std::uint32_t kQSnapCacheScheme = 24;
+// v25 (2026-11-02, #494: Rust Drop::drop) — no blob shape change; the dead SET's inputs moved. languageInvokedSymbol, which
+// isDeadCandidate calls, now exempts a Rust method named drop (the compiler runs it at scope exit). Bumped 24 -> 25 so the history
+// above stays complete. Lane note: v25 is this PR's number; a second scheme bump from another open PR renumbers on the merge.
+constexpr std::uint32_t kQSnapCacheScheme = 25;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
