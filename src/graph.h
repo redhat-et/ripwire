@@ -10675,6 +10675,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // a star import of an indexed module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding.
         const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
                                     && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
+        bool rule3NoProof = false;   // RULE3-MEMBER-GUARD: Rule 3 fired, and nothing the language writes proves its answer
         if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
@@ -10687,13 +10688,43 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 // an implicit receiver's bare call is the same question: the included file's definition must be one the
                 // language's lookup reaches (a free function, the class's own cone) — decided with the ladder's proof below
-                std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || implicitReceiverLang( r.lang ) ) ) ? memberRule3 : cand;
+                const bool memberSide = hedgeEligible && ( isMemberCallRef( r ) || implicitReceiverLang( r.lang ) );
+                // RULE3-MEMBER-GUARD: where the language writes what a name is bound to, Rule 3 is no proof without that writing (langfacts.h
+                // rule3NameProof): the candidates it proves decide the call; with none the call takes the ladder's name-only path, hedged.
+                const Rule3NameProof nameProof = ( !memberSide && r.role == RefRole::Call && !scipPinned ) ? langFacts( r.lang ).rule3NameProof : Rule3NameProof::None;
+                const auto           nameProves = [ & ]( NodeId c )
+                {
+                    switch( nameProof )
+                    {
+                        case Rule3NameProof::RustUse:      return recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
+                        case Rule3NameProof::PythonImport: return externalVeto.importVerdict( r, r.calleeName ) != '\0' || externalVeto.pythonStarImports( r );
+                        case Rule3NameProof::None:         return true;
+                    }
+                    return true;
+                };
                 for( NodeId c : rule3Out )
                 {
                     if( langCompatible( symLang[ c ], r.lang ) )
                     {
-                        into.push_back( c );
+                        if( memberSide )
+                        {
+                            memberRule3.push_back( c );
+                        }
+                        else if( nameProves( c ) )
+                        {
+                            cand.push_back( c );
+                        }
+                        else
+                        {
+                            memberRule3.push_back( c );
+                            rule3NoProof = true;
+                        }
                     }
+                }
+                rule3NoProof = rule3NoProof && cand.empty();   // a proven candidate decides the call, and the unproven ones leave with Rule 3's other files
+                if( !rule3NoProof && !memberSide )
+                {
+                    memberRule3.clear();
                 }
                 narrowed = !cand.empty();
             }
@@ -10894,7 +10925,16 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 languageLookupProved = true;
             }
         }
-        if( hedgeEligible && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
+        if( rule3NoProof && !narrowed && !languageLookupProved )
+        {
+            nameOnly = !cand.empty() || !memberRule3.empty();
+            if( cand.empty() )
+            {
+                cand = memberRule3;   // the whole-name path above filtered them out: Rule 3's own file still answers, hedged
+                candMemo = nullptr;
+            }
+        }
+        if( hedgeEligible && !rule3NoProof && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
         {
             provedScratch.clear();
             if( !memberRule3.empty() && !isMemberCallRef( r ) )

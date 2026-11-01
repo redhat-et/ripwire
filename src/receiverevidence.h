@@ -1326,6 +1326,65 @@ struct CallResultTypes
         rustModuleAt( tf, ing.symbols[ target ].sigStartByte, targetModule );
         return tf < rust.crateOf.size() && rust.crateOf[ tf ] == crate && targetModule == module;
     }
+    // RULE3-MEMBER-GUARD: what written binding proves `target` for a Rust call Rule 3 narrowed to it, an allowlist. A bare call: a `use`
+    // of the name that does not provably leave the tree, or a glob `use` of the module holding the target. A qualified call: the
+    // qualifier names the module holding the target, or the target's own type (`owner`). "Holding" takes a module's descendants too
+    // and a crate root takes its whole crate, because a `pub use` re-export places an item below the path written. Not proven, counted
+    // as via="name": `Ok(..)`, `assert!(..)`, a name only a glob of an unrelated module is near, `oneshot::channel()`, `String::new()` (those two then read as outside the tree, external=).
+    bool rustRule3Proves( const Reference& r, NodeId target, std::string_view owner ) const
+    {
+        if( !rust.built )
+        {
+            buildRustLayout();
+        }
+        const std::uint32_t tf = ing.symbols[ target ].fileId;
+        if( tf >= rust.crateOf.size() || r.fileId >= rust.crateOf.size() )
+        {
+            return false;
+        }
+        std::string targetModule;
+        rustModuleAt( tf, ing.symbols[ target ].sigStartByte, targetModule );
+        std::uint32_t crate = kNoCrate;
+        std::string   module;
+        const auto    holdsTarget = [ & ]( std::string_view path, std::uint32_t at )
+        {
+            if( !rustModuleOf( r.fileId, at, path, crate, module, 0 ) || rust.crateOf[ tf ] != crate )
+            {
+                return false;
+            }
+            return module.empty() || targetModule == module || ( targetModule.starts_with( module ) && std::string_view( targetModule ).substr( module.size() ).starts_with( "::" ) );
+        };
+        if( !r.qualifier.empty() )
+        {
+            const std::size_t sep = r.qualifier.rfind( "::" );
+            const std::string_view last = std::string_view( r.qualifier ).substr( sep == std::string::npos ? 0 : sep + 2 );
+            return ( !owner.empty() && last == owner ) || holdsTarget( r.qualifier, r.startByte );
+        }
+        bool proven = false;
+        forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b )
+        {
+            proven = proven || !rustPathProvablyOutside( r.fileId, b.startByte, b.importedName );
+        } );
+        if( !proven )
+        {
+            forEachImport( r.fileId, "*", [ & ]( const Binding& b )
+            {
+                if( proven || b.kind != LocalBindKind::TypeImport )
+                {
+                    return;
+                }
+                bool brought = holdsTarget( b.importedName, b.startByte );
+                if( !brought && rustModuleOf( r.fileId, b.startByte, b.importedName, crate, module, 0 ) )
+                {
+                    // `use super::*` over a module that itself `use`s the name (a `mod tests` calling what its parent imports), unless that `use` leaves the tree
+                    rustItemAt( crate, module, r.calleeName, 0, brought );
+                    brought = brought && !rustPathProvablyOutside( r.fileId, b.startByte, b.importedName + "::" + r.calleeName );
+                }
+                proven = brought;
+            } );
+        }
+        return proven;
+    }
     // fc1: does the Rust path `path` (a call's written qualifier, a `use`'s path) written at byte `at` of `f` PROVABLY lead out of
     // the tree — std / core / alloc, an external crate, an unknown root, the prelude, or an in-tree re-export of one? false
     // when it reaches an in-tree module or item, and whenever the walk cannot tell: two `use`s of the root, an in-tree glob

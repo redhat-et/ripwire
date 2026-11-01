@@ -85,6 +85,8 @@ enum class FileEdges : std::uint8_t
 };
 
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
+enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
+
 struct LangFacts
 {
     Must<Lang> lang;   // the row's own key — the order check below proves row i is Lang(i)
@@ -165,6 +167,13 @@ struct LangFacts
     /// Python: a bare builtin or an import from outside the tree is bound there whatever namesake an imported file defines, so the
     /// Phase-5 external-name veto (graph.h ExternalVeto) decides a call BEFORE Rule 3 narrows it to that namesake.
     bool externalVetoBeforeRule3 = false;
+
+    /// What proves a call Rule 3 narrowed that no receiver rule answers (RULE3-MEMBER-GUARD, graph.h): Rule 3 sees that the caller's
+    /// import closure holds a file defining the name, which says nothing about what the call's own name is bound to. The written
+    /// binding does. RustUse: a `use` of the name or a glob of the target's module, or a qualifier naming its module or type.
+    /// PythonImport: an import binding of the name, or a star import of an indexed module. A call without it keeps the edge, hedged.
+    /// None: Rule 3 keeps deciding as it did (hand samples of C, C++, TS, Go: reports/rule3-member-guard.md).
+    Rule3NameProof rule3NameProof = Rule3NameProof::None;
 
     /// Kotlin: an `interface` is a class_declaration like a class (queries/kotlin/tags.scm: "both land here as @definition.class"),
     /// so the symbol's kind cannot tell the two apart; shared code that needs an interface (ifacedispatch.h's lambda test) reads a
@@ -291,12 +300,12 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
+    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir, .signatureRows = true },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .rule3NameProof = Rule3NameProof::RustUse, .baseImportEvidence = BaseImportEvidence::RustUse,
       .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
