@@ -167,7 +167,7 @@ inline std::vector<std::vector<NodeId>> placeCandidates( const IngestResult& ing
         {
             continue;
         }
-        const std::string_view base = s.lang == Lang::Elixir ? elixirBaseName( s.name ) : std::string_view( s.name );
+        const std::string_view base = elixirBaseName( s.name );   // `name/N` to `name`; every other language's name is itself
         for( std::size_t k = 0; k < cands.size(); ++k )
         {
             if( base == cands[k].leaf && ( cands[k].qualifier.empty() || mention_detail::qualifierPlaces( ing, s, cands[k].qualifier ) ) )

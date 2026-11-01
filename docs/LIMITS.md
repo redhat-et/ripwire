@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 350 | 126 | 229 | **121** |
+| 352 | 127 | 229 | **123** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 350 + 7 is the 357 constants this generator parses out of `src/`.
+are not counted as caps, and 352 + 7 is the 359 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 350 caps are classified
-(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 207 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 352 caps are classified
+(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 209 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -102,7 +102,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 126 files that declare a cap — the 350 caps counted above, and no parameter.
+One table for each of the 127 files that declare a cap — the 352 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -1239,6 +1239,15 @@ Discloses: `diff_capped`
 | --- | --- | --- | --- |
 | `kMaxDiffRows` | `2000` | — | — |
 | `kMaxRenameHops` | `8` | — | — |
+
+### `src/subjectanchor.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kSubjectMaxDefs` | `12` | — | — |
+| `kSubjectMaxPlainWords` | `4` | — | — |
 
 ### `src/taskroute.h`
 

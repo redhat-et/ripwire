@@ -14,7 +14,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN - build first"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 echo "subjectanchorcheck: BIN=$BIN"
 ask(){ ( cd "$1" && "$BIN" "$1" --no-cache "--for=$2" 2>/dev/null ) </dev/null; }
@@ -57,12 +57,13 @@ hasnt "$R" 'new(app' "A1 py: new is not an anchor"
 has   "$A" '<callers of="prepare_setup_platform"' "A1 py: <callers> no longer lost to the words"
 has   "$A" 'first_caller' "A1 py: caller row printed"
 BARE="$( ask "$PY" 'prepare_setup_platform' )"
-python3 - "$A" "$BARE" <<'X' && ok "A1 py: <callers> and <bodies> equal the bare subject's" || no "A1 py: differs from the bare subject"
+if python3 - "$A" "$BARE" <<'X'
 import re,sys
 a,b=sys.argv[1:3]
 f=lambda s:(re.findall(r'<callers .*?</callers>',s,re.S),re.findall(r'<bodies.*?</bodies>',s,re.S))
 sys.exit(0 if f(a)==f(b) and f(a)[0] else 1)
 X
+then ok "A1 py: <callers> and <bodies> equal the bare subject's"; else no "A1 py: differs from the bare subject"; fi
 # ── C++: `new` over the definitions bound declines at base, the qualified symbol anchors here ──
 CX="$TMP/cx"; mkdir -p "$CX/src"
 cat > "$CX/src/registry.cpp" <<'X'
@@ -116,7 +117,7 @@ has "$( route "$A" )" 'subtoken+body' "C go: the route stays conceptual"
 has "$A" '<callers by="subject"' "C go: callers ride by subject"
 has "$( blk "$A" )" 'createProxier' "D go: the dotted qualifier picks proxy's callers"
 hasnt "$( blk "$A" )" 'otherCreate' "D go: not the namesake's callers"
-python3 - "$A" "$( cd "$GO" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$GO" --no-cache '--for=proxy.NewProxier gains sturdy zzknob' 2>/dev/null )" <<'X' && ok "C go: answer minus the block and its clause is byte-identical" || no "C go: the block displaced something"
+if python3 - "$A" "$( cd "$GO" && RIPWIRE_NO_CALLER_HOP=1 "$BIN" "$GO" --no-cache '--for=proxy.NewProxier gains sturdy zzknob' 2>/dev/null )" <<'X'
 import re,sys
 a,b=sys.argv[1:3]
 m=lambda s:re.sub(r' est_tokens="\d+"| at="[^"]*"','',s)
@@ -124,6 +125,7 @@ a=re.sub(r'<callers by="subject".*?</callers>','',a,flags=re.S)
 ca=re.sub(r'<!--.*?-->','',m(a),flags=re.S); cb=re.sub(r'<!--.*?-->','',m(b),flags=re.S)
 sys.exit(0 if ca==cb else 1)
 X
+then ok "C go: answer minus the block and its clause is byte-identical"; else no "C go: the block displaced something"; fi
 # ── near misses: each byte-identical in route to a run with no reading ──
 FL="$TMP/flood"; mkdir -p "$FL/a"
 for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do printf 'def flood_name(x):\n    return x\n' > "$FL/a/m$i.py"; done
@@ -166,11 +168,11 @@ hasnt "$( blk "$A" )" 'tsUser' "D poly: not the TypeScript one"
 conf(){ printf '%s' "$1" | python3 -c 'import re,sys; m=re.search(r"confidence=\"(\w+)\"",sys.stdin.read()); print(m.group(1) if m else "@@NONE")'; }
 NOSRC='anchor has no source definition'
 A="$( ask "$PY" 'helper_only_tests' )"
-[ "$( conf "$A" )" = low ] && ok "H test-only: confidence low" || no "H test-only: confidence $( conf "$A" )"; has "$A" "$NOSRC" "H test-only: the note says why"
+if [ "$( conf "$A" )" = low ]; then ok "H test-only: confidence low"; else no "H test-only: confidence $( conf "$A" )"; fi; has "$A" "$NOSRC" "H test-only: the note says why"
 printf '{"json_only_key": true}\n' > "$PY/app/conf.json"
-A="$( ask "$PY" 'json_only_key' )"; [ "$( conf "$A" )" = low ] && ok "H data file: low" || no "H data file: $( conf "$A" )"
-A="$( ask "$PY" 'prepare_setup_platform' )"; [ "$( conf "$A" )" = high ] && ok "H source: high" || no "H source: $( conf "$A" )"; hasnt "$A" "$NOSRC" "H source: no note"
-A="$( ask "$PY" 'helper_only_tests new parameter' )"; [ "$( conf "$A" )" = low ] && ok "H test-only beside dropped words: low" || no "H test-only beside words: $( conf "$A" )"
+A="$( ask "$PY" 'json_only_key' )"; if [ "$( conf "$A" )" = low ]; then ok "H data file: low"; else no "H data file: $( conf "$A" )"; fi
+A="$( ask "$PY" 'prepare_setup_platform' )"; if [ "$( conf "$A" )" = high ]; then ok "H source: high"; else no "H source: $( conf "$A" )"; fi; hasnt "$A" "$NOSRC" "H source: no note"
+A="$( ask "$PY" 'helper_only_tests new parameter' )"; if [ "$( conf "$A" )" = low ]; then ok "H test-only beside dropped words: low"; else no "H test-only beside words: $( conf "$A" )"; fi
 A="$( ask "$PY" 'zznope sturdy words' )"; hasnt "$A" "$NOSRC" "H conceptual route: no note"
 printf 'def plain_src(x):\n    return x\n' > "$PY/app/some_mod.py"
 A="$( ask "$PY" 'app/some_mod.py' )"; hasnt "$A" "$NOSRC" "H a source FILE subject is a source anchor"
@@ -184,7 +186,7 @@ has "$R" 'declined' "T declined + two exact: declined stays disclosed"
 has "$( blk "$A" )" 'segUser' "T declined + two exact: the function's callers ride"
 # determinism + well-formed
 A1="$( ask "$PY" 'prepare_setup_platform new parameter' )"; A2="$( ask "$PY" 'prepare_setup_platform new parameter' )"
-[ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ] && ok "determinism" || no "determinism"
-printf '%s' "$A1" | xmllint --noout - 2>/dev/null && ok "xml well formed" || no "xml not well formed"
+if [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ]; then ok "determinism"; else no "determinism"; fi
+if printf '%s' "$A1" | xmllint --noout - 2>/dev/null; then ok "xml well formed"; else no "xml not well formed"; fi
 [ "$fail" = 0 ] && { echo "subjectanchorcheck: PASS"; exit 0; }
 echo "subjectanchorcheck: FAIL"; exit 1
