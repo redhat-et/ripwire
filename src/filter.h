@@ -65,14 +65,24 @@ inline bool isTestPath( std::string_view p ) noexcept
     // filename heuristics
     const std::size_t      sl = p.rfind( '/' );
     const std::string_view fn = ( sl == std::string_view::npos ) ? p : p.substr( sl + 1 );
-    if( fn.rfind( "test_", 0 ) == 0 || fn.rfind( "test-", 0 ) == 0 )
+    if( fn.rfind( "test_", 0 ) == 0 )
     {
-        return true; // test_*.*, test-*.*
+        return true; // test_*.*
+    }
+    // Hyphen forms are an allowlist (a false match hides real source from every verb): shell/batch test scripts, and the
+    // dotted Angular/Nest suffixes. attest-spec.ts, pod-spec.ts, ab-test.ts, self-test.c, test-and-set.c stay source.
+    const auto fnEnds = [ & ]( std::string_view e ) { return fn.size() >= e.size() && fn.substr( fn.size() - e.size() ) == e; };
+    if( ( fnEnds( ".sh" ) || fnEnds( ".bash" ) || fnEnds( ".zsh" ) || fnEnds( ".ps1" ) || fnEnds( ".bat" ) )
+        && ( fn.rfind( "test-", 0 ) == 0 || fn.find( "-test." ) != std::string_view::npos ) )
+    {
+        return true; // test-*.sh, *-test.sh
+    }
+    if( fn.find( ".e2e-spec." ) != std::string_view::npos || fn.find( ".perf-spec." ) != std::string_view::npos )
+    {
+        return true; // *.e2e-spec.ts, *.perf-spec.ts
     }
     for( std::string_view m : { std::string_view( "_test." ), std::string_view( ".test." ),
-                                std::string_view( "-test." ),
-                                std::string_view( "_spec." ), std::string_view( ".spec." ),
-                                std::string_view( "-spec." ) } )
+                                std::string_view( "_spec." ), std::string_view( ".spec." ) } )
     {
         if( fn.find( m ) != std::string_view::npos )
         {
