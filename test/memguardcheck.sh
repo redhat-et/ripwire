@@ -629,6 +629,80 @@ if b8real "$rc" "$TMP/b8b.out" "$TMP/b8b.err"; then
 else
     no "(B8b) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8b.out" "$TMP/b8b.err" )"
 fi
+# (B8s, B8bs) the STRICT twins of the two arms above (PROCESS rule 4: a loosened arm keeps its old form). The macOS route
+#      (largealloc.cpp) is what made B8/B8b accept a time-gated soft stop; with RIPWIRE_TEST_LARGEALLOC=off the allocator is
+#      the base one on every OS (the variable is read only by that file), so the old assertion must hold exactly: exit 5,
+#      the ingest line, an empty stdout. A hard line that stopped working would fail here even on a slow host.
+b8strict(){ # rc out err
+    [ "$1" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$3" && [ ! -s "$2" ]
+}
+RIPWIRE_TEST_LARGEALLOC=off "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8s.out" 2>"$TMP/b8s.err"; rc=$?
+if b8strict "$rc" "$TMP/b8s.out" "$TMP/b8s.err"; then
+    ok "(B8s) with the large-block route off: a real footprint over --max-memory=64M exits 5 with the ingest line"
+else
+    no "(B8s) $( b8why "$rc" "$TMP/b8s.out" "$TMP/b8s.err" )"
+fi
+RIPWIRE_TEST_LARGEALLOC=off RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8bs.out" 2>"$TMP/b8bs.err"; rc=$?
+if b8strict "$rc" "$TMP/b8bs.out" "$TMP/b8bs.err"; then
+    ok "(B8bs) with the route off, crawl:999999999 still exits 5 with the ingest line"
+else
+    no "(B8bs) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8bs.out" "$TMP/b8bs.err" )"
+fi
+
+# (B8c) THE OVERSHOOT is disclosed on every path the guard's other messages use (owner 2026-11-01: a run that finishes over
+#       its cap is not stopped, it says so). peak:1 makes the post-run peak reading read over the limit on every OS; the
+#       real band (macOS route) is largeallocpeakcheck.sh arm D. A normal run says nothing.
+peakline='memory peak 65M went over the 64M limit (from --max-memory), and the run finished and answered'
+peakwhy='rule of thumb that keeps the machine from running out of memory, not an exact line'
+"$BIN" "$FX" --no-cache --max-memory=64M >"$TMP/b8c0.out" 2>"$TMP/b8c0.err"; rc0=$?
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M >"$TMP/b8c.out" 2>"$TMP/b8c.err"; rc=$?
+if [ "$rc0" = 0 ] && ! grep -q 'memory peak\|memory_peak' "$TMP/b8c0.out" "$TMP/b8c0.err"; then
+    ok "(B8c) a run under its limit says nothing about a peak"
+else
+    no "(B8c) rc=$rc0 a normal run mentions a peak: $( grep -h 'memory peak\|memory_peak' "$TMP/b8c0.out" "$TMP/b8c0.err" | head -c 200 )"
+fi
+if [ "$rc" = 0 ] && grep -qF "ripwire: $peakline" "$TMP/b8c.err" && grep -qF "$peakwhy" "$TMP/b8c.err" \
+   && grep -q 'raise it with --max-memory=' "$TMP/b8c.err" && [ "$( grep -c '^ripwire: memory peak' "$TMP/b8c.err" )" = 1 ]; then
+    ok "(B8c) an overshoot: one stderr line with the peak, the limit, what the limit is for, and the override"
+else
+    no "(B8c) rc=$rc stderr: $( head -c 400 "$TMP/b8c.err" )"
+fi
+hdr="$( grep -oE '<!-- files=[^>]*-->' "$TMP/b8c.out" | head -1 )"
+if case "$hdr" in *" memory_peak=65M memory_limit=64M"*) true;; *) false;; esac && [ "$( printf '%s' "$hdr" | grep -o 'memory_limit=' | wc -l | tr -d ' ' )" = 1 ] \
+   && ! printf '%s' "$hdr" | grep -q 'memory_stop='; then
+    ok "(B8c) the default map's header carries memory_peak= and memory_limit= once, and no memory_stop="
+else
+    no "(B8c) header: $hdr"
+fi
+if perl -ne 'print $1 if /^(<!-- ripwire map.*?-->)/' "$TMP/b8c.out" | grep -q 'memory_peak='; then
+    ok "(B8c) the legend defines memory_peak= when it rides"
+else
+    no "(B8c) the legend lacks memory_peak="
+fi
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M --grep=a_01 >"$TMP/b8c2.out" 2>"$TMP/b8c2.err"; rc=$?
+if [ "$rc" = 0 ] && grep -qF "ripwire: $peakline" "$TMP/b8c2.err" && ! grep -q 'memory_peak' "$TMP/b8c2.out"; then
+    ok "(B8c) a verb with no header (--grep) says it on stderr only"
+else
+    no "(B8c) --grep rc=$rc stderr: $( head -c 300 "$TMP/b8c2.err" )"
+fi
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c3.out" 2>/dev/null; rc=$?
+if [ "$rc" = 0 ] && grep -q '"memory_peak":"65M","memory_limit":"64M"' "$TMP/b8c3.out"; then
+    ok "(B8c) the JSON map header carries memory_peak and memory_limit"
+else
+    no "(B8c) --json rc=$rc: $( head -c 300 "$TMP/b8c3.out" )"
+fi
+printf '%s\n' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    | RIPWIRE_TEST_MEMGUARD=peak:1 mcp_call "$TMP" --max-memory=64M >"$TMP/b8c4.out"
+mp="$( mcp_field "$TMP/b8c4.out" 2 _memory_peak )"
+case "$mp" in "$peakline"*"$peakwhy"*) ok "(B8c) MCP: the first answer carries _memory_peak with the same sentence";;
+    *) no "(B8c) MCP id=2 _memory_peak='${mp:0:300}'";; esac
+if [ -z "$( mcp_field "$TMP/b8c4.out" 3 _memory_peak )" ]; then
+    ok "(B8c) MCP: the next answer, at the same peak, does not repeat it"
+else
+    no "(B8c) MCP id=3 repeats _memory_peak"
+fi
 
 # (B9) the pressure path: a pressure stop is disclosed as such, and a pressure stop with nothing built says pressure
 run_trip pressure:30 "$FX" --no-cache >"$TMP/b9.out" 2>"$TMP/b9.err"; rc=$?

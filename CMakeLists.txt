@@ -770,6 +770,8 @@ if(RIPWIRE_LARGE_ALLOC AND APPLE AND NOT RIPWIRE_ALLOC_COUNT)
   string(REGEX MATCH "-fsanitize=" _ripwire_sanitized "${CMAKE_CXX_FLAGS}")
   if(NOT (RIPWIRE_ASAN OR RIPWIRE_TSAN OR RIPWIRE_FUZZ OR _ripwire_sanitized))
     target_sources(ripwire PRIVATE src/largealloc.cpp)
+    # memguard.h reads the real peak for its overshoot disclosure only in a build that routes (freed blocks leave the reading)
+    target_compile_definitions(ripwire PRIVATE RIPWIRE_LARGE_ALLOC_LINKED)
   endif()
 endif()
 

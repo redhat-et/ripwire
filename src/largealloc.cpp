@@ -5,17 +5,20 @@
 // WHY. The default macOS zone keeps freed large blocks resident (vmmap: "MALLOC_LARGE (empty)"), and they count in the
 // peak footprint. An index walks growth ladders (each worker's vector<RawRef> doubles through 8-65 MB blocks) and frees
 // short-lived arrays, so about half of the peak was blocks nothing held: `--deps` on Envoy 1,515 to 767 MB, cockroach
-// 1,848 to 984, vscode 2,873 to 1,482, wall unchanged (test/largeallocpeakcheck.sh keeps the ratio).
+// 1,848 to 984, vscode 2,873 to 1,482, CPU flat (test/largeallocpeakcheck.sh keeps the ratio).
 // COMPARED BEFORE CHOSEN. A chunked worker store with no ladder removed only 0-17 %, because every other large free is
 // still kept, and added nothing worth its code on top of this route. `MallocLargeCache=0` gives the same peak, but
 // libmalloc reads that undocumented variable only at process start, so it would cost a re-exec on every run. glibc does
 // not need any of this: on the gate's fixture a fixed mmap threshold moved max RSS by 2 %, so Linux has no route.
 //
-// THE MEMORY GUARD STAYS HONEST: the footprint it reads (os::mem_footprint, the kernel's phys_footprint) counts these
-// regions like any other dirty page, so --max-memory holds with no change.
+// THE MEMORY GUARD: the footprint it reads (os::mem_footprint, the kernel's phys_footprint) counts these regions like any
+// other dirty page while they live, so --max-memory still stops a run that is over its limit at a reading. But a block
+// returned early is gone from the NEXT reading, so a run can peak above its cap, pass every reading and finish: the cap can
+// be exceeded in that band. The run says so (memguard.h "the overshoot": one stderr line, memory_peak= in the map header,
+// `_memory_peak` in the MCP envelope); it is disclosed, not enforced (owner, 2026-11-01).
 //
-// NOT ROUTED: over-aligned new (no new-expression in ripwire asks for a large one; the library's aligned forms use
-// posix_memalign and free, never these functions); malloc itself (tree-sitter's own, about 2 % of the large bytes).
+// NOT ROUTED: over-aligned new (the library's aligned forms use posix_memalign and free, never these functions; the one
+// direct caller, infra/sparseCsr.h, pairs it with the aligned delete, and those frees stay retained); malloc itself (tree-sitter's own, about 2 % of the large bytes).
 // RIPWIRE_TEST_LARGEALLOC=off turns the route off for one run, so the gate can compare the same binary with and without.
 #include "largealloc.h"
 #include <cstdlib>

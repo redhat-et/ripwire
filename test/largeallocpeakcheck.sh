@@ -12,6 +12,11 @@
 #      someone raises the threshold, unlinks the file, or swaps the allocator back.
 #   B  the two runs' answers are byte-identical.
 #   M  --max-memory still reads the routed pages: a limit under the routed peak stops the run (exit 5 or a partial answer).
+#   D  the band M never enters: a limit at 70 % of the routed peak. The guard reads the footprint between phases, and the
+#      blocks the route returned are gone from that reading, so the run finishes over its cap. It must SAY so (owner
+#      2026-11-01: disclosed, not enforced): the stderr line with the peak, the cap and what the cap is for, and
+#      memory_peak= in the map header; the answer is otherwise the unlimited run's. A stop (exit 5, memory_stop=) is also
+#      honest. Silence is the failure (red on 38be976d, which finished at 1.0-1.3x its cap with nothing said).
 # A sanitizer binary owns operator new and runs U only, and says so. Any other macOS binary must carry the route.
 #
 # Usage: RIPWIRE_BIN=build/ripwire bash test/largeallocpeakcheck.sh
@@ -59,10 +64,10 @@ if [ "$ROUTED" != 1 ]; then
 fi
 
 # ---- fixture: dense calls, so each worker's reference array passes 256 KiB many times over ----
-FX="$TMP/fx"
-python3 - "$FX" <<'P'
+genfx(){ # dir files calls
+python3 - "$1" "$2" "$3" <<'P'
 import os, sys
-root = sys.argv[1]; files = 2000; calls = 400
+root = sys.argv[1]; files = int(sys.argv[2]); calls = int(sys.argv[3])
 for f in range(files):
     d = f"{root}/m{f % 40}"; os.makedirs(d, exist_ok=True)
     L = [f"int leaf_{f}_{k}(int x);" for k in range(8)]
@@ -72,7 +77,10 @@ for f in range(files):
         L.append("    return x;\n}")
     open(f"{d}/f{f}.c", "w").write("\n".join(L) + "\n")
 P
-git -C "$FX" init -q . 2>/dev/null
+git -C "$1" init -q . 2>/dev/null
+}
+FX="$TMP/fx"
+genfx "$FX" 2000 400
 
 # peak MB of one run: macOS phys_footprint, else max RSS
 peak(){ # outfile errfile env...
@@ -118,6 +126,46 @@ if [ "$rc" -eq 5 ] || grep -q 'memory_stop' "$TMP/m.out" "$TMP/m.err"; then
     ok "M: --max-memory=${lim}M against a ${on} MB run stops (exit $rc)"
 else
     no "M: --max-memory=${lim}M against a ${on} MB run did not stop (exit $rc): the guard does not see routed pages"
+fi
+
+# ---- D: the band between the at-line reading and the peak. A 400-file tree peaks near 180 MB in ~2 s (under the guard's
+#      5 s cadence, so no soft line); a limit at 70 % of the unlimited peak sits above every reading and below the peak. ----
+DX="$TMP/dx"
+genfx "$DX" 400 400
+dpeak(){ # outfile errfile [extra args]
+    local o="$1" e="$2"; shift 2
+    ( cd "$DX" && HOME="$TMP" /usr/bin/time -l "$BIN" "$DX" --no-cache "$@" >"$o" 2>"$e" ); local r=$?
+    echo "$r $( awk '/peak memory footprint/ { printf "%d", $1 / 1048576 }' "$e" )"
+}
+read -r drc0 dp0 <<<"$( dpeak "$TMP/d0.out" "$TMP/d0.err" )"
+dlim=$(( dp0 * 70 / 100 )); [ "$dlim" -lt 64 ] && dlim=64
+read -r drc dp <<<"$( dpeak "$TMP/d.out" "$TMP/d.err" --max-memory="${dlim}M" )"
+echo "  D: unlimited peak $dp0 MB (rc $drc0); --max-memory=${dlim}M peak $dp MB (rc $drc)"
+if [ "${dp0:-0}" -lt 80 ] || [ "$drc0" != 0 ]; then
+    no "D: the unlimited run is too small or failed (rc $drc0, peak ${dp0:-0} MB): the band cannot be entered"
+elif [ "$drc" = 5 ] || grep -q 'memory_stop=' "$TMP/d.out"; then
+    ok "D: --max-memory=${dlim}M stopped the run on a real line (rc $drc), which says so itself"
+elif [ "${dp:-0}" -le "$dlim" ]; then
+    no "D: the capped run peaked at $dp MB, not over its ${dlim}M cap: the band was not entered"
+else
+    if [ "$drc" = 0 ] && grep -Eq "^ripwire: memory peak [0-9]+M went over the ${dlim}M limit \(from --max-memory\), and the run finished and answered: the guard reads the limit between phases" "$TMP/d.err" \
+       && grep -q 'rule of thumb that keeps the machine from running out of memory, not an exact line — raise it with --max-memory=<N>' "$TMP/d.err"; then
+        ok "D: over its ${dlim}M cap ($dp MB peak) the run finished and said so on stderr, with what the cap is for"
+    else
+        no "D: --max-memory=${dlim}M, peak $dp MB, rc $drc: the run went over its cap and did not say so plainly (stderr: $( grep '^ripwire' "$TMP/d.err" | head -c 300 ))"
+    fi
+    if grep -Eq "<!-- .* memory_peak=[0-9]+M memory_limit=${dlim}M" "$TMP/d.out"; then
+        ok "D: the map header carries memory_peak= and memory_limit=${dlim}M"
+    else
+        no "D: the map header does not name the peak and the cap: $( grep -o '<!-- files=[^>]*-->' "$TMP/d.out" | head -1 | head -c 300 )"
+    fi
+    # the header comments and est_tokens= (which prices them) move with the two new terms; the rows are the answer
+    if [ "$( perl -0pe 's/<!--.*?-->//gs; s/ est_tokens="[0-9]+"//' "$TMP/d.out" | md5 -q 2>/dev/null || perl -0pe 's/<!--.*?-->//gs; s/ est_tokens="[0-9]+"//' "$TMP/d.out" | md5sum )" \
+         = "$( perl -0pe 's/<!--.*?-->//gs; s/ est_tokens="[0-9]+"//' "$TMP/d0.out" | md5 -q 2>/dev/null || perl -0pe 's/<!--.*?-->//gs; s/ est_tokens="[0-9]+"//' "$TMP/d0.out" | md5sum )" ]; then
+        ok "D: apart from the header comments and est_tokens= the answer is the unlimited run's"
+    else
+        no "D: the answer differs from the unlimited run beyond the disclosure"
+    fi
 fi
 
 if [ "$fail" = 0 ]; then echo "PASS largeallocpeakcheck"; exit 0; fi

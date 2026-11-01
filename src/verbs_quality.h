@@ -1684,6 +1684,7 @@ KindsDisclosure kindsDisclosure( const rw::Config& cfg, const RefPairDelta& refs
     out.peakOver = memguard::peakOverLimit();
     if( out.peakOver != 0 )
     {
+        memguard::peakSaidSlot().store( true, std::memory_order_relaxed );   // main() need not say it again
         add( "memory_peak", memguard::limitSpelling( out.peakOver ), false );
     }
     return out;
