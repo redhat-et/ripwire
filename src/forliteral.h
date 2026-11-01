@@ -81,6 +81,7 @@
 #include "sarif.h"           // rootPrefixOf / rootRelativeUri
 #include "search.h"          // grepCollect / grepEnrich / isBareWordCodePath
 #include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis
+#include "taskroute.h"       // taskroute::identifierRunOf
 
 #include <algorithm>
 #include <array>
@@ -983,11 +984,6 @@ struct RowShape
 inline constexpr auto kForTableNotCallee = std::to_array<std::string_view>(
     { "if", "for", "while", "switch", "catch", "return", "sizeof", "assert", "elif", "match", "def", "func", "fn", "function", "class", "struct", "print", "println" } );
 
-inline std::size_t identEnd( std::string_view t ) noexcept
-{
-    return std::size_t( std::find_if_not( t.begin(), t.end(), namesplit::isIdentChar ) - t.begin() );
-}
-
 inline RowShape rowShapeOf( std::string_view line )
 {
     std::string_view t = trimWs( line );
@@ -1012,7 +1008,7 @@ inline RowShape rowShapeOf( std::string_view line )
     }
     else
     {
-        keyEnd = identEnd( t );
+        keyEnd = taskroute::identifierRunOf( t ).size();
         if( keyEnd == 0 )
         {
             return {};
@@ -1036,11 +1032,6 @@ inline RowShape rowShapeOf( std::string_view line )
         return RowShape{ RowKind::Key, {} };
     }
     return {};
-}
-
-inline std::size_t indentOf( std::string_view line ) noexcept
-{
-    return std::min( line.find_first_not_of( " \t" ), line.size() );
 }
 
 // the line at `start` of `text`, and the start of the next one
@@ -1080,7 +1071,7 @@ inline std::optional<std::string_view> siblingLine( std::string_view text, std::
         {
             continue;
         }
-        const std::size_t in = indentOf( l );
+        const std::size_t in = lintdetail::indentOf( l );
         if( in < indent && !crossLess )
         {
             return std::nullopt;
@@ -1110,7 +1101,7 @@ inline std::string_view openerOf( std::string_view text, std::size_t rowStart, s
         const std::size_t nl = pos >= 2 ? text.rfind( '\n', pos - 2 ) : std::string_view::npos;
         pos = nl == std::string_view::npos ? 0 : nl + 1;
         const std::string_view l = lineAt( text, pos );
-        if( !trimWs( l ).empty() && indentOf( l ) < indent && linesOpensBlock( l ) )
+        if( !trimWs( l ).empty() && lintdetail::indentOf( l ) < indent && linesOpensBlock( l ) )
         {
             return trimWs( l );
         }
@@ -1141,8 +1132,7 @@ inline bool isSecondaryPath( std::string_view p ) noexcept
 // an import list reads like a member list: `use a::{` / `import {` / `from x import (` open no table
 inline bool opensImport( std::string_view opener ) noexcept
 {
-    const std::size_t n = identEnd( opener );
-    const std::string_view first = opener.substr( 0, n );
+    const std::string_view first = taskroute::identifierRunOf( opener );
     return first == "use" || first == "import" || first == "from" || first == "export" || first == "package" || first == "extern" || first == "pub";
 }
 
@@ -1162,7 +1152,7 @@ inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bo
     {
         return {};
     }
-    const std::size_t indent = indentOf( line );
+    const std::size_t indent = lintdetail::indentOf( line );
     const std::string_view opener = openerOf( text, start, indent );
     if( opensImport( opener ) )
     {
@@ -1202,17 +1192,15 @@ inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, con
     return any;
 }
 
-// the tbl= attribute of a row, "" on a row that is no table row; the opener is raw source text
-inline std::string tblAttr( std::string opener, RedactCounts* redact )
+// a table row's tbl= attribute onto its <ls>; the opener is raw source text. No opener, no attribute.
+inline void appendTblAttr( std::string& xml, std::string opener, RedactCounts* redact, std::vector<char>& esc )
 {
-    if( opener.empty() )
+    if( !opener.empty() )
     {
-        return {};
+        redactInPlace( opener, redact );
+        truncateUtf8WithEllipsis( opener, kForTableOpenerBytes );
+        xml.append( " tbl=\"" ).append( escapeXml( opener, esc ) ).push_back( '"' );
     }
-    std::vector<char> esc;
-    redactInPlace( opener, redact );
-    truncateUtf8WithEllipsis( opener, kForTableOpenerBytes );
-    return " tbl=\"" + std::string( escapeXml( opener, esc ) ) + "\"";
 }
 
 // `'files.autoSave': {`: the quoted key is followed by a colon on its line (a property key, the way a schema registers a setting)
@@ -1766,7 +1754,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         redactInPlace( line, redact );   // CR 4423843223: the matched line is raw source text; redact before the cut
         lit_detail::cutAround( line, needle, kForLiteralLineBytes );
         const bool callableOwner = h.enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind );
-        rowsXml += lit_detail::tblAttr( rows[i].tbl, redact );
+        lit_detail::appendTblAttr( rowsXml, rows[i].tbl, redact, esc );
         if( ( policy.tableRows ? !rows[i].tbl.empty() : rows[i].k == 's' && !callableOwner ) && contextRows < policy.contextRows )
         {
             // a string site outside any function (a table entry, an error-code map): the lines after it hold what it builds
