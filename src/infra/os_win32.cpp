@@ -2857,6 +2857,8 @@ static std::uint64_t commitCharge( bool peak )
     }
     return std::uint64_t( peak ? counters.PeakPagefileUsage : counters.PrivateUsage );
 }
+void* vm_map( std::size_t bytes ) noexcept { return ::VirtualAlloc( nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE ); }
+void  vm_unmap( void* p, std::size_t ) noexcept { ::VirtualFree( p, 0, MEM_RELEASE ); }
 std::uint64_t mem_footprint() { return commitCharge( false ); }
 std::uint64_t mem_footprint_peak() { return commitCharge( true ); }
 
