@@ -8,7 +8,7 @@
 #   - `.e2e-spec.` and `.perf-spec.` in any extension (Nest / Angular suffixes)
 #
 # Eight one-function files, each defining the word pair `widget probe`; `--ignore-tests --for='widget probe'` lists the survivors.
-#   A0 [G] presence: without --ignore-tests all eight files answer (an absence arm below is not free while a file is never extracted)
+#   A0 [G] presence: without --ignore-tests all nine files answer (an absence arm below is not free while a file is never extracted)
 #   A1 [P] RED on the pre-change binary: cats.e2e-spec.ts, test-widget.sh and widget-test.sh are hidden under --ignore-tests
 #   A2 [P] RED on the PR hunk as first written (bare test- / -test. / -spec.): ab-test.ts, attest-spec.ts, pod-spec.ts, self-test.c and
 #          test-and-set.c stay visible under --ignore-tests
@@ -39,10 +39,10 @@ done
 for f in self-test.c test-and-set.c; do
     printf 'int widget_probe(void){return 1;}\n' > "$T/fx/src/$f"
 done
-for f in test-widget.sh widget-test.sh; do
+for f in test-widget.sh widget-test.sh test-upper.SH; do
     printf 'widget_probe() { echo ok; }\n' > "$T/fx/src/$f"
 done
-HIDDEN="cats.e2e-spec.ts test-widget.sh widget-test.sh"
+HIDDEN="cats.e2e-spec.ts test-widget.sh widget-test.sh test-upper.SH"
 SHOWN="ab-test.ts attest-spec.ts pod-spec.ts self-test.c test-and-set.c"
 
 # run FAILS the gate when the binary exits non-zero: an absence arm reads the capture, and a crashed run leaves it empty
@@ -55,7 +55,7 @@ run --ignore-tests --for='widget probe' > "$T/ign.xml"
 # A0: presence
 miss=""
 for f in $HIDDEN $SHOWN; do has "$T/all.xml" "$f" || miss="$miss $f"; done
-if [ -z "$miss" ]; then ok "A0 presence: all eight files answer without --ignore-tests"
+if [ -z "$miss" ]; then ok "A0 presence: all nine files answer without --ignore-tests"
 else no "A0 presence: no row for:$miss (the arms below would be inert)"; fi
 
 # the --ignore-tests capture must be a real answer before any absence arm reads it

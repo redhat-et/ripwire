@@ -36,6 +36,14 @@ inline bool hasDirSegment( std::string_view p, std::string_view seg ) noexcept
     return false;
 }
 
+// True when s ends with the lowercase suffix e, ignoring ASCII case in s. The crawl lowercases an extension before it
+// picks a language (ingest_crawl.h), so test-widget.SH is indexed as Bash and has to read as a shell script here too.
+inline bool endsWithLowerAscii( std::string_view s, std::string_view e ) noexcept
+{
+    return s.size() >= e.size()
+        && std::ranges::equal( s.substr( s.size() - e.size() ), e, []( char a, char b ) { return ( a >= 'A' && a <= 'Z' ? static_cast<char>( a + ( 'a' - 'A' ) ) : a ) == b; } );
+}
+
 // rv-test-gate-tsjs G2 (delta review, treated as a real defect, not advisory): jest's OWN default
 // `testMatch` collects every file under a `__tests__/` directory, named or not — a real, common JS/TS
 // convention this function did not recognize, so such a file was invisible to `--test-gate` (and every
@@ -71,7 +79,7 @@ inline bool isTestPath( std::string_view p ) noexcept
     }
     // Hyphen forms are an allowlist (a false match hides real source from every verb): shell/batch test scripts, and the
     // dotted Angular/Nest suffixes. attest-spec.ts, pod-spec.ts, ab-test.ts, self-test.c, test-and-set.c stay source.
-    const auto fnEnds = [ & ]( std::string_view e ) { return fn.size() >= e.size() && fn.substr( fn.size() - e.size() ) == e; };
+    const auto fnEnds = [ & ]( std::string_view e ) { return endsWithLowerAscii( fn, e ); };
     if( ( fnEnds( ".sh" ) || fnEnds( ".bash" ) || fnEnds( ".zsh" ) || fnEnds( ".ps1" ) || fnEnds( ".bat" ) )
         && ( fn.rfind( "test-", 0 ) == 0 || fn.find( "-test." ) != std::string_view::npos ) )
     {
