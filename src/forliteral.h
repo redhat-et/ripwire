@@ -730,11 +730,43 @@ inline std::vector<std::size_t> pickRows( const std::vector<char>& reg, std::siz
     return pick;
 }
 
-// where a hit of the literal at `at` of `text` stands: shape=dotted keyHitAt; shape=message a hit inside a longer word is `longer`
-inline KeyHit literalHitAt( bool dotted, bool message, std::string_view text, std::size_t at, std::size_t n ) noexcept
+// How a shape of <lit> reads its sites: one row of this table per shape, so a new shape is a new row, never a new bool through renderForLiteral.
+enum class LitBoundary : std::uint8_t
 {
-    KeyHit h = dotted ? keyHitAt( text, at, n ) : KeyHit{};
-    h.longer = h.longer || ( message && !wordBounded( text, at, n ) );
+    None,   // shape=quoted|const: every byte-exact hit is a site
+    Key,    // shape=dotted: keyHitAt, a hit inside a longer name or a child key is `longer`, quotes around the key rank it
+    Word    // shape=message: wordBounded, a hit inside a longer word is `longer`
+};
+struct LitPolicy
+{
+    LitBoundary      boundary = LitBoundary::None;
+    bool             dropCode = false;   // a code row is never printed (the task's words met outside a string are no message)
+    std::size_t      rows     = kForLiteralSiteRows;
+    std::size_t      reserve  = 0;       // row slots kept for a registration (pickRows)
+    std::string_view legend;             // the clause this shape adds to the base legend; "" = none
+};
+inline LitPolicy litPolicyOf( std::string_view shape ) noexcept
+{
+    if( shape == "dotted" )
+    {
+        return LitPolicy{ LitBoundary::Key, false, kForLiteralSiteRows, kForLiteralRegistrationRows, kForLiteralKeyLegend };
+    }
+    if( shape == "message" )
+    {
+        return LitPolicy{ LitBoundary::Word, true, kForLiteralSiteRows, 0, kForLiteralKeyLegend };
+    }
+    return LitPolicy{};
+}
+
+// where a hit of the literal at `at` of `text` stands, by the shape's boundary rule
+inline KeyHit literalHitAt( LitBoundary boundary, std::string_view text, std::size_t at, std::size_t n ) noexcept
+{
+    if( boundary == LitBoundary::Key )
+    {
+        return keyHitAt( text, at, n );
+    }
+    KeyHit h;
+    h.longer = boundary == LitBoundary::Word && !wordBounded( text, at, n );
     return h;
 }
 
@@ -1023,8 +1055,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         return rootArg.empty() ? std::string( ing.files[f] ) : std::string( rw::sarif::rootRelativeUri( ing.files[f], rootPrefix ) );
     };
     // ── path tiers, then the span tier of every source hit file (bounded, in the scan's order: classified files first) ─────────
-    const bool  dotted  = lit.shape == "dotted";
-    const bool  message = lit.shape == "message";
+    const lit_detail::LitPolicy policy = lit_detail::litPolicyOf( lit.shape );
     std::uint32_t loadedFile = UINT32_MAX;
     std::string   loadedText;
     const auto loadFile = [ & ]( std::uint32_t fileId )
@@ -1053,10 +1084,10 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         else
         {
             lit_detail::KeyHit keyHit;
-            if( dotted || message )
+            if( policy.boundary != lit_detail::LitBoundary::None )
             {
                 loadFile( r.fileId );
-                keyHit = lit_detail::literalHitAt( dotted, message, loadedText, r.byteOffset, lit.text.size() );
+                keyHit = lit_detail::literalHitAt( policy.boundary, loadedText, r.byteOffset, lit.text.size() );
                 if( keyHit.longer )
                 {
                     ++longerHits;
@@ -1140,7 +1171,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         }
         rows = std::move( lines );
     }
-    if( message )
+    if( policy.dropCode )
     {
         lit_detail::dropCodeRows( rows );   // a code row is never printed (all code: no block)
     }
@@ -1164,15 +1195,15 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     const auto rankOf = [ & ]( std::size_t i )
     {
         const bool callable = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        return ( dotted && !rows[i].quotedKey ? 6 : 0 ) + ( callable ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
+        return ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
     };
     std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b ) { return rankOf( a ) < rankOf( b ); } );
     std::vector<char> registration( order.size(), 0 );   // by rank position: a quoted key outside any function (shape=dotted)
-    for( std::size_t i = 0; dotted && i < order.size(); ++i )
+    for( std::size_t i = 0; policy.reserve > 0 && i < order.size(); ++i )
     {
         registration[i] = lit_detail::registrationMark( ing, rows[order[i]], enriched[order[i]].enclosingId, enriched[order[i]].text, lit.text );
     }
-    const std::vector<std::size_t> pick = lit_detail::pickRows( registration, kForLiteralSiteRows, dotted ? kForLiteralRegistrationRows : 0 );
+    const std::vector<std::size_t> pick = lit_detail::pickRows( registration, policy.rows, policy.reserve );
     const std::size_t shown = pick.size();
     std::vector<GrepHit>          hits;
     std::vector<lit_detail::Site> shownRows;
@@ -1240,7 +1271,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     }
 
     // ── the rows ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-    const std::string_view needle = dotted || message ? std::string_view( lit.text ) : std::string_view();   // a cut row opens near it
+    const std::string_view needle = policy.boundary != lit_detail::LitBoundary::None ? std::string_view( lit.text ) : std::string_view();   // a cut row opens near it
     std::string rowsXml;
     std::size_t contextRows = 0;
     for( std::size_t i = 0; i < hits.size(); ++i )
@@ -1292,7 +1323,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
 
     std::string& x = out.xml;
     x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
-    x += dotted || message || lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view();
+    x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
     x += "<lit s=\"";
     x += escapeXml( lit.text, esc );
     x += "\" shape=\"";
