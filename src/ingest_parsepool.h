@@ -128,6 +128,41 @@ struct RawFacts
     std::vector<ConstOpen>    constOpens;  // parser version 82: Ruby class/module opens (model.h ConstOpen)
 };
 
+// EXPERIMENT candidate B: worker segments
+template <class T> using FactSegments = std::vector<std::vector<T>>;
+struct RawFactSegments
+{
+    FactSegments<RawDef>  defs;
+    FactSegments<RawRef>  refs;
+    FactSegments<RawBind> binds;
+};
+inline std::size_t segBytes()
+{
+    static const std::size_t b = [] { const char* v = std::getenv( "RW_B" ); return v != nullptr ? std::size_t( std::atol( v ) ) * 1024 : std::size_t( 2048 * 1024 ); }();
+    return b;
+}
+template <class T>
+inline void rollSegment( std::vector<T>& cur, FactSegments<T>& segs )
+{
+    const std::size_t bytes = segBytes();
+    if( bytes == 0 ) { return; }
+    const std::size_t elems = bytes / sizeof( T );
+    if( cur.size() < elems / 2 || cur.size() + cur.size() / 8 < cur.capacity() ) { return; }
+    segs.push_back( std::move( cur ) );
+    cur = std::vector<T>();
+    cur.reserve( elems );
+}
+template <class T>
+inline void mergeFamily( std::vector<T>& into, FactSegments<T>& segs )
+{
+    for( std::vector<T>& seg : segs )
+    {
+        into.insert( into.end(), std::make_move_iterator( seg.begin() ), std::make_move_iterator( seg.end() ) );
+        std::vector<T>().swap( seg );
+    }
+    FactSegments<T>().swap( segs );
+}
+
 // A parsed-but-unqueried file waiting for the tags-query gate: owns its bytes and its TSTree until
 // the flush hands them to captureTagsFacts (move-only; the tree is freed on destruction if unflushed).
 // It also owns the file's decided-dead byte ranges (#72 follow-up): those are walked ONCE, beside the
@@ -343,6 +378,7 @@ struct ParsePoolShared
     bool                             needsCacheHash;
     bool                             captureValueUses;
     memguard::Watch*                 memWatch;              // #350: null = unguarded; else checked before each claim
+    std::vector<RawFactSegments>&    tSegs;
 };
 
 // one worker's whole life: grab files off the shared cursor, reuse cache hits, parse+capture misses,
@@ -430,6 +466,9 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
         {
             flushPendingParsed();
         }
+        rollSegment( out.defs, sh.tSegs[ t ].defs );
+        rollSegment( out.refs, sh.tSegs[ t ].refs );
+        rollSegment( out.binds, sh.tSegs[ t ].binds );
 
         // #350: the memory guard. The previous file is done (every path through the body below ends its iteration),
         // so report it; then look at the stop flag BEFORE claiming, which is what keeps the finished set an unbroken
@@ -666,7 +705,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
 
 // merge per-thread results into one RawFacts (cross-thread order is irrelevant — everything is
 // re-sorted by the model-build tail), reserving each family's exact total first.
-inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
+inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts, std::vector<RawFactSegments>& tSegs )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/parse-pool: merge per-thread facts" );
     RawFacts raw;
@@ -682,6 +721,12 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
         totRouteUses += tf.routeUses.size();
         totConstOpens += tf.constOpens.size();
     }
+    for( const RawFactSegments& ts : tSegs )
+    {
+        for( const auto& seg : ts.defs ) { totDefs += seg.size(); }
+        for( const auto& seg : ts.refs ) { totRefs += seg.size(); }
+        for( const auto& seg : ts.binds ) { totBinds += seg.size(); }
+    }
     raw.defs.reserve( totDefs );
     raw.refs.reserve( totRefs );
     raw.incs.reserve( totIncs );
@@ -690,8 +735,13 @@ inline RawFacts mergeThreadFacts( std::vector<RawFacts>& tFacts )
     raw.routeDefs.reserve( totRouteDefs );
     raw.routeUses.reserve( totRouteUses );
     raw.constOpens.reserve( totConstOpens );
+    std::size_t tIdx = 0;
     for( RawFacts& tf : tFacts )
     {
+        RawFactSegments& ts = tSegs[ tIdx++ ];
+        mergeFamily( raw.defs, ts.defs );
+        mergeFamily( raw.refs, ts.refs );
+        mergeFamily( raw.binds, ts.binds );
         for( RawDef& d : tf.defs )
         {
             raw.defs.push_back( std::move( d ) );
@@ -851,6 +901,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
                 tFacts[ t ].binds.reserve( cold.binds );
             }
         }
+        std::vector<RawFactSegments>      tSegs( nthreads );
         std::vector<std::thread>          pool;
         pool.reserve( nthreads );
         std::vector<std::size_t>          parseOrder;
@@ -898,7 +949,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
 
         ParsePoolShared shared{ result.files, cache, scan, prewarm, queryReadyGate, cacheCandidateFacts, cacheHitFacts,
                                 tFacts, parseOrder, nextFile, dirty, reparsedCount, warmGrowths, nfiles, needsCacheHash, captureValueUses,
-                                memWatch };
+                                memWatch, tSegs };
 
         for( unsigned t = 0; t < nthreads; ++t )
         {
@@ -915,7 +966,7 @@ inline RawFacts runParsePool( IngestResult& result, const char* rootDir, std::st
         }
         }
 
-        raw = mergeThreadFacts( tFacts );
+        raw = mergeThreadFacts( tFacts, tSegs );
 
         const bool parseCut = applyMemoryParseCut( result, memWatch, nextFile.load( std::memory_order_relaxed ), nfiles );   // #350
 

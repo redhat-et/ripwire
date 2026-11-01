@@ -5364,6 +5364,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
     const Graph       g               = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+    if( const char* v = std::getenv( "RW_VMMAP" ) ) { std::string c = "vmmap -summary " + std::to_string( getpid() ) + " 2>&1 | grep -E '^(MALLOC_|VM_ALLOCATE|TOTAL)' > " + v; (void) std::system( c.c_str() ); } // EXPERIMENT
     joinGrepScanPrefetch( grepPhaseWorker );
     if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build and the verbs
     {
@@ -5827,3 +5828,4 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
 
     return runDefaultMap( dsp );
 }
+#include "infra/largealloc.h"   // EXPERIMENT
