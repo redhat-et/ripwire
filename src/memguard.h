@@ -23,6 +23,8 @@
 //          became a hard stop after the ingest instead of a partial answer.
 //   hard   at the limit itself, checked between phases (main.cpp; --quality-delta=A..B, which dispatches before main()'s
 //          ingest, between its own: verbs_quality.h refPairOverHardLimit) and before each MCP tool call: no partial answer.
+//          It reads the footprint at that moment, so a run whose memory PEAKED above the limit and was given back before the
+//          reading finishes; it is not stopped, and says so (the overshoot section below).
 //          The range form alone answers PART of the question instead (qd-memory-degrade): a stop in either commit's full
 //          tree — or a projection that says the target phase will not fit (projectTargetPhase) — releases the full trees
 //          and re-asks from both commits' CHANGED FILES the kinds those files decide, naming every kind it skipped
@@ -71,6 +73,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <format>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -477,23 +480,29 @@ inline std::uint64_t replayLimitBytes( std::uint64_t needBytes, std::uint64_t in
     const std::uint64_t ceiling = std::uint64_t( SIZE_MAX ) / kMiB * kMiB;
     return std::min( want, ceiling );
 }
+#if defined( RIPWIRE_LARGE_ALLOC_LINKED )
+inline constexpr bool kDisclosePeakOnThisBuild = true;
+#else
+inline constexpr bool kDisclosePeakOnThisBuild = false;
+#endif
 // The peak after the answer was computed, when it went over the limit (or the peak:N seam says so), else 0. computeDelta
 // runs after the last hard-line reading, so a full answer can finish over --max-memory (rv-pr391 N1: 1.09-1.11x); this
 // is the reading that SAYS so instead of answering silently over it. It never changes the exit code.
-inline std::uint64_t peakOverLimit()
+inline std::uint64_t peakOverLimitWith( bool realReading, bool seamLaterToo )
 {
     const std::uint64_t limit = limits().hardBytes;
     if( limit == 0 )
     {
         return 0;
     }
-    std::uint64_t peak = os::mem_footprint_peak();
-    if( seamCallTrips( TripAt::Peak, seamCounters().peaks, /*laterToo=*/false ) )
+    std::uint64_t peak = realReading ? os::mem_footprint_peak() : 0;
+    if( seamCallTrips( TripAt::Peak, seamCounters().peaks, seamLaterToo ) )
     {
         peak = std::max( peak, limit + kMiB );   // the seam: the reading says over, whatever the real peak was
     }
     return peak > limit ? peak : 0;
 }
+inline std::uint64_t peakOverLimit() { return peakOverLimitWith( true, false ); }
 // ── the backstop: a stop nobody answered for ────────────────────────────────────────────────────────────
 // ingest() counts every stop it discloses; the caller that decides what the partial ingest may answer (main.cpp's
 // memoryStopExit) marks every stop so far as answered for. A CLI run that ends with a stop nobody answered for — an
@@ -504,6 +513,7 @@ struct StopCounts
 {
     std::atomic<std::uint32_t> recorded{ 0 };
     std::atomic<std::uint32_t> answered{ 0 };
+    std::atomic<bool>          peakSaid{ false };   // an emitter already told the reader about the overshoot (main() need not)
 };
 inline StopCounts& stopCounts() noexcept
 {
@@ -592,6 +602,49 @@ inline std::string softStopLine( const IngestResult& ing )
 inline std::string partialAbsenceLine( const IngestResult& ing )
 {
     return "the index this server holds is partial, so a not-found or empty answer from it is not proof of absence — " + softStopLine( ing );
+}
+
+// ── the overshoot: a run that finished over its limit says so ─────────────────────────────────────────────────
+// The hard line reads the CURRENT footprint between phases. A block the allocator returned to the OS before the next
+// reading (src/largealloc.cpp, macOS) is gone from that reading, so a run can peak above the limit, pass every reading,
+// and finish. Owner decision 2026-11-01: that is DISCLOSED, not enforced. The peak is os::mem_footprint_peak; the run
+// names it and the limit on every path the guard's other messages use: one stderr line on the CLI (any verb), memory_peak=
+// in the default map's header, `_memory_peak` in the MCP envelope. Builds that link the route read the real peak
+// (RIPWIRE_LARGE_ALLOC_LINKED, CMakeLists.txt); on any other build the real reading is off here — the hard line already
+// held there as before — and only the test seam (peak:N, the Nth and every later reading) can make it speak.
+
+// the peak when it went over the limit, else 0: the real reading only on a build that routes, the seam on every build
+inline std::uint64_t runPeakOverLimit() { return peakOverLimitWith( kDisclosePeakOnThisBuild, /*seamLaterToo=*/true ); }
+
+// the peak line: the run finished and answered, by how far it went over, and what the limit is for
+inline std::string peakOverLine( std::uint64_t peak )
+{
+    return std::format( "memory peak {} went over the {} limit ({}), and the run finished and answered: the guard reads the limit between "
+                        "phases, and by then this run had given that memory back. The limit is a rule of thumb that keeps the machine from "
+                        "running out of memory, not an exact line — {}",
+                        limitSpelling( peak ), limitSpelling( limits().hardBytes ), limitSourceClause(), kOverride );
+}
+
+// the MCP envelope's `_memory_peak`: the sentence when this server's peak has risen over the limit since the last time it
+// said so (the peak never falls, so saying it on every answer would repeat one fact), else empty
+inline std::string peakNoteOnIncrease()
+{
+    static std::atomic<std::uint64_t> announced{ 0 };
+    const std::uint64_t peak = runPeakOverLimit();
+    if( peak == 0 )
+    {
+        return {};
+    }
+    const std::uint64_t mib  = ( peak + kMiB - 1 ) / kMiB;
+    std::uint64_t       seen = announced.load( std::memory_order_relaxed );
+    while( mib > seen )
+    {
+        if( announced.compare_exchange_weak( seen, mib, std::memory_order_relaxed ) )
+        {
+            return peakOverLine( peak );
+        }
+    }
+    return {};
 }
 
 }   // namespace rw::memguard

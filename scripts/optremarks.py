@@ -140,6 +140,8 @@ COLD_FILES = (
       "BECAUSE it is thousands of cold functions — volume here measures function count, not heat. Its verbs_*.h sections are cold for the same reason." ),
     ( "src/tsprobe.cpp",
       "the ripwire_probe binary. Not linked into ripwire at all, so nothing in it runs when the tool runs." ),
+    ( "src/largealloc.cpp",
+      "macOS operator new and delete; a block under 256 KiB pays one compare, and the mmap route is called a few thousand times a run" ),
     ( "src/alloccount.cpp",
       "the RIPWIRE_ALLOC_COUNT operator new/delete replacement: absent from every shipped build and from every gate by construction — see the honesty note at the "
       "top of the file." ),

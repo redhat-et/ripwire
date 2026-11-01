@@ -593,6 +593,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "memory_parsed",     "memory_parsed=K: the parse claimed the first K slots of its work order (uncached files, then cached, then grammarless, each largest first; path order when no grammar-bearing file needed a fresh parse, every one an ingest-cache hit); a slot may reuse cached facts or fail to read; later files carry no symbols", false, {}, MapHeaderRead::Only },
     { "memory_limit",      "memory_limit=NM: the guard's limit, spelled as the max-memory value that raises it", false, {}, MapHeaderRead::Only },
     { "memory_pressure",   "memory_pressure=1: OS memory pressure stopped it, not the limit", false, {}, MapHeaderRead::Only },
+    { "memory_peak",       "memory_peak=NM: this run's memory peak went over the memory_limit= value between the guard's readings; the run finished and answered, nothing is cut, and the limit is a rule of thumb against running out of memory", false, {}, MapHeaderRead::Only },
     { "unindexed",         "unindexed=ext:N: N text files of that extension no grammar reads (6 extensions at most)", false, {}, MapHeaderRead::Only },
     { "unindexed_exts",    "unindexed_exts=E: E such extensions in all, the list cut", false, {}, MapHeaderRead::Only },
     { "escaped_root",      "escaped_root=K: K files refused: a symlink led out of the root", false, {}, MapHeaderRead::Only },

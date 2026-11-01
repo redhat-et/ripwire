@@ -4242,6 +4242,15 @@ int main( int argc, char** argv )
         rw::emitTo( stderr, "ripwire: the memory guard stopped an ingest this answer depends on, so the answer (or refusal) above may be incomplete or wrong — {}\n", rw::memguard::kOverride );
         return 5;
     }
+    // The hard line reads the footprint between phases; a run whose peak went over the limit and was given back before a
+    // reading finishes and answers. Owner decision 2026-11-01: disclosed, not enforced. The range form says it itself.
+    if( !cfg.mcp && !cfg.lsp && rc != 5 && !rw::memguard::stopCounts().peakSaid.load( std::memory_order_relaxed ) )
+    {
+        if( const std::uint64_t peak = rw::memguard::runPeakOverLimit(); peak != 0 )
+        {
+            rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::peakOverLine( peak ) );
+        }
+    }
     return rc;
 }
 

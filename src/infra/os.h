@@ -90,6 +90,7 @@ inline constexpr int kDirwatchBatch = 32;
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <sys/mman.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -501,6 +502,15 @@ struct dirwatch_event
 // cheaply" — the guard (src/memguard.h) then falls back to what it can read, and says nothing on a normal run.
 // Every body is one syscall or at most four small /proc and /sys reads, and the guard calls them at most once per five
 // seconds, plus once at each hard-line check between phases.
+// vm_map: a private, zero-filled, read-write region of `bytes` from the OS, nullptr when refused. vm_unmap gives it back at
+// once. The one caller is src/largealloc.cpp, linked on macOS only.
+[[gnu::always_inline]] inline void* vm_map( std::size_t bytes ) noexcept
+{
+    void* p = ::mmap( nullptr, bytes, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
+    return p == MAP_FAILED ? nullptr : p;
+}
+[[gnu::always_inline]] inline void vm_unmap( void* p, std::size_t bytes ) noexcept { ::munmap( p, bytes ); }
+
 // mem_footprint: bytes this process holds. macOS: TASK_VM_INFO phys_footprint (what Activity Monitor and the
 //   jetsam killer count — compressed and swapped pages included). Linux: resident pages from /proc/self/statm.
 // mem_footprint_peak: the most this process has held so far, in mem_footprint's own measure (qd-memory-degrade: the
@@ -1128,6 +1138,9 @@ int dirwatch_poll( int watchFd, dirwatch_event* events, int eventCount, const ::
 // charge's high-water mark), ullTotalPhys from GlobalMemoryStatusEx, no cgroup (0, both cgroup helpers), and
 // QueryMemoryResourceNotification on a low-memory notification object created once (3 when the system signals low
 // memory, else 1).
+// vm_map / vm_unmap (see the POSIX branch): VirtualAlloc committed read-write, VirtualFree. No Windows caller yet.
+void* vm_map( std::size_t bytes ) noexcept;
+void  vm_unmap( void* p, std::size_t bytes ) noexcept;
 std::uint64_t mem_footprint();
 std::uint64_t mem_footprint_peak();
 std::uint64_t mem_physical();

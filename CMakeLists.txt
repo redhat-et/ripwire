@@ -762,6 +762,19 @@ if(RIPWIRE_ALLOC_COUNT)
   message(STATUS "heap-allocation counting: ON (ALLOC_REPORT on stderr at exit)")
 endif()
 
+# RIPWIRE_LARGE_ALLOC links src/largealloc.cpp on macOS: operator new >= 256 KiB via mmap/munmap, since the default
+# zone keeps freed large blocks resident (the file says why). Never beside a sanitizer (they own operator new) or
+# RIPWIRE_ALLOC_COUNT (which replaces the same functions); the toolchain's own LTO and strip are unaffected.
+option(RIPWIRE_LARGE_ALLOC "macOS: route large operator new through mmap so freed blocks leave the footprint" ON)
+if(RIPWIRE_LARGE_ALLOC AND APPLE AND NOT RIPWIRE_ALLOC_COUNT)
+  string(REGEX MATCH "-fsanitize=" _ripwire_sanitized "${CMAKE_CXX_FLAGS}")
+  if(NOT (RIPWIRE_ASAN OR RIPWIRE_TSAN OR RIPWIRE_FUZZ OR _ripwire_sanitized))
+    target_sources(ripwire PRIVATE src/largealloc.cpp)
+    # memguard.h reads the real peak for its overshoot disclosure only in a build that routes (freed blocks leave the reading)
+    target_compile_definitions(ripwire PRIVATE RIPWIRE_LARGE_ALLOC_LINKED)
+  endif()
+endif()
+
 # ---- global install: `cmake --install build --prefix /opt/homebrew --component ripwire` (see install.sh) ----
 # COMPONENT ripwire + --component on install scopes this to just the binary: without it, `cmake --install`
 # also runs the vendored tree-sitter subproject's own install() rules (headers/pkgconfig/static lib into

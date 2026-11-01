@@ -2844,6 +2844,26 @@ inline std::string buildMemoryStopAttr( const IngestResult& ing, bool json )
          + ( m.byPressure ? " memory_pressure=1" : "" );
 }
 
+// The overshoot (memguard.h "the overshoot"): the run's memory peak went over the limit between two of the guard's readings,
+// and the run finished and answered. memory_peak= is the peak, memory_limit= the limit it passed, spelled as the max-memory
+// value that raises it (left to buildMemoryStopAttr when a stop already carries it). Absent on every run that stayed under
+// its limit, so every normal run is byte-identical. XML header-comment and JSON spellings.
+inline std::string buildMemoryPeakAttr( const IngestResult& ing, bool json )
+{
+    const std::uint64_t peak = memguard::runPeakOverLimit();
+    if( peak == 0 )
+    {
+        return {};
+    }
+    const std::string peakText  = memguard::limitSpelling( peak );
+    const std::string limitText = ing.memoryStop.isSet() ? std::string() : memguard::limitSpelling( memguard::limits().hardBytes );
+    if( json )
+    {
+        return "\"memory_peak\":\"" + peakText + "\"," + ( limitText.empty() ? std::string() : "\"memory_limit\":\"" + limitText + "\"," );
+    }
+    return " memory_peak=" + peakText + ( limitText.empty() ? std::string() : " memory_limit=" + limitText );
+}
+
 // The per-symbol honesty counters (graph.h ambOut / unresolvedOut / locPinOut) reach both map dialects as
 // NULLABLE vectors — nullptr ⇒ never measured (a pure sizing pass). These two are the only ways the emitters
 // read them, so "an absent counter reads as zero" is stated once instead of in six hand-rolled chains.
@@ -3505,7 +3525,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     const std::string unindexedAttr = buildUnindexedAttr( ing.crawlSkips );
     const std::string ignoredAttr   = buildIgnoredAttr( ing.crawlSkips );   // §N6-C, empty unless the ignore rules cut something
     const std::string escapedAttr   = buildEscapedRootAttr( ing.crawlSkips ); // §SEC1, empty unless a symlink left the root
-    const std::string memoryAttr    = buildMemoryStopAttr( ing, false );      // #350, empty unless the memory guard stopped the ingest
+    const std::string memoryAttr    = buildMemoryStopAttr( ing, false ) + buildMemoryPeakAttr( ing, false );   // #350, empty unless the memory guard stopped the ingest or the peak passed the limit
     // §B13.4: --max-tokens=N asked for a TOKEN count and got a BYTE ceiling. Both numbers, on the map that
     // was shaped by them, so the ~10% the headroom leaves unused is a disclosed fact rather than a silent
     // one. Emitted ONLY under --max-tokens (nullptr for every other caller ⇒ byte-identical default map).
@@ -10880,6 +10900,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         w.write( hdr );
     }
     w.write( buildMemoryStopAttr( h.ing, true ) );   // #350, JSON lane: empty unless the memory guard stopped the ingest
+    w.write( buildMemoryPeakAttr( h.ing, true ) );   // the overshoot: empty unless the peak went over the limit
 
     // §SEC1, JSON lane: the crawl-boundary refusal must reach --json/MCP consumers too, by the same argument
     // skipped_oversize= makes one paragraph up — the audience most likely to be a model is the one least able
