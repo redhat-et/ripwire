@@ -1254,11 +1254,6 @@ inline std::optional<std::string> readText( const std::string& path )
     return docparse::detail::readWholeFile( path );
 }
 
-inline bool holdsAny( std::string_view text, std::span<const std::string_view> needles ) noexcept
-{
-    return std::ranges::any_of( needles, [text]( std::string_view n ) { return text.contains( n ); } );
-}
-
 // A package.json that publishes something: a main, module, exports, types or bin, and not `"private": true`. Its exported defs have consumers outside the tree.
 inline bool packageJsonPublishes( std::string_view json ) noexcept
 {
@@ -1275,14 +1270,14 @@ inline bool packageJsonPublishes( std::string_view json ) noexcept
         }
     }
     static constexpr std::array<std::string_view, 6> kKeys = { "\"main\"", "\"module\"", "\"exports\"", "\"types\"", "\"typings\"", "\"bin\"" };
-    return holdsAny( json, kKeys );
+    return std::ranges::any_of( kKeys, [json]( std::string_view k ) { return json.contains( k ); } );
 }
 
 // A pyproject.toml that builds a distribution: a [project] or [tool.poetry] table, or a [build-system].
 inline bool pyprojectBuilds( std::string_view toml ) noexcept
 {
     static constexpr std::array<std::string_view, 3> kTables = { "[project]", "[tool.poetry]", "[build-system]" };
-    return holdsAny( toml, kTables );
+    return std::ranges::any_of( kTables, [toml]( std::string_view t ) { return toml.contains( t ); } );
 }
 
 // A Python module path with a private component (`_impl/`, `_compat.py`) is not a public surface; `__init__` and `__main__` are.
