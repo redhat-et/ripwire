@@ -90,6 +90,7 @@ inline constexpr int kDirwatchBatch = 32;
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <sys/mman.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -501,6 +502,15 @@ struct dirwatch_event
 // cheaply" — the guard (src/memguard.h) then falls back to what it can read, and says nothing on a normal run.
 // Every body is one syscall or at most four small /proc and /sys reads, and the guard calls them at most once per five
 // seconds, plus once at each hard-line check between phases.
+// vm_map: a private, zero-filled, read-write region of `bytes` from the OS, nullptr when refused. vm_unmap gives it back at
+// once. POSIX only; the one caller is src/largealloc.cpp, which no other target links.
+[[gnu::always_inline]] inline void* vm_map( std::size_t bytes ) noexcept
+{
+    void* p = ::mmap( nullptr, bytes, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
+    return p == MAP_FAILED ? nullptr : p;
+}
+[[gnu::always_inline]] inline void vm_unmap( void* p, std::size_t bytes ) noexcept { ::munmap( p, bytes ); }
+
 // mem_footprint: bytes this process holds. macOS: TASK_VM_INFO phys_footprint (what Activity Monitor and the
 //   jetsam killer count — compressed and swapped pages included). Linux: resident pages from /proc/self/statm.
 // mem_footprint_peak: the most this process has held so far, in mem_footprint's own measure (qd-memory-degrade: the

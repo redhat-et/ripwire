@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# largeallocpeakcheck.sh — freed large blocks must not sit in the peak. src/infra/largealloc.cpp routes operator new of
+# largeallocpeakcheck.sh — freed large blocks must not sit in the peak. src/largealloc.cpp routes operator new of
 # 256 KiB or more through mmap on macOS. Linux has no route and needs none: glibc on the same fixture moved max RSS by
 # 2 % with a fixed mmap threshold (CHANGELOG); the U arm still runs there, the P arms are macOS's.
 #
@@ -17,19 +17,25 @@
 # Usage: RIPWIRE_BIN=build/ripwire bash test/largeallocpeakcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
-BIN="${RIPWIRE_BIN:-$ROOT/build/ripwire}"
+. "$ROOT/test/lib/clean-env.sh"   # no inherited agent homes or GIT_* repository selection (the gate builds a repo)
+BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ fail=1; printf '  FAIL  %s\n' "$*"; return 0; }
 
+# Linux runs no peak arm, so this is what keeps the gate from passing on a binary that does not even start.
+if ! "$BIN" --version 2>/dev/null | grep -q '^ripwire '; then
+    echo "  FAIL  $BIN does not run"; echo "FAIL largeallocpeakcheck"; exit 1
+fi
+
 # ---- U ----
 CXX="${CXX:-clang++}"
 command -v "$CXX" >/dev/null 2>&1 || CXX=c++
 command -v "$CXX" >/dev/null 2>&1 || CXX=g++
 case "$( uname -s )" in
-    Darwin) EXTRA=( -DLINK_OPERATORS "$ROOT/src/infra/largealloc.cpp" ) ;;
+    Darwin) EXTRA=( -DLINK_OPERATORS "$ROOT/src/largealloc.cpp" ) ;;
     Linux)  EXTRA=( -pthread ) ;;
     *)      EXTRA=() ; echo "  SKIP  U: no mmap route on this OS"; echo "PASS largeallocpeakcheck"; exit 0 ;;
 esac

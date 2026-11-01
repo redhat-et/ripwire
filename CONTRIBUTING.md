@@ -487,7 +487,7 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
   vector), so never hold a `T&` into it across an insert.
 
 **The global allocator.** On macOS `operator new` of 256 KiB or more goes through mmap and munmap
-(`src/infra/largealloc.cpp`, the one file that replaces it, with the reason, the alternatives measured and what it does
+(`src/largealloc.cpp`, the one file that replaces it, with the reason, the alternatives measured and what it does
 not route). So never `free()` what `new` returned, and read a macOS peak knowing a big array is returned at delete.
 
 ### Adding a language: common stays common

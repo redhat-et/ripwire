@@ -505,6 +505,7 @@ ingest_docpass.h	runDocPostPass	alert-only	1	FINDING (disclosure lane): a doc po
 mcpindex.h	maybePrefetchHeadSnapshot	silent	1	not an answer path: optional background prefetch of the HEAD snapshot; a request recomputes whatever it did not fill (§2b rule 3)
 REGB1
 cat > "$TMP/reg_b2.tsv" <<'REGB2'
+largealloc.cpp	operator new	1	the operator new seam CONTRIBUTING §3 permits: the replaced operator's own bad_alloc, as the library's would throw
 alloccount.cpp	operator new	2	the one throw seam CONTRIBUTING §3 permits: operator new under RIPWIRE_ALLOC_COUNT, an A/B instrument no shipped build links
 infra/dynamic_map.hpp	at	1	vendored container API; no ripwire call site reaches it (rule C lists its one caller, the container's own non-const at)
 regexguard.h	throwIfMatchFaultInjected	1	the RIPWIRE_FAULT_REGEX_MATCH fault switch, off unless the variable is set; its three call sites are the first statement inside GuardedRegex's search, search and forEachMatch try blocks, which catch std::regex_error by type and return Exhausted (a stopped --regex scan has one cause — the former MIXED sibling rode with the per-file match budget the PR #397 review removed)
@@ -518,6 +519,7 @@ REGC
 cat > "$TMP/reg_d.tsv" <<'REGD'
 REGD
 cat > "$TMP/reg_e.tsv" <<'REGE'
+largealloc.cpp	allocOrNull	malloc	1	the replaced operator new's storage for a block the route does not take, freed by its operator delete
 alloccount.cpp	countedAlloc	malloc	1	the counting allocator's own storage, freed by its operator delete (A/B instrument, never shipped)
 alloccount.cpp	operator new	aligned_alloc	1	the counting allocator's aligned storage, freed by its operator delete (A/B instrument, never shipped)
 infra/dynamic_map.hpp	compact	new	4	the rebuilt pools replace the old ones (delete[] before the swap, owned by ~dynamic_map after it); the two scratch arrays are delete[]d before the return

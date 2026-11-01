@@ -17,7 +17,7 @@
 // NOT ROUTED: over-aligned new (no new-expression in ripwire asks for a large one; the library's aligned forms use
 // posix_memalign and free, never these functions); malloc itself (tree-sitter's own, about 2 % of the large bytes).
 // RIPWIRE_TEST_LARGEALLOC=off turns the route off for one run, so the gate can compare the same binary with and without.
-#include "infra/largealloc.h"
+#include "largealloc.h"
 #include <cstdlib>
 #include <new>
 

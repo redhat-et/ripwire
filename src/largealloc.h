@@ -1,11 +1,11 @@
 #pragma once
-// largealloc.h — the route behind src/infra/largealloc.cpp: a block of kMinBytes or more gets its own mmap region and
+// largealloc.h — the route behind src/largealloc.cpp: a block of kMinBytes or more gets its own mmap region and
 // goes back to the OS at once on delete. Only the mechanism lives here (no replaced operator), so
 // test/largeallocfix/largealloc_test.cpp can drive it with a tiny table. Why it exists: largealloc.cpp.
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <sys/mman.h>
+#include "infra/os.h" // os::vm_map / vm_unmap
 
 namespace rw::largealloc
 {
@@ -74,8 +74,8 @@ inline void* allocate( Table& table, std::size_t n ) noexcept
         return nullptr;
     }
     const std::size_t total = ( n + kHeader + kRoundTo - 1 ) & ~( kRoundTo - 1 );
-    void* b = ::mmap( nullptr, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
-    if( b == MAP_FAILED )
+    void* b = os::vm_map( total );
+    if( b == nullptr )
     {
         return nullptr;
     }
@@ -85,7 +85,7 @@ inline void* allocate( Table& table, std::size_t n ) noexcept
     {
         return p;
     }
-    ::munmap( b, total );
+    os::vm_unmap( b, total );
     return nullptr;
 }
 
@@ -99,7 +99,7 @@ inline bool release( Table& table, void* p ) noexcept
         return false;
     }
     void* b = static_cast<char*>( p ) - kHeader;
-    ::munmap( b, *static_cast<std::size_t*>( b ) );
+    os::vm_unmap( b, *static_cast<std::size_t*>( b ) );
     return true;
 }
 } // namespace rw::largealloc

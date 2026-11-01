@@ -1,6 +1,6 @@
-// largealloc_test.cpp — driven by test/largeallocpeakcheck.sh. Compiled alone with src/infra/largealloc.h (the table and
-// the route, every POSIX host) and, with LINK_OPERATORS, with src/infra/largealloc.cpp (the replaced forms, macOS).
-#include "infra/largealloc.h"
+// largealloc_test.cpp — driven by test/largeallocpeakcheck.sh. Compiled alone with src/largealloc.h (the table and
+// the route, every POSIX host) and, with LINK_OPERATORS, with src/largealloc.cpp (the replaced forms, macOS).
+#include "largealloc.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
