@@ -6263,8 +6263,10 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         r.payload = std::move( *ownersAnswer );
         if( r.payload.empty() )
         {
-            return bad( symbol.empty() ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
-                                       : symbolMissing( "owners", symbol ) );   // N7: the hint comes from the table row
+            const std::string cut = rw::gitWalkCutRefusalCause();   // F2: a walk the budget ended is not "no history"
+            return bad( !cut.empty() ? "owners is mined from git: " + cut
+                        : symbol.empty() ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
+                                         : symbolMissing( "owners", symbol ) );   // N7: the hint comes from the table row
         }
     }
     else if( r.verb == "cochange" )

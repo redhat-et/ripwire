@@ -822,6 +822,146 @@ inline std::chrono::steady_clock::time_point gitWalkDeadline() noexcept
     return seconds == 0 ? std::chrono::steady_clock::time_point::max() : std::chrono::steady_clock::now() + std::chrono::seconds( seconds );
 }
 
+// A git read that keeps a deadline. gitCommandLines blocks in fread, so a git that stopped writing, or one that is still working out
+// what to say, holds the caller for as long as it likes. This reads the descriptor with poll (os::pipeReadSome) and, at the deadline,
+// drops what it has: `timedOut`, and `lines` is a PREFIX no caller may serve as an answer. pclose goes to a thread of its own then, for
+// the reason finishGitLogWalk gives; git is not killed (popen holds no pid), it ends at its next write or when ripwire exits.
+struct GitTimedLines : GitCommandLines
+{
+    bool timedOut = false;
+};
+inline GitTimedLines gitCommandLinesBy( const std::string& cmd, std::chrono::steady_clock::time_point deadline )
+{
+    GitTimedLines out;
+    std::FILE*    pipe = os::popen( cmd.c_str(), "r" );
+    if( !pipe )
+    {
+        return out;
+    }
+    out.isStarted = true;
+    std::string       tail;
+    std::vector<char> block( 64u * 1024u );
+    const auto        flush = [ & ]( std::string_view row )
+    {
+        while( !row.empty() && ( row.back() == '\r' ) )
+        {
+            row.remove_suffix( 1 );
+        }
+        if( !row.empty() )
+        {
+            out.lines.emplace_back( row );
+        }
+    };
+    for( ;; )
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if( now >= deadline )
+        {
+            out.timedOut = true;
+            break;
+        }
+        const auto leftMs = std::chrono::duration_cast<std::chrono::milliseconds>( std::min( deadline - now, std::chrono::steady_clock::duration( std::chrono::milliseconds( 100 ) ) ) ).count() + 1;
+        const long got    = os::pipeReadSome( pipe, block.data(), block.size(), static_cast<int>( leftMs ) );
+        if( got == os::kPipeNothingYet )
+        {
+            if( gitWalksAbandoned() )
+            {
+                out.abandoned = true;
+                break;
+            }
+            continue;
+        }
+        if( got <= 0 )
+        {
+            break;
+        }
+        tail.append( block.data(), static_cast<std::size_t>( got ) );
+        std::size_t from = 0;
+        for( std::size_t nl = tail.find( '\n', from ); nl != std::string::npos; nl = tail.find( '\n', from ) )
+        {
+            flush( std::string_view( tail ).substr( from, nl - from ) );
+            from = nl + 1;
+        }
+        tail.erase( 0, from );
+    }
+    if( out.timedOut || out.abandoned )
+    {
+        out.lines.clear();
+        try
+        {
+            std::thread( [ pipe ]() noexcept { os::pclose( pipe ); } ).detach();
+        }
+        catch( const std::system_error& )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the answer is whole; only one pipe stays open until the process ends",
+                      "gitmine: no thread for a timed-out read's pclose — the pipe is left to the process's exit" );
+        }
+        return out;
+    }
+    flush( tail );
+    out.status = os::pclose( pipe );
+    return out;
+}
+
+// PARTIAL CLONE (HISTORY-WALK-HANG, F1). A clone made with --filter=blob:none holds commits and trees and fetches blobs on demand; ripwire
+// never downloads (gitcmd.h NEVER DOWNLOAD), so a read that needs an absent blob fails. It fails LATE: with lazy fetch off, git parses
+// every object of the promisor pack before it dies "could not fetch" (is_promisor_object > for_each_packed_object), and on a pack of
+// millions of objects that is minutes to hours (ClickHouse, 5.2 M objects: `diff --numstat`, `archive` and `log -p` all still running
+// at 90 s, 8 min for the numstat). So a command that would read a blob is never STARTED on a partial clone; the caller takes a
+// tree-level read or refuses, and says so. The test reads configuration only, no object: extensions.partialClone names the promisor
+// remote, `remote.<name>.promisor` marks it (a clone made with --filter writes both). Once per root.
+inline bool gitIsPartialClone( const std::string& root )
+{
+    static std::mutex                                   lock;
+    static std::vector<std::pair<std::string, bool>>    memo;   // a handful of roots at most (an MCP server's), so a scan
+    {
+        const std::lock_guard<std::mutex> guard( lock );
+        for( const auto& [ known, answer ] : memo )
+        {
+            if( known == root )
+            {
+                return answer;
+            }
+        }
+    }
+    bool                  partial = false;
+    const GitCommandLines cfg     = gitCommandLines( gitCmd( " -C " ) + shSingleQuote( root )
+                                                     + " config --get-regexp '^(extensions[.]partialclone|remote[.].*[.]promisor)$' 2>/dev/null" );
+    for( const std::string& row : cfg.lines )
+    {
+        const std::size_t sp = row.find( ' ' );
+        if( sp == std::string::npos || sp + 1 >= row.size() )
+        {
+            continue;
+        }
+        const std::string_view key   = std::string_view( row ).substr( 0, sp );
+        const std::string_view value = std::string_view( row ).substr( sp + 1 );
+        partial = partial || key == "extensions.partialclone" || value == "true" || value == "yes" || value == "on" || value == "1";
+    }
+    const std::lock_guard<std::mutex> guard( lock );
+    memo.emplace_back( root, partial );
+    return partial;
+}
+
+// Which blobs of one commit's tree this clone lacks: the count, or -1 when it could not be told in the budget. `rev-list --objects
+// --no-walk --missing=print` names the absent objects and fetches nothing and does not scan the promisor pack (ClickHouse HEAD~3: 86,609
+// objects listed, 5 absent, 4 s). A caller that would run `git archive <rev>` asks first on a partial clone.
+inline long gitAbsentBlobCount( const std::string& root, const std::string& rev )
+{
+    const GitTimedLines listed = gitCommandLinesBy( gitCmd( " -C " ) + shSingleQuote( root ) + " rev-list --objects --no-walk --missing=print "
+                                                    + shSingleQuote( rev ) + " -- 2>/dev/null", std::chrono::steady_clock::now() + std::chrono::seconds( 60 ) );
+    if( !listed.isStarted || listed.timedOut || listed.abandoned || listed.status != 0 )
+    {
+        return -1;
+    }
+    long absent = 0;
+    for( const std::string& row : listed.lines )
+    {
+        absent += !row.empty() && row.front() == '?';
+    }
+    return absent;
+}
+
 // The DISCLOSE sink for a walk whose consumer has no history_unread of its own. Worker threads write it; main() reads it last.
 struct GitWalkCutReport
 {

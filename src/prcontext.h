@@ -264,35 +264,60 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --numstat "
                           + revArgs + " -- 2>/dev/null";
 
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe )
+    // F1 (HISTORY-WALK-HANG): `diff --numstat` reads the blobs of both sides, and on a partial clone git parses every object of the
+    // promisor pack before it fails on the first absent one (ClickHouse, 5.2 M objects: past 8 minutes). So it is not started there;
+    // the tree-level list is the answer, said once on stderr. A clone that is not partial runs it under the walk budget instead, for a
+    // git that stalls: a read that outlives the budget is dropped whole (a prefix of the rows is not a list) and the tree-level list stands in.
+    const bool partial = gitIsPartialClone( root );
+    bool       viaNameOnly = partial;
+    if( !partial )
     {
-        return out;
-    }
-
-    char line[ 4096 ];
-    while( std::fgets( line, sizeof( line ), pipe ) )
-    {
-        auto [ path, isModeOnly ] = numstatRowPath( std::string( line ) );
-
-        if( isModeOnly )
+        const GitTimedLines run = gitCommandLinesBy( cmd, gitWalkDeadline() );
+        if( !run.isStarted )
         {
-            ++out.skippedModeOnly;
+            return out;
         }
-        else if( !path.empty() )
+        if( !run.timedOut )
         {
-            out.paths.push_back( std::move( path ) );
+            for( const std::string& row : run.lines )
+            {
+                auto [ path, isModeOnly ] = numstatRowPath( row );
+                if( isModeOnly )
+                {
+                    ++out.skippedModeOnly;
+                }
+                else if( !path.empty() )
+                {
+                    out.paths.push_back( std::move( path ) );
+                }
+            }
+        }
+        viaNameOnly = run.timedOut || ( run.status != 0 && out.paths.empty() && out.skippedModeOnly == 0 );
+        if( run.timedOut )
+        {
+            rw::emitTo( stderr, "ripwire: git diff --numstat did not finish within the {} s git budget (RIPWIRE_GIT_WALK_SECONDS); the changed files are listed from "
+                                "--name-only instead\n", gitWalkMaxSeconds() );
         }
     }
-    const int rc = os::pclose( pipe );
-    if( rc != 0 && out.paths.empty() && out.skippedModeOnly == 0 )
+    if( viaNameOnly )
     {
+        out.paths.clear();
+        out.skippedModeOnly = 0;
         if( !nameOnlyChangedPaths( root, revArgs, againstWorkingTree, out.paths ) )
         {
             return out;
         }
+        if( partial )
+        {
+            static std::atomic<bool> told{ false };
+            if( !told.exchange( true ) )
+            {
+                rw::emitTo( stderr, "ripwire: this is a partial clone (blobs are fetched on demand and ripwire never downloads them), so the changed files are "
+                                    "listed from git diff --name-only: a mode-only change is not told from a content change\n" );
+            }
+        }
         DISCLOSE( Diagnostics::answerUnchanged, "the changed files are listed; a mode-only change is not told from a content change",
-                  "prcontext: git diff --numstat failed (a partial clone's missing blob?) — the changed paths come from --name-only" );
+                  "prcontext: the changed paths come from --name-only (a partial clone, or git diff --numstat failed or stalled)" );
     }
     out.ok = true;
     return out;

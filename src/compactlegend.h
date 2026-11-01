@@ -1372,7 +1372,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "why", "why=: the measurements that crossed (rule*N fired N times; hrank=/churn= are the file's, inherited)", true, "e", MapHeaderRead::No, {}, "quality-panel" },
     // naming-calibration: src/renamemine.h writeNamingCalibrationReport (+ kNamingCalibrationLegend)
     { "probed", "probed=0: no history to mine, nothing scored (r= says why); 1 = the git walk ran", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
-    { "r", "r=: why probed=0: not-a-git-repo or probe-failed", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
+    { "r", "r=: why probed=0: not-a-git-repo, partial-clone (blobless clone, no patches) or probe-failed", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
     { "pairs", "pairs=N: labelled rename pairs that survived the join, the SAMPLE SIZE; a small one means nothing", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
     { "candidates", "candidates=N: raw substitutions mined from the patch stream before the join; FLOOR when truncated=1", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
     { "commits", "commits=N: non-merge commits walked (the walk stops at 40000)", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },

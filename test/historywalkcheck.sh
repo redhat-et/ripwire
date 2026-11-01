@@ -150,6 +150,40 @@ printf '#!/bin/sh\ncase " $* " in *" diff "*) exit 128 ;; esac\nexec "%s" "$@"\n
 ( cd "$CL" && PATH="$SHIMD:$PATH" "$BIN" "$CL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" ); rc=$?
 check "(H3b) a diff git cannot read at all is a refusal naming the cause, not an empty bundle (rc=$rc)" '[ "$rc" = 1 ] && grep -q "could not read the diff" "$TMP/err" && ! grep -q "<pr-context [^>]*files=\"0\"" "$TMP/out"'
 
+# ── (F1) a partial clone starts no git that reads a blob: on a big one git parses every object of the promisor pack before it fails ──
+# A logging shim records every git ripwire starts. A promisor repo must see no `--numstat`, no `-p` and no `archive` from the verbs that used
+# them (--pr-context=REF, --quality-delta=REF, --whereis --with-history, --naming-calibration); the control is the full clone, which does start them.
+# The fixtures hold a few dozen objects, where git fails at once, so only the shim can see what a ClickHouse-sized pack would turn into minutes.
+SHIML="$TMP/shim-log"; mkdir -p "$SHIML"
+cat > "$SHIML/git" <<SH
+#!/bin/sh
+printf '%s\\n' "\$*" >> "\$F1LOG"
+case " \$* " in *" --numstat "*) [ -n "\${NUMSTAT_SLEEP:-}" ] && sleep "\$NUMSTAT_SLEEP" ;; esac
+exec "$REALGIT" "\$@"
+SH
+chmod +x "$SHIML/git"
+blobreaders() { grep -c -e ' --numstat ' -e ' -p -U0' -e ' archive ' "$F1LOG" 2>/dev/null || true; }
+fresh_partial "$CL"; git -C "$CL" log -1 >/dev/null
+for v in --pr-context=HEAD~3 --quality-delta=HEAD~3 "--whereis=f1 --with-history" --naming-calibration; do
+  export F1LOG="$TMP/f1log"; : > "$F1LOG"
+  ( cd "$CL" && PATH="$SHIML:$PATH" perl -e 'alarm 60; exec @ARGV' "$BIN" "$CL" --no-cache $v >"$TMP/out" 2>"$TMP/err" )
+  check "(F1) partial clone, $v: no git that reads a blob was started ($(blobreaders) of them)" '[ "$(blobreaders)" = 0 ]'
+done
+export F1LOG="$TMP/f1log"; : > "$F1LOG"
+( cd "$CL" && PATH="$SHIML:$PATH" "$BIN" "$CL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" )
+check "(F1b) ... --pr-context=REF on it still lists the changed files, and says it is a partial clone" 'grep -q "<pr-context [^>]*files=\"[1-9]" "$TMP/out" && grep -q "partial clone" "$TMP/err"'
+( cd "$CL" && PATH="$SHIML:$PATH" "$BIN" "$CL" --no-cache --whereis=f1 --with-history >"$TMP/out" 2>"$TMP/err" )
+check "(F1c) ... the history probe says why it did not run: probed=\"0\" r=\"partial-clone\"" 'grep -q "probed=\"0\" r=\"partial-clone\"" "$TMP/out"'
+( cd "$CL" && PATH="$SHIML:$PATH" "$BIN" "$CL" --no-cache --quality-delta=HEAD~3 >"$TMP/out" 2>"$TMP/err" ); rc=$?
+check "(F1d) ... --quality-delta=REF with absent blobs still refuses, naming the partial clone (rc=$rc)" '[ "$rc" != 0 ] && grep -q "partial clone" "$TMP/err"'
+: > "$F1LOG"; ( cd "$FULL" && PATH="$SHIML:$PATH" "$BIN" "$FULL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" )
+check "(F1e) control: the full clone does run git diff --numstat ($(blobreaders) blob-reading gits)" '[ "$(blobreaders)" -gt 0 ]'
+# the stalled case: a git that sits in --numstat for 15 s, budget 1 s. Today: two serial numstats, wall 39 s, rc 0, no cut said.
+: > "$F1LOG"; t0=$(date +%s)
+( cd "$FULL" && PATH="$SHIML:$PATH" NUMSTAT_SLEEP=15 RIPWIRE_GIT_WALK_SECONDS=1 perl -e 'alarm 60; exec @ARGV' "$BIN" "$FULL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" ); rc=$?
+secs=$(( $(date +%s) - t0 ))
+check "(F1f) a git stalled in --numstat ends at the budget, not after it (rc=$rc ${secs}s), is said, and the files are listed" '[ "$rc" = 0 ] && [ "$secs" -lt 12 ] && grep -q "did not finish within the 1 s git budget" "$TMP/err" && grep -q "<pr-context [^>]*files=\"[1-9]" "$TMP/out"'
+
 # ── (B) the commit budget, on a long history ──
 LONG="$TMP/long"; git init -q -b main "$LONG"
 python3 -I - "$LONG" <<'PY' | git -C "$LONG" fast-import --quiet
@@ -245,6 +279,15 @@ for v in --hotspots --owners "--cochange"; do
   check "(M4) $v against a git silent from the first byte: exit 1, names the budget, not an unavailable git (rc=$rc)" '[ "$rc" = 1 ] && grep -q "hit its budget" "$TMP/err" && ! grep -q "git unavailable" "$TMP/err"'
 done
 unset STALL_AT_START TWS
+# (F2) the same refusal over MCP: the error of `owners` (and `symbol`) names the budget, not "no git history"
+export STALL_AT_START=1
+for sym in "" f1; do
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"owners\",\"arguments\":{\"path\":\"$LONG\",\"symbol\":\"$sym\"}}}" \
+    | ( cd "$LONG" && PATH="$SHIMT:$PATH" RIPWIRE_GIT_WALK_SECONDS=1 perl -e 'alarm 60; exec @ARGV' "$BIN" "$LONG" --mcp --no-cache >"$TMP/out" 2>"$TMP/err" )
+  check "(F2) --mcp owners symbol='$sym' against a git silent from the first byte: the error names the budget, not a missing history" 'grep -q "hit its budget" "$TMP/out" && ! grep -q "no git history" "$TMP/out"'
+done
+unset STALL_AT_START
 # (L2) --exemplar runs no history walk (it prints neither churn= nor amp=)
 rm -f "$TMP/walklog"; QC="$TMP/qc3"; mkdir -p "$QC"
 wrun --no-cache --exemplar=f1

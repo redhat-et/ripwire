@@ -2094,6 +2094,15 @@ inline RenameMap gitRenameMap( const std::string& root, const std::string& span 
     const unsigned long long tot = std::strtoull( depth.c_str(), nullptr, 10 );
     rm.commitsScanned            = std::uint32_t( tot < kRenameWindowCommits ? tot : kRenameWindowCommits );
     rm.truncatedWindow           = tot > kRenameWindowCommits;
+    if( gitIsPartialClone( root ) )
+    {
+        // F1: rename detection (-M50%) reads blobs, and on a partial clone git scans the whole promisor pack before it fails (gitmine.h
+        // gitIsPartialClone). So the map is not asked for: no commit was scanned (rename_window_commits="0") and the window is said to be
+        // truncated, which is the existing way to say "older renames unseen". Git's recorded renames are not consulted; content routes remain.
+        rm.commitsScanned  = 0;
+        rm.truncatedWindow = true;
+        return rm;
+    }
 
     const auto absorb = [ & ]( const std::string& raw )
     {
@@ -4267,6 +4276,19 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     {
         DISCLOSE( tree, MaterializedTree::DisclosureWhy::RevisionUnresolved, "quality: commit-tree revision does not resolve to a commit — refusing to archive" );
         return tree.root;
+    }
+
+    // F1 (HISTORY-WALK-HANG): on a partial clone `git archive` of a tree with an absent blob parses every object of the promisor pack
+    // before it fails (ClickHouse: past 90 s; gitmine.h gitIsPartialClone). The blobs are asked about first, by a read that fetches
+    // nothing and does not scan the pack; archive is not started unless every blob of the tree is here. -1 (not told in time) refuses too.
+    if( gitIsPartialClone( root ) )
+    {
+        const long absent = gitAbsentBlobCount( root, rev );
+        if( absent != 0 )
+        {
+            DISCLOSE( tree, MaterializedTree::DisclosureWhy::ArchiveFailed, "quality: partial clone, the commit tree has blobs this clone does not hold - git archive not started" );
+            return tree.root;
+        }
     }
 
     std::error_code ec;
