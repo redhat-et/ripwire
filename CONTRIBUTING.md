@@ -486,6 +486,10 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
   ordered container); and `unordered_dense` invalidates references on insert (values live in one
   vector), so never hold a `T&` into it across an insert.
 
+**The global allocator.** On macOS `operator new` of 256 KiB or more goes through mmap and munmap
+(`src/infra/largealloc.cpp`, the one file that replaces it, with the reason, the alternatives measured and what it does
+not route). So never `free()` what `new` returned, and read a macOS peak knowing a big array is returned at delete.
+
 ### Adding a language: common stays common
 
 A new language is **data plus, at most, small per-language pieces for semantics that genuinely differ** —

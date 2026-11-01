@@ -1,103 +1,105 @@
 #pragma once
-// largealloc.h — EXPERIMENT (mem-reserve): on macOS, give every operator new of 256 KiB or more its own mmap
-// region and munmap it on delete, so a freed large block returns its pages at once. The default zone keeps
-// freed large blocks resident ("MALLOC_LARGE (empty)"), and ripwire's growth ladders and short-lived big
-// arrays leave about half the peak footprint there (reports/mem-reserve.md). Included from main.cpp ONLY:
-// replacement allocation functions may be defined in exactly one translation unit.
-#if defined( __APPLE__ ) && !defined( __SANITIZE_ADDRESS__ ) && !defined( __SANITIZE_THREAD__ )
+// largealloc.h — the route behind src/infra/largealloc.cpp: a block of kMinBytes or more gets its own mmap region and
+// goes back to the OS at once on delete. Only the mechanism lives here (no replaced operator), so
+// test/largeallocfix/largealloc_test.cpp can drive it with a tiny table. Why it exists: largealloc.cpp.
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <new>
 #include <sys/mman.h>
 
 namespace rw::largealloc
 {
-constexpr std::size_t kMinBytes = 256 * 1024;   // below this the zone's own small/medium paths are fine
-constexpr std::size_t kHeader   = 16;           // region size, keeps the user pointer 16-byte aligned
-constexpr std::size_t kPage     = 16384;
-constexpr std::size_t kSlots    = std::size_t( 1 ) << 16;   // live large blocks at once: dozens in practice
+constexpr std::size_t kMinBytes   = 256 * 1024;   // below this the zone's small and medium paths keep working as they do
+constexpr std::size_t kHeader     = 16;           // holds the region size; 16 keeps the user pointer at the default new alignment
+constexpr std::size_t kRoundTo    = 16384;        // the largest page size of a target (arm64 macOS); on 4 KiB pages it only rounds up
+constexpr std::size_t kPageFilter = 4095;         // regions start on a page of at least 4 KiB, whatever the architecture
+constexpr std::size_t kMaxRouted  = std::size_t( -1 ) / 2;   // keeps the rounding below from wrapping; malloc then refuses the size
 
-// Which user pointers are ours: lock-free open addressing, 0 = never used, 1 = tombstone. A pointer whose
-// low 14 bits are not kHeader cannot be ours (regions are page aligned), so delete of an ordinary block
-// never reads the table.
-inline std::atomic<std::uint64_t>* slots()
+// Which user pointers are routed: lock-free open addressing over the address alone. 0 = never used, 1 = free again.
+// A slot never returns to 0, so a probe that stops at 0 cannot have skipped a live pointer. Only the block's owner
+// forgets it, and the address cannot be mapped again until after the forget, so a pointer is in the table at most once.
+// Full, or ProbeLimit slots busy from its home: remember() says no and the block comes from malloc, as a smaller one
+// would; nothing is lost but that block's early return to the OS.
+template <std::size_t Slots, std::size_t ProbeLimit>
+class BlockTable
 {
-    static auto* t = static_cast<std::atomic<std::uint64_t>*>( ::mmap( nullptr, sizeof( std::uint64_t ) * kSlots, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 ) );
-    return t == MAP_FAILED ? nullptr : t;
-}
-inline std::size_t home( std::uint64_t p ) { return static_cast<std::size_t>( ( ( p >> 14 ) * 0x9E3779B97F4A7C15ull ) >> 40 ) & ( kSlots - 1 ); }
-inline bool remember( std::uint64_t p )
-{
-    auto* t = slots();
-    for( std::size_t h = t == nullptr ? kSlots : home( p ), n = 0; n < 4096; h = ( h + 1 ) & ( kSlots - 1 ), ++n )
-    {
-        std::uint64_t e = t[ h ].load( std::memory_order_relaxed );
-        if( ( e == 0 || e == 1 ) && t[ h ].compare_exchange_strong( e, p ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-inline bool forget( std::uint64_t p )
-{
-    auto* t = slots();
-    for( std::size_t h = t == nullptr ? kSlots : home( p ), n = 0; n < 4096; h = ( h + 1 ) & ( kSlots - 1 ), ++n )
-    {
-        std::uint64_t e = t[ h ].load( std::memory_order_relaxed );
-        if( e == 0 )
-        {
-            return false;
-        }
-        if( e == p )
-        {
-            return t[ h ].compare_exchange_strong( e, 1 );
-        }
-    }
-    return false;
-}
-}   // namespace rw::largealloc
+    static_assert( ( Slots & ( Slots - 1 ) ) == 0 );
+    std::atomic<std::uint64_t> m_slots[ Slots ] {};
 
-void* operator new( std::size_t n )
-{
-    static const bool on = [] { const char* v = std::getenv( "RW_A" ); return v == nullptr || v[ 0 ] != '0'; }();
-    if( n >= rw::largealloc::kMinBytes && on )
+    static constexpr std::size_t home( std::uint64_t p ) noexcept
     {
-        const std::size_t total = ( n + rw::largealloc::kHeader + rw::largealloc::kPage - 1 ) & ~( rw::largealloc::kPage - 1 );
-        void*             b     = ::mmap( nullptr, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
-        if( b != MAP_FAILED )
+        return static_cast<std::size_t>( ( ( p >> 12 ) * 0x9E3779B97F4A7C15ull ) >> 32 ) & ( Slots - 1 );
+    }
+
+public:
+    bool remember( std::uint64_t p ) noexcept
+    {
+        std::size_t h = home( p );
+        for( std::size_t n = 0; n < ProbeLimit; ++n, h = ( h + 1 ) & ( Slots - 1 ) )
         {
-            *static_cast<std::size_t*>( b ) = total;
-            void* p = static_cast<char*>( b ) + rw::largealloc::kHeader;
-            if( rw::largealloc::remember( reinterpret_cast<std::uint64_t>( p ) ) )
+            std::uint64_t e = m_slots[ h ].load( std::memory_order_relaxed );
+            if( ( e == 0 || e == 1 ) && m_slots[ h ].compare_exchange_strong( e, p ) )
             {
-                return p;
+                return true;
             }
-            ::munmap( b, total );   // table full: fall through to malloc
         }
+        return false;
     }
-    if( void* p = std::malloc( n != 0 ? n : 1 ) )
+    bool forget( std::uint64_t p ) noexcept
+    {
+        std::size_t h = home( p );
+        for( std::size_t n = 0; n < ProbeLimit; ++n, h = ( h + 1 ) & ( Slots - 1 ) )
+        {
+            const std::uint64_t e = m_slots[ h ].load( std::memory_order_relaxed );
+            if( e == 0 )
+            {
+                return false;
+            }
+            if( e == p )
+            {
+                m_slots[ h ].store( 1 );
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+// nullptr = not routed (too small, too large, mmap refused, table busy): the caller falls back to malloc.
+template <class Table>
+inline void* allocate( Table& table, std::size_t n ) noexcept
+{
+    if( n < kMinBytes || n > kMaxRouted )
+    {
+        return nullptr;
+    }
+    const std::size_t total = ( n + kHeader + kRoundTo - 1 ) & ~( kRoundTo - 1 );
+    void*             b     = ::mmap( nullptr, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
+    if( b == MAP_FAILED )
+    {
+        return nullptr;
+    }
+    *static_cast<std::size_t*>( b ) = total;
+    char* p                         = static_cast<char*>( b ) + kHeader;
+    if( table.remember( reinterpret_cast<std::uint64_t>( p ) ) )
     {
         return p;
     }
-    throw std::bad_alloc();
+    ::munmap( b, total );
+    return nullptr;
 }
-void operator delete( void* p ) noexcept
+
+// true = p was routed and is unmapped. Any other block returns false without the table being read in most cases: a
+// routed pointer sits exactly kHeader into a page, so only 1 in 256 of the 16-byte-aligned ordinary pointers probes.
+template <class Table>
+inline bool release( Table& table, void* p ) noexcept
 {
-    if( p == nullptr )
+    if( ( reinterpret_cast<std::uintptr_t>( p ) & kPageFilter ) != kHeader || !table.forget( reinterpret_cast<std::uint64_t>( p ) ) )
     {
-        return;
+        return false;
     }
-    if( ( reinterpret_cast<std::uintptr_t>( p ) & ( rw::largealloc::kPage - 1 ) ) == rw::largealloc::kHeader
-        && rw::largealloc::forget( reinterpret_cast<std::uint64_t>( p ) ) )
-    {
-        void* b = static_cast<char*>( p ) - rw::largealloc::kHeader;
-        ::munmap( b, *static_cast<std::size_t*>( b ) );
-        return;
-    }
-    std::free( p );
+    void* b = static_cast<char*>( p ) - kHeader;
+    ::munmap( b, *static_cast<std::size_t*>( b ) );
+    return true;
 }
-void operator delete( void* p, std::size_t ) noexcept { operator delete( p ); }
-#endif
+}   // namespace rw::largealloc
