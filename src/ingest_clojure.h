@@ -53,21 +53,6 @@ ClojureDefinitionShape clojureDefinitionShape( TSNode list, std::string_view src
     return {};
 }
 
-// Temporary inert-form filter: CONTRIBUTING slice 8a moves it onto the shared mechanism after #380 and #349 land.
-bool clojureInert( TSNode node, std::string_view src ) noexcept
-{
-    for( TSNode parent = ts_node_parent( node ); !ts_node_is_null( parent ); parent = ts_node_parent( parent ) )
-    {
-        const char* type = ts_node_type( parent );
-        if( kindIs( type, "quoting_lit" ) || kindIs( type, "syn_quoting_lit" ) || kindIs( type, "dis_expr" )
-            || ( kindIs( type, "list_lit" ) && clojureListHead( parent, src ) == "comment" ) )
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool clojureDeclarationMethod( TSNode list, std::string_view src ) noexcept
 {
     const TSNode parent = ts_node_parent( list );
@@ -81,7 +66,16 @@ bool clojureDeclarationMethod( TSNode list, std::string_view src ) noexcept
 
 bool clojureKeepCapture( TSNode role, bool isDef, std::string_view src ) noexcept
 {
-    if( clojureInert( role, src ) )
+    if( inInertRegion( role, [ & ]( TSNode ancestor, TSNode )
+    {
+        const char* type = ts_node_type( ancestor );
+        if( kindIs( type, "quoting_lit" ) || kindIs( type, "syn_quoting_lit" ) || kindIs( type, "dis_expr" )
+            || ( kindIs( type, "list_lit" ) && clojureListHead( ancestor, src ) == "comment" ) )
+        {
+            return InertBoundary::Inert;
+        }
+        return InertBoundary::None;
+    } ) )
     {
         return false;
     }
