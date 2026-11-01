@@ -288,6 +288,44 @@ printf 'export function setPhase(phase: string): void {\n  console.log(phase)\n}
 printf "import { setPhase } from './lifecycle'\n\nexport function boot(): void {\n  setPhase('booting')\n}\n\nsetPhase('starting')\n" > "$MS/src/index.ts"
 PT="$( cd "$MS" && "$BIN" "$MS" --no-cache '--pack-task=<file-scope> setPhase' 2>/dev/null )"
 case "$PT" in *'capped="0" bodyless="1"'*) ok "F10 --pack-task keeps the owner in the body set (bodyless)";; *) no "F10 the module-scope owner was dropped from the body set";; esac
+# M1-M5 (review rv-subject-anchor-delta): the flip needs a real body AND real callers
+mkfx(){ d="$TMP/m_$1"; mkdir -p "$d/src" "$d/cc"; cp "$FX/src/"p*.ts "$FX/src/fresh.ts" "$d/src/"; printf '%s' "$d"; }
+CU='#include "t.h"\nint userOne(){ return SoloThing(1); }\n'
+# M1: a declaration beside its definition in one file shares the six-candidate pool: a body past it cannot print, so the map stays
+M1="$( mkfx m1 )"
+python3 - "$M1/cc/t.h" "$M1/cc/u.cc" <<'X2'
+import sys
+open(sys.argv[1],'w').write('int SoloThing(int a);\nint SoloThing(int a) {\n' + '    a = a + 1;\n'*700 + '    return a;\n}\n')
+open(sys.argv[2],'w').write('#include "t.h"\nint userOne(){ return SoloThing(1); }\n')
+X2
+A="$( ask "$M1" 'SoloThing fresh parameter' )"; R="$( route "$A" )"
+hasnt "$R" 'dropped:' "M1 declaration + a ~10 KB definition in one file: the map stays"
+hasnt "$A" 'body omitted' "M1 the answer never claims a body it cannot print"
+M1S="$( mkfx m1s )"
+printf 'int SoloThing(int a);\nint SoloThing(int a) { return a + 41; }\n' > "$M1S/cc/t.h"; printf '%b' "$CU" > "$M1S/cc/u.cc"
+A="$( ask "$M1S" 'SoloThing fresh parameter' )"
+has "$( route "$A" )" 'dropped:' "M1 control: declaration + a small definition still flips"
+has "$A" 'int SoloThing(int a) { return a + 41; }' "M1 control: the body prints"
+# M2: a declaration-only symbol never flips
+M2="$( mkfx m2 )"; printf 'int SoloThing(int a);\n' > "$M2/cc/t.h"; printf '%b' "$CU" > "$M2/cc/u.cc"
+A="$( ask "$M2" 'SoloThing fresh parameter' )"; hasnt "$( route "$A" )" 'dropped:' "M2 C++ prototype only: no flip"
+M2T="$( mkfx m2t )"; printf 'export declare function SoloThing(a: number): number;\n' > "$M2T/src/thing.d.ts"; printf "import {SoloThing} from './thing';\nexport function userOne() { return SoloThing(1); }\n" > "$M2T/src/user.ts"
+A="$( ask "$M2T" 'SoloThing fresh parameter' )"; hasnt "$( route "$A" )" 'dropped:' "M2 TS declare function only: no flip"
+M2I="$( mkfx m2i )"; mkdir -p "$M2I/j"; printf 'interface I { int SoloThing(int a); }\n' > "$M2I/j/I.java"; printf 'class U { int userOne(I i) { return i.SoloThing(1); } }\n' > "$M2I/j/U.java"
+A="$( ask "$M2I" 'SoloThing fresh parameter' )"; hasnt "$( route "$A" )" 'dropped:' "M2 Java interface method only: no flip"
+# M3: --signatures-only prints no body and no callers: the map stays
+A="$( cd "$FX" && "$BIN" "$FX" --no-cache '--for=SoloThing fresh parameter' --signatures-only 2>/dev/null </dev/null )"
+hasnt "$( route "$A" )" 'dropped:' "M3 --signatures-only: no flip"
+has "$( route "$A" )" 'declined' "M3 --signatures-only: the declined route is disclosed"
+# M5: a function with no caller has no <callers> to trade the map for
+M5="$( mkfx m5 )"; printf 'export function SoloThing(a: number) { return a + 41; }\n' > "$M5/src/thing.ts"
+A="$( ask "$M5" 'SoloThing fresh parameter' )"; hasnt "$( route "$A" )" 'dropped:' "M5 no caller: no flip"
+# M4: a declaration in namespace a and a definition in namespace b are two functions: no flip (the body and a caller would be the other's)
+M4="$( mkfx m4 )"; mkdir -p "$M4/aaa" "$M4/zzz"
+printf 'namespace a { int SoloThing(int v); }\n' > "$M4/aaa/a.h"
+printf 'namespace b { int SoloThing(int v) { return v + 41; } }\n' > "$M4/zzz/b.cc"
+printf 'namespace a { int SoloThing(int); }\nint userOne(){ return a::SoloThing(1); }\n' > "$M4/zzz/u.cc"
+A="$( ask "$M4" 'SoloThing fresh parameter' )"; hasnt "$( route "$A" )" 'dropped:' "M4 declaration in a, definition in b: no flip"
 # determinism + well-formed
 A1="$( ask "$PY" 'prepare_setup_platform new parameter' )"; A2="$( ask "$PY" 'prepare_setup_platform new parameter' )"
 if [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ]; then ok "determinism"; else no "determinism"; fi

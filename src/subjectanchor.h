@@ -398,10 +398,12 @@ inline bool subjectAnchoredPlainWord( const IngestResult& ing, const RouteChoice
 // replaces it is one definition's body plus its callers, and nothing else. That trade is worth it only when both really print:
 //   * the anchor resolved to a definition (rc.anchorDefs): the single-anchor body allowance (kForAnchorBodyBudgetBytes) funds ITS body.
 //     A spelling the route could only read by shape ("ProcessList::insert(syntax)") binds nothing, so the body is omitted: no flip;
-//   * that definition's body fits the allowance, so it is printed and not "omitted (over budget)";
+//   * a definition carries a body (a declaration-only symbol never flips) and the span(s) fit the allowance that really funds them: one
+//     candidate gets kForAnchorBodyBudgetBytes, a declaration beside its definition shares the six-candidate pool;
 //   * the name is ONE function over the whole index, by the callers verb's own resolution (forCallerHopTargets): its callers are
 //     served and no namesake, in any directory, is a second candidate for the body. This is the class, not a path list: a copy under
-//     devtools/, ci/, examples/, deps/ or anywhere else makes the name two functions and the map stays.
+//     devtools/, ci/, examples/, deps/ or anywhere else makes the name two functions and the map stays;
+//   * at least one caller prints, and every match falls in ONE definition group (a declaration in another namespace is not this body's).
 inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, const RouteChoice& bare )
 {
     if( bare.anchorDefs.empty() )
@@ -426,19 +428,55 @@ inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, c
             }
         }
     }
-    if( defs.empty() )
+    // M2: a symbol with no definition that carries a body (a prototype, an interface method, a `declare function`) has no body to
+    // print, so the flip would trade the map for a signature and nothing else.
+    const bool anyBody = std::ranges::any_of( defs, [ & ]( NodeId id ) { return isDefinitionNotDeclaration( ing.symbols[id] ); } );
+    if( !anyBody )
     {
         return false;
     }
+    // M1: the budget that really funds the body. ONE candidate raises to kForAnchorBodyBudgetBytes; two or more (a declaration beside
+    // its definition in one file is two) share the six-candidate pool (kForAutoBodyBudgetBytes, buildForAutoBodies), so their whole
+    // spans must fit that. A byte count, not a promise about which one prints: an over-budget case keeps the map.
+    const std::size_t allowance = defs.size() == 1 ? kForAnchorBodyBudgetBytes : kForAutoBodyBudgetBytes;
+    std::size_t       spanBytes = 0;
     for( const NodeId id : defs )
     {
         const Symbol& s = ing.symbols[id];
-        if( s.endByte > s.sigStartByte && std::size_t( s.endByte - s.sigStartByte ) > kForAnchorBodyBudgetBytes )
+        spanBytes += s.endByte > s.sigStartByte ? std::size_t( s.endByte - s.sigStartByte ) : 0;
+    }
+    if( spanBytes > allowance )
+    {
+        return false;
+    }
+    const std::vector<NodeId> targets = forCallerHopTargets( ing, g, defs );
+    if( targets.empty() )
+    {
+        return false;
+    }
+    // M5: callers total >= 1, so the <callers> a flip promises exists.
+    const std::vector<NodeId> rows = oneHopCallerRows( ing, g, targets );
+    if( rows.empty() )
+    {
+        return false;
+    }
+    // M4 (cross-namespace tie): the hop resolves the SCOPED selector (`b::SoloThing`), so a bodyless declaration of the same bare name in
+    // another namespace or owner (`namespace a { int SoloThing(int); }`) is outside `targets`, yet the callers verb unions it with the
+    // definition: the body is b's and the caller row is a's. A bodyless namesake in any other scope declines the flip.
+    {
+        std::size_t unproven = 0;
+        for( const NodeId id : resolveAllByNameQualified( ing, ing.symbols[ targets.front() ].name, &unproven ) )
         {
-            return false;
+            if( ReceiverEvidence::callableKind( ing.symbols[id].kind ) && !isDefinitionNotDeclaration( ing.symbols[id] )
+                && std::ranges::find( targets, id ) == targets.end() )
+            {
+                return false;
+            }
         }
     }
-    return !forCallerHopTargets( ing, g, defs ).empty();
+    // M4: ONE definition group. A declaration in `a` and a definition in `b` are two groups the callers verb unions (the hop tolerates
+    // an untied bodyless group); the body and callers a flip would print belong to one of them. Declined: the map stays.
+    return attributeOneHopAnswer( ing, g, targets, rows, /*towardMatches=*/true ).groups.size() == 1;
 }
 
 // The route the subject reading picks, before the CONFIDENCE-ANCHOR check. `servesBodiesAndCallers`: the surface prints the anchor's
