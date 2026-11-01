@@ -12,7 +12,7 @@
 # Every arm here is one row of the honesty table in src/forunused.h, or a near miss: re-export only; called only by a test; called through a
 # string; a private helper; an overload set; the same name in two files. Each is RED on the pre-table binary b8c31789 (no block at all).
 set -u
-RIPWIRE="${RIPWIRE:-./build/ripwire}"
+RIPWIRE="${RIPWIRE_BIN:-${RIPWIRE:-./build/ripwire}}" # RIPWIRE_BIN first: pargates.py and regression.sh set it (binoverridecheck)
 case "$RIPWIRE" in /*) ;; *) RIPWIRE="$PWD/$RIPWIRE" ;; esac
 [ -x "$RIPWIRE" ] || { echo "SKIP: no binary at $RIPWIRE"; exit 0; }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
@@ -39,6 +39,10 @@ want() { # want ARM ANSWERFILE NAME VERDICT [WHY-WORD]
     case "$r" in *why=\"*"$w"*) ;; *) fail "$arm: $n wants why=$w, got: $r"; return ;; esac
   fi
   pass "$arm: $n v=$v${w:+ why=$w}"
+}
+notv() { # notv ARM ANSWERFILE NAME VERDICT : the row exists and does NOT read VERDICT
+  local r; r=$(rowof "$2" "$3")
+  case "$r" in "") fail "$1: $3 has no row" ;; *" v=\"$4\""*) fail "$1: $3 reads v=$4: $r" ;; *) pass "$1: $3 is not $4" ;; esac
 }
 norow() { # norow ARM ANSWERFILE NAME
   local r; r=$(rowof "$2" "$3")
@@ -427,6 +431,204 @@ want PG1 "$T/poly.out" shared_word unknown name
 want PG2 "$T/poly.out" poly_dead unused
 ask "$Y" "unused functions in web/app.ts" > "$T/poly2.out"
 want PG3 "$T/poly2.out" shared_word used
+
+# ---- fix round 1 (review F2-F6): every arm below is RED on the head before this round ----
+# F2: a caller in a file the index does not take (.vue, .svelte, .ipp, Procfile, a template, vendor/, dist/, a file past the index size limit)
+U="$T/f2"; mkdir -p "$U/pkg" "$U/views" "$U/web" "$U/vendor/lib" "$U/dist" "$U/gen"
+cat > "$U/pkg/t.py" <<'E'
+def vue_only_helper():
+    return 1
+def svelte_only_helper():
+    return 2
+def ipp_only_thing():
+    return 3
+def proc_factory():
+    return 4
+def vendor_only_fn():
+    return 5
+def dist_only_fn():
+    return 6
+def big_only_thing():
+    return 7
+def truly_dead_f2():
+    return 8
+def tmpl_only_fn():
+    return 9
+E
+printf '<script>\nimport { vue_only_helper } from "../pkg/t";\nvue_only_helper();\n</script>\n' > "$U/views/a.vue"
+printf '<script>\n  svelte_only_helper();\n</script>\n' > "$U/views/b.svelte"
+printf 'template <class T> int m() { return ipp_only_thing(); }\n' > "$U/web/m.ipp"
+printf 'web: gunicorn pkg.t:proc_factory\n' > "$U/Procfile"
+printf 'call vendor_only_fn now\n' > "$U/vendor/lib/conf.tmpl"
+printf 'var x = dist_only_fn();\n' > "$U/dist/bundle.min.cfg"
+printf '{{ tmpl_only_fn }}\n' > "$U/web/page.j2"
+python3 - "$U/gen/huge.dat" <<'PY'
+import sys
+with open(sys.argv[1],"w") as f:
+    f.write("x = 1\n" * 1000000)
+    f.write("big_only_thing()\n")
+PY
+ask "$U" "unused functions in pkg/t.py" > "$T/f2.out"
+for n in vue_only_helper svelte_only_helper ipp_only_thing proc_factory vendor_only_fn dist_only_fn big_only_thing tmpl_only_fn; do want F2a "$T/f2.out" $n unknown name; done
+want F2b "$T/f2.out" truly_dead_f2 unused                 # the walk does not blanket-hedge: a name nowhere stays unused
+U2="$T/f2u"; mkdir -p "$U2/pkg" "$U2/gen"
+printf 'def dead_but_unseen():\n    return 1\n' > "$U2/pkg/t.py"
+python3 -c "
+f=open('$U2/gen/blob.txtdata','w'); f.truncate(40<<20); f.close()"
+ask "$U2" "unused functions in pkg/t.py" > "$T/f2u.out"
+want F2c "$T/f2u.out" dead_but_unseen unknown unseen    # a text file too large to read: absence is not proven
+grep -q ' unseen="[1-9]' "$T/f2u.out" && pass "F2d: the block says unseen=N" || fail "F2d: no unseen= on the block"
+# F3: `#` opens a comment only where the language facts say so
+H="$T/f3"; mkdir -p "$H/src" "$H/py" "$H/web"
+cat > "$H/src/t.rs" <<'E'
+pub fn parse_port_thing() -> u16 { 1 }
+pub fn rs_commented_only() -> u16 { 2 }
+E
+cat > "$H/src/a.rs" <<'E'
+#[arg(long, value_parser = crate::t::parse_port_thing)]
+struct A {}
+// rs_commented_only is not a use
+E
+cat > "$H/py/t.py" <<'E'
+def py_commented_only():
+    return 1
+def py_code_after_hash():
+    return 2
+E
+printf '# py_commented_only is not a use\nx = 1  # trailing words are not read as code either\n' > "$H/py/u.py"
+printf 'print(1)\n' > "$H/py/v.py"
+cat > "$H/web/h.ts" <<'E'
+export function tsHashHelper() { return 1; }
+E
+cat > "$H/web/q.ts" <<'E'
+import { tsHashHelper } from "./h";
+class Q {
+    #cb = tsHashHelper;
+}
+E
+cat > "$H/web/t.c" <<'E'
+int hxx_only_thing(void) { return 1; }
+E
+printf '#define HX hxx_only_thing()\n' > "$H/web/m.hxx"
+ask "$H" "unused functions in src/t.rs" > "$T/f3rs.out"
+want F3a "$T/f3rs.out" parse_port_thing unknown name
+want F3b "$T/f3rs.out" rs_commented_only unused             # a // comment is still a comment
+ask "$H" "unused functions in py/t.py" > "$T/f3py.out"
+want F3c "$T/f3py.out" py_commented_only unused             # Python's `#` is a comment (langFacts hashComment)
+ask "$H" "unused exports in web/h.ts" > "$T/f3ts.out"
+want F3d "$T/f3ts.out" tsHashHelper unknown name           # a JS/TS `#private` field line is code
+ask "$H" "unused functions in web/t.c" > "$T/f3c.out"
+want F3e "$T/f3c.out" hxx_only_thing unknown name           # a `#define` body in any non-hash language is code
+# F4: one-character names are scanned
+O="$T/f4"; mkdir -p "$O/pkg" "$O/go"
+printf 'K = 5\ndef f():\n    return 1\ndef dead_plain_f4():\n    return 2\n' > "$O/pkg/t.py"
+printf 'from pkg.t import K, f\nprint(K, f())\n' > "$O/pkg/other.py"
+printf 'package x\n\nfunc F() int { return 1 }\n\ntype Q struct{}\n' > "$O/go/x.go"
+printf 'package main\n\nimport "ex/go"\n\nvar _ = x.F\n' > "$O/go/main.go"
+ask "$O" "unused functions in pkg/t.py" > "$T/f4.out"
+notv F4a "$T/f4.out" K unused
+notv F4b "$T/f4.out" f unused
+want F4c "$T/f4.out" dead_plain_f4 unused
+ask "$O" "unused functions in go/x.go" > "$T/f4go.out"
+notv F4d "$T/f4go.out" F unused
+# F5: a library's public API is never `test-only` or `unused` on the strength of this tree alone
+L="$T/f5"; mkdir -p "$L/lib/pkg" "$L/lib/tests" "$L/app/pkg" "$L/app/tests" "$L/js/src" "$L/js/test" "$L/jsapp/src"
+printf '[project]\nname = "lib"\n' > "$L/lib/pyproject.toml"
+printf 'def public_api_fn():\n    return 1\ndef public_api_untested():\n    return 2\n' > "$L/lib/pkg/api.py"
+printf 'def impl_fn():\n    return 3\n' > "$L/lib/pkg/_impl.py"
+printf 'from pkg.api import public_api_fn\ndef test_it():\n    assert public_api_fn() == 1\n' > "$L/lib/tests/test_api.py"
+printf '[tool.ruff]\nline-length = 100\n' > "$L/app/pyproject.toml"
+printf 'def app_fn():\n    return 1\n' > "$L/app/pkg/mod.py"
+printf 'from pkg.mod import app_fn\ndef test_it():\n    assert app_fn() == 1\n' > "$L/app/tests/test_mod.py"
+printf '{"name":"jslib","main":"dist/index.js","version":"1.0.0"}\n' > "$L/js/package.json"
+printf 'export function tsLibApi() { return 1; }\n' > "$L/js/src/api.ts"
+printf 'export type TsTypeThing = { a: number };\n' > "$L/js/src/types.ts"
+printf 'export type * from "./types";\n' > "$L/js/src/index.ts"
+printf 'import { tsLibApi } from "../src/api";\ntsLibApi();\n' > "$L/js/test/api.test.ts"
+printf '{"name":"jsapp","private":true,"main":"x.js"}\n' > "$L/jsapp/package.json"
+printf 'export function tsAppFn() { return 1; }\n' > "$L/jsapp/src/api.ts"
+printf 'import { tsAppFn } from "../src/api";\ntsAppFn();\n' > "$L/jsapp/src/api.test.ts"
+ask "$L/lib" "unused functions in pkg/api.py" > "$T/f5py.out"
+want F5a "$T/f5py.out" public_api_fn unknown api
+want F5b "$T/f5py.out" public_api_untested unknown api
+ask "$L/lib" "unused functions in pkg/_impl.py" > "$T/f5pyp.out"
+[ -z "$(rowof "$T/f5pyp.out" impl_fn)" ] || want F5c "$T/f5pyp.out" impl_fn unused
+ask "$L/app" "unused functions in pkg/mod.py" > "$T/f5app.out"
+want F5d "$T/f5app.out" app_fn test-only                     # a pyproject with no [project] builds nothing: not a library
+ask "$L/js" "unused exports in src/api.ts" > "$T/f5ts.out"
+want F5e "$T/f5ts.out" tsLibApi unknown api
+ask "$L/js" "unused exports in src/types.ts" > "$T/f5tt.out"
+want F5f "$T/f5tt.out" TsTypeThing unknown barrel           # `export type *` is a barrel
+ask "$L/jsapp" "unused exports in src/api.ts" > "$T/f5ja.out"
+want F5g "$T/f5ja.out" tsAppFn test-only                    # "private": true publishes nothing
+grep -q 'never live' "$T/f5py.out" && fail "F5h: the legend still says never live" || pass "F5h: no 'never live' in the legend"
+# F6: routes by path, registries, string-built names, directory imports, a short stem aimed at a module
+N="$T/f6"; mkdir -p "$N/app/about" "$N/src/pages" "$N/pkg/ext" "$N/modules" "$N/pkg2"
+printf 'export default function AboutRoutePage() { return 1; }\nexport function generateMetadata() { return 2; }\n' > "$N/app/about/page.tsx"
+printf 'export function HomePageComponent() { return 1; }\nexport function getServerSideProps() { return 2; }\n' > "$N/src/pages/home.tsx"
+cat > "$N/pkg/reg.py" <<'E'
+REG = []
+class Base:
+    def __init_subclass__(cls):
+        REG.append(cls)
+class AutoPlugin(Base):
+    pass
+class PlainNoBase:
+    pass
+E
+cat > "$N/pkg/cat.py" <<'E'
+def concat_handle_alpha():
+    return 1
+def plainjoin_one():
+    return 2
+E
+cat > "$N/pkg/cat_use.py" <<'E'
+import pkg.cat as t
+def go(kind):
+    return getattr(t, "concat_handle" + kind)()
+
+
+
+
+
+
+
+
+
+note = "plainjoin" + "_x"
+E
+printf 'export class Widget {\n  renderAlpha() { return 1; }\n  renderPlain() { return 2; }\n}\nexport function modAlpha() { return 3; }\nexport function modLiteral() { return 4; }\n' > "$N/modules/w.ts"
+cat > "$N/modules/use.ts" <<'E'
+import { Widget } from "./w";
+export async function load(kind: string, key: string) {
+  const w = new Widget() as any;
+  const f = w["render" + kind];
+  const m = await import(`./modules/${kind}`);
+  return [f, m[key]()];
+}
+E
+printf 'def setup_alpha():\n    return 1\n' > "$N/pkg/ext/alpha.py"
+printf 'import importlib\ndef load(name):\n    return importlib.import_module("pkg.ext." + name)\n' > "$N/pkg/loader.py"
+printf 'def is_private_addr(x):\n    return x\ndef is_free_other(x):\n    return x\n' > "$N/pkg2/isx_t.py"
+printf 'import pkg2.isx_t as n\ndef probe(k, x):\n    return getattr(n, f"is_{k}")(x)\n' > "$N/pkg2/probe.py"
+ask "$N" "unused exports in app/about/page.tsx" > "$T/f6a.out"
+want F6a "$T/f6a.out" generateMetadata unknown framework
+ask "$N" "unused exports in src/pages/home.tsx" > "$T/f6b.out"
+want F6b "$T/f6b.out" getServerSideProps unknown framework
+ask "$N" "unused classes in pkg/reg.py" > "$T/f6c.out"
+want F6c "$T/f6c.out" AutoPlugin unknown dispatch
+want F6d "$T/f6c.out" PlainNoBase unused                    # a class with no base is not registered by a hook
+want PY27 "$T/py.out" Derived unused                        # near miss: no hook anywhere in that tree, a base alone hedges nothing
+ask "$N" "unused functions in pkg/cat.py" > "$T/f6e.out"
+want F6e "$T/f6e.out" concat_handle_alpha unknown built-name
+want F6f "$T/f6e.out" plainjoin_one unused                  # a joined literal with no lookup near it builds no name
+ask "$N" "unused exports in modules/w.ts" > "$T/f6g.out"
+want F6g "$T/f6g.out" modAlpha unknown built-name
+ask "$N" "unused functions in pkg/ext/alpha.py" > "$T/f6h.out"
+want F6h "$T/f6h.out" setup_alpha unknown built-name
+ask "$N" "unused functions in pkg2/isx_t.py" > "$T/f6i.out"
+want F6i "$T/f6i.out" is_private_addr unknown built-name   # the lookup's object is the target module: no stem-length rule
+grep -q 'kForUnusedForeignStem' "$(dirname "$0")/../src/forunused.h" 2>/dev/null && fail "F6j: the stem-length rule is back" || pass "F6j: no stem-length rule"
 
 # ---- the trigger, on the words of the stored argv ----
 for q in "unused functions in pkg/util.py" "pkg/util.py unused functions" "which functions in pkg/util.py are never called" \

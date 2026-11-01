@@ -10,9 +10,10 @@
 //              Proves one such caller. Not that the caller itself is live.
 //   unknown    something may reach it that this tool cannot follow; why= names each reason. NOT a claim either way.
 //   file-only  only same-file references, none chained from a used or unknown def. Proves no reference from another file.
-//   test-only  every reference found is in a test. Proves no non-test reference in this tree; a test-only caller is never live.
-//   unused     the name appears nowhere in this tree outside its own definition, its declarations and comments, and no row of the table below
-//              applies. Proves that about this tree only: a consumer outside the tree is not seen (why=api names the surfaces that have them).
+//   test-only  every reference found is in a test. Proves no non-test reference in this tree, nothing about a consumer outside it (why=api).
+//   unused     the name appears in no text file under the root (indexed or not, vendored or generated included) outside its own definition, its
+//              declarations and comments, and no row of the table below applies. Proves that about this tree only: a consumer outside it is
+//              not seen (why=api names the surfaces that have them). A file the scan could not read makes every such row `unknown why=unseen`.
 // The evidence runs in that order and a stronger word never hides a hedge: `used` wins, then any why= makes `unknown`.
 //
 // WHY THE TEXT SCAN. The graph is a floor: a member call on an unproved receiver, a table, a string lookup are no edge. So no row says
@@ -34,6 +35,10 @@
 //   api          a surface consumers outside this tree may use                          -       -    exported outside internal/, not package main  pub in a lib crate  a header under include/
 //   members      its members are reached without naming it: a member row has evidence   x       x    x    x     x     (and every unscoped C/C++ enum)
 //   manifest     a build or package file beside it names it                             pyproject, setup.cfg  package.json  -  Cargo.toml  CMakeLists, Makefile, BUILD
+//   unseen       a text file under the root could not be read, or the walk hit its cap   x       x    x    x     x     (the block says unseen=N)
+// Beyond the table: a Python class whose base defines `__init_subclass__` or a metaclass reads dispatch; a file under a route directory
+// (pages/, app/, routes/, views.py ...) reads framework; a literal joined by `+` or `%` beside a lookup is a built-name stem; a dynamic
+// import of a directory (`import(`./routes/${n}`)`, `import_module("pkg.plugins." + n)`) reads built-name on every def of the directory.
 //
 // PRESENT-ONLY: no cue or no file, no block, and the answer is byte-identical. The block takes its own allowance, like the file page: it draws
 // nothing from the bytes that fund bodies. Caps are runaway guards, each cut disclosed.
@@ -41,7 +46,9 @@
 #include "forfilepage.h" // resolveFileAnchors, FileAnchor, filepage::fileDefsInLineOrder, trimWordPunct
 #include "infra/namesplit.h" // isIdentChar
 #include "graph.h" // Graph, edgeNameOnly, declinedCallsNaming, graphCountFloorAttrXml
+#include "langfacts.h" // langFacts(l).hashComment
 #include "lexical.h" // splitRouteWords, routeLower
+#include "lintrules.h" // langOfPath
 #include "model.h"
 #include "quality.h" // pythonDecoratedDef, pythonRunnerRoot, languageInvokedSymbol, symbolHasStaticLinkage
 #include "serialize.h" // escapeXml
@@ -52,6 +59,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <span>
@@ -68,7 +76,9 @@ inline constexpr std::size_t kForUnusedRowsPerFile = 150; // printed rows of one
 inline constexpr std::size_t kForUnusedDirFiles = 6; // files of a named directory given a table
 inline constexpr std::size_t kForUnusedMaxBytes = 32768; // the whole block: no further file starts past it
 inline constexpr std::size_t kForUnusedSitesShown = 2; // at= sites on one row
-inline constexpr std::size_t kForUnusedForeignStem = 5; // a stem shorter than this, in another file, hedges only members (see NameScan::markPrefix)
+inline constexpr std::size_t kForUnusedExtraFileBytes = std::size_t( 32 ) << 20; // one unindexed text file; a larger one is unseen
+inline constexpr std::size_t kForUnusedExtraBytes = std::size_t( 768 ) << 20; // all unindexed text read in one answer; past it the rest is unseen
+inline constexpr std::size_t kForUnusedExtraFiles = 400000; // unindexed files visited in one answer
 inline constexpr std::size_t kForUnusedMinPrefix = 3; // a built-name prefix shorter than this names too much to read as evidence
 
 inline bool forUnusedOn()
@@ -95,9 +105,10 @@ enum Why : std::uint16_t
     kWhyApi = 1024,
     kWhyManifest = 2048,
     kWhyInFile = 4096,
-    kWhyMembers = 8192
+    kWhyMembers = 8192,
+    kWhyUnseen = 16384
 };
-inline constexpr std::array<std::pair<std::uint16_t, std::string_view>, 14> kWhyWords = { { { kWhyName, "name" }, { kWhyByName, "by-name" }, { kWhyDeclined, "declined" }, { kWhyValue, "value" }, { kWhyString, "string" }, { kWhyBuilt, "built-name" }, { kWhyImport, "import" }, { kWhyBarrel, "barrel" }, { kWhyDispatch, "dispatch" }, { kWhyFramework, "framework" }, { kWhyApi, "api" }, { kWhyManifest, "manifest" }, { kWhyInFile, "in-file" }, { kWhyMembers, "members" } } };
+inline constexpr std::array<std::pair<std::uint16_t, std::string_view>, 15> kWhyWords = { { { kWhyName, "name" }, { kWhyByName, "by-name" }, { kWhyDeclined, "declined" }, { kWhyValue, "value" }, { kWhyString, "string" }, { kWhyBuilt, "built-name" }, { kWhyImport, "import" }, { kWhyBarrel, "barrel" }, { kWhyDispatch, "dispatch" }, { kWhyFramework, "framework" }, { kWhyApi, "api" }, { kWhyManifest, "manifest" }, { kWhyInFile, "in-file" }, { kWhyMembers, "members" }, { kWhyUnseen, "unseen" } } };
 
 // isTestPath plus the support trees a test run alone loads. A caller here reads as a test: row at= names the path, so a reader can see it.
 inline bool isTestLikePath( std::string_view p ) noexcept
@@ -349,13 +360,43 @@ inline bool pythonDecoratorsMayRegister( std::string_view src, std::size_t lineS
     return false;
 }
 
+// A framework that routes by FILE PATH calls the defs of a file nothing in the tree names: Next, Nuxt, SvelteKit, Remix and Astro (pages/, app/, routes/,
+// page.tsx, +server.ts), Django and Flask conventions (views.py, urls.py, admin.py, management/commands/). These are framework conventions, not rows of any
+// corpus. A path component that matches reads framework on every public def of the file.
+inline bool frameworkRoutedPath( std::string_view rel, Lang lang ) noexcept
+{
+    static constexpr std::array<std::string_view, 12> kJsDirs = { "pages", "app", "routes", "route", "api", "layouts", "middleware", "handlers", "controllers", "plugins", "endpoints", "server" };
+    static constexpr std::array<std::string_view, 12> kJsStems = { "page", "layout", "route", "loading", "error", "template", "middleware", "+page", "+layout", "+server", "root", "entry.server" };
+    static constexpr std::array<std::string_view, 9> kPyDirs = { "commands", "templatetags", "migrations", "routes", "api", "handlers", "plugins", "blueprints", "views" };
+    static constexpr std::array<std::string_view, 12> kPyStems = { "views", "urls", "admin", "apps", "signals", "consumers", "routing", "tasks", "serializers", "forms", "models", "wsgi" };
+    const bool js = std::ranges::contains( kJsFamilyLangs, lang );
+    if( !js && lang != Lang::Python )
+    {
+        return false;
+    }
+    const std::size_t slash = rel.rfind( '/' );
+    std::string_view dirs = slash == std::string_view::npos ? std::string_view {} : rel.substr( 0, slash );
+    while( !dirs.empty() )
+    {
+        const std::size_t cut = dirs.rfind( '/' );
+        const std::string_view part = cut == std::string_view::npos ? dirs : dirs.substr( cut + 1 );
+        if( js ? std::ranges::contains( kJsDirs, part ) : std::ranges::contains( kPyDirs, part ) )
+        {
+            return true;
+        }
+        dirs = cut == std::string_view::npos ? std::string_view {} : dirs.substr( 0, cut );
+    }
+    const std::string_view stem = mention_detail::stripExt( mention_detail::baseNameOf( rel ) );
+    return js ? std::ranges::contains( kJsStems, stem ) : std::ranges::contains( kPyStems, stem );
+}
+
 inline std::uint16_t languageHedges( const Symbol& s, std::string_view rel, std::string_view src, const Symbol* owner, bool rustLibCrate )
 {
     std::uint16_t why = 0;
     const std::size_t ls = lineStartOf( src, s.sigStartByte );
     const std::string_view above = lineBefore( src, ls );
     const bool isMethod = isMemberDef( s );
-    if( s.name == "main" )
+    if( s.name == "main" || frameworkRoutedPath( rel, s.lang ) )
     {
         why |= kWhyFramework;
     }
@@ -451,6 +492,7 @@ struct Row
     bool isPublic = false;
     std::string_view ownerName; // the class of a member def, when this file holds it
     bool member = false; // a def of it is a member: any object's attribute lookup may reach it
+    bool derived = false; // a Python class with a base: an `__init_subclass__` or metaclass hook in the tree may register it
     bool top = false; // the file's own top-level code calls it
     bool viaFile = false; // `used` came down an in-file chain
     std::uint32_t outPlain = 0; // non-test callers in another file, bound by more than the name
@@ -521,10 +563,22 @@ inline constexpr auto opensWithAny = []( std::string_view t, std::span<const std
 { return std::ranges::contains( heads, true, [t]( std::string_view head )
                                 { return t.starts_with( head ); } ); };
 
+// `hashComments` comes from the language facts (langFacts(l).hashComment): `#` is a comment in Python, shell, Ruby and the like, and is NOT one in Rust
+// attributes, C/C++ directives or JS/TS private fields. A language no table row knows reads `#` as code.
+// `/* note */ call()` is code after the comment: only a line that ends with its comment is skipped whole.
 inline bool isCommentLine( std::string_view line, bool hashComments ) noexcept
 {
     static constexpr std::array<std::string_view, 4> kHeads = { "//", "/*", "* ", "*/" };
     const std::string_view t = trimWs( line );
+    if( t.starts_with( "/*" ) || t.starts_with( "*/" ) )
+    {
+        const std::size_t close = t.starts_with( "*/" ) ? 0 : t.find( "*/", 2 );
+        if( close != std::string_view::npos )
+        {
+            const std::string_view rest = trimWs( t.substr( close + 2 ) );
+            return rest.empty() || rest.starts_with( "//" );
+        }
+    }
     return opensWithAny( t, kHeads ) || t == "*" || ( hashComments && t.starts_with( '#' ) );
 }
 
@@ -540,17 +594,70 @@ inline bool isDocPath( std::string_view p ) noexcept
 
 inline bool isIdent( char c ) noexcept { return namesplit::isIdentChar( c ) || c == '$'; }
 
+inline std::string_view stemOf( std::string_view rel ) noexcept
+{
+    const std::string_view base = mention_detail::baseNameOf( rel );
+    return mention_detail::stripExt( base );
+}
+
+// How a lookup near a built name reaches things: an OBJECT lookup (`getattr(obj, ...)`, `obj[...]`, MethodByName) reaches the members of that object, a MODULE
+// lookup (`globals()`, `import_module`, `dlsym`) reaches the free defs of a module. A stem built beside an object lookup in another file reads on members only,
+// unless that file names the target's module (then the object may be the module).
+enum class Lookup : std::uint8_t
+{
+    None,
+    Object,
+    Module
+};
+
+// The module name a file is imported by: its stem, or its directory's when the stem is `index`, `__init__` or `mod`.
+inline std::string moduleStem( std::string_view rel )
+{
+    std::string_view stem = stemOf( rel );
+    if( stem == "index" || stem == "__init__" || stem == "mod" )
+    {
+        const std::size_t sl = rel.rfind( '/' );
+        stem = sl == std::string_view::npos ? stem : mention_detail::baseNameOf( rel.substr( 0, sl ) );
+    }
+    return std::string( stem );
+}
+
+inline std::string withoutExt( std::string_view rel )
+{
+    const std::size_t sl = rel.rfind( '/' );
+    const std::size_t dot = rel.rfind( '.' );
+    return std::string( dot != std::string_view::npos && ( sl == std::string_view::npos || dot > sl ) ? rel.substr( 0, dot ) : rel );
+}
+
+// Does `src` hold `word` as a whole identifier?
+inline bool holdsWord( std::string_view src, std::string_view word ) noexcept
+{
+    for( std::size_t p = src.find( word ); p != std::string_view::npos; p = src.find( word, p + 1 ) )
+    {
+        if( ( p == 0 || !isIdent( src[p - 1] ) ) && ( p + word.size() >= src.size() || !isIdent( src[p + word.size()] ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The one pass: every word of every scanned file, looked up in the table's sorted names. A two-byte prefilter keeps the lookup off most words.
 class NameScan
 {
 public:
-    NameScan( std::span<Row> rows, std::span<const std::uint32_t> targetFiles ) : rows_( rows ), targets_( targetFiles ), first2_( 1u << 16, 0 )
+    NameScan( std::span<Row> rows, std::span<const std::uint32_t> targetFiles, std::vector<std::string> targetModules, std::vector<std::string> targetStems )
+        : rows_( rows ), targets_( targetFiles ), first2_( 1u << 16, 0 ), modules_( std::move( targetModules ) ), stems_( std::move( targetStems ) )
     {
         for( const Row& r : rows_ )
         {
             if( r.name.size() >= 2 )
             {
                 first2_[key2( r.name[0], r.name[1] )] = 1;
+            }
+            else if( r.name.size() == 1 )
+            {
+                single_[static_cast<unsigned char>( r.name[0] )] = 1;
             }
             names_.push_back( r.name );
         }
@@ -567,7 +674,7 @@ public:
             return; // a doc naming a function is no use of it
         }
         const bool cFamily = path.ends_with( ".c" ) || path.ends_with( ".h" ) || path.ends_with( ".cc" ) || path.ends_with( ".cpp" ) || path.ends_with( ".hpp" ) || path.ends_with( ".cxx" ) || path.ends_with( ".hh" );
-        const bool hashComments = !cFamily;
+        const bool hashComments = langFacts( langOfPath( path ) ).hashComment; // an unknown language reads `#` as code
         std::size_t lineStart = 0;
         std::uint32_t lineNo = 1;
         bool commentLine = false;
@@ -592,10 +699,10 @@ public:
             {
                 if( ( c == '"' || c == '\'' || c == '`' ) && !isTest )
                 {
-                    i = quoted( i, src, fileId, lineNo, isDoc );
+                    i = quoted( i, src, fileId, lineNo );
                     continue;
                 }
-                if( c == '#' && cFamily && i + 1 < src.size() && src[i + 1] == '#' && !isTest )
+                if( c == '#' && !hashComments && i + 1 < src.size() && src[i + 1] == '#' && !isTest )
                 {
                     pasted( i, src );
                 }
@@ -608,7 +715,11 @@ public:
                 ++e;
             }
             const std::string_view word = src.substr( i, e - i );
-            if( word.size() >= 2 && first2_[key2( word[0], word[1] )] != 0 )
+            if( word.size() >= 6 && !isTest && !manifest )
+            {
+                noteHook( word, e, src );
+            }
+            if( word.size() == 1 ? single_[static_cast<unsigned char>( word[0] )] != 0 : first2_[key2( word[0], word[1] )] != 0 )
             {
                 if( Row* r = find( word ); r != nullptr )
                 {
@@ -632,6 +743,22 @@ public:
         }
     }
 
+    // After every file is read: what the whole tree said about all the rows at once.
+    void finish() noexcept
+    {
+        for( Row& r : rows_ )
+        {
+            if( dynamicDir_ )
+            {
+                r.why |= kWhyBuilt; // a directory import with a computed name: any module of it, any def of the module
+            }
+            if( registryHook_ && r.derived )
+            {
+                r.why |= kWhyDispatch; // `__init_subclass__` or a metaclass may register a subclass at its definition
+            }
+        }
+    }
+
 private:
     static std::size_t key2( char a, char b ) noexcept { return ( std::size_t( static_cast<unsigned char>( a ) ) << 8 ) | static_cast<unsigned char>( b ); }
 
@@ -641,13 +768,20 @@ private:
         return it != names_.end() && *it == w ? &rows_[std::size_t( it - names_.begin() )] : nullptr;
     }
 
-    bool shortForeignStem( std::string_view stem, std::uint32_t fileId ) const noexcept
+    // Does another file name the target's module (an import, an alias)? Then an object it looks names up on may be that module.
+    bool namesTargetModule( std::uint32_t fileId, std::string_view src )
     {
-        return stem.size() < kForUnusedForeignStem && !std::ranges::contains( targets_, fileId );
+        if( mentionFile_ != fileId )
+        {
+            mentionFile_ = fileId;
+            mentionVal_ = std::ranges::any_of( stems_, [&]( const std::string& st )
+                                               { return !st.empty() && holdsWord( src, st ); } );
+        }
+        return mentionVal_;
     }
 
     // a stem builds a NAME only near a lookup that takes one: `f"is_{x}"` alone is a log line
-    static bool nearDynamicLookup( std::string_view src, std::size_t at ) noexcept
+    static Lookup nearDynamicLookup( std::string_view src, std::size_t at ) noexcept
     {
         std::size_t b = at;
         for( int up = 0; up < 3 && b > 0; ++up )
@@ -661,19 +795,34 @@ private:
             e = src.find( '\n', e + 1 );
         }
         const std::string_view near = src.substr( b, e == std::string_view::npos ? std::string_view::npos : e - b );
-        static constexpr std::array<std::string_view, 13> kLookups = { "getattr(", "hasattr(", "__getattribute__", "globals()", "locals()", "import_module(", "MethodByName(", "FieldByName(",
-                                                                       "dlsym(", "GetProcAddress(", ".send(", "Reflect.get(", "eval(" };
-        if( at > 0 && src[at - 1] == '[' )
+        static constexpr std::array<std::string_view, 9> kModuleLookups = { "globals()", "locals()", "vars(", "import_module(", "__import__(", "sys.modules", "dlsym(", "GetProcAddress(", "eval(" };
+        static constexpr std::array<std::string_view, 6> kObjectLookups = { "getattr(", "hasattr(", "__getattribute__", "MethodByName(", "FieldByName(", ".send(" };
+        const auto holds = [&]( std::string_view w )
+        { return near.find( w ) != std::string_view::npos; };
+        if( std::ranges::any_of( kModuleLookups, holds ) )
         {
-            return true; // obj[`on${x}`]
+            return Lookup::Module;
         }
-        return std::ranges::any_of( kLookups, [&]( std::string_view w )
-                                    { return near.find( w ) != std::string_view::npos; } );
+        if( ( at > 0 && src[at - 1] == '[' ) || near.find( "Reflect.get(" ) != std::string_view::npos || std::ranges::any_of( kObjectLookups, holds ) )
+        {
+            return Lookup::Object;
+        }
+        return Lookup::None;
     }
 
-    // A short stem in another file (`f"is_{x}"` beside a getattr) is a lookup on that file's own objects: it can reach a member of this file,
-    // and reads as nothing about a free function here. A longer stem, or one in this file, or a macro paste, hedges either.
-    void markPrefix( std::string_view prefix, bool membersOnly = false ) noexcept
+    // A stem built beside an object lookup in another file reaches that object's members; beside a module lookup, or in a file that names the target's module,
+    // it reaches a free def too. No length rule: the lookup decides, not the stem.
+    void markPrefix( std::string_view prefix, Lookup how, std::uint32_t fileId, std::string_view src )
+    {
+        if( prefix.size() < kForUnusedMinPrefix )
+        {
+            return;
+        }
+        const bool membersOnly = how == Lookup::Object && !std::ranges::contains( targets_, fileId ) && !namesTargetModule( fileId, src );
+        markPrefixRows( prefix, membersOnly );
+    }
+
+    void markPrefixRows( std::string_view prefix, bool membersOnly = false ) noexcept
     {
         if( prefix.size() < kForUnusedMinPrefix )
         {
@@ -689,9 +838,43 @@ private:
         }
     }
 
+    void markSuffixRows( std::string_view tail ) noexcept
+    {
+        if( tail.size() < 2 * kForUnusedMinPrefix )
+        {
+            return;
+        }
+        for( std::size_t k = 0; k < names_.size(); ++k )
+        {
+            if( names_[k].ends_with( tail ) )
+            {
+                rows_[k].why |= kWhyBuilt;
+            }
+        }
+    }
+
+    // `"render" + kind`, `.concat(` : the literal is joined to something computed
+    static bool joinedAfter( std::string_view src, std::size_t pos ) noexcept
+    {
+        while( pos < src.size() && ( src[pos] == ' ' || src[pos] == '\t' ) )
+        {
+            ++pos;
+        }
+        return pos < src.size() && ( ( src[pos] == '+' && ( pos + 1 >= src.size() || src[pos + 1] != '+' ) ) || src.substr( pos ).starts_with( ".concat(" ) );
+    }
+
+    static bool joinedBefore( std::string_view src, std::size_t pos ) noexcept
+    {
+        while( pos > 0 && ( src[pos - 1] == ' ' || src[pos - 1] == '\t' ) )
+        {
+            --pos;
+        }
+        return pos > 0 && src[pos - 1] == '+' && ( pos < 2 || src[pos - 2] != '+' );
+    }
+
     // a literal that is a name (string), or that opens with a stem a built name could extend (built-name). Returns where the scan resumes:
     // past the identifier run; a quote that opens no such run moves one byte, so the words of the string's text still read as words.
-    std::size_t quoted( std::size_t at, std::string_view src, std::uint32_t fileId, std::uint32_t lineNo, bool ) noexcept
+    std::size_t quoted( std::size_t at, std::string_view src, std::uint32_t fileId, std::uint32_t lineNo ) noexcept
     {
         const char q = src[at];
         std::size_t e = at + 1;
@@ -713,17 +896,103 @@ private:
                 ++r->strings;
                 noteSite( r->at, fileId, lineNo );
             }
-            else if( lit.back() == '_' && nearDynamicLookup( src, at ) )
+            else
             {
-                markPrefix( lit, shortForeignStem( lit, fileId ) );
+                const bool after = joinedAfter( src, e + 1 );
+                const bool before = joinedBefore( src, at );
+                if( lit.back() == '_' || after || before )
+                {
+                    if( const Lookup how = nearDynamicLookup( src, at ); how != Lookup::None )
+                    {
+                        if( lit.back() == '_' || after )
+                        {
+                            markPrefix( lit, how, fileId, src );
+                        }
+                        if( before )
+                        {
+                            markSuffixRows( lit );
+                        }
+                    }
+                }
             }
             return e + 1;
         }
-        if( ( close == '{' || close == '%' || ( close == '$' && q == '`' ) ) && nearDynamicLookup( src, at ) )
+        if( close == '{' || close == '%' || ( close == '$' && q == '`' ) )
         {
-            markPrefix( lit, shortForeignStem( lit, fileId ) );
+            if( const Lookup how = nearDynamicLookup( src, at ); how != Lookup::None )
+            {
+                markPrefix( lit, how, fileId, src );
+            }
         }
         return at + 1;
+    }
+
+    // `import(`./routes/${n}`)`, `import_module("pkg.plugins." + n)`: a computed module name under a literal directory. Every def of a target under that directory
+    // may be reached by the member lookup that follows, so the table reads built-name. A fully computed name (no literal head) names no directory and is not read.
+    void dynamicImport( std::size_t open, std::string_view src ) noexcept
+    {
+        std::size_t k = open + 1;
+        while( k < src.size() && ( src[k] == ' ' || src[k] == '\t' ) )
+        {
+            ++k;
+        }
+        for( int pre = 0; pre < 3 && k < src.size() && ( src[k] == 'f' || src[k] == 'r' || src[k] == 'b' ); ++pre )
+        {
+            ++k;
+        }
+        if( k >= src.size() || ( src[k] != '"' && src[k] != '\'' && src[k] != '`' ) )
+        {
+            return;
+        }
+        const char q = src[k++];
+        std::string lit;
+        bool computed = false;
+        for( ; k < src.size() && src[k] != q && src[k] != '\n'; ++k )
+        {
+            if( src[k] == '{' || src[k] == '%' || ( src[k] == '$' && k + 1 < src.size() && src[k + 1] == '{' ) )
+            {
+                computed = true;
+                break;
+            }
+            lit += src[k];
+        }
+        if( !computed && ( k >= src.size() || src[k] != q || !joinedAfter( src, k + 1 ) ) )
+        {
+            return; // a whole literal: the import graph already follows it
+        }
+        if( lit.find( '/' ) == std::string::npos )
+        {
+            std::ranges::replace( lit, '.', '/' );
+        }
+        while( lit.starts_with( "./" ) || lit.starts_with( "../" ) )
+        {
+            lit.erase( 0, lit.find( '/' ) + 1 );
+        }
+        if( lit.empty() )
+        {
+            return;
+        }
+        for( const std::string& m : modules_ )
+        {
+            const std::size_t p = m.find( lit );
+            if( p != std::string::npos && ( p == 0 || m[p - 1] == '/' ) )
+            {
+                dynamicDir_ = true;
+            }
+        }
+    }
+
+    // words that say something about the whole tree: dynamic imports, class-registration hooks
+    void noteHook( std::string_view word, std::size_t end, std::string_view src ) noexcept
+    {
+        if( word == "__init_subclass__" || word == "__subclasses__" || word == "metaclass" )
+        {
+            registryHook_ = true;
+        }
+        else if( end < src.size() && src[end] == '(' && ( word == "import" || word == "import_module" || word == "__import__" || word == "require" ) )
+        {
+            dynamicImport( end, src );
+        }
     }
 
     void pasted( std::size_t at, std::string_view src ) noexcept
@@ -733,22 +1002,13 @@ private:
         {
             --b;
         }
-        markPrefix( src.substr( b, at - b ) );
+        markPrefixRows( src.substr( b, at - b ) );
         std::size_t e = at + 2;
         while( e < src.size() && isIdent( src[e] ) )
         {
             ++e;
         }
-        if( const std::string_view tail = src.substr( at + 2, e - at - 2 ); tail.size() >= 2 * kForUnusedMinPrefix )
-        {
-            for( std::size_t k = 0; k < names_.size(); ++k )
-            {
-                if( names_[k].ends_with( tail ) )
-                {
-                    rows_[k].why |= kWhyBuilt;
-                }
-            }
-        }
+        markSuffixRows( src.substr( at + 2, e - at - 2 ) );
     }
 
     void hit( Row& r, std::uint32_t fileId, std::uint32_t lineNo, std::string_view line, std::size_t col, bool isTest, bool isTarget, bool cFamily, bool manifest ) noexcept
@@ -788,10 +1048,23 @@ private:
     std::span<Row> rows_;
     std::span<const std::uint32_t> targets_;
     std::vector<std::uint8_t> first2_;
+    std::array<std::uint8_t, 256> single_ {};
     std::vector<std::string_view> names_;
+    std::vector<std::string> modules_; // the target files' paths without extension: what a computed import's literal head is matched against
+    std::vector<std::string> stems_; // the names the target files are imported by
+    std::uint32_t mentionFile_ = ~std::uint32_t( 0 );
+    bool mentionVal_ = false;
+    bool dynamicDir_ = false;
+    bool registryHook_ = false;
 };
 
 // `export * from "./x"`, `from x import *`, `pub use x::*`: the stem right beside the star, in any non-test file
+// `export * from`, `export * as ns from`, `export type * from`
+inline bool isExportStar( std::string_view t ) noexcept
+{
+    return t.starts_with( "export *" ) || t.starts_with( "export type *" );
+}
+
 inline bool lineStarExportsStem( std::string_view line, std::string_view stem, Lang lang ) noexcept
 {
     const std::string_view t = trimWs( line );
@@ -808,7 +1081,7 @@ inline bool lineStarExportsStem( std::string_view line, std::string_view stem, L
         }
         return false;
     };
-    if( t.starts_with( "export *" ) )
+    if( isExportStar( t ) )
     {
         return std::ranges::contains( kJsFamilyLangs, lang ) && holdsStem( t );
     }
@@ -821,12 +1094,6 @@ inline bool lineStarExportsStem( std::string_view line, std::string_view stem, L
         return std::to_underlying( lang ) == std::to_underlying( Lang::Rust ) && holdsStem( t );
     }
     return false;
-}
-
-inline std::string_view stemOf( std::string_view rel ) noexcept
-{
-    const std::string_view base = mention_detail::baseNameOf( rel );
-    return mention_detail::stripExt( base );
 }
 
 inline bool fileIsStarExported( std::string_view rel, Lang lang, std::uint32_t self, std::span<const std::string> texts, std::span<const std::uint32_t> ids )
@@ -856,7 +1123,7 @@ inline void collectStarLines( std::string_view src, std::uint32_t fileId, std::v
         const std::size_t le = src.find( '\n', p );
         const std::string_view line = src.substr( ls, le == std::string_view::npos ? std::string_view::npos : le - ls );
         const std::string_view t = trimWs( line );
-        if( t.starts_with( "export *" ) || ( t.starts_with( "from " ) && t.ends_with( "import *" ) ) || ( ( t.starts_with( "pub use " ) || t.starts_with( "pub(crate) use " ) ) && t.find( "::*" ) != std::string_view::npos ) )
+        if( isExportStar( t ) || ( t.starts_with( "from " ) && t.ends_with( "import *" ) ) || ( ( t.starts_with( "pub use " ) || t.starts_with( "pub(crate) use " ) ) && t.find( "::*" ) != std::string_view::npos ) )
         {
             texts.emplace_back( t );
             ids.push_back( fileId );
@@ -899,16 +1166,171 @@ inline std::vector<std::string> manifestsAbove( std::string_view diskAbs, std::s
 // a `pub` def in a crate with a src/lib.rs: consumers outside the tree may use it
 inline bool inRustLibCrate( std::string_view diskAbs ) noexcept
 {
+    namespace fs = std::filesystem;
     std::string dir( diskAbs );
+    std::error_code ec;
     for( std::size_t sl = dir.rfind( '/' ); sl != std::string::npos && sl > 0; sl = dir.rfind( '/' ) )
     {
         dir.resize( sl );
-        if( docparse::detail::readWholeFile( dir + "/Cargo.toml" ).has_value() )
+        if( fs::is_regular_file( dir + "/Cargo.toml", ec ) )
         {
-            return docparse::detail::readWholeFile( dir + "/src/lib.rs" ).has_value();
+            return fs::is_regular_file( dir + "/src/lib.rs", ec );
         }
     }
     return false;
+}
+
+// The one read of this lane's scan: every indexed file, every unindexed text file and every manifest comes through here.
+inline std::optional<std::string> readText( const std::string& path )
+{
+    return docparse::detail::readWholeFile( path );
+}
+
+// A package.json that publishes something: a main, module, exports, types or bin, and not `"private": true`. Its exported defs have consumers outside the tree.
+inline bool packageJsonPublishes( std::string_view json ) noexcept
+{
+    if( const std::size_t p = json.find( "\"private\"" ); p != std::string_view::npos )
+    {
+        std::size_t k = p + 9;
+        while( k < json.size() && ( json[k] == ' ' || json[k] == ':' || json[k] == '\t' || json[k] == '\n' || json[k] == '\r' ) )
+        {
+            ++k;
+        }
+        if( json.substr( k ).starts_with( "true" ) )
+        {
+            return false;
+        }
+    }
+    static constexpr std::array<std::string_view, 6> kKeys = { "\"main\"", "\"module\"", "\"exports\"", "\"types\"", "\"typings\"", "\"bin\"" };
+    return std::ranges::any_of( kKeys, [&]( std::string_view key )
+                                { return json.find( key ) != std::string_view::npos; } );
+}
+
+// A pyproject.toml that builds a distribution: a [project] or [tool.poetry] table, or a [build-system].
+inline bool pyprojectBuilds( std::string_view toml ) noexcept
+{
+    return toml.find( "[project]" ) != std::string_view::npos || toml.find( "[tool.poetry]" ) != std::string_view::npos || toml.find( "[build-system]" ) != std::string_view::npos;
+}
+
+// A Python module path with a private component (`_impl/`, `_compat.py`) is not a public surface; `__init__` and `__main__` are.
+inline bool pythonModulePrivate( std::string_view rel ) noexcept
+{
+    for( std::size_t p = 0; p < rel.size(); )
+    {
+        const std::size_t sl = rel.find( '/', p );
+        const std::string_view part = rel.substr( p, sl == std::string_view::npos ? std::string_view::npos : sl - p );
+        if( part.starts_with( '_' ) && !part.starts_with( "__init__" ) && !part.starts_with( "__main__" ) )
+        {
+            return true;
+        }
+        if( sl == std::string_view::npos )
+        {
+            break;
+        }
+        p = sl + 1;
+    }
+    return false;
+}
+
+// The text files under the root that the index did not take (a .vue, a Procfile, vendor/, dist/, a file over the size limit), read once each. A caller can sit in
+// any of them, so the scan reads them all. `unseen` counts what it could not read or was too large to read: those make every claim of absence `unknown`.
+struct ExtraFiles
+{
+    std::vector<std::string> paths; // root-relative, by extra id: an id of ing.files.size() + k is paths[k]
+    std::size_t unseen = 0;
+};
+
+template <class Visit>
+inline void walkUnindexed( const IngestResult& ing, ExtraFiles& st, Visit&& visit )
+{
+    namespace fs = std::filesystem;
+    if( ing.crawlRoot.empty() )
+    {
+        ++st.unseen; // a merged multi-root index: no one root to walk
+        return;
+    }
+    std::vector<std::string_view> indexed;
+    indexed.reserve( ing.files.size() );
+    for( std::uint32_t k = 0; k < ing.files.size(); ++k )
+    {
+        indexed.push_back( rootRelPath( ing, k ) );
+    }
+    std::ranges::sort( indexed, sortutil::svLess );
+    std::error_code ec;
+    fs::recursive_directory_iterator it( ing.crawlRoot, fs::directory_options::skip_permission_denied, ec );
+    if( ec )
+    {
+        ++st.unseen;
+        return;
+    }
+    std::size_t visited = 0;
+    std::size_t bytes = 0;
+    for( const fs::recursive_directory_iterator end; it != end; it.increment( ec ) )
+    {
+        if( ec )
+        {
+            ec.clear();
+            ++st.unseen;
+            continue;
+        }
+        const fs::file_status ls = it->symlink_status( ec );
+        if( ec )
+        {
+            ec.clear();
+            ++st.unseen;
+            continue;
+        }
+        if( fs::is_directory( ls ) )
+        {
+            if( it->path().filename() == ".git" )
+            {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if( !fs::is_regular_file( ls ) ) // a symlink, FIFO, socket or device is never opened
+        {
+            continue;
+        }
+        if( ++visited > kForUnusedExtraFiles )
+        {
+            ++st.unseen;
+            break;
+        }
+        const std::string rel = it->path().lexically_relative( ing.crawlRoot ).generic_string();
+        if( std::ranges::binary_search( indexed, std::string_view( rel ), sortutil::svLess ) )
+        {
+            continue;
+        }
+        const std::uintmax_t size = it->file_size( ec );
+        if( ec )
+        {
+            ec.clear();
+            ++st.unseen;
+            continue;
+        }
+        if( size == 0 )
+        {
+            continue;
+        }
+        if( size > kForUnusedExtraFileBytes || bytes + size > kForUnusedExtraBytes )
+        {
+            ++st.unseen;
+            continue;
+        }
+        const std::optional<std::string> data = readText( it->path().string() );
+        if( !data )
+        {
+            ++st.unseen;
+            continue;
+        }
+        bytes += data->size();
+        if( std::string_view( *data ).substr( 0, 4096 ).find( '\0' ) != std::string_view::npos )
+        {
+            continue; // binary: it holds no caller a text scan could read
+        }
+        visit( rel, *data );
+    }
 }
 
 inline std::string_view verdictOf( const Row& r ) noexcept
@@ -1083,6 +1505,7 @@ inline FileTable buildFileTable( const IngestResult& ing, const Graph& g, const 
         {
             it->listed = true;
             it->isPublic = it->isPublic || isPublicDef( ing, s, text.src, jsExports, owner );
+            it->derived = it->derived || ( s.lang == Lang::Python && s.kind == SymKind::Class && sigHolds( s, text.src, "(" ) && !sigHolds( s, text.src, "(object)" ) );
             it->why = std::uint16_t( it->why | languageHedges( s, rel, text.src, owner, rustLib ) );
         }
         else
@@ -1227,13 +1650,19 @@ inline void appendWhy( std::string& out, std::uint16_t why )
     }
 }
 
-inline void appendSites( std::string& out, const IngestResult& ing, std::span<const Site> sites, std::vector<char>& esc )
+// a site's path: an indexed file's, or an unindexed one (id past the index) read off the extra list
+inline std::string_view sitePath( const IngestResult& ing, const ExtraFiles& extra, std::uint32_t fileId ) noexcept
+{
+    return fileId < ing.files.size() ? rootRelPath( ing, fileId ) : std::string_view( extra.paths[fileId - ing.files.size()] );
+}
+
+inline void appendSites( std::string& out, const IngestResult& ing, const ExtraFiles& extra, std::span<const Site> sites, std::vector<char>& esc )
 {
     bool first = true;
     for( const Site& s : sites )
     {
         out += first ? " at=\"" : ",";
-        out += escapeXml( rootRelPath( ing, s.fileId ), esc );
+        out += escapeXml( sitePath( ing, extra, s.fileId ), esc );
         out += std::format( ":{}", s.line );
         first = false;
     }
@@ -1243,7 +1672,7 @@ inline void appendSites( std::string& out, const IngestResult& ing, std::span<co
     }
 }
 
-inline void appendRow( std::string& out, const IngestResult& ing, const Row& r, std::string_view verdict, std::vector<char>& esc )
+inline void appendRow( std::string& out, const IngestResult& ing, const ExtraFiles& extra, const Row& r, std::string_view verdict, std::vector<char>& esc )
 {
     const Symbol& s = ing.symbols[r.defs.front()];
     out += "<u n=\"";
@@ -1276,12 +1705,12 @@ inline void appendRow( std::string& out, const IngestResult& ing, const Row& r, 
     }
     if( verdict != "used" )
     {
-        appendSites( out, ing, verdict == "test-only" ? std::span<const Site>( r.testAt ) : std::span<const Site>( r.at ), esc );
+        appendSites( out, ing, extra, verdict == "test-only" ? std::span<const Site>( r.testAt ) : std::span<const Site>( r.at ), esc );
     }
     out += "/>";
 }
 
-inline std::string renderFileTable( const IngestResult& ing, const Graph& g, const FileTable& t, std::vector<char>& esc )
+inline std::string renderFileTable( const IngestResult& ing, const Graph& g, const FileTable& t, const ExtraFiles& extra, std::vector<char>& esc )
 {
     std::array<std::size_t, 5> tally {};
     std::vector<std::pair<int, const Row*>> shownRows;
@@ -1307,13 +1736,14 @@ inline std::string renderFileTable( const IngestResult& ing, const Graph& g, con
     out += escapeXml( rootRelPath( ing, t.file ), esc );
     out += std::format( "\" public=\"{}\" private=\"{}\" unused=\"{}\" test_only=\"{}\" file_only=\"{}\" unknown=\"{}\" used=\"{}\"", shownRows.size(), privateRows, tally[0], tally[1], tally[2], tally[3], tally[4] );
     if( t.unread ) { out += " unread=\"1\""; }
+    if( extra.unseen > 0 ) { out += std::format( " unseen=\"{}\"", extra.unseen ); }
     if( !t.servedLanguage ) { out += " lang_unserved=\"1\""; }
     if( shownRows.size() > kForUnusedRowsPerFile ) { out += std::format( " shown=\"{}\" capped=\"1\"", kForUnusedRowsPerFile ); }
     out += graphCountFloorAttrXml( g );
     out += '>';
     for( std::size_t k = 0; k < shownRows.size() && k < kForUnusedRowsPerFile; ++k )
     {
-        appendRow( out, ing, *shownRows[k].second, verdictOf( *shownRows[k].second ), esc );
+        appendRow( out, ing, extra, *shownRows[k].second, verdictOf( *shownRows[k].second ), esc );
     }
     out += "</unused_in_file>";
     return out;
@@ -1375,46 +1805,88 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
     // The one pass over the tree: each file read once, whatever the number of tables.
     std::vector<std::string> starTexts;
     std::vector<std::uint32_t> starIds;
+    ExtraFiles extra;
     std::vector<NameScan> scans;
     scans.reserve( tables.size() );
     for( FileTable& table : tables )
     {
-        scans.emplace_back( table.rows, table.pair );
-    }
-    for( std::uint32_t k = 0; k < ing.files.size(); ++k )
-    {
-        const std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, k ) );
-        if( !bytes )
+        std::vector<std::string> modules;
+        std::vector<std::string> stems;
+        for( const std::uint32_t pf : table.pair )
         {
-            continue;
+            modules.push_back( withoutExt( rootRelPath( ing, pf ) ) );
+            stems.push_back( moduleStem( rootRelPath( ing, pf ) ) );
         }
-        const std::string_view rel = rootRelPath( ing, k );
+        scans.emplace_back( table.rows, table.pair, std::move( modules ), std::move( stems ) );
+    }
+    const auto scanAll = [&]( std::uint32_t id, std::string_view rel, std::string_view bytes )
+    {
         for( NameScan& scan : scans )
         {
-            scan.scanFile( k, rel, *bytes, false );
+            scan.scanFile( id, rel, bytes, false );
         }
         if( !isTestLikePath( rel ) )
         {
-            collectStarLines( *bytes, k, starTexts, starIds );
+            collectStarLines( bytes, id, starTexts, starIds );
         }
+    };
+    for( std::uint32_t k = 0; k < ing.files.size(); ++k )
+    {
+        const std::optional<std::string> bytes = readText( diskPath( ing, k ) );
+        if( !bytes )
+        {
+            ++extra.unseen; // an indexed file that cannot be read may hold a caller
+            continue;
+        }
+        scanAll( k, rootRelPath( ing, k ), *bytes );
     }
+    walkUnindexed( ing, extra, [&]( const std::string& rel, const std::string& bytes )
+                   {
+        extra.paths.push_back( rel );
+        scanAll( std::uint32_t( ing.files.size() + extra.paths.size() - 1 ), rel, bytes ); } );
     for( std::size_t t = 0; t < tables.size(); ++t )
     {
         FileTable& table = tables[t];
+        bool pyPackaged = false;
+        bool jsPublished = false;
+        bool sawPackageJson = false;
         for( const std::string& m : manifestsAbove( diskPath( ing, table.file ), rootRelPath( ing, table.file ) ) )
         {
-            if( const std::optional<std::string> bytes = docparse::detail::readWholeFile( m ); bytes )
+            if( const std::optional<std::string> bytes = readText( m ); bytes )
             {
                 scans[t].scanFile( table.file, m, *bytes, true );
+                if( m.ends_with( "/pyproject.toml" ) )
+                {
+                    pyPackaged = pyPackaged || pyprojectBuilds( *bytes );
+                }
+                else if( m.ends_with( "/setup.py" ) || m.ends_with( "/setup.cfg" ) )
+                {
+                    pyPackaged = true;
+                }
+                else if( m.ends_with( "/package.json" ) && !sawPackageJson )
+                {
+                    sawPackageJson = true; // the nearest one decides
+                    jsPublished = packageJsonPublishes( *bytes );
+                }
             }
         }
+        scans[t].finish();
         const Lang fileLang = table.rows.empty() ? Lang::Unknown : ing.symbols[table.rows.front().defs.front()].lang;
         const bool barrel = fileIsStarExported( rootRelPath( ing, table.file ), fileLang, table.file, starTexts, starIds );
+        const bool library = ( fileLang == Lang::Python && pyPackaged && !pythonModulePrivate( rootRelPath( ing, table.file ) ) ) || ( std::ranges::contains( kJsFamilyLangs, fileLang ) && jsPublished );
         for( Row& r : table.rows )
         {
             if( barrel )
             {
                 r.why |= kWhyBarrel;
+            }
+            if( library )
+            {
+                r.why |= kWhyApi; // a distribution's public surface has consumers this tree does not hold
+            }
+            if( extra.unseen > 0 && r.outPlain == 0 && !r.top )
+            {
+                r.why |= kWhyUnseen;
             }
             if( r.text > 0 )
             {
@@ -1437,7 +1909,7 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
             out += "<unused_cut bytes_capped=\"1\"/>";
             break;
         }
-        out += renderFileTable( ing, g, table, esc );
+        out += renderFileTable( ing, g, table, extra, esc );
     }
     if( dirTotal > files.size() )
     {
@@ -1449,17 +1921,17 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
 inline constexpr std::string_view kForUnusedLegend =
     "; unused_in_file p= public= private=: the task asks what is unused in a named file; its public defs, private ones counted and not listed. u n= t= l=: a def, defs= an overload set. "
     "v=used: a non-test caller in another file bound by more than the name, or an in-file chain from one or from top-level code (proves one caller, not that it is live); "
-    "v=unknown: something may reach it that no index follows, why= says what, no claim either way; v=file-only: only same-file references; v=test-only: every reference found is in a test, never live; "
-    "v=unused: the name appears nowhere in this tree outside its definition, declarations and comments, and no why= applies: proves that of this tree only. "
+    "v=unknown: something may reach it that no index follows, why= says what, no claim either way; v=file-only: only same-file references; v=test-only: every reference found is in a test (a consumer outside this tree is not seen, see why=api); "
+    "v=unused: the name appears in no text file under the root outside its definition, declarations and comments, and no why= applies: proves that of this tree only. "
     "why=name a non-test word no edge explains (a member call, a callback), by-name its callers bound by name alone or split over same-named defs, declined a declined call may mean it, value a table or argument holds it, "
     "string a string literal is its name (__all__, getattr), built-name a string or macro builds names it could be, import only an import or re-export names it, barrel its file is star re-exported, "
     "dispatch a base, trait or interface may call it, framework the language or a framework calls it (decorator, attribute, entry point), api consumers outside this tree may use it, "
-    "members a type whose members are reached without its name (a member has evidence, or an unscoped enum), manifest a build or package file names it, in-file an unknown def in this file calls it. "
+    "members a type whose members are reached without its name (a member has evidence, or an unscoped enum), manifest a build or package file names it, in-file an unknown def in this file calls it, unseen a text file could not be read (unseen=N on the block). "
     "out= non-test callers elsewhere, in= in this file, by= one of them, tests= test callers and words, text= str= imp= same= non-test code, string, import and same-file words, at= sites to read. "
-    "lang_unserved=1 no verdicts for this language; unread=1; shown= capped=1 rows cut; unused_cut: files or bytes cut; unused_names: several files match, none picked";
+    "lang_unserved=1 no verdicts for this language; unread=1; unseen=N files that could not be read; shown= capped=1 rows cut; unused_cut: files or bytes cut; unused_names: several files match, none picked";
 inline constexpr std::string_view kForCompactUnusedLegend =
     "; unused_in_file p= public= private=: public defs of the named file. u n= t= l= defs= v=used|unknown|file-only|test-only|unused: used a non-test caller elsewhere, or a chain from one; unknown why= says what may reach it; "
-    "file-only same-file refs only; test-only tests only, never live; unused no mention in this tree. why=name|by-name|declined|value|string|built-name|import|barrel|dispatch|framework|api|members|manifest|in-file. "
-    "out= in= by= tests= text= str= imp= same= at= the evidence; lang_unserved=1 unread=1 shown= capped=1 unused_cut unused_names";
+    "file-only same-file refs only; test-only tests only; unused no mention in any text file under the root. why=name|by-name|declined|value|string|built-name|import|barrel|dispatch|framework|api|members|manifest|in-file|unseen. "
+    "out= in= by= tests= text= str= imp= same= at= the evidence; lang_unserved=1 unread=1 unseen= shown= capped=1 unused_cut unused_names";
 
 } // namespace rw
