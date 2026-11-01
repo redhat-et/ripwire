@@ -1020,7 +1020,7 @@ for i in range(n):
         site32("def.ppAlt", 9 * 4); site32("def.params", 13 * 4)
         if "def.paramsMin" not in pmin and struct.unpack_from("<I", blob, p + 13 * 4)[0] >= 1:   # B2.2 pair rule: a def with params >= 1
             pmin["def.paramsMin"] = (p + 14 * 4, struct.unpack_from("<I", blob, p + 14 * 4)[0], struct.unpack_from("<I", blob, p + 13 * 4)[0])
-        skip(15 * 4 + 6 + 2 * 4); site("def.kind"); site("def.lang"); s(); s(); skip(8)   # #150: +1 u8 (scopeRootsStd); cache v26: +2 u32 (fnScopeStart/End) before kind; cache v33: +1 u32 (paramsMin) after params
+        skip(15 * 4 + 7 + 2 * 4); site("def.kind"); site("def.lang"); s(); s(); skip(8)   # #452: +1 u8 (entryDecl) after scopeRootsStd; #150: +1 u8 (scopeRootsStd); cache v26: +2 u32 (fnScopeStart/End) before kind; cache v33: +1 u32 (paramsMin) after params
         has_key = blob[p]; skip(1 + (8 if has_key else 0))               # cache v50: clone-key presence u8, then the u64 key when 1
     for _ in range(u32()):                                                # refs
         skip(4); site("ref.lang"); s(); skip(2); s(); site("ref.recv"); s(); skip(1); s(); s(); site("ref.role"); site32("ref.argCount", 4); skip(12); s(); s(); s(); s(); skip(1); site("ref.forwarded"); site("ref.trailingLambda")   # line, argCount, argCountKnown, viaArrow, #150's qualifierRootsStd, FE-A's memberCall u8 + memberRoot str, FE-B's memberPath + memberCtor + memberVia strs, memberFactory u8, fcall-forward's forwarded u8, #155's trailingLambda u8

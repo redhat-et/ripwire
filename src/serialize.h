@@ -3135,6 +3135,15 @@ inline void writeMapInventoryXml( XmlWriter& w, const IngestResult& ing, const M
         w.write( "<entry p=\"" );  w.write( escapeXml( pathRel( s.fileId ), esc ) );
         w.write( "\" n=\"" );      w.write( escapeXml( s.name, esc ) );  w.write( "\">" );
         writeMapCalleeRows( w, ing, outOff[ id ], outOff[ id + 1 ], outTargets, outProv, outNameOnly, esc, scratch );
+        // #452: an attribute-style entry's own static main(), the callee its convention promises — no edge
+        // carries it (the type does not call its own main), so it is appended here for this row only. The
+        // callees MAIN itself resolves (#486 point 3: `run` in the slice's fixture) ride the same row
+        // through the ranked writer, so the entry reads "Tool — main — run", never a dead-end main.
+        if( const NodeId mainId = inventoryAttrTypeMainCallee( ing, id ); mainId != kNoNode )
+        {
+            w.write( "<c n=\"" );  w.write( escapeXml( ing.symbols[ mainId ].name, esc ) );  w.write( "\"/>" );
+            writeMapCalleeRows( w, ing, outOff[ mainId ], outOff[ mainId + 1 ], outTargets, outProv, outNameOnly, esc, scratch );
+        }
         w.write( "</entry>" );
     }
     for( const MapInventoryDir& d : inv.dirs )
@@ -11126,9 +11135,11 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
         w.write( i ? ",{\"p\":" : "{\"p\":" );  writeJsonStr( w, pathRel( s.fileId ), esc );
         w.write( ",\"n\":" );                    writeJsonStr( w, s.name, esc );
         w.write( ",\"c\":[" );
-        for( std::uint32_t e = outOff[ id ]; e < outOff[ id + 1 ]; ++e )
+        // one callee row, shared by the entry's own callees and main's (#486 review nit: the two
+        // loops had drifted into copies)
+        const auto writeCalleeRow = [ & ]( std::uint32_t e, bool leadingComma )
         {
-            w.write( e > outOff[ id ] ? ",{\"n\":" : "{\"n\":" );  writeJsonStr( w, ing.symbols[ outTargets[ e ] ].name, esc );
+            w.write( leadingComma ? ",{\"n\":" : "{\"n\":" );  writeJsonStr( w, ing.symbols[ outTargets[ e ] ].name, esc );
             if( outProv && e < outProv->size() && ( *outProv )[ e ] )
             {
                 w.write( ",\"" );  w.write( provAttrName( ( *outProv )[ e ] ) );  w.write( "\":" );  writeJsonStr( w, provLabel( ( *outProv )[ e ] ), esc );   // L6: "via":"impl"
@@ -11138,6 +11149,20 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
                 writeMapCalleeJsonKind( w, ( *outNameOnly )[ e ] );
             }
             w.write( "}" );
+        };
+        for( std::uint32_t e = outOff[ id ]; e < outOff[ id + 1 ]; ++e )
+        {
+            writeCalleeRow( e, e > outOff[ id ] );
+        }
+        if( const NodeId mainId = inventoryAttrTypeMainCallee( ing, id ); mainId != kNoNode )
+        {
+            w.write( outOff[ id + 1 ] > outOff[ id ] ? ",{\"n\":" : "{\"n\":" );  writeJsonStr( w, ing.symbols[ mainId ].name, esc );   // no leading comma when the type's own callee list is empty (the main row then opens the array)
+            w.write( "}" );
+            // the callees MAIN itself resolves, same attrs as the rows above (#486 point 3)
+            for( std::uint32_t e = outOff[ mainId ]; e < outOff[ mainId + 1 ]; ++e )
+            {
+                writeCalleeRow( e, true );
+            }
         }
         w.write( "]}" );
     }
