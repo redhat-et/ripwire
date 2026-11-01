@@ -184,6 +184,20 @@ A="$( ask "$CX" 'parameter UrlThing segmentMaker' )"; R="$( route "$A" )"
 hasnt "$R" 'dropped:' "T declined + two exact: the route is not flipped"
 has "$R" 'declined' "T declined + two exact: declined stays disclosed"
 has "$( blk "$A" )" 'segUser' "T declined + two exact: the function's callers ride"
+# ── a CI or vendored copy first in path order must not displace the answer (LD-2 ld2-angular-09's shape, one exact symbol) ──
+VN="$TMP/vend"; mkdir -p "$VN/.github/actions" "$VN/src" "$VN/vendor/lib"
+printf 'function BundledThing(a) { return a; }\nfunction parameter(a) { return a; }\n' > "$VN/.github/actions/main.js"
+printf 'export function BundledThing(a: number) { return a; }\nexport function bundledUser() { return BundledThing(1); }\n' > "$VN/src/thing.ts"
+for i in 1 2 3 4 5; do printf 'export function parameter(a: number) { return a; }\n' > "$VN/src/p$i.ts"; done
+printf 'def VendorOnlyThing(x):\n    return x\n' > "$VN/vendor/lib/copy.py"
+printf 'export function fresh(a: number) { return a; }\n' > "$VN/src/fresh.ts"
+A="$( ask "$VN" 'BundledThing fresh parameter' )"; R="$( route "$A" )"
+has "$R" 'declined' "V .github first in path order: the declined route stands, the map is not given up"
+hasnt "$R" 'dropped:' "V .github first: no flip"
+has "$( blk "$A" )" 'bundledUser' "V .github first: the source def's callers ride on top, or the map stands"
+A="$( ask "$VN" 'BundledThing parameter' )"; has "$( route "$A" )" 'anchor has no source definition' "V two words, already name-exact at base: no map to lose, and the CI anchor says so"
+A="$( ask "$VN" 'VendorOnlyThing' )"; if [ "$( conf "$A" )" = low ]; then ok "V vendored anchor: confidence low"; else no "V vendored anchor: $( conf "$A" )"; fi
+A="$( ask "$VN" 'VendorOnlyThing zznope sturdy' )"; hasnt "$A" 'by="subject"' "V vendored only: lifts nothing"
 # determinism + well-formed
 A1="$( ask "$PY" 'prepare_setup_platform new parameter' )"; A2="$( ask "$PY" 'prepare_setup_platform new parameter' )"
 if [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ]; then ok "determinism"; else no "determinism"; fi

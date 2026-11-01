@@ -148,11 +148,32 @@ inline bool isGraphForm( std::string_view task, const std::vector<std::string_vi
     return false;
 }
 
+// A CI, tool or vendored copy: under a dot directory (.github, .circleci, .yarn), a vendoring directory, or the demo/generated tier. Such
+// a file can define the subject's symbol, even first in path order (a bundled .github action defined Angular's UrlSerializer), and it
+// is never what the subject means.
+inline bool isToolOrVendoredPath( std::string_view p ) noexcept
+{
+    if( isDemoOrGeneratedPath( p ) )
+    {
+        return true;
+    }
+    for( std::size_t start = 0, slash = p.find( '/' ); slash != std::string_view::npos; start = slash + 1, slash = p.find( '/', start ) )
+    {
+        const std::string_view dir = p.substr( start, slash - start );
+        const bool             vendoring = dir == "vendor" || dir == "third_party" || dir == "node_modules" || dir == "bower_components";
+        if( vendoring || ( dir.size() > 1 && dir.front() == '.' && dir != ".." ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 inline bool sourceClassDef( const IngestResult& ing, NodeId id )
 {
     const Symbol& s = ing.symbols[id];
     return s.kind != SymKind::Section && s.fileId < ing.files.size() && !langFacts( s.lang ).notCode
-        && pathTierOf( rootRelPath( ing, s.fileId ) ) == PathTier::Source && !isTestSymbol( ing, id );
+        && pathTierOf( rootRelPath( ing, s.fileId ) ) == PathTier::Source && !isToolOrVendoredPath( rootRelPath( ing, s.fileId ) ) && !isTestSymbol( ing, id );
 }
 
 // The definitions of each exact candidate: name equal byte for byte (an Elixir name/N also by its arity-less spelling), qualifier
@@ -311,7 +332,7 @@ inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice&
             for( std::uint32_t f = 0; f < ing.files.size(); ++f )
             {
                 const std::string_view path = rootRelPath( ing, f );
-                if( path.ends_with( t ) && ( path.size() == t.size() || path[ path.size() - t.size() - 1 ] == '/' ) && pathTierOf( path ) == PathTier::Source )
+                if( path.ends_with( t ) && ( path.size() == t.size() || path[ path.size() - t.size() - 1 ] == '/' ) && pathTierOf( path ) == PathTier::Source && !isToolOrVendoredPath( path ) )
                 {
                     return true;
                 }
@@ -373,7 +394,10 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, std::s
     if( subjectAnchoredPlainWord( ing, out.route, reading ) || ( declined && lift && reading.exact.size() == 1 ) )
     {
         RouteChoice bare = chooseForRanker( ing, reading.reduced );
-        if( bare.which == LexMode::NameExact )
+        // A flip from a declined route gives up the conceptual map, so the definition the anchor would SERVE must be source-class, not
+        // merely some definition of the name: the anchor binds the first body-carrying one in path order, and that can be a CI or
+        // vendored copy. A name-exact route had no map to lose, and CONFIDENCE-ANCHOR reads that answer low.
+        if( bare.which == LexMode::NameExact && ( !declined || routeAnchorHasSourceDef( ing, bare, reading.reduced ) ) )
         {
             bare.reason += subjectDroppedClause( ing, reading.dropped );
             out.route     = std::move( bare );
@@ -399,7 +423,7 @@ inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, std::string_vie
     out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, out.rankQuery.empty() ? task : std::string_view( out.rankQuery ) );
     if( out.anchorNoSource )
     {
-        out.route.reason += "; anchor has no source definition (test, doc or data only, or not indexed)";
+        out.route.reason += "; anchor has no source definition (test, doc, data, CI or vendored only, or not indexed)";
     }
     return out;
 }
