@@ -87,14 +87,7 @@ struct Spelling
 
 inline bool allIdentChars( std::string_view t ) noexcept
 {
-    for( const char c : t )
-    {
-        if( !namesplit::isIdentChar( c ) )
-        {
-            return false;
-        }
-    }
-    return !t.empty();
+    return !t.empty() && std::ranges::all_of( t, []( char c ) { return namesplit::isIdentChar( c ); } );
 }
 
 inline Spelling parseSpelling( std::string_view w ) noexcept
@@ -134,22 +127,15 @@ inline bool hasNameSyntax( std::string_view w ) noexcept
         && ( namesplit::hasIdentifierShape( w ) || w.find( "::" ) != std::string_view::npos || w.find( '.' ) != std::string_view::npos );
 }
 
-inline bool isJoinWord( std::string_view w ) noexcept
+inline bool isJoinWord( std::string_view w )
 {
-    return w == "+" || w == "->" || w == "=>" || w == "=" || w == "|" || w == "<-" || w == "&";
+    return detail::graphSubjectWordIs( w, { "+", "->", "=>", "=", "|", "<-", "&" } );
 }
 
-// a question opens with one of these (the words the prose gate's stopword list holds as question words, and the rest of the class)
-inline bool isQuestionLead( std::string_view lower ) noexcept
+// a question opens with one of these
+inline bool isQuestionLead( std::string_view w )
 {
-    for( const std::string_view q : { "which", "where", "how", "what", "why", "who", "when", "does", "do", "is", "are", "can", "should", "will" } )
-    {
-        if( lower == q )
-        {
-            return true;
-        }
-    }
-    return false;
+    return detail::graphSubjectWordIs( w, { "which", "where", "how", "what", "why", "who", "when", "does", "do", "is", "are", "can", "should", "will" } );
 }
 
 // "call chain from A to B" names the same two endpoints a path does (parseGraphSubject reads the code-spelled forms)
@@ -201,6 +187,41 @@ inline std::vector<std::vector<NodeId>> placeCandidates( const IngestResult& ing
     }
     return out;
 }
+// One subject's words by class. False: a join word, so two named endpoints and no reading.
+struct SubjectWords
+{
+    std::vector<std::string_view> named;     // identifier-syntax words with a clean spelling, trimmed
+    std::vector<Spelling>         spelled;   // their spellings
+    std::vector<std::string_view> kept;      // every identifier-syntax word, clean or not
+};
+
+inline bool sortSubjectWords( const std::vector<std::string_view>& words, SubjectWords& out, std::vector<std::string>& dropped )
+{
+    for( const std::string_view w : words )
+    {
+        if( isJoinWord( w ) )
+        {
+            return false;
+        }
+        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+        if( isRouteStopword( routeLower( t ) ) )
+        {
+            continue;
+        }
+        if( !hasNameSyntax( t ) )
+        {
+            dropped.emplace_back( t );
+            continue;
+        }
+        out.kept.push_back( t );
+        if( const Spelling sp = parseSpelling( t ); sp.valid )
+        {
+            out.named.push_back( t );
+            out.spelled.push_back( sp );
+        }
+    }
+    return true;
+}
 }   // namespace subject_detail
 
 inline SubjectReading subjectReading( const IngestResult& ing, std::string_view task )
@@ -212,32 +233,14 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
     {
         return r;
     }
-    std::vector<std::string_view> named;     // identifier-syntax words, trimmed
-    std::vector<Spelling>         spelled;   // those of them with a clean spelling
-    std::vector<std::string_view> keptRaw;
-    for( const std::string_view w : words )
+    SubjectWords sw;
+    if( !sortSubjectWords( words, sw, r.dropped ) )
     {
-        if( isJoinWord( w ) )
-        {
-            return r;
-        }
-        const std::string_view t = detail::graphSubjectTrimWord( w ).text;
-        if( isRouteStopword( routeLower( t ) ) )
-        {
-            continue;
-        }
-        if( hasNameSyntax( t ) )
-        {
-            keptRaw.push_back( t );
-            if( const Spelling sp = parseSpelling( t ); sp.valid )
-            {
-                named.push_back( t );
-                spelled.push_back( sp );
-            }
-            continue;
-        }
-        r.dropped.emplace_back( t );
+        return r;
     }
+    const std::vector<std::string_view>& named   = sw.named;
+    const std::vector<Spelling>&         spelled = sw.spelled;
+    const std::vector<std::string_view>& keptRaw = sw.kept;
     if( spelled.empty() || r.dropped.empty() )
     {
         return r;
@@ -264,7 +267,7 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
         r.reduced += r.reduced.empty() ? "" : " ";
         r.reduced += t;
     }
-    r.descriptive = !isQuestionLead( routeLower( words.front() ) ) && r.dropped.size() <= kSubjectMaxPlainWords;
+    r.descriptive = !isQuestionLead( words.front() ) && r.dropped.size() <= kSubjectMaxPlainWords;
     return r;
 }
 
