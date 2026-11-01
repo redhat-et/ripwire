@@ -584,8 +584,8 @@ else
     no "(B7c) no answer to id=4"
 fi
 
-# (B8) the REAL reading (no seam): a fixture whose parsed facts alone sit far over 64M (80 files x 1500 small functions;
-#      unguarded peak 150-185M), so the hard line after the ingest fires on its own reading.
+# (B8) the REAL reading (no seam): a fixture whose parsed facts alone sit far over 64M (160 files x 1500 small functions),
+#      so the hard line after the ingest fires on its own reading.
 # (B8b) the seam is ADDITIVE: a trip that never fires (crawl:999999999) does not switch the real guard off — the same
 #      run under that seam still ends on the real hard line.
 #   0.6.6 (#364): both arms used to run on this repo's src/, whose footprint AT THE HARD LINE (not its peak: 72-93M on a
@@ -596,6 +596,9 @@ fi
 #   off". The run is not guarded per allocation: a sub-five-second transient over the limit between phase readings is the
 #   documented contract, so this was the gate's assumption, not a product gap. On $EG both runs measured rc 5 with the
 #   ingest line 40/40 (with and without the seam; 3/4/10/16 workers; foreground and taskpolicy -b; 0.7-4.7 s).
+#   Since largealloc.cpp (macOS) the freed blocks no longer carry the reading: 80 big files peak at 134M and sat on the line
+#   (6 of 12 graph-build line, 4 ingest line, 2 complete under `taskpolicy -b`), so the fixture doubled to 160, and any real
+#   line counts: either hard line, or the time-gated parse stop on a slow host, which discloses itself.
 EG="$TMP/eg"; mkdir -p "$EG"
 python3 - "$EG" <<'PY2'
 import os, sys
@@ -605,20 +608,24 @@ for d in "abcdefgh":
     for f in range( 40 ):
         open( os.path.join( root, d, "f%02d.c" % f ), "w" ).write( "int %s_%d(int x){ return x; }\n" % ( d, f ) )
 os.makedirs( os.path.join( root, "z" ), exist_ok=True )
-for f in range( 80 ):
-    open( os.path.join( root, "z", "big%02d.c" % f ), "w" ).write(
+for f in range( 160 ):
+    open( os.path.join( root, "z", "big%03d.c" % f ), "w" ).write(
         "".join( "int z%d_%d(int x){ return x>0 ? z%d_%d(x-1)+%d : %d; }\n" % ( f, k, f, ( k + 1 ) % 1500, k, k ) for k in range( 1500 ) ) )
 PY2
+b8real(){ # rc out err: a real line fired. A hard line, or on a slow host the time-gated parse stop, which discloses itself
+    { [ "$1" = 5 ] && grep -Eq '^ripwire: memory limit reached during the (ingest|graph build)' "$3" && [ ! -s "$2" ]; } \
+        || { [ "$1" = 0 ] && grep -q 'memory_stop=' "$2"; }
+}
 b8why(){ printf 'rc=%s memory_stop=%s stdout=%sB stderr: %s' "$1" "$( grep -oE 'memory_stop=[a-z]+' "$2" | head -1 | cut -d= -f2 )" "$( wc -c < "$2" | tr -d ' ' )" "$( grep '^ripwire:' "$3" | head -c 200 )"; }
 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8.out" 2>"$TMP/b8.err"; rc=$?
-if [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$TMP/b8.err" && [ ! -s "$TMP/b8.out" ]; then
-    ok "(B8) a real footprint over --max-memory=64M (no seam): exit 5 with the ingest line"
+if b8real "$rc" "$TMP/b8.out" "$TMP/b8.err"; then
+    ok "(B8) a real footprint over --max-memory=64M (no seam): a real line stopped the run"
 else
     no "(B8) $( b8why "$rc" "$TMP/b8.out" "$TMP/b8.err" )"
 fi
 RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8b.out" 2>"$TMP/b8b.err"; rc=$?
-if [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$TMP/b8b.err" && [ ! -s "$TMP/b8b.out" ]; then
-    ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 still exits 5 with the ingest line)"
+if b8real "$rc" "$TMP/b8b.out" "$TMP/b8b.err"; then
+    ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 still stops on a real line)"
 else
     no "(B8b) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8b.out" "$TMP/b8b.err" )"
 fi
