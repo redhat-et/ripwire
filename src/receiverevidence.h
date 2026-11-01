@@ -1330,7 +1330,7 @@ struct CallResultTypes
     // of the name that does not provably leave the tree, or a glob `use` of the module holding the target. A qualified call: the
     // qualifier names the module holding the target, or the target's own type (`owner`). "Holding" takes a module's descendants too
     // and a crate root takes its whole crate, because a `pub use` re-export places an item below the path written. Not proven, counted
-    // as via="name": `Ok(..)`, `assert!(..)`, a name only a glob of an unrelated module is near, `oneshot::channel()`, `String::new()` (those two then read as outside the tree, external=).
+    // as via="name": `Ok(..)`, `assert!(..)`, a name only a glob of an unrelated module is near, `oneshot::channel()`, `String::new()` (those two then read as outside the tree, external=; graph.h).
     bool rustRule3Proves( const Reference& r, NodeId target, std::string_view owner ) const
     {
         if( !rust.built )
@@ -1358,7 +1358,17 @@ struct CallResultTypes
         {
             const std::size_t sep = r.qualifier.rfind( "::" );
             const std::string_view last = std::string_view( r.qualifier ).substr( sep == std::string::npos ? 0 : sep + 2 );
-            return ( !owner.empty() && last == owner ) || holdsTarget( r.qualifier, r.startByte );
+            if( !owner.empty() && last == owner )
+            {
+                return true;
+            }
+            bool aliased = false;   // `use nu_protocol::Value as NuValue; NuValue::nothing()`
+            forEachRustUseAt( r.fileId, r.startByte, last, [ & ]( const Binding& b )
+            {
+                const std::size_t at = b.importedName.rfind( "::" );
+                aliased = aliased || ( !owner.empty() && std::string_view( b.importedName ).substr( at == std::string::npos ? 0 : at + 2 ) == owner );
+            } );
+            return aliased || holdsTarget( r.qualifier, r.startByte );
         }
         bool proven = false;
         forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b )

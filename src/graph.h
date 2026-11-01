@@ -10883,7 +10883,21 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
 
         // ---- H4 W3: RUST qualified-call scope guard — see keepRustQualifiedCandidates ------------------
-        const bool alreadyPinned = scipPinned || canonical || narrowed;
+        // RULE3-MEMBER-GUARD: an unproven Rule 3 answer on a qualified call. A qualifier that provably leaves the tree (`oneshot::channel()`, `String::new()`)
+        // reads as outside it, counted external=; any other keeps its hedge, since the scope guard below reads type scopes and cannot place a re-exported
+        // module item or a trait's method (`gpui::black()`, `AgentSettings::override_global()`).
+        bool rule3QualifiedHedge = false;
+        if( rule3NoProof && !r.qualifier.empty() )
+        {
+            std::string path = r.qualifier + "::" + r.calleeName;
+            if( recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, path ) )
+            {
+                disposition = vetoExternal( r );
+                continue;
+            }
+            rule3QualifiedHedge = true;
+        }
+        const bool alreadyPinned = scipPinned || canonical || narrowed || rule3QualifiedHedge;
         if( !keepRustQualifiedCandidates( ing, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )
         {
             disposition = CallDisposition::QualifiedExternal;                   // qualified-external → no edge
