@@ -103,6 +103,26 @@ class Holder:
     def is_stem_member(self):
         return 15
 
+def plainlog_thing():
+    return 20
+
+def held_in_table():
+    return 21
+
+TABLE = {"k": held_in_table}
+
+def script_entry():
+    return 16
+
+def named_in_a_comment():
+    return 17
+
+def named_in_a_doc():
+    return 18
+
+def harness_only():
+    return 19
+
 class Plain:
     def plain_method(self):
         return 12
@@ -126,7 +146,12 @@ def main_app(obj, which):
     getattr(importlib.import_module("pkg.util"), "reached_through_string")()
     return getattr(obj, f"built_on_demand_{which}")()
 E
+printf '[project.scripts]\nrun = "pkg.util:script_entry"\n' > "$P/pyproject.toml"
+printf '\n\n\n\n\n\nLOG = f"plainlog_{1}"\n' > "$P/pkg/logs.py"
+printf 'See named_in_a_doc for details.\n' > "$P/README.md"
+mkdir -p "$P/harness"; printf 'from pkg.util import harness_only\nharness_only()\n' > "$P/harness/h.py"
 cat > "$P/pkg/stems.py" <<'E'
+# named_in_a_comment is not a use
 def probe(obj, x):
     return getattr(obj, f"is_{x}")()
 E
@@ -148,6 +173,12 @@ want PY9  "$T/py.out" called_by_member unknown name
 want PY10 "$T/py.out" built_on_demand_alpha unknown built-name
 want PY19 "$T/py.out" is_stem_free test-only              # a short stem elsewhere, `f"is_{x}"`, reads on members only
 want PY20 "$T/py.out" is_stem_member unknown built-name
+want PY21 "$T/py.out" script_entry unknown manifest
+want PY22 "$T/py.out" named_in_a_comment unused
+want PY23 "$T/py.out" named_in_a_doc unused
+want PY24 "$T/py.out" harness_only test-only                # a test-support tree is a test
+want PY25 "$T/py.out" plainlog_thing unused                 # a stem with no lookup near it builds no name
+want PY26 "$T/py.out" held_in_table unknown value
 want PY11 "$T/py.out" registered_plugin unknown framework
 want PY12 "$T/py.out" over_ridden unknown dispatch
 want PY13 "$T/py.out" plain_method unused
@@ -172,6 +203,9 @@ export function tsOver(a: number): number;
 export function tsOver(a: any): any { return a; }
 export const tsArrow = () => 5;
 export class TsThing { run() { return 6; } }
+export class TsSvc {
+  tsUniqueMember() { return 8; }
+}
 E
 cat > "$S/src/barrelled.ts" <<'E'
 export function tsBehindStar() { return 7; }
@@ -183,6 +217,7 @@ E
 cat > "$S/src/main.ts" <<'E'
 import { tsLive } from "./a";
 tsLive();
+export function viaAny(o: any) { return o.tsUniqueMember(); }
 E
 cat > "$S/test/a.test.ts" <<'E'
 import { tsTestOnly } from "../src/a";
@@ -193,6 +228,8 @@ want TS1 "$T/ts.out" tsDead unused
 want TS2 "$T/ts.out" tsTestOnly test-only
 want TS3 "$T/ts.out" tsLive used
 want TS4 "$T/ts.out" tsReexported unknown import
+want TS10 "$T/ts.out" tsUniqueMember unknown by-name       # one member call on an `any`: bound by name alone is never proof
+want TS11 "$T/ts.out" TsSvc unknown members                 # the class's name appears nowhere, its member is reached
 want TS5 "$T/ts.out" tsOver unused
 norow TS6 "$T/ts.out" tsHelper
 case "$(rowof "$T/ts.out" tsOver)" in *'defs="'*) pass "TS7: an overload set is one row with defs=" ;; *) pass "TS7: the overload set is one row (one def indexed)" ;; esac
@@ -301,9 +338,19 @@ int c_live(void) { return c_static_helper(); }
 int c_test_only(void) { return 3; }
 int c_in_table(void) { return 4; }
 int cmd_pasted_one(void) { return 5; }
+int c_proto_elsewhere(void) { return 6; }
+enum c_kind { K_A };
+struct c_inner { int a; };
+struct c_outer {
+    enum c_kind kind_field;
+    struct c_inner inner_field;
+};
 enum c_unscoped_enum { C_ONE, C_TWO };
 struct c_named_enum { int a; };
 int c_holds(void) { struct c_named_enum x; return x.a + C_ONE; }
+E
+cat > "$C/other.h" <<'E'
+int c_proto_elsewhere(void);
 E
 cat > "$C/main.c" <<'E'
 #include "x.h"
@@ -318,6 +365,9 @@ E
 ask "$C" "unused functions in x.c" > "$T/c.out"
 want C7 "$T/c.out" c_unscoped_enum unknown members
 want C8 "$T/c.out" c_named_enum file-only                # `enum E x;` uses the type: that symbol is a mention, not a second definition
+want C9 "$T/c.out" c_proto_elsewhere unused              # a prototype in an unrelated header, the tmux.h shape
+want C10 "$T/c.out" c_inner file-only                    # `struct S f;` inside another struct is a use, never a second def
+case "$(rowof "$T/c.out" c_kind)" in *'defs="'*) fail "C11: a mention counted as a second def: $(rowof "$T/c.out" c_kind)" ;; *) pass "C11: c_kind is one def" ;; esac
 want C1 "$T/c.out" c_dead unused                         # a prototype in x.h is its other half, not a use
 want C2 "$T/c.out" c_live used
 want C3 "$T/c.out" c_test_only test-only

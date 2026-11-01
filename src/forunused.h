@@ -32,7 +32,7 @@
 //   dispatch     a method a base, trait or interface may call                           class(bases) extends/implements  every method  (not pub)  virtual/override/base
 //   framework    the language or a framework calls it with no call in the tree          decorator, dunder, runner hook, pytest_*  decorator  init, Test*, //export  #[attr], extern "C", main  __attribute__, extern "C", main, ctor
 //   api          a surface consumers outside this tree may use                          -       -    exported outside internal/, not package main  pub in a lib crate  a header under include/
-//   members      an unscoped enum: its enumerators are used without naming it           -       -    -    -     x
+//   members      its members are reached without naming it: a member row has evidence   x       x    x    x     x     (and every unscoped C/C++ enum)
 //   manifest     a build or package file beside it names it                             pyproject, setup.cfg  package.json  -  Cargo.toml  CMakeLists, Makefile, BUILD
 //
 // PRESENT-ONLY: no cue or no file, no block, and the answer is byte-identical. The block takes its own allowance, like the file page: it draws
@@ -219,7 +219,8 @@ inline bool rowKind( const Symbol& s ) noexcept
 // a member of a class or type: Python keeps a method as a scoped function
 inline bool isMemberDef( const Symbol& s ) noexcept
 {
-    return s.kind == SymKind::Method || ( s.lang == Lang::Python && s.kind == SymKind::Function && !s.scope.empty() );
+    const bool scopedFunctionIsMember = s.lang == Lang::Python || s.lang == Lang::TypeScript || s.lang == Lang::JavaScript;
+    return s.kind == SymKind::Method || ( scopedFunctionIsMember && s.kind == SymKind::Function && !s.scope.empty() );
 }
 
 // the text before byte `at` on its own line and the lines just above: what an attribute, a decorator or `//export` sits on
@@ -297,7 +298,7 @@ inline bool isPublicDef( const IngestResult& ing, const Symbol& s, std::string_v
             return sigOpensPub( s, src );
         case Lang::TypeScript:
         case Lang::JavaScript:
-            if( s.kind == SymKind::Method )
+            if( isMemberDef( s ) )
             {
                 const std::size_t ls = lineStartOf( src, s.sigStartByte );
                 const std::string_view head = trimWs( src.substr( ls, s.sigStartByte > ls ? s.sigStartByte - ls + 8 : 8 ) );
@@ -445,6 +446,7 @@ struct Row
     bool                       listed   = false;   // has a def in the named file (its pair's other defs read as evidence only)
     std::uint16_t              why      = 0;
     bool                       isPublic = false;
+    std::string_view           ownerName;          // the class of a member def, when this file holds it
     bool                       member   = false;   // a def of it is a member: any object's attribute lookup may reach it
     bool                       top      = false;   // the file's own top-level code calls it
     bool                       viaFile  = false;   // `used` came down an in-file chain
@@ -466,6 +468,24 @@ inline void noteSite( std::vector<Site>& sites, std::uint32_t fileId, std::uint3
     if( sites.size() < kForUnusedSitesShown )
     {
         sites.push_back( { fileId, line } );
+    }
+}
+
+// A class reached only through its members never has its name read: a member with any evidence keeps the class row from `unused`.
+inline void hedgeOwnersOfMembers( std::span<Row> rows )
+{
+    for( const Row& r : rows )
+    {
+        const bool evidence = r.outPlain > 0 || r.inFile > 0 || r.text > 0 || r.tests > 0 || r.sameText > 0 || ( r.why & ( kWhyByName | kWhyDeclined | kWhyString | kWhyValue ) ) != 0;
+        if( !evidence || r.ownerName.empty() )
+        {
+            continue;
+        }
+        const auto owner = std::ranges::lower_bound( rows, r.ownerName, sortutil::svLess, &Row::name );
+        if( owner != rows.end() && owner->name == r.ownerName && owner->name != r.name )
+        {
+            owner->why |= kWhyMembers;
+        }
     }
 }
 
@@ -1026,7 +1046,13 @@ inline FileTable buildFileTable( const IngestResult& ing, const Graph& g, const 
         for( const NodeId d : defs )
         {
             const Symbol& o = ing.symbols[d];
-            if( o.name == tail && ( o.kind == SymKind::Class || isStructOrNamedType( o.kind ) || o.kind == SymKind::Interface ) )
+            if( o.kind != SymKind::Class && !isStructOrNamedType( o.kind ) && o.kind != SymKind::Interface )
+            {
+                continue;
+            }
+            // a C++ or Python member names its class in scope; TS and JS leave scope empty, and the class's span holds the member
+            const bool holds = tail.empty() && o.fileId == s.fileId && o.sigStartByte < s.sigStartByte && s.sigStartByte < o.endByte;
+            if( o.name == tail || holds )
             {
                 return &o;
             }
@@ -1056,6 +1082,7 @@ inline FileTable buildFileTable( const IngestResult& ing, const Graph& g, const 
             it = table.rows.insert( it, std::move( fresh ) );
         }
         const Symbol* owner = ownerOf( s );
+        it->ownerName = owner != nullptr ? std::string_view( owner->name ) : it->ownerName;
         it->defs.push_back( id );
         it->member = it->member || isMemberDef( s );
         it->ownLines.push_back( ( std::uint64_t( s.fileId ) << 32 ) | s.line );
@@ -1404,6 +1431,7 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
                 r.why |= kWhyImport;
             }
         }
+        hedgeOwnersOfMembers( table.rows );
         chainWithinFile( ing, g, table );
     }
 
@@ -1432,7 +1460,7 @@ inline constexpr std::string_view kForUnusedLegend =
     "why=name a non-test word no edge explains (a member call, a callback), by-name its callers bound by name alone or split over same-named defs, declined a declined call may mean it, value a table or argument holds it, "
     "string a string literal is its name (__all__, getattr), built-name a string or macro builds names it could be, import only an import or re-export names it, barrel its file is star re-exported, "
     "dispatch a base, trait or interface may call it, framework the language or a framework calls it (decorator, attribute, entry point), api consumers outside this tree may use it, "
-    "members an unscoped enum whose enumerators need no mention of it, manifest a build or package file names it, in-file an unknown def in this file calls it. "
+    "members a type whose members are reached without its name (a member has evidence, or an unscoped enum), manifest a build or package file names it, in-file an unknown def in this file calls it. "
     "out= non-test callers elsewhere, in= in this file, by= one of them, tests= test callers and words, text= str= imp= same= non-test code, string, import and same-file words, at= sites to read. "
     "lang_unserved=1 no verdicts for this language; unread=1; shown= capped=1 rows cut; unused_cut: files or bytes cut; unused_names: several files match, none picked";
 inline constexpr std::string_view kForCompactUnusedLegend =
