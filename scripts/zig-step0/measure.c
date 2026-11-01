@@ -116,8 +116,11 @@ static int span_has_word( const char *data, uint32_t lo, uint32_t hi, const char
         {
             continue;
         }
+        /* One cast on this line. A second identical cast would collapse in
+         * --lint and disagree with --match (lintbudgetcheck). */
+        uint32_t word_end = i + ( uint32_t ) n;
         int left_ok  = ( i == lo ) || !is_ident( ( unsigned char ) data[ i - 1 ] );
-        int right_ok = ( i + ( uint32_t ) n == hi ) || !is_ident( ( unsigned char ) data[ i + ( uint32_t ) n ] );
+        int right_ok = ( word_end == hi ) || !is_ident( ( unsigned char ) data[ word_end ] );
         if( left_ok && right_ok )
         {
             return 1;
@@ -424,10 +427,13 @@ static int measure_one( TSParser *parser, const char *full, uint64_t limit_ns, F
         write_row( out, rel, 0, "read_error", 0, 0, 0, "", "", "", "" );
         return 0;
     }
-    if( st.st_size < 0 || ( uint64_t ) st.st_size > kMaxFileBytes || ( uint64_t ) st.st_size > 0xffffffffull )
+    /* Hoist the cast. The same `( uint64_t ) st.st_size` twice on one line
+     * is one --lint row and two --match hits. */
+    uint64_t file_bytes = ( uint64_t ) st.st_size;
+    if( st.st_size < 0 || file_bytes > kMaxFileBytes || file_bytes > 0xffffffffull )
     {
         close( fd );
-        write_row( out, rel, ( uint64_t ) st.st_size, "too_big", 0, 0, 0, "", "", "", "" );
+        write_row( out, rel, file_bytes, "too_big", 0, 0, 0, "", "", "", "" );
         return 0;
     }
     uint32_t len = ( uint32_t ) st.st_size;
