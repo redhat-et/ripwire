@@ -43,14 +43,28 @@
 // Strings that merely SHOW a git command to the user (a `next=` hint, a printed shell snippet) are not
 // invocations and keep their plain spelling.
 //
+// NEVER DOWNLOAD. On a partial clone (a promisor remote, `--filter=blob:none`), any git read of a missing object fetches
+// it from the network, one batch at a time, without asking: a read-only `git log` grew a ClickHouse .git from 15 to 33 GB.
+// denyGitLazyFetch() below is the policy, set once in the environment at the top of main() so every git child (and every
+// git that child starts) inherits it, on any shell. Two layers, because the common distro gits predate the first:
+//   GIT_NO_LAZY_FETCH=1             git 2.45 and later: git does not try. (An option, `git --no-lazy-fetch`, arrived in
+//                                   2.44, and an older git REFUSES it with exit 129, so it cannot ride in this prefix.)
+//   GIT_ALLOW_PROTOCOL=<no such>    git 2.12 and later: the fetch child git starts is refused at the transport, so the
+//                                   download fails even when git tries. Beats any protocol.* config. Ignored by 2.11-.
+// A read that needs a missing object then FAILS, exactly as a corrupt object does, and takes that verb's existing
+// git-failed path. The one command of ours that means to use the network, resolveRemoteRoot's `clone`, lifts the second
+// layer around itself (GitNetworkForClone). test/lazyfetchcheck.sh.
+//
 // Gated by test/githardencheck.sh: behavioural arms run the git-backed verbs through several root shapes and
 // the MCP and --plan-lint entry points and assert a hook-form core.fsmonitor stays unfired; a PATH shim arm
 // asserts every git child carries the prefix; a structural arm refuses an executed git command spelled
 // outside gitCmd(). test/gitchildoptscheck.sh gates the filter pins and the diff-program options.
 
+#include "infra/os.h"        // rw::os::setenv — denyGitLazyFetch, every child's no-download environment
 #include "infra/shquote.h"   // rw::shSingleQuote — a driver name is the repository's text, quoted for the shell
 
 #include <algorithm>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -64,6 +78,43 @@ inline constexpr std::string_view kGitCmdPrefix = "git --no-optional-locks -c co
 // An option no git version accepts: git exits 129 before it reads a config file or a working tree. Carried by
 // every child once a repository names a filter driver the -c pins cannot spell (see FILTER DRIVERS above).
 inline constexpr std::string_view kGitRefusedOption = "--ripwire-refused-unpinnable-filter-driver";
+
+// A protocol name no transport has: an allow-list of only this allows nothing.
+inline constexpr const char* kGitNoFetchProtocols = "ripwire-no-network";
+
+// The protocols the caller's environment allowed before denyGitLazyFetch replaced them; empty when it set none.
+inline std::string& callerGitAllowProtocol()
+{
+    static std::string saved;
+    return saved;
+}
+
+// NEVER DOWNLOAD (the header comment). Call ONCE, first thing in main(), before any thread (setenv is not thread-safe).
+inline void denyGitLazyFetch()
+{
+    if( const char* caller = std::getenv( "GIT_ALLOW_PROTOCOL" ); caller != nullptr )
+    {
+        callerGitAllowProtocol() = caller;
+    }
+    os::setenv( "GIT_NO_LAZY_FETCH", "1", 1 );
+    os::setenv( "GIT_ALLOW_PROTOCOL", kGitNoFetchProtocols, 1 );
+}
+
+// The scope of the one git command that means to use the network: a root the user named as a URL. The allow-list is what
+// the caller's environment said, else git's ordinary transports (never ext::, which the clone also pins off). Single
+// threaded: the clone runs before any walk starts.
+class GitNetworkForClone
+{
+public:
+    GitNetworkForClone()
+    {
+        const std::string& caller = callerGitAllowProtocol();
+        os::setenv( "GIT_ALLOW_PROTOCOL", caller.empty() ? "https:http:ssh:git:file" : caller.c_str(), 1 );
+    }
+    ~GitNetworkForClone() { os::setenv( "GIT_ALLOW_PROTOCOL", kGitNoFetchProtocols, 1 ); }
+    GitNetworkForClone( const GitNetworkForClone& )            = delete;
+    GitNetworkForClone& operator=( const GitNetworkForClone& ) = delete;
+};
 
 namespace gitcmddetail
 {

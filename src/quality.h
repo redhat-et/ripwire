@@ -5088,7 +5088,9 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // COMMAND changed under an unchanged key, here the PARSE did. Neither is visible to the key, which is why
 // this bump is manual. On ordinary trees the two readers' streams are byte-identical (the lane's golden
 // arm over owners/hotspots/cochange), so the bump costs those repos one cold walk and changes no answer.
-constexpr std::uint32_t kQChurnCacheScheme = 4;
+// SCHEME 5 (2026-11-01, HISTORY-WALK-HANG): the COMMAND changed under an unchanged key again (--no-renames, gitLogRecordsCmd:
+// a rename now lists its old path too), the scheme 2 case.
+constexpr std::uint32_t kQChurnCacheScheme = 5;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )

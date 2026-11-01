@@ -850,10 +850,18 @@ inline int decodedExitCode( int status ) noexcept
 // field in it. Measured: `--owners=SYM` answered "git unavailable / no history" on a healthy one-commit
 // repo while the all-files form beside it was correct. A `--since=` window is an option and rides
 // anywhere; both forms end in a space, which is what keeps the redirect from gluing on.
+//
+// --no-renames: a walk reads commits and trees and never a blob. Rename detection is what read blobs: the similarity score
+// needs each candidate's content, so on a partial clone it was the lazy fetch (risingwave without it: git dies after 73 of
+// 2455 commits under GIT_NO_LAZY_FETCH, 1.78 s; with it, every commit in 0.18 s), and on a full clone it was the cost. What it
+// changes: a rename now lists BOTH paths where it listed the new one, so a commit only ever GAINS a path, the old one. Whole
+// history, base vs this: textual 92 of 13104 commits differ (354 paths added, 5 of them at a path that exists at HEAD), hono
+// 50 of 2862 (286, 3), tmux 15 of 12243 (23, 1), none lost. A path gone from HEAD resolves to nothing and drops out at the
+// join; one that exists again was in fact touched by that commit, so it counts. Nothing here follows a file through a rename.
 inline std::string gitLogRecordsCmd( const std::string& root, const std::string& extraArgs )
 {
     return gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-         + " log --no-ext-diff --no-textconv " + kMergeDiffArgs
+         + " log --no-ext-diff --no-textconv --no-renames " + kMergeDiffArgs
          + "-z --name-only --format=%x00__C__%x00%ae%x00%at%x00%ct " + extraArgs + "2>/dev/null";
 }
 

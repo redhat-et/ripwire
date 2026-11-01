@@ -417,6 +417,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // URL string that starts with `-` from ever being parsed as a `git clone` OPTION even if isGitUrl's
     // own leading-dash guard were ever bypassed or loosened — belt-and-suspenders, not the only gate.
     fs::remove_all( fs::path( cacheDir ), ec );
+    const rw::GitNetworkForClone networkForThisClone;   // the one git command that means to download (gitcmd.h NEVER DOWNLOAD)
     const std::string cmd = rw::gitCmd( " -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
                                          "clone --depth=1 -q -- " ) + rw::shSingleQuote( urlOrPath )
                           + " " + rw::shSingleQuote( cacheDir ) + " 2>&1";
@@ -4177,6 +4178,7 @@ int main( int argc, char** argv )
     using namespace rw;
 
     rw::os::init_process( argc, argv );   // POSIX: nothing. Windows: UTF-8 argv, binary stdio, path-valued environment in the program's spelling
+    rw::denyGitLazyFetch();               // before any thread and any git child: no git of ours downloads on a partial clone (gitcmd.h)
 
     if( argc >= 2 && std::string_view( argv[1] ) == "wrap" )
     { // adoption recipe (subcommand, not a flag)
