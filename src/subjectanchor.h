@@ -119,6 +119,11 @@ inline Spelling parseSpelling( std::string_view w ) noexcept
 // identifier syntax: the shape the router already calls explicit (camelCase, snake_case), or a qualified spelling
 inline bool hasNameSyntax( std::string_view w ) noexcept
 {
+    // `<file-scope>`, `<module>`: the angle-bracketed spelling of a synthetic owner (module-scope symbols) is a name, not a word
+    if( w.size() > 2 && w.front() == '<' && w.back() == '>' )
+    {
+        return true;
+    }
     return !w.empty() && w.front() != '-' && w.find( '/' ) == std::string_view::npos
         && ( namesplit::hasIdentifierShape( w ) || w.find( "::" ) != std::string_view::npos || w.find( '.' ) != std::string_view::npos );
 }
