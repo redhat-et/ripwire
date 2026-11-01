@@ -21,7 +21,7 @@
 //   * name-exact, with a plain word among its anchors: the words are dropped. Always; that anchor was never true, on a question too,
 //     and with a test-only symbol too (CONFIDENCE-ANCHOR reads that answer low).
 //   * declined for a word: the route is the one the names alone get, when the subject is DESCRIPTIVE (no question lead, at most
-//     kSubjectMaxPlainWords plain content words) and one exact symbol has a source-class definition. rankQuery carries the names, so
+//     kSubjectMaxPlainWords plain content words) and names ONE exact symbol with a source-class definition. rankQuery carries the names, so
 //     the answer is the bare symbol's plus the dropped: clause.
 //   * any other route, same two conditions: the conceptual answer stands, every byte, and <callers by="subject"> rides on top
 //     (verbs_for.h). The prose words there are real retrieval terms and the ranked map may hold the answer, so nothing is taken.
@@ -302,6 +302,22 @@ inline bool routeAnchorHasSourceDef( const IngestResult& ing, const RouteChoice&
             leaves.push_back( routeLower( sp.leaf ) );
         }
     }
+    // a subject that is a FILE ("DynamicScreen.c", "src/x.cc") anchors that file, not a symbol: a source file is a source anchor
+    if( rc.anchorDefs.empty() )
+    {
+        for( const std::string_view w : splitRouteWords( rankQuery ) )
+        {
+            const std::string_view t = detail::graphSubjectTrimWord( w ).text;
+            for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+            {
+                const std::string_view path = rootRelPath( ing, f );
+                if( path.ends_with( t ) && ( path.size() == t.size() || path[ path.size() - t.size() - 1 ] == '/' ) && pathTierOf( path ) == PathTier::Source )
+                {
+                    return true;
+                }
+            }
+        }
+    }
     const auto named = [ & ]( const Symbol& s )
     {
         if( rc.anchorDefs.empty() )
@@ -352,7 +368,9 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, std::s
     }
     const bool lift     = reading.descriptive && reading.sourceDef;
     const bool declined = out.route.reason.starts_with( "subtoken+body:declined(" );
-    if( subjectAnchoredPlainWord( ing, out.route, reading ) || ( declined && lift ) )
+    // Two exact symbols on a declined route ("add a UrlSerializer parameter to createSegmentGroupFromRoute") name no ONE anchor, and
+    // name-exact would serve neither's callers: the conceptual answer stands with the first function's callers on top.
+    if( subjectAnchoredPlainWord( ing, out.route, reading ) || ( declined && lift && reading.exact.size() == 1 ) )
     {
         RouteChoice bare = chooseForRanker( ing, reading.reduced );
         if( bare.which == LexMode::NameExact )
@@ -381,7 +399,7 @@ inline SubjectRoute chooseSubjectRoute( const IngestResult& ing, std::string_vie
     out.anchorNoSource = !routeAnchorHasSourceDef( ing, out.route, out.rankQuery.empty() ? task : std::string_view( out.rankQuery ) );
     if( out.anchorNoSource )
     {
-        out.route.reason += "; anchor has no source definition (test, doc or data only)";
+        out.route.reason += "; anchor has no source definition (test, doc or data only, or not indexed)";
     }
     return out;
 }

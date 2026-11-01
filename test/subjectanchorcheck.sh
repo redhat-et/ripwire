@@ -172,6 +172,16 @@ A="$( ask "$PY" 'json_only_key' )"; [ "$( conf "$A" )" = low ] && ok "H data fil
 A="$( ask "$PY" 'prepare_setup_platform' )"; [ "$( conf "$A" )" = high ] && ok "H source: high" || no "H source: $( conf "$A" )"; hasnt "$A" "$NOSRC" "H source: no note"
 A="$( ask "$PY" 'helper_only_tests new parameter' )"; [ "$( conf "$A" )" = low ] && ok "H test-only beside dropped words: low" || no "H test-only beside words: $( conf "$A" )"
 A="$( ask "$PY" 'zznope sturdy words' )"; hasnt "$A" "$NOSRC" "H conceptual route: no note"
+printf 'def plain_src(x):\n    return x\n' > "$PY/app/some_mod.py"
+A="$( ask "$PY" 'app/some_mod.py' )"; hasnt "$A" "$NOSRC" "H a source FILE subject is a source anchor"
+A="$( ask "$CX" 'src/registry.cpp' )"; hasnt "$A" "$NOSRC" "H a source FILE subject, cpp"
+# two exact on a route declined for a word: no ONE anchor, the map stands, the function's callers on top
+for i in 1 2 3 4 5; do printf 'struct W%s { int fresh2( int a ) { return a; } };\n' "$i" > "$CX/src/w$i.cpp"; done
+printf 'struct UrlThing { int a; };\nint segmentMaker( int a ) { return a; }\nint segUser() { return segmentMaker( 1 ); }\n' > "$CX/src/seg.cpp"
+A="$( ask "$CX" 'parameter UrlThing segmentMaker' )"; R="$( route "$A" )"
+hasnt "$R" 'dropped:' "T declined + two exact: the route is not flipped"
+has "$R" 'declined' "T declined + two exact: declined stays disclosed"
+has "$( blk "$A" )" 'segUser' "T declined + two exact: the function's callers ride"
 # determinism + well-formed
 A1="$( ask "$PY" 'prepare_setup_platform new parameter' )"; A2="$( ask "$PY" 'prepare_setup_platform new parameter' )"
 [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ] && ok "determinism" || no "determinism"
