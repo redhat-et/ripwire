@@ -85,6 +85,8 @@ struct LensRanking
     // for words that named something. The T3 auto-body allowance reads it so the bundle serves the anchor's
     // OWN body or none at all (docs/EVALS.md, the anchor-only substitution round).
     std::vector<RouteAnchorDef> anchorDefs;
+    // SUBJECT-ANCHOR (subjectanchor.h): the definitions of each symbol a conceptual route's descriptive subject names, subject order
+    std::vector<std::vector<NodeId>> subjectCallerCandidates;
     // L-W (forpage.h): the term evidence behind the RAW lexical pass — which query subtokens each symbol
     // matched and how rare each is — read back out of the scorer (lexical.h LexTermEvidence) so coverage=
     // and the --for --limit=N file page are computed from the same integers that ranked the head.

@@ -17,6 +17,7 @@
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
 #include "forselfhook.h"      // lane self-hook: a served Python override names where its base classes reach it through self
 #include "forcallerhop.h"   // mf1-nx: a name-exact answer about ONE function carries that function's callers
+#include "subjectanchor.h"  // SUBJECT-ANCHOR: the symbol a descriptive subject names is the anchor, not the words around it
 #include "regindex.h"       // registrar: <reg> rows joining a registry key to its registrations
 #include "epmanifest.h"     // ep-manifest: the manifest entry-point groups that register a shown row
 #include "listedin.h"       // manifest-noncode: the build/package/registry manifest lines that list a shown file (creation tasks)
@@ -121,7 +122,10 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // chosen ONCE here and reused below rather than classified twice — chooseForRanker is pure over
     // (ing, task), so hoisting it is byte-neutral by construction.
     const bool        routeOn      = !cfg.noRoute;
-    const RouteChoice rc           = routeOn ? chooseForRanker( ing, task ) : RouteChoice{};
+    SubjectRoute      subjectRoute = routeOn ? chooseSubjectRoute( ing, task ) : SubjectRoute{};
+    const RouteChoice& rc          = subjectRoute.route;
+    // SUBJECT-ANCHOR: the ranker and the mention anchor read the names alone when the words were dropped from the route
+    const std::string_view rankTask = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     const bool        compactRoute = routeOn && compactCandidate && rc.which == LexMode::SubtokenBody;
 
     std::size_t       forPruneK = 0;
@@ -161,7 +165,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     std::vector<float>& lensRank = out.rank;
     if( routeOn )
     {
-        lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
+        lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
                                                                                   0, 0, {}, &out.evidence );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
@@ -170,7 +174,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
             // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
             // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence );
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence );
         }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
@@ -183,7 +187,8 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         out.routeNote  = routeNoteOf( rc, shape, /*noRoute=*/false );   // row 6: the code itself, no "routed: " prose prefix — ONE producer (filter.h)
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
-        out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
+        out.anchorDefs = std::move( subjectRoute.route.anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
+        out.subjectCallerCandidates = std::move( subjectRoute.callerCandidates );   // SUBJECT-ANCHOR: empty unless a conceptual route's subject names a symbol
     }
     else
     {
@@ -220,7 +225,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     if( !cfg.noRoute && !cfg.noMentionBoost && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
-        if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
+        if( applyMentionBoost( ing, rankTask, lensRank, &mentionInfo ) )
         {
             char nb[ 220 ];
             rw::formatTo( nb, sizeof( nb ), " [mention anchor: {} file{} + {} symbols named in the task, score lifted to within 5% of the top score; "
@@ -606,6 +611,7 @@ struct ForLensHeaderParts
                                             // regime (forcallerhop.h forCallerHopTargets), so a <callers> rides and its clause
                                             // defines it; set after construction, cleared with the section
     bool             callerHopRanked = false;  // UPWARD-2HOP: that <callers> is the ranked seed's (by="rank"), so ITS clause rides instead
+    bool             callerHopSubject = false; // SUBJECT-ANCHOR: that <callers> is the subject's named symbol (by="subject"), so ITS clause rides instead
     bool             dispatchHopPresent = false; // mf1-nx wave 4 (fordispatchhop.h): a <dispatch> rides; its clause defines it
     bool             selfHookPresent = false;    // lane self-hook (forselfhook.h): a <selfhooks> rides; its clause defines it
     bool             epPresent = false;        // ep-manifest (epmanifest.h): a manifest entry-point group registers a shown row in
@@ -817,6 +823,10 @@ inline constexpr std::string_view presentOnlyClause( bool present, bool compact,
 // mf1-nx / UPWARD-2HOP: the caller hop's present-only clause — the named-route one, or the ranked seed's (by="rank")
 inline constexpr std::string_view callerHopClause( const ForLensHeaderParts& p, bool compact ) noexcept
 {
+    if( p.callerHopSubject )
+    {
+        return presentOnlyClause( p.callerHopPresent, compact, rw::kForCompactSubjectCallerHopLegend, rw::kForSubjectCallerHopLegend );
+    }
     return p.callerHopRanked ? presentOnlyClause( p.callerHopPresent, compact, rw::kForCompactRankedCallerHopLegend, rw::kForRankedCallerHopLegend )
                              : presentOnlyClause( p.callerHopPresent, compact, rw::kForCompactCallerHopLegend, rw::kForCallerHopLegend );
 }
@@ -2623,7 +2633,35 @@ inline rw::CallerHopRender rankedCallerHop( const RankedHopPosture& p, const rw:
         return held;
     }
     const std::vector<rw::NodeId> ids = rw::forRankedCallerHopTargets( ing, g, shownSigIds, cfg.forTask );
-    return ids.empty() ? held : rw::renderForCallerHop( ing, g, ids, rootArg, /*ranked=*/true );
+    return ids.empty() ? held : rw::renderForCallerHop( ing, g, ids, rootArg, "rank" );
+}
+
+// SUBJECT-ANCHOR (subjectanchor.h): the conceptual route's answer stands and the callers of the function its subject names ride on
+// top, on the ranked hop's late-splice posture and with no task gate: the subject match is the trigger. The first named symbol that
+// is ONE function, by the callers verb's own resolution, or by the qualifier when that placed exactly one definition.
+inline rw::CallerHopRender subjectCallerHop( const RankedHopPosture& p, const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                             const std::vector<std::vector<rw::NodeId>>& candidates, std::string_view rootArg )
+{
+    if( candidates.empty() || p.namedHop || !p.bundleCompact || !p.sigsRendered || p.surfaceOff || p.hopsCutMarker || rw::isNameExactRouteTag( p.routeTag ) || cfg.json
+        || cfg.tokenBudget > 0 || !rw::forCallerHopOn() )
+    {
+        return {};
+    }
+    for( const std::vector<rw::NodeId>& defs : candidates )
+    {
+        std::vector<rw::NodeId> ids = rw::forCallerHopTargets( ing, g, defs );
+        if( ids.empty() && defs.size() == 1 && rw::ReceiverEvidence::callableKind( ing.symbols[ defs.front() ].kind ) )
+        {
+            ids = defs;
+        }
+        // no rows is no element: the block is a lead on top of an answer, and a bare total="0" here would read as "nobody calls it"
+        // where a member call with an unproven receiver may (the callers verb says so with its own hedges)
+        if( !ids.empty() && !rw::oneHopCallerRows( ing, g, ids ).empty() )
+        {
+            return rw::renderForCallerHop( ing, g, ids, rootArg, "subject" );
+        }
+    }
+    return {};
 }
 
 // mf1-nx (forcallerhop.h): the ONE function whose callers ride — `nameExactBodies` is the posture runForLensPass knows (the auto
@@ -4498,10 +4536,19 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         // ── UPWARD-2HOP (forcallerhop.h forRankedCallerHopTargets): an error-shaped task's ranked caller hop, a late splice on the
         // rows <sigs> EMITTED (rankedCallerHop states the posture); its clause rides beside it
-        callerHop = rankedCallerHop( RankedHopPosture{ .bundleCompact = autoBundleMode && plan.compact, .sigsRendered = sigsPreRendered,
-                                                       .surfaceOff = enrich.surfaceOff, .hopsCutMarker = enrich.hopsCutMarker,
-                                                       .namedHop = headerParts.callerHopPresent, .routeTag = lr.routeTag },
-                                     cfg, ing, g, shownSigIds, flRootArg, std::move( callerHop ) );
+        RankedHopPosture lateHop{ .bundleCompact = autoBundleMode && plan.compact, .sigsRendered = sigsPreRendered,
+                                  .surfaceOff = enrich.surfaceOff, .hopsCutMarker = enrich.hopsCutMarker,
+                                  .namedHop = headerParts.callerHopPresent, .routeTag = lr.routeTag };
+        // SUBJECT-ANCHOR: a symbol the subject names outranks a lead found by rank
+        if( rw::CallerHopRender byName = subjectCallerHop( lateHop, cfg, ing, g, lr.subjectCallerCandidates, flRootArg ); !byName.xml.empty() )
+        {
+            callerHop                    = std::move( byName );
+            headerParts.callerHopPresent = true;
+            headerParts.callerHopSubject = true;
+            lateHop.namedHop             = true;
+            headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+        }
+        callerHop = rankedCallerHop( lateHop, cfg, ing, g, shownSigIds, flRootArg, std::move( callerHop ) );
         if( !callerHop.xml.empty() && !headerParts.callerHopPresent )
         {
             headerParts.callerHopPresent = true;   // the ranked clause rides beside the element it defines

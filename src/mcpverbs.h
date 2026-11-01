@@ -44,6 +44,7 @@
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
+#include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
@@ -2477,7 +2478,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // them is part of the routed reading. A default-constructed RouteChoice IS that reading: SubtokenBody,
     // no reason, no anchors, so there is no route= to disclose and ctxRootOpen omits the attribute, which is
     // byte-for-byte what the CLI emits under --no-route.
-    const RouteChoice        rc        = noRoute ? RouteChoice{} : chooseForRanker( ing, task );
+    const SubjectRoute       subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, task );   // SUBJECT-ANCHOR, the CLI twin's
+    const RouteChoice&       rc        = subjectRoute.route;
+    const std::string_view   rankTask  = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     // NOT const: LB-A's relevance floor narrows it below, once every boost has landed on lensRank. The
     // MaxScore pruning bound two stanzas down consumes the PRE-floor value, which is the safe direction —
     // a bound computed for a larger K can only keep more candidates, never fewer.
@@ -2505,12 +2508,12 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // twin's computeLensRanking makes the same two calls (one exhaustive subtoken pass on the identifier route).
     LexTermEvidence    mcpEvidence;
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
-                                       ? lexicalScoresNameExactRanked( ing, task, &tierMul )
+                                       ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                        : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
                                                               0, 0, {}, &mcpEvidence );
     if( rc.which == LexMode::NameExact )
     {
-        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
+        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
     }
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
@@ -2537,7 +2540,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( !noRoute && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
-        if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
+        if( applyMentionBoost( ing, rankTask, lensRank, &mentionInfo ) )
         {
             char nb[ 220 ];
             rw::formatTo( nb, sizeof( nb ), " [mention anchor: {} file{} + {} symbols named in the task, score lifted to within 5% of the top score; "
@@ -4892,7 +4895,9 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     LensRanking       lr;
     // See forTaskText's own note: `noRoute` is the CLI --no-route over MCP, and it skips the shape demotion,
     // the mention anchor and the co-change prior with the ranker, because all four are the routed reading.
-    const RouteChoice rc = noRoute ? RouteChoice{} : chooseForRanker( ing, task );
+    const SubjectRoute     subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, task );   // SUBJECT-ANCHOR, the CLI twin's
+    const RouteChoice&     rc           = subjectRoute.route;
+    const std::string_view rankTask     = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     std::vector<char> ifaceExact( ing.symbols.size(), 0 );
     for( std::size_t i = 0; i < ix.g.implementors.size() && i < ifaceExact.size(); ++i )
     {
@@ -4906,7 +4911,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     const queryshape::Verdict shape   = queryshape::classify( task );
     const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
     const std::vector<float>  docNoiseMul = !noRoute ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};   // the CLI twin's lift order
-    lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
+    lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul,
                                                                               0, 0, {}, &lr.evidence );
     // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
@@ -4923,7 +4928,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     if( !noRoute && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
-        if( applyMentionBoost( ing, task, lr.rank, &mentionInfo ) )
+        if( applyMentionBoost( ing, rankTask, lr.rank, &mentionInfo ) )
         {
             char nb[ 160 ];
             rw::formatTo( nb, sizeof( nb ), " [mention anchor: {} file{} + {} symbols named in the task, score lifted to within 5% of the top score]",
