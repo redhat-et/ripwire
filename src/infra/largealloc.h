@@ -9,22 +9,22 @@
 
 namespace rw::largealloc
 {
-constexpr std::size_t kMinBytes   = 256 * 1024;   // below this the zone's small and medium paths keep working as they do
-constexpr std::size_t kHeader     = 16;           // holds the region size; 16 keeps the user pointer at the default new alignment
-constexpr std::size_t kRoundTo    = 16384;        // the largest page size of a target (arm64 macOS); on 4 KiB pages it only rounds up
-constexpr std::size_t kPageFilter = 4095;         // regions start on a page of at least 4 KiB, whatever the architecture
-constexpr std::size_t kMaxRouted  = std::size_t( -1 ) / 2;   // keeps the rounding below from wrapping; malloc then refuses the size
+constexpr std::size_t kMinBytes = 256 * 1024; // below this the zone's small and medium paths keep working as they do
+constexpr std::size_t kHeader = 16; // holds the region size; 16 keeps the user pointer at the default new alignment
+constexpr std::size_t kRoundTo = 16384; // the largest page size of a target (arm64 macOS); on 4 KiB pages it only rounds up
+constexpr std::size_t kPageFilter = 4095; // regions start on a page of at least 4 KiB, whatever the architecture
+constexpr std::size_t kMaxRouted = std::size_t( -1 ) / 2; // keeps the rounding below from wrapping; malloc then refuses the size
 
 // Which user pointers are routed: lock-free open addressing over the address alone. 0 = never used, 1 = free again.
 // A slot never returns to 0, so a probe that stops at 0 cannot have skipped a live pointer. Only the block's owner
 // forgets it, and the address cannot be mapped again until after the forget, so a pointer is in the table at most once.
 // Full, or ProbeLimit slots busy from its home: remember() says no and the block comes from malloc, as a smaller one
 // would; nothing is lost but that block's early return to the OS.
-template <std::size_t Slots, std::size_t ProbeLimit>
+template<std::size_t Slots, std::size_t ProbeLimit>
 class BlockTable
 {
     static_assert( ( Slots & ( Slots - 1 ) ) == 0 );
-    std::atomic<std::uint64_t> m_slots[ Slots ] {};
+    std::atomic<std::uint64_t> m_slots[Slots] {};
 
     static constexpr std::size_t home( std::uint64_t p ) noexcept
     {
@@ -37,8 +37,8 @@ public:
         std::size_t h = home( p );
         for( std::size_t n = 0; n < ProbeLimit; ++n, h = ( h + 1 ) & ( Slots - 1 ) )
         {
-            std::uint64_t e = m_slots[ h ].load( std::memory_order_relaxed );
-            if( ( e == 0 || e == 1 ) && m_slots[ h ].compare_exchange_strong( e, p ) )
+            std::uint64_t e = m_slots[h].load( std::memory_order_relaxed );
+            if( ( e == 0 || e == 1 ) && m_slots[h].compare_exchange_strong( e, p ) )
             {
                 return true;
             }
@@ -50,14 +50,14 @@ public:
         std::size_t h = home( p );
         for( std::size_t n = 0; n < ProbeLimit; ++n, h = ( h + 1 ) & ( Slots - 1 ) )
         {
-            const std::uint64_t e = m_slots[ h ].load( std::memory_order_relaxed );
+            const std::uint64_t e = m_slots[h].load( std::memory_order_relaxed );
             if( e == 0 )
             {
                 return false;
             }
             if( e == p )
             {
-                m_slots[ h ].store( 1 );
+                m_slots[h].store( 1 );
                 return true;
             }
         }
@@ -66,7 +66,7 @@ public:
 };
 
 // nullptr = not routed (too small, too large, mmap refused, table busy): the caller falls back to malloc.
-template <class Table>
+template<class Table>
 inline void* allocate( Table& table, std::size_t n ) noexcept
 {
     if( n < kMinBytes || n > kMaxRouted )
@@ -74,13 +74,13 @@ inline void* allocate( Table& table, std::size_t n ) noexcept
         return nullptr;
     }
     const std::size_t total = ( n + kHeader + kRoundTo - 1 ) & ~( kRoundTo - 1 );
-    void*             b     = ::mmap( nullptr, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
+    void* b = ::mmap( nullptr, total, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0 );
     if( b == MAP_FAILED )
     {
         return nullptr;
     }
     *static_cast<std::size_t*>( b ) = total;
-    char* p                         = static_cast<char*>( b ) + kHeader;
+    char* p = static_cast<char*>( b ) + kHeader;
     if( table.remember( reinterpret_cast<std::uint64_t>( p ) ) )
     {
         return p;
@@ -91,7 +91,7 @@ inline void* allocate( Table& table, std::size_t n ) noexcept
 
 // true = p was routed and is unmapped. Any other block returns false without the table being read in most cases: a
 // routed pointer sits exactly kHeader into a page, so only 1 in 256 of the 16-byte-aligned ordinary pointers probes.
-template <class Table>
+template<class Table>
 inline bool release( Table& table, void* p ) noexcept
 {
     if( ( reinterpret_cast<std::uintptr_t>( p ) & kPageFilter ) != kHeader || !table.forget( reinterpret_cast<std::uint64_t>( p ) ) )
@@ -102,4 +102,4 @@ inline bool release( Table& table, void* p ) noexcept
     ::munmap( b, *static_cast<std::size_t*>( b ) );
     return true;
 }
-}   // namespace rw::largealloc
+} // namespace rw::largealloc

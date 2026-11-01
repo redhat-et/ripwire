@@ -30,7 +30,8 @@ void* allocOrNull( std::size_t n ) noexcept
 {
     if( n >= rw::largealloc::kMinBytes )
     {
-        static const bool off = [] { const char* v = std::getenv( "RIPWIRE_TEST_LARGEALLOC" ); return v != nullptr && v[ 0 ] == 'o' && v[ 1 ] == 'f'; }();
+        static const bool off = []
+        { const char* v = std::getenv( "RIPWIRE_TEST_LARGEALLOC" ); return v != nullptr && v[ 0 ] == 'o' && v[ 1 ] == 'f'; }();
         if( !off )
         {
             if( void* p = rw::largealloc::allocate( g_blocks, n ) )
@@ -41,7 +42,7 @@ void* allocOrNull( std::size_t n ) noexcept
     }
     return std::malloc( n != 0 ? n : 1 );
 }
-}   // namespace
+} // namespace
 
 void* operator new( std::size_t n )
 {
