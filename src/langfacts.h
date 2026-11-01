@@ -71,6 +71,19 @@ enum class BaseImportEvidence : std::uint8_t
     JvmImport,      // `import org.ext.Base` / `extends org.ext.Base` of a package the tree does not declare
 };
 
+/// Lane arch-honest: can this language's files carry a file→file edge in this build? Resolved: a directive resolves to an indexed
+/// file (resolve.h includeLangOf has a Step-A), so an absent edge means none was written. Unmeasured: the language has code, and no
+/// sound string→file rule (a Go package path, a Java/Kotlin/C#/PHP namespace, a Swift whole-module import) or no import capture at
+/// all (Dart, GDScript, Clojure), so an absent edge means nothing: its Ca/Ce/I/D/zone are unknown, not zero. NotApplicable: docs and
+/// data, which the dependency verbs exclude by decision (lintrules.h dependencyCapable); a directory of them keeps its row.
+/// Unmeasured is the default, the honest answer for a language that says nothing; test/archhonestcheck.sh (H) pins each row to the index.
+enum class FileEdges : std::uint8_t
+{
+    Unmeasured,
+    Resolved,
+    NotApplicable,
+};
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -148,6 +161,10 @@ struct LangFacts
     /// Python: a closure inside a method can call `self.hook()` / `cls.hook()` for its host, so a receiver-bound call dispatches
     /// through the host's overrides (quality.h pythonReceiverParameters, pythonDispatchRequests). A separate fact from the hooks.
     bool closureReceiverDispatch = false;
+
+    /// Python: a bare builtin or an import from outside the tree is bound there whatever namesake an imported file defines, so the
+    /// Phase-5 external-name veto (graph.h ExternalVeto) decides a call BEFORE Rule 3 narrows it to that namesake.
+    bool externalVetoBeforeRule3 = false;
 
     /// Kotlin: an `interface` is a class_declaration like a class (queries/kotlin/tags.scm: "both land here as @definition.class"),
     /// so the symbol's kind cannot tell the two apart; shared code that needs an interface (ifacedispatch.h's lambda test) reads a
@@ -262,6 +279,9 @@ struct LangFacts
     /// method), so a signature change reaches those rows in step; fordeclrow.h counts only these languages' function and method rows
     /// (DECL-ROW). Objective-C is not here: its message selectors are not C signatures.
     bool signatureRows = false;
+
+    /// Whether this language's files can carry a file→file edge in this build (FileEdges above).
+    FileEdges fileEdges = FileEdges::Unmeasured;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -270,34 +290,34 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
-      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .signatureRows = true },
-    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
-      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true },
+      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
+      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true },
+      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir, .signatureRows = true },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self" },
+      .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true },
-    { .lang = Lang::Markdown, .notCode = true, .linkSections = true },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true },
-    { .lang = Lang::Bash },
+      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Bash, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
-      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self" },
-    { .lang = Lang::Unknown, .notCode = true },
-    { .lang = Lang::Json, .notCode = true },
+      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
-      .staticLinkage = true, .signatureRows = true },
-    { .lang = Lang::Toml, .notCode = true },
-    { .lang = Lang::Yaml, .notCode = true },
+      .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Toml, .notCode = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Yaml, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Php, .memberSeparator = "::" },
-    { .lang = Lang::Lua, .dashDashComments = true },
-    { .lang = Lang::Elixir, .hasInertQuoteRegions = true },
+    { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Dart },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
       .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly },

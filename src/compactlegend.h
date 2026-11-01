@@ -390,8 +390,16 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // Its reading on --deps/--arch, the same sentence both full legends carry (graphlegend.h kGraphPartialAttrXml): not a
     // floor, because a missing edge can merge two cycles into one and moves a ratio either way.
     { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },
+    { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero" },
+    { "unmeasured_files",  "unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it" },
+    { "masked_files",      "masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor)", true },
+    // --cochange-groups root (verbs_report.h countAttrXmlOrEmpty): a countAttrXmlOrEmpty attribute takes its row here, test/compactlegendcheck.sh (S). onTag + onKey: only that root.
+    { "unknown_pairs", "unknown_pairs=N: pairs left out of groups= because surprising= is unknown for them, not 0; drop the cochange-groups flag to list them", true, "cochange", MapHeaderRead::No, {}, "cochange" },
     // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
     // tsconfig_unread= makes the root partial exactly as imports_unresolved= does (graph_partial= above is its reading).
+    // #478 gap 3: <pruned_packages count=> (serialize.h buildPrunedPackagesBlock), a block rather than a root attribute, so the row is keyed
+    // by its count= on that element only; the same sentence stands in the full legends (graphlegend.h kPrunedPackagesLegend).
+    { "count",             "pruned_packages count=N: real packages (they hold an __init__.py) the crawl denylist removed by name; not indexed, so edges to and from them are missing; p path= names one, the skipped verb rows them as why=pruned-package, at most 500 (rows_capped=1 there marks a cut; count= stays exact)", true, "pruned_packages" },
     { "imports_dts",       "imports_dts=N: N TS/JS imports resolved only to a .d.ts declaration, not source" },
     { "tsconfig_unread",   "tsconfig_unread=N: N configs not read (not in the tree, unparseable, above the root) could declare aliases; edges may be missing" },
     // #60: <bodies bodyless=N> — requested symbols with no body BY CONSTRUCTION (a module-scope owner), so
@@ -987,6 +995,10 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "partners", "partners=N: partner files with 3+ shared commits (after min_recur); the total, rows paged", false, "cochange", MapHeaderRead::No, {}, "cochange" },
     { "recur", "recur=K: slices of sub_windows= the pair co-changed in; 1 = one burst, not a standing coupling", true, "f", MapHeaderRead::No, {}, "cochange" },
     { "dep_capable", "dep_capable=0: a side cannot carry a static dependency (md, json, sh vs C++), so surprising= is undefined", true, "f", MapHeaderRead::No, {}, "cochange" },
+    { "no_file_edges", "no_file_edges=LANGS: a side's imports are almost never resolved to files and none links this pair, so surprising= is unknown, not 0", true, "f", MapHeaderRead::No, {}, "cochange" },
+    { "no_file_edges", "no_file_edges=LANGS: a side's imports are almost never resolved to files and none links this pair, so surprising= is unknown, not 0", true, "pair", MapHeaderRead::No, {}, "cochange" },
+    // --cochange-groups root: pairs of that kind are in no group, so groups= is a floor on the violations (graphlegend.h kCochangeGroupsNoFileEdgesLegend)
+    { "no_file_edges", "no_file_edges=LANGS: with unknown_pairs=N, pairs whose side imports are almost never resolved to files and none links them are in no group; groups= may be low", true, "cochange", MapHeaderRead::No, {}, "cochange" },
     // context-ratio: src/contextratio.h writeContextRatioReport (root element is <contextratio>)
     { "units", "units=N: symbols measured (the s row population)", false, "contextratio", MapHeaderRead::No, {}, "context-ratio" },
     { "file_units", "file_units=N: files measured (the f row population)", false, "contextratio", MapHeaderRead::No, {}, "context-ratio" },
@@ -1611,6 +1623,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "deg", "partner deg=: of this file's commits in window=, the fraction that partner shares", true, "partner", MapHeaderRead::No, {}, "pr-context" },
     { "surprising", "partner surprising=1: co-changes with no transitive static dependency either way (hidden coupling)", true, "partner", MapHeaderRead::No, {}, "pr-context" },
     { "dep_capable", "partner dep_capable=0: a side cannot carry a static dependency, so surprising= is undefined", true, "partner", MapHeaderRead::No, {}, "pr-context" },
+    { "no_file_edges", "partner no_file_edges=LANGS: a side's imports are almost never resolved to files and none links this pair, so surprising= is unknown", true, "partner", MapHeaderRead::No, {}, "pr-context" },
     { "callers", "s callers=N: direct callers of that changed symbol; caller rows are its top shown= (callers verb: all)", true, "s", MapHeaderRead::No, {}, "pr-context" },
     { "sections", "changed-symbols sections=N: doc headings folded into count=, no row each; count minus sections = rows", true, "changed-symbols", MapHeaderRead::No, {}, "pr-context" },
     // handoff: src/handoff.h (root detached=, heuristic note rows)

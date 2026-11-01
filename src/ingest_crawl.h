@@ -1696,11 +1696,34 @@ GitIgnoreSet probeIgnoreSet( const char* rootDir, bool respectGitignore, IgnoreM
 // (kCrawlSkipDirs, or the CMakeCache.txt build-output sentinel). The ignore class is ROWED as well as
 // counted: a pruned subtree's contents are unknown, but its PATH is the one fact a reader chasing a
 // vanished symbol needs, and it costs one capped row per subtree.
+// #478 gap 3: is this pruned directory a real package (pip's `operations/build`)? An ALLOWLIST of two proven facts: the name is a
+// build-output name the denylist guesses at, not a vendoring or tool name, and the directory holds its own __init__.py. A
+// setuptools `build/lib/pkg/` has none at its top; `vendor/` and `third_party/` are vendored whatever they hold.
+inline bool isPrunedPythonPackage( const fs::directory_entry& entry )
+{
+    static constexpr std::string_view kBuildOutputNames[] = { "build", "dist", "out", "target", "captures" };
+    const std::string name = entry.path().filename().string();
+    if( std::find( std::begin( kBuildOutputNames ), std::end( kBuildOutputNames ), std::string_view( name ) ) == std::end( kBuildOutputNames ) )
+    {
+        return false;
+    }
+    std::error_code ec;
+    return fs::is_regular_file( entry.path() / "__init__.py", ec );
+}
+
 template< typename PathFn >
 void recordDirPrune( CrawlSkips& skips, bool excluded, bool ignoredDir, const fs::directory_entry& entry, PathFn&& fullPath )
 {
     if( excluded )        { ++skips.excludedDirs;  return; }
     if( ignoredDir )      { recordCrawlDrop( skips.ignoredDirRows, skips.ignoredDirs, fullPath(), {}, entry );  return; }
+    if( isPrunedPythonPackage( entry ) )
+    {
+        recordCrawlDrop( skips.prunedPackageRows, skips.prunedPackages, fullPath(), {}, entry );
+    }
+    else if( skips.prunedDirRows.size() < kMaxSkipRowsPerClass )
+    {
+        skips.prunedDirRows.push_back( { fullPath(), 0ull, std::string() } );
+    }
     ++skips.prunedDirs;
 }
 
@@ -1716,6 +1739,8 @@ void finalizeCrawlSkips( CrawlSkips& skips, const HashMap<std::string, std::uint
     std::sort( skips.unsupported.begin(), skips.unsupported.end(), byPath );
     std::sort( skips.ignored.begin(), skips.ignored.end(), byPath );               // §N6-C, same contract
     std::sort( skips.ignoredDirRows.begin(), skips.ignoredDirRows.end(), byPath ); // §N6-C, same contract
+    std::sort( skips.prunedDirRows.begin(), skips.prunedDirRows.end(), byPath );   // #478 gap 3, same contract
+    std::sort( skips.prunedPackageRows.begin(), skips.prunedPackageRows.end(), byPath );
     std::sort( skips.escaped.begin(), skips.escaped.end(), byPath );               // §SEC1, same contract
     skips.unindexedExts.reserve( extTally.size() );
     for( const auto& [ ext, count ] : extTally )
