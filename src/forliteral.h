@@ -784,6 +784,7 @@ struct ForLiteralRender
     std::string xml;          // "" = nothing rides
     std::size_t sites = 0;    // src= (source code + string + unclassified sites)
     std::size_t bodies = 0;   // <b>/<x> elements served
+    bool        noRoom = false;   // shape=table: sites exist, but not one row fit the bytes left
 };
 
 namespace lit_detail
@@ -1783,7 +1784,9 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     }
     if( byteCut && shownRowCount == 0 )
     {
-        return ForLiteralRender{};   // not one row fits what the cap left: the caller counts this anchor as skipped
+        ForLiteralRender none;
+        none.noRoom = true;   // not one row fits what the cap left: the caller counts this anchor as skipped
+        return none;
     }
 
     std::string& x = out.xml;
@@ -1896,6 +1899,13 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
         ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly };
         ForLiteral lit{ word, "table" };
         ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits );
+        if( r.noRoom )
+        {
+            --scanned;
+            ++skipped;
+            firstSkipped = firstSkipped.empty() ? word : firstSkipped;
+            continue;
+        }
         if( r.xml.empty() )
         {
             continue;

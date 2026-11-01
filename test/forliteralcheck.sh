@@ -720,22 +720,35 @@ for m in re.finditer(r"<lit [^>]*>(.*?)</lit>",s,re.S):
 print(len(heads),tot,sum(1 for h in heads if "capped" in h[2]))
 ' <<<"$A" )"
 set -- $CAPJ
-if [ "${1:-0}" -ge 1 ] && [ "${2:-99999}" -le 40000 ] && [ "${3:-0}" -ge 1 ] && has "$A" 'next="--grep=cap_anchor_one"'; then ok "T22 the byte cap holds ($2 B over $1 elements), cut on a row boundary, capped=1, next="
+if [ "${1:-0}" -ge 1 ] && [ "${2:-99999}" -le 40000 ] && [ "${3:-0}" -ge 1 ] && has "$A" 'next="--grep=cap_anchor_one"'; then ok "T22 the row limit discloses ($2 B over $1 elements), capped=1, next="
 else no "T22 byte cap: $CAPJ"; fi
 if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22b the capped answer is well-formed"; else no "T22b not well-formed"; fi
-python3 -I - "$BF/a" <<'PY'
-import sys
-d=sys.argv[1]
-for f in range(40,120):
+# T22c-e: paths long enough that two elements spend the 40 KB, and the third anchor has sites but no room
+BL="$TMP/blong"; mkdir -p "$BL"
+python3 -I - "$BL" <<'PY'
+import os,sys
+d=sys.argv[1]+"/"+"d"*90+"/"+"e"*90+"/"+"f"*90; os.makedirs(d)
+for f in range(40):
     with open(f"{d}/t{f}.go","w") as o:
         o.write("package a\n\nvar T%d = map[string]int{\n"%f)
         for i in range(30):
-            o.write('\t"%s_%d": cap_anchor_one,\n'%("y"*150,i))
+            o.write('\t"%s_%d": cap_anchor_one + cap_anchor_two + cap_anchor_three,\n'%("x"*150,i))
         o.write("}\n")
+open(f"{d}/s.go","w").write("package a\n\nfunc cap_anchor_one() {}\nfunc cap_anchor_two() {}\nfunc cap_anchor_three() {}\n")
 PY
-A="$( cd "$BF" || exit 1; "$BIN" "$BF" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' </dev/null 2>/dev/null )"
-if has "$A" '<lit_capped' && has "$A" 'next="--grep=cap_anchor_three"' || has "$A" 'next="--grep=cap_anchor_two"'; then ok "T22c an anchor the cap left out is counted by <lit_capped> with next="
-else no "T22c later anchor unsaid: $( grep -o '<lit s="[^"]*"[^>]*>' <<<"$A" | cut -c1-200 | tr '\n' ' ' )"; fi
+A="$( cd "$BL" || exit 1; "$BIN" "$BL" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' </dev/null 2>/dev/null )"
+CAPJ="$( python3 -I -c '
+import sys,re
+s=sys.stdin.read()
+h=re.findall(r"<lit s=\"[^\"]*\"[^>]*?shown=\"(\d+)\"[^>]*?bytes=\"(\d+)\"",s)
+print(len(h),sum(int(x[1]) for x in h),min(int(x[0]) for x in h))
+' <<<"$A" )"
+set -- $CAPJ
+if [ "${1:-0}" -eq 2 ] && [ "${2:-99999}" -le 40000 ] && [ "${3:-32}" -lt 32 ]; then ok "T22c the byte cap holds ($2 B over $1 elements), the last cut on a row boundary below the row limit"
+else no "T22c byte cap: $CAPJ"; fi
+if has "$A" '<lit_capped scanned="2" skipped="1"' && has "$A" 'next="--grep=cap_anchor_three"'; then ok "T22d an anchor with sites and no room left is counted by <lit_capped> with next="
+else no "T22d later anchor unsaid: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$A" | cut -c1-200 | tr '\n' ' ' )"; fi
+if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22e the capped answer is well-formed"; else no "T22e not well-formed"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
