@@ -3096,7 +3096,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "parameter, a TypeScript literal, a Rust lifetime), is not linkage evidence. "
                      "Graph evidence is local to the indexed tree; verify before deleting. {}{}-->",
                      // Reference-as-value round: beside its hyphenated siblings above, exactly when the root carries it.
-                     ( std::string( testOnly.empty() ? "" : "test-only=N (absent when 0): library functions whose every indexed caller "
+                     ( std::string( cfg.deadCodeDir.find_first_of( "./" ) != std::string_view::npos ? "next= the for-verb table of this path's public defs, which this verb does not judge. " : "" )
+                       + std::string( testOnly.empty() ? "" : "test-only=N (absent when 0): library functions whose every indexed caller "
                                                            "is test code (a test path, or an in-file test scope), listed as <to n= t= p= l=> rows "
                                                            "after the d rows on the first page; not dead and not in count=, the index holds no "
                                                            "library caller. Internal evidence as for d rows, or a Python leading-underscore name or "
@@ -3128,6 +3129,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         {
             std::vector<char> dcFiltEsc;
             dcFilterAttr = " filter=\"" + std::string( escapeXml( cfg.deadCodeDir, dcFiltEsc ) ) + "\"";
+            // UNUSED-IN-FILE (forunused.h): this verb answers for internal linkage; a filter that names a path is often asking about public defs, so it names the verb that does
+            if( cfg.deadCodeDir.find_first_of( "./" ) != std::string_view::npos )
+            {
+                dcFilterAttr += " next=\"" + std::string( escapeXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ), dcFiltEsc ) ) + "\"";
+            }
         }
         // 0.6.6 D4: runner-root-excluded= is absent at 0, so a tree with no Python test/decorated root is byte-identical
         const std::string runnerRootAttr = ( runnerRootExcluded == 0 ? std::string() : std::format( " runner-root-excluded=\"{}\"", runnerRootExcluded ) )

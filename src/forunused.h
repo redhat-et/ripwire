@@ -1,0 +1,1443 @@
+#pragma once
+// forunused.h — UNUSED-IN-FILE (practice-60 group E, widens IDEAS A2 TESTONLY-DEAD): the --for table for "which public X in <file> are unused".
+//
+// --dead-code answers a different question on purpose: internal linkage plus zero callers, so `--dead-code=util/network.py` says
+// count=0 about a file of public functions. It keeps that meaning. This table takes a --for subject with an unused cue that names a file
+// or a directory, and prints each public def of the file with the evidence for and against a use.
+//
+// THE ROW SAYS WHAT WAS PROVEN, because this answer tells an agent code is safe to delete, and a wrong row is expensive. The verdict words:
+//   used       a non-test caller in another file bound by more than the name, or an in-file chain from one (or from the file's top level).
+//              Proves one such caller. Not that the caller itself is live.
+//   unknown    something may reach it that this tool cannot follow; why= names each reason. NOT a claim either way.
+//   file-only  only same-file references, none chained from a used or unknown def. Proves no reference from another file.
+//   test-only  every reference found is in a test. Proves no non-test reference in this tree; a test-only caller is never live.
+//   unused     the name appears nowhere in this tree outside its own definition, its declarations and comments, and no row of the table below
+//              applies. Proves that about this tree only: a consumer outside the tree is not seen (why=api names the surfaces that have them).
+// The evidence runs in that order and a stronger word never hides a hedge: `used` wins, then any why= makes `unknown`.
+//
+// WHY THE TEXT SCAN. The graph is a floor: a member call on an unproved receiver, a table, a string lookup are no edge. So no row says
+// unused from zero callers alone. One pass over every indexed file reads each name as a word: a non-test word that no resolved edge
+// explains makes the row `unknown`, with its site. This is what makes the class of false row small and language-independent.
+//
+// THE HONESTY TABLE, per language (kept here, in the legend and in docs/COMMANDS.md; test/forunusedcheck.sh pins each row):
+//   why=         reads as unknown when                                                Python  TS/JS  Go  Rust  C/C++
+//   name         a non-test code word names it and no edge is resolved                  x       x    x    x     x     (member call, callback, value)
+//   by-name      its only non-test callers were bound by name alone or split            x       x    x    x     x
+//   declined     the resolver declined a call whose candidates hold it                  x       x    x    x     x
+//   value        a table, field or argument holds it (the value index)                  x       x    x    x     x     (registries)
+//   string       a string literal is exactly its name                                   x       x    x    x     x     (__all__, getattr, MethodByName)
+//   built-name   a string or macro builds names it could be: "on_{x}", `on_${x}`, a##b  x       x    x    x     x
+//   import       a non-test import or re-export names it, and nothing else does         x       x    x    x     x
+//   barrel       its file is star re-exported: `export *`, `from m import *`, `pub use m::*`  x  x         x
+//   dispatch     a method a base, trait or interface may call                           class(bases) extends/implements  every method  (not pub)  virtual/override/base
+//   framework    the language or a framework calls it with no call in the tree          decorator, dunder, runner hook, pytest_*  decorator  init, Test*, //export  #[attr], extern "C", main  __attribute__, extern "C", main, ctor
+//   api          a surface consumers outside this tree may use                          -       -    exported outside internal/, not package main  pub in a lib crate  a header under include/
+//   members      an unscoped enum: its enumerators are used without naming it           -       -    -    -     x
+//   manifest     a build or package file beside it names it                             pyproject, setup.cfg  package.json  -  Cargo.toml  CMakeLists, Makefile, BUILD
+//
+// PRESENT-ONLY: no cue or no file, no block, and the answer is byte-identical. The block takes its own allowance, like the file page: it draws
+// nothing from the bytes that fund bodies. Caps are runaway guards, each cut disclosed.
+#include "filter.h"        // isTestPath, isTestSymbol
+#include "forfilepage.h"   // resolveFileAnchors, FileAnchor, filepage::fileDefsInLineOrder, trimWordPunct
+#include "graph.h"         // Graph, edgeNameOnly, declinedCallsNaming, graphCountFloorAttrXml
+#include "lexical.h"       // splitRouteWords, routeLower
+#include "model.h"
+#include "quality.h"       // pythonDecoratedDef, pythonRunnerRoot, languageInvokedSymbol, symbolHasStaticLinkage
+#include "serialize.h"     // escapeXml
+#include "taskroute.h"     // taskroute::isOneOf
+#include "valuerefindex.h" // ValueRefIndex::isValueReferenced
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstdlib>
+#include <format>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace rw
+{
+
+// Runaway guards (knob census ADDENDUM), never size targets: every cut is disclosed.
+inline constexpr std::size_t kForUnusedRowsPerFile = 150;     // printed rows of one file (shown= capped=1 and the counts stay whole)
+inline constexpr std::size_t kForUnusedDirFiles    = 6;       // files of a named directory given a table
+inline constexpr std::size_t kForUnusedMaxBytes    = 32768;   // the whole block: no further file starts past it
+inline constexpr std::size_t kForUnusedSitesShown  = 2;       // at= sites on one row
+inline constexpr std::size_t kForUnusedForeignStem = 5;       // a stem shorter than this, in another file, hedges only members (see NameScan::markPrefix)
+inline constexpr std::size_t kForUnusedMinPrefix   = 3;       // a built-name prefix shorter than this names too much to read as evidence
+
+inline bool forUnusedOn()
+{
+    return std::getenv( "RIPWIRE_NO_UNUSED_TABLE" ) == nullptr;
+}
+
+namespace unusedfile
+{
+
+// Hedge bits, in the order why= prints them.
+enum Why : std::uint16_t
+{
+    kWhyName = 1, kWhyByName = 2, kWhyDeclined = 4, kWhyValue = 8, kWhyString = 16, kWhyBuilt = 32, kWhyImport = 64, kWhyBarrel = 128,
+    kWhyDispatch = 256, kWhyFramework = 512, kWhyApi = 1024, kWhyManifest = 2048, kWhyInFile = 4096, kWhyMembers = 8192
+};
+inline constexpr std::array<std::pair<std::uint16_t, std::string_view>, 14> kWhyWords = { {
+    { kWhyName, "name" }, { kWhyByName, "by-name" }, { kWhyDeclined, "declined" }, { kWhyValue, "value" }, { kWhyString, "string" }, { kWhyBuilt, "built-name" },
+    { kWhyImport, "import" }, { kWhyBarrel, "barrel" }, { kWhyDispatch, "dispatch" }, { kWhyFramework, "framework" }, { kWhyApi, "api" }, { kWhyManifest, "manifest" },
+    { kWhyInFile, "in-file" }, { kWhyMembers, "members" } } };
+
+// isTestPath plus the support trees a test run alone loads. A caller here reads as a test: row at= names the path, so a reader can see it.
+inline bool isTestLikePath( std::string_view p ) noexcept
+{
+    if( isTestPath( p ) || p.ends_with( "conftest.py" ) )
+    {
+        return true;
+    }
+    static constexpr std::array<std::string_view, 9> kDirs = { "harness/", "testRunner/", "testing/", "testutil/", "testutils/", "test-utils/", "test_utils/", "testdata/", "e2e/" };
+    return std::ranges::any_of( kDirs, [ & ]( std::string_view d )
+    {
+        for( std::size_t at = p.find( d ); at != std::string_view::npos; at = p.find( d, at + 1 ) )
+        {
+            if( at == 0 || p[at - 1] == '/' )
+            {
+                return true;
+            }
+        }
+        return false;
+    } );
+}
+
+// ---- the trigger: an ALLOWLIST of phrasings, read from the stored argv's own words ----
+
+inline bool isTableNoun( std::string_view w ) noexcept
+{
+    static constexpr std::string_view kNouns[] = { "function", "functions", "func", "funcs", "fn", "fns", "method", "methods", "export", "exports", "exported", "public", "class",
+                                                   "classes", "def", "defs", "definition", "definitions", "symbol", "symbols", "helper", "helpers", "api", "apis", "code", "name", "names",
+                                                   "type", "types", "constant", "constants", "const", "consts", "utility", "utilities", "util", "utils", "member", "members", "routine",
+                                                   "routines", "procedure", "procedures", "item", "items", "thing", "things", "entry", "entries", "struct", "structs" };
+    return taskroute::isOneOf( w, kNouns, std::size( kNouns ) );
+}
+
+// May an unused/dead word's object be the table's rows? The next word is a row noun, a linking word, a file token or the end of the subject:
+// `unused imports`, `dead store`, `unused parameter` are other questions and do not fire.
+inline bool cueObjectFits( std::span<const std::string> words, std::size_t next ) noexcept
+{
+    if( next >= words.size() )
+    {
+        return true;
+    }
+    const std::string_view w = words[next];
+    static constexpr std::string_view kLinks[] = { "in", "from", "of", "inside", "within", "here", "at", "or", "and" };
+    return isTableNoun( w ) || taskroute::isOneOf( w, kLinks, std::size( kLinks ) ) || w.find_first_of( "./" ) != std::string_view::npos;
+}
+
+inline bool wordIn( std::string_view w, std::initializer_list<std::string_view> set ) noexcept
+{
+    return std::ranges::find( set, w ) != set.end();
+}
+
+inline bool subjectAsksUnused( std::string_view task )
+{
+    std::vector<std::string> words;
+    for( const std::string_view raw : splitRouteWords( task ) )
+    {
+        if( const std::string_view w = filepage::trimWordPunct( raw ); !w.empty() )
+        {
+            words.push_back( routeLower( w ) );
+        }
+    }
+    const auto at = [ & ]( std::size_t k ) -> std::string_view { return k < words.size() ? std::string_view( words[k] ) : std::string_view{}; };
+    for( std::size_t k = 0; k < words.size(); ++k )
+    {
+        const std::string_view w = words[k];
+        if( wordIn( w, { "unused", "uncalled", "unreferenced", "unexercised-by-code" } ) && cueObjectFits( words, k + 1 ) )
+        {
+            return true;
+        }
+        if( w == "dead" )
+        {
+            // `dead code elimination` / `dead store` are other subjects; `dead code in f`, `dead functions`, `are any dead` fire
+            const bool analysis = at( k + 1 ) == "code" && wordIn( at( k + 2 ), { "elimination", "removal", "detection", "analysis", "pass", "analyzer", "stripping" } );
+            if( !analysis && cueObjectFits( words, k + 1 ) )
+            {
+                return true;
+            }
+        }
+        if( wordIn( w, { "never", "not", "isn't", "aren't", "isnt", "arent" } ) && wordIn( at( k + 1 ), { "called", "used", "referenced", "invoked", "imported" } ) )
+        {
+            return true;
+        }
+        if( wordIn( w, { "nobody", "nothing", "noone" } ) && wordIn( at( k + 1 ), { "calls", "uses", "references", "imports", "invokes" } ) )
+        {
+            return true;
+        }
+        if( wordIn( w, { "no", "without", "zero" } )
+            && ( wordIn( at( k + 1 ), { "caller", "callers", "users", "usages", "references" } )
+                 || ( wordIn( at( k + 1 ), { "non-test", "production", "library", "external", "outside" } ) && wordIn( at( k + 2 ), { "caller", "callers", "users", "usages", "references" } ) ) ) )
+        {
+            return true;
+        }
+        if( w == "test-only" )
+        {
+            return true;
+        }
+        if( w == "only" && wordIn( at( k + 1 ), { "called", "used", "referenced", "exercised" } ) && wordIn( at( k + 2 ), { "by", "from", "in" } )
+            && wordIn( at( k + 3 ), { "test", "tests" } ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---- which defs are public, per language (an allowlist: an unserved language gets no verdict at all) ----
+
+inline bool servedLang( Lang l ) noexcept
+{
+    return l == Lang::Python || l == Lang::TypeScript || l == Lang::JavaScript || l == Lang::Go || l == Lang::Rust || l == Lang::C || l == Lang::Cpp;
+}
+
+inline bool isCFamily( Lang l ) noexcept { return l == Lang::C || l == Lang::Cpp; }
+
+inline std::string_view scopeTail( const Symbol& s ) noexcept
+{
+    const std::string_view scope = s.scope;
+    const std::size_t      sep   = scope.rfind( "::" );
+    return sep == std::string_view::npos ? scope : scope.substr( sep + 2 );
+}
+
+// A class attribute is a field, not a row: `r`, `x`, `red` read as words everywhere and no one asks whether they are unused here.
+inline bool rowKind( const Symbol& s ) noexcept
+{
+    const SymKind k = s.kind;
+    return k == SymKind::Function || k == SymKind::Method || k == SymKind::Class || k == SymKind::Struct || k == SymKind::Interface || k == SymKind::NamedType
+           || k == SymKind::Alias || k == SymKind::FuncType || ( k == SymKind::Var && s.scope.empty() ) || k == SymKind::Macro;
+}
+
+// a member of a class or type: Python keeps a method as a scoped function
+inline bool isMemberDef( const Symbol& s ) noexcept
+{
+    return s.kind == SymKind::Method || ( s.lang == Lang::Python && s.kind == SymKind::Function && !s.scope.empty() );
+}
+
+// the text before byte `at` on its own line and the lines just above: what an attribute, a decorator or `//export` sits on
+inline std::string_view lineBefore( std::string_view src, std::size_t lineStartByte ) noexcept
+{
+    if( lineStartByte < 2 || lineStartByte > src.size() )
+    {
+        return {};
+    }
+    const std::size_t prevEnd   = lineStartByte - 1;
+    const std::size_t nl        = src.rfind( '\n', prevEnd - 1 );
+    const std::size_t prevStart = nl == std::string_view::npos ? 0 : nl + 1;
+    return trimWs( src.substr( prevStart, prevEnd - prevStart ) );
+}
+
+inline std::size_t lineStartOf( std::string_view src, std::size_t at ) noexcept
+{
+    if( at == 0 || at > src.size() )
+    {
+        return 0;
+    }
+    const std::size_t nl = src.rfind( '\n', at - 1 );
+    return nl == std::string_view::npos ? 0 : nl + 1;
+}
+
+// C and C++ mint a type symbol at `enum E x;` and `struct S *p;`: that line uses the type. A definition opens a body or typedefs one.
+inline bool cTypeMentionNotDefinition( const Symbol& s, std::string_view src ) noexcept
+{
+    if( !isCFamily( s.lang ) || ( s.kind != SymKind::Class && !isStructOrNamedType( s.kind ) ) || s.kind == SymKind::Alias )
+    {
+        return false;
+    }
+    const std::size_t ls = lineStartOf( src, s.sigStartByte );
+    const std::size_t e1 = src.find( '\n', ls );
+    if( e1 == std::string_view::npos )
+    {
+        return src.substr( ls ).find( '{' ) == std::string_view::npos;
+    }
+    const std::size_t e2 = src.find( '\n', e1 + 1 );
+    const std::string_view twoLines = src.substr( ls, e2 == std::string_view::npos ? std::string_view::npos : e2 - ls );
+    return twoLines.find( '{' ) == std::string_view::npos && src.substr( ls, e1 - ls ).find( "typedef" ) == std::string_view::npos;
+}
+
+inline bool jsIsExported( const IngestResult& ing, const Symbol& s, std::string_view src, std::span<const std::string_view> exportedNames ) noexcept
+{
+    (void)ing;
+    if( std::ranges::binary_search( exportedNames, std::string_view( s.name ), sortutil::svLess ) )
+    {
+        return true;
+    }
+    const std::size_t ls = lineStartOf( src, s.sigStartByte );
+    return src.substr( ls ).starts_with( "export " );
+}
+
+inline bool sigOpensPub( const Symbol& s, std::string_view src ) noexcept
+{
+    const std::size_t ls = lineStartOf( src, s.sigStartByte );
+    return s.sigStartByte <= src.size() && trimWs( src.substr( ls, s.sigStartByte - ls + 4 ) ).starts_with( "pub" );
+}
+
+// Is the def a public row of its language? `owner` is the class symbol of a method, when the file holds one.
+inline bool isPublicDef( const IngestResult& ing, const Symbol& s, std::string_view src, std::span<const std::string_view> jsExports, const Symbol* owner ) noexcept
+{
+    if( !rowKind( s ) || ( s.kind != SymKind::Class && !isStructOrNamedType( s.kind ) && s.kind != SymKind::Interface && quality::languageInvokedSymbol( s ) ) )
+    {
+        return false;
+    }
+    switch( s.lang )
+    {
+        case Lang::Python:
+            return !s.name.starts_with( '_' ) && !scopeTail( s ).starts_with( '_' );
+        case Lang::Go:
+            return !s.name.empty() && s.name.front() >= 'A' && s.name.front() <= 'Z';
+        case Lang::Rust:
+            return sigOpensPub( s, src );
+        case Lang::TypeScript:
+        case Lang::JavaScript:
+            if( s.kind == SymKind::Method )
+            {
+                const std::size_t ls = lineStartOf( src, s.sigStartByte );
+                const std::string_view head = trimWs( src.substr( ls, s.sigStartByte > ls ? s.sigStartByte - ls + 8 : 8 ) );
+                return owner != nullptr && jsIsExported( ing, *owner, src, jsExports ) && !s.name.starts_with( '#' ) && !head.starts_with( "private" ) && !head.starts_with( "protected" );
+            }
+            return jsIsExported( ing, s, src, jsExports );
+        case Lang::C:
+        case Lang::Cpp:
+            return !quality::symbolHasStaticLinkage( s, src );
+        default:
+            return false;
+    }
+}
+
+// ---- the hedges a def carries before any scan: the language's own ways of reaching it ----
+
+inline bool sigHolds( const Symbol& s, std::string_view src, std::string_view word ) noexcept
+{
+    const std::size_t end = std::min<std::size_t>( s.sigEndByte, src.size() );
+    return s.sigStartByte < end && src.substr( s.sigStartByte, end - s.sigStartByte ).find( word ) != std::string_view::npos;
+}
+
+// A Python decorator registers its function unless it is one of these, which only reshape it. An allowlist: an unlisted decorator hedges.
+inline bool pythonDecoratorsMayRegister( std::string_view src, std::size_t lineStart ) noexcept
+{
+    static constexpr std::array<std::string_view, 16> kShapers = { "dataclass", "dataclasses.dataclass", "attr.s", "attrs.define", "attrs.frozen", "staticmethod", "classmethod", "property", "cached_property",
+                                                                   "functools.cached_property", "functools.wraps", "functools.lru_cache", "functools.cache", "lru_cache", "overload", "typing.overload" };
+    for( std::size_t ls = lineStart; ls > 0; )
+    {
+        const std::string_view line = lineBefore( src, ls );
+        if( !line.starts_with( '@' ) )
+        {
+            return false;
+        }
+        const std::size_t      cut  = line.find_first_of( "( \t" );
+        const std::string_view name = line.substr( 1, cut == std::string_view::npos ? std::string_view::npos : cut - 1 );
+        if( std::ranges::find( kShapers, name ) == kShapers.end() )
+        {
+            return true;
+        }
+        const std::size_t nl = src.rfind( '\n', ls - 2 );
+        ls = nl == std::string_view::npos ? 0 : nl + 1;
+    }
+    return false;
+}
+
+inline std::uint16_t languageHedges( const Symbol& s, std::string_view rel, std::string_view src, const Symbol* owner, bool rustLibCrate )
+{
+    std::uint16_t      why   = 0;
+    const std::size_t  ls    = lineStartOf( src, s.sigStartByte );
+    const std::string_view above = lineBefore( src, ls );
+    const bool         isMethod = isMemberDef( s );
+    if( s.name == "main" )
+    {
+        why |= kWhyFramework;
+    }
+    switch( s.lang )
+    {
+        case Lang::Python:
+            if( ( quality::pythonDecoratedDef( s, src ) && pythonDecoratorsMayRegister( src, ls ) ) || quality::pythonRunnerRoot( rel, s, src ) || s.name.starts_with( "pytest_" ) )
+            {
+                why |= kWhyFramework;
+            }
+            if( isMethod && owner != nullptr && sigHolds( *owner, src, "(" ) && !sigHolds( *owner, src, "(object)" ) )
+            {
+                why |= kWhyDispatch;
+            }
+            break;
+        case Lang::TypeScript:
+        case Lang::JavaScript:
+            if( above.starts_with( "@" ) )
+            {
+                why |= kWhyFramework;
+            }
+            if( isMethod && owner != nullptr && ( sigHolds( *owner, src, " extends " ) || sigHolds( *owner, src, " implements " ) ) )
+            {
+                why |= kWhyDispatch;
+            }
+            break;
+        case Lang::Go:
+            if( s.name == "init" || s.name.starts_with( "Test" ) || s.name.starts_with( "Benchmark" ) || s.name.starts_with( "Fuzz" ) || s.name.starts_with( "Example" )
+                || above.starts_with( "//export " ) || above.starts_with( "//go:linkname " ) )
+            {
+                why |= kWhyFramework;
+            }
+            if( isMethod )
+            {
+                why |= kWhyDispatch;   // Go interfaces are implicit: any method may satisfy one, inside or outside the tree
+            }
+            if( rel.find( "internal/" ) == std::string_view::npos && !src.starts_with( "package main" ) && src.find( "\npackage main" ) == std::string_view::npos )
+            {
+                why |= kWhyApi;
+            }
+            break;
+        case Lang::Rust:
+            if( above.starts_with( "#[" ) || sigHolds( s, src, "extern \"" ) )
+            {
+                why |= kWhyFramework;
+            }
+            if( rustLibCrate )
+            {
+                why |= kWhyApi;
+            }
+            break;
+        case Lang::C:
+        case Lang::Cpp:
+            if( sigHolds( s, src, "__attribute__" ) || sigHolds( s, src, "extern \"C\"" ) || above.starts_with( "extern \"C\"" ) )
+            {
+                why |= kWhyFramework;
+            }
+            // an out-of-class definition's class is in another file: its bases and `virtual` are not read here, so it hedges
+            if( isMethod && ( owner == nullptr || sigHolds( s, src, "virtual" ) || sigHolds( s, src, "override" ) || sigHolds( *owner, src, ":" ) ) )
+            {
+                why |= kWhyDispatch;
+            }
+            // the enumerators of an unscoped enum are used without ever naming it, so its own name proves nothing
+            if( s.kind != SymKind::Function && s.kind != SymKind::Method && src.substr( lineStartOf( src, s.sigStartByte ) ).starts_with( "enum " ) && !sigHolds( s, src, "enum class" ) && !sigHolds( s, src, "enum struct" ) )
+            {
+                why |= kWhyMembers;
+            }
+            if( rel.starts_with( "include/" ) || rel.find( "/include/" ) != std::string_view::npos )
+            {
+                why |= kWhyApi;
+            }
+            break;
+        default:
+            break;
+    }
+    return why;
+}
+
+// ---- one name's evidence, grouped over the same-named defs of the file (an overload set is one row) ----
+
+struct Site
+{
+    std::uint32_t fileId = 0;
+    std::uint32_t line   = 0;
+};
+
+struct Row
+{
+    std::string_view           name;
+    std::vector<NodeId>        defs;
+    std::vector<std::uint64_t> ownLines;           // (fileId << 32) | line of each def: a word there is the def itself, sorted
+    bool                       listed   = false;   // has a def in the named file (its pair's other defs read as evidence only)
+    std::uint16_t              why      = 0;
+    bool                       isPublic = false;
+    bool                       member   = false;   // a def of it is a member: any object's attribute lookup may reach it
+    bool                       top      = false;   // the file's own top-level code calls it
+    bool                       viaFile  = false;   // `used` came down an in-file chain
+    std::uint32_t              outPlain = 0;       // non-test callers in another file, bound by more than the name
+    std::uint32_t              inFile   = 0;       // non-test callers in this file
+    std::uint32_t              tests    = 0;       // test callers and test-file words
+    std::uint32_t              text     = 0;       // non-test code words outside this file, past the def lines
+    std::uint32_t              strings  = 0;
+    std::uint32_t              imports  = 0;
+    std::uint32_t              sameText = 0;       // words in this file past the def lines
+    std::uint32_t              decls    = 0;
+    std::vector<Site>          at;
+    std::vector<Site>          testAt;
+    NodeId                     byInFile = kNoNode;
+};
+
+inline void noteSite( std::vector<Site>& sites, std::uint32_t fileId, std::uint32_t line )
+{
+    if( sites.size() < kForUnusedSitesShown )
+    {
+        sites.push_back( { fileId, line } );
+    }
+}
+
+// a word on a line that only DECLARES it (C/C++: a prototype or a forward declaration) is the definition's other half, not a use
+inline bool isPrototypeLine( std::string_view line, std::size_t col, std::size_t nameLen ) noexcept
+{
+    const std::string_view t = trimWs( line );
+    if( t.empty() || t.starts_with( "return" ) || t.find( '=' ) != std::string_view::npos )
+    {
+        return false;
+    }
+    if( col + nameLen >= line.size() || line[col + nameLen] != '(' || col == 0 )
+    {
+        return false;
+    }
+    const char before = line[col - 1];
+    if( before != ' ' && before != '\t' && before != '*' && before != '&' )
+    {
+        return false;
+    }
+    if( trimWs( line.substr( 0, col ) ).empty() )
+    {
+        return false;   // no type ahead of the name: a call
+    }
+    const char last = t.back();
+    return last == ';' || last == ',' || last == '(';
+}
+
+inline bool isCommentLine( std::string_view line, bool hashComments ) noexcept
+{
+    const std::string_view t = trimWs( line );
+    return t.starts_with( "//" ) || t.starts_with( "/*" ) || t.starts_with( "* " ) || t == "*" || t.starts_with( "*/" ) || ( hashComments && t.starts_with( '#' ) );
+}
+
+inline bool isImportLine( std::string_view line ) noexcept
+{
+    const std::string_view t = trimWs( line );
+    return t.starts_with( "import " ) || t.starts_with( "from " ) || t.starts_with( "export {" ) || t.starts_with( "export type {" ) || t.starts_with( "use " ) || t.starts_with( "pub use " )
+           || t.starts_with( "pub(crate) use " );
+}
+
+inline bool isDocPath( std::string_view p ) noexcept
+{
+    const auto ends = [ & ]( std::string_view e ) { return p.ends_with( e ); };
+    return ends( ".md" ) || ends( ".mdx" ) || ends( ".rst" ) || ends( ".txt" ) || ends( ".adoc" ) || p.find( "CHANGELOG" ) != std::string_view::npos;
+}
+
+inline bool isIdent( char c ) noexcept
+{
+    return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_' || c == '$';
+}
+
+// The one pass: every word of every scanned file, looked up in the table's sorted names. A two-byte prefilter keeps the lookup off most words.
+class NameScan
+{
+public:
+    NameScan( std::span<Row> rows, std::span<const std::uint32_t> targetFiles ) : rows_( rows ), targets_( targetFiles ), first2_( 1u << 16, 0 )
+    {
+        for( const Row& r : rows_ )
+        {
+            if( r.name.size() >= 2 )
+            {
+                first2_[ key2( r.name[0], r.name[1] ) ] = 1;
+            }
+            names_.push_back( r.name );
+        }
+    }
+
+    // rows_ is sorted by name, so names_ is too
+    void scanFile( std::uint32_t fileId, std::string_view path, std::string_view src, bool manifest )
+    {
+        const bool isTest   = !manifest && isTestLikePath( path );
+        const bool isDoc    = !manifest && isDocPath( path );
+        const bool isTarget = !manifest && std::ranges::contains( targets_, fileId );
+        if( isDoc )
+        {
+            return;   // a doc naming a function is no use of it
+        }
+        const bool cFamily = path.ends_with( ".c" ) || path.ends_with( ".h" ) || path.ends_with( ".cc" ) || path.ends_with( ".cpp" ) || path.ends_with( ".hpp" ) || path.ends_with( ".cxx" ) || path.ends_with( ".hh" );
+        const bool hashComments = !cFamily;
+        std::size_t   lineStart = 0;
+        std::uint32_t lineNo    = 1;
+        bool          commentLine = false;
+        bool          lineRead  = false;
+        const auto    lineText = [ & ]() -> std::string_view
+        {
+            const std::size_t e = src.find( '\n', lineStart );
+            return src.substr( lineStart, e == std::string_view::npos ? std::string_view::npos : e - lineStart );
+        };
+        for( std::size_t i = 0; i < src.size(); )
+        {
+            const char c = src[i];
+            if( c == '\n' )
+            {
+                ++i;
+                lineStart = i;
+                ++lineNo;
+                lineRead = false;
+                continue;
+            }
+            if( !isIdent( c ) )
+            {
+                if( ( c == '"' || c == '\'' || c == '`' ) && !isTest )
+                {
+                    i = quoted( i, src, fileId, lineNo, isDoc );
+                    continue;
+                }
+                if( c == '#' && cFamily && i + 1 < src.size() && src[i + 1] == '#' && !isTest )
+                {
+                    pasted( i, src );
+                }
+                ++i;
+                continue;
+            }
+            std::size_t e = i + 1;
+            while( e < src.size() && isIdent( src[e] ) )
+            {
+                ++e;
+            }
+            const std::string_view word = src.substr( i, e - i );
+            if( word.size() >= 2 && first2_[ key2( word[0], word[1] ) ] != 0 )
+            {
+                if( Row* r = find( word ); r != nullptr )
+                {
+                    if( !lineRead )
+                    {
+                        commentLine = isCommentLine( lineText(), hashComments );
+                        lineRead    = true;
+                    }
+                    const std::uint64_t here = ( std::uint64_t( fileId ) << 32 ) | lineNo;
+                    if( !commentLine && !( !manifest && std::ranges::binary_search( r->ownLines, here ) ) )
+                    {
+                        hit( *r, fileId, lineNo, lineText(), i - lineStart, isTest, isTarget, cFamily, manifest );
+                    }
+                    else if( commentLine && manifest )
+                    {
+                        hit( *r, fileId, lineNo, lineText(), i - lineStart, isTest, isTarget, cFamily, manifest );
+                    }
+                }
+            }
+            i = e;
+        }
+    }
+
+private:
+    static std::size_t key2( char a, char b ) noexcept { return ( std::size_t( static_cast<unsigned char>( a ) ) << 8 ) | static_cast<unsigned char>( b ); }
+
+    Row* find( std::string_view w ) noexcept
+    {
+        const auto it = std::ranges::lower_bound( names_, w, sortutil::svLess );
+        return it != names_.end() && *it == w ? &rows_[ std::size_t( it - names_.begin() ) ] : nullptr;
+    }
+
+    bool shortForeignStem( std::string_view stem, std::uint32_t fileId ) const noexcept
+    {
+        return stem.size() < kForUnusedForeignStem && !std::ranges::contains( targets_, fileId );
+    }
+
+    // a stem builds a NAME only near a lookup that takes one: `f"is_{x}"` alone is a log line
+    static bool nearDynamicLookup( std::string_view src, std::size_t at ) noexcept
+    {
+        std::size_t b = at;
+        for( int up = 0; up < 3 && b > 0; ++up )
+        {
+            const std::size_t nl = src.rfind( '\n', b - 1 );
+            b = nl == std::string_view::npos ? 0 : nl;
+        }
+        std::size_t e = at;
+        for( int down = 0; down < 4 && e != std::string_view::npos; ++down )
+        {
+            e = src.find( '\n', e + 1 );
+        }
+        const std::string_view near = src.substr( b, e == std::string_view::npos ? std::string_view::npos : e - b );
+        static constexpr std::array<std::string_view, 13> kLookups = { "getattr(", "hasattr(", "__getattribute__", "globals()", "locals()", "import_module(", "MethodByName(", "FieldByName(",
+                                                                       "dlsym(", "GetProcAddress(", ".send(", "Reflect.get(", "eval(" };
+        if( at > 0 && src[at - 1] == '[' )
+        {
+            return true;   // obj[`on${x}`]
+        }
+        return std::ranges::any_of( kLookups, [ & ]( std::string_view w ) { return near.find( w ) != std::string_view::npos; } );
+    }
+
+    // A short stem in another file (`f"is_{x}"` beside a getattr) is a lookup on that file's own objects: it can reach a member of this file,
+    // and reads as nothing about a free function here. A longer stem, or one in this file, or a macro paste, hedges either.
+    void markPrefix( std::string_view prefix, bool membersOnly = false ) noexcept
+    {
+        if( prefix.size() < kForUnusedMinPrefix )
+        {
+            return;
+        }
+        for( auto it = std::ranges::lower_bound( names_, prefix, sortutil::svLess ); it != names_.end() && it->starts_with( prefix ); ++it )
+        {
+            Row& r = rows_[ std::size_t( it - names_.begin() ) ];
+            if( !membersOnly || r.member )
+            {
+                r.why |= kWhyBuilt;
+            }
+        }
+    }
+
+    // a literal that is a name (string), or that opens with a stem a built name could extend (built-name). Returns where the scan resumes:
+    // past the identifier run; a quote that opens no such run moves one byte, so the words of the string's text still read as words.
+    std::size_t quoted( std::size_t at, std::string_view src, std::uint32_t fileId, std::uint32_t lineNo, bool ) noexcept
+    {
+        const char  q = src[at];
+        std::size_t e = at + 1;
+        while( e < src.size() && isIdent( src[e] ) )
+        {
+            ++e;
+        }
+        const std::string_view lit = src.substr( at + 1, e - at - 1 );
+        if( lit.empty() || e >= src.size() )
+        {
+            return at + 1;
+        }
+        const char close = src[e];
+        if( close == q )
+        {
+            if( Row* r = find( lit ); r != nullptr )
+            {
+                r->why |= kWhyString;
+                ++r->strings;
+                noteSite( r->at, fileId, lineNo );
+            }
+            else if( lit.back() == '_' && nearDynamicLookup( src, at ) )
+            {
+                markPrefix( lit, shortForeignStem( lit, fileId ) );
+            }
+            return e + 1;
+        }
+        if( ( close == '{' || close == '%' || ( close == '$' && q == '`' ) ) && nearDynamicLookup( src, at ) )
+        {
+            markPrefix( lit, shortForeignStem( lit, fileId ) );
+        }
+        return at + 1;
+    }
+
+    void pasted( std::size_t at, std::string_view src ) noexcept
+    {
+        std::size_t b = at;
+        while( b > 0 && isIdent( src[b - 1] ) )
+        {
+            --b;
+        }
+        markPrefix( src.substr( b, at - b ) );
+        std::size_t e = at + 2;
+        while( e < src.size() && isIdent( src[e] ) )
+        {
+            ++e;
+        }
+        if( const std::string_view tail = src.substr( at + 2, e - at - 2 ); tail.size() >= 2 * kForUnusedMinPrefix )
+        {
+            for( std::size_t k = 0; k < names_.size(); ++k )
+            {
+                if( names_[k].ends_with( tail ) )
+                {
+                    rows_[k].why |= kWhyBuilt;
+                }
+            }
+        }
+    }
+
+    void hit( Row& r, std::uint32_t fileId, std::uint32_t lineNo, std::string_view line, std::size_t col, bool isTest, bool isTarget, bool cFamily, bool manifest ) noexcept
+    {
+        if( manifest )
+        {
+            r.why |= kWhyManifest;
+            return;
+        }
+        if( cFamily && isPrototypeLine( line, col, r.name.size() ) )
+        {
+            ++r.decls;
+            return;
+        }
+        if( isTest )
+        {
+            ++r.tests;
+            noteSite( r.testAt, fileId, lineNo );
+            return;
+        }
+        if( isTarget )
+        {
+            ++r.sameText;
+            return;
+        }
+        if( isImportLine( line ) )
+        {
+            ++r.imports;
+        }
+        else
+        {
+            ++r.text;
+        }
+        noteSite( r.at, fileId, lineNo );
+    }
+
+    std::span<Row>                 rows_;
+    std::span<const std::uint32_t> targets_;
+    std::vector<std::uint8_t>      first2_;
+    std::vector<std::string_view>  names_;
+};
+
+// `export * from "./x"`, `from x import *`, `pub use x::*`: the stem right beside the star, in any non-test file
+inline bool lineStarExportsStem( std::string_view line, std::string_view stem, Lang lang ) noexcept
+{
+    const std::string_view t = trimWs( line );
+    const auto holdsStem = [ & ]( std::string_view hay )
+    {
+        for( std::size_t p = hay.find( stem ); p != std::string_view::npos; p = hay.find( stem, p + 1 ) )
+        {
+            const bool leftOk  = p == 0 || !isIdent( hay[p - 1] );
+            const bool rightOk = p + stem.size() >= hay.size() || !isIdent( hay[p + stem.size()] );
+            if( leftOk && rightOk )
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    if( t.starts_with( "export *" ) )
+    {
+        return ( lang == Lang::TypeScript || lang == Lang::JavaScript ) && holdsStem( t );
+    }
+    if( t.starts_with( "from " ) && t.ends_with( "import *" ) )
+    {
+        return lang == Lang::Python && holdsStem( t );
+    }
+    if( ( t.starts_with( "pub use " ) || t.starts_with( "pub(crate) use " ) ) && t.find( "::*" ) != std::string_view::npos )
+    {
+        return lang == Lang::Rust && holdsStem( t );
+    }
+    return false;
+}
+
+inline std::string_view stemOf( std::string_view rel ) noexcept
+{
+    const std::string_view base = mention_detail::baseNameOf( rel );
+    return mention_detail::stripExt( base );
+}
+
+inline bool fileIsStarExported( std::string_view rel, Lang lang, std::uint32_t self, std::span<const std::string> texts, std::span<const std::uint32_t> ids )
+{
+    std::string_view stem = stemOf( rel );
+    if( stem == "index" || stem == "__init__" || stem == "mod" )
+    {
+        const std::string_view dir = rel.substr( 0, rel.rfind( '/' ) == std::string_view::npos ? 0 : rel.rfind( '/' ) );
+        stem = mention_detail::baseNameOf( dir );
+    }
+    for( std::size_t k = 0; k < texts.size(); ++k )
+    {
+        if( ids[k] != self && lineStarExportsStem( texts[k], stem, lang ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// the star-export lines of a file, kept while the one pass reads it
+inline void collectStarLines( std::string_view src, std::uint32_t fileId, std::vector<std::string>& texts, std::vector<std::uint32_t>& ids )
+{
+    for( std::size_t p = src.find( '*' ); p != std::string_view::npos; p = src.find( '*', p + 1 ) )
+    {
+        const std::size_t ls = lineStartOf( src, p );
+        const std::size_t le = src.find( '\n', p );
+        const std::string_view line = src.substr( ls, le == std::string_view::npos ? std::string_view::npos : le - ls );
+        const std::string_view t = trimWs( line );
+        if( t.starts_with( "export *" ) || ( t.starts_with( "from " ) && t.ends_with( "import *" ) )
+            || ( ( t.starts_with( "pub use " ) || t.starts_with( "pub(crate) use " ) ) && t.find( "::*" ) != std::string_view::npos ) )
+        {
+            texts.emplace_back( t );
+            ids.push_back( fileId );
+        }
+        if( le == std::string_view::npos )
+        {
+            break;
+        }
+        p = le;
+    }
+}
+
+// the build and package files on the way from the file up to the root: a name in one is a `[project.scripts]`, a `bin`, a linker list
+inline std::vector<std::string> manifestsAbove( std::string_view diskAbs, std::string_view rel )
+{
+    static constexpr std::array<std::string_view, 10> kManifests = { "pyproject.toml", "setup.cfg", "setup.py", "package.json", "Cargo.toml", "CMakeLists.txt", "Makefile", "Makefile.am", "BUILD", "BUILD.bazel" };
+    std::vector<std::string> out;
+    if( !diskAbs.ends_with( rel ) )
+    {
+        return out;
+    }
+    const std::string root( diskAbs.substr( 0, diskAbs.size() - rel.size() ) );
+    std::string_view  dir = rel;
+    while( true )
+    {
+        const std::size_t sl = dir.rfind( '/' );
+        dir = sl == std::string_view::npos ? std::string_view{} : dir.substr( 0, sl );
+        for( const std::string_view m : kManifests )
+        {
+            out.push_back( root + ( dir.empty() ? std::string() : std::string( dir ) + "/" ) + std::string( m ) );
+        }
+        if( dir.empty() )
+        {
+            break;
+        }
+    }
+    return out;
+}
+
+// a `pub` def in a crate with a src/lib.rs: consumers outside the tree may use it
+inline bool inRustLibCrate( std::string_view diskAbs ) noexcept
+{
+    std::string dir( diskAbs );
+    for( std::size_t sl = dir.rfind( '/' ); sl != std::string::npos && sl > 0; sl = dir.rfind( '/' ) )
+    {
+        dir.resize( sl );
+        if( docparse::detail::readWholeFile( dir + "/Cargo.toml" ).has_value() )
+        {
+            return docparse::detail::readWholeFile( dir + "/src/lib.rs" ).has_value();
+        }
+    }
+    return false;
+}
+
+inline std::string_view tagOfKind( SymKind k ) noexcept
+{
+    switch( k )
+    {
+        case SymKind::Function: return "fn";
+        case SymKind::Method:   return "m";
+        case SymKind::Class:    return "class";
+        case SymKind::Struct:   return "struct";
+        case SymKind::Var:      return "var";
+        case SymKind::Macro:    return "macro";
+        default:                return "type";
+    }
+}
+
+inline std::string_view verdictOf( const Row& r ) noexcept
+{
+    if( r.outPlain > 0 || r.top || r.viaFile )
+    {
+        return "used";
+    }
+    if( r.why != 0 )
+    {
+        return "unknown";
+    }
+    if( r.inFile > 0 || r.sameText > 0 )
+    {
+        return "file-only";
+    }
+    return r.tests > 0 ? "test-only" : "unused";
+}
+
+inline int verdictRank( std::string_view v ) noexcept
+{
+    return v == "unused" ? 0 : v == "test-only" ? 1 : v == "file-only" ? 2 : v == "unknown" ? 3 : 4;
+}
+
+// A C/C++ header and its source are one surface: `quoteString.h` declares what `quoteString.cpp` defines, so the table reads both.
+inline std::vector<std::uint32_t> pairedFiles( const IngestResult& ing, std::uint32_t f )
+{
+    std::vector<std::uint32_t> out{ f };
+    const std::string_view rel = rootRelPath( ing, f );
+    static constexpr std::array<std::string_view, 7> kExts = { ".h", ".hpp", ".hh", ".c", ".cc", ".cpp", ".cxx" };
+    const auto isC = []( std::string_view p ) { return std::ranges::any_of( kExts, [ & ]( std::string_view e ) { return p.ends_with( e ); } ); };
+    if( !isC( rel ) )
+    {
+        return out;
+    }
+    const std::string_view stem = stemOf( rel );
+    for( std::uint32_t k = 0; k < ing.files.size(); ++k )
+    {
+        const std::string_view other = rootRelPath( ing, k );
+        if( k != f && isC( other ) && stemOf( other ) == stem )
+        {
+            out.push_back( k );
+        }
+    }
+    if( out.size() != 2 )   // the same stem three times over is no pair
+    {
+        out.resize( 1 );
+    }
+    return out;
+}
+
+// One file's rows, the evidence read off the graph, then the scan, then the in-file chain.
+struct FileTable
+{
+    std::uint32_t      file = 0;
+    std::vector<Row>   rows;       // by name
+    std::vector<std::uint32_t> pair;   // the named file, and its C/C++ other half when it has one
+    std::size_t        privateDefs = 0;
+    bool               unread = false;
+    bool               servedLanguage = true;
+};
+
+// the caller's edge to `id` is one of several to same-named defs: the resolver did not pick, so it proves neither
+inline bool callSplitOverNamesakes( const IngestResult& ing, const Graph& g, NodeId caller, NodeId id ) noexcept
+{
+    if( std::size_t( caller ) + 1 >= g.outOff.size() )
+    {
+        return false;
+    }
+    const std::string_view name = ing.symbols[id].name;
+    for( std::uint32_t k = g.outOff[caller]; k < g.outOff[caller + 1]; ++k )
+    {
+        const NodeId other = g.outTargets[k];
+        if( other != id && other < ing.symbols.size() && ing.symbols[other].name == name )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline FileTable buildFileTable( const IngestResult& ing, const Graph& g, const ValueRefIndex& vri, std::uint32_t f )
+{
+    FileTable table;
+    table.file = f;
+    const filepage::FileText text = filepage::loadFileText( ing, f );
+    table.unread = text.src.empty();
+    table.pair = pairedFiles( ing, f );
+    bool modScope = false;
+    std::vector<NodeId> defs = filepage::fileDefsInLineOrder( ing, f, modScope );
+    for( std::size_t k = 1; k < table.pair.size(); ++k )
+    {
+        const std::vector<NodeId> more = filepage::fileDefsInLineOrder( ing, table.pair[k], modScope );
+        defs.insert( defs.end(), more.begin(), more.end() );
+    }
+
+    std::vector<std::string_view> jsExports;
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::JsExport && b.fileId == f )
+        {
+            jsExports.push_back( b.var );
+            if( !b.importedName.empty() )
+            {
+                jsExports.push_back( b.importedName );
+            }
+        }
+    }
+    std::ranges::sort( jsExports, sortutil::svLess );
+
+    const std::string_view rel  = rootRelPath( ing, f );
+    const std::string      disk = diskPath( ing, f );
+    const bool             rustLib = !defs.empty() && ing.symbols[ defs.front() ].lang == Lang::Rust && inRustLibCrate( disk );
+    table.servedLanguage = defs.empty() || servedLang( ing.symbols[ defs.front() ].lang );
+
+    const auto ownerOf = [ & ]( const Symbol& s ) -> const Symbol*
+    {
+        if( !isMemberDef( s ) )
+        {
+            return nullptr;
+        }
+        const std::string_view tail = scopeTail( s );
+        for( const NodeId d : defs )
+        {
+            const Symbol& o = ing.symbols[d];
+            if( o.name == tail && ( o.kind == SymKind::Class || isStructOrNamedType( o.kind ) || o.kind == SymKind::Interface ) )
+            {
+                return &o;
+            }
+        }
+        return nullptr;
+    };
+
+    // the rows, by name: an overload set or two same-named members is one row
+    for( const NodeId id : defs )
+    {
+        const Symbol& s = ing.symbols[id];
+        if( !rowKind( s ) )
+        {
+            continue;
+        }
+        const filepage::FileText pairText = s.fileId == f ? filepage::FileText{} : filepage::loadFileText( ing, s.fileId );
+        const std::string_view   defSrc   = s.fileId == f ? std::string_view( text.src ) : std::string_view( pairText.src );
+        if( cTypeMentionNotDefinition( s, defSrc ) )
+        {
+            continue;   // the word stays a use: the scan reads this line as one
+        }
+        auto it = std::ranges::lower_bound( table.rows, std::string_view( s.name ), sortutil::svLess, &Row::name );
+        if( it == table.rows.end() || it->name != s.name )
+        {
+            Row fresh;
+            fresh.name = s.name;
+            it = table.rows.insert( it, std::move( fresh ) );
+        }
+        const Symbol* owner = ownerOf( s );
+        it->defs.push_back( id );
+        it->member = it->member || isMemberDef( s );
+        it->ownLines.push_back( ( std::uint64_t( s.fileId ) << 32 ) | s.line );
+        if( s.fileId == f )
+        {
+            it->listed   = true;
+            it->isPublic = it->isPublic || isPublicDef( ing, s, text.src, jsExports, owner );
+            it->why      = std::uint16_t( it->why | languageHedges( s, rel, text.src, owner, rustLib ) );
+        }
+        else
+        {
+            // the pair's other half: read for the hedges through its own bytes
+            it->why = std::uint16_t( it->why | languageHedges( s, rootRelPath( ing, s.fileId ), defSrc, owner, rustLib ) );
+        }
+        if( vri.isValueReferenced( id ) )
+        {
+            it->why |= kWhyValue;
+        }
+    }
+    for( Row& r : table.rows )
+    {
+        std::ranges::sort( r.ownLines );
+    }
+
+    // the graph's evidence
+    const std::uint32_t* ro = g.inEdges.rowOffsets();
+    const std::uint32_t* ci = g.inEdges.colIndices();
+    for( Row& r : table.rows )
+    {
+        for( const NodeId id : r.defs )
+        {
+            if( ro == nullptr || ci == nullptr || id >= ing.symbols.size() )
+            {
+                continue;
+            }
+            for( std::uint32_t k = ro[id]; k < ro[id + 1]; ++k )
+            {
+                const NodeId caller = ci[k];
+                if( caller == id || caller >= ing.symbols.size() )
+                {
+                    continue;
+                }
+                const Symbol& c = ing.symbols[caller];
+                if( isTestSymbol( ing, caller ) || isTestLikePath( rootRelPath( ing, c.fileId ) ) )
+                {
+                    ++r.tests;
+                    continue;
+                }
+                if( std::ranges::contains( table.pair, c.fileId ) )
+                {
+                    if( c.kind == SymKind::ModuleScope || c.name == "main" )
+                    {
+                        r.top = true;   // top-level code or the entry point runs: this is what `used` chains from
+                    }
+                    ++r.inFile;
+                    r.byInFile = r.byInFile == kNoNode ? caller : r.byInFile;
+                    continue;
+                }
+                if( edgeNameOnly( g, caller, id ) || callSplitOverNamesakes( ing, g, caller, id ) )
+                {
+                    r.why |= kWhyByName;
+                }
+                else
+                {
+                    ++r.outPlain;
+                }
+            }
+            const NodeId one[] = { id };
+            if( declinedCallsNaming( g, one ) > 0 )
+            {
+                r.why |= kWhyDeclined;
+            }
+        }
+    }
+    return table;
+}
+
+// The in-file chain, once the scan has set each row's hedges: a def called by a used def is used; by an unknown one, unknown.
+inline void chainWithinFile( const IngestResult& ing, const Graph& g, FileTable& t )
+{
+    const std::uint32_t* ro = g.inEdges.rowOffsets();
+    const std::uint32_t* ci = g.inEdges.colIndices();
+    if( ro == nullptr || ci == nullptr )
+    {
+        return;
+    }
+    struct Edge { std::uint32_t caller, callee; };
+    std::vector<Edge> edges;
+    for( std::uint32_t r = 0; r < t.rows.size(); ++r )
+    {
+        for( const NodeId id : t.rows[r].defs )
+        {
+            for( std::uint32_t k = ro[id]; k < ro[id + 1]; ++k )
+            {
+                const NodeId caller = ci[k];
+                if( caller >= ing.symbols.size() || caller == id || !std::ranges::contains( t.pair, ing.symbols[caller].fileId ) )
+                {
+                    continue;
+                }
+                const auto it = std::ranges::lower_bound( t.rows, std::string_view( ing.symbols[caller].name ), sortutil::svLess, &Row::name );
+                if( it != t.rows.end() && it->name == ing.symbols[caller].name && std::ranges::contains( it->defs, caller ) )
+                {
+                    edges.push_back( { std::uint32_t( it - t.rows.begin() ), r } );
+                }
+            }
+        }
+    }
+    bool moved = true;
+    for( std::size_t pass = 0; moved && pass <= t.rows.size(); ++pass )
+    {
+        moved = false;
+        for( const Edge& e : edges )
+        {
+            const Row& from = t.rows[e.caller];
+            Row&       to   = t.rows[e.callee];
+            const bool fromUsed = from.outPlain > 0 || from.top || from.viaFile;
+            if( fromUsed && !( to.outPlain > 0 || to.top || to.viaFile ) )
+            {
+                to.viaFile = true;
+                moved      = true;
+            }
+            else if( !fromUsed && from.why != 0 && to.why == 0 && !( to.outPlain > 0 || to.top || to.viaFile ) )
+            {
+                to.why = kWhyInFile;
+                moved  = true;
+            }
+        }
+    }
+}
+
+inline void appendWhy( std::string& out, std::uint16_t why )
+{
+    bool first = true;
+    for( const auto& [ bit, word ] : kWhyWords )
+    {
+        if( ( why & bit ) != 0 )
+        {
+            out += first ? " why=\"" : ",";
+            out += word;
+            first = false;
+        }
+    }
+    if( !first )
+    {
+        out += '"';
+    }
+}
+
+inline void appendSites( std::string& out, const IngestResult& ing, std::span<const Site> sites, std::vector<char>& esc )
+{
+    bool first = true;
+    for( const Site& s : sites )
+    {
+        out += first ? " at=\"" : ",";
+        out += escapeXml( rootRelPath( ing, s.fileId ), esc );
+        out += std::format( ":{}", s.line );
+        first = false;
+    }
+    if( !first )
+    {
+        out += '"';
+    }
+}
+
+inline void appendRow( std::string& out, const IngestResult& ing, const Row& r, std::string_view verdict, std::vector<char>& esc )
+{
+    const Symbol& s = ing.symbols[ r.defs.front() ];
+    out += "<u n=\"";
+    out += escapeXml( r.name, esc );
+    out += "\" t=\"";
+    out += tagOfKind( s.kind );
+    out += std::format( "\" l=\"{}\" v=\"{}\"", s.line, verdict );
+    if( r.defs.size() > 1 )
+    {
+        out += std::format( " defs=\"{}\"", r.defs.size() );
+    }
+    if( r.outPlain > 0 ) { out += std::format( " out=\"{}\"", r.outPlain ); }
+    if( r.inFile > 0 )   { out += std::format( " in=\"{}\"", r.inFile ); }
+    if( verdict == "used" )
+    {
+        out += "/>";   // a used row needs no more: why= would hedge what out= or in= already proves
+        return;
+    }
+    appendWhy( out, r.why );
+    if( r.tests > 0 )    { out += std::format( " tests=\"{}\"", r.tests ); }
+    if( r.text > 0 )     { out += std::format( " text=\"{}\"", r.text ); }
+    if( r.strings > 0 )  { out += std::format( " str=\"{}\"", r.strings ); }
+    if( r.imports > 0 )  { out += std::format( " imp=\"{}\"", r.imports ); }
+    if( r.sameText > 0 && r.inFile == 0 ) { out += std::format( " same=\"{}\"", r.sameText ); }
+    if( r.byInFile != kNoNode && verdict != "used" )
+    {
+        out += " by=\"";
+        out += escapeXml( ing.symbols[ r.byInFile ].name, esc );
+        out += '"';
+    }
+    if( verdict != "used" )
+    {
+        appendSites( out, ing, verdict == "test-only" ? std::span<const Site>( r.testAt ) : std::span<const Site>( r.at ), esc );
+    }
+    out += "/>";
+}
+
+inline std::string renderFileTable( const IngestResult& ing, const Graph& g, const FileTable& t, std::vector<char>& esc )
+{
+    std::array<std::size_t, 5> tally {};
+    std::vector<std::pair<int, const Row*>> shownRows;
+    std::size_t privateRows = 0;
+    for( const Row& r : t.rows )
+    {
+        if( !r.listed )
+        {
+            continue;
+        }
+        if( !r.isPublic )
+        {
+            ++privateRows;
+            continue;
+        }
+        const int rank = verdictRank( verdictOf( r ) );
+        ++tally[ std::size_t( rank ) ];
+        shownRows.emplace_back( rank, &r );
+    }
+    std::ranges::stable_sort( shownRows, [ & ]( const auto& a, const auto& b )
+    {
+        return a.first != b.first ? a.first < b.first : ing.symbols[ a.second->defs.front() ].line < ing.symbols[ b.second->defs.front() ].line;
+    } );
+    std::string out = "<unused_in_file p=\"";
+    out += escapeXml( rootRelPath( ing, t.file ), esc );
+    out += std::format( "\" public=\"{}\" private=\"{}\" unused=\"{}\" test_only=\"{}\" file_only=\"{}\" unknown=\"{}\" used=\"{}\"", shownRows.size(), privateRows, tally[0], tally[1], tally[2], tally[3], tally[4] );
+    if( t.unread )                                 { out += " unread=\"1\""; }
+    if( !t.servedLanguage )                        { out += " lang_unserved=\"1\""; }
+    if( shownRows.size() > kForUnusedRowsPerFile ) { out += std::format( " shown=\"{}\" capped=\"1\"", kForUnusedRowsPerFile ); }
+    out += graphCountFloorAttrXml( g );
+    out += '>';
+    for( std::size_t k = 0; k < shownRows.size() && k < kForUnusedRowsPerFile; ++k )
+    {
+        appendRow( out, ing, *shownRows[k].second, verdictOf( *shownRows[k].second ), esc );
+    }
+    out += "</unused_in_file>";
+    return out;
+}
+
+} // namespace unusedfile
+
+// The block: "" unless the subject carries a cue and names a file or a directory.
+inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g, std::string_view task )
+{
+    using namespace unusedfile;
+    if( !subjectAsksUnused( task ) )
+    {
+        return {};
+    }
+    const std::vector<FileAnchor> anchors = resolveFileAnchors( ing, task );
+    std::vector<std::uint32_t>    files;
+    std::string                   nameList;
+    std::vector<char>             esc;
+    std::size_t                   dirTotal = 0;
+    for( const FileAnchor& a : anchors )
+    {
+        if( a.picksOne() || a.kind == 'd' )
+        {
+            for( const std::uint32_t f : a.files )
+            {
+                if( !std::ranges::contains( files, f ) && ( files.size() < kForUnusedDirFiles ) )
+                {
+                    files.push_back( f );
+                }
+            }
+            dirTotal = std::max<std::size_t>( dirTotal, a.total );
+        }
+        else
+        {
+            nameList += std::format( "<unused_names s=\"{}\" total=\"{}\">", std::string( escapeXml( a.token, esc ) ), a.total );
+            for( const std::uint32_t f : a.files )
+            {
+                nameList += "<f p=\"";
+                nameList += escapeXml( rootRelPath( ing, f ), esc );
+                nameList += "\"/>";
+            }
+            nameList += "</unused_names>";
+        }
+    }
+    if( files.empty() )
+    {
+        return nameList;
+    }
+
+    const ValueRefIndex    vri( ing );
+    std::vector<FileTable> tables;
+    tables.reserve( files.size() );
+    for( const std::uint32_t f : files )
+    {
+        tables.push_back( buildFileTable( ing, g, vri, f ) );
+    }
+
+    // The one pass over the tree: each file read once, whatever the number of tables.
+    std::vector<std::string>   starTexts;
+    std::vector<std::uint32_t> starIds;
+    std::vector<NameScan>      scans;
+    scans.reserve( tables.size() );
+    for( FileTable& table : tables )
+    {
+        scans.emplace_back( table.rows, table.pair );
+    }
+    for( std::uint32_t k = 0; k < ing.files.size(); ++k )
+    {
+        const std::optional<std::string> bytes = docparse::detail::readWholeFile( diskPath( ing, k ) );
+        if( !bytes )
+        {
+            continue;
+        }
+        const std::string_view rel = rootRelPath( ing, k );
+        for( NameScan& scan : scans )
+        {
+            scan.scanFile( k, rel, *bytes, false );
+        }
+        if( !isTestLikePath( rel ) )
+        {
+            collectStarLines( *bytes, k, starTexts, starIds );
+        }
+    }
+    for( std::size_t t = 0; t < tables.size(); ++t )
+    {
+        FileTable& table = tables[t];
+        for( const std::string& m : manifestsAbove( diskPath( ing, table.file ), rootRelPath( ing, table.file ) ) )
+        {
+            if( const std::optional<std::string> bytes = docparse::detail::readWholeFile( m ); bytes )
+            {
+                scans[t].scanFile( table.file, m, *bytes, true );
+            }
+        }
+        const Lang fileLang = table.rows.empty() ? Lang::Unknown : ing.symbols[ table.rows.front().defs.front() ].lang;
+        const bool barrel   = fileIsStarExported( rootRelPath( ing, table.file ), fileLang, table.file, starTexts, starIds );
+        for( Row& r : table.rows )
+        {
+            if( barrel )
+            {
+                r.why |= kWhyBarrel;
+            }
+            if( r.text > 0 )
+            {
+                r.why |= kWhyName;
+            }
+            if( r.imports > 0 && r.text == 0 )
+            {
+                r.why |= kWhyImport;
+            }
+        }
+        chainWithinFile( ing, g, table );
+    }
+
+    std::string out = nameList;
+    for( const FileTable& table : tables )
+    {
+        if( out.size() > kForUnusedMaxBytes )
+        {
+            out += "<unused_cut bytes_capped=\"1\"/>";
+            break;
+        }
+        out += renderFileTable( ing, g, table, esc );
+    }
+    if( dirTotal > files.size() )
+    {
+        out += std::format( "<unused_cut total=\"{}\" shown=\"{}\"/>", dirTotal, files.size() );
+    }
+    return out;
+}
+
+inline constexpr std::string_view kForUnusedLegend =
+    "; unused_in_file p= public= private=: the task asks what is unused in a named file; its public defs, private ones counted and not listed. u n= t= l=: a def, defs= an overload set. "
+    "v=used: a non-test caller in another file bound by more than the name, or an in-file chain from one or from top-level code (proves one caller, not that it is live); "
+    "v=unknown: something may reach it that no index follows, why= says what, no claim either way; v=file-only: only same-file references; v=test-only: every reference found is in a test, never live; "
+    "v=unused: the name appears nowhere in this tree outside its definition, declarations and comments, and no why= applies: proves that of this tree only. "
+    "why=name a non-test word no edge explains (a member call, a callback), by-name its callers bound by name alone or split over same-named defs, declined a declined call may mean it, value a table or argument holds it, "
+    "string a string literal is its name (__all__, getattr), built-name a string or macro builds names it could be, import only an import or re-export names it, barrel its file is star re-exported, "
+    "dispatch a base, trait or interface may call it, framework the language or a framework calls it (decorator, attribute, entry point), api consumers outside this tree may use it, "
+    "members an unscoped enum whose enumerators need no mention of it, manifest a build or package file names it, in-file an unknown def in this file calls it. "
+    "out= non-test callers elsewhere, in= in this file, by= one of them, tests= test callers and words, text= str= imp= same= non-test code, string, import and same-file words, at= sites to read. "
+    "lang_unserved=1 no verdicts for this language; unread=1; shown= capped=1 rows cut; unused_cut: files or bytes cut; unused_names: several files match, none picked";
+inline constexpr std::string_view kForCompactUnusedLegend =
+    "; unused_in_file p= public= private=: public defs of the named file. u n= t= l= defs= v=used|unknown|file-only|test-only|unused: used a non-test caller elsewhere, or a chain from one; unknown why= says what may reach it; "
+    "file-only same-file refs only; test-only tests only, never live; unused no mention in this tree. why=name|by-name|declined|value|string|built-name|import|barrel|dispatch|framework|api|members|manifest|in-file. "
+    "out= in= by= tests= text= str= imp= same= at= the evidence; lang_unserved=1 unread=1 shown= capped=1 unused_cut unused_names";
+
+} // namespace rw
