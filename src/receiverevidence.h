@@ -1346,9 +1346,36 @@ struct CallResultTypes
         rustModuleAt( tf, ing.symbols[ target ].sigStartByte, targetModule );
         std::uint32_t crate = kNoCrate;
         std::string   module;
+        // The module layout knows a crate only by a lib.rs or main.rs: a crate with `[lib] path = "src/x.rs"` (all of zed's) has none. There the written root reads
+        // against the package directory: `crate`/`self`/`super` the caller's own, any other root that directory's name (`-` as `_`). `use serde_json::json` names no tree directory.
+        const auto packageOf = []( std::string_view path )
+        {
+            std::size_t cut = path.size();
+            for( const std::string_view part : { std::string_view( "/src/" ), std::string_view( "/tests/" ), std::string_view( "/benches/" ), std::string_view( "/examples/" ) } )
+            {
+                cut = std::min( cut, path.find( part ) );
+            }
+            return cut == path.size() ? std::string_view{} : path.substr( 0, cut );
+        };
+        const auto rootNamesTargetPackage = [ & ]( std::string_view path )
+        {
+            const std::string_view root = path.substr( 0, path.find( "::" ) );
+            const std::string_view pkg  = packageOf( rootRelPath( ing, tf ) );
+            if( root == "crate" || root == "self" || root == "super" )
+            {
+                return pkg == packageOf( rootRelPath( ing, r.fileId ) );
+            }
+            const std::size_t      slash = pkg.rfind( '/' );
+            const std::string_view leaf  = slash == std::string_view::npos ? pkg : pkg.substr( slash + 1 );
+            return !leaf.empty() && leaf.size() == root.size() && std::ranges::equal( leaf, root, []( char a, char b ) { return ( a == '-' ? '_' : a ) == b; } );
+        };
         const auto    holdsTarget = [ & ]( std::string_view path, std::uint32_t at )
         {
-            if( !rustModuleOf( r.fileId, at, path, crate, module, 0 ) || rust.crateOf[ tf ] != crate )
+            if( !rustModuleOf( r.fileId, at, path, crate, module, 0 ) )
+            {
+                return rootNamesTargetPackage( path );
+            }
+            if( rust.crateOf[ tf ] != crate )
             {
                 return false;
             }
@@ -1378,10 +1405,15 @@ struct CallResultTypes
                 return false;
             }
             const std::size_t at = b.importedName.rfind( "::" );
-            return at != std::string::npos && rustModuleOf( f, b.startByte, std::string_view( b.importedName ).substr( 0, at ), crate, module, 0 ) && rust.crateOf[ tf ] == crate;
+            if( at == std::string::npos )
+            {
+                return false;
+            }
+            const std::string_view modPath = std::string_view( b.importedName ).substr( 0, at );
+            return rustModuleOf( f, b.startByte, modPath, crate, module, 0 ) ? rust.crateOf[ tf ] == crate : rootNamesTargetPackage( modPath );
         };
         bool proven = false;
-        forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b ) { proven = proven || usesIntoTargetCrate( r.fileId, b ); } );
+        forEachImport( r.fileId, r.calleeName, [ & ]( const Binding& b ) { proven = proven || usesIntoTargetCrate( r.fileId, b ); } );   // any level: `mod tests { use super::*; }` sees its parent's
         if( !proven )
         {
             forEachImport( r.fileId, "*", [ & ]( const Binding& b )

@@ -63,6 +63,22 @@ row R11.superout  "$R" callees t_super_out  src/a.rs swap    name
 row R12.callers   "$R" callers Ok           src/user.rs u_prelude name
 row M.rust        "$R" callees u_member     src/a.rs Thing::lock name
 
+# ---- Rust, a workspace whose crates have no lib.rs (`[lib] path`): the module layout knows nothing, the written root reads against the package directory.
+Z=$T/zs
+w "$Z/Cargo.toml" '[workspace]\nmembers = ["crates/*"]\n'
+w "$Z/crates/settings/Cargo.toml" '[package]\nname = "settings"\nversion = "0.1.0"\n[lib]\npath = "src/settings.rs"\n'
+w "$Z/crates/settings/src/settings.rs" 'pub mod file;\nuse crate::file::update_file;\nfn z_crate() { update_file(); }\nfn z_crate_prelude() -> i32 { Ok(1) }\n'
+w "$Z/crates/settings/src/file.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\n'
+w "$Z/crates/gpui-util/Cargo.toml" '[package]\nname = "gpui-util"\nversion = "0.1.0"\n[lib]\npath = "src/util.rs"\n'
+w "$Z/crates/gpui-util/src/util.rs" 'pub fn dashed() {}\n'
+w "$Z/crates/other/Cargo.toml" '[package]\nname = "other"\nversion = "0.1.0"\n[lib]\npath = "src/other.rs"\n'
+w "$Z/crates/other/src/other.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\npub fn dashed() {}\n'
+w "$Z/crates/app/Cargo.toml" '[package]\nname = "app"\nversion = "0.1.0"\n[lib]\npath = "src/app.rs"\n[dependencies]\nsettings = { path = "../settings" }\n'
+w "$Z/crates/app/src/app.rs" 'use settings::{update_file};\nuse gpui_util::dashed;\nuse serde_json::json;\nfn z_use() { update_file(); }\nfn z_dash() { dashed(); }\nfn z_prelude() -> i32 { Ok(1) }\nfn z_ext() { let _ = json!({}); }\nfn z_qual() { settings::update_file(); }\n'
+# `mod file;` is the one edge a crate without a lib.rs has at this head; a root naming ANOTHER package needs a resolved cross-crate edge (RUST-ROOTS), measured with the rig
+row Z1.crate   "$Z" callees z_crate         crates/settings/src/file.rs update_file proven
+row Z2.prelude "$Z" callees z_crate_prelude crates/settings/src/file.rs Ok name
+
 # ---- Python
 P=$T/py
 w "$P/a.py" 'def helper():\n    pass\ndef conv():\n    pass\ndef starred():\n    pass\nclass A:\n    def getvalue(self):\n        pass\n'

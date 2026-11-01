@@ -10696,9 +10696,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     switch( nameProof )
                     {
-                        // a local or parameter hides any import of the name: the call holds whatever was assigned
+                        // a Rust local or parameter hides any `use` of the name: the call holds whatever was assigned
                         case Rule3NameProof::RustUse:      return !falseEdges.isLocalOfCaller( r ) && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
-                        case Rule3NameProof::PythonImport: return !falseEdges.isLocalOfCaller( r ) && ( externalVeto.importVerdict( r, r.calleeName ) != '\0' || externalVeto.pythonStarImports( r ) );
+                        case Rule3NameProof::PythonImport: return externalVeto.importVerdict( r, r.calleeName ) != '\0' || externalVeto.pythonStarImports( r );   // a function-level import is bound there too
                         case Rule3NameProof::None:         return true;
                     }
                     return true;
