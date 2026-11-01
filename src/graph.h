@@ -10676,6 +10676,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
                                     && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
         bool rule3NoProof = false;   // RULE3-MEMBER-GUARD: Rule 3 fired, and nothing the language writes proves its answer
+        bool rule3Local   = false;   // ... and the call goes through a local or parameter of the caller: the value held is no definition of the name
         if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
@@ -10696,7 +10697,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     switch( nameProof )
                     {
-                        // a Rust local or parameter hides any `use` of the name: the call holds whatever was assigned
+                        // a local or parameter of the caller hides any `use` of the name: the call holds whatever was assigned. Only where the extractor records locals: it
+                        // records none for Rust, so there this reads false and a `let f = ..; f()` over `use a::f` stays proven (RUST-LOCALS card)
                         case Rule3NameProof::RustUse:      return !falseEdges.isLocalOfCaller( r ) && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
                         case Rule3NameProof::PythonImport: return externalVeto.importVerdict( r, r.calleeName ) != '\0' || externalVeto.pythonStarImports( r );   // a function-level import is bound there too
                         case Rule3NameProof::None:         return true;
@@ -10891,7 +10893,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         if( rule3NoProof && !r.qualifier.empty() )
         {
             std::string path = r.qualifier + "::" + r.calleeName;
-            if( recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, path ) )
+            if( recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, path ) && !recvEv.types.rustRootNamesTreePackage( r.fileId, r.startByte, path ) )
             {
                 disposition = vetoExternal( r );
                 continue;
@@ -10942,6 +10944,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
         if( rule3NoProof && !narrowed && !languageLookupProved )
         {
+            rule3Local = r.qualifier.empty() && falseEdges.isLocalOfCaller( r );
             nameOnly = !cand.empty() || !memberRule3.empty();
             if( cand.empty() )
             {
@@ -11068,7 +11071,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     const bool file = ing.symbols[ c ].fileId == r.fileId;
                     const bool dir  = fileDir[ ing.symbols[ c ].fileId ] == rdir;
-                    if( file || dir || std::find( memberRule3.begin(), memberRule3.end(), c ) != memberRule3.end() )
+                    const bool rule3File = std::find( memberRule3.begin(), memberRule3.end(), c ) != memberRule3.end();
+                    // RULE3-MEMBER-GUARD: a call no written binding reaches names this file's own definition or Rule 3's file (hedged), never a directory
+                    // namesake; through a local or parameter Rule 3's file is no better a guess than the namesakes, so there only this file's own stay
+                    if( rule3NoProof ? ( file || ( rule3File && !rule3Local ) ) : ( file || dir || rule3File ) )
                     {
                         tier.push_back( c );
                         anyFile = anyFile || file;
@@ -11077,7 +11083,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 for( NodeId c : memberRule3 )   // the included file's candidates, even where reachableByName set them aside
                 {
-                    if( std::find( tier.begin(), tier.end(), c ) == tier.end() )
+                    if( !rule3Local && std::find( tier.begin(), tier.end(), c ) == tier.end() )
                     {
                         tier.push_back( c );
                     }
@@ -11087,7 +11093,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 nameOnlyAnyDir  = anyDir;
                 if( tier.empty() )
                 {
-                    if( cand.size() == 1 && !localsYield )
+                    if( cand.size() == 1 && !localsYield && !rule3Local )
                     {
                         tier = cand;   // a unique global, hedged
                     }

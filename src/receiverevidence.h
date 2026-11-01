@@ -282,6 +282,16 @@ struct CallResultTypes
     std::vector<std::string_view>                         filePackage;
     HashMap<std::string, std::vector<std::uint32_t>>      packageFiles;
     HashMap<std::string, std::vector<const Binding*>>     aliasesByName;
+    // RULE3-MEMBER-GUARD: the package directory of a Rust source path (`crates/settings/src/file.rs` → `crates/settings`), empty for a path outside src/, tests/, benches/, examples/
+    static std::string_view rustPackageDirOf( std::string_view path )
+    {
+        std::size_t cut = path.size();
+        for( const std::string_view part : { std::string_view( "/src/" ), std::string_view( "/tests/" ), std::string_view( "/benches/" ), std::string_view( "/examples/" ) } )
+        {
+            cut = std::min( cut, path.find( part ) );
+        }
+        return cut == path.size() ? std::string_view{} : path.substr( 0, cut );
+    }
     // Rust crate/module layout, built on the first Rust resolution: a file's crate (its nearest `lib.rs` / `main.rs`
     // directory) and module path (`a::b` for src/a/b.rs or src/a/b/mod.rs), the crates by name (`mdbook_core` for
     // crates/mdbook-core/src), and each module's files
@@ -293,6 +303,7 @@ struct CallResultTypes
         HashMap<std::string, std::uint32_t>               crateByName;
         HashMap<std::string, std::vector<std::uint32_t>>  filesOf;    // "<crate>#<module>" → its files
         HashMap<std::string, NodeId>                      inlineMods; // fix round 3: "<crate>#<module>" → an inline `mod` symbol
+        HashMap<std::string, char>                        packageNames;   // RULE3-MEMBER-GUARD: every package directory's name (`-` as `_`), lib.rs or not
     };
     static constexpr std::uint32_t                        kNoCrate = 0xFFFFFFFFu;
     mutable RustLayout                                    rust;
@@ -1021,6 +1032,12 @@ struct CallResultTypes
             {
                 continue;
             }
+            if( const std::string_view pkg = rustPackageDirOf( path ); !pkg.empty() )
+            {
+                std::string name( pkg.substr( pkg.rfind( '/' ) == std::string_view::npos ? 0 : pkg.rfind( '/' ) + 1 ) );
+                std::replace( name.begin(), name.end(), '-', '_' );
+                rust.packageNames.try_emplace( std::move( name ), '\1' );
+            }
             for( std::string_view dir = includerDir( path );; dir = includerDir( dir ) )
             {
                 if( const auto it = rootIndex.find( std::string( dir ) ); it != rootIndex.end() )
@@ -1348,15 +1365,7 @@ struct CallResultTypes
         std::string   module;
         // The module layout knows a crate only by a lib.rs or main.rs: a crate with `[lib] path = "src/x.rs"` (all of zed's) has none. There the written root reads
         // against the package directory: `crate`/`self`/`super` the caller's own, any other root that directory's name (`-` as `_`). `use serde_json::json` names no tree directory.
-        const auto packageOf = []( std::string_view path )
-        {
-            std::size_t cut = path.size();
-            for( const std::string_view part : { std::string_view( "/src/" ), std::string_view( "/tests/" ), std::string_view( "/benches/" ), std::string_view( "/examples/" ) } )
-            {
-                cut = std::min( cut, path.find( part ) );
-            }
-            return cut == path.size() ? std::string_view{} : path.substr( 0, cut );
-        };
+        const auto packageOf = []( std::string_view path ) { return rustPackageDirOf( path ); };
         const auto rootNamesTargetPackage = [ & ]( std::string_view path )
         {
             const std::string_view root = path.substr( 0, path.find( "::" ) );
@@ -1474,6 +1483,20 @@ struct CallResultTypes
     {
         pathCut = false;
         return rustPathOutside( f, at, path ) && !pathCut;
+    }
+    // RULE3-MEMBER-GUARD: does the root a written path starts from (its head, or where the head's `use` begins) name a package directory of the tree? A crate with
+    // `[lib] path` has no lib.rs for the layout to know it by, so rustPathOutside reads a `use agent_settings::AgentSettings` from a crate it does know as an
+    // unknown, outside root; naming a package directory of the tree, the root is not provably outside.
+    bool rustRootNamesTreePackage( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        if( !rust.built )
+        {
+            buildRustLayout();
+        }
+        const std::string head( path.substr( 0, path.find( "::" ) ) );
+        std::string       root = head;
+        forEachRustUseAt( f, at, head, [ & ]( const Binding& b ) { root = b.importedName.substr( 0, b.importedName.find( "::" ) ); } );
+        return rust.packageNames.contains( root );
     }
     // the files holding module (crate, module)'s own level: a file module's files, or (`inlineMod` set) the one file of an
     // inline `mod`, kept in `ownFile`; empty when no such module

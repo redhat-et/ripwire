@@ -47,6 +47,7 @@ w "$R/src/nest.rs" 'use crate::a::helper;\nuse std::mem::swap;\nmod tests {\n   
 row R1.use        "$R" callees u_use        src/a.rs helper  proven
 row R1.far        "$R" callees u_use        src/far.rs helper none
 row R2.prelude    "$R" callees u_prelude    src/a.rs Ok      name
+row R2.neighbour  "$R" callees u_prelude    src/far.rs Ok    none
 row R3.macro      "$R" callees u_macro      src/a.rs assert  name
 row R4.type       "$R" callees u_type       src/a.rs Thing::new proven
 row R5.module     "$R" callees u_module     src/a.rs channel proven
@@ -55,6 +56,7 @@ row R7.stdtype    "$R" callees u_stdtype    src/a.rs new     none
 row R8.stduse     "$R" callees u_stduse     src/a.rs swap    name
 row R5.alias      "$R" callees u_alias      src/a.rs Thing::new proven
 row R5.extuse     "$R" callees u_ext_use    src/a.rs json    name
+# Rust records no local or parameter binding (RUST-LOCALS card): a closure named like a def, called, keeps Rule 3's file hedged like any unbound name
 row R5.closure    "$R" callees u_closure    src/a.rs conv    name
 row R9.glob       "$R" callees g_glob       src/a.rs globbed proven
 row R10.superglob "$R" callees t_super_glob src/a.rs Ok      name
@@ -67,17 +69,20 @@ row M.rust        "$R" callees u_member     src/a.rs Thing::lock name
 Z=$T/zs
 w "$Z/Cargo.toml" '[workspace]\nmembers = ["crates/*"]\n'
 w "$Z/crates/settings/Cargo.toml" '[package]\nname = "settings"\nversion = "0.1.0"\n[lib]\npath = "src/settings.rs"\n'
-w "$Z/crates/settings/src/settings.rs" 'pub mod file;\nuse crate::file::update_file;\nfn z_crate() { update_file(); }\nfn z_crate_prelude() -> i32 { Ok(1) }\n'
-w "$Z/crates/settings/src/file.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\n'
+w "$Z/crates/settings/src/settings.rs" 'pub mod file;\nuse crate::file::update_file;\nuse other::shared;\nuse settings::viaown;\nfn z_crate() { update_file(); }\nfn z_crate_prelude() -> i32 { Ok(1) }\nfn z_other_root() { shared(); }\nfn z_own_root() { viaown(); }\n'
+w "$Z/crates/settings/src/file.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\npub fn shared() {}\npub fn viaown() {}\n'
 w "$Z/crates/gpui-util/Cargo.toml" '[package]\nname = "gpui-util"\nversion = "0.1.0"\n[lib]\npath = "src/util.rs"\n'
 w "$Z/crates/gpui-util/src/util.rs" 'pub fn dashed() {}\n'
 w "$Z/crates/other/Cargo.toml" '[package]\nname = "other"\nversion = "0.1.0"\n[lib]\npath = "src/other.rs"\n'
-w "$Z/crates/other/src/other.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\npub fn dashed() {}\n'
+w "$Z/crates/other/src/other.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\npub fn dashed() {}\npub fn shared() {}\npub fn viaown() {}\n'
 w "$Z/crates/app/Cargo.toml" '[package]\nname = "app"\nversion = "0.1.0"\n[lib]\npath = "src/app.rs"\n[dependencies]\nsettings = { path = "../settings" }\n'
 w "$Z/crates/app/src/app.rs" 'use settings::{update_file};\nuse gpui_util::dashed;\nuse serde_json::json;\nfn z_use() { update_file(); }\nfn z_dash() { dashed(); }\nfn z_prelude() -> i32 { Ok(1) }\nfn z_ext() { let _ = json!({}); }\nfn z_qual() { settings::update_file(); }\n'
 # `mod file;` is the one edge a crate without a lib.rs has at this head; a root naming ANOTHER package needs a resolved cross-crate edge (RUST-ROOTS), measured with the rig
 row Z1.crate   "$Z" callees z_crate         crates/settings/src/file.rs update_file proven
 row Z2.prelude "$Z" callees z_crate_prelude crates/settings/src/file.rs Ok name
+# a root naming ANOTHER package is no proof of the target package's file (`use other::shared` over the closure's `shared`); a root naming the target's own package is
+row Z3.otherroot "$Z" callees z_other_root crates/settings/src/file.rs shared name
+row Z4.ownroot   "$Z" callees z_own_root   crates/settings/src/file.rs viaown proven
 
 # ---- Python
 P=$T/py
@@ -88,6 +93,9 @@ w "$P/staruser.py" 'from a import *\ndef p_star():\n    return starred()\n'
 row Y1.import  "$P" callees p_import src/none helper none
 row Y1.bound   "$P" callees p_import a.py helper proven
 row Y2.unbound "$P" callees p_unbound a.py conv name
+row Y2.neighbour "$P" callees p_unbound far.py conv none
+row Y2.local   "$P" callees p_local   a.py conv none
+row Y2.param   "$P" callees p_param   a.py conv none
 row Y3.alias   "$P" callees p_alias a.py conv proven
 row Y4.star    "$P" callees p_star a.py starred proven
 row M.python   "$P" callees p_member a.py A.getvalue name

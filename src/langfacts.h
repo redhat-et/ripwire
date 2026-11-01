@@ -84,9 +84,10 @@ enum class FileEdges : std::uint8_t
     NotApplicable,
 };
 
-/// What shared code asks about a language. Every optional column is false for a language that says nothing.
+/// What proves a call Rule 3 narrowed (LangFacts::rule3NameProof): nothing (Rule 3 decides), a Rust `use` or module qualifier, a Python import binding.
 enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
 
+/// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
     Must<Lang> lang;   // the row's own key — the order check below proves row i is Lang(i)
@@ -305,7 +306,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir, .signatureRows = true },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .rule3NameProof = Rule3NameProof::RustUse, .baseImportEvidence = BaseImportEvidence::RustUse,
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
