@@ -16,10 +16,12 @@
 #   (B) a long fixture (fast-import) under RIPWIRE_GIT_WALK_COMMITS: --for carries history_unread and the count; a warm second run still
 #       does (the cut is cached); --cochange carries history_cut on stdout and stderr; --json stays parseable, the cut on stderr only;
 #       a budget above the history is silent, and byte-identical to no budget at all.
-#   (T) a git shim that prints the first commits of the real walk and then goes silent for an hour: --for, --cochange exit inside the
+#   (T) a git shim that prints the first commits of the real walk and then goes silent for longer than the budget: --for, --cochange exit inside the
 #       time budget's reach, disclosed; a shim silent from the first byte ends the same way.
 #   (R) red, only when RIPWIRE_BASE_BIN names a pre-fix binary: (P) fetches and (T) outlives its timeout.
 set -u
+ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
+. "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-build/ripwire}}"
 case "$BIN" in /*) ;; *) BIN="$PWD/$BIN" ;; esac
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/rw-histwalk.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
@@ -142,11 +144,11 @@ check "(B6) a malformed budget keeps the default" 'cmp -s "$TMP/badenv" "$TMP/no
 SHIMT="$TMP/shim-stall"; mkdir -p "$SHIMT"
 cat > "$SHIMT/git" <<SH
 #!/bin/sh
-# Only the record walk stalls: it prints what real git prints for the first commits, then says nothing for an hour.
+# Only the record walk stalls: it prints what real git prints for the first commits, then says nothing for far longer than the budget.
 case " \$* " in
   *" --name-only "*" -z "*|*" -z --name-only "*)
-    if [ -n "\${STALL_AT_START:-}" ]; then exec sleep 3600; fi
-    "$REALGIT" "\$@" -n 5 2>/dev/null | cat; exec sleep 3600 ;;
+    if [ -n "\${STALL_AT_START:-}" ]; then exec sleep 45; fi
+    "$REALGIT" "\$@" -n 5 2>/dev/null | cat; exec sleep 45 ;;
 esac
 exec "$REALGIT" "\$@"
 SH

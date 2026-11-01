@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <system_error>
 #include <thread>
 #include <cstring>
 #include <array>        // popenTrimmed's 64 KB read block
@@ -929,7 +930,15 @@ inline void finishGitLogWalk( std::FILE* pipe, GitLogWalk& walk, GitWalkCutDiscl
     {
         // The pipe closes now and git dies at its next write, but a git that is not writing would hold pclose's wait for as long
         // as it stays silent, which is what the deadline exists to end. So the wait goes to a thread of its own.
-        std::thread( [ pipe ]() { os::pclose( pipe ); } ).detach();
+        try
+        {
+            std::thread( [ pipe ]() noexcept { os::pclose( pipe ); } ).detach();
+        }
+        catch( const std::system_error& )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the walk's answer is whole; only one pipe stays open until the process ends",
+                      "gitmine: no thread for a cut walk's pclose — the pipe is left to the process's exit" );
+        }
         if( cutSink == GitWalkCutDisclosure::ProcessTail )
         {
             gitWalkCutsToDisclose().walks.fetch_add( 1, std::memory_order_relaxed );
