@@ -1256,8 +1256,14 @@ inline std::optional<std::string> readText( const std::string& path )
 
 inline bool holdsAny( std::string_view text, std::span<const std::string_view> needles ) noexcept
 {
-    return std::ranges::any_of( needles, [&]( std::string_view n )
-                                { return text.find( n ) != std::string_view::npos; } );
+    for( const std::string_view n : needles )
+    {
+        if( text.contains( n ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 // A package.json that publishes something: a main, module, exports, types or bin, and not `"private": true`. Its exported defs have consumers outside the tree.
