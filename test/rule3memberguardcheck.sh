@@ -39,9 +39,9 @@ print(got)' "$path" "$name" )
 R=$T/rs
 w "$R/Cargo.toml" '[package]\nname = "r"\nversion = "0.1.0"\n'
 w "$R/src/lib.rs" 'pub mod a;\npub mod far;\npub mod user;\npub mod globuser;\npub mod nest;\n'
-w "$R/src/a.rs" 'pub fn helper() {}\npub fn globbed() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn channel() {}\npub fn swap() {}\npub fn assert(x: bool) {}\npub struct Thing;\nimpl Thing {\n    pub fn new() -> Thing { Thing }\n    pub fn lock(&self) {}\n}\npub fn new() {}\n'
-w "$R/src/far.rs" 'pub fn helper() {}\npub fn globbed() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn channel() {}\npub fn swap() {}\npub fn assert(x: bool) {}\npub struct Other;\nimpl Other {\n    pub fn new() -> Other { Other }\n    pub fn lock(&self) {}\n}\npub fn new() {}\n'
-w "$R/src/user.rs" 'use crate::a::helper;\nuse crate::a::Thing;\nuse crate::a;\nuse futures::channel::oneshot;\nuse std::mem::swap;\nuse crate::a::Thing as Alias;\nfn u_alias() { let _ = Alias::new(); }\nfn u_trait_like() { crate::far::Other::zzz(); }\nfn u_unknown() { let _ = Hidden::lock(); }\nfn u_use() { helper(); }\nfn u_prelude() -> i32 { Ok(1) }\nfn u_macro() { assert!(true); }\nfn u_type() { let _ = Thing::new(); }\nfn u_module() { a::channel(); }\nfn u_outside() { let _ = oneshot::channel(); }\nfn u_stdtype() { let _ = String::new(); }\nfn u_stduse() { swap(); }\nfn u_member(x: &std::sync::Mutex<u32>) { let _ = x.lock(); }\n'
+w "$R/src/a.rs" 'pub fn helper() {}\npub fn globbed() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn channel() {}\npub fn swap() {}\npub fn assert(x: bool) {}\npub fn json() {}\npub fn conv() {}\npub struct Thing;\nimpl Thing {\n    pub fn new() -> Thing { Thing }\n    pub fn lock(&self) {}\n}\npub fn new() {}\n'
+w "$R/src/far.rs" 'pub fn helper() {}\npub fn globbed() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn channel() {}\npub fn swap() {}\npub fn assert(x: bool) {}\npub fn json() {}\npub fn conv() {}\npub struct Other;\nimpl Other {\n    pub fn new() -> Other { Other }\n    pub fn lock(&self) {}\n}\npub fn new() {}\n'
+w "$R/src/user.rs" 'use crate::a::helper;\nuse crate::a::Thing;\nuse crate::a;\nuse futures::channel::oneshot;\nuse std::mem::swap;\nuse crate::a::Thing as Alias;\nuse serde_json::json;\nuse anyhow::Ok as AOk;\nfn u_ext_use() { let _ = json!({}); }\nfn u_closure() { let conv = || 1; let _ = conv(); }\nfn u_alias() { let _ = Alias::new(); }\nfn u_trait_like() { crate::far::Other::zzz(); }\nfn u_unknown() { let _ = Hidden::lock(); }\nfn u_use() { helper(); }\nfn u_prelude() -> i32 { Ok(1) }\nfn u_macro() { assert!(true); }\nfn u_type() { let _ = Thing::new(); }\nfn u_module() { a::channel(); }\nfn u_outside() { let _ = oneshot::channel(); }\nfn u_stdtype() { let _ = String::new(); }\nfn u_stduse() { swap(); }\nfn u_member(x: &std::sync::Mutex<u32>) { let _ = x.lock(); }\n'
 w "$R/src/globuser.rs" 'use crate::a::*;\nfn g_glob() { globbed(); }\n'
 w "$R/src/nest.rs" 'use crate::a::helper;\nuse std::mem::swap;\nmod tests {\n    use super::*;\n    fn t_super_glob() -> i32 { Ok(1) }\n    fn t_super_use() { helper(); }\n    fn t_super_out() { swap(); }\n}\n'
 row R1.use        "$R" callees u_use        src/a.rs helper  proven
@@ -54,6 +54,8 @@ row R6.outside    "$R" callees u_outside    src/a.rs channel none
 row R7.stdtype    "$R" callees u_stdtype    src/a.rs new     none
 row R8.stduse     "$R" callees u_stduse     src/a.rs swap    name
 row R5.alias      "$R" callees u_alias      src/a.rs Thing::new proven
+row R5.extuse     "$R" callees u_ext_use    src/a.rs json    name
+row R5.closure    "$R" callees u_closure    src/a.rs conv    name
 row R9.glob       "$R" callees g_glob       src/a.rs globbed proven
 row R10.superglob "$R" callees t_super_glob src/a.rs Ok      name
 row R11.superuse  "$R" callees t_super_use  src/a.rs helper  proven
@@ -65,7 +67,7 @@ row M.rust        "$R" callees u_member     src/a.rs Thing::lock name
 P=$T/py
 w "$P/a.py" 'def helper():\n    pass\ndef conv():\n    pass\ndef starred():\n    pass\nclass A:\n    def getvalue(self):\n        pass\n'
 w "$P/far.py" 'def helper():\n    pass\ndef conv():\n    pass\ndef starred():\n    pass\nclass B:\n    def getvalue(self):\n        pass\n'
-w "$P/user.py" 'import a\nfrom a import helper\ndef p_import():\n    helper()\ndef p_local():\n    conv = make()\n    return conv()\ndef p_unbound():\n    return conv()\ndef p_param(conv):\n    return conv()\ndef p_alias():\n    return a.conv()\ndef p_member(x):\n    return x.getvalue()\ndef make():\n    return None\n'
+w "$P/user.py" 'import a\nfrom a import helper\ndef p_import():\n    helper()\ndef p_local():\n    conv = make()\n    return conv()\ndef p_unbound():\n    return conv()\ndef p_param(conv):\n    return conv()\nfrom a import conv as shadowed\ndef p_shadow():\n    shadowed = make()\n    return shadowed()\ndef p_alias():\n    return a.conv()\ndef p_member(x):\n    return x.getvalue()\ndef make():\n    return None\n'
 w "$P/staruser.py" 'from a import *\ndef p_star():\n    return starred()\n'
 row Y1.import  "$P" callees p_import src/none helper none
 row Y1.bound   "$P" callees p_import a.py helper proven

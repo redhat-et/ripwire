@@ -1370,11 +1370,18 @@ struct CallResultTypes
             } );
             return aliased || holdsTarget( r.qualifier, r.startByte );
         }
-        bool proven = false;
-        forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b )
+        // a `use` of the name in file `f` whose module path is written into the target's crate: an unknown root, a duplicate crate name or an outside crate proves nothing
+        const auto usesIntoTargetCrate = [ & ]( std::uint32_t f, const Binding& b )
         {
-            proven = proven || !rustPathProvablyOutside( r.fileId, b.startByte, b.importedName );
-        } );
+            if( b.kind != LocalBindKind::TypeImport )
+            {
+                return false;
+            }
+            const std::size_t at = b.importedName.rfind( "::" );
+            return at != std::string::npos && rustModuleOf( f, b.startByte, std::string_view( b.importedName ).substr( 0, at ), crate, module, 0 ) && rust.crateOf[ tf ] == crate;
+        };
+        bool proven = false;
+        forEachRustUseAt( r.fileId, r.startByte, r.calleeName, [ & ]( const Binding& b ) { proven = proven || usesIntoTargetCrate( r.fileId, b ); } );
         if( !proven )
         {
             forEachImport( r.fileId, "*", [ & ]( const Binding& b )
@@ -1383,14 +1390,19 @@ struct CallResultTypes
                 {
                     return;
                 }
-                bool brought = holdsTarget( b.importedName, b.startByte );
-                if( !brought && rustModuleOf( r.fileId, b.startByte, b.importedName, crate, module, 0 ) )
+                proven = holdsTarget( b.importedName, b.startByte );
+                if( !proven && rustModuleOf( r.fileId, b.startByte, b.importedName, crate, module, 0 ) )
                 {
-                    // `use super::*` over a module that itself `use`s the name (a `mod tests` calling what its parent imports), unless that `use` leaves the tree
-                    rustItemAt( crate, module, r.calleeName, 0, brought );
-                    brought = brought && !rustPathProvablyOutside( r.fileId, b.startByte, b.importedName + "::" + r.calleeName );
+                    // `use super::*` over a module that itself `use`s the name (a `mod tests` calling what its parent imports)
+                    const auto files = rust.filesOf.find( rustModuleKey( crate, module ) );
+                    if( files != rust.filesOf.end() )
+                    {
+                        for( const std::uint32_t mf : files->second )
+                        {
+                            forEachImport( mf, r.calleeName, [ & ]( const Binding& used ) { proven = proven || usesIntoTargetCrate( mf, used ); } );
+                        }
+                    }
                 }
-                proven = brought;
             } );
         }
         return proven;
