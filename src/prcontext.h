@@ -222,6 +222,37 @@ inline NumstatRow numstatRowPath( std::string row )
     return NumstatRow{ resolveNumstatPath( std::move( pathCol ) ), false };
 }
 
+inline bool nameOnlyChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree, std::vector<std::string>& paths )
+{
+    // The fallback when `git diff --numstat` failed outright. On a partial clone that is numstat wanting a blob ripwire will not download (gitcmd.h NEVER DOWNLOAD),
+    // and "no changed files" would be a confident wrong answer. The tree-level list needs no blob, at the one cost of not telling
+    // a mode-only row from a content row, so such a row is listed.
+    // `diff <rev>` compares the WORKING TREE, and git reads the base blob of every modified file to check it (a blob the partial clone
+    // does not hold: it dies). So a dirty tree's list is two tree-level reads: the work already committed (<rev> against HEAD) and the
+    // uncommitted edits (HEAD against the tree, whose blobs a checkout has). `againstWorkingTree` is false for a diff of two commits.
+    const std::string listHead = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                               + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --no-renames --name-only ";
+    const GitCommandLines listed = gitCommandLines( listHead + revArgs + ( againstWorkingTree ? " HEAD" : "" ) + " -- 2>/dev/null" );
+    if( !listed.isStarted || listed.status != 0 )
+    {
+        return false;
+    }
+    paths = listed.lines;
+    if( againstWorkingTree )
+    {
+        const GitCommandLines dirty = gitCommandLines( listHead + "HEAD -- 2>/dev/null" );
+        if( !dirty.isStarted || dirty.status != 0 )
+        {
+            paths.clear();
+            return false;
+        }
+        paths.insert( paths.end(), dirty.lines.begin(), dirty.lines.end() );
+        std::sort( paths.begin(), paths.end() );
+        paths.erase( std::unique( paths.begin(), paths.end() ), paths.end() );
+    }
+    return true;
+}
+
 inline NumstatDiff numstatChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree = false )
 {
     NumstatDiff out;
@@ -256,31 +287,9 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
     const int rc = os::pclose( pipe );
     if( rc != 0 && out.paths.empty() && out.skippedModeOnly == 0 )
     {
-        // git failed outright. On a partial clone that is numstat wanting a blob ripwire will not download (gitcmd.h NEVER DOWNLOAD),
-        // and "no changed files" would be a confident wrong answer. The tree-level list needs no blob, at the one cost of not telling
-        // a mode-only row from a content row, so such a row is listed.
-        // `diff <rev>` compares the WORKING TREE, and git reads the base blob of every modified file to check it (a blob the partial clone
-        // does not hold: it dies). So a dirty tree's list is two tree-level reads: the work already committed (<rev> against HEAD) and the
-        // uncommitted edits (HEAD against the tree, whose blobs a checkout has). `againstWorkingTree` is false for a diff of two commits.
-        const std::string listHead = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                                   + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --no-renames --name-only ";
-        const GitCommandLines listed = gitCommandLines( listHead + revArgs + ( againstWorkingTree ? " HEAD" : "" ) + " -- 2>/dev/null" );
-        if( !listed.isStarted || listed.status != 0 )
+        if( !nameOnlyChangedPaths( root, revArgs, againstWorkingTree, out.paths ) )
         {
             return out;
-        }
-        out.paths = listed.lines;
-        if( againstWorkingTree )
-        {
-            const GitCommandLines dirty = gitCommandLines( listHead + "HEAD -- 2>/dev/null" );
-            if( !dirty.isStarted || dirty.status != 0 )
-            {
-                out.paths.clear();
-                return out;
-            }
-            out.paths.insert( out.paths.end(), dirty.lines.begin(), dirty.lines.end() );
-            std::sort( out.paths.begin(), out.paths.end() );
-            out.paths.erase( std::unique( out.paths.begin(), out.paths.end() ), out.paths.end() );
         }
         DISCLOSE( Diagnostics::answerUnchanged, "the changed files are listed; a mode-only change is not told from a content change",
                   "prcontext: git diff --numstat failed (a partial clone's missing blob?) — the changed paths come from --name-only" );

@@ -710,15 +710,14 @@ public:
             facts_.emplace( sha, std::move( f ) );
             ++fetched_;
         }, &stats_ );
-        std::sort( stats_.missingShas.begin(), stats_.missingShas.end() );
-        stats_.missingShas.erase( std::unique( stats_.missingShas.begin(), stats_.missingShas.end() ), stats_.missingShas.end() );
+        missing_.insert( stats_.missingShas.begin(), stats_.missingShas.end() );
     }
 
     // An object git could not read (a partial clone's blob: ripwire never downloads one, gitcmd.h NEVER DOWNLOAD). Its facts are the
     // shared empty record, which is "this side contributed no lines" - a measurement it is not, so a verdict that rests on it is Unknown.
     bool absent( const std::string& sha ) const noexcept
     {
-        return std::binary_search( stats_.missingShas.begin(), stats_.missingShas.end(), sha );
+        return missing_.contains( sha );
     }
 
     // K75: a batch that never started (the sha list could not be written under the cache dir, git did not spawn) or died
@@ -742,6 +741,7 @@ public:
 private:
     std::string                              root_;
     gtl::btree_map<std::string, BlobFacts>   facts_;
+    gtl::btree_set<std::string>              missing_;       // the shas git could not read (stats_.missingShas, deduplicated)
     std::vector<std::string>                 pending_;
     std::size_t                              fetched_ = 0;
     StreamBlobStats                          stats_;

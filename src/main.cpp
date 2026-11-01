@@ -5462,15 +5462,16 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // shared by every symbol in that file, ADDED to that symbol's direct-caller count. No git / no history
         // → coPartnersPerFile stays 0 (clean degrade to callers-only). The single popen is measured (§ gate f).
         std::vector<std::uint32_t> coPartnersPerFile( ing.files.size(), 0u );
-        if( cfg.metrics || !cfg.forTask.empty() )   // --exemplar selects by tested/fan-in/ccx and prints neither amp= nor churn=: no history, no wait
         {
+            // --exemplar selects by tested/fan-in/ccx and prints neither amp= nor churn=: it starts no walk (startHistoryWalks) and waits for none
+            // here, so `historyWalks` is empty for it and both branches below read nothing.
             // ONE popen: 18-month co-change file-sets (for amp) + — only when --for needs it — the 12-month
             // per-file churn (folded into the same walk, A4-P6). --metrics/--exemplar pass churnMonths=0 → no
             // churn work, sets byte-identical to the old gitCommitFileSets("18 months ago", 30).
             // Multi-root (§5): one popen PER root, each resolved only against its own files; the per-commit
             // sets concatenate (commits are disjoint across repos) and churn accumulates per file.
-            ASSUME( historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
-                    "this block runs under startHistoryWalks' condition (--help-task has already answered), so every root's walk was started" );
+            ASSUME( historyWalks.empty() || historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
+                    "startHistoryWalks starts every root's walk or none (--help-task has already answered; --exemplar starts none)" );
             // K51: a walk git could not finish arrives flagged (it is never cached either); the document says so (historyread.h).
             HistoryReadReport& historyReport = historyRead();
             const auto         joinWalk      = [ & ]( std::size_t r )
@@ -5498,7 +5499,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             if( multiRoot )
             {
                 std::vector<std::uint32_t> rootChurn;
-                for( std::uint32_t r = 0; r < ws.size(); ++r )
+                for( std::uint32_t r = 0; r < historyWalks.size(); ++r )
                 {
                     // Y2: the memoized form — skips the 431 ms `git log --name-only` walk on a
                     // warm (repo, HEAD sha, window, boundary-sha) hit; see quality.h's qchurn family.
@@ -5523,7 +5524,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                     }
                 }
             }
-            else
+            else if( !historyWalks.empty() )
             {
                 // Y2: memoized — see the multi-root branch above.
                 commits = quality::resolveHistoryWalk( joinWalk( 0 ), ing,

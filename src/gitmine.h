@@ -2,6 +2,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
+#include <format>            // gitWalkCutSentence
 
 
 // gitmine.h — git-history mining shared by the CLI (main.cpp) and the MCP server (mcp.h): shell-quoting,
@@ -853,9 +854,9 @@ inline std::string gitWalkCutSentence( std::uint32_t walks, std::uint64_t commit
     {
         return {};
     }
-    return "history_cut=" + std::to_string( walks ) + ": that many git history walks hit their budget and read only the newest commits ("
-         + std::to_string( commits ) + " read in all), so co-change, owner and churn numbers from history in this answer are floors, and the prefix a time "
-           "cut reaches moves with machine load, so two runs can differ. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget.";
+    return std::format( "history_cut={}: that many git history walks hit their budget and read only the newest commits ({} read in all), so co-change, "
+                        "owner and churn numbers from history in this answer are floors, and the prefix a time cut reaches moves with machine load, so two "
+                        "runs can differ. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget.", walks, commits );
 }
 
 // A refusal that would say "git unavailable / no history" when the history walk was ended by its budget before it read one commit
