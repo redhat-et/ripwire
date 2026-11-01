@@ -126,10 +126,13 @@ sys.exit(0 if ca==cb else 1)
 X
 # ── near misses: each byte-identical in route to a run with no reading ──
 FL="$TMP/flood"; mkdir -p "$FL/a"
-for i in 1 2 3 4 5; do printf 'def flood_name(x):\n    return x\n\ndef parameter%s(x):\n    return flood_name(x)\n' "$i" > "$FL/a/m$i.py"; done
-A="$( ask "$FL" 'flood_name new parameter' )"
-hasnt "$A" 'dropped:' "N1 flood: a namesake flood gets no reading"
-hasnt "$A" 'by="subject"' "N1 flood: no callers lifted"
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do printf 'def flood_name(x):\n    return x\n' > "$FL/a/m$i.py"; done
+for i in 1 2 3 4 5; do printf 'def family_name(x):\n    return x\n' > "$FL/a/f$i.py"; done
+printf 'def new(x):\n    return x\n' > "$FL/a/words.py"
+A="$( ask "$FL" 'flood_name new' )"
+hasnt "$( route "$A" )" 'dropped:' "N1 flood: 14 namesakes prove nothing, no reading"
+A="$( ask "$FL" 'family_name new' )"
+has "$( route "$A" )" 'dropped: new(1-defs)' "N1 family: one definition per backend is still a name"
 A="$( ask "$PY" 'helper_only_tests new parameter' )"
 has "$( route "$A" )" 'dropped:' "N2 test-only: a word anchor still goes"
 A="$( ask "$PY" 'helper_only_tests zznope sturdy' )"
@@ -145,6 +148,8 @@ A="$( ask "$PY" 'new parameter' )"; hasnt "$( route "$A" )" 'dropped:' "N6 plain
 A="$( ask "$PY" 'prepare_setup_platform and the other long descriptive prose words around' )"
 hasnt "$A" 'by="subject"' "N7 prose past the plain-word bound: no reading"
 A="$( ask "$PY" 'prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N8 bare symbol: nothing to drop"
+printf 'def lonely_function(x):\n    return x\n' > "$PY/app/lonely.py"
+A="$( ask "$PY" 'lonely_function zznope sturdy' )"; hasnt "$A" 'by="subject"' "N9 no callers: no element, never a bare total=0"
 # two exact symbols: both anchor, neither word survives
 A="$( ask "$PY" 'first_caller second_caller new' )"; R="$( route "$A" )"
 has "$R" 'first_caller(' "T two exact: first anchored"; has "$R" 'second_caller(' "T two exact: second anchored"; has "$R" 'dropped: new(1-defs)' "T two exact: word dropped"
