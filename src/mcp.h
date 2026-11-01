@@ -37,6 +37,7 @@
 #include "infra/os.h"      // rw::os::getcwd — R2a: the launch-cwd assumed root (resolved once at startup)
 #include "rootguard.h"      // #350 layer 1: noProjectRootReason — the launch cwd a server may not assume
 #include "memguard.h"       // #350 layer 3: the per-call hard-limit refusal and the _memory_stop sentence
+#include "gitmine.h"       // gitWalkCutMark/gitWalkCutSentence — the `_history_cut` envelope note (a history walk this request cut)
 
 namespace rw
 {
@@ -1674,6 +1675,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // record their memory-guard stops here; a count that grew during this request means the answer may rest on
             // a partial ingest even when the resident index is whole, and the envelope says so (textResult).
             const std::uint32_t stopsAtEntry = memguard::stopCounts().recorded.load( std::memory_order_relaxed );
+            const GitWalkCutMark cutsAtEntry = gitWalkCutMark();   // M1: a history walk this request cut is said in its envelope (`_history_cut`)
             ownIngestCutNote().clear();   // notfound-on-cut: this request's own-ingest note starts empty (mcpindex.h)
             const auto textResult = [ & ]( const std::string& text )
             {
@@ -1685,6 +1687,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     memoryStopNote = "the memory guard stopped an ingest this answer depends on (inside this tool, or the "
                                      "background snapshot), so it may be incomplete — " + std::string( memguard::kOverride );
                 }
+                const GitWalkCutMark cutsNow  = gitWalkCutMark();
+                const std::string    cutNote  = gitWalkCutSentence( cutsNow.walks - cutsAtEntry.walks, cutsNow.commits - cutsAtEntry.commits );
                 // R2a: `_assumed_root` — a third envelope sibling (mcpEnvelopeNoteField), emitted ONLY when
                 // the request omitted `path` and the launch-cwd default answered.
                 // Card A3: `_fresh` — a fourth sibling, on EVERY response, because it is the one of these
@@ -1725,7 +1729,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
-                     + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote ) + "}}";
+                     + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too
@@ -2495,7 +2500,9 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             return errResult( -32603, "internal error: the owners answer buffer lost bytes — no answer served" );
                         }
                         const std::string& t = *answer;
-                        return t.empty() ? errResultMsg( -32602, symbol.empty()
+                        const std::string cut = rw::gitWalkCutRefusalCause();   // F2: a walk the budget ended is not "no history"
+                        return t.empty() ? errResultMsg( -32602, !cut.empty() ? "owners is mined from git: " + cut
+                                                : symbol.empty()
                                                 ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
                                                 : notFoundSym( symbol ) )
                                          : textResult( t );

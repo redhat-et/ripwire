@@ -81,6 +81,14 @@
 namespace rw
 {
 
+// The words of the refusal for a diff git could not read. The likeliest cause is a partial clone: the diff needs a blob the clone does
+// not hold, and ripwire never downloads one (gitcmd.h NEVER DOWNLOAD). The user's own `git fetch` or `git diff` does, and then this runs.
+inline std::string prContextDiffFailedCause( const std::string& root )
+{
+    return "could not read the diff in " + root + " (git failed: on a partial clone, --filter=blob:none, the diff needs a blob this clone does not hold and "
+           "ripwire does not download one) - refusing rather than print files=\"0\". Run `git diff --stat` in that repository yourself to fetch what it needs, then rerun";
+}
+
 // result of a --numstat-based diff mask build: the mask itself, whether git ran cleanly, and how many
 // entries were dropped for being content-identical (mode-only flips, e.g. chmod 644→755) — see
 // PrContextMask::skippedModeOnly below. A3-F10.
@@ -107,6 +115,8 @@ struct PrContextMask
                                              // (the class --abi names head-moved: the other line moved, not us).
 
     // ── refusal (P0.1 security + P2.8 honesty) ───────────────────────────────────────────────────────────
+    bool              diffFailed = false;    // git has history and the ref resolved, but no diff could be read (a partial clone's blob
+                                             // ripwire will not download, with no tree-level answer either): REFUSE, never print files="0"
     bool              badRef = false;        // a BASEREF was given, the root HAS git history, and the ref does not
                                              // resolve to a commit. `ok` is false, but this is NOT the non-git
                                              // degrade: the caller must REFUSE with exit 1 and name the ref (the
@@ -212,7 +222,71 @@ inline NumstatRow numstatRowPath( std::string row )
     return NumstatRow{ resolveNumstatPath( std::move( pathCol ) ), false };
 }
 
-inline NumstatDiff numstatChangedPaths( const std::string& root, const std::string& revArgs )
+inline bool nameOnlyChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree, std::vector<std::string>& paths )
+{
+    // The fallback when `git diff --numstat` failed outright. On a partial clone that is numstat wanting a blob ripwire will not download (gitcmd.h NEVER DOWNLOAD),
+    // and "no changed files" would be a confident wrong answer. The tree-level list needs no blob, at the one cost of not telling
+    // a mode-only row from a content row, so such a row is listed.
+    // `diff <rev>` compares the WORKING TREE, and git reads the base blob of every modified file to check it (a blob the partial clone
+    // does not hold: it dies). So a dirty tree's list is two tree-level reads: the work already committed (<rev> against HEAD) and the
+    // uncommitted edits (HEAD against the tree, whose blobs a checkout has). `againstWorkingTree` is false for a diff of two commits.
+    const std::string listHead = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+                               + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --no-renames --name-only ";
+    const GitCommandLines listed = gitCommandLines( listHead + revArgs + ( againstWorkingTree ? " HEAD" : "" ) + " -- 2>/dev/null" );
+    if( !listed.isStarted || listed.status != 0 )
+    {
+        return false;
+    }
+    paths = listed.lines;
+    if( againstWorkingTree )
+    {
+        const GitCommandLines dirty = gitCommandLines( listHead + "HEAD -- 2>/dev/null" );
+        if( !dirty.isStarted || dirty.status != 0 )
+        {
+            paths.clear();
+            return false;
+        }
+        paths.insert( paths.end(), dirty.lines.begin(), dirty.lines.end() );
+        std::sort( paths.begin(), paths.end() );
+        paths.erase( std::unique( paths.begin(), paths.end() ), paths.end() );
+    }
+    return true;
+}
+
+enum class NumstatRead : std::uint8_t { NotStarted, Read, Failed };
+
+// `git diff --numstat` under the walk budget: its rows into out.paths/skippedModeOnly. Failed = the caller falls back to the tree-level list
+// (git exited non-zero with no row, or the budget ended it, in which case no row is kept: a prefix of the rows is not a list).
+inline NumstatRead readNumstatRows( const std::string& cmd, NumstatDiff& out )
+{
+    const GitTimedLines run = gitCommandLinesBy( cmd, gitWalkDeadline() );
+    if( !run.isStarted )
+    {
+        return NumstatRead::NotStarted;
+    }
+    if( run.timedOut )
+    {
+        rw::emitTo( stderr, "ripwire: git diff --numstat did not finish within the {} s git budget (RIPWIRE_GIT_WALK_SECONDS); the changed files are listed from "
+                            "--name-only instead\n", gitWalkMaxSeconds() );
+        return NumstatRead::Failed;
+    }
+    for( const std::string& row : run.lines )
+    {
+        auto [ path, isModeOnly ] = numstatRowPath( row );
+        if( isModeOnly )
+        {
+            ++out.skippedModeOnly;
+        }
+        else if( !path.empty() )
+        {
+            out.paths.push_back( std::move( path ) );
+        }
+    }
+    const bool noRows = out.paths.empty() && out.skippedModeOnly == 0;
+    return run.status != 0 && noRows ? NumstatRead::Failed : NumstatRead::Read;
+}
+
+inline NumstatDiff numstatChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree = false )
 {
     NumstatDiff out;
 
@@ -223,31 +297,35 @@ inline NumstatDiff numstatChangedPaths( const std::string& root, const std::stri
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --numstat "
                           + revArgs + " -- 2>/dev/null";
 
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe )
+    // F1 (HISTORY-WALK-HANG): `diff --numstat` reads the blobs of both sides, and on a partial clone git parses every object of the
+    // promisor pack before it fails on the first absent one (ClickHouse, 5.2 M objects: past 8 minutes). So it is not started there;
+    // the tree-level list is the answer, said once on stderr. A clone that is not partial runs it under the walk budget instead, for a
+    // git that stalls: a read that outlives the budget is dropped whole (a prefix of the rows is not a list) and the tree-level list stands in.
+    const bool partial = gitIsPartialClone( root );
+    if( !partial )
+    {
+        switch( readNumstatRows( cmd, out ) )
+        {
+            case NumstatRead::NotStarted: return out;
+            case NumstatRead::Read: out.ok = true; return out;
+            case NumstatRead::Failed: break;
+        }
+    }
+    if( !nameOnlyChangedPaths( root, revArgs, againstWorkingTree, out.paths ) )
     {
         return out;
     }
-
-    char line[ 4096 ];
-    while( std::fgets( line, sizeof( line ), pipe ) )
+    if( partial )
     {
-        auto [ path, isModeOnly ] = numstatRowPath( std::string( line ) );
-
-        if( isModeOnly )
+        static std::atomic<bool> told{ false };
+        if( !told.exchange( true ) )
         {
-            ++out.skippedModeOnly;
-        }
-        else if( !path.empty() )
-        {
-            out.paths.push_back( std::move( path ) );
+            rw::emitTo( stderr, "ripwire: this is a partial clone (blobs are fetched on demand and ripwire never downloads them), so the changed files are "
+                                "listed from git diff --name-only: a mode-only change is not told from a content change\n" );
         }
     }
-    const int rc = os::pclose( pipe );
-    if( rc != 0 && out.paths.empty() && out.skippedModeOnly == 0 )
-    {
-        return out; // git failed outright
-    }
+    DISCLOSE( Diagnostics::answerUnchanged, "the changed files are listed; a mode-only change is not told from a content change",
+              "prcontext: the changed paths come from --name-only (a partial clone, or git diff --numstat failed or stalled)" );
     out.ok = true;
     return out;
 }
@@ -382,9 +460,12 @@ inline PrContextMask gitDiffChangedMaskNumstat( const std::string& root, const I
         return result;
     }
 
-    const NumstatDiff mine = numstatChangedPaths( root, anchor.revArgs );
+    const NumstatDiff mine = numstatChangedPaths( root, anchor.revArgs, true );
     if( !mine.ok )
     {
+        // The callers refuse and name the cause: a list that could not be read is not an empty list. Only for a root that HAS a HEAD - a
+        // directory that is no repository (or has no commit yet) keeps the exit-0 degrade, whose message is true of it.
+        result.diffFailed = !quality::gitOneLine( root, "rev-parse --verify --quiet HEAD 2>/dev/null" ).empty();
         return result;
     }
 

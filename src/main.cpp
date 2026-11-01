@@ -417,7 +417,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // URL string that starts with `-` from ever being parsed as a `git clone` OPTION even if isGitUrl's
     // own leading-dash guard were ever bypassed or loosened — belt-and-suspenders, not the only gate.
     fs::remove_all( fs::path( cacheDir ), ec );
-    const std::string cmd = rw::gitCmd( " -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
+    const std::string cmd = rw::gitCmdForClone( " -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
                                          "clone --depth=1 -q -- " ) + rw::shSingleQuote( urlOrPath )
                           + " " + rw::shSingleQuote( cacheDir ) + " 2>&1";
     rw::emitTo( stderr, "ripwire: cloning {} → {}\n", urlOrPath.c_str(), cacheDir.c_str() );
@@ -3867,22 +3867,28 @@ static std::string_view scipIndexUnreadableReason( const std::string& scipPath )
     return {};
 }
 
-// --for / --metrics / --exemplar mine 18 months of history after the graph build (the amp=/churn= block in
+// --for / --metrics mine 18 months of history after the graph build (the amp=/churn= block in
 // dispatchMain). That walk is `git` subprocesses plus a blob read and touches nothing the ingest produces, so it
 // starts BEFORE the ingest, one thread per root, and runs beside it; the amp=/churn= block only resolves each walk's
 // paths against `ing`. Empty when no such verb runs — and for --help-task, the one verb that answers between the
 // two, because a run that stops before the block still waits for its walks (a std::async future joins).
+//
+// THE WAIT, and why it stays. These two verbs are the walk's only readers, and each prints what it feeds into every row: amp= on
+// both, churn= on --for. (--exemplar used to start it and printed neither; it selects by tested, fan-in and complexity.)
+// Answering without it would lose both, on a timing that varies per run, where the wait is instead bounded: the walk's own budget ends it (gitmine.h THE BUDGET, 20 s from the walk's start, even against a git that went silent),
+// the budget's clock runs beside the ingest, and a cut is cached, so only the first call after HEAD moves pays it. Every other
+// verb runs no walk here; those that mine history do it themselves, on the same budget.
 static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( const rw::Config& cfg, bool multiRoot,
                                                                          const std::vector<rw::WorkspaceRoot>& ws, const std::string& root )
 {
     std::vector<std::future<rw::quality::HistoryWalk>> walks;
-    if( ( !cfg.metrics && cfg.forTask.empty() && cfg.exemplar.empty() ) || !cfg.helpTask.empty() )
+    if( ( !cfg.metrics && cfg.forTask.empty() ) || !cfg.helpTask.empty() )
     {
         return walks;
     }
     for( std::size_t r = 0; r < ( multiRoot ? ws.size() : 1u ); ++r )
     {
-        walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root ]() { return rw::quality::gitHistoryWalk( rootArg ); } ) );
+        walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root, noCache = cfg.noCache ]() { return rw::quality::gitHistoryWalk( rootArg, noCache ); } ) );
     }
     return walks;
 }
@@ -4108,6 +4114,29 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     return 1;
 }
 
+// A history walk that has no history_unread of its own (--cochange, --owners, --hotspots, --situ, …) and hit its budget: said
+// once, after the answer, in the answer's stream when that stream can hold a comment, and always on stderr (gitmine.h THE BUDGET).
+static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
+{
+    const rw::GitWalkCutReport& cuts = rw::gitWalkCutsToDisclose();
+    const std::uint32_t walks = cuts.walks.load( std::memory_order_relaxed );
+    if( walks == 0 )
+    {
+        return;
+    }
+    const std::uint64_t commits = cuts.commitsRead.load( std::memory_order_relaxed );
+    DISCLOSE( Diagnostics::answerUnchanged, "the walk's numbers are floors and the answer says so",
+              "main: a git history walk hit its budget — its counts cover only the newest commits" );
+    const std::string sentence = rw::gitWalkCutSentence( walks, commits );
+    // The servers' stdout is the protocol, so a comment there is a line no client can parse: they carry the sentence per request in the
+    // envelope (`_history_cut`, mcp.h) and here only on stderr.
+    if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
+    {
+        rw::emitTo( stdout, "<!--{}-->\n", sentence.c_str() );
+    }
+    rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
+}
+
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 {
     EXPECTS( !cfg.legendDefaulted || cfg.legend == rw::kDefaultLegendPosture, "a defaulted posture is the registered default" );
@@ -4232,6 +4261,7 @@ int main( int argc, char** argv )
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
     const int rc = runWithCompactLegend( cfg, argv );
+    discloseGitWalkCuts( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
     // The servers answer for their own stops per request (the MCP envelope's _memory_stop), so they are exempt.
     // Whatever exit code the verb chose becomes 5: a verdict (0, a gate's 2, a budget's 3, an obligation's 4) computed
@@ -5433,19 +5463,27 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // → coPartnersPerFile stays 0 (clean degrade to callers-only). The single popen is measured (§ gate f).
         std::vector<std::uint32_t> coPartnersPerFile( ing.files.size(), 0u );
         {
+            // --exemplar selects by tested/fan-in/ccx and prints neither amp= nor churn=: it starts no walk (startHistoryWalks) and waits for none
+            // here, so `historyWalks` is empty for it and both branches below read nothing.
             // ONE popen: 18-month co-change file-sets (for amp) + — only when --for needs it — the 12-month
             // per-file churn (folded into the same walk, A4-P6). --metrics/--exemplar pass churnMonths=0 → no
             // churn work, sets byte-identical to the old gitCommitFileSets("18 months ago", 30).
             // Multi-root (§5): one popen PER root, each resolved only against its own files; the per-commit
             // sets concatenate (commits are disjoint across repos) and churn accumulates per file.
-            ASSUME( historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
-                    "this block runs under startHistoryWalks' condition (--help-task has already answered), so every root's walk was started" );
+            ASSUME( historyWalks.empty() || historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
+                    "startHistoryWalks starts every root's walk or none (--help-task has already answered; --exemplar starts none)" );
             // K51: a walk git could not finish arrives flagged (it is never cached either); the document says so (historyread.h).
             HistoryReadReport& historyReport = historyRead();
             const auto         joinWalk      = [ & ]( std::size_t r )
             {
                 quality::HistoryWalk walk = historyWalks[ r ].get();
-                if( walk.raw.unread && walk.raw.notRun )
+                if( walk.raw.cut != GitWalkCut::None )
+                {
+                    historyReport.cutCommits += walk.raw.commits.size();
+                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkCut,
+                              "main: the git history walk hit its budget — churn= and amp= count only the newest commits (floors), and the document says so" );
+                }
+                else if( walk.raw.unread && walk.raw.notRun )
                 {
                     DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkNotRun,
                               "main: git did not run for the history walk — churn= is absent and amp= counts callers only, and the document says so" );
@@ -5461,7 +5499,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             if( multiRoot )
             {
                 std::vector<std::uint32_t> rootChurn;
-                for( std::uint32_t r = 0; r < ws.size(); ++r )
+                for( std::uint32_t r = 0; r < historyWalks.size(); ++r )
                 {
                     // Y2: the memoized form — skips the 431 ms `git log --name-only` walk on a
                     // warm (repo, HEAD sha, window, boundary-sha) hit; see quality.h's qchurn family.
@@ -5486,7 +5524,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                     }
                 }
             }
-            else
+            else if( !historyWalks.empty() )
             {
                 // Y2: memoized — see the multi-root branch above.
                 commits = quality::resolveHistoryWalk( joinWalk( 0 ), ing,

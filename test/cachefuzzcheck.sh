@@ -1255,7 +1255,7 @@ def fnv1a64(data):
     for c in data:
         h = ((h ^ c) * 1099511628211) & ((1 << 64) - 1)
     return h
-QCHURN_COUNT_OFF = 16   # magic(4) + scheme(4) + fnv(key)(8): the key check must pass for the count to be read at all
+QCHURN_COUNT_OFF = 20   # magic(4) + scheme(4) + fnv(key)(8) + the budget cut(4): the key check must pass for the count to be read at all
 # Verify the layout on the good blob before aiming a row at it: walking commits and paths from QCHURN_COUNT_OFF must
 # land exactly on the trailer. A header that grew a field would make that walk miss, and the rows would then be
 # refused by an earlier guard while passing — so a miss fails the arm instead.

@@ -2924,7 +2924,7 @@ inline constexpr char kHelpTail[] =
         "    -v, --version              print the version + short build info, exit 0\n\n"
         "every line above is a summary. --help=--FLAG prints that flag's full text — the caveats, the units, what it\n"
         "refuses and why. --help=SECTION does one family; --help=all is the whole catalog (~46K tokens).\n"
-        "determinism: output is byte-identical run-to-run  (t=$(mktemp -d); ripwire <dir> >\"$t/a\"; ripwire <dir> >\"$t/b\"; diff -q \"$t/a\" \"$t/b\")\n";
+        "determinism: output is byte-identical run-to-run, except a disclosed history cut (a git history walk that hit its time budget keeps a prefix that moves with machine load)  (t=$(mktemp -d); ripwire <dir> >\"$t/a\"; ripwire <dir> >\"$t/b\"; diff -q \"$t/a\" \"$t/b\")\n";
 
 // ── the two tiers ───────────────────────────────────────────────────────────────────────────────────
 // The catalog above is ONE text and stays one text — nothing here deletes a line of it. What changed is

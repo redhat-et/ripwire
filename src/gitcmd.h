@@ -43,6 +43,25 @@
 // Strings that merely SHOW a git command to the user (a `next=` hint, a printed shell snippet) are not
 // invocations and keep their plain spelling.
 //
+// NEVER DOWNLOAD. On a partial clone (a promisor remote, `--filter=blob:none`), any git read of a missing object fetches
+// it from the network, one batch at a time, without asking: a read-only `git log` grew a ClickHouse .git from 15 to 33 GB.
+// Every git command gitCmd() builds starts with two environment assignments (kGitNoDownloadEnv), so the policy reaches that
+// git and every git it starts, and NOTHING ELSE: it is not set in ripwire's own environment, so the command a user hands
+// --run-trace, a markitdown child and every other non-git child see the environment the user gave ripwire (an earlier
+// draft set it process-wide, and a test command that clones, a cargo git dependency or a `go get` failed under it). Two layers,
+// because the common distro gits predate the first:
+//   GIT_NO_LAZY_FETCH=1             git 2.45 and later: git does not try. (An option, `git --no-lazy-fetch`, arrived in
+//                                   2.45 too, and an older git REFUSES it with exit 129, so it cannot ride in this prefix.)
+//   GIT_ALLOW_PROTOCOL=<no such>    git 2.6.1 and later: the fetch child git starts is refused at the transport, so the
+//                                   download fails even when git tries. Beats any protocol.* config. Ignored by 2.6.0-.
+// (Versions checked against git's source at the tags: environment.h has GIT_NO_LAZY_FETCH from v2.45.0, git.c has
+// --no-lazy-fetch from v2.45.0, transport.c reads GIT_ALLOW_PROTOCOL from v2.6.1. Only git 2.50.1 has RUN here; an older
+// git is simulated by a shim that drops the first variable, test/historywalkcheck.sh arm O.)
+// A read that needs a missing object then FAILS, exactly as a corrupt object does, and takes that verb's existing
+// git-failed path. The one command of ours that means to use the network, resolveRemoteRoot's `clone`, is built by
+// gitCmdForClone(): no download policy at all, so the user's own GIT_ALLOW_PROTOCOL (set, empty or unset) and their
+// protocol.*.allow config decide, exactly as for their own `git clone`. test/historywalkcheck.sh.
+//
 // Gated by test/githardencheck.sh: behavioural arms run the git-backed verbs through several root shapes and
 // the MCP and --plan-lint entry points and assert a hook-form core.fsmonitor stays unfired; a PATH shim arm
 // asserts every git child carries the prefix; a structural arm refuses an executed git command spelled
@@ -51,6 +70,7 @@
 #include "infra/shquote.h"   // rw::shSingleQuote — a driver name is the repository's text, quoted for the shell
 
 #include <algorithm>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -64,6 +84,9 @@ inline constexpr std::string_view kGitCmdPrefix = "git --no-optional-locks -c co
 // An option no git version accepts: git exits 129 before it reads a config file or a working tree. Carried by
 // every child once a repository names a filter driver the -c pins cannot spell (see FILTER DRIVERS above).
 inline constexpr std::string_view kGitRefusedOption = "--ripwire-refused-unpinnable-filter-driver";
+
+// A protocol name no transport has: an allow-list of only this allows nothing.
+inline constexpr std::string_view kGitNoDownloadEnv = "GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=ripwire-no-network ";
 
 namespace gitcmddetail
 {
@@ -131,16 +154,33 @@ inline DriverPinResult pinGitFilterDrivers( const std::vector<std::string>& name
 
 // `rest` is everything after the program name and the policy options, starting with its own leading space
 // (" -c core.quotepath=false -C "), exactly as the call site spelled it after "git" before this header existed.
-inline std::string gitCmd( std::string_view rest )
+inline std::string gitCmdWith( bool downloadAllowed, std::string_view rest )
 {
     gitcmddetail::DriverPins&   pins = gitcmddetail::driverPins();
     const std::lock_guard<std::mutex> guard( pins.lock );
     std::string cmd;
-    cmd.reserve( kGitCmdPrefix.size() + pins.options.size() + rest.size() );
+    cmd.reserve( kGitNoDownloadEnv.size() + kGitCmdPrefix.size() + pins.options.size() + rest.size() );
+    if( !downloadAllowed )
+    {
+        cmd += kGitNoDownloadEnv;
+    }
     cmd += kGitCmdPrefix;
     cmd += pins.options;
     cmd += rest;
     return cmd;
+}
+
+// Every git read: carries the no-download environment (NEVER DOWNLOAD, above).
+inline std::string gitCmd( std::string_view rest )
+{
+    return gitCmdWith( false, rest );
+}
+
+// The one git command that means to use the network (a root the user named as a URL): the same hardening, none of the download
+// policy — the user's environment and protocol.* config decide which transports it may use.
+inline std::string gitCmdForClone( std::string_view rest )
+{
+    return gitCmdWith( true, rest );
 }
 
 }   // namespace rw

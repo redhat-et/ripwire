@@ -120,7 +120,7 @@ struct RefPairDelta
 // files (qd-memory-degrade).
 int refPairUnavailable( const std::string& sha )
 {
-    rw::emitTo( stderr, "ripwire: --quality-delta: could not materialize or parse the tree at {}\n", sha.c_str() );
+    rw::emitTo( stderr, "ripwire: --quality-delta: could not materialize or parse the tree at {} (on a partial clone, its blobs may be absent: ripwire never downloads them; to fetch them yourself, run `git archive {} >/dev/null` in that repository, then rerun)\n", sha.c_str(), sha.c_str() );
     return 1;
 }
 

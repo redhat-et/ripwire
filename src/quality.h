@@ -2091,6 +2091,15 @@ inline RenameMap gitRenameMap( const std::string& root, const std::string& span 
     const unsigned long long tot = std::strtoull( depth.c_str(), nullptr, 10 );
     rm.commitsScanned            = std::uint32_t( tot < kRenameWindowCommits ? tot : kRenameWindowCommits );
     rm.truncatedWindow           = tot > kRenameWindowCommits;
+    if( gitIsPartialClone( root ) )
+    {
+        // F1: rename detection (-M50%) reads blobs, and on a partial clone git scans the whole promisor pack before it fails (gitmine.h
+        // gitIsPartialClone). So the map is not asked for: no commit was scanned (rename_window_commits="0") and the window is said to be
+        // truncated, which is the existing way to say "older renames unseen". Git's recorded renames are not consulted; content routes remain.
+        rm.commitsScanned  = 0;
+        rm.truncatedWindow = true;
+        return rm;
+    }
 
     const auto absorb = [ & ]( const std::string& raw )
     {
@@ -4266,6 +4275,19 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
         return tree.root;
     }
 
+    // F1 (HISTORY-WALK-HANG): on a partial clone `git archive` of a tree with an absent blob parses every object of the promisor pack
+    // before it fails (ClickHouse: past 90 s; gitmine.h gitIsPartialClone). The blobs are asked about first, by a read that fetches
+    // nothing and does not scan the pack; archive is not started unless every blob of the tree is here. -1 (not told in time) refuses too.
+    if( gitIsPartialClone( root ) )
+    {
+        const long absent = gitAbsentBlobCount( root, rev );
+        if( absent != 0 )
+        {
+            DISCLOSE( tree, MaterializedTree::DisclosureWhy::ArchiveFailed, "quality: partial clone, the commit tree has blobs this clone does not hold - git archive not started" );
+            return tree.root;
+        }
+    }
+
     std::error_code ec;
     std::string tmpRoot = cacheDirLadder() + "/ripwire-" + tag + "-" + std::to_string( os::getpid() );   // not const: moved out on return
     fs::remove_all( fs::path( tmpRoot ), ec );                 // stale leftover from a crashed prior run
@@ -5085,7 +5107,10 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // COMMAND changed under an unchanged key, here the PARSE did. Neither is visible to the key, which is why
 // this bump is manual. On ordinary trees the two readers' streams are byte-identical (the lane's golden
 // arm over owners/hotspots/cochange), so the bump costs those repos one cold walk and changes no answer.
-constexpr std::uint32_t kQChurnCacheScheme = 4;
+// SCHEME 5 (2026-11-01, HISTORY-WALK-HANG): the COMMAND changed under an unchanged key again (--no-renames, gitLogRecordsCmd:
+// a rename now lists its old path too), the scheme 2 case. The blob also carries the walk's budget cut, so a cached prefix
+// still says it is one.
+constexpr std::uint32_t kQChurnCacheScheme = 5;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )
@@ -5094,6 +5119,7 @@ inline std::string serializeRawCommitStream( const RawCommitStream& raw, const s
     buf.append( kQChurnMagic, 4 );
     qsnapPut( buf, kQChurnCacheScheme );
     qsnapPut( buf, fnv1a64( keyMat ) );
+    qsnapPut( buf, std::uint32_t( raw.cut ) );
     qsnapPut( buf, std::uint32_t( raw.commits.size() ) );
     for( const RawCommitStream::Commit& c : raw.commits )
     {
@@ -5147,12 +5173,18 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
     // both counts are measured against the bytes left before either sizes a reserve (qsnapCountFits).
     constexpr std::size_t kMinCommitRecordBytes = sizeof( RawCommitStream::Commit::epoch ) + sizeof( std::uint32_t );
     constexpr std::size_t kMinPathRecordBytes   = sizeof( std::uint32_t );
+    std::uint32_t cutCode = 0;
+    if( !qsnapGet( p, end, cutCode ) || cutCode > std::uint32_t( GitWalkCut::Time ) )
+    {
+        return false;
+    }
     std::uint32_t nCommits = 0;
     if( !qsnapGet( p, end, nCommits ) || !qsnapCountFits( p, end, nCommits, kMinCommitRecordBytes ) )
     {
         return false;
     }
     RawCommitStream r;
+    r.cut = GitWalkCut( cutCode );
     r.commits.reserve( nCommits );
     for( std::uint32_t i = 0; i < nCommits; ++i )
     {
@@ -5196,7 +5228,10 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
 // degrades to an empty stream; no resolvable HEAD to the uncached walk (which itself degrades to an empty stream —
 // gitLogNameOnlyRaw's contract). Thread-safe: every memo it reaches (the HEAD anchor, the toplevel) takes its own
 // mutex, and the blob write is an atomic rename. K51: a walk git could not complete comes back with `unread` set and is never stored.
-inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince )
+// A prefix the BUDGET cut (gitmine.h THE BUDGET) is stored only when it is worth keeping: a Time cut under kMinStoredTimeCutCommits is a git
+// that stalled, not a slow repo, and `noCache` (--no-cache) neither reads nor writes any cut, so the flag that asks for a fresh answer gets one.
+inline constexpr std::size_t kMinStoredTimeCutCommits = 1024;
+inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince, bool noCache = false )
 {
     if( !hasEnclosingGitRepo( root ) )
     {
@@ -5227,14 +5262,18 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     keyMat.push_back( '\x1f' ); keyMat += coSince;
     keyMat.push_back( '\x1f' ); keyMat += boundary;
     keyMat += "qchurn" + std::to_string( kQChurnCacheScheme );
+    // The budget is in the key: a prefix cut under one budget must not answer a run that raised it.
+    keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxCommits() );
+    keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxSeconds() );
     const std::string cachePath = shaKeyedCachePath( "qchurn", repoHex, std::string{}, keyMat );
 
     RawCommitStream                  raw;
     const std::optional<std::string> blob = readQSnapBlob( cachePath );
-    if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) )
+    if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) && !( noCache && raw.cut != GitWalkCut::None ) )
     {
         return raw;                                                                // warm hit — no walk
     }
+    raw = RawCommitStream{};   // a stored cut that --no-cache refused to read is walked again
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
     if( raw.unread || gitWalksAbandoned() )
@@ -5245,6 +5284,14 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
         // An abandoned read (a memory-guard refusal stopped the walk) is a prefix too, even when git exited 0: never cached.
         return raw;
     }
+    if( raw.cut != GitWalkCut::None
+        && ( noCache || ( raw.cut == GitWalkCut::Time && raw.commits.size() < kMinStoredTimeCutCommits ) ) )
+    {
+        return raw;   // --no-cache keeps no cut; a clock that ran out within the first ~1,000 commits is a stalled git, not a prefix worth keeping until HEAD moves
+    }
+    // A cut prefix IS stored (a Commits cut, or a Time cut of a slow repo): re-walking would cost the whole budget on every call of a repo
+    // that will only cut again, and the blob carries the cut, so the next answer still discloses it. Where the clock decided, WHICH commits
+    // it reached moves with machine load, so the answer says so (renderHistoryUnread). It is the same prefix until HEAD moves.
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                    // write just recomputes next time
     return raw;
@@ -5258,9 +5305,9 @@ struct HistoryWalk
     RawCommitStream raw;
 };
 
-inline HistoryWalk gitHistoryWalk( std::string root )
+inline HistoryWalk gitHistoryWalk( std::string root, bool noCache = false )
 {
-    RawCommitStream raw = gitRawCommitStreamCached( root, "18 months ago" );
+    RawCommitStream raw = gitRawCommitStreamCached( root, "18 months ago", noCache );
     return HistoryWalk{ std::move( root ), std::move( raw ) };
 }
 

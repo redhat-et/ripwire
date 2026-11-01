@@ -157,6 +157,7 @@ struct HistoryIndex
 {
     bool          ok         = false;   // false ⇒ no answer at all (not a git repo, git unavailable, probe failed)
     bool          nonGitRoot = false;
+    bool          partialClone = false; // a partial clone: `log -p` was not started (it would scan the whole promisor pack), probed="0" r="partial-clone"
     bool          truncated  = false;   // hit kMaxProbeCommits / kMaxProbeBytes / kMaxNamesTracked ⇒ a miss is Unknown
     // The DISCLOSE sink for the probe's degrades: no answer reads probed="0" (every name unknown), a partial one
     // truncated="1" (an unseen name unknown, never "never").
@@ -633,6 +634,15 @@ inline HistoryIndex runProbe( const std::string& root )
 {
     HistoryIndex idx;
 
+    // F1 (HISTORY-WALK-HANG): `log -p` reads blobs, and on a partial clone git parses the whole promisor pack before it fails. Not started:
+    // probed="0" r="partial-clone", every name unknown.
+    if( gitIsPartialClone( root ) )
+    {
+        idx.partialClone = true;
+        DISCLOSE( idx, HistoryIndex::DisclosureWhy::WalkNotStarted, "gitoracle: partial clone - git log -p not started, the history probe answers unknown for every name" );
+        return idx;
+    }
+
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                           + " log --no-merges --no-color --no-ext-diff --no-textconv --no-renames"
                             " --format='%x01%H %cs' -p -U0 2>/dev/null";
@@ -723,7 +733,7 @@ inline constexpr const char* kHistoryProbeLegend =
     "own no-merges log, so a name deleted only inside a merge commit is invisible and not counted either), "
     "removed-names= how many distinct names it saw deleted at least once, and truncated=\"1\" (absent = not "
     "hit) means the walk stopped at its own commit ceiling before reaching the root. probed=\"0\" r= says why "
-    "it did not run at all (not-a-git-repo or probe-failed) — none of the other attributes are then present. ";
+    "it did not run at all (not-a-git-repo, partial-clone: a blobless clone, whose patches ripwire never downloads, or probe-failed) — none of the other attributes are then present. ";
 
 // The `<history .../>` element a verb emits to state what the probe did (or why it did nothing). `escape` is
 // the caller's own escaper, so this header needs no dependency on serialize.h's buffer discipline.
@@ -733,7 +743,7 @@ inline void writeHistoryProbe( std::FILE* out, const HistoryIndex& idx, Escape e
     if( !idx.ok )
     {
         rw::emitTo( out, "<history probed=\"0\" r=\"{}\"/>",
-                      idx.nonGitRoot ? "not-a-git-repo" : "probe-failed" );
+                      idx.nonGitRoot ? "not-a-git-repo" : idx.partialClone ? "partial-clone" : "probe-failed" );
         return;
     }
     rw::emitTo( out, "<history probed=\"1\" head=\"{:.9}\" commits=\"{}\" removed-names=\"{}\"{}/>",

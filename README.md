@@ -1168,7 +1168,9 @@ all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
 
 **The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
 floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
-exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
+exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one, except where a
+git history walk hits its time budget on a slow repository: that cut is disclosed in the answer, and the
+prefix it keeps moves with machine load, so two runs can differ. That is a
 contract, gated on every pull request and every push to main, not a tendency.
 [The full discipline — and the losses published next to the wins →](#the-honesty-contract)
 
@@ -2139,9 +2141,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>743 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>744 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **743 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **744 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
@@ -2738,7 +2740,7 @@ The map is `<r>` root, `<f p="PATH">` files, `<s t n k>` symbols, `<c n>` call e
 command wraps its rows in an element named for the verb — `<callers>`, `<uses>`, `<pr-context>`,
 `<dmm>`, `<skillscan>`.
 
-Two runs over one tree produce the same bytes, and every attribute and text node is XML-escaped, so
+Two runs over one tree produce the same bytes (except a disclosed history cut, whose prefix moves with machine load), and every attribute and text node is XML-escaped, so
 `operator<` and a path containing `&` round-trip: `ripwire . | xmllint --noout -` is a gate here.
 `docs/ARCHITECTURE.md` has the schema and the streaming writer behind it.
 
@@ -2875,7 +2877,7 @@ Neither diff may report a difference.
 
 **The gate scripts** hold five contracts that a unit test cannot hold.
 
-1. Two runs over one tree are byte-identical — the determinism gate of section 8, run on every CI leg.
+1. Two runs over one tree are byte-identical — the determinism gate of section 8, run on every CI leg — except a disclosed history cut, whose prefix moves with machine load.
 2. A warm run equals a cold run — the cache-transparency gates.
 3. Every XML output is well-formed. The verification command is `xmllint --noout`.
 4. The sanitizer build uses `-fno-sanitize-recover=all`, without which a run with undefined behaviour
@@ -2899,7 +2901,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 350 compile-time caps and 7 ranking parameters.
+Another gate derives the cap inventory. The tool has 351 compile-time caps and 7 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.
