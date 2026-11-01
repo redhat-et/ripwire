@@ -41,6 +41,8 @@
 #   N2 [train 42b T-5] `x = x + 1  # note:` is no def header: the bare string after it is a row, not a docstring (twin: the same without the comment)
 #   K1-K10, M1-M5 (lane LITERAL-ANCHOR; RED on base 4e8bfde7 where [P], fixture built at runtime): a dotted key (3+ segments, or 2 with a setting/option/key/command/flag word) or
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
+#   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
+#          add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names; near misses keep the answer byte-identical
 #   N1 [train 42b T-3] an <x> excerpt line over 200 bytes is cut on a UTF-8 boundary with cut="1" (a 48.9 KB minified body); twin: none
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
@@ -500,6 +502,240 @@ printf 'export const SVC_REAL_CONST = 7;\nexport function zf() { return SVC_REAL
 Z1="$( cd "$ZF" || exit 1; "$BIN" "$ZF" --no-cache '--for=where is NO_SUCH_AAAA and NO_SUCH_AAAA and NO_SUCH_AAAA and NO_SUCH_AAAA and SVC_REAL_CONST used' </dev/null 2>/dev/null )"
 if has "$Z1" 's="SVC_REAL_CONST"' && ! has "$Z1" 'lit_capped'; then ok "Z1 [P] four repeats of one CONST word cost one candidate slot: the fifth word is tried and nothing is reported skipped"
 else no "Z1 repeated CONST words took the candidate slots: $( grep -o '<lit_capped[^>]*>' <<<"$Z1" ) $( lit <<<"$Z1" | cut -c1-160 )"; fi
+
+# ── T (lane TABLE-CONST V2; [P] RED on base b8c31789, fixture built at runtime, never under a .gitignored path): shape="table", the last try of <lit>:
+# a registration, table, compile-time or add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names. ──
+TF="$TMP/tfix"; mkdir -p "$TF/internal/lang" "$TF/internal/funcs" "$TF/crates/cmd" "$TF/src/settings" "$TF/internal/lang_test" "$TF/src/gates"
+cat > "$TF/internal/lang/functions.go" <<'GO'
+package lang
+
+func (s *Scope) Functions() map[string]Function {
+	baseFunctions := map[string]Function{
+		"abspath":  funcs.AbsPathFunc,
+		"basename": funcs.BaseNameFunc,
+		"concat":   funcs.ConcatFunc,
+	}
+	return baseFunctions
+}
+GO
+cat > "$TF/internal/funcs/path.go" <<'GO'
+package funcs
+
+// the tablecomment_word stands in this comment only
+var AbsPathFunc = Function{}
+var BaseNameFunc = Function{}
+var ConcatFunc = Function{}
+
+func helper_user() int {
+	x := unlisted_value + 1
+	return x
+}
+func unlisted_value() int { return 1 }
+GO
+cat > "$TF/crates/cmd/ctx.rs" <<'RS'
+use crate::Commands;
+use other::{
+    ImportedOnly,
+    AnotherImport,
+};
+pub fn add_context() {
+    bind_command! {
+        Each,
+        Filter,
+        Map,
+    };
+}
+pub struct Each;
+pub struct Filter;
+pub struct Map;
+pub struct ImportedOnly;
+pub struct AnotherImport;
+impl_body!(HashJoin(HashJoinNode) => HashJoinBuilder);
+pub struct HashJoinNode;
+pub struct HashJoinBuilder;
+for_all_params! {
+    { barrier_interval_ms, u32, Some(1000_u32) },
+    { checkpoint_frequency, u64, Some(1_u64) },
+}
+pub fn barrier_interval_ms() -> u32 { 1 }
+pub fn checkpoint_frequency() -> u64 { 1 }
+RS
+cat > "$TF/src/settings/Settings.cpp" <<'CC'
+#define COMMON_SETTINGS(DECLARE) \
+    DECLARE(MaxThreads, max_threads, 0, R"(
+The maximum number of threads.
+)", 0) \
+    DECLARE(MaxBlock, max_block_size, 65536, "block") \
+    DECLARE(MinBlock, min_block_size, 1, "min")
+int max_threads() { return 1; }
+int max_block_size() { return 1; }
+CC
+cat > "$TF/src/gates/kube_features.go" <<'GO'
+package gates
+
+const FeatureAlpha = "FeatureAlpha"
+const FeatureBeta = "FeatureBeta"
+
+var defaultGates = map[string]Spec{
+	FeatureAlpha: {
+		Default: true,
+	},
+	FeatureBeta: {
+		Default: false,
+	},
+}
+GO
+cat > "$TF/internal/lang_test/only_test.go" <<'GO'
+package lang_test
+
+func test_only_anchor() {}
+var _ = test_only_anchor
+GO
+cat > "$TF/internal/funcs/plain.go" <<'GO'
+package funcs
+
+func dispatch_one() { dispatch_two() }
+func dispatch_two() {}
+GO
+cat > "$TF/internal/funcs/keys.go" <<'GO'
+package funcs
+
+var _ = "svc.retry.limit"
+var _ = "other.keyed_word"
+func keyed_word() {}
+GO
+tr1(){ ( cd "$TF" || exit 1; "$BIN" "$TF" --no-cache "$@" </dev/null 2>/dev/null ); }
+trf(){ ( cd "$TF" || exit 1; RIPWIRE_NO_LITERAL_ANCHOR=1 "$BIN" "$TF" --no-cache "$@" </dev/null 2>/dev/null ); }
+lits(){ python3 -I -c 'import sys,re;s=sys.stdin.read();print("".join(re.findall(r"<lit [^>]*>.*?</lit>",s,re.S)))'; }
+
+# T1 [P] a backticked sibling with an add-a-new word (`abspath`): the table row first, tbl= the opener, lines= the members after it
+A="$( tr1 '--for=add a new function; use `abspath` as the model' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="abspath" shape="table"' && has "$L" 'p="internal/lang/functions.go" l="5"' && has "$L" 'tbl="baseFunctions := map[string]Function{"' && has "$L" 'lines="5-7"' && has "$L" 'funcs.BaseNameFunc'; then
+    ok "T1 add-a-new + backticked sibling: the table row, its opener and the members after it"
+else no "T1 table row wrong: ${L:0:500}"; fi
+if has "$A" 'ripwire for lit: shape=table'; then ok "T1b the shape's legend clause rides"; else no "T1b no table legend"; fi
+# T2 [P] a registration word + an identifier-shaped symbol word, no backticks; the Rust list row
+A="$( tr1 '--for=where is HashJoinNode registered' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="HashJoinNode" shape="table"' && has "$L" 'tbl="item"' && has "$L" 'impl_body!(HashJoin(HashJoinNode)'; then ok "T2 macro row at top level: tbl=item, no sibling needed"
+else no "T2 macro row wrong: ${L:0:400}"; fi
+# T3 [P] default on a macro-table row: ClickHouse DECLARE shape
+A="$( tr1 '--for=max_threads default' )"; L="$( lits <<<"$A" )"
+if has "$L" 'shape="table"' && has "$L" 'DECLARE(MaxThreads, max_threads' && has "$L" 'tbl="#define COMMON_SETTINGS(DECLARE) \"'; then ok "T3 default + X-macro row over a raw-string description, tbl= the #define"; else no "T3 X-macro row wrong: ${L:0:400}"; fi
+# T4 [P] default on a map table row, the entry's lines follow
+A="$( tr1 '--for=FeatureAlpha feature gate default' )"; L="$( lits <<<"$A" )"
+if has "$L" 'FeatureAlpha: {' && has "$L" 'Default: true' && has "$L" 'tbl="var defaultGates = map[string]Spec{"'; then ok "T4 default + map table row with its value"
+else no "T4 map row wrong: ${L:0:400}"; fi
+# T4b [P] a registry outside any function ranks before a table row inside one (a struct literal in a reader) and before path order
+cat > "$TF/src/gates/a_reader.go" <<'GO'
+package gates
+
+func readers() []Opts {
+	return []Opts{
+		{Alpha: 1},
+	}
+}
+func build() Opts {
+	o := Opts{
+		FeatureAlpha: true,
+		Other:        false,
+	}
+	return o
+}
+GO
+A="$( tr1 '--for=FeatureAlpha feature gate default' )"; L="$( lits <<<"$A" )"
+FIRST="$( grep -o '<ls p="[^"]*"' <<<"$L" | sed -n 1p )"
+if [ "$FIRST" = '<ls p="src/gates/kube_features.go"' ] && has "$L" 'a_reader.go'; then ok "T4b the top-level registry row first, the reader's literal after it"; else no "T4b order: $FIRST"; fi
+# T4c [P] a call chain in backticks anchors on its last link
+A="$( tr1 '--for=where does the default of `self.params.load().checkpoint_frequency()` live' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="checkpoint_frequency" shape="table"'; then ok "T4c the last link of a backticked call chain"; else no "T4c chain: ${L:0:200}"; fi
+# T5 [P] Rust brace rows in a macro table
+A="$( tr1 '--for=barrier_interval_ms default' )"; L="$( lits <<<"$A" )"
+if has "$L" '{ barrier_interval_ms, u32' && has "$L" 'tbl="for_all_params! {"'; then ok "T5 a Rust macro table row"; else no "T5 brace row wrong: ${L:0:400}"; fi
+# T6 [P] member list row beats nothing else; backticked `Each`, case kept
+A="$( tr1 '--for=add a new command like `Each`' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="Each" shape="table"' && has "$L" 'tbl="bind_command! {"'; then ok "T6 member-list row"; else no "T6 member row wrong: ${L:0:400}"; fi
+# T7 [P] exemplar: a plain word after like, an index symbol
+A="$( tr1 '--for=add a new filter like concat' )"
+if has "$( lits <<<"$A" )" 'funcs.ConcatFunc' || has "$A" 's="concat"'; then no "T7a concat is no symbol: no anchor (near miss, not in index)"; else ok "T7a a plain word that is no index symbol does not anchor"; fi
+A="$( tr1 '--for=add a new struct like Filter' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="Filter" shape="table"'; then ok "T7b a plain word after like that the index holds anchors"; else no "T7b no sibling: ${L:0:300}"; fi
+# Near misses [G]
+nomiss(){ local T="$1" W="$2"; local X; X="$( tr1 "--for=$1" )"; if ! has "$( lits <<<"$X" )" 'shape="table"' && [ "$X" = "$( trf "--for=$1" )" ]; then ok "$W"; else no "$W: $( lits <<<"$X" | cut -c1-240 )"; fi; }
+nomiss 'where is HashJoinNode used' 'T8 no cue: an identifier alone, no block, byte-identical to the switch off'
+nomiss 'register the widget' 'T9 a cue with a stop word and a plain word: no anchor'
+nomiss 'register no_such_symbol_here' 'T10 an identifier-shaped word that is no symbol: no anchor'
+nomiss 'register `no_such_site_here`' 'T11 a backticked identifier with no site: no block, no claim'
+nomiss 'register `test_only_anchor`' 'T12 a test-only site: no block (counts alone anchor nothing)'
+nomiss 'register `tablecomment_word`' 'T13 a word in a comment only: no row, no block'
+nomiss 'dispatch_one default' 'T14 default without a table row: no block'
+nomiss 'register `internal/lang/functions.go`' 'T15 a backticked path is no anchor'
+A="$( tr1 '--for=register self.keyed_word table' )"
+if ! has "$( lits <<<"$A" )" 's="self.keyed_word"'; then ok "T15b a self. chain does not anchor"; else no "T15b self. chain anchored"; fi
+# T16 [G] a dotted key beside a cue stays the dotted shape, one element, no table
+A="$( tr1 '--for=svc.retry.limit setting table keyed_word' )"; L="$( lits <<<"$A" )"
+if has "$L" 'shape="dotted"' && ! has "$L" 'shape="table"'; then ok "T16 a dotted key beside a cue stays dotted"; else no "T16 shape wrong: ${L:0:300}"; fi
+# T17 [P] an import list is no table row, but the anchor still has its site rows when the cue is a registration word
+A="$( tr1 '--for=ImportedOnly default' )"
+if ! has "$( lits <<<"$A" )" 'shape="table"'; then ok "T17 an import list row is no table row"; else no "T17 import read as a table: $( lits <<<"$A" | cut -c1-300 )"; fi
+# T18 [P] word edges: a hit inside a longer word is longer=, never a row
+printf 'var eachWord = 1\nvar _ = "Eachly"\n' > "$TF/internal/funcs/w.go"
+A="$( tr1 '--for=add a new command like `Each`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'longer=' && ! has "$L" 'Eachly'; then ok "T18 a hit inside a longer word is counted, not a row"; else no "T18 word edge: ${L:0:300}"; fi
+# T19 [G] prefix identity and determinism and well-formed on a table answer
+A="$( tr1 '--for=add a new function; use `abspath` as the model' )"; B="$( tr1 '--for=add a new function; use `abspath` as the model' )"; OFF="$( trf '--for=add a new function; use `abspath` as the model' )"
+S="$( python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit[^>]*?-->","",s,flags=re.S);s=re.sub(r"<lit [^>]*>.*?</lit>","",s,flags=re.S);print(s,end="")' <<<"$A" )"
+if [ "$S" = "$OFF" ]; then ok "T19a the answer minus the legend and <lit> is the switch-off answer"; else no "T19a prefix moved"; fi
+if [ "$A" = "$B" ]; then ok "T19b determinism"; else no "T19b two runs differ"; fi
+if command -v xmllint >/dev/null 2>&1; then if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T19c xmllint well-formed"; else no "T19c not well-formed"; fi; else ok "T19c SKIP: xmllint not installed"; fi
+# T20 [P] several anchors: one <lit> each, the legend once
+A="$( tr1 '--for=register `abspath` and `basename`' )"
+n="$( grep -o '<lit s=' <<<"$A" | wc -l | tr -d ' ' )"; m="$( grep -o 'ripwire for lit: shape=table' <<<"$A" | wc -l | tr -d ' ' )"
+if [ "$n" = "2" ] && [ "$m" = "1" ]; then ok "T20 two anchors: two elements, one legend"; else no "T20 n=$n legend=$m"; fi
+# T21 [P] at most three anchors kept: the fourth is not scanned
+A="$( tr1 '--for=register `abspath` `basename` `concat` `Each`' )"
+if [ "$( grep -o '<lit s=' <<<"$A" | wc -l | tr -d ' ' )" = "3" ] && ! has "$A" 's="Each"'; then ok "T21 the anchor cap"; else no "T21 anchor cap: $( grep -o '<lit s="[^"]*"' <<<"$A" | tr '\n' ' ' )"; fi
+# T22 [P] the byte cap: a row boundary, capped=1, next=, a later anchor counted in <lit_capped>; rows past the row limit disclose too
+BF="$TMP/bfix"; mkdir -p "$BF/a"
+python3 -I - "$BF/a" <<'PY'
+import sys
+d=sys.argv[1]
+pad="x"*150
+for f in range(40):
+    with open(f"{d}/t{f}.go","w") as o:
+        o.write("package a\n\nvar T%d = map[string]int{\n"%f)
+        for i in range(30):
+            o.write('\t"%s_%d": cap_anchor_one + cap_anchor_two, // %s\n'%(pad,i,""))
+        o.write("}\n")
+open(f"{d}/s.go","w").write("package a\n\nfunc cap_anchor_one() {}\nfunc cap_anchor_two() {}\nfunc cap_anchor_three() {}\nvar _ = cap_anchor_three\n")
+PY
+A="$( cd "$BF" || exit 1; "$BIN" "$BF" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' </dev/null 2>/dev/null )"
+CAPJ="$( python3 -I -c '
+import sys,re
+s=sys.stdin.read()
+heads=re.findall(r"<lit s=\"([^\"]*)\"[^>]*?shown=\"(\d+)\"[^>]*?( capped=\"1\")?[^>]*?bytes=\"(\d+)\"",s)
+tot=sum(int(h[3]) for h in heads)
+for m in re.finditer(r"<lit [^>]*>(.*?)</lit>",s,re.S):
+    body=m.group(1)
+    assert body.count("<ls ")==body.count("</ls>")
+print(len(heads),tot,sum(1 for h in heads if "capped" in h[2]))
+' <<<"$A" )"
+set -- $CAPJ
+if [ "${1:-0}" -ge 1 ] && [ "${2:-99999}" -le 40000 ] && [ "${3:-0}" -ge 1 ] && has "$A" 'next="--grep=cap_anchor_one"'; then ok "T22 the byte cap holds ($2 B over $1 elements), cut on a row boundary, capped=1, next="
+else no "T22 byte cap: $CAPJ"; fi
+if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22b the capped answer is well-formed"; else no "T22b not well-formed"; fi
+python3 -I - "$BF/a" <<'PY'
+import sys
+d=sys.argv[1]
+for f in range(40,120):
+    with open(f"{d}/t{f}.go","w") as o:
+        o.write("package a\n\nvar T%d = map[string]int{\n"%f)
+        for i in range(30):
+            o.write('\t"%s_%d": cap_anchor_one,\n'%("y"*150,i))
+        o.write("}\n")
+PY
+A="$( cd "$BF" || exit 1; "$BIN" "$BF" --no-cache '--for=register `cap_anchor_one` `cap_anchor_two` `cap_anchor_three`' </dev/null 2>/dev/null )"
+if has "$A" '<lit_capped' && has "$A" 'next="--grep=cap_anchor_three"' || has "$A" 'next="--grep=cap_anchor_two"'; then ok "T22c an anchor the cap left out is counted by <lit_capped> with next="
+else no "T22c later anchor unsaid: $( grep -o '<lit s="[^"]*"[^>]*>' <<<"$A" | cut -c1-200 | tr '\n' ' ' )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"

@@ -55,6 +55,17 @@
 // Literals are tried in order (forLiteralCandidates: quoted span, CONST words, dotted keys, message), kForLiteralCandidates scans, until
 // one has a source site; try="N" says it was the task's Nth. Literals past the cap are not scanned: when none of the scanned ones
 // anchors, <lit_capped scanned= skipped= next=> says so (a task of five keys no longer reads as five misses).
+//
+// TABLE-CONST V2. Last of all, only when no earlier literal has a site, shape="table": the sites of the identifiers a task about a table
+// or a registration names, the question a ranked answer cannot print because the table holds no edge (a Go map entry, a Rust macro row, a C
+// X-macro line). Trigger (forTableCueOf), whole words: a registration, table or compile-time word; "add a new", the exemplar form, whose
+// anchor is the named sibling; or default/handler, which print only when a table row exists. Anchors (forTableAnchorsOf): backticked
+// spans first, then identifier-shaped words (snake_case, camelCase, Pascal with an inner capital, a::b, a.b), then a plain word after
+// like/alongside/following; a backticked span stands as it is, any other word must be a symbol of the index (forTableAnchorKeeps), at
+// most kForTableAnchors. Each anchor with a site prints one <lit>, its own row limit (kForTableRows) and all of them under one byte cap
+// (kForTableByteCap, cut on a row boundary, capped=1 and next=; an anchor the cap left out is counted by <lit_capped>). A row whose line
+// reads as a table row (lit_detail::tableRowOf) ranks first and carries tbl= (the line that opens the table, "item" at top level) and the
+// lines after it: the members beside it. Hits stand on word edges.
 
 #include "filter.h"          // pathTierOf — source / test / doc, the reader's tier
 #include "layout.h"          // layout::lineOf — a byte offset's line
@@ -108,6 +119,17 @@ inline constexpr std::size_t kForLiteralCandidates    = 4;      // literals (quo
 inline constexpr std::size_t kForLiteralRegistrationRows = 2;   // shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count
 inline constexpr std::size_t kForLiteralFileMaxSegments = 4;    // a dotted word of this many segments or more is a key even when its last one is an extension (`envoy.filters.http.lua`)
 inline constexpr std::size_t kForLiteralKeyLead       = 40;     // a cut row starts this many bytes before the key
+inline constexpr std::size_t kForTableAnchors         = 3;      // shape=table: identifiers of a task scanned, in order, each with a site printing a <lit>
+inline constexpr std::size_t kForTableRows            = 32;     // shape=table: <ls> rows per anchor (next= lists all)
+inline constexpr std::size_t kForTableByteCap         = 40000;  // shape=table: all its <lit> elements together, cut on a row boundary (runaway guard: a 16 KB cap loses ld-nushell-07)
+inline constexpr std::size_t kForTableElementBytes    = 800;    // shape=table: what an element's open tag and legend may add to its rows and bodies; an anchor is not tried with less than this left
+inline constexpr std::size_t kForTableRankedRows      = 4096;   // shape=table: source sites read for a table row and ordered (a registry past the readers in path order must still rank first)
+inline constexpr std::size_t kForTableContextRows     = 4;      // shape=table: table rows served with the lines after them
+inline constexpr std::size_t kForTableSiblingLines    = 24;     // a sibling row of a table row is looked for this many lines away (an entry may span lines)
+inline constexpr std::size_t kForTableOpenerLines     = 2000;   // the line that opens a table is looked for this many lines above a row
+inline constexpr std::size_t kForTableOpenerBytes     = 80;     // tbl= text
+inline constexpr std::size_t kForTableMinAnchor       = 3;      // a shorter word is no anchor
+inline constexpr std::size_t kForTableMaxAnchor       = 60;     // a longer backticked span is no anchor
 
 // the element's legend comment (X3: no double hyphen inside). The compact form is the default --legend=compact posture; the long
 // text rides --legend=full. Both name every attribute the element prints.
@@ -144,6 +166,13 @@ inline constexpr std::string_view kForLiteralCapLegend =
     "<!-- ripwire for lit: lit_capped = the task names more literals than one answer scans; scanned= whole-repo scans made, none found a source site; "
     "skipped= literals not scanned; next= scans the first of them; this note is not in est_tokens. -->";
 static_assert( kForLiteralCapLegend.find( "--", 4 ) == kForLiteralCapLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+
+// present only with shape=table (the first of its elements), so the bytes of every other fire do not move
+inline constexpr std::string_view kForLiteralTableLegend =
+    "<!-- ripwire for lit: shape=table a task about a table, registration or new sibling: the identifier it names, one lit per identifier, "
+    "after the other shapes found no site. Table rows first: tbl= the line that opens the table (item: a top level macro or call row), lines=a-b "
+    "with the lines after it. longer= source sites inside a longer word, counted, never rows. A cut on a row boundary says capped=1. -->";
+static_assert( kForLiteralTableLegend.find( "--", 4 ) == kForLiteralTableLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
 inline bool forLiteralOn()
 {
@@ -590,6 +619,175 @@ inline std::vector<ForLiteral> forLiteralCandidates( std::string_view task )
     return out;
 }
 
+// shape=table: which trigger a task pulled. None: no block. AnySite: a registration, table or compile-time word, or "add a new". TableRowOnly:
+// default/handler, words of many tasks, so the block prints only when a site reads as a table row.
+enum class TableCue : std::uint8_t
+{
+    None,
+    AnySite,
+    TableRowOnly
+};
+
+namespace lit_detail
+{
+inline constexpr auto kForTableRegistrationCues = std::to_array<std::string_view>(
+    { "register", "registers", "registered", "registering", "registration", "registrations", "registry", "registries", "registrar", "registrars", "table", "tables",
+      "compile-time" } );
+inline constexpr std::array<std::string_view, 4> kForTableValueCues{ "default", "defaults", "handler", "handlers" };
+inline constexpr std::array<std::string_view, 3> kForTableExemplarLeads{ "like", "alongside", "following" };
+
+inline bool isIdentByte( char c ) noexcept
+{
+    return std::isalnum( static_cast<unsigned char>( c ) ) != 0 || c == '_';
+}
+
+// the task with every backticked span blanked (a cue inside code quotes is code, not the task's word)
+inline std::string withoutBackticks( std::string_view task )
+{
+    std::string out( task );
+    bool inside = false;
+    for( char& c : out )
+    {
+        const bool tick = c == '`';
+        inside = tick ? !inside : inside;
+        c = tick || inside ? ' ' : c;
+    }
+    return out;
+}
+
+// snake_case, camelCase, Pascal with an inner capital, a::b, a.b: a word nobody writes in prose. Allowlist: only these shapes anchor.
+inline bool isIdentifierShaped( std::string_view w ) noexcept
+{
+    if( w.size() < kForTableMinAnchor || std::isalpha( static_cast<unsigned char>( w[0] ) ) == 0 )
+    {
+        return false;
+    }
+    bool underscore = false, innerCap = false, lower = false, sep = false;
+    for( std::size_t i = 0; i < w.size(); ++i )
+    {
+        const char c = w[i];
+        if( c == '.' || c == ':' )
+        {
+            if( i == 0 || i + 1 == w.size() || std::isalpha( static_cast<unsigned char>( w[i + 1] ) ) == 0 )
+            {
+                if( c == ':' && i + 1 < w.size() && w[i + 1] == ':' )
+                {
+                    continue;
+                }
+                return false;
+            }
+            sep = true;
+            continue;
+        }
+        if( !isIdentByte( c ) )
+        {
+            return false;
+        }
+        underscore = underscore || ( c == '_' && i + 1 < w.size() );
+        innerCap   = innerCap || ( i > 0 && std::isupper( static_cast<unsigned char>( c ) ) != 0 && lower );
+        lower      = lower || std::islower( static_cast<unsigned char>( c ) ) != 0;
+    }
+    return lower && ( underscore || innerCap || sep );
+}
+
+// a backticked span that can be scanned for: identifier bytes and a few separators, never a flag, a path or a file name
+inline bool isTableAnchorSpan( std::string_view w ) noexcept
+{
+    if( w.size() < kForTableMinAnchor || w.size() > kForTableMaxAnchor || w.front() == '-' )
+    {
+        return false;
+    }
+    const bool bytesOk = std::all_of( w.begin(), w.end(), []( char c ) { return isIdentByte( c ) || c == '.' || c == ':' || c == '#' || c == '$'; } );
+    const std::size_t dot = w.rfind( '.' );
+    return bytesOk && ( dot == std::string_view::npos || !isFileOrHostSuffix( w.substr( dot + 1 ) ) );
+}
+
+// the name an index symbol would carry: the last segment of a::b or a.b
+inline std::string_view anchorTail( std::string_view w ) noexcept
+{
+    const std::size_t at = w.find_last_of( ".:#" );
+    return at == std::string_view::npos ? w : w.substr( at + 1 );
+}
+}   // namespace lit_detail
+
+// the trigger of shape=table, read from the task's own words outside code quotes
+inline TableCue forTableCueOf( std::string_view task )
+{
+    const std::string prose = lit_detail::withoutBackticks( task );
+    const std::vector<std::string_view> words = lit_detail::taskWords( prose );
+    TableCue cue = TableCue::None;
+    std::size_t addAt = SIZE_MAX;
+    for( std::size_t i = 0; i < words.size(); ++i )
+    {
+        const std::string_view w = lit_detail::stripWordPunct( words[i] );
+        if( lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForTableRegistrationCues ) ) )
+        {
+            return TableCue::AnySite;
+        }
+        if( i + 1 < words.size() && lit_detail::wordIsOneOf( w, std::array<std::string_view, 1>{ "compile" } )
+            && lit_detail::wordIsOneOf( lit_detail::stripWordPunct( words[i + 1] ), std::array<std::string_view, 1>{ "time" } ) )
+        {
+            return TableCue::AnySite;
+        }
+        if( lit_detail::wordIsOneOf( w, std::array<std::string_view, 4>{ "add", "adding", "implement", "implementing" } ) )
+        {
+            addAt = i;
+        }
+        if( addAt != SIZE_MAX && i <= addAt + 2 && i > addAt && lit_detail::wordIsOneOf( w, std::array<std::string_view, 2>{ "new", "another" } ) )
+        {
+            return TableCue::AnySite;
+        }
+        if( lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForTableValueCues ) ) )
+        {
+            cue = TableCue::TableRowOnly;
+        }
+    }
+    return cue;
+}
+
+// the anchors of shape=table, in order, before the index filter: {text, quoted}
+inline std::vector<std::pair<std::string, bool>> forTableAnchorsOf( std::string_view task )
+{
+    std::vector<std::pair<std::string, bool>> out;
+    const auto add = [ & ]( std::string_view w, bool quoted )
+    {
+        if( std::none_of( out.begin(), out.end(), [ & ]( const auto& a ) { return a.first == w; } ) )
+        {
+            out.emplace_back( std::string( w ), quoted );
+        }
+    };
+    for( std::size_t at = task.find( '`' ); at != std::string_view::npos; )
+    {
+        const std::size_t end = task.find( '`', at + 1 );
+        if( end == std::string_view::npos )
+        {
+            break;
+        }
+        std::string_view span = task.substr( at + 1, end - at - 1 );
+        span = span.ends_with( "()" ) ? span.substr( 0, span.size() - 2 ) : span;
+        const std::size_t call = span.rfind( "()." );   // `a.load().b()`: the last link of a call chain is the name
+        span = call == std::string_view::npos ? span : span.substr( call + 3 );
+        if( lit_detail::isTableAnchorSpan( span ) )
+        {
+            add( span, true );
+        }
+        at = task.find( '`', end + 1 );
+    }
+    const std::string prose = lit_detail::withoutBackticks( task );
+    const std::vector<std::string_view> words = lit_detail::taskWords( prose );
+    for( std::size_t i = 0; i < words.size(); ++i )
+    {
+        const std::string_view w = lit_detail::stripWordPunct( words[i] );
+        const bool afterLead = i > 0 && lit_detail::wordIsOneOf( lit_detail::stripWordPunct( words[i - 1] ), std::span<const std::string_view>( lit_detail::kForTableExemplarLeads ) );
+        if( lit_detail::isIdentifierShaped( w ) || ( afterLead && w.size() >= kForTableMinAnchor && !lit_detail::wordIsOneOf( w, std::span<const std::string_view>( lit_detail::kForLiteralStopWords ) )
+                                                     && std::all_of( w.begin(), w.end(), lit_detail::isIdentByte ) ) )
+        {
+            add( w, false );
+        }
+    }
+    return out;
+}
+
 struct ForLiteralRender
 {
     std::string xml;          // "" = nothing rides
@@ -604,6 +802,7 @@ struct Site
     GrepRawHit raw;
     char       k = '?';   // 's' string, 'c' code, '?' unclassified
     bool       quotedKey = false;   // shape=dotted: quotes delimit the key on both sides (`'files.autoSave'`), not a mention inside a sentence
+    std::string tbl;                // shape=table: the line that opens the table this site is a row of ("item" at top level); "" = not a table row
 };
 
 // shape=dotted: where a hit of a key of `n` bytes at `at` of `text` stands. longer: inside a longer name or a child key (an identifier byte
@@ -744,6 +943,9 @@ struct LitPolicy
     std::size_t      rows     = kForLiteralSiteRows;
     std::size_t      reserve  = 0;       // row slots kept for a registration (pickRows)
     std::string_view legend;             // the clause this shape adds to the base legend; "" = none
+    bool             tableRows    = false;   // sites are read for a table row (tableRowOf), which rank first and carry tbl=
+    std::size_t      contextRows  = kForLiteralContextRows;
+    std::size_t      rankedRows   = kForLiteralRankedRows;
 };
 inline LitPolicy litPolicyOf( std::string_view shape ) noexcept
 {
@@ -754,6 +956,10 @@ inline LitPolicy litPolicyOf( std::string_view shape ) noexcept
     if( shape == "message" )
     {
         return LitPolicy{ LitBoundary::Word, true, kForLiteralSiteRows, 0, kForLiteralKeyLegend };
+    }
+    if( shape == "table" )
+    {
+        return LitPolicy{ LitBoundary::Word, false, kForTableRows, 0, kForLiteralTableLegend, true, kForTableContextRows, kForTableRankedRows };
     }
     return LitPolicy{};
 }
@@ -768,6 +974,242 @@ inline KeyHit literalHitAt( LitBoundary boundary, std::string_view text, std::si
     KeyHit h;
     h.longer = boundary == LitBoundary::Word && !wordBounded( text, at, n );
     return h;
+}
+
+// shape=table: what a source line looks like as a row of a table. Allowlist: a line of none of these shapes is never a table row.
+enum class RowKind : std::uint8_t
+{
+    None,
+    Call,    // `DECLARE(MaxThreads, max_threads, ...`, `impl_stream_node_body!(HashJoin(HashJoinNode) => ...);`, `Register("k", f);`
+    Key,     // `"abspath": funcs.AbsPathFunc,`, `InPlacePodVerticalScaling: {`, `"k" => v,`
+    Member,  // `Each,`  `Each, Filter,`  `"a",`
+    Brace    // `{ barrier_interval_ms, u32, ...`
+};
+struct RowShape
+{
+    RowKind          kind = RowKind::None;
+    std::string_view head;   // RowKind::Call: the callee, so two calls of one callee are siblings and two different ones are not
+};
+inline constexpr auto kForTableNotCallee = std::to_array<std::string_view>(
+    { "if", "for", "while", "switch", "catch", "return", "sizeof", "assert", "elif", "match", "def", "func", "fn", "function", "class", "struct", "print", "println" } );
+
+inline std::string_view trimIndent( std::string_view line ) noexcept
+{
+    const std::size_t at = line.find_first_not_of( " \t" );
+    return at == std::string_view::npos ? std::string_view() : line.substr( at );
+}
+
+inline std::size_t identEnd( std::string_view t ) noexcept
+{
+    std::size_t i = 0;
+    while( i < t.size() && isIdentByte( t[i] ) )
+    {
+        ++i;
+    }
+    return i;
+}
+
+inline RowShape rowShapeOf( std::string_view line )
+{
+    std::string_view t = trimIndent( line );
+    if( t.empty() )
+    {
+        return {};
+    }
+    if( t.front() == '{' )
+    {
+        const std::string_view in = trimIndent( t.substr( 1 ) );
+        return !in.empty() && ( isIdentByte( in.front() ) || in.front() == '"' ) ? RowShape{ RowKind::Brace, {} } : RowShape{};
+    }
+    std::size_t keyEnd = 0;
+    if( t.front() == '"' || t.front() == '\'' )
+    {
+        const std::size_t close = t.find( t.front(), 1 );
+        if( close == std::string_view::npos )
+        {
+            return {};
+        }
+        keyEnd = close + 1;
+    }
+    else
+    {
+        keyEnd = identEnd( t );
+        if( keyEnd == 0 )
+        {
+            return {};
+        }
+        const std::size_t bang = keyEnd < t.size() && t[keyEnd] == '!' ? keyEnd + 1 : keyEnd;
+        if( bang < t.size() && t[bang] == '(' )
+        {
+            const std::string_view callee = t.substr( 0, keyEnd );
+            return wordIsOneOf( callee, kForTableNotCallee ) ? RowShape{} : RowShape{ RowKind::Call, t.substr( 0, bang ) };
+        }
+    }
+    const std::string_view rest = trimIndent( t.substr( keyEnd ) );
+    if( rest.empty() || rest.front() == ',' )
+    {
+        // a member: nothing but bare words and commas on the line, and it ends in a comma or stands alone in a list
+        const bool plain = std::all_of( t.begin(), t.end(), []( char c ) { return isIdentByte( c ) || c == ',' || c == ' ' || c == '"' || c == '\''; } );
+        return plain && t.back() == ',' ? RowShape{ RowKind::Member, {} } : RowShape{};
+    }
+    if( ( rest.front() == ':' && !rest.starts_with( "::" ) && !rest.starts_with( ":=" ) ) || rest.starts_with( "=>" ) )
+    {
+        return RowShape{ RowKind::Key, {} };
+    }
+    return {};
+}
+
+inline std::size_t indentOf( std::string_view line ) noexcept
+{
+    const std::size_t at = line.find_first_not_of( " \t" );
+    return at == std::string_view::npos ? line.size() : at;
+}
+
+// the line at `start` of `text`, and the start of the next one
+inline std::string_view lineAt( std::string_view text, std::size_t start ) noexcept
+{
+    const std::size_t end = text.find( '\n', start );
+    return text.substr( start, end == std::string_view::npos ? std::string_view::npos : end - start );
+}
+
+// the nearest line at this indent, walking one way, that is not a closer; `down` next line, else the previous one. A line less indented ends the walk unless `crossLess`.
+inline std::optional<std::string_view> siblingLine( std::string_view text, std::size_t rowStart, std::size_t indent, bool down, bool crossLess ) noexcept
+{
+    std::size_t pos = rowStart;
+    for( std::size_t step = 0; step < kForTableSiblingLines; ++step )
+    {
+        if( down )
+        {
+            const std::size_t nl = text.find( '\n', pos );
+            if( nl == std::string_view::npos || nl + 1 >= text.size() )
+            {
+                return std::nullopt;
+            }
+            pos = nl + 1;
+        }
+        else
+        {
+            if( pos == 0 )
+            {
+                return std::nullopt;
+            }
+            const std::size_t nl = pos >= 2 ? text.rfind( '\n', pos - 2 ) : std::string_view::npos;
+            pos = nl == std::string_view::npos ? 0 : nl + 1;
+        }
+        const std::string_view l = lineAt( text, pos );
+        const std::string_view t = trimIndent( l );
+        if( t.empty() )
+        {
+            continue;
+        }
+        const std::size_t in = indentOf( l );
+        if( in < indent && !crossLess )
+        {
+            return std::nullopt;
+        }
+        if( in == indent && t.front() != '}' && t.front() != ')' && t.front() != ']' )
+        {
+            return l;
+        }
+    }
+    return std::nullopt;
+}
+
+// a line that can open a table: it ends in an open bracket, or is a #define (a continuation line of raw text above a row opens nothing)
+inline bool linesOpensBlock( std::string_view line ) noexcept
+{
+    std::string_view t = trimIndent( line );
+    while( !t.empty() && ( t.back() == ' ' || t.back() == '\t' || t.back() == '\r' || t.back() == '\\' ) )
+    {
+        t.remove_suffix( 1 );
+    }
+    return !t.empty() && ( t.back() == '{' || t.back() == '[' || t.back() == '(' || t.starts_with( "#define" ) );
+}
+
+// the line that opens the table a row at `rowStart` stands in: the nearest less indented line above it that can open one
+inline std::string_view openerOf( std::string_view text, std::size_t rowStart, std::size_t indent ) noexcept
+{
+    std::size_t pos = rowStart;
+    for( std::size_t step = 0; indent > 0 && pos > 0 && step < kForTableOpenerLines; ++step )
+    {
+        const std::size_t nl = pos >= 2 ? text.rfind( '\n', pos - 2 ) : std::string_view::npos;
+        pos = nl == std::string_view::npos ? 0 : nl + 1;
+        const std::string_view l = lineAt( text, pos );
+        if( !trimIndent( l ).empty() && indentOf( l ) < indent && linesOpensBlock( l ) )
+        {
+            return trimIndent( l );
+        }
+    }
+    return {};
+}
+
+// shape=table, rank only: a site under documentation, examples or an integration app comes after the product's own (a row is never dropped by this)
+inline bool isSecondaryPath( std::string_view p ) noexcept
+{
+    static constexpr std::array<std::string_view, 8> kSegments{ "docs", "doc", "examples", "example", "samples", "snippets", "website", "integration" };
+    while( !p.empty() )
+    {
+        const std::size_t slash = p.find( '/' );
+        if( slash == std::string_view::npos )
+        {
+            return false;   // the last segment is the file's own name
+        }
+        if( std::find( kSegments.begin(), kSegments.end(), p.substr( 0, slash ) ) != kSegments.end() )
+        {
+            return true;
+        }
+        p.remove_prefix( slash + 1 );
+    }
+    return false;
+}
+
+// an import list reads like a member list: `use a::{` / `import {` / `from x import (` open no table
+inline bool opensImport( std::string_view opener ) noexcept
+{
+    const std::size_t n = identEnd( opener );
+    const std::string_view first = opener.substr( 0, n );
+    return first == "use" || first == "import" || first == "from" || first == "export" || first == "package" || first == "extern" || first == "pub";
+}
+
+// The table this source line is a row of, or "": a row of an allowed shape with a sibling of the same shape at its indent, or a macro row at
+// top level (a Rust `name!(`, an ALLCAPS callee, outside any function), which is a registration with no sibling needed.
+inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bool callableOwner )
+{
+    if( byteOffset >= text.size() )
+    {
+        return {};   // a file that changed since the scan: unknown, no claim
+    }
+    const std::size_t nl    = byteOffset == 0 ? std::string_view::npos : text.rfind( '\n', byteOffset - 1 );
+    const std::size_t start = nl == std::string_view::npos ? 0 : nl + 1;
+    const std::string_view line = lineAt( text, start );
+    const RowShape shape = rowShapeOf( line );
+    if( shape.kind == RowKind::None )
+    {
+        return {};
+    }
+    const std::size_t indent = indentOf( line );
+    const std::string_view opener = openerOf( text, start, indent );
+    if( opensImport( opener ) )
+    {
+        return {};
+    }
+    const auto same = [ & ]( std::optional<std::string_view> l )
+    {
+        if( !l )
+        {
+            return false;
+        }
+        const RowShape o = rowShapeOf( *l );
+        return o.kind == shape.kind && o.head == shape.head;
+    };
+    const bool macroRow = shape.kind == RowKind::Call && !callableOwner
+                          && ( shape.head.ends_with( '!' ) || std::none_of( shape.head.begin(), shape.head.end(), []( char c ) { return std::islower( static_cast<unsigned char>( c ) ) != 0; } ) );
+    const bool crossLess = shape.kind == RowKind::Call;   // a call row's text may span raw lines at any indent (`DECLARE(.., R"(` over a description)
+    if( !macroRow && !same( siblingLine( text, start, indent, true, crossLess ) ) && !same( siblingLine( text, start, indent, false, crossLess ) ) )
+    {
+        return {};
+    }
+    return opener.empty() ? std::string( "item" ) : std::string( opener );
 }
 
 // `'files.autoSave': {`: the quoted key is followed by a colon on its line (a property key, the way a schema registers a setting)
@@ -1034,10 +1476,18 @@ inline std::string excerptElement( const std::string& text, const std::string& p
 }
 }   // namespace lit_detail
 
+// shape=table: what a later <lit> of one task inherits from the earlier ones
+struct ForLiteralLimits
+{
+    std::size_t byteCap    = SIZE_MAX;   // element bytes left for rows and bodies
+    bool        withLegend = true;       // only the first element of a task carries the legend comments
+    bool        tableOnly  = false;      // TableCue::TableRowOnly: no table row, no block
+};
+
 // THE BLOCK. `served` = the answer's own bytes after <sigs> (bodies, fold, slot, hops): a body whose <b … l= p= n=> head is in it
 // is not printed again. `useMemo` = the span-tier memo (false under --no-cache). `compactLegend` = the default --legend=compact dialect.
 inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLiteral& lit, std::string_view rootArg, std::string_view served,
-                                          RedactCounts* redact, bool useMemo, bool compactLegend )
+                                          RedactCounts* redact, bool useMemo, bool compactLegend, const ForLiteralLimits& limits = {} )
 {
     ForLiteralRender out;
     if( lit.text.empty() || ing.files.empty() )
@@ -1180,13 +1630,28 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     {
         return out;   // no source site: nothing to anchor on (test/doc/comment counts alone answer nothing; measured as noise, ld2-django-09)
     }
-    const std::size_t ranked = std::min( rows.size(), kForLiteralRankedRows );
+    const std::size_t ranked = std::min( rows.size(), policy.rankedRows );
     for( std::size_t i = 0; i < ranked; ++i )
     {
         all.push_back( rows[i].raw );
     }
     std::vector<GrepHit> enriched = grepEnrich( ing, std::span<const GrepRawHit>( all ) );
     ASSUME( enriched.size() == all.size(), "grepEnrich returns one row per windowed hit" );
+    if( policy.tableRows )
+    {
+        bool anyTable = false;
+        for( std::size_t i = 0; i < enriched.size(); ++i )
+        {
+            loadFile( rows[i].raw.fileId );
+            const bool callableOwner = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
+            rows[i].tbl = lit_detail::tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner );
+            anyTable    = anyTable || !rows[i].tbl.empty();
+        }
+        if( limits.tableOnly && !anyTable )
+        {
+            return ForLiteralRender{};
+        }
+    }
     std::vector<std::size_t> order( enriched.size() );
     for( std::size_t i = 0; i < order.size(); ++i )
     {
@@ -1195,7 +1660,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     const auto rankOf = [ & ]( std::size_t i )
     {
         const bool callable = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        return ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
+        return ( policy.tableRows && lit_detail::isSecondaryPath( rootRelPath( ing, rows[i].raw.fileId ) ) ? 12 : 0 ) + ( policy.tableRows && rows[i].tbl.empty() ? 6 : 0 ) + ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable != policy.tableRows ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
     };
     std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b ) { return rankOf( a ) < rankOf( b ); } );
     std::vector<char> registration( order.size(), 0 );   // by rank position: a quoted key outside any function (shape=dotted)
@@ -1204,7 +1669,6 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         registration[i] = lit_detail::registrationMark( ing, rows[order[i]], enriched[order[i]].enclosingId, enriched[order[i]].text, lit.text );
     }
     const std::vector<std::size_t> pick = lit_detail::pickRows( registration, policy.rows, policy.reserve );
-    const std::size_t shown = pick.size();
     std::vector<GrepHit>          hits;
     std::vector<lit_detail::Site> shownRows;
     for( const std::size_t p : pick )
@@ -1250,7 +1714,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         if( last >= first && last - first < kForLiteralWholeBodyLines )   // a short body is served whole (nothing to leave out)
         {
             std::optional<std::string> body = renderBodyElement( ing, h.enclosingId, /*capBytes=*/0, /*compress=*/false, redact, rootArg, nullptr );
-            if( body && body->size() <= kForLiteralBodyCapBytes )
+            if( body && body->size() <= kForLiteralBodyCapBytes && bodiesXml.size() + body->size() <= limits.byteCap )
             {
                 bodiesXml += *body;
                 ++out.bodies;
@@ -1266,7 +1730,13 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
                 siteLines.push_back( o.line );
             }
         }
-        bodiesXml += lit_detail::excerptElement( text, path, s, first, last, siteLines, redact );
+        std::string excerpt = lit_detail::excerptElement( text, path, s, first, last, siteLines, redact );
+        if( bodiesXml.size() + excerpt.size() > limits.byteCap )
+        {
+            ownerAbove.back() = 2;   // past the byte cap, as past the body cap: the row says body="held"
+            continue;
+        }
+        bodiesXml += excerpt;
         ++out.bodies;
     }
 
@@ -1274,9 +1744,12 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     const std::string_view needle = policy.boundary != lit_detail::LitBoundary::None ? std::string_view( lit.text ) : std::string_view();   // a cut row opens near it
     std::string rowsXml;
     std::size_t contextRows = 0;
+    std::size_t shownRowCount = 0;
+    bool        byteCut       = false;
     for( std::size_t i = 0; i < hits.size(); ++i )
     {
         const GrepHit& h = hits[i];
+        const std::size_t rowStartAt = rowsXml.size();
         rowsXml += "<ls p=\"";
         rowsXml += escapeXml( relPath( h.fileId ), esc );
         rowsXml += "\" l=\"" + std::to_string( h.line ) + "\" k=\"";
@@ -1301,7 +1774,16 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         redactInPlace( line, redact );   // CR 4423843223: the matched line is raw source text; redact before the cut
         lit_detail::cutAround( line, needle, kForLiteralLineBytes );
         const bool callableOwner = h.enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[h.enclosingId].kind );
-        if( rows[i].k == 's' && !callableOwner && contextRows < kForLiteralContextRows )
+        if( !rows[i].tbl.empty() )
+        {
+            std::string opener = rows[i].tbl;
+            redactInPlace( opener, redact );
+            truncateUtf8WithEllipsis( opener, kForTableOpenerBytes );
+            rowsXml += " tbl=\"";
+            rowsXml += escapeXml( opener, esc );
+            rowsXml += "\"";
+        }
+        if( ( policy.tableRows ? !rows[i].tbl.empty() : rows[i].k == 's' && !callableOwner ) && contextRows < policy.contextRows )
         {
             // a string site outside any function (a table entry, an error-code map): the lines after it hold what it builds
             const std::string text = docparse::detail::readWholeFile( diskPath( ing, h.fileId ) ).value_or( std::string() );
@@ -1319,18 +1801,32 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         rowsXml += "><![CDATA[";
         appendCdataSafe( line, rowsXml );
         rowsXml += "]]></ls>";
+        if( rowsXml.size() + bodiesXml.size() > limits.byteCap )
+        {
+            rowsXml.resize( rowStartAt );   // a cut stands on a row boundary, never inside a line
+            byteCut = true;
+            break;
+        }
+        ++shownRowCount;
+    }
+    if( byteCut && shownRowCount == 0 )
+    {
+        return ForLiteralRender{};   // not one row fits what the cap left: the caller counts this anchor as skipped
     }
 
     std::string& x = out.xml;
-    x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
-    x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
+    if( limits.withLegend )
+    {
+        x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
+        x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
+    }
     x += "<lit s=\"";
     x += escapeXml( lit.text, esc );
     x += "\" shape=\"";
     x += lit.shape;
     x += "\" hits=\"" + std::to_string( collected.raw.size() ) + "\" src=\"" + std::to_string( out.sites ) + "\" shown=\""
-         + std::to_string( shown ) + "\"";
-    if( shown < out.sites )
+         + std::to_string( shownRowCount ) + "\"";
+    if( shownRowCount < out.sites )
     {
         x += " capped=\"1\"";
     }
@@ -1383,6 +1879,75 @@ inline ForLiteralRender renderMessageTries( const IngestResult& ing, const ForLi
     return {};
 }
 
+// a word of the task is an anchor of shape=table when the index holds a symbol of that name (a backticked span stands on its own quoting)
+inline bool forTableAnchorKeeps( const IngestResult& ing, std::string_view word, bool quoted )
+{
+    if( quoted )
+    {
+        return true;
+    }
+    if( word.starts_with( "self." ) || word.starts_with( "this." ) )
+    {
+        return false;   // a member chain, never a table's key (dottedKeysOf's rule)
+    }
+    const std::string_view tail = lit_detail::anchorTail( word );
+    return tail.size() >= kForTableMinAnchor && std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == tail; } );
+}
+
+// the legend comments before an element: not element bytes
+inline std::size_t legendBytes( std::string_view xml ) noexcept
+{
+    const std::size_t at = xml.find( "<lit " );
+    return at == std::string_view::npos ? 0 : at;
+}
+
+// shape=table, the last try: every kept anchor with a site prints its own <lit>, all under one byte cap. `capped` = what the earlier shapes
+// left unscanned, which stays said. An anchor the cap left out is counted the way a literal past the scan cap is.
+inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
+                                              RedactCounts* redact, bool useMemo, bool compactLegend )
+{
+    ForLiteralRender out;
+    const TableCue cue = forTableCueOf( task );
+    if( cue == TableCue::None )
+    {
+        return out;
+    }
+    std::size_t kept = 0, scanned = 0, skipped = 0, used = 0;
+    std::string firstSkipped;
+    for( const auto& [word, quoted] : forTableAnchorsOf( task ) )
+    {
+        if( kept >= kForTableAnchors || namesIndexedFile( ing, word ) || !forTableAnchorKeeps( ing, word, quoted ) )
+        {
+            continue;
+        }
+        ++kept;
+        if( used + kForTableElementBytes >= kForTableByteCap )
+        {
+            ++skipped;
+            firstSkipped = firstSkipped.empty() ? word : firstSkipped;
+            continue;
+        }
+        ++scanned;
+        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly };
+        ForLiteral lit{ word, "table" };
+        ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits );
+        if( r.xml.empty() )
+        {
+            continue;
+        }
+        used += r.xml.size() - ( out.xml.empty() ? legendBytes( r.xml ) : 0 );
+        out.xml += r.xml;
+        out.sites += r.sites;
+        out.bodies += r.bodies;
+    }
+    if( skipped > 0 )
+    {
+        out.xml += std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scanned ) + "\" skipped=\"" + std::to_string( skipped )
+                   + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>";
+    }
+    return out;
+}
+
 // the block of the task's literals: each in order (forLiteralCandidates) until one has a source site, at most kForLiteralCandidates scans
 // besides a message, which walks its tries
 inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
@@ -1411,14 +1976,14 @@ inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::st
             return r;
         }
     }
+    // no earlier shape anchored: the last try, shape=table (it never prints beside them)
+    ForLiteralRender table = renderForTableOfTask( ing, task, rootArg, served, redact, useMemo, compactLegend );
     if( skipped > 0 )
     {
         // the cap was hit and nothing scanned anchored: say so (no <lit>: no site was found, so the block's attributes would claim one)
-        ForLiteralRender capped;
-        capped.xml = std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scans ) + "\" skipped=\"" + std::to_string( skipped )
-                     + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>";
-        return capped;
+        table.xml = std::string( kForLiteralCapLegend ) + "<lit_capped scanned=\"" + std::to_string( scans ) + "\" skipped=\"" + std::to_string( skipped )
+                    + "\"" + nextAttrXml( nextFlag( "--grep=", firstSkipped ) ) + "/>" + table.xml;
     }
-    return {};
+    return table;
 }
 }   // namespace rw
