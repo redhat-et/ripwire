@@ -145,7 +145,14 @@ inline bool cueObjectFits( std::span<const std::string> words, std::size_t next 
 
 inline bool wordIn( std::string_view w, std::initializer_list<std::string_view> set ) noexcept
 {
-    return std::ranges::find( set, w ) != set.end();
+    for( const std::string_view one : set )
+    {
+        if( one == w )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline bool subjectAsksUnused( std::string_view task )
@@ -180,7 +187,7 @@ inline bool subjectAsksUnused( std::string_view task )
         {
             return true;
         }
-        if( wordIn( w, { "nobody", "nothing", "noone" } ) && wordIn( at( k + 1 ), { "calls", "uses", "references", "imports", "invokes" } ) )
+        if( wordIn( w, { "nobody", "nothing", "noone" } ) && wordIn( at( k + 1 ), { "calls", "uses", "references", "imports", "invokes", "call", "use", "reference" } ) )
         {
             return true;
         }
@@ -521,8 +528,14 @@ inline bool isPrototypeLine( std::string_view line, std::size_t col, std::size_t
 
 inline bool opensWithAny( std::string_view t, std::span<const std::string_view> heads ) noexcept
 {
-    return std::ranges::any_of( heads, [&]( std::string_view h )
-                                { return t.starts_with( h ); } );
+    for( const std::string_view head : heads )
+    {
+        if( t.starts_with( head ) )
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 inline bool isCommentLine( std::string_view line, bool hashComments ) noexcept
@@ -532,11 +545,8 @@ inline bool isCommentLine( std::string_view line, bool hashComments ) noexcept
     return opensWithAny( t, kHeads ) || t == "*" || ( hashComments && t.starts_with( '#' ) );
 }
 
-inline bool isImportLine( std::string_view line ) noexcept
-{
-    static constexpr std::array<std::string_view, 7> kHeads = { "import ", "from ", "export {", "export type {", "use ", "pub use ", "pub(crate) use " };
-    return opensWithAny( trimWs( line ), kHeads );
-}
+inline constexpr std::array<std::string_view, 7> kImportHeads = { "import ", "from ", "export {", "export type {", "use ", "pub use ", "pub(crate) use " };
+inline bool isImportLine( std::string_view line ) noexcept { return opensWithAny( trimWs( line ), kImportHeads ); }
 
 inline bool isDocPath( std::string_view p ) noexcept
 {
