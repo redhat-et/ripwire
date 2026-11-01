@@ -40,6 +40,7 @@
 #include <vector>
 
 #include <limits.h>    // PATH_MAX (hasEnclosingGitRepo realpath buffer)
+#include "infra/pipefields.h"  // PipeFieldReader — the record walk's deadline-keeping read
 #include "infra/os.h"  // rw::os::stat — the zero-popen .git walk-up pre-check; popen/pclose/realpath/localtime_r
 
 namespace rw
@@ -813,6 +814,11 @@ inline std::uint64_t gitWalkBudgetValue( const char* envName, std::uint64_t fall
 }
 inline std::uint64_t gitWalkMaxCommits() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_COMMITS", kGitWalkMaxCommits ); }
 inline std::uint64_t gitWalkMaxSeconds() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_SECONDS", kGitWalkMaxSeconds ); }
+inline std::chrono::steady_clock::time_point gitWalkDeadline() noexcept
+{
+    const std::uint64_t seconds = gitWalkMaxSeconds();
+    return seconds == 0 ? std::chrono::steady_clock::time_point::max() : std::chrono::steady_clock::now() + std::chrono::seconds( seconds );
+}
 
 // The DISCLOSE sink for a walk whose consumer has no history_unread of its own. Worker threads write it; main() reads it last.
 struct GitWalkCutReport
@@ -843,81 +849,18 @@ struct GitLogWalk
     std::uint64_t             commitsVisited = 0;
 };
 
-// One field of lookahead over a NUL-framed stream: `next` reads a field or hands back the one the boundary rule in
-// forEachGitLogRecord parked in `held` while it decided what an empty field means. It reads the pipe's descriptor itself, in
-// blocks, because a read through stdio cannot keep a deadline against a git that stopped writing. Between blocks, and at least
-// every 100 ms while none arrives, it checks `abandon` (the walkers' stop-at-the-next-unit contract) and `deadline`. Either one
-// drops a partial field and reads as end of stream; the caller tells them apart by the flag and `timedOut`. An end of stream
-// inside a field still returns that field: a final unterminated field counts.
+// One field of lookahead over a NUL-framed stream: `next` reads a field (infra/pipefields.h) or hands back the one the boundary
+// rule in forEachGitLogRecord parked in `held` while it decided what an empty field means.
 struct NulFieldStream
 {
-    std::FILE*                            pipe    = nullptr;
-    std::string                           held;
-    bool                                  hasHeld = false;
-    const std::atomic<bool>*              abandon = nullptr;
-    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
-    bool                                  timedOut = false;
-    std::vector<char>                     block    = std::vector<char>( 64u * 1024u );
-    std::size_t                           pos      = 0;
-    std::size_t                           len      = 0;
-
-    bool stopping() const noexcept { return timedOut || ( abandon != nullptr && abandon->load( std::memory_order_relaxed ) ); }
-
-    bool refill()
-    {
-        constexpr std::int64_t kPollMs = 100;
-        pos = len = 0;
-        while( !stopping() )
-        {
-            const auto now = std::chrono::steady_clock::now();
-            if( now >= deadline )
-            {
-                timedOut = true;
-                return false;
-            }
-            std::int64_t waitMs = kPollMs;
-            if( deadline != std::chrono::steady_clock::time_point::max() )
-            {
-                waitMs = std::min<std::int64_t>( kPollMs, std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now ).count() + 1 );
-            }
-            const long got = os::pipeReadSome( pipe, block.data(), block.size(), int( waitMs ) );
-            if( got == os::kPipeNothingYet )
-            {
-                continue;
-            }
-            if( got <= 0 )
-            {
-                return false;
-            }
-            len = std::size_t( got );
-            return true;
-        }
-        return false;
-    }
+    PipeFieldReader reader;
+    std::string     held;
+    bool            hasHeld = false;
 
     bool next( std::string& field )
     {
         if( hasHeld ) { field = std::move( held ); hasHeld = false; return true; }
-        field.clear();
-        bool readAny = false;
-        for( ;; )
-        {
-            if( pos == len && !refill() )
-            {
-                return readAny && !stopping();
-            }
-            readAny = true;
-            const char* start = block.data() + pos;
-            const char* nul   = static_cast<const char*>( std::memchr( start, '\0', len - pos ) );
-            if( nul != nullptr )
-            {
-                field.append( start, nul );
-                pos += std::size_t( nul - start ) + 1;
-                return true;
-            }
-            field.append( start, len - pos );
-            pos = len;
-        }
+        return reader.next( field );
     }
 };
 
@@ -979,13 +922,42 @@ inline std::string gitLogRecordsCmd( const std::string& root, const std::string&
 // `cut` set and a clean exit status; `cutSink` then hears of it, unless this walk's consumer carries the cut itself.
 enum class GitWalkCutDisclosure : std::uint8_t { ProcessTail, CarriedByCaller };
 
+// A walk's end: the exit status, or, for a cut walk, the disclosure. `unframed`: bytes arrived and no field ever opened a record.
+inline void finishGitLogWalk( std::FILE* pipe, GitLogWalk& walk, GitWalkCutDisclosure cutSink, bool unframed )
+{
+    if( walk.cut != GitWalkCut::None )
+    {
+        // The pipe closes now and git dies at its next write, but a git that is not writing would hold pclose's wait for as long
+        // as it stays silent, which is what the deadline exists to end. So the wait goes to a thread of its own.
+        std::thread( [ pipe ]() { os::pclose( pipe ); } ).detach();
+        if( cutSink == GitWalkCutDisclosure::ProcessTail )
+        {
+            gitWalkCutsToDisclose().walks.fetch_add( 1, std::memory_order_relaxed );
+            gitWalkCutsToDisclose().commitsRead.fetch_add( walk.commitsVisited, std::memory_order_relaxed );
+        }
+        return;
+    }
+    walk.exitCode = decodedExitCode( os::pclose( pipe ) );
+    if( walk.exitCode != 0 )
+    {
+        walk.unread = true;
+        walk.notRun = ( walk.exitCode == 127 || walk.exitCode == 126 );
+    }
+    else if( unframed && !gitWalksAbandoned() )
+    {
+        // Exit 0, bytes on the pipe, yet no field ever opened a record: the stream was not framed
+        // (CodeRabbit on #469). It is NOT "read, no history" — an abandoned walk stopped on purpose and
+        // is reported by the abandon flag instead.
+        walk.unread = true;
+    }
+}
+
 template<typename Visitor>
 inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::string& extraArgs, Visitor&& visit,
                                        GitWalkCutDisclosure cutSink = GitWalkCutDisclosure::ProcessTail )
 {
     GitLogWalk walk;
     const std::uint64_t maxCommits = gitWalkMaxCommits();
-    const std::uint64_t maxSeconds = gitWalkMaxSeconds();
     const std::string cmd = gitLogRecordsCmd( root, extraArgs );
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
@@ -1000,11 +972,7 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
     // stream whose fields never arrive (the default-format degrade, a test shim's bare lines) stops
     // the read where the old line reader stopped it — at its next unit — instead of blocking to
     // end-of-stream inside one unterminated field.
-    NulFieldStream fields{ .pipe = pipe, .abandon = &gGitWalksAbandoned };
-    if( maxSeconds != 0 )
-    {
-        fields.deadline = std::chrono::steady_clock::now() + std::chrono::seconds( maxSeconds );
-    }
+    NulFieldStream fields{ .reader = PipeFieldReader( pipe, &gGitWalksAbandoned, gitWalkDeadline() ) };
     std::string    field;
     std::string    lookahead;
     bool           haveLookahead = false;
@@ -1124,7 +1092,7 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
         }
         cur.paths.push_back( std::move( field ) );
     }
-    if( fields.timedOut )
+    if( fields.reader.timedOut )
     {
         walk.cut = GitWalkCut::Time;   // the open record lost its tail: not visited
     }
@@ -1132,32 +1100,7 @@ inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::strin
     {
         closeRecord();
     }
-    if( walk.cut != GitWalkCut::None )
-    {
-        // The pipe closes now and git dies at its next write, but a git that is not writing would hold pclose's wait for as long
-        // as it stays silent, which is what the deadline exists to end. So the wait goes to a thread of its own.
-        std::thread( [ pipe ]() { os::pclose( pipe ); } ).detach();
-        if( cutSink == GitWalkCutDisclosure::ProcessTail )
-        {
-            gitWalkCutsToDisclose().walks.fetch_add( 1, std::memory_order_relaxed );
-            gitWalkCutsToDisclose().commitsRead.fetch_add( walk.commitsVisited, std::memory_order_relaxed );
-        }
-        return walk;
-    }
-
-    walk.exitCode = decodedExitCode( os::pclose( pipe ) );
-    if( walk.exitCode != 0 )
-    {
-        walk.unread = true;
-        walk.notRun = ( walk.exitCode == 127 || walk.exitCode == 126 );
-    }
-    else if( anyData && !anyMarker && !gitWalksAbandoned() )
-    {
-        // Exit 0, bytes on the pipe, yet no field ever opened a record: the stream was not framed
-        // (CodeRabbit on #469). It is NOT "read, no history" — an abandoned walk stopped on purpose and
-        // is reported by the abandon flag instead.
-        walk.unread = true;
-    }
+    finishGitLogWalk( pipe, walk, cutSink, anyData && !anyMarker );
     return walk;
 }
 

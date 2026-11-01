@@ -100,7 +100,8 @@ inline std::string renderHistoryUnread( DiscloseAs as )
     }
     else
     {
-        comment += historyRead().notRunRoots == 0 ? "the walk stopped part-way or hit its budget" : "the walk did not run for one root and stopped part-way or hit its budget for another";
+        const char* const stopped = historyRead().cutRoots == 0 ? "stopped part-way" : historyRead().stoppedRoots == 0 ? "hit its budget" : "stopped part-way or hit its budget";
+        comment += historyRead().notRunRoots == 0 ? std::string( "the walk " ) + stopped : std::string( "the walk did not run for one root and " ) + stopped + " for another";
         comment += "), so churn= and amp= count only the commits that were read: both are floors";
     }
     comment += "; an absent churn= here is not zero churn. The failed walk is not cached, so the next call walks again.-->";
