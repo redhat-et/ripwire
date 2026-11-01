@@ -65,12 +65,14 @@ inline bool isTestPath( std::string_view p ) noexcept
     // filename heuristics
     const std::size_t      sl = p.rfind( '/' );
     const std::string_view fn = ( sl == std::string_view::npos ) ? p : p.substr( sl + 1 );
-    if( fn.rfind( "test_", 0 ) == 0 )
+    if( fn.rfind( "test_", 0 ) == 0 || fn.rfind( "test-", 0 ) == 0 )
     {
-        return true; // test_*.*
+        return true; // test_*.*, test-*.*
     }
     for( std::string_view m : { std::string_view( "_test." ), std::string_view( ".test." ),
-                                std::string_view( "_spec." ), std::string_view( ".spec." ) } )
+                                std::string_view( "-test." ),
+                                std::string_view( "_spec." ), std::string_view( ".spec." ),
+                                std::string_view( "-spec." ) } )
     {
         if( fn.find( m ) != std::string_view::npos )
         {
