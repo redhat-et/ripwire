@@ -223,7 +223,7 @@ if grep -q 'n="run"' "$TMP/pkgjsonts"; then ok "J7 positive: run row shown (src/
 F="$TMP/fold"; mkdir -p "$F/py/pkg" "$F/dot/bin" "$F/lit/tools" || no "F fixture dirs"
 printf '[options.entry_points]\nx.report =\n    fmt = pkg.mod:Fmt\n    whole = pkg.mod\n' >"$F/py/setup.cfg"
 printf 'class Fmt:\n    pass\n\n\ndef main():\n    pass\n' >"$F/py/pkg/mod.py"; : >"$F/py/pkg/__init__.py"
-printf '{\n  "name": "dot-pkg",\n  "bin": {\n    "dot-cli": "./bin/cli.js"\n  }\n}\n' >"$F/dot/package.json"
+printf '{\n  "name": "dot-pkg",\n  "description": "say \\"bin\\": in a string",\n  "files": ["bin"],\n  "publishConfig": {\n    "bin": "nested.js"\n  },\n  "bin": {\n    "dot-cli": "./bin/cli.js"\n  }\n}\n' >"$F/dot/package.json"   # top-level "bin" on line 8
 printf 'export function dotStart() {\n  return 1;\n}\n' >"$F/dot/bin/cli.js"
 printf 'export function loadBins() {\n  return entry_points(group="bin");\n}\n' >"$F/dot/bin/load.js"   # a loader shape quoting "bin"
 printf '[package]\nname = "pyish"\n\n[[bin]]\nname = "pyish"\npath = "pkg/mod.py"\n' >"$F/py/Cargo.toml"   # read only for a .rs row
@@ -242,8 +242,8 @@ if has "$FPY" "any({'n':'fmt','target':'pkg.mod:Fmt','def':'pkg/mod.py:1'} in g[
 if grep -q 'n="main"' "$TMP/fpy2" && has "$FPY2" "len($(grp x.report))==1 and $(grp bin)==[]"; then
     ok "F1b a shown Python main reads setup.cfg, not a Cargo.toml [[bin]] that names its file"; else no "F1b format by extension: $FPY2"; fi
 # F2: a package.json path written "./bin/cli.js" resolves through the one path resolver
-if has "$FDOT" "any(g['p']=='package.json' and g['e']==[{'n':'dot-cli','target':'./bin/cli.js','def':'bin/cli.js:1'}] and 'used_at' not in g for g in $(grp bin))"; then
-    ok "F2 a ./-prefixed package.json bin path links to its exported function; a manifest-key group carries no used_at= (a loader quoting \"bin\" is not scanned)"; else no "F2 ./ path: $FDOT"; fi
+if has "$FDOT" "any(g['p']=='package.json' and g['l']=='8' and g['e']==[{'n':'dot-cli','target':'./bin/cli.js','def':'bin/cli.js:1'}] and 'used_at' not in g for g in $(grp bin))"; then
+    ok "F2 l= is the top-level bin key (not a nested one, a value or an escaped quote in a string); a ./-prefixed package.json bin path links to its exported function; a manifest-key group carries no used_at= (a loader quoting \"bin\" is not scanned)"; else no "F2 ./ path: $FDOT"; fi
 # F3: Cargo literal strings ('x') and a spaced [[ bin ]] header with a trailing comment read through the shared TOML helpers
 if has "$FLIT" "any(g['p']=='Cargo.toml' and g['e']==[{'n':'gen','target':'tools/gen.rs','def':'tools/gen.rs:3'}] for g in $(grp bin))"; then
     ok "F3 Cargo [[ bin ]] header + literal-string name/path -> tools/gen.rs:3 main"; else no "F3 cargo literal strings: $FLIT"; fi

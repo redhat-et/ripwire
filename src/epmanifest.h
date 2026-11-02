@@ -464,24 +464,38 @@ inline void parseCargoBins( std::string_view text, std::vector<EpEntry>& out )
 }
 
 // package.json: `"bin"` (a string or an object of name → path) and `"main"`, each target a file path as written (not module:attr).
+// The line of the TOP-LEVEL key `key` of the JSON object `text` (object depth 1, outside strings), 0 when it is absent: a
+// same-named key nested deeper ("publishConfig": {"bin": …}) or a value that spells it ("files": ["bin"]) is not that key.
 inline std::uint32_t jsonKeyLine( std::string_view text, std::string_view key )
 {
-    std::uint32_t found = 0;
-    const std::string needle = std::format( "\"{}\"", key );
-    darkflags::forEachLine( text, [ & ]( std::string_view line, std::uint32_t lineNo )
+    std::uint32_t line  = 1;
+    int           depth = 0;
+    for( std::size_t i = 0; i < text.size(); ++i )
     {
-        if( found != 0 )
+        const char c = text[i];
+        line += c == '\n' ? 1 : 0;
+        depth += ( c == '{' || c == '[' ) ? 1 : ( c == '}' || c == ']' ) ? -1 : 0;
+        if( c != '"' )
         {
-            return;
+            continue;
         }
-        const std::size_t at = line.find( needle );
-        if( at == std::string_view::npos || !trimWs( line.substr( at + needle.size() ) ).starts_with( ':' ) )
+        std::size_t end = i + 1;   // the closing quote; a backslash escapes the next byte
+        while( end < text.size() && text[end] != '"' )
         {
-            return;
+            end += text[end] == '\\' ? 2 : 1;
         }
-        found = lineNo;
-    } );
-    return found;
+        if( end >= text.size() )
+        {
+            return 0;   // an unclosed string: no key can follow
+        }
+        const std::size_t after = text.find_first_not_of( " \t\r\n", end + 1 );
+        if( depth == 1 && text.substr( i + 1, end - i - 1 ) == key && after != std::string_view::npos && text[after] == ':' )
+        {
+            return line;
+        }
+        i = end;
+    }
+    return 0;
 }
 
 inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>& out )
