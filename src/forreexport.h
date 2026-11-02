@@ -8,7 +8,9 @@
 //
 // WHEN. The task asks where something comes from — a cue word (`defined`, `import`, `export`, `re-export`, `hop(s)`) or the import
 // spelling `NAME from <module>` (`verify from hono/jwt`) — or the chain reaches a file the task names (`ls.rs`, a `remove-emphasis`
-// directory). Without either, a definition's re-exports are not what was asked: the fire table showed 25 fires across S1/MF1/LD/LD2
+// directory), or (BARREL-SHORT-KEY) the subject's SHAPE asks it: the task IS one name (a bare subject), or it writes a TS/JS name
+// QUALIFIED (`Completions.getCompletionsAtPosition`, `ts.server.Session`), in which case only the chains that prove the qualifier
+// print (forreexport.h qualifierProvenAt: a namespace hop, a `a.b.ts` file stem or a directory). Without one, a definition's re-exports are not what was asked: the fire table showed 25 fires across S1/MF1/LD/LD2
 // before this gate, 20 of them on path/orientation questions that gained no asked-for name (angular barrels alone 9 rows, 10 KB).
 // WHAT. For each task word that names an in-tree definition (a code-shaped word, or `NAME from <module>`), the re-export statements
 // that make THAT definition reachable under another module path, walked outward from the definition (nearest first):
@@ -17,7 +19,10 @@
 //         reads it (`crate` / `self` / `super` / a child module of the file / a crate of the tree by its Cargo name), so two
 //         same-named items in two modules keep their module identity; a crate name that two manifests spell is cands="N".
 //   TS/JS `export { a } from './m'`, `export { a as b } from './m'` (the row says as=), `export * from './m'` (hedged, glob="1"),
-//         the module resolved by the import pin's own resolver (resolveJsNamedImportFile, unique-or-nothing).
+//         NAMESPACE hops (ns=): `export * as X from './m'`, and `import * as X from './m'` with a local `export { X [as Y] }` in the
+//         same file (both records already indexed: ModuleAlias "*" + the JsExport clause); a Web spelling then carries its
+//         namespace path (Spelling::mods), and a later hop takes its head segment. The module resolved by the import pin's own
+//         resolver (resolveJsNamedImportFile, unique-or-nothing).
 // A file the task names (`ls.rs`) that imports the definition through one of those spellings adds its own `use`/`import` row
 // (u, the start of the chain). Rows only: no row is a call edge, nothing here feeds reaches=, and a type-only re-export is a
 // row like any other (it moves a name, not a call).
@@ -26,11 +31,12 @@
 // path is not the file's: a disclosed floor; a `pub use` STATEMENT inside an inline `mod { }` is read, with the inline module in
 // its path); `src/main.rs` beside a lib.rs and `src/bin/**` (their own binary crates, never the lib's modules); a Rust `pub use a as b` RENAME (counted as_skipped=, not followed: help-wanted
 // #445 owns renames); an external target (the walk starts at an in-tree definition, so an outside crate is never a row);
-// `export * as ns from` (a namespace, not a name). Cycles terminate (each public spelling is visited once).
+// a namespace import that the file does not export. Cycles terminate (each public spelling is visited once).
 // RIPWIRE_NO_REEXPORT_HOPS (any value) turns it off.
 
 #include "depdialect.h"          // dependencyDialect — the Web dialect is the unit the ReExport records are written per
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
+#include "forliteral.h"          // lit_detail::isConstShaped; hopbody.h renderBodyElement — a CONST-shaped key is <lit>'s; search.h grepCollect/grepEnrich, redact, nextverb
 #include "graph.h"               // tomlSectionNames, resolveJsNamedImportFile, lexicalNormalize
 #include "infra/namesplit.h"     // isIdentChar
 #include "model.h"
@@ -44,6 +50,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace rw
@@ -66,7 +73,9 @@ inline constexpr std::string_view kReexportLegend =
     "definition, at= its path, total= its rx rows (8 shown; capped=1: the walk stopped at 256 spellings, total= is a floor), same=1 the same rows as a def above; "
     "rx p= l= one `pub use`/`export … from` statement, use= its written path (or from= the module), "
     "at= the path it makes public (vis=restricted: pub(crate)/pub(super)/pub(in …), visible only inside its crate), as= the new name; glob=1 a glob/star hop (hedged: the module may not supply the name); "
-    "cands=N the path names N same-named crates (hedged); u p= l= a task-named file's own import of it (the chain's start); "
+    "cands=N the path names N same-named crates (hedged); ns= a namespace hop (`import * as X` then `export { X }`, or `export * as X from`): "
+    "the whole module published as X; def q= the qualifier the task wrote the name under (`Q.name`), proven at a hop or the definition's "
+    "own file and printed first (a same-named definition that cannot prove it is not listed); u p= l= a task-named file's own import of it (the chain's start); "
     "as_skipped=N renamed re-exports not followed; rows, not call edges -->";
 
 namespace reexport_detail
@@ -86,7 +95,10 @@ struct Row
     bool           glob  = false;
     bool           use   = false;   // a task-named file's own import (no new spelling)
     bool           restricted = false;   // Rust `pub(crate)` / `pub(super)` / `pub(in …)`: visible only inside its crate, not a public path
+    bool           ns    = false;   // Web NAMESPACE hop: `export * as X from` (b), or `import * as X from` (b) + `export { X }` (exp)
+    const Binding* exp   = nullptr; // the `export { X [as Y] }` clause of a paired namespace hop
     std::size_t    cands = 1;
+    int            parent = -1;     // the row whose new spelling this row consumed (-1: the definition's own spelling)
     Spelling       at;
 };
 
@@ -486,7 +498,9 @@ struct Walk
     const RustCrates&                           rc;
     const HashMap<std::string, std::uint32_t>&  files;
     HashMap<std::string, std::vector<const Binding*>> rustByVar;     // Rust TypeImport records by bound name ("*" = globs)
-    HashMap<std::string, std::vector<const Binding*>> webByTaken;    // Web ReExport records by the name they take ("*" = stars)
+    HashMap<std::string, std::vector<const Binding*>> webByTaken;    // Web ReExport records by the name they take ("*" = stars, namespaces)
+    // Web paired NAMESPACE hops by the module FILE they import: `import * as X from './m'` (first) + `export { X [as Y] }` (second)
+    HashMap<std::uint32_t, std::vector<std::pair<const Binding*, const Binding*>>> webNsByTarget;
     HashMap<const Binding*, RustTarget>               rustTargets;   // memo
     HashMap<const Binding*, std::uint32_t>            webTargets;    // memo: the module's file, kNoFile when not unique
     std::vector<char>                                 taskFile;      // file -> the task names it (use-site rows)
@@ -560,7 +574,8 @@ struct Walk
         return row;
     }
 
-    // Web: does record `b` re-export spelling `s` (file + exported name)?
+    // Web: does record `b` re-export spelling `s` (file + namespace path + exported name)? A Web spelling's mods are the namespace
+    // path it is reached under (`Completions.getCompletionsAtPosition`: mods [Completions]); the statement takes its head segment.
     std::optional<Row> webMatch( const Binding* b, const Spelling& s )
     {
         if( webTarget( b ) != s.crate )
@@ -568,10 +583,41 @@ struct Walk
             return std::nullopt;
         }
         Row row{ .b = b };
-        row.glob     = b->importedName == "*";
         row.at.crate = b->fileId;
-        row.at.name  = row.glob ? s.name : b->var;
+        row.at.mods  = s.mods;
+        row.at.name  = s.name;
+        if( b->importedName == "*" )
+        {
+            row.glob = b->var == "*";   // `export * from`: the same spelling, hedged; `export * as X from`: a namespace hop
+            row.ns   = !row.glob;
+            if( row.ns )
+            {
+                row.at.mods.insert( row.at.mods.begin(), b->var );
+            }
+            return row;
+        }
+        std::string& head = row.at.mods.empty() ? row.at.name : row.at.mods.front();
+        if( b->importedName != head )   // `export { a [as b] } from`: takes the head segment by name, publishes it as b
+        {
+            return std::nullopt;
+        }
+        head = b->var;
         return row;
+    }
+    // Web: the paired namespace hops of the module file `s.crate` (`import * as X from` it, then `export { X [as Y] }`): each
+    // publishes `Y.<s>` from the importing file.
+    void webNsRows( const Spelling& s, std::vector<Row>& out )
+    {
+        const auto hit = webNsByTarget.find( s.crate );
+        for( const auto& [ alias, exp ] : hit == webNsByTarget.end() ? std::vector<std::pair<const Binding*, const Binding*>>{} : hit->second )
+        {
+            Row row{ .b = alias, .ns = true, .exp = exp };
+            row.at.crate = alias->fileId;
+            row.at.mods  = s.mods;
+            row.at.mods.insert( row.at.mods.begin(), exp->var );
+            row.at.name = s.name;
+            out.push_back( std::move( row ) );
+        }
     }
 };
 
@@ -589,7 +635,56 @@ struct Chain
     std::vector<Row> uses;
     std::size_t      asSkipped = 0;
     bool             capped    = false;   // the walk stopped at kReexportSpellingCap spellings: total= is a floor
+    std::vector<std::string> q;           // the qualifier the task wrote the name under (Web only; empty: none)
+    int              qRow      = -2;      // where q is proven: -1 the definition's own file, K the row whose spelling it is, -2 not proven
 };
+
+// The file stem of `rel` (`src/a/ts.Completions.ts` -> `ts.Completions`; `x.d.ts` -> `x`) and its directory segments.
+inline std::string_view reexportStem( std::string_view rel )
+{
+    const std::size_t slash = rel.rfind( '/' );
+    std::string_view  base  = rel.substr( slash == std::string_view::npos ? 0 : slash + 1 );
+    for( const std::string_view ext : { std::string_view( ".d.ts" ), std::string_view( ".d.mts" ), std::string_view( ".d.cts" ) } )
+    {
+        if( base.ends_with( ext ) )
+        {
+            return base.substr( 0, base.size() - ext.size() );
+        }
+    }
+    const std::size_t dot = base.rfind( '.' );
+    return dot == std::string_view::npos || dot == 0 ? base : base.substr( 0, dot );
+}
+
+// THE QUALIFIER RULE (one rule for the re-export rows and the SHORT-KEY leaf rung). A name written `Q.leaf` is proven reached under Q
+// at a spelling (file F, namespace path P) when Q ends with P and every segment before that is accounted for by F itself: the
+// segments, joined by `.`, are a dot-suffix of F's stem (`ts.server` for `ts.server.ts`; `Completions` for `ts.Completions.ts`),
+// or each is F's stem or one of F's directory segments (`pkg.mod.f` for `pkg/mod.py`). Nothing proven when Q is all P-less and F
+// says nothing (a same-named definition elsewhere is never picked by its leaf alone). Case-sensitive.
+inline bool qualifierProvenAt( std::string_view rel, const std::vector<std::string>& mods, const std::vector<std::string>& q )
+{
+    if( q.empty() || q.size() < mods.size() || !std::equal( mods.begin(), mods.end(), q.end() - std::ptrdiff_t( mods.size() ) ) )
+    {
+        return false;
+    }
+    const std::size_t rest = q.size() - mods.size();
+    if( rest == 0 )
+    {
+        return true;
+    }
+    const std::string_view stem = reexportStem( rel );
+    std::string            joined;
+    for( std::size_t i = 0; i < rest; ++i )
+    {
+        joined.append( i ? "." : "" ).append( q[ i ] );
+    }
+    if( stem == joined || ( stem.size() > joined.size() && stem.ends_with( joined ) && stem[ stem.size() - joined.size() - 1 ] == '.' ) )
+    {
+        return true;
+    }
+    const std::string slashed = std::string( "/" ).append( rel.substr( 0, rel.rfind( '/' ) == std::string_view::npos ? 0 : rel.rfind( '/' ) ) ).append( "/" );
+    return std::all_of( q.begin(), q.begin() + std::ptrdiff_t( rest ), [ & ]( const std::string& seg )
+                        { return seg == stem || slashed.find( std::string( "/" ).append( seg ).append( "/" ) ) != std::string::npos; } );
+}
 
 // The statements that may re-export spelling `s`: by its name, every glob, and (Rust) by each module segment of its path.
 inline std::vector<const Binding*> reexportCandidates( const Walk& w, bool rust, const Spelling& s )
@@ -603,7 +698,7 @@ inline std::vector<const Binding*> reexportCandidates( const Walk& w, bool rust,
             cand.insert( cand.end(), hit->second.begin(), hit->second.end() );
         }
     };
-    take( s.name );
+    take( !rust && !s.mods.empty() ? s.mods.front() : s.name );   // Web: a namespace-path spelling is taken by its head segment
     take( "*" );
     for( const std::string& m : rust ? s.mods : std::vector<std::string>{} )
     {
@@ -650,10 +745,12 @@ inline void walkChain( Walk& w, Chain& c )
     HashMap<std::string, char> seen;
     seen.try_emplace( spellingKey( c.start ), '\0' );
     std::vector<Spelling> frontier{ c.start };
+    std::vector<int>      frontierRow{ -1 };   // the row that published frontier[i] (-1: the definition's own spelling)
     std::size_t at = 0;
     for( ; at < frontier.size() && frontier.size() < kReexportSpellingCap; ++at )
     {
         const Spelling s = frontier[ at ];
+        std::vector<Row> found;
         for( const Binding* b : reexportCandidates( w, c.rust, s ) )
         {
             std::optional<Row> row = c.rust ? w.rustMatch( b, s, c.asSkipped ) : w.webMatch( b, s );
@@ -662,26 +759,42 @@ inline void walkChain( Walk& w, Chain& c )
             if( publishes )
             {
                 row->restricted = vis == 2;
+                found.push_back( std::move( *row ) );
             }
-            if( row && !publishes )
+            else if( row )
             {
                 noteReexportUse( w, c, std::move( *row ) );
             }
-            if( !publishes || !seen.try_emplace( spellingKey( row->at ), '\0' ).second )
+        }
+        if( !c.rust )
+        {
+            w.webNsRows( s, found );
+        }
+        for( Row& row : found )
+        {
+            if( !seen.try_emplace( spellingKey( row.at ), '\0' ).second )
             {
                 continue;
             }
-            frontier.push_back( row->at );
-            if( std::ranges::none_of( c.rows, [ & ]( const Row& r ) { return r.b == b; } ) )
+            row.parent = frontierRow[ at ];
+            frontier.push_back( row.at );
+            const auto same = std::ranges::find_if( c.rows, [ & ]( const Row& r ) { return r.b == row.b && r.exp == row.exp; } );
+            frontierRow.push_back( same == c.rows.end() ? int( c.rows.size() ) : int( same - c.rows.begin() ) );
+            if( same == c.rows.end() )
             {
-                c.rows.push_back( std::move( *row ) );
+                c.rows.push_back( std::move( row ) );
             }
         }
     }
     c.capped = at < frontier.size();   // the loop ended on the cap with spellings still unvisited
     if( !c.rust )
     {
-        webReexportUses( w, c, seen );
+        HashMap<std::string, char> heads;   // a use site imports a spelling's HEAD segment (a namespace, or the name itself)
+        for( const Spelling& s : frontier )
+        {
+            heads.try_emplace( spellingKey( Spelling{ .crate = s.crate, .name = s.mods.empty() ? s.name : s.mods.front() } ), '\0' );
+        }
+        webReexportUses( w, c, heads );
     }
 }
 
@@ -737,22 +850,67 @@ inline bool reexportTaskCued( const std::vector<std::string_view>& tokens )
     return false;
 }
 
+// A token spelled as a QUALIFIED name: identifier segments joined by `.` or `::` (`Completions.getCompletionsAtPosition`,
+// `ts.server.Session`, `a::b::Item`), at least two, none empty. A `this.`/`self.` chain is a member access, not a qualifier, and a
+// segment that is not an identifier (`ls.rs` passes the shape but its leaf is no code word, so it names nothing). Empty when not.
+inline std::vector<std::string_view> reexportQualifiedSegments( std::string_view tok )
+{
+    std::vector<std::string_view> segs;
+    for( std::size_t at = 0; at <= tok.size(); )
+    {
+        std::size_t end = at;
+        while( end < tok.size() && ( namesplit::isIdentChar( tok[ end ] ) || tok[ end ] == '$' ) )
+        {
+            ++end;
+        }
+        if( end == at )
+        {
+            return {};
+        }
+        segs.push_back( tok.substr( at, end - at ) );
+        if( end == tok.size() )
+        {
+            break;
+        }
+        const std::size_t sep = tok.substr( end ).starts_with( "::" ) ? 2 : tok[ end ] == '.' ? 1 : 0;
+        if( sep == 0 )
+        {
+            return {};
+        }
+        at = end + sep;
+    }
+    if( segs.size() < 2 || segs.front() == "this" || segs.front() == "self" )
+    {
+        return {};
+    }
+    return segs;
+}
+
+// A task word that may name a definition, with the qualifier it was written under (`Completions` for
+// `Completions.getCompletionsAtPosition`; empty when bare).
+struct ReexportTaskName
+{
+    std::string              name;
+    std::vector<std::string> q;
+};
+
 // The task's words that may name a definition: code-shaped (an upper-case letter, `_` or `$` inside, or a capital first
-// letter) or written `NAME from M` with M a module spelling.
-inline std::vector<std::string> reexportTaskNames( std::string_view task )
+// letter) or written `NAME from M` with M a module spelling. The LAST word of a qualified token keeps its qualifier.
+inline std::vector<ReexportTaskName> reexportTaskNames( std::string_view task )
 {
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
-    std::vector<std::string>            out;
-    const auto add = [ & ]( std::string_view w )
+    std::vector<ReexportTaskName>       out;
+    const auto add = [ & ]( std::string_view w, std::vector<std::string> q )
     {
-        if( out.size() < kReexportNameCap && w.size() >= 3 && std::ranges::find( out, w ) == out.end() )
+        if( out.size() < kReexportNameCap && w.size() >= 3 && std::ranges::none_of( out, [ & ]( const ReexportTaskName& n ) { return n.name == w; } ) )
         {
-            out.emplace_back( w );
+            out.push_back( ReexportTaskName{ std::string( w ), std::move( q ) } );
         }
     };
     for( std::size_t i = 0; i < tokens.size(); ++i )
     {
-        const std::string_view tok = tokens[ i ];
+        const std::string_view              tok  = tokens[ i ];
+        const std::vector<std::string_view> segs = reexportQualifiedSegments( tok );
         for( std::size_t at = 0; at < tok.size(); )   // the identifier words inside one token (`Owner::name`, `a/b`)
         {
             std::size_t end = at;
@@ -763,9 +921,12 @@ inline std::vector<std::string> reexportTaskNames( std::string_view task )
             const std::string_view w = tok.substr( at, end - at );
             const bool code = std::ranges::any_of( w.substr( std::min<std::size_t>( 1, w.size() ) ), []( char ch ) { return ( ch >= 'A' && ch <= 'Z' ) || ch == '_' || ch == '$'; } )
                            || ( !w.empty() && w.front() >= 'A' && w.front() <= 'Z' );
-            if( code || ( end == tok.size() && at == 0 && reexportFromModule( tokens, i ) ) )
+            // the LEAF of a qualified spelling is a name whatever its case (`Utils.formatDate`, `api.v1.handler`): the qualified form
+            // is itself the code shape. A file or host suffix (`main.go`, `pkg.json`) is not a leaf.
+            const bool leaf = !segs.empty() && end == tok.size() && !lit_detail::isFileOrHostSuffix( w );
+            if( code || leaf || ( end == tok.size() && at == 0 && reexportFromModule( tokens, i ) ) )
             {
-                add( w );
+                add( w, leaf ? std::vector<std::string>( segs.begin(), segs.end() - 1 ) : std::vector<std::string>{} );
             }
             at = end + 1;
         }
@@ -863,7 +1024,11 @@ struct ReexportXml
             attr( "at", spelled( r.at ) );
             out.append( r.restricted ? " vis=\"restricted\"" : "" );
         }
-        if( !c.rust && !r.use && !r.glob && r.b->var != r.b->importedName )
+        if( r.ns )
+        {
+            attr( "ns", r.exp != nullptr ? r.exp->var : r.b->var );   // the namespace the hop publishes the module under
+        }
+        else if( !c.rust && !r.use && !r.glob && r.b->var != r.b->importedName )
         {
             attr( "as", r.b->var );
         }
@@ -885,6 +1050,10 @@ struct ReexportXml
         {
             attr( "at", spelled( c.start ) );
         }
+        if( !c.q.empty() )
+        {
+            attr( "q", joinPath( std::vector<std::string>( c.q.begin(), c.q.end() - 1 ), c.q.back(), "." ) );
+        }
         num( "total", c.rows.size() );
         out.append( c.capped ? " capped=\"1\"" : "" );
         if( c.asSkipped > 0 )
@@ -904,13 +1073,32 @@ struct ReexportXml
         }
         return !same;
     }
+    // The rows printed, at most kReexportRowCap: walk order, except that a QUALIFIED chain prints the hops that reach the qualifier
+    // first (nearest the definition first), so the cap never cuts the path the task's spelling names.
+    static std::vector<std::size_t> rowOrder( const Chain& c )
+    {
+        std::vector<std::size_t> order;
+        for( int i = c.qRow; i >= 0; i = c.rows[ std::size_t( i ) ].parent )
+        {
+            order.insert( order.begin(), std::size_t( i ) );
+        }
+        for( std::size_t i = 0; i < c.rows.size(); ++i )
+        {
+            if( std::ranges::find( order, i ) == order.end() )
+            {
+                order.push_back( i );
+            }
+        }
+        order.resize( std::min( order.size(), kReexportRowCap ) );
+        return order;
+    }
     void chain( const Chain& c )
     {
         if( !defRow( c ) )
         {
             return;
         }
-        for( std::size_t i = 0; i < c.rows.size() && i < kReexportRowCap; ++i )
+        for( const std::size_t i : rowOrder( c ) )
         {
             row( c, c.rows[ i ], "rx" );
         }
@@ -938,7 +1126,7 @@ inline std::string_view reexportFromPackage( const std::vector<std::string_view>
 
 // The definitions a task word names, in a language whose re-exports this file reads (Rust; the Web dialect), inside the
 // package the task names (`from @angular/core`: a path with a `core/` directory) when it names one.
-inline std::vector<const Symbol*> reexportDefs( const IngestResult& ing, const std::vector<std::string>& names, std::string_view package )
+inline std::vector<const Symbol*> reexportDefs( const IngestResult& ing, const std::vector<ReexportTaskName>& names, std::string_view package )
 {
     std::vector<const Symbol*> defs;
     const std::string          dir = std::string( "/" ).append( package ).append( "/" );
@@ -947,12 +1135,64 @@ inline std::vector<const Symbol*> reexportDefs( const IngestResult& ing, const s
         const DepDialect d    = dependencyDialect( s.lang );
         const bool       lang = d == DepDialect::Rust || d == DepDialect::Web;
         const bool inPkg = package.empty() || std::string( "/" ).append( rootRelPath( ing, s.fileId ) ).find( dir ) != std::string::npos;
-        if( lang && inPkg && reexportDefKind( s ) && std::ranges::find( names, s.name ) != names.end() )
+        if( lang && inPkg && reexportDefKind( s ) && std::ranges::any_of( names, [ & ]( const ReexportTaskName& n ) { return n.name == s.name; } ) )
         {
             defs.push_back( &s );
         }
     }
     return defs;
+}
+
+// Is the statement at `byte` of file `f` a LOCAL export clause, `export { … }` with no `from` (the clause form of a JsExport record; a
+// re-export clause names another module's binding, never this file's namespace import)? Unreadable reads as no.
+inline bool localExportClause( Sources& src, std::uint32_t f, std::uint32_t byte )
+{
+    const std::string* t = src.of( f );
+    if( t == nullptr || byte >= t->size() || !std::string_view( *t ).substr( byte ).starts_with( "export" ) )
+    {
+        return false;
+    }
+    const std::size_t open  = t->find_first_not_of( " \t\r\n", byte + 6 );
+    const std::size_t close = open == std::string::npos || ( *t )[ open ] != '{' ? std::string::npos : t->find( '}', open );
+    if( close == std::string::npos )
+    {
+        return false;
+    }
+    const std::size_t next = t->find_first_not_of( " \t\r\n", close + 1 );
+    return next == std::string::npos || !std::string_view( *t ).substr( next ).starts_with( "from" )
+        || ( next + 4 < t->size() && namesplit::isIdentChar( ( *t )[ next + 4 ] ) );
+}
+
+// The paired NAMESPACE hops: a file that does `import * as X from './m'` and exports X with a local `export { X [as Y] }` publishes
+// m's whole namespace as Y. Both records are already indexed (ModuleAlias "*" and the JsExport clause); the module must resolve to
+// ONE file. Only this proven shape is a hop: an import with no local export, or an export of a name no namespace import binds, is not.
+inline void indexWebNamespaceHops( const IngestResult& ing, Walk& w )
+{
+    HashMap<std::string, const Binding*>   byKey;
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::ModuleAlias && b.importedName == "*" && !b.isFromAssignment && dependencyDialect( langOfPath( rootRelPath( ing, b.fileId ) ) ) == DepDialect::Web )
+        {
+            byKey.try_emplace( std::to_string( b.fileId ) + "#" + b.var, &b );
+        }
+    }
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind != LocalBindKind::JsExport || b.importedName.empty() || byKey.empty() )
+        {
+            continue;
+        }
+        const auto alias = byKey.find( std::to_string( b.fileId ) + "#" + b.importedName );
+        if( alias == byKey.end() || !localExportClause( w.src, b.fileId, b.startByte ) )
+        {
+            continue;
+        }
+        const std::uint32_t target = w.webTarget( alias->second );
+        if( target != kNoFile )
+        {
+            w.webNsByTarget[ target ].emplace_back( alias->second, &b );
+        }
+    }
 }
 
 // The candidate statements by the name they bind or take: Rust `use` records (a rename also under the name it takes, to be
@@ -974,23 +1214,52 @@ inline void indexReexportRecords( const IngestResult& ing, bool rust, bool web, 
             w.webByTaken[ b.importedName ].push_back( &b );
         }
     }
+    if( web )
+    {
+        indexWebNamespaceHops( ing, w );
+    }
 }
 
-// Every chain of the definitions named `name` that has a hop: one reaching a task-named file first, then the longer, then path order.
-inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbol*>& defs, std::string_view name )
+// A Web chain walked for a QUALIFIED task name: where the qualifier is proven (Chain::qRow), the definition's own file first, then the
+// rows in walk order.
+inline void proveChainQualifier( const IngestResult& ing, Chain& c )
+{
+    if( qualifierProvenAt( rootRelPath( ing, c.def->fileId ), {}, c.q ) )
+    {
+        c.qRow = -1;
+        return;
+    }
+    for( std::size_t i = 0; i < c.rows.size(); ++i )
+    {
+        if( qualifierProvenAt( rootRelPath( ing, c.rows[ i ].at.crate ), c.rows[ i ].at.mods, c.q ) )
+        {
+            c.qRow = int( i );
+            return;
+        }
+    }
+}
+
+// Every chain of the definitions named `n.name` that has a hop: one reaching a task-named file first, then the longer, then path
+// order. A Web name the task QUALIFIED keeps only the chains that prove the qualifier (a same-named definition elsewhere is a decoy).
+inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbol*>& defs, const ReexportTaskName& n )
 {
     std::vector<Chain> chains;
     for( const Symbol* d : defs )
     {
         const bool rust = dependencyDialect( d->lang ) == DepDialect::Rust;
-        if( d->name != name || ( rust && w.rc.crateOf[ d->fileId ] == kNoFile ) )
+        if( d->name != n.name || ( rust && w.rc.crateOf[ d->fileId ] == kNoFile ) )
         {
             continue;
         }
         Chain c{ .def = d, .rust = rust };
         c.start = rust ? Spelling{ w.rc.crateOf[ d->fileId ], w.rc.modOf[ d->fileId ], d->name } : Spelling{ .crate = d->fileId, .name = d->name };
         walkChain( w, c );
-        if( !c.rows.empty() )
+        if( !rust && !n.q.empty() )
+        {
+            c.q = n.q;
+            proveChainQualifier( w.ing, c );
+        }
+        if( !c.rows.empty() && ( c.q.empty() || c.qRow != -2 ) )
         {
             chains.push_back( std::move( c ) );
         }
@@ -1015,7 +1284,7 @@ inline std::string reexportHeldMarker( std::size_t defs )
 inline std::string renderForReexports( const IngestResult& ing, std::string_view task, bool held = false )
 {
     using namespace reexport_detail;
-    const std::vector<std::string>      names  = reexportTaskNames( task );
+    const std::vector<ReexportTaskName> names  = reexportTaskNames( task );
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
     const std::vector<const Symbol*>    defs   = names.empty() ? std::vector<const Symbol*>{} : reexportDefs( ing, names, reexportFromPackage( tokens ) );
     if( defs.empty() )
@@ -1025,9 +1294,14 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     // CR nitpick (review 5712563408, forreexport.h:1025): no cue word and no task-named file means no chain can print (a chain prints
     // when cued, or when it carries a use row, and a use row is only noted from a task-named file): return before the file map and
     // the Cargo.toml reads
-    const bool        cued      = reexportTaskCued( tokens );   // otherwise only a chain that reaches a task-named file prints
+    // BARREL-SHORT-KEY: the SUBJECT'S SHAPE cues it too, not only a word: a task that IS one name (a bare subject: where it comes from
+    // is part of what it asks) and a QUALIFIED name (`Completions.getCompletionsAtPosition`: the qualifier is a namespace path a
+    // reader must walk, and only the chain that proves it prints)
+    const bool        bare      = tokens.size() == 1;
+    const bool        cued      = reexportTaskCued( tokens ) || bare;   // otherwise only a chain that reaches a task-named file prints
+    const bool        qualified = std::ranges::any_of( names, []( const ReexportTaskName& n ) { return !n.q.empty(); } );
     std::vector<char> taskFiles = reexportTaskFiles( ing, tokens );
-    if( !cued && std::ranges::none_of( taskFiles, []( char c ) { return c != 0; } ) )
+    if( !cued && !qualified && std::ranges::none_of( taskFiles, []( char c ) { return c != 0; } ) )
     {
         return {};
     }
@@ -1042,16 +1316,16 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     }
     const RustCrates rc = rust ? buildRustCrates( ing, files ) : RustCrates{ .crateOf = std::vector<std::uint32_t>( ing.files.size(), kNoFile ) };
     Sources          src{ ing, {} };
-    Walk             w{ ing, src, rc, files, {}, {}, {}, {}, std::move( taskFiles ) };
+    Walk             w{ ing, src, rc, files, {}, {}, {}, {}, {}, std::move( taskFiles ) };
     indexReexportRecords( ing, rust, web, w );
     ReexportXml xml{ ing, rc, src, {}, {}, {} };
     std::size_t printedDefs = 0;   // the def rows printed (the held marker's count)
-    for( const std::string& name : names )
+    for( const ReexportTaskName& name : names )
     {
         const std::vector<Chain> chains = reexportChains( w, defs, name );
         for( std::size_t k = 0; k < chains.size() && k < kReexportDefCap; ++k )
         {
-            if( cued || !chains[ k ].uses.empty() )
+            if( cued || !chains[ k ].q.empty() || !chains[ k ].uses.empty() )
             {
                 xml.chain( chains[ k ] );
                 ++printedDefs;
@@ -1063,6 +1337,403 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
         return xml.out;
     }
     return held ? reexportHeldMarker( printedDefs ) : xml.out.append( "</reexports>" );
+}
+
+// ── SHORT-KEY-FOR (lane barrel-short-key): the fallback ladder of a name-exact route that resolved no definition ─────────────────
+// WHY. `--for=ColumnPtr` / `--for=Completions.getCompletionsAtPosition` routes name-exact and then finds no definition: the answer was
+// reason="no_candidates", an empty <sigs> and no next= (1.2 KB that says nothing), the worst outcome for an agent, although a dotted
+// leaf, a longer definition name or a declaration line the index did not store (`using ColumnPtr = …`, `use … as ExprType`) is
+// one call away. WHAT. <shortkey of=X found="0" rungs= next=> just before </ctx>, outside est_tokens (its own allowance: no
+// auto-served body pays for it), each rung named:
+//   leaf      X written `Q.leaf` / `Q::leaf`: the definitions named leaf that PROVE Q (forreexport.h qualifierProvenAt: the owner scope
+//             is Q, the file stem or directories spell Q, or a TS/JS namespace re-export publishes it under Q). One proven = exact="1"
+//             and the ladder stops; several = exact="0" cands=; none = q_unmatched="1" with the same-leaf definitions listed, hedged.
+//   substring definition names containing the key (at least kShortKeyMinSubstring bytes), never exact.
+//   literal   DECLARATION-SHAPED source lines of the key (an allowlist: `using X =`, `typedef … X;`, `type X`, `#define X`, `as X` on an
+//             import/use line, `const|let|var|static X`, `X =`/`X: T =` at column 0), never called a definition; a CONST-shaped key is
+//             the <lit> block's (held="lit"). Other lines holding the word are not rows (next= --grep).
+// Every shortkey carries a next=. RIPWIRE_NO_SHORT_KEY (any value) turns it off; a token budget prints a held marker.
+inline constexpr std::size_t kShortKeyRows          = 6;   // rows per rung (a runaway guard; total= counts all)
+static_assert( kShortKeyRows == 6, "kShortKeyLegend states the cap (6 shown): move the sentence with the constant" );
+inline constexpr std::size_t kShortKeyMinSubstring  = 4;   // a shorter key matches too many names to be a lead
+inline constexpr std::size_t kShortKeyLineBytes     = 200; // a literal row's line is cut here (an ellipsis marks it)
+inline constexpr std::size_t kShortKeyBodyBytes     = 8192;   // the exact leaf's body is cut at a line end past this (a runaway guard, disclosed)
+static_assert( kShortKeyBodyBytes == 8192, "kShortKeyLegend states the body cut (8192 bytes): move the sentence with the constant" );
+
+inline bool forShortKeyOn()
+{
+    return std::getenv( "RIPWIRE_NO_SHORT_KEY" ) == nullptr;
+}
+
+inline constexpr std::string_view kShortKeyLegend =
+    "<!-- shortkey: the task names X, the route read it as a name (name-exact) and no definition resolved; the ladder below says what "
+    "does exist, each rung named, none of it a definition of X unless exact=1. rungs= the rungs run, in order. "
+    "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove Q (q_by=scope: owner Q; file: its file stem or "
+    "directories spell Q; ns: a TS/JS namespace re-export publishes it under Q), of= all named leaf; exact=1 one proven (the ladder "
+    "stops), cands=N several (hedged), q_unmatched=1 none proves Q (the rows are same-leaf definitions, NOT the one asked). "
+    "rung n=substring: definitions whose name contains key (exact=0 always). rung n=literal: declaration-shaped source lines of key "
+    "(shape=using|typedef|type|define|import-as|const|assign; in= the enclosing definition), not indexed as definitions; "
+    "held=lit: the lit block lists this key. total= all matches, 6 shown; floor=1: the scan stopped early, counts are floors. "
+    "d n= t= p= l=: a definition row; ld p= l= shape=: a line row; b: the exact leaf's body (the expand shape; cut past 8192 bytes "
+    "with truncated=1 lines= next=). next= the call that continues -->";
+
+namespace shortkey_detail
+{
+
+// The name inside `name-exact(X)` at the head of the route note ("" when the route is not name-exact).
+inline std::string_view routeName( std::string_view routeNote )
+{
+    static constexpr std::string_view kHead = "name-exact(";
+    if( !routeNote.starts_with( kHead ) )
+    {
+        return {};
+    }
+    const std::size_t close = routeNote.find( ')', kHead.size() );
+    return close == std::string_view::npos ? std::string_view{} : routeNote.substr( kHead.size(), close - kHead.size() );
+}
+
+inline std::string displayName( const Symbol& s )
+{
+    return s.scope.empty() ? s.name : s.scope + "." + s.name;
+}
+
+// A definition row, the shared order: source before test/doc, then path, then line.
+inline bool rowBefore( const IngestResult& ing, const Symbol* a, const Symbol* b )
+{
+    const auto key = [ & ]( const Symbol* s ) { return std::tuple( int( pathTierOf( rootRelPath( ing, s->fileId ) ) ), rootRelPath( ing, s->fileId ), s->line ); };
+    return key( a ) < key( b );
+}
+
+struct Proven
+{
+    const Symbol*    s = nullptr;
+    std::string_view by;   // scope | file | ns
+};
+
+// The leaf rung: definitions named `leaf` that prove qualifier `q` (all kinds; the owner scope, the file, or a Web namespace chain).
+inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_view leaf, const std::vector<std::string>& q, std::vector<const Symbol*>& sameLeaf )
+{
+    std::vector<Proven> kept;
+    std::string         dotted, colons;
+    for( std::size_t i = 0; i < q.size(); ++i )
+    {
+        dotted.append( i ? "." : "" ).append( q[ i ] );
+        colons.append( i ? "::" : "" ).append( q[ i ] );
+    }
+    // the type definitions named like the qualifier's last segment: a member the index stores with no owner scope (TS/JS methods) is
+    // still proven inside one when its line sits strictly within that type's line span in the same file
+    std::vector<const Symbol*> owners;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.name == q.back() && s.loc > 1 && ( s.kind == SymKind::Class || s.kind == SymKind::Struct || s.kind == SymKind::Interface ) )
+        {
+            owners.push_back( &s );
+        }
+    }
+    const auto insideOwner = [ & ]( const Symbol& s )
+    {
+        return std::ranges::any_of( owners, [ & ]( const Symbol* o ) { return o->fileId == s.fileId && s.line > o->line && s.line < o->line + o->loc; } );
+    };
+    std::vector<const Symbol*> webTop;
+    for( const Symbol& s : ing.symbols )
+    {
+        if( s.name != leaf )
+        {
+            continue;
+        }
+        sameLeaf.push_back( &s );
+        if( !s.scope.empty() && ( s.scope == q.back() || s.scope == dotted || s.scope == colons || s.scope.ends_with( "." + q.back() ) || s.scope.ends_with( "::" + q.back() ) ) )
+        {
+            kept.push_back( Proven{ &s, "scope" } );
+        }
+        else if( s.scope.empty() && s.kind != SymKind::Class && insideOwner( s ) )
+        {
+            kept.push_back( Proven{ &s, "scope" } );
+        }
+        else if( s.scope.empty() && reexport_detail::qualifierProvenAt( rootRelPath( ing, s.fileId ), {}, q ) )
+        {
+            kept.push_back( Proven{ &s, "file" } );
+        }
+        else if( dependencyDialect( s.lang ) == DepDialect::Web && reexport_detail::reexportDefKind( s ) )
+        {
+            webTop.push_back( &s );
+        }
+    }
+    if( !webTop.empty() )   // the namespace chains, walked once for every top-level Web definition left
+    {
+        using namespace reexport_detail;
+        HashMap<std::string, std::uint32_t> files;
+        files.reserve( ing.files.size() );
+        for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+        {
+            files.emplace( lexicalNormalize( rootRelPath( ing, f ) ), f );
+        }
+        const RustCrates rc{ .crateOf = std::vector<std::uint32_t>( ing.files.size(), kNoFile ) };
+        Sources          src{ ing, {} };
+        Walk             w{ ing, src, rc, files, {}, {}, {}, {}, {}, std::vector<char>( ing.files.size(), 0 ) };
+        indexReexportRecords( ing, /*rust=*/false, /*web=*/true, w );
+        for( const Symbol* d : webTop )
+        {
+            Chain c{ .def = d, .rust = false };
+            c.start = Spelling{ .crate = d->fileId, .name = d->name };
+            walkChain( w, c );
+            c.q = q;
+            proveChainQualifier( ing, c );
+            if( c.qRow >= 0 )
+            {
+                kept.push_back( Proven{ d, "ns" } );
+            }
+        }
+    }
+    std::ranges::sort( kept, [ & ]( const Proven& a, const Proven& b ) { return rowBefore( ing, a.s, b.s ); } );
+    std::ranges::sort( sameLeaf, [ & ]( const Symbol* a, const Symbol* b ) { return rowBefore( ing, a, b ); } );
+    return kept;
+}
+
+// The literal rung's allowlist: the declaration shape of `line` for key `k` ("" = not a declaration line).
+inline std::string_view declShape( std::string_view line, std::string_view k )
+{
+    const auto wordAt = [ & ]( std::size_t at, std::size_t n )
+    {
+        return ( at == 0 || !namesplit::isIdentChar( line[ at - 1 ] ) ) && ( at + n >= line.size() || !namesplit::isIdentChar( line[ at + n ] ) );
+    };
+    const auto skipBlank = [ & ]( std::size_t at ) { return std::min( line.find_first_not_of( " \t", at ), line.size() ); };
+    const std::size_t lead = skipBlank( 0 );
+    // `X =` / `X: T =` at column 0 (a module constant)
+    if( line.starts_with( k ) && wordAt( 0, k.size() ) )
+    {
+        const std::size_t after = skipBlank( k.size() );
+        if( after < line.size() && ( ( line[ after ] == '=' && line.substr( after, 2 ) != "==" ) || line[ after ] == ':' ) )
+        {
+            return line[ after ] == ':' && line.find( '=', after ) == std::string_view::npos ? std::string_view{} : std::string_view( "assign" );
+        }
+    }
+    for( std::size_t at = line.find( k ); at != std::string_view::npos; at = line.find( k, at + 1 ) )
+    {
+        if( !wordAt( at, k.size() ) )
+        {
+            continue;
+        }
+        std::size_t prev = at;
+        while( prev > 0 && ( line[ prev - 1 ] == ' ' || line[ prev - 1 ] == '\t' ) )
+        {
+            --prev;
+        }
+        std::size_t start = prev;
+        while( start > 0 && namesplit::isIdentChar( line[ start - 1 ] ) )
+        {
+            --start;
+        }
+        const std::string_view before = line.substr( start, prev - start );   // the word right before the key
+        const std::size_t      after  = skipBlank( at + k.size() );
+        const char             next   = after < line.size() ? line[ after ] : '\0';
+        if( before == "using" && next == '=' )
+        {
+            return "using";
+        }
+        if( before == "type" && prev < at )
+        {
+            return "type";
+        }
+        if( before == "define" && line.substr( lead ).starts_with( "#" ) )
+        {
+            return "define";
+        }
+        if( before == "as" )
+        {
+            const std::string_view body = line.substr( lead );
+            if( body.starts_with( "import " ) || body.starts_with( "use " ) || body.starts_with( "pub use " ) || body.starts_with( "pub(" ) || body.starts_with( "from " )
+                || body.starts_with( "export " ) || line.find( "import" ) != std::string_view::npos )
+            {
+                return "import-as";
+            }
+        }
+        if( ( before == "const" || before == "let" || before == "var" || before == "static" ) && ( next == '=' || next == ':' || next == ';' ) )
+        {
+            return "const";
+        }
+        if( line.substr( lead ).starts_with( "typedef" ) && ( next == ';' || next == '[' || next == ')' ) )
+        {
+            return "typedef";
+        }
+    }
+    return {};
+}
+
+}   // namespace shortkey_detail
+
+struct ShortKeyArgs
+{
+    std::string_view routeNote;           // the route note: `name-exact(X); anchors: …`
+    bool             noDefinitionServed;  // the answer printed no signature row (the no_candidates shape)
+    bool             held = false;        // a token budget is set: the marker, not the rows
+    RedactCounts*    redact = nullptr;
+    std::string_view rootArg;             // the single root (p= relative to it), "" otherwise
+};
+
+// The <shortkey> block ("" unless the route is name-exact and no definition was served).
+inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortKeyArgs& a )
+{
+    using namespace shortkey_detail;
+    const std::string_view x = routeName( a.routeNote );
+    if( x.empty() || !a.noDefinitionServed || !forShortKeyOn() )
+    {
+        return {};
+    }
+    const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( x );
+    const std::string_view              key  = segs.empty() ? x : segs.back();
+    std::string                         out;
+    std::vector<char>                   esc;
+    const auto attr = [ & ]( std::string_view k, std::string_view v ) { out.append( " " ).append( k ).append( "=\"" ).append( escapeXml( v, esc ) ).append( "\"" ); };
+    const auto num  = [ & ]( std::string_view k, std::size_t v ) { out.append( " " ).append( k ).append( "=\"" ).append( std::to_string( v ) ).append( "\"" ); };
+    const auto defRow = [ & ]( const Symbol& s, std::string_view by )
+    {
+        out.append( "<d" );
+        attr( "n", displayName( s ) );
+        attr( "t", symTag( s.kind ) );
+        attr( "p", rootRelPath( ing, s.fileId ) );
+        num( "l", s.line );
+        if( !by.empty() )
+        {
+            attr( "q_by", by );
+        }
+        out.append( "/>" );
+    };
+    if( a.held )
+    {
+        out = "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run; next= runs it without the budget --><shortkey held=\"budget\"";
+        attr( "of", x );
+        return out.append( nextAttrXml( nextFlag( "--for=", x ) ) ).append( "/>" );
+    }
+    std::string rungs, body, next;
+    // rung 1: the leaf, proven by its qualifier
+    bool exact = false;
+    if( !segs.empty() )
+    {
+        rungs = "leaf";
+        const std::vector<std::string> q( segs.begin(), segs.end() - 1 );
+        std::vector<const Symbol*>     sameLeaf;
+        const std::vector<Proven>      kept = provenLeafDefs( ing, key, q, sameLeaf );
+        exact                                = kept.size() == 1;
+        out.append( "<rung n=\"leaf\"" );
+        attr( "key", key );
+        attr( "q", std::string_view( x ).substr( 0, x.size() - key.size() - ( x.ends_with( "::" + std::string( key ) ) ? 2 : 1 ) ) );
+        num( "kept", kept.size() );
+        num( "of", sameLeaf.size() );
+        out.append( exact ? " exact=\"1\"" : " exact=\"0\"" );
+        if( kept.size() > 1 )
+        {
+            num( "cands", kept.size() );
+        }
+        out.append( kept.empty() && !sameLeaf.empty() ? " q_unmatched=\"1\">" : ">" );
+        for( std::size_t i = 0; i < kept.size() && i < kShortKeyRows; ++i )
+        {
+            defRow( *kept[ i ].s, kept[ i ].by );
+        }
+        for( std::size_t i = 0; kept.empty() && i < sameLeaf.size() && i < kShortKeyRows; ++i )
+        {
+            defRow( *sameLeaf[ i ], {} );
+        }
+        out.append( "</rung>" );
+        if( exact )   // the one proven definition IS the answer the route missed: its body, like --expand prints it
+        {
+            const Symbol& s = *kept.front().s;
+            if( std::optional<std::string> b = renderBodyElement( ing, NodeId( &s - ing.symbols.data() ), kShortKeyBodyBytes, /*compress=*/false, a.redact, a.rootArg, nullptr ) )
+            {
+                out.append( *b );
+            }
+            next = nextFlag( "--expand=", std::string( rootRelPath( ing, s.fileId ) ) + ":" + std::to_string( s.line ) + ":" + s.name );
+        }
+        else if( !sameLeaf.empty() )
+        {
+            next = nextFlag( "--defs=", key );
+        }
+    }
+    // rung 2: definition names containing the key
+    if( !exact && key.size() >= kShortKeyMinSubstring )
+    {
+        rungs.append( rungs.empty() ? "" : "," ).append( "substring" );
+        std::vector<const Symbol*> hits;
+        for( const Symbol& s : ing.symbols )
+        {
+            if( s.name != key && s.name.find( key ) != std::string::npos )
+            {
+                hits.push_back( &s );
+            }
+        }
+        std::ranges::sort( hits, [ & ]( const Symbol* l, const Symbol* r ) { return l->name.size() != r->name.size() ? l->name.size() < r->name.size() : rowBefore( ing, l, r ); } );
+        out.append( "<rung n=\"substring\"" );
+        attr( "key", key );
+        num( "total", hits.size() );
+        num( "shown", std::min( hits.size(), kShortKeyRows ) );
+        out.append( " exact=\"0\">" );
+        for( std::size_t i = 0; i < hits.size() && i < kShortKeyRows; ++i )
+        {
+            defRow( *hits[ i ], {} );
+        }
+        out.append( "</rung>" );
+    }
+    // rung 3: declaration-shaped source lines
+    if( !exact )
+    {
+        rungs.append( rungs.empty() ? "" : "," ).append( "literal" );
+        out.append( "<rung n=\"literal\"" );
+        attr( "key", key );
+        const bool identKey = std::ranges::all_of( key, []( char ch ) { return namesplit::isIdentChar( ch ); } );
+        if( lit_detail::isConstShaped( key ) || !identKey )
+        {
+            out.append( identKey ? " held=\"lit\"" : " skipped=\"1\"" ).append( " exact=\"0\"/>" );
+        }
+        else
+        {
+            const GrepCollection          got = grepCollect( ing, std::string( key ), /*regex=*/false, /*noPrefilter=*/false );
+            std::vector<GrepRawHit>       src;
+            std::copy_if( got.raw.begin(), got.raw.end(), std::back_inserter( src ), [ & ]( const GrepRawHit& h ) { return pathTierOf( rootRelPath( ing, h.fileId ) ) == PathTier::Source; } );
+            const std::vector<GrepHit>    lines = grepEnrich( ing, src );
+            std::vector<std::pair<const GrepHit*, std::string_view>> decl;
+            for( const GrepHit& h : lines )
+            {
+                if( const std::string_view shape = declShape( h.text, key ); !shape.empty() )
+                {
+                    decl.emplace_back( &h, shape );
+                }
+            }
+            std::ranges::stable_sort( decl, []( const auto& l, const auto& r ) { return l.first->enclosing.empty() && !r.first->enclosing.empty(); } );
+            num( "total", decl.size() );
+            num( "shown", std::min( decl.size(), kShortKeyRows ) );
+            out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
+            for( std::size_t i = 0; i < decl.size() && i < kShortKeyRows; ++i )
+            {
+                const GrepHit& h = *decl[ i ].first;
+                out.append( "<ld" );
+                attr( "p", rootRelPath( ing, h.fileId ) );
+                num( "l", h.line );
+                attr( "shape", decl[ i ].second );
+                if( !h.enclosing.empty() )
+                {
+                    attr( "in", h.enclosing );
+                }
+                std::string text( h.text.substr( std::min( h.text.find_first_not_of( " \t" ), h.text.size() ) ) );
+                redactInPlace( text, a.redact );
+                truncateUtf8WithEllipsis( text, kShortKeyLineBytes );
+                out.append( "><![CDATA[" );
+                appendCdataSafe( text, out );
+                out.append( "]]></ld>" );
+            }
+            out.append( "</rung>" );
+        }
+        if( next.empty() )
+        {
+            next = nextFlag( "--grep=", key );
+        }
+    }
+    std::string head = std::string( kShortKeyLegend ).append( "<shortkey" );
+    std::swap( out, head );
+    attr( "of", x );
+    out.append( " found=\"0\"" );
+    attr( "rungs", rungs );
+    out.append( nextAttrXml( next ) ).append( ">" ).append( head ).append( "</shortkey>" );
+    return out;
 }
 
 }   // namespace rw
