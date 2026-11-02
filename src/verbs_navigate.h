@@ -3463,11 +3463,20 @@ inline bool refuseUnknownLangTail( const rw::IngestResult& ing, std::string_view
 
 // D4 (arms A1/A5/A6) — the anchor's disclosure pair: the root-row attributes (via the seed annotation) plus
 // the stderr sentence when the STATED language holds nothing and foreign rows answer anyway. rc is never
-// touched by the fallback: disclosure, not refusal.
+// touched by the fallback: disclosure, not refusal. The adopted rule's second half (#440 review): presence
+// must MEAN something — an inferred corpus majority that fronts nothing and ties nothing decided nothing,
+// so it says nothing; when its tie-break really did move the front, the root carries the disagree-here
+// step (next=--defs=NAME: the verb that lists every definition and the spellings that pick one).
 inline void aroundAnchorDisclosure( const rw::LangAnchor& arAnchor, rw::MapAnnotations::SeedDisclosure& seedAnn )
 {
-    seedAnn.reflang       = arAnchor.active() ? rw::langTag( arAnchor.lang ) : nullptr;
-    seedAnn.reflangOrigin = arAnchor.active() ? rw::anchorOriginName( arAnchor.origin ) : nullptr;
+    const bool decides = arAnchor.active()
+        && ( arAnchor.origin != rw::AnchorOrigin::Corpus || arAnchor.tieBroke || arAnchor.fellBack );
+    seedAnn.reflang       = decides ? rw::langTag( arAnchor.lang ) : nullptr;
+    seedAnn.reflangOrigin = decides ? rw::anchorOriginName( arAnchor.origin ) : nullptr;
+    if( arAnchor.tieBroke && arAnchor.origin == rw::AnchorOrigin::Corpus && !seedAnn.of.empty() )
+    {
+        seedAnn.nextDefs = seedAnn.of;
+    }
     if( arAnchor.fellBack )
     {
         rw::emitTo( stderr, "ripwire: --around: the matching language holds no definition; {} in others, answering from the other languages\n", arAnchor.others );

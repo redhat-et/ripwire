@@ -479,7 +479,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // defs= names resolveFocus's pick (graph.h), and the body preference there holds only IN THE DECLARATION'S SCOPE: a pure
     // virtual beside another class's override keeps the focus. Unconditional, this reading described that answer wrongly
     // (test/decltodefcheck.sh E3g, which also holds the full --around and --connect readings to the same condition).
-    { "defs",              "defs=N: of= names N defs; the anchor's exact language leads, its family next, then most-specific kind, id last; code first, a C/C++ body in the same scope over its declaration", true, "r" },
+    { "defs",              "defs=N: of= names N defs; a STATED language fronts its own definitions, else most-specific kind leads (stated: its family next) with the repo majority breaking same-kind ties; code first, a C/C++ body in the same scope over its declaration", true, "r" },
     // reflang/reflang-origin are NOT defined here: the around first screen renders its verb-scoped dict (below,
     // at the layer= "around" rows), and legendcoveragecheck (A) probes THAT document — MEASURED, not assumed.
     // The map HEADER's absent-at-zero gauges: `<!-- files=` is kept as data while the `<!-- hdr:` clauses that define
@@ -1616,8 +1616,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // legendcoveragecheck (A) settled where the definition belongs: the DEFAULT (compact) around doc renders the
     // VERB-scoped dict below — not the shared map dict (the 466-area entries for reflang were invisible to the
     // probe), and the full seed stanza is not in the default answer either. First screen, first responsibility.
-    { "reflang", "reflang=X: the language the answer ANCHORED to — its definitions lead the rows; reflang-origin= beside it says where X came from", true, "r", MapHeaderRead::No, {}, "around" },
-    { "reflang-origin", "reflang-origin=: explicit (the query's @lang suffix), context (the file the query asked from) or corpus (the language whose definitions own this name most in this root); under an explicit anchor that language cannot fill, foreign rows are served anyway and stderr says so", true, "r", MapHeaderRead::No, {}, "around" },
+    { "reflang", "reflang=X: the language the answer ANCHORED to — a STATED one (the query's @lang, the asked-from file, the editor's declared languageId) fronts its own definitions; reflang-origin= beside it says where X came from. Absent when language decided nothing.", true, "r", MapHeaderRead::No, {}, "around" },
+    { "reflang-origin", "reflang-origin=: explicit (the query's @lang suffix), context (the file the query asked from), client (the editor's declared languageId) or corpus (the repo's majority language — it fronts NOTHING, it only breaks ties between same-kind definitions, and appears only when one such tie moved the front); under an explicit anchor that language cannot fill, foreign rows are served anyway and stderr says so", true, "r", MapHeaderRead::No, {}, "around" },
+    { "next", "next= beside a corpus tie: the majority broke a same-kind tie for the front; the value carries the defs invocation that lists every definition and the spellings that pick one", true, "r", MapHeaderRead::No, {}, "around" },
     // D4 reflang/reflang-origin: the FULL legend defines them in the seed stanza itself (serialize.h, charged only
     // when the row carries them) — the verb table proved NOT to reach around's first screen, and legendcoveragecheck
     // (A) is what caught that. The COMPACT dialect rides the shared dict entries above.

@@ -12916,7 +12916,11 @@ struct LangAnchor
     // answered (others) — the sentence the CLI and the LSP notice carry cannot be re-derived from the ordered
     // list alone, and re-deriving it downstream risks disagreeing with the resolver that decided it.
     bool         fellBack = false;
-    std::size_t  others   = 0;
+    bool         tieBroke = false;   // the adopted rule (#440): an INFERRED corpus majority no longer lifts a tier — it
+    std::size_t  others   = 0;       // breaks same-rung ties. tieBroke says the tie-break actually ordered a row it
+                                     // otherwise would not have (ids), which is the ONE moment a corpus anchor is
+                                     // allowed to speak: reflang= + the --defs= next step. An anchor that decided
+                                     // nothing stays silent (the maintainer's quiet-reflang case).
     constexpr bool active() const noexcept { return origin != AnchorOrigin::None; }
 };
 
@@ -12999,22 +13003,25 @@ constexpr LangAnchor makeLangAnchor( bool hasExplicit, Lang explicitLang, bool h
     return census.resolve();
 }
 
-// The tower (RIPWIRE-RUBY task C, re-tiered by task D): ONE total order for every multi-definition NAME answer,
-// applied to the RESULT LIST of the name resolvers below (query-time only — buildGraph's edge candidates are
-// deliberately NOT reordered, so no extraction moved and kParserVer stays; edge-vs-display disagreement is
-// disclosed, not hidden). Key, in order: (0) the EXACT anchor language, (1) its edge-family — langFamilyOf's
-// class, the middle ground between "this language" and "all languages", (2) the kind ladder — kindSpecificity
-// DESC with the constructor demotion nameTowerRanks adds — then id ASC for the deterministic tail. Levels
-// decide WITHIN a group, never across it (the owner's rule; it replaces task C's reference-language tier, which
-// was circular: the reference was elected by (top rank, lowest id) — a path accident — then re-ordered the set
-// that elected it). With NO anchor both tiers collapse and the order is the ladder, id — task C minus the
-// election. DISTINCT from gitmine.h's §H6 "specificity-ordered mapper", which orders file PATHS on a different axis.
-// The tower's language tier — the D3 rule's first two keys as a NAMED thing: 0 this exact language, 1 its
-// family, 2 foreign; all 0 (a pure ladder) with no anchor. Its own function because the tier is the RULE,
-// and a rule buried in a comparator body is the one thing a reader cannot see (nor reuse).
+// The tower (RIPWIRE-RUBY task C, re-tiered by task D, ordered by the adopted #440 rule): ONE total order
+// for every multi-definition NAME answer, applied to the RESULT LIST of the name resolvers below (query-time
+// only — buildGraph's edge candidates are deliberately NOT reordered, so no extraction moved and kParserVer
+// stays; edge-vs-display disagreement is disclosed, not hidden). A STATED language — the query's @lang tail,
+// the asked-from file, the editor's declared languageId — is evidence about THIS answer, so it lifts tiers:
+// (0) the exact language, (1) its edge-family, (2) the kind ladder — kindSpecificity DESC with the
+// constructor demotion nameTowerRanks adds — then id ASC. A MERELY INFERRED majority (the corpus census)
+// is population evidence, not name evidence: it lifts NO tier and fronts NOTHING — the ladder answers first
+// and the majority only breaks ties between same-rung definitions, with id last on both paths. Levels decide
+// WITHIN a group, never across it (the owner's rule; it replaces task C's reference-language election, which
+// was circular). With no anchor at all the order is the ladder, id — and an inferred majority is exactly
+// that for tier purposes; its tie key is the only addition. DISTINCT from gitmine.h's §H6 "specificity-ordered
+// mapper", which orders file PATHS on a different axis.
+// The tower's language tier — 0 this exact language, 1 its family, 2 foreign; all 0 (a pure ladder) with no
+// anchor, AND all 0 for an inferred corpus anchor, which ties instead of fronting. Its own function because
+// the tier is the RULE, and a rule buried in a comparator body is the one thing a reader cannot see (nor reuse).
 inline std::uint8_t nameTowerLangTier( const IngestResult& ing, NodeId id, const LangAnchor& anchor ) noexcept
 {
-    if( !anchor.active() )
+    if( !anchor.active() || anchor.origin == AnchorOrigin::Corpus )
     {
         return 0;
     }
@@ -13022,19 +13029,21 @@ inline std::uint8_t nameTowerLangTier( const IngestResult& ing, NodeId id, const
     return l == anchor.lang ? 0 : ( langFamilyOf( l ) == langFamilyOf( anchor.lang ) ? 1 : 2 );
 }
 
-inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids, const LangAnchor& anchor = {} )
+inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids, LangAnchor& anchor )
 {
     if( ids.size() < 2 )
     {
         return ids;
     }
-    struct Key { std::uint8_t langTier; int rank; NodeId id; };   // tier 0 exact, 1 family, 2 foreign (or all 0 with no anchor)
+    struct Key { std::uint8_t langTier; int rank; std::uint8_t tie; NodeId id; };   // tier 0 exact, 1 family, 2 foreign (all 0 with no anchor — or a corpus one, which ties instead)
+    const bool corpusTie = anchor.origin == AnchorOrigin::Corpus;                   // the majority BREAKS ties, it never fronts a tier
     const std::vector<int> ranks = nameTowerRanks( ing, ids );
     std::vector<Key> keyed;
     keyed.reserve( ids.size() );
     for( std::size_t i = 0; i < ids.size(); ++i )
     {
-        keyed.push_back( { nameTowerLangTier( ing, ids[ i ], anchor ), ranks[ i ], ids[ i ] } );
+        keyed.push_back( { nameTowerLangTier( ing, ids[ i ], anchor ), ranks[ i ],
+                           static_cast< std::uint8_t>( corpusTie && ing.symbols[ ids[ i ] ].lang == anchor.lang ? 0 : 1 ), ids[ i ] } );
     }
     std::sort( keyed.begin(), keyed.end(),
                []( const Key& a, const Key& b ) noexcept
@@ -13047,13 +13056,35 @@ inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<
                    {
                        return a.rank > b.rank;
                    }
+                   if( a.tie != b.tie )
+                   {
+                       return a.tie < b.tie;
+                   }
                    return a.id < b.id;
                } );
     for( std::size_t i = 0; i < ids.size(); ++i )
     {
         ids[ i ] = keyed[ i ].id;
     }
+    if( corpusTie )   // did the tie key actually order rows the id tail would have ordered otherwise? A rung
+    {                 // whose ids come out unsorted means exactly that: the majority spoke. Silent otherwise —
+        for( std::size_t i = 1; i < keyed.size(); ++i )   // an anchor that decided nothing must not be disclosed.
+        {
+            if( keyed[ i ].rank == keyed[ i - 1 ].rank && keyed[ i ].langTier == keyed[ i - 1 ].langTier
+                && keyed[ i ].tie != keyed[ i - 1 ].tie && keyed[ i ].id < keyed[ i - 1 ].id )
+            {
+                anchor.tieBroke = true;
+                break;
+            }
+        }
+    }
     return ids;
+}
+
+inline std::vector<NodeId> applyNameTower( const IngestResult& ing, std::vector<NodeId> ids )   // no anchor: the pure ladder
+{
+    LangAnchor none;
+    return applyNameTower( ing, std::move( ids ), none );
 }
 
 // Name@lang (task D): the suffix is read ONLY when the full string resolves to nothing — indexed data keys
@@ -13159,6 +13190,26 @@ inline void applyExplicitScope( const IngestResult& ing, std::vector<NodeId>& ou
     }
 }
 
+// The stated tag applies to EVERY lane's answer, the tiers included (#440 review): the canonical-id and
+// Scope::name tiers used to return "their own answers" ahead of the anchor, so `A::f@rs` in a C++/Rust tree
+// answered on whichever tier row the id order happened to front — the tag decided nothing on the very path
+// its owner wrote it for. One helper, both lanes: a STATED language scopes the tier answer through the ONE
+// scope rule (empty after scoping keeps foreign rows and DISCLOSES the fallback — A5's doctrine), and the
+// resulting anchor leaves through anchorOut so the root's reflang= can say what scoped the answer. No tag:
+// the tiers answer for themselves exactly as they always did, byte-unchanged.
+inline std::vector<NodeId> statedScopeOnTierAnswer( const IngestResult& ing, std::vector<NodeId> ids,
+                                                    const NameSuffixSplit& split, bool selector, LangAnchor* anchorOut )
+{
+    if( !selector || !split.tag.has_value() )
+    {
+        return ids;
+    }
+    LangAnchor anchor{ split.tag.value(), AnchorOrigin::Explicit };
+    applyExplicitScope( ing, ids, anchor, true );
+    if( anchorOut ) *anchorOut = anchor;
+    return ids;
+}
+
 inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::string_view name, const LangAnchor& context = {},
                                              LangAnchor* anchorOut = nullptr )
 {
@@ -13176,12 +13227,12 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
         std::vector<NodeId> byId = resolveAllByCanonicalId( ing, base );   // suffixed specs keep the canonical/scope tiers on their base
         if( !byId.empty() )
         {
-            return byId;
+            return statedScopeOnTierAnswer( ing, std::move( byId ), split, selector, anchorOut );
         }
         std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, base );   // Scope::name tier — see its contract
         if( !byScope.empty() )
         {
-            return byScope;
+            return statedScopeOnTierAnswer( ing, std::move( byScope ), split, selector, anchorOut );
         }
     }
 
@@ -13198,8 +13249,9 @@ inline std::vector<NodeId> resolveAllByName( const IngestResult& ing, std::strin
     LangAnchor anchor = makeLangAnchor( selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
                                                context.active(), context.lang, census );
     applyExplicitScope( ing, out, anchor, selector );   // the ONE scope rule (see its contract)
-    if( anchorOut ) *anchorOut = anchor;
-    return applyNameTower( ing, std::move( out ), anchor );   // the tower orders this tier; the "::" tiers above are their own answers
+    out = applyNameTower( ing, std::move( out ), anchor );   // the tower orders this tier; the "::" tiers above are their own answers
+    if( anchorOut ) *anchorOut = anchor;                   // AFTER the tower: tieBroke is written by the comparator, and the
+    return out;                                            // disclosure that must agree with the ORDER leaves on this copy
 }
 
 // The number of definitions the NAME of `focus` has — what a single-pick verb must disclose when it
@@ -14167,13 +14219,14 @@ inline std::vector<NodeId> finishAnchoredNameList( const IngestResult& ing, std:
     LangAnchor anchor = makeLangAnchor( selector && split.tag.has_value(), split.tag.value_or( Lang::Unknown ),
                                         fileLane, fileLane ? ing.symbols[ out.front() ].lang : Lang::Unknown, census );
     applyExplicitScope( ing, out, anchor, selector );   // the ONE scope rule, same contract in both lanes
-    if( anchorOut ) *anchorOut = anchor;
     out = applyNameTower( ing, std::move( out ), anchor );   // the tower orders the name/file tier; the early tiers above stay as-is
     // Written-spelling and def-line (train 39-40 tiers) join the lane's tail: each acts only while the list is
     // still empty, so the order they held inline — dotted, written, def-line — is kept exactly.
-    return resolveAllByDefLine( ing, spec,
+    out = resolveAllByDefLine( ing, spec,
         resolveAllByWrittenSpelling( ing, spec,
             resolveAllByDottedScope( ing, spec, std::move( out ) ) ) );   // `Class.method`, then the source's own spelling, then a printed p=
+    if( anchorOut ) *anchorOut = anchor;   // AFTER the tail: the tiers cannot re-anchor, but tieBroke belongs to the anchor that ordered the head
+    return out;
 }
 
 // The "::" probe, shared by both name lanes (task D kept its tiers inlined; quality-delta's pass-2 count said
@@ -14251,7 +14304,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     const std::vector<NodeId> colon = resolveAllByColonTiers( ing, tierSpec, colonAnswered );
     if( colonAnswered )
     {
-        return colon;
+        return statedScopeOnTierAnswer( ing, colon, specTail, specTail.tag.has_value(), anchorOut );   // the stated tag scopes the tiers too (#440)
     }
 
     std::string_view file, rawName;

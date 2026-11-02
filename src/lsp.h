@@ -1048,11 +1048,15 @@ inline std::string lspHandleWorkspaceSymbol( const rw::McpIndex& mix, const std:
     // Task D4 (arms (28)(29)(32)): the language the answer anchored to rides the one channel a
     // SymbolInformation[] has — a notice ahead of the response. When the cap notice already speaks it
     // joins that sentence instead of adding a second one; a foreign fallback SAYS so in the same place.
-    const std::string   wsClause = wsAnchor.active()
+    // The adopted rule's silence half (#440): a corpus anchor that fronted nothing and broke no tie
+    // decided nothing — the notice stays home; only a stated anchor or an actual tie/fallback speaks.
+    const bool wsDecides = wsAnchor.active()
+        && ( wsAnchor.origin != rw::AnchorOrigin::Corpus || wsAnchor.tieBroke || wsAnchor.fellBack );
+    const std::string   wsClause = wsDecides
         ? std::string( " \u2014 reflang=\\\"" ) + rw::langTag( wsAnchor.lang ) + "\\\" origin=\\\"" + rw::anchorOriginName( wsAnchor.origin ) + "\\\""
         : std::string();
     if( total > kLspWorkspaceCap ) lspWriteMessage( stdout, lspWorkspaceCapNotice( query, total, wsClause ) );
-    else if( wsAnchor.active() && total > 0 )   // an empty answer discloses nothing — there is no foreign pick to name (arm (34))
+    else if( wsDecides && total > 0 )   // an empty answer discloses nothing — there is no foreign pick to name (arm (34))
         lspWriteMessage( stdout, lspLogMessageFrame( wsAnchor.fellBack
             ? "ripwire: the matching language holds no definition; " + std::to_string( wsAnchor.others ) + " in others, answering anyway" + wsClause
             : "ripwire: answer anchored" + wsClause ) );
