@@ -15444,17 +15444,10 @@ inline bool importTierIsUmbrella( const IngestResult& ing, std::size_t importerC
     return importerCount * 2 >= importing;
 }
 
-inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<NodeId>& seeds )
+// IMPACT-PATH: the tier of a set of FILES — a symbol selector's definition files (impactImportTier below) or the one file a
+// path selector names (verbs_navigate.h runImpact). `defFiles` sorted and unique.
+inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles )
 {
-    std::vector<std::uint32_t> defFiles;
-    defFiles.reserve( seeds.size() );
-    for( const NodeId s : seeds )
-    {
-        defFiles.push_back( ing.symbols[s].fileId );
-    }
-    std::sort( defFiles.begin(), defFiles.end() );
-    defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
-
     ImportTier t;
     for( const std::uint32_t f : defFiles )
     {
@@ -15500,6 +15493,19 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     importTierRollup( ing, t, tierOfFile );                      // IMPACT-ROLLUP: printed only on a cut tier (sizeImportTier)
     sizeImportTier( t, 0 );   // the default size; a surface with a --limit re-sizes it (sizeImportTier)
     return t;
+}
+
+inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<NodeId>& seeds )
+{
+    std::vector<std::uint32_t> defFiles;
+    defFiles.reserve( seeds.size() );
+    for( const NodeId s : seeds )
+    {
+        defFiles.push_back( ing.symbols[s].fileId );
+    }
+    std::sort( defFiles.begin(), defFiles.end() );
+    defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
+    return impactImportTierOfFiles( ing, defFiles );
 }
 
 // ── idea #6: the per-FILE rollup of the WHOLE reach set ──────────────────────────────────────────────────────
