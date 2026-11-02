@@ -15,6 +15,8 @@
 #       only: a hedged proof, q_by="alias" (fix round 1; it printed no block before).
 #   A4  sibling shapes that are NOT namespace hops: `import * as Hidden` with no local export, and `export { Mixed } from './other'`
 #       beside a local `import * as Mixed` (a re-export of another module, not of the namespace import): neither is an ns= row.
+#       `import * as Dflt` + `export default Dflt` is a JsExport record but not a local `export { }` clause (localExportClause):
+#       no ns="default" row (fix round 1: the from-clause form is a ReExport record and never reaches that guard; this one does).
 #   A5  `Wrong.leaf` (no proof of the qualifier) and `this.leaf` (a member access, not a qualifier): no block. Positive twin: A1.
 #   A6  JS: `import * as JS from './lib.js'; export { JS }` in .js files: ns="JS".
 #   A7  a bare subject (`Widget`, the whole task) prints its chain with no cue word; an uncued multi-word task does not (N3 holds).
@@ -74,6 +76,7 @@ printf 'export * as NS from "./lib/m";\n' >"$W/src/ns.ts"
 printf 'import * as Inner from "./lib/m";\nexport { Inner as Outer };\n' >"$W/src/renamed.ts"
 printf 'import * as Hidden from "./lib/m";\nexport const hiddenLeaf = Hidden.leaf;\n' >"$W/src/noexport.ts"
 printf 'import * as Mixed from "./lib/m";\nexport { Mixed } from "./other/decoy";\nexport const mixedLeaf = Mixed.leaf;\n' >"$W/src/fromother.ts"
+printf 'import * as Dflt from "./lib/m";\nexport default Dflt;\n' >"$W/src/defexp.ts"
 printf 'export class Widget {\n  run(): number {\n    return 1;\n  }\n}\n' >"$W/src/other/widget.ts"
 printf 'export { Widget } from "./other/widget";\n' >"$W/src/widgets.ts"
 printf 'export function jleaf(n) {\n  return n;\n}\n' >"$W/js/lib.js"
@@ -99,6 +102,7 @@ has   "$TMP/a1.xml" "A1 star hop index.ts follows"         '<rx p="src/index.ts"
 hasnt "$TMP/a1.xml" "A1 same-named decoy not listed"       'src/other/decoy.ts'
 hasnt "$TMP/a1.xml" "A4 import * as Hidden with no export is no ns row" 'ns="Hidden"'
 hasnt "$TMP/a1.xml" "A4 export { Mixed } from another module is no ns row" 'ns="Mixed"'
+hasnt "$TMP/a1.xml" "A4 export default of a namespace import is no ns row" 'ns="default"'
 }
 run "$W" "$TMP/a2.xml" "--for=NS.leaf" && \
 has   "$TMP/a2.xml" "A2 export * as NS from: ns row first" 'q="NS" total="4"/><rx p="src/ns.ts" l="1" from="./lib/m" ns="NS"/>'
@@ -259,7 +263,7 @@ run "$L" "$TMP/c9a.xml" "--for=RowMap" && skhas "$TMP/c9a.xml" "C9 type shape" '
 run "$L" "$TMP/c9b.xml" "--for=widgetCount" && skhas "$TMP/c9b.xml" "C9 define shape (a non-CONST key)" '<ld p="c/x.h" l="3" shape="define">'
 run "$L" "$TMP/c9c.xml" "--for=localLimit" && skhas "$TMP/c9c.xml" "C9 const shape, in= its function" '<ld p="src/host.ts" l="2" shape="const" in="host">'
 run "$L" "$TMP/c9d.xml" "--for=fieldWidth" && skhas "$TMP/c9d.xml" "C9 assign shape at column 0" '<ld p="py/a.lua" l="1" shape="assign">'
-run "$L" "$TMP/c9e.xml" "--for=capKey" && {
+c9e=1; run "$L" "$TMP/c9e.xml" "--for=capKey" && { c9e=0;
 skhas "$TMP/c9e.xml" "C9 row cap: total=8 shown=6" '<rung n="literal" key="capKey" total="8" shown="6" exact="0">'
 n=$( sk "$TMP/c9e.xml" | grep -o '<ld ' | wc -l | tr -d ' ' ); if [ "$n" = 6 ]; then ok "C9 row cap: 6 ld rows"; else no "C9 row cap: $n ld rows (want 6)"; fi
 }
@@ -271,7 +275,7 @@ if [ -r "$L/src/f3.ts" ]; then
 else
     ( cd "$L" || exit 1; HOME="$TMP" "$BIN" "$L" --cache="$TMP/litcache" "--for=capKey" </dev/null 2>/dev/null ) >"$TMP/c9g.xml"; frc=$?
     if [ "$frc" -eq 0 ] && sk "$TMP/c9g.xml" | grep -qF 'exact="0" floor="1">'; then ok "C9 floor=1 when a file is unreadable"; else no "C9 floor=1 when a file is unreadable (rc=$frc)"; fi
-    if sk "$TMP/c9e.xml" | grep -qF 'floor='; then no "C9 a clean scan prints no floor="; else ok "C9 a clean scan prints no floor="; fi
+    if [ "$c9e" -ne 0 ] || sk "$TMP/c9e.xml" | grep -qF 'floor='; then no "C9 a clean scan prints no floor= (or its run failed)"; else ok "C9 a clean scan prints no floor="; fi
 fi
 chmod 644 "$L/src/f3.ts"
 

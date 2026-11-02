@@ -54,6 +54,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace rw
@@ -1080,6 +1081,43 @@ inline std::vector<std::size_t> reexportRowOrder( const Chain& c )
     return order;
 }
 
+// A row's name attribute: ns= the namespace a hop publishes the module under, as= a Web rename ("" when neither).
+inline std::pair<std::string_view, std::string_view> reexportRowName( const Chain& c, const Row& r )
+{
+    if( r.ns )
+    {
+        return { "ns", r.exp != nullptr ? r.exp->var : r.b->var };
+    }
+    const bool renamed = !c.rust && !r.use && !r.glob && r.b->var != r.b->importedName;
+    return renamed ? std::pair<std::string_view, std::string_view>{ "as", r.b->var } : std::pair<std::string_view, std::string_view>{};
+}
+
+// The def row's qualifier: q= as the task wrote it, then the hedge when no spelling proves every segment (q_by=alias|dir, or
+// q_unmatched="1" when nothing proves it). "" for an unqualified name.
+inline std::string reexportQualifierAttrs( const Chain& c, std::vector<char>& esc )
+{
+    if( c.q.empty() )
+    {
+        return {};
+    }
+    std::string out = std::string( " q=\"" ).append( escapeXml( joinPath( std::vector<std::string>( c.q.begin(), c.q.end() - 1 ), c.q.back(), "." ), esc ) ).append( "\"" );
+    return out.append( c.qLevel == QProof::Strong ? ""
+                       : c.qLevel == QProof::None ? " q_unmatched=\"1\""
+                       : c.qLevel == QProof::Alias ? " q_by=\"alias\""
+                                                   : " q_by=\"dir\"" );
+}
+
+// The statements a chain prints (its rows, then its use rows): two definitions reached through the same ones print them once.
+inline std::vector<const Binding*> chainStatements( const Chain& c )
+{
+    std::vector<const Binding*> sig;
+    for( const std::vector<Row>* part : { &c.rows, &c.uses } )
+    {
+        std::ranges::transform( *part, std::back_inserter( sig ), []( const Row& r ) { return r.b; } );
+    }
+    return sig;
+}
+
 // The XML writer: one <def> row per printed chain, its rx rows and its u rows (a chain that repeats an earlier one's statements
 // prints its def row alone, same="1").
 struct ReexportXml
@@ -1121,13 +1159,9 @@ struct ReexportXml
             attr( "at", spelled( r.at ) );
             out.append( r.restricted ? " vis=\"restricted\"" : "" );
         }
-        if( r.ns )
+        if( const auto [ k, v ] = reexportRowName( c, r ); !k.empty() )
         {
-            attr( "ns", r.exp != nullptr ? r.exp->var : r.b->var );   // the namespace the hop publishes the module under
-        }
-        else if( !c.rust && !r.use && !r.glob && r.b->var != r.b->importedName )
-        {
-            attr( "as", r.b->var );
+            attr( k, v );
         }
         out.append( r.glob ? " glob=\"1\"" : "" );
         if( r.cands > 1 )
@@ -1147,25 +1181,14 @@ struct ReexportXml
         {
             attr( "at", spelled( c.start ) );
         }
-        if( !c.q.empty() )
-        {
-            attr( "q", joinPath( std::vector<std::string>( c.q.begin(), c.q.end() - 1 ), c.q.back(), "." ) );
-            out.append( c.qLevel == QProof::Strong ? ""
-                        : c.qLevel == QProof::None ? " q_unmatched=\"1\""
-                        : c.qLevel == QProof::Alias ? " q_by=\"alias\""
-                                                    : " q_by=\"dir\"" );
-        }
+        out.append( reexportQualifierAttrs( c, esc ) );
         num( "total", c.rows.size() );
         out.append( c.capped ? " capped=\"1\"" : "" );
         if( c.asSkipped > 0 )
         {
             num( "as_skipped", c.asSkipped );
         }
-        std::vector<const Binding*> sig;   // a same-named definition reached through the very same statements prints them once
-        for( const std::vector<Row>* part : { &c.rows, &c.uses } )
-        {
-            std::ranges::transform( *part, std::back_inserter( sig ), []( const Row& r ) { return r.b; } );
-        }
+        std::vector<const Binding*> sig = chainStatements( c );   // a same-named definition reached through the very same statements prints them once
         const bool same = std::ranges::find( printed, sig ) != printed.end();
         out.append( same ? " same=\"1\"/>" : "/>" );
         if( !same )
