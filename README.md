@@ -1522,7 +1522,7 @@ $ ripwire . --test-gate          # exit code: 4
 
 A `run=` attribute appears only when a runner is derivable from real evidence — a test-dir script
 whose stem matches the harness, or whose text names it; for TypeScript/JavaScript, a file already
-recognized as test code (`test/`/`tests/`/`__tests__/`, or a `_test./.test./_spec./.spec.` name — the
+recognized as test code (`test/`/`tests/`/`__tests__/`, or a `_test./.test./_spec./.spec.` name, or a `.e2e-spec./.perf-spec.` name — the
 `__tests__/` directory convention is shared with every language, the rest are TS/JS's own) whose name
 ALSO matches vitest/jest's own test-name shape (`.test.`/`.spec.`, or living under `__tests__/` at
 all, jest's own two default conventions — never a `.d.ts` declaration file) — whose nearest

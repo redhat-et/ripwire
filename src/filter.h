@@ -36,6 +36,14 @@ inline bool hasDirSegment( std::string_view p, std::string_view seg ) noexcept
     return false;
 }
 
+// True when s ends with the lowercase suffix e, ignoring ASCII case in s. The crawl lowercases an extension before it
+// picks a language (ingest_crawl.h), so test-widget.SH is indexed as Bash and has to read as a shell script here too.
+inline bool endsWithLowerAscii( std::string_view s, std::string_view e ) noexcept
+{
+    return s.size() >= e.size()
+        && std::ranges::equal( s.substr( s.size() - e.size() ), e, []( char a, char b ) { return ( a >= 'A' && a <= 'Z' ? static_cast<char>( a + ( 'a' - 'A' ) ) : a ) == b; } );
+}
+
 // rv-test-gate-tsjs G2 (delta review, treated as a real defect, not advisory): jest's OWN default
 // `testMatch` collects every file under a `__tests__/` directory, named or not — a real, common JS/TS
 // convention this function did not recognize, so such a file was invisible to `--test-gate` (and every
@@ -68,6 +76,18 @@ inline bool isTestPath( std::string_view p ) noexcept
     if( fn.rfind( "test_", 0 ) == 0 )
     {
         return true; // test_*.*
+    }
+    // Hyphen forms are an allowlist (a false match hides real source from every verb): shell/batch test scripts, and the
+    // dotted Angular/Nest suffixes. attest-spec.ts, pod-spec.ts, ab-test.ts, self-test.c, test-and-set.c stay source.
+    const auto fnEnds = [ & ]( std::string_view e ) { return endsWithLowerAscii( fn, e ); };
+    if( ( fnEnds( ".sh" ) || fnEnds( ".bash" ) || fnEnds( ".zsh" ) || fnEnds( ".ps1" ) || fnEnds( ".bat" ) )
+        && ( fn.rfind( "test-", 0 ) == 0 || fn.find( "-test." ) != std::string_view::npos ) )
+    {
+        return true; // test-*.sh, *-test.sh
+    }
+    if( fn.find( ".e2e-spec." ) != std::string_view::npos || fn.find( ".perf-spec." ) != std::string_view::npos )
+    {
+        return true; // *.e2e-spec.ts, *.perf-spec.ts
     }
     for( std::string_view m : { std::string_view( "_test." ), std::string_view( ".test." ),
                                 std::string_view( "_spec." ), std::string_view( ".spec." ) } )
