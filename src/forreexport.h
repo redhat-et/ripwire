@@ -1406,6 +1406,26 @@ inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbo
     return chains;
 }
 
+// Print the first kReexportDefCap chains of one task word that may print: a chain prints when the task is cued, the name was
+// qualified, or it carries a use row; an UNPROVEN qualified chain only under a cue word (a bare `Q.leaf` prints proven chains only).
+// Returns the def rows printed.
+inline std::size_t printReexportChains( ReexportXml& xml, const std::vector<Chain>& chains, bool cued, bool wordCued )
+{
+    std::size_t printed = 0;
+    for( std::size_t k = 0; k < chains.size() && k < kReexportDefCap; ++k )
+    {
+        const Chain& c        = chains[ k ];
+        const bool   unproven = !c.q.empty() && c.qLevel == QProof::None;
+        if( ( unproven && !wordCued ) || !( cued || !c.q.empty() || !c.uses.empty() ) )
+        {
+            continue;
+        }
+        xml.chain( c );
+        ++printed;
+    }
+    return printed;
+}
+
 }   // namespace reexport_detail
 
 // CR pre-pass 42b: a token budget is a request the block must obey, so under one the rows are NOT printed (they sit outside
@@ -1456,19 +1476,7 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     std::size_t printedDefs = 0;   // the def rows printed (the held marker's count)
     for( const ReexportTaskName& name : names )
     {
-        const std::vector<Chain> chains = reexportChains( w, defs, name );
-        for( std::size_t k = 0; k < chains.size() && k < kReexportDefCap; ++k )
-        {
-            if( !chains[ k ].q.empty() && chains[ k ].qLevel == QProof::None && !wordCued )   // a bare `Q.leaf` prints proven chains only
-            {
-                continue;
-            }
-            if( cued || !chains[ k ].q.empty() || !chains[ k ].uses.empty() )
-            {
-                xml.chain( chains[ k ] );
-                ++printedDefs;
-            }
-        }
+        printedDefs += printReexportChains( xml, reexportChains( w, defs, name ), cued, wordCued );
     }
     if( xml.out.empty() )
     {
