@@ -68,8 +68,9 @@ fi
 unmerged="$( git diff --name-only --diff-filter=U )"
 [ -z "$unmerged" ] || { echo "merge_main: still unmerged: $unmerged" >&2; exit 1; }
 regenerate || { echo "merge_main: a generator or check failed — the merge is left uncommitted; fix and run --continue"; exit 1; }
+mergedFrom="$( git rev-parse --short MERGE_HEAD )"
 git commit --no-edit --quiet || { echo "merge_main: git commit failed" >&2; exit 2; }
-echo "merge_main: merged $( git rev-parse --short MERGE_HEAD 2>/dev/null || echo "$REF" ) as $( git rev-parse --short HEAD )"
+echo "merge_main: merged $mergedFrom as $( git rev-parse --short HEAD )"
 
 # Files the binary pins whose conflict was settled by taking main's side: the right bytes need the merged build.
 if [ -s "$REGEN_LOG" ]; then
