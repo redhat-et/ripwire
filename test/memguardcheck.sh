@@ -617,8 +617,13 @@ else
     no "(B8) $( b8why "$rc" "$TMP/b8.out" "$TMP/b8.err" )"
 fi
 RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8b.out" 2>"$TMP/b8b.err"; rc=$?
+# B8b asks one thing: is the REAL guard still on under a never-firing seam. A time-gated soft stop is the real guard too
+# (macOS CI leg, 2026-11-02: rc 0, memory_stop=crawl in the answer, "the memory guard stopped the parse" on stderr), so it
+# passes; a run with no memory_stop and no guard line, the disabled-guard shape, still fails.
 if [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$TMP/b8b.err" && [ ! -s "$TMP/b8b.out" ]; then
     ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 still exits 5 with the ingest line)"
+elif [ "$rc" = 0 ] && grep -qE 'memory_stop=[a-z]+' "$TMP/b8b.out" && grep -q '^ripwire: the memory guard stopped' "$TMP/b8b.err"; then
+    ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 ended on the real guard's disclosed soft stop)"
 else
     no "(B8b) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8b.out" "$TMP/b8b.err" )"
 fi
