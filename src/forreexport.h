@@ -741,6 +741,44 @@ inline void webReexportUses( Walk& w, Chain& c, const HashMap<std::string, char>
 
 // Breadth-first from the definition: each statement that re-exports a reached spelling is a row and publishes a new spelling
 // (visited once: cycles terminate); a statement already printed for another spelling is not printed twice.
+// The rows that publish spelling `s` one hop further (a use site that does not publish is noted on the chain instead), and for Web
+// the namespace hops of `s`'s module file.
+inline std::vector<Row> publishingHops( Walk& w, Chain& c, const Spelling& s )
+{
+    std::vector<Row> found;
+    for( const Binding* b : reexportCandidates( w, c.rust, s ) )
+    {
+        std::optional<Row> row = c.rust ? w.rustMatch( b, s, c.asSkipped ) : w.webMatch( b, s );
+        const int  vis       = row && c.rust ? w.src.visOf( b->fileId, b->startByte ) : 1;
+        const bool publishes = row && vis > 0 && ( !c.rust || w.rc.crateOf[ b->fileId ] != kNoFile );
+        if( publishes )
+        {
+            row->restricted = vis == 2;
+            found.push_back( std::move( *row ) );
+        }
+        else if( row )
+        {
+            noteReexportUse( w, c, std::move( *row ) );
+        }
+    }
+    if( !c.rust )
+    {
+        w.webNsRows( s, found );
+    }
+    return found;
+}
+
+// A use site imports a spelling's HEAD segment (a namespace, or the name itself): the keys webReexportUses matches against.
+inline HashMap<std::string, char> spellingHeads( const std::vector<Spelling>& frontier )
+{
+    HashMap<std::string, char> heads;
+    for( const Spelling& s : frontier )
+    {
+        heads.try_emplace( spellingKey( Spelling{ .crate = s.crate, .name = s.mods.empty() ? s.name : s.mods.front() } ), '\0' );
+    }
+    return heads;
+}
+
 inline void walkChain( Walk& w, Chain& c )
 {
     HashMap<std::string, char> seen;
@@ -750,28 +788,7 @@ inline void walkChain( Walk& w, Chain& c )
     std::size_t at = 0;
     for( ; at < frontier.size() && frontier.size() < kReexportSpellingCap; ++at )
     {
-        const Spelling s = frontier[ at ];
-        std::vector<Row> found;
-        for( const Binding* b : reexportCandidates( w, c.rust, s ) )
-        {
-            std::optional<Row> row = c.rust ? w.rustMatch( b, s, c.asSkipped ) : w.webMatch( b, s );
-            const int  vis       = row && c.rust ? w.src.visOf( b->fileId, b->startByte ) : 1;
-            const bool publishes = row && vis > 0 && ( !c.rust || w.rc.crateOf[ b->fileId ] != kNoFile );
-            if( publishes )
-            {
-                row->restricted = vis == 2;
-                found.push_back( std::move( *row ) );
-            }
-            else if( row )
-            {
-                noteReexportUse( w, c, std::move( *row ) );
-            }
-        }
-        if( !c.rust )
-        {
-            w.webNsRows( s, found );
-        }
-        for( Row& row : found )
+        for( Row& row : publishingHops( w, c, Spelling( frontier[ at ] ) ) )
         {
             if( !seen.try_emplace( spellingKey( row.at ), '\0' ).second )
             {
@@ -790,12 +807,7 @@ inline void walkChain( Walk& w, Chain& c )
     c.capped = at < frontier.size();   // the loop ended on the cap with spellings still unvisited
     if( !c.rust )
     {
-        HashMap<std::string, char> heads;   // a use site imports a spelling's HEAD segment (a namespace, or the name itself)
-        for( const Spelling& s : frontier )
-        {
-            heads.try_emplace( spellingKey( Spelling{ .crate = s.crate, .name = s.mods.empty() ? s.name : s.mods.front() } ), '\0' );
-        }
-        webReexportUses( w, c, heads );
+        webReexportUses( w, c, spellingHeads( frontier ) );
     }
 }
 
@@ -897,6 +909,14 @@ struct ReexportTaskName
 
 // The task's words that may name a definition: code-shaped (an upper-case letter, `_` or `$` inside, or a capital first
 // letter) or written `NAME from M` with M a module spelling. The LAST word of a qualified token keeps its qualifier.
+// A word written as code: an upper-case first letter, or an upper-case letter, `_` or `$` past it (`Widget`, `getX`, `max_len`).
+inline bool reexportCodeShapedWord( std::string_view w )
+{
+    const auto upper = []( char ch ) { return ch >= 'A' && ch <= 'Z'; };
+    return ( !w.empty() && upper( w.front() ) ) ||
+           std::ranges::any_of( w.substr( std::min<std::size_t>( 1, w.size() ) ), [ & ]( char ch ) { return upper( ch ) || ch == '_' || ch == '$'; } );
+}
+
 inline std::vector<ReexportTaskName> reexportTaskNames( std::string_view task )
 {
     const std::vector<std::string_view> tokens = reexportTaskTokens( task );
@@ -920,8 +940,7 @@ inline std::vector<ReexportTaskName> reexportTaskNames( std::string_view task )
                 ++end;
             }
             const std::string_view w = tok.substr( at, end - at );
-            const bool code = std::ranges::any_of( w.substr( std::min<std::size_t>( 1, w.size() ) ), []( char ch ) { return ( ch >= 'A' && ch <= 'Z' ) || ch == '_' || ch == '$'; } )
-                           || ( !w.empty() && w.front() >= 'A' && w.front() <= 'Z' );
+            const bool code = reexportCodeShapedWord( w );
             // the LEAF of a qualified spelling is a name whatever its case (`Utils.formatDate`, `api.v1.handler`): the qualified form
             // is itself the code shape. A file or host suffix (`main.go`, `pkg.json`) is not a leaf.
             const bool leaf = !segs.empty() && end == tok.size() && !lit_detail::isFileOrHostSuffix( w );
@@ -1242,6 +1261,26 @@ inline void proveChainQualifier( const IngestResult& ing, Chain& c )
 
 // Every chain of the definitions named `n.name` that has a hop: one reaching a task-named file first, then the longer, then path
 // order. A Web name the task QUALIFIED keeps only the chains that prove the qualifier (a same-named definition elsewhere is a decoy).
+// The chain of definition `d` walked from its own spelling; a Web chain under a written qualifier `q` is proven against it (qRow).
+inline Chain walkedChain( Walk& w, const Symbol* d, bool rust, const std::vector<std::string>& q )
+{
+    Chain c{ .def = d, .rust = rust };
+    c.start = rust ? Spelling{ w.rc.crateOf[ d->fileId ], w.rc.modOf[ d->fileId ], d->name } : Spelling{ .crate = d->fileId, .name = d->name };
+    walkChain( w, c );
+    if( !rust && !q.empty() )
+    {
+        c.q = q;
+        proveChainQualifier( w.ing, c );
+    }
+    return c;
+}
+
+// Chains with use rows first, then the longer walk.
+inline bool chainBefore( const Chain& a, const Chain& b )
+{
+    return a.uses.size() != b.uses.size() ? a.uses.size() > b.uses.size() : a.rows.size() > b.rows.size();
+}
+
 inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbol*>& defs, const ReexportTaskName& n )
 {
     std::vector<Chain> chains;
@@ -1252,20 +1291,13 @@ inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbo
         {
             continue;
         }
-        Chain c{ .def = d, .rust = rust };
-        c.start = rust ? Spelling{ w.rc.crateOf[ d->fileId ], w.rc.modOf[ d->fileId ], d->name } : Spelling{ .crate = d->fileId, .name = d->name };
-        walkChain( w, c );
-        if( !rust && !n.q.empty() )
-        {
-            c.q = n.q;
-            proveChainQualifier( w.ing, c );
-        }
+        Chain c = walkedChain( w, d, rust, n.q );
         if( !c.rows.empty() && ( c.q.empty() || c.qRow != -2 ) )
         {
             chains.push_back( std::move( c ) );
         }
     }
-    std::ranges::stable_sort( chains, []( const Chain& a, const Chain& b ) { return a.uses.size() != b.uses.size() ? a.uses.size() > b.uses.size() : a.rows.size() > b.rows.size(); } );
+    std::ranges::stable_sort( chains, chainBefore );
     return chains;
 }
 
@@ -1470,12 +1502,7 @@ inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_
         indexReexportRecords( ing, /*rust=*/false, /*web=*/true, w );
         for( const Symbol* d : webTop )
         {
-            Chain c{ .def = d, .rust = false };
-            c.start = Spelling{ .crate = d->fileId, .name = d->name };
-            walkChain( w, c );
-            c.q = q;
-            proveChainQualifier( ing, c );
-            if( c.qRow >= 0 )
+            if( walkedChain( w, d, /*rust=*/false, q ).qRow >= 0 )
             {
                 kept.push_back( Proven{ d, "ns" } );
             }
