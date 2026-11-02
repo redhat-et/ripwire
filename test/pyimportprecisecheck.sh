@@ -399,4 +399,69 @@ else
     skip '#358: pristine-main cache compatibility (set RIPWIRE_BASE_BIN)'
 fi
 
+# #478 gap 2: an aliased plain import records the MODULE as its Include target. tree-sitter-python's import_statement
+# carries name:(dotted_name|aliased_import), and the first-clause capture read the whole aliased_import span, so
+# `import pkg.mod as pm` recorded `pkg.mod as pm`: no resolver finds that module, and the file lost its edge in --deps,
+# --arch, cycles and the Rule 3 call narrow. Arms and fixture shapes ported from joyful-ii-V-I's pyaliasincludecheck
+# (46bfa131, lane/py-alias-include-target, written against the pre-#382 walk); the multi-clause and one-segment rows
+# are new. pkg/mod.py and other/mod.py both define pyai_helper, so a bare call to it binds only through the include.
+PA="$TMP/pyalias"; mkdir -p "$PA/pkg" "$PA/other"
+: >"$PA/pkg/__init__.py"; : >"$PA/other/__init__.py"
+printf 'def pyai_helper():\n    return 1\n' >"$PA/pkg/mod.py"
+printf 'def pyai_helper():\n    return 2\n' >"$PA/other/mod.py"
+printf 'def pyai_single():\n    return 3\n' >"$PA/single.py"
+printf 'import pkg.mod as pm\nimport os.path as osp\n\n\ndef pyai_caller_aliased():\n    return pyai_helper() + len( osp.sep )\n' >"$PA/aliased.py"
+printf 'import pkg.mod\n\n\ndef pyai_caller_plain():\n    return pyai_helper()\n' >"$PA/plain.py"
+printf 'from pkg.mod import pyai_helper as h\n\n\ndef pyai_caller_from():\n    return h()\n' >"$PA/fromimp.py"
+printf 'import pkg.mod as pm, os.path\n' >"$PA/multi.py"
+printf 'import single as s\n' >"$PA/onesegment.py"
+printf 'import as_x\n' >"$PA/asname.py"
+printf 'def as_x_fn():\n    return 4\n' >"$PA/as_x.py"
+"$BIN" "$PA" --deps --no-cache >"$TMP/pa.deps" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<deps ' "$TMP/pa.deps"; then
+    no "#478 gap 2: --deps on the alias fixture did not run (rc=$rc)"
+else
+    if python3 - "$TMP/pa.deps" <<'PY'
+import sys, xml.etree.ElementTree as ET
+rows = {f.get('p'): [i.get('t') for i in f.findall('inc')] for f in ET.parse(sys.argv[1]).getroot().findall('f')}
+want = {'aliased.py': ['pkg.mod', 'os.path'], 'plain.py': ['pkg.mod'], 'fromimp.py': ['pkg.mod'],
+        'multi.py': ['pkg.mod'], 'onesegment.py': ['single'], 'asname.py': ['as_x']}
+got = {p: rows.get(p) for p in want}
+assert got == want, got
+assert not any(' as ' in t for ts in rows.values() for t in ts), rows
+PY
+    then ok '#478 gap 2: aliased, multi-clause and one-segment targets are the bare module; `import as_x` unchanged; no `… as …` row'
+    else no "#478 gap 2: alias targets wrong: $( grep -oE '<inc t="[^"]*"' "$TMP/pa.deps" | sort | uniq -c | tr '\n' ' ' )"
+    fi
+    # afferent counts edge occurrences: plain + fromimp (controls) + aliased + multi (the fix) = 4.
+    grep -q '<f p="pkg/mod.py" afferent="4"/>' "$TMP/pa.deps" \
+        && ok '#478 gap 2: pkg/mod.py afferent="4" (plain + from-import + aliased + aliased-first multi-clause)' \
+        || no "#478 gap 2: pkg/mod.py afferent wrong: $( grep -oE '<f p="pkg/mod.py"[^>]*>' "$TMP/pa.deps" )"
+    grep -q '<f p="single.py" afferent="1"/>' "$TMP/pa.deps" \
+        && ok '#478 gap 2: one-segment `import single as s` resolves (single.py afferent="1")' \
+        || no "#478 gap 2: single.py afferent wrong: $( grep -oE '<f p="single.py"[^>]*>' "$TMP/pa.deps" )"
+    # transitive= is the file's resolved cone: itself + pkg/mod.py = 2 (os.path is external). It read 1 while the
+    # aliased target resolved to nothing.
+    grep -oE '<f p="aliased.py"[^>]*>' "$TMP/pa.deps" | grep -q 'transitive="2"' \
+        && ok '#478 gap 2: aliased.py transitive="2" (itself + pkg/mod.py; os.path is external)' \
+        || no "#478 gap 2: aliased.py cone wrong: $( grep -oE '<f p="aliased.py"[^>]*>' "$TMP/pa.deps" )"
+fi
+"$BIN" "$PA" --callers=pkg/mod.py:pyai_helper --no-cache --legend=compact >"$TMP/pa.callers" 2>/dev/null; rc=$?
+if [ "$rc" -ne 0 ] || ! grep -q '<callers ' "$TMP/pa.callers"; then
+    no "#478 gap 2: --callers did not run (rc=$rc)"
+else
+    grep -q 'n="pyai_caller_aliased" p="aliased.py:5"' "$TMP/pa.callers" \
+        && ok '#478 gap 2 rule 3: aliased.py:pyai_caller_aliased binds pkg/mod.py:pyai_helper through the include' \
+        || no "#478 gap 2 rule 3: pyai_caller_aliased is not a caller of pkg/mod.py:pyai_helper: $( cat "$TMP/pa.callers" )"
+    grep -q 'n="pyai_caller_plain" p="plain.py:4"' "$TMP/pa.callers" \
+        && ok '#478 gap 2 rule 3 control: plain.py:pyai_caller_plain binds pkg/mod.py:pyai_helper' \
+        || no "#478 gap 2 rule 3 control: pyai_caller_plain lost its edge: $( cat "$TMP/pa.callers" )"
+fi
+"$BIN" "$PA" --callers=other/mod.py:pyai_helper --no-cache --legend=compact >"$TMP/pa.other" 2>/dev/null; rc=$?
+if [ "$rc" -eq 0 ] && grep -q '<callers [^>]*count="0"' "$TMP/pa.other"; then
+    ok '#478 gap 2 rule 3 negative: the decoy other/mod.py:pyai_helper has no caller'
+else
+    no "#478 gap 2 rule 3 negative: decoy gained a caller or the run failed (rc=$rc): $( cat "$TMP/pa.other" )"
+fi
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }
