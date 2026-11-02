@@ -399,6 +399,18 @@ arm_not "H4 no label (_name) takes a sym= slot" sh -c '[ "$1" != 0 ] || printf "
 arm "H4b the label is still a unit" sh -c 'out="$( "$1" "$2" --no-cache --expand=_page-7 --top-k=0 2>/dev/null </dev/null )" && case "$out" in *"<b t=\"sec\""*) exit 0;; esac; exit 1' _ "$BIN" "$HX"
 arm "H5 the extract_partial legend names the reST bound" grep -q 'reST/Sphinx units past 20000 per file or titles and directives nested past 64 levels' "$TMP/skip.xml"
 
+# H7: the cut tail's next= (forpage.h fileTailNextInvocation, pageSkip) skips no unlisted file: every file page row before its
+# --offset is a row the tail printed, so the doc rows the code-first walk left out (past the plain window) come on that page.
+h7tail="$( tailrows "$HX" "how does frob widget" )"; r7=$?
+h7next="$( printf '%s' "$ts" | grep -o '<tail [^>]*next="[^"]*"' | grep -o 'offset=[0-9]*' | cut -d= -f2 )"
+h7page="$( "$BIN" "$HX" --no-cache --for="how does frob widget" --limit=500 --offset=0 2>/dev/null </dev/null | tr '<' '\n' | grep '^f p=' | sed 's/^f p="\([^"]*\)".*/\1/' )"; r7p=$?
+h7a(){ [ "$r7" = 0 ] && [ "$r7p" = 0 ] && [ -n "$h7next" ] && [ "$( printf '%s\n' "$h7page" | grep -c . )" -gt "$h7next" ]; }
+arm "H7a the tail is cut with a next= offset inside the page" h7a
+h7(){ h7a || return 1; printf '%s\n' "$h7page" | head -n "$h7next" | while read -r f; do printf '%s\n' "$h7tail" | grep -qxF "$f" || exit 1; done; }
+arm "H7 every page row before next='s offset is a printed tail row" h7
+h7b(){ h7a && printf '%s\n' "$h7tail" | grep -q '^docs/' && ! printf '%s\n' "$h7tail" | grep -qxF "$( printf '%s\n' "$h7page" | sed -n "$(( h7next + 1 ))p" )"; }
+arm "H7b and the row at the offset is one the tail left out" h7b
+
 # H6: --match walks an admitted .txt with the grammar a .rst gets (ingest_astquery.h lookupLangOfCrawledFile); b.rst is the twin
 MX="$TMP/mx"; mkdir -p "$MX/docs"; printf 'project = "m"\nextensions = []\nsource_suffix = [".rst", ".txt"]\n' >"$MX/docs/conf.py"
 printf 'Match Title\n===========\n\nbody\n' >"$MX/docs/a.txt"; cp "$MX/docs/a.txt" "$MX/docs/b.rst"
