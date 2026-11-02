@@ -32,7 +32,8 @@
 #   B6  Rust `ExprKind` (`use … as ExprKind`): literal row shape="import-as".
 #   B7  a CONST-shaped key with no definition: the literal rung says held="lit" (the <lit> block lists it), no ld rows.
 #   B8  every <shortkey> carries next=; a resolved name-exact route (`getWidgetPtrCount`) prints no <shortkey> (absence twin of B5).
-#   B9  --token-budget: <shortkey held="budget"> with next=, no rungs; --json: no block; RIPWIRE_NO_SHORT_KEY=1 removes exactly the block.
+#   B9  --token-budget: <shortkey held="budget"> with next=, no rungs; --json, --format=candidates: no block (a non-empty
+#       answer); RIPWIRE_NO_SHORT_KEY=1 removes exactly the block.
 #   C1  (fix round 1, MF1) a DIRECTORY on the path is a hedged proof, never exact: `utils.formatDate` with src/utils/legacy/old.ts
 #       (the decoy) and src/helpers/date.ts reached by a consumer's `import * as utils from "../helpers"`: kept="2" exact="0",
 #       q_by="alias" first, q_by="dir" second, no body. With the decoy alone: kept="1" exact="0" q_by="dir" (one hedged is no answer).
@@ -181,6 +182,10 @@ run "$S" "$TMP/b9.xml" "--for=WidgetPtr" --token-budget=2000 && {
 if grep -q '<shortkey held="budget" of="WidgetPtr" next="--for=WidgetPtr"/>' "$TMP/b9.xml" && ! grep -q '<rung ' "$TMP/b9.xml"; then ok "B9 token budget: held marker, no rungs"; else no "B9 token budget: held marker, no rungs"; fi
 }
 run "$S" "$TMP/b9.json" --json "--for=WidgetPtr" && { if grep -q 'shortkey' "$TMP/b9.json"; then no "B9 --json carries no block"; else ok "B9 --json carries no block"; fi; }
+for fmt in --format=candidates; do
+    ( cd "$S" || exit 1; HOME="$TMP" "$BIN" "$S" --no-cache "$fmt" "--for=WidgetPtr" </dev/null 2>/dev/null ) >"$TMP/b9f.out"; frc=$?
+    if [ "$frc" -eq 0 ] && [ -s "$TMP/b9f.out" ] && ! grep -q 'shortkey' "$TMP/b9f.out"; then ok "B9 $fmt carries no block"; else no "B9 $fmt carries no block (rc=$frc)"; fi
+done
 ( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=WidgetPtr" </dev/null 2>/dev/null ) >"$TMP/b9off.xml"
 python3 - "$TMP/b5.xml" "$TMP/b9off.xml" <<'PY'
 import re, sys
