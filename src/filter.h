@@ -1019,17 +1019,6 @@ inline std::vector<float> docNoiseSymbolMultipliers( const IngestResult& ing, st
 inline constexpr DocNoiseCue kDocsQuestionCues[] = { { "doc", true },      { "readme", true }, { "guide", true }, { "tutorial", true },
                                                      { "manual", true },   { "markdown", false }, { "wiki", false }, { "faq", false },
                                                      { "howto", false } };
-inline bool taskAsksAboutDocs( std::string_view task )
-{
-    const std::string lowerTask = queryshape::detail::lowerAscii( task );
-    if( lowerTask.find( ".md" ) != std::string::npos || lowerTask.find( ".rst" ) != std::string::npos )
-    {
-        return true;   // a named doc file (the B8 mention anchor lifts it; this rule must not push it back down)
-    }
-    return taskHasCue( lowerTask, kDocsQuestionCues ) || taskHasCue( lowerTask, kChangeQuestionCues )
-        || taskHasCue( lowerTask, kTranslationQuestionCues );
-}
-
 // Does the question ask for doc TEXT: a docs cue (kDocsQuestionCues) or a named .md/.rst file? The narrower half of
 // taskAsksAboutDocs, without its change and translation cues: those misfire on code wording (`django.utils.deprecation`,
 // ld2-django-01), and the two rules that read this (the code-first --for tail, forpage.h computeFileTail; the Sphinx .txt
@@ -1041,6 +1030,18 @@ inline bool taskAsksForDocText( std::string_view task )
         || taskHasCue( lowerTask, kDocsQuestionCues );
 }
 
+// taskAsksForDocText (a named .md/.rst file — the B8 mention anchor lifts it, this rule must not push it back down — or a docs
+// cue), or a change or translation cue
+inline bool taskAsksAboutDocs( std::string_view task )
+{
+    if( taskAsksForDocText( task ) )
+    {
+        return true;
+    }
+    const std::string lowerTask = queryshape::detail::lowerAscii( task );
+    return taskHasCue( lowerTask, kChangeQuestionCues ) || taskHasCue( lowerTask, kTranslationQuestionCues );
+}
+
 // ── SPHINX .txt PAGES STAY OUT OF A CODE QUESTION'S CORPUS STATISTICS (--for and MCP `for`; gate restdocscheck (H)) ─────
 // A `.txt` file enters the index only as a declared Sphinx source (docparse.h sphinxConfDeclaresTxt): django's 679 pages
 // arrived at once and, through BM25's document frequencies and average length, re-ranked code rows on code questions
@@ -1050,14 +1051,14 @@ inline bool taskAsksForDocText( std::string_view task )
 // A doc unit of an indexed `.txt` file: a Sphinx page (only a declared Sphinx source is indexed with that extension)
 inline bool isSphinxTxtUnit( const IngestResult& ing, const Symbol& s )
 {
-    return s.lang == Lang::Markdown && s.fileId < ing.files.size() && ing.files[ s.fileId ].ends_with( ".txt" );
+    return isDocLang( s.lang ) && s.fileId < ing.files.size() && ing.files[ s.fileId ].ends_with( ".txt" );
 }
 
 // A reST label unit (`.. _name:`, ingest_rest.h (4)): a Markdown-lang unit named `_…` in a .rst/.txt file. It names the title
 // beside it, so ranked name lists (the --for file page and tail sym=, forpage.h) leave it out; :ref: still binds it.
 inline bool isRestLabelUnit( const IngestResult& ing, const Symbol& s )
 {
-    return s.lang == Lang::Markdown && s.name.starts_with( '_' ) && s.fileId < ing.files.size()
+    return isDocLang( s.lang ) && s.name.starts_with( '_' ) && s.fileId < ing.files.size()
         && ( ing.files[ s.fileId ].ends_with( ".rst" ) || ing.files[ s.fileId ].ends_with( ".txt" ) );
 }
 
@@ -1084,7 +1085,7 @@ inline std::vector<char> sphinxTxtStatsExclusion( const IngestResult& ing, std::
     for( std::size_t i = 0; i < ing.symbols.size(); ++i )
     {
         const Symbol& s = ing.symbols[i];
-        if( s.lang == Lang::Markdown && s.fileId < txtFile.size() && txtFile[ s.fileId ] != 0 )
+        if( isDocLang( s.lang ) && s.fileId < txtFile.size() && txtFile[ s.fileId ] != 0 )
         {
             out[i] = 1;
             ++marked;

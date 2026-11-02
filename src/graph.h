@@ -14060,7 +14060,7 @@ inline std::vector<NodeId> resolveAllByDefLine( const IngestResult& ing, std::st
 // Lang::Markdown; no code grammar mints that language.
 inline bool isDocUnit( const Symbol& s ) noexcept
 {
-    return s.lang == Lang::Markdown;
+    return isDocLang( s.lang );
 }
 
 // CODE BEFORE A DOC UNIT OF THE SAME SPELLING (docs-rest fix2; gate restdocscheck (I)). A reST object directive names its unit as

@@ -50,6 +50,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <numeric>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -738,6 +739,36 @@ inline std::string forPageSymOfFile( const IngestResult& ing, const ForFilePage&
     return forFileRowSymNames( ing, row );
 }
 
+// The code-first walk's window rule, shared by both row kinds: a doc row met while `walked` < `window` is listed, a Sphinx .txt
+// page only while fewer than kForFileTailSphinxTxtRows of them are (`txtListed`); such a page takes no window row.
+inline bool docRowInWindow( bool txt, std::size_t& walked, std::size_t window, std::size_t txtListed ) noexcept
+{
+    const bool inWindow = walked < window && ( !txt || txtListed < kForFileTailSphinxTxtRows );
+    walked += txt ? 0 : 1;   // the pages that arrived with Sphinx .txt take no window row
+    return inWindow;
+}
+
+inline void pushTailRow( FileTail& to, std::string path, std::string sym, std::size_t next )
+{
+    to.paths.push_back( std::move( path ) );
+    to.syms.push_back( std::move( sym ) );
+    to.pageNext.push_back( next );
+}
+
+// per file: 1 when a symbol of the shown head sits in it
+inline std::vector<char> headFilesOf( const IngestResult& ing, const std::vector<NodeId>& headIds )
+{
+    std::vector<char> inHead( ing.files.size(), 0 );
+    for( NodeId sid : headIds )
+    {
+        if( sid < ing.symbols.size() && ing.symbols[ sid ].fileId < inHead.size() )
+        {
+            inHead[ ing.symbols[ sid ].fileId ] = 1;
+        }
+    }
+    return inHead;
+}
+
 // 1. the rank rows: the best-symbol projection of the lens order, outside the shown head's files; marks each file it lists.
 //    tail-sym (train 30): each row's sym= is that file's page row's top symbols (`page` holds EVERY positive-score file and
 //    a rank row's file has a positive-score symbol, so its row exists) — reused from computeForFilePage, never recomputed.
@@ -754,49 +785,34 @@ inline void fileTailRankRows( FileTail& out, std::vector<char>& listed, const In
 {
     const std::size_t                F         = ing.files.size();
     const std::vector<std::uint32_t> pageRowOf = forPageRowOfFile( page, F );
-    std::vector<char>                inHead( F, 0 );
-    for( NodeId sid : headIds )
-    {
-        if( sid < ing.symbols.size() && ing.symbols[ sid ].fileId < F )
-        {
-            inHead[ ing.symbols[ sid ].fileId ] = 1;
-        }
-    }
-    const std::size_t   S = std::min( ing.symbols.size(), rank.size() );
-    std::vector<NodeId> order( S );
-    for( NodeId i = 0; i < S; ++i )
-    {
-        order[i] = i;
-    }
+    const std::vector<char>          inHead    = headFilesOf( ing, headIds );
+    const std::size_t                S         = std::min( ing.symbols.size(), rank.size() );
+    std::vector<NodeId>              order( S );
+    std::iota( order.begin(), order.end(), NodeId( 0 ) );
     sortutil::radixSortByScoreDescId( order, rank );
     std::size_t walked = 0;   // distinct files met, code and doc, a Sphinx .txt page not counted: the plain walk's window
     for( std::size_t k = 0; k < S && out.paths.size() < kForFileTailShownCap && rank[ order[k] ] > 0.0f; ++k )   // the zero-score tail is contiguous
     {
-        const std::uint32_t f = ing.symbols[ order[k] ].fileId;
+        const Symbol&       s = ing.symbols[ order[k] ];
+        const std::uint32_t f = s.fileId;
         if( f >= F || listed[f] || inHead[f] )
         {
             continue;
         }
-        if( docs != nullptr && ing.symbols[ order[k] ].lang == Lang::Markdown )
+        const bool isDoc = docs != nullptr && isDocLang( s.lang );
+        const bool txt   = isDoc && isSphinxTxtUnit( ing, s );
+        if( isDoc && !docRowInWindow( txt, walked, kForFileTailShownCap, docs->total ) )
         {
-            const bool txt      = isSphinxTxtUnit( ing, ing.symbols[ order[k] ] );
-            const bool inWindow = walked < kForFileTailShownCap && ( !txt || docs->total < kForFileTailSphinxTxtRows );
-            walked += txt ? 0 : 1;   // the pages that arrived with Sphinx .txt take no window row
-            docs->total += ( txt && inWindow ) ? 1 : 0;
-            if( inWindow )
-            {
-                listed[f] = 1;
-                docs->paths.push_back( lensRowPath( ing, f, rootArg ) );
-                docs->syms.push_back( forPageSymOfFile( ing, page, pageRowOf, f, order[k] ) );
-                docs->pageNext.push_back( pageRowOf[f] == kNoPageRow ? 0 : std::size_t( pageRowOf[f] ) + 1 );   // where the page holds it
-            }
             continue;
         }
-        ++walked;
+        walked += isDoc ? 0 : 1;
+        if( txt )   // a doc row, so docs is set
+        {
+            ++docs->total;
+        }
         listed[f] = 1;
-        out.paths.push_back( lensRowPath( ing, f, rootArg ) );
-        out.syms.push_back( forPageSymOfFile( ing, page, pageRowOf, f, order[k] ) );
-        out.pageNext.push_back( 0 );
+        const std::size_t next = !isDoc ? 0 : pageRowOf[f] == kNoPageRow ? 0 : std::size_t( pageRowOf[f] ) + 1;   // a doc row: where the page holds it
+        pushTailRow( isDoc ? *docs : out, lensRowPath( ing, f, rootArg ), forPageSymOfFile( ing, page, pageRowOf, f, order[k] ), next );
     }
 }
 
@@ -815,17 +831,17 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
     for( std::size_t r = 0; r < page.rows.size() && ( docs != nullptr ? codeSeen < kForFileTailPageRows : r < out.pageSeen ); ++r )
     {
         const ForFileRow& row   = page.rows[r];
-        const bool        isDoc = docs != nullptr && row.lead < ing.symbols.size() && ing.symbols[ row.lead ].lang == Lang::Markdown;
+        const bool        isDoc = docs != nullptr && row.lead < ing.symbols.size() && isDocLang( ing.symbols[ row.lead ].lang );
+        const bool        txt   = isDoc && isSphinxTxtUnit( ing, ing.symbols[ row.lead ] );
+        windowSeen += isDoc ? 0 : 1;
+        const bool        inWindow = !isDoc || docRowInWindow( txt, windowSeen, kForFileTailPageRows, docs->total );
         codeSeen += isDoc ? 0 : 1;
-        const bool txt      = isDoc && isSphinxTxtUnit( ing, ing.symbols[ row.lead ] );
-        const bool inWindow = windowSeen < kForFileTailPageRows && ( !txt || docs->total < kForFileTailSphinxTxtRows );
-        windowSeen += txt ? 0 : 1;
         out.pageSeen = std::max( out.pageSeen, r + 1 );
         if( row.fileId >= listed.size() || listed[ row.fileId ] )
         {
             continue;
         }
-        if( isDoc && !inWindow )
+        if( !inWindow )
         {
             out.pageSkip = std::min( out.pageSkip, r );
             continue;
@@ -835,10 +851,7 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
         {
             ++docs->total;
         }
-        FileTail& to = isDoc ? *docs : out;
-        to.paths.push_back( lensRowPath( ing, row.fileId, rootArg ) );
-        to.syms.push_back( forFileRowSymNames( ing, row ) );
-        to.pageNext.push_back( r + 1 );
+        pushTailRow( isDoc ? *docs : out, lensRowPath( ing, row.fileId, rootArg ), forFileRowSymNames( ing, row ), r + 1 );
     }
 }
 

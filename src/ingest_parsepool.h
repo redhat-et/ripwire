@@ -575,7 +575,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
                 buildLexForNewDefs( out.defs, firstNewDefIndex, bytes );
                 notePartialExtract( scan, fileId, restShort, bytes.size() );
             }
-            else if( le->lang == Lang::Markdown )
+            else if( isDocLang( le->lang ) )
             {
                 if( !prepareParserFor( pg.p, *le ) )
                 {
