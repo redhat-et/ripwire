@@ -1217,14 +1217,29 @@ inline bool isStructValue( std::string_view v ) noexcept
     return !name.empty() && ( std::isupper( static_cast<unsigned char>( name.front() ) ) != 0 || name.find( '.' ) != std::string_view::npos || name.find( "::" ) != std::string_view::npos );
 }
 
+// How a language reads a bracket after `=` or `return` (the language-specific layer of the opener allowlist; everything else in it is shared):
+//   tuple: `(` holds data only in Python (a tuple). In TS, JS it opens an arrow function's parameters (`export const f = (`), elsewhere a parenthesised expression.
+//   localBrace: a bare `{` inside a function body is data in Python (a dict), C, C++, Java (an array initialiser), Go, Ruby; not in TS, JS (an object literal built in a
+//   function is a call's options or a value, `const opts = {`), Rust (a block) or Swift, Kotlin (a closure).
+struct BracketReading
+{
+    bool tuple      = false;
+    bool localBrace = true;
+};
+inline BracketReading bracketReadingOf( Lang lang ) noexcept
+{
+    const bool notLocalBrace = lang == Lang::TypeScript || lang == Lang::JavaScript || lang == Lang::Rust || lang == Lang::Swift || lang == Lang::Kotlin;
+    return BracketReading{ lang == Lang::Python, !notLocalBrace };
+}
+
 // the right side of an assignment, a return or a key is a data literal. A call's result is not (`make_unique<Pool>(`, `new Hono<E>({`, `wrap_with_prefix(`, `compute(`), nor is code (`() => {`, `function () {`, `match x {`).
 // A struct literal only where allowStruct: outside a function it is a table of constants, inside one it is the arguments of a call (`opt := resource.PodResourcesOptions{`)
-inline bool isDataValue( std::string_view v, bool allowStruct ) noexcept
+inline bool isDataValue( std::string_view v, bool allowStruct, BracketReading br ) noexcept
 {
     static constexpr auto kLiterals = std::to_array<std::string_view>( { "{", "[", "(", "[{", "[(", "[[", "&[", "&mut [", "&'static [", "%w[", "%i[" } );
-    if( v.empty() )
+    if( v.empty() || ( !br.tuple && ( v == "(" || v == "[(" ) ) )
     {
-        return false;
+        return false;   // a tuple outside Python is a parameter list or an expression
     }
     return std::find( kLiterals.begin(), kLiterals.end(), v ) != kLiterals.end() || isDataWrapperValue( v ) || isMacroOpener( v, false ) || isCompositeValue( v ) || ( allowStruct && isStructValue( v ) );
 }
@@ -1247,7 +1262,7 @@ inline std::size_t assignmentAt( std::string_view c ) noexcept
 }
 
 // `key: {`, `"key": [`, `K: T{`, `'k' => [`: a row that is itself a literal, nested in a table (an `if x: {` or a callback is not: the key is one identifier or one quoted string)
-inline bool isKeyedLiteral( std::string_view c, bool allowStruct ) noexcept
+inline bool isKeyedLiteral( std::string_view c, bool allowStruct, BracketReading br ) noexcept
 {
     std::size_t keyEnd = 0;
     if( c.front() == '"' || c.front() == '\'' )
@@ -1265,7 +1280,7 @@ inline bool isKeyedLiteral( std::string_view c, bool allowStruct ) noexcept
     {
         return false;
     }
-    return isDataValue( trimWs( rest.substr( colon ? 1 : 2 ) ), allowStruct );
+    return isDataValue( trimWs( rest.substr( colon ? 1 : 2 ) ), allowStruct, br );
 }
 
 // `enum E {`, `export const enum E {`, `pub(crate) enum E {`, `typedef enum {`, `enum class E : int {`: no `=`, no parameter list, the word enum among the first ones
@@ -1283,13 +1298,26 @@ inline bool isEnumOpener( std::string_view c ) noexcept
     return false;
 }
 
-// C++ brace initialisation with no `=`: `static constexpr std::array<T, 8> kNames{`, `const std::map<K, V> kM {`
+// C++ brace initialisation with no `=`: `static constexpr std::array<T, 8> kNames{`, `const std::map<K, V> kM {`. The word before `{` is the declared name: a JS destructuring
+// `const {` (an import binding) and a Java `static {` initialiser block declare none
 inline bool isBraceInitDecl( std::string_view c ) noexcept
 {
+    const auto isLead = []( std::string_view w ) { return w == "static" || w == "const" || w == "constexpr" || w == "inline"; };
     const std::string_view first = taskroute::identifierRunOf( c );
-    const bool lead = first == "static" || first == "const" || first == "constexpr" || first == "inline" || c.starts_with( "std::" );
+    const bool lead = isLead( first ) || c.starts_with( "std::" );
     const bool notType = c.find( "struct" ) == std::string_view::npos && c.find( "class" ) == std::string_view::npos && c.find( "union" ) == std::string_view::npos;
-    return lead && notType && c.back() == '{' && c.find( '(' ) == std::string_view::npos && c.find( '=' ) == std::string_view::npos;
+    if( !lead || !notType || c.back() != '{' || c.find( '(' ) != std::string_view::npos || c.find( '=' ) != std::string_view::npos )
+    {
+        return false;
+    }
+    const std::string_view head = trimWs( c.substr( 0, c.size() - 1 ) );
+    std::size_t at = head.size();
+    while( at > 0 && namesplit::isIdentChar( head[at - 1] ) )
+    {
+        --at;
+    }
+    const std::string_view name = head.substr( at );
+    return !name.empty() && at > 0 && !isLead( name );
 }
 
 // What an opener line proves about the rows under it. ALLOWLIST (SAFETY (d)(1)): a line that is none of these is no table, and neither is what stands under it.
@@ -1309,7 +1337,7 @@ enum class OpenerKind
     Nested,
     Transparent
 };
-inline OpenerKind classifyOpener( std::string_view c, bool inFunction ) noexcept
+inline OpenerKind classifyOpener( std::string_view c, bool inFunction, BracketReading br ) noexcept
 {
     static constexpr auto kNotData = std::to_array<std::string_view>( { "else", "do", "try", "case", "default", "finally", "with", "async", "await", "yield", "throw", "new" } );
     if( c.starts_with( "#define" ) )
@@ -1331,7 +1359,8 @@ inline OpenerKind classifyOpener( std::string_view c, bool inFunction ) noexcept
     }
     if( first == "return" )
     {
-        return isDataValue( trimWs( c.substr( 6 ) ), false ) ? OpenerKind::Root : OpenerKind::None;
+        const std::string_view value = trimWs( c.substr( 6 ) );
+        return ( br.localBrace || value != "{" ) && isDataValue( value, false, br ) ? OpenerKind::Root : OpenerKind::None;   // a return is in a function body
     }
     if( wordIsOneOf( first, kForTableNotCallee ) || wordIsOneOf( first, kNotData ) || c.front() == '}' )
     {
@@ -1345,7 +1374,7 @@ inline OpenerKind classifyOpener( std::string_view c, bool inFunction ) noexcept
     {
         return OpenerKind::EnumBody;
     }
-    if( isKeyedLiteral( c, !inFunction ) || ( !inFunction && isStructValue( c ) ) )
+    if( isKeyedLiteral( c, !inFunction, br ) || ( !inFunction && isStructValue( c ) ) )
     {
         return OpenerKind::Nested;
     }
@@ -1367,7 +1396,8 @@ inline OpenerKind classifyOpener( std::string_view c, bool inFunction ) noexcept
     {
         return OpenerKind::None;   // `type T = {`, `using U = struct {`: a declaration; `type = {` is a variable
     }
-    if( !isDataValue( trimWs( c.substr( eq + 1 ) ), !inFunction ) )
+    const std::string_view value = trimWs( c.substr( eq + 1 ) );
+    if( ( inFunction && !br.localBrace && value == "{" ) || !isDataValue( value, !inFunction, br ) )
     {
         return OpenerKind::None;
     }
@@ -1403,7 +1433,7 @@ struct TableOpener
 };
 
 // a bracket alone on its line (Allman style): its declaration is the line above, at its indent. `T t[] =` + `{` reads as `T t[] = {`; `int main()` + `{` is no table
-inline TableOpener allmanOpener( std::string_view text, std::size_t pos, std::size_t indent, std::string_view bracket, bool inFunction )
+inline TableOpener allmanOpener( std::string_view text, std::size_t pos, std::size_t indent, std::string_view bracket, bool inFunction, BracketReading br )
 {
     const std::optional<std::string_view> above = prevTextLine( text, pos );
     if( !above || lintdetail::indentOf( *above ) != indent )
@@ -1412,13 +1442,13 @@ inline TableOpener allmanOpener( std::string_view text, std::size_t pos, std::si
     }
     std::string joined( openerCode( *above ) );
     joined.append( " " ).append( bracket );
-    const OpenerKind k = classifyOpener( joined, inFunction );
+    const OpenerKind k = classifyOpener( joined, inFunction, br );
     return k == OpenerKind::Nested || k == OpenerKind::None ? TableOpener{} : TableOpener{ k, joined };
 }
 
 // The opener of the literal a row at `rowStart` stands in. Going up, a less indented line must be an opener the allowlist knows: a closer, a statement or a declaration ends
 // the walk with no claim, so a row never takes the opener of a closed block. A C++ raw string's lines (a column 0 `)", 0) \` up to its `R"(`) are text, not structure.
-inline TableOpener tableOpenerOf( std::string_view text, std::size_t rowStart, std::size_t indent, bool inFunction )
+inline TableOpener tableOpenerOf( std::string_view text, std::size_t rowStart, std::size_t indent, bool inFunction, BracketReading br )
 {
     std::size_t pos = rowStart;
     std::size_t cur = indent;
@@ -1442,10 +1472,10 @@ inline TableOpener tableOpenerOf( std::string_view text, std::size_t rowStart, s
             continue;
         }
         const std::string_view code = openerCode( *l );
-        const OpenerKind k = classifyOpener( code, inFunction );
+        const OpenerKind k = classifyOpener( code, inFunction, br );
         if( code == "{" || code == "[" || code == "(" )
         {
-            TableOpener a = allmanOpener( text, pos, in, code, inFunction );
+            TableOpener a = allmanOpener( text, pos, in, code, inFunction, br );
             if( a.kind != OpenerKind::None )
             {
                 return a;
@@ -1461,7 +1491,7 @@ inline TableOpener tableOpenerOf( std::string_view text, std::size_t rowStart, s
 }
 
 // a row at column 0 of a table written flat: `T t[] = {` + `{ "a" },` + `{ "b" },`: the lines above of the row's own shape, then the opener
-inline TableOpener flatOpenerOf( std::string_view text, std::size_t rowStart, RowKind kind, bool inFunction )
+inline TableOpener flatOpenerOf( std::string_view text, std::size_t rowStart, RowKind kind, bool inFunction, BracketReading br )
 {
     std::size_t pos = rowStart;
     for( std::size_t step = 0; step < kForTableSiblingLines; ++step )
@@ -1475,7 +1505,7 @@ inline TableOpener flatOpenerOf( std::string_view text, std::size_t rowStart, Ro
         {
             continue;
         }
-        const OpenerKind k = classifyOpener( openerCode( *l ), inFunction );
+        const OpenerKind k = classifyOpener( openerCode( *l ), inFunction, br );
         return k == OpenerKind::Root || k == OpenerKind::EnumBody ? TableOpener{ k, std::string( trimWs( *l ) ) } : TableOpener{};
     }
     return {};
@@ -1505,7 +1535,7 @@ inline bool isSecondaryPath( std::string_view p ) noexcept
 // (classifyOpener); or a macro row at top level (a Rust `name!(`, an ALLCAPS callee, outside any function), which is a registration with no sibling needed; or a call row at top level with
 // a sibling ("item"). The owner the parser found makes this stricter, never looser: inside a function a call is a statement, never a row (`log_info("x");` twice is two statements,
 // not a table), and a struct literal is the arguments of a call. A call row whose callee IS the anchor is a call of it (`run_it(1)` twice in a script), not a row of a table that holds it.
-inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bool callableOwner )
+inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bool callableOwner, BracketReading br )
 {
     if( byteOffset >= text.size() )
     {
@@ -1528,8 +1558,8 @@ inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bo
         }
     }
     const std::size_t indent = lintdetail::indentOf( line );
-    const TableOpener opener = indent > 0 ? tableOpenerOf( text, start, indent, callableOwner )
-                                          : ( shape.kind == RowKind::Call ? TableOpener{ OpenerKind::Transparent, {} } : flatOpenerOf( text, start, shape.kind, callableOwner ) );
+    const TableOpener opener = indent > 0 ? tableOpenerOf( text, start, indent, callableOwner, br )
+                                          : ( shape.kind == RowKind::Call ? TableOpener{ OpenerKind::Transparent, {} } : flatOpenerOf( text, start, shape.kind, callableOwner, br ) );
     const bool enumMember = opener.kind == OpenerKind::EnumBody && shape.kind == RowKind::Member;
     if( opener.kind != OpenerKind::Root && !enumMember && !( opener.kind == OpenerKind::Transparent && shape.kind == RowKind::Call ) )
     {
@@ -1563,7 +1593,7 @@ inline bool markTableRows( const IngestResult& ing, std::vector<Site>& rows, con
     {
         loadFile( rows[i].raw.fileId );
         const bool callableOwner = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
-        rows[i].tbl = tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner );
+        rows[i].tbl = tableRowOf( loadedText, rows[i].raw.byteOffset, callableOwner, bracketReadingOf( langOfPath( ing.files[rows[i].raw.fileId] ) ) );
         any         = any || !rows[i].tbl.empty();
     }
     return any;
@@ -2275,7 +2305,7 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
             continue;
         }
         // the caps are on work done: scans (an anchor with no site costs one too) and elements printed. An anchor past either is counted, never dropped.
-        if( printed >= kForTableAnchors || scanned + skipped >= kForLiteralCandidates || used + kForTableElementBytes >= kForTableByteCap )
+        if( printed >= kForTableAnchors || scanned >= kForLiteralCandidates || used + kForTableElementBytes >= kForTableByteCap )
         {
             skip( word );
             continue;
@@ -2284,15 +2314,9 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
         ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm };
         ForLiteral lit{ word, "table" };
         ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits );
-        if( r.noRoom )
+        if( r.noRoom || r.unread )
         {
-            --scanned;
-            skip( word );
-            continue;
-        }
-        if( r.unread )
-        {
-            skip( word );
+            skip( word );   // scanned, and counted once more as skipped: it printed nothing
             continue;
         }
         if( r.xml.empty() )

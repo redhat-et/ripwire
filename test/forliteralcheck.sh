@@ -43,6 +43,7 @@
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
 #   T28-T37 (fix round 2; RED on 5bbee3cb where [P]): tbl= is an allowlist of proven openers per language; a closer ends the opener walk; read= and <lit_capped> say the rank cap; table rows first
 #   T38, T38b (fix round 3): a call in a list a function builds, and an enum struct variant, are no table rows (they killed two surviving mutants)
+#   T39-T42 (fix round 4; RED on d23529d9 where [P]): `= (` is data only in Python; a declaration names something before `{`; a TS/JS function's object literal is no table; an unread anchor is one scan
 #   T22f (fix round 3, C4): two elements past 39,200 B; the third anchor is counted, never printed (killed the byte-cap mutant)
 #   T23-T27, T24g-h (fix round; RED on e2df59ee where [P]): natural wording near `add a new argument to run_it` prints no block, a statement in a function body carries no tbl=, the capped note is true, no silent anchor
 #   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
@@ -664,7 +665,7 @@ if has "$( lits <<<"$A" )" 'funcs.ConcatFunc' || has "$A" 's="concat"'; then no 
 A="$( tr1 '--for=add a new struct like Filter' )"; L="$( lits <<<"$A" )"
 if has "$L" 's="Filter" shape="table"'; then ok "T7b a plain word after like that the index holds anchors"; else no "T7b no sibling: ${L:0:300}"; fi
 # Near misses [G]
-nomiss(){ local T="$1" W="$2"; local X; X="$( tr1 "--for=$1" )"; if ! has "$( lits <<<"$X" )" 'shape="table"' && [ "$X" = "$( trf "--for=$1" )" ]; then ok "$W"; else no "$W: $( lits <<<"$X" | cut -c1-240 )"; fi; }
+nomiss(){ local T="$1" W="$2"; local X; X="$( tr1 "--for=$1" )"; if [ -n "$X" ] && ! has "$( lits <<<"$X" )" 'shape="table"' && [ "$X" = "$( trf "--for=$1" )" ]; then ok "$W"; else no "$W: ${#X} B $( lits <<<"$X" | cut -c1-240 )"; fi; }
 nomiss 'where is HashJoinNode used' 'T8 no cue: an identifier alone, no block, byte-identical to the switch off'
 nomiss 'register the widget' 'T9 a cue with a stop word and a plain word: no anchor'
 nomiss 'add a new argument to HashJoinNode' 'T9b the word after to in an add-a-new task is the target, no anchor'
@@ -675,13 +676,13 @@ nomiss 'register `tablecomment_word`' 'T13 a word in a comment only: no row, no 
 nomiss 'dispatch_one default' 'T14 default without a table row: no block'
 nomiss 'register `internal/lang/functions.go`' 'T15 a backticked path is no anchor'
 A="$( tr1 '--for=register self.keyed_word table' )"
-if ! has "$( lits <<<"$A" )" 's="self.keyed_word"'; then ok "T15b a self. chain does not anchor"; else no "T15b self. chain anchored"; fi
+if [ -n "$A" ] && ! has "$( lits <<<"$A" )" 's="self.keyed_word"'; then ok "T15b a self. chain does not anchor"; else no "T15b self. chain anchored"; fi
 # T16 [G] a dotted key beside a cue stays the dotted shape, one element, no table
 A="$( tr1 '--for=svc.retry.limit setting table keyed_word' )"; L="$( lits <<<"$A" )"
 if has "$L" 'shape="dotted"' && ! has "$L" 'shape="table"'; then ok "T16 a dotted key beside a cue stays dotted"; else no "T16 shape wrong: ${L:0:300}"; fi
 # T17 [P] an import list is no table row, but the anchor still has its site rows when the cue is a registration word
 A="$( tr1 '--for=ImportedOnly default' )"
-if ! has "$( lits <<<"$A" )" 'shape="table"'; then ok "T17 an import list row is no table row"; else no "T17 import read as a table: $( lits <<<"$A" | cut -c1-300 )"; fi
+if [ -n "$A" ] && ! has "$( lits <<<"$A" )" 'shape="table"'; then ok "T17 an import list row is no table row"; else no "T17 import read as a table: $( lits <<<"$A" | cut -c1-300 )"; fi
 # T18 [P] word edges: a hit inside a longer word is longer=, never a row
 printf 'var eachWord = 1\nvar _ = "Eachly"\n' > "$TF/internal/funcs/w.go"
 A="$( tr1 '--for=add a new command like `Each`' )"; L="$( lits <<<"$A" )"
@@ -727,7 +728,8 @@ print(len(heads),tot,sum(1 for h in heads if "capped" in h[2]))
 set -- $CAPJ
 if [ "${1:-0}" -ge 1 ] && [ "${2:-99999}" -le 40000 ] && [ "${3:-0}" -ge 1 ] && has "$A" 'next="--grep=cap_anchor_one"'; then ok "T22 the row limit discloses ($2 B over $1 elements), capped=1, next="
 else no "T22 byte cap: $CAPJ"; fi
-if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22b the capped answer is well-formed"; else no "T22b not well-formed"; fi
+if ! command -v xmllint >/dev/null 2>&1; then ok "T22b SKIP: xmllint not installed"
+elif [ -n "$A" ] && printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22b the capped answer is well-formed"; else no "T22b not well-formed"; fi
 # T22c-e: paths long enough that two elements spend the 40 KB, and the third anchor has sites but no room
 BL="$TMP/blong"; mkdir -p "$BL"
 python3 -I - "$BL" <<'PY'
@@ -751,9 +753,10 @@ print(len(h),sum(int(x[1]) for x in h),min(int(x[0]) for x in h))
 set -- $CAPJ
 if [ "${1:-0}" -eq 2 ] && [ "${2:-99999}" -le 40000 ] && [ "${3:-32}" -lt 32 ]; then ok "T22c the byte cap holds ($2 B over $1 elements), the last cut on a row boundary below the row limit"
 else no "T22c byte cap: $CAPJ"; fi
-if has "$A" '<lit_capped scanned="2" skipped="1"' && has "$A" 'next="--grep=cap_anchor_three"'; then ok "T22d an anchor with sites and no room left is counted by <lit_capped> with next="
+if has "$A" '<lit_capped scanned="3" skipped="1"' && has "$A" 'next="--grep=cap_anchor_three"'; then ok "T22d an anchor with sites and no room left is counted by <lit_capped> with next="
 else no "T22d later anchor unsaid: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$A" | cut -c1-200 | tr '\n' ' ' )"; fi
-if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22e the capped answer is well-formed"; else no "T22e not well-formed"; fi
+if ! command -v xmllint >/dev/null 2>&1; then ok "T22e SKIP: xmllint not installed"
+elif [ -n "$A" ] && printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22e the capped answer is well-formed"; else no "T22e not well-formed"; fi
 # T22f (fix round 3, C4; killed the byte-cap mutant T22c let survive): an element's own tag may take two elements past 39,200 B (cap - kForTableElementBytes),
 # where cap - used - 800 would wrap. The pre-check must count the third anchor in <lit_capped>, never print it. The fixture is tuned by path depth until
 # the first two elements land in the window; landing nowhere is red, so the arm cannot pass blind.
@@ -871,7 +874,8 @@ for T in 'add a new argument to the run_it function' 'add a new argument for run
          'add another retry around run_it' 'add a new test for run_it' 'adding new tests for lookup_user' 'implement a new overload of run_it' 'add a new caller of run_it' \
          'add a new argument to run_it and lookup_user' 'run_it returns the wrong row from the table' 'fix register allocation in run_it' 'reduce compile time of run_it' \
          'the users table is empty when lookup_user runs' 'add a new argument to `run_it`'; do
-    if has "$( lits <<<"$( nf1 "--for=$T" )" )" 'shape="table"'; then bad="$bad [$T]"; fi
+    O="$( nf1 "--for=$T" )"
+    if [ -z "$O" ] || has "$( lits <<<"$O" )" 'shape="table"'; then bad="$bad [$T]"; fi
 done
 if [ -z "$bad" ]; then ok "T23 [P] a bare identifier prints only beside a real table row: 16 natural phrasings of a change to a function, no block"; else no "T23 false fires:$bad"; fi
 # T23b [G] twin: a bare identifier with a real table row (T2's macro row) and a backticked or like-named sibling still print
@@ -904,7 +908,8 @@ PY
 # T24i [P] neighbours the review did not name: a statement under `if __name__ == "__main__":` is no top level row; calls OF the anchor are no rows of it
 A="$( nf1 '--for=register `main_key_one`' )"; L="$( lits <<<"$A" )"
 if has "$L" 'reg("main_key_one"' && ! has "$L" 'tbl='; then ok "T24i [P] an indented statement with no opener is no \"item\" row"; else no "T24i main block: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
-if ! has "$( lits <<<"$( nf1 '--for=add a new test for run_it' )" )" 'shape="table"' && ! has "$( lits <<<"$( nf1 '--for=fix register allocation in run_it' )" )" 'shape="table"'; then ok "T24j [P] top level calls of the anchor (run_it(1); run_it(2)) are no table: a bare word prints nothing"; else no "T24j script calls read as a table"; fi
+O="$( nf1 '--for=add a new test for run_it' )"; O2="$( nf1 '--for=fix register allocation in run_it' )"
+if [ -n "$O" ] && [ -n "$O2" ] && ! has "$( lits <<<"$O" )" 'shape="table"' && ! has "$( lits <<<"$O2" )" 'shape="table"'; then ok "T24j [P] top level calls of the anchor (run_it(1); run_it(2)) are no table: a bare word prints nothing"; else no "T24j script calls read as a table"; fi
 A="$( nf1 '--for=register `run_it`' )"; L="$( lits <<<"$A" )"
 if has "$L" 's="run_it"' && ! has "$L" 'tbl='; then ok "T24k [P] backticked: its call sites print, with no tbl="; else no "T24k callee rows: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
 A="$( nf1 '--for=register `top_py_one`' )"; L="$( lits <<<"$A" )"
@@ -1318,6 +1323,139 @@ else no "T38 call in a function list: $( grep -o '<ls [^>]*>' <<<"$Q$Q2" | cut -
 Q="$( mvq 'add a new event like `ev_key`' )"; Q2="$( mvq 'add a new event like `ew_key`' )"
 if has "$Q" 's="ev_key" shape="table"' && ! has "$Q" ' tbl="' && has "$Q2" 'tbl="pub enum Ew {"'; then ok "T38b [P] an enum's struct variant is a declaration, no tbl=; twin: a unit variant keeps its enum"
 else no "T38b enum variant: $( grep -o '<ls [^>]*>' <<<"$Q$Q2" | cut -c1-160 | tr '\n' ' ' )"; fi
+
+# T39-T42 (fix round 4; RED on d23529d9 where [P]). Each alcheck first needs the anchor's own <lit>, so a crash or an empty answer is red.
+mkdir -p "$AL/web4" "$AL/py4" "$AL/rs4/src" "$AL/go4" "$AL/cc4" "$AL/java4"
+cat > "$AL/web4/arrow.ts" <<'TS'
+export const normalizeLang = (
+  n1_typed: string,
+  options: DetectorOpts,
+): string => {
+  return n1_typed;
+};
+export const useThing = (
+  n1_untyped,
+  other_arrow,
+) => {
+  return n1_untyped + other_arrow;
+};
+const pick = (
+  n1_local: string,
+  other: number,
+) => n1_local;
+function n1_typed() {}
+function n1_untyped() {}
+function n1_local() {}
+TS
+cat > "$AL/web4/view.jsx" <<'JS'
+export function View() {
+  return (
+    n1_jsx,
+    other
+  );
+}
+JS
+cat > "$AL/web4/syms.js" <<'JS'
+const {
+  n2_sym,
+  n2_other,
+} = require('./symbols')
+const  {
+  n2_spaced,
+  n2_other2,
+} = require('./symbols')
+JS
+cat > "$AL/web4/symbols.js" <<'JS'
+const keys = {
+  n2_sym: Symbol('n2'),
+  n2_other: Symbol('other'),
+}
+module.exports = keys
+JS
+cat > "$AL/web4/opts.ts" <<'TS'
+export class Router {
+  clone() {
+    const opts = {
+      n3_opt: this.n3_opt,
+      strict: this.strict,
+    };
+    return new Router(opts);
+  }
+  make() {
+    return {
+      n3_ret: 1,
+      strict: 2,
+    };
+  }
+  n3_opt() {}
+  n3_ret() {}
+}
+export const TOP_OPTS = {
+  n3_top: 1,
+  strict: 2,
+};
+TS
+cat > "$AL/py4/t.py" <<'PY'
+def build():
+    pairs = (
+        "n1_py_local_tuple",
+        "other",
+    )
+    return pairs
+PY
+cat > "$AL/rs4/src/p.rs" <<'RS'
+pub const PAIR: (u32, u32) = (
+    n1_rs_tuple,
+    other,
+);
+fn n1_rs_tuple() -> u32 { 1 }
+RS
+cat > "$AL/go4/p.go" <<'GO'
+package p
+
+var sum = (
+	n1_go_paren,
+	other)
+
+func n1_go_paren() int { return 1 }
+GO
+cat > "$AL/cc4/p.c" <<'CC'
+void fill(void) {
+    static const char *names[] = {
+        "n3_c_local",
+        "other",
+    };
+}
+CC
+cat > "$AL/java4/S.java" <<'JV'
+class S {
+    static {
+        register(n2_java_static);
+        register(other);
+    }
+    static void n2_java_static() {}
+}
+JV
+albatch "T39 [P] N1 \`= (\` holds data only in Python: a TS/JS arrow function's parameters (typed, untyped, local), a JSX return, a Rust tuple const and a Go parenthesised expression get no tbl=" \
+    n1_typed - n1_untyped - n1_local - n1_jsx - n1_rs_tuple - n1_go_paren -
+albatch "T39b [G] twins: a Python tuple keeps its opener, at top level (T33's NAMES = ( ) and in a function body" \
+    pos_py_tuple 'NAMES = (' n1_py_local_tuple 'pairs = ('
+Q="$( alq 'add a new option like n1_typed' )"
+if [ -n "$Q" ] && ! has "$Q" ' tbl="'; then ok "T39c [P] natural wording (add a new option like X): no tbl= on an arrow function's parameters"; else no "T39c arrow parameters: ${#Q} B $( grep -o ' tbl="[^"]*"' <<<"$Q" | tr '\n' ' ' )"; fi
+albatch "T40 [P] N2 a declaration names something before {: JS destructuring (const {, const  {) and a Java static initialiser are no Root opener" \
+    n2_spaced - n2_java_static -
+Q="$( alq 'register a new symbol like `n2_sym`' )"
+if has "$Q" 's="n2_sym" shape="table"' && has "$( grep -m1 -o '<ls [^>]*>' <<<"$Q" )" 'tbl="const keys = {"' && ! has "$Q" 'tbl="const {"'; then ok "T40b [P] the registry ranks first; the destructuring import carries no tbl="
+else no "T40b registry order: $( grep -o '<ls [^>]*>' <<<"$Q" | cut -c1-160 | tr '\n' ' ' )"; fi
+albatch "T41 [P] N3 an object literal a TS/JS function builds (const opts = {, return {) is a call's options or a value, no tbl=" \
+    n3_opt - n3_ret -
+albatch "T41b [G] twins: a top level TS object, a Python dict and a C array in a function body keep their opener" \
+    n3_top 'export const TOP_OPTS = {' pos_py_infn 'table = {' n3_c_local 'static const char *names[] = {'
+# T42 [P] CodeRabbit: an anchor read for a table row that found none (too many sites) costs one scan, not two: three anchors after it still print
+printf 'MORE = {\n    "rk_two": 1,\n    "rk_three": 2,\n    "rk_four": 3,\n}\ndef rk_two():\n    return 1\ndef rk_three():\n    return 1\ndef rk_four():\n    return 1\n' > "$RK/zzz/more.py"
+Q="$( rkq 'add a new test for big_key like rk_two alongside rk_three following rk_four' )"
+if has "$Q" '<lit_capped scanned="4" skipped="1" next="--grep=big_key"' && has "$Q" 's="rk_four"'; then ok "T42 [P] the unread anchor is one scan: three more anchors print, <lit_capped> scanned=4 skipped=1"
+else no "T42 unread anchor counted twice: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$Q" | cut -c1-120 | tr '\n' ' ' )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
