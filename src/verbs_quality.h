@@ -2784,9 +2784,10 @@ inline void dropTestOnlyEntryPoints( const rw::IngestResult& ing, std::vector<rw
     using namespace rw;
     std::vector<std::string>        seenDirs;
     std::vector<epdetail::Manifest> manifests;
+    const std::uint8_t              moduleAttr = epFormatsOfForm( EpTargetForm::ModuleAttr );   // setup.cfg + pyproject: module:attr targets
     for( NodeId id : testOnly )
     {
-        epdetail::collectManifestsAbove( ing, ing.symbols[ id ].fileId, seenDirs, manifests );
+        epdetail::collectManifestsAbove( ing, ing.symbols[ id ].fileId, moduleAttr, seenDirs, manifests );
     }
     const auto isEntryAttr = [ & ]( std::string_view name )
     {
