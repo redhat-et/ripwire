@@ -1228,8 +1228,8 @@ struct BracketReading
 };
 inline BracketReading bracketReadingOf( Lang lang ) noexcept
 {
-    const bool notLocalBrace = lang == Lang::TypeScript || lang == Lang::JavaScript || lang == Lang::Rust || lang == Lang::Swift || lang == Lang::Kotlin;
-    return BracketReading{ lang == Lang::Python, !notLocalBrace };
+    const LangFacts f = langFacts( lang );
+    return BracketReading{ f.tupleParens, !f.localBraceNotData };
 }
 
 // the right side of an assignment, a return or a key is a data literal. A call's result is not (`make_unique<Pool>(`, `new Hono<E>({`, `wrap_with_prefix(`, `compute(`), nor is code (`() => {`, `function () {`, `match x {`).
