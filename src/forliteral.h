@@ -1247,7 +1247,7 @@ inline std::size_t assignmentAt( std::string_view c ) noexcept
 }
 
 // `key: {`, `"key": [`, `K: T{`, `'k' => [`: a row that is itself a literal, nested in a table (an `if x: {` or a callback is not: the key is one identifier or one quoted string)
-inline bool isKeyedLiteral( std::string_view c ) noexcept
+inline bool isKeyedLiteral( std::string_view c, bool allowStruct ) noexcept
 {
     std::size_t keyEnd = 0;
     if( c.front() == '"' || c.front() == '\'' )
@@ -1265,7 +1265,7 @@ inline bool isKeyedLiteral( std::string_view c ) noexcept
     {
         return false;
     }
-    return isDataValue( trimWs( rest.substr( colon ? 1 : 2 ) ), true );
+    return isDataValue( trimWs( rest.substr( colon ? 1 : 2 ) ), allowStruct );
 }
 
 // `enum E {`, `export const enum E {`, `pub(crate) enum E {`, `typedef enum {`, `enum class E : int {`: no `=`, no parameter list, the word enum among the first ones
@@ -1297,7 +1297,7 @@ inline bool isBraceInitDecl( std::string_view c ) noexcept
 //         Rust: `const T: &[R] = &[`, `pub static M: [R; 2] = [`, `name! {`, `vec![`, `name!(` outside a function. TS, JS: `export const T = {`, `export default {`, `const T: R[] = [`, `module.exports = {`,
 //         `Object.freeze({`, `new Map([`. Python: `T = {`, `T = [`, `T = (`, `T: dict[K, V] = {`, `frozenset({`. Java, C#: `T[] t = new T[] {`, `Map.of(`. A struct literal outside a function: `const L: Foo = Foo {`, `var X = T{`.
 //   EnumBody: members of an enum (only a Member row is a row of it; a Rust variant's fields are not).
-//   Nested: a literal inside a literal, which proves nothing yet: `{`, `}, {`, `key: {`, `Row {`, `.field = {`. The walk goes on to the line above it.
+//   Nested: a literal inside a literal, which proves nothing yet: `{`, `}, {`, `key: {`, `.field = {`, and outside a function `Row {`, `key: Row {`. The walk goes on to the line above it.
 //   Transparent: `namespace x {`, `mod x {`, `extern "C" {`: what stands in it is top level.
 //   None: everything else. A declaration (`struct S {`, `interface I {`, `type T = {`, `class C {`, `impl X {`), a call's arguments (`x = foo(`, `new Hono<E>({`, `foo(k=[`), a statement (`if (x) {`, `for (;;) {`,
 //         `} else {`), a callback (`describe("x", () => {`, `(function () {`), a function's own header, a closer (`};`), an import (`use a::{`, `import {`, `from x import (`, `export {`).
@@ -1345,7 +1345,7 @@ inline OpenerKind classifyOpener( std::string_view c, bool inFunction ) noexcept
     {
         return OpenerKind::EnumBody;
     }
-    if( isKeyedLiteral( c ) || isStructValue( c ) )
+    if( isKeyedLiteral( c, !inFunction ) || ( !inFunction && isStructValue( c ) ) )
     {
         return OpenerKind::Nested;
     }

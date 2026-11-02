@@ -1102,6 +1102,16 @@ fn fill() {
         neg_rs_lit: 1,
         other: 2,
     };
+    let rows = [
+        Item::Tab {
+            neg_rs_nested: 1,
+            other: 2,
+        },
+        Item::Tab {
+            neg_rs_nested: 3,
+            other: 4,
+        },
+    ];
 }
 RS
 cat > "$AL/go/g.go" <<'GO'
@@ -1222,7 +1232,7 @@ albatch(){ # label, then anchor/expected pairs
     if [ -z "$msg" ]; then ok "$label"; else no "$label: $msg"; fi
 }
 albatch "T28 [P] M1 a call's arguments and an option literal are no table: py, ts, rust, c++, go" \
-    neg_py_call - neg_py_kwarg - neg_py_infn - neg_ts_new - neg_ts_app - neg_rs_arg - neg_rs_assert - neg_cc_arg - NegGoOpt - neg_rs_lit -
+    neg_py_call - neg_py_kwarg - neg_py_infn - neg_ts_new - neg_ts_app - neg_rs_arg - neg_rs_assert - neg_cc_arg - NegGoOpt - neg_rs_lit - neg_rs_nested -
 albatch "T29 [P] M2 code in a top level callback, block or iife is no table" \
     neg_ts_cb - neg_ts_cbkey - neg_ts_route - neg_ts_iife - neg_ts_for - neg_ts_map - neg_py_with -
 albatch "T30 [P] M3 a declaration is no table: struct, enum variant fields, interface, type alias, class field, multi-line generic" \
