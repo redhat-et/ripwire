@@ -1509,7 +1509,8 @@ private:
             k = e;
         }
         const auto literal = []( std::string_view w ) noexcept
-        { return !w.empty() && std::ranges::all_of( w, []( char c ) noexcept { return c != '$' && isIdent( c ); } ); };
+        { return !w.empty() && std::ranges::all_of( w, []( char c ) noexcept
+                                                    { return c != '$' && isIdent( c ); } ); };
         if( std::ranges::all_of( parts, literal ) )
         {
             std::string joined;
@@ -2132,8 +2133,8 @@ inline bool packageJsonPublishes( std::string_view json ) noexcept
     static constexpr std::array<std::string_view, 6> kKeys = { "\"main\"", "\"module\"", "\"exports\"", "\"types\"", "\"typings\"", "\"bin\"" };
     // npm publishes any package with a name and a version; with no main its entry is index.js
     return std::ranges::any_of( kKeys, [json]( std::string_view k )
-                                { return json.contains( k ); } )
-           || ( json.contains( "\"name\"" ) && json.contains( "\"version\"" ) );
+                                { return json.contains( k ); } ) ||
+           ( json.contains( "\"name\"" ) && json.contains( "\"version\"" ) );
 }
 
 // A pyproject.toml that builds a distribution: a [project] or [tool.poetry] table, or a [build-system].
