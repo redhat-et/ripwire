@@ -661,7 +661,7 @@ A="$( tr1 '--for=add a new command like `Each`' )"; L="$( lits <<<"$A" )"
 if has "$L" 's="Each" shape="table"' && has "$L" 'tbl="bind_command! {"'; then ok "T6 member-list row"; else no "T6 member row wrong: ${L:0:400}"; fi
 # T7 [P] exemplar: a plain word after like, an index symbol
 A="$( tr1 '--for=add a new filter like concat' )"
-if has "$( lits <<<"$A" )" 'funcs.ConcatFunc' || has "$A" 's="concat"'; then no "T7a concat is no symbol: no anchor (near miss, not in index)"; else ok "T7a a plain word that is no index symbol does not anchor"; fi
+if [ -z "$A" ] || has "$( lits <<<"$A" )" 'funcs.ConcatFunc' || has "$A" 's="concat"'; then no "T7a concat is no symbol: no anchor (near miss, not in index)"; else ok "T7a a plain word that is no index symbol does not anchor"; fi
 A="$( tr1 '--for=add a new struct like Filter' )"; L="$( lits <<<"$A" )"
 if has "$L" 's="Filter" shape="table"'; then ok "T7b a plain word after like that the index holds anchors"; else no "T7b no sibling: ${L:0:300}"; fi
 # Near misses [G]
@@ -690,8 +690,8 @@ if has "$L" 'longer=' && ! has "$L" 'Eachly'; then ok "T18 a hit inside a longer
 # T19 [G] prefix identity and determinism and well-formed on a table answer
 A="$( tr1 '--for=add a new function; use `abspath` as the model' )"; B="$( tr1 '--for=add a new function; use `abspath` as the model' )"; OFF="$( trf '--for=add a new function; use `abspath` as the model' )"
 S="$( python3 -I -c 'import sys,re;s=sys.stdin.read();s=re.sub(r"<!-- ripwire for lit[^>]*?-->","",s,flags=re.S);s=re.sub(r"<lit [^>]*>.*?</lit>","",s,flags=re.S);print(s,end="")' <<<"$A" )"
-if [ "$S" = "$OFF" ]; then ok "T19a the answer minus the legend and <lit> is the switch-off answer"; else no "T19a prefix moved"; fi
-if [ "$A" = "$B" ]; then ok "T19b determinism"; else no "T19b two runs differ"; fi
+if [ -n "$A" ] && [ "$S" = "$OFF" ]; then ok "T19a the answer minus the legend and <lit> is the switch-off answer"; else no "T19a prefix moved"; fi
+if [ -n "$A" ] && [ "$A" = "$B" ]; then ok "T19b determinism"; else no "T19b two runs differ"; fi
 if command -v xmllint >/dev/null 2>&1; then if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T19c xmllint well-formed"; else no "T19c not well-formed"; fi; else ok "T19c SKIP: xmllint not installed"; fi
 # T20 [P] several anchors: one <lit> each, the legend once
 A="$( tr1 '--for=register `abspath` and `basename`' )"
