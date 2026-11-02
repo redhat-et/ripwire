@@ -322,9 +322,9 @@ for seam in "" fold:1 fold:2 fold:3; do
     lab="ins${seam/:/}"; r="$( mcp_write "$lab" "$seam" insert_after_symbol "$INS" )"
     n="$( grep -c added_fn "$TMP/w_$lab/lib.cpp" 2>/dev/null )"
     case "$seam" in
-    "")     case "$r" in OK*'"applied":"insert_after_symbol"'*'"edit_check"'*) [ "$n" = 1 ] && ok "MCP insert_after_symbol, no seam: applied with its post-check, the text once (the positive twin)" || no "insert no seam: added_fn x$n";;
+    "")     case "$r" in OK*'"applied":"insert_after_symbol"'*'"edit_check"'*) if [ "$n" = 1 ]; then ok "MCP insert_after_symbol, no seam: applied with its post-check, the text once (the positive twin)"; else no "insert no seam: added_fn x$n"; fi;;
             *) no "MCP insert_after_symbol no seam: ${r:0:250}";; esac;;
-    fold:1) case "$r" in "ERR memory limit reached during the include-closure fold"*) [ "$n" = 0 ] && ok "MCP insert_after_symbol fold:1 (the locate build, before the write): refused by name, file untouched" || no "insert fold:1 refused but added_fn x$n";;
+    fold:1) case "$r" in "ERR memory limit reached during the include-closure fold"*) if [ "$n" = 0 ]; then ok "MCP insert_after_symbol fold:1 (the locate build, before the write): refused by name, file untouched"; else no "insert fold:1 refused but added_fn x$n"; fi;;
             *) no "MCP insert_after_symbol fold:1: ${r:0:250}";; esac;;
     *)      case "$r" in OK*'"applied":"insert_after_symbol"'*'"blob_sha"'*) ;; *) no "MCP insert_after_symbol $seam (a stop after the write): not a receipt: ${r:0:300}"; continue;; esac
             if [ "$n" = 1 ] && { printf '%s' "$r" | grep -q '"post_check":"not run: the post-edit check stopped in the include-closure fold' \
@@ -335,15 +335,15 @@ for seam in "" fold:1 fold:2 fold:3; do
 done
 # a neighbour the review did not run: replace_symbol_body, the other op through the same driver
 r="$( mcp_write rep2 fold:2 replace_symbol_body ',"symbol":"unrelated","file":"lib.cpp","new_body":"int unrelated(){ return 9; }"' )"
-case "$r" in OK*'"applied":"replace_symbol_body"'*'"post_check":"not run: '*) grep -q 'return 9' "$TMP/w_rep2/lib.cpp" && ok "MCP replace_symbol_body fold:2: applied, post_check not run, the stop named" || no "replace fold:2: receipt but file not edited";;
+case "$r" in OK*'"applied":"replace_symbol_body"'*'"post_check":"not run: '*) if grep -q 'return 9' "$TMP/w_rep2/lib.cpp"; then ok "MCP replace_symbol_body fold:2: applied, post_check not run, the stop named"; else no "replace fold:2: receipt but file not edited"; fi;;
 *) no "MCP replace_symbol_body fold:2: ${r:0:300}";; esac
 # quality_baseline: the sidecar is written, then the stamp's rebuild stops: the answer stands, the stamp and _memory_stop say so
 r="$( mcp_write qb2 fold:2 quality_baseline '' )"
 case "$r" in OK*'_index=[index: not rebuilt'*'_memory_stop=the index rebuild after this answer stopped in the include-closure fold'*)
-    [ -s "$TMP/w_qb2/.ripwire_quality_baseline" ] && ok "MCP quality_baseline fold:2: the sidecar written, answered with the index stop named (_index not rebuilt, _memory_stop)" || no "qb fold:2: answered but no sidecar";;
+    if [ -s "$TMP/w_qb2/.ripwire_quality_baseline" ]; then ok "MCP quality_baseline fold:2: the sidecar written, answered with the index stop named (_index not rebuilt, _memory_stop)"; else no "qb fold:2: answered but no sidecar"; fi;;
 *) no "MCP quality_baseline fold:2: ${r:0:300}";; esac
 r="$( mcp_write qb0 "" quality_baseline '' )"
-case "$r" in OK*'_index=[index: files='*) [ -s "$TMP/w_qb0/.ripwire_quality_baseline" ] && ok "MCP quality_baseline, no seam: the sidecar written, a whole stamp (the positive twin)" || no "qb no seam: no sidecar";;
+case "$r" in OK*'_index=[index: files='*) if [ -s "$TMP/w_qb0/.ripwire_quality_baseline" ]; then ok "MCP quality_baseline, no seam: the sidecar written, a whole stamp (the positive twin)"; else no "qb no seam: no sidecar"; fi;;
 *) no "MCP quality_baseline no seam: ${r:0:300}";; esac
 # the CLI twin of the edit driver: exit 0 with the receipt (the file is edited), the stop named on it and on the stderr line
 d="$TMP/w_cli"; rm -rf "$d"; cp -R "$FGS" "$d"; printf 'int added_fn(){ return 7; }\n' >"$TMP/w_cli.payload"; mkdir -p "$TMP/xdg/w_cli"
