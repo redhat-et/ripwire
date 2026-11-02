@@ -36,6 +36,7 @@
 
 #include "depdialect.h"          // dependencyDialect — the Web dialect is the unit the ReExport records are written per
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
+#include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
 #include "forliteral.h"          // lit_detail::isConstShaped; hopbody.h renderBodyElement — a CONST-shaped key is <lit>'s; search.h grepCollect/grepEnrich, redact, nextverb
 #include "graph.h"               // tomlSectionNames, resolveJsNamedImportFile, lexicalNormalize
 #include "infra/namesplit.h"     // isIdentChar
@@ -1392,11 +1393,6 @@ inline std::string_view routeName( std::string_view routeNote )
     return close == std::string_view::npos ? std::string_view{} : routeNote.substr( kHead.size(), close - kHead.size() );
 }
 
-inline std::string displayName( const Symbol& s )
-{
-    return s.scope.empty() ? s.name : s.scope + "." + s.name;
-}
-
 // A definition row, the shared order: source before test/doc, then path, then line.
 inline bool rowBefore( const IngestResult& ing, const Symbol* a, const Symbol* b )
 {
@@ -1597,7 +1593,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     const auto defRow = [ & ]( const Symbol& s, std::string_view by )
     {
         out.append( "<d" );
-        attr( "n", displayName( s ) );
+        attr( "n", dotteddetail::displayName( s ) );
         attr( "t", symTag( s.kind ) );
         attr( "p", rootRelPath( ing, s.fileId ) );
         num( "l", s.line );

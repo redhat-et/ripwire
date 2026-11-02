@@ -157,13 +157,15 @@ if grep -q '<shortkey held="budget" of="WidgetPtr" next="--for=WidgetPtr"/>' "$T
 }
 run "$S" "$TMP/b9.json" --json "--for=WidgetPtr" && { if grep -q 'shortkey' "$TMP/b9.json"; then no "B9 --json carries no block"; else ok "B9 --json carries no block"; fi; }
 ( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=WidgetPtr" </dev/null 2>/dev/null ) >"$TMP/b9off.xml"
-python3 - "$TMP/b5.xml" "$TMP/b9off.xml" <<'PY' && ok "B9 the off switch removes exactly the block" || no "B9 the off switch changed more than the block"
+python3 - "$TMP/b5.xml" "$TMP/b9off.xml" <<'PY'
 import re, sys
 on, off = (open(p).read() for p in sys.argv[1:3])
 strip = lambda s: re.sub(r' (at|est_tokens)="[^"]*"', '', s)
 i = on.find('<!-- shortkey:'); j = on.find('</shortkey>')
 sys.exit(0 if i > 0 and j > i and strip(on[:i] + on[j + len('</shortkey>'):]) == strip(off) else 1)
 PY
+offrc=$?
+if [ "$offrc" -eq 0 ]; then ok "B9 the off switch removes exactly the block"; else no "B9 the off switch changed more than the block"; fi
 
 if [ "$fail" = 0 ]; then echo "barrelshortkeycheck: PASS"; else echo "barrelshortkeycheck: FAIL"; fi
 exit "$fail"
