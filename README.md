@@ -1522,7 +1522,7 @@ $ ripwire . --test-gate          # exit code: 4
 
 A `run=` attribute appears only when a runner is derivable from real evidence — a test-dir script
 whose stem matches the harness, or whose text names it; for TypeScript/JavaScript, a file already
-recognized as test code (`test/`/`tests/`/`__tests__/`, or a `_test./.test./_spec./.spec.` name — the
+recognized as test code (`test/`/`tests/`/`__tests__/`, or a `_test./.test./_spec./.spec.` name, or a `.e2e-spec./.perf-spec.` name — the
 `__tests__/` directory convention is shared with every language, the rest are TS/JS's own) whose name
 ALSO matches vitest/jest's own test-name shape (`.test.`/`.spec.`, or living under `__tests__/` at
 all, jest's own two default conventions — never a `.d.ts` declaration file) — whose nearest
@@ -2139,9 +2139,9 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>743 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>744 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **743 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` names **744 gate scripts** and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
