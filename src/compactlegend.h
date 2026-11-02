@@ -1617,6 +1617,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "cyclic_files", "health cyclic_files=N: dep_files= files inside an include cycle (all cycles, not only the listed ones); absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "health lazy_edges=N: in-closure (lazy) include pairs kept OUT of cones, cycles and ccd; absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "f lazy_edges=N: this file's lazy pairs; still in its inc rows, out of afferent=/instab=/transitive=", true, "f", MapHeaderRead::No, {}, "deps" },
+    { "containment_edges", "health containment_edges=N: Rust mod x; parent-child pairs, out of transitive=/cycles/ccd/shape, in Ca/Ce", true, "health", MapHeaderRead::No, {}, "deps" },
     { "size", "cycle size=/cost=: files in that include cycle / size squared, the cycle's share of ccd=", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cost=
     { "cut", "cycle cut=/cutrefs=: SUGGESTED edge to break it (fewest directives) / that edge's directive count; nothing cut", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cutrefs=
     // pr-context: src/prcontext.h (changed-symbols, cochange partner, owners author); coPairAttr in src/gitmine.h

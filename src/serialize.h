@@ -10114,9 +10114,13 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       // (graph.h StructuralIncludeAdj). unresolved or unread > 0 ⇒ the root carries its attribute and
                       // graph_partial="1", and the legend defines them (graphlegend.h tsImportRootAttrXml); all 0 ⇒
                       // byte-identical.
-                      const rw::TsImportRootCounts& tsImports = {} )
+                      const rw::TsImportRootCounts& tsImports = {},
+                      // RUST-MOD-DECL (graph.h ContainmentCut): the graph `cycles` and `transitive` were measured on (nullptr: `adj`
+                      // itself), and how many containment pairs it leaves out of them (<health containment_edges=>, absent at 0)
+                      const std::vector<std::vector<std::uint32_t>>* cycleAdj = nullptr, std::uint64_t containmentEdges = 0 )
 {
     const std::size_t F = ing.files.size();
+    const std::vector<std::vector<std::uint32_t>>& cutAdj = cycleAdj != nullptr ? *cycleAdj : adj;
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
     {
@@ -10190,6 +10194,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     const bool                healthUnknown = rw::systemNumbersUnknown( noEdge, measure );   // no measured edge left: every cone is one file, nothing behind ccd/nccd/shape but the missing data
     w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
     w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
+    if( containmentEdges > 0 )   // RUST-MOD-DECL: exactly when <health containment_edges=> is printed
+    {
+        w.write( "health containment_edges=N: Rust `mod x;` parent-to-child pairs (a module file and the file it declares), "
+                 "left out of transitive=/cycles/ccd/acd/nccd/shape= as containment and kept in afferent=/instab=/godfiles/stabledeps. " );
+    }
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -10243,6 +10252,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         char lb[ 40 ];  rw::formatTo( lb, sizeof( lb ), " lazy_edges=\"{}\"", static_cast<unsigned long long>( lazyEdges ) );
         w.write( lb );
     }
+    w.write( rw::countAttrXmlOrEmpty( "containment_edges", std::size_t( containmentEdges ) ) );   // RUST-MOD-DECL: absent at 0
     w.write( " dep_langs=\"" );  w.write( escapeXml( depLangs, esc ) );  w.write( "\"/>" );
 
     // most depended-ON (afferent coupling Ca) = highest blast radius: changing these recompiles the most.
@@ -10343,11 +10353,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                 { return std::binary_search( memberOf.begin(), memberOf.end(), f ); };
                 for( std::uint32_t src : cycles[c] )
                 {
-                    if( src >= adj.size() )
+                    if( src >= cutAdj.size() )
                     {
                         continue;
                     }
-                    for( std::uint32_t dst : adj[src] )
+                    for( std::uint32_t dst : cutAdj[src] )   // the graph the cycle was found in: a containment pair is never the cut
                     {
                         if( dst != src && isMember( dst ) )
                         {
