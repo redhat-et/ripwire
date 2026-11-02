@@ -6,3 +6,6 @@ under the root, or a path suffix only one file has), the answer is that file's i
 with the importer listing's own `shown_importers=`, `importers_capped=`, `importers_next=` and rollup. It has no call reach:
 `FILE:SYM` still picks one symbol. A symbol match always wins, so no selector that answered before answers differently. A
 suffix several files share stays a refusal whose `near=` is the first such path.
+When files name the path in an include or import the index did not resolve to it (an include root it does not know), the
+answer carries `unresolved_naming=N`, so `importers="0"` on such a file reads as a floor, not as unused: Envoy's
+`envoy/registry/registry.h` answers `importers="0" unresolved_naming="580"`.

@@ -3325,6 +3325,33 @@ inline constexpr const char* kImpactPathLegend =
     "<!-- ripwire impact: selector=\"file\": of= names an indexed FILE, not a symbol, so this answer is that file's import tier "
     "alone, with no call reach (of=FILE:SYM gives one of its symbols' blast radius). ";
 
+inline constexpr const char* kImpactPathNamingLegend =
+    "unresolved_naming=: files with an include/import whose target text is a suffix of this path but that did not resolve to it "
+    "(an include root or build path the index does not know); they likely import it, so importers= is a floor here. ";
+
+// IMPACT-PATH hedge: the files with an include/import directive whose literal target is a '/'-boundary suffix of FILE's path
+// (or the whole path) yet that are NOT in its importer tier: the resolver did not land that directive on FILE (an include
+// root it does not know, a build-system path). A count, not a claim that they import FILE; it makes importers="0" on a
+// file the code base plainly names (Envoy's envoy/registry/registry.h: 580 such files at base) read as unresolved, not unused.
+inline std::size_t impactPathUnresolvedNaming( const rw::IngestResult& ing, std::uint32_t file, const std::vector<std::uint32_t>& importers )
+{
+    const std::string_view       rel = rw::rootRelPath( ing, file );
+    std::vector<char>            seen( ing.files.size(), 0 );
+    for( const std::uint32_t f : importers ) { if( f < seen.size() ) { seen[f] = 1; } }
+    if( file < seen.size() ) { seen[file] = 1; }
+    std::size_t n = 0;
+    for( const auto& inc : ing.includes )
+    {
+        if( inc.isSymbolic || inc.fileId >= seen.size() || seen[ inc.fileId ] != 0 ) { continue; }
+        std::string_view tgt = inc.target;
+        while( tgt.size() > 2 && tgt.substr( 0, 2 ) == "./" ) { tgt.remove_prefix( 2 ); }
+        const bool hit = tgt == rel || ( rel.size() > tgt.size() && !tgt.empty() && rel[ rel.size() - tgt.size() - 1 ] == '/'
+                                         && rel.substr( rel.size() - tgt.size() ) == tgt );
+        if( hit ) { seen[ inc.fileId ] = 1; ++n; }
+    }
+    return n;
+}
+
 int emitImpactPathAnswer( const rw::Config& cfg, const rw::IngestResult& ing, std::uint32_t file, bool singleRoot, const std::string& rootPrefix,
                           const std::string& rootAttr )
 {
@@ -3335,6 +3362,7 @@ int emitImpactPathAnswer( const rw::Config& cfg, const rw::IngestResult& ing, st
     const auto        page    = std::span<const std::uint32_t>( t.files ).first( t.shown );
     const auto        lazy    = std::span<const char>( t.lazy ).first( t.shown );
     const std::string rp      = singleRoot ? rootPrefix : std::string();
+    const std::size_t naming  = impactPathUnresolvedNaming( ing, file, t.files );
     if( cfg.json )
     {
         rw::emitTo( stdout, "{{\"of\":\"{}\",\"selector\":\"file\",\"importers\":{},\"shown_importers\":{},\"importers_capped\":{}",
@@ -3343,7 +3371,7 @@ int emitImpactPathAnswer( const rw::Config& cfg, const rw::IngestResult& ing, st
         {
             rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( t.next ).c_str() );
         }
-        rw::emitTo( stdout, "{}{}{}{}", importTierRollupJson( t ), rw::importsUnresolvedKeyJson( t.importsUnresolved ),
+        rw::emitTo( stdout, "{}{}{}{}{}", importTierRollupJson( t ), rw::countFieldOrEmpty( "unresolved_naming", naming, /*json=*/true ), rw::importsUnresolvedKeyJson( t.importsUnresolved ),
                     rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ), /*json=*/true ),
                     t.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( t.noFileEdgeLangs ) + "\"" : std::string() );
         if( singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
@@ -3353,11 +3381,12 @@ int emitImpactPathAnswer( const rw::Config& cfg, const rw::IngestResult& ing, st
         return 0;
     }
     // XML (the columnar form has no importer rows, so a path answer, which is only rows, is XML there too, as a refusal is)
-    rw::emitTo( stdout, "{}{}{}{}{}{}-->", kImpactPathLegend, rw::kImpactImportTierLegend, rw::importersNextLegend( !t.next.empty() ),
+    rw::emitTo( stdout, "{}{}{}{}{}{}{}-->", kImpactPathLegend, naming != 0 ? kImpactPathNamingLegend : "", rw::kImpactImportTierLegend, rw::importersNextLegend( !t.next.empty() ),
                 rw::importersRollupLegend( t.capped && !t.files.empty() ), rw::impactTsImportLegend( t.importsUnresolved, t.tsconfigUnread ),
                 rw::impactNoFileEdgesLegend( t.noFileEdgeLangs != 0 ) );
     std::vector<char> esc;
-    rw::emitTo( stdout, "<impact of=\"{}\" selector=\"file\"{}{}>", std::string( escapeXml( cfg.impactSym, esc ) ).c_str(), t.xmlAttrs.c_str(), rootAttr.c_str() );
+    rw::emitTo( stdout, "<impact of=\"{}\" selector=\"file\"{}{}{}>", std::string( escapeXml( cfg.impactSym, esc ) ).c_str(), t.xmlAttrs.c_str(),
+                rw::countAttrXmlOrEmpty( "unresolved_naming", naming ), rootAttr.c_str() );
     rw::emitImportRowsXml( stdout, ing, page, rp, lazy );
     rw::emitRaw( stdout, "</impact>\n" );
     return 0;

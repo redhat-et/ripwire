@@ -619,6 +619,24 @@ if command -v xmllint >/dev/null 2>&1; then
 else
     printf '  SKIP  path (m) xml well-formed (no xmllint)\n'
 fi
+# (o) Envoy's envoy/registry/registry.h: 580 files include it by an include-root path the index does not resolve, and the
+# path answer read importers="0" bare. unresolved_naming= counts the files whose directive target is a suffix of the
+# path yet did not land on it; a target that only shares the basename (other/reg.h) is not counted.
+mkdir -p "$PH/inc/proj" "$PH/src/c"; printf 'int reg_fn(void);\n' > "$PH/inc/proj/reg.h"
+printf '#include "proj/reg.h"\nint c1(void) { return reg_fn(); }\n' > "$PH/src/c/c1.c"
+printf '#include "inc/proj/reg.h"\nint c2(void) { return reg_fn(); }\n' > "$PH/src/c/c2.c"
+printf '#include "other/reg.h"\nint c3(void) { return 0; }\n' > "$PH/src/c/c3.c"
+pi inc/proj/reg.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" importers="0" shown_importers="0" importers_capped="0" unresolved_naming="2"' \
+   && printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
+    ok "path (o): importers=0 on a file two directives name by an unknown include root carries unresolved_naming=2 and its legend"
+else no "path (o) rc=$PRC: $R"; fi
+pi inc/proj/reg.h --json
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"importers":0,.*"unresolved_naming":2'; then ok "path (o): --json carries unresolved_naming"; else no "path (o) json rc=$PRC: $( printf '%s' "$PO" | head -c 300 )"; fi
+pi lib/core.h; R="$( proot )"
+if [ "$PRC" = 0 ] && [ -n "$R" ] && ! printf '%s' "$R" | grep -q 'unresolved_naming=' && ! printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
+    ok "path (o): a fully resolved file has no unresolved_naming= and no legend sentence (present-only)"
+else no "path (o) absent rc=$PRC: $R"; fi
 rm -rf "$PH"
 
 # ── #10 determinism + well-formedness ─────────────────────────────────────────────────────────────────
