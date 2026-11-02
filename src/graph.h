@@ -15000,6 +15000,145 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
     return resolveStructuralIncludeAdj( ing ).adj;
 }
 
+// ── RUST-MOD-DECL: a Rust `mod x;` is CONTAINMENT, not a dependency ────────────────────────────────────────
+// A body-less `mod x;` declares that `x.rs` (or `x/mod.rs`) is a child module of the declaring file; the child's own
+// `use crate::…` / `use super::…` then points back up. Read as two dependencies, every parent and child is a 2-cycle,
+// and a crate reads as one strongly connected block: GRAPH-SCALE measured nushell's largest cycle at 235 files with
+// these pairs and 19 without, zed 93 and 25. Cargo compiles a crate as ONE unit, so the pair is not a physical
+// dependency a cycle or Lakos's ccd should charge; it stays in the graph and in Ca and Ce (afferent=, instab=,
+// godfiles, stabledeps), and leaves --deps' cycle and health numbers (cycles, ccd/acd/nccd/shape, a row's transitive=,
+// which say how many pairs they leave out: containment_edges=) and --report's cycle list (its heading says so). --arch's
+// propagation_cost still walks them (not yet cut: card RUST-MOD-DECL-ARCH).
+//
+// The pair is judged by Rust's module-file rule over PATHS, not by which directive drew the edge, so an edge a `use`
+// draws to the same child is the same containment and an edge from any other source (an injected truth edge in a rig)
+// is judged alike: parent P declares `mod x;` (an Include with target `mod:x`, ingest_relations.h), and the edge's
+// target is `x.rs` or `x/mod.rs` in P's module directory — P's own directory for a `mod.rs` or a crate root, else
+// `<dir>/<stem>` (Rust 2018: `src/a.rs` declares `src/a/b.rs`). A crate root is `lib.rs`/`main.rs`, or a file no
+// `mod <its stem>;` anywhere in the tree declares: Cargo's other roots (`[lib] path = "src/gpui.rs"`, src/bin/*.rs,
+// tests/*.rs, examples/*.rs, build.rs) are exactly the files no module declares (zed: gpui.rs, theme.rs). Declared is
+// read by NAME, so a namesake declared elsewhere makes a root read as a module, which only cuts less. Allowlist,
+// SAFETY (d)(1): only those proven shapes are cut. A `#[path = "…"] mod x;` and a `mod x;` inside an inline
+// `mod m { … }` are not recognised and stay counted.
+struct ContainmentCut
+{
+    std::vector<std::vector<std::uint32_t>> adj;     // the adjacency minus the containment pairs, filled only when pairs > 0
+    std::uint64_t                           pairs = 0;   // DISTINCT (parent, child) pairs left out
+
+    // The adjacency the cycle and health numbers walk: `full` itself when nothing was cut (no copy, byte-identical).
+    const std::vector<std::vector<std::uint32_t>>& of( const std::vector<std::vector<std::uint32_t>>& full ) const noexcept
+    {
+        return pairs > 0 ? adj : full;
+    }
+};
+
+// The directory a Rust file's `mod x;` children live in (see ContainmentCut). `declared`: some `mod <stem>;` in the tree
+// names this file's stem, so it is a module file, not a crate root.
+inline std::string rustChildModuleDir( std::string_view path, const std::vector<std::string_view>& declaredNames )
+{
+    const std::string_view dir   = includerDir( path );
+    std::string_view       stem  = dir.empty() ? path : path.substr( dir.size() + 1 );
+    stem                         = stem.substr( 0, stem.size() - 3 );   // ".rs", checked by the caller
+    const bool root = stem == "lib" || stem == "main" || !std::binary_search( declaredNames.begin(), declaredNames.end(), stem );
+    if( stem == "mod" || root )
+    {
+        return std::string( dir );
+    }
+    return dir.empty() ? std::string( stem ) : std::string( dir ) + "/" + std::string( stem );
+}
+
+inline bool isRustSourcePath( std::string_view path ) noexcept
+{
+    return path.size() > 3 && path.substr( path.size() - 3 ) == ".rs";
+}
+
+inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+{
+    ContainmentCut cut;
+    const std::uint32_t F = std::uint32_t( std::min( adj.size(), ing.files.size() ) );
+    // (declaring file, declared name), sorted: one contiguous run per file. Names point into ing.includes.
+    std::vector<std::pair<std::uint32_t, std::string_view>> decls;
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.fileId < F && inc.target.size() > 4 && inc.target.compare( 0, 4, "mod:" ) == 0 && isRustSourcePath( rootRelPath( ing, inc.fileId ) ) )
+        {
+            decls.emplace_back( inc.fileId, std::string_view( inc.target ).substr( 4 ) );
+        }
+    }
+    if( decls.empty() )
+    {
+        return cut;
+    }
+    std::sort( decls.begin(), decls.end() );
+    decls.erase( std::unique( decls.begin(), decls.end() ), decls.end() );
+    std::vector<std::string_view> declaredNames;   // every name some `mod x;` declares, sorted: a file whose stem is not here is a crate root
+    declaredNames.reserve( decls.size() );
+    for( const auto& d : decls )
+    {
+        declaredNames.push_back( d.second );
+    }
+    std::sort( declaredNames.begin(), declaredNames.end() );
+    declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
+
+    cut.adj = adj;
+    std::vector<std::uint32_t> dropped;   // one scratch row, reused: the distinct children cut from one parent
+    for( std::size_t i = 0; i < decls.size(); )
+    {
+        const std::uint32_t p = decls[i].first;
+        std::size_t         j = i;
+        while( j < decls.size() && decls[j].first == p )
+        {
+            ++j;
+        }
+        const std::string                 childDir = rustChildModuleDir( rootRelPath( ing, p ), declaredNames );
+        const auto                        names    = std::span( decls ).subspan( i, j - i );
+        const auto isChild = [ & ]( std::uint32_t g ) -> bool
+        {
+            const std::string_view gp = rootRelPath( ing, g );
+            if( !isRustSourcePath( gp ) )
+            {
+                return false;
+            }
+            const std::string_view gDir = includerDir( gp );
+            std::string_view       name = gDir.empty() ? gp.substr( 0, gp.size() - 3 ) : gp.substr( gDir.size() + 1, gp.size() - gDir.size() - 4 );
+            std::string_view       home = gDir;   // the directory the declaring parent sits in for `x.rs`
+            if( name == "mod" )                   // `x/mod.rs`: the module is the directory, declared one level up
+            {
+                if( gDir.empty() )
+                {
+                    return false;
+                }
+                home = includerDir( gDir );
+                name = home.empty() ? gDir : gDir.substr( home.size() + 1 );
+            }
+            return home == childDir
+                && std::any_of( names.begin(), names.end(), [ & ]( const auto& d ) { return d.second == name; } );
+        };
+        std::vector<std::uint32_t>& outs = cut.adj[p];
+        std::uint32_t               kept = 0;
+        dropped.clear();
+        for( const std::uint32_t g : outs )
+        {
+            if( g < F && isChild( g ) )
+            {
+                dropped.push_back( g );
+                continue;
+            }
+            outs[kept++] = g;
+        }
+        outs.resize( kept );
+        std::sort( dropped.begin(), dropped.end() );
+        cut.pairs += std::uint64_t( std::unique( dropped.begin(), dropped.end() ) - dropped.begin() );
+        i = j;
+    }
+    if( cut.pairs == 0 )
+    {
+        cut.adj.clear();
+        cut.adj.shrink_to_fit();
+    }
+    return cut;
+}
+
 // ── LB-H (r10 GitNexus round) — IMPORT REACH, the second and much weaker kind of blast radius ────────────
 // The files that DIRECTLY include/import one of `defFiles`, sorted by file id, each listed once. A file is
 // never its own importer — but "own" means an edge to ITSELF, not membership in `defFiles`: buildPreciseIncludeAdj

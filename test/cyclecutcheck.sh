@@ -175,5 +175,65 @@ if [ "$R20" = 0 ] && printf '%s' "$C20" | grep -q '<cycles>' && [ "$( printf '%s
     ok "cycles (e) twin: 20 cycles, all listed, a bare <cycles> (no cut to disclose)"
 else no "cycles (e) twin rc=$R20: $( printf '%s' "$C20" | grep -oE '<cycles[^>]*>' )"; fi
 
+# ── 10) RUST-MOD-DECL: a `mod x;` parent-to-child pair is containment, not a cycle ──────────────────────────────────
+# Rust: the parent declares `mod x;`, the child `use super::…`/`use crate::…` back: every pair reads as a 2-cycle
+# (GRAPH-SCALE nushell: largest cycle 235 with these pairs, 19 without). They leave cycles/ccd/transitive= and stay in
+# afferent=; <health containment_edges=> counts them. A cycle between two SIBLINGS is real and must stay.
+RS="$SH/rs"; mkdir -p "$RS/src/net" "$RS/pkg"
+printf 'mod net;\nmod util;\nmod store;\npub fn root_fn() {}\n' > "$RS/src/lib.rs"
+printf 'mod wire;\nuse crate::util;\npub fn net_fn() { util::helper(); }\n' > "$RS/src/net/mod.rs"
+printf 'use crate::net;\npub fn wire_fn() { net::net_fn(); }\n' > "$RS/src/net/wire.rs"
+printf 'use crate::store;\npub fn helper() { store::keep(); }\n' > "$RS/src/util.rs"
+printf 'use crate::util;\npub fn keep() { util::helper(); }\n' > "$RS/src/store.rs"
+# polyglot: a Python package whose __init__ imports its child and the child imports the package — a real import
+# cycle Python executes, so it is NOT containment and must stay a cycle
+printf 'from .mod_a import a\n' > "$RS/pkg/__init__.py"
+printf 'from pkg import thing\ndef a(): pass\n' > "$RS/pkg/mod_a.py"
+deps "$RS" --legend=full; H="$( health )"; RD="$DOUT"; RRC=$DRC
+cyc(){ printf '%s' "$RD" | tr '\n' ' ' | grep -oE '<cycle [^>]*>(<f[^>]*/>)*</cycle>'; }
+if [ "$RRC" = 0 ] && [ -n "$H" ] && printf '%s' "$H" | grep -qE 'containment_edges="[1-9][0-9]*"'; then
+    ok "rust mod (a): <health containment_edges=$( printf '%s' "$H" | grep -oE 'containment_edges="[0-9]+"' | grep -oE '[0-9]+' )> printed"
+else no "rust mod (a) rc=$RRC: $H"; fi
+if [ "$RRC" = 0 ] && [ -n "$RD" ] && ! cyc | grep -q 'net/wire.rs' && ! cyc | grep -q 'src/lib.rs'; then
+    ok "rust mod (b): no cycle through a mod-declared pair (lib.rs, net/mod.rs <-> net/wire.rs)"
+else no "rust mod (b): a containment pair still reads as a cycle: $( cyc )"; fi
+if cyc | grep -q 'src/util.rs' && cyc | grep -q 'src/store.rs'; then
+    ok "rust mod (c): the sibling cycle util.rs <-> store.rs stays (a real use cycle, not containment)"
+else no "rust mod (c): the sibling cycle is gone: $( cyc )"; fi
+if cyc | grep -q 'pkg/__init__.py' && cyc | grep -q 'pkg/mod_a.py'; then
+    ok "rust mod (d) polyglot: the Python package cycle __init__.py <-> mod_a.py stays (only Rust mod pairs are containment)"
+else no "rust mod (d): the Python cycle is gone: $( cyc )"; fi
+wrow="$( printf '%s' "$RD" | grep -oE '<f p="src/net/wire.rs"[^>]*>' | head -1 )"
+if printf '%s' "$RD" | grep -oE '<f p="src/net/mod.rs"[^>]*>' | grep -q 'afferent="[1-9]'; then
+    ok "rust mod (e): Ca kept: net/mod.rs keeps its afferent= from the parent and the child"
+else no "rust mod (e): net/mod.rs row: $( printf '%s' "$RD" | grep -oE '<f p="src/net/mod.rs"[^>]*>' )"; fi
+if printf '%s' "$RD" | grep -q 'health containment_edges=N'; then ok "rust mod (f): the legend defines containment_edges= beside it"; else no "rust mod (f): legend sentence missing"; fi
+# (i) allowlist (SAFETY (d)(1)): only the module-file rule's own location is containment. src/store.rs's `mod cache;` names
+# src/store/cache.rs in Rust 2018; the edge this build draws to src/cache.rs (resolve.h probes the includer's own
+# directory) is not that pair, so it is NOT cut and its cycle with cache.rs's `use crate::store;` stays counted.
+mkdir -p "$SH/rs2/src"; printf 'mod store;\nmod cache;\n' > "$SH/rs2/src/lib.rs"
+printf 'mod cache;\npub fn keep() {}\n' > "$SH/rs2/src/store.rs"
+printf 'use crate::store;\npub fn get() { store::keep(); }\n' > "$SH/rs2/src/cache.rs"
+deps "$SH/rs2" --legend=full
+if [ "$DRC" = 0 ] && printf '%s' "$DOUT" | tr '\n' ' ' | grep -oE '<cycle [^>]*>(<f[^>]*/>)*</cycle>' | grep -q 'src/cache.rs' \
+   && printf '%s' "$DOUT" | grep -oE '<health [^>]*>' | grep -q 'containment_edges="2"'; then
+    ok "rust mod (i): a mod name resolved outside the module-file location is not containment (cycle kept; only lib.rs's 2 pairs cut)"
+else no "rust mod (i) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
+# (j) a crate root that is not lib.rs/main.rs (an integration test, a [[bin]], a [lib] path): no `mod it;` declares
+# tests/it.rs, so it is a root and its `mod common;` child is tests/common/mod.rs; common's `use super::it` points back.
+mkdir -p "$SH/rs3/tests/common"; printf 'mod common;\npub fn it_fn() { common::setup(); }\n' > "$SH/rs3/tests/it.rs"
+printf 'use super::it;\npub fn setup() {}\n' > "$SH/rs3/tests/common/mod.rs"
+deps "$SH/rs3" --legend=full
+if [ "$DRC" = 0 ] && [ -n "$DOUT" ] && ! printf '%s' "$DOUT" | grep -q '<cycle ' && printf '%s' "$DOUT" | grep -oE '<health [^>]*>' | grep -q 'containment_edges="1"'; then
+    ok "rust mod (j): tests/it.rs (declared by no mod, so a crate root) contains tests/common/mod.rs: no cycle, containment_edges=1"
+else no "rust mod (j) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
+# (g) negative twin: a C tree with no Rust never prints containment_edges=
+deps "$SH/edge"; if [ "$DRC" = 0 ] && [ -n "$DOUT" ] && ! printf '%s' "$DOUT" | grep -q 'containment_edges'; then ok "rust mod (g): no Rust file, no containment_edges="; else no "rust mod (g) rc=$DRC"; fi
+# (h) --report's cycle heading says what it left out
+REP="$( cd "$RS" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$RS" --report --no-cache 2>/dev/null )"; REPRC=$?
+if [ "$REPRC" = 0 ] && printf '%s' "$REP" | grep -q '## Dependency cycles .*Rust mod-declaration pairs left out as containment'; then
+    ok "rust mod (h): --report's cycle heading names the containment pairs it left out"
+else no "rust mod (h) rc=$REPRC: $( printf '%s' "$REP" | grep 'Dependency cycles' )"; fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
