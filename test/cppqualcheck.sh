@@ -360,8 +360,8 @@ rrun US --uses=selectBaseline \
 # (the lane's own step was 39 -> 40, CI run 41021256300 answered 40 at fa51be6b).
 rrun RW --uses=readWholeFile \
 && { [ "$( cnt "$RW" )" = 45 ] \
-    && ok "repo: --uses=readWholeFile count=45 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 45, got '$( cnt "$RW" )'"; }
+    && ok "repo: --uses=readWholeFile count=46 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 46, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \

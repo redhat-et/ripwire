@@ -145,7 +145,7 @@ Links
 
 See :ref:`the label <option-label>` and :ref:`bare-label` and :ref:`wrapped text
 over a line <wrapped-label>`, then :doc:`ref/options`, :doc:`Absolute </ref/deep/page>`
-and :ref:`widgetfn`, which names no label.
+and :ref:`widgetfn` and :ref:`near`, which name no label.
 
 .. _bare-label:
 
@@ -290,6 +290,14 @@ out="$( run --callers=links )"
 case "$out" in *'via="link"'*) ok "C6 :doc:\`/abs\` from a deeper file";; *) no "C6 :doc:\`/abs\` from a deeper file";; esac
 out="$( run --callers=widgetfn )"
 case "$out" in *'via="link"'*) no "C7 a dangling :ref: does not land on a function of that name";; *'callit'*) ok "C7 a dangling :ref: does not land on a function of that name";; *) no "C7 no caller row at all";; esac
+out="$( run --callers=near )"
+case "$out" in *'p="docs/links.txt:'*) no "C7b a dangling :ref: does not land on a document of that name";; *) ok "C7b a dangling :ref: does not land on a document of that name";; esac
+printf 'Same Stem\n=========\n\nwrongstem\n' >"$FIX/docs/ref/deep/links.txt"
+out="$( run --callers=links )"
+case "$out" in *'p="docs/ref/deep/page.txt:'*) ;; *) no "C6b no caller row for a root :doc:";; esac
+out="$( run --expand="Deep Page" --top-k=0 )"
+case "$out" in *'<c n="links" l="1" via="link">'*'Links'*|*'<c n="Links" l="1" via="link">'*) ok "C6b a root :doc: goes to the Sphinx root's file, not a same-named neighbour";; *) no "C6b a root :doc: goes to the Sphinx root's file, not a same-named neighbour";; esac
+rm -f "$FIX/docs/ref/deep/links.txt"
 arm "C8 a label serves the section it names" has_body "_bare-label" "_bare-label" barebody
 
 echo "D. which .txt is a document"

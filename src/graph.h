@@ -28,6 +28,7 @@
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
 #include "clones.h"              // scanCodeTokens / CodeScanOptions — BuiltinMethodGate::namedBeyondDefinition's code-token count
 #include "infra/mdslug.h"        // mdSlugOf — bindMarkdownLinks matches a link slug to a heading
+#include "restlinks.h"           // bindRestLink — a reST :ref: or :doc:`/root` link, whose target no path spells
 #include "infra/namesplit.h"     // isIdentChar — identifierRunCount, the identifier runs inside a string annotation
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "cppscopechain.h"       // EditCheckBraceLexer / editCheckWrittenQualifier — the written-spelling tier's C/C++ full chain
@@ -8086,12 +8087,11 @@ inline void fillImplementorBound( Graph& g, const std::vector<ImplementorBoundEd
 struct MdLinkIndex
 {
     struct Heading { std::uint32_t fileId; std::uint32_t startByte; NodeId id; std::string slug; };
-    HashMap<std::string, std::uint32_t> fileByPath;   // every .md/.markdown/.rst/crawled .txt file, by lexicalNormalize(ing.files). A `.`-rooted crawl stores `./docs/a.md`; the lookup key does not. An absolute root stores the absolute path, and the lookup joins to that same absolute path.
+    HashMap<std::string, std::uint32_t> fileByPath;   // every .md/.markdown file, by lexicalNormalize(ing.files). A `.`-rooted crawl stores `./docs/a.md`; the lookup key does not. An absolute root stores the absolute path, and the lookup joins to that same absolute path.
     std::vector<Heading>                headings;     // sorted (fileId, slug, startByte, id): the first of a slug is its heading
     std::vector<NodeId>                 wholeFile;    // per file: the file-level Section node, kNoNode when none
     std::vector<std::string>            wholeSlug;    // parallel to wholeFile: that node's own slug (a file that is one heading line IS that heading)
     std::vector<char>                   markup;       // per file: 1 when a heading (or the file node) holds inline markup mdSlugOf cannot slug as GitHub does
-    std::vector<std::pair<std::string_view, NodeId>> labels;   // reST `_name` units, sorted (name, id); empty unless a :ref: asks
 };
 
 inline bool isMarkdownLinkRef( const Reference& r ) noexcept
@@ -8134,8 +8134,7 @@ inline std::uint8_t markdownLinkBit( const HashMap<std::uint64_t, char>& linkEdg
 
 // The file node is the Section extractMarkdown builds with bodyByte 0 over [0, size). assignSymbols then
 // leaves sigStart 0 and sigEnd == endByte == the file span (widest is that span, measured over the file's
-// own sections). A 0,0 span is a ModuleScope, never this node. Same predicate recall.h uses. A heading
-// matches it only when the whole file is that one heading line.
+// own sections). A 0,0 span is a ModuleScope, never this node. Same predicate recall.h uses. A heading matches it only when the whole file is that one heading line.
 inline bool isMarkdownFileNode( const Symbol& sym, std::uint32_t widestEnd ) noexcept
 {
     return sym.sigStartByte == 0 && sym.sigEndByte >= sym.endByte && sym.endByte >= widestEnd;
@@ -8182,74 +8181,17 @@ inline void indexMarkdownSections( MdLinkIndex& ix, const IngestResult& ing )
     } );
 }
 
-// The label units ingest_rest.h wrote, `_name` Sections, sorted (name, id): the lowest id of a name is its target. Only
-// when a reference asks for one, so a tree with no :ref: pays nothing. Names point into ing.symbols, which outlives ix.
-inline void indexRestLabels( MdLinkIndex& ix, const IngestResult& ing )
-{
-    if( std::none_of( ing.references.begin(), ing.references.end(),
-                      []( const Reference& r ) { return r.memberPath.starts_with( kRestLabelMark ); } ) )
-    {
-        return;
-    }
-    for( const Symbol& sym : ing.symbols )
-    {
-        if( sym.kind == SymKind::Section && sym.name.starts_with( '_' ) && langFacts( sym.lang ).linkSections )
-        {
-            ix.labels.push_back( { sym.name, sym.id } );
-        }
-    }
-    std::sort( ix.labels.begin(), ix.labels.end() );
-}
-
-inline NodeId bindRestLabel( const MdLinkIndex& ix, std::string_view label )
-{
-    std::string name( 1, '_' );
-    name.append( label );
-    const auto hit = std::lower_bound( ix.labels.begin(), ix.labels.end(), std::string_view( name ),
-                                       []( const std::pair<std::string_view, NodeId>& row, std::string_view key ) { return row.first < key; } );
-    return hit != ix.labels.end() && hit->first == name ? hit->second : kNoNode;
-}
-
-// :doc:`/a/b`: relative to the Sphinx root, a directory this stage does not know. The nearest ancestor of the linker holding
-// that path is it; a miss leaves the stem ladder to answer, as for any link whose file is not in the tree.
-inline NodeId bindRestRootDoc( const MdLinkIndex& ix, std::string_view linkerPath, std::string_view written )
-{
-    std::string_view dir = includerDir( linkerPath );
-    for( ;; )
-    {
-        std::string path( dir );
-        if( !path.empty() )
-        {
-            path.push_back( '/' );
-        }
-        path.append( written );
-        const std::string norm = lexicalNormalize( path );
-        if( const auto hit = ix.fileByPath.find( norm ); !norm.empty() && hit != ix.fileByPath.end() )
-        {
-            return ix.wholeFile[ hit->second ];
-        }
-        if( dir.empty() )
-        {
-            return kNoNode;
-        }
-        const std::size_t slash = dir.find_last_of( '/' );
-        dir = slash == std::string_view::npos ? std::string_view{} : dir.substr( 0, slash );
-    }
-}
-
 inline MdLinkIndex buildMdLinkIndex( const IngestResult& ing )
 {
     MdLinkIndex ix;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        // .rst and a crawled .txt: a :doc: is written to a document whichever its format, and a crawled .txt is one.
-        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) || ing.files[ f ].ends_with( ".rst" ) || ing.files[ f ].ends_with( ".txt" ) )
+        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) || isRestLinkTargetPath( ing.files[ f ] ) )
         {
             ix.fileByPath.try_emplace( lexicalNormalize( ing.files[ f ] ), f );
         }
     }
     indexMarkdownSections( ix, ing );
-    indexRestLabels( ix, ing );
     return ix;
 }
 
@@ -8362,23 +8304,14 @@ inline MdLinkPins bindMarkdownLinks( const IngestResult& ing )
     out.pin.assign( ing.references.size(), kNoNode );
     out.slugMiss.assign( ing.references.size(), 0 );
     const MdLinkIndex ix = buildMdLinkIndex( ing );
+    const RestLinkIndex rest = buildRestLinkIndex( ing );
     for( std::size_t i = 0; i < ing.references.size(); ++i )
     {
         const Reference& r = ing.references[ i ];
         if( isMarkdownLinkRef( r ) && r.fileId < ing.files.size() )
         {
-            const std::string_view written = r.memberPath;
-            if( written.starts_with( kRestLabelMark ) )
-            {
-                out.pin[ i ] = bindRestLabel( ix, written.substr( kRestLabelMark.size() ) );
-                continue;
-            }
-            if( written.starts_with( kRestDocRootMark ) )
-            {
-                out.pin[ i ] = bindRestRootDoc( ix, ing.files[ r.fileId ], written.substr( kRestDocRootMark.size() ) );
-                continue;
-            }
-            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], written, ing.crawlRoot );
+            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath, out.pin[ i ] ) ) { continue; }
+            const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath, ing.crawlRoot );
             out.pin[ i ]      = t.id;
             out.slugMiss[ i ] = t.slugMiss ? 1 : 0;
         }
