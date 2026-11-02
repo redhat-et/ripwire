@@ -78,11 +78,17 @@ w "$Z/crates/other/src/other.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> 
 w "$Z/crates/app/Cargo.toml" '[package]\nname = "app"\nversion = "0.1.0"\n[lib]\npath = "src/app.rs"\n[dependencies]\nsettings = { path = "../settings" }\n'
 w "$Z/crates/app/src/app.rs" 'use settings::{update_file};\nuse gpui_util::dashed;\nuse serde_json::json;\nfn z_use() { update_file(); }\nfn z_dash() { dashed(); }\nfn z_prelude() -> i32 { Ok(1) }\nfn z_ext() { let _ = json!({}); }\nfn z_qual() { settings::update_file(); }\n'
 # `mod file;` is the one edge a crate without a lib.rs has at this head; a root naming ANOTHER package needs a resolved cross-crate edge (RUST-ROOTS), measured with the rig
+# a glob written from the package's own root, in a crate the layout cannot see: the root reads against the package directory (near-miss twin of Z3, whose root names another package)
+w "$Z/crates/gr/Cargo.toml" '[package]\nname = "gr"\nversion = "0.1.0"\n[lib]\npath = "src/gr.rs"\n'
+w "$Z/crates/gr/src/gr.rs" 'pub mod f;\nuse gr::f::*;\nfn z_own_glob() { globz(); }\n'
+w "$Z/crates/gr/src/f.rs" 'pub fn globz() {}\n'
+printf 'pub fn globz() {}\n' >> "$Z/crates/other/src/other.rs"
 row Z1.crate   "$Z" callees z_crate         crates/settings/src/file.rs update_file proven
 row Z2.prelude "$Z" callees z_crate_prelude crates/settings/src/file.rs Ok name
 # a root naming ANOTHER package is no proof of the target package's file (`use other::shared` over the closure's `shared`); a root naming the target's own package is
 row Z3.otherroot "$Z" callees z_other_root crates/settings/src/file.rs shared name
 row Z4.ownroot   "$Z" callees z_own_root   crates/settings/src/file.rs viaown proven
+row Z5.ownglob   "$Z" callees z_own_glob   crates/gr/src/f.rs globz proven
 
 # ---- Python
 P=$T/py
