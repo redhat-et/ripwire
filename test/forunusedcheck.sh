@@ -874,6 +874,12 @@ mk "$T/outside_sv.txt" 'dead_via_symlink()\n'; ln -s "$T/outside_sv.txt" "$SV/li
 ask "$SV" "unused functions in pkg/tgt.py" > "$T/sv.out"
 want SVa "$T/sv.out" dead_in_git_only unused               # .git is not a text file of the tree: its objects, hooks and messages name everything
 want SVb "$T/sv.out" dead_via_symlink unused               # a symlink is never opened: a link to a file outside the root is not a file under it
+mk "$R/mr/a/pkg/t.py" 'def mr_dead():\n    return 1\n'; mk "$R/mr/a/pkg/u.py" 'from pkg import t\n'; mk "$R/mr/b/o.py" 'def other():\n    return 2\n'
+( cd "$R/mr" && "$RIPWIRE" a b --no-cache --for="unused functions in a/pkg/t.py" 2>/dev/null ) > "$T/mr.out"
+want SVc "$T/mr.out" mr_dead unknown unseen              # a merged multi-root index has no one root to walk: every claim is `unknown`
+mk "$R/ur/pkg/t.py" 'def ur_dead():\n    return 1\n'; mk "$R/ur/pkg/u.py" 'from pkg import t\n'; mk "$R/ur/pkg/v.py" 'x = 1\n'
+( cd "$R/ur" && "$RIPWIRE" . --for="unused functions in pkg/t.py" >/dev/null 2>&1; chmod 000 pkg/v.py; "$RIPWIRE" . --for="unused functions in pkg/t.py" 2>/dev/null; chmod 644 pkg/v.py ) > "$T/ur.out"
+if [ -r "$R/ur/pkg/v.py" ] && [ "$(id -u)" = 0 ]; then pass "SVd: skipped as root"; else want SVd "$T/ur.out" ur_dead unknown unseen; fi   # an indexed file that cannot be read now may hold a caller (the cached index still lists it)
 mk "$R/pk/package.json" '{"name":"root","private":true}\n'
 mk "$R/pk/src/package.json" '{"name":"lib","main":"tgt.js"}\n'
 mk "$R/pk/src/tgt.ts" 'export function nearest_pub(){return 1}\n'
