@@ -865,6 +865,24 @@ if has "$L" 'Name: "kw_one"' && ! has "$L" 'tbl='; then ok "T24g [P] a key row i
 # T24h [P] an opener with a trailing line comment is still the opener: a top level table row never reads as no opener ("item")
 A="$( nf1 '--for=register `aws_key_one`' )"; L="$( lits <<<"$A" )"
 if has "$L" 'tbl="var SecretTable = map[string]string{ // aws"'; then ok "T24h [P] a trailing comment on the opener line: tbl= names the opener, not item"; else no "T24h opener with a comment: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+cat > "$NF/py/script.py" <<'PY'
+from run import run_it
+reg("top_py_one", 1)
+reg("top_py_two", 2)
+run_it(1)
+run_it(2)
+if __name__ == "__main__":
+    reg("main_key_one", 1)
+    reg("main_key_two", 2)
+PY
+# T24i [P] neighbours the review did not name: a statement under `if __name__ == "__main__":` is no top level row; calls OF the anchor are no rows of it
+A="$( nf1 '--for=register `main_key_one`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'reg("main_key_one"' && ! has "$L" 'tbl='; then ok "T24i [P] an indented statement with no opener is no \"item\" row"; else no "T24i main block: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+if ! has "$( lits <<<"$( nf1 '--for=add a new test for run_it' )" )" 'shape="table"' && ! has "$( lits <<<"$( nf1 '--for=fix register allocation in run_it' )" )" 'shape="table"'; then ok "T24j [P] top level calls of the anchor (run_it(1); run_it(2)) are no table: a bare word prints nothing"; else no "T24j script calls read as a table"; fi
+A="$( nf1 '--for=register `run_it`' )"; L="$( lits <<<"$A" )"
+if has "$L" 's="run_it"' && ! has "$L" 'tbl='; then ok "T24k [P] backticked: its call sites print, with no tbl="; else no "T24k callee rows: $( grep -o 'tbl="[^"]*"' <<<"$L" | tr '\n' ' ' )"; fi
+A="$( nf1 '--for=register `top_py_one`' )"; L="$( lits <<<"$A" )"
+if has "$L" 'tbl="item"'; then ok "T24l [G] twin: a top level registration call whose key is the anchor keeps tbl=item"; else no "T24l top level registration lost: ${L:0:200}"; fi
 # T24e [G] twin: a data table inside a function keeps its opener (a dict literal assigned in a Python body)
 A="$( nf1 '--for=register `alpha_key`' )"; L="$( lits <<<"$A" )"
 if has "$L" 'tbl="table = {"'; then ok "T24e [G] twin: a dict literal in a function body keeps tbl= (its opener is an assignment)"; else no "T24e in-function table lost: ${L:0:300}"; fi

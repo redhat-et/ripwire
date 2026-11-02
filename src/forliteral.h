@@ -1214,7 +1214,9 @@ inline bool opensDataLiteral( std::string_view opener )
 // The table this source line is a row of, or "": a row of an allowed shape with a sibling of the same shape at its indent, or a macro row at
 // top level (a Rust `name!(`, an ALLCAPS callee, outside any function), which is a registration with no sibling needed.
 // A row inside a function body is read more strictly: a call there is a statement, never a row (`log_info("x");` twice is two statements, not a
-// table), and a key, member or brace row counts only when the literal it stands in opens with a data opener (opensDataLiteral).
+// table), and a key, member or brace row counts only when the literal it stands in opens with a data opener (opensDataLiteral). A call row
+// whose callee IS the anchor is a call of it (`run_it(1)` twice in a script), not a row of a table that holds it. An indented row with no opener
+// found is a statement in a block, never "item".
 inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bool callableOwner )
 {
     if( byteOffset >= text.size() )
@@ -1231,9 +1233,10 @@ inline std::string tableRowOf( std::string_view text, std::size_t byteOffset, bo
     }
     const std::size_t indent = lintdetail::indentOf( line );
     const std::string_view opener = openerOf( text, start, indent );
-    if( opensImport( opener ) || ( callableOwner && ( shape.kind == RowKind::Call || !opensDataLiteral( opener ) ) ) )
+    const bool inCallee = shape.kind == RowKind::Call && byteOffset >= std::size_t( shape.head.data() - text.data() ) && byteOffset < std::size_t( shape.head.data() - text.data() ) + shape.head.size();
+    if( opensImport( opener ) || inCallee || ( indent > 0 && opener.empty() ) || ( callableOwner && ( shape.kind == RowKind::Call || !opensDataLiteral( opener ) ) ) )
     {
-        return {};
+        return {};   // a call OF the anchor is no row of it; "item" is top level only (a statement under `if __name__ ...:` opens no table)
     }
     const auto same = [ & ]( std::optional<std::string_view> l )
     {
