@@ -9956,6 +9956,11 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                                       : std::vector<std::uint32_t>{};
         const bool anyChurn = std::any_of( commitCounts.begin(), commitCounts.end(),
                                            []( std::uint32_t c ){ return c >= kShortHorizonMinCommits; } );
+        // Gate 2 and the exemptions first, from the trees in hand: the history reads below (the window ref tree, the blame)
+        // are asked only for a symbol this diff rewrites, so an unread one is named only when it could have held a row
+        // (hwh-fix4, N1: a clean tree or an untouched file never reports history it did not need).
+        struct ChurnCandidate { NodeId node; std::uint64_t key; std::uint64_t baseBody; };
+        std::vector<ChurnCandidate> candidates;
         if( anyChurn || walkUnread )
         {
             const gtl::btree_map<std::uint64_t, std::uint64_t> nowBody = bodyHashesBySym( ing, root );
@@ -9967,12 +9972,7 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 fixtureByFile[f] = isFixturePath( rootRelPath( ing, f ) ) ? 1 : 0;
             }
 
-            // Gate 2 and the exemptions first, from the trees in hand: the history reads below (the window ref tree, the blame)
-            // are asked only for a symbol this diff rewrites, so an unread one is named only when it could have held a row
-            // (hwh-fix4, N1: a clean tree or an untouched file never reports history it did not need).
-            struct ChurnCandidate { NodeId node; std::uint64_t key; std::uint64_t baseBody; };
-            std::vector<ChurnCandidate> candidates;
-            ScratchMap<std::uint8_t>    churnSeen( ing.symbols.size() );
+            ScratchMap<std::uint8_t> churnSeen( ing.symbols.size() );
             for( NodeId i = 0; i < ing.symbols.size(); ++i )
             {
                 if( i >= g.canonId.size() || g.canonId[i].empty() )
@@ -10013,59 +10013,59 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 }
                 candidates.push_back( { i, key, bb->second } );
             }
+        }
 
-            // The window ref tree is read only when a candidate needs it (an empty candidate list reads nothing and loses nothing);
-            // a file reached the window threshold, so history exists: a ref tree that did not load is unread, not absent.
-            using RefBodies = std::pair<gtl::btree_map<std::uint64_t, std::uint64_t>, bool>;
-            const auto [ refBody, refOk ] = candidates.empty() ? RefBodies{ {}, true }
-                                                               : computeWindowRefBodyHashes( std::string( root ), kShortHorizonDays, excludes, maxFileBytes );
-            historyUnread.churnTree = !refOk;
-            if( refOk && !candidates.empty() )
+        // The window ref tree is read only when a candidate needs it (an empty candidate list reads nothing and loses nothing);
+        // a file reached the window threshold, so history exists: a ref tree that did not load is unread, not absent.
+        using RefBodies = std::pair<gtl::btree_map<std::uint64_t, std::uint64_t>, bool>;
+        const auto [ refBody, refOk ] = candidates.empty() ? RefBodies{ {}, true }
+                                                           : computeWindowRefBodyHashes( std::string( root ), kShortHorizonDays, excludes, maxFileBytes );
+        historyUnread.churnTree = !refOk;
+        if( refOk && !candidates.empty() )
+        {
+            // B10.2d — SELF-vs-AMBIENT window cutoff, same basis as gates 1/3 (HEAD's own committer epoch
+            // minus the window, never wall-clock). A failed lookup leaves churnCutoffEpoch==0, and every
+            // candidate below then reads churn="unknown" (the blame cannot be asked).
+            const std::int64_t churnHeadEpoch   = gitHeadCommitEpoch( std::string( root ) );   // the same `log -1 --format=%ct HEAD` read, 0 on failure
+            const std::int64_t churnCutoffEpoch = churnHeadEpoch > 0 ? churnHeadEpoch - std::int64_t( kShortHorizonDays ) * 86400 : 0;
+
+            // P3 (r27) — ONE `git diff --unified=0 HEAD -- <path>` spawn per PATH for the whole loop. The
+            // diff is a pure function of (HEAD, working tree), both fixed for this call, yet it used to be
+            // re-spawned per symbol (measured: 8 byte-identical spawns for a single dirty file).
+            DiffHunkMemo churnHunkMemo;
+            for( const ChurnCandidate& c : candidates )
             {
-                // B10.2d — SELF-vs-AMBIENT window cutoff, same basis as gates 1/3 (HEAD's own committer epoch
-                // minus the window, never wall-clock). A failed lookup leaves churnCutoffEpoch==0, and every
-                // candidate below then reads churn="unknown" (the blame cannot be asked).
-                const std::int64_t churnHeadEpoch   = gitHeadCommitEpoch( std::string( root ) );   // the same `log -1 --format=%ct HEAD` read, 0 on failure
-                const std::int64_t churnCutoffEpoch = churnHeadEpoch > 0 ? churnHeadEpoch - std::int64_t( kShortHorizonDays ) * 86400 : 0;
-
-                // P3 (r27) — ONE `git diff --unified=0 HEAD -- <path>` spawn per PATH for the whole loop. The
-                // diff is a pure function of (HEAD, working tree), both fixed for this call, yet it used to be
-                // re-spawned per symbol (measured: 8 byte-identical spawns for a single dirty file).
-                DiffHunkMemo churnHunkMemo;
-                for( const ChurnCandidate& c : candidates )
+                const Symbol& s  = ing.symbols[c.node];
+                const auto    rb = refBody.find( c.key );
+                // gate 3: rewritten across window commits (ref ≠ baseline body), or first COMMITTED inside the window.
+                if( rb != refBody.end() && rb->second == c.baseBody )
                 {
-                    const Symbol& s  = ing.symbols[c.node];
-                    const auto    rb = refBody.find( c.key );
-                    // gate 3: rewritten across window commits (ref ≠ baseline body), or first COMMITTED inside the window.
-                    if( rb != refBody.end() && rb->second == c.baseBody )
-                    {
-                        continue;
-                    }
-
-                    // B10.2d: SELF vs AMBIENT — does THIS diff modify a pre-existing line that was itself
-                    // last committed inside the window? See the section comment above churnEditWindowCommitCount.
-                    // Q-DIAL-1 — ONE blame-derived number decides both the facet and the severity (see
-                    // churnEditWindowCommitCount): >=1 in-window commit on the edited lines is SELF, and it
-                    // is now INFORMATIONAL exactly as AMBIENT already was; >= kShortHorizonMinCommits is the
-                    // rewrite-thrash that gates. Measured on twelve LANDED commits of this repo (audit Q1
-                    // §2b): the old "SELF gates" rule fired 135 of 171 gating rows, 0% of them a finding a
-                    // reviewer would act on, because on an active branch the symbol you wrote this week and
-                    // are touching again is churn="self" by construction.
-                    bool                blameUnread   = churnCutoffEpoch <= 0;   // no HEAD epoch: the blame cannot be asked
-                    const std::uint32_t windowCommits = churnCutoffEpoch > 0
-                                                      ? churnEditWindowCommitCount( churnHunkMemo, std::string( root ),
-                                                                                    std::string( relForHash( ing.files[ s.fileId ], root ) ),
-                                                                                    s.line, s.loc, churnCutoffEpoch, blameUnread )
-                                                      : 0u;
-                    const bool gates = windowCommits >= kShortHorizonMinCommits;   // a floor at the bar already proves it, read or not
-                    // hwh-fix4 (N1): a refused read under the bar is unknown, never ambient (and never a gating claim it cannot prove)
-                    const bool unknown = blameUnread && !gates;
-                    historyUnread.churnRows += unknown ? 1u : 0u;
-                    const bool self = windowCommits > 0;
-                    regs.push_back( { "short-horizon-churn", g.canonId[c.node], 0, commitCounts[ s.fileId ], c.key,
-                                      !gates, unknown ? "unknown" : self ? "self" : "ambient", false } );   // now = window commit count on the file; origin: ALWAYS preexisting (gate 2 above required a baseline body)
-                    stampLoc( c.node );
+                    continue;
                 }
+
+                // B10.2d: SELF vs AMBIENT — does THIS diff modify a pre-existing line that was itself
+                // last committed inside the window? See the section comment above churnEditWindowCommitCount.
+                // Q-DIAL-1 — ONE blame-derived number decides both the facet and the severity (see
+                // churnEditWindowCommitCount): >=1 in-window commit on the edited lines is SELF, and it
+                // is now INFORMATIONAL exactly as AMBIENT already was; >= kShortHorizonMinCommits is the
+                // rewrite-thrash that gates. Measured on twelve LANDED commits of this repo (audit Q1
+                // §2b): the old "SELF gates" rule fired 135 of 171 gating rows, 0% of them a finding a
+                // reviewer would act on, because on an active branch the symbol you wrote this week and
+                // are touching again is churn="self" by construction.
+                bool                blameUnread   = churnCutoffEpoch <= 0;   // no HEAD epoch: the blame cannot be asked
+                const std::uint32_t windowCommits = churnCutoffEpoch > 0
+                                                  ? churnEditWindowCommitCount( churnHunkMemo, std::string( root ),
+                                                                                std::string( relForHash( ing.files[ s.fileId ], root ) ),
+                                                                                s.line, s.loc, churnCutoffEpoch, blameUnread )
+                                                  : 0u;
+                const bool gates = windowCommits >= kShortHorizonMinCommits;   // a floor at the bar already proves it, read or not
+                // hwh-fix4 (N1): a refused read under the bar is unknown, never ambient (and never a gating claim it cannot prove)
+                const bool unknown = blameUnread && !gates;
+                historyUnread.churnRows += unknown ? 1u : 0u;
+                const bool self = windowCommits > 0;
+                regs.push_back( { "short-horizon-churn", g.canonId[c.node], 0, commitCounts[ s.fileId ], c.key,
+                                  !gates, unknown ? "unknown" : self ? "self" : "ambient", false } );   // now = window commit count on the file; origin: ALWAYS preexisting (gate 2 above required a baseline body)
+                stampLoc( c.node );
             }
         }
     }
