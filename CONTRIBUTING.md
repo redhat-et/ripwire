@@ -431,7 +431,8 @@ every input the tool ever sees, costs nothing in release, and tells the optimize
 - **Never `ASSUME( false )` (or an `EXPECTS`/`ENSURES` of false) on a degrade path.** In release the assert
   compiles away and the optimizer deletes the fallback behind it — that is a real shipped-bug shape, not a
   hypothetical. Guard, don't assert.
-- Throw only at the `operator new` seam. A throw escaping a worker thread is `std::terminate`, so
+- Throw only at the `operator new` seam and for `rw::FileGraphStopped`, a failed file-graph build
+  (`src/infra/fileGraphStop.h`), which `test/hazardpatterncheck.sh` (B2) registers. A throw escaping a worker thread is `std::terminate`, so
   wrap thread bodies in `try { … } catch( ... ) { … }`.
 - **Avoid exception handling. Where a throw is unavoidable, RAII is what makes the code exception-safe:
   cleanup belongs in a destructor, never in a `catch`.** A handler that releases a resource has to know

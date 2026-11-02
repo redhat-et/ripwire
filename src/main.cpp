@@ -1,6 +1,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
+#include <exception>         // std::uncaught_exceptions: the stopped fold's unwind abandons the history walks
 #include <future>            // std::async — the history walk that runs beside the ingest
 
 // main.cpp — ripwire entry point: parse args → ingest → graph → PageRank → minified XML,
@@ -5245,6 +5246,13 @@ static int dispatchMainBody( const rw::Config& cfg, char** argv )
     const bool needsValueUses = rw::needsValueUses( cfg );   // cli.h — ONE definition, and --doctor's
                                                             // rich_verbs= roster is derived from it
     std::vector<std::future<quality::HistoryWalk>> historyWalks = startHistoryWalks( cfg, multiRoot, ws, root );
+    // Declared after the futures, so it runs before they join: FileGraphStopped unwinds this function, and a join here would
+    // hold the refusal until the log ends (the same wait the refusals below abandon; memguardcheck B21b).
+    struct AbandonWalksOnUnwind
+    {
+        int  uncaught = std::uncaught_exceptions();
+        ~AbandonWalksOnUnwind() { if( std::uncaught_exceptions() > uncaught ) { rw::abandonGitWalks(); } }
+    } abandonWalksOnUnwind;
     IngestResult ing;
     if( multiRoot )
     {
@@ -5855,7 +5863,6 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         rw::memguard::answerStops();
         DISCLOSE( Diagnostics::answerRefused, "main: the file graph's fold stopped, so the build failed — exit 5, one stderr line, nothing printed from a partial store" );
         rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build", {}, stopped.why() ) );
-        rw::abandonGitWalks();   // the refusal is out: do not wait for the history walks' futures (gitmine.h)
         return 5;
     }
 }
