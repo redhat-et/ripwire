@@ -1,0 +1,15 @@
+[package]
+name = "demo"
+version = "0.1.0"
+description = """
+a text that quotes a table
+[[bin]]
+name = "fake"
+path = "src/fake.rs"
+"""
+
+[[bin]]
+name = "demo"
+
+[[bin]]
+name = "tool"
