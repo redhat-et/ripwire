@@ -1127,7 +1127,7 @@ inline constexpr char kHelpHead[] =
         "                               Never dropped: it still wins when nothing else matches. Each one says\n"
         "                               [generated_demoted: marker|size+fences] on its own line; the header tallies\n"
         "                               generated_demoted=N and names the first 5 best-first in generated_demoted_paths=\"a,b\"\n"
-        "                               (% \" , percent-encoded; generated_demoted_named=K when it names fewer than N)\n"
+        "                               (% \" , and space percent-encoded; generated_demoted_named=K when it names fewer than N)\n"
         "    --tree                     orient file by file: each file's top symbols, 80 files by default\n"
         "                               file-by-file orientation map (top symbols per file). Default window: the 80 files with the\n"
         "                               best-ranked symbols (shown=/capped=/total=/next_offset= disclose the cut, next= pastes the\n"

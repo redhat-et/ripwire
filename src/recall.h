@@ -362,7 +362,8 @@ inline std::size_t recallBytesForTokens( std::size_t maxTokens ) noexcept
 // deterministic, no map order, no clock. Returns true when it had to close a fence.
 inline bool closeOpenMarkdownFence( std::string& body )
 {
-    if( !docparse::scanMarkdownFences( body ).endsInsideFence )
+    const docparse::MarkdownFenceScan scan = docparse::scanMarkdownFences( body );
+    if( !scan.endsInsideFence )
     {
         return false;
     }
@@ -370,7 +371,7 @@ inline bool closeOpenMarkdownFence( std::string& body )
     {
         body += '\n';
     }
-    body += "```";
+    body.append( scan.openFenceRun, scan.openFenceChar );   // a ```` or ~~~ fence is closed only by its own kind
     return true;
 }
 
@@ -417,9 +418,9 @@ inline std::size_t findRecallBoundaryCut( std::string_view body, std::size_t cut
 
 // §L4.2 — fenced code blocks and pipe-table row runs are WHOLE-OR-NOTHING under a forced cut: the cut
 // point may not land inside one. `end` is exclusive (the byte just past the element). Detected in one
-// pass over lines, mirroring docparse::scanMarkdownFences' own fence rule (three-or-more backticks,
-// first non-space characters on the line, toggles state) so "inside a fence" cannot mean two different
-// things in this file. A pipe-table run is ≥2 consecutive non-blank lines outside any fence that each
+// pass over lines with docparse::scanMarkdownFences' own fence state machine (detail::MarkdownFenceTracker:
+// a closer repeats the opener's character with a run at least as long and nothing after it), so "inside a
+// fence" cannot mean two different things in this file. A pipe-table run is ≥2 consecutive non-blank lines outside any fence that each
 // contain a `|` — deliberately loose (no header/separator-row validation): a hand-rolled table detector
 // that DEMANDS GFM's exact grammar would silently stop protecting a body whose table is slightly
 // off-spec, which is a worse failure than over-protecting a pipe-heavy paragraph run.
@@ -432,7 +433,7 @@ struct RecallProtectedRange
 inline std::vector<RecallProtectedRange> findRecallProtectedRanges( std::string_view body )
 {
     std::vector<RecallProtectedRange> ranges;
-    bool        insideFence  = false;
+    docparse::detail::MarkdownFenceTracker fence;
     std::size_t fenceStart   = 0;
     std::size_t tableStart   = std::string_view::npos;
     std::size_t tableLines   = 0;
@@ -460,24 +461,20 @@ inline std::vector<RecallProtectedRange> findRecallProtectedRanges( std::string_
 
         std::size_t cursor = 0;
         while( cursor < line.size() && ( line[cursor] == ' ' || line[cursor] == '\t' ) ) { ++cursor; }
-        std::size_t tickCount = 0;
-        while( cursor + tickCount < line.size() && line[cursor + tickCount] == '`' ) { ++tickCount; }
-
-        if( tickCount >= 3 )
+        const bool wasInside = fence.isInside();
+        if( fence.advance( line, cursor, line.size() ) )
         {
             flushTable( lineStart );
-            if( !insideFence )
+            if( !wasInside )
             {
-                insideFence = true;
-                fenceStart  = lineStart;
+                fenceStart = lineStart;
             }
             else
             {
-                insideFence = false;
                 ranges.push_back( { fenceStart, lineFullEnd } );
             }
         }
-        else if( insideFence )
+        else if( wasInside )
         {
             // absorbed into the open fence's range once it closes (or at EOF, below) — no per-line work
         }
@@ -497,7 +494,7 @@ inline std::vector<RecallProtectedRange> findRecallProtectedRanges( std::string_
         }
         lineStart = lineFullEnd;
     }
-    if( insideFence )
+    if( fence.isInside() )
     {
         ranges.push_back( { fenceStart, body.size() } );   // unterminated fence protects through EOF
     }
@@ -638,8 +635,9 @@ inline std::string optionalRecallAttr( std::string_view name, std::size_t value 
 // DOCS-DEMOTE-FP: the demoted docs BY NAME, so a header that tallies generated_demoted=N also says which N —
 // a demoted doc sits below every other match and is usually past the --top-k cut, where its own separator
 // note is never printed. `paths` are display paths, best-first, at most kRecallDemotedNamedMax of them.
-// Inside the quotes, '%', '"', ',' and control bytes are percent-encoded (%25 %22 %2C %XX), so the comma
-// list splits on ',' whatever a path spells. " generated_demoted_named=K" rides only when K < demotedCount.
+// Inside the quotes, '%', '"', ',', space and control bytes are percent-encoded (%25 %22 %2C %20 %XX), so the
+// comma list splits on ',' whatever a path spells, a space-splitting reader keeps the value whole, and a path
+// that spells " est_tokens=" cannot be mistaken for the header's own field (withHeaderField finds the first). " generated_demoted_named=K" rides only when K < demotedCount.
 inline std::string formatRecallDemotedNames( const std::vector<std::string_view>& paths, std::size_t demotedCount )
 {
     if( paths.empty() )
@@ -663,7 +661,7 @@ inline std::string formatRecallDemotedNames( const std::vector<std::string_view>
         for( const char ch : paths[i] )
         {
             const auto byte = static_cast<unsigned char>( ch );
-            if( byte == '%' || byte == '"' || byte == ',' || byte < 0x20 || byte == 0x7f )
+            if( byte == '%' || byte == '"' || byte == ',' || byte == ' ' || byte < 0x20 || byte == 0x7f )
             {
                 attr += '%';
                 attr += kHex[ byte >> 4 ];

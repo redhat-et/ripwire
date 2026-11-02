@@ -88,11 +88,14 @@ blocks near_size_above 11 0 7 1     # ~5.4 KB
 
 # premise: measure each fixture with the rule's own definitions (awk replica) and print it, so a fixture
 # that drifts across a threshold fails here instead of passing for the wrong reason.
+# The fence rule is CommonMark's closer: an opener is 3+ backticks (no backtick after the run) or 3+ tildes;
+# only the same character, a run at least as long and nothing but whitespace after it closes the fence.
 measure(){ awk '
-    { n++; s=$0; sub(/^[ \t]+/, "", s); t=s; ticks=0; while (substr(t,1,1)=="`") { ticks++; t=substr(t,2) }
-      if (ticks>=3) { inside=!inside; fz++; next }
-      if (inside) { fz++; next }
-      if (s=="") next
+    { n++; s=$0; sub(/^[ \t]+/, "", s); c=substr(s,1,1); run=0
+      if (c=="`" || c=="~") { t=s; while (substr(t,1,1)==c) { run++; t=substr(t,2) } }
+      if (inside) { fz++; if (c==oc && run>=orun && t ~ /^[ \t\r]*$/) inside=0; next }
+      if (run>=3 && !(c=="`" && index(t,"`"))) { inside=1; oc=c; orun=run; fz++; next }
+      if (s=="" || s=="\r") next
       if (match(s, /^#{1,6}([ \t]|$)/)) next
       pb += length($0) }
     END { printf "%d %.3f %.3f\n", bytes, (n?fz/n:0), pb/bytes }' bytes="$( wc -c < "$1" | tr -d ' ' )" "$1"; }
@@ -214,6 +217,101 @@ PY
 )"
 grep -qF " generated_demoted_paths=\"$paths\"" <<<"$MCPH" \
     && ok "MCP memory_recall header names the same 5" || no "MCP header: $( printf '%s' "$MCPH" | head -c 300 )"
+
+# 9) CommonMark fences (fix round 1, CodeRabbit's docparse.h thread). The scanner used to TOGGLE on any
+#    line starting with ```, so a ````-fence quoting a ```bash block "closed" at the inner line and the rest
+#    of the dump counted as prose: this repo's own captures (a ````` fence holding a ```bash block cut by
+#    "… [N more lines]") measured prose 0.82 and escaped. A separate corpus, so arms 1-8 keep their counts.
+#    RED on 66683e5f: nest_dump, trunc_capture, info_closer_dump, tilde_dump undemoted.
+R3="$TMP/fence"; mkdir -p "$R3"
+python3 - "$R3" <<'PY' || no "fence fixture generator failed"
+import sys, os
+R = sys.argv[1]
+L = "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij zzz"   # 69 bytes
+def w(name, text, nl="\n"):
+    open(os.path.join(R, name), "w", newline="").write(text.replace("\n", nl))
+for k in range(40):
+    w(f"small_{k}.md", f"# small {k:04d}\n" + f"zqfence server option note {k}".ljust(68) + "\n" + (L + "\n") * 13)
+def dump(n, inner):   # a capture: one caption line per quoted block
+    return "# capture zqfence\n" + "".join(f"{L}\n" + inner + "\n" for _ in range(n))
+w("nest_dump.md",        dump(30, "````markdown\n" + f"{L}\n{L}\n```rust\n" + f"{L}\n" * 4 + f"```\n{L}\n````\n"))
+w("trunc_capture.md",    dump(30, "`````\n" + f"{L}\n```bash\n" + f"{L}\n" * 5 + "… [130 more lines]\n`````\n"))
+w("info_closer_dump.md", dump(30, "````\n" + f"{L}\n" * 3 + "````bash\n" + f"{L}\n" * 3 + "````\n"))   # an info string never closes
+w("tilde_dump.md",       dump(30, "~~~\n" + f"{L}\n```\n" + f"{L}\n" * 4 + f"```\n{L}\n~~~\n"))
+w("indented_dump.md",    dump(30, "   ```\n" + f"   {L}\n" * 7 + "   ```\n"))                       # closer indented 3
+w("handwritten_quote.md", "# Writing docs zqfence\n\n" + "".join(f"## Example {k}\n\n" + f"{L}\n" * 3
+                          + "\n````markdown\n" + f"{L}\n```js\n" + f"{L}\n" * 3 + "```\n````\n\n" for k in range(30)))
+w("crlf_ref.md", "# CRLF reference zqfence\n\n" + "".join(f"## Option {k}\n\n" + f"{L}\n" * 3 + "\n```\n" + f"{L}\n" * 6
+                 + "```\n\n" for k in range(30)), "\r\n")
+w("crlf_caption.md", dump(30, "```\n" + f"{L}\n" * 7 + "```"), "\r\n")
+w("crlf_headed.md", "# crlf headed zqfence\n" + "".join(f"## {L}\n```\n" + f"{L}\n" * 3 + "```\n\n" for _ in range(40)), "\r\n")
+PY
+R_SAVE=$R; R=$R3
+premise nest_dump.md         "ge 5000" "ge 0.35" "lt 0.15"
+premise trunc_capture.md     "ge 5000" "ge 0.35" "lt 0.15"
+premise info_closer_dump.md  "ge 5000" "ge 0.35" "lt 0.15"
+premise tilde_dump.md        "ge 5000" "ge 0.35" "lt 0.15"
+premise indented_dump.md     "ge 5000" "ge 0.35" "lt 0.15"
+premise handwritten_quote.md "ge 5000" "ge 0.35" "ge 0.30"
+premise crlf_ref.md          "ge 5000" "ge 0.35" "ge 0.15"
+premise crlf_caption.md      "ge 5000" "ge 0.35" "lt 0.15"
+premise crlf_headed.md       "ge 5000" "ge 0.35" "lt 0.15"
+FENCE="$( run --recall=zqfence --top-k=100 --max-tokens=400000 )"
+R=$R_SAVE
+expect_in(){ local out=$1 f=$2 want=$3 got
+    seen "$out" "$f" || { no "$f is not printed at all — cannot read its verdict"; return; }
+    got="$( note_for "$out" "$f" )"
+    [ "$got" = "$want" ] && ok "$f: ${want:-not demoted}" || no "$f: expected '${want:-no note}', got '${got:-no note}'"; }
+SF="[generated_demoted: size+fences]"
+expect_in "$FENCE" nest_dump.md         "$SF"
+expect_in "$FENCE" trunc_capture.md     "$SF"
+expect_in "$FENCE" info_closer_dump.md  "$SF"
+expect_in "$FENCE" tilde_dump.md        "$SF"
+expect_in "$FENCE" indented_dump.md     "$SF"
+expect_in "$FENCE" crlf_caption.md      "$SF"
+expect_in "$FENCE" crlf_headed.md       "$SF"
+expect_in "$FENCE" handwritten_quote.md ""
+expect_in "$FENCE" crlf_ref.md          ""
+expect_in "$FENCE" small_0.md           ""
+hdr "$FENCE" | grep -q ' generated_demoted=7 generated_demoted_named=5 ' \
+    && ok "fence corpus header: generated_demoted=7, 5 named" || no "fence corpus header: $( hdr "$FENCE" | head -c 300 )"
+
+# 10) a budget cut never hands back an open fence of the other kinds: a ````-fence holding ```js, and a ~~~
+#     fence. The protected-range pass shares the scanner, so the cut moves before the fence. RED on 66683e5f:
+#     the ```` body ends inside its fence (the inner ```js "closed" it), the ~~~ body was cut mid-fence.
+R4="$TMP/cut"; mkdir -p "$R4"
+python3 - "$R4" <<'PY' || no "cut fixture generator failed"
+import sys, os
+R = sys.argv[1]; L = "abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij zzz"
+for k in range(3): open(os.path.join(R, f"n{k}.md"), "w").write(f"# note {k}\nplain note {k}\n")
+open(os.path.join(R, "quad.md"), "w").write("# Quad fence zqcut\n\nIntro zqcut sentence here.\n\n````markdown\n```js\n"
+    + (L + "\n") * 3 + "```\n" + (L + "\n") * 300 + "````\n\nAfter.\n")
+open(os.path.join(R, "tilde.md"), "w").write("# Tilde fence zqtil\n\nIntro zqtil sentence here.\n\n~~~text\n"
+    + (L + "\n") * 300 + "~~~\n\nAfter.\n")
+PY
+open_fence_at_end(){ awk '/^━━ /{body=1; next} body{ s=$0; sub(/^[ \t]+/, "", s); c=substr(s,1,1); run=0
+      if (c=="`" || c=="~") { t=s; while (substr(t,1,1)==c) { run++; t=substr(t,2) } }
+      if (inside) { if (c==oc && run>=orun && t ~ /^[ \t\r]*$/) inside=0; next }
+      if (run>=3 && !(c=="`" && index(t,"`"))) { inside=1; oc=c; orun=run } }
+    END { print inside+0 }'; }
+for q in zqcut:quad.md zqtil:tilde.md; do
+    CUT="$( perl -e 'alarm 60; exec @ARGV' "$BIN" "$R4" --no-cache --recall="${q%%:*}" --max-tokens=600 --top-k=1 2>/dev/null )"; crc=$?
+    { [ "$crc" -eq 0 ] && grep -F '━━' <<<"$CUT" | grep -qF " ${q#*:} " && grep -qF 'truncated' <<<"$CUT" \
+      && [ "$( printf '%s\n' "$CUT" | open_fence_at_end )" = 0 ]; } \
+        && ok "${q#*:} cut under --max-tokens=600 is printed, truncated, and ends with every fence closed" \
+        || no "${q#*:} cut (rc=$crc): open fence at end or not printed: $( printf '%s' "$CUT" | tail -4 | head -c 300 )"
+done
+
+# 11) a demoted path holding a space (and " est_tokens=") is percent-encoded, so the withheld (--token-budget)
+#     header rewrites its OWN est_tokens= field, not the path. RED on 66683e5f: the path was rewritten.
+R5="$TMP/wh"; mkdir -p "$R5"
+k=0; while [ "$k" -lt 4 ]; do printf '# note %d\nzqwh plain note %d\n' "$k" "$k" > "$R5/n$k.md"; k=$(( k + 1 )); done
+printf '# odd\n<!-- @generated by x -->\nzqwh odd\n' > "$R5/a est_tokens=7.md"
+WH="$( perl -e 'alarm 60; exec @ARGV' "$BIN" "$R5" --no-cache --recall=zqwh --token-budget=5 2>/dev/null )"; wrc=$?
+{ [ "$wrc" -eq 3 ] && hdr "$WH" | grep -qF ' generated_demoted=1 generated_demoted_paths="a%20est_tokens=7.md" ' \
+  && hdr "$WH" | grep -qE ' est_tokens=[0-9]+ withheld_est_tokens=[0-9]+$'; } \
+    && ok "withheld header: path a%20est_tokens=7.md intact, its own est_tokens/withheld_est_tokens at the end (exit 3)" \
+    || no "withheld header (rc=$wrc, want 3): $( hdr "$WH" | head -c 400 )"
 
 # 8) determinism.
 grep -qF '━━' <<<"$ALL" && [ "$( run --recall=zqcommon --top-k=100 --max-tokens=400000 )" = "$ALL" ] \
