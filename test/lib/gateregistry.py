@@ -14,7 +14,7 @@ regression.sh), one stem per line. It must equal the absorb list plus the gates 
 name (`bash "$ROOT/test/NAME.sh"` on a non-comment line above the loop), and those two must not overlap.
 Otherwise a gate file exists that regression.sh never runs, CI runs a script no list registers, or a
 listed gate has no file. test/manifestcheck.sh runs this with mutation controls; scripts/merge_main.sh
-runs the shape half after a merge.
+runs both halves after a merge, with the same listing.
 
 Prints PASS/FAIL lines; exit 0 when clean, 1 on any FAIL.
 """

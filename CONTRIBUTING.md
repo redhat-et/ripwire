@@ -962,9 +962,14 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
    registers, a listed name with no file, and an unsorted list) — but first check whether a gate already
    owns the subject and can take another arm, which costs nothing outside its own file.
 5. **Never edit the published gate count by hand.** After adding a gate, run `python3 docs/gatecount_build.py`.
-   To bring main into your branch, run `scripts/merge_main.sh`: it settles the absorb list, the generated
-   counts and tables, regenerates them, and stops only on a real conflict (exit 3 lists binary-pinned files
-   to regenerate after a build). See below.
+   To bring main into your branch, run `scripts/merge_main.sh`: it settles the absorb list (including, once,
+   a branch still on the old one-line `for _g in …; do` list), count lines that differ only in a
+   generator-owned number, and the generated tables, then regenerates them. Anything else stops the merge
+   for you, including a hand-written number on a marked line; fix it, `git add`, and run
+   `scripts/merge_main.sh --continue` (not a plain `git commit`, which skips the generators). `--continue`
+   refuses staged conflict markers and an unregistered gate file. Exit 3 lists binary-pinned files to
+   regenerate after a build; the list is also in the merge commit message. `test/mergemaincheck.sh` pins
+   each of these. See below.
 6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
 7. Keep formatting churn out of logic commits.

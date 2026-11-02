@@ -710,6 +710,7 @@ for _g in \
     mentioncheck \
     mentionsverbcheck \
     mergechurncheck \
+    mergemaincheck \
     mergescoutcheck \
     mergescoutlonglinecheck \
     metalcheck \
