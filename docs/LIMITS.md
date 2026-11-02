@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 359 | 128 | 236 | **123** |
+| 360 | 128 | 236 | **124** |
 
-Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 359 + 7 is the 366 constants this generator parses out of `src/`.
+Plus 8 ranking and apportionment parameters, in their own table below: they are not caps, they
+are not counted as caps, and 360 + 8 is the 368 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 359 caps are classified
-(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 216 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 360 caps are classified
+(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 217 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -84,7 +84,7 @@ measurement that chose it; listing them beside truncation caps invites tuning th
 
 The **anchor** column is read from each constant's own trailing comment. **unsourced** means the
 comment cites no measurement — the value came from somewhere, but not from anything a reader can
-check. All 7 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
+check. All 8 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
 the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per
 `docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider's)`. Sourcing them
 means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator
@@ -97,12 +97,13 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 | `kCommonNameDefThreshold` | `5` | `src/graph.h` | **unsourced** | >5 defs of the same name ⇒ common (aider's) |
 | `kCoreBudgetShare` | `0.34` | `src/partition.h` | **unsourced** | — |
 | `kExemplarCcxCeilFactor` | `4` | `src/exemplar.h` | **unsourced** | — |
+| `kGeneratedMaxProseShare` | `0.15` | `src/docparse.h` | **unsourced** | of the document's bytes that are its own prose |
 | `kSpecificMinLen` | `8` | `src/graph.h` | **unsourced** | ≥8 chars …  (aider's) |
 | `kZoneDistanceThreshold` | `0.5` | `src/arch.h` | **unsourced** | \|A+I-1\| past this → classify into pain/useless |
 
 ## Caps, by file
 
-One table for each of the 128 files that declare a cap — the 359 caps counted above, and no parameter.
+One table for each of the 128 files that declare a cap — the 360 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -1096,6 +1097,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
+| `kRecallDemotedNamedMax` | `5` | — | — |
 
 ### `src/receiverevidence.h`
 

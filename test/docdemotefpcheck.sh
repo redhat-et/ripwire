@@ -27,7 +27,7 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 echo "docdemotefpcheck: BIN=$BIN"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
@@ -136,7 +136,7 @@ expect(){   # expect FILE NOTE  (NOTE "" = must be printed and carry no demotion
     local f=$1 want=$2 got
     seen "$ALL" "$f" || { no "$f is not printed at all — cannot read its verdict"; return; }
     got="$( note_for "$ALL" "$f" )"
-    [ "$got" = "$want" ] && ok "$f: ${want:-not demoted}" || no "$f: expected '${want:-no note}', got '${got:-no note}'"
+    if [ "$got" = "$want" ]; then ok "$f: ${want:-not demoted}"; else no "$f: expected '${want:-no note}', got '${got:-no note}'"; fi
 }
 expect ref_server.md        ""
 expect near_prose_above.md  ""
@@ -261,7 +261,7 @@ R=$R_SAVE
 expect_in(){ local out=$1 f=$2 want=$3 got
     seen "$out" "$f" || { no "$f is not printed at all — cannot read its verdict"; return; }
     got="$( note_for "$out" "$f" )"
-    [ "$got" = "$want" ] && ok "$f: ${want:-not demoted}" || no "$f: expected '${want:-no note}', got '${got:-no note}'"; }
+    if [ "$got" = "$want" ]; then ok "$f: ${want:-not demoted}"; else no "$f: expected '${want:-no note}', got '${got:-no note}'"; fi; }
 SF="[generated_demoted: size+fences]"
 expect_in "$FENCE" nest_dump.md         "$SF"
 expect_in "$FENCE" trunc_capture.md     "$SF"
