@@ -72,6 +72,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>        // std::tie — PythonMemberSite's (fileId, byte) order
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -596,6 +597,70 @@ inline std::uint32_t resolvePythonImport( std::string_view includerPath, std::st
         probeAll( pythonTierBases( tier, dir, tail, isRelative, fileIndex, ws, includerFileId ) );
     }
     return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;   // unique-or-degrade
+}
+
+// ── #478 gap 1: the SUBMODULE a from-import member names ─────────────────────────────────────────────
+// `from pkg import mod` has ONE Include, `pkg`, and Python loads pkg/mod.py for it whenever pkg/__init__.py does not bind `mod`
+// itself — and the file DEPENDS on pkg/mod.py whenever that file exists, because an __init__ that binds the name is the usual way
+// it re-exports the submodule. So the file graph gains an edge to the module `<from-module>.<member>` names, resolved by
+// resolvePythonImport exactly as `import pkg.mod` would be (same tiers, unique-or-degrade): no file → no edge, two → no edge.
+// The member is the name taken FROM the module, never the local alias (`from pkg import mod as m` → pkg.mod, never pkg.m), read
+// off the binds channel's Import record for the same statement: importedName "from:<member>" for a rename, else var. A plain
+// `import` (importedName "module") and a wildcard (no record) name no member. `from . import x` / `from .. import x` join without
+// a dot: `.` + `x` → `.x`.
+struct PythonMemberSite
+{
+    std::uint32_t fileId;
+    std::uint32_t byte;   // the from-import statement's start byte — the byte its Include is sited at (emitCapturedImport)
+    std::uint32_t bind;   // index into ing.bindings
+};
+
+inline std::vector<PythonMemberSite> pythonFromImportMembers( const IngestResult& ing )
+{
+    std::vector<PythonMemberSite> sites;
+    for( std::uint32_t i = 0; i < ing.bindings.size(); ++i )
+    {
+        const Binding& b = ing.bindings[ i ];
+        if( b.kind == LocalBindKind::Import && b.importedName != "module" && !b.typeName.empty() && b.fileId < ing.files.size()
+            && includeLangOf( rootRelPath( ing, b.fileId ) ) == IncludeLang::Python )
+        {
+            sites.push_back( { b.fileId, b.startByte, i } );
+        }
+    }
+    std::sort( sites.begin(), sites.end(), []( const PythonMemberSite& a, const PythonMemberSite& b )
+               { return std::tie( a.fileId, a.byte, a.bind ) < std::tie( b.fileId, b.byte, b.bind ); } );
+    return sites;
+}
+
+// the distinct member files one Python from-import Include reaches, in binding order; never the includer itself
+inline void pythonMemberFiles( const IngestResult& ing, const std::vector<PythonMemberSite>& sites, const Include& inc,
+                               const HashMap<std::string, std::uint32_t>& fileIndex, const WsIncludeCtx* ws, std::vector<std::uint32_t>& out )
+{
+    out.clear();
+    const auto [ lo, hi ] = std::equal_range( sites.begin(), sites.end(), PythonMemberSite{ inc.fileId, inc.byte, 0 },
+                                              []( const PythonMemberSite& a, const PythonMemberSite& b ) { return std::tie( a.fileId, a.byte ) < std::tie( b.fileId, b.byte ); } );
+    std::string module;
+    for( auto it = lo; it != hi; ++it )
+    {
+        const Binding& b = ing.bindings[ it->bind ];
+        if( b.typeName != inc.target )
+        {
+            continue;   // a record sited at this byte that is not this statement's module
+        }
+        const std::string_view member = b.importedName.starts_with( kPythonFromMemberMark )
+                                            ? std::string_view( b.importedName ).substr( kPythonFromMemberMark.size() ) : std::string_view( b.var );
+        module.assign( inc.target );
+        if( module.back() != '.' )
+        {
+            module.push_back( '.' );
+        }
+        module.append( member );
+        const std::uint32_t to = resolvePythonImport( rootRelPath( ing, inc.fileId ), module, fileIndex, ws, inc.fileId );
+        if( to != kNoFile && to != inc.fileId && std::find( out.begin(), out.end(), to ) == out.end() )
+        {
+            out.push_back( to );
+        }
+    }
 }
 
 // A relative JS/TS specifier may spell the RUNTIME file its source compiles to: TypeScript's node16/nodenext
@@ -4727,6 +4792,11 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
     std::optional<tsimport::ImportResolver> tsResolver;   // #220: built on the first bare TS/JS specifier that missed
+    // #478 gap 1: a from-import member's submodule is a DEPENDENCY of the file and every dependency view keeps it, but it is not
+    // import evidence for a bare call — `from pkg import mod` makes no name of mod visible unqualified — so, like an
+    // Include::isValueUse record, buildGraph's call narrow (forCallNarrow) leaves it out and the call graph is unchanged.
+    const std::vector<PythonMemberSite> memberSites = forCallNarrow ? std::vector<PythonMemberSite>{} : pythonFromImportMembers( ing );
+    std::vector<std::uint32_t>          memberFiles;
     for( const Include& inc : ing.includes )
     {
         if( inc.fileId >= F )
@@ -4782,15 +4852,30 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
         {
             to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
         }
-        if( to == kNoFile || to == inc.fileId )
+        if( to != kNoFile && to != inc.fileId )   // unresolved or self-include → contributes nothing
         {
-            continue; // unresolved or self-include → contributes nothing
+            edgeFrom.push_back( inc.fileId );
+            edgeTo.push_back( to );
+            if( lazyPairsOut != nullptr )
+            {
+                recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+            }
         }
-        edgeFrom.push_back( inc.fileId );
-        edgeTo.push_back( to );
-        if( lazyPairsOut != nullptr )
+        if( memberSites.empty() )
         {
-            recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
+            continue;
+        }
+        // #478 gap 1: the submodules a from-import's members name — read even when the package itself did not resolve (a
+        // namespace package has no __init__.py). Left out of the call narrow (memberSites is empty there): see its note above.
+        pythonMemberFiles( ing, memberSites, inc, fileIndex, ws, memberFiles );
+        for( const std::uint32_t m : memberFiles )
+        {
+            edgeFrom.push_back( inc.fileId );
+            edgeTo.push_back( m );
+            if( lazyPairsOut != nullptr )
+            {
+                recordLazyPair( *lazyPairsOut, inc.fileId, m, inc.isLazy );
+            }
         }
     }
     if( extrasOut != nullptr )
