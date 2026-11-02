@@ -430,9 +430,7 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     {
         return false;
     }
-    const auto ends = [ & ]( std::string_view e )
-    { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
-    return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
+    return endsWithLowerAscii( p, ".sh" ) || endsWithLowerAscii( p, ".bash" ) || endsWithLowerAscii( p, ".zsh" );
 }
 
 // ---- P2.2 (agent-friction round, 2026-08-29): self-registering test/benchmark macros -------------------
@@ -3796,9 +3794,9 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // The producer identity already keeps this build's blobs apart; bumped 22 -> 23 so the history above stays complete.
 // v24 (2026-10-25, train 36) — #228's v23 was the PR's placeholder; renumbered above every live value (main / train 35 / every
 // other ref 22, #437 23). No further shape change.
-// v25 (2026-11-02, #494: Rust Drop::drop) — no blob shape change; the dead SET's inputs moved. languageInvokedSymbol, which
-// isDeadCandidate calls, now exempts a Rust method named drop (the compiler runs it at scope exit). Bumped 24 -> 25 so the history
-// above stays complete. Lane note: v25 is this PR's number; a second scheme bump from another open PR renumbers on the merge.
+// v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
+// other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
+// dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
 // v26 (2026-11-02, #494 review) — the dead SET's inputs moved again: queries/rust/tags.scm captures a method only inside an impl or
 // trait body, so a free fn in a `mod` is a Function, not a Method the Drop::drop exemption could hide. Renumbered above main's
 // v25 (land-472); whichever of the two open scheme bumps merges second renumbers again. kParserVer 284 also invalidates v25 blobs.
