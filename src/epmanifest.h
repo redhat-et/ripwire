@@ -1080,6 +1080,24 @@ inline bool epTaskCuesBinary( std::string_view task, std::span<const std::string
     return false;
 }
 
+// A group whose every entry is implicit rides only on a binary cue in the task (epTaskCuesBinary): quiet without one.
+inline bool epGroupQuiet( const Manifest& man, const std::string& group, std::string_view task )
+{
+    std::vector<const std::string*> names;
+    for( const EpEntry& e : man.entries )
+    {
+        if( e.group == group && !e.implicit )
+        {
+            return false;
+        }
+        if( e.group == group )
+        {
+            names.push_back( &e.name );
+        }
+    }
+    return !epTaskCuesBinary( task, names );
+}
+
 // A (manifest, group) the answer prints.
 struct EpPick
 {
@@ -1091,23 +1109,6 @@ struct EpPick
 inline std::vector<EpPick> pickEpGroups( const std::vector<Manifest>& manifests, const std::vector<std::vector<EpTarget>>& targets,
                                          std::span<const NodeId> shown, std::string_view task, std::size_t& total )
 {
-    // a group whose every entry is implicit rides only on a binary cue in the task (epTaskCuesBinary)
-    const auto quiet = [ & ]( std::size_t m, const std::string& g )
-    {
-        std::vector<const std::string*> names;
-        for( const EpEntry& e : manifests[m].entries )
-        {
-            if( e.group == g && !e.implicit )
-            {
-                return false;
-            }
-            if( e.group == g )
-            {
-                names.push_back( &e.name );
-            }
-        }
-        return !epTaskCuesBinary( task, names );
-    };
     std::vector<EpPick> picks;
     for( const NodeId id : shown )
     {
@@ -1117,7 +1118,7 @@ inline std::vector<EpPick> pickEpGroups( const std::vector<Manifest>& manifests,
             {
                 const std::string& g    = manifests[m].entries[k].group;
                 const auto         same = [ & ]( const EpPick& p ) { return p.m == m && p.group == g; };
-                if( targets[m][k].def == id && !std::ranges::any_of( picks, same ) && !quiet( m, g ) )
+                if( targets[m][k].def == id && !std::ranges::any_of( picks, same ) && !epGroupQuiet( manifests[m], g, task ) )
                 {
                     picks.push_back( EpPick{ m, g } );
                 }
