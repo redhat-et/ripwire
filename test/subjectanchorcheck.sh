@@ -138,7 +138,7 @@ printf 'def new(x):\n    return x\n' > "$FL/a/words.py"
 A="$( ask "$FL" 'flood_name new' )"
 hasnt "$( route "$A" )" 'dropped:' "N1 flood: 14 namesakes prove nothing, no reading"
 A="$( ask "$FL" 'family_name new' )"
-has "$( route "$A" )" 'dropped: new(1-defs)' "N1 family: one definition per backend is still a name"
+hasnt "$( route "$A" )" 'dropped:' "N1 family: five namesakes are not one function (the gate), the map answers"
 A="$( ask "$PY" 'helper_only_tests new parameter' )"
 hasnt "$( route "$A" )" 'dropped:' "N2 test-only: the words stay (a test anchor leaves the route as it was; it reads low)"
 A="$( ask "$PY" 'helper_only_tests zznope sturdy' )"
@@ -326,6 +326,78 @@ printf 'namespace a { int SoloThing(int v); }\n' > "$M4/aaa/a.h"
 printf 'namespace b { int SoloThing(int v) { return v + 41; } }\n' > "$M4/zzz/b.cc"
 printf 'namespace a { int SoloThing(int); }\nint userOne(){ return a::SoloThing(1); }\n' > "$M4/zzz/u.cc"
 A="$( ask "$M4" 'SoloThing fresh parameter' )"; hasnt "$( route "$A" )" 'dropped:' "M4 declaration in a, definition in b: no flip"
+# ── FIX 3 (review rv-subject-anchor-delta2): the gate runs for EVERY flip, and tests the outcome ──
+# MF1: natural wording. `work` is itself a symbol (one definition), so the WHOLE route is name-exact and the dropped word is a plain-word
+# anchor; before this fix that path skipped M1-M5 and printed a prototype at high. The arms above pass only because their fill word makes
+# the route decline; these reach the gate with question wording, a task verb and a bare tail.
+wfx(){ d="$( mkfx "w_$1" )"; printf 'export function work(a: number) { return a; }\nexport function fix(a: number) { return a; }\nexport function bug(a: number) { return a; }\n' > "$d/src/work.ts"; printf '%s' "$d"; }
+WQ=( 'how does SoloThing work' 'fix a bug in SoloThing' 'SoloThing work' )
+refused(){ # $1 fixture, $2 label: every wording keeps a ranked map: no flip, no bare-symbol route
+    local q A
+    for q in "${WQ[@]}"; do
+        A="$( ask "$1" "$q" )"
+        hasnt "$( route "$A" )" 'name-exact' "$2 [$q]: no name-exact route"
+        hasnt "$( route "$A" )" 'dropped:' "$2 [$q]: nothing dropped"
+        has "$( route "$A" )" 'subtoken+body' "$2 [$q]: the ranked map answers"
+    done
+}
+W1="$( wfx m1 )"; python3 - "$W1/cc/t.h" "$W1/cc/u.cc" <<'X2'
+import sys
+open(sys.argv[1],'w').write('int SoloThing(int a);\nint SoloThing(int a) {\n' + '    a = a + 1;\n'*700 + '    return a;\n}\n')
+open(sys.argv[2],'w').write('#include "t.h"\nint userOne(){ return SoloThing(1); }\n')
+X2
+refused "$W1" "W-M1 declaration + a ~10 KB definition"
+W2="$( wfx m2 )"; printf 'int SoloThing(int a);\n' > "$W2/cc/t.h"; printf '%b' "$CU" > "$W2/cc/u.cc"
+refused "$W2" "W-M2 C++ prototype only"
+W2T="$( wfx m2t )"; printf 'export declare function SoloThing(a: number): number;\n' > "$W2T/src/thing.d.ts"; printf "import {SoloThing} from './thing';\nexport function userOne() { return SoloThing(1); }\n" > "$W2T/src/user.ts"
+refused "$W2T" "W-M2 TS declare function only"
+W2I="$( wfx m2i )"; mkdir -p "$W2I/j"; printf 'interface I { int SoloThing(int a); }\n' > "$W2I/j/I.java"; printf 'class U { int userOne(I i) { return i.SoloThing(1); } }\n' > "$W2I/j/U.java"
+refused "$W2I" "W-M2 Java interface method only"
+W2G="$( wfx m2g )"; mkdir -p "$W2G/g"; printf 'package g\ntype I interface {\n\tSoloThing(a int) int\n}\n' > "$W2G/g/i.go"; printf 'package g\nfunc userOne(i I) int { return i.SoloThing(1) }\n' > "$W2G/g/u.go"
+refused "$W2G" "W-M2 Go interface method only"
+W5="$( wfx m5 )"; printf 'export function SoloThing(a: number) { return a + 41; }\n' > "$W5/src/thing.ts"
+refused "$W5" "W-M5 no caller"
+W4="$( wfx m4 )"; mkdir -p "$W4/aaa" "$W4/zzz"
+printf 'namespace a { int SoloThing(int v); }\n' > "$W4/aaa/a.h"; printf 'namespace b { int SoloThing(int v) { return v + 41; } }\n' > "$W4/zzz/b.cc"
+printf 'namespace a { int SoloThing(int); }\nint userOne(){ return a::SoloThing(1); }\n' > "$W4/zzz/u.cc"
+refused "$W4" "W-M4 declaration in a, definition in b"
+# neighbour shapes the review did not name: a Python def with no caller, a Rust trait method with no body
+WP="$( wfx py )"; mkdir -p "$WP/py"; printf 'def solo_thing(a):\n    return a + 41\n' > "$WP/py/s.py"
+for q in 'how does solo_thing work' 'fix a bug in solo_thing' 'solo_thing work'; do
+    A="$( ask "$WP" "$q" )"; hasnt "$( route "$A" )" 'dropped:' "W py no caller [$q]: no flip"
+done
+WR="$( wfx rs )"; mkdir -p "$WR/rs"; printf 'trait T { fn solo_thing(&self, a: i32) -> i32; }\n' > "$WR/rs/t.rs"; printf 'fn user_one(t: &dyn T) -> i32 { t.solo_thing(1) }\n' > "$WR/rs/u.rs"
+for q in 'how does solo_thing work' 'fix a bug in solo_thing' 'solo_thing work'; do
+    A="$( ask "$WR" "$q" )"; hasnt "$( route "$A" )" 'dropped:' "W rust trait method only [$q]: no flip"
+done
+# neighbour: SEVERAL exact names are a name-exact set; the set form of the gate (every name has a body) still refuses prototypes
+WS="$( wfx set )"; printf 'int SoloOne(int a);\nint SoloTwo(int a);\n' > "$WS/cc/t.h"; printf '#include "t.h"\nint userOne(){ return SoloOne(1) + SoloTwo(2); }\n' > "$WS/cc/u.cc"
+A="$( ask "$WS" 'SoloOne SoloTwo work' )"; hasnt "$( route "$A" )" 'dropped:' "W set of two prototypes + work: no flip"
+WS2="$( wfx set2 )"; printf 'int SoloOne(int a) { return a + 1; }\nint SoloTwo(int a) { return a + 2; }\n' > "$WS2/cc/t.cc"
+A="$( ask "$WS2" 'SoloOne SoloTwo work' )"; has "$( route "$A" )" 'dropped: work' "W set control: two bodied names + work still flips"
+# controls: one function, a body that fits, a caller: the natural wording still flips and the body and callers print
+WC="$( wfx ctl )"; printf 'export function SoloThing(a: number) { return a + 41; }\nexport function soloUser() { return SoloThing(1); }\n' > "$WC/src/thing.ts"
+for q in "${WQ[@]}"; do
+    A="$( ask "$WC" "$q" )"
+    has "$( route "$A" )" 'name-exact(SoloThing)' "W control [$q]: flips to the symbol"
+    has "$A" 'n="SoloThing"><![CDATA[function SoloThing' "W control [$q]: the body prints"
+    has "$( blk "$A" )" 'soloUser' "W control [$q]: the callers print"
+done
+# MF2: the outcome, not a flag list. Every mode that prints no body, or no callers, keeps the map; the same call in the default mode flips.
+mode(){ ( cd "$FX" && "$BIN" "$FX" --no-cache '--for=SoloThing fresh parameter' "$@" 2>/dev/null ) </dev/null; }
+A="$( mode )"; has "$( route "$A" )" 'dropped:' "MF2 control: the default mode flips"
+A="$( mode --json )"
+case "$A" in *'name-exact(SoloThing)'*) no "MF2 --json flipped to a signature row with no body";; *) ok "MF2 --json: no flip";; esac
+case "$A" in *'dropped:'*) no "MF2 --json names dropped words";; *) ok "MF2 --json: nothing dropped";; esac
+A="$( mode --detail=1 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --detail=1: no flip (bodies, no callers hop)"
+A="$( mode --token-budget=2000 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --token-budget: no flip"
+# neighbours not named by the review
+A="$( mode --format=candidates )"
+case "$A" in *'dropped:'*|*'name-exact(SoloThing)'*) no "MF2 --format=candidates flipped";; *) ok "MF2 --format=candidates: no flip";; esac
+A="$( mode --detail=2 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --detail=2: no flip"
+A="$( mode --json --signatures-only )"
+case "$A" in *'name-exact(SoloThing)'*) no "MF2 --json --signatures-only flipped";; *) ok "MF2 --json --signatures-only: no flip";; esac
+A="$( mode --auto-bodies )"; has "$( route "$A" )" 'dropped:' "MF2 --auto-bodies prints bodies and callers on the name-exact route: still flips"
 # determinism + well-formed
 A1="$( ask "$PY" 'prepare_setup_platform new parameter' )"; A2="$( ask "$PY" 'prepare_setup_platform new parameter' )"
 if [ "$( printf '%s' "$A1" | sed -E 's/ at="[^"]*"//' )" = "$( printf '%s' "$A2" | sed -E 's/ at="[^"]*"//' )" ]; then ok "determinism"; else no "determinism"; fi

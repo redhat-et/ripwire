@@ -122,9 +122,12 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // chosen ONCE here and reused below rather than classified twice — chooseForRanker is pure over
     // (ing, task), so hoisting it is byte-neutral by construction.
     const bool        routeOn      = !cfg.noRoute;
-    // --signatures-only prints no body, and an explicit --token-budget is a hard ceiling the single-anchor allowance never sees:
-    // neither serves what a flip trades the ranked map for (subjectanchor.h flipServesBodyAndCallers)
-    const bool        servesBodies = !cfg.signaturesOnly && cfg.tokenBudget == 0;
+    // A flip trades the ranked map for the anchor's body AND its <callers>; test that the call prints both, not a list of flags.
+    // The auto-bodies bundle (autoBundleMode below) is the one posture that serves them: --signatures-only, --detail=N (bodies, no
+    // callers hop), --json, --format=columnar|candidates and an explicit --token-budget (a hard ceiling the single-anchor allowance
+    // never sees) each print one without the other (subjectanchor.h flipServesBodyAndCallers)
+    const bool        servesBodies = cfg.detail == 0 && !cfg.signaturesOnly && !cfg.json && !cfg.columnar && !cfg.candidates && cfg.tokenBudget == 0
+                                     && rw::forCallerHopOn();
     SubjectRoute      subjectRoute = routeOn ? chooseSubjectRoute( ing, g, task, servesBodies ) : SubjectRoute{};
     const RouteChoice& rc          = subjectRoute.route;
     // SUBJECT-ANCHOR: the ranker and the mention anchor read the names alone when the words were dropped from the route

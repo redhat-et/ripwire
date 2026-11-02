@@ -479,6 +479,43 @@ inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, c
     return attributeOneHopAnswer( ing, g, targets, rows, /*towardMatches=*/true ).groups.size() == 1;
 }
 
+// The conceptual route chooseForRanker gives a task of this many content words: what a refused flip returns to when the whole route
+// was name-exact on a plain word (no declined route exists to fall back on).
+inline RouteChoice conceptualRouteFor( std::string_view task )
+{
+    std::size_t nWords = 0;
+    for( const std::string_view w : splitRouteWords( task ) )
+    {
+        nWords += isRouteStopword( routeLower( w ) ) ? 0u : 1u;
+    }
+    RouteChoice rc;
+    rc.which  = LexMode::SubtokenBody;
+    rc.reason = nWords >= 3 ? "subtoken+body" : "subtoken+body:broad";
+    return rc;
+}
+
+// Does every name a name-exact route anchors have a definition that carries a body (not a prototype, an interface method or a
+// `declare function`)? The set form of flipServesBodyAndCallers' M2.
+inline bool everyAnchorHasBody( const IngestResult& ing, const RouteChoice& bare )
+{
+    if( bare.anchorDefs.empty() )
+    {
+        return false;
+    }
+    return std::ranges::all_of( bare.anchorDefs, [ & ]( const RouteAnchorDef& a )
+    {
+        for( NodeId id = 0; id < NodeId( ing.symbols.size() ); ++id )
+        {
+            const Symbol& s = ing.symbols[id];
+            if( s.kind != SymKind::Section && s.fileId == a.fileId && routeLower( s.name ) == a.lowerName && isDefinitionNotDeclaration( s ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    } );
+}
+
 // The route the subject reading picks, before the CONFIDENCE-ANCHOR check. `servesBodiesAndCallers`: the surface prints the anchor's
 // body and <callers> (the CLI --for does; the MCP `for` verb serves signatures only), so it may trade a ranked map for them.
 inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
@@ -503,9 +540,20 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
         // with no lead, where the full route kept one. A name-exact route had no map to lose; a declined one does, so it flips only
         // where the surface prints the body AND the callers (flipServesBodyAndCallers); otherwise the map stands and the callers ride.
         bool flip = bare.which == LexMode::NameExact && routeAnchorHasSourceDef( ing, bare, reading.reduced );
-        if( flip && !plainAnchored )
+        if( flip )
         {
-            flip = servesBodiesAndCallers && flipServesBodyAndCallers( ing, g, bare );
+            // EVERY flip, a plain word that is itself a symbol included ("how does X work": `work` is a definition in every large
+            // repo): the route is name-exact either way, but only the gate says the body and the callers it promises print.
+            // ONE exact symbol: the full gate (one function, a real body that fits, a caller). Several names (`first_caller second_caller
+            // work`): the route is a name-exact set that promises each name's body but no one function's callers, so the gate there is
+            // the part that reads as a set: every name has a definition that carries a body.
+            flip = servesBodiesAndCallers && ( reading.exact.size() == 1 ? flipServesBodyAndCallers( ing, g, bare ) : everyAnchorHasBody( ing, bare ) );
+            if( !flip && plainAnchored )
+            {
+                // The whole route anchored the plain word too (`work` and X), which was never true, and the gate refuses the bare
+                // symbol: neither name-exact answer is one to give. The conceptual map is the answer, as on a declined descriptive subject.
+                out.route = conceptualRouteFor( task );
+            }
         }
         if( flip )
         {
