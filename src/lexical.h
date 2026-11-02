@@ -2732,11 +2732,13 @@ struct ForConfidence
 // stamp is the same defect wearing a different hat). marginPct is left as the TRUE measured drop even
 // when declined — 0 means "no cliff found" (non-negotiable #3: a zero must mean none found, never none
 // exists), and a real 25% tie-break drop is not that; the note's extra clause is what says not to trust it.
-inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline )
+// anchorNoSource (CONFIDENCE-ANCHOR, subjectanchor.h): a name-exact route whose anchor is served from a test, doc or data file. The
+// drop may be real, but it says the name matched, not that the answer is here: low, and route= says why.
+inline ForConfidence deriveForConfidence( const rw::AdaptiveCut& cut, int servedTopN, bool homonymDecline, bool anchorNoSource = false )
 {
     ForConfidence out;
     const bool servedComplete = cut.positiveHits > 0 && cut.positiveHits <= std::size_t( servedTopN );
-    out.level     = homonymDecline ? "low" : ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
+    out.level     = ( homonymDecline || anchorNoSource ) ? "low" : ( !cut.hitCeiling || servedComplete ) ? "high" : "low";
     out.marginPct = cut.hitCeiling ? 0 : cut.dropPct;
     char attrBuf[ 48 ];
     rw::formatTo( attrBuf, sizeof( attrBuf ), " confidence=\"{}\" margin_pct=\"{}\"", out.level, out.marginPct );
