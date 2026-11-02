@@ -965,6 +965,7 @@ for _g in \
     stdqualcheck \
     strkerncheck \
     structlayoutcheck \
+    subjectanchorcheck \
     sublistcountcheck \
     subscriptopcheck \
     substrfiltercheck \
