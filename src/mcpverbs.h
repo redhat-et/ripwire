@@ -4521,6 +4521,9 @@ struct QualityDeltaOutcome
     // the JSON, under the same absent-means-the-ordinary-archived-tree rule as the CLI, so mcpclidiffcheck's
     // key-set lens stays satisfied.
     const char*                       headBasis             = nullptr;
+    // hwh-fix4 (N1): the CLI root's unread_history= twin (quality::historyUnreadDisclosure), present-only. An MCP client has no exit
+    // code, so this field is the only way it learns that "gating":0 is a floor over history that could not be read.
+    std::string                       historyJson;
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -4645,8 +4648,11 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     auto       acks = rw::quality::readAckRecords( qualityAcksPath( root ) );
     const auto heal = rw::quality::healIdentity( baseSel.snapshot, acks, ing, g, root, root, /*wantContentIds=*/false );
 
+    rw::quality::HistoryUnread historyUnread;
     oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root, {}, rw::kDefaultMaxFileBytes, &oc.registerMacroExcluded, &oc.apiNewSurface,
-                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded );
+                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread );
+    historyUnread.renames = heal.renames.refusedPartial && baseSel.marker == std::string_view( "sidecar" );   // the CLI's own rule
+    oc.historyJson = rw::quality::historyUnreadDisclosure( historyUnread ).second;
 
     // signal-to-noise round: honor the per-finding ack ratchet exactly like the CLI — the acks sidecar is
     // root-qualified (same SIDECAR LOCATION discipline as the baseline), suppression is reported via `acked`.
@@ -4737,6 +4743,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
                     + oc.identityJson
                     // #228 — the CLI root's head_basis= twin, present-only: absent means the archived HEAD tree.
                     + ( oc.headBasis == nullptr ? std::string() : std::string( ",\"head_basis\":\"" ) + mcpdetail::jsonEscape( oc.headBasis ) + "\"" )
+                    + oc.historyJson
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )

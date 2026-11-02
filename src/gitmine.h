@@ -2322,8 +2322,16 @@ inline std::int64_t gitHeadCommitEpoch( const std::string& root )
     return epoch > 0 ? epoch : 0;
 }
 
-inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::string& root, const IngestResult& ing, std::uint32_t days )
+// `windowUnreadOut` (hwh-fix4, N1): set when the walk ended (budget, failed or not started git) before it passed the
+// window floor, so a count can be short of the truth and a file under the threshold is not known to be cold. A walk
+// that ends past the floor read every window commit and does not set it; no history at all (no HEAD epoch) does not.
+inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::string& root, const IngestResult& ing, std::uint32_t days,
+                                                                  bool* windowUnreadOut = nullptr )
 {
+    if( windowUnreadOut )
+    {
+        *windowUnreadOut = false;
+    }
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitFileCommitCountsInDayWindow (short-horizon churn)" );
     std::vector<std::uint32_t> counts( ing.files.size(), 0 );
     if( ing.files.empty() )
@@ -2347,8 +2355,10 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
     // committer epoch in hand. A commit counts once per file it touches, iff its epoch is within
     // [cutoff, headEpoch].
     std::vector<std::uint32_t> cur;   // this commit's resolved fileIds (dedup before tally)
-    forEachGitLogRecord( root, "", [ & ]( const GitLogRecord& rec )
+    bool passedFloor = false;         // a record older than the window was read: every window commit came before it
+    const GitLogWalk walk = forEachGitLogRecord( root, "", [ & ]( const GitLogRecord& rec )
     {
+        passedFloor = passedFloor || ( rec.committerTs > 0 && rec.committerTs < cutoff );
         if( rec.committerTs < cutoff || rec.committerTs > headEpoch )
         {
             return;   // out of window: this commit's files do not count
@@ -2369,6 +2379,10 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
         }
         cur.clear();
     } );
+    if( windowUnreadOut )
+    {
+        *windowUnreadOut = ( walk.unread || walk.cut != GitWalkCut::None ) && !passedFloor;
+    }
     return counts;
 }
 

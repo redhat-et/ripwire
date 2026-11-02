@@ -522,6 +522,7 @@ struct DeltaBasis
     // (quality::backfillCloneAckProvenance) on the --quality-ack path; a read-only --quality-delta fills it
     // and never looks at it, which keeps the two runs' reported findings identical.
     std::vector<rw::quality::CloneIdiomFact> cloneIdioms;
+    rw::quality::HistoryUnread               historyUnread;   // hwh-fix4 (N1): history a gating kind could not read (unread_history=, exit 6)
 };
 
 // The REF-PAIR floor's comparison, once loadRefPairDelta has both sides: the base snapshot is the floor, tree B the judged
@@ -548,7 +549,7 @@ void refPairBasis( const rw::Config& cfg, const std::string& root, RefPairDelta&
     out.regs    = quality::computeDelta( refs.target().ing, refs.target().g, out.baseSel.snapshot,
                                          out.deltaRoot, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
                                          cfg.qualityAck ? &out.cloneIdioms : nullptr, &out.declinedCallExcluded, &out.valueRefExcluded,
-                                         quality::KindScope{ refs.kinds, refs.macroOverride() } );
+                                         quality::KindScope{ refs.kinds, refs.macroOverride() }, &out.historyUnread );
 }
 
 // Returns an EXIT CODE when there is nothing to compare against (already reported), nullopt when `out` holds
@@ -653,7 +654,9 @@ std::optional<int> resolveDeltaBasis( const MainDispatch& d, const std::string& 
     out.healing = quality::healIdentity( out.baseSel.snapshot, out.acks, d.ing, d.g,
                                          std::string( cfg.rootPath ), root, cfg.qualityAck );
     out.regs = quality::computeDelta( d.ing, d.g, out.baseSel.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, &out.registerMacroExcluded, &out.apiNewSurface,
-                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded );
+                                      &out.cloneIdioms, &out.declinedCallExcluded, &out.valueRefExcluded, quality::KindScope{}, &out.historyUnread );
+    // hwh-fix4 (N1): against a pinned sidecar the rename record re-files baseline rows; refused on a partial clone, it is unread history
+    out.historyUnread.renames = out.healing.renames.refusedPartial && out.baseSel.marker == std::string_view( "sidecar" );
     return std::nullopt;
 }
 
@@ -1060,7 +1063,7 @@ inline constexpr const char* kQdRowLegend =
     "clone kinds; omitted, never faked, when none resolves). churn= and surface= are per-kind "
     "classification facets (short-horizon-churn's self/ambient split; api-surface's new-symbol/"
     "contract-change tier). churn= facets never gate alone: the kind gates only on 2+ COMMITTED in-window "
-    "rewrites of the edited lines. "
+    "rewrites of the edited lines; churn=\"unknown\": that blame could not be read (see unread_history=). "
     "Every row the header's gating= counter counts also carries a gating attribute "
     "set to 1 — marked positively, never by the ABSENCE of sev or origin. ";
 
@@ -1179,6 +1182,7 @@ struct QualityDeltaLegendParts
     bool                                          memoryStopped           = false;   // ... memory_stop= (and memory_pressure= when it was pressure)
     bool                                          memoryPeak              = false;   // ... memory_peak= (any range answer whose peak went over the limit)
     bool                                          memorySkippedShare      = false;   // ... memory_skipped= (skipped_why="selector,memory")
+    bool                                          historyUnread           = false;   // hwh-fix4 (N1): unread_history= is on the root
 };
 
 // qd-memory-degrade — present-only: each rides only with the attributes it defines. No double dash anywhere in them
@@ -1208,6 +1212,16 @@ inline constexpr const char* kQdMemoryStopLegend =
     "memory_stop= names the guard's stop that sent this answer to the changed files: crawl (the crawl line, an eighth of the "
     "limit grown) or parse (half the limit) is a soft line, memory_pressure=1 when the OS pressure signal stopped it instead, "
     "hard is the limit itself; a soft stop does not show the full need exceeds the limit. ";
+// hwh-fix4 (N1) — present-only, with unread_history= on the root.
+inline constexpr const char* kQdHistoryUnreadLegend =
+    "unread_history= names git history a gating kind needed and could not read (a partial clone refuses to download, a failed "
+    "blame, a git walk cut by its budget): churn-window (the window commit counts were cut, so a file under the bar is not known "
+    "to be under it), churn-tree (the window reference tree was not read: no short-horizon-churn row could be judged), "
+    "churn-blame (rows with churn=\"unknown\": the edited lines' blame failed, so self/ambient and gating are not known), renames "
+    "(the floor is a pinned sidecar and the git rename record was not read: a baseline row under a renamed path reads as a new "
+    "symbol, which does not gate). Rows "
+    "it would have produced may be missing, so gating= is a floor: EXIT 6 when no row gates, never 0. Full history (a full clone, "
+    "or the missing blobs fetched) answers it. ";
 inline constexpr const char* kQdMemoryPeakLegend =
     "memory_peak= is this process's peak footprint when it went OVER the memory limit: the answer and its exit code are what "
     "they would be without it (complete, or the changed-files answer ingest_scope= names), but the last stretch of the "
@@ -1362,6 +1376,10 @@ inline void emitQualityDeltaLegend( const QualityDeltaLegendParts& p, std::FILE*
     {
         std::fputs( kQdMemoryPeakLegend, out );
     }
+    if( p.historyUnread )
+    {
+        std::fputs( kQdHistoryUnreadLegend, out );
+    }
     if( p.staleCollapsed )
     {
         // idea #11: the collapse, named where its attributes are. No flag spelling (a double dash is illegal in a comment).
@@ -1461,6 +1479,7 @@ struct DirtyPinVerdict
 {
     std::size_t              absorbed = 0;    // gating findings this tree already holds vs HEAD
     std::string              firstRow;        // the first of them, spelled for a human ("" when absorbed==0)
+    rw::quality::HistoryUnread historyUnread;   // hwh-fix4 (N1): history the check needed and could not read, so absorbed= is a floor
 };
 
 DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::string& acksFile )
@@ -1482,7 +1501,8 @@ DirtyPinVerdict inspectDirtyBaselinePin( const MainDispatch& d, const std::strin
     gtl::btree_map<std::string, quality::AckRecord> acks = quality::readAckRecords( acksFile );
     quality::healIdentity( basis.snapshot, acks, d.ing, d.g, std::string( cfg.rootPath ), root, /*wantContentIds=*/false );
     std::vector<quality::Regression> regs =
-        quality::computeDelta( d.ing, d.g, basis.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes );
+        quality::computeDelta( d.ing, d.g, basis.snapshot, cfg.rootPath, cfg.excludes, cfg.maxFileBytes, nullptr, nullptr, nullptr, nullptr, nullptr,
+                               quality::KindScope{}, &verdict.historyUnread );
     quality::applyAckRatchet( regs, acks );
 
     for( const quality::Regression& r : regs )
@@ -1517,6 +1537,16 @@ int runQualityBaselinePin( const MainDispatch& d, const std::string& baselineFil
                               "  Commit the tree first, or pass --allow-dirty to pin anyway (the sidecar then records the {} absorbed, and every\n"
                               "  report against it carries baseline_absorbed=\"{}\").\n",
                       pin.absorbed, pin.firstRow.c_str(), pin.absorbed, pin.absorbed );
+        return 1;
+    }
+    if( pin.absorbed == 0 && pin.historyUnread.any() && !d.cfg.allowDirty )
+    {
+        // hwh-fix4 (N1): "absorbs nothing" was not established — the check could not read the history a gating kind needs, and a
+        // pin is the one write that would make a missed finding permanent (every later --quality-delta reads against it).
+        rw::emitTo( stderr, "ripwire: --quality-baseline: could not tell whether this tree holds gating findings against HEAD: git history the check needs "
+                            "could not be read ({}; a partial clone does not download it) — pinning here could absorb one unseen.\n"
+                            "  Run it in a full clone or with the history fetched, commit the tree first, or pass --allow-dirty to pin anyway.\n",
+                      quality::historyUnreadDisclosure( pin.historyUnread ).first.substr( 1 ).c_str() );
         return 1;
     }
     const quality::Snapshot snap  = quality::computeSnapshot( d.ing, d.g, d.cfg.rootPath );
@@ -1707,10 +1737,11 @@ void emitMemoryLines( const KindsDisclosure& kd, const RefPairDelta& refs )
 }
 
 // The exit code every --quality-delta emitter returns: 2 when a row gates; a changed-files answer with no gating row is 6
-// (a partial answer, never a clean pass — the kinds it skipped could still gate); otherwise 0.
-int qualityDeltaExit( std::size_t gatingCount, const RefPairDelta& refs ) noexcept
+// (a partial answer, never a clean pass — the kinds it skipped could still gate), and so is an answer whose gating history
+// could not be read (hwh-fix4, N1: unread_history= — a refused tree or blame is not "nothing got worse"); otherwise 0.
+int qualityDeltaExit( std::size_t gatingCount, const RefPairDelta& refs, bool historyUnread ) noexcept
 {
-    return gatingCount > 0 ? 2 : refs.degraded ? 6 : 0;
+    return gatingCount > 0 ? 2 : ( refs.degraded || historyUnread ) ? 6 : 0;
 }
 
 std::optional<int> runQualityDelta( const MainDispatch& d )
@@ -2079,6 +2110,13 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         // what it rested on; building the XML and JSON halves in one place is what keeps the two surfaces
         // from disclosing different things about the same run.
         const auto [ identityAttrs, identityJson ] = quality::identityDisclosure( basis.healing );
+        // hwh-fix4 (N1): the history a gating kind could not read, one builder for every emitter (absent when all was read)
+        const auto [ historyAttrs, historyJson ] = quality::historyUnreadDisclosure( basis.historyUnread );
+        if( gatingCount == 0 && basis.historyUnread.any() )
+        {
+            rw::emitTo( stderr, "ripwire: --quality-delta: not a clean pass - git history a gating kind needs could not be read ({}; a partial clone "
+                                "does not download it), so a gating row may be missing: exit 6\n", historyAttrs.substr( 1 ).c_str() );
+        }
 
         // P1/P1.4 — the scope disclosure, built once for both emitters (quality::scopeDisclosure).
         const auto [ scopeAttrs, scopeJson ] = quality::scopeDisclosure( scope, outOfScope.size(), scopedOutGating, foreignAcks.size(), diffFileCount );
@@ -2171,7 +2209,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                          "\"preexisting-worse\":{},\"new-symbol\":{},\"gating\":{}{},\"api-new-surface\":{},\"at\":{}{}{}{}{}{}{}{},\"r\":[",
                          jsonStr( baseMarkerJ ).c_str(), regs.size(), minorCount, ackedCount, staleJ,
                          preexistingCount, newSymbolCount, gatingCount, rmeJ, basis.apiNewSurface, atJsonJ.c_str(), refs.jsonAttrs.c_str(),
-                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str(), absorbedJson.c_str(), headBasisJson.c_str(), kd.json );
+                         identityJson.c_str(), scopeJson.c_str(), configWarnJson.c_str(), absorbedJson.c_str(), headBasisJson.c_str(), kd.json + historyJson );
             // P1: one row emitter, called for both halves of the scope partition — the disclosed rows carry
             // the identical key set, so nothing about a row changes by being someone else's. `gatingAllowed`
             // is the ONE difference: an out-of-scope row is not what the exit code fires on, so claiming
@@ -2249,7 +2287,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             std::fputs( quality::staleAcksJsonArray( saRows ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows below
             rw::emitRaw( stdout, "}" );
-            return qualityDeltaExit( gatingCount, refs );
+            return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );
         }
 
         std::vector<char> esc;
@@ -2378,7 +2416,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                                       scope.active() || !foreignAcks.empty(), !foreignAcks.empty(), baselineAbsorbed,
                                       basis.headBasis, basis.declinedCallExcluded > 0, basis.valueRefExcluded > 0, collapse,
                                       refs.kinds != quality::kAllKinds, refs.degraded, !refs.memoryStop.empty(), kd.peakOver != 0,
-                                      kd.memorySkipped != 0 && refs.selected != quality::kAllKinds }, out );
+                                      kd.memorySkipped != 0 && refs.selected != quality::kAllKinds, basis.historyUnread.any() }, out );
             const char* baseMarker = baseSel.marker;    // R3: ditto — one seam decides staleness AND names it
             // 2026-09-06: what the sidecar readers skipped, on the root (absent means none) — see kQdBaseHeadUnreadable
             std::string sidecarHealthAttrs;
@@ -2400,7 +2438,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
                          // target_ref= are the anchor there, and they carry FULL shas because a wave measurement
                          // gets quoted into handoffs where a 9-char prefix is one collision from unverifiable.
                          atAttrs.c_str(), refs.attrs.c_str(), identityAttrs.c_str(),
-                         scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str(), ( sidecarHealthAttrs + ( collapse ? staleCollapseAttrs : std::string() ) + kd.xml ).c_str() );
+                         scopeAttrs.c_str(), configWarnAttr.c_str(), baselineAbsorbedAttr.c_str(), ( sidecarHealthAttrs + ( collapse ? staleCollapseAttrs : std::string() ) + kd.xml + historyAttrs ).c_str() );
             for( const quality::Regression& r : regs )
             {
                 emitRow( out, r, /*gatingAllowed=*/true );
@@ -2442,7 +2480,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         if( !collapseStale )
         {
             emitDocument( stdout, /*collapse=*/false );
-            return qualityDeltaExit( gatingCount, refs );
+            return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );
         }
         const Rendered full   = renderToString( [ & ]( std::FILE* f ) { emitDocument( f, /*collapse=*/false ); } );
         const Rendered folded = renderToString( [ & ]( std::FILE* f ) { if( verdictOnly ) { emitVerdict( f ); } else { emitDocument( f, /*collapse=*/true ); } } );
@@ -2450,11 +2488,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         {
             // renderToString DISCLOSEd the failed buffer; the full document is the superset, written straight to stdout
             emitDocument( stdout, /*collapse=*/false );
-            return qualityDeltaExit( gatingCount, refs );
+            return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );
         }
         const std::string& chosen = foldPays( folded.text, full.text ) ? folded.text : full.text;   // compactlegend.h: the margin and why
         std::fwrite( chosen.data(), 1, chosen.size(), stdout );
-        return qualityDeltaExit( gatingCount, refs );   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
+        return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
     }
     return std::nullopt;
 }

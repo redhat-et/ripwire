@@ -84,14 +84,15 @@ enum class Status : std::uint8_t
     FileAbsentAtRev,       // the path is not in the REV tree and no recorded rename reaches it
     AmbiguousAtRev,        // several same-named definitions of that kind in the file at REV
     UnparsedAtRev,         // the blob is there and the grammar could not locate the span in it
+    UnreadAtRev,           // hwh-fix4 (N2): git refused a read this needs (a blob or the rename record a partial clone does not hold)
 };
 
 inline const char* statusTag( Status s ) noexcept
 {
     // declarative table over a switch (G2), indexed by the enum value
     static constexpr const char* kNames[] = { "ok", "sym_absent_at_rev", "var_absent_at_rev",
-                                              "file_absent_at_rev", "ambiguous_at_rev", "unparsed_at_rev" };
-    static_assert( std::size( kNames ) == std::size_t( Status::UnparsedAtRev ) + 1 );
+                                              "file_absent_at_rev", "ambiguous_at_rev", "unparsed_at_rev", "unread_at_rev" };
+    static_assert( std::size( kNames ) == std::size_t( Status::UnreadAtRev ) + 1 );
     const std::size_t at = std::size_t( s );
     return kNames[ at < std::size( kNames ) ? at : 0 ];
 }
@@ -320,13 +321,19 @@ struct RevSide
 // The blob at `sha:rel`, following a git-RECORDED rename chain (never a similarity guess of our own —
 // quality.h's gitRenameMap pins `-c diff.renames=true` and reads what git already decided). "" when the
 // path is not reachable at that revision; `pathAtRev` is set to the spelling that answered.
+// hwh-fix4 (N2): `unreadOut` is set when the "" is not established as absence: the tree lists the path but its blob could not
+// be read (a partial clone does not hold it, and the no-download rule refuses the fetch), or the rename record that could reach an
+// earlier spelling was not read. A refused read is never reported as file_absent_at_rev.
 inline std::string blobAtRev( const std::string& root, const std::string& sha, const std::string& rel,
-                              std::string& pathAtRev )
+                              std::string& pathAtRev, bool& unreadOut )
 {
+    unreadOut = false;
     const auto read = [ & ]( const std::string& p ) -> std::string
     {
         if( quality::gitOneLine( root, "cat-file -e " + shSingleQuote( sha + ":" + p ) + " 2>/dev/null && echo ok" ) != "ok" )
         {
+            // trees are whole on a blob-filtered clone, so ls-tree tells an absent path from an absent blob without a fetch
+            unreadOut = unreadOut || !quality::gitOneLine( root, "ls-tree " + shSingleQuote( sha ) + " -- " + shSingleQuote( p ) + " 2>/dev/null" ).empty();
             return {};
         }
         return quality::gitOneLine( root, "show --no-ext-diff --no-textconv " + shSingleQuote( sha + ":" + p ) + " 2>/dev/null" );
@@ -337,7 +344,12 @@ inline std::string blobAtRev( const std::string& root, const std::string& sha, c
         pathAtRev = rel;
         return blob;
     }
+    if( unreadOut )
+    {
+        return {};   // the path is in that tree: no rename needs following, and its blob was refused
+    }
     const quality::RenameMap rm  = quality::gitRenameMap( root, sha + "..HEAD" );
+    unreadOut = rm.refusedPartial;   // the record that could reach an earlier spelling was not read: absence is not established
     std::string              cur = rel;
     for( std::size_t hop = 0; hop < kMaxRenameHops; ++hop )
     {
@@ -376,10 +388,11 @@ inline RevSide sliceAtRev( const std::string& root, const std::string& sha, cons
     r.path = rel;
 
     std::string pathAtRev;
-    r.src = blobAtRev( root, sha, rel, pathAtRev );
+    bool        unread = false;
+    r.src = blobAtRev( root, sha, rel, pathAtRev, unread );
     if( r.src.empty() )
     {
-        r.status = Status::FileAbsentAtRev;
+        r.status = unread ? Status::UnreadAtRev : Status::FileAbsentAtRev;
         return r;
     }
     r.path = pathAtRev;
@@ -461,7 +474,8 @@ inline std::string legendText( bool compact )
             "— never the line, never the text: a re-wrap, a comment edit, an insertion above the definition, a rename of an "
             "unrelated local and a value-only edit are all EMPTY. EMPTY means no def-use edge of this variable moved, never "
             "that the commit changed nothing. Every limit of the slice legend holds on BOTH sides. status=ok | "
-            "sym_absent_at_rev | var_absent_at_rev | file_absent_at_rev | ambiguous_at_rev | unparsed_at_rev; comparable=0 = "
+            "sym_absent_at_rev | var_absent_at_rev | file_absent_at_rev | ambiguous_at_rev | unparsed_at_rev | unread_at_rev (git "
+            "refused a read: a blob or rename record a partial clone does not hold); comparable=0 = "
             "NO comparison was made and the emptiness is not evidence; diff_capped=1 = over 2000 statement rows on a side. "
             "Full legend: omit legend=compact. -->";
     }
@@ -493,7 +507,10 @@ inline std::string legendText( bool compact )
         "that kind in the file then, never silently narrowed | \"unparsed_at_rev\" the blob is there and the parse "
         "could not be trusted (ERROR/MISSING nodes) — the definition's own span did not locate, or (A6) nothing "
         "matching the name+kind was found at all in a blob whose parse was this degraded, so sym_absent_at_rev's "
-        "\"new code\" story is not one this run can honestly tell. comparable=\"0\" = NO COMPARISON WAS MADE: the "
+        "\"new code\" story is not one this run can honestly tell | \"unread_at_rev\" git refused a read the REV side needs: the "
+        "path is in that tree but its blob is not in this clone (a partial clone, which ripwire does not download into), or "
+        "the path is not there and the rename record that could reach an earlier spelling was not read — absence is NOT "
+        "established; fetch the history or use a full clone. comparable=\"0\" = NO COMPARISON WAS MADE: the "
         "absence of rows under it is not evidence of no change, and must not be read as one. diff_capped=\"1\" = "
         "more than 2000 statement rows on a side, aligned to "
         "that bound and said so. -->";

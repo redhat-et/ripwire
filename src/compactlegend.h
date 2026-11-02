@@ -930,6 +930,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "kinds_skipped", "kinds_skipped=: kinds NOT run, so none of their rows is here and every count covers the rest; a count only they feed is absent", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "skipped_why", "skipped_why=selector (the caller chose; stale acks judged for those kinds only) | memory (see ingest_scope=) | selector,memory (both)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "memory_skipped", "memory_skipped=: beside skipped_why=selector,memory, the kinds memory skipped; kinds_next= runs exactly them", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "unread_history", "unread_history=churn-window|churn-tree|churn-blame|renames: git history a gating kind could not read (partial clone, failed blame, cut walk); rows may be missing, exit 6 if none gates", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "ingest_scope", "ingest_scope=changed-files: the full trees did not fit, so both commits' changed files answered the kinds they decide, rows as a full answer's; exit 2 if one gates, else 6", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "memory_need", "memory_need=NM: the full answer's projected need; unmeasured after a stop (memory_stop=)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "also_skipped", "also_skipped=: whole-answer facts not computed (config-warnings, stale-acks, ack-healing: acks match by recorded key only)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -1418,7 +1419,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // quality-delta rows (src/verbs_quality.h): the row facets the purpose line does not spell, present-only.
     { "sev", "r sev=minor: a small numeric delta, counted in minor=, never gating (absent: major)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "origin", "r origin=new-symbol: a finding on NEW code (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "churn", "r churn=self|ambient: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "churn", "r churn=self|ambient|unknown: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); unknown: the blame failed (unread_history=); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.

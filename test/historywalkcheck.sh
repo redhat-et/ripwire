@@ -23,6 +23,9 @@
 #       time budget's reach, disclosed; a shim silent from the first byte ends the same way.
 #   (M) --mcp: no comment line on the protocol stream, the cut in the answer's envelope; a stalled walk's short prefix is not stored; the cut
 #       sentence and --help=all say the prefix moves with load; a zero-commit cut names the budget (M4); --exemplar starts no walk (L2).
+#   (Q) a dirty partial clone's plain --quality-delta: history the churn kind could not read is unread_history= and exit 6, a failed
+#       blame is churn="unknown" (never ambient), a cut window walk too; --quality-baseline refuses; a sidecar floor names renames.
+#   (S) --slice --since on a partial clone: a refused blob or rename record is unread_at_rev, never file_absent_at_rev.
 #   (R) red, only when RIPWIRE_BASE_BIN names a pre-fix binary: (P) fetches and (T) outlives its timeout.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -336,6 +339,72 @@ unset STALL_AT_START
 rm -f "$TMP/walklog"; QC="$TMP/qc3"; mkdir -p "$QC"
 wrun --no-cache --exemplar=f1
 check "(L2) --exemplar starts no record walk (walks $(walks))" '[ "$(walks)" = 0 ] && [ -s "$TMP/out" ]'
+
+# ── (Q) hwh-fix4 N1: plain --quality-delta on a DIRTY partial clone. short-horizon-churn's gating input is git history (the window
+# commit counts, the window ref tree, the blame of the edited lines); a refused or failed read is unread_history= on the answer,
+# churn="unknown" on the row, and exit 6 when no row gates — never gating="0" exit 0. The full clone is every arm's positive twin.
+QSRC="$TMP/qsrc"; git init -q -b main "$QSRC"; mkdir "$QSRC/src"
+qhot() { printf 'int hot(){\n    int x = %s;\n    return x%s;\n}\nint cold(){ return 1; }\nint drive(){ return hot()+cold(); }\n' "$1" "$2" > "$3/src/f.cpp"; }
+qhot 1 "" "$QSRC"; git -C "$QSRC" add -A; git -C "$QSRC" commit -qm c1
+qhot 2 "" "$QSRC"; git -C "$QSRC" add -A; git -C "$QSRC" commit -qm c2
+qhot 2 " + 0" "$QSRC"; git -C "$QSRC" add -A; git -C "$QSRC" commit -qm c3
+printf 'int lone(){ return 0; }\nint uselone(){ int v = lone(); return v; }\n' > "$QSRC/src/g.cpp"; git -C "$QSRC" add -A; git -C "$QSRC" commit -qm c4
+QBARE="$TMP/qremote.git"; git clone -q --bare "$QSRC" "$QBARE"; git -C "$QBARE" config uploadpack.allowFilter true; git -C "$QBARE" config uploadpack.allowAnySHA1InWant true
+qclone() {  # $1 dir, $2 full|part; dirty unless $3=clean
+  rm -rf "$1"
+  if [ "$2" = part ]; then git clone -q --filter=blob:none "file://$QBARE" "$1" || exit 2; else git clone -q "file://$QBARE" "$1" || exit 2; fi
+  [ "${3:-dirty}" = clean ] || qhot 3 " + 1" "$1"
+}
+qd() {  # $1 dir, rest = flags; stdout $TMP/out, stderr $TMP/err, echoes rc
+  ( cd "$1" && perl -e 'alarm 120; exec @ARGV' "$BIN" "$1" --cache="$TMP/qcache.$RANDOM" "${@:2}" >"$TMP/out" 2>"$TMP/err" ); echo $?
+}
+QF="$TMP/qfull"; QP="$TMP/qpart"
+qclone "$QF" full; rc="$(qd "$QF" --quality-delta)"
+check "(Q0) full clone, dirty: the churn row gates, exit 2 (rc=$rc)" '[ "$rc" = 2 ] && grep -q "churn=\"self\"[^>]*gating=\"1\"" "$TMP/out" && ! grep -q " unread_history=\"" "$TMP/out"'
+qclone "$QP" part; rc="$(qd "$QP" --quality-delta)"
+check "(Q1) partial clone, dirty, window tree refused: unread_history=\"churn-tree\", exit 6, never gating 0 exit 0 (rc=$rc)" '[ "$rc" = 6 ] && grep -q "gating=\"0\"[^>]*unread_history=\"churn-tree\"" "$TMP/out" && grep -q "not a clean pass" "$TMP/err"'
+rc="$(qd "$QP" --quality-delta --json)"
+check "(Q1j) the same over --json: \"unread_history\":[\"churn-tree\"], exit 6 (rc=$rc)" '[ "$rc" = 6 ] && python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d[\"unread_history\"]==[\"churn-tree\"] and d[\"gating\"]==0 else 1)" "$TMP/out"'
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"quality_delta\",\"arguments\":{\"path\":\"$QP\"}}}" \
+  | ( cd "$QP" && perl -e 'alarm 120; exec @ARGV' "$BIN" "$QP" --mcp --cache="$TMP/qcache.mcp" >"$TMP/out" 2>"$TMP/err" ); rc=$?
+check "(Q1m) the same over MCP quality_delta: the answer carries unread_history (rc=$rc)" '[ "$rc" = 0 ] && grep "\"id\":2" "$TMP/out" | grep -q "unread_history.*churn-tree"'
+# (Q2) shape 2: the window ref tree's blobs fetched by hand, the intermediate blob still absent, so the blame of the edited lines fails
+git -C "$QP" archive "$(git -C "$QP" rev-list --max-parents=0 HEAD)" >/dev/null 2>&1
+rc="$(qd "$QP" --quality-delta)"
+check "(Q2) partial clone, blame refused: the row says churn=\"unknown\" (not ambient), unread_history=\"churn-blame\", exit 6 (rc=$rc)" '[ "$rc" = 6 ] && grep -q "churn=\"unknown\"" "$TMP/out" && ! grep -q "churn=\"ambient\"" "$TMP/out" && grep -q "unread_history=\"churn-blame\"" "$TMP/out"'
+# (Q3) neighbour: a walk cut before the window floor (commit budget 1) on the FULL clone: a rewritten symbol in a file under the bar
+rc="$(RIPWIRE_GIT_WALK_COMMITS=1 qd "$QF" --quality-delta)"
+check "(Q3) full clone, window walk cut: unread_history=\"churn-window\", exit 6, not a clean 0 (rc=$rc)" '[ "$rc" = 6 ] && grep -q "unread_history=\"churn-window\"" "$TMP/out"'
+# (Q4) negative twins: a CLEAN partial clone reads nothing it needs, so no unread_history and exit 0; a dirty edit outside every
+# churned file (g.cpp has one commit) needs no history either
+qclone "$QP" part clean; rc="$(qd "$QP" --quality-delta)"
+check "(Q4) partial clone, clean tree: no unread_history, exit 0 (rc=$rc)" '[ "$rc" = 0 ] && grep -q "<quality-delta" "$TMP/out" && ! grep -q " unread_history=\"" "$TMP/out"'
+printf 'int lone(){ return 9; }\nint uselone(){ int v = lone(); return v; }\n' > "$QP/src/g.cpp"; rc="$(qd "$QP" --quality-delta)"
+check "(Q4b) partial clone, an edit only to a file with one window commit: no unread_history, exit 0 (rc=$rc)" '[ "$rc" = 0 ] && grep -q "<quality-delta" "$TMP/out" && ! grep -q " unread_history=\"" "$TMP/out"'
+# (Q5) --quality-baseline on the dirty partial clone: "absorbs nothing" is not established, so the pin refuses; --allow-dirty pins
+qclone "$QP" part; rc="$(qd "$QP" --quality-baseline)"
+check "(Q5) --quality-baseline, dirty partial clone: refuses naming the unread history, no sidecar written (rc=$rc)" '[ "$rc" = 1 ] && grep -q "could not tell whether" "$TMP/err" && [ ! -e "$QP/.ripwire_quality_baseline" ]'
+rc="$(qd "$QP" --quality-baseline --allow-dirty)"
+check "(Q5b) --allow-dirty pins anyway (rc=$rc)" '[ "$rc" = 0 ] && [ -e "$QP/.ripwire_quality_baseline" ]'
+# (Q6) neighbour: a sidecar floor on a partial clone — the rename record that re-files baseline rows (read when the ack ledger is not
+# empty: identity healing) was refused
+qack() { printf 'ack complexity 1111111111111111 1 historywalkcheck-q6\n' > "$1/.ripwire_quality_acks"; }
+qclone "$QP" part clean; qd "$QP" --quality-baseline >/dev/null; qack "$QP"; qhot 3 " + 1" "$QP"; rc="$(qd "$QP" --quality-delta)"
+check "(Q6) sidecar floor on a partial clone: unread_history names renames, exit 6 (rc=$rc)" '[ "$rc" = 6 ] && grep -q "baseline=\"sidecar\"[^>]*unread_history=\"[a-z,-]*renames\"" "$TMP/out"'
+qclone "$QF" full clean; qd "$QF" --quality-baseline >/dev/null; qack "$QF"; qhot 3 " + 1" "$QF"; rc="$(qd "$QF" --quality-delta)"
+check "(Q6b) the same on the full clone: no unread_history (rc=$rc)" '[ "$rc" != 6 ] && grep -q "baseline=\"sidecar\"" "$TMP/out" && ! grep -q " unread_history=\"" "$TMP/out"'
+
+# ── (S) hwh-fix4 N2: --slice --since on a partial clone. A refused read is unread_at_rev, never file_absent_at_rev ──
+qclone "$QP" part clean; qclone "$QF" full clean
+rc="$(qd "$QP" --no-cache --slice=hot:x --since=HEAD~2)"
+check "(S1) partial clone, the path is in the REV tree, its blob absent: status=\"unread_at_rev\", not file_absent (rc=$rc)" '[ "$rc" = 0 ] && grep -q "status=\"unread_at_rev\" comparable=\"0\"" "$TMP/out"'
+rc="$(qd "$QF" --no-cache --slice=hot:x --since=HEAD~2)"
+check "(S1b) the same on the full clone: status=\"ok\" (rc=$rc)" '[ "$rc" = 0 ] && grep -q "status=\"ok\"" "$TMP/out"'
+rc="$(qd "$QF" --no-cache --slice=uselone:v --since=HEAD~1)"
+check "(S2) full clone, a file added after REV: still file_absent_at_rev (rc=$rc)" '[ "$rc" = 0 ] && grep -q "status=\"file_absent_at_rev\"" "$TMP/out"'
+rc="$(qd "$QP" --no-cache --slice=uselone:v --since=HEAD~1)"
+check "(S2b) partial clone, the same file: the rename record was not read, so absence is not claimed: unread_at_rev (rc=$rc)" '[ "$rc" = 0 ] && grep -q "status=\"unread_at_rev\"" "$TMP/out"'
 
 # ── (R) red-first, on a named pre-fix binary ──
 if [ -n "${RIPWIRE_BASE_BIN:-}" ]; then
