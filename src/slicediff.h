@@ -324,10 +324,15 @@ struct RevSide
 // hwh-fix4 (N2): `unreadOut` is set when the "" is not established as absence: the tree lists the path but its blob could not
 // be read (a partial clone does not hold it, and the no-download rule refuses the fetch), or the rename record that could reach an
 // earlier spelling was not read. A refused read is never reported as file_absent_at_rev.
-inline std::string blobAtRev( const std::string& root, const std::string& sha, const std::string& rel,
-                              std::string& pathAtRev, bool& unreadOut )
+struct BlobAtRev
 {
-    unreadOut = false;
+    std::string blob;
+    bool        unread = false;   // the "" is a refused read, not an established absence (see above)
+};
+inline BlobAtRev blobAtRev( const std::string& root, const std::string& sha, const std::string& rel, std::string& pathAtRev )
+{
+    BlobAtRev out;
+    bool&     unreadOut = out.unread;
     const auto read = [ & ]( const std::string& p ) -> std::string
     {
         if( quality::gitOneLine( root, "cat-file -e " + shSingleQuote( sha + ":" + p ) + " 2>/dev/null && echo ok" ) != "ok" )
@@ -338,15 +343,15 @@ inline std::string blobAtRev( const std::string& root, const std::string& sha, c
         }
         return quality::gitOneLine( root, "show --no-ext-diff --no-textconv " + shSingleQuote( sha + ":" + p ) + " 2>/dev/null" );
     };
-    std::string blob = read( rel );
-    if( !blob.empty() )
+    out.blob = read( rel );
+    if( !out.blob.empty() )
     {
         pathAtRev = rel;
-        return blob;
+        return out;
     }
     if( unreadOut )
     {
-        return {};   // the path is in that tree: no rename needs following, and its blob was refused
+        return out;   // the path is in that tree: no rename needs following, and its blob was refused
     }
     const quality::RenameMap rm  = quality::gitRenameMap( root, sha + "..HEAD" );
     unreadOut = rm.refusedPartial;   // the record that could reach an earlier spelling was not read: absence is not established
@@ -356,7 +361,7 @@ inline std::string blobAtRev( const std::string& root, const std::string& sha, c
         const auto it = rm.previousOf.find( cur );
         if( it == rm.previousOf.end() )
         {
-            return {};
+            return out;
         }
         cur = it->second;
         // a rename that changes the EXTENSION changes the language, and with it what a definition even is;
@@ -364,16 +369,16 @@ inline std::string blobAtRev( const std::string& root, const std::string& sha, c
         // dependence change
         if( std::filesystem::path( cur ).extension() != std::filesystem::path( rel ).extension() )
         {
-            return {};
+            return out;
         }
-        blob = read( cur );
-        if( !blob.empty() )
+        out.blob = read( cur );
+        if( !out.blob.empty() )
         {
             pathAtRev = cur;
-            return blob;
+            return out;
         }
     }
-    return {};
+    return out;
 }
 
 // The slice of `sym`'s definition as it stood at `sha`. One blob, one single-file ingest, one
@@ -388,11 +393,11 @@ inline RevSide sliceAtRev( const std::string& root, const std::string& sha, cons
     r.path = rel;
 
     std::string pathAtRev;
-    bool        unread = false;
-    r.src = blobAtRev( root, sha, rel, pathAtRev, unread );
+    BlobAtRev read = blobAtRev( root, sha, rel, pathAtRev );
+    r.src          = std::move( read.blob );
     if( r.src.empty() )
     {
-        r.status = unread ? Status::UnreadAtRev : Status::FileAbsentAtRev;
+        r.status = read.unread ? Status::UnreadAtRev : Status::FileAbsentAtRev;
         return r;
     }
     r.path = pathAtRev;

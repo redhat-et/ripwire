@@ -1739,9 +1739,10 @@ void emitMemoryLines( const KindsDisclosure& kd, const RefPairDelta& refs )
 // The exit code every --quality-delta emitter returns: 2 when a row gates; a changed-files answer with no gating row is 6
 // (a partial answer, never a clean pass — the kinds it skipped could still gate), and so is an answer whose gating history
 // could not be read (hwh-fix4, N1: unread_history= — a refused tree or blame is not "nothing got worse"); otherwise 0.
-int qualityDeltaExit( std::size_t gatingCount, const RefPairDelta& refs, bool historyUnread ) noexcept
+// `partial` = refs.degraded || basis.historyUnread.any(): the two ways an answer is short of the whole question.
+int qualityDeltaExit( std::size_t gatingCount, bool partial ) noexcept
 {
-    return gatingCount > 0 ? 2 : ( refs.degraded || historyUnread ) ? 6 : 0;
+    return gatingCount > 0 ? 2 : partial ? 6 : 0;
 }
 
 std::optional<int> runQualityDelta( const MainDispatch& d )
@@ -2287,7 +2288,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
             }
             std::fputs( quality::staleAcksJsonArray( saRows ).c_str(), stdout );   // L2 — "sa":[...], same taxonomy as the XML sa= rows below
             rw::emitRaw( stdout, "}" );
-            return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );
+            return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );
         }
 
         std::vector<char> esc;
@@ -2480,7 +2481,7 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         if( !collapseStale )
         {
             emitDocument( stdout, /*collapse=*/false );
-            return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );
+            return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );
         }
         const Rendered full   = renderToString( [ & ]( std::FILE* f ) { emitDocument( f, /*collapse=*/false ); } );
         const Rendered folded = renderToString( [ & ]( std::FILE* f ) { if( verdictOnly ) { emitVerdict( f ); } else { emitDocument( f, /*collapse=*/true ); } } );
@@ -2488,11 +2489,11 @@ std::optional<int> runQualityDelta( const MainDispatch& d )
         {
             // renderToString DISCLOSEd the failed buffer; the full document is the superset, written straight to stdout
             emitDocument( stdout, /*collapse=*/false );
-            return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );
+            return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );
         }
         const std::string& chosen = foldPays( folded.text, full.text ) ? folded.text : full.text;   // compactlegend.h: the margin and why
         std::fwrite( chosen.data(), 1, chosen.size(), stdout );
-        return qualityDeltaExit( gatingCount, refs, basis.historyUnread.any() );   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
+        return qualityDeltaExit( gatingCount, refs.degraded || basis.historyUnread.any() );   // r26: only a PREEXISTING-worse AND major regression gates (== gating=)
     }
     return std::nullopt;
 }
