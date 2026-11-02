@@ -10210,7 +10210,8 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     }
     w.write( buildPrunedPackagesBlock( ing.crawlSkips, rootArg ) );   // #478 gap 3: absent when no real package was pruned
 
-    // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >1 vertical, >2 tangled.
+    // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >=1 vertical; tangled from the cycles, not
+    // NCCD (DEPS-SHAPE-HONEST, rw::depsShape).
     // §P9.4: files=corpus size, dep_files=the ccd/acd/nccd/shape denominator (dependency-capable only).
     //
     // dep_langs= (kParserVer 81) is the DENOMINATOR'S OWN DISCLOSURE, and the reason it exists is that
@@ -10220,6 +10221,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // (lintrules.h::dependencyCapableLangTags), so it cannot drift from the predicate it describes, and
     // it is the SAME predicate --arch's propagation_cost N and --cochange's dep_capable= are built on.
     const std::string depLangs = rw::dependencyCapableLangTags();
+    const std::size_t cyclicFiles = rw::filesInCycles( cycles, measure.mask );
     char hb[ 176 ];
     if( healthUnknown )
     {
@@ -10228,10 +10230,13 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     else
     {
         rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
-                       ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
-                       nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+                       ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd, rw::depsShape( nccd, cyclicFiles, depFiles ) );
     }
     w.write( hb );
+    if( !healthUnknown )
+    {
+        w.write( rw::countAttrXmlOrEmpty( "cyclic_files", cyclicFiles ) );   // DEPS-SHAPE-HONEST: the number behind tangled; absent at 0
+    }
     w.write( rw::countAttrXmlOrEmpty( "masked_files", measure.masked ) );   // arch-honest: absent at 0, so a tree without a no-edge file is byte-identical
     if( lazyEdges > 0 )   // absent exactly when nothing was left out — never a hidden 0, and byte-identical for every corpus without a lazy directive
     {
@@ -10308,8 +10313,15 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
 
     if( !cycles.empty() )   // Lakos's cardinal sin: cyclic physical dependencies (must build/test as one unit)
     {
-        w.write( "<cycles>" );
         const std::size_t capC = cycles.size() < 20 ? cycles.size() : 20;
+        if( capC < cycles.size() )   // DEPS-SHAPE-HONEST: a cut list says so (pageview.h rules 1-3); an uncut one is unchanged
+        {
+            w.write( "<cycles total=\"" + std::to_string( cycles.size() ) + "\" shown=\"" + std::to_string( capC ) + "\" capped=\"1\">" );
+        }
+        else
+        {
+            w.write( "<cycles>" );
+        }
         for( std::size_t c = 0; c < capC; ++c )
         {
             char cb[ 56 ];   // cost = k² = this cycle's contribution to CCD (Lakos: a k-cycle costs k²)

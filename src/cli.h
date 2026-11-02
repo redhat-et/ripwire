@@ -1490,6 +1490,8 @@ inline constexpr char kHelpHead[] =
         "                               <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/\n"
         "                               acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser\n"
         "                               version 81 and every one of those numbers moved on a corpus holding them.\n"
+        "                               <health shape=> is tangled when 1 in 20 dep_files= sit inside an include cycle (cyclic_files=,\n"
+        "                               over every cycle), else nccd below 1 horizontal, from 1 vertical: a deep graph is not a tangle.\n"
         "                               STRUCTURE vs USE (parser version 83): a LAZY edge -- every directive of the pair\n"
         "                               written inside a closure (Ruby method/lambda/block, TS/JS function body), a Ruby\n"
         "                               autoload or rescue class -- is a use, not a load-time dependency: it is in --impact's importer tier\n"

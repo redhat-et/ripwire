@@ -116,5 +116,64 @@ fi
 #        `w_ < bestW` → `w_ > bestW` in src/serialize.h made check #1 fail as expected (cut became
 #        "a.h -> b.h" cutrefs=3); reverted before landing.
 
+# ── 9) DEPS-SHAPE-HONEST: <health shape=> reads the CYCLES, not nccd alone ──────────────────────────────────────────
+# nccd passes 2 on any deep graph with no cycle at all (GRAPH-SCALE: true-edge Envoy 0.09 "horizontal" to 15.20
+# "tangled" with 3 small cycles in 7,786 files). tangled now needs cyclic_files= to be at least 1 in 20 of dep_files=.
+# Fixtures are written at runtime (SAFETY (f)(6)); every arm reads the exit code, so a crash or an empty answer is red.
+SH="$( mktemp -d )"; trap 'rm -rf "$SH"' EXIT
+deps(){ # $1 root, rest: extra flags. Sets DOUT and DRC.
+    DOUT="$( cd "$1" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$1" --deps --no-cache "${@:2}" 2>/dev/null )"; DRC=$?
+}
+health(){ printf '%s' "$DOUT" | grep -oE '<health [^>]*>' | head -1; }
+mkchain(){ # $1 dir  $2 files in an acyclic include chain c0.h -> c1.h -> ... (a deep graph, no cycle)
+    mkdir -p "$1"; local i=0
+    while [ "$i" -lt "$2" ]; do
+        if [ "$i" -lt $(( $2 - 1 )) ]; then printf '#include "c%d.h"\nint f%d(void);\n' $(( i + 1 )) "$i" > "$1/c$i.h"
+        else printf 'int f%d(void);\n' "$i" > "$1/c$i.h"; fi
+        i=$(( i + 1 ))
+    done
+}
+mkpair(){ # $1 dir  $2 name: a 2-cycle p_<name>.h <-> q_<name>.h
+    printf '#include "q_%s.h"\nint p_%s(void);\n' "$2" "$2" > "$1/p_$2.h"
+    printf '#include "p_%s.h"\nint q_%s(void);\n' "$2" "$2" > "$1/q_$2.h"
+}
+# (a) a 40-deep chain, no cycle: nccd 4.56, so the old verdict said tangled
+mkchain "$SH/deep" 40
+deps "$SH/deep"; H="$( health )"
+if [ "$DRC" = 0 ] && [ -n "$H" ] && printf '%s' "$H" | grep -q 'shape="vertical"' && ! printf '%s' "$H" | grep -q 'cyclic_files='; then
+    ok "shape (a): a 40-deep acyclic chain reads vertical with no cyclic_files= (nccd above 2 is depth, not a tangle)"
+else no "shape (a) rc=$DRC: $H"; fi
+nc="$( printf '%s' "$H" | grep -oE 'nccd="[0-9.]+"' | grep -oE '[0-9.]+' )"
+if awk -v n="${nc:-0}" 'BEGIN{exit !(n > 2)}'; then ok "shape (a) positive twin: the same chain's nccd=$nc is above 2"; else no "shape (a) nccd=$nc not above 2: the fixture no longer tests the old rule"; fi
+# (b) 38 chain files + one 2-cycle: 2 of 40 = exactly 1 in 20, so tangled (the boundary is >=)
+mkchain "$SH/edge" 38; mkpair "$SH/edge" a
+deps "$SH/edge"; H="$( health )"
+if [ "$DRC" = 0 ] && printf '%s' "$H" | grep -q 'shape="tangled" cyclic_files="2"' && printf '%s' "$H" | grep -q 'dep_files="40"'; then
+    ok "shape (b): 2 cyclic files of 40 (1 in 20) read tangled, cyclic_files=2"
+else no "shape (b) rc=$DRC: $H"; fi
+# (c) the neighbour below the line: one more chain file makes it 2 of 41, under 1 in 20 -> not tangled
+mkchain "$SH/below" 39; mkpair "$SH/below" a
+deps "$SH/below"; H="$( health )"
+if [ "$DRC" = 0 ] && printf '%s' "$H" | grep -q 'cyclic_files="2"' && ! printf '%s' "$H" | grep -q 'shape="tangled"' && printf '%s' "$H" | grep -q ' shape='; then
+    ok "shape (c): 2 cyclic files of 41 stay below the line (not tangled), cyclic_files=2 still printed"
+else no "shape (c) rc=$DRC: $H"; fi
+# (d) a shallow tree with no cycle stays horizontal, no cyclic_files=
+mkdir -p "$SH/flat"; for k in 1 2 3 4 5 6; do printf 'int g%d(void);\n' "$k" > "$SH/flat/l$k.h"; done
+printf '#include "l1.h"\n#include "l2.h"\n' > "$SH/flat/top.h"
+deps "$SH/flat"; H="$( health )"
+if [ "$DRC" = 0 ] && printf '%s' "$H" | grep -q 'shape="horizontal"' && ! printf '%s' "$H" | grep -q 'cyclic_files='; then
+    ok "shape (d): a flat tree stays horizontal, no cyclic_files="
+else no "shape (d) rc=$DRC: $H"; fi
+# (e) the cycle list discloses its 20-row cut: 21 pairs print total=21 shown=20 capped=1; 20 pairs print a bare <cycles>
+mkdir -p "$SH/many21" "$SH/many20"; for k in $( seq 1 21 ); do mkpair "$SH/many21" "n$k"; done; for k in $( seq 1 20 ); do mkpair "$SH/many20" "n$k"; done
+deps "$SH/many21" --legend=full; C21="$DOUT"; R21=$DRC
+deps "$SH/many20" --legend=full; C20="$DOUT"; R20=$DRC
+if [ "$R21" = 0 ] && printf '%s' "$C21" | grep -q '<cycles total="21" shown="20" capped="1">' && [ "$( printf '%s' "$C21" | grep -oE '<cycle size=' | wc -l | tr -d ' ' )" = 20 ]; then
+    ok "cycles (e): 21 cycles list 20 under <cycles total=21 shown=20 capped=1>"
+else no "cycles (e) rc=$R21: $( printf '%s' "$C21" | grep -oE '<cycles[^>]*>' )"; fi
+if [ "$R20" = 0 ] && printf '%s' "$C20" | grep -q '<cycles>' && [ "$( printf '%s' "$C20" | grep -oE '<cycle size=' | wc -l | tr -d ' ' )" = 20 ]; then
+    ok "cycles (e) twin: 20 cycles, all listed, a bare <cycles> (no cut to disclose)"
+else no "cycles (e) twin rc=$R20: $( printf '%s' "$C20" | grep -oE '<cycles[^>]*>' )"; fi
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

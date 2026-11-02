@@ -15678,6 +15678,34 @@ inline RestrictedDepHealth restrictDependencyHealth( const std::vector<char>& ma
     return r;
 }
 
+// DEPS-SHAPE-HONEST: the files the cycle list holds that are in the measured set (`mask`, lintrules.h dependencyMeasure),
+// each once — sccCycles' components are disjoint, so a plain sum over the masked members is exact.
+inline std::size_t filesInCycles( const std::vector<std::vector<std::uint32_t>>& cycles, const std::vector<char>& mask ) noexcept
+{
+    std::size_t n = 0;
+    for( const auto& comp : cycles )
+    {
+        n += std::size_t( std::count_if( comp.begin(), comp.end(), [ & ]( std::uint32_t f ) { return f < mask.size() && mask[f] != 0; } ) );
+    }
+    return n;
+}
+
+// DEPS-SHAPE-HONEST: <health shape=>. It read `tangled` whenever nccd passed 2, and nccd passes 2 on any real graph whose
+// mean cone holds a few hundred files with no cycle at all: GRAPH-SCALE's true-edge Envoy went `horizontal` 0.09 to
+// `tangled` 15.20 with 3 cycles of 2, 3 and 6 files in 7,786; textual 19.9, vscode 40. Depth is not a tangle. Tangled now
+// means what the word says, read off the cycles: at least one measured file in 20 sits in an include cycle
+// (kTangledCyclicShareDenom, printed beside it as cyclic_files=). Otherwise nccd says how deep: horizontal below 1 (flatter
+// than a balanced tree), vertical from 1 up. A heuristic still, now about the property it names.
+inline constexpr std::size_t kTangledCyclicShareDenom = 20;   // tangled: cyclic_files * 20 >= dep_files
+inline const char* depsShape( double nccd, std::size_t cyclicFiles, std::size_t depFiles ) noexcept
+{
+    if( cyclicFiles > 0 && cyclicFiles * kTangledCyclicShareDenom >= depFiles )
+    {
+        return "tangled";
+    }
+    return nccd < 1.0 ? "horizontal" : "vertical";
+}
+
 // --map-diff teleport: β of the mass on symbols in changed files, (1−β) on the rest.
 inline std::vector<float> diffTeleport( const IngestResult& ing, const std::vector<char>& fileChanged, float beta = 0.7f )
 {
