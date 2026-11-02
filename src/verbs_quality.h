@@ -895,7 +895,7 @@ inline constexpr const char* kQdLegendCore =
     "whose target no longer applies. "
     "api-new-surface= COUNTS the new PUBLIC symbols (never gates, not in regressions=, printed even at zero). "
     "register-macro-excluded= is a FLOOR, not a finding: symbols this run excluded from the dead-code kind "
-    "because their own definition is a registered self-registering test/benchmark macro call. Never gates, "
+    "because their own definition is a registered self-registering test/benchmark macro call, or a Rust #[test] or #[tokio::test] function the test harness calls. Never gates, "
     "never counted in regressions=, printed even at zero (zero means none excluded, not that the check did "
     "not run). "
     // P3 (L7): next= on gating rows, defined where the reader meets it

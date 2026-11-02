@@ -386,8 +386,8 @@ fn stacked_case() { assert_eq!(live_helper(), 1); }
 
 fn blank_line_case() { assert_eq!(live_helper(), 1); }
 
-/// A documented harness case: the doc line sits between the attribute and the item.
 #[test]
+/// A documented harness case: the doc line sits between the attribute and the item.
 fn doc_comment_case() { assert_eq!(live_helper(), 1); }
 
 #[testing]
