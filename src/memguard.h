@@ -168,6 +168,7 @@ enum class TripAt : std::uint8_t
     Ingest,     // ingest:N   — the Nth ingest of the process stops its crawl at its first entry (a crawl stop)
     Peak,       // peak:N     — the Nth post-answer peak reading (peakOverLimit) reads as over the limit
     Fold,       // fold:N     — the Nth fold of the process (buildGraph's is the first) reads as over the hard limit at its first component
+    FoldFrom,   // foldfrom:N — the Nth fold and every one after it: a degrade path's own fold stops too (the range form's changed files)
 };
 struct TestTrip
 {
@@ -184,7 +185,7 @@ inline TripAt tripAtFor( std::string_view phase ) noexcept
     } kPhases[] = {
         { "crawl", TripAt::Crawl }, { "pressure", TripAt::Pressure }, { "parse", TripAt::Parse },
         { "request", TripAt::Request }, { "hard", TripAt::Hard }, { "eager", TripAt::Eager },
-        { "project", TripAt::Project }, { "ingest", TripAt::Ingest }, { "peak", TripAt::Peak }, { "fold", TripAt::Fold },
+        { "project", TripAt::Project }, { "ingest", TripAt::Ingest }, { "peak", TripAt::Peak }, { "fold", TripAt::Fold }, { "foldfrom", TripAt::FoldFrom },
     };
     for( const auto& p : kPhases )
     {
@@ -473,7 +474,9 @@ inline FileSetStore guardedFileClosure( const FileAdjacency& adj )
     opts.chunkBits  = testChunkBits();
     opts.stats      = &st;
     opts.shouldStop = &foldShouldStop;
-    if( testTrip().at == TripAt::Fold && seamCounters().folds.fetch_add( 1, std::memory_order_relaxed ) + 1 == testTrip().index )
+    const TripAt seamAt = testTrip().at;
+    const std::uint64_t seamFold = seamAt == TripAt::Fold || seamAt == TripAt::FoldFrom ? seamCounters().folds.fetch_add( 1, std::memory_order_relaxed ) + 1 : 0;
+    if( seamFold != 0 && ( seamFold == testTrip().index || ( seamAt == TripAt::FoldFrom && seamFold > testTrip().index ) ) )
     {
         opts.shouldStop = &foldSeamStop;
         opts.checkEvery = 1;

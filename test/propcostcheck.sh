@@ -220,10 +220,27 @@ if [ "$rc" = 5 ] && [ ! -s "$TMP/ec.out" ] && [ "$( stopline "$TMP/ec.err" )" = 
 else
     no "--edit-check=use_a fold:2: rc=$rc stdout=$( wc -c <"$TMP/ec.out" ) bytes stderr: $( head -c 250 "$TMP/ec.err" )"
 fi
-rc="$( fgs_cli rg fold:2 --quality-delta=HEAD~1..HEAD --legend=compact )"
-if [ "$rc" = 6 ] && grep -q 'answered from the changed files only' "$TMP/rg.err"; then ok "--quality-delta=A..B, a full tree's fold stopped: no score from it; the range form degrades to the changed files, disclosed (exit 6, the design of qd-memory-degrade)"
-elif [ "$rc" = 5 ] && [ ! -s "$TMP/rg.out" ]; then ok "--quality-delta=A..B, a stopped fold: exit 5, nothing printed"
-else no "range form fold:2: rc=$rc out=$( wc -c <"$TMP/rg.out" ) stderr: $( head -c 200 "$TMP/rg.err" )"; fi
+# Each commit's tree in turn: loadRefTree's catch is what makes this a degrade, so exit 5 here would mean the catch is gone.
+for seam in fold:1 fold:2; do
+    rc="$( fgs_cli rg "$seam" --quality-delta=HEAD~1..HEAD --legend=compact )"
+    if [ "$rc" = 6 ] && [ -s "$TMP/rg.out" ] && grep -q 'answered from the changed files only' "$TMP/rg.err"; then ok "--quality-delta=A..B $seam, a full tree's fold stopped: no score from it; the range form degrades to the changed files, disclosed (exit 6, the design of qd-memory-degrade)"
+    else no "range form $seam: rc=$rc out=$( wc -c <"$TMP/rg.out" ) stderr: $( head -c 200 "$TMP/rg.err" )"; fi
+done
+# Every fold stops, the changed-files form's own too: its catch reports the phase, and the refusal is by name with nothing printed.
+# The commit changes files that carry edges, or the changed-files graph has nothing to fold.
+FGR="$TMP/fgr"; cp -R "$FGS" "$FGR"; git -C "$FGR" checkout -q -- . 2>/dev/null
+for f in mid_a.h mid2_a.h use_a.cpp util_a.h; do echo '// three' >>"$FGR/$f"; done
+git -C "$FGR" add -A 2>/dev/null; git -C "$FGR" -c user.name=t -c user.email=t@example.invalid commit -q -m three 2>/dev/null
+mkdir -p "$TMP/xdg/rgall"
+XDG_CACHE_HOME="$TMP/xdg/rgall" TMPDIR="$TMP/xdg/rgall" RIPWIRE_TEST_MEMGUARD=foldfrom:1 "$BIN" "$FGR" --no-cache --quality-delta=HEAD~1..HEAD --legend=compact >"$TMP/rgall.out" 2>"$TMP/rgall.err"; rc=$?
+if [ "$rc" = 5 ] && [ ! -s "$TMP/rgall.out" ] && grep -q '^ripwire: memory limit reached during the include-closure fold.*the changed files alone were cut too' "$TMP/rgall.err"; then ok "--quality-delta=A..B, every fold stopped: refused by name, the changed-files form's phase on the line, nothing printed"
+else no "range form foldfrom:1: rc=$rc out=$( wc -c <"$TMP/rgall.out" ) stderr: $( grep -a '^ripwire:' "$TMP/rgall.err" | head -c 240 )"; fi
+# A stop while the grep prefetch worker runs: the unwind joins it first (a joinable thread would std::terminate, rc 134).
+rc="$( fgs_cli gr fold:1 --grep=helper )"
+if [ "$rc" = 5 ] && [ ! -s "$TMP/gr.out" ] && [ "$( stopline "$TMP/gr.err" )" = 1 ]; then ok "--grep over a stopped fold: exit 5, one line, nothing printed (the prefetch worker was joined on the unwind)"
+else no "--grep fold:1: rc=$rc stdout=$( wc -c <"$TMP/gr.out" ) bytes stderr: $( head -c 200 "$TMP/gr.err" )"; fi
+rc="$( fgs_cli grok "" --grep=helper )"
+if [ "$rc" = 0 ] && grep -q helper "$TMP/grok.out"; then ok "--grep, no seam: answers (the positive twin)"; else no "--grep no seam: rc=$rc"; fi
 
 # the MCP envelope: the call that hit the stop is refused by name; the server is NOT stuck — the next call is served, and from a
 # whole index (the `of_def` of the call is one definition, not the split ["1~s","2~s"] a partial closure gives)
@@ -269,6 +286,42 @@ rm -rf "$TMP/xdg/mcp"; mkdir -p "$TMP/xdg/mcp"
 printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"quality_delta\",\"arguments\":{\"path\":\"$FGS\"}}}" | mcp_fgs fold:2 >"$TMP/mq.out"
 r="$( mcp_resp "$TMP/mq.out" 2 )"
 case "$r" in "ERR memory limit reached during the include-closure fold"*) ok "MCP quality_delta: the HEAD snapshot's fold stopped, refused, no false regression";; *) no "MCP quality_delta fold:2: ${r:0:250}";; esac
+
+# The call after a stop rebuilds: the envelope released the index even when the stop was a verb's own graph, not the index's.
+rm -rf "$TMP/xdg/mcp"; mkdir -p "$TMP/xdg/mcp"
+fr="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"find_referencing_symbols\",\"arguments\":{\"path\":\"$FGS\",\"symbol\":\"helper\"}}}"
+qb="{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"quality_delta\",\"arguments\":{\"path\":\"$FGS\"}}}"
+printf '%s\n%s\n%s\n' "$fr" "$qb" "${fr/\"id\":2/\"id\":4}" \
+    | { { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}'; cat; } | ( cd "$FGS" && XDG_CACHE_HOME="$TMP/xdg/mcp" TMPDIR="$TMP/xdg/mcp" RIPWIRE_MCP_TIMINGS=1 RIPWIRE_TEST_MEMGUARD=fold:2 perl -e 'alarm shift; exec @ARGV' 60 "$BIN" --mcp 2>"$TMP/rel.err" ) >"$TMP/rel.out"; }
+r3="$( mcp_resp "$TMP/rel.out" 3 )"; r4="$( mcp_resp "$TMP/rel.out" 4 )"
+last="$( grep 'ripwire-timing verb=find_referencing_symbols' "$TMP/rel.err" | tail -1 )"
+case "$r3" in "ERR memory limit reached during the include-closure fold"*) ok "MCP: a verb's own fold stopped after the index was built, refused by name";; *) no "MCP own-fold premise: ${r3:0:200}";; esac
+case "$r4$last" in OK*'"of_def":["1"]'*'rebuilt=1'*) ok "MCP: the call after it rebuilt the released index and answered whole (rebuilt=1)";; *) no "MCP after an own-fold stop: last='$last' ${r4:0:160}";; esac
+
+# The HTTP server's warm-up: a stopped fold there leaves the server up with no index kept, and the first request builds whole.
+WARMUP_PY="$TMP/warmup.py"
+cat >"$WARMUP_PY" <<'PY'
+import json, os, socket, subprocess, sys, time, urllib.request
+bin_, root = sys.argv[1:3]
+s = socket.socket(); s.bind( ( "127.0.0.1", 0 ) ); port = s.getsockname()[1]; s.close()
+p = subprocess.Popen( [ bin_, root, f"--listen=127.0.0.1:{port}" ], cwd=root, env=dict( os.environ, RIPWIRE_TEST_MEMGUARD="fold:1" ), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True )
+try:
+    for line in p.stderr:
+        if "warm-up: memory limit reached during the include-closure fold" in line: break
+    else:
+        print( "no warm-up line, server rc", p.wait() ); sys.exit( 1 )
+    time.sleep( 0.5 )
+    if p.poll() is not None: print( "the server died, rc", p.returncode ); sys.exit( 1 )
+    body = json.dumps( { "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "find_referencing_symbols", "arguments": { "path": root, "symbol": "helper" } } } ).encode()
+    r = urllib.request.urlopen( urllib.request.Request( f"http://127.0.0.1:{port}/mcp", data=body, headers={ "Content-Type": "application/json", "Accept": "application/json, text/event-stream" } ), timeout=60 ).read().decode().replace( '\\"', '"' )
+    if '"of_def":["1"]' not in r: print( "first request not whole:", r[:200] ); sys.exit( 1 )
+    print( "whole" )
+finally:
+    p.kill()
+PY
+XDG_CACHE_HOME="$TMP/xdg/mcp" TMPDIR="$TMP/xdg/mcp" perl -e 'alarm shift; exec @ARGV' 90 python3 "$WARMUP_PY" "$BIN" "$FGS" >"$TMP/warm.out" 2>&1; rc=$?
+if [ "$rc" = 0 ] && [ "$( cat "$TMP/warm.out" )" = whole ]; then ok "--listen warm-up over a stopped fold: the server stays up, disclosed on stderr, and the first request answers whole"
+else no "--listen warm-up: rc=$rc $( tail -c 240 "$TMP/warm.out" )"; fi
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail
