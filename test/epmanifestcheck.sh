@@ -187,7 +187,7 @@ if has "$CARGONM" "any(e=={'n':'empty','target':'tools/empty.rs','unresolved':'1
 if has "$CARGOEX" "d==[]" && grep -q 'examples/sample.rs' "$TMP/cargoex"; then   # the example file is shown: the empty answer is the reader's
     ok "B4 [[example]] is not a binary manifest row"; else no "B4 example produced ep: $CARGOEX"; fi
 # B5
-if has "$CARGOWS" "d==[]"; then
+if okrun "$TMP/cargows" && has "$CARGOWS" "d==[]"; then
     ok "B5 workspace root Cargo.toml with no [[bin]] yields no <ep>"; else no "B5 workspace root ep: $CARGOWS"; fi
 # B6
 if has "$CARGOWSA" "any(g['p']=='Cargo.toml' and g['group']=='bin' and any(e=={'n':'crate-a','target':'src/main.rs','def':'src/main.rs:3'} for e in g['e']) for g in d)"; then
@@ -206,19 +206,19 @@ if has "$PKGJSONMISS" "any(g.get('group')=='bin' and any(e.get('n')=='tool' and 
     ok "J3 a bin path outside the tree is external=1 beside an in-tree bin"; else no "J3 missing bin path: $PKGJSONMISS"; fi
 # J4
 if grep -q 'n="run"' "$TMP/pkgjsonexp"; then ok "J4 positive: run row shown"; else no "J4 positive: run row not shown (query did not reach src/index.js)"; fi
-[ "$PKGJSONEXP" = "[]" ]; verdict $? "J4 exports-only package.json yields no <ep>" "J4 exports produced rows: $PKGJSONEXP"
+okrun "$TMP/pkgjsonexp" && [ "$PKGJSONEXP" = "[]" ]; verdict $? "J4 exports-only package.json yields no <ep>" "J4 exports produced rows: $PKGJSONEXP"
 # J5
 if grep -q 'n="idle"' "$TMP/pkgjsonempty"; then ok "J5 positive: idle row shown"; else no "J5 positive: idle row not shown"; fi
-[ "$PKGJSONEMPTY" = "[]" ]; verdict $? "J5 no bin/main yields no <ep>" "J5 empty manifest produced rows: $PKGJSONEMPTY"
+okrun "$TMP/pkgjsonempty" && [ "$PKGJSONEMPTY" = "[]" ]; verdict $? "J5 no bin/main yields no <ep>" "J5 empty manifest produced rows: $PKGJSONEMPTY"
 # J6
 if has "$PKGJSONNM" "any(g['p']=='package.json' and g.get('group')=='bin' for g in d) and not any('node_modules' in g.get('p','') for g in d)"; then
     ok "J6 node_modules package.json is ignored; root bin still rides"; else no "J6 node_modules: $PKGJSONNM"; fi
 if grep -q 'n="depStart"' "$TMP/pkgjsonnmdep"; then ok "J6b positive: depStart row shown"; else no "J6b positive: depStart row not shown"; fi
 if grep -q 'n="rootStart"' "$TMP/pkgjsonnm"; then ok "J6b positive: root bin row shown in sibling root fixture"; else no "J6b positive: rootStart row not shown in pkgjsonnm"; fi
-[ "$PKGJSONNMDEP" = "[]" ]; verdict $? "J6b a package.json under node_modules yields no <ep>" "J6b node_modules package.json produced rows: $PKGJSONNMDEP" 
+okrun "$TMP/pkgjsonnmdep" && [ "$PKGJSONNMDEP" = "[]" ]; verdict $? "J6b a package.json under node_modules yields no <ep>" "J6b node_modules package.json produced rows: $PKGJSONNMDEP" 
 # J7
 if grep -q 'n="run"' "$TMP/pkgjsonts"; then ok "J7 positive: run row shown (src/index.ts)"; else no "J7 positive: run row not shown"; fi
-[ "$PKGJSONTS" = "[]" ]; verdict $? "J7 TS main -> missing dist/ yields no <ep>" "J7 TS dist main produced rows: $PKGJSONTS" 
+okrun "$TMP/pkgjsonts" && [ "$PKGJSONTS" = "[]" ]; verdict $? "J7 TS main -> missing dist/ yields no <ep>" "J7 TS dist main produced rows: $PKGJSONTS" 
 # F1-F3 (the fold of #459 + #460, fixtures built at run time): one format table decides how a target is read
 F="$TMP/fold"; mkdir -p "$F/py/pkg" "$F/dot/bin" "$F/lit/tools" || no "F fixture dirs"
 printf '[options.entry_points]\nx.report =\n    fmt = pkg.mod:Fmt\n    whole = pkg.mod\n' >"$F/py/setup.cfg"
@@ -254,8 +254,87 @@ if has "$FANON" "any(g['p']=='package.json' and g['e']==[{'n':'main','target':'s
 # F3: Cargo literal strings ('x') and a spaced [[ bin ]] header with a trailing comment read through the shared TOML helpers
 if has "$FLIT" "any(g['p']=='Cargo.toml' and g['e']==[{'n':'gen','target':'tools/gen.rs','def':'tools/gen.rs:3'}] for g in $(grp bin))"; then
     ok "F3 Cargo [[ bin ]] header + literal-string name/path -> tools/gen.rs:3 main"; else no "F3 cargo literal strings: $FLIT"; fi
+# V (fix round 1 of the fold, fixtures built at run time; [P] = red on 0f256cc7): every manifest path join, Cargo's order, npm's bin name
+V="$TMP/v"; mkdir -p "$V/a/up/src" "$V/a/shared" "$V/f/packages/a" "$V/f/shared" "$V/w/src/bin" "$V/w/tools" "$V/o/src/bin" "$V/s" "$V/nn" "$V/ab/src" "$V/at/src" "$V/q/pkg" "$V/qt/src" "$V/ql/src" || no "V fixture dirs"
+printf '[package]\nname = "up"\n\n[[bin]]\nname = "up"\npath = "src/main.rs"\n\n[[bin]]\nname = "sharedgen"\npath = "../shared/gen.rs"\n' >"$V/a/up/Cargo.toml"
+printf 'fn main() {\n    println!("up");\n}\n' >"$V/a/up/src/main.rs"; printf 'fn main() {\n    println!("gen");\n}\n' >"$V/a/shared/gen.rs"
+printf '{\n  "name": "a",\n  "bin": {\n    "a-cli": "./a.js",\n    "b-cli": "../../shared/b.js"\n  }\n}\n' >"$V/f/packages/a/package.json"
+printf 'export function startA() {\n  return 1;\n}\n' >"$V/f/packages/a/a.js"; printf 'export function startB() {\n  return 2;\n}\n' >"$V/f/shared/b.js"
+printf '[package]\nname = "win"\n\n[[bin]]\nname = "app"\npath = "src/app.rs"\n\n[[bin]]\nname = "gen"\npath = "src\\\\bin\\\\gen.rs"\n\n[[bin]]\nname = "lit"\npath = '"'"'src\\bin\\lit.rs'"'"'\n\n[[bin]]\nname = "mid"\npath = "./tools/../src/app.rs"\n\n[[bin]]\nname = "esc"\npath = "../../../nowhere/x.rs"\n\n[[bin]]\nname = "abs"\npath = "/src/app.rs"\n' >"$V/w/Cargo.toml"
+for b in app bin/gen bin/lit; do printf 'fn main() {\n    println!("x");\n}\n' >"$V/w/src/$b.rs"; done
+printf '[[bin]]\nname = "ord"\n\n[[bin]]\nname = "aux"\n\n[package]\nname = "ord"\n' >"$V/o/Cargo.toml"   # [[bin]] before [package]: Cargo still names ord src/main.rs
+printf 'fn main() {\n    println!("ord");\n}\n' >"$V/o/src/main.rs"; printf 'fn main() {\n    println!("aux");\n}\n' >"$V/o/src/bin/aux.rs"
+printf '{\n  "name": "@acme/tool",\n  "bin": "./cli.js"\n}\n' >"$V/s/package.json"; printf 'export function startTool() {\n  return 1;\n}\n' >"$V/s/cli.js"
+mkdir -p "$V/s2" && printf '{\n  "name": "@acme/objs",\n  "bin": {\n    "@acme/obj-cli": "./obj.js"\n  }\n}\n' >"$V/s2/package.json" && printf 'export function startObj() {\n  return 1;\n}\n' >"$V/s2/obj.js"
+printf '{\n  "bin": "./nn.js",\n  "main": "nn.js"\n}\n' >"$V/nn/package.json"; printf 'export function startNn() {\n  return 1;\n}\n' >"$V/nn/nn.js"   # nameless: npm drops the string bin; main stays
+printf '[package]\nname = "nob"\nautobins = false  # no inferred binary\n' >"$V/ab/Cargo.toml"; printf '[package]\nname = "yesb"\nautobins = true\n' >"$V/at/Cargo.toml"
+for d in ab at; do printf 'fn main() {\n    println!("x");\n}\n' >"$V/$d/src/main.rs"; done
+printf '[project]\nname = "qq"\ndescription = """\nExample:\n[project.scripts]\nghost = "pkg.cli:run_cli"\n"""\n\n[project.scripts]\nreal = "pkg.cli:run_real"\n' >"$V/q/pyproject.toml"
+printf 'def run_cli():\n    return 1\n\n\ndef run_real():\n    return 2\n' >"$V/q/pkg/cli.py"; : >"$V/q/pkg/__init__.py"
+printf '[package]\nname = "quietc"\n' >"$V/qt/Cargo.toml"; printf '[package]\nname = "loudc"\n\n[[bin]]\nname = "loudc"\npath = "src/main.rs"\n' >"$V/ql/Cargo.toml"
+for d in qt ql; do printf 'fn compute_total(x: u32) -> u32 {\n    x + 1\n}\n\nfn main() {\n    let t = compute_total(2);\n    println!("{}", t);\n}\n' >"$V/$d/src/main.rs"; done
+QOFF='--for=who passes the argument to compute_total and what next.run returns'
+run "$V/a" "$TMP/va" '--for=cargo run --bin up main entry'
+run "$V/f" "$TMP/vf" '--for=how does the a-cli command start startA startB'
+run "$V/w" "$TMP/vw" '--for=cargo run --bin gen entry main'
+run "$V/o" "$TMP/vo" '--for=cargo run --bin ord main entry'
+run "$V/s" "$TMP/vs" '--for=how does the tool command start startTool'
+run "$V/s2" "$TMP/vs2" '--for=how does the obj-cli command start startObj'
+run "$V/nn" "$TMP/vnn" '--for=how does startNn start the package main'
+run "$V/ab" "$TMP/vab" '--for=cargo run main entry'
+run "$V/at" "$TMP/vat" '--for=cargo run main entry'
+run "$V/q" "$TMP/vq" '--for=how do run_cli and run_real start'
+run "$V/qt" "$TMP/vqt" "$QOFF"
+run "$V/qt" "$TMP/vqtcue" '--for=what does main print when you cargo run it'
+run "$V/qt" "$TMP/vqtname" '--for=what does quietc print at startup, compute_total'
+run "$V/qt" "$TMP/vqtnear" '--for=what does quietcx print at startup, compute_total'
+run "$V/ql" "$TMP/vql" "$QOFF"
+run "$FX/cargows" "$TMP/cargowsm" '--for=how does crate-a main start'
+VR="va vf vw vo vs vs2 vnn vab vat vq vqt vqtcue vqtname vqtnear vql cargowsm"
+for a in $VR; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
+good(){ local a; for a in "$@"; do okrun "$TMP/$a" || return 1; done; }   # every named run exited 0 and printed an answer
+VA="$( eps "$TMP/va" )"; VF="$( eps "$TMP/vf" )"; VW="$( eps "$TMP/vw" )"; VO="$( eps "$TMP/vo" )"; VS="$( eps "$TMP/vs" )"; VS2="$( eps "$TMP/vs2" )"; VNN="$( eps "$TMP/vnn" )"
+VAB="$( eps "$TMP/vab" )"; VAT="$( eps "$TMP/vat" )"; VQ="$( eps "$TMP/vq" )"; VQT="$( eps "$TMP/vqt" )"; VQTCUE="$( eps "$TMP/vqtcue" )"; VQTNAME="$( eps "$TMP/vqtname" )"; VQTNEAR="$( eps "$TMP/vqtnear" )"; VQL="$( eps "$TMP/vql" )"; CARGOWSM="$( eps "$TMP/cargowsm" )"
+# V1 [P] a "../" target resolves to the indexed file it names, in both path formats (an indexed file never reads external=1)
+if good va && has "$VA" "any(g['p']=='up/Cargo.toml' and g['e']==[{'n':'up','target':'src/main.rs','def':'up/src/main.rs:1'},{'n':'sharedgen','target':'../shared/gen.rs','def':'shared/gen.rs:1'}] for g in d)"; then
+    ok "V1 Cargo path ../shared/gen.rs from up/ -> shared/gen.rs:1 main"; else no "V1 cargo ../ path: $VA"; fi
+if good vf && has "$VF" "any(g['p']=='packages/a/package.json' and {'n':'b-cli','target':'../../shared/b.js','def':'shared/b.js:1'} in g['e'] and {'n':'a-cli','target':'./a.js','def':'packages/a/a.js:1'} in g['e'] for g in d)"; then
+    ok "V1b package.json bin ../../shared/b.js -> shared/b.js:1, beside ./a.js"; else no "V1b package.json ../ path: $VF"; fi
+# V2 [P] a Windows path (basic-string "src\\bin\\gen.rs", literal 'src\bin\lit.rs') is the same file; [G] a mid-path "tools/.." folds;
+#    an escape above the root and an absolute path stay external=1 (no file there is indexed)
+if good vw && has "$VW" "any(g['p']=='Cargo.toml' and {'n':'gen','target':'src\\\\\\\\bin\\\\\\\\gen.rs','def':'src/bin/gen.rs:1'} in g['e'] and {'n':'lit','target':'src\\\\bin\\\\lit.rs','def':'src/bin/lit.rs:1'} in g['e'] and {'n':'mid','target':'./tools/../src/app.rs','def':'src/app.rs:1'} in g['e'] and {'n':'esc','target':'../../../nowhere/x.rs','external':'1'} in g['e'] and {'n':'abs','target':'/src/app.rs','external':'1'} in g['e'] for g in d)"; then
+    ok "V2 Windows backslash paths (basic and literal strings) and a tools/.. path resolve; an escape above the root and an absolute path stay external=1"; else no "V2 path normalization: $VW"; fi
+# V3 [P] [[bin]] tables before [package]: the package's own bin defaults to src/main.rs, another to src/bin/<name>.rs
+if good vo && has "$VO" "any(g['p']=='Cargo.toml' and g['l']=='1' and g['e']==[{'n':'ord','target':'src/main.rs','def':'src/main.rs:1'},{'n':'aux','target':'src/bin/aux.rs','def':'src/bin/aux.rs:1'}] for g in d)"; then
+    ok "V3 [[bin]] before [package]: ord -> src/main.rs, aux -> src/bin/aux.rs (Cargo's defaults, filled after the scan)"; else no "V3 bin before package: $VO"; fi
+# V4 [P] npm installs a bin under its name's last segment: a scoped string bin and a scoped object key; [P] a nameless string bin is dropped, its main stays
+if good vs && has "$VS" "any(g['p']=='package.json' and g['e']==[{'n':'tool','target':'./cli.js','def':'cli.js:1'}] for g in $(grp bin))"; then
+    ok "V4 scoped string bin @acme/tool installs the command tool"; else no "V4 scoped string bin: $VS"; fi
+if good vs2 && has "$VS2" "any(g['e']==[{'n':'obj-cli','target':'./obj.js','def':'obj.js:1'}] for g in $(grp bin))"; then
+    ok "V4b scoped object key @acme/obj-cli installs the command obj-cli"; else no "V4b scoped object key: $VS2"; fi
+if good vnn && has "$VNN" "$(grp bin)==[] and any(g['e']==[{'n':'main','target':'nn.js','def':'nn.js:1'}] for g in $(grp main))"; then
+    ok "V4c a nameless package.json string bin is no entry (npm drops it); its main is n=main"; else no "V4c nameless string bin: $VNN"; fi
+# V5 [P] autobins = false (a trailing comment) infers no package bin; [G] autobins = true does
+if good vab vat && grep -q 'n="main"' "$TMP/vab" && has "$VAB" "d==[]" && has "$VAT" "any(g['e']==[{'n':'yesb','target':'src/main.rs','def':'src/main.rs:1'}] for g in d)"; then
+    ok "V5 autobins = false: no inferred bin though main is shown; autobins = true: yesb -> src/main.rs:1"; else no "V5 autobins: $VAB / $VAT"; fi
+# V6 [P] a pyproject multi-line string that spells a [project.scripts] table is a value; [G] the real table after it still reads
+if good vq && has "$VQ" "any(g['e']==[{'n':'real','target':'pkg.cli:run_real','def':'pkg/cli.py:5'}] for g in $(grp console_scripts)) and not any(e['n']=='ghost' for g in d for e in g['e'])"; then
+    ok "V6 pyproject description = \"\"\" ... [project.scripts] ghost ... \"\"\" registers nothing; the real table after it does"; else no "V6 pyproject multi-line: $VQ"; fi
+# V7 an implicit-only Cargo group (no [[bin]]) rides only on a binary cue: [P] quiet on an off-topic task whose main is shown (next.run is no cue);
+#    [G] a cue word, the package name; [P] a longer word holding the name is not it; [G] an explicit [[bin]] rides on the same off-topic task
+if good vqt && grep -q 'n="main"' "$TMP/vqt" && has "$VQT" "d==[]"; then
+    ok "V7 implicit-only group quiet on an off-topic task (main shown, next.run not a cue)"; else no "V7 implicit group off-topic: $VQT"; fi
+if good vqtcue vqtname && has "$VQTCUE" "any(g['e']==[{'n':'quietc','target':'src/main.rs','def':'src/main.rs:5'}] for g in d)" && has "$VQTNAME" "any(g['e'][0]['n']=='quietc' for g in d)"; then
+    ok "V7b implicit-only group rides on a cue word (main, run) and on the package name"; else no "V7b implicit group cue: $VQTCUE / $VQTNAME"; fi
+if good vqtnear && grep -q 'n="main"' "$TMP/vqtnear" && has "$VQTNEAR" "d==[]"; then
+    ok "V7c 'quietcx' does not name the package quietc"; else no "V7c name boundary: $VQTNEAR"; fi
+if good vql && grep -q 'n="main"' "$TMP/vql" && has "$VQL" "any(g['e']==[{'n':'loudc','target':'src/main.rs','def':'src/main.rs:5'}] for g in d)"; then
+    ok "V7d an explicit [[bin]] group rides on the same off-topic task"; else no "V7d explicit group off-topic: $VQL"; fi
+# B5 positive twin: at the same workspace root, a member's main is shown and its own Cargo.toml group rides; the root manifest adds none
+if good cargowsm && has "$CARGOWSM" "'Cargo.toml' not in [g['p'] for g in d] and any(g['p']=='crate-a/Cargo.toml' and g['e']==[{'n':'crate-a','target':'src/main.rs','def':'crate-a/src/main.rs:3'}] for g in d)"; then
+    ok "B5 positive: the workspace root run shows crate-a's own group, none from the root Cargo.toml"; else no "B5 positive twin: $CARGOWSM"; fi
 # N1
-[ "$NEG" = "[]" ]; verdict $? "N1 a non-manifest .cfg yields no <ep>" "N1 config.cfg produced rows: $NEG"
+okrun "$TMP/neg" && grep -q 'n="Fmt"' "$TMP/neg" && [ "$NEG" = "[]" ]; verdict $? "N1 a non-manifest .cfg yields no <ep> (Fmt shown)" "N1 config.cfg produced rows: $NEG"
 # N2
 for v in --json --token-budget=3000 --signatures-only; do
     run "$FX/cfg" "$TMP/n2on" "$Q" "$v"; RIPWIRE_NO_EP_MANIFEST=1 run "$FX/cfg" "$TMP/n2off" "$Q" "$v"
@@ -302,7 +381,7 @@ done
 # L1-MUT: drop one definition from the ep clause (def= in the compact clause, used_capped= in both): the same check must go red
 for f in cfg cfgfull; do
 sed -e 's/def=file:line/DEF-GONE/' -e 's/used_capped=/USED-GONE=/' "$TMP/$f" >"$TMP/$f.mut"
-python3 - "$TMP/$f.mut" <<'PY'; [ $? -ne 0 ]; verdict $? "L1-MUT $f: a clause without def= / used_capped= fails the L1 check" "L1-MUT $f: the L1 check passed a clause missing definitions (it cannot fail)"
+python3 - "$TMP/$f.mut" <<'PY'; [ $? -ne 0 ] && okrun "$TMP/$f" && grep -q '; ep p= l= group=' "$TMP/$f"; verdict $? "L1-MUT $f: a clause without def= / used_capped= fails the L1 check" "L1-MUT $f: the L1 check passed a clause missing definitions (it cannot fail)"
 import re, sys
 t = open(sys.argv[1]).read()
 leg = " ".join(re.findall(r"<!--(.*?)-->", t, flags=re.S))
@@ -314,13 +393,13 @@ sys.exit(0 if all(re.search(r"(?<!\w)" + a + "=", clause) for a in attrs) else 1
 PY
 done
 # X1 X2 X3
-cmp -s "$TMP/cfg" "$TMP/cfg2"; verdict $? "X1 deterministic" "X1 two runs differ"
+okrun "$TMP/cfg" && okrun "$TMP/cfg2" && grep -q '<ep ' "$TMP/cfg" && cmp -s "$TMP/cfg" "$TMP/cfg2"; verdict $? "X1 deterministic" "X1 two runs differ"
 if command -v xmllint >/dev/null 2>&1; then
     for f in cfg cfgfull pyp cargo; do xmllint --noout "$TMP/$f" 2>/dev/null; verdict $? "X2 $f well-formed" "X2 $f not well-formed"; done
 else
     echo "  SKIP  X2 xmllint not installed"
 fi
-python3 - "$TMP/cfg" "$TMP/cfgfull" <<'PY'; verdict $? "X3 no '--' inside a legend comment" "X3 '--' inside a legend comment"
+python3 - "$TMP/cfg" "$TMP/cfgfull" <<'PY'; [ $? -eq 0 ] && okrun "$TMP/cfg" && okrun "$TMP/cfgfull" && grep -q '<!--' "$TMP/cfg" && grep -q '<!--' "$TMP/cfgfull"; verdict $? "X3 no '--' inside a legend comment" "X3 '--' inside a legend comment"
 import re, sys
 for f in sys.argv[1:]:
     for c in re.findall(r"<!--(.*?)-->", open(f).read(), flags=re.S):

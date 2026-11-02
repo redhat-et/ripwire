@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -74,6 +75,7 @@ struct EpEntry
     std::string   name;
     std::string   target;
     std::uint32_t line = 0;
+    bool          implicit = false;   // no manifest line names it: Cargo's package bin inferred with no [[bin]] (a quiet satellite, renderForEpManifest)
 };
 
 namespace epdetail
@@ -344,11 +346,17 @@ inline void parseSetupCfgEntryPoints( std::string_view text, std::vector<EpEntry
 // `[tool.poetry.scripts]` tables, each `name = "module:attr"` line whose value is a string.
 inline void parsePyprojectEntryPoints( std::string_view text, std::vector<EpEntry>& out )
 {
-    std::string   group;
-    std::uint32_t groupLine = 0;
+    std::string      group;
+    std::uint32_t    groupLine = 0;
+    std::string_view multiline;   // the delimiter of an open multi-line string: its lines are a value, never a table or a key
     darkflags::forEachLine( text, [ & ]( std::string_view line, std::uint32_t lineNo )
     {
         const std::string_view t = trimWs( line );
+        if( !multiline.empty() )
+        {
+            multiline = t.contains( multiline ) ? std::string_view() : multiline;
+            return;
+        }
         if( t.empty() || t.front() == '#' )
         {
             return;
@@ -361,12 +369,13 @@ inline void parsePyprojectEntryPoints( std::string_view text, std::vector<EpEntr
             groupLine = lineNo;
             return;
         }
-        if( group.empty() )
+        const std::size_t eq = epdetail::tomlKeyEnd( t );   // the key ends at the first '=' outside quotes
+        if( eq == std::string_view::npos )
         {
             return;
         }
-        const std::size_t eq = epdetail::tomlKeyEnd( t );   // the key ends at the first '=' outside quotes
-        if( eq == std::string_view::npos )
+        multiline = epdetail::tomlMultilineOpen( trimWs( t.substr( eq + 1 ) ) );   // in any table: [project] description = """
+        if( group.empty() )
         {
             return;
         }
@@ -382,13 +391,17 @@ inline void parsePyprojectEntryPoints( std::string_view text, std::vector<EpEntr
 }
 
 // Cargo.toml: each `[[bin]]` table (name, path; Cargo's default `src/main.rs` for the package's own name, `src/bin/<name>.rs`
-// otherwise, when `path` is omitted), else — no `[[bin]]` at all — the package's own bin at `src/main.rs`. Group "bin", the
-// target a file path. Lines inside a multi-line string are values, never keys or tables.
+// otherwise, when `path` is omitted — filled after the scan, so a `[[bin]]` written before `[package]` is named as Cargo
+// names it), else — no `[[bin]]` at all and no `autobins = false` — the package's own bin at `src/main.rs`, marked implicit.
+// Group "bin", the target a file path. Lines inside a multi-line string are values, never keys or tables. Not read (floors):
+// src/bin/<name>/main.rs as a default path, and the src/bin/*.rs binaries Cargo auto-discovers.
 inline void parseCargoBins( std::string_view text, std::vector<EpEntry>& out )
 {
     bool             inBin     = false;
     bool             inPackage = false;
     bool             sawBin    = false;
+    bool             autobins  = true;
+    const std::size_t first    = out.size();   // this manifest's entries start here
     std::string      pkgName;
     std::uint32_t    pkgLine = 0;
     std::string      curName;
@@ -399,9 +412,7 @@ inline void parseCargoBins( std::string_view text, std::vector<EpEntry>& out )
     {
         if( inBin && !curName.empty() )
         {
-            // (src/bin/<name>/main.rs is not tried: a floor, the entry then reads unresolved or external)
-            const std::string path = !curPath.empty() ? curPath : curName == pkgName ? std::string( "src/main.rs" ) : "src/bin/" + curName + ".rs";
-            out.push_back( EpEntry{ "bin", binLine, curName, path, binLine } );
+            out.push_back( EpEntry{ "bin", binLine, curName, curPath, binLine } );   // an empty path: Cargo's default, after the scan
             sawBin = true;
         }
         curName.clear();
@@ -439,6 +450,11 @@ inline void parseCargoBins( std::string_view text, std::vector<EpEntry>& out )
         multiline                                   = epdetail::tomlMultilineOpen( trimWs( t.substr( eq + 1 ) ) );
         const std::vector<std::string>        key   = epdetail::tomlKeyParts( t.substr( 0, eq ) );
         const std::optional<std::string_view> val   = epdetail::tomlStringValue( t.substr( eq + 1 ) );
+        if( inPackage && key.size() == 1 && key[0] == "autobins" )
+        {
+            const std::string_view rhs = trimWs( t.substr( eq + 1 ) );   // a TOML bool, then blanks or a comment
+            autobins = !( rhs.starts_with( "false" ) && ( rhs.size() == 5 || rhs[5] == ' ' || rhs[5] == '\t' || rhs[5] == '#' ) );
+        }
         if( key.size() != 1 || !val || val->empty() )
         {
             return;
@@ -457,9 +473,14 @@ inline void parseCargoBins( std::string_view text, std::vector<EpEntry>& out )
         }
     } );
     flushBin();
-    if( !sawBin && !pkgName.empty() )
+    for( std::size_t i = first; i < out.size(); ++i )
     {
-        out.push_back( EpEntry{ "bin", pkgLine, pkgName, "src/main.rs", pkgLine } );
+        // (src/bin/<name>/main.rs is not tried: a floor, the entry then reads unresolved or external)
+        out[i].target = !out[i].target.empty() ? out[i].target : out[i].name == pkgName ? std::string( "src/main.rs" ) : "src/bin/" + out[i].name + ".rs";
+    }
+    if( !sawBin && autobins && !pkgName.empty() )
+    {
+        out.push_back( EpEntry{ "bin", pkgLine, pkgName, "src/main.rs", pkgLine, /*implicit=*/true } );
     }
 }
 
@@ -505,7 +526,7 @@ inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>
     {
         return;
     }
-    std::string pkgName;   // a string `bin` and `main` are named by the package; with no "name", by their own key (never invented)
+    std::string pkgName;   // a string `bin` and `main` are named by the package; with no "name", `main` by its key (never invented)
     if( const tsimport::JsonNode* nm = root.get( "name" ); nm != nullptr && nm->kind == tsimport::JsonNode::Kind::Str && !nm->str.empty() )
     {
         pkgName = nm->str;
@@ -520,9 +541,11 @@ inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>
     if( const tsimport::JsonNode* bin = root.get( "bin" ) )
     {
         const std::uint32_t binLine = jsonKeyLine( text, "bin" );
-        if( bin->kind == tsimport::JsonNode::Kind::Str && !bin->str.empty() )
+        // npm installs a bin under its name's last segment ("@acme/tool" → tool), and drops a string `bin` of a nameless package
+        const auto command = []( std::string_view n ) { return n.substr( n.rfind( '/' ) == std::string_view::npos ? 0 : n.rfind( '/' ) + 1 ); };
+        if( bin->kind == tsimport::JsonNode::Kind::Str && !bin->str.empty() && !pkgName.empty() )
         {
-            add( "bin", binLine, pkgName.empty() ? std::string_view( "bin" ) : std::string_view( pkgName ), bin->str, binLine );
+            add( "bin", binLine, command( pkgName ), bin->str, binLine );
         }
         else if( bin->kind == tsimport::JsonNode::Kind::Obj )
         {
@@ -531,7 +554,7 @@ inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>
                 const tsimport::JsonNode& v = bin->vals[i];
                 if( v.kind == tsimport::JsonNode::Kind::Str && !v.str.empty() && !bin->keys[i].empty() )
                 {
-                    add( "bin", binLine, bin->keys[i], v.str, binLine );
+                    add( "bin", binLine, command( bin->keys[i] ), v.str, binLine );
                 }
             }
         }
@@ -772,18 +795,17 @@ inline std::uint8_t epFormatsOfForm( EpTargetForm form ) noexcept
     return mask;
 }
 
-// THE ONE PATH RESOLVER for file-path targets (Cargo `path`, package.json `bin`/`main`): `path` as written, leading "./"
-// dropped, joined to the manifest's directory `mdir`; the indexed file at exactly that root-relative path. `inTree` says
-// whether one exists. A path that leaves the manifest's directory ("../x") or names a directory is not tried (a floor).
+// THE ONE PATH RESOLVER for file-path targets (Cargo `path`, package.json `bin`/`main`): `path` as written, a Windows `\`
+// read as `/`, joined to the manifest's directory `mdir` and normalized lexically (lexicalNormalize: "./" and "." elided, ".."
+// collapsed, so "../shared/gen.rs" from up/ is shared/gen.rs); the indexed file at exactly that root-relative path. `inTree`
+// says whether one exists. A path that escapes above the root, an absolute path or a directory matches no indexed file: External.
 inline std::uint32_t epPathFile( const IngestResult& ing, std::string_view mdir, std::string_view path, bool& inTree )
 {
-    while( path.starts_with( "./" ) )
-    {
-        path.remove_prefix( 2 );
-    }
-    const std::string rel = mdir.empty() ? std::string( path ) : std::string( mdir ) + "/" + std::string( path );
+    std::string joined = mdir.empty() ? std::string( path ) : std::string( mdir ) + "/" + std::string( path );
+    std::replace( joined.begin(), joined.end(), '\\', '/' );   // a TOML basic string's undecoded "\\" leaves an empty segment: elided
+    const std::string rel = path.starts_with( '/' ) || path.starts_with( '\\' ) ? std::string() : lexicalNormalize( joined );
     std::uint32_t     hit = kNoFile;
-    for( std::uint32_t f = 0; f < ing.files.size() && hit == kNoFile; ++f )
+    for( std::uint32_t f = 0; f < ing.files.size() && hit == kNoFile && !rel.empty(); ++f )
     {
         hit = rootRelPath( ing, f ) == rel ? f : kNoFile;
     }
@@ -998,6 +1020,63 @@ inline std::vector<std::vector<EpTarget>> resolveEpTargets( const IngestResult& 
     return targets;
 }
 
+// An implicit-only group (Cargo's inferred package bin: no [[bin]] line names it) adds only the package name to a src/main.rs
+// row the answer already shows, so it rides only when the task asks about running a binary: a cue word (run, bin, binary, cli,
+// command, executable, launch, main, entry, entrypoint and their plurals and -ing forms), case-folded, as a whole word — words
+// split on every byte that is not alphanumeric, '_', '.' or ':', so `next.run` and `axum::serve` are identifiers, not cues — or
+// the name of one of the group's entries (`-` and `_` alike, as Cargo's crate names) bounded by bytes that are not a name byte.
+inline bool epTaskCuesBinary( std::string_view task, std::span<const std::string* const> names )
+{
+    static constexpr std::string_view kCues[] = { "run", "runs", "running", "bin", "bins", "binary", "binaries", "cli", "command",
+                                                   "commands", "executable", "executables", "launch", "launches", "launching", "main",
+                                                   "entry", "entrypoint", "entrypoints" };
+    std::string lower;    // the task case-folded: the cue words
+    std::string folded;   // and with '-' read as '_': the entry names
+    for( const char c : task )
+    {
+        lower += char( std::tolower( static_cast<unsigned char>( c ) ) );
+        folded += c == '-' ? '_' : lower.back();
+    }
+    const auto fold     = []( char c ) { return c == '-' ? '_' : char( std::tolower( static_cast<unsigned char>( c ) ) ); };
+    const auto wordByte = []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '.' || c == ':'; };
+    for( std::size_t i = 0; i < lower.size(); )
+    {
+        std::size_t j = i;
+        while( j < lower.size() && wordByte( lower[j] ) )
+        {
+            ++j;
+        }
+        std::string_view w = std::string_view( lower ).substr( i, j - i );
+        while( !w.empty() && ( w.back() == '.' || w.back() == ':' ) )
+        {
+            w.remove_suffix( 1 );   // a sentence's full stop or colon ends the word, it does not join it
+        }
+        if( std::ranges::find( kCues, w ) != std::end( kCues ) )
+        {
+            return true;
+        }
+        i = j + 1;
+    }
+    const auto nameByte = []( char c ) { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
+    for( const std::string* n : names )
+    {
+        std::string want;
+        for( const char c : *n )
+        {
+            want += fold( c );
+        }
+        for( std::size_t at = want.empty() ? std::string::npos : folded.find( want ); at != std::string::npos; at = folded.find( want, at + 1 ) )
+        {
+            const std::size_t end = at + want.size();
+            if( ( at == 0 || !nameByte( folded[at - 1] ) ) && ( end == folded.size() || !nameByte( folded[end] ) ) )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // A (manifest, group) the answer prints.
 struct EpPick
 {
@@ -1007,8 +1086,25 @@ struct EpPick
 
 // The groups that hold a shown row, in the rank order of their first shown target; `total` counts them before the cap.
 inline std::vector<EpPick> pickEpGroups( const std::vector<Manifest>& manifests, const std::vector<std::vector<EpTarget>>& targets,
-                                         std::span<const NodeId> shown, std::size_t& total )
+                                         std::span<const NodeId> shown, std::string_view task, std::size_t& total )
 {
+    // a group whose every entry is implicit rides only on a binary cue in the task (epTaskCuesBinary)
+    const auto quiet = [ & ]( std::size_t m, const std::string& g )
+    {
+        std::vector<const std::string*> names;
+        for( const EpEntry& e : manifests[m].entries )
+        {
+            if( e.group == g && !e.implicit )
+            {
+                return false;
+            }
+            if( e.group == g )
+            {
+                names.push_back( &e.name );
+            }
+        }
+        return !epTaskCuesBinary( task, names );
+    };
     std::vector<EpPick> picks;
     for( const NodeId id : shown )
     {
@@ -1018,7 +1114,7 @@ inline std::vector<EpPick> pickEpGroups( const std::vector<Manifest>& manifests,
             {
                 const std::string& g    = manifests[m].entries[k].group;
                 const auto         same = [ & ]( const EpPick& p ) { return p.m == m && p.group == g; };
-                if( targets[m][k].def == id && !std::ranges::any_of( picks, same ) )
+                if( targets[m][k].def == id && !std::ranges::any_of( picks, same ) && !quiet( m, g ) )
                 {
                     picks.push_back( EpPick{ m, g } );
                 }
@@ -1138,8 +1234,9 @@ inline void collectEpManifestsForShown( const IngestResult& ing, std::span<const
     }
 }
 
-// The element(s). `shown` is the answer's ranked head (the rows <sigs> serves, rank order). Single-root runs only.
-inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const NodeId> shown )
+// The element(s). `shown` is the answer's ranked head (the rows <sigs> serves, rank order); `task` the --for text (an implicit-only
+// Cargo group rides on a binary cue in it, pickEpGroups). Single-root runs only.
+inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const NodeId> shown, std::string_view task )
 {
     EpRender out;
     if( ing.crawlRoot.empty() || shown.empty() )
@@ -1155,7 +1252,7 @@ inline EpRender renderForEpManifest( const IngestResult& ing, std::span<const No
     }
     const std::vector<std::vector<EpTarget>> targets     = epdetail::resolveEpTargets( ing, manifests );
     std::size_t                              groupsTotal = 0;
-    const std::vector<epdetail::EpPick>      picks       = epdetail::pickEpGroups( manifests, targets, shown, groupsTotal );
+    const std::vector<epdetail::EpPick>      picks       = epdetail::pickEpGroups( manifests, targets, shown, task, groupsTotal );
     if( picks.empty() )
     {
         return out;   // no group holds a shown row: nothing to scan for consumers, no element to print
