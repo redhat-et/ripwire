@@ -3920,7 +3920,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v26 (2026-11-02, #493 / #499: Rust test-attribute functions) — no blob shape change; the dead SET's inputs moved.
 // registeredMacroSymbolIds, which isDeadCandidate's register-macro exemption reads, now also holds a Rust definition that a
 // #[test] or #[tokio::test] attribute stacks above (registersItself). The harness calls such a function, so it is no dead
-// candidate. Renumbered above main's v25 (land-472); whichever of the two open scheme bumps merges second renumbers again.
+// candidate. Renumbered above main's v25 (land-472); The open #494 bump takes v27, so the two never share a value.
 constexpr std::uint32_t kQSnapCacheScheme = 26;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
