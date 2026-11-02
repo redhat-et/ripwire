@@ -564,16 +564,54 @@ printf '#include "../../lib/small.h"\n#include "../../lib/util.h"\nint m1(void) 
 printf '#include "../../lib/small.h"\nint m2(void) { return small_fn(); }\n' > "$PH/src/b/m2.c"
 pi(){ PO="$( cd "$PH" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$PH" --impact="$1" --no-cache "${@:2}" 2>/dev/null )"; PRC=$?; }
 proot(){ printf '%s' "$PO" | grep -oE '<impact [^>]*>' | head -1; }
+pi lib/core.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" importers="45" shown_importers="40" importers_capped="1" importers_next="--impact=lib/core.h --limit=45" importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' \
+   && [ "$( printf '%s' "$PO" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )" = 40 ]; then
+    ok "path (a): --impact=lib/core.h lists its importers (45, 40 shown) under selector=file, with the cut rollup tests=15 dirs=src/a:20,tests/unit:15,src/b:10"
+else no "path (a) rc=$PRC: $R"; fi
+if [ "$PRC" = 0 ] && [ -n "$R" ] && ! printf '%s' "$R" | grep -qE ' (reaches|defs|found)='; then ok "path (a): no call reach, no defs=, no found= on a file answer"; else no "path (a) carries symbol attributes: $R"; fi
+for spell in core.h ./lib/core.h "$PH/lib/core.h"; do
+    pi "$spell"; R2="$( proot )"
+    if [ "$PRC" = 0 ] && printf '%s' "$R2" | grep -q 'selector="file" importers="45"'; then ok "path (b): the spelling '${spell#$PH/}' names the same file"; else no "path (b) '$spell' rc=$PRC: $R2"; fi
+done
+pi util.h; R="$( printf '%s' "$PO" | grep -oE '<impact [^>]*>' )"
+if [ "$PRC" = 1 ] && printf '%s' "$R" | grep -q 'found="0" near="lib/util.h"'; then ok "path (c): a suffix two files share stays a refusal (exit 1) whose near= is the first path"; else no "path (c) rc=$PRC: $R"; fi
+pi lib/nope.h; R="$( printf '%s' "$PO" | grep -oE '<impact [^>]*>' )"
+if [ "$PRC" = 1 ] && printf '%s' "$R" | grep -q 'found="0"' && ! printf '%s' "$R" | grep -q 'selector='; then ok "path (d): a path no file has stays found=0, exit 1"; else no "path (d) rc=$PRC: $R"; fi
+pi lib/core.h --limit=45; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'importers="45" shown_importers="45" importers_capped="0"' && ! printf '%s' "$R" | grep -qE 'importers_(tests|dirs|next)='; then
+    ok "rollup (e): an uncut tier (--limit=45) has no importers_tests=/importers_dirs= (every importer is a row)"
+else no "rollup (e) rc=$PRC: $R"; fi
+pi lib/small.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" importers="2" shown_importers="2" importers_capped="0"' && ! printf '%s' "$R" | grep -q 'importers_tests='; then
+    ok "rollup (f): a 2-importer file: uncut, no rollup"
+else no "rollup (f) rc=$PRC: $R"; fi
 pi core_fn; R="$( proot )"
 if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'importers="45" shown_importers="0" importers_capped="1"' && printf '%s' "$R" | grep -q 'importers_umbrella="1" importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' && ! printf '%s' "$R" | grep -q 'selector='; then
     ok "rollup (g): the symbol answer's umbrella tier (a count, 0 rows) carries the same rollup (no selector=: a symbol still wins)"
 else no "rollup (g) rc=$PRC: $R"; fi
+pi lib/core.h:core_fn; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'defs="1"' && ! printf '%s' "$R" | grep -q 'selector='; then ok "path (h): FILE:SYM is still a symbol answer"; else no "path (h) rc=$PRC: $R"; fi
+pi lib/core.h --json
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"selector":"file","importers":45,"shown_importers":40,"importers_capped":true' && printf '%s' "$PO" | grep -q '"importers_tests":15,"importers_dirs":"src/a:20,tests/unit:15,src/b:10"'; then
+    ok "path (i): --json carries selector, the tier and the rollup"
+else no "path (i) rc=$PRC: $( printf '%s' "$PO" | head -c 400 )"; fi
 pi core_fn --json
 if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"importers_tests":15,"importers_dirs":"src/a:20,tests/unit:15,src/b:10"'; then ok "rollup (j): the symbol --json carries the rollup"; else no "rollup (j) rc=$PRC"; fi
 pi core_fn --format=columnar
 if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q 'importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' && printf '%s' "$PO" | grep -q 'importers_tests=/importers_dirs='; then
     ok "rollup (k): columnar carries the rollup and its legend"
 else no "rollup (k) rc=$PRC: $( printf '%s' "$PO" | grep -oE '<impact [^>]*>' )"; fi
+pi lib/core.h --legend=full
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q 'selector="file": of= names an indexed FILE' && printf '%s' "$PO" | grep -q 'importers_tests=/importers_dirs= (a cut importer listing only)'; then
+    ok "path (l): the full legend defines selector= and the rollup"
+else no "path (l) rc=$PRC"; fi
+if command -v xmllint >/dev/null 2>&1; then
+    pi lib/core.h --legend=full
+    if printf '%s' "$PO" | xmllint --noout - 2>/dev/null; then ok "path (m): xml well-formed"; else no "path (m): xml malformed"; fi
+else
+    printf '  SKIP  path (m) xml well-formed (no xmllint)\n'
+fi
 rm -rf "$PH"
 
 # ── #10 determinism + well-formedness ─────────────────────────────────────────────────────────────────
