@@ -84,12 +84,13 @@ row M.rust        "$R" callees u_member     src/a.rs Thing::lock name
 # name in tests/ or a bin (`mm::far::helper()`) Rule 3 never narrows; the qualified-call scope guard drops it at base too (card RUST-REEXPORT-SCOPE).
 M=$T/mm
 w "$M/Cargo.toml" '[package]\nname = "mm"\nversion = "0.1.0"\n'
-w "$M/src/lib.rs" 'pub mod a;\npub mod far;\npub mod b;\npub mod io;\npub mod u;\n'
-w "$M/src/a.rs" 'pub fn helper() {}\npub fn viasuper() {}\npub struct Thing;\n'
+w "$M/src/lib.rs" 'pub mod a;\npub mod far;\npub mod b;\npub mod io;\npub mod re;\npub mod u;\n'
+w "$M/src/re.rs" 'pub use extlib::lone;\n'
+w "$M/src/a.rs" 'pub fn helper() {}\npub fn viasuper() {}\npub fn lone() {}\npub struct Thing;\n'
 w "$M/src/far/mod.rs" 'pub use crate::a::helper;\npub use super::a::viasuper;\n'
-w "$M/src/b.rs" 'pub fn helper() {}\npub fn viasuper() {}\npub fn stdout() {}\n'
+w "$M/src/b.rs" 'pub fn helper() {}\npub fn viasuper() {}\npub fn stdout() {}\npub fn lone() {}\n'
 w "$M/src/io.rs" 'pub struct Io;\npub fn stdout() {}\n'
-w "$M/src/u.rs" 'use crate::a::Thing;\nuse crate::io::Io;\nuse crate::far as f;\nfn m_crate() { crate::far::helper(); }\nfn m_crate_super() { crate::far::viasuper(); }\nfn m_super() { super::far::helper(); }\nfn m_modalias() { f::helper(); }\nfn m_selfalias() { self::f::helper(); }\nfn m_direct() { crate::a::helper(); }\nfn m_std() { std::io::stdout(); crate::a::helper(); }\n'
+w "$M/src/u.rs" 'use crate::a::Thing;\nuse crate::io::Io;\nuse crate::far as f;\nuse crate::re::lone;\nfn m_reexport_out() { lone(); crate::a::helper(); }\nfn m_crate() { crate::far::helper(); }\nfn m_crate_super() { crate::far::viasuper(); }\nfn m_super() { super::far::helper(); }\nfn m_modalias() { f::helper(); }\nfn m_selfalias() { self::f::helper(); }\nfn m_direct() { crate::a::helper(); }\nfn m_std() { std::io::stdout(); crate::a::helper(); }\n'
 row R13.modalias  "$M" callees m_modalias    src/a.rs helper   name
 row R13.selfalias "$M" callees m_selfalias   src/a.rs helper   name
 row R14.crate     "$M" callees m_crate       src/a.rs helper   name
@@ -99,6 +100,9 @@ row R14.super     "$M" callees m_super       src/a.rs helper   name
 row R14.direct    "$M" callees m_direct      src/a.rs helper   proven
 row R14.std       "$M" callees m_std         src/io.rs stdout  none
 row R14.stdtwin   "$M" callees m_std         src/a.rs helper   proven
+# a `use` into the crate that a module re-exports from outside it (`pub use extlib::lone`) proves no in-tree namesake (red under M21)
+row R15.useout    "$M" callees m_reexport_out src/a.rs lone   name
+row R15.twin      "$M" callees m_reexport_out src/a.rs helper proven
 
 # ---- Rust, a workspace whose crates have no lib.rs (`[lib] path`): the module layout knows nothing, the written root reads against the package directory.
 Z=$T/zs
