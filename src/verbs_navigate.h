@@ -3060,6 +3060,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + rw::defsListedAttrXml( v.attrib.groups, v.defListing )         // attrib-multidef: a cut table says so
                                  + rw::byDepthAttrXml( v.byDepth )                                // 0.6.5: the XML root's, same place
                                  + " importers=\"" + std::to_string( v.imports.files.size() ) + "\""
+                                 + rw::importTierRollupAttrXml( v.imports )                      // IMPACT-ROLLUP: the XML root's, on a cut tier only
                                  + rw::importsUnresolvedAttrXml( v.imports.importsUnresolved )   // #220: the XML root's, absent at 0
                                  + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ) )
                                  + rw::noFileEdgesAttrXml( v.imports.noFileEdgeLangs )           // arch-honest: the XML root's, absent when every def's language draws edges
@@ -3110,6 +3111,17 @@ int emitImpactColumnar( const ImpactView& v )
     return 0;
 }
 
+// IMPACT-ROLLUP: the JSON twin of graph.h importTierRollupAttrXml — ,"importers_tests":N,"importers_dirs":"…" on a cut
+// tier, "" otherwise (jsonStr lives in serialize.h, which graph.h cannot include).
+inline std::string importTierRollupJson( const rw::ImportTier& t )
+{
+    if( !t.capped || t.files.empty() )
+    {
+        return {};
+    }
+    return ",\"importers_tests\":" + std::to_string( t.testImporters ) + ",\"importers_dirs\":\"" + rw::jsonStr( t.topDirs ) + "\"";
+}
+
 // L2: --json — same set, keys mirror the XML attr names (of/defs/reaches/shown/capped/t/n/p).
 // §A4c: shown/capped came from a hand-rolled pair that never grew the paging half, so a JSON caller
 // walking --offset had no has_more/next_offset to terminate on. The JSON row of pageDisclosure()'s syntax
@@ -3132,6 +3144,7 @@ int emitImpactJson( const ImpactView& v )
     {
         rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( v.imports.next ).c_str() );
     }
+    rw::emitRaw( stdout, importTierRollupJson( v.imports ).c_str() );   // IMPACT-ROLLUP: the XML root's, on a cut tier only
     rw::emitTo( stdout, "{}{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ),
                  v.imports.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( v.imports.noFileEdgeLangs ) + "\"" : std::string() );   // arch-honest: likewise
@@ -3227,7 +3240,8 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                      + rw::impactByTypeColumnarLegend( cfg.columnar && std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
                                                                                                 [ & ]( rw::NodeId n ) { return n < imWalk.typeOnly.size() && imWalk.typeOnly[ n ] != 0; } ) ),
                  ( std::string( cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend )
-                   + rw::importersNextLegend( !imports.next.empty() && !cfg.columnar ) ).c_str(),
+                   + rw::importersNextLegend( !imports.next.empty() && !cfg.columnar )
+                   + rw::importersRollupLegend( imports.capped && !imports.files.empty() ) ).c_str(),   // IMPACT-ROLLUP: every dialect carries it
                  ( rw::impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + rw::impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )
                    + rw::viaNameLegend( std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )

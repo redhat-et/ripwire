@@ -548,6 +548,41 @@ printf '%s' "$L_MCP" | grep -qF "importers_next=\\\"$WANT_L\\\"" \
     || no "long: an uncut tier carries importers_next="
 rm -rf "$LS"
 
+# ── #11 IMPACT-PATH + IMPACT-ROLLUP (GRAPH-SCALE flood) ───────────────────────────────────────────────────────────────
+# `--impact=<path>` answered found="0" with no hedge on a file hundreds of files include. A selector that matches no
+# symbol and names one indexed file now answers with that file's import tier (selector="file", exit 0); a cut tier, on a
+# path or a symbol answer, carries importers_tests= and importers_dirs= over EVERY importer. Every arm reads the exit
+# code, so a crash or an empty answer is red. Fixture at runtime (SAFETY (f)(6)).
+PH="$( mktemp -d )"; mkdir -p "$PH/lib" "$PH/other" "$PH/src/a" "$PH/src/b" "$PH/tests/unit"
+printf 'int core_fn(void);\n' > "$PH/lib/core.h"
+printf 'int small_fn(void);\n' > "$PH/lib/small.h"
+printf 'int util_a(void);\n' > "$PH/lib/util.h"; printf 'int util_b(void);\n' > "$PH/other/util.h"
+for k in $( seq 1 20 ); do printf '#include "../../lib/core.h"\nint a%d(void) { return core_fn(); }\n' "$k" "$k" > "$PH/src/a/s$k.c"; done
+for k in $( seq 1 10 ); do printf '#include "../../lib/core.h"\nint b%d(void) { return core_fn(); }\n' "$k" "$k" > "$PH/src/b/s$k.c"; done
+for k in $( seq 1 15 ); do printf '#include "../../lib/core.h"\nint t%d(void) { return core_fn(); }\n' "$k" "$k" > "$PH/tests/unit/test_s$k.c"; done
+printf '#include "../../lib/small.h"\n#include "../../lib/util.h"\nint m1(void) { return small_fn(); }\n' > "$PH/src/b/m1.c"
+printf '#include "../../lib/small.h"\nint m2(void) { return small_fn(); }\n' > "$PH/src/b/m2.c"
+pi(){ PO="$( cd "$PH" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$PH" --impact="$1" --no-cache "${@:2}" 2>/dev/null )"; PRC=$?; }
+proot(){ printf '%s' "$PO" | grep -oE '<impact [^>]*>' | head -1; }
+pi core_fn; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'importers="45" shown_importers="0" importers_capped="1"' && printf '%s' "$R" | grep -q 'importers_umbrella="1" importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' && ! printf '%s' "$R" | grep -q 'selector='; then
+    ok "rollup (g): the symbol answer's umbrella tier (a count, 0 rows) carries the same rollup (no selector=: a symbol still wins)"
+else no "rollup (g) rc=$PRC: $R"; fi
+pi core_fn --json
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"importers_tests":15,"importers_dirs":"src/a:20,tests/unit:15,src/b:10"'; then ok "rollup (j): the symbol --json carries the rollup"; else no "rollup (j) rc=$PRC"; fi
+pi core_fn --format=columnar
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q 'importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' && printf '%s' "$PO" | grep -q 'importers_tests=/importers_dirs='; then
+    ok "rollup (k): columnar carries the rollup and its legend"
+else no "rollup (k) rc=$PRC: $( printf '%s' "$PO" | grep -oE '<impact [^>]*>' )"; fi
+MO="$( printf '%s\n%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"impact","arguments":{"path":"'"$PH"'","symbol":"core_fn"}}}' \
+        | ( cd "$PH" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$PH" --mcp --no-cache 2>/dev/null | tail -1 ) )"; MRC=$?
+if [ "$MRC" = 0 ] && printf '%s' "$MO" | grep -q 'importers_tests=\\"15\\" importers_dirs=\\"src/a:20,tests/unit:15,src/b:10\\"' && printf '%s' "$MO" | grep -q 'importers_tests=/importers_dirs='; then
+    ok "rollup (n): the MCP impact tool carries the rollup and its legend sentence"
+else no "rollup (n) rc=$MRC: $( printf '%s' "$MO" | grep -oE 'importers=[^ ]*' | head -1 )"; fi
+rm -rf "$PH"
+
 # ── #10 determinism + well-formedness ─────────────────────────────────────────────────────────────────
 A="$( i Widget )"; B="$( i Widget )"
 if [ "$A" = "$B" ]; then ok "determinism: --impact=Widget byte-identical run-to-run"; else no "non-deterministic --impact output"; fi
