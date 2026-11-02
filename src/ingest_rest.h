@@ -17,8 +17,9 @@
 //       at the next unit whichever it is, and prose after a body would otherwise belong to no unit;
 //   (4) a LABEL, `.. _name:`, named `_name` (lowered, as Sphinx looks it up). `_` keeps a label from being read as a title
 //       of the same words when a `:ref:` binds it in graph.h.
-//   A label or a directive with no body names what follows it: `.. setting:: X` above a title covers that title's whole
-//   section, so asking for X serves the prose. With prose after it instead, it runs like (3).
+//   A label or a directive with no body names what follows it: `.. setting:: X` above a title Y covers that title's whole
+//   section, so asking for X serves the prose. Above a title X it IS that title, one unit. With prose after it, it runs
+//   like (3).
 // WHAT IS NOT STRUCTURE. Anything in a literal block (`::`, or a directive on kLiteralDirectives), a comment, or a
 //   substitution definition. A title is read at column 0 only: reST has no indented title.
 // THE UNDERLINE RULE is docutils': shorter than its title and under 4 characters is ordinary text; shorter and 4 or more
@@ -345,6 +346,12 @@ public:
 
     void addTitle( RestUnit unit, std::uint32_t level )
     {
+        // `.. setting:: X` straight above a title X: one thing with one name. The title keeps it and takes the line.
+        while( !waiting_.empty() && waiting_.back().name == unit.name )
+        {
+            unit.startByte = waiting_.back().startByte;
+            waiting_.pop_back();
+        }
         closeTitlesTo( level, firstWaitingStart( unit.startByte ) );
         if( !admit() )
         {

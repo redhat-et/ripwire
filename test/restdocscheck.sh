@@ -121,6 +121,13 @@ Options
 
 settingbody qqsettingword
 
+.. setting:: QQ_ABOVE
+
+Another Name
+------------
+
+abovebody qqaboveword
+
 .. setting:: QQ_PLAIN
 
 plainbody qqplainword
@@ -256,6 +263,8 @@ has_body "qqattr" "qqattr" qqattrword && ok "B7 a domain prefix comes off" || no
 has_body "qq_cfunc" "qq_cfunc" qqcfuncword && ok "B8 a C signature names the function" || no "B8 a C signature names the function"
 is_unit "--qqinnote" && ok "B9 an option inside a note" || no "B9 an option inside a note"
 has_body "QQ_SETTING" "QQ_SETTING" qqsettingword && ok "B10 a body-less setting covers the title below it" || no "B10 a body-less setting covers the title below it"
+out="$( run --expand=QQ_SETTING --top-k=0 )"; [ "$( printf '%s' "$out" | grep -o 'n="QQ_SETTING"' | wc -l | tr -d ' ' )" = 1 ] && ok "B10b a setting above its own title is one unit" || no "B10b a setting above its own title is one unit"
+has_body "QQ_ABOVE" "QQ_ABOVE" qqaboveword && ok "B10c a setting above another title covers it" || no "B10c a setting above another title covers it"
 has_body "QQ_PLAIN" "QQ_PLAIN" qqplainword && ok "B11 a body-less setting with prose runs to the next unit" || no "B11 a body-less setting with prose runs to the next unit"
 body_lacks "QQ_PLAIN" qqnextword && ok "B12 and stops at the next title" || no "B12 and stops at the next title"
 has_body "--qqrstopt" "--qqrstopt" rstoptbody && ok "B13 a .rst outside any Sphinx root parses the same" || no "B13 a .rst outside any Sphinx root parses the same"
