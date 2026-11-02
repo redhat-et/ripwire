@@ -824,11 +824,12 @@ inline bool isCommentLine( std::string_view src, std::size_t lineStart, bool has
 inline constexpr std::array<std::string_view, 7> kImportHeads = { "import ", "from ", "export {", "export type {", "use ", "pub use ", "pub(crate) use " };
 inline bool isImportLine( std::string_view line ) noexcept { return opensWithAny( trimWs( line ), kImportHeads ); }
 
+inline constexpr std::array<Lang, 1> kNoLanguage = { Lang::Unknown }; // a path no language claims
 inline bool isDocPath( std::string_view p ) noexcept
 {
     const auto ends = [&]( std::string_view e )
     { return p.ends_with( e ); };
-    return ends( ".md" ) || ends( ".rst" ) || ends( ".adoc" ) || ( mention_detail::baseNameOf( p ).starts_with( "CHANGELOG" ) && langOfPath( p ) == Lang::Unknown ); // prose; .mdx holds imports and calls, .txt holds linker lists, CHANGELOG_tool.py is code
+    return ends( ".md" ) || ends( ".rst" ) || ends( ".adoc" ) || ( mention_detail::baseNameOf( p ).starts_with( "CHANGELOG" ) && std::ranges::contains( kNoLanguage, langOfPath( p ) ) ); // prose; .mdx holds imports and calls, .txt holds linker lists, CHANGELOG_tool.py is code
 }
 
 inline std::string_view stemOf( std::string_view rel ) noexcept
@@ -899,7 +900,7 @@ public:
         const bool cFamily = path.ends_with( ".c" ) || path.ends_with( ".h" ) || path.ends_with( ".cc" ) || path.ends_with( ".cpp" ) || path.ends_with( ".hpp" ) || path.ends_with( ".cxx" ) || path.ends_with( ".hh" );
         const Lang pathLang = langOfPath( path );
         const bool hashComments = langFacts( pathLang ).hashComment;
-        const bool commentsKnown = pathLang != Lang::Unknown; // an unknown language has no comment line: `//` is an operator in some, `#` code in others
+        const bool commentsKnown = !std::ranges::contains( kNoLanguage, pathLang ); // an unknown language has no comment line: `//` is an operator in some, `#` code in others
         if( !manifest && !isTarget && syntax_ != ModuleSyntax::None )
         {
             noteImports( fileId, path, src, isTest, hashComments );
