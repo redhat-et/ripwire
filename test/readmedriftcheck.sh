@@ -634,7 +634,7 @@ else
 import re, sys
 text = open( sys.argv[ 1 ] ).read()
 m = re.search( r'for _g in (.*?); do', text, re.S )
-sys.exit( 'no loop found' ) if not m else print( len( m.group( 1 ).split() ) )
+sys.exit( 'no loop found' ) if not m else print( len( [ w for w in m.group( 1 ).split() if w != chr( 92 ) ] ) )
 " "$REGRESSION" 2>/dev/null )"
     readmeGates="$( grep -oE '\*\*[0-9]+ gate scripts\*\*' "$README" | head -1 | grep -oE '[0-9]+' )"
 

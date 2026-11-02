@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 354 | 127 | 229 | **125** |
+| 369 | 129 | 242 | **127** |
 
 Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 354 + 7 is the 361 constants this generator parses out of `src/`.
+are not counted as caps, and 369 + 7 is the 376 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 354 caps are classified
-(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 211 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 369 caps are classified
+(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 226 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -102,7 +102,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 127 files that declare a cap — the 354 caps counted above, and no parameter.
+One table for each of the 129 files that declare a cap — the 369 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -484,6 +484,11 @@ Discloses: `capped`, `lit_capped`
 | `kForLiteralRegistrationRows` | `2` | — | shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count |
 | `kForLiteralSiteRows` | `8` | — | <ls> rows shown (a runaway guard: shown=/src= count, next= lists all) |
 | `kForLiteralTierFiles` | `64` | — | source hit files classified (k=); past it k="?" |
+| `kForTableByteCap` | `40000` | — | shape=table: all its <lit> elements together, cut on a row boundary (runaway guard: a 16 KB cap loses ld-nushell-07) |
+| `kForTableContextRows` | `4` | — | shape=table: table rows served with the lines after them |
+| `kForTableMaxAnchor` | `60` | — | a longer backticked span is no anchor |
+| `kForTableRankedRows` | `4096` | — | shape=table: source sites read for a table row and ordered (a registry past the readers in path order must still rank first) |
+| `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
 
 ### `src/formembers.h`
 
@@ -541,6 +546,20 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kForSlotByCap` | `4` | — | — |
 | `kForSlotCap` | `16` | — | — |
+
+### `src/forunused.h`
+
+Discloses: `capped`, `bytes_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForUnusedDirFiles` | `6` | — | files of a named directory given a table |
+| `kForUnusedExtraFiles` | `400000` | — | unindexed files visited in one answer |
+| `kForUnusedMaxBytes` | `32768` | — | the whole block: no further file starts past it |
+| `kForUnusedRowsPerFile` | `150` | — | printed rows of one file (shown= capped=1 and the counts stay whole) |
+| `kForUnusedSitesShown` | `2` | — | at= sites on one row |
+| `kMaxLinesUp` | `24` | — | — |
+| `kMaxLinesUp` | `400` | — | — |
 
 ### `src/gitmine.h`
 
@@ -1188,6 +1207,7 @@ Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importer
 | `kForCompactSurfaceBudgetBytes` | `1000` | — | — |
 | `kForFileTailPageRows` | `40` | — | FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault) |
 | `kForFileTailShownCap` | `24` | — | the rank rows (deep-tail d2): files outside the shown head |
+| `kForFileTailSphinxTxtRows` | `24` | — | code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h) |
 | `kForLensDefaultTopN` | `40` | — | — |
 | `kForPayloadBudgetBytes` | `7500` | — | — |
 | `kForTailSigBytes` | `160` | — | — |
@@ -1250,6 +1270,15 @@ Discloses: `diff_capped`
 | --- | --- | --- | --- |
 | `kMaxDiffRows` | `2000` | — | — |
 | `kMaxRenameHops` | `8` | — | — |
+
+### `src/subjectanchor.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kSubjectMaxDefs` | `12` | — | — |
+| `kSubjectMaxPlainWords` | `4` | — | — |
 
 ### `src/taskroute.h`
 

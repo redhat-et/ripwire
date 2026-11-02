@@ -2618,6 +2618,29 @@ inline bool pythonDynamicNamespace( const HashMap<std::string, char>& rebind, st
 //                             name anywhere in the corpus (its in-repo definitions are all members, which an
 //                             unqualified call from outside their class cannot reach; the enclosing class and
 //                             its bases were probed by Rule 1 + the base walk before this).
+// RULE3-MEMBER-GUARD fix 4: does a `from m import *` chain from Python file `from` (the starred modules' own star imports, 16 files at most) reach
+// file `target`? A star import of a module that binds nothing of a name proves no candidate of it (graph.h Rule3NameProof::PythonImport).
+inline bool pythonStarChainReaches( const std::vector<std::vector<std::uint32_t>>& stars, std::uint32_t from, std::uint32_t target )
+{
+    rw::SmallVec<std::uint32_t, 8> seen;
+    seen.push_back( from );
+    for( std::size_t i = 0; i < seen.size() && i < 16; ++i )
+    {
+        for( const std::uint32_t t : seen[ i ] < stars.size() ? std::span<const std::uint32_t>( stars[ seen[ i ] ] ) : std::span<const std::uint32_t>{} )
+        {
+            if( t == target )
+            {
+                return true;
+            }
+            if( t != kNoFile && std::ranges::find( seen, t ) == seen.end() )
+            {
+                seen.push_back( t );
+            }
+        }
+    }
+    return false;
+}
+
 // Consulted by buildGraph's resolve loop ONLY after every receiver rule has missed. The key buffer is
 // reused across calls (one allocation amortized), so the predicate is `const` in contract and `mutable` in
 // storage, exactly like Narrower.
@@ -5880,26 +5903,20 @@ struct FalseEdgeRules
     // A local or parameter of the caller — or of a function ENCLOSING it, which a nested def/closure captures (textual:
     // `get_label_width = self.get_label_width` in a method, called from a `def` nested in it). The enclosing chain is read
     // by span: the innermost function or method of the same file whose span holds the current one, at most 8 levels.
-    bool isLocalOfCaller( const Reference& r ) const
+    bool isLocalOfCaller( const Reference& r ) const { return localEvidenceOfCaller( r ) != 0; }
+    // the evidence (resolve.h localNameEvidence) of the innermost of those scopes binding the name, 0 when none does
+    char localEvidenceOfCaller( const Reference& r ) const
     {
-        if( veto.hasLocal( r, r.calleeName ) )
-        {
-            return true;
-        }
         NodeId cur = r.fromSymbol;
-        for( int depth = 0; depth < 8; ++depth )
+        for( int depth = 0; depth <= 8 && cur != kNoNode; ++depth )
         {
+            if( const auto it = veto.localNameSet.find( fileNameKey( key, cur, r.calleeName ) ); it != veto.localNameSet.end() )
+            {
+                return it->second;
+            }
             cur = enclosingFunction( cur );
-            if( cur == kNoNode )
-            {
-                return false;
-            }
-            if( veto.localNameSet.contains( fileNameKey( key, cur, r.calleeName ) ) )
-            {
-                return true;
-            }
         }
-        return false;
+        return 0;
     }
     // the innermost function/method of the same file whose span strictly holds `id`'s span; kNoNode when none
     NodeId enclosingFunction( NodeId id ) const { return innermostEnclosingFn( ing, functionsByFile, id ); }
@@ -10677,6 +10694,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // a star import of an indexed module: that module's names bind nothing the veto can see, so there Rule 3 keeps deciding.
         const bool vetoFirstSite = langFacts( r.lang ).externalVetoBeforeRule3 && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
                                     && bindingTier.empty() && it != byName.end() && !externalVeto.pythonStarImports( r ) && externalVeto.isExternalBound( r );
+        bool rule3NoProof = false;   // RULE3-MEMBER-GUARD: Rule 3 fired, and nothing the language writes proves its answer
+        bool rule3Local   = false;   // ... and the call goes through a local or parameter of the caller: the value held is no definition of the name
         if( !scipPinned && !canonical && !narrowed && it != byName.end() && !vetoFirstSite )
         {
             // memoized when the list asked about IS the byName entry (no per-call survivor list in play): same answer, asked once
@@ -10689,13 +10708,55 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
             {
                 // an implicit receiver's bare call is the same question: the included file's definition must be one the
                 // language's lookup reaches (a free function, the class's own cone) — decided with the ladder's proof below
-                std::vector<NodeId>& into = ( hedgeEligible && ( isMemberCallRef( r ) || langFacts( r.lang ).implicitReceiver ) ) ? memberRule3 : cand;
+                const bool memberSide = hedgeEligible && ( isMemberCallRef( r ) || langFacts( r.lang ).implicitReceiver );
+                // RULE3-MEMBER-GUARD: where the language writes what a name is bound to, Rule 3 is no proof without that writing (langfacts.h
+                // rule3NameProof): the candidates it proves decide the call; with none the call takes the ladder's name-only path, hedged.
+                const Rule3NameProof nameProof = ( !memberSide && r.role == RefRole::Call && !scipPinned ) ? langFacts( r.lang ).rule3NameProof : Rule3NameProof::None;
+                const auto           nameProves = [ & ]( NodeId c )
+                {
+                    switch( nameProof )
+                    {
+                        // a local or parameter of the caller hides any `use` of the name: the call holds whatever was assigned. Only where the extractor records locals: it
+                        // records none for Rust, so there this reads false and a `let f = ..; f()` over `use a::f` stays proven (RUST-LOCALS card)
+                        case Rule3NameProof::RustUse:      return !falseEdges.isLocalOfCaller( r ) && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
+                        // a local or parameter of the caller or a def enclosing it hides the module's import (u4: `from a import view` over `def deco(view)`);
+                        // a def-scoped import of the name is that scope's binding, read like the file's. A star import proves only a candidate its chain reaches.
+                        case Rule3NameProof::PythonImport:
+                        {
+                            const char local = falseEdges.localEvidenceOfCaller( r );
+                            if( local != 0 && ( ( local & kLocalNameImport ) == 0 || ( local & kLocalNameDeclared ) != 0 ) )
+                            {
+                                return false;
+                            }
+                            return externalVeto.importVerdict( r, r.calleeName ) != '\0' || pythonStarChainReaches( externalVeto.tables.pythonScopes.starTargets, r.fileId, ing.symbols[ c ].fileId );
+                        }
+                        case Rule3NameProof::None:         return true;
+                    }
+                    return true;
+                };
                 for( NodeId c : rule3Out )
                 {
                     if( langCompatible( symLang[ c ], r.lang ) )
                     {
-                        into.push_back( c );
+                        if( memberSide )
+                        {
+                            memberRule3.push_back( c );
+                        }
+                        else if( nameProves( c ) )
+                        {
+                            cand.push_back( c );
+                        }
+                        else
+                        {
+                            memberRule3.push_back( c );
+                            rule3NoProof = true;
+                        }
                     }
+                }
+                rule3NoProof = rule3NoProof && cand.empty();   // a proven candidate decides the call, and the unproven ones leave with Rule 3's other files
+                if( !rule3NoProof && !memberSide )
+                {
+                    memberRule3.clear();
                 }
                 narrowed = !cand.empty();
             }
@@ -10854,7 +10915,22 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
 
         // ---- H4 W3: RUST qualified-call scope guard — see keepRustQualifiedCandidates ------------------
-        const bool alreadyPinned = scipPinned || canonical || narrowed;
+        // RULE3-MEMBER-GUARD: an unproven Rule 3 answer on a qualified call. A qualifier that provably leaves the tree (`oneshot::channel()`, `String::new()`)
+        // reads as outside it, counted external=; any other keeps its hedge, since the scope guard below reads type scopes and cannot place a re-exported
+        // module item or a trait's method (`gpui::black()`, `AgentSettings::override_global()`).
+        bool rule3QualifiedHedge = false;
+        if( rule3NoProof && !r.qualifier.empty() )
+        {
+            // the path as written from its root (`crate::far::helper`, never `far::helper`): a module named by a longer path is no unknown root
+            std::string path = std::string( rustWrittenQualifierOf( r ) ) + "::" + r.calleeName;
+            if( recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, path ) && !recvEv.types.rustRootNamesTreePackage( r.fileId, r.startByte, path ) )
+            {
+                disposition = vetoExternal( r );
+                continue;
+            }
+            rule3QualifiedHedge = true;
+        }
+        const bool alreadyPinned = scipPinned || canonical || narrowed || rule3QualifiedHedge;
         if( !keepRustQualifiedCandidates( ing, chaCones, r, alreadyPinned, cand ) && bindingTier.empty() )
         {
             disposition = CallDisposition::QualifiedExternal;                   // qualified-external → no edge
@@ -10896,7 +10972,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 languageLookupProved = true;
             }
         }
-        if( hedgeEligible && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
+        if( rule3NoProof && !narrowed && !languageLookupProved )
+        {
+            rule3Local = r.qualifier.empty() && falseEdges.isLocalOfCaller( r );
+            nameOnly = !cand.empty() || !memberRule3.empty();
+            if( cand.empty() )
+            {
+                cand = memberRule3;   // the whole-name path above filtered them out: Rule 3's own file still answers, hedged
+                candMemo = nullptr;
+            }
+        }
+        if( hedgeEligible && !rule3NoProof && !narrowed && !languageLookupProved && !cand.empty() && r.lang != Lang::Elixir )
         {
             provedScratch.clear();
             if( !memberRule3.empty() && !isMemberCallRef( r ) )
@@ -11015,7 +11101,10 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 {
                     const bool file = ing.symbols[ c ].fileId == r.fileId;
                     const bool dir  = fileDir[ ing.symbols[ c ].fileId ] == rdir;
-                    if( file || dir || std::find( memberRule3.begin(), memberRule3.end(), c ) != memberRule3.end() )
+                    const bool rule3File = std::find( memberRule3.begin(), memberRule3.end(), c ) != memberRule3.end();
+                    // RULE3-MEMBER-GUARD: a call no written binding reaches names this file's own definition or Rule 3's file (hedged), never a directory
+                    // namesake; through a local or parameter Rule 3's file is no better a guess than the namesakes, so there only this file's own stay
+                    if( rule3NoProof ? ( file || ( rule3File && !rule3Local ) ) : ( file || dir || rule3File ) )
                     {
                         tier.push_back( c );
                         anyFile = anyFile || file;
@@ -11024,7 +11113,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 }
                 for( NodeId c : memberRule3 )   // the included file's candidates, even where reachableByName set them aside
                 {
-                    if( std::find( tier.begin(), tier.end(), c ) == tier.end() )
+                    if( !rule3Local && std::find( tier.begin(), tier.end(), c ) == tier.end() )
                     {
                         tier.push_back( c );
                     }
@@ -11034,7 +11123,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                 nameOnlyAnyDir  = anyDir;
                 if( tier.empty() )
                 {
-                    if( cand.size() == 1 && !localsYield )
+                    if( cand.size() == 1 && !localsYield && !rule3Local )
                     {
                         tier = cand;   // a unique global, hedged
                     }

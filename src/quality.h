@@ -430,9 +430,7 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     {
         return false;
     }
-    const auto ends = [ & ]( std::string_view e )
-    { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
-    return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
+    return endsWithLowerAscii( p, ".sh" ) || endsWithLowerAscii( p, ".bash" ) || endsWithLowerAscii( p, ".zsh" );
 }
 
 // ---- P2.2 (agent-friction round, 2026-08-29): self-registering test/benchmark macros -------------------
@@ -2441,7 +2439,9 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
 constexpr std::uint32_t kIngestCacheVersionMirror   = 48;   // MUST equal ingest.cpp's kCacheVersion (gated); 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 285;  // MUST equal ingest.cpp's kParserVer   (gated)
+constexpr std::uint32_t kIngestParserVerMirror    = 287;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                         // 285 = 2026-11-02 (lane rule3-member-guard fix 4: a Rust path call's whole written qualifier)
+                                                         // 287 = 2026-11-02 (lane docs-rest: the reST/Sphinx tier, after #504's 285/286)
                                                           // 283 = 2026-10-31 (train 43b: registrar + string-import extraction; above the lane placeholders up to 281, rich 282)
                                                           // 271 = 2026-10-30 (train 42b: iface-peel alias pointee / dyn-result / template-param
                                                           //   member records and alias-import ReExport records, placeholders 259, 260, 261; above 41b's 269/270)
@@ -3787,7 +3787,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // The producer identity already keeps this build's blobs apart; bumped 22 -> 23 so the history above stays complete.
 // v24 (2026-10-25, train 36) — #228's v23 was the PR's placeholder; renumbered above every live value (main / train 35 / every
 // other ref 22, #437 23). No further shape change.
-constexpr std::uint32_t kQSnapCacheScheme = 24;
+// v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
+// other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
+// dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
+constexpr std::uint32_t kQSnapCacheScheme = 25;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
