@@ -368,7 +368,12 @@ constexpr std::uint32_t kCacheVersion = 49;           // 49: feat/ruby-rails-loo
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 275;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 277;          // bump on any grammar/.scm/extraction change
+                                                      // 277 = 2026-11-02 (feat/ruby-rails-lookup R3a): a Ruby class body's Rails DSL
+                                                      //   mints the methods it generates as lookup-only Section defs, and the class methods among
+                                                      //   them as RubySingletonDef bindings named for them (ingest_ruby.h captureRubyGeneratedDefs,
+                                                      //   src/ruby_generated.h). No record layout change: kCacheVersion stays 49. 277, not 276: 276
+                                                      //   is 275's rich file tag. Rich file tag 278. The train renumbers.
                                                       // 275 = 2026-11-02 (feat/ruby-rails-lookup R4): a Ruby call's receiver is typed
                                                       //   by more evidence (ingest_binds.h's R4 note) — an instance variable, a method's value, an
                                                       //   Active Record relation chain (memberVia spells the chain's links: "where.order.first").

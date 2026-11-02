@@ -8,6 +8,7 @@
 #include "ruby_groupself.h"      // an RSpec example group's self: its blocks and the modules it mixes in (RubyTopSelf reads it)
 #include "ruby_frameworks.h"     // the Rails rows of the builtin-method gate: which framework tables a tree joins
 #include "ruby_receivers.h"      // R4: a relation chain's links and the via that spells it (RubyTypedReceivers, RubyClassObjects::of)
+#include "ruby_generated.h"      // R3: the methods a class body's Rails DSL generates, which a lookup reads once nothing written answers
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
 #include "nextverb.h"            // cut-fix E: nextFlag / nextAttrXml — the import tier's importers_next=
@@ -4521,9 +4522,15 @@ struct RubyClassObjects
     void                            expandLevel( const HashMap<std::string, std::vector<std::string>>& edges, const std::string& name ) const;
     void                            noteNamedDefs( const std::string& owner, std::string_view callee ) const;
     const rw::SmallVec<NodeId, 2>*  sideLookup( const std::string& start, RubySide side, std::string_view callee ) const;
+    template<class Note>
+    const rw::SmallVec<NodeId, 2>*  sideWalk( const std::string& start, RubySide side, Note&& note ) const;
+    const rw::SmallVec<NodeId, 2>*  generatedLookup( const RubyClassObject& object, RubySide side, std::string_view callee ) const;
+    const rw::SmallVec<NodeId, 2>*  instanceLookup( const RubyClassObject& object, std::string_view callee ) const;
+    RubySideAnswer                  moduleSelfCall( const RubyClassObject& object, std::string_view callee ) const;
     void                            sideSteps( const std::string& name, RubySide at ) const;
     void                            sideVisit( const std::string& name, RubySide on, std::vector<RubySideStep>& into ) const;
     void                            noteSideDefs( const std::string& fqn, std::string_view callee, RubySide side ) const;
+    void                            noteGeneratedDefs( const std::string& fqn, std::string_view callee, RubySide side ) const;
     bool                            ownedBy( NodeId c, const std::string& fqn ) const;
     bool                            anyInLookup( const std::string& cls, const HashMap<std::string, char>& owners ) const;
     template<class Pred>
@@ -4546,6 +4553,7 @@ struct RubyTypedReceivers
     HashMap<std::string, char>                            openedPaths;    // every trailing path of every constant the tree opens:
                                                                           //   `A::B::C` → "A::B::C", "B::C", "C"
     std::array<bool, std::size( kRspecTargets )>          builderDefined {};   // the tree defines a method of that builder's name
+    RubyGenerated                                         generated;      // the methods a class body's declarations generate (R3)
     mutable rw::SmallVec<NodeId, 2>                       rootHits;
 
     const std::string*             classOf( const Reference& r ) const;                          // r's receiver's class, when trusted
@@ -4554,6 +4562,7 @@ struct RubyTypedReceivers
     bool                           outOfTreeTarget( const Reference& r ) const;                  // RSpec's, of a class the tree never opens
     const rw::SmallVec<NodeId, 2>* lookup( const Reference& r, const std::string& cls ) const;   // what lookup on `cls` reaches
     const rw::SmallVec<NodeId, 2>* rootLookup( const Reference& r ) const;                       // what a reopened instance root defines
+    const rw::SmallVec<NodeId, 2>* generatedOn( const std::string& cls, std::string_view callee, bool classObject ) const;   // by name
 
     // does the tree define a method of the name of `t`'s builder (`def expect`)? Then nothing that name builds is RSpec's.
     bool builderShadowed( const RspecTarget* t ) const noexcept
@@ -4636,14 +4645,42 @@ inline bool RubyTypedReceivers::outOfTreeTarget( const Reference& r ) const
         && openedPaths.find( std::string( rubyTypedWritten( *typed ) ) ) == openedPaths.end();
 }
 
-// what lookup on `cls` reaches for r's method: its own or an ancestor's definitions, else a reopened instance root's
+// what lookup on `cls` reaches for r's method: its own or an ancestor's definitions, else what the declarations along it
+// generate (src/ruby_generated.h: read only once nothing written answers), else a reopened instance root's
 inline const rw::SmallVec<NodeId, 2>* RubyTypedReceivers::lookup( const Reference& r, const std::string& cls ) const
 {
     if( const rw::SmallVec<NodeId, 2>* hit = narrower.methodOnTypeOrBases( cls, r, up, /*skipSelf=*/false, /*unionOnMulti=*/true ) )
     {
         return hit;
     }
+    if( const rw::SmallVec<NodeId, 2>* hit = generatedOn( cls, r.calleeName, false ) )
+    {
+        return hit;
+    }
     return rootLookup( r );
+}
+
+// What the declarations of `cls` and its ancestors, read by name, generate named `callee` — an instance method, or on the class
+// object (its own scopes and an included concern's) — the nearest ancestor that generates one answering; nullptr when none
+// does. The walk a typed receiver takes where no constant index places its class (a FactoryBot build, a tree without one).
+inline const rw::SmallVec<NodeId, 2>* RubyTypedReceivers::generatedOn( const std::string& cls, std::string_view callee, bool classObject ) const
+{
+    if( generated.empty() )
+    {
+        return nullptr;
+    }
+    for( const std::string& a : reach.ancestorsOf( cls ) )
+    {
+        if( const rw::SmallVec<NodeId, 2>* hit = generated.in( a, callee, classObject ? RubyGenWhere::ClassObject : RubyGenWhere::Instance ) )
+        {
+            return hit;
+        }
+        if( const rw::SmallVec<NodeId, 2>* hit = classObject && a != cls ? generated.in( a, callee, RubyGenWhere::Includers ) : nullptr )
+        {
+            return hit;
+        }
+    }
+    return nullptr;
 }
 
 // what a reopened Object, Kernel or BasicObject defines for r's method — every instance's ancestors
@@ -4831,6 +4868,27 @@ inline void RubyClassObjects::noteSideDefs( const std::string& fqn, std::string_
     }
 }
 
+// What the declarations of the class or module `fqn` generate named `callee` (src/ruby_generated.h) that answers a walk
+// standing on `side` there, into hits: an instance's methods on the Instance or Extended side, the class's own class
+// methods on the class object's, a concern's includer class methods on the Included side.
+inline void RubyClassObjects::noteGeneratedDefs( const std::string& fqn, std::string_view callee, RubySide side ) const
+{
+    if( side == RubySide::ConcernClassMethods )
+    {
+        return;
+    }
+    const RubyGenWhere where = side == RubySide::ClassObject ? RubyGenWhere::ClassObject : side == RubySide::Included ? RubyGenWhere::Includers : RubyGenWhere::Instance;
+    const std::size_t  cut   = fqn.rfind( "::" );
+    const auto*        made  = typed.generated.in( cut == std::string::npos ? std::string_view( fqn ) : std::string_view( fqn ).substr( cut + 2 ), callee, where );
+    for( const NodeId c : made != nullptr ? std::span<const NodeId>( made->data(), made->size() ) : std::span<const NodeId> {} )
+    {
+        if( ownedBy( c, fqn ) )
+        {
+            hits.push_back( c );
+        }
+    }
+}
+
 // Onto `into` unless the walk has stood on `name` on side `on` already (sideSeen); fqnSides and the caller own every name.
 inline void RubyClassObjects::sideVisit( const std::string& name, RubySide on, std::vector<RubySideStep>& into ) const
 {
@@ -4867,9 +4925,17 @@ inline void RubyClassObjects::sideSteps( const std::string& name, RubySide at ) 
 }
 
 // The first place along Ruby's lookup order, walked from `start` on `side` (sideSteps), at which a def of `callee` answers
-// on the side the walk stands on, into hits; nullptr when none does. One round per class up the superclass chain; within
-// it, level by level, the class, then what it extends or includes. A level with two definers answers their union.
+// on the side the walk stands on, into hits; nullptr when none does (sideWalk, noting written defs).
 inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::sideLookup( const std::string& start, RubySide side, std::string_view callee ) const
+{
+    return sideWalk( start, side, [ & ]( const std::string& name, RubySide at ) { noteSideDefs( name, callee, at ); } );
+}
+
+// Ruby's lookup order walked from `start` on `side` (sideSteps), `note` handed each class or module and the side it stands
+// on there, until a place notes a def into hits; nullptr when none does. One round per class up the superclass chain; within
+// it, level by level, the class, then what it extends or includes. A level with two definers answers their union.
+template<class Note>
+inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::sideWalk( const std::string& start, RubySide side, Note&& note ) const
 {
     hits.clear();
     sideSeen.clear();
@@ -4885,13 +4951,51 @@ inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::sideLookup( const std::s
             for( std::size_t i = 0; i < sideLevel.size(); ++i )   // by index: an included module joins this level as it is met
             {
                 const auto [ name, at ] = sideLevel[ i ];
-                noteSideDefs( *name, callee, at );
+                note( *name, at );
                 sideSteps( *name, at );
             }
             sideLevel.swap( sideNext );
         }
     }
     return hits.empty() ? nullptr : &hits;
+}
+
+// What the declarations along the lookup of `object`, on `side`, generate named `callee` (src/ruby_generated.h) — read once no
+// written method answers: Rails keeps the association and attribute methods in modules it includes as the class inherits,
+// so a def written in the class or a module it includes comes first. Over fully-qualified constants side by side where the
+// tree keeps a constant index, else by name (RubyTypedReceivers::generatedOn).
+inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::generatedLookup( const RubyClassObject& object, RubySide side, std::string_view callee ) const
+{
+    if( typed.generated.empty() || object.cls == nullptr )
+    {
+        return nullptr;
+    }
+    if( !object.fqn.empty() )
+    {
+        return sideWalk( object.fqn, side, [ & ]( const std::string& name, RubySide at ) { noteGeneratedDefs( name, callee, at ); } );
+    }
+    return typed.generatedOn( *object.cls, callee, side == RubySide::ClassObject );
+}
+
+// What an instance of the class `object` answers `callee` from: the written defs along its instances' lookup, else what the
+// declarations along it generate.
+inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::instanceLookup( const RubyClassObject& object, std::string_view callee ) const
+{
+    const rw::SmallVec<NodeId, 2>* hit = sideLookup( object.fqn, RubySide::Instance, callee );
+    return hit != nullptr ? hit : generatedLookup( object, RubySide::Instance, callee );
+}
+
+// A call to self in a module's own method: self is any includer, whose lookup the walk cannot see — but what the module's
+// declarations generate (a concern's `included do`) is every includer's, so it answers once nothing written in the
+// module's lookup does. No side otherwise, as before.
+inline RubySideAnswer RubyClassObjects::moduleSelfCall( const RubyClassObject& object, std::string_view callee ) const
+{
+    if( typed.generated.empty() || sideLookup( object.fqn, RubySide::Instance, callee ) != nullptr )
+    {
+        return {};
+    }
+    const rw::SmallVec<NodeId, 2>* made = generatedLookup( object, RubySide::Instance, callee );
+    return made != nullptr ? RubySideAnswer { RubySide::Instance, made, false } : RubySideAnswer {};
 }
 
 // What the lookup the class object stands at defines `asked` in: as a class method when `classObject`, else as its
@@ -4919,6 +5023,10 @@ inline const rw::SmallVec<NodeId, 2>* RubyClassObjects::lookup( const Reference&
     if( const rw::SmallVec<NodeId, 2>* hit = definerLookup( object, r, true ) )
     {
         return hit;
+    }
+    if( const rw::SmallVec<NodeId, 2>* hit = generatedLookup( object, RubySide::ClassObject, r.calleeName ) )
+    {
+        return hit;   // a scope, an enum value's scope: what the class's declarations generate (src/ruby_generated.h)
     }
     const bool ctor = r.calleeName == kRubyNew;
     if( ctor || anyInLookup( *object.cls, forwarders ) )
@@ -5110,16 +5218,20 @@ inline RubySideAnswer RubyClassObjects::selfCall( const Reference& r ) const
     const std::size_t               cut   = fqn != nullptr ? fqn->rfind( "::" ) : std::string::npos;
     const auto cls = fqn != nullptr ? typed.reach.classNames.find( fqn->substr( cut == std::string::npos ? 0 : cut + 2 ) ) : typed.reach.classNames.end();
     const bool singleton = ( defSides[ r.fromSymbol ] & kRubyDefSingleton ) != 0;
-    if( cls == typed.reach.classNames.end() || ( !singleton && !isClass( *fqn ) ) )
+    if( cls == typed.reach.classNames.end() )
     {
         return {};
     }
     const RubyClassObject object { &cls->first, *fqn, false };
+    if( !singleton && !isClass( *fqn ) )
+    {
+        return moduleSelfCall( object, r.calleeName );
+    }
     if( singleton )
     {
         return { RubySide::ClassObject, lookup( r, object ), missingAnswers( object ) || delegates( object, r.calleeName ) };
     }
-    const rw::SmallVec<NodeId, 2>* hit = sideLookup( *fqn, RubySide::Instance, r.calleeName );
+    const rw::SmallVec<NodeId, 2>* hit = instanceLookup( object, r.calleeName );
     return { RubySide::Instance, hit != nullptr ? hit : typed.rootLookup( r ), missingAnswers( object ) };
 }
 
@@ -5143,7 +5255,7 @@ inline RubySideAnswer RubyClassObjects::typedLookup( const Reference& r, const s
     {
         return { std::nullopt, nullptr, open };
     }
-    const rw::SmallVec<NodeId, 2>* hit = sideLookup( fqn, RubySide::Instance, r.calleeName );
+    const rw::SmallVec<NodeId, 2>* hit = instanceLookup( RubyClassObject { &cls, fqn, false }, r.calleeName );
     return { RubySide::Instance, hit != nullptr ? hit : typed.rootLookup( r ), open };
 }
 
@@ -5550,6 +5662,7 @@ inline RubyTypedReceivers buildRubyTypedReceivers( const IngestResult& ing, cons
     RubyTypedReceivers out{ .reach = reach, .up = up, .narrower = narrower };
     rubyOpenedPaths( ing, bases, out.openedPaths );
     rubyDefinedBuilders( ing, out.builderDefined );
+    out.generated = buildRubyGenerated( ing );
     for( const Binding& b : ing.bindings )
     {
         if( b.kind != LocalBindKind::RubyFactory || b.var.empty() )
@@ -8597,14 +8710,15 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         PROFILE_SCOPE_DESCRIBE( "buildGraph/1d: byName (name -> def ids)" );
         for( const Symbol& s : ing.symbols )
         {
-            if( s.kind == SymKind::Section && s.lang == Lang::Ruby )
+            if( s.kind == SymKind::Section && langFacts( s.lang ).lookupOnlySections )
             {
                 continue;   // definitions-only (#339): a Ruby schema column answers --uses/--grep/--whereis as
                             // a def, but admits NO call edge — the byName table feeds both call binding and the
                             // common-name damping, so an untyped `response.code` must not become a column's
                             // caller, and 200 `name` columns must not damp a model's real `def name`.
-                            // Mirrors contextratio.h's isMeasurableKind treatment of Sections. Edges may come
-                            // later behind an evidence rule (receiver proven to be the owning model).
+                            // Mirrors contextratio.h's isMeasurableKind treatment of Sections. A method a class
+                            // body's Rails DSL generates is such a section too, which only the language's class
+                            // lookup reaches (src/ruby_generated.h, R3).
             }
             byName[ s.name ].push_back( s.id );
         }
@@ -8636,8 +8750,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         for( const Symbol& s : ing.symbols )
         {
             // a definition under scope::name; a C++ specialization's definition again under its template's family key, and
-            // any symbol a specialization scopes (declarations too) as that specialization's existence marker
-            indexCanonicalScope( canonByName, canonFamilyByName, canonKey, s );
+            // any symbol a specialization scopes (declarations too) as that specialization's existence marker. A lookup-only
+            // section (langfacts.h: a method Ruby's class-body DSL generates) is not: a shared rule reading `scope::name`
+            // would find it ahead of a written method the language's own lookup reaches first.
+            if( s.kind != SymKind::Section || !langFacts( s.lang ).lookupOnlySections )
+            {
+                indexCanonicalScope( canonByName, canonFamilyByName, canonKey, s );
+            }
         }
     }
 

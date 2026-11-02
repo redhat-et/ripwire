@@ -873,6 +873,422 @@ inline void captureRubyExampleGroups( TSNode root, std::uint32_t fileId, std::st
     }
 }
 
+// ─── Methods Ruby generates (parser version 277, test/rubygeneratedcheck.sh; src/ruby_generated.h) ─────────────────────
+// A declaration at a class body's level — or in a concern's `included do`, which runs on each includer — defines the methods
+// src/ruby_generated.h kRubyGeneratedVerbs lists for it: `has_many :bills` defines `bills` and `bills=`. Each is
+// minted as a Section definition of the class or concern (captureRubyGeneratedDefs), the token that names it its extent;
+// the class methods among them (a scope, an enum value's scope) carry a RubySingletonDef binding named for them
+// (captureRubyGeneratedSides). One declaration mints several definitions from one token, so each takes as its name byte the
+// declaration's start plus its own position among them — a byte inside the declaration that no other definition names —
+// and a Section is never held to the head rule (extentsuspect.h). Not read: a declaration in `class << self` (the class
+// object's own, which graph.h's delegation reading answers), inside a def or any block but `included do` (`with_options`:
+// test/rubygeneratedcheck.sh floor (d)), Active Record's in a plain module's body, and an argument that is no symbol or plain
+// string (a computed name).
+
+// One generated method: its name, the token that names it, its side, and whether a concern's `included do` declares it (a
+// class method there is each includer's).
+struct RubyGenMethod
+{
+    std::string name;
+    TSNode      token;
+    RubyGenSide side     = RubyGenSide::Instance;
+    bool        includer = false;
+};
+
+// Where one declaration's methods go: the list, and whether a concern's `included do` holds the declaration.
+struct RubyGenSink
+{
+    std::vector<RubyGenMethod>& out;
+    bool                        includer = false;
+
+    // Each `names` method generated from the name `n` its token spells.
+    void from( std::string_view n, TSNode token, std::span<const RubyGenName> names ) const
+    {
+        for( const RubyGenName& g : n.empty() ? std::span<const RubyGenName> {} : names )
+        {
+            out.push_back( RubyGenMethod { std::string( g.prefix ).append( n ).append( g.suffix ), token, g.side, includer } );
+        }
+    }
+};
+
+// The name a symbol (`:a`) or a plain string (`"a"`, no interpolation) argument spells, or empty.
+inline std::string_view rubyGenArgName( TSNode a, std::string_view src ) noexcept
+{
+    const char* t = ts_node_type( a );
+    if( kindIs( t, "simple_symbol" ) )
+    {
+        const std::string_view text = nodeTextOf( a, src );
+        return text.empty() ? text : text.substr( 1 );   // a recovered parse can leave a zero-width symbol
+    }
+    if( kindIs( t, "hash_key_symbol" ) || kindIs( t, "identifier" ) )
+    {
+        return nodeTextOf( a, src );
+    }
+    const bool plain = kindIs( t, "string" ) && ts_node_named_child_count( a ) == 1 && kindIs( ts_node_type( ts_node_named_child( a, 0 ) ), "string_content" );
+    return plain ? nodeTextOf( ts_node_named_child( a, 0 ), src ) : std::string_view {};
+}
+
+// The value of the `key:` option among a call's arguments, or a null node.
+inline TSNode rubyGenOption( TSNode args, std::string_view key, std::string_view src ) noexcept
+{
+    TSNode      found {};
+    ChildCursor cursor( args );
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode a )
+    {
+        if( kindIs( ts_node_type( a ), "pair" ) && rubyPairKeyText( a, src ) == key )
+        {
+            found = fieldChild( a, NodeField::Value );
+            return false;
+        }
+        return true;
+    } );
+    return found;
+}
+
+// How an enum call names its values' methods (ActiveRecord::Enum): `prefix:` / `suffix:` (or the older `_prefix:` /
+// `_suffix:`) — `true` names them after the attribute, a symbol or string after itself — and `scopes: false` /
+// `instance_methods: false`, which leave a side out.
+struct RubyEnumNaming
+{
+    std::string prefix;
+    std::string suffix;
+    bool        scopes    = true;
+    bool        instances = true;
+};
+
+inline RubyEnumNaming rubyEnumNaming( TSNode args, std::string_view attr, std::string_view src )
+{
+    const auto option = [ & ]( std::string_view name )
+    {
+        const TSNode v = rubyGenOption( args, name, src );
+        return ts_node_is_null( v ) ? rubyGenOption( args, std::string( "_" ).append( name ), src ) : v;
+    };
+    const auto affix = [ & ]( std::string_view name ) -> std::string
+    {
+        const TSNode v = option( name );
+        return ts_node_is_null( v ) ? std::string {} : std::string( kindIs( ts_node_type( v ), "true" ) ? attr : rubyGenArgName( v, src ) );
+    };
+    const auto off = [ & ]( std::string_view name )
+    {
+        const TSNode v = option( name );
+        return !ts_node_is_null( v ) && kindIs( ts_node_type( v ), "false" );
+    };
+    const std::string prefix = affix( "prefix" );
+    const std::string suffix = affix( "suffix" );
+    return { prefix.empty() ? prefix : prefix + "_", suffix.empty() ? suffix : "_" + suffix, !off( "scopes" ), !off( "instance_methods" ) };
+}
+
+// An enum value's method-friendly label (ActiveRecord::Enum: each run of ASCII non-word characters becomes `_`).
+inline std::string rubyEnumLabel( std::string_view value )
+{
+    std::string out;
+    bool        run = false;
+    for( const char c : value )
+    {
+        const auto u    = static_cast<unsigned char>( c );
+        const bool word = u >= 0x80 || ( u >= '0' && u <= '9' ) || ( u >= 'A' && u <= 'Z' ) || ( u >= 'a' && u <= 'z' ) || c == '_';
+        if( !word && !run )
+        {
+            out.push_back( '_' );
+        }
+        run = !word;
+        if( word )
+        {
+            out.push_back( c );
+        }
+    }
+    return out;
+}
+
+// The token naming the enum value `v` stands for — a hash's key, an array's element — or a null node. When the values are the
+// call's own keywords (`enum :status, trial: 0`), only a pair that is no option names one.
+inline TSNode rubyEnumValueToken( TSNode v, bool keywords, std::string_view src ) noexcept
+{
+    const bool pair   = kindIs( ts_node_type( v ), "pair" );
+    const bool option = pair && std::ranges::count( kRubyEnumOptions, rubyPairKeyText( v, src ) ) != 0;
+    if( keywords && ( !pair || option ) )
+    {
+        return {};
+    }
+    return pair ? fieldChild( v, NodeField::Key ) : v;
+}
+
+// An enum value's methods as kRubyGenEnumValue lists them — the instance methods first, then the scopes — less a side the
+// call's options leave out.
+inline std::span<const RubyGenName> rubyEnumValueMethods( const RubyEnumNaming& naming ) noexcept
+{
+    static_assert( kRubyGenEnumValue[ 1 ].side == RubyGenSide::Instance && kRubyGenEnumValue[ 2 ].side == RubyGenSide::ClassObject, "instance methods, then scopes" );
+    const std::span<const RubyGenName> all( kRubyGenEnumValue );
+    return all.subspan( naming.instances ? 0 : 2, ( naming.instances ? 2 : 0 ) + ( naming.scopes ? 2 : 0 ) );
+}
+
+// One enum attribute's methods (its reader and writer at `attrToken`) and each of its values' (at the value), named and gated
+// by the call's options (rubyEnumNaming). `values` is a hash, an array, or the call's own arguments (rubyEnumValueToken).
+inline void rubyGenEnumAttribute( TSNode args, TSNode attrToken, TSNode values, std::string_view src, const RubyGenSink& sink )
+{
+    const std::string_view attr = rubyGenArgName( attrToken, src );
+    if( attr.empty() )
+    {
+        return;
+    }
+    sink.from( attr, attrToken, kRubyGenReaderWriter );
+    const RubyEnumNaming naming   = rubyEnumNaming( args, attr, src );
+    const bool           keywords = ts_node_eq( values, args );
+    ChildCursor          cursor( values );
+    forEachNamedChild( values, cursor.cur, [ & ]( TSNode v )
+    {
+        const TSNode           token = rubyEnumValueToken( v, keywords, src );
+        const std::string_view value = ts_node_is_null( token ) ? std::string_view {} : rubyGenArgName( token, src );
+        if( !value.empty() )
+        {
+            sink.from( naming.prefix + rubyEnumLabel( value ) + naming.suffix, token, rubyEnumValueMethods( naming ) );
+        }
+        return true;
+    } );
+}
+
+// Is `n` an enum's list of values — a hash or an array?
+inline bool rubyEnumValues( TSNode n ) noexcept
+{
+    return !ts_node_is_null( n ) && ( kindIs( ts_node_type( n ), "hash" ) || kindIs( ts_node_type( n ), "array" ) );
+}
+
+// What an `enum` call generates: `enum :status, { trial: 0 } | [ :trial ], **options`, `enum :status, trial: 0, …`, or the
+// older `enum status: { trial: 0 }, _prefix: true` (several attributes in one call).
+inline void rubyGenEnum( TSNode args, std::string_view src, const RubyGenSink& sink )
+{
+    const TSNode first = rubyFirstNonCommentArg( args );
+    if( ts_node_is_null( first ) )
+    {
+        return;
+    }
+    if( !kindIs( ts_node_type( first ), "pair" ) )
+    {
+        const TSNode values = ts_node_next_named_sibling( first );
+        rubyGenEnumAttribute( args, first, rubyEnumValues( values ) ? values : args, src, sink );
+        return;
+    }
+    ChildCursor cursor( args );
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode p )
+    {
+        const TSNode values = kindIs( ts_node_type( p ), "pair" ) ? fieldChild( p, NodeField::Value ) : TSNode {};
+        if( rubyEnumValues( values ) && std::ranges::count( kRubyEnumOptions, rubyPairKeyText( p, src ) ) == 0 )
+        {
+            rubyGenEnumAttribute( args, fieldChild( p, NodeField::Key ), values, src, sink );
+        }
+        return true;
+    } );
+}
+
+// The prefix a `delegate` call's `prefix:` gives its names — `true`: the `to:` method's name, `:p`: p — and whether the call
+// delegates at all (a call with no `to:`, or `prefix: true` with no method to name it after, raises in ActiveSupport).
+inline bool rubyDelegatePrefix( TSNode args, std::string_view src, std::string& prefix )
+{
+    const TSNode to       = rubyGenOption( args, "to", src );
+    const TSNode prefixed = rubyGenOption( args, "prefix", src );
+    if( ts_node_is_null( to ) )
+    {
+        return false;
+    }
+    const bool             named  = !ts_node_is_null( prefixed ) && kindIs( ts_node_type( prefixed ), "true" );
+    const std::string_view source = named ? rubyGenArgName( to, src ) : ts_node_is_null( prefixed ) ? std::string_view {} : rubyGenArgName( prefixed, src );
+    if( named && ( source.empty() || !( source.front() == '_' || ( source.front() >= 'a' && source.front() <= 'z' ) ) ) )
+    {
+        return false;
+    }
+    prefix = source.empty() ? std::string {} : std::string( source ) + "_";
+    return true;
+}
+
+// What a `delegate` call generates: each symbol or string argument, prefixed by its `prefix:` (rubyDelegatePrefix).
+inline void rubyGenDelegate( TSNode args, std::string_view src, const RubyGenSink& sink )
+{
+    std::string prefix;
+    if( !rubyDelegatePrefix( args, src, prefix ) )
+    {
+        return;
+    }
+    const RubyGenName named[] = { { prefix, "", RubyGenSide::Instance } };
+    ChildCursor       cursor( args );
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode a )
+    {
+        if( kindIs( ts_node_type( a ), "simple_symbol" ) || kindIs( ts_node_type( a ), "string" ) )
+        {
+            sink.from( rubyGenArgName( a, src ), a, named );
+        }
+        return true;
+    } );
+}
+
+// Is the declaration `n` written where it defines methods (the note above)? `includer` says whether a concern's `included
+// do` holds it.
+inline bool rubyGenAtDeclarationLevel( TSNode n, bool modelOnly, std::string_view src, bool& includer ) noexcept
+{
+    includer = rubyInConcernIncludedBlock( n, src );
+    if( includer )
+    {
+        return true;
+    }
+    if( !rubyAttrAtClassBodyLevel( n, src ) || rubyIsSingletonDef( n ) )
+    {
+        return false;
+    }
+    for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+    {
+        if( kindIs( ts_node_type( p ), "class" ) || kindIs( ts_node_type( p ), "module" ) )
+        {
+            return !modelOnly || kindIs( ts_node_type( p ), "class" );
+        }
+    }
+    return false;
+}
+
+// What a DSL call's arguments name, by how its verb reads them (RubyGenArgs), onto the sink.
+inline void rubyGenFromArguments( const RubyGenVerb& verb, TSNode args, std::string_view src, const RubyGenSink& sink )
+{
+    if( verb.args == RubyGenArgs::Delegated )
+    {
+        rubyGenDelegate( args, src, sink );
+        return;
+    }
+    if( verb.args == RubyGenArgs::Enum )
+    {
+        rubyGenEnum( args, src, sink );
+        return;
+    }
+    if( verb.args == RubyGenArgs::First )
+    {
+        const TSNode first = rubyFirstNonCommentArg( args );   // a comment before it is no argument
+        if( !ts_node_is_null( first ) && !kindIs( ts_node_type( first ), "identifier" ) && !kindIs( ts_node_type( first ), "hash_key_symbol" ) )
+        {
+            sink.from( rubyGenArgName( first, src ), first, verb.names );
+        }
+        return;
+    }
+    ChildCursor cursor( args );
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode a )
+    {
+        if( kindIs( ts_node_type( a ), "simple_symbol" ) )
+        {
+            sink.from( rubyGenArgName( a, src ), a, verb.names );
+        }
+        return true;
+    } );
+}
+
+// The methods the declaration `n` generates — a DSL call (kRubyGeneratedVerbs) or an `alias new old` — onto `out` (cleared
+// first); none where it is not written at declaration level.
+inline void rubyGeneratedMethods( TSNode n, std::string_view src, std::vector<RubyGenMethod>& out )
+{
+    out.clear();
+    RubyGenSink sink { out };
+    if( kindIs( ts_node_type( n ), "alias" ) )
+    {
+        const TSNode name = fieldChild( n, NodeField::Name );
+        if( !ts_node_is_null( name ) && rubyGenAtDeclarationLevel( n, false, src, sink.includer ) )
+        {
+            sink.from( rubyGenArgName( name, src ), name, kRubyGenMethod );
+        }
+        return;
+    }
+    const bool         bare = ts_node_is_null( fieldChild( n, NodeField::Receiver ) );
+    const RubyGenVerb* verb = bare ? findByField( kRubyGeneratedVerbs, &RubyGenVerb::verb, fieldIdentifierText( n, NodeField::Method, src ) ) : nullptr;
+    const TSNode       args = fieldChild( n, NodeField::Arguments );
+    if( verb != nullptr && !ts_node_is_null( args ) && rubyGenAtDeclarationLevel( n, verb->modelOnly, src, sink.includer ) )
+    {
+        rubyGenFromArguments( *verb, args, src, sink );
+    }
+}
+
+// Could the file declare a generated method at all — does it spell `alias` or any verb?
+inline bool rubyMayGenerate( std::string_view src ) noexcept
+{
+    if( src.find( "alias" ) != std::string_view::npos )
+    {
+        return true;   // `alias` and `alias_method`
+    }
+    for( const RubyGenVerb& v : kRubyGeneratedVerbs )
+    {
+        if( src.find( v.verb ) != std::string_view::npos )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Each declaration in the file, with the methods it generates (rubyGeneratedMethods): `visit( declaration, methods )`. A def
+// body declares nothing, so the walk does not enter one; nor a declaration, once read.
+template<class Visit>
+inline void forEachRubyGenerated( TSNode root, std::string_view src, Visit&& visit )
+{
+    if( !rubyMayGenerate( src ) )
+    {
+        return;
+    }
+    std::vector<RubyGenMethod> methods;
+    rubyWalkUntaken( root, [ & ]( TSNode n )
+    {
+        const char* t = ts_node_type( n );
+        if( kindIs( t, "method" ) || kindIs( t, "singleton_method" ) )
+        {
+            return true;
+        }
+        if( !kindIs( t, "call" ) && !kindIs( t, "alias" ) )
+        {
+            return false;
+        }
+        rubyGeneratedMethods( n, src, methods );
+        if( methods.empty() )
+        {
+            return false;
+        }
+        visit( n, methods );
+        return true;
+    } );
+}
+
+// The generated methods as Section definitions of the class or concern around each declaration (the note above).
+inline void captureRubyGeneratedDefs( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawDef>& defs )
+{
+    forEachRubyGenerated( root, src, [ & ]( TSNode decl, const std::vector<RubyGenMethod>& methods )
+    {
+        const std::uint32_t start = ts_node_start_byte( decl );
+        const std::uint32_t end   = ts_node_end_byte( decl );
+        for( std::size_t k = 0; k < methods.size() && start + k < end; ++k )
+        {
+            const RubyGenMethod& m = methods[ k ];
+            RawDef               d;
+            d.fileId = fileId; d.line = ts_node_start_point( m.token ).row + 1; d.startByte = ts_node_start_byte( m.token ); d.endByte = ts_node_end_byte( m.token );
+            d.nameByte = start + std::uint32_t( k ); d.loc = 1; d.kind = SymKind::Section; d.lang = Lang::Ruby;
+            d.scope = rubyEnclosingScopeOf( m.token, src ); d.name = m.name;
+            if( !d.scope.empty() )
+            {
+                defs.push_back( std::move( d ) );
+            }
+        }
+    } );
+}
+
+// The class methods among them, each a RubySingletonDef binding named for it at its definition's start (a concern's carry
+// kRubyIncluderMark: each includer's) — the join src/ruby_generated.h buildRubyGenerated reads.
+inline void captureRubyGeneratedSides( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    forEachRubyGenerated( root, src, [ & ]( TSNode decl, const std::vector<RubyGenMethod>& methods )
+    {
+        const std::uint32_t span = ts_node_end_byte( decl ) - ts_node_start_byte( decl );
+        for( std::size_t k = 0; k < methods.size() && k < span; ++k )
+        {
+            const RubyGenMethod& m = methods[ k ];
+            if( m.side == RubyGenSide::ClassObject )
+            {
+                binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( m.token ), .lang = Lang::Ruby, .kind = LocalBindKind::RubySingletonDef,
+                                           .var = m.name, .importedName = m.includer ? std::string( kRubyIncluderMark ) : std::string {} } );
+            }
+        }
+    } );
+}
+
 // ─── FactoryBot's factory definitions (parser version 132, test/rubytypedrecvcheck.sh) ─────────────────────────────────
 // `factory :user do … end` inside a `FactoryBot.define` (or `FactoryGirl.define`) block defines what `create( :user )`
 // builds, and its class is FactoryBot's own rule: the `class:` option as written — a constant, or a string naming one (its

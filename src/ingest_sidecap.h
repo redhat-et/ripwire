@@ -2640,9 +2640,12 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
     // methods — beside each singleton def, which the def capture above notes.
     // Parser version 145 (test/rubyclassrecvcheck.sh): the mixins the class object's lookup reaches — an `extend`, an
     // `include` in `class << self` — into binds, beside the inherit reference each mixin already is.
+    // Parser version 277 (test/rubygeneratedcheck.sh): the methods a class body's Rails DSL generates, as lookup-only Section
+    // defs in the same defs window, and the class methods among them into binds.
     if( le.lang == Lang::Ruby )
     {
         captureRubyDefs( root, fileId, src, defs );   // #339: the Definitions-only walker (attr defs + rendered db/schema.rb columns)
+        captureRubyGeneratedDefs( root, fileId, src, defs );
         if( !full )
         {
             return;   // TagsCapture::DefinitionsOnly: the passes below write references and binds only
@@ -2654,6 +2657,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
         captureRubyClassMixins( root, fileId, src, binds );
         captureRubyMainMixins( root, fileId, src, binds );
         captureRubyExampleGroups( root, fileId, src, binds );
+        captureRubyGeneratedSides( root, fileId, src, binds );
         if( le.ext == kJbuilderExt )
         {
             typeRubyJbuilderLocal( fileId, refs );

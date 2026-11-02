@@ -163,6 +163,11 @@ struct LangFacts
     /// Markdown: a link targets a section, so shared graph code treats this language's sections as link targets (graph.h).
     bool linkSections = false;
 
+    /// Ruby: a section is a definition only the language's own class lookup reaches — a db/schema.rb column (#339), a method a
+    /// class body's Rails DSL generates (src/ruby_generated.h) — so it joins neither the name tier nor the `scope::name` index a
+    /// shared rule reads (graph.h buildGraph's byName and canonByName): an untyped `response.code` is never a column's caller.
+    bool lookupOnlySections = false;
+
     /// C, C++, Objective-C: a function span the parser reports DIRECTLY inside a function's span is read as a misread (htop's
     /// `else if (…) {` inside a macro-heavy body read as a function named `if`), never a closure (src/closures.h; this fact
     /// decides only the closure relation, no symbol or edge). A lambda or a block is anonymous, and a C++ local class's
@@ -278,7 +283,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
       .writtenModule = WrittenModuleRule::DirsOnly },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
-      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self" },
+      .lookupOnlySections = true, .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self" },
     { .lang = Lang::Unknown },
     { .lang = Lang::Json },
     { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly },

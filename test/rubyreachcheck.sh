@@ -28,8 +28,10 @@
 #       superclass (`< DelegateClass( User )`) names no base, so its class is not seen as one.
 #   (b) the delegation DSL — ActiveSupport's `delegate :a, to: :x` and `delegate_missing_to`, Forwardable's
 #       `def_delegator(s)` — defines methods the tree does not index, so a class that writes it (or one whose reach holds
-#       such a class) refuses nothing: its bare calls bind by name as before. Indexing the delegated names as methods
-#       is a later round's (they must answer a call to self only — a receiver call of that name is no evidence).
+#       such a class) refuses nothing: its bare calls bind by name as before. PARTLY LIFTED at parser version 277
+#       (test/rubygeneratedcheck.sh): a name ActiveSupport's `delegate` spells as a symbol is a method the class's
+#       declaration generates, which its call to self reaches; the class still refuses nothing for any other name, and
+#       Forwardable, `delegate_missing_to` and a computed name list are read as before.
 #   (h) a top-level def is a private method of Object, and any ancestor answers before Object does: a class whose
 #       reach holds an out-of-tree superclass or mixin (ActionController::Base) does not reach a top-level def.
 #   (i) a mixin written inside a METHOD body runs when the method does (activerecord's `primary_key=` includes
@@ -643,8 +645,10 @@ else
 fi
 
 echo "=== floor (b): a class that delegates is exempt — its bare calls bind by name as before ==="
-reaches Quoting::quote_name        Creation#build "delegate :quote_name, to: :@conn — the delegated method is not indexed, Creation is exempt"
-reaches Quoting::owner_name        Creation#label "delegate … prefix: true — exempt the same way"
+reaches Creation::quote_name       Creation#build "LIFTED (parser version 277): delegate :quote_name, to: :@conn generates Creation's own quote_name"
+misses  Quoting::quote_name        build          "…so the bare call no longer binds the namesake by name"
+reaches Creation::owner_name       Creation#label "LIFTED: delegate :name, to: :owner, prefix: true generates owner_name"
+misses  Quoting::owner_name        label          "…not Quoting's owner_name"
 reaches Pool::checkout             Counter#count "def_delegators :@pool, :checkout — Forwardable, exempt"
 reaches Pool::forwarded_anywhere   Forwarder#go    "delegate_missing_to forwards any name, as method_missing does"
 reaches Pool::computed_name        Computed#go    "delegate( *NAMES, … ) — the names are computed, the class is exempt"

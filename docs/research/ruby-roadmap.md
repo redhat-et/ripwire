@@ -179,6 +179,20 @@ and the gate pins both directions.
 
 ### R3: methods Ruby generates (M; recall)
 
+**Status, 2026-11-02: the class-body DSL is done on `feat/ruby-rails-lookup`** (kParserVer placeholder
+277, gate `test/rubygeneratedcheck.sh`, `changelog.d/ruby-generated-methods.md`). Sized first with Prism over both
+applications, joined to the census: calls on a receiver the lookup already types that land on a generated name were about
+2,300 on app A and 9,500 on app B, two thirds of B's being `db/schema.rb` columns (app A has `structure.sql`, so none).
+Association chains reaching a written method of the target class were small (142 and 76), so an association's value stays
+untyped. Associations, `scope`, `delegate`, enums, attachments, nested attributes, `alias_method`, `alias` and
+`define_method( :name )` now mint lookup-only `sec` definitions (`src/ruby_generated.h`): the name tier never sees them, and a
+lookup reads them only once no written method answers, which is Rails' order for its generated association and attribute
+modules. Measured against R4: app A 1,441 refusals and 732 undecided calls newly bound, 132 retargeted; app B 1,083, 1,680
+and 349; ActiveRecord 9, 61 and 104; ActiveSupport 1, 31 and 8; no site lost an edge. Every sampled category was right (20 of
+20 or all of a smaller one). Not done: columns (a table-to-model mapping and the inflector; #339 recorded "definitions only"
+as a maintainer decision, with edges "behind an evidence rule" left open), `<singular>_ids`, pluralized enum class methods,
+`with_options`, Forwardable (no corpus uses it).
+
 Ruby code defines methods the source never spells as `def`:
 
 - `delegate :name, to: :owner`, `def_delegator(s)`, `alias_method`, `alias`, `define_method( :literal )`;

@@ -198,6 +198,7 @@ extern "C"
 #include "ingest_docs.h"
 #include "ingest_names.h"
 #include "ruby_receivers.h"    // R4: the relation links and the via a chain spells (graph.h reads the same)
+#include "ruby_generated.h"    // R3: the methods a class body's Rails DSL generates (ingest_ruby.h mints them; graph.h looks them up)
 #include "ingest_binds.h"
 #include "ingest_inert.h"
 #include "ingest_elixir.h"
