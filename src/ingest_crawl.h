@@ -92,6 +92,10 @@ inline constexpr std::string_view kJbuilderExt = ".jbuilder";
 // deterministic. `=` and `-` cover 1321 of that corpus's 1948 underlines (67.8%); `*`/`^`/`"`/`~`/`+`/`#`
 // titles are read as prose, which costs recall precision inside a file and nothing else.
 //
+// SUPERSEDED FOR .rst (#409): the setext reading above got `=` and `-` titles and read every directive as a paragraph, so
+// .rst now goes through ingest_rest.h's parser; the grammar row stays as its Lang::Markdown identity. The rest of this note
+// stands for .adoc/.org/.mdx.
+//
 // WHAT THIS HONESTLY DOES NOT DO, disclosed because --recall says `section-granular` only when it is true:
 // AsciiDoc's `== Section` and Org-mode's `* Heading` are NOT markdown headings (the former is a paragraph,
 // the latter a list item), so those files carry the file-level node alone and serve as ONE whole-file
@@ -225,7 +229,7 @@ constexpr std::array<LangEntry, 57> kLangTable = {{
     { ".bb",   Lang::Clojure,    &tree_sitter_clojure,    "clojure"    },
     { ".md",   Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Markdown DOC tier — headings/sections via extractMarkdown()'s custom tree walk; NO tags.scm (query stays "")
     { ".markdown", Lang::Markdown, &tree_sitter_markdown, ""           },   // sibling extension, same walk
-    { ".rst",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // reStructuredText — underlined titles tile as setext
+    { ".rst",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // reStructuredText — read by ingest_rest.h, no parse with this grammar
     { ".adoc", Lang::Markdown,   &tree_sitter_markdown,   ""           },   // AsciiDoc — whole-file unit (see above)
     { ".org",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // Org-mode — whole-file unit (see above)
     { ".mdx",  Lang::Markdown,   &tree_sitter_markdown,   ""           },   // MDX — markdown with JSX islands

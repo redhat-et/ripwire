@@ -823,18 +823,17 @@ void extractRest( std::uint32_t fileId, std::string_view src, std::string_view s
             continue;
         }
 
-        if( isAdornmentLine( text ) )   // a transition, or a table rule
-        {
-            afterBlank = false;
-            continue;
-        }
-        build.flushWaiting();
         afterBlank = false;
-        resumeAt   = scanRestInline( src, line, resumeAt, fileId, ownExt, refs );
-        if( text.ends_with( "::" ) )
+        if( text.ends_with( "::" ) )   // first: a bare `::` is also a line of one punctuation character
         {
             literalIndent = indent;
         }
+        if( isAdornmentLine( text ) )   // a transition, or a table rule
+        {
+            continue;
+        }
+        build.flushWaiting();
+        resumeAt = scanRestInline( src, line, resumeAt, fileId, ownExt, refs );
     }
 
     const std::vector<RestUnit> units = build.finish();

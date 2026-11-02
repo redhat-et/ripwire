@@ -185,6 +185,10 @@ A literal block follows::
 
     .. option:: --qqfakeliteral
 
+::
+
+    .. option:: --qqfakebare
+
 .. code-block:: rst
 
     Fake Code Title
@@ -301,6 +305,7 @@ is_unit "abcdefgh" && ok "E2 a 5-char underline shorter than its title is a titl
 is_unit "qqparaline" && no "E3 a paragraph's last line is no title" || ok "E3 a paragraph's last line is no title"
 is_unit "Fake Literal Title" && no "E4 title in a literal block" || ok "E4 title in a literal block"
 is_unit "--qqfakeliteral" && no "E5 directive in a literal block" || ok "E5 directive in a literal block"
+is_unit "--qqfakebare" && no "E5b directive after a bare ::" || ok "E5b directive after a bare ::"
 is_unit "--qqfakecode" && no "E6 directive in code-block" || ok "E6 directive in code-block"
 is_unit "--qqfakecomment" && no "E7 directive in a comment" || ok "E7 directive in a comment"
 is_unit "bullet qqbullet" && no "E8 a bullet above a rule" || ok "E8 a bullet above a rule"

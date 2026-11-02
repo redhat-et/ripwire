@@ -566,7 +566,8 @@ between runs — the whole cost is one cold parse. Two conditions decide whether
 and both are yours, because the file you write is the only thing that sets them:
 
 1. **Dump to `.md`.** `--recall` ranks DOCUMENT files: `.md`, plus the docparse'd
-   `.ipynb`/`.html`/`.csv` (and Office/PDF through the optional markitdown bridge). `.txt`,
+   `.ipynb`/`.html`/`.csv` (and Office/PDF through the optional markitdown bridge). `.txt`
+   (unless a Sphinx `conf.py` above it names that suffix),
    `.log`, `.json` and extensionless files are **not** documents to it. A directory of those
    answers `0 relevant of 0 document files` and exits 0 — which reads like "nothing matched
    your terms" when what happened is "nothing was indexed at all". Redirect to `notes.md`,

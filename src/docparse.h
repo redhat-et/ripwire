@@ -115,7 +115,8 @@ inline bool isDocExtension( std::string_view extLower ) noexcept
 //     Lang::Markdown and the vendored markdown BLOCK grammar, so they reach the section tier, --recall's
 //     section-granular serving and doc→code mentions with no extractor and no extracted-text copy at
 //     all. Deliberately NOT a DocKind: docKindOf answers "which EXTRACTOR", and these need none. A
-//     compile-time guard in ingest_crawl.h asserts every name here really has a grammar row.
+//     compile-time guard in ingest_crawl.h asserts every name here really has a grammar row. `.rst` keeps its row and its
+//     Lang::Markdown identity, and its text is read by ingest_rest.h instead of the grammar (isRestExtension).
 //   • EXTRACTOR tier (docKindOf). A notebook / exported HTML / CSV is turned into plain text by a parser
 //     below, or by the markitdown bridge, and contributes one whole-file section.
 //   • PROSE THIS BUILD DOES NOT INDEX (kUnindexedProseExts). Prose to a reader, absent from the index —
