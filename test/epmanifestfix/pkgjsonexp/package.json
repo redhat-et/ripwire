@@ -1,0 +1,6 @@
+{
+  "name": "exp-pkg",
+  "exports": {
+    ".": "./src/index.js"
+  }
+}
