@@ -1119,6 +1119,7 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 inline constexpr std::size_t kForFileTailShownCap     = 24;   // the rank rows (deep-tail d2): files outside the shown head
 inline constexpr std::size_t kForFileTailPageRows     = 40;   // FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault)
 inline constexpr std::size_t kForFileTailShellReserve = 48;
+inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h)
 
 // The legend clause defining BOTH deep-tail surfaces (the r= rank fact and the <tail> element) — a named
 // constant, shared by the CLI --for header and the MCP `for` twin, so the sigs-budget exemption in each

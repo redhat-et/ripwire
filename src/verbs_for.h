@@ -159,18 +159,20 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
 
     LensRanking out;
     std::vector<float>& lensRank = out.rank;
+    const std::vector<char>  statsOut    = sphinxTxtStatsExclusion( ing, task );   // Sphinx .txt pages out of a code question's statistics
+    const std::vector<char>* statsOutPtr = statsOut.empty() ? nullptr : &statsOut;
     if( routeOn )
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
-                                                                                  0, 0, {}, &out.evidence );   // L-W: the term evidence rides out
+                                                                                  0, 0, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
         {
             // L-W: the name-exact ranker scores WHOLE names, so the subtoken evidence coverage= and the file page
             // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
             // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
             // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence );
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
         }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
@@ -187,7 +189,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     }
     else
     {
-        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence );
+        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
     }
 
     // input blow-up guard disclosure (lexical.h kMaxUniqueQueryTerms/dedupeQueryTerms): a task string with

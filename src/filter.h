@@ -1010,6 +1010,73 @@ inline bool taskAsksAboutDocs( std::string_view task )
         || taskHasCue( lowerTask, kTranslationQuestionCues );
 }
 
+// Does the question ask for doc TEXT: a docs cue (kDocsQuestionCues) or a named .md/.rst file? The narrower half of
+// taskAsksAboutDocs, without its change and translation cues: those misfire on code wording (`django.utils.deprecation`,
+// ld2-django-01), and the two rules that read this (the code-first --for tail, forpage.h computeFileTail; the Sphinx .txt
+// statistics below) keep every doc row and score every doc unit either way, so a code reading of a change question loses none.
+inline bool taskAsksForDocText( std::string_view task )
+{
+    const std::string lowerTask = queryshape::detail::lowerAscii( task );
+    return lowerTask.find( ".md" ) != std::string::npos || lowerTask.find( ".rst" ) != std::string::npos
+        || taskHasCue( lowerTask, kDocsQuestionCues );
+}
+
+// ── SPHINX .txt PAGES STAY OUT OF A CODE QUESTION'S CORPUS STATISTICS (--for and MCP `for`; gate restdocscheck (H)) ─────
+// A `.txt` file enters the index only as a declared Sphinx source (docparse.h sphinxConfDeclaresTxt): django's 679 pages
+// arrived at once and, through BM25's document frequencies and average length, re-ranked code rows on code questions
+// (ld2-django-15 lost a sig row and a hop). On a question that does not ask for doc text (taskAsksForDocText), those pages are still scored, against the whole corpus as before, but the code is scored against statistics
+// without them (lexical.h lexicalScoresTiered statsOut). Empty = nothing to leave out: the historical pass, byte-identical.
+// `.rst` and Markdown keep counting: they were in the statistics before Sphinx `.txt` pages were indexed.
+// A doc unit of an indexed `.txt` file: a Sphinx page (only a declared Sphinx source is indexed with that extension)
+inline bool isSphinxTxtUnit( const IngestResult& ing, const Symbol& s )
+{
+    return s.lang == Lang::Markdown && s.fileId < ing.files.size() && ing.files[ s.fileId ].ends_with( ".txt" );
+}
+
+// A reST label unit (`.. _name:`, ingest_rest.h (4)): a Markdown-lang unit named `_…` in a .rst/.txt file. It names the title
+// beside it, so ranked name lists (the --for file page and tail sym=, forpage.h) leave it out; :ref: still binds it.
+inline bool isRestLabelUnit( const IngestResult& ing, const Symbol& s )
+{
+    return s.lang == Lang::Markdown && s.name.starts_with( '_' ) && s.fileId < ing.files.size()
+        && ( ing.files[ s.fileId ].ends_with( ".rst" ) || ing.files[ s.fileId ].ends_with( ".txt" ) );
+}
+
+inline std::vector<char> sphinxTxtStatsExclusion( const IngestResult& ing, std::string_view task )
+{
+    std::vector<char> out;
+    if( taskAsksForDocText( task ) )
+    {
+        return out;
+    }
+    std::vector<char> txtFile( ing.files.size(), 0 );
+    bool              anyTxt = false;
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        txtFile[f] = docparse::lowerExtOf( ing.files[f] ) == ".txt" ? 1 : 0;
+        anyTxt     = anyTxt || txtFile[f] != 0;
+    }
+    if( !anyTxt )
+    {
+        return out;
+    }
+    out.assign( ing.symbols.size(), 0 );
+    std::size_t marked = 0;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( s.lang == Lang::Markdown && s.fileId < txtFile.size() && txtFile[ s.fileId ] != 0 )
+        {
+            out[i] = 1;
+            ++marked;
+        }
+    }
+    if( marked == 0 )
+    {
+        out.clear();
+    }
+    return out;
+}
+
 // Order a file-id list by a per-id KEY descending, PATH ascending as the tiebreak — the shared
 // "most-consequential-first, and deterministically so" ordering the first-screen verbs need (§P11.7
 // --pr-context by blast radius, §P11.8 --tree by best-symbol rank). Templated on the key because one of

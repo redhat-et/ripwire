@@ -359,4 +359,38 @@ out="$( "$BIN" "$FIX" --cache="$CF" --expand="Over Top Name" --top-k=0 2>/dev/nu
 sed -i.bak 's/".rst"/".txt"/' "$FIX/docs/conf.py"
 out="$( "$BIN" "$FIX" --cache="$CF" --expand="Over Top Name" --top-k=0 2>/dev/null </dev/null )"; case "$out" in *qqtopword*) ok "G5 and one that declares it again";; *) no "G5 and one that declares it again";; esac
 
+echo "H. a code question: Sphinx .txt pages move no code row (filter.h sphinxTxtStatsExclusion, forpage.h code-first tail)"
+# 31 code files where `frob` is common and `widget` rare; 120 Sphinx .txt pages say `widget`. With the pages in the BM25
+# statistics, `widget` turns common and frob_thing climbs past frob_1 (the old pass); out of them, the code ranks as without them.
+mkh(){ H="$1"; mkdir -p "$H/docs" "$H/src"
+  printf 'project = "h"\nextensions = []\nsource_suffix = [".rst", ".txt"]\n' >"$H/docs/conf.py"
+  printf 'def frob_thing(widget):\n    return widget\n\n\ndef widget_thing(frob):\n    return frob\n' >"$H/src/core.py"
+  for i in $(seq 1 30); do printf 'def helper_%d(x):\n    return frob_%d(x) + 1\n\n\ndef frob_%d(x):\n    return x\n' $i $i $i >"$H/src/mod$i.py"; done
+  [ "${2:-}" = nodocs ] && return 0
+  for i in $(seq 1 120); do printf '.. _page-%d:\n\nWidget Page %d\n=============\n\nThe widget frob guide %d: widget widget widget.\n' $i $i $i >"$H/docs/page$i.txt"; done; }
+HX="$TMP/h"; HN="$TMP/hn"; mkh "$HX"; mkh "$HN" nodocs
+# codesigs DIR TASK: the code rows of the ranked head (name per line, rank order); fails when the call fails or prints none
+codesigs(){ o="$( "$BIN" "$1" --no-cache --for="$2" 2>/dev/null </dev/null )" || return 1
+  printf '%s' "$o" | tr '<' '\n' | grep '^d ' | grep -v 'p="docs/' | sed 's/.* n="\([^"]*\)".*/\1/' | grep . ; }
+hx="$( codesigs "$HX" "how does frob widget" )"; rx=$?; hn="$( codesigs "$HN" "how does frob widget" )"; rn=$?
+h1a(){ [ "$rx" = 0 ] && [ "$rn" = 0 ] && [ -n "$hx" ] && [ -n "$hn" ]; }; arm "H1a both answers print code rows" h1a
+# the .txt rows may take ranked rows (docs after code moves them down, never out), so the code rows compare over the shorter list
+h1(){ h1a || return 1; k="$( printf '%s\n' "$hx" | wc -l )"; kn="$( printf '%s\n' "$hn" | wc -l )"; [ "$kn" -lt "$k" ] && k="$kn"
+  [ "$k" -ge 3 ] && [ "$( printf '%s\n' "$hx" | head -n "$k" )" = "$( printf '%s\n' "$hn" | head -n "$k" )" ]; }
+arm "H1 the code rows rank as they do without the .txt pages" h1
+# tailrows DIR TASK: the <tail> rows' paths, in order; fails on a failed call or an empty tail
+tailrows(){ o="$( "$BIN" "$1" --no-cache --for="$2" 2>/dev/null </dev/null )" || return 1
+  printf '%s' "$o" | tr '<' '\n' | grep '^t p=' | sed 's/^t p="\([^"]*\)".*/\1/' | grep . ; }
+tc="$( tailrows "$HX" "how does frob widget" )"; rc=$?
+lastcode="$( printf '%s\n' "$tc" | grep -n '^src/' | tail -1 | cut -d: -f1 )"; firstdoc="$( printf '%s\n' "$tc" | grep -n '^docs/' | head -1 | cut -d: -f1 )"
+h2a(){ [ "$rc" = 0 ] && [ -n "$lastcode" ] && [ -n "$firstdoc" ]; }; arm "H2a the code question's tail holds code and .txt rows" h2a
+h2(){ h2a && [ "$lastcode" -lt "$firstdoc" ]; }; arm "H2 every code row comes before every doc row" h2
+td="$( tailrows "$HX" "docs for the frob widget guide" )"; rd=$?
+h3(){ [ "$rd" = 0 ] && [ "$( printf '%s\n' "$td" | head -1 | cut -d/ -f1 )" = docs ]; }; arm "H3 a docs question keeps the plain order (a doc row first)" h3
+ts="$( "$BIN" "$HX" --no-cache --for="how does frob widget" 2>/dev/null </dev/null )"; rs=$?
+h4a(){ [ "$rs" = 0 ] && printf '%s' "$ts" | grep -q '<t p="docs/page[0-9]*\.txt" sym="[^"]'; }; arm "H4a .txt tail rows carry sym=" h4a
+arm_not "H4 no label (_name) takes a sym= slot" sh -c '[ "$1" != 0 ] || printf "%s" "$2" | grep -q "sym=\"_\|sym=\"[^\"]*,_"' _ "$rs" "$ts"
+arm "H4b the label is still a unit" sh -c 'out="$( "$1" "$2" --no-cache --expand=_page-7 --top-k=0 2>/dev/null </dev/null )" && case "$out" in *"<b t=\"sec\""*) exit 0;; esac; exit 1' _ "$BIN" "$HX"
+arm "H5 the extract_partial legend names the reST bound" grep -q 'reST/Sphinx units past 20000 per file or titles and directives nested past 64 levels' "$TMP/skip.xml"
+
 [ "$fail" = 0 ] && echo "restdocscheck: ALL PASS" || { echo "restdocscheck: FAILED"; exit 1; }

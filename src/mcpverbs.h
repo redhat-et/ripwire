@@ -2503,14 +2503,16 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // fullDistribution (a pruned tail would make total= mode-dependent and its order incomplete).
     // L-W: the term evidence behind the subtoken pass rides out for coverage= and the file page — the CLI
     // twin's computeLensRanking makes the same two calls (one exhaustive subtoken pass on the identifier route).
-    LexTermEvidence    mcpEvidence;
+    LexTermEvidence          mcpEvidence;
+    const std::vector<char>  mcpStatsOut    = sphinxTxtStatsExclusion( ing, task );   // the CLI twin's statistics (filter.h)
+    const std::vector<char>* mcpStatsOutPtr = mcpStatsOut.empty() ? nullptr : &mcpStatsOut;
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
                                        ? lexicalScoresNameExactRanked( ing, task, &tierMul )
                                        : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
-                                                              0, 0, {}, &mcpEvidence );
+                                                              0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
     if( rc.which == LexMode::NameExact )
     {
-        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
+        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence, mcpStatsOutPtr );
     }
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /

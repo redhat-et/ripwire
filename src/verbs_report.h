@@ -2070,6 +2070,7 @@ void writeNestRefusedLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
 }
 
 // The extract-partial clause, on nest-refused's rule: written ONLY into a document that carries extract-partial rows.
+// the reST clause names ingest_rest.h resttier::kMaxRestUnits / kMaxRestDepth by value; restdocscheck (H) pins it
 void writeExtractPartialLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
 {
     if( cs.extractPartialFiles == 0 )
@@ -2077,7 +2078,8 @@ void writeExtractPartialLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
         return;
     }
     w.write( "<!-- extract_partial= counts indexed files whose extracted facts are PARTIAL: an extraction pass stopped at a nesting"
-             " bound it will not descend past (Elixir module/alias chains, imports nested past their container bound), the"
+             " bound it will not descend past (Elixir module/alias chains, imports nested past their container bound, reST/Sphinx"
+             " units past 20000 per file or titles and directives nested past 64 levels), the"
              " grammar's tags query was unavailable, or the extraction stopped part-way on an internal failure (the facts before it"
              " are kept). Each is one <f why=\"extract-partial\" bytes= ext=/> row. Such a file IS inside indexed=, its symbols and"
              " edges may be missing, and it is never cached as whole, so the next run extracts it again. -->" );
