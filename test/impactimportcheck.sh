@@ -602,8 +602,15 @@ pi core_fn --format=columnar
 if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q 'importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' && printf '%s' "$PO" | grep -q 'importers_tests=/importers_dirs='; then
     ok "rollup (k): columnar carries the rollup and its legend"
 else no "rollup (k) rc=$PRC: $( printf '%s' "$PO" | grep -oE '<impact [^>]*>' )"; fi
+MO="$( printf '%s\n%s\n%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"impact","arguments":{"path":"'"$PH"'","symbol":"core_fn"}}}' \
+        | ( cd "$PH" && perl -e 'alarm 60; exec @ARGV' "$BIN" "$PH" --mcp --no-cache 2>/dev/null | tail -1 ) )"; MRC=$?
+if [ "$MRC" = 0 ] && printf '%s' "$MO" | grep -q 'importers_tests=\\"15\\" importers_dirs=\\"src/a:20,tests/unit:15,src/b:10\\"' && printf '%s' "$MO" | grep -q 'importers_tests=/importers_dirs='; then
+    ok "rollup (n): the MCP impact tool carries the rollup and its legend sentence"
+else no "rollup (n) rc=$MRC: $( printf '%s' "$MO" | grep -oE 'importers=[^ ]*' | head -1 )"; fi
 pi lib/core.h --legend=full
-if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q 'selector="file": of= names an indexed FILE' && printf '%s' "$PO" | grep -q 'importers_tests=/importers_dirs= (a cut importer listing only)'; then
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q 'selector="file": of= names an indexed FILE' && printf '%s' "$PO" | grep -q 'importers_tests=/importers_dirs='; then
     ok "path (l): the full legend defines selector= and the rollup"
 else no "path (l) rc=$PRC"; fi
 if command -v xmllint >/dev/null 2>&1; then
