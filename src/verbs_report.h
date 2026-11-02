@@ -498,11 +498,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
     {
         const StructuralIncludeAdj sa = resolveStructuralIncludeAdj( ing );   // the LOAD-TIME file→file graph (forward = includes);
         const auto&     adj    = sa.adj;                     //   lazy pairs are out of it and counted (lazy_edges=), see graph.h
-        // RUST-MOD-DECL: a `mod x;` parent-to-child pair is containment: out of the cycles and the cones below, in Ca/Ce
-        const ContainmentCut contain   = rustContainmentCut( ing, adj );
-        const auto&          healthAdj = contain.of( adj );
-        const auto      cycles = sccCycles( healthAdj );     // Lakos cardinal sin: cyclic physical deps
-        const DepHealth h      = dependencyHealth( healthAdj );   // per-file transitive cone (unrestricted BFS)
+        const auto      cycles = sccCycles( adj );           // Lakos cardinal sin: cyclic physical deps
+        const DepHealth h      = dependencyHealth( adj );    // per-file transitive cone (unrestricted BFS)
         // §P9.4: <health>'s ccd/acd/nccd are the RESTRICTED (dependency-capable-only) numbers — recomputed
         // from h.transitive (a post-pass, not a second BFS; see graph.h::restrictDependencyHealth).
         const RestrictedDepHealth rh = restrictDependencyHealth( dependencyMeasure( ing, adj ).mask, h.transitive );
@@ -518,8 +515,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
             }
         }
         packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, sa.lazyEdgesByFile, sa.lazyEdges, cfg.pageLimit, cfg.pageOffset, avRootArg,
-                  { sa.importsUnresolved, sa.tsExtras.declarationOnly, sa.tsExtras.extendsUnread },   // #220: the partial-graph disclosures, absent at 0
-                  &healthAdj, contain.pairs );   // RUST-MOD-DECL: the cycles' own graph, and how many pairs it leaves out
+                  { sa.importsUnresolved, sa.tsExtras.declarationOnly, sa.tsExtras.extendsUnread } );   // #220: the partial-graph disclosures, absent at 0
         return 0;
     }
 
@@ -3609,8 +3605,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
                 }
             }
         }
-        const ContainmentCut reportContain = rustContainmentCut( ing, adj );   // RUST-MOD-DECL: `mod x;` pairs are containment, not cycles
-        const auto           cycles        = sccCycles( reportContain.of( adj ) );
+        const auto cycles = sccCycles( adj );
 
         // §P7 embedding contract: this markdown never contains a run of 4-or-more backticks, so a consumer's
         // 5-backtick fence always safely embeds it whole (test/mdembedcheck.sh pins this). Every element below
@@ -3682,15 +3677,13 @@ std::optional<int> runStructureText( const MainDispatch& d )
         {
             reportWhy += ( reportWhy.empty() ? "" : ", " ) + reportNoEdgeWhy;
         }
-        // RUST-MOD-DECL: the pairs left out as containment are named in the heading, absent when none
-        const std::string reportContainWhy = reportContain.pairs != 0 ? std::format( "; {} Rust mod-declaration pairs left out as containment", reportContain.pairs ) : std::string();
         if( !reportPartial )
         {
-            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}{})\n", reportCycles, cycles.size(), reportContainWhy );
+            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {})\n", reportCycles, cycles.size() );
         }
         else
         {
-            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {}{})\n", reportCycles, cycles.size(), reportWhy, reportContainWhy );
+            rw::emitTo( stdout, "\n## Dependency cycles (showing {} of {}; measured over resolved edges: {})\n", reportCycles, cycles.size(), reportWhy );
         }
         if( cycles.empty() )
         {

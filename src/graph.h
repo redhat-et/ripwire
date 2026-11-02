@@ -15000,145 +15000,6 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
     return resolveStructuralIncludeAdj( ing ).adj;
 }
 
-// ── RUST-MOD-DECL: a Rust `mod x;` is CONTAINMENT, not a dependency ────────────────────────────────────────
-// A body-less `mod x;` declares that `x.rs` (or `x/mod.rs`) is a child module of the declaring file; the child's own
-// `use crate::…` / `use super::…` then points back up. Read as two dependencies, every parent and child is a 2-cycle,
-// and a crate reads as one strongly connected block: GRAPH-SCALE measured nushell's largest cycle at 235 files with
-// these pairs and 19 without, zed 93 and 25. Cargo compiles a crate as ONE unit, so the pair is not a physical
-// dependency a cycle or Lakos's ccd should charge; it stays in the graph and in Ca and Ce (afferent=, instab=,
-// godfiles, stabledeps), and leaves --deps' cycle and health numbers (cycles, ccd/acd/nccd/shape, a row's transitive=,
-// which say how many pairs they leave out: containment_edges=) and --report's cycle list (its heading says so). --arch's
-// propagation_cost still walks them (not yet cut: card RUST-MOD-DECL-ARCH).
-//
-// The pair is judged by Rust's module-file rule over PATHS, not by which directive drew the edge, so an edge a `use`
-// draws to the same child is the same containment and an edge from any other source (an injected truth edge in a rig)
-// is judged alike: parent P declares `mod x;` (an Include with target `mod:x`, ingest_relations.h), and the edge's
-// target is `x.rs` or `x/mod.rs` in P's module directory — P's own directory for a `mod.rs` or a crate root, else
-// `<dir>/<stem>` (Rust 2018: `src/a.rs` declares `src/a/b.rs`). A crate root is `lib.rs`/`main.rs`, or a file no
-// `mod <its stem>;` anywhere in the tree declares: Cargo's other roots (`[lib] path = "src/gpui.rs"`, src/bin/*.rs,
-// tests/*.rs, examples/*.rs, build.rs) are exactly the files no module declares (zed: gpui.rs, theme.rs). Declared is
-// read by NAME, so a namesake declared elsewhere makes a root read as a module, which only cuts less. Allowlist,
-// SAFETY (d)(1): only those proven shapes are cut. A `#[path = "…"] mod x;` and a `mod x;` inside an inline
-// `mod m { … }` are not recognised and stay counted.
-struct ContainmentCut
-{
-    std::vector<std::vector<std::uint32_t>> adj;     // the adjacency minus the containment pairs, filled only when pairs > 0
-    std::uint64_t                           pairs = 0;   // DISTINCT (parent, child) pairs left out
-
-    // The adjacency the cycle and health numbers walk: `full` itself when nothing was cut (no copy, byte-identical).
-    const std::vector<std::vector<std::uint32_t>>& of( const std::vector<std::vector<std::uint32_t>>& full ) const noexcept
-    {
-        return pairs > 0 ? adj : full;
-    }
-};
-
-// The directory a Rust file's `mod x;` children live in (see ContainmentCut). `declared`: some `mod <stem>;` in the tree
-// names this file's stem, so it is a module file, not a crate root.
-inline std::string rustChildModuleDir( std::string_view path, const std::vector<std::string_view>& declaredNames )
-{
-    const std::string_view dir   = includerDir( path );
-    std::string_view       stem  = dir.empty() ? path : path.substr( dir.size() + 1 );
-    stem                         = stem.substr( 0, stem.size() - 3 );   // ".rs", checked by the caller
-    const bool root = stem == "lib" || stem == "main" || !std::binary_search( declaredNames.begin(), declaredNames.end(), stem );
-    if( stem == "mod" || root )
-    {
-        return std::string( dir );
-    }
-    return dir.empty() ? std::string( stem ) : std::string( dir ) + "/" + std::string( stem );
-}
-
-inline bool isRustSourcePath( std::string_view path ) noexcept
-{
-    return path.size() > 3 && path.substr( path.size() - 3 ) == ".rs";
-}
-
-inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
-{
-    ContainmentCut cut;
-    const std::uint32_t F = std::uint32_t( std::min( adj.size(), ing.files.size() ) );
-    // (declaring file, declared name), sorted: one contiguous run per file. Names point into ing.includes.
-    std::vector<std::pair<std::uint32_t, std::string_view>> decls;
-    for( const Include& inc : ing.includes )
-    {
-        if( inc.fileId < F && inc.target.size() > 4 && inc.target.compare( 0, 4, "mod:" ) == 0 && isRustSourcePath( rootRelPath( ing, inc.fileId ) ) )
-        {
-            decls.emplace_back( inc.fileId, std::string_view( inc.target ).substr( 4 ) );
-        }
-    }
-    if( decls.empty() )
-    {
-        return cut;
-    }
-    std::sort( decls.begin(), decls.end() );
-    decls.erase( std::unique( decls.begin(), decls.end() ), decls.end() );
-    std::vector<std::string_view> declaredNames;   // every name some `mod x;` declares, sorted: a file whose stem is not here is a crate root
-    declaredNames.reserve( decls.size() );
-    for( const auto& d : decls )
-    {
-        declaredNames.push_back( d.second );
-    }
-    std::sort( declaredNames.begin(), declaredNames.end() );
-    declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
-
-    cut.adj = adj;
-    std::vector<std::uint32_t> dropped;   // one scratch row, reused: the distinct children cut from one parent
-    for( std::size_t i = 0; i < decls.size(); )
-    {
-        const std::uint32_t p = decls[i].first;
-        std::size_t         j = i;
-        while( j < decls.size() && decls[j].first == p )
-        {
-            ++j;
-        }
-        const std::string                 childDir = rustChildModuleDir( rootRelPath( ing, p ), declaredNames );
-        const auto                        names    = std::span( decls ).subspan( i, j - i );
-        const auto isChild = [ & ]( std::uint32_t g ) -> bool
-        {
-            const std::string_view gp = rootRelPath( ing, g );
-            if( !isRustSourcePath( gp ) )
-            {
-                return false;
-            }
-            const std::string_view gDir = includerDir( gp );
-            std::string_view       name = gDir.empty() ? gp.substr( 0, gp.size() - 3 ) : gp.substr( gDir.size() + 1, gp.size() - gDir.size() - 4 );
-            std::string_view       home = gDir;   // the directory the declaring parent sits in for `x.rs`
-            if( name == "mod" )                   // `x/mod.rs`: the module is the directory, declared one level up
-            {
-                if( gDir.empty() )
-                {
-                    return false;
-                }
-                home = includerDir( gDir );
-                name = home.empty() ? gDir : gDir.substr( home.size() + 1 );
-            }
-            return home == childDir
-                && std::any_of( names.begin(), names.end(), [ & ]( const auto& d ) { return d.second == name; } );
-        };
-        std::vector<std::uint32_t>& outs = cut.adj[p];
-        std::uint32_t               kept = 0;
-        dropped.clear();
-        for( const std::uint32_t g : outs )
-        {
-            if( g < F && isChild( g ) )
-            {
-                dropped.push_back( g );
-                continue;
-            }
-            outs[kept++] = g;
-        }
-        outs.resize( kept );
-        std::sort( dropped.begin(), dropped.end() );
-        cut.pairs += std::uint64_t( std::unique( dropped.begin(), dropped.end() ) - dropped.begin() );
-        i = j;
-    }
-    if( cut.pairs == 0 )
-    {
-        cut.adj.clear();
-        cut.adj.shrink_to_fit();
-    }
-    return cut;
-}
-
 // ── LB-H (r10 GitNexus round) — IMPORT REACH, the second and much weaker kind of blast radius ────────────
 // The files that DIRECTLY include/import one of `defFiles`, sorted by file id, each listed once. A file is
 // never its own importer — but "own" means an edge to ITSELF, not membership in `defFiles`: buildPreciseIncludeAdj
@@ -15315,62 +15176,7 @@ struct ImportTier
     std::uint64_t              tsconfigUnread    = 0;   // #220 part 2: configs with an unread extends/references base (tsconfig_unread=)
     bool                       umbrella          = false;   // idea #6: an umbrella header — see impactImportTier
     std::uint32_t              noFileEdgeLangs   = 0;       // arch-honest: the def files' languages this build draws no file edge for (lintrules.h)
-    std::size_t                testImporters     = 0;       // IMPACT-ROLLUP: importers in the test/bench tier (filter.h pathTierOf), over ALL files
-    std::string                topDirs;                     // IMPACT-ROLLUP: "dir:n,dir:n,dir:n", the most-importing directories over ALL files
 };
-
-// IMPACT-ROLLUP (GRAPH-SCALE flood): a cut tier shows its most-imported 40 and hides the shape of the rest — RegisterFactory
-// on true-edge Envoy lists 40 of 580 with 0 tests among them, of 202 tests in all. The rollup is two facts over EVERY
-// importer, printed only beside importers_capped="1": how many are tests (importers_tests=) and the directories most of
-// them sit in (importers_dirs=, kImportTierRollupDirs of them, a directory being the first kImportTierRollupDirDepth
-// segments of the importer's root-relative path, or its whole directory when shallower; by count, then path). About 100 B.
-inline constexpr std::size_t kImportTierRollupDirs     = 3;
-inline constexpr std::size_t kImportTierRollupDirDepth = 2;
-
-inline std::string_view importTierRollupDir( std::string_view rel ) noexcept
-{
-    std::size_t end = 0;
-    for( std::size_t seg = 0; seg < kImportTierRollupDirDepth; ++seg )
-    {
-        const std::size_t slash = rel.find( '/', end == 0 ? 0 : end + 1 );
-        if( slash == std::string_view::npos )
-        {
-            break;   // the file sits in a shallower directory: that directory is its group ("" at the root)
-        }
-        end = slash;
-    }
-    return rel.substr( 0, end );
-}
-
-inline void importTierRollup( const IngestResult& ing, ImportTier& t, const std::vector<std::uint8_t>& tierOfFile )
-{
-    t.testImporters = std::size_t( std::count_if( t.files.begin(), t.files.end(), [ & ]( std::uint32_t f )
-                                                  { return f < tierOfFile.size() && tierOfFile[f] == std::uint8_t( PathTier::TestOrBench ); } ) );
-    std::vector<std::string_view> dirs;
-    dirs.reserve( t.files.size() );
-    for( const std::uint32_t f : t.files )
-    {
-        dirs.push_back( importTierRollupDir( rootRelPath( ing, f ) ) );
-    }
-    std::sort( dirs.begin(), dirs.end() );
-    std::vector<std::pair<std::size_t, std::string_view>> counts;   // (count, dir), one per distinct dir
-    for( std::size_t i = 0; i < dirs.size(); )
-    {
-        std::size_t j = i;
-        while( j < dirs.size() && dirs[j] == dirs[i] )
-        {
-            ++j;
-        }
-        counts.emplace_back( j - i, dirs[i] );
-        i = j;
-    }
-    std::sort( counts.begin(), counts.end(), [ ]( const auto& a, const auto& b ) { return a.first != b.first ? a.first > b.first : a.second < b.second; } );
-    t.topDirs.clear();
-    for( std::size_t i = 0; i < counts.size() && i < kImportTierRollupDirs; ++i )
-    {
-        t.topDirs += ( i ? "," : "" ) + std::string( counts[i].second.empty() ? std::string_view( "." ) : counts[i].second ) + ":" + std::to_string( counts[i].first );
-    }
-}
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
 // surface's, the rows are not). `pageLimit` is the answer's --limit / MCP limit, 0 = the kImportReachRowCap default;
@@ -15383,18 +15189,6 @@ inline void importTierRollup( const IngestResult& ing, ImportTier& t, const std:
 // 2026-09-25 ruling (nextverb.h: next= is never truncated or dropped for length) removed from every other producer.
 // The invocation is never truncated, so it never pastes wrong. Both surfaces spell the CLI flag, as their root next=
 // already does. Gate: impactimportcheck.sh #9d (a 130 B call).
-// IMPACT-ROLLUP: the rollup's two attributes, on a CUT tier only (an uncut one lists every importer), "" otherwise.
-// The dirs value carries paths, so it goes through nextverb.h's attribute writer (serialize.h escapeXml's policy, byte for
-// byte); ':' and ',' separate and never need it.
-inline std::string importTierRollupAttrXml( const ImportTier& t )
-{
-    if( !t.capped || t.files.empty() )
-    {
-        return {};
-    }
-    return " importers_tests=\"" + std::to_string( t.testImporters ) + "\"" + rw::nextAttrXml( t.topDirs, "importers_dirs" );
-}
-
 inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym = {} )
 {
     // idea #6: an UMBRELLA def file's importers are counted, not listed, unless --limit asks for rows — a list of every
@@ -15416,7 +15210,6 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
                + rw::importsUnresolvedAttrXml( t.importsUnresolved )   // #220: absent at zero; the root's counts_floor covers it
                + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) )   // #220 part 2: likewise
                + ( t.umbrella ? " importers_umbrella=\"1\"" : "" )                               // idea #6: present-only
-               + importTierRollupAttrXml( t )                                                    // IMPACT-ROLLUP: a cut tier only
                + rw::noFileEdgesAttrXml( t.noFileEdgeLangs );                                   // arch-honest: importers= is a floor for these defs
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
@@ -15444,10 +15237,17 @@ inline bool importTierIsUmbrella( const IngestResult& ing, std::size_t importerC
     return importerCount * 2 >= importing;
 }
 
-// IMPACT-PATH: the tier of a set of FILES — a symbol selector's definition files (impactImportTier below) or the one file a
-// path selector names (verbs_navigate.h runImpact). `defFiles` sorted and unique.
-inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles )
+inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<NodeId>& seeds )
 {
+    std::vector<std::uint32_t> defFiles;
+    defFiles.reserve( seeds.size() );
+    for( const NodeId s : seeds )
+    {
+        defFiles.push_back( ing.symbols[s].fileId );
+    }
+    std::sort( defFiles.begin(), defFiles.end() );
+    defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
+
     ImportTier t;
     for( const std::uint32_t f : defFiles )
     {
@@ -15490,22 +15290,8 @@ inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::v
     }
     ENSURES( t.lazy.size() == t.files.size(), "lazy stays parallel to files" );
     t.umbrella = importTierIsUmbrella( ing, t.files.size() );   // idea #6
-    importTierRollup( ing, t, tierOfFile );                      // IMPACT-ROLLUP: printed only on a cut tier (sizeImportTier)
     sizeImportTier( t, 0 );   // the default size; a surface with a --limit re-sizes it (sizeImportTier)
     return t;
-}
-
-inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<NodeId>& seeds )
-{
-    std::vector<std::uint32_t> defFiles;
-    defFiles.reserve( seeds.size() );
-    for( const NodeId s : seeds )
-    {
-        defFiles.push_back( ing.symbols[s].fileId );
-    }
-    std::sort( defFiles.begin(), defFiles.end() );
-    defFiles.erase( std::unique( defFiles.begin(), defFiles.end() ), defFiles.end() );
-    return impactImportTierOfFiles( ing, defFiles );
 }
 
 // ── idea #6: the per-FILE rollup of the WHOLE reach set ──────────────────────────────────────────────────────
@@ -15890,34 +15676,6 @@ inline RestrictedDepHealth restrictDependencyHealth( const std::vector<char>& ma
     const double btree = r.depFileCount > 1 ? ( ( N + 1.0 ) * std::log2( N + 1.0 ) - N ) : 1.0;
     r.nccd = btree > 0.0 ? double( r.ccd ) / btree : 0.0;
     return r;
-}
-
-// DEPS-SHAPE-HONEST: the files the cycle list holds that are in the measured set (`mask`, lintrules.h dependencyMeasure),
-// each once — sccCycles' components are disjoint, so a plain sum over the masked members is exact.
-inline std::size_t filesInCycles( const std::vector<std::vector<std::uint32_t>>& cycles, const std::vector<char>& mask ) noexcept
-{
-    std::size_t n = 0;
-    for( const auto& comp : cycles )
-    {
-        n += std::size_t( std::count_if( comp.begin(), comp.end(), [ & ]( std::uint32_t f ) { return f < mask.size() && mask[f] != 0; } ) );
-    }
-    return n;
-}
-
-// DEPS-SHAPE-HONEST: <health shape=>. It read `tangled` whenever nccd passed 2, and nccd passes 2 on any real graph whose
-// mean cone holds a few hundred files with no cycle at all: GRAPH-SCALE's true-edge Envoy went `horizontal` 0.09 to
-// `tangled` 15.20 with 3 cycles of 2, 3 and 6 files in 7,786; textual 19.9, vscode 40. Depth is not a tangle. Tangled now
-// means what the word says, read off the cycles: at least one measured file in 20 sits in an include cycle
-// (kTangledCyclicShareDenom, printed beside it as cyclic_files=). Otherwise nccd says how deep: horizontal below 1 (flatter
-// than a balanced tree), vertical from 1 up. A heuristic still, now about the property it names.
-inline constexpr std::size_t kTangledCyclicShareDenom = 20;   // tangled: cyclic_files * 20 >= dep_files
-inline const char* depsShape( double nccd, std::size_t cyclicFiles, std::size_t depFiles ) noexcept
-{
-    if( cyclicFiles > 0 && cyclicFiles * kTangledCyclicShareDenom >= depFiles )
-    {
-        return "tangled";
-    }
-    return nccd < 1.0 ? "horizontal" : "vertical";
 }
 
 // --map-diff teleport: β of the mass on symbols in changed files, (1−β) on the rest.

@@ -542,10 +542,6 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // (kZoomBridgeCap); shown_symbols= is --tree's on <tree> (kTreeSymbolsPerFile). Their *_capped= siblings read in the
     // shared sub-cap clause.
     { "importers_next",    "importers_next=: the call listing every importer", true, "impact" },
-    // IMPACT-ROLLUP (graph.h importTierRollup): present-only, beside importers_capped=1
-    { "importers_tests",   "importers_tests=/importers_dirs=: over EVERY importer of a cut tier: test/bench/fixture files / the 3 dirs (2 path segments) holding most, dir:count", true, "impact" },   // also defines importers_dirs=
-    // IMPACT-PATH (verbs_navigate.h emitImpactPathAnswer): present-only, on a path selector's answer
-    { "selector",          "selector=file: of= names an indexed file, not a symbol; the answer is its importers only, no call reach (of=FILE:SYM for a symbol)", true, "impact" },
     // idea #6 (lane lean-trio): the reach set's per-file rollup element and the umbrella-header count, present-only
     { "importers_umbrella", "importers_umbrella=1: SYM's file is imported by half the files that import anything (and over 40); importers are a count, importers_next= lists them", true, "impact" },
     { "shown_files", "files files=/shown_files=: files the WHOLE reach set touches (rides beside a cut symbol window) / listed; rf syms= reached symbols there, d= fewest hops; files_capped=1 + files_next= when cut", true, "files", MapHeaderRead::No, {}, "impact" },
@@ -1617,11 +1613,9 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "dep_files", "health dep_files=N: dependency-capable files (dep_langs=), the ccd/acd/nccd denominator", true, "health", MapHeaderRead::No, {}, "deps" },
     { "dep_langs", "health dep_langs=: the languages dep_files= counts; compare its numbers across builds only when equal", true, "health", MapHeaderRead::No, {}, "deps" },
     { "ccd", "ccd=/acd=/nccd=: Lakos: sum of per-file transitive cones (self incl) / per file / over a balanced tree's", true, "health", MapHeaderRead::No, {}, "deps" },   // also defines acd= nccd=
-    { "shape", "health shape=: tangled when cyclic_files= is 1 in 20 of dep_files= or more, else nccd= below 1 horizontal, from 1 vertical (a heuristic)", true, "health", MapHeaderRead::No, {}, "deps" },
-    { "cyclic_files", "health cyclic_files=N: dep_files= files inside an include cycle (all cycles, not only the listed ones); absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
+    { "shape", "health shape=: the nccd= verdict: horizontal below 1, vertical 1 to 2, tangled above 2 (a heuristic)", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "health lazy_edges=N: in-closure (lazy) include pairs kept OUT of cones, cycles and ccd; absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "f lazy_edges=N: this file's lazy pairs; still in its inc rows, out of afferent=/instab=/transitive=", true, "f", MapHeaderRead::No, {}, "deps" },
-    { "containment_edges", "health containment_edges=N: Rust mod x; parent-child pairs, out of transitive=/cycles/ccd/shape, in Ca/Ce", true, "health", MapHeaderRead::No, {}, "deps" },
     { "size", "cycle size=/cost=: files in that include cycle / size squared, the cycle's share of ccd=", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cost=
     { "cut", "cycle cut=/cutrefs=: SUGGESTED edge to break it (fewest directives) / that edge's directive count; nothing cut", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cutrefs=
     // pr-context: src/prcontext.h (changed-symbols, cochange partner, owners author); coPairAttr in src/gitmine.h
