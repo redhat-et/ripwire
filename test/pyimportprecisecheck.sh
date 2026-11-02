@@ -111,7 +111,8 @@ monotonic_check
 
 # #358 Python capture slice. Expectations below were read from pristine main, not from the new
 # query: ONE Include per statement (first clause), but bindings for EVERY named/aliased clause.
-# Aliased plain imports keep their whole written clause in --deps; cleaning it is a separate change.
+# An aliased first clause records its bare module (#478 gap 2): these pins read `a as aa` / `a as local` / `a.b as c`
+# until that fix, which moved them on purpose. The #478 gap 2 arms at the end of this gate say why.
 PC="$TMP/captures"; mkdir -p "$PC/pkg"
 cat >"$PC/main.py" <<'PY'
 import a, b
@@ -164,9 +165,9 @@ if python3 - "$TMP/pc.deps" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
 rows = {f.get('p'): [i.get('t') for i in f.findall('inc')] for f in root.findall('f')}
-want = ['a', 'a as aa', 'pkg.mod', 'pkg.mod', '.', 'pkg', 'pkg.mod', 'os',
-        'b', 'pkg.mod', 'a', 'b', 'a as local']
-assert rows == {'main.py': want, 'typing.pyi': ['a as aa', 'pkg.mod'], 'broken.py': ['a']}, rows
+want = ['a', 'a', 'pkg.mod', 'pkg.mod', '.', 'pkg', 'pkg.mod', 'os',
+        'b', 'pkg.mod', 'a', 'b', 'a']
+assert rows == {'main.py': want, 'typing.pyi': ['a', 'pkg.mod'], 'broken.py': ['a']}, rows
 PY
 then ok '#358: exact first-clause, alias, from, relative, wildcard, nested and .pyi targets; ERROR import stays out'
 else no '#358: Python target set/order differs from pristine main'
@@ -278,7 +279,7 @@ want = {
     'future.py': ([], []),
     'builtin_call.py': ([], []),
     'importlib_call.py': ([include('importlib')], [bind('importlib', 'importlib', 'module')]),
-    'dotted.py': ([include('a.b as c')], [bind('c', 'a.b', 'module')]),
+    'dotted.py': ([include('a.b')], [bind('c', 'a.b', 'module')]),
     # HISTORY (lane ind4b, fix 5 -> fix 6): the Import RawBind of an ALIASED from-import used to carry importedName '' (no marker); fix 5
     # records the member's own name for it, 'from:a' (kPythonFromMemberMark + a), so `from . import a as b` + `b.Base` can be read as the
     # submodule a. The change is on purpose, not erosion: the pin still asserts the exact value (a wrong or missing marker fails, see the
