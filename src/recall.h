@@ -194,7 +194,14 @@ struct RecallSelection
                                                     // --top-k cut below. This is what "K relevant of N docs"
                                                     // and total= must report; files.size() AFTER the cut is
                                                     // an emission cap, not a fact about how many matched.
+    std::vector<std::uint32_t> demotedNamed;        // DOCS-DEMOTE-FP: the first kRecallDemotedNamedMax demoted
+                                                    // matches, best-first, taken BEFORE the --top-k cut — the
+                                                    // docs the header names, so a tally is never anonymous.
 };
+
+// How many demoted docs the header names by path. The tally (generated_demoted=) stays the full count; past
+// this many, generated_demoted_named= says how many of them the path list holds.
+inline constexpr std::size_t kRecallDemotedNamedMax = 5;
 
 // The recall order itself, named so the ranking rule reads as one sentence at its only call site.
 inline bool recallOrderLess( const Recalled& a, const Recalled& b, const IngestResult& ing ) noexcept
@@ -252,6 +259,13 @@ inline RecallSelection recallTopFiles( const IngestResult& ing, const std::vecto
     std::sort( selection.files.begin(), selection.files.end(),
                [ & ]( const Recalled& a, const Recalled& b ) noexcept { return recallOrderLess( a, b, ing ); } );
     selection.matchedCount = selection.files.size();   // §B2: TRUE count, taken BEFORE the --top-k cut
+    for( const Recalled& r : selection.files )         // sorted, so the demoted tail is already best-first
+    {
+        if( r.generated != docparse::GeneratedDocReason::None && selection.demotedNamed.size() < kRecallDemotedNamedMax )
+        {
+            selection.demotedNamed.push_back( r.fileId );
+        }
+    }
     if( k > 0 && int( selection.files.size() ) > k )
     {
         selection.files.resize( std::size_t( k ) );
@@ -277,6 +291,8 @@ struct RecallShape
     std::size_t shownCount     = 0;       // docs actually emitted
     std::size_t truncatedCount = 0;       // emitted docs whose body was CUT to fit the budget
     std::size_t demotedCount   = 0;       // §P2b: MATCHING docs de-prioritized as generated artifacts
+    std::string demotedNamesAttr;         // DOCS-DEMOTE-FP: " generated_demoted_paths=…" (and _named= when the
+                                          // list is cut), built once from the selection; "" when none demoted
     std::size_t bytes          = 0;       // total emitted bytes (header + bodies + markers)
     std::size_t estTokens      = 0;       // calibrated estimate over those bytes
     bool        isCapped       = false;   // shownCount < matchedCount || truncatedCount > 0
@@ -619,6 +635,50 @@ inline std::string optionalRecallAttr( std::string_view name, std::size_t value 
     return value == 0 ? std::string() : " " + std::string( name ) + "=" + std::to_string( value );
 }
 
+// DOCS-DEMOTE-FP: the demoted docs BY NAME, so a header that tallies generated_demoted=N also says which N —
+// a demoted doc sits below every other match and is usually past the --top-k cut, where its own separator
+// note is never printed. `paths` are display paths, best-first, at most kRecallDemotedNamedMax of them.
+// Inside the quotes, '%', '"', ',' and control bytes are percent-encoded (%25 %22 %2C %XX), so the comma
+// list splits on ',' whatever a path spells. " generated_demoted_named=K" rides only when K < demotedCount.
+inline std::string formatRecallDemotedNames( const std::vector<std::string_view>& paths, std::size_t demotedCount )
+{
+    if( paths.empty() )
+    {
+        return {};
+    }
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string           attr;
+    if( paths.size() < demotedCount )
+    {
+        attr += " generated_demoted_named=";
+        attr += std::to_string( paths.size() );
+    }
+    attr += " generated_demoted_paths=\"";
+    for( std::size_t i = 0; i < paths.size(); ++i )
+    {
+        if( i > 0 )
+        {
+            attr += ',';
+        }
+        for( const char ch : paths[i] )
+        {
+            const auto byte = static_cast<unsigned char>( ch );
+            if( byte == '%' || byte == '"' || byte == ',' || byte < 0x20 || byte == 0x7f )
+            {
+                attr += '%';
+                attr += kHex[ byte >> 4 ];
+                attr += kHex[ byte & 0x0f ];
+            }
+            else
+            {
+                attr += ch;
+            }
+        }
+    }
+    attr += '"';
+    return attr;
+}
+
 inline std::string formatRecallHeader( std::string_view task, const RecallShape& shape, std::size_t estTokens )
 {
     // W3FIX M1 (same class as --for/--pack-task): `over_ceiling=1` — the artifact is larger than the --max-tokens
@@ -659,7 +719,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     // §B9.2: "document files" is docFileMask()'s population and says so — it is a SUPERSET of
     // --doc-drift's docs= (markdown by extension), and the two must not share a noun.
     std::string line;
-    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + overCeilingAttr.size()
+    line.reserve( 160 + task.size() + truncAttr.size() + demotedAttr.size() + shape.demotedNamesAttr.size() + overCeilingAttr.size()
                   + maxTokensAttr.size() + budgetTokensAttr.size() + shareBytesAttr.size() );
     line += "ripwire recall — \"";
     line += task;
@@ -675,6 +735,7 @@ inline std::string formatRecallHeader( std::string_view task, const RecallShape&
     line += shape.isCapped ? "1" : "0";
     line += truncAttr;
     line += demotedAttr;
+    line += shape.demotedNamesAttr;
     line += overCeilingAttr;
     line += maxTokensAttr;
     line += budgetTokensAttr;
@@ -1705,10 +1766,23 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     const std::string recallRootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const RecallSelection        selected = recallTopFiles( ing, scores, k, docsOnly );
     const std::vector<Recalled>& top      = selected.files;
+    // the display path, one spelling for the separator line and the header's demoted names
+    const auto displayPath = [ & ]( std::uint32_t fileId ) -> std::string_view {
+        return rootArg.empty() ? std::string_view( ing.files[ fileId ] )
+                               : rw::sarif::rootRelativeUri( ing.files[ fileId ], recallRootPrefix );
+    };
+    std::vector<std::string_view> demotedPaths;
+    demotedPaths.reserve( selected.demotedNamed.size() );
+    for( const std::uint32_t fileId : selected.demotedNamed )
+    {
+        ASSUME( fileId < ing.files.size() );
+        demotedPaths.push_back( displayPath( fileId ) );
+    }
+    const std::string demotedNamesAttr = formatRecallDemotedNames( demotedPaths, selected.demotedMatchCount );
 
     // the payload's own share of the budget — the header and the closing capped note are charged first so
-    // the TOTAL artifact (not just its bodies) honours maxBytes.
-    const std::size_t headerReserve = maxBytes ? kRecallHeaderReserveBytes + task.size() : 0;
+    // the TOTAL artifact (not just its bodies) honours maxBytes. The demoted names are header bytes too.
+    const std::size_t headerReserve = maxBytes ? kRecallHeaderReserveBytes + task.size() + demotedNamesAttr.size() : 0;
     const std::size_t payloadBudget = ( maxBytes > headerReserve ) ? maxBytes - headerReserve : 0;
 
     std::string payload;
@@ -1719,6 +1793,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
     shape.matchedCount  = selected.matchedCount;  // §B2: TRUE relevant count, pre-top-k
     shape.selectedCount = top.size();             // post-top-k, pre-budget (bookkeeping for the capped note)
     shape.demotedCount  = selected.demotedMatchCount;
+    shape.demotedNamesAttr = demotedNamesAttr;
     shape.maxTokens     = maxTokens;              // H9: the ceiling applied, whatever it is (0 = unbounded)
     shape.budgetTokens  = budgetTokens;           // F4: the GATING ceiling beside the shaping one (0 = none)
 
@@ -1784,8 +1859,7 @@ inline RecallBundle buildRecall( const IngestResult& ing, const std::vector<floa
         }
 
         const std::string      demotedNote = formatDemotedNote( r.generated );
-        const std::string_view sepPath     = rootArg.empty() ? std::string_view( ing.files[ r.fileId ] )
-                                                             : rw::sarif::rootRelativeUri( ing.files[ r.fileId ], recallRootPrefix );
+        const std::string_view sepPath     = displayPath( r.fileId );
         doc.sep = formatRecallSeparator( sepPath, r.score, demotedNote );
         // 2 = the separator's own newline + the body's. The section note's FIXED part is overhead; its
         // lines= ranges are demand, priced with the units that put them there.
