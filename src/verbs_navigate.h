@@ -2847,7 +2847,8 @@ std::optional<int> runPathServed( const MainDispatch& d, std::span<const rw::Nod
         const rw::PathGapsXml pthUnreached = path.empty()
             ? rw::pathUnreachedXml( ing, pthGaps, pthSingleRoot, pthRootPrefix,
                                     { "--connect=" + std::string( srcN ) + "," + std::string( dstN ), "--uses/--impact",
-                                      ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "" },
+                                      ( srcDefs.size() > 1 || dstDefs.size() > 1 ) ? "; several defs share these names — qualify as file:name to pick one" : "",
+                                      rw::pathDocEndpoints( ing, srcDefs, dstDefs ) },
                                     pthSinkCallers )
             : rw::PathGapsXml{};
         rw::emitTo( stdout, "{}>{}{}{}{}", pthUnreached.rootAttrs, pthUnreached.rows, rw::pathBridgeXml( ing, g, pthBridge, pthSingleRoot, pthRootPrefix ),

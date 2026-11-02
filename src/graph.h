@@ -13967,6 +13967,44 @@ inline std::vector<NodeId> resolveAllByDefLine( const IngestResult& ing, std::st
     return { seed.chain.back() };
 }
 
+// A documentation unit: a Markdown heading, or a reST title, object directive or label (docparse.h, ingest_rest.h). Every one is
+// Lang::Markdown; no code grammar mints that language.
+inline bool isDocUnit( const Symbol& s ) noexcept
+{
+    return s.lang == Lang::Markdown;
+}
+
+// CODE BEFORE A DOC UNIT OF THE SAME SPELLING (docs-rest fix2; gate restdocscheck (I)). A reST object directive names its unit as
+// the page writes the object (`.. method:: Model.save` is a unit named `Model.save`), so the name tier matched that heading, and
+// the dotted-scope and written-spelling tiers, which run only on an empty result, never reached the code: --path answered
+// reachable=0 "no directed call path" from docs/ref/models/instances.txt:446 where the code walks 5 hops from base.py:847, and
+// --callers, --callees and --impact counted 0. When EVERY earlier match is a doc unit, those two tiers run as if nothing had
+// matched, and the code definitions they find replace the doc units. With no code match the doc units stand (--expand of a
+// heading, --callers of a :ref: label; a `docs/x.rst:name` spelling picks the doc unit). A match list that holds code AND doc
+// units keeps the code only: a `.. c:function:: Py_X` directive is not a second definition of Py_X, so it never raises
+// defs= or the "several defs share these names" hint (the Scope::name tier: a nested `.. method:: save` under `.. class:: Model`).
+inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std::string_view spec, std::vector<NodeId> found )
+{
+    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
+    if( found.empty() || std::none_of( found.begin(), found.end(), doc ) )
+    {
+        return found;
+    }
+    if( !std::all_of( found.begin(), found.end(), doc ) )
+    {
+        std::erase_if( found, doc );
+        return found;
+    }
+    std::vector<NodeId> code = resolveAllByDottedScope( ing, spec, {} );
+    std::erase_if( code, doc );
+    if( code.empty() )
+    {
+        code = resolveAllByWrittenSpelling( ing, spec, {} );
+        std::erase_if( code, doc );
+    }
+    return code.empty() ? found : code;
+}
+
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
 // on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
 // bare name), so a reader never has to ask whether the number is stale.
@@ -14001,7 +14039,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
         std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, spec );   // Scope::name tier — see its contract
         if( !byScope.empty() )
         {
-            return byScope;
+            return preferCodeOverDocUnits( ing, spec, std::move( byScope ) );
         }
     }
 
@@ -14022,8 +14060,10 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
     declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );
     out = applyNameTower( ing, std::move( out ) );   // the tower orders the name/file tier (task C); the early tiers above stay as-is
+    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );   // a doc heading spelled like code never hides the code
     out = resolveAllByDottedScope( ing, spec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
     out = resolveAllByWrittenSpelling( ing, spec, std::move( out ) );   // the source's own spelling, only when still empty
+    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );        // the dotted tier reads the Scope::name tier: same rule
     return resolveAllByDefLine( ing, spec, std::move( out ) );            // a printed p= (`file:LINE`), last, only when still empty
 }
 

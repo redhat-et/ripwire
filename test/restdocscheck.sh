@@ -406,4 +406,26 @@ printf 'Match Title\n===========\n\nbody\n' >"$MX/docs/a.txt"; cp "$MX/docs/a.tx
 h6b(){ [ "$mxrc" = 0 ] && grep -q 'docs/b\.rst' "$TMP/mx.out"; }; arm "H6b --match finds the .rst title" h6b
 h6(){ h6b && grep -q 'docs/a\.txt' "$TMP/mx.out"; }; arm "H6 --match finds the admitted .txt title" h6
 
+echo "I. a doc unit spelled like code never hides the code (graph.h preferCodeOverDocUnits, pathgaps.h pathDocEndpoints)"
+# `.. method:: Model.save` is a unit named `Model.save`; the code's Model.save is reached by the dotted-scope tier only. A nested
+# `.. method:: save_base` under `.. class:: Model` is the Scope::name shape; `only_in_docs` has no code at all.
+IX="$TMP/ix"; mkdir -p "$IX/docs" "$IX/src"; printf 'project = "i"\nextensions = []\n' >"$IX/docs/conf.py"
+printf 'def helper():\n    return 1\n\n\nclass Model:\n    def save(self):\n        return self.save_base()\n\n    def save_base(self):\n        return helper()\n\n\ndef run():\n    return Model().save()\n' >"$IX/src/m.py"
+printf 'Model reference\n===============\n\n.. method:: Model.save(force=False)\n\n   Saves qqsaveword.\n\n.. function:: only_in_docs(x)\n\n   No code qqdoconly.\n\n.. class:: Model\n\n   .. method:: save_base()\n\n      Nested qqnested.\n' >"$IX/docs/ref.rst"
+# root VERB: the verb's root element (exit code checked: a crash or an empty answer fails every arm that reads it)
+root(){ o="$( "$BIN" "$IX" --no-cache "$1" 2>/dev/null </dev/null )" || return 1; printf '%s' "$o" | grep -o "<$2 [^>]*>" | head -1 | grep . ; }
+i1="$( root --path=Model.save,helper path )"; arm "I1 --path from a dotted name a directive also spells starts at the code" sh -c 'case "$1" in *from_p=\"src/m.py:6\"*reachable=\"1\"*) exit 0;; esac; exit 1' _ "$i1"
+i2="$( root --callers=Model.save callers )"; arm "I2 --callers counts the code's caller" sh -c 'case "$1" in *defs=\"1\"*count=\"1\"*) exit 0;; esac; exit 1' _ "$i2"
+i3="$( root --callees=Model.save callees )"; arm "I3 --callees counts the code's callee" sh -c 'case "$1" in *count=\"1\"*) exit 0;; esac; exit 1' _ "$i3"
+i4="$( root --impact=Model.save impact )"; arm "I4 --impact reaches the code's caller" sh -c 'case "$1" in *reaches=\"1\"*) exit 0;; esac; exit 1' _ "$i4"
+i5="$( root --path=Model::save_base,helper path )"; arm "I5 a nested directive is no second definition (Scope::name tier: from_defs=1)" sh -c 'case "$1" in *from_p=\"src/m.py:9\"*from_defs=\"1\"*reachable=\"1\"*) exit 0;; esac; exit 1' _ "$i5"
+i6="$( root --path=save_base,helper path )"; arm "I6 nor under its bare name" sh -c 'case "$1" in *from_defs=\"1\"*reachable=\"1\"*) exit 0;; esac; exit 1' _ "$i6"
+i7="$( root --path=only_in_docs,helper path )"; ri7=$?
+arm "I7 a doc-only endpoint says so" sh -c '[ "$1" = 0 ] && case "$2" in *"hint=\"from= names only documentation"*) exit 0;; esac; exit 1' _ "$ri7" "$i7"
+arm_not "I7b and never prints a no-path verdict" sh -c '[ "$1" != 0 ] && exit 0; case "$2" in *"no directed call path"*) exit 0;; esac; exit 1' _ "$ri7" "$i7"
+i8="$( root --path=helper,only_in_docs path )"; arm "I8 the to= side too" sh -c 'case "$1" in *"hint=\"to= names only documentation"*) exit 0;; esac; exit 1' _ "$i8"
+i9="$( root --path=helper,run path )"; arm "I9 twin: a code pair with no path keeps the no-path hint" sh -c 'case "$1" in *"no directed call path"*) exit 0;; esac; exit 1' _ "$i9"
+arm "I10 the doc-only unit still expands" sh -c 'o="$( "$1" "$2" --no-cache --expand=only_in_docs --top-k=0 2>/dev/null </dev/null )" && case "$o" in *qqdoconly*) exit 0;; esac; exit 1' _ "$BIN" "$IX"
+arm "I11 a file:name spelling still picks the nested directive" sh -c 'o="$( "$1" "$2" --no-cache --expand=docs/ref.rst:save_base --top-k=0 2>/dev/null </dev/null )" && case "$o" in *qqnested*) exit 0;; esac; exit 1' _ "$BIN" "$IX"
+
 [ "$fail" = 0 ] && echo "restdocscheck: ALL PASS" || { echo "restdocscheck: FAILED"; exit 1; }

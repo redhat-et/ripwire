@@ -3908,7 +3908,7 @@ inline std::optional<std::string> pathText( const std::string& root, const std::
     rw::emitTo( mem, "{}{}", countAttrXmlOrEmpty( "to_value_refs", ptToValueRefs.count ),   // absent at zero, as on the CLI
                   valueRefsDepthAttrXml( ing, ptToValueRefs.depthCut, VrRender{ ptSingleRoot, ptRootPrefix } ).c_str() );   // + the depth cut, as the CLI
     const PathGapsXml ptUnreached = pth.empty()
-        ? pathUnreachedXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, { "the connect verb on " + from + "," + to, "uses/impact", "" }, ptSinkCallers )
+        ? pathUnreachedXml( ing, ptGaps, ptSingleRoot, ptRootPrefix, { "the connect verb on " + from + "," + to, "uses/impact", "", pathDocEndpoints( ing, srcDefs, dstDefs ) }, ptSinkCallers )
         : PathGapsXml{};
     rw::emitTo( mem, "{}>{}{}{}{}", ptUnreached.rootAttrs, ptUnreached.rows, pathBridgeXml( ing, g, ptBridge, ptSingleRoot, ptRootPrefix ),
                   pathNearSinkXml( ing, ptNear, ptSingleRoot, ptRootPrefix ),
