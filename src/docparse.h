@@ -867,12 +867,6 @@ inline double fencedLineFraction( const MarkdownFenceScan& scan ) noexcept
     return scan.lineCount ? double( scan.fencedLineCount ) / double( scan.lineCount ) : 0.0;
 }
 
-// proseBytes / the text's bytes, 0 for an empty text — the "did a person write around these fences" number.
-inline double proseByteShare( const MarkdownFenceScan& scan, std::size_t textBytes ) noexcept
-{
-    return textBytes ? double( scan.proseBytes ) / double( textBytes ) : 0.0;
-}
-
 namespace detail
 {
 
@@ -954,7 +948,8 @@ inline GeneratedDocReason classifyGeneratedDoc( std::string_view text, std::size
     {
         return GeneratedDocReason::None;
     }
-    if( proseByteShare( scan, text.size() ) >= kGeneratedMaxProseShare )
+    // the "did a person write around these fences" number; text is non-empty here (bytes >= kGeneratedMinBytes)
+    if( double( scan.proseBytes ) >= kGeneratedMaxProseShare * double( text.size() ) )
     {
         return GeneratedDocReason::None;   // a person wrote between the fences: a reference page, not a dump
     }
