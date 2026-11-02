@@ -35,6 +35,22 @@ namespace rw
 
 inline constexpr bool kEnumCountProbed = true;
 
+// The one character that decides, after "V = ": a name, or "(" of a cast. An enum declared in an unnamed namespace (main.cpp's
+// verb sections) is spelled "(anonymous namespace)::E::Name", whose parenthesis is the scope, not a cast, so that prefix is
+// stepped over first; its cast form "((anonymous namespace)::E)2" still opens with the cast's own parenthesis.
+constexpr bool spellsEnumerator( std::string_view value ) noexcept
+{
+    constexpr std::string_view kAnon = "(anonymous namespace)::";
+    while( value.starts_with( kAnon ) )
+    {
+        value.remove_prefix( kAnon.size() );
+    }
+    return !value.empty() && value.front() != '(';
+}
+static_assert( spellsEnumerator( "(anonymous namespace)::S::W::B]" ) && !spellsEnumerator( "((anonymous namespace)::S::W)2]" )
+                   && spellsEnumerator( "Shape::Square]" ) && !spellsEnumerator( "(Shape)2]" ) && !spellsEnumerator( "" ),
+               "enumcount.h: an unnamed-namespace enumerator is a name, its cast is not" );
+
 // Does V spell a declared enumerator of its enum?  "[V = Shape::Square]" yes, "[V = (Shape)2]" no.
 template<auto V>
     requires std::is_enum_v<decltype( V )>
@@ -42,7 +58,7 @@ constexpr bool namesEnumerator() noexcept
 {
     const std::string_view signature = __PRETTY_FUNCTION__;
     const std::size_t      at        = signature.rfind( "V = " );
-    return at != std::string_view::npos && at + 4 < signature.size() && signature[ at + 4 ] != '(';
+    return at != std::string_view::npos && spellsEnumerator( signature.substr( at + 4 ) );
 }
 
 // `Count` is exact: the value Count-1 is a declared enumerator of E and the value Count is not.
