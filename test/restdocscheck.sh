@@ -324,7 +324,11 @@ arm_not "E5b directive after a bare ::" is_unit "--qqfakebare"
 arm_not "E6 directive in code-block" is_unit "--qqfakecode"
 arm_not "E7 directive in a comment" is_unit "--qqfakecomment"
 arm_not "E8 a bullet above a rule" is_unit "bullet qqbullet"
-arm "E9 names with markup stay well-formed" "$BIN" "$FIX" --no-cache 2>/dev/null </dev/null | xmllint --noout - 2>/dev/null
+# E9 reads the answer in this shell (a pipeline into arm would lose a FAIL in its subshell); no xmllint is a SKIP, not a FAIL
+"$BIN" "$FIX" --no-cache >"$TMP/e9.xml" 2>/dev/null </dev/null; e9rc=$?
+if command -v xmllint >/dev/null 2>&1; then
+  e9(){ [ "$e9rc" = 0 ] && [ -s "$TMP/e9.xml" ] && xmllint --noout "$TMP/e9.xml" 2>/dev/null; }; arm "E9 names with markup stay well-formed" e9
+else echo "  SKIP  E9 names with markup stay well-formed (no xmllint)"; fi
 arm "E10 that title is a unit" is_unit "Title <With> & Markup"
 
 echo "F. pathological files disclose rather than hang"
@@ -355,7 +359,9 @@ out="$( "$BIN" "$CR" --no-cache --expand=--qqcr --top-k=0 2>/dev/null )"; case "
 CF="$TMP/cache"; "$BIN" "$FIX" --cache="$CF" --expand=--qqheight --top-k=0 >"$TMP/c1" 2>/dev/null </dev/null; "$BIN" "$FIX" --cache="$CF" --expand=--qqheight --top-k=0 >"$TMP/c2" 2>/dev/null </dev/null
 case "$(cat "$TMP/c2")" in *qqheightword*) ok "G3 warm run serves the unit";; *) no "G3 warm run serves the unit";; esac
 sed -i.bak 's/".txt"/".rst"/' "$FIX/docs/conf.py"
-out="$( "$BIN" "$FIX" --cache="$CF" --expand="Over Top Name" --top-k=0 2>/dev/null </dev/null )"; case "$out" in *qqtopword*) no "G4 a warm run follows a conf.py that drops .txt";; *) ok "G4 a warm run follows a conf.py that drops .txt";; esac
+# G4 is an absence: it passes only on the verb's own miss (rc 1, nothing on stdout, "matched no symbol"), never on a crash
+"$BIN" "$FIX" --cache="$CF" --expand="Over Top Name" --top-k=0 >"$TMP/g4.out" 2>"$TMP/g4.err" </dev/null; g4rc=$?
+g4(){ [ "$g4rc" = 1 ] && [ ! -s "$TMP/g4.out" ] && grep -q 'matched no symbol' "$TMP/g4.err"; }; arm "G4 a warm run follows a conf.py that drops .txt" g4
 sed -i.bak 's/".rst"/".txt"/' "$FIX/docs/conf.py"
 out="$( "$BIN" "$FIX" --cache="$CF" --expand="Over Top Name" --top-k=0 2>/dev/null </dev/null )"; case "$out" in *qqtopword*) ok "G5 and one that declares it again";; *) no "G5 and one that declares it again";; esac
 
@@ -392,5 +398,12 @@ h4a(){ [ "$rs" = 0 ] && printf '%s' "$ts" | grep -q '<t p="docs/page[0-9]*\.txt"
 arm_not "H4 no label (_name) takes a sym= slot" sh -c '[ "$1" != 0 ] || printf "%s" "$2" | grep -q "sym=\"_\|sym=\"[^\"]*,_"' _ "$rs" "$ts"
 arm "H4b the label is still a unit" sh -c 'out="$( "$1" "$2" --no-cache --expand=_page-7 --top-k=0 2>/dev/null </dev/null )" && case "$out" in *"<b t=\"sec\""*) exit 0;; esac; exit 1' _ "$BIN" "$HX"
 arm "H5 the extract_partial legend names the reST bound" grep -q 'reST/Sphinx units past 20000 per file or titles and directives nested past 64 levels' "$TMP/skip.xml"
+
+# H6: --match walks an admitted .txt with the grammar a .rst gets (ingest_astquery.h lookupLangOfCrawledFile); b.rst is the twin
+MX="$TMP/mx"; mkdir -p "$MX/docs"; printf 'project = "m"\nextensions = []\nsource_suffix = [".rst", ".txt"]\n' >"$MX/docs/conf.py"
+printf 'Match Title\n===========\n\nbody\n' >"$MX/docs/a.txt"; cp "$MX/docs/a.txt" "$MX/docs/b.rst"
+"$BIN" "$MX" --no-cache --match='(setext_heading) @h' >"$TMP/mx.out" 2>/dev/null </dev/null; mxrc=$?
+h6b(){ [ "$mxrc" = 0 ] && grep -q 'docs/b\.rst' "$TMP/mx.out"; }; arm "H6b --match finds the .rst title" h6b
+h6(){ h6b && grep -q 'docs/a\.txt' "$TMP/mx.out"; }; arm "H6 --match finds the admitted .txt title" h6
 
 [ "$fail" = 0 ] && echo "restdocscheck: ALL PASS" || { echo "restdocscheck: FAILED"; exit 1; }
