@@ -1,0 +1,7 @@
+### Fixed — a shell test script named `test-*.sh` or `*-test.sh` reads as a test (#466, #472, thanks @lennix1337)
+
+`isTestPath`, the test-file question every verb shares, did not read `test-document-remind.sh` as a test, so `--for` ranked the test sibling beside the script it tests and `--ignore-tests` kept it. @lennix1337 found it in #466 and sent the fix in #472; the `src/filter.h` change lands under their authorship, and the narrowing below is ours.
+
+A false match here hides real source from every verb, and the bare hyphen forms (`test-*`, `*-test.*`, `*-spec.*`) also matched shipped files such as `pod-spec.ts`, `ab-test.ts`, `self-test.c`, `test-and-set.c` and zone.js's `async-test.ts`. So the hyphen forms are an allowlist: `test-*` and `*-test.*` apply to shell and batch scripts (`.sh .bash .zsh .ps1 .bat`), and `.e2e-spec.` and `.perf-spec.` apply in any extension. Of the 102 corpus code files the bare forms newly read as tests, the allowlist keeps 73, including every `.e2e-spec.` and `.perf-spec.` file and the shell scripts; the other 29 keep their previous reading as source. That includes real test files such as a bare `foo-spec.ts`, which stay visible: a missed test only stays on screen, a false test hides source. Underscore forms (`ab_test.ts`) already read as tests before this change and are untouched. Gate: `test/testpathhyphencheck.sh`.
+
+The mention-anchoring half of #472 is not part of this change: FOR-FILE-ANCHOR already anchors the bare filename and stem cases.

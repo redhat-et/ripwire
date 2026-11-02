@@ -430,9 +430,7 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     {
         return false;
     }
-    const auto ends = [ & ]( std::string_view e )
-    { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
-    return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
+    return endsWithLowerAscii( p, ".sh" ) || endsWithLowerAscii( p, ".bash" ) || endsWithLowerAscii( p, ".zsh" );
 }
 
 // ---- P2.2 (agent-friction round, 2026-08-29): self-registering test/benchmark macros -------------------
@@ -3787,7 +3785,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // The producer identity already keeps this build's blobs apart; bumped 22 -> 23 so the history above stays complete.
 // v24 (2026-10-25, train 36) — #228's v23 was the PR's placeholder; renumbered above every live value (main / train 35 / every
 // other ref 22, #437 23). No further shape change.
-constexpr std::uint32_t kQSnapCacheScheme = 24;
+// v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
+// other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
+// dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
+constexpr std::uint32_t kQSnapCacheScheme = 25;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
