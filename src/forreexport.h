@@ -1358,8 +1358,8 @@ inline void proveChainQualifier( Walk& w, Chain& c )
 
 // Every chain of the definitions named `n.name` that has a hop: the stronger qualifier proof first, then one reaching a task-named
 // file, then the longer. A Web name the task QUALIFIED keeps only the Strong chains when one exists (a same-named definition elsewhere
-// is a decoy); otherwise every chain with any proof (hedged on its def row), and when a cue WORD asks where the name comes from
-// (`where is utils.formatDate defined`) the unproven ones too: a qualifier nothing proves never drops the only definition.
+// is a decoy); otherwise every chain, the hedged ones first (renderForReexports prints an unproven one only when a cue WORD asks
+// where the name comes from, `where is utils.formatDate defined`: a qualifier nothing proves never drops the only definition).
 // The chain of definition `d` walked from its own spelling; a Web chain under a written qualifier `q` is proven against it (qRow).
 inline Chain walkedChain( Walk& w, const Symbol* d, bool rust, const std::vector<std::string>& q )
 {
@@ -1384,7 +1384,7 @@ inline bool chainBefore( const Chain& a, const Chain& b )
     return a.uses.size() != b.uses.size() ? a.uses.size() > b.uses.size() : a.rows.size() > b.rows.size();
 }
 
-inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbol*>& defs, const ReexportTaskName& n, bool cued )
+inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbol*>& defs, const ReexportTaskName& n )
 {
     std::vector<Chain> chains;
     for( const Symbol* d : defs )
@@ -1401,7 +1401,7 @@ inline std::vector<Chain> reexportChains( Walk& w, const std::vector<const Symbo
         }
     }
     const bool strong = std::ranges::any_of( chains, []( const Chain& c ) { return c.qLevel == QProof::Strong; } );
-    std::erase_if( chains, [ & ]( const Chain& c ) { return !c.q.empty() && ( strong ? c.qLevel != QProof::Strong : !cued && c.qLevel == QProof::None ); } );
+    std::erase_if( chains, [ & ]( const Chain& c ) { return !c.q.empty() && strong && c.qLevel != QProof::Strong; } );
     std::ranges::stable_sort( chains, chainBefore );
     return chains;
 }
@@ -1436,7 +1436,8 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     // is part of what it asks) and a QUALIFIED name (`Completions.getCompletionsAtPosition`: the qualifier is a namespace path a
     // reader must walk, and only the chain that proves it prints)
     const bool        bare      = tokens.size() == 1;
-    const bool        cued      = reexportTaskCued( tokens ) || bare;   // otherwise only a chain that reaches a task-named file prints
+    const bool        wordCued  = reexportTaskCued( tokens );
+    const bool        cued      = wordCued || bare;   // otherwise only a chain that reaches a task-named file prints
     const bool        qualified = std::ranges::any_of( names, []( const ReexportTaskName& n ) { return !n.q.empty(); } );
     std::vector<char> taskFiles = reexportTaskFiles( ing, tokens );
     if( !cued && !qualified && std::ranges::none_of( taskFiles, []( char c ) { return c != 0; } ) )
@@ -1455,9 +1456,13 @@ inline std::string renderForReexports( const IngestResult& ing, std::string_view
     std::size_t printedDefs = 0;   // the def rows printed (the held marker's count)
     for( const ReexportTaskName& name : names )
     {
-        const std::vector<Chain> chains = reexportChains( w, defs, name, reexportTaskCued( tokens ) );   // a bare `Q.leaf` keeps proven chains only
+        const std::vector<Chain> chains = reexportChains( w, defs, name );
         for( std::size_t k = 0; k < chains.size() && k < kReexportDefCap; ++k )
         {
+            if( !chains[ k ].q.empty() && chains[ k ].qLevel == QProof::None && !wordCued )   // a bare `Q.leaf` prints proven chains only
+            {
+                continue;
+            }
             if( cued || !chains[ k ].q.empty() || !chains[ k ].uses.empty() )
             {
                 xml.chain( chains[ k ] );
@@ -1544,20 +1549,11 @@ struct Proven
     QProof           level = QProof::None;
 };
 
-// A stored owner scope as path segments (`a::b::Cls`, `pkg.Cls` -> a b Cls).
+// A stored owner scope as path segments (`a::b::Cls`, `pkg.Cls` -> a b Cls; a scope that is not a plain dotted name stays whole).
 inline std::vector<std::string> scopeSegments( std::string_view scope )
 {
-    std::vector<std::string> segs;
-    for( std::size_t at = 0; at < scope.size(); )
-    {
-        const std::size_t end = std::min( scope.find_first_of( ".:", at ), scope.size() );
-        if( end > at )
-        {
-            segs.emplace_back( scope.substr( at, end - at ) );
-        }
-        at = end + 1;
-    }
-    return segs;
+    const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( scope );
+    return segs.empty() ? std::vector<std::string>{ std::string( scope ) } : std::vector<std::string>( segs.begin(), segs.end() );
 }
 
 // Q against a definition's OWNER path (its stored scope, or the type whose line span holds it): Q names the owner's tail (`Cls` or
