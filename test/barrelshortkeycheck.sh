@@ -11,7 +11,8 @@
 #   A1  `Scope.leaf`: the def under the namespace is printed with q="Scope", the namespace hop src/barrel.ts (import * as Scope +
 #       export { Scope }) is the FIRST rx row, the star hop src/index.ts follows; the same-named decoy src/other/decoy.ts is NOT listed.
 #   A2  `NS.leaf`: `export * as NS from` is a row ns="NS", printed first (path to the qualifier before the rest of the walk).
-#   A3  `Outer.leaf`: `import * as Inner` + `export { Inner as Outer }` publishes ns="Outer"; `Inner.leaf` proves nothing: no block.
+#   A3  `Outer.leaf`: `import * as Inner` + `export { Inner as Outer }` publishes ns="Outer"; `Inner.leaf` is that file's own alias
+#       only: a hedged proof, q_by="alias" (fix round 1; it printed no block before).
 #   A4  sibling shapes that are NOT namespace hops: `import * as Hidden` with no local export, and `export { Mixed } from './other'`
 #       beside a local `import * as Mixed` (a re-export of another module, not of the namespace import): neither is an ns= row.
 #   A5  `Wrong.leaf` (no proof of the qualifier) and `this.leaf` (a member access, not a qualifier): no block. Positive twin: A1.
@@ -30,6 +31,23 @@
 #   B7  a CONST-shaped key with no definition: the literal rung says held="lit" (the <lit> block lists it), no ld rows.
 #   B8  every <shortkey> carries next=; a resolved name-exact route (`getWidgetPtrCount`) prints no <shortkey> (absence twin of B5).
 #   B9  --token-budget: <shortkey held="budget"> with next=, no rungs; --json: no block; RIPWIRE_NO_SHORT_KEY=1 removes exactly the block.
+#   C1  (fix round 1, MF1) a DIRECTORY on the path is a hedged proof, never exact: `utils.formatDate` with src/utils/legacy/old.ts
+#       (the decoy) and src/helpers/date.ts reached by a consumer's `import * as utils from "../helpers"`: kept="2" exact="0",
+#       q_by="alias" first, q_by="dir" second, no body. With the decoy alone: kept="1" exact="0" q_by="dir" (one hedged is no answer).
+#   C2  every qualifier segment is proven: `Wrong.Fmt3.formatDate` and `Wrong::Fmt3::formatDate` (only the last segment is the owner)
+#       are q_unmatched="1", never exact. Positive twin: B3.
+#   C3  a consumer's own `import * as utils from '../helpers'` proves helpers for `utils.` (hedged, q_by="alias" on the def row).
+#   C4  (MF2) a cued task whose qualifier nothing proves keeps every chain, q_unmatched="1"; a bare one keeps none (A5).
+#   C5  the path's own tail (`legacy.old`, `utils.legacy`) and a package file (`src/utils/index.ts` for `utils`) are full proofs:
+#       the def row carries no hedge; with a Strong chain the dir-only decoy is not listed.
+#   C6  a dot-suffix stem: `Completions.getX` and `ts.Completions.getX` for ts/ts.Completions.ts are exact q_by="file";
+#       `Wrong.Completions.getX` is not.
+#   C7  `this.leaf` / `self.leaf` in a CUED task print no block (without the guard the qualifier `this` would be kept unproven), and
+#       `--for=this.formatDate` prints no <shortkey>. Positive twin: C4.
+#   C8  a namespace re-export cycle (a.ts `export * as B from './b'`, b.ts `export * as A from './a'`) ends: total="2", no capped=.
+#   C9  the literal rung's shapes type (Python `type X =`), define (`#define x 4`), const (a local `const x =`, in= its function)
+#       and assign (`x = 3` at column 0, Lua); the row cap (8 lines: total="8" shown="6", 6 rows); the exact leaf's body cut
+#       (truncated="1" past 8192 bytes); floor="1" when a file the scan must read is unreadable (SKIP when chmod cannot hide it).
 # Every arm reads an answer whose run exited 0 and printed a <ctx root: a crash or an empty answer is a FAIL, never an absence pass.
 #
 # Usage: bash test/barrelshortkeycheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
@@ -38,7 +56,7 @@ ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 . "$ROOT/test/lib/clean-env.sh"
 BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ "${BIN#/}" = "$BIN" ] && BIN="$ROOT/$BIN"
-TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
+TMP="${KEEP_TMP:-$( mktemp -d )}"; [ -n "${KEEP_TMP:-}" ] || trap 'rm -rf "$TMP"' EXIT
 fail=0
 ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
@@ -86,7 +104,7 @@ run "$W" "$TMP/a2.xml" "--for=NS.leaf" && \
 has   "$TMP/a2.xml" "A2 export * as NS from: ns row first" 'q="NS" total="4"/><rx p="src/ns.ts" l="1" from="./lib/m" ns="NS"/>'
 run "$W" "$TMP/a3.xml" "--for=Outer.leaf" && \
 has   "$TMP/a3.xml" "A3 export { Inner as Outer }: ns=Outer" '<rx p="src/renamed.ts" l="1" from="./lib/m" ns="Outer"/>'
-run "$W" "$TMP/a3b.xml" "--for=Inner.leaf" && noblock "$TMP/a3b.xml" "A3 the unexported local name proves nothing"
+run "$W" "$TMP/a3b.xml" "--for=Inner.leaf" && has "$TMP/a3b.xml" "A3 the unexported local alias is a hedged proof" '<def n="leaf" p="src/lib/m.ts" l="1" q="Inner" q_by="alias" total="4"/>'
 run "$W" "$TMP/a5.xml" "--for=Wrong.leaf" && noblock "$TMP/a5.xml" "A5 unproven qualifier: no block"
 run "$W" "$TMP/a5b.xml" "--for=this.leaf" && noblock "$TMP/a5b.xml" "A5 this.leaf is a member access: no block"
 run "$W" "$TMP/a6.xml" "--for=JS.jleaf" && \
@@ -166,6 +184,96 @@ sys.exit(0 if i > 0 and j > i and strip(on[:i] + on[j + len('</shortkey>'):]) ==
 PY
 offrc=$?
 if [ "$offrc" -eq 0 ]; then ok "B9 the off switch removes exactly the block"; else no "B9 the off switch changed more than the block"; fi
+
+# ── fix round 1: the qualifier proof, every segment (C1-C8), and the literal rung's shapes and cuts (C9) ─────────────────────
+F1="$TMP/f1"; mkdir -p "$F1/src/helpers" "$F1/src/utils/legacy" "$F1/src/app"
+printf 'export function formatDate(d: number): string {\n  return String(d);\n}\n' >"$F1/src/helpers/date.ts"
+printf 'export { formatDate } from "./date";\n' >"$F1/src/helpers/index.ts"
+printf 'import * as utils from "../helpers";\nexport function main(): string {\n  return utils.formatDate(1);\n}\n' >"$F1/src/app/main.ts"
+printf 'export function formatDate(x: string): string {\n  return "legacy" + x;\n}\n' >"$F1/src/utils/legacy/old.ts"
+printf 'export { formatDate } from "./legacy/old";\n' >"$F1/src/utils/legacy.ts"
+for i in 1 2 3 4 5 6; do printf 'export class Fmt%s {\n  formatDate(v: number): string {\n    return "x" + v;\n  }\n}\n' "$i" >"$F1/src/app/fmt$i.ts"; done
+FD="$TMP/fd"; cp -R "$F1" "$FD"; rm -rf "$FD/src/helpers" "$FD/src/app/main.ts"                       # the decoy alone
+FK="$TMP/fk"; cp -R "$F1" "$FK"; rm "$FK/src/app/main.ts"; printf 'export { formatDate } from "../helpers/date";\n' >"$FK/src/utils/index.ts"   # a package index
+F3="$TMP/f3"; mkdir -p "$F3/src"; cp -R "$F1/src/helpers" "$F1/src/app" "$F3/src/"; rm "$F3"/src/app/fmt*.ts   # one definition, a consumer alias
+F2="$TMP/f2"; mkdir -p "$F2/cyc"
+printf 'export function cleaf(): number {\n  return 1;\n}\nexport * as A from "./a";\n' >"$F2/cyc/b.ts"
+printf 'export * as B from "./b";\n' >"$F2/cyc/a.ts"
+FT="$TMP/ft"; mkdir -p "$FT/ts"
+printf 'export function getX(a: number): number {\n  return a;\n}\n' >"$FT/ts/ts.Completions.ts"
+for i in 1 2 3 4 5 6; do printf 'export class G%s {\n  getX(v: number): number {\n    return v * %s;\n  }\n}\n' "$i" "$i" >"$FT/ts/g$i.ts"; done
+
+run "$F1" "$TMP/c1.xml" "--for=utils.formatDate" && {
+skhas   "$TMP/c1.xml" "C1 dir + alias: both hedged, cands=2"     '<rung n="leaf" key="formatDate" q="utils" kept="2" of="8" exact="0" cands="2"><d n="formatDate" t="fn" p="src/helpers/date.ts" l="1" q_by="alias"/><d n="formatDate" t="fn" p="src/utils/legacy/old.ts" l="1" q_by="dir"/></rung>'
+skhasnt "$TMP/c1.xml" "C1 never exact"                             'exact="1"'
+skhasnt "$TMP/c1.xml" "C1 no body for a hedged row"                '<b '
+}
+run "$FD" "$TMP/c1d.xml" "--for=utils.formatDate" && {
+skhas   "$TMP/c1d.xml" "C1 one dir-only proof is not exact"        'kept="1" of="7" exact="0"><d n="formatDate" t="fn" p="src/utils/legacy/old.ts" l="1" q_by="dir"/>'
+has     "$TMP/c1d.xml" "C1 the reexports def row says q_by=dir"    '<def n="formatDate" p="src/utils/legacy/old.ts" l="1" q="utils" q_by="dir"'
+}
+for qq in "Wrong.Fmt3.formatDate" "Wrong::Fmt3::formatDate"; do
+run "$F1" "$TMP/c2.xml" "--for=$qq" && {
+skhas   "$TMP/c2.xml" "C2 $qq: no segment-complete proof"          'kept="0" of="8" exact="0" q_unmatched="1">'
+skhasnt "$TMP/c2.xml" "C2 $qq: never exact"                        'exact="1"'
+}
+done
+run "$F3" "$TMP/c3.xml" "--for=where is utils.formatDate defined" && \
+has     "$TMP/c3.xml" "C3 a consumer alias keeps the only definition, hedged" '<def n="formatDate" p="src/helpers/date.ts" l="1" q="utils" q_by="alias" total="1"/><rx p="src/helpers/index.ts" l="1" from="./date"/>'
+run "$W" "$TMP/c4.xml" "--for=where is Wrong.leaf defined" && {
+has     "$TMP/c4.xml" "C4 cued, nothing proves Q: the definition kept, q_unmatched" '<def n="leaf" p="src/lib/m.ts" l="1" q="Wrong" q_unmatched="1"'
+}
+run "$F1" "$TMP/c5.xml" "--for=legacy.old.formatDate" && has "$TMP/c5.xml" "C5 path tail legacy/old proves legacy.old" '<def n="formatDate" p="src/utils/legacy/old.ts" l="1" q="legacy.old" total="1"/>'
+run "$F1" "$TMP/c5b.xml" "--for=utils.legacy.formatDate" && has "$TMP/c5b.xml" "C5 path tail utils/legacy proves utils.legacy" '<def n="formatDate" p="src/utils/legacy/old.ts" l="1" q="utils.legacy" total="1"/>'
+run "$FK" "$TMP/c5c.xml" "--for=where is utils.formatDate defined" && {
+has     "$TMP/c5c.xml" "C5 a package index (src/utils/index.ts) proves utils" '<def n="formatDate" p="src/helpers/date.ts" l="1" q="utils" total="2"/><rx p="src/utils/index.ts"'
+hasnt   "$TMP/c5c.xml" "C5 the dir-only decoy is not listed beside it" 'src/utils/legacy/old.ts'
+}
+run "$FT" "$TMP/c6.xml" "--for=Completions.getX" && skhas "$TMP/c6.xml" "C6 dot-suffix stem" 'q="Completions" kept="1" of="7" exact="1"><d n="getX" t="fn" p="ts/ts.Completions.ts" l="1" q_by="file"/>'
+run "$FT" "$TMP/c6b.xml" "--for=ts.Completions.getX" && skhas "$TMP/c6b.xml" "C6 the whole stem" 'q="ts.Completions" kept="1" of="7" exact="1">'
+run "$FT" "$TMP/c6c.xml" "--for=Wrong.Completions.getX" && skhas "$TMP/c6c.xml" "C6 a segment the stem lacks" 'q="Wrong.Completions" kept="0" of="7" exact="0" q_unmatched="1">'
+run "$W" "$TMP/c7.xml" "--for=where is this.leaf defined" && noblock "$TMP/c7.xml" "C7 this.leaf (cued) is a member access: no block"
+run "$W" "$TMP/c7b.xml" "--for=where is self.leaf defined" && noblock "$TMP/c7b.xml" "C7 self.leaf (cued) is a member access: no block"
+run "$F1" "$TMP/c7c.xml" "--for=this.formatDate" && { if grep -q '<shortkey' "$TMP/c7c.xml"; then no "C7 this.formatDate prints no shortkey"; else ok "C7 this.formatDate prints no shortkey"; fi; }
+run "$F2" "$TMP/c8.xml" "--for=B.cleaf" && {
+has     "$TMP/c8.xml" "C8 namespace cycle ends with both hops"     '<def n="cleaf" p="cyc/b.ts" l="1" q="B" total="2"/>'
+hasnt   "$TMP/c8.xml" "C8 no false capped="                         'capped="1"'
+}
+
+L="$TMP/lit"; mkdir -p "$L/src" "$L/c" "$L/py" "$L/ts"
+printf 'export function host(): number {\n  const localLimit = 4;\n  return localLimit;\n}\n' >"$L/src/host.ts"
+printf '#ifndef X_H\n#define X_H\n#define widgetCount 4\nint useIt(void);\n#endif\n' >"$L/c/x.h"
+printf '#include "x.h"\nint useIt(void) { return widgetCount; }\n' >"$L/c/x.c"
+printf 'type RowMap = dict[str, int]\n\ndef go(m: RowMap) -> int:\n    return len(m)\n' >"$L/py/m.py"
+printf 'fieldWidth = 3\nreturn fieldWidth\n' >"$L/py/a.lua"
+for i in 1 2 3 4 5 6 7 8; do printf 'export function host%s(): number {\n  const capKey = %s;\n  return capKey;\n}\n' "$i" "$i" >"$L/src/f$i.ts"; done
+python3 - "$L" <<'PY'
+import sys
+L = sys.argv[1]
+body = "".join("  total += %d;\n" % i for i in range(800))
+open(L + "/ts/ts.Big.ts", "w").write("export function hugeFn(): number {\n  let total = 0;\n" + body + "  return total;\n}\n")
+for i in range(1, 7):
+    open(L + "/ts/q%d.ts" % i, "w").write("export class Q%d {\n  hugeFn(v: number): number {\n    return v * %d;\n  }\n}\n" % (i, i))
+PY
+run "$L" "$TMP/c9a.xml" "--for=RowMap" && skhas "$TMP/c9a.xml" "C9 type shape" '<ld p="py/m.py" l="1" shape="type">'
+run "$L" "$TMP/c9b.xml" "--for=widgetCount" && skhas "$TMP/c9b.xml" "C9 define shape (a non-CONST key)" '<ld p="c/x.h" l="3" shape="define">'
+run "$L" "$TMP/c9c.xml" "--for=localLimit" && skhas "$TMP/c9c.xml" "C9 const shape, in= its function" '<ld p="src/host.ts" l="2" shape="const" in="host">'
+run "$L" "$TMP/c9d.xml" "--for=fieldWidth" && skhas "$TMP/c9d.xml" "C9 assign shape at column 0" '<ld p="py/a.lua" l="1" shape="assign">'
+run "$L" "$TMP/c9e.xml" "--for=capKey" && {
+skhas "$TMP/c9e.xml" "C9 row cap: total=8 shown=6" '<rung n="literal" key="capKey" total="8" shown="6" exact="0">'
+n=$( sk "$TMP/c9e.xml" | grep -o '<ld ' | wc -l | tr -d ' ' ); if [ "$n" = 6 ]; then ok "C9 row cap: 6 ld rows"; else no "C9 row cap: $n ld rows (want 6)"; fi
+}
+run "$L" "$TMP/c9f.xml" "--for=Big.hugeFn" && skhas "$TMP/c9f.xml" "C9 the exact leaf's body is cut past 8192 bytes" 'n="hugeFn" lines="1-518/804" truncated="1" next="--expand=ts/ts.Big.ts:1:hugeFn:519-804">'
+( cd "$L" || exit 1; HOME="$TMP" "$BIN" "$L" --cache="$TMP/litcache" "--for=capKey" </dev/null >"$TMP/c9g0.xml" 2>/dev/null ) || no "C9 floor: the cache-priming run failed"
+chmod 000 "$L/src/f3.ts"
+if [ -r "$L/src/f3.ts" ]; then
+    printf '  SKIP  C9 floor: chmod cannot hide a file from this user\n'
+else
+    ( cd "$L" || exit 1; HOME="$TMP" "$BIN" "$L" --cache="$TMP/litcache" "--for=capKey" </dev/null 2>/dev/null ) >"$TMP/c9g.xml"; frc=$?
+    if [ "$frc" -eq 0 ] && sk "$TMP/c9g.xml" | grep -qF 'exact="0" floor="1">'; then ok "C9 floor=1 when a file is unreadable"; else no "C9 floor=1 when a file is unreadable (rc=$frc)"; fi
+    if sk "$TMP/c9e.xml" | grep -qF 'floor='; then no "C9 a clean scan prints no floor="; else ok "C9 a clean scan prints no floor="; fi
+fi
+chmod 644 "$L/src/f3.ts"
 
 if [ "$fail" = 0 ]; then echo "barrelshortkeycheck: PASS"; else echo "barrelshortkeycheck: FAIL"; fi
 exit "$fail"

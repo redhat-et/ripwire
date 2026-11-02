@@ -4722,7 +4722,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // byte allowance, outside est_tokens: no auto-served body pays for it. XML only, like the block above.
         if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot )
         {
-            const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = shownSigIds.empty(),
+            const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = sigsPreRendered && shownSigIds.empty(),
                                                                                              .held = cfg.tokenBudget > 0, .redact = redactPtr, .rootArg = flRootArg } );
             std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }

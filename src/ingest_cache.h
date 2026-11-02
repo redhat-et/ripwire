@@ -369,7 +369,7 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
 constexpr std::uint32_t kParserVer    = 289;          // bump on any grammar/.scm/extraction change
                                                       // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
                                                       //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286) and
-                                                      //   DOCS-REST #506 (287/288); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
+                                                      //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
                                                       // 283 = 2026-10-31 (train 43b: lanes registrar (placeholders 273..281), string-import (274, 275) and their extraction: Python registrar facts,
                                                       //   TS/JS provider-record literal marks, Python dotted-string and import-sink facts). Strictly above 281 (rich 282) and every lane value. Rich file tag 284.
                                                       //   kCacheVersion stays 48: no record changes shape.
