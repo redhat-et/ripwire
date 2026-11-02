@@ -13,8 +13,10 @@ BIN="${1:-${RIPWIRE_BIN:-$ROOT/build/ripwire}}"
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 TMP="$( mktemp -d )"; trap 'rm -rf "$TMP"' EXIT
 fail=0
-ok(){ printf '  PASS  %s\n' "$*"; }
+ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write the PASS line for: %s\n' "$*"; }; return 0; }
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
+arm(){ label="$1"; shift; if "$@"; then ok "$label"; else no "$label"; fi; }
+arm_not(){ label="$1"; shift; if "$@"; then no "$label"; else ok "$label"; fi; }
 echo "restdocscheck: BIN=$BIN"
 
 FIX="$TMP/fix"; mkdir -p "$FIX/docs/ref/deep" "$FIX/notsphinx" "$FIX/defaultsuffix" "$FIX/commented" "$FIX/listform" "$FIX/src" "$FIX/plain"
@@ -247,38 +249,39 @@ body_lacks(){ out="$( run --expand="$1" --top-k=0 )"; case "$out" in *"$2"*) ret
 link_from(){ out="$( run --callers="$1" )"; case "$out" in *"p=\"$2:"*"via=\"link\""*) return 0;; esac; return 1; }
 
 echo "A. titles"
-has_body "Over Top Name" "Over Top Name" qqtopword && ok "A1 overlined title" || no "A1 overlined title"
-has_body "Under Three" "Under Three" qqthreeword && ok "A2 a third punctuation" || no "A2 a third punctuation"
-body_lacks "Under Three" qqfourword && ok "A3 a same-level title ends the span" || no "A3 a same-level title ends the span"
+arm "A1 overlined title" has_body "Over Top Name" "Over Top Name" qqtopword
+arm "A2 a third punctuation" has_body "Under Three" "Under Three" qqthreeword
+arm "A3 a same-level title ends the span" body_lacks "Under Three" qqfourword
 out="$( run --expand="Under Two" --top-k=0 )"
 case "$out" in *qqtwoword*) ok "A4 a title keeps its prose";; *) no "A4 a title keeps its prose";; esac
 out="$( run --expand="Order Inner" --top-k=0 )"
 case "$out" in *'sibs="Order Outer'*|*'Order Outer'*) ok "A5 level by first-seen order: = sits under ~ here";; *) no "A5 level by first-seen order: = sits under ~ here";; esac
-body_lacks "Order Inner" qqsiblingword && ok "A6 the first-seen style closes the inner one" || no "A6 the first-seen style closes the inner one"
+arm "A6 the first-seen style closes the inner one" body_lacks "Order Inner" qqsiblingword
 
 echo "B. directives as units, named by their target, body served"
-has_body "--qqwidth" "--qqwidth" qqwidthword && ok "B1 option named by the long spelling, no =<n>" || no "B1 option named by the long spelling, no =<n>"
-body_lacks "--qqwidth" qqheightword && ok "B2 the next option ends the unit" || no "B2 the next option ends the unit"
-has_body "qqconf_value" "qqconf_value" qqconfword && ok "B3 confval" || no "B3 confval"
-has_body "pkg.qqfunc" "pkg.qqfunc" qqfuncword && ok "B4 function, signature off" || no "B4 function, signature off"
-has_body "QqKlass" "QqKlass" qqmethword && ok "B5 class holds its method" || no "B5 class holds its method"
-has_body "qqmeth" "qqmeth" qqmethword && ok "B6 method nested in a class" || no "B6 method nested in a class"
-has_body "qqattr" "qqattr" qqattrword && ok "B7 a domain prefix comes off" || no "B7 a domain prefix comes off"
-has_body "qq_cfunc" "qq_cfunc" qqcfuncword && ok "B8 a C signature names the function" || no "B8 a C signature names the function"
-is_unit "--qqinnote" && ok "B9 an option inside a note" || no "B9 an option inside a note"
-has_body "QQ_SETTING" "QQ_SETTING" qqsettingword && ok "B10 a body-less setting covers the title below it" || no "B10 a body-less setting covers the title below it"
-out="$( run --expand=QQ_SETTING --top-k=0 )"; [ "$( printf '%s' "$out" | grep -o 'n="QQ_SETTING"' | wc -l | tr -d ' ' )" = 1 ] && ok "B10b a setting above its own title is one unit" || no "B10b a setting above its own title is one unit"
-has_body "QQ_ABOVE" "QQ_ABOVE" qqaboveword && ok "B10c a setting above another title covers it" || no "B10c a setting above another title covers it"
-has_body "QQ_PLAIN" "QQ_PLAIN" qqplainword && ok "B11 a body-less setting with prose runs to the next unit" || no "B11 a body-less setting with prose runs to the next unit"
-body_lacks "QQ_PLAIN" qqnextword && ok "B12 and stops at the next title" || no "B12 and stops at the next title"
-has_body "--qqrstopt" "--qqrstopt" rstoptbody && ok "B13 a .rst outside any Sphinx root parses the same" || no "B13 a .rst outside any Sphinx root parses the same"
+arm "B1 option named by the long spelling, no =<n>" has_body "--qqwidth" "--qqwidth" qqwidthword
+arm "B2 the next option ends the unit" body_lacks "--qqwidth" qqheightword
+arm "B3 confval" has_body "qqconf_value" "qqconf_value" qqconfword
+arm "B4 function, signature off" has_body "pkg.qqfunc" "pkg.qqfunc" qqfuncword
+arm "B5 class holds its method" has_body "QqKlass" "QqKlass" qqmethword
+arm "B6 method nested in a class" has_body "qqmeth" "qqmeth" qqmethword
+arm "B7 a domain prefix comes off" has_body "qqattr" "qqattr" qqattrword
+arm "B8 a C signature names the function" has_body "qq_cfunc" "qq_cfunc" qqcfuncword
+arm "B9 an option inside a note" is_unit "--qqinnote"
+arm "B10 a body-less setting covers the title below it" has_body "QQ_SETTING" "QQ_SETTING" qqsettingword
+out="$( run --expand=QQ_SETTING --top-k=0 )"
+arm "B10b a setting above its own title is one unit" [ "$( printf '%s' "$out" | grep -o 'n="QQ_SETTING"' | wc -l | tr -d ' ' )" = 1 ]
+arm "B10c a setting above another title covers it" has_body "QQ_ABOVE" "QQ_ABOVE" qqaboveword
+arm "B11 a body-less setting with prose runs to the next unit" has_body "QQ_PLAIN" "QQ_PLAIN" qqplainword
+arm "B12 and stops at the next title" body_lacks "QQ_PLAIN" qqnextword
+arm "B13 a .rst outside any Sphinx root parses the same" has_body "--qqrstopt" "--qqrstopt" rstoptbody
 out="$( run --recall=qqheightword )"
 case "$out" in *qqheightword*) case "$out" in *qqconfword*) no "B14 recall serves the unit, not the page";; *) ok "B14 recall serves the unit, not the page";; esac;; *) no "B14 recall serves the unit, not the page";; esac
 
 echo "C. links"
-link_from "_option-label" "docs/links.txt" && ok "C1 :ref: with text, to a label" || no "C1 :ref: with text, to a label"
-link_from "_bare-label" "docs/links.txt" && ok "C2 bare :ref:" || no "C2 bare :ref:"
-link_from "_wrapped-label" "docs/links.txt" && ok "C3 a :ref: wrapped over lines, label lowered" || no "C3 a :ref: wrapped over lines, label lowered"
+arm "C1 :ref: with text, to a label" link_from "_option-label" "docs/links.txt"
+arm "C2 bare :ref:" link_from "_bare-label" "docs/links.txt"
+arm "C3 a :ref: wrapped over lines, label lowered" link_from "_wrapped-label" "docs/links.txt"
 out="$( run --callers=options )"
 case "$out" in *'via="link"'*) ok "C4 relative :doc:";; *) no "C4 relative :doc:";; esac
 out="$( run --callers=page )"
@@ -287,30 +290,30 @@ out="$( run --callers=links )"
 case "$out" in *'via="link"'*) ok "C6 :doc:\`/abs\` from a deeper file";; *) no "C6 :doc:\`/abs\` from a deeper file";; esac
 out="$( run --callers=widgetfn )"
 case "$out" in *'via="link"'*) no "C7 a dangling :ref: does not land on a function of that name";; *'callit'*) ok "C7 a dangling :ref: does not land on a function of that name";; *) no "C7 no caller row at all";; esac
-has_body "_bare-label" "_bare-label" barebody && ok "C8 a label serves the section it names" || no "C8 a label serves the section it names"
+arm "C8 a label serves the section it names" has_body "_bare-label" "_bare-label" barebody
 
 echo "D. which .txt is a document"
 map="$( run --top-k=1 )"
-is_unit "Over Top Name" && ok "D1 a .txt under a conf.py declaring it" || no "D1 a .txt under a conf.py declaring it"
-is_unit "List Form" && ok "D2 source_suffix as a list" || no "D2 source_suffix as a list"
+arm "D1 a .txt under a conf.py declaring it" is_unit "Over Top Name"
+arm "D2 source_suffix as a list" is_unit "List Form"
 for pair in "Refused One:no conf.py" "Refused Two:a conf.py that is not Sphinx" "Refused Three:Sphinx default suffix" "Refused Four:a commented .txt"; do
   name="${pair%%:*}"; why="${pair#*:}"
-  is_unit "$name" && no "D3 stays out: $why" || ok "D3 stays out: $why"
+  arm_not "D3 stays out: $why" is_unit "$name"
 done
 case "$map" in *'unindexed="'*txt*) ok "D4 the refused .txt files stay disclosed in unindexed=";; *) no "D4 the refused .txt files stay disclosed in unindexed=";; esac
 
 echo "E. near misses"
-is_unit "abcdef" && no "E1 a 3-char underline shorter than its title is text" || ok "E1 a 3-char underline shorter than its title is text"
-is_unit "abcdefgh" && ok "E2 a 5-char underline shorter than its title is a title" || no "E2 a 5-char underline shorter than its title is a title"
-is_unit "qqparaline" && no "E3 a paragraph's last line is no title" || ok "E3 a paragraph's last line is no title"
-is_unit "Fake Literal Title" && no "E4 title in a literal block" || ok "E4 title in a literal block"
-is_unit "--qqfakeliteral" && no "E5 directive in a literal block" || ok "E5 directive in a literal block"
-is_unit "--qqfakebare" && no "E5b directive after a bare ::" || ok "E5b directive after a bare ::"
-is_unit "--qqfakecode" && no "E6 directive in code-block" || ok "E6 directive in code-block"
-is_unit "--qqfakecomment" && no "E7 directive in a comment" || ok "E7 directive in a comment"
-is_unit "bullet qqbullet" && no "E8 a bullet above a rule" || ok "E8 a bullet above a rule"
-"$BIN" "$FIX" --no-cache 2>/dev/null </dev/null | xmllint --noout - 2>/dev/null && ok "E9 names with markup stay well-formed" || no "E9 names with markup stay well-formed"
-is_unit "Title <With> & Markup" && ok "E10 that title is a unit" || no "E10 that title is a unit"
+arm_not "E1 a 3-char underline shorter than its title is text" is_unit "abcdef"
+arm "E2 a 5-char underline shorter than its title is a title" is_unit "abcdefgh"
+arm_not "E3 a paragraph's last line is no title" is_unit "qqparaline"
+arm_not "E4 title in a literal block" is_unit "Fake Literal Title"
+arm_not "E5 directive in a literal block" is_unit "--qqfakeliteral"
+arm_not "E5b directive after a bare ::" is_unit "--qqfakebare"
+arm_not "E6 directive in code-block" is_unit "--qqfakecode"
+arm_not "E7 directive in a comment" is_unit "--qqfakecomment"
+arm_not "E8 a bullet above a rule" is_unit "bullet qqbullet"
+arm "E9 names with markup stay well-formed" "$BIN" "$FIX" --no-cache 2>/dev/null </dev/null | xmllint --noout - 2>/dev/null
+arm "E10 that title is a unit" is_unit "Title <With> & Markup"
 
 echo "F. pathological files disclose rather than hang"
 PATH_FIX="$TMP/path"; mkdir -p "$PATH_FIX"
@@ -324,17 +327,17 @@ start=$( date +%s )
 timeout_cmd=(); command -v timeout >/dev/null && timeout_cmd=(timeout 120); command -v gtimeout >/dev/null && timeout_cmd=(gtimeout 120)
 ${timeout_cmd[@]+"${timeout_cmd[@]}"} "$BIN" "$PATH_FIX" --no-cache --skipped >"$TMP/skip.xml" 2>/dev/null </dev/null; rc=$?
 took=$(( $( date +%s ) - start ))
-[ "$rc" = 0 ] && ok "F1 finished, rc=0 in ${took}s" || no "F1 rc=$rc after ${took}s"
+arm "F1 finished in ${took}s, rc=$rc" [ "$rc" = 0 ]
 for f in flat deep; do
-  grep -q "$f.rst[^>]*extract-partial\|extract-partial[^>]*$f.rst" "$TMP/skip.xml" && ok "F2 $f.rst reports extract-partial" || no "F2 $f.rst reports extract-partial"
+  arm "F2 $f.rst reports extract-partial" grep -q "$f.rst[^>]*extract-partial\|extract-partial[^>]*$f.rst" "$TMP/skip.xml"
 done
-grep -q 'odd.rst[^>]*extract-partial' "$TMP/skip.xml" && no "F3 odd.rst is whole, no false partial" || ok "F3 odd.rst is whole, no false partial"
+arm_not "F3 odd.rst is whole, no false partial" grep -q 'odd.rst[^>]*extract-partial' "$TMP/skip.xml"
 FIXC="$PATH_FIX"; out="$( "$BIN" "$FIXC" --no-cache --expand=--o19000 --top-k=0 2>/dev/null )"; case "$out" in *'n="--o19000"'*) ok "F4 units below the cap are served";; *) no "F4 units below the cap are served";; esac
 
 echo "G. determinism, CRLF, cache"
 "$BIN" "$FIX" --no-cache >"$TMP/a" 2>/dev/null </dev/null; "$BIN" "$FIX" --no-cache >"$TMP/b" 2>/dev/null </dev/null
 sed -E 's/ at="[^"]*"//g' "$TMP/a" >"$TMP/a2"; sed -E 's/ at="[^"]*"//g' "$TMP/b" >"$TMP/b2"
-cmp -s "$TMP/a2" "$TMP/b2" && ok "G1 two runs byte-identical" || no "G1 two runs byte-identical"
+arm "G1 two runs byte-identical" cmp -s "$TMP/a2" "$TMP/b2"
 CR="$TMP/cr"; mkdir -p "$CR"; printf 'Crlf Title\r\n==========\r\n\r\n.. option:: --qqcr\r\n\r\n    crbody\r\n' >"$CR/a.rst"
 out="$( "$BIN" "$CR" --no-cache --expand=--qqcr --top-k=0 2>/dev/null )"; case "$out" in *crbody*) ok "G2 CRLF file";; *) no "G2 CRLF file";; esac
 CF="$TMP/cache"; "$BIN" "$FIX" --cache="$CF" --expand=--qqheight --top-k=0 >"$TMP/c1" 2>/dev/null </dev/null; "$BIN" "$FIX" --cache="$CF" --expand=--qqheight --top-k=0 >"$TMP/c2" 2>/dev/null </dev/null

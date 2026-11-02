@@ -559,7 +559,7 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             // under third_party/patches/ are the SECOND, independent layer for those three).
             // Itemized in --skipped (why="nest-refused") for every language now, not just Kotlin.
             // A reST file takes no grammar, so the guard has nothing to protect: ingest_rest.h's scan is flat and bounds itself.
-            const std::string restExt = le->lang == Lang::Markdown ? lowerExtensionOf( path ) : std::string();
+            const std::string restExt = lowerExtensionOf( path );
             const bool        isRest  = docparse::isRestExtension( restExt );
             if( !isRest && refuseNesting( *le, bytes, path.c_str(), fileId, scan ) )
             {
