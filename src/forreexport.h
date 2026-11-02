@@ -1499,6 +1499,14 @@ inline std::string_view declShape( std::string_view line, std::string_view k )
     };
     const auto skipBlank = [ & ]( std::size_t at ) { return std::min( line.find_first_not_of( " \t", at ), line.size() ); };
     const std::size_t lead = skipBlank( 0 );
+    // a comment line is never a declaration: `//`, `/*`, a block-comment continuation `*`, `--` (SQL/Lua/Haskell) and `#` other than a
+    // preprocessor `#define` (a Python/shell/Ruby comment)
+    if( const std::string_view body = line.substr( lead );
+        body.starts_with( "//" ) || body.starts_with( "/*" ) || body.starts_with( "*" ) || body.starts_with( "--" ) ||
+        ( body.starts_with( "#" ) && !body.substr( skipBlank( lead + 1 ) - lead ).starts_with( "define" ) ) )
+    {
+        return {};
+    }
     // `X =` / `X: T =` at column 0 (a module constant)
     if( line.starts_with( k ) && wordAt( 0, k.size() ) )
     {

@@ -24,7 +24,8 @@
 #   B3  `Fmt3.formatDate`: a TS method (no stored owner scope) proven by the class's line span: kept="1" q_by="scope" fmt3.ts.
 #   B4  `Utils.parseInput`: two definitions both published under Utils: kept="2" cands="2" exact="0" (hedged, never exact).
 #   B5  C++ `WidgetPtr` (a `using` alias the index does not store): substring row getWidgetPtrCount, literal row shape="using"
-#       cpp/fwd.h:4; a commented-out `// using WidgetPtr = …` line is never a row; next="--grep=WidgetPtr". `GadgetRef`: shape="typedef".
+#       cpp/fwd.h:4; a commented-out `// using WidgetPtr = …` line is never a row; next="--grep=WidgetPtr". `GadgetRef` (a
+#       function-pointer typedef; a plain `typedef T X;` is now an indexed definition): shape="typedef".
 #   B6  Rust `ExprKind` (`use … as ExprKind`): literal row shape="import-as".
 #   B7  a CONST-shaped key with no definition: the literal rung says held="lit" (the <lit> block lists it), no ld rows.
 #   B8  every <shortkey> carries next=; a resolved name-exact route (`getWidgetPtrCount`) prints no <shortkey> (absence twin of B5).
@@ -65,7 +66,7 @@ run(){
     local root="$1" out="$2"; shift 2
     ( cd "$root" || exit 1; HOME="$TMP" "$BIN" "$root" --no-cache "$@" </dev/null 2>"$out.err" ) >"$out"
     local rc=$?
-    if [ "$rc" -ne 0 ] || ! grep -q '<ctx \|"schema"' "$out"; then no "run $* exited $rc or printed no answer"; return 1; fi
+    if [ "$rc" -ne 0 ] || ! grep -q '<ctx \|"task":' "$out"; then no "run $* exited $rc or printed no answer"; return 1; fi
     return 0
 }
 rx(){ grep -o '<reexports>.*</reexports>' "$1" | sed 's/<!--[^>]*-->//'; }
@@ -106,7 +107,7 @@ printf 'export function formatDate(x: string): string {\n  return x;\n}\n' >"$S/
 for i in 1 2 3 4 5; do
     printf 'export class Fmt%s {\n  formatDate(v: number): string {\n    return "x" + v;\n  }\n  parseInput(v: string): string {\n    return v;\n  }\n}\n' "$i" >"$S/src/legacy/fmt$i.ts"
 done
-printf '#pragma once\ntemplate <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nusing WidgetPtr = Ptr<Widget>;\nint getWidgetPtrCount();\ntypedef Ptr<Widget> GadgetRef;\n// using WidgetPtr = OldPtr<Widget>;\nint useLimit() { return clamp(MAX_WIDGET_COUNT); }\n' >"$S/cpp/fwd.h"
+printf '#pragma once\ntemplate <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nusing WidgetPtr = Ptr<Widget>;\nint getWidgetPtrCount();\ntypedef void (*GadgetRef)(int);\n// using WidgetPtr = OldPtr<Widget>;\nint useLimit() { return clamp(MAX_WIDGET_COUNT); }\n' >"$S/cpp/fwd.h"
 printf '#include "fwd.h"\nint getWidgetPtrCount() { return 1; }\n' >"$S/cpp/fwd.cpp"
 printf '[package]\nname = "rs"\nversion = "0.1.0"\n' >"$S/rs/Cargo.toml"
 printf 'pub mod pb { pub enum Kind { A } }\nuse crate::pb::Kind as ExprKind;\npub fn f(_k: ExprKind) {}\n' >"$S/rs/src/lib.rs"
