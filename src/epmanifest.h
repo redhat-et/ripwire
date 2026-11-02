@@ -19,12 +19,15 @@
 // READERS (one per manifest format, language data separate from the shared row): setup.cfg `[options.entry_points]` (INI keys
 // and continuation lines), pyproject.toml `[project.entry-points.G]`, `[project.scripts]` (console_scripts), `[project.gui-scripts]`
 // (gui_scripts), `[tool.poetry.plugins.G]`, `[tool.poetry.scripts]` (string values only); Cargo.toml `[[bin]]` (name, path,
-// Cargo's default `src/main.rs` / `src/bin/<name>.rs` when a target omits it, the package's own bin when a crate declares none);
-// package.json `"bin"` / `"main"` (file-path targets). One table (kEpManifestFormats) names each format's file, reader, target
+// Cargo's default `src/main.rs` / `src/bin/<name>.rs` when a target omits it, the package's own bin when a crate declares none
+// and has no `autobins = false` — that implicit group rides only on a binary cue in the task); package.json `"bin"` (named by
+// the last `/` segment, as npm installs it) / `"main"` (file-path targets, `../` and a Windows `\` normalized). One table (kEpManifestFormats) names each format's file, reader, target
 // form and the shown-row file extensions that look for it: a manifest is read where such a shown row sits in a directory or an
 // ancestor that holds one — a package's manifest always sits above its modules.
 // FLOORS (stated in the legend's absence of them, and in the lane report): setup.py `entry_points={…}` (a call, not a table),
-// package.json `"exports"` maps, pyproject inline tables, a group literal built at run time, a multi-root run. The DEFAULT regime
+// package.json `"exports"` maps, pyproject inline tables, a group literal built at run time, a multi-root run; Cargo's
+// auto-discovered binaries (`src/bin/*.rs`, and `src/main.rs` beside declared `[[bin]]` tables) and `src/bin/<name>/main.rs` as
+// a default path are not read; package.json is read for a .js or .ts row only (not .mjs, .cjs, .mts, .jsx, .tsx). The DEFAULT regime
 // and the XML dialect only, as the caller hop: --json, --token-budget=N,
 // --signatures-only and --detail=N carry none. RIPWIRE_NO_EP_MANIFEST (any value) turns it off — the A/B handle.
 
