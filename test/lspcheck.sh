@@ -359,7 +359,10 @@ done
 [ -z "$f16" ] && ok "(16) framing: missing / non-numeric / negative / over-cap Content-Length and a header flood each exit 1 within 10 s, stdout empty, the refusal named" \
              || no "(16) framing refusal wrong for:$f16"
 
-# ── (17) workspace/symbol discloses its 20-row cap ──────────────────────────────────────────────────────────
+# ── (17) workspace/symbol discloses its 20-row cap ──────────────────────────────────────────────────
+# (#440 re-pin: the anchored-notice half of the TWO notices was task D's corpus anchor speaking on a
+# substring query it decided nothing about — under the adopted rule an unused anchor is silent, so the
+# cap sentence is now the ONLY notice. The cap itself is untouched.)
 W17="$( mktemp -d )"
 for k in $( seq 0 24 ); do printf 'int capfn%02d() { return %d; }\n' "$k" "$k"; done > "$W17/caps.cpp"
 {
@@ -375,12 +378,13 @@ rm -rf "$W17"
 rows30="$( grep '"id":30,' "$WORK/r17" | grep -o '"name":"capfn' | wc -l | tr -d ' ' )"
 rows31="$( grep '"id":31,' "$WORK/r17" | grep -o '"name":"capfn' | wc -l | tr -d ' ' )"
 notices="$( grep -c '"method":"window/logMessage"' "$WORK/r17" )"
-noticeLine="$( grep -n '"method":"window/logMessage"' "$WORK/r17" | head -1 | cut -d: -f1 )"; resp30Line="$( grep -n '"id":30,' "$WORK/r17" | head -1 | cut -d: -f1 )"   # head -1 since D4: two disclosures can ride one dialog, the FIRST must precede the capped response
-[ "$rows30" = 20 ] && [ "$rows31" = 10 ] && [ "$notices" = 2 ] \
+noticeLine="$( grep -n '"method":"window/logMessage"' "$WORK/r17" | head -1 | cut -d: -f1 )"; resp30Line="$( grep -n '"id":30,' "$WORK/r17" | head -1 | cut -d: -f1 )"
+[ "$rows30" = 20 ] && [ "$rows31" = 10 ] && [ "$notices" = 1 ] \
     && grep -q 'shows the first 20 of 25 matches for .capfn.' "$WORK/r17" \
     && [ -n "$noticeLine" ] && [ "$noticeLine" -lt "$resp30Line" ] \
-    && ok "(17) workspace/symbol: 25 matches → 20 rows after the window/logMessage 'first 20 of 25'; 10 matches → 10 rows; TWO notices = the cap sentence plus D4's anchor clause on the below-cap query — disclosures are frames, cap honesty unchanged" \
+    && ok "(17) workspace/symbol: 25 matches → 20 rows after the ONE window/logMessage 'first 20 of 25' (an unused corpus anchor says nothing); 10 matches → 10 rows" \
     || { no "(17) cap disclosure wrong: rows30=$rows30 rows31=$rows31 notices=$notices"; head -c 500 "$WORK/r17"; }
+
 # ── (18) picker order: the tower sorts every multi-def answer, byte-pinned on the collision fixture ───
 cp -r "$ROOT/test/rubyschemafix" "$WORK/collide"
 uriColl="file://$WORK/collide"
@@ -629,16 +633,18 @@ grep -q 'splits over' "$WORK/r25" \
     && no "(25) the disclosure says the resolver SPLIT a call it bound to the body alone" \
     || ok "(25) prototype+body: counted as 2 definitions, no split claimed (the call binds to the body)"
 
-# ── (26) the tier order itself: exact language first, ladder WITHIN it (re-pinned by task D) ──
+# ── (26) the adopted rule's ladder: with NO stated language, kind decides and the majority is SILENT
+# even when it would order differently — #440 re-pin of task D's language-first pin. Mix: js/rb count
+# says ruby, but method(5) beats class(3) beats attr-var(1) across the languages. ─────────────────────
 mkdir -p "$WORK/mixlang"
 printf 'class AllFour\n  attr_reader :name\nend\n' > "$WORK/mixlang/a.rb"
 printf 'class name:\n    pass\n' > "$WORK/mixlang/b.py"
 printf 'class Other\n  def name\n    1\n  end\nend\nOther.new.name\n' > "$WORK/mixlang/c.rb"
 o26="$( cd "$WORK/mixlang" && "$BIN" --impact=name . 2>/dev/null | grep -o '<def ix="[0-9]*" t="[a-z]*"[^>]*p="[^"]*"' | tr '\n' ' ' )"
 case "$o26" in
-    *'ix="1" t="method" sc="Other" p="c.rb:2"'*'ix="2" t="var" sc="AllFour" p="a.rb:2"'*'ix="3" t="cls" sc="name" p="b.py:1"'*)
-        ok "(26) tiers in order: Ruby method then Ruby attr (the ladder WITHIN the anchor) then the Python class — language first, levels decide within" ;;
-    *)  no "(26) tier order wrong (family/foreign leakage, or the ladder still outranks the language): $o26" ;;
+    *'ix="1" t="method" sc="Other" p="c.rb:2"'*'ix="2" t="cls" sc="name" p="b.py:1"'*'ix="3" t="var" sc="AllFour" p="a.rb:2"'*)
+        ok "(26) the ladder answers alone: Ruby method → Python class → Ruby attr — kind outranks the majority language, and the root said nothing" ;;
+    *)  no "(26) ladder order wrong (a lifted corpus tier would front the ruby attr before the python class): $o26" ;;
 esac
 
 # ── (22) determinism x2 on the collision dialog (house pattern) ───────────────────────────────────────
@@ -733,14 +739,16 @@ printf '%s' "$R64" | grep -q '"result":\(null\|\[\]\)' \
     && ok "(30) Shape@bogus: nothing answers, ONE refusal naming the known tags precedes the empty result" \
     || { no "(30) LSP refusal wrong: notices=$n64"; printf '%s\n' "$R64" | head -c 240; }
 
-# ── (32) corpus tie: the anchor lands on a language present and counted, never invented ───────────
+# ── (32) adopted-rule pair: kind-first SILENCE for def-vs-class-counts, and the tie-break SPEAKING
+# when same-kind counts decide. First half: 5 python defs (fn rung 2) + 1 ruby def (method rung 5) —
+# the method rung fronts on KIND, the 5-vs-1 majority never speaks (no notice). Second half: python
+# fn vs javascript fn — same rung, js is the majority → js fronts and the tie names itself corpus-side.
 mkdir -p "$WORK/lotie"
 for k in 1 2 3 4; do printf 'def helper_%s():\n    return %s\n' "$k" "$k" > "$WORK/lotie/mod$k.py"; done
 printf 'def helper():\n    return helper_1()\n' > "$WORK/lotie/top.py"
 printf 'def helper\nend\n' > "$WORK/lotie/one.rb"
 {
   msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lotie\",\"capabilities\":{}}}"
-  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
   msg "{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"helper\"}}"
   msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
   msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
@@ -750,10 +758,31 @@ decodeFrames "$WORK/raw32" > "$WORK/r32" 2>/dev/null
 R65="$( grep '"id":65,' "$WORK/r32" )"
 t65py="$( printf '%s' "$R65" | grep -bo 'top\.py' | cut -d: -f1 | head -1 )"
 t65rb="$( printf '%s' "$R65" | grep -bo 'one\.rb'  | cut -d: -f1 | head -1 )"
-grep -q 'window/logMessage.*reflang=\\"py\\" origin=\\"corpus\\"' "$WORK/r32" \
-    && [ -n "$t65py" ] && [ -n "$t65rb" ] && [ "$t65py" -lt "$t65rb" ] \
-    && ok "(32) 5 Python defs beat 1 Ruby on the corpus anchor (top.py before one.rb, origin named)" \
-    || { no "(32) corpus tie wrong: py=$t65py rb=$t65rb"; printf '%s\n' "$R65" | head -c 260; }
+if [ -n "$t65rb" ] && [ -n "$t65py" ] && [ "$t65rb" -lt "$t65py" ] \
+   && ! grep -q 'reflang' "$WORK/r32"; then
+    ok "(32) kind-first: the Ruby method rung fronts 5-to-1 python defs and the majority says NOTHING (no reflang)"
+else
+    no "(32) kind-first/silence wrong: py=$t65py rb=$t65rb"; printf '%s\n' "$R65" | head -c 260
+fi
+mkdir -p "$WORK/lotie2"
+printf 'function run() {}\nfunction aux1() {}\nfunction aux2() {}\n' > "$WORK/lotie2/z.js"
+printf 'def run():\n    return 1\n' > "$WORK/lotie2/a.py"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/lotie2\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"run\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d32b"
+"$BIN" --lsp < "$WORK/d32b" > "$WORK/raw32b" 2>/dev/null
+decodeFrames "$WORK/raw32b" > "$WORK/r32b" 2>/dev/null
+R66="$( grep '"id":66,' "$WORK/r32b" )"
+t66js="$( printf '%s' "$R66" | grep -bo 'z\.js' | cut -d: -f1 | head -1 )"
+t66py="$( printf '%s' "$R66" | grep -bo 'a\.py'  | cut -d: -f1 | head -1 )"
+if grep -q 'reflang=.*origin=.*corpus' "$WORK/r32b" && [ -n "$t66js" ] && [ -n "$t66py" ] && [ "$t66js" -lt "$t66py" ]; then
+    ok "(32b) same-rung tie: the js majority fronts run AND names itself (reflang origin=corpus)"
+else
+    no "(32b) tie-break front/disclosure wrong: js=$t66js py=$t66py"
+fi
 
 # ── (34) a zero-match name with a valid suffix: empty, unclaimed, and the @ never leaks as the name ─
 {
