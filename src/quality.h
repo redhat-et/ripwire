@@ -10025,18 +10025,8 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                 // B10.2d — SELF-vs-AMBIENT window cutoff, same basis as gates 1/3 (HEAD's own committer epoch
                 // minus the window, never wall-clock). A failed lookup leaves churnCutoffEpoch==0, and every
                 // candidate below then reads churn="unknown" (the blame cannot be asked).
-                std::int64_t churnCutoffEpoch = 0;
-                {
-                    const std::string epochStr = gitOneLine( std::string( root ), "log --no-ext-diff --no-textconv -1 --format=%ct HEAD 2>/dev/null" );
-                    if( !epochStr.empty() )
-                    {
-                        const std::int64_t headEpoch = std::strtoll( epochStr.c_str(), nullptr, 10 );
-                        if( headEpoch > 0 )
-                        {
-                            churnCutoffEpoch = headEpoch - std::int64_t( kShortHorizonDays ) * 86400;
-                        }
-                    }
-                }
+                const std::int64_t churnHeadEpoch   = gitHeadCommitEpoch( std::string( root ) );   // the same `log -1 --format=%ct HEAD` read, 0 on failure
+                const std::int64_t churnCutoffEpoch = churnHeadEpoch > 0 ? churnHeadEpoch - std::int64_t( kShortHorizonDays ) * 86400 : 0;
 
                 // P3 (r27) — ONE `git diff --unified=0 HEAD -- <path>` spawn per PATH for the whole loop. The
                 // diff is a pure function of (HEAD, working tree), both fixed for this call, yet it used to be
