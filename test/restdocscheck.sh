@@ -291,12 +291,16 @@ case "$out" in *'via="link"'*) ok "C6 :doc:\`/abs\` from a deeper file";; *) no 
 out="$( run --callers=widgetfn )"
 case "$out" in *'via="link"'*) no "C7 a dangling :ref: does not land on a function of that name";; *'callit'*) ok "C7 a dangling :ref: does not land on a function of that name";; *) no "C7 no caller row at all";; esac
 out="$( run --callers=near )"
-case "$out" in *'p="docs/links.txt:'*) no "C7b a dangling :ref: does not land on a document of that name";; *) ok "C7b a dangling :ref: does not land on a document of that name";; esac
+case "$out" in *'<callers '*'defs="'[1-9]*) case "$out" in *'p="docs/links.txt:'*) no "C7b a dangling :ref: does not land on a document of that name";; *) ok "C7b a dangling :ref: does not land on a document of that name";; esac;; *) no "C7b --callers=near answered no <callers> with a def (crash or no document named near)";; esac
 printf 'Same Stem\n=========\n\nwrongstem\n' >"$FIX/docs/ref/deep/links.txt"
+# The page.txt row's of_def must be the def whose p is the root's docs/links.txt, not the neighbour's.
 out="$( run --callers=links )"
-case "$out" in *'p="docs/ref/deep/page.txt:'*) ;; *) no "C6b no caller row for a root :doc:";; esac
-out="$( run --expand="Deep Page" --top-k=0 )"
-case "$out" in *'<c n="links" l="1" via="link">'*'Links'*|*'<c n="Links" l="1" via="link">'*) ok "C6b a root :doc: goes to the Sphinx root's file, not a same-named neighbour";; *) no "C6b a root :doc: goes to the Sphinx root's file, not a same-named neighbour";; esac
+rootix="$( printf '%s' "$out" | grep -o '<def ix="[0-9]*" t="sec" p="docs/links.txt:1"' | grep -o 'ix="[0-9]*"' | grep -o '[0-9][0-9]*' )"
+nearix="$( printf '%s' "$out" | grep -o '<def ix="[0-9]*" t="sec" p="docs/ref/deep/links.txt:1"' | grep -o 'ix="[0-9]*"' | grep -o '[0-9][0-9]*' )"
+rowdef="$( printf '%s' "$out" | grep -o '<s t="sec" n="page" p="docs/ref/deep/page.txt:1" via="link" of_def="[0-9]*"' | grep -o 'of_def="[0-9]*"' | grep -o '[0-9][0-9]*' )"
+if [ -z "$rootix" ] || [ -z "$nearix" ]; then no "C6b both links.txt files are defs of --callers=links (got root='$rootix' near='$nearix')"
+elif [ "$rowdef" = "$rootix" ]; then ok "C6b a root :doc: goes to the Sphinx root's file (def $rootix), not the same-named neighbour (def $nearix)"
+else no "C6b a root :doc: goes to the Sphinx root's file (def $rootix), not the same-named neighbour (def $nearix): page.txt row of_def='$rowdef'"; fi
 rm -f "$FIX/docs/ref/deep/links.txt"
 arm "C8 a label serves the section it names" has_body "_bare-label" "_bare-label" barebody
 

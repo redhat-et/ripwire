@@ -8186,7 +8186,7 @@ inline MdLinkIndex buildMdLinkIndex( const IngestResult& ing )
     MdLinkIndex ix;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) || isRestLinkTargetPath( ing.files[ f ] ) )
+        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) || ing.files[ f ].ends_with( ".rst" ) || ing.files[ f ].ends_with( ".txt" ) )
         {
             ix.fileByPath.try_emplace( lexicalNormalize( ing.files[ f ] ), f );
         }

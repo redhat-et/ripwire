@@ -1868,13 +1868,9 @@ private:
 class SphinxTxtRoots
 {
 public:
-    explicit SphinxTxtRoots( std::string root ) : root_( std::move( root ) )
-    {
-        while( root_.size() > 1 && root_.back() == '/' )
-        {
-            root_.pop_back();
-        }
-    }
+    // A trailing '/' on the root stops the walk at the root all the same: the walk reads a directory's conf.py before it
+    // compares that directory to the root, so the root's own conf.py is always read.
+    explicit SphinxTxtRoots( std::string root ) : root_( std::move( root ) ) {}
 
     bool declares( const std::string& dir )
     {
@@ -1909,7 +1905,7 @@ private:
         std::error_code ec;
         const fs::path  conf   = fs::path( dir ) / "conf.py";
         const auto      status = fs::symlink_status( conf, ec );
-        if( ec || !fs::is_regular_file( status ) )
+        if( ec || status.type() != fs::file_type::regular )
         {
             return docparse::SphinxTxt::Unknown;
         }

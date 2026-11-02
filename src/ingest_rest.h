@@ -68,11 +68,6 @@ inline constexpr std::string_view kPassThroughDirectives[] = { "currentmodule", 
 
 static_assert( std::is_sorted( std::begin( kPassThroughDirectives ), std::end( kPassThroughDirectives ), rw::sortutil::svLess ), "kPassThroughDirectives must stay byte-sorted" );
 
-inline bool inTable( std::span<const std::string_view> table, std::string_view name ) noexcept
-{
-    return std::binary_search( table.begin(), table.end(), name, rw::sortutil::svLess );
-}
-
 struct RestLine
 {
     std::uint32_t start = 0;
@@ -99,11 +94,6 @@ inline std::vector<RestLine> splitRestLines( std::string_view src )
     return lines;
 }
 
-inline bool isBlankText( std::string_view s ) noexcept
-{
-    return s.find_first_not_of( " \t" ) == std::string_view::npos;
-}
-
 inline std::uint32_t indentOf( std::string_view s ) noexcept
 {
     std::uint32_t width = 0;
@@ -116,19 +106,10 @@ inline std::uint32_t indentOf( std::string_view s ) noexcept
     return width;
 }
 
-inline std::string_view trimText( std::string_view s ) noexcept
-{
-    const std::size_t a = s.find_first_not_of( " \t" );
-    if( a == std::string_view::npos )
-    {
-        return {};
-    }
-    return s.substr( a, s.find_last_not_of( " \t" ) - a + 1 );
-}
-
+// reST's adornment set is ASCII punctuation: printable, not a letter or digit (`_` included).
 inline bool isAdornmentChar( char c ) noexcept
 {
-    return ( c >= '!' && c <= '/' ) || ( c >= ':' && c <= '@' ) || ( c >= '[' && c <= '`' ) || ( c >= '{' && c <= '~' );
+    return c > ' ' && c <= '~' && ( c == '_' || !namesplit::isIdentChar( c ) );
 }
 
 // A whole line of one punctuation character, with trailing blanks allowed.
@@ -173,14 +154,14 @@ inline bool startsOtherBlock( std::string_view s ) noexcept
 inline bool underlineFits( std::string_view title, std::string_view underline ) noexcept
 {
     const std::size_t len = adornmentLength( underline );
-    return len >= 4 || len >= textWidth( trimText( title ) );
+    return len >= 4 || len >= textWidth( trimWs( title ) );
 }
 
 // Title text with its inline markup taken off: ``NAME`` and :role:`NAME` both read NAME. Any other byte stays.
 inline std::string cleanTitleText( std::string_view raw )
 {
     std::string out;
-    const std::string_view t = trimText( raw );
+    const std::string_view t = trimWs( raw );
     out.reserve( t.size() );
     for( std::size_t i = 0; i < t.size(); ++i )
     {
@@ -235,10 +216,10 @@ inline std::string_view optionTarget( std::string_view args ) noexcept
 // `foo.bar(x)` names foo.bar; `int f(int a)` names f; `x = 1` and `x: int` name x; `class Foo` names Foo.
 inline std::string_view signatureTarget( std::string_view args ) noexcept
 {
-    std::string_view head = trimText( args.substr( 0, std::min( args.find_first_of( "(=" ), args.size() ) ) );
+    std::string_view head = trimWs( args.substr( 0, std::min( args.find_first_of( "(=" ), args.size() ) ) );
     if( const std::size_t colon = head.find( ": " ); colon != std::string_view::npos )
     {
-        head = trimText( head.substr( 0, colon ) );
+        head = trimWs( head.substr( 0, colon ) );
     }
     const std::size_t space = head.find_last_of( " \t" );
     std::string_view  name  = space == std::string_view::npos ? head : head.substr( space + 1 );
@@ -280,7 +261,7 @@ inline ExplicitLine parseExplicit( std::string_view text ) noexcept
     {
         return {};   // `..word` is a paragraph to docutils; the caller only reaches here on ".. " or a bare ".."
     }
-    body = trimText( body );
+    body = trimWs( body );
     if( body.empty() )
     {
         return {};
@@ -315,7 +296,7 @@ inline ExplicitLine parseExplicit( std::string_view text ) noexcept
     {
         directive = directive.substr( domain + 1 );
     }
-    return { ExplicitKind::Directive, directive, trimText( body.substr( marker + 2 ) ) };
+    return { ExplicitKind::Directive, directive, trimWs( body.substr( marker + 2 ) ) };
 }
 
 struct RestUnit
@@ -502,19 +483,20 @@ private:
 // One role's text: `label`, or `text <label>` whose target is the angle-bracketed part.
 inline std::string_view roleTarget( std::string_view inner ) noexcept
 {
-    inner = trimText( inner );
+    inner = trimWs( inner );
     if( inner.size() > 2 && inner.back() == '>' )
     {
         const std::size_t open = inner.rfind( '<' );
         if( open != std::string_view::npos )
         {
-            return trimText( inner.substr( open + 1, inner.size() - open - 2 ) );
+            return trimWs( inner.substr( open + 1, inner.size() - open - 2 ) );
         }
     }
     return inner;
 }
 
-inline void emitRestLabelRef( std::uint32_t fileId, std::uint32_t at, std::string_view target, std::vector<RawRef>& refs )
+// A label as Sphinx keys it, on both sides of a :ref:: lowered, runs of whitespace one space.
+inline std::string restLabelKey( std::string_view target )
 {
     std::string label;
     label.reserve( target.size() );
@@ -534,6 +516,12 @@ inline void emitRestLabelRef( std::uint32_t fileId, std::uint32_t at, std::strin
         pendingSpace = false;
         label.push_back( c >= 'A' && c <= 'Z' ? char( c - 'A' + 'a' ) : c );
     }
+    return label;
+}
+
+inline void emitRestLabelRef( std::uint32_t fileId, std::uint32_t at, std::string_view target, std::vector<RawRef>& refs )
+{
+    const std::string label = restLabelKey( target );
     if( label.empty() )
     {
         return;
@@ -621,22 +609,12 @@ inline std::uint32_t scanRestInline( std::string_view src, const RestLine& line,
     return pos;
 }
 
-inline std::string lowerText( std::string_view s )
-{
-    std::string out( s );
-    for( char& c : out )
-    {
-        c = c >= 'A' && c <= 'Z' ? char( c - 'A' + 'a' ) : c;
-    }
-    return out;
-}
-
 inline bool nextLineHasBody( const std::vector<RestLine>& lines, std::size_t i, std::string_view src, std::uint32_t indent ) noexcept
 {
     for( std::size_t k = i + 1; k < lines.size(); ++k )
     {
         const std::string_view t = src.substr( lines[ k ].start, lines[ k ].end - lines[ k ].start );
-        if( !isBlankText( t ) )
+        if( !trimWs( t ).empty() )
         {
             return indentOf( t ) > indent;
         }
@@ -670,8 +648,8 @@ inline TitleHit titleAt( const std::vector<RestLine>& lines, std::size_t i, std:
         }
         const std::string_view text  = textOf( i + 1 );
         const std::string_view under = textOf( i + 2 );
-        const bool ok = !isBlankText( text ) && isAdornmentLine( under ) && under[ 0 ] == here[ 0 ]
-            && adornmentLength( under ) == adornmentLength( here ) && !isAdornmentLine( trimText( text ) ) && underlineFits( text, under );
+        const bool ok = !trimWs( text ).empty() && isAdornmentLine( under ) && under[ 0 ] == here[ 0 ]
+            && adornmentLength( under ) == adornmentLength( here ) && !isAdornmentLine( trimWs( text ) ) && underlineFits( text, under );
         return ok ? TitleHit{ true, true, i + 1, i + 2, here[ 0 ] } : TitleHit{};
     }
     if( i + 1 >= lines.size() || startsOtherBlock( here ) )
@@ -734,7 +712,7 @@ void extractRest( std::uint32_t fileId, std::string_view src, std::string_view s
     {
         const RestLine&        line = lines[ i ];
         const std::string_view text = src.substr( line.start, line.end - line.start );
-        if( isBlankText( text ) )
+        if( trimWs( text ).empty() )
         {
             afterBlank = true;
             continue;
@@ -777,22 +755,22 @@ void extractRest( std::uint32_t fileId, std::string_view src, std::string_view s
                 unit.sigEnd    = line.next;
                 unit.nameByte  = std::uint32_t( ex.name.data() - src.data() );
                 unit.line      = std::uint32_t( i ) + 1u;
-                unit.name      = "_" + lowerText( ex.name );
+                unit.name      = "_" + restLabelKey( ex.name );
                 build.addWaiting( std::move( unit ), indent );
                 continue;
             }
-            if( inTable( kUnitDirectives, ex.name ) )
+            if( externalnames::inSortedTable( kUnitDirectives, ex.name ) )
             {
                 addDirectiveUnit( build, ex, src, line, i, indent, hasBody );
                 continue;
             }
-            if( inTable( kPassThroughDirectives, ex.name ) )
+            if( externalnames::inSortedTable( kPassThroughDirectives, ex.name ) )
             {
                 opaqueIndent = indent;
                 continue;
             }
             build.flushWaiting();
-            if( inTable( kLiteralDirectives, ex.name ) )
+            if( externalnames::inSortedTable( kLiteralDirectives, ex.name ) )
             {
                 opaqueIndent = indent;
                 continue;
@@ -813,7 +791,7 @@ void extractRest( std::uint32_t fileId, std::string_view src, std::string_view s
                 RestUnit unit;
                 unit.startByte = line.start;
                 unit.sigEnd    = lines[ title.lastLine ].next;
-                unit.nameByte  = std::uint32_t( trimText( raw ).data() - src.data() );
+                unit.nameByte  = std::uint32_t( trimWs( raw ).data() - src.data() );
                 unit.line      = std::uint32_t( title.textLine ) + 1u;
                 unit.name      = std::move( name );
                 build.addTitle( std::move( unit ), styles.levelOf( title.style, title.overlined ) );

@@ -20,12 +20,6 @@
 namespace rw
 {
 
-// A file a :doc: may name. A crawled .txt is one, since the crawl only admits a declared one.
-inline bool isRestLinkTargetPath( std::string_view path ) noexcept
-{
-    return path.ends_with( ".rst" ) || path.ends_with( ".txt" );
-}
-
 struct RestLinkIndex
 {
     std::vector<std::pair<std::string_view, NodeId>> labels;       // `_name` Sections, sorted (name, id): the lowest id of a name is its target
@@ -70,8 +64,8 @@ inline NodeId bindRestLabel( const RestLinkIndex& rx, std::string_view label )
 {
     std::string name( 1, '_' );
     name.append( label );
-    const auto hit = std::lower_bound( rx.labels.begin(), rx.labels.end(), std::string_view( name ),
-                                       []( const std::pair<std::string_view, NodeId>& row, std::string_view key ) { return rw::sortutil::svLess( row.first, key ); } );
+    const auto byName = []( const std::pair<std::string_view, NodeId>& row, std::string_view key ) { return rw::sortutil::svLess( row.first, key ); };
+    const auto hit    = std::lower_bound( rx.labels.begin(), rx.labels.end(), name, byName );   // byName is svLess on the name
     return hit != rx.labels.end() && hit->first == name ? hit->second : kNoNode;
 }
 
