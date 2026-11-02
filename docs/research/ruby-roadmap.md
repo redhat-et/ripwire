@@ -75,6 +75,9 @@ Each name below has exactly one in-tree definition, and that definition absorbs 
 
 These are suspects because nothing has been sampled yet. Round 0 samples them before Round 2 is written.
 
+**Status, 2026-11-01: sampled.** On app B the `where`, `pluck`, `blank?` and `present?` bindings were wrong 20 of 20; on
+app A the `where`, `blank?` and `now` ones 18 of 20. Round 2 acts on them.
+
 ## 3. Rules every round follows
 
 1. **The gate is written first and shown red on `main`.** A wrong answer the round does not fix gets a known-gap arm
@@ -145,6 +148,19 @@ subclass; an `it`, `before` or `let` block runs on an instance of it. That insta
 class; R1 measures whether #373's class lookup already answers it.
 
 ### R2: framework methods on untyped receivers (M)
+
+**Status, 2026-11-02: done on `feat/ruby-rails-lookup`** (no parser bump: the gate reads the tree at
+graph time; gate `test/rubyframeworknamescheck.sh`, `changelog.d/ruby-framework-names.md`). Two tables generated from the
+Rails 8.1.4 gems by one recorded command, in `src/externalnames.h`: ActiveSupport's `Object` extensions and `TimeZone`
+(47 names) and ActiveRecord's record, relation and model-class methods (893). The evidence is the tree's, not a
+`Gemfile.lock`: a constant written under a Rails namespace, with the framework's home constant never opened, so the Rails
+gems keep their maps. Measured against R1 with `--pin-census`: app B lost 6,153 bound sites (6,087 declined, 66 external),
+app A 3,005 (2,943 and 62), ActiveRecord's `lib/` 214 (192 and 22, all ActiveSupport names its own code uses);
+ActiveSupport's census is identical. Sampled: the removed edges were wrong 20 of 20 on B and 19 of 20 on A, among generic
+names 15 of 15 and 14 of 15, the new externals 12 of 12, ActiveRecord's 15 of 15. Measuring found one rule the first cut
+lacked, now an arm: a name only a framework table holds never narrows a split to the file's own class (`column.name` had
+bound `Migration#name`, 4 of 5 sampled on ActiveRecord). The stated cost: an object whose class the file never names loses
+its edge until R4 types it (the two true edges among the 70 sampled were such).
 
 **Ruby's rule.** An untyped receiver can be any object, so a call to `where` on it reaches the in-tree `where` only
 if the receiver is an instance of that class. When the name is also a method Ruby or Rails defines on the classes the

@@ -645,11 +645,12 @@ inline const char* capLegendClause( bool active ) noexcept
 // double hyphen anywhere, because it lands inside an XML comment.
 inline constexpr const char* kDeclinedCallsLegend =
     "declined_calls=K (absent when 0) counts call SITES the resolver declined to bind: the called name has two or more same-language definitions, none in the caller's file or directory, and no qualifier, receiver type or include chose one (tier 3); a name gate or Ruby's side/new rule may decline one (the callers and callees <dc> rows say which, gate=; a declined new carries none). No edge exists and no count or row here includes them (the map header's declined=). Callers form: declined calls that could have meant this selector's definitions; impact form: that could have reached SYM or a symbol in its radius; callees form: declined calls these definitions make. Each call counts once however many candidates it had; the uses verb on the called name lists the sites. ";
-// The builtin-method name gate's declines (graph.h BuiltinMethodGate) ride the same count with ONE definition possible;
-// this clause is charged only where the gate declined at least one call in the graph (Graph::gateDeclinedCalls), so an
-// answer on a tree the gate never touched keeps its bytes.
+// The builtin-method name gate's declines (graph.h BuiltinMethodGate, its builtin and framework rows) ride the same count with ONE
+// definition possible; this clause is charged only where the gate declined at least one call in the graph (Graph::gateDeclinedCalls), so an
+// answer on a tree the gate never touched keeps its bytes. The framework words ride a tree with no framework too (one count, one
+// flag): 185 B, written short for testgatelegendbudgetcheck's 3930 B target, which this repo's own --test-gate legend carries.
 inline constexpr const char* kDeclinedCallsGateClause =
-    "It also counts a call named like a builtin-type method (dict.get, list.append) whose bound definitions' classes the caller's file never names. ";
+    "It also counts a call named like a method of a builtin type or a used framework (dict.get, list.append, Rails rel.where) whose bound definitions' classes the caller's file never names. ";
 // The standard-member gate's declines (graph.h StdMemberGate, one name row per language) ride the same count, with ONE definition possible and in
 // the caller's own file or directory too; charged only where that gate declined at least one call in the graph
 // (Graph::stdMemberDeclinedCalls), so a tree it never touched keeps its bytes. What it does NOT mean is in the same breath.
@@ -708,7 +709,7 @@ inline constexpr const char* kDeclinedSitesCallersForm =
 inline constexpr const char* kDeclinedSitesSideClause =
     "gate=side: a Ruby call whose in-reach definitions answer on the other side of self. ";
 inline constexpr const char* kDeclinedSitesNameGateClause =
-    "gate=builtin|std: declined by the builtin-method or the standard-member name gate (per-language name lists, C++ and Rust). ";
+    "gate=builtin|std: declined by the builtin-method name gate (a used framework's method names too, Rails) or the standard-member name gate (per-language name lists, C++ and Rust). ";
 // lane L6 (ifacedispatch.h): the interface-typed dispatch rows, and a generic receiver's bound
 inline constexpr const char* kDeclinedSitesIfaceClause =
     "gate=\"iface\": the receiver's recorded type is an interface, trait or abstract class, and cands=K counts the methods of the called name its implementors in this tree own (and its own default): K implementors of the receiver's interface; which one runs is unproven. K is a floor where a type conforms with no implements clause (a TypeScript object literal or matching class is not counted). Never a by-name list. ";

@@ -24,3 +24,4 @@ perlang	ingest_clojure.h
 perlang	ingest_jsimports.h
 perlang	ingest_ruby.h
 perlang	ruby_groupself.h
+perlang	ruby_frameworks.h

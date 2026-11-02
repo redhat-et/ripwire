@@ -2509,7 +2509,7 @@ inline constexpr const char* kDeclinedMapLegend =
 // The builtin-method name gate's declines (graph.h BuiltinMethodGate) ride the same declined= count; this clause is charged
 // only to a map where the gate declined at least one call, so a map the gate never touched keeps its bytes.
 inline constexpr const char* kDeclinedGateMapLegend =
-    "<!-- hdr:declined=also-counts-builtin-type-method-calls(dict.get,list.append)whose-bound-targets-classes-the-callers-file-never-names -->";
+    "<!-- hdr:declined=also-counts-builtin-or-framework-method-calls(dict.get,list.append,rel.where)whose-bound-targets-classes-the-callers-file-never-names -->";
 // The standard-member gate's declines (graph.h StdMemberGate) ride the same declined= count; charged only to a map where
 // that gate declined at least one call, so a map it never touched keeps its bytes. No '>' and no double hyphen inside.
 // The Rust floor is the clause's own "on-a-receiver-no-rule-tied-to-an-in-tree-class" (a Rust receiver no rule typed is one);

@@ -263,7 +263,7 @@ HDR="$( stats "$TMP/map.xml" )"
 # the tree defines no initialize for, which runs BasicObject's — outside the tree
 [ "$( gauge "$HDR" external )" = 3 ] && ok "(I) header external=3: raw.decode(\"utf-8\") can reach no in-repo definition (the only one is a closure); RbPool.new and LinkedList.new reach no in-tree initialize" \
     || no "(I) header external= should be 3: ${HDR:-no stats comment}"
-legend_of "$TMP/map.xml" | grep -q 'hdr:declined=also-counts-builtin-type-method-calls' \
+legend_of "$TMP/map.xml" | grep -q 'hdr:declined=also-counts-builtin-or-framework-method-calls' \
     && ok "(I) the full map legend defines hdr:declined= including the builtin-name clause" \
     || no "(I) the full map legend does not name the builtin-name decline under hdr:declined="
 DISP="$( grep -m1 '^# dispositions ' "$TMP/c.tsv" )"

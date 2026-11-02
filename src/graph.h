@@ -6,6 +6,7 @@
 #include "model.h"
 #include "elixir_resolve.h"      // lexical module/name/arity resolution; reuses cached Binding records
 #include "ruby_groupself.h"      // an RSpec example group's self: its blocks and the modules it mixes in (RubyTopSelf reads it)
+#include "ruby_frameworks.h"     // the Rails rows of the builtin-method gate: which framework tables a tree joins
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
 #include "nextverb.h"            // cut-fix E: nextFlag / nextAttrXml — the import tier's importers_next=
@@ -3108,6 +3109,18 @@ inline JsImportTables buildJsImportTables( const IngestResult& ing, const WsIncl
 //       Ruby — a bare call is an implicit-self send and reaches a top-level def: Admit. A call with an explicit
 //         receiver cannot reach one (top-level defs are private methods of Object): Impossible.
 //
+// FRAMEWORK ROWS (test/rubyframeworknamescheck.sh; ruby_frameworks.h). A framework that gives every object, record or
+// relation its methods is a builtin type's twin in a tree that uses it: `scope.where( … )`, `rows.pluck( :id )`,
+// `params[ :q ].present?` and `Time.zone.now` on a receiver no rule typed bound the ONE application method of the name — a
+// test double's `where`, a value class's `present?` — 20 of 20 sampled sites wrong on one Rails application, 18 of 20 on
+// another. Such a framework's table (externalnames.h kRubyActiveSupportMethodNames, kRubyActiveRecordMethodNames) joins
+// the language's builtin table in frameworkTables when the tree writes a constant under one of the framework's
+// namespaces and does not open its home constant (so the Rails gems' own trees keep their maps), and appliesTo reads
+// both; judge() is unchanged, and a split with an evidenced arm stays whole (FE-B's name-only narrowing is the builtin
+// table's alone: builtinNamed). Floor (4) below is the price, and it is wider here: 893 ActiveRecord names include ones an
+// application defines on its own classes (`update`, `save`, `name`), and a call on an object whose class the file never
+// names loses that edge to declined_calls= until a receiver rule types it.
+//
 // STATED FLOORS, each measured or probed:
 //   (1) the evidence is a class NAME, as CHA-lite's is: two same-named classes share it;
 //   (2) the grain is the FILE: a builtin call in a file that also works with the in-repo class keeps its edge (the
@@ -3289,6 +3302,9 @@ struct BuiltinMethodGate
     bool                                           active = false;
     mutable std::uint32_t                          textFileId = 0xFFFFFFFFu;   // namedBeyondDefinition's one-file byte cache
     mutable std::optional<std::string>             text;
+    // per language: the framework tables that join its builtin table in THIS tree (FRAMEWORK ROWS above; Ruby's are
+    // ruby_frameworks.h rubyFrameworkTablesInUse), each strictly sorted
+    std::array<std::vector<std::span<const std::string_view>>, kLangCount> frameworkTables {};
 
     static bool isClassLike( const Symbol& s ) noexcept
     {
@@ -3315,6 +3331,16 @@ struct BuiltinMethodGate
         {
             return false;
         }
+        EXPECTS( std::size_t( r.lang ) < kLangCount, "a reference's language is a Lang enumerator" );
+        const auto inTable = [ name = std::string_view( r.calleeName ) ]( std::span<const std::string_view> table )   // strictly sorted:
+        { return std::binary_search( table.begin(), table.end(), name, rw::sortutil::svLess ); };                       // the static_asserts
+        return builtinNamed( r ) || std::ranges::any_of( frameworkTables[ std::size_t( r.lang ) ], inTable );
+    }
+
+    // Is the call's name in its language's OWN builtin table? A name only a framework row holds asks the same evidence but
+    // never narrows a name-only split (buildGraph's FE-B block reads this alone).
+    bool builtinNamed( const Reference& r ) const
+    {
         const std::span<const std::string_view> table = tableFor( r.lang );   // strictly sorted: externalnames.h's static_asserts
         return std::binary_search( table.begin(), table.end(), std::string_view( r.calleeName ), rw::sortutil::svLess );
     }
@@ -5654,7 +5680,8 @@ inline std::vector<RubyMainMixinRow> rubyMainObjectMixins( const IngestResult& i
 }
 
 inline BuiltinMethodGate buildBuiltinMethodGate( const IngestResult& ing, const ExternalVeto& veto, const ExternalVetoTables& vetoTables,
-                                                 const std::vector<std::vector<std::uint32_t>>& directIncludes, const JsImportTables& jsImports )
+                                                 const std::vector<std::vector<std::uint32_t>>& directIncludes, const JsImportTables& jsImports,
+                                                 const HashMap<std::string, char>& rubyOpened )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2j: builtin-method name gate" );
     BuiltinMethodGate gate{ ing, veto, vetoTables, directIncludes, jsImports, {}, {}, {}, {}, {}, {}, {}, {}, {}, false };
@@ -5671,6 +5698,7 @@ inline BuiltinMethodGate buildBuiltinMethodGate( const IngestResult& ing, const 
     {
         return gate;
     }
+    gate.frameworkTables[ std::size_t( Lang::Ruby ) ] = rubyFrameworkTablesInUse( ing, rubyOpened );
     for( const Symbol& s : ing.symbols )
     {
         if( BuiltinMethodGate::isClassLike( s ) && gate.classId.try_emplace( s.name, std::uint32_t( gate.className.size() ) ).second )
@@ -8752,10 +8780,6 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // census row with no target.
     const ExternalVeto externalVeto{ ing, canonByName, fieldNarrow.localNameSet, extVeto };
     const PythonRenamedImports pyRenamedImports = buildPythonRenamedImports( ing );   // PY-IMPORT-ALIAS-CALL (pythonRenamedImportPin)
-    // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
-    // method of the caller language's builtin map/list/set/string type. Inert (active=false) on a corpus with no
-    // symbol in a gated language.
-    const BuiltinMethodGate builtinGate = buildBuiltinMethodGate( ing, externalVeto, extVeto, includeAdj, jsImports );
     const FalseEdgeRules    falseEdges  = buildFalseEdgeRules( ing, classNames, externalVeto, extVeto, includeAdj );   // FE-A (test/falseedgecheck.sh)
     rw::SmallVec<NodeId, 2> feKept;                                                                        // its narrowed candidates, reused
     std::vector<NodeId>     gateRefused;   // reused: a gated call's targets refused for want of evidence (the list a decline records)
@@ -8847,6 +8871,11 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // cannot reach an unrelated in-tree `Base` — and by the implementor pass below. Empty on a Ruby-free corpus.
     const RubyBaseScope rubyBases = buildRubyBaseScope( ing );
     g.rubyBasesUnscoped = rubyBases.disclosure.unscoped;   // ruby_bases_unscoped= (absent at zero)
+    // The builtin-method name gate (BuiltinMethodGate above): decides, in Rule 3's place, the calls whose name is a
+    // method of the caller language's builtin map/list/set/string type, or of a framework the tree uses (the Rails rows
+    // read the constants the tree opens, so it is built here, after them). Inert (active=false) on a corpus with no
+    // symbol in a gated language.
+    const BuiltinMethodGate builtinGate = buildBuiltinMethodGate( ing, externalVeto, extVeto, includeAdj, jsImports, rubyBases.opened );
     {
         const auto isClassLikeK = []( SymKind k ) noexcept
         { return k == SymKind::Class || isStructOrNamedType( k ) || k == SymKind::Interface; };
@@ -11324,11 +11353,14 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                     gateRefused.push_back( c );
                 }
             }
-            if( anyReal && anyAdmitted && nameOnly )
+            if( anyReal && anyAdmitted && nameOnly && builtinGate.builtinNamed( r ) )
             {
                 // FE-B: a name-only call's tier is WIDER than the ladder's pick (every same-file and same-directory candidate),
                 // so "the decision stands" would hand a builtin-named call every class's method in reach. A CLASS-owned
                 // target still needs the gate's evidence; a module or object-literal member (no class to look for) stays.
+                // Not for a name only a framework row holds (FRAMEWORK ROWS): its evidenced arm is as often the file's own
+                // class beside a receiver of the framework's type (`column.name` in a file naming Migration bound
+                // Migration#name, 4 of 5 sampled on ActiveRecord's own tree), so that split stays a split, as floor (3) keeps one.
                 std::erase_if( tier, [ & ]( NodeId c )
                 {
                     if( c == r.fromSymbol )
