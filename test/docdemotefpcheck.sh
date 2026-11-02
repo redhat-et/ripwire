@@ -277,7 +277,9 @@ hdr "$FENCE" | grep -q ' generated_demoted=7 generated_demoted_named=5 ' \
     && ok "fence corpus header: generated_demoted=7, 5 named" || no "fence corpus header: $( hdr "$FENCE" | head -c 300 )"
 
 # 10) a budget cut never hands back an open fence of the other kinds: a ````-fence holding ```js, and a ~~~
-#     fence. The protected-range pass shares the scanner, so the cut moves before the fence. RED on 66683e5f:
+#     fence. The protected-range pass shares the scanner, so the cut moves before the fence instead of leaning
+#     on the fence_closed repair (a protected-range pass that ignored the scanner would still end balanced,
+#     via the repair, and is caught by the no-repair check). RED on 66683e5f:
 #     the ```` body ends inside its fence (the inner ```js "closed" it), the ~~~ body was cut mid-fence.
 R4="$TMP/cut"; mkdir -p "$R4"
 python3 - "$R4" <<'PY' || no "cut fixture generator failed"
@@ -297,8 +299,8 @@ open_fence_at_end(){ awk '/^━━ /{body=1; next} body{ s=$0; sub(/^[ \t]+/, ""
 for q in zqcut:quad.md zqtil:tilde.md; do
     CUT="$( perl -e 'alarm 60; exec @ARGV' "$BIN" "$R4" --no-cache --recall="${q%%:*}" --max-tokens=600 --top-k=1 2>/dev/null )"; crc=$?
     { [ "$crc" -eq 0 ] && grep -F '━━' <<<"$CUT" | grep -qF " ${q#*:} " && grep -qF 'truncated' <<<"$CUT" \
-      && [ "$( printf '%s\n' "$CUT" | open_fence_at_end )" = 0 ]; } \
-        && ok "${q#*:} cut under --max-tokens=600 is printed, truncated, and ends with every fence closed" \
+      && ! grep -qF 'fence_closed' <<<"$CUT" && [ "$( printf '%s\n' "$CUT" | open_fence_at_end )" = 0 ]; } \
+        && ok "${q#*:} cut under --max-tokens=600 is printed, truncated, lands outside the fence (no fence_closed repair) and ends with every fence closed" \
         || no "${q#*:} cut (rc=$crc): open fence at end or not printed: $( printf '%s' "$CUT" | tail -4 | head -c 300 )"
 done
 
