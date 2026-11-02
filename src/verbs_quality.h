@@ -6,6 +6,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 #include "epmanifest.h"       // D1: collectManifestsAbove — the entry-point targets a setup.cfg / pyproject.toml names (unindexed by the crawl)
+#include "forunused.h"        // forUnusedOn: --dead-code=PATH names the table only when the table is on
 #include "infra/sortutil.h"   // svLess: the explicit byte order the test-only name vetting sorts by (portablebuildcheck #6)
 
 // verbs_quality.h — the quality family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -3135,7 +3136,8 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "parameter, a TypeScript literal, a Rust lifetime), is not linkage evidence. "
                      "Graph evidence is local to the indexed tree; verify before deleting. {}{}-->",
                      // Reference-as-value round: beside its hyphenated siblings above, exactly when the root carries it.
-                     ( std::string( testOnly.empty() ? "" : "test-only=N (absent when 0): library functions whose every indexed caller "
+                     ( std::string( rw::forUnusedOn() && cfg.deadCodeDir.find_first_of( "./" ) != std::string_view::npos ? "next= the for-verb table of this path's public defs, which this verb does not judge. " : "" )
+                       + std::string( testOnly.empty() ? "" : "test-only=N (absent when 0): library functions whose every indexed caller "
                                                            "is test code (a test path, or an in-file test scope), listed as <to n= t= p= l=> rows "
                                                            "after the d rows on the first page; not dead and not in count=, the index holds no "
                                                            "library caller. Internal evidence as for d rows, or a Python leading-underscore name or "
@@ -3167,6 +3169,11 @@ std::optional<int> runQualityViews( const MainDispatch& d )
         {
             std::vector<char> dcFiltEsc;
             dcFilterAttr = " filter=\"" + std::string( escapeXml( cfg.deadCodeDir, dcFiltEsc ) ) + "\"";
+            // UNUSED-IN-FILE (forunused.h): this verb answers for internal linkage; a filter that names a path is often asking about public defs, so it names the verb that does
+            if( rw::forUnusedOn() && cfg.deadCodeDir.find_first_of( "./" ) != std::string_view::npos )
+            {
+                dcFilterAttr += " next=\"" + std::string( escapeXml( rw::nextFlag( "--for=", std::string( "unused functions in " ) + std::string( cfg.deadCodeDir ) ), dcFiltEsc ) ) + "\"";
+            }
         }
         // 0.6.6 D4: runner-root-excluded= is absent at 0, so a tree with no Python test/decorated root is byte-identical
         const std::string runnerRootAttr = ( runnerRootExcluded == 0 ? std::string() : std::format( " runner-root-excluded=\"{}\"", runnerRootExcluded ) )
