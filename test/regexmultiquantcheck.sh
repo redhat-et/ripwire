@@ -340,5 +340,42 @@ safeCase "\d+\s*?\w+ (lazy quantifiers, disjoint sets, all mixes)" '\d+\s*?\w+'
 safeCase "((a*?)b*)c (one lazy atom inside a nested group, ONE unbounded atom per scope)" '((a*?)b*)c'
 safeCase "a{1,4}?b{1,4}? (lazy BOUNDED intervals — bounded atoms are never participants)" 'a{1,4}?b{1,4}?'
 
+# ── (9) THE #484 REVIEW ROUND 2: PROPORTIONALITY — the pair/three threshold, and the optionals ───────────────
+# The maintainer's measured round (issuecomment-6566480333): every number in it reproduced on this lane's
+# binaries before any change. Two FALSE-POSITIVE classes, one per clause, both now closed with the review's
+# own thresholds:
+#   • CLAUSE 1 refused ANY adjacent intersecting pair. In a 900-regex agent sample 9 (1%) were cross-set
+#     pairs (`import\s+.*from`, `TODO:\s*.*`, `ERROR.*\d+`, `\w+.*`, `=\s*[^;]+;`, `^#+.*`) that cost a
+#     constant factor on ordinary lines (measured: sub-millisecond) — the family's real exponent lives in
+#     SAME-SET pairs (`a*a*`, per-byte split) and in runs of 3+ intersecting atoms (degree (atoms-1)).
+#     The rule now fires on: same-set PAIR, or any 3-run. All six sample patterns re-admitted, below.
+#   • CLAUSE 2 counted `?` as a nesting repeat. `(https?://(www\.|www2\.)?)?example`, the access-modifier
+#     prefix `(((public|private)\s+)?static\s+)?void` and — the proof the workaround was dead —
+#     `((www|www2)?\.){1,5}example` all refused as exponential, all measured sub-0.1 ms. The optionals
+#     (`?`, `{0,1}`) repeat nothing, so they no longer count as the first of the two repeats clause 2 needs.
+#   • UNQUANTIFIED groups are now TRANSPARENT to the clause-1 walk (the review's item 3):
+#     `(a*)(a*)(a*)(a*)(a*)b` is `a*a*a*a*a*b` in punctuation — same bomb, admitted before, REFUSED now.
+#   • the class walk no longer reads INSIDE a class it cannot parse (item 4): `[[:alpha:]*.*.*]`'s inner
+#     `*.*` was judged as an adjacency pair when it is a class MEMBER — the class is one atom, opaque.
+# The three section-3 shapes keep their refusals: `a*b*c*` is admitted today (disjoint sets), and its
+# comment in the source (which claimed the opposite) is fixed with this round.
+shapeCase "group-list (a*)(a*)(a*)(a*)(a*)b (transparent unquantified groups, review item 3)" '(a*)(a*)(a*)(a*)(a*)b' "$FIX/i"
+safeCase "import\s+.*from (cross-set intersecting PAIR — constant factor, review blocker 1)" 'import\s+.*from'
+safeCase "TODO:\s*.* (cross-set pair, single second atom)" 'TODO:\s*.*'
+safeCase "ERROR.*\d+ (cross-set pair, escape-vs-any)" 'ERROR.*\d+'
+safeCase "\w+.* (the review's own listed pair)" '\w+.*'
+safeCase "=\s*[^;]+; (class-vs-any intersecting pair)" '=\s*[^;]+;'
+safeCase "^#+.* (anchored cross-set pair)" '^#+.*'
+safeCase "a*b*c* (DISJOINT chain — forced split at the literals, admitted through both rounds)" 'a*b*c*'
+safeCase "(https?://(www\.|www2\.)?)?example (optionals under optionals, review blocker 2)" '(https?://(www\.|www2\.)?)?example'
+safeCase "(((public|private)\s+)?static\s+)?void (optional access-modifier prefix)" '(((public|private)\s+)?static\s+)?void'
+safeCase "((www|www2)?\.){1,5}example (bounded outer over an OPTIONAL inner — the workaround that used to refuse)" '((www|www2)?\.){1,5}example'
+safeCase "[[:alpha:]*.*.*] (unreadable class internals are never walked, review item 4)" '[[:alpha:]*.*.*]'
+# and the NEW REFUSALS the review's own wording demands: a same-set pair and a 3-run must still refuse —
+# these two are the relax-back guards, stopping a future "simplification" that re-tightens to any-pair
+# (over-refusing) or loosens past the same-set threshold (under-refusing).
+shapeCase "same-set pair a*a*?b (the relax-back guard: identical sets refuse at TWO)" 'a*a*?b' "$FIX/i" '--no-prefilter'
+shapeCase "3-run \w+.*\w+.*\w+ (cross-set run at THREE: degree-2, refused)" '\w+.*\w+.*\w+' "$FIX/clean" '--no-prefilter'
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

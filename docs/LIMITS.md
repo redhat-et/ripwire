@@ -21,12 +21,20 @@ never throws; libc++ returns only because its ENGINE throws `error_complexity`. 
 multi-quantifier shapes it used to admit — `a*a*a*a*a*b` (adjacent unbounded quantifiers whose atoms are not
 proven disjoint, flat or grouped as `^(a)*(a)*(a)*(a)*(a)*$`) and `^(ab\w|((.|.){1,3}){1,3}){1,3}$` (an
 unprovable alternation repeated within a repeat) — by name and before any engine sees the pattern, which is
-`regex-screen-multiquantifier`'s closure (`test/regexmultiquantcheck.sh`). **What remains open is the general
+`regex-screen-multiquantifier`'s closure (`test/regexmultiquantcheck.sh`). The #484 review then made the
+refusal proportional: a cross-set intersecting PAIR is a constant factor and is admitted (`\s+.*`,
+`\w+.*` — measured sub-millisecond on ordinary source lines; the message names the drop-one-quantifier
+rewrite), while a same-set pair and any 3-run of intersecting atoms still refuse; optionals (`?`, `{0,1}`)
+do not count as repeats; and an unquantified group is transparent (`(a*)(a*)(a*)(a*)(a*)b` refuses).
+**What remains open is the general
 case**, and it is still reachable: any ADMITTED pattern whose cost in the subject is super-linear. The family is
 not provable shape-by-shape — `(a|aa){1,100}b$` is admitted (a bounded outer over a branch that repeats itself
 only through the outer quantifier, so no clause fires), yet it is exponential on libstdc++: measured 7.8 ms at a
-21-byte subject, 517 ms at 29 B, 13.8 s at 37 B, 99.1 s at 41 B (roughly 7x per 4 bytes). On libc++ the same
-pattern throws `error_complexity` from an 18-byte subject up, which is the engine giving up, not a bound
+21-byte subject, 517 ms at 29 B, 13.8 s at 37 B, 99.1 s at 41 B (roughly 7x per 4 bytes). Two sibling vehicles
+the #484 review measured and named for this paragraph: `(a*){20}b`, a bounded repeat of a group whose body is
+one unbounded atom (over 6 s at an 80-byte subject on libstdc++), and `.*x.*x.*x.*x.*y`, four disjoint `.*`
+separated by literals the run rule resets on (the same subject-growth class as `(a?)+`'s elders). On libc++ the same
+patterns throw `error_complexity` from an 18-byte subject up, which is the engine giving up, not a bound
 holding. That is the class this paragraph keeps open; it is named here rather than left to be discovered. (The
 guard's former per-file match budget — `kRegexFileMatchBudget`, removed in the PR #397 review — cannot be
 revived against this residual: it counted line-match attempts BETWEEN engine calls, so it refused fast linear
