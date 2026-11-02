@@ -683,6 +683,7 @@ struct GitCommandLines
     bool                     isStarted = false;
     int                      status    = 0;
     bool                     abandoned = false;   // the read stopped early (abandonGitWalks): lines is a prefix, never an answer
+    bool                     timedOut  = false;   // gitCommandLinesBy only: the read outlived its deadline; lines is empty, never an answer
 };
 
 // A git walk this run no longer needs: --for / --metrics / --exemplar start the 18-month history walk beside the ingest
@@ -796,12 +797,14 @@ struct GitLogRecord
 // blobless one pay the same. 20 s is twice the slowest whole history that finished in reasonable time and is what an agent
 // tolerates on top of an ingest; the walk runs beside the ingest, so on any big repo most of it is hidden anyway. 200 K commits
 // never trips before the clock on a repo like ClickHouse; it bounds memory on a repo fast enough to beat the clock.
-// RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS move them (0 = no limit), for a user willing to wait.
+// RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS move them (0 = no limit, at most 1e9: a larger or malformed value keeps the default), for a user willing to wait.
 // A cut walk is a prefix, newest first, and is DISCLOSED: amp=/churn= by history_unread (historyread.h), every other walk by
 // gitWalkCutsToDisclose, which main() prints once after the answer.
 enum class GitWalkCut : std::uint8_t { None, Commits, Time };
 inline constexpr std::uint64_t kGitWalkMaxCommits = 200'000;
 inline constexpr std::uint64_t kGitWalkMaxSeconds = 20;
+
+inline constexpr std::uint64_t kGitWalkBudgetCeiling = 1'000'000'000;   // far above any real budget; keeps now() + seconds and maxCommits + 1 in range
 
 inline std::uint64_t gitWalkBudgetValue( const char* envName, std::uint64_t fallback ) noexcept
 {
@@ -812,7 +815,13 @@ inline std::uint64_t gitWalkBudgetValue( const char* envName, std::uint64_t fall
     }
     char*               end   = nullptr;
     const std::uint64_t value = std::strtoull( raw, &end, 10 );
-    return *end == '\0' && *raw != '-' ? value : fallback;   // external input: anything but a plain number keeps the default
+    // external input: anything but a plain number up to the ceiling keeps the default (a huge one overflowed the deadline, and
+    // UINT64_MAX + 1 wrapped the commit cap to `git log -n 0`, an empty history read as a clean one)
+    if( !VALIDATE( *end == '\0' && *raw != '-' && value <= kGitWalkBudgetCeiling, "RIPWIRE_GIT_WALK_* is a plain number no larger than 1e9 (0 = no limit)" ) )
+    {
+        return fallback;
+    }
+    return value;
 }
 inline std::uint64_t gitWalkMaxCommits() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_COMMITS", kGitWalkMaxCommits ); }
 inline std::uint64_t gitWalkMaxSeconds() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_SECONDS", kGitWalkMaxSeconds ); }
@@ -826,14 +835,10 @@ inline std::chrono::steady_clock::time_point gitWalkDeadline() noexcept
 // what to say, holds the caller for as long as it likes. This reads the descriptor with poll (os::pipeReadSome) and, at the deadline,
 // drops what it has: `timedOut`, and `lines` is a PREFIX no caller may serve as an answer. pclose goes to a thread of its own then, for
 // the reason finishGitLogWalk gives; git is not killed (popen holds no pid), it ends at its next write or when ripwire exits.
-struct GitTimedLines : GitCommandLines
+inline GitCommandLines gitCommandLinesBy( const std::string& cmd, std::chrono::steady_clock::time_point deadline )
 {
-    bool timedOut = false;
-};
-inline GitTimedLines gitCommandLinesBy( const std::string& cmd, std::chrono::steady_clock::time_point deadline )
-{
-    GitTimedLines out;
-    std::FILE*    pipe = os::popen( cmd.c_str(), "r" );
+    GitCommandLines out;
+    std::FILE*      pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
     {
         return out;
@@ -948,7 +953,7 @@ inline bool gitIsPartialClone( const std::string& root )
 // objects listed, 5 absent, 4 s). A caller that would run `git archive <rev>` asks first on a partial clone.
 inline long gitAbsentBlobCount( const std::string& root, const std::string& rev )
 {
-    const GitTimedLines listed = gitCommandLinesBy( gitCmd( " -C " ) + shSingleQuote( root ) + " rev-list --objects --no-walk --missing=print "
+    const GitCommandLines listed = gitCommandLinesBy( gitCmd( " -C " ) + shSingleQuote( root ) + " rev-list --objects --no-walk --missing=print "
                                                     + shSingleQuote( rev ) + " -- 2>/dev/null", std::chrono::steady_clock::now() + std::chrono::seconds( 60 ) );
     if( !listed.isStarted || listed.timedOut || listed.abandoned || listed.status != 0 )
     {
@@ -1001,10 +1006,12 @@ inline std::string gitWalkCutSentence( std::uint32_t walks, std::uint64_t commit
 
 // A refusal that would say "git unavailable / no history" when the history walk was ended by its budget before it read one commit
 // names that instead: git ran, there IS history, the clock or the commit cap stopped the read. "" when no walk was cut.
-inline std::string gitWalkCutRefusalCause()
+// `since` scopes it to one unit of work: an MCP server lives for many requests, and a walk an earlier request cut is not the cause of this
+// one's empty answer. The default (the whole process) is the CLI's, which answers one verb.
+inline std::string gitWalkCutRefusalCause( const GitWalkCutMark& since = {} )
 {
     const GitWalkCutMark mark = gitWalkCutMark();
-    if( mark.walks == 0 )
+    if( mark.walks <= since.walks )
     {
         return {};
     }

@@ -158,7 +158,9 @@ SHIML="$TMP/shim-log"; mkdir -p "$SHIML"
 cat > "$SHIML/git" <<SH
 #!/bin/sh
 printf '%s\\n' "\$*" >> "\$F1LOG"
-case " \$* " in *" --numstat "*) [ -n "\${NUMSTAT_SLEEP:-}" ] && sleep "\$NUMSTAT_SLEEP" ;; esac
+case " \$* " in *" --numstat "*) [ -n "\${NUMSTAT_SLEEP:-}" ] && sleep "\$NUMSTAT_SLEEP"
+                                  [ -n "\${NUMSTAT_FAIL:-}" ] && { printf '1\\t1\\tphantom_row.c\\n'; exit 3; } ;; esac
+case " \$* " in *" diff "*" --name-only "*) [ -n "\${NAMEONLY_SLEEP:-}" ] && sleep "\$NAMEONLY_SLEEP" ;; esac
 exec "$REALGIT" "\$@"
 SH
 chmod +x "$SHIML/git"
@@ -178,11 +180,22 @@ check "(F1c) ... the history probe says why it did not run: probed=\"0\" r=\"par
 check "(F1d) ... --quality-delta=REF with absent blobs still refuses, naming the partial clone (rc=$rc)" '[ "$rc" != 0 ] && grep -q "partial clone" "$TMP/err"'
 : > "$F1LOG"; ( cd "$FULL" && PATH="$SHIML:$PATH" "$BIN" "$FULL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" )
 check "(F1e) control: the full clone does run git diff --numstat ($(blobreaders) blob-reading gits)" '[ "$(blobreaders)" -gt 0 ]'
-# the stalled case: a git that sits in --numstat for 15 s, budget 1 s. Today: two serial numstats, wall 39 s, rc 0, no cut said.
+# the stalled case: a git that sits in --numstat for 90 s, budget 3 s (a loaded machine needs the headroom: an ingest alone can take 20 s, and the fallback is two more gits). Today: two serial numstats, wall 39 s, rc 0, no cut said.
 : > "$F1LOG"; t0=$(date +%s)
-( cd "$FULL" && PATH="$SHIML:$PATH" NUMSTAT_SLEEP=15 RIPWIRE_GIT_WALK_SECONDS=1 perl -e 'alarm 60; exec @ARGV' "$BIN" "$FULL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" ); rc=$?
+( cd "$FULL" && PATH="$SHIML:$PATH" NUMSTAT_SLEEP=90 RIPWIRE_GIT_WALK_SECONDS=3 perl -e 'alarm 100; exec @ARGV' "$BIN" "$FULL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" ); rc=$?
 secs=$(( $(date +%s) - t0 ))
-check "(F1f) a git stalled in --numstat ends at the budget, not after it (rc=$rc ${secs}s), is said, and the files are listed" '[ "$rc" = 0 ] && [ "$secs" -lt 12 ] && grep -q "did not finish within the 1 s git budget" "$TMP/err" && grep -q "<pr-context [^>]*files=\"[1-9]" "$TMP/out"'
+check "(F1f) a git stalled in --numstat ends at the budget, not after it (rc=$rc ${secs}s), is said, and the files are listed" '[ "$rc" = 0 ] && [ "$secs" -lt 60 ] && grep -q "did not finish within the 3 s git budget" "$TMP/err" && grep -q "<pr-context [^>]*files=\"[1-9]" "$TMP/out"'
+
+# (F1g) CodeRabbit on #498, prcontext.h:235: the fallback list is read under the budget too. A git stalled in --numstat AND in --name-only (the
+# promisor-pack scan of a big clone stalls both) ended after the fallback had run its whole stall. Now: one budget each, a refusal that says why.
+: > "$F1LOG"; t0=$(date +%s)
+( cd "$FULL" && PATH="$SHIML:$PATH" NUMSTAT_SLEEP=90 NAMEONLY_SLEEP=90 RIPWIRE_GIT_WALK_SECONDS=3 perl -e 'alarm 100; exec @ARGV' "$BIN" "$FULL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" ); rc=$?
+secs=$(( $(date +%s) - t0 ))
+check "(F1g) a git stalled in --numstat and in --name-only ends within both budgets (rc=$rc ${secs}s), says so, and serves no list" ' [ "$secs" -lt 60 ] && grep -q "git diff --name-only did not finish within the 3 s git budget" "$TMP/err" && ! grep -q "files=\"[1-9]" "$TMP/out"'
+# (F1h) CodeRabbit on #498, prcontext.h:286: a numstat that printed a row and then failed is a prefix, not a list; the tree-level list stands in
+: > "$F1LOG"
+( cd "$FULL" && PATH="$SHIML:$PATH" NUMSTAT_FAIL=1 "$BIN" "$FULL" --no-cache --pr-context=HEAD~3 >"$TMP/out" 2>"$TMP/err" ); rc=$?
+check "(F1h) a git diff --numstat that fails after a row keeps no row: the list is the tree-level one (rc=$rc)" '[ "$rc" = 0 ] && ! grep -q phantom_row "$TMP/out" && grep -q "<pr-context [^>]*files=\"[1-9]" "$TMP/out"'
 
 # ── (B) the commit budget, on a long history ──
 LONG="$TMP/long"; git init -q -b main "$LONG"
@@ -213,6 +226,14 @@ RIPWIRE_GIT_WALK_COMMITS=0 RIPWIRE_GIT_WALK_SECONDS=0 rw --no-cache --for="calle
 check "(B5) a budget exactly the history's size is silent, and byte-identical to no budget" '! grep -q "history_" "$TMP/at" && cmp -s "$TMP/at" "$TMP/none"'
 RIPWIRE_GIT_WALK_COMMITS=abc RIPWIRE_GIT_WALK_SECONDS=-1 rw --no-cache --for="caller f1" 2>/dev/null | sed 's/ at="[^"]*"//; s/est_tokens="[^"]*"//' >"$TMP/badenv"
 check "(B6) a malformed budget keeps the default" 'cmp -s "$TMP/badenv" "$TMP/none"'
+# (B7) CodeRabbit on #498, gitmine.h:823: a budget past the ceiling keeps the default. UINT64_MAX wrapped the commit cap to `git log -n 0`
+# (an empty history read as a clean one) and a huge SECONDS overflowed the deadline.
+for big in 18446744073709551615 1000000001 99999999999999999999; do
+  RIPWIRE_GIT_WALK_COMMITS=$big RIPWIRE_GIT_WALK_SECONDS=$big rw --no-cache --for="caller f1" 2>/dev/null | sed 's/ at="[^"]*"//; s/est_tokens="[^"]*"//' >"$TMP/bigenv"
+  check "(B7) a budget of $big keeps the default: the answer is byte-identical to no budget" 'cmp -s "$TMP/bigenv" "$TMP/none"'
+done
+RIPWIRE_GIT_WALK_COMMITS=18446744073709551615 rw --no-cache --cochange=m1.c >"$TMP/out" 2>"$TMP/err"
+check "(B7b) ... and --cochange under COMMITS=UINT64_MAX reads the history (commits found), not an empty one" 'grep -q "<cochange [^>]*commits=\"[1-9]" "$TMP/out"'
 
 # ── (T) the time budget against a git that stops talking ──
 SHIMT="$TMP/shim-stall"; mkdir -p "$SHIMT"
@@ -221,7 +242,10 @@ cat > "$SHIMT/git" <<SH
 # Only the record walk stalls: it prints what real git prints for the first commits, then says nothing for far longer than the budget.
 case " \$* " in
   *" --name-only "*" -z "*|*" -z --name-only "*)
-    if [ -n "\${STALL_AT_START:-}" ]; then exec sleep 45; fi
+    if [ -n "\${STALL_AT_START:-}" ]; then
+      # STALL_ONCE=<file>: only the first walk stalls (an earlier request's cut, then a request the budget never touched)
+      if [ -z "\${STALL_ONCE:-}" ] || [ ! -e "\$STALL_ONCE" ]; then [ -z "\${STALL_ONCE:-}" ] || : > "\$STALL_ONCE"; exec sleep 45; fi
+    fi
     "$REALGIT" "\$@" -n 5 2>/dev/null | cat; exec sleep 45 ;;
 esac
 exec "$REALGIT" "\$@"
@@ -279,6 +303,13 @@ for v in --hotspots --owners "--cochange"; do
   check "(M4) $v against a git silent from the first byte: exit 1, names the budget, not an unavailable git (rc=$rc)" '[ "$rc" = 1 ] && grep -q "hit its budget" "$TMP/err" && ! grep -q "git unavailable" "$TMP/err"'
 done
 unset STALL_AT_START TWS
+# (M5) CodeRabbit on #498, verbs_report.h:1405: a --since window is not "empty" when the walk was cut before its first record
+export STALL_AT_START=1 TWS=2
+for v in --hotspots --cochange; do
+  read -r rc secs <<<"$(timed "$BIN" $v --since="1 year ago")"
+  check "(M5) $v --since=... against a git silent from the first byte: exit 1, names the budget, no empty-window claim (rc=$rc)" '[ "$rc" = 1 ] && grep -q "hit its budget" "$TMP/err" && ! grep -q "matched no commits" "$TMP/out"'
+done
+unset STALL_AT_START TWS
 # (F2) the same refusal over MCP: the error of `owners` (and `symbol`) names the budget, not "no git history"
 export STALL_AT_START=1
 for sym in "" f1; do
@@ -287,6 +318,16 @@ for sym in "" f1; do
     | ( cd "$LONG" && PATH="$SHIMT:$PATH" RIPWIRE_GIT_WALK_SECONDS=1 perl -e 'alarm 60; exec @ARGV' "$BIN" "$LONG" --mcp --no-cache >"$TMP/out" 2>"$TMP/err" )
   check "(F2) --mcp owners symbol='$sym' against a git silent from the first byte: the error names the budget, not a missing history" 'grep -q "hit its budget" "$TMP/out" && ! grep -q "no git history" "$TMP/out"'
 done
+unset STALL_AT_START
+# (F2b) CodeRabbit on #498, mcp.h:2505: the cause is THIS request's. One server, two calls: the first walk is cut, the second request is a
+# symbol that does not exist; its refusal is the missing symbol, not the first request's budget.
+export STALL_AT_START=1
+rm -f "$TMP/stalled"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"owners\",\"arguments\":{\"path\":\"$LONG\",\"symbol\":\"\"}}}" \
+  "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"owners\",\"arguments\":{\"path\":\"$LONG\",\"symbol\":\"zz_no_such_symbol\"}}}" \
+  | ( cd "$LONG" && PATH="$SHIMT:$PATH" STALL_ONCE="$TMP/stalled" RIPWIRE_GIT_WALK_SECONDS=1 perl -e 'alarm 60; exec @ARGV' "$BIN" "$LONG" --mcp --no-cache >"$TMP/out" 2>"$TMP/err" )
+check "(F2b) --mcp: the first owners call names the budget; a later call for a missing symbol does not" 'grep "\"id\":2" "$TMP/out" | grep -q "hit its budget" && ! grep "\"id\":3" "$TMP/out" | grep -q "hit its budget" && grep -q "\"id\":3" "$TMP/out"'
 unset STALL_AT_START
 # (L2) --exemplar runs no history walk (it prints neither churn= nor amp=)
 rm -f "$TMP/walklog"; QC="$TMP/qc3"; mkdir -p "$QC"

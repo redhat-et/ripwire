@@ -222,6 +222,15 @@ inline NumstatRow numstatRowPath( std::string row )
     return NumstatRow{ resolveNumstatPath( std::move( pathCol ) ), false };
 }
 
+inline void warnNameOnlyStalled( bool timedOut )
+{
+    if( timedOut )
+    {
+        rw::emitTo( stderr, "ripwire: git diff --name-only did not finish within the {} s git budget (RIPWIRE_GIT_WALK_SECONDS); no changed-file list is "
+                            "served\n", gitWalkMaxSeconds() );
+    }
+}
+
 inline bool nameOnlyChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree, std::vector<std::string>& paths )
 {
     // The fallback when `git diff --numstat` failed outright. On a partial clone that is numstat wanting a blob ripwire will not download (gitcmd.h NEVER DOWNLOAD),
@@ -232,17 +241,21 @@ inline bool nameOnlyChangedPaths( const std::string& root, const std::string& re
     // uncommitted edits (HEAD against the tree, whose blobs a checkout has). `againstWorkingTree` is false for a diff of two commits.
     const std::string listHead = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                                + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --no-renames --name-only ";
-    const GitCommandLines listed = gitCommandLines( listHead + revArgs + ( againstWorkingTree ? " HEAD" : "" ) + " -- 2>/dev/null" );
-    if( !listed.isStarted || listed.status != 0 )
+    // Both reads keep ONE deadline (the walk budget): a git that stalls here ends the list as a refusal, never as a partial list.
+    const auto            deadline = gitWalkDeadline();
+    const GitCommandLines listed   = gitCommandLinesBy( listHead + revArgs + ( againstWorkingTree ? " HEAD" : "" ) + " -- 2>/dev/null", deadline );
+    if( !listed.isStarted || listed.timedOut || listed.status != 0 )
     {
+        warnNameOnlyStalled( listed.timedOut );
         return false;
     }
     paths = listed.lines;
     if( againstWorkingTree )
     {
-        const GitCommandLines dirty = gitCommandLines( listHead + "HEAD -- 2>/dev/null" );
-        if( !dirty.isStarted || dirty.status != 0 )
+        const GitCommandLines dirty = gitCommandLinesBy( listHead + "HEAD -- 2>/dev/null", deadline );
+        if( !dirty.isStarted || dirty.timedOut || dirty.status != 0 )
         {
+            warnNameOnlyStalled( dirty.timedOut );
             paths.clear();
             return false;
         }
@@ -256,10 +269,10 @@ inline bool nameOnlyChangedPaths( const std::string& root, const std::string& re
 enum class NumstatRead : std::uint8_t { NotStarted, Read, Failed };
 
 // `git diff --numstat` under the walk budget: its rows into out.paths/skippedModeOnly. Failed = the caller falls back to the tree-level list
-// (git exited non-zero with no row, or the budget ended it, in which case no row is kept: a prefix of the rows is not a list).
+// (git exited non-zero, or the budget ended it; in both no row is kept: a prefix of the rows is not a list).
 inline NumstatRead readNumstatRows( const std::string& cmd, NumstatDiff& out )
 {
-    const GitTimedLines run = gitCommandLinesBy( cmd, gitWalkDeadline() );
+    const GitCommandLines run = gitCommandLinesBy( cmd, gitWalkDeadline() );
     if( !run.isStarted )
     {
         return NumstatRead::NotStarted;
@@ -269,6 +282,10 @@ inline NumstatRead readNumstatRows( const std::string& cmd, NumstatDiff& out )
         rw::emitTo( stderr, "ripwire: git diff --numstat did not finish within the {} s git budget (RIPWIRE_GIT_WALK_SECONDS); the changed files are listed from "
                             "--name-only instead\n", gitWalkMaxSeconds() );
         return NumstatRead::Failed;
+    }
+    if( run.status != 0 )
+    {
+        return NumstatRead::Failed;   // git said it failed: the rows before that are a prefix, never a list (the tree-level list stands in)
     }
     for( const std::string& row : run.lines )
     {
@@ -282,8 +299,7 @@ inline NumstatRead readNumstatRows( const std::string& cmd, NumstatDiff& out )
             out.paths.push_back( std::move( path ) );
         }
     }
-    const bool noRows = out.paths.empty() && out.skippedModeOnly == 0;
-    return run.status != 0 && noRows ? NumstatRead::Failed : NumstatRead::Read;
+    return NumstatRead::Read;
 }
 
 inline NumstatDiff numstatChangedPaths( const std::string& root, const std::string& revArgs, bool againstWorkingTree = false )

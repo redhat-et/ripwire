@@ -6255,6 +6255,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( refusal );
         }
+        const GitWalkCutMark       cutsBefore   = gitWalkCutMark();
         std::optional<std::string> ownersAnswer = ownersText( root, symbol, pageParse.page );      // symbol optional (empty = all files); M13: paged
         if( !ownersAnswer )
         {
@@ -6263,7 +6264,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         r.payload = std::move( *ownersAnswer );
         if( r.payload.empty() )
         {
-            const std::string cut = rw::gitWalkCutRefusalCause();   // F2: a walk the budget ended is not "no history"
+            const std::string cut = rw::gitWalkCutRefusalCause( cutsBefore );   // F2: a walk THIS request's budget ended is not "no history"
             return bad( !cut.empty() ? "owners is mined from git: " + cut
                         : symbol.empty() ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
                                          : symbolMissing( "owners", symbol ) );   // N7: the hint comes from the table row

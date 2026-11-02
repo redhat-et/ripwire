@@ -2494,13 +2494,14 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
-                        const std::optional<std::string> answer = ownersText( path, symbol, pg );
+                        const GitWalkCutMark             cutsBefore = gitWalkCutMark();
+                        const std::optional<std::string> answer     = ownersText( path, symbol, pg );
                         if( !answer )
                         {
                             return errResult( -32603, "internal error: the owners answer buffer lost bytes — no answer served" );
                         }
                         const std::string& t = *answer;
-                        const std::string cut = rw::gitWalkCutRefusalCause();   // F2: a walk the budget ended is not "no history"
+                        const std::string cut = rw::gitWalkCutRefusalCause( cutsBefore );   // F2: a walk THIS request's budget ended is not "no history"
                         return t.empty() ? errResultMsg( -32602, !cut.empty() ? "owners is mined from git: " + cut
                                                 : symbol.empty()
                                                 ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
