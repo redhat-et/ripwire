@@ -35,11 +35,17 @@ namespace rw
 
 inline constexpr bool kEnumCountProbed = true;
 
-// The one character that decides, after "V = ": a name, or "(" of a cast. An enum declared in an unnamed namespace (main.cpp's
+// The one character that decides, after the last "V = " of a __PRETTY_FUNCTION__: a name, or "(" of a cast. An enum declared in an unnamed namespace (main.cpp's
 // verb sections) is spelled "(anonymous namespace)::E::Name", whose parenthesis is the scope, not a cast, so that prefix is
 // stepped over first; its cast form "((anonymous namespace)::E)2" still opens with the cast's own parenthesis.
-constexpr bool spellsEnumerator( std::string_view value ) noexcept
+constexpr bool spellsEnumerator( std::string_view signature ) noexcept
 {
+    const std::size_t at = signature.rfind( "V = " );
+    if( at == std::string_view::npos )
+    {
+        return false;
+    }
+    std::string_view           value = signature.substr( at + 4 );
     constexpr std::string_view kAnon = "(anonymous namespace)::";
     while( value.starts_with( kAnon ) )
     {
@@ -47,8 +53,9 @@ constexpr bool spellsEnumerator( std::string_view value ) noexcept
     }
     return !value.empty() && value.front() != '(';
 }
-static_assert( spellsEnumerator( "(anonymous namespace)::S::W::B]" ) && !spellsEnumerator( "((anonymous namespace)::S::W)2]" )
-                   && spellsEnumerator( "Shape::Square]" ) && !spellsEnumerator( "(Shape)2]" ) && !spellsEnumerator( "" ),
+static_assert( spellsEnumerator( "[V = (anonymous namespace)::S::W::B]" ) && !spellsEnumerator( "[V = ((anonymous namespace)::S::W)2]" )
+                   && spellsEnumerator( "[V = Shape::Square]" ) && !spellsEnumerator( "[V = (Shape)2]" ) && !spellsEnumerator( "[V = " )
+                   && !spellsEnumerator( "" ),
                "enumcount.h: an unnamed-namespace enumerator is a name, its cast is not" );
 
 // Does V spell a declared enumerator of its enum?  "[V = Shape::Square]" yes, "[V = (Shape)2]" no.
@@ -56,9 +63,7 @@ template<auto V>
     requires std::is_enum_v<decltype( V )>
 constexpr bool namesEnumerator() noexcept
 {
-    const std::string_view signature = __PRETTY_FUNCTION__;
-    const std::size_t      at        = signature.rfind( "V = " );
-    return at != std::string_view::npos && spellsEnumerator( signature.substr( at + 4 ) );
+    return spellsEnumerator( __PRETTY_FUNCTION__ );
 }
 
 // `Count` is exact: the value Count-1 is a declared enumerator of E and the value Count is not.

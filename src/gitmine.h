@@ -2325,13 +2325,18 @@ inline std::int64_t gitHeadCommitEpoch( const std::string& root )
 // `windowUnreadOut` (hwh-fix4, N1): set when the walk ended (budget, failed or not started git) before it passed the
 // window floor, so a count can be short of the truth and a file under the threshold is not known to be cold. A walk
 // that ends past the floor read every window commit and does not set it; no history at all (no HEAD epoch) does not.
+// A walk that stopped (cut, failed, not started) before it read a record older than the window floor.
+inline bool gitWalkStoppedAboveFloor( const GitLogWalk& walk, bool passedFloor ) noexcept
+{
+    return ( walk.unread || walk.cut != GitWalkCut::None ) && !passedFloor;
+}
+
 inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::string& root, const IngestResult& ing, std::uint32_t days,
                                                                   bool* windowUnreadOut = nullptr )
 {
-    if( windowUnreadOut )
-    {
-        *windowUnreadOut = false;
-    }
+    bool  unreadSink = false;
+    bool& unread     = windowUnreadOut ? *windowUnreadOut : unreadSink;
+    unread           = false;
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitFileCommitCountsInDayWindow (short-horizon churn)" );
     std::vector<std::uint32_t> counts( ing.files.size(), 0 );
     if( ing.files.empty() )
@@ -2358,7 +2363,7 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
     bool passedFloor = false;         // a record older than the window was read: every window commit came before it
     const GitLogWalk walk = forEachGitLogRecord( root, "", [ & ]( const GitLogRecord& rec )
     {
-        passedFloor = passedFloor || ( rec.committerTs > 0 && rec.committerTs < cutoff );
+        passedFloor |= ( rec.committerTs > 0 ) & ( rec.committerTs < cutoff );   // branch-free: a parsed epoch below the floor
         if( rec.committerTs < cutoff || rec.committerTs > headEpoch )
         {
             return;   // out of window: this commit's files do not count
@@ -2379,10 +2384,7 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
         }
         cur.clear();
     } );
-    if( windowUnreadOut )
-    {
-        *windowUnreadOut = ( walk.unread || walk.cut != GitWalkCut::None ) && !passedFloor;
-    }
+    unread = gitWalkStoppedAboveFloor( walk, passedFloor );
     return counts;
 }
 
