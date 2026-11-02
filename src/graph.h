@@ -15315,7 +15315,62 @@ struct ImportTier
     std::uint64_t              tsconfigUnread    = 0;   // #220 part 2: configs with an unread extends/references base (tsconfig_unread=)
     bool                       umbrella          = false;   // idea #6: an umbrella header — see impactImportTier
     std::uint32_t              noFileEdgeLangs   = 0;       // arch-honest: the def files' languages this build draws no file edge for (lintrules.h)
+    std::size_t                testImporters     = 0;       // IMPACT-ROLLUP: importers in the test/bench tier (filter.h pathTierOf), over ALL files
+    std::string                topDirs;                     // IMPACT-ROLLUP: "dir:n,dir:n,dir:n", the most-importing directories over ALL files
 };
+
+// IMPACT-ROLLUP (GRAPH-SCALE flood): a cut tier shows its most-imported 40 and hides the shape of the rest — RegisterFactory
+// on true-edge Envoy lists 40 of 580 with 0 tests among them, of 202 tests in all. The rollup is two facts over EVERY
+// importer, printed only beside importers_capped="1": how many are tests (importers_tests=) and the directories most of
+// them sit in (importers_dirs=, kImportTierRollupDirs of them, a directory being the first kImportTierRollupDirDepth
+// segments of the importer's root-relative path, or its whole directory when shallower; by count, then path). About 100 B.
+inline constexpr std::size_t kImportTierRollupDirs     = 3;
+inline constexpr std::size_t kImportTierRollupDirDepth = 2;
+
+inline std::string_view importTierRollupDir( std::string_view rel ) noexcept
+{
+    std::size_t end = 0;
+    for( std::size_t seg = 0; seg < kImportTierRollupDirDepth; ++seg )
+    {
+        const std::size_t slash = rel.find( '/', end == 0 ? 0 : end + 1 );
+        if( slash == std::string_view::npos )
+        {
+            break;   // the file sits in a shallower directory: that directory is its group ("" at the root)
+        }
+        end = slash;
+    }
+    return rel.substr( 0, end );
+}
+
+inline void importTierRollup( const IngestResult& ing, ImportTier& t, const std::vector<std::uint8_t>& tierOfFile )
+{
+    t.testImporters = std::size_t( std::count_if( t.files.begin(), t.files.end(), [ & ]( std::uint32_t f )
+                                                  { return f < tierOfFile.size() && tierOfFile[f] == std::uint8_t( PathTier::TestOrBench ); } ) );
+    std::vector<std::string_view> dirs;
+    dirs.reserve( t.files.size() );
+    for( const std::uint32_t f : t.files )
+    {
+        dirs.push_back( importTierRollupDir( rootRelPath( ing, f ) ) );
+    }
+    std::sort( dirs.begin(), dirs.end() );
+    std::vector<std::pair<std::size_t, std::string_view>> counts;   // (count, dir), one per distinct dir
+    for( std::size_t i = 0; i < dirs.size(); )
+    {
+        std::size_t j = i;
+        while( j < dirs.size() && dirs[j] == dirs[i] )
+        {
+            ++j;
+        }
+        counts.emplace_back( j - i, dirs[i] );
+        i = j;
+    }
+    std::sort( counts.begin(), counts.end(), [ ]( const auto& a, const auto& b ) { return a.first != b.first ? a.first > b.first : a.second < b.second; } );
+    t.topDirs.clear();
+    for( std::size_t i = 0; i < counts.size() && i < kImportTierRollupDirs; ++i )
+    {
+        t.topDirs += ( i ? "," : "" ) + std::string( counts[i].second.empty() ? std::string_view( "." ) : counts[i].second ) + ":" + std::to_string( counts[i].first );
+    }
+}
 
 // cut-fix C: the tier's DISPLAY size, split from its measurement (callhierarchy.h's rule: the cap policy is the
 // surface's, the rows are not). `pageLimit` is the answer's --limit / MCP limit, 0 = the kImportReachRowCap default;
@@ -15328,6 +15383,18 @@ struct ImportTier
 // 2026-09-25 ruling (nextverb.h: next= is never truncated or dropped for length) removed from every other producer.
 // The invocation is never truncated, so it never pastes wrong. Both surfaces spell the CLI flag, as their root next=
 // already does. Gate: impactimportcheck.sh #9d (a 130 B call).
+// IMPACT-ROLLUP: the rollup's two attributes, on a CUT tier only (an uncut one lists every importer), "" otherwise.
+// The dirs value carries paths, so it goes through nextverb.h's attribute writer (serialize.h escapeXml's policy, byte for
+// byte); ':' and ',' separate and never need it.
+inline std::string importTierRollupAttrXml( const ImportTier& t )
+{
+    if( !t.capped || t.files.empty() )
+    {
+        return {};
+    }
+    return " importers_tests=\"" + std::to_string( t.testImporters ) + "\"" + rw::nextAttrXml( t.topDirs, "importers_dirs" );
+}
+
 inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym = {} )
 {
     // idea #6: an UMBRELLA def file's importers are counted, not listed, unless --limit asks for rows — a list of every
@@ -15349,6 +15416,7 @@ inline void sizeImportTier( ImportTier& t, int pageLimit, std::string_view sym =
                + rw::importsUnresolvedAttrXml( t.importsUnresolved )   // #220: absent at zero; the root's counts_floor covers it
                + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ) )   // #220 part 2: likewise
                + ( t.umbrella ? " importers_umbrella=\"1\"" : "" )                               // idea #6: present-only
+               + importTierRollupAttrXml( t )                                                    // IMPACT-ROLLUP: a cut tier only
                + rw::noFileEdgesAttrXml( t.noFileEdgeLangs );                                   // arch-honest: importers= is a floor for these defs
     ENSURES( t.shown <= t.files.size(), "the page is a prefix of the ranked tier" );
     ENSURES( t.next.empty() || t.capped, "a follow-up is offered only for a cut tier" );
@@ -15429,6 +15497,7 @@ inline ImportTier impactImportTier( const IngestResult& ing, const std::vector<N
     }
     ENSURES( t.lazy.size() == t.files.size(), "lazy stays parallel to files" );
     t.umbrella = importTierIsUmbrella( ing, t.files.size() );   // idea #6
+    importTierRollup( ing, t, tierOfFile );                      // IMPACT-ROLLUP: printed only on a cut tier (sizeImportTier)
     sizeImportTier( t, 0 );   // the default size; a surface with a --limit re-sizes it (sizeImportTier)
     return t;
 }
