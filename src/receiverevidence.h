@@ -1312,8 +1312,9 @@ struct CallResultTypes
         return tf < rust.crateOf.size() && rust.crateOf[ tf ] == crate && targetModule == module;
     }
     // RULE3-MEMBER-GUARD: what written binding proves `target` for a Rust call Rule 3 narrowed to it, an allowlist. A bare call: a `use`
-    // of the name that does not provably leave the tree, or a glob `use` of the module holding the target. A qualified call: the
-    // qualifier names the module holding the target, or the target's own type (`owner`). "Holding" takes a module's descendants too
+    // of the name written into the target's crate that does not provably leave the tree (the item it names in that crate is not compared),
+    // or a glob `use` of the module holding the target. A qualified call: the qualifier, read whole from its written root
+    // (model.h rustWrittenQualifierOf), names the module holding the target, or its last segment the target's own type (`owner`). "Holding" takes a module's descendants too
     // and a crate root takes its whole crate, because a `pub use` re-export places an item below the path written. Not proven, counted
     // as via="name": `Ok(..)`, `assert!(..)`, a name only a glob of an unrelated module is near, `oneshot::channel()`, `String::new()` (those two then read as outside the tree, external=; graph.h).
     bool rustRule3Proves( const Reference& r, NodeId target, std::string_view owner ) const
@@ -1340,7 +1341,8 @@ struct CallResultTypes
             const std::string_view pkg  = packageOf( rootRelPath( ing, tf ) );
             if( root == "crate" || root == "self" || root == "super" )
             {
-                return pkg == packageOf( rootRelPath( ing, r.fileId ) );
+                // only where the layout cannot see the caller's crate: where it can, a path it cannot follow (`self::f` through a `use … as f`) proves nothing
+                return rust.crateOf[ r.fileId ] == kNoCrate && pkg == packageOf( rootRelPath( ing, r.fileId ) );
             }
             const std::size_t      slash = pkg.rfind( '/' );
             const std::string_view leaf  = slash == std::string_view::npos ? pkg : pkg.substr( slash + 1 );
@@ -1360,21 +1362,24 @@ struct CallResultTypes
         };
         if( !r.qualifier.empty() )
         {
-            const std::size_t sep = r.qualifier.rfind( "::" );
-            const std::string_view last = std::string_view( r.qualifier ).substr( sep == std::string::npos ? 0 : sep + 2 );
+            const std::string_view written = rustWrittenQualifierOf( r );   // from its root: `crate::a` of `crate::a::helper()`
+            const std::size_t sep = written.rfind( "::" );
+            const std::string_view last = written.substr( sep == std::string::npos ? 0 : sep + 2 );
             if( !owner.empty() && last == owner )
             {
                 return true;
             }
-            bool aliased = false;   // `use nu_protocol::Value as NuValue; NuValue::nothing()`
-            forEachRustUseAt( r.fileId, r.startByte, last, [ & ]( const Binding& b )
+            bool aliased = false;   // `use nu_protocol::Value as NuValue; NuValue::nothing()`: a `use` binds a ONE-segment qualifier only
+            forEachRustUseAt( r.fileId, r.startByte, sep == std::string::npos ? last : std::string_view{}, [ & ]( const Binding& b )
             {
                 const std::size_t at = b.importedName.rfind( "::" );
                 aliased = aliased || ( !owner.empty() && std::string_view( b.importedName ).substr( at == std::string::npos ? 0 : at + 2 ) == owner );
             } );
-            return aliased || holdsTarget( r.qualifier, r.startByte );
+            return aliased || holdsTarget( written, r.startByte );
         }
-        // a `use` of the name in file `f` whose module path is written into the target's crate: an unknown root, a duplicate crate name or an outside crate proves nothing
+        // a `use` of the name in file `f` whose module path is written into the target's crate and that does not provably leave the tree (`pub use
+        // ext::helper` re-exported by the module named): an unknown root, a duplicate crate name or an outside crate proves nothing. WHICH item of
+        // that crate it names is not compared with the target (card RUST-USE-TARGET): a second in-crate namesake the `use` reaches still proves it.
         const auto usesIntoTargetCrate = [ & ]( std::uint32_t f, const Binding& b )
         {
             if( b.kind != LocalBindKind::TypeImport )
@@ -1387,6 +1392,10 @@ struct CallResultTypes
                 return false;
             }
             const std::string_view modPath = std::string_view( b.importedName ).substr( 0, at );
+            if( rustPathProvablyOutside( f, b.startByte, b.importedName ) )
+            {
+                return false;
+            }
             return rustModuleOf( f, b.startByte, modPath, crate, module, 0 ) ? rust.crateOf[ tf ] == crate : rootNamesTargetPackage( modPath );
         };
         bool proven = false;

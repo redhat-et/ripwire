@@ -17,21 +17,30 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/rule3memberguardcheck.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 fail=0
 w() { mkdir -p "$(dirname "$1")"; printf '%b' "$2" > "$1"; }
-# row ID ROOT VERB CALLER PATH NAME WANT: the row of --VERB=CALLER at file PATH named NAME is `proven` (no via), `name` (via="name"), or `none` (absent)
+# row ID ROOT VERB CALLER PATH NAME WANT: the row of --VERB=CALLER at file PATH named NAME is `proven` (no via), `name` (via="name"), or `none` (absent).
+# A run that exits nonzero or prints no schema is `failed-run`, and an answer that found no CALLER (defs="0") is `no-caller`: neither passes any arm.
 row() {
-    local id=$1 root=$2 verb=$3 caller=$4 path=$5 name=$6 want=$7 got
-    got=$( ( cd "$root" && "$BIN" "$root" "--$verb=$caller" --no-cache --legend=compact </dev/null 2>/dev/null ) | python3 -I -c '
+    local id=$1 root=$2 verb=$3 caller=$4 path=$5 name=$6 want=$7 got out rc
+    out=$( cd "$root" && "$BIN" "$root" "--$verb=$caller" --no-cache --legend=compact </dev/null 2>/dev/null )
+    rc=$?
+    if [ "$rc" != 0 ]; then
+        got="failed-run"
+    else
+        got=$( printf '%s' "$out" | python3 -I -c '
 import re,sys
 path,name=sys.argv[1],sys.argv[2]
 got="none"
 doc=sys.stdin.read()
 if "schema=" not in doc: print("failed-run"); sys.exit()
+d=re.search(r" defs=\"([0-9]+)\"",doc)
+if not d or d.group(1)=="0": print("no-caller"); sys.exit()
 for m in re.finditer(r"<s [^>]*>",doc):
     t=m.group(0)
     n=re.search(r" n=\"([^\"]*)\"",t); p=re.search(r" p=\"([^\":]*)",t)
     if n and p and p.group(1)==path and (n.group(1)==name or n.group(1).endswith("::"+name) or n.group(1).endswith("."+name)):
         got="name" if " via=\"name\"" in t else "proven"
 print(got)' "$path" "$name" )
+    fi
     if [ "$got" = "$want" ]; then echo "PASS $id"; else echo "FAIL $id $caller -> $path:$name want $want got $got"; fail=1; fi
 }
 
@@ -41,7 +50,7 @@ w "$R/Cargo.toml" '[package]\nname = "r"\nversion = "0.1.0"\n'
 w "$R/src/lib.rs" 'pub mod a;\npub mod far;\npub mod user;\npub mod globuser;\npub mod nest;\n'
 w "$R/src/a.rs" 'pub fn helper() {}\npub fn globbed() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn channel() {}\npub fn swap() {}\npub fn assert(x: bool) {}\npub fn json() {}\npub fn conv() {}\npub struct Thing;\nimpl Thing {\n    pub fn new() -> Thing { Thing }\n    pub fn lock(&self) {}\n}\npub fn new() {}\n'
 w "$R/src/far.rs" 'pub fn helper() {}\npub fn globbed() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn channel() {}\npub fn swap() {}\npub fn assert(x: bool) {}\npub fn json() {}\npub fn conv() {}\npub struct Other;\nimpl Other {\n    pub fn new() -> Other { Other }\n    pub fn lock(&self) {}\n}\npub fn new() {}\n'
-w "$R/src/user.rs" 'use crate::a::helper;\nuse crate::a::Thing;\nuse crate::a;\nuse futures::channel::oneshot;\nuse std::mem::swap;\nuse crate::a::Thing as Alias;\nuse serde_json::json;\nuse anyhow::Ok as AOk;\nfn u_ext_use() { let _ = json!({}); }\nfn u_closure() { let conv = || 1; let _ = conv(); }\nfn u_alias() { let _ = Alias::new(); }\nfn u_trait_like() { crate::far::Other::zzz(); }\nfn u_unknown() { let _ = Hidden::lock(); }\nfn u_use() { helper(); }\nfn u_prelude() -> i32 { Ok(1) }\nfn u_macro() { assert!(true); }\nfn u_type() { let _ = Thing::new(); }\nfn u_module() { a::channel(); }\nfn u_outside() { let _ = oneshot::channel(); }\nfn u_stdtype() { let _ = String::new(); }\nfn u_stduse() { swap(); }\nfn u_member(x: &std::sync::Mutex<u32>) { let _ = x.lock(); }\n'
+w "$R/src/user.rs" 'use crate::a::helper;\nuse crate::a::Thing;\nuse crate::a;\nuse futures::channel::oneshot;\nuse std::mem::swap;\nuse crate::a::Thing as Alias;\nuse serde_json::json;\nuse anyhow::Ok as AOk;\nfn u_ext_use() { let _ = json!({}); }\nfn u_closure() { let conv = || 1; let _ = conv(); }\nfn u_alias() { let _ = Alias::new(); }\nfn u_trait_like() { crate::far::Other::zzz(); }\nfn u_unknown() { let _ = Hidden::lock(); }\nfn u_use() { helper(); }\nfn u_prelude() -> i32 { Ok(1) }\nfn u_macro() { assert!(true); }\nfn u_type() { let _ = Thing::new(); }\nfn u_module() { a::channel(); }\nfn u_outside() { let _ = oneshot::channel(); helper(); }\nfn u_stdtype() { let _ = String::new(); helper(); }\nfn u_stduse() { swap(); }\nfn u_member(x: &std::sync::Mutex<u32>) { let _ = x.lock(); }\n'
 w "$R/src/globuser.rs" 'use crate::a::*;\nfn g_glob() { globbed(); }\n'
 w "$R/src/nest.rs" 'use crate::a::helper;\nuse std::mem::swap;\nmod tests {\n    use super::*;\n    fn t_super_glob() -> i32 { Ok(1) }\n    fn t_super_use() { helper(); }\n    fn t_super_out() { swap(); }\n}\n'
 row R1.use        "$R" callees u_use        src/a.rs helper  proven
@@ -52,7 +61,9 @@ row R3.macro      "$R" callees u_macro      src/a.rs assert  name
 row R4.type       "$R" callees u_type       src/a.rs Thing::new proven
 row R5.module     "$R" callees u_module     src/a.rs channel proven
 row R6.outside    "$R" callees u_outside    src/a.rs channel none
+row R6.twin       "$R" callees u_outside    src/a.rs helper  proven
 row R7.stdtype    "$R" callees u_stdtype    src/a.rs new     none
+row R7.twin       "$R" callees u_stdtype    src/a.rs helper  proven
 row R8.stduse     "$R" callees u_stduse     src/a.rs swap    name
 row R5.alias      "$R" callees u_alias      src/a.rs Thing::new proven
 row R5.extuse     "$R" callees u_ext_use    src/a.rs json    name
@@ -65,18 +76,42 @@ row R11.superout  "$R" callees t_super_out  src/a.rs swap    name
 row R12.callers   "$R" callers Ok           src/user.rs u_prelude name
 row M.rust        "$R" callees u_member     src/a.rs Thing::lock name
 
+# ---- Rust, a qualifier written with more than one segment (fix 4). Reference::qualifier keeps only the last one (`far` of `crate::far::helper()`);
+# the guard reads the path whole from its root, so a module reached through `crate::`, `super::`, `self::`, a `use … as` alias or the crate's own name is
+# never an unknown, outside root, and `std::io::stdout()` still leaves the tree even though the tree has a module `io` defining `stdout`.
+# far/ re-exports a::helper and a::viasuper and defines nothing; b.rs holds namesakes. R13.modalias goes red under mutant M09. A path the layout
+# cannot follow (`self::f` through `use … as f`) proves nothing in a crate it sees (R13.selfalias). Not here: a call written from the crate's own
+# name in tests/ or a bin (`mm::far::helper()`) Rule 3 never narrows; the qualified-call scope guard drops it at base too (card RUST-REEXPORT-SCOPE).
+M=$T/mm
+w "$M/Cargo.toml" '[package]\nname = "mm"\nversion = "0.1.0"\n'
+w "$M/src/lib.rs" 'pub mod a;\npub mod far;\npub mod b;\npub mod io;\npub mod u;\n'
+w "$M/src/a.rs" 'pub fn helper() {}\npub fn viasuper() {}\npub struct Thing;\n'
+w "$M/src/far/mod.rs" 'pub use crate::a::helper;\npub use super::a::viasuper;\n'
+w "$M/src/b.rs" 'pub fn helper() {}\npub fn viasuper() {}\npub fn stdout() {}\n'
+w "$M/src/io.rs" 'pub struct Io;\npub fn stdout() {}\n'
+w "$M/src/u.rs" 'use crate::a::Thing;\nuse crate::io::Io;\nuse crate::far as f;\nfn m_crate() { crate::far::helper(); }\nfn m_crate_super() { crate::far::viasuper(); }\nfn m_super() { super::far::helper(); }\nfn m_modalias() { f::helper(); }\nfn m_selfalias() { self::f::helper(); }\nfn m_direct() { crate::a::helper(); }\nfn m_std() { std::io::stdout(); crate::a::helper(); }\n'
+row R13.modalias  "$M" callees m_modalias    src/a.rs helper   name
+row R13.selfalias "$M" callees m_selfalias   src/a.rs helper   name
+row R14.crate     "$M" callees m_crate       src/a.rs helper   name
+row R14.neighbour "$M" callees m_crate       src/b.rs helper   none
+row R14.crateviasuper "$M" callees m_crate_super src/a.rs viasuper name
+row R14.super     "$M" callees m_super       src/a.rs helper   name
+row R14.direct    "$M" callees m_direct      src/a.rs helper   proven
+row R14.std       "$M" callees m_std         src/io.rs stdout  none
+row R14.stdtwin   "$M" callees m_std         src/a.rs helper   proven
+
 # ---- Rust, a workspace whose crates have no lib.rs (`[lib] path`): the module layout knows nothing, the written root reads against the package directory.
 Z=$T/zs
 w "$Z/Cargo.toml" '[workspace]\nmembers = ["crates/*"]\n'
 w "$Z/crates/settings/Cargo.toml" '[package]\nname = "settings"\nversion = "0.1.0"\n[lib]\npath = "src/settings.rs"\n'
-w "$Z/crates/settings/src/settings.rs" 'pub mod file;\nuse crate::file::update_file;\nuse other::shared;\nuse settings::viaown;\nfn z_crate() { update_file(); }\nfn z_crate_prelude() -> i32 { Ok(1) }\nfn z_other_root() { shared(); }\nfn z_own_root() { viaown(); }\n'
+w "$Z/crates/settings/src/settings.rs" 'pub mod file;\nuse crate::file::update_file;\nuse other::shared;\nuse settings::viaown;\nfn z_crate() { update_file(); }\nfn z_crate_prelude() -> i32 { Ok(1) }\nfn z_other_root() { shared(); }\nfn z_own_root() { viaown(); }\nfn z_own_path() { settings::file::viaown(); }\n'
 w "$Z/crates/settings/src/file.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\npub fn shared() {}\npub fn viaown() {}\n'
 w "$Z/crates/gpui-util/Cargo.toml" '[package]\nname = "gpui-util"\nversion = "0.1.0"\n[lib]\npath = "src/util.rs"\n'
 w "$Z/crates/gpui-util/src/util.rs" 'pub fn dashed() {}\n'
 w "$Z/crates/other/Cargo.toml" '[package]\nname = "other"\nversion = "0.1.0"\n[lib]\npath = "src/other.rs"\n'
 w "$Z/crates/other/src/other.rs" 'pub fn update_file() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn json() {}\npub fn dashed() {}\npub fn shared() {}\npub fn viaown() {}\n'
 w "$Z/crates/app/Cargo.toml" '[package]\nname = "app"\nversion = "0.1.0"\n[lib]\npath = "src/app.rs"\n[dependencies]\nsettings = { path = "../settings" }\n'
-w "$Z/crates/app/src/app.rs" 'use settings::{update_file};\nuse gpui_util::dashed;\nuse serde_json::json;\nfn z_use() { update_file(); }\nfn z_dash() { dashed(); }\nfn z_prelude() -> i32 { Ok(1) }\nfn z_ext() { let _ = json!({}); }\nfn z_qual() { settings::update_file(); }\n'
+w "$Z/crates/app/src/app.rs" 'use settings::{update_file};\nuse gpui_util::dashed;\nuse serde_json::json;\nfn z_use() { update_file(); }\nfn z_dash() { dashed(); }\nfn z_prelude() -> i32 { Ok(1) }\nfn z_ext() { let _ = json!({}); }\nfn z_qual() { settings::update_file(); }\nfn z_qual_path() { settings::file::update_file(); }\n'
 # `mod file;` is the one edge a crate without a lib.rs has at this head; a root naming ANOTHER package needs a resolved cross-crate edge (RUST-ROOTS), measured with the rig
 # a glob written from the package's own root, in a crate the layout cannot see: the root reads against the package directory (near-miss twin of Z3, whose root names another package)
 w "$Z/crates/gr/Cargo.toml" '[package]\nname = "gr"\nversion = "0.1.0"\n[lib]\npath = "src/gr.rs"\n'
@@ -89,22 +124,41 @@ row Z2.prelude "$Z" callees z_crate_prelude crates/settings/src/file.rs Ok name
 row Z3.otherroot "$Z" callees z_other_root crates/settings/src/file.rs shared name
 row Z4.ownroot   "$Z" callees z_own_root   crates/settings/src/file.rs viaown proven
 row Z5.ownglob   "$Z" callees z_own_glob   crates/gr/src/f.rs globz proven
+# a path rooted in another package of the tree (`settings::file::update_file()`) is no unknown root either (fix 4)
+row Z6.otherpath "$Z" callees z_qual_path  crates/settings/src/file.rs update_file proven
+row Z7.ownpath   "$Z" callees z_own_path   crates/settings/src/file.rs viaown proven
 
 # ---- Python
 P=$T/py
 w "$P/a.py" 'def helper():\n    pass\ndef conv():\n    pass\ndef starred():\n    pass\nclass A:\n    def getvalue(self):\n        pass\n'
 w "$P/far.py" 'def helper():\n    pass\ndef conv():\n    pass\ndef starred():\n    pass\nclass B:\n    def getvalue(self):\n        pass\n'
-w "$P/user.py" 'import a\nfrom a import helper\ndef p_import():\n    helper()\ndef p_local():\n    conv = make()\n    return conv()\ndef p_unbound():\n    return conv()\ndef p_param(conv):\n    return conv()\nfrom a import conv as shadowed\ndef p_shadow():\n    shadowed = make()\n    return shadowed()\ndef p_alias():\n    return a.conv()\ndef p_member(x):\n    return x.getvalue()\ndef make():\n    return None\n'
+w "$P/user.py" 'import a\nfrom a import helper\ndef p_import():\n    helper()\ndef p_local():\n    conv = make()\n    return conv()\ndef p_unbound():\n    return conv()\ndef p_param(conv):\n    make()\n    return conv()\nfrom a import conv as shadowed\ndef p_shadow():\n    shadowed = make()\n    return shadowed()\ndef p_alias():\n    return a.conv()\ndef p_member(x):\n    return x.getvalue()\ndef make():\n    return None\n'
 w "$P/staruser.py" 'from a import *\ndef p_star():\n    return starred()\n'
-row Y1.import  "$P" callees p_import src/none helper none
+# a parameter of an enclosing def hides the file's import of the same name (fix 4); a def-scoped import is that def's binding and proves
+w "$P/shadow.py" 'from a import conv\ndef deco(conv):\n    def s_inner():\n        s_helper()\n        return conv()\n    return s_inner\ndef s_defimport():\n    from a import conv\n    return conv()\ndef s_assign():\n    s_helper()\n    conv = s_helper\n    return conv()\ndef s_helper():\n    pass\n'
+# a star import proves only a candidate its chain reaches: `from b import *` where b defines nothing of the name proves no a.starred (fix 4)
+w "$P/b.py" 'def nothing():\n    pass\n'
+w "$P/chain.py" 'from a import *\n'
+w "$P/staruser2.py" 'import a\nfrom b import *\ndef p_star_other():\n    return starred()\n'
+w "$P/staruser3.py" 'import far\nfrom chain import *\ndef p_star_chain():\n    return starred()\n'
+row Y1.import  "$P" callees p_import far.py helper none
 row Y1.bound   "$P" callees p_import a.py helper proven
 row Y2.unbound "$P" callees p_unbound a.py conv name
 row Y2.neighbour "$P" callees p_unbound far.py conv none
 row Y2.local   "$P" callees p_local   a.py conv none
+row Y2.localtwin "$P" callees p_local user.py make proven
 row Y2.param   "$P" callees p_param   a.py conv none
+row Y2.paramtwin "$P" callees p_param user.py make proven
 row Y3.alias   "$P" callees p_alias a.py conv proven
 row Y4.star    "$P" callees p_star a.py starred proven
 row M.python   "$P" callees p_member a.py A.getvalue name
+row Y5.shadow   "$P" callees s_inner a.py conv none
+row Y5.twin     "$P" callees s_inner shadow.py s_helper proven
+row Y5.defimport "$P" callees s_defimport a.py conv proven
+row Y5.assign   "$P" callees s_assign a.py conv none
+row Y5.assigntwin "$P" callees s_assign shadow.py s_helper proven
+row Y6.starother "$P" callees p_star_other a.py starred name
+row Y6.starchain "$P" callees p_star_chain a.py starred proven
 
 # ---- C++, Go, TS: member calls already hedged; Rule 3 still decides a C++ free function, a C++ qualified name, a TS named import.
 C=$T/cpp

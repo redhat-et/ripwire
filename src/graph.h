@@ -2664,6 +2664,33 @@ struct ExternalVeto
         const auto& stars = tables.pythonScopes.starTargets;
         return ref.fileId < stars.size() && std::ranges::any_of( stars[ ref.fileId ], []( std::uint32_t t ) { return t != kNoFile; } );
     }
+    // SF2: does a `from m import *` chain of the caller's file (a starred module's own star imports, 4 levels) reach file `target`?
+    bool pythonStarReaches( const Reference& ref, std::uint32_t target ) const
+    {
+        const auto& stars = tables.pythonScopes.starTargets;
+        rw::SmallVec<std::uint32_t, 8> frontier;
+        frontier.push_back( ref.fileId );
+        for( int depth = 0; depth < 4 && !frontier.empty(); ++depth )
+        {
+            rw::SmallVec<std::uint32_t, 8> next;
+            for( const std::uint32_t f : frontier )
+            {
+                for( const std::uint32_t t : f < stars.size() ? std::span<const std::uint32_t>( stars[ f ] ) : std::span<const std::uint32_t>{} )
+                {
+                    if( t == target )
+                    {
+                        return true;
+                    }
+                    if( t != kNoFile && std::ranges::find( next, t ) == next.end() )
+                    {
+                        next.push_back( t );
+                    }
+                }
+            }
+            frontier = std::move( next );
+        }
+        return false;
+    }
     bool isExternalBound( const Reference& ref ) const
     {
         if( ref.lang == Lang::Python )
@@ -5879,26 +5906,20 @@ struct FalseEdgeRules
     // A local or parameter of the caller — or of a function ENCLOSING it, which a nested def/closure captures (textual:
     // `get_label_width = self.get_label_width` in a method, called from a `def` nested in it). The enclosing chain is read
     // by span: the innermost function or method of the same file whose span holds the current one, at most 8 levels.
-    bool isLocalOfCaller( const Reference& r ) const
+    bool isLocalOfCaller( const Reference& r ) const { return localEvidenceOfCaller( r ) != 0; }
+    // the evidence (resolve.h localNameEvidence) of the innermost of those scopes binding the name, 0 when none does
+    char localEvidenceOfCaller( const Reference& r ) const
     {
-        if( veto.hasLocal( r, r.calleeName ) )
-        {
-            return true;
-        }
         NodeId cur = r.fromSymbol;
-        for( int depth = 0; depth < 8; ++depth )
+        for( int depth = 0; depth <= 8 && cur != kNoNode; ++depth )
         {
+            if( const auto it = veto.localNameSet.find( fileNameKey( key, cur, r.calleeName ) ); it != veto.localNameSet.end() )
+            {
+                return it->second;
+            }
             cur = enclosingFunction( cur );
-            if( cur == kNoNode )
-            {
-                return false;
-            }
-            if( veto.localNameSet.contains( fileNameKey( key, cur, r.calleeName ) ) )
-            {
-                return true;
-            }
         }
-        return false;
+        return 0;
     }
     // the innermost function/method of the same file whose span strictly holds `id`'s span; kNoNode when none
     NodeId enclosingFunction( NodeId id ) const { return innermostEnclosingFn( ing, functionsByFile, id ); }
@@ -10700,7 +10721,17 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         // a local or parameter of the caller hides any `use` of the name: the call holds whatever was assigned. Only where the extractor records locals: it
                         // records none for Rust, so there this reads false and a `let f = ..; f()` over `use a::f` stays proven (RUST-LOCALS card)
                         case Rule3NameProof::RustUse:      return !falseEdges.isLocalOfCaller( r ) && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
-                        case Rule3NameProof::PythonImport: return externalVeto.importVerdict( r, r.calleeName ) != '\0' || externalVeto.pythonStarImports( r );   // a function-level import is bound there too
+                        // a local or parameter of the caller or a def enclosing it hides the module's import (u4: `from a import view` over `def deco(view)`);
+                        // a def-scoped import of the name is that scope's binding, read like the file's. A star import proves only a candidate its chain reaches.
+                        case Rule3NameProof::PythonImport:
+                        {
+                            const char local = falseEdges.localEvidenceOfCaller( r );
+                            if( local != 0 && ( ( local & kLocalNameImport ) == 0 || ( local & kLocalNameDeclared ) != 0 ) )
+                            {
+                                return false;
+                            }
+                            return externalVeto.importVerdict( r, r.calleeName ) != '\0' || externalVeto.pythonStarReaches( r, ing.symbols[ c ].fileId );
+                        }
                         case Rule3NameProof::None:         return true;
                     }
                     return true;
@@ -10892,7 +10923,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         bool rule3QualifiedHedge = false;
         if( rule3NoProof && !r.qualifier.empty() )
         {
-            std::string path = r.qualifier + "::" + r.calleeName;
+            // the path as written from its root (`crate::far::helper`, never `far::helper`): a module named by a longer path is no unknown root
+            std::string path = std::string( rustWrittenQualifierOf( r ) ) + "::" + r.calleeName;
             if( recvEv.types.rustPathProvablyOutside( r.fileId, r.startByte, path ) && !recvEv.types.rustRootNamesTreePackage( r.fileId, r.startByte, path ) )
             {
                 disposition = vetoExternal( r );

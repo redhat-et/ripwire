@@ -2578,6 +2578,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     {
                         r.trailingLambda = kotlinTrailingLambda( roleNode );   // #155: `x.run { }` / `with( x ) { }` — graph.h FalseEdgeRules' Kotlin arm
                     }
+                    if( le.lang == Lang::Rust && r.role == RefRole::Call )
+                    {
+                        r.fieldName = rustWrittenQualifier( nameNode, src );   // a path call's whole written qualifier (model.h Reference::fieldName)
+                    }
                     if( isQueueLang( le.lang ) && isQueueCallName( r.name ) )
                     {
                         if( const std::uint8_t kw = callKeywords( nameNode, src ); kw != 0 )
