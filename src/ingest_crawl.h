@@ -311,6 +311,14 @@ static_assert( firstCrawlRowLangOfPathMisbuckets() == kLangTable.size(),
 static_assert( firstLangOfPathRowTheCrawlNeverAdmits() == std::size( kLintExtRows ),
                "a lintrules.h kLintExtRows row names an extension kLangTable does not admit under the same Lang" );
 
+// The language of a file the crawl ALREADY admitted. A `.txt` reaches files[] only when SphinxTxtRoots declared it, so here
+// it reads as reST; lookupLang itself keeps answering no, since it is the admission test for every other caller.
+const LangEntry* lookupLang( std::string_view ext ) noexcept;
+inline const LangEntry* lookupLangOfCrawledFile( std::string_view ext ) noexcept
+{
+    return lookupLang( ext == ".txt" ? std::string_view( ".rst" ) : ext );
+}
+
 const LangEntry* lookupLang( std::string_view ext ) noexcept
 {
     return findByField( kLangTable, &LangEntry::ext, ext );
@@ -1301,11 +1309,13 @@ void recordRootEscape( CrawlSkips& skips, const std::string& path, std::string_v
 // `fullPath` is the caller's LAZY path materializer, taken as a template parameter rather than a
 // std::string: a monorepo crawl walks far more non-source files than source ones, and stringifying every
 // one of them to record the handful that are reportable would be a real per-file cost for nothing.
+//
+// `declaredDoc`: a `.txt` that a Sphinx project declares (SphinxTxtRoots), which this class would otherwise row as unsupported.
 template< typename PathFn, typename IgnoredFn >
 bool recordPreSizeDrop( CrawlSkips& skips, HashMap<std::string, std::uint64_t>& extTally,
-                        const std::string& ext, bool excluded, const fs::directory_entry& entry, PathFn&& fullPath, IgnoredFn&& ignored )
+                        const std::string& ext, bool excluded, bool declaredDoc, const fs::directory_entry& entry, PathFn&& fullPath, IgnoredFn&& ignored )
 {
-    if( lookupLang( ext ) == nullptr && !docparse::isDocExtension( ext ) )
+    if( lookupLang( ext ) == nullptr && !docparse::isDocExtension( ext ) && !declaredDoc )
     {
         if( !excluded && !isNonTextExtension( ext ) && !ignored() )
         {
@@ -1846,6 +1856,72 @@ private:
 // #350: `memWatch` (null = unguarded) is consulted once per directory entry — memguard::Watch decides how rarely it
 // actually measures — and a stop ends the walk where it is. What was seen so far is sorted and returned exactly as a
 // finished walk's list is, and the walk itself is in SortedDirWalk's order, so a partial corpus is a deterministic one; ingest() discloses the stop.
+// Which directories hold `.txt` documents, by the nearest Sphinx conf.py at or above them, up to the crawl root. Found by
+// structure: the path of the directory plays no part. Asked only when the walk meets a `.txt`, and memoized per directory,
+// so a tree with no `.txt` pays nothing and one with many pays one stat per directory that holds them, plus its ancestors
+// once. A conf.py past kMaxSphinxConfBytes or not a regular file is not read and says nothing: such a `.txt` stays in
+// `unindexed=`, which is the disclosure.
+class SphinxTxtRoots
+{
+public:
+    explicit SphinxTxtRoots( std::string root ) : root_( std::move( root ) )
+    {
+        while( root_.size() > 1 && root_.back() == '/' )
+        {
+            root_.pop_back();
+        }
+    }
+
+    bool declares( const std::string& dir )
+    {
+        if( const auto hit = memo_.find( dir ); hit != memo_.end() )
+        {
+            return hit->second != 0;
+        }
+        bool answer = false;
+        switch( readConf( dir ) )
+        {
+            case docparse::SphinxTxt::Declared: answer = true; break;
+            case docparse::SphinxTxt::Refused:  answer = false; break;
+            case docparse::SphinxTxt::Unknown:
+            {
+                const std::size_t slash = dir.find_last_of( '/' );
+                if( dir != root_ && dir.size() > root_.size() && slash != std::string::npos )
+                {
+                    answer = declares( dir.substr( 0, slash ) );   // depth bounded by the path, memoized
+                }
+                break;
+            }
+        }
+        memo_.try_emplace( dir, answer ? char( 1 ) : char( 0 ) );
+        return answer;
+    }
+
+private:
+    static constexpr std::uintmax_t kMaxSphinxConfBytes = 256u * 1024u;
+
+    static docparse::SphinxTxt readConf( const std::string& dir )
+    {
+        std::error_code ec;
+        const fs::path  conf   = fs::path( dir ) / "conf.py";
+        const auto      status = fs::symlink_status( conf, ec );
+        if( ec || !fs::is_regular_file( status ) )
+        {
+            return docparse::SphinxTxt::Unknown;
+        }
+        const std::uintmax_t size = fs::file_size( conf, ec );
+        if( ec || !VALIDATE( size <= kMaxSphinxConfBytes, "a conf.py past the read bound says nothing about its .txt files" ) )
+        {
+            return docparse::SphinxTxt::Unknown;
+        }
+        const std::optional<std::string> text = docparse::detail::readWholeFile( conf.string() );
+        return text ? docparse::sphinxConfDeclaresTxt( *text ) : docparse::SphinxTxt::Unknown;
+    }
+
+    std::string                root_;
+    HashMap<std::string, char> memo_;
+};
+
 CrawlResult collectSources( const char* rootDir, const std::vector<std::string>& excludeSubstr,
                             std::size_t maxFileBytes, std::string_view excludeLabel = {}, bool respectGitignore = true,
                             memguard::Watch* memWatch = nullptr, IgnoreProbeSpeculation* ignoreSpeculation = nullptr )
@@ -1907,6 +1983,7 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
     }
 
     const GitIgnoreSet ignoreSet = probeIgnoreSet( rootDir, respectGitignore, skips.ignoreMode, ignoreSpeculation, rootReal );   // §N6-C
+    SphinxTxtRoots     sphinxTxtRoots( os::program_path( root ) );
 
     {
         PROFILE_SCOPE_DESCRIBE( "ingest/crawl: directory walk (stat + classify)" );
@@ -2040,8 +2117,9 @@ CrawlResult collectSources( const char* rootDir, const std::vector<std::string>&
             // §L1: the two NON-SIZE drops are classified and recorded together (recordPreSizeDrop) — see its
             // header for why the tests must run in that order, why the unsupported-ext class alone consults the
             // ignore verdict BEFORE it records a row, and why none of it is written inline here.
-            const std::string ext = lowerExtensionOf( name );
-            if( recordPreSizeDrop( skips, extTally, ext, excluded, *it, fullPath, ignored ) )
+            const std::string ext         = lowerExtensionOf( name );
+            const bool        declaredDoc = ext == ".txt" && !excluded && sphinxTxtRoots.declares( os::program_path( p.parent_path() ) );
+            if( recordPreSizeDrop( skips, extTally, ext, excluded, declaredDoc, *it, fullPath, ignored ) )
             {
                 continue;
             }

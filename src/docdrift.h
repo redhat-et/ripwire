@@ -351,7 +351,7 @@ inline bool isMarkdownPath( std::string_view path )
 // silently let a reStructuredText document vouch for a symbol name.
 inline bool isIndexedDocPath( std::string_view path )
 {
-    return docparse::isIndexedDocExtension( lowerExtOf( path ) );
+    return docparse::isIndexedFileDoc( lowerExtOf( path ) );
 }
 
 // Split a qualified spelling into its final segment and the scope directly above it:

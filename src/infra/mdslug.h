@@ -13,6 +13,11 @@
 namespace rw
 {
 
+// A reST link as RawRef::memberPath carries it (ingest_rest.h writes it, graph.h bindMarkdownLinks reads it). A markdown
+// destination stops at its first tab, so a leading tab cannot be a markdown link as written.
+inline constexpr std::string_view kRestLabelMark   = "\tref:";   // + the lowered label a :ref: names
+inline constexpr std::string_view kRestDocRootMark = "\tdoc:";   // + a :doc:`/path` relative to the Sphinx root, own extension added
+
 // alnum lowered, spaces→'-', '-'/'_' kept, everything else dropped. First match wins on collision
 // (GitHub's -1/-2 suffixes, percent-encoded slugs and headings with inline markup are not modelled; such a link falls
 // back to the target file's own edge — disclosed here rather than guessed, and never marked anchor="missing": see

@@ -208,26 +208,68 @@ inline void lowercaseMarkdownSlug( std::string& written )
     }
 }
 
+// (1) file-level node — span [0,size) ⇒ the lexical scorer indexes the whole fact body; cross-file
+// links land here. bodyByte stays 0 (no signature/body split — this node IS the whole doc).
+// nameByte = src.size() (EOF), NOT 0: (fileId, nameByte) is the global dedup identity, and a SETEXT
+// heading whose paragraph opens the file puts its name at byte 0 — with nameByte 0 the file node and
+// that heading TIED on every sort key (same kind, same startByte, and an equal endByte whenever the
+// first heading's span runs to EOF), so std::sort's instability let the unique() survivor flip with
+// worker arrival order (caught 2026-08-12: bench scoreboards flapping in --merge-scout's changed set).
+// No identifier can START at EOF, so this identity is collision-free by construction.
+inline void pushDocFileNode( std::uint32_t fileId, std::string_view src, std::string_view stem, std::vector<RawDef>& defs )
+{
+    RawDef d;
+    d.fileId = fileId; d.line = 1; d.startByte = 0; d.endByte = std::uint32_t( src.size() );
+    d.nameByte = std::uint32_t( src.size() ); d.bodyByte = 0; d.kind = SymKind::Section; d.lang = Lang::Markdown;
+    d.name.assign( stem );
+    defs.push_back( std::move( d ) );
+}
+
+// Inline-code `identifiers` in one line of prose become doc→code mentions, resolved to real code symbols in buildGraph
+// (stored in g.mentions, OUT of the call graph). Accepts only clean idents (len≥3). lineStart is the line's byte in the file.
+inline void scanBacktickMentions( std::string_view line, std::size_t lineStart, std::uint32_t fileId, std::vector<RawRef>& refs )
+{
+    for( std::size_t b = 0; b + 1 < line.size(); )
+    {
+        if( line[ b ] != '`' ) { ++b; continue; }
+        std::size_t e = b + 1;
+        while( e < line.size() && line[ e ] != '`' )
+        {
+            ++e;
+        }
+        if( e >= line.size() )
+        {
+            break; // unclosed backtick on this line
+        }
+        std::string_view span = line.substr( b + 1, e - b - 1 );
+        if( const std::size_t p = span.find( '(' ); p != std::string_view::npos )
+        {
+            span = span.substr( 0, p ); // `foo()` → foo
+        }
+        if( const std::size_t c = span.rfind( "::" ); c != std::string_view::npos )
+        {
+            span = span.substr( c + 2 ); // `A::b` → b
+        }
+        bool ok = span.size() >= 3 && ( ( span.front() >= 'A' && span.front() <= 'Z' ) || ( span.front() >= 'a' && span.front() <= 'z' ) || span.front() == '_' );
+        for( std::size_t k = 0; ok && k < span.size(); ++k )
+        { const char ch = span[ k ]; ok = ( ch >= 'A' && ch <= 'Z' ) || ( ch >= 'a' && ch <= 'z' ) || ( ch >= '0' && ch <= '9' ) || ch == '_'; }
+        if( ok )
+        {
+            RawRef rr;
+            rr.fileId = fileId;  rr.startByte = std::uint32_t( lineStart + b );  rr.lang = Lang::Markdown;
+            rr.isInherit = false;  rr.isDocLink = true;  rr.name.assign( span );
+            refs.push_back( std::move( rr ) );
+        }
+        b = e + 1;
+    }
+}
+
 void extractMarkdown( std::uint32_t fileId, std::string_view src, std::string_view stem, TSNode root,
                       std::vector<RawDef>& defs, std::vector<RawRef>& refs )
 {
     using mdtier::MdHeading;
 
-    // (1) file-level node — span [0,size) ⇒ the lexical scorer indexes the whole fact body; cross-file
-    // links land here. bodyByte stays 0 (no signature/body split — this node IS the whole doc).
-    // nameByte = src.size() (EOF), NOT 0: (fileId, nameByte) is the global dedup identity, and a SETEXT
-    // heading whose paragraph opens the file puts its name at byte 0 — with nameByte 0 the file node and
-    // that heading TIED on every sort key (same kind, same startByte, and an equal endByte whenever the
-    // first heading's span runs to EOF), so std::sort's instability let the unique() survivor flip with
-    // worker arrival order (caught 2026-08-12: bench scoreboards flapping in --merge-scout's changed set).
-    // No identifier can START at EOF, so this identity is collision-free by construction.
-    {
-        RawDef d;
-        d.fileId = fileId; d.line = 1; d.startByte = 0; d.endByte = std::uint32_t( src.size() );
-        d.nameByte = std::uint32_t( src.size() ); d.bodyByte = 0; d.kind = SymKind::Section; d.lang = Lang::Markdown;
-        d.name.assign( stem );
-        defs.push_back( std::move( d ) );
-    }
+    pushDocFileNode( fileId, src, stem, defs );
 
     mdtier::MdWalkOut walk;
     mdtier::mdWalk( root, src, false, 0, walk );
@@ -365,41 +407,7 @@ void extractMarkdown( std::uint32_t fileId, std::string_view src, std::string_vi
             line.remove_suffix( 1 ); // CRLF: drop the trailing CR — LF/CRLF byte-identity
         }
 
-        // inline-code `identifiers` → doc→code mentions; resolved to real code symbols in buildGraph
-        // (stored in g.mentions, OUT of the call graph). Accepts only clean idents (len≥3).
-        for( std::size_t b = 0; b + 1 < line.size(); )
-        {
-            if( line[ b ] != '`' ) { ++b; continue; }
-            std::size_t e = b + 1;
-            while( e < line.size() && line[ e ] != '`' )
-            {
-                ++e;
-            }
-            if( e >= line.size() )
-            {
-                break; // unclosed backtick on this line
-            }
-            std::string_view span = line.substr( b + 1, e - b - 1 );
-            if( const std::size_t p = span.find( '(' ); p != std::string_view::npos )
-            {
-                span = span.substr( 0, p ); // `foo()` → foo
-            }
-            if( const std::size_t c = span.rfind( "::" ); c != std::string_view::npos )
-            {
-                span = span.substr( c + 2 ); // `A::b` → b
-            }
-            bool ok = span.size() >= 3 && ( ( span.front() >= 'A' && span.front() <= 'Z' ) || ( span.front() >= 'a' && span.front() <= 'z' ) || span.front() == '_' );
-            for( std::size_t k = 0; ok && k < span.size(); ++k )
-            { const char ch = span[ k ]; ok = ( ch >= 'A' && ch <= 'Z' ) || ( ch >= 'a' && ch <= 'z' ) || ( ch >= '0' && ch <= '9' ) || ch == '_'; }
-            if( ok )
-            {
-                RawRef rr;
-                rr.fileId = fileId;  rr.startByte = std::uint32_t( lineStart + b );  rr.lang = Lang::Markdown;
-                rr.isInherit = false;  rr.isDocLink = true;  rr.name.assign( span );
-                refs.push_back( std::move( rr ) );
-            }
-            b = e + 1;
-        }
+        scanBacktickMentions( line, lineStart, fileId, refs );
 
         // [text](target) links (images ride along; non-.md targets drop in emitLinkTarget). [[wikilinks]]
         // are NOT handled here — their own scan below keeps its historical shape.

@@ -137,7 +137,8 @@ inline bool isDocExtension( std::string_view extLower ) noexcept
 // Admitting it would hand BM25 half a megabyte of gate dumps that the generated-document demotion does
 // NOT catch — those carry no marker and no ``` fences, the limit classifyGeneratedDoc states itself. So
 // `.txt` stays a reader's prose and an unindexed extension, DISCLOSED in `unindexed=` rather than silently
-// absent. `.tsv` is the same shape one tier further out: a table a reader reads, no extractor for it here.
+// absent, with one exception decided by structure: a file under a Sphinx conf.py whose source_suffix names '.txt' is a
+// declared reST source (sphinxConfDeclaresTxt, 679 documents in django's docs/). `.tsv` is the same shape one tier further out: a table a reader reads, no extractor for it here.
 // Gate: test/textdocscheck.sh pins both halves — the four admitted formats and the four refused ones.
 // SORT ORDER IS LOAD-BEARING on both tables — they are binary-searched, and an out-of-order entry does not
 // fail to compile on its own, it silently stops matching. The static_asserts are the guard, exactly as
@@ -167,6 +168,82 @@ inline bool isMarkdownGrammarExtension( std::string_view extLower ) noexcept
 inline bool isIndexedDocExtension( std::string_view extLower ) noexcept
 {
     return isMarkdownGrammarExtension( extLower ) || isDocExtension( extLower );
+}
+
+// The formats ingest_rest.h reads instead of the markdown grammar. `.txt` is here because the crawl only ever admits one
+// that a Sphinx project declares (sphinxConfDeclaresTxt): an indexed `.txt` IS a reST document.
+inline bool isRestExtension( std::string_view extLower ) noexcept
+{
+    return extLower == ".rst" || extLower == ".txt";
+}
+
+// isIndexedDocExtension for a file already known to be in the index, the one place `.txt` can answer yes.
+inline bool isIndexedFileDoc( std::string_view extLower ) noexcept
+{
+    return isIndexedDocExtension( extLower ) || extLower == ".txt";
+}
+
+// What a conf.py says about `.txt`, read from its text and never run. Sphinx builds `.rst` only unless source_suffix says
+// otherwise, so a Sphinx project whose source_suffix does not name '.txt' keeps its requirements.txt out of the index, and
+// Unknown means this is not a Sphinx conf.py at all (django/urls/conf.py): the walk keeps looking further up. Only a
+// literal quoted '.txt' on the last column-0 `source_suffix =` counts: a value it would have to evaluate does not.
+enum class SphinxTxt : std::uint8_t { Unknown, Refused, Declared };
+
+inline SphinxTxt sphinxConfDeclaresTxt( std::string_view conf ) noexcept
+{
+    constexpr std::string_view kKey = "source_suffix";
+    constexpr std::string_view kMarks[] = { "extensions", "master_doc", "root_doc", "html_theme" };
+    SphinxTxt verdict = SphinxTxt::Unknown;
+    bool      hasKey  = false;
+    for( std::size_t i = 0; i < conf.size(); )
+    {
+        const std::size_t      nl   = std::min( conf.find( '\n', i ), conf.size() );
+        const std::string_view line = conf.substr( i, nl - i );
+        const auto assignsTo = [ & ]( std::string_view key ) noexcept
+        {
+            if( !line.starts_with( key ) )
+            {
+                return false;
+            }
+            const std::size_t eq = line.find_first_not_of( " \t", key.size() );
+            return eq != std::string_view::npos && line[ eq ] == '=' && ( eq + 1 == line.size() || line[ eq + 1 ] != '=' );
+        };
+        if( !assignsTo( kKey ) )
+        {
+            if( !hasKey && std::any_of( std::begin( kMarks ), std::end( kMarks ), assignsTo ) )
+            {
+                verdict = SphinxTxt::Refused;
+            }
+            i = nl + 1;
+            continue;
+        }
+        hasKey  = true;
+        verdict = SphinxTxt::Refused;
+        int         depth = 0;
+        std::size_t stop  = i + line.find( '=' ) + 1;   // walk the value in conf: brackets may span lines
+        for( ; stop < conf.size(); ++stop )
+        {
+            const char c = conf[ stop ];
+            if( c == '#' )
+            {
+                stop = std::min( conf.find( '\n', stop ), conf.size() );
+                if( stop == conf.size() || depth == 0 )
+                {
+                    break;
+                }
+                continue;
+            }
+            if( c == '\n' && depth == 0 ) { break; }
+            if( c == '[' || c == '(' || c == '{' ) { ++depth; }
+            if( c == ']' || c == ')' || c == '}' ) { --depth; }
+            if( ( c == '\'' || c == '"' ) && conf.substr( stop + 1 ).starts_with( ".txt" ) && stop + 5 < conf.size() && conf[ stop + 5 ] == c )
+            {
+                verdict = SphinxTxt::Declared;
+            }
+        }
+        i = stop + 1;
+    }
+    return verdict;
 }
 
 // THE READER'S question: prose, whether or not this build indexes it. Ordering keys, comment-syntax

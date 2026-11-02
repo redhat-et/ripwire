@@ -95,7 +95,7 @@ inline std::string gitOneLine( const std::string& root, const char* args )
 // vocabulary is now the single answer, so a format the crawl learns reaches the brief on the same day.
 inline bool isIndexedDocPath( std::string_view p ) noexcept
 {
-    return docparse::isIndexedDocExtension( docparse::lowerExtOf( p ) );
+    return docparse::isIndexedFileDoc( docparse::lowerExtOf( p ) );
 }
 
 // Which of the two caps a changed file is judged by. isIndexedDocPath is the SAME vocabulary the brief

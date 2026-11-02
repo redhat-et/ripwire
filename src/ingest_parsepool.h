@@ -558,12 +558,24 @@ inline void runParseWorker( ParsePoolShared& sh, unsigned t )
             // ingest.h's per-ceiling comments for each defect's arithmetic; the vendored scanner patches
             // under third_party/patches/ are the SECOND, independent layer for those three).
             // Itemized in --skipped (why="nest-refused") for every language now, not just Kotlin.
-            if( refuseNesting( *le, bytes, path.c_str(), fileId, scan ) )
+            // A reST file takes no grammar, so the guard has nothing to protect: ingest_rest.h's scan is flat and bounds itself.
+            const std::string restExt = le->lang == Lang::Markdown ? lowerExtensionOf( path ) : std::string();
+            const bool        isRest  = docparse::isRestExtension( restExt );
+            if( !isRest && refuseNesting( *le, bytes, path.c_str(), fileId, scan ) )
             {
                 continue;
             }
 
-            if( le->lang == Lang::Markdown )
+            if( isRest )
+            {
+                const std::string stem             = fs::path( path ).stem().string();
+                const std::size_t firstNewDefIndex = out.defs.size();
+                ExtractShortfall  restShort;
+                extractRest( static_cast<std::uint32_t>( fileId ), bytes, stem, restExt, out.defs, out.refs, restShort );
+                buildLexForNewDefs( out.defs, firstNewDefIndex, bytes );
+                notePartialExtract( scan, fileId, restShort, bytes.size() );
+            }
+            else if( le->lang == Lang::Markdown )
             {
                 if( !prepareParserFor( pg.p, *le ) )
                 {

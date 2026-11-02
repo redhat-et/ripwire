@@ -366,7 +366,7 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 283;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 284;          // bump on any grammar/.scm/extraction change
                                                       // 283 = 2026-10-31 (train 43b: lanes registrar (placeholders 273..281), string-import (274, 275) and their extraction: Python registrar facts,
                                                       //   TS/JS provider-record literal marks, Python dotted-string and import-sink facts). Strictly above 281 (rich 282) and every lane value. Rich file tag 284.
                                                       //   kCacheVersion stays 48: no record changes shape.

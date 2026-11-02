@@ -88,7 +88,7 @@ inline IngestFileScan makeFileScan( const std::vector<std::string>& files )
         for( std::size_t fileId = 0; fileId < nfilesEarly; ++fileId )
         {
             const std::string ext = lowerExtensionOf( files[ fileId ] );
-            scan.lang[ fileId ] = lookupLang( ext );
+            scan.lang[ fileId ] = lookupLangOfCrawledFile( ext );
         }
     }
     return scan;
