@@ -2617,6 +2617,29 @@ inline bool pythonDynamicNamespace( const HashMap<std::string, char>& rebind, st
 //                             name anywhere in the corpus (its in-repo definitions are all members, which an
 //                             unqualified call from outside their class cannot reach; the enclosing class and
 //                             its bases were probed by Rule 1 + the base walk before this).
+// RULE3-MEMBER-GUARD fix 4: does a `from m import *` chain from Python file `from` (the starred modules' own star imports, 16 files at most) reach
+// file `target`? A star import of a module that binds nothing of a name proves no candidate of it (graph.h Rule3NameProof::PythonImport).
+inline bool pythonStarChainReaches( const std::vector<std::vector<std::uint32_t>>& stars, std::uint32_t from, std::uint32_t target )
+{
+    rw::SmallVec<std::uint32_t, 8> seen;
+    seen.push_back( from );
+    for( std::size_t i = 0; i < seen.size() && i < 16; ++i )
+    {
+        for( const std::uint32_t t : seen[ i ] < stars.size() ? std::span<const std::uint32_t>( stars[ seen[ i ] ] ) : std::span<const std::uint32_t>{} )
+        {
+            if( t == target )
+            {
+                return true;
+            }
+            if( t != kNoFile && std::ranges::find( seen, t ) == seen.end() )
+            {
+                seen.push_back( t );
+            }
+        }
+    }
+    return false;
+}
+
 // Consulted by buildGraph's resolve loop ONLY after every receiver rule has missed. The key buffer is
 // reused across calls (one allocation amortized), so the predicate is `const` in contract and `mutable` in
 // storage, exactly like Narrower.
@@ -2663,33 +2686,6 @@ struct ExternalVeto
     {
         const auto& stars = tables.pythonScopes.starTargets;
         return ref.fileId < stars.size() && std::ranges::any_of( stars[ ref.fileId ], []( std::uint32_t t ) { return t != kNoFile; } );
-    }
-    // SF2: does a `from m import *` chain of the caller's file (a starred module's own star imports, 4 levels) reach file `target`?
-    bool pythonStarReaches( const Reference& ref, std::uint32_t target ) const
-    {
-        const auto& stars = tables.pythonScopes.starTargets;
-        rw::SmallVec<std::uint32_t, 8> frontier;
-        frontier.push_back( ref.fileId );
-        for( int depth = 0; depth < 4 && !frontier.empty(); ++depth )
-        {
-            rw::SmallVec<std::uint32_t, 8> next;
-            for( const std::uint32_t f : frontier )
-            {
-                for( const std::uint32_t t : f < stars.size() ? std::span<const std::uint32_t>( stars[ f ] ) : std::span<const std::uint32_t>{} )
-                {
-                    if( t == target )
-                    {
-                        return true;
-                    }
-                    if( t != kNoFile && std::ranges::find( next, t ) == next.end() )
-                    {
-                        next.push_back( t );
-                    }
-                }
-            }
-            frontier = std::move( next );
-        }
-        return false;
     }
     bool isExternalBound( const Reference& ref ) const
     {
@@ -10730,7 +10726,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                             {
                                 return false;
                             }
-                            return externalVeto.importVerdict( r, r.calleeName ) != '\0' || externalVeto.pythonStarReaches( r, ing.symbols[ c ].fileId );
+                            return externalVeto.importVerdict( r, r.calleeName ) != '\0' || pythonStarChainReaches( externalVeto.tables.pythonScopes.starTargets, r.fileId, ing.symbols[ c ].fileId );
                         }
                         case Rule3NameProof::None:         return true;
                     }

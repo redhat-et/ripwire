@@ -1223,10 +1223,11 @@ inline constexpr std::uint32_t kBaseBindTemplateParam = 0xFFFFFFFEu;  // fn-slot
 static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= kBaseBindTemplateParam` for both sentinels" );
 
 // RULE3-MEMBER-GUARD fix 4: the qualifier a Rust call is WRITTEN with, from its root — `crate::far` for `crate::far::helper()`, where
-// Reference::qualifier keeps only `far` — else `qualifier` itself (a one-segment path, every other language, every non-call reference).
+// Reference::qualifier keeps only `far` — else `qualifier` itself (a one-segment path, every non-call reference). Its readers pass Rust
+// references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
 inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
 {
-    const bool whole = r.lang == Lang::Rust && r.role == RefRole::Call && !r.isCompose && !r.isInherit && !r.fieldName.empty();
+    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName.empty();
     return whole ? std::string_view( r.fieldName ) : std::string_view( r.qualifier );
 }
 
