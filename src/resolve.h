@@ -5031,11 +5031,12 @@ inline bool assignmentNamesNoClass( const Binding& b, const HashMap<std::string,
 // grammar reads as a function declarator — a call inside its scope takes the member's type (fieldnarrowcheck arm v4, a floor).
 inline constexpr char kLocalNameBound    = 1;   // some binding record names the variable
 inline constexpr char kLocalNameDeclared = 2;   // a declaration record does
+inline constexpr char kLocalNameImport   = 4;   // RULE3-MEMBER-GUARD fix 4: a def-scoped import does (Python `def f(): from a import conv`)
 
 inline char localNameEvidence( LocalBindKind kind ) noexcept
 {
     const bool declares = kind == LocalBindKind::VarDecl || kind == LocalBindKind::ParamType || kind == LocalBindKind::FnDecl;
-    return declares ? char( kLocalNameBound | kLocalNameDeclared ) : kLocalNameBound;
+    return char( ( declares ? kLocalNameBound | kLocalNameDeclared : kLocalNameBound ) | ( kind == LocalBindKind::Import ? kLocalNameImport : 0 ) );
 }
 
 // One entry of Rule 2's FLAT per-function type table (buildGraph's varType) and of Rule 2b's "Class#field" table

@@ -66,7 +66,7 @@ def loopCount( root ):
     if len( loops ) != 1:
         sys.exit( 'gatecount_build: expected exactly ONE `for _g in …; do` loop in test/regression.sh, '
                   'found %d — the absorb loop changed shape, refusing to publish a number' % len( loops ) )
-    names = loops[ 0 ].split()
+    names = [ w for w in loops[ 0 ].split() if w != '\\' ]   # one name per line: drop the line-continuation backslashes
     if not names:
         sys.exit( 'gatecount_build: the absorb loop in test/regression.sh names 0 gates — refusing' )
     return len( names )
