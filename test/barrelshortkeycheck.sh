@@ -52,7 +52,8 @@
 #       in-tree `import * as utils` binds utils to a module that does not reach the definition: g9 (tests/utils.ts), g4
 #       (tests/utils/index.ts) list the alias first and agree with the <reexports> block; g12 (the real one renamed, so never a leaf
 #       candidate) keeps the decoy hedged; a path tail beside that alias (`utils.legacy.formatDate`) is q_by="path" too. Twins: the
-#       stem alone, and an alias that reaches the stem's own file, stay exact q_by="file"; the tail with no alias stays proven (C5).
+#       stem alone, and an alias that reaches the stem's own file, stay exact q_by="file"; an alias of a package index that
+#       re-exports the definition keeps the chain's proof full; the tail with no alias stays proven (C5).
 #   C12 (fix round 2, MF1b) a MEMBER gets only its owner-path proof, never the file proof: a method in tests/utils.ts (with and without
 #       the alias) and a function nested in a function (`nest.parseIt`) are not exact and carry no q_by="file". Twin: a top-level
 #       function (`flat.topIt`) is exact q_by="file".
@@ -288,6 +289,8 @@ run "$G12" "$TMP/c11r.xml" "--for=utils.formatDate" && {
 skhas   "$TMP/c11r.xml" "C11 g12 (the real one renamed, never a leaf candidate): the stem decoy is hedged" '<rung n="leaf" key="formatDate" q="utils" kept="1" of="1" exact="0"><d n="formatDate" t="fn" p="tests/utils.ts" l="1" q_by="path"/></rung>'
 skhasnt "$TMP/c11r.xml" "C11 g12: never exact" 'exact="1"'
 }
+FU="$TMP/fu"; cp -R "$FK" "$FU"; printf 'import * as utils from "../utils";\nexport function main(): string {\n  return utils.formatDate(1);\n}\n' >"$FU/src/app/main.ts"
+run "$FU" "$TMP/c11u.xml" "--for=where is utils.formatDate defined" && has "$TMP/c11u.xml" "C11 twin: an alias that reaches a re-exporting package index keeps its proof full" '<def n="formatDate" p="src/helpers/date.ts" l="1" q="utils" total="2"/><rx p="src/utils/index.ts"'
 run "$GS" "$TMP/c11s.xml" "--for=utils.formatDate" && skhas "$TMP/c11s.xml" "C11 twin: the stem alone (nothing aliases utils) stays exact" 'q="utils" kept="1" of="1" exact="1"><d n="formatDate" t="fn" p="tests/utils.ts" l="1" q_by="file"/>'
 run "$GR" "$TMP/c11a.xml" "--for=utils.formatDate" && skhas "$TMP/c11a.xml" "C11 twin: an alias that reaches the stem's own file keeps it exact" 'q="utils" kept="1" of="1" exact="1"><d n="formatDate" t="fn" p="tests/utils.ts" l="1" q_by="file"/>'
 run "$G10" "$TMP/c12.xml" "--for=utils.formatDate" && {
