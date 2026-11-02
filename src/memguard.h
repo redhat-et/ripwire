@@ -628,6 +628,29 @@ inline std::string hardStopLine( std::string_view where, std::string_view also =
     return line.append( also ).append( "stopped cleanly without an answer — " ).append( kOverride );
 }
 
+// F-W1: a fold that stops AFTER the call's answer or write is complete (an edit's post-check, the envelope's index stamp)
+// refuses nothing: what is done `stands`, and this line names the gap. Never "without an answer" — there is one.
+inline std::string afterAnswerStopLine( std::string_view rebuild, std::string_view stands, FileGraphStop why )
+{
+    std::string line = "the ";
+    line.append( rebuild ).append( " stopped in the include-closure fold (" );
+    switch( why )
+    {
+    case FileGraphStop::Capacity:
+        line.append( "the file graph passed a 32-bit offset" );
+        break;
+    case FileGraphStop::AllocFailure:
+        line.append( "an allocation failed" );
+        break;
+    case FileGraphStop::MemoryLimit:
+    case FileGraphStop::None:
+        line.append( "memory limit " ).append( limitSpelling( limits().hardBytes ) ).append( ", " ).append( limitSourceClause() );
+        break;
+    }
+    line.append( "); " ).append( stands ).append( " stands, the index was released and the next call retries the build — " );
+    return line.append( why == FileGraphStop::Capacity ? std::string_view( "pass a smaller root" ) : kOverride );
+}
+
 // which line a soft stop crossed, spelled against the limit that sets it (a soft stop is never the limit itself)
 inline std::string stopCause( const MemoryStop& stop )
 {

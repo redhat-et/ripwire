@@ -740,7 +740,7 @@ fi
 #        Same shim, same verdict: the refusal returned while the stream had not finished. Neighbour: --metrics starts the walk too.
 #        The fixture has include edges and is a git repo: a fold over no edge never reaches the seam, and an rc=0 here is a FAIL.
 FXB="$TMP/b21bfx"; cp -R "$ROOT/test/filegraphstopfix" "$FXB"
-( cd "$FXB" && git init -q && git add -A && git -c user.name=t -c user.email=t@t.invalid commit -qm init ) || no "(B21b) premise: the fixture repo did not build"
+( cd "$FXB" && git init -q && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm init ) || no "(B21b) premise: the fixture repo did not build"
 for b21verb in --for=helper --metrics; do
     rm -f "$SHIM/log-served" "$SHIM/log-done"; mkdir -p "$TMP/b21btmp$b21verb"
     t0=$( date +%s )

@@ -3740,8 +3740,14 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // region and blob_sha always, plus edit_check/tests_to_run unless --no-post-check — so this line names what is
     // in hand and the single call that follows; never a second command. test/receiptpostcheck.sh (12) and
     // test/edithandlehintcheck.sh assert the printed next is the receipt's and RUNS.
+    // F-W1: a post-check whose fold stopped AFTER the write is a gap on the receipt (post_check "not run: ..."), never a
+    // refusal: the file is edited, so this exits 0 like any applied edit and says the check did not run
+    const bool postCheckStopped = outcome.resultJson.find( rw::mcpedit::kPostCheckNotRunKey ) != std::string::npos;
     rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}; next: {}\n",
-                  cfg.noPostCheck ? " (post-check skipped)" : ", edit_check, tests_to_run", outcome.next.c_str() );
+                  cfg.noPostCheck        ? " (post-check skipped)"
+                  : postCheckStopped     ? " (post-check not run: its graph fold stopped, see post_check)"
+                                         : ", edit_check, tests_to_run",
+                  outcome.next.c_str() );
     return 0;
 }
 

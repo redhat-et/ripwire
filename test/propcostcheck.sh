@@ -191,10 +191,10 @@ fi
 FGS="$TMP/fgs"; mkdir -p "$FGS" "$TMP/xdg"; cp "$ROOT"/test/filegraphstopfix/* "$FGS"/
 git -C "$FGS" init -q 2>/dev/null
 git -C "$FGS" add -A 2>/dev/null
-git -C "$FGS" -c user.name=t -c user.email=t@example.invalid commit -q -m one 2>/dev/null
+git -C "$FGS" -c user.name=t -c user.email=t@example.com commit -q -m one 2>/dev/null
 echo '// two' >>"$FGS/lib.cpp"
 git -C "$FGS" add -A 2>/dev/null
-git -C "$FGS" -c user.name=t -c user.email=t@example.invalid commit -q -m two 2>/dev/null
+git -C "$FGS" -c user.name=t -c user.email=t@example.com commit -q -m two 2>/dev/null
 echo '// edit' >>"$FGS/lib.cpp"
 stopline(){ grep -c '^ripwire: memory limit reached during the include-closure fold' "$1"; }
 fgs_cli(){   # $1 = label, $2 = seam, $3.. = argv; a fresh cache per label, kept for the "not poisoned" re-run
@@ -230,7 +230,7 @@ done
 # The commit changes files that carry edges, or the changed-files graph has nothing to fold.
 FGR="$TMP/fgr"; cp -R "$FGS" "$FGR"; git -C "$FGR" checkout -q -- . 2>/dev/null
 for f in mid_a.h mid2_a.h use_a.cpp util_a.h; do echo '// three' >>"$FGR/$f"; done
-git -C "$FGR" add -A 2>/dev/null; git -C "$FGR" -c user.name=t -c user.email=t@example.invalid commit -q -m three 2>/dev/null
+git -C "$FGR" add -A 2>/dev/null; git -C "$FGR" -c user.name=t -c user.email=t@example.com commit -q -m three 2>/dev/null
 mkdir -p "$TMP/xdg/rgall"
 XDG_CACHE_HOME="$TMP/xdg/rgall" TMPDIR="$TMP/xdg/rgall" RIPWIRE_TEST_MEMGUARD=foldfrom:1 "$BIN" "$FGR" --no-cache --quality-delta=HEAD~1..HEAD --legend=compact >"$TMP/rgall.out" 2>"$TMP/rgall.err"; rc=$?
 if [ "$rc" = 5 ] && [ ! -s "$TMP/rgall.out" ] && grep -q '^ripwire: memory limit reached during the include-closure fold.*the changed files alone were cut too' "$TMP/rgall.err"; then ok "--quality-delta=A..B, every fold stopped: refused by name, the changed-files form's phase on the line, nothing printed"
@@ -287,6 +287,79 @@ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\
 r="$( mcp_resp "$TMP/mq.out" 2 )"
 case "$r" in "ERR memory limit reached during the include-closure fold"*) ok "MCP quality_delta: the HEAD snapshot's fold stopped, refused, no false regression";; *) no "MCP quality_delta fold:2: ${r:0:250}";; esac
 
+# ── a write verb whose fold stops AFTER its write answers its receipt, never a refusal (rv-file-graph-final F-W1) ──────────────
+# The edit verbs write, then rebuild the index for the post-check, then the envelope stamps _index from it; quality_baseline writes
+# its sidecar, then the stamp rebuilds. A stop in either rebuild refuses nothing: the write stands, so the call answers a RESULT
+# with the write on it and the stop named (post_check "not run: ...", or _index "not rebuilt" plus _memory_stop). A refusal
+# there makes an agent retry, and an insert retried inserts twice. fold:1 is the locate build, before any write: still refused.
+mcp_full(){ python3 - "$1" "$2" <<'PY'
+import json, sys
+for line in open( sys.argv[1], encoding="utf-8", errors="replace" ):
+    line = line.strip()
+    if line.startswith( "{" ):
+        try:
+            r = json.loads( line )
+        except ValueError:
+            continue
+        if r.get( "id" ) == int( sys.argv[2] ):
+            e = r.get( "error" )
+            if e:
+                print( "ERR " + e.get( "message", "" ) )
+            else:
+                res = r.get( "result", {} )
+                print( "OK " + "".join( c.get( "text", "" ) for c in res.get( "content", [] ) ) + " _index=" + res.get( "_index", "" ) + " _memory_stop=" + res.get( "_memory_stop", "" ) )
+PY
+}
+mcp_write(){   # $1 = label, $2 = seam, $3 = tool, $4 = extra arguments JSON; a fresh copy of the fixture and a fresh cache per label
+    local d="$TMP/w_$1"; rm -rf "$d" "$TMP/xdg/w_$1"; cp -R "$FGS" "$d"; mkdir -p "$TMP/xdg/w_$1"
+    { printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}'
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$3\",\"arguments\":{\"path\":\"$d\"$4}}}"; } \
+        | ( cd "$d" && XDG_CACHE_HOME="$TMP/xdg/w_$1" TMPDIR="$TMP/xdg/w_$1" env ${2:+RIPWIRE_TEST_MEMGUARD="$2"} perl -e 'alarm shift; exec @ARGV' 60 "$BIN" --mcp 2>/dev/null ) >"$TMP/w_$1.out"
+    mcp_full "$TMP/w_$1.out" 2
+}
+INS=',"symbol":"unrelated","file":"lib.cpp","text":"int added_fn(){ return 7; }\n"'
+for seam in "" fold:1 fold:2 fold:3; do
+    lab="ins${seam/:/}"; r="$( mcp_write "$lab" "$seam" insert_after_symbol "$INS" )"
+    n="$( grep -c added_fn "$TMP/w_$lab/lib.cpp" 2>/dev/null )"
+    case "$seam" in
+    "")     case "$r" in OK*'"applied":"insert_after_symbol"'*'"edit_check"'*) [ "$n" = 1 ] && ok "MCP insert_after_symbol, no seam: applied with its post-check, the text once (the positive twin)" || no "insert no seam: added_fn x$n";;
+            *) no "MCP insert_after_symbol no seam: ${r:0:250}";; esac;;
+    fold:1) case "$r" in "ERR memory limit reached during the include-closure fold"*) [ "$n" = 0 ] && ok "MCP insert_after_symbol fold:1 (the locate build, before the write): refused by name, file untouched" || no "insert fold:1 refused but added_fn x$n";;
+            *) no "MCP insert_after_symbol fold:1: ${r:0:250}";; esac;;
+    *)      case "$r" in OK*'"applied":"insert_after_symbol"'*'"blob_sha"'*) ;; *) no "MCP insert_after_symbol $seam (a stop after the write): not a receipt: ${r:0:300}"; continue;; esac
+            if [ "$n" = 1 ] && { printf '%s' "$r" | grep -q '"post_check":"not run: the post-edit check stopped in the include-closure fold' \
+                                 || printf '%s' "$r" | grep -q '_index=\[index: not rebuilt.*_memory_stop=the index rebuild after this answer stopped'; }; then
+                ok "MCP insert_after_symbol $seam: the stop after the write is on the receipt (applied, blob_sha, the stop named), the text once"
+            else no "MCP insert_after_symbol $seam: added_fn x$n, no stop named: ${r:0:400}"; fi;;
+    esac
+done
+# a neighbour the review did not run: replace_symbol_body, the other op through the same driver
+r="$( mcp_write rep2 fold:2 replace_symbol_body ',"symbol":"unrelated","file":"lib.cpp","new_body":"int unrelated(){ return 9; }"' )"
+case "$r" in OK*'"applied":"replace_symbol_body"'*'"post_check":"not run: '*) grep -q 'return 9' "$TMP/w_rep2/lib.cpp" && ok "MCP replace_symbol_body fold:2: applied, post_check not run, the stop named" || no "replace fold:2: receipt but file not edited";;
+*) no "MCP replace_symbol_body fold:2: ${r:0:300}";; esac
+# quality_baseline: the sidecar is written, then the stamp's rebuild stops: the answer stands, the stamp and _memory_stop say so
+r="$( mcp_write qb2 fold:2 quality_baseline '' )"
+case "$r" in OK*'_index=[index: not rebuilt'*'_memory_stop=the index rebuild after this answer stopped in the include-closure fold'*)
+    [ -s "$TMP/w_qb2/.ripwire_quality_baseline" ] && ok "MCP quality_baseline fold:2: the sidecar written, answered with the index stop named (_index not rebuilt, _memory_stop)" || no "qb fold:2: answered but no sidecar";;
+*) no "MCP quality_baseline fold:2: ${r:0:300}";; esac
+r="$( mcp_write qb0 "" quality_baseline '' )"
+case "$r" in OK*'_index=[index: files='*) [ -s "$TMP/w_qb0/.ripwire_quality_baseline" ] && ok "MCP quality_baseline, no seam: the sidecar written, a whole stamp (the positive twin)" || no "qb no seam: no sidecar";;
+*) no "MCP quality_baseline no seam: ${r:0:300}";; esac
+# the CLI twin of the edit driver: exit 0 with the receipt (the file is edited), the stop named on it and on the stderr line
+d="$TMP/w_cli"; rm -rf "$d"; cp -R "$FGS" "$d"; printf 'int added_fn(){ return 7; }\n' >"$TMP/w_cli.payload"; mkdir -p "$TMP/xdg/w_cli"
+( cd "$d" && XDG_CACHE_HOME="$TMP/xdg/w_cli" TMPDIR="$TMP/xdg/w_cli" RIPWIRE_TEST_MEMGUARD=fold:2 "$BIN" "$d" --insert-after-symbol=unrelated --edit-target-file=lib.cpp --edit-payload="$TMP/w_cli.payload" >"$TMP/w_cli.out" 2>"$TMP/w_cli.err" ); rc=$?
+if [ "$rc" = 0 ] && grep -q '"post_check":"not run: ' "$TMP/w_cli.out" && grep -q 'post-check not run' "$TMP/w_cli.err" && [ "$( grep -c added_fn "$d/lib.cpp" )" = 1 ]; then
+    ok "CLI --insert-after-symbol fold:2: exit 0, the receipt names the stopped post-check, the text once"
+else no "CLI --insert-after-symbol fold:2: rc=$rc added_fn x$( grep -c added_fn "$d/lib.cpp" ) out: $( head -c 200 "$TMP/w_cli.out" ) err: $( head -c 200 "$TMP/w_cli.err" )"; fi
+
+# the plan surface: each op's post-check and the receipt's count both rebuild after every file is written
+d="$TMP/w_plan"; rm -rf "$d"; cp -R "$FGS" "$d"; mkdir -p "$d/plans" "$TMP/xdg/w_plan"; printf 'int added_fn(){ return 7; }\n' >"$d/plans/add.cpp"
+printf '%s\n' '{"version":1,"edits":[{"op":"insert_after_symbol","target":"unrelated","file":"lib.cpp","payload":"add.cpp"}]}' >"$d/plans/p.json"
+( cd "$d" && XDG_CACHE_HOME="$TMP/xdg/w_plan" TMPDIR="$TMP/xdg/w_plan" RIPWIRE_TEST_MEMGUARD=foldfrom:2 "$BIN" . --edit-plan=plans/p.json --apply >"$TMP/w_plan.out" 2>"$TMP/w_plan.err" ); rc=$?
+if [ "$rc" = 0 ] && grep -q '"post_check":"not run: ' "$TMP/w_plan.out" && grep -q '"counts_floor_unavailable":"the post-apply index rebuild stopped' "$TMP/w_plan.out" && [ "$( grep -c added_fn "$d/lib.cpp" )" = 1 ]; then
+    ok "CLI --edit-plan --apply, every fold after the locate stopped: exit 0, the op's post_check and the receipt's count name the stop, the text once"
+else no "CLI --edit-plan --apply foldfrom:2: rc=$rc added_fn x$( grep -c added_fn "$d/lib.cpp" ) out: $( head -c 200 "$TMP/w_plan.out" ) err: $( head -c 200 "$TMP/w_plan.err" )"; fi
+
 # The call after a stop rebuilds: the envelope released the index even when the stop was a verb's own graph, not the index's.
 rm -rf "$TMP/xdg/mcp"; mkdir -p "$TMP/xdg/mcp"
 fr="{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"find_referencing_symbols\",\"arguments\":{\"path\":\"$FGS\",\"symbol\":\"helper\"}}}"
@@ -322,6 +395,52 @@ PY
 XDG_CACHE_HOME="$TMP/xdg/mcp" TMPDIR="$TMP/xdg/mcp" perl -e 'alarm shift; exec @ARGV' 90 python3 "$WARMUP_PY" "$BIN" "$FGS" >"$TMP/warm.out" 2>&1; rc=$?
 if [ "$rc" = 0 ] && [ "$( cat "$TMP/warm.out" )" = whole ]; then ok "--listen warm-up over a stopped fold: the server stays up, disclosed on stderr, and the first request answers whole"
 else no "--listen warm-up: rc=$rc $( tail -c 240 "$TMP/warm.out" )"; fi
+
+# --lsp: a request whose fold stops is answered -32803 RequestFailed with the stop line and the server keeps serving. initialize
+# at fold:1 fails and the retried initialize serves; a rebuild mid-session (an edited file, then references) at fold:2 fails and
+# the next references answers. The server exits 0 after shutdown/exit: never the crashed server a stop used to leave.
+LSP_PY="$TMP/lspstop.py"
+cat >"$LSP_PY" <<'PY'
+import json, os, subprocess, sys
+bin_, root, seam, mode = sys.argv[1:5]
+p = subprocess.Popen( [ bin_, root, "--lsp" ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=root, env=dict( os.environ, RIPWIRE_TEST_MEMGUARD=seam ) )
+def send( o ):
+    b = json.dumps( o ).encode(); p.stdin.write( b"Content-Length: %d\r\n\r\n" % len( b ) + b ); p.stdin.flush()
+def recv():
+    h = b""
+    while not h.endswith( b"\r\n\r\n" ):
+        c = p.stdout.read( 1 )
+        if not c: return None
+        h += c
+    n = int( [ l for l in h.split( b"\r\n" ) if l.lower().startswith( b"content-length" ) ][0].split( b":" )[1] )
+    return json.loads( p.stdout.read( n ) )
+def tag( r ):
+    if r is None: return "NONE"
+    e = r.get( "error" )
+    return "ERR%d:%s" % ( e[ "code" ], e[ "message" ][ :70 ] ) if e else "OK" + ( "[]" if r.get( "result" ) == [] else "" )
+uri = "file://" + root
+refs = { "textDocument": { "uri": uri + "/util_a.h" }, "position": { "line": 1, "character": 12 }, "context": { "includeDeclaration": True } }
+out = []
+send( { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": { "rootUri": uri } } ); out.append( tag( recv() ) )
+if mode == "init":
+    send( { "jsonrpc": "2.0", "id": 2, "method": "initialize", "params": { "rootUri": uri } } ); out.append( tag( recv() ) )
+else:
+    open( os.path.join( root, "use_a.cpp" ), "a" ).write( "// stale\n" )
+    send( { "jsonrpc": "2.0", "id": 2, "method": "textDocument/references", "params": refs } ); out.append( tag( recv() ) )
+send( { "jsonrpc": "2.0", "id": 3, "method": "textDocument/references", "params": refs } ); out.append( tag( recv() ) )
+send( { "jsonrpc": "2.0", "id": 4, "method": "shutdown" } ); recv(); send( { "jsonrpc": "2.0", "method": "exit" } )
+p.stdin.close(); p.wait()
+print( " ".join( out ) + " rc=%d" % p.returncode )
+PY
+for shape in init:fold:1 mid:fold:2; do
+    mode="${shape%%:*}"; seam="${shape#*:}"; d="$TMP/lsp_$mode"; rm -rf "$d" "$TMP/xdg/lsp_$mode"; cp -R "$FGS" "$d"; mkdir -p "$TMP/xdg/lsp_$mode"
+    r="$( XDG_CACHE_HOME="$TMP/xdg/lsp_$mode" TMPDIR="$TMP/xdg/lsp_$mode" perl -e 'alarm shift; exec @ARGV' 60 python3 "$LSP_PY" "$BIN" "$d" "$seam" "$mode" 2>&1 )"
+    case "$mode:$r" in
+    "init:ERR-32803:ripwire --lsp: memory limit reached during the include-closure fold"*" OK OK rc=0") ok "--lsp initialize at fold:1: -32803 naming the stop, the retried initialize serves, references answer, exit 0";;
+    "mid:OK ERR-32803:ripwire --lsp: memory limit reached during the include-closure fold"*" OK rc=0") ok "--lsp references after an edit at fold:2: -32803 naming the stop, the next references answers, exit 0";;
+    *) no "--lsp $shape: $r";;
+    esac
+done
 
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

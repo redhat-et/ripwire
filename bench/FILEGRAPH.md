@@ -127,10 +127,20 @@ fix, 172 MB after, 183 MB at base).
   one footprint reading against the hard line. Over it, the fold stops and THROWS `FileGraphStopped` (`src/infra/fileGraphStop.h`):
   a stopped fold is a failed build, never a partial store handed back, so no reader can answer from one and none has to remember to
   check. There is no process-wide stop flag, so nothing is sticky. Each surface refuses in its own words: `dispatchMain` (every CLI
-  verb: exit 5, one stderr line), the MCP request envelope (the call is refused by name, the half-built index is released, the next
-  call rebuilds and is served), `--quality-delta=A..B` (the phase is recorded and the changed files answer, disclosed), and the
-  qsnap prefetch worker (drops the result, writes nothing). `computeHeadSnapshot` never reaches its score or its write, so no
-  qsnap, sidecar or cache is written from a stopped fold (`test/propcostcheck.sh` pins every path). An allocation failure anywhere
+  verb: exit 5, one stderr line, except the range form, an edit after its write and `--lsp`, below), the MCP request envelope (the call is refused by name, the half-built index is
+  released, and the next call retries the build: it is served once memory allows, and refused again while the limit still binds),
+  `--quality-delta=A..B` (the phase is recorded and the changed files answer, exit 6, disclosed), and the qsnap prefetch worker (drops
+  the result, writes nothing). A write is never followed by a refusal: an edit (the MCP and CLI edit verbs, each op of
+  `--edit-plan --apply`) whose post-check fold stops answers its receipt with `post_check` "not run" and the stop named (the CLI
+  exits 0, the file is edited), and an MCP write whose envelope stamp rebuild stops (`quality_baseline`'s sidecar, an edit) answers
+  with `_index` "not rebuilt" and `_memory_stop`. `computeHeadSnapshot` never reaches its score or its write, so no qsnap, sidecar
+  or cache is written from a stopped fold. `test/propcostcheck.sh` pins: CLI `--quality-delta`, `--edit-check`, the range form at
+  fold:1, fold:2 and every fold, `--grep`, `--deps` and `--arch=FILE` at the second fold, `--insert-after-symbol` and `--edit-plan --apply` after their writes;
+  MCP `find_referencing_symbols`, `quality_baseline`, `quality_delta`, `edit_check`, `insert_after_symbol` (before and after its
+  write), `replace_symbol_body` and `quality_baseline` after their write, the release of the index, the `--listen` warm-up, and `--lsp` (initialize at the
+  first fold, references after an edit at the second: -32803 RequestFailed naming the stop, the server keeps serving). Not pinned:
+  the qsnap prefetch worker, CLI `--quality-baseline`, MCP `batch`, `edit_check` with `new_body`.
+  An allocation failure anywhere
   in the fold, the component scan and the reach scan included, is a stop of the same kind (`fileSetStore.h`: the whole fold is
   inside its `try`); `FileAdjacency::fromEdges` past its edge limit throws the same exception. `RIPWIRE_TEST_MEMGUARD=fold:N` stops the Nth fold of the process
   (buildGraph's is the first), for the gates.
