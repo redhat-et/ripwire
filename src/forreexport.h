@@ -80,7 +80,8 @@ inline constexpr std::string_view kReexportLegend =
     "cands=N the path names N same-named crates (hedged); ns= a namespace hop (`import * as X` then `export { X }`, or `export * as X from`): "
     "the whole module published as X; def q= the qualifier the task wrote the name under (`Q.name`), proven at a hop or the definition's "
     "own file and printed first (when one chain proves every segment, a same-named definition that cannot is not listed); q_by=alias "
-    "only a consumer's own `import * as Q` reaches it, q_by=dir only directories on its path name Q (both hedged); q_unmatched=1 no "
+    "only a consumer's own `import * as Q` reaches it, q_by=path its file path names Q but an `import * as Q` binds Q to another module, "
+    "q_by=dir only directories on its path name Q (all hedged); q_unmatched=1 no "
     "chain proves Q (listed because the task asks where it comes from); u p= l= a task-named file's own import of it (the chain's start); "
     "as_skipped=N renamed re-exports not followed; rows, not call edges -->";
 
@@ -639,6 +640,8 @@ enum class QProof : std::uint8_t
 {
     None,
     Dir,      // each Q segment is SOME directory (or the stem) of the path, not its own tail: a coincidence (src/utils/legacy/old.ts)
+    Path,     // a Strong PATH proof (stem, tail, package file) of Q's leading segments while an in-tree `import * as Q0` binds Q's
+              // first segment to a module that does not reach the definition: the tree's own binding contradicts the file name
     Alias,    // only a consumer's own `import * as Q from M` reaches it (M resolves to the spelling's file; nothing exports Q)
     Strong,   // the stem or the path's own tail, a package file's directory, every owner-scope segment, or a namespace hop spells Q
 };
@@ -681,7 +684,10 @@ inline std::string_view reexportStem( std::string_view rel )
 //   Dir     each segment is the stem or SOME directory of F, out of order or with others between (`utils` for
 //           `src/utils/legacy/old.ts`): something closer (`legacy`, `old`) is unexplained, so it is a lead, hedged.
 //   None    otherwise (a same-named definition elsewhere is never picked by its leaf alone). Case-sensitive.
-inline QProof qualifierProofAt( std::string_view rel, const std::vector<std::string>& mods, const std::vector<std::string>& q )
+// `boundElsewhere`: an in-tree `import * as Q0` binds Q's first segment and none of its modules reaches the definition, so a Strong
+// proof that rests on the path for any segment (rest > 0) is only Path (hedged); a namespace path that spells all of Q (rest = 0) is
+// itself a binding and stays Strong.
+inline QProof qualifierProofAt( std::string_view rel, const std::vector<std::string>& mods, const std::vector<std::string>& q, bool boundElsewhere = false )
 {
     if( q.empty() || q.size() < mods.size() || !std::equal( mods.begin(), mods.end(), q.end() - std::ptrdiff_t( mods.size() ) ) )
     {
@@ -698,9 +704,10 @@ inline QProof qualifierProofAt( std::string_view rel, const std::vector<std::str
     {
         joined.append( i ? "." : "" ).append( q[ i ] );
     }
+    const QProof path = boundElsewhere ? QProof::Path : QProof::Strong;
     if( stem == joined || ( stem.size() > joined.size() && stem.ends_with( joined ) && stem[ stem.size() - joined.size() - 1 ] == '.' ) )
     {
-        return QProof::Strong;
+        return path;
     }
     std::vector<std::string_view> segs;   // the directories, then the stem
     for( std::size_t at = 0, slash = rel.find( '/' ); slash != std::string_view::npos; at = slash + 1, slash = rel.find( '/', at ) )
@@ -713,7 +720,7 @@ inline QProof qualifierProofAt( std::string_view rel, const std::vector<std::str
     const bool package = stem == "index" || stem == "__init__" || stem == "mod" || rel.ends_with( ".go" );
     if( tailIs( 0 ) || ( package && tailIs( 1 ) ) )
     {
-        return QProof::Strong;
+        return path;
     }
     const bool everyDir = std::all_of( q.begin(), q.begin() + std::ptrdiff_t( rest ), [ & ]( const std::string& seg ) { return std::ranges::find( segs, seg ) != segs.end(); } );
     return everyDir ? QProof::Dir : QProof::None;
@@ -729,6 +736,26 @@ inline QProof aliasProofAt( Walk& w, std::uint32_t file, const std::vector<std::
         return QProof::None;
     }
     return std::ranges::any_of( hit->second, [ & ]( const Binding* b ) { return w.webTarget( b ) == file; } ) ? QProof::Alias : QProof::None;
+}
+
+// Whether the tree binds Q's first segment elsewhere: some Web file does `import * as Q0 from M` and no such M resolves to a file in
+// `reached` (the definition's own file and every file that re-exports it). An unresolved M (a package outside the tree) binds Q0
+// elsewhere too. False when nothing aliases Q0.
+inline bool qualifierBoundElsewhere( Walk& w, const std::vector<std::string>& q, const std::vector<std::uint32_t>& reached )
+{
+    const auto hit = q.empty() ? w.webAliasByVar.end() : w.webAliasByVar.find( q.front() );
+    return hit != w.webAliasByVar.end() && std::ranges::none_of( hit->second, [ & ]( const Binding* b ) { return std::ranges::find( reached, w.webTarget( b ) ) != reached.end(); } );
+}
+
+// The files a chain's spellings sit in: the definition's own, then every row's (a Web spelling's crate is its file).
+inline std::vector<std::uint32_t> chainFiles( const Chain& c )
+{
+    std::vector<std::uint32_t> files{ c.def->fileId };
+    for( const Row& r : c.rows )
+    {
+        files.push_back( r.at.crate );
+    }
+    return files;
 }
 
 // The statements that may re-export spelling `s`: by its name, every glob, and (Rust) by each module segment of its path.
@@ -1092,7 +1119,7 @@ inline std::pair<std::string_view, std::string_view> reexportRowName( const Chai
     return renamed ? std::pair<std::string_view, std::string_view>{ "as", r.b->var } : std::pair<std::string_view, std::string_view>{};
 }
 
-// The def row's qualifier: q= as the task wrote it, then the hedge when no spelling proves every segment (q_by=alias|dir, or
+// The def row's qualifier: q= as the task wrote it, then the hedge when no spelling proves every segment (q_by=alias|path|dir, or
 // q_unmatched="1" when nothing proves it). "" for an unqualified name.
 inline std::string reexportQualifierAttrs( const Chain& c, std::vector<char>& esc )
 {
@@ -1104,6 +1131,7 @@ inline std::string reexportQualifierAttrs( const Chain& c, std::vector<char>& es
     return out.append( c.qLevel == QProof::Strong ? ""
                        : c.qLevel == QProof::None ? " q_unmatched=\"1\""
                        : c.qLevel == QProof::Alias ? " q_by=\"alias\""
+                       : c.qLevel == QProof::Path  ? " q_by=\"path\""
                                                    : " q_by=\"dir\"" );
 }
 
@@ -1342,8 +1370,9 @@ inline void indexReexportRecords( const IngestResult& ing, bool rust, bool web, 
 // spelling that gives it (Chain::qRow): the definition's own file, then the rows in walk order.
 inline void proveChainQualifier( Walk& w, Chain& c )
 {
-    const auto at = [ & ]( std::uint32_t file, const std::vector<std::string>& mods )
-    { return std::max( qualifierProofAt( rootRelPath( w.ing, file ), mods, c.q ), aliasProofAt( w, file, mods, c.q ) ); };
+    const bool bound = qualifierBoundElsewhere( w, c.q, chainFiles( c ) );
+    const auto at    = [ & ]( std::uint32_t file, const std::vector<std::string>& mods )
+    { return std::max( qualifierProofAt( rootRelPath( w.ing, file ), mods, c.q, bound ), aliasProofAt( w, file, mods, c.q ) ); };
     c.qLevel = at( c.def->fileId, {} );
     c.qRow   = c.qLevel == QProof::None ? -2 : -1;
     for( std::size_t i = 0; i < c.rows.size() && c.qLevel != QProof::Strong; ++i )
@@ -1516,8 +1545,9 @@ inline constexpr std::string_view kShortKeyLegend =
     "<!-- shortkey: the task names X, the route read it as a name (name-exact) and no definition resolved; the ladder below says what "
     "does exist, each rung named, none of it a definition of X unless exact=1. rungs= the rungs run, in order. "
     "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove every segment of Q (q_by=scope: its owner path; file: "
-    "its file stem or path tail; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own `import * as Q`; dir: only "
-    "directories on its path; alias and dir are hedged and kept only when nothing proves Q fully), of= all named leaf; exact=1 one "
+    "its file stem or path tail, never for a member; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own "
+    "`import * as Q`; path: its file path names Q but an `import * as Q` binds Q to another module; dir: only directories on its path; "
+    "alias, path and dir are hedged and kept only when nothing proves Q fully), of= all named leaf; exact=1 one "
     "fully proven (the ladder stops), cands=N several (hedged), q_unmatched=1 none proves Q (the rows are same-leaf definitions, NOT "
     "the one asked). "
     "rung n=substring: definitions whose name contains key (exact=0 always). rung n=literal: declaration-shaped source lines of key "
@@ -1567,13 +1597,13 @@ inline std::vector<std::string> scopeSegments( std::string_view scope )
 // Q against a definition's OWNER path (its stored scope, or the type whose line span holds it): Q names the owner's tail (`Cls` or
 // `b::Cls` for a::b::Cls), or Q ends with the whole owner and the segments before it are proven by the file (qualifierProofAt). The
 // last segment alone never proves a longer Q (`Wrong.Fmt3.leaf` is not `Fmt3.leaf`).
-inline QProof ownerProof( const IngestResult& ing, const std::vector<std::string>& owner, std::uint32_t file, const std::vector<std::string>& q )
+inline QProof ownerProof( const IngestResult& ing, const std::vector<std::string>& owner, std::uint32_t file, const std::vector<std::string>& q, bool boundElsewhere )
 {
     if( !owner.empty() && owner.size() >= q.size() && std::equal( q.begin(), q.end(), owner.end() - std::ptrdiff_t( q.size() ) ) )
     {
         return QProof::Strong;
     }
-    return owner.empty() ? QProof::None : reexport_detail::qualifierProofAt( rootRelPath( ing, file ), owner, q );
+    return owner.empty() ? QProof::None : reexport_detail::qualifierProofAt( rootRelPath( ing, file ), owner, q, boundElsewhere );
 }
 
 // The Web walk the leaf rung needs (built once, only when a Web definition is left to prove through its chain).
@@ -1600,8 +1630,11 @@ struct LeafWalk
 };
 
 // The strongest proof of Q for definition `s` (named leaf): its owner path, its file, and for a Web definition its re-export chain
-// (namespace hops, a consumer's alias), or for a member the chain of its owner type under the rest of Q.
-inline Proven leafProof( const IngestResult& ing, const Symbol& s, const std::vector<const Symbol*>& owners, const std::vector<std::string>& q, LeafWalk& lw )
+// (namespace hops, a consumer's alias), or for a member the chain of its owner type under the rest of Q. A MEMBER (`member`: inside a
+// type's or function's line span, stored with no owner scope) gets only its owner-path proofs, never the bare file proof (`utils.f`
+// cannot name a method of a class in utils.ts). `qAliased`: some Web file does `import * as Q0` for Q's first segment; a path proof
+// is then only Path (hedged) unless one of those modules reaches this definition (qualifierBoundElsewhere).
+inline Proven leafProof( const IngestResult& ing, const Symbol& s, const std::vector<const Symbol*>& owners, const std::vector<std::string>& q, LeafWalk& lw, bool member, bool qAliased )
 {
     using namespace reexport_detail;
     Proven     best{ &s, {}, QProof::None };
@@ -1613,38 +1646,75 @@ inline Proven leafProof( const IngestResult& ing, const Symbol& s, const std::ve
         }
     };
     const bool web = dependencyDialect( s.lang ) == DepDialect::Web;
-    if( !s.scope.empty() )
-    {
-        consider( ownerProof( ing, scopeSegments( s.scope ), s.fileId, q ), "scope" );
-    }
+    std::vector<const Symbol*> mine;   // the owners whose line span holds s (a member the index stores with no owner scope)
     for( const Symbol* o : s.scope.empty() && s.kind != SymKind::Class ? owners : std::vector<const Symbol*>{} )
     {
-        if( o->fileId == s.fileId && s.line > o->line && s.line < o->line + o->loc )   // a member the index stores with no owner scope
+        if( o->fileId == s.fileId && s.line > o->line && s.line < o->line + o->loc )
         {
-            std::vector<std::string> path = scopeSegments( o->scope );
-            path.push_back( o->name );
-            consider( ownerProof( ing, path, s.fileId, q ), "scope" );
-            if( q.size() > 1 && web && reexportDefKind( *o ) )   // `Utils.Fmt3.leaf`: the owner type published under the rest of Q
-            {
-                consider( walkedChain( lw.get(), o, /*rust=*/false, std::vector<std::string>( q.begin(), q.end() - 1 ) ).qLevel, "ns" );
-            }
+            mine.push_back( o );
         }
     }
-    if( s.scope.empty() )
+    const bool           ownChain = s.scope.empty() && !member && web && reexportDefKind( s );
+    std::optional<Chain> chain;   // s's own chain, walked once (its qualifier proof applies the same bound rule)
+    bool                 bound = false;
+    if( qAliased )
     {
-        consider( qualifierProofAt( rootRelPath( ing, s.fileId ), {}, q ), "file" );
+        std::vector<std::uint32_t> reached{ s.fileId };
+        if( ownChain )
+        {
+            chain.emplace( walkedChain( lw.get(), &s, /*rust=*/false, q ) );
+            reached = chainFiles( *chain );
+        }
+        for( const Symbol* o : q.size() > 1 && web ? mine : std::vector<const Symbol*>{} )
+        {
+            if( reexportDefKind( *o ) )
+            {
+                const std::vector<std::uint32_t> more = chainFiles( walkedChain( lw.get(), o, /*rust=*/false, std::vector<std::string>( q.begin(), q.end() - 1 ) ) );
+                reached.insert( reached.end(), more.begin(), more.end() );
+            }
+        }
+        bound = qualifierBoundElsewhere( lw.get(), q, reached );
     }
-    if( s.scope.empty() && web && reexportDefKind( s ) && best.level != QProof::Strong )
+    if( !s.scope.empty() )
     {
-        const Chain c = walkedChain( lw.get(), &s, /*rust=*/false, q );
-        consider( c.qLevel, c.qRow == -1 ? "file" : "ns" );
+        consider( ownerProof( ing, scopeSegments( s.scope ), s.fileId, q, bound ), "scope" );
     }
-    best.by = best.level == QProof::Dir ? "dir" : best.level == QProof::Alias ? "alias" : best.by;
+    for( const Symbol* o : mine )
+    {
+        std::vector<std::string> path = scopeSegments( o->scope );
+        path.push_back( o->name );
+        consider( ownerProof( ing, path, s.fileId, q, bound ), "scope" );
+        if( q.size() > 1 && web && reexportDefKind( *o ) )   // `Utils.Fmt3.leaf`: the owner type published under the rest of Q
+        {
+            consider( walkedChain( lw.get(), o, /*rust=*/false, std::vector<std::string>( q.begin(), q.end() - 1 ) ).qLevel, "ns" );
+        }
+    }
+    if( s.scope.empty() && !member )
+    {
+        consider( qualifierProofAt( rootRelPath( ing, s.fileId ), {}, q, bound ), "file" );
+    }
+    if( ownChain && best.level != QProof::Strong )
+    {
+        if( !chain )
+        {
+            chain.emplace( walkedChain( lw.get(), &s, /*rust=*/false, q ) );
+        }
+        consider( chain->qLevel, chain->qRow == -1 ? "file" : "ns" );
+    }
+    best.by = best.level == QProof::Dir ? "dir" : best.level == QProof::Alias ? "alias" : best.level == QProof::Path ? "path" : best.by;
     return best;
 }
 
+// Whether `s` (stored with no owner scope) sits strictly inside another definition's line span in its file: a class/struct/
+// interface member or a function nested in a function or method. `spans` holds those definitions, sorted by file.
+inline bool leafIsMember( const Symbol& s, const std::vector<const Symbol*>& spans )
+{
+    const auto lo = std::ranges::lower_bound( spans, s.fileId, {}, []( const Symbol* t ) { return t->fileId; } );
+    return s.scope.empty() && std::any_of( lo, spans.end(), [ & ]( const Symbol* t ) { return t->fileId == s.fileId && t != &s && s.line > t->line && s.line < t->line + t->loc; } );
+}
+
 // The leaf rung: the definitions named `leaf` that prove qualifier `q`. When one is Strong, only the Strong ones (exact when one);
-// otherwise every hedged one (alias, dir), never exact. `sameLeaf` gets every definition named leaf.
+// otherwise every hedged one (alias, path, dir), never exact. `sameLeaf` gets every definition named leaf.
 inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_view leaf, const std::vector<std::string>& q, std::vector<const Symbol*>& sameLeaf )
 {
     // the type definitions named like the qualifier's last segment: a member the index stores with no owner scope (TS/JS methods) is
@@ -1656,16 +1726,36 @@ inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_
         {
             owners.push_back( &s );
         }
-    }
-    LeafWalk            lw{ ing, {}, {}, {}, {} };
-    std::vector<Proven> all;
-    for( const Symbol& s : ing.symbols )
-    {
         if( s.name == leaf )
         {
             sameLeaf.push_back( &s );
-            all.push_back( leafProof( ing, s, owners, q, lw ) );
         }
+    }
+    // the definitions whose span may hold a leaf definition (only in the leaf definitions' files), sorted by file
+    std::vector<std::uint32_t> leafFiles;
+    for( const Symbol* s : sameLeaf )
+    {
+        leafFiles.push_back( s->fileId );
+    }
+    std::ranges::sort( leafFiles );
+    std::vector<const Symbol*> spans;
+    for( const Symbol& t : ing.symbols )
+    {
+        const bool holder = t.kind == SymKind::Class || t.kind == SymKind::Struct || t.kind == SymKind::Interface || t.kind == SymKind::Function || t.kind == SymKind::Method;
+        if( holder && t.loc > 1 && std::ranges::binary_search( leafFiles, t.fileId ) )
+        {
+            spans.push_back( &t );
+        }
+    }
+    std::ranges::stable_sort( spans, {}, []( const Symbol* t ) { return t->fileId; } );
+    // Q's first segment bound by a Web `import * as Q0` somewhere (the walk that resolves its modules is built only then)
+    const bool qAliased = std::ranges::any_of( ing.bindings, [ & ]( const Binding& b )
+                                               { return b.kind == LocalBindKind::ModuleAlias && b.importedName == "*" && !b.isFromAssignment && b.var == q.front(); } );
+    LeafWalk            lw{ ing, {}, {}, {}, {} };
+    std::vector<Proven> all;
+    for( const Symbol* s : sameLeaf )
+    {
+        all.push_back( leafProof( ing, *s, owners, q, lw, leafIsMember( *s, spans ), qAliased ) );
     }
     const bool strong = std::ranges::any_of( all, []( const Proven& p ) { return p.level == QProof::Strong; } );
     std::vector<Proven> kept;

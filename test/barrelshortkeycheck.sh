@@ -48,6 +48,14 @@
 #   C7  `this.leaf` / `self.leaf` in a CUED task print no block (without the guard the qualifier `this` would be kept unproven), and
 #       `--for=this.formatDate` prints no <shortkey>. Positive twin: C4.
 #   C8  a namespace re-export cycle (a.ts `export * as B from './b'`, b.ts `export * as A from './a'`) ends: total="2", no capped=.
+#   C11 (fix round 2, MF1a) a PATH-only proof (file stem, package index) of `utils.` is hedged q_by="path", never exact, when an
+#       in-tree `import * as utils` binds utils to a module that does not reach the definition: g9 (tests/utils.ts), g4
+#       (tests/utils/index.ts) list the alias first and agree with the <reexports> block; g12 (the real one renamed, so never a leaf
+#       candidate) keeps the decoy hedged; a path tail beside that alias (`utils.legacy.formatDate`) is q_by="path" too. Twins: the
+#       stem alone, and an alias that reaches the stem's own file, stay exact q_by="file"; the tail with no alias stays proven (C5).
+#   C12 (fix round 2, MF1b) a MEMBER gets only its owner-path proof, never the file proof: a method in tests/utils.ts (with and without
+#       the alias) and a function nested in a function (`nest.parseIt`) are not exact and carry no q_by="file". Twin: a top-level
+#       function (`flat.topIt`) is exact q_by="file".
 #   C10 a STORED owner scope (Python `class Cls` in m3.py): `m3.Cls.parseRow` is exact q_by="scope" (the scope and the stem prove
 #       both segments); `wrong.Cls.parseRow` is q_unmatched; C++ `n3::Cls::runTask` is never exact (the index stores the innermost
 #       owner only, so the namespace segment stays unproven: a disclosed floor, never a wrong exact).
@@ -236,7 +244,8 @@ run "$W" "$TMP/c4.xml" "--for=where is Wrong.leaf defined" && {
 has     "$TMP/c4.xml" "C4 cued, nothing proves Q: the definition kept, q_unmatched" '<def n="leaf" p="src/lib/m.ts" l="1" q="Wrong" q_unmatched="1"'
 }
 run "$F1" "$TMP/c5.xml" "--for=legacy.old.formatDate" && has "$TMP/c5.xml" "C5 path tail legacy/old proves legacy.old" '<def n="formatDate" p="src/utils/legacy/old.ts" l="1" q="legacy.old" total="1"/>'
-run "$F1" "$TMP/c5b.xml" "--for=utils.legacy.formatDate" && has "$TMP/c5b.xml" "C5 path tail utils/legacy proves utils.legacy" '<def n="formatDate" p="src/utils/legacy/old.ts" l="1" q="utils.legacy" total="1"/>'
+run "$FD" "$TMP/c5b.xml" "--for=utils.legacy.formatDate" && has "$TMP/c5b.xml" "C5 path tail utils/legacy proves utils.legacy" '<def n="formatDate" p="src/utils/legacy/old.ts" l="1" q="utils.legacy" total="1"/>'
+run "$F1" "$TMP/c5d.xml" "--for=utils.legacy.formatDate" && has "$TMP/c5d.xml" "C11 the same tail beside an in-tree import * as utils of another module: q_by=path" '<def n="formatDate" p="src/utils/legacy/old.ts" l="1" q="utils.legacy" q_by="path" total="1"/>'
 run "$FK" "$TMP/c5c.xml" "--for=where is utils.formatDate defined" && {
 has     "$TMP/c5c.xml" "C5 a package index (src/utils/index.ts) proves utils" '<def n="formatDate" p="src/helpers/date.ts" l="1" q="utils" total="2"/><rx p="src/utils/index.ts"'
 hasnt   "$TMP/c5c.xml" "C5 the dir-only decoy is not listed beside it" 'src/utils/legacy/old.ts'
@@ -251,6 +260,46 @@ run "$F2" "$TMP/c8.xml" "--for=B.cleaf" && {
 has     "$TMP/c8.xml" "C8 namespace cycle ends with both hops"     '<def n="cleaf" p="cyc/b.ts" l="1" q="B" total="2"/>'
 hasnt   "$TMP/c8.xml" "C8 no false capped="                         'capped="1"'
 }
+
+# ── fix round 2: a path proof the tree's own `import * as Q` contradicts (C11), a member never gets the file proof (C12) ─────────
+mkbase(){ mkdir -p "$1/src/helpers" "$1/src/app" "$1/tests"; cp "$F1/src/helpers/date.ts" "$F1/src/helpers/index.ts" "$1/src/helpers/"; cp "$F1/src/app/main.ts" "$1/src/app/"; }
+decoy='export function formatDate(x: string): string {\n  return "decoy" + x;\n}\n'
+G9="$TMP/g9";   mkbase "$G9";  printf "$decoy" >"$G9/tests/utils.ts"                                  # a file-stem decoy
+G4="$TMP/g4";   mkbase "$G4";  mkdir -p "$G4/tests/utils"; printf "$decoy" >"$G4/tests/utils/index.ts"  # a package-index decoy
+G12="$TMP/g12"; mkbase "$G12"; printf "$decoy" >"$G12/tests/utils.ts"                                 # the real one renamed
+printf 'export function fmt(d: number): string {\n  return String(d);\n}\n' >"$G12/src/helpers/date.ts"
+printf 'export { fmt as formatDate } from "./date";\n' >"$G12/src/helpers/index.ts"
+GS="$TMP/gs";   mkdir -p "$GS/tests"; printf "$decoy" >"$GS/tests/utils.ts"                            # the stem alone: no alias
+GR="$TMP/gr";   mkdir -p "$GR/tests" "$GR/src/app"; printf "$decoy" >"$GR/tests/utils.ts"             # the alias reaches the stem's file
+printf 'import * as utils from "../../tests/utils";\nexport function main(): string {\n  return utils.formatDate("1");\n}\n' >"$GR/src/app/main.ts"
+G10="$TMP/g10"; mkbase "$G10"; printf 'export class DateUtil {\n  formatDate(x: string): string {\n    return "member" + x;\n  }\n}\n' >"$G10/tests/utils.ts"
+GM="$TMP/gm";   mkdir -p "$GM/tests"; cp "$G10/tests/utils.ts" "$GM/tests/"                            # the member alone: no alias
+printf 'export function outer(n: number): number {\n  function parseIt(v: number): number {\n    return v + 1;\n  }\n  return parseIt(n);\n}\n' >"$GM/tests/nest.ts"
+printf 'export function topIt(v: number): number {\n  return v;\n}\n' >"$GM/tests/flat.ts"
+for gg in G9:g9:tests/utils.ts G4:g4:tests/utils/index.ts; do
+    d="${gg%%:*}"; rest="${gg#*:}"; n="${rest%%:*}"; dp="${rest#*:}"; eval "root=\$$d"
+    run "$root" "$TMP/c11$n.xml" "--for=utils.formatDate" && {
+    skhas   "$TMP/c11$n.xml" "C11 $n: the in-tree alias first, the path-only decoy hedged q_by=path" "<rung n=\"leaf\" key=\"formatDate\" q=\"utils\" kept=\"2\" of=\"2\" exact=\"0\" cands=\"2\"><d n=\"formatDate\" t=\"fn\" p=\"src/helpers/date.ts\" l=\"1\" q_by=\"alias\"/><d n=\"formatDate\" t=\"fn\" p=\"$dp\" l=\"1\" q_by=\"path\"/></rung>"
+    skhasnt "$TMP/c11$n.xml" "C11 $n: never exact" 'exact="1"'
+    has     "$TMP/c11$n.xml" "C11 $n: the reexports block agrees (helpers, q_by=alias)" '<def n="formatDate" p="src/helpers/date.ts" l="1" q="utils" q_by="alias" total="1"/>'
+    }
+done
+run "$G12" "$TMP/c11r.xml" "--for=utils.formatDate" && {
+skhas   "$TMP/c11r.xml" "C11 g12 (the real one renamed, never a leaf candidate): the stem decoy is hedged" '<rung n="leaf" key="formatDate" q="utils" kept="1" of="1" exact="0"><d n="formatDate" t="fn" p="tests/utils.ts" l="1" q_by="path"/></rung>'
+skhasnt "$TMP/c11r.xml" "C11 g12: never exact" 'exact="1"'
+}
+run "$GS" "$TMP/c11s.xml" "--for=utils.formatDate" && skhas "$TMP/c11s.xml" "C11 twin: the stem alone (nothing aliases utils) stays exact" 'q="utils" kept="1" of="1" exact="1"><d n="formatDate" t="fn" p="tests/utils.ts" l="1" q_by="file"/>'
+run "$GR" "$TMP/c11a.xml" "--for=utils.formatDate" && skhas "$TMP/c11a.xml" "C11 twin: an alias that reaches the stem's own file keeps it exact" 'q="utils" kept="1" of="1" exact="1"><d n="formatDate" t="fn" p="tests/utils.ts" l="1" q_by="file"/>'
+run "$G10" "$TMP/c12.xml" "--for=utils.formatDate" && {
+skhas   "$TMP/c12.xml" "C12 a method in tests/utils.ts is no file proof: only the alias is kept" '<rung n="leaf" key="formatDate" q="utils" kept="1" of="2" exact="0"><d n="formatDate" t="fn" p="src/helpers/date.ts" l="1" q_by="alias"/></rung>'
+skhasnt "$TMP/c12.xml" "C12 never exact" 'exact="1"'
+}
+run "$GM" "$TMP/c12m.xml" "--for=utils.formatDate" && {
+skhas   "$TMP/c12m.xml" "C12 the member alone (no alias): q_unmatched, not the file proof" 'q="utils" kept="0" of="1" exact="0" q_unmatched="1">'
+skhasnt "$TMP/c12m.xml" "C12 the member alone: no q_by=file" 'q_by="file"'
+}
+run "$GM" "$TMP/c12n.xml" "--for=nest.parseIt" && skhas "$TMP/c12n.xml" "C12 a function nested in a function: q_unmatched, not the file proof" 'q="nest" kept="0" of="1" exact="0" q_unmatched="1">'
+run "$GM" "$TMP/c12f.xml" "--for=flat.topIt" && skhas "$TMP/c12f.xml" "C12 twin: a top-level function keeps the file proof" 'q="flat" kept="1" of="1" exact="1"><d n="topIt" t="fn" p="tests/flat.ts" l="1" q_by="file"/>'
 
 SC="$TMP/sc"; mkdir -p "$SC/py" "$SC/cpp"
 for i in 1 2 3 4 5 6 7; do
