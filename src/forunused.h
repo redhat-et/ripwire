@@ -2941,7 +2941,7 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
         const bool lonelyHeader = quality::isHeaderPath( rootRelPath( ing, table.file ) ) && !scans[t].headerIncluded();
         // `p.Lookup(name)` in a plugin host: an exported def of a `package main` is a plugin symbol a computed name may reach
         bool pluginMain = false;
-        if( fileLang == Lang::Go && scans[t].pluginLookup() )
+        if( rootRelPath( ing, table.file ).ends_with( ".go" ) && scans[t].pluginLookup() )
         {
             const std::optional<std::string> own = readText( diskPath( ing, table.file ) );
             pluginMain = !own || own->starts_with( "package main" ) || own->contains( "\npackage main" );
