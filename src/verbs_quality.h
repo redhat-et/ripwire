@@ -1063,7 +1063,7 @@ inline constexpr const char* kQdRowLegend =
     "clone kinds; omitted, never faked, when none resolves). churn= and surface= are per-kind "
     "classification facets (short-horizon-churn's self/ambient split; api-surface's new-symbol/"
     "contract-change tier). churn= facets never gate alone: the kind gates only on 2+ COMMITTED in-window "
-    "rewrites of the edited lines; churn=\"unknown\": that blame could not be read (see unread_history=). "
+    "rewrites of the edited lines. "
     "Every row the header's gating= counter counts also carries a gating attribute "
     "set to 1 — marked positively, never by the ABSENCE of sev or origin. ";
 
