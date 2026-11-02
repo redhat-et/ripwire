@@ -15004,22 +15004,33 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
 // A body-less `mod x;` declares that `x.rs` (or `x/mod.rs`) is a child module of the declaring file; the child's own
 // `use crate::…` / `use super::…` then points back up. Read as two dependencies, every parent and child is a 2-cycle,
 // and a crate reads as one strongly connected block: GRAPH-SCALE measured nushell's largest cycle at 235 files with
-// these pairs and 19 without, zed 93 and 25. Cargo compiles a crate as ONE unit, so the pair is not a physical
-// dependency a cycle or Lakos's ccd should charge; it stays in the graph and in Ca and Ce (afferent=, instab=,
-// godfiles, stabledeps), and leaves --deps' cycle and health numbers (cycles, ccd/acd/nccd/shape, a row's transitive=,
-// which say how many pairs they leave out: containment_edges=) and --report's cycle list (its heading says so). --arch's
-// propagation_cost still walks them (not yet cut: card RUST-MOD-DECL-ARCH).
+// these pairs and 19 without, zed 93 and 25. Cargo compiles a crate as ONE unit, so the declaration alone is not a
+// physical dependency a cycle or Lakos's ccd should charge; the pair stays in the graph and in Ca and Ce (afferent=,
+// instab=, godfiles, stabledeps), and leaves --deps' cycle and health numbers (cycles, ccd/acd/nccd/shape, a row's
+// transitive=, which say how many pairs they leave out: containment_edges=) and --report's cycle list (its heading says
+// so). --arch's propagation_cost still walks them (not yet cut: card RUST-MOD-DECL-ARCH).
 //
-// The pair is judged by Rust's module-file rule over PATHS, not by which directive drew the edge, so an edge a `use`
-// draws to the same child is the same containment and an edge from any other source (an injected truth edge in a rig)
-// is judged alike: parent P declares `mod x;` (an Include with target `mod:x`, ingest_relations.h), and the edge's
-// target is `x.rs` or `x/mod.rs` in P's module directory — P's own directory for a `mod.rs` or a crate root, else
-// `<dir>/<stem>` (Rust 2018: `src/a.rs` declares `src/a/b.rs`). A crate root is `lib.rs`/`main.rs`, or a file no
-// `mod <its stem>;` anywhere in the tree declares: Cargo's other roots (`[lib] path = "src/gpui.rs"`, src/bin/*.rs,
-// tests/*.rs, examples/*.rs, build.rs) are exactly the files no module declares (zed: gpui.rs, theme.rs). Declared is
-// read by NAME, so a namesake declared elsewhere makes a root read as a module, which only cuts less. Allowlist,
-// SAFETY (d)(1): only those proven shapes are cut. A `#[path = "…"] mod x;` and a `mod x;` inside an inline
-// `mod m { … }` are not recognised and stay counted.
+// Only the parent-to-child edge is cut, and only when the DECLARATION IS ITS ONLY REASON. A parent that also uses its
+// child — `pub use self::inner::Thing;`, `use inner::*;`, a path call `inner::go()` — depends on it, and a cycle through
+// that edge is real (fx r1m: a/mod.rs uses inner.rs, inner.rs uses b.rs, b.rs uses a/mod.rs; the 3-cycle stays). The
+// child's edges back up are uses and are never cut. A parent-to-child pair is cut when all of these hold:
+//   (1) the module-file rule over PATHS: parent P declares `mod x;` (an Include with target `mod:x`, ingest_relations.h),
+//       and the edge's target is `x.rs` or `x/mod.rs` in P's module directory — P's own directory for a `mod.rs` or a
+//       crate root, else `<dir>/<stem>` (Rust 2018: `src/a.rs` declares `src/a/b.rs`). A crate root is `lib.rs`/
+//       `main.rs`, or a file no `mod <its stem>;` anywhere in the tree declares: Cargo's other roots (`[lib] path =
+//       "src/gpui.rs"`, src/bin/*.rs, tests/*.rs, examples/*.rs, build.rs) are exactly the files no module declares
+//       (zed: gpui.rs, theme.rs). Declared is read by NAME, so a namesake declared elsewhere makes a root read as a
+//       module, which only cuts less;
+//   (2) every occurrence of the edge in P's row (the adjacency is un-deduped: one per directive) was drawn by one of P's
+//       `mod x;` declarations. resolve.h resolveRustImport resolves `mod:x` in the INCLUDER's directory, which is the
+//       module directory only for a `mod.rs` or a crate root, so a declaration draws this edge only there; anywhere else
+//       every occurrence came from a `use` (`crate::a::b::…`) and the pair is kept (card RUST-MOD-RESOLVE);
+//   (3) no other directive of P names the child at its head (`x`, `x::…`, `self::x…`, resolved or not: a relative
+//       `use x::Thing;` resolves to no file today), and no reference written in P is qualified by it (`x::go()`, the
+//       immediate qualifier: Reference::qualifier). Any namesake reads as a use, which only cuts less.
+// Allowlist, SAFETY (d)(1): only those shapes are cut. A `mod x;` written inside an inline `mod m { … }` and a
+// `#[path = "…"]` / `#[cfg_attr(…, path = "…")] mod x;` are read as P's own plain `mod x;`: the declaration resolves to
+// P's `x.rs`, the wrong file for those two (card RUST-MOD-RESOLVE), and that edge is cut like any other declaration.
 struct ContainmentCut
 {
     std::vector<std::vector<std::uint32_t>> adj;     // the adjacency minus the containment pairs, filled only when pairs > 0
@@ -15039,7 +15050,7 @@ inline std::string rustChildModuleDir( std::string_view path, const std::vector<
     const std::string_view dir   = includerDir( path );
     std::string_view       stem  = dir.empty() ? path : path.substr( dir.size() + 1 );
     stem                         = stem.substr( 0, stem.size() - 3 );   // ".rs", checked by the caller
-    const bool root = stem == "lib" || stem == "main" || !std::binary_search( declaredNames.begin(), declaredNames.end(), stem );
+    const bool root = stem == "lib" || stem == "main" || !std::binary_search( declaredNames.begin(), declaredNames.end(), stem, sortutil::svLess );
     if( stem == "mod" || root )
     {
         return std::string( dir );
@@ -15052,52 +15063,125 @@ inline bool isRustSourcePath( std::string_view path ) noexcept
     return path.size() > 3 && path.substr( path.size() - 3 ) == ".rs";
 }
 
+// The module name a Rust `use` target (or a reference qualifier) names at its head, after an optional `self::`: `inner`
+// for `inner::Thing`, `self::inner::{A, B}` and `inner`; "" for `crate::…`, `super::…` (those resolve through
+// resolve.h and are counted by occurrence, ContainmentCut rule (2)).
+inline std::string_view rustUseHead( std::string_view target ) noexcept
+{
+    if( target.starts_with( "self::" ) )
+    {
+        target.remove_prefix( 6 );
+    }
+    const std::size_t end = target.find_first_of( ":{, " );
+    return end == std::string_view::npos ? target : target.substr( 0, end );
+}
+
+// One `mod x;` a file declares: how many times (a `#[cfg]` pair declares it twice, each drawing one edge occurrence),
+// and whether anything else in the declaring file names x (ContainmentCut rule (3)).
+struct RustModDecl
+{
+    std::uint32_t    file = 0;
+    std::string_view name;
+    std::uint32_t    count = 0;
+    bool             used  = false;
+};
+
 inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
 {
     ContainmentCut cut;
     const std::uint32_t F = std::uint32_t( std::min( adj.size(), ing.files.size() ) );
     // (declaring file, declared name), sorted: one contiguous run per file. Names point into ing.includes.
-    std::vector<std::pair<std::uint32_t, std::string_view>> decls;
+    std::vector<std::pair<std::uint32_t, std::string_view>> raw;
     for( const Include& inc : ing.includes )
     {
         if( inc.fileId < F && inc.target.size() > 4 && inc.target.compare( 0, 4, "mod:" ) == 0 && isRustSourcePath( rootRelPath( ing, inc.fileId ) ) )
         {
-            decls.emplace_back( inc.fileId, std::string_view( inc.target ).substr( 4 ) );
+            raw.emplace_back( inc.fileId, std::string_view( inc.target ).substr( 4 ) );
         }
     }
-    if( decls.empty() )
+    if( raw.empty() )
     {
         return cut;
     }
-    std::sort( decls.begin(), decls.end() );
-    decls.erase( std::unique( decls.begin(), decls.end() ), decls.end() );
+    std::sort( raw.begin(), raw.end(), [ ]( const auto& a, const auto& b )
+               { return a.first != b.first ? a.first < b.first : sortutil::svLess( a.second, b.second ); } );
+    std::vector<RustModDecl> decls;   // one per distinct (file, name), in raw's order
+    for( const auto& r : raw )
+    {
+        if( decls.empty() || decls.back().file != r.first || decls.back().name != r.second )
+        {
+            decls.push_back( { r.first, r.second, 0, false } );
+        }
+        ++decls.back().count;
+    }
+    const auto byKey = [ ]( const RustModDecl& d, const std::pair<std::uint32_t, std::string_view>& k )
+    { return d.file != k.first ? d.file < k.first : sortutil::svLess( d.name, k.second ); };
+    const auto markUsed = [ & ]( std::uint32_t file, std::string_view name )
+    {
+        if( name.empty() )
+        {
+            return;
+        }
+        const auto key = std::make_pair( file, name );
+        const auto it  = std::lower_bound( decls.begin(), decls.end(), key, byKey );
+        if( it != decls.end() && it->file == file && it->name == name )
+        {
+            it->used = true;
+        }
+    };
+    // Rule (3): every other directive and every qualified reference in a declaring file. `isParent` keeps the scan of
+    // the reference table to one byte test per row outside the declaring files.
+    std::vector<char> isParent( F, 0 );
+    for( const RustModDecl& d : decls )
+    {
+        isParent[d.file] = 1;
+    }
+    for( const Include& inc : ing.includes )
+    {
+        if( inc.fileId < F && isParent[inc.fileId] != 0 && !inc.target.starts_with( "mod:" ) )
+        {
+            markUsed( inc.fileId, rustUseHead( inc.target ) );
+        }
+    }
+    for( const Reference& r : ing.references )
+    {
+        if( r.fileId < F && isParent[r.fileId] != 0 && !r.qualifier.empty() )
+        {
+            markUsed( r.fileId, r.qualifier );
+        }
+    }
+
     std::vector<std::string_view> declaredNames;   // every name some `mod x;` declares, sorted: a file whose stem is not here is a crate root
     declaredNames.reserve( decls.size() );
-    for( const auto& d : decls )
+    for( const RustModDecl& d : decls )
     {
-        declaredNames.push_back( d.second );
+        declaredNames.push_back( d.name );
     }
-    std::sort( declaredNames.begin(), declaredNames.end() );
+    std::sort( declaredNames.begin(), declaredNames.end(), sortutil::svLess );
     declaredNames.erase( std::unique( declaredNames.begin(), declaredNames.end() ), declaredNames.end() );
 
     cut.adj = adj;
-    std::vector<std::uint32_t> dropped;   // one scratch row, reused: the distinct children cut from one parent
+    std::vector<std::pair<std::uint32_t, const RustModDecl*>> cand;   // one scratch row, reused: (child, its declaration) per occurrence
+    std::vector<std::uint32_t>                                drop;   // the distinct children cut from one parent, sorted
     for( std::size_t i = 0; i < decls.size(); )
     {
-        const std::uint32_t p = decls[i].first;
+        const std::uint32_t p = decls[i].file;
         std::size_t         j = i;
-        while( j < decls.size() && decls[j].first == p )
+        while( j < decls.size() && decls[j].file == p )
         {
             ++j;
         }
-        const std::string                 childDir = rustChildModuleDir( rootRelPath( ing, p ), declaredNames );
-        const auto                        names    = std::span( decls ).subspan( i, j - i );
-        const auto isChild = [ & ]( std::uint32_t g ) -> bool
+        const std::string_view pPath    = rootRelPath( ing, p );
+        const std::string      childDir = rustChildModuleDir( pPath, declaredNames );
+        const bool             declDraws = childDir == includerDir( pPath );   // rule (2): resolveRustImport's `mod:` base
+        const auto             names    = std::span( decls ).subspan( i, j - i );
+        // The declaration naming g by the module-file rule, or nullptr (rule (1)).
+        const auto declOf = [ & ]( std::uint32_t g ) -> const RustModDecl*
         {
             const std::string_view gp = rootRelPath( ing, g );
             if( !isRustSourcePath( gp ) )
             {
-                return false;
+                return nullptr;
             }
             const std::string_view gDir = includerDir( gp );
             std::string_view       name = gDir.empty() ? gp.substr( 0, gp.size() - 3 ) : gp.substr( gDir.size() + 1, gp.size() - gDir.size() - 4 );
@@ -15106,29 +15190,51 @@ inline ContainmentCut rustContainmentCut( const IngestResult& ing, const std::ve
             {
                 if( gDir.empty() )
                 {
-                    return false;
+                    return nullptr;
                 }
                 home = includerDir( gDir );
                 name = home.empty() ? gDir : gDir.substr( home.size() + 1 );
             }
-            return home == childDir
-                && std::any_of( names.begin(), names.end(), [ & ]( const auto& d ) { return d.second == name; } );
+            if( home != childDir )
+            {
+                return nullptr;
+            }
+            const auto it = std::find_if( names.begin(), names.end(), [ & ]( const RustModDecl& d ) { return d.name == name; } );
+            return it == names.end() ? nullptr : &*it;
         };
         std::vector<std::uint32_t>& outs = cut.adj[p];
-        std::uint32_t               kept = 0;
-        dropped.clear();
+        cand.clear();
         for( const std::uint32_t g : outs )
         {
-            if( g < F && isChild( g ) )
+            if( g < F )
             {
-                dropped.push_back( g );
-                continue;
+                if( const RustModDecl* d = declOf( g ) )
+                {
+                    cand.emplace_back( g, d );
+                }
             }
-            outs[kept++] = g;
         }
-        outs.resize( kept );
-        std::sort( dropped.begin(), dropped.end() );
-        cut.pairs += std::uint64_t( std::unique( dropped.begin(), dropped.end() ) - dropped.begin() );
+        std::sort( cand.begin(), cand.end() );
+        drop.clear();
+        for( std::size_t a = 0; a < cand.size(); )
+        {
+            std::size_t b = a;
+            while( b < cand.size() && cand[b].first == cand[a].first )
+            {
+                ++b;
+            }
+            const RustModDecl& d = *cand[a].second;
+            if( declDraws && !d.used && b - a <= d.count )   // rules (2) and (3): every occurrence is the declaration's
+            {
+                drop.push_back( cand[a].first );
+            }
+            a = b;
+        }
+        if( !drop.empty() )
+        {
+            std::erase_if( outs, [ & ]( std::uint32_t g ) { return std::binary_search( drop.begin(), drop.end(), g ); } );
+            cut.pairs += drop.size();
+        }
         i = j;
     }
     if( cut.pairs == 0 )
@@ -15237,7 +15343,8 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
                                                      std::vector<char>* lazyOut = nullptr,
                                                      std::vector<std::uint32_t>* fileFanInOut = nullptr,
                                                      std::uint64_t* importsUnresolvedOut = nullptr,
-                                                     TsImportExtras* tsExtrasOut = nullptr )
+                                                     TsImportExtras* tsExtrasOut = nullptr,
+                                                     std::vector<std::vector<std::uint32_t>>* adjOut = nullptr )
 {
     std::vector<std::uint32_t> importers;
     if( lazyOut != nullptr )
@@ -15262,7 +15369,7 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
     // dedup=true: this is a MEMBERSHIP question ("does this file import a def file"), not an
     // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
     HashMap<std::uint64_t, char>  lazyPairs;
-    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut, tsExtrasOut );
+    std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut, tsExtrasOut );
     // No `isDef[f]` pre-filter here (barrel-exclusion lane): a def file is not skipped wholesale, because
     // it may ALSO be a genuine importer of a DIFFERENT def file (the barrel-getter shape — see
     // scanImporterEdges' own comment). The narrower, correct exclusion — f is never its own importer — is
@@ -15283,6 +15390,10 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
                 lazyOut->push_back( scan.allLazy ? 1 : 0 );
             }
         }
+    }
+    if( adjOut != nullptr )
+    {
+        *adjOut = std::move( adj );   // IMPACT-PATH: the path answer's unresolved_naming= reads where each naming file's directives landed
     }
     return importers;                       // ascending file id — already sorted, already unique
 }
@@ -15352,7 +15463,7 @@ inline void importTierRollup( const IngestResult& ing, ImportTier& t, const std:
     {
         dirs.push_back( importTierRollupDir( rootRelPath( ing, f ) ) );
     }
-    std::sort( dirs.begin(), dirs.end() );
+    std::sort( dirs.begin(), dirs.end(), sortutil::svLess );
     std::vector<std::pair<std::size_t, std::string_view>> counts;   // (count, dir), one per distinct dir
     for( std::size_t i = 0; i < dirs.size(); )
     {
@@ -15364,7 +15475,7 @@ inline void importTierRollup( const IngestResult& ing, ImportTier& t, const std:
         counts.emplace_back( j - i, dirs[i] );
         i = j;
     }
-    std::sort( counts.begin(), counts.end(), [ ]( const auto& a, const auto& b ) { return a.first != b.first ? a.first > b.first : a.second < b.second; } );
+    std::sort( counts.begin(), counts.end(), [ ]( const auto& a, const auto& b ) { return a.first != b.first ? a.first > b.first : sortutil::svLess( a.second, b.second ); } );
     t.topDirs.clear();
     for( std::size_t i = 0; i < counts.size() && i < kImportTierRollupDirs; ++i )
     {
@@ -15386,9 +15497,15 @@ inline void importTierRollup( const IngestResult& ing, ImportTier& t, const std:
 // IMPACT-ROLLUP: the rollup's two attributes, on a CUT tier only (an uncut one lists every importer), "" otherwise.
 // The dirs value carries paths, so it goes through nextverb.h's attribute writer (serialize.h escapeXml's policy, byte for
 // byte); ':' and ',' separate and never need it.
+// The rollup rides (attributes and legend sentence, every dialect and surface) exactly on a cut, non-empty tier.
+inline bool importTierRollupShown( const ImportTier& t ) noexcept
+{
+    return t.capped && !t.files.empty();
+}
+
 inline std::string importTierRollupAttrXml( const ImportTier& t )
 {
-    if( !t.capped || t.files.empty() )
+    if( !importTierRollupShown( t ) )
     {
         return {};
     }
@@ -15446,7 +15563,9 @@ inline bool importTierIsUmbrella( const IngestResult& ing, std::size_t importerC
 
 // IMPACT-PATH: the tier of a set of FILES — a symbol selector's definition files (impactImportTier below) or the one file a
 // path selector names (verbs_navigate.h runImpact). `defFiles` sorted and unique.
-inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles )
+// `adjOut` (IMPACT-PATH): optional, the deduped file->file adjacency the tier was read from (importersOfFiles).
+inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::vector<std::uint32_t>& defFiles,
+                                           std::vector<std::vector<std::uint32_t>>* adjOut = nullptr )
 {
     ImportTier t;
     for( const std::uint32_t f : defFiles )
@@ -15460,7 +15579,7 @@ inline ImportTier impactImportTierOfFiles( const IngestResult& ing, const std::v
     const bool tsTarget = std::any_of( defFiles.begin(), defFiles.end(), [ & ]( std::uint32_t f )
                                        { return f < ing.files.size() && tsimport::couldBeTsImportTarget( ing.files[f] ); } );
     TsImportExtras tsExtras;
-    t.files          = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, tsTarget ? &t.importsUnresolved : nullptr, tsTarget ? &tsExtras : nullptr );
+    t.files          = importersOfFiles( ing, defFiles, &lazyByFileOrder, &fileFanIn, tsTarget ? &t.importsUnresolved : nullptr, tsTarget ? &tsExtras : nullptr, adjOut );
     t.tsconfigUnread = tsExtras.extendsUnread;
 
     // t.files is about to be RESORTED into tier/path order; lazyByFileOrder must move WITH each entry, not
@@ -15821,6 +15940,14 @@ inline std::vector<std::vector<std::uint32_t>> sccCycles( const std::vector<std:
             }
         }
     }
+    return cycles;
+}
+
+// S1 (DEPS-CYCLE-ORDER): the cycle lists cap (--deps 20, --report 6), so they list the LARGEST first: by size, descending,
+// ties in sccCycles' own deterministic order (stable). Components are disjoint, so the order is total.
+inline std::vector<std::vector<std::uint32_t>> sortCyclesLargestFirst( std::vector<std::vector<std::uint32_t>> cycles )
+{
+    std::stable_sort( cycles.begin(), cycles.end(), [ ]( const auto& a, const auto& b ) { return a.size() > b.size(); } );
     return cycles;
 }
 

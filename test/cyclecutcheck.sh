@@ -221,12 +221,71 @@ if [ "$DRC" = 0 ] && printf '%s' "$DOUT" | tr '\n' ' ' | grep -oE '<cycle [^>]*>
 else no "rust mod (i) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
 # (j) a crate root that is not lib.rs/main.rs (an integration test, a [[bin]], a [lib] path): no `mod it;` declares
 # tests/it.rs, so it is a root and its `mod common;` child is tests/common/mod.rs; common's `use super::it` points back.
-mkdir -p "$SH/rs3/tests/common"; printf 'mod common;\npub fn it_fn() { common::setup(); }\n' > "$SH/rs3/tests/it.rs"
+mkdir -p "$SH/rs3/tests/common"; printf 'mod common;\npub fn it_fn() {}\n' > "$SH/rs3/tests/it.rs"
 printf 'use super::it;\npub fn setup() {}\n' > "$SH/rs3/tests/common/mod.rs"
 deps "$SH/rs3" --legend=full
 if [ "$DRC" = 0 ] && [ -n "$DOUT" ] && ! printf '%s' "$DOUT" | grep -q '<cycle ' && printf '%s' "$DOUT" | grep -oE '<health [^>]*>' | grep -q 'containment_edges="1"'; then
     ok "rust mod (j): tests/it.rs (declared by no mod, so a crate root) contains tests/common/mod.rs: no cycle, containment_edges=1"
 else no "rust mod (j) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
+# (k)-(o) truth-fixes fix 1 (M1, coordinator ruling: a `use` across a mod pair is a dependency): a parent-to-child pair is
+# cut only when the `mod x;` declaration is the edge's only reason. A parent that also uses its child keeps the edge, so a
+# cycle through it stays. (k) fx r1m: a/mod.rs uses inner.rs, inner.rs uses b.rs, b.rs uses a/mod.rs: the 3-cycle stays.
+mkdir -p "$SH/r1m/src/a"; printf 'mod a;\nmod b;\n' > "$SH/r1m/src/lib.rs"
+printf 'mod inner;\npub use self::inner::Thing;\npub fn a_fn() { inner::go(); }\n' > "$SH/r1m/src/a/mod.rs"
+printf 'use crate::b;\npub struct Thing;\npub fn go() { b::b_fn(); }\n' > "$SH/r1m/src/a/inner.rs"
+printf 'use crate::a;\npub fn b_fn() { a::a_fn(); }\n' > "$SH/r1m/src/b.rs"
+deps "$SH/r1m" --legend=full
+if [ "$DRC" = 0 ] && printf '%s' "$DOUT" | tr '\n' ' ' | grep -oE '<cycle size="3"[^>]*>(<f[^>]*/>)*</cycle>' | grep -q 'src/a/inner.rs' \
+   && printf '%s' "$DOUT" | grep -oE '<health [^>]*>' | grep -q 'containment_edges="2"'; then
+    ok "rust mod (k): a cycle through a parent that uses its child stays (r1m 3-cycle; only lib.rs's 2 declaration-only pairs cut)"
+else no "rust mod (k) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
+REP="$( cd "$SH/r1m" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$SH/r1m" --report --no-cache 2>/dev/null )"; REPRC=$?
+if [ "$REPRC" = 0 ] && printf '%s' "$REP" | grep -q '^- `src/a/mod.rs` ↔' && ! printf '%s' "$REP" | grep -q 'acyclic'; then
+    ok "rust mod (k): --report lists the r1m cycle and never says acyclic"
+else no "rust mod (k) report rc=$REPRC: $( printf '%s' "$REP" | grep -A1 'Dependency cycles' )"; fi
+# (l) the sibling shapes of "uses its child": a path call alone (`common::setup()`), a relative `pub use x::*;` that resolves
+# to no file, and `use self::x::T;`. Each keeps its 2-cycle with the child's `use crate::p;`.
+for shape in 'pub fn f() { kid::k(); }' 'pub use kid::*;' 'use self::kid::K;'; do
+    rm -rf "$SH/rsl"; mkdir -p "$SH/rsl/src/p"
+    printf 'mod p;\n' > "$SH/rsl/src/lib.rs"
+    printf 'mod kid;\n%s\npub fn pf() {}\n' "$shape" > "$SH/rsl/src/p/mod.rs"
+    printf 'use crate::p;\npub struct K;\npub fn k() { p::pf(); }\n' > "$SH/rsl/src/p/kid.rs"
+    deps "$SH/rsl" --legend=full
+    if [ "$DRC" = 0 ] && printf '%s' "$DOUT" | tr '\n' ' ' | grep -oE '<cycle [^>]*>(<f[^>]*/>)*</cycle>' | grep -q 'src/p/kid.rs' \
+       && printf '%s' "$DOUT" | grep -oE '<health [^>]*>' | grep -q 'containment_edges="1"'; then
+        ok "rust mod (l): '$shape' in the parent keeps the p/mod.rs <-> p/kid.rs cycle (only lib.rs -> p cut)"
+    else no "rust mod (l) '$shape' rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
+done
+# (m) negative twin of (l): the parent declares the child twice under #[cfg] and names it nowhere else: cut, no cycle
+rm -rf "$SH/rsl"; mkdir -p "$SH/rsl/src/p"; printf 'mod p;\n' > "$SH/rsl/src/lib.rs"
+printf '#[cfg(unix)]\nmod kid;\n#[cfg(not(unix))]\nmod kid;\npub fn pf() {}\n' > "$SH/rsl/src/p/mod.rs"
+printf 'use crate::p;\npub fn k() { p::pf(); }\n' > "$SH/rsl/src/p/kid.rs"
+deps "$SH/rsl" --legend=full
+if [ "$DRC" = 0 ] && [ -n "$DOUT" ] && ! printf '%s' "$DOUT" | grep -q '<cycle ' && printf '%s' "$DOUT" | grep -oE '<health [^>]*>' | grep -q 'containment_edges="2"'; then
+    ok "rust mod (m): a declaration-only pair (declared twice under #[cfg]) is cut: no cycle, containment_edges=2"
+else no "rust mod (m) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
+# (n) (j)'s positive twin: tests/it.rs calls its child (`common::setup()`), so the pair is a use and the 2-cycle stays
+printf 'mod common;\npub fn it_fn() { common::setup(); }\n' > "$SH/rs3/tests/it.rs"
+deps "$SH/rs3" --legend=full
+if [ "$DRC" = 0 ] && printf '%s' "$DOUT" | grep -q '<cycle size="2"' && ! printf '%s' "$DOUT" | grep -q 'containment_edges='; then
+    ok "rust mod (n): a root that calls its child keeps the cycle (no containment_edges=)"
+else no "rust mod (n) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<health [^>]*>|<cycle [^>]*>' )"; fi
+# (o) --report over a tree whose only would-be cycles are containment says "acyclic without the containment pairs", never bare
+REP="$( cd "$SH/rs3" && printf 'mod common;\npub fn it_fn() {}\n' > tests/it.rs && perl -e 'alarm 30; exec @ARGV' "$BIN" "$SH/rs3" --report --no-cache 2>/dev/null )"; REPRC=$?
+if [ "$REPRC" = 0 ] && printf '%s' "$REP" | grep -q '^- none (acyclic without the containment pairs)' && ! printf '%s' "$REP" | grep -q '^- none (acyclic)'; then
+    ok "rust mod (o): --report's empty cycle list qualifies acyclic by the containment pairs"
+else no "rust mod (o) rc=$REPRC: $( printf '%s' "$REP" | grep -A1 'Dependency cycles' )"; fi
+# (p) S1: twenty-one 2-cycles and one 4-cycle: the 20-row cap keeps the 4-cycle (largest first); --limit=30 lists all 22
+mkdir -p "$SH/m21"; for k in $( seq 1 21 ); do mkpair "$SH/m21" "n$k"; done
+printf '#include "w2.h"\n' > "$SH/m21/w1.h"; printf '#include "w3.h"\n' > "$SH/m21/w2.h"; printf '#include "w4.h"\n' > "$SH/m21/w3.h"; printf '#include "w1.h"\n' > "$SH/m21/w4.h"
+deps "$SH/m21" --legend=full
+if [ "$DRC" = 0 ] && printf '%s' "$DOUT" | grep -q '<cycles total="22" shown="20" capped="1"><cycle size="4"'; then
+    ok "cycles (p): the cut list keeps the largest: the 4-cycle is first of the 20 shown"
+else no "cycles (p) rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<cycles[^>]*><cycle [^>]*>' )"; fi
+deps "$SH/m21" --legend=full --limit=30
+if [ "$DRC" = 0 ] && printf '%s' "$DOUT" | grep -q '<cycles><cycle size="4"' && [ "$( printf '%s' "$DOUT" | grep -oE '<cycle size=' | wc -l | tr -d ' ' )" = 22 ]; then
+    ok "cycles (p) twin: --limit=30 raises the cap: all 22 listed, a bare <cycles>"
+else no "cycles (p) twin rc=$DRC: $( printf '%s' "$DOUT" | grep -oE '<cycles[^>]*>' )"; fi
 # (g) negative twin: a C tree with no Rust never prints containment_edges=
 deps "$SH/edge"; if [ "$DRC" = 0 ] && [ -n "$DOUT" ] && ! printf '%s' "$DOUT" | grep -q 'containment_edges'; then ok "rust mod (g): no Rust file, no containment_edges="; else no "rust mod (g) rc=$DRC"; fi
 # (h) --report's cycle heading says what it left out

@@ -565,14 +565,14 @@ printf '#include "../../lib/small.h"\nint m2(void) { return small_fn(); }\n' > "
 pi(){ PO="$( cd "$PH" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$PH" --impact="$1" --no-cache "${@:2}" 2>/dev/null )"; PRC=$?; }
 proot(){ printf '%s' "$PO" | grep -oE '<impact [^>]*>' | head -1; }
 pi lib/core.h; R="$( proot )"
-if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" importers="45" shown_importers="40" importers_capped="1" importers_next="--impact=lib/core.h --limit=45" importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' \
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="lib/core.h" importers="45" shown_importers="40" importers_capped="1" importers_next="--impact=lib/core.h --limit=45" importers_tests="15" importers_dirs="src/a:20,tests/unit:15,src/b:10"' \
    && [ "$( printf '%s' "$PO" | grep -oE '<f via="import"' | wc -l | tr -d ' ' )" = 40 ]; then
     ok "path (a): --impact=lib/core.h lists its importers (45, 40 shown) under selector=file, with the cut rollup tests=15 dirs=src/a:20,tests/unit:15,src/b:10"
 else no "path (a) rc=$PRC: $R"; fi
 if [ "$PRC" = 0 ] && [ -n "$R" ] && ! printf '%s' "$R" | grep -qE ' (reaches|defs|found)='; then ok "path (a): no call reach, no defs=, no found= on a file answer"; else no "path (a) carries symbol attributes: $R"; fi
 for spell in core.h ./lib/core.h "$PH/lib/core.h"; do
     pi "$spell"; R2="$( proot )"
-    if [ "$PRC" = 0 ] && printf '%s' "$R2" | grep -q 'selector="file" importers="45"'; then ok "path (b): the spelling '${spell#$PH/}' names the same file"; else no "path (b) '$spell' rc=$PRC: $R2"; fi
+    if [ "$PRC" = 0 ] && printf '%s' "$R2" | grep -qE 'selector="file" file="lib/core.h"( matched="suffix")? importers="45"'; then ok "path (b): the spelling '${spell#$PH/}' names the same file, file=lib/core.h"; else no "path (b) '$spell' rc=$PRC: $R2"; fi
 done
 pi util.h; R="$( printf '%s' "$PO" | grep -oE '<impact [^>]*>' )"
 if [ "$PRC" = 1 ] && printf '%s' "$R" | grep -q 'found="0" near="lib/util.h"'; then ok "path (c): a suffix two files share stays a refusal (exit 1) whose near= is the first path"; else no "path (c) rc=$PRC: $R"; fi
@@ -583,7 +583,7 @@ if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'importers="45" shown_importers=
     ok "rollup (e): an uncut tier (--limit=45) has no importers_tests=/importers_dirs= (every importer is a row)"
 else no "rollup (e) rc=$PRC: $R"; fi
 pi lib/small.h; R="$( proot )"
-if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" importers="2" shown_importers="2" importers_capped="0"' && ! printf '%s' "$R" | grep -q 'importers_tests='; then
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="lib/small.h" importers="2" shown_importers="2" importers_capped="0"' && ! printf '%s' "$R" | grep -q 'importers_tests='; then
     ok "rollup (f): a 2-importer file: uncut, no rollup"
 else no "rollup (f) rc=$PRC: $R"; fi
 pi core_fn; R="$( proot )"
@@ -593,7 +593,7 @@ else no "rollup (g) rc=$PRC: $R"; fi
 pi lib/core.h:core_fn; R="$( proot )"
 if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'defs="1"' && ! printf '%s' "$R" | grep -q 'selector='; then ok "path (h): FILE:SYM is still a symbol answer"; else no "path (h) rc=$PRC: $R"; fi
 pi lib/core.h --json
-if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"selector":"file","importers":45,"shown_importers":40,"importers_capped":true' && printf '%s' "$PO" | grep -q '"importers_tests":15,"importers_dirs":"src/a:20,tests/unit:15,src/b:10"'; then
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"selector":"file","file":"lib/core.h","importers":45,"shown_importers":40,"importers_capped":true' && printf '%s' "$PO" | grep -q '"importers_tests":15,"importers_dirs":"src/a:20,tests/unit:15,src/b:10"'; then
     ok "path (i): --json carries selector, the tier and the rollup"
 else no "path (i) rc=$PRC: $( printf '%s' "$PO" | head -c 400 )"; fi
 pi core_fn --json
@@ -627,7 +627,7 @@ printf '#include "proj/reg.h"\nint c1(void) { return reg_fn(); }\n' > "$PH/src/c
 printf '#include "inc/proj/reg.h"\nint c2(void) { return reg_fn(); }\n' > "$PH/src/c/c2.c"
 printf '#include "other/reg.h"\nint c3(void) { return 0; }\n' > "$PH/src/c/c3.c"
 pi inc/proj/reg.h; R="$( proot )"
-if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" importers="0" shown_importers="0" importers_capped="0" unresolved_naming="2"' \
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="inc/proj/reg.h" importers="0" shown_importers="0" importers_capped="0" unresolved_naming="2"' \
    && printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
     ok "path (o): importers=0 on a file two directives name by an unknown include root carries unresolved_naming=2 and its legend"
 else no "path (o) rc=$PRC: $R"; fi
@@ -637,6 +637,51 @@ pi lib/core.h; R="$( proot )"
 if [ "$PRC" = 0 ] && [ -n "$R" ] && ! printf '%s' "$R" | grep -q 'unresolved_naming=' && ! printf '%s' "$PO" | grep -q 'unresolved_naming=:'; then
     ok "path (o): a fully resolved file has no unresolved_naming= and no legend sentence (present-only)"
 else no "path (o) absent rc=$PRC: $R"; fi
+# ── truth-fixes fix 1: the path answer names its file (M3), unresolved_naming= skips a directive that resolved to another
+# same-named file (M2), an ambiguous suffix says how many (S3), and an absolute path under a root typed `.` answers.
+# (p) a selector naming a deleted or unindexed file that another file's path ends with: file= and matched="suffix" say
+# which file answered; the exact path of that file answers with no matched=.
+mkdir -p "$PH/x/lib"; printf 'int gone_fn(void);\n' > "$PH/x/lib/gone.h"
+printf '#include "../x/lib/gone.h"\nint g1(void) { return gone_fn(); }\n' > "$PH/src/g1.c"
+pi lib/gone.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'of="lib/gone.h" selector="file" file="x/lib/gone.h" matched="suffix" importers="1"'; then
+    ok "path (p): --impact=lib/gone.h (no such file) answers for x/lib/gone.h and says so: file=x/lib/gone.h matched=suffix"
+else no "path (p) rc=$PRC: $R"; fi
+pi x/lib/gone.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'selector="file" file="x/lib/gone.h" importers="1"' && ! printf '%s' "$R" | grep -q 'matched='; then
+    ok "path (p) twin: the whole path answers with file= and no matched="
+else no "path (p) twin rc=$PRC: $R"; fi
+pi lib/gone.h --json
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q '"selector":"file","file":"x/lib/gone.h","matched":"suffix","importers":1'; then ok "path (p): --json carries file and matched"; else no "path (p) json rc=$PRC: $( printf '%s' "$PO" | head -c 300 )"; fi
+pi lib/gone.h --legend=full
+if [ "$PRC" = 0 ] && printf '%s' "$PO" | grep -q 'file=: the indexed file this answer is for; matched="suffix"'; then ok "path (p): the legend defines file= and matched="; else no "path (p) legend rc=$PRC"; fi
+# (q) M2: d/a/x1..3.c include "util.h" and it resolves to d/a/util.h; d/b/y.c's "util.h" resolves to d/b/util.h. None of
+# d/a's three may count toward d/b/util.h. d/c/z.c's "b/util.h" resolves to no file (no d/c/b/util.h): it counts, once.
+mkdir -p "$PH/d/a" "$PH/d/b" "$PH/d/c"; printf 'int du_a(void);\n' > "$PH/d/a/util.h"; printf 'int du_b(void);\n' > "$PH/d/b/util.h"
+for k in 1 2 3; do printf '#include "util.h"\nint dx%d(void) { return du_a(); }\n' "$k" "$k" > "$PH/d/a/x$k.c"; done
+printf '#include "util.h"\nint dy(void) { return du_b(); }\n' > "$PH/d/b/y.c"
+pi d/b/util.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'file="d/b/util.h" importers="1" shown_importers="1" importers_capped="0"' && ! printf '%s' "$R" | grep -q 'unresolved_naming='; then
+    ok "path (q): three directives that resolved to d/a/util.h are not unresolved_naming= for d/b/util.h"
+else no "path (q) rc=$PRC: $R"; fi
+printf '#include "b/util.h"\nint dz(void) { return 0; }\n' > "$PH/d/c/z.c"
+pi d/b/util.h; R="$( proot )"
+if [ "$PRC" = 0 ] && printf '%s' "$R" | grep -q 'file="d/b/util.h" importers="1" shown_importers="1" importers_capped="0" unresolved_naming="1"'; then
+    ok "path (q) twin: a directive that resolved to no file still counts (unresolved_naming=1)"
+else no "path (q) twin rc=$PRC: $R"; fi
+# (r) S3: util.h now ends 4 indexed paths: the refusal says matches=4, near= is the first by path, stderr names the same retry
+PE="$( cd "$PH" && perl -e 'alarm 30; exec @ARGV' "$BIN" "$PH" --impact=util.h --no-cache 2>&1 >/dev/null )"
+pi util.h; R="$( printf '%s' "$PO" | grep -oE '<impact [^>]*>' )"
+if [ "$PRC" = 1 ] && printf '%s' "$R" | grep -q 'found="0" near="d/a/util.h" matches="4"' && printf '%s' "$PE" | grep -q '4 indexed files end with .util.h.*--impact=d/a/util.h'; then
+    ok "path (r): an ambiguous suffix refuses with near=d/a/util.h matches=4, and stderr names the same retry"
+else no "path (r) rc=$PRC: $R / $PE"; fi
+pi util.h --json
+if [ "$PRC" = 1 ] && printf '%s' "$PO" | grep -q '"near":"d/a/util.h","matches":4'; then ok "path (r): --json carries matches"; else no "path (r) json rc=$PRC: $PO"; fi
+# (s) CodeRabbit 4445823336: an absolute path under a root typed `.`
+for abs in "$PH" "$( cd "$PH" && pwd -P )"; do
+    PA="$( cd "$PH" && perl -e 'alarm 30; exec @ARGV' "$BIN" . --impact="$abs/lib/core.h" --no-cache 2>/dev/null )"; PARC=$?
+    if [ "$PARC" = 0 ] && printf '%s' "$PA" | grep -q 'selector="file" file="lib/core.h" importers="45"'; then ok "path (s): an absolute path ($abs) under the root typed . answers for lib/core.h"; else no "path (s) $abs rc=$PARC: $( printf '%s' "$PA" | grep -oE '<impact [^>]*>' )"; fi
+done
 rm -rf "$PH"
 
 # ── #10 determinism + well-formedness ─────────────────────────────────────────────────────────────────

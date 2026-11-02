@@ -6,5 +6,5 @@ others, cycle or not: with true include edges injected, Envoy's verdict went fro
 says: at least 1 in 20 of `dep_files=` sits inside an include cycle, and the number behind it rides beside it as
 `cyclic_files=` (absent at 0). Otherwise `nccd` says how deep: `horizontal` below 1, `vertical` from 1. That Envoy graph now
 reads `vertical cyclic_files="11"`; cpython (314 of 3,544 files in cycles) and vscode (1,277 of 15,574) stay `tangled`. A
-cycle list longer than its 20 rows now says so: `<cycles total= shown= capped="1">`. The 1-in-20 line is a heuristic, like
+cycle list longer than its 20 rows now lists the largest first and says so: `<cycles total= shown= capped="1">`; `--limit` above 20 lists more. The 1-in-20 line is a heuristic, like
 the `nccd` one it replaces.

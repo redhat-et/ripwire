@@ -501,7 +501,7 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // RUST-MOD-DECL: a `mod x;` parent-to-child pair is containment: out of the cycles and the cones below, in Ca/Ce
         const ContainmentCut contain   = rustContainmentCut( ing, adj );
         const auto&          healthAdj = contain.of( adj );
-        const auto      cycles = sccCycles( healthAdj );     // Lakos cardinal sin: cyclic physical deps
+        const auto      cycles = sortCyclesLargestFirst( sccCycles( healthAdj ) );   // Lakos cardinal sin: cyclic physical deps
         const DepHealth h      = dependencyHealth( healthAdj );   // per-file transitive cone (unrestricted BFS)
         // §P9.4: <health>'s ccd/acd/nccd are the RESTRICTED (dependency-capable-only) numbers — recomputed
         // from h.transitive (a post-pass, not a second BFS; see graph.h::restrictDependencyHealth).
@@ -517,9 +517,8 @@ std::optional<int> runArchViews( const MainDispatch& d )
                 }
             }
         }
-        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, cycles, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, sa.lazyEdgesByFile, sa.lazyEdges, cfg.pageLimit, cfg.pageOffset, avRootArg,
-                  { sa.importsUnresolved, sa.tsExtras.declarationOnly, sa.tsExtras.extendsUnread },   // #220: the partial-graph disclosures, absent at 0
-                  &healthAdj, contain.pairs );   // RUST-MOD-DECL: the cycles' own graph, and how many pairs it leaves out
+        packDeps( stdout, ing, cfg.packTopN > 0 ? cfg.packTopN : 40, DepsCycleView{ cycles, &healthAdj, contain.pairs }, h.transitive, afferent, adj, rh.ccd, rh.acd, rh.nccd, sa.lazyEdgesByFile, sa.lazyEdges, cfg.pageLimit, cfg.pageOffset, avRootArg,
+                  { sa.importsUnresolved, sa.tsExtras.declarationOnly, sa.tsExtras.extendsUnread } );   // #220: the partial-graph disclosures, absent at 0
         return 0;
     }
 
@@ -3610,7 +3609,7 @@ std::optional<int> runStructureText( const MainDispatch& d )
             }
         }
         const ContainmentCut reportContain = rustContainmentCut( ing, adj );   // RUST-MOD-DECL: `mod x;` pairs are containment, not cycles
-        const auto           cycles        = sccCycles( reportContain.of( adj ) );
+        const auto           cycles        = sortCyclesLargestFirst( sccCycles( reportContain.of( adj ) ) );   // S1: the 6 listed are the largest
 
         // §P7 embedding contract: this markdown never contains a run of 4-or-more backticks, so a consumer's
         // 5-backtick fence always safely embeds it whole (test/mdembedcheck.sh pins this). Every element below
@@ -3694,7 +3693,9 @@ std::optional<int> runStructureText( const MainDispatch& d )
         }
         if( cycles.empty() )
         {
-            rw::emitTo( stdout, "{}", reportPartial ? "- none found over the resolved edges\n" : "- none (acyclic)\n" );
+            // RUST-MOD-DECL: with containment pairs left out, "acyclic" is said of the graph without them, never bare
+            rw::emitTo( stdout, "{}", reportPartial ? "- none found over the resolved edges\n"
+                                                    : ( reportContain.pairs != 0 ? "- none (acyclic without the containment pairs)\n" : "- none (acyclic)\n" ) );
         }
         else
         {

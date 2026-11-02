@@ -10094,8 +10094,18 @@ inline std::vector<std::uint32_t> depsGodfileRows( const IngestResult& ing, cons
     return byAff;
 }
 
+// RUST-MOD-DECL (graph.h ContainmentCut): --deps' cycle list with the graph it and `transitive` were measured on (nullptr:
+// packDeps' own `adj`) and how many containment pairs that graph leaves out (<health containment_edges=>, absent at 0).
+// The list arrives sorted largest first (graph.h sortCyclesLargestFirst), so the 20-row cap keeps the largest.
+struct DepsCycleView
+{
+    const std::vector<std::vector<std::uint32_t>>& cycles;
+    const std::vector<std::vector<std::uint32_t>>* adj              = nullptr;
+    std::uint64_t                                  containmentEdges = 0;
+};
+
 inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
-                      const std::vector<std::vector<std::uint32_t>>& cycles,
+                      const DepsCycleView& cycleView,
                       const std::vector<std::uint32_t>& transitive, const std::vector<std::uint32_t>& afferent,
                       const std::vector<std::vector<std::uint32_t>>& adj,
                       std::uint64_t ccd, double acd, double nccd,
@@ -10114,13 +10124,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       // (graph.h StructuralIncludeAdj). unresolved or unread > 0 ⇒ the root carries its attribute and
                       // graph_partial="1", and the legend defines them (graphlegend.h tsImportRootAttrXml); all 0 ⇒
                       // byte-identical.
-                      const rw::TsImportRootCounts& tsImports = {},
-                      // RUST-MOD-DECL (graph.h ContainmentCut): the graph `cycles` and `transitive` were measured on (nullptr: `adj`
-                      // itself), and how many containment pairs it leaves out of them (<health containment_edges=>, absent at 0)
-                      const std::vector<std::vector<std::uint32_t>>* cycleAdj = nullptr, std::uint64_t containmentEdges = 0 )
+                      const rw::TsImportRootCounts& tsImports = {} )
 {
     const std::size_t F = ing.files.size();
-    const std::vector<std::vector<std::uint32_t>>& cutAdj = cycleAdj != nullptr ? *cycleAdj : adj;
+    const std::vector<std::vector<std::uint32_t>>& cycles           = cycleView.cycles;
+    const std::vector<std::vector<std::uint32_t>>& cutAdj           = cycleView.adj != nullptr ? *cycleView.adj : adj;
+    const std::uint64_t                            containmentEdges = cycleView.containmentEdges;
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
     {
@@ -10196,8 +10205,9 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
     if( containmentEdges > 0 )   // RUST-MOD-DECL: exactly when <health containment_edges=> is printed
     {
-        w.write( "health containment_edges=N: Rust `mod x;` parent-to-child pairs (a module file and the file it declares), "
-                 "left out of transitive=/cycles/ccd/acd/nccd/shape= as containment and kept in afferent=/instab=/godfiles/stabledeps. " );
+        w.write( "health containment_edges=N: Rust `mod x;` parent-to-child pairs whose only directive is the declaration (a parent "
+                 "that also uses or calls its child keeps the edge, and a cycle through it stays), left out of "
+                 "transitive=/cycles/ccd/acd/nccd/shape= as containment and kept in afferent=/instab=/godfiles/stabledeps. " );
     }
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
@@ -10323,7 +10333,8 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
 
     if( !cycles.empty() )   // Lakos's cardinal sin: cyclic physical dependencies (must build/test as one unit)
     {
-        const std::size_t capC = cycles.size() < 20 ? cycles.size() : 20;
+        // S1: the 20 largest (the list is sorted largest first); --limit above 20 lists more, as the legend's limit=N says
+        const std::size_t capC = std::min( cycles.size(), std::max<std::size_t>( 20, pageLimit > 0 ? std::size_t( pageLimit ) : 0 ) );
         if( capC < cycles.size() )   // DEPS-SHAPE-HONEST: a cut list says so (pageview.h rules 1-3); an uncut one is unchanged
         {
             w.write( "<cycles total=\"" + std::to_string( cycles.size() ) + "\" shown=\"" + std::to_string( capC ) + "\" capped=\"1\">" );

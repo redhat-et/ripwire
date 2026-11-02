@@ -3352,7 +3352,7 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
                   ( std::string( kImpactImportTierLegend ) + importersNextLegend( !imports.next.empty() )
-                    + importersRollupLegend( imports.capped && !imports.files.empty() ) ).c_str(),   // cut-fix E, as on the CLI; IMPACT-ROLLUP likewise
+                    + importersRollupLegend( importTierRollupShown( imports ) ) ).c_str(),   // cut-fix E, as on the CLI; IMPACT-ROLLUP likewise
                   ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )   // #220: exactly when the root carries them, as on the CLI
                     + viaNameLegend( imHasVia, true )
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
