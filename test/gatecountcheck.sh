@@ -53,7 +53,7 @@ loopN="$( python3 -c "
 import re, sys
 t = open( sys.argv[ 1 ] ).read()
 m = re.search( r'for _g in (.*?); do', t, re.S )
-sys.exit( 'no loop' ) if not m else print( len( m.group( 1 ).split() ) )
+sys.exit( 'no loop' ) if not m else print( len( [ w for w in m.group( 1 ).split() if w != chr( 92 ) ] ) )
 " "$REGRESSION" 2>/dev/null )"
 if [ -n "$genN" ] && [ -n "$loopN" ] && [ "$genN" = "$loopN" ]; then
     ok "(A) generator derives $genN from the for-loop in test/regression.sh (independently derived here: $loopN)"
@@ -76,9 +76,10 @@ for s in "${SITE_FILES[@]}"; do
     cp "$ROOT/$s" "$TMP/synth/$s"
 done
 # add one gate name INSIDE the loop, exactly the way a lane that adds a gate does
-awk '/^for _g in /{ sub( /; do$/, " synthonecheck; do" ); print; next } { print }' \
+# (one name per line since 2026-11-02: the new name is its own `    name \` line right after `for _g in \`)
+awk '{ print } /^for _g in \\$/{ print "    synthonecheck \\" }' \
     "$REGRESSION" > "$TMP/synth/test/regression.sh"
-if ! grep -q 'synthonecheck; do' "$TMP/synth/test/regression.sh"; then
+if ! grep -qx '    synthonecheck \\' "$TMP/synth/test/regression.sh"; then
     no "(C) synthetic setup: could not inject a gate name into the copied loop — the arm would be vacuous"
 elif python3 "$TMP/synth/docs/gatecount_build.py" --root "$TMP/synth" --check >/dev/null 2>&1; then
     no "(C) a gate ADDED to the loop did not make --check fail — this gate cannot go red"
@@ -88,7 +89,7 @@ else
         no "(C) regenerating the synthetic tree did not clear the failure"
     else
         # and again, to prove the SECOND lane's identical-text merge is what the gate catches
-        awk '/^for _g in /{ sub( /; do$/, " synthtwocheck; do" ); print; next } { print }' \
+        awk '{ print } /^for _g in \\$/{ print "    synthtwocheck \\" }' \
             "$TMP/synth/test/regression.sh" > "$TMP/synth/test/regression.sh.new"
         mv "$TMP/synth/test/regression.sh.new" "$TMP/synth/test/regression.sh"
         if python3 "$TMP/synth/docs/gatecount_build.py" --root "$TMP/synth" --check >/dev/null 2>&1; then
