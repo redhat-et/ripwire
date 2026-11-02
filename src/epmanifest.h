@@ -21,13 +21,16 @@
 // (gui_scripts), `[tool.poetry.plugins.G]`, `[tool.poetry.scripts]` (string values only); Cargo.toml `[[bin]]` (name, path,
 // Cargo's default `src/main.rs` / `src/bin/<name>.rs` when a target omits it, the package's own bin when a crate declares none
 // and has no `autobins = false` — that implicit group rides only on a binary cue in the task); package.json `"bin"` (named by
-// the last `/` segment, as npm installs it) / `"main"` (file-path targets, `../` and a Windows `\` normalized). One table (kEpManifestFormats) names each format's file, reader, target
+// the last `/` segment, as npm installs it) / `"main"` (file-path targets, `../` and a Windows `\` normalized; a `main` that
+// is no exact file probes Node's `.js`, `.ts`, `.mjs`, `.cjs`, then `/index.js`, `/index.ts`, a trailing `/` the index only). One table (kEpManifestFormats) names each format's file, reader, target
 // form and the shown-row file extensions that look for it: a manifest is read where such a shown row sits in a directory or an
 // ancestor that holds one — a package's manifest always sits above its modules.
 // FLOORS (stated in the legend's absence of them, and in the lane report): setup.py `entry_points={…}` (a call, not a table),
 // package.json `"exports"` maps, pyproject inline tables, a group literal built at run time, a multi-root run; Cargo's
 // auto-discovered binaries (`src/bin/*.rs`, and `src/main.rs` beside declared `[[bin]]` tables) and `src/bin/<name>/main.rs` as
-// a default path are not read; package.json is read for a .js or .ts row only (not .mjs, .cjs, .mts, .jsx, .tsx). The DEFAULT regime
+// a default path are not read; package.json is read for a .js or .ts row only (not .mjs, .cjs, .mts, .jsx, .tsx); a `main`
+// directory's own package.json `main` and Node's other probes (`.json`, `.node`, `index.mjs`, `index.cjs`) are not followed,
+// such a `main` reads external="1"; a `bin` or Cargo `path` is an exact file (no probe). The DEFAULT regime
 // and the XML dialect only, as the caller hop: --json, --token-budget=N,
 // --signatures-only and --detail=N carry none. RIPWIRE_NO_EP_MANIFEST (any value) turns it off — the A/B handle.
 
@@ -798,19 +801,79 @@ inline std::uint8_t epFormatsOfForm( EpTargetForm form ) noexcept
     return mask;
 }
 
-// THE ONE PATH RESOLVER for file-path targets (Cargo `path`, package.json `bin`/`main`): `path` as written, a Windows `\`
-// read as `/`, joined to the manifest's directory `mdir` and normalized lexically (lexicalNormalize: "./" and "." elided, ".."
-// collapsed, so "../shared/gen.rs" from up/ is shared/gen.rs); the indexed file at exactly that root-relative path. `inTree`
-// says whether one exists. A path that escapes above the root, an absolute path or a directory matches no indexed file: External.
-inline std::uint32_t epPathFile( const IngestResult& ing, std::string_view mdir, std::string_view path, bool& inTree )
+// A manifest path target joined to the manifest's directory `mdir`, a Windows `\` read as `/` (not yet normalized).
+inline std::string epJoinedPath( std::string_view mdir, std::string_view path )
 {
     std::string joined = mdir.empty() ? std::string( path ) : std::string( mdir ) + "/" + std::string( path );
     std::replace( joined.begin(), joined.end(), '\\', '/' );   // a TOML basic string's undecoded "\\" leaves an empty segment: elided
+    return joined;
+}
+
+// THE ONE PATH RESOLVER for file-path targets (Cargo `path`, package.json `bin`/`main`): `path` as written, a Windows `\`
+// read as `/`, joined to the manifest's directory `mdir` and normalized lexically (lexicalNormalize: "./" and "." elided, ".."
+// collapsed, so "../shared/gen.rs" from up/ is shared/gen.rs); the indexed file at exactly that root-relative path. `inTree`
+// says whether one exists. A path that escapes above the root, an absolute path or a directory matches no indexed file: External
+// (a package.json `main` goes through epMainFile, which also probes Node's extensions and directory index).
+inline std::uint32_t epPathFile( const IngestResult& ing, std::string_view mdir, std::string_view path, bool& inTree )
+{
+    const std::string joined = epJoinedPath( mdir, path );
     const std::string rel = path.starts_with( '/' ) || path.starts_with( '\\' ) ? std::string() : lexicalNormalize( joined );
     std::uint32_t     hit = kNoFile;
     for( std::uint32_t f = 0; f < ing.files.size() && hit == kNoFile && !rel.empty(); ++f )
     {
         hit = rootRelPath( ing, f ) == rel ? f : kNoFile;
+    }
+    inTree = hit != kNoFile;
+    return hit;
+}
+
+// A package.json `main` as Node loads it (the module resolution's LOAD_AS_FILE, then LOAD_AS_DIRECTORY's index): the exact
+// path (epPathFile), else the first indexed file of `path` + `.js`, `.ts`, `.mjs`, `.cjs`, then `path/index.js`,
+// `path/index.ts`, in that fixed order. A trailing `/` (or `\`) names a directory: only the two index probes. A directory's own
+// package.json `main` is not followed (a floor); nothing matched keeps External. `bin` and a Cargo `path` name a file as
+// written (an extensionless bin script is a real file name) and stay on epPathFile.
+inline std::uint32_t epMainFile( const IngestResult& ing, std::string_view mdir, std::string_view path, bool& inTree )
+{
+    const bool dirOnly = path.ends_with( '/' ) || path.ends_with( '\\' );
+    if( const std::uint32_t exact = dirOnly ? kNoFile : epPathFile( ing, mdir, path, inTree ); exact != kNoFile )
+    {
+        return exact;
+    }
+    inTree = false;
+    if( path.starts_with( '/' ) || path.starts_with( '\\' ) )
+    {
+        return kNoFile;   // absolute: no indexed file, as epPathFile
+    }
+    const std::string joined = epJoinedPath( mdir, path );
+    static constexpr std::string_view kFileExts[]  = { ".js", ".ts", ".mjs", ".cjs" };
+    static constexpr std::string_view kDirIndex[]  = { "/index.js", "/index.ts" };
+    std::vector<std::string>          probes;   // in priority order; an escape above the root normalizes to "" and is skipped
+    probes.reserve( std::size( kFileExts ) + std::size( kDirIndex ) );
+    if( const std::string base = lexicalNormalize( joined ); !dirOnly && !base.empty() )
+    {
+        for( const std::string_view ext : kFileExts )
+        {
+            probes.push_back( base + std::string( ext ) );
+        }
+    }
+    for( const std::string_view idx : kDirIndex )
+    {
+        probes.push_back( lexicalNormalize( joined + std::string( idx ) ) );   // "." at the root probes index.js
+    }
+    std::size_t   best = probes.size();
+    std::uint32_t hit  = kNoFile;
+    for( std::uint32_t f = 0; f < ing.files.size() && best != 0; ++f )   // one pass over the files; the earliest probe wins
+    {
+        const std::string_view rel = rootRelPath( ing, f );
+        for( std::size_t i = 0; i < best; ++i )
+        {
+            if( !probes[i].empty() && probes[i] == rel )
+            {
+                best = i;
+                hit  = f;
+                break;
+            }
+        }
     }
     inTree = hit != kNoFile;
     return hit;
@@ -935,6 +998,10 @@ inline std::uint32_t epEntryFile( const IngestResult& ing, const Manifest& man, 
     if( man.fmt->form == EpTargetForm::ModuleAttr )
     {
         return epModuleFile( ing, man.dir, std::string_view( e.target ).substr( 0, e.target.find( ':' ) ), inTree );
+    }
+    if( man.fmt->form == EpTargetForm::FileExport && e.group == "main" )
+    {
+        return epMainFile( ing, man.dir, e.target, inTree );
     }
     return epPathFile( ing, man.dir, e.target, inTree );
 }

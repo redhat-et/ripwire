@@ -333,6 +333,49 @@ if good vql && grep -q 'n="main"' "$TMP/vql" && has "$VQL" "any(g['e']==[{'n':'l
 # B5 positive twin: at the same workspace root, a member's main is shown and its own Cargo.toml group rides; the root manifest adds none
 if good cargowsm && has "$CARGOWSM" "'Cargo.toml' not in [g['p'] for g in d] and any(g['p']=='crate-a/Cargo.toml' and g['e']==[{'n':'crate-a','target':'src/main.rs','def':'crate-a/src/main.rs:3'}] for g in d)"; then
     ok "B5 positive: the workspace root run shows crate-a's own group, none from the root Cargo.toml"; else no "B5 positive twin: $CARGOWSM"; fi
+# M (fix round 2, fixtures built at run time; [P] = red on 14161f0e): a package.json `main` resolves as Node loads it — the exact
+#    path, then .js .ts .mjs .cjs, then /index.js /index.ts; a trailing / is a directory; `bin` stays an exact file
+M="$TMP/m"; mkdir -p "$M/idx" "$M/dot/lib" "$M/slash/lib" "$M/ord" "$M/tsonly" "$M/mono/packages/a" "$M/mono/packages/b" "$M/bin/bin" || no "M fixture dirs"
+fn(){ printf 'export function %s() {\n  return 1;\n}\n' "$1" >"$2"; }
+printf '{\n  "name": "idx",\n  "main": "index"\n}\n' >"$M/idx/package.json"; fn startIdx "$M/idx/index.js"
+printf '{\n  "name": "dotlib",\n  "main": "./lib"\n}\n' >"$M/dot/package.json"; fn startDotLib "$M/dot/lib/index.js"
+printf '{\n  "name": "slashlib",\n  "main": "lib/"\n}\n' >"$M/slash/package.json"; fn startLibFile "$M/slash/lib.js"; fn startSlashLib "$M/slash/lib/index.js"
+printf '{\n  "name": "ordp",\n  "main": "./app"\n}\n' >"$M/ord/package.json"; fn startAppJs "$M/ord/app.js"; fn startAppTs "$M/ord/app.ts"
+printf '{\n  "name": "tsonly",\n  "main": "index"\n}\n' >"$M/tsonly/package.json"; printf 'export function startTs(): number {\n  return 1;\n}\n' >"$M/tsonly/index.ts"
+printf '{\n  "name": "a",\n  "main": "index"\n}\n' >"$M/mono/packages/a/package.json"; fn startMonoA "$M/mono/packages/a/index.js"
+printf '{\n  "name": "b",\n  "main": "nothing"\n}\n' >"$M/mono/packages/b/package.json"; fn startMonoB "$M/mono/packages/b/b.js"
+printf '{\n  "name": "binx",\n  "bin": {\n    "cli": "bin/cli",\n    "ok": "ok.js"\n  }\n}\n' >"$M/bin/package.json"; fn startCli "$M/bin/bin/cli.js"; fn startOk "$M/bin/ok.js"
+run "$M/idx" "$TMP/midx" '--for=how does startIdx start the package main'
+run "$M/dot" "$TMP/mdot" '--for=how does startDotLib start the package main'
+run "$M/slash" "$TMP/mslash" '--for=how do startSlashLib and startLibFile start the package main'
+run "$M/ord" "$TMP/mord" '--for=how do startAppJs and startAppTs start the package main'
+run "$M/tsonly" "$TMP/mts" '--for=how does startTs start the package main'
+run "$M/mono" "$TMP/mmono" '--for=how do startMonoA and startMonoB start the package main'
+run "$M/bin" "$TMP/mbin" '--for=how do startOk and startCli start the cli command'
+MR="midx mdot mslash mord mts mmono mbin"
+for a in $MR; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
+MIDX="$( eps "$TMP/midx" )"; MDOT="$( eps "$TMP/mdot" )"; MSLASH="$( eps "$TMP/mslash" )"; MORD="$( eps "$TMP/mord" )"; MTS="$( eps "$TMP/mts" )"; MMONO="$( eps "$TMP/mmono" )"; MBIN="$( eps "$TMP/mbin" )"
+# M1 [P] an extensionless main "index" -> index.js
+if good midx && has "$MIDX" "any(g['p']=='package.json' and g['e']==[{'n':'idx','target':'index','def':'index.js:1'}] for g in $(grp main))"; then
+    ok "M1 main \"index\" -> index.js:1 (the .js probe)"; else no "M1 extensionless main: $MIDX"; fi
+# M2 [P] a directory main "./lib" -> lib/index.js
+if good mdot && has "$MDOT" "any(g['e']==[{'n':'dotlib','target':'./lib','def':'lib/index.js:1'}] for g in $(grp main))"; then
+    ok "M2 main \"./lib\" -> lib/index.js:1 (the directory index)"; else no "M2 directory main: $MDOT"; fi
+# M3 [P] a trailing slash "lib/" is the directory: lib/index.js, never the lib.js beside it (both shown)
+if good mslash && grep -q 'n="startLibFile"' "$TMP/mslash" && has "$MSLASH" "any(g['e']==[{'n':'slashlib','target':'lib/','def':'lib/index.js:1'}] for g in $(grp main))"; then
+    ok "M3 main \"lib/\" -> lib/index.js:1, not lib.js (a trailing / skips the extension probes)"; else no "M3 trailing-slash main: $MSLASH"; fi
+# M4 [P] index.ts only -> index.ts (the .ts probe)
+if good mts && has "$MTS" "any(g['e']==[{'n':'tsonly','target':'index','def':'index.ts:1'}] for g in $(grp main))"; then
+    ok "M4 main \"index\" with only index.ts -> index.ts:1"; else no "M4 ts-only main: $MTS"; fi
+# M5 [P] the fixed order: "./app" with app.js and app.ts both present (both shown) is app.js
+if good mord && grep -q 'n="startAppTs"' "$TMP/mord" && has "$MORD" "any(g['e']==[{'n':'ordp','target':'./app','def':'app.js:1'}] for g in $(grp main))"; then
+    ok "M5 main \"./app\" with app.js and app.ts -> app.js:1 (.js before .ts)"; else no "M5 probe order: $MORD"; fi
+# M6 [P] a miss: b's main "nothing" matches no file and rides nowhere (its b.js is shown); a's "index" beside it resolves
+if good mmono && grep -q 'n="startMonoB"' "$TMP/mmono" && has "$MMONO" "[g['p'] for g in d]==['packages/a/package.json'] and d[0]['e']==[{'n':'a','target':'index','def':'packages/a/index.js:1'}]"; then
+    ok "M6 a main that matches no probe resolves to nothing (no b group); a sibling package's \"index\" -> packages/a/index.js:1"; else no "M6 miss beside a hit: $MMONO"; fi
+# M7 [G] a bin is an exact file: "bin/cli" stays external=1 although bin/cli.js exists; "ok.js" beside it resolves
+if good mbin && has "$MBIN" "any(g['e']==[{'n':'cli','target':'bin/cli','external':'1'},{'n':'ok','target':'ok.js','def':'ok.js:1'}] for g in $(grp bin))"; then
+    ok "M7 an extensionless bin \"bin/cli\" is not probed (external=1 beside bin/cli.js); ok.js -> ok.js:1"; else no "M7 bin not probed: $MBIN"; fi
 # N1
 okrun "$TMP/neg" && grep -q 'n="Fmt"' "$TMP/neg" && [ "$NEG" = "[]" ]; verdict $? "N1 a non-manifest .cfg yields no <ep> (Fmt shown)" "N1 config.cfg produced rows: $NEG"
 # N2
