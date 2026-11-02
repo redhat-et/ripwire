@@ -38,6 +38,7 @@
 #include "serialize.h"    // escapeXml
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -829,9 +830,11 @@ struct Manifest
 };
 
 // A manifest inside a node_modules tree belongs to a dependency, not to the shown row's package.
-inline bool epInDependencyTree( std::string_view rel, std::string_view diskPath ) noexcept
+inline bool epInDependencyTree( std::string_view rel, std::string_view diskPath )
 {
-    return rel.contains( "/node_modules/" ) || rel.starts_with( "node_modules/" ) || diskPath.contains( "/node_modules/" );
+    const std::string                   relFromRoot = "/" + std::string( rel );   // a leading segment is a segment too
+    const std::array<std::string_view, 2> paths     = { relFromRoot, diskPath };
+    return std::ranges::any_of( paths, []( std::string_view p ) { return p.contains( "/node_modules/" ); } );
 }
 
 // Read one manifest of format `fmt` in directory `dir` (root-relative; `disk` is the same directory on disk); kept only when
