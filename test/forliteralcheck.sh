@@ -42,6 +42,7 @@
 #   K1-K10, M1-M5 (lane LITERAL-ANCHOR; RED on base 4e8bfde7 where [P], fixture built at runtime): a dotted key (3+ segments, or 2 with a setting/option/key/command/flag word) or
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
 #   T28-T37 (fix round 2; RED on 5bbee3cb where [P]): tbl= is an allowlist of proven openers per language; a closer ends the opener walk; read= and <lit_capped> say the rank cap; table rows first
+#   T38, T38b (fix round 3): a call in a list a function builds, and an enum struct variant, are no table rows (they killed two surviving mutants)
 #   T23-T27, T24g-h (fix round; RED on e2df59ee where [P]): natural wording near `add a new argument to run_it` prints no block, a statement in a function body carries no tbl=, the capped note is true, no silent anchor
 #   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
 #          add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names; near misses keep the answer byte-identical
@@ -1280,6 +1281,19 @@ RAWK="AKIA""IOSFODNN7EXAMPLE"; RDX="$TMP/rdx"; mkdir -p "$RDX"
 printf 'TOKS = {  # %s\n    "rd_key": 1,\n    "other": 2,\n}\n' "$RAWK" > "$RDX/t.py"
 Q="$( cd "$RDX" || exit 1; "$BIN" "$RDX" --no-cache '--for=register `rd_key`' </dev/null 2>/dev/null )"; QN="$( cd "$RDX" || exit 1; "$BIN" "$RDX" --no-cache --no-redact '--for=register `rd_key`' </dev/null 2>/dev/null )"
 if has "$Q" ' tbl="TOKS = {' && ! has "$Q" "$RAWK" && has "$QN" "tbl=\"TOKS = {  # $RAWK"; then ok "T37 [G] a credential on the opener line is redacted in tbl=; --no-redact keeps it"; else no "T37 opener redaction: $( grep -o ' tbl="[^"]*"' <<<"$Q" )"; fi
+# T38 (fix round 3; killed the mutants call-in-fn and enum-any-row, which T24/T30 let survive): a call row in a list a function builds is a statement, no row;
+# a struct variant of an enum is a declaration, no row. Twins: the same calls in a top level list, and unit variants, keep their opener. Each needs the anchor's <lit>.
+MV="$TMP/mv"; mkdir -p "$MV"
+printf 'def setup():\n    handlers = [\n        make("cf_key", 1),\n        make("other", 2),\n    ]\n    return handlers\n\ndef cf_key():\n    pass\n' > "$MV/a.py"
+printf 'TOP = [\n    make("cg_key", 1),\n    make("other", 2),\n]\n\ndef cg_key():\n    pass\n' > "$MV/b.py"
+printf 'pub enum Ev {\n    Plain,\n    EvKey { ev_key: u8, other: u8 },\n    Other { ev_key: u8, other: u8 },\n}\npub enum Ew {\n    ew_key,\n    other,\n}\nfn ev_key() {}\nfn ew_key() {}\n' > "$MV/ev.rs"
+mvq(){ ( cd "$MV" || exit 1; "$BIN" "$MV" --no-cache "--for=$1" </dev/null 2>/dev/null ); }
+Q="$( mvq 'register a new handler like `cf_key`' )"; Q2="$( mvq 'register a new handler like `cg_key`' )"
+if has "$Q" 's="cf_key" shape="table"' && ! has "$Q" ' tbl="' && has "$Q2" 'tbl="TOP = ["'; then ok "T38 [P] calls in a list a function builds are statements, no tbl=; twin: the top level list keeps TOP = ["
+else no "T38 call in a function list: $( grep -o '<ls [^>]*>' <<<"$Q$Q2" | cut -c1-160 | tr '\n' ' ' )"; fi
+Q="$( mvq 'add a new event like `ev_key`' )"; Q2="$( mvq 'add a new event like `ew_key`' )"
+if has "$Q" 's="ev_key" shape="table"' && ! has "$Q" ' tbl="' && has "$Q2" 'tbl="pub enum Ew {"'; then ok "T38b [P] an enum's struct variant is a declaration, no tbl=; twin: a unit variant keeps its enum"
+else no "T38b enum variant: $( grep -o '<ls [^>]*>' <<<"$Q$Q2" | cut -c1-160 | tr '\n' ' ' )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
