@@ -3797,10 +3797,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
 // other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
 // dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
-// v26 (2026-11-02, #494 review) — the dead SET's inputs moved again: queries/rust/tags.scm captures a method only inside an impl or
+// v27 (2026-11-02, #494 review) — the dead SET's inputs moved again: queries/rust/tags.scm captures a method only inside an impl or
 // trait body, so a free fn in a `mod` is a Function, not a Method the Drop::drop exemption could hide. Renumbered above main's
-// v25 (land-472); whichever of the two open scheme bumps merges second renumbers again. kParserVer 284 also invalidates v25 blobs.
-constexpr std::uint32_t kQSnapCacheScheme = 26;
+// v25 (land-472); and above the open #499 bump (v26, Rust test-attribute functions), so the two never share a value. kParserVer 284 also invalidates v25 blobs.
+constexpr std::uint32_t kQSnapCacheScheme = 27;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
