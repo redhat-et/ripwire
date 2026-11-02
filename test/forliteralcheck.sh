@@ -41,6 +41,7 @@
 #   N2 [train 42b T-5] `x = x + 1  # note:` is no def header: the bare string after it is a row, not a docstring (twin: the same without the comment)
 #   K1-K10, M1-M5 (lane LITERAL-ANCHOR; RED on base 4e8bfde7 where [P], fixture built at runtime): a dotted key (3+ segments, or 2 with a setting/option/key/command/flag word) or
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
+#   T28-T37 (fix round 2; RED on 5bbee3cb where [P]): tbl= is an allowlist of proven openers per language; a closer ends the opener walk; read= and <lit_capped> say the rank cap; table rows first
 #   T23-T27, T24g-h (fix round; RED on e2df59ee where [P]): natural wording near `add a new argument to run_it` prints no block, a statement in a function body carries no tbl=, the capped note is true, no silent anchor
 #   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
 #          add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names; near misses keep the answer byte-identical
@@ -895,6 +896,380 @@ A="$( tr1 '--for=register `abspath` `basename` `concat` `Each`' )"
 if [ "$( grep -o '<lit s=' <<<"$A" | wc -l | tr -d ' ' )" = "3" ] && has "$A" '<lit_capped scanned="3" skipped="1" next="--grep=Each"'; then ok "T26 [P] the fourth anchor: three scanned, one skipped, next= names it"; else no "T26 fourth anchor: $( grep -o '<lit_capped[^>]*>' <<<"$A" )"; fi
 A="$( tr1 '--for=register `no_a_thing` `no_b_thing` `no_c_thing` `abspath`' )"
 if has "$A" 's="abspath"' || ( has "$A" '<lit_capped' && has "$A" 'next="--grep=abspath"' ); then ok "T27 [P] anchors with no site never make a later one vanish: it prints or next= names it"; else no "T27 silent drop: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$A" | cut -c1-160 | tr '\n' ' ' )"; fi
+
+# T28-T37 (fix round 2; RED on 5bbee3cb where [P]): tbl= is an allowlist of proven openers, per language. Every arm first needs the anchor's own <lit>, so a crash or an empty answer is red.
+AL="$TMP/allow"; mkdir -p "$AL/py" "$AL/web" "$AL/rs/src" "$AL/go" "$AL/cc" "$AL/java"
+cat > "$AL/py/neg.py" <<'PY'
+def compute(a, b):
+    return a
+
+y = compute(
+    neg_py_call,
+    other_a,
+)
+z = compute(
+    neg_py_call,
+    other_b,
+)
+compute(1, k=[
+    "neg_py_kwarg",
+    "other_c",
+])
+def inner():
+    v = compute(
+        neg_py_infn,
+        other_d,
+    )
+    return v
+with open("x") as f:
+    compute(neg_py_with, 1)
+    compute(neg_py_with, 2)
+PY
+cat > "$AL/py/pos.py" <<'PY'
+PLAIN = {
+    "pos_py_dict": 1,
+    "other": 2,
+}
+NAMES = (
+    "pos_py_tuple",
+    "other",
+)
+TYPED: dict[str, int] = {
+    "pos_py_typed": 1,
+    "other": 2,
+}
+FROZEN = frozenset({
+    "pos_py_frozen",
+    "other",
+})
+OUTER = {
+    "a": {
+        "pos_py_nested": 1,
+        "other": 2,
+    },
+}
+EARLY = {
+    "a": 1,
+}
+REAL = {  #real
+    "pos_py_comment": 1,
+    "other": 2,
+}
+def build():
+    table = {
+        "pos_py_infn": 1,
+        "other": 2,
+    }
+    return table
+PY
+cat > "$AL/web/neg.ts" <<'TS'
+declare const describe: any, app: any, createApp: any;
+function log_it(x: any) { return x; }
+function neg_ts_new() { return 1; }
+function pos_ts_export() { return 1; }
+class Hono<E> { constructor(o: any) {} }
+const clone = new Hono<E>({
+  neg_ts_new: 1,
+  other: 2,
+});
+const made = createApp({
+  neg_ts_app: 1,
+  other: 2,
+});
+describe("x", () => {
+  log_it(neg_ts_cb);
+  log_it(neg_ts_cb);
+  log_it({
+    neg_ts_cbkey: 1,
+    other: 2,
+  });
+});
+app.get('/x', (req, res) => {
+  log_it(neg_ts_route);
+  log_it(neg_ts_route);
+});
+(function () {
+  log_it(neg_ts_iife, 1);
+  log_it(neg_ts_iife, 2);
+})();
+for (let i = 0; i < 1; i++) {
+  neg_ts_for,
+  other,
+}
+const mapped = [1, 2].map(x => {
+  neg_ts_map: 1,
+  other: 2,
+});
+export interface Options {
+  neg_ts_iface: number;
+  other: number;
+}
+export type T2 = {
+  neg_ts_type: string;
+  other: string;
+};
+class Field {
+  neg_ts_field: number;
+  other: number;
+}
+export type Long<
+  A
+> = {
+  neg_ts_long: A;
+  other: A;
+};
+TS
+cat > "$AL/web/pos.ts" <<'TS'
+export const EXPORTED = {
+  pos_ts_export: 1,
+  other: 2,
+};
+export default {
+  pos_ts_default: 1,
+  other: 2,
+};
+const ARR: Row[] = [
+  { name: "pos_ts_arr", n: 1 },
+  { name: "other", n: 2 },
+];
+const FROZEN = Object.freeze({
+  pos_ts_frozen: 1,
+  other: 2,
+});
+const MAP = new Map([
+  ["pos_ts_map", 1],
+  ["other", 2],
+]);
+export enum Kind {
+  PosTsEnum,
+  Other,
+}
+export const OPTS: Opt[] = [
+  {
+    pos_ts_deep: "x",
+    other: 1,
+  },
+];
+TS
+cat > "$AL/rs/src/neg.rs" <<'RS'
+pub struct MapState {
+    neg_rs_field: u32,
+    other: u32,
+}
+pub enum Change {
+    New {
+        neg_rs_variant: u32,
+        other: u32,
+    },
+    Old,
+}
+impl MapState {
+    fn wrapper(&self) {
+        let w = wrap_it(
+            neg_rs_arg,
+            other,
+        );
+        assert_eq!(
+            neg_rs_assert,
+            other,
+        );
+    }
+}
+RS
+cat > "$AL/rs/src/pos.rs" <<'RS'
+pub const TABLE: &[(&str, u32)] = &[
+    ("pos_rs_const", 1),
+    ("other", 2),
+];
+pub static M: [Row; 2] = [
+    Row { key: pos_rs_static, n: 1 },
+    Row { key: other, n: 2 },
+];
+const L: Foo = Foo {
+    pos_rs_struct: 1,
+    other: 2,
+};
+fn fill() {
+    bind_it! {
+        PosRsMacro,
+        Other,
+    };
+    let v = vec![
+        pos_rs_vec,
+        other,
+    ];
+    let f = Foo {
+        neg_rs_lit: 1,
+        other: 2,
+    };
+}
+RS
+cat > "$AL/go/g.go" <<'GO'
+package g
+
+var Plain = map[string]string{ // aws
+	"pos_go_map": "a",
+	"other":      "b",
+}
+var Funcs = map[string]func() error{
+	"pos_go_func": nil,
+	"other":       nil,
+}
+var Conf = Options{
+	PosGoStruct: 1,
+	Other:       2,
+}
+var Gates = map[string]Spec{
+	"a": {
+		PosGoNested: 1,
+		Other:       2,
+	},
+}
+
+func build() []string {
+	opt := res.Options{
+		NegGoOpt: 1,
+		Other:    2,
+	}
+	use(opt)
+	return []string{
+		"pos_go_ret",
+		"other",
+	}
+}
+GO
+cat > "$AL/cc/t.cpp" <<'CC'
+#include <array>
+static const struct R first[] = {
+    { "a", 1 },
+};
+static const struct R real_table[] = { /* the real table */
+    { "pos_c_comment", 1 },
+    { "other", 2 },
+};
+static const struct R allman[] =
+{
+    { "pos_c_allman", 1 },
+    { "other", 2 },
+};
+static constexpr std::array<const char*, 2> kNames{
+    "pos_cc_brace",
+    "other",
+};
+constexpr auto kMore = std::to_array<const char*>( {
+    "pos_cc_toarray",
+    "other",
+} );
+struct Decl {
+    neg_c_field: 1,
+    other: 2,
+};
+void go() {
+    instance = std::make_unique<Pool>(
+        neg_cc_arg,
+        other,
+    );
+}
+wrap(first, {
+    neg_cc_closed: 1,
+    other: 2,
+});
+namespace ns {
+    REGISTER_IT(pos_cc_ns);
+    REGISTER_IT(other);
+}
+CC
+cat > "$AL/cc/x.cpp" <<'CC'
+static const char* decoy = R"(
+)";
+DECLARE_EARLY(UInt64, early_row, 1, R"(
+closed text
+)", 0)
+#define SETTINGS(DECLARE) \
+    DECLARE(UInt64, first_row, 1, R"(
+text at column 0 (
+)", 0) \
+    DECLARE(UInt64, pos_cc_xmacro, 2, R"(
+more text
+)", 0) \
+
+CC
+cat > "$AL/java/J.java" <<'JV'
+class J {
+    static final String[] NAMES = new String[] {
+        "pos_java_arr",
+        "other",
+    };
+    static final Object M = List.of(
+        "pos_java_listof",
+        "other",
+        "third"
+    );
+}
+JV
+alq(){ ( cd "$AL" || exit 1; "$BIN" "$AL" --no-cache "--for=$1" </dev/null 2>/dev/null ); }
+alcheck(){ # anchor, then the tbl= the rows must carry, or - for none
+    local L T
+    L="$( lits <<<"$( alq "register \`$1\`" )" )"
+    if ! has "$L" "s=\"$1\" shape=\"table\""; then printf '%s no <lit>; ' "$1"; return 1; fi
+    T="$( grep -o ' tbl="[^"]*"' <<<"$L" | sed -e 's/^ tbl="//' -e 's/"$//' | sort -u | tr '\n' '|' )"
+    if [ "$2" = "-" ]; then [ -z "$T" ] && return 0; else [ "$T" = "$2|" ] && return 0; fi
+    printf '%s tbl=[%s]; ' "$1" "$T"; return 1
+}
+albatch(){ # label, then anchor/expected pairs
+    local label="$1" msg=""; shift
+    while [ "$#" -gt 1 ]; do msg="$msg$( alcheck "$1" "$2" )"; shift 2; done
+    if [ -z "$msg" ]; then ok "$label"; else no "$label: $msg"; fi
+}
+albatch "T28 [P] M1 a call's arguments and an option literal are no table: py, ts, rust, c++, go" \
+    neg_py_call - neg_py_kwarg - neg_py_infn - neg_ts_new - neg_ts_app - neg_rs_arg - neg_rs_assert - neg_cc_arg - NegGoOpt - neg_rs_lit -
+albatch "T29 [P] M2 code in a top level callback, block or iife is no table" \
+    neg_ts_cb - neg_ts_cbkey - neg_ts_route - neg_ts_iife - neg_ts_for - neg_ts_map - neg_py_with -
+albatch "T30 [P] M3 a declaration is no table: struct, enum variant fields, interface, type alias, class field, multi-line generic" \
+    neg_rs_field - neg_rs_variant - neg_ts_iface - neg_ts_type - neg_ts_field - neg_ts_long - neg_c_field -
+albatch "T31 [P] M4 a closer ends the walk: a row never names a closed table; a comment on the opener line; a raw string's lines are text" \
+    pos_c_comment 'static const struct R real_table[] = { /* the real table */' pos_py_comment 'REAL = {  #real' neg_cc_closed - pos_cc_xmacro '#define SETTINGS(DECLARE) \'
+albatch "T32 [P] M5 export and pub tables keep their opener" \
+    pos_ts_export 'export const EXPORTED = {' pos_ts_default 'export default {' pos_rs_const 'pub const TABLE: &amp;[(&amp;str, u32)] = &amp;[' pos_rs_static 'pub static M: [Row; 2] = ['
+albatch "T33 [G] twins, one proven shape per language: py dict, tuple, annotated, wrapper, nested; ts array, freeze, Map, enum, deep; rust struct, macro, vec; go map, func map, struct, nested, return; c++ brace init, to_array, Allman, namespace macro; java array, List.of" \
+    pos_py_dict 'PLAIN = {' pos_py_tuple 'NAMES = (' pos_py_typed 'TYPED: dict[str, int] = {' pos_py_frozen 'FROZEN = frozenset({' pos_py_nested 'OUTER = {' pos_py_infn 'table = {' \
+    pos_ts_arr 'const ARR: Row[] = [' pos_ts_frozen 'const FROZEN = Object.freeze({' pos_ts_map 'const MAP = new Map([' PosTsEnum 'export enum Kind {' pos_ts_deep 'export const OPTS: Opt[] = [' \
+    pos_rs_struct 'const L: Foo = Foo {' PosRsMacro 'bind_it! {' pos_rs_vec 'let v = vec![' \
+    pos_go_map 'var Plain = map[string]string{ // aws' pos_go_func 'var Funcs = map[string]func() error{' PosGoStruct 'var Conf = Options{' PosGoNested 'var Gates = map[string]Spec{' pos_go_ret 'return []string{' \
+    pos_cc_brace 'static constexpr std::array&lt;const char*, 2&gt; kNames{' pos_cc_toarray 'constexpr auto kMore = std::to_array&lt;const char*&gt;( {' pos_c_allman 'static const struct R allman[] = {' pos_cc_ns 'item' \
+    pos_java_arr 'static final String[] NAMES = new String[] {' pos_java_listof 'static final Object M = List.of('
+# T34 [P] the false fire M1 made: a bare word whose only "row" is a call's option literal prints nothing; twin: a bare word with a real row prints
+Q="$( alq 'add a new test for neg_ts_new' )"
+if [ -n "$Q" ] && ! has "$Q" 'shape="table"'; then ok "T34 [P] a bare word beside an option literal only: no block"; else no "T34 false fire or empty answer: ${#Q} B"; fi
+Q="$( alq 'where is pos_ts_export registered' )"
+if has "$Q" 's="pos_ts_export" shape="table"' && has "$Q" 'tbl="export const EXPORTED = {"'; then ok "T34b [P] twin: a bare word with an exported table row prints"; else no "T34b bare word lost its row"; fi
+# T35 [P] M6 past the rank cap: read= says how many sites were read; a bare anchor is named in <lit_capped>, never nothing; twin: under the cap, no read=
+RK="$TMP/rk"; mkdir -p "$RK/aaa" "$RK/zzz"
+{ printf 'def big_key():\n    return 1\n\ndef use():\n'; for i in $( seq 1 4302 ); do printf '    x%s = big_key() + %s\n' "$i" "$i"; done; } > "$RK/aaa/many.py"
+printf 'REG = {\n    "big_key": 1,\n    "other": 2,\n}\nSMALL = {\n    "small_key": 1,\n    "other": 2,\n}\ndef small_key():\n    return 1\n' > "$RK/zzz/table.py"
+rkq(){ ( cd "$RK" || exit 1; "$BIN" "$RK" --no-cache "--for=$1" </dev/null 2>/dev/null ); }
+Q="$( rkq 'register a new key like big_key' )"
+if has "$Q" 's="big_key" shape="table"' && has "$Q" 'read="4096"' && has "$Q" 'read=N: only the first N'; then ok "T35 [P] a firm anchor past the rank cap says read=4096"; else no "T35 read= missing: $( grep -o '<lit [^>]*>' <<<"$Q" | cut -c1-200 )"; fi
+Q="$( rkq 'add a new test for big_key' )"
+if has "$Q" '<lit_capped' && has "$Q" 'next="--grep=big_key"' && has "$Q" 'too many sites'; then ok "T35b [P] a bare anchor past the rank cap with no row read is named in <lit_capped>"; else no "T35b silent: ${#Q} B, $( grep -o '<lit[_a-z]* [^>]*>' <<<"$Q" | cut -c1-200 )"; fi
+Q="$( rkq 'register a new key like small_key' )"
+if has "$Q" 's="small_key" shape="table"' && ! has "$( grep -o '<lit [^>]*>' <<<"$Q" )" 'read='; then ok "T35c [G] twin: under the cap, no read="; else no "T35c read= on a small anchor"; fi
+# T36 [P] M7 the only table row, in a secondary directory, past 32 other sites: it prints, first
+W2="$TMP/w2"; mkdir -p "$W2/integration" "$W2/src" "$W2/lib"
+printf 'REG = {\n    "w2_key": 1,\n    "other": 2,\n}\n' > "$W2/integration/reg.py"
+{ printf 'def w2_key():\n    return 1\n\ndef use():\n'; for i in $( seq 1 42 ); do printf '    y%s = w2_key() + %s\n' "$i" "$i"; done; } > "$W2/src/a.py"
+printf 'LIB = {\n    "w3_key": 1,\n    "other": 2,\n}\n' > "$W2/lib/own.py"; printf 'DOC = {\n    "w3_key": 1,\n    "other": 2,\n}\n' > "$W2/integration/doc.py"
+w2q(){ ( cd "$W2" || exit 1; "$BIN" "$W2" --no-cache "--for=$1" </dev/null 2>/dev/null ); }
+Q="$( w2q 'register a new key like w2_key' )"
+if has "$( grep -m1 -o '<ls [^>]*>' <<<"$Q" )" 'tbl="REG = {"' && has "$Q" 'capped="1"'; then ok "T36 [P] table rows first: the only table row prints first, past the row cap"; else no "T36 table row lost: $( grep -m1 -o '<ls [^>]*>' <<<"$Q" | cut -c1-200 )"; fi
+# T36b [G] among table rows the product's own still comes before a secondary path
+Q="$( w2q 'register `w3_key`' )"
+if has "$( grep -m1 -o '<ls [^>]*>' <<<"$Q" )" 'tbl="LIB = {"' && has "$Q" 'tbl="DOC = {"'; then ok "T36b [G] twin: among table rows, the product's own first"; else no "T36b secondary order: $( grep -o '<ls [^>]*>' <<<"$Q" | cut -c1-160 | tr '\n' ' ' )"; fi
+# T37 [P on a removed redaction] the opener is raw source text: a credential on it is redacted; twin --no-redact keeps it verbatim, so the arm reads the attribute it means to
+RAWK="AKIA""IOSFODNN7EXAMPLE"; RDX="$TMP/rdx"; mkdir -p "$RDX"
+printf 'TOKS = {  # %s\n    "rd_key": 1,\n    "other": 2,\n}\n' "$RAWK" > "$RDX/t.py"
+Q="$( cd "$RDX" || exit 1; "$BIN" "$RDX" --no-cache '--for=register `rd_key`' </dev/null 2>/dev/null )"; QN="$( cd "$RDX" || exit 1; "$BIN" "$RDX" --no-cache --no-redact '--for=register `rd_key`' </dev/null 2>/dev/null )"
+if has "$Q" ' tbl="TOKS = {' && ! has "$Q" "$RAWK" && has "$QN" "tbl=\"TOKS = {  # $RAWK"; then ok "T37 [G] a credential on the opener line is redacted in tbl=; --no-redact keeps it"; else no "T37 opener redaction: $( grep -o ' tbl="[^"]*"' <<<"$Q" )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
