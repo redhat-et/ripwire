@@ -57,7 +57,8 @@
 // parse:N count per INGEST (each ingest's own Watch). Three more for the range form (test/qddegradecheck.sh): project:N —
 // the Nth target-phase projection reads "does not fit"; ingest:N — the Nth ingest of the process stops its crawl at its
 // first entry (a stop in ONE chosen ingest, e.g. the target's after the base fit); peak:N — the Nth post-answer peak
-// reading reads as over the limit.
+// reading reads as over the limit; fold:N — the Nth include-closure fold of the process (buildGraph's is the first, the one
+// `--deps` and `--arch=FILE` run again the second) stops at its first component (test/propcostcheck.sh).
 //
 // REPEATABILITY. A crawl stop keeps what the walk had seen, then sorts it. A parse stop keeps the first K slots of the
 // parse ORDER (cache misses, then cache hits, then grammarless files, each largest first, then fileId — or plain fileId
@@ -68,6 +69,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -76,6 +78,8 @@
 #include <string_view>
 
 #include "infra/Diagnostics.h"   // VALIDATE — the environment is external input
+#include "infra/fileGraphStop.h"  // FileGraphStopped: a stopped file-graph fold fails the build
+#include "infra/fileSetStore.h"   // guardedFileClosure: the fold asks this guard whether to go on
 #include "infra/os.h"            // rw::os::mem_footprint / mem_physical / mem_cgroup_max / mem_cgroup_unreclaimable / mem_pressure
 #include "model.h"               // MemoryStop — the disclosure sink
 
@@ -163,6 +167,7 @@ enum class TripAt : std::uint8_t
     Project,    // project:N  — the Nth target-phase projection (projectTargetPhase) reads as "does not fit"
     Ingest,     // ingest:N   — the Nth ingest of the process stops its crawl at its first entry (a crawl stop)
     Peak,       // peak:N     — the Nth post-answer peak reading (peakOverLimit) reads as over the limit
+    Fold,       // fold:N     — the Nth fold of the process (buildGraph's is the first) reads as over the hard limit at its first component
 };
 struct TestTrip
 {
@@ -179,7 +184,7 @@ inline TripAt tripAtFor( std::string_view phase ) noexcept
     } kPhases[] = {
         { "crawl", TripAt::Crawl }, { "pressure", TripAt::Pressure }, { "parse", TripAt::Parse },
         { "request", TripAt::Request }, { "hard", TripAt::Hard }, { "eager", TripAt::Eager },
-        { "project", TripAt::Project }, { "ingest", TripAt::Ingest }, { "peak", TripAt::Peak },
+        { "project", TripAt::Project }, { "ingest", TripAt::Ingest }, { "peak", TripAt::Peak }, { "fold", TripAt::Fold },
     };
     for( const auto& p : kPhases )
     {
@@ -237,6 +242,7 @@ struct SeamCounters
     std::atomic<std::uint64_t> requests{ 0 };
     std::atomic<std::uint64_t> projections{ 0 };
     std::atomic<std::uint64_t> peaks{ 0 };
+    std::atomic<std::uint64_t> folds{ 0 };
 };
 inline SeamCounters& seamCounters() noexcept
 {
@@ -418,6 +424,68 @@ inline bool requestSeamTrips()
     return seamCallTrips( TripAt::Request, seamCounters().requests, /*laterToo=*/true );
 }
 
+// ── the file graph's fold ─────────────────────────────────────────────────────────────────────────────────────
+// The closure fold (infra/fileSetStore.h) runs inside buildGraph, and again for --deps and --arch=FILE, where the hard line
+// between phases cannot see it. It asks this every kFoldCheckComponents components or 4 MiB of payload: one footprint reading,
+// the same test as overHardLimit. A stop makes guardedFileClosure throw FileGraphStopped (fileGraphStop.h): nothing is
+// answered from the partial store, and nothing is remembered once the build that stopped has been abandoned.
+inline bool foldShouldStop() noexcept
+{
+    const Limits& l = limits();
+    if( l.hardBytes == 0 )
+    {
+        return false;
+    }
+    const std::uint64_t footprint = measuredFootprint();
+    return footprint != 0 && footprint >= l.hardBytes;
+}
+
+// fold:N, the seam: the Nth fold of the process (buildGraph's is the first, the --deps / --arch=FILE one the second) reads as
+// over the hard limit at its first component. Additive: the real reading still applies to every fold.
+inline bool foldSeamStop() noexcept { return true; }
+
+// RIPWIRE_TEST_FILESET_CHUNK_BITS forces the chunk size of EVERY fold (buildGraph's and the second one on --deps and
+// --arch=FILE), so the multi-chunk read paths run on repos too small to reach them: no real row crosses a 16-bit chunk below
+// 65,536 files. An answer never depends on it; a bad value is no knob at all.
+inline std::uint32_t testChunkBits() noexcept
+{
+    static const std::uint32_t bits = []() noexcept -> std::uint32_t
+    {
+        const char* forced = std::getenv( "RIPWIRE_TEST_FILESET_CHUNK_BITS" );
+        if( forced == nullptr )
+        {
+            return 0;
+        }
+        std::uint32_t value = 0;
+        const char*   end   = forced + std::char_traits<char>::length( forced );
+        const auto    got   = std::from_chars( forced, end, value );
+        return got.ec == std::errc() && got.ptr == end && value >= 1 && value <= 16 ? value : 0;
+    }();
+    return bits;
+}
+
+// buildFileClosure under the guard. On a stop the store is partial, so it is never returned: FileGraphStopped is thrown, and
+// the build that asked for the fold fails. Every caller of the fold goes through this, so none can forget to look.
+inline FileSetStore guardedFileClosure( const FileAdjacency& adj )
+{
+    FileClosureStats st;
+    FileClosureOptions opts;
+    opts.chunkBits  = testChunkBits();
+    opts.stats      = &st;
+    opts.shouldStop = &foldShouldStop;
+    if( testTrip().at == TripAt::Fold && seamCounters().folds.fetch_add( 1, std::memory_order_relaxed ) + 1 == testTrip().index )
+    {
+        opts.shouldStop = &foldSeamStop;
+        opts.checkEvery = 1;
+    }
+    FileSetStore store = buildFileClosure( adj, opts );
+    if( st.stop != FileGraphStop::None )
+    {
+        throw FileGraphStopped( st.stop );
+    }
+    return store;
+}
+
 // ── the range form's projection and peak (qd-memory-degrade) ───────────────────────────────────────────────
 // --quality-delta=A..B scores the base commit and releases it before the target is materialized (#387). The target
 // phase then holds the base snapshot, the full target tree and computeDelta's passes; on the measured repositories its
@@ -538,8 +606,20 @@ inline std::string_view limitSourceClause() noexcept
 
 // the hard stop's one line: nothing was built that could answer. `also` is said between the limit and the verdict — the
 // range form's "the changed files were not tried" / "were cut too" — and is empty everywhere else (the line keeps its bytes).
-inline std::string hardStopLine( std::string_view where, std::string_view also = {} )
+inline std::string hardStopLine( std::string_view where, std::string_view also = {}, FileGraphStop why = FileGraphStop::None )
 {
+    switch( why )   // a file-graph stop reads as over the line, and says its own cause
+    {
+    case FileGraphStop::Capacity:
+        return "the file graph passed a 32-bit offset during the include-closure fold (more than 4 Gi payload words or edges); stopped cleanly without an answer — pass a smaller root";
+    case FileGraphStop::AllocFailure:
+        return "an allocation failed during the include-closure fold (" + std::string( where ) + "); stopped cleanly without an answer — " + std::string( kOverride );
+    case FileGraphStop::MemoryLimit:
+        where = "include-closure fold";
+        break;
+    case FileGraphStop::None:
+        break;
+    }
     std::string line = "memory limit reached during the ";
     line.append( where ).append( " (limit " ).append( limitSpelling( limits().hardBytes ) ).append( ", " ).append( limitSourceClause() ).append( "); " );
     return line.append( also ).append( "stopped cleanly without an answer — " ).append( kOverride );

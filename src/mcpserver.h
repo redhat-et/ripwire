@@ -562,7 +562,14 @@ inline int runMcpHttp( const McpHttpConfig& cfg )
 
     // warm the pinned index once so the first client request is fast (and any parse issue surfaces now, on
     // stderr, not mid-request). getIndex caches process-wide; failure degrades to a lazy first-request build.
-    (void)getIndex( pinnedRoot );
+    try
+    {
+        (void)getIndex( pinnedRoot );
+    }
+    catch( const FileGraphStopped& stopped )   // a failed build (fileGraphStop.h): nothing was kept, and the first request builds again under its own check
+    {
+        rw::emitTo( stderr, "ripwire: warm-up: {}\n", memguard::hardStopLine( "graph build", {}, stopped.why() ) );
+    }
 
     const bool authRequired = !cfg.token.empty();
 

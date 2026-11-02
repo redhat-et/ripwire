@@ -38,6 +38,7 @@
 #include "infra/namesplit.h"   // namesplit::stripQuotePair — THE canonical quote-strip; never re-rolled
 #include "infra/Diagnostics.h"  // DISCLOSE (no-op in release; the fprintf below is the visible line)
 #include "infra/tablelookup.h"   // findByField
+#include "infra/fileSetStore.h" // FileAdjacency: dependencyMeasure reads the file graph
 
 namespace rw
 {
@@ -385,7 +386,7 @@ struct DependencyMeasure
     std::size_t       masked   = 0;         // no-edge files left out: masked_files=
     bool              measuredEdge = false; // an edge with both ends in mask
 };
-inline DependencyMeasure dependencyMeasure( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+inline DependencyMeasure dependencyMeasure( const IngestResult& ing, const FileAdjacency& adj )
 {
     DependencyMeasure m;
     m.mask = dependencyCapableMask( ing );

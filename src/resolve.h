@@ -51,7 +51,8 @@
 #include "arch.h"        // §B1.3: relForHash — the root-relative path segment canonicalIdRelTo keys on
 #include "smallvec.h"
 #include "infra/namesplit.h"   // stripTemplateArgs — a C++ template-id scope's family (appendTemplateFamilyKey), a `using Base<T>::m;` qualifier (buildUsingReexports)
-#include "infra/sortutil.h"      // radixSortIdsAscending — the id-set sort buildGraph/2b below runs F times
+#include "infra/fileSetStore.h"   // FileAdjacency, FileSetStore, buildFileClosure — the file graph's stores
+#include "memguard.h"                 // guardedFileClosure
 #include "infra/profileScope.h"  // PROFILE_SCOPE self-profiling — gated by PROFILE_ENABLED (off unless -DRIPWIRE_PROFILE=ON)
 #include "infra/os.h"           // os::realpath / os::stat — the ancestor-config walk (#220: configs above the crawl root)
 #include "infra/Diagnostics.h"   // ASSUME — buildScopedRecvDecls' index-range precondition
@@ -59,8 +60,10 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>     // from_chars: the test-only chunk-size knob
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cstdio>       // fopen/fread — workspace-only config-file evidence (go.mod / tsconfig.json), §3.2
 #include <climits>      // PATH_MAX — the ancestor-config walk's realpath buffer
 #include <limits>
@@ -4485,7 +4488,7 @@ inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap
 // to tsimport::ImportResolver (built on the first such specifier, so a tree without one reads no config file), and
 // what it resolves is an edge exactly like a relative import's. `extrasOut` (optional) receives its two disclosures:
 // how many of those edges land only on a declaration file, and how many owning configs name an unread `extends` base.
-inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPreciseIncludeAdjWithContext( const IngestResult& ing, bool dedup = true,
+inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithContext( const IngestResult& ing, bool dedup = true,
                                                                        HashMap<std::uint64_t, char>* lazyPairsOut = nullptr,
                                                                        bool forCallNarrow = false,
                                                                        std::uint64_t* importsUnresolvedOut = nullptr,
@@ -4493,7 +4496,9 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2a: precise include adjacency (resolve.h)" );
     const std::uint32_t F = std::uint32_t( ing.files.size() );
-    std::vector<std::vector<std::uint32_t>> adj( F );
+    std::vector<std::uint32_t> edgeFrom, edgeTo;   // parallel, in directive order; FileAdjacency::fromEdges keeps that order per row
+    edgeFrom.reserve( ing.includes.size() );
+    edgeTo.reserve( ing.includes.size() );
     if( importsUnresolvedOut != nullptr )
     {
         *importsUnresolvedOut = 0;
@@ -4504,7 +4509,7 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
     }
     if( ing.includes.empty() )
     {
-        return { std::move( adj ), {} };
+        return { rw::FileAdjacency( F ), {} };
     }
 
     // path → fileId over the canonical (sorted) file list. The KEY is the LEXICALLY-NORMALIZED ROOT-RELATIVE
@@ -4607,19 +4612,6 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
     const RubyConstantIndex                   rubyConsts    = buildRubyConstantIndex( ing );   // parser version 82; empty unless a symbolic directive exists
     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
-    std::vector<std::uint32_t> includeCountByFile( F, 0 );
-    for( const Include& inc : ing.includes )
-    {
-        if( inc.fileId < F )
-        {
-            ++includeCountByFile[inc.fileId];
-        }
-    }
-    for( std::uint32_t f = 0; f < F; ++f )
-    {
-        adj[ f ].reserve( includeCountByFile[ f ] );
-    }
-
     std::optional<tsimport::ImportResolver> tsResolver;   // #220: built on the first bare TS/JS specifier that missed
     for( const Include& inc : ing.includes )
     {
@@ -4643,7 +4635,8 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
                 {
                     continue;
                 }
-                adj[ inc.fileId ].push_back( to );
+                edgeFrom.push_back( inc.fileId );
+                edgeTo.push_back( to );
                 if( lazyPairsOut != nullptr )
                 {
                     recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
@@ -4669,7 +4662,8 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
         {
             continue; // unresolved or self-include → contributes nothing
         }
-        adj[ inc.fileId ].push_back( to );
+        edgeFrom.push_back( inc.fileId );
+        edgeTo.push_back( to );
         if( lazyPairsOut != nullptr )
         {
             recordLazyPair( *lazyPairsOut, inc.fileId, to, inc.isLazy );
@@ -4679,77 +4673,28 @@ inline std::pair<std::vector<std::vector<std::uint32_t>>, WsIncludeCtx> buildPre
     {
         *extrasOut = TsImportExtras{ extrasOut->declarationOnly, tsResolver ? tsResolver->extendsUnread() : 0 };
     }
-    if( dedup )
-    {
-        for( std::vector<std::uint32_t>& v : adj )
-        {
-            std::sort( v.begin(), v.end() );
-            v.erase( std::unique( v.begin(), v.end() ), v.end() );
-        }
-    }
-    return { std::move( adj ), std::move( wsCtx ) };
+    return { rw::FileAdjacency::fromEdges( F, edgeFrom, edgeTo, dedup ), std::move( wsCtx ) };
 }
 
-inline std::vector<std::vector<std::uint32_t>> buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true,
-                                                                       HashMap<std::uint64_t, char>* lazyPairsOut = nullptr,
-                                                                       std::uint64_t* importsUnresolvedOut = nullptr,
-                                                                       TsImportExtras* extrasOut = nullptr )
+inline rw::FileAdjacency buildPreciseIncludeAdj( const IngestResult& ing, bool dedup = true,
+                                         HashMap<std::uint64_t, char>* lazyPairsOut = nullptr,
+                                         std::uint64_t* importsUnresolvedOut = nullptr,
+                                         TsImportExtras* extrasOut = nullptr )
 {
     auto built = buildPreciseIncludeAdjWithContext( ing, dedup, lazyPairsOut, /*forCallNarrow=*/false, importsUnresolvedOut, extrasOut );
     return std::move( built.first );   // the adjacency alone; the workspace context stays with the one caller that needs it
 }
 
-// Transitive include-set per file: for each file f, the sorted, duplicate-free set of fileIds reachable
-// from f by ≥1 include hop (f itself EXCLUDED). Cycle-safe via a `seen` bitset (a file already visited is
-// not re-pushed), so mutually-including headers (a↔b) simply each reach the other — the exact
-// reachability walk shape as graph.h::dependencyHealth. Deterministic: `adj` is sorted and each result set
-// is re-sorted, so it is a pure function of the adjacency regardless of visit order. Duplicate-free is a
-// property of the epoch stamp, NOT of a dedup pass — there is no longer one to describe; see the NO DEDUP
-// PASS note at the sort below, which is where the removed std::unique used to sit.
-inline std::vector<std::vector<NodeId>> transitiveIncludeSet( const std::vector<std::vector<std::uint32_t>>& adj )
+// Transitive include-set per file: for each file f, the set of fileIds reachable from f by >= 1 include hop, f itself
+// EXCLUDED, read in ascending id order. Cycle-safe (mutually-including headers each reach the other). A pure function of
+// the adjacency. See infra/fileSetStore.h for the store and the fold, test/fileset_unit.cpp and
+// test/includeprecisecheck.sh for the independent oracles.
+// The fold runs under the memory guard (memguard::guardedFileClosure): it stops, disclosed, at the hard line, and
+// RIPWIRE_TEST_FILESET_CHUNK_BITS (test only) forces its chunk size there.
+inline rw::FileSetStore transitiveIncludeSet( const rw::FileAdjacency& adj )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2b: transitive include closure (resolve.h)" );
-    const std::uint32_t          F = std::uint32_t( adj.size() );
-    std::vector<std::vector<NodeId>> trans( F );
-    std::vector<std::uint32_t>   seenEpoch( F, 0 );
-    std::vector<std::uint32_t>   stack;
-    std::vector<NodeId>          sortScratch;   // radix ping-pong buffer, reused across all F closures
-    stack.reserve( F );
-    std::uint32_t                epoch = 1;
-    for( std::uint32_t s = 0; s < F; ++s )
-    {
-        stack.clear();  stack.push_back( s );  seenEpoch[s] = epoch;     // seed with s so f never lands in its OWN set…
-        while( !stack.empty() )
-        {
-            const std::uint32_t v = stack.back();  stack.pop_back();
-            for( std::uint32_t w : adj[v] )
-            {
-                if( seenEpoch[w] != epoch )
-                {
-                    seenEpoch[w] = epoch;
-                    stack.push_back( w );
-                    trans[s].push_back( w );
-                }
-            }
-        }
-        // …trans[s] already excludes s (never pushed as a reachable target). Sorted for the binary_search
-        // in rule3IncludeFile, and for the determinism contract in this function's header comment — the
-        // walk's discovery order is deterministic but is NOT id order, so the sort is what makes the
-        // result a pure function of `adj`. It stays; only its implementation changes.
-        //
-        // NO DEDUP PASS. `w` is appended in the same branch that stamps `seenEpoch[w] = epoch`, and
-        // nothing clears that stamp before `++epoch` below, so a file can be appended to trans[s] at most
-        // once per source — the set is duplicate-free BY CONSTRUCTION. The `std::unique` that used to sit
-        // here removed 0 elements in 24,216 calls across six corpora (rails, go, django, rust-analyzer, a
-        // private C++ tree, this repo) at a measured 0.99 ms on rails. Its sibling `ancestorsReach` in
-        // graph.h has always relied on this same stamp without a dedup. The invariant is now asserted by
-        // test/includeprecisecheck.sh — a diamond fixture (two distinct paths to one file) plus a 400-node
-        // scrambled synthetic graph checked against an independent mark-sweep oracle — rather than paid
-        // for on every call.
-        rw::sortutil::radixSortIdsAscending( trans[s], sortScratch );
-        ++epoch;
-    }
-    return trans;
+    return rw::memguard::guardedFileClosure( adj );
 }
 
 // ── S6-C canonical SCIP-style symbol strings ───────────────────────────────────────────────────────
@@ -6113,7 +6058,7 @@ struct WrittenType
 struct IdentityNarrower
 {
     const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canonByName;
-    const std::vector<std::vector<NodeId>>&              fileIncludes;
+    const rw::FileSetStore&                              fileIncludes;
     const std::vector<std::uint32_t>&                    symFileId;
 
     mutable std::string                                   keyScope;        // "Class::callee"
@@ -6128,7 +6073,7 @@ struct IdentityNarrower
     mutable bool                                          subclassClaim  = false;   // lane L6: claimRef's claim is step (3), the dispatch split
     mutable bool                                          lookupLexical  = false;   // classWalk came from an enclosing class or a class qualifier
 
-    IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const std::vector<std::vector<NodeId>>& incl,
+    IdentityNarrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon, const rw::FileSetStore& incl,
                       const std::vector<std::uint32_t>& symFile ) noexcept
         : canonByName( canon ), fileIncludes( incl ), symFileId( symFile ) {}
 
@@ -6385,7 +6330,7 @@ struct IdentityNarrower
     // `Value.h` headers hold three `Value` classes in llvm)?
     bool fileVisibleFrom( std::uint32_t fromFile, std::uint32_t defFile, const ClassIdentity& ids ) const
     {
-        if( fromFile == defFile || ( fromFile < fileIncludes.size() && std::binary_search( fileIncludes[ fromFile ].begin(), fileIncludes[ fromFile ].end(), defFile ) ) )
+        if( fromFile == defFile || ( fileIncludes.contains( fromFile, defFile ) ) )
         {
             return true;
         }
@@ -6659,12 +6604,12 @@ struct Narrower
     // Rule 2's LEXICAL table for names with a ParamType declaration (see ScopedRecvDecl above). A name found here is
     // answered here ONLY — varType is not consulted.
     const ScopedRecvDecls&                               scopedDecls;
-    // P2-D Rule 3 include table: caller fileId → the sorted, deduped set of fileIds it #includes / imports
-    // (resolved file→file by basename, exactly like graph.h::resolveIncludeAdj; the caller's own file is NEVER
+    // P2-D Rule 3 include table: caller fileId → every file it reaches over >= 1 include / import edge, read in ascending
+    // id order (resolved file→file by basename, exactly like graph.h::resolveIncludeAdj; the caller's own file is NEVER
     // in its own set). buildGraph builds it once from IngestResult::includes. Empty when the repo has no
-    // include/import edges, so Rule 3 simply never fires (degrades to the unchanged ladder). A `std::span`
-    // seam: buildGraph owns the storage (a `std::vector<std::vector<NodeId>>`), the Narrower only reads it.
-    const std::vector<std::vector<NodeId>>&              fileIncludes;
+    // include/import edges, so Rule 3 simply never fires (degrades to the unchanged ladder). A read-only seam:
+    // buildGraph owns the rw::FileSetStore (infra/fileSetStore.h), the Narrower only reads it.
+    const rw::FileSetStore&                              fileIncludes;
     // per-symbol fileId (view into ing.symbols' fileIds), so Rule 3 can group candidate defs by their file
     // without a reference to the whole IngestResult. buildGraph owns the backing vector.
     const std::vector<std::uint32_t>&                    symFileId;
@@ -6686,7 +6631,7 @@ struct Narrower
     explicit Narrower( const HashMap<std::string, rw::SmallVec<NodeId, 2>>& canon,
                        const HashMap<std::string, FlatRecvType>&            vt,
                        const ScopedRecvDecls&                               scoped,
-                       const std::vector<std::vector<NodeId>>&              incl,
+                       const rw::FileSetStore&                              incl,
                        const std::vector<std::uint32_t>&                    symFile,
                        const HashMap<std::string, std::vector<std::string>>& reexports ) noexcept
         : canonByName( canon ), varType( vt ), scopedDecls( scoped ), fileIncludes( incl ), symFileId( symFile ), usingReexports( reexports ),
@@ -7547,7 +7492,7 @@ struct Narrower
     // bare ladder could also reach (a subset of `cands`); Rule 3 only PICKS the include-correct file's def earlier.
     // It can never invent a target, never empty a resolvable call, and never make a same-file call worse.
     //
-    // Deterministic: `cands` is in symbol-id order (byName insertion order) and `fileIncludes[callerFileId]` is a
+    // Deterministic: `cands` is in symbol-id order (byName insertion order) and `fileIncludes`' row for callerFileId is a
     // sorted id set, so the "which single file" decision and the emitted `out` are a pure function of the inputs.
     //
     // `minCands` (default 2): the smallest set this rule reads. graph.h passes 1 for the set a call can reach BY NAME
@@ -7556,36 +7501,17 @@ struct Narrower
     bool rule3IncludeFile( const rw::SmallVec<NodeId, 2>& cands, std::uint32_t callerFileId,
                            std::vector<NodeId>& out, std::size_t minCands = 2 ) const
     {
-        if( callerFileId >= fileIncludes.size() )
+        if( fileIncludes.empty( callerFileId ) )
         {
-            return false; // no per-file include set → no narrow
-        }
-        const std::vector<NodeId>& inc = fileIncludes[ callerFileId ];
-        if( inc.empty() )
-        {
-            return false; // caller includes nothing → no narrow
+            return false; // no per-file include set, or the caller includes nothing → no narrow
         }
         if( cands.size() < minCands || cands.empty() )
         {
             return false; // already unambiguous → nothing for Rule 3 to do
         }
 
-        // included-file membership test: `inc` is sorted+deduped, so a binary search is the deterministic O(log)
-        // check (no allocation, no state). A candidate in the caller's OWN file short-circuits the whole rule.
-        const auto includes = [ & ]( std::uint32_t f ) noexcept
-        {
-            std::size_t lo = 0, hi = inc.size();
-            while( lo < hi )
-            {
-                const std::size_t mid = ( lo + hi ) >> 1;
-                if( inc[mid] < f ) { lo = mid + 1; }
-                else
-                {
-                    hi = mid;
-                }
-            }
-            return lo < inc.size() && inc[ lo ] == f;
-        };
+        // A candidate in the caller's OWN file short-circuits the whole rule.
+        const auto includes = [ & ]( std::uint32_t f ) noexcept { return fileIncludes.contains( callerFileId, f ); };
 
         std::uint32_t chosenFile = 0xFFFFFFFFu;   // the single included file that holds candidate(s), or sentinel
         bool          multiFile  = false;         // ≥2 distinct included files hold candidates → ambiguous → bail
@@ -7629,7 +7555,7 @@ struct Narrower
 };
 
 // Rule 3 asked once per (caller file, name's candidate list) instead of once per call. rule3IncludeFile is a pure
-// function of (caller file, candidate list, minCands) and walks the WHOLE list with a binary search per candidate over
+// function of (caller file, candidate list, minCands) and walks the WHOLE list with a membership test per candidate over
 // the caller's transitive include set, so a file that calls one name N times paid that walk N times for one answer
 // (C: thousands of include ids, a name defined in dozens of files). The key is the candidate list's own address — a
 // byName entry, which buildGraph's resolve loop never inserts into or reorders — plus the file, held until the next

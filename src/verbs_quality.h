@@ -80,6 +80,7 @@ struct PhaseStop
     bool              hard    = false;   // the hard line (the limit itself); else a soft stop (soft below)
     std::string       where;             // "ingest of the base commit", "graph of the target commit", …
     rw::MemoryStop    soft;              // a soft stop's cause, copied off the cut ingest
+    rw::FileGraphStop graph = rw::FileGraphStop::None;   // the fold's cause when the graph build failed (hard is then true)
 };
 
 struct RefPairDelta
@@ -138,7 +139,8 @@ std::optional<int> recordLoad( rw::quality::RefTreeLoad load, const rw::quality:
     }
     stop.stopped = true;
     stop.hard    = load == RefTreeLoad::OverHardLimit;
-    stop.where   = "ingest of the " + std::string( side );
+    stop.graph   = tree.graphStop;
+    stop.where   = std::string( tree.graphStop != rw::FileGraphStop::None ? "graph of the " : "ingest of the " ) + std::string( side );
     stop.soft    = tree.ing.memoryStop;
     return std::nullopt;
 }
@@ -169,7 +171,7 @@ int refPairStopRefusal( const PhaseStop& stop, const RefPairDelta& refs, std::st
     DISCLOSE( Diagnostics::answerRefused, "--quality-delta=A..B: the full trees did not fit and the changed files did not answer either — exit 5, one stderr line" );
     if( stop.stopped && stop.hard )
     {
-        rw::emitTo( stderr, "ripwire: {}\n", memguard::hardStopLine( stop.where, std::string( why ) + "; " ) );
+        rw::emitTo( stderr, "ripwire: {}\n", memguard::hardStopLine( stop.where, std::string( why ) + "; ", stop.graph ) );
     }
     else if( stop.stopped )
     {

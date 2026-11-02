@@ -2837,7 +2837,7 @@ private:
     }
 
     const std::vector<std::string>&                    files_;               // §P9.1 fallback: the OTHER file's basename
-    std::vector<std::vector<std::uint32_t>>           adj_;
+    rw::FileAdjacency                                 adj_;
     HashMap<std::uint32_t, std::vector<std::string>>  includedBaseNames_;    // §P9.1 fallback: fileId → its raw #include basenames
     mutable HashMap<std::uint32_t, std::vector<char>>  memo_;
 };

@@ -156,7 +156,7 @@ struct Graph
     // lane ind4b: the precise import adjacency (file → the files its imports resolve to, forCallNarrow), kept past buildGraph
     // for the by-name hedge's rule 2b (pathgaps.h NamesakeRule). Moved in at the end of buildGraph; not cached. (Rule 2c
     // reads implementors + implementorBound above: the per-file base binding.)
-    std::vector<std::vector<std::uint32_t>> importAdj;
+    rw::FileAdjacency importAdj;
     std::size_t                externalCalls = 0;   // Phase 5 (docs/EVALS.md "Phase 5"): call sites the external-name
                                                      // VETO refused — a bare name or receiver provably bound OUTSIDE the
                                                      // indexed tree (a builtin/stdlib name with no in-repo evidence, an
@@ -3281,7 +3281,7 @@ struct BuiltinMethodGate
     const IngestResult&                            ing;
     const ExternalVeto&                            veto;          // hasLocal / importVerdict: Python module receivers
     const ExternalVetoTables&                      vetoTables;    // importBindFile: an `import m` binding's module file
-    const std::vector<std::vector<std::uint32_t>>& directIncludes;   // caller file → the files it imports/requires directly
+    const rw::FileAdjacency& directIncludes;   // caller file → the files it imports/requires directly
     const JsImportTables&                          jsImports;     // an ES import binding of the called name in the caller's file
     HashMap<std::string, std::uint32_t>            classId;       // every class-like definition NAME in the corpus → a dense id
     std::vector<std::string>                       className;     // dense id → name (ChaConeMemo::contains takes a std::string)
@@ -3509,7 +3509,7 @@ struct BuiltinMethodGate
         }
         if( r.fileId < directIncludes.size() )
         {
-            const std::vector<std::uint32_t>& inc = directIncludes[ r.fileId ];
+            const std::span<const std::uint32_t> inc = directIncludes[ r.fileId ];
             if( std::find( inc.begin(), inc.end(), target.fileId ) != inc.end() )
             {
                 return Verdict::Admit;
@@ -5644,7 +5644,7 @@ inline std::vector<RubyMainMixinRow> rubyMainObjectMixins( const IngestResult& i
 }
 
 inline BuiltinMethodGate buildBuiltinMethodGate( const IngestResult& ing, const ExternalVeto& veto, const ExternalVetoTables& vetoTables,
-                                                 const std::vector<std::vector<std::uint32_t>>& directIncludes, const JsImportTables& jsImports )
+                                                 const rw::FileAdjacency& directIncludes, const JsImportTables& jsImports )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2j: builtin-method name gate" );
     BuiltinMethodGate gate{ ing, veto, vetoTables, directIncludes, jsImports, {}, {}, {}, {}, {}, {}, {}, {}, {}, false };
@@ -5750,7 +5750,7 @@ struct FalseEdgeRules
     const HashMap<std::string, char>&           classNames;
     const ExternalVeto&                         veto;         // hasLocal / importVerdict (Python, C): the Phase-5 evidence, reused
     const ExternalVetoTables&                   vetoTables;   // importBindFile: the file a Python `from m import x` names
-    const std::vector<std::vector<std::uint32_t>>& directIncludes;   // caller file → the files it imports directly (a star import)
+    const rw::FileAdjacency& directIncludes;   // caller file → the files it imports directly (a star import)
     HashMap<std::string, Alias>                 alias;        // "<fileId>#name" → ModuleAlias (JS/TS and Go)
     HashMap<std::string, char>                  bound;        // "<fileId>#name" → any import/alias binding of that name (JS/TS)
     HashMap<std::string, std::vector<VarSpan>>  shadows;      // "<fileId>#name" → JsShadow spans
@@ -5984,10 +5984,10 @@ struct FalseEdgeRules
             }
             // the module itself, or one re-export hop (`from .base import reverse` in a package __init__)
             const std::uint32_t                    module   = mf->second;
-            const std::vector<std::uint32_t>* const reexport = module < directIncludes.size() ? &directIncludes[ module ] : nullptr;
+            const std::span<const std::uint32_t>   reexport = module < directIncludes.size() ? directIncludes[ module ] : std::span<const std::uint32_t>();
             const auto fromModule = [ & ]( const Symbol& s )
             {
-                return s.fileId == module || ( reexport != nullptr && std::find( reexport->begin(), reexport->end(), s.fileId ) != reexport->end() );
+                return s.fileId == module || std::find( reexport.begin(), reexport.end(), s.fileId ) != reexport.end();
             };
             if( keepOnly( r, kept, fromModule ) == 0 )
             {
@@ -5996,9 +5996,9 @@ struct FalseEdgeRules
             }
             return Verdict::Narrow;
         }
-        const std::vector<std::uint32_t>* direct  = r.fileId < directIncludes.size() ? &directIncludes[ r.fileId ] : nullptr;
-        const std::vector<std::uint32_t>* imports = r.fileId < vetoTables.importFiles.size() ? &vetoTables.importFiles[ r.fileId ] : nullptr;
-        const auto in = []( const std::vector<std::uint32_t>* files, std::uint32_t f ) { return files != nullptr && std::find( files->begin(), files->end(), f ) != files->end(); };
+        const std::span<const std::uint32_t> direct  = r.fileId < directIncludes.size() ? directIncludes[ r.fileId ] : std::span<const std::uint32_t>();
+        const std::span<const std::uint32_t> imports = r.fileId < vetoTables.importFiles.size() ? std::span<const std::uint32_t>( vetoTables.importFiles[ r.fileId ] ) : std::span<const std::uint32_t>();
+        const auto in = []( const std::span<const std::uint32_t> files, std::uint32_t f ) { return std::find( files.begin(), files.end(), f ) != files.end(); };
         const std::size_t visible = keepOnly( r, kept, [ & ]( const Symbol& s )
         {
             if( localDefOutOfReach( ing, s.id, r ) )
@@ -7194,7 +7194,7 @@ inline void collectRustOutsideUses( const IngestResult& ing, FalseEdgeRules& rul
 }
 
 inline FalseEdgeRules buildFalseEdgeRules( const IngestResult& ing, const HashMap<std::string, char>& classNames, const ExternalVeto& veto,
-                                           const ExternalVetoTables& vetoTables, const std::vector<std::vector<std::uint32_t>>& directIncludes )
+                                           const ExternalVetoTables& vetoTables, const rw::FileAdjacency& directIncludes )
 {
     PROFILE_SCOPE_DESCRIBE( "buildGraph/2h: FE-A false-edge rules" );
     FalseEdgeRules rules{ ing, classNames, veto, vetoTables, directIncludes };
@@ -7268,8 +7268,8 @@ struct BaseEvidenceTables
     const IngestResult&                     ing;
     const ExternalVetoTables&               extVeto;       // Python `from m import X` / `import m as q` → m's one file
     const JsImportTables&                   jsImports;     // JS/TS named import → the definition it pins
-    const std::vector<std::vector<NodeId>>& fileIncludes;  // C-family: the transitive, path-precise include set (sorted)
-    const std::vector<std::vector<std::uint32_t>>& includeAdj;   // every language: the files a file's imports resolve to
+    const rw::FileSetStore& fileIncludes;  // C-family: the transitive, path-precise include set (sorted)
+    const rw::FileAdjacency& includeAdj;   // every language: the files a file's imports resolve to
     const std::vector<std::uint32_t>&       fileDir;       // file → interned directory id
     const ReceiverEvidence*                 recvEv;        // JS/TS: a CommonJS require alias's module (moduleNames)
     const HashMap<std::string, char>*       rustOutsideUse;   // Rust: "<fileId>#X" a `use` of an outside path binds (crate-dir aware)
@@ -7810,10 +7810,9 @@ inline void includedBases( const BaseEvidenceTables& t, const Reference& r, cons
 {
     if( r.lang == Lang::Cpp || r.lang == Lang::C || r.lang == Lang::ObjC )
     {
-        const std::vector<NodeId>* inc = r.fileId < t.fileIncludes.size() ? &t.fileIncludes[ r.fileId ] : nullptr;
         for( NodeId c : cand )
         {
-            if( inc != nullptr && std::binary_search( inc->begin(), inc->end(), NodeId( t.ing.symbols[ c ].fileId ) ) )
+            if( t.fileIncludes.contains( r.fileId, t.ing.symbols[ c ].fileId ) )
             {
                 out.push_back( c );
             }
@@ -8617,13 +8616,13 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // (Diagnostics.h / arch.h / a.h …) can no longer manufacture a wrong narrow. An include that cannot
     // be path-resolved contributes NOTHING (it is simply absent) → it can never CAUSE a narrow → the
     // resolver degrades to the name-based fallback ladder + honest amb=. The caller's OWN file is excluded (f ∉ trans[f]).
-    // Deterministic: a pure function of the sorted ing.files + ing.includes; each set is sorted+deduped
-    // so rule3IncludeFile's binary-search membership is valid and order-stable (warm == cold).
+    // Deterministic: a pure function of the sorted ing.files + ing.includes, so its membership answers are
+    // order-stable (warm == cold).
     // `forCallNarrow`: a Ruby constant read off a VALUE position (an argument, a rescue class — parser version 93)
     // is a dependency of the file but not import evidence for a bare call, so it never enters this set. --deps,
     // --impact's importer tier and the lazy-pair count read the same records through the default path and keep it.
     auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, /*lazyPairsOut=*/nullptr, /*forCallNarrow=*/true );
-    std::vector<std::vector<NodeId>> fileIncludes = transitiveIncludeSet( includeAdj );
+    const rw::FileSetStore fileIncludes = transitiveIncludeSet( includeAdj );
     const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
     // per-symbol fileId view for Rule 3 (group a candidate def by its file without passing the whole IngestResult).
     std::vector<std::uint32_t> symFileId( N );
@@ -9177,7 +9176,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         {
             return !localDefOutOfReach( ing, c, ref );
         }
-        if( ref.fileId < fileIncludes.size() && std::binary_search( fileIncludes[ ref.fileId ].begin(), fileIncludes[ ref.fileId ].end(), symFileId[ c ] ) )
+        if( fileIncludes.contains( ref.fileId, symFileId[ c ] ) )
         {
             return true;
         }
@@ -9355,7 +9354,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         const auto visible = [ & ]( std::uint32_t i )
         {
             const std::uint32_t f = ing.bindings[ i ].fileId;
-            return f == ref.fileId || ( ref.fileId < fileIncludes.size() && std::binary_search( fileIncludes[ ref.fileId ].begin(), fileIncludes[ ref.fileId ].end(), f ) );
+            return f == ref.fileId || fileIncludes.contains( ref.fileId, f );
         };
         const bool anyVisible = std::any_of( nit->second.begin(), nit->second.end(), visible );
         for( const std::uint32_t i : nit->second )
@@ -10769,12 +10768,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                         {
                             continue;
                         }
-                        if( r.fileId >= fileIncludes.size() )
-                        {
-                            continue;
-                        }
-                        const std::vector<NodeId>& inc = fileIncludes[ r.fileId ];
-                        if( std::binary_search( inc.begin(), inc.end(), symFileId[c] ) )
+                        if( fileIncludes.contains( r.fileId, symFileId[c] ) )
                         {
                             cand.push_back( c );
                         }
@@ -14947,7 +14941,7 @@ inline QMetrics computeQMetrics( const IngestResult& ing, const Graph& g )
 // with graph_partial="1", absent at zero, so a tree without one stays byte-identical; graphlegend.h states the rule).
 struct StructuralIncludeAdj
 {
-    std::vector<std::vector<std::uint32_t>> adj;               // UN-deduped occurrences, minus the all-lazy pairs
+    rw::FileAdjacency                       adj;               // UN-deduped occurrences, minus the all-lazy pairs
     std::vector<std::uint32_t>              lazyEdgesByFile;   // distinct (f, to) pairs left out, per f
     std::uint64_t                           lazyEdges = 0;     // Σ lazyEdgesByFile
     std::uint64_t                           importsUnresolved = 0;   // #220: in-repo TS/JS directives with no edge
@@ -14971,15 +14965,13 @@ inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing
     // two pairs (parser version 93, test/rubyargcheck.sh service.rb, where three spellings of one file's classes
     // are interleaved with two other files). One scratch vector, reused across files; sort + unique is the count.
     std::vector<std::uint32_t> dropped;
-    for( std::uint32_t f = 0; f < out.adj.size(); ++f )
+    out.adj.retainRows( [ & ]( const std::uint32_t f, const std::span<std::uint32_t> outs )
     {
-        std::vector<std::uint32_t>& outs = out.adj[f];
-        std::uint32_t               kept = 0;
+        std::size_t kept = 0;
         dropped.clear();
-        for( std::uint32_t j = 0; j < outs.size(); ++j )
+        for( const std::uint32_t to : outs )
         {
-            const std::uint32_t to  = outs[j];
-            const auto          it  = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
+            const auto it = lazyPairs.find( ( std::uint64_t( f ) << 32 ) | std::uint64_t( to ) );
             if( it != lazyPairs.end() && it->second != 0 )
             {
                 dropped.push_back( to );
@@ -14987,15 +14979,15 @@ inline StructuralIncludeAdj resolveStructuralIncludeAdj( const IngestResult& ing
             }
             outs[kept++] = to;
         }
-        outs.resize( kept );
         std::sort( dropped.begin(), dropped.end() );
         out.lazyEdgesByFile[f] = static_cast<std::uint32_t>( std::unique( dropped.begin(), dropped.end() ) - dropped.begin() );
         out.lazyEdges += out.lazyEdgesByFile[f];
-    }
+        return kept;
+    } );
     return out;
 }
 
-inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestResult& ing )
+inline rw::FileAdjacency resolveIncludeAdj( const IngestResult& ing )
 {
     return resolveStructuralIncludeAdj( ing ).adj;
 }
@@ -15044,7 +15036,7 @@ inline std::vector<std::vector<std::uint32_t>> resolveIncludeAdj( const IngestRe
 // return require("./ChunkGraph"); }`) is exactly a def file whose own body imports another def file.
 struct ImporterScan { bool found; bool allLazy; };
 
-inline ImporterScan scanImporterEdges( std::uint32_t f, const std::vector<std::uint32_t>& toList, const std::vector<char>& isDef,
+inline ImporterScan scanImporterEdges( std::uint32_t f, const std::span<const std::uint32_t> toList, const std::vector<char>& isDef,
                                        std::uint32_t F, const HashMap<std::uint64_t, char>* lazyPairs ) noexcept
 {
     ImporterScan r{ false, true };   // allLazy is vacuously true until the first def edge is seen
@@ -15078,7 +15070,7 @@ inline ImporterScan scanImporterEdges( std::uint32_t f, const std::vector<std::u
 // cut-fix C: per FILE, how many distinct files import it — the deduped adjacency's in-degree, the file-granular
 // twin of navRelevanceWeight, which the import tier ranks its importers by before its cap. `adj` must be the
 // dedup=true adjacency, so each (importer, imported) pair counts once; self-edges never count.
-inline void countFileImporters( const std::vector<std::vector<std::uint32_t>>& adj, std::uint32_t F, std::vector<std::uint32_t>& out )
+inline void countFileImporters( const rw::FileAdjacency& adj, std::uint32_t F, std::vector<std::uint32_t>& out )
 {
     out.assign( F, 0u );
     for( std::uint32_t f = 0; f < F && f < adj.size(); ++f )
@@ -15123,7 +15115,7 @@ inline std::vector<std::uint32_t> importersOfFiles( const IngestResult& ing, con
     // dedup=true: this is a MEMBERSHIP question ("does this file import a def file"), not an
     // occurrence-count one, so the deduped adjacency is both the right shape and the cheaper scan.
     HashMap<std::uint64_t, char>  lazyPairs;
-    const std::vector<std::vector<std::uint32_t>> adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut, tsExtrasOut );
+    const rw::FileAdjacency adj = buildPreciseIncludeAdj( ing, /*dedup=*/true, lazyOut ? &lazyPairs : nullptr, importsUnresolvedOut, tsExtrasOut );
     // No `isDef[f]` pre-filter here (barrel-exclusion lane): a def file is not skipped wholesale, because
     // it may ALSO be a genuine importer of a DIFFERENT def file (the barrel-getter shape — see
     // scanImporterEdges' own comment). The narrower, correct exclusion — f is never its own importer — is
@@ -15542,7 +15534,7 @@ inline bool impactRollupHedged( const ImpactFileRollup& r ) noexcept
 
 // Tarjan SCC on the file→file graph → cycles (SCCs with >1 node). Cyclic physical dependencies are
 // Lakos's cardinal sin: a cycle must be compiled/tested/reused as one unit. Iterative (no stack risk).
-inline std::vector<std::vector<std::uint32_t>> sccCycles( const std::vector<std::vector<std::uint32_t>>& adj )
+inline std::vector<std::vector<std::uint32_t>> sccCycles( const rw::FileAdjacency& adj )
 {
     const std::uint32_t F = std::uint32_t( adj.size() );
     std::vector<std::int32_t>               idx( F, -1 ), low( F, 0 );
@@ -15616,34 +15608,18 @@ inline std::vector<std::vector<std::uint32_t>> sccCycles( const std::vector<std:
 // EVIDENCE NOTE: mechanistically plausible for build cost, but no independent outcome-based study
 // validates NCCD as a defect/maintenance predictor — design heuristic, not proof.
 struct DepHealth { std::vector<std::uint32_t> transitive; std::uint64_t ccd = 0; double acd = 0, nccd = 0; };
-inline DepHealth dependencyHealth( const std::vector<std::vector<std::uint32_t>>& adj )
+inline DepHealth dependencyHealth( const rw::FileAdjacency& adj )
 {
     const std::uint32_t F = std::uint32_t( adj.size() );
     DepHealth h;
     h.transitive.assign( F, 0 );
-    std::vector<std::uint32_t> seenEpoch( F, 0 );
-    std::vector<std::uint32_t> stack;
-    stack.reserve( F );
-    std::uint32_t              epoch = 1;
+    PROFILE_SCOPE_DESCRIBE( "--deps/2nd include-closure fold (dependencyHealth)" );
+    const rw::FileSetStore closure = rw::memguard::guardedFileClosure( adj );   // a stop throws FileGraphStopped: no partial store is returned
     for( std::uint32_t s = 0; s < F; ++s )
     {
-        stack.clear();  stack.push_back( s );  seenEpoch[s] = epoch;
-        std::uint32_t reached = 0;
-        while( !stack.empty() )
-        {
-            const std::uint32_t v = stack.back();  stack.pop_back();  ++reached;
-            for( std::uint32_t w : adj[v] )
-            {
-                if( seenEpoch[w] != epoch )
-                {
-                    seenEpoch[w] = epoch;
-                    stack.push_back( w );
-                }
-            }
-        }
+        const std::uint32_t reached = closure.setSize( s ) + 1;
         h.transitive[s] = reached;   // includes self (Lakos convention)
         h.ccd += reached;
-        ++epoch;
     }
     h.acd  = F ? double( h.ccd ) / double( F ) : 0.0;
     const double btree = F > 1 ? ( double( F + 1 ) * std::log2( double( F + 1 ) ) - double( F ) ) : 1.0;

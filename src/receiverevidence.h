@@ -237,7 +237,7 @@ struct CallResultTypes
     const HashMap<std::string, NodeId>*                   jsPinnedClasses = nullptr;  // graph.h: "<fileId>#<local>" → the class a TS import pins
     const HashMap<std::string, std::uint32_t>*            jsImportModules = nullptr;  // graph.h (lane L6): "<fileId>#<local>" → the file a TS import's module resolved to
     const ClassIdentity*                                  classIds        = nullptr;  // graph.h: C-family class identity (resolve.h)
-    const std::vector<std::vector<NodeId>>*               fileIncludes    = nullptr;  // graph.h: C-family transitive include set per file (sorted)
+    const rw::FileSetStore*                               fileIncludes    = nullptr;  // graph.h: C-family transitive include set per file (sorted)
     const HashMap<std::string, std::vector<std::string>>* chaUp           = nullptr;  // class name → its direct base names
     // fix round 2: the Namespace records (scopes the index has no symbol for) in (file, start) order, the C++ files holding a
     // namespace- or file-scope using (sorted), and each class's innermost enclosing symbol as first asked (kNoNode: file scope)
@@ -1641,25 +1641,24 @@ struct CallResultTypes
             }
         };
         rowsOf( f, true );
-        if( fileIncludes == nullptr || f >= fileIncludes->size() )
+        if( fileIncludes == nullptr )
         {
             return;
         }
-        const std::vector<NodeId>& inc = ( *fileIncludes )[ f ];
-        if( inc.size() < cppUsingFiles.size() )
+        if( fileIncludes->cardinalityHint( f ) < cppUsingFiles.size() )
         {
-            for( NodeId h : inc )
+            fileIncludes->forEach( f, [ & ]( const std::uint32_t h )
             {
-                if( h != f && std::binary_search( cppUsingFiles.begin(), cppUsingFiles.end(), std::uint32_t( h ) ) )
+                if( std::binary_search( cppUsingFiles.begin(), cppUsingFiles.end(), h ) )
                 {
-                    rowsOf( std::uint32_t( h ), false );
+                    rowsOf( h, false );
                 }
-            }
+            } );
             return;
         }
         for( std::uint32_t h : cppUsingFiles )
         {
-            if( h != f && std::binary_search( inc.begin(), inc.end(), NodeId( h ) ) )
+            if( fileIncludes->contains( f, h ) )
             {
                 rowsOf( h, false );
             }
