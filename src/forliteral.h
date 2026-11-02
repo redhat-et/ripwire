@@ -2244,7 +2244,8 @@ inline bool forTableAnchorKeeps( const IngestResult& ing, std::string_view word,
     {
         return false;   // a member chain, never a table's key (dottedKeysOf's rule)
     }
-    const std::string_view tail = word.substr( word.find_last_of( ".:#" ) + 1 );   // the name an index symbol carries; npos + 1 is the whole word
+    const size_t sep = word.find_last_of( ".:#" );
+    const std::string_view tail = sep == std::string_view::npos ? word : word.substr( sep + 1 );   // the name an index symbol carries
     return tail.size() >= kForTableMinAnchor && std::any_of( ing.symbols.begin(), ing.symbols.end(), [ & ]( const Symbol& s ) { return s.name == tail; } );
 }
 
