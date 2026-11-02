@@ -309,6 +309,9 @@ for v in --hotspots --cochange; do
   read -r rc secs <<<"$(timed "$BIN" $v --since="1 year ago")"
   check "(M5) $v --since=... against a git silent from the first byte: exit 1, names the budget, no empty-window claim (rc=$rc)" '[ "$rc" = 1 ] && grep -q "hit its budget" "$TMP/err" && ! grep -q "matched no commits" "$TMP/out"'
 done
+# (M5b) the neighbour the review did not name: --rank-by=churn --since says "found no commits in its window" of a walk that was only cut
+read -r rc secs <<<"$(timed "$BIN" --rank-by=churn "--since=1 year ago")"
+check "(M5b) --rank-by=churn --since=... against a git silent from the first byte: the no-commits line names the budget (rc=$rc)" 'grep -q "found no commits in its window (its git history walk hit its budget" "$TMP/err"'
 unset STALL_AT_START TWS
 # (F2) the same refusal over MCP: the error of `owners` (and `symbol`) names the budget, not "no git history"
 export STALL_AT_START=1

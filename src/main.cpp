@@ -1407,16 +1407,19 @@ inline void discloseUniformChurnFallback( bool hasChurnEvidence, bool stubbed, c
     {
         return;
     }
+    // A walk the budget ended before its first commit proves nothing about the window (HISTORY-WALK-HANG, CodeRabbit on #498 for --hotspots/--cochange):
+    // the same claim here would say "no commits" of a history that was only not read.
+    const std::string cutNote = rw::gitWalkCutRefusalCause().empty() ? std::string() : std::string( " (its git history walk hit its budget: see history_cut; the window may hold commits that were not read)" );
     if( stubbed )
     {
-        rw::emitTo( stderr, "ripwire: {} found no commits in its window, so NEITHER <recent> block rides this run and the symbol map is the "
+        rw::emitTo( stderr, "ripwire: {} found no commits in its window{}, so NEITHER <recent> block rides this run and the symbol map is the "
                               "counted stub — nothing was ranked at all, so there is no ranking to have fallen back (header: window=\"{}\"). "
                               "Widen the window (--since), or drop --in=DIR for the map, which is then byte-identical to --rank-by=pagerank\n",
-                    verbLabel, windowStamp.c_str() );
+                    verbLabel, cutNote, windowStamp.c_str() );
         return;
     }
-    rw::emitTo( stderr, "ripwire: {} found no commits in its window; using uniform (structural) ranking — this map is "
-                          "byte-identical to --rank-by=pagerank (header: window=\"{}\")\n", verbLabel, windowStamp.c_str() );
+    rw::emitTo( stderr, "ripwire: {} found no commits in its window{}; using uniform (structural) ranking — this map is "
+                          "byte-identical to --rank-by=pagerank (header: window=\"{}\")\n", verbLabel, cutNote, windowStamp.c_str() );
 }
 
 // --rank-by=churn-decay's ARM, lifted whole out of churnRankedGraph — which is a three-way dispatcher that was
