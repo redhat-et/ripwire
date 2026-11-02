@@ -369,17 +369,22 @@ inline ChangedFileSplit splitChangedFiles( const IngestResult& ing, const std::v
     }
     return out;
 }
-inline ChangedFileSplit splitChangedFilesOfSymbols( const IngestResult& ing, std::span<const NodeId> changedSyms )
+// per file: 1 when one of `syms` sits in it (an id past the symbols, or a symbol past the files, marks nothing)
+inline std::vector<char> fileMaskOfSymbols( const IngestResult& ing, std::span<const NodeId> syms )
 {
-    std::vector<char> changedFile( ing.files.size(), 0 );
-    for( NodeId s : changedSyms )
+    std::vector<char> mask( ing.files.size(), 0 );
+    for( NodeId s : syms )
     {
-        if( s < ing.symbols.size() && ing.symbols[s].fileId < changedFile.size() )
+        if( s < ing.symbols.size() && ing.symbols[s].fileId < mask.size() )
         {
-            changedFile[ing.symbols[s].fileId] = 1;
+            mask[ing.symbols[s].fileId] = 1;
         }
     }
-    return splitChangedFiles( ing, changedFile );
+    return mask;
+}
+inline ChangedFileSplit splitChangedFilesOfSymbols( const IngestResult& ing, std::span<const NodeId> changedSyms )
+{
+    return splitChangedFiles( ing, fileMaskOfSymbols( ing, changedSyms ) );
 }
 inline std::size_t testRowPartnerCount( const std::vector<TestRow>& rows )
 {

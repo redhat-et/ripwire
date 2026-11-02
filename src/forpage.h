@@ -748,25 +748,34 @@ inline bool docRowInWindow( bool txt, std::size_t& walked, std::size_t window, s
     return inWindow;
 }
 
-inline void pushTailRow( FileTail& to, std::string path, std::string sym, std::size_t next )
+// One walked row's code-first verdict: a doc row (`docs` set and a doc-language lead), a Sphinx .txt page, and whether it is listed
+// under docRowInWindow (a code row always is). Counts the row into `walked` either way, as the plain walk's window does.
+struct TailRowAdmit
 {
+    bool isDoc    = false;
+    bool txt      = false;
+    bool inWindow = true;
+};
+inline TailRowAdmit admitTailRow( const IngestResult& ing, NodeId lead, const FileTail* docs, std::size_t& walked, std::size_t window ) noexcept
+{
+    TailRowAdmit a;
+    a.isDoc    = docs != nullptr && lead < ing.symbols.size() && isDocLang( ing.symbols[ lead ].lang );
+    a.txt      = a.isDoc && isSphinxTxtUnit( ing, ing.symbols[ lead ] );
+    a.inWindow = !a.isDoc || docRowInWindow( a.txt, walked, window, docs->total );
+    walked += a.isDoc ? 0 : 1;
+    return a;
+}
+
+// List file `f` as a tail row: into `docs` for a doc row (a Sphinx .txt page counted in docs->total), else into `out`.
+inline void listTailRow( FileTail& out, FileTail* docs, const TailRowAdmit& a, std::vector<char>& listed, std::uint32_t f, std::string path,
+                         std::string sym, std::size_t next )
+{
+    listed[f]    = 1;
+    FileTail& to = a.isDoc ? *docs : out;
+    to.total += a.txt ? 1 : 0;   // only the docs tail counts, and only its Sphinx .txt pages (kForFileTailSphinxTxtRows)
     to.paths.push_back( std::move( path ) );
     to.syms.push_back( std::move( sym ) );
     to.pageNext.push_back( next );
-}
-
-// per file: 1 when a symbol of the shown head sits in it
-inline std::vector<char> headFilesOf( const IngestResult& ing, const std::vector<NodeId>& headIds )
-{
-    std::vector<char> inHead( ing.files.size(), 0 );
-    for( NodeId sid : headIds )
-    {
-        if( sid < ing.symbols.size() && ing.symbols[ sid ].fileId < inHead.size() )
-        {
-            inHead[ ing.symbols[ sid ].fileId ] = 1;
-        }
-    }
-    return inHead;
 }
 
 // 1. the rank rows: the best-symbol projection of the lens order, outside the shown head's files; marks each file it lists.
@@ -785,7 +794,7 @@ inline void fileTailRankRows( FileTail& out, std::vector<char>& listed, const In
 {
     const std::size_t                F         = ing.files.size();
     const std::vector<std::uint32_t> pageRowOf = forPageRowOfFile( page, F );
-    const std::vector<char>          inHead    = headFilesOf( ing, headIds );
+    const std::vector<char>          inHead    = fileMaskOfSymbols( ing, headIds );
     const std::size_t                S         = std::min( ing.symbols.size(), rank.size() );
     std::vector<NodeId>              order( S );
     std::iota( order.begin(), order.end(), NodeId( 0 ) );
@@ -793,26 +802,17 @@ inline void fileTailRankRows( FileTail& out, std::vector<char>& listed, const In
     std::size_t walked = 0;   // distinct files met, code and doc, a Sphinx .txt page not counted: the plain walk's window
     for( std::size_t k = 0; k < S && out.paths.size() < kForFileTailShownCap && rank[ order[k] ] > 0.0f; ++k )   // the zero-score tail is contiguous
     {
-        const Symbol&       s = ing.symbols[ order[k] ];
-        const std::uint32_t f = s.fileId;
+        const std::uint32_t f = ing.symbols[ order[k] ].fileId;
         if( f >= F || listed[f] || inHead[f] )
         {
             continue;
         }
-        const bool isDoc = docs != nullptr && isDocLang( s.lang );
-        const bool txt   = isDoc && isSphinxTxtUnit( ing, s );
-        if( isDoc && !docRowInWindow( txt, walked, kForFileTailShownCap, docs->total ) )
+        const TailRowAdmit a = admitTailRow( ing, order[k], docs, walked, kForFileTailShownCap );
+        if( a.inWindow )
         {
-            continue;
+            const std::size_t next = a.isDoc && pageRowOf[f] != kNoPageRow ? std::size_t( pageRowOf[f] ) + 1 : 0;   // a doc row: where the page holds it
+            listTailRow( out, docs, a, listed, f, lensRowPath( ing, f, rootArg ), forPageSymOfFile( ing, page, pageRowOf, f, order[k] ), next );
         }
-        walked += isDoc ? 0 : 1;
-        if( txt )   // a doc row, so docs is set
-        {
-            ++docs->total;
-        }
-        listed[f] = 1;
-        const std::size_t next = !isDoc ? 0 : pageRowOf[f] == kNoPageRow ? 0 : std::size_t( pageRowOf[f] ) + 1;   // a doc row: where the page holds it
-        pushTailRow( isDoc ? *docs : out, lensRowPath( ing, f, rootArg ), forPageSymOfFile( ing, page, pageRowOf, f, order[k] ), next );
     }
 }
 
@@ -830,28 +830,20 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
     std::size_t codeSeen = 0, windowSeen = 0;   // window: page rows met, a Sphinx .txt page not counted (rank rows' rule)
     for( std::size_t r = 0; r < page.rows.size() && ( docs != nullptr ? codeSeen < kForFileTailPageRows : r < out.pageSeen ); ++r )
     {
-        const ForFileRow& row   = page.rows[r];
-        const bool        isDoc = docs != nullptr && row.lead < ing.symbols.size() && isDocLang( ing.symbols[ row.lead ].lang );
-        const bool        txt   = isDoc && isSphinxTxtUnit( ing, ing.symbols[ row.lead ] );
-        windowSeen += isDoc ? 0 : 1;
-        const bool        inWindow = !isDoc || docRowInWindow( txt, windowSeen, kForFileTailPageRows, docs->total );
-        codeSeen += isDoc ? 0 : 1;
+        const ForFileRow&  row = page.rows[r];
+        const TailRowAdmit a   = admitTailRow( ing, row.lead, docs, windowSeen, kForFileTailPageRows );
+        codeSeen += a.isDoc ? 0 : 1;
         out.pageSeen = std::max( out.pageSeen, r + 1 );
         if( row.fileId >= listed.size() || listed[ row.fileId ] )
         {
             continue;
         }
-        if( !inWindow )
+        if( !a.inWindow )
         {
             out.pageSkip = std::min( out.pageSkip, r );
             continue;
         }
-        listed[ row.fileId ] = 1;
-        if( txt )
-        {
-            ++docs->total;
-        }
-        pushTailRow( isDoc ? *docs : out, lensRowPath( ing, row.fileId, rootArg ), forFileRowSymNames( ing, row ), r + 1 );
+        listTailRow( out, docs, a, listed, row.fileId, lensRowPath( ing, row.fileId, rootArg ), forFileRowSymNames( ing, row ), r + 1 );
     }
 }
 
