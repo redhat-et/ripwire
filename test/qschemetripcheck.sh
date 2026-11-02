@@ -34,8 +34,12 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
-# 2026-11-02, lane barrel-short-key (base main 5d6438d7; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text:
-#   kParserVer 283 -> 289 (rich 290; above RULE3's 285/286 and DOCS-REST's 287/288): the TS/TSX/JS tags queries capture `export * as ns from`
+# 2026-11-02, lane rule3-member-guard fix 4 (base main 00a16550; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 283 -> 285 (rich 286; 284 is 283's rich tag): a Rust path call whose qualifier has more than one segment keeps
+#   it whole in Reference::fieldName; quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:
+#   no record changes shape and no watched quality.h function moved.
+# 2026-11-02, lane barrel-short-key (base main 02aebc91; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text:
+#   kParserVer 285 -> 289 (rich 290; above RULE3's 285/286 and DOCS-REST's 287/288): the TS/TSX/JS tags queries capture `export * as ns from`
 #   as a namespace re-export. quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24: no record
 #   changes shape and no watched quality.h function moved.
 # 2026-10-31, train 43b (lanes registrar, string-import, self-hook, decl-row merged onto main 65210e86): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the

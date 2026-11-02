@@ -1163,6 +1163,9 @@ struct Reference
                                           //   → "Billing::Invoice"; `described_class` → the group's constant whole),
                                           //   recvVar keeping the final segment every class is keyed by (graph.h
                                           //   RubyClassObjects::ofIndexed); no chain or compose reader reads a NamedVar's
+                                          //   A fourth reading, on a Rust CALL reference (role Call, recv None): the whole qualifier a path call
+                                          //   is written with when it has more than one segment (`crate::far` for `crate::far::helper()`), ""
+                                          //   otherwise (ingest_names.h rustWrittenQualifier; read through rustWrittenQualifierOf below).
     std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
@@ -1218,6 +1221,15 @@ inline constexpr std::uint32_t kBaseBindNone          = 0;            // no encl
 inline constexpr std::uint32_t kBaseBindUnknown       = 0xFFFFFFFFu;  // a scope was too large to scan: nothing proven either way
 inline constexpr std::uint32_t kBaseBindTemplateParam = 0xFFFFFFFEu;  // fn-slot S2 fix 2: the written base is a TEMPLATE PARAMETER of the deriving class (`template <class B> struct M : B`): it names no declaration
 static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= kBaseBindTemplateParam` for both sentinels" );
+
+// RULE3-MEMBER-GUARD fix 4: the qualifier a Rust call is WRITTEN with, from its root — `crate::far` for `crate::far::helper()`, where
+// Reference::qualifier keeps only `far` — else `qualifier` itself (a one-segment path, every non-call reference). Its readers pass Rust
+// references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
+inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
+{
+    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName.empty();
+    return whole ? std::string_view( r.fieldName ) : std::string_view( r.qualifier );
+}
 
 // ONE rule for every reader of the reference table that counts a call SITE (train 30, fcall-forward nit N1): a FORWARDED
 // reference counts only where buildGraph kept its call — `keptForwards` is Graph::keptForwards, the ascending
