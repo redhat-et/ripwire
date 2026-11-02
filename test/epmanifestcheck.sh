@@ -225,16 +225,20 @@ printf '[options.entry_points]\nx.report =\n    fmt = pkg.mod:Fmt\n    whole = p
 printf 'class Fmt:\n    pass\n\n\ndef main():\n    pass\n' >"$F/py/pkg/mod.py"; : >"$F/py/pkg/__init__.py"
 printf '{\n  "name": "dot-pkg",\n  "description": "say \\"bin\\": in a string",\n  "files": ["bin"],\n  "publishConfig": {\n    "bin": "nested.js"\n  },\n  "bin": {\n    "dot-cli": "./bin/cli.js"\n  }\n}\n' >"$F/dot/package.json"   # top-level "bin" on line 8
 printf '// the dot-cli command: its exported function, not the module body (line 1), is the entry\nexport function dotStart() {\n  return 1;\n}\n' >"$F/dot/bin/cli.js"
-printf 'export function loadBins() {\n  return entry_points(group="bin");\n}\n' >"$F/dot/bin/load.js"   # a loader shape quoting "bin"
+printf 'from importlib.metadata import entry_points\n\n\ndef load_bins():\n    return entry_points(group="bin")\n' >"$F/dot/load.py"   # a Python loader shape quoting "bin" (the scan reads .py)
 printf '[package]\nname = "pyish"\n\n[[bin]]\nname = "pyish"\npath = "pkg/mod.py"\n' >"$F/py/Cargo.toml"   # read only for a .rs row
+mkdir -p "$F/anon" || no "F fixture anon"
+printf '{\n  "main": "start.js"\n}\n' >"$F/anon/package.json"   # no "name": the entry is named by its key, never an invented name
+printf '// the anonymous package main\nexport function anonStart() {\n  return 1;\n}\n' >"$F/anon/start.js"
 printf '[package]\nname = "lit"\n\n[[ bin ]]  # a spaced header with a comment\nname = '"'"'gen'"'"'\npath = '"'"'tools/gen.rs'"'"'\n' >"$F/lit/Cargo.toml"
 printf 'fn helper() {}\n\nfn main() {\n    helper();\n}\n' >"$F/lit/tools/gen.rs"
 run "$F/py" "$TMP/fpy" "$Q"
 run "$F/py" "$TMP/fpy2" '--for=how is the Fmt report formatter and the main function registered'
 run "$F/dot" "$TMP/fdot" '--for=how does dotStart start the dot-cli command'
+run "$F/anon" "$TMP/fanon" '--for=how does anonStart start the package main'
 run "$F/lit" "$TMP/flit" '--for=cargo run --bin gen entry main helper'
-for a in fpy fpy2 fdot flit; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
-FPY="$( eps "$TMP/fpy" )"; FPY2="$( eps "$TMP/fpy2" )"; FDOT="$( eps "$TMP/fdot" )"; FLIT="$( eps "$TMP/flit" )"
+for a in fpy fpy2 fdot fanon flit; do okrun "$TMP/$a" || no "run $a failed (rc=$(cat "$TMP/$a.rc"))"; done
+FPY="$( eps "$TMP/fpy" )"; FPY2="$( eps "$TMP/fpy2" )"; FDOT="$( eps "$TMP/fdot" )"; FANON="$( eps "$TMP/fanon" )"; FLIT="$( eps "$TMP/flit" )"
 # F1: a module-only Python target (`whole = pkg.mod`) is a module, never a file path: in the tree it is unresolved=1, not external=1
 if has "$FPY" "any({'n':'fmt','target':'pkg.mod:Fmt','def':'pkg/mod.py:1'} in g['e'] and {'n':'whole','target':'pkg.mod','unresolved':'1'} in g['e'] for g in $(grp x.report))"; then
     ok "F1 a module-only setup.cfg target reads as a module (unresolved=1), beside a resolved module:attr"; else no "F1 module-only target: $FPY"; fi
@@ -244,6 +248,9 @@ if grep -q 'n="main"' "$TMP/fpy2" && has "$FPY2" "len($(grp x.report))==1 and $(
 # F2: a package.json path written "./bin/cli.js" resolves through the one path resolver
 if has "$FDOT" "any(g['p']=='package.json' and g['l']=='8' and g['e']==[{'n':'dot-cli','target':'./bin/cli.js','def':'bin/cli.js:2'}] and 'used_at' not in g for g in $(grp bin))"; then
     ok "F2 l= is the top-level bin key (not a nested one, a value or an escaped quote in a string); a ./-prefixed package.json bin path links to its exported function; a manifest-key group carries no used_at= (a loader quoting \"bin\" is not scanned)"; else no "F2 ./ path: $FDOT"; fi
+# F2b: a package.json with no "name" names its main entry by the key, not by an invented package name
+if has "$FANON" "any(g['p']=='package.json' and g['e']==[{'n':'main','target':'start.js','def':'start.js:2'}] for g in $(grp main))"; then
+    ok "F2b a nameless package.json main entry is n=main -> start.js:2"; else no "F2b nameless package: $FANON"; fi
 # F3: Cargo literal strings ('x') and a spaced [[ bin ]] header with a trailing comment read through the shared TOML helpers
 if has "$FLIT" "any(g['p']=='Cargo.toml' and g['e']==[{'n':'gen','target':'tools/gen.rs','def':'tools/gen.rs:3'}] for g in $(grp bin))"; then
     ok "F3 Cargo [[ bin ]] header + literal-string name/path -> tools/gen.rs:3 main"; else no "F3 cargo literal strings: $FLIT"; fi

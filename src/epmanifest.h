@@ -505,14 +505,10 @@ inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>
     {
         return;
     }
-    std::string pkgName;
+    std::string pkgName;   // a string `bin` and `main` are named by the package; with no "name", by their own key (never invented)
     if( const tsimport::JsonNode* nm = root.get( "name" ); nm != nullptr && nm->kind == tsimport::JsonNode::Kind::Str && !nm->str.empty() )
     {
         pkgName = nm->str;
-    }
-    if( pkgName.empty() )
-    {
-        pkgName = "pkg";
     }
     const auto add = [ & ]( std::string_view group, std::uint32_t groupLine, std::string_view name, std::string_view target, std::uint32_t line )
     {
@@ -526,7 +522,7 @@ inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>
         const std::uint32_t binLine = jsonKeyLine( text, "bin" );
         if( bin->kind == tsimport::JsonNode::Kind::Str && !bin->str.empty() )
         {
-            add( "bin", binLine, pkgName, bin->str, binLine );
+            add( "bin", binLine, pkgName.empty() ? std::string_view( "bin" ) : std::string_view( pkgName ), bin->str, binLine );
         }
         else if( bin->kind == tsimport::JsonNode::Kind::Obj )
         {
@@ -545,7 +541,7 @@ inline void parsePackageJsonEntries( std::string_view text, std::vector<EpEntry>
         const std::uint32_t mainLine = jsonKeyLine( text, "main" );
         if( main->kind == tsimport::JsonNode::Kind::Str && !main->str.empty() )
         {
-            add( "main", mainLine, pkgName, main->str, mainLine );
+            add( "main", mainLine, pkgName.empty() ? std::string_view( "main" ) : std::string_view( pkgName ), main->str, mainLine );
         }
     }
 }
