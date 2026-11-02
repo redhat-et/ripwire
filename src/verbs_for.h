@@ -123,10 +123,12 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // (ing, task), so hoisting it is byte-neutral by construction.
     const bool        routeOn      = !cfg.noRoute;
     // A flip trades the ranked map for the anchor's body AND its <callers>; test that the call prints both, not a list of flags.
-    // The auto-bodies bundle (autoBundleMode below) is the one posture that serves them: --signatures-only, --detail=N (bodies, no
-    // callers hop), --json, --format=columnar|candidates and an explicit --token-budget (a hard ceiling the single-anchor allowance
-    // never sees) each print one without the other (subjectanchor.h flipServesBodyAndCallers)
+    // The auto-bodies bundle (autoBundleMode below), unpaged and at its own byte budgets, is the one posture that serves them:
+    // --signatures-only, --detail=N (bodies, no callers hop), --json, --format=columnar|candidates, the --limit/--offset file page and
+    // an explicit --token-budget or --pack-budget-bytes (a ceiling the single-anchor allowance never sees) each print one without the
+    // other, or may cut the body (subjectanchor.h flipServesBodyAndCallers)
     const bool        servesBodies = cfg.detail == 0 && !cfg.signaturesOnly && !cfg.json && !cfg.columnar && !cfg.candidates && cfg.tokenBudget == 0
+                                     && cfg.pageLimit == 0 && cfg.pageOffset == 0 && cfg.packBudgetBytes == rw::Config{}.packBudgetBytes
                                      && rw::forCallerHopOn();
     SubjectRoute      subjectRoute = routeOn ? chooseSubjectRoute( ing, g, task, servesBodies ) : SubjectRoute{};
     const RouteChoice& rc          = subjectRoute.route;

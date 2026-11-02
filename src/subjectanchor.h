@@ -14,17 +14,17 @@
 // kSubjectMaxDefs definitions. A namesake flood proves nothing, so that route stays declined and says so. Graph forms (path from,
 // callers of, call chain from), joins of named endpoints (+, ->, =>, =, |) and pasted traces or issue forms get no reading; their
 // answers are byte-identical to before.
-// WHAT A PLAIN WORD THAT REALLY IS A SYMBOL GETS. It is dropped like any other word, beside a proven name, and the route prints its
-// count: "dropped: emit(102-defs) new(41-defs) argument". To ask about emit, the subject is `emit`, which routes as it always did.
+// WHAT A PLAIN WORD THAT REALLY IS A SYMBOL GETS. On a flip it is dropped like any other word, beside a proven name, and the route
+// prints its count: "dropped: emit(102-defs) new(41-defs) argument". To ask about emit, the subject is `emit`, which routes as it always did.
 //
-// WHAT THE READING DOES, by what chooseForRanker made of the whole subject:
-//   * name-exact, with a plain word among its anchors: the words are dropped. Always; that anchor was never true, on a question too,
-//     and with a test-only symbol too (CONFIDENCE-ANCHOR reads that answer low).
-//   * declined for a word: the route is the one the names alone get, when the subject is DESCRIPTIVE (no question lead, at most
-//     kSubjectMaxPlainWords plain content words) and names ONE exact symbol with a source-class definition. rankQuery carries the names, so
-//     the answer is the bare symbol's plus the dropped: clause.
-//   * any other route, same two conditions: the conceptual answer stands, every byte, and <callers by="subject"> rides on top
-//     (verbs_for.h). The prose words there are real retrieval terms and the ranked map may hold the answer, so nothing is taken.
+// WHAT THE READING DOES. ONE change to the route, the flip, and only where it serves what it takes away:
+//   * the flip: the subject spells ONE identifier, it places one exact symbol, and the whole route either anchored a plain word too
+//     (name-exact) or was declined for one on a DESCRIPTIVE subject (no question lead, at most kSubjectMaxPlainWords plain content
+//     words). The words are dropped and the route is the bare symbol's, but only on a surface that prints the body and the callers
+//     (the CLI --for default bundle) and only where that answer has them: one function with a source definition, a real body that
+//     fits the single-anchor allowance, a caller (flipServesBodyAndCallers). rankQuery carries the name; route= says dropped:.
+//   * everything else, a refused flip included: the route is chooseForRanker's for the whole subject (CONFIDENCE-ANCHOR's note aside). A conceptual
+//     route whose descriptive subject names a symbol gains <callers by="subject"> on top (verbs_for.h); nothing is taken.
 
 #include "filter.h"            // isTestSymbol, pathTierOf
 #include "forcallerhop.h"      // forCallerHopTargets — the ONE-function test a flip needs (its callers are served)
@@ -65,6 +65,7 @@ struct SubjectReading
     std::vector<SubjectExactSymbol> exact;      // subject word order
     std::string                     reduced;    // the subject with its plain words gone (exact + unproven identifier-syntax words)
     std::vector<std::string>        dropped;    // the plain content words, subject order
+    std::size_t                     names       = 0;       // identifier-syntax words in the subject (the words `reduced` keeps)
     bool                            sourceDef   = false;   // one exact symbol has a source-class definition
     bool                            descriptive = false;   // no question lead, and few enough plain words: not prose
 };
@@ -287,6 +288,7 @@ inline SubjectReading subjectReading( const IngestResult& ing, std::string_view 
         r.reduced += r.reduced.empty() ? "" : " ";
         r.reduced += t;
     }
+    r.names       = keptRaw.size();
     r.descriptive = !isQuestionLead( words.front() ) && r.dropped.size() <= kSubjectMaxPlainWords;
     return r;
 }
@@ -479,43 +481,6 @@ inline bool flipServesBodyAndCallers( const IngestResult& ing, const Graph& g, c
     return attributeOneHopAnswer( ing, g, targets, rows, /*towardMatches=*/true ).groups.size() == 1;
 }
 
-// The conceptual route chooseForRanker gives a task of this many content words: what a refused flip returns to when the whole route
-// was name-exact on a plain word (no declined route exists to fall back on).
-inline RouteChoice conceptualRouteFor( std::string_view task )
-{
-    std::size_t nWords = 0;
-    for( const std::string_view w : splitRouteWords( task ) )
-    {
-        nWords += isRouteStopword( routeLower( w ) ) ? 0u : 1u;
-    }
-    RouteChoice rc;
-    rc.which  = LexMode::SubtokenBody;
-    rc.reason = nWords >= 3 ? "subtoken+body" : "subtoken+body:broad";
-    return rc;
-}
-
-// Does every name a name-exact route anchors have a definition that carries a body (not a prototype, an interface method or a
-// `declare function`)? The set form of flipServesBodyAndCallers' M2.
-inline bool everyAnchorHasBody( const IngestResult& ing, const RouteChoice& bare )
-{
-    if( bare.anchorDefs.empty() )
-    {
-        return false;
-    }
-    return std::ranges::all_of( bare.anchorDefs, [ & ]( const RouteAnchorDef& a )
-    {
-        for( NodeId id = 0; id < NodeId( ing.symbols.size() ); ++id )
-        {
-            const Symbol& s = ing.symbols[id];
-            if( s.kind != SymKind::Section && s.fileId == a.fileId && routeLower( s.name ) == a.lowerName && isDefinitionNotDeclaration( s ) )
-            {
-                return true;
-            }
-        }
-        return false;
-    } );
-}
-
 // The route the subject reading picks, before the CONFIDENCE-ANCHOR check. `servesBodiesAndCallers`: the surface prints the anchor's
 // body and <callers> (the CLI --for does; the MCP `for` verb serves signatures only), so it may trade a ranked map for them.
 inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const Graph& g, std::string_view task, bool servesBodiesAndCallers )
@@ -530,32 +495,19 @@ inline SubjectRoute chooseSubjectRouteUnchecked( const IngestResult& ing, const 
     const bool lift     = reading.descriptive && reading.sourceDef;
     const bool declined = out.route.reason.starts_with( "subtoken+body:declined(" );
     const bool plainAnchored = subjectAnchoredPlainWord( ing, out.route, reading );
-    // Two exact symbols on a declined route ("add a UrlSerializer parameter to createSegmentGroupFromRoute") name no ONE anchor, and
-    // name-exact would serve neither's callers: the conceptual answer stands with the first function's callers on top.
-    if( plainAnchored || ( declined && lift && reading.exact.size() == 1 ) )
+    // A flip is the ONE change to the route. It needs a surface that prints the body and the callers, and ONE name: the subject spells
+    // one identifier and it places one exact symbol. Several names ("add a UrlSerializer parameter to createSegmentGroupFromRoute",
+    // `first_caller second_caller new`) name no ONE anchor whose body and callers a name-exact answer would serve: the route stands.
+    // Every refusal below leaves `out.route` exactly what chooseForRanker made of the whole subject (the answer is the one it always
+    // was); a conceptual route then only gains <callers by="subject"> on top.
+    if( servesBodiesAndCallers && reading.exact.size() == 1 && reading.names == 1 && ( plainAnchored || ( declined && lift ) ) )
     {
         RouteChoice bare = chooseForRanker( ing, reading.reduced );
-        // The words go only for a route that is still name-exact on the symbol and whose anchor has a SOURCE definition: a test, doc or
-        // data-file anchor leaves the route as it was (CONFIDENCE-ANCHOR reads it low), since dropping the words there leaves an answer
-        // with no lead, where the full route kept one. A name-exact route had no map to lose; a declined one does, so it flips only
-        // where the surface prints the body AND the callers (flipServesBodyAndCallers); otherwise the map stands and the callers ride.
-        bool flip = bare.which == LexMode::NameExact && routeAnchorHasSourceDef( ing, bare, reading.reduced );
-        if( flip )
-        {
-            // EVERY flip, a plain word that is itself a symbol included ("how does X work": `work` is a definition in every large
-            // repo): the route is name-exact either way, but only the gate says the body and the callers it promises print.
-            // ONE exact symbol: the full gate (one function, a real body that fits, a caller). Several names (`first_caller second_caller
-            // work`): the route is a name-exact set that promises each name's body but no one function's callers, so the gate there is
-            // the part that reads as a set: every name has a definition that carries a body.
-            flip = servesBodiesAndCallers && ( reading.exact.size() == 1 ? flipServesBodyAndCallers( ing, g, bare ) : everyAnchorHasBody( ing, bare ) );
-            if( !flip && plainAnchored )
-            {
-                // The whole route anchored the plain word too (`work` and X), which was never true, and the gate refuses the bare
-                // symbol: neither name-exact answer is one to give. The conceptual map is the answer, as on a declined descriptive subject.
-                out.route = conceptualRouteFor( task );
-            }
-        }
-        if( flip )
+        // The words go only for a route that is still name-exact on the symbol, whose anchor has a SOURCE definition (a test, doc or
+        // data-file anchor leaves the route as it was; CONFIDENCE-ANCHOR reads it low), and whose answer prints the body AND the
+        // callers (flipServesBodyAndCallers: one function, a real body that fits, a caller). This holds when a dropped word is itself
+        // a symbol too ("how does X work": `work` is a definition in every large repo).
+        if( bare.which == LexMode::NameExact && routeAnchorHasSourceDef( ing, bare, reading.reduced ) && flipServesBodyAndCallers( ing, g, bare ) )
         {
             bare.reason += subjectDroppedClause( ing, reading.dropped );
             out.route     = std::move( bare );

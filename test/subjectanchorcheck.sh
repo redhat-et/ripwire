@@ -9,6 +9,8 @@
 #   F      FIX ROUND: F6 a declined route flips only where the body AND the callers print (one function, resolved anchor, body fits),
 #          F2 a namesake in ANY directory keeps the map, F1 the MCP `for` verb never trades its map, F4 a plain word never vouches
 #          for a spelled name, F10 an angle-bracketed owner is a name
+#   W/MF2  subject-fix4: a refused flip keeps the whole subject's route (no conceptual re-rank), several names never flip, a paged,
+#          budgeted or candidates call never flips
 # Usage: bash test/subjectanchorcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/subjectanchorcheck.sh
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -156,9 +158,9 @@ hasnt "$A" 'by="subject"' "N7 prose past the plain-word bound: no reading"
 A="$( ask "$PY" 'prepare_setup_platform' )"; hasnt "$( route "$A" )" 'dropped:' "N8 bare symbol: nothing to drop"
 printf 'def lonely_function(x):\n    return x\n' > "$PY/app/lonely.py"
 A="$( ask "$PY" 'lonely_function zznope sturdy' )"; hasnt "$A" 'by="subject"' "N9 no callers: no element, never a bare total=0"
-# two exact symbols: both anchor, neither word survives
+# two exact symbols: no ONE anchor, so no flip: the whole subject's route stands (both names anchored, and the word with them)
 A="$( ask "$PY" 'first_caller second_caller new' )"; R="$( route "$A" )"
-has "$R" 'first_caller(' "T two exact: first anchored"; has "$R" 'second_caller(' "T two exact: second anchored"; has "$R" 'dropped: new(1-defs)' "T two exact: word dropped"
+has "$R" 'first_caller(' "T two exact: first anchored"; has "$R" 'second_caller(' "T two exact: second anchored"; hasnt "$R" 'dropped:' "T two exact: nothing dropped (no set flip)"
 # ── polyglot: one name in Python and TypeScript ──
 PG="$TMP/poly"; mkdir -p "$PG/pyside" "$PG/tsside"
 printf 'def shared_name(x):\n    return x\n\ndef py_user():\n    return shared_name(1)\n' > "$PG/pyside/mod.py"
@@ -332,13 +334,15 @@ A="$( ask "$M4" 'SoloThing fresh parameter' )"; hasnt "$( route "$A" )" 'dropped
 # the route decline; these reach the gate with question wording, a task verb and a bare tail.
 wfx(){ d="$( mkfx "w_$1" )"; printf 'export function work(a: number) { return a; }\nexport function fix(a: number) { return a; }\nexport function bug(a: number) { return a; }\n' > "$d/src/work.ts"; printf '%s' "$d"; }
 WQ=( 'how does SoloThing work' 'fix a bug in SoloThing' 'SoloThing work' )
-refused(){ # $1 fixture, $2 label: every wording keeps a ranked map: no flip, no bare-symbol route
-    local q A
+refused(){ # $1 fixture, $2 label: a refused flip answers as the whole subject always did: chooseForRanker's route, the plain word
+    # still among its anchors, nothing dropped, and no conceptual re-rank of the whole task (subject-fix4: that fallback ranked the
+    # dropped word and lost type subjects)
+    local q A R
     for q in "${WQ[@]}"; do
-        A="$( ask "$1" "$q" )"
-        hasnt "$( route "$A" )" 'name-exact' "$2 [$q]: no name-exact route"
-        hasnt "$( route "$A" )" 'dropped:' "$2 [$q]: nothing dropped"
-        has "$( route "$A" )" 'subtoken+body' "$2 [$q]: the ranked map answers"
+        A="$( ask "$1" "$q" )"; R="$( route "$A" )"
+        hasnt "$R" 'dropped:' "$2 [$q]: nothing dropped"
+        has "$R" 'name-exact(' "$2 [$q]: the whole subject's name-exact route stands"
+        has "$R" '(src/work.ts)' "$2 [$q]: the plain-word anchor is the whole route's, as before"
     done
 }
 W1="$( wfx m1 )"; python3 - "$W1/cc/t.h" "$W1/cc/u.cc" <<'X2'
@@ -374,7 +378,29 @@ done
 WS="$( wfx set )"; printf 'int SoloOne(int a);\nint SoloTwo(int a);\n' > "$WS/cc/t.h"; printf '#include "t.h"\nint userOne(){ return SoloOne(1) + SoloTwo(2); }\n' > "$WS/cc/u.cc"
 A="$( ask "$WS" 'SoloOne SoloTwo work' )"; hasnt "$( route "$A" )" 'dropped:' "W set of two prototypes + work: no flip"
 WS2="$( wfx set2 )"; printf 'int SoloOne(int a) { return a + 1; }\nint SoloTwo(int a) { return a + 2; }\n' > "$WS2/cc/t.cc"
-A="$( ask "$WS2" 'SoloOne SoloTwo work' )"; has "$( route "$A" )" 'dropped: work' "W set control: two bodied names + work still flips"
+A="$( ask "$WS2" 'SoloOne SoloTwo work' )"; R="$( route "$A" )"
+hasnt "$R" 'dropped:' "W set: two bodied names + work: several names never flip"; has "$R" '(src/work.ts)' "W set: the whole route stands"
+# the set shapes review delta3 found passing the old set gate: a case-folded namesake struct (C++), a Rust trait method (syntax anchor),
+# two bodies past the allowance. No set flip exists now; each keeps the whole route.
+WS3="$( wfx set3 )"; printf 'int AlphaOne(int a) { return a + 1; }\n' > "$WS3/cc/a.cc"; printf 'int BetaTwo(int a);\nstruct betatwo { int x; int y; };\n' > "$WS3/cc/b.h"
+A="$( ask "$WS3" 'AlphaOne BetaTwo work' )"; hasnt "$( route "$A" )" 'dropped:' "W set s3 (prototype + case-folded struct): no flip"
+WS6="$( wfx set6 )"; mkdir -p "$WS6/rs"; printf 'trait T { fn beta_two(&self, a: i32) -> i32; }\nfn alpha_one(a: i32) -> i32 { a + 1 }\n' > "$WS6/rs/t.rs"
+A="$( ask "$WS6" 'alpha_one beta_two work' )"; hasnt "$( route "$A" )" 'dropped:' "W set s6 (Rust trait method, syntax anchor): no flip"
+# ONE placed name beside a second identifier the index does not hold is still two names: no flip (its twin, the control below, flips)
+WC0="$( wfx ctl0 )"; printf 'export function SoloThing(a: number) { return a + 41; }\nexport function soloUser() { return SoloThing(1); }\n' > "$WC0/src/thing.ts"
+A="$( ask "$WC0" 'SoloThing zzNotIndexed work' )"; hasnt "$( route "$A" )" 'dropped:' "W one placed + one unplaced identifier: no flip"
+A="$( ask "$WC0" 'SoloThing work' )"; has "$( route "$A" )" 'dropped: work' "W one placed name: twin flips"
+# a TYPE subject (review delta3 must-fix 3: mdbook BookConfig, cpython Py_buffer): a type has no caller contract, so the gate refuses
+# the flip, and the answer is the whole subject's as before: the type is still anchored, never a conceptual re-rank led by `run`
+WT="$( wfx type )"; printf 'export function run(a: number) { return a; }\n' >> "$WT/src/work.ts"
+printf 'export class SoloType { x = 1; y = 2; }\nexport function soloMaker() { return new SoloType(); }\n' > "$WT/src/type.ts"
+for q in 'how does SoloType run' 'SoloType work' 'SoloType fresh parameter'; do
+    A="$( ask "$WT" "$q" )"; R="$( route "$A" )"
+    hasnt "$R" 'dropped:' "W type subject [$q]: no flip"
+    has "$A" 'class SoloType' "W type subject [$q]: the type's body still prints"
+    case "$q" in *fresh*) has "$R" 'declined' "W type subject [$q]: the declined route stands";;
+                 *) has "$R" 'name-exact(' "W type subject [$q]: the whole subject's name-exact route stands, no conceptual re-rank";; esac
+done
 # controls: one function, a body that fits, a caller: the natural wording still flips and the body and callers print
 WC="$( wfx ctl )"; printf 'export function SoloThing(a: number) { return a + 41; }\nexport function soloUser() { return SoloThing(1); }\n' > "$WC/src/thing.ts"
 for q in "${WQ[@]}"; do
@@ -391,9 +417,19 @@ case "$A" in *'name-exact(SoloThing)'*) no "MF2 --json flipped to a signature ro
 case "$A" in *'dropped:'*) no "MF2 --json names dropped words";; *) ok "MF2 --json: nothing dropped";; esac
 A="$( mode --detail=1 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --detail=1: no flip (bodies, no callers hop)"
 A="$( mode --token-budget=2000 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --token-budget: no flip"
-# neighbours not named by the review
+# the file page (--limit/--offset) prints file rows, no body and no callers; an explicit --pack-budget-bytes is a body ceiling the
+# single-anchor allowance never sees (CodeRabbit #502). Each keeps the map; each arm reads a route first, so an empty answer is red.
+for fl in --limit=5 --offset=1 '--limit=5 --offset=0' --pack-budget-bytes=4000; do
+    # shellcheck disable=SC2086  # word splitting is the point: '--limit=5 --offset=0' is two flags
+    A="$( mode $fl )"; R="$( route "$A" )"
+    case "$R" in @@NONE) no "MF2 $fl: no route (empty or failed answer)";; *dropped:*|*'name-exact(SoloThing)'*) no "MF2 $fl flipped: $R";; *) ok "MF2 $fl: no flip";; esac
+done
+A="$( mode --pack-budget-bytes=65536 )"; has "$( route "$A" )" 'dropped:' "MF2 --pack-budget-bytes at its default: still flips"
+# --format=candidates prints the route TAG (route="name-exact"), never the anchor clause: test the tag, with a positive twin
 A="$( mode --format=candidates )"
-case "$A" in *'dropped:'*|*'name-exact(SoloThing)'*) no "MF2 --format=candidates flipped";; *) ok "MF2 --format=candidates: no flip";; esac
+case "$A" in *'route="subtoken+body'*) ok "MF2 --format=candidates: no flip (the declined map's tag)";; *) no "MF2 --format=candidates flipped or failed";; esac
+A="$( cd "$FX" && "$BIN" "$FX" --no-cache '--for=SoloThing' --format=candidates 2>/dev/null </dev/null )"
+has "$A" 'route="name-exact"' "MF2 --format=candidates twin: a bare symbol's tag is name-exact, so the arm above can see a flip"
 A="$( mode --detail=2 )"; hasnt "$( route "$A" )" 'dropped:' "MF2 --detail=2: no flip"
 A="$( mode --json --signatures-only )"
 case "$A" in *'name-exact(SoloThing)'*) no "MF2 --json --signatures-only flipped";; *) ok "MF2 --json --signatures-only: no flip";; esac
