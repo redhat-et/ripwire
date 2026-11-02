@@ -957,12 +957,19 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
 1. Write the gate, then the code.
 2. Build both flavours locally; run `python3 test/pargates.py . ./build/ripwire -j 6` green.
 3. Run the sanitizer build clean, and the determinism gate three times.
-4. Add any new `test/*check.sh` to `test/regression.sh` in the same commit — but first check
-   whether a gate already owns the subject and can take another arm. A new gate file forces a
-   `docs/gatecount_build.py` regeneration that collides with every other open lane; a new arm
-   in an existing gate costs nothing outside its own file.
-5. **Never edit the published gate count by hand.** After adding a gate — and again after any rebase
-   or merge that moved the `for _g in …; do` loop — run `python3 docs/gatecount_build.py`. See below.
+4. Add any new `test/*.sh` gate to `test/regression.sh` in the same commit, as its own `    name \` line
+   at its byte-sorted place in the absorb list (`test/manifestcheck.sh` fails a gate file that no list
+   registers, a listed name with no file, and an unsorted list) — but first check whether a gate already
+   owns the subject and can take another arm, which costs nothing outside its own file.
+5. **Never edit the published gate count by hand.** After adding a gate, run `python3 docs/gatecount_build.py`.
+   To bring main into your branch, run `scripts/merge_main.sh`: it settles the absorb list (including, once,
+   a branch still on the old one-line `for _g in …; do` list), count lines that differ only in a
+   generator-owned number, and the generated tables, then regenerates them. Anything else stops the merge
+   for you, including a hand-written number on a marked line; fix it, `git add`, and run
+   `scripts/merge_main.sh --continue` (not a plain `git commit`, which skips the generators). `--continue`
+   refuses staged conflict markers and an unregistered gate file. Exit 3 lists binary-pinned files to
+   regenerate after a build; the list is also in the merge commit message. `test/mergemaincheck.sh` pins
+   each of these. See below.
 6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
 7. Keep formatting churn out of logic commits.
@@ -1068,9 +1075,9 @@ round. Each takes minutes to check; each miss costs a review round.
 `test/gatecountcheck.sh`. Hand-writing it is not a style preference. Two lanes that each add one gate
 both write N+1, and git auto-merges that **identical** text clean in all three files — only the
 `for _g in …` loop conflicts, so the loop is the only place anyone is forced to look. That collided
-seven times in one night on 2026-09-10. The merge recipe is therefore: **union the `for _g in …` sets,
-run the generator (no `--check`, so it WRITES), then `--check` it. Never hand-write the number and
-never trust the clean auto-merge of the three published files.**
+seven times in one night on 2026-09-10. The merge recipe is therefore: **union the absorb-list lines,
+run the generator (no `--check`, so it WRITES), then `--check` it** — `scripts/merge_main.sh` does all
+three. Never hand-write the number and never trust the clean auto-merge of the three published files.
 
 WHAT CATCHES A BOTCHED RESOLUTION, measured on this tree 2026-09-13 rather than assumed, because the two
 ways to botch it are caught by *different* gates and neither is caught by both:
