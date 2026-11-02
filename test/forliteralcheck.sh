@@ -43,6 +43,7 @@
 #          an unquoted/backticked/single-quoted 3+ word message with an error/notification/message word, read from the --for text: whole-key rows, longer= counts, frag=1, near misses
 #   T28-T37 (fix round 2; RED on 5bbee3cb where [P]): tbl= is an allowlist of proven openers per language; a closer ends the opener walk; read= and <lit_capped> say the rank cap; table rows first
 #   T38, T38b (fix round 3): a call in a list a function builds, and an enum struct variant, are no table rows (they killed two surviving mutants)
+#   T22f (fix round 3, C4): two elements past 39,200 B; the third anchor is counted, never printed (killed the byte-cap mutant)
 #   T23-T27, T24g-h (fix round; RED on e2df59ee where [P]): natural wording near `add a new argument to run_it` prints no block, a statement in a function body carries no tbl=, the capped note is true, no silent anchor
 #   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
 #          add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names; near misses keep the answer byte-identical
@@ -753,6 +754,29 @@ else no "T22c byte cap: $CAPJ"; fi
 if has "$A" '<lit_capped scanned="2" skipped="1"' && has "$A" 'next="--grep=cap_anchor_three"'; then ok "T22d an anchor with sites and no room left is counted by <lit_capped> with next="
 else no "T22d later anchor unsaid: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$A" | cut -c1-200 | tr '\n' ' ' )"; fi
 if printf '%s' "$A" | xmllint --noout - 2>/dev/null; then ok "T22e the capped answer is well-formed"; else no "T22e not well-formed"; fi
+# T22f (fix round 3, C4; killed the byte-cap mutant T22c let survive): an element's own tag may take two elements past 39,200 B (cap - kForTableElementBytes),
+# where cap - used - 800 would wrap. The pre-check must count the third anchor in <lit_capped>, never print it. The fixture is tuned by path depth until
+# the first two elements land in the window; landing nowhere is red, so the arm cannot pass blind.
+T22F=""
+for P in 888 896 904 912 920; do
+  BW="$TMP/bwin$P"; mkdir -p "$BW"
+  python3 -I - "$BW" "$P" <<'PY'
+import os,sys
+d,P=sys.argv[1],int(sys.argv[2]); ld=d+"/"+"/".join(["q"*200]*(P//200))+("/"+"r"*(P%200) if P%200 else ""); os.makedirs(ld,exist_ok=True)
+open(ld+"/a.go","w").write("package a\n\nvar TA = map[string]int{\n"+"".join('\t"%s_%d": bc_one,\n'%("a"*300,i) for i in range(40))+"}\n")
+open(d+"/b.go","w").write("package a\n\nvar TB = map[string]int{\n"+"".join('\t"k%d": bc_two,\n'%i for i in range(400))+"}\n")
+open(d+"/c.go","w").write("package a\n\nvar TC = map[string]int{\n\t\"k1\": bc_three,\n\t\"k2\": bc_three,\n}\n")
+open(d+"/s.go","w").write("package a\n\nfunc bc_one() {}\nfunc bc_two() {}\nfunc bc_three() {}\n")
+PY
+  A="$( cd "$BW" || exit 1; "$BIN" "$BW" --no-cache '--for=register `bc_one` `bc_two` `bc_three`' </dev/null 2>/dev/null )"
+  U="$( python3 -I -c '
+import sys,re
+s=sys.stdin.read(); el=[s.find("</lit>",m.start())+6-m.start() for m in re.finditer(r"<lit s=\"bc_(?:one|two)\"",s)]
+print(sum(el) if len(el)==2 else 0)' <<<"$A" )"
+  if [ "${U:-0}" -gt 39200 ]; then T22F="$P $U"; break; fi
+done
+if [ -n "$T22F" ] && has "$A" '<lit_capped scanned="2" skipped="1"' && has "$A" 'next="--grep=bc_three"' && ! has "$A" '<lit s="bc_three"'; then ok "T22f two elements at ${T22F#* } B (past 39,200): the third anchor is counted in <lit_capped>, not printed"
+else no "T22f byte-cap window: landed=${T22F:-none} $( grep -o '<lit[_a-z]* s=\"[^\"]*\"\|<lit_capped[^>]*>' <<<"$A" | tr '\n' ' ' )"; fi
 
 # ── T23-T29 (lane TABLE-CONST V2, fix round; [P] RED on e2df59ee): natural task wording, statements in function bodies, the capped note, silent anchors ──
 NF="$TMP/nfix"; mkdir -p "$NF/py" "$NF/src" "$NF/rs" "$NF/go"
