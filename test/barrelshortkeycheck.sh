@@ -47,6 +47,9 @@
 #   C7  `this.leaf` / `self.leaf` in a CUED task print no block (without the guard the qualifier `this` would be kept unproven), and
 #       `--for=this.formatDate` prints no <shortkey>. Positive twin: C4.
 #   C8  a namespace re-export cycle (a.ts `export * as B from './b'`, b.ts `export * as A from './a'`) ends: total="2", no capped=.
+#   C10 a STORED owner scope (Python `class Cls` in m3.py): `m3.Cls.parseRow` is exact q_by="scope" (the scope and the stem prove
+#       both segments); `wrong.Cls.parseRow` is q_unmatched; C++ `n3::Cls::runTask` is never exact (the index stores the innermost
+#       owner only, so the namespace segment stays unproven: a disclosed floor, never a wrong exact).
 #   C9  the literal rung's shapes type (Python `type X =`), define (`#define x 4`), const (a local `const x =`, in= its function)
 #       and assign (`x = 3` at column 0, Lua); the row cap (8 lines: total="8" shown="6", 6 rows); the exact leaf's body cut
 #       (truncated="1" past 8192 bytes); floor="1" when a file the scan must read is unreadable (SKIP when chmod cannot hide it).
@@ -242,6 +245,18 @@ run "$F1" "$TMP/c7c.xml" "--for=this.formatDate" && { if grep -q '<shortkey' "$T
 run "$F2" "$TMP/c8.xml" "--for=B.cleaf" && {
 has     "$TMP/c8.xml" "C8 namespace cycle ends with both hops"     '<def n="cleaf" p="cyc/b.ts" l="1" q="B" total="2"/>'
 hasnt   "$TMP/c8.xml" "C8 no false capped="                         'capped="1"'
+}
+
+SC="$TMP/sc"; mkdir -p "$SC/py" "$SC/cpp"
+for i in 1 2 3 4 5 6 7; do
+    printf 'class Cls:\n    def parseRow(self, x):\n        return x * %s\n' "$i" >"$SC/py/m$i.py"
+    printf 'namespace n%s {\nstruct Cls {\n  int runTask(int a);\n};\nint Cls::runTask(int a) { return a * %s; }\n}\n' "$i" "$i" >"$SC/cpp/k$i.cpp"
+done
+run "$SC" "$TMP/c10.xml" "--for=m3.Cls.parseRow" && skhas "$TMP/c10.xml" "C10 stored scope + stem: exact" 'q="m3.Cls" kept="1" of="7" exact="1"><d n="Cls.parseRow" t="fn" p="py/m3.py" l="2" q_by="scope"/>'
+run "$SC" "$TMP/c10b.xml" "--for=wrong.Cls.parseRow" && skhas "$TMP/c10b.xml" "C10 stored scope, a wrong first segment" 'q="wrong.Cls" kept="0" of="7" exact="0" q_unmatched="1">'
+run "$SC" "$TMP/c10c.xml" "--for=n3::Cls::runTask" && {
+skhas   "$TMP/c10c.xml" "C10 C++ namespace segment unproven: q_unmatched" 'q="n3::Cls" kept="0" of="14" exact="0" q_unmatched="1">'
+skhasnt "$TMP/c10c.xml" "C10 C++ never exact"                       'exact="1"'
 }
 
 L="$TMP/lit"; mkdir -p "$L/src" "$L/c" "$L/py" "$L/ts"
