@@ -907,6 +907,7 @@ for _g in \
     rubyscopecheck \
     rubysettercheck \
     rubytypedrecvcheck \
+    rule3memberguardcheck \
     runhintcheck \
     runtracecheck \
     rustanccheck \
