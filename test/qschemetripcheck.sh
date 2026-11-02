@@ -34,6 +34,9 @@ SRC="$ROOT/src/quality.h"
 ING="$ROOT/src/ingest_cache.h"   # extraction-identity constants moved here (2026-08-29 ingest.cpp section split); the hashed CONCAT label keeps its historical spelling so the pin holds
 PIN="$ROOT/test/qschemetrip.hash"
 # RE-PIN LOG (the pin is a bare hash, so its justification has to live here).
+# 2026-11-02, feat/ruby-rails-lookup R4: RE-PINNED ONCE with UPDATE_GOLDEN=1 (90511afb… -> 567a178c…). Watched text:
+#   kParserVer 273 -> 275 (rich 276; 274 is 273's rich tag) and quality.h's kIngestParserVerMirror with it; kCacheVersion stays 49
+#   (no record layout change) and kQSnapCacheScheme stays 24: no watched quality.h function moved. Placeholders: the train renumbers.
 # 2026-10-31, feat/ruby-rails-lookup R1: RE-PINNED ONCE with UPDATE_GOLDEN=1 (189bc4ef… -> 90511afb…). Watched text:
 #   kParserVer 271 -> 273 (rich 274; 272 is main's rich tag) and kCacheVersion 48 -> 49 (LocalBindKind RubyGroupSelf and
 #   RubyGroupMixin appended), quality.h's two kIngest*Mirror constants with them. kQSnapCacheScheme stays 24: no watched quality.h

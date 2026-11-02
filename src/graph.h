@@ -7,6 +7,7 @@
 #include "elixir_resolve.h"      // lexical module/name/arity resolution; reuses cached Binding records
 #include "ruby_groupself.h"      // an RSpec example group's self: its blocks and the modules it mixes in (RubyTopSelf reads it)
 #include "ruby_frameworks.h"     // the Rails rows of the builtin-method gate: which framework tables a tree joins
+#include "ruby_receivers.h"      // R4: a relation chain's links and the via that spells it (RubyTypedReceivers, RubyClassObjects::of)
 #include "filter.h"              // isTestPath — for the Q2 tested= post-pass
 #include "pageview.h"            // LB-H: kImportReachRowCap — the import tier's display cap lives with the rest of the truncation vocabulary
 #include "nextverb.h"            // cut-fix E: nextFlag / nextAttrXml — the import tier's importers_next=
@@ -4298,6 +4299,12 @@ inline RubyTopSelf buildRubyTopSelf( const IngestResult& ing, const RubySelfReac
 // (`def expect`) where an example group can reach it types nothing from that name (rubyDefinedBuilders). RSpec's matchers
 // are such targets too: a call on a chain rooted at `receive( :m )` or `change { }` is RSpec's. A Jbuilder template's `json` is another (model.h kJbuilderTemplate): every
 // call on it is a key the class's method_missing writes (test/rubyrakejbuildercheck.sh).
+// More sources build one (test/rubyrecvevidencecheck.sh; parser version 275 — ingest_binds.h's R4 note): an instance
+// variable every assignment in its class body builds alike, a method of the body whose value is one thing, and an Active
+// Record relation chain (`User.where( … ).order( … )`, src/ruby_receivers.h). A relation is no instance: classOf leaves it
+// to RUBY CLASS OBJECTS below, which answers it as its class object — a scope or class method from the class side, else
+// Active Record's own query method, outside the tree — and a finder at a chain's end (`….first`) builds an instance as
+// above. The guard reads every link: a class whose lookup defines `where` says what its chains build.
 //
 // RUBY CLASS OBJECTS (test/rubyclassrecvcheck.sh; parser version 137). A call whose receiver is a constant —
 // `Report.generate`, `User.where( … )`, `JSON.parse( s )` — is sent to the class object, and Ruby's lookup on it answers
@@ -4495,7 +4502,7 @@ struct RubyClassObjects
     mutable HashMap<std::string_view, char>                sideSeen;          // a constant → the sides the walk met it on, a bit each
 
     RubyClassObject                 of( const Reference& r ) const;                                     // the class a constant names
-    RubyClassObject                 ofIndexed( const Reference& r ) const;
+    RubyClassObject                 ofIndexed( const Reference& r, std::string_view written ) const;
     const rw::SmallVec<NodeId, 2>*  lookup( const Reference& r, const RubyClassObject& object ) const;   // what answers a call on it
     const rw::SmallVec<NodeId, 2>*  definerLookup( const RubyClassObject& object, const Reference& asked, bool classObject ) const;
     const rw::SmallVec<NodeId, 2>*  rootLookup( const Reference& r ) const;                             // a reopened root's
@@ -4542,6 +4549,8 @@ struct RubyTypedReceivers
     mutable rw::SmallVec<NodeId, 2>                       rootHits;
 
     const std::string*             classOf( const Reference& r ) const;                          // r's receiver's class, when trusted
+    std::string_view               relationOf( const Reference& r ) const;                       // the class a trusted relation is of, as written
+    const std::string*             trustedClass( const RubyTypedRecv& typed ) const;             // the class `typed` names, when trusted
     bool                           outOfTreeTarget( const Reference& r ) const;                  // RSpec's, of a class the tree never opens
     const rw::SmallVec<NodeId, 2>* lookup( const Reference& r, const std::string& cls ) const;   // what lookup on `cls` reaches
     const rw::SmallVec<NodeId, 2>* rootLookup( const Reference& r ) const;                       // what a reopened instance root defines
@@ -4565,22 +4574,40 @@ inline const RspecTarget* rubyRspecTarget( const RubyTypedRecv& typed ) noexcept
     return typed.factory ? nullptr : rspecTargetOf( rubyTypedWritten( typed ), typed.via );
 }
 
-// the class a Ruby reference's receiver was built as, when the tree can trust it (the note above); nullptr otherwise
+// the class a Ruby reference's receiver was built as, when the tree can trust it (the note above); nullptr otherwise, and for
+// a relation (src/ruby_receivers.h, parser version 275), which answers from its class's class side: RubyClassObjects::of
+// reads that one (relationOf)
 inline const std::string* RubyTypedReceivers::classOf( const Reference& r ) const
 {
     const std::optional<RubyTypedRecv> typed = rubyTypedRecvOf( r );
-    if( !typed || builderShadowed( rubyRspecTarget( *typed ) ) )
+    return typed && ( typed->factory || !rubyViaIsRelation( typed->via ) ) ? trustedClass( *typed ) : nullptr;
+}
+
+// the class constant a relation-built receiver is of, as written (`User` for `User.where( … ).order( … )`), when the tree
+// can trust it; empty otherwise
+inline std::string_view RubyTypedReceivers::relationOf( const Reference& r ) const
+{
+    const std::optional<RubyTypedRecv> typed = rubyTypedRecvOf( r );
+    const bool relation = typed && !typed->factory && rubyViaIsRelation( typed->via );
+    return relation && trustedClass( *typed ) != nullptr ? rubyTypedWritten( *typed ) : std::string_view {};
+}
+
+// the class `typed` names — a class the tree defines, a qualified one only where the tree opens its path — unless a class in
+// its lookup defines a method that built it: any link of a relation chain's via (src/ruby_receivers.h) included
+inline const std::string* RubyTypedReceivers::trustedClass( const RubyTypedRecv& typed ) const
+{
+    if( builderShadowed( rubyRspecTarget( typed ) ) )
     {
         return nullptr;
     }
-    const std::string_view written = rubyTypedWritten( *typed );
-    const std::size_t      cut     = typed->factory ? std::string_view::npos : written.rfind( "::" );
+    const std::string_view written = rubyTypedWritten( typed );
+    const std::size_t      cut     = typed.factory ? std::string_view::npos : written.rfind( "::" );
     if( cut != std::string_view::npos && openedPaths.find( std::string( written ) ) == openedPaths.end() )
     {
         return nullptr;   // a qualified constant whose path the tree never opens: not the in-tree namesake
     }
-    const auto        factory = typed->factory ? factoryClass.find( std::string( written ) ) : factoryClass.end();
-    const std::string name    = !typed->factory ? std::string( written.substr( cut == std::string_view::npos ? 0 : cut + 2 ) )
+    const auto        factory = typed.factory ? factoryClass.find( std::string( written ) ) : factoryClass.end();
+    const std::string name    = !typed.factory ? std::string( written.substr( cut == std::string_view::npos ? 0 : cut + 2 ) )
                               : factory != factoryClass.end() ? factory->second : std::string {};
     const auto        cls     = reach.classNames.find( name );
     if( name.empty() || cls == reach.classNames.end() )
@@ -4589,9 +4616,10 @@ inline const std::string* RubyTypedReceivers::classOf( const Reference& r ) cons
     }
     for( const std::string& a : reach.ancestorsOf( cls->first ) )
     {
-        if( !typed->factory && narrower.definitionsIn( a, typed->via ) != nullptr )
+        const auto defines = [ & ]( std::string_view link ) { return narrower.definitionsIn( a, link ) != nullptr; };
+        if( !typed.factory && rubyAnyViaLink( typed.via, defines ) )
         {
-            return nullptr;   // the class says how it is built: `def self.find` may return anything
+            return nullptr;   // the class says how it is built: `def self.find` or `def self.where` may return anything
         }
     }
     return &cls->first;
@@ -4655,7 +4683,10 @@ inline std::string_view rubyConstantReceiver( const Reference& r ) noexcept
 // constant the tree assigns: a value whose class nothing types.
 inline RubyClassObject RubyClassObjects::of( const Reference& r ) const
 {
-    const std::string_view written = rubyConstantReceiver( r );
+    // a constant receiver, or a relation the code builds of a class (parser version 275), which Active Record answers from
+    // that class's class side: a scope, a class method — and otherwise its own query method, outside the tree
+    const std::string_view constant = rubyConstantReceiver( r );
+    const std::string_view written  = constant.empty() ? typed.relationOf( r ) : constant;
     if( written.empty() )
     {
         return {};
@@ -4668,7 +4699,8 @@ inline RubyClassObject RubyClassObjects::of( const Reference& r ) const
     }
     if( !bases.ix.opensByFile.empty() )
     {
-        return ofIndexed( r );
+        return ofIndexed( r, !constant.empty() ? ( r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName ) )
+                                               : std::string_view( r.memberCtor ) );
     }
     const auto cls = typed.reach.classNames.find( name );
     if( cls != typed.reach.classNames.end() && ( cut == std::string_view::npos || pathOpened( written ) ) )
@@ -4678,12 +4710,12 @@ inline RubyClassObject RubyClassObjects::of( const Reference& r ) const
     return { nullptr, {}, true };
 }
 
-// The class object by fully-qualified constant (the receiver as written, or its path — Reference::fieldName — read from the
-// call site by fqnOfWritten), keyed beside it by its final segment as RubySelfReach keys
+// The class object by fully-qualified constant (`written`: the receiver as written or its path — Reference::fieldName — or a
+// relation's class, read from the call site by fqnOfWritten), keyed beside it by its final segment as RubySelfReach keys
 // every class; external when the constant resolves to nothing the tree opens.
-inline RubyClassObject RubyClassObjects::ofIndexed( const Reference& r ) const
+inline RubyClassObject RubyClassObjects::ofIndexed( const Reference& r, std::string_view written ) const
 {
-    std::string       fqn  = fqnOfWritten( r, r.fieldName.empty() ? std::string_view( r.recvVar ) : std::string_view( r.fieldName ) );
+    std::string       fqn  = fqnOfWritten( r, written );
     const std::size_t last = fqn.rfind( "::" );
     const auto        cls  = fqn.empty() ? typed.reach.classNames.end() : typed.reach.classNames.find( fqn.substr( last == std::string::npos ? 0 : last + 2 ) );
     return cls != typed.reach.classNames.end() ? RubyClassObject { &cls->first, std::move( fqn ), false } : RubyClassObject { nullptr, {}, true };
@@ -5172,10 +5204,20 @@ inline RubyCut RubyClassObjects::reachableOnSide( const RubyTopSelf& top, const 
     return cut || out.size() < before ? RubyCut::Cut : RubyCut::Unchanged;
 }
 
+// Does an Active Record relation answer `name` itself (externalnames.h kRubyActiveRecordRelationMethodNames)? Then the call
+// never reaches its model's class side: `User.where( … ).find_each` is the relation's, whatever User defines.
+inline bool rubyRelationAnswers( std::string_view name ) noexcept
+{
+    return std::binary_search( std::begin( externalnames::kRubyActiveRecordRelationMethodNames ),
+                               std::end( externalnames::kRubyActiveRecordRelationMethodNames ), name, sortutil::svLess );
+}
+
 // What a call reaches on a receiver whose every answer the tree knows: one of RSpec's targets or a template's `json`, which
 // only a reopened instance root answers (RubyTypedReceivers), and a class object, which its lookup answers
-// (RubyClassObjects). Not closed for any other receiver, nor for a class object whose `class << self` delegates the name,
-// nor for one whose lookup misses it where a method_missing may answer: Ruby calls that only on a miss.
+// (RubyClassObjects) — a relation the code builds of a class too, except for a name the relation answers itself
+// (rubyRelationAnswers: Active Record's, outside the tree). Not closed for any other receiver, nor for a class object whose
+// `class << self` delegates the name, nor for one whose lookup misses it where a method_missing may answer: Ruby calls that
+// only on a miss.
 inline RubyClosedLookup rubyClosedLookup( const Reference& r, const RubyTypedReceivers& typed, const RubyClassObjects& classes )
 {
     if( typed.outOfTreeTarget( r ) )
@@ -5190,6 +5232,10 @@ inline RubyClosedLookup rubyClosedLookup( const Reference& r, const RubyTypedRec
     if( object.cls == nullptr || classes.delegates( object, r.calleeName ) )
     {
         return {};
+    }
+    if( rubyConstantReceiver( r ).empty() && rubyRelationAnswers( r.calleeName ) )
+    {
+        return { true, nullptr };   // a relation (no constant receiver: `of` read a typed one) runs its own find_each, count, map
     }
     const rw::SmallVec<NodeId, 2>* hit = classes.lookup( r, object );
     if( hit == nullptr && classes.missingAnswers( object ) )

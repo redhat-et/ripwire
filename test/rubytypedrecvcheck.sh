@@ -28,8 +28,9 @@
 #       built that way is untyped.
 #   (c) a local assigned any other shape anywhere in its scope, or bound as a parameter or block parameter there, is
 #       untyped everywhere in that scope — the rule reads no control flow.
-#   (d) instance variables, method return values, `x.class`, and a `let` defined in a shared context in another file are
-#       not typed: those calls bind by name as before.
+#   (d) `x.class` and a `let` defined in a shared context in another file are not typed: those calls bind by name as before.
+#       Instance variables and method return values were here too; parser version 275 types them
+#       (test/rubyrecvevidencecheck.sh), and the two arms that pinned the gap now assert it is closed.
 #   (e) a class whose lookup can leave it (a delegator, `method_missing`, the delegation DSL — rubyreachcheck floor (a)/(b))
 #       refuses nothing: its typed calls bind by name as before.
 #   (f) two factories sharing a name in different files, with different classes, type nothing.
@@ -458,8 +459,8 @@ misses  Client::get              $S qualified_out "floor (a): the tree opens no 
 misses  Other::fetch             $S alias_floor   "floor (g): Client's fetch is an alias_method, which the tree indexes as no def — refused, not Other#fetch"
 reaches User::title_line         $S delegator     "floor (e): UserPresenter < SimpleDelegator forwards what it lacks"
 misses  Client::get              $S block_param   "floor (c): a block parameter c makes c untyped in its scope"
-misses  Client::get              $S ivar          "floor (d): an instance variable is not typed"
-misses  Client::get              $S return        "floor (d): a method's return value is not typed"
+reaches Client::get              $S ivar          "floor (d) lifted (rubyrecvevidencecheck): every assignment to @client in the body builds a Client"
+reaches Client::get              $S return        "floor (d) lifted (rubyrecvevidencecheck): def client returns Client.new"
 reaches User::title_line         $U let_untyped   "a let whose block builds nothing typed binds by name as before"
 reaches Post::email              $U let_twin_factory "floor (f): factory :twin names User in one file and Admin in another — untyped, binds by name"
 reaches User::title_line         $P shared_let    "floor (d): a shared context's let is not seen in the including file — binds by name as before"

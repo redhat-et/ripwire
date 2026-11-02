@@ -787,7 +787,8 @@ inline void rubyTypeReceiver( RawRef& ref, std::string_view type, std::string_vi
 // `described_class.new`. RubyBareCallWalk reads all of it on the walk it already makes, beside the locals it tracks, and
 // typeReceivers writes each type into its call reference (rubyTypeReceiver above; model.h rubyTypedRecvOf). Floors (test/rubytypedrecvcheck.sh):
 // control flow is not read (one binding of another shape anywhere in the scope, a parameter or a block parameter
-// included, leaves the local untyped); instance variables, return values and a shared context's lets are not typed.
+// included, leaves the local untyped); a shared context's lets are not typed. Instance variables and a method's value are
+// read since parser version 275 (the R4 note below, test/rubyrecvevidencecheck.sh).
 // RSpec's own builders are read the same way (test/rubyrspectargetcheck.sh, parser version 133): inside an example
 // group a receiver-less `expect( v )`, `allow( v )`, `expect_any_instance_of( K )`, `allow_any_instance_of( K )` and a
 // bare `is_expected` build one of RSpec's target classes (model.h kRspecTargets; `expect { … }` a BlockExpectationTarget),
@@ -816,8 +817,9 @@ struct RubyValueType
 // redefines the name. The walk keeps both per frame, so neither costs a climb up the tree.
 struct RubyValueSite
 {
-    bool             inGroup = false;
-    std::string_view described;
+    bool                     inGroup = false;
+    std::string_view         described;
+    std::deque<std::string>* vias = nullptr;   // where a relation chain's via is spelled (src/ruby_receivers.h); none: no chain is read
 };
 
 // What a FactoryBot build `v` to `m` builds — its factory, named by its first symbol argument — when `m` is a build
@@ -862,9 +864,42 @@ inline RubyValueType rubyMatcherChainType( TSNode v, std::string_view src )
     return {};
 }
 
+// What `m` on `recv` builds when `recv` is a chain of relation links rooted at a constant — `User.where( … ).order( … )`
+// (src/ruby_receivers.h, parser version 275): a relation of that class for another link, an instance for a finder; the
+// via spells every link from the constant outward, into `vias` (a deque: the strings keep their addresses). Untyped for
+// any other receiver, and past kRubyRelationChainLinks links.
+inline RubyValueType rubyRelationChainType( TSNode recv, std::string_view m, std::string_view src, std::deque<std::string>& vias )
+{
+    std::array<std::string_view, kRubyRelationChainLinks> links {};
+    std::size_t                                           count = 0;
+    for( TSNode link = recv; count < links.size() && !ts_node_is_null( link ) && kindIs( ts_node_type( link ), "call" ); )
+    {
+        const std::string_view name = fieldChildTextOfKind( link, NodeField::Method, "identifier", src );
+        const TSNode           on   = fieldChild( link, NodeField::Receiver );
+        if( !rubyIsRelationLink( name ) || ts_node_is_null( on ) )
+        {
+            return {};
+        }
+        links[ count++ ] = name;
+        if( isRubyConstantNode( on ) )
+        {
+            std::string& via = vias.emplace_back();
+            for( std::size_t i = count; i > 0; --i )
+            {
+                via.append( links[ i - 1 ] ).push_back( kRubyViaSeparator );
+            }
+            via.append( m );
+            return RubyValueType { pattern::nodeText( on, src ), via, false };
+        }
+        link = on;
+    }
+    return {};
+}
+
 // What a call `v` to `m` on `recv` builds, read at `site`: a FactoryBot build on `FactoryBot`, a finder on any other
 // constant — the constant AS WRITTEN (`OpenSSL::Cipher`): graph.h reads a qualified one only when the tree opens that
-// path — `described_class.new`, or a link of a matcher chain in an example group.
+// path — a relation link on a constant or on a relation chain (parser version 275), `described_class.new`, or a link of a
+// matcher chain in an example group.
 inline RubyValueType rubyReceiverBuildType( TSNode v, TSNode recv, std::string_view m, std::string_view src, const RubyValueSite& site )
 {
     const std::string_view on = isRubyConstantNode( recv ) ? rubyFinalConstant( recv, src ) : std::string_view {};
@@ -872,10 +907,17 @@ inline RubyValueType rubyReceiverBuildType( TSNode v, TSNode recv, std::string_v
     {
         return rubyFactoryBuildType( v, m, src );
     }
+    const bool finder = std::ranges::find( kRubyTypedFinders, m ) != std::end( kRubyTypedFinders );
     if( !on.empty() )
     {
-        const bool finder = std::ranges::find( kRubyTypedFinders, m ) != std::end( kRubyTypedFinders );
-        return finder ? RubyValueType { pattern::nodeText( recv, src ), m, false } : RubyValueType {};
+        return finder || rubyIsRelationLink( m ) ? RubyValueType { pattern::nodeText( recv, src ), m, false } : RubyValueType {};
+    }
+    if( ( finder || rubyIsRelationLink( m ) ) && site.vias != nullptr )
+    {
+        if( const RubyValueType chained = rubyRelationChainType( recv, m, src, *site.vias ); !chained.type.empty() )
+        {
+            return chained;
+        }
     }
     const bool describedNew = m == "new" && kindIs( ts_node_type( recv ), "identifier" ) && pattern::nodeText( recv, src ) == "described_class";
     if( describedNew )
@@ -1051,15 +1093,54 @@ inline std::string_view subscriptOperatorName( TSNode access, const SubscriptOpe
 // whether the receiver is an (identifier) — the reference's NamedVar — or a value, and what it builds; for a local, the
 // scope and name whose binding types are read once the walk has seen every binding (`local` non-empty, `type` filled by
 // typeReceivers).
+// Where a typed site's type is read once the walk has seen the whole file: written in place, or what a local of one scope,
+// an instance variable of one class body or a method of one class body builds (the last two: parser version 275).
+enum class RubyTypedFrom : std::uint8_t { Value, Local, Ivar, Method };
+
 struct RubyTypedSite
 {
     std::uint32_t    callStart;
     std::string_view method;
     bool             identReceiver;
     RubyValueType    type;
-    std::uint32_t    wall;
-    std::string_view local;
+    std::uint32_t    wall;                          // the local's scope serial; the class body's for an ivar or a method
+    std::string_view local;                         // the local's, the ivar's (no `@`) or the method's name
+    RubyTypedFrom    from = RubyTypedFrom::Value;
 };
+
+// ─── More evidence for a receiver's type (docs/research/ruby-roadmap.md R4; test/rubyrecvevidencecheck.sh; parser version
+// 275). An instance variable and a method's return value are values a class body BUILDS. RubyBareCallWalk records, per class
+// or module body ("<class frame serial>#<name>"), what every assignment to an instance variable builds and what each method
+// returns, and types a receiver `@x` or a bare-word `x` (no local or let of the name: a call to self) read in an instance
+// method of that body by it, once the whole file is seen:
+//   * an instance variable: every assignment in an instance method of the body — `@x = C.new`, a finder, a relation,
+//     `@x ||= …`, another ivar's or a method's value — builds the same thing; `@x += …`, a multiple assignment, a rescued
+//     exception, an `attr_writer`/`attr_accessor` of the name (any caller may assign it) leave it untyped, and so does
+//     anything inside a block whose self is another object (`instance_eval` and kin, `Class.new do`);
+//   * a method: defined once in the body, directly (not in a block), with no parameters, no `return` and no rescue, and its
+//     last statement builds one thing — an endless `def store = Store.new`, `@x ||= C.new`, an ivar's value — or an
+//     `attr_reader`/`attr_accessor`/`attr` reads an ivar.
+// Floors (test/rubyrecvevidencecheck.sh): only the body in its own file is read — a subclass or a reopening elsewhere that
+// assigns the ivar or overrides the method is not seen; a class-level ivar (class body, singleton method) is never typed;
+// `instance_variable_set`, `for @x in …` and `define_method` are not read; a block parameter, and a local assigned from a
+// typed ivar or method, are not typed.
+struct RubyValueRef
+{
+    RubyValueType    type;                    // what it builds, written in place
+    std::string_view ivar;                    // or: the value of this instance variable of the same body (no `@`)
+    std::string_view method;                  // or: the value of this method of the same body
+    std::uint32_t    def  = 0xFFFFFFFFu;      // a method's frame serial: a `return` in it leaves it untyped
+    bool             tomb = false;            // two disagree, or one cannot be read: untyped
+    bool sameValue( const RubyValueRef& o ) const noexcept { return type == o.type && ivar == o.ivar && method == o.method && tomb == o.tomb; }
+};
+inline constexpr std::size_t kRubyValueRefHops = 4;   // `def a = @a`, `@a ||= b`, `def b = B.new`: a short chain, cut if it loops
+
+// What opened a frame of the walk (RubyBareCallWalk::frameKind_).
+enum class RubyFrameKind : std::uint8_t { File, Class, Module, SingletonClass, Def, SingletonDef, Block };
+
+// Is call `n`'s block run with another object as self (`instance_eval` and kin, `Class.new do`)? Defined in ingest_ruby.h,
+// which ingest.cpp includes after this fragment; the walk reads it for instance variables.
+inline bool rubyRebindsSelf( TSNode n, std::string_view src );
 
 // One `send`-family call naming its method by a literal symbol (RubyBareCallWalk::sendTargets): the call node's start
 // and method, and the symbol.
@@ -1093,13 +1174,23 @@ private:
         TSNode node;
         bool   naming;       // an identifier in a naming or binding position: it reads nothing
         bool   groupBlock;   // the block of an RSpec example-group call
+        bool   rebindBlock;  // the block of a call that runs it with another object as self
     };
     void visit( const Item& item, ChildCursor& cursor );
-    void enter( TSNode n, const char* t, RubyLocalRole role, bool groupBlock );
+    void enter( TSNode n, const char* t, RubyLocalRole role, bool groupBlock, bool rebindBlock );
     void bindGroupLets( TSNode block, bool groupBlock );
     void pushChildren( TSNode n, const char* t, ChildCursor& cursor );
     void emit( TSNode at, std::string_view name );
-    void noteFrame( bool groupBlock, TSNode block );
+    void noteFrame( bool groupBlock, TSNode block, RubyFrameKind frame, bool rebinds );
+    std::optional<std::uint32_t> instanceBody( bool directDef ) const;
+    RubyValueRef statementRef( TSNode v, bool allowWord );
+    RubyValueRef defValueOf( TSNode def );
+    void noteDefType( TSNode def );
+    void noteIvarAssignment( TSNode n );
+    void noteIvarTomb( TSNode ivar );
+    void noteAccessors( TSNode call );
+    void foldRef( HashMap<std::string, RubyValueRef>& table, std::uint32_t body, std::string_view name, const RubyValueRef& ref, bool unique );
+    RubyValueType resolveRef( std::uint32_t body, const RubyValueRef* ref );
     RubyValueSite valueSite() const;
     void noteLocalTypes( TSNode n, RubyLocalRole role );
     void noteLetType( TSNode letCall, std::string_view name );
@@ -1134,6 +1225,16 @@ private:
     HashMap<std::uint32_t, RubyValueType>   explicitSubjects_;
     std::vector<RubyTypedSite>              typedSites_;
     std::string                             key_;
+
+    // more receiver evidence (the R4 note above): per open frame depth what opened it and whether self there is another
+    // object's; per class body what each instance variable and each method builds; the methods holding a `return`; and the
+    // vias the relation chains spell
+    std::vector<RubyFrameKind>              frameKind_;
+    std::vector<char>                       frameRebinds_;
+    HashMap<std::string, RubyValueRef>      ivarTypes_;
+    HashMap<std::string, RubyValueRef>      defTypes_;
+    HashMap<std::uint32_t, char>            defReturns_;
+    mutable std::deque<std::string>         vias_;
 };
 
 inline void RubyBareCallWalk::run( TSNode root )
@@ -1141,8 +1242,8 @@ inline void RubyBareCallWalk::run( TSNode root )
     ChildCursor cursor( root );
     scopes_.push( ts_node_end_byte( root ), true, true, false );
     describedRedefined_ = rubyDefinesDescribedClassMethod( src_ );
-    noteFrame( false, root );
-    stack_.push_back( Item { root, false, false } );
+    noteFrame( false, root, RubyFrameKind::File, false );
+    stack_.push_back( Item { root, false, false, false } );
     while( !stack_.empty() )
     {
         const Item item = stack_.back();
@@ -1176,37 +1277,65 @@ inline void RubyBareCallWalk::visit( const Item& item, ChildCursor& cursor )
     {
         noteTypedCall( n );
         noteDeclaredCall( n );
+        noteAccessors( n );
     }
     else if( kindIs( t, "element_reference" ) )
     {
         noteTypedSubscript( n );
     }
+    else if( kindIs( t, "return" ) )
+    {
+        const std::size_t wall = scopes_.frames.back().wall;
+        if( frameKind_[ wall ] == RubyFrameKind::Def )
+        {
+            defReturns_.try_emplace( frameSerial_[ wall ], 1 );   // the def's value is not its last statement alone
+        }
+    }
+    else if( kindIs( t, "exception_variable" ) )
+    {
+        const TSNode ivar = ts_node_named_child_count( n ) > 0 ? ts_node_named_child( n, 0 ) : TSNode {};
+        if( !ts_node_is_null( ivar ) && kindIs( ts_node_type( ivar ), "instance_variable" ) )
+        {
+            noteIvarTomb( ivar );   // `rescue => @error`: an exception, whatever else assigns it
+        }
+    }
     binding_.clear();
     if( const std::optional<RubyLocalRole> role = rubyLocalRole( t ) )
     {
-        enter( n, t, *role, item.groupBlock );
+        enter( n, t, *role, item.groupBlock, item.rebindBlock );
     }
     pushChildren( n, t, cursor );
 }
 
 // a scope node opens its frame (and an example group's block binds its lets); a binding node binds its names
-inline void RubyBareCallWalk::enter( TSNode n, const char* t, RubyLocalRole role, bool groupBlock )
+inline void RubyBareCallWalk::enter( TSNode n, const char* t, RubyLocalRole role, bool groupBlock, bool rebindBlock )
 {
     if( role == RubyLocalRole::Wall || role == RubyLocalRole::Closure )
     {
         const bool closure = role == RubyLocalRole::Closure;
         scopes_.push( ts_node_end_byte( n ), !closure, kindIs( t, "class" ) || kindIs( t, "module" ) || kindIs( t, "singleton_class" ),
                       closure && ts_node_is_null( fieldChild( n, NodeField::Parameters ) ) );
-        noteFrame( groupBlock, n );
+        const RubyFrameKind kind = kindIs( t, "class" ) ? RubyFrameKind::Class : kindIs( t, "module" ) ? RubyFrameKind::Module
+                                 : kindIs( t, "singleton_class" ) ? RubyFrameKind::SingletonClass : kindIs( t, "method" ) ? RubyFrameKind::Def
+                                 : kindIs( t, "singleton_method" ) ? RubyFrameKind::SingletonDef : RubyFrameKind::Block;
+        noteFrame( groupBlock, n, kind, rebindBlock );
         if( closure && !kindIs( t, "lambda" ) )
         {
             bindGroupLets( n, groupBlock );
+        }
+        if( kind == RubyFrameKind::Def )
+        {
+            noteDefType( n );
         }
         return;
     }
     rubyForEachBinding( n, role, src_, [ & ]( TSNode c ) { binding_.push_back( c ); scopes_.bind( pattern::nodeText( c, src_ ), false ); },
                         [ & ]( std::string_view name ) { scopes_.bind( name, false ); } );
     noteLocalTypes( n, role );
+    if( kindIs( t, "assignment" ) || kindIs( t, "operator_assignment" ) )
+    {
+        noteIvarAssignment( n );
+    }
 }
 
 // every let the block's statements define, and `subject` when the block is an example group's
@@ -1230,13 +1359,16 @@ inline void RubyBareCallWalk::bindGroupLets( TSNode block, bool groupBlock )
 
 inline void RubyBareCallWalk::pushChildren( TSNode n, const char* t, ChildCursor& cursor )
 {
-    const TSNode groupBlock = kindIs( t, "call" ) ? rspecGroupBlock( n, src_ ) : TSNode {};
+    const bool   call        = kindIs( t, "call" );
+    const TSNode groupBlock  = call ? rspecGroupBlock( n, src_ ) : TSNode {};
+    const TSNode rebindBlock = call && rubyRebindsSelf( n, src_ ) ? rubyCallBlock( n ) : TSNode {};
     collectChildren( n, cursor.cur, kids_ );
     for( std::size_t i = kids_.size(); i > 0; --i )
     {
         const TSNode c      = kids_[ i - 1 ];
         const bool   naming = rubyNamingChild( n, t, c ) || std::ranges::any_of( binding_, [ & ]( TSNode b ) { return ts_node_eq( b, c ); } );
-        stack_.push_back( Item { c, naming, !ts_node_is_null( groupBlock ) && ts_node_eq( c, groupBlock ) } );
+        stack_.push_back( Item { c, naming, !ts_node_is_null( groupBlock ) && ts_node_eq( c, groupBlock ),
+                                 !ts_node_is_null( rebindBlock ) && ts_node_eq( c, rebindBlock ) } );
     }
 }
 
@@ -1253,7 +1385,7 @@ inline void RubyBareCallWalk::emit( TSNode at, std::string_view name )
 // in it — rspecDescribedClass's rule, kept per frame: an example group's block takes its group's constant argument, a
 // String or absent one passes the parent's through, any other argument and a shared group name none; any other frame
 // inherits its parent's
-inline void RubyBareCallWalk::noteFrame( bool groupBlock, TSNode block )
+inline void RubyBareCallWalk::noteFrame( bool groupBlock, TSNode block, RubyFrameKind frame, bool rebinds )
 {
     const std::size_t depth = scopes_.frames.size() - 1;
     if( frameSerial_.size() <= depth )
@@ -1261,7 +1393,13 @@ inline void RubyBareCallWalk::noteFrame( bool groupBlock, TSNode block )
         frameSerial_.resize( depth + 1 );
         frameInGroup_.resize( depth + 1 );
         frameDescribed_.resize( depth + 1 );
+        frameKind_.resize( depth + 1 );
+        frameRebinds_.resize( depth + 1 );
     }
+    // self is another object's in a block a rebinding call runs, and in every frame inside it — until a class body opens
+    const bool classBody   = frame == RubyFrameKind::Class || frame == RubyFrameKind::Module || frame == RubyFrameKind::SingletonClass;
+    frameKind_[ depth ]    = frame;
+    frameRebinds_[ depth ] = char( !classBody && ( rebinds || ( depth > 0 && frameRebinds_[ depth - 1 ] != 0 ) ) );
     const std::string_view parent = depth > 0 ? frameDescribed_[ depth - 1 ] : std::string_view {};
     const TSNode           group  = groupBlock ? ts_node_parent( block ) : TSNode {};
     const int              kind   = ts_node_is_null( group ) ? 0 : rspecGroupKind( group, src_ );
@@ -1277,7 +1415,7 @@ inline RubyValueSite RubyBareCallWalk::valueSite() const
 {
     const std::size_t top       = scopes_.frames.size() - 1;
     const bool        redefined = describedRedefined_ || scopes_.visible( "described_class" );
-    return RubyValueSite { frameInGroup_[ top ] != 0, redefined ? std::string_view {} : frameDescribed_[ top ] };
+    return RubyValueSite { frameInGroup_[ top ] != 0, redefined ? std::string_view {} : frameDescribed_[ top ], &vias_ };
 }
 
 inline const std::string& RubyBareCallWalk::typeKey( std::uint32_t frame, std::string_view name )
@@ -1361,13 +1499,27 @@ inline void RubyBareCallWalk::noteTypedSend( std::uint32_t at, TSNode recv, std:
         return;
     }
     const bool          ident = kindIs( ts_node_type( recv ), "identifier" );
+    if( kindIs( ts_node_type( recv ), "instance_variable" ) )
+    {
+        // `@x.m` in an instance method: what every assignment to @x in the class body builds (read at the end)
+        if( const std::optional<std::uint32_t> body = instanceBody( true ) )
+        {
+            typedSites_.push_back( RubyTypedSite { at, method, false, {}, *body, pattern::nodeText( recv, src_ ).substr( 1 ), RubyTypedFrom::Ivar } );
+        }
+        return;
+    }
     if( !ident || !scopes_.visible( pattern::nodeText( recv, src_ ) ) )
     {
-        // a value — or a bare word no local or let binds, which is a call on self (`is_expected`)
+        // a value — or a bare word no local or let binds, which is a call on self (`is_expected`; in an instance method, what
+        // the class body's method of that name returns, read at the end)
         const RubyValueType built = rubyValueType( recv, src_, valueSite() );
         if( !built.type.empty() )
         {
             typedSites_.push_back( RubyTypedSite { at, method, ident, built, 0, {} } );
+        }
+        else if( const std::optional<std::uint32_t> body = ident ? instanceBody( true ) : std::nullopt )
+        {
+            typedSites_.push_back( RubyTypedSite { at, method, true, {}, *body, pattern::nodeText( recv, src_ ), RubyTypedFrom::Method } );
         }
         return;
     }
@@ -1396,8 +1548,206 @@ inline void RubyBareCallWalk::noteNamedReceiver( std::uint32_t at, std::string_v
     const auto          found = table.find( typeKey( frame, name ) );
     if( found != table.end() && !found->second.type.empty() )
     {
-        typedSites_.push_back( RubyTypedSite { at, method, true, found->second, frame, local ? name : std::string_view {} } );
+        typedSites_.push_back( RubyTypedSite { at, method, true, found->second, frame, local ? name : std::string_view {},
+                                               local ? RubyTypedFrom::Local : RubyTypedFrom::Value } );
     }
+}
+
+// The class body an instance method at the walk's position belongs to — its frame serial — when the innermost wall is a def
+// in a class's or module's body (`directDef`: written directly in it, not inside a block such as a concern's `included do`)
+// and self is the instance there: no block on the way runs with another object as self. nullopt in a class body, a singleton
+// def, `class << self` and at the top level.
+inline std::optional<std::uint32_t> RubyBareCallWalk::instanceBody( bool directDef ) const
+{
+    const RubyLocalScopes::Frame& top    = scopes_.frames.back();
+    const std::size_t             def    = top.wall;
+    const std::size_t             body   = top.classWall;
+    const bool                    inside = frameKind_[ def ] == RubyFrameKind::Def && def > body && ( !directDef || def == body + 1 )
+                                        && ( frameKind_[ body ] == RubyFrameKind::Class || frameKind_[ body ] == RubyFrameKind::Module )
+                                        && frameRebinds_[ scopes_.frames.size() - 1 ] == 0;
+    return inside ? std::optional<std::uint32_t>( frameSerial_[ body ] ) : std::nullopt;
+}
+
+// What the statement `v` evaluates to, as an instance variable's or a method's value (the R4 note above): what it builds
+// (rubyValueType), the right side of the `@x = …` or `@x ||= …` it is, another instance variable's value, or — `allowWord`,
+// where the walk's locals are current — a bare word no local or let binds: self's method's value. Anything else: untyped.
+inline RubyValueRef RubyBareCallWalk::statementRef( TSNode v, bool allowWord )
+{
+    for( std::size_t hop = 0; !ts_node_is_null( v ) && hop < kRubyValueRefHops; ++hop )
+    {
+        const char*  t       = ts_node_type( v );
+        const bool   assigns = kindIs( t, "assignment" ) || ( kindIs( t, "operator_assignment" ) && nodeFieldText( v, NodeField::Operator, src_ ) == "||=" );
+        const TSNode left    = assigns ? fieldChild( v, NodeField::Left ) : TSNode {};
+        if( !ts_node_is_null( left ) && kindIs( ts_node_type( left ), "instance_variable" ) )
+        {
+            v = fieldChild( v, NodeField::Right );   // `@x ||= C.new` as the value: what C.new builds
+            continue;
+        }
+        if( kindIs( t, "instance_variable" ) )
+        {
+            return RubyValueRef { .ivar = pattern::nodeText( v, src_ ).substr( 1 ) };
+        }
+        const std::string_view word = kindIs( t, "identifier" ) ? pattern::nodeText( v, src_ ) : std::string_view {};
+        if( allowWord && !word.empty() && !scopes_.visible( word ) )
+        {
+            return RubyValueRef { .method = word };
+        }
+        const RubyValueType built = assigns ? RubyValueType {} : rubyValueType( v, src_, valueSite() );
+        return built.type.empty() ? RubyValueRef { .tomb = true } : RubyValueRef { .type = built };
+    }
+    return RubyValueRef { .tomb = true };
+}
+
+// What a def returns (the R4 note above): untyped with a parameter list or a rescue; else its last statement's value — the
+// body itself for an endless `def store = Store.new`. A `return` anywhere in it is read at the end (defReturns_).
+inline RubyValueRef RubyBareCallWalk::defValueOf( TSNode def )
+{
+    const TSNode body = fieldChild( def, NodeField::Body );
+    if( !ts_node_is_null( fieldChild( def, NodeField::Parameters ) ) || ts_node_is_null( body ) )
+    {
+        return RubyValueRef { .tomb = true };
+    }
+    if( !kindIs( ts_node_type( body ), "body_statement" ) )
+    {
+        return statementRef( body, false );
+    }
+    TSNode      last {};
+    bool        rescues = false;
+    ChildCursor cursor( body );   // O(children): a body is as wide as its comments (src/infra/tschildren.h)
+    forEachNamedChild( body, cursor.cur, [ & ]( TSNode c )
+    {
+        const char* ct = ts_node_type( c );
+        rescues        = rescues || kindIs( ct, "rescue" ) || kindIs( ct, "else" );
+        last           = kindIs( ct, "comment" ) || kindIs( ct, "ensure" ) ? last : c;
+        return true;
+    } );
+    return rescues ? RubyValueRef { .tomb = true } : statementRef( last, false );
+}
+
+// A def written directly in a class's or module's body — its frame is on top: what it returns, under its name.
+inline void RubyBareCallWalk::noteDefType( TSNode def )
+{
+    const std::string_view name = fieldChildTextOfKind( def, NodeField::Name, "identifier", src_ );
+    if( const std::optional<std::uint32_t> body = name.empty() ? std::nullopt : instanceBody( true ) )
+    {
+        RubyValueRef value = defValueOf( def );
+        value.def          = frameSerial_[ scopes_.frames.size() - 1 ];
+        foldRef( defTypes_, *body, name, value, true );
+    }
+}
+
+// An assignment in an instance method (the R4 note above): `@x = v` and `@x ||= v` fold what v builds into @x's record; any
+// other operator, and every instance variable a multiple assignment's left side writes, leave @x untyped. Read in any def of
+// the body, a block's included — a def a concern's `class_methods do` writes only makes the record more cautious.
+inline void RubyBareCallWalk::noteIvarAssignment( TSNode n )
+{
+    const TSNode                       left = fieldChild( n, NodeField::Left );
+    const std::optional<std::uint32_t> body = ts_node_is_null( left ) ? std::nullopt : instanceBody( false );
+    if( !body )
+    {
+        return;
+    }
+    if( kindIs( ts_node_type( left ), "instance_variable" ) )
+    {
+        const bool plain = kindIs( ts_node_type( n ), "assignment" ) || nodeFieldText( n, NodeField::Operator, src_ ) == "||=";
+        foldRef( ivarTypes_, *body, pattern::nodeText( left, src_ ).substr( 1 ),
+                 plain ? statementRef( fieldChild( n, NodeField::Right ), true ) : RubyValueRef { .tomb = true }, false );
+        return;
+    }
+    if( !kindIs( ts_node_type( left ), "left_assignment_list" ) )
+    {
+        return;
+    }
+    std::vector<TSNode> todo { left };   // `@a, (@b, *@c) = …`: an explicit stack, so a hostile nesting costs heap
+    while( !todo.empty() )
+    {
+        const TSNode c = todo.back();
+        todo.pop_back();
+        if( kindIs( ts_node_type( c ), "instance_variable" ) )
+        {
+            foldRef( ivarTypes_, *body, pattern::nodeText( c, src_ ).substr( 1 ), RubyValueRef { .tomb = true }, false );
+            continue;
+        }
+        ChildCursor cursor( c );
+        forEachNamedChild( c, cursor.cur, [ & ]( TSNode k ) { todo.push_back( k ); return true; } );
+    }
+}
+
+// An instance variable something other than an assignment writes in an instance method (`rescue => @error`): untyped.
+inline void RubyBareCallWalk::noteIvarTomb( TSNode ivar )
+{
+    if( const std::optional<std::uint32_t> body = instanceBody( false ) )
+    {
+        foldRef( ivarTypes_, *body, pattern::nodeText( ivar, src_ ).substr( 1 ), RubyValueRef { .tomb = true }, false );
+    }
+}
+
+// `attr_reader :x` (or `attr :x`, `attr_accessor :x`) written in a class's or module's body: a method x whose value is
+// @x's. `attr_writer :x` and `attr_accessor :x` let any caller assign @x, which then cannot be read.
+inline void RubyBareCallWalk::noteAccessors( TSNode call )
+{
+    const std::size_t top  = scopes_.frames.size() - 1;
+    const bool        body = scopes_.frames[ top ].classWall == top
+                          && ( frameKind_[ top ] == RubyFrameKind::Class || frameKind_[ top ] == RubyFrameKind::Module );
+    if( !body || !ts_node_is_null( fieldChild( call, NodeField::Receiver ) ) )
+    {
+        return;
+    }
+    const std::string_view m      = fieldChildTextOfKind( call, NodeField::Method, "identifier", src_ );
+    const bool             reader = m == "attr_reader" || m == "attr_accessor" || m == "attr";
+    const bool             writer = m == "attr_writer" || m == "attr_accessor";
+    const TSNode           args   = reader || writer ? fieldChild( call, NodeField::Arguments ) : TSNode {};
+    if( ts_node_is_null( args ) )
+    {
+        return;
+    }
+    ChildCursor cursor( args );
+    forEachNamedChild( args, cursor.cur, [ & ]( TSNode a )
+    {
+        const std::string_view name = kindIs( ts_node_type( a ), "simple_symbol" ) ? pattern::nodeText( a, src_ ).substr( 1 ) : std::string_view {};
+        if( !name.empty() && reader )
+        {
+            foldRef( defTypes_, frameSerial_[ top ], name, RubyValueRef { .ivar = name }, true );
+        }
+        if( !name.empty() && writer )
+        {
+            foldRef( ivarTypes_, frameSerial_[ top ], name, RubyValueRef { .tomb = true }, false );
+        }
+        return true;
+    } );
+}
+
+// Fold one record into `table` under the body's name: the first stands and an equal one keeps it; a different one — or,
+// where `unique`, any second one (a method defined twice, or both a def and an accessor) — leaves the name untyped.
+inline void RubyBareCallWalk::foldRef( HashMap<std::string, RubyValueRef>& table, std::uint32_t body, std::string_view name, const RubyValueRef& ref, bool unique )
+{
+    const auto [ it, inserted ] = table.try_emplace( typeKey( body, name ), ref );
+    if( !inserted && ( unique || !it->second.sameValue( ref ) ) )
+    {
+        it->second = RubyValueRef { .tomb = true };
+    }
+}
+
+// What a record builds, through the body's other instance variables and methods it names — at most kRubyValueRefHops, so a
+// loop (`def a = @a` with `@a ||= a`) ends untyped; a method holding a `return` is untyped.
+inline RubyValueType RubyBareCallWalk::resolveRef( std::uint32_t body, const RubyValueRef* ref )
+{
+    for( std::size_t hop = 0; ref != nullptr && !ref->tomb && hop < kRubyValueRefHops; ++hop )
+    {
+        if( defReturns_.find( ref->def ) != defReturns_.end() )
+        {
+            return {};
+        }
+        if( !ref->type.type.empty() )
+        {
+            return ref->type;
+        }
+        const bool  ivar  = !ref->ivar.empty();
+        const auto& table = ivar ? ivarTypes_ : defTypes_;
+        const auto  next  = table.find( typeKey( body, ivar ? ref->ivar : ref->method ) );
+        ref               = next == table.end() ? nullptr : &next->second;
+    }
+    return {};
 }
 
 // Each typed site's local read now that every binding is seen, then each written into the call reference the tags query
@@ -1407,10 +1757,16 @@ inline void RubyBareCallWalk::typeReceivers( std::size_t firstRef, std::size_t e
 {
     for( RubyTypedSite& site : typedSites_ )
     {
-        if( !site.local.empty() )
+        if( site.from == RubyTypedFrom::Local )
         {
             const auto it = localTypes_.find( typeKey( site.wall, site.local ) );
             site.type     = it == localTypes_.end() ? RubyValueType {} : it->second;
+        }
+        else if( site.from == RubyTypedFrom::Ivar || site.from == RubyTypedFrom::Method )
+        {
+            const auto& table = site.from == RubyTypedFrom::Ivar ? ivarTypes_ : defTypes_;
+            const auto  it    = table.find( typeKey( site.wall, site.local ) );
+            site.type         = resolveRef( site.wall, it == table.end() ? nullptr : &it->second );
         }
     }
     std::erase_if( typedSites_, []( const RubyTypedSite& site ) { return site.type.type.empty(); } );

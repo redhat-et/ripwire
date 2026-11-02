@@ -25,3 +25,4 @@ perlang	ingest_jsimports.h
 perlang	ingest_ruby.h
 perlang	ruby_groupself.h
 perlang	ruby_frameworks.h
+perlang	ruby_receivers.h

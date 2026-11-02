@@ -193,6 +193,20 @@ defines. R0 re-measures that on today's corpora.
 
 ### R4: more evidence for a receiver's type (M)
 
+**Status, 2026-11-02: done on `feat/ruby-rails-lookup`** (kParserVer placeholder 275, gate
+`test/rubyrecvevidencecheck.sh`, `changelog.d/ruby-receiver-evidence.md`). Sized first with Prism over both applications,
+joined to the census: the four sources below cover about 4% (app A) and 3% (app B) of the calls R2 left declined. Method
+parameters (2,931 and 2,321 declined sites), association chains (5,626 and 6,512) and lets FactoryBot does not build (1,988
+and 3,734) hold most of the rest. Neither application declares Sorbet signatures (17 `sig` blocks on A, none on B), so the
+optional source was dropped. R2's losses were already sampled wrong 20 of 20 and 19 of 20, so "recovering R2's recall cost"
+was a small target. What R4 adds is typed receivers: an ivar every assignment builds alike, a method whose value is one
+thing, and a relation chain answered from its model's class side. Measured against R2: app A 117 calls newly bound, 21
+retargeted, 61 bound to external and 803 declines to external; app B 38, 17, 19 and 871; ActiveRecord's `lib/` 29 newly
+bound and 20 retargeted. Every sampled category was right (20 of 20 or all of a smaller one). Measuring found one rule the
+first cut lacked: a relation answers ActiveRecord::Relation's own methods (`find_each`) before its class side. Floors: one
+class body in one file, block parameters, and locals copied from a typed ivar. R3's associations and scopes are the next
+recall, now that a relation and a typed instance can reach them.
+
 #373 types a receiver from a local constructor, a FactoryBot `let` and RSpec builders. The next sources, in measured
 order (R0 sizes them first):
 

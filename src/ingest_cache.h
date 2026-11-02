@@ -368,7 +368,12 @@ constexpr std::uint32_t kCacheVersion = 49;           // 49: feat/ruby-rails-loo
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 273;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 275;          // bump on any grammar/.scm/extraction change
+                                                      // 275 = 2026-11-02 (feat/ruby-rails-lookup R4): a Ruby call's receiver is typed
+                                                      //   by more evidence (ingest_binds.h's R4 note) — an instance variable, a method's value, an
+                                                      //   Active Record relation chain (memberVia spells the chain's links: "where.order.first").
+                                                      //   No record layout change: kCacheVersion stays 49. 275, not 274: 274 is 273's rich file
+                                                      //   tag. Rich file tag 276. The train renumbers.
                                                       // 273 = 2026-10-31 (feat/ruby-rails-lookup R1): a Ruby file's RSpec example
                                                       //   groups record LocalBindKind::RubyGroupSelf spans and RubyGroupMixin modules (two appended
                                                       //   kinds; ingest_ruby.h captureRubyExampleGroups). 273, not 272: 272 is main's rich file tag.
