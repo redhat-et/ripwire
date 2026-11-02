@@ -173,6 +173,42 @@ printf '%s' "$RDDEAD" | grep -q 'orphan_helper' \
     && ok "rust-drop: an ordinary orphan helper is still reported (negative control)" \
     || { no "rust-drop: orphan_helper not reported"; printf '%s\n' "$RDDEAD"; }
 
+# ── 2c) raw identifier r#drop, and a free fn named drop inside a module (issue #494 review) ─────────────────
+# `fn r#drop` is the same Drop::drop, and the extractor keeps the `r#` in the name, so it is exempt too. A free fn
+# named `drop` inside `mod m` is not a method: nothing invokes it at scope exit, so it must stay reported. Each is
+# checked by its file:line, because a row's sym alone cannot tell the module fn from the top-level one.
+RR="$WORK/rawdrop"; mkdir -p "$RR/src"
+( cd "$RR" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
+printf 'pub fn api() -> u32 { 2 }\n' > "$RR/src/lib.rs"
+( cd "$RR" && git add -A >/dev/null 2>&1 && git commit -qm base >/dev/null 2>&1 )
+cat > "$RR/src/lib.rs" <<'RS'
+pub fn api() -> u32 { 2 }
+
+struct Raw(u32);
+
+impl Drop for Raw {
+    fn r#drop(&mut self) { self.0 = 0; }
+}
+
+mod m {
+    pub fn drop() { }
+}
+
+fn orphan_raw_helper() -> u32 { 7 }
+RS
+MODLN="$( grep -n 'pub fn drop' "$RR/src/lib.rs" | cut -d: -f1 )"
+RRQ="$( cd "$RR" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+RRDEAD="$( rows "$RRQ" | grep 'kind="dead-code"' )"
+printf '%s' "$RRDEAD" | grep -q 'Raw::r#drop' \
+    && { no "rust-raw-drop: r#drop of 'impl Drop for Raw' reported as dead-code"; printf '%s\n' "$RRDEAD"; } \
+    || ok "rust-raw-drop: r#drop of 'impl Drop for Raw' is not reported (same Drop::drop, raw spelling)"
+printf '%s\n' "$RRDEAD" | grep -q "p=\"[^\"]*:$MODLN\"" \
+    && ok "rust-raw-drop: a free fn named drop inside mod m is still reported (line $MODLN, not a method)" \
+    || { no "rust-raw-drop: mod-level drop (line $MODLN) wrongly exempt as a Drop::drop method"; printf '%s\n' "$RRDEAD"; }
+printf '%s' "$RRDEAD" | grep -q 'orphan_raw_helper' \
+    && ok "rust-raw-drop: an ordinary orphan helper is still reported (negative control)" \
+    || { no "rust-raw-drop: orphan_raw_helper not reported"; printf '%s\n' "$RRDEAD"; }
+
 # ── 3) verbosity counts CODE lines; verbosity + complexity gate on a CROSSING or >= 25% growth ───────────
 # Q1 measured the median growth of a GATING verbosity row at 6% and of a gating complexity row at 6%, while
 # 60 pure BLANK lines added to an 18-LOC body produced `was="18" now="78"`, gating, exit 2. Both halves are

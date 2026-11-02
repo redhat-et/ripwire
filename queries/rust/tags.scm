@@ -35,9 +35,17 @@
 ; sits inside a declaration_list" — that is expressed by the pattern SHAPE, so the capture belongs on the
 ; function_item, where `body:` is found immediately and no climb happens. Dedup is unaffected: identity is
 ; (fileId, name-token start byte) and Method still outranks Function on specificity.
-(declaration_list
-    (function_item
-        name: (identifier) @name) @definition.method)
+; A method is a function in an impl or trait body. A free function inside `mod m { ... }` sits in the same
+; declaration_list, and capturing it as a method let the Rust Drop::drop exemption hide `m::drop` (issue #494 review).
+(impl_item
+    body: (declaration_list
+        (function_item
+            name: (identifier) @name) @definition.method))
+
+(trait_item
+    body: (declaration_list
+        (function_item
+            name: (identifier) @name) @definition.method))
 
 ; function definitions
 
