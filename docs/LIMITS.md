@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 360 | 128 | 236 | **124** |
+| 365 | 128 | 241 | **124** |
 
 Plus 8 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 360 + 8 is the 368 constants this generator parses out of `src/`.
+are not counted as caps, and 365 + 8 is the 373 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 360 caps are classified
-(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 217 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 365 caps are classified
+(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 222 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -103,7 +103,7 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 
 ## Caps, by file
 
-One table for each of the 128 files that declare a cap — the 360 caps counted above, and no parameter.
+One table for each of the 128 files that declare a cap — the 365 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -485,6 +485,11 @@ Discloses: `capped`, `lit_capped`
 | `kForLiteralRegistrationRows` | `2` | — | shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count |
 | `kForLiteralSiteRows` | `8` | — | <ls> rows shown (a runaway guard: shown=/src= count, next= lists all) |
 | `kForLiteralTierFiles` | `64` | — | source hit files classified (k=); past it k="?" |
+| `kForTableByteCap` | `40000` | — | shape=table: all its <lit> elements together, cut on a row boundary (runaway guard: a 16 KB cap loses ld-nushell-07) |
+| `kForTableContextRows` | `4` | — | shape=table: table rows served with the lines after them |
+| `kForTableMaxAnchor` | `60` | — | a longer backticked span is no anchor |
+| `kForTableRankedRows` | `4096` | — | shape=table: source sites read for a table row and ordered (a registry past the readers in path order must still rank first) |
+| `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
 
 ### `src/formembers.h`
 

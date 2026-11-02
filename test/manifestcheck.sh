@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# manifestcheck.sh — every committed top-level *check.sh gate must be owned by regression.sh.
+# manifestcheck.sh — every committed top-level test/*.sh gate must be owned by regression.sh (listed or invoked by name).
 
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
@@ -7,17 +7,70 @@ REGRESSION="$ROOT/test/regression.sh"
 EVALS="$ROOT/docs/EVALS.md"
 fail=0
 
-while IFS= read -r gatePath; do
-    gateName="$( basename "$gatePath" .sh )"
-    if ! grep -Eq "(^|[^[:alnum:]_])${gateName}(\\.sh)?([^[:alnum:]_]|$)" "$REGRESSION"; then
-        printf 'FAIL: test/%s.sh is not listed in test/regression.sh\n' "$gateName"
-        fail=1
-    fi
-done < <( find "$ROOT/test" -maxdepth 1 -type f -name '*check.sh' | LC_ALL=C sort )
-
-if [ "$fail" = 0 ]; then
-    printf 'PASS: every top-level *check.sh gate is listed in regression.sh\n'
+# ── REGISTRY ARM: every test/*.sh runs, and nothing runs that no list registers ─────────────────────
+# CI runs test/pargates.py, which runs EVERY top-level test/*.sh except regression.sh. regression.sh runs the
+# absorb list plus the gates it invokes by name above it. The two sets must be EQUAL: otherwise a gate file
+# exists that regression.sh never runs, or CI runs a script no list registers. The same arm holds the list's
+# shape -- `for _g in \`, one `    name \` line per gate in byte (LC_ALL=C) order with no duplicate, then a bare
+# `    ; do` line -- because that shape is what lets two branches add gates without a merge conflict, and a
+# name parked after `; do` (the old merge-resolution trap) breaks it. (Replaces the older "every *check.sh
+# name appears somewhere in regression.sh" grep, which a name in a comment satisfied.)
+REGPY="$ROOT/test/lib/gateregistry.py"   # the one copy of the rule; scripts/merge_main.sh runs it too
+gateListing="$( mktemp -t manifestcheck_ls.XXXXXX )"
+# the same set test/pargates.py runs: top-level *.sh, no dotfile, minus the driver itself
+find "$ROOT/test" -maxdepth 1 -type f -name '*.sh' ! -name '.*' ! -name 'regression.sh' -exec basename {} .sh \; | LC_ALL=C sort > "$gateListing"
+if [ ! -f "$REGPY" ]; then
+    printf 'FAIL: (REGISTRY) test/lib/gateregistry.py is missing -- the registry has no checker\n'; fail=1
+elif [ ! -s "$gateListing" ]; then
+    printf 'FAIL: (REGISTRY) found no test/*.sh gate at all -- the listing is empty, the arm would be vacuous\n'; fail=1
+else
+    python3 "$REGPY" "$REGRESSION" "$gateListing"; regRc=$?
+    # a checker that crashed or printed nothing is a FAIL with its exit status, never a silent one
+    [ "$regRc" = 0 ] || { printf 'FAIL: (REGISTRY) test/lib/gateregistry.py exited %s\n' "$regRc"; fail=1; }
 fi
+# MUTATION CONTROLS: each planted defect must turn the same check red, and the unmutated inputs must pass
+# (proven just above). Each mutation is asserted to have taken before its red is trusted.
+regMut() {   # $1 label, $2 regression copy, $3 listing copy, $4 text the FAIL must contain
+    local out
+    if out="$( python3 "$REGPY" "$2" "$3" 2>&1 )"; then
+        printf 'FAIL: (REGISTRY) mutation control %s stayed green -- the arm cannot see it\n' "$1"; fail=1
+    elif ! printf '%s' "$out" | grep -qF -- "$4"; then
+        printf 'FAIL: (REGISTRY) mutation control %s went red for the wrong reason: %s\n' "$1" "$( printf '%s' "$out" | head -1 )"; fail=1
+    else
+        printf 'PASS: (REGISTRY) mutation control %s is caught\n' "$1"
+    fi
+}
+mutReg="$( mktemp -t manifestcheck_mreg.XXXXXX )"; mutLs="$( mktemp -t manifestcheck_mls.XXXXXX )"
+firstListed="$( awk '/^for _g in \\$/{ getline; sub( /^    /, "" ); sub( / \\$/, "" ); print; exit }' "$REGRESSION" )"
+# (1) an unregistered gate file: CI would run it, regression.sh would not
+cp "$REGRESSION" "$mutReg"; { cat "$gateListing"; echo zzzunregisteredcheck; } > "$mutLs"
+regMut "(unregistered file)" "$mutReg" "$mutLs" "zzzunregisteredcheck.sh exists"
+# (2) a listed gate whose file is gone
+cp "$REGRESSION" "$mutReg"; grep -vx -- "$firstListed" "$gateListing" > "$mutLs"
+if [ -z "$firstListed" ] || cmp -s "$gateListing" "$mutLs"; then
+    printf 'FAIL: (REGISTRY) mutation control (missing file) did not take -- could not read the first listed gate\n'; fail=1
+else
+    regMut "(listed gate with no file: $firstListed)" "$mutReg" "$mutLs" "registers $firstListed but"
+fi
+# (3) a name parked after `; do` -- it would never run
+awk '/^    ; do$/{ print "    ; do parkedcheck;"; next } { print }' "$REGRESSION" > "$mutReg"; cp "$gateListing" "$mutLs"
+if cmp -s "$REGRESSION" "$mutReg"; then printf 'FAIL: (REGISTRY) mutation control (parked after do) did not take\n'; fail=1
+else regMut "(name parked after \"; do\")" "$mutReg" "$mutLs" "one-name-per-line shape"; fi
+# (4) out of byte order (the first entry moved to the end of the list)
+awk -v F="    $firstListed \\\\" '$0==F && !moved { held=$0; moved=1; next } /^    ; do$/ && moved { print held } { print }' "$REGRESSION" > "$mutReg"
+if cmp -s "$REGRESSION" "$mutReg"; then printf 'FAIL: (REGISTRY) mutation control (out of order) did not take\n'; fail=1
+else regMut "(out of byte order)" "$mutReg" "$mutLs" "not in byte order"; fi
+# (5) the old single-line shape
+python3 -c "
+import re, sys
+t = open( sys.argv[ 1 ] ).read()
+m = re.search( r'^for _g in \\\\\n(.*?)^    ; do\n', t, re.S | re.M )
+names = [ w for w in m.group( 1 ).split() if w != chr( 92 ) ]
+sys.stdout.write( t[ :m.start() ] + 'for _g in ' + ' '.join( names ) + '; do\n' + t[ m.end(): ] )
+" "$REGRESSION" > "$mutReg" 2>/dev/null
+if cmp -s "$REGRESSION" "$mutReg" || [ ! -s "$mutReg" ]; then printf 'FAIL: (REGISTRY) mutation control (single-line list) did not take\n'; fail=1
+else regMut "(single-line list)" "$mutReg" "$mutLs" "one-name-per-line shape"; fi
+rm -f "$gateListing" "$mutReg" "$mutLs"
 
 # ── gate-count drift: docs/EVALS.md §8 quotes the loop's length as a known-honest number; that
 # quote must equal the loop's ACTUAL length or it is itself the exact stale-docstring drift §8 is
@@ -30,7 +83,7 @@ loopNames="$( python3 -c "
 import re, sys
 text = open(sys.argv[1]).read()
 m = re.search(r'for _g in (.*?); do', text, re.S)
-sys.exit('no loop found') if not m else print(len(m.group(1).split()))
+sys.exit('no loop found') if not m else print(len([w for w in m.group(1).split() if w != chr( 92 )]))
 " "$REGRESSION" )"
 # ── SYNTAX ARM: test/regression.sh must actually PARSE ────────────────────────────────────────────
 # Nothing in this repository syntax-checks the file that drives every gate. Verified empirically:
@@ -63,31 +116,6 @@ else
 fi
 rm -f "$synTmp"
 
-# ── TAIL ARM: nothing may sit between the gate list and `do` ────────────────────────────────────────
-# A gate name parked AFTER the loop's `; do` is not in the loop and never runs, yet BOTH existing arms
-# stay green: "every gate FILE is listed" matches the name anywhere in the file, and the count is
-# derived from the same text. It is produced by the obvious merge resolution -- whitespace-splitting
-# the ~12,000-char list line and appending -- which yields
-#     for _g in ... connectjoincheck; do termmargincheck;;
-# `bash -n` clean, exit 0, gate silently disabled. This arm reads the tail of the list line directly:
-# after `; do` there must be nothing. Its mutation control parks a name there and requires a red.
-loopTail="$( awk '/^for _g in /{ sub(/^.*; do/, ""); print; exit }' "$REGRESSION" )"
-if [ -n "$( printf '%s' "$loopTail" | tr -d '[:space:]' )" ]; then
-    printf 'FAIL: text sits after the gate loop'"'"'s "; do" — those names never run: %s\n' "$loopTail"
-    fail=1
-else
-    printf 'PASS: nothing follows the gate loop'"'"'s "; do" — no gate is parked outside the loop\n'
-fi
-tailMut="$( mktemp -t manifestcheck_tail.XXXXXX )"
-awk '/^for _g in /{ print $0 " parkedcheck;"; next } { print }' "$REGRESSION" > "$tailMut"
-tailMutTail="$( awk '/^for _g in /{ sub(/^.*; do/, ""); print; exit }' "$tailMut" )"
-if [ -n "$( printf '%s' "$tailMutTail" | tr -d '[:space:]' )" ]; then
-    printf 'PASS: mutation control: a gate parked after "; do" is caught (saw "%s")\n' "$tailMutTail"
-else
-    printf 'FAIL: mutation control: a gate parked after "; do" was NOT caught — the tail arm is inert\n'
-    fail=1
-fi
-rm -f "$tailMut"
 
 evalsStated="$( grep -oE 'loop in `test/regression\.sh` names [0-9]+' "$EVALS" | head -1 | grep -oE '[0-9]+$' )"
 # DERIVE the line pointer instead of hard-coding it. This message used to end "update
