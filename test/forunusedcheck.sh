@@ -558,12 +558,14 @@ want F5b "$T/f5py.out" public_api_untested unknown api
 printf 'from pkg import _impl\n' > "$L/lib/pkg/imp_impl.py"
 ask "$L/lib" "unused functions in pkg/_impl.py" > "$T/f5pyp.out"
 [ -z "$(rowof "$T/f5pyp.out" impl_fn)" ] || want F5c "$T/f5pyp.out" impl_fn unused
+printf 'from pkg import mod\n' > "$L/app/pkg/run.py"   # a non-test importer: since fix round 3 a test-only importer leaves `unimported` on
 ask "$L/app" "unused functions in pkg/mod.py" > "$T/f5app.out"
 want F5d "$T/f5app.out" app_fn test-only                     # a pyproject with no [project] builds nothing: not a library
 ask "$L/js" "unused exports in src/api.ts" > "$T/f5ts.out"
 want F5e "$T/f5ts.out" tsLibApi unknown api
 ask "$L/js" "unused exports in src/types.ts" > "$T/f5tt.out"
 want F5f "$T/f5tt.out" TsTypeThing unknown barrel           # `export type *` is a barrel
+printf "import { other } from './api'\nexport const o = other\n" > "$L/jsapp/src/run.ts"
 ask "$L/jsapp" "unused exports in src/api.ts" > "$T/f5ja.out"
 want F5g "$T/f5ja.out" tsAppFn test-only                    # "private": true publishes nothing
 grep -q 'never live' "$T/f5py.out" && fail "F5h: the legend still says never live" || pass "F5h: no 'never live' in the legend"
@@ -866,7 +868,10 @@ mk "$NB/n/t.py" 'def trig_dead():\n    return 1\n'; mk "$NB/n/ut.py" 'from n imp
 for q in "safely delete functions in n/t.py" "what can be removed from n/t.py" "functions that can be removed in n/t.py"; do
   ask "$NB" "$q" | grep -q '<unused_in_file' && pass "NT: fires on: $q" || fail "NT: silent on: $q"; done
 for q in "how to safely delete a message in n/t.py" "items can be removed from the queue in n/t.py"; do
-  ask "$NB" "$q" | grep -q '<unused_in_file' && fail "NT: fires on: $q" || pass "NT: silent on: $q"; done
+  out=$(ask "$NB" "$q") || { fail "NT: run failed: $q"; continue; }
+  case "$out" in *'</ctx>'*) ;; *) fail "NT: incomplete answer: $q"; continue ;; esac
+  case "$out" in *'<unused_in_file'*) fail "NT: fires on: $q" ;; *) pass "NT: silent on: $q" ;; esac
+done
 # the five honesty guards no arm needed before (mutants unreadable, multiroot, walk_git, walk_symlink, pkg_nearest)
 SV="$R/sv"; mk "$SV/pkg/__init__.py" ''; mk "$SV/pkg/tgt.py" 'def dead_in_git_only():\n    return 1\ndef dead_via_symlink():\n    return 2\n'; mk "$SV/pkg/u.py" 'from pkg import tgt\n'
 mk "$SV/.git/notes.txt" 'dead_in_git_only was mentioned in a commit message\n'
@@ -886,6 +891,77 @@ mk "$R/pk/src/tgt.ts" 'export function nearest_pub(){return 1}\n'
 mk "$R/pk/src/tgt.test.ts" 'import { nearest_pub } from "./tgt";\nnearest_pub();\n'
 ask "$R/pk" "unused exports in src/tgt.ts" > "$T/pk.out"
 want PKa "$T/pk.out" nearest_pub unknown api              # the nearest package.json decides: this one publishes, the private root above it does not
+
+# ---- fix round 3 (review delta2 MF1-MF4): each arm red on 0e03fbd3, with neighbour shapes the review did not name ----
+# askok ARM DIR TASK OUT: the answer, and a failed or empty run is a FAIL of its own (an absence read from a crash is no pass)
+askok() { local rc; ( cd "$2" && "$RIPWIRE" . --no-cache --for="$3" 2>/dev/null ) > "$4"; rc=$?
+  if [ "$rc" != 0 ] || ! grep -q '</ctx>' "$4"; then fail "$1: run failed or incomplete (rc=$rc): $3"; return 1; fi; }
+# MF1: a module used as a value inside an exported body (only `import ..{`, `export {`, `export type {` open a list)
+X1="$R/x1"; mk "$X1/package.json" '{"name":"a","private":true}\n'
+mk "$X1/src/x1.ts" 'export function x1F(){return 1}\n'; mk "$X1/src/ux1.ts" "import * as o1 from './x1'\nexport function run(n: string) {\n  return (o1 as any)[n]()\n}\n"
+mk "$X1/src/x2.ts" 'export function x2F(){return 1}\n'; mk "$X1/src/ux2.ts" "import * as o2 from './x2'\nexport class R {\n  go(n: string) { return (o2 as any)[n]() }\n}\n"
+mk "$X1/src/x3.ts" 'export function x3F(){return 1}\n'; mk "$X1/src/ux3.ts" "import * as o3 from './x3'\nexport const t = {\n  all: Object.values(o3),\n}\n"
+mk "$X1/src/x4.ts" 'export function x4F(){return 1}\n'; mk "$X1/src/ux4.ts" "import * as o4 from './x4'\nexport default {\n  all: Object.keys(o4),\n}\n"
+mk "$X1/src/x5.ts" 'export function x5F(){return 1}\n'; mk "$X1/src/ux5.ts" "import * as o5 from './x5'\nexport async function go(n: string) {\n  return (o5 as any)[n]()\n}\n"
+mk "$X1/src/x6.ts" 'export function x6F(){return 1}\n'; mk "$X1/src/ux6.ts" "import * as o6 from './x6'\nexport const all = Object.values(o6) // from here\n"
+mk "$X1/src/x7.ts" 'export function x7Live(){return 1}\nexport function x7Dead(){return 2}\n'; mk "$X1/src/ux7.ts" "import * as o7 from './x7'\nexport function run() {\n  return o7.x7Live()\n}\n"
+mk "$X1/src/x8.ts" 'export function x8F(){return 1}\n'; mk "$X1/src/ux8.ts" "export async function run(n: string) {\n  const o8: Record<string, any> = await import('./x8')\n  return o8[n]()\n}\n"
+for k in 1 2 3 4 5 6 8; do askok X1$k "$X1" "unused exports in src/x$k.ts" "$T/x1$k.out" && want X1$k "$T/x1$k.out" x${k}F unknown built-name; done
+askok X1n "$X1" "unused exports in src/x7.ts" "$T/x17.out" && want X1n "$T/x17.out" x7Dead unused   # twin: `o7.x7Live()` in an exported body names one def, no module value
+# MF2: the target dispatches into itself
+X2="$R/x2"; mk "$X2/pkg/__init__.py" ''; mk "$X2/pkg/m.py" 'from pkg import s1, s2, s3, s4, s6\n'
+mk "$X2/pkg/s1.py" 'def s1_f():\n    return 1\ndef dispatch(n):\n    return globals()[n]()\n'
+mk "$X2/pkg/s2.py" 'import sys\ndef s2_f():\n    return 1\ndef run(n):\n    return getattr(sys.modules[__name__], n)()\n'
+mk "$X2/pkg/s3.py" 'import importlib\ndef s3_f():\n    return 1\ndef run(n):\n    return getattr(importlib.import_module(__name__), "s3_" + n)()\n'
+mk "$X2/pkg/s4.py" 'def s4_f():\n    return 1\ndef run(n):\n    return vars()[n]()\n'
+mk "$X2/pkg/s6.py" 'def s6_dead():\n    return 1\nNAME = globals()["__name__"]\n'
+mk "$X2/package.json" '{"name":"a","private":true}\n'; mk "$X2/src/s5.ts" "import * as me from './s5'\nexport function s5F(){return 1}\nexport function run(n: string){ return (me as any)[n]() }\n"
+mk "$X2/src/m.ts" "import { run } from './s5'\nexport const a = run('x')\n"
+for k in 1 2 3 4; do askok X2$k "$X2" "unused functions in pkg/s$k.py" "$T/x2$k.out" && want X2$k "$T/x2$k.out" s${k}_f unknown built-name; done
+askok X25 "$X2" "unused exports in src/s5.ts" "$T/x25.out" && want X25 "$T/x25.out" s5F unknown built-name
+askok X2n "$X2" "unused functions in pkg/s6.py" "$T/x26.out" && want X2n "$T/x26.out" s6_dead unused   # twin: a literal key names one name, which the word scan reads
+# MF3: outside consumers and built names the tree does not spell
+X3="$R/x3"; mk "$X3/js/t.js" 'export function libFn(){return 1}\n'; mk "$X3/js/t.test.js" "import {libFn} from './t'\nlibFn()\n"; mk "$X3/js/package.json" '{"name":"lib","version":"1.0.0"}\n'
+mk "$X3/jp/t.js" 'export function privFn(){return 1}\n'; mk "$X3/jp/u.js" "import {other} from './t'\nexport const a = other\n"; mk "$X3/jp/t.test.js" "import {privFn} from './t'\nprivFn()\n"; mk "$X3/jp/package.json" '{\n  "name": "app",\n  "version": "1.0.0",\n  "private": true\n}\n'
+askok X3a "$X3" "unused exports in js/t.js" "$T/x3a.out" && want X3a "$T/x3a.out" libFn unknown api              # npm publishes a named, versioned package with no main
+askok X3an "$X3" "unused exports in jp/t.js" "$T/x3an.out" && want X3an "$T/x3an.out" privFn test-only        # twin: private, on several lines
+X3R="$R/x3r"; mk "$X3R/Cargo.toml" '[package]\nname="a"\n\n[ lib ]  # library\npath="rs/foo.rs"\n'; mk "$X3R/rs/foo.rs" 'pub fn nonstd_pub() -> u32 { 1 }\n'
+mk "$X3R/b/Cargo.toml" '[package]\nname="b"\n[[bin]]\nname="b"\npath="rs/main.rs"\n[package.metadata.lib]\nx=1\n'; mk "$X3R/b/rs/main.rs" 'pub fn bin_pub() -> u32 { 1 }\nfn main(){}\n'
+askok X3b "$X3R" "unused functions in rs/foo.rs" "$T/x3b.out" && want X3b "$T/x3b.out" nonstd_pub unknown api    # a [lib] table with a path, written with spaces and a comment
+askok X3bn "$X3R" "unused functions in b/rs/main.rs" "$T/x3bn.out" && want X3bn "$T/x3bn.out" bin_pub unused   # twin: [[bin]] and a table whose name only ends in lib
+X3P="$R/x3p"; mk "$X3P/Cargo.toml" '[package]\nname="a"\n'
+mk "$X3P/src/main.rs" 'mod t;\nmacro_rules! go { ($e:ident) => { paste::paste!{ t::[<on_ $e>](); t::[<$e _cb>](); t::[<lit_ name>]() } } }\nfn main(){ go!(click); }\n'
+mk "$X3P/src/t.rs" 'pub fn on_click() -> u32 { 1 }\npub fn click_cb() -> u32 { 2 }\npub fn lit_name() -> u32 { 3 }\npub fn paste_dead() -> u32 { 4 }\n'
+askok X3c "$X3P" "unused functions in src/t.rs" "$T/x3c.out" && { want X3c "$T/x3c.out" on_click unknown built-name; want X3c "$T/x3c.out" click_cb unknown built-name; want X3c "$T/x3c.out" lit_name unknown built-name; want X3c "$T/x3c.out" paste_dead unused; }
+X3G="$R/x3g"; mk "$X3G/go.mod" 'module a\n'; mk "$X3G/cmd/p/main.go" 'package main\nvar Symbol int\nfunc helper() {}\nfunc main(){}\n'
+mk "$X3G/host/h.go" 'package host\nimport (\n\tplg "plugin"\n)\nfunc f(p *plg.Plugin, n string){ p.Lookup(n) }\n'
+mk "$X3G/cmd/q/main.go" 'package main\nvar Other int\nfunc main(){}\n'; mk "$X3G/cmd/q/l.go" 'package main\nimport "sync"\nfunc g(m *sync.Map, n string){ m.Load(n) }\ntype L struct{}\nfunc (L) Lookup(n string) {}\n'
+askok X3d "$X3G" "unused functions in cmd/p/main.go" "$T/x3d.out" && { want X3d "$T/x3d.out" Symbol unknown built-name; norow X3d "$T/x3d.out" helper; }   # an aliased "plugin" import; an unexported def is no public row
+X3H="$R/x3h"; mk "$X3H/zz.h" 'int zz_public(void);\n'; mk "$X3H/zz.c" 'int zz_public(void){return 1;}\n'; mk "$X3H/Makefile" 'all:\n\tcc -c zz.c\n'
+mk "$X3H/yy.hpp" 'int yy_public();\n'; mk "$X3H/ww.h" 'int ww_dead(void);\n'; mk "$X3H/src/m.c" '#  include <ww.h>\nint main(void){return 0;}\n'
+askok X3e "$X3H" "unused functions in zz.h" "$T/x3e.out" && want X3e "$T/x3e.out" zz_public unknown api       # a header no file includes: an outside includer's
+askok X3e2 "$X3H" "unused functions in yy.hpp" "$T/x3e2.out" && want X3e2 "$T/x3e2.out" yy_public unknown api
+askok X3en "$X3H" "unused functions in ww.h" "$T/x3en.out" && want X3en "$T/x3en.out" ww_dead unused       # twin: `#  include <ww.h>` includes it
+X3S="$R/x3s"; mk "$X3S/lib/foo/t.py" 'def pylib():\n    return 1\n'; mk "$X3S/lib/foo/__init__.py" ''; mk "$X3S/tests/test_t.py" 'from foo.t import pylib\npylib()\n'
+askok X3f "$X3S" "unused functions in lib/foo/t.py" "$T/x3f.out" && want X3f "$T/x3f.out" pylib unknown unimported   # tests reach it as an installed `foo`: no non-test importer
+# MF4: only a non-test import that names this module and no other indexed one clears `unimported`
+X4="$R/x4"; mk "$X4/proj/__init__.py" ''; mk "$X4/proj/settings.py" 'DEBUG = False\nMIDDLEWARE = []\n'
+mk "$X4/tests/test_s.py" 'from proj import settings\ndef test_d():\n    assert settings.DEBUG is False\n'
+mk "$X4/scripts/settings.py" 'X = 1\ndef run_dead():\n    return 1\n'; mk "$X4/scripts/run.py" 'import settings\nprint(settings.X)\n'
+askok X4a "$X4" "unused functions in proj/settings.py" "$T/x4a.out" && { want X4a "$T/x4a.out" MIDDLEWARE unknown unimported; want X4a "$T/x4a.out" DEBUG unknown unimported; }
+askok X4b "$X4" "unused functions in scripts/settings.py" "$T/x4b.out" && want X4b "$T/x4b.out" run_dead unused   # twin: the script's own directory comes first, so run.py imports it
+X4T="$R/x4t"; for d in a a/b c c/b; do mk "$X4T/$d/__init__.py" ''; done; mk "$X4T/a/b/util.py" 'def helper_u():\n    return 1\n'; mk "$X4T/c/b/util.py" 'X=1\n'; mk "$X4T/c/m.py" 'from b import util\nprint(util.X)\n'
+askok X4c "$X4T" "unused functions in a/b/util.py" "$T/x4c.out" && want X4c "$T/x4c.out" helper_u unknown unimported   # `b.util` is the tail of two modules
+X4J="$R/x4j"; mk "$X4J/package.json" '{"name":"a","private":true}\n'; mk "$X4J/packages/a/src/config.ts" 'export function hookA(){return 1}\n'
+mk "$X4J/packages/b/src/config.ts" 'export const z = 1\n'; mk "$X4J/packages/b/src/m.ts" "import { z } from '@/config'\nexport const y = z\n"
+mk "$X4J/packages/c/src/only.ts" 'export function onlyDead(){return 1}\n'; mk "$X4J/packages/c/src/m.ts" "import { q } from '@/only'\nexport const y = q\n"
+askok X4d "$X4J" "unused exports in packages/a/src/config.ts" "$T/x4d.out" && want X4d "$T/x4d.out" hookA unknown unimported
+askok X4dn "$X4J" "unused exports in packages/c/src/only.ts" "$T/x4dn.out" && want X4dn "$T/x4dn.out" onlyDead unused   # twin: a tail one module holds still proves the import
+# CodeRabbit #503: RIPWIRE_NO_UNUSED_TABLE=1 drops --dead-code=PATH's next= and its legend clause with the table
+( cd "$P" && RIPWIRE_NO_UNUSED_TABLE=1 "$RIPWIRE" . --no-cache --dead-code=pkg/util.py 2>/dev/null ) > "$T/dcoff.out"; rc=$?
+if [ "$rc" != 0 ] || ! grep -q 'evidence="internal-linkage' "$T/dcoff.out"; then fail "T13: --dead-code=PATH with the table off failed (rc=$rc)"
+elif grep -q 'next="--for=\|next= the for-verb table' "$T/dcoff.out"; then fail "T13: the table is off and --dead-code=PATH still names it"
+else pass "T13: table off: --dead-code=PATH names no table"; fi
 
 # ---- the trigger, on the words of the stored argv ----
 for q in "unused functions in pkg/util.py" "pkg/util.py unused functions" "which functions in pkg/util.py are never called" \
@@ -912,8 +988,10 @@ ask "$G" "unused functions in internal/x" > "$T/dir.out"
 n=$(grep -o '<unused_in_file ' "$T/dir.out" | wc -l | tr -d ' ')
 [ "$n" -ge 1 ] && pass "T3: a directory gets a table per file ($n)" || fail "T3: directory tables: $n"
 # --json and --token-budget carry none
-( cd "$P" && "$RIPWIRE" . --no-cache --json --for="unused functions in pkg/util.py" 2>/dev/null ) | grep -q unused_in_file && fail "T4: --json carries the table" || pass "T4: --json carries none"
-( cd "$P" && "$RIPWIRE" . --no-cache --token-budget=4000 --for="unused functions in pkg/util.py" 2>/dev/null ) | grep -q '<unused_in_file ' && fail "T5: --token-budget carries the table" || pass "T5: --token-budget carries none"
+out=$( cd "$P" && "$RIPWIRE" . --no-cache --json --for="unused functions in pkg/util.py" 2>/dev/null ); rc=$?
+if [ "$rc" != 0 ] || [ -z "$out" ]; then fail "T4: --json run failed (rc=$rc)"; else case "$out" in *unused_in_file*) fail "T4: --json carries the table" ;; *) pass "T4: --json carries none" ;; esac; fi
+out=$( cd "$P" && "$RIPWIRE" . --no-cache --token-budget=4000 --for="unused functions in pkg/util.py" 2>/dev/null ); rc=$?
+if [ "$rc" != 0 ]; then fail "T5: --token-budget run failed (rc=$rc)"; else case "$out" in *'</ctx>'*) case "$out" in *'<unused_in_file '*) fail "T5: --token-budget carries the table" ;; *) pass "T5: --token-budget carries none" ;; esac ;; *) fail "T5: --token-budget answer incomplete" ;; esac; fi
 # the legend names every word it prints, and the answer is well-formed
 if command -v xmllint >/dev/null; then xmllint --noout "$T/py.out" 2>/dev/null && pass "T6: well-formed" || fail "T6: not well-formed"; fi
 grep -q 'unused_in_file p= public= private=' "$T/py.out" && pass "T7: legend present" || fail "T7: no legend clause"
@@ -922,7 +1000,8 @@ grep -q 'unused_in_file p= public= private=' "$T/py.out" && pass "T7: legend pre
 grep -q 'evidence="internal-linkage+zero-callers"' "$T/dc.out" && pass "T8: --dead-code keeps evidence=internal-linkage" || fail "T8: --dead-code moved"
 grep -q '<unused_in_file ' "$T/dc.out" && fail "T9: --dead-code prints the table" || pass "T9: --dead-code prints no table"
 grep -q 'next="--for=' "$T/dc.out" && pass "T11: --dead-code=PATH names the table" || fail "T11: no next= on --dead-code=PATH"
-( cd "$P" && "$RIPWIRE" . --no-cache --dead-code 2>/dev/null ) | grep -q 'next="--for=' && fail "T12: bare --dead-code grew a next=" || pass "T12: bare --dead-code has no next="
+out=$( cd "$P" && "$RIPWIRE" . --no-cache --dead-code 2>/dev/null ); rc=$?
+if [ "$rc" != 0 ] || [ -z "$out" ]; then fail "T12: bare --dead-code run failed (rc=$rc)"; else case "$out" in *'next="--for='*) fail "T12: bare --dead-code grew a next=" ;; *) pass "T12: bare --dead-code has no next=" ;; esac; fi
 # deterministic
 ask "$P" "unused functions in pkg/util.py" > "$T/py.again"
 sed -E 's/ at="[0-9a-f+a-z]*"//' "$T/py.out" > "$T/a1"; sed -E 's/ at="[0-9a-f+a-z]*"//' "$T/py.again" > "$T/a2"

@@ -27,15 +27,15 @@
 //   declined     the resolver declined a call whose candidates hold it                  x       x    x    x     x
 //   value        a table, field or argument holds it (the value index)                  x       x    x    x     x     (registries)
 //   string       a string literal is exactly its name                                   x       x    x    x     x     (__all__, getattr, MethodByName)
-//   built-name   a string or macro builds names it could be: "on_{x}", `on_${x}`, a##b  x       x    x    x     x
+//   built-name   a string or macro builds names it could be: "on_{x}", `on_${x}`, a##b, paste [<on_ $e>]; the module or the file itself indexed (globals()[n]); Go plugin Lookup(n)  x  x  x  x  x
 //   import       a non-test import or re-export names it, and nothing else does         x       x    x    x     x
 //   barrel       its file is star re-exported: `export *`, `from m import *`, `pub use m::*`  x  x         x
 //   dispatch     a method a base, trait or interface may call                           class(bases) extends/implements  every method  (not pub)  virtual/override/base
 //   framework    the language or a framework calls it with no call in the tree          decorator, dunder, runner hook, pytest_*  decorator  init, Test*, //export  #[attr], extern "C", main  __attribute__, extern "C", main, ctor
-//   api          a surface consumers outside this tree may use                          -       -    exported outside internal/, not package main  pub in a lib crate  a header under include/
+//   api          a surface consumers outside this tree may use                          -       -    exported outside internal/, not package main  pub in a lib crate ([lib] or src/lib.rs)  a header under include/ or one no file includes
 //   members      its members are reached without naming it: a member row has evidence   x       x    x    x     x     (and every unscoped C/C++ enum)
 //   manifest     a build or package file beside it names it                             pyproject, setup.cfg  package.json  -  Cargo.toml  CMakeLists, Makefile, BUILD
-//   unimported   no file imports its module (an entry point, a plugin, a convention file, or dead as a whole)  x  x    -    -     -
+//   unimported   no non-test file imports its module by a path no other indexed module shares (an entry point, a plugin, a convention file, or dead as a whole)  x  x  -  -  -
 //   unseen       a text file under the root could not be read, or the walk hit its cap   x       x    x    x     x     (the block says unseen=N unseen_by=)
 // Beyond the table: a Python class whose base defines `__init_subclass__` or a metaclass reads dispatch; a file under a route directory
 // (pages/, app/, routes/, views.py ...) reads framework; a literal joined by `+` or `%` beside a lookup is a built-name stem; a dynamic
@@ -53,7 +53,7 @@
 #include "lexical.h" // splitRouteWords, routeLower
 #include "lintrules.h" // langOfPath
 #include "model.h"
-#include "quality.h" // pythonDecoratedDef, pythonRunnerRoot, languageInvokedSymbol, symbolHasStaticLinkage
+#include "quality.h" // pythonDecoratedDef, pythonRunnerRoot, languageInvokedSymbol, symbolHasStaticLinkage, isHeaderPath
 #include "serialize.h" // escapeXml
 #include "taskroute.h" // taskroute::isOneOf
 #include "valuerefindex.h" // ValueRefIndex::isValueReferenced
@@ -870,8 +870,10 @@ inline constexpr std::array<std::string_view, 4> kLoadCalls = { "require(", "imp
 class NameScan
 {
 public:
-    NameScan( std::span<Row> rows, std::span<const std::uint32_t> targetFiles, std::vector<std::string> targetModules, std::vector<std::string> targetStems, ModuleSyntax syntax )
-        : rows_( rows ), targets_( targetFiles ), first2_( 1u << 16, 0 ), modules_( std::move( targetModules ) ), stems_( std::move( targetStems ) ), syntax_( syntax )
+    // `sameStem`: every other indexed module of the target's syntax with one of its stems (root-relative, no extension); a path tail they share proves nothing.
+    NameScan( std::span<Row> rows, std::span<const std::uint32_t> targetFiles, std::vector<std::string> targetModules, std::vector<std::string> targetStems, ModuleSyntax syntax,
+              std::vector<std::string> sameStem = {} )
+        : rows_( rows ), targets_( targetFiles ), first2_( 1u << 16, 0 ), modules_( std::move( targetModules ) ), stems_( std::move( targetStems ) ), sameStem_( std::move( sameStem ) ), syntax_( syntax )
     {
         for( const Row& r : rows_ )
         {
@@ -901,9 +903,13 @@ public:
         const Lang pathLang = langOfPath( path );
         const bool hashComments = langFacts( pathLang ).hashComment;
         const bool commentsKnown = !std::ranges::contains( kNoLanguage, pathLang ); // an unknown language has no comment line: `//` is an operator in some, `#` code in others
-        if( !manifest && !isTarget && syntax_ != ModuleSyntax::None )
+        if( !manifest && syntax_ != ModuleSyntax::None )
         {
-            noteImports( fileId, path, src, isTest, hashComments );
+            noteImports( fileId, path, src, isTest, hashComments, isTarget );
+        }
+        if( !manifest )
+        {
+            noteLanguageShapes( path, src, isTest, isTarget );
         }
         std::size_t lineStart = 0;
         std::uint32_t lineNo = 1;
@@ -1007,6 +1013,9 @@ public:
 
     // After every file is read: what the whole tree said about all the rows at once.
     bool importsTarget() const noexcept { return importsTarget_; }
+    bool pluginLookup() const noexcept { return pluginLookup_; }
+    bool headerIncluded() const noexcept { return headerIncluded_; }
+    void setHeaderNames( std::vector<std::string> names ) { headerNames_ = std::move( names ); }
 
     void finish() noexcept
     {
@@ -1111,10 +1120,38 @@ private:
             }
         }
         key = dropIndexTail( key );
-        return std::ranges::any_of( modules_, [&]( const std::string& m )
-                                    {
+        if( relative )
+        {
+            return std::ranges::any_of( modules_, [&]( const std::string& m )
+                                        { return dropIndexTail( m ) == key; } );
+        }
+        if( key.empty() )
+        {
+            return false;
+        }
+        const auto tailIs = [key]( std::string_view m )
+        {
             const std::string_view t = dropIndexTail( m );
-            return relative ? t == key : ( !key.empty() && ( t == key || ( t.size() > key.size() && t.ends_with( key ) && t[t.size() - key.size() - 1] == '/' ) ) ); } );
+            return t == key || ( t.size() > key.size() && t.ends_with( key ) && t[t.size() - key.size() - 1] == '/' );
+        };
+        if( syntax_ == ModuleSyntax::Python )
+        {
+            // a script's own directory is first on its path: `import settings` beside scripts/settings.py is that file
+            const std::size_t sl = importer.rfind( '/' );
+            const std::string sibling = sl == std::string_view::npos ? std::string( key ) : std::string( importer.substr( 0, sl + 1 ) ) + std::string( key );
+            if( std::ranges::any_of( modules_, [&]( const std::string& m )
+                                     { return dropIndexTail( m ) == sibling; } ) )
+            {
+                return true;
+            }
+            if( std::ranges::any_of( sameStem_, [&]( const std::string& m )
+                                     { return dropIndexTail( m ) == sibling; } ) )
+            {
+                return false;
+            }
+        }
+        // a tail another indexed module also ends with names either: ambiguous keeps the hedge
+        return std::ranges::any_of( modules_, tailIs ) && std::ranges::none_of( sameStem_, tailIs );
     }
 
     // `.ops.x` -> `./ops/x`, `..` -> `../`, `a.b` -> `a/b`
@@ -1263,9 +1300,24 @@ private:
                     {
                         --b;
                     }
-                    if( b < eq )
+                    std::string_view name = t.substr( b, eq - b );
+                    // `const ops: any = await import(..)`: the annotation is a type; the name follows the declaring keyword
+                    for( const std::string_view kw : { "const ", "let ", "var " } )
                     {
-                        bound.emplace_back( t.substr( b, eq - b ) );
+                        if( const std::size_t d = t.substr( 0, eq ).rfind( kw ); d != std::string_view::npos && ( d == 0 || !isIdent( t[d - 1] ) ) )
+                        {
+                            std::size_t e = d + kw.size();
+                            while( e < eq && isIdent( t[e] ) )
+                            {
+                                ++e;
+                            }
+                            name = e > d + kw.size() ? t.substr( d + kw.size(), e - d - kw.size() ) : name;
+                            break;
+                        }
+                    }
+                    if( !name.empty() )
+                    {
+                        bound.emplace_back( name );
                     }
                     continue;
                 }
@@ -1302,13 +1354,24 @@ private:
         }
     }
 
-    // An import statement that opens a list and closes it on a later line: where it ends, else npos.
+    // An import statement that opens a list and closes it on a later line: where it ends, else npos. Only `from a import (`, `import {`, `import x, {`,
+    // `import type {`, `export {` and `export type {` open one: `export function f() {`, `export class C {`, `export const t = {` and `export default {` are code.
     static std::size_t listCloses( std::string_view src, std::size_t lineEnd, std::string_view t ) noexcept
     {
-        const bool pyList = t.starts_with( "from " ) && t.contains( '(' ) && !t.contains( ')' );
-        const bool jsList = ( t.starts_with( "import " ) || t.starts_with( "export " ) ) && t.contains( '{' ) && !t.contains( '}' );
+        const std::size_t brace = t.find( '{' );
+        const bool pyList = t.starts_with( "from " ) && t.contains( " import " ) && t.contains( '(' ) && !t.contains( ')' );
+        const bool importList = t.starts_with( "import " ) && brace != std::string_view::npos && t.find_first_of( "(=" ) > brace;
+        const bool jsList = ( importList || t.starts_with( "export {" ) || t.starts_with( "export type {" ) ) && brace != std::string_view::npos && !t.contains( '}' );
         return pyList ? src.find( ')', lineEnd ) : jsList ? src.find( '}', lineEnd )
                                                           : std::string_view::npos;
+    }
+
+    // A line that only imports or re-exports: `import ..`, `from a import ..`, `export { .. } from '..'`, `export * from '..'`, the `} from '..'` that closes a list.
+    // `export const all = Object.values(ops) // from here` is code.
+    static bool importOnlyLine( std::string_view t ) noexcept
+    {
+        const bool reExport = t.starts_with( "export {" ) || t.starts_with( "export *" ) || t.starts_with( "export type {" ) || t.starts_with( "export type *" ) || t.starts_with( "} from " );
+        return t.starts_with( "import " ) || ( t.starts_with( "from " ) && t.contains( " import " ) ) || ( reExport && t.contains( " from " ) );
     }
 
     // Is one of `bound` a VALUE on a code line (not an import): a whole word not followed by `.name`? `ops[n]`, `getattr(ops, n)`, `Object.values(ops)`, `dir(ops)`,
@@ -1325,8 +1388,7 @@ private:
                 ls = close;
                 continue;
             }
-            const bool importLine = t.starts_with( "import " ) || t.starts_with( "from " ) || ( t.starts_with( "export " ) && t.contains( " from " ) );
-            if( !importLine && !isCommentLine( src, ls, hashComments ) )
+            if( !importOnlyLine( t ) && !isCommentLine( src, ls, hashComments ) )
             {
                 for( const std::string& n : bound )
                 {
@@ -1356,10 +1418,172 @@ private:
         return false;
     }
 
-    // What a file says about the target as a MODULE: does it import it (any file, a test too), and does a non-test one hand the module object around instead of naming
-    // a def of it.
-    void noteImports( std::uint32_t fileId, std::string_view path, std::string_view src, bool isTest, bool hashComments )
+    // Shapes one language builds or reaches names by, read once per file:
+    // Rust `paste!` `[<on_ $e>]` (a literal stem joined to a macro variable: prefix, suffix or inner rows; all literal: the joined name);
+    // Go `p.Lookup(n)` with a computed name in a file that imports "plugin" (any exported def of a `package main` may be the plugin symbol);
+    // C and C++ `#include "t.h"` / `#import <x/t.h>` of a target header by its file name.
+    void noteLanguageShapes( std::string_view path, std::string_view src, bool isTest, bool isTarget )
     {
+        if( path.ends_with( ".rs" ) && !isTest )
+        {
+            for( std::size_t p = src.find( "[<" ); p != std::string_view::npos; p = src.find( "[<", p + 2 ) )
+            {
+                const std::size_t e = src.find( ">]", p + 2 );
+                const std::size_t nl = src.find( '\n', p );
+                if( e != std::string_view::npos && ( nl == std::string_view::npos || e < nl ) )
+                {
+                    pasteGroup( src.substr( p + 2, e - p - 2 ) );
+                }
+            }
+        }
+        if( path.ends_with( ".go" ) && !isTest && !pluginLookup_ && src.contains( "\"plugin\"" ) )
+        {
+            for( std::size_t p = src.find( ".Lookup(" ); p != std::string_view::npos && !pluginLookup_; p = src.find( ".Lookup(", p + 1 ) )
+            {
+                std::size_t k = p + 8;
+                while( k < src.size() && src[k] == ' ' )
+                {
+                    ++k;
+                }
+                pluginLookup_ = k < src.size() && src[k] != '"' && src[k] != '`';
+            }
+        }
+        if( !headerNames_.empty() && !isTarget && !headerIncluded_ )
+        {
+            headerIncluded_ = includesHeader( src );
+        }
+    }
+
+    // `#include "zz.h"`, `# include <lib/zz.h>`, `#import "zz.h"`: a target header named by its file name (a same-named header elsewhere counts too: a floor on
+    // the hedge, not a proof)
+    bool includesHeader( std::string_view src ) const noexcept
+    {
+        for( std::size_t p = src.find( '#' ); p != std::string_view::npos; p = src.find( '#', p + 1 ) )
+        {
+            std::size_t k = p + 1;
+            while( k < src.size() && ( src[k] == ' ' || src[k] == '\t' ) )
+            {
+                ++k;
+            }
+            const std::string_view rest = src.substr( k );
+            if( !rest.starts_with( "include" ) && !rest.starts_with( "import" ) )
+            {
+                continue;
+            }
+            const std::size_t le = std::min( rest.find( '\n' ), rest.size() );
+            const std::string_view line = rest.substr( 0, le );
+            const std::size_t open = line.find_first_of( "\"<" );
+            const std::size_t close = open == std::string_view::npos ? open : line.find_first_of( "\">", open + 1 );
+            if( close == std::string_view::npos )
+            {
+                continue;
+            }
+            const std::string_view spec = line.substr( open + 1, close - open - 1 );
+            const std::size_t sl = spec.rfind( '/' );
+            const std::string_view base = sl == std::string_view::npos ? spec : spec.substr( sl + 1 );
+            if( std::ranges::contains( headerNames_, base ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // One `[< .. >]` group of paste: literal words and `$var` pieces. A literal beside a variable is a prefix, a suffix or an inner part of the built name.
+    void pasteGroup( std::string_view g ) noexcept
+    {
+        std::vector<std::string_view> parts;
+        for( std::size_t k = 0; k < g.size(); )
+        {
+            if( g[k] == ' ' || g[k] == '\t' )
+            {
+                ++k;
+                continue;
+            }
+            std::size_t e = k;
+            while( e < g.size() && g[e] != ' ' && g[e] != '\t' )
+            {
+                ++e;
+            }
+            parts.push_back( g.substr( k, e - k ) );
+            k = e;
+        }
+        const auto literal = []( std::string_view w ) noexcept
+        { return !w.empty() && std::ranges::all_of( w, []( char c ) noexcept { return c != '$' && isIdent( c ); } ); };
+        if( std::ranges::all_of( parts, literal ) )
+        {
+            std::string joined;
+            for( const std::string_view w : parts )
+            {
+                joined += w;
+            }
+            if( !joined.empty() )
+            {
+                markPrefixRows( joined ); // every piece literal: the exact name the word scan never reads
+            }
+            return;
+        }
+        for( std::size_t k = 0; k < parts.size(); ++k )
+        {
+            if( !literal( parts[k] ) || !stemReads( parts[k].size(), false ) )
+            {
+                continue;
+            }
+            if( k == 0 )
+            {
+                markPrefixRows( parts[k] );
+            }
+            else if( k + 1 == parts.size() )
+            {
+                markSuffixRows( parts[k] );
+            }
+            else
+            {
+                markInnerRows( parts[k] );
+            }
+        }
+    }
+
+    // Does the target reach its own defs by a computed name? `globals()[n]`, `vars()`, `getattr(sys.modules[__name__], n)`, `import_module(__name__)`,
+    // `module.exports[n]`, `exports[n]`: any def of it may be called by a name no file spells. A literal key (`globals()["x"]`) is a name the word scan reads.
+    static bool selfDispatch( std::string_view src ) noexcept
+    {
+        static constexpr std::array<std::string_view, 4> kSelf = { "globals()", "vars()", "locals()", "exports[" };
+        for( const std::string_view w : kSelf )
+        {
+            for( std::size_t p = src.find( w ); p != std::string_view::npos; p = src.find( w, p + 1 ) )
+            {
+                const bool wordStart = p == 0 || !isIdent( src[p - 1] );
+                const std::string_view rest = src.substr( p + w.size() - ( w.ends_with( '[' ) ? 1 : 0 ) );
+                if( wordStart && !literalLookup( rest ) )
+                {
+                    return true;
+                }
+            }
+        }
+        // `sys.modules[__name__]`, `sys.modules.get(__name__)`, `import_module(__name__)`, `__import__(__name__)` on one line
+        for( std::size_t p = src.find( "__name__" ); p != std::string_view::npos; p = src.find( "__name__", p + 1 ) )
+        {
+            const std::size_t ls = src.rfind( '\n', p );
+            const std::size_t le = src.find( '\n', p );
+            const std::string_view line = src.substr( ls == std::string_view::npos ? 0 : ls + 1, le == std::string_view::npos ? std::string_view::npos : le - ( ls == std::string_view::npos ? 0 : ls + 1 ) );
+            if( line.contains( "sys.modules" ) || line.contains( "import_module(" ) || line.contains( "__import__(" ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // What a file says about the target as a MODULE: does a non-test file import it, and does a non-test one hand the module object around instead of naming
+    // a def of it. The target itself (`self`) never counts as its own importer; its self-dispatch and `import * as me from './self'` do hand the module on.
+    void noteImports( std::uint32_t fileId, std::string_view path, std::string_view src, bool isTest, bool hashComments, bool self )
+    {
+        if( self && !moduleAsValue_ && selfDispatch( src ) )
+        {
+            moduleAsValue_ = true;
+            return;
+        }
         if( !namesTargetModule( fileId, src ) )
         {
             return;
@@ -1400,8 +1624,8 @@ private:
                 readImportCalls( t, path, imports, bound, inPlace );
             }
         }
-        importsTarget_ = importsTarget_ || imports;
-        if( !isTest && !moduleAsValue_ && imports )
+        importsTarget_ = importsTarget_ || ( imports && !isTest && !self );
+        if( ( !isTest || self ) && !moduleAsValue_ && imports )
         {
             std::erase_if( bound, []( const std::string& n )
                            { return n.empty(); } );
@@ -1725,11 +1949,15 @@ private:
     std::vector<std::string_view> names_;
     std::vector<std::string> modules_; // the target files' paths without extension: what a computed import's literal head is matched against
     std::vector<std::string> stems_; // the names the target files are imported by
+    std::vector<std::string> sameStem_; // other indexed modules of the target's syntax with one of its stems
     std::uint32_t mentionFile_ = ~std::uint32_t( 0 );
     bool mentionVal_ = false;
     bool dynamicDir_ = false;
     bool registryHook_ = false;
-    bool importsTarget_ = false; // some file (a test too) holds an import-ish line naming the target's module
+    bool pluginLookup_ = false; // a Go file that imports "plugin" looks a symbol up by a computed name
+    bool headerIncluded_ = false; // some file `#include`s a target header by its file name
+    std::vector<std::string> headerNames_; // the file names of the target's C and C++ headers
+    bool importsTarget_ = false; // some non-test file other than the target holds an import line that names the target's module and no other indexed one
     bool moduleAsValue_ = false; // a non-test file that imports it hands the module object around: `ops[n]()`, `getattr(ops, n)`, `Object.values(ops)`
     ModuleSyntax syntax_ = ModuleSyntax::None;
 };
@@ -1840,8 +2068,35 @@ inline std::vector<std::string> manifestsAbove( std::string_view diskAbs, std::s
     return out;
 }
 
-// a `pub` def in a crate with a src/lib.rs: consumers outside the tree may use it
-inline bool inRustLibCrate( std::string_view diskAbs ) noexcept
+// The one read of this lane's scan: every indexed file, every unindexed text file and every manifest comes through here.
+inline std::optional<std::string> readText( const std::string& path )
+{
+    return docparse::detail::readWholeFile( path );
+}
+
+// A `[lib]` table header on its own line (comments and spacing allowed): `[lib]`, `[ lib ]`.
+inline bool cargoHasLib( std::string_view toml ) noexcept
+{
+    for( std::size_t ls = 0; ls < toml.size(); )
+    {
+        const std::size_t le = std::min( toml.find( '\n', ls ), toml.size() );
+        std::string_view t = trimWs( toml.substr( ls, le - ls ) );
+        ls = le + 1;
+        if( !t.starts_with( '[' ) || t.starts_with( "[[" ) )
+        {
+            continue;
+        }
+        t = trimWs( t.substr( 1, t.find( ']' ) == std::string_view::npos ? std::string_view::npos : t.find( ']' ) - 1 ) );
+        if( t == "lib" )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// a `pub` def in a crate with a library target (src/lib.rs or a `[lib]` table): consumers outside the tree may use it. An unreadable Cargo.toml hedges.
+inline bool inRustLibCrate( std::string_view diskAbs )
 {
     namespace fs = std::filesystem;
     std::string dir( diskAbs );
@@ -1851,19 +2106,15 @@ inline bool inRustLibCrate( std::string_view diskAbs ) noexcept
         dir.resize( sl );
         if( fs::is_regular_file( dir + "/Cargo.toml", ec ) )
         {
-            return fs::is_regular_file( dir + "/src/lib.rs", ec );
+            // a `[lib]` table names a library target wherever its `path` points; else Cargo's default src/lib.rs
+            const std::optional<std::string> toml = readText( dir + "/Cargo.toml" );
+            return fs::is_regular_file( dir + "/src/lib.rs", ec ) || !toml || cargoHasLib( *toml );
         }
     }
     return false;
 }
 
-// The one read of this lane's scan: every indexed file, every unindexed text file and every manifest comes through here.
-inline std::optional<std::string> readText( const std::string& path )
-{
-    return docparse::detail::readWholeFile( path );
-}
-
-// A package.json that publishes something: a main, module, exports, types or bin, and not `"private": true`. Its exported defs have consumers outside the tree.
+// A package.json that publishes something: a main, module, exports, types or bin, or a name and a version (npm's default entry), and not `"private": true`. Its exported defs have consumers outside the tree.
 inline bool packageJsonPublishes( std::string_view json ) noexcept
 {
     if( const std::size_t p = json.find( "\"private\"" ); p != std::string_view::npos )
@@ -1879,8 +2130,10 @@ inline bool packageJsonPublishes( std::string_view json ) noexcept
         }
     }
     static constexpr std::array<std::string_view, 6> kKeys = { "\"main\"", "\"module\"", "\"exports\"", "\"types\"", "\"typings\"", "\"bin\"" };
+    // npm publishes any package with a name and a version; with no main its entry is index.js
     return std::ranges::any_of( kKeys, [json]( std::string_view k )
-                                { return json.contains( k ); } );
+                                { return json.contains( k ); } )
+           || ( json.contains( "\"name\"" ) && json.contains( "\"version\"" ) );
 }
 
 // A pyproject.toml that builds a distribution: a [project] or [tool.poetry] table, or a [build-system].
@@ -2602,7 +2855,30 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
         const Lang lang = table.rows.empty() ? Lang::Unknown : ing.symbols[table.rows.front().defs.front()].lang;
         const ModuleSyntax syntax = std::ranges::contains( kPythonLangs, lang ) ? ModuleSyntax::Python : std::ranges::contains( kJsFamilyLangs, lang ) ? ModuleSyntax::Js
                                                                                                                                                        : ModuleSyntax::None;
-        scans.emplace_back( table.rows, table.pair, std::move( modules ), std::move( stems ), syntax );
+        std::vector<std::string> sameStem;
+        if( syntax != ModuleSyntax::None )
+        {
+            for( std::uint32_t k = 0; k < ing.files.size(); ++k )
+            {
+                const Lang kl = langOfPath( rootRelPath( ing, k ) );
+                const bool sameSyntax = syntax == ModuleSyntax::Python ? std::ranges::contains( kPythonLangs, kl ) : std::ranges::contains( kJsFamilyLangs, kl );
+                if( sameSyntax && !std::ranges::contains( table.pair, k ) && std::ranges::contains( stems, moduleStem( rootRelPath( ing, k ) ) ) )
+                {
+                    sameStem.push_back( withoutExt( rootRelPath( ing, k ) ) );
+                }
+            }
+        }
+        scans.emplace_back( table.rows, table.pair, std::move( modules ), std::move( stems ), syntax, std::move( sameStem ) );
+        std::vector<std::string> headers;
+        for( const std::uint32_t pf : table.pair )
+        {
+            const std::string_view rel = rootRelPath( ing, pf );
+            if( quality::isHeaderPath( rel ) )
+            {
+                headers.emplace_back( mention_detail::baseNameOf( rel ) );
+            }
+        }
+        scans.back().setHeaderNames( std::move( headers ) );
     }
     const auto scanAll = [&]( std::uint32_t id, std::string_view rel, std::string_view bytes )
     {
@@ -2660,15 +2936,28 @@ inline std::string renderForUnusedTable( const IngestResult& ing, const Graph& g
         const bool pyOrJs = std::ranges::contains( kPythonLangs, fileLang ) || std::ranges::contains( kJsFamilyLangs, fileLang );
         const bool barrel = fileIsStarExported( rootRelPath( ing, table.file ), fileLang, table.file, starTexts, starIds );
         const bool library = ( std::ranges::contains( kPythonLangs, fileLang ) && pyPackaged && !pythonModulePrivate( rootRelPath( ing, table.file ) ) ) || ( std::ranges::contains( kJsFamilyLangs, fileLang ) && jsPublished );
+        // a header no file of the tree includes is there for an outside includer (a root-level library header), or dead as a whole
+        const bool lonelyHeader = quality::isHeaderPath( rootRelPath( ing, table.file ) ) && !scans[t].headerIncluded();
+        // `p.Lookup(name)` in a plugin host: an exported def of a `package main` is a plugin symbol a computed name may reach
+        bool pluginMain = false;
+        if( fileLang == Lang::Go && scans[t].pluginLookup() )
+        {
+            const std::optional<std::string> own = readText( diskPath( ing, table.file ) );
+            pluginMain = !own || own->starts_with( "package main" ) || own->contains( "\npackage main" );
+        }
         for( Row& r : table.rows )
         {
             if( barrel )
             {
                 r.why |= kWhyBarrel;
             }
-            if( library )
+            if( library || lonelyHeader )
             {
                 r.why |= kWhyApi; // a distribution's public surface has consumers this tree does not hold
+            }
+            if( pluginMain && !r.name.empty() && std::isupper( static_cast<unsigned char>( r.name[0] ) ) != 0 )
+            {
+                r.why |= kWhyBuilt;
             }
             if( pyOrJs && !scans[t].importsTarget() && r.inFile == 0 && r.sameText == 0 )
             {
@@ -2715,9 +3004,9 @@ inline constexpr std::string_view kForUnusedLegend =
     "v=unused: the name appears in no text file under the root outside its definition, declarations and comments (prose docs .md .rst .adoc and changelogs are not read), and no why= applies: proves that of this tree only. "
     "why=name a non-test word no edge explains (a member call, a callback), by-name its callers bound by name alone or split over same-named defs, declined a declined call may mean it, value a table or argument holds it, "
     "string a string literal is its name (__all__, getattr), built-name a string or macro builds names it could be, or a file indexes or passes the module object along, import only an import or re-export names it, or a default export an importer names by anything, barrel its file is star re-exported, "
-    "dispatch a base, trait or interface may call it, framework the language or a framework calls it (decorator, attribute, entry point), api consumers outside this tree may use it, "
+    "dispatch a base, trait or interface may call it, framework the language or a framework calls it (decorator, attribute, entry point), api consumers outside this tree may use it (a published package or lib crate, a header under include/ or included by no file), "
     "members a type whose members are reached without its name (a member has evidence, or an unscoped enum), manifest a build or package file names it, in-file an unknown def in this file calls it, "
-    "unimported no file imports its module (Python, TS, JS: an entry point, a plugin, a convention file such as settings.py, or dead as a whole), unseen a text file could not be read or a limit was hit (unseen=N, unseen_by=size|total|files|read|walk on the block). "
+    "unimported no non-test file imports its module by a path that names it alone (Python, TS, JS: an entry point, a plugin, a convention file such as settings.py, or dead as a whole), unseen a text file could not be read or a limit was hit (unseen=N, unseen_by=size|total|files|read|walk on the block). "
     "out= non-test callers elsewhere, in= in this file, by= one of them, tests= test callers and words, text= str= imp= same= non-test code, string, import and same-file words, at= sites to read. "
     "lang_unserved=1 no verdicts for this language; unread=1; unseen=N files that could not be read or a limit hit; shown= capped=1 rows cut; unused_cut: files or bytes cut; unused_names: several files match, none picked";
 inline constexpr std::string_view kForCompactUnusedLegend =
