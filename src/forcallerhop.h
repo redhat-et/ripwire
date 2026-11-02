@@ -419,6 +419,18 @@ inline constexpr std::string_view kForCompactRankedCallerHopLegend =
     "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
     "shown= of total=; d=2 rows: their callers, d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
 
+// SUBJECT-ANCHOR: the subject's named symbol (by="subject" on the element). Self-contained, as the ranked clauses are.
+inline constexpr std::string_view kForSubjectCallerHopLegend =
+    "; callers by=subject of=: the subject names this function exactly, so its callers ride on the conceptual answer above: s t= n= sc= p=file:line rows are its 1-hop callers "
+    "(n=Owner.name with no sc= on a member whose owner the index defines; sites_at= their calls of it as file:line, sites_total= when "
+    "that list was cut; via=name: matched by name alone, the receiver unproven), shown= of total=; then d=2 rows, callers of the "
+    "shown callers by rank, d2_shown= of d2=; capped=1 when either hop was cut; counts are floors (resolved calls only); next= lists "
+    "the whole caller radius";
+inline constexpr std::string_view kForCompactSubjectCallerHopLegend =
+    "; callers by=subject of=: the function the subject names, on top of the conceptual answer: its callers, s t= n= "
+    "sc= p=file:line (n=Owner.name folds sc= on a member; sites_at= its call sites, sites_total= if cut; via=name by name only), "
+    "shown= of total=; d=2 rows: their callers, d2_shown= of d2=; capped=1 if cut; floors; next= the radius";
+
 struct CallerHopRender
 {
     std::string xml;   // <callers …>…</callers>; empty when there is no target or the render failed
@@ -487,9 +499,10 @@ inline std::vector<NodeId> callerHopSecondRows( const IngestResult& ing, const G
 }
 
 // The element. `rootArg` is the single-root run's own root (empty under multi-root: p= keeps ingest's spelling), as every --for row.
-// `ranked` (UPWARD-2HOP): the seed came from forRankedCallerHopTargets, and the element says so (by="rank", its own clause).
+// `by`: empty on the name-exact route; "rank" (UPWARD-2HOP) the seed came from forRankedCallerHopTargets; "subject" (SUBJECT-ANCHOR) a
+// conceptual route's subject names it (subjectanchor.h). The element says so (by=, its own clause).
 inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph& g, std::span<const NodeId> targets, std::string_view rootArg,
-                                           bool ranked = false )
+                                           std::string_view by = {} )
 {
     CallerHopRender out;
     if( targets.empty() )
@@ -517,7 +530,14 @@ inline CallerHopRender renderForCallerHop( const IngestResult& ing, const Graph&
     const CallerHopRowCtx rc{ ing, owners, rootArg, esc };
     std::string&          x = out.xml;
     x.reserve( 160 + ( firstShown + secondShown ) * 112 );
-    x += ranked ? "<callers by=\"rank\" of=\"" : "<callers of=\"";
+    x += "<callers ";
+    if( !by.empty() )
+    {
+        x += "by=\"";
+        x += by;
+        x += "\" ";
+    }
+    x += "of=\"";
     x += escapeXml( sel, esc );
     x += "\" shown=\"" + std::to_string( firstShown ) + "\" total=\"" + std::to_string( first.size() ) + "\" capped=\"";
     x += ( firstShown < first.size() || secondShown < second.size() ) ? "1" : "0";
