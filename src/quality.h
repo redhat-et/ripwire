@@ -1690,6 +1690,43 @@ inline bool isRustTestAttribute( std::string_view attr ) noexcept
     return false;
 }
 
+// rustCodeOfAttributeLine returns an attribute line without a trailing `//` comment. Rust reads that comment as
+// whitespace, so `#[test] // case` is still `#[test]`. A `//` inside a double-quoted string is attribute text:
+// `#[tokio::test(flavor = "http://x")]` keeps its argument whether or not a comment follows it.
+inline std::string_view rustCodeOfAttributeLine( std::string_view line ) noexcept
+{
+    bool inString = false;
+    for( std::size_t i = 0; i < line.size(); ++i )
+    {
+        const char c = line[ i ];
+        if( inString )
+        {
+            if( c == '\\' )
+            {
+                ++i;
+            }
+            else if( c == '"' )
+            {
+                inString = false;
+            }
+        }
+        else if( c == '"' )
+        {
+            inString = true;
+        }
+        else if( c == '/' && i + 1 < line.size() && line[ i + 1 ] == '/' )
+        {
+            line = line.substr( 0, i );
+            break;
+        }
+    }
+    while( !line.empty() && std::isspace( static_cast<unsigned char>( line.back() ) ) )
+    {
+        line.remove_suffix( 1 );
+    }
+    return line;
+}
+
 // rustTestAttributed reads backwards from the item's signature start over blank lines, `//` comments and other
 // attribute lines (`#[inline]`, `#[allow(...)]`), and answers true when one of them is a test attribute. Whole-token
 // compare: `#[testing]` and a `#[test]` inside a comment do not count.
@@ -1718,6 +1755,12 @@ inline bool rustTestAttributed( std::string_view file, std::size_t sigStart ) no
         if( line.substr( 0, 2 ) == "//" )
         {
             end = from;   // a comment or doc line: keep reading upward
+            continue;
+        }
+        line = rustCodeOfAttributeLine( line );
+        if( line.empty() )
+        {
+            end = from;
             continue;
         }
         const std::size_t open = line.rfind( "#[" );

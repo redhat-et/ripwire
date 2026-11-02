@@ -432,5 +432,41 @@ commit "$A10" "a dangling test attribute at end of file"
 if [ "$RC10" -eq 0 ] || [ "$RC10" -eq 2 ]; then ok "arm10: a dangling #[test] at end of file does not crash the scan (exit $RC10)"
 else no "arm10: a dangling #[test] at end of file made ripwire exit $RC10"; fi
 
+# ── ARM 11: a trailing // comment after a test attribute (issue #499 review) ───────────────────────────────
+# Rust reads `#[test] // case` as `#[test]` followed by a comment, so the harness still registers the fn and the
+# exemption must hold. A `//` inside an attribute's string argument is text, not a comment: the
+# `#[tokio::test(flavor = "http://x")]` shape stays exempt with no trailing comment at all. A trailing comment on a
+# NON-test attribute changes nothing: `#[testing] // note` stays flagged, and so does an ordinary dead fn.
+A11="$WORK/a11"; newrepo "$A11"
+printf 'fn live_helper() -> u32 { 1 }\n' > "$A11/lib.rs"
+commit "$A11" "baseline for the trailing-comment arms"
+cat >> "$A11/lib.rs" <<'EOF'
+
+#[test] // regression case
+fn trailing_comment_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "current_thread")] // harness case
+fn flavored_trailing_case() { assert_eq!(live_helper(), 1); }
+
+#[tokio::test(flavor = "http://x")]
+fn slashes_in_string_case() { assert_eq!(live_helper(), 1); }
+
+#[testing] // not a test attribute
+fn testing_attr_with_comment() { }
+
+fn dead_plain() { }
+EOF
+QD11="$( cd "$A11" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
+for sym in trailing_comment_case flavored_trailing_case slashes_in_string_case; do
+    printf '%s' "$QD11" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && no "arm11: '$sym' is a #[test] function but was reported as dead-code" \
+        || ok "arm11: '$sym' (#[test] shape with trailing comment or // in its string) excluded from dead-code"
+done
+for sym in testing_attr_with_comment dead_plain; do
+    printf '%s' "$QD11" | grep -q "kind=\"dead-code\" sym=\"$sym\"" \
+        && ok "arm11: '$sym' (negative lookalike) still flagged" \
+        || no "arm11: '$sym' should still be flagged — the trailing comment leaked into the exemption"
+done
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"
 exit "$fail"
