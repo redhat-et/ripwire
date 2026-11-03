@@ -49,6 +49,9 @@
 #   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
 #          add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names; near misses keep the answer byte-identical
 #   N1 [train 42b T-3] an <x> excerpt line over 200 bytes is cut on a UTF-8 boundary with cut="1" (a 48.9 KB minified body); twin: none
+#   D1-D7 (lane LIT-SITE-DECOY; RED on base 6bae81c6 where [P], fixture built at runtime): sites ordered by nearness to the answer (its rows and bodies,
+#          the literal's source definitions: file, directory, one call); capped blocks cut the far sites and far tables (lit_cut=, legend, next=);
+#          a static/ copy is no row beside product sites; twins: a static-only literal, an uncapped block, an unanchored single-table block
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -1456,6 +1459,115 @@ printf 'MORE = {\n    "rk_two": 1,\n    "rk_three": 2,\n    "rk_four": 3,\n}\nde
 Q="$( rkq 'add a new test for big_key like rk_two alongside rk_three following rk_four' )"
 if has "$Q" '<lit_capped scanned="4" skipped="1" next="--grep=big_key"' && has "$Q" 's="rk_four"'; then ok "T42 [P] the unread anchor is one scan: three more anchors print, <lit_capped> scanned=4 skipped=1"
 else no "T42 unread anchor counted twice: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$Q" | cut -c1-120 | tr '\n' ' ' )"; fi
+
+# ── D (lane LIT-SITE-DECOY; [P] RED on base 6bae81c6, fixture built at runtime): the sites are ordered by nearness to the answer above the block
+# (its rows and bodies, and the literal's own source definitions: same file, same directory, one call away) and, when they do not all fit, the far
+# ones are cut with a disclosed count (lit_cut=) and next= lists every site; a CI, vendored or generated copy is no row beside a product site. ──
+DF="$TMP/dfix"; mkdir -p "$DF/src/core" "$DF/src/fuzz/gen" "$DF/aaa/scripts" "$DF/zzz/far" "$DF/zzz/t1" "$DF/src/home" "$DF/static/js" "$DF/tests"
+cat > "$DF/src/core/settings.cpp" <<'CC'
+#define COMMON_SETTINGS(DECLARE) \
+    DECLARE(SlotCount, worker_slots, 0, "the worker slots") \
+    DECLARE(QueueDepth, queue_depth, 16, "the queue depth") \
+    DECLARE(MinRows, min_rows, 1, "min rows")
+CC
+cat > "$DF/src/core/settings.h" <<'CC'
+struct CoreSettings {
+    int slots;
+};
+int worker_slots(const CoreSettings& s) { return s.slots; }
+int queue_depth() { return 16; }
+int min_rows() { return 1; }
+CC
+cat > "$DF/src/core/defaults.cpp" <<'CC'
+int slotsDefault() {
+    return lookupSetting("worker_slots");
+}
+int depthDefault() {
+    return lookupSetting("queue_depth");
+}
+CC
+cat > "$DF/src/fuzz/gen/session.cpp" <<'CC'
+static std::unordered_map<std::string, int> fuzzSettings = {
+    {"worker_slots", 1},
+    {"min_rows", 2},
+};
+CC
+cat > "$DF/aaa/scripts/ci_jobs.py" <<'PY'
+WORKER_OVERRIDE = "worker_slots"
+def run_job():
+    return {"worker_slots": 4}
+PY
+# far readers: 40 one-line functions, so the 46 sites of worker_slots do not fit the 32 rows; far_knob's and home_knob's sites stand here too
+{ for i in $( seq 1 40 ); do printf 'int far_reader_%s() { return getSetting("worker_slots") + getSetting("far_knob") + getSetting("home_knob"); }\n' "$i"; done; } > "$DF/zzz/far/readers.cpp"
+cat > "$DF/zzz/far/knobs.cpp" <<'CC'
+static std::unordered_map<std::string, int> farKnobs = {
+    {"far_knob", 1},
+    {"other_knob", 2},
+};
+CC
+cat > "$DF/tests/knobs_test.cpp" <<'CC'
+int far_knob() { return 1; }
+int home_knob() { return 1; }
+CC
+cat > "$DF/zzz/t1/aux.cpp" <<'CC'
+static std::unordered_map<std::string, int> auxKnobs = {
+    {"home_knob", 1},
+    {"aux_knob", 2},
+};
+CC
+cat > "$DF/src/home/knobs.cpp" <<'CC'
+static std::unordered_map<std::string, int> homeKnobs = {
+    {"home_knob", 1},
+    {"main_knob", 2},
+};
+int readHomeA() { return getSetting("home_knob"); }
+int readHomeB() { return getSetting("home_knob") + 1; }
+int readHomeC() { return getSetting("home_knob") + 2; }
+CC
+cat > "$DF/static/js/pool.js" <<'JS'
+function vendoredPool() { return config("ONLY_STATIC_KEY") + config("queue_depth"); }
+JS
+dq(){ ( cd "$DF" || exit 1; "$BIN" "$DF" --no-cache "--for=$1" </dev/null 2>/dev/null ); }
+rows(){ grep -o '<ls p="[^"]*" l="[0-9]*"' | sed 's/<ls p="//; s/" l="/:/; s/"$//'; }
+
+A="$( dq 'worker_slots default' )"; L="$( lits <<<"$A" )"
+first="$( rows <<<"$L" | head -1 )"
+# D1 [P] proximity order: the table row near the answer's anchor (settings.h defines worker_slots) ranks before the fuzz table row the old string-first order put first
+if [ "$first" = "src/core/settings.cpp:2" ]; then ok "D1 [P] the table row near the answer's anchor is the first row"; else no "D1 first row: $first"; fi
+# D2 [P] the cap: 46 sites do not fit 32 rows and three stand near the anchor, so the far ones (another table, CI script, far readers) are cut and counted
+n_far="$( rows <<<"$L" | grep -c -E '^(src/fuzz|aaa/|zzz/)' )"
+if has "$L" 'src="46" shown="3" capped="1"' && has "$L" 'lit_cut="43"' && [ "$n_far" = "0" ] \
+   && has "$L" '<ls p="src/core/defaults.cpp" l="2"' && has "$L" '<ls p="src/core/settings.h" l="4"'; then
+    ok "D2 [P] capped: near rows only (settings.cpp, settings.h, defaults.cpp), lit_cut=43 counts the far ones"
+else no "D2 cap: far rows=$n_far $( grep -o '<lit [^>]*>' <<<"$L" )"; fi
+# D3 [P] the next-call line: the lit_cut legend names next= as the call that lists every site, and that call prints the cut ones
+G="$( cd "$DF" && "$BIN" "$DF" --no-cache --grep=worker_slots </dev/null 2>/dev/null )"
+nleg="$( grep -o 'lit_cut=N: N read sites not rows' <<<"$A" | wc -l | tr -d ' ' )"
+if [ "$nleg" = "1" ] && has "$L" 'next="--grep=worker_slots"' && has "$G" 'src/fuzz/gen/session.cpp' && has "$G" 'aaa/scripts/ci_jobs.py' && has "$G" 'zzz/far/readers.cpp'; then
+    ok "D3 [P] lit_cut legend once; next= --grep=worker_slots lists the cut sites (fuzz table, CI script, far readers)"
+else no "D3 next line: legend x$nleg; grep ${#G} B"; fi
+# D4 [P] a vendored/generated copy (static/) is no row beside a product site, even when every site fits
+Q="$( lits <<<"$( dq 'queue_depth default' )" )"
+if has "$Q" 's="queue_depth" shape="table"' && ! has "$Q" 'static/js/pool.js' && has "$Q" 'lit_cut="1"'; then ok "D4 [P] the static/ copy is cut beside the product sites (lit_cut=1)"
+else no "D4 vendored copy: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | tr '\n' ' ' )"; fi
+# D4b [G] twin: a literal met only in the static/ copy keeps its row (no product site to prefer)
+Q="$( lits <<<"$( dq 'ONLY_STATIC_KEY' )" )"
+if has "$Q" '<ls p="static/js/pool.js"' && ! has "$Q" 'lit_cut='; then ok "D4b [G] a literal only in static/ keeps its row, nothing cut"; else no "D4b static-only: ${Q:0:300}"; fi
+# D5 [G] twin, unchanged: every site fits and stands near (queue_depth minus the static copy is D4); min_rows: two tables, all fit: both rows, no cut
+Q="$( lits <<<"$( dq 'min_rows default' )" )"
+if has "$Q" '<ls p="src/core/settings.cpp" l="4"' && has "$Q" '<ls p="src/fuzz/gen/session.cpp" l="3"' && ! has "$Q" 'lit_cut=' && ! has "$Q" 'read sites not rows'; then
+    ok "D5 [G] all sites fit: both tables listed, no lit_cut, no cut legend"
+else no "D5 uncapped twin: $( rows <<<"$Q" | tr '\n' ' ' )"; fi
+# D6 [G] twin: nothing stands near the answer (far_knob is defined only in a test file) and one table: the capped block is the old one, no cut
+Q="$( lits <<<"$( dq 'far_knob default' )" )"
+want="$( { echo zzz/far/knobs.cpp:2; for i in $( seq 1 31 ); do echo "zzz/far/readers.cpp:$i"; done; } | tr '\n' ' ' )"
+if has "$Q" 's="far_knob" shape="table"' && has "$Q" 'shown="32" capped="1"' && ! has "$Q" 'lit_cut=' && [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "$want" ]; then
+    ok "D6 [G] no anchor near and one table: the old 32 rows in the old order (the table row, then readers.cpp 1-31), no lit_cut"
+else no "D6 unanchored twin: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -3 | tr '\n' ' ' )"; fi
+# D7 [P] several tables, none near the answer, sites over the rows: the home table (the file holding most of the literal's sites) stays, the other table's row is cut
+Q="$( lits <<<"$( dq 'home_knob default' )" )"
+if has "$Q" '<ls p="src/home/knobs.cpp" l="2"' && ! has "$Q" '<ls p="zzz/t1/aux.cpp"' && has "$Q" 'lit_cut="1"'; then ok "D7 [P] two tables, none near: the home table file stays, the other table row is cut (lit_cut=1)"
+else no "D7 home table: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"

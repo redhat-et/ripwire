@@ -84,6 +84,7 @@
 #include "search.h"          // grepCollect / grepEnrich / isBareWordCodePath
 #include "serialize.h"       // escapeXml / appendCdataSafe / truncateUtf8WithEllipsis
 #include "taskroute.h"       // taskroute::identifierRunOf
+#include "subjectanchor.h"   // subject_detail::sourceClassDef / isToolOrVendoredPath — the answer's source-class anchors
 
 #include <algorithm>
 #include <array>
@@ -179,6 +180,13 @@ inline constexpr std::string_view kForLiteralTableLegend =
     "claim. lines=a-b with the lines after it. read=N: only the first N source sites of src= in path order were read for a table row. longer= source sites inside a longer "
     "word, counted, never rows. A cut on a row boundary says capped=1. -->";
 static_assert( kForLiteralTableLegend.find( "--", 4 ) == kForLiteralTableLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
+
+// present only with lit_cut= (LIT-SITE-DECOY), so the bytes of a block that cuts nothing do not move
+inline constexpr std::string_view kForLiteralCutLegend =
+    "<!-- ripwire for lit: rows near the answer first: a site in a file or directory of its rows, bodies or the literal's own definitions, or one call "
+    "from them. lit_cut=N: N read sites not rows: in a CI, vendored or generated path beside product sites, or, when the sites do not all fit, far from "
+    "the answer, or a row of another table than the one near it (with no table near it: the one whose file holds the most sites); next= lists every site. -->";
+static_assert( kForLiteralCutLegend.find( "--", 4 ) == kForLiteralCutLegend.size() - 3, "the only double hyphen in a legend comment is its closing" );
 
 inline bool forLiteralOn()
 {
@@ -819,10 +827,117 @@ struct ForLiteralRender
     std::size_t bodies = 0;   // <b>/<x> elements served
     bool        noRoom = false;   // shape=table: sites exist, but not one row fit the bytes left
     bool        unread = false;   // shape=table: a table-rows-only anchor with more sites than are read for a row, none of those read a row: unknown, not "no table"
+    bool        cutLegend = false;   // this element carries the lit_cut legend
+};
+
+// LIT-SITE-DECOY: what the ranked answer above the block stands on, read to order the literal's sites by nearness to it
+struct LitAnchors
+{
+    std::span<const NodeId> answer;      // the answer's shown signature rows and the bodies it serves whole
+    const Graph*            g = nullptr; // the run's call graph (1-hop nearness); null = no graph reading
 };
 
 namespace lit_detail
 {
+// how near a site stands to the answer's anchors: the answer's source-class rows and the literal's own source definitions
+enum class Prox : std::uint8_t
+{
+    Near = 0,   // in an anchor's file, or its owner is an anchor or calls / is called by one
+    Dir  = 1,   // in an anchor's directory
+    Far  = 2,   // elsewhere in the product
+    Off  = 3    // a CI, tool, vendored or generated copy (subject_detail::isToolOrVendoredPath)
+};
+
+struct AnchorSet
+{
+    std::vector<NodeId>           syms;    // sorted, unique
+    std::vector<std::uint32_t>    files;   // sorted, unique
+    std::vector<std::string_view> dirs;    // sorted, unique, root-relative
+};
+
+inline std::string_view dirOfPath( std::string_view p ) noexcept
+{
+    const std::size_t slash = p.rfind( '/' );
+    return slash == std::string_view::npos ? std::string_view() : p.substr( 0, slash );
+}
+
+template<typename T>
+inline void sortUnique( std::vector<T>& v )
+{
+    std::sort( v.begin(), v.end() );
+    v.erase( std::unique( v.begin(), v.end() ), v.end() );
+}
+
+inline void addAnchor( const IngestResult& ing, AnchorSet& a, NodeId id )
+{
+    if( id < NodeId( ing.symbols.size() ) && subject_detail::sourceClassDef( ing, id ) )
+    {
+        a.syms.push_back( id );
+        a.files.push_back( ing.symbols[id].fileId );
+        a.dirs.push_back( dirOfPath( rootRelPath( ing, ing.symbols[id].fileId ) ) );
+    }
+}
+
+// the answer's source-class anchors, and (defs) the source-class definitions of the literal's name: the symbol a dotted or qualified literal
+// ends in (`SyntaxKind.SatisfiesExpression` is SatisfiesExpression's)
+inline AnchorSet anchorSetOf( const IngestResult& ing, std::span<const NodeId> ids )
+{
+    AnchorSet a;
+    for( const NodeId id : ids )
+    {
+        addAnchor( ing, a, id );
+    }
+    sortUnique( a.syms );
+    sortUnique( a.files );
+    sortUnique( a.dirs );
+    return a;
+}
+inline std::vector<NodeId> literalDefsOf( const IngestResult& ing, std::string_view literal )
+{
+    const std::size_t      sep  = literal.find_last_of( ".:#" );
+    const std::string_view tail = sep == std::string_view::npos ? literal : literal.substr( sep + 1 );
+    std::vector<NodeId>    out;
+    for( NodeId id = 0; id < NodeId( ing.symbols.size() ) && !tail.empty(); ++id )
+    {
+        if( ing.symbols[id].name == tail )
+        {
+            out.push_back( id );
+        }
+    }
+    return out;
+}
+
+// `from` calls `to` on the graph (outTargets is ascending within a source)
+inline bool callsOnGraph( const Graph& g, NodeId from, NodeId to ) noexcept
+{
+    if( std::size_t( from ) + 1 >= g.outOff.size() )
+    {
+        return false;
+    }
+    const auto b = g.outTargets.begin() + g.outOff[from];
+    const auto e = g.outTargets.begin() + g.outOff[from + 1];
+    return std::binary_search( b, e, to );
+}
+
+inline Prox proxOf( const IngestResult& ing, const AnchorSet& a, const Graph* g, std::uint32_t fileId, NodeId owner )
+{
+    const std::string_view p = rootRelPath( ing, fileId );
+    if( subject_detail::isToolOrVendoredPath( p ) )
+    {
+        return Prox::Off;
+    }
+    if( std::binary_search( a.files.begin(), a.files.end(), fileId ) )
+    {
+        return Prox::Near;
+    }
+    if( owner != kNoNode && g != nullptr
+        && std::any_of( a.syms.begin(), a.syms.end(), [ & ]( NodeId s ) { return s == owner || callsOnGraph( *g, owner, s ) || callsOnGraph( *g, s, owner ); } ) )
+    {
+        return Prox::Near;
+    }
+    return std::binary_search( a.dirs.begin(), a.dirs.end(), dirOfPath( p ) ) ? Prox::Dir : Prox::Far;
+}
+
 struct Site
 {
     GrepRawHit raw;
@@ -830,6 +945,80 @@ struct Site
     bool       quotedKey = false;   // shape=dotted: quotes delimit the key on both sides (`'files.autoSave'`), not a mention inside a sentence
     std::string tbl;                // shape=table: the line that opens the table this site is a row of ("item" at top level); "" = not a table row
 };
+
+// LIT-SITE-DECOY: the sort tier of each ranked site (0 a near or kept table row, 1 another table row, 2 a near site, 3 a far one) or kCutTier
+// (not a row), and how many are cut
+inline constexpr std::uint8_t kCutTier = 255;
+struct SiteCut
+{
+    std::vector<std::uint8_t> tier;
+    std::size_t               count = 0;
+};
+
+// `rows[i]` pairs with `enriched[i]` (the ranked window). `capped`: the sites do not all fit the rows, so the far ones are cut, not only ordered.
+// Cuts: (1) a CI, vendored or generated copy (Prox::Off) whenever a product site exists; when capped, (2) the far sites when some site stands near
+// the answer, and (3) the table rows far from it when a table row stands near it, or, with none near and several tables, the rows outside the
+// table file holding the most sites of the literal (its home). Nothing near and one table: nothing is cut but (1), the order is the old one.
+inline SiteCut cutSites( const IngestResult& ing, const LitAnchors& anchors, std::string_view literal, const std::vector<Site>& rows,
+                         const std::vector<GrepHit>& enriched, bool tableRows, bool capped )
+{
+    SiteCut out;
+    out.tier.assign( enriched.size(), 1 );
+    std::vector<NodeId> ids( anchors.answer.begin(), anchors.answer.end() );
+    const std::vector<NodeId> defs = literalDefsOf( ing, literal );
+    ids.insert( ids.end(), defs.begin(), defs.end() );
+    const AnchorSet set = anchorSetOf( ing, ids );
+    std::vector<Prox> prox( enriched.size() );
+    bool anyProduct = false, anyNear = false, anyNearTable = false;   // anyNear: a site that is no table row
+    for( std::size_t i = 0; i < enriched.size(); ++i )
+    {
+        prox[i]      = proxOf( ing, set, anchors.g, rows[i].raw.fileId, enriched[i].enclosingId );
+        anyProduct   = anyProduct || prox[i] != Prox::Off;
+        const bool near = prox[i] == Prox::Near || prox[i] == Prox::Dir;
+        anyNear      = anyNear || ( near && rows[i].tbl.empty() );
+        anyNearTable = anyNearTable || ( near && !rows[i].tbl.empty() );
+    }
+    // the home table, when the sites do not all fit, several tables hold the literal and none of their rows stands near the answer: the
+    // table file holding the most sites of the literal (every source site counts); the rows of the other tables are cut
+    std::uint32_t homeFile = UINT32_MAX;
+    if( tableRows && capped && !anyNearTable )
+    {
+        std::size_t best = 0, files = 0;
+        std::vector<std::uint32_t> seen;
+        for( std::size_t i = 0; i < enriched.size(); ++i )
+        {
+            const std::uint32_t f = rows[i].raw.fileId;
+            if( rows[i].tbl.empty() || prox[i] == Prox::Off || std::find( seen.begin(), seen.end(), f ) != seen.end() )
+            {
+                continue;
+            }
+            seen.push_back( f );
+            ++files;
+            const std::size_t n = std::size_t( std::count_if( rows.begin(), rows.end(), [ & ]( const Site& s ) { return s.raw.fileId == f; } ) );
+            if( n > best )   // a tie keeps the first in path order
+            {
+                best     = n;
+                homeFile = f;
+            }
+        }
+        homeFile = files > 1 ? homeFile : UINT32_MAX;
+    }
+    const bool cutFar = capped && ( anyNear || anyNearTable );   // something stands near the answer: the far sites are cut, not only ordered
+    for( std::size_t i = 0; i < enriched.size(); ++i )
+    {
+        const bool table = !rows[i].tbl.empty();
+        const bool near  = prox[i] == Prox::Near || prox[i] == Prox::Dir;
+        const bool cutTable = table && capped && ( anyNearTable ? !near : ( homeFile != UINT32_MAX && rows[i].raw.fileId != homeFile ) );
+        if( ( prox[i] == Prox::Off && anyProduct ) || cutTable || ( !table && cutFar && !near ) )
+        {
+            out.tier[i] = kCutTier;
+            ++out.count;
+            continue;
+        }
+        out.tier[i] = std::uint8_t( ( table ? 0 : 2 ) + ( near || prox[i] == Prox::Off ? 0 : 1 ) );   // table rows first, near before far in each
+    }
+    return out;
+}
 
 // shape=dotted: where a hit of a key of `n` bytes at `at` of `text` stands. longer: inside a longer name or a child key (an identifier byte
 // on either side, or `.` plus an identifier byte after it); `config.a.b` keeps a.b whole, a prefix is how a context key spells it.
@@ -1880,12 +2069,14 @@ struct ForLiteralLimits
     std::size_t byteCap    = SIZE_MAX;   // element bytes left for rows and bodies
     bool        withLegend = true;       // only the first element of a task carries the legend comments
     bool        tableOnly  = false;      // TableCue::TableRowOnly: no table row, no block
+    bool        cutLegendAbove = false;  // an earlier element of the task carries the lit_cut legend
 };
 
 // THE BLOCK. `served` = the answer's own bytes after <sigs> (bodies, fold, slot, hops): a body whose <b … l= p= n=> head is in it
 // is not printed again. `useMemo` = the span-tier memo (false under --no-cache). `compactLegend` = the default --legend=compact dialect.
 inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLiteral& lit, std::string_view rootArg, std::string_view served,
-                                          RedactCounts* redact, bool useMemo, bool compactLegend, const ForLiteralLimits& limits = {} )
+                                          RedactCounts* redact, bool useMemo, bool compactLegend, const ForLiteralLimits& limits = {},
+                                          const LitAnchors& anchors = {} )
 {
     ForLiteralRender out;
     if( lit.text.empty() || ing.files.empty() )
@@ -2051,7 +2242,15 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         const bool callable = enriched[i].enclosingId != kNoNode && ReceiverEvidence::callableKind( ing.symbols[enriched[i].enclosingId].kind );
         return ( policy.tableRows && lit_detail::isSecondaryPath( rootRelPath( ing, rows[i].raw.fileId ) ) ? 6 : 0 ) + ( policy.tableRows && rows[i].tbl.empty() ? 12 : 0 ) + ( policy.boundary == lit_detail::LitBoundary::Key && !rows[i].quotedKey ? 6 : 0 ) + ( callable != policy.tableRows ? 0 : 3 ) + ( rows[i].k == 's' ? 0 : ( rows[i].k == 'c' ? 1 : 2 ) );
     };
-    std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b ) { return rankOf( a ) < rankOf( b ); } );
+    // LIT-SITE-DECOY: nearness to the answer above the block (its rows and bodies, and the literal's own definitions) orders the sites and,
+    // when they do not all fit, cuts the far ones (lit_cut=). A CI, vendored or generated copy is never a row beside a product site.
+    const lit_detail::SiteCut cut = lit_detail::cutSites( ing, anchors, lit.text, rows, enriched, policy.tableRows, rows.size() > policy.rows );
+    std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b )
+                      {
+                          const auto key = [ & ]( std::size_t i ) { return std::pair{ cut.tier[i], rankOf( i ) }; };
+                          return key( a ) < key( b );
+                      } );
+    std::erase_if( order, [ & ]( std::size_t i ) { return cut.tier[i] == lit_detail::kCutTier; } );
     std::vector<char> registration( order.size(), 0 );   // by rank position: a quoted key outside any function (shape=dotted)
     for( std::size_t i = 0; policy.reserve > 0 && i < order.size(); ++i )
     {
@@ -2203,6 +2402,11 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
         x = compactLegend ? std::string( kForCompactLiteralLegend ) : std::string( kForLiteralLegend );
         x += !policy.legend.empty() ? policy.legend : ( lit.tryNo > 1 ? kForLiteralKeyLegend : std::string_view() );
     }
+    if( cut.count > 0 && !limits.cutLegendAbove )
+    {
+        x += kForLiteralCutLegend;   // present only with lit_cut=, so a block that cuts nothing keeps its bytes
+        out.cutLegend = true;
+    }
     x += "<lit s=\"";
     x += escapeXml( lit.text, esc );
     x += "\" shape=\"";
@@ -2217,6 +2421,7 @@ inline ForLiteralRender renderForLiteral( const IngestResult& ing, const ForLite
     x += longerHits > 0 ? " longer=\"" + std::to_string( longerHits ) + "\"" : std::string();
     x += lit.frag ? " frag=\"1\"" : "";
     x += lit.tryNo > 1 ? " try=\"" + std::to_string( lit.tryNo ) + "\"" : std::string();
+    x += cut.count > 0 ? " lit_cut=\"" + std::to_string( cut.count ) + "\"" : std::string();
     x += " comment=\"" + std::to_string( commentHits ) + "\" test=\"" + std::to_string( testHits ) + "\" doc=\"" + std::to_string( docHits ) + "\"";
     if( !collected.cleanScan() || anyUnclassified )
     {
@@ -2247,14 +2452,14 @@ inline bool namesIndexedFile( const IngestResult& ing, std::string_view name )
 
 // the first try of a message (forMessageTries) that has a string site, or nothing
 inline ForLiteralRender renderMessageTries( const IngestResult& ing, const ForLiteral& lit, std::string_view rootArg, std::string_view served,
-                                            RedactCounts* redact, bool useMemo, bool compactLegend )
+                                            RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
 {
     for( const std::string& t : forMessageTries( lit.text ) )
     {
         ForLiteral tried = lit;
         tried.text       = t;
         tried.frag       = t != lit.text;
-        ForLiteralRender r = renderForLiteral( ing, tried, rootArg, served, redact, useMemo, compactLegend );
+        ForLiteralRender r = renderForLiteral( ing, tried, rootArg, served, redact, useMemo, compactLegend, {}, anchors );
         if( !r.xml.empty() )
         {
             return r;
@@ -2282,7 +2487,7 @@ inline bool forTableAnchorKeeps( const IngestResult& ing, std::string_view word,
 // shape=table, the last try: every kept anchor with a site prints its own <lit>, all under one byte cap. `capped` = what the earlier shapes
 // left unscanned, which stays said. An anchor the cap left out is counted the way a literal past the scan cap is.
 inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
-                                              RedactCounts* redact, bool useMemo, bool compactLegend )
+                                              RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors )
 {
     ForLiteralRender out;
     const TableCue cue = forTableCueOf( task );
@@ -2311,9 +2516,9 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
             continue;
         }
         ++scanned;
-        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm };
+        ForLiteralLimits limits{ kForTableByteCap - used - kForTableElementBytes, out.xml.empty(), cue == TableCue::TableRowOnly || !anchor.firm, out.cutLegend };
         ForLiteral lit{ word, "table" };
-        ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits );
+        ForLiteralRender r = renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, limits, anchors );
         if( r.noRoom || r.unread )
         {
             skip( word );   // scanned, and counted once more as skipped: it printed nothing
@@ -2328,6 +2533,7 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
         out.xml += r.xml;
         out.sites += r.sites;
         out.bodies += r.bodies;
+        out.cutLegend = out.cutLegend || r.cutLegend;
     }
     if( skipped > 0 )
     {
@@ -2340,7 +2546,7 @@ inline ForLiteralRender renderForTableOfTask( const IngestResult& ing, std::stri
 // the block of the task's literals: each in order (forLiteralCandidates) until one has a source site, at most kForLiteralCandidates scans
 // besides a message, which walks its tries
 inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::string_view task, std::string_view rootArg, std::string_view served,
-                                                RedactCounts* redact, bool useMemo, bool compactLegend )
+                                                RedactCounts* redact, bool useMemo, bool compactLegend, const LitAnchors& anchors = {} )
 {
     std::size_t scans = 0, skipped = 0;
     std::string firstSkipped;
@@ -2358,15 +2564,15 @@ inline ForLiteralRender renderForLiteralOfTask( const IngestResult& ing, std::st
             continue;
         }
         scans += message ? 0 : 1;
-        ForLiteralRender r = message ? renderMessageTries( ing, lit, rootArg, served, redact, useMemo, compactLegend )
-                                     : renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend );
+        ForLiteralRender r = message ? renderMessageTries( ing, lit, rootArg, served, redact, useMemo, compactLegend, anchors )
+                                     : renderForLiteral( ing, lit, rootArg, served, redact, useMemo, compactLegend, {}, anchors );
         if( !r.xml.empty() )
         {
             return r;
         }
     }
     // no earlier shape anchored: the last try, shape=table (it never prints beside them)
-    ForLiteralRender table = renderForTableOfTask( ing, task, rootArg, served, redact, useMemo, compactLegend );
+    ForLiteralRender table = renderForTableOfTask( ing, task, rootArg, served, redact, useMemo, compactLegend, anchors );
     if( skipped > 0 )
     {
         // the cap was hit and nothing scanned anchored: say so (no <lit>: no site was found, so the block's attributes would claim one)
