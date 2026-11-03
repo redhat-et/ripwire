@@ -150,7 +150,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 49;           // 49: feat/ruby-rails-lookup R1 — LocalBindKind RubyGroupSelf and
+constexpr std::uint32_t kCacheVersion = 50;           // 50: feat/ruby-rails-lookup R3b — LocalBindKind RubyTable (appended;
+                                                      //    readBind's kind bound moves). The train renumbers.
+                                                      // 49: feat/ruby-rails-lookup R1 — LocalBindKind RubyGroupSelf and
                                                       //    RubyGroupMixin (appended; readBind's kind bound moves). The train renumbers.
                                                       // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
                                                       //    moves; its placeholder 47), strictly above main 46 and that placeholder; no other
@@ -368,7 +370,12 @@ constexpr std::uint32_t kCacheVersion = 49;           // 49: feat/ruby-rails-loo
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 277;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 279;          // bump on any grammar/.scm/extraction change
+                                                      // 279 = 2026-11-03 (feat/ruby-rails-lookup R3b): a rendered db/schema.rb's tables and
+                                                      //   a class body's `self.table_name =` record LocalBindKind::RubyTable bindings (ingest_ruby.h
+                                                      //   captureRubyTables), which src/ruby_generated.h reads to make each column a reader of its
+                                                      //   model. kCacheVersion 50 (the kind bound moves). 279, not 278: 278 is 277's rich file tag.
+                                                      //   Rich file tag 280. The train renumbers.
                                                       // 277 = 2026-11-02 (feat/ruby-rails-lookup R3a): a Ruby class body's Rails DSL
                                                       //   mints the methods it generates as lookup-only Section defs, and the class methods among
                                                       //   them as RubySingletonDef bindings named for them (ingest_ruby.h captureRubyGeneratedDefs,

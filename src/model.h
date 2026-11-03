@@ -1567,7 +1567,16 @@ enum class LocalBindKind : std::uint8_t
     // (always kept) or any other (kept only in a file under spec/helpers/, ruby_groupself.h). Read by graph.h RubyTopSelf
     // ONLY. APPENDED (cache u8).
     RubyGroupMixin,
+    // Parser version 279 (test/rubycolumncheck.sh): a table a Ruby model's instances read columns of. In a rendered
+    // db/schema.rb, one per `create_table` the schema capture reads: var = the table's name, spanStart/spanEnd = the call's
+    // bytes, which hold its columns' definitions; importedName EMPTY. In a class body, one per `self.table_name = "x"`
+    // written at its level: var = the name, at the assignment's start byte, spans {0,0}, importedName kRubyModelTableMark.
+    // Written by ingest_ruby.h captureRubyTables; read by src/ruby_generated.h ONLY (rubyNamedTables and rubyTableColumns, which
+    // feed the generated-method index and graph.h RubySelfReach::modelsOf). APPENDED (cache u8).
+    RubyTable,
 };
+// LocalBindKind::RubyTable's importedName on the table a class body names (`self.table_name = "x"`)
+inline constexpr std::string_view kRubyModelTableMark = "model";
 // LocalBindKind::RubyGroupSelf's importedName on a block inside a group whose self is another object's, and on a group whose
 // defs every group reaches
 inline constexpr std::string_view kRubyGroupHoleMark   = "hole";
@@ -1581,7 +1590,7 @@ inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RubyGroupMixin ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::RubyTable ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two

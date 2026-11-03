@@ -3979,6 +3979,8 @@ struct RubySelfReach
     HashMap<std::string, char>                            outOfTree;    // classes with a superclass or mixin the tree never opens
     HashMap<NodeId, std::string>                          qualifiedOwner;   // a def inside a nested `module ClassMethods` →
                                                                             // "<holder>::ClassMethods" (buildRubyCha's key)
+    HashMap<NodeId, std::vector<std::string>>             modelsOf;   // a schema column → the models that read it, by name
+                                                                      // (src/ruby_generated.h rubyColumnModels)
 
     struct Reach
     {
@@ -4040,18 +4042,9 @@ struct RubySelfReach
     bool proves( const IngestResult& ing, const std::string& self, NodeId c ) const
     {
         const Reach& reach = reachOf( self );
-        if( reach.open )
-        {
-            return false;
-        }
-        const auto         q     = qualifiedOwner.find( c );
-        const std::string& owner = q != qualifiedOwner.end() ? q->second : ing.symbols[ c ].scope;
-        if( owner.empty() )
-        {
-            return !reach.external;   // a top-level def: a private method of Object, reached while no outside ancestor answers first
-        }
-        const bool known = q != qualifiedOwner.end() || classNames.find( owner ) != classNames.end();
-        return known && reach.names.find( owner ) != reach.names.end();
+        const Owned  owned = ownedIn( ing, reach, c );
+        // a top-level def is a private method of Object, reached while no outside ancestor answers first
+        return !reach.open && ( owned == Owned::InReach || ( owned == Owned::TopLevel && !reach.external ) );
     }
 
     // The candidates of `ids` self's lookup can reach, into `out` (cleared first); true when any was left out. A candidate
@@ -4064,16 +4057,43 @@ struct RubySelfReach
         out.clear();
         for( const NodeId c : ids )
         {
-            const auto         q     = qualifiedOwner.find( c );
-            const std::string& owner = q != qualifiedOwner.end() ? q->second : ing.symbols[ c ].scope;
-            const bool topLevel = owner.empty();
-            const bool known    = q != qualifiedOwner.end() || classNames.find( owner ) != classNames.end();
-            if( reach.open || ( topLevel && !reach.external ) || ( !topLevel && ( !known || reach.names.find( owner ) != reach.names.end() ) ) )
+            const Owned owned = ownedIn( ing, reach, c );
+            if( reach.open || owned == Owned::InReach || owned == Owned::Unknown || ( owned == Owned::TopLevel && !reach.external ) )
             {
                 out.push_back( c );
             }
         }
         return out.size() < ids.size();
+    }
+
+    // Where candidate `c`'s owner stands: none (a top-level def), no class or module the tree defines, in reach or not. A
+    // def's owner is its class or module (qualifiedOwner's for a nested ClassMethods'); a schema column's, each model that
+    // reads it (modelsOf).
+    enum class Owned : std::uint8_t
+    {
+        TopLevel,
+        Unknown,
+        InReach,
+        OutOfReach,
+    };
+    Owned ownedIn( const IngestResult& ing, const Reach& reach, NodeId c ) const
+    {
+        if( const auto models = modelsOf.find( c ); models != modelsOf.end() )
+        {
+            const auto in = [ & ]( const std::string& m ) { return reach.names.find( m ) != reach.names.end(); };
+            return std::ranges::any_of( models->second, in ) ? Owned::InReach : Owned::OutOfReach;
+        }
+        const auto         q     = qualifiedOwner.find( c );
+        const std::string& owner = q != qualifiedOwner.end() ? q->second : ing.symbols[ c ].scope;
+        if( owner.empty() )
+        {
+            return Owned::TopLevel;
+        }
+        if( q == qualifiedOwner.end() && classNames.find( owner ) == classNames.end() )
+        {
+            return Owned::Unknown;
+        }
+        return reach.names.find( owner ) != reach.names.end() ? Owned::InReach : Owned::OutOfReach;
     }
 };
 
@@ -4138,6 +4158,7 @@ inline RubySelfReach buildRubySelfReach( const IngestResult& ing, const HashMap<
 {
     RubySelfReach reach{ .chaUp = chaUp, .chaDown = chaDown };
     rubyClassMethodsOwners( ing, reach.qualifiedOwner );
+    rubyColumnModels( ing, reach.modelsOf );
     for( const Symbol& s : ing.symbols )
     {
         if( s.lang == Lang::Ruby && BuiltinMethodGate::isClassLike( s ) )
@@ -4663,6 +4684,7 @@ inline const rw::SmallVec<NodeId, 2>* RubyTypedReceivers::lookup( const Referenc
 // What the declarations of `cls` and its ancestors, read by name, generate named `callee` — an instance method, or on the class
 // object (its own scopes and an included concern's) — the nearest ancestor that generates one answering; nullptr when none
 // does. The walk a typed receiver takes where no constant index places its class (a FactoryBot build, a tree without one).
+// Read by name, an ancestor's name can be several classes': schema columns of more than one model there answer nothing.
 inline const rw::SmallVec<NodeId, 2>* RubyTypedReceivers::generatedOn( const std::string& cls, std::string_view callee, bool classObject ) const
 {
     if( generated.empty() )
@@ -4671,9 +4693,9 @@ inline const rw::SmallVec<NodeId, 2>* RubyTypedReceivers::generatedOn( const std
     }
     for( const std::string& a : reach.ancestorsOf( cls ) )
     {
-        if( const rw::SmallVec<NodeId, 2>* hit = generated.in( a, callee, classObject ? RubyGenWhere::ClassObject : RubyGenWhere::Instance ) )
+        if( generated.in( a, callee, classObject ? RubyGenWhere::ClassObject : RubyGenWhere::Instance ) != nullptr )
         {
-            return hit;
+            return generated.ofOneModel();   // by name, columns of two same-named models answer for neither
         }
         if( const rw::SmallVec<NodeId, 2>* hit = classObject && a != cls ? generated.in( a, callee, RubyGenWhere::Includers ) : nullptr )
         {
@@ -4880,11 +4902,13 @@ inline void RubyClassObjects::noteGeneratedDefs( const std::string& fqn, std::st
     const RubyGenWhere where = side == RubySide::ClassObject ? RubyGenWhere::ClassObject : side == RubySide::Included ? RubyGenWhere::Includers : RubyGenWhere::Instance;
     const std::size_t  cut   = fqn.rfind( "::" );
     const auto*        made  = typed.generated.in( cut == std::string::npos ? std::string_view( fqn ) : std::string_view( fqn ).substr( cut + 2 ), callee, where );
-    for( const NodeId c : made != nullptr ? std::span<const NodeId>( made->data(), made->size() ) : std::span<const NodeId> {} )
+    for( std::size_t k = 0; made != nullptr && k < made->size(); ++k )
     {
-        if( ownedBy( c, fqn ) )
+        const NodeId       model = typed.generated.foundModels[ k ];   // a schema column is its model's, wherever its schema sits
+        const std::string* of    = model != kNoNode ? bases.fqnOfSymbol( ing.symbols[ model ] ) : nullptr;
+        if( model != kNoNode ? of != nullptr && *of == fqn : ownedBy( ( *made )[ k ], fqn ) )
         {
-            hits.push_back( c );
+            hits.push_back( ( *made )[ k ] );
         }
     }
 }
@@ -5775,9 +5799,9 @@ inline void collectFileClassEvidence( const IngestResult& ing, const std::vector
     for( const Binding& b : ing.bindings )
     {
         // FE-B's receiver evidence is read by ReceiverEvidence alone; a main mixin by --lego alone; a re-export by the --for hop rows
-        // alone; an example group's span and mixins by RubyTopSelf alone
+        // alone; an example group's span and mixins by RubyTopSelf alone; a Ruby table by src/ruby_generated.h alone
         if( !isReceiverEvidenceKind( b.kind ) && b.kind != LocalBindKind::RubyMainMixin && b.kind != LocalBindKind::ReExport
-            && b.kind != LocalBindKind::RubyGroupSelf && b.kind != LocalBindKind::RubyGroupMixin )
+            && b.kind != LocalBindKind::RubyGroupSelf && b.kind != LocalBindKind::RubyGroupMixin && b.kind != LocalBindKind::RubyTable )
         {
             noteBindingClasses( gate, fileGated, b );
         }

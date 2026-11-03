@@ -2658,6 +2658,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
         captureRubyMainMixins( root, fileId, src, binds );
         captureRubyExampleGroups( root, fileId, src, binds );
         captureRubyGeneratedSides( root, fileId, src, binds );
+        captureRubyTables( root, fileId, src, binds );   // parser version 279: a schema's tables, a model's table_name
         if( le.ext == kJbuilderExt )
         {
             typeRubyJbuilderLocal( fileId, refs );

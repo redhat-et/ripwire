@@ -190,8 +190,19 @@ lookup reads them only once no written method answers, which is Rails' order for
 modules. Measured against R4: app A 1,441 refusals and 732 undecided calls newly bound, 132 retargeted; app B 1,083, 1,680
 and 349; ActiveRecord 9, 61 and 104; ActiveSupport 1, 31 and 8; no site lost an edge. Every sampled category was right (20 of
 20 or all of a smaller one). Not done: columns (a table-to-model mapping and the inflector; #339 recorded "definitions only"
-as a maintainer decision, with edges "behind an evidence rule" left open), `<singular>_ids`, pluralized enum class methods,
+as a maintainer decision, with edges "behind an evidence rule" left open: R3b below), `<singular>_ids`, pluralized enum class methods,
 `with_options`, Forwardable (no corpus uses it).
+
+**Status, 2026-11-03: schema columns (R3b) are done on `feat/ruby-rails-lookup`** (kParserVer placeholder
+279, kCacheVersion 50, gate `test/rubycolumncheck.sh`, `changelog.d/ruby-schema-columns.md`), trimmed to what the evidence rule
+#339's review left open covers. A column answers its model's instance lookup as a reader, after any written method or
+declaration's method of the name. A model's table is its `self.table_name` (94 models on app B write one), else the name of a
+class written `< ApplicationRecord`, underscored and pluralized by three regular rules, which on app B agree with Rails'
+inflector for every model written that way. App B: 2,712 refusals and 2,170 undecided calls newly bound and 123 retargeted,
+each to exactly one column, none lost; the other three corpora are byte-identical. Not done: writers, predicates and dirty
+affixes; Rails' special plurals; `table_name_prefix` modules and classes nested in a model; abstract intermediate classes; a
+class directly below `ActiveRecord::Base`; and a receiver known only by a name several models share (FactoryBot's `class:`
+option keeps only the final segment), which needs R4's factory class kept whole.
 
 Ruby code defines methods the source never spells as `def`:
 

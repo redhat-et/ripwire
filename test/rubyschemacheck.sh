@@ -34,7 +34,7 @@
 #   all_four / pair_def_column / triple_*  the def+attr+column(+yaml) collision matrix; the picker
 #     styles: `self.name` in the instance method PairDefColumn#lookup pins its own def (locality),
 #     `rec.name` on a local splits over the method/attr defs (graph_ambiguous), and
-#     `SingleColumn.new.name` binds nothing (no in-tree def on that model; never a column)
+#     `SingleColumn.new.name` binds its table's name column (a receiver shown to be the model, test/rubycolumncheck.sh)
 #   unrelated_client  an untyped `response.ref` (ref is a column-only name): a use, never a caller
 #   config/spike_names.yml  the cross-language name key (counted, never edgeable)
 #
@@ -116,24 +116,33 @@ for dsl in string define datetime timestamps create_table; do
         || no "posture: $dsl gained a def — the DSL call must stay a reference: $( useshead "$dsl" )"
 done
 
-# ── 3. DEFINITIONS ONLY: columns admit NO call edges (maintainer decision, graph.h buildGraph byName) ──
-[ "$( callershead id )"         = 'of="id" defs="14" count="0"' ] \
-    && ok 'defs-only: `IdDefault.new.id` matches the 14 defs but has NO caller row — columns take no edges' \
-    || no "defs-only: id callers: $( callershead id )"
-[ "$( callershead created_at )" = 'of="created_at" defs="2" count="0"' ] \
-    && ok 'defs-only: `Timestamps.new.created_at` matches both defs but carries no call edge' \
-    || no "defs-only: created_at callers: $( callershead created_at )"
+# ── 3. DEFINITIONS ONLY BY NAME: columns admit no name-tier edges (maintainer decision, graph.h buildGraph byName); a receiver
+#    shown to be the model reaches its own table's column (the evidence rule #339 left open: test/rubycolumncheck.sh) ──
+# These two arms pinned count="0" while columns took no edges at all; IdDefault and Timestamps are models with a table_name,
+# so each call now reaches exactly its table's column (of_def= names it among the defs), and nothing else.
+"$BIN" "$FIX" --callers=id --no-cache 2>/dev/null >"$TMP/callers_id"
+[ "$( callershead id )"         = 'of="id" defs="14" count="1"' ] \
+    && grep -qE '<s t="method" n="Spike#default_id" p="column_consumers.rb:10" of_def="3" sites_at="column_consumers.rb:11"/>' "$TMP/callers_id" \
+    && ok 'evidence: `IdDefault.new.id` reaches the one implicit id of spike_id_defaults (of_def 3 of the 14) — its model'"'"'s table' \
+    || no "evidence: id callers: $( callershead id )"
+"$BIN" "$FIX" --callers=created_at --no-cache 2>/dev/null >"$TMP/callers_created_at"
+[ "$( callershead created_at )" = 'of="created_at" defs="2" count="1"' ] \
+    && grep -qE '<s t="method" n="Spike#literal_stamp" p="column_consumers.rb:14" of_def="1" sites_at="column_consumers.rb:15"/>' "$TMP/callers_created_at" \
+    && ok 'evidence: `Timestamps.new.created_at` reaches spike_timestamps'"'"' created_at alone, not spike_timestamps_literal'"'"'s' \
+    || no "evidence: created_at callers: $( callershead created_at )"
 "$BIN" "$FIX" --uses=ref --no-cache 2>/dev/null | grep -q 'p="unrelated_client.rb:7"' \
     && [ "$( callershead ref )"     = 'of="ref" defs="1" count="0"' ] \
     && ok "defs-only false-binding: the untyped 'response.ref' in unrelated_client.rb:7 is a use of the column-only name ref, never its caller (RED without buildGraph's Section-Ruby byName skip: it binds by name alone)" \
     || no "defs-only: ref callers: $( callershead ref )"
 "$BIN" "$FIX" --callers=name --no-cache 2>/dev/null >"$TMP/callers_name"
 # attrib-multidef: the 19 definitions form several groups, so each row also names its definitions (of_def=, defattrib.h)
-[ "$( callershead name )"       = 'of="name" defs="19" count="2"' ] \
+# This arm pinned count="2" while SingleColumn.new.name bound nothing; its model's table now answers it.
+[ "$( callershead name )"       = 'of="name" defs="19" count="3"' ] \
     && grep -qE '<s t="method" n="ConsumerAmbiguous#render_label" p="consumer_ambiguous.rb:7" via="name"( of_def="[^"]*")? sites_at="consumer_ambiguous.rb:8"/>' "$TMP/callers_name" \
     && grep -qE '<s t="method" n="PairDefColumn#lookup" p="pair_def_column.rb:14"( of_def="[^"]*")? sites_at="pair_def_column.rb:15"/>' "$TMP/callers_name" \
-    && ok 'defs-only: the 2 name callers are METHODS (render_label by name alone, lookup pinned by its own class) — the 9 columns contribute zero edges to the 19-def set; SingleColumn.new.name binds nothing (no in-tree def on that model)' \
-    || no "defs-only: name callers: $( callershead name )"
+    && grep -qE '<s t="method" n="Spike#single_name" p="column_consumers.rb:6" of_def="17" sites_at="column_consumers.rb:7"/>' "$TMP/callers_name" \
+    && ok 'evidence: the 3 name callers — render_label by name alone, lookup pinned by its own class, and SingleColumn.new.name reaching spike_single_columns'"'"' name (of_def 17); render_label'"'"'s untyped rec.name still splits over methods and attrs, never a column' \
+    || no "evidence: name callers: $( callershead name )"
 
 # ── 4. AMBIGUITY + LOCALITY: the resolver splits honestly, pins on evidence ─────────────────────────
 "$BIN" "$FIX" --uses=name --no-cache 2>/dev/null >"$TMP/uses_name"

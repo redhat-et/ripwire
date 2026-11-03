@@ -166,10 +166,18 @@ inline void rubySchemaColumnCall( TSNode c, std::uint32_t fileId, std::string_vi
     defs.push_back( d );
 }
 
-// One create_table call: the schema-file gate plus the whole table's defs (name, options, columns, id).
-inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_view src, std::vector<RawDef>& defs )
+// A create_table call read as a rendered schema's table (the gates below): its string name, its arguments, its own do_block
+// and the block parameter its column calls must use. A null name when `n` is not one.
+struct RubySchemaTable
 {
-    std::string_view receiverName;   // the block parameter's name (`t`); empty until Gate 2 passes
+    TSNode           name {};
+    TSNode           args {};
+    TSNode           block {};
+    std::string_view handle;   // the `|t|` spelling
+};
+
+inline RubySchemaTable rubySchemaTableOf( TSNode n, std::string_view src )
+{
     // Gate 0: a rendered schema's tables live at file level or under `ActiveRecord::Schema[].define … do`
     // — NEVER inside a class/module body. A MIGRATION's `create_table "users" … do |t|` (class-wrapped,
     // often string-named) is the same AST shape, and without this gate it would mint the SAME columns as
@@ -179,62 +187,70 @@ inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_vie
     // double its schema either. Excluding at least one `class`/`module` ancestor keeps the capture
     // content-gated (still no path heuristic): a migration file next to the schema contributes ZERO defs.
     // Checked FIRST — the cheapest gate — before the argument/block walks.
+    for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
     {
-        for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ) )
+        const std::string_view k( ts_node_type( p ) );
+        if( k == "class" || k == "module" )   // a locals distilled walk — no cross-helper dependency
         {
-            const std::string_view k( ts_node_type( p ) );
-            if( k == "class" || k == "module" )   // a locals distilled walk — no cross-helper dependency
-            {
-                return;
-            }
+            return {};
         }
     }
-    const TSNode args = fieldChild( n, NodeField::Arguments );
-    if( ts_node_is_null( args ) )
+    RubySchemaTable t;
+    t.args = fieldChild( n, NodeField::Arguments );
+    if( ts_node_is_null( t.args ) )
     {
-        return;
+        return {};
     }
     // Gate 1: a STRING table name as the first argument (a symbol-named table is a migration spelling,
     // not a rendered-schema shape — stated floor; no name node → no schema surface either).
-    const TSNode tableName = rubyFirstNonCommentArg( args );
+    const TSNode tableName = rubyFirstNonCommentArg( t.args );
     if( ts_node_is_null( tableName ) || !kindIs( ts_node_type( tableName ), "string" ) )
     {
-        return;
+        return {};
     }
     // Gate 2: the call's OWN do_block, and its parameters: field carries ONE bare identifier (the `|t|`).
-    TSNode block{};
     {
         ChildCursor cursor( n );
         forEachNamedChild( n, cursor.cur, [ & ]( TSNode c )
         {
             if( kindIs( ts_node_type( c ), "do_block" ) )
             {
-                block = c;
+                t.block = c;
                 return false;
             }
             return true;
         } );
     }
-    if( ts_node_is_null( block ) )
+    const TSNode params = ts_node_is_null( t.block ) ? TSNode{} : fieldChild( t.block, NodeField::Parameters );
+    if( ts_node_is_null( params ) )
+    {
+        return {};   // no block, or `create_table "x" do … end` with no handle — not the schema shape
+    }
+    ChildCursor cursor( params );
+    TSNode      only{};
+    std::size_t named = 0;
+    forEachNamedChild( params, cursor.cur, [ & ]( TSNode c ) { only = c; ++named; return true; } );
+    if( named != 1 || !kindIs( ts_node_type( only ), "identifier" ) )
+    {
+        return {};   // multi-parameter or non-identifier handle — not a rendered schema's do |t|
+    }
+    t.handle = nodeTextOf( only, src );   // the `|t|` spelling — column calls must use it
+    t.name   = tableName;
+    return t;
+}
+
+// One create_table call: the schema-file gate plus the whole table's defs (name, options, columns, id).
+inline void rubySchemaTableCall( TSNode n, std::uint32_t fileId, std::string_view src, std::vector<RawDef>& defs )
+{
+    const RubySchemaTable table = rubySchemaTableOf( n, src );
+    if( ts_node_is_null( table.name ) )
     {
         return;
     }
-    const TSNode params = fieldChild( block, NodeField::Parameters );
-    if( ts_node_is_null( params ) )
-    {
-        return;   // `create_table "x" do … end` with no handle — not the schema shape
-    }
-    {
-        ChildCursor cursor( params );
-        TSNode      only{};
-        std::size_t named = 0;
-        forEachNamedChild( params, cursor.cur, [ & ]( TSNode c ) { only = c; ++named; return true; } );
-        if( named != 1 || !kindIs( ts_node_type( only ), "identifier" ) )
-        {
-            return;   // multi-parameter or non-identifier handle — not a rendered schema's do |t|
-        }
-        receiverName = nodeTextOf( only, src );   // the `|t|` spelling — column calls must use it
-    }
+    const TSNode           args         = table.args;
+    const TSNode           block        = table.block;
+    const TSNode           tableName    = table.name;
+    const std::string_view receiverName = table.handle;
     // Options: the id/primary_key pairs among the call's arguments.
     bool   idFalse = false, primaryKey = false;
     TSNode idKey{}, pkValue{};
@@ -1286,6 +1302,72 @@ inline void captureRubyGeneratedSides( TSNode root, std::uint32_t fileId, std::s
                                            .var = m.name, .importedName = m.includer ? std::string( kRubyIncluderMark ) : std::string {} } );
             }
         }
+    } );
+}
+
+// ─── A model's table (parser version 279, test/rubycolumncheck.sh; src/ruby_generated.h) ────────────────────────────────────
+// Which columns a model's instances read is a fact of two files: a rendered db/schema.rb says which columns each table has,
+// and the class body which table it reads (`self.table_name = "x"`; else Rails' name for the class, src/ruby_generated.h).
+// Each is a LocalBindKind::RubyTable binding, joined over the tree by src/ruby_generated.h buildRubyGenerated: a table at
+// its create_table call's bytes, which hold its columns' definitions (the schema capture above), and a class body's
+// `self.table_name =` at its own start, marked kRubyModelTableMark. Only a name written as a string or a symbol is read.
+
+// The table a class body names at its level — `self.table_name = "x"` or `= :x` — or empty.
+inline std::string rubyModelTableName( TSNode n, std::string_view src )
+{
+    const TSNode left  = fieldChild( n, NodeField::Left );
+    const TSNode right = fieldChild( n, NodeField::Right );
+    if( ts_node_is_null( left ) || ts_node_is_null( right ) || !kindIs( ts_node_type( left ), "call" )
+        || fieldIdentifierText( left, NodeField::Method, src ) != "table_name" )
+    {
+        return {};
+    }
+    const TSNode recv = fieldChild( left, NodeField::Receiver );
+    bool         includer = false;
+    if( ts_node_is_null( recv ) || !kindIs( ts_node_type( recv ), "self" ) || !rubyGenAtDeclarationLevel( n, /*modelOnly=*/true, src, includer ) || includer )
+    {
+        return {};
+    }
+    const bool literal = kindIs( ts_node_type( right ), "string" ) || kindIs( ts_node_type( right ), "simple_symbol" );
+    return literal ? std::string( rubyGenArgName( right, src ) ) : std::string {};   // a plain string or a symbol, not an expression
+}
+
+// One file's tables and table names, into `binds` — a file that spells neither `create_table` nor `table_name` is not walked.
+// A def body declares neither, so the walk does not enter one.
+inline void captureRubyTables( TSNode root, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( src.find( "create_table" ) == std::string_view::npos && src.find( "table_name" ) == std::string_view::npos )
+    {
+        return;
+    }
+    rubyWalkUntaken( root, [ & ]( TSNode n )
+    {
+        const char* t = ts_node_type( n );
+        if( kindIs( t, "method" ) || kindIs( t, "singleton_method" ) )
+        {
+            return true;
+        }
+        if( kindIs( t, "assignment" ) )
+        {
+            if( std::string name = rubyModelTableName( n, src ); !name.empty() )
+            {
+                binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyTable,
+                                           .var = std::move( name ), .importedName = std::string( kRubyModelTableMark ) } );
+            }
+            return true;
+        }
+        if( !kindIs( t, "call" ) || fieldIdentifierText( n, NodeField::Method, src ) != "create_table" )
+        {
+            return false;
+        }
+        const RubySchemaTable table = rubySchemaTableOf( n, src );
+        std::string           name  = ts_node_is_null( table.name ) ? std::string {} : stringLiteralText( table.name, src );
+        if( !name.empty() )
+        {
+            binds.push_back( RawBind { .fileId = fileId, .startByte = ts_node_start_byte( n ), .lang = Lang::Ruby, .kind = LocalBindKind::RubyTable,
+                                       .spanStart = ts_node_start_byte( n ), .spanEnd = ts_node_end_byte( n ), .var = std::move( name ) } );
+        }
+        return true;
     } );
 }
 
