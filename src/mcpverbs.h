@@ -2812,6 +2812,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
         : ForBodySlotOwner{};
     const std::string_view mcpBundleLegend   = mcpSlotOwner.any() ? rw::kMcpForBundleSigsOwnerLegend : rw::kMcpForBundleSigsLegend;
     const std::string_view mcpBodySlotLegend = mcpSlotOwner.any() ? rw::kForBodySlotLegend : std::string_view();
+    const std::string_view mcpTailCodeFirstLegend = tailOrdersCodeFirst( ing, task ) ? rw::kForFileTailCodeFirstLegend : std::string_view();   // the CLI twin's clause
     std::string headerStr = rootOpenStr
                           + "<!-- ripwire lens for \"" + safeTask + "\"" + termsCapNote + mentionNote + boostNote + docMentionNote + floorNote
                           + std::string( rw::kMcpForBuildingBlocksLegend )
@@ -2827,6 +2828,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
                           // hyphen is ill-formed (G4), so the CLI verb is named without its dashes.
                           + std::string( rw::kMcpForLensColumnsLegend )
                           + std::string( rw::kForFileTailLegend )   // deep-tail: r= + <tail> definitions, the CLI twin's exact clause (sigs-charge-exempt below)
+                          + std::string( mcpTailCodeFirstLegend )   // docs-rest: the tail's order on a code question (exempt below)
                           + ( mcpForHdrRows.empty() ? std::string() : std::string( rw::kForHdrLegend ) )   // R2-AF: present-only
                           + std::string( mcpEndLineLegend )   // e=: present-only, the CLI twin's full clause (sig-charge exempt below)
                           + " -->"
@@ -2885,7 +2887,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     const ForStubbableSection mcpComposeChargeIn{ .hasContent = !composeStr.empty(), .preCapTotal = composePreCapCount, .rendered = true,
                                                   .renderedBytes = composeStr.size() };
     const ForSectionStubPlan  mcpSigChargePlan = forSectionsSigChargePlan( sections, /*explicitCeiling=*/false, task, mcpLegoChargeIn, mcpComposeChargeIn );
-    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
+    const std::size_t fixedBytes = headerStr.size() - rw::kForFileTailLegend.size() - mcpTailCodeFirstLegend.size() - mcpConfidenceExemptBytes - mcpIdRouteExemptBytes - mcpAtLegendExemptBytes
                                  - mcpEndLineExemptBytes
                                  - ( mcpBundleLegend.size() + mcpBodySlotLegend.size() - rw::kMcpForBundleSigsLegend.size() )   // for-body-slot: 0 when not asked
                                  - rw::forZeroNoteBytes( headerStr )   // lean-answers: the zero reading never costs a row

@@ -603,6 +603,7 @@ struct ForLensHeaderParts
                                             // (forowner.h forBodySlotOwner), so a <bodies> element rides — served, or skipped
                                             // under a target with its next= — and the slot clause defines it (present-only)
     bool             splitPresent = false;   // attrib-multidef Q1: may a <calls><c> row carry prov="split"? viaPresent's twin
+    bool             tailCodeFirst = false;  // docs-rest: the tail orders code files first (forpage.h tailOrdersCodeFirst)
                                             // question over the same ids (serialize.h splitArmsOutAny); set after construction
     bool             hopsCallsNextPresent = false; // body-fold rider: a ranked <hops> row's cut <calls> carries next= (set after the
                                             // hops render, cleared with the section)
@@ -878,6 +879,17 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
 }
 inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
+inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
+// The tail-order clause (serialize.h kForFileTailCodeFirstLegend): rides with the tail clause, only where the order applies
+// (forpage.h tailOrdersCodeFirst: a code question over an index that holds a doc unit).
+inline std::string_view tailCodeFirstLegend( const ForLensHeaderParts& p, bool compact )
+{
+    if( !p.tailLegend || !p.tailCodeFirst )
+    {
+        return {};
+    }
+    return compact ? kForCompactLegendTailCodeFirst : rw::kForFileTailCodeFirstLegend;
+}
 // R2-AF (round 2, S4): the COMPACT dialect's `<hdr p= of=/>` clause — verbatim, round-2 amendment §R7.
 // 96 B, present-only like every clause in this dialect (appendCompactForLegend below).
 inline constexpr std::string_view kForCompactLegendHdr =
@@ -995,7 +1007,9 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     // five identical ifs — the list has grown once per lane (hdr, compose, then train 9's lego and layer) and the
     // next one is a row, not another block. hdr is never ceiling-dropped (R2-AF round 2, S4); tail is.
     const struct { bool on; std::string_view clause; } kPresentOnly[] = {
-        { p.tailLegend, kForCompactLegendTail },         { p.hdrLegend, kForCompactLegendHdr },
+        { p.tailLegend, kForCompactLegendTail },
+        { !tailCodeFirstLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailCodeFirst },   // docs-rest: the tail's order
+        { p.hdrLegend, kForCompactLegendHdr },
         { p.composePresent, kForCompactLegendCompose },  { p.legoPresent, kForCompactLegendLego },
         { p.layerPresent, kForCompactLegendLayer },
         { p.modScopePresent, rw::kForCompactModScopeClause },   // #60
@@ -1141,6 +1155,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     if( p.tailLegend )
     {
         h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
+        h.append( tailCodeFirstLegend( p, /*compact=*/false ) );   // docs-rest: the order a code question's tail uses
     }
     if( p.hdrLegend )
     {
@@ -3405,6 +3420,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                         /*hdrLegend=*/!forHdrRows.empty(), forScPresent, forComposePresent,
                                         forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent,
                                         ownerPlan.any(), forViaByOwnerOnly, slotOwner.any() };
+        headerParts.tailCodeFirst = rw::tailOrdersCodeFirst( ing, cfg.forTask );   // docs-rest: the tail-order clause rides only here
         headerParts.splitPresent = forSplitPresent;   // attrib-multidef Q1 (a trailing member: the aggregate above keeps its order)
         // body-fold (forfold.h): the bodies of the top ranked rows, appended — decided here because the header's fold clause reads it.
         // The compact route's XML answer in the DEFAULT regime only: an explicit --token-budget is a size the caller named (that
@@ -3711,7 +3727,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactLegendConfidence.size() + ( forCoverageOn ? kForCompactCoverageClause.size() : 0 ) )
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
-        const std::size_t tailLegendEmitted    = compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size();
+        const std::size_t tailLegendEmitted    = ( compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size() )
+                                               + tailCodeFirstLegend( headerParts, compactLegendOn ).size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -3783,7 +3800,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::size_t fullHeaderBytes = fullHeader.size();
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
-                                              + rw::kForFileTailLegend.size() + idRouteParts.bytes()
+                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + idRouteParts.bytes()
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u )
                                               + ownerLegendExemptBytes( headerParts, /*compact=*/false )
                                               + bodySlotLegend( headerParts, /*compact=*/false ).size()

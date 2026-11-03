@@ -847,6 +847,15 @@ inline void fileTailPageRows( FileTail& out, std::vector<char>& listed, const In
     }
 }
 
+// Where the code-first order below applies, so its legend clause (serialize.h kForFileTailCodeFirstLegend) rides only there: a
+// code question (taskAsksForDocText false) over an index that holds a doc unit. With no doc unit indexed, no tail row is a doc
+// row, and the plain order and the code-first order are the same rows in the same order.
+inline bool tailOrdersCodeFirst( const IngestResult& ing, std::string_view task )
+{
+    return !taskAsksForDocText( task )
+        && std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s ) noexcept { return isDocLang( s.lang ); } );
+}
+
 inline FileTail computeFileTail( const IngestResult& ing, const std::vector<float>& rank, const LexTermEvidence& ev,
                                  const std::vector<NodeId>& headIds, std::string_view rootArg, std::string_view task )
 {

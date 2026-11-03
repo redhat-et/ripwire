@@ -99,6 +99,10 @@ PY
 "$BIN" docdemotefix --for="$BUGQ" --no-route --format=candidates --no-cache >"$TMP/noroute.xml" 2>/dev/null
 "$BIN" docdemotefix --for="$BUGQ"     --no-cache >"$TMP/bugfor.xml"    2>/dev/null
 "$BIN" docdemotefix --for="$TRACEQ"   --no-cache >"$TMP/tracefor.xml"  2>/dev/null
+# RE-PIN 2026-11-02 b (lane docs-rest CI fix 2, the tail-order legend clause; rule 4): docdemotegolden_for.xml 6542 -> 6709 B
+# (est_tokens "2617" -> "2684") and docdemotegolden_noroute.xml 10049 -> 10216 B ("3583" -> "3650"). Both are code questions, so
+# both carry serialize.h kForFileTailCodeFirstLegend (167 B) after the tail clause; removing it and masking est_tokens= gives the
+# previous goldens byte for byte (checked mechanically).
 # RE-PIN 2026-11-02 (lane docs-rest fix1, code-first --for tail; rule 4): docdemotegolden_for.xml and docdemotegolden_noroute.xml
 # keep their bytes outside <tail> and their length (6542 B, 10049 B); only the ORDER of the <tail> rows moves: a code question's tail
 # lists its code files first (src/forpage.h fileTailRankRows), so src/evictor.py rises above notes/paging_design.md in (f) and

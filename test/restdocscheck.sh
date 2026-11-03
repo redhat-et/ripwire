@@ -447,4 +447,20 @@ arm "I11 a file:name spelling still picks the nested directive" sh -c 'o="$( "$1
 i12="$( root --callers=save_base callers )"; arm "I12 --callers keeps the nested directive beside the code (defs=2, the code's caller counted)" sh -c 'case "$1" in *defs=\"2\"*count=\"1\"*) exit 0;; esac; exit 1' _ "$i12"
 i13="$( root --path=save_base,helper path )"; arm "I13 a markdown heading spelled like the to= code is no second definition (to_defs=1)" sh -c 'case "$1" in *to_defs=\"1\"*reachable=\"1\"*) exit 0;; esac; exit 1' _ "$i13"
 i13c="$( root --callers=helper callers )"; arm "I13b while --callers lists that heading as a second def (defs=2)" sh -c 'case "$1" in *defs=\"2\"*) exit 0;; esac; exit 1' _ "$i13c"
+echo "J. the tail-order legend clause rides only where the code-first order applies (forpage.h tailOrdersCodeFirst)"
+JX="$TMP/jx"; mkdir -p "$JX/src" "$JX/docs"; printf 'def frob_widget():\n    return 1\n' >"$JX/src/w.py"; printf '# Frob\n\nfrob widget notes\n' >"$JX/docs/frob.md"
+JC="$TMP/jc"; mkdir -p "$JC/src"; cp "$JX/src/w.py" "$JC/src/w.py"
+JCLAUSE='tail order on this code question'
+jfor(){ "$BIN" "$1" --no-cache --for="$2" --legend="$3" 2>/dev/null </dev/null; }
+j1="$( jfor "$JX" "how does frob widget work" full )"; rj1=$?
+arm "J1 a code question over an index with a doc unit carries the clause" sh -c '[ "$1" = 0 ] && case "$2" in *"<tail"*) case "$2" in *"$3"*) exit 0;; esac;; esac; exit 1' _ "$rj1" "$j1" "$JCLAUSE"
+j1c="$( jfor "$JX" "how does frob widget work" compact )"; rj1c=$?
+arm "J1c and its compact twin" sh -c '[ "$1" = 0 ] && case "$2" in *"t order: code files first"*) exit 0;; esac; exit 1' _ "$rj1c" "$j1c"
+j2="$( jfor "$JX" "where is the frob widget documentation" full )"; rj2=$?
+arm "J2 a question asking for doc text does not (the plain order)" sh -c '[ "$1" = 0 ] && case "$2" in *"<tail"*) case "$2" in *"$3"*) exit 1;; esac; exit 0;; esac; exit 1' _ "$rj2" "$j2" "$JCLAUSE"
+j3="$( jfor "$JC" "how does frob widget work" full )"; rj3=$?
+arm "J3 nor does an index with no doc unit (no doc row to move)" sh -c '[ "$1" = 0 ] && case "$2" in *"<tail"*) case "$2" in *"$3"*) exit 1;; esac; exit 0;; esac; exit 1' _ "$rj3" "$j3" "$JCLAUSE"
+j4="$( printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize"}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"for","arguments":{"path":"'"$JX"'","task":"how does frob widget work"}}}' | "$BIN" --mcp 2>/dev/null | tail -1 )"; rj4=$?
+arm "J4 the MCP for twin carries the same clause" sh -c '[ "$1" = 0 ] && case "$2" in *"$3"*) exit 0;; esac; exit 1' _ "$rj4" "$j4" "$JCLAUSE"
+
 [ "$fail" = 0 ] && echo "restdocscheck: ALL PASS" || { echo "restdocscheck: FAILED"; exit 1; }

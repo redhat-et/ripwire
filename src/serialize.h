@@ -1132,6 +1132,14 @@ inline constexpr std::string_view kForFileTailLegend =
     "sym= its top symbols by lens rank (a pointer, not the answer); "
     "total=every positive-score file, shown=printed, capped=1 when they differ, next= the page from its first unprinted row. "
     "r= on a ranked row is its 1-based rank in this lens ranking, rows in r= order, p= the file (a gap = a budget-trimmed row)";
+// docs-rest CI fix 2: the order the tail really uses on a CODE question (filter.h taskAsksForDocText false; forpage.h
+// computeFileTail): every code row of both parts, then the doc rows. Present-only beside kForFileTailLegend, where that order
+// applies (forpage.h tailOrdersCodeFirst: a code question over an index holding a doc unit); a question asking for doc text keeps
+// the plain interleaved walk, and an index with no doc unit has no doc row to move, so neither carries it.
+// Sigs-charge-exempt with the clause it qualifies. No "--" (it rides inside an XML comment).
+inline constexpr std::string_view kForFileTailCodeFirstLegend =
+    "; tail order on this code question: every code file of both parts first, each part in the order above, then the doc "
+    "files (.md, .rst, a Sphinx .txt page) in that order";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,
