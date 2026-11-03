@@ -369,12 +369,18 @@ inline constexpr std::string_view kCppStdMemberNames[] = {
 // replace, find, filter, run, build, lock, join, send, close, first, last, sort), and `expect` (a parser's own
 // `expect( token )` is common). Unlike C++ the receiver exception has no Rust written type to read yet (no parameter,
 // local or field type is recorded), so a receiver written as an in-tree type is declined too: graph.h's stated floor.
-// 40 names; sorted by byte.
+// EDGE-PRELUDE-VETO (2026-11-03) added five names left out above by reasoning, by a hand sample of their name-only calls instead:
+// `expect`, `into`, `join`, `lock`, `status`. zed (injected import closure): 0 of 40 sampled sites right (`.expect()` on an Option or
+// Result bound to settings_store.rs `expect`, `.lock()` on a Mutex to test_scheduler.rs `lock`, `.into()` to an inspector `into`,
+// `.status()` on an HTTP response to window.rs `status`); nushell: 2 of 20 right (1,332 `.expect()` calls bound to the parser's own
+// `expect`). Under 25 % right, so declined and counted; a receiver Rust receiver evidence types, or the impl's own `self.expect()`,
+// keeps its edge (the way back, arm P9 of test/preludevetocheck.sh).
+// 45 names; sorted by byte.
 inline constexpr std::string_view kRustStdMemberNames[] = {
-    "and_then", "as_bytes", "as_slice", "as_str", "chars", "collect", "contains", "contains_key", "drain", "ends_with", "entry",
-    "extend_from_slice", "get_mut", "insert", "is_empty", "is_none", "is_some", "iter", "iter_mut", "keys", "len", "ok_or",
-    "or_insert", "or_insert_with", "pop", "push", "push_str", "retain", "starts_with", "to_lowercase", "to_owned", "to_string",
-    "to_uppercase", "to_vec", "trim", "unwrap", "unwrap_or", "unwrap_or_default", "unwrap_or_else", "values"
+    "and_then", "as_bytes", "as_slice", "as_str", "chars", "collect", "contains", "contains_key", "drain", "ends_with", "entry", "expect",
+    "extend_from_slice", "get_mut", "insert", "into", "is_empty", "is_none", "is_some", "iter", "iter_mut", "join", "keys", "len", "lock",
+    "ok_or", "or_insert", "or_insert_with", "pop", "push", "push_str", "retain", "starts_with", "status", "to_lowercase", "to_owned",
+    "to_string", "to_uppercase", "to_vec", "trim", "unwrap", "unwrap_or", "unwrap_or_default", "unwrap_or_else", "values"
 };
 
 // ── THE KOTLIN SCOPE-FUNCTION TABLE (graph.h FalseEdgeRules, the Kotlin arm; gate test/kotlincheck.sh §15 and test/falseedgecheck.sh

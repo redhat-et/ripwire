@@ -362,10 +362,15 @@ rrun US --uses=selectBaseline \
 # manifests) through ONE helper, readText; the round first made four new call sites (49), the helper is the one that remains. No new fopen.
 # 46 -> 47 2026-11-02 (lane/docs-rest): ingest_crawl.h SphinxTxtRoots::readConf reads a Sphinx conf.py, bounded by
 # kMaxSphinxConfBytes, through the same helper — one new call site.
+# 47 -> 53 2026-11-03 (lane/edge-prelude-veto, merged over main 6bae81c6): graph.h's Rust macro-scope and prelude-veto reads, six
+# call sites, each memoised: rustManifestRoots reads each Cargo.toml once per build (cache.rootsRead); rustMacroScopeOf reads a
+# shared-directory root and each parent module file once per macro file (cache.scopes); isProcMacro and preludeBinding read a
+# candidate's file once per candidate (procMacroMemo, preludeBindMemo); useNames reads a caller file once (rustUseText). Measured:
+# the six new <u> rows at src/graph.h:7249/7387/7423/10513/10523/11264 on the merged tree (53); main pins 47. No new fopen.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 47 ] \
-    && ok "repo: --uses=readWholeFile count=47 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 47, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 53 ] \
+    && ok "repo: --uses=readWholeFile count=53 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 53, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
