@@ -2063,7 +2063,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 {
                     --e;
                 }
-                const bool suffix = e == tEnd && !kindIs( ts_node_type( roleNode ), "type_definition" );   // a typedef's target precedes its name
+                const bool suffix = e == tEnd;   // only `using`/namespace alias rows reach here (a typedef capture is never definition.alias)
                 aliasTargetStart  = suffix ? ts_node_start_byte( aliasShape.target ) : 0u;
             }
 

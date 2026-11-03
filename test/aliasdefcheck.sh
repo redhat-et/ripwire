@@ -38,6 +38,7 @@ namespace L = lib;
 using namespace lib;
 using lib::Real;
 class Holder { public: using value_type = IColumn; };
+using LongAlias = lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<IColumn>>>>>>>>>>>>>>>>;
 inline void f() { using LocalAlias = int; LocalAlias v = 0; (void)v; }
 EOF
 cat > "$F/t/mod.ts" <<'EOF'
@@ -84,6 +85,9 @@ check_cpp FnType     functype ''                              ''
 check_cpp SPtr       struct   ''                              ''
 # the to_next hop is itself an alias row with a target: the chain is followable call by call
 check_cpp COW::Ptr   alias    'T*'                            ''
+# the runaway guard (kAliasTargetCap = 160): a longer target is cut with an ellipsis and to_bytes= names its full size
+defs "$F/c" LongAlias; r=$( row )
+case "$r" in *' to_bytes="'*'"'*'…"'*|*'…" to_bytes="'*) ok "[RED] --defs=LongAlias: to= cut at the cap, to_bytes= present";; *) no "[RED] --defs=LongAlias: rc=$drc want to_bytes= and a cut to=, got: ${r:-<no row>}";; esac
 # typedef rows keep their old shape: no to= (the target precedes the name)
 defs "$F/c" S2; r=$( row ); if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' "$r" | grep -q ' to='; then ok "typedef S2 is a def with no to= (unchanged shape)"; else no "typedef S2: rc=$drc row=${r:-<none>}"; fi
 
@@ -106,7 +110,7 @@ defs "$F/t" SCREAMING_ALIAS; r=$( row )
 if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' "$r" | grep -q ' to'; then ok "TS SCREAMING const: a def with no to= (unchanged)"; else no "TS SCREAMING const: rc=$drc row=${r:-<none>}"; fi
 if command -v xmllint >/dev/null 2>&1; then
     ( cd "$F/c" && "$BIN" . --no-cache --defs=ColumnPtr ) > "$TMP/x" 2>/dev/null
-    if [ $? -eq 0 ] && xmllint --noout "$TMP/x" 2>/dev/null; then ok "the --defs answer carrying to= is well-formed"; else no "--defs to= answer not well-formed or failed"; fi
+    if [ $? -eq 0 ] && xmllint --noout "$TMP/x" 2>/dev/null; then ok "[RED] the --defs answer carrying to= is well-formed"; else no "--defs to= answer not well-formed or failed"; fi
 else
     echo "  SKIP  xmllint arms (xmllint not on PATH)"
 fi
