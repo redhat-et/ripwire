@@ -1540,7 +1540,7 @@ function storyCards(s, { kick, head, stories, footText }){
     ["193 long flags · 36 slides",        "bash test/deckclaimcheck.sh"],
     ["every --flag named here exists",    "bash test/deckcheck.sh"],
     ["74.7% fewer element bytes",         "bash test/showcasecapturecheck.sh"],
-    ["752 gate scripts (counts snapshot 2026-11-03)", "python3 docs/counts_snapshot.py show"], // gatecount
+    ["752 gate scripts (counts snapshot 2026-11-03)", "bash test/manifestcheck.sh"], // gatecount
     ["49 repos · 71 papers · 237 surveyed","bash test/readmedriftcheck.sh"],
     ["the ten moments, any row",          "ripwire . --callers=SYM | wc -c"],
     ["the head-to-head table",            "bench/headtohead/r4-2026-08-06/"],
