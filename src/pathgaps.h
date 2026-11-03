@@ -686,14 +686,15 @@ private:
     // closure) over any number of import edges? Memoized per `from`.
     bool fileSees( std::uint32_t from, std::uint32_t to, bool transitive ) const
     {
-        const std::vector<std::vector<std::uint32_t>>& adj = g_.importAdj;
+        const rw::FileAdjacency& adj = g_.importAdj;
         if( from >= adj.size() )
         {
             return false;
         }
         if( !transitive )
         {
-            return std::ranges::find( adj[from], to ) != adj[from].end();
+            const std::span<const std::uint32_t> row = adj[from];
+            return std::ranges::find( row, to ) != row.end();
         }
         if( reach_.empty() )
         {

@@ -693,7 +693,6 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kRadixThreshold` | `128` | BOUNDARY | — |
 | `kRadixThreshold` ×2 | `2048` | BOUNDARY | — |
 
 ### `src/infra/strkern.h`

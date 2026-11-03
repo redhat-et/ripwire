@@ -500,6 +500,7 @@ for _g in \
     fieldusescheck \
     filerootcheck \
     fileselectorrefusecheck \
+    filesetcheck \
     fillordercheck \
     fixedbufsweep \
     flagscheck \
