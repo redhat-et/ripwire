@@ -829,7 +829,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "sig", "s sig=: the join symbol's declaration signature; dropped first when a max_tokens ceiling trims", true, "s", MapHeaderRead::No, {}, "connect" },
     // dead-code: src/verbs_quality.h (the <dead-code> root emit)
     { "evidence", "evidence=: the rule every row met, internal linkage and no caller in the index; verify before deleting", false, "dead-code", MapHeaderRead::No, {}, "dead-code" },
-    { "register-macro-excluded", "register-macro-excluded=N: symbols skipped as self-registering test/bench macros or Rust #[test] (TEST, BENCHMARK...); a floor", false, "dead-code", MapHeaderRead::No, {}, "dead-code" },
+    { "register-macro-excluded", "register-macro-excluded=N: symbols skipped as self-registering test/bench macros (TEST, BENCHMARK...) or Rust #[test]; a floor", false, "dead-code", MapHeaderRead::No, {}, "dead-code" },
     // 0.6.6 D4: present-only — absent at 0, so a tree with no Python runner root is byte-identical
     { "runner-root-excluded", "runner-root-excluded=N: Python defs skipped as pytest/unittest test-runner roots; a floor", true, "dead-code", MapHeaderRead::No, {}, "dead-code" },
     // 0.6.6 D4 review: counted apart — a decorator MAY register the def; a wrapper (@property, @lru_cache) registers nothing
