@@ -1690,15 +1690,16 @@ inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, co
     return ids;
 }
 
-// issue #494 (maintainer review): Rust Drop::drop, the methods the compiler runs when a value leaves scope, which no call names.
-// A method named drop (or r#drop) is exempt only as a DIRECT member of a Drop impl block: an ImplBlock record (model.h) whose
-// trait is Drop (var = the trait's final path segment, so `impl std::ops::Drop` counts), whose span is the whole impl item.
-// The implementor's name is never the test. Stays reported:
-//   * a free fn named drop: its kind is Function, or a `mod` fn (the grammar captures it as a Method) with no block around it;
-//   * an inherent or other-trait method, whether at file level or nested in a Drop body: an inherent impl leaves no ImplBlock
-//     record, so the test is the enclosing-def check in the loop. A def of this file that lies inside the block and encloses the
-//     method means the method sits in another fn's body, not in the block's own item list;
+// issue #494 (maintainer review): Rust Drop::drop, the method the compiler runs when a value leaves scope, which no call names.
+// A method named drop (or r#drop) is exempt when its span lies inside an ImplBlock record (model.h) of the same file whose trait
+// (var, the final path segment, so `impl std::ops::Drop` counts) is Drop, and no fn or method of that file encloses it inside that
+// block. The trait decides; the implementor's name is never the test. Stays reported:
+//   * a free fn named drop: its kind is Function, or a `mod` fn (the grammar captures it as a Method) outside any Drop block;
+//   * an inherent or other-trait method at file level: an inherent impl leaves no ImplBlock record, and another trait's block is not Drop;
+//   * an inherent or other-trait method nested in a Drop body: that body's own Drop::drop encloses it, so the enclosing test holds it;
 //   * the method of a mock trait named Drop (#[automock]): its ImplBlock names no implementor, so it never counts.
+// FLOOR, stated: the enclosing test reads only the symbols the extractor captures, and it looks for fn and method bodies. A method
+// inside the impl header (a block in a const generic argument) is in no body, so this rule exempts it; no test covers that shape.
 // FLOOR, stated: a user-defined trait whose final segment is Drop is read the same way, so its implementations are exempt too.
 // Built once per run, like registeredMacroSymbolIds, and read by isDeadCandidate.
 inline std::vector<NodeId> rustDropImplMethodIds( const IngestResult& ing )
