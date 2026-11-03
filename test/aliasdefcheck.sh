@@ -40,6 +40,7 @@ using lib::Real;
 class Holder { public: using value_type = IColumn; };
 using LongAlias = lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<IColumn>>>>>>>>>>>>>>>>;
 inline void f() { using LocalAlias = int; LocalAlias v = 0; (void)v; }
+inline int h() { struct LocalShape { int a; }; LocalShape s{ 1 }; return s.a; }
 EOF
 cat > "$F/t/mod.ts" <<'EOF'
 import * as m from './other';
@@ -108,6 +109,8 @@ absent(){ # dir name why
     if [ "$drc" -eq 1 ] && [ -z "$r" ] && grep -q 'not found' "$TMP/err" "$TMP/out" 2>/dev/null; then ok "$3: --defs=$2 not found"; else no "$3: --defs=$2 rc=$drc row=${r:-<none>}"; fi
 }
 absent "$F/c" LocalAlias "a function-local alias is no definition"
+defs "$F/c" LocalShape; r=$( row )
+if [ "$drc" -eq 0 ] && [ -n "$r" ]; then ok "a function-local struct stays a def (only alias captures take the local rule)"; else no "function-local struct: rc=$drc row=${r:-<none>}"; fi
 defs "$F/c" Real; n=$( grep -oE '<name q="Real" defs="[0-9]+"' "$TMP/rows" | grep -oE '[0-9]+"$' | tr -d '"' )
 if [ "$drc" -eq 0 ] && [ "${n:-x}" = "1" ]; then ok "using lib::Real; adds no second Real (defs=1)"; else no "using-declaration: rc=$drc defs=${n:-<none>}"; fi
 absent "$F/c" lib "using namespace lib; is no definition of lib"
