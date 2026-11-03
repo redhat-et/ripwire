@@ -2098,7 +2098,7 @@ $ ./build/ripwire . --naming-calibration
 <!-- ripwire naming-calibration schema=ripwire.naming-calibration/v1: naming lint rules scored against this repo's OWN rename history (a noisy proxy): <r n= old= new= fired= proxy=>. at=: commit+dirty+shallow. probed=0: no history to mine, nothing scored (r= says why); 1 = the git walk ran. pairs=N: labelled rename pairs that survived the join, the SAMPLE SIZE; a small one means nothing. candidates=N: raw substitutions mined from the patch stream before the join; FLOOR when truncated=1. commits=N: non-merge commits walked (the walk stops at 40000). hunks=N: diff hunks with content on both sides. wide_hunks=N: hunks DROPPED for exceeding the 24-line per-side pairing cap; never mined. drop_old_alive=N: candidates dropped: the old spelling is still an indexed name. drop_new_absent=N: candidates dropped: the new spelling is no eligible indexed symbol at HEAD. drop_ambiguous=N: candidates dropped: a name on both sides of several (split, rework, revert). drop_old_skipped=N: candidates dropped: the lens skips the old spelling, no rule could fire. scope=group-rule: the rule judges co-visible names, which one pair cannot evidence; unscored, not 0/0. o=/n=: one labelled pair's old (abandoned) and new (chosen) spelling. sup=N: distinct hunks that showed this substitution. p at=: path:line of the symbol the pair joined to, not a commit (the root at= is). old_fires=: rules that fired on the old spelling; absent when none. new_fires=: rules that fired on the new spelling; absent when none. -->
 <naming-calibration schema="ripwire.naming-calibration/v1" probed="1" pairs="201" candidates="2647" commits="5703" hunks="121371" wide_hunks="1200" drop_old_alive="669" drop_new_absent="1629" drop_ambiguous="148" drop_old_skipped="0" at="875d9ff28">
 <r n="naming-short" old="2" new="5" fired="7" proxy="0.286"/>
-<r n="naming-wordy" old="1" new="5" fired="6" proxy="0.167"/>
+<r n="naming-wordy" old="1" new="4" fired="5" proxy="0.200"/>
 <r n="naming-series" scope="group-rule"/>
 <r n="naming-underscore" old="0" new="0" fired="0"/>
 <r n="naming-case" old="1" new="1" fired="2" proxy="0.500"/>
@@ -2271,7 +2271,6 @@ $ ./build/ripwire . --cochange --cochange-recur=2
 <cochange schema="ripwire.cochange/v1" pairs="3264" window="18mo@HEAD" sub_windows="3" min_recur="2" shown="30" capped="1" total="3264" has_more="1" next_offset="30" offset="0" limit="0" root="." at="875d9ff28">
 <pair a="test/qsnapcachecheck.sh" b="test/qsnapprefetchcheck.sh" together="4" deg="1.00" conf_ab="1.00" conf_ba="0.67" driver="a" recur="2" surprising="1"/>
 <pair a="test/headsnapcachecheck.sh" b="test/qsnapprefetchcheck.sh" together="4" deg="1.00" conf_ab="1.00" conf_ba="0.67" driver="a" recur="2" surprising="1"/>
-<pair a="test/qsnapcachecheck.sh" b="test/qsnapprefetchcheck.sh" together="4" deg="1.00" conf_ab="1.00" conf_ba="0.67" driver="a" recur="2" surprising="1"/>
 <pair a="test/headsnapcachecheck.sh" b="test/qsnapcachecheck.sh" together="4" deg="1.00" conf_ab="1.00" conf_ba="1.00" recur="2" surprising="1"/>
 <pair a="test/gatecountcheck.sh" b="test/manifestcheck.sh" together="3" deg="1.00" conf_ab="1.00" conf_ba="0.23" driver="a" recur="2" surprising="1"/>
 <pair a="test/elixircheck.sh" b="test/elixirsemanticcheck.sh" together="3" deg="1.00" conf_ab="0.14" conf_ba="1.00" driver="b" recur="3" surprising="1"/>
@@ -2738,8 +2737,6 @@ $ ./build/ripwire . --zoom
 <module level="3" id="9213" size="345" dir="./test" children="3">
 </module>
 </module>
-<module level="4" id="9128" size="1556" dir="./test">
-<module level="3" id="9132" size="1215" dir="./test" children="4">
 ... [17 more line(s); run it to see the whole thing]
 ```
 
@@ -3658,7 +3655,6 @@ $ ./build/ripwire . --stray-content=lane/ --plan
 <ref name="lane/served-syms-prereg" v="unmerged" stray="2134" files="4" scouted="1"/>
 <ref name="lane/crossctx-external-prereg" v="unmerged" stray="2054" files="6" scouted="1"/>
 <ref name="lane/file-graph-csr" v="unmerged" stray="1861" files="38" scouted="1"/>
-<ref name="lane/for-noise" v="unmerged" stray="1820" files="47" scouted="1"/>
 ... [17 more line(s); run it to see the whole thing]
 ```
 
