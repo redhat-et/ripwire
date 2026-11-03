@@ -24,6 +24,7 @@
 #include "nextverb.h"      // nextFlag / nextAttrXml
 #include "pathpairs.h"     // pathDefInTests — the one test-path rule --path's twins use
 #include "serialize.h"     // escapeXml / jsonStr / symTag
+#include "infra/tablelookup.h"  // findSortedByField — the alias-target side table is ascending by id
 
 #include <algorithm>
 #include <cstdint>
@@ -202,8 +203,7 @@ struct AliasTargetText
 // the side-table row of an alias def, or nullptr (model.h AliasTarget: ascending id)
 inline const AliasTarget* aliasTargetOf( const IngestResult& ing, NodeId id ) noexcept
 {
-    const auto it = std::lower_bound( ing.aliasTargets.begin(), ing.aliasTargets.end(), id, []( const AliasTarget& a, NodeId v ) { return a.id < v; } );
-    return it != ing.aliasTargets.end() && it->id == id ? &*it : nullptr;
+    return findSortedByField( ing.aliasTargets, &AliasTarget::id, id );
 }
 inline bool aliasTargetRow( const IngestResult& ing, const Symbol& s ) noexcept
 {

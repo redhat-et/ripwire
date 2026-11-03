@@ -67,19 +67,4 @@ inline AliasShape aliasShapeOf( Lang lang, TSNode decl ) noexcept
     }
 }
 
-// A C++ alias written inside a function body or lambda is a local name, not a definition (the local-const rule).
-inline bool cppAliasIsFunctionLocal( TSNode n ) noexcept
-{
-    int depth = 0;
-    for( TSNode p = ts_node_parent( n ); !ts_node_is_null( p ); p = ts_node_parent( p ), ++depth )
-    {
-        const char* pt = ts_node_type( p );
-        if( depth >= 256 || kindIs( pt, "compound_statement" ) || kindIs( pt, "lambda_expression" ) )
-        {
-            return true;   // past the cap the enclosure is unknown: not indexed (a floor, never a false def)
-        }
-    }
-    return false;
-}
-
 }   // namespace rw

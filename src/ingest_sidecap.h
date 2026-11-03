@@ -2045,7 +2045,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             AliasShape    aliasShape {};
             if( isDef && langFacts( le.lang ).aliasTargetDefs && defCapSv == "definition.alias" )
             {
-                if( cppAliasIsFunctionLocal( roleNode ) )
+                if( insideFunctionBody( roleNode ) )   // ingest_relations.h: a function-local alias is a local name (the local-const rule)
                 {
                     continue;
                 }
