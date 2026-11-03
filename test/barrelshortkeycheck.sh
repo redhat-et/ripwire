@@ -69,7 +69,8 @@
 #       is one name, D6 the held marker under --token-budget, D7 the off switch. Near-miss twins print no <shortkey>: D8 two names
 #       (`WidgetPtr` and `ExprKind`), a name that resolves (`getWidgetPtrCount`), a plain capitalised word (`Widget`), no code word,
 #       a file name (`index.ts`), a version and an abbreviation (`3.15`, `e.g.`), a qualified and a bare name together, and a
-#       qualified name whose fully proven definition the answer already printed (`Utils.formatDate`: resolved, no ladder);
+#       qualified name whose fully proven definition the answer already printed (`Utils.formatDate`: resolved, no ladder), and a
+#       qualified spelling that is a module path (`utils.date` for src/utils/date.ts: it names a file, not a definition);
 #       D9 every sentence shortkey carries next=.
 # Every arm reads an answer whose run exited 0 and printed a <ctx root: a crash or an empty answer is a FAIL, never an absence pass.
 #
@@ -385,7 +386,7 @@ d8=0
 for q in "definition of WidgetPtr and ExprKind, the name lookup is empty" "definition of getWidgetPtrCount, the name lookup is empty" \
          "where is the Widget struct used in the headers" "how does this fixture handle pointers" "what does index.ts export for the lookup" \
          "in version 3.15 e.g. the lookup of widgets is empty" "the lookup of Wrong.formatDate and WidgetPtr is empty" \
-         "where does Utils.formatDate come from, the lookup is empty"; do
+         "where does Utils.formatDate come from, the lookup is empty" "where is utils.date imported in this tree"; do
     d8=$(( d8 + 1 ))
     run "$S" "$TMP/d8-$d8.xml" "--for=$q" && { if grep -q '<shortkey' "$TMP/d8-$d8.xml"; then no "D8 near miss prints no shortkey: $q"; else ok "D8 near miss prints no shortkey: $q"; fi; }
 done

@@ -1828,15 +1828,47 @@ inline std::string_view sentenceName( std::string_view task )
     return quals.empty() ? words.front() : quals.front();
 }
 
+// A qualified spelling that names a FILE of the tree, not a definition: a file's basename (`build.ninja`) or a module path whose
+// segments are the file's directories and stem (`http.server` for Lib/http/server.py, `pkg.sub` for pkg/sub/__init__.py or
+// pkg/sub/index.ts).
+inline bool sentenceNameIsFile( const IngestResult& ing, std::string_view x, const std::vector<std::string_view>& segs )
+{
+    std::string mod;
+    for( const std::string_view g : segs )
+    {
+        mod.append( mod.empty() ? "" : "/" ).append( g );
+    }
+    const auto atSegment = []( std::string_view path, std::string_view tail ) { return path.ends_with( tail ) && ( path.size() == tail.size() || path[ path.size() - tail.size() - 1 ] == '/' ); };
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view rel   = rootRelPath( ing, f );
+        const std::size_t      slash = rel.rfind( '/' );
+        const std::string_view base  = rel.substr( slash == std::string_view::npos ? 0 : slash + 1 );
+        const std::size_t      dot   = base.find( '.' );
+        const std::string_view stem  = rel.substr( 0, rel.size() - base.size() + ( dot == std::string_view::npos ? base.size() : dot ) );
+        const bool             pkg   = base.starts_with( "__init__." ) || base.starts_with( "index." ) || base.starts_with( "mod." );
+        if( base == x || atSegment( stem, mod ) || ( pkg && slash != std::string_view::npos && atSegment( rel.substr( 0, slash ), mod ) ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The sentence's name resolved to no definition: a bare X names no symbol in the index (one that exists is the route's to rank, not
 // the ladder's); a qualified X has no definition the answer printed that proves its qualifier fully (provenLeafDefs, the leaf
-// rung's own rule: a served same-leaf decoy does not resolve it).
+// rung's own rule: a served same-leaf decoy does not resolve it). A qualified X that names a file (sentenceNameIsFile) is no
+// definition to resolve: the ladder would list same-leaf strangers.
 inline bool sentenceNameUnresolved( const IngestResult& ing, std::string_view x, const std::vector<NodeId>& served )
 {
     const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( x );
     if( segs.empty() )
     {
         return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.name == x; } );
+    }
+    if( sentenceNameIsFile( ing, x, segs ) )
+    {
+        return false;
     }
     std::vector<const Symbol*> sameLeaf;
     const std::vector<Proven>  kept = provenLeafDefs( ing, segs.back(), std::vector<std::string>( segs.begin(), segs.end() - 1 ), sameLeaf );
