@@ -63,6 +63,14 @@
 #   C9  the literal rung's shapes type (Python `type X =`), define (`#define x 4`), const (a local `const x =`, in= its function)
 #       and assign (`x = 3` at column 0, Lua); the row cap (8 lines: total="8" shown="6", 6 rows); the exact leaf's body cut
 #       (truncated="1" past 8192 bytes); floor="1" when a file the scan must read is unreadable (SKIP when chmod cannot hide it).
+#   D1-D9 (lane short-key-sentence) a SENTENCE around exactly one code-shaped name the index cannot resolve reaches the same ladder,
+#       marked from="sentence": D1 leaf (`Wrong.formatDate`: q_unmatched, never exact), D2 substring + literal using (`WidgetPtr`),
+#       D3 literal import-as (`ExprKind`), D4 CONST held=lit (`MAX_WIDGET_COUNT`), D5 a bare leaf beside its own qualified spelling
+#       is one name, D6 the held marker under --token-budget, D7 the off switch. Near-miss twins print no <shortkey>: D8 two names
+#       (`WidgetPtr` and `ExprKind`), a name that resolves (`getWidgetPtrCount`), a plain capitalised word (`Widget`), no code word,
+#       a file name (`index.ts`), a version and an abbreviation (`3.15`, `e.g.`), a qualified and a bare name together, and a
+#       qualified name whose fully proven definition the answer already printed (`Utils.formatDate`: resolved, no ladder);
+#       D9 every sentence shortkey carries next=.
 # Every arm reads an answer whose run exited 0 and printed a <ctx root: a crash or an empty answer is a FAIL, never an absence pass.
 #
 # Usage: bash test/barrelshortkeycheck.sh [BIN]     (default build/ripwire; exits non-zero on any failure)
@@ -350,6 +358,41 @@ else
     if [ "$c9e" -ne 0 ] || sk "$TMP/c9e.xml" | grep -qF 'floor='; then no "C9 a clean scan prints no floor= (or its run failed)"; else ok "C9 a clean scan prints no floor="; fi
 fi
 chmod 644 "$L/src/f3.ts"
+
+# ── D: a sentence around one unresolved code-shaped name (lane short-key-sentence) ──────────────────────────────────────────────
+run "$S" "$TMP/d1.xml" "--for=where does Wrong.formatDate come from, the lookup is empty" && {
+skhas   "$TMP/d1.xml" "D1 sentence: the ladder runs, from=sentence"  '<shortkey of="Wrong.formatDate" from="sentence" found="0" rungs="leaf,substring,literal"'
+skhas   "$TMP/d1.xml" "D1 sentence leaf rung: q_unmatched, exact=0"   'kept="0" of="7" exact="0" q_unmatched="1">'
+skhasnt "$TMP/d1.xml" "D1 sentence leaf rung: never exact"            'exact="1"'
+}
+run "$S" "$TMP/d2.xml" "--for=definition of WidgetPtr, the name lookup is empty" && {
+skhas   "$TMP/d2.xml" "D2 sentence: from=sentence"                    '<shortkey of="WidgetPtr" from="sentence" found="0" rungs="substring,literal" next="--grep=WidgetPtr">'
+skhas   "$TMP/d2.xml" "D2 sentence substring rung"                    '<d n="getWidgetPtrCount" t="fn" p="cpp/fwd.cpp" l="2"/>'
+skhas   "$TMP/d2.xml" "D2 sentence literal using row"                 '<ld p="cpp/fwd.h" l="4" shape="using"><![CDATA[using WidgetPtr = Ptr<Widget>;]]></ld>'
+skhasnt "$TMP/d2.xml" "D2 sentence: a commented-out declaration is no row" 'l="7"'
+}
+run "$S" "$TMP/d3.xml" "--for=where does ExprKind come from? --defs finds nothing" && skhas "$TMP/d3.xml" "D3 sentence literal import-as row" '<ld p="rs/src/lib.rs" l="2" shape="import-as">'
+run "$S" "$TMP/d4.xml" "--for=why is the lookup of MAX_WIDGET_COUNT empty" && skhas "$TMP/d4.xml" "D4 sentence CONST key: held=lit" '<rung n="literal" key="MAX_WIDGET_COUNT" held="lit" exact="0"/>'
+run "$S" "$TMP/d5.xml" "--for=where is formatDate defined, it is used as Wrong.formatDate" && skhas "$TMP/d5.xml" "D5 a bare leaf beside its qualified spelling is one name" '<shortkey of="Wrong.formatDate" from="sentence"'
+run "$S" "$TMP/d6.xml" "--for=definition of WidgetPtr, the name lookup is empty" --token-budget=2000 && {
+if grep -q '<shortkey held="budget" of="WidgetPtr" from="sentence" next="--for=WidgetPtr"/>' "$TMP/d6.xml" && ! grep -q '<rung ' "$TMP/d6.xml"; then ok "D6 sentence under a token budget: held marker"; else no "D6 sentence under a token budget: held marker"; fi
+}
+( cd "$S" || exit 1; RIPWIRE_NO_SHORT_KEY=1 HOME="$TMP" "$BIN" "$S" --no-cache "--for=definition of WidgetPtr, the name lookup is empty" </dev/null 2>/dev/null ) >"$TMP/d7.xml"; d7rc=$?
+if [ "$d7rc" -eq 0 ] && grep -q '<ctx ' "$TMP/d7.xml" && ! grep -q '<shortkey' "$TMP/d7.xml"; then ok "D7 the off switch removes the sentence ladder"; else no "D7 the off switch removes the sentence ladder (rc=$d7rc)"; fi
+d8=0
+for q in "definition of WidgetPtr and ExprKind, the name lookup is empty" "definition of getWidgetPtrCount, the name lookup is empty" \
+         "where is the Widget struct used in the headers" "how does this fixture handle pointers" "what does index.ts export for the lookup" \
+         "in version 3.15 e.g. the lookup of widgets is empty" "the lookup of Wrong.formatDate and WidgetPtr is empty" \
+         "where does Utils.formatDate come from, the lookup is empty"; do
+    d8=$(( d8 + 1 ))
+    run "$S" "$TMP/d8-$d8.xml" "--for=$q" && { if grep -q '<shortkey' "$TMP/d8-$d8.xml"; then no "D8 near miss prints no shortkey: $q"; else ok "D8 near miss prints no shortkey: $q"; fi; }
+done
+nsk=0; nnext=0
+for f in "$TMP"/d[1-5].xml; do
+    c=$( grep -c '<shortkey of=' "$f" ); nsk=$(( nsk + c ))
+    n=$( grep -o '<shortkey of="[^"]*" from="sentence" found="0" rungs="[^"]*" next="--' "$f" | wc -l | tr -d ' ' ); nnext=$(( nnext + n ))
+done
+if [ "$nsk" -ge 5 ] && [ "$nsk" = "$nnext" ]; then ok "D9 every sentence shortkey carries next= ($nnext of $nsk)"; else no "D9 sentence shortkeys with next= $nnext of $nsk (want all, at least 5)"; fi
 
 if [ "$fail" = 0 ]; then echo "barrelshortkeycheck: PASS"; else echo "barrelshortkeycheck: FAIL"; fi
 exit "$fail"

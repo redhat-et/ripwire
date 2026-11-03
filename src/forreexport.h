@@ -1542,7 +1542,8 @@ inline bool forShortKeyOn()
 }
 
 inline constexpr std::string_view kShortKeyLegend =
-    "<!-- shortkey: the task names X, the route read it as a name (name-exact) and no definition resolved; the ladder below says what "
+    "<!-- shortkey: the task names X, the route read it as a name (name-exact) and no definition resolved (from=sentence: the route read "
+    "the task as words, X is its one code-shaped name and no definition of X resolved); the ladder below says what "
     "does exist, each rung named, none of it a definition of X unless exact=1. rungs= the rungs run, in order. "
     "rung n=leaf: X written Q.leaf; kept= the definitions named leaf that prove every segment of Q (q_by=scope: its owner path; file: "
     "its file stem or path tail, never for a member; ns: a TS/JS re-export hop publishes it under Q; alias: only a consumer's own "
@@ -1765,6 +1766,84 @@ inline std::vector<Proven> provenLeafDefs( const IngestResult& ing, std::string_
     return kept;
 }
 
+// SHORT-KEY-SENTENCE: the ONE code-shaped name of a task the route read as words ("" when it holds none or several). Code-shaped:
+// a QUALIFIED spelling (reexportQualifiedSegments, every segment starting like an identifier, a leaf of 2+ bytes that is no file or
+// host suffix: `index.ts`, `e.g.`, `3.15`, `Node.js` are not) or a word namesplit::hasIdentifierShape accepts (a lower-to-upper step
+// or an interior `_`: `ChunkPtr`, `max_len`; a plain capitalised word, `Python`, `Utils`, `Column`, is English as often as code, the
+// same reading the name-exact route makes). A bare word that is a segment of the qualified spelling beside it (`getX … Owner.getX`)
+// is that name. Spans break on every byte that is not an identifier byte, `$`, `.` or `:` (`--defs=ColumnPtr` holds `ColumnPtr`).
+inline std::string_view sentenceName( std::string_view task )
+{
+    const auto spanByte = []( char c ) { return namesplit::isIdentChar( c ) || c == '$' || c == '.' || c == ':'; };
+    const auto edge     = []( char c ) { return c == '.' || c == ':'; };
+    std::vector<std::string_view> quals, words;
+    const auto addOnce = []( std::vector<std::string_view>& v, std::string_view w ) { if( std::ranges::find( v, w ) == v.end() ) { v.push_back( w ); } };
+    for( std::size_t at = 0; at < task.size(); )
+    {
+        std::size_t end = at;
+        while( end < task.size() && spanByte( task[ end ] ) )
+        {
+            ++end;
+        }
+        std::string_view tok = task.substr( at, end - at );
+        at                   = end == at ? at + 1 : end;
+        while( !tok.empty() && edge( tok.front() ) )   // sentence punctuation around a span (`X.`, `::X`)
+        {
+            tok.remove_prefix( 1 );
+        }
+        while( !tok.empty() && edge( tok.back() ) )
+        {
+            tok.remove_suffix( 1 );
+        }
+        const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( tok );
+        if( !segs.empty() && segs.back().size() >= 2 && !lit_detail::isFileOrHostSuffix( segs.back() ) &&
+            std::ranges::all_of( segs, []( std::string_view g ) { return namesplit::isIdentStart( g.front() ) || g.front() == '$'; } ) )
+        {
+            addOnce( quals, tok );
+            continue;
+        }
+        for( std::size_t w = 0; w < tok.size(); )   // the words of a span that is no qualified name
+        {
+            std::size_t e = w;
+            while( e < tok.size() && !edge( tok[ e ] ) )
+            {
+                ++e;
+            }
+            if( namesplit::hasIdentifierShape( tok.substr( w, e - w ) ) )
+            {
+                addOnce( words, tok.substr( w, e - w ) );
+            }
+            w = e + 1;
+        }
+    }
+    for( const std::string_view q : quals )
+    {
+        const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( q );
+        std::erase_if( words, [ & ]( std::string_view w ) { return std::ranges::find( segs, w ) != segs.end(); } );
+    }
+    if( quals.size() + words.size() != 1 )
+    {
+        return {};
+    }
+    return quals.empty() ? words.front() : quals.front();
+}
+
+// The sentence's name resolved to no definition: a bare X names no symbol in the index (one that exists is the route's to rank, not
+// the ladder's); a qualified X has no definition the answer printed that proves its qualifier fully (provenLeafDefs, the leaf
+// rung's own rule: a served same-leaf decoy does not resolve it).
+inline bool sentenceNameUnresolved( const IngestResult& ing, std::string_view x, const std::vector<NodeId>& served )
+{
+    const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( x );
+    if( segs.empty() )
+    {
+        return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.name == x; } );
+    }
+    std::vector<const Symbol*> sameLeaf;
+    const std::vector<Proven>  kept = provenLeafDefs( ing, segs.back(), std::vector<std::string>( segs.begin(), segs.end() - 1 ), sameLeaf );
+    return std::ranges::none_of( kept, [ & ]( const Proven& p )
+                                 { return p.level == QProof::Strong && std::ranges::find( served, NodeId( p.s - ing.symbols.data() ) ) != served.end(); } );
+}
+
 // The literal rung's allowlist: the declaration shape of `line` for key `k` ("" = not a declaration line).
 inline std::string_view declShape( std::string_view line, std::string_view k )
 {
@@ -1852,15 +1931,26 @@ struct ShortKeyArgs
     bool             held = false;        // a token budget is set: the marker, not the rows
     RedactCounts*    redact = nullptr;
     std::string_view rootArg;             // the single root (p= relative to it), "" otherwise
+    std::string_view task;                // the --for text (SHORT-KEY-SENTENCE: its one code-shaped name when the route read it as words)
+    const std::vector<NodeId>* served = nullptr;   // the signature rows the answer printed; null when they streamed unrecorded (no sentence ladder)
 };
 
-// The <shortkey> block ("" unless the route is name-exact and no definition was served).
+// The <shortkey> block ("" unless the route is name-exact and no definition was served, or the route read the task as words and
+// its one code-shaped name resolved to no definition: from="sentence").
 inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortKeyArgs& a )
 {
     using namespace shortkey_detail;
-    const std::string_view x = routeName( a.routeNote );
+    std::string_view x = routeName( a.routeNote );
+    // SHORT-KEY-SENTENCE: a route that read the task as words reaches the same ladder when the task holds exactly one code-shaped
+    // name and no definition of it resolved (sentenceName, sentenceNameUnresolved); every rung and proof below is unchanged
+    bool fromSentence = false;
+    if( x.empty() && a.served != nullptr && forShortKeyOn() )
+    {
+        x            = sentenceName( a.task );
+        fromSentence = !x.empty() && sentenceNameUnresolved( ing, x, *a.served );
+    }
     // `this.X` / `self.X` is a member access, not a qualified name: no ladder keyed on text no definition can carry
-    if( x.empty() || !a.noDefinitionServed || !forShortKeyOn() || x.starts_with( "this." ) || x.starts_with( "self." ) )
+    if( x.empty() || !( a.noDefinitionServed || fromSentence ) || !forShortKeyOn() || x.starts_with( "this." ) || x.starts_with( "self." ) )
     {
         return {};
     }
@@ -1887,6 +1977,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     {
         out = "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run; next= runs it without the budget --><shortkey held=\"budget\"";
         attr( "of", x );
+        out.append( fromSentence ? " from=\"sentence\"" : "" );
         return out.append( nextAttrXml( nextFlag( "--for=", x ) ) ).append( "/>" );
     }
     std::string rungs, body, next;
@@ -2014,7 +2105,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     std::string head = std::string( kShortKeyLegend ).append( "<shortkey" );
     std::swap( out, head );
     attr( "of", x );
-    out.append( " found=\"0\"" );
+    out.append( fromSentence ? " from=\"sentence\" found=\"0\"" : " found=\"0\"" );
     attr( "rungs", rungs );
     out.append( nextAttrXml( next ) ).append( ">" ).append( head ).append( "</shortkey>" );
     return out;
