@@ -9,7 +9,8 @@
 #   1. short-horizon-churn — churn="self" is informational; GATING needs >= 2 COMMITTED in-window commits on
 #      the edited lines (the working edit never counted).
 #   2. dead-code — the blanket .h/.hpp/.hh/.hxx exclusion is gone; what is exempt is what the LANGUAGE invokes
-#      (constructors, destructors, operators, bare type declarations, main).
+#      (constructors, destructors, operators, bare type declarations, main) and a Rust method named drop inside an
+#      impl Drop block (issue #494).
 #   3. verbosity/complexity — verbosity counts CODE lines (blank and comment lines are not debt); both kinds
 #      gate on a bar CROSSING or >= 25% growth, and a sub-bar doubling is a minor row rather than silence.
 #   4. api-surface — new-symbol rows are a header COUNT, a surface that SHRANK is not a regression, and a
@@ -133,11 +134,13 @@ rows "$ODC" | grep 'kind="dead-code"' | grep -q 'Extra' \
     && ok "dead-code: byte-identical run to run (deterministic)" || no "dead-code: non-deterministic delta"
 
 
-# ── 2b) the Rust Drop::drop exemption (issue #494) ─────────────────────────────────────────────────────────
+# ── 2b) the Rust Drop::drop exemption (issue #494, maintainer review: the ImplBlock of the Drop trait) ───────────
 # `impl Drop for T { fn drop(&mut self) }` is run by the compiler when a T leaves scope, and nothing in the source
-# names it, so its zero in-edges say nothing. Positive: that method is exempt. Negatives, which must stay reported:
-# a free function named `drop` (not a method, so the language does not invoke it), a C++ method named `drop` (the
-# exemption is Rust-only), and an ordinary orphan helper beside them.
+# names it, so its zero in-edges say nothing. What is exempt is a method of a Drop impl BLOCK, judged by the trait's
+# final path segment: `impl std::ops::Drop` and `impl<T> Drop for G<T>` count. A free fn named drop, a method of any
+# other impl or trait, and the C++ method named drop stay reported. Each case is judged on ITS OWN LINE: a row's sym
+# cannot tell two `drop` symbols apart (a nested free fn prints as Nest::drop too), and the p= attribute can.
+# Each fixture line carries a marker comment, so the line is looked up, never guessed.
 RD="$WORK/rustdrop"; mkdir -p "$RD/src"
 ( cd "$RD" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
 printf 'pub fn api() -> u32 { 2 }\n' > "$RD/src/lib.rs"
@@ -148,35 +151,55 @@ pub fn api() -> u32 { use_guard() }
 struct Guard(u32);
 
 impl Drop for Guard {
-    fn drop(&mut self) { self.0 = 0; }
+    fn drop(&mut self) { self.0 = 0; } // P-guard
+}
+
+struct Gen<T>(T);
+
+impl<T> Drop for Gen<T> {
+    fn drop(&mut self) { } // P-gen
+}
+
+struct Q;
+
+impl std::ops::Drop for Q {
+    fn drop(&mut self) { } // P-path
 }
 
 fn use_guard() -> u32 { let guard = Guard(3); guard.0 }
-fn drop() { }
-fn orphan_helper() -> u32 { 7 }
+fn drop() { } // N-free
+fn orphan_helper() -> u32 { 7 } // N-orphan
 RS
 cat > "$RD/src/holder.cpp" <<'CPP'
-struct Holder { void drop() { } };
+struct Holder { void drop() { } }; // N-cpp
 CPP
+# A dead-code row on file:line. The p= attribute is exact ("src/lib.rs:4"), so line 4 never matches line 40.
+deadAt(){ printf '%s' "$1" | tr '>' '\n' | grep -F 'kind="dead-code"' | grep -q -F "p=\"$2\""; }
+# The one line that carries a marker. A marker that is not on exactly one line fails its case; nothing is guessed.
+markerLine(){ [ "$( grep -c -F -- "$2" "$1" )" = 1 ] && grep -n -F -- "$2" "$1" | cut -d: -f1; }
+# judgeLine <project dir> <quality-delta output> <file> <marker> <reported|exempt> <claim>
+judgeLine(){
+    local l
+    l="$( markerLine "$1/$3" "$4" )" || { no "$6: marker '$4' is not on exactly one line of $3"; return 0; }
+    if deadAt "$2" "$3:$l"; then
+        if [ "$5" = reported ]; then ok "$6 (line $l)"; else no "$6: reported as dead-code at $3:$l"; fi
+    else
+        if [ "$5" = exempt ]; then ok "$6 (line $l)"; else no "$6: not reported at $3:$l"; fi
+    fi
+    return 0
+}
 RDQ="$( cd "$RD" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
-RDDEAD="$( rows "$RDQ" | grep 'kind="dead-code"' )"
-printf '%s' "$RDDEAD" | grep -q 'Guard::drop' \
-    && { no "rust-drop: Drop::drop of 'impl Drop for Guard' reported as dead-code"; printf '%s\n' "$RDDEAD"; } \
-    || ok "rust-drop: Drop::drop of 'impl Drop for Guard' is not reported (the compiler runs it at scope exit)"
-printf '%s' "$RDDEAD" | grep -q 'sym="drop"' \
-    && ok "rust-drop: a free function named drop is still reported (the language does not invoke it)" \
-    || { no "rust-drop: free function 'drop' wrongly exempt"; printf '%s\n' "$RDDEAD"; }
-printf '%s' "$RDDEAD" | grep -q 'Holder::drop' \
-    && ok "rust-drop: a C++ method named drop is still reported (the exemption is Rust-only)" \
-    || { no "rust-drop: C++ method Holder::drop wrongly exempt"; printf '%s\n' "$RDDEAD"; }
-printf '%s' "$RDDEAD" | grep -q 'orphan_helper' \
-    && ok "rust-drop: an ordinary orphan helper is still reported (negative control)" \
-    || { no "rust-drop: orphan_helper not reported"; printf '%s\n' "$RDDEAD"; }
+judgeLine "$RD" "$RDQ" src/lib.rs '// P-guard' exempt "rust-drop: Drop::drop of 'impl Drop for Guard' is not reported (the compiler runs it at scope exit)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// P-gen' exempt "rust-drop: Drop::drop of 'impl<T> Drop for Gen<T>' is not reported (generic implementor)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// P-path' exempt "rust-drop: Drop::drop of 'impl std::ops::Drop for Q' is not reported (path-qualified trait)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// N-free' reported "rust-drop: a free fn named drop is still reported (the language does not invoke it)"
+judgeLine "$RD" "$RDQ" src/holder.cpp '// N-cpp' reported "rust-drop: a C++ method named drop is still reported (the exemption is Rust-only)"
+judgeLine "$RD" "$RDQ" src/lib.rs '// N-orphan' reported "rust-drop: an ordinary orphan helper is still reported (negative control)"
 
-# ── 2c) raw identifier r#drop, and a free fn named drop inside a module (issue #494 review) ─────────────────
-# `fn r#drop` is the same Drop::drop, and the extractor keeps the `r#` in the name, so it is exempt too. A free fn
-# named `drop` inside `mod m` is not a method: nothing invokes it at scope exit, so it must stay reported. Each is
-# checked by its file:line, because a row's sym alone cannot tell the module fn from the top-level one.
+# ── 2c) raw identifier r#drop, and the shapes that must stay reported (issue #494, maintainer review) ───────────
+# `fn r#drop` is the same Drop::drop: the extractor keeps the `r#` in the name, and the trait is still Drop. The
+# reported side is the review's list: a module-level fn, an inherent method, a method of another trait (its declaration
+# and its impl), and everything nested in a Drop::drop body (a free fn, an inherent impl, another trait's impl).
 RR="$WORK/rawdrop"; mkdir -p "$RR/src"
 ( cd "$RR" && git init -q && git config user.email t@t && git config user.name t && git config commit.gpgsign false )
 printf 'pub fn api() -> u32 { 2 }\n' > "$RR/src/lib.rs"
@@ -187,27 +210,58 @@ pub fn api() -> u32 { 2 }
 struct Raw(u32);
 
 impl Drop for Raw {
-    fn r#drop(&mut self) { self.0 = 0; }
+    fn r#drop(&mut self) { self.0 = 0; } // P-raw
 }
 
 mod m {
-    pub fn drop() { }
+    pub fn drop() { } // N-mod
 }
 
-fn orphan_raw_helper() -> u32 { 7 }
+struct Plain;
+
+impl Plain {
+    fn drop(&mut self) { } // N-inherent
+}
+
+trait Closer {
+    fn drop(&mut self) { } // N-trait-decl
+}
+
+struct C1;
+
+impl Closer for C1 {
+    fn drop(&mut self) { } // N-other-trait
+}
+
+struct Nest;
+
+impl Drop for Nest {
+    fn drop(&mut self) { // P-nest
+        fn drop() { } // N-nested-fn
+        struct Inner;
+        impl Inner {
+            fn drop(&mut self) { } // N-nested-inherent
+        }
+        struct Inner2;
+        impl Closer for Inner2 {
+            fn drop(&mut self) { } // N-nested-trait
+        }
+    }
+}
+
+fn orphan_raw_helper() -> u32 { 7 } // N-orphan-raw
 RS
-MODLN="$( grep -n 'pub fn drop' "$RR/src/lib.rs" | cut -d: -f1 )"
 RRQ="$( cd "$RR" && "$BIN" . --quality-delta --no-cache 2>/dev/null )"
-RRDEAD="$( rows "$RRQ" | grep 'kind="dead-code"' )"
-printf '%s' "$RRDEAD" | grep -q 'Raw::r#drop' \
-    && { no "rust-raw-drop: r#drop of 'impl Drop for Raw' reported as dead-code"; printf '%s\n' "$RRDEAD"; } \
-    || ok "rust-raw-drop: r#drop of 'impl Drop for Raw' is not reported (same Drop::drop, raw spelling)"
-printf '%s\n' "$RRDEAD" | grep -q "p=\"[^\"]*:$MODLN\"" \
-    && ok "rust-raw-drop: a free fn named drop inside mod m is still reported (line $MODLN, not a method)" \
-    || { no "rust-raw-drop: mod-level drop (line $MODLN) wrongly exempt as a Drop::drop method"; printf '%s\n' "$RRDEAD"; }
-printf '%s' "$RRDEAD" | grep -q 'orphan_raw_helper' \
-    && ok "rust-raw-drop: an ordinary orphan helper is still reported (negative control)" \
-    || { no "rust-raw-drop: orphan_raw_helper not reported"; printf '%s\n' "$RRDEAD"; }
+judgeLine "$RR" "$RRQ" src/lib.rs '// P-raw' exempt "rust-raw-drop: r#drop of 'impl Drop for Raw' is not reported (same Drop::drop, raw spelling)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// P-nest' exempt "rust-raw-drop: Drop::drop of 'impl Drop for Nest' is not reported (a Drop body holding nested items)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-mod' reported "rust-raw-drop: a free fn named drop inside mod m is still reported (not a method of any impl)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-inherent' reported "rust-raw-drop: an inherent method named drop is still reported (no Drop impl block)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-trait-decl' reported "rust-raw-drop: trait Closer's own default drop is still reported (another trait)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-other-trait' reported "rust-raw-drop: impl Closer for C1's drop is still reported (another trait's impl)"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-nested-fn' reported "rust-raw-drop: a free fn named drop nested in Nest's Drop::drop body is still reported"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-nested-inherent' reported "rust-raw-drop: an inherent drop nested in Nest's Drop::drop body is still reported"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-nested-trait' reported "rust-raw-drop: an other-trait drop nested in Nest's Drop::drop body is still reported"
+judgeLine "$RR" "$RRQ" src/lib.rs '// N-orphan-raw' reported "rust-raw-drop: an ordinary orphan helper is still reported (negative control)"
 
 # ── 3) verbosity counts CODE lines; verbosity + complexity gate on a CROSSING or >= 25% growth ───────────
 # Q1 measured the median growth of a GATING verbosity row at 6% and of a gating complexity row at 6%, while
