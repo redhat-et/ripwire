@@ -4737,6 +4737,14 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::string reexports = rw::renderForReexports( ing, cfg.forTask, /*held=*/cfg.tokenBudget > 0 );   // CR pre-pass 42b: held under --token-budget
             std::fwrite( reexports.data(), 1, reexports.size(), stdout );
         }
+        // SHORT-KEY-FOR (forreexport.h): a name-exact route that served no signature row gets the fallback ladder; "" otherwise. Its own
+        // byte allowance, outside est_tokens: no auto-served body pays for it. XML only, like the block above.
+        if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot )
+        {
+            const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = sigsPreRendered && shownSigIds.empty(),
+                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .rootArg = flRootArg } );
+            std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
+        }
         appendLiteralAnchorBlock( d, flRootArg, detailSection.xml + autoSection.xml + slot.xml + fold.xml + callerHop.xml + dispatchHop.xml );   // MF1-LIT: "" unless the task names a literal with a site (dispatchHop: train 42b, its single-candidate <b>)
         if( peerManifestRegime )   // STRING-IMPORT (fordottedstring.h): after the ordinary answer, outside est_tokens; "" unless a dotted string names a shown row
         {

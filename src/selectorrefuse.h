@@ -325,6 +325,7 @@ struct NotFoundAnswer
     std::string_view                                       missing;
     NotFoundNear                                           near;
     std::size_t                                            refused = 0;   // N != 0 (> 1): N definitions fit the selector and none was chosen (a refusal, not an absence); found= stays 0, the contract
+    std::size_t                                            nearMatches = 0;   // IMPACT-PATH: N > 1 indexed files end with the path selector; near= is the first by path (matches=N)
 
     // the legend sentence of a refused answer (refused != 0), spelled with the JSON/XML member by countFieldOrEmpty
     std::string_view refusedLegend() const
@@ -346,6 +347,7 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
         if( !a.missing.empty() ) { body += ",\"missing\":\"" + std::string( a.missing ) + "\""; }
         if( !a.near.name.empty() ) { body += ",\"near\":\"" + jsonStr( a.near.name ) + "\""; }
         if( a.near.renamed ) { body += ",\"near_renamed\":true"; }
+        body += countFieldOrEmpty( "matches", a.nearMatches, /*json=*/true );
         rw::emitTo( out, "{}}}\n", body );
         return;
     }
@@ -359,14 +361,17 @@ inline void writeNotFoundAnswer( std::FILE* out, const NotFoundAnswer& a, bool j
     if( !a.missing.empty() ) { root += " missing=\"" + std::string( a.missing ) + "\""; }
     if( !a.near.name.empty() ) { root += " near=\"" + std::string( escapeXml( a.near.name, esc ) ) + "\""; }
     if( a.near.renamed ) { root += " near_renamed=\"1\""; }
+    root += countAttrXmlOrEmpty( "matches", a.nearMatches );
     rw::emitTo( out, "<!-- ripwire {}: NOT FOUND, an answer and a refusal at once. found=0: no indexed definition matched the "
                      "selector echoed on this element, so nothing was listed or counted. Zero means none found, not none exists: "
                      "an unindexed file, a typo or an uncommitted rename can each hide the definition.{}{} near=: the indexed name "
                      "to retry with; near_renamed=1: the working tree renamed the selector to it (a DEFINITION of the selector left "
                      "a changed file that now defines near=; a mere mention is not a rename). On the CLI the exit status stays 1, a "
-                     "refusal, and stderr carries the same diagnosis; over MCP this document rides the refusal's error data. -->{}/>",
+                     "refusal, and stderr carries the same diagnosis; over MCP this document rides the refusal's error data.{} -->{}/>",
                  a.tag, a.refusedLegend(),
-                 a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.", root );
+                 a.missing.empty() ? "" : " missing=from|to|both: the endpoint(s) that matched nothing; near= retries the first.",
+                 a.nearMatches != 0 ? " matches=N: N indexed files end with the path selector and it cannot pick one; near= is the first by path, one whole path answers." : "",
+                 root );
 }
 
 }   // namespace rw

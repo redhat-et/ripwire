@@ -675,13 +675,17 @@ probeFor()
 # "|closure" to the ns d= reading: measured 852 B, inside the same 860 B pin. The OLD path keeps its pin: the
 # (U-twin-path) arm after the universe loop cuts exactly those readings out of the same probe and holds the rest at 550 B.
 # RE-PINNED 2026-10-19 (markdown section links): the via=link reading and the deleted same-pair sentence.
+# RE-PINNED 2026-11-02 (lane truth-fixes, DEPS-SHAPE-HONEST): ripwire.deps/v1 780 -> 810 (measured 800, the --deps probe; 764 on
+# main c3b678bf). The always-on health shape= reading now says what tangled means (cyclic_files= at 1 in 20 of dep_files=) instead
+# of the nccd>2 rule it replaced: +36 B on every --deps answer. The cyclic_files= and containment_edges= readings ride only when
+# their attribute does (absent at 0) and add nothing on this cycle-free, Rust-free probe.
 PIN_TABLE='
 ripwire.edit-check/v1             650   636
 ripwire.map/v1                   1140  1129
 ripwire.map-diff/v1              970   953
 ripwire.pack-signatures/v1       840   827
 ripwire.metrics/v1               1090  1080
-ripwire.deps/v1                   780   764
+ripwire.deps/v1                   810   800
 ripwire.hotspots/v1               530   518
 ripwire.clones/v1                 810   799
 ripwire.readability/v1            350   332
