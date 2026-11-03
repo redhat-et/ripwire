@@ -111,6 +111,9 @@ absent(){ # dir name why
 absent "$F/c" LocalAlias "a function-local alias is no definition"
 defs "$F/c" LocalShape; r=$( row )
 if [ "$drc" -eq 0 ] && [ -n "$r" ]; then ok "a function-local struct stays a def (only alias captures take the local rule)"; else no "function-local struct: rc=$drc row=${r:-<none>}"; fi
+# a function with a body is no alias row: no to= (the target transport rides alias rows only)
+defs "$F/c" h; r=$( row )
+if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' "$r" | grep -q ' to'; then ok "a function row carries no to="; else no "function row: rc=$drc row=${r:-<none>}"; fi
 defs "$F/c" Real; n=$( grep -oE '<name q="Real" defs="[0-9]+"' "$TMP/rows" | grep -oE '[0-9]+"$' | tr -d '"' )
 if [ "$drc" -eq 0 ] && [ "${n:-x}" = "1" ]; then ok "using lib::Real; adds no second Real (defs=1)"; else no "using-declaration: rc=$drc defs=${n:-<none>}"; fi
 absent "$F/c" lib "using namespace lib; is no definition of lib"
