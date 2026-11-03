@@ -908,6 +908,7 @@ for _g in \
     rubysettercheck \
     rubytypedrecvcheck \
     rule3memberguardcheck \
+    pymodcallsitescheck \
     runhintcheck \
     runtracecheck \
     rustanccheck \
