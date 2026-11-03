@@ -1219,8 +1219,10 @@ struct DefectSiteAt
 // three call sites — which is precisely the finding that kind exists to catch, on the run that was adding
 // it. Two copies of "read each file once and hand me each body" is two places for the degrade rules to
 // drift, and those rules are the honesty contract here, not an implementation detail.
+// visit( NodeId, const Symbol&, body, fileBytes ): the body slice plus the whole file, for a rule that reads text OUTSIDE
+// the slice (forEachSymbolBody below is the three-argument spelling every other caller uses).
 template<class Fn>
-inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
+inline void forEachSymbolFile( const IngestResult& ing, Fn&& visit )
 {
     // per-file def ids with a real body (see constructCountsBySym above on `symbols[i].id == i`).
     const SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s ) { return s.endByte > s.sigStartByte; } );
@@ -1242,9 +1244,18 @@ inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
             {
                 continue;
             }
-            visit( i, s, std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ) );
+            visit( i, s, std::string_view( bytes.data() + s.sigStartByte, s.endByte - s.sigStartByte ), std::string_view( bytes ) );
         }
     }
+}
+
+template<class Fn>
+inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
+{
+    forEachSymbolFile( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view )
+    {
+        visit( i, s, body );
+    } );
 }
 
 // Direct Python class members get an owner: the enclosing class. A def nested inside a method gets a host: the
@@ -1658,6 +1669,126 @@ inline std::vector<std::uint8_t> trailingDefaultByNode( const IngestResult& ing 
 }
 
 
+// ---- Rust test-harness registration (issue #493) ---------------------------------------------------------------
+// `#[test]` and `#[tokio::test]` (optionally with an argument list) register a function with the test harness,
+// which calls it by name without any call in the tree. They are attributes, not macro calls, so the signature-
+// text check above never sees them: the attribute stacks ABOVE the item, outside [sigStartByte, endByte).
+// isRustTestAttribute answers whether the text between "#[" and "]" is one of the two spellings.
+inline bool isRustTestAttribute( std::string_view attr ) noexcept
+{
+    if( attr == "test" )
+    {
+        return true;
+    }
+    constexpr std::string_view tokio = "tokio::test";
+    if( attr.substr( 0, tokio.size() ) == tokio )
+    {
+        return attr.size() == tokio.size() || attr[ tokio.size() ] == '(';
+    }
+    return false;
+}
+
+// rustCodeOfAttributeLine returns an attribute line without a trailing `//` comment. Rust reads that comment as
+// whitespace, so `#[test] // case` is still `#[test]`. A `//` inside a double-quoted string is attribute text:
+// `#[tokio::test(flavor = "http://x")]` keeps its argument whether or not a comment follows it.
+inline std::string_view rustCodeOfAttributeLine( std::string_view line ) noexcept
+{
+    bool inString = false;
+    for( std::size_t i = 0; i < line.size(); ++i )
+    {
+        const char c = line[ i ];
+        if( inString )
+        {
+            if( c == '\\' )
+            {
+                ++i;
+            }
+            else if( c == '"' )
+            {
+                inString = false;
+            }
+        }
+        else if( c == '"' )
+        {
+            inString = true;
+        }
+        else if( c == '/' && i + 1 < line.size() && line[ i + 1 ] == '/' )
+        {
+            line = line.substr( 0, i );
+            break;
+        }
+    }
+    while( !line.empty() && std::isspace( static_cast<unsigned char>( line.back() ) ) )
+    {
+        line.remove_suffix( 1 );
+    }
+    return line;
+}
+
+// rustTestAttributed reads backwards from the item's signature start over blank lines, `//` comments and other
+// attribute lines (`#[inline]`, `#[allow(...)]`), and answers true when one of them is a test attribute. Whole-token
+// compare: `#[testing]` and a `#[test]` inside a comment do not count. An attribute line STARTS with `#[` once its leading
+// whitespace is gone: a `#[test]` written after code on the same line (`const A: u32 = 1; #[test]`) is not an attribute
+// of the item below it, so it ends the scan like any other code (issue #499 review).
+// FLOOR, stated: a multi-line attribute, or a block comment between attribute and item, ends the scan and the item
+// stays a dead-code candidate. That is a miss in the reporting direction, never a false exemption.
+inline bool rustTestAttributed( std::string_view file, std::size_t sigStart ) noexcept
+{
+    std::size_t end = std::min( sigStart, file.size() );   // everything before `end` is still unread
+    for( ;; )
+    {
+        while( end > 0 && std::isspace( static_cast<unsigned char>( file[ end - 1 ] ) ) )
+        {
+            --end;
+        }
+        if( end == 0 )
+        {
+            return false;
+        }
+        const std::size_t nl   = file.rfind( '\n', end - 1 );
+        const std::size_t from = nl == std::string_view::npos ? 0 : nl + 1;
+        std::string_view  line = file.substr( from, end - from );
+        while( !line.empty() && std::isspace( static_cast<unsigned char>( line.front() ) ) )
+        {
+            line.remove_prefix( 1 );
+        }
+        if( line.substr( 0, 2 ) == "//" )
+        {
+            end = from;   // a comment or doc line: keep reading upward
+            continue;
+        }
+        line = rustCodeOfAttributeLine( line );
+        if( line.empty() )
+        {
+            end = from;
+            continue;
+        }
+        if( line.substr( 0, 2 ) != "#[" || line.back() != ']' )
+        {
+            return false; // any other code ends the attribute block
+        }
+        const std::size_t open = line.rfind( "#[" );
+        if( isRustTestAttribute( line.substr( open + 2, line.size() - open - 3 ) ) )
+        {
+            return true;
+        }
+        end = from;       // another attribute on the way up: keep reading
+    }
+}
+
+// The exemption a definition gets for registering itself with a runner the call graph cannot see: its own signature
+// begins with a registered macro call (the list above), or, for Rust only, a test attribute stacks above it. Both
+// --dead-code and --quality-delta read this one predicate, so the two verbs cannot disagree about one symbol.
+inline bool registersItself( const Symbol& s, std::string_view file, std::string_view sigRegion,
+                             const std::vector<std::string>& names ) noexcept
+{
+    if( startsWithRegisteredMacro( sigRegion, names ) )
+    {
+        return true;
+    }
+    return langFacts( s.lang ).attributeRegistersTests && rustTestAttributed( file, s.sigStartByte );
+}
+
 // P2.2 — every symbol in THIS tree whose own signature text is a registered-macro call (built ONCE per
 // computeSnapshot/computeDelta run, exactly like topLevelCallees above), reading each file's bytes once via
 // forEachSymbolBody — whose per-symbol `body` view already starts at sigStartByte, which is precisely where
@@ -1672,9 +1803,9 @@ inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, co
     {
         return ids;
     }
-    forEachSymbolBody( ing, [ & ]( NodeId i, const Symbol&, std::string_view body )
+    forEachSymbolFile( ing, [ & ]( NodeId i, const Symbol& s, std::string_view body, std::string_view file )
     {
-        if( startsWithRegisteredMacro( body, names ) )
+        if( registersItself( s, file, body, names ) )
         {
             ids.push_back( i );
         }
@@ -3673,6 +3804,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //                                             constexpr array, not a function, so this manifest mechanism
 //                                             cannot hash IT — a future edit that only changes the built-in
 //                                             NAME LIST (not these functions' text) will not trip this gate.
+//   registersItself            (quality.h) — the self-registration exemption --dead-code and --quality-delta share (a registered macro call, or a Rust test attribute above)
+//   rustTestAttributed         (quality.h) — the backward scan over blank, comment and attribute lines that finds a #[test] or #[tokio::test] above a Rust definition
+//   isRustTestAttribute        (quality.h) — whole-token check that an attribute's text is `test` or `tokio::test`, with or without an argument list
+//   rustCodeOfAttributeLine    (quality.h) — an attribute line without its trailing // comment (a // inside a double-quoted string does not start one)
 //   defectSitesOf              (quality.h) — the defect-shape site identity (anchor + facet + normalized text)
 //                                             the baseline stores. NOTE (disclosed limitation): the scanners it
 //                                             calls live in defectshape.h, outside this manifest, so a change
@@ -3800,7 +3935,11 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
 // other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
 // dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
-constexpr std::uint32_t kQSnapCacheScheme = 25;
+// v26 (2026-11-02, #493 / #499: Rust test-attribute functions) — no blob shape change; the dead SET's inputs moved.
+// registeredMacroSymbolIds, which isDeadCandidate's register-macro exemption reads, now also holds a Rust definition that a
+// #[test] or #[tokio::test] attribute stacks above (registersItself). The harness calls such a function, so it is no dead
+// candidate. Renumbered above main's v25 (land-472); The open #494 bump takes v27, so the two never share a value.
+constexpr std::uint32_t kQSnapCacheScheme = 26;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)

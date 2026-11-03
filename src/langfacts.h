@@ -319,6 +319,10 @@ struct LangFacts
     /// TypeScript, JavaScript, Rust, Swift, Kotlin: a bare `{` assigned or returned inside a function body is an object literal (a
     /// call's options or a value), a block or a closure, never a table; in Python (a dict), C, C++, Java, Go it can hold data (forliteral.h).
     bool localBraceNotData = false;
+
+    /// Rust: a `#[test]` or `#[tokio::test]` attribute registers the function with the test harness, which calls it by name
+    /// without any call in the tree (issue #493). quality.h's registersItself reads this column; nothing else does.
+    bool attributeRegistersTests = false;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -338,7 +342,7 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
       .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
+      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true, .attributeRegistersTests = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
