@@ -36,6 +36,7 @@
 // is never taken twice on one path).
 // RIPWIRE_NO_REEXPORT_HOPS (any value) turns it off.
 
+#include "defslookup.h"          // aliasTargetRow — an alias row (model.h AliasTarget) is another name, not the definition a sentence asks for
 #include "depdialect.h"          // dependencyDialect — the Web dialect is the unit the ReExport records are written per
 #include "docparse.h"            // detail::readWholeFile — the `pub` check and the row's line read the statement's file
 #include "fordottedstring.h"     // dotteddetail::displayName — a <shortkey> definition row names the symbol as <dotted> rows do
@@ -1886,16 +1887,18 @@ inline bool sentenceNameIsFile( const IngestResult& ing, std::string_view x, con
     return !root.empty() && x.find( ':' ) == std::string_view::npos && std::filesystem::is_regular_file( std::filesystem::path( root ) / x, ec );
 }
 
-// The sentence's name resolved to no definition: a bare X names no symbol in the index (one that exists is the route's to rank, not
-// the ladder's); a qualified X has no definition the answer printed that proves its qualifier fully (provenLeafDefs, the leaf
-// rung's own rule: a served same-leaf decoy does not resolve it). A qualified X that names a file (sentenceNameIsFile) is no
-// definition to resolve: the ladder would list same-leaf strangers.
+// The sentence's name resolved to no definition: a bare X names no symbol in the index other than alias rows (one that exists is the
+// route's to rank, not the ladder's; INDEX-ALIAS-CONST: a C++ `using X = Y;` / `namespace X = y;` row, defslookup.h aliasTargetRow, is
+// another name the words route does not anchor on, so a name with only alias rows keeps the ladder and its literal rung prints the
+// `using` lines; a name-exact route lands on the alias rows themselves); a qualified X has no definition the answer printed that
+// proves its qualifier fully (provenLeafDefs, the leaf rung's own rule: a served same-leaf decoy does not resolve it). A qualified X
+// that names a file (sentenceNameIsFile) is no definition to resolve: the ladder would list same-leaf strangers.
 inline bool sentenceNameUnresolved( const IngestResult& ing, std::string_view x, const std::vector<NodeId>& served, std::string_view root )
 {
     const std::vector<std::string_view> segs = reexport_detail::reexportQualifiedSegments( x );
     if( segs.empty() )
     {
-        return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.name == x; } );
+        return std::ranges::none_of( ing.symbols, [ & ]( const Symbol& s ) { return s.name == x && !aliasTargetRow( ing, s ); } );
     }
     if( sentenceNameIsFile( ing, x, segs, root ) )
     {
@@ -2142,7 +2145,13 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
                     decl.emplace_back( &h, shape );
                 }
             }
-            std::ranges::stable_sort( decl, []( const auto& l, const auto& r ) { return l.first->enclosing.empty() && !r.first->enclosing.empty(); } );
+            // in=: the enclosing definition, never the key's own alias row (INDEX-ALIAS-CONST: a `using X = Y;` line encloses itself)
+            const auto inOf = [ & ]( const GrepHit& h )
+            {
+                const bool self = h.enclosingId < ing.symbols.size() && ing.symbols[ h.enclosingId ].name == key && aliasTargetRow( ing, ing.symbols[ h.enclosingId ] );
+                return self ? std::string_view() : std::string_view( h.enclosing );
+            };
+            std::ranges::stable_sort( decl, [ & ]( const auto& l, const auto& r ) { return inOf( *l.first ).empty() && !inOf( *r.first ).empty(); } );
             num( "total", decl.size() );
             num( "shown", std::min( decl.size(), kShortKeyRows ) );
             out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
@@ -2153,9 +2162,9 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
                 attr( "p", rootRelPath( ing, h.fileId ) );
                 num( "l", h.line );
                 attr( "shape", decl[ i ].second );
-                if( !h.enclosing.empty() )
+                if( const std::string_view in = inOf( h ); !in.empty() )
                 {
-                    attr( "in", h.enclosing );
+                    attr( "in", in );
                 }
                 std::string text( h.text.substr( std::min( h.text.find_first_not_of( " \t" ), h.text.size() ) ) );
                 redactInPlace( text, a.redact );
