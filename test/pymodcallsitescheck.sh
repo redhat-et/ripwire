@@ -187,5 +187,41 @@ row M3.notmodule    app/dual.py:dual_f app/use_dual.py run_dual none
 row S1.pinned       app/boot.py:setup_a app/use_a.py run_a proven
 row S2.pinned       app/boot.py:setup_b app/use_b.py run_b proven
 
+# ---- X: PATH-FROM-UPSTREAM (src/forgraphverb.h applyPathFromUpstreamCut). In `--for=path from A to B`, a caller of A that a new
+# from-import edge reaches (`core.alpha_entry()`) is upstream of the asked path: it never pushes A's own callees past the ranked head's
+# cap (--pack-top-n=3 stands in for the default 40). The twin, the same words without `path from ... to`, keeps the plain ranking.
+# forrow ID WANT_NOTE(1|0) WANT_NAMES FORBID_NAMES TASK: rc 0 and a schema, the note present or absent, every WANT name printed as a
+# <d> row, no FORBID name printed as one
+X=$T/pathfrom
+w "$X/pkg/__init__.py" ''
+w "$X/pkg/core.py" 'def alpha_entry(argv):\n    return beta_step(argv)\n\ndef beta_step(x):\n    return gamma_handle(x)\n\ndef gamma_handle(x):\n    return x\n'
+w "$X/main_mod.py" 'from pkg import core\n\ndef run_alpha_entry_main():\n    """alpha entry handle"""\n    return core.alpha_entry([])\n\ndef alpha_entry_handle_twice():\n    """alpha entry handle"""\n    core.alpha_entry([])\n    return core.alpha_entry([1])\n'
+( cd "$X" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
+forrow() {
+    local id=$1 note=$2 want=$3 forbid=$4 task=$5 out rc got
+    out=$( cd "$X" && "$BIN" "$X" --no-cache --legend=compact --pack-top-n=3 "--for=$task" </dev/null 2>/dev/null )
+    rc=$?
+    if [ "$rc" != 0 ]; then
+        got="failed-run rc=$rc"
+    else
+        got=$( printf '%s' "$out" | python3 -I -c '
+import re,sys
+note,want,forbid=sys.argv[1],sys.argv[2].split(","),[x for x in sys.argv[3].split(",") if x]
+doc=sys.stdin.read()
+if "schema=" not in doc: print("failed-run no schema"); sys.exit()
+names=set(re.findall(r"<d [^>]*? n=\"([^\"]*)\"",doc))
+bad=[]
+has="path from: " in doc
+if has!=(note=="1"): bad.append("note=%d" % has)
+bad+=["missing "+n for n in want if n not in names]
+bad+=["printed "+n for n in forbid if n in names]
+print(";".join(bad) or "ok")' "$note" "$want" "$forbid" )
+    fi
+    if [ "$got" = ok ]; then echo "PASS $id"; else echo "FAIL $id: $got"; fail=1; fi
+}
+forrow X1.pathfrom  1 alpha_entry,beta_step,gamma_handle run_alpha_entry_main,alpha_entry_handle_twice 'path from alpha_entry to the gamma handle'
+forrow X2.twin      0 alpha_entry,alpha_entry_handle_twice,run_alpha_entry_main beta_step 'alpha_entry and the gamma handle'
+forrow X3.unparsed  0 gamma_handle '' 'path from nothing_named_this to the gamma handle'
+
 if [ "$fail" = 0 ]; then echo "pymodcallsitescheck: PASS"; else echo "pymodcallsitescheck: FAIL"; fi
 exit "$fail"

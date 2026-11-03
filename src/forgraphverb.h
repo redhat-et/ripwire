@@ -21,7 +21,9 @@
 #include "pathgaps.h"    // resolvePathEndpoint — the --path resolver
 #include "serialize.h"   // escapeXml
 
+#include <algorithm>
 #include <cstddef>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -222,6 +224,115 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     out += o.nameTestHops > 0 ? " name_test_hops=\"" + std::to_string( o.nameTestHops ) + "\"" : "";
     out += o.held ? "/>" : ">";
     return out;
+}
+
+// PATH-FROM-UPSTREAM (PY-MOD-CALL-SITES fix 1): in a task spelled `path from A to B`, a caller of A is UPSTREAM of the asked path — the
+// question starts at A. Such a row may still rank, but never ahead of the path's own rows: every ranked caller of A (a resolved call
+// edge, not a by-name one) that A does not itself reach within kPathFromReachHops is moved below every other positive score, its
+// own order kept. So a new call edge INTO A (a module-level `management.execute_from_command_line()` bound for the first time) cannot
+// push a hop under A past the ranked head's cap. A is read as the FROM slot's first candidate the qualified resolver finds (B need
+// not name a symbol: parseGraphSubjectPathFrom); no parse, no candidate, or no caller ranked → nothing moves (byte-identical). Returns how many rows moved; the caller discloses it.
+inline constexpr int         kPathFromReachHops  = 4;      // A's forward reach that keeps a caller of A on the path (a cycle back to A)
+inline constexpr std::size_t kPathFromReachNodes = 4096;   // runaway guard on that walk; past it every caller of A stays where it ranked
+inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Graph& g, std::string_view task, std::vector<float>& lensRank )
+{
+    const std::vector<std::string> fromCands = parseGraphSubjectPathFrom( task );
+    const std::size_t              n         = ing.symbols.size();
+    if( fromCands.empty() || lensRank.size() != n || g.outOff.size() != n + 1 )
+    {
+        return 0;
+    }
+    std::vector<NodeId> from;
+    for( const std::string& cand : fromCands )
+    {
+        from = resolveAllByNameQualified( ing, cand );
+        if( !from.empty() )
+        {
+            break;
+        }
+    }
+    if( from.empty() )
+    {
+        return 0;
+    }
+    std::ranges::sort( from );   // binary_search below
+    const auto proven = [ & ]( std::size_t e ) { return g.outNameOnly.empty() || g.outNameOnly[ e ] == 0; };
+    // A's forward reach (A included): a caller of A inside it is on a cycle through A, so on the path
+    std::vector<char>   reach( n, 0 );
+    std::vector<NodeId> frontier = from;
+    std::size_t         seen     = 0;
+    for( NodeId f : from )
+    {
+        reach[ f ] = 1;
+        ++seen;
+    }
+    for( int hop = 0; hop < kPathFromReachHops && !frontier.empty(); ++hop )
+    {
+        std::vector<NodeId> next;
+        for( NodeId u : frontier )
+        {
+            for( std::size_t e = g.outOff[ u ]; e < g.outOff[ u + 1 ]; ++e )
+            {
+                const NodeId v = g.outTargets[ e ];
+                if( v < n && reach[ v ] == 0 && proven( e ) )
+                {
+                    if( ++seen > kPathFromReachNodes )
+                    {
+                        return 0;   // too wide to tell on-path from upstream: nothing moves
+                    }
+                    reach[ v ] = 1;
+                    next.push_back( v );
+                }
+            }
+        }
+        frontier = std::move( next );
+    }
+    std::vector<NodeId> upstream;
+    float               floorScore = 0.0f;   // the lowest positive score of every row that stays
+    for( NodeId u = 0; u < n; ++u )
+    {
+        if( !( lensRank[ u ] > 0.0f ) )
+        {
+            continue;
+        }
+        bool callsFrom = false;
+        if( reach[ u ] == 0 )
+        {
+            for( std::size_t e = g.outOff[ u ]; e < g.outOff[ u + 1 ] && !callsFrom; ++e )
+            {
+                callsFrom = proven( e ) && std::ranges::binary_search( from, g.outTargets[ e ] );
+            }
+        }
+        if( callsFrom )
+        {
+            upstream.push_back( u );
+        }
+        else if( floorScore == 0.0f || lensRank[ u ] < floorScore )
+        {
+            floorScore = lensRank[ u ];
+        }
+    }
+    if( upstream.empty() || floorScore == 0.0f )
+    {
+        return 0;
+    }
+    float top = 0.0f;
+    for( NodeId u : upstream )
+    {
+        top = std::max( top, lensRank[ u ] );
+    }
+    // scaled into (0, floorScore / 2]: below every staying row, their own order kept
+    for( NodeId u : upstream )
+    {
+        lensRank[ u ] = floorScore * 0.5f * ( lensRank[ u ] / top );
+    }
+    return std::uint32_t( upstream.size() );
+}
+
+// the header note applyPathFromUpstreamCut's count rides in (the CLI --for and the MCP `for` twin print the same words)
+inline std::string pathFromUpstreamNote( std::uint32_t moved )
+{
+    return std::format( " [path from: {} caller{} of the from endpoint ranked after the path's own rows]", moved, moved == 1 ? "" : "s" );
 }
 
 inline constexpr std::string_view kGraphSubjectCloseXml = "</graph_verb>";

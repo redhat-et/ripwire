@@ -2452,6 +2452,29 @@ inline std::optional<GraphSubject> parseGraphSubject( std::string_view task )
     return std::nullopt;
 }
 
+// the FROM slot of `path from A to B` alone (applyPathFromUpstreamCut): A's candidates even when B names no symbol (`to the migrate
+// command's handle`), which parseGraphSubject refuses as a whole; empty when the task is not that form or A gives none
+inline std::vector<std::string> parseGraphSubjectPathFrom( std::string_view task )
+{
+    const std::vector<std::string_view> w = splitRouteWords( task );
+    for( std::size_t i = 0; i + 3 < w.size(); ++i )
+    {
+        if( detail::graphSubjectWordIs( w[i], { "path" } ) && routeLower( w[i + 1] ) == "from" )
+        {
+            for( std::size_t k = i + 3; k + 1 < w.size(); ++k )
+            {
+                if( routeLower( w[k] ) == "to" )
+                {
+                    std::string span;
+                    return detail::graphSubjectCandidates( std::span<const std::string_view>( w.data() + i + 2, k - i - 2 ), span );
+                }
+            }
+            return {};
+        }
+    }
+    return {};
+}
+
 inline RouteChoice chooseForRanker( const IngestResult& ing, std::string_view query )
 {
     const std::vector<std::string_view> words = splitRouteWords( query );
