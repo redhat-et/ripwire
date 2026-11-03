@@ -1989,6 +1989,65 @@ inline std::string_view declShape( std::string_view line, std::string_view k )
     return {};
 }
 
+// The literal rung's rows: every declaration-shaped line of the key, those with an in= owner after those without (stable).
+// in=: the enclosing definition, never the key's own alias row (INDEX-ALIAS-CONST: a `using X = Y;` line encloses itself):
+// then the next definition out, spelt as grep's breadcrumb (`struct Holder { using X = Y; };` keeps main's in="Holder::Holder"),
+// or none at namespace scope.
+struct ShortKeyDeclLine
+{
+    const GrepHit*   h;
+    std::string_view shape;
+    std::string      in;
+    const Symbol*    self  = nullptr;   // the key's own alias row the line sits in
+    const Symbol*    outer = nullptr;   // the innermost definition around that alias row
+};
+// One pass over the symbols finds the owner of every line that sits in the key's own alias row (the file-scope owner is no
+// definition to name; modscope rows are appended out of file order, so the pass is linear, not a file range).
+inline void shortKeyAliasRowOwners( const IngestResult& ing, std::vector<ShortKeyDeclLine>& decl )
+{
+    std::vector<ShortKeyDeclLine*> selfs;   // the few lines inside the key's own alias rows
+    for( ShortKeyDeclLine& d : decl )
+    {
+        if( d.self != nullptr )
+        {
+            selfs.push_back( &d );
+        }
+    }
+    for( const Symbol& o : selfs.empty() ? std::span<const Symbol>() : std::span<const Symbol>( ing.symbols ) )
+    {
+        const auto around = [ & ]( const ShortKeyDeclLine& d )
+        {
+            const Symbol& a = *d.self;
+            return &o != &a && o.kind != SymKind::ModuleScope && o.fileId == a.fileId && o.sigStartByte <= a.sigStartByte && a.endByte <= o.endByte &&
+                   ( d.outer == nullptr || o.sigStartByte > d.outer->sigStartByte );
+        };
+        for( ShortKeyDeclLine* d : selfs )
+        {
+            d->outer = around( *d ) ? &o : d->outer;
+        }
+    }
+    for( ShortKeyDeclLine* d : selfs )
+    {
+        d->in = d->outer == nullptr ? std::string() : d->outer->scope.empty() ? d->outer->name : d->outer->scope + "::" + d->outer->name;
+    }
+}
+inline std::vector<ShortKeyDeclLine> shortKeyDeclLines( const IngestResult& ing, std::string_view key, const std::vector<GrepHit>& lines )
+{
+    std::vector<ShortKeyDeclLine> decl;
+    for( const GrepHit& h : lines )
+    {
+        if( const std::string_view shape = declShape( h.text, key ); !shape.empty() )
+        {
+            const Symbol* e    = h.enclosingId < ing.symbols.size() ? &ing.symbols[ h.enclosingId ] : nullptr;
+            const bool    self = e != nullptr && e->name == key && aliasTargetRow( ing, *e );
+            decl.push_back( ShortKeyDeclLine{ &h, shape, self ? std::string() : h.enclosing, self ? e : nullptr } );
+        }
+    }
+    shortKeyAliasRowOwners( ing, decl );
+    std::ranges::stable_sort( decl, []( const ShortKeyDeclLine& l, const ShortKeyDeclLine& r ) { return l.in.empty() && !r.in.empty(); } );
+    return decl;
+}
+
 }   // namespace shortkey_detail
 
 struct ShortKeyArgs
@@ -2138,57 +2197,7 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             std::vector<GrepRawHit>       src;
             std::copy_if( got.raw.begin(), got.raw.end(), std::back_inserter( src ), [ & ]( const GrepRawHit& h ) { return pathTierOf( rootRelPath( ing, h.fileId ) ) == PathTier::Source; } );
             const std::vector<GrepHit>    lines = grepEnrich( ing, src );
-            // in=: the enclosing definition, never the key's own alias row (INDEX-ALIAS-CONST: a `using X = Y;` line encloses itself):
-            // then the next definition out, spelt as grep's breadcrumb (`struct Holder { using X = Y; };` keeps main's
-            // in="Holder::Holder"), or none at namespace scope. One pass over the symbols finds every such owner (the file-scope
-            // owner is no definition to name; modscope rows are appended out of file order, so the pass is linear, not a range).
-            struct DeclLine
-            {
-                const GrepHit*   h;
-                std::string_view shape;
-                std::string      in;
-                const Symbol*    self  = nullptr;   // the key's own alias row the line sits in
-                const Symbol*    outer = nullptr;   // the innermost definition around it
-            };
-            std::vector<DeclLine> decl;
-            for( const GrepHit& h : lines )
-            {
-                if( const std::string_view shape = declShape( h.text, key ); !shape.empty() )
-                {
-                    const Symbol* e    = h.enclosingId < ing.symbols.size() ? &ing.symbols[ h.enclosingId ] : nullptr;
-                    const bool    self = e != nullptr && e->name == key && aliasTargetRow( ing, *e );
-                    decl.push_back( DeclLine{ &h, shape, self ? std::string() : h.enclosing, self ? e : nullptr } );
-                }
-            }
-            std::vector<std::size_t> selfs;   // the few lines inside the key's own alias rows
-            for( std::size_t i = 0; i < decl.size(); ++i )
-            {
-                if( decl[i].self != nullptr )
-                {
-                    selfs.push_back( i );
-                }
-            }
-            for( const Symbol& o : selfs.empty() ? std::span<const Symbol>() : std::span<const Symbol>( ing.symbols ) )
-            {
-                for( const std::size_t i : selfs )
-                {
-                    DeclLine&     d = decl[i];
-                    const Symbol* a = d.self;
-                    if( &o != a && o.kind != SymKind::ModuleScope && o.fileId == a->fileId && o.sigStartByte <= a->sigStartByte &&
-                        a->endByte <= o.endByte && ( d.outer == nullptr || o.sigStartByte > d.outer->sigStartByte ) )
-                    {
-                        d.outer = &o;
-                    }
-                }
-            }
-            for( DeclLine& d : decl )
-            {
-                if( d.outer != nullptr )
-                {
-                    d.in = d.outer->scope.empty() ? d.outer->name : d.outer->scope + "::" + d.outer->name;
-                }
-            }
-            std::ranges::stable_sort( decl, []( const DeclLine& l, const DeclLine& r ) { return l.in.empty() && !r.in.empty(); } );
+            const std::vector<ShortKeyDeclLine> decl = shortKeyDeclLines( ing, key, lines );
             num( "total", decl.size() );
             num( "shown", std::min( decl.size(), kShortKeyRows ) );
             out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
