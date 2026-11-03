@@ -502,14 +502,20 @@ std::optional<int> runArchViews( const MainDispatch& d )
         const ContainmentCut contain   = rustContainmentCut( ing, adj );
         const auto&          healthAdj = contain.of( adj );
         const auto      cycles = sortCyclesLargestFirst( sccCycles( healthAdj ) );   // Lakos cardinal sin: cyclic physical deps
-        const DepHealth h      = dependencyHealth( healthAdj );   // per-file transitive cone (unrestricted BFS)
+        const DepHealth h      = dependencyHealth( healthAdj );   // per-file transitive cone (one fold, infra/fileSetStore.h)
+        if( rw::memguard::overHardLimit() )   // the hard line (a fold that stops throws FileGraphStopped before this; this reads the footprint the fold left)
+        {
+            DISCLOSE( Diagnostics::answerRefused, "runArchViews --deps: the include-closure fold stopped at the memory guard's hard line — exit 5, one stderr line" );
+            rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "--deps closure" ) );
+            return 5;
+        }
         // §P9.4: <health>'s ccd/acd/nccd are the RESTRICTED (dependency-capable-only) numbers — recomputed
         // from h.transitive (a post-pass, not a second BFS; see graph.h::restrictDependencyHealth).
         const RestrictedDepHealth rh = restrictDependencyHealth( dependencyMeasure( ing, adj ).mask, h.transitive );
         std::vector<std::uint32_t> afferent( ing.files.size(), 0 );   // Ca: # files that include each file (blast radius)
-        for( const auto& outs : adj )
+        for( std::size_t from = 0; from < adj.size(); ++from )
         {
-            for( std::uint32_t g : outs )
+            for( std::uint32_t g : adj[from] )
             {
                 if( g < afferent.size() )
                 {
@@ -702,6 +708,12 @@ std::optional<int> runArchViews( const MainDispatch& d )
         // never a gate. Computed + documented in arch.h::dsmPropagationCostCapable. §P9.4: N is restricted
         // to the SAME dependency-capable mask --deps <health> uses, so the two verbs' denominator agrees.
         const double propCost = rw::dsmPropagationCostCapable( ing, adj, archMeasure.mask );
+        if( rw::memguard::overHardLimit() )   // the hard line after the second fold (a fold that stops throws FileGraphStopped before this)
+        {
+            DISCLOSE( Diagnostics::answerRefused, "runArchViews --arch: the include-closure fold stopped at the memory guard's hard line — exit 5, one stderr line" );
+            rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "--arch closure" ) );
+            return 5;
+        }
 
         // ── shared emitters (one definition → the three return paths can't drift) ──────────────────────
         std::vector<char> ae;   // escapeXml scratch (cleared per call); captured by the lambdas below
@@ -2086,6 +2098,7 @@ void writeNestRefusedLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
 }
 
 // The extract-partial clause, on nest-refused's rule: written ONLY into a document that carries extract-partial rows.
+// the reST clause names ingest_rest.h resttier::kMaxRestUnits / kMaxRestDepth by value; restdocscheck (H) pins it
 void writeExtractPartialLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
 {
     if( cs.extractPartialFiles == 0 )
@@ -2093,7 +2106,8 @@ void writeExtractPartialLegend( rw::XmlWriter& w, const rw::CrawlSkips& cs )
         return;
     }
     w.write( "<!-- extract_partial= counts indexed files whose extracted facts are PARTIAL: an extraction pass stopped at a nesting"
-             " bound it will not descend past (Elixir module/alias chains, imports nested past their container bound), the"
+             " bound it will not descend past (Elixir module/alias chains, imports nested past their container bound, reST/Sphinx"
+             " units past 20000 per file or titles and directives nested past 64 levels), the"
              " grammar's tags query was unavailable, or the extraction stopped part-way on an internal failure (the facts before it"
              " are kept). Each is one <f why=\"extract-partial\" bytes= ext=/> row. Such a file IS inside indexed=, its symbols and"
              " edges may be missing, and it is never cached as whole, so the next run extracts it again. -->" );

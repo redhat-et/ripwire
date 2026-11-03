@@ -120,6 +120,10 @@ def tokens( byteCount, rate ):
 path, wantMax, wantBudget = sys.argv[1], int( sys.argv[2] ), int( sys.argv[3] )
 softBudget = len( sys.argv ) > 4 and sys.argv[4] == 'soft'
 raw  = open( path, 'rb' ).read()
+# The <shortkey> fallback ladder (forreexport.h, gate barrelshortkeycheck) is an out-of-band block whose legend says it is not in
+# est_tokens (like <lit>, <decl_rows>): the accounting below prices the charged answer, so ONE trailing block that DECLARES itself
+# outside est_tokens is cut before pricing. A <shortkey> with no such declaration stays in and fails (C) like any uncharged byte.
+raw  = re.sub( rb'<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>)(?=</ctx>\s*$)', b'', raw, count = 1, flags = re.S )
 bad  = []
 
 try:

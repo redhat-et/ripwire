@@ -360,10 +360,12 @@ rrun US --uses=selectBaseline \
 # (the lane's own step was 39 -> 40, CI run 41021256300 answered 40 at fa51be6b).
 # 45 -> 46 2026-11-01 (lane/unused-in-file fix round 1): src/forunused.h reads every file its scan touches (indexed files, unindexed text files,
 # manifests) through ONE helper, readText; the round first made four new call sites (49), the helper is the one that remains. No new fopen.
+# 46 -> 47 2026-11-02 (lane/docs-rest): ingest_crawl.h SphinxTxtRoots::readConf reads a Sphinx conf.py, bounded by
+# kMaxSphinxConfBytes, through the same helper — one new call site.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 46 ] \
-    && ok "repo: --uses=readWholeFile count=46 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 46, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 47 ] \
+    && ok "repo: --uses=readWholeFile count=47 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 47, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \

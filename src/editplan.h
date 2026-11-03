@@ -405,9 +405,23 @@ inline std::string receipt( const std::vector<Edit>& edits, const std::vector<Fi
     // gauge and the floor can never land separately (graph.h graphCountFloorAttrJson). Root-scoped: it
     // qualifies every count in this receipt, per-op ones included. The index is already warm here — the
     // dry-run path never invalidated it, and on an apply each op's postCheckJson has just rebuilt it.
-    if( !root.empty() )
+    if( !root.empty() && !apply )
     {
-        out += rw::graphCountFloorAttrJson( getIndex( root ).g );
+        out += rw::graphCountFloorAttrJson( getIndex( root ).g );   // a dry-run wrote nothing: a stop here is refused like any read
+    }
+    else if( !root.empty() )
+    {
+        try
+        {
+            out += rw::graphCountFloorAttrJson( getIndex( root ).g );
+        }
+        catch( const FileGraphStopped& stopped )
+        {
+            // F-W1: on an apply every file is already written, so the receipt stands and names the gap (mcpedit::postCheckJson)
+            memguard::answerStops();
+            out += ",\"counts_floor_unavailable\":\""
+                 + mcpdetail::jsonEscape( memguard::afterAnswerStopLine( "post-apply index rebuild", "the applied plan", stopped.why() ) ) + "\"";
+        }
     }
     if( apply ) { out += ",\"applied\":" + std::to_string( edits.size() ) + ",\"atomic_files\":" + std::to_string( files.size() ); }
     // recheck_before_each_write: every file's indexed byte-hash is re-verified immediately before ITS OWN

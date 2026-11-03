@@ -372,6 +372,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # sentence "A hit is one LINE: occ= on a row (present only above one) counts the pattern's occurrences on that line, and
 # hits=, shown= and the window count lines, not occurrences."; the root's hits=/shown= read 7 (was 8: the two occurrences on
 # geometry.cpp:16 are one line now); that row's n="2" + its at-tagged sibling become occ="2" (one hit per line).
+# RE-ANCHORED BY HAND 2026-11-02 (lane docs-rest, code-first --for tail + its legend clause), for.xml only: the lane's intended
+# output change, nothing else. Checked mechanically: removing the clause "; tail order on this code question: ..." (serialize.h
+# kForFileTailCodeFirstLegend, it rides because the fixture indexes notes.md) and masking at=/est_tokens= leaves the previous pin
+# with one change, the <tail> row order: notes.md moves from first to last behind the three code files (forpage.h
+# computeFileTail). Same four rows; est_tokens "2215" -> "2282".
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.

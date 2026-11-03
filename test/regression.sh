@@ -500,6 +500,7 @@ for _g in \
     fieldusescheck \
     filerootcheck \
     fileselectorrefusecheck \
+    filesetcheck \
     fillordercheck \
     fixedbufsweep \
     flagscheck \
@@ -882,6 +883,7 @@ for _g in \
     reportcheck \
     resolvecheck \
     resolverhonestycheck \
+    restdocscheck \
     retrievalqualitycheck \
     reusefirstworkflowcheck \
     ripwirepubliccheck \

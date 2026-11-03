@@ -343,7 +343,19 @@ struct PathHintSpelling
     std::string      connect;
     std::string_view usesImpact;
     std::string_view tail;
+    std::string_view docEndpoint = {};   // pathDocEndpoints: "from", "to" or "from and to" when it names doc units only, else ""
 };
+
+// docs-rest fix2 (gate restdocscheck (I)): which endpoint resolved to doc units ONLY (a heading or directive, no code definition;
+// graph.h preferCodeOverDocUnits and dropDocUnitsBesideCode already took the code when any spelling reaches it). Such an endpoint holds no calls, so a
+// reachable="0" answer from it is not a call-graph verdict, and the hint says so instead of "no directed call path".
+inline std::string_view pathDocEndpoints( const IngestResult& ing, std::span<const NodeId> srcDefs, std::span<const NodeId> dstDefs ) noexcept
+{
+    const auto docOnly = [ &ing ]( std::span<const NodeId> ids ) noexcept
+    { return !ids.empty() && std::all_of( ids.begin(), ids.end(), [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); } ); };
+    const bool from = docOnly( srcDefs ), to = docOnly( dstDefs );
+    return from && to ? std::string_view( "from and to" ) : from ? std::string_view( "from" ) : to ? std::string_view( "to" ) : std::string_view();
+}
 
 // The reachable="0" clause: the gap clause when the search met a gap, else the plain hint, byte-identical to before.
 // `rootPrefix` empty ⇒ p= stays as indexed (multi-root), exactly as the hop rows spell it.
@@ -355,6 +367,12 @@ inline PathGapsXml pathUnreachedXml( const IngestResult& ing, const PathSearchGa
     std::vector<char> esc;
     const auto ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
     PathGapsXml out;
+    if( !say.docEndpoint.empty() )
+    {   // a doc-only endpoint: never "no directed call path" (that would read as a verdict on code the reader meant)
+        out.rootAttrs = " hint=\"" + std::string( say.docEndpoint ) + "= names only documentation (a doc heading or directive, no code definition), "
+                      "not code: reachable=0 here is no verdict on a call path — name the code definition as file:name\"";
+        return out;
+    }
     if( !gaps.any() )
     {
         out.rootAttrs = " hint=\"no directed call path — try " + ex( say.connect ) + " (undirected: finds a shared caller), or "
@@ -686,14 +704,15 @@ private:
     // closure) over any number of import edges? Memoized per `from`.
     bool fileSees( std::uint32_t from, std::uint32_t to, bool transitive ) const
     {
-        const std::vector<std::vector<std::uint32_t>>& adj = g_.importAdj;
+        const rw::FileAdjacency& adj = g_.importAdj;
         if( from >= adj.size() )
         {
             return false;
         }
         if( !transitive )
         {
-            return std::ranges::find( adj[from], to ) != adj[from].end();
+            const std::span<const std::uint32_t> row = adj[from];
+            return std::ranges::find( row, to ) != row.end();
         }
         if( reach_.empty() )
         {
@@ -1106,7 +1125,7 @@ inline std::string pathNearSinkXml( const IngestResult& ing, const PathNearSink&
 inline std::vector<NodeId> resolvePathEndpoint( const IngestResult& ing, std::string_view spec, std::size_t* unprovenDefs, bool* glob )
 {
     *glob                   = false;
-    std::vector<NodeId> out = resolveAllByNameQualified( ing, spec, unprovenDefs );
+    std::vector<NodeId> out = dropDocUnitsBesideCode( ing, resolveAllByNameQualified( ing, spec, unprovenDefs ) );
     if( !out.empty() || spec.find( '*' ) == std::string_view::npos || spec.find( ':' ) != std::string_view::npos )
     {
         return out;

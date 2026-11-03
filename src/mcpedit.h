@@ -1113,8 +1113,8 @@ namespace mcpedit
 
     // `nextOut` (E2): when given, receives receiptNextFor()'s answer (the --test-gate fallback when the file left
     // the index).
-    inline std::string postCheckJson( const std::string& root, const std::string& fileIdentity, const std::string& symbolName,
-                                      bool withTests = true, std::string* nextOut = nullptr )
+    inline std::string postCheckJsonBuilt( const std::string& root, const std::string& fileIdentity, const std::string& symbolName,
+                                           bool withTests, std::string* nextOut )
     {
         const McpIndex&     ix  = getIndex( root );   // the edit invalidated it; this is the rebuild
         const IngestResult& ing = ix.ing;
@@ -1178,6 +1178,30 @@ namespace mcpedit
                                        firstTest == rw::kNoFile ? std::string() : TestRunnerIndex( ing, root ).commandFor( firstTest ) );
         }
         return out;
+    }
+
+    // The key a post-check that stopped AFTER the write puts on the receipt; the CLI's stderr line reads it.
+    inline constexpr std::string_view kPostCheckNotRunKey = ",\"post_check\":\"not run: ";
+
+    // F-W1: the post-check runs AFTER the write is committed, and its index rebuild (or the contract check's fold) can stop at
+    // the memory limit. That stop refuses nothing: the write stands, so the receipt stands and says the check did not run.
+    // Letting FileGraphStopped reach a surface's catch would answer "refused" for a file already edited, and an agent that
+    // believes it inserts twice. Every write path's post-check goes through here: the MCP and CLI edit verbs (runEditVerb)
+    // and each op of an --edit-plan --apply (editplan.h). `nextOut` keeps the caller's --edit-check= (set before the call).
+    inline std::string postCheckJson( const std::string& root, const std::string& fileIdentity, const std::string& symbolName,
+                                      bool withTests = true, std::string* nextOut = nullptr )
+    {
+        try
+        {
+            return postCheckJsonBuilt( root, fileIdentity, symbolName, withTests, nextOut );
+        }
+        catch( const FileGraphStopped& stopped )
+        {
+            releaseMcpIndexMemory();     // getIndex released a half-built slot already; a stop in the check's own fold leaves a whole one
+            memguard::answerStops();     // this receipt answers for the stop: no backstop line, no exit 5
+            return std::string( kPostCheckNotRunKey )
+                 + mcpdetail::jsonEscape( memguard::afterAnswerStopLine( "post-edit check", "the write", stopped.why() ) ) + "\"";
+        }
     }
 
 }   // namespace mcpedit
