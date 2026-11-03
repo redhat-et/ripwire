@@ -447,6 +447,11 @@ std::optional<int> runChangeViews( const MainDispatch& d )
                                  rw::gitstamp::shallowRefHint( ws[r].arg ) );   // 0.6.6: the likeliest cause on a depth-limited clone
                     return 1;
                 }
+                if( masks[r].diffFailed )
+                {
+                    rw::emitTo( stderr, "ripwire: --pr-context: {}\n", rw::prContextDiffFailedCause( ws[r].arg ).c_str() );
+                    return 1;
+                }
                 for( char c : masks[r].mask )
                 {
                     if( c )
@@ -503,6 +508,12 @@ std::optional<int> runChangeViews( const MainDispatch& d )
         {
             rw::emitTo( stderr, "ripwire: --pr-context: unknown base ref '{}'{}\n", std::string_view( cfg.prContextBase.data(), cfg.prContextBase.size() ),
                          rw::gitstamp::shallowRefHint( root ) );   // 0.6.6: the likeliest cause on a depth-limited clone
+            return 1;
+        }
+        if( pcm.diffFailed )
+        {
+            // The diff could not be read and no tree-level list could either: said, never an empty bundle (files="0" reads as "nothing changed").
+            rw::emitTo( stderr, "ripwire: --pr-context: {}\n", rw::prContextDiffFailedCause( root ).c_str() );
             return 1;
         }
         if( !pcm.ok )

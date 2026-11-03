@@ -1385,8 +1385,9 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // the error + exit 1 below; (2) git fine and history exists but an ACTIVE --since window
             // matched zero commits → a legitimate empty result, not an error. A windowless HEAD probe
             // tells them apart: history present + active scope ⇒ clean empty (ranked="0", commits="0",
-            // exit 0), NOT the "git unavailable" error.
-            if( sinceScope.active && gitRepoHasHistory( root ) )
+            // exit 0), NOT the "git unavailable" error. A walk the budget ended before it read a commit proves nothing about the window:
+            // that is the refusal below, which names the budget, not an empty window.
+            if( sinceScope.active && gitWalkCutRefusalCause().empty() && gitRepoHasHistory( root ) )
             {
                 std::vector<char>  sinceEsc;
                 const std::string  windowLabel = std::string( escapeXml( std::string_view( cfg.since ), sinceEsc ) );
@@ -1404,6 +1405,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             if( const std::string shallowWhy = minedRootShallowCause( root, multiRoot, ws ); !shallowWhy.empty() )   // 0.6.6: shallow says so, on any mined root
             {
                 rw::emitTo( stderr, "ripwire --hotspots: {}\n", shallowWhy );
+            }
+            else if( const std::string cutWhy = gitWalkCutRefusalCause(); !cutWhy.empty() )
+            {
+                rw::emitTo( stderr, "ripwire --hotspots: {}\n", cutWhy );   // M4: a budget cut is not an unavailable git
             }
             else
             {
@@ -1690,7 +1695,7 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             // Same two-cause split as --hotspots: an ACTIVE --since window that matched zero commits is a
             // legitimate empty result (git history exists), not the git-unavailable error. The windowless
             // HEAD probe distinguishes them → clean empty (pairs="0", commits="0", exit 0) vs error+exit 1.
-            if( sinceScope.active && gitRepoHasHistory( root ) )
+            if( sinceScope.active && gitWalkCutRefusalCause().empty() && gitRepoHasHistory( root ) )   // a cut walk is no proof of an empty window
             {
                 rw::emitTo( stdout, "<!-- ripwire cochange: the since-window matched no commits — empty result, not an error (git history exists) -->" );
                 // The at= stamp belongs on the EMPTY result too — "no pairs at this HEAD" is itself a claim
@@ -1707,6 +1712,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             if( const std::string shallowWhy = minedRootShallowCause( root, multiRoot, ws ); !shallowWhy.empty() )   // 0.6.6: shallow says so, on any mined root
             {
                 rw::emitTo( stderr, "ripwire --cochange: {}\n", shallowWhy );
+            }
+            else if( const std::string cutWhy = gitWalkCutRefusalCause(); !cutWhy.empty() )
+            {
+                rw::emitTo( stderr, "ripwire --cochange: {}\n", cutWhy );   // M4: a budget cut is not an unavailable git
             }
             else
             {
@@ -1887,6 +1896,10 @@ std::optional<int> runMaintenanceViews( const MainDispatch& d )
             if( const std::string shallowWhy = minedRootShallowCause( root, multiRoot, ws, ( multiRoot && onlyFileId != UINT32_MAX ) ? ing.fileRoot[ onlyFileId ] : UINT32_MAX ); !shallowWhy.empty() )   // 0.6.6: on any mined root
             {
                 rw::emitTo( stderr, "ripwire --owners: {}\n", shallowWhy );
+            }
+            else if( const std::string cutWhy = gitWalkCutRefusalCause(); !cutWhy.empty() )
+            {
+                rw::emitTo( stderr, "ripwire --owners: {}\n", cutWhy );   // M4: a budget cut is not an unavailable git
             }
             else
             {
