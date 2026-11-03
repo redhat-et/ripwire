@@ -254,6 +254,14 @@ for-budgeted | ctx@bodies
 for-budgeted | ctx@reason
 for-budgeted | ctx@task
 for-budgeted | d@pure
+# HISTORY-WALK-HANG (2026-11-02): the for-budgeted row's first screen now reaches a <compose><field…> block on this tree
+# (the corpus is the gate's own src/, and this branch's history moved what "rank symbols by pagerank" ranks first; main's
+# binary on this tree prints the same block, and neither binary prints it on main's tree). Not new debt: field@owner/rel/type
+# are the for-sections lines above, read on a second row, and the full --for legend leaves them undefined for the byte
+# reason recorded there (the compact legend defines them).
+for-budgeted | field@owner
+for-budgeted | field@rel
+for-budgeted | field@type
 # L1 (0.6.1), the COMPACT dialect at the same rung: seven lines recorded here (ctx@schema, d@next, d@pure, field@*) were
 # CLOSED by the L1 fix round (rv-r1-L1 HIGH-1), which gave the compact --for legend its definitions — "schema=ripwire.for/v1",
 # "task= the query", "pure= 1 (pure: const/constexpr sig)", "next= the follow-up to paste", and "field name= type= owner=

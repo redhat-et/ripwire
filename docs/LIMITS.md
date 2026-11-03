@@ -577,6 +577,7 @@ Discloses: `coboost_commits_capped`, `coboost_partners_capped`
 | `kCoBoostMaxFilesPerCommit` | `30` | INDEXING | same bulk-commit cap as the other co-change miners here |
 | `kCoBoostMaxPartnerFiles` | `8` | INDEXING | strongest partners only, by (deg desc, path asc) |
 | `kCoBoostMaxSymbolsPerFile` | `3` | INDEXING | per partner file: its top-3 symbols by (lens score desc, id asc) |
+| `kGitWalkMaxSeconds` | `20` | — | — |
 
 ### `src/gitoracle.h`
 

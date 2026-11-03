@@ -365,6 +365,27 @@ template<class FsPath>
 [[gnu::always_inline]] inline int        pclose( std::FILE* stream )                               { return ::pclose( stream ); }
 [[gnu::always_inline]] inline int        system( const char* command )                             { return ::system( command ); }
 
+// Read what a popen'd stream has ready, waiting at most `timeoutMs`: the byte count, 0 at end of stream, kPipeNothingYet when
+// the wait ended with nothing, -1 on error. It reads the descriptor beneath stdio, so a caller uses this and never stdio on
+// `stream`. What lets a reader keep a deadline against a child that stopped writing.
+inline constexpr long kPipeNothingYet = -2;
+inline long pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs )
+{
+    const int fd    = ::fileno( stream );
+    pollfd    ready = { fd, POLLIN, 0 };
+    const int polled = ::poll( &ready, 1, timeoutMs );
+    if( polled == 0 || ( polled < 0 && errno == EINTR ) )
+    {
+        return kPipeNothingYet;
+    }
+    if( polled < 0 )
+    {
+        return -1;
+    }
+    const ssize_t got = ::read( fd, buf, size );
+    return got < 0 && errno == EINTR ? kPipeNothingYet : long( got );
+}
+
 // Start `/bin/sh -c command` as the leader of its own process group — so a timeout can SIGKILL the whole tree —
 // with stdin from /dev/null (a command that reads its terminal must not hang the caller), stdout AND stderr both
 // onto the pipe's write end pipeFds[1] (interleaved, as a terminal would show them), and both pipe ends closed in
@@ -1090,6 +1111,8 @@ pid_t      waitpid( pid_t pid, int* status, int options );
 std::FILE* popen( const char* command, const char* mode );
 int        pclose( std::FILE* stream );
 int        system( const char* command );
+inline constexpr long kPipeNothingYet = -2;
+long       pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs );   // the POSIX half's comment
 pid_t      spawn_sh( const std::string& command, const int pipeFds[ 2 ] );
 
 // ── threads ────────────────────────────────────────────────────────────────────────────────────────────────
