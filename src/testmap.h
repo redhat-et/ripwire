@@ -375,9 +375,10 @@ inline std::vector<char> fileMaskOfSymbols( const IngestResult& ing, std::span<c
     std::vector<char> mask( ing.files.size(), 0 );
     for( NodeId s : syms )
     {
-        if( s < ing.symbols.size() && ing.symbols[s].fileId < mask.size() )
+        const std::uint32_t f = s < ing.symbols.size() ? ing.symbols[s].fileId : std::uint32_t( mask.size() );
+        if( f < mask.size() )
         {
-            mask[ing.symbols[s].fileId] = 1;
+            mask[f] = 1;
         }
     }
     return mask;

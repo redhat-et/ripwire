@@ -1026,8 +1026,7 @@ inline constexpr DocNoiseCue kDocsQuestionCues[] = { { "doc", true },      { "re
 inline bool taskAsksForDocText( std::string_view task )
 {
     const std::string lowerTask = queryshape::detail::lowerAscii( task );
-    return lowerTask.find( ".md" ) != std::string::npos || lowerTask.find( ".rst" ) != std::string::npos
-        || taskHasCue( lowerTask, kDocsQuestionCues );
+    return lowerTask.contains( ".md" ) || lowerTask.contains( ".rst" ) || taskHasCue( lowerTask, kDocsQuestionCues );
 }
 
 // taskAsksForDocText (a named .md/.rst file — the B8 mention anchor lifts it, this rule must not push it back down — or a docs
