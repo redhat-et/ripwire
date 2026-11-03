@@ -2599,11 +2599,11 @@ std::optional<int> runDefs( const MainDispatch& d )
                 {
                     body += ",";
                 }
-                defRowJson( body, ing, d.g, L, r, owners );
+                defRowJson( body, ing, L, r, owners );
             }
             else
             {
-                defRowXml( body, ing, L, r, owners, /*compact=*/false, &d.g );
+                defRowXml( body, ing, L, r, owners, /*compact=*/false, /*aliasTarget=*/true );
                 anyAlias = anyAlias || aliasTargetRow( ing, ing.symbols[ r.rep ] );
             }
         }
@@ -2636,7 +2636,7 @@ std::optional<int> runDefs( const MainDispatch& d )
     if( anyAlias )
     {
         legend += "to= an alias's written target (C++ using X = Y or namespace L = lib), "
-                  "whitespace folded; to_capped=1 to_bytes=N: the target is N bytes and to= is cut (ellipsis); to_next= the defs call for the target: Owner::leaf when that binds, else the last name segment (it may list namesakes); to_unread=1: "
+                  "whitespace folded, comments dropped; to_capped=1 to_bytes=N: the target is N bytes and to= is cut (ellipsis); to_next= the defs call for the target: Owner::leaf when that binds, else the last name segment (it may list namesakes); to_unread=1: "
                   "the file could not be read. ";
     }
     if( anyCut )

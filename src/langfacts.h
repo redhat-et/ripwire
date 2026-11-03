@@ -206,7 +206,8 @@ struct LangFacts
     /// buildFieldNarrowTables follows a bounded alias chain). A `.` call on such a member reaches the smart pointer, never I.
     bool aliasPeelsSmartPointer = false;
 
-    /// C++ (C reads with the same grammar): a `using X = Y;` / `namespace L = lib;` definition (tags @definition.alias) records
+    /// C++ (and every `.h`, which reads as C++; a `.c` file reads with the C grammar and its own query, untouched here, card
+    /// C-FUNCTYPE-QUERY): a `using X = Y;` / `namespace L = lib;` definition (tags @definition.alias) records
     /// where its written target starts (src/aliasdef.h, model.h AliasTarget; the defs verb prints it as to=), and one written
     /// inside a function body or lambda is a local name, no definition. Go's `type A = B` is @definition.alias too and records
     /// none (lane index-alias-const).

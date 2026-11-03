@@ -412,6 +412,11 @@ inline IngestResult mergeWorkspaceIngests( const std::vector<WorkspaceRoot>& roo
             s.fileId += fileOff;
             m.symbols.push_back( std::move( s ) );
         }
+        for( AliasTarget a : p.aliasTargets )   // INDEX-ALIAS-CONST: the alias-target side table rides the same id offset (roots append in order: stays ascending)
+        {
+            a.id += symOff;
+            m.aliasTargets.push_back( a );
+        }
         for( FnLocalScope f : p.fnLocalScopes )   // the function-local scope side table rides the same id offset
         {
             f.id += symOff;

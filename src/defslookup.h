@@ -189,7 +189,7 @@ inline DefLookup lookupDefs( const IngestResult& ing, const Graph& g, std::strin
 // INDEX-ALIAS-CONST: an alias definition's written target, read from [AliasTarget::start, endByte) — the tags pass records where the
 // target starts exactly when the target ends the declaration (ingest_sidecap.h, src/aliasdef.h, model.h AliasTarget): C++ `using X = Y;` and
 // `namespace L = lib;`. Every other row (a typedef, whose target precedes its name; any def with a real body) has no to=. `unread` when the file
-// could not be read: never an empty target. Whitespace runs fold to one space; past kAliasTargetCap the text is cut on a
+// could not be read: never an empty target. Whitespace runs fold to one space and a comment reads as whitespace; past kAliasTargetCap the text is cut on a
 // UTF-8 boundary with an ellipsis, to_capped="1" says so and `fullBytes` (to_bytes=) names the uncut size.
 inline constexpr std::size_t kAliasTargetCap = 160;   // a runaway guard: real alias targets are tens of bytes
 struct AliasTargetText
@@ -211,7 +211,7 @@ inline bool aliasTargetRow( const IngestResult& ing, const Symbol& s ) noexcept
 {
     return aliasTargetStart( ing, s ) != 0;
 }
-inline AliasTargetText aliasTargetText( const IngestResult& ing, const Graph& g, const Symbol& s )
+inline AliasTargetText aliasTargetText( const IngestResult& ing, const Symbol& s )
 {
     AliasTargetText out;
     const std::uint32_t tStart = aliasTargetStart( ing, s );
@@ -229,8 +229,18 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Graph& g,
     }
     const std::string_view raw = std::string_view( *file ).substr( tStart, s.endByte - tStart );
     bool                   space = false;
-    for( const char c : raw )
+    for( std::size_t i = 0; i < raw.size(); ++i )
     {
+        const char c = raw[i];
+        // a comment reads as whitespace: `/* c */` and `// c` (to its line end) never reach to= (a folded `// c` would read as if it
+        // commented out the rest); a string literal is copied whole, so a `//` inside one stays
+        if( c == '/' && i + 1 < raw.size() && ( raw[ i + 1 ] == '*' || raw[ i + 1 ] == '/' ) )
+        {
+            const std::size_t end = raw[ i + 1 ] == '*' ? raw.find( "*/", i + 2 ) : raw.find( '\n', i + 2 );
+            i                     = end == std::string_view::npos ? raw.size() : end + ( raw[ i + 1 ] == '*' ? 1 : 0 );
+            space                 = !out.text.empty();
+            continue;
+        }
         const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
         if( ws )
         {
@@ -243,8 +253,23 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Graph& g,
             space = false;
         }
         out.text += c;
+        if( c == '"' )
+        {
+            for( ++i; i < raw.size() && raw[i] != '"'; ++i )
+            {
+                out.text += raw[i];
+                if( raw[i] == '\\' && i + 1 < raw.size() )
+                {
+                    out.text += raw[ ++i ];
+                }
+            }
+            if( i < raw.size() )
+            {
+                out.text += '"';
+            }
+        }
     }
-    while( !out.text.empty() && out.text.back() == ';' )
+    while( !out.text.empty() && ( out.text.back() == ';' || out.text.back() == ' ' ) )   // `Y ;` and `Y\n;` leave no trailing space
     {
         out.text.pop_back();
     }
@@ -291,7 +316,13 @@ inline AliasTargetText aliasTargetText( const IngestResult& ing, const Graph& g,
             const std::size_t ownerStart = name.find_last_of( ":.", ownerEnd > 0 ? ownerEnd - 1 : 0 );
             const std::string owner      = name.substr( ownerStart == std::string::npos ? 0 : ownerStart + 1, ownerEnd - ( ownerStart == std::string::npos ? 0 : ownerStart + 1 ) );
             const std::string twoSeg     = owner + "::" + leaf;
-            if( !owner.empty() && !lookupDefs( ing, g, twoSeg, 0, 1 ).matches.empty() )
+            // the defs verb's own match set (lookupDefs' first two steps), without its per-call row work: one resolve per alias row
+            const auto binds = [ & ]( std::string_view spec )
+            {
+                const std::vector<NodeId> m = resolveAllByNameQualified( ing, spec );
+                return std::ranges::any_of( m, [ & ]( NodeId n ) { return isInventoryCodeSymbol( ing.symbols[n] ); } );
+            };
+            if( !owner.empty() && binds( twoSeg ) )
             {
                 spell = twoSeg;
             }
@@ -345,7 +376,7 @@ inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
     }
 }
 
-inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, const Graph* aliasTargetGraph = nullptr )
+inline void defRowXml( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners, bool compact, bool aliasTarget = false )
 {
     std::vector<char> esc;
     const Symbol&     s = ing.symbols[ r.rep ];
@@ -373,14 +404,14 @@ inline void defRowXml( std::string& out, const IngestResult& ing, const DefLooku
     {
         out += " decl_only=\"1\"";   // compact too: a header declaration of the bound definition is no second definition
     }
-    if( aliasTargetGraph != nullptr )
+    if( aliasTarget )
     {
-        aliasTargetAttrsXml( out, aliasTargetText( ing, *aliasTargetGraph, s ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
+        aliasTargetAttrsXml( out, aliasTargetText( ing, s ) );   // INDEX-ALIAS-CONST: the defs verb only (its legend defines to=)
     }
     out += "/>";
 }
 
-inline void defRowJson( std::string& out, const IngestResult& ing, const Graph& g, const DefLookup& L, const DefRow& r, const MemberOwners& owners )
+inline void defRowJson( std::string& out, const IngestResult& ing, const DefLookup& L, const DefRow& r, const MemberOwners& owners )
 {
     const Symbol& s = ing.symbols[ r.rep ];
     out += "{\"n\":\"" + jsonStr( qualifiedMemberName( owners, s ) ) + "\",\"t\":\"" + symTag( s.kind ) + "\",\"p\":\""
@@ -395,7 +426,7 @@ inline void defRowJson( std::string& out, const IngestResult& ing, const Graph& 
     {
         out += ",\"decl_only\":1";
     }
-    aliasTargetAttrsJson( out, aliasTargetText( ing, g, s ) );
+    aliasTargetAttrsJson( out, aliasTargetText( ing, s ) );
     out += "}";
 }
 

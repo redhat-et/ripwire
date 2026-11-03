@@ -53,6 +53,7 @@
 #include <filesystem>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -2137,34 +2138,70 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
             std::vector<GrepRawHit>       src;
             std::copy_if( got.raw.begin(), got.raw.end(), std::back_inserter( src ), [ & ]( const GrepRawHit& h ) { return pathTierOf( rootRelPath( ing, h.fileId ) ) == PathTier::Source; } );
             const std::vector<GrepHit>    lines = grepEnrich( ing, src );
-            std::vector<std::pair<const GrepHit*, std::string_view>> decl;
+            // in=: the enclosing definition, never the key's own alias row (INDEX-ALIAS-CONST: a `using X = Y;` line encloses itself):
+            // then the next definition out, spelt as grep's breadcrumb (`struct Holder { using X = Y; };` keeps main's
+            // in="Holder::Holder"), or none at namespace scope. One pass over the symbols finds every such owner (the file-scope
+            // owner is no definition to name; modscope rows are appended out of file order, so the pass is linear, not a range).
+            struct DeclLine
+            {
+                const GrepHit*   h;
+                std::string_view shape;
+                std::string      in;
+                const Symbol*    self  = nullptr;   // the key's own alias row the line sits in
+                const Symbol*    outer = nullptr;   // the innermost definition around it
+            };
+            std::vector<DeclLine> decl;
             for( const GrepHit& h : lines )
             {
                 if( const std::string_view shape = declShape( h.text, key ); !shape.empty() )
                 {
-                    decl.emplace_back( &h, shape );
+                    const Symbol* e    = h.enclosingId < ing.symbols.size() ? &ing.symbols[ h.enclosingId ] : nullptr;
+                    const bool    self = e != nullptr && e->name == key && aliasTargetRow( ing, *e );
+                    decl.push_back( DeclLine{ &h, shape, self ? std::string() : h.enclosing, self ? e : nullptr } );
                 }
             }
-            // in=: the enclosing definition, never the key's own alias row (INDEX-ALIAS-CONST: a `using X = Y;` line encloses itself)
-            const auto inOf = [ & ]( const GrepHit& h )
+            std::vector<std::size_t> selfs;   // the few lines inside the key's own alias rows
+            for( std::size_t i = 0; i < decl.size(); ++i )
             {
-                const bool self = h.enclosingId < ing.symbols.size() && ing.symbols[ h.enclosingId ].name == key && aliasTargetRow( ing, ing.symbols[ h.enclosingId ] );
-                return self ? std::string_view() : std::string_view( h.enclosing );
-            };
-            std::ranges::stable_sort( decl, [ & ]( const auto& l, const auto& r ) { return inOf( *l.first ).empty() && !inOf( *r.first ).empty(); } );
+                if( decl[i].self != nullptr )
+                {
+                    selfs.push_back( i );
+                }
+            }
+            for( const Symbol& o : selfs.empty() ? std::span<const Symbol>() : std::span<const Symbol>( ing.symbols ) )
+            {
+                for( const std::size_t i : selfs )
+                {
+                    DeclLine&     d = decl[i];
+                    const Symbol* a = d.self;
+                    if( &o != a && o.kind != SymKind::ModuleScope && o.fileId == a->fileId && o.sigStartByte <= a->sigStartByte &&
+                        a->endByte <= o.endByte && ( d.outer == nullptr || o.sigStartByte > d.outer->sigStartByte ) )
+                    {
+                        d.outer = &o;
+                    }
+                }
+            }
+            for( DeclLine& d : decl )
+            {
+                if( d.outer != nullptr )
+                {
+                    d.in = d.outer->scope.empty() ? d.outer->name : d.outer->scope + "::" + d.outer->name;
+                }
+            }
+            std::ranges::stable_sort( decl, []( const DeclLine& l, const DeclLine& r ) { return l.in.empty() && !r.in.empty(); } );
             num( "total", decl.size() );
             num( "shown", std::min( decl.size(), kShortKeyRows ) );
             out.append( " exact=\"0\"" ).append( got.cleanScan() ? "" : " floor=\"1\"" ).append( ">" );
             for( std::size_t i = 0; i < decl.size() && i < kShortKeyRows; ++i )
             {
-                const GrepHit& h = *decl[ i ].first;
+                const GrepHit& h = *decl[ i ].h;
                 out.append( "<ld" );
                 attr( "p", rootRelPath( ing, h.fileId ) );
                 num( "l", h.line );
-                attr( "shape", decl[ i ].second );
-                if( const std::string_view in = inOf( h ); !in.empty() )
+                attr( "shape", decl[ i ].shape );
+                if( !decl[ i ].in.empty() )
                 {
-                    attr( "in", in );
+                    attr( "in", decl[ i ].in );
                 }
                 std::string text( h.text.substr( std::min( h.text.find_first_not_of( " \t" ), h.text.size() ) ) );
                 redactInPlace( text, a.redact );

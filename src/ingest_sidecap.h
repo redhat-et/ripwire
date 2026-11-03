@@ -2057,13 +2057,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             }
             if( aliasShape.form != AliasForm::None )
             {
-                const std::uint32_t tEnd = ts_node_end_byte( aliasShape.target );
-                std::uint32_t       e    = ts_node_end_byte( roleNode );
-                while( e > tEnd && e <= src.size() && ( src[ e - 1 ] == ';' || src[ e - 1 ] == ' ' || src[ e - 1 ] == '\t' || src[ e - 1 ] == '\n' || src[ e - 1 ] == '\r' ) )
-                {
-                    --e;
-                }
-                const bool suffix = e == tEnd;   // only `using`/namespace alias rows reach here (a typedef capture is never definition.alias)
+                // the target is a suffix when every child after it is the `;` or a comment (`using X = Y /* c */ ;` keeps its
+                // target; the printer drops the comment, defslookup.h aliasTargetText); one cursor walk (infra/tschildren.h)
+                const std::uint32_t tEnd   = ts_node_end_byte( aliasShape.target );
+                bool                suffix = true;   // only `using`/namespace alias rows reach here (a typedef capture is never definition.alias)
+                ChildCursor         cursor( roleNode );
+                forEachChild( roleNode, cursor.cur, [ & ]( TSNode c )
+                              {
+                                  const char* k = ts_node_type( c );
+                                  suffix = ts_node_start_byte( c ) < tEnd || kindIs( k, ";" ) || kindIs( k, "comment" );
+                                  return suffix;
+                              } );
                 aliasTargetStart  = suffix ? ts_node_start_byte( aliasShape.target ) : 0u;
             }
 

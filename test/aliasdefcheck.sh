@@ -41,6 +41,12 @@ class Holder { public: using value_type = IColumn; };
 using LongAlias = lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<lib::COW<IColumn>>>>>>>>>>>>>>>>;
 inline void f() { using LocalAlias = int; LocalAlias v = 0; (void)v; }
 inline int h() { struct LocalShape { int a; }; LocalShape s{ 1 }; return s.a; }
+using Trailing = lib::Real /* trail */ ;
+using Spaced = lib::Real
+    ;
+using LineComment = lib::COW<int, // key
+    lib::Real>;
+namespace LC = lib /* ns */;
 EOF
 cat > "$F/t/mod.ts" <<'EOF'
 import * as m from './other';
@@ -73,6 +79,7 @@ check_cpp(){ # name t= to= to_next=
     if [ "$drc" -ne 0 ]; then no "[RED] --defs=$1 exited $drc (a found alias exits 0)"; return; fi
     case "$r" in *"t=\"$2\""*) ;; *) no "[RED] --defs=$1: want t=\"$2\", got: ${r:-<no row>}"; return;; esac
     if [ -n "$3" ]; then case "$r" in *" to=\"$3\""*) ;; *) no "[RED] --defs=$1: want to=\"$3\", got: $r"; return;; esac; fi
+    if [ -z "$3" ]; then case "$r" in *" to="*) no "[RED] --defs=$1: a typedef row carries no to=, got: $r"; return;; esac; fi
     if [ -n "$4" ]; then case "$r" in *" to_next=\"$4\""*) ;; *) no "[RED] --defs=$1: want to_next=\"$4\", got: $r"; return;; esac; fi
     ok "[RED] --defs=$1 t=$2${3:+ to=$3}${4:+ to_next=$4}"
 }
@@ -86,6 +93,11 @@ check_cpp FnType     functype ''                              ''
 check_cpp SPtr       struct   ''                              ''
 # the to_next hop is itself an alias row with a target: the chain is followable call by call
 check_cpp COW::Ptr   alias    'T*'                            ''
+# [RED on 67efef80] a comment or a line break before `;` keeps the target, with no trailing space and no comment text (N1, N2, CR)
+check_cpp Trailing    alias   'lib::Real'                     '--defs=Real'
+check_cpp Spaced      alias   'lib::Real'                     '--defs=Real'
+check_cpp LineComment alias   'lib::COW&lt;int, lib::Real&gt;' '--defs=COW'
+check_cpp LC          alias   'lib'                           ''
 # the runaway guard (kAliasTargetCap = 160): a longer target is cut with an ellipsis, to_capped="1" says so, to_bytes= names its full size
 defs "$F/c" LongAlias; r=$( row )
 case "$r" in *'…" to_capped="1" to_bytes="'*) ok "[RED] --defs=LongAlias: to= cut at the cap, to_capped=\"1\" to_bytes= present";; *) no "[RED] --defs=LongAlias: rc=$drc want to_bytes= and a cut to=, got: ${r:-<no row>}";; esac
@@ -94,14 +106,17 @@ defs "$F/c" S2; r=$( row ); if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' 
 
 # [RED] the map's kind clause: a C/C++ alias or functype row reads the C/C++ clause, never the Go named-type one
 ( cd "$F/c" && "$BIN" . --no-cache ) > "$TMP/map" 2>/dev/null; mrc=$?
-if [ "$mrc" -eq 0 ] && grep -q 't=alias|functype-in-C/C++' "$TMP/map" && ! grep -q 'a-Go-named-type' "$TMP/map"; then ok "[RED] C++ map: the C/C++ alias clause, no Go clause"; else no "[RED] C++ map clause: rc=$mrc cpp=$( grep -c 'functype-in-C/C++' "$TMP/map" ) go=$( grep -c 'a-Go-named-type' "$TMP/map" )"; fi
+if [ "$mrc" -eq 0 ] && grep -q 't=alias|functype-in-C++-and-.h' "$TMP/map" && ! grep -q 'a-Go-named-type' "$TMP/map"; then ok "[RED] C++ map: the C++ alias clause, no Go clause"; else no "[RED] C++ map clause: rc=$mrc cpp=$( grep -c 'functype-in-C++-and-.h' "$TMP/map" ) go=$( grep -c 'a-Go-named-type' "$TMP/map" )"; fi
+# [RED on 67efef80] the map of a tree with C++ alias rows is well-formed XML: no legend comment holds two hyphens in a row (CI
+# windows-package found it; test/regression.sh's xmllint arm reads test/fixture, which has no alias row, so this arm is the cover)
+if [ "$mrc" -eq 0 ] && python3 -c 'import sys, xml.etree.ElementTree as E; E.parse(sys.argv[1])' "$TMP/map" 2> "$TMP/xmlerr"; then ok "[RED] C++ map parses as XML (python3 ElementTree)"; else no "[RED] C++ map is not well-formed XML: rc=$mrc $( tail -c 300 "$TMP/xmlerr" )"; fi
 
 # a Go `type A = B` stays a t="alias" def with no to= (Go records no target; LangFacts::aliasTargetDefs is C/C++ only)
 mkdir -p "$F/g"; printf 'package p\n\ntype Real struct{}\n\ntype GoAlias = Real\n' > "$F/g/a.go"
 defs "$F/g" GoAlias; r=$( row )
 if [ "$drc" -eq 0 ] && printf '%s' "$r" | grep -q 't="alias"' && ! printf '%s' "$r" | grep -q ' to'; then ok "Go type alias: t=alias, no to= (unchanged)"; else no "Go type alias: rc=$drc row=${r:-<none>}"; fi
 ( cd "$F/g" && "$BIN" . --no-cache ) > "$TMP/gmap" 2>/dev/null
-if grep -q 'a-Go-named-type' "$TMP/gmap" && ! grep -q 'functype-in-C/C++' "$TMP/gmap"; then ok "Go map: the Go clause only"; else no "Go map clause: go=$( grep -c 'a-Go-named-type' "$TMP/gmap" ) cpp=$( grep -c 'functype-in-C/C++' "$TMP/gmap" )"; fi
+if grep -q 'a-Go-named-type' "$TMP/gmap" && ! grep -q 'functype-in-C++-and-.h' "$TMP/gmap" && python3 -c 'import sys, xml.etree.ElementTree as E; E.parse(sys.argv[1])' "$TMP/gmap" 2>/dev/null; then ok "Go map: the Go clause only, well-formed"; else no "Go map clause: go=$( grep -c 'a-Go-named-type' "$TMP/gmap" ) cpp=$( grep -c 'functype-in-C++-and-.h' "$TMP/gmap" )"; fi
 
 # NOT aliases: a function-local alias; `using namespace` and a using-declaration add no definition
 absent(){ # dir name why
@@ -139,6 +154,46 @@ open(sys.argv[1],'w').write('int big[] = {' + ','.join(['0']*5_000_000) + '};\n'
 printf 'namespace other { struct Thing {}; }\nusing Keep = other::Thing;\n' > "$F/big/small.h"
 ( cd "$F/big" && "$BIN" . --no-cache --defs=Keep ) > "$TMP/big" 2>&1; brc=$?
 if [ "$brc" -eq 0 ] && grep -q 'to="other::Thing"' "$TMP/big"; then ok "[RED] 10 MB one-line header beside an alias: the run finishes and indexes the alias"; else no "10 MB file: rc=$brc"; fi
+
+# [RED on 67efef80 for the mutants named] the JSON row carries the same target keys (mutant: defRowJson without aliasTargetAttrsJson)
+( cd "$F/c" && "$BIN" . --no-cache --defs=ColumnPtr --json ) > "$TMP/j" 2>/dev/null; jrc=$?
+if [ "$jrc" -eq 0 ] && grep -qF '"to":"lib::COW<IColumn>::Ptr"' "$TMP/j" && grep -qF '"to_next":"--defs=COW::Ptr"' "$TMP/j"; then ok "--defs --json: \"to\" and \"to_next\""; else no "--defs --json: rc=$jrc $( head -c 300 "$TMP/j" )"; fi
+( cd "$F/c" && "$BIN" . --no-cache --defs=LongAlias --json ) > "$TMP/j" 2>/dev/null; jrc=$?
+if [ "$jrc" -eq 0 ] && grep -qF '"to_capped":1,"to_bytes":' "$TMP/j"; then ok "--defs --json: \"to_capped\" and \"to_bytes\" on a cut target"; else no "--defs --json cap: rc=$jrc $( head -c 300 "$TMP/j" )"; fi
+
+# the warm cache carries the target start (RawDef bodyByte through ingest_cache.h): a second, cached run prints the same to=, and an
+# edit that shifts the alias's offset prints the target at its new place
+W="$TMP/w"; mkdir -p "$W/src"; cp "$F/c/alias.h" "$W/src/alias.h"; C="$TMP/w.cache"
+( cd "$W/src" && "$BIN" . --cache="$C" --defs=ColumnPtr ) > /dev/null 2>&1
+( cd "$W/src" && "$BIN" . --cache="$C" --defs=ColumnPtr ) > "$TMP/w1" 2>/dev/null; wrc=$?
+if [ "$wrc" -eq 0 ] && [ -s "$C" ] && grep -q 'to="lib::COW&lt;IColumn&gt;::Ptr"' "$TMP/w1"; then ok "warm cache: to= survives the reload"; else no "warm cache: rc=$wrc cache=$( [ -s "$C" ] && echo yes || echo no ) $( grep -oE '<d n="[^>]*>' "$TMP/w1" | head -1 )"; fi
+{ printf '// a new first line shifts every offset\n'; cat "$F/c/alias.h"; } > "$W/src/alias.h"
+( cd "$W/src" && "$BIN" . --cache="$C" --defs=ColumnPtr ) > "$TMP/w2" 2>/dev/null; wrc=$?
+if [ "$wrc" -eq 0 ] && grep -q 'p="alias.h:5"' "$TMP/w2" && grep -q 'to="lib::COW&lt;IColumn&gt;::Ptr"' "$TMP/w2"; then ok "warm cache after an offset-shifting edit: to= read at the new place"; else no "warm cache after edit: rc=$wrc $( grep -oE '<d n="[^>]*>' "$TMP/w2" | head -1 )"; fi
+# to_unread: the cached row's file can no longer be read (mutant: the to_unread attribute never written); skipped when chmod does not bite
+chmod 000 "$W/src/alias.h"
+if [ -r "$W/src/alias.h" ]; then
+    echo "  SKIP  to_unread arms (chmod 000 does not stop this user reading)"
+else
+    ( cd "$W/src" && "$BIN" . --cache="$C" --defs=ColumnPtr ) > "$TMP/u" 2>/dev/null; urc=$?
+    ( cd "$W/src" && "$BIN" . --cache="$C" --defs=ColumnPtr --json ) > "$TMP/uj" 2>/dev/null; ujrc=$?
+    if [ "$urc" -eq 0 ] && grep -q 't="alias"[^>]* to_unread="1"' "$TMP/u" && ! grep -q ' to="' "$TMP/u"; then ok "an unreadable file: to_unread=\"1\", no to="; else no "to_unread XML: rc=$urc $( grep -oE '<d n="[^>]*>' "$TMP/u" | head -1 )"; fi
+    if [ "$ujrc" -eq 0 ] && grep -qF '"to_unread":1' "$TMP/uj"; then ok "an unreadable file: JSON \"to_unread\":1"; else no "to_unread JSON: rc=$ujrc $( head -c 300 "$TMP/uj" )"; fi
+fi
+chmod 644 "$W/src/alias.h"
+
+# [RED on 67efef80] a multi-root workspace keeps the alias-target side table (workspace.h mergeWorkspaceIngests re-offsets it)
+mkdir -p "$TMP/ws/a" "$TMP/ws/b"; printf 'struct Other {};\n' > "$TMP/ws/a/o.h"
+printf 'namespace other { struct Thing {}; }\nusing Keep = other::Thing;\n' > "$TMP/ws/b/k.h"
+( cd "$TMP/ws" && "$BIN" a b --no-cache --defs=Keep ) > "$TMP/ws.xml" 2>/dev/null; xrc=$?
+( cd "$TMP/ws" && "$BIN" a b --no-cache --defs=Keep --json ) > "$TMP/ws.json" 2>/dev/null; jrc=$?
+if [ "$xrc" -eq 0 ] && grep -q 'n="Keep" t="alias"[^>]* to="other::Thing" to_next="--defs=Thing"' "$TMP/ws.xml"; then ok "[RED] multi-root --defs: to= and to_next="; else no "[RED] multi-root --defs: rc=$xrc $( grep -oE '<d n="[^>]*>' "$TMP/ws.xml" | head -1 )"; fi
+if [ "$jrc" -eq 0 ] && grep -qF '"to":"other::Thing"' "$TMP/ws.json"; then ok "[RED] multi-root --defs --json: \"to\""; else no "[RED] multi-root --defs --json: rc=$jrc $( head -c 300 "$TMP/ws.json" )"; fi
+
+# [RED on 67efef80] a class-scope alias's literal row names its class as in= (as main did), never its own alias row (S4)
+mkdir -p "$F/e/cpp"; printf 'template <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nstruct Holder {\n    using WidgetRef = Ptr<Widget>;\n};\nint getWidgetRefCount();\n' > "$F/e/cpp/h.h"
+( cd "$F/e" && "$BIN" . --no-cache --for="what does WidgetRef expand to? the defs lookup is empty" ) > "$TMP/e" 2>/dev/null; erc=$?
+if [ "$erc" -eq 0 ] && grep -q '<ld p="cpp/h.h" l="4" shape="using" in="Holder::Holder">' "$TMP/e"; then ok "[RED] class-scope using: the literal row's in= names its class"; else no "[RED] class-scope using in=: rc=$erc $( grep -oE '<ld [^>]*>' "$TMP/e" | head -1 )"; fi
 
 echo "aliasdefcheck: $( [ "$fail" -eq 0 ] && echo PASS || echo FAIL )"
 exit "$fail"

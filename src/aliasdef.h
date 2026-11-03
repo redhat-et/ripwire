@@ -10,13 +10,14 @@
 // (reports/index-alias-const.md, adoption plan).
 //
 // LANGUAGE LAYER (explicit, one arm per language): C++ reads node kinds the grammar fixes (alias_declaration's `type`
-// field, namespace_alias_definition's last named child, type_definition's `type` field). Every other language returns
+// field, namespace_alias_definition's last named non-comment child, type_definition's `type` field). Every other language returns
 // None today. A TypeScript arm (module-level `const X = <alias- or table-shaped value>` against an allowlist of
 // right-hand-side shapes) was measured and carded (TS-CONST-DEFS): the defs verb found the tables, the task-phrased
 // answers did not print them. It returns as one more arm here, with its own AliasForm values.
 
 #include "infra/fieldid.h"
 #include "infra/nodekind.h"
+#include "infra/tschildren.h"
 #include "model.h"
 
 #include <tree_sitter/api.h>
@@ -40,7 +41,7 @@ struct AliasShape
 };
 
 // The shape of the declaration node a definition capture's role node names.
-inline AliasShape aliasShapeOf( Lang lang, TSNode decl ) noexcept
+inline AliasShape aliasShapeOf( Lang lang, TSNode decl )   // not noexcept: the child cursor allocates (infra/tschildren.h)
 {
     if( ts_node_is_null( decl ) )
     {
@@ -57,8 +58,18 @@ inline AliasShape aliasShapeOf( Lang lang, TSNode decl ) noexcept
         }
         if( kindIs( t, "namespace_alias_definition" ) )
         {
-            const std::uint32_t c      = ts_node_named_child_count( decl );
-            const TSNode        target = c == 0 ? TSNode{} : ts_node_named_child( decl, c - 1 );
+            // the last named child that is no comment: `namespace L = lib /* c */;` names lib, never the comment (a comment is a
+            // named extra); one cursor walk (infra/tschildren.h: an indexed walk is quadratic under a comment flood)
+            TSNode      target {};
+            ChildCursor cursor( decl );
+            forEachNamedChild( decl, cursor.cur, [ & ]( TSNode c )
+                               {
+                                   if( !kindIs( ts_node_type( c ), "comment" ) )
+                                   {
+                                       target = c;
+                                   }
+                                   return true;
+                               } );
             return ts_node_is_null( target ) ? AliasShape{} : AliasShape{ AliasForm::NamespaceAlias, target };
         }
         return {};
