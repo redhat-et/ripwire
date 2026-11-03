@@ -7252,6 +7252,64 @@ inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uin
     return scope;
 }
 
+// EDGE-PRELUDE-VETO: does the function whose item starts at `start` of `text` carry `#[proc_macro]` (the one attribute that makes a function
+// a `name!(..)` macro)? Its attribute run is the lines from `start` down to the item line and right above `start`: attributes, comments and
+// blank lines; each scan stops at the first other line. A bare text scan of the run, read off disk at graph time (no extraction bit: Symbol has no free bit).
+inline bool rustFnIsProcMacro( std::string_view text, std::uint32_t start )
+{
+    const auto isProcMacroAttr = []( std::string_view line )
+    {
+        std::string_view inner = line.substr( 2, line.find( ']' ) == std::string_view::npos ? std::string_view::npos : line.find( ']' ) - 2 );
+        inner.remove_prefix( std::min( inner.find_first_not_of( " \t" ), inner.size() ) );
+        return inner.substr( 0, std::min( inner.find_last_not_of( " \t" ) + 1, inner.size() ) ) == "proc_macro";
+    };
+    // The def's start may already include its doc comments and attributes (the Rust extent takes the run): read forward to the item line
+    for( std::size_t at = std::min<std::size_t>( start, text.size() ); at < text.size(); )
+    {
+        const std::size_t nl   = text.find( '\n', at );
+        std::string_view  line = text.substr( at, nl == std::string_view::npos ? std::string_view::npos : nl - at );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( "#[" ) && isProcMacroAttr( line ) )
+        {
+            return true;
+        }
+        if( !line.empty() && !line.starts_with( "#[" ) && !line.starts_with( "//" ) )
+        {
+            break;   // the item's own line
+        }
+        if( nl == std::string_view::npos )
+        {
+            break;
+        }
+        at = nl + 1;
+    }
+    std::size_t end = std::min<std::size_t>( start, text.size() );
+    while( end > 0 )
+    {
+        const std::size_t      nl   = text.rfind( '\n', end - 1 );
+        const std::size_t      from = nl == std::string_view::npos ? 0 : nl + 1;
+        std::string_view       line = text.substr( from, end - from );
+        line.remove_prefix( std::min( line.find_first_not_of( " \t\r" ), line.size() ) );
+        if( line.starts_with( "#[" ) )
+        {
+            if( isProcMacroAttr( line ) )
+            {
+                return true;
+            }
+        }
+        else if( !line.empty() && !line.starts_with( "//" ) && !line.starts_with( "*" ) && !line.starts_with( "/*" ) )
+        {
+            return false;   // the line before the run: the attribute run ended without #[proc_macro]
+        }
+        if( nl == std::string_view::npos )
+        {
+            break;
+        }
+        end = nl;
+    }
+    return false;
+}
+
 // Rust base clause table values: the head of the `use` is DECIDED outside the tree ('\0') or UNDECIDED ('u').
 inline constexpr char kRustUseUndecided = 'u';
 
@@ -10087,6 +10145,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         }
     }
     RustMacroScopeCache macroScopes;   // EDGE-PRELUDE-VETO: a non-exported Rust macro file's textual scope, read once when a site asks
+    HashMap<NodeId, bool> procMacroMemo;   // EDGE-PRELUDE-VETO: does a Rust function candidate of a `name!(..)` site carry #[proc_macro]
     for( siteIndex = 0; siteIndex < ing.references.size(); ++siteIndex )
     {
         const Reference& site = ing.references[ siteIndex ];
@@ -10146,10 +10205,25 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                      || rustMacroScopeOf( ing, symFileId[ c ], macroScopes ).holds( ing.files[ r.fileId ] )
                      || ( langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) ) );
         };
+        // A procedural macro is a function that carries #[proc_macro] (a nested `fn assert` a glob `use` reaches is no macro: zed +110 before
+        // this test), read once per candidate (procMacroMemo).
+        const auto isProcMacro = [ & ]( NodeId c )
+        {
+            auto [ at, fresh ] = procMacroMemo.try_emplace( c, false );
+            if( fresh )
+            {
+                const Symbol& s = ing.symbols[ c ];
+                if( const std::optional<std::string> text = s.fnLocal == 0 ? docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ) : std::nullopt )
+                {
+                    at->second = rustFnIsProcMacro( *text, s.sigStartByte );
+                }
+            }
+            return at->second;
+        };
         const auto procMacroDef = [ & ]( NodeId c )
         {
             return symKind[ c ] == SymKind::Function && langCompatible( symLang[ c ], r.lang ) && langFacts( r.lang ).rule3NameProof == Rule3NameProof::RustUse
-                && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
+                && ownerIsClass( c ).empty() && recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) && isProcMacro( c );
         };
         const bool macroSite     = r.role == RefRole::Macro && it != byName.end();
         const bool anyMacroDef   = macroSite && std::any_of( it->second.begin(), it->second.end(), macroDef );

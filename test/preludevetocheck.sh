@@ -76,12 +76,12 @@ attr() {
 # ---- Rust: one crate; a.rs holds a namesake of every prelude name and macro, so each call has an in-tree name to be bound to by mistake.
 R=$T/rs
 w "$R/Cargo.toml" '[package]\nname = "p"\nversion = "0.1.0"\n'
-w "$R/src/lib.rs" 'pub mod a;\npub mod own;\npub mod m;\npub mod parser;\npub mod pm;\npub mod u1;\npub mod u2;\npub mod u3;\npub mod u4;\npub mod u6;\npub mod u7;\npub mod u8;\npub mod u9;\npub mod u10;\npub mod u12;\npub mod u14;\npub mod u15;\npub mod cm;\npub mod u16;\n#[macro_use]\nmod mu;\n#[macro_use]\npub(crate) mod dm;\npub mod u17;\npub mod ru;\npub mod u18;\n'
+w "$R/src/lib.rs" 'pub mod a;\npub mod own;\npub mod m;\npub mod parser;\npub mod pm;\npub mod u1;\npub mod u2;\npub mod u3;\npub mod u4;\npub mod u6;\npub mod u7;\npub mod u8;\npub mod u9;\npub mod u10;\npub mod u11;\npub mod u12;\npub mod u14;\npub mod u15;\npub mod cm;\npub mod u16;\n#[macro_use]\nmod mu;\n#[macro_use]\npub(crate) mod dm;\npub mod u17;\npub mod ru;\npub mod u18;\n'
 w "$R/src/a.rs" 'pub fn helper() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn Err(x: i32) -> i32 { x }\npub fn assert(x: bool) {}\npub fn json() {}\npub fn mac2() {}\npub fn pmac() {}\npub fn outer() { fn drop(x: i32) {} drop(1); }\npub struct Q;\nimpl Q {\n    pub fn lock(&self) {}\n    pub fn into(self) {}\n}\n'
 w "$R/src/own.rs" 'pub struct Ok(pub i32);\n'
 w "$R/src/m.rs" '#[macro_export]\nmacro_rules! mac2 { () => {} }\n#[macro_export]\nmacro_rules! json { ($e:tt) => {} }\n'
 w "$R/src/parser.rs" 'pub struct Parser;\nimpl Parser {\n    pub fn expect(&self, s: &str) {}\n    pub fn parse(&self) { self.expect("x"); }\n}\n'
-w "$R/src/pm.rs" 'pub fn pmac(input: u32) -> u32 { input }\n'
+w "$R/src/pm.rs" '/// a procedural macro\n/// let p = pmac!(1);\n#[proc_macro]\npub fn pmac(input: u32) -> u32 { input }\npub fn nmac() {}\npub fn outer() { fn gmac() {} gmac(); }\n'
 w "$R/src/u1.rs" 'use crate::a::helper;\nfn p1() -> i32 { helper(); Ok(1) }\nfn p1e() -> i32 { helper(); Err(1) }\n'
 w "$R/src/u2.rs" 'use crate::own::Ok;\nfn p2() -> Ok { Ok(1) }\n'
 w "$R/src/u3.rs" 'fn Some(x: i32) -> i32 { x }\nfn p3() -> i32 { Some(1) }\n'
@@ -91,6 +91,7 @@ w "$R/src/u7.rs" 'fn p7() { drop(1); crate::a::helper(); }\n'
 w "$R/src/u8.rs" 'fn p8(o: Option<i32>, m: std::sync::Mutex<u8>) { o.expect("v"); let _ = m.lock(); crate::a::helper(); }\n'
 w "$R/src/u9.rs" 'use crate::parser::Parser;\nfn p9(p: &Parser) { p.expect("v"); }\n'
 w "$R/src/u10.rs" 'use crate::pm::pmac;\nfn p10() { pmac!(1); }\n'
+w "$R/src/u11.rs" 'use crate::pm::*;\nuse crate::pm::nmac;\nfn p11() { nmac!(); gmac!(); crate::a::helper(); }\n'
 w "$R/src/u12.rs" 'macro_rules! assert { ($e:expr) => {} }\nfn p12() { assert!(true); }\n'
 # M arms (macro scope): a `macro_rules!` without #[macro_export] is textual: its file, its child modules, a `#[macro_use] mod` parent's
 w "$R/src/u14.rs" '#[macro_export]\nmacro_rules! mexp { () => {} }\nmacro_rules! mloc { () => {} }\n'
@@ -120,7 +121,11 @@ row K3.boundjson   "$R" callees p6  src/m.rs json      present
 row K3.fnnamesake  "$R" callees p6  src/a.rs json      none
 row K3.twin        "$R" callees p6  src/a.rs helper    proven
 row K4.procmacro   "$R" callees p10 src/pm.rs pmac     present
-# K4 has no neighbour arm: a `use` proves every in-crate namesake of its name (receiverevidence.h rustRule3Proves, card RUST-USE-TARGET)
+# K4 neighbours: a `use`d function without #[proc_macro], and a nested fn a glob reaches (zed's `fn assert` in tests), are no macros
+row K4.notproc     "$R" callees p11 src/pm.rs nmac     none
+row K4.nested      "$R" callees p11 src/pm.rs gmac     none
+row K4.twin        "$R" callees p11 src/a.rs helper    proven
+# K4 has no same-name neighbour arm: a `use` proves every in-crate namesake of its name (receiverevidence.h rustRule3Proves, card RUST-USE-TARGET)
 row K5.localmacro  "$R" callees p12 src/u12.rs assert  present
 row K5.fnnamesake  "$R" callees p12 src/a.rs assert    none
 row M1.localother  "$R" callees p5  src/u12.rs assert  none
@@ -139,8 +144,8 @@ row S1.twin        "$R" callees p8  src/a.rs helper    proven
 row S2.typed       "$R" callees p9  src/parser.rs Parser::expect present
 row S2.self        "$R" callees Parser::parse src/parser.rs Parser::expect present
 # the map header's external= counts the refused sites (p1 Ok, p1e Err, p7 drop, and the out-of-scope macros p5 assert, p15 mloc,
-# p16 cmac; 0 before this lane, 3 before the macro-scope fix)
-attr D1.external   "$R" map     -   external 6
+# p16 cmac, p11 nmac and gmac; 0 before this lane, 3 before the macro-scope fix)
+attr D1.external   "$R" map     -   external 8
 attr D2.declined   "$R" callers Parser::expect declined_calls 1
 
 # ---- polyglot: Python's and C's builtin vetoes are their own Phase-5 rows; a bound or same-file namesake keeps its edge there
