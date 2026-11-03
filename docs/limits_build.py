@@ -285,8 +285,9 @@ def render(caps, disc, classes, tot, taken):
         w('measurement that chose it; listing them beside truncation caps invites tuning them by intuition.\n')
         w('The **anchor** column is read from each constant\'s own trailing comment. **unsourced** means the')
         w('comment cites no measurement — the value came from somewhere, but not from anything a reader can')
-        w('check. All %d read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has'
-          % T('parameters'))
+        w('check. %s, which is the finding, not an omission: `kSpecificMinLen` has'
+          % ('All %d read unsourced today' % len(weights) if all(not anchor_of(x[4]) for x in weights)
+             else '%d of the %d read unsourced today' % (sum(1 for x in weights if not anchor_of(x[4])), len(weights))))
         w('the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per')
         w('`docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider\'s)`. Sourcing them')
         w('means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator')
@@ -303,8 +304,7 @@ def render(caps, disc, classes, tot, taken):
     # attribution filed every cap in this document under "Not caps" (limitstablecheck arm K). It is written
     # unconditionally: with no parameters, the tables would fall under the refuted section instead.
     w('## Caps, by file\n')
-    w('One table for each of the %d files that declare a cap — the %d caps counted above, and no parameter.\n'
-      % (T('files'), T('caps')))
+    w('One table for each file that declares a cap in today\'s `src/` (the totals above are the dated snapshot), and no parameter.\n')
     for rel in sorted({c[2] for c in caps}):
         rows = [c for c in caps if c[2] == rel]
         d = ', '.join('`%s_capped`' % a if a else '`capped`' for a in sorted(disc.get(rel, []))) or '**none**'
@@ -382,8 +382,12 @@ if a.check:
              _tot['limits.indexing'] + _tot['limits.output'] + _tot['limits.boundary'], _liveNote))
 else:
     pathlib.Path(a.out).write_text(body)
-    print('limits_build: wrote %s — %d caps (%d silent), %d parameters, %d caps classified' %
-          (rel(a.out), len(_real), sum(1 for c in _real if not disc.get(c[2])), len(_wts),
+    # The first "N caps" / "M parameters" this line prints are the PUBLISHED totals (the snapshot's, the ones
+    # LIMITS.md and README.md state); the live tree follows in _liveNote. tools that read the counts off this
+    # line (a pre-review sweep comparing README) must compare published with published.
+    print('limits_build: wrote %s — %d caps (%d silent), %d parameters, %d classified published%s; live src/ classifies %d caps' %
+          (rel(a.out), _tot['limits.caps'], _tot['limits.silent'], _tot['limits.parameters'],
+           _tot['limits.indexing'] + _tot['limits.output'] + _tot['limits.boundary'], _liveNote,
            sum(1 for c in _real if c[0] in classes)))
     # README.md restates the two counts in one sentence, which test/readmedriftcheck.sh (L2) compares with
     # this generator. Writing it here as well means a merge that moved the counts is settled by re-running
@@ -391,10 +395,14 @@ else:
     _readme = ROOT / 'README.md'
     if _readme.exists() and not a.root:
         _rt = _readme.read_text(encoding='utf-8')
+        _datePat = re.compile(r'(?<=counts snapshot )[0-9]{4}-[0-9]{2}-[0-9]{2}')
         _pat = re.compile(r'\b([0-9]+)(\s+compile-time\s+caps\s+and\s+)([0-9]+)(\s+ranking\s+parameters)\b')
         _hits = _pat.findall(_rt)
         if len(_hits) == 1:
             _new = _pat.sub(lambda m: '%d%s%d%s' % (_tot['limits.caps'], m.group(2), _tot['limits.parameters'], m.group(4)), _rt)
+            if _snap:   # the sentence's own "counts snapshot YYYY-MM-DD" follows the snapshot (one line, the sentence's)
+                _ln = [l for l in _new.split('\n') if _pat.search(l)][0]
+                _new = _new.replace(_ln, _datePat.sub(_snap['taken'], _ln), 1)
             if _new != _rt:
                 _readme.write_text(_new, encoding='utf-8')
                 print('limits_build: rewrote README.md\'s cap-inventory sentence — %d caps, %d parameters'

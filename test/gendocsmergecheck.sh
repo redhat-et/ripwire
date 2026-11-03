@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # gendocsmergecheck.sh — two open changes that each add a gate and a cap, and regenerate the docs as
-# CONTRIBUTING says, merge with NO textual conflict in either order, and the merge result passes every
-# generator check. GEN-DOCS-MERGE, 2026-11-02: before it, every landing rewrote the totals in README.md,
+# CONTRIBUTING says, merge with no textual conflict on any TOTAL in either order, and the merge result passes
+# every generator check. Scope of "no conflict": the two changes here touch different source files and gate
+# names far apart in the sorted list. Two caps in the SAME file, or two gate names adjacent in the list, still
+# conflict on their per-item lines (docs/LIMITS.md rows, the absorb list) — git cannot merge two insertions
+# at one spot; scripts/merge_main.sh settles those (it rebuilds LIMITS.md and set-merges the list), GitHub's
+# mergeability check does not. GEN-DOCS-MERGE, 2026-11-02: before it, every landing rewrote the totals in README.md,
 # docs/LIMITS.md and docs/TUNING.md (and docs/EVALS.md + the deck for a gate), so GitHub marked every other
 # open PR CONFLICTING and each one needed a main merge plus a full CI run. The totals are now the dated
 # snapshot docs/counts.tsv (docs/counts_snapshot.py); a feature change rewrites only per-item lines.
@@ -19,6 +23,15 @@
 #   (N3) docs/counts.tsv without its gates.scripts line: the generator exits non-zero, never publishes live.
 #   (N4) docs/counts.tsv written by a generator that crashes: counts_snapshot.py refresh exits non-zero and
 #        leaves the snapshot unchanged.
+#   (N5) a generator that passes the live preflight and fails in WRITE mode: refresh exits non-zero and every
+#        file it writes (the snapshot, README, EVALS, deck, LIMITS, TUNING) is back to its bytes before it.
+#   (N6) a hand-edited snapshot whose totals do not add up (silent + disclosing != caps): every generator refuses.
+#   (N7) an impossible COUNTS_TAKEN date (2026-11-31): refresh refuses and the snapshot is unchanged.
+#   (N8) a snapshot key no generator publishes: `show` lists it and counts it; `check` exits 1.
+#   (N9) a marked gate-count site without its "counts snapshot YYYY-MM-DD" date: gatecount_build refuses.
+#   (D)  the drift bound (the staleness rule, docs/counts_snapshot.py MAX_DRIFT): `check --max-drift` exits 0 on
+#        THIS tree; on the fixture it exits 0 at the merged tree's drift of 2 gates, 1 once gates drift by 11
+#        or caps by 21, and non-zero when a generator crashes. (Dr) release.yml runs the exact `check`.
 set -u
 ROOT="$( cd "$( dirname "$0" )/.." && pwd )"
 fail=0
@@ -38,6 +51,10 @@ mkdir -p "$R/test" || exit 2
 ( cd "$ROOT" && tar cf - src docs bench/capsweep scripts present/deck5_ripwire_build.js README.md test/regression.sh test/lib ) \
     | ( cd "$R" && tar xf - ) || { echo "gendocsmergecheck: could not copy the tree"; exit 2; }
 for f in "$ROOT"/test/*.sh; do [ -f "$f" ] && [ ! -e "$R/test/${f##*/}" ] && : > "$R/test/${f##*/}"; done
+# the fixture starts from an exact snapshot (both changes cut right after a refresh, same date), so its arms do
+# not depend on how far this tree's own snapshot lags; arm (D) checks this tree's lag separately
+taken="$( awk -F'\t' '$1 == "taken" { print $2 }' "$R/docs/counts.tsv" )"
+( cd "$R" && COUNTS_TAKEN="$taken" python3 docs/counts_snapshot.py refresh >/dev/null ) || { echo "gendocsmergecheck: refresh failed on the fixture"; exit 2; }
 g(){ git -C "$R" "$@"; }
 g init -q -b base . >/dev/null 2>&1 || g init -q . || exit 2
 g checkout -q -B base 2>/dev/null
@@ -112,6 +129,11 @@ else
     no "(P3 twin) after refresh: exit $rc, $sites site lines state $(( baseGates + 2 )) (want >= 8): $( printf '%s' "$out" | tail -2 )"
 fi
 
+dated="$( cat "$TMP/fresh/README.md" "$TMP/fresh/docs/EVALS.md" "$TMP/fresh/present/deck5_ripwire_build.js" | grep -E '<!-- gatecount -->|// gatecount' | grep -c 'counts snapshot 2026-11-03' )"
+if [ "$dated" -ge 8 ] && grep -q 'counts snapshot 2026-11-03 the tool had [0-9]* compile-time caps' "$TMP/fresh/README.md"; then
+    ok "(P3 date) after refresh: $dated marked site lines and README's cap sentence carry the new date 2026-11-03"
+else no "(P3 date) after refresh: $dated marked site lines carry the new date (want >= 8), cap sentence $( grep -c 'counts snapshot 2026-11-03 the tool' "$TMP/fresh/README.md" )"; fi
+
 # ── (N1) a hand-edited total ─────────────────────────────────────────────────────────────────────────
 cp -R "$M" "$TMP/n1"
 python3 - "$TMP/n1/README.md" "$baseGates" <<'PY'
@@ -144,6 +166,97 @@ printf 'import sys\nsys.exit( "crash stub" )\n' > "$TMP/n4/docs/limits_build.py"
 if [ "$rc" != 0 ] && cmp -s "$M/docs/counts.tsv" "$TMP/n4/docs/counts.tsv"; then
     ok "(N4) refresh with a crashing generator exits $rc and leaves docs/counts.tsv unchanged"
 else no "(N4) refresh with a crashing generator: exit $rc, snapshot $( cmp -s "$M/docs/counts.tsv" "$TMP/n4/docs/counts.tsv" && echo unchanged || echo CHANGED )"; fi
+
+# ── (N5) write-mode failure after the live preflight: refresh restores every file it writes ─────────
+cp -R "$M" "$TMP/n5"
+cp "$M/docs/limits_build.py" "$TMP/n5/docs/limits_build_real.py"
+cat > "$TMP/n5/docs/limits_build.py" <<'PY'
+import os, subprocess, sys
+here = os.path.dirname( os.path.abspath( __file__ ) )
+if '--live-counts' in sys.argv[ 1: ]:
+    sys.exit( subprocess.run( [ sys.executable, '-B', os.path.join( here, 'limits_build_real.py' ) ] + sys.argv[ 1: ] ).returncode )
+sys.exit( 'write-mode stub failure' )
+PY
+out="$( cd "$TMP/n5" && COUNTS_TAKEN=2000-01-01 python3 docs/counts_snapshot.py refresh 2>&1 )"; rc=$?
+same=0; for f in docs/counts.tsv README.md docs/EVALS.md present/deck5_ripwire_build.js docs/LIMITS.md docs/TUNING.md; do cmp -s "$M/$f" "$TMP/n5/$f" && same=$(( same + 1 )); done
+if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'failed after the refresh' && [ "$same" = 6 ]; then
+    ok "(N5) a write-mode failure: refresh exits $rc and all 6 written files are restored (gatecount_build had already rewritten its 3)"
+else no "(N5) write-mode failure: exit $rc, $same of 6 files restored: $( printf '%s' "$out" | tail -1 )"; fi
+
+# ── (N6) a snapshot whose totals do not add up is refused by every generator ──────────────────────────
+cp -R "$M" "$TMP/n6"
+awk -F'\t' 'BEGIN { OFS = "\t" } $1 == "limits.silent" { $2 = $2 + 1 } { print }' "$M/docs/counts.tsv" > "$TMP/n6/docs/counts.tsv"
+refused=0; for c in "docs/gatecount_build.py --check" "docs/limits_build.py --check" "bench/capsweep/capsweep.py emit --check"; do
+    out="$( cd "$TMP/n6" && python3 $c 2>&1 )" || { printf '%s' "$out" | grep -q 'does not add up' && refused=$(( refused + 1 )); }
+done
+if ! cmp -s "$M/docs/counts.tsv" "$TMP/n6/docs/counts.tsv" && [ "$refused" = 3 ]; then
+    ok "(N6) a hand-edited snapshot (limits.silent + 1, sums broken) is refused by all 3 generators"
+else no "(N6) a snapshot that does not add up was refused by $refused of 3 generators"; fi
+
+# ── (N7) an impossible date is refused ───────────────────────────────────────────────────────────────
+cp -R "$M" "$TMP/n7"
+out="$( cd "$TMP/n7" && COUNTS_TAKEN=2026-11-31 python3 docs/counts_snapshot.py refresh 2>&1 )"; rc=$?
+if [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'not a real' && cmp -s "$M/docs/counts.tsv" "$TMP/n7/docs/counts.tsv"; then
+    ok "(N7) COUNTS_TAKEN=2026-11-31: refresh refuses (exit $rc), snapshot unchanged"
+else no "(N7) impossible date: exit $rc: $( printf '%s' "$out" | tail -1 )"; fi
+out="$( cd "$TMP/n7" && COUNTS_TAKEN=2026-11-30 python3 docs/counts_snapshot.py refresh 2>&1 )"; rc=$?
+if [ "$rc" = 0 ] && grep -qx 'taken	2026-11-30' "$TMP/n7/docs/counts.tsv"; then ok "(N7 twin) COUNTS_TAKEN=2026-11-30: refresh exits 0 and records it"
+else no "(N7 twin) a real date: exit $rc: $( printf '%s' "$out" | tail -1 )"; fi
+
+# ── (N8) an obsolete snapshot key: show lists it, check refuses ─────────────────────────────────────
+cp -R "$M" "$TMP/n8"
+printf 'limits.retired\t5\n' >> "$TMP/n8/docs/counts.tsv"
+sout="$( cd "$TMP/n8" && python3 docs/counts_snapshot.py show 2>&1 )"; src=$?
+( cd "$TMP/n8" && python3 docs/counts_snapshot.py check >/dev/null 2>&1 ); crc=$?
+if [ "$src" = 0 ] && printf '%s' "$sout" | grep -q '^limits.retired .*no longer published' && printf '%s' "$sout" | grep -q '1 snapshot key(s) no longer published' && [ "$crc" = 1 ]; then
+    ok "(N8) an obsolete key: show lists it and counts it (exit 0), check exits 1"
+else no "(N8) obsolete key: show exit $src, check exit $crc: $( printf '%s' "$sout" | tail -1 )"; fi
+
+# ── (N9) a marked site without its snapshot date ─────────────────────────────────────────────────────
+cp -R "$M" "$TMP/n9"
+python3 - "$TMP/n9/README.md" <<'PY'
+import re, sys; p = sys.argv[ 1 ]; t = open( p ).read()
+open( p, 'w' ).write( re.sub( r' \(counts snapshot [0-9-]+\)(?=, five contracts)', '', t, count = 1 ) )
+PY
+out="$( cd "$TMP/n9" && python3 docs/gatecount_build.py --check 2>&1 )"; rc=$?
+if ! cmp -s "$M/README.md" "$TMP/n9/README.md" && [ "$rc" != 0 ] && printf '%s' "$out" | grep -q 'without its date'; then
+    ok "(N9) a marked site that lost its snapshot date is refused (exit $rc)"
+else no "(N9) undated site: exit $rc (injection $( cmp -s "$M/README.md" "$TMP/n9/README.md" && echo 'did NOT take' || echo took )): $( printf '%s' "$out" | head -1 )"; fi
+
+# ── (D) the drift bound ─────────────────────────────────────────────────────────────────────────────
+out="$( cd "$ROOT" && python3 docs/counts_snapshot.py check --max-drift 2>&1 )"; rc=$?
+if [ "$rc" = 0 ]; then ok "(D) this tree: ${out#counts_snapshot: }"
+else no "(D) this tree's counts snapshot lags past the bound (exit $rc) — run: python3 docs/counts_snapshot.py refresh in this PR: $out"; fi
+out="$( cd "$M" && python3 docs/counts_snapshot.py check --max-drift 2>&1 )"; rc=$?
+if [ "$rc" = 0 ]; then ok "(D twin) the merged fixture (2 gates and 2 caps behind) is within the bound"
+else no "(D twin) the merged fixture, 2 behind, exit $rc: $out"; fi
+setSnap(){   # $1 tree, $2 key, $3 delta; keeps SUMS true (caps moves silent and constants with it)
+    python3 - "$1/docs/counts.tsv" "$2" "$3" <<'PY'
+import sys
+p, k, d = sys.argv[ 1 ], sys.argv[ 2 ], int( sys.argv[ 3 ] )
+ks = [ k ] + ( [ 'limits.silent', 'limits.constants' ] if k == 'limits.caps' else [] )
+out = []
+for l in open( p ).read().split( '\n' ):
+    f = l.split( '\t' )
+    if len( f ) == 2 and f[ 0 ] in ks:
+        l = '%s\t%d' % ( f[ 0 ], int( f[ 1 ] ) + d )
+    out.append( l )
+open( p, 'w' ).write( '\n'.join( out ) )
+PY
+}
+for spec in "gates.scripts -9 1" "limits.caps -19 1" "gates.scripts -8 0"; do
+    set -- $spec
+    rm -rf "$TMP/d"; cp -R "$M" "$TMP/d"; setSnap "$TMP/d" "$1" "$2"
+    out="$( cd "$TMP/d" && python3 docs/counts_snapshot.py check --max-drift 2>&1 )"; rc=$?
+    if [ "$rc" = "$3" ]; then ok "(D) $1 snapshot moved by $2 on the merged fixture: check --max-drift exits $rc as expected"
+    else no "(D) $1 moved by $2: exit $rc, expected $3: $out"; fi
+done
+( cd "$TMP/n4" && python3 docs/counts_snapshot.py check --max-drift >/dev/null 2>&1 ); rc=$?
+if [ "$rc" != 0 ]; then ok "(D crash) a crashing generator: check --max-drift exits $rc, never a pass"
+else no "(D crash) check --max-drift passed with a crashing generator"; fi
+if [ -f "$ROOT/.github/workflows/release.yml" ] && grep -qE '^[[:space:]]*python3 docs/counts_snapshot\.py check[[:space:]]*(\|\||$)' "$ROOT/.github/workflows/release.yml"; then
+    ok "(Dr) .github/workflows/release.yml runs the exact counts_snapshot.py check before publishing"
+else no "(Dr) .github/workflows/release.yml does not run 'python3 docs/counts_snapshot.py check' (the release refusal of a stale snapshot)"; fi
 
 [ $fail -eq 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

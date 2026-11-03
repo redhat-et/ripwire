@@ -20,10 +20,15 @@
 # A merge that brings main's newer showcase capture marks it too, conflict or not (CAPTURE-DICTV-DRIFT, 2026-11-02):
 # the capture's --legend-dict line records main's legend dictionary (dictv=, entries=), and a branch that adds a
 # legend entry prints its own, so docscommandscheck (G) / showcasecapturecheck (I) go red after the merge.
-# --regen-after-build BIN re-records every marked file from BIN: the parity manifest with
-# `UPDATE_GOLDEN=1 bash test/printffmtparitycheck.sh BIN`, and the capture's dictv=/entries= pair (replaced
-# wherever that exact pair is quoted: the capture, docs/COMMANDS.md, changelog.d/) followed by
-# `python3 docs/docs_commands_build.py --bin BIN` and its --check; then it commits what moved.
+# --regen-after-build BIN settles the marks of every merge since the last re-pin (a later merge with no marks
+# does not hide an earlier one's), from BIN: the parity manifest with `UPDATE_GOLDEN=1 bash
+# test/printffmtparitycheck.sh BIN`, keeping only labels whose pinned line differed between a marked merge's
+# two parents (a label both parents agreed on that moves is refused and listed: that is the drift the gate
+# exists to catch); the NEWEST capture's --legend-dict dictv=/entries= pair only (replaced wherever that exact
+# pair is quoted: the capture, docs/COMMANDS.md, changelog.d/; no other capture bytes are re-recorded, and an
+# older marked capture keeps main's side, being a record of an older binary that no gate compares with BIN),
+# then `python3 docs/docs_commands_build.py --bin BIN`, which writes docs/COMMANDS.md, and its --check; then it
+# commits what moved, naming every moved parity label in the message.
 #
 # The totals the docs publish (gate count, cap inventory, LIMITS/TUNING census) are the dated snapshot
 # docs/counts.tsv and are not recomputed per branch, so two branches do not conflict on them;
@@ -81,16 +86,38 @@ if [ "$mode" = regen ]; then
     [ -x "$RBIN" ] || { echo "merge_main: $RBIN is not an executable" >&2; exit 2; }
     git rev-parse -q --verify MERGE_HEAD >/dev/null && { echo "merge_main: a merge is still in progress — finish it first" >&2; exit 2; }
     [ -z "$( git status --porcelain --untracked-files=no )" ] || { echo "merge_main: the work tree has uncommitted changes — commit or stash them first" >&2; exit 2; }
-    # the marked list is in the newest merge commit's message (written there by this script; it survives a lost terminal)
-    lastMerge="$( git rev-list -1 --merges HEAD )"
-    marked=""
-    [ -n "$lastMerge" ] && marked="$( git show -s --format=%B "$lastMerge" | sed -n '/^REGEN AFTER BUILD/,$p' | sed -n 's/^    //p' )"
-    if [ -z "$marked" ]; then echo "merge_main: the last merge marks nothing REGEN AFTER BUILD — nothing to re-record"; exit 0; fi
-    rrc=0
+    # The marked lists are in the merge commits' messages (written there by this script; they survive a lost
+    # terminal). Every merge on the first-parent chain since the last re-pin commit counts: a later merge with no
+    # marks must not hide an earlier merge's pending ones. Bounded walk (200 commits).
+    marked=""; markedMerges=""
+    for c in $( git rev-list --first-parent -n 200 HEAD ); do
+        subj="$( git show -s --format=%s "$c" )"
+        case "$subj" in "Re-pin binary-pinned files"*|"Re-record binary-pinned files"*) break ;; esac
+        git rev-parse -q --verify "$c^2" >/dev/null || continue
+        m="$( git show -s --format=%B "$c" | sed -n '/^REGEN AFTER BUILD/,$p' | sed -n 's/^    //p' )"
+        [ -n "$m" ] && { marked="$( printf '%s\n%s\n' "$marked" "$m" | grep . | LC_ALL=C sort -u )"; markedMerges="$markedMerges $c"; }
+    done
+    if [ -z "$marked" ]; then echo "merge_main: no merge since the last re-pin marks anything REGEN AFTER BUILD — nothing to re-record"; exit 0; fi
+    rrc=0; movedLabels=""
     if printf '%s\n' "$marked" | grep -qx 'test/printf_parity.manifest'; then
+        # labels a marked merge's two parents pinned differently (or only one pinned): the only ones a re-pin may move
+        allowed="$( for c in $markedMerges; do
+                        { git show "$c^1:test/printf_parity.manifest" 2>/dev/null; git show "$c^2:test/printf_parity.manifest" 2>/dev/null; } \
+                            | LC_ALL=C sort | uniq -u | awk '{ print $1 }'
+                    done | LC_ALL=C sort -u )"
         UPDATE_GOLDEN=1 bash test/printffmtparitycheck.sh "$RBIN" >/dev/null 2>&1 || { echo "merge_main: UPDATE_GOLDEN=1 bash test/printffmtparitycheck.sh $RBIN failed"; rrc=1; }
+        movedLabels="$( { git show HEAD:test/printf_parity.manifest 2>/dev/null; cat test/printf_parity.manifest; } | LC_ALL=C sort | uniq -u | awk '{ print $1 }' | LC_ALL=C sort -u )"
+        stray="$( printf '%s\n' "$movedLabels" | grep . | LC_ALL=C comm -23 - <( printf '%s\n' "$allowed" | grep . ) )"
+        if [ -n "$stray" ]; then
+            echo "merge_main: the re-pin moved parity label(s) both parents of the marked merge(s) pinned the same — refusing (the merged binary's output moved there; review it, then re-pin by hand with UPDATE_GOLDEN=1 and REVIEW THE DIFF):"
+            printf '%s\n' "$stray" | sed 's/^/    /'
+            rrc=1
+        fi
         bash test/printffmtparitycheck.sh "$RBIN" >/dev/null 2>&1 || { echo "merge_main: test/printffmtparitycheck.sh is red after the re-pin"; rrc=1; }
     fi
+    for oc in $( printf '%s\n' "$marked" | grep '^docs/captures/' ); do
+        [ "$oc" = "$( newestCapture )" ] || echo "merge_main: $oc keeps main's side — an older capture records an older binary; only the newest capture's legend pair is compared with BIN (showcasecapturecheck (I))"
+    done
     if printf '%s\n' "$marked" | grep -q '^docs/'; then
         cap="$( newestCapture )"
         old=""; live=""; lrc=0
@@ -115,10 +142,12 @@ for p in [ x for x in sys.stdin.read().split( "\0" ) if x ]:
     if [ "$rrc" != 0 ]; then echo "merge_main: re-record failed — nothing committed; inspect git diff (git checkout -- . drops it)"; exit 1; fi
     moved="$( git status --porcelain --untracked-files=no | sed 's/^...//' )"
     if [ -z "$moved" ]; then echo "merge_main: the marked files already match $RBIN — nothing to commit"; exit 0; fi
-    git add -u && git commit -q -m "Re-record binary-pinned files from the merged build" \
+    git add -u && git commit -q -m "Re-pin binary-pinned files from the merged build (parity labels, legend pair, COMMANDS.md)" \
         -m "scripts/merge_main.sh --regen-after-build, from: $( "$RBIN" --version 2>/dev/null | head -1 )" \
-        -m "$( printf '%s\n' "$moved" | sed 's/^/    /' )" || { echo "merge_main: git commit failed" >&2; exit 2; }
-    echo "merge_main: committed $( git rev-parse --short HEAD ): re-recorded $( printf '%s ' $moved )"
+        -m "$( printf '%s\n' "$moved" | sed 's/^/    /' )" \
+        -m "$( if [ -n "$movedLabels" ]; then printf 'parity labels re-pinned: %s' "$( printf '%s\n' $movedLabels | paste -sd' ' - )"; else printf 'parity labels re-pinned: none'; fi )" \
+        || { echo "merge_main: git commit failed" >&2; exit 2; }
+    echo "merge_main: committed $( git rev-parse --short HEAD ): re-pinned $( printf '%s ' $moved )${movedLabels:+(parity labels: $( printf '%s\n' $movedLabels | paste -sd' ' - ))}"
     exit 0
 fi
 
@@ -171,7 +200,7 @@ if [ -s "$REGEN_LOG" ]; then
     echo "merge_main: REGEN AFTER BUILD — these binary-pinned files took main's side of a conflict; build, regenerate, commit:"
     sed 's/^/    /' "$REGEN_LOG"
     grep -q 'printf_parity' "$REGEN_LOG" && echo "    UPDATE_GOLDEN=1 bash test/printffmtparitycheck.sh      # test/printf_parity.manifest"
-    grep -q 'docs/' "$REGEN_LOG"         && echo "    python3 docs/docs_commands_build.py --bin build/ripwire  # docs/COMMANDS.md and its capture (test/docscommandscheck.sh, test/showcasecapturecheck.sh)"
+    grep -q 'docs/' "$REGEN_LOG"         && echo "    python3 docs/docs_commands_build.py --bin build/ripwire  # writes docs/COMMANDS.md (test/docscommandscheck.sh); the newest capture's --legend-dict pair needs --regen-after-build (test/showcasecapturecheck.sh (I))"
     echo "    or all of it at once: scripts/merge_main.sh --regen-after-build build/ripwire   # re-records, checks, commits"
     rm -f "$REGEN_LOG"
     exit 3

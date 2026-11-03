@@ -970,12 +970,21 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
    refuses staged conflict markers and an unregistered gate file. Exit 3 lists binary-pinned files to
    regenerate after a build (including main's newer showcase capture, whose legend-dictionary `dictv=` line
    names main's binary); the list is also in the merge commit message. Build the merged tree, then run
-   `scripts/merge_main.sh --regen-after-build build/ripwire`: it re-records the marked files and commits them.
+   `scripts/merge_main.sh --regen-after-build build/ripwire`: it settles the marks of every merge since its last
+   run, re-pins only the parity labels the merge's two parents pinned differently (a label both agreed on that
+   moved is refused and listed), re-records the newest capture's `dictv=`/`entries=` pair, regenerates
+   `docs/COMMANDS.md`, and commits, naming the re-pinned labels.
    `test/mergemaincheck.sh` pins each of these. See below.
    **Totals are a dated snapshot.** The gate count, the cap inventory and the LIMITS/TUNING totals are published
-   from `docs/counts.tsv`, so a change that adds a gate or a cap leaves every total line alone and two open PRs
-   do not conflict on them (`test/gendocsmergecheck.sh`). Do not run `python3 docs/counts_snapshot.py refresh`
-   in a feature change; it is a maintainer step (a release commit, or a standalone change).
+   from `docs/counts.tsv`, each site with its date ("counts snapshot YYYY-MM-DD"), so a change that adds a gate
+   or a cap leaves every total line alone and two open PRs do not conflict on them (`test/gendocsmergecheck.sh`;
+   two caps in one file or two adjacent gate names still conflict on their own per-item lines, which
+   `merge_main.sh` settles). The staleness rule: a refresh (`python3 docs/counts_snapshot.py refresh`) rides every
+   train PR and every release commit; `gendocsmergecheck` (D) goes red when the live tree is more than 10 gates
+   or 20 caps away from the snapshot (`check --max-drift`; the bounds are `MAX_DRIFT` in
+   `docs/counts_snapshot.py`), and the PR that turns it red carries the refresh; `release.yml` refuses a tag
+   whose snapshot is not exact. A refresh touches only total lines and `docs/counts.tsv`, so it conflicts with
+   no feature PR. Otherwise leave the snapshot alone in a feature change.
 6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
 7. Keep formatting churn out of logic commits.
@@ -989,8 +998,8 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
    with `python3 scripts/changelog_assemble.py release X.Y.Z YYYY-MM-DD` (it writes the
    `## [X.Y.Z] — date` section under the `## [Unreleased]` stub and deletes the folded files; edit the
    section's opening summary in by hand after it), run `python3 docs/counts_snapshot.py refresh` (the
-   release's totals; `… check` must then pass), commit that before tagging (the release workflow
-   refuses a tag while `changelog.d/` still holds fragments), and add the release's blurb to
+   release's totals), commit that before tagging (the release workflow refuses a tag while `changelog.d/`
+   still holds fragments, or while `python3 docs/counts_snapshot.py check` fails), and add the release's blurb to
    README.md's `## Release notes` section (newest first, with a `Thanks to` line where one applies) —
    never to a `## What's new` section, which no longer exists (moved 2026-09-25; see git history if
    you are looking for it). Update the one-line **Latest: 0.6.x** pointer near the top of README.md to
@@ -1078,8 +1087,8 @@ round. Each takes minutes to check; each miss costs a review round.
 
 **The gate count is a build product** — of a dated snapshot since 2026-11-02 (`docs/counts.tsv`): the sites
 state the snapshot's number, `docs/gatecount_build.py --check` fails a site that disagrees with it and prints
-the live loop length beside it, and `python3 docs/counts_snapshot.py check` asserts snapshot == loop at a
-refresh and a release. The history below is why the number is generated at all. It is stated in `README.md`, `docs/EVALS.md` and
+the live loop length beside it, `python3 docs/counts_snapshot.py check` asserts snapshot == loop at a
+refresh and in `release.yml`, and `check --max-drift` bounds the lag on every PR (`gendocsmergecheck` (D)). The history below is why the number is generated at all. It is stated in `README.md`, `docs/EVALS.md` and
 `present/deck5_ripwire_build.js` — eight sites — and every one of them is written by
 `docs/gatecount_build.py` from the single absorb loop in `test/regression.sh`, then gated by
 `test/gatecountcheck.sh`. Hand-writing it is not a style preference. Two lanes that each add one gate
@@ -1088,14 +1097,17 @@ both write N+1, and git auto-merges that **identical** text clean in all three f
 seven times in one night on 2026-09-10. The merge recipe is therefore: **union the absorb-list lines,
 run the generator (no `--check`, so it WRITES), then `--check` it** — `scripts/merge_main.sh` does all
 three. Never hand-write the number and never trust the clean auto-merge of the three published files.
+Since 2026-11-02 the generator writes the SNAPSHOT's count, so after a union the sites do not move: a loop
+of N+2 against a snapshot of N is expected and green until the drift bound (below).
 
-WHAT CATCHES A BOTCHED RESOLUTION, measured on this tree 2026-09-13 rather than assumed, because the two
-ways to botch it are caught by *different* gates and neither is caught by both:
+WHAT CATCHES A BOTCHED RESOLUTION (re-measured 2026-11-03 for the snapshot; the two ways to botch it are
+caught by *different* gates):
 
 | botched how | the tree then has | red on |
 | --- | --- | --- |
-| loop unioned, generator not re-run | loop N+2, the eight sites N+1 | `gatecountcheck` (B), `manifestcheck`, `readmedriftcheck` (F2) — `deckclaimcheck` passes, but the deck's three sites are three of the eight `gatecountcheck` owns |
-| one side of the loop taken instead of the union | loop N+1 and self-consistent, but a gate FILE present that the loop never names | `manifestcheck` only (`gatecountcheck` passes: the count really is consistent, and the generator has nothing to say) |
+| a site hand-edited to the live loop length (or any number but the snapshot's) | a site at N+2, the snapshot N | `gatecountcheck` (B), `manifestcheck`, `readmedriftcheck` (F2): each compares the sites with `docs/counts.tsv`, never with the loop |
+| loop unioned, sites left at the snapshot | loop N+2, sites and snapshot N | nothing, by design: the totals are dated. `counts_snapshot.py check --max-drift` (in `gendocsmergecheck` (D)) goes red once the lag passes 10 gates or 20 caps, and `release.yml` refuses a tag unless `check` is exact. Do not hand-edit the sites: run `python3 docs/counts_snapshot.py refresh` |
+| one side of the loop taken instead of the union | a gate FILE present that the loop never names | `manifestcheck` only (`gatecountcheck` passes: the sites still equal the snapshot) |
 
 So the count is fail-closed **provided the full suite runs** — which is why the suite before every push
 is not negotiable. An earlier revision of this paragraph claimed the first row went green on every

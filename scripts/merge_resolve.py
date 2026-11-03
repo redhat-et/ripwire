@@ -14,10 +14,11 @@ with their markers:
   (c) GEN    in a gatecount site file only (docs/gatecount_build.py's SITES: README.md, docs/EVALS.md, the
              deck), a hunk whose every non-blank line on both sides carries a generator marker
              (`<!-- gatecount -->`, `// gatecount`) or is the README cap-inventory sentence, and whose two
-             sides differ ONLY in the number spans a generator owns (the gate count's SPELLINGS, the cap
-             sentence's two numbers), or ONE side differs from the base only in those spans (it just re-ran
+             sides differ ONLY in the spans a generator owns (the gate count's SPELLINGS, the cap
+             sentence's two numbers, the "counts snapshot YYYY-MM-DD" date), or ONE side differs from the base only in those spans (it just re-ran
              the generator) while the other also edited the prose (2026-11-02: the counts-snapshot rewording
-             met every open branch that had regenerated a count). Every other digit is compared literally, so
+             met every open branch that had regenerated a count). Every other figure is compared literally, with
+             the sign or qualifier glued to it (~210, 200+, -200, 70%), so
              a hand-written number, or prose edited on both sides, stays a conflict. The side carrying the
              prose edit is taken (the other side when neither does); a prose side that changed any non-owned number
              stays a conflict, and merge_main.sh then re-runs the
@@ -48,7 +49,7 @@ def generator_constants():
     import ast
     here = os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), '..', 'docs' )
     found = {}
-    for gen, names in ( ( 'gatecount_build.py', ( 'SITES', 'SPELLINGS' ) ), ( 'limits_build.py', ( '_pat', ) ) ):
+    for gen, names in ( ( 'gatecount_build.py', ( 'SITES', 'SPELLINGS', 'SNAPSHOT_DATE' ) ), ( 'limits_build.py', ( '_pat', ) ) ):
         try:
             tree = ast.parse( open( os.path.join( here, gen ), encoding = 'utf-8' ).read() )
         except ( OSError, SyntaxError ):                        # the generator itself is mid-conflict: use ours
@@ -60,14 +61,15 @@ def generator_constants():
             if isinstance( node, ast.Assign ) and len( node.targets ) == 1 and isinstance( node.targets[ 0 ], ast.Name ) \
                and node.targets[ 0 ].id in names and node.targets[ 0 ].id not in found:
                 found[ node.targets[ 0 ].id ] = eval( compile( ast.Expression( node.value ), gen, 'eval' ), { 're': re } )
-    missing = [ n for n in ( 'SITES', 'SPELLINGS', '_pat' ) if n not in found ]
+    missing = [ n for n in ( 'SITES', 'SPELLINGS', 'SNAPSHOT_DATE', '_pat' ) if n not in found ]
     if missing:
         sys.stderr.write( 'merge_resolve: docs/gatecount_build.py or docs/limits_build.py no longer declares %s\n' % ', '.join( missing ) )
         sys.exit( 2 )
     # limits_build's README sentence pattern captures both numbers as groups 1 and 3; mask exactly those spans
     capPat = found[ '_pat' ]
     capOwned = lambda line: capPat.sub( lambda m: '#' + m.group( 2 ) + '#' + m.group( 4 ), line )
-    spell = list( found[ 'SPELLINGS' ] )
+    # the snapshot date a marked line carries ("counts snapshot YYYY-MM-DD") is generator-owned text too
+    spell = list( found[ 'SPELLINGS' ] ) + [ found[ 'SNAPSHOT_DATE' ] ]
     return set( found[ 'SITES' ] ), lambda line: capOwned( _subAll( spell, line ) )
 
 def _subAll( pats, line ):
@@ -76,6 +78,9 @@ def _subAll( pats, line ):
     return line
 
 GEN_SITES, MASK_OWNED = None, None
+# a figure as gen_side compares it: the digits plus any sign/qualifier before (~ ≈ < > ± + - −) and after (+ % ×)
+# and inner separators, so a prose edit that keeps the digits but changes what they claim is still a change
+NUMBER = re.compile( r'[~≈<>±+\-−]*[0-9]+(?:[.,][0-9]+)*[+%×]*' )
 
 def git( *args, check = True ):
     p = subprocess.run( [ 'git' ] + list( args ), capture_output = True, text = True )
@@ -186,7 +191,9 @@ def gen_side( ours, base, theirs ):
         return theirs
     if base is None:
         return None
-    digits = lambda ls: [ re.findall( r'[0-9]+', MASK_OWNED( l ) ) for l in ls ]
+    # every non-owned figure WITH the sign or qualifier glued to it: "~210" -> "210", "200+" -> "200", "200" -> "-200",
+    # "1.5" -> "1,5" or "70%" -> "70" is a changed figure, not a rewording
+    digits = lambda ls: [ NUMBER.findall( MASK_OWNED( l ) ) for l in ls ]
     if owned_only( ours, base ) and digits( theirs ) == digits( base ):
         return theirs
     if owned_only( theirs, base ) and digits( ours ) == digits( base ):

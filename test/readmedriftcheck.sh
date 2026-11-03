@@ -1114,7 +1114,8 @@ else
     else
         # since 2026-11-02 these are the dated counts snapshot (docs/counts.tsv) when the tree has one; the
         # generator's --check line names the snapshot date and the live src/ numbers beside it
-        ok "(L1) limits_build.py publishes $l_caps caps and $l_params ranking parameters ($( printf '%s' "$l_out" | grep -oE 'counts snapshot taken [0-9-]+' | head -1 || echo 'no snapshot: live src/' ))"
+        l_src="$( printf '%s' "$l_out" | grep -oE 'counts snapshot taken [0-9-]+' | head -1 )"
+        ok "(L1) limits_build.py publishes $l_caps caps and $l_params ranking parameters (${l_src:-no snapshot: live src/})"
     fi
 
     l_stated="$( tr '\n' ' ' < "$README" | tr -s ' ' | grep -oE '[0-9]+ compile-time caps and [0-9]+ ranking parameters' | head -1 )"

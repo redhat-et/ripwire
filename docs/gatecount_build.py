@@ -59,6 +59,12 @@ SPELLINGS = (
     re.compile( r'(?<=loop in `test/regression\.sh` names )[0-9]+' ),
 )
 
+# The date a marked site gives its snapshot count ("counts snapshot 2026-11-02"). When the tree has a snapshot,
+# every marked line must carry one and this generator rewrites it to the snapshot's `taken` date, so a reader
+# always sees how old the number is and a refresh moves the date with the count. scripts/merge_resolve.py
+# reads this pattern too: the date is generator-owned text, like the count.
+SNAPSHOT_DATE = re.compile( r'(?<=counts snapshot )[0-9]{4}-[0-9]{2}-[0-9]{2}' )
+
 
 def loopCount( root ):
     """The single `for _g in NAME NAME …; do` line in test/regression.sh is the authority.
@@ -79,9 +85,10 @@ def loopCount( root ):
     return len( names )
 
 
-def rewrite_marked_sites( root, count ):
-    """Return [ ( relPath, newText, [ (line, oldValue) … ] ) … ], refusing on any unmarked claim."""
-    plans, unmarked, orphanMarkers, empty = [], [], [], []
+def rewrite_marked_sites( root, count, taken = None ):
+    """Return [ ( relPath, newText, [ (line, oldValue) … ] ) … ], refusing on any unmarked claim. With a
+    snapshot date `taken`, every marked line must also carry `counts snapshot YYYY-MM-DD`, rewritten to it."""
+    plans, unmarked, orphanMarkers, empty, undated = [], [], [], [], []
     for rel in SITES:
         path = root / rel
         if not path.is_file():
@@ -98,6 +105,10 @@ def rewrite_marked_sites( root, count ):
             if marked and hits:
                 for rx in SPELLINGS:
                     line = rx.sub( str( count ), line )
+                if taken is not None:
+                    if SNAPSHOT_DATE.search( line ) is None:
+                        undated.append( '%s:%d' % ( rel, i ) )
+                    line = SNAPSHOT_DATE.sub( taken, line )
                 seen += [ ( i, v ) for v in hits ]
             out.append( line )
         if not seen:
@@ -111,6 +122,10 @@ def rewrite_marked_sites( root, count ):
                   'claim drifted; restore the claim or drop the marker:\n  ' + '\n  '.join( orphanMarkers ) )
     if empty:
         sys.exit( 'gatecount_build: site(s) with no marked gate count at all: %s' % ', '.join( empty ) )
+    if undated:
+        sys.exit( 'gatecount_build: marked site(s) state the snapshot count without its date — add '
+                  '"counts snapshot YYYY-MM-DD" to the line (this generator keeps the date current):\n  '
+                  + '\n  '.join( undated ) )
     return plans
 
 
@@ -143,7 +158,7 @@ if ( ROOT / 'docs' / 'counts.tsv' ).exists():     # a synthetic --root tree has 
 else:
     count = live
 source = ( 'the counts snapshot taken %s (docs/counts.tsv)' % snap[ 'taken' ] ) if snap else 'the live loop'
-plans = rewrite_marked_sites( ROOT, count )
+plans = rewrite_marked_sites( ROOT, count, snap[ 'taken' ] if snap else None )
 sites = sum( len( s ) for _, _, s in plans )
 
 if a.check:
