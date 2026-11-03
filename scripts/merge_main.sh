@@ -38,7 +38,7 @@
 # nothing committed; 2 usage or precondition.
 # Exit: 0 merged and committed, nothing left; 1 stopped on real conflicts, or refused staged conflict markers,
 # an unregistered gate file, a failed generator check, or a kParserVer that does not clear both sides' bumps or
-# falls below main's bump (also in merge mode, for a clean merge); the merge is in progress: fix, `git add`, then
+# falls below one side's bump (also in merge mode, for a clean merge); the merge is in progress: fix, `git add`, then
 # --continue; 3 merged and committed, but the REGEN AFTER BUILD list must be regenerated after a build
 # (commands printed, and the list is in the merge commit message); 2 usage, precondition or resolver error.
 set -u
@@ -194,8 +194,8 @@ if [ -n "$markerHits" ]; then
 fi
 # Both sides bumped kParserVer past the merge base: the merged value must clear both, or a cache one side wrote under
 # that number reads as the other's (MERGE-PARSERVER-CHECK, 2026-11-03). Lean and rich caches are separate files
-# (src/ingest_cache.h, the note under 79), so max+1 is enough. Only main bumped: the merged value must not fall
-# below main's, or the merged build reads caches the older grammar wrote under that number. Neither: nothing to check.
+# (src/ingest_cache.h, the note under 79), so max+1 is enough. Only one side bumped: the merged value must not fall
+# below that side's, or the merged build reads caches the older grammar wrote under that number. Neither: nothing to check.
 parserVer(){ git show "$1:src/ingest_cache.h" 2>/dev/null | sed -n 's/^constexpr .*kParserVer *= *\([0-9][0-9]*\);.*$/\1/p' | head -1; }
 pvLane="$( parserVer HEAD )"; pvMain="$( parserVer MERGE_HEAD )"; pvOut="$( parserVer "" )"
 pvBaseRef="$( git merge-base HEAD MERGE_HEAD 2>/dev/null )"; pvBase=""   # (an empty ref would read the index)
@@ -207,6 +207,10 @@ if [ -n "$pvLane" ] && [ -n "$pvMain" ] && [ -n "$pvOut" ] && [ -n "$pvBase" ]; 
     fi
     if [ "$pvMain" -gt "$pvBase" ] && [ "$pvOut" -lt "$pvMain" ]; then
         echo "merge_main: main bumped kParserVer to $pvMain (merge base $pvBase), the merge has $pvOut — set it to at least $pvMain in src/ingest_cache.h, and update quality.h's kIngestParserVerMirror to match; git add both, then --continue (the merge is left uncommitted)" >&2
+        exit 1
+    fi
+    if [ "$pvLane" -gt "$pvBase" ] && [ "$pvOut" -lt "$pvLane" ]; then
+        echo "merge_main: the lane bumped kParserVer to $pvLane (merge base $pvBase), the merge has $pvOut — set it to at least $pvLane in src/ingest_cache.h, and update quality.h's kIngestParserVerMirror to match; git add both, then --continue (the merge is left uncommitted)" >&2
         exit 1
     fi
 fi

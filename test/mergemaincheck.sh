@@ -40,8 +40,9 @@
 #   (PV) MERGE-PARSERVER-CHECK: both sides bumped kParserVer past the merge base -> the merged value must clear both.
 #        Kept main's, kept the lane's: refused (exit 1, nothing committed, the message names both numbers). Twin:
 #        set to max+1 (with quality.h's mirror) commits. Only main bumped, and the resolution restored the lane's
-#        lower number: refused (exit 1, nothing committed); twin: main's number commits. One side bumped and
-#        nothing restored, either way round: merges (exit 0). Every (PV) arm branches fresh from base.
+#        lower number: refused (exit 1, nothing committed); twin: main's number commits. The mirror: only the lane
+#        bumped, and the resolution restored main's lower number: refused; twin: the lane's number commits. One
+#        side bumped and nothing restored, either way round: merges (exit 0). Every (PV) arm branches fresh from base.
 # The fixture runs the generators WITHOUT docs/counts.tsv (live totals), the shape every branch cut before the
 # counts snapshot has; test/gendocsmergecheck.sh covers merges of branches that have the snapshot.
 set -u
@@ -447,6 +448,23 @@ else
         if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse pv-main2 )" ] && [ "$( pvOf )" = "$pvMain" ]; then
             ok "(PV below main twin) the merge keeps main's $pvMain: commits (exit 0)"
         else no "(PV below main twin) rc=$rc (want 0, committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    fi
+    # the mirror: only the lane bumped, and a resolution restored main's lower number: refused; the lane's number commits
+    fresh pv-lane3 pv-lane && printf 'line one\nlane side\n' > "$R/conflict.txt" && commitAll "lane bumps and edits"
+    fresh pv-main3 base && printf 'line one\nmain side\n' > "$R/conflict.txt" && commitAll "main edits the same line"
+    fresh pv-t3 pv-lane3; head0="$( g rev-parse HEAD )"
+    mm pv-main3; rc=$?
+    if [ "$rc" != 1 ] || ! grep -q '^<<<<<<< ' "$R/conflict.txt"; then no "(PV below lane) setup: the conflict did not stop the merge (rc=$rc)"
+    else
+        printf 'line one\nlane side\nmain side\n' > "$R/conflict.txt"
+        g checkout -q pv-main3 -- src/ingest_cache.h src/quality.h; g add conflict.txt src/ingest_cache.h src/quality.h; mm --continue; rc=$?
+        if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -q "the lane bumped kParserVer to $pvLane (merge base $pv0), the merge has $pv0" "$TMP/out"; then
+            ok "(PV below lane) only the lane bumped, the merge restored $pv0: refused (exit 1, nothing committed, $pvLane named)"
+        else no "(PV below lane) rc=$rc (want 1, nothing committed, the lane's $pvLane named): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+        g checkout -q pv-lane3 -- src/ingest_cache.h src/quality.h; g add src/ingest_cache.h src/quality.h; mm --continue; rc=$?
+        if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse pv-main3 )" ] && [ "$( pvOf )" = "$pvLane" ]; then
+            ok "(PV below lane twin) the merge keeps the lane's $pvLane: commits (exit 0)"
+        else no "(PV below lane twin) rc=$rc (want 0, committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
     fi
     # one side bumped (either way round) merges clean
     for pair in "pv-lane1 pv-main" "pv-lane pv-lane1"; do
