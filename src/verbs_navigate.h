@@ -3060,6 +3060,7 @@ int emitImpactColumnar( const ImpactView& v )
                                  + rw::defsListedAttrXml( v.attrib.groups, v.defListing )         // attrib-multidef: a cut table says so
                                  + rw::byDepthAttrXml( v.byDepth )                                // 0.6.5: the XML root's, same place
                                  + " importers=\"" + std::to_string( v.imports.files.size() ) + "\""
+                                 + rw::importTierRollupAttrXml( v.imports )                      // IMPACT-ROLLUP: the XML root's, on a cut tier only
                                  + rw::importsUnresolvedAttrXml( v.imports.importsUnresolved )   // #220: the XML root's, absent at 0
                                  + rw::countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ) )
                                  + rw::noFileEdgesAttrXml( v.imports.noFileEdgeLangs )           // arch-honest: the XML root's, absent when every def's language draws edges
@@ -3110,6 +3111,17 @@ int emitImpactColumnar( const ImpactView& v )
     return 0;
 }
 
+// IMPACT-ROLLUP: the JSON twin of graph.h importTierRollupAttrXml — ,"importers_tests":N,"importers_dirs":"…" on a cut
+// tier, "" otherwise (jsonStr lives in serialize.h, which graph.h cannot include).
+inline std::string importTierRollupJson( const rw::ImportTier& t )
+{
+    if( !rw::importTierRollupShown( t ) )
+    {
+        return {};
+    }
+    return ",\"importers_tests\":" + std::to_string( t.testImporters ) + ",\"importers_dirs\":\"" + rw::jsonStr( t.topDirs ) + "\"";
+}
+
 // L2: --json — same set, keys mirror the XML attr names (of/defs/reaches/shown/capped/t/n/p).
 // §A4c: shown/capped came from a hand-rolled pair that never grew the paging half, so a JSON caller
 // walking --offset had no has_more/next_offset to terminate on. The JSON row of pageDisclosure()'s syntax
@@ -3132,6 +3144,7 @@ int emitImpactJson( const ImpactView& v )
     {
         rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( v.imports.next ).c_str() );
     }
+    rw::emitRaw( stdout, importTierRollupJson( v.imports ).c_str() );   // IMPACT-ROLLUP: the XML root's, on a cut tier only
     rw::emitTo( stdout, "{}{}{}", rw::importsUnresolvedKeyJson( v.imports.importsUnresolved ),   // #220: the XML root's, absent at 0
                  rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( v.imports.tsconfigUnread ), /*json=*/true ),
                  v.imports.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( v.imports.noFileEdgeLangs ) + "\"" : std::string() );   // arch-honest: likewise
@@ -3227,7 +3240,8 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                                      + rw::impactByTypeColumnarLegend( cfg.columnar && std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
                                                                                                 [ & ]( rw::NodeId n ) { return n < imWalk.typeOnly.size() && imWalk.typeOnly[ n ] != 0; } ) ),
                  ( std::string( cfg.columnar ? rw::kImpactImportTierColumnarLegend : rw::kImpactImportTierLegend )
-                   + rw::importersNextLegend( !imports.next.empty() && !cfg.columnar ) ).c_str(),
+                   + rw::importersNextLegend( !imports.next.empty() && !cfg.columnar )
+                   + rw::importersRollupLegend( rw::importTierRollupShown( imports ) ) ).c_str(),   // IMPACT-ROLLUP: every dialect carries it
                  ( rw::impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + rw::impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )
                    + rw::viaNameLegend( std::any_of( show.begin() + imPage.begin, show.begin() + imPage.end,
                                                      [ & ]( rw::NodeId n ) { return rw::impactRowNameOnly( imProven, n ); } ), true, cfg.columnar )
@@ -3252,6 +3266,188 @@ inline void emitImpactLegend( const rw::Config& cfg, const rw::IngestResult& ing
                  rw::graphCountDisclosure( rw::graphGaugeClauses( g ) ).c_str(), rw::renderDisclosure( prD, rw::DiscloseAs::LegendClause ).c_str() );
 }
 
+// ── IMPACT-PATH (GRAPH-SCALE flood): `--impact=<path>` ───────────────────────────────────────────────────────────────
+// The selector is a symbol, so a path matched nothing and answered found="0" with no hedge — on envoy/registry/registry.h,
+// a file 580 files include once true edges exist. When NO symbol matches and the selector names an indexed FILE, the
+// answer is that file's import tier: the files that directly include/import it, with the symbol verb's own truncation
+// vocabulary (shown_importers=/importers_capped=/importers_next=, and on a cut the importers_tests=/importers_dirs= rollup)
+// under selector="file". No call reach: a file is not a symbol (FILE:SYM names one of its symbols). A symbol match always
+// wins, so no selector that answered before answers differently. The file is matched by its root-relative path (a
+// leading ./ or the root itself stripped), else by a unique path suffix that starts at a '/'. The answer always names the
+// file it used (file=), and a suffix match says so (matched="suffix"): a selector naming a deleted or unindexed file that
+// another file's path ends with answers for that other file, visibly. Several suffix matches stay a refusal whose near=
+// is the first of them by path, with matches= counting them, so the retry pastes and the reader knows it is one of N.
+struct ImpactPathSelect
+{
+    std::uint32_t file      = rw::kNoFile;   // the one file named, kNoFile when none or several
+    std::string   firstOfMany;              // several suffix matches: the first, root-relative (the near= retry)
+    std::size_t   matches   = 0;
+    bool          suffix    = false;        // the file was found by a path suffix, not the whole path
+};
+
+inline ImpactPathSelect impactPathSelect( const rw::IngestResult& ing, std::string_view spec )
+{
+    ImpactPathSelect sel;
+    // The root's own spellings (as typed, from the cwd, absolute: graph.h selectorRootTail), so `$PWD/lib/core.h` under
+    // `ripwire .` reads as lib/core.h
+    if( const std::string_view tail = rw::selectorRootTail( ing, spec ); !tail.empty() )
+    {
+        spec = tail;
+    }
+    else if( !ing.crawlRoot.empty() && spec.size() > ing.crawlRoot.size() && spec.substr( 0, ing.crawlRoot.size() ) == ing.crawlRoot
+             && spec[ ing.crawlRoot.size() ] == '/' )
+    {
+        spec.remove_prefix( ing.crawlRoot.size() + 1 );
+    }
+    while( spec.size() > 2 && spec.substr( 0, 2 ) == "./" )
+    {
+        spec.remove_prefix( 2 );
+    }
+    if( spec.empty() || spec.back() == '/' )
+    {
+        return sel;
+    }
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view rel = rw::rootRelPath( ing, f );
+        if( rel == spec )
+        {
+            return ImpactPathSelect{ f, {}, 1, false };   // an exact path is never ambiguous
+        }
+        if( rel.size() > spec.size() && rel[ rel.size() - spec.size() - 1 ] == '/' && rel.substr( rel.size() - spec.size() ) == spec )
+        {
+            if( sel.matches++ == 0 || rel < sel.firstOfMany )
+            {
+                sel.file        = f;
+                sel.firstOfMany = std::string( rel );
+            }
+        }
+    }
+    sel.suffix = true;
+    if( sel.matches != 1 )
+    {
+        sel.file = rw::kNoFile;
+    }
+    return sel;
+}
+
+inline constexpr const char* kImpactPathLegend =
+    "<!-- ripwire impact: selector=\"file\": of= names an indexed FILE, not a symbol, so this answer is that file's import tier "
+    "alone, with no call reach (of=FILE:SYM gives one of its symbols' blast radius). file=: the indexed file this answer is "
+    "for; matched=\"suffix\": of= is not a whole indexed path, and file= is the one indexed file whose path ends with it "
+    "(of= may name a deleted or unindexed file: check file= before reading the importers as of='s). ";
+
+inline constexpr const char* kImpactPathNamingLegend =
+    "unresolved_naming=: files with an include/import whose target text is a suffix of this path and that resolved to no "
+    "indexed file (an include root or build path the index does not know); each may import this file, so importers= may be "
+    "a floor. A directive that resolved to another file whose path ends with the same text is not counted. ";
+
+// IMPACT-PATH hedge: the files with an include/import directive whose literal target is a '/'-boundary suffix of FILE's path
+// (or the whole path) yet that are NOT in its importer tier and resolved nowhere: no edge of the naming file (`adj`, the
+// tier's own deduped adjacency) lands on another file whose path ends with that target. A directive that resolved to a
+// same-named file elsewhere (a/util.h vs b/util.h) imports that file, not this one, and is not counted. A count, not a
+// claim that they import FILE; it makes importers="0" on a file the code base plainly names (Envoy's
+// envoy/registry/registry.h: 580 such files at base) read as unresolved, not unused.
+inline bool pathEndsWithSegment( std::string_view rel, std::string_view tgt ) noexcept
+{
+    return !tgt.empty()
+        && ( rel == tgt || ( rel.size() > tgt.size() && rel[ rel.size() - tgt.size() - 1 ] == '/' && rel.substr( rel.size() - tgt.size() ) == tgt ) );
+}
+
+inline std::size_t impactPathUnresolvedNaming( const rw::IngestResult& ing, std::uint32_t file, const std::vector<std::uint32_t>& importers,
+                                               const rw::FileAdjacency& adj )
+{
+    const std::string_view       rel = rw::rootRelPath( ing, file );
+    std::vector<char>            seen( ing.files.size(), 0 );
+    for( const std::uint32_t f : importers ) { if( f < seen.size() ) { seen[f] = 1; } }
+    if( file < seen.size() ) { seen[file] = 1; }
+    const auto resolvedElsewhere = [ & ]( std::uint32_t from, std::string_view tgt )
+    {
+        return from < adj.size() && std::any_of( adj[from].begin(), adj[from].end(), [ & ]( std::uint32_t to )
+                                                 { return to != file && to < ing.files.size() && pathEndsWithSegment( rw::rootRelPath( ing, to ), tgt ); } );
+    };
+    std::size_t n = 0;
+    for( const auto& inc : ing.includes )
+    {
+        if( inc.isSymbolic || inc.fileId >= seen.size() || seen[ inc.fileId ] != 0 ) { continue; }
+        std::string_view tgt = inc.target;
+        while( tgt.size() > 2 && tgt.substr( 0, 2 ) == "./" ) { tgt.remove_prefix( 2 ); }
+        if( pathEndsWithSegment( rel, tgt ) && !resolvedElsewhere( inc.fileId, tgt ) ) { seen[ inc.fileId ] = 1; ++n; }
+    }
+    return n;
+}
+
+int emitImpactPathAnswer( const rw::Config& cfg, const rw::IngestResult& ing, const ImpactPathSelect& sel, bool singleRoot, const std::string& rootPrefix,
+                          const std::string& rootAttr )
+{
+    using namespace rw;
+    rw::FileAdjacency adj;
+    ImportTier t = impactImportTierOfFiles( ing, std::vector<std::uint32_t>{ sel.file }, &adj );
+    t.umbrella   = false;   // the importers ARE the answer to a path: listed, not folded to a count
+    sizeImportTier( t, cfg.pageLimit, cfg.impactSym );
+    const auto             page    = std::span<const std::uint32_t>( t.files ).first( t.shown );
+    const auto             lazy    = std::span<const char>( t.lazy ).first( t.shown );
+    const std::string      rp      = singleRoot ? rootPrefix : std::string();
+    const std::size_t      naming  = impactPathUnresolvedNaming( ing, sel.file, t.files, adj );
+    const std::string_view usedRaw = ing.files[ sel.file ];
+    const std::string      used( rp.empty() ? usedRaw : rw::sarif::rootRelativeUri( usedRaw, rp ) );
+    if( cfg.json )
+    {
+        rw::emitTo( stdout, "{{\"of\":\"{}\",\"selector\":\"file\",\"file\":\"{}\"{},\"importers\":{},\"shown_importers\":{},\"importers_capped\":{}",
+                    jsonStr( cfg.impactSym ).c_str(), jsonStr( used ).c_str(), sel.suffix ? ",\"matched\":\"suffix\"" : "", t.files.size(), t.shown,
+                    t.capped ? "true" : "false" );
+        if( !t.next.empty() )
+        {
+            rw::emitTo( stdout, ",\"importers_next\":\"{}\"", jsonStr( t.next ).c_str() );
+        }
+        rw::emitTo( stdout, "{}{}{}{}{}", importTierRollupJson( t ), rw::countFieldOrEmpty( "unresolved_naming", naming, /*json=*/true ), rw::importsUnresolvedKeyJson( t.importsUnresolved ),
+                    rw::countFieldOrEmpty( "tsconfig_unread", std::size_t( t.tsconfigUnread ), /*json=*/true ),
+                    t.noFileEdgeLangs != 0 ? ",\"no_file_edges\":\"" + rw::noFileEdgeLangTags( t.noFileEdgeLangs ) + "\"" : std::string() );
+        if( singleRoot ) { rw::emitTo( stdout, ",\"root\":\"{}\"", jsonStr( cfg.roots[0] ).c_str() ); }
+        rw::emitRaw( stdout, ",\"import_reach\":[" );
+        rw::emitImportRowsJson( stdout, ing, page, rp, lazy );
+        rw::emitRaw( stdout, "]}\n" );
+        return 0;
+    }
+    // XML (the columnar form has no importer rows, so a path answer, which is only rows, is XML there too, as a refusal is)
+    rw::emitTo( stdout, "{}{}{}{}{}{}{}-->", kImpactPathLegend, naming != 0 ? kImpactPathNamingLegend : "", rw::kImpactImportTierLegend, rw::importersNextLegend( !t.next.empty() ),
+                rw::importersRollupLegend( rw::importTierRollupShown( t ) ), rw::impactTsImportLegend( t.importsUnresolved, t.tsconfigUnread ),
+                rw::impactNoFileEdgesLegend( t.noFileEdgeLangs != 0 ) );
+    std::vector<char> esc;
+    const std::string ofEsc( escapeXml( cfg.impactSym, esc ) );
+    const std::string fileEsc( escapeXml( used, esc ) );
+    rw::emitTo( stdout, "<impact of=\"{}\" selector=\"file\" file=\"{}\"{}{}{}{}>", ofEsc.c_str(), fileEsc.c_str(), sel.suffix ? " matched=\"suffix\"" : "",
+                t.xmlAttrs.c_str(), rw::countAttrXmlOrEmpty( "unresolved_naming", naming ), rootAttr.c_str() );
+    rw::emitImportRowsXml( stdout, ing, page, rp, lazy );
+    rw::emitRaw( stdout, "</impact>\n" );
+    return 0;
+}
+
+// IMPACT-PATH: no symbol matched `--impact=`: a selector naming one indexed file answers with its importers
+// (emitImpactPathAnswer); several files ending with it refuse with near= (the first by path) and matches=, and stderr
+// names the same retry; anything else is the shared not-found refusal (§B4.2).
+inline int impactPathOrRefuse( const rw::Config& cfg, const rw::IngestResult& ing, bool singleRoot, const std::string& rootPrefix,
+                               const std::string& rootAttr )
+{
+    const ImpactPathSelect sel = impactPathSelect( ing, cfg.impactSym );
+    if( sel.file != rw::kNoFile )
+    {
+        return emitImpactPathAnswer( cfg, ing, sel, singleRoot, rootPrefix, rootAttr );
+    }
+    if( sel.matches > 1 )
+    {
+        rw::emitTo( stderr, "ripwire: --impact path is ambiguous: {} indexed files end with '{}'; retry with one whole path, e.g. --impact={}\n",
+                    sel.matches, cfg.impactSym, sel.firstOfMany );
+        rw::NotFoundAnswer answer{ "impact", { { "of", std::string( cfg.impactSym ) } }, {}, rw::NotFoundNear{ sel.firstOfMany, false } };
+        answer.nearMatches = sel.matches;
+        rw::writeNotFoundAnswer( stdout, answer, cfg.json );
+        return 1;
+    }
+    return refuseNotFoundWithAnswer( ing, cfg, rw::NotFoundAnswer{ "impact", { { "of", std::string( cfg.impactSym ) } }, {},
+                                                                   rw::notFoundNear( ing, cfg.impactSym, notFoundGitRoot( ing, cfg ) ) },
+                                     "ripwire: --impact symbol not found: ", cfg.impactSym, "--impact=" );   // §B4.2
+}
+
 std::optional<int> runImpact( const MainDispatch& d )
 {
     using namespace rw;
@@ -3274,9 +3470,7 @@ std::optional<int> runImpact( const MainDispatch& d )
         const std::vector<NodeId> seeds          = resolveAllByNameQualified( ing, cfg.impactSym, &imUnprovenDefs );
         if( seeds.empty() )
         {
-            return refuseNotFoundWithAnswer( ing, cfg, rw::NotFoundAnswer{ "impact", { { "of", std::string( cfg.impactSym ) } }, {},
-                                                                           rw::notFoundNear( ing, cfg.impactSym, notFoundGitRoot( ing, cfg ) ) },
-                                             "ripwire: --impact symbol not found: ", cfg.impactSym, "--impact=" );   // §B4.2
+            return impactPathOrRefuse( cfg, ing, imSingleRoot, imRootPrefix, imRootAttr );   // IMPACT-PATH, else §B4.2
         }
         // 0.6.5: the SAME walk, keeping each node's hop depth — the rows' d= and the root's by_depth=.
         // L7 (typeuse.h): a TYPE seed's walk also starts from the symbols that name it; a function's walk is unchanged.

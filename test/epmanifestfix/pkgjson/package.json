@@ -1,0 +1,7 @@
+{
+  "name": "tool-pkg",
+  "main": "src/index.js",
+  "bin": {
+    "tool-cli": "bin/cli.js"
+  }
+}

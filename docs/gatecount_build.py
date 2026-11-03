@@ -24,7 +24,14 @@
 # drifted). Do not spell the literal marker inside a site file except at a real site; document it in
 # CONTRIBUTING.md, which is not a site.
 #
-# Usage: python3 docs/gatecount_build.py [--check] [--root DIR]
+# THE SNAPSHOT (2026-11-02). Since GEN-DOCS-MERGE the sites state the gate count of the dated snapshot
+# docs/counts.tsv (key gates.scripts), not the live loop: two open PRs that each add a gate then never both
+# rewrite the same eight lines, so neither goes CONFLICTING when the other lands. The loop is still parsed on
+# every run (a loop that changed shape is refused) and --check prints the live length beside the snapshot;
+# `python3 docs/counts_snapshot.py check` asserts snapshot == loop, `refresh` re-takes it. A tree with no
+# docs/counts.tsv (the synthetic trees the gates build with --root) publishes the live length, as before.
+#
+# Usage: python3 docs/gatecount_build.py [--check] [--root DIR] [--live-counts]
 #   --check rewrites nothing and exits 1 if any site has drifted (this is what the gate runs).
 #   --root retargets the whole tree. It exists so test/gatecountcheck.sh can prove this generator CAN go
 #          red on a real loop change without editing the tree it is gating — a probe copy dropped into
@@ -52,6 +59,12 @@ SPELLINGS = (
     re.compile( r'(?<=loop in `test/regression\.sh` names )[0-9]+' ),
 )
 
+# The date a marked site gives its snapshot count ("counts snapshot 2026-11-02"). When the tree has a snapshot,
+# every marked line must carry one and this generator rewrites it to the snapshot's `taken` date, so a reader
+# always sees how old the number is and a refresh moves the date with the count. scripts/merge_resolve.py
+# reads this pattern too: the date is generator-owned text, like the count.
+SNAPSHOT_DATE = re.compile( r'(?<=counts snapshot )[0-9]{4}-[0-9]{2}-[0-9]{2}' )
+
 
 def loopCount( root ):
     """The single `for _g in NAME NAME …; do` line in test/regression.sh is the authority.
@@ -66,15 +79,48 @@ def loopCount( root ):
     if len( loops ) != 1:
         sys.exit( 'gatecount_build: expected exactly ONE `for _g in …; do` loop in test/regression.sh, '
                   'found %d — the absorb loop changed shape, refusing to publish a number' % len( loops ) )
-    names = loops[ 0 ].split()
+    names = [ w for w in loops[ 0 ].split() if w != '\\' ]   # one name per line: drop the line-continuation backslashes
     if not names:
         sys.exit( 'gatecount_build: the absorb loop in test/regression.sh names 0 gates — refusing' )
     return len( names )
 
 
-def rewrite_marked_sites( root, count ):
-    """Return [ ( relPath, newText, [ (line, oldValue) … ] ) … ], refusing on any unmarked claim."""
-    plans, unmarked, orphanMarkers, empty = [], [], [], []
+def _site_line( line, count, taken, where, sink ):
+    """One line of a site file: the rewritten line, recording an unmarked claim, an orphan marker or (with a
+    snapshot date `taken`) a marked line without its date into sink[ 'unmarked' | 'orphan' | 'undated' ];
+    returns ( newLine, [ old values ] )."""
+    marked = MARKER.search( line ) is not None
+    hits = [ v for rx in SPELLINGS for v in rx.findall( line ) ]
+    if hits and not marked:
+        sink[ 'unmarked' ].append( '%s states %s and carries no marker' % ( where, '/'.join( hits ) ) )
+    elif marked and not hits:
+        sink[ 'orphan' ].append( where )
+    if not ( marked and hits ):
+        return line, []
+    for rx in SPELLINGS:
+        line = rx.sub( str( count ), line )
+    if taken is not None:
+        if SNAPSHOT_DATE.search( line ) is None:
+            sink[ 'undated' ].append( where )
+        line = SNAPSHOT_DATE.sub( taken, line )
+    return line, hits
+
+
+REFUSALS = (
+    ( 'unmarked', 'gatecount_build: HAND-WRITTEN gate count(s) found — mark the line with the marker '
+                  'comment (see CONTRIBUTING.md) so this generator owns it:\n  ' ),
+    ( 'orphan',   'gatecount_build: marker(s) on a line stating no gate count — a claim deleted is a '
+                  'claim drifted; restore the claim or drop the marker:\n  ' ),
+    ( 'empty',    'gatecount_build: site(s) with no marked gate count at all:\n  ' ),
+    ( 'undated',  'gatecount_build: marked site(s) state the snapshot count without its date — add '
+                  '"counts snapshot YYYY-MM-DD" to the line (this generator keeps the date current):\n  ' ),
+)
+
+
+def rewrite_marked_sites( root, count, taken = None ):
+    """Return [ ( relPath, newText, [ (line, oldValue) … ] ) … ], refusing on any unmarked claim. With a
+    snapshot date `taken`, every marked line must also carry `counts snapshot YYYY-MM-DD`, rewritten to it."""
+    plans, sink = [], { k: [] for k, _ in REFUSALS }
     for rel in SITES:
         path = root / rel
         if not path.is_file():
@@ -82,28 +128,15 @@ def rewrite_marked_sites( root, count ):
         lines = path.read_text( encoding = 'utf-8', errors = 'surrogateescape' ).split( '\n' )
         out, seen = [], []
         for i, line in enumerate( lines, 1 ):
-            marked = MARKER.search( line ) is not None
-            hits = [ v for rx in SPELLINGS for v in rx.findall( line ) ]
-            if hits and not marked:
-                unmarked.append( '%s:%d states %s and carries no marker' % ( rel, i, '/'.join( hits ) ) )
-            elif marked and not hits:
-                orphanMarkers.append( '%s:%d' % ( rel, i ) )
-            if marked and hits:
-                for rx in SPELLINGS:
-                    line = rx.sub( str( count ), line )
-                seen += [ ( i, v ) for v in hits ]
+            line, hits = _site_line( line, count, taken, '%s:%d' % ( rel, i ), sink )
+            seen += [ ( i, v ) for v in hits ]
             out.append( line )
         if not seen:
-            empty.append( rel )
+            sink[ 'empty' ].append( rel )
         plans.append( ( rel, '\n'.join( out ), seen ) )
-    if unmarked:
-        sys.exit( 'gatecount_build: HAND-WRITTEN gate count(s) found — mark the line with the marker '
-                  'comment (see CONTRIBUTING.md) so this generator owns it:\n  ' + '\n  '.join( unmarked ) )
-    if orphanMarkers:
-        sys.exit( 'gatecount_build: marker(s) on a line stating no gate count — a claim deleted is a '
-                  'claim drifted; restore the claim or drop the marker:\n  ' + '\n  '.join( orphanMarkers ) )
-    if empty:
-        sys.exit( 'gatecount_build: site(s) with no marked gate count at all: %s' % ', '.join( empty ) )
+    for key, msg in REFUSALS:
+        if sink[ key ]:
+            sys.exit( msg + '\n  '.join( sink[ key ] ) )
     return plans
 
 
@@ -114,6 +147,8 @@ ap.add_argument( '--root', default = None )
 # tuple, the gate's own copy, and test/manifestcheck.sh's `gateCountSites` name the same files — three
 # hand-kept copies of one list is the shape that let a site go unscanned in the first place.
 ap.add_argument( '--sites', action = 'store_true' )
+# --live-counts prints this generator's live totals as `key<TAB>value` (docs/counts_snapshot.py reads it)
+ap.add_argument( '--live-counts', action = 'store_true' )
 a = ap.parse_args()
 if a.sites:
     print( '\n'.join( SITES ) )
@@ -121,8 +156,20 @@ if a.sites:
 if a.root:
     ROOT = pathlib.Path( a.root ).resolve()
 
-count = loopCount( ROOT )
-plans = rewrite_marked_sites( ROOT, count )
+live = loopCount( ROOT )
+if a.live_counts:
+    print( 'gates.scripts\t%d' % live )
+    sys.exit( 0 )
+snap = None
+if ( ROOT / 'docs' / 'counts.tsv' ).exists():     # a synthetic --root tree has none, and no counts_snapshot.py either
+    sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
+    import counts_snapshot
+    snap = counts_snapshot.read( ROOT )
+    count = counts_snapshot.published( snap, { 'gates.scripts': live }, 'gatecount_build' )[ 'gates.scripts' ]
+else:
+    count = live
+source = ( 'the counts snapshot taken %s (docs/counts.tsv)' % snap[ 'taken' ] ) if snap else 'the live loop'
+plans = rewrite_marked_sites( ROOT, count, snap[ 'taken' ] if snap else None )
 sites = sum( len( s ) for _, _, s in plans )
 
 if a.check:
@@ -134,10 +181,10 @@ if a.check:
             # a difference this scan cannot name is still a difference — never report clean on one
             drift += named or [ '%s differs from what this generator produces' % rel ]
     if drift:
-        sys.exit( 'gatecount_build: the loop in test/regression.sh names %d, but %s — run: '
-                  'python3 docs/gatecount_build.py' % ( count, '; '.join( drift ) ) )
-    print( 'gatecount_build: %d marked site(s) in %d file(s) all state the loop in test/regression.sh '
-           'names %d' % ( sites, len( SITES ), count ) )
+        sys.exit( 'gatecount_build: %s says %d, but %s — run: '
+                  'python3 docs/gatecount_build.py' % ( source, count, '; '.join( drift ) ) )
+    print( 'gatecount_build: %d marked site(s) in %d file(s) all state %d, %s; the loop in test/regression.sh '
+           'names %d today' % ( sites, len( SITES ), count, source, live ) )
 else:
     changed = 0
     for rel, newText, _ in plans:
@@ -145,5 +192,5 @@ else:
         if path.read_text( encoding = 'utf-8', errors = 'surrogateescape' ) != newText:
             path.write_text( newText, encoding = 'utf-8', errors = 'surrogateescape' )
             changed += 1
-    print( 'gatecount_build: wrote %d to %d marked site(s) across %d file(s) (%d file(s) changed)' %
-           ( count, sites, len( SITES ), changed ) )
+    print( 'gatecount_build: wrote %d (%s) to %d marked site(s) across %d file(s) (%d file(s) changed); '
+           'the loop names %d today' % ( count, source, sites, len( SITES ), changed, live ) )

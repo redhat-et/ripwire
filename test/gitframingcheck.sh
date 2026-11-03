@@ -462,9 +462,9 @@ dot_churn=$( churn_of_fn "$TMP/for-dotFn.xml" dotFn )
     && ok "the disclosed collision is pinned: the collision merge's __C__.cpp is dropped (churn=3, not 4)" \
     || no "dotFn churn='$dot_churn', want 3 — the collision's observable moved"
 hs_dot=$( attr_of "$TMP/hotspots.xml" '__C__.cpp' churn )
-[ "$hs_dot" = 4 ] \
-    && ok "the two miners disagree there BY DESIGN: --hotspots rides the unmigrated gitCommandLines miner and still counts the collision merge's file (4)" \
-    || no "--hotspots __C__.cpp churn='$hs_dot', want 4 — the documented disagreement moved, re-derive"
+[ "$hs_dot" = 3 ] \
+    && ok "--hotspots rides the same record walk since HISTORY-WALK-HANG, so the two miners agree on the collision (3)" \
+    || no "--hotspots __C__.cpp churn='$hs_dot', want 3 — the two miners no longer share the walk, re-derive"
 
 # ── ARM 4: ownership answers with the AUTHOR, never the committer ──────────────────────────────────
 echo "arm 4: author-not-committer"

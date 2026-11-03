@@ -634,7 +634,7 @@ else
 import re, sys
 text = open( sys.argv[ 1 ] ).read()
 m = re.search( r'for _g in (.*?); do', text, re.S )
-sys.exit( 'no loop found' ) if not m else print( len( m.group( 1 ).split() ) )
+sys.exit( 'no loop found' ) if not m else print( len( [ w for w in m.group( 1 ).split() if w != chr( 92 ) ] ) )
 " "$REGRESSION" 2>/dev/null )"
     readmeGates="$( grep -oE '\*\*[0-9]+ gate scripts\*\*' "$README" | head -1 | grep -oE '[0-9]+' )"
 
@@ -646,6 +646,17 @@ sys.exit( 'no loop found' ) if not m else print( len( m.group( 1 ).split() ) )
         no "(F1) derived only $loopNames loop entries from test/regression.sh — implausibly few; the scrape has probably broken"
     else
         ok "(F1) derived $loopNames gate scripts from test/regression.sh's absorb loop"
+    fi
+    # Since 2026-11-02 README states the dated counts snapshot (docs/counts.tsv, test/lib/countsnapshot.sh),
+    # so (F2)/(F3) compare with that; the live loop length is in (F1), and counts_snapshot.py check
+    # asserts snapshot == loop at a refresh and a release.
+    . "$ROOT/test/lib/countsnapshot.sh"
+    snapGates="$( countsSnapshotValue "$ROOT" gates.scripts )"; snapRc=$?
+    if [ "$snapRc" = 0 ]; then
+        ok "(F1s) the published gate count is the counts snapshot's $snapGates (live loop: $loopNames)"
+        loopNames="$snapGates"
+    elif [ "$snapRc" = 2 ]; then
+        no "(F1s) docs/counts.tsv exists but has no readable gates.scripts / taken line"
     fi
 
     # (F2) the drift arm
@@ -1101,7 +1112,10 @@ else
     if [ -z "$l_caps" ] || [ -z "$l_params" ]; then
         no "(L1) could not parse a '(N caps, M parameters, …)' line out of limits_build.py --check — did its output change? Got: $( printf '%s' "$l_out" | head -1 )"
     else
-        ok "(L1) limits_build.py derives $l_caps caps and $l_params ranking parameters from src/"
+        # since 2026-11-02 these are the dated counts snapshot (docs/counts.tsv) when the tree has one; the
+        # generator's --check line names the snapshot date and the live src/ numbers beside it
+        l_src="$( printf '%s' "$l_out" | grep -oE 'counts snapshot taken [0-9-]+' | head -1 )"
+        ok "(L1) limits_build.py publishes $l_caps caps and $l_params ranking parameters (${l_src:-no snapshot: live src/})"
     fi
 
     l_stated="$( tr '\n' ' ' < "$README" | tr -s ' ' | grep -oE '[0-9]+ compile-time caps and [0-9]+ ranking parameters' | head -1 )"
@@ -1115,7 +1129,7 @@ else
         if [ "$l_sc" = "$l_caps" ] && [ "$l_sp" = "$l_params" ]; then
             ok "(L2) README.md states $l_sc caps and $l_sp ranking parameters, matching the generator"
         else
-            no "(L2) README.md states '$l_stated' but src/ has $l_caps caps and $l_params ranking parameters — run python3 docs/limits_build.py"
+            no "(L2) README.md states '$l_stated' but the generator publishes $l_caps caps and $l_params ranking parameters — run python3 docs/limits_build.py"
         fi
     fi
 

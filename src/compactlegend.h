@@ -393,6 +393,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero" },
     { "unmeasured_files",  "unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it" },
     { "masked_files",      "masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor)", true },
+    // DEPS-SHAPE-HONEST / RUST-MOD-DECL (serialize.h packDeps): absent-at-zero counts on <health>, so they read here (arm (S))
+    { "cyclic_files", "health cyclic_files=N: dep_files= files inside an include cycle (all cycles, not only the listed ones); absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
+    { "containment_edges", "health containment_edges=N: Rust mod x; pairs whose only directive is the declaration, out of transitive=/cycles/ccd/shape, in Ca/Ce", true, "health", MapHeaderRead::No, {}, "deps" },
     // --cochange-groups root (verbs_report.h countAttrXmlOrEmpty): a countAttrXmlOrEmpty attribute takes its row here, test/compactlegendcheck.sh (S). onTag + onKey: only that root.
     { "unknown_pairs", "unknown_pairs=N: pairs left out of groups= because surprising= is unknown for them, not 0; drop the cochange-groups flag to list them", true, "cochange", MapHeaderRead::No, {}, "cochange" },
     // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
@@ -542,6 +545,14 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // (kZoomBridgeCap); shown_symbols= is --tree's on <tree> (kTreeSymbolsPerFile). Their *_capped= siblings read in the
     // shared sub-cap clause.
     { "importers_next",    "importers_next=: the call listing every importer", true, "impact" },
+    // IMPACT-ROLLUP (graph.h importTierRollup): present-only, beside importers_capped=1
+    { "importers_tests",   "importers_tests=/importers_dirs=: over EVERY importer of a cut tier: test/bench/fixture files / the 3 dirs (2 path segments) holding most, dir:count", true, "impact" },   // also defines importers_dirs=
+    // IMPACT-PATH (verbs_navigate.h emitImpactPathAnswer): present-only, on a path selector's answer
+    { "unresolved_naming", "unresolved_naming=: files whose include/import target is a suffix of this path and resolved to no indexed file; each may import it, so importers= may be a floor", true, "impact" },
+    { "selector",          "selector=file: of= names an indexed file, not a symbol; the answer is its importers only, no call reach (of=FILE:SYM for a symbol); file= is the file answered for", true, "impact" },
+    { "matched",           "matched=suffix: of= is not a whole indexed path; file= is the one indexed file whose path ends with it", true, "impact" },
+    // IMPACT-PATH (verbs_navigate.h impactPathOrRefuse): an ambiguous path suffix's refusal, beside near=
+    { "matches",           "matches=N: N indexed files end with the path selector; near= is the first by path, one whole path answers", true, "impact" },
     // idea #6 (lane lean-trio): the reach set's per-file rollup element and the umbrella-header count, present-only
     { "importers_umbrella", "importers_umbrella=1: SYM's file is imported by half the files that import anything (and over 40); importers are a count, importers_next= lists them", true, "impact" },
     { "shown_files", "files files=/shown_files=: files the WHOLE reach set touches (rides beside a cut symbol window) / listed; rf syms= reached symbols there, d= fewest hops; files_capped=1 + files_next= when cut", true, "files", MapHeaderRead::No, {}, "impact" },
@@ -930,6 +941,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "kinds_skipped", "kinds_skipped=: kinds NOT run, so none of their rows is here and every count covers the rest; a count only they feed is absent", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "skipped_why", "skipped_why=selector (the caller chose; stale acks judged for those kinds only) | memory (see ingest_scope=) | selector,memory (both)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "memory_skipped", "memory_skipped=: beside skipped_why=selector,memory, the kinds memory skipped; kinds_next= runs exactly them", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
+    { "unread_history", "unread_history=churn-window|churn-tree|churn-blame|renames: git history a gating kind could not read (partial clone, failed blame, cut walk); rows may be missing, exit 6 if none gates", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "ingest_scope", "ingest_scope=changed-files: the full trees did not fit, so both commits' changed files answered the kinds they decide, rows as a full answer's; exit 2 if one gates, else 6", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "memory_need", "memory_need=NM: the full answer's projected need; unmeasured after a stop (memory_stop=)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
     { "also_skipped", "also_skipped=: whole-answer facts not computed (config-warnings, stale-acks, ack-healing: acks match by recorded key only)", false, "quality-delta", MapHeaderRead::No, {}, "quality-delta" },
@@ -1372,7 +1384,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "why", "why=: the measurements that crossed (rule*N fired N times; hrank=/churn= are the file's, inherited)", true, "e", MapHeaderRead::No, {}, "quality-panel" },
     // naming-calibration: src/renamemine.h writeNamingCalibrationReport (+ kNamingCalibrationLegend)
     { "probed", "probed=0: no history to mine, nothing scored (r= says why); 1 = the git walk ran", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
-    { "r", "r=: why probed=0: not-a-git-repo or probe-failed", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
+    { "r", "r=: why probed=0: not-a-git-repo, partial-clone (blobless clone, no patches) or probe-failed", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
     { "pairs", "pairs=N: labelled rename pairs that survived the join, the SAMPLE SIZE; a small one means nothing", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
     { "candidates", "candidates=N: raw substitutions mined from the patch stream before the join; FLOOR when truncated=1", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
     { "commits", "commits=N: non-merge commits walked (the walk stops at 40000)", false, "naming-calibration", MapHeaderRead::No, {}, "naming-calibration" },
@@ -1418,7 +1430,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     // quality-delta rows (src/verbs_quality.h): the row facets the purpose line does not spell, present-only.
     { "sev", "r sev=minor: a small numeric delta, counted in minor=, never gating (absent: major)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "origin", "r origin=new-symbol: a finding on NEW code (absent: preexisting-worse)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
-    { "churn", "r churn=self|ambient: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
+    { "churn", "r churn=self|ambient|unknown: the edit modifies lines committed inside the churn window (self) or only adds/touches older ones (ambient); unknown: the blame failed (unread_history=); informational", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "idiom", "r idiom=: the recognized clone-body shape of a duplication row", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     { "defect", "r defect=: a defect-shape row's shape: format-arity (gates, any origin) or utf8-cut / dedup-first / vacuous-assert (always sev=minor)", true, "r", MapHeaderRead::No, {}, "quality-delta" },
     // --expand's bundle (src/main.cpp runDefaultMap): the ride-along note and the map it carries inside the <ctx>.
@@ -1613,7 +1625,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "dep_files", "health dep_files=N: dependency-capable files (dep_langs=), the ccd/acd/nccd denominator", true, "health", MapHeaderRead::No, {}, "deps" },
     { "dep_langs", "health dep_langs=: the languages dep_files= counts; compare its numbers across builds only when equal", true, "health", MapHeaderRead::No, {}, "deps" },
     { "ccd", "ccd=/acd=/nccd=: Lakos: sum of per-file transitive cones (self incl) / per file / over a balanced tree's", true, "health", MapHeaderRead::No, {}, "deps" },   // also defines acd= nccd=
-    { "shape", "health shape=: the nccd= verdict: horizontal below 1, vertical 1 to 2, tangled above 2 (a heuristic)", true, "health", MapHeaderRead::No, {}, "deps" },
+    { "shape", "health shape=: tangled when cyclic_files= is 1 in 20 of dep_files= or more, else nccd= below 1 horizontal, from 1 vertical (a heuristic)", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "health lazy_edges=N: in-closure (lazy) include pairs kept OUT of cones, cycles and ccd; absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "f lazy_edges=N: this file's lazy pairs; still in its inc rows, out of afferent=/instab=/transitive=", true, "f", MapHeaderRead::No, {}, "deps" },
     { "size", "cycle size=/cost=: files in that include cycle / size squared, the cycle's share of ccd=", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cost=

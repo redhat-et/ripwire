@@ -12,27 +12,32 @@ env var — production keeps its `constexpr` and is never patched — then runni
 invocations at the default value and at a probe value. The tunable binary is byte-identical
 to production at defaults; that control is what makes these numbers mean anything.
 
+**The census is a dated snapshot.** The first two columns below and the paragraph after them are
+the counts snapshot taken 2026-11-03 (`docs/counts.tsv`), so two open changes that each add a cap do not
+both rewrite them; the per-cap tables are re-read from `src/` on every run.
+`python3 docs/counts_snapshot.py show` prints today's numbers beside these.
+
 | cap declarations | distinct names | tunable | must stay `constexpr` | move >= 1 invocation | move nothing measurable |
 | --- | --- | --- | --- | --- | --- |
-| 248 | 247 | 112 | 12 | **37** | 75 |
+| 258 | 257 | 112 | 12 | **37** | 75 |
 
-The first two columns are not the same number, and the gap is not a rounding: `src/` holds **248 cap
-declarations** under **247 distinct names** (`kRowCap` declared in more than one file). The sweep
+The first two columns are not the same number, and the gap is not a rounding: `src/` holds **258 cap
+declarations** under **257 distinct names** (`kRowCap` declared in more than one file). The sweep
 patches by NAME, so its own population is NAMES and not declarations — and the two columns beside
 those are frozen at the commit named under Provenance while this census is re-read from `src/` on
-every run, which makes them a third population again. Enumerated over the 247 names `src/` declares
-today: **111 tunable**, **12 must stay `constexpr`**, and **124 declared since the sweep was
+every run, which makes them a third population again. Enumerated over the 257 names `src/` declares
+today: **111 tunable**, **12 must stay `constexpr`**, and **134 declared since the sweep was
 prepared, which no measurement has touched** (`kAliasPeelDepth`, `kBackHopWidth`,
-`kBaseScopeScanCap`, `kBridgeMaxHops`, `kCallSitesPerRowCap`, `kCallersBandMaxBytes`, +118 more).
-111 + 12 + 124 = 247, and `emit` refuses to render a partition that does not add up. The `tunable`
+`kBaseScopeScanCap`, `kBridgeMaxHops`, `kCallSitesPerRowCap`, `kCallersBandMaxBytes`, +128 more).
+111 + 12 + 134 = 257, and `emit` refuses to render a partition that does not add up. The `tunable`
 column above reads 112 rather than 111 because one name the sweep classified is no longer declared
-in `src/` at all: `kSituTestRowsShown`. Quoting "113 of 248" would be wrong in both halves at once,
+in `src/` at all: `kSituTestRowsShown`. Quoting "113 of 258" would be wrong in both halves at once,
 which is the shape of error a generated table exists to prevent.
 
 ## Read this ratio before the tables
 
 **37 of 112 tunable caps move any invocation at all. 75 move nothing measurable.** That is the
-finding, and it says what NOT to do: this is not a 248-cap audit. Most of these constants are
+finding, and it says what NOT to do: this is not a 258-cap audit. Most of these constants are
 inert on real invocations and should be left alone. The work worth doing is the small set below,
 plus the caps that fire SILENTLY — a cap that bites without disclosing is a defect independent of
 whether its value is right, and that fix is both cheaper and larger than any retuning.
