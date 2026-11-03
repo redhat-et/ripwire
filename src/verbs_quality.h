@@ -911,8 +911,9 @@ inline constexpr const char* kQdLegendCore =
 // excluded something, because on a repo with no such macro the roster explains an empty set.
 inline constexpr const char* kQdRegisterMacroLegend =
     "The registered families are doctest/Catch2 TEST_CASE, GoogleTest TEST/TEST_F/TEST_P, Google Benchmark "
-    "BENCHMARK, plus any name a .ripwire_config register_macros= line adds; each registers itself through a "
-    "static initializer the call graph cannot see, so zero in-edges on one is not evidence of anything. ";
+    "BENCHMARK, plus any name a .ripwire_config register_macros= line adds, and Rust #[test] / #[tokio::test] "
+    "functions; each registers itself through a static initializer or the test harness, which the call graph cannot "
+    "see, so zero in-edges on one is not evidence of anything. ";
 
 // F-13 (audit 2026-09-02) — printed only when .ripwire_config itself has something wrong with it, which
 // used to be a silent no-op: a typo'd key was skipped with no trace, and a register_macros= name that
@@ -3122,8 +3123,9 @@ std::optional<int> runQualityViews( const MainDispatch& d )
                      "(test/x/src/y.cpp included); anchor with ./ (filter=\"./src\") to pin the root-level directory only. "
                      "register-macro-excluded= counts symbols excluded because their OWN definition is a registered "
                      "self-registering test/benchmark macro call (doctest/Catch2 TEST_CASE family, GoogleTest TEST/TEST_F/TEST_P, "
-                     "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds): such a "
-                     "symbol registers itself through a static initializer the call graph cannot see, so zero in-edges on it is "
+                     "Google Benchmark BENCHMARK family, plus any name a .ripwire_config register_macros= line adds), or a Rust "
+                     "#[test] or #[tokio::test] function: such a symbol registers itself through a static initializer or the test "
+                     "harness, which the call graph cannot see, so zero in-edges on it is "
                      "not evidence of anything — never a finding, never gating, absent nothing (0 is printed, not omitted). "
                      "config-warnings= counts two DISCLOSED .ripwire_config problems, each also written to stderr — an "
                      "unrecognized key, and a register_macros= name matching no indexed symbol — never gating, present "
