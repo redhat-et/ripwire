@@ -747,6 +747,10 @@ for fn in sorted( os.listdir( src ) ):
             # emitter statement carries a format directive or a live concatenation on that same tag line
             if "%" not in stmt and "+" not in stmt and "write(" not in stmt: continue
             if pat == r'"<community id=' and "partition=" not in stmt: continue
+            # IMPACT-PATH: --impact=<path>'s root (selector="file") lists a file's IMPORTERS off the include adjacency, not a
+            # CSR count; the call-graph floor sentence (dispatch, callbacks, macros) does not describe it, and its own
+            # floors ride as unresolved_naming=/imports_unresolved=/no_file_edges= (impactimportcheck #11)
+            if pat == r'"<impact of=' and 'selector=\\"file\\"' in stmt: continue
             found[ pat ] += 1
             stmt = window
             # the constant by name, or its exact literal spelling (situ.h's test-gate root writes the literal)
