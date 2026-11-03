@@ -1928,6 +1928,7 @@ struct ForAutoBodiesResult
     // body text (T3 <bodies>: charged at the body rate, which is why the sum splits by kind at all).
     std::size_t        markupBytes = 0;
     std::size_t        bodyTokens  = 0;
+    std::vector<rw::NodeId> emitted;        // the bodies the section printed (EmittedBodies.kept): LIT-SITE-DECOY anchors on them (CR 4460661596)
 };
 
 // ── ANCHOR-ONLY: the allowance serves the anchor's OWN body, or none (docs/EVALS.md, T3 substitution round) ──
@@ -2203,6 +2204,10 @@ ForAutoBodiesResult buildForAutoBodies( const rw::Config& cfg, const rw::IngestR
     else
     {
         out.attr = " bundle=\"auto\" bodies=\"" + std::to_string( autoEmitted.kept.size() ) + "\"";
+        for( const rw::EmittedBody& b : autoEmitted.kept )
+        {
+            out.emitted.push_back( b.id );
+        }
     }
     return out;
 }
@@ -3836,6 +3841,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         // §F1's graph block, rendered HERE (before <sigs>) rather than beside the bodies: it reads only lensRank, so the
         // bytes are the same wherever it renders. Emission order is unchanged (detail, then graph).
         rw::ChargedSection graphSection, detailSection;
+        rw::EmittedBodies  detailEmitted;   // the --detail bodies printed (LIT-SITE-DECOY anchors on them)
         if( cfg.withGraph )
         {
             graphSection = rw::chargeSection( [ & ]( std::FILE* f ) { packGraphBlock( f, ing, lensRank, g.outOff, g.outTargets ); },
@@ -4182,7 +4188,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             detailSection = rw::chargeSection( [ & ]( std::FILE* f )
                 { packBodies( f, ing, detailIds, detailBodyBudget, g.outOff, g.outTargets, rw::withAnchorEdge( rw::CalleeEdgeBytes( g.outNameOnly, &g.outProv, nullptr ), &g.outAnchorMiss ), cfg.compress, redactPtr,
-                              /*ranges=*/nullptr, notesPtr, /*outEmitted=*/nullptr, /*truncateOversizedFirst=*/true,
+                              /*ranges=*/nullptr, notesPtr, &detailEmitted, /*truncateOversizedFirst=*/true,
                               /*withFileContext=*/false, flRootArg, &lensRank, rw::CalleeLegendsInHead( headerParts.viaPresent, headerParts.splitPresent ) ); },   // L3: --detail bodies surface notes too (part of the --for bundle)
                 rw::kBytesPerTokenBody );
             if( !detailSection.isRendered )
@@ -4752,6 +4758,11 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::vector<rw::NodeId> litAnswerIds = shownSigIds;   // LIT-SITE-DECOY: the answer's rows and whole bodies order the literal's sites
         const std::vector<rw::NodeId> servedWhole = servedAnswerBodies().bodies;
         litAnswerIds.insert( litAnswerIds.end(), servedWhole.begin(), servedWhole.end() );
+        for( const rw::EmittedBody& b : detailEmitted.kept )   // the --detail bodies printed (CR 4460661596): a printed body anchors, a row or not
+        {
+            litAnswerIds.push_back( b.id );
+        }
+        litAnswerIds.insert( litAnswerIds.end(), enrich.emitted.begin(), enrich.emitted.end() );   // the auto <bodies> printed
         appendLiteralAnchorBlock( d, flRootArg, detailSection.xml + autoSection.xml + slot.xml + fold.xml + callerHop.xml + dispatchHop.xml, litAnswerIds );   // MF1-LIT: "" unless the task names a literal with a site (dispatchHop: train 42b, its single-candidate <b>)
         if( peerManifestRegime )   // STRING-IMPORT (fordottedstring.h): after the ordinary answer, outside est_tokens; "" unless a dotted string names a shown row
         {

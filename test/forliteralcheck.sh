@@ -49,10 +49,13 @@
 #   T1-T22 (lane TABLE-CONST V2; RED on base b8c31789 where [P], fixture built at runtime): shape="table", the last try: a registration, table, compile-time or
 #          add-a-new word, or default/handler when a table row exists, reaches the sites of the identifier the task names; near misses keep the answer byte-identical
 #   N1 [train 42b T-3] an <x> excerpt line over 200 bytes is cut on a UTF-8 boundary with cut="1" (a 48.9 KB minified body); twin: none
-#   D1-D7 (lane LIT-SITE-DECOY; RED on base 6bae81c6 where [P], fixture built at runtime): sites ordered by nearness to the answer (its rows and bodies,
+#   D1-D8 (lane LIT-SITE-DECOY; RED on base 6bae81c6 where [P], fixture built at runtime): sites ordered by nearness to the answer (its rows and bodies,
 #          the literal's source definitions: file, directory, one call); capped blocks cut the far sites and far tables (lit_cut=, legend, next=);
-#          an uncapped block is only reordered (D5b); a static/ copy is no row beside product sites; twins: a static-only literal, an uncapped
-#          block's rows, an unanchored single-table block, a cut that moved no row (D8: no lit_cut)
+#          an uncapped block is only reordered (D5b; D4c: a minified copy listed last, not cut); an authored static/ file is a row (D4); twins: a
+#          static-only literal, an uncapped block's rows, an unanchored single-table block, a cut that moved no row (D8: no lit_cut)
+#   D9-D14 (fix round 1; RED on 8c7cf2011 where [P]): a Dir-near map cuts no table (D9); the home table counts table rows, then a #define list
+#          (D10, D7 with the home file sorting last); a far registration keeps its reserve slot (D11); one-call nearness kept, its twin cut (D12);
+#          the answer's reader rows anchor nothing on a body match (D13); a hub (fan-in > 16) lends no one-call nearness (D14)
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
@@ -1464,7 +1467,7 @@ else no "T42 unread anchor counted twice: $( grep -o '<lit[_a-z]* [^>]*>' <<<"$Q
 # ── D (lane LIT-SITE-DECOY; [P] RED on base 6bae81c6, fixture built at runtime): the sites are ordered by nearness to the answer above the block
 # (its rows and bodies, and the literal's own source definitions: same file, same directory, one call away) and, when they do not all fit, the far
 # ones are cut with a disclosed count (lit_cut=) and next= lists every site; a CI, vendored or generated copy is no row beside a product site. ──
-DF="$TMP/dfix"; mkdir -p "$DF/src/core" "$DF/src/fuzz/gen" "$DF/aaa/scripts" "$DF/zzz/far" "$DF/zzz/t1" "$DF/src/home" "$DF/static/js" "$DF/tests"
+DF="$TMP/dfix"; mkdir -p "$DF/src/core" "$DF/src/fuzz/gen" "$DF/aaa/scripts" "$DF/zzz/far" "$DF/src/t1" "$DF/zzz/home" "$DF/static/js" "$DF/tests" "$DF/web/min"
 cat > "$DF/src/core/settings.cpp" <<'CC'
 #define COMMON_SETTINGS(DECLARE) \
     DECLARE(SlotCount, worker_slots, 0, "the worker slots") \
@@ -1519,16 +1522,19 @@ cat > "$DF/tests/knobs_test.cpp" <<'CC'
 int far_knob() { return 1; }
 int home_knob() { return 1; }
 CC
-cat > "$DF/zzz/t1/aux.cpp" <<'CC'
+cat > "$DF/src/t1/aux.cpp" <<'CC'
 static std::unordered_map<std::string, int> auxKnobs = {
     {"home_knob", 1},
     {"aux_knob", 2},
 };
 CC
-cat > "$DF/src/home/knobs.cpp" <<'CC'
+cat > "$DF/zzz/home/knobs.cpp" <<'CC'
 static std::unordered_map<std::string, int> homeKnobs = {
     {"home_knob", 1},
     {"main_knob", 2},
+};
+static std::unordered_map<std::string, int> homeKnobsV2 = {
+    {"home_knob", 3},
 };
 int readHomeA() { return getSetting("home_knob"); }
 int readHomeB() { return getSetting("home_knob") + 1; }
@@ -1537,6 +1543,12 @@ CC
 cat > "$DF/static/js/pool.js" <<'JS'
 function vendoredPool() { return config("ONLY_STATIC_KEY") + config("queue_depth"); }
 JS
+cat > "$DF/src/core/copy_settings.cpp" <<'CC'
+#define COPY_SETTINGS(DECLARE) \
+    DECLARE(Int, copy_knob, 3, "the copy knob")
+CC
+printf 'int copy_knob() { return 3; }\n' > "$DF/src/core/copy.h"
+printf 'function copiedPool() { return config("copy_knob"); }\n' > "$DF/web/min/pool.js"   # a minified copy (vendor/ is pruned from the crawl)
 dq(){ ( cd "$DF" || exit 1; "$BIN" "$DF" --no-cache "--for=$1" </dev/null 2>/dev/null ); }
 rows(){ grep -o '<ls p="[^"]*" l="[0-9]*"' | sed 's/<ls p="//; s/" l="/:/; s/"$//'; }
 
@@ -1559,10 +1571,14 @@ if [ "$nleg" = "1" ] && has "$L" 'next="--grep=worker_slots"' && has "$G" 'src/f
 else no "D3 next line: legend x$nleg; grep ${#G} B"; fi
 if has "$FL" 'lit_cut=N (printed when the cut moved a row): N read sites not rows' && ! has "$FL" 'lit_cut=N sites not rows'; then ok "D3b [P] --legend=full carries the long lit_cut clause, not the compact one"
 else no "D3b full legend: $( grep -o '<!-- ripwire for lit: [a-z ]*' <<<"$FL" | tr '\n' '|' )"; fi
-# D4 [P] a vendored/generated copy (static/) is no row beside a product site, even when every site fits
+# D4 [P] an authored static/ file (Django's admin JS) is product code, not a copy: every site fits, so nothing is cut and its row stays (rv F6)
 Q="$( lits <<<"$( dq 'queue_depth default' )" )"
-if has "$Q" 's="queue_depth" shape="table"' && ! has "$Q" 'static/js/pool.js' && has "$Q" 'lit_cut="1"'; then ok "D4 [P] the static/ copy is cut beside the product sites (lit_cut=1)"
-else no "D4 vendored copy: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | tr '\n' ' ' )"; fi
+if has "$Q" 's="queue_depth" shape="table"' && has "$Q" '<ls p="static/js/pool.js"' && ! has "$Q" 'lit_cut='; then ok "D4 [P] uncapped: the authored static/ row stays, nothing cut"
+else no "D4 static row: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | tr '\n' ' ' )"; fi
+# D4c [P] an uncapped block is only reordered: a minified copy (min/) stays a row, listed after the product rows, no lit_cut (rv F6, CR 4460661562)
+Q="$( lits <<<"$( dq 'copy_knob default' )" )"
+if [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "src/core/copy_settings.cpp:2 src/core/copy.h:1 web/min/pool.js:1 " ] && ! has "$Q" 'lit_cut='; then ok "D4c [P] uncapped: the minified copy is listed last, not cut"
+else no "D4c vendored uncapped: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | tr '\n' ' ' )"; fi
 # D4b [G] twin: a literal met only in the static/ copy keeps its row (no product site to prefer)
 Q="$( lits <<<"$( dq 'ONLY_STATIC_KEY' )" )"
 if has "$Q" '<ls p="static/js/pool.js"' && ! has "$Q" 'lit_cut='; then ok "D4b [G] a literal only in static/ keeps its row, nothing cut"; else no "D4b static-only: ${Q:0:300}"; fi
@@ -1586,10 +1602,69 @@ want="$( { echo src/core/knobtable.cpp:2; for i in $( seq 1 31 ); do echo "src/c
 if has "$Q" 'shown="32" capped="1"' && ! has "$Q" 'lit_cut=' && ! has "$A8" 'sites not rows' && [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "$want" ]; then
     ok "D8 [G] a cut that moved no row is not said: the old 32 rows, no lit_cut, no cut legend"
 else no "D8 silent cut: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -3 | tr '\n' ' ' )"; fi
-# D7 [P] several tables, none near the answer, sites over the rows: the home table (the file holding most of the literal's sites) stays, the other table's row is cut
+# D7 [P] several tables, none near the answer, sites over the rows: the home table (the file holding the most TABLE rows of the literal) stays, the
+# other table's row is cut; the home file sorts LAST in path order (zzz/home vs src/t1), so "first table in scan order" fails here (rv F5 mutant 2)
 Q="$( lits <<<"$( dq 'home_knob default' )" )"
-if has "$Q" '<ls p="src/home/knobs.cpp" l="2"' && ! has "$Q" '<ls p="zzz/t1/aux.cpp"' && has "$Q" 'lit_cut="1"'; then ok "D7 [P] two tables, none near: the home table file stays, the other table row is cut (lit_cut=1)"
+if has "$Q" '<ls p="zzz/home/knobs.cpp" l="2"' && has "$Q" '<ls p="zzz/home/knobs.cpp" l="6"' && ! has "$Q" '<ls p="src/t1/aux.cpp"' && has "$Q" 'lit_cut="1"'; then ok "D7 [P] two tables, none near: the home table file (2 table rows, sorts last) stays, the other table row is cut (lit_cut=1)"
 else no "D7 home table: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
+
+# ── D9-D15 (fix round 1, rv-lit-site F1-F5 + CR; [P] RED on 8c7cf2011, fixtures built at runtime, one directory each) ──
+EX="$TMP/dfx"; mkdir -p "$EX"
+ex(){ ( cd "$EX/$1" || exit 1; "$BIN" "$EX/$1" --no-cache "--for=$2" </dev/null 2>/dev/null ); }
+farreaders(){ for i in $( seq 1 40 ); do printf "int far_reader_%s() { return getSetting(\"%s\"); }\n" "$i" "$1"; done; }
+# D9 [P] (rv F1) a lookup map in the answer's directory does not cut the declaration table: knob_x's DECLARE row (the default 4) stays a row
+mkdir -p "$EX/d9/src/core" "$EX/d9/src/storage" "$EX/d9/zzz/far"
+printf '#define COMMON_SETTINGS(DECLARE) \\\n    DECLARE(UInt64, knob_x, 4, "the knob x default") \\\n    DECLARE(UInt64, other_x, 1, "other")\n' > "$EX/d9/src/core/settings.cpp"
+printf 'int StorageReader::readKnob(const Context& ctx) {\n    return ctx.getSetting("knob_x");\n}\nint knob_x(const Context& ctx) { return 0; }\n' > "$EX/d9/src/storage/StorageReader.cpp"
+printf 'static std::unordered_map<std::string, int> storageOverrides = {\n    {"knob_x", 1},\n    {"other_y", 2},\n};\n' > "$EX/d9/src/storage/overrides.cpp"
+farreaders knob_x > "$EX/d9/zzz/far/readers.cpp"
+Q="$( lits <<<"$( ex d9 'knob_x default' )" )"
+if has "$Q" '<ls p="src/core/settings.cpp" l="2"' && has "$Q" '<ls p="src/storage/overrides.cpp" l="2"' && ! has "$Q" 'zzz/far/readers.cpp'; then ok "D9 [P] a Dir-near map cuts no table: the DECLARE row and the overrides map both stay, the far readers are cut"
+else no "D9 declaration table: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -5 | tr '\n' ' ' )"; fi
+# D10 [P] (rv F2) the home table counts table rows, not every site: the alias-map file with three readers does not beat the declaration (a tie on
+# rows: the #define list wins); the declaration row stays and the alias row is the one cut
+mkdir -p "$EX/d10/src/core" "$EX/d10/src/engine" "$EX/d10/zzz/far"
+printf '#define COMMON_SETTINGS(DECLARE) \\\n    DECLARE(UInt64, knob_y, 4, "the knob y default") \\\n    DECLARE(UInt64, other_y, 1, "other")\n' > "$EX/d10/src/core/settings.cpp"
+printf 'static std::unordered_map<std::string, int> legacyAliases = {\n    {"knob_y", 7},\n    {"old_y", 2},\n};\nint engineA() { return getSetting("knob_y"); }\nint engineB() { return getSetting("knob_y") + 1; }\nint engineC() { return getSetting("knob_y") + 2; }\n' > "$EX/d10/src/engine/impl.cpp"
+farreaders knob_y > "$EX/d10/zzz/far/readers.cpp"
+Q="$( lits <<<"$( ex d10 'where is the `knob_y` default' )" )"
+if has "$Q" '<ls p="src/core/settings.cpp" l="2"' && ! has "$Q" '<ls p="src/engine/impl.cpp" l="2"' && has "$Q" 'lit_cut="1"'; then ok "D10 [P] the busy alias-map file loses the home pick: the DECLARE row stays, the alias row is cut (lit_cut=1)"
+else no "D10 home by table rows: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
+# D11 [P] (rv F3, MUST-FIX) a far registration keeps its reserve slot: register_default("feature.cache.enabled", True) is a row; lit_cut counts job readers only
+mkdir -p "$EX/d11/src/config" "$EX/d11/src/jobs" "$EX/d11/src/ui"
+printf 'register_default("feature.cache.enabled", True)\nregister_default("feature.cache.size", 128)\n' > "$EX/d11/src/config/registry.py"
+printf 'class Toggle:\n    def enabled(self, cfg):\n        return cfg.get("feature.cache.enabled")\n' > "$EX/d11/src/ui/toggle.py"
+for i in $( seq 1 70 ); do printf 'hooks.append(cfg.get("feature.cache.enabled"))\n' > "$EX/d11/src/jobs/job$i.py"; done
+Q="$( lits <<<"$( ex d11 'what does feature.cache.enabled default to' )" )"
+if has "$Q" '<ls p="src/config/registry.py" l="1"' && has "$Q" 'lit_cut="69"'; then ok "D11 [P] the far registration is a row (the reserve holds it); lit_cut=69 counts job readers only"
+else no "D11 registration: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
+# D12 [P]+[G] (rv F5 mutant 1, CR review nitpick) one call away: useMode calls the answer's widgetMode from another directory and is kept; its twin
+# noCall (no call) and the far readers are cut
+mkdir -p "$EX/d12/src/widget" "$EX/d12/lib/b" "$EX/d12/lib/c" "$EX/d12/zzz/far"
+printf 'int widgetMode() { return 2; }\n' > "$EX/d12/src/widget/mode.cpp"
+printf 'int useMode() { return widgetMode() + getSetting("widget.mode"); }\n' > "$EX/d12/lib/b/caller.cpp"
+printf 'int noCall() { return getSetting("widget.mode"); }\n' > "$EX/d12/lib/c/twin.cpp"
+farreaders widget.mode > "$EX/d12/zzz/far/readers.cpp"
+Q="$( lits <<<"$( ex d12 'widgetMode and the widget.mode setting' )" )"
+if [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "lib/b/caller.cpp:1 " ] && has "$Q" 'lit_cut="41"'; then ok "D12 [P] the one-call caller is kept, its no-call twin and the far readers are cut (lit_cut=41)"
+else no "D12 one call: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
+# D13 [P] (rv F4) a body-match answer (its rows are the literal's own readers) lends no nearness: the readers are not all "near", the registration stays
+mkdir -p "$EX/d13/src/config" "$EX/d13/src/jobs"
+printf 'register_default("svc.retry.timeout", 30)\n' > "$EX/d13/src/config/registry.py"
+mkdir -p "$EX/d13/src/net"; printf 'class Socket:\n    def timeout(self):\n        return 5\n    def apply(self, cfg):\n        return cfg.get("svc.retry.timeout")\n' > "$EX/d13/src/net/socket.py"
+for i in $( seq 1 40 ); do printf 'def job_%s(cfg):\n    return cfg.get("svc.retry.timeout")\n' "$i" > "$EX/d13/src/jobs/job$i.py"; done
+Q="$( lits <<<"$( ex d13 'what does svc.retry.timeout default to' )" )"
+if has "$Q" '<ls p="src/config/registry.py" l="1"' && ! has "$Q" '<ls p="src/jobs/' && has "$Q" 'lit_cut="40"'; then ok "D13 [P] the job_N reader rows anchor nothing: the job readers are far and cut (lit_cut=40), the registration is listed"
+else no "D13 self-referential: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
+# D14 [P] (rv F4) a hub is not one call from its callers: getSetting (fan-in 40 > kLitHubFanIn 16) is the answer's row, its 40 far callers are cut;
+# the default beside it (same directory) stays
+mkdir -p "$EX/d14/src/cfg" "$EX/d14/zzz/far"
+printf 'int getSetting(const char* k) { return k[0]; }\n' > "$EX/d14/src/cfg/get.cpp"
+printf 'int hubDefault() { return lookup("hub.knob"); }\n' > "$EX/d14/src/cfg/defaults.cpp"
+farreaders hub.knob > "$EX/d14/zzz/far/readers.cpp"
+Q="$( lits <<<"$( ex d14 'getSetting and the hub.knob setting' )" )"
+if [ "$( rows <<<"$Q" | tr '\n' ' ' )" = "src/cfg/defaults.cpp:1 " ] && has "$Q" 'lit_cut="40"'; then ok "D14 [P] a hub anchor lends no one-call nearness: its 40 callers are cut, the Dir-near default stays"
+else no "D14 hub: $( grep -o '<lit [^>]*>' <<<"$Q" ) $( rows <<<"$Q" | head -4 | tr '\n' ' ' )"; fi
 
 [ "$fail" -eq 0 ] && echo "forliteralcheck: OK" || echo "forliteralcheck: FAILED"
 exit "$fail"
