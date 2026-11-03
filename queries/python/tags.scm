@@ -93,3 +93,13 @@
 (import_from_statement name: (aliased_import
   name: (dotted_name) @import.names
   alias: (identifier) @import.alias))
+
+; #448 route registration — `@app.VERB('/path')` / `@app.route('/path', methods=[…])` directly above a
+; function definition. The C++ arm reuses the old walk's body: the verb table, the `methods=` keyword
+; and the leading-'/' rule.
+(decorator
+  (call
+    function: (attribute
+      attribute: (identifier))
+    arguments: (argument_list
+      . (string)))) @route.def

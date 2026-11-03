@@ -371,13 +371,11 @@ constexpr std::uint32_t kCacheVersion = 50;           // 50: lane clones-persist
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 301;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 302;          // bump on any grammar/.scm/extraction change
                                                       // 301 = 2026-11-04 (#478 gap 2, PLACEHOLDER: the train renumbers; above main's 299/300, rich file tag 302;
                                                       //   test/pyimportprecisecheck.sh): `import a.b as c` records the Include target `a.b`, not the aliased_import span
-                                                      //   `a.b as c` no resolver could find. kCacheVersion stays 48: no record changes shape.
-                                                      // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
-                                                      //   so the merged value goes above both. Rich file tag 300. kCacheVersion stays 48.
-                                                      // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage
+                                                      //   `a.b as c` no resolver could find. kCacheVersion stays 48: no record changes shape.                                                      // 299 = 2026-11-03 (lane index-alias-const main merge): both sides bumped (lane 293/294, main 297/298 after #515),
+                                                      //   so the merged value goes above both. Rich file tag 300. kCacheVersion stays 48.                                                      // 297 = 2026-11-03 (lane edge-prelude-veto fix): a Rust `macro_rules!` without #[macro_export] sets RawDef::internalLinkage
                                                       //   (textual scope, graph.h rustMacroScopeOf). Rich file tag 298. kCacheVersion unchanged.
                                                       // 295 = 2026-11-03 (lane edge-prelude-veto): a Rust macro invocation is captured @reference.macro (role Macro,
                                                       //   queries/rust/tags.scm), no longer @reference.call. Rich file tag 296. kCacheVersion unchanged.
@@ -385,11 +383,9 @@ constexpr std::uint32_t kParserVer    = 301;          // bump on any grammar/.sc
                                                       //   typedefs are definitions (src/aliasdef.h). kCacheVersion stays 48: no record changes shape (the alias target
                                                       //   rides RawDef::bodyByte). Rich file tag 294.
                                                       // 291 = 2026-11-03 (lane docs-rest #506 re-bump): both sides bumped (lane 287/288, main 289/290), so the merged value
-                                                      //   goes above both; caches built on main at 289 re-index and pick up the reST .txt docs. Rich file tag 292. kCacheVersion stays 48.
-                                                      // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
+                                                      //   goes above both; caches built on main at 289 re-index and pick up the reST .txt docs. Rich file tag 292. kCacheVersion stays 48.                                                      // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
                                                       //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286, merged) and
-                                                      //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
-                                                      // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
+                                                      //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.                                                      // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
                                                       //   qualifier of more than one segment keeps it whole in Reference::fieldName (ingest_names.h rustWrittenQualifier).
                                                       //   Rich file tag 286. kCacheVersion stays 48: no record changes shape.
                                                       // 287 = 2026-11-02 (lane docs-rest, #409 reST tier, after #504's 285/286): reST/Sphinx units, and the crawl
