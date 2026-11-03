@@ -882,6 +882,7 @@ for _g in \
     reportcheck \
     resolvecheck \
     resolverhonestycheck \
+    restdocscheck \
     retrievalqualitycheck \
     reusefirstworkflowcheck \
     ripwirepubliccheck \

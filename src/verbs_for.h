@@ -172,18 +172,20 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
 
     LensRanking out;
     std::vector<float>& lensRank = out.rank;
+    const std::vector<char>  statsOut    = sphinxTxtStatsExclusion( ing, task );   // Sphinx .txt pages out of a code question's statistics
+    const std::vector<char>* statsOutPtr = statsOut.empty() ? nullptr : &statsOut;
     if( routeOn )
     {
         lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
-                                                                                  0, 0, {}, &out.evidence );   // L-W: the term evidence rides out
+                                                                                  0, 0, {}, &out.evidence, statsOutPtr );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
         {
             // L-W: the name-exact ranker scores WHOLE names, so the subtoken evidence coverage= and the file page
             // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
             // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
             // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence );
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
         }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
@@ -202,7 +204,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     }
     else
     {
-        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence );
+        lensRank = lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul, 0, 0, {}, &out.evidence, statsOutPtr );
     }
 
     // input blow-up guard disclosure (lexical.h kMaxUniqueQueryTerms/dedupeQueryTerms): a task string with
@@ -601,6 +603,7 @@ struct ForLensHeaderParts
                                             // (forowner.h forBodySlotOwner), so a <bodies> element rides — served, or skipped
                                             // under a target with its next= — and the slot clause defines it (present-only)
     bool             splitPresent = false;   // attrib-multidef Q1: may a <calls><c> row carry prov="split"? viaPresent's twin
+    bool             tailCodeFirst = false;  // docs-rest: the tail orders code files first (forpage.h tailOrdersCodeFirst)
                                             // question over the same ids (serialize.h splitArmsOutAny); set after construction
     bool             hopsCallsNextPresent = false; // body-fold rider: a ranked <hops> row's cut <calls> carries next= (set after the
                                             // hops render, cleared with the section)
@@ -876,6 +879,17 @@ inline std::string bodyFoldLegend( const ForLensHeaderParts& p, bool compact )
 }
 inline constexpr std::string_view kForCompactLegendTail =
     "; t p= file outside sigs (weaker), t sym= its top symbols (a pointer, not the answer), r= rank (gap = trimmed)";
+inline constexpr std::string_view kForCompactLegendTailCodeFirst = "; t order: code files first, then doc files (a code question)";
+// The tail-order clause (serialize.h kForFileTailCodeFirstLegend): rides with the tail clause, only where the order applies
+// (forpage.h tailOrdersCodeFirst: a code question over an index that holds a doc unit).
+inline std::string_view tailCodeFirstLegend( const ForLensHeaderParts& p, bool compact )
+{
+    if( !p.tailLegend || !p.tailCodeFirst )
+    {
+        return {};
+    }
+    return compact ? kForCompactLegendTailCodeFirst : rw::kForFileTailCodeFirstLegend;
+}
 // R2-AF (round 2, S4): the COMPACT dialect's `<hdr p= of=/>` clause — verbatim, round-2 amendment §R7.
 // 96 B, present-only like every clause in this dialect (appendCompactForLegend below).
 inline constexpr std::string_view kForCompactLegendHdr =
@@ -993,7 +1007,9 @@ inline void appendCompactForLegend( std::string& h, const ForLensHeaderParts& p,
     // five identical ifs — the list has grown once per lane (hdr, compose, then train 9's lego and layer) and the
     // next one is a row, not another block. hdr is never ceiling-dropped (R2-AF round 2, S4); tail is.
     const struct { bool on; std::string_view clause; } kPresentOnly[] = {
-        { p.tailLegend, kForCompactLegendTail },         { p.hdrLegend, kForCompactLegendHdr },
+        { p.tailLegend, kForCompactLegendTail },
+        { !tailCodeFirstLegend( p, /*compact=*/true ).empty(), kForCompactLegendTailCodeFirst },   // docs-rest: the tail's order
+        { p.hdrLegend, kForCompactLegendHdr },
         { p.composePresent, kForCompactLegendCompose },  { p.legoPresent, kForCompactLegendLego },
         { p.layerPresent, kForCompactLegendLayer },
         { p.modScopePresent, rw::kForCompactModScopeClause },   // #60
@@ -1139,6 +1155,7 @@ inline std::string forLensHeaderText( const ForLensHeaderParts& p, bool withRout
     if( p.tailLegend )
     {
         h.append( rw::kForFileTailLegend );   // deep-tail: defines r= and the <tail> element (sigs-charge-exempt, serialize.h)
+        h.append( tailCodeFirstLegend( p, /*compact=*/false ) );   // docs-rest: the order a code question's tail uses
     }
     if( p.hdrLegend )
     {
@@ -3403,6 +3420,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                         /*hdrLegend=*/!forHdrRows.empty(), forScPresent, forComposePresent,
                                         forLegoPresent, forLayerPresent, forModScopePresent, forEndLinePresent, forViaPresent,
                                         ownerPlan.any(), forViaByOwnerOnly, slotOwner.any() };
+        headerParts.tailCodeFirst = rw::tailOrdersCodeFirst( ing, cfg.forTask );   // docs-rest: the tail-order clause rides only here
         headerParts.splitPresent = forSplitPresent;   // attrib-multidef Q1 (a trailing member: the aggregate above keeps its order)
         // body-fold (forfold.h): the bodies of the top ranked rows, appended — decided here because the header's fold clause reads it.
         // The compact route's XML answer in the DEFAULT regime only: an explicit --token-budget is a size the caller named (that
@@ -3709,7 +3727,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const std::size_t confidenceEmitted    = compactLegendOn ? ( confidenceEarlyNoteBytes == 0 ? 0 : kForCompactLegendConfidence.size() + ( forCoverageOn ? kForCompactCoverageClause.size() : 0 ) )
                                                                  : confidenceEarlyNoteBytes;
         const std::size_t confidenceExemptBytes = confidenceEarlyAttrsBytes + confidenceEmitted + forAtAttrStr.size();   // == confidenceOwnBytes + at= in the full dialect
-        const std::size_t tailLegendEmitted    = compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size();
+        const std::size_t tailLegendEmitted    = ( compactLegendOn ? kForCompactLegendTail.size() : rw::kForFileTailLegend.size() )
+                                               + tailCodeFirstLegend( headerParts, compactLegendOn ).size();
         // DEEP-TAIL: the tail legend's bytes are exempt from the sig-trim charge in BOTH regimes, the
         // confidence-disclosure precedent verbatim — the tail's contract is that the ranked head is
         // byte-identical with and without it, and charging the clause here would shrink <sigs> to pay for
@@ -3781,7 +3800,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             const std::size_t fullHeaderBytes = fullHeader.size();
             const std::size_t fullExempt      = adaptiveNote.size() + enrichmentLegendBytesEmitted( plan, false )
                                               + confidenceEarlyAttrsBytes + confidenceEarlyNoteBytes + forAtAttrStr.size()
-                                              + rw::kForFileTailLegend.size() + idRouteParts.bytes()
+                                              + rw::kForFileTailLegend.size() + tailCodeFirstLegend( fullParts, false ).size() + idRouteParts.bytes()
                                               + ( headerParts.endLinePresent ? rw::kForEndLineLegend.size() : 0u )
                                               + ownerLegendExemptBytes( headerParts, /*compact=*/false )
                                               + bodySlotLegend( headerParts, /*compact=*/false ).size()

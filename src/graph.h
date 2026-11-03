@@ -28,6 +28,7 @@
 #include "infra/sortutil.h"      // radix edge sorting for large integer-key graph edge lists
 #include "clones.h"              // scanCodeTokens / CodeScanOptions — BuiltinMethodGate::namedBeyondDefinition's code-token count
 #include "infra/mdslug.h"        // mdSlugOf — bindMarkdownLinks matches a link slug to a heading
+#include "restlinks.h"           // bindRestLink — a reST :ref: or :doc:`/root` link, whose target no path spells
 #include "infra/namesplit.h"     // isIdentChar — identifierRunCount, the identifier runs inside a string annotation
 #include "docparse.h"            // detail::readWholeFile — resolveAtSeed reads the seed line's byte range off disk
 #include "cppscopechain.h"       // EditCheckBraceLexer / editCheckWrittenQualifier — the written-spelling tier's C/C++ full chain
@@ -8149,8 +8150,7 @@ inline std::uint8_t markdownLinkBit( const HashMap<std::uint64_t, char>& linkEdg
 
 // The file node is the Section extractMarkdown builds with bodyByte 0 over [0, size). assignSymbols then
 // leaves sigStart 0 and sigEnd == endByte == the file span (widest is that span, measured over the file's
-// own sections). A 0,0 span is a ModuleScope, never this node. Same predicate recall.h uses. A heading
-// matches it only when the whole file is that one heading line.
+// own sections). A 0,0 span is a ModuleScope, never this node. Same predicate recall.h uses. A heading matches it only when the whole file is that one heading line.
 inline bool isMarkdownFileNode( const Symbol& sym, std::uint32_t widestEnd ) noexcept
 {
     return sym.sigStartByte == 0 && sym.sigEndByte >= sym.endByte && sym.endByte >= widestEnd;
@@ -8202,7 +8202,7 @@ inline MdLinkIndex buildMdLinkIndex( const IngestResult& ing )
     MdLinkIndex ix;
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
-        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) )
+        if( ing.files[ f ].ends_with( ".md" ) || ing.files[ f ].ends_with( ".markdown" ) || ing.files[ f ].ends_with( ".rst" ) || ing.files[ f ].ends_with( ".txt" ) )
         {
             ix.fileByPath.try_emplace( lexicalNormalize( ing.files[ f ] ), f );
         }
@@ -8320,11 +8320,13 @@ inline MdLinkPins bindMarkdownLinks( const IngestResult& ing )
     out.pin.assign( ing.references.size(), kNoNode );
     out.slugMiss.assign( ing.references.size(), 0 );
     const MdLinkIndex ix = buildMdLinkIndex( ing );
+    const RestLinkIndex rest = buildRestLinkIndex( ing );
     for( std::size_t i = 0; i < ing.references.size(); ++i )
     {
         const Reference& r = ing.references[ i ];
         if( isMarkdownLinkRef( r ) && r.fileId < ing.files.size() )
         {
+            if( bindRestLink( rest, ix.fileByPath, ix.wholeFile, ing.files[ r.fileId ], r.memberPath, out.pin[ i ] ) ) { continue; }
             const MarkdownLinkTarget t = bindOneMarkdownLink( ix, ing.files[ r.fileId ], r.memberPath, ing.crawlRoot );
             out.pin[ i ]      = t.id;
             out.slugMiss[ i ] = t.slugMiss ? 1 : 0;
@@ -14048,6 +14050,53 @@ inline std::vector<NodeId> resolveAllByDefLine( const IngestResult& ing, std::st
     return { seed.chain.back() };
 }
 
+// A documentation unit: a Markdown heading, or a reST title, object directive or label (docparse.h, ingest_rest.h). Every one is
+// Lang::Markdown; no code grammar mints that language.
+inline bool isDocUnit( const Symbol& s ) noexcept
+{
+    return isDocLang( s.lang );
+}
+
+// CODE BEFORE A DOC UNIT OF THE SAME SPELLING (docs-rest fix2; gate restdocscheck (I)). A reST object directive names its unit as
+// the page writes the object (`.. method:: Model.save` is a unit named `Model.save`), so the name tier matched that heading, and
+// the dotted-scope and written-spelling tiers, which run only on an empty result, never reached the code: --path answered
+// reachable=0 "no directed call path" from docs/ref/models/instances.txt:446 where the code walks 5 hops from base.py:847, and
+// --callers, --callees and --impact counted 0. When EVERY earlier match is a doc unit, those two tiers run as if nothing had
+// matched, and the code definitions they find replace the doc units. With no code match the doc units stand (--expand of a
+// heading, --callers of a :ref: label; a `docs/x.rst:name` spelling picks the doc unit). A match list that holds code AND doc
+// units stands as it is here: --callers, --impact and --safe-delete list a markdown heading `## run` beside `def run` as a second
+// def (cross_kind) with its link callers marked via=link (mdsectioncheck). Only a --path ENDPOINT drops the doc units of a mixed
+// list (dropDocUnitsBesideCode, pathgaps.h resolvePathEndpoint): a heading holds no calls, so it is never a path start or end.
+inline std::vector<NodeId> preferCodeOverDocUnits( const IngestResult& ing, std::string_view spec, std::vector<NodeId> found )
+{
+    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
+    if( found.empty() || !std::all_of( found.begin(), found.end(), doc ) )
+    {
+        return found;
+    }
+    std::vector<NodeId> code = resolveAllByDottedScope( ing, spec, {} );
+    std::erase_if( code, doc );
+    if( code.empty() )
+    {
+        code = resolveAllByWrittenSpelling( ing, spec, {} );
+        std::erase_if( code, doc );
+    }
+    return code.empty() ? found : code;
+}
+
+// A --path endpoint's matches, code first (docs-rest CI fix; gates restdocscheck (I5, I6), mdsectioncheck): when a name matches code
+// AND doc units, the doc units go, since a `.. method:: save` directive or a `## run` heading is no second place a call path can
+// start or end, and from_defs=/to_defs= count code only. An all-doc or all-code list is returned as it is.
+inline std::vector<NodeId> dropDocUnitsBesideCode( const IngestResult& ing, std::vector<NodeId> found )
+{
+    const auto doc = [ &ing ]( NodeId id ) noexcept { return isDocUnit( ing.symbols[ id ] ); };
+    if( !std::all_of( found.begin(), found.end(), doc ) )
+    {
+        std::erase_if( found, doc );
+    }
+    return found;
+}
+
 // `unprovenDefCountOut` (H1, optional): the residue declToDefFollowThrough dropped — see its contract. Zero
 // on every path that never reaches the widening (an @FILE:LINE seed, a canonical id, a Scope::name tier, a
 // bare name), so a reader never has to ask whether the number is stale.
@@ -14082,7 +14131,7 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
         std::vector<NodeId> byScope = resolveAllByScopeQualified( ing, spec );   // Scope::name tier — see its contract
         if( !byScope.empty() )
         {
-            return byScope;
+            return preferCodeOverDocUnits( ing, spec, std::move( byScope ) );
         }
     }
 
@@ -14103,8 +14152,10 @@ inline std::vector<NodeId> resolveAllByNameQualified( const IngestResult& ing, s
     // Widen to the definitions they stand for. Full contract and its limits: declToDefFollowThrough above.
     declToDefFollowThrough( ing, file, name, out, unprovenDefCountOut );
     out = applyNameTower( ing, std::move( out ) );   // the tower orders the name/file tier (task C); the early tiers above stay as-is
+    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );   // a doc heading spelled like code never hides the code
     out = resolveAllByDottedScope( ing, spec, std::move( out ) );   // `Class.method` / `Class#method`, only when `out` is empty
     out = resolveAllByWrittenSpelling( ing, spec, std::move( out ) );   // the source's own spelling, only when still empty
+    out = preferCodeOverDocUnits( ing, spec, std::move( out ) );        // the dotted tier reads the Scope::name tier: same rule
     return resolveAllByDefLine( ing, spec, std::move( out ) );            // a printed p= (`file:LINE`), last, only when still empty
 }
 
