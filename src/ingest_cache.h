@@ -371,6 +371,9 @@ constexpr std::uint32_t kParserVer    = 297;          // bump on any grammar/.sc
                                                       //   (textual scope, graph.h rustMacroScopeOf). Rich file tag 298. kCacheVersion unchanged.
                                                       // 295 = 2026-11-03 (lane edge-prelude-veto): a Rust macro invocation is captured @reference.macro (role Macro,
                                                       //   queries/rust/tags.scm), no longer @reference.call. Rich file tag 296. kCacheVersion unchanged.
+                                                      // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
+                                                      //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286, merged) and
+                                                      //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
                                                       // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
                                                       //   qualifier of more than one segment keeps it whole in Reference::fieldName (ingest_names.h rustWrittenQualifier).
                                                       //   Rich file tag 286. kCacheVersion stays 48: no record changes shape.

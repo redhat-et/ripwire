@@ -1628,7 +1628,8 @@ enum class LocalBindKind : std::uint8_t
     // Lane alias-import (ALIAS-IMPORT): a JS/TS RE-EXPORT clause — `export { a } from './m'`, `export { a as b } from './m'`,
     // `export * from './m'` (and the `export type` spellings). var = the EXPORTED name ("*" for a star re-export), typeName = the
     // module specifier as written (quotes stripped), importedName = the name it takes from that module ("*" for a star).
-    // `export * as ns from` records nothing (it binds a namespace, not a name). fromSymbol kNoNode, spans {0,0}, sited at the
+    // `export * as ns from './m'` (BARREL-SHORT-KEY) is a NAMESPACE re-export: var = ns, importedName = "*" (a star has var "*").
+    // fromSymbol kNoNode, spans {0,0}, sited at the
     // statement. Written by ingest_importcap.h emitCapturedImportBind (the binds channel's Web arm) and read by forreexport.h
     // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
     // filters by kind). APPENDED (cache u8).

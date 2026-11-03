@@ -318,6 +318,7 @@ for _g in \
     atomscheck \
     attribmultidefcheck \
     attrvocabcheck \
+    barrelshortkeycheck \
     baselinecheck \
     baselinedirtycheck \
     baselineportcheck \
@@ -794,6 +795,7 @@ for _g in \
     prcontextcheck \
     prconvergecheck \
     precedencecheck \
+    preludevetocheck \
     preproccondcheck \
     preprocdeadscalecheck \
     prmaskanchorcheck \
@@ -910,7 +912,6 @@ for _g in \
     rubysettercheck \
     rubytypedrecvcheck \
     rule3memberguardcheck \
-    preludevetocheck \
     runhintcheck \
     runtracecheck \
     rustanccheck \
