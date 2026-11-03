@@ -2503,8 +2503,12 @@ inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBi
         std::uint32_t file = sb.file;
         const std::size_t hash = key.find( '#' );
         const std::uint32_t importer = std::uint32_t( std::strtoul( key.c_str(), nullptr, 10 ) );
-        // MF5 (rv-py-mod2): a star import in the importer AFTER the from-import may rebind y (`from p.other import *` defining y)
-        if( t.pythonModuleRebind.contains( key ) || pythonStarMayBind( t, importer, std::string_view( key ).substr( hash + 1 ), sb.firstByte + 1 ) )
+        // MF5 (rv-py-mod2): a star import in the importer AFTER the from-import may rebind y (`from p.other import *` defining y).
+        // MF7 (rv-py-mod3): an earlier star is skipped only when every from-import of y runs: one under an `if`/`try`/`with`/loop at
+        // module scope (kPythonCondImportPrefix) may not, and then the earlier star's binding is the one that stands, so every star counts.
+        const std::string_view y        = std::string_view( key ).substr( hash + 1 );
+        const bool             condFrom = marked( importer, std::string{ kPythonCondImportPrefix }.append( y ) );
+        if( t.pythonModuleRebind.contains( key ) || pythonStarMayBind( t, importer, y, condFrom ? 0 : sb.firstByte + 1 ) )
         {
             file = kNoFile;
         }
@@ -2572,11 +2576,11 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonImportFiles( const Ing
     return files;
 }
 
-// Python fileId → the file each `from m import *` of it names (kNoFile: the module is not in the tree), unsorted. The capture records a
+// Python fileId → the file each `from m import *` of it names (kNoFile: the module is not in the tree), unsorted, and each such
+// statement's byte (PythonScopeFacts::starTargets / starBytes; nameBinds is left empty). The capture records a
 // statement's names as Import bindings at the statement's byte and one Include there; a statement with an Include and no Import binding
 // bound no name — a star import (or an import the capture could not read, which is no better evidence).
-inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                                                       PythonSuffixMemo& memo, std::vector<std::vector<std::uint32_t>>& bytes )
+inline PythonScopeFacts buildPythonStarTargets( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex, PythonSuffixMemo& memo )
 {
     std::vector<std::uint64_t> named;   // ( fileId << 32 | statement byte ) of every import statement that bound a name
     for( const Binding& b : ing.bindings )
@@ -2587,8 +2591,9 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const Ing
         }
     }
     std::sort( named.begin(), named.end() );
-    std::vector<std::vector<std::uint32_t>> stars( ing.files.size() );
-    bytes.assign( ing.files.size(), {} );
+    PythonScopeFacts out;   // starTargets and starBytes; the caller fills nameBinds
+    out.starTargets.assign( ing.files.size(), {} );
+    out.starBytes.assign( ing.files.size(), {} );
     for( const Include& inc : ing.includes )
     {
         const std::string_view from = inc.fileId < ing.files.size() ? rootRelPath( ing, inc.fileId ) : std::string_view{};
@@ -2597,10 +2602,10 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const Ing
         {
             continue;
         }
-        stars[ inc.fileId ].push_back( pythonIncludeFile( ing, inc, fileIndex, memo ) );
-        bytes[ inc.fileId ].push_back( inc.byte );
+        out.starTargets[ inc.fileId ].push_back( pythonIncludeFile( ing, inc, fileIndex, memo ) );
+        out.starBytes[ inc.fileId ].push_back( inc.byte );
     }
-    return stars;
+    return out;
 }
 
 // buildPythonImportVetoes: 'i' an in-repo module (a relative import cannot leave the package, or Step-A pinned the file), 'u' unknown
@@ -2689,7 +2694,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         }
     }
     t.importFiles  = buildPythonImportFiles( ing, fileIndex, memo );
-    t.scopes.starTargets = buildPythonStarTargets( ing, fileIndex, memo, t.scopes.starBytes );
+    t.scopes             = buildPythonStarTargets( ing, fileIndex, memo );
     t.scopes.nameBinds   = buildPythonNameBinds( ing, pythonSubmoduleCalleeNames( ing, t.submodules ) );
     return t;
 }

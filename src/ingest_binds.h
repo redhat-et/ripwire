@@ -3544,6 +3544,32 @@ inline void capturePythonRebindShadowDecls( TSNode n, const char* t, std::uint32
         }
         return;
     }
+    if( kindIs( t, "import_from_statement" ) )
+    {
+        // MF7: a module-scope from-import that may not run (inside an `if`/`try`/`with`/loop clause) marks each name it binds `?:y`
+        // (kPythonCondImportPrefix); the import's own Import binding is filed elsewhere. A star import binds no name and files none.
+        if( pythonDefIsConditionalAtModule( n ) )
+        {
+            const std::uint32_t at = ts_node_start_byte( n );
+            ChildCursor         cursor( n );
+            forEachChild( n, cursor.cur, [ & ]( TSNode c )
+            {
+                const TSNode nm = kindIs( ts_node_type( c ), "aliased_import" ) ? fieldChild( c, NodeField::Alias ) : c;
+                if( ts_node_eq( c, fieldChild( n, NodeField::ModuleName ) ) || ts_node_is_null( nm ) )
+                {
+                    return true;
+                }
+                const char* nt = ts_node_type( nm );
+                if( kindIs( nt, "identifier" ) || kindIs( nt, "dotted_name" ) )
+                {
+                    pushRawBind( fileId, lang, std::string{ kPythonCondImportPrefix }.append( nodeTextOf( nm, src ) ), std::string{},
+                                 BindSite{ at, 0u, 0u }, LocalBindKind::VarDecl, binds );
+                }
+                return true;
+            } );
+        }
+        return;
+    }
     if( kindIs( t, "function_definition" ) || kindIs( t, "class_definition" ) )
     {
         const TSNode nm = fieldChild( n, NodeField::Name );

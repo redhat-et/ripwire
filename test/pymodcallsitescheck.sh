@@ -150,6 +150,14 @@ w "$P/use_sp.py" 'from sp.other13 import *\nfrom tkinter import *\nfrom sp impor
 w "$P/use_sp2.py" 'from sp import n17\nfrom tkinter import *\n\ndef run_n17():\n    return n17.n17_f()\n'
 w "$P/sp/use_rel.py" 'from . import n18\nfrom .other18 import *\n\ndef run_n18():\n    return n18.n18_f()\n'
 w "$P/sp/other18.py" 'from . import n13 as n18\n'
+# MF7 (rv-py-mod3): an earlier star is skipped only when the from-import always runs. A from-import under `if`/`else`, `except`, a loop
+# or a one-line `if` may not run, so a star before it that binds y declines (N19-N22); a conditional from-import with no star keeps it (N23)
+for k in n19 n20 n21 n22 n23; do w "$P/sp/$k.py" "def ${k}_f():\n    return 1\n"; w "$P/sp/other${k#n}.py" "def ${k}():\n    return 3\n"; done
+w "$P/use_c19.py" 'import sys\nif sys.argv:\n    from sp.other19 import *\nelse:\n    from sp import n19\n\ndef run_n19():\n    return n19.n19_f()\n'
+w "$P/use_c20.py" 'try:\n    from sp.other20 import *\nexcept ImportError:\n    from sp import n20\n\ndef run_n20():\n    return n20.n20_f()\n'
+w "$P/use_c21.py" 'from sp.other21 import *\nfor _ in ():\n    from sp import n21\n\ndef run_n21():\n    return n21.n21_f()\n'
+w "$P/use_c22.py" 'import sys\nfrom sp.other22 import *\nif not sys.argv: from sp import n22\n\ndef run_n22():\n    return n22.n22_f()\n'
+w "$P/use_c23.py" 'import sys\nif sys.argv:\n    from sp import n23\n\ndef run_n23():\n    return n23.n23_f()\n'
 ( cd "$P" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
 
 # ---- S: the accepted spellings bind the call (S3 is the module form Rule 2d already read: the twin)
@@ -207,6 +215,12 @@ row N15.starnobind  sp/n15.py:n15_f   use_sp.py  run_n15  proven
 row N16.extbefore   sp/n16.py:n16_f   use_sp.py  run_n16  proven
 row N17.extafter    sp/n17.py:n17_f   use_sp2.py run_n17  declined
 row N18.relimport   sp/n18.py:n18_f   sp/use_rel.py run_n18 declined
+# ---- MF7: a conditional from-import after a star that binds y (N19-N22 declined; N23 and N13 twins proven)
+row N19.ifelse      sp/n19.py:n19_f   use_c19.py run_n19  declined
+row N20.tryexcept   sp/n20.py:n20_f   use_c20.py run_n20  declined
+row N21.loop        sp/n21.py:n21_f   use_c21.py run_n21  declined
+row N22.oneline     sp/n22.py:n22_f   use_c22.py run_n22  declined
+row N23.condnostar  sp/n23.py:n23_f   use_c23.py run_n23  proven
 # ---- S pinned by file (the arms above match the caller by name across every def of the callee name)
 row S1.pinned       app/boot.py:setup_a app/use_a.py run_a proven
 row S2.pinned       app/boot.py:setup_b app/use_b.py run_b proven
@@ -253,7 +267,7 @@ forrow X3.unparsed  0 gamma_handle '' 'path from nothing_named_this to the gamma
 # upstream callers, 24 filler defs named like the endpoints, at --pack-top-n=6. A's whole forward reach keeps c5_step (X6, 5 hops out)
 # and b_end (X5); B itself never moves even when no resolved edge joins it to A (X5b: b_orphan calls a_start, nothing reaches it).
 # The rule fires only on a path question: not when the task also asks who calls A (X7), not on `path from` inside other prose (X8);
-# the lead-ins `trace the call path from` / `what is the execution path from` fire (X9, X10)
+# the lead-ins `trace the call path from` / `what is the execution path from` fire (X9, X10); nor when a callers question follows (X7b, X7c)
 XP=$T/pathchain
 w "$XP/pkg/__init__.py" ''
 w "$XP/pkg/chain.py" 'def a_start(x):\n    return c1_step(x)\n\ndef c1_step(x):\n    return c2_step(x)\n\ndef c2_step(x):\n    return c3_step(x)\n\ndef c3_step(x):\n    return c4_step(x)\n\ndef c4_step(x):\n    return c5_step(x)\n\ndef c5_step(x):\n    if x > 3:\n        return a_start(x - 1)\n    return b_end(x)\n\ndef b_end(x):\n    if x < 0:\n        return a_start(-x)\n    return x\n\ndef b_orphan(x):\n    return a_start(x)\n'
@@ -269,6 +283,9 @@ FROOT=$XP FTOPN=6 forrow X5.bcallsa   1 b_end,a_start '' 'path from a_start to b
 FROOT=$XP FTOPN=6 forrow X6.deepchain 1 c5_step '' 'path from a_start to b_end'
 FROOT=$XP FTOPN=6 forrow X5b.borphan  1 b_orphan '' 'path from a_start to b_orphan'
 FROOT=$XP FTOPN=40 forrow X7.whocalls 0 upstream_one,upstream_two '' 'who calls a_start and what is the path from a_start to b_end'
+# X7b/X7c (G5): `path from` opens the task and a callers question follows: the who-calls refusal (not the lead-in) keeps the callers
+FROOT=$XP FTOPN=40 forrow X7b.thencalls 0 upstream_one,upstream_two '' 'path from a_start to b_end and who calls a_start'
+FROOT=$XP FTOPN=40 forrow X7c.thenask   0 upstream_one,upstream_two '' 'path from a_start to b_end. Who calls a_start?'
 FROOT=$XP FTOPN=6 forrow X8.prose     0 a_start '' 'strip the directory path from a_start() to shorten the log line'
 FROOT=$XP FTOPN=6 forrow X9.trace     1 b_end,c5_step '' 'Trace the call path from a_start to b_end'
 FROOT=$XP FTOPN=6 forrow X10.whatis   1 b_end,c5_step '' 'what is the execution path from a_start to b_end'

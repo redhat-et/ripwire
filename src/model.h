@@ -1754,6 +1754,10 @@ struct RubyMainMixinRow
 // (`?f`). No identifier starts with it, so no name lookup ever matches the record; graph.h pythonRenamedImportPin reads it as "f may
 // be unbound", the case where a module `__getattr__` (PEP 562, consulted only for names the module lacks) answers instead.
 inline constexpr std::string_view kPythonCondDefPrefix = "?";
+// MF7 (PY-MOD-CALL-SITES): a Python from-import at MODULE scope inside a compound statement (it may not run) files a VarDecl `?:y`
+// per name y it binds. No identifier starts with `?` or `:`, so no name lookup and no kPythonCondDefPrefix probe (`?f`) matches it;
+// graph.h finalizePythonSubmoduleBinds reads it as "this from-import of y may not run": a star import before it may be what binds y.
+inline constexpr std::string_view kPythonCondImportPrefix = "?:";
 // A Python lambda parameter or comprehension target `K` files a VarDecl spelled `~K` at the lambda / comprehension (its enclosing def's
 // scope, else module scope). No identifier starts with it, so no name lookup ever matches the record; src/regindex.h reads it as "K is
 // another variable here" (a registrar key named like a lambda parameter is not the key).
