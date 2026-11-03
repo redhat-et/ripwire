@@ -798,6 +798,7 @@ for _g in \
     prcontextcheck \
     prconvergecheck \
     precedencecheck \
+    preludevetocheck \
     preproccondcheck \
     preprocdeadscalecheck \
     prmaskanchorcheck \
