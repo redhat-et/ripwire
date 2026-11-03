@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <optional>
 #include <string>
@@ -231,9 +232,11 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
 // edge, not a by-name one) that A does not itself reach within kPathFromReachHops is moved below every other positive score, its
 // own order kept. So a new call edge INTO A (a module-level `management.execute_from_command_line()` bound for the first time) cannot
 // push a hop under A past the ranked head's cap. A is read as the FROM slot's first candidate the qualified resolver finds (B need
-// not name a symbol: parseGraphSubjectPathFrom); no parse, no candidate, or no caller ranked → nothing moves (byte-identical). Returns how many rows moved; the caller discloses it.
+// not name a symbol: parseGraphSubjectPathFrom); no parse, no candidate, or no caller ranked → nothing moves (byte-identical). Returns how many rows moved,
+// or kPathFromReachCapped when A's reach passed kPathFromReachNodes (nothing moved, path_from_capped=1 in the note); the caller discloses either.
 inline constexpr int         kPathFromReachHops  = 4;      // A's forward reach that keeps a caller of A on the path (a cycle back to A)
 inline constexpr std::size_t kPathFromReachNodes = 4096;   // runaway guard on that walk; past it every caller of A stays where it ranked
+inline constexpr std::uint32_t kPathFromReachCapped = UINT32_MAX;   // applyPathFromUpstreamCut's answer when that guard stopped the walk
 inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Graph& g, std::string_view task, std::vector<float>& lensRank )
 {
     const std::vector<std::string> fromCands = parseGraphSubjectPathFrom( task );
@@ -278,7 +281,7 @@ inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Gr
                 {
                     if( ++seen > kPathFromReachNodes )
                     {
-                        return 0;   // too wide to tell on-path from upstream: nothing moves
+                        return kPathFromReachCapped;   // too wide to tell on-path from upstream: nothing moves, and the note says so
                     }
                     reach[ v ] = 1;
                     next.push_back( v );
@@ -332,6 +335,10 @@ inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Gr
 // the header note applyPathFromUpstreamCut's count rides in (the CLI --for and the MCP `for` twin print the same words)
 inline std::string pathFromUpstreamNote( std::uint32_t moved )
 {
+    if( moved == kPathFromReachCapped )
+    {
+        return std::format( " [path from: the from endpoint reaches over {} symbols, path_from_capped=1: its callers were not moved]", kPathFromReachNodes );
+    }
     return std::format( " [path from: {} caller{} of the from endpoint ranked after the path's own rows]", moved, moved == 1 ? "" : "s" );
 }
 

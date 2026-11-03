@@ -227,6 +227,23 @@ print(";".join(bad) or "ok")' "$note" "$want" "$forbid" )
 forrow X1.pathfrom  1 alpha_entry,beta_step,gamma_handle run_alpha_entry_main,alpha_entry_handle_twice 'path from alpha_entry to the gamma handle'
 forrow X2.twin      0 alpha_entry,alpha_entry_handle_twice,run_alpha_entry_main beta_step 'alpha_entry and the gamma handle'
 forrow X3.unparsed  0 gamma_handle '' 'path from nothing_named_this to the gamma handle'
+# X4: A reaches over 4096 symbols within 4 hops (70 x 70 fan-out): the walk stops, nothing moves, and the note says path_from_capped=1
+XC=$T/pathcap
+w "$XC/pkg/__init__.py" ''
+python3 -I -c '
+import sys
+o=["def alpha_wide(argv):"]+["    hop_%d(argv)" % i for i in range(70)]+["    return argv",""]
+for i in range(70):
+    o+=["def hop_%d(x):" % i]+["    leaf_%d_%d(x)" % (i,k) for k in range(70)]+["    return x",""]
+    for k in range(70): o+=["def leaf_%d_%d(x):" % (i,k),"    return x",""]
+open(sys.argv[1],"w").write("\n".join(o)+"\n")' "$XC/pkg/wide.py"
+w "$XC/main_wide.py" 'from pkg import wide\n\ndef run_alpha_wide_main():\n    """alpha wide"""\n    return wide.alpha_wide([])\n'
+( cd "$XC" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
+out=$( cd "$XC" && "$BIN" "$XC" --no-cache --legend=compact "--for=path from alpha_wide to the leaf" </dev/null 2>/dev/null ); rc=$?
+case "$rc:$out" in
+    0:*schema=*path_from_capped=1*) echo "PASS X4.capped" ;;
+    *) echo "FAIL X4.capped: rc=$rc, no schema or no path_from_capped=1 note"; fail=1 ;;
+esac
 
 if [ "$fail" = 0 ]; then echo "pymodcallsitescheck: PASS"; else echo "pymodcallsitescheck: FAIL"; fi
 exit "$fail"

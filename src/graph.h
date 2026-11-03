@@ -2627,10 +2627,10 @@ inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult
     std::string                key;
     for( const Reference& r : ing.references )
     {
-        if( r.lang == Lang::Python && r.recv == RecvKind::NamedVar && !r.recvVar.empty() && !r.calleeName.empty() )
+        if( r.recv == RecvKind::NamedVar && !r.recvVar.empty() && !r.calleeName.empty() )
         {
             key.clear();  Narrower::appendUint( key, r.fileId );  key.push_back( '#' );  key.append( r.recvVar );
-            const auto it = submodules.find( key );
+            const auto it = submodules.find( key );   // keyed by Python import bindings only: a hit is a Python file
             if( it != submodules.end() && it->second.anySub )
             {
                 names.try_emplace( r.calleeName, '\0' );
