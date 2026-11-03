@@ -1119,6 +1119,7 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 inline constexpr std::size_t kForFileTailShownCap     = 24;   // the rank rows (deep-tail d2): files outside the shown head
 inline constexpr std::size_t kForFileTailPageRows     = 40;   // FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault)
 inline constexpr std::size_t kForFileTailShellReserve = 48;
+inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h)
 
 // The legend clause defining BOTH deep-tail surfaces (the r= rank fact and the <tail> element) — a named
 // constant, shared by the CLI --for header and the MCP `for` twin, so the sigs-budget exemption in each
@@ -1131,6 +1132,14 @@ inline constexpr std::string_view kForFileTailLegend =
     "sym= its top symbols by lens rank (a pointer, not the answer); "
     "total=every positive-score file, shown=printed, capped=1 when they differ, next= the page from its first unprinted row. "
     "r= on a ranked row is its 1-based rank in this lens ranking, rows in r= order, p= the file (a gap = a budget-trimmed row)";
+// docs-rest CI fix 2: the order the tail really uses on a CODE question (filter.h taskAsksForDocText false; forpage.h
+// computeFileTail): every code row of both parts, then the doc rows. Present-only beside kForFileTailLegend, where that order
+// applies (forpage.h tailOrdersCodeFirst: a code question over an index holding a doc unit); a question asking for doc text keeps
+// the plain interleaved walk, and an index with no doc unit has no doc row to move, so neither carries it.
+// Sigs-charge-exempt with the clause it qualifies. No "--" (it rides inside an XML comment).
+inline constexpr std::string_view kForFileTailCodeFirstLegend =
+    "; tail order on this code question: every code file of both parts first, each part in the order above, then the doc "
+    "files (.md, .rst, a Sphinx .txt page) in that order";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,
@@ -10040,7 +10049,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 // directory name: test/, tests/, bench/) AND every file that depends on it is a test path (isTestPath) — both
 // by path, nothing is parsed. A production file under test/ (src/*.cpp includes ../test/lib/hooks.h) therefore
 // stays ranked. `adj` is the same file→file graph the afferent counts come from; the result is indexed by file id.
-inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const rw::FileAdjacency& adj )
 {
     const std::uint32_t       F = std::uint32_t( ing.files.size() );
     std::vector<std::uint8_t> prodDependent( F, 0 );
@@ -10100,14 +10109,14 @@ inline std::vector<std::uint32_t> depsGodfileRows( const IngestResult& ing, cons
 struct DepsCycleView
 {
     const std::vector<std::vector<std::uint32_t>>& cycles;
-    const std::vector<std::vector<std::uint32_t>>* adj              = nullptr;
+    const rw::FileAdjacency*                       adj              = nullptr;
     std::uint64_t                                  containmentEdges = 0;
 };
 
 inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       const DepsCycleView& cycleView,
                       const std::vector<std::uint32_t>& transitive, const std::vector<std::uint32_t>& afferent,
-                      const std::vector<std::vector<std::uint32_t>>& adj,
+                      const rw::FileAdjacency& adj,
                       std::uint64_t ccd, double acd, double nccd,
                       // parser version 83: the lazy pairs the load-time structure leaves out — per file (a row's
                       // lazy_edges=, written only when > 0) and in total (<health lazy_edges=>, same rule). See
@@ -10128,7 +10137,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
 {
     const std::size_t F = ing.files.size();
     const std::vector<std::vector<std::uint32_t>>& cycles           = cycleView.cycles;
-    const std::vector<std::vector<std::uint32_t>>& cutAdj           = cycleView.adj != nullptr ? *cycleView.adj : adj;
+    const rw::FileAdjacency&                       cutAdj           = cycleView.adj != nullptr ? *cycleView.adj : adj;
     const std::uint64_t                            containmentEdges = cycleView.containmentEdges;
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view

@@ -505,6 +505,10 @@ ingest_docpass.h	runDocPostPass	alert-only	1	FINDING (disclosure lane): a doc po
 mcpindex.h	maybePrefetchHeadSnapshot	silent	1	not an answer path: optional background prefetch of the HEAD snapshot; a request recomputes whatever it did not fill (§2b rule 3)
 REGB1
 cat > "$TMP/reg_b2.tsv" <<'REGB2'
+infra/fileSetStore.h	fromEdges	1	an adjacency past its u32 offset is a failed build, not a partial store (fileGraphStop.h); every surface catches it: main.cpp dispatchMain, mcp.h's envelope, mcpserver.h's warm-up, quality.h loadRefTree
+main.cpp	dispatchMainBody	1	the rethrow after joining the grep prefetch worker, which would std::terminate if unwound joinable; dispatchMain catches it
+mcpindex.h	getIndex	1	the rethrow after releasing the half-built index; mcp.h's request envelope and mcpserver.h's warm-up catch it
+memguard.h	guardedFileClosure	1	a stopped fold is a failed build, not a partial store (fileGraphStop.h); every surface catches it: main.cpp dispatchMain, mcp.h's envelope, mcpserver.h's warm-up, quality.h loadRefTree
 alloccount.cpp	operator new	2	the one throw seam CONTRIBUTING §3 permits: operator new under RIPWIRE_ALLOC_COUNT, an A/B instrument no shipped build links
 infra/dynamic_map.hpp	at	1	vendored container API; no ripwire call site reaches it (rule C lists its one caller, the container's own non-const at)
 regexguard.h	throwIfMatchFaultInjected	1	the RIPWIRE_FAULT_REGEX_MATCH fault switch, off unless the variable is set; its three call sites are the first statement inside GuardedRegex's search, search and forEachMatch try blocks, which catch std::regex_error by type and return Exhausted (a stopped --regex scan has one cause — the former MIXED sibling rode with the per-file match budget the PR #397 review removed)

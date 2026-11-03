@@ -321,7 +321,7 @@ ingest_cache.h	saveCache	fdopen	1	closes	adopts ExclTempFile's released fd; fclo
 ingest_crawl.h	runGitIgnoreProbe	popen	1	closes	the overflow break still reaches pclose
 ingest_docpass.h	publishDocBridgeBlob	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd
 lintrules.h	loadLintRules	fopen	1	closes	skips only a failed open; fclose after the sized read
-main.cpp	dispatchMain	fopen	1	closes	returns only on a failed open; fclose after the read loop
+main.cpp	dispatchMainBody	fopen	1	closes	returns only on a failed open; fclose after the read loop
 main.cpp	resolveRemoteRoot	popen	1	closes	no exit between popen and pclose
 main.cpp	runDefaultMap	fopen	1	closes	returns only on a failed open; fclose after the render
 main.cpp	scipIndexUnreadableReason	open	1	closes	close right after fstat, before every return

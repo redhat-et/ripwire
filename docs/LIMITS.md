@@ -693,7 +693,6 @@ Discloses: **none**
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kRadixThreshold` | `128` | BOUNDARY | — |
 | `kRadixThreshold` ×2 | `2048` | BOUNDARY | — |
 
 ### `src/infra/strkern.h`
@@ -757,6 +756,17 @@ Discloses: **none**
 | --- | --- | --- | --- |
 | `kBaseScopeScanCap` | `4096` | INDEXING | statements the unindexed scope scans read (not the index) |
 | `kMaxImportContainerDepth` | `256` | INDEXING | — |
+
+### `src/ingest_rest.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kMaxRestDepth` | `64` | — | — |
+| `kMaxRestName` | `256` | — | a longer "target" is a sentence, not a name |
+| `kMaxRestUnits` | `20000` | — | — |
+| `kMaxRoleBytes` | `400` | — | a role's closing backtick must be this near, on one paragraph |
 
 ### `src/ingest_sidecap.h`
 
@@ -1206,6 +1216,7 @@ Discloses: `capped`, `calls_capped`, `entries_capped`, `files_capped`, `importer
 | `kForCompactSurfaceBudgetBytes` | `1000` | — | — |
 | `kForFileTailPageRows` | `40` | — | FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault) |
 | `kForFileTailShownCap` | `24` | — | the rank rows (deep-tail d2): files outside the shown head |
+| `kForFileTailSphinxTxtRows` | `24` | — | code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h) |
 | `kForLensDefaultTopN` | `40` | — | — |
 | `kForPayloadBudgetBytes` | `7500` | — | — |
 | `kForTailSigBytes` | `160` | — | — |

@@ -970,118 +970,133 @@ inline int runLsp( const std::string& cliRoot )
             if( id.hasId ) resp = lspErrorJson( id.token, code, msg );
         };
 
-        if( method == "initialize" )
+        // F-LSP: a request whose file-graph fold stops (fileGraphStop.h) is answered, not fatal: -32803 RequestFailed (LSP 3.17)
+        // with the stop line, the index released by getIndex, and the server keeps serving. On initialize the throw comes before
+        // `initialized = true`, so the client can retry initialize; a notification has no id and gets no response.
+        try
         {
-            if( initialized )
+            if( method == "initialize" )
             {
-                respond( -32002, "server already initialized" );
-            }
-            else
-            {
-                std::string cand = lspUriToPath( rw::mcpdetail::findString( params, "rootUri" ) );
-                if( cand.empty() ) cand = cliRoot;
-                std::string noRootWhy;   // #350: why the launch cwd was not assumed, when it was a home/system directory
-                if( cand.empty() ) cand = rw::mcpResolveAssumedRoot( &noRootWhy );
-                const std::string canon = cand.empty() ? std::string() : rw::mcpCanonRoot( cand );
-                // #350 layer 1: an editor's rootUri is the window it opened, not a project a human named for ripwire —
-                // $HOME, a filesystem root or a system tree is refused like the MCP path=, unless it IS the root typed on
-                // the command line (`ripwire <root> --lsp`)
-                if( noRootWhy.empty() && !canon.empty() && ( cliRoot.empty() || canon != rw::mcpCanonRoot( cliRoot ) ) )
+                if( initialized )
                 {
-                    noRootWhy = rw::noProjectRootReason( rw::rootGuardCanon( canon.c_str() ) );
-                }
-                rw::os::stat_t    st;
-                if( !noRootWhy.empty() )
-                {
-                    respond( -32002, "ripwire --lsp: " + noRootWhy );
-                }
-                else if( canon.empty() || rw::os::stat( canon.c_str(), &st ) != 0 || !S_ISDIR( st.st_mode ) )
-                {
-                    respond( -32002, "ripwire --lsp: no readable workspace root (initialize.rootUri, the command-line root, or the launch cwd)" );
+                    respond( -32002, "server already initialized" );
                 }
                 else
                 {
-                    root        = canon;
-                    const rw::McpIndex& mix = rw::getIndex( root );   // warm-up HERE, not on the first navigation request
-                    initialized = true;
-                    rw::emitTo( stderr, "ripwire --lsp: serving {} (files={} symbols={}; utf-8 positions, saved-state answers — counts are floors)\n",
-                                root, mix.ing.files.size(), mix.ing.symbols.size() );
-                    if( id.hasId ) resp = lspResultJson( id.token, lspCapabilitiesJson() );
+                    std::string cand = lspUriToPath( rw::mcpdetail::findString( params, "rootUri" ) );
+                    if( cand.empty() ) cand = cliRoot;
+                    std::string noRootWhy;   // #350: why the launch cwd was not assumed, when it was a home/system directory
+                    if( cand.empty() ) cand = rw::mcpResolveAssumedRoot( &noRootWhy );
+                    const std::string canon = cand.empty() ? std::string() : rw::mcpCanonRoot( cand );
+                    // #350 layer 1: an editor's rootUri is the window it opened, not a project a human named for ripwire —
+                    // $HOME, a filesystem root or a system tree is refused like the MCP path=, unless it IS the root typed on
+                    // the command line (`ripwire <root> --lsp`)
+                    if( noRootWhy.empty() && !canon.empty() && ( cliRoot.empty() || canon != rw::mcpCanonRoot( cliRoot ) ) )
+                    {
+                        noRootWhy = rw::noProjectRootReason( rw::rootGuardCanon( canon.c_str() ) );
+                    }
+                    rw::os::stat_t    st;
+                    if( !noRootWhy.empty() )
+                    {
+                        respond( -32002, "ripwire --lsp: " + noRootWhy );
+                    }
+                    else if( canon.empty() || rw::os::stat( canon.c_str(), &st ) != 0 || !S_ISDIR( st.st_mode ) )
+                    {
+                        respond( -32002, "ripwire --lsp: no readable workspace root (initialize.rootUri, the command-line root, or the launch cwd)" );
+                    }
+                    else
+                    {
+                        root        = canon;
+                        const rw::McpIndex& mix = rw::getIndex( root );   // warm-up HERE, not on the first navigation request
+                        initialized = true;
+                        rw::emitTo( stderr, "ripwire --lsp: serving {} (files={} symbols={}; utf-8 positions, saved-state answers — counts are floors)\n",
+                                    root, mix.ing.files.size(), mix.ing.symbols.size() );
+                        if( id.hasId ) resp = lspResultJson( id.token, lspCapabilitiesJson() );
+                    }
                 }
             }
-        }
-        else if( method == "initialized" || method == "$/cancelRequest" || method.rfind( "textDocument/did", 0 ) == 0 )
-        {
-            // notifications: no response, per the protocol. Phase 1 records open/close nowhere — answers
-            // read only saved state — and $/cancelRequest has nothing to cancel: the loop serves one
-            // request at a time; a Phase-2 multiplexed transport would answer -32800.
-        }
-        else if( method == "shutdown" )
-        {
-            shutDown = true;
-            if( id.hasId ) resp = lspResultJson( id.token, "null" );
-        }
-        else if( !id.hasId )
-        {
-            // an unknown notification — ignore it, as the spec directs
-        }
-        else if( !initialized )
-        {
-            respond( -32002, "server not initialized" );
-        }
-        else if( shutDown )
-        {
-            respond( -32001, "server is shut down" );
-        }
-        else if( method == "textDocument/definition" )
-        {
-            const LspPos pos = lspReadPos( params );
-            if( !pos.ok ) respond( -32602, "textDocument/definition needs params.textDocument.uri and params.position{line,character}" );
-            else { const rw::McpIndex& mix = rw::getIndex( root ); LspDocs docs( mix.ing );
-                   const LspDefinitionAnswer d = lspDefinition( mix.ing, cwd, docs, pos );
-                   if( !d.notice.empty() ) lspWriteMessage( stdout, d.notice );
-                   resp = lspResultJson( id.token, d.result ); }
-        }
-        else if( method == "textDocument/references" )
-        {
-            const LspPos pos = lspReadPos( params );
-            if( !pos.ok ) respond( -32602, "textDocument/references needs params.textDocument.uri and params.position{line,character}" );
-            else
+            else if( method == "initialized" || method == "$/cancelRequest" || method.rfind( "textDocument/did", 0 ) == 0 )
             {
-                const rw::mcpdetail::RawValue iv = rw::mcpdetail::findRawValue(
-                    rw::mcpdetail::findObject( params, "context" ), "includeDeclaration" );
+                // notifications: no response, per the protocol. Phase 1 records open/close nowhere — answers
+                // read only saved state — and $/cancelRequest has nothing to cancel: the loop serves one
+                // request at a time; a Phase-2 multiplexed transport would answer -32800.
+            }
+            else if( method == "shutdown" )
+            {
+                shutDown = true;
+                if( id.hasId ) resp = lspResultJson( id.token, "null" );
+            }
+            else if( !id.hasId )
+            {
+                // an unknown notification — ignore it, as the spec directs
+            }
+            else if( !initialized )
+            {
+                respond( -32002, "server not initialized" );
+            }
+            else if( shutDown )
+            {
+                respond( -32001, "server is shut down" );
+            }
+            else if( method == "textDocument/definition" )
+            {
+                const LspPos pos = lspReadPos( params );
+                if( !pos.ok ) respond( -32602, "textDocument/definition needs params.textDocument.uri and params.position{line,character}" );
+                else { const rw::McpIndex& mix = rw::getIndex( root ); LspDocs docs( mix.ing );
+                       const LspDefinitionAnswer d = lspDefinition( mix.ing, cwd, docs, pos );
+                       if( !d.notice.empty() ) lspWriteMessage( stdout, d.notice );
+                       resp = lspResultJson( id.token, d.result ); }
+            }
+            else if( method == "textDocument/references" )
+            {
+                const LspPos pos = lspReadPos( params );
+                if( !pos.ok ) respond( -32602, "textDocument/references needs params.textDocument.uri and params.position{line,character}" );
+                else
+                {
+                    const rw::mcpdetail::RawValue iv = rw::mcpdetail::findRawValue(
+                        rw::mcpdetail::findObject( params, "context" ), "includeDeclaration" );
+                    const rw::McpIndex& mix = rw::getIndex( root );
+                    LspDocs         docs( mix.ing );
+                    resp = lspResultJson( id.token, lspReferences( mix.ing, mix.g, cwd, docs, pos, iv.isPresent && iv.text == "true" ) );
+                }
+            }
+            else if( method == "textDocument/documentSymbol" )
+            {
+                const std::string uri = lspDocUri( params );
+                if( uri.empty() ) respond( -32602, "textDocument/documentSymbol needs params.textDocument.uri" );
+                else { const rw::McpIndex& mix = rw::getIndex( root ); LspDocs docs( mix.ing );
+                       resp = lspResultJson( id.token, lspDocumentSymbol( mix.ing, cwd, docs, uri ) ); }
+            }
+            else if( method == "workspace/symbol" )
+            {
                 const rw::McpIndex& mix = rw::getIndex( root );
                 LspDocs         docs( mix.ing );
-                resp = lspResultJson( id.token, lspReferences( mix.ing, mix.g, cwd, docs, pos, iv.isPresent && iv.text == "true" ) );
+                const std::string   query = rw::mcpdetail::findString( params, "query" );
+                std::size_t         total = 0;
+                const std::string   items = lspWorkspaceSymbol( mix.ing, cwd, docs, query, total );
+                if( total > kLspWorkspaceCap ) lspWriteMessage( stdout, lspWorkspaceCapNotice( query, total ) );
+                resp = lspResultJson( id.token, items );
+            }
+            else if( method == "textDocument/hover" )
+            {
+                const LspPos pos = lspReadPos( params );
+                if( !pos.ok ) respond( -32602, "textDocument/hover needs params.textDocument.uri and params.position{line,character}" );
+                else { const rw::McpIndex& mix = rw::getIndex( root ); LspDocs docs( mix.ing );
+                       resp = lspResultJson( id.token, lspHover( mix.ing, mix.g, cwd, docs, pos ) ); }
+            }
+            else
+            {
+                respond( -32601, "method not found: " + method );
             }
         }
-        else if( method == "textDocument/documentSymbol" )
+        catch( const rw::FileGraphStopped& stopped )
         {
-            const std::string uri = lspDocUri( params );
-            if( uri.empty() ) respond( -32602, "textDocument/documentSymbol needs params.textDocument.uri" );
-            else { const rw::McpIndex& mix = rw::getIndex( root ); LspDocs docs( mix.ing );
-                   resp = lspResultJson( id.token, lspDocumentSymbol( mix.ing, cwd, docs, uri ) ); }
-        }
-        else if( method == "workspace/symbol" )
-        {
-            const rw::McpIndex& mix = rw::getIndex( root );
-            LspDocs         docs( mix.ing );
-            const std::string   query = rw::mcpdetail::findString( params, "query" );
-            std::size_t         total = 0;
-            const std::string   items = lspWorkspaceSymbol( mix.ing, cwd, docs, query, total );
-            if( total > kLspWorkspaceCap ) lspWriteMessage( stdout, lspWorkspaceCapNotice( query, total ) );
-            resp = lspResultJson( id.token, items );
-        }
-        else if( method == "textDocument/hover" )
-        {
-            const LspPos pos = lspReadPos( params );
-            if( !pos.ok ) respond( -32602, "textDocument/hover needs params.textDocument.uri and params.position{line,character}" );
-            else { const rw::McpIndex& mix = rw::getIndex( root ); LspDocs docs( mix.ing );
-                   resp = lspResultJson( id.token, lspHover( mix.ing, mix.g, cwd, docs, pos ) ); }
-        }
-        else
-        {
-            respond( -32601, "method not found: " + method );
+            rw::memguard::answerStops();
+            if( id.hasId )
+            {
+                resp = lspErrorJson( id.token, -32803, "ripwire --lsp: " + rw::memguard::hardStopLine( "graph build", {}, stopped.why() )
+                                                           + "; this request failed, the index was released and the next request retries the build" );
+            }
         }
 
         if( !resp.empty() ) lspWriteMessage( stdout, resp );
