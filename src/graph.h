@@ -7148,8 +7148,9 @@ struct RustMacroScope
 {
     std::vector<std::string> files;   // identity paths of the files whose whole text sees the macro
     std::vector<std::string> dirs;    // identity directory prefixes (no trailing '/') whose files are child modules in scope
-    std::vector<std::string> others;  // under a crate root's directory, the files of the package's OTHER crates: `src/bin/` and the
-                                      // `main.rs` beside a `lib.rs` (or the `lib.rs` beside a `main.rs`); a directory prefix or one file
+    std::vector<std::string> others;  // under a crate root's directory, the files of the package's OTHER crates: `src/bin/`, the
+                                      // `main.rs` beside a `lib.rs` (or the `lib.rs` beside a `main.rs`) and another manifest-named root
+                                      // there (`[lib] path` beside `[[bin]] path`); a directory prefix or one file
     bool holds( std::string_view path ) const
     {
         const auto under = [ & ]( const std::string& d ) { return d.empty() || ( path.size() > d.size() && path.starts_with( d ) && path[ d.size() ] == '/' ); };   // "": the top level owns all
@@ -7161,6 +7162,7 @@ struct RustMacroScopeCache
 {
     HashMap<std::uint32_t, RustMacroScope> scopes;          // per macro file
     HashMap<std::string, char>             manifestRoots;   // identity paths of the crate roots a Cargo.toml names (`[lib] path`, `[[bin]] path`)
+    HashMap<std::string, char>             libMainFiles;    // identity paths of the tree's `lib.rs` / `main.rs` files
     bool                                   rootsRead = false;
 };
 
@@ -7235,6 +7237,10 @@ inline const HashMap<std::string, char>& rustManifestRoots( const IngestResult& 
     for( std::uint32_t f = 0; f < ing.files.size(); ++f )
     {
         const std::string_view ident = ing.files[ f ];
+        if( ident == "lib.rs" || ident == "main.rs" || ident.ends_with( "/lib.rs" ) || ident.ends_with( "/main.rs" ) )
+        {
+            cache.libMainFiles.try_emplace( std::string( ident ), '\0' );
+        }
         if( ident != "Cargo.toml" && !ident.ends_with( "/Cargo.toml" ) )
         {
             continue;
@@ -7248,8 +7254,22 @@ inline const HashMap<std::string, char>& rustManifestRoots( const IngestResult& 
         tomlSectionNames( *text, { "[lib]", "[[bin]]" }, paths, "path" );
         for( const std::string& p : paths )
         {
-            // the manifest's directory exactly as the identity path spells it (a root given as `T//x` keeps its `//`), the written path normalized
-            cache.manifestRoots.try_emplace( std::string( ident.substr( 0, ident.size() - 10 ) ) + lexicalNormalize( p ), '\0' );
+            // the manifest's directory exactly as the identity path spells it (a root given as `T//x` keeps its `//`), the written path normalized;
+            // a path that leaves the package (`../shared/b.rs`) resolves against the manifest's directory: `crates/b/../shared/b.rs` is `crates/shared/b.rs`
+            // (each leading `../` pops one directory of the manifest's own, so its spelling, `//` included, stays as the identity path has it)
+            std::string      dir  = std::string( ident.substr( 0, ident.size() - 10 ) );
+            std::string_view rest = p;
+            while( rest.starts_with( "../" ) && !dir.empty() )
+            {
+                dir.pop_back();
+                dir.resize( dir.rfind( '/' ) + 1 );   // npos + 1 == 0: the top level
+                rest.remove_prefix( 3 );
+            }
+            const std::string norm = lexicalNormalize( rest );
+            if( !norm.empty() )
+            {
+                cache.manifestRoots.try_emplace( dir + norm, '\0' );
+            }
         }
     }
     return cache.manifestRoots;
@@ -7294,6 +7314,29 @@ inline bool rustDeclaresMacroUseMod( std::string_view source, std::string_view n
     return false;
 }
 
+// The module names `source` declares (`mod x;`, `pub(crate) mod x {`), in order: a text scan of the code (comments and strings blanked first).
+inline std::vector<std::string> rustDeclaredModNames( std::string_view source )
+{
+    const std::string code    = rustBlankCommentsAndStrings( source );
+    const auto        isIdent = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    std::vector<std::string> names;
+    for( std::size_t hit = code.find( "mod" ); hit != std::string::npos; hit = code.find( "mod", hit + 3 ) )
+    {
+        const std::size_t from = std::min( code.find_first_not_of( " \t\r\n", hit + 3 ), code.size() );
+        std::size_t       to   = from;
+        while( to < code.size() && isIdent( code[ to ] ) )
+        {
+            ++to;
+        }
+        const std::size_t after = std::min( code.find_first_not_of( " \t\r\n", to ), code.size() );
+        if( ( hit == 0 || !isIdent( code[ hit - 1 ] ) ) && from > hit + 3 && to > from && after < code.size() && ( code[ after ] == ';' || code[ after ] == '{' ) )
+        {
+            names.push_back( code.substr( from, to - from ) );
+        }
+    }
+    return names;
+}
+
 // The scope of the non-exported macros file `m` defines (RustMacroScope), built once per file.
 inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uint32_t m, RustMacroScopeCache& cache )
 {
@@ -7325,6 +7368,28 @@ inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uin
             const auto in = [ & ]( std::string_view f ) { return identDir.empty() ? std::string( f ) : identDir + "/" + std::string( f ); };
             scope.others.push_back( in( "bin" ) );   // each src/bin/*.rs is a crate of its own
             scope.others.push_back( in( stem == "main" ? "lib.rs" : "main.rs" ) );
+            // MACRO-MANIFEST-SIBLINGS: a directory this root shares with another crate root (another manifest-named root there, a main.rs or
+            // lib.rs beside a manifest-named root, or the other auto bins beside a root in a `bin` directory) holds that crate's modules
+            // too, so the root owns only the modules it declares there. A plain lib.rs beside a main.rs keeps the whole directory.
+            bool shared = split( identDir ).second == "bin" || ( manifestRoot && stem != "lib" && stem != "main" && ( cache.libMainFiles.contains( in( "main.rs" ) ) || cache.libMainFiles.contains( in( "lib.rs" ) ) ) );
+            for( const auto& [ root, unused ] : roots )
+            {
+                if( root != ident && split( root ).first == identDir && !root.ends_with( "/lib.rs" ) && !root.ends_with( "/main.rs" ) && root != "lib.rs" && root != "main.rs" )
+                {
+                    scope.others.push_back( root );
+                    shared = true;
+                }
+            }
+            if( shared )
+            {
+                scope.dirs.pop_back();
+                const std::optional<std::string> text = docparse::detail::readWholeFile( disk );
+                for( const std::string& name : text ? rustDeclaredModNames( *text ) : std::vector<std::string>() )
+                {
+                    scope.files.push_back( in( name + ".rs" ) );
+                    scope.dirs.push_back( in( name ) );
+                }
+            }
         }
         if( stem == "lib" || stem == "main" || manifestRoot || ( stem == "mod" && identDir.empty() ) )
         {

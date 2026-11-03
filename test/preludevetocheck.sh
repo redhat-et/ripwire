@@ -233,6 +233,43 @@ row M7.mainrs      "$L" callees mz  src/lib.rs lm         none
 row M7.twin2       "$L" callees mz  src/main.rs here2     proven
 w "$G/src/bin/tool.rs" 'fn there() {}\nfn gtz() { rootm!(); there(); }\n'
 row M7.libpathbin  "$G" callees gtz src/g.rs rootm        none
+# M8 (MACRO-MANIFEST-SIBLINGS): crate roots that share a directory (`[lib] path` beside a `[[bin]] path`, a `[[bin]] path` in src/bin beside
+# an auto bin, a main.rs beside a `[lib] path`) own only the modules each declares there; a `[lib] path` outside the package (`../shared/b.rs`)
+# owns its directory
+S=$T/sib
+w "$S/Cargo.toml" '[workspace]\nmembers = ["crates/a", "crates/b", "crates/z"]\n'
+w "$S/crates/a/Cargo.toml" '[package]\nname = "a"\nversion = "0.1.0"\n\n[lib]\npath = "src/a_lib.rs"\n\n[[bin]]\nname = "acli"\npath = "src/a_cli.rs"\n\n[[bin]]\nname = "x"\npath = "src/bin/x.rs"\n'
+w "$S/crates/a/src/a_lib.rs" 'macro_rules! lm { () => { 1 } }\n#[macro_use]\nmod macros;\nmod helper;\npub fn lf() -> i32 { lm!() }\n'
+w "$S/crates/a/src/macros.rs" 'macro_rules! mm { () => { 2 } }\n'
+w "$S/crates/a/src/helper.rs" 'pub fn hf() -> i32 { lm!() + mm!() }\npub fn hc() -> i32 { cm!() }\n'
+w "$S/crates/a/src/a_cli.rs" 'macro_rules! cm { () => { 3 } }\nmod clih;\npub fn cliuse() -> i32 { lm!() + mm!() + cm!() }\nfn main() {}\n'
+w "$S/crates/a/src/clih.rs" 'pub fn ch() -> i32 { cm!() }\n'
+w "$S/crates/a/src/bin/x.rs" 'macro_rules! xm { () => { 4 } }\npub mod xh;\npub fn xf() -> i32 { xm!() }\nfn main() {}\n'
+w "$S/crates/a/src/bin/xh.rs" 'pub fn xhf() -> i32 { xm!() }\n'
+w "$S/crates/a/src/bin/y.rs" 'pub fn yf() -> i32 { xm!() + lm!() }\nfn main() {}\n'
+w "$S/crates/b/Cargo.toml" '[package]\nname = "b"\nversion = "0.1.0"\n\n[lib]\npath = "../shared/b.rs"\n'
+w "$S/crates/shared/b.rs" 'macro_rules! bm { () => { 5 } }\nmod bh;\n'
+w "$S/crates/shared/bh.rs" 'pub fn bhf() -> i32 { bm!() }\n'
+w "$S/crates/z/Cargo.toml" "[package]\nname = 'z'\nversion = '0.1.0'\n[lib]\npath = 'src/zl.rs'\n"
+w "$S/crates/z/src/zl.rs" 'macro_rules! zm { () => {} }\npub mod zc;\n'
+w "$S/crates/z/src/zc.rs" 'pub fn zcf() { zm!(); }\n'
+w "$S/crates/z/src/main.rs" 'macro_rules! mainm { () => {} }\nmod zmod;\nfn zmain() { zm!(); mainm!(); }\nfn main() { zmain(); }\n'
+w "$S/crates/z/src/zmod.rs" 'pub fn zmf() { zm!(); mainm!(); }\n'
+row M8.hflib       "$S" callees hf     crates/a/src/a_lib.rs lm   present
+row M8.hfmu        "$S" callees hf     crates/a/src/macros.rs mm  present
+row M8.hc          "$S" callees hc     crates/a/src/a_cli.rs cm   none
+row M8.cliuselm    "$S" callees cliuse crates/a/src/a_lib.rs lm   none
+row M8.cliusemm    "$S" callees cliuse crates/a/src/macros.rs mm  none
+row M8.cliuseown   "$S" callees cliuse crates/a/src/a_cli.rs cm   present
+row M8.clichild    "$S" callees ch     crates/a/src/a_cli.rs cm   present
+row M8.yf          "$S" callees yf     crates/a/src/bin/x.rs xm   none
+row M8.yflib       "$S" callees yf     crates/a/src/a_lib.rs lm   none
+row M8.xchild      "$S" callees xhf    crates/a/src/bin/x.rs xm   present
+row M8.bhf         "$S" callees bhf    crates/shared/b.rs bm      present
+row M8.zchild      "$S" callees zcf    crates/z/src/zl.rs zm      present
+row M8.zmain       "$S" callees zmain  crates/z/src/zl.rs zm      none
+row M8.zmainmod    "$S" callees zmf    crates/z/src/zl.rs zm      none
+row M8.zmainown    "$S" callees zmf    crates/z/src/main.rs mainm present
 w "$W/crates/g/Cargo.toml" '[package]\nname = "g"\nversion = "0.1.0"\n[lib]\npath = "src/g.rs"\n'
 w "$W/crates/g/src/g.rs" '#[macro_use]\nmod gm;\npub mod gu;\nmacro_rules! groot { () => {} }\n'
 w "$W/crates/g/src/gm.rs" 'macro_rules! gmm { () => {} }\n'
