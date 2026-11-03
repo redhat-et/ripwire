@@ -722,18 +722,20 @@ inline std::string partialAbsenceLine( const IngestResult& ing )
 // the peak when it went over the limit, else 0: the real reading only on a build that routes, the seam on every build
 inline std::uint64_t runPeakOverLimit() { return peakOverLimitWith( kDisclosePeakOnThisBuild, /*seamLaterToo=*/true ); }
 
-// the peak line: the run finished and answered, by how far it went over, and what the limit is for
-inline std::string peakOverLine( std::uint64_t peak )
+// the peak line: the run finished (and answered, unless `outcome` says otherwise), by how far it went over, and what the
+// limit is for
+inline std::string peakOverLine( std::uint64_t peak, std::string_view outcome = "the run finished and answered" )
 {
-    return std::format( "memory peak {} went over the {} limit ({}), and the run finished and answered: the guard reads the limit between "
+    return std::format( "memory peak {} went over the {} limit ({}), and {}: the guard reads the limit between "
                         "phases, and by then this run had given that memory back. The limit is a rule of thumb that keeps the machine from "
                         "running out of memory, not an exact line — {}",
-                        limitSpelling( peak ), limitSpelling( limits().hardBytes ), limitSourceClause(), kOverride );
+                        limitSpelling( peak ), limitSpelling( limits().hardBytes ), limitSourceClause(), outcome, kOverride );
 }
 
 // the MCP envelope's `_memory_peak`: the sentence when this server's peak has risen over the limit since the last time it
-// said so (the peak never falls, so saying it on every answer would repeat one fact), else empty
-inline std::string peakNoteOnIncrease()
+// said so (the peak never falls, so saying it on every answer would repeat one fact), else empty. An error response says it
+// too, in its message, with `outcome` naming what that request did instead of answering.
+inline std::string peakNoteOnIncrease( std::string_view outcome = "the run finished and answered" )
 {
     static std::atomic<std::uint64_t> announced{ 0 };
     const std::uint64_t peak = runPeakOverLimit();
@@ -747,7 +749,7 @@ inline std::string peakNoteOnIncrease()
     {
         if( announced.compare_exchange_weak( seen, mib, std::memory_order_relaxed ) )
         {
-            return peakOverLine( peak );
+            return peakOverLine( peak, outcome );
         }
     }
     return {};

@@ -1777,16 +1777,31 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 }
                 return {};
             };
+            // the overshoot on an error: a request that built an index and then refused (a not-found after getIndex) may be the
+            // last call a client makes, so the error says the peak the success path's `_memory_peak` would have said. Not beside
+            // a guard sentence already in the message (a hard-line refusal names the limit and the override itself).
+            const auto memoryPeakSuffix = [ & ]( std::string_view msg ) -> std::string
+            {
+                if( msg.find( memguard::kOverride ) != std::string_view::npos )
+                {
+                    return {};
+                }
+                const std::string note = memguard::peakNoteOnIncrease( "this request finished with the error above" );
+                return note.empty() ? note : "; " + note;
+            };
             const auto errResult = [ & ]( int code, const char* msg )
             {
-                const std::string suffix = memoryStopSuffix( msg );
+                const std::string suffix = memoryStopSuffix( msg ) + memoryPeakSuffix( msg );
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\"" + msg
                      + mcpdetail::jsonEscape( suffix ) + "\"}}";
             };
             // dynamic-message variant (edit verbs build refusal messages that embed symbol names / candidate
             // file:line lists) — JSON-escape so a path with a quote or a control byte can't corrupt the response.
             const auto errResultMsg = [ & ]( int code, const std::string& msg )
-            { return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\"" + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) ) + "\"}}"; };
+            {
+                return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + std::to_string( code ) + ",\"message\":\""
+                     + mcpdetail::jsonEscape( msg + memoryStopSuffix( msg ) + memoryPeakSuffix( msg ) ) + "\"}}";
+            };
             // §B6 M8: the shared not-found renderers, bound to THIS request's index. Seven verbs on both
             // arms answered a bare "symbol not found" — no echo of what the caller typed, no near-miss —
             // while the CLI twin has carried both since A3-F16a and the `flags` verb below carries both

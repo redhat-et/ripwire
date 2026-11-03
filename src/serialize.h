@@ -10768,6 +10768,8 @@ struct JsonMapHeader
     bool                             isEstModelled      = false;   // MapEstimate: "est_measured":false, absent when measured
     DataSectionsCut                  dataSectionsCut    = {};      // the code-first pick's swaps: "data_sections_cut":N + "next", absent at N=0
     std::size_t                      stemCut            = 0;       // MAP-STEM: "stem_cut":N, the XML stem_cut=, absent at N=0
+    std::string_view                 memoryPeakJson     = {};      // buildMemoryPeakAttr( ing, true ), read ONCE per serializeJson call (the
+                                                                   // peak reading only rises and the seam counts calls); kept last, the struct is filled positionally
 };
 
 // §B1.2: the PROVENANCE stamp — the JSON half of the XML `<r at= rank_by= window=>` attributes. Without it
@@ -10942,7 +10944,7 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         w.write( hdr );
     }
     w.write( buildMemoryStopAttr( h.ing, true ) );   // #350, JSON lane: empty unless the memory guard stopped the ingest
-    w.write( buildMemoryPeakAttr( h.ing, true ) );   // the overshoot: empty unless the peak went over the limit
+    w.write( h.memoryPeakJson );   // the overshoot: empty unless the peak went over the limit (read once by the caller)
 
     // §SEC1, JSON lane: the crawl-boundary refusal must reach --json/MCP consumers too, by the same argument
     // skipped_oversize= makes one paragraph up — the audience most likely to be a model is the one least able
@@ -11219,7 +11221,9 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     }
 
     // ONE header emitter, used by the degrade write, the size probe and the real write, so the three can
-    // never disagree on the header's shape.
+    // never disagree on the header's shape. The peak attribute is read here once for all three: a second reading may
+    // pass the limit the first did not, and the probe would then have priced a shorter header than the one written.
+    const std::string memoryPeakJson = buildMemoryPeakAttr( ing, true );
     std::string esc;
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
@@ -11227,7 +11231,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
                                                     unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls, declinedTotal,
                                                     extentSuspectTotal, macroBlankedFileCount( ing ), ing.crawlSkips.nestRefusedFiles,
-                                                    estimate.isModelled, dataSecCut, stemPick.cut } );
+                                                    estimate.isModelled, dataSecCut, stemPick.cut, memoryPeakJson } );
         hw.write( ",\"r\":[" );
     };
 

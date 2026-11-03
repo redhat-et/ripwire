@@ -707,6 +707,32 @@ if [ -z "$( mcp_field "$TMP/b8c4.out" 3 _memory_peak )" ]; then
 else
     no "(B8c) MCP id=3 repeats _memory_peak"
 fi
+# an error built after the index (a not-found) may be a client's last call: it says the peak too, and the next answer does not
+# repeat it (red on 19d60eaa: the error said nothing and only a later success carried it)
+printf '%s\n' \
+    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"mentions\",\"arguments\":{\"path\":\"$FX\",\"symbol\":\"no_such_sym\"}}}" \
+    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    | RIPWIRE_TEST_MEMGUARD=peak:1 mcp_call "$TMP" --max-memory=64M >"$TMP/b8c5.out"
+me="$( mcp_field "$TMP/b8c5.out" 2 error )"
+case "$me" in *"symbol not found"*"; memory peak 65M went over the 64M limit (from --max-memory), and this request finished with the error above"*"$peakwhy"*)
+    if [ -z "$( mcp_field "$TMP/b8c5.out" 3 _memory_peak )" ]; then
+        ok "(B8c) MCP: an error after the index says the peak in its message, and the next answer does not repeat it"
+    else
+        no "(B8c) MCP: the answer after the error repeats _memory_peak"
+    fi ;;
+    *) no "(B8c) MCP error id=2 lacks the peak: '${me:0:300}'" ;; esac
+# the JSON header reads the peak once for the size probe and the real write: at peak:2 (the second reading over) the header
+# either lacks memory_peak or its est_tokens priced it (red on 19d60eaa: memory_peak written, est_tokens of the shorter probe)
+RIPWIRE_TEST_MEMGUARD=peak:1 "$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c6a.out" 2>/dev/null
+RIPWIRE_TEST_MEMGUARD=peak:2 "$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c6b.out" 2>/dev/null
+"$BIN" "$FX" --no-cache --max-memory=64M --json >"$TMP/b8c6c.out" 2>/dev/null
+est(){ grep -oE '"est_tokens":[0-9]+' "$1" | head -1; }
+if grep -q '"memory_peak"' "$TMP/b8c6b.out"; then want="$( est "$TMP/b8c6a.out" )"; else want="$( est "$TMP/b8c6c.out" )"; fi
+if [ -n "$want" ] && [ "$( est "$TMP/b8c6b.out" )" = "$want" ]; then
+    ok "(B8c) --json at peak:2: est_tokens prices the header actually written ($want)"
+else
+    no "(B8c) --json at peak:2: $( est "$TMP/b8c6b.out" ) against $want, memory_peak $( grep -c '"memory_peak"' "$TMP/b8c6b.out" )"
+fi
 
 # (B9) the pressure path: a pressure stop is disclosed as such, and a pressure stop with nothing built says pressure
 run_trip pressure:30 "$FX" --no-cache >"$TMP/b9.out" 2>"$TMP/b9.err"; rc=$?

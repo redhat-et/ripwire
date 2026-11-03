@@ -17,7 +17,9 @@
 #      2026-11-01: disclosed, not enforced): the stderr line with the peak, the cap and what the cap is for, and
 #      memory_peak= in the map header; the answer is otherwise the unlimited run's. A stop (exit 5, memory_stop=) is also
 #      honest. Silence is the failure (red on 38be976d, which finished at 1.0-1.3x its cap with nothing said).
-# A sanitizer binary owns operator new and runs U only, and says so. Any other macOS binary must carry the route.
+# A macOS binary without the route runs U only, and says so, when its build says it should not have one: a sanitizer binary
+# (it owns operator new), or a build whose CMakeCache.txt beside the binary has RIPWIRE_LARGE_ALLOC=OFF, RIPWIRE_ALLOC_COUNT=ON or
+# a -fsanitize= flag. Any other macOS binary must carry the route; one that does not fails here, before P can pass on noise.
 #
 # Usage: RIPWIRE_BIN=build/ripwire bash test/largeallocpeakcheck.sh
 set -u
@@ -52,13 +54,32 @@ else
     no "U: unit arms"; "$TMP/ut" | head -20
 fi
 
-# ---- does this binary carry a route? ----
+# ---- does this binary carry a route? src/largealloc.cpp is the only source that spells RIPWIRE_TEST_LARGEALLOC, so the
+#      string in the binary is the route's mark (P's peak ratio alone is not: two route-off runs can differ by 30 %). ----
 ROUTED=0
 case "$( uname -s )" in
-    Darwin) nm "$BIN" 2>/dev/null | grep -Eq '___(asan|tsan)_init' || ROUTED=1 ;;
+    Darwin)
+        if LC_ALL=C grep -aqF RIPWIRE_TEST_LARGEALLOC "$BIN"; then
+            ROUTED=1
+        else
+            why=""
+            nm "$BIN" 2>/dev/null | grep -Eq '___(asan|tsan)_init' && why="a sanitizer binary"
+            CACHE="$( dirname "$BIN" )/CMakeCache.txt"
+            if [ -z "$why" ] && [ -f "$CACHE" ]; then
+                if grep -Eq '^RIPWIRE_LARGE_ALLOC:BOOL=(OFF|0|FALSE|NO)$' "$CACHE"; then why="built with RIPWIRE_LARGE_ALLOC=OFF"
+                elif grep -Eq '^RIPWIRE_ALLOC_COUNT:BOOL=(ON|1|TRUE|YES)$' "$CACHE"; then why="built with RIPWIRE_ALLOC_COUNT=ON"
+                elif grep -Eq '^(RIPWIRE_(ASAN|TSAN|FUZZ):BOOL=(ON|1|TRUE|YES)|CMAKE_CXX_FLAGS[A-Z_]*:[A-Z]+=.*-fsanitize=)' "$CACHE"; then why="a sanitizer build"
+                fi
+            fi
+            if [ -z "$why" ]; then
+                no "this macOS binary links no large-block route, and nothing says it should not (no sanitizer; $CACHE does not opt out)"
+            else
+                echo "  note  no large-block route: $why"
+            fi
+        fi ;;
 esac
 if [ "$ROUTED" != 1 ]; then
-    echo "  SKIP  P, B, M: this binary has no large-block route ($( "$BIN" --version | head -1 ))"
+    echo "  SKIP  P, B, M, D: this binary has no large-block route ($( "$BIN" --version | head -1 ))"
     [ "$fail" = 0 ] && { echo "PASS largeallocpeakcheck"; exit 0; }
     echo "FAIL largeallocpeakcheck"; exit 1
 fi

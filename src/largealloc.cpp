@@ -33,6 +33,8 @@ void* allocOrNull( std::size_t n ) noexcept
 {
     if( n >= rw::largealloc::kMinBytes )
     {
+        // the variable's name is also the route's mark: test/largeallocpeakcheck.sh finds it in the binary to tell a build
+        // that links this file from one that does not, so no other source file spells it
         static const bool off = []
         { const char* v = std::getenv( "RIPWIRE_TEST_LARGEALLOC" ); return v != nullptr && v[ 0 ] == 'o' && v[ 1 ] == 'f'; }();
         if( !off )
