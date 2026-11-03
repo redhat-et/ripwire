@@ -533,6 +533,7 @@ Discloses: `capped`
 | `kReexportRowCap` | `8` | — | hop rows per definition (BFS order); the rest counted in total= |
 | `kReexportSpellingCap` | `256` | — | spellings one walk visits; past it total= is a floor (capped="1") |
 | `kReexportUseCap` | `2` | — | use-site rows per definition, from task-named files |
+| `kShortKeyRows` | `6` | — | rows per rung (a runaway guard; total= counts all) |
 
 ### `src/forselfhook.h`
 
