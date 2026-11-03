@@ -775,6 +775,7 @@ inline std::vector<std::uint64_t> topLevelCalleeNameHashes( const IngestResult& 
 //   * a METHOD named init/deinit/constructor is Swift's / JavaScript's spelling of the same constructor
 //     protocol. Scoped to Method deliberately: a free function called `init` is an ordinary function, and
 //     excluding it would be the header rule's over-reach in a smaller costume.
+// A Rust Drop::drop is not a name rule here: it needs its impl block, so rustDropImplMethodIds (below) exempts it.
 // FLOOR, stated: this is a NAME-level rule, exactly like the resolver's own bare-name matching, and it errs
 // toward false-LIVE (a symbol wrongly considered invoked is silently not reported) rather than false-dead,
 // which is the direction a deletion candidate must err in.
@@ -862,15 +863,16 @@ inline bool pythonFrameworkInvokedSymbol( const Symbol& s, std::string_view p ) 
 // registered self-registering macro. A SIMPLE,
 // internally-consistent heuristic — the delta only needs baseline↔current consistency, not parity with the
 // fuller --dead-code verb. `topLevelCallees` is the sorted set topLevelCalleeNameHashes builds and
-// `registeredMacroIds` the sorted set registeredMacroSymbolIds builds (below, past forEachSymbolBody) —
-// every call site builds both ONCE outside its symbol loop. `exemptedByRegisterMacro`, when non-null, is
-// set true iff this symbol satisfied every OTHER test here and was excluded SOLELY by the macro check —
-// the signal a caller needs to disclose an honest "N excluded" count instead of just applying the rule
-// silently (P2.2's honesty requirement).
+// `registeredMacroIds` the sorted set registeredMacroSymbolIds builds (below, past forEachSymbolBody), and `dropImplIds` the
+// sorted set rustDropImplMethodIds builds. Every call site builds all three ONCE outside its symbol loop. `exemptedByRegisterMacro`,
+// when non-null, is set true iff this symbol satisfied every OTHER test here and was excluded SOLELY by the macro check — the
+// signal a caller needs to disclose an honest "N excluded" count instead of just applying the rule silently (P2.2's honesty
+// requirement).
 inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
                              const std::vector<std::uint64_t>& topLevelCallees,
                              const std::vector<NodeId>& registeredMacroIds,
                              const std::vector<NodeId>& pythonDispatchIds,
+                             const std::vector<NodeId>& dropImplIds,
                              bool* exemptedByRegisterMacro = nullptr ) noexcept
 {
     if( exemptedByRegisterMacro )
@@ -902,6 +904,10 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
     if( languageInvokedSymbol( s ) )
     {
         return false; // Q-DIAL-2: the LANGUAGE calls it — see languageInvokedSymbol (this replaced a blanket header exclusion)
+    }
+    if( std::binary_search( dropImplIds.begin(), dropImplIds.end(), i ) )
+    {
+        return false; // issue #494: Drop::drop, run by the compiler at scope exit (rustDropImplMethodIds)
     }
     const std::string_view p = rootRelPath( ing, s.fileId );   // #228: a directory above the root never decides this
     if( pythonFrameworkInvokedSymbol( s, p ) )
@@ -1680,6 +1686,64 @@ inline std::vector<NodeId> registeredMacroSymbolIds( const IngestResult& ing, co
         }
     } );
     std::sort( ids.begin(), ids.end() );
+    return ids;
+}
+
+// issue #494 (maintainer review): Rust Drop::drop, the method the compiler runs when a value leaves scope, which no call names.
+// A method named drop (or r#drop) is exempt when its span lies inside an ImplBlock record (model.h) of the same file whose trait
+// (var, the final path segment, so `impl std::ops::Drop` counts) is Drop, and no fn or method of that file encloses it inside that
+// block. The trait decides; the implementor's name is never the test. Stays reported:
+//   * a free fn named drop: its kind is Function, or a `mod` fn (the grammar captures it as a Method) outside any Drop block;
+//   * an inherent or other-trait method at file level: an inherent impl leaves no ImplBlock record, and another trait's block is not Drop;
+//   * an inherent or other-trait method nested in a Drop body: that body's own Drop::drop encloses it, so the enclosing test holds it;
+//   * the method of a mock trait named Drop (#[automock]): its ImplBlock names no implementor, so it never counts.
+// FLOOR, stated: the enclosing test reads only the symbols the extractor captures, and it looks for fn and method bodies. A method
+// inside the impl header (a block in a const generic argument) is in no body, so this rule exempts it; no test covers that shape.
+// FLOOR, stated: a user-defined trait whose final segment is Drop is read the same way, so its implementations are exempt too.
+// Built once per run, like registeredMacroSymbolIds, and read by isDeadCandidate.
+inline std::vector<NodeId> rustDropImplMethodIds( const IngestResult& ing )
+{
+    std::vector<const Binding*> dropBlocks;
+    for( const Binding& b : ing.bindings )
+    {
+        if( b.kind == LocalBindKind::ImplBlock && b.var == "Drop" && !b.typeName.empty() )
+        {
+            dropBlocks.push_back( &b );
+        }
+    }
+    std::vector<NodeId> ids;
+    if( dropBlocks.empty() )
+    {
+        return ids;
+    }
+    for( NodeId i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( s.kind != SymKind::Method || ( s.name != "drop" && s.name != "r#drop" ) || !langFacts( s.lang ).dropRunsAtScopeExit )
+        {
+            continue;
+        }
+        for( const Binding* block : dropBlocks )
+        {
+            if( block->fileId != s.fileId || s.sigStartByte < block->spanStart || s.sigStartByte >= block->spanEnd )
+            {
+                continue;
+            }
+            bool nested = false;   // a fn or method of this file, inside the block, whose body holds the method
+            for( NodeId x = 0; x < ing.symbols.size() && !nested; ++x )
+            {
+                const Symbol& o = ing.symbols[x];
+                nested = x != i && o.fileId == s.fileId && ( o.kind == SymKind::Function || o.kind == SymKind::Method )
+                      && o.sigStartByte >= block->spanStart && o.endByte <= block->spanEnd
+                      && o.sigStartByte < s.sigStartByte && s.sigStartByte < o.endByte;
+            }
+            if( !nested )
+            {
+                ids.push_back( i );
+                break;
+            }
+        }
+    }
     return ids;
 }
 
@@ -3654,6 +3718,7 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   pythonRecordParent         (quality.h) — fills the closure host and owner that pythonReceiverScope reads (#228)
 //   pythonReceiverScope        (quality.h) — which method a self./cls. call in a closure belongs to (#228)
 //   isFixturePath              (quality.h) — a fixture-path exemption isDeadCandidate calls into
+//   rustDropImplMethodIds       (quality.h) — the Rust Drop::drop exemption SET isDeadCandidate consults (#494): a method of a Drop impl block
 //   isTestScriptPath           (quality.h) — the test-script exemption isDeadCandidate calls into (the exact
 //                                             helper B10.1a added without a bump — the finding this guards)
 //   topLevelCalleeNameHashes   (quality.h) — the file-scope (top-level script statement) call-site evidence
@@ -3800,7 +3865,11 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
 // other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
 // dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
-constexpr std::uint32_t kQSnapCacheScheme = 25;
+// v27 (2026-11-02, #494 maintainer review) — a Rust method named drop is exempt only as a DIRECT member of a Drop impl block
+// (rustDropImplMethodIds: an ImplBlock whose trait is Drop). A v25 blob reports every Drop::drop as dead, and this scheme changes
+// that dead set, so v25 blobs are rejected. Renumbered above main's v25 (land-472), and above the open
+// #499 bump (v26, Rust test-attribute functions), so the two never share a value. kParserVer stays 289: no extraction change.
+constexpr std::uint32_t kQSnapCacheScheme = 27;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -5517,6 +5586,7 @@ inline void addDeadSet( Snapshot& snap, const IngestResult& ing, const Graph& g,
     const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );          // W1-S2: dead-kind evidence, built once
     const std::vector<std::string>   macroNames      = registeredMacroNames( root );             // P2.2: built-ins + .ripwire_config
     const std::vector<NodeId>        macroIds        = registeredMacroSymbolIds( ing, macroNames );
+    const std::vector<NodeId>        dropIds         = rustDropImplMethodIds( ing );             // issue #494: Drop::drop by its impl block
     const std::vector<NodeId>        pythonDispatch  = pythonDispatchedMethodIds( ing, g );
     const ValueRefIndex              valueRefs( ing );                                           // a value-held function is not dead
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
@@ -5525,7 +5595,7 @@ inline void addDeadSet( Snapshot& snap, const IngestResult& ing, const Graph& g,
         {
             continue;
         }
-        if( isDeadCandidate( ing, g, i, topLevelCallees, macroIds, pythonDispatch ) && !declinedCallMayReach( g, i )
+        if( isDeadCandidate( ing, g, i, topLevelCallees, macroIds, pythonDispatch, dropIds ) && !declinedCallMayReach( g, i )
             && !valueRefs.isValueReferenced( i ) )
         {
             snap.dead.push_back( qualityKey( ing, i, root ) );
@@ -9203,6 +9273,7 @@ inline void appendDeadCodeRows( std::vector<Regression>& regs, const IngestResul
     const std::vector<std::uint64_t> topLevelCallees = topLevelCalleeNameHashes( ing );   // W1-S2: dead-kind evidence, built once
     const std::vector<std::string>   macroNames      = registeredMacroNames( root );      // P2.2: built-ins + .ripwire_config
     const std::vector<NodeId>        macroIds        = registeredMacroSymbolIds( ing, macroNames );
+    const std::vector<NodeId>        dropIds         = rustDropImplMethodIds( ing );       // issue #494: Drop::drop by its impl block, as addDeadSet
     const std::vector<NodeId>        pythonDispatch  = pythonDispatchedMethodIds( ing, g );
     const ValueRefIndex              valueRefs( ing );                                     // reference-as-value round: the --dead-code verb's rule
     for( NodeId i = 0; i < ing.symbols.size(); ++i )
@@ -9212,7 +9283,7 @@ inline void appendDeadCodeRows( std::vector<Regression>& regs, const IngestResul
             continue;
         }
         bool macroExempt = false;
-        if( !isDeadCandidate( ing, g, i, topLevelCallees, macroIds, pythonDispatch, &macroExempt ) )
+        if( !isDeadCandidate( ing, g, i, topLevelCallees, macroIds, pythonDispatch, dropIds, &macroExempt ) )
         {
             if( macroExempt && excluded.registerMacro )
             {
