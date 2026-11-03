@@ -477,7 +477,7 @@ Discloses: `path_from_capped`
 
 | constant | value | class | note |
 | --- | --- | --- | --- |
-| `kPathFromReachHops` | `4` | — | A's forward reach that keeps a caller of A on the path (a cycle back to A) |
+| `kPathFromReachMaxNodes` | `4096` | — | runaway guard on A's forward walk; past it every caller of A stays where it ranked |
 
 ### `src/forliteral.h`
 

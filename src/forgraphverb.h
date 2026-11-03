@@ -227,19 +227,23 @@ inline std::string graphSubjectOpenXml( const GraphSubjectArgs& a, const GraphSu
     return out;
 }
 
-// PATH-FROM-UPSTREAM (PY-MOD-CALL-SITES fix 1): in a task spelled `path from A to B`, a caller of A is UPSTREAM of the asked path — the
-// question starts at A. Such a row may still rank, but never ahead of the path's own rows: every ranked caller of A (a resolved call
-// edge, not a by-name one) that A does not itself reach within kPathFromReachHops is moved below every other positive score, its
-// own order kept. So a new call edge INTO A (a module-level `management.execute_from_command_line()` bound for the first time) cannot
-// push a hop under A past the ranked head's cap. A is read as the FROM slot's first candidate the qualified resolver finds (B need
-// not name a symbol: parseGraphSubjectPathFrom); no parse, no candidate, or no caller ranked → nothing moves (byte-identical). Returns how many rows moved,
-// or kPathFromReachCapped when A's reach passed kPathFromReachNodes (nothing moved, path_from_capped=1 in the note); the caller discloses either.
-inline constexpr int         kPathFromReachHops  = 4;      // A's forward reach that keeps a caller of A on the path (a cycle back to A)
-inline constexpr std::size_t kPathFromReachNodes = 4096;   // runaway guard on that walk; past it every caller of A stays where it ranked
+// PATH-FROM-UPSTREAM (PY-MOD-CALL-SITES fix 1): in a task that asks `path from A to B` (parseGraphSubjectPathFrom: a path question,
+// not one that also asks for callers), a caller of A is UPSTREAM of the asked path — the question starts at A. Such a row may still
+// rank, but never ahead of the path's own rows: every ranked caller of A (a resolved call edge, not a by-name one) that A does not itself
+// reach is scored below every other positive score, its own order kept. "Reach" is A's whole forward closure over resolved edges, up
+// to kPathFromReachMaxNodes: any row on a path out of A is in it, so a chain row that calls back to A (recursion, an eval loop, a
+// tree walker) at any depth stays (rv-py-mod2 MF6). B itself never moves, wherever it sits (it is asked for even when no resolved edge
+// joins it to A). So a new call edge INTO A (a module-level `management.execute_from_command_line()` bound for the first time) cannot
+// push a hop under A past the ranked head's cap. A is read as the FROM slot's first candidate the qualified resolver finds, B likewise
+// (B need not name a symbol); no parse, no candidate, or no caller ranked → nothing moves (byte-identical). Returns how many rows moved,
+// or kPathFromReachCapped when A's reach passed kPathFromReachMaxNodes (nothing moved, path_from_capped=1 in the note); the caller
+// discloses either.
+inline constexpr std::size_t kPathFromReachMaxNodes = 4096;   // runaway guard on A's forward walk; past it every caller of A stays where it ranked
 inline constexpr std::uint32_t kPathFromReachCapped = UINT32_MAX;   // applyPathFromUpstreamCut's answer when that guard stopped the walk
 inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Graph& g, std::string_view task, std::vector<float>& lensRank )
 {
-    const std::vector<std::string> fromCands = parseGraphSubjectPathFrom( task );
+    std::vector<std::string>       toCands;
+    const std::vector<std::string> fromCands = parseGraphSubjectPathFrom( task, &toCands );
     const std::size_t              n         = ing.symbols.size();
     if( fromCands.empty() || lensRank.size() != n || g.outOff.size() != n + 1 )
     {
@@ -259,8 +263,17 @@ inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Gr
         return 0;
     }
     std::ranges::sort( from );   // binary_search below
+    std::vector<NodeId> to;
+    for( const std::string& cand : toCands )
+    {
+        to = resolveAllByNameQualified( ing, cand );
+        if( !to.empty() )
+        {
+            break;
+        }
+    }
     const auto proven = [ & ]( std::size_t e ) { return g.outNameOnly.empty() || g.outNameOnly[ e ] == 0; };
-    // A's forward reach (A included): a caller of A inside it is on a cycle through A, so on the path
+    // A's forward reach (A included): a caller of A inside it is on a cycle through A, so on the path; B is marked as if reached
     std::vector<char>   reach( n, 0 );
     std::vector<NodeId> frontier = from;
     std::size_t         seen     = 0;
@@ -269,26 +282,30 @@ inline std::uint32_t applyPathFromUpstreamCut( const IngestResult& ing, const Gr
         reach[ f ] = 1;
         ++seen;
     }
-    for( int hop = 0; hop < kPathFromReachHops && !frontier.empty(); ++hop )
+    while( !frontier.empty() )
     {
-        std::vector<NodeId> next;
-        for( NodeId u : frontier )
+        const NodeId u = frontier.back();
+        frontier.pop_back();
+        for( std::size_t e = g.outOff[ u ]; e < g.outOff[ u + 1 ]; ++e )
         {
-            for( std::size_t e = g.outOff[ u ]; e < g.outOff[ u + 1 ]; ++e )
+            const NodeId v = g.outTargets[ e ];
+            if( v < n && reach[ v ] == 0 && proven( e ) )
             {
-                const NodeId v = g.outTargets[ e ];
-                if( v < n && reach[ v ] == 0 && proven( e ) )
+                if( ++seen > kPathFromReachMaxNodes )
                 {
-                    if( ++seen > kPathFromReachNodes )
-                    {
-                        return kPathFromReachCapped;   // too wide to tell on-path from upstream: nothing moves, and the note says so
-                    }
-                    reach[ v ] = 1;
-                    next.push_back( v );
+                    return kPathFromReachCapped;   // too wide to tell on-path from upstream: nothing moves, and the note says so
                 }
+                reach[ v ] = 1;
+                frontier.push_back( v );
             }
         }
-        frontier = std::move( next );
+    }
+    for( NodeId b : to )
+    {
+        if( b < n )
+        {
+            reach[ b ] = 1;   // B is asked for: never moved, even when no resolved edge joins it to A
+        }
     }
     std::vector<NodeId> upstream;
     float               floorScore = 0.0f;   // the lowest positive score of every row that stays
@@ -337,9 +354,9 @@ inline std::string pathFromUpstreamNote( std::uint32_t moved )
 {
     if( moved == kPathFromReachCapped )
     {
-        return std::format( " [path from: the from endpoint reaches over {} symbols, path_from_capped=1: its callers were not moved]", kPathFromReachNodes );
+        return std::format( " [path from: the from endpoint reaches over {} symbols, path_from_capped=1: its callers were not moved]", kPathFromReachMaxNodes );
     }
-    return std::format( " [path from: {} caller{} of the from endpoint ranked after the path's own rows]", moved, moved == 1 ? "" : "s" );
+    return std::format( " [path from: {} caller{} of the from endpoint scored below the path's own rows]", moved, moved == 1 ? "" : "s" );
 }
 
 inline constexpr std::string_view kGraphSubjectCloseXml = "</graph_verb>";

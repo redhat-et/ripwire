@@ -2088,6 +2088,7 @@ struct PythonScopeFacts
                                                                      //   only for names a Python class's base clause starts with or is looked up under
     std::vector<std::vector<std::uint32_t>>           starTargets;   // Python fileId → the file each `from m import *` names (kNoFile:
                                                                      //   unresolved) — a star import binds names no table lists
+    std::vector<std::vector<std::uint32_t>>           starBytes;     // parallel to starTargets: each star statement's byte in its file
 };
 
 struct ExternalVetoTables
@@ -2339,6 +2340,7 @@ struct PythonSubmoduleBind
     std::uint32_t pkg    = kNoFile;
     bool          anySub = false;
     std::string   member;
+    std::uint32_t firstByte = UINT32_MAX;   // the earliest module-scope from-import of the name: a star import after it may rebind it
 };
 
 struct PythonImportVetoes
@@ -2463,9 +2465,10 @@ inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std:
         pkg = look( "__init__.py" );
     }
     key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
-    const auto [ it, fresh ] = out.try_emplace( key, PythonSubmoduleBind{ sub, pkg, sub != kNoFile, sub != kNoFile ? std::string( member ) : std::string{} } );
+    const auto [ it, fresh ] = out.try_emplace( key, PythonSubmoduleBind{ sub, pkg, sub != kNoFile, sub != kNoFile ? std::string( member ) : std::string{}, b.startByte } );
     if( !fresh )
     {
+        it->second.firstByte = std::min( it->second.firstByte, b.startByte );
         if( it->second.file != sub || it->second.pkg != pkg )
         {
             it->second.file = kNoFile;   // two from-imports of y that disagree, or one that names no submodule: y is not one module
@@ -2480,6 +2483,8 @@ inline void recordSubmoduleBind( const IngestResult& ing, const Binding& b, std:
 // package's own namespace does not bind x — no def, class, assignment or global of x there, no import of x that names another file
 // than the submodule, no star import, no module `__getattr__` (it answers `from p import x` before the submodule loads) and no
 // `globals()` / `setattr` write. Anything else records kNoFile: the call is declined and counted, never picked.
+inline bool pythonStarMayBind( const ExternalVetoTables& v, std::uint32_t f, std::string_view name, std::uint32_t fromByte = 0 );
+
 inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBind>& pending, ExternalVetoTables& t )
 {
     std::string pk;
@@ -2496,7 +2501,10 @@ inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBi
             continue;
         }
         std::uint32_t file = sb.file;
-        if( t.pythonModuleRebind.contains( key ) )
+        const std::size_t hash = key.find( '#' );
+        const std::uint32_t importer = std::uint32_t( std::strtoul( key.c_str(), nullptr, 10 ) );
+        // MF5 (rv-py-mod2): a star import in the importer AFTER the from-import may rebind y (`from p.other import *` defining y)
+        if( t.pythonModuleRebind.contains( key ) || pythonStarMayBind( t, importer, std::string_view( key ).substr( hash + 1 ), sb.firstByte + 1 ) )
         {
             file = kNoFile;
         }
@@ -2568,7 +2576,7 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonImportFiles( const Ing
 // statement's names as Import bindings at the statement's byte and one Include there; a statement with an Include and no Import binding
 // bound no name — a star import (or an import the capture could not read, which is no better evidence).
 inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
-                                                                       PythonSuffixMemo& memo )
+                                                                       PythonSuffixMemo& memo, std::vector<std::vector<std::uint32_t>>& bytes )
 {
     std::vector<std::uint64_t> named;   // ( fileId << 32 | statement byte ) of every import statement that bound a name
     for( const Binding& b : ing.bindings )
@@ -2580,6 +2588,7 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const Ing
     }
     std::sort( named.begin(), named.end() );
     std::vector<std::vector<std::uint32_t>> stars( ing.files.size() );
+    bytes.assign( ing.files.size(), {} );
     for( const Include& inc : ing.includes )
     {
         const std::string_view from = inc.fileId < ing.files.size() ? rootRelPath( ing, inc.fileId ) : std::string_view{};
@@ -2589,6 +2598,7 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const Ing
             continue;
         }
         stars[ inc.fileId ].push_back( pythonIncludeFile( ing, inc, fileIndex, memo ) );
+        bytes[ inc.fileId ].push_back( inc.byte );
     }
     return stars;
 }
@@ -2620,7 +2630,8 @@ inline std::uint32_t pythonFromImportModuleFile( const Binding& b, std::uint32_t
 }
 
 // PY-MOD-CALL-SITES: the attribute names `y.f()` reads through a module-scope from-import y that names an in-tree submodule — the
-// names whose module-scope bindings pythonSubmoduleAttrProven asks of the submodule (nameBinds holds only the names asked for)
+// names whose module-scope bindings pythonSubmoduleAttrProven asks of the submodule (nameBinds holds only the names asked for) — and
+// every such y, which finalizePythonSubmoduleBinds asks of the importer's star targets
 inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult& ing, const HashMap<std::string, PythonSubmoduleBind>& submodules )
 {
     HashMap<std::string, char> names;
@@ -2635,6 +2646,13 @@ inline HashMap<std::string, char> pythonSubmoduleCalleeNames( const IngestResult
             {
                 names.try_emplace( r.calleeName, '\0' );
             }
+        }
+    }
+    for( const auto& [ k, sb ] : submodules )
+    {
+        if( sb.anySub )
+        {
+            names.try_emplace( k.substr( k.find( '#' ) + 1 ), '\0' );   // y itself: a star import in the importer may bind it (pythonStarMayBind)
         }
     }
     return names;
@@ -2671,7 +2689,7 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         }
     }
     t.importFiles  = buildPythonImportFiles( ing, fileIndex, memo );
-    t.scopes.starTargets = buildPythonStarTargets( ing, fileIndex, memo );
+    t.scopes.starTargets = buildPythonStarTargets( ing, fileIndex, memo, t.scopes.starBytes );
     t.scopes.nameBinds   = buildPythonNameBinds( ing, pythonSubmoduleCalleeNames( ing, t.submodules ) );
     return t;
 }
@@ -7612,18 +7630,24 @@ inline const std::vector<PythonNameBind>* pythonModuleBindsOf( const ExternalVet
     return it == v.pythonScopes.nameBinds.end() ? nullptr : &it->second;
 }
 
-// can `from m import *` (any of file `f`'s) bind `name`? A star target outside the tree could bind anything; one inside can bind
-// what its own module scope binds (a def, class, assignment or import of the name) or, when it star-imports itself, anything.
-// Unknown answers yes (no walk past one level, no __all__ read).
-inline bool pythonStarMayBind( const ExternalVetoTables& v, std::uint32_t f, std::string_view name )
+// can `from m import *` (any of file `f`'s, or with `fromByte` > 0 only those at or after that byte) bind `name`? A star target outside
+// the tree could bind anything; one inside can bind what its own module scope binds (a def, class, assignment or import of the name) or,
+// when it star-imports itself, anything. Unknown answers yes (no walk past one level, no __all__ read).
+inline bool pythonStarMayBind( const ExternalVetoTables& v, std::uint32_t f, std::string_view name, std::uint32_t fromByte )
 {
     if( f >= v.pythonScopes.starTargets.size() )
     {
         return false;
     }
     std::string key;
-    for( std::uint32_t target : v.pythonScopes.starTargets[ f ] )
+    const std::vector<std::uint32_t>& targets = v.pythonScopes.starTargets[ f ];
+    for( std::size_t i = 0; i < targets.size(); ++i )
     {
+        const std::uint32_t target = targets[ i ];
+        if( fromByte > 0 && f < v.pythonScopes.starBytes.size() && i < v.pythonScopes.starBytes[ f ].size() && v.pythonScopes.starBytes[ f ][ i ] < fromByte )
+        {
+            continue;   // a star statement before the binding being judged: the later binding wins at run time
+        }
         if( target == kNoFile || ( target < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ target ].empty() ) )
         {
             return true;

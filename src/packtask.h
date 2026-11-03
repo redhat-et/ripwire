@@ -182,6 +182,8 @@ struct PackTaskHeaderParts
     std::string_view runClause;        // M21(b)/E1: testmap.h's run=/run_unknown=/<g> clause — ROWS-GATED (empty when
                                         // the tests section kept no row), so a bundle that omits tests pays nothing
     bool             softBudget = false;   // forbudget-soft: the caller's own budget — a soft target (kPackTaskSoftBudgetSentence)
+    std::string_view pathFromNote;     // PATH-FROM-UPSTREAM's clause (forgraphverb.h), its OWN data comment after the legend: the compact
+                                        // dialect strips the legend comment, and rows it moved must stay disclosed there (S9, rv-py-mod2)
 };
 
 // P10 (L7): the bundle legend's BODY, one constant, spliced by the standalone header (packTaskHeaderText) and
@@ -325,6 +327,10 @@ inline std::string packTaskHeaderText( const PackTaskHeaderParts& p, bool withRo
     h.append( p.report );
     h.append( extraNotes );
     h += " -->";
+    if( !p.pathFromNote.empty() )
+    {
+        h += "<!--";  h.append( p.pathFromNote );  h += " -->";
+    }
     // R-E fix (2026-08-19): root= landed on this bundle's <ctx> with nothing defining it (legendcoverage
     // arm (A), "pack-task | ctx@root"). The shared clause, emitted exactly when the attribute is.
     h += rootRelPathsLegend( !p.rootArg.empty() );
@@ -1536,7 +1542,13 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // L1 (density audit 2026-08-08): no scrubbed routeNote here any more — the comment used to echo the
     // route= attribute's text verbatim-but-scrubbed (~230-260 duplicated B per routed call). route= is the
     // one copy (test/routeoncecheck.sh pins it).
-    const std::string mentionNote    = xmlCommentText( lr.mentionNote );
+    // PATH-FROM-UPSTREAM's clause leaves the prose note for its own data comment (PackTaskHeaderParts::pathFromNote)
+    const std::size_t pathFromAt     = lr.mentionNote.find( " [path from: " );
+    const std::size_t pathFromEnd    = pathFromAt == std::string::npos ? std::string::npos : lr.mentionNote.find( ']', pathFromAt );
+    const std::size_t pathFromLen    = pathFromEnd == std::string::npos ? 0 : pathFromEnd + 1 - pathFromAt;
+    const std::string pathFromNote   = pathFromLen == 0 ? std::string() : xmlCommentText( std::string_view( lr.mentionNote ).substr( pathFromAt, pathFromLen ) );
+    const std::string mentionNote    = xmlCommentText( pathFromLen == 0 ? lr.mentionNote
+                                                                        : std::string( lr.mentionNote ).erase( pathFromAt, pathFromLen ) );
     const std::string boostNote      = xmlCommentText( lr.boostNote );
     const std::string sibliftNote    = xmlCommentText( lr.sibliftNote );
     const std::string expandNote     = xmlCommentText( lr.expandNote );
@@ -1558,7 +1570,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     // header's own user-length parts. 0 for every caller that splices nothing.
     const std::size_t headerFloor = kPackTaskHeaderReserve + rootOpenStr.size() + taskNote.size()
                                   + mentionNote.size() + boostNote.size() + sibliftNote.size() + expandNote.size() + docMentionNote.size()
-                                  + in.trailingSectionBytes;
+                                  + ( pathFromNote.empty() ? 0 : pathFromNote.size() + 8 ) + in.trailingSectionBytes;
     std::size_t       remaining   = bundleBudget > headerFloor ? bundleBudget - headerFloor : 1;
 
     // F1 — the kPackTaskQuota*Pct shares above, applied to `quotaBase` (see their own comment for why). `carry`
@@ -2115,7 +2127,7 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
     const std::string runClauseStr = rw::runHintClauseIfRows( tests.kept, rw::runsAreRootRelative( ing, in.rootArg ) );   // the ONE gate: the section's own kept count
     const PackTaskHeaderParts headerParts{ task, rootOpenStr, taskNote, mentionNote, boostNote,
                                             docMentionNote, sibliftNote, expandNote, report, droppedPositiveAttr, in.rootArg,
-                                            runClauseStr, /*softBudget=*/in.softTarget && !in.innerBundle };
+                                            runClauseStr, /*softBudget=*/in.softTarget && !in.innerBundle, pathFromNote };
     const auto buildHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
     {
         if( in.innerBundle )   // P10 (L7): a partition slice — the outer <ctx-partitions> legend speaks once for all of them
@@ -2125,6 +2137,10 @@ inline std::string packTaskBundleText( const IngestResult& ing, const Graph& g, 
             if( !report.empty() || !extraNotes.empty() )
             {
                 h += "<!-- slice ";  h.append( report );  h.append( extraNotes );  h += " -->";   // data only (the budget ledger + ceiling notes; dropped_positive= is on the root, M1)
+            }
+            if( !pathFromNote.empty() )
+            {
+                h += "<!--";  h.append( pathFromNote );  h += " -->";
             }
             return h;
         }

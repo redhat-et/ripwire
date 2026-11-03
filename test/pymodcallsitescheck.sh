@@ -137,6 +137,19 @@ w "$P/app/use_t.py" 'from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    fr
 w "$P/app/dual.py" 'def dual_f(x):\n    return x\n'
 w "$P/app/dual/__init__.py" 'def dual_f(x):\n    return x\n'
 w "$P/app/use_dual.py" 'from . import dual\n\ndef run_dual():\n    return dual.dual_f(1)\n'
+# MF5 (rv-py-mod2): a star import in the IMPORTER after `from p import y` may rebind y — when its in-tree source binds y at module
+# scope (a def, an `as` alias's name), or when it is outside the tree (it may bind anything). Twins keep the edge: a star whose source
+# binds y only inside a function or not at all, a star BEFORE the from-import (the from-import wins at run time), an outside star before it
+for k in n12 n13 n14 n15 n16 n17 n18; do w "$P/sp/$k.py" "def ${k}_f():\n    return 1\n"; done
+w "$P/sp/__init__.py" ''
+w "$P/sp/other12.py" 'def n12():\n    return 3\n'
+w "$P/sp/other13.py" 'def n13():\n    return 3\n'
+w "$P/sp/other14.py" 'def nz():\n    return 3\n'
+w "$P/sp/consts.py" 'LIMIT = 3\n\ndef helper():\n    n15 = 2\n    return n15\n'
+w "$P/use_sp.py" 'from sp.other13 import *\nfrom tkinter import *\nfrom sp import n12, n13, n15, n16\nfrom sp import n14 as nz\nfrom sp.consts import *\nfrom sp.other12 import *\nfrom sp.other14 import *\n\ndef run_n12():\n    return n12.n12_f()\n\ndef run_n13():\n    return n13.n13_f()\n\ndef run_n14():\n    return nz.n14_f()\n\ndef run_n15():\n    return n15.n15_f()\n\ndef run_n16():\n    return n16.n16_f()\n'
+w "$P/use_sp2.py" 'from sp import n17\nfrom tkinter import *\n\ndef run_n17():\n    return n17.n17_f()\n'
+w "$P/sp/use_rel.py" 'from . import n18\nfrom .other18 import *\n\ndef run_n18():\n    return n18.n18_f()\n'
+w "$P/sp/other18.py" 'from . import n13 as n18\n'
 ( cd "$P" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
 
 # ---- S: the accepted spellings bind the call (S3 is the module form Rule 2d already read: the twin)
@@ -186,6 +199,14 @@ row M2.typecheck    app/tm_b.py:t_f   app/use_t.py   run_t     declined
 # ---- MF3: the package directory wins
 row M3.pkgfirst     app/dual/__init__.py:dual_f app/use_dual.py run_dual proven
 row M3.notmodule    app/dual.py:dual_f app/use_dual.py run_dual none
+# ---- MF5: a star import in the importer after the from-import (N12/N14/N17 declined; N13/N15/N16 twins proven)
+row N12.starafter   sp/n12.py:n12_f   use_sp.py  run_n12  declined
+row N13.starbefore  sp/n13.py:n13_f   use_sp.py  run_n13  proven
+row N14.staralias   sp/n14.py:n14_f   use_sp.py  run_n14  declined
+row N15.starnobind  sp/n15.py:n15_f   use_sp.py  run_n15  proven
+row N16.extbefore   sp/n16.py:n16_f   use_sp.py  run_n16  proven
+row N17.extafter    sp/n17.py:n17_f   use_sp2.py run_n17  declined
+row N18.relimport   sp/n18.py:n18_f   sp/use_rel.py run_n18 declined
 # ---- S pinned by file (the arms above match the caller by name across every def of the callee name)
 row S1.pinned       app/boot.py:setup_a app/use_a.py run_a proven
 row S2.pinned       app/boot.py:setup_b app/use_b.py run_b proven
@@ -204,7 +225,8 @@ w "$X/main_mod.py" 'from pkg import core\n\ndef run_alpha_entry_main():\n    """
 ( cd "$X" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
 forrow() {
     local id=$1 note=$2 want=$3 forbid=$4 task=$5 out rc got
-    out=$( cd "$X" && "$BIN" "$X" --no-cache --legend=compact --pack-top-n=3 "--for=$task" </dev/null 2>/dev/null )
+    local root=${FROOT:-$X}
+    out=$( cd "$root" && "$BIN" "$root" --no-cache --legend=compact "--pack-top-n=${FTOPN:-3}" "--for=$task" </dev/null 2>/dev/null )
     rc=$?
     if [ "$rc" != 0 ]; then
         got="failed-run rc=$rc"
@@ -227,7 +249,36 @@ print(";".join(bad) or "ok")' "$note" "$want" "$forbid" )
 forrow X1.pathfrom  1 alpha_entry,beta_step,gamma_handle run_alpha_entry_main,alpha_entry_handle_twice 'path from alpha_entry to the gamma handle'
 forrow X2.twin      0 alpha_entry,alpha_entry_handle_twice,run_alpha_entry_main beta_step 'alpha_entry and the gamma handle'
 forrow X3.unparsed  0 gamma_handle '' 'path from nothing_named_this to the gamma handle'
-# X4: A reaches over 4096 symbols within 4 hops (70 x 70 fan-out): the walk stops, nothing moves, and the note says path_from_capped=1
+# X5-X10 (rv-py-mod2 MF6, S7): a 6-hop chain a_start -> c1..c4 -> c5_step -> b_end where c5_step and b_end call back to a_start, two
+# upstream callers, 24 filler defs named like the endpoints, at --pack-top-n=6. A's whole forward reach keeps c5_step (X6, 5 hops out)
+# and b_end (X5); B itself never moves even when no resolved edge joins it to A (X5b: b_orphan calls a_start, nothing reaches it).
+# The rule fires only on a path question: not when the task also asks who calls A (X7), not on `path from` inside other prose (X8);
+# the lead-ins `trace the call path from` / `what is the execution path from` fire (X9, X10)
+XP=$T/pathchain
+w "$XP/pkg/__init__.py" ''
+w "$XP/pkg/chain.py" 'def a_start(x):\n    return c1_step(x)\n\ndef c1_step(x):\n    return c2_step(x)\n\ndef c2_step(x):\n    return c3_step(x)\n\ndef c3_step(x):\n    return c4_step(x)\n\ndef c4_step(x):\n    return c5_step(x)\n\ndef c5_step(x):\n    if x > 3:\n        return a_start(x - 1)\n    return b_end(x)\n\ndef b_end(x):\n    if x < 0:\n        return a_start(-x)\n    return x\n\ndef b_orphan(x):\n    return a_start(x)\n'
+w "$XP/pkg/up.py" 'from pkg.chain import a_start\n\ndef upstream_one():\n    return a_start(1)\n\ndef upstream_two():\n    return a_start(2)\n'
+python3 -I -c '
+import sys
+o=[]
+for i in range(12):
+    for n in ("b_end_variant_%d" % i, "a_start_variant_%d" % i, "b_orphan_variant_%d" % i): o+=["def %s(x):" % n,"    return x",""]
+open(sys.argv[1],"w").write("\n".join(o)+"\n")' "$XP/pkg/filler.py"
+( cd "$XP" && git init -q . && git add -A && git -c user.name=t -c user.email=t@t commit -qm fx ) || { echo "pymodcallsitescheck: fixture git init failed"; exit 2; }
+FROOT=$XP FTOPN=6 forrow X5.bcallsa   1 b_end,a_start '' 'path from a_start to b_end'
+FROOT=$XP FTOPN=6 forrow X6.deepchain 1 c5_step '' 'path from a_start to b_end'
+FROOT=$XP FTOPN=6 forrow X5b.borphan  1 b_orphan '' 'path from a_start to b_orphan'
+FROOT=$XP FTOPN=40 forrow X7.whocalls 0 upstream_one,upstream_two '' 'who calls a_start and what is the path from a_start to b_end'
+FROOT=$XP FTOPN=6 forrow X8.prose     0 a_start '' 'strip the directory path from a_start() to shorten the log line'
+FROOT=$XP FTOPN=6 forrow X9.trace     1 b_end,c5_step '' 'Trace the call path from a_start to b_end'
+FROOT=$XP FTOPN=6 forrow X10.whatis   1 b_end,c5_step '' 'what is the execution path from a_start to b_end'
+# X11 (S9): pack-task under the default compact legend carries the clause as its own data comment, beside the rows it moved
+out=$( cd "$XP" && "$BIN" "$XP" --no-cache "--pack-task=path from a_start to b_end" </dev/null 2>/dev/null ); rc=$?
+case "$rc:$out" in
+    0:*schema=*'<!-- [path from: '[0-9]*' callers of the from endpoint scored below'*'n="b_end"'*) echo "PASS X11.packtask" ;;
+    *) echo "FAIL X11.packtask: rc=$rc, no schema, no path-from data comment or no b_end row"; fail=1 ;;
+esac
+# X4: A reaches over 4096 symbols (70 x 70 fan-out): the walk stops, nothing moves, and the note says path_from_capped=1
 XC=$T/pathcap
 w "$XC/pkg/__init__.py" ''
 python3 -I -c '
