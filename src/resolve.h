@@ -2283,6 +2283,15 @@ inline std::uint32_t inImporterRoot( const std::vector<std::uint32_t>& fileRoot,
 // the root. Each base is a shape a build file in the corpus passes as -I (repo root: Envoy Bazel, htop automake, tmux -iquote;
 // `include/`: waybar meson, cpython Modules/_hacl; root `src/`: ninja's fuzzer build); `source/` and `lib/` bound nothing. One tier: unique across the roots or nothing, and an in-tree name that two
 // roots both hold is counted in `ambiguousOut` (a dropped edge the verbs disclose), never guessed by probe order.
+// THE SEAM — the file graph reads the roots, the call narrow does not (yet). Every dependency view (--deps, --arch, Ca/Ce,
+// cycles, --impact importers, the health line) reads these edges. buildGraph's call narrow (fileIncludes → rule3IncludeFile,
+// and Graph::importAdj for the by-name hedge) builds its adjacency with forCallNarrow=true and keeps the includer-directory
+// resolution, because on Envoy the root edges let Rule 3 bind ~2,060 more call sites unhedged, about 300 of them wrong: an
+// external-qualified (`std::format`, `absl::Span`) or member call bound by include evidence to an in-tree namesake.
+// RE-COUPLE CONDITION: when CPP-EXTQUAL-VETO lands (an external-namespace-qualified call never binds an in-tree namesake by
+// include evidence; a member call on a typed local keeps the via="name" hedge), flip this to true and retarget
+// test/crootincludecheck.sh R9 to the bound arm. Nothing else reads it.
+inline constexpr bool kCallNarrowReadsCIncludeRoots = false;
 inline std::vector<std::string> cIncludeRootBases( std::string_view dir )
 {
     std::vector<std::string> bases{ std::string() };
@@ -2325,7 +2334,8 @@ inline std::uint32_t resolveCIncludeRoots( std::string_view dir, std::string_vie
 // do not build one — an Elixir target then simply stays unresolved, never guessed). Returns the
 // fileId on a UNIQUE precise hit, else kNoFile (unresolved → contributes nothing; NEVER a basename
 // fallback, NEVER a guess).
-//   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit.
+//   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit; on a miss,
+//     the include roots (resolveCIncludeRoots) unless `cIncludeRoots` is false (the call narrow — see the seam above it).
 //   * C-family angle `<x.h>` (isAngle==true): external without a build system ⇒ kNoFile (never matched).
 //   * Python / TS / Rust / Bash / Ruby / Lua / Elixir: their per-language Step-A above (unique-or-degrade).
 //   * Go / Swift / Other: DEFERRED / no path ⇒ kNoFile (contributes nothing — honest).
@@ -2334,7 +2344,7 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
                                             std::string_view crateRootDir = {}, bool hasCrateRoot = false,
                                             const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
                                             const HashMap<std::string, std::uint32_t>* moduleIndex = nullptr,
-                                            std::uint64_t* cAmbiguousOut = nullptr )
+                                            std::uint64_t* cAmbiguousOut = nullptr, bool cIncludeRoots = true )
 {
     if( target.empty() )
     {
@@ -2396,7 +2406,7 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
             }
             {
                 const std::uint32_t own = joinNormalizeLookup( includerDir( includerPath ), target, fileIndex, ws, includerFileId );
-                return own != kNoFile ? own : resolveCIncludeRoots( includerDir( includerPath ), target, fileIndex, ws, includerFileId, cAmbiguousOut );
+                return ( own != kNoFile || !cIncludeRoots ) ? own : resolveCIncludeRoots( includerDir( includerPath ), target, fileIndex, ws, includerFileId, cAmbiguousOut );
             }
         case IncludeLang::Python: return resolvePythonImport( includerPath, target, fileIndex, ws, includerFileId );
         case IncludeLang::Ts:     return resolveTsImport( includerPath, target, fileIndex, ws, includerFileId );
@@ -4524,7 +4534,8 @@ inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap
 // keeps them, but they are not import evidence for a bare call: `notify(Dev::Config)` beside `record.update!` says
 // nothing about `record`, and buildGraph's narrow bound 1,017 discourse call sites on that reading, 19 of 20
 // sampled wrong (PR #139 review). Only buildGraph's fileIncludes passes true; the default keeps every consumer
-// byte-identical.
+// byte-identical. It also keeps a C/C++ quote include at the includer's directory (no include-root probe) unless
+// kCallNarrowReadsCIncludeRoots — the C-ROOT-INCLUDE seam, decoupled until CPP-EXTQUAL-VETO lands.
 // `importsUnresolvedOut` (#220 part 1): optional, default nullptr — when non-null it receives how many TS/JS bare
 // import directives drew no edge although they name something in this tree (tsimport::ImportResolver's
 // InRepoUnresolved verdict), plus the C/C++ quote includes two include roots both hold (resolveCIncludeRoots: no edge,
@@ -4699,7 +4710,8 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
             hasCrd = hasCrateByRoot[ r ] != 0;
         }
         std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle,
-                                                   fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex, importsUnresolvedOut );
+                                                   fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex, importsUnresolvedOut,
+                                                   /*cIncludeRoots=*/!forCallNarrow || kCallNarrowReadsCIncludeRoots );
         if( to == kNoFile && tsimport::isBareTsSpecifier( rootRelPath( ing, inc.fileId ), inc.target ) )
         {
             to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );

@@ -14,10 +14,15 @@
 #   R6 angle         sub/s.c        <string.h>, <core/x.h> → no edge on a single root (a sibling string.h never binds)
 #   R7 unproven      t/q.c          "q.h"             → no edge: only source/q.h and lib/q.h hold it
 #   R8 escape        sub/e.c        "../../out.h"     → no edge above the crawl root
-#   R9 call graph    sub/deep/main.c calls helper(): "core/x.h" and "alt/x.h" both define it, main.c includes only
-#                    core/x.h by its root path → --callers=helper binds main.c to core/x.h alone (without the root
-#                    include the call is declined between the two namesakes)
+#   R9 decoupled     sub/deep/main.c calls helper(): "core/x.h" and "alt/x.h" both define it, main.c includes only
+#                    core/x.h by its root path. The FILE graph has the edge main.c → core/x.h, and the call graph is
+#                    main's: --callers=helper still declines the call between the two namesakes (count="0",
+#                    via="declined"). The call narrow keeps the includer-directory resolution until CPP-EXTQUAL-VETO
+#                    lands (resolve.h kCallNarrowReadsCIncludeRoots); this arm goes red if the root probe leaks into it,
+#                    and is the arm to retarget (bound to core/x.h alone) when the two are re-coupled.
 #   R10 non-C        a Python file importing `core.x` is untouched (the rule is the C-family branch only)
+#   R11 no suffix    t/u.c          "y.hpp"           → no edge: only app/include/util/y.hpp ends with it (unique-suffix
+#                    matching is not this rule; card C-SUFFIX-INCLUDE)
 #
 # Usage:  test/crootincludecheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire test/crootincludecheck.sh
 set -u
@@ -67,6 +72,8 @@ mk t/q.c                   '#include "q.h"
 int q_fn(void) { return 7; }'
 mk sub/e.c                 '#include "../../out.h"
 int e_fn(void) { return 8; }'
+mk t/u.c                   '#include "y.hpp"
+int u_fn(void) { return 9; }'
 mk core/x.py               'def helper(): return 1'
 mk py/use.py               'import core.x
 def use(): return core.x.helper()'
@@ -91,10 +98,14 @@ grep -q 'imports_unresolved="1"' "$TMP/deps.out" && grep -q 'graph_partial="1"' 
 noedge_from sub/s.c && ok "R6 angle <string.h> and <core/x.h> stay unresolved on a single root" || no "R6 an angle include bound a file"
 noedge_from t/q.c && ok "R7 unproven roots: source/q.h and lib/q.h never bind \"q.h\"" || no "R7 an unproven root bound"
 noedge_from sub/e.c && ok "R8 a ../ escape above the crawl root stays unresolved" || no "R8 escape bound a file"
-core_ix="$( grep -oE '<def ix="[0-9]+" t="fn" p="core/x.h:' "$TMP/callers.out" | grep -oE 'ix="[0-9]+"' | grep -oE '[0-9]+' )"
-if [ -n "$core_ix" ] && grep -qE "<s t=\"fn\" n=\"main_fn\" p=\"sub/deep/main.c:2\" of_def=\"$core_ix\"" "$TMP/callers.out"; then
-  ok "R9 call graph: main.c's helper() binds core/x.h alone (of_def=$core_ix) through the root include, not declined between two namesakes"
-else no "R9 main.c's helper() is not bound to core/x.h alone"; sed -n '1,20p' "$TMP/callers.out" | sed 's/<!--.*-->//' | head -c 1200; echo; fi
+edge sub/deep/main.c core/x.h && ok "R9 file graph: sub/deep/main.c → core/x.h (the root include)" || no "R9 file edge main.c → core/x.h missing"
+if grep -q '<callers schema="ripwire.callers/v1" of="helper" defs="3" count="0" ' "$TMP/callers.out" \
+   && grep -qE '<dc in="main_fn" p="sub/deep/main.c:2" cands="2" via="declined"' "$TMP/callers.out" \
+   && ! grep -qE '<s t="fn" n="main_fn"' "$TMP/callers.out"; then
+  ok "R9 call graph unchanged from main: main.c's helper() is declined between the two namesakes (root edges stay out of the call narrow)"
+else no "R9 the root include reached the call narrow: main.c's helper() is no longer declined"; sed -n '1,20p' "$TMP/callers.out" | sed 's/<!--.*-->//' | head -c 1200; echo; fi
 edge py/use.py core/x.py && ok "R10 Python import core.x unchanged (resolves by its own rule)" || no "R10 Python import edge changed"
+
+noedge_from t/u.c && ok "R11 a unique suffix (\"y.hpp\" → app/include/util/y.hpp) draws no edge" || no "R11 a suffix match bound a file"
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

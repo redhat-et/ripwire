@@ -8640,6 +8640,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     // `forCallNarrow`: a Ruby constant read off a VALUE position (an argument, a rescue class — parser version 93)
     // is a dependency of the file but not import evidence for a bare call, so it never enters this set. --deps,
     // --impact's importer tier and the lazy-pair count read the same records through the default path and keep it.
+    // C-ROOT-INCLUDE: the same flag keeps C/C++ quote includes at the includer's directory here (no include-root probe),
+    // so the file graph gains the root edges and this narrow does not — resolve.h kCallNarrowReadsCIncludeRoots.
     auto [ includeAdj, includeContext ] = buildPreciseIncludeAdjWithContext( ing, /*dedup=*/true, /*lazyPairsOut=*/nullptr, /*forCallNarrow=*/true );
     const rw::FileSetStore fileIncludes = transitiveIncludeSet( includeAdj );
     const JsImportTables jsImports = buildJsImportTables( ing, includeContext.fileRoot ? &includeContext : nullptr );
