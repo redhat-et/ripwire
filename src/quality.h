@@ -1727,7 +1727,9 @@ inline std::string_view rustCodeOfAttributeLine( std::string_view line ) noexcep
 
 // rustTestAttributed reads backwards from the item's signature start over blank lines, `//` comments and other
 // attribute lines (`#[inline]`, `#[allow(...)]`), and answers true when one of them is a test attribute. Whole-token
-// compare: `#[testing]` and a `#[test]` inside a comment do not count.
+// compare: `#[testing]` and a `#[test]` inside a comment do not count. An attribute line STARTS with `#[` once its leading
+// whitespace is gone: a `#[test]` written after code on the same line (`const A: u32 = 1; #[test]`) is not an attribute
+// of the item below it, so it ends the scan like any other code (issue #499 review).
 // FLOOR, stated: a multi-line attribute, or a block comment between attribute and item, ends the scan and the item
 // stays a dead-code candidate. That is a miss in the reporting direction, never a false exemption.
 inline bool rustTestAttributed( std::string_view file, std::size_t sigStart ) noexcept
@@ -1761,11 +1763,11 @@ inline bool rustTestAttributed( std::string_view file, std::size_t sigStart ) no
             end = from;
             continue;
         }
-        const std::size_t open = line.rfind( "#[" );
-        if( open == std::string_view::npos || line.back() != ']' )
+        if( line.substr( 0, 2 ) != "#[" || line.back() != ']' )
         {
             return false; // any other code ends the attribute block
         }
+        const std::size_t open = line.rfind( "#[" );
         if( isRustTestAttribute( line.substr( open + 2, line.size() - open - 3 ) ) )
         {
             return true;
@@ -3802,6 +3804,10 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //                                             constexpr array, not a function, so this manifest mechanism
 //                                             cannot hash IT — a future edit that only changes the built-in
 //                                             NAME LIST (not these functions' text) will not trip this gate.
+//   registersItself            (quality.h) — the self-registration exemption --dead-code and --quality-delta share (a registered macro call, or a Rust test attribute above)
+//   rustTestAttributed         (quality.h) — the backward scan over blank, comment and attribute lines that finds a #[test] or #[tokio::test] above a Rust definition
+//   isRustTestAttribute        (quality.h) — whole-token check that an attribute's text is `test` or `tokio::test`, with or without an argument list
+//   rustCodeOfAttributeLine    (quality.h) — an attribute line without its trailing // comment (a // inside a double-quoted string does not start one)
 //   defectSitesOf              (quality.h) — the defect-shape site identity (anchor + facet + normalized text)
 //                                             the baseline stores. NOTE (disclosed limitation): the scanners it
 //                                             calls live in defectshape.h, outside this manifest, so a change
