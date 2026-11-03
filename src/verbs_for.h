@@ -3447,7 +3447,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( rw::forEpManifestOn() )
             {
-                epManifest = rw::renderForEpManifest( ing, epHead );
+                epManifest = rw::renderForEpManifest( ing, epHead , cfg.forTask );
             }
             if( rw::forListedInOn() )
             {
@@ -4463,7 +4463,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( epEmitted.size() != epHead.size() && headerParts.epPresent )
             {
-                epManifest = rw::renderForEpManifest( ing, epEmitted );
+                epManifest = rw::renderForEpManifest( ing, epEmitted , cfg.forTask );
                 if( epManifest.xml.empty() )
                 {
                     headerParts.epPresent = false;   // its clause goes with it
