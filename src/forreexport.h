@@ -1557,7 +1557,7 @@ inline constexpr std::string_view kShortKeyLegend =
     "(shape=using|typedef|type|define|import-as|const|assign; in= the enclosing definition), not indexed as definitions; "
     "held=lit: the lit block lists this key. total= all matches, 6 shown; floor=1: the scan stopped early, counts are floors. "
     "d n= t= p= l=: a definition row; ld p= l= shape=: a line row; b: the exact leaf's body (the expand shape; cut past 8192 bytes "
-    "with truncated=1 lines= next=). next= the call that continues -->";
+    "with truncated=1 lines= next=). next= the call that continues. The block is not in est_tokens -->";
 
 namespace shortkey_detail
 {
@@ -2042,9 +2042,9 @@ inline std::string renderShortKeyFallback( const IngestResult& ing, const ShortK
     };
     if( a.held )
     {
-        out = fromSentence ? "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run; next= runs it without the budget; "
+        out = fromSentence ? "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run (not in est_tokens); next= runs it without the budget; "
                              "from=sentence: the route read the task as words and X is its one code-shaped name, unresolved --><shortkey held=\"budget\""
-                           : "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run; next= runs it without the budget --><shortkey held=\"budget\"";
+                           : "<!-- shortkey held=\"budget\": a token budget is set, so the fallback ladder is not run (not in est_tokens); next= runs it without the budget --><shortkey held=\"budget\"";
         attr( "of", x );
         out.append( fromSentence ? " from=\"sentence\"" : "" );
         return out.append( nextAttrXml( nextFlag( "--for=", x ) ) ).append( "/>" );
