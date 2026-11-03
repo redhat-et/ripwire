@@ -1003,6 +1003,30 @@ inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
     return qualifier;
 }
 
+// RULE3-MEMBER-GUARD fix 4: the WHOLE qualifier a Rust path call is written with when it has more than one segment — `crate::far` for
+// `crate::far::helper()`, `super::far::deep` for `super::far::deep::dd()`, `std::io` for `std::io::stdout()` — blanks dropped. "" for a
+// one-segment qualifier (rustQualifierOf already holds it whole), a bare call, and a path with a generic or `<T as Trait>` segment or a
+// leading `::`. rustQualifierOf keeps only the last segment, so a reader that walks the path from its root (graph.h W3, receiverevidence.h
+// rustRule3Proves) reads this one; stored in Reference::fieldName (model.h), which a Rust call reference does not otherwise use.
+inline std::string rustWrittenQualifier( TSNode nameNode, std::string_view src )
+{
+    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode path   = ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) ? TSNode{} : fieldChild( parent, NodeField::Path );
+    if( ts_node_is_null( path ) || !kindIs( ts_node_type( path ), "scoped_identifier" ) )
+    {
+        return {};
+    }
+    std::string out;
+    for( const char c : nodeTextOf( path, src ) )
+    {
+        if( c != ' ' && c != '\t' && c != '\n' && c != '\r' )
+        {
+            out.push_back( c );
+        }
+    }
+    return out.find_first_of( "<>" ) != std::string::npos || out.starts_with( "::" ) ? std::string{} : out;
+}
+
 // The name a written type ends in: `Deb`, `*Deb` → "Deb"; `Stack[T]`, `*Stack[T]`, `Foo<T>` → the name, never the
 // argument list; Go `pkg.T` → "T"; a TS `a.b.C` member chain → "C". "" for any other form (a slice, map, func type).
 // Shared by the receiver evidence in ingest_binds.h and the Go receiver row of kScopeOwners below.
@@ -2162,6 +2186,18 @@ inline bool cppInternalLinkage( TSNode defNode, std::string_view src ) noexcept
 // decision points.
 inline std::uint8_t internalLinkageBit( Lang lang, TSNode defNode, std::string_view src ) noexcept
 {
+    // EDGE-PRELUDE-VETO: a Rust `macro_rules!` without #[macro_export] is textually scoped (graph.h rustMacroScopeOf): its own file,
+    // its child modules, and a `#[macro_use] mod` parent's. An exported one (any attribute of its run naming macro_export, also inside a
+    // cfg_attr) is crate-wide and keeps 0. LangFacts::bangMacros names the language (Rust).
+    if( langFacts( lang ).bangMacros )
+    {
+        if( !kindIs( ts_node_type( defNode ), "macro_definition" ) )
+        {
+            return 0;
+        }
+        const bool exported = rustItemAttrRunAny( defNode, [ & ]( TSNode attr ) { return nodeTextOf( attr, src ).find( "macro_export" ) != std::string_view::npos; } );
+        return exported ? std::uint8_t( 0 ) : std::uint8_t( 1 );
+    }
     if( lang != Lang::Cpp && lang != Lang::C )
     {
         return 0;

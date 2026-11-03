@@ -2432,6 +2432,27 @@ std::FILE* popen( const char* command, const char* mode )
     return stream;
 }
 
+// pipeReadSome: a Windows pipe has no poll; PeekNamedPipe says whether a read would block, and a broken pipe (the writer
+// gone) falls through to the read, which reports the end of the stream.
+long pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs )
+{
+    const int    fd     = _fileno( stream );
+    const HANDLE handle = reinterpret_cast<HANDLE>( _get_osfhandle( fd ) );
+    for( int waited = 0;; waited += 10 )
+    {
+        DWORD available = 0;
+        if( !PeekNamedPipe( handle, nullptr, 0, nullptr, &available, nullptr ) || available > 0 )
+        {
+            return long( _read( fd, buf, static_cast<unsigned>( size ) ) );
+        }
+        if( waited >= timeoutMs )
+        {
+            return kPipeNothingYet;
+        }
+        Sleep( 10 );
+    }
+}
+
 // pclose: close the stream, wait for the shell, and return its wait status (WEXITSTATUS is the exit code) — callers
 // test `== 0`, which holds exactly when the command exited 0.
 int pclose( std::FILE* stream )

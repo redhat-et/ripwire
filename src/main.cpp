@@ -1,6 +1,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
+#include <exception>         // std::uncaught_exceptions: the stopped fold's unwind abandons the history walks
 #include <future>            // std::async — the history walk that runs beside the ingest
 
 // main.cpp — ripwire entry point: parse args → ingest → graph → PageRank → minified XML,
@@ -417,7 +418,7 @@ std::pair<std::string, bool> resolveRemoteRoot( const std::string& urlOrPath, bo
     // URL string that starts with `-` from ever being parsed as a `git clone` OPTION even if isGitUrl's
     // own leading-dash guard were ever bypassed or loosened — belt-and-suspenders, not the only gate.
     fs::remove_all( fs::path( cacheDir ), ec );
-    const std::string cmd = rw::gitCmd( " -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
+    const std::string cmd = rw::gitCmdForClone( " -c protocol.ext.allow=never -c protocol.file.allow=user -c core.quotepath=false "
                                          "clone --depth=1 -q -- " ) + rw::shSingleQuote( urlOrPath )
                           + " " + rw::shSingleQuote( cacheDir ) + " 2>&1";
     rw::emitTo( stderr, "ripwire: cloning {} → {}\n", urlOrPath.c_str(), cacheDir.c_str() );
@@ -1407,16 +1408,19 @@ inline void discloseUniformChurnFallback( bool hasChurnEvidence, bool stubbed, c
     {
         return;
     }
+    // A walk the budget ended before its first commit proves nothing about the window (HISTORY-WALK-HANG, CodeRabbit on #498 for --hotspots/--cochange):
+    // the same claim here would say "no commits" of a history that was only not read.
+    const std::string cutNote = rw::gitWalkCutRefusalCause().empty() ? std::string() : std::string( " (its git history walk hit its budget: see history_cut; the window may hold commits that were not read)" );
     if( stubbed )
     {
-        rw::emitTo( stderr, "ripwire: {} found no commits in its window, so NEITHER <recent> block rides this run and the symbol map is the "
+        rw::emitTo( stderr, "ripwire: {} found no commits in its window{}, so NEITHER <recent> block rides this run and the symbol map is the "
                               "counted stub — nothing was ranked at all, so there is no ranking to have fallen back (header: window=\"{}\"). "
                               "Widen the window (--since), or drop --in=DIR for the map, which is then byte-identical to --rank-by=pagerank\n",
-                    verbLabel, windowStamp.c_str() );
+                    verbLabel, cutNote, windowStamp.c_str() );
         return;
     }
-    rw::emitTo( stderr, "ripwire: {} found no commits in its window; using uniform (structural) ranking — this map is "
-                          "byte-identical to --rank-by=pagerank (header: window=\"{}\")\n", verbLabel, windowStamp.c_str() );
+    rw::emitTo( stderr, "ripwire: {} found no commits in its window{}; using uniform (structural) ranking — this map is "
+                          "byte-identical to --rank-by=pagerank (header: window=\"{}\")\n", verbLabel, cutNote, windowStamp.c_str() );
 }
 
 // --rank-by=churn-decay's ARM, lifted whole out of churnRankedGraph — which is a three-way dispatcher that was
@@ -3739,8 +3743,14 @@ std::optional<int> runCliEdit( const rw::Config& cfg )
     // region and blob_sha always, plus edit_check/tests_to_run unless --no-post-check — so this line names what is
     // in hand and the single call that follows; never a second command. test/receiptpostcheck.sh (12) and
     // test/edithandlehintcheck.sh assert the printed next is the receipt's and RUNS.
+    // F-W1: a post-check whose fold stopped AFTER the write is a gap on the receipt (post_check "not run: ..."), never a
+    // refusal: the file is edited, so this exits 0 like any applied edit and says the check did not run
+    const bool postCheckStopped = outcome.resultJson.find( rw::mcpedit::kPostCheckNotRunKey ) != std::string::npos;
     rw::emitTo( stderr, "ripwire edit: applied atomically; receipt carries region, blob_sha{}; next: {}\n",
-                  cfg.noPostCheck ? " (post-check skipped)" : ", edit_check, tests_to_run", outcome.next.c_str() );
+                  cfg.noPostCheck        ? " (post-check skipped)"
+                  : postCheckStopped     ? " (post-check not run: its graph fold stopped, see post_check)"
+                                         : ", edit_check, tests_to_run",
+                  outcome.next.c_str() );
     return 0;
 }
 
@@ -3867,27 +3877,34 @@ static std::string_view scipIndexUnreadableReason( const std::string& scipPath )
     return {};
 }
 
-// --for / --metrics / --exemplar mine 18 months of history after the graph build (the amp=/churn= block in
+// --for / --metrics mine 18 months of history after the graph build (the amp=/churn= block in
 // dispatchMain). That walk is `git` subprocesses plus a blob read and touches nothing the ingest produces, so it
 // starts BEFORE the ingest, one thread per root, and runs beside it; the amp=/churn= block only resolves each walk's
 // paths against `ing`. Empty when no such verb runs — and for --help-task, the one verb that answers between the
 // two, because a run that stops before the block still waits for its walks (a std::async future joins).
+//
+// THE WAIT, and why it stays. These two verbs are the walk's only readers, and each prints what it feeds into every row: amp= on
+// both, churn= on --for. (--exemplar used to start it and printed neither; it selects by tested, fan-in and complexity.)
+// Answering without it would lose both, on a timing that varies per run, where the wait is instead bounded: the walk's own budget ends it (gitmine.h THE BUDGET, 20 s from the walk's start, even against a git that went silent),
+// the budget's clock runs beside the ingest, and a cut is cached, so only the first call after HEAD moves pays it. Every other
+// verb runs no walk here; those that mine history do it themselves, on the same budget.
 static std::vector<std::future<rw::quality::HistoryWalk>> startHistoryWalks( const rw::Config& cfg, bool multiRoot,
                                                                          const std::vector<rw::WorkspaceRoot>& ws, const std::string& root )
 {
     std::vector<std::future<rw::quality::HistoryWalk>> walks;
-    if( ( !cfg.metrics && cfg.forTask.empty() && cfg.exemplar.empty() ) || !cfg.helpTask.empty() )
+    if( ( !cfg.metrics && cfg.forTask.empty() ) || !cfg.helpTask.empty() )
     {
         return walks;
     }
     for( std::size_t r = 0; r < ( multiRoot ? ws.size() : 1u ); ++r )
     {
-        walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root ]() { return rw::quality::gitHistoryWalk( rootArg ); } ) );
+        walks.push_back( std::async( std::launch::async, [ rootArg = multiRoot ? ws[r].arg : root, noCache = cfg.noCache ]() { return rw::quality::gitHistoryWalk( rootArg, noCache ); } ) );
     }
     return walks;
 }
 
 static int dispatchMain( const rw::Config& cfg, char** argv );
+static int dispatchMainBody( const rw::Config& cfg, char** argv );
 
 // The key for a SHARED root (`r` = the map family, `ctx` = the bundle family) is read off the ANSWER, never off a flag order.
 // The ROOT picks the family: one flag order across both families cannot be right, because verb precedence interleaves them, and
@@ -4108,6 +4125,29 @@ static int finishCompactCapture( const rw::Config& cfg, std::string& doc, int rc
     return 1;
 }
 
+// A history walk that has no history_unread of its own (--cochange, --owners, --hotspots, --situ, …) and hit its budget: said
+// once, after the answer, in the answer's stream when that stream can hold a comment, and always on stderr (gitmine.h THE BUDGET).
+static void discloseGitWalkCuts( const rw::Config& cfg, char** argv )
+{
+    const rw::GitWalkCutReport& cuts = rw::gitWalkCutsToDisclose();
+    const std::uint32_t walks = cuts.walks.load( std::memory_order_relaxed );
+    if( walks == 0 )
+    {
+        return;
+    }
+    const std::uint64_t commits = cuts.commitsRead.load( std::memory_order_relaxed );
+    DISCLOSE( Diagnostics::answerUnchanged, "the walk's numbers are floors and the answer says so",
+              "main: a git history walk hit its budget — its counts cover only the newest commits" );
+    const std::string sentence = rw::gitWalkCutSentence( walks, commits );
+    // The servers' stdout is the protocol, so a comment there is a line no client can parse: they carry the sentence per request in the
+    // envelope (`_history_cut`, mcp.h) and here only on stderr.
+    if( !cfg.json && !cfg.candidates && !cfg.sarif && !cfg.mcp && !cfg.lsp && cfg.listen.empty() && !certainlyNonXmlAnswer( cfg, argv ) )
+    {
+        rw::emitTo( stdout, "<!--{}-->\n", sentence.c_str() );
+    }
+    rw::emitTo( stderr, "ripwire: {}\n", sentence.c_str() );
+}
+
 static int runWithCompactLegend( const rw::Config& cfg, char** argv )
 {
     EXPECTS( !cfg.legendDefaulted || cfg.legend == rw::kDefaultLegendPosture, "a defaulted posture is the registered default" );
@@ -4232,6 +4272,7 @@ int main( int argc, char** argv )
     // disclose it (stderr + --doctor). githarden.h holds the measurement and the reasoning.
     githarden::hardenForRoots( cfg.roots );
     const int rc = runWithCompactLegend( cfg, argv );
+    discloseGitWalkCuts( cfg, argv );
     // #350: the backstop — an ingest the memory guard stopped inside a verb that does not read the stop (memguard.h).
     // The servers answer for their own stops per request (the MCP envelope's _memory_stop), so they are exempt.
     // Whatever exit code the verb chose becomes 5: a verdict (0, a gate's 2, a budget's 3, an obligation's 4) computed
@@ -4316,7 +4357,7 @@ static int memoryStopExit( const rw::IngestResult& ing, const rw::Config& cfg, c
     return 0;
 }
 
-static int dispatchMain( const rw::Config& cfg, char** argv )
+static int dispatchMainBody( const rw::Config& cfg, char** argv )
 {
     using namespace rw;
 
@@ -5253,6 +5294,13 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     const bool needsValueUses = rw::needsValueUses( cfg );   // cli.h — ONE definition, and --doctor's
                                                             // rich_verbs= roster is derived from it
     std::vector<std::future<quality::HistoryWalk>> historyWalks = startHistoryWalks( cfg, multiRoot, ws, root );
+    // Declared after the futures, so it runs before they join: FileGraphStopped unwinds this function, and a join here would
+    // hold the refusal until the log ends (the same wait the refusals below abandon; memguardcheck B21b).
+    struct AbandonWalksOnUnwind
+    {
+        int  uncaught = std::uncaught_exceptions();
+        ~AbandonWalksOnUnwind() { if( std::uncaught_exceptions() > uncaught ) { rw::abandonGitWalks(); } }
+    } abandonWalksOnUnwind;
     IngestResult ing;
     if( multiRoot )
     {
@@ -5372,8 +5420,20 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     // condition and the degrade path, and is handed §B11.4's own dispatch winner rather than a guess.
     GrepScanPhases    grepPhases;
     std::thread       grepPhaseWorker = startGrepScanPrefetch( cfg, ing, verbPrec.winner, grepPhases );
-    const Graph       g               = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
-    joinGrepScanPrefetch( grepPhaseWorker );
+    const Graph       g               = [ & ]
+    {
+        try   // a failed build (fileGraphStop.h) unwinds past a joinable worker, which would std::terminate: join it, then let the stop go on
+        {
+            Graph built = buildGraph( ing, scipPtr, !cfg.pinCensus.empty() );
+            joinGrepScanPrefetch( grepPhaseWorker );
+            return built;
+        }
+        catch( ... )
+        {
+            joinGrepScanPrefetch( grepPhaseWorker );
+            throw;
+        }
+    }();
     if( rw::memguard::overHardLimit() )   // #350: the hard line between the graph build and the verbs
     {
         DISCLOSE( Diagnostics::answerRefused, "main: over the memory guard's hard limit after the graph build — exit 5, one stderr line" );
@@ -5442,19 +5502,27 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
         // → coPartnersPerFile stays 0 (clean degrade to callers-only). The single popen is measured (§ gate f).
         std::vector<std::uint32_t> coPartnersPerFile( ing.files.size(), 0u );
         {
+            // --exemplar selects by tested/fan-in/ccx and prints neither amp= nor churn=: it starts no walk (startHistoryWalks) and waits for none
+            // here, so `historyWalks` is empty for it and both branches below read nothing.
             // ONE popen: 18-month co-change file-sets (for amp) + — only when --for needs it — the 12-month
             // per-file churn (folded into the same walk, A4-P6). --metrics/--exemplar pass churnMonths=0 → no
             // churn work, sets byte-identical to the old gitCommitFileSets("18 months ago", 30).
             // Multi-root (§5): one popen PER root, each resolved only against its own files; the per-commit
             // sets concatenate (commits are disjoint across repos) and churn accumulates per file.
-            ASSUME( historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
-                    "this block runs under startHistoryWalks' condition (--help-task has already answered), so every root's walk was started" );
+            ASSUME( historyWalks.empty() || historyWalks.size() == ( multiRoot ? ws.size() : 1u ),
+                    "startHistoryWalks starts every root's walk or none (--help-task has already answered; --exemplar starts none)" );
             // K51: a walk git could not finish arrives flagged (it is never cached either); the document says so (historyread.h).
             HistoryReadReport& historyReport = historyRead();
             const auto         joinWalk      = [ & ]( std::size_t r )
             {
                 quality::HistoryWalk walk = historyWalks[ r ].get();
-                if( walk.raw.unread && walk.raw.notRun )
+                if( walk.raw.cut != GitWalkCut::None )
+                {
+                    historyReport.cutCommits += walk.raw.commits.size();
+                    DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkCut,
+                              "main: the git history walk hit its budget — churn= and amp= count only the newest commits (floors), and the document says so" );
+                }
+                else if( walk.raw.unread && walk.raw.notRun )
                 {
                     DISCLOSE( historyReport, HistoryReadReport::DisclosureWhy::WalkNotRun,
                               "main: git did not run for the history walk — churn= is absent and amp= counts callers only, and the document says so" );
@@ -5470,7 +5538,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
             if( multiRoot )
             {
                 std::vector<std::uint32_t> rootChurn;
-                for( std::uint32_t r = 0; r < ws.size(); ++r )
+                for( std::uint32_t r = 0; r < historyWalks.size(); ++r )
                 {
                     // Y2: the memoized form — skips the 431 ms `git log --name-only` walk on a
                     // warm (repo, HEAD sha, window, boundary-sha) hit; see quality.h's qchurn family.
@@ -5495,7 +5563,7 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
                     }
                 }
             }
-            else
+            else if( !historyWalks.empty() )
             {
                 // Y2: memoized — see the multi-root branch above.
                 commits = quality::resolveHistoryWalk( joinWalk( 0 ), ing,
@@ -5835,4 +5903,22 @@ static int dispatchMain( const rw::Config& cfg, char** argv )
     }
 
     return runDefaultMap( dsp );
+}
+
+// A stopped file-graph fold, or an adjacency past its edge limit, FAILED a build (fileGraphStop.h): no store was returned,
+// so no verb below answered from one and none printed. This is the one place that turns that failure into the run's
+// answer for every verb: the one line, exit 5. The backstop's second line is not wanted, so the stops are answered for.
+static int dispatchMain( const rw::Config& cfg, char** argv )
+{
+    try
+    {
+        return dispatchMainBody( cfg, argv );
+    }
+    catch( const rw::FileGraphStopped& stopped )
+    {
+        rw::memguard::answerStops();
+        DISCLOSE( Diagnostics::answerRefused, "main: the file graph's fold stopped, so the build failed — exit 5, one stderr line, nothing printed from a partial store" );
+        rw::emitTo( stderr, "ripwire: {}\n", rw::memguard::hardStopLine( "graph build", {}, stopped.why() ) );
+        return 5;
+    }
 }

@@ -5,4 +5,6 @@
 # in the gate; a row here is for content a complete answer needs that the old number did not foresee.
 # Columns (tab-separated): surface  clause  bytes  attr  marker  reason
 #   surface  ripwire.<key>/v1 (compactlegendcheck (U)), loop, mcp:<verb>, mcp:edit_check:answer, full:<shape> (the full-dialect gates)
-# No rows yet: every legend fits its target at the base (train-32a fe71bfc9).
+# First rows 2026-11-02 (docs-rest): the tail-order clause on ripwire.for/v1 and loop.
+ripwire.for/v1	tail-code-first	61	<tail	t order: code files first	docs-rest: the --for tail lists code files before doc files on a code question over an index with a doc unit; the legend says the order it uses (forpage.h tailOrdersCodeFirst)
+loop	tail-code-first	61	<tail	t order: code files first	docs-rest: the loop's --for answer carries the tail-order clause (fixture indexes notes.md); same clause as ripwire.for/v1

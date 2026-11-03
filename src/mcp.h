@@ -37,6 +37,7 @@
 #include "infra/os.h"      // rw::os::getcwd — R2a: the launch-cwd assumed root (resolved once at startup)
 #include "rootguard.h"      // #350 layer 1: noProjectRootReason — the launch cwd a server may not assume
 #include "memguard.h"       // #350 layer 3: the per-call hard-limit refusal and the _memory_stop sentence
+#include "gitmine.h"       // gitWalkCutMark/gitWalkCutSentence — the `_history_cut` envelope note (a history walk this request cut)
 
 namespace rw
 {
@@ -1657,7 +1658,23 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             std::string memoryStopNote;   // #350: set by indexStamp when the index answering this request is memory-guard partial
             const auto indexStamp = [ & ]( const std::string& root ) -> std::string
             {
-                const McpIndex& mix = getIndex( root );
+                // F-W1: the stamp is built AFTER the verb's answer is complete, so a rebuild that stops here refuses nothing. A write
+                // verb (an edit, quality_baseline's sidecar) has already written; a verb that answered without the index answered
+                // from its own build. The answer stands, the stamp says the index was not rebuilt, and _memory_stop names the stop.
+                // A verb that needed the index built or used it in its own body first, and a stop there still refuses (the catch below).
+                const McpIndex* built = nullptr;
+                try
+                {
+                    built = &getIndex( root );
+                }
+                catch( const FileGraphStopped& stopped )
+                {
+                    releaseMcpIndexMemory();
+                    memguard::answerStops();
+                    memoryStopNote = memguard::afterAnswerStopLine( "index rebuild after this answer", "the answer (and any write it reports)", stopped.why() );
+                    return "[index: not rebuilt: the include-closure fold stopped; the next call retries]";
+                }
+                const McpIndex& mix = *built;
                 memoryStopNote = mix.ing.memoryStop.isSet() ? memguard::softStopLine( mix.ing ) : std::string();
                 char buf[ 96 ];
                 rw::formatTo( buf, sizeof( buf ), "[index: files={} symbols={} hash={:08x}]",
@@ -1674,6 +1691,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // record their memory-guard stops here; a count that grew during this request means the answer may rest on
             // a partial ingest even when the resident index is whole, and the envelope says so (textResult).
             const std::uint32_t stopsAtEntry = memguard::stopCounts().recorded.load( std::memory_order_relaxed );
+            const GitWalkCutMark cutsAtEntry = gitWalkCutMark();   // M1: a history walk this request cut is said in its envelope (`_history_cut`)
             ownIngestCutNote().clear();   // notfound-on-cut: this request's own-ingest note starts empty (mcpindex.h)
             const auto textResult = [ & ]( const std::string& text )
             {
@@ -1685,6 +1703,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     memoryStopNote = "the memory guard stopped an ingest this answer depends on (inside this tool, or the "
                                      "background snapshot), so it may be incomplete — " + std::string( memguard::kOverride );
                 }
+                const GitWalkCutMark cutsNow  = gitWalkCutMark();
+                const std::string    cutNote  = gitWalkCutSentence( cutsNow.walks - cutsAtEntry.walks, cutsNow.commits - cutsAtEntry.commits );
                 // R2a: `_assumed_root` — a third envelope sibling (mcpEnvelopeNoteField), emitted ONLY when
                 // the request omitted `path` and the launch-cwd default answered.
                 // Card A3: `_fresh` — a fourth sibling, on EVERY response, because it is the one of these
@@ -1726,7 +1746,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                      + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
                      + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
-                     + mcpEnvelopeNoteField( "_memory_peak", memguard::peakNoteOnIncrease() ) + "}}";
+                     + mcpEnvelopeNoteField( "_memory_peak", memguard::peakNoteOnIncrease() )
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too
@@ -2134,7 +2155,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 // dispatch chain below, which is what makes room for this.
                 // #350 layer 3: over the memory guard's hard limit, no tool call starts work — the call is refused by
                 // name and the server stays up (a later call, after memory is released, is served). One footprint
-                // reading per tool call; nothing is measured on any other method.
+                // reading per tool call; nothing is measured on any other method. The reading is the LIVE footprint, never a
+                // remembered stop: a fold that stops throws FileGraphStopped, caught at this try's end, so nothing is sticky.
                 // Over the line, the resident index is released first (it is usually most of the footprint) and the
                 // footprint read once more: under the line again, the call proceeds and rebuilds for its own root; still
                 // over, it is refused, and the sentence names what is over: this server (restart it), or the cgroup leaf
@@ -2490,13 +2512,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
-                        const std::optional<std::string> answer = ownersText( path, symbol, pg );
+                        const GitWalkCutMark             cutsBefore = gitWalkCutMark();
+                        const std::optional<std::string> answer     = ownersText( path, symbol, pg );
                         if( !answer )
                         {
                             return errResult( -32603, "internal error: the owners answer buffer lost bytes — no answer served" );
                         }
                         const std::string& t = *answer;
-                        return t.empty() ? errResultMsg( -32602, symbol.empty()
+                        const std::string cut = rw::gitWalkCutRefusalCause( cutsBefore );   // F2: a walk THIS request's budget ended is not "no history"
+                        return t.empty() ? errResultMsg( -32602, !cut.empty() ? "owners is mined from git: " + cut
+                                                : symbol.empty()
                                                 ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
                                                 : notFoundSym( symbol ) )
                                          : textResult( t );
@@ -2918,6 +2943,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                         resp = errResultMsg( -32602, mcprefuse::unknownVerbRefusal( knownVerbs, name, advertisedCount ) );
                     }
                 }
+            }
+            catch( const FileGraphStopped& stopped )
+            {
+                // A failed build (infra/fileGraphStop.h): the fold stopped at the hard line, or the file graph passed a 32-bit offset, or an
+                // allocation failed inside it. No store was returned, so nothing answered, and nothing is remembered: the half-built index is
+                // released (valid=false, bulk gone) and the next call rebuilds, under the same limit it is checked against again.
+                releaseMcpIndexMemory();
+                memguard::answerStops();
+                DISCLOSE( Diagnostics::answerRefused, "mcp: a call whose file-graph fold stopped is refused with an MCP error naming the stop; the index is released, the next call rebuilds" );
+                resp = errResultMsg( -32000, memguard::hardStopLine( "graph build", {}, stopped.why() ) + "; this call was refused, the index was released and the next call retries the build" );
             }
             catch( ... )
             {

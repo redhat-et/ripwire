@@ -110,7 +110,7 @@ measurements are in [docs/EVALS.md](docs/EVALS.md).*
 </details>
 
 <details>
-<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 71 papers folded — McCabe (1976) through to <b>seven published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
+<summary><b>Fifty years of software-engineering results, and research from last month.</b> 49 repositories and 76 papers folded — McCabe (1976) through to <b>seven published in the last two months</b> — each row in <a href="docs/LINEAGE.md"><b>docs/LINEAGE.md</b></a> naming the lesson taken and the file it lives in</summary>
 
 Beside those sits a labelled survey of **237 tools** that contributed nothing and says so. The two
 sets are disjoint by construction, so they add rather than nest — a tool that gave a lesson is never
@@ -1168,7 +1168,9 @@ all six clients: [Agent setup](#set-it-up-in-your-coding-agent).
 
 **The honesty contract, in one line:** every count ripwire cannot prove is a total ships labelled a
 floor, every truncation is disclosed where it happens, and a zero means *none found* — never *none
-exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one. That is a
+exists*. Two runs over the same tree are byte-identical, and a warm run equals a cold one, except where a
+git history walk hits its time budget on a slow repository: that cut is disclosed in the answer, and the
+prefix it keeps moves with machine load, so two runs can differ. That is a
 contract, gated on every pull request and every push to main, not a tendency.
 [The full discipline — and the losses published next to the wins →](#the-honesty-contract)
 
@@ -1522,7 +1524,7 @@ $ ripwire . --test-gate          # exit code: 4
 
 A `run=` attribute appears only when a runner is derivable from real evidence — a test-dir script
 whose stem matches the harness, or whose text names it; for TypeScript/JavaScript, a file already
-recognized as test code (`test/`/`tests/`/`__tests__/`, or a `_test./.test./_spec./.spec.` name — the
+recognized as test code (`test/`/`tests/`/`__tests__/`, or a `_test./.test./_spec./.spec.` name, or a `.e2e-spec./.perf-spec.` name — the
 `__tests__/` directory convention is shared with every language, the rest are TS/JS's own) whose name
 ALSO matches vitest/jest's own test-name shape (`.test.`/`.spec.`, or living under `__tests__/` at
 all, jest's own two default conventions — never a `.d.ts` declaration file) — whose nearest
@@ -1982,10 +1984,10 @@ timing-only, and `pmccheck`'s inactive arm now proves that was truly the case.
 ## Standing on the whole field
 
 <details>
-<summary>49 repositories, 71 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
+<summary>49 repositories, 76 papers and a 237-tool survey — and the study where search over a pre-built index beats a delegating planner <b>65.2% to 46.2%</b>, at under half the cost</summary>
 
 Almost none of the ideas here are new; the combination and the constraints are. Lessons folded from
-**49 repositories and 71 papers** into one deterministic executable, alongside a labelled
+**49 repositories and 76 papers** into one deterministic executable, alongside a labelled
 survey of 237 tools that folded nothing and are catalogued separately — the two sets are disjoint,
 so they add rather than nest. The row-by-row ledger, each with the lesson taken and where it lives, is
 [`docs/LINEAGE.md`](docs/LINEAGE.md). Those three counts are derived from that document's own tables
@@ -2139,14 +2141,16 @@ wrong, and it has. These are the results that say so, all in-tree, all published
 ### In the tests
 
 <details>
-<summary><b>744 gate scripts</b>, five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
+<summary><b>753 gate scripts</b> (counts snapshot 2026-11-03), five contracts no unit test can hold, and the house rule: write the gate before the code it measures</summary> <!-- gatecount -->
 
-`test/regression.sh` names **744 gate scripts** and is the authoritative list; <!-- gatecount -->
+`test/regression.sh` named **753 gate scripts** at the counts snapshot 2026-11-03 and is the authoritative list; <!-- gatecount -->
 `python3 test/pargates.py . ./build/ripwire -j 6` runs the same set in parallel. On top of them sit the
 contracts that do not fit a unit test: two runs byte-identical, warm output identical to cold, output
 that pipes clean through `xmllint --noout`, a sanitizer build with `-fno-sanitize-recover=all`, and a
 differential argv harness that runs a reference binary and the candidate over every argument vector
-and requires stdout, stderr and exit code to match on each.
+and requires stdout, stderr and exit code to match on each. The gate count above and the cap inventory in
+§9 are the dated counts snapshot in `docs/counts.tsv` (`python3 docs/counts_snapshot.py show` prints today's
+numbers beside it), so two open changes that each add a gate or a cap never conflict on a total.
 
 The house rule behind all of it: **write the gate before the code it measures.** A ranking, a token
 estimate and a call graph all look plausible whether or not they are correct.
@@ -2393,7 +2397,7 @@ full command reference. Run `ripwire --help` for the current flag list. The bina
 `--help`, report this guide as a defect.
 
 <details>
-<summary><b>Evidence basis.</b> Fifty years of software-engineering results. 49 repositories and 71 papers are folded. A survey of 237 tools is separate.</summary>
+<summary><b>Evidence basis.</b> Fifty years of software-engineering results. 49 repositories and 76 papers are folded. A survey of 237 tools is separate.</summary>
 
 The counts come from `docs/LINEAGE.md`. Counts are current as of 2026-09-14. Seventeen of the folded papers are from 2026, seven published in the last two months, and three in the last thirty days. The survey describes 237 tools that contributed no lesson. The two sets are disjoint, so the counts add.
 
@@ -2738,7 +2742,7 @@ The map is `<r>` root, `<f p="PATH">` files, `<s t n k>` symbols, `<c n>` call e
 command wraps its rows in an element named for the verb — `<callers>`, `<uses>`, `<pr-context>`,
 `<dmm>`, `<skillscan>`.
 
-Two runs over one tree produce the same bytes, and every attribute and text node is XML-escaped, so
+Two runs over one tree produce the same bytes (except a disclosed history cut, whose prefix moves with machine load), and every attribute and text node is XML-escaped, so
 `operator<` and a path containing `&` round-trip: `ripwire . | xmllint --noout -` is a gate here.
 `docs/ARCHITECTURE.md` has the schema and the streaming writer behind it.
 
@@ -2875,7 +2879,7 @@ Neither diff may report a difference.
 
 **The gate scripts** hold five contracts that a unit test cannot hold.
 
-1. Two runs over one tree are byte-identical — the determinism gate of section 8, run on every CI leg.
+1. Two runs over one tree are byte-identical — the determinism gate of section 8, run on every CI leg — except a disclosed history cut, whose prefix moves with machine load.
 2. A warm run equals a cold run — the cache-transparency gates.
 3. Every XML output is well-formed. The verification command is `xmllint --noout`.
 4. The sanitizer build uses `-fno-sanitize-recover=all`, without which a run with undefined behaviour
@@ -2899,7 +2903,7 @@ python3 test/pargates.py . ./build/ripwire -j 6
 A new gate script must be added to `test/regression.sh` in the same change. The gate
 `test/manifestcheck.sh` enforces this rule.
 
-Another gate derives the cap inventory. The tool has 350 compile-time caps and 7 ranking parameters.
+Another gate derives the cap inventory. At the counts snapshot 2026-11-03 the tool had 368 compile-time caps and 8 ranking parameters.
 `docs/LIMITS.md` lists each cap, its value, and whether the file discloses a truncation when the cap
 fires, and `python3 docs/limits_build.py --check` proves that list against `src/`. `docs/TUNING.md`
 lists the measured cost of each cap.

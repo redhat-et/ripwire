@@ -1119,6 +1119,7 @@ inline constexpr std::size_t kForAnchorBodyBudgetBytes = 22800;
 inline constexpr std::size_t kForFileTailShownCap     = 24;   // the rank rows (deep-tail d2): files outside the shown head
 inline constexpr std::size_t kForFileTailPageRows     = 40;   // FOLD C: page 0 of the file page (forpage.h kForPageRowsDefault)
 inline constexpr std::size_t kForFileTailShellReserve = 48;
+inline constexpr std::size_t kForFileTailSphinxTxtRows = 24;  // code-first tail: Sphinx .txt pages listed beside the window's docs (forpage.h)
 
 // The legend clause defining BOTH deep-tail surfaces (the r= rank fact and the <tail> element) — a named
 // constant, shared by the CLI --for header and the MCP `for` twin, so the sigs-budget exemption in each
@@ -1131,6 +1132,14 @@ inline constexpr std::string_view kForFileTailLegend =
     "sym= its top symbols by lens rank (a pointer, not the answer); "
     "total=every positive-score file, shown=printed, capped=1 when they differ, next= the page from its first unprinted row. "
     "r= on a ranked row is its 1-based rank in this lens ranking, rows in r= order, p= the file (a gap = a budget-trimmed row)";
+// docs-rest CI fix 2: the order the tail really uses on a CODE question (filter.h taskAsksForDocText false; forpage.h
+// computeFileTail): every code row of both parts, then the doc rows. Present-only beside kForFileTailLegend, where that order
+// applies (forpage.h tailOrdersCodeFirst: a code question over an index holding a doc unit); a question asking for doc text keeps
+// the plain interleaved walk, and an index with no doc unit has no doc row to move, so neither carries it.
+// Sigs-charge-exempt with the clause it qualifies. No "--" (it rides inside an XML comment).
+inline constexpr std::string_view kForFileTailCodeFirstLegend =
+    "; tail order on this code question: every code file of both parts first, each part in the order above, then the doc "
+    "files (.md, .rst, a Sphinx .txt page) in that order";
 
 // R2-AF (round 2, S4): the legend clause defining `<hdr p= of=/>` — verbatim, round-2 amendment §R7. A
 // named constant, shared by the CLI --for header and the MCP `for` twin (rw::forNamedHeaderRows,
@@ -10060,7 +10069,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
 // directory name: test/, tests/, bench/) AND every file that depends on it is a test path (isTestPath) — both
 // by path, nothing is parsed. A production file under test/ (src/*.cpp includes ../test/lib/hooks.h) therefore
 // stays ranked. `adj` is the same file→file graph the afferent counts come from; the result is indexed by file id.
-inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+inline std::vector<std::uint8_t> testLayerGroup( const IngestResult& ing, const rw::FileAdjacency& adj )
 {
     const std::uint32_t       F = std::uint32_t( ing.files.size() );
     std::vector<std::uint8_t> prodDependent( F, 0 );
@@ -10114,10 +10123,20 @@ inline std::vector<std::uint32_t> depsGodfileRows( const IngestResult& ing, cons
     return byAff;
 }
 
+// RUST-MOD-DECL (graph.h ContainmentCut): --deps' cycle list with the graph it and `transitive` were measured on (nullptr:
+// packDeps' own `adj`) and how many containment pairs that graph leaves out (<health containment_edges=>, absent at 0).
+// The list arrives sorted largest first (graph.h sortCyclesLargestFirst), so the 20-row cap keeps the largest.
+struct DepsCycleView
+{
+    const std::vector<std::vector<std::uint32_t>>& cycles;
+    const rw::FileAdjacency*                       adj              = nullptr;
+    std::uint64_t                                  containmentEdges = 0;
+};
+
 inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
-                      const std::vector<std::vector<std::uint32_t>>& cycles,
+                      const DepsCycleView& cycleView,
                       const std::vector<std::uint32_t>& transitive, const std::vector<std::uint32_t>& afferent,
-                      const std::vector<std::vector<std::uint32_t>>& adj,
+                      const rw::FileAdjacency& adj,
                       std::uint64_t ccd, double acd, double nccd,
                       // parser version 83: the lazy pairs the load-time structure leaves out — per file (a row's
                       // lazy_edges=, written only when > 0) and in total (<health lazy_edges=>, same rule). See
@@ -10137,6 +10156,9 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                       const rw::TsImportRootCounts& tsImports = {} )
 {
     const std::size_t F = ing.files.size();
+    const std::vector<std::vector<std::uint32_t>>& cycles           = cycleView.cycles;
+    const rw::FileAdjacency&                       cutAdj           = cycleView.adj != nullptr ? *cycleView.adj : adj;
+    const std::uint64_t                            containmentEdges = cycleView.containmentEdges;
     const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
     const auto         pathRel   = [ & ]( std::uint32_t fileId ) -> std::string_view
     {
@@ -10210,6 +10232,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     const bool                healthUnknown = rw::systemNumbersUnknown( noEdge, measure );   // no measured edge left: every cone is one file, nothing behind ccd/nccd/shape but the missing data
     w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
     w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
+    if( containmentEdges > 0 )   // RUST-MOD-DECL: exactly when <health containment_edges=> is printed
+    {
+        w.write( "health containment_edges=N: Rust `mod x;` parent-to-child pairs whose only directive is the declaration (a parent "
+                 "that also uses or calls its child keeps the edge, and a cycle through it stays), left out of "
+                 "transitive=/cycles/ccd/acd/nccd/shape= as containment and kept in afferent=/instab=/godfiles/stabledeps. " );
+    }
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -10230,7 +10258,8 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     }
     w.write( buildPrunedPackagesBlock( ing.crawlSkips, rootArg ) );   // #478 gap 3: absent when no real package was pruned
 
-    // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >1 vertical, >2 tangled.
+    // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >=1 vertical; tangled from the cycles, not
+    // NCCD (DEPS-SHAPE-HONEST, rw::depsShape).
     // §P9.4: files=corpus size, dep_files=the ccd/acd/nccd/shape denominator (dependency-capable only).
     //
     // dep_langs= (kParserVer 81) is the DENOMINATOR'S OWN DISCLOSURE, and the reason it exists is that
@@ -10240,6 +10269,7 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // (lintrules.h::dependencyCapableLangTags), so it cannot drift from the predicate it describes, and
     // it is the SAME predicate --arch's propagation_cost N and --cochange's dep_capable= are built on.
     const std::string depLangs = rw::dependencyCapableLangTags();
+    const std::size_t cyclicFiles = rw::filesInCycles( cycles, measure.mask );
     char hb[ 176 ];
     if( healthUnknown )
     {
@@ -10248,16 +10278,20 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     else
     {
         rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
-                       ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
-                       nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+                       ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd, rw::depsShape( nccd, cyclicFiles, depFiles ) );
     }
     w.write( hb );
+    if( !healthUnknown )
+    {
+        w.write( rw::countAttrXmlOrEmpty( "cyclic_files", cyclicFiles ) );   // DEPS-SHAPE-HONEST: the number behind tangled; absent at 0
+    }
     w.write( rw::countAttrXmlOrEmpty( "masked_files", measure.masked ) );   // arch-honest: absent at 0, so a tree without a no-edge file is byte-identical
     if( lazyEdges > 0 )   // absent exactly when nothing was left out — never a hidden 0, and byte-identical for every corpus without a lazy directive
     {
         char lb[ 40 ];  rw::formatTo( lb, sizeof( lb ), " lazy_edges=\"{}\"", static_cast<unsigned long long>( lazyEdges ) );
         w.write( lb );
     }
+    w.write( rw::countAttrXmlOrEmpty( "containment_edges", std::size_t( containmentEdges ) ) );   // RUST-MOD-DECL: absent at 0
     w.write( " dep_langs=\"" );  w.write( escapeXml( depLangs, esc ) );  w.write( "\"/>" );
 
     // most depended-ON (afferent coupling Ca) = highest blast radius: changing these recompiles the most.
@@ -10328,8 +10362,16 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
 
     if( !cycles.empty() )   // Lakos's cardinal sin: cyclic physical dependencies (must build/test as one unit)
     {
-        w.write( "<cycles>" );
-        const std::size_t capC = cycles.size() < 20 ? cycles.size() : 20;
+        // S1: the 20 largest (the list is sorted largest first); --limit above 20 lists more, as the legend's limit=N says
+        const std::size_t capC = std::min( cycles.size(), std::max<std::size_t>( 20, pageLimit > 0 ? std::size_t( pageLimit ) : 0 ) );
+        if( capC < cycles.size() )   // DEPS-SHAPE-HONEST: a cut list says so (pageview.h rules 1-3); an uncut one is unchanged
+        {
+            w.write( "<cycles total=\"" + std::to_string( cycles.size() ) + "\" shown=\"" + std::to_string( capC ) + "\" capped=\"1\">" );
+        }
+        else
+        {
+            w.write( "<cycles>" );
+        }
         for( std::size_t c = 0; c < capC; ++c )
         {
             char cb[ 56 ];   // cost = k² = this cycle's contribution to CCD (Lakos: a k-cycle costs k²)
@@ -10351,11 +10393,11 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
                 { return std::binary_search( memberOf.begin(), memberOf.end(), f ); };
                 for( std::uint32_t src : cycles[c] )
                 {
-                    if( src >= adj.size() )
+                    if( src >= cutAdj.size() )
                     {
                         continue;
                     }
-                    for( std::uint32_t dst : adj[src] )
+                    for( std::uint32_t dst : cutAdj[src] )   // the graph the cycle was found in: a containment pair is never the cut
                     {
                         if( dst != src && isMember( dst ) )
                         {

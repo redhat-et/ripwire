@@ -196,6 +196,7 @@ extern "C"
 #include "ingest_jsimports.h"
 #include "infra/mdslug.h"      // mdSlugOf — shared with graph.h (the cross-file link bind)
 #include "ingest_docs.h"
+#include "ingest_rest.h"
 #include "ingest_names.h"
 #include "ingest_binds.h"
 #include "ingest_inert.h"

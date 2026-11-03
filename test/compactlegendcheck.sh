@@ -372,6 +372,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # sentence "A hit is one LINE: occ= on a row (present only above one) counts the pattern's occurrences on that line, and
 # hits=, shown= and the window count lines, not occurrences."; the root's hits=/shown= read 7 (was 8: the two occurrences on
 # geometry.cpp:16 are one line now); that row's n="2" + its at-tagged sibling become occ="2" (one hit per line).
+# RE-ANCHORED BY HAND 2026-11-02 (lane docs-rest, code-first --for tail + its legend clause), for.xml only: the lane's intended
+# output change, nothing else. Checked mechanically: removing the clause "; tail order on this code question: ..." (serialize.h
+# kForFileTailCodeFirstLegend, it rides because the fixture indexes notes.md) and masking at=/est_tokens= leaves the previous pin
+# with one change, the <tail> row order: notes.md moves from first to last behind the three code files (forpage.h
+# computeFileTail). Same four rows; est_tokens "2215" -> "2282".
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -670,13 +675,17 @@ probeFor()
 # "|closure" to the ns d= reading: measured 852 B, inside the same 860 B pin. The OLD path keeps its pin: the
 # (U-twin-path) arm after the universe loop cuts exactly those readings out of the same probe and holds the rest at 550 B.
 # RE-PINNED 2026-10-19 (markdown section links): the via=link reading and the deleted same-pair sentence.
+# RE-PINNED 2026-11-02 (lane truth-fixes, DEPS-SHAPE-HONEST): ripwire.deps/v1 780 -> 810 (measured 800, the --deps probe; 764 on
+# main c3b678bf). The always-on health shape= reading now says what tangled means (cyclic_files= at 1 in 20 of dep_files=) instead
+# of the nccd>2 rule it replaced: +36 B on every --deps answer. The cyclic_files= and containment_edges= readings ride only when
+# their attribute does (absent at 0) and add nothing on this cycle-free, Rust-free probe.
 PIN_TABLE='
 ripwire.edit-check/v1             650   636
 ripwire.map/v1                   1140  1129
 ripwire.map-diff/v1              970   953
 ripwire.pack-signatures/v1       840   827
 ripwire.metrics/v1               1090  1080
-ripwire.deps/v1                   780   764
+ripwire.deps/v1                   810   800
 ripwire.hotspots/v1               530   518
 ripwire.clones/v1                 810   799
 ripwire.readability/v1            350   332

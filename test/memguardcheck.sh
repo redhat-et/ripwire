@@ -624,7 +624,11 @@ else
     no "(B8) $( b8why "$rc" "$TMP/b8.out" "$TMP/b8.err" )"
 fi
 RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8b.out" 2>"$TMP/b8b.err"; rc=$?
-if b8real "$rc" "$TMP/b8b.out" "$TMP/b8b.err"; then
+# B8b asks one thing: is the REAL guard still on under a never-firing seam. A real line (ingest or graph build) passes; a
+# time-gated soft stop is the real guard too (macOS CI leg, 2026-11-02: rc 0, memory_stop=crawl in the answer, "the memory
+# guard stopped the parse" on stderr), so it passes when it says so on stderr; a run with no memory_stop and no guard line,
+# the disabled-guard shape, still fails.
+if b8real "$rc" "$TMP/b8b.out" "$TMP/b8b.err" && { [ "$rc" = 5 ] || grep -q '^ripwire: the memory guard stopped' "$TMP/b8b.err"; }; then
     ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 still stops on a real line)"
 else
     no "(B8b) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8b.out" "$TMP/b8b.err" )"
@@ -816,6 +820,25 @@ elif [ "$rc" = 5 ] && grep -q '^ripwire: .*cannot answer from a partial index' "
 else
     no "(B21) rc=$rc elapsed=${el}s stream-finished-before-return=$( [ -e "$SHIM/log-done" ] && echo yes || echo no ) (the shim's log streams for 6 s; a join waits it out) stderr: $( grep '^ripwire:' "$TMP/b21.err" | head -c 200 )"
 fi
+# (B21b) the same for a stopped include-closure fold: FileGraphStopped unwinds dispatchMainBody, whose historyWalks future joins
+#        on the way, so the walk must be abandoned before that destructor runs, not in dispatchMain's catch after it.
+#        Same shim, same verdict: the refusal returned while the stream had not finished. Neighbour: --metrics starts the walk too.
+#        The fixture has include edges and is a git repo: a fold over no edge never reaches the seam, and an rc=0 here is a FAIL.
+FXB="$TMP/b21bfx"; cp -R "$ROOT/test/filegraphstopfix" "$FXB"
+( cd "$FXB" && git init -q && git add -A && git -c user.name=t -c user.email=t@example.com commit -qm init ) || no "(B21b) premise: the fixture repo did not build"
+for b21verb in --for=helper --metrics; do
+    rm -f "$SHIM/log-served" "$SHIM/log-done"; mkdir -p "$TMP/b21btmp$b21verb"
+    t0=$( date +%s )
+    PATH="$SHIM:$PATH" TMPDIR="$TMP/b21btmp$b21verb" run_trip fold:1 "$FXB" --no-cache "$b21verb" >"$TMP/b21b.out" 2>"$TMP/b21b.err"; rc=$?
+    el=$(( $( date +%s ) - t0 ))
+    if [ ! -e "$SHIM/log-served" ]; then
+        no "(B21b) $b21verb premise: the shim never served a git log --name-only (rc=$rc)"
+    elif [ "$rc" = 5 ] && [ ! -s "$TMP/b21b.out" ] && grep -q '^ripwire: .*include-closure fold' "$TMP/b21b.err" && [ ! -e "$SHIM/log-done" ]; then
+        ok "(B21b) $b21verb over a stopped fold refuses in ${el}s while the shim's log still streams: the walk is abandoned, not joined"
+    else
+        no "(B21b) $b21verb rc=$rc elapsed=${el}s stream-finished-before-return=$( [ -e "$SHIM/log-done" ] && echo yes || echo no ) stderr: $( grep '^ripwire:' "$TMP/b21b.err" | head -c 200 )"
+    fi
+done
 # (B16) --query --format=candidates is a report verb, so it refuses a partial index like the rest (pinned: its
 #       <candidates> root has no header to carry the cut)
 run_trip parse:10 "$FX" --no-cache --query=d_17 --format=candidates >"$TMP/b16.out" 2>"$TMP/b16.err"; rc=$?

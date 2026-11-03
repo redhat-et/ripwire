@@ -36,6 +36,14 @@ inline bool hasDirSegment( std::string_view p, std::string_view seg ) noexcept
     return false;
 }
 
+// True when s ends with the lowercase suffix e, ignoring ASCII case in s. The crawl lowercases an extension before it
+// picks a language (ingest_crawl.h), so test-widget.SH is indexed as Bash and has to read as a shell script here too.
+inline bool endsWithLowerAscii( std::string_view s, std::string_view e ) noexcept
+{
+    return s.size() >= e.size()
+        && std::ranges::equal( s.substr( s.size() - e.size() ), e, []( char a, char b ) { return ( a >= 'A' && a <= 'Z' ? static_cast<char>( a + ( 'a' - 'A' ) ) : a ) == b; } );
+}
+
 // rv-test-gate-tsjs G2 (delta review, treated as a real defect, not advisory): jest's OWN default
 // `testMatch` collects every file under a `__tests__/` directory, named or not — a real, common JS/TS
 // convention this function did not recognize, so such a file was invisible to `--test-gate` (and every
@@ -68,6 +76,18 @@ inline bool isTestPath( std::string_view p ) noexcept
     if( fn.rfind( "test_", 0 ) == 0 )
     {
         return true; // test_*.*
+    }
+    // Hyphen forms are an allowlist (a false match hides real source from every verb): shell/batch test scripts, and the
+    // dotted Angular/Nest suffixes. attest-spec.ts, pod-spec.ts, ab-test.ts, self-test.c, test-and-set.c stay source.
+    const auto fnEnds = [ & ]( std::string_view e ) { return endsWithLowerAscii( fn, e ); };
+    if( ( fnEnds( ".sh" ) || fnEnds( ".bash" ) || fnEnds( ".zsh" ) || fnEnds( ".ps1" ) || fnEnds( ".bat" ) )
+        && ( fn.rfind( "test-", 0 ) == 0 || fn.find( "-test." ) != std::string_view::npos ) )
+    {
+        return true; // test-*.sh, *-test.sh
+    }
+    if( fn.find( ".e2e-spec." ) != std::string_view::npos || fn.find( ".perf-spec." ) != std::string_view::npos )
+    {
+        return true; // *.e2e-spec.ts, *.perf-spec.ts
     }
     for( std::string_view m : { std::string_view( "_test." ), std::string_view( ".test." ),
                                 std::string_view( "_spec." ), std::string_view( ".spec." ) } )
@@ -999,15 +1019,82 @@ inline std::vector<float> docNoiseSymbolMultipliers( const IngestResult& ing, st
 inline constexpr DocNoiseCue kDocsQuestionCues[] = { { "doc", true },      { "readme", true }, { "guide", true }, { "tutorial", true },
                                                      { "manual", true },   { "markdown", false }, { "wiki", false }, { "faq", false },
                                                      { "howto", false } };
-inline bool taskAsksAboutDocs( std::string_view task )
+// Does the question ask for doc TEXT: a docs cue (kDocsQuestionCues) or a named .md/.rst file? The narrower half of
+// taskAsksAboutDocs, without its change and translation cues: those misfire on code wording (`django.utils.deprecation`,
+// ld2-django-01), and the two rules that read this (the code-first --for tail, forpage.h computeFileTail; the Sphinx .txt
+// statistics below) keep every doc row and score every doc unit either way, so a code reading of a change question loses none.
+inline bool taskAsksForDocText( std::string_view task )
 {
     const std::string lowerTask = queryshape::detail::lowerAscii( task );
-    if( lowerTask.find( ".md" ) != std::string::npos || lowerTask.find( ".rst" ) != std::string::npos )
+    return lowerTask.contains( ".md" ) || lowerTask.contains( ".rst" ) || taskHasCue( lowerTask, kDocsQuestionCues );
+}
+
+// taskAsksForDocText (a named .md/.rst file — the B8 mention anchor lifts it, this rule must not push it back down — or a docs
+// cue), or a change or translation cue
+inline bool taskAsksAboutDocs( std::string_view task )
+{
+    if( taskAsksForDocText( task ) )
     {
-        return true;   // a named doc file (the B8 mention anchor lifts it; this rule must not push it back down)
+        return true;
     }
-    return taskHasCue( lowerTask, kDocsQuestionCues ) || taskHasCue( lowerTask, kChangeQuestionCues )
-        || taskHasCue( lowerTask, kTranslationQuestionCues );
+    const std::string lowerTask = queryshape::detail::lowerAscii( task );
+    return taskHasCue( lowerTask, kChangeQuestionCues ) || taskHasCue( lowerTask, kTranslationQuestionCues );
+}
+
+// ── SPHINX .txt PAGES STAY OUT OF A CODE QUESTION'S CORPUS STATISTICS (--for and MCP `for`; gate restdocscheck (H)) ─────
+// A `.txt` file enters the index only as a declared Sphinx source (docparse.h sphinxConfDeclaresTxt): django's 679 pages
+// arrived at once and, through BM25's document frequencies and average length, re-ranked code rows on code questions
+// (ld2-django-15 lost a sig row and a hop). On a question that does not ask for doc text (taskAsksForDocText), those pages are still scored, against the whole corpus as before, but the code is scored against statistics
+// without them (lexical.h lexicalScoresTiered statsOut). Empty = nothing to leave out: the historical pass, byte-identical.
+// `.rst` and Markdown keep counting: they were in the statistics before Sphinx `.txt` pages were indexed.
+// A doc unit of an indexed `.txt` file: a Sphinx page (only a declared Sphinx source is indexed with that extension)
+inline bool isSphinxTxtUnit( const IngestResult& ing, const Symbol& s )
+{
+    return isDocLang( s.lang ) && s.fileId < ing.files.size() && ing.files[ s.fileId ].ends_with( ".txt" );
+}
+
+// A reST label unit (`.. _name:`, ingest_rest.h (4)): a Markdown-lang unit named `_…` in a .rst/.txt file. It names the title
+// beside it, so ranked name lists (the --for file page and tail sym=, forpage.h) leave it out; :ref: still binds it.
+inline bool isRestLabelUnit( const IngestResult& ing, const Symbol& s )
+{
+    return isDocLang( s.lang ) && s.name.starts_with( '_' ) && s.fileId < ing.files.size()
+        && ( ing.files[ s.fileId ].ends_with( ".rst" ) || ing.files[ s.fileId ].ends_with( ".txt" ) );
+}
+
+inline std::vector<char> sphinxTxtStatsExclusion( const IngestResult& ing, std::string_view task )
+{
+    std::vector<char> out;
+    if( taskAsksForDocText( task ) )
+    {
+        return out;
+    }
+    std::vector<char> txtFile( ing.files.size(), 0 );
+    bool              anyTxt = false;
+    for( std::size_t f = 0; f < ing.files.size(); ++f )
+    {
+        txtFile[f] = docparse::lowerExtOf( ing.files[f] ) == ".txt" ? 1 : 0;
+        anyTxt     = anyTxt || txtFile[f] != 0;
+    }
+    if( !anyTxt )
+    {
+        return out;
+    }
+    out.assign( ing.symbols.size(), 0 );
+    std::size_t marked = 0;
+    for( std::size_t i = 0; i < ing.symbols.size(); ++i )
+    {
+        const Symbol& s = ing.symbols[i];
+        if( isDocLang( s.lang ) && s.fileId < txtFile.size() && txtFile[ s.fileId ] != 0 )
+        {
+            out[i] = 1;
+            ++marked;
+        }
+    }
+    if( marked == 0 )
+    {
+        out.clear();
+    }
+    return out;
 }
 
 // Order a file-id list by a per-id KEY descending, PATH ascending as the tiebreak — the shared

@@ -2505,7 +2505,9 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 r.startByte = ts_node_start_byte( roleNode );
                 r.line      = ts_node_start_point( roleNode ).row + 1;   // ABS-3: 1-based use-site line for --uses
                 r.lang      = le.lang;
-                r.role      = isImportRef ? RefRole::Import : RefRole::Call;   // ABS-3: @reference.call is a call use-site; @reference.import a using-decl re-export
+                // ABS-3: @reference.call is a call use-site; @reference.import a using-decl re-export. EDGE-PRELUDE-VETO: @reference.macro is a macro
+                // invocation the grammar spells as one (Rust `name!(..)`): role Macro, so it binds only to an indexed macro of the name (graph.h).
+                r.role      = isImportRef ? RefRole::Import : ( refCapSv == "reference.macro" ? RefRole::Macro : RefRole::Call );
                 r.name      = finalSegment( nameTxt );
                 if( le.lang == Lang::Clojure )
                 {
@@ -2541,6 +2543,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 {
                     r.name.push_back( '=' );   // `obj.name = v` calls `name=`, never the getter `name` (test/rubysettercheck.sh)
                 }
+                std::string rustWritten;   // RULE3-MEMBER-GUARD fix 4: a Rust path call's qualifier as written, when longer than one segment
                 if( le.lang == Lang::Cpp )
                 {
                     r.qualifier = qualifierOf( nameNode, src ); // `A::b()` → "A" (E#4 canonical resolve)
@@ -2553,6 +2556,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 else if( le.lang == Lang::Rust )
                 {
                     r.qualifier = rustQualifierOf( nameNode, src ); // H4: `Widget::new()` → "Widget"
+                    if( r.role == RefRole::Call )
+                    {
+                        rustWritten = rustWrittenQualifier( nameNode, src );   // the whole written qualifier, set below once the receiver fields are
+                    }
                 }
 
                 if( !isImportRef && le.lang != Lang::Elixir )                             // an import site has no receiver and no argument list —
@@ -2577,6 +2584,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     if( langFacts( le.lang ).trailingLambdaScopeFns )
                     {
                         r.trailingLambda = kotlinTrailingLambda( roleNode );   // #155: `x.run { }` / `with( x ) { }` — graph.h FalseEdgeRules' Kotlin arm
+                    }
+                    if( !rustWritten.empty() )
+                    {
+                        r.fieldName = std::move( rustWritten );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
                     }
                     if( isQueueLang( le.lang ) && isQueueCallName( r.name ) )
                     {

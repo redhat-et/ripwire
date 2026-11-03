@@ -84,6 +84,9 @@ enum class FileEdges : std::uint8_t
     NotApplicable,
 };
 
+/// What proves a call Rule 3 narrowed (LangFacts::rule3NameProof): nothing (Rule 3 decides), a Rust `use` or module qualifier, a Python import binding.
+enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
+
 /// What shared code asks about a language. Every optional column is false for a language that says nothing.
 struct LangFacts
 {
@@ -165,6 +168,26 @@ struct LangFacts
     /// Python: a bare builtin or an import from outside the tree is bound there whatever namesake an imported file defines, so the
     /// Phase-5 external-name veto (graph.h ExternalVeto) decides a call BEFORE Rule 3 narrows it to that namesake.
     bool externalVetoBeforeRule3 = false;
+
+    /// What proves a call Rule 3 narrowed that no receiver rule answers (RULE3-MEMBER-GUARD, graph.h): Rule 3 sees that the caller's
+    /// import closure holds a file defining the name, which says nothing about what the call's own name is bound to. The written
+    /// binding does. RustUse: a `use` of the name or a glob of the target's module, or a qualifier naming its module or type.
+    /// PythonImport: an import binding of the name, or a star import of an indexed module. A call without it keeps the edge, hedged.
+    /// None: Rule 3 keeps deciding as it did (hand samples of C, C++, TS, Go: reports/rule3-member-guard.md).
+    Rule3NameProof rule3NameProof = Rule3NameProof::None;
+
+    /// EDGE-PRELUDE-VETO: the names a bare call means in the language's prelude, bound outside the tree unless a binding of the name is
+    /// written (a definition in the caller's file, or one the rule3NameProof writing proves: a Rust `use`). Such a call joins the Phase-5
+    /// external-name veto beside Python's builtins and the C family's library names, BEFORE Rule 3 (graph.h preludeSite), so an
+    /// associated `type Ok;` or a nested `fn drop` an imported file defines never takes `Ok(x)` / `drop(x)`. Rust only (kRustPreludeCalls).
+    std::span<const std::string_view> preludeCalls = {};
+    constexpr bool isPreludeCall( std::string_view name ) const noexcept { return std::ranges::contains( preludeCalls, name ); }
+
+    /// EDGE-PRELUDE-VETO: the language invokes a macro only by a site the grammar spells as one (Rust `name!(..)`, queries/rust/tags.scm
+    /// @reference.macro, role Macro), so a role Call site never binds to a macro (graph.h siteNamespaceCompatible), and a macro definition
+    /// without an export attribute is textually scoped (ingest_names.h internalLinkageBit: Rust `macro_rules!` without #[macro_export]).
+    /// False where a macro is called like a function (a Clojure `defmacro` invoked as `(name ..)`) and in the C family (a #define).
+    bool bangMacros = false;
 
     /// Kotlin: an `interface` is a class_declaration like a class (queries/kotlin/tags.scm: "both land here as @definition.class"),
     /// so the symbol's kind cannot tell the two apart; shared code that needs an interface (ifacedispatch.h's lambda test) reads a
@@ -275,6 +298,25 @@ struct LangFacts
     /// count it (lane path-hop-body-fix1, review F4: a documented one-line delegator is still thin).
     bool leadingDocstring = false;
 
+    /// The languages where a bare `m()` inside a method is an implicit `this.m()` (or reaches a free/top-level function):
+    /// Java, Kotlin, C#, Swift, C++, Ruby.
+    bool implicitReceiver = false;
+
+    /// The languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias):
+    /// a free function is never what `x.f()` calls. Python, Go, C++, Rust, Ruby, Java, C#, Swift.
+    bool memberNeverReachesFreeFunction = false;
+
+    /// A call through a module alias (`pkg.F()`) reaches the module's package-level functions only, never a method: Go.
+    bool moduleCallReachesFunctionsOnly = false;
+
+    /// The languages where `Cls.m()` is a call on the CLASS (a static or an unbound method):
+    /// JavaScript, TypeScript, Python, Java, Kotlin, C#, Swift.
+    bool classNameReceiver = false;
+
+    /// The languages where `#` opens a line comment (in the C family `#` opens a preprocessor directive):
+    /// Python, Bash, Ruby, Elixir, Toml, Yaml, GDScript.
+    bool hashComment = false;
+
     /// C, C++, Go: a function's signature is a unit other declarations repeat (a header prototype, a forward declaration, a Go interface
     /// method), so a signature change reaches those rows in step; fordeclrow.h counts only these languages' function and method rows
     /// (DECL-ROW). Objective-C is not here: its message selectors are not C signatures.
@@ -282,7 +324,20 @@ struct LangFacts
 
     /// Whether this language's files can carry a file→file edge in this build (FileEdges above).
     FileEdges fileEdges = FileEdges::Unmeasured;
+
+    /// Python: `= (` and `return (` open a tuple, which holds data; in the other languages a `(` after `=` opens an arrow function's
+    /// parameters (TS, JS) or a parenthesised expression, so it never opens a table (forliteral.h bracketReadingOf).
+    bool tupleParens = false;
+
+    /// TypeScript, JavaScript, Rust, Swift, Kotlin: a bare `{` assigned or returned inside a function body is an object literal (a
+    /// call's options or a value), a block or a closure, never a table; in Python (a dict), C, C++, Java, Go it can hold data (forliteral.h).
+    bool localBraceNotData = false;
 };
+
+/// The Rust prelude's bare-callable items (std::prelude::v1, every edition): the Option and Result variants a call constructs, and
+/// std::mem::drop. `None` is never called; types (`Box`, `Vec`, `String`) are reached through a path (`Box::new`), and macros
+/// (`assert!`, `vec!`) are role Macro (queries/rust/tags.scm). LangFacts::preludeCalls.
+inline constexpr std::array<std::string_view, 4> kRustPreludeCalls = { "Err", "Ok", "Some", "drop" };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
 inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals", "hashCode", "toString" };
@@ -290,38 +345,48 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 /// The rows, one per Lang in enum order. A language says only the facts it has.
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
-      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .baseImportEvidence = BaseImportEvidence::PythonImport,
-      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true, .fileEdges = FileEdges::Resolved },
+      .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
+      .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
+      .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true },
     { .lang = Lang::TypeScript, .overloadSignatures = true, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir, .signatureRows = true },
-    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
-      .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self" },
+      .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
+    { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
+      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
+    { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .preludeCalls = kRustPreludeCalls, .bangMacros = true, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
+      .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
+    { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
     { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
-      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Bash, .fileEdges = FileEdges::Resolved },
+      .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
+      .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
+    { .lang = Lang::Bash, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Java, .samLambdas = true, .samIgnoredMembers = kJavaObjectMethods, .anonymousImplementors = true, .baseImportEvidence = BaseImportEvidence::JvmImport,
-      .writtenModule = WrittenModuleRule::DirsOnly },
+      .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::Ruby, .classObjectLookup = true, .mixinAncestry = true, .keepsUnshapedSubscript = true, .constantPathReceiver = true,
-      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self", .fileEdges = FileEdges::Resolved },
+      .memberSeparator = "#", .writtenModule = WrittenModuleRule::ConstantPath, .instanceReceiver = "self",
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Unknown, .notCode = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Json, .notCode = true, .fileEdges = FileEdges::NotApplicable },
-    { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly },
+    { .lang = Lang::CSharp, .overloadsWithoutArity = true, .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true },
     { .lang = Lang::C, .noNestedNamedFunctions = true, .memberSeparator = "::", .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain,
       .staticLinkage = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Toml, .notCode = true, .fileEdges = FileEdges::NotApplicable },
-    { .lang = Lang::Yaml, .notCode = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Toml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
+    { .lang = Lang::Yaml, .notCode = true, .hashComment = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::Php, .memberSeparator = "::" },
     { .lang = Lang::Lua, .dashDashComments = true, .fileEdges = FileEdges::Resolved },
-    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::Elixir, .hasInertQuoteRegions = true, .hashComment = true, .fileEdges = FileEdges::Resolved },
     { .lang = Lang::Dart },
     { .lang = Lang::Kotlin, .samFromJavaLambdas = true, .trailingLambdaScopeFns = true, .interfaceReadsAsClass = true, .anonymousImplementors = true, .overloadsWithoutArity = true,
-      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly },
-    { .lang = Lang::GDScript },
+      .baseImportEvidence = BaseImportEvidence::JvmImport, .writtenModule = WrittenModuleRule::DirsOnly,
+      .implicitReceiver = true, .classNameReceiver = true, .localBraceNotData = true },
+    { .lang = Lang::GDScript, .hashComment = true },
     { .lang = Lang::Clojure },
 } };
 
@@ -340,5 +405,38 @@ inline constexpr LangFacts langFacts( Lang l ) noexcept
 {
     return enumTableAt( kLangFacts, l, LangFacts { .lang = Lang::Unknown } );
 }
+
+// Slice 6c compile-time assertions: verify all 5 columns against the exact original language sets for every Lang.
+static_assert( []() constexpr
+{
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        const Lang l = static_cast<Lang>( i );
+        const bool expectedImplicit = ( l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp ||
+                                        l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby );
+        const bool expectedMemberNeverReachesFree = ( l == Lang::Python || l == Lang::Go || l == Lang::Cpp ||
+                                                     l == Lang::Rust || l == Lang::Ruby || l == Lang::Java ||
+                                                     l == Lang::CSharp || l == Lang::Swift );
+        const bool expectedModuleCallReachesFnsOnly = ( l == Lang::Go );
+        const bool expectedClassNameReceiver = ( l == Lang::JavaScript || l == Lang::TypeScript ||
+                                                l == Lang::Python || l == Lang::Java || l == Lang::Kotlin ||
+                                                l == Lang::CSharp || l == Lang::Swift );
+        const bool expectedHashComment = ( l == Lang::Python || l == Lang::Bash || l == Lang::Ruby ||
+                                           l == Lang::Elixir || l == Lang::Toml || l == Lang::Yaml ||
+                                           l == Lang::GDScript );
+
+        const auto& f = kLangFacts[ i ];
+        if( f.implicitReceiver != expectedImplicit ) return false;
+        if( f.memberNeverReachesFreeFunction != expectedMemberNeverReachesFree ) return false;
+        if( f.moduleCallReachesFunctionsOnly != expectedModuleCallReachesFnsOnly ) return false;
+        if( f.classNameReceiver != expectedClassNameReceiver ) return false;
+        if( f.hashComment != expectedHashComment ) return false;
+    }
+    return true;
+}(), "Slice 6c: all 5 columns in kLangFacts must match the exact original language predicate sets" );
+static_assert( !langFacts( Lang::Unknown ).implicitReceiver && !langFacts( Lang::Unknown ).memberNeverReachesFreeFunction );
+static_assert( !langFacts( Lang::Unknown ).moduleCallReachesFunctionsOnly && !langFacts( Lang::Unknown ).classNameReceiver && !langFacts( Lang::Unknown ).hashComment );
+static_assert( !langFacts( static_cast<Lang>( 99 ) ).implicitReceiver && !langFacts( static_cast<Lang>( 99 ) ).hashComment );
+
 
 }   // namespace rw

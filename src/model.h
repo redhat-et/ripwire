@@ -232,6 +232,12 @@ inline constexpr std::size_t kLangCount = static_cast<std::size_t>( Lang::Clojur
 // ...and the cache readers validate every cached Lang byte against it, so a stale kLangCount would also refuse
 // the new language's records. The compile-time proof (infra/enumcount.h) makes the append a build error instead.
 static_assert( enumCountIsExact<Lang, kLangCount>(), "kLangCount must name the LAST Lang enumerator — move it with the append" );
+// The documentation language: a Markdown heading, or a reST/Sphinx title, object directive or label (docparse.h, ingest_rest.h) is
+// Lang::Markdown, and no code grammar mints it. The ONE spelling of "is this a doc unit" (test/langidentity: no per-site compares).
+inline constexpr bool isDocLang( Lang l ) noexcept
+{
+    return l == Lang::Markdown;
+}
 
 // short lang label — the terse XML/JSON attribute (lang="cpp|py|ts|go|rs|swift|objc|js|sh|java|rb|md|json|cs|c|toml|yaml|php|lua|ex|dart|kt|gd|clj").
 // The canonical home for this switch: previously duplicated privately in htmlexport.h, moved here so a THIRD
@@ -905,6 +911,8 @@ struct Symbol
     // cache record, so kParserVer gates it like every other extracted fact. 0 (the SAFE state) means "no internal
     // linkage found", so a grammar that never sets it keeps today's gather. Shares testScope's byte as a bit-field:
     // Symbol has no pad byte left (the static_assert below holds unchanged).
+    // RUST (EDGE-PRELUDE-VETO): on a `macro_rules!` the same bit means NO #[macro_export]: the macro is textually scoped (its file, child
+    // modules, a `#[macro_use] mod` parent's: graph.h rustMacroScopeOf), so a `name!(..)` elsewhere does not bind it.
     std::uint8_t  internalLinkage : 1 = 0;
     // STD-ROOTED SCOPE (#150, C++ only): 1 ⇒ walking this def's FULL enclosing-owner chain out to the
     // translation unit, the OUTERMOST namespace found is literally `std` — i.e. this def genuinely lives
@@ -1163,6 +1171,9 @@ struct Reference
                                           //   → "Billing::Invoice"; `described_class` → the group's constant whole),
                                           //   recvVar keeping the final segment every class is keyed by (graph.h
                                           //   RubyClassObjects::ofIndexed); no chain or compose reader reads a NamedVar's
+                                          //   A fourth reading, on a Rust CALL reference (role Call, recv None): the whole qualifier a path call
+                                          //   is written with when it has more than one segment (`crate::far` for `crate::far::helper()`), ""
+                                          //   otherwise (ingest_names.h rustWrittenQualifier; read through rustWrittenQualifierOf below).
     std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
@@ -1218,6 +1229,15 @@ inline constexpr std::uint32_t kBaseBindNone          = 0;            // no encl
 inline constexpr std::uint32_t kBaseBindUnknown       = 0xFFFFFFFFu;  // a scope was too large to scan: nothing proven either way
 inline constexpr std::uint32_t kBaseBindTemplateParam = 0xFFFFFFFEu;  // fn-slot S2 fix 2: the written base is a TEMPLATE PARAMETER of the deriving class (`template <class B> struct M : B`): it names no declaration
 static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= kBaseBindTemplateParam` for both sentinels" );
+
+// RULE3-MEMBER-GUARD fix 4: the qualifier a Rust call is WRITTEN with, from its root — `crate::far` for `crate::far::helper()`, where
+// Reference::qualifier keeps only `far` — else `qualifier` itself (a one-segment path, every non-call reference). Its readers pass Rust
+// references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
+inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
+{
+    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName.empty();
+    return whole ? std::string_view( r.fieldName ) : std::string_view( r.qualifier );
+}
 
 // ONE rule for every reader of the reference table that counts a call SITE (train 30, fcall-forward nit N1): a FORWARDED
 // reference counts only where buildGraph kept its call — `keptForwards` is Graph::keptForwards, the ascending
@@ -1614,7 +1634,8 @@ enum class LocalBindKind : std::uint8_t
     // Lane alias-import (ALIAS-IMPORT): a JS/TS RE-EXPORT clause — `export { a } from './m'`, `export { a as b } from './m'`,
     // `export * from './m'` (and the `export type` spellings). var = the EXPORTED name ("*" for a star re-export), typeName = the
     // module specifier as written (quotes stripped), importedName = the name it takes from that module ("*" for a star).
-    // `export * as ns from` records nothing (it binds a namespace, not a name). fromSymbol kNoNode, spans {0,0}, sited at the
+    // `export * as ns from './m'` (BARREL-SHORT-KEY) is a NAMESPACE re-export: var = ns, importedName = "*" (a star has var "*").
+    // fromSymbol kNoNode, spans {0,0}, sited at the
     // statement. Written by ingest_importcap.h emitCapturedImportBind (the binds channel's Web arm) and read by forreexport.h
     // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
     // filters by kind). APPENDED (cache u8).

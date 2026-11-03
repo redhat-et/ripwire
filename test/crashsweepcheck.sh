@@ -307,6 +307,7 @@ docparse.h	openRegularFileStream	open	1	owned	fdopen'd into NoFollowRead; ::clos
 docparse.h	runMarkitdown	popen	1	closes	no exit between popen and pclose
 gitmine.h	forEachGitLogRecord	popen	1	closes	the shared --name-only reader: the walk loop leaves by stream end or the abandon break; one pclose after it, on the only exit past the failed open
 gitmine.h	gitCommandLines	popen	1	closes	status = pclose after the loop; no exit between
+gitmine.h	gitCommandLinesBy	popen	1	closes	pclose after the poll loop; a read past its deadline hands the pipe to a detached thread that pcloses it, or leaves it to process exit when no thread can start
 infra/os_win32.cpp	system	popen	1	closes	Windows body of os::system (compiled only for Windows): the drain loop has no exit; pclose after it
 gitmine.h	popenTrimmed	popen	1	closes	no exit between popen and pclose
 gitoracle.h	loadOracleCache	fopen	1	closes	returns only on a failed open; fclose after the read loop
@@ -320,7 +321,7 @@ ingest_cache.h	saveCache	fdopen	1	closes	adopts ExclTempFile's released fd; fclo
 ingest_crawl.h	runGitIgnoreProbe	popen	1	closes	the overflow break still reaches pclose
 ingest_docpass.h	publishDocBridgeBlob	fdopen	1	closes	adopts ExclTempFile's released fd; fclose on its own line; a failed fdopen ::closes the fd
 lintrules.h	loadLintRules	fopen	1	closes	skips only a failed open; fclose after the sized read
-main.cpp	dispatchMain	fopen	1	closes	returns only on a failed open; fclose after the read loop
+main.cpp	dispatchMainBody	fopen	1	closes	returns only on a failed open; fclose after the read loop
 main.cpp	resolveRemoteRoot	popen	1	closes	no exit between popen and pclose
 main.cpp	runDefaultMap	fopen	1	closes	returns only on a failed open; fclose after the render
 main.cpp	scipIndexUnreadableReason	open	1	closes	close right after fstat, before every return
@@ -339,7 +340,6 @@ pathguard.h	randomTempSuffix	open	1	closes	::close after the read loop, before t
 pathguard.h	readWholeBeneathNoFollow	openat	1	transferred	the next statement's cur.reset( next ) adopts it into OwnedFd; the only return between is the failed open
 pincensus.h	writePinCensus	fopen	1	closes	returns only on a failed open; one fclose before the return
 planlint.h	gitBlameLineSha	popen	1	closes	no exit between popen and pclose
-prcontext.h	numstatChangedPaths	popen	1	closes	rc = pclose after the loop; no exit between
 quality.h	SidecarWriteLock	open	1	owned	SidecarWriteLock's destructor unlocks and closes
 quality.h	forEachGitNulRecord	popen	1	closes	fread loop with no exit; pclose after it (qd-memory-degrade: the changed-files listing)
 quality.h	gitBlameRangeWindowCommits	popen	1	closes	continue-only loop; pclose after it
