@@ -7,7 +7,8 @@
 # name-exact route had nothing to land on. src/aliasdef.h is the one reader (C++ node kinds, one arm per language).
 #
 # RED-BEFORE-FIX: every [RED] arm fails on the base binary (main 824847bd; recorded in reports/index-alias-const.md); the
-# unmarked arms hold on base and head alike (each negative has a positive twin in the same fixture).
+# unmarked arms hold on base and head alike (each negative has a positive twin in the same fixture). The [R4] arms hold on main and
+# were red on the round-3 head 67efef80 (regressions that branch had made: the map legend comment, a class-scope literal row's in=).
 # Fixtures are built at runtime (nothing under a .gitignored path). Every arm reads a command whose exit code it checks.
 #
 # Usage: test/aliasdefcheck.sh [BIN]      (BIN falls back to RIPWIRE_BIN, then build/ripwire)
@@ -93,7 +94,7 @@ check_cpp FnType     functype ''                              ''
 check_cpp SPtr       struct   ''                              ''
 # the to_next hop is itself an alias row with a target: the chain is followable call by call
 check_cpp COW::Ptr   alias    'T*'                            ''
-# [RED on 67efef80] a comment or a line break before `;` keeps the target, with no trailing space and no comment text (N1, N2, CR)
+# [RED] (and red on 67efef80) a comment or a line break before `;` keeps the target, with no trailing space and no comment text (N1, N2, CR)
 check_cpp Trailing    alias   'lib::Real'                     '--defs=Real'
 check_cpp Spaced      alias   'lib::Real'                     '--defs=Real'
 check_cpp LineComment alias   'lib::COW&lt;int, lib::Real&gt;' '--defs=COW'
@@ -107,9 +108,9 @@ defs "$F/c" S2; r=$( row ); if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' 
 # [RED] the map's kind clause: a C/C++ alias or functype row reads the C/C++ clause, never the Go named-type one
 ( cd "$F/c" && "$BIN" . --no-cache ) > "$TMP/map" 2>/dev/null; mrc=$?
 if [ "$mrc" -eq 0 ] && grep -q 't=alias|functype-in-C++-and-.h' "$TMP/map" && ! grep -q 'a-Go-named-type' "$TMP/map"; then ok "[RED] C++ map: the C++ alias clause, no Go clause"; else no "[RED] C++ map clause: rc=$mrc cpp=$( grep -c 'functype-in-C++-and-.h' "$TMP/map" ) go=$( grep -c 'a-Go-named-type' "$TMP/map" )"; fi
-# [RED on 67efef80] the map of a tree with C++ alias rows is well-formed XML: no legend comment holds two hyphens in a row (CI
+# [R4] the map of a tree with C++ alias rows is well-formed XML: no legend comment holds two hyphens in a row (CI
 # windows-package found it; test/regression.sh's xmllint arm reads test/fixture, which has no alias row, so this arm is the cover)
-if [ "$mrc" -eq 0 ] && python3 -c 'import sys, xml.etree.ElementTree as E; E.parse(sys.argv[1])' "$TMP/map" 2> "$TMP/xmlerr"; then ok "[RED] C++ map parses as XML (python3 ElementTree)"; else no "[RED] C++ map is not well-formed XML: rc=$mrc $( tail -c 300 "$TMP/xmlerr" )"; fi
+if [ "$mrc" -eq 0 ] && python3 -c 'import sys, xml.etree.ElementTree as E; E.parse(sys.argv[1])' "$TMP/map" 2> "$TMP/xmlerr"; then ok "[R4] C++ map parses as XML (python3 ElementTree)"; else no "[R4] C++ map is not well-formed XML: rc=$mrc $( tail -c 300 "$TMP/xmlerr" )"; fi
 
 # a Go `type A = B` stays a t="alias" def with no to= (Go records no target; LangFacts::aliasTargetDefs is C/C++ only)
 mkdir -p "$F/g"; printf 'package p\n\ntype Real struct{}\n\ntype GoAlias = Real\n' > "$F/g/a.go"
@@ -155,7 +156,7 @@ printf 'namespace other { struct Thing {}; }\nusing Keep = other::Thing;\n' > "$
 ( cd "$F/big" && "$BIN" . --no-cache --defs=Keep ) > "$TMP/big" 2>&1; brc=$?
 if [ "$brc" -eq 0 ] && grep -q 'to="other::Thing"' "$TMP/big"; then ok "[RED] 10 MB one-line header beside an alias: the run finishes and indexes the alias"; else no "10 MB file: rc=$brc"; fi
 
-# [RED on 67efef80 for the mutants named] the JSON row carries the same target keys (mutant: defRowJson without aliasTargetAttrsJson)
+# (the mutants named are killed here) the JSON row carries the same target keys (mutant: defRowJson without aliasTargetAttrsJson)
 ( cd "$F/c" && "$BIN" . --no-cache --defs=ColumnPtr --json ) > "$TMP/j" 2>/dev/null; jrc=$?
 if [ "$jrc" -eq 0 ] && grep -qF '"to":"lib::COW<IColumn>::Ptr"' "$TMP/j" && grep -qF '"to_next":"--defs=COW::Ptr"' "$TMP/j"; then ok "--defs --json: \"to\" and \"to_next\""; else no "--defs --json: rc=$jrc $( head -c 300 "$TMP/j" )"; fi
 ( cd "$F/c" && "$BIN" . --no-cache --defs=LongAlias --json ) > "$TMP/j" 2>/dev/null; jrc=$?
@@ -182,7 +183,7 @@ else
 fi
 chmod 644 "$W/src/alias.h"
 
-# [RED on 67efef80] a multi-root workspace keeps the alias-target side table (workspace.h mergeWorkspaceIngests re-offsets it)
+# [RED] (and red on 67efef80) a multi-root workspace keeps the alias-target side table (workspace.h mergeWorkspaceIngests re-offsets it)
 mkdir -p "$TMP/ws/a" "$TMP/ws/b"; printf 'struct Other {};\n' > "$TMP/ws/a/o.h"
 printf 'namespace other { struct Thing {}; }\nusing Keep = other::Thing;\n' > "$TMP/ws/b/k.h"
 ( cd "$TMP/ws" && "$BIN" a b --no-cache --defs=Keep ) > "$TMP/ws.xml" 2>/dev/null; xrc=$?
@@ -190,10 +191,10 @@ printf 'namespace other { struct Thing {}; }\nusing Keep = other::Thing;\n' > "$
 if [ "$xrc" -eq 0 ] && grep -q 'n="Keep" t="alias"[^>]* to="other::Thing" to_next="--defs=Thing"' "$TMP/ws.xml"; then ok "[RED] multi-root --defs: to= and to_next="; else no "[RED] multi-root --defs: rc=$xrc $( grep -oE '<d n="[^>]*>' "$TMP/ws.xml" | head -1 )"; fi
 if [ "$jrc" -eq 0 ] && grep -qF '"to":"other::Thing"' "$TMP/ws.json"; then ok "[RED] multi-root --defs --json: \"to\""; else no "[RED] multi-root --defs --json: rc=$jrc $( head -c 300 "$TMP/ws.json" )"; fi
 
-# [RED on 67efef80] a class-scope alias's literal row names its class as in= (as main did), never its own alias row (S4)
+# [R4] a class-scope alias's literal row names its class as in= (as main did), never its own alias row (S4)
 mkdir -p "$F/e/cpp"; printf 'template <class T> struct Ptr { T* p; };\nstruct Widget { int n; };\nstruct Holder {\n    using WidgetRef = Ptr<Widget>;\n};\nint getWidgetRefCount();\n' > "$F/e/cpp/h.h"
 ( cd "$F/e" && "$BIN" . --no-cache --for="what does WidgetRef expand to? the defs lookup is empty" ) > "$TMP/e" 2>/dev/null; erc=$?
-if [ "$erc" -eq 0 ] && grep -q '<ld p="cpp/h.h" l="4" shape="using" in="Holder::Holder">' "$TMP/e"; then ok "[RED] class-scope using: the literal row's in= names its class"; else no "[RED] class-scope using in=: rc=$erc $( grep -oE '<ld [^>]*>' "$TMP/e" | head -1 )"; fi
+if [ "$erc" -eq 0 ] && grep -q '<ld p="cpp/h.h" l="4" shape="using" in="Holder::Holder">' "$TMP/e"; then ok "[R4] class-scope using: the literal row's in= names its class"; else no "[R4] class-scope using in=: rc=$erc $( grep -oE '<ld [^>]*>' "$TMP/e" | head -1 )"; fi
 
 echo "aliasdefcheck: $( [ "$fail" -eq 0 ] && echo PASS || echo FAIL )"
 exit "$fail"
