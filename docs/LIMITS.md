@@ -30,10 +30,10 @@ a small explicit bound" is safe only when nothing inside the group repeats; it i
 
 | total caps | files | caps whose file discloses | caps whose file discloses NOTHING |
 | --- | --- | --- | --- |
-| 350 | 126 | 229 | **121** |
+| 368 | 128 | 244 | **124** |
 
-Plus 7 ranking and apportionment parameters, in their own table below: they are not caps, they
-are not counted as caps, and 350 + 7 is the 357 constants this generator parses out of `src/`.
+Plus 8 ranking and apportionment parameters, in their own table below: they are not caps, they
+are not counted as caps, and 368 + 8 is the 376 constants this generator parses out of `src/`.
 
 ## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds
 
@@ -51,8 +51,8 @@ None of them truncates anything, so none can be judged by `shown=`/`total=` and 
 a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.
 The distinction was named in review on #108 and the rows below now carry it.
 
-The `class` column below carries that answer where it is known. **143 of 350 caps are classified
-(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 207 render `—`, which means NOT YET
+The `class` column below carries that answer where it is known. **143 of 368 caps are classified
+(50 INDEXING, 46 OUTPUT, 47 BOUNDARY); the remaining 225 render `—`, which means NOT YET
 CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with
 a known expiry:
 the tag belongs on the declaration itself, and this file exists only because the round that
@@ -84,7 +84,7 @@ measurement that chose it; listing them beside truncation caps invites tuning th
 
 The **anchor** column is read from each constant's own trailing comment. **unsourced** means the
 comment cites no measurement — the value came from somewhere, but not from anything a reader can
-check. All 7 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
+check. All 8 read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has
 the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per
 `docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider's)`. Sourcing them
 means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator
@@ -97,12 +97,13 @@ refuse to write, so the column cannot be satisfied by pointing at nothing.
 | `kCommonNameDefThreshold` | `5` | `src/graph.h` | **unsourced** | >5 defs of the same name ⇒ common (aider's) |
 | `kCoreBudgetShare` | `0.34` | `src/partition.h` | **unsourced** | — |
 | `kExemplarCcxCeilFactor` | `4` | `src/exemplar.h` | **unsourced** | — |
+| `kGeneratedMaxProseShare` | `0.15` | `src/docparse.h` | **unsourced** | of the document's bytes that are its own prose |
 | `kSpecificMinLen` | `8` | `src/graph.h` | **unsourced** | ≥8 chars …  (aider's) |
 | `kZoneDistanceThreshold` | `0.5` | `src/arch.h` | **unsourced** | \|A+I-1\| past this → classify into pain/useless |
 
 ## Caps, by file
 
-One table for each of the 126 files that declare a cap — the 350 caps counted above, and no parameter.
+One table for each of the 128 files that declare a cap — the 368 caps counted above, and no parameter.
 
 ### `src/abicheck.h`
 
@@ -484,6 +485,11 @@ Discloses: `capped`, `lit_capped`
 | `kForLiteralRegistrationRows` | `2` | — | shape=dotted: row slots kept for quoted sites outside any function (a registration) whatever the reader count |
 | `kForLiteralSiteRows` | `8` | — | <ls> rows shown (a runaway guard: shown=/src= count, next= lists all) |
 | `kForLiteralTierFiles` | `64` | — | source hit files classified (k=); past it k="?" |
+| `kForTableByteCap` | `40000` | — | shape=table: all its <lit> elements together, cut on a row boundary (runaway guard: a 16 KB cap loses ld-nushell-07) |
+| `kForTableContextRows` | `4` | — | shape=table: table rows served with the lines after them |
+| `kForTableMaxAnchor` | `60` | — | a longer backticked span is no anchor |
+| `kForTableRankedRows` | `4096` | — | shape=table: source sites read for a table row and ordered (a registry past the readers in path order must still rank first) |
+| `kForTableRows` | `32` | — | shape=table: <ls> rows per anchor (next= lists all) |
 
 ### `src/formembers.h`
 
@@ -522,6 +528,7 @@ Discloses: `capped`
 | `kReexportRowCap` | `8` | — | hop rows per definition (BFS order); the rest counted in total= |
 | `kReexportSpellingCap` | `256` | — | spellings one walk visits; past it total= is a floor (capped="1") |
 | `kReexportUseCap` | `2` | — | use-site rows per definition, from task-named files |
+| `kShortKeyRows` | `6` | — | rows per rung (a runaway guard; total= counts all) |
 
 ### `src/forselfhook.h`
 
@@ -542,6 +549,20 @@ Discloses: **none**
 | `kForSlotByCap` | `4` | — | — |
 | `kForSlotCap` | `16` | — | — |
 
+### `src/forunused.h`
+
+Discloses: `capped`, `bytes_capped`
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kForUnusedDirFiles` | `6` | — | files of a named directory given a table |
+| `kForUnusedExtraFiles` | `400000` | — | unindexed files visited in one answer |
+| `kForUnusedMaxBytes` | `32768` | — | the whole block: no further file starts past it |
+| `kForUnusedRowsPerFile` | `150` | — | printed rows of one file (shown= capped=1 and the counts stay whole) |
+| `kForUnusedSitesShown` | `2` | — | at= sites on one row |
+| `kMaxLinesUp` | `24` | — | — |
+| `kMaxLinesUp` | `400` | — | — |
+
 ### `src/gitmine.h`
 
 Discloses: `coboost_commits_capped`, `coboost_partners_capped`
@@ -552,6 +573,7 @@ Discloses: `coboost_commits_capped`, `coboost_partners_capped`
 | `kCoBoostMaxFilesPerCommit` | `30` | INDEXING | same bulk-commit cap as the other co-change miners here |
 | `kCoBoostMaxPartnerFiles` | `8` | INDEXING | strongest partners only, by (deg desc, path asc) |
 | `kCoBoostMaxSymbolsPerFile` | `3` | INDEXING | per partner file: its top-3 symbols by (lens score desc, id asc) |
+| `kGitWalkMaxSeconds` | `20` | — | — |
 
 ### `src/gitoracle.h`
 
@@ -573,6 +595,7 @@ Discloses: `files_capped`, `importers_capped`
 | `kChaConeCap` | `4096` | INDEXING | per-walk discovery cap, unchanged from the per-call walk |
 | `kImpactFileRollupCap` | `20` | — | — |
 | `kImpactTypeRollupBandMax` | `200` | — | — |
+| `kImportTierRollupDirDepth` | `2` | — | — |
 | `kMaxEdges` | `256` | — | total emitted edge cap |
 | `kMaxNodes` | `96` | — | total emitted node cap (§3 size caps) |
 | `kMaxRadius` | `12` | — | — |
@@ -1082,6 +1105,7 @@ Discloses: **none**
 | constant | value | class | note |
 | --- | --- | --- | --- |
 | `kDefaultRecallMaxTokens` | `8000` | — | — |
+| `kRecallDemotedNamedMax` | `5` | — | — |
 
 ### `src/receiverevidence.h`
 
@@ -1239,6 +1263,15 @@ Discloses: `diff_capped`
 | --- | --- | --- | --- |
 | `kMaxDiffRows` | `2000` | — | — |
 | `kMaxRenameHops` | `8` | — | — |
+
+### `src/subjectanchor.h`
+
+Discloses: **none**
+
+| constant | value | class | note |
+| --- | --- | --- | --- |
+| `kSubjectMaxDefs` | `12` | — | — |
+| `kSubjectMaxPlainWords` | `4` | — | — |
 
 ### `src/taskroute.h`
 

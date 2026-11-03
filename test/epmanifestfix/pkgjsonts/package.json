@@ -1,0 +1,4 @@
+{
+  "name": "ts-pkg",
+  "main": "dist/index.js"
+}

@@ -14,7 +14,8 @@
 #       no def row of its own and none of core_x's rows.
 #   T1  `where sayHello used in use.ts is defined`: ts/m/index.ts:1 `export { sayHello } from './impl'`, ts/alias.ts:1 as="sayHi",
 #       ts/barrel.ts:1 `export * from './m'` (glob="1"), u ts/use.ts:1.
-#   T2  `export * as ns from './impl'` (ts/m/index.ts:3) is a namespace: never a row; `export type { Shape }` IS a row (it moves a
+#   T2  `export * as ns from './impl'` (ts/m/index.ts:3) is a namespace hop (lane barrel-short-key: an ns="ns" row, before it never a
+#       row; test/barrelshortkeycheck.sh owns the namespace forms); `export type { Shape }` IS a row (it moves a
 #       name) and never a call edge: --callers=sayHello lists no ts/m/index.ts row.
 #   C1  cycles terminate: core_x a.rs/b.rs glob each other; ts cyc1.ts/cyc2.ts star each other (one row each).
 #   N2  a task spelling `(…)` / `[…]` around file names terminates (the tokenizer once spun on a `)` it never skipped).
@@ -81,7 +82,10 @@ has  "$TMP/t1.xml" "T1 barrel export-from index.ts:1"   '<rx p="ts/m/index.ts" l
 has  "$TMP/t1.xml" "T1 renamed export-from as="         '<rx p="ts/alias.ts" l="1" from="./m/index" as="sayHi"/>'
 has  "$TMP/t1.xml" "T1 star hop hedged"                 '<rx p="ts/barrel.ts" l="1" from="./m" glob="1"/>'
 has  "$TMP/t1.xml" "T1 task-named import use.ts:1"      '<u p="ts/use.ts" l="1" from="./barrel"/>'
-hasnt "$TMP/t1.xml" "T2 namespace export not a row"     'p="ts/m/index.ts" l="3"'
+# BY-DESIGN BREAK (lane barrel-short-key): `export * as ns from './impl'` was "never a row"; it is now a NAMESPACE hop (ns="ns"): the
+# module's names are published as ns.<name>. The row says ns=, never as= or glob=, and it moves no plain spelling (no as="ns").
+has  "$TMP/t1.xml" "T2 namespace export is an ns= row"  '<rx p="ts/m/index.ts" l="3" from="./impl" ns="ns"/>'
+hasnt "$TMP/t1.xml" "T2 namespace export is no rename"  'l="3" from="./impl" as="ns"'
 ask "--for=where Shape is defined" >"$TMP/t2.xml"
 has  "$TMP/t2.xml" "T2 type-only re-export is a row"    '<rx p="ts/m/index.ts" l="2" from="./impl"/>'
 ask --callers=sayHello >"$TMP/t2c.xml"

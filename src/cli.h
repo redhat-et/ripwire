@@ -1047,7 +1047,11 @@ inline constexpr char kHelpHead[] =
         "                               route= is a CODE: name-exact(X) = the task names symbol X (the anchors: clause after it is the\n"
         "                               evidence); subtoken+body = the conceptual ranker over names and bodies; subtoken+body:broad = a\n"
         "                               one- or two-word query where plain rg may also win; subtoken+body:declined(word;N-carriers,M-defs)\n"
-        "                               = a name hit refused because the word is a common name (N names carry it, M definitions); a shape\n"
+        "                               = a name hit refused because the word is a common name (N names carry it, M definitions);\n"
+        "                               a descriptive subject's plain words beside an exact symbol append \"; dropped: word(N-defs) ...\" (they\n"
+        "                               are not anchors; ask for a word alone to read it as a name); a name-exact anchor no source file defines\n"
+        "                               appends \"; anchor has no source definition (...)\" and confidence= reads low. A conceptual route whose\n"
+        "                               subject names one function carries <callers by=\"subject\">. A shape\n"
         "                               demotion appends \"; doc tier demoted (...)\". On the rows, sc= is the enclosing scope and the full id\n"
         "                               is p::sc::n (p= of the row or its <f>) - the spelling --expand/--callers/--impact/--uses accept; a member\n"
         "                               row folds its stored scope into n=Owner.name where the index defines that scope as a type or module (Owner::name C/C++/Rust, Owner#name Ruby): id p::n.\n"
@@ -1117,10 +1121,13 @@ inline constexpr char kHelpHead[] =
         "                               the ceiling cost, and lines= the ranges actually PRESENT in the emitted body rather than the\n"
         "                               ones merely selected.\n"
         "                               GENERATED documents rank LAST by default — a doc that declares itself generated in\n"
-        "                               its first lines, or is BOTH >=5x the median doc's size AND mostly ```-fenced quoted\n"
-        "                               output (a capture/API dump quotes every term, so BM25 hands it every query). Never\n"
-        "                               dropped: it still wins when nothing else matches. Each one says [generated_demoted:\n"
-        "                               marker|size+fences] on its own line and the header tallies generated_demoted=N\n"
+        "                               its first lines, or is >=5x the median doc's size AND mostly ```-fenced quoted output\n"
+        "                               AND under 15% prose of its own (a capture/API dump quotes every term, so BM25 hands\n"
+        "                               it every query; a reference page with prose between its examples is not demoted).\n"
+        "                               Never dropped: it still wins when nothing else matches. Each one says\n"
+        "                               [generated_demoted: marker|size+fences] on its own line; the header tallies\n"
+        "                               generated_demoted=N and names the first 5 best-first in generated_demoted_paths=\"a,b\"\n"
+        "                               (% \" , and space percent-encoded; generated_demoted_named=K when it names fewer than N)\n"
         "    --tree                     orient file by file: each file's top symbols, 80 files by default\n"
         "                               file-by-file orientation map (top symbols per file). Default window: the 80 files with the\n"
         "                               best-ranked symbols (shown=/capped=/total=/next_offset= disclose the cut, next= pastes the\n"
@@ -1490,6 +1497,8 @@ inline constexpr char kHelpHead[] =
         "                               <health dep_langs=> names that language set, which is what makes a dep_files=/ccd/\n"
         "                               acd/nccd number comparable across builds: sh, rb, lua and ex joined it at parser\n"
         "                               version 81 and every one of those numbers moved on a corpus holding them.\n"
+        "                               <health shape=> is tangled when 1 in 20 dep_files= sit inside an include cycle (cyclic_files=,\n"
+        "                               over every cycle), else nccd below 1 horizontal, from 1 vertical: a deep graph is not a tangle.\n"
         "                               STRUCTURE vs USE (parser version 83): a LAZY edge -- every directive of the pair\n"
         "                               written inside a closure (Ruby method/lambda/block, TS/JS function body), a Ruby\n"
         "                               autoload or rescue class -- is a use, not a load-time dependency: it is in --impact's importer tier\n"
@@ -2924,7 +2933,7 @@ inline constexpr char kHelpTail[] =
         "    -v, --version              print the version + short build info, exit 0\n\n"
         "every line above is a summary. --help=--FLAG prints that flag's full text — the caveats, the units, what it\n"
         "refuses and why. --help=SECTION does one family; --help=all is the whole catalog (~46K tokens).\n"
-        "determinism: output is byte-identical run-to-run  (t=$(mktemp -d); ripwire <dir> >\"$t/a\"; ripwire <dir> >\"$t/b\"; diff -q \"$t/a\" \"$t/b\")\n";
+        "determinism: output is byte-identical run-to-run, except a disclosed history cut (a git history walk that hit its time budget keeps a prefix that moves with machine load)  (t=$(mktemp -d); ripwire <dir> >\"$t/a\"; ripwire <dir> >\"$t/b\"; diff -q \"$t/a\" \"$t/b\")\n";
 
 // ── the two tiers ───────────────────────────────────────────────────────────────────────────────────
 // The catalog above is ONE text and stays one text — nothing here deletes a line of it. What changed is
