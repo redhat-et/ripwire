@@ -85,9 +85,9 @@ check_cpp FnType     functype ''                              ''
 check_cpp SPtr       struct   ''                              ''
 # the to_next hop is itself an alias row with a target: the chain is followable call by call
 check_cpp COW::Ptr   alias    'T*'                            ''
-# the runaway guard (kAliasTargetCap = 160): a longer target is cut with an ellipsis and to_bytes= names its full size
+# the runaway guard (kAliasTargetCap = 160): a longer target is cut with an ellipsis, to_capped="1" says so, to_bytes= names its full size
 defs "$F/c" LongAlias; r=$( row )
-case "$r" in *' to_bytes="'*'"'*'…"'*|*'…" to_bytes="'*) ok "[RED] --defs=LongAlias: to= cut at the cap, to_bytes= present";; *) no "[RED] --defs=LongAlias: rc=$drc want to_bytes= and a cut to=, got: ${r:-<no row>}";; esac
+case "$r" in *'…" to_capped="1" to_bytes="'*) ok "[RED] --defs=LongAlias: to= cut at the cap, to_capped=\"1\" to_bytes= present";; *) no "[RED] --defs=LongAlias: rc=$drc want to_bytes= and a cut to=, got: ${r:-<no row>}";; esac
 # typedef rows keep their old shape: no to= (the target precedes the name)
 defs "$F/c" S2; r=$( row ); if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' "$r" | grep -q ' to='; then ok "typedef S2 is a def with no to= (unchanged shape)"; else no "typedef S2: rc=$drc row=${r:-<none>}"; fi
 

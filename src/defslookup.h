@@ -189,7 +189,7 @@ inline DefLookup lookupDefs( const IngestResult& ing, const Graph& g, std::strin
 // target starts exactly when the target ends the declaration (ingest_sidecap.h, src/aliasdef.h, model.h AliasTarget): C++ `using X = Y;` and
 // `namespace L = lib;`. Every other row (a typedef, whose target precedes its name; any def with a real body) has no to=. `unread` when the file
 // could not be read: never an empty target. Whitespace runs fold to one space; past kAliasTargetCap the text is cut on a
-// UTF-8 boundary with an ellipsis and `fullBytes` names the uncut size.
+// UTF-8 boundary with an ellipsis, to_capped="1" says so and `fullBytes` (to_bytes=) names the uncut size.
 inline constexpr std::size_t kAliasTargetCap = 160;   // a runaway guard: real alias targets are tens of bytes
 struct AliasTargetText
 {
@@ -315,7 +315,7 @@ inline void aliasTargetAttrsXml( std::string& out, const AliasTargetText& a )
     out += " to=\"" + std::string( escapeXml( a.text, esc ) ) + "\"";
     if( a.fullBytes > kAliasTargetCap )
     {
-        out += " to_bytes=\"" + std::to_string( a.fullBytes ) + "\"";
+        out += " to_capped=\"1\" to_bytes=\"" + std::to_string( a.fullBytes ) + "\"";
     }
     if( !a.next.empty() )
     {
@@ -336,7 +336,7 @@ inline void aliasTargetAttrsJson( std::string& out, const AliasTargetText& a )
     out += ",\"to\":\"" + jsonStr( a.text ) + "\"";
     if( a.fullBytes > kAliasTargetCap )
     {
-        out += ",\"to_bytes\":" + std::to_string( a.fullBytes );
+        out += ",\"to_capped\":1,\"to_bytes\":" + std::to_string( a.fullBytes );
     }
     if( !a.next.empty() )
     {
