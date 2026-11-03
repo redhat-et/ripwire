@@ -85,10 +85,42 @@ def loopCount( root ):
     return len( names )
 
 
+def _site_line( line, count, taken, where, sink ):
+    """One line of a site file: the rewritten line, recording an unmarked claim, an orphan marker or (with a
+    snapshot date `taken`) a marked line without its date into sink[ 'unmarked' | 'orphan' | 'undated' ];
+    returns ( newLine, [ old values ] )."""
+    marked = MARKER.search( line ) is not None
+    hits = [ v for rx in SPELLINGS for v in rx.findall( line ) ]
+    if hits and not marked:
+        sink[ 'unmarked' ].append( '%s states %s and carries no marker' % ( where, '/'.join( hits ) ) )
+    elif marked and not hits:
+        sink[ 'orphan' ].append( where )
+    if not ( marked and hits ):
+        return line, []
+    for rx in SPELLINGS:
+        line = rx.sub( str( count ), line )
+    if taken is not None:
+        if SNAPSHOT_DATE.search( line ) is None:
+            sink[ 'undated' ].append( where )
+        line = SNAPSHOT_DATE.sub( taken, line )
+    return line, hits
+
+
+REFUSALS = (
+    ( 'unmarked', 'gatecount_build: HAND-WRITTEN gate count(s) found — mark the line with the marker '
+                  'comment (see CONTRIBUTING.md) so this generator owns it:\n  ' ),
+    ( 'orphan',   'gatecount_build: marker(s) on a line stating no gate count — a claim deleted is a '
+                  'claim drifted; restore the claim or drop the marker:\n  ' ),
+    ( 'empty',    'gatecount_build: site(s) with no marked gate count at all:\n  ' ),
+    ( 'undated',  'gatecount_build: marked site(s) state the snapshot count without its date — add '
+                  '"counts snapshot YYYY-MM-DD" to the line (this generator keeps the date current):\n  ' ),
+)
+
+
 def rewrite_marked_sites( root, count, taken = None ):
     """Return [ ( relPath, newText, [ (line, oldValue) … ] ) … ], refusing on any unmarked claim. With a
     snapshot date `taken`, every marked line must also carry `counts snapshot YYYY-MM-DD`, rewritten to it."""
-    plans, unmarked, orphanMarkers, empty, undated = [], [], [], [], []
+    plans, sink = [], { k: [] for k, _ in REFUSALS }
     for rel in SITES:
         path = root / rel
         if not path.is_file():
@@ -96,36 +128,15 @@ def rewrite_marked_sites( root, count, taken = None ):
         lines = path.read_text( encoding = 'utf-8', errors = 'surrogateescape' ).split( '\n' )
         out, seen = [], []
         for i, line in enumerate( lines, 1 ):
-            marked = MARKER.search( line ) is not None
-            hits = [ v for rx in SPELLINGS for v in rx.findall( line ) ]
-            if hits and not marked:
-                unmarked.append( '%s:%d states %s and carries no marker' % ( rel, i, '/'.join( hits ) ) )
-            elif marked and not hits:
-                orphanMarkers.append( '%s:%d' % ( rel, i ) )
-            if marked and hits:
-                for rx in SPELLINGS:
-                    line = rx.sub( str( count ), line )
-                if taken is not None:
-                    if SNAPSHOT_DATE.search( line ) is None:
-                        undated.append( '%s:%d' % ( rel, i ) )
-                    line = SNAPSHOT_DATE.sub( taken, line )
-                seen += [ ( i, v ) for v in hits ]
+            line, hits = _site_line( line, count, taken, '%s:%d' % ( rel, i ), sink )
+            seen += [ ( i, v ) for v in hits ]
             out.append( line )
         if not seen:
-            empty.append( rel )
+            sink[ 'empty' ].append( rel )
         plans.append( ( rel, '\n'.join( out ), seen ) )
-    if unmarked:
-        sys.exit( 'gatecount_build: HAND-WRITTEN gate count(s) found — mark the line with the marker '
-                  'comment (see CONTRIBUTING.md) so this generator owns it:\n  ' + '\n  '.join( unmarked ) )
-    if orphanMarkers:
-        sys.exit( 'gatecount_build: marker(s) on a line stating no gate count — a claim deleted is a '
-                  'claim drifted; restore the claim or drop the marker:\n  ' + '\n  '.join( orphanMarkers ) )
-    if empty:
-        sys.exit( 'gatecount_build: site(s) with no marked gate count at all: %s' % ', '.join( empty ) )
-    if undated:
-        sys.exit( 'gatecount_build: marked site(s) state the snapshot count without its date — add '
-                  '"counts snapshot YYYY-MM-DD" to the line (this generator keeps the date current):\n  '
-                  + '\n  '.join( undated ) )
+    for key, msg in REFUSALS:
+        if sink[ key ]:
+            sys.exit( msg + '\n  '.join( sink[ key ] ) )
     return plans
 
 

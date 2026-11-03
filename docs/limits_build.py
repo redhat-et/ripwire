@@ -200,6 +200,11 @@ def live_totals(caps, disc, classes):
             'limits.parameters': len(weights), 'limits.constants': len(caps),
             'limits.indexing': cls('INDEXING'), 'limits.output': cls('OUTPUT'), 'limits.boundary': cls('BOUNDARY')}
 
+def unsourced_phrase(weights):
+    """How many parameters read unsourced, from the live table below it (per-item content, not a snapshot total)."""
+    n = sum(1 for x in weights if not anchor_of(x[4]))
+    return 'All %d read unsourced today' % n if n == len(weights) else '%d of the %d read unsourced today' % (n, len(weights))
+
 def render(caps, disc, classes, tot, taken):
     out = []
     w = out.append
@@ -285,9 +290,7 @@ def render(caps, disc, classes, tot, taken):
         w('measurement that chose it; listing them beside truncation caps invites tuning them by intuition.\n')
         w('The **anchor** column is read from each constant\'s own trailing comment. **unsourced** means the')
         w('comment cites no measurement — the value came from somewhere, but not from anything a reader can')
-        w('check. %s, which is the finding, not an omission: `kSpecificMinLen` has'
-          % ('All %d read unsourced today' % len(weights) if all(not anchor_of(x[4]) for x in weights)
-             else '%d of the %d read unsourced today' % (sum(1 for x in weights if not anchor_of(x[4])), len(weights))))
+        w('check. %s, which is the finding, not an omission: `kSpecificMinLen` has' % unsourced_phrase(weights))
         w('the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per')
         w('`docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider\'s)`. Sourcing them')
         w('means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator')
