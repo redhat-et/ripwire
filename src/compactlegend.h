@@ -386,7 +386,7 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // #220 part 1: the FILE graph's gauge (graphlegend.h importsUnresolvedAttrXml), absent at zero, on the --deps/--arch/
     // --impact roots and the MCP impact twin. What it means for the numbers is the reading BESIDE it, never this row:
     // graph_partial= on --deps/--arch (next row), counts_floor= on --impact (its own row above; importers= only rises).
-    { "imports_unresolved", "imports_unresolved=N: N TS/JS imports naming this tree (alias, workspace or imports entry; assets never) drew no edge" },
+    { "imports_unresolved", "imports_unresolved=N: N TS/JS imports naming this tree (alias, workspace or imports entry; assets never) or C/C++ quote includes two include roots hold drew no edge" },
     // Its reading on --deps/--arch, the same sentence both full legends carry (graphlegend.h kGraphPartialAttrXml): not a
     // floor, because a missing edge can merge two cycles into one and moves a ratio either way.
     { "graph_partial",     "graph_partial=1: measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios" },

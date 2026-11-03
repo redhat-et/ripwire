@@ -2277,6 +2277,47 @@ inline std::uint32_t inImporterRoot( const std::vector<std::uint32_t>& fileRoot,
     return fileRoot[ hit ] == fileRoot[ importerFileId ] ? hit : kNoFile;
 }
 
+// C-ROOT-INCLUDE: the include roots a quote `#include "a/b.h"` is probed at once the includer's own directory missed, with no build
+// file read: the repo root (Envoy, htop, tmux: the -I every build passes), each `include/` directory beside the includer's
+// directory or an ancestor, nearest first (the shared module-root rule, moduleRootCandidates; C has no module unit), then `src/` at
+// the root. Each base is a shape a build file in the corpus passes as -I (repo root: Envoy Bazel, htop automake, tmux -iquote;
+// `include/`: waybar meson, cpython Modules/_hacl; root `src/`: ninja's fuzzer build); `source/` and `lib/` bound nothing. One tier: unique across the roots or nothing, and an in-tree name that two
+// roots both hold is counted in `ambiguousOut` (a dropped edge the verbs disclose), never guessed by probe order.
+inline std::vector<std::string> cIncludeRootBases( std::string_view dir )
+{
+    std::vector<std::string> bases{ std::string() };
+    for( std::string& r : moduleRootCandidates( dir, []( std::string_view ) noexcept { return false; }, "include" ) )
+    {
+        bases.push_back( std::move( r ) );
+    }
+    bases.emplace_back( "src" );
+    return bases;
+}
+
+inline std::uint32_t resolveCIncludeRoots( std::string_view dir, std::string_view target, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                           const WsIncludeCtx* ws, std::uint32_t includerFileId, std::uint64_t* ambiguousOut )
+{
+    std::uint32_t hit = kNoFile;
+    for( const std::string& base : cIncludeRootBases( dir ) )
+    {
+        const std::uint32_t f = joinNormalizeLookup( base, target, fileIndex, ws, includerFileId );
+        if( f == kNoFile || f == hit )
+        {
+            continue;
+        }
+        if( hit != kNoFile )
+        {
+            if( ambiguousOut != nullptr )
+            {
+                ++*ambiguousOut;
+            }
+            return kNoFile;
+        }
+        hit = f;
+    }
+    return hit;
+}
+
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on
 // the INCLUDER's language (its file extension). `fileIndex` maps each canonical `ing.files` path → its
 // fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust);
@@ -2292,7 +2333,8 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
                                             const HashMap<std::string, std::uint32_t>& fileIndex,
                                             std::string_view crateRootDir = {}, bool hasCrateRoot = false,
                                             const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
-                                            const HashMap<std::string, std::uint32_t>* moduleIndex = nullptr )
+                                            const HashMap<std::string, std::uint32_t>* moduleIndex = nullptr,
+                                            std::uint64_t* cAmbiguousOut = nullptr )
 {
     if( target.empty() )
     {
@@ -2352,7 +2394,10 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
                 }
                 return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
             }
-            return joinNormalizeLookup( includerDir( includerPath ), target, fileIndex, ws, includerFileId );
+            {
+                const std::uint32_t own = joinNormalizeLookup( includerDir( includerPath ), target, fileIndex, ws, includerFileId );
+                return own != kNoFile ? own : resolveCIncludeRoots( includerDir( includerPath ), target, fileIndex, ws, includerFileId, cAmbiguousOut );
+            }
         case IncludeLang::Python: return resolvePythonImport( includerPath, target, fileIndex, ws, includerFileId );
         case IncludeLang::Ts:     return resolveTsImport( includerPath, target, fileIndex, ws, includerFileId );
         case IncludeLang::Rust:   return resolveRustImport( includerPath, target, fileIndex, crateRootDir, hasCrateRoot, ws, includerFileId );
@@ -4482,7 +4527,8 @@ inline std::uint32_t resolveBareTsImport( const IngestResult& ing, const HashMap
 // byte-identical.
 // `importsUnresolvedOut` (#220 part 1): optional, default nullptr — when non-null it receives how many TS/JS bare
 // import directives drew no edge although they name something in this tree (tsimport::ImportResolver's
-// InRepoUnresolved verdict). Counted in DIRECTIVES, lazy ones included, so the dedup=true and dedup=false builds
+// InRepoUnresolved verdict), plus the C/C++ quote includes two include roots both hold (resolveCIncludeRoots: no edge,
+// never a guess by probe order). Counted in DIRECTIVES, lazy ones included, so the dedup=true and dedup=false builds
 // agree on it.
 // #220 part 2: every caller now gets the EDGES — a bare TS/JS specifier the relative branch left unresolved is handed
 // to tsimport::ImportResolver (built on the first such specifier, so a tree without one reads no config file), and
@@ -4653,7 +4699,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
             hasCrd = hasCrateByRoot[ r ] != 0;
         }
         std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle,
-                                                   fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex );
+                                                   fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex, importsUnresolvedOut );
         if( to == kNoFile && tsimport::isBareTsSpecifier( rootRelPath( ing, inc.fileId ), inc.target ) )
         {
             to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );
