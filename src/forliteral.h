@@ -1046,9 +1046,9 @@ inline std::uint32_t homeTableFile( const IngestResult& ing, const std::vector<S
     return cands[0].key() == cands[1].key() ? UINT32_MAX : cands[0].file;
 }
 
-// the answer's ids that anchor. Two or more of its source-class rows own a site of the literal: the answer matched the literal in their bodies (a
-// body-match route), so those readers say nothing about where it belongs and do not anchor (their files, directories and calls would make every
-// reader near); its other rows and the literal's own definitions still do. One reader the answer names (the function asked about) anchors.
+// the answer's ids that anchor. More than half of its source-class rows own a site of the literal: the answer is mostly the literal's own readers
+// (a body match), so those readers say nothing about where it belongs and do not anchor (their files, directories and calls would make every
+// reader near); its other rows and the literal's own definitions still do. A minority of readers (ts-09: 15 of 40 rows) anchors as before.
 inline std::vector<NodeId> answerAnchorsOf( const IngestResult& ing, std::span<const NodeId> answer, const std::vector<GrepHit>& enriched )
 {
     std::vector<NodeId> readers;
@@ -1062,7 +1062,8 @@ inline std::vector<NodeId> answerAnchorsOf( const IngestResult& ing, std::span<c
         return id < NodeId( ing.symbols.size() ) && subject_detail::sourceClassDef( ing, id ) && std::ranges::binary_search( readers, id );
     };
     std::vector<NodeId> out( answer.begin(), answer.end() );
-    if( std::ranges::count_if( out, isReader ) >= 2 )
+    const auto sourceRows = std::ranges::count_if( out, [ & ]( NodeId id ) { return id < NodeId( ing.symbols.size() ) && subject_detail::sourceClassDef( ing, id ); } );
+    if( std::ranges::count_if( out, isReader ) * 2 > sourceRows )
     {
         std::erase_if( out, isReader );
     }

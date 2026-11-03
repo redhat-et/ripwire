@@ -55,7 +55,7 @@
 #          static-only literal, an uncapped block's rows, an unanchored single-table block, a cut that moved no row (D8: no lit_cut)
 #   D9-D14 (fix round 1; RED on 8c7cf2011 where [P]): a Dir-near map cuts no table (D9); the home table counts table rows, then a #define list
 #          (D10, D7 with the home file sorting last); a far registration keeps its reserve slot (D11); one-call nearness kept, its twin cut (D12);
-#          the answer's reader rows anchor nothing on a body match (D13); a hub (fan-in > 16) lends no one-call nearness (D14)
+#          the answer's reader rows anchor nothing when they are most of it (D13); a hub (fan-in > 16) lends no one-call nearness (D14)
 #
 # Usage:  bash test/forliteralcheck.sh [BIN]   |   RIPWIRE_BIN=asan/ripwire bash test/forliteralcheck.sh
 # BIN is $1, else RIPWIRE_BIN, else build/ripwire; the first output line names the binary used. Exits non-zero on any failure.
