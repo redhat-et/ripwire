@@ -217,13 +217,21 @@ w "$G/src/user.rs" 'fn here() {}\npub fn uz() { mm!(); rootm!(); here(); }\n'
 row M6.libpathuse  "$G" callees uz  src/macros.rs mm      present
 row M6.libpathroot "$G" callees uz  src/g.rs rootm        present
 row M6.twin        "$G" callees uz  src/user.rs here      proven
-# M7: src/bin/*.rs and a main.rs beside the lib root are crates of their own: a lib's non-exported macro binds in neither
-w "$G/src/bin/tool.rs" 'fn there() {}\nfn tz() { rootm!(); there(); }\n'
-w "$G/src/main.rs" 'fn here2() {}\nfn mz() { rootm!(); here2(); }\nfn main() { mz(); }\n'
-row M7.srcbin      "$G" callees tz  src/g.rs rootm        none
-row M7.twin        "$G" callees tz  src/bin/tool.rs there proven
-row M7.mainrs      "$G" callees mz  src/g.rs rootm        none
-row M7.twin2       "$G" callees mz  src/main.rs here2     proven
+# M7: src/bin/*.rs and a main.rs beside the lib root are crates of their own: a lib's non-exported macro binds in neither (a lib.rs crate
+# and a `[lib] path` crate); a child module of the lib root still binds it
+L=$T/lb
+w "$L/Cargo.toml" '[package]\nname = "lb"\nversion = "0.1.0"\n'
+w "$L/src/lib.rs" 'macro_rules! lm { () => {} }\npub mod x;\n'
+w "$L/src/x.rs" 'pub fn xz() { lm!(); }\n'
+w "$L/src/bin/tool.rs" 'fn there() {}\nfn tz() { lm!(); there(); }\n'
+w "$L/src/main.rs" 'fn here2() {}\nfn mz() { lm!(); here2(); }\nfn main() { mz(); }\n'
+row M7.child       "$L" callees xz  src/lib.rs lm         present
+row M7.srcbin      "$L" callees tz  src/lib.rs lm         none
+row M7.twin        "$L" callees tz  src/bin/tool.rs there proven
+row M7.mainrs      "$L" callees mz  src/lib.rs lm         none
+row M7.twin2       "$L" callees mz  src/main.rs here2     proven
+w "$G/src/bin/tool.rs" 'fn there() {}\nfn gtz() { rootm!(); there(); }\n'
+row M7.libpathbin  "$G" callees gtz src/g.rs rootm        none
 w "$W/crates/g/Cargo.toml" '[package]\nname = "g"\nversion = "0.1.0"\n[lib]\npath = "src/g.rs"\n'
 w "$W/crates/g/src/g.rs" '#[macro_use]\nmod gm;\npub mod gu;\nmacro_rules! groot { () => {} }\n'
 w "$W/crates/g/src/gm.rs" 'macro_rules! gmm { () => {} }\n'
