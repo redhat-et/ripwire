@@ -3544,32 +3544,6 @@ inline void capturePythonRebindShadowDecls( TSNode n, const char* t, std::uint32
         }
         return;
     }
-    if( kindIs( t, "import_from_statement" ) )
-    {
-        // MF7: a module-scope from-import that may not run (inside an `if`/`try`/`with`/loop clause) marks each name it binds `?:y`
-        // (kPythonCondImportPrefix); the import's own Import binding is filed elsewhere. A star import binds no name and files none.
-        if( pythonDefIsConditionalAtModule( n ) )
-        {
-            const std::uint32_t at = ts_node_start_byte( n );
-            ChildCursor         cursor( n );
-            forEachChild( n, cursor.cur, [ & ]( TSNode c )
-            {
-                const TSNode nm = kindIs( ts_node_type( c ), "aliased_import" ) ? fieldChild( c, NodeField::Alias ) : c;
-                if( ts_node_eq( c, fieldChild( n, NodeField::ModuleName ) ) || ts_node_is_null( nm ) )
-                {
-                    return true;
-                }
-                const char* nt = ts_node_type( nm );
-                if( kindIs( nt, "identifier" ) || kindIs( nt, "dotted_name" ) )
-                {
-                    pushRawBind( fileId, lang, std::string{ kPythonCondImportPrefix }.append( nodeTextOf( nm, src ) ), std::string{},
-                                 BindSite{ at, 0u, 0u }, LocalBindKind::VarDecl, binds );
-                }
-                return true;
-            } );
-        }
-        return;
-    }
     if( kindIs( t, "function_definition" ) || kindIs( t, "class_definition" ) )
     {
         const TSNode nm = fieldChild( n, NodeField::Name );
@@ -3616,6 +3590,30 @@ inline void capturePythonParamShadowDecls( TSNode n, std::uint32_t fileId, Lang 
     }
 }
 
+// MF7 (PY-MOD-CALL-SITES): a module-scope from-import that may not run (inside an `if`/`try`/`with`/loop clause,
+// pythonDefIsConditionalAtModule) marks each name it binds `?:y` (kPythonCondImportPrefix); the import's own Import binding is filed
+// elsewhere. A star import binds no name and files none.
+inline void capturePythonCondImportMarks( TSNode n, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+{
+    if( !kindIs( ts_node_type( n ), "import_from_statement" ) || !pythonDefIsConditionalAtModule( n ) )
+    {
+        return;
+    }
+    const std::uint32_t at     = ts_node_start_byte( n );
+    const TSNode        module = fieldChild( n, NodeField::ModuleName );
+    ChildCursor         cursor( n );
+    forEachChild( n, cursor.cur, [ & ]( TSNode c )
+    {
+        const TSNode nm = kindIs( ts_node_type( c ), "aliased_import" ) ? fieldChild( c, NodeField::Alias ) : c;
+        if( !ts_node_eq( c, module ) && !ts_node_is_null( nm ) && ( kindIs( ts_node_type( nm ), "identifier" ) || kindIs( ts_node_type( nm ), "dotted_name" ) ) )
+        {
+            pushRawBind( fileId, Lang::Python, std::string{ kPythonCondImportPrefix }.append( nodeTextOf( nm, src ) ), std::string{},
+                         BindSite{ at, 0u, 0u }, LocalBindKind::VarDecl, binds );
+        }
+        return true;
+    } );
+}
+
 inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
 {
     if( lang == Lang::Python )
@@ -3625,6 +3623,7 @@ inline void captureShadowScopeDecls( TSNode n, const char* t, std::uint32_t file
             capturePythonParamShadowDecls( n, fileId, lang, src, binds );   // Phase 4b: veto evidence only (empty span)
         }
         capturePythonRebindShadowDecls( n, t, fileId, lang, src, binds );   // issue #287 round 2: rebind veto evidence
+        capturePythonCondImportMarks( n, fileId, src, binds );   // MF7: `?:y` for a from-import that may not run
         capturePythonLocalScopeDecls( n, t, fileId, lang, src, binds );   // lambda parameters / comprehension targets (`~name`)
         capturePythonPatternDecls( n, fileId, src, binds );        // ind4b fix 4: match captures and `type` statements
         capturePythonTypeParamDecls( n, fileId, src, binds );   // ind4b fix 5: PEP 695 type parameters
