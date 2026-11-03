@@ -55,14 +55,15 @@ for m in re.finditer(r"<s [^>]*>",doc):
 print(got)' "$1" "$2"
 }
 # row ID ROOT VERB SYM PATH NAME WANT   WANT: proven | name | none | present (proven or name)
+# (`good` is yes/no, never 0/1: test/gateexitcheck.sh (B) reads the first `X=1` in a FAIL-printing helper as the accumulator, and that is `fail`)
 row() {
-    local id=$1 root=$2 verb=$3 sym=$4 path=$5 name=$6 want=$7 got good=0
+    local id=$1 root=$2 verb=$3 sym=$4 path=$5 name=$6 want=$7 got good=no
     got=$( ask "$BIN" "$root" "$verb" "$sym" | classify "$path" "$name" )
     case "$want:$got" in
-        present:proven|present:name) good=1 ;;
-        *) [ "$got" = "$want" ] && good=1 ;;
+        present:proven|present:name) good=yes ;;
+        *) [ "$got" = "$want" ] && good=yes ;;
     esac
-    if [ "$good" = 1 ]; then echo "PASS $id ($got)"; else echo "FAIL $id --$verb=$sym -> $path:$name want $want got $got"; fail=1; fi
+    if [ "$good" = yes ]; then echo "PASS $id ($got)"; else echo "FAIL $id --$verb=$sym -> $path:$name want $want got $got"; fail=1; fi
 }
 # attr ID ROOT VERB SYM ATTR MIN: the answer's ATTR="N" or header ATTR=N (first occurrence) is at least MIN; VERB map = the default map
 attr() {
