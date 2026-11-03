@@ -56,13 +56,13 @@ print(got)' "$1" "$2"
 }
 # row ID ROOT VERB SYM PATH NAME WANT   WANT: proven | name | none | present (proven or name)
 row() {
-    local id=$1 root=$2 verb=$3 sym=$4 path=$5 name=$6 want=$7 got ok=0
+    local id=$1 root=$2 verb=$3 sym=$4 path=$5 name=$6 want=$7 got good=0
     got=$( ask "$BIN" "$root" "$verb" "$sym" | classify "$path" "$name" )
     case "$want:$got" in
-        present:proven|present:name) ok=1 ;;
-        *) [ "$got" = "$want" ] && ok=1 ;;
+        present:proven|present:name) good=1 ;;
+        *) [ "$got" = "$want" ] && good=1 ;;
     esac
-    if [ "$ok" = 1 ]; then echo "PASS $id ($got)"; else echo "FAIL $id --$verb=$sym -> $path:$name want $want got $got"; fail=1; fi
+    if [ "$good" = 1 ]; then echo "PASS $id ($got)"; else echo "FAIL $id --$verb=$sym -> $path:$name want $want got $got"; fail=1; fi
 }
 # attr ID ROOT VERB SYM ATTR MIN: the answer's ATTR="N" or header ATTR=N (first occurrence) is at least MIN; VERB map = the default map
 attr() {
@@ -76,7 +76,7 @@ attr() {
 # ---- Rust: one crate; a.rs holds a namesake of every prelude name and macro, so each call has an in-tree name to be bound to by mistake.
 R=$T/rs
 w "$R/Cargo.toml" '[package]\nname = "p"\nversion = "0.1.0"\n'
-w "$R/src/lib.rs" 'pub mod a;\npub mod own;\npub mod m;\npub mod parser;\npub mod pm;\npub mod u1;\npub mod u2;\npub mod u3;\npub mod u4;\npub mod u6;\npub mod u7;\npub mod u8;\npub mod u9;\npub mod u10;\npub mod u11;\npub mod u12;\npub mod u14;\npub mod u15;\npub mod cm;\npub mod u16;\n#[macro_use]\nmod mu;\n#[macro_use]\npub(crate) mod dm;\npub mod u17;\npub mod ru;\npub mod u18;\n'
+w "$R/src/lib.rs" 'pub mod a;\npub mod own;\npub mod m;\npub mod parser;\npub mod pm;\npub mod u1;\npub mod u2;\npub mod u3;\npub mod u4;\npub mod u6;\npub mod u7;\npub mod u8;\npub mod u9;\npub mod u10;\npub mod u11;\npub mod u12;\npub mod u14;\npub mod u15;\npub mod cm;\npub mod u16;\n#[macro_use]\nmod mu;\n#[macro_use]\npub(crate) mod dm;\npub mod u17;\npub mod ru;\npub mod u18;\n/* #[macro_use] mod cmt; */\npub mod cmt;\npub mod u23;\npub mod pmc;\npub mod u24;\npub mod u25;\npub mod u26;\n'
 w "$R/src/a.rs" 'pub fn helper() {}\npub fn Ok(x: i32) -> i32 { x }\npub fn Err(x: i32) -> i32 { x }\npub fn assert(x: bool) {}\npub fn json() {}\npub fn mac2() {}\npub fn pmac() {}\npub fn outer() { fn drop(x: i32) {} drop(1); }\npub struct Q;\nimpl Q {\n    pub fn lock(&self) {}\n    pub fn into(self) {}\n}\n'
 w "$R/src/own.rs" 'pub struct Ok(pub i32);\n'
 w "$R/src/m.rs" '#[macro_export]\nmacro_rules! mac2 { () => {} }\n#[macro_export]\nmacro_rules! json { ($e:tt) => {} }\n'
@@ -104,6 +104,12 @@ w "$R/src/dm/mod.rs" 'macro_rules! dmac { () => {} }\n'
 w "$R/src/u17.rs" 'fn p17() { mumac!(); dmac!(); }\n'
 w "$R/src/ru.rs" 'macro_rules! rmac { () => {} }\npub(crate) use rmac;\n'
 w "$R/src/u18.rs" 'use crate::ru::rmac;\nfn p18() { rmac!(); }\n'
+w "$R/src/cmt.rs" 'macro_rules! cmtm { () => {} }\nfn cm1() { cmtm!(); }\n'
+w "$R/src/u23.rs" 'fn p23() { cmtm!(); crate::a::helper(); }\n'
+w "$R/src/pmc.rs" '/*\n#[proc_macro]\n*/\npub fn cpm(x: u32) -> u32 { x }\n#[proc_macro]\npub fn rpm(x: u32) -> u32 { x }\n'
+w "$R/src/u24.rs" 'use crate::pmc::{cpm, rpm};\nfn p24() { cpm!(1); rpm!(1); }\n'
+w "$R/src/u25.rs" 'use crate::pm::pmac as other;\nfn p25() { pmac!(1); crate::a::helper(); }\n'
+w "$R/src/u26.rs" 'use crate::pm::pmac as pmac;\nfn p26() { pmac!(1); }\n'
 row P1.prelude     "$R" callees p1  src/a.rs Ok        none
 row P1.own         "$R" callees p1  src/own.rs Ok      none
 row P1.twin        "$R" callees p1  src/a.rs helper    proven
@@ -113,6 +119,14 @@ row P2.neighbour   "$R" callees p2  src/a.rs Ok        none
 row P3.samefile    "$R" callees p3  src/u3.rs Some     proven
 row P7.drop        "$R" callees p7  src/a.rs drop      none
 row P7.twin        "$R" callees p7  src/a.rs helper    proven
+# C arms (fix round 1, review threads): a `#[macro_use] mod` written inside a comment widens nothing; a `#[proc_macro]` inside a /* */ block
+# is no attribute; `use m::pmac as other;` binds `other`, not `pmac` (the same `use` spelled `as pmac` keeps it)
+row C1.cmtmacrouse "$R" callees p23 src/cmt.rs cmtm    none
+row C1.twin        "$R" callees cm1 src/cmt.rs cmtm    present
+row C2.blockattr   "$R" callees p24 src/pmc.rs cpm     none
+row C2.twin        "$R" callees p24 src/pmc.rs rpm     present
+row C3.asrename    "$R" callees p25 src/pm.rs pmac     none
+row C3.asself      "$R" callees p26 src/pm.rs pmac     present
 row K1.exported    "$R" callees p4  src/m.rs mac2      present
 row K1.fnnamesake  "$R" callees p4  src/a.rs mac2      none
 row K2.stdmacro    "$R" callees p5  src/a.rs assert    none
@@ -143,25 +157,83 @@ row S1.lock        "$R" callees p8  src/a.rs Q::lock   none
 row S1.twin        "$R" callees p8  src/a.rs helper    proven
 row S2.typed       "$R" callees p9  src/parser.rs Parser::expect present
 row S2.self        "$R" callees Parser::parse src/parser.rs Parser::expect present
-# the map header's external= counts the refused sites (p1 Ok, p1e Err, p7 drop, and the out-of-scope macros p5 assert, p15 mloc,
-# p16 cmac, p11 nmac and gmac; 0 before this lane, 3 before the macro-scope fix)
-attr D1.external   "$R" map     -   external 8
+# the map header's external= counts the refused sites (p1 Ok, p1e Err, p7 drop, the out-of-scope macros p5 assert, p15 mloc,
+# p16 cmac, p11 nmac and gmac, and fix round 1's p23 cmtm, p24 cpm and p25 pmac; 0 before this lane, 3 before the macro-scope fix)
+attr D1.external   "$R" map     -   external 11
 attr D2.declined   "$R" callers Parser::expect declined_calls 1
+
+# ---- P10-P13 (fix round 1), a crate of their own (R's a.rs `fn Ok` would hide the shape): only a namesake a bare call can NAME cancels the
+# veto. An associated `type Ok` / `type Err` in the caller's own file (serde's Serializer, FromStr), a module-level `type Ok` alias a `use`
+# names, a nested `unsafe fn drop` a `use super::*;` reaches (zed's arena.rs) and a glob-imported trait's impl `type Ok` are none; a nested
+# fn called inside its own fn, a same-file fn and a tuple struct (P2, P3) keep it
+P=$T/pv
+w "$P/Cargo.toml" '[package]\nname = "pv"\nversion = "0.1.0"\n'
+w "$P/src/lib.rs" 'pub mod a;\npub mod u19;\npub mod al;\npub mod u20;\npub mod nd;\npub use nd::*;\npub mod u21;\npub mod tr;\npub mod u22;\n'
+w "$P/src/a.rs" 'pub fn helper() {}\npub fn outer() { fn drop(x: i32) {} drop(1); }\n'
+w "$P/src/u19.rs" 'pub trait Ser { type Ok; type Err; }\npub struct S;\nimpl Ser for S { type Ok = (); type Err = i32; }\npub fn p19() -> Result<(), i32> { if true { crate::a::helper(); return Err(1); } Ok(()) }\n'
+w "$P/src/al.rs" 'pub type Ok = i32;\n'
+w "$P/src/u20.rs" 'use crate::al::Ok;\nfn p20() -> Result<i32, ()> { crate::a::helper(); Ok(1) }\n'
+w "$P/src/nd.rs" 'pub mod kid;\npub fn arena() { unsafe fn drop<T>(x: T) {} }\npub struct Arena;\nimpl Arena {\n    pub fn alloc(&self) {\n        unsafe fn drop<T>(p: *mut u8) {}\n    }\n}\n'
+w "$P/src/nd/kid.rs" 'use super::*;\nfn p21() { drop(1); crate::a::helper(); }\n'
+w "$P/src/u21.rs" 'use crate::*;\nfn p21b() { drop(1); crate::a::helper(); }\n'
+w "$P/src/tr.rs" 'pub trait T { type Ok; }\npub struct X;\nimpl T for X { type Ok = u8; }\n'
+w "$P/src/u22.rs" 'use crate::tr::*;\nfn p22() -> Result<u8, ()> { crate::a::helper(); Ok(1) }\n'
+row P10.assocok    "$P" callees p19 src/u19.rs Ok      none
+row P10.assocerr   "$P" callees p19 src/u19.rs Err     none
+row P10.twin       "$P" callees p19 src/a.rs helper    proven
+row P11.aliasuse   "$P" callees p20 src/al.rs Ok       none
+row P11.twin       "$P" callees p20 src/a.rs helper    proven
+row P12.nesteddrop "$P" callees p21 src/nd.rs drop     none
+row P12.twin       "$P" callees p21 src/a.rs helper    proven
+row P12.reexport   "$P" callees p21b src/nd.rs drop    none
+row P12.twin2      "$P" callees p21b src/a.rs helper   proven
+row P12.ownfn      "$P" callees outer src/a.rs drop    present
+row P13.globtrait  "$P" callees p22 src/tr.rs Ok       none
+row P13.twin       "$P" callees p22 src/a.rs helper    proven
+attr D3.external   "$P" map     -   external 5
 
 # ---- K6: a procedural macro in a workspace crate whose root is a Cargo `[lib] path` (zed's sqlez_macros): `use m::sql;` binds `sql!`;
 # a caller with no `use` of it binds nothing (the name alone is no proof)
 W=$T/ws
-w "$W/Cargo.toml" '[workspace]\nmembers = ["crates/m", "crates/d"]\n'
+w "$W/Cargo.toml" '[workspace]\nmembers = ["crates/m", "crates/d", "crates/g"]\n'
 w "$W/crates/m/Cargo.toml" '[package]\nname = "m"\nversion = "0.1.0"\n[lib]\nproc-macro = true\npath = "src/m.rs"\n'
 w "$W/crates/m/src/m.rs" '#[proc_macro]\npub fn sql(t: u32) -> u32 { t }\n'
 w "$W/crates/d/Cargo.toml" '[package]\nname = "d"\nversion = "0.1.0"\n[dependencies]\nm = { path = "../m" }\n'
 w "$W/crates/d/src/f.rs" 'use m::sql;\nfn f7() { sql!(1); }\n'
-w "$W/crates/d/src/lib.rs" 'use m::{sql};\npub mod e;\npub mod f;\npub fn helper() {}\nfn f6() { sql!(1); helper(); }\n'
+w "$W/crates/d/src/lib.rs" 'use m::{sql};\npub mod e;\npub mod f;\npub mod h;\npub fn helper() {}\nfn f6() { sql!(1); helper(); }\n'
 w "$W/crates/d/src/e.rs" 'use crate::helper;\nfn g6() { sql!(1); helper(); }\n'
 row K6.libpath     "$W" callees f7  crates/m/src/m.rs sql     present
 row K6.braced      "$W" callees f6  crates/m/src/m.rs sql     present
 row K6.nouse       "$W" callees g6  crates/m/src/m.rs sql     none
 row K6.twin        "$W" callees g6  crates/d/src/lib.rs helper proven
+
+# ---- M6 (fix round 1): a crate root a Cargo.toml names by `[lib] path` owns its directory like lib.rs: its own non-exported macro, and one
+# of a `#[macro_use] mod` it declares, bind in its child modules (a root-level package and a workspace member); another crate's file binds neither
+G=$T/lg
+w "$G/Cargo.toml" '[package]\nname="g"\nversion="0.1.0"\n[lib]\npath="src/g.rs"\n'
+w "$G/src/g.rs" '#[macro_use]\nmod macros;\npub mod user;\nmacro_rules! rootm { () => {} }\npub fn helper() {}\n'
+w "$G/src/macros.rs" 'macro_rules! mm { () => {} }\n'
+w "$G/src/user.rs" 'fn here() {}\npub fn uz() { mm!(); rootm!(); here(); }\n'
+row M6.libpathuse  "$G" callees uz  src/macros.rs mm      present
+row M6.libpathroot "$G" callees uz  src/g.rs rootm        present
+row M6.twin        "$G" callees uz  src/user.rs here      proven
+# M7: src/bin/*.rs and a main.rs beside the lib root are crates of their own: a lib's non-exported macro binds in neither
+w "$G/src/bin/tool.rs" 'fn there() {}\nfn tz() { rootm!(); there(); }\n'
+w "$G/src/main.rs" 'fn here2() {}\nfn mz() { rootm!(); here2(); }\nfn main() { mz(); }\n'
+row M7.srcbin      "$G" callees tz  src/g.rs rootm        none
+row M7.twin        "$G" callees tz  src/bin/tool.rs there proven
+row M7.mainrs      "$G" callees mz  src/g.rs rootm        none
+row M7.twin2       "$G" callees mz  src/main.rs here2     proven
+w "$W/crates/g/Cargo.toml" '[package]\nname = "g"\nversion = "0.1.0"\n[lib]\npath = "src/g.rs"\n'
+w "$W/crates/g/src/g.rs" '#[macro_use]\nmod gm;\npub mod gu;\nmacro_rules! groot { () => {} }\n'
+w "$W/crates/g/src/gm.rs" 'macro_rules! gmm { () => {} }\n'
+w "$W/crates/g/src/gu.rs" 'pub fn gz() { gmm!(); groot!(); }\n'
+w "$W/crates/d/src/h.rs" 'fn there() {}\nfn h6() { groot!(); gmm!(); there(); }\n'
+row M6.wsuse       "$W" callees gz  crates/g/src/gm.rs gmm present
+row M6.wsroot      "$W" callees gz  crates/g/src/g.rs groot present
+row M6.othercrate  "$W" callees h6  crates/g/src/g.rs groot none
+row M6.othercrate2 "$W" callees h6  crates/g/src/gm.rs gmm none
+row M6.twin2       "$W" callees h6  crates/d/src/h.rs there proven
 
 # ---- polyglot: Python's and C's builtin vetoes are their own Phase-5 rows; a bound or same-file namesake keeps its edge there
 X=$T/poly
@@ -170,6 +242,9 @@ w "$X/py/b.py" 'from a import Ok\n\ndef q():\n    return Ok(1)\n'
 w "$X/c/x.c" 'static void drop(int v) {}\nvoid f(void) { drop(1); }\n'
 row X1.pyimport "$X" callees q py/a.py Ok   proven
 row X2.csame    "$X" callees f c/x.c drop   proven
+# a Clojure `defmacro` is invoked as `(name ..)`, a Call site: the Rust-only Call-never-binds-a-macro gate (LangFacts::bangMacros) leaves it
+w "$X/clj/m.clj" '(ns m)\n(defmacro mm [x] x)\n(defn usem [] (mm 1))\n'
+row X3.cljmacro "$X" callees usem clj/m.clj mm present
 
 # ---- self-test: a row read through a binary that crashes is failed-run, never a pass (the gate cannot go green on a dead binary)
 STUB=$T/stub.sh
@@ -177,5 +252,5 @@ printf '#!/bin/sh\nkill -SEGV $$\n' > "$STUB"; chmod +x "$STUB"
 got=$( ask "$STUB" "$R" callees p1 | classify src/a.rs Ok )
 if [ "$got" = "failed-run" ]; then echo "PASS Z1.crashstub ($got)"; else echo "FAIL Z1.crashstub got $got want failed-run"; fail=1; fi
 
-if [ "$fail" = 0 ]; then echo "preludevetocheck: PASS"; exit 0; fi
-echo "preludevetocheck: FAIL"; exit 1
+[ "$fail" = 0 ] && echo "preludevetocheck: PASS" || echo "preludevetocheck: FAIL"
+exit "$fail"

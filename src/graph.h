@@ -733,12 +733,12 @@ inline bool namespaceCompatible( RefRole role, SymKind kind ) noexcept
     return true;
 }
 
-// The call loop's namespace gate: namespaceCompatible, and EDGE-PRELUDE-VETO's one addition — outside the C family (where a call-shaped
-// macro invocation stays role Call unless retagged) a macro is invoked only by a Macro site (Rust `name!(..)`), so a role Call site never
-// binds to a same-named `macro_rules!`.
+// The call loop's namespace gate: namespaceCompatible, and EDGE-PRELUDE-VETO's one addition — in a language that invokes a macro only by a
+// site spelled as one (LangFacts::bangMacros: Rust `name!(..)`, role Macro), a role Call site never binds to a same-named `macro_rules!`.
+// A Clojure `defmacro` is invoked as `(name ..)`, a Call site, and the C family's call-shaped #define stays role Call unless retagged: both keep it.
 inline bool siteNamespaceCompatible( RefRole role, Lang lang, SymKind kind ) noexcept
 {
-    return namespaceCompatible( role, kind ) && !( kind == SymKind::Macro && role == RefRole::Call && !macroRefLang( lang ) );
+    return namespaceCompatible( role, kind ) && !( kind == SymKind::Macro && role == RefRole::Call && langFacts( lang ).bangMacros );
 }
 
 // ---- aider-style name-quality prior weights --------------------------------------------------------
@@ -7138,27 +7138,129 @@ inline std::string_view rustFileAlias( const IngestResult& ing, std::uint32_t f,
 
 // EDGE-PRELUDE-VETO, MACRO SCOPE: where a `macro_rules!` without #[macro_export] (Symbol::internalLinkage on a Rust macro) is in scope.
 // Such a macro is TEXTUAL: a call names it only in the file that defines it and in that file's child modules (a `mod x;` file under
-// the module's directory: `src/a.rs` owns `src/a/`, a `lib.rs` / `main.rs` / `mod.rs` owns its own directory). `#[macro_use]` on
+// the module's directory: `src/a.rs` owns `src/a/`, a `lib.rs` / `main.rs` / `mod.rs` owns its own directory, and so does a crate root a
+// Cargo.toml names by `[lib] path` or `[[bin]] path`, e.g. `src/g.rs`). `#[macro_use]` on
 // the `mod` that declares the macro's module keeps its macros in scope after it, so the scope widens to the parent module's, and on up
 // while each parent is itself declared `#[macro_use]`. Source order inside a module is not read (a call above the definition binds), nor
-// a `#[path]` module; the scope is a set of files and directory prefixes, read once per macro file (one parent file read per level).
+// a `#[path]` module (its calls lose the edge, counted external=: card MACRO-PATH-ATTR); the scope is a set of files and directory prefixes,
+// read once per macro file (one parent file read per level).
 struct RustMacroScope
 {
     std::vector<std::string> files;   // identity paths of the files whose whole text sees the macro
     std::vector<std::string> dirs;    // identity directory prefixes (no trailing '/') whose files are child modules in scope
+    std::vector<std::string> others;  // under a crate root's directory, the files of the package's OTHER crates: `src/bin/` and the
+                                      // `main.rs` beside a `lib.rs` (or the `lib.rs` beside a `main.rs`); a directory prefix or one file
     bool holds( std::string_view path ) const
     {
+        const auto under = [ & ]( const std::string& d ) { return d.empty() || ( path.size() > d.size() && path.starts_with( d ) && path[ d.size() ] == '/' ); };   // "": the top level owns all
         return std::ranges::find( files, path ) != files.end()
-            || std::ranges::any_of( dirs, [ & ]( const std::string& d )
-                                   { return d.empty() || ( path.size() > d.size() && path.starts_with( d ) && path[ d.size() ] == '/' ); } );   // "": the top level owns all
+            || ( std::ranges::any_of( dirs, under ) && std::ranges::none_of( others, [ & ]( const std::string& o ) { return path == o || under( o ); } ) );
     }
 };
-using RustMacroScopeCache = HashMap<std::uint32_t, RustMacroScope>;
+struct RustMacroScopeCache
+{
+    HashMap<std::uint32_t, RustMacroScope> scopes;          // per macro file
+    HashMap<std::string, char>             manifestRoots;   // identity paths of the crate roots a Cargo.toml names (`[lib] path`, `[[bin]] path`)
+    bool                                   rootsRead = false;
+};
+
+// `text` with Rust comments (`//`, nested `/* */`) and string literals ("…" with escapes, spanning lines) blanked to spaces, line breaks and
+// offsets kept: the text scans below read code only. A char literal (`'"'`, `'\''`) is stepped over; a lifetime (`'a`) is not one.
+// A raw string (`r#"…"#`) is read as a plain one: a `"#` inside it can end the blanking early, which only lets a scan read more text.
+inline std::string rustBlankCommentsAndStrings( std::string_view text )
+{
+    std::string       out( text );
+    const std::size_t n     = text.size();
+    const auto        blank = [ & ]( std::size_t from, std::size_t to )
+    {
+        for( std::size_t k = from; k < to && k < n; ++k )
+        {
+            out[ k ] = out[ k ] == '\n' ? '\n' : ' ';
+        }
+    };
+    for( std::size_t i = 0; i < n; )
+    {
+        const char c    = text[ i ];
+        const char next = i + 1 < n ? text[ i + 1 ] : '\0';
+        std::size_t j   = i + 1;
+        if( c == '/' && next == '/' )
+        {
+            j = std::min( text.find( '\n', i ), n );
+            blank( i, j );
+        }
+        else if( c == '/' && next == '*' )
+        {
+            int depth = 1;
+            for( j = i + 2; j < n && depth > 0; )
+            {
+                const char d = j + 1 < n ? text[ j + 1 ] : '\0';
+                depth += text[ j ] == '/' && d == '*' ? 1 : ( text[ j ] == '*' && d == '/' ? -1 : 0 );
+                j += ( ( text[ j ] == '/' && d == '*' ) || ( text[ j ] == '*' && d == '/' ) ) ? 2 : 1;
+            }
+            blank( i, j );
+        }
+        else if( c == '"' )
+        {
+            while( j < n && text[ j ] != '"' )
+            {
+                j += text[ j ] == '\\' ? 2 : 1;
+            }
+            j = std::min( j + 1, n );
+            blank( i, j );
+        }
+        else if( c == '\'' && i + 2 < n && text[ i + 2 ] == '\'' )
+        {
+            j = i + 3;   // 'x'
+        }
+        else if( c == '\'' && next == '\\' )
+        {
+            const std::size_t close = i + 3 < n ? text.find( '\'', i + 3 ) : std::string_view::npos;   // '\n', '\'', '\u{..}'
+            j                       = close == std::string_view::npos ? n : close + 1;
+        }
+        i = j;
+    }
+    return out;
+}
+
+// The crate roots this tree's Cargo.toml files name by `[lib] path` / `[[bin]] path` (zed's `path = "src/sqlez_macros.rs"`), as identity paths,
+// read once (RustMacroScopeCache::manifestRoots). A bare line scan (tomlSectionNames): a dotted key or inline table is not read, so a root can
+// only be missed (its macros then bind in fewer files), never invented.
+inline const HashMap<std::string, char>& rustManifestRoots( const IngestResult& ing, RustMacroScopeCache& cache )
+{
+    if( cache.rootsRead )
+    {
+        return cache.manifestRoots;
+    }
+    cache.rootsRead = true;
+    for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+    {
+        const std::string_view ident = ing.files[ f ];
+        if( ident != "Cargo.toml" && !ident.ends_with( "/Cargo.toml" ) )
+        {
+            continue;
+        }
+        const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, f ) );
+        if( !text )
+        {
+            continue;
+        }
+        std::vector<std::string> paths;
+        tomlSectionNames( *text, { "[lib]", "[[bin]]" }, paths, "path" );
+        for( const std::string& p : paths )
+        {
+            // the manifest's directory exactly as the identity path spells it (a root given as `T//x` keeps its `//`), the written path normalized
+            cache.manifestRoots.try_emplace( std::string( ident.substr( 0, ident.size() - 10 ) ) + lexicalNormalize( p ), '\0' );
+        }
+    }
+    return cache.manifestRoots;
+}
 
 // Does `text` declare `mod name` under `#[macro_use]` (`#[macro_use] mod name;`, `#[macro_use]\npub(crate) mod name {`, other attributes
-// between)? A bare text scan: a spelling inside a comment or string is read like code.
-inline bool rustDeclaresMacroUseMod( std::string_view text, std::string_view name )
+// between)? A text scan of the code: a spelling inside a comment or string is blanked first (rustBlankCommentsAndStrings).
+inline bool rustDeclaresMacroUseMod( std::string_view source, std::string_view name )
 {
+    const std::string      code = rustBlankCommentsAndStrings( source );
+    const std::string_view text = code;
     constexpr std::string_view kMark = "#[macro_use]";
     const auto skipSpace = [ & ]( std::size_t at ) { return std::min( text.find_first_not_of( " \t\r\n", at ), text.size() ); };
     const auto isIdent   = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
@@ -7195,12 +7297,13 @@ inline bool rustDeclaresMacroUseMod( std::string_view text, std::string_view nam
 // The scope of the non-exported macros file `m` defines (RustMacroScope), built once per file.
 inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uint32_t m, RustMacroScopeCache& cache )
 {
-    auto [ at, fresh ] = cache.try_emplace( m );
+    auto [ at, fresh ] = cache.scopes.try_emplace( m );
     if( !fresh )
     {
         return at->second;
     }
-    RustMacroScope& scope = at->second;
+    RustMacroScope&                   scope = at->second;
+    const HashMap<std::string, char>& roots = rustManifestRoots( ing, cache );
     std::string     ident = ing.files[ m ];
     std::string     disk  = diskPath( ing, m );
     for( int level = 0; level < 64; ++level )   // a module tree deeper than 64 levels stops widening: the scope only narrows, so binds fewer
@@ -7213,10 +7316,17 @@ inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uin
         const auto [ identDir, base ] = split( ident );
         const std::string diskDir     = split( disk ).first;
         const std::string stem        = base.ends_with( ".rs" ) ? base.substr( 0, base.size() - 3 ) : base;
-        const bool        dirOwner    = stem == "mod" || stem == "lib" || stem == "main";
+        const bool        manifestRoot = roots.contains( ident );   // a `[lib] path` / `[[bin]] path` crate root owns its directory like lib.rs
+        const bool        dirOwner    = stem == "mod" || stem == "lib" || stem == "main" || manifestRoot;
         scope.files.push_back( ident );
         scope.dirs.push_back( dirOwner ? identDir : ( identDir.empty() ? stem : identDir + "/" + stem ) );
-        if( stem == "lib" || stem == "main" || ( stem == "mod" && identDir.empty() ) )
+        if( stem == "lib" || stem == "main" || manifestRoot )
+        {
+            const auto in = [ & ]( std::string_view f ) { return identDir.empty() ? std::string( f ) : identDir + "/" + std::string( f ); };
+            scope.others.push_back( in( "bin" ) );   // each src/bin/*.rs is a crate of its own
+            scope.others.push_back( in( stem == "main" ? "lib.rs" : "main.rs" ) );
+        }
+        if( stem == "lib" || stem == "main" || manifestRoot || ( stem == "mod" && identDir.empty() ) )
         {
             break;   // a crate root (or a bare top-level mod.rs): no parent module to widen into
         }
@@ -7226,7 +7336,16 @@ inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uin
         const std::string parentDisk   = stem == "mod" ? split( diskDir ).first : diskDir;
         const auto        join         = []( const std::string& d, std::string_view f ) { return d.empty() ? std::string( f ) : d + "/" + std::string( f ); };
         bool              widened      = false;
-        for( const std::string_view parentFile : { "lib.rs", "main.rs", "mod.rs", "" } )
+        std::vector<std::string> parentFiles = { "lib.rs", "main.rs", "mod.rs", "" };
+        for( const auto& [ root, unused ] : roots )   // a manifest-named root in the parent's directory (`src/g.rs` declaring `#[macro_use] mod m;`)
+        {
+            const auto [ rootDir, rootBase ] = split( root );
+            if( rootDir == parentIdent )
+            {
+                parentFiles.push_back( rootBase );
+            }
+        }
+        for( const std::string_view parentFile : parentFiles )
         {
             // "" = the 2018 layout's `parent.rs` beside the `parent/` directory
             const std::string pIdent = parentFile.empty() ? parentIdent + ".rs" : join( parentIdent, parentFile );
@@ -7254,9 +7373,12 @@ inline const RustMacroScope& rustMacroScopeOf( const IngestResult& ing, std::uin
 
 // EDGE-PRELUDE-VETO: does the function whose item starts at `start` of `text` carry `#[proc_macro]` (the one attribute that makes a function
 // a `name!(..)` macro)? Its attribute run is the lines from `start` down to the item line and right above `start`: attributes, comments and
-// blank lines; each scan stops at the first other line. A bare text scan of the run, read off disk at graph time (no extraction bit: Symbol has no free bit).
-inline bool rustFnIsProcMacro( std::string_view text, std::uint32_t start )
+// blank lines; each scan stops at the first other line. A text scan of the run's code, read off disk at graph time (no extraction bit: Symbol
+// has no free bit): comments and strings are blanked first, so a `#[proc_macro]` inside a `/* */` block is no attribute.
+inline bool rustFnIsProcMacro( std::string_view source, std::uint32_t start )
 {
+    const std::string      code = rustBlankCommentsAndStrings( source );
+    const std::string_view text = code;
     const auto isProcMacroAttr = []( std::string_view line )
     {
         std::string_view inner = line.substr( 2, line.find( ']' ) == std::string_view::npos ? std::string_view::npos : line.find( ']' ) - 2 );
@@ -7354,8 +7476,63 @@ inline bool rustUseTextNames( std::string_view uses, std::string_view name )
                                                      && uses[ after + uses.substr( after ).find_first_not_of( " \t" ) ] != ':' );
         if( at >= 1 && !isIdent( uses[ at - 1 ] ) && leaf )   // a whole segment that is no path head (`m::sql;`, `{sql, X}`)
         {
+            // a rename binds the alias, not the name: `m::sql as q` names no `sql` (`sql as sql` does), and the alias of `m::other as sql`
+            // is no item called `sql`
+            std::string_view rest = uses.substr( after );
+            rest.remove_prefix( std::min( rest.find_first_not_of( " \t" ), rest.size() ) );
+            std::string_view before = uses.substr( 0, at );
+            before.remove_suffix( before.size() - std::min( before.find_last_not_of( " \t" ) + 1, before.size() ) );
+            const bool aliasSlot = before.ends_with( "as" ) && ( before.size() == 2 || !isIdent( before[ before.size() - 3 ] ) );
+            if( rest.starts_with( "as" ) && rest.size() > 2 && !isIdent( rest[ 2 ] ) )
+            {
+                rest.remove_prefix( 2 );
+                rest.remove_prefix( std::min( rest.find_first_not_of( " \t" ), rest.size() ) );
+                if( !( rest.starts_with( name ) && ( rest.size() == name.size() || !isIdent( rest[ name.size() ] ) ) ) )
+                {
+                    continue;
+                }
+            }
+            else if( aliasSlot )
+            {
+                continue;
+            }
             return true;
         }
+    }
+    return false;
+}
+
+// EDGE-PRELUDE-VETO: is the type item named `name` in [from, to) of `source` a TUPLE struct (`struct Ok(T);`, `pub struct Some<T>(pub T)`), the
+// one type definition a bare call `Ok(x)` constructs? An enum, a union, a unit or braced struct and a `type` alias (an associated
+// `type Ok = ();`) are not: a call cannot name them, so they never cancel the prelude veto. Comments and strings are blanked first.
+inline bool rustItemIsTupleStruct( std::string_view source, std::uint32_t from, std::uint32_t to, std::string_view name )
+{
+    const std::string code    = rustBlankCommentsAndStrings( source.substr( 0, std::min<std::size_t>( to, source.size() ) ) );
+    const auto        isIdent = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+    const auto        skip    = [ & ]( std::size_t at ) { return std::min( code.find_first_not_of( " \t\r\n", at ), code.size() ); };
+    for( std::size_t kw = code.find( "struct", from ); kw != std::string::npos; kw = code.find( "struct", kw + 1 ) )
+    {
+        std::size_t at = skip( kw + 6 );
+        if( ( kw > 0 && isIdent( code[ kw - 1 ] ) ) || at == kw + 6 || std::string_view( code ).substr( at, name.size() ) != name
+            || ( at + name.size() < code.size() && isIdent( code[ at + name.size() ] ) ) )
+        {
+            continue;
+        }
+        at = skip( at + name.size() );
+        if( at < code.size() && code[ at ] == '<' )   // generics: skip to the matching '>'
+        {
+            int depth = 0;
+            for( ; at < code.size(); ++at )
+            {
+                depth += code[ at ] == '<' ? 1 : ( code[ at ] == '>' && code[ at - 1 ] != '-' ? -1 : 0 );
+                if( depth == 0 )
+                {
+                    break;
+                }
+            }
+            at = skip( at + 1 );
+        }
+        return at < code.size() && code[ at ] == '(';
     }
     return false;
 }
@@ -10197,6 +10374,7 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
     RustMacroScopeCache macroScopes;   // EDGE-PRELUDE-VETO: a non-exported Rust macro file's textual scope, read once when a site asks
     HashMap<std::uint32_t, std::string> rustUseText;   // EDGE-PRELUDE-VETO: a caller file's `use` statements (rustUseStatements), read once
     HashMap<NodeId, bool> procMacroMemo;   // EDGE-PRELUDE-VETO: does a Rust function candidate of a `name!(..)` site carry #[proc_macro]
+    HashMap<NodeId, bool> preludeBindMemo;   // EDGE-PRELUDE-VETO: can a bare call name this namesake of a prelude name (preludeSite)
     for( siteIndex = 0; siteIndex < ing.references.size(); ++siteIndex )
     {
         const Reference& site = ing.references[ siteIndex ];
@@ -10246,7 +10424,9 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // EDGE-PRELUDE-VETO: a macro invocation binds to a macro, never to a function, module or type by name alone. Its targets: an indexed
         // macro of the name, or a function the language's written binding proves (a Rust procedural macro, `#[proc_macro] pub fn sql`, reached
         // through `use sqlez_macros::sql;`). A C-family Macro site names a #define by construction (retagMacroCallReferences); a Rust `assert!`
-        // or `json!` with neither is a std or outside crate's macro: external=, whatever same-named definitions the tree holds.
+        // or `json!` with neither is a std or outside crate's macro: external=, whatever same-named definitions the tree holds. A macro name
+        // with NO in-tree definition at all takes the Undefined disposition below, as a call of an undefined name does (site A's honesty note:
+        // a name the tree never defines is not counted as a refused in-tree candidate).
         // A Rust `macro_rules!` without #[macro_export] (internalLinkage) is textual: it binds a site in its own file, a child module of it
         // or, through `#[macro_use] mod`, its parent's (rustMacroScopeOf), or one a `use` names (a `pub(crate) use m;` re-export).
         const auto macroDef = [ & ]( NodeId c )
@@ -10999,7 +11179,30 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
         // unless a binding of the name is written: a definition in the caller's file, or one the language's rule3NameProof proves (a Rust
         // `use` of it or a glob of its module). Then it joins the Phase-5 veto exactly as a Python builtin does: decided before Rule 3,
         // counted external=. A user's own `Ok` type used through a `use` keeps its edge.
+        // Only a namesake a bare call can NAME is such a binding (preludeBinding): no associated item (an impl's `type Ok = ();`, a trait's
+        // `type Err`: ownerIsClass), no function local to another fn (arena.rs's nested `unsafe fn drop<T>`, reached by `use super::*;`:
+        // localDefOutOfReach), and a function or a tuple struct, never a type alias, enum or braced struct (rustItemIsTupleStruct).
         const LangFacts& callerFacts = langFacts( r.lang );
+        const auto       preludeBinding = [ & ]( NodeId c )
+        {
+            auto [ at, fresh ] = preludeBindMemo.try_emplace( c, false );
+            if( fresh && ownerIsClass( c ).empty() )
+            {
+                const Symbol& s = ing.symbols[ c ];
+                if( s.kind == SymKind::Function )
+                {
+                    at->second = true;
+                }
+                else if( isStructOrNamedType( s.kind ) || s.kind == SymKind::Class )
+                {
+                    if( const std::optional<std::string> text = docparse::detail::readWholeFile( diskPath( ing, s.fileId ) ) )
+                    {
+                        at->second = rustItemIsTupleStruct( *text, s.sigStartByte, s.endByte, s.name );
+                    }
+                }
+            }
+            return at->second && !localDefOutOfReach( ing, c, r );   // a nested fn binds only inside the fn that holds it
+        };
         const bool preludeSite = !callerFacts.preludeCalls.empty() && !scipPinned && !canonical && !narrowed && r.role == RefRole::Call && r.qualifier.empty()
                                  && r.recv == RecvKind::None && !isMemberCallRef( r ) && bindingTier.empty() && it != byName.end() && callerFacts.isPreludeCall( r.calleeName )
                                  && !falseEdges.isLocalOfCaller( r )
@@ -11011,7 +11214,8 @@ inline Graph buildGraph( const IngestResult& ing, const ScipOverlay* scip = null
                                         }
                                         switch( callerFacts.rule3NameProof )
                                         {
-                                            case Rule3NameProof::RustUse:      return symFileId[ c ] == r.fileId || recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) );
+                                            case Rule3NameProof::RustUse:
+                                                return preludeBinding( c ) && ( symFileId[ c ] == r.fileId || recvEv.types.rustRule3Proves( r, c, ownerIsClass( c ) ) );
                                             case Rule3NameProof::PythonImport: return symFileId[ c ] == r.fileId || externalVeto.importVerdict( r, r.calleeName ) != '\0';
                                             case Rule3NameProof::None:         return true;   // no written-binding reading: any namesake may be the binding
                                         }

@@ -2188,8 +2188,8 @@ inline std::uint8_t internalLinkageBit( Lang lang, TSNode defNode, std::string_v
 {
     // EDGE-PRELUDE-VETO: a Rust `macro_rules!` without #[macro_export] is textually scoped (graph.h rustMacroScopeOf): its own file,
     // its child modules, and a `#[macro_use] mod` parent's. An exported one (any attribute of its run naming macro_export, also inside a
-    // cfg_attr) is crate-wide and keeps 0.
-    if( lang == Lang::Rust )
+    // cfg_attr) is crate-wide and keeps 0. LangFacts::bangMacros names the language (Rust).
+    if( langFacts( lang ).bangMacros )
     {
         if( !kindIs( ts_node_type( defNode ), "macro_definition" ) )
         {
