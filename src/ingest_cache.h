@@ -366,7 +366,9 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 289;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 291;          // bump on any grammar/.scm/extraction change
+                                                      // 291 = 2026-11-03 (lane docs-rest #506 re-bump): both sides bumped (lane 287/288, main 289/290), so the merged value
+                                                      //   goes above both; caches built on main at 289 re-index and pick up the reST .txt docs. Rich file tag 292. kCacheVersion stays 48.
                                                       // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
                                                       //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286, merged) and
                                                       //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
