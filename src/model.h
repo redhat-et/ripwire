@@ -982,6 +982,16 @@ static_assert( sizeof( Symbol ) == 64 + 2 * sizeof( std::string ),
 
 // The byte span of the function whose body binds a function-local def's name (Symbol::fnLocal). A call site inside
 // [start, end) of the def's own file can name the def; any other site cannot (graph.h reachableByName).
+// INDEX-ALIAS-CONST (src/aliasdef.h): where an alias definition's WRITTEN TARGET starts, when the target ends the declaration —
+// C++ `using X = Y;` / `namespace L = lib;`, a TS const whose value is a name, member chain or require/import of a literal. The
+// target is [start, Symbol::endByte) less a trailing `;`. One row per such def, ascending id (8 bytes a row, no string): the
+// def's own signature stays the whole declaration, so every sig/body consumer reads an alias row exactly as it reads a typedef.
+struct AliasTarget
+{
+    NodeId        id    = kNoNode;
+    std::uint32_t start = 0;
+};
+
 struct FnLocalScope
 {
     NodeId        id    = kNoNode;
@@ -2103,6 +2113,8 @@ struct FileHealth
                                       // errBytes above always describe the parse extraction actually read.
     std::uint32_t useBoundsBlanked = 0;   // its Rust layer (src/rustusebounds.h): precise-capturing use<..> bounds
                                           // blanked for the ADOPTED parse; 0 ⇒ the first parse was kept
+    std::uint32_t constsSkipped = 0;      // INDEX-ALIAS-CONST: TS module-level consts whose value is outside the allowlist
+                                          // (src/aliasdef.h) — counted, not indexed; --health consts_skipped=
 };
 
 // Output of ingestion. Deterministic: files sorted lexicographically, symbol ids assigned
@@ -2176,6 +2188,7 @@ struct IngestResult
                                            // INTO THIS VECTOR (a FieldId, not a NodeId), kind == SymKind::Field, scope == the
                                            // owner, canonical id path::Owner::field. Sorted like symbols ((fileId, line, name,
                                            // startByte)); reachable only through graph.h's resolveFieldSelector.
+    std::vector<AliasTarget>  aliasTargets;    // INDEX-ALIAS-CONST: one row per alias def whose target ends it, ascending id (AliasTarget above)
     std::vector<FnLocalScope> fnLocalScopes;   // one row per Symbol::fnLocal def, ascending id: the span of the function
                                                // whose body binds its name (SoA side table: Symbol has no byte left for it)
     std::vector<Reference>   references;   // unresolved calls

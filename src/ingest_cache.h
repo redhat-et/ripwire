@@ -150,7 +150,9 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
+constexpr std::uint32_t kCacheVersion = 49;           // 49: lane index-alias-const (PLACEHOLDER, the train renumbers) — the FILE record gains a seventh
+                                                      //    FileHealth u32, constsSkipped (TS consts outside the value allowlist, src/aliasdef.h).
+                                                      // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
                                                       //    moves; its placeholder 47), strictly above main 46 and that placeholder; no other
                                                       //    train-42b lane changed a record format.
                                                       // 46: train 40 — lane js-def-naming's LocalBindKind JsObjectLiteral (appended; its placeholder 45),
@@ -366,7 +368,10 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 289;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 293;          // bump on any grammar/.scm/extraction change
+                                                      // 293 = 2026-11-03 (lane index-alias-const, PLACEHOLDER above 285-292 taken by #504 #506 #512 #513; rich file tag 294):
+                                                      //   C++ `using X = Y` / `namespace L = lib` / function-type and pointer typedefs are definitions, and a TS module-level
+                                                      //   const with an alias- or table-shaped value is kept past the SCREAMING gate (src/aliasdef.h); kCacheVersion 49.
                                                       // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
                                                       //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286, merged) and
                                                       //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
@@ -2758,6 +2763,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.health.wsBytes   = r.u32();
     ffOut.health.macroBlanked = r.u32();   // v20: member-macro re-parse — rides the record so the disclosure survives a warm run
     ffOut.health.useBoundsBlanked = r.u32();   // v44: its Rust layer (use<..> bounds blanked) — same reason
+    ffOut.health.constsSkipped    = r.u32();   // v49: INDEX-ALIAS-CONST's per-file count of TS consts outside the value allowlist
     if( !r.ok )
     {
         return false;
@@ -3392,6 +3398,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 w.u32( fh.errNodes );  w.u32( fh.errBytes );  w.u32( fh.fileBytes );  w.u32( fh.wsBytes );
                 w.u32( fh.macroBlanked );   // v20: the member-macro re-parse's per-file count (0 ⇒ the first parse was kept)
                 w.u32( fh.useBoundsBlanked );   // v44: the Rust precise-capture re-parse's per-file count (0 ⇒ first parse kept)
+                w.u32( fh.constsSkipped );      // v49: INDEX-ALIAS-CONST (TS consts outside the value allowlist)
             }
             if( captureValueUses )
             {

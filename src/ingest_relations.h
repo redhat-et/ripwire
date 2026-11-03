@@ -2979,6 +2979,8 @@ struct ExtractShortfall
         AstroFrontmatterUnterminated,   // an .astro opened a `---` fence and never closed it: its frontmatter is not extracted
     };
     bool isShort = false;
+    std::uint32_t constsSkipped = 0;   // INDEX-ALIAS-CONST: TS module-level consts outside the value allowlist (src/aliasdef.h), counted
+                                       //   not indexed — a disclosed COUNT, not a shortfall: isShort stays as it was
     void disclose( DisclosureWhy ) noexcept   // every reason records the same fact
     {
         isShort = true;

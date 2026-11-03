@@ -64,6 +64,20 @@
 
 (type_definition declarator: (type_identifier) @name) @definition.type
 
+; INDEX-ALIAS-CONST: the alias forms the typedef pattern above never matched, each a definition whose
+; target is the written type (src/aliasdef.h aliasShapeOf reads it; --defs prints it as to=).
+;   `using X = Y;` / `template<class T> using V = std::vector<T>;` / a class-scope `using value_type = T;`
+;   (alias_declaration; a function-local one drops in dropGatedCapture, like a local const)
+;   `namespace L = lib::v2;` (namespace_alias_definition)
+;   `typedef void (*Fn)(int);` / `typedef int Fn2(int);` (a function type: t="functype")
+;   `typedef struct S *SP;` (a pointer typedef)
+; NOT aliases, and not matched here: `using namespace ns;` and `using ns::name;` (using_declaration, below).
+(alias_declaration name: (type_identifier) @name) @definition.alias
+(namespace_alias_definition name: (namespace_identifier) @name) @definition.alias
+(type_definition declarator: (function_declarator declarator: (parenthesized_declarator (pointer_declarator declarator: (type_identifier) @name)))) @definition.functype
+(type_definition declarator: (function_declarator declarator: (type_identifier) @name)) @definition.functype
+(type_definition declarator: (pointer_declarator declarator: (type_identifier) @name)) @definition.type
+
 (enum_specifier name: (type_identifier) @name) @definition.type
 
 (class_specifier name: (type_identifier) @name) @definition.class

@@ -93,6 +93,14 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
 //     C++ functions carry Lang::ObjC too, but a C++ overload set inside a .mm is out of this fixture's scope
 //     and the same key limitation applies — so we restrict to the observed ObjC node shapes by language and
 //     rely on the byte-identical + langcheck gates. Never manufactures a symbol the tags query didn't capture.
+// INDEX-ALIAS-CONST: a RawDef whose bodyByte carries its alias target's start (ingest_sidecap.h sets it only on these two shapes:
+// a C++ alias row, and a TS module const with an alias-shaped value — no TS const has a body field of its own)
+inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
+{
+    const bool shape = ( d.lang == Lang::Cpp && d.kind == SymKind::Alias ) || ( d.lang == Lang::TypeScript && d.kind == SymKind::Var );
+    return shape && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
+}
+
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )
 {
     PROFILE_SCOPE_DESCRIBE( "ingest/build-model: objc decl-def collapse" );
@@ -426,6 +434,13 @@ inline void assignSymbols( IngestResult& result, std::vector<RawDef>& rawDefs, b
         // answer, and the one that keeps an agent from reading it as a function), the lexical index has no
         // document for it, and every body-shaped metric (LOC, complexity, dead code) reads zero. The two
         // are separate reads — buildDefSpanIndex reads RawDefs, every display surface reads the Symbol.
+        // INDEX-ALIAS-CONST: an alias row's RawDef bodyByte is its target's start (ingest_sidecap.h captureTagsFacts); the Symbol keeps the
+        // whole declaration as its signature and no body, and the target start goes to the side table (model.h AliasTarget)
+        if( rawDefIsAliasRow( d ) )
+        {
+            s.sigEndByte = d.endByte;
+            result.aliasTargets.push_back( AliasTarget{ s.id, d.bodyByte } );
+        }
         if( d.kind == SymKind::ModuleScope )
         {
             s.sigStartByte = 0;

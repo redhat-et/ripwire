@@ -63,6 +63,10 @@ struct FileExtractThrew
 // Record a pass's shortfall on the file's slot (plumbing: the DISCLOSE already happened inside the pass).
 inline void notePartialExtract( IngestFileScan& scan, std::size_t fileId, const ExtractShortfall& shortfall, std::size_t fileBytes ) noexcept
 {
+    if( fileId < scan.health.size() )
+    {
+        scan.health[ fileId ].constsSkipped = shortfall.constsSkipped;   // INDEX-ALIAS-CONST: rides the cached FileHealth (--health consts_skipped=)
+    }
     if( shortfall.isShort )
     {
         scan.markExtractPartial( fileId, fileBytes );
