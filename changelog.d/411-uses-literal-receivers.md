@@ -1,3 +1,0 @@
-### Fixed — `--uses` on a JS/TS literal receiver no longer lists built-in member calls as uses of a same-named in-tree method (#411, thanks @lennix1337)
-
-- `--uses` on JS/TS literal receivers no longer lists built-in member calls (e.g. `"abc".trim()`) as uses of an in-tree method of the same name; a `declined_literal_calls=` count discloses what was filtered (thanks @lennix1337, #411). A call stays a use when an in-repo definition is a prototype polyfill of that built-in on the same literal type. The MCP `uses` twin, `--safe-delete`, `--verify` and the LSP references / hover answers apply the same filter, and Python literal calls are unchanged.

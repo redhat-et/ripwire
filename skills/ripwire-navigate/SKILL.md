@@ -112,6 +112,7 @@ two hops away, a read/write that never calls SYM, or an `#include` that pulls it
 - **Transitive blast radius** — `ripwire <dir> --impact=SYM --legend=compact`
 - **Neighborhood** (bounded k-hop ego graph) — `ripwire <dir> --around=SYM --legend=compact [--around-depth=2] [--around-fanout=32]`
 - **How does X reach Y** (shortest call-path) — `ripwire <dir> --path=SRC,DST --legend=compact`
+- **Which definitions does a name bind** (each with `sel=`, the spelling that picks it alone in any verb above) — `ripwire <dir> --defs=NAME[,NAME…] --legend=compact`
 - **How do N symbols relate** (minimal connecting subgraph, shared-caller joins) — `ripwire <dir> --connect=A,B,C --legend=compact [--connect-radius=N]`
 - **Verify a CLAIM in one call** — "does X really call Y?", "is Z ever used?", "does this file contain/define A?" →
   `ripwire <dir> --verify='calls(A,B)' --legend=compact` (also `uses(SYM)` / `unused(SYM)` / `contains(FILE, "LIT")` /

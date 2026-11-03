@@ -227,7 +227,7 @@ PY
 fi
 TE="$( ask ts ctx 'How is a per-request context created?' )"
 if ran_ok "$TE" "E/TS"; then
-    echeck "$TE" "E/TS" "$CORPUS/ts" createContext:src/application.ts:11:18 handle:src/application.ts:20:22
+    echeck "$TE" "E/TS" "$CORPUS/ts" Application.createContext:src/application.ts:11:18 Application.handle:src/application.ts:20:22   # js-def-naming: a TS method row names its class
     oracle "$TE" "E+U/TS" "$CORPUS/ts"
 fi
 PE="$( ask py compute 'What does LookupCache._compute return, and how are entries evicted?' )"

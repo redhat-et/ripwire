@@ -100,6 +100,21 @@ D2="$( "$BIN" "$ROOT" --no-cache "--recall=$BQ" --max-tokens=15000 2>/dev/null )
     && ok "mutation self-test: fence counter reports an unclosed fence as odd" \
     || no "mutation self-test: fence counter did NOT see a lone opening fence (unsound gate)"
 
+# ── 2c) the corpus side, by file: no hand-written markdown file in this repo holds a 4+-backtick run ──────
+# Section 2 sees a run only when a query happens to rank the file; this names the file whatever the query.
+# Its first catch: a changelog fragment that spelled a four-backtick fence literally in prose, recalled
+# verbatim by "markdown fence backtick embed". docs/captures/ is excluded from ingest (above), so it is
+# excluded here. Fix the file's text (spell the run in words), never this arm.
+MDLIST="$( git -C "$ROOT" ls-files -- '*.md' ':!docs/captures/*' 2>/dev/null )"; MDRC=$?
+if [ "$MDRC" -ne 0 ] || [ -z "$MDLIST" ]; then
+    no "(2c) git ls-files listed no markdown file (rc=$MDRC) — cannot check the corpus"
+else
+    MDBAD="$( printf '%s\n' "$MDLIST" | while IFS= read -r f; do grep -lE '`{4,}' -- "$ROOT/$f" >/dev/null 2>&1 && printf '%s ' "$f"; done )"
+    [ -z "$MDBAD" ] \
+        && ok "(2c) none of the $( printf '%s\n' "$MDLIST" | wc -l | tr -d ' ' ) tracked markdown files outside docs/captures/ holds a 4+-backtick run" \
+        || no "(2c) markdown file(s) holding a 4+-backtick run, which --recall embeds verbatim: $MDBAD"
+fi
+
 # ── 3) sanity: the assertion itself is live (a synthetic 4-backtick run MUST be caught) ────────────────────
 if has_bad_run "three fences: \`\`\`\`" ; then
     ok "mutation self-test: a synthetic 4-backtick run is correctly detected"

@@ -77,6 +77,7 @@ struct WrapListing
 {
     std::vector<std::string> verbLines;
     std::string              toolsArg;
+    bool                     toolsGiven = false;   // the user typed --mcp-tools=…; their list (even `full`) beats a row's default
 };
 
 // ── THE AGENT REGISTRY ───────────────────────────────────────────────────────────────────────────
@@ -125,21 +126,26 @@ struct AgentTarget
     std::string_view mcpAddPre;    // McpForm::CliAdd only: the command up to where the path goes
     std::string_view mcpAddPost;   //                     ... and the remainder after it
     std::string_view caveat;
+    bool             readBeforeEdit;   // the agent REFUSES a native Edit on a file it has not Read (Claude Code: enforced; codex, opencode,
+                                       // Gemini CLI: not, checked in their sources 2026-09-28). true = route an edit through "line range from
+                                       // ripwire -> ranged Read -> native Edit" and register the MCP server WITHOUT the three edit twins
+                                       // (kReadBeforeEditToolsProfile); false = the whole-symbol edit verbs skip a Read, so keep them. A COLUMN,
+                                       // so a new agent row decides it and no code names the agent. test/agenttablecheck.sh (L) holds both ways.
 };
 
 inline constexpr AgentTarget kAgentTargets[] = {
     { "claude",   "Claude Code",  "CLAUDE.md",                   "",
-      "~/.claude",           "${CLAUDE_CONFIG_DIR:-~/.claude}/skills", "",       true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "" },
+      "~/.claude",           "${CLAUDE_CONFIG_DIR:-~/.claude}/skills", "",       true,  WrapPrimary::Cli,     McpForm::CliAdd,     "claude mcp add ripwire -- ",          " --mcp\n",            "", true },
     { "codex",    "OpenAI Codex", "AGENTS.md",                   "",
-      "~/.codex",            "${AGENTS_HOME:-~/.agents}/skills", " --codex",    true,  WrapPrimary::Cli,     McpForm::Toml,       "",                                    "",                    "" },
+      "~/.codex",            "${AGENTS_HOME:-~/.agents}/skills", " --codex",    true,  WrapPrimary::Cli,     McpForm::Toml,       "",                                    "",                    "", false },
     { "cursor",   "Cursor",       ".cursor/rules (a .mdc file)", "",
-      "~/.cursor",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "" },
+      "~/.cursor",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", false },
     { "windsurf", "Windsurf",     ".windsurfrules",              "",
-      "~/.codeium/windsurf", "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "" },
+      "~/.codeium/windsurf", "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", false },
     { "gemini",   "Gemini CLI",   "GEMINI.md",                   "",
-      "~/.gemini",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "" },
+      "~/.gemini",           "",                                 "",            false, WrapPrimary::Mcp,     McpForm::Json,       "",                                    "",                    "", false },
     { "opencode", "opencode",     "AGENTS.md",                   "also read globally from ~/.config/opencode/AGENTS.md",
-      "~/.config/opencode",  "",                                 "",            false, WrapPrimary::Cli,     McpForm::JsonMcpKey, "",                                    "",                    "" },
+      "~/.config/opencode",  "",                                 "",            false, WrapPrimary::Cli,     McpForm::JsonMcpKey, "",                                    "",                    "", false },
     // openclaw, corrected 2026-09-08 after review. THE CONTEXT FILE WAS WRONG and it mattered: the first
     // version of this row said "AGENTS.md", and the CLI-first prose then told a coding user to paste the
     // wiring into their REPO's AGENTS.md. openclaw never reads that. Its AGENTS.md is the operator's
@@ -150,16 +156,16 @@ inline constexpr AgentTarget kAgentTargets[] = {
     // such env var, so a Codex user who has relocated AGENTS_HOME would otherwise be told to install
     // exactly where openclaw will not look.
     { "openclaw", "openclaw",     "~/.openclaw/workspace/AGENTS.md", "openclaw's own workspace bootstrap file — NOT your repository's AGENTS.md",
-      "~/.openclaw",         "~/.agents/skills",                 " --openclaw", false, WrapPrimary::Cli,     McpForm::CliAdd,     "openclaw mcp add ripwire --command ", " --arg --mcp\n",      "skills are read from ~/.agents/skills ONLY when OPENCLAW_STATE_DIR is the default ~/.openclaw; openclaw honours no AGENTS_HOME, and its before_tool_call is a plugin API, not a shell hook slot" },
+      "~/.openclaw",         "~/.agents/skills",                 " --openclaw", false, WrapPrimary::Cli,     McpForm::CliAdd,     "openclaw mcp add ripwire --command ", " --arg --mcp\n",      "skills are read from ~/.agents/skills ONLY when OPENCLAW_STATE_DIR is the default ~/.openclaw; openclaw honours no AGENTS_HOME, and its before_tool_call is a plugin API, not a shell hook slot", false },
     // Hermes. Authored in PR #51 (AnkitArya); the maintainer's kAgentTargets consolidation (2026-09-08)
     // folded the six hand-edited Hermes branches here into one row. HERMES_HOME honours the same
     // relocation the installer's --hermes target does. The pre_tool_call hook slot EXISTS (config.yaml)
     // but hooks/ripwire-nudge.sh is not ported yet, so hookSlot stays false until that port lands -
     // emitting a --hook line today would print a command the installer honestly refuses.
     { "hermes",   "Hermes",       "AGENTS.md",                   "",
-      "~/.hermes",           "${HERMES_HOME:-~/.hermes}/skills", " --hermes",   false, WrapPrimary::Cli,     McpForm::CliAdd,     "hermes mcp add ripwire --command ",   " --args --mcp\n# verify: hermes mcp test ripwire\n",    "hermes exposes hooks:pre_tool_call in config.yaml (PreToolUse-shaped) but ripwire's nudge hook is not ported yet: the hook install line stays off until that port lands" },
+      "~/.hermes",           "${HERMES_HOME:-~/.hermes}/skills", " --hermes",   false, WrapPrimary::Cli,     McpForm::CliAdd,     "hermes mcp add ripwire --command ",   " --args --mcp\n# verify: hermes mcp test ripwire\n",    "hermes exposes hooks:pre_tool_call in config.yaml (PreToolUse-shaped) but ripwire's nudge hook is not ported yet: the hook install line stays off until that port lands", false },
     { "aider",    "aider",        "CONVENTIONS.md",              "",
-      "",                    "",                                 "",            false, WrapPrimary::RepoMap, McpForm::None,       "",                                    "",                    "" },
+      "",                    "",                                 "",            false, WrapPrimary::RepoMap, McpForm::None,       "",                                    "",                    "", false },
 };
 
 inline constexpr const AgentTarget* agentTarget( const std::string_view name ) noexcept
@@ -247,8 +253,22 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
 // agent → the context/rules file its use-when blurb belongs in (declarative table, one row per client)
 // (the per-agent context file is a column in kAgentTargets above)
 
+// THE EDIT-ROUTING PAIR is the one place the blurb is per-agent, and the table decides which (AgentTarget::readBeforeEdit):
+// Claude Code refuses a native Edit on a file it has not Read in this session, so "no whole-file Read" is a promise the
+// whole-symbol edit verbs cannot keep for it — and in our own usage they were never called there. For it the pair names the
+// route that does keep it (a line range from ripwire, a ranged Read, the native Edit); every other agent keeps the verbs.
+inline constexpr std::string_view kEditLinesSkipRead[ 2 ] = {
+    "- Apply a whole-symbol edit without a whole-file Read: `--replace-symbol-body=SYM` plus `--edit-payload=FILE|-`",
+    "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM --legend=compact` is for a contract question WITHOUT an edit in hand.",
+};
+inline constexpr std::string_view kEditLinesRangedRead[ 2 ] = {
+    "- To edit a symbol: take its range from ripwire (`--for` row `l=`..`e=`; `--expand=SYM --legend=compact` body from `l=`), Read only that range (offset/limit), then use your native Edit —",
+    "  not a whole-file Read. `--edit-check=SYM --legend=compact` before a contract change, and after the edit.",
+};
+
 // The ONE shared use-when blurb — single source of truth for every agent recipe (the gate diffs the
-// body across agents, so a per-agent fork of this text is a red gate, not a variant). A binary on
+// body across agents, so a per-agent fork of this text is a red gate, not a variant — the one exception is the
+// edit-routing pair, a table column). A binary on
 // PATH is invisible to an agent until its context file says when to reach for it; this is the
 // distilled protocol, sized to paste whole.
 //
@@ -261,8 +281,9 @@ inline void wrapPrintSkillsLine( std::FILE* out, const std::string_view agent, c
 // The body sits at the CEILING of wrapverbscheck.sh's 10-20 line band. That is deliberate, not an
 // oversight: the next line added here has to displace one, which is the point of a size contract on a
 // block whose whole value is that a human will paste it whole.
-inline std::vector<std::string_view> wrapUseWhenBlurbLines()
+inline std::vector<std::string_view> wrapUseWhenBlurbLines( const bool readBeforeEdit = false )
 {
+    const std::string_view( &editLines )[ 2 ] = readBeforeEdit ? kEditLinesRangedRead : kEditLinesSkipRead;
     return {
         "## ripwire — deterministic codebase maps (on PATH as `ripwire`)",
         "Reach for it BEFORE blind grep + whole-file reads. First call ~1s cold; after that warm, ~0.1s.",
@@ -273,8 +294,8 @@ inline std::vector<std::string_view> wrapUseWhenBlurbLines()
         "  paste the error, don't paraphrase it into a query.",
         "- Who calls X: `--callers=SYM --legend=compact`. \"Is it safe to change X?\" needs the full blast radius:",
         "  `--impact=SYM --legend=compact` (transitive) plus `--uses=SYM --legend=compact` (every read/write/import site).",
-        "- Apply a whole-symbol edit without a whole-file Read: `--replace-symbol-body=SYM` plus `--edit-payload=FILE|-`",
-        "  (or insert-before/after); the receipt carries region, blob_sha, edit_check, tests_to_run + ONE next= — no re-read after it; `--edit-check=SYM --legend=compact` is for a contract question WITHOUT an edit in hand.",
+        editLines[ 0 ],
+        editLines[ 1 ],
         "- Before writing a new fn/class/helper: `--exemplar=\"<what you're writing>\" --legend=compact` — duplicates are born on small tasks.",
         "- Before calling work done: `--quality-delta --legend=compact` (what you made worse), then `--test-gate --legend=compact`.",
         "- Trust notes: counts marked counts_floor are floors, not totals; a zero means \"none found\", never \"none exists\".",
@@ -302,7 +323,7 @@ inline void wrapPrintBlurb( std::FILE* out, const std::string_view agent )
     rw::emitTo( out, "#\n# context wiring — a binary on PATH is invisible to an agent until its rules file says when\n"
                        "# to reach for it. Paste the block below into {}:\n", std::string_view( targetFile.data(), targetFile.size() ) );
     rw::emitTo( out, "# --- paste into {} ---\n", std::string_view( targetFile.data(), targetFile.size() ) );
-    for( const std::string_view line : wrapUseWhenBlurbLines() )
+    for( const std::string_view line : wrapUseWhenBlurbLines( blurbRow->readBeforeEdit ) )
     {
         rw::emitTo( out, "{}\n", std::string_view( line.data(), line.size() ) );
     }
@@ -476,6 +497,22 @@ inline void wrapPrintToolsArgNote( const AgentTarget* row, std::string_view tool
     rw::emitTo( stdout, "# NOTE: {} is not written into this agent's {}; add it to the ripwire server's arguments by hand{}.\n", toolsArg,
                 row->mcpForm == McpForm::None ? "recipe (it registers no MCP server)" : "MCP stanza",
                 row->mcpForm == McpForm::Toml ? ", and list the same tools in enabled_tools" : "" );
+}
+
+// The listing a recipe prints for ONE agent. A row marked readBeforeEdit registers the server WITHOUT the three edit twins
+// (the `no-edit` profile) unless the user asked for a list of their own: `--mcp-tools=full` is an explicit request for
+// the whole catalog and gets it. Only where the flag can actually be written (wrapWritesToolsArg) — an agent whose form
+// cannot carry it is left alone rather than handed a NOTE about a flag nobody typed.
+inline constexpr std::string_view kReadBeforeEditToolsProfile = "no-edit";
+
+inline WrapListing wrapListingFor( const AgentTarget* row, const WrapListing& asked )
+{
+    if( row == nullptr || !row->readBeforeEdit || asked.toolsGiven || !wrapWritesToolsArg( *row ) )
+    {
+        return asked;
+    }
+    return { wrapVerbGroupLines( mcpToolSpecTokenMask( kReadBeforeEditToolsProfile ) ),
+             "--mcp-tools=" + std::string( kReadBeforeEditToolsProfile ), false };
 }
 
 // Agent configuration: name, config directory path (using ~ for home), and a lambda to
@@ -772,8 +809,10 @@ inline void wrapEmitCliFirst( const AgentTarget& row, const std::string& token,
 }
 
 // Emit the configuration recipe for a single agent (shared by runWrap and --all logic)
-inline void wrapEmitAgent( const std::string_view agent, const WrapListing& listing, const std::string_view executablePath ) noexcept
+inline void wrapEmitAgent( const std::string_view agent, const WrapListing& asked, const std::string_view executablePath ) noexcept
 {
+    const WrapListing listing = wrapListingFor( agentTarget( agent ), asked );   // a read-before-edit agent's default is the no-edit server
+
     const std::string token = wrapCommandToken( executablePath );   // 2026-09-06: "ripwire", or this binary's absolute path when PATH has none
 
     // Every agent that can shell out takes ONE shared path. Rows decide, not branches.
@@ -840,6 +879,7 @@ struct WrapToolsArg
     std::string toolsArg;
     McpToolMask mask = kMcpAllToolsMask;
     std::string refusal;
+    bool        given = false;   // an --mcp-tools= was typed (`full` included): it beats an agent row's default list
 };
 inline WrapToolsArg wrapToolsArg( int argc, char** argv )
 {
@@ -860,6 +900,7 @@ inline WrapToolsArg wrapToolsArg( int argc, char** argv )
         }
         seen         = true;
         out.mask     = spec.mask;
+        out.given    = true;
         out.toolsArg = spec.mask != kMcpAllToolsMask ? std::string( arg ) : std::string{};
     }
     return out;
@@ -904,7 +945,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
 
     // --mcp-tools=LIST: validated by the server's own parser, then written into the server command (and the verb
     // list narrowed to it). `full` is the default server, so it is the default recipe too.
-    const auto [ toolsArg, toolMask, toolsRefusal ] = wrapToolsArg( argc, argv );
+    const auto [ toolsArg, toolMask, toolsRefusal, toolsGiven ] = wrapToolsArg( argc, argv );
     if( !toolsRefusal.empty() )
     {
         rw::emitTo( stderr, "ripwire wrap: {}\n", toolsRefusal );
@@ -912,7 +953,7 @@ inline int runWrap( int argc, char** argv, const std::string_view executablePath
     }
 
     // All MCP verbs, grouped — derived from mcp.h's kMcpVerbTable so this cannot re-drift (A4-S2).
-    const WrapListing listing{ wrapVerbGroupLines( toolMask ), toolsArg };
+    const WrapListing listing{ wrapVerbGroupLines( toolMask ), toolsArg, toolsGiven };
 
     // ── Handle --all: detect + emit every installed agent ─────────────────────────────────────
     if( arg == "--all" )

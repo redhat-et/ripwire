@@ -37,6 +37,7 @@
 #include "infra/os.h"      // rw::os::getcwd — R2a: the launch-cwd assumed root (resolved once at startup)
 #include "rootguard.h"      // #350 layer 1: noProjectRootReason — the launch cwd a server may not assume
 #include "memguard.h"       // #350 layer 3: the per-call hard-limit refusal and the _memory_stop sentence
+#include "gitmine.h"       // gitWalkCutMark/gitWalkCutSentence — the `_history_cut` envelope note (a history walk this request cut)
 
 namespace rw
 {
@@ -160,6 +161,12 @@ struct McpToolProfile
 };
 inline constexpr McpToolProfile kMcpToolProfiles[] = {
     { "core", "explore,batch,from_trace,impact,uses,fetch_body,edit_check,quality_delta" },
+    // `no-edit` = everything but the three span-addressed edit twins. What `ripwire wrap claude` registers: Claude Code
+    // refuses a native Edit on a file it has not Read, so the edit twins cannot spare it the Read, and in our own usage
+    // they were never called there (their schemas, about 4 KB of tools/list, were paid every session). Listed in full
+    // rather than derived, to stay a plain table row like `core`; mcpNoEditProfileIsAllButEditGroup below holds it to
+    // the table, so a tool added later cannot silently fall out of it.
+    { "no-edit", "analyze,rank_by,find_symbol,find_referencing_symbols,grep,cochange,memory_recall,situational_awareness,mentions,for,lego,owners,fetch_body,batch,exemplar,quality_delta,quality_baseline,impact,uses,affected,path_between,connect,explore,from_trace,edit_check,whereis,stray_content,flags,doc_drift,slice" },
     { "full", "" },
 };
 
@@ -204,6 +211,25 @@ consteval bool mcpProfilesNameOnlyTools() noexcept
 }
 static_assert( mcpProfilesNameOnlyTools(),
                "a kMcpToolProfiles row names a tool kMcpVerbTable does not have, names one twice, or a profile is named like a tool" );
+
+// `no-edit` is exactly the tools outside McpVerbGroup::Edit: a new read or reflex verb must join it, a new edit verb must not.
+consteval bool mcpNoEditProfileIsAllButEditGroup() noexcept
+{
+    McpToolMask notEdit = 0;
+    for( std::size_t toolIndex = 0; toolIndex < kMcpVerbCount; ++toolIndex )
+    {
+        notEdit |= kMcpVerbTable[ toolIndex ].group == McpVerbGroup::Edit ? McpToolMask{ 0 } : McpToolMask{ 1 } << toolIndex;
+    }
+    for( const McpToolProfile& profile : kMcpToolProfiles )
+    {
+        if( profile.name == "no-edit" )
+        {
+            return mcpProfileMask( profile.members ) == notEdit;
+        }
+    }
+    return false;
+}
+static_assert( mcpNoEditProfileIsAllButEditGroup(), "the no-edit profile drifted from 'every tool outside McpVerbGroup::Edit' — add the new tool to its members" );
 
 // The @FILE:LINE line-seed sentence, SPLICED into every stanza whose selector resolves it (the
 // kExemplarSelectionRule pattern: one constant, nine descriptions, zero drift). This is the no-name
@@ -353,7 +379,7 @@ inline std::string mcpBatchServedVerbsList( bool gitVerbsOmitted )
     return out;
 }
 
-// "core, full (profiles); analyze, rank_by, … (tools)" — every name --mcp-tools accepts, in table order, for the
+// "core, no-edit, full (profiles); analyze, rank_by, … (tools)" — every name --mcp-tools accepts, in table order, for the
 // refusal that has to say what WOULD have been accepted.
 inline std::string mcpToolSpecNames()
 {
@@ -1314,7 +1340,7 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                    // MCP twin disclosed capped:true at 100 hits with no knob to raise or walk past it.
                    "{\"name\":\"grep\",\"description\":\"Trigram literal search; each hit annotated with its enclosing symbol (which function/class it is in). Hits carry text; enclosing rows a fetch_body handle. pattern = the literal; in=any lifts the span tiering (default: tightest non-empty tier; rest rides as suppressed_comment/suppressed_string); limit/offset page the hits (first 100; has_more/next_offset end it). total/shown/capped/hits_capped and complete= are defined in the answer's legend.\","
                    + mcprefuse::toolMetadataFor( "grep", pathIsRequired ) + "},"
-                   "{\"name\":\"cochange\",\"description\":\"Files that historically change together with this file — the co-edit partners. Fowler's Shotgun Surgery as change coupling. dep_capable=false means neither side could carry one (sh/md/json/binary), so surprising is undefined rather than informative. file = the file (a path SUFFIX is enough); limit/offset page the partners; the root names the mined window and its sub-window denominator.\","
+                   "{\"name\":\"cochange\",\"description\":\"Files that historically change together with this file — the co-edit partners. Fowler's Shotgun Surgery as change coupling. dep_capable=false (sh/md/json/binary) or no_file_edges (Go, Java: imports not resolved) makes surprising undefined, not a finding. file = the file (a path SUFFIX is enough); limit/offset page the partners; the root names the mined window and its sub-window denominator.\","
                    + mcprefuse::toolMetadataFor( "cochange", pathIsRequired ) + "},"
                    // §B6 M15 / verifier N5: top_k is the budget knob this verb's own est_tokens disclosure implies. It
                    // was hardcoded to 8 with no way to ask for less, on the one MCP verb that can return ~180 KB,
@@ -1649,6 +1675,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
             // record their memory-guard stops here; a count that grew during this request means the answer may rest on
             // a partial ingest even when the resident index is whole, and the envelope says so (textResult).
             const std::uint32_t stopsAtEntry = memguard::stopCounts().recorded.load( std::memory_order_relaxed );
+            const GitWalkCutMark cutsAtEntry = gitWalkCutMark();   // M1: a history walk this request cut is said in its envelope (`_history_cut`)
+            ownIngestCutNote().clear();   // notfound-on-cut: this request's own-ingest note starts empty (mcpindex.h)
             const auto textResult = [ & ]( const std::string& text )
             {
                 // stamp FIRST, then the pass count: on a verb that never touched the index, building the
@@ -1659,6 +1687,8 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     memoryStopNote = "the memory guard stopped an ingest this answer depends on (inside this tool, or the "
                                      "background snapshot), so it may be incomplete — " + std::string( memguard::kOverride );
                 }
+                const GitWalkCutMark cutsNow  = gitWalkCutMark();
+                const std::string    cutNote  = gitWalkCutSentence( cutsNow.walks - cutsAtEntry.walks, cutsNow.commits - cutsAtEntry.commits );
                 // R2a: `_assumed_root` — a third envelope sibling (mcpEnvelopeNoteField), emitted ONLY when
                 // the request omitted `path` and the launch-cwd default answered.
                 // Card A3: `_fresh` — a fourth sibling, on EVERY response, because it is the one of these
@@ -1699,17 +1729,36 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                 return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
                      + mcpdetail::jsonEscape( *body ) + "\"}],\"_index\":\"" + mcpdetail::jsonEscape( stamp )
                      + "\"" + mcpReingestField( passesAtEntry ) + mcpFreshFields( passesAtEntry )
-                     + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote ) + "}}";
+                     + mcpEnvelopeNoteField( "_assumed_root", assumedRootNote ) + mcpEnvelopeNoteField( "_memory_stop", memoryStopNote )
+                     + mcpEnvelopeNoteField( "_history_cut", cutNote ) + "}}";
             };
             // #350: a refusal composed after an ingest the memory guard cut may name a false cause ("no git HEAD" for a
             // HEAD tree that was only partly read) — so every error built after a stop carries the guard's sentence too
             const auto memoryStopSuffix = [ & ]( std::string_view msg ) -> std::string
             {
-                if( memguard::stopCounts().recorded.load( std::memory_order_relaxed ) <= stopsAtEntry || msg.find( "memory guard" ) != std::string_view::npos )
+                // every guard sentence ends with memguard::kOverride; the words "memory guard" can ride in echoed caller text
+                // (`symbol not found: 'memory guard'`), which is not a disclosure (CR 4419328423)
+                if( msg.find( memguard::kOverride ) != std::string_view::npos )
                 {
                     return {};
                 }
-                return "; the memory guard stopped an ingest this request ran, which may be the real cause — " + std::string( memguard::kOverride );
+                // notfound-on-cut: the resident index for this root is cut — the request that BUILT it (an agent's first call), a
+                // LATER one served from it, and the edit_check / quality_delta ingests that left it resident all say the same
+                // shared sentence (mcpindex.h): the partial-absence clause, the file count and the override
+                if( std::string clause = cutIndexErrorClause( path ); !clause.empty() )
+                {
+                    return clause;
+                }
+                if( const std::string& own = ownIngestCutNote(); !own.empty() )   // edit_check / quality_delta ingest on their own
+                {
+                    return own;
+                }
+                // #350: an ingest this request ran that left no resident index for `path` (a root served without the slot)
+                if( memguard::stopCounts().recorded.load( std::memory_order_relaxed ) > stopsAtEntry )
+                {
+                    return "; the memory guard stopped an ingest this request ran, which may be the real cause — " + std::string( memguard::kOverride );
+                }
+                return {};
             };
             const auto errResult = [ & ]( int code, const char* msg )
             {
@@ -2445,13 +2494,16 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                     {
                     resp = pagedResult( [ & ]( McpPageArgs pg )   // M13
                     {
-                        const std::optional<std::string> answer = ownersText( path, symbol, pg );
+                        const GitWalkCutMark             cutsBefore = gitWalkCutMark();
+                        const std::optional<std::string> answer     = ownersText( path, symbol, pg );
                         if( !answer )
                         {
                             return errResult( -32603, "internal error: the owners answer buffer lost bytes — no answer served" );
                         }
                         const std::string& t = *answer;
-                        return t.empty() ? errResultMsg( -32602, symbol.empty()
+                        const std::string cut = rw::gitWalkCutRefusalCause( cutsBefore );   // F2: a walk THIS request's budget ended is not "no history"
+                        return t.empty() ? errResultMsg( -32602, !cut.empty() ? "owners is mined from git: " + cut
+                                                : symbol.empty()
                                                 ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
                                                 : notFoundSym( symbol ) )
                                          : textResult( t );
@@ -2806,6 +2858,15 @@ inline McpDispatchResult dispatchMcpLine( const std::string& line, int topK, boo
                             for( std::size_t i = 0; i < take; ++i )
                             {
                                 subs.push_back( runBatchSub( path, objs[i], topK, stable, redactPtr, legendCompactPosture ) );
+                            }
+                            // notfound-on-cut: a sub-query's not-found is an ok="0" err= inside a RESULT, not a JSON-RPC error, so
+                            // errResult never saw it — it takes the same partial-index clause (one helper, memoryStopSuffix)
+                            for( BatchSub& sub : subs )
+                            {
+                                if( !sub.ok )
+                                {
+                                    sub.err += memoryStopSuffix( sub.err );
+                                }
                             }
                             // M1: the posture reaches INSIDE the CDATA — the rule, its measurement and the one
                             // skipped verb live once, on applyCompactToBatchSubs (mcpverbs.h), because the CLI

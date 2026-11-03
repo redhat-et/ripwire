@@ -107,12 +107,13 @@ run f2 "$FIX/js" RIPWIRE_NO_BODY_FOLD=1 -- "--for=create"
 run f3 "$FIX/js" RIPWIRE_NO_BODY_FOLD=1 -- "--for=$Q" --json
 run x1 "$FIX/js" RIPWIRE_NO_BODY_FOLD=1 -- "--for=$Q"
 
-if m="$( chk ctor "$TMP/a1.xml" create 10 makeLogger,makeStore )"; then ok "A1 JS constructor: ctor_l=\"10\" ctor_calls=\"makeLogger,makeStore\" (name order)"; else no "A1 $m"; fi
-if m="$( chk ctor "$TMP/a1b.xml" create 2 alpha1,alpha2,alpha3,alpha4,alpha5,alpha6,alpha7,alpha8,alpha9,zeta1,zeta2,zeta3,zeta4,zeta5,zeta6,zeta7 2 )"; then ok "A1b 18 distinct callees: the 16 kept are the first 16 by NAME, ctor_calls_more=\"2\" (the twice-defined alpha9 is kept, not double counted)"; else no "A1b $m"; fi
+# js-def-naming: a JS/TS method row names its class (Registry.create), so the r=1 row is pinned under that name
+if m="$( chk ctor "$TMP/a1.xml" Registry.create 10 makeLogger,makeStore )"; then ok "A1 JS constructor: ctor_l=\"10\" ctor_calls=\"makeLogger,makeStore\" (name order)"; else no "A1 $m"; fi
+if m="$( chk ctor "$TMP/a1b.xml" Registry.create 2 alpha1,alpha2,alpha3,alpha4,alpha5,alpha6,alpha7,alpha8,alpha9,zeta1,zeta2,zeta3,zeta4,zeta5,zeta6,zeta7 2 )"; then ok "A1b 18 distinct callees: the 16 kept are the first 16 by NAME, ctor_calls_more=\"2\" (the twice-defined alpha9 is kept, not double counted)"; else no "A1b $m"; fi
 if m="$( chk ctor "$TMP/a2.xml" Registry.create 6 make_store )"; then ok "A2 Python __init__: ctor_l=\"6\" ctor_calls=\"make_store\""; else no "A2 $m"; fi
-if m="$( chk none "$TMP/b1.xml" create )"; then ok "B1 no constructor: no ctor_l="; else no "B1 $m"; fi
+if m="$( chk none "$TMP/b1.xml" Registry.create )"; then ok "B1 no constructor: no ctor_l="; else no "B1 $m"; fi
 if grep -q '<b t="cls" l="9" p="store.js" n="Registry">' "$TMP/b2.xml"; then
-    if m="$( chk none "$TMP/b2.xml" create )"; then ok "B2 the fold serves the class body: no ctor_l="; else no "B2 $m"; fi
+    if m="$( chk none "$TMP/b2.xml" Registry.create )"; then ok "B2 the fold serves the class body: no ctor_l="; else no "B2 $m"; fi
 else
     no "B2 vacuous: the fold did not serve Registry"
 fi

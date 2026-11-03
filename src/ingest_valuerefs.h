@@ -53,8 +53,8 @@
 // scope exit / file end), so an ordinary `x.m()` adds nothing; a parameter Through always survives — its
 // values arrive from callers elsewhere.
 //
-// FLOORS (stated in the legend and pinned by recallshapecheck): a member or qualified value (obj.f, self.f,
-// ns::f, &Cls::m) and a function as the OBJECT of a member access (f.bind, f.name) are not rows; an import
+// FLOORS (stated in the legend and pinned by recallshapecheck; this walk's families — Rust records its own slot rows,
+// ingest_rustslots.h): a member or qualified value (obj.f, self.f, ns::f; C++ `&Cls::m` IS a row: memberPointerValueAt) and a function as the OBJECT of a member access (f.bind, f.name) are not rows; an import
 // alias is a local binding; a macro body is opaque; classes are not functions; Python attribute calls never
 // count as a call through a dict; nodes deeper than kVrMaxDepth are not visited — DISCLOSED, never silent: the file's
 // depth-cut record (below) makes value_refs= / --dead-code say the count is a floor and name the first cut site.
@@ -67,6 +67,8 @@ namespace
 
 using VrFam = ValueRefFamily;   // model.h: the one armed-language table the resolver indexes too
 
+inline constexpr std::size_t kVrDottedFlowMaxBytes = 400;    // STRING-IMPORT: a sink's flow-token list over this carries none (it joins no constant)
+inline constexpr std::size_t kVrDottedStringMaxBytes = 200;   // STRING-IMPORT: a longer string is no module path (no fact, no disclosure: nothing is cut)
 inline constexpr std::uint32_t kVrMaxDepth   = 512;   // the value-uses pass's own depth guard (ingest_sidecap.h kSideDepthUses); a cut is disclosed as value_refs_depth_capped= (valuerefs.h)
 inline constexpr std::size_t   kVrTextCap    = 96;    // a written slot / callee longer than this is cut with "…"
 
@@ -179,28 +181,20 @@ struct VrPatternLookup
     std::uint8_t     nameArg        = 0;
     bool             dictGet        = false;
     bool             computedMember = false;
+    bool             testOnly       = false;   // a capability test (hasattr): the name is looked up for its presence, never to call it
 };
 inline constexpr VrPatternLookup kVrPatternLookups[] = {
-    { VrFam::Py, "getattr", 1, false, false },
-    { VrFam::Py, "hasattr", 1, false, false },
-    { VrFam::Py, "__dict__", 0, true, false },
-    { VrFam::Js, "", 0, false, true },
+    { VrFam::Py, "getattr", 1, false, false, false },
+    { VrFam::Py, "hasattr", 1, false, false, true },
+    { VrFam::Py, "__dict__", 0, true, false, false },
+    { VrFam::Js, "", 0, false, true, false },
 };
-// IX-1 SLOT-TYPE JOIN: which field calls are calls through a stored function, per language, as data (lang-specific-layer
-// §2: a family-owned row; a language with no row records no slot call and no slot fact). C has no member functions, so
-// EVERY field call `x->f( … )` calls through a function-pointer field (or a macro the grammar reads as one). A C++ field
-// call is mostly a member-function call: there the receiver must be declared with the `struct` / `union` keyword, or be
-// declared with a struct type whose body in this same file declares the callee as a function-pointer field. Go func-typed fields, Rust `fn` / `Box<dyn Fn>`
-// fields and TS function-typed properties are later rows.
-struct VrSlotLang
-{
-    Lang lang;
-    bool everyFieldCall;
-};
-inline constexpr VrSlotLang kVrSlotLangs[] = {
-    { Lang::C, true },
-    { Lang::Cpp, false },
-};
+// IX-1 SLOT-TYPE JOIN: which field calls are calls through a stored function, per language, as data: model.h kVrSlotLangs (shared
+// with the join). C has no member functions, so EVERY field call `x->f( … )` calls through a function-pointer field (or a macro
+// the grammar reads as one). A C++ field call is mostly a member-function call: there the receiver must be declared with the
+// `struct` / `union` keyword, or be declared with a struct type whose body in this same file declares the callee as a
+// function-pointer field. Go (callSide MemberCallByName): this walk records only the STORE side (a keyed composite-literal field, a field
+// assignment, a parameter stored into one); the call side is the ordinary member call, joined by field name in valuerefindex.h.
 
 // A template's literal side must hold this many identifier characters to be matched (`f"_{m}"` is too wide).
 inline constexpr std::size_t kVrPatternMinLiteral = 3;
@@ -489,6 +483,39 @@ struct VrDepthCut
         disclosed = true;
     }
 };
+// A node at kVrMaxDepth whose children a value walk does not visit: a value reference below it is never captured. The
+// first one's site is kept as the clue the answers print (value_refs_depth_at=).
+inline void noteVrDepthCut( VrDepthCut& cut, TSNode n ) noexcept
+{
+    if( cut.subtrees == 0 )
+    {
+        cut.startByte = ts_node_start_byte( n );
+        cut.line      = ts_node_start_point( n ).row + 1;
+    }
+    if( cut.subtrees < UINT32_MAX )
+    {
+        ++cut.subtrees;
+    }
+}
+// The file's ONE depth-cut record (RECORD SHAPE in the header comment): the cut is disclosed through it on the answers that
+// read value references (valuerefs.h value_refs_depth_capped=, --dead-code; the named exceptions are in the header comment),
+// and it is cached with the file's other references, so a warm run discloses it too.
+inline RawRef vrDepthCutRecord( std::uint32_t fileId, Lang lang, VrDepthCut& cut )
+{
+    EXPECTS( cut.subtrees > 0, "a depth-cut record is written only when the cap stopped the walk" );
+    DISCLOSE( cut, VrDepthCut::DisclosureWhy::SubtreesBelowMaxDepth,
+              "value references: subtrees below kVrMaxDepth were not visited (value_refs_depth_capped=)" );
+    RawRef r;
+    r.fileId        = fileId;
+    r.startByte     = cut.startByte;
+    r.line          = cut.line;
+    r.lang          = lang;
+    r.role          = RefRole::Value;
+    r.qualifier     = std::string( 1, kValueRefDepthCutScope );   // name stays "": no identifier is empty
+    r.argCount      = static_cast<std::uint16_t>( std::min<std::uint32_t>( cut.subtrees, 0xFFFFu ) );
+    r.argCountKnown = true;
+    return r;
+}
 
 struct VrAnc
 {
@@ -498,6 +525,121 @@ struct VrAnc
     std::uint32_t namedIndex = 0;     // index among the parent's named, non-extra children
     std::uint32_t childNamed = 0;     // running count of this node's named, non-extra children entered so far
     bool          opensScope = false;
+};
+
+// ── FN-SLOT S2 fix 1: where a C++ class is defined and a `&Cls::m` is written (model.h VrMemberScope) ───────────────────────
+// One scope segment as a qualifier writes it: a template-id `W<int>` is W.
+inline std::string_view vrScopeSegment( TSNode seg, std::string_view src ) noexcept
+{
+    if( !ts_node_is_null( seg ) && kindIs( ts_node_type( seg ), "template_type" ) )
+    {
+        seg = fieldChild( seg, NodeField::Name );
+    }
+    return ts_node_is_null( seg ) ? std::string_view() : nodeTextOf( seg, src );
+}
+inline void vrAppendScope( std::string& path, std::string_view seg )
+{
+    if( !seg.empty() )
+    {
+        path += path.empty() ? "" : "::";
+        path += seg;
+    }
+}
+// `inline namespace v1 { … }`: the keyword is the namespace_definition's first, anonymous child. Qualifiers need not write it.
+inline bool vrInlineNamespace( TSNode ns, std::string_view src ) noexcept
+{
+    const TSNode first = ts_node_child( ns, 0 );
+    return !ts_node_is_null( first ) && !ts_node_is_named( first ) && nodeTextOf( first, src ) == "inline";
+}
+// The scope an out-of-line definition's declarator writes (`int a::C::f() { … }` is inside a::C), appended to `path`.
+inline void vrDeclaratorScope( TSNode fn, std::string_view src, std::string& path )
+{
+    TSNode d = fieldChild( fn, NodeField::Declarator );
+    for( int guard = 0; guard < 8 && !ts_node_is_null( d ) && !kindIs( ts_node_type( d ), "qualified_identifier" ); ++guard )
+    {
+        d = fieldChild( d, NodeField::Declarator );   // pointer / reference / function declarator
+    }
+    for( int guard = 0; guard < 8 && !ts_node_is_null( d ) && kindIs( ts_node_type( d ), "qualified_identifier" ); ++guard )
+    {
+        vrAppendScope( path, vrScopeSegment( fieldChild( d, NodeField::Scope ), src ) );
+        d = fieldChild( d, NodeField::Name );
+    }
+}
+// The named namespaces and classes enclosing anc[0..end) outermost first, "::"-joined (an anonymous or inline namespace is
+// transparent), then the scope of an out-of-line function definition among them.
+inline std::string vrEnclosingScopePath( std::span<const VrAnc> anc, std::size_t end, std::string_view src )
+{
+    std::string path;
+    for( const VrAnc& a : anc.first( end ) )
+    {
+        if( kindIs( a.kind, "namespace_definition" ) )
+        {
+            if( !vrInlineNamespace( a.node, src ) )
+            {
+                const TSNode nm = fieldChild( a.node, NodeField::Name );
+                vrAppendScope( path, ts_node_is_null( nm ) ? std::string_view() : nodeTextOf( nm, src ) );
+            }
+        }
+        else if( kindIs( a.kind, "class_specifier" ) || kindIs( a.kind, "struct_specifier" ) || kindIs( a.kind, "union_specifier" ) )
+        {
+            vrAppendScope( path, vrScopeSegment( fieldChild( a.node, NodeField::Name ), src ) );
+        }
+        else if( kindIs( a.kind, "function_definition" ) )
+        {
+            vrDeclaratorScope( a.node, src, path );
+        }
+    }
+    return path;
+}
+// This file's `using ns::Cls;` declarations and `using namespace ns;` directives so far (anywhere in the file: a floor in the
+// declining direction only — a qualifier that is not the class's own scope declines, never binds).
+struct VrUsings
+{
+    std::vector<std::pair<std::string, std::string>> declared;     // (Cls, the qualifier `ns` written before it)
+    std::vector<std::string>                         directives;   // `ns` of each `using namespace ns;`
+
+    // `n` is a using_declaration: `using namespace ns;` (the anonymous `namespace` token is its second child) or `using ns::Cls;`.
+    void note( TSNode n, std::string_view src )
+    {
+        const TSNode target = ts_node_named_child( n, 0 );
+        if( ts_node_is_null( target ) )
+        {
+            return;
+        }
+        const TSNode           second = ts_node_child( n, 1 );
+        const std::string_view full   = nodeTextOf( target, src );
+        if( !ts_node_is_named( second ) && nodeTextOf( second, src ) == "namespace" )
+        {
+            directives.emplace_back( full );
+            return;
+        }
+        if( const std::size_t cut = full.rfind( "::" ); cut != std::string_view::npos )
+        {
+            declared.emplace_back( std::string( full.substr( cut + 2 ) ), std::string( full.substr( 0, cut ) ) );
+        }
+    }
+    // The qualifier a `using` of class `owner` writes ("" when none).
+    std::string_view qualifierOf( std::string_view owner ) const noexcept
+    {
+        for( const auto& [ cls, qualifier ] : declared )
+        {
+            if( cls == owner )
+            {
+                return qualifier;
+            }
+        }
+        return {};
+    }
+    std::string directivesJoined() const
+    {
+        std::string out;
+        for( const std::string& d : directives )
+        {
+            out += out.empty() ? "" : ",";
+            out += d;
+        }
+        return out;
+    }
 };
 
 class ValueRefWalk
@@ -539,9 +681,19 @@ public:
         m_fAlias       = ts_language_field_id_for_name( tl, "alias", 5 );
         m_fArguments   = fieldIdFor( tl, NodeField::Arguments );
         m_fSource      = ts_language_field_id_for_name( tl, "source", 6 );
-        m_slot         = findByField( kVrSlotLangs, &VrSlotLang::lang, m_lang );
+        m_fReceiver    = ts_language_field_id_for_name( tl, "receiver", 8 );
+        m_fScope       = ts_language_field_id_for_name( tl, "scope", 5 );
+        const VrSlotLang* slotRow = vrSlotLang( m_lang );
+        m_slot         = slotRow != nullptr && slotRow->callSide == VrSlotCallSide::ThroughRows ? slotRow : nullptr;
+        m_slotByName   = slotRow != nullptr && slotRow->callSide == VrSlotCallSide::MemberCallByName;
         m_fwd          = callForwardersOf( m_lang );
         m_fwdArmed     = !m_fwd.empty();
+        const RegLang* regRow = regLang( m_lang );   // REGISTRAR: a language whose registrars store a parameter into a container
+        m_regStores    = regRow != nullptr && regRow->form == RegForm::ReceiverMethod ? regRow->containerStores : std::span<const std::string_view>{};
+        if( const DottedImportSinkLang* sinkRow = findByField( kDottedImportSinks, &DottedImportSinkLang::lang, m_lang ); sinkRow != nullptr )
+        {
+            m_importSinks = sinkRow->sinks;
+        }
 
         VrScope file;
         file.node = root;
@@ -562,7 +714,7 @@ public:
             }
             else if( ts_node_child_count( m_anc.back().node ) > 0 )
             {
-                noteDepthCut( m_anc.back().node );   // the cap stops the walk ABOVE these children: one subtree not visited
+                noteVrDepthCut( m_depthCut, m_anc.back().node );   // the cap stops the walk ABOVE these children: one subtree not visited
             }
             bool done = false;
             for( ;; )
@@ -600,7 +752,7 @@ public:
         emitForwardedCalls();
         if( m_depthCut.subtrees > 0 )
         {
-            emitDepthCut();
+            m_out.push_back( vrDepthCutRecord( m_fileId, m_lang, m_depthCut ) );
         }
     }
 
@@ -633,6 +785,7 @@ private:
                     || kindIs( t, "generator_expression" ) ? ScopeKind::Block : ScopeKind::None;
             case VrFam::Go:
                 return kindIs( t, "function_declaration" ) || kindIs( t, "method_declaration" ) || kindIs( t, "func_literal" ) ? ScopeKind::Function : ScopeKind::None;
+            case VrFam::Rust:   // never: Rust runs ingest_rustslots.h, not this walk
             case VrFam::None: break;
         }
         return ScopeKind::None;
@@ -896,17 +1049,21 @@ private:
                 }
                 break;
             }
+            case VrFam::Rust:   // never: Rust runs ingest_rustslots.h, not this walk
             case VrFam::None: break;
         }
     }
 
-    std::vector<std::string_view> pyParamNames( TSNode params ) const
+    // `defaulted` (optional): one flag per returned name, true for a parameter written with a default value.
+    std::vector<std::string_view> pyParamNames( TSNode params, std::vector<bool>* defaulted = nullptr ) const
     {
         std::vector<std::string_view> names;
         ChildCursor c( params );
         forEachNamedChild( params, c.cur, [ & ]( TSNode k )
         {
-            const char* t = ts_node_type( k );
+            const char*       t      = ts_node_type( k );
+            const std::size_t before = names.size();
+            bool              dflt   = false;
             if( kindIs( t, "identifier" ) )
             {
                 names.push_back( text( k ) );
@@ -914,15 +1071,194 @@ private:
             else if( kindIs( t, "default_parameter" ) || kindIs( t, "typed_default_parameter" ) )
             {
                 names.push_back( text( child( k, m_fName ) ) );
+                dflt = true;
             }
             else if( kindIs( t, "typed_parameter" ) || kindIs( t, "list_splat_pattern" ) || kindIs( t, "dictionary_splat_pattern" ) )
             {
                 const TSNode id = ts_node_named_child( k, 0 );
                 names.push_back( !ts_node_is_null( id ) && kindIs( ts_node_type( id ), "identifier" ) ? text( id ) : std::string_view() );
             }
+            if( defaulted != nullptr && names.size() > before )
+            {
+                defaulted->push_back( dflt );
+            }
             return true;
         } );
         return names;
+    }
+
+    // Python: parameter `name` of function node `fn` is written with a default value (`x=1`, `x: int = 1`).
+    bool pyParamHasDefault( TSNode fn, std::string_view name ) const
+    {
+        const TSNode params = child( fn, m_fParameters );
+        if( ts_node_is_null( params ) )
+        {
+            return false;
+        }
+        std::vector<bool> defaulted;
+        const auto        names = pyParamNames( params, &defaulted );
+        const auto        at    = std::ranges::find( names, name );
+        return at != names.end() && defaulted[ static_cast<std::size_t>( at - names.begin() ) ];
+    }
+
+    // Python: is store target `n` rooted at `self` (`self.x`, `self.x[ k ]`, `self.x.y[ k ]`)?
+    bool pySelfRooted( TSNode n ) const
+    {
+        for( int guard = 0; guard < 16 && !ts_node_is_null( n ); ++guard )
+        {
+            if( kindIs( ts_node_type( n ), "identifier" ) )
+            {
+                return text( n ) == "self";
+            }
+            if( kindIs( ts_node_type( n ), "attribute" ) )
+            {
+                n = child( n, m_fObject );
+            }
+            else if( kindIs( ts_node_type( n ), "subscript" ) )
+            {
+                n = child( n, m_fValue );
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    // Python: identifier `id` is the KEY of a subscript store into `self` (`self.d[ id ] = handler`): it is read only to say where the
+    // value goes, never stored itself.
+    bool pyStoreKey( TSNode id ) const
+    {
+        const TSNode sub = ts_node_parent( id );
+        if( ts_node_is_null( sub ) || !kindIs( ts_node_type( sub ), "subscript" ) || !ts_node_eq( child( sub, m_fSubscript ), id ) )
+        {
+            return false;
+        }
+        const TSNode as = ts_node_parent( sub );
+        return !ts_node_is_null( as ) && kindIs( ts_node_type( as ), "assignment" ) && ts_node_eq( child( as, m_fLeft ), sub )
+            && pySelfRooted( sub );
+    }
+
+    // Python: is identifier `id` only a label (an attribute name or a keyword-argument name), never a read of a variable?
+    bool pyLabel( TSNode id ) const
+    {
+        const TSNode parent = ts_node_parent( id );
+        return !ts_node_is_null( parent )
+            && ( ( kindIs( ts_node_type( parent ), "attribute" ) && ts_node_eq( child( parent, m_fAttribute ), id ) )
+                 || ( kindIs( ts_node_type( parent ), "keyword_argument" ) && ts_node_eq( child( parent, m_fName ), id ) ) );
+    }
+
+    // Python: does the subtree `n` read identifier `name`? A subtree too large to scan answers false (the caller then refuses).
+    bool pyReads( TSNode n, std::string_view name ) const
+    {
+        constexpr std::size_t kScanCap = 512;
+        std::vector<TSNode>   stack{ n };
+        for( std::size_t seen = 0; !stack.empty() && seen <= kScanCap; ++seen )
+        {
+            const TSNode cur = stack.back();
+            stack.pop_back();
+            if( kindIs( ts_node_type( cur ), "identifier" ) )
+            {
+                if( text( cur ) == name && !pyLabel( cur ) )
+                {
+                    return true;
+                }
+                continue;
+            }
+            for( std::uint32_t k = 0, cc = ts_node_named_child_count( cur ); k < cc; ++k )
+            {
+                stack.push_back( ts_node_named_child( cur, k ) );
+            }
+        }
+        return false;
+    }
+
+    // Python: is `ch`, a child of `node`, what `node` stores into `self` — the arguments of `self.<field>.<store>( … )` or the right side of
+    // a store into `self` — in a store that does not also hold `keep`?
+    bool pyStoredChild( TSNode node, TSNode ch, std::string_view keep ) const
+    {
+        const char* kind = ts_node_type( node );
+        bool        into = false;
+        if( kindIs( kind, "call" ) )
+        {
+            const TSNode fn = child( node, m_fFunction );
+            into = kindIs( ts_node_type( ch ), "argument_list" ) && !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "attribute" )
+                && std::ranges::find( m_regStores, text( child( fn, m_fAttribute ) ) ) != m_regStores.end()
+                && !selfField( child( fn, m_fObject ) ).empty();
+        }
+        else if( kindIs( kind, "assignment" ) )
+        {
+            into = ts_node_eq( ch, child( node, m_fRight ) ) && pySelfRooted( child( node, m_fLeft ) );
+        }
+        return into && !pyReads( ch, keep );
+    }
+
+    // Python: is identifier `id` a use of one of the `others` that the allowlist refuses (see pyOtherParamUsed)? `stored`: it sits inside a
+    // store into `self` that does not hold the registered value.
+    bool pyOtherHit( TSNode id, bool stored, const std::vector<std::pair<std::string_view, bool>>& others ) const
+    {
+        const auto hit = std::ranges::find( others, text( id ), &std::pair<std::string_view, bool>::first );
+        return hit != others.end() && !pyLabel( id ) && ( hit->second ? stored : !pyStoreKey( id ) );
+    }
+
+    // Python: is the one parameter a store shows (`keep`) provably the registered value? An ALLOWLIST over the method's other parameters
+    // (after `self`), refused as soon as one is not provably beside the point:
+    //   a parameter written WITHOUT a default is allowed only as the subscript key of the `self` store itself (`self.d[ name ] = handler`);
+    //     any other use of it (a condition, a call, a second store) refuses, because the receiver may be that one;
+    //   a parameter written WITH a default (`sender=None`, `weak=True`) is allowed anywhere EXCEPT inside a store into `self` that does not
+    //     also hold `keep` (the arguments of `self.<field>.<store>( … )`, the right side of `self.x = …` / `self.x[ k ] = …`): a second,
+    //     separate stored candidate (`self.rx.append( wrap( fn ) )` beside `self.fl.append( ev )`) makes the receiver unprovable, while
+    //     `self.rx.append( ( receiver, sender ) )` stores the option beside the value, as Django's `Signal.connect` does.
+    // An attribute or keyword name is no use. A body too large to scan counts as a use.
+    bool pyOtherParamUsed( TSNode fn, std::string_view keep ) const
+    {
+        const TSNode params = child( fn, m_fParameters );
+        const TSNode body   = fieldChild( fn, NodeField::Body );
+        if( ts_node_is_null( params ) || ts_node_is_null( body ) )
+        {
+            return false;
+        }
+        std::vector<bool> defaulted;
+        const auto        names = pyParamNames( params, &defaulted );
+        std::vector<std::pair<std::string_view, bool>> others;   // name, written with a default
+        for( std::size_t k = 1; k < names.size(); ++k )          // names[0] is self
+        {
+            if( !names[k].empty() && names[k] != keep )
+            {
+                others.emplace_back( names[k], static_cast<bool>( defaulted[k] ) );
+            }
+        }
+        if( others.empty() )
+        {
+            return false;
+        }
+        constexpr std::size_t kScanCap = 4096;
+        struct Item { TSNode node; bool stored; };
+        std::vector<Item> stack{ { body, false } };
+        for( std::size_t seen = 0; !stack.empty(); ++seen )
+        {
+            if( seen > kScanCap )
+            {
+                return true;
+            }
+            const Item cur = stack.back();
+            stack.pop_back();
+            if( kindIs( ts_node_type( cur.node ), "identifier" ) )
+            {
+                if( pyOtherHit( cur.node, cur.stored, others ) )
+                {
+                    return true;
+                }
+                continue;
+            }
+            for( std::uint32_t k = 0, cc = ts_node_named_child_count( cur.node ); k < cc; ++k )
+            {
+                const TSNode ch = ts_node_named_child( cur.node, k );
+                stack.push_back( { ch, cur.stored || pyStoredChild( cur.node, ch, keep ) } );
+            }
+        }
+        return false;
     }
 
     // The positional parameter names of a function-like node, in order, and its own name.
@@ -1025,6 +1361,7 @@ private:
                 }
                 break;
             }
+            case VrFam::Rust:   // never: Rust runs ingest_rustslots.h, not this walk
             case VrFam::None: break;
         }
     }
@@ -1132,45 +1469,10 @@ private:
                 return kindIs( t, "formal_parameters" ) && !( s.isFunction && ts_node_eq( parent.node, s.node ) );
             }
             case VrFam::Py:
+            case VrFam::Rust:   // never: Rust runs ingest_rustslots.h, not this walk
             case VrFam::None: break;
         }
         return false;
-    }
-
-    // ── the depth cut ──────────────────────────────────────────────────────────────────────────────────
-    // A node at kVrMaxDepth whose children the walk does not visit: a value reference below it is never captured. The
-    // first one's site is kept as the clue the answers print (value_refs_depth_at=).
-    void noteDepthCut( TSNode n ) noexcept
-    {
-        if( m_depthCut.subtrees == 0 )
-        {
-            m_depthCut.startByte = ts_node_start_byte( n );
-            m_depthCut.line      = ts_node_start_point( n ).row + 1;
-        }
-        if( m_depthCut.subtrees < UINT32_MAX )
-        {
-            ++m_depthCut.subtrees;
-        }
-    }
-
-    // The file's ONE depth-cut record (RECORD SHAPE in the header comment): the cut is disclosed through it on the
-    // answers that read value references (valuerefs.h value_refs_depth_capped=, --dead-code; the named exceptions are in
-    // the header comment), and it is cached with the file's other references, so a warm run discloses it too.
-    void emitDepthCut()
-    {
-        EXPECTS( m_depthCut.subtrees > 0, "a depth-cut record is written only when the cap stopped the walk" );
-        DISCLOSE( m_depthCut, VrDepthCut::DisclosureWhy::SubtreesBelowMaxDepth,
-                  "value references: subtrees below kVrMaxDepth were not visited (value_refs_depth_capped=)" );
-        RawRef r;
-        r.fileId        = m_fileId;
-        r.startByte     = m_depthCut.startByte;
-        r.line          = m_depthCut.line;
-        r.lang          = m_lang;
-        r.role          = RefRole::Value;
-        r.qualifier     = std::string( 1, kValueRefDepthCutScope );   // name stays "": no identifier is empty
-        r.argCount      = static_cast<std::uint16_t>( std::min<std::uint32_t>( m_depthCut.subtrees, 0xFFFFu ) );
-        r.argCountKnown = true;
-        m_out.push_back( std::move( r ) );
     }
 
     // ── the walk ───────────────────────────────────────────────────────────────────────────────────────
@@ -1202,6 +1504,7 @@ private:
             noteSlotTypes( n, a.kind );   // IX-1: the declared struct types, beside the names (inert without a slot row)
         }
         noteStructBody( n, a.kind );      // IX-1: a struct body's field order and facts (m_anc.back() is the parent)
+        noteUsing( n, a.kind );           // FN-SLOT S2 fix 1: where a bare `&Cls::m` may name an external class (m_anc.back() is the parent)
         if( m_fwdArmed )
         {
             noteForwardProof( n, a.kind );
@@ -1216,8 +1519,17 @@ private:
         {
             valueRefAt( i );
         }
+        else if( memberValueKind( a.kind ) )
+        {
+            memberValueAt( i );
+        }
+        else if( !m_importSinks.empty() && kindIs( a.kind, "string" ) )
+        {
+            dottedStringAt( i );   // STRING-IMPORT (inert on a language with no sink row)
+        }
         else if( isCallKind( a.kind ) )
         {
+            importSinkAt( n );    // STRING-IMPORT (inert on a language with no sink row)
             slotThroughAt( n );   // IX-1 (inert without a slot row)
             throughAt( n );
             patternAtCall( n );
@@ -1459,6 +1771,8 @@ private:
         char        scope = 'x';
         std::uint16_t argIndex = 0;
         bool          isArg = false;
+        std::uint32_t litAt = 0;   // REGISTRAR (ProviderRecord): start byte of the object literal this pair is read from, when that
+                                   //   literal is proven (providerLiteralDirect) and the value is the pair's value written bare; 0 = none
     };
 
     std::string_view opText( TSNode n ) const noexcept
@@ -1715,8 +2029,10 @@ private:
         }
         // The shadow test FIRST: most identifiers in a value position are a parameter or local (`f(x)`), and the
         // position's slot text (callee, container) is only worth building for a name that can still be a function.
-        if( declaringScope( name ) != 0 )
+        if( const std::size_t d = declaringScope( name ); d != 0 )
         {
+            paramSlotFact( i, d, name );   // IX1-V2: a parameter stored into a field slot is a fact, never a row
+            paramRegFact( i, d, name );    // REGISTRAR: a method parameter stored into a container a field of self holds
             return;   // a parameter or local of that name hides the function
         }
         if( m_fwdArmed && forwardCallAt( i, name ) )
@@ -1734,7 +2050,13 @@ private:
             return;
         }
         const bool fileShadow = std::ranges::find( m_scopes.front().decls, name ) != std::ranges::end( m_scopes.front().decls );
+        landValue( i, j, name, s, fileShadow, {} );
+    }
 
+    // The classified value `name` at anc[i] (effective position anc[j]): a container it fills is marked fed (its scope's, or
+    // the file's), then its Value row. `owner` non-empty: a method value of that receiver type (methodValueAt).
+    void landValue( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via = {} )
+    {
         if( !s.container.empty() && ( s.scope == 'f' || s.scope == 'l' ) )
         {
             const std::size_t d = declaringScope( s.container );
@@ -1750,11 +2072,278 @@ private:
             }
         }
 
-        emitValueRef( i, j, name, s, fileShadow );
+        emitValueRef( i, j, name, s, fileShadow, owner, std::move( via ) );
+    }
+
+    // A node a method value may be written as: Go `b.opPlan` (methodValueAt), C++ `&Cls::m` (memberPointerValueAt).
+    bool memberValueKind( const char* t ) const noexcept
+    {
+        return ( m_slotByName && kindIs( t, "selector_expression" ) )
+            || ( m_slot != nullptr && m_slot->memberPointers && kindIs( t, "qualified_identifier" ) );
+    }
+    void memberValueAt( std::size_t i )
+    {
+        if( m_slotByName )
+        {
+            methodValueAt( i );   // IX1-V2: Go `f = b.opPlan` (a method value of the enclosing method's own receiver)
+        }
+        else
+        {
+            memberPointerValueAt( i );   // FN-SLOT S2: C++ `&Cls::m` (a pointer to member function)
+        }
+    }
+
+    // IX1-V2 (Go): `recv.m` in a value position, where recv is the enclosing METHOD's own receiver (no closer scope redeclares
+    // it): a Value row naming m with memberRoot = the receiver's type name, so the join resolves it to that type's method m
+    // only (valuerefindex.h resolveName), never to a same-named method of another type. Any other `x.m` stays a floor (x's
+    // type is not read here).
+    void methodValueAt( std::size_t i )
+    {
+        const TSNode n   = m_anc[i].node;
+        const TSNode op  = child( n, m_fOperand );
+        const TSNode fld = child( n, m_fField );
+        if( ts_node_is_null( op ) || ts_node_is_null( fld ) || !kindIs( ts_node_type( op ), "identifier" ) || i < 2 )
+        {
+            return;
+        }
+        const std::size_t d = declaringScope( text( op ) );
+        if( d == 0 || !kindIs( ts_node_type( m_scopes[d].node ), "method_declaration" ) )
+        {
+            return;
+        }
+        const TSNode rl = child( m_scopes[d].node, m_fReceiver );
+        const TSNode rp = ts_node_is_null( rl ) ? TSNode{} : ts_node_named_child( rl, 0 );
+        if( ts_node_is_null( rp ) || text( child( rp, m_fName ) ) != text( op ) )
+        {
+            return;   // a parameter or local of the method, not its receiver
+        }
+        TSNode rt = child( rp, m_fType );
+        if( !ts_node_is_null( rt ) && kindIs( ts_node_type( rt ), "pointer_type" ) )
+        {
+            rt = ts_node_named_child( rt, 0 );
+        }
+        const std::string_view owner = goTypeName( rt );
+        if( owner.empty() )
+        {
+            return;
+        }
+        std::size_t j = i;
+        while( j > 1 && transparent( j ) )
+        {
+            --j;
+        }
+        Slot s;
+        if( !classify( i, j, s ) )
+        {
+            return;   // the callee of a call (`b.opPlan( x )`), an operand: not a value use
+        }
+        landValue( i, j, text( fld ), s, false, owner );
+    }
+
+    // FN-SLOT S2 (C++, model.h kVrSlotLangs memberPointers): `&Cls::m` in a value position — a Value row naming m with memberRoot
+    // = Cls (the class segment written last before m; a template `Cls<T>` is Cls), resolved to that class's method m only
+    // (valuerefindex.h ownedBy). A bare `Cls::m` (a static member or a namespace function), an operator or destructor name, and
+    // a member pointer to data (no method m) are no rows.
+    void memberPointerValueAt( std::size_t i )
+    {
+        if( i < 2 || !kindIs( m_anc[i - 1].kind, "pointer_expression" ) || text( ts_node_child( m_anc[i - 1].node, 0 ) ) != "&" )
+        {
+            return;
+        }
+        // the written chain `[::]a::b::Cls::m`: every scope segment, the class last
+        std::vector<std::string_view> segs;
+        TSNode                        scope = child( m_anc[i].node, m_fScope );
+        TSNode                        name  = child( m_anc[i].node, m_fName );
+        const bool                    anchored = ts_node_is_null( scope );
+        for( int guard = 0; guard < 8; ++guard )
+        {
+            if( !ts_node_is_null( scope ) )
+            {
+                segs.push_back( vrScopeSegment( scope, m_src ) );
+            }
+            if( ts_node_is_null( name ) || !kindIs( ts_node_type( name ), "qualified_identifier" ) )
+            {
+                break;
+            }
+            scope = child( name, m_fScope );
+            name  = child( name, m_fName );
+        }
+        if( segs.empty() || segs.back().empty() || ts_node_is_null( name ) || !kindIs( ts_node_type( name ), "identifier" ) )
+        {
+            return;   // `&::f`: the global namespace, no class
+        }
+        const std::string_view owner = segs.back();
+        std::size_t j = i;
+        while( j > 1 && transparent( j ) )
+        {
+            --j;
+        }
+        Slot s;
+        if( !classify( i, j, s ) )
+        {
+            return;
+        }
+        landValue( i, j, text( name ), s, false, owner, memberScopeOf( segs, anchored ) );
+    }
+
+    // model.h VrMemberScope of a `&[::]a::Cls::m` written in segs (the class last): the qualifier, the enclosing scope, the directives.
+    std::string memberScopeOf( const std::vector<std::string_view>& segs, bool anchored ) const
+    {
+        std::string qualifier = anchored ? "::" : "";
+        for( std::size_t k = 0; k + 1 < segs.size(); ++k )
+        {
+            qualifier += k == 0 ? "" : "::";
+            qualifier += segs[k];
+        }
+        if( segs.size() == 1 && !anchored )
+        {
+            qualifier = std::string( m_usings.qualifierOf( segs.back() ) );   // `using ns::Cls;` then a bare `&Cls::m`
+        }
+        return qualifier + kVrMemberScopeSep + vrEnclosingScopePath( m_anc, m_anc.size() - 1, m_src ) + kVrMemberScopeSep + m_usings.directivesJoined();
+    }
+
+    // IX1-V2: a PARAMETER (`impl`, position k of the function `fnName` declared at scope d) stored into a field slot
+    // (goValueSlot: `Command{ EvalRW: impl }`, `x.F = impl`) — a slot fact (model.h kValueRefSlotParamScope), no row.
+    void paramSlotFact( std::size_t i, std::size_t d, std::string_view name )
+    {
+        const VrScope& sc = m_scopes[d];
+        if( !m_slotByName || !sc.isFunction || sc.fnName.empty() || i < 2 )
+        {
+            return;
+        }
+        const auto at = std::ranges::find( sc.params, name );
+        if( at == sc.params.end() || std::ranges::count( sc.params, name ) != 1 )
+        {
+            return;
+        }
+        std::size_t j = i;
+        while( j > 1 && transparent( j ) )
+        {
+            --j;
+        }
+        Slot   s;
+        RawRef r;
+        if( !classify( i, j, s ) )
+        {
+            return;
+        }
+        goValueSlot( j, r );
+        if( r.memberPath.empty() )
+        {
+            return;
+        }
+        r.fileId        = m_fileId;
+        r.startByte     = ts_node_start_byte( m_anc[i].node );
+        r.line          = ts_node_start_point( m_anc[i].node ).row + 1;
+        r.lang          = m_lang;
+        r.role          = RefRole::Value;
+        r.qualifier     = std::string( 1, kValueRefSlotParamScope );   // name stays "": no identifier is empty, so no row
+        r.recvVar       = std::string( sc.fnName );
+        r.argCount      = static_cast<std::uint16_t>( std::min<std::ptrdiff_t>( at - sc.params.begin(), 0xFFFF ) );
+        r.argCountKnown = true;
+        m_out.push_back( std::move( r ) );
+    }
+
+    // REGISTRAR (model.h kValueRefRegParamScope; read by src/regindex.h): parameter `name` of METHOD scope d (its enclosing scope
+    // is a class body, its first parameter `self`) at anc[i], reached through tuple/list/parenthesis wrappers only, is either
+    //   an argument of `self.<field>.<store>( … )` (store one of the language row's containerStores), or
+    //   the right side of `self.<field>[ … ] = …`.
+    // Records the fact (method, parameter position after self, field). A parameter with a default value (`sender=None`) records
+    // nothing: it is an option stored beside the receiver, and a positional argument there is not a registered value. Nor does a method
+    // whose other parameters are not provably beside the point (pyOtherParamUsed: a required one used beyond the subscript key of the store,
+    // a defaulted one stored into `self`). Anything else — a store into a local, a store through
+    // another object, a call of the parameter — records nothing (no fact: never a registrar).
+    void paramRegFact( std::size_t i, std::size_t d, std::string_view name )
+    {
+        if( m_regStores.empty() || d == 0 || i < 3 )
+        {
+            return;
+        }
+        const VrScope& sc = m_scopes[d];
+        if( !sc.isFunction || sc.fnName.empty() || !m_scopes[d - 1].isClass || sc.params.empty() || sc.params.front() != "self" )
+        {
+            return;
+        }
+        const auto at = std::ranges::find( sc.params, name );
+        if( at == sc.params.begin() || at == sc.params.end() || std::ranges::count( sc.params, name ) != 1 )
+        {
+            return;
+        }
+        std::size_t j = i;
+        while( j > 1 && ( kindIs( m_anc[j - 1].kind, "tuple" ) || kindIs( m_anc[j - 1].kind, "list" )
+                          || kindIs( m_anc[j - 1].kind, "parenthesized_expression" ) ) )
+        {
+            --j;
+        }
+        std::string_view field;
+        const VrAnc&     p = m_anc[j - 1];
+        if( kindIs( p.kind, "argument_list" ) && j >= 2 && kindIs( m_anc[j - 2].kind, "call" ) )
+        {
+            // `self.<field>.<store>`: an attribute whose object is the attribute `self.<field>`
+            const TSNode fn = child( m_anc[j - 2].node, m_fFunction );
+            if( ts_node_is_null( fn ) || !kindIs( ts_node_type( fn ), "attribute" ) )
+            {
+                return;
+            }
+            const std::string_view store = text( child( fn, m_fAttribute ) );
+            if( std::ranges::find( m_regStores, store ) == m_regStores.end() )
+            {
+                return;
+            }
+            field = selfField( child( fn, m_fObject ) );
+        }
+        else if( kindIs( p.kind, "assignment" ) && m_anc[j].field == m_fRight )
+        {
+            const TSNode lhs = child( p.node, m_fLeft );
+            if( ts_node_is_null( lhs ) || !kindIs( ts_node_type( lhs ), "subscript" ) )
+            {
+                return;
+            }
+            field = selfField( ts_node_named_child( lhs, 0 ) );
+        }
+        if( field.empty() )
+        {
+            return;
+        }
+        // after the store shape: both are pure predicates, and pyOtherParamUsed re-reads the parameters and scans the body (most uses of a parameter are no store)
+        if( pyParamHasDefault( sc.node, name ) )
+        {
+            return;   // `sender=None`, `weak=True`: an option the registrar stores beside the receiver, never the registered value
+        }
+        if( pyOtherParamUsed( sc.node, name ) )
+        {
+            return;   // `self.rx.append( wrap( receiver ) ); self.fl.append( sender )`: the stored one may be the option, not the value
+        }
+        RawRef r;
+        r.fileId        = m_fileId;
+        r.startByte     = ts_node_start_byte( m_anc[i].node );
+        r.line          = ts_node_start_point( m_anc[i].node ).row + 1;
+        r.lang          = m_lang;
+        r.role          = RefRole::Value;
+        r.qualifier     = std::string( 1, kValueRefRegParamScope );   // name stays "": no identifier is empty, so no row
+        r.recvVar       = std::string( sc.fnName );
+        r.argCount      = static_cast<std::uint16_t>( std::min<std::ptrdiff_t>( at - sc.params.begin() - 1, 0xFFFF ) );
+        r.argCountKnown = true;
+        r.memberPath    = std::string( field );
+        m_out.push_back( std::move( r ) );
+    }
+    // `self.<field>` → field; anything else → "".
+    std::string_view selfField( TSNode n ) const
+    {
+        if( ts_node_is_null( n ) || !kindIs( ts_node_type( n ), "attribute" ) )
+        {
+            return {};
+        }
+        const TSNode obj = child( n, m_fObject );
+        if( ts_node_is_null( obj ) || !kindIs( ts_node_type( obj ), "identifier" ) || text( obj ) != "self" )
+        {
+            return {};
+        }
+        return text( child( n, m_fAttribute ) );
     }
 
     // The Value row of identifier anc[i] (effective position anc[j]) landing in slot `s`.
-    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow )
+    void emitValueRef( std::size_t i, std::size_t j, std::string_view name, Slot& s, bool fileShadow, std::string_view owner, std::string via )
     {
         RawRef r;
         r.fileId        = m_fileId;
@@ -1769,8 +2358,93 @@ private:
         r.fieldName     = std::move( s.into );
         r.argCount      = s.argIndex;
         r.argCountKnown = s.isArg;
+        if( s.litAt != 0 )
+        {
+            r.qualifier += "@" + std::to_string( s.litAt );   // REGISTRAR: the object literal (qualifier[2..], read only by regindex.h)
+        }
         valueSlot( j, r );   // IX-1: a struct-field slot's type and field (inert without a slot row)
+        r.memberRoot = std::string( owner );   // IX1-V2: a method value's receiver type (methodValueAt), "" otherwise
+        r.memberVia  = std::move( via );       // FN-SLOT S2: C++ `&Cls::m` — where it was written (model.h VrMemberScope), "" otherwise
         m_out.push_back( std::move( r ) );
+    }
+
+    // REGISTRAR (model.h kRegLangs, form ProviderRecord; read by src/regindex.h): is the object literal anc[k] in a position that is
+    // never conditional, repeated or rebound? An ALLOWLIST: it is an ELEMENT of an array literal, and that array is a direct argument of a
+    // call (`register( [ { … } ] )`, `makeProviders( [ … ] )`), the initialiser of a `const` (bound exactly once, never reassigned), the
+    // value of a `providers` / `viewProviders` property, or an element of such an array. A bare `f( { … } )` (`reg.remove( { … } )`,
+    // `console.log( { … } )`), a `const o = { … }` (mutable by `o.provide = …`), a ternary, `||` / `&&`, a `return`, an assignment,
+    // a `let` / `var`, a spread or a cast is none of these: a `provide` and a `useClass` read from there may belong to two different objects.
+    bool providerLiteralDirect( std::size_t k ) const { return k > 0 && kindIs( m_anc[k - 1].kind, "array" ) && providerArrayDirect( k - 1, 0 ); }
+    bool providerArrayDirect( std::size_t k, int depth ) const
+    {
+        if( k == 0 || depth > 8 )
+        {
+            return false;
+        }
+        const VrAnc& p = m_anc[k - 1];
+        const VrAnc& c = m_anc[k];
+        if( kindIs( p.kind, "arguments" ) || kindIs( p.kind, "argument_list" ) )
+        {
+            return true;
+        }
+        if( kindIs( p.kind, "variable_declarator" ) )
+        {
+            return c.field == m_fValue && k >= 2 && kindIs( m_anc[k - 2].kind, "lexical_declaration" )
+                && text( ts_node_child( m_anc[k - 2].node, 0 ) ) == "const";
+        }
+        if( kindIs( p.kind, "array" ) )
+        {
+            return providerArrayDirect( k - 1, depth + 1 );
+        }
+        if( kindIs( p.kind, "pair" ) && c.field == m_fValue )
+        {
+            const std::string_view key = text( child( p.node, m_fKey ) );
+            return key == "providers" || key == "viewProviders";
+        }
+        return false;
+    }
+    // Is every entry of the object literal `obj` one plain pair or shorthand with a non-computed key written once? A spread, method,
+    // accessor, computed key or duplicate key can override the `provide` / value pair read from the same literal.
+    bool providerLiteralPlain( TSNode obj ) const
+    {
+        std::vector<std::string_view> seen;
+        for( std::uint32_t i = 0, n = ts_node_named_child_count( obj ); i < n; ++i )
+        {
+            const TSNode e = ts_node_named_child( obj, i );
+            if( kindIs( ts_node_type( e ), "comment" ) )
+            {
+                continue;
+            }
+            const bool        pair = kindIs( ts_node_type( e ), "pair" );
+            const TSNode      kn   = pair ? child( e, m_fKey ) : e;
+            std::string_view  key  = ( pair || kindIs( ts_node_type( e ), "shorthand_property_identifier" ) ) ? text( kn ) : std::string_view{};
+            if( pair && kindIs( ts_node_type( kn ), "string" ) && key.size() >= 2 )
+            {
+                key = key.substr( 1, key.size() - 2 );
+            }
+            else if( pair && !kindIs( ts_node_type( kn ), "property_identifier" ) )
+            {
+                key = {};   // computed / numeric / private key
+            }
+            if( key.empty() || std::ranges::find( seen, key ) != seen.end() )
+            {
+                return false;
+            }
+            seen.push_back( key );
+        }
+        return true;
+    }
+    // Mark slot `s` with the object literal anc[k] it is read from (qualifier "@<start byte>"): only for a ProviderRecord language, a value
+    // written bare (`useClass: Impl`, not `Impl ? a : b`) and a literal providerLiteralDirect proves. regindex.h pairs a `provide` with a
+    // value only when both carry the SAME mark.
+    void markProviderLiteral( Slot& s, bool bare, std::size_t k ) const
+    {
+        const RegLang* row = regLang( m_lang );
+        if( bare && row != nullptr && row->form == RegForm::ProviderRecord && k > 0 && kindIs( m_anc[k].kind, "object" ) && providerLiteralDirect( k )
+            && providerLiteralPlain( m_anc[k].node ) )
+        {
+            s.litAt = ts_node_start_byte( m_anc[k].node ) + 1;
+        }
     }
 
     // Classify the value position of identifier anc[i], whose effective position (after pass-through wrappers)
@@ -1794,6 +2468,7 @@ private:
             s.container = id;
             s.key = "." + std::string( text( self.node ) );
             s.scope = id.empty() ? 'x' : 'f';
+            markProviderLiteral( s, i == j, j - 1 );
             return true;
         }
         // keyed elements: the VALUE side only (a key or field NAME is never a value use) …
@@ -1833,6 +2508,7 @@ private:
             s.container = id;
             s.key = key;
             s.scope = id.empty() ? 'x' : 'f';
+            markProviderLiteral( s, i == j, j - 2 );
             return true;
         }
         // JS computed key `{ [f]: 1 }`: the function is coerced to a KEY.
@@ -1939,6 +2615,21 @@ private:
                 {
                     idx = m_anc[k].namedIndex;
                     break;
+                }
+            }
+            if( m_slotByName && kindIs( pt, "assignment_statement" ) )
+            {
+                // IX1-V2: Go `x.F = fn` / `x.a.F = fn` — the slot is the field as written (goValueSlot types it), the container x
+                const TSNode lhsList = child( p.node, m_fLeft );
+                const TSNode lhs     = ts_node_is_null( lhsList ) ? TSNode{} : ts_node_named_child( lhsList, idx );
+                if( !ts_node_is_null( lhs ) && kindIs( ts_node_type( lhs ), "selector_expression" ) )
+                {
+                    const TSNode obj = child( lhs, m_fOperand );
+                    s.into = vrClean( text( lhs ) );
+                    s.key  = "." + std::string( text( child( lhs, m_fField ) ) );
+                    s.container = !ts_node_is_null( obj ) && kindIs( ts_node_type( obj ), "identifier" ) ? std::string( text( obj ) ) : std::string();
+                    s.scope = s.container.empty() ? 'x' : 'f';
+                    return true;
                 }
             }
             const std::string nm( nthName( p.node, kindIs( pt, "var_spec" ), idx ) );
@@ -2260,7 +2951,7 @@ private:
     // of a struct is a slot fact (alias → struct).
     void noteSlotTypes( TSNode n, const char* t )
     {
-        if( m_slot == nullptr )
+        if( m_slot == nullptr || noteMacroCast( n, t ) )
         {
             return;
         }
@@ -2322,6 +3013,21 @@ private:
 
     // A struct / union / class BODY as the walk enters its specifier: its field order (positional initializers), its
     // function-pointer fields (the C++ gate) and one slot fact per field declared with a struct type.
+    // A file-scope or block-scope `using ns::Cls;` / `using namespace ns;` (C++ member-pointer rows only) feeds m_usings. A CLASS MEMBER's
+    // `using B::B;` (inheriting constructors) / `using B::m;` names a member, never a class a bare spelling reaches: its parent is the
+    // class body (field_declaration_list), and noting it would make the later bare `&B::m` decline as an external class (CR 4415276397).
+    void noteUsing( TSNode n, const char* t )
+    {
+        if( m_slot == nullptr || !m_slot->memberPointers || !kindIs( t, "using_declaration" ) )
+        {
+            return;
+        }
+        if( !m_anc.empty() && kindIs( m_anc.back().kind, "field_declaration_list" ) )
+        {
+            return;
+        }
+        m_usings.note( n, m_src );
+    }
     void noteStructBody( TSNode n, const char* t )
     {
         if( m_slot == nullptr || !( kindIs( t, "struct_specifier" ) || kindIs( t, "union_specifier" ) || kindIs( t, "class_specifier" ) ) )
@@ -2341,7 +3047,7 @@ private:
         }
         if( owner.front() != '@' )   // an anonymous struct's "@LINE" key is its own file's already
         {
-            emitSlotFact( n, owner, std::string_view( &kValueRefSlotBodyRel, 1 ), vrBodyDigest( text( body ) ) );
+            emitSlotFact( n, owner, kValueRefSlotBodyRel + vrEnclosingScopePath( m_anc, m_anc.size(), m_src ), vrBodyDigest( text( body ) ) );
         }
         VrStructFields sf;
         sf.key = owner;
@@ -2414,6 +3120,101 @@ private:
 
     // A typedef / using alias of a struct type: a slot fact (valuerefindex.h unaliases a receiver through it) and this file's
     // own alias map (the C++ gate reads the struct an alias names in this file).
+    // FN-SLOT S2 (c): a function-like macro whose whole body is ONE pointer cast to a named type, `#define As_Row( x )
+    // ( ( const RowClass* )( … ) )`, is an alias fact of the key "()As_Row" (kVrSlotMacroCastMark + name) for that type, so a
+    // slot call `As_Row( this )->writeField( … )` (slotThroughAt) keys RowClass wherever the macro is defined. Anything else
+    // in the body (`( ( T* )( x ) )->klass`, two casts, a non-pointer cast) records nothing.
+    // Returns whether `n` is a macro definition (handled here).
+    bool noteMacroCast( TSNode n, const char* t )
+    {
+        if( !kindIs( t, "preproc_function_def" ) )
+        {
+            return false;
+        }
+        emitMacroCast( n );
+        return true;
+    }
+    void emitMacroCast( TSNode n )
+    {
+        const std::string_view name = text( child( n, m_fName ) );
+        std::string_view       v    = text( child( n, m_fValue ) );
+        const auto trim = [ & ]()
+        {
+            while( !v.empty() && ( v.front() == ' ' || v.front() == '\t' || v.front() == '\\' || v.front() == '\n' || v.front() == '\r' ) )
+            {
+                v.remove_prefix( 1 );
+            }
+            while( !v.empty() && ( v.back() == ' ' || v.back() == '\t' || v.back() == '\n' || v.back() == '\r' ) )
+            {
+                v.remove_suffix( 1 );
+            }
+        };
+        trim();
+        if( name.empty() || v.size() < 6 || v.front() != '(' || v.back() != ')' )
+        {
+            return;
+        }
+        int depth = 0;
+        for( std::size_t k = 0; k < v.size(); ++k )
+        {
+            depth += v[k] == '(' ? 1 : v[k] == ')' ? -1 : 0;
+            if( depth == 0 && k + 1 != v.size() )
+            {
+                return;   // the first parenthesis closes before the end: not one parenthesised cast expression
+            }
+        }
+        v = v.substr( 1, v.size() - 2 );
+        trim();
+        if( v.empty() || v.front() != '(' )
+        {
+            return;
+        }
+        const std::size_t close = v.find( ')' );
+        if( close == std::string_view::npos )
+        {
+            return;
+        }
+        std::string_view cast = v.substr( 1, close - 1 );
+        bool             kw   = false;
+        std::string_view type;
+        std::size_t      stars = 0;
+        while( !cast.empty() )
+        {
+            std::size_t w = 0;
+            while( w < cast.size() && ( cast[w] == '_' || ( cast[w] >= 'a' && cast[w] <= 'z' ) || ( cast[w] >= 'A' && cast[w] <= 'Z' ) || ( cast[w] >= '0' && cast[w] <= '9' ) ) )
+            {
+                ++w;
+            }
+            const std::string_view tok = w > 0 ? cast.substr( 0, w ) : cast.substr( 0, 1 );
+            cast.remove_prefix( tok.size() );
+            if( tok == " " || tok == "\t" || tok == "const" || tok == "volatile" )
+            {
+                continue;
+            }
+            if( tok == "struct" || tok == "union" )
+            {
+                kw = true;
+            }
+            else if( tok == "*" )
+            {
+                ++stars;
+            }
+            else if( w > 0 && type.empty() && stars == 0 )
+            {
+                type = tok;
+            }
+            else
+            {
+                return;   // a second type word (`unsigned long`), a template, a reference: not one named pointer type
+            }
+        }
+        if( type.empty() || stars != 1 )
+        {
+            return;
+        }
+        emitSlotFact( n, std::string( kVrSlotMacroCastMark ) + std::string( name ), {}, slotCtor( std::string( type ), kw ) );
+    }
+
     void noteSlotAlias( TSNode at, std::string_view alias, const std::string& ctor )   // ctor: slotCtor( key, kw )
     {
         const std::string_view key = ctor.starts_with( kValueRefSlotTagMark ) ? std::string_view( ctor ).substr( 1 ) : std::string_view( ctor );
@@ -2425,19 +3226,21 @@ private:
         m_aliases.pairs.emplace_back( std::string( alias ), std::string( key ) );
     }
 
+    // One no-row fact record (role Value, name "": no identifier is empty, so no row): the slot facts and the dotted-string facts.
+    void emitValueFact( TSNode at, char scope, std::string recvVar, std::string_view composeRel, std::string_view memberCtor, std::string_view memberPath = {} )
+    {
+        RawRef r     = rawRefAt( at, m_fileId, m_lang, RefRole::Value, {} );
+        r.qualifier  = std::string( 1, scope );
+        r.recvVar    = std::move( recvVar );
+        r.composeRel = std::string( composeRel );
+        r.memberCtor = std::string( memberCtor );
+        r.memberPath = std::string( memberPath );
+        m_out.push_back( std::move( r ) );
+    }
+
     void emitSlotFact( TSNode at, std::string owner, std::string_view field, const std::string& type )
     {
-        RawRef r;
-        r.fileId     = m_fileId;
-        r.startByte  = ts_node_start_byte( at );
-        r.line       = ts_node_start_point( at ).row + 1;
-        r.lang       = m_lang;
-        r.role       = RefRole::Value;
-        r.qualifier  = std::string( 1, kValueRefSlotFactScope );   // name stays "": no identifier is empty, so no row
-        r.recvVar    = std::move( owner );
-        r.composeRel = std::string( field );
-        r.memberCtor = type;
-        m_out.push_back( std::move( r ) );
+        emitValueFact( at, kValueRefSlotFactScope, std::move( owner ), field, type );
     }
 
     // The struct type a name is declared with, innermost scope first: declared = some scope declares it; key "" with
@@ -2523,7 +3326,7 @@ private:
 
     // The field chain of a member access, root first: `wme->mode->command` → root `wme`, chain "mode.command";
     // subscripts and parentheses are crossed (`t[ i ].f` → root `t`, chain "f"). A null root: not an identifier.
-    TSNode fieldChain( TSNode f, std::string& chain ) const
+    TSNode fieldChain( TSNode f, std::string& chain, TSNode* base = nullptr ) const
     {
         chain = std::string( text( child( f, m_fField ) ) );
         TSNode x = child( f, m_fArgument );
@@ -2548,13 +3351,147 @@ private:
                 break;
             }
         }
+        if( base != nullptr )
+        {
+            *base = x;
+        }
         return !ts_node_is_null( x ) && kindIs( ts_node_type( x ), "identifier" ) ? x : TSNode{};
+    }
+
+    // The type of the literal list anc[k] a designated field `path` is written in. FN-SLOT S2 (c): a NESTED designated literal
+    // `.super = { .super = { .display = f } }` with no type of its own is a field of the enclosing literal's field, so the path
+    // climbs (super.super.display) to the first literal with a type; `path` keeps the field alone when none has one.
+    std::pair<std::string, bool> designatedType( std::size_t k, std::string& path ) const
+    {
+        std::string climbed = path;
+        for( int guard = 0; guard < 4; ++guard, k -= 2 )
+        {
+            auto typed = literalType( k );
+            if( !typed.first.empty() )
+            {
+                path = std::move( climbed );
+                return typed;
+            }
+            if( k < 3 || !kindIs( m_anc[k].kind, "initializer_list" ) || !kindIs( m_anc[k - 1].kind, "initializer_pair" ) )
+            {
+                break;
+            }
+            const std::string_view up = vrDesignatedField( m_anc[k - 1].node, m_fDesignator, m_src );
+            if( up.empty() )
+            {
+                break;
+            }
+            climbed = std::string( up ) + "." + climbed;
+        }
+        return {};
+    }
+
+    // FN-SLOT S2 (C++): the member-pointer operand of a `( obj.*x.f )( … )` callee — the grammar reads `obj.*x.f` as the field
+    // chain obj → x → f whose FIRST hop is the `.*` operator, so the operand's root is that hop's field (`x`) and its chain the
+    // hops after it ("f"). A null root: no `.*`, `.*` last (`( obj.*pmf )( … )`, a member pointer in a plain variable: no field
+    // slot), or a non-field hop after it.
+    TSNode memberPointerChain( TSNode f, std::string& chain ) const
+    {
+        if( ts_node_is_null( f ) || !kindIs( ts_node_type( f ), "parenthesized_expression" ) )
+        {
+            return {};
+        }
+        TSNode x = ts_node_named_child( f, 0 );
+        std::string tail;
+        for( int guard = 0; guard < 8 && !ts_node_is_null( x ) && kindIs( ts_node_type( x ), "field_expression" ); ++guard )
+        {
+            const TSNode fld = child( x, m_fField );
+            if( ts_node_is_null( fld ) || !kindIs( ts_node_type( fld ), "field_identifier" ) )
+            {
+                return {};
+            }
+            if( ts_node_child_count( x ) >= 2 && text( ts_node_child( x, 1 ) ) == ".*" )
+            {
+                if( tail.empty() )
+                {
+                    return {};
+                }
+                chain = std::move( tail );
+                return fld;
+            }
+            tail = tail.empty() ? std::string( text( fld ) ) : std::string( text( fld ) ) + "." + tail;
+            x    = child( x, m_fArgument );
+        }
+        return {};
+    }
+
+    // IX1-V2 (Go): the type NAME a composite literal's or receiver's type node spells — `Command`, `batcheval.Command` (its final
+    // segment; goValueSlot keeps a qualified literal type whole), by ingest_relations.h aliasTargetName. "" for every other type (a map, a slice, an inline struct, a generic
+    // instantiation `Box[T]` — a floor): a value stored there lands in a container slot, which the container join answers.
+    std::string_view goTypeName( TSNode ty ) const noexcept
+    {
+        return aliasTargetName( ty, m_src );
+    }
+    // IX1-V2 (Go): the struct-field slot a Value row (effective position anc[j]) lands in — a keyed element of a composite
+    // literal of a NAMED type (`Command{ EvalRW: fn }`: memberPath "EvalRW", memberCtor "Command"), or a field assignment
+    // `x.F = fn` / `x.a.F = fn` (memberPath "F", memberCtor "": the receiver's type is not read here, so it joins by the field
+    // name alone). A map key, a positional element, a nested literal without its own type, a slice or map literal: no slot.
+    void goValueSlot( std::size_t j, RawRef& r ) const
+    {
+        if( j < 4 )
+        {
+            return;
+        }
+        const VrAnc& p = m_anc[j - 1];
+        if( kindIs( p.kind, "keyed_element" ) )
+        {
+            TSNode k = ts_node_named_child( p.node, 0 );
+            if( !ts_node_is_null( k ) && kindIs( ts_node_type( k ), "literal_element" ) )
+            {
+                k = ts_node_named_child( k, 0 );
+            }
+            if( ts_node_is_null( k ) || !( kindIs( ts_node_type( k ), "identifier" ) || kindIs( ts_node_type( k ), "field_identifier" ) ) )
+            {
+                return;   // a map key (a string, a constant expression): a container slot, not a field
+            }
+            if( !kindIs( m_anc[j - 2].kind, "literal_value" ) || !kindIs( m_anc[j - 3].kind, "composite_literal" ) )
+            {
+                return;   // a nested literal whose type is the outer literal's element type: not read (a floor)
+            }
+            const TSNode           tyNode = child( m_anc[j - 3].node, m_fType );
+            const std::string_view ty     = goTypeName( tyNode );
+            if( ty.empty() )
+            {
+                return;   // a map / slice / inline struct literal: the key is not a field of a named struct type
+            }
+            r.memberPath = std::string( text( k ) );
+            // fix1 F-2: `pkg.T` kept WHOLE (the join maps pkg through the file's import to its directory); a bare `T` is the
+            // file's own package's
+            r.memberCtor = kindIs( ts_node_type( tyNode ), "qualified_type" ) ? std::string( text( tyNode ) ) : std::string( ty );
+            return;
+        }
+        if( kindIs( p.kind, "assignment_statement" ) && m_anc[j].field == m_fRight && kindIs( m_anc[j].kind, "expression_list" ) && j + 1 < m_anc.size() )
+        {
+            const TSNode lhsList = child( p.node, m_fLeft );
+            const TSNode lhs     = ts_node_is_null( lhsList ) ? TSNode{} : ts_node_named_child( lhsList, m_anc[j + 1].namedIndex );
+            if( ts_node_is_null( lhs ) || !kindIs( ts_node_type( lhs ), "selector_expression" ) || opText( p.node ) != "=" )
+            {
+                return;   // a plain variable (the container join's), or a compound assignment
+            }
+            const TSNode fld = child( lhs, m_fField );
+            if( ts_node_is_null( fld ) || ts_node_named_child_count( lhsList ) != ts_node_named_child_count( m_anc[j].node ) )
+            {
+                return;   // `a, b.F = f()`: a multi-value call, no position maps one value to one field
+            }
+            r.memberPath = std::string( text( fld ) );
+            r.memberCtor.clear();
+        }
     }
 
     // The slot a Value row (`r`, effective position anc[j]) lands in, when it is a struct field: memberPath = the chain,
     // memberCtor = the declared struct type of the object ("" unknown). Left empty for every other slot.
     void valueSlot( std::size_t j, RawRef& r ) const
     {
+        if( m_slotByName )
+        {
+            goValueSlot( j, r );
+            return;
+        }
         if( m_slot == nullptr || j < 1 )
         {
             return;
@@ -2573,8 +3510,8 @@ private:
             {
                 return;   // a nested `.a.b =` / array `[i] =` designator: not one field of this literal's type
             }
-            const auto [ lt, ltKw ] = literalType( j - 2 );
             r.memberPath = std::string( fld );
+            const auto [ lt, ltKw ] = designatedType( j - 2, r.memberPath );
             r.memberCtor = slotCtor( lt, ltKw );
             return;
         }
@@ -2628,12 +3565,9 @@ private:
             return;
         }
         const TSNode f = vrDerefCallee( child( call, m_fFunction ), m_fArgument );
-        if( ts_node_is_null( f ) || !kindIs( ts_node_type( f ), "field_expression" ) )
-        {
-            return;
-        }
         std::string  chain;
-        const TSNode root = fieldChain( f, chain );
+        bool         viaMemberPointer = false;
+        const TSNode root = slotCallRoot( call, f, chain, viaMemberPointer );
         if( ts_node_is_null( root ) )
         {
             return;
@@ -2645,30 +3579,65 @@ private:
         }
         const std::size_t      dot   = chain.rfind( '.' );
         const std::string_view field = dot == std::string::npos ? std::string_view( chain ) : std::string_view( chain ).substr( dot + 1 );
-        if( !m_slot->everyFieldCall
-            && !( ty.declared
-                  && ( ty.structKw
-                       || ( dot == std::string::npos
-                            && std::ranges::find( m_callableFields, std::pair<std::string_view, std::string_view>( m_aliases.resolve( ty.key ), field ),
-                                                  []( const auto& cf ) { return std::pair<std::string_view, std::string_view>( cf.first, cf.second ); } )
-                                   != m_callableFields.end() ) ) ) )
+        if( !m_slot->everyFieldCall && !viaMemberPointer && !cppFieldCall( ty, dot == std::string::npos, field ) )
         {
             return;   // C++: a struct-keyword receiver, or a direct call through a function-pointer field its type (through this
                       // file's typedef / using aliases) declares in this file
         }
-        RawRef r;
-        r.fileId     = m_fileId;
-        r.startByte  = ts_node_start_byte( call );
-        r.line       = ts_node_start_point( call ).row + 1;
-        r.lang       = m_lang;
-        r.role       = RefRole::Through;
+        emitSlotCall( call, f, root, chain, std::string( ty.key ), ty.structKw );
+    }
+    // The C++ gate on a field call: a struct-keyword receiver, or a direct call through a function-pointer field its type
+    // (through this file's typedef / using aliases) declares in this file.
+    bool cppFieldCall( const VrTypeOf& ty, bool direct, std::string_view field ) const
+    {
+        return ty.declared
+            && ( ty.structKw
+                 || ( direct
+                      && std::ranges::find( m_callableFields, std::pair<std::string_view, std::string_view>( m_aliases.resolve( ty.key ), field ),
+                                            []( const auto& cf ) { return std::pair<std::string_view, std::string_view>( cf.first, cf.second ); } )
+                             != m_callableFields.end() ) );
+    }
+    // The root of slot call `call`'s callee `f` and its field chain: `x->a.f`, or (C++) the member-pointer operand of
+    // `( o.*x.f )`; null when there is none. FN-SLOT S2 (c): a C call receiver `M( … )->f( … )` is emitted here (keyed "()M":
+    // the macro's cast type when noteMacroCast recorded one, else the name tier) and answers null.
+    TSNode slotCallRoot( TSNode call, TSNode f, std::string& chain, bool& viaMemberPointer )
+    {
+        if( !ts_node_is_null( f ) && kindIs( ts_node_type( f ), "field_expression" ) )
+        {
+            TSNode       base;
+            const TSNode root = fieldChain( f, chain, &base );
+            if( ts_node_is_null( root ) && m_slot->everyFieldCall && macroCastCall( base ) )
+            {
+                emitSlotCall( call, f, child( base, m_fFunction ), chain, std::string( kVrSlotMacroCastMark ) + std::string( text( child( base, m_fFunction ) ) ), false );
+            }
+            return root;
+        }
+        if( !m_slot->memberPointers )
+        {
+            return {};
+        }
+        const TSNode root = memberPointerChain( f, chain );
+        viaMemberPointer  = !ts_node_is_null( root );
+        return root;
+    }
+    // A slot call Through (model.h kValueRefSlotCallScope): root `root`, field chain `chain`, the root's type key `key`.
+    void emitSlotCall( TSNode call, TSNode f, TSNode root, std::string& chain, std::string key, bool kw )
+    {
+        const std::size_t dot = chain.rfind( '.' );
+        RawRef r     = rawRefAt( call, m_fileId, m_lang, RefRole::Through, std::string( text( root ) ) );
         r.qualifier  = std::string( 1, kValueRefSlotCallScope );
-        r.name       = std::string( text( root ) );
         r.fieldName  = vrClean( text( f ) );
-        r.composeRel = "." + std::string( field );
-        r.memberCtor = slotCtor( std::string( ty.key ), ty.structKw );
+        r.composeRel = "." + ( dot == std::string::npos ? chain : chain.substr( dot + 1 ) );
+        r.memberCtor = slotCtor( std::move( key ), kw );
         r.memberPath = std::move( chain );
         m_out.push_back( std::move( r ) );
+    }
+    // FN-SLOT S2 (c): a call of a bare identifier (a function-like macro, or a function returning a struct pointer) as a field
+    // chain's base — the join keys its noteMacroCast fact, and a name with none joins by the field name only.
+    bool macroCastCall( TSNode base ) const noexcept
+    {
+        return !ts_node_is_null( base ) && kindIs( ts_node_type( base ), "call_expression" ) && !ts_node_is_null( child( base, m_fFunction ) )
+            && kindIs( ts_node_type( child( base, m_fFunction ) ), "identifier" );
     }
 
     // ── name-template dispatch (IX-3) ─────────────────────────────────────────────────────────────────
@@ -2681,7 +3650,458 @@ private:
         bool        isTemplate = false;
         std::string prefix;
         std::string suffix;
+        bool        callable = true;   // false: the name is tested or stored, never called through (hasattr, `o[ 'p' + e ] = fn`)
     };
+    // ── STRING-IMPORT: dotted-string facts (model.h kValueRefDottedStringScope; fordottedstring.h reads them) ──────────
+    // The string's content when the node is ONE plain literal: no interpolation, not bytes. "" otherwise.
+    std::string_view plainStringContent( TSNode n ) const noexcept
+    {
+        if( !isPlainStringNode( n ) || ts_node_named_child_count( n ) != 3 || !kindIs( ts_node_type( ts_node_named_child( n, 1 ) ), "string_content" ) )
+        {
+            return {};
+        }
+        const std::string_view open = text( ts_node_named_child( n, 0 ) );
+        for( const char c : open )
+        {
+            if( c != '"' && c != '\'' && c != 'r' && c != 'R' && c != 'u' && c != 'U' )
+            {
+                return {};   // b'' bytes, f'' with no hole
+            }
+        }
+        return text( ts_node_named_child( n, 1 ) );
+    }
+    // `ident(.ident)+`, ASCII; with `allowHole` a segment may be exactly %s. Over the cap: no module path.
+    static bool isDottedPathText( std::string_view s, bool allowHole ) noexcept
+    {
+        if( s.size() > kVrDottedStringMaxBytes || s.find( '.' ) == std::string_view::npos )
+        {
+            return false;
+        }
+        bool sawHole = false;
+        for( std::size_t at = 0; at <= s.size(); )
+        {
+            const std::size_t      dot = std::min( s.find( '.', at ), s.size() );
+            const std::string_view seg = s.substr( at, dot - at );
+            if( allowHole && seg == "%s" )
+            {
+                sawHole = true;
+            }
+            else
+            {
+                const auto idByte = []( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '_'; };
+                if( seg.empty() || ( seg[0] >= '0' && seg[0] <= '9' ) || !std::ranges::all_of( seg, idByte ) )
+                {
+                    return false;
+                }
+            }
+            at = dot + 1;
+        }
+        return !allowHole || sawHole;
+    }
+    // The call's callee tail name: `f` of `f(...)` and of `a.b.f(...)`; "" for any other callee shape.
+    std::string_view calleeTailOf( TSNode call ) const noexcept
+    {
+        TSNode fn = ts_node_child_by_field_id( call, m_fFunction );
+        if( !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "attribute" ) )
+        {
+            fn = ts_node_child_by_field_id( fn, m_fAttribute );
+        }
+        return !ts_node_is_null( fn ) && kindIs( ts_node_type( fn ), "identifier" ) ? text( fn ) : std::string_view();
+    }
+    // The call's import-sink tail name ("" when its callee is not one). A tail name only: the callee is not resolved.
+    std::string_view importSinkOf( TSNode call ) const noexcept
+    {
+        const std::string_view tail = calleeTailOf( call );
+        if( std::ranges::find( m_importSinks, tail ) == m_importSinks.end() )
+        {
+            return {};
+        }
+        return tail;
+    }
+    void noteDottedFact( TSNode at, std::string_view value, std::string_view shape, std::string_view sink, std::string_view assignedTo )
+    {
+        emitValueFact( at, kValueRefDottedStringScope, std::string( value ), shape, assignedTo, sink );
+    }
+    // ── the flow of a sink's argument (kDottedFlowAttr / kDottedFlowBound tokens, model.h) ────────────────────────────────────────
+    // The names an expression mentions: a bare identifier, an attribute's tail as `.tail` (its object is walked too).
+    void flowNamesOf( TSNode root, std::vector<std::string>& out ) const
+    {
+        std::vector<TSNode> stack{ root };
+        while( !stack.empty() )
+        {
+            const TSNode c = stack.back();
+            stack.pop_back();
+            const char* t = ts_node_type( c );
+            if( kindIs( t, "identifier" ) )
+            {
+                out.emplace_back( text( c ) );
+            }
+            else if( kindIs( t, "attribute" ) )
+            {
+                const TSNode attr = ts_node_child_by_field_name( c, "attribute", 9 );
+                const TSNode obj  = ts_node_child_by_field_name( c, "object", 6 );
+                if( !ts_node_is_null( attr ) )
+                {
+                    out.push_back( std::string( 1, kDottedFlowAttr ) + std::string( text( attr ) ) );
+                }
+                if( !ts_node_is_null( obj ) )
+                {
+                    stack.push_back( obj );
+                }
+            }
+            else if( kindIs( t, "keyword_argument" ) )
+            {
+                const TSNode v = ts_node_child_by_field_name( c, "value", 5 );
+                if( !ts_node_is_null( v ) )
+                {
+                    stack.push_back( v );
+                }
+            }
+            else
+            {
+                const bool ternary = kindIs( t, "conditional_expression" );   // `a if COND else b`: COND decides, it does not flow (named children: a, COND, b)
+                for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
+                {
+                    if( !ternary || k != 1 )
+                    {
+                        stack.push_back( ts_node_named_child( c, k ) );
+                    }
+                }
+            }
+        }
+    }
+    // The names an assignment-like left side binds: `x`, `self.x` (as `.x`), the elements of a tuple/list pattern, a subscript's object.
+    void flowTargetsOf( TSNode left, std::vector<std::string>& out, bool& bareBinds ) const
+    {
+        const char* t = ts_node_type( left );
+        if( kindIs( t, "identifier" ) )
+        {
+            out.emplace_back( text( left ) );
+            bareBinds = true;
+        }
+        else if( kindIs( t, "attribute" ) )
+        {
+            const TSNode attr = ts_node_child_by_field_name( left, "attribute", 9 );
+            out.push_back( std::string( 1, kDottedFlowAttr ) + std::string( ts_node_is_null( attr ) ? std::string_view() : text( attr ) ) );
+        }
+        else if( kindIs( t, "subscript" ) )
+        {
+            const TSNode v = ts_node_child_by_field_name( left, "value", 5 );
+            bool         ignored = false;
+            if( !ts_node_is_null( v ) )
+            {
+                flowTargetsOf( v, out, ignored );
+            }
+        }
+        else if( kindIs( t, "pattern_list" ) || kindIs( t, "tuple_pattern" ) || kindIs( t, "list_pattern" ) || kindIs( t, "list_splat_pattern" ) )
+        {
+            for( std::uint32_t k = 0; k < ts_node_named_child_count( left ); ++k )
+            {
+                flowTargetsOf( ts_node_named_child( left, k ), out, bareBinds );
+            }
+        }
+    }
+    // The space-separated flow tokens of the sink call `call` inside function `fn`: every name whose value can reach the call's first
+    // argument through that function's own assignments. A bare name some statement of the function binds is `=name`.
+    std::string flowTokensOf( TSNode fn, TSNode first ) const
+    {
+        std::vector<std::pair<std::string, std::vector<std::string>>> edges;   // target <- names
+        std::set<std::string>                                          bound;
+        std::set<std::string>                                          globalNames;
+        const auto                                                     bindParam = [ & ]( TSNode p )
+        {
+            const char* t = ts_node_type( p );
+            if( kindIs( t, "identifier" ) )
+            {
+                bound.emplace( text( p ) );
+            }
+            else if( kindIs( t, "default_parameter" ) || kindIs( t, "typed_default_parameter" ) )
+            {
+                const TSNode nm = ts_node_child_by_field_name( p, "name", 4 );
+                if( !ts_node_is_null( nm ) && kindIs( ts_node_type( nm ), "identifier" ) )
+                {
+                    bound.emplace( text( nm ) );
+                }
+            }
+            else if( ts_node_named_child_count( p ) > 0 )
+            {
+                const TSNode in = ts_node_named_child( p, 0 );
+                if( kindIs( ts_node_type( in ), "identifier" ) )
+                {
+                    bound.emplace( text( in ) );
+                }
+            }
+        };
+        std::vector<TSNode> stack{ fn };
+        while( !stack.empty() )
+        {
+            const TSNode c = stack.back();
+            stack.pop_back();
+            const char* t = ts_node_type( c );
+            if( kindIs( t, "function_definition" ) || kindIs( t, "class_definition" ) )
+            {
+                const TSNode nm = ts_node_child_by_field_name( c, "name", 4 );
+                if( c.id != fn.id )
+                {
+                    if( !ts_node_is_null( nm ) )
+                    {
+                        bound.emplace( text( nm ) );
+                    }
+                    continue;   // a nested scope binds its own names
+                }
+                const TSNode params = ts_node_child_by_field_name( c, "parameters", 10 );
+                for( std::uint32_t k = 0; !ts_node_is_null( params ) && k < ts_node_named_child_count( params ); ++k )
+                {
+                    bindParam( ts_node_named_child( params, k ) );
+                }
+            }
+            else if( kindIs( t, "global_statement" ) || kindIs( t, "nonlocal_statement" ) )
+            {
+                for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
+                {
+                    globalNames.emplace( text( ts_node_named_child( c, k ) ) );
+                }
+            }
+            else if( kindIs( t, "as_pattern" ) )
+            {
+                // `with open(x) as NAME`, `except E as NAME`, `case ... as NAME`: the alias binds its identifiers
+                const TSNode alias = ts_node_child_by_field_name( c, "alias", 5 );
+                std::vector<TSNode> inner{ alias };
+                while( !ts_node_is_null( alias ) && !inner.empty() )
+                {
+                    const TSNode n = inner.back();
+                    inner.pop_back();
+                    if( kindIs( ts_node_type( n ), "identifier" ) )
+                    {
+                        bound.emplace( text( n ) );
+                    }
+                    for( std::uint32_t k = 0; k < ts_node_named_child_count( n ); ++k )
+                    {
+                        inner.push_back( ts_node_named_child( n, k ) );
+                    }
+                }
+            }
+            else if( kindIs( t, "lambda" ) )
+            {
+                const TSNode params = ts_node_child_by_field_name( c, "parameters", 10 );   // a lambda's parameters shadow for the whole function (over-binding only removes a join)
+                for( std::uint32_t k = 0; !ts_node_is_null( params ) && k < ts_node_named_child_count( params ); ++k )
+                {
+                    bindParam( ts_node_named_child( params, k ) );
+                }
+            }
+            else
+            {
+                const bool isAssign = kindIs( t, "assignment" ) || kindIs( t, "augmented_assignment" );
+                const bool isFor    = kindIs( t, "for_statement" ) || kindIs( t, "for_in_clause" );
+                const bool isWalrus = kindIs( t, "named_expression" );
+                if( isAssign || isFor || isWalrus )
+                {
+                    const TSNode l = ts_node_child_by_field_name( c, isWalrus ? "name" : "left", 4 );
+                    const TSNode r = ts_node_child_by_field_name( c, isWalrus ? "value" : "right", 5 );
+                    if( !ts_node_is_null( l ) && !ts_node_is_null( r ) )
+                    {
+                        std::pair<std::string, std::vector<std::string>> e;
+                        std::vector<std::string>                         targets;
+                        bool                                             bareBinds = false;
+                        flowTargetsOf( l, targets, bareBinds );
+                        flowNamesOf( r, e.second );
+                        for( const std::string& tg : targets )
+                        {
+                            if( tg[0] != kDottedFlowAttr )
+                            {
+                                bound.insert( tg );
+                            }
+                            edges.emplace_back( tg, e.second );
+                        }
+                    }
+                }
+            }
+            for( std::uint32_t k = 0; k < ts_node_named_child_count( c ); ++k )
+            {
+                stack.push_back( ts_node_named_child( c, k ) );
+            }
+        }
+        for( const std::string& g : globalNames )
+        {
+            bound.erase( g );
+        }
+        std::vector<std::string> start;
+        flowNamesOf( first, start );
+        std::set<std::string> reach( start.begin(), start.end() );
+        for( bool grew = true; grew; )
+        {
+            grew = false;
+            for( const auto& [ target, from ] : edges )
+            {
+                if( reach.contains( target ) )
+                {
+                    for( const std::string& f : from )
+                    {
+                        grew = reach.insert( f ).second || grew;
+                    }
+                }
+            }
+        }
+        std::string out;
+        for( const std::string& name : reach )
+        {
+            const bool isBound = name[0] != kDottedFlowAttr && bound.contains( name );
+            out += ( out.empty() ? "" : " " );
+            if( isBound )
+            {
+                out += kDottedFlowBound;
+            }
+            out += name;
+        }
+        return out.size() > kVrDottedFlowMaxBytes ? std::string() : out;
+    }
+    // A call of an import sink whose first argument is no literal or template: the loader half of a dotted string's story.
+    void importSinkAt( TSNode call )
+    {
+        if( m_importSinks.empty() )
+        {
+            return;
+        }
+        const std::string_view sink = importSinkOf( call );
+        if( sink.empty() )
+        {
+            return;
+        }
+        const TSNode args  = ts_node_child_by_field_id( call, m_fArguments );
+        const TSNode first = ts_node_is_null( args ) || ts_node_named_child_count( args ) == 0 ? TSNode{} : ts_node_named_child( args, 0 );
+        if( !isPlainStringNode( first ) )   // a %-template is a computed value too (dottedStringAt records the template beside this)
+        {
+            std::string flow;
+            for( std::size_t j = m_anc.size(); j > 0 && !ts_node_is_null( first ); --j )
+            {
+                if( kindIs( m_anc[j - 1].kind, "function_definition" ) )
+                {
+                    flow = flowTokensOf( m_anc[j - 1].node, first );
+                    break;
+                }
+            }
+            emitValueFact( call, kValueRefDottedStringScope, std::move( flow ), kDottedShapeVariable, {}, sink );
+        }
+    }
+    // The assignment target's last name: `NAME`, `self.NAME`, `a.b.NAME`; "" for anything else (a tuple target, a subscript).
+    std::string_view assignedNameOf( TSNode assignment ) const noexcept
+    {
+        TSNode left = ts_node_child_by_field_id( assignment, m_fLeft );
+        if( !ts_node_is_null( left ) && kindIs( ts_node_type( left ), "attribute" ) )
+        {
+            left = ts_node_child_by_field_id( left, m_fAttribute );
+        }
+        return !ts_node_is_null( left ) && kindIs( ts_node_type( left ), "identifier" ) ? text( left ) : std::string_view();
+    }
+    // Is an ancestor of m_anc[i] a function body? (a lambda counts: a local there is no module constant)
+    bool insideFunctionBody( std::size_t i ) const noexcept
+    {
+        for( std::size_t j = i; j > 0; --j )
+        {
+            if( kindIs( m_anc[j - 1].kind, "function_definition" ) || kindIs( m_anc[j - 1].kind, "lambda" ) )
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    // The climb of dottedStringAt ended at m_anc[j - 1] (`top`) above a container: is that a comparison, an assert, a raise, or the
+    // argument of a print/log-like call (kDottedNonLoadCallees)?
+    bool containerIsNotLoaded( std::size_t j, const char* top ) const noexcept
+    {
+        if( kindIs( top, "comparison_operator" ) || kindIs( top, "assert_statement" ) || kindIs( top, "raise_statement" ) || kindIs( top, "not_operator" ) )
+        {
+            return true;
+        }
+        std::size_t k = j - 1;
+        if( kindIs( top, "keyword_argument" ) && j >= 2 )
+        {
+            k = j - 2;
+        }
+        if( !kindIs( m_anc[k].kind, "argument_list" ) || k < 1 || !isCallKind( m_anc[k - 1].kind ) )
+        {
+            return false;
+        }
+        const bool raised = k >= 2 && kindIs( m_anc[k - 2].kind, "raise_statement" );
+        return raised || std::ranges::find( kDottedNonLoadCallees, calleeTailOf( m_anc[k - 1].node ) ) != std::end( kDottedNonLoadCallees );
+    }
+    // m_anc[i] is a `string` node. The PARSE decides the shape: a docstring (an expression statement), a comparison operand, a log
+    // call's argument and a dict KEY record nothing; the text is never scanned.
+    void dottedStringAt( std::size_t i )
+    {
+        const TSNode           n       = m_anc[i].node;
+        const std::string_view content = plainStringContent( n );
+        if( content.empty() )
+        {
+            return;
+        }
+        if( i >= 3 && kindIs( m_anc[i - 1].kind, "binary_operator" ) && kindIs( m_anc[i - 2].kind, "argument_list" ) && m_anc[i].namedIndex == 0
+            && text( ts_node_child_by_field_id( m_anc[i - 1].node, m_fOperator ) ) == "%" && isDottedPathText( content, /*allowHole=*/true ) )
+        {
+            const std::string_view sink = importSinkOf( m_anc[i - 3].node );
+            if( !sink.empty() && m_anc[i - 2].childNamed == 1 )
+            {
+                noteDottedFact( n, content, kDottedShapeFormat, sink, {} );
+            }
+            return;
+        }
+        if( !isDottedPathText( content, /*allowHole=*/false ) )
+        {
+            return;
+        }
+        bool        inContainer = false;
+        std::size_t j           = i;
+        while( j > 0 )
+        {
+            const char* up = m_anc[j - 1].kind;
+            if( kindIs( up, "list" ) || kindIs( up, "tuple" ) || kindIs( up, "set" ) || kindIs( up, "expression_list" ) )
+            {
+                inContainer = true;
+            }
+            else if( kindIs( up, "pair" ) )
+            {
+                if( m_anc[j].field != m_fValue )
+                {
+                    return;   // a dict KEY names a slot, not a value (LOGGING's "django.request": { … })
+                }
+                inContainer = true;
+            }
+            else if( !kindIs( up, "parenthesized_expression" ) && !kindIs( up, "dictionary" ) )
+            {
+                break;
+            }
+            --j;
+        }
+        if( j == 0 )
+        {
+            return;
+        }
+        const char*            top      = m_anc[j - 1].kind;
+        const bool             isAssign = ( kindIs( top, "assignment" ) || kindIs( top, "augmented_assignment" ) ) && m_anc[j].field == m_fRight;
+        const std::string_view name     = isAssign ? assignedNameOf( m_anc[j - 1].node ) : std::string_view();
+        if( inContainer )
+        {
+            if( containerIsNotLoaded( j, top ) )
+            {
+                return;   // compared, asserted, raised or logged: a string in it is data to look at, never a path to load
+            }
+            const bool localName = isAssign && kindIs( top, "assignment" ) && insideFunctionBody( j ) && kindIs( ts_node_type( ts_node_child_by_field_id( m_anc[j - 1].node, m_fLeft ) ), "identifier" );
+            noteDottedFact( n, content, localName ? kDottedShapeLocalListed : kDottedShapeListed, {}, name );
+        }
+        else if( isAssign && kindIs( top, "assignment" ) && !insideFunctionBody( j ) )
+        {
+            noteDottedFact( n, content, kDottedShapeConstant, {}, name );
+        }
+        else if( kindIs( top, "argument_list" ) && j >= 2 && j == i && m_anc[j - 1].childNamed == 1 )
+        {
+            const std::string_view sink = importSinkOf( m_anc[j - 2].node );
+            if( !sink.empty() )
+            {
+                noteDottedFact( n, content, kDottedShapeSink, sink, {} );
+            }
+        }
+    }
+
     bool isPlainStringNode( TSNode n ) const noexcept
     {
         if( ts_node_is_null( n ) || !kindIs( ts_node_type( n ), "string" ) )
@@ -2794,7 +4214,9 @@ private:
         r.line       = ts_node_start_point( site ).row + 1;
         r.lang       = m_lang;
         r.role       = RefRole::Pattern;
-        r.qualifier  = pre || suf ? "" : "w";   // too wide: counted, never matched
+        // "" = a lookup the name-key hop may follow; "t" = a presence test or a store (no call is made through it: still a <pd> clue,
+        // never a name-key hop); "w" = too wide: counted, never matched
+        r.qualifier  = !( pre || suf ) ? "w" : t.callable ? "" : "t";
         // an unusable side is no constraint: a template `x_{a}.{b}` keeps only its usable prefix; a too-wide one keeps
         // both sides as written (valuerefindex.h counts the members they could name, pattern_too_wide=)
         r.fieldName  = pre || !suf ? t.prefix : std::string();
@@ -2857,7 +4279,9 @@ private:
             {
                 recv = pos[0];
             }
-            emitPattern( call, recv, templateOf( pos[ form.nameArg ] ) );
+            VrTemplate t = templateOf( pos[ form.nameArg ] );
+            t.callable   = !form.testOnly;
+            emitPattern( call, recv, t );
             return;
         }
     }
@@ -2867,7 +4291,16 @@ private:
         {
             return;
         }
-        emitPattern( sub, child( sub, m_fObject ), templateOf( child( sub, m_fIndex ) ) );
+        // `o[ 'on' + e ] = fn` stores a function under the name (an assignment target, `++`, `delete`): no lookup, so no call
+        const TSNode parent = ts_node_parent( sub );
+        const char*  pk     = ts_node_is_null( parent ) ? "" : ts_node_type( parent );
+        const bool   store  = ( ( kindIs( pk, "assignment_expression" ) || kindIs( pk, "augmented_assignment_expression" ) )
+                                && ts_node_eq( child( parent, m_fLeft ), sub ) )
+                           || kindIs( pk, "update_expression" )
+                           || ( kindIs( pk, "unary_expression" ) && text( child( parent, m_fOperator ) ) == "delete" );
+        VrTemplate t = templateOf( child( sub, m_fIndex ) );
+        t.callable   = !store;
+        emitPattern( sub, child( sub, m_fObject ), t );
     }
 
     // Record one call through the container `obj` (written callee `f`), routed by where `obj` is declared.
@@ -2920,9 +4353,12 @@ private:
     VrFam                          m_fam;
     Lang                           m_lang;
     const VrSlotLang*              m_slot = nullptr;    // IX-1: this language's slot row (nullptr: no slot capture)
+    std::span<const std::string_view> m_regStores;   // REGISTRAR: the language row's container stores (empty: no registrar facts)
+    bool                           m_slotByName = false;   // IX1-V2: a MemberCallByName row (Go): the store side only (goValueSlot)
     std::vector<VrStructFields>    m_structs;           // IX-1: this file's struct bodies so far
     std::vector<std::pair<std::string, std::string_view>> m_callableFields;   // IX-1: (struct, function-pointer field) this file declares
     VrAliases                                             m_aliases;          // IX-1: this file's typedef / using alias → struct type key
+    VrUsings                                              m_usings;           // FN-SLOT S2 fix 1: this file's `using` declarations and directives so far (C++)
     VrScalarTypedefs                                      m_scalarTypedefs;   // IX-1: this file's typedefs of scalar types
     std::uint32_t                  m_fileId;
     std::string_view               m_src;
@@ -2935,25 +4371,35 @@ private:
     // call forwarders (model.h kCallForwarders): the sites `f.call( … )` / `f.apply( … )` whose f no enclosing parameter or
     // local declares, and the file's two proofs that a bare f names a function — its function declarations (any depth:
     // a declaration is hoisted and the walk's scopes do not record it) and its file-scope relative imports.
+    std::span<const std::string_view> m_importSinks;   // STRING-IMPORT: this language's import sinks (model.h kDottedImportSinks; empty: no facts)
     std::span<const CallForwarder> m_fwd;
     bool                           m_fwdArmed = false;
     std::vector<RawRef>            m_fwdSites;
     std::vector<std::string_view>  m_fnDeclNames;
     std::vector<std::string_view>  m_relImportNames;
-    TSFieldId m_fArguments = 0, m_fSource = 0;
+    TSFieldId m_fArguments = 0, m_fSource = 0, m_fReceiver = 0;
+    TSFieldId m_fScope = 0;   // FN-SLOT S2: a C++ qualified_identifier's scope
     TSFieldId m_fValue = 0, m_fKey = 0, m_fLeft = 0, m_fRight = 0, m_fFunction = 0, m_fName = 0, m_fDeclarator = 0;
     TSFieldId m_fConsequence = 0, m_fAlternative = 0, m_fParameters = 0, m_fParameter = 0, m_fObject = 0, m_fProperty = 0, m_fField = 0;
     TSFieldId m_fArgument = 0, m_fOperand = 0, m_fAttribute = 0, m_fOperator = 0, m_fPattern = 0, m_fDefinition = 0;
     TSFieldId m_fConstructor = 0, m_fType = 0, m_fIndex = 0, m_fSubscript = 0, m_fDesignator = 0, m_fAlias = 0;
 };
 
+// Rust's slot records (ingest_rustslots.h, defined after this section).
+inline void captureRustSlotRefs( Lang lang, std::uint32_t fileId, std::string_view src, TSNode root, std::vector<RawRef>& refs );
+
 // The pass's entry point: one file's value references and calls-through-a-value, appended to `refs`. Inert on a
-// language outside the armed set (C, C++, JavaScript/JSX, TypeScript/TSX, Python, Go).
+// language outside the armed set (C, C++, JavaScript/JSX, TypeScript/TSX, Python, Go; Rust records its slot join's only).
 inline void captureValueRefs( Lang lang, std::uint32_t fileId, std::string_view src, TSNode root, std::vector<RawRef>& refs )
 {
     const VrFam fam = valueRefFamily( lang );
     if( fam == VrFam::None || ts_node_is_null( root ) )
     {
+        return;
+    }
+    if( fam == VrFam::Rust )
+    {
+        captureRustSlotRefs( lang, fileId, src, root, refs );   // the slot join's records only (ingest_rustslots.h)
         return;
     }
     PROFILE_SCOPE_DESCRIBE( "ingest/extractFile: value references" );

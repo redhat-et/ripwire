@@ -1,0 +1,7 @@
+{
+  "name": "root",
+  "exports": {
+    "./cors": "./dist/middleware/cors/index.js",
+    "./log": "./dist/middleware/log/index.js"
+  }
+}

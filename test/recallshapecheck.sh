@@ -59,7 +59,8 @@
 # NAMED FLOORS (each asserted as a floor arm, never as a pass of the contract):
 #   F1 a call through a TYPED pointer or receiver field (`p->open(x)`, p a `struct ops *` parameter): through= matches a
 #      container by NAME, and p names none. --callees=use_ptr stays silent.
-#   F2 a member or qualified value (`run(obj.lone)`, `self.f`, `ns::qf`, `&Cls::sm`, `this.handler`) is no row.
+#   F2 a member or qualified value (`run(obj.lone)`, `self.f`, `ns::qf`, `this.handler`) is no row; C++ `&Cls::sm` is a row since
+#      FN-SLOT S2 (model.h kVrSlotLangs memberPointers), F2b.
 #   F3 a value spelled by an import ALIAS (`import { aliasFn as af }`, `from m import alias_fn as af`) or bound by a
 #      destructured require (`const { reqFn } = require(…)`) is a local binding: no row under the original name.
 #   F4 a function as the OBJECT of a member access (`lone2.name`, `f.__name__`) is no row. JS/TS call forwarders are the
@@ -682,18 +683,18 @@ def app_route(fn):
 
 
 @app_route
-def handler(static=3):  # decorated AND a decorator value use: counted in decorated-excluded= only
+def handler(static=3):  # D1 fix round: a Python `static=` parameter is no linkage evidence, so no Python def is a --dead-code candidate
     return static
 
 
-def tabled(static=4):  # a value use only: value-ref-excluded=
+def tabled(static=4):  # (same: never a candidate, never counted)
     return static
 
 
 TABLE = [tabled]
 
 
-def orphan(static=5):  # neither: still listed
+def orphan(static=5):  # (same: no longer listed — static is the storage class only in C/C++/ObjC)
     return static
 EOF
 cat >"$FX/dead/r.cpp" <<'EOF'
@@ -799,7 +800,7 @@ cat >"$TMP/chk.py" <<'EOF'
 import os, re, sys
 import xml.etree.ElementTree as ET
 VR_ATTRS = { "in_id", "bind", "into", "called_by", "to", "def", "through", "sites",
-             "called_at", "via", "called_more", "slot_name_also" }   # IX-1 slot join (test/slotjoincheck.sh): none is n=/p=/t=
+             "called_at", "via", "called_more", "slot_name_also", "cands" }   # IX-1 slot join (test/slotjoincheck.sh) + IX1-V2 cands= (test/fnslotcheck.sh): none is n=/p=/t=
 fxdir, outfile, toks = sys.argv[1], sys.argv[2], sys.argv[3:]
 text = open( outfile, encoding="utf-8", errors="replace" ).read()
 marks = {}
@@ -1021,10 +1022,10 @@ arm "CX6 safe-delete a.c:handler_a: still a dead-code candidate with risk=none-f
 
 # ── --dead-code: one entity, one reason (review fix 9) ─────────────────────────────────────────────────
 echo "-- dead-code precedence"
-arm "DC1a dead-code (negative): orphan and truly_dead_cpp stay listed; the decorated handler stays in decorated-excluded=1; the TEST_CASE in register-macro-excluded=1" \
-    dead --dead-code 'd:n=orphan' 'd:n=truly_dead_cpp' 'nod:n=handler' attr:decorated-excluded=1 attr:register-macro-excluded=1
-arm "DC1b dead-code: tabled, BM_x (BENCHMARK arg), reg_only counted ONCE in value-ref-excluded=3 — the decorated handler is not counted again" \
-    dead --dead-code attr:count=2 nd:2 'nod:n=tabled' 'nod:n=BM_x' 'nod:n=reg_only' attr:value-ref-excluded=3 attr:decorated-excluded=1
+arm "DC1a dead-code (negative): truly_dead_cpp stays listed; the Python orphan/handler (a static= parameter, no linkage) are no rows and no decorated-excluded=; the TEST_CASE in register-macro-excluded=1" \
+    dead --dead-code 'd:n=truly_dead_cpp' 'nod:n=orphan' 'nod:n=handler' noattr:decorated-excluded attr:register-macro-excluded=1
+arm "DC1b dead-code: BM_x (BENCHMARK arg) and reg_only counted ONCE in value-ref-excluded=2 — the Python tabled/handler are not candidates, so not counted at all" \
+    dead --dead-code attr:count=1 nd:1 'nod:n=tabled' 'nod:n=BM_x' 'nod:n=reg_only' attr:value-ref-excluded=2 noattr:decorated-excluded
 
 # ── JS: object-literal tables (pair, shorthand, array), computed and dotted dispatch, callbacks, CJS exports ──
 echo "-- JavaScript"
@@ -1200,7 +1201,7 @@ arm "X2 callers myOpen: a designated initialiser" \
 arm "X3 negatives: lone (a string, a comment, decltype, an init-capture, a captured parameter, a range-for variable) has its one call and no value row" \
     cpp --callers=lone attr:count=1 ns:1 noattr:value_refs nvr:0
 arm "F2 floor: ns::qf passed as a qualified value — no row" cpp --callers=qf attr:defs=1 noattr:value_refs nvr:0
-arm "F2 floor: &Cls::sm passed as a qualified value — no row" cpp --callers=sm attr:defs=1 noattr:value_refs nvr:0
+arm "F2b &Cls::sm (a pointer to a member of Cls) is a value row since FN-SLOT S2" cpp --callers=sm attr:defs=1 attr:value_refs=1
 
 # ── Class members and bare names (final review R1) ───────────────────────────────────────────────────────
 echo "-- members are not bare names"

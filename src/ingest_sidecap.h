@@ -1846,7 +1846,8 @@ enum class TagsCapture : std::uint8_t { Full, DefinitionsOnly };
 /// file's tags pass runs later, at the prewarm flush).
 void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t fileId, std::string_view src, TSNode root,
                        std::vector<RawDef>& defs, std::vector<RawRef>& refs, std::vector<RawBind>& binds, std::vector<Include>& includes,
-                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full )
+                       const std::vector<PreprocDeadRange>& ppDead, ExtractShortfall& shortfall, TagsCapture mode = TagsCapture::Full,
+                       std::string_view fileStem = {} )   // the file's stem: the name of a bare `module.exports = <anonymous fn>` (JS)
 {
     const bool full = mode == TagsCapture::Full;
     if( cursor == nullptr )
@@ -1902,7 +1903,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             uint32_t         nameRow  = 0;   // 0-based row of the @name identifier
             bool             haveName = false;
             TSNode           nameNode {};    // the @name identifier node — for C++ scope/qualifier (E#4)
-            TSNode           importNamesNode {};   // Python: one clause's target, paired with its optional alias
+            TSNode           importNamesNode {};   // one clause's target, paired with its optional alias (emitCapturedImportBind)
             TSNode           importAliasNode {};
 
             for( uint16_t ci = 0; ci < match.capture_count; ++ci )
@@ -1982,11 +1983,11 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                         {
                             emitCapturedImport( cap.node, fileId, le.lang, src, includes, refs, shortfall );
                         }
-                        else if( full && le.lang == Lang::Python && capSv == "import.names" )
+                        else if( full && capSv == "import.names" )
                         {
                             importNamesNode = cap.node;
                         }
-                        else if( full && le.lang == Lang::Python && capSv == "import.alias" )
+                        else if( full && capSv == "import.alias" )
                         {
                             importAliasNode = cap.node;
                         }
@@ -1997,7 +1998,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
 
             if( !ts_node_is_null( importNamesNode ) )
             {
-                emitCapturedPythonImportBind( importNamesNode, importAliasNode, fileId, src, binds );
+                emitCapturedImportBind( importNamesNode, importAliasNode, fileId, le.lang, src, binds );
             }
             if( !haveName )
             {
@@ -2309,6 +2310,14 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
             d.kind      = kind;
             d.lang      = le.lang;
             d.name      = isTestMacroBlock ? std::string( nameTxt ) : defNameFromCapture( le.lang, nameTxt );   // LB-E: a title is a display string — see testMacroTitleOf
+            if( defCapSv == "definition.cjsexport" && isCjsModuleExportsItself( nameNode, src ) )
+            {   // lane js-def-naming: the module's own export function, named by the file's stem (ingest_names.h isCjsModuleExportsItself)
+                if( fileStem.empty() )
+                {
+                    continue;   // no path to name it by: no row, as before
+                }
+                d.name = std::string( fileStem );
+            }
             if( le.lang == Lang::Elixir && elixirTarget( roleNode, src ) == "test" )
             {
                 // Static ExUnit title; interpolation was rejected by elixirKeepCapture.
@@ -2532,6 +2541,7 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 {
                     r.name.push_back( '=' );   // `obj.name = v` calls `name=`, never the getter `name` (test/rubysettercheck.sh)
                 }
+                std::string rustWritten;   // RULE3-MEMBER-GUARD fix 4: a Rust path call's qualifier as written, when longer than one segment
                 if( le.lang == Lang::Cpp )
                 {
                     r.qualifier = qualifierOf( nameNode, src ); // `A::b()` → "A" (E#4 canonical resolve)
@@ -2544,6 +2554,10 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                 else if( le.lang == Lang::Rust )
                 {
                     r.qualifier = rustQualifierOf( nameNode, src ); // H4: `Widget::new()` → "Widget"
+                    if( r.role == RefRole::Call )
+                    {
+                        rustWritten = rustWrittenQualifier( nameNode, src );   // the whole written qualifier, set below once the receiver fields are
+                    }
                 }
 
                 if( !isImportRef && le.lang != Lang::Elixir )                             // an import site has no receiver and no argument list —
@@ -2568,6 +2582,17 @@ void captureTagsFacts( TSQueryCursor* cursor, const LangEntry& le, std::uint32_t
                     if( langFacts( le.lang ).trailingLambdaScopeFns )
                     {
                         r.trailingLambda = kotlinTrailingLambda( roleNode );   // #155: `x.run { }` / `with( x ) { }` — graph.h FalseEdgeRules' Kotlin arm
+                    }
+                    if( !rustWritten.empty() )
+                    {
+                        r.fieldName = std::move( rustWritten );   // a Rust path call's whole written qualifier (model.h Reference::fieldName)
+                    }
+                    if( isQueueLang( le.lang ) && isQueueCallName( r.name ) )
+                    {
+                        if( const std::uint8_t kw = callKeywords( nameNode, src ); kw != 0 )
+                        {
+                            r.composeRel = pyKwTag( kw );                                // a queue call's keywords, for QueueHops (model.h pyKwTag)
+                        }
                     }
                 }
                 refs.push_back( std::move( r ) );

@@ -55,6 +55,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <numeric>
+#include <set>                 // std::set — ingest_valuerefs.h flowTokensOf
 #include <string>
 #include <span>
 #include <string_view>
@@ -203,6 +204,7 @@ extern "C"
 #include "ingest_ruby.h"      // Ruby Rails/DSL capture lane (schema columns, Jbuilder typing, factories, class-side DSL walks) - carved verbatim 2026-10-12
 #include "ingest_importcap.h"
 #include "ingest_valuerefs.h"
+#include "ingest_rustslots.h"   // FN-SLOT part 2: Rust's slot-join records (callSide ParenFieldCall)
 #include "ingest_sidecap.h"
 #include "ingest_prewarm.h"
 #include "ingest_parsepool.h"

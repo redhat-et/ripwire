@@ -505,7 +505,7 @@ inline const char* refRoleTag( RefRole r ) noexcept
 // Reference-as-value round: the grammar family whose value positions src/ingest_valuerefs.h reads, and whose
 // visibility rule src/valuerefs.h resolves under — ONE table both sides index, so the capture and the resolver
 // cannot disagree about which languages are armed. None = not armed (no Value/Through rows are captured).
-enum class ValueRefFamily : std::uint8_t { None, C, Js, Py, Go };
+enum class ValueRefFamily : std::uint8_t { None, C, Js, Py, Go, Rust };   // Rust: the slot join's records only (ingest_rustslots.h)
 inline constexpr std::array<ValueRefFamily, kLangCount> kValueRefFamilyOfLang = []
 {
     std::array<ValueRefFamily, kLangCount> table {};   // value-initialised: every language None unless armed below
@@ -515,6 +515,7 @@ inline constexpr std::array<ValueRefFamily, kLangCount> kValueRefFamilyOfLang = 
     table[ static_cast<std::size_t>( Lang::TypeScript ) ] = ValueRefFamily::Js;
     table[ static_cast<std::size_t>( Lang::Python ) ]     = ValueRefFamily::Py;
     table[ static_cast<std::size_t>( Lang::Go ) ]         = ValueRefFamily::Go;
+    table[ static_cast<std::size_t>( Lang::Rust ) ]       = ValueRefFamily::Rust;
     return table;
 }();
 inline ValueRefFamily valueRefFamily( Lang l ) noexcept
@@ -573,11 +574,190 @@ inline constexpr char kValueRefDepthCutScope = 'd';
 // declared struct type, or a typedef alias). Distinct from every other scope char.
 inline constexpr char kValueRefSlotCallScope = 's';
 inline constexpr char kValueRefSlotFactScope = 't';
+// IX1-V2 (lane fn-slot): a PARAMETER stored into a slot (`func Reg( impl F ) { … Command{ EvalRW: impl } … }`): role Value,
+// name "" (no row), recvVar = the storing function's name, argCount = the parameter's position (argCountKnown), memberPath =
+// the field, memberCtor = the slot's type ("" unknown). valuerefindex.h SlotIndex re-slots an ARGUMENT row of a bare call of
+// that function at that position (`Reg( Put )`) into the same field. Distinct from every other scope char.
+inline constexpr char kValueRefSlotParamScope = 'q';
+// REGISTRAR (lane registrar, Python first slice): a METHOD PARAMETER stored into a container held by a field of `self`
+// (`self.receivers.append( ( key, receiver ) )`, `self.filters[ k ] = f`, tuple/list elements included): role Value, name ""
+// (no row), recvVar = the method's name, argCount = the parameter's position AFTER `self` (argCountKnown), memberPath = the field.
+// Written by src/ingest_valuerefs.h (kRegLangs rows with containerStores), read by src/regindex.h only. Distinct from every
+// other scope char.
+inline constexpr char kValueRefRegParamScope = 'g';
+// STRING-IMPORT: a dotted-string FACT (role Value, name "": no row, no edge; fordottedstring.h is its one reader). recvVar = the
+// string as written, composeRel = the shape below, memberPath = the import sink's tail name (direct / format / variable shapes),
+// memberCtor = the name it is assigned to ("" none). The scope char is a NON-identifier byte on purpose: a reader that takes the
+// qualifier for a type or scope name (fordispatchhop.h ownerNamedByProduction read "D" as a class D) can never match it.
+inline constexpr char kValueRefDottedStringScope = '%';
+inline constexpr std::string_view kDottedShapeConstant = "c";   // a module-level or class-level `NAME = "a.b.C"`
+inline constexpr std::string_view kDottedShapeListed   = "l";   // an element of a list/tuple/set or a dict VALUE, anywhere
+inline constexpr std::string_view kDottedShapeLocalListed = "m";   // as "l", assigned to a plain local NAME inside a function: only that function can name it
+inline constexpr std::string_view kDottedShapeSink     = "s";   // the first positional argument of an import sink
+inline constexpr std::string_view kDottedShapeFormat   = "f";   // `"%s.base" % x` as that argument (recvVar = the template)
+inline constexpr std::string_view kDottedShapeVariable = "v";   // an import sink called with anything else: recvVar = the FLOW TOKENS (below), space-separated
+// The flow tokens of a "v" fact: the names whose value can reach the sink's first argument inside its function (the argument's own
+// names, then through assignments / for targets / walrus / comprehension targets of that function, to a fixpoint): `.NAME` an
+// attribute tail, `NAME` a bare name no assignment, for/with/except/lambda binder of the function binds (a local import is a bind too, but is left free here and decided by the joiner, which sees the module imported), `=NAME` a bare name the function itself binds. Capped by
+// kVrDottedFlowMaxBytes: over it the fact carries none and joins nothing (an empty list is read as untraced: the row of a constant such a call could name says loaders_floor=1). A name that reaches the argument only through another
+// function, a parameter or a call result is not here, so no constant joins it.
+inline constexpr char kDottedFlowAttr  = '.';
+inline constexpr char kDottedFlowBound = '=';
+// A call whose arguments are printed, compared or logged, never loaded: a container handed to one records nothing.
+inline constexpr std::string_view kDottedNonLoadCallees[] = { "print", "debug", "info", "warning", "warn", "error", "exception", "critical", "fatal", "log", "write", "writelines",
+                                                              "assertEqual", "assertNotEqual", "assertIn", "assertNotIn", "assertListEqual", "assertCountEqual", "assertTrue", "assertFalse" };
+// The import sinks, by the callee's tail name: language DATA, one row per language; a language with no row records nothing.
+struct DottedImportSinkLang
+{
+    Lang                             lang;
+    std::span<const std::string_view> sinks;
+};
+inline constexpr std::string_view kPythonImportSinks[] = { "import_string", "import_module", "__import__" };
+inline constexpr DottedImportSinkLang kDottedImportSinks[] = { { Lang::Python, kPythonImportSinks } };
+
+// IX-1 / IX1-V2: which languages record a slot join, and how — the one table both the extractor (ingest_valuerefs.h) and the
+// join (valuerefindex.h) read. A language's row supplies the per-language pieces of the language-blind join (SlotIndex):
+// callSide — how a call THROUGH a field is found:
+//   ThroughRows: the extractor records the field calls itself (C family: kValueRefSlotCallScope rows; everyFieldCall = every
+//     `x->f( … )` in C, the C++ gate otherwise);
+//   MemberCallByName: an ordinary member call `x.F( … )` (a Call reference with memberCall) is a call through field F when some
+//     function value is stored in a field F, joined at index time by the field name (the receiver's type is not read: the name
+//     tier, via="slot-name"); the extractor records only the STORE side (Go);
+//   ParenFieldCall: `(x.f)( … )`, the only spelling that calls a function-valued field (`x.f( … )` is always a method call), recorded
+//     by the extractor as a kValueRefSlotCallScope row, typed when x is `self` (Rust: ingest_rustslots.h).
+// typeKey — how a slot's declared struct type is keyed (both sides and --for's struct rows key the same way):
+//   TypedefFacts: the type as written, through the typedef / field-type slot facts (C family);
+//   PackageDir: the package DIRECTORY the type is declared in, plus its name (Go: valuerefindex.h slot_join::GoTypeKeys);
+//   ModuleType: the one in-tree struct the name spells — its own file's, else its crate's, else the repo's only one (Rust:
+//     slot_join::RustTypeKeys; `Self` is resolved to the impl type by the extractor).
+// pathSep — a registrar may be an associated function reached by a PATH call (`CallEval::new( … )`): the argument row's callee
+//   is written `Owner<pathSep>name`, resolved to the owner type's function of that name ("" = bare callees only, never a method).
+// memberPointers — FN-SLOT S2 (C++): a pointer to MEMBER is a function value and its call a slot call. `&Cls::m` in a value
+//   position is a Value row naming m with memberRoot = Cls (resolved to Cls's method m only, never a namesake: valuerefindex.h
+//   ownedBy); `( obj.*x.f )( … )` is a slot call through field f of x's type (the `.*` proves f holds a member pointer, so no C++
+//   gate applies). Floors: `->*` (the grammar reads it as an ERROR node), a member pointer held in a plain variable.
+enum class VrSlotCallSide : std::uint8_t { ThroughRows, MemberCallByName, ParenFieldCall };
+enum class VrSlotTypeKey : std::uint8_t { TypedefFacts, PackageDir, ModuleType };
+struct VrSlotLang
+{
+    Lang             lang;
+    bool             everyFieldCall;
+    VrSlotCallSide   callSide;
+    VrSlotTypeKey    typeKey;
+    std::string_view pathSep;
+    bool             memberPointers = false;
+};
+inline constexpr VrSlotLang kVrSlotLangs[] = {
+    { Lang::C, true, VrSlotCallSide::ThroughRows, VrSlotTypeKey::TypedefFacts, "", false },
+    { Lang::Cpp, false, VrSlotCallSide::ThroughRows, VrSlotTypeKey::TypedefFacts, "", true },
+    { Lang::Go, false, VrSlotCallSide::MemberCallByName, VrSlotTypeKey::PackageDir, "", false },
+    { Lang::Rust, false, VrSlotCallSide::ParenFieldCall, VrSlotTypeKey::ModuleType, "::", false },
+};
+inline constexpr std::array<const VrSlotLang*, kLangCount> kVrSlotLangOf = []
+{
+    std::array<const VrSlotLang*, kLangCount> byLang {};
+    for( const VrSlotLang& row : kVrSlotLangs )
+    {
+        byLang[ static_cast<std::size_t>( row.lang ) ] = &row;
+    }
+    return byLang;
+}();
+// The slot row of language `l`, nullptr when it records no slot join.
+inline const VrSlotLang* vrSlotLang( Lang l ) noexcept
+{
+    return enumTableAt( kVrSlotLangOf, l, static_cast<const VrSlotLang*>( nullptr ) );
+}
+// REGISTRAR (lane registrar; reports/dispatch-register-design.md REGISTRY half, the Py/TS first slice): which languages join a
+// registry KEY to its registration sites, and how — the language layer src/regindex.h reads (one place for the join itself).
+//   ReceiverMethod (Python): a call `K.m( f )` / `mod.K.m( f )` whose receiver K is a module variable `K = C()` and whose method
+//     C.m stores parameter k into a container held by a field of self (kValueRefRegParamScope facts; containerStores names the
+//     store calls); f at argument k is registered under the key K. consumerSkip: methods on K that are neither a registration
+//     nor a consumer (the unregister side).
+//   ProviderRecord (TypeScript): an object literal `{ provide: K, useClass: C }` (keyField + valueFields) registers C under K;
+//     a consumer is a `consumerCalls` call naming K (`@Inject( K )`, `inject( K )`).
+enum class RegForm : std::uint8_t { ReceiverMethod, ProviderRecord };
+inline constexpr std::string_view kPyRegStores[]   = { "add", "append", "appendleft", "extend", "insert" };
+inline constexpr std::string_view kPyRegSkip[]     = { "disconnect", "discard", "remove", "unregister" };
+inline constexpr std::string_view kTsRegValues[]   = { "useClass", "useExisting", "useFactory", "useValue" };
+inline constexpr std::string_view kTsRegConsumer[] = { "Inject", "inject" };
+struct RegLang
+{
+    Lang                              lang;
+    RegForm                           form;
+    std::span<const std::string_view> containerStores;   // ReceiverMethod: `self.f.<store>( … param … )`; `self.f[ k ] = param` always
+    std::span<const std::string_view> consumerSkip;      // ReceiverMethod
+    std::string_view                  keyField;          // ProviderRecord
+    std::span<const std::string_view> valueFields;       // ProviderRecord
+    std::span<const std::string_view> consumerCalls;     // ProviderRecord
+};
+inline constexpr RegLang kRegLangs[] = {
+    { Lang::Python, RegForm::ReceiverMethod, kPyRegStores, kPyRegSkip, "", {}, {} },
+    { Lang::TypeScript, RegForm::ProviderRecord, {}, {}, "provide", kTsRegValues, kTsRegConsumer },
+};
+// The registrar row of language `l`, nullptr when it joins no registry (the mechanism is then inert: byte-identical answers).
+inline const RegLang* regLang( Lang l ) noexcept
+{
+    return findByField( kRegLangs, &RegLang::lang, l );
+}
+inline bool slotJoinsByFieldName( Lang l ) noexcept
+{
+    const VrSlotLang* row = vrSlotLang( l );
+    return row != nullptr && row->callSide == VrSlotCallSide::MemberCallByName;
+}
+// How language `l` keys a slot type (TypedefFacts for a language with no slot row: it keys nothing of its own).
+inline VrSlotTypeKey slotTypeKeyOf( Lang l ) noexcept
+{
+    const VrSlotLang* row = vrSlotLang( l );
+    return row == nullptr ? VrSlotTypeKey::TypedefFacts : row->typeKey;
+}
+// The path separator of language `l`'s registrar callees ("" = bare callees only).
+inline std::string_view slotPathSep( Lang l ) noexcept
+{
+    const VrSlotLang* row = vrSlotLang( l );
+    return row == nullptr ? std::string_view() : row->pathSep;
+}
+// A language whose slot types key by its own rule (valuerefindex.h slot_join), not through the C family's typedef facts.
+inline bool slotKeysOwnTypes( Lang l ) noexcept
+{
+    return slotTypeKeyOf( l ) != VrSlotTypeKey::TypedefFacts;
+}
 // A slot type key written with the `struct` / `union` keyword (`struct thandle`) leads with this mark: a C tag is no typedef
 // name, so the join never reads it through an alias. A slot fact whose composeRel is kValueRefSlotBodyRel declares that its
 // owner's struct BODY is in this file (no field): one tag with bodies in two files is two types, so it joins nothing.
 inline constexpr char kValueRefSlotTagMark = '\x02';
+// FN-SLOT S2 (c): the slot type key of a call of a function-like macro `M( … )->f( … )` is "()M"; a macro whose body is one
+// pointer cast to a named type records an alias fact "()M" → that type (ingest_valuerefs.h noteMacroCast). A "()M" no fact
+// resolves (a function returning a pointer, a macro of another shape) is an unknown type: the name tier.
+inline constexpr std::string_view kVrSlotMacroCastMark = "()";
 inline constexpr char kValueRefSlotBodyRel = '{';
+// FN-SLOT S2 fix 1 (F-2): a body fact's composeRel is kValueRefSlotBodyRel followed by the SCOPE PATH of the class (its enclosing named
+// namespaces and classes, outermost first, "::"-joined; an anonymous or inline namespace is transparent; "" = the global scope).
+// A C++ `&Cls::m` Value row's memberVia says where the pointer was written, so the join can tell the in-tree class from an external
+// namesake: the written QUALIFIER (`grpc` in `&grpc::Server::start`, a leading "::" kept; `using ns::Cls;` supplies it for a bare
+// `Cls`), the SITE (the named namespaces and classes enclosing the pointer, plus the scope an out-of-line definition's declarator
+// writes) and the `using namespace` DIRECTIVES in the file (',' joined), the three joined by kVrMemberScopeSep.
+inline constexpr char kVrMemberScopeSep = '\x1f';
+struct VrMemberScope
+{
+    std::string_view qualifier;
+    std::string_view site;
+    std::string_view directives;
+};
+inline VrMemberScope vrMemberScopeOf( std::string_view via ) noexcept
+{
+    VrMemberScope out;
+    const std::size_t a = via.find( kVrMemberScopeSep );
+    if( a == std::string_view::npos )
+    {
+        out.qualifier = via;
+        return out;
+    }
+    const std::size_t b = via.find( kVrMemberScopeSep, a + 1 );
+    out.qualifier       = via.substr( 0, a );
+    out.site            = via.substr( a + 1, b == std::string_view::npos ? std::string_view::npos : b - a - 1 );
+    out.directives      = b == std::string_view::npos ? std::string_view() : via.substr( b + 1 );
+    return out;
+}
 
 // Essential-complexity ev_why= reason vocabulary (the essential-complexity design note, §5.1). PUBLIC the
 // moment it ships (test/attrvocabcheck.sh's standing posture; test/essentialcxcheck.sh pins the spellings):
@@ -895,6 +1075,50 @@ struct LocalNameFact
 // The prefix of a C++ call's memberPath that marks an ELEMENT-ACCESS receiver (Reference::memberPath, its C++ reading).
 inline constexpr std::string_view kCppElementMark = "[]";
 
+// A Python queue call's KEYWORD arguments (isQueueCallName), carried on its call reference's composeRel (a call is no compose record and no value-ref slot, so the
+// field is free there): "" none, else "k<count>" and a trailing "o" when any keyword is spelled other than `timeout` / `block` (the two
+// keywords queue.Queue.put/get and asyncio.Queue take). argCount counts them too (the resolver's arity filter needs that), so
+// QueueHops (backhops.h) subtracts the count to read the positional arguments. Written by ingest_sidecap.h, read by pyKwArgsOf.
+inline constexpr std::uint8_t kCallKwCount = 0x7F;   // the count's mask in callArity's keyword byte (saturating)
+inline constexpr std::uint8_t kCallKwOther = 0x80;   // …and the flag: a keyword other than timeout / block
+// The four calls QueueHops reads (backhops.h): the only Python calls whose keyword arguments ingest records.
+inline bool isQueueCallName( std::string_view name ) noexcept
+{
+    static constexpr std::string_view kQueueCalls[] = { "get", "get_nowait", "put", "put_nowait" };
+    return std::ranges::contains( kQueueCalls, name );
+}
+// The languages whose queue operations the hop rule reads (a per-kind table, as backhops.h selfKeyword's: Go channels need an ingest record first).
+// Ingest records the queue calls' keywords for these; QueueHops (backhops.h) pairs only their symbols.
+inline bool isQueueLang( Lang lang ) noexcept
+{
+    static constexpr Lang kQueueLangs[] = { Lang::Python };
+    return std::ranges::contains( kQueueLangs, lang );
+}
+inline std::string pyKwTag( std::uint8_t kw )
+{
+    return "k" + std::to_string( unsigned( kw & kCallKwCount ) ) + ( ( kw & kCallKwOther ) != 0 ? "o" : "" );
+}
+struct PyKwArgs
+{
+    std::uint32_t count = 0;
+    bool          other = false;
+};
+inline PyKwArgs pyKwArgsOf( std::string_view composeRel ) noexcept
+{
+    PyKwArgs out;
+    if( composeRel.size() < 2 || composeRel[ 0 ] != 'k' )
+    {
+        return out;
+    }
+    std::size_t i = 1;
+    for( ; i < composeRel.size() && composeRel[ i ] >= '0' && composeRel[ i ] <= '9'; ++i )
+    {
+        out.count = out.count * 10 + std::uint32_t( composeRel[ i ] - '0' );
+    }
+    out.other = i < composeRel.size() && composeRel[ i ] == 'o';
+    return out;
+}
+
 struct Reference
 {
     NodeId        fromSymbol = kNoNode;   // enclosing symbol (caller); kNoNode if file-scope
@@ -939,6 +1163,9 @@ struct Reference
                                           //   → "Billing::Invoice"; `described_class` → the group's constant whole),
                                           //   recvVar keeping the final segment every class is keyed by (graph.h
                                           //   RubyClassObjects::ofIndexed); no chain or compose reader reads a NamedVar's
+                                          //   A fourth reading, on a Rust CALL reference (role Call, recv None): the whole qualifier a path call
+                                          //   is written with when it has more than one segment (`crate::far` for `crate::far::helper()`), ""
+                                          //   otherwise (ingest_names.h rustWrittenQualifier; read through rustWrittenQualifierOf below).
     std::string   composeRel;             // "creates" (value/inline) or "uses" (reference/pointer) when isCompose; "" otherwise
     // FE-A (test/falseedgecheck.sh): Go, JS/TS, Rust and C record no receiver SHAPE for a member call — `x.f()`, `JSON.parse()`,
     //   `h.render()`, C's `ops->open()` keep recv == None, exactly like a bare `f()` (ingest_binds.h receiverOf: widening recv would move every
@@ -988,6 +1215,21 @@ struct Reference
     //   Sits in memberFactory's alignment padding: sizeof(Reference) is unchanged.
     std::uint32_t baseBind = 0;
 };
+// The sentinels Reference::baseBind holds besides a real binding (1 + a name byte): ONE definition for the writer (ingest_relations.h
+// localBaseBinding) and every reader (graph.h provenBasesOf, valuerefindex.h inheritEdges / ClassFamilies::bindBase).
+inline constexpr std::uint32_t kBaseBindNone          = 0;            // no enclosing scope declares the name
+inline constexpr std::uint32_t kBaseBindUnknown       = 0xFFFFFFFFu;  // a scope was too large to scan: nothing proven either way
+inline constexpr std::uint32_t kBaseBindTemplateParam = 0xFFFFFFFEu;  // fn-slot S2 fix 2: the written base is a TEMPLATE PARAMETER of the deriving class (`template <class B> struct M : B`): it names no declaration
+static_assert( kBaseBindTemplateParam < kBaseBindUnknown, "the readers test `>= kBaseBindTemplateParam` for both sentinels" );
+
+// RULE3-MEMBER-GUARD fix 4: the qualifier a Rust call is WRITTEN with, from its root — `crate::far` for `crate::far::helper()`, where
+// Reference::qualifier keeps only `far` — else `qualifier` itself (a one-segment path, every non-call reference). Its readers pass Rust
+// references only (graph.h W3, receiverevidence.h rustRule3Proves): another language's call keeps a receiver's field here.
+inline std::string_view rustWrittenQualifierOf( const Reference& r ) noexcept
+{
+    const bool whole = r.role == RefRole::Call && r.recv == RecvKind::None && !r.isCompose && !r.isInherit && !r.fieldName.empty();
+    return whole ? std::string_view( r.fieldName ) : std::string_view( r.qualifier );
+}
 
 // ONE rule for every reader of the reference table that counts a call SITE (train 30, fcall-forward nit N1): a FORWARDED
 // reference counts only where buildGraph kept its call — `keptForwards` is Graph::keptForwards, the ascending
@@ -1374,6 +1616,21 @@ enum class LocalBindKind : std::uint8_t
     // (via=name); over a `var x;` / `let x;` / undeclared name only the root's SPELLING stops deciding (`Eng = Foo; Eng.make()` is
     // not the class `Eng`) while a stated type (`let app; … app = new Hono(); app.request()`) keeps its receiver reading. APPENDED (cache u8).
     JsRebind,
+    // Lane js-def-naming (QN-OBJLIT-NAMED): a JS/TS MODULE-SCOPE object literal bound to a name — `const Widget = { run() {} }`,
+    // `export const Widget = { … }`, `var Widget = { … }`. var = the binding name; spanStart/spanEnd = the object literal, so a
+    // member inside it is that literal's (the index stores no owner for it: langfacts.h objectLiteralMembers). fromSymbol kNoNode
+    // (a module-level statement). Read by graph.h resolveAllByWrittenSpelling ONLY: a spelling whose owner segment is the
+    // literal's name (`Widget.run`) could name that member, so beside a class of that name it is unknown, never the class alone.
+    // APPENDED (cache u8).
+    JsObjectLiteral,
+    // Lane alias-import (ALIAS-IMPORT): a JS/TS RE-EXPORT clause — `export { a } from './m'`, `export { a as b } from './m'`,
+    // `export * from './m'` (and the `export type` spellings). var = the EXPORTED name ("*" for a star re-export), typeName = the
+    // module specifier as written (quotes stripped), importedName = the name it takes from that module ("*" for a star).
+    // `export * as ns from` records nothing (it binds a namespace, not a name). fromSymbol kNoNode, spans {0,0}, sited at the
+    // statement. Written by ingest_importcap.h emitCapturedImportBind (the binds channel's Web arm) and read by forreexport.h
+    // ONLY (the --for re-export hop rows): it is never a call edge and no resolver table reads it (every other binding reader
+    // filters by kind). APPENDED (cache u8).
+    ReExport,
 };
 // fix round 4: the TypeAlias rows that bind a spelling with no alias target (model.h LocalBindKind::TypeAlias, typeName)
 inline constexpr std::string_view kTypeBindForward  = "forward";
@@ -1381,7 +1638,7 @@ inline constexpr std::string_view kTypeBindShadow   = "shadow";
 inline constexpr std::string_view kTypeBindUnparsed = "unparsed";
 inline constexpr std::string_view kTypeBindUnrecorded = "unrecorded";
 // The number of LocalBindKind enumerators — the bound readBind validates a cached kind byte against (see kSymKindCount).
-inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::JsRebind ) + 1;
+inline constexpr std::size_t kLocalBindKindCount = static_cast<std::size_t>( LocalBindKind::ReExport ) + 1;
 // FE-B: the kinds only graph.h ReceiverEvidence (and, for the two call-result kinds, its resolve loop) reads (see RecvType above).
 // L6's ImplBlock is in the set for the same reason: its var is the TRAIT / interface being implemented, never a name bound in the
 // enclosing function, so the generic binding readers (localNameSet, the fn-pointer tables, nonlocalstate) must skip it (its two
@@ -1450,6 +1707,28 @@ inline TypeWrap typeWrapOf( CallResultFamily f, std::string_view name ) noexcept
 }
 // Binding::resultIndex of a record about a WHOLE result (a single non-tuple result; a Rust `let t = pair()?` binding all of it).
 inline constexpr std::uint8_t kWholeResult = 0xFF;
+// lane iface-peel (LangFacts::returnTypedDispatchLet): a ReturnType whose unwrapDepth carries this bit names a TRAIT the result
+// dispatches through (Rust `-> &dyn T` / `-> Box<dyn T>` / `-> impl T`), never a class: typeName = the trait, importedName = its
+// path when qualified. No call-result reader that compares depths can match it by accident (a call's own depth never has the
+// bit); graph.h typeCallResults alone reads it, and types the local as SOME implementor of the trait (ReceiverEvidence::LocalFact
+// iface). The low bits stay the Result/Option layers (always 0 today: a layered trait object is not read).
+inline constexpr std::uint8_t kDispatchResultBit = 0x80;
+// lane iface-peel fix 1 (B1): the memberVia of a C++ MEMBER record (isCompose, a field name) whose written type is a TEMPLATE
+// PARAMETER of an enclosing `template <…>` (`template <class Handle> class S { Handle h_; }`): the name is the parameter, never
+// the smart-pointer alias of that spelling in some namespace. resolve.h SmartAliasPeel::pointeeOf alone reads it, to keep the
+// member's base reading; every other reader of a compose record ignores memberVia (a C++ member record carries none otherwise).
+inline constexpr std::string_view kTemplateParamMemberType = "<tparam>";
+// train 42b CR harvest: the memberVia of a C++ MEMBER record declared as a POINTER to a non-smart written type (`FilterSharedPtr* p_;`):
+// `p_->` reaches the alias's smart pointer, never the pointee. resolve.h SmartAliasPeel::pointeeOf alone reads it (base reading kept).
+inline constexpr std::string_view kPointerMemberType = "<ptr>";
+// lane iface-peel fix 1 (B1): the LEXICAL SCOPE of a C++ declaration, written on its record's memberRoot (a compose record's only
+// use of that field): the enclosing namespaces and classes, outermost first, joined by "::" — a class element is prefixed "#"
+// (`Envoy::Network::#ConnectionImpl`), an anonymous namespace is kAnonScopeElement, an inline namespace is transparent (left
+// out). kLocalScope is a declaration inside a function body (its scope is a block this index does not model). Written by
+// ingest_relations.h cppScopePath on an alias record and on a member record (the member's class last); read by resolve.h
+// SmartAliasPeel alone. The C++ call-result bindings are OFF (callResultFamilyOf), so no Namespace record exists to read.
+inline constexpr std::string_view kAnonScopeElement = "(anon)";
+inline constexpr std::string_view kLocalScope       = "(local)";
 // The importedName of a Ruby class-object binding that acts on each class INCLUDING the module, not on the module
 // (LocalBindKind::RubySingletonDef, RubyClassMixin; parser version 145): written in a concern's `included do`, or a def
 // in its `class_methods do`.
@@ -1469,6 +1748,16 @@ struct RubyMainMixinRow
     std::uint32_t fileId = 0;
     std::uint32_t line   = 0;   // the constant's 1-based line
 };
+
+// PY-ALIAS-SPLIT-MARKER: a Python def or class statement at MODULE scope that sits inside a compound statement (`if`, `try`,
+// `with`, `for`, `while`, `match`: it may not run) files, besides its ordinary VarDecl, a second VarDecl spelled with this prefix
+// (`?f`). No identifier starts with it, so no name lookup ever matches the record; graph.h pythonRenamedImportPin reads it as "f may
+// be unbound", the case where a module `__getattr__` (PEP 562, consulted only for names the module lacks) answers instead.
+inline constexpr std::string_view kPythonCondDefPrefix = "?";
+// A Python lambda parameter or comprehension target `K` files a VarDecl spelled `~K` at the lambda / comprehension (its enclosing def's
+// scope, else module scope). No identifier starts with it, so no name lookup ever matches the record; src/regindex.h reads it as "K is
+// another variable here" (a registrar key named like a lambda parameter is not the key).
+inline constexpr std::string_view kPythonLocalScopePrefix = "~";
 
 struct Binding
 {
@@ -1721,6 +2010,12 @@ struct CrawlSkips
     // disable_recursion_pending() and only the --exclude one incremented anything, so `--skipped` over a
     // tree with node_modules/ reported EVERY counter zero while whole subtrees had been dropped.
     std::uint64_t             prunedDirs      = 0;
+    // #478 gap 3: the rows behind prunedDirs (capped, path-sorted, bytes 0, ext ""). A directory that is a real Python package
+    // (ingest_crawl.h isPrunedPythonPackage) rows in prunedPackageRows and not in prunedDirRows, and has its own exact count,
+    // because --arch and --deps name those: a module they would otherwise report on as if it did not exist.
+    std::vector<SkippedFile>  prunedDirRows;
+    std::vector<SkippedFile>  prunedPackageRows;
+    std::uint64_t             prunedPackages  = 0;
     std::vector<UnindexedExt> unindexedExts;        // EXACT histogram, sorted files desc then ext asc
 
     // §N6-C — the .gitignore lane. TWO counters for the same reason excludedDirs and prunedDirs are two:
@@ -2284,8 +2579,24 @@ inline bool isSlotJoinRecord( const Reference& r ) noexcept
     {
         return false;
     }
-    return ( r.role == RefRole::Value && r.qualifier[0] == kValueRefSlotFactScope )
+    return ( r.role == RefRole::Value
+             && ( r.qualifier[0] == kValueRefSlotFactScope || r.qualifier[0] == kValueRefSlotParamScope || r.qualifier[0] == kValueRefRegParamScope
+                  || r.qualifier[0] == kValueRefDottedStringScope ) )
         || ( r.role == RefRole::Through && r.qualifier[0] == kValueRefSlotCallScope );
+}
+
+// STRING-IMPORT: a dotted-string fact (kValueRefDottedStringScope): its qualifier is a scope char and its recvVar a string, neither a
+// name the file spells, so no name-evidence scan may read them.
+inline bool isDottedStringFact( const Reference& r ) noexcept
+{
+    return r.role == RefRole::Value && r.qualifier.size() == 1 && r.qualifier[0] == kValueRefDottedStringScope;
+}
+
+// REGISTRAR: a registrar fact (kValueRefRegParamScope): its qualifier is a scope char and its recvVar the registrar METHOD's name, neither a
+// class the file names, so no name-evidence scan (graph.h collectFileClassEvidence) may read them.
+inline bool isRegistrarFact( const Reference& r ) noexcept
+{
+    return r.role == RefRole::Value && r.qualifier.size() == 1 && r.qualifier[0] == kValueRefRegParamScope;
 }
 
 inline void buildShadowKey( std::string& key, std::uint32_t fromSymbol, std::string_view name )

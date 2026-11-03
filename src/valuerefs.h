@@ -37,6 +37,21 @@ namespace rw
 {
 
 // ── rendering ────────────────────────────────────────────────────────────────────────────────────────────────
+// The callee a slot call writes: a C-family slot Through keeps it whole (fieldName); an IX1-V2 member call (an ordinary Call
+// reference, valuerefindex.h addMemberCalls) is rebuilt from its receiver chain (`cmd.EvalRW`, `s.cfg.Run`).
+inline std::string slotCallWritten( const Reference& r )
+{
+    if( r.role != RefRole::Call )
+    {
+        return r.fieldName;
+    }
+    std::string out = r.memberRoot;
+    if( !r.memberPath.empty() )
+    {
+        out += ( out.empty() ? "" : "." ) + r.memberPath;
+    }
+    return out + "." + r.calleeName;
+}
 struct VrRender
 {
     bool             singleRoot = true;
@@ -78,6 +93,10 @@ inline std::vector<std::pair<std::string_view, std::string>> slotCallerFields( c
     if( row.slotNameAlso > 0 )
     {
         out.emplace_back( "slot_name_also", std::to_string( row.slotNameAlso ) );
+    }
+    if( row.slotCands > 1 )
+    {
+        out.emplace_back( "cands", std::to_string( row.slotCands ) );   // IX1-V2: the slot is a table of K functions, not this one alone
     }
     return out;
 }
@@ -286,8 +305,9 @@ inline std::string slotCalleesXml( const IngestResult& ing, std::span<const Slot
     for( const SlotSiteRow& site : sites )
     {
         const Reference& r = ing.references[ site.ref ];
-        out += "<vs l=\"" + std::to_string( r.line ) + "\" through=\"" + std::string( escapeXml( r.fieldName, esc ) ) + "\" slot=\""
+        out += "<vs l=\"" + std::to_string( r.line ) + "\" through=\"" + std::string( escapeXml( slotCallWritten( r ), esc ) ) + "\" slot=\""
              + std::string( escapeXml( site.slot, esc ) ) + "\" via=\"" + ( site.typed ? "slot" : "slot-name" ) + "\"";
+        out += site.nameAlso > 0 ? " slot_name_also=\"" + std::to_string( site.nameAlso ) + "\"" : std::string();   // L-1: name-only stores the typed tier hides
         out += vrTargetWindowXml( ing, site.targets, kSlotTargetCap, "targets", slotSiteNext( ing, site ), rr, esc ) + "</vs>";
     }
     return out;
@@ -306,8 +326,9 @@ inline std::string slotCalleesJson( const IngestResult& ing, std::span<const Slo
         const Reference&   r     = ing.references[ site.ref ];
         const std::size_t  shown = std::min( site.targets.size(), kSlotTargetCap );
         out += ( i == 0 ? "{" : ",{" );
-        out += "\"l\":" + std::to_string( r.line ) + ",\"through\":\"" + jsonStr( r.fieldName ) + "\",\"slot\":\"" + jsonStr( site.slot )
-             + "\",\"via\":\"" + ( site.typed ? "slot" : "slot-name" ) + "\",\"targets\":" + std::to_string( site.targets.size() ) + ",\"shown\":" + std::to_string( shown );
+        out += "\"l\":" + std::to_string( r.line ) + ",\"through\":\"" + jsonStr( slotCallWritten( r ) ) + "\",\"slot\":\"" + jsonStr( site.slot )
+             + "\",\"via\":\"" + ( site.typed ? "slot" : "slot-name" ) + "\"" + ( site.nameAlso > 0 ? ",\"slot_name_also\":" + std::to_string( site.nameAlso ) : std::string() )
+             + ",\"targets\":" + std::to_string( site.targets.size() ) + ",\"shown\":" + std::to_string( shown );
         if( shown < site.targets.size() )
         {
             out += ",\"next\":\"" + jsonStr( slotSiteNext( ing, site ) ) + "\"";
@@ -326,12 +347,8 @@ inline std::string slotCallsAttrXml( std::size_t n ) { return countFieldOrEmpty(
 inline std::string slotCallsKeyJson( std::size_t n ) { return countFieldOrEmpty( "slot_calls", n, /*json=*/true ); }
 // The legend clause, exactly when an answer carries a slot join: callers — a <vr> row with via= (ValueRefRows::slotCallers);
 // callees — slot_calls=.
-inline std::string_view slotJoinLegend( bool any, bool callersSide ) noexcept
+inline constexpr std::string_view slotJoinClause( bool callersSide ) noexcept
 {
-    if( !any )
-    {
-        return {};
-    }
     return callersSide
         ? "vr called_by= called_at= via=slot|slot-name: the function was stored in a struct FIELD; called_by names each function "
           "that calls through a field of that name (x->f(...)), called_at= its first such call, file:line, in the same order. "
@@ -347,7 +364,22 @@ inline std::string_view slotJoinLegend( bool any, bool callersSide ) noexcept
           "receiver is not read), first 16 as <t n= p=>, next= the rest; slot=@N.f: an "
           "anonymous struct declared at line N of this file. via=slot: same declared struct type (one tag with the same body text "
           "in two files is one type); via=slot-name: field name "
-          "only (one side's type unknown). MAY be called; never a proven call, never in count=. ";
+          "only (one side's type unknown; slot_name_also=K: K such functions the same-type ones hide). MAY be called; never a proven call, never in count=. ";
+}
+
+inline std::string slotJoinLegend( bool any, bool callersSide, bool cands = false )
+{
+    if( !any )
+    {
+        return {};
+    }
+    std::string out( slotJoinClause( callersSide ) );
+    if( callersSide && cands )
+    {
+        out += "cands=K: the first called_by call's slot holds K distinct functions, this one among them (a table: which one runs "
+               "is decided at run time). ";
+    }
+    return out;
 }
 
 // ── IX-3 name-template dispatch rows ────────────────────────────────────────────────────────────────────

@@ -6,7 +6,12 @@
 // the sc= every other surface prints), never off the name, and printed only when the index DEFINES the scope's last segment as a
 // member owner in the row's language — a class, struct, interface or named type, or a module (`@definition.module` is
 // SymKind::Other: Rust `mod`, Ruby `module`, Elixir `defmodule`). A printed scope is a claim, so it is exact or bare:
-//   * no stored scope (TS/JS, Java, C#, Swift, Kotlin `object` today) → bare: a floor, not a claim;
+//   * no stored scope (Java, C#, Swift, Kotlin `object` today) → bare: a floor, not a claim;
+//   * a TS/JS METHOD (no stored scope: langfacts.h containmentOwners) → the ONE class whose body holds it, read by graph.h
+//     containedOwnersOf — the rule the written-spelling tier binds `Class.method` by, so the printed name resolves back
+//     (lane js-def-naming: nunjucks' two environment.js `render`s print Environment.render and Template.render). Bare when a
+//     function or method holds it (a local def), when no class does (an object-literal member), and when two classes nest
+//     around it (a floor: one owner prints, never a guessed chain);
 //   * a type or module row → bare (a class carries its own name as sc=; never `Box.Box`);
 //   * a C++ namespace scope → bare (a namespace is no indexed definition, so a namespace-scope function stays a free function) —
 //     unless a class of the same name is defined in that language: the owner test is name-keyed, so `namespace Logger { int init(); }`
@@ -24,9 +29,11 @@
 #include "graph.h"       // namespaceCompatible — the one statement of "a type definition"
 #include "langfacts.h"   // memberSeparator — the per-language spelling, as a column
 #include "model.h"
+#include "graphlegend.h"   // memberOwnerLegend / memberOwnerContainedLegend — memberOwnerLegendFor's two clauses
 #include "infra/sortutil.h"   // svLess: the explicit byte order a std::sort over string_view needs
 
 #include <algorithm>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -46,11 +53,24 @@ inline bool isMemberOwnerKind( SymKind k ) noexcept
 // scopeLastSegment (the segment the index must define as an owner) lives in model.h, beside Symbol::scope: testmap.h's
 // class-new owner reads it too (train 33: IX-5 and QUALNAME-1 each moved the same helper out of defattrib.h).
 
+// The containment languages' symbols per file, ascending start (id breaks a tie): what containedOwnersOf scans for a member's class.
+inline SymbolsByFile containmentSymbolsByFile( const IngestResult& ing )
+{
+    return symbolsByFile(
+        ing, []( const Symbol& t ) { return langFacts( t.lang ).containmentOwners; },
+        [ &ing ]( NodeId a, NodeId b )
+        {
+            const Symbol& x = ing.symbols[ a ];
+            const Symbol& y = ing.symbols[ b ];
+            return x.sigStartByte != y.sigStartByte ? x.sigStartByte < y.sigStartByte : a < b;
+        } );
+}
+
 class MemberOwners
 {
 public:
     // One pass over the symbols: the (language, name) of every member-owner definition, sorted for the per-row lookup.
-    explicit MemberOwners( const IngestResult& ing )
+    explicit MemberOwners( const IngestResult& ing ) : ing_( ing )
     {
         for( const Symbol& t : ing.symbols )
         {
@@ -64,11 +84,15 @@ public:
     }
     // The owner a member row prints ("" = bare): the symbol's full stored scope, when the rule above holds. An extent-suspect symbol's
     // scope was inferred from a recovered parse (extentsuspect.h), so it is no claim: bare.
-    std::string_view ownerOf( const Symbol& s ) const noexcept
+    std::string_view ownerOf( const Symbol& s ) const
     {
-        if( s.scope.empty() || isMemberOwnerKind( s.kind ) || s.fnLocal || s.extentSuspect != 0 )
+        if( isMemberOwnerKind( s.kind ) || s.fnLocal || s.extentSuspect != 0 )
         {
             return {};
+        }
+        if( s.scope.empty() )
+        {
+            return containedOwnerOf( s );
         }
         const std::string_view last = scopeLastSegment( s.scope );
         return !last.empty() && std::binary_search( defined_.begin(), defined_.end(), Key{ s.lang, last }, keyLess )
@@ -77,6 +101,10 @@ public:
     }
 
 private:
+    // A TS/JS method's owner by containment (see the header): the one enclosing class, else "". The per-file buckets of the
+    // containment languages' symbols (ascending start) are built at the first such row, so an answer with none pays nothing.
+    std::string_view containedOwnerOf( const Symbol& s ) const;   // defined below the class
+
     using Key = std::pair<Lang, std::string_view>;
     static bool keyLess( const Key& a, const Key& b ) noexcept
     {
@@ -86,18 +114,68 @@ private:
         }
         return sortutil::svLess( a.second, b.second );
     }
-    std::vector<Key> defined_;
+    const IngestResult&                   ing_;
+    std::vector<Key>                      defined_;
+    mutable std::optional<SymbolsByFile>  byFile_;
 };
 
-// Whether any of `rows` prints an owner — a legend clause's presence. The owner pass runs only when some row has a scope at all.
-inline bool anyMemberOwnerRow( const IngestResult& ing, std::span<const NodeId> rows )
+inline std::string_view MemberOwners::containedOwnerOf( const Symbol& s ) const
 {
-    if( std::none_of( rows.begin(), rows.end(), [ & ]( NodeId id ) { return !ing.symbols[ id ].scope.empty(); } ) )
+    if( s.kind != SymKind::Method || !langFacts( s.lang ).containmentOwners )
     {
-        return false;
+        return {};
+    }
+    if( !byFile_ )
+    {
+        byFile_.emplace( containmentSymbolsByFile( ing_ ) );
+    }
+    if( s.fileId >= byFile_->size() )
+    {
+        return {};
+    }
+    const FileSymbols&    bucket = ( *byFile_ )[ s.fileId ];
+    const ContainedOwners c      = containedOwnersOf( ing_, std::span<const NodeId>( bucket.data(), bucket.size() ), s );
+    return !c.nested && c.chain.size() == 1 ? c.chain.front() : std::string_view();
+}
+
+// Whether `s` could print an owner at all: a stored scope, or a TS/JS method (containment). The cheap pre-test the answer-level
+// "does any row print an owner" checks run before they pay for a MemberOwners pass.
+inline bool memberOwnerPossible( const Symbol& s ) noexcept
+{
+    return !s.scope.empty() || ( s.kind == SymKind::Method && langFacts( s.lang ).containmentOwners );
+}
+
+// Which owner clauses `rows` need: any row printing an owner, and any whose owner was read by containment (TS/JS). The owner
+// pass runs only when some row could print one at all.
+struct MemberOwnerRows
+{
+    bool any       = false;
+    bool contained = false;
+};
+inline MemberOwnerRows memberOwnerRows( const IngestResult& ing, std::span<const NodeId> rows )
+{
+    MemberOwnerRows out;
+    if( std::none_of( rows.begin(), rows.end(), [ & ]( NodeId id ) { return memberOwnerPossible( ing.symbols[ id ] ); } ) )
+    {
+        return out;
     }
     const MemberOwners owners( ing );
-    return std::any_of( rows.begin(), rows.end(), [ & ]( NodeId id ) { return !owners.ownerOf( ing.symbols[ id ] ).empty(); } );
+    for( const NodeId id : rows )
+    {
+        const Symbol& s = ing.symbols[ id ];
+        if( !owners.ownerOf( s ).empty() )
+        {
+            out.any       = true;
+            out.contained = out.contained || s.scope.empty();
+        }
+    }
+    return out;
+}
+// Both owner clauses for `rows` (graphlegend.h): the shared one when any row prints an owner, the TS/JS one when a containment
+// owner is among them.
+inline std::string memberOwnerLegendFor( MemberOwnerRows r )
+{
+    return std::string( memberOwnerLegend( r.any ) ) + memberOwnerContainedLegend( r.contained );
 }
 
 // The separator between an owner and a member name in `l` (langfacts.h).

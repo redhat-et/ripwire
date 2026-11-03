@@ -73,7 +73,9 @@ has   "D1 a positional table entry maps to its field by the struct's field order
 o="$( run --callers=lay_even )"
 has   "D2 an anonymous struct table joins its subscripted dispatcher" "$o" 'called_by="layout_select" called_at="table.c:22" via="slot"'
 o="$( run --callers=on_cb )"
-has   "E1 a value whose struct type is not read (nested literal) joins by name only" "$o" 'called_by="run_outer" called_at="mode.c:9" via="slot-name"'
+has   "E1 a nested designated literal keys the path from the outer literal's type (FN-SLOT S2: was name-only)" "$o" 'called_by="run_outer" called_at="mode.c:9" via="slot"'
+o="$( run --callers=on_go )"
+has   "E1b a store whose type is unknown (g_unknown, declared nowhere) joins by name only" "$o" 'called_by="run_nest" called_at="mode.c:14" via="slot-name"'
 o="$( run --callers=opa )"
 has   "F1 C++: a function-pointer field its type declares in this file" "$o" 'called_by="use" called_at="vt.cpp:8" via="slot"'
 o="$( run --callers=cmd_alpha_exec --json )"

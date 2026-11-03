@@ -1139,7 +1139,7 @@ meter_family()
 # The PreToolUse nudges above are reactive — they only speak after the agent has already reached for a
 # default. This is the proactive half: a binary on PATH is invisible until the context says when to
 # reach for it, and not every user has pasted the blurb into CLAUDE.md. The text is EXTRACTED from
-# `ripwire wrap claude` rather than restated here, so it cannot drift from wrapUseWhenBlurbLines() in
+# `ripwire wrap <the running agent>` rather than restated here, so it cannot drift from wrapUseWhenBlurbLines() in
 # src/wrap.h (the single source of truth the wrap gate diffs across agents). If wrap refuses — e.g. a
 # CRITICAL skill-scan finding — the fence is absent, the blurb is empty, and this degrades to silence.
 if [ "${1:-}" = "--session-start" ]
@@ -1185,7 +1185,12 @@ then
     [ -e "$marker" ] && exit 0
     { : > "$marker"; } 2>/dev/null || true
 
-    blurb=$( ripwire wrap claude 2>/dev/null \
+    # The primer is the blurb of the agent this hook RUNS for: ripwire-codex-nudge.sh exports RIPWIRE_METER_AGENT=codex
+    # (`wrap codex` keeps --replace-symbol-body; `wrap claude` swaps in the ranged-Read route Codex has no use for).
+    blurb=$( ripwire wrap "$meter_agent" 2>/dev/null \
+        | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )
+    # an operator-set RIPWIRE_METER_AGENT that `wrap` does not know (a free-form label) falls back to Claude's, as before
+    [ -n "$blurb" ] || [ "$meter_agent" = claude ] || blurb=$( ripwire wrap claude 2>/dev/null \
         | sed -n '/^# --- paste into/,/^# --- end paste ---$/p' | sed '1d;$d' )
     [ -n "$blurb" ] || exit 0
 

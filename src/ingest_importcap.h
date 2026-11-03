@@ -30,9 +30,10 @@
 // declaration clause its Include has always carried (see DepDialect::Go below), not in a field of their own.
 // `@import.alias` is the local name an import renames a target to (`import a.b as c`, `use Foo\Bar as Baz`, `using X = Foo.Bar`).
 // `@import.names` names the imported clauses of a directive (`use Foo\{A, B}`, `alias MyApp.{Bar, Baz}`).
-// Python emits one names clause and its optional alias in the SAME match, then its Python-specific
-// helper produces the existing RawBind. Later dialects may need a per-directive helper for groups;
-// a capture names one node, and a group is many. No unused enum arm pretends to support a dialect.
+// A query emits one names clause and its optional alias in the SAME match; the shared binds channel
+// (emitCapturedImportBind, below) turns the pair into a RawBind through one normaliser arm per dialect.
+// Python has the only arm today. Later dialects may need a per-directive helper for groups; a capture
+// names one node, and a group is many. No unused enum arm pretends to support a dialect.
 //
 // SECOND MEMBER: DepDialect::Web (TypeScript, TSX, JavaScript, the .astro frontmatter that rides TypeScript).
 // Its three spellings are three patterns on the SAME capture name — `import … from 'x'`, a re-export
@@ -279,47 +280,99 @@ TSNode importDirectiveOf( DepDialect dialect, TSNode pathNode ) noexcept
     return directive;
 }
 
-// One @import.names clause and its optional @import.alias → the existing Python Import binding.
-// The query selects the clause; normalization keeps the plain-import module marker and from-import
-// member distinction (#287). Both records stay at the STATEMENT byte, with the same empty spans.
-// A multi-clause import still has only its FIRST Include, but every clause binds a name. Reach and
-// depth must apply to bindings too, or a cut/ERROR-wrapped import would still narrow a call.
-void emitCapturedPythonImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t fileId, std::string_view src, std::vector<RawBind>& binds )
+// THE BINDS CHANNEL (CONTRIBUTING family 2, slice 2a). One `@import.names` clause and its optional `@import.alias`, from
+// ANY language's tags query, become one RawBind here. What a written rename MEANS varies by dialect (which node is the
+// directive, which name is bound, which text is the target, what importedName records), so that is one normaliser arm per
+// DepDialect below, exactly as importDirectiveOf / normaliseImportSpecifier split @import.path. What does not vary is shared:
+// the reach and depth bound, the statement-byte siting, the empty-name refusals and the record itself. A dialect with no arm
+// emits nothing — Python's tags.scm writes these captures for imports and the TS/TSX/JS ones for RE-EXPORTS (kind ReExport, lane alias-import);
+// slice 2b ports one language per PR onto this function.
+struct CapturedImportBind
+{
+    TSNode           directive {};      // the statement both the bind and its Include are sited at
+    std::string_view bound;             // the local name the directive binds
+    std::string      target;            // the module (or path) the name comes from
+    std::string      importedName;      // the dialect's extra bit (Python: "module", "from:<member>" or empty)
+    LocalBindKind    kind = LocalBindKind::Import;   // what the record IS: an import binding, or (Web) a re-export clause
+};
+
+// Python: `import a.b` binds `a` → module a.b; `import a.b as c` binds c → module a.b; `from m import x [as y]` binds x (or y) → m.
+// The query selects the clause; normalization keeps the plain-import module marker and from-import member distinction (#287), and
+// `from m import x as y` with y != x records "from:x" (kPythonFromMemberMark): y alone names no member of m. A multi-clause import
+// still has only its FIRST Include, but every clause binds a name; the old walk bound one only after a nonempty first target.
+inline bool pythonImportBindOf( TSNode namesNode, TSNode aliasNode, std::string_view src, CapturedImportBind& out )
 {
     const bool   hasAlias = !ts_node_is_null( aliasNode );
     const TSNode clause   = hasAlias ? ts_node_parent( namesNode ) : namesNode;
-    const TSNode stmt     = ts_node_parent( clause );
-    const bool   isFrom   = kindIs( ts_node_type( stmt ), "import_from_statement" );
-    const ImportReach reach = importContainerReach( stmt, Lang::Python );
-    if( reach.depth > kMaxImportContainerDepth || !reach.reachable )
-    {
-        return;
-    }
-    // The old walk called its binding helper only after extracting a nonempty first target.
-    const TSNode first = fieldChild( stmt, isFrom ? NodeField::ModuleName : NodeField::Name );
+    out.directive         = ts_node_parent( clause );
+    const bool   isFrom   = kindIs( ts_node_type( out.directive ), "import_from_statement" );
+    const TSNode first    = fieldChild( out.directive, isFrom ? NodeField::ModuleName : NodeField::Name );
     if( nodeTextOf( first, src ).empty() )
     {
-        return;
+        return false;
     }
-    std::string_view bound = nodeTextOf( hasAlias ? aliasNode : namesNode, src );
+    out.bound = nodeTextOf( hasAlias ? aliasNode : namesNode, src );
     if( !isFrom && !hasAlias )
     {
-        bound = bound.substr( 0, bound.find( '.' ) );   // `import a.b` binds `a`, not `a.b`
+        out.bound = out.bound.substr( 0, out.bound.find( '.' ) );   // `import a.b` binds `a`, not `a.b`
     }
-    std::string target = importSpecifierText( isFrom ? first : namesNode, src );
-    const bool  renamed = isFrom && hasAlias && nodeTextOf( namesNode, src ) != bound;   // `from m import x as y`: y alone names no member of m
-    if( bound.empty() || target.empty() )
+    out.target         = importSpecifierText( isFrom ? first : namesNode, src );
+    const bool renamed = isFrom && hasAlias && nodeTextOf( namesNode, src ) != out.bound;
+    out.importedName   = !isFrom ? "module" : renamed ? std::string( kPythonFromMemberMark ).append( nodeTextOf( namesNode, src ) ) : std::string{};
+    return true;
+}
+
+// Web (lane alias-import): a RE-EXPORT — `export { a [as b] } from 'm'` (one record per specifier) and `export * from 'm'`. The
+// tags query captures the specifier's `name:` (with its `alias:` when written) or, for a star, the `source:` string itself. The
+// record binds no local name: var = the exported spelling ("*" for a star), typeName = the module, importedName = the name taken
+// from it ("*"), kind = ReExport (model.h). `export * as ns from` names a namespace and is not captured by the query; a
+// string-named specifier (`export { "a b" as c }`) is not an identifier and is refused here.
+inline bool webReexportBindOf( TSNode namesNode, TSNode aliasNode, std::string_view src, CapturedImportBind& out )
+{
+    static constexpr std::string_view kStar = "*";
+    const bool star = kindIs( ts_node_type( namesNode ), "string" );
+    out.directive   = star ? ts_node_parent( namesNode ) : ts_node_parent( ts_node_parent( ts_node_parent( namesNode ) ) );
+    if( ts_node_is_null( out.directive ) || !kindIs( ts_node_type( out.directive ), "export_statement" )   // a capture the query did not
+        || ( !star && !kindIs( ts_node_type( namesNode ), "identifier" ) ) )                                // shape this way is refused
+    {
+        return false;
+    }
+    out.kind         = LocalBindKind::ReExport;
+    out.bound        = star ? kStar : nodeTextOf( ts_node_is_null( aliasNode ) ? namesNode : aliasNode, src );
+    out.importedName = star ? std::string( kStar ) : std::string( nodeTextOf( namesNode, src ) );
+    out.target       = std::string( pattern::stripQuotePair( nodeTextOf( fieldChild( out.directive, NodeField::Source ), src ) ) );
+    return true;
+}
+
+// the shared emitter: the dialect arm reads the clause, then reach and depth apply to bindings as to Includes (a cut or
+// ERROR-wrapped import must not narrow a call), and the record is sited at the STATEMENT byte with empty spans.
+void emitCapturedImportBind( TSNode namesNode, TSNode aliasNode, std::uint32_t fileId, Lang lang, std::string_view src, std::vector<RawBind>& binds )
+{
+    CapturedImportBind c;
+    bool               read = false;
+    switch( dependencyDialect( lang ) )
+    {
+        case DepDialect::Python: read = pythonImportBindOf( namesNode, aliasNode, src, c ); break;
+        case DepDialect::Web:    read = webReexportBindOf( namesNode, aliasNode, src, c ); break;   // re-exports only (lane alias-import)
+        default:                 break;   // no arm: this dialect's query writes no @import.names (slice 2b adds one per PR)
+    }
+    if( !read )
+    {
+        return;
+    }
+    const ImportReach reach = importContainerReach( c.directive, lang );
+    if( reach.depth > kMaxImportContainerDepth || !reach.reachable || c.bound.empty() || c.target.empty() )
     {
         return;
     }
     RawBind b;
     b.fileId       = fileId;
-    b.startByte    = ts_node_start_byte( stmt );
-    b.lang         = Lang::Python;
-    b.kind         = LocalBindKind::Import;
-    b.var.assign( bound );
-    b.typeName     = std::move( target );
-    b.importedName = !isFrom ? "module" : renamed ? std::string( kPythonFromMemberMark ).append( nodeTextOf( namesNode, src ) ) : std::string{};
+    b.startByte    = ts_node_start_byte( c.directive );
+    b.lang         = lang;
+    b.kind         = c.kind;
+    b.var.assign( c.bound );
+    b.typeName     = std::move( c.target );
+    b.importedName = std::move( c.importedName );
     binds.push_back( std::move( b ) );
 }
 
@@ -348,7 +401,7 @@ void emitCapturedPythonImportBind( TSNode namesNode, TSNode aliasNode, std::uint
 //
 // SEVEN PARAMETERS, and that is the house shape rather than an accident. --quality-delta's `params` check
 // bars 5, and this is over it; the siblings it sits between take 5 (captureBases, captureFields,
-// emitCapturedPythonImportBind above) and 9 (captureIncludes — the very function this round moved C-family OUT of),
+// emitCapturedImportBind above) and 9 (captureIncludes — the very function this round moved C-family OUT of),
 // with the two per-file drivers at 10. Four of the seven are the sink set (includes, refs, shortfall) plus
 // the file id every capture records carry. Collapsing them into a context struct would take this one call
 // under the bar while leaving every sibling over it, i.e. a local abstraction that makes the family harder

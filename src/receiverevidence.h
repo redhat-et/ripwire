@@ -87,32 +87,7 @@ struct GoPackagePaths
     }
 };
 
-// The languages where a bare `m()` inside a method is an implicit `this.m()` (or reaches a free/top-level function).
-inline bool implicitReceiverLang( Lang l ) noexcept
-{
-    return l == Lang::Java || l == Lang::Kotlin || l == Lang::CSharp || l == Lang::Swift || l == Lang::Cpp || l == Lang::Ruby;
-}
-
-// the languages where a call written on a receiver reaches a function only as a METHOD (or through a module alias): a
-// free function is never what `x.f()` calls. JS/TS (an object property may hold one), Kotlin (an extension function is a
-// top-level `fun T.f()`) and C (a function-pointer field) are left out.
-inline bool memberNeverReachesFreeFunction( Lang l ) noexcept
-{
-    return l == Lang::Python || l == Lang::Go || l == Lang::Cpp || l == Lang::Rust || l == Lang::Ruby || l == Lang::Java
-        || l == Lang::CSharp || l == Lang::Swift;
-}
-
-// a call through a module alias (`pkg.F()`) reaches the module's package-level functions only, never a method: Go, where a
-// package qualifier never names a receiver (train 29 call-result-typing, review decision (b): nfpm's `nfpm.Get( … )` beside
-// `( *Config ).Get`). A local spelled like the import hides it before this is asked (graph.h ladderProves).
-inline bool moduleCallReachesFunctionsOnly( Lang l ) noexcept
-{
-    switch( l )
-    {
-        case Lang::Go: return true;
-        default:       return false;
-    }
-}
+// Slice 6c: implicitReceiver, memberNeverReachesFreeFunction, moduleCallReachesFunctionsOnly moved to langFacts(l) in langfacts.h
 
 // (L) the languages whose own receiver rule (Rule 1) answers `self.m()`, so receiver evidence adds only a LOCAL whose class a
 // binding states and the field paths below it or below `self` (ReceiverEvidence::narrowTypedLocal): Rust, whose locals are
@@ -162,14 +137,7 @@ inline WrittenQualifierRule writtenQualifierRuleOf( Lang l ) noexcept
     }
 }
 
-// the languages where `Cls.m()` is a call on the CLASS (a static or an unbound method): C++ spells that `Cls::m()` (a
-// qualifier, the canonical tier's), so a C++/C/Rust receiver spelled like a class is a variable or a member; Ruby's class
-// receivers are its own lookup's question
-inline bool classNameReceiverLang( Lang l ) noexcept
-{
-    return l == Lang::JavaScript || l == Lang::TypeScript || l == Lang::Python || l == Lang::Java || l == Lang::Kotlin
-        || l == Lang::CSharp || l == Lang::Swift;
-}
+// Slice 6c: classNameReceiver moved to langFacts(l) in langfacts.h
 
 // a call written ON a receiver — every language's member shape: Python/C++/Ruby record a RecvKind, the rest memberCall
 inline bool isMemberCallRef( const Reference& r ) noexcept
@@ -282,6 +250,16 @@ struct CallResultTypes
     std::vector<std::string_view>                         filePackage;
     HashMap<std::string, std::vector<std::uint32_t>>      packageFiles;
     HashMap<std::string, std::vector<const Binding*>>     aliasesByName;
+    // RULE3-MEMBER-GUARD: the package directory of a Rust source path (`crates/settings/src/file.rs` → `crates/settings`), empty for a path outside src/, tests/, benches/, examples/
+    static std::string_view rustPackageDirOf( std::string_view path )
+    {
+        std::size_t cut = path.size();
+        for( const std::string_view part : { std::string_view( "/src/" ), std::string_view( "/tests/" ), std::string_view( "/benches/" ), std::string_view( "/examples/" ) } )
+        {
+            cut = std::min( cut, path.find( part ) );
+        }
+        return cut == path.size() ? std::string_view{} : path.substr( 0, cut );
+    }
     // Rust crate/module layout, built on the first Rust resolution: a file's crate (its nearest `lib.rs` / `main.rs`
     // directory) and module path (`a::b` for src/a/b.rs or src/a/b/mod.rs), the crates by name (`mdbook_core` for
     // crates/mdbook-core/src), and each module's files
@@ -293,6 +271,7 @@ struct CallResultTypes
         HashMap<std::string, std::uint32_t>               crateByName;
         HashMap<std::string, std::vector<std::uint32_t>>  filesOf;    // "<crate>#<module>" → its files
         HashMap<std::string, NodeId>                      inlineMods; // fix round 3: "<crate>#<module>" → an inline `mod` symbol
+        HashMap<std::string, char>                        packageNames;   // RULE3-MEMBER-GUARD: every package directory's name (`-` as `_`), lib.rs or not
     };
     static constexpr std::uint32_t                        kNoCrate = 0xFFFFFFFFu;
     mutable RustLayout                                    rust;
@@ -1021,6 +1000,12 @@ struct CallResultTypes
             {
                 continue;
             }
+            if( const std::string_view pkg = rustPackageDirOf( path ); !pkg.empty() )
+            {
+                std::string name( pkg.substr( pkg.rfind( '/' ) == std::string_view::npos ? 0 : pkg.rfind( '/' ) + 1 ) );
+                std::replace( name.begin(), name.end(), '-', '_' );
+                rust.packageNames.try_emplace( std::move( name ), '\1' );
+            }
             for( std::string_view dir = includerDir( path );; dir = includerDir( dir ) )
             {
                 if( const auto it = rootIndex.find( std::string( dir ) ); it != rootIndex.end() )
@@ -1326,6 +1311,120 @@ struct CallResultTypes
         rustModuleAt( tf, ing.symbols[ target ].sigStartByte, targetModule );
         return tf < rust.crateOf.size() && rust.crateOf[ tf ] == crate && targetModule == module;
     }
+    // RULE3-MEMBER-GUARD: what written binding proves `target` for a Rust call Rule 3 narrowed to it, an allowlist. A bare call: a `use`
+    // of the name written into the target's crate that does not provably leave the tree (the item it names in that crate is not compared),
+    // or a glob `use` of the module holding the target. A qualified call: the qualifier, read whole from its written root
+    // (model.h rustWrittenQualifierOf), names the module holding the target, or its last segment the target's own type (`owner`). "Holding" takes a module's descendants too
+    // and a crate root takes its whole crate, because a `pub use` re-export places an item below the path written. Not proven, counted
+    // as via="name": `Ok(..)`, `assert!(..)`, a name only a glob of an unrelated module is near, `oneshot::channel()`, `String::new()` (those two then read as outside the tree, external=; graph.h).
+    bool rustRule3Proves( const Reference& r, NodeId target, std::string_view owner ) const
+    {
+        if( !rust.built )
+        {
+            buildRustLayout();
+        }
+        const std::uint32_t tf = ing.symbols[ target ].fileId;
+        if( tf >= rust.crateOf.size() || r.fileId >= rust.crateOf.size() )
+        {
+            return false;
+        }
+        std::string targetModule;
+        rustModuleAt( tf, ing.symbols[ target ].sigStartByte, targetModule );
+        std::uint32_t crate = kNoCrate;
+        std::string   module;
+        // The module layout knows a crate only by a lib.rs or main.rs: a crate with `[lib] path = "src/x.rs"` (all of zed's) has none. There the written root reads
+        // against the package directory: `crate`/`self`/`super` the caller's own, any other root that directory's name (`-` as `_`). `use serde_json::json` names no tree directory.
+        const auto packageOf = []( std::string_view path ) { return rustPackageDirOf( path ); };
+        const auto rootNamesTargetPackage = [ & ]( std::string_view path )
+        {
+            const std::string_view root = path.substr( 0, path.find( "::" ) );
+            const std::string_view pkg  = packageOf( rootRelPath( ing, tf ) );
+            if( root == "crate" || root == "self" || root == "super" )
+            {
+                // only where the layout cannot see the caller's crate: where it can, a path it cannot follow (`self::f` through a `use … as f`) proves nothing
+                return rust.crateOf[ r.fileId ] == kNoCrate && pkg == packageOf( rootRelPath( ing, r.fileId ) );
+            }
+            const std::size_t      slash = pkg.rfind( '/' );
+            const std::string_view leaf  = slash == std::string_view::npos ? pkg : pkg.substr( slash + 1 );
+            return !leaf.empty() && leaf.size() == root.size() && std::ranges::equal( leaf, root, []( char a, char b ) { return ( a == '-' ? '_' : a ) == b; } );
+        };
+        const auto    holdsTarget = [ & ]( std::string_view path, std::uint32_t at )
+        {
+            if( !rustModuleOf( r.fileId, at, path, crate, module, 0 ) )
+            {
+                return rootNamesTargetPackage( path );
+            }
+            if( rust.crateOf[ tf ] != crate )
+            {
+                return false;
+            }
+            return module.empty() || targetModule == module || ( targetModule.starts_with( module ) && std::string_view( targetModule ).substr( module.size() ).starts_with( "::" ) );
+        };
+        if( !r.qualifier.empty() )
+        {
+            const std::string_view written = rustWrittenQualifierOf( r );   // from its root: `crate::a` of `crate::a::helper()`
+            const std::size_t sep = written.rfind( "::" );
+            const std::string_view last = written.substr( sep == std::string::npos ? 0 : sep + 2 );
+            if( !owner.empty() && last == owner )
+            {
+                return true;
+            }
+            bool aliased = false;   // `use nu_protocol::Value as NuValue; NuValue::nothing()`: a `use` binds a ONE-segment qualifier only
+            forEachRustUseAt( r.fileId, r.startByte, sep == std::string::npos ? last : std::string_view{}, [ & ]( const Binding& b )
+            {
+                const std::size_t at = b.importedName.rfind( "::" );
+                aliased = aliased || ( !owner.empty() && std::string_view( b.importedName ).substr( at == std::string::npos ? 0 : at + 2 ) == owner );
+            } );
+            return aliased || holdsTarget( written, r.startByte );
+        }
+        // a `use` of the name in file `f` whose module path is written into the target's crate and that does not provably leave the tree (`pub use
+        // ext::helper` re-exported by the module named): an unknown root, a duplicate crate name or an outside crate proves nothing. WHICH item of
+        // that crate it names is not compared with the target (card RUST-USE-TARGET): a second in-crate namesake the `use` reaches still proves it.
+        const auto usesIntoTargetCrate = [ & ]( std::uint32_t f, const Binding& b )
+        {
+            if( b.kind != LocalBindKind::TypeImport )
+            {
+                return false;
+            }
+            const std::size_t at = b.importedName.rfind( "::" );
+            if( at == std::string::npos )
+            {
+                return false;
+            }
+            const std::string_view modPath = std::string_view( b.importedName ).substr( 0, at );
+            if( rustPathProvablyOutside( f, b.startByte, b.importedName ) )
+            {
+                return false;
+            }
+            return rustModuleOf( f, b.startByte, modPath, crate, module, 0 ) ? rust.crateOf[ tf ] == crate : rootNamesTargetPackage( modPath );
+        };
+        bool proven = false;
+        forEachImport( r.fileId, r.calleeName, [ & ]( const Binding& b ) { proven = proven || usesIntoTargetCrate( r.fileId, b ); } );   // any level: `mod tests { use super::*; }` sees its parent's
+        if( !proven )
+        {
+            forEachImport( r.fileId, "*", [ & ]( const Binding& b )
+            {
+                if( proven || b.kind != LocalBindKind::TypeImport )
+                {
+                    return;
+                }
+                proven = holdsTarget( b.importedName, b.startByte );
+                if( !proven && rustModuleOf( r.fileId, b.startByte, b.importedName, crate, module, 0 ) )
+                {
+                    // `use super::*` over a module that itself `use`s the name (a `mod tests` calling what its parent imports)
+                    const auto files = rust.filesOf.find( rustModuleKey( crate, module ) );
+                    if( files != rust.filesOf.end() )
+                    {
+                        for( const std::uint32_t mf : files->second )
+                        {
+                            forEachImport( mf, r.calleeName, [ & ]( const Binding& used ) { proven = proven || usesIntoTargetCrate( mf, used ); } );
+                        }
+                    }
+                }
+            } );
+        }
+        return proven;
+    }
     // fc1: does the Rust path `path` (a call's written qualifier, a `use`'s path) written at byte `at` of `f` PROVABLY lead out of
     // the tree — std / core / alloc, an external crate, an unknown root, the prelude, or an in-tree re-export of one? false
     // when it reaches an in-tree module or item, and whenever the walk cannot tell: two `use`s of the root, an in-tree glob
@@ -1354,6 +1453,27 @@ struct CallResultTypes
             return rustRootOutside( f, at, modPath.empty() ? item : modPath.substr( 0, modPath.find( "::" ) ), depth );
         }
         return rustReexportOutside( crate, module, item, depth );
+    }
+    // rustPathOutside, as a verdict: the path provably leaves the tree (an `impl other_crate::Renderer for X` names ANOTHER crate's
+    // trait, not the in-tree one of that name). A cut walk, an empty path or a path into the tree is false.
+    bool rustPathProvablyOutside( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        pathCut = false;
+        return rustPathOutside( f, at, path ) && !pathCut;
+    }
+    // RULE3-MEMBER-GUARD: does the root a written path starts from (its head, or where the head's `use` begins) name a package directory of the tree? A crate with
+    // `[lib] path` has no lib.rs for the layout to know it by, so rustPathOutside reads a `use agent_settings::AgentSettings` from a crate it does know as an
+    // unknown, outside root; naming a package directory of the tree, the root is not provably outside.
+    bool rustRootNamesTreePackage( std::uint32_t f, std::uint32_t at, std::string_view path ) const
+    {
+        if( !rust.built )
+        {
+            buildRustLayout();
+        }
+        const std::string head( path.substr( 0, path.find( "::" ) ) );
+        std::string       root = head;
+        forEachRustUseAt( f, at, head, [ & ]( const Binding& b ) { root = b.importedName.substr( 0, b.importedName.find( "::" ) ); } );
+        return rust.packageNames.contains( root );
     }
     // the files holding module (crate, module)'s own level: a file module's files, or (`inlineMod` set) the one file of an
     // inline `mod`, kept in `ownFile`; empty when no such module
@@ -2432,6 +2552,36 @@ struct ReceiverEvidence
         return false;
     }
 
+    // lane iface-peel (LangFacts::returnTypedDispatchLet): the local `b` (a CallResult) holds the result of a call whose ONE
+    // proven callee declares `-> &dyn T` / `Box<dyn T>` / `impl T` (`rt`, a ReturnType carrying kDispatchResultBit). The trait
+    // resolves in the CALLEE's file like a written type (noteDispatchWritten's rule) and must be a trait; the local's own
+    // untyped tombstone (same span) then carries it, exactly as `let x: &dyn T` would. False when nothing was typed: no
+    // tombstone, a class of that name, an unresolved or ambiguous trait.
+    bool typeCallResultDispatch( const Binding& b, const Binding& rt )
+    {
+        const auto it = localType.find( keyOf( factScope( b ), '#', b.var ) );
+        if( it == localType.end() )
+        {
+            return false;
+        }
+        const std::string_view written = rt.importedName;
+        const NodeId trait = types.rustResultClass( rt.fileId, rt.startByte, written.find( "::" ) == std::string_view::npos ? std::string_view{} : written, rt.typeName );
+        if( trait == kNoNode || ing.symbols[ trait ].kind != SymKind::Interface )
+        {
+            return false;
+        }
+        const bool spanned = b.spanEnd > b.spanStart;
+        for( LocalFact& f : it->second )
+        {
+            if( f.start == ( spanned ? b.spanStart : 0u ) && f.end == ( spanned ? b.spanEnd : 0u ) && f.type.empty() && f.iface == kNoNode )
+            {
+                f.iface = trait;
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ── queries ───────────────────────────────────────────────────────────────────────────────────────────────────────
     // the innermost function/method of the same file whose span strictly holds `id`; kNoNode when none
     NodeId enclosingFn( NodeId id ) const { return innermostEnclosingFn( ing, fnsByFile, id ); }
@@ -2587,7 +2737,7 @@ struct ReceiverEvidence
     // outside on-demand import alone, no import at all) names an outside class — never an in-tree namesake
     bool namesClass( const Reference& r, std::string_view root, std::string_view cls ) const
     {
-        return classNameReceiverLang( r.lang ) && classNames.contains( std::string( cls ) ) && !isLocalName( r.fromSymbol, root )
+        return langFacts( r.lang ).classNameReceiver && classNames.contains( std::string( cls ) ) && !isLocalName( r.fromSymbol, root )
             && !( callResultFamilyOf( r.lang ) == CallResultFamily::Jvm && types.jvmHides( r.fileId, r.startByte, root ) );
     }
     // the class owning the caller — the caller's own owner, else the nearest enclosing function's (a closure in a method)
@@ -2854,7 +3004,7 @@ struct ReceiverEvidence
         // Java/C#/Kotlin/Swift (the implicit-receiver languages but C++, whose Rule 2b reads fields, and Ruby, whose fields
         // are @ivars): a bare `field.m()` inside a method is `this.field.m()` — the field the caller's class (or a base)
         // declares, when no parameter or local of that name hides it
-        if( implicitReceiverLang( r.lang ) && r.lang != Lang::Cpp && r.lang != Lang::Ruby && !declaresLocal( r.fromSymbol, root, r.startByte ) )
+        if( langFacts( r.lang ).implicitReceiver && r.lang != Lang::Cpp && r.lang != Lang::Ruby && !declaresLocal( r.fromSymbol, root, r.startByte ) )
         {
             const std::string_view owner = callerClass( r.fromSymbol );
             if( const std::string_view ft = owner.empty() ? std::string_view{} : fieldOf( owner, root ); !ft.empty() )
@@ -2998,8 +3148,9 @@ struct ReceiverEvidence
     // recorded. Rust (receiverLocalsOnly): a parameter, local or field typed only through a trait (noteDispatchWritten), reached
     // from a local or from `self` through the fields' resolved classes. The typed languages: the receiver root's written type
     // (rootClass: a typed parameter or local, a field of the caller's class) and its stated fields (fieldOf), resolved to ONE
-    // in-tree class at the call site (classAtSite) — a field path only below a class no other in-tree class names. Never
-    // `this` / `self` / `super` or a class-name receiver: those name the caller's own class or a static call, no dispatch.
+    // in-tree class at the call site (classAtSite) — a field path only below a class no other in-tree class names. Never a bare
+    // `this` / `self` / `super` or a class-name receiver: those name the caller's own class or a static call, no dispatch;
+    // `this.f.m()` (lane receiver-fixes, TS-FIELD-SELF) is f's stated type, as for any other root.
     struct DispatchReceiver
     {
         NodeId           type = kNoNode;
@@ -3020,7 +3171,10 @@ struct ReceiverEvidence
         {
             return traitDispatchReceiver( r, ch );
         }
-        if( isThisRoot( ch.root ) || isSuperRoot( r, ch.root ) )
+        // TS-FIELD-SELF: `this.f.m()` is a call on f's stated type, as `f.m()` on a typed local is; a bare `this.m()` (or one inside a
+        // static member, whose `this` is the class object) names the caller's own class, no dispatch
+        if( ( isThisRoot( ch.root ) && ( ch.path.empty() || ch.root != langFacts( r.lang ).instanceReceiver || callerIsStatic( r.fromSymbol ) ) )
+            || isSuperRoot( r, ch.root ) )
         {
             return {};
         }
@@ -3053,6 +3207,48 @@ struct ReceiverEvidence
             }
         }
         return { cls, {} };
+    }
+    // lane receiver-fixes (TS-FIELD-SELF, PY-CTOR-ANNOT; dispatch classes #10 receiver peeling, #11 name-keyed identity): the
+    // caller's own class when a member call's receiver is `this.<path>` / `self.<path>` whose last field the classes state as
+    // an in-tree class or interface T (fieldOf: a written or constructed type, never a tombstone) that is neither the caller's
+    // class nor one of its bases (inCone). The object such a call reaches is a T, so the caller's OWN definition of the callee
+    // is no candidate: graph.h cuts it from the name tiers (before, `this.pub.provide()` with `pub: Provider` bound the
+    // caller's own `provide` by name, and with that one same-file candidate the self-loop then vanished). kNoNode otherwise:
+    // no path, a static side, an unknown field, a T the tree does not define, or no one class owning the caller.
+    NodeId foreignFieldOwner( const Reference& r ) const
+    {
+        if( !active || r.fromSymbol >= ing.symbols.size() || !r.qualifier.empty() || !isMemberCallRef( r ) || receiverLocalsOnly( r.lang ) )
+        {
+            return kNoNode;
+        }
+        const Chain ch = chainOf( r );
+        if( !ch.valid || !ch.ctor.empty() || ch.path.empty() || ch.root != langFacts( r.lang ).instanceReceiver || callerIsStatic( r.fromSymbol ) )
+        {
+            return kNoNode;
+        }
+        const std::string_view own  = callerClass( r.fromSymbol );
+        std::string_view       type = own;
+        for( std::string_view rest = ch.path; !rest.empty() && !type.empty(); )
+        {
+            const std::size_t dot = rest.find( '.' );
+            type = fieldOf( type, rest.substr( 0, dot ) );
+            rest = dot == std::string_view::npos ? std::string_view{} : rest.substr( dot + 1 );
+        }
+        if( own.empty() || type.empty() || type == own || inCone( own, type ) )
+        {
+            return kNoNode;
+        }
+        key.assign( type );
+        return classNames.contains( key ) && !namesTypeAlias( r.lang, type ) ? selfClass( r.fromSymbol ) : kNoNode;
+    }
+    // a TypeScript `type T = …` is indexed as a Struct (queries/typescript/tags.scm @definition.type), and TS has no struct of its
+    // own: T then names whatever the alias spells (a union, a base class), not "a class that is not the caller's". Any alias of the
+    // name in the tree keeps foreignFieldOwner from cutting (a union holds the caller's class too; `type B = Base` may hold a D).
+    bool namesTypeAlias( Lang lang, std::string_view name ) const
+    {
+        NodeId one = kNoNode;
+        return callResultFamilyOf( lang ) == CallResultFamily::TypeScript
+            && types.classesNamed( name, CallResultFamily::TypeScript, [ & ]( NodeId c ) { return ing.symbols[ c ].kind == SymKind::Struct; }, one ) != 0;
     }
     // TypeScript: a type name the caller's file imports by name from a module (`import { Router } from "./fmt/router"`) that the
     // import tables pin to no class — their export table holds functions and classes, never an interface — names the ONE

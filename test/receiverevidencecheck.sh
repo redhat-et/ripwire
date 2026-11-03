@@ -1054,7 +1054,7 @@ merge_arms(){
     printf '%s' "$proven" | grep -q 'x="' \
         && no "(H) merge near miss: proven's evidence-bound get row was merged: $proven" \
         || ok "(H) merge near miss: a proven row is never merged (proven's get carries no x=)"
-    [ "$( grep -o '<s [^>]*n="get"' "$cal" | wc -l | tr -d ' ' )" = 3 ] \
+    [ "$( grep -oE '<s [^>]*n="([A-Za-z]+\.)?get"' "$cal" | wc -l | tr -d ' ' )" = 3 ] \
         && ok "(H) merge: --callees=u.js:use lists all three get candidates (the merged row is recoverable)" \
         || no "(H) merge: --callees=u.js:use does not list three get candidates: $( head -c 600 "$cal" )"
     grep -q 'x=N' "$full" && P legend "$full" && [ "$PARSED" = "DEFINED" ] \
@@ -1141,7 +1141,7 @@ echo "--- (H) parity: the hedge bit is value-equal across CLI and MCP, and acros
 cli_set(){ local f rc rows; f="$( answer "$1" "$2" "$3" )"; rc="$( cat "$f.rc" 2>/dev/null )"
            if [ "$rc" != "0" ]; then echo "RUNFAIL --$2=$3 rc=${rc:-unknown}"; return; fi
            rows="$( python3 "$TMP/parse.py" rows "$f" 2>/dev/null )" || { echo "RUNFAIL reader on --$2=$3"; return; }
-           printf '%s\n' "$rows" | awk 'NF >= 5 { print $2 "@" $3 "#" $5 } $0 == "NOROOT" { print }' | sort -u; }
+           printf '%s\n' "$rows" | awk 'NF >= 5 { n = $2; sub(/^[A-Za-z_]+\./, "", n); print n "@" $3 "#" $5 } $0 == "NOROOT" { print }' | sort -u; }   # js-def-naming: the CLI XML row names a JS/TS method by its class (Application.onerror); the MCP JSON key stays bare (QUALNAME-1), so the parity reads the leaf
 mcp_set(){ local out rc rows; out="$TMP/mcpset.$1.$2.$( printf '%s' "$3" | tr '/:.' '___' )"; mcp "$1" "$2" "$3" "$out"
            rc="$( cat "$out.rc" 2>/dev/null )"
            if [ "$rc" != "0" ]; then echo "RUNFAIL MCP $2 $3 rc=${rc:-unknown}"; return; fi

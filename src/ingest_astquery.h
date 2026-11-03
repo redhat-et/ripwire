@@ -2176,7 +2176,7 @@ struct BlobDefsSlot
 // member-macro re-parse when the first parse holds errors, the `#if 0` ranges, the definitions-only tags pass. False when
 // the slot is already final (a template-only .astro, or a degrade it discloses).
 inline bool tagsDefinitionsOfBlob( std::string_view bytes, const LangEntry& le, TSParser* parser, TSQueryCursor* cursor, MemberMacroReparse& macroWork,
-                                   std::vector<RawDef>& defs, BlobDefinitions& slot )
+                                   std::vector<RawDef>& defs, BlobDefinitions& slot, std::string_view fileStem )
 {
     IncludedRangeGuard     rangeGuard;
     const AstroFrontmatter astro = restrictAstroToFrontmatter( parser, le, bytes, rangeGuard );
@@ -2206,7 +2206,7 @@ inline bool tagsDefinitionsOfBlob( std::string_view bytes, const LangEntry& le, 
     std::vector<RawBind>                binds;
     std::vector<Include>                incs;
     ExtractShortfall                    shortfall;
-    captureTagsFacts( cursor, le, 0, bytes, root, defs, refs, binds, incs, ppDead, shortfall, TagsCapture::DefinitionsOnly );
+    captureTagsFacts( cursor, le, 0, bytes, root, defs, refs, binds, incs, ppDead, shortfall, TagsCapture::DefinitionsOnly, fileStem );
     if( shortfall.isShort )
     {
         DISCLOSE( ( BlobDefsSlot{ slot } ), BlobDefsSlot::DisclosureWhy::ExtractPartial, "whereis: the tags pass over a blob was partial — its rows confirm no definition" );
@@ -2264,7 +2264,7 @@ inline void definitionLinesOfOneBlob( const BlobText& blob, std::string_view nam
         std::vector<RawRef> refs;
         extractMarkdown( 0, blob.bytes, fs::path( pathText ).stem().string(), ts_tree_root_node( mdTree.get() ), defs, refs );
     }
-    else if( !tagsDefinitionsOfBlob( blob.bytes, *le, parser, cursor, macroWork, defs, slot ) )
+    else if( !tagsDefinitionsOfBlob( blob.bytes, *le, parser, cursor, macroWork, defs, slot, cjsExportStem( le->lang, pathText ) ) )
     {
         return;   // the slot says why (template-only .astro: Parsed with nothing; a degrade: Failed)
     }

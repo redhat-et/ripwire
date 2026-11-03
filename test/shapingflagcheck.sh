@@ -308,6 +308,14 @@ if [ "$nHonor"  -ge 3  ]; then ok "(B) $nHonor honouring rows proved to actually
     && ok "(C) a report/paging verb still REFUSES --top-k and does not also emit the notice" \
     || no "(C) --hotspots --top-k=3 exited $rcH with: [$( head -c 200 "$TMP/hot.err" )]"
 
+# CR nitpick (harvest 463, review 5692571864, src/cli.h:4239): --defs is an honorsPaging() member, so it holds no kShapingVerbs row
+# (the header's invariant: a verb is in one table, never both). The row was dead — noticeShapingFlagIgnored returns before reading it.
+if grep -n -E '^[[:space:]]*\{ "--defs"[[:space:]]*,' "$ROOT/src/cli.h" >/dev/null; then no "(C) --defs holds a kShapingVerbs row while honorsPaging() already owns it"; else ok "(C) --defs is in honorsPaging() only: no kShapingVerbs row"; fi
+"$BIN" . --defs=main --max-tokens=200 >/dev/null 2>"$TMP/defs.err"; rcD=$?
+{ [ "$rcD" -eq 1 ] && grep -q 'honoring set' "$TMP/defs.err" && ! grep -q 'is not read by' "$TMP/defs.err"; } \
+    && ok "(C) --defs --max-tokens=200 still REFUSES and does not also emit the notice" \
+    || no "(C) --defs --max-tokens=200 exited $rcD with: [$( head -c 200 "$TMP/defs.err" )]"
+
 # ── (D) the default map and its riders honour both and must stay silent ────────────────────────────────
 for probe in "--top-k=3" "--max-tokens=200"; do
     "$BIN" . "$probe" >"$TMP/d.out" 2>"$TMP/d.err"; rcD=$?

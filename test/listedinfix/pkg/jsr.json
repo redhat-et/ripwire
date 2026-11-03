@@ -1,0 +1,6 @@
+{
+  "exports": {
+    "./logger": "./src/middleware/logger/index.ts",
+    "./cors": "./src/middleware/cors/index.ts"
+  }
+}

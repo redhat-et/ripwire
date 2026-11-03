@@ -24,6 +24,7 @@
 #include "recall.h"
 #include "valuerefs.h"          // reference-as-value round: the per-index ValueRefIndex cache (valueRefIndexOf)
 #include "situ.h"
+#include "memguard.h"          // cutIndexErrorClause: the partial-index sentence an error from a cut index carries
 #include "workspace.h"          // multi-root `paths` array (A11): root hygiene + labels + merge
 #include "infra/statclock.h"    // rw::saturatingNanoseconds — the staleness stat reads without signed overflow past 2262
 #include "quality.h"            // computeSnapshot/computeDelta + writeBaseline + gitHeadSha/computeHeadSnapshot — the quality_delta/quality_baseline verbs reuse the exact CLI logic
@@ -1178,6 +1179,32 @@ inline const ValueRefIndex& valueRefIndexOf( const McpIndex& ix )
         ++ix.valueRefBuilds;
     }
     return *ix.valueRefs;
+}
+
+// notfound-on-cut: the memory-guard sentence an ERROR from `root` carries when the resident index for that root is the one the
+// guard cut ("" otherwise). Reads the slot only — an error never builds or rebuilds an index — so a request for a root that
+// is not resident, or a whole one, gets nothing. A result of the same index carries it as `_memory_stop` instead.
+inline std::string cutIndexErrorClause( const std::string& root )
+{
+    const McpIndex& resident = mcpIndexSlot();
+    return resident.valid && resident.root == root && resident.ing.memoryStop.isSet() ? "; " + memguard::partialAbsenceLine( resident.ing ) : std::string();
+}
+
+// notfound-on-cut: the verbs that run an ingest of their OWN (edit_check, quality_delta) never fill the resident slot, so on the
+// request that cut it cutIndexErrorClause finds nothing to read. They hand the ingest they answer from to noteOwnIngestCut, and
+// the request's error builder (mcp.h memoryStopSuffix) ends its message with the same shared sentence. One note per request
+// (the dispatcher clears it on entry); the thread that ran the ingest is the thread that builds the error.
+inline std::string& ownIngestCutNote()
+{
+    static thread_local std::string note;
+    return note;
+}
+inline void noteOwnIngestCut( const IngestResult& ing )
+{
+    if( ing.memoryStop.isSet() )
+    {
+        ownIngestCutNote() = "; " + memguard::partialAbsenceLine( ing );
+    }
 }
 
 // the cached index for `root`, rebuilt only when stale (otherwise returned as-is, no parse, no graph rebuild).

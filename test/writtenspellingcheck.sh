@@ -60,6 +60,17 @@ refuse ts 'AliasDriver.beginTransaction'       # a value alias is not an owner
 refuse ts 'Missing.beginTransaction'
 refuse ts 'driver.RuntimeDriver.inner'         # no such member
 
+echo "-- (1b) a JS/TS private member as the rows print it, Owner.#name (lane D2, readout-40 G; RED on train-40 1318069a: every bind arm rc=1)"
+bind   ts 'RuntimeDriver.#dispatch' tsPrivHelper tsOtherPrivHelper
+bind   ts 'Other.#dispatch' tsOtherPrivHelper tsPrivHelper
+bind   ts 'src/driver/runtime-driver.ts:RuntimeDriver.#dispatch' tsPrivHelper tsOtherPrivHelper
+bind   ts '#dispatch' tsPrivHelper                 # the bare name: both, as before (a union)
+bind   ts '#dispatch' tsOtherPrivHelper            # ... and the other one too: a union names BOTH definitions' callees (CR 4408459940)
+refuse ts 'Missing.#dispatch'                     # no owner of that name
+refuse ts 'RuntimeDriver.#nope'                   # no such private member
+refuse ts 'RuntimeDriver.dispatch'                # the '#' is part of the name: the unprefixed spelling names nothing
+refuse ts 'src/other.ts:RuntimeDriver.#dispatch'  # the owner is not in that file
+
 echo "-- (2) module / crate / package prefixes"
 bind   py 'asyncio.run' py_asyncio_run_helper py_runner_method_helper py_app_run_helper
 bind   py 'json.dump' py_json_dump_helper py_app_dump_helper

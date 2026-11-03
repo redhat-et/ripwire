@@ -207,6 +207,16 @@ struct CodeScanOptions
     bool tripleQuoteStrings      = false;   // `"""…"""` / `'''…'''` is one string to its closing triple (Python)
 };
 
+// The scanner options for `lang`'s comment and string rules, in ONE place (the two consumers that read string literals spelled the
+// same five fields: graph.h identifierTokenCountExceeds, forcallerhop.h forBodyHoldsTaskMessage). Python: `//` is floor division, not a
+// comment, and `"""`/`'''` open one triple-quoted string; `#` comments and `'` strings per the two language masks above.
+inline CodeScanOptions stringAwareScanOptions( Lang lang, bool munchMultiByteOperators ) noexcept
+{
+    return CodeScanOptions{ .stripHashComments = usesHashLineComments( lang ), .munchMultiByteOperators = munchMultiByteOperators,
+                            .singleQuoteStrings = usesSingleQuoteStrings( lang ), .slashComments = lang != Lang::Python,
+                            .tripleQuoteStrings = lang == Lang::Python };
+}
+
 template<typename Sink>
 inline void scanCodeTokens( const std::string& src, std::size_t a, std::size_t b, CodeScanOptions options, Sink&& sink )
 {

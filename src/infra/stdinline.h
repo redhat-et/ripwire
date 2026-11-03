@@ -32,6 +32,7 @@
 
 #include "Diagnostics.h" // ASSUME — the null-stream precondition
 
+#include <atomic>
 #include <cstdio>
 #include <string>
 

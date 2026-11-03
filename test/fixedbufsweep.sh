@@ -190,9 +190,9 @@ TABLE = {
     ( "src/serialize.h", "fitAttr" ):  ( 1, "safe",       "fitAttr[96]: two %zu plus the literal ' over_ceiling=1'." ),
     ( "src/serialize.h", "attr" ):     ( 2, "safe",       "attr[352] x2: the per-symbol metric attrs. Widest 26 lit + 4x10 digits + 11 role + qbuf(<=95) + ambs(<=35: amb= + lpin=) + kbuf(<=23) = 230 B." ),
     ( "src/serialize.h", "tail" ):     ( 3, "safe",       "tail[192] x3: the <d> row tail. Widest 34 lit+digits + inAttr(<=23) + lens(qbuf, <=79) + pure(9) = 145 B. The third (lane/lean-answers-068, sigRowTail's zero-elision branch) prints cxAttr/ccxAttr/inAttr pre-formatted, each omitted at 0 — never wider than the second." ),
-    ( "src/serialize.h", "hdr" ): ( 13, "safe",       "hdr[64] x2 (packBodies/packOutline) (13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
+    ( "src/serialize.h", "hdr" ): ( 14, "safe",       "hdr[64] x2 (packBodies/packOutline) (14: arch-honest — packDeps' <f> row for a no-edge file writes includes= and a language tag, hdr[144], one integer + a label of at most 8 B: far under the buffer; 13: train 26b — count-floor-068 replaced the <lego> implementors= header writes, two hdr sites, with string appends): '<b t=\"%s\" l=\"%u\" p=\"' — symTag's fixed vocabulary + a line number. THE ESCAPED PATH IS APPENDED AFTER, on std::string. snprintf-then-append: textbook safe." ),
     ( "src/serialize.h", "db" ):       ( 1, "safe",       "db[64 + kPageDisclosureCap]: <deps files=...> plus pageDisclosure's own capped buffer, sized against that cap by construction." ),
-    ( "src/serialize.h", "hb" ): ( 3, "latent",     "hb[176]: <health .../>; shape= is a fixed vocabulary but acd/nccd are %.1f/%.2f on DOUBLES, formally unbounded. Realistic worst case 66 lit + 60 digits + 24 float + 10 shape = 160 B, ~16 B of margin. Truncation drops the '/>' and orphans the element." ),
+    ( "src/serialize.h", "hb" ): ( 4, "latent",     "hb[176]: <health .../> (4: arch-honest — the same line without ccd/acd/nccd/shape when no measured file is left: two integers, 64 B at most; masked_files= is appended through the writer, outside the buffer); shape= is a fixed vocabulary but acd/nccd are %.1f/%.2f on DOUBLES, formally unbounded. Realistic worst case 66 lit + 60 digits + 24 float + 10 shape = 160 B, ~16 B of margin. Truncation drops the '/>' and orphans the element." ),
     ( "src/serialize.h", "fit" ):      ( 1, "safe",       "fit[160]: the JSON max_tokens/fit_bytes twin; the %s is the literal ',\"over_ceiling\":true'." ),
     ( "src/serialize.h", "num" ): ( 25, "safe",       "num[64]: ',\"calls_total\":%u,\"calls_capped\":%s,...' — the %s is 'true'/'false'. Worst case 56 B." ),
 }
@@ -626,7 +626,7 @@ if not bad:
 #            train 26c (cli-perf merged onto the train's 363/248/248/109): re-derived on the merged tree.
 #            2026-10-18 (lane/hrr): +1 call/+1 mention/+1 site, rows unchanged (363/248/248/109 -> 364/249/249/109): sigsOpenTag's
 #            nb[96] ' files_first="{}"' (35 B worst case, one size_t, nothing escaped) — re-read and sized before this pin.
-EXPECTED = { "mentions": 364, "calls": 249, "sites": 249, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=)
+EXPECTED = { "mentions": 366, "calls": 251, "sites": 251, "rows": 109, "widthforms": 0 }   # lane/hrr: +1 nb site (files_first=); arch-honest: +2 (packDeps hb, hdr)
 #            2026-09-30 (#325 ruby_bases_unscoped=): +2 calls/+2 mentions/+2 sites, rows unchanged — graphGaugeAttrXml/Json (graphlegend.h) each format the absent-at-zero Ruby gauge into the SAME local buf[160]: one size_t, no string argument (21 + 20 digits worst case).
 #            2026-09-04 (capture-audit L6, H9): +1 call/+1 mention, sites/rows UNCHANGED — re-read, not
 #            re-counted. packConnect gained ONE snprintf into a new `char connectCeiling[32]` for the

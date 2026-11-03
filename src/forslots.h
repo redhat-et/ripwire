@@ -25,6 +25,9 @@
 // the stored functions) is built only when one is found, so an answer with no initializer row pays one scan.
 
 #include "forfold.h"            // fold_detail::overlapsServed — the fold's own "the answer already carries this text" reading
+#include "langfacts.h"         // langFacts().memberSeparator — slot_by= names a method as its rows do
+#include "infra/sortutil.h"   // svLess: the candidate-name list the cost pre-check binary-searches
+#include "filter.h"             // isTestSymbol — slot_by= / slot_fields= list non-test callers first
 #include "formembers.h"         // MemberNamesServed — the bodies the answer serves
 #include "model.h"
 #include "valuerefindex.h"      // ValueRefIndex::targetsOf — the functions a value reference may hold
@@ -33,8 +36,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
+#include <numeric>
+#include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -63,6 +70,15 @@ static_assert( kForSlotCap == 16, "kForInitSlotsLegend states the cap: move the 
 
 namespace slot_detail
 {
+// One struct field of a slot_fields= run before the cap: its printed item, whether a caller was found, how many functions it holds,
+// whether that caller joins by the field name alone.
+struct SlotFieldItem
+{
+    std::string item;
+    bool        hasCaller = false;
+    std::size_t stored    = 0;
+    bool        nameOnly  = false;   // its caller joins by the field NAME alone (`@~C`): printed, it sets the name-tier legend
+};
 // The slot key as into= spells it, less the row's own name: `o.run` → `run`, `po[0]` → `[0]`, `T["k"]` → `["k"]`.
 inline std::string_view slotKey( std::string_view fieldName, std::string_view owner ) noexcept
 {
@@ -214,6 +230,291 @@ inline std::size_t spliceInitSlots( std::string& sigs, const IngestResult& ing, 
     std::ranges::sort( inserts, {}, &std::pair<std::size_t, std::string>::first );
     std::size_t added = 0;
     for( auto it = inserts.rbegin(); it != inserts.rend(); ++it )   // back to front: earlier offsets stay valid
+    {
+        sigs.insert( it->first, it->second );
+        added += it->second.size();
+    }
+    return added;
+}
+
+// ── SLOT JOIN ROWS (lane fn-slot, IX1-V2) ─────────────────────────────────────────────────────────────────
+// The value index's slot and container joins, on the SHOWN rows of the same posture: a function row the answer names may be
+// reached through a slot it is stored in (a struct field, a variable, a registrar's parameter), which no call edge shows —
+// cockroach's batcheval Put is stored by RegisterReadWriteCommand into Command.EvalRW and run by evaluateCommand's
+// `cmd.EvalRW( … )`; terraform's Local.opPlan is stored in a local `f` that Local.Operation calls. On a shown row:
+//   slot_by="A,B"       a Function/Method row: up to kForSlotByCap functions that MAY call it through such a slot (the --callers
+//                       <vr> called_by= names, slot and container joins alike, first-site order), slot_by_more="N" the rest;
+//   slot_fields="F=K@C" a struct/class row: up to kForSlotByCap of its fields that hold stored functions (by the field's declared
+//                       struct type name), K the distinct functions stored there, C the first function calling through a field F
+//                       (`@C` absent when none), slot_fields_more="N" the rest.
+// MAY-call clues by the index, never a proven call, never in count=. RIPWIRE_NO_SLOT_JOIN_ROWS (any value) turns it off.
+inline constexpr std::ptrdiff_t kForSlotByCap = 4;
+inline bool forSlotJoinRowsOn()
+{
+    return std::getenv( "RIPWIRE_NO_SLOT_JOIN_ROWS" ) == nullptr;
+}
+// fix1 F-4: the mark on a caller joined by the field NAME alone, and its present-only clause (rides when a row prints the mark).
+inline constexpr std::string_view kForSlotNameMark = "~";
+inline constexpr std::string_view kForCompactSlotNameLegend = "; d slot_by= ~C, slot_fields= @~C: C matches the field name only (its type unread), a candidate";
+inline constexpr std::string_view kForSlotNameLegend =
+    "; a ~ before a slot_by= name or a slot_fields= caller (@~C): that function calls through a field of the same NAME whose struct "
+    "type is not read (the callers rows say via=\"slot-name\"), a candidate, never a fact";
+inline constexpr std::string_view kForCompactSlotJoinLegend =
+    "; d slot_by= functions that MAY call this one through a slot it is stored in, slot_fields= F=K@C a struct field F holding K "
+    "stored functions that C calls through (both by the value index, not calls), _more= the rest";
+inline constexpr std::string_view kForSlotJoinLegend =
+    "; slot_by= on a function d row: up to 4 functions that MAY call it through a slot it is stored in (a struct field, by type or "
+    "by field name, a variable, a parameter of a registrar it is passed to), by the value index, never a proven call, "
+    "slot_by_more= the rest, and slot_fields= on a struct d row: up to 4 fields holding stored functions as F=K@C, K distinct "
+    "functions stored in F, C the first function calling through a field F (absent when none), slot_fields_more= the rest";
+static_assert( kForCompactSlotJoinLegend.find( ';', 1 ) == std::string_view::npos && kForSlotJoinLegend.find( ';', 1 ) == std::string_view::npos
+                   && kForSlotJoinLegend.find( "--" ) == std::string_view::npos && kForCompactSlotJoinLegend.find( "--" ) == std::string_view::npos,
+               "one clause each, and no '--' (the legend is an XML comment)" );
+static_assert( kForSlotByCap == 4, "kForSlotJoinLegend states the cap: move the sentence with the constant" );
+static_assert( kForCompactSlotNameLegend.find( ';', 1 ) == std::string_view::npos && kForSlotNameLegend.find( ';', 1 ) == std::string_view::npos
+                   && kForCompactSlotNameLegend.find( "--" ) == std::string_view::npos && kForSlotNameLegend.find( "--" ) == std::string_view::npos,
+               "one clause each, and no '--' (the legend is an XML comment)" );
+
+namespace slot_detail
+{
+// Appends `name` to `names` once, counting it in `more` past the cap; a name a comma would split is counted, never printed.
+inline void addCapped( std::vector<std::string>& names, std::size_t& more, std::string name )
+{
+    if( name.empty() || std::ranges::find( names, name ) != names.end() )
+    {
+        return;
+    }
+    if( std::ssize( names ) < kForSlotByCap && name.find_first_of( ",=@" ) == std::string::npos )
+    {
+        names.push_back( std::move( name ) );
+        return;
+    }
+    ++more;
+}
+// A caller as the <sigs> rows name it: the owner joined (`Local.Operation`, `Editor::run`), so two same-named methods of two
+// types (terraform's Local.Operation and Cloud.Operation) never read as one.
+inline std::string ownerName( const Symbol& s )
+{
+    if( s.scope.empty() )
+    {
+        return s.name;
+    }
+    return s.scope + std::string( langFacts( s.lang ).memberSeparator ) + s.name;   // the language's own (`Local.Operation`, `Editor::run`)
+}
+inline std::string joinedRun( std::string_view attr, const std::vector<std::string>& names, std::size_t more, std::vector<char>& esc )
+{
+    std::string run = " " + std::string( attr ) + "=\"";
+    for( std::size_t k = 0; k < names.size(); ++k )
+    {
+        run += k == 0 ? "" : ",";
+        run += escapeXml( names[k], esc );
+    }
+    run += "\"";
+    if( more > 0 )
+    {
+        run += " " + std::string( attr ) + "_more=\"" + std::to_string( more ) + "\"";
+    }
+    return run;
+}
+}   // namespace slot_detail
+
+// THE SPLICE, as spliceInitSlots: appends slot_by= / slot_fields= to the shown rows' heads. Returns the bytes added.
+// `nameTier` (when given) is set when a printed caller joined by the field NAME alone (the `~` mark).
+inline std::size_t spliceSlotJoinRows( std::string& sigs, const IngestResult& ing, const std::vector<NodeId>& shownIds, bool* nameTier = nullptr )
+{
+    std::vector<std::size_t> cand;
+    for( std::size_t i = 0; i < shownIds.size(); ++i )
+    {
+        const SymKind k = shownIds[i] < ing.symbols.size() ? ing.symbols[ shownIds[i] ].kind : SymKind::Section;
+        if( k == SymKind::Function || k == SymKind::Method || k == SymKind::Class || isStructOrNamedType( k ) )
+        {
+            cand.push_back( i );
+        }
+    }
+    if( cand.empty() )
+    {
+        return 0;
+    }
+    // COST: the value index is built only when some Value reference can join a candidate — it names a candidate function, or it
+    // is stored into a struct-field slot (a struct row's slot_fields=) — so an answer with none pays one scan, no index.
+    std::vector<std::string_view> fnNames;
+    bool                          structRow = false;
+    for( const std::size_t i : cand )
+    {
+        const Symbol& s = ing.symbols[ shownIds[i] ];
+        if( s.kind == SymKind::Function || s.kind == SymKind::Method )
+        {
+            fnNames.push_back( s.name );
+        }
+        else
+        {
+            structRow = true;
+        }
+    }
+    std::ranges::sort( fnNames, rw::sortutil::svLess );
+    const bool joinable = std::ranges::any_of( ing.references, [ & ]( const Reference& r )
+    {
+        return r.role == RefRole::Value
+            && ( std::ranges::binary_search( fnNames, std::string_view( r.calleeName ), rw::sortutil::svLess )
+                 || ( structRow && ( !r.memberPath.empty() || ( !r.qualifier.empty() && r.qualifier[0] == kValueRefSlotParamScope ) ) ) );
+    } );
+    if( !joinable )
+    {
+        return 0;
+    }
+    constexpr std::string_view kOpen = "<d l=\"";
+    std::vector<std::size_t> heads;
+    for( std::size_t at = sigs.find( kOpen ); at != std::string::npos; at = sigs.find( kOpen, at + kOpen.size() ) )
+    {
+        heads.push_back( at );
+    }
+    if( heads.size() != shownIds.size() )
+    {
+        DISCLOSE( Diagnostics::answerUnchanged, "no row carries slot_by=: the answer is the one without slot join rows",
+                  "spliceSlotJoinRows: the <sigs> rows and the shown ids disagree" );
+        return 0;
+    }
+    // fix1 (RSS): the NARROW index (ValueRefIndex::narrowFor) — the shown functions' values and every slot store, not the whole
+    // tree's value references. RIPWIRE_SLOT_INDEX_FULL (any value) builds the full one: the A/B handle that proves the rows equal.
+    const ValueRefIndex vri = std::getenv( "RIPWIRE_SLOT_INDEX_FULL" ) == nullptr ? ValueRefIndex::narrowFor( ing, fnNames ) : ValueRefIndex( ing );
+    std::vector<std::pair<std::size_t, std::string>> inserts;
+    std::vector<char> esc;
+    for( const std::size_t i : cand )
+    {
+        const NodeId   id = shownIds[i];
+        const Symbol&  s  = ing.symbols[id];
+        std::vector<std::string> names;
+        std::size_t              more = 0;
+        bool                     printedNameOnly = false;   // a caller joined by the field NAME alone is in the printed run (not a `~` in some name)
+        std::string              run;
+        if( s.kind == SymKind::Function || s.kind == SymKind::Method )
+        {
+            const bool         subjectIsTest = isTestSymbol( ing, id );
+            const ValueRefRows rows = valueRefCallerRows( ing, vri, std::span<const NodeId>( &id, 1 ) );
+            std::vector<std::tuple<bool, bool, std::string>> by;   // (a test caller, a field-name-only caller, name), first-site order; non-test callers listed first
+            for( const ValueRefRow& row : rows.rows )
+            {
+                if( !subjectIsTest && isTestPath( rootRelPath( ing, ing.references[ row.ref ].fileId ) ) )
+                {
+                    continue;   // fix1 F-7: a store in test code (`assertMatch( t, MatchV1 )`) is a test harness, not the subject's dispatch
+                }
+                for( const NodeId f : vri.calledBy( row.ref ) )
+                {
+                    by.emplace_back( isTestSymbol( ing, f ), false, slot_detail::ownerName( ing.symbols[f] ) );
+                }
+                for( const std::uint32_t c : row.slotCalls )
+                {
+                    const NodeId from = ing.references[c].fromSymbol;
+                    if( from < ing.symbols.size() )
+                    {
+                        // fix1 F-4: `~` marks a caller joined by the field NAME alone (via="slot-name"): a candidate, not a fact
+                        by.emplace_back( isTestSymbol( ing, from ), !row.slotTyped, ( row.slotTyped ? "" : std::string( kForSlotNameMark ) ) + slot_detail::ownerName( ing.symbols[from] ) );
+                    }
+                }
+            }
+            std::ranges::stable_partition( by, []( const auto& b ) { return !std::get<0>( b ); } );
+            for( auto& [ test, nameOnly, name ] : by )
+            {
+                const std::size_t before = names.size();
+                slot_detail::addCapped( names, more, std::move( name ) );
+                printedNameOnly = printedNameOnly || ( nameOnly && names.size() > before );   // CR 4396503829: the mark of a PRINTED name-only caller
+            }
+            if( !names.empty() )
+            {
+                run = slot_detail::joinedRun( "slot_by", names, more, esc );
+            }
+        }
+        else
+        {
+            std::vector<std::pair<std::string_view, std::vector<std::uint32_t>>> fields;   // field → its value refs, first-seen order
+            const std::string typeKey = slotKeysOwnTypes( s.lang ) ? vri.slots().typeKeyOf( id ) : s.name;   // fix1 F-2: the ONE key
+            for( const auto& [ ref, field ] : vri.slots().valuesOfType( typeKey ) )
+            {
+                auto it = std::ranges::find( fields, field, &std::pair<std::string_view, std::vector<std::uint32_t>>::first );
+                if( it == fields.end() )
+                {
+                    fields.emplace_back( field, std::vector<std::uint32_t>{} );
+                    it = fields.end() - 1;
+                }
+                it->second.push_back( ref );
+            }
+            std::vector<slot_detail::SlotFieldItem> items;
+            for( const auto& [ field, refs ] : fields )
+            {
+                std::vector<NodeId> fns;
+                std::string         caller;
+                bool                callerIsTest = false;
+                bool                callerTyped  = false;
+                for( const std::uint32_t r : refs )
+                {
+                    std::ranges::copy( vri.targetsOf( r ), std::back_inserter( fns ) );
+                    for( const SlotIndex::Hit& h : vri.slots().callsFor( r ) )
+                    {
+                        const NodeId from = ing.references[h.ref].fromSymbol;
+                        if( from >= ing.symbols.size() )
+                        {
+                            continue;
+                        }
+                        const bool test = isTestSymbol( ing, from );
+                        // the first non-test caller, else the first caller; a same-type caller before a field-name one
+                        if( caller.empty() || ( callerIsTest && !test ) || ( callerIsTest == test && !callerTyped && h.typed ) )
+                        {
+                            caller       = slot_detail::ownerName( ing.symbols[from] );
+                            callerIsTest = test;
+                            callerTyped  = h.typed;
+                        }
+                    }
+                }
+                std::ranges::sort( fns );
+                fns.erase( std::ranges::unique( fns ).begin(), fns.end() );
+                if( fns.empty() || caller.find_first_of( ",=@" ) != std::string::npos )
+                {
+                    ++more;
+                    continue;
+                }
+                // fix1 F-4: `@~C` — C joins by the field NAME alone (its receiver's type is not read): a candidate, not a fact
+                items.push_back( { std::string( field ) + "=" + std::to_string( fns.size() )
+                                       + ( caller.empty() ? "" : "@" + ( callerTyped ? std::string() : std::string( kForSlotNameMark ) ) + caller ),
+                                   !caller.empty(), fns.size(), !callerTyped && !caller.empty() } );
+            }
+            // fix1 F-4: the cap is a spew guard, so it cuts the LEAST informative fields: a field with a caller first, then the most
+            // stored functions, then the name (`writeField=11@Row_display` is never cut for `isVisible=1`). The kept fields print in
+            // their first-seen order, as before.
+            std::vector<std::size_t> rank( items.size() );
+            std::iota( rank.begin(), rank.end(), std::size_t{ 0 } );
+            std::ranges::stable_sort( rank, [ & ]( std::size_t x, std::size_t y )
+            {
+                const slot_detail::SlotFieldItem& a = items[x];
+                const slot_detail::SlotFieldItem& b = items[y];
+                return a.hasCaller != b.hasCaller ? a.hasCaller : ( a.stored != b.stored ? a.stored > b.stored : a.item < b.item );
+            } );
+            const std::size_t keep = std::min<std::size_t>( items.size(), static_cast<std::size_t>( kForSlotByCap ) );
+            std::ranges::sort( rank.begin(), rank.begin() + static_cast<std::ptrdiff_t>( keep ) );
+            for( std::size_t k = 0; k < keep; ++k )
+            {
+                printedNameOnly = printedNameOnly || items[ rank[k] ].nameOnly;   // CR 4396503829: the mark of a PRINTED name-only caller
+                names.push_back( std::move( items[ rank[k] ].item ) );
+            }
+            more += items.size() - keep;
+            if( !names.empty() )
+            {
+                run = slot_detail::joinedRun( "slot_fields", names, more, esc );
+            }
+        }
+        if( run.empty() )
+        {
+            continue;
+        }
+        if( nameTier != nullptr && printedNameOnly )
+        {
+            *nameTier = true;
+        }
+        const std::size_t close = sigs.find( '>', heads[i] );
+        ASSUME( close != std::string::npos && ( i + 1 == heads.size() || close < heads[i + 1] ), "a <d> head closes before the next row opens" );
+        inserts.emplace_back( close, std::move( run ) );
+    }
+    std::size_t added = 0;
+    for( auto it = inserts.rbegin(); it != inserts.rend(); ++it )   // cand is in row order: back to front keeps offsets valid
     {
         sigs.insert( it->first, it->second );
         added += it->second.size();

@@ -739,7 +739,11 @@ ripwire.pack-top-n/v1            830   813
 ripwire.expand/v1                280   265
 ripwire.expand-file/v1            510   508
 ripwire.for/v1                   1100  1099
+ripwire.defs/v1                   490   472
 '
+# PINNED 2026-10-27 (lane/defs-lookup): ripwire.defs/v1 on this gate's --defs=zzqq9 probe. First pin 340 on 316 B, measured BEFORE
+# the not-found readings existed; RE-PINNED 2026-10-28 to 490 on 472 B = the verb's purpose line (~290 B) plus the shared not-found
+# answer's found=/of=/near= readings (compactlegendcheck UG required them). Present-only: none of the defs row readings ride here.
 pinFor()
 {
     printf '%s\n' "$PIN_TABLE" | awk -v schema="$1" '$1 == schema { printf "%s", $2; exit }'

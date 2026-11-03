@@ -10,11 +10,12 @@
 # memberSeparator: `::` C/C++/Rust, `#` Ruby, `.` elsewhere; PHP methods store no scope, so none prints); a <d> row then drops sc=
 # (folded, lossless). A printed scope is a claim, so it is exact or bare: a type row, a free function, a C++ namespace-scope function
 # (unless a class of the same name is indexed: the owner test is name-keyed), a function-local def (a closure), an EXTENT-SUSPECT
-# symbol (a free function an ERROR-recovered struct swallowed) and a language whose defs carry no scope (TS, Java) stay bare. The legend clause rides only where a row carries an owner.
+# symbol (a free function an ERROR-recovered struct swallowed) and a language whose defs carry no scope (Java) stay bare; a TS/JS
+# method names the class whose body holds it (lane js-def-naming, memberowner.h). The legend clause rides only where a row carries an owner.
 #
 # ARMS
 #   (A) red-first, per language: callees/callers/path/sigs rows carry the owner (Py, Go, Rust, C++, Ruby).
-#   (B) floor: TS and Java members stay bare (no scope stored — QN2).
+#   (B) floor: Java members stay bare (no scope stored — QN2); a TS member names its enclosing class (js-def-naming).
 #   (C) T1: a Python closure inside a method stays bare (two depths); a type row is never Owner.Owner; free functions stay bare; a
 #       C++ namespace-scope function keeps n= bare and sc="ns".
 #   (D) clickable: every qualified name printed in (A) resolves through --callers (defs>=1).
@@ -146,8 +147,8 @@ case "$s" in *'n="Pattern.match_chunk" sc='*) no "py <d> folded row still carrie
 s=$( run "$TMP/go" --pack-signatures )
 case "$s" in *'n="Pattern.MatchChunk"'*) ok "go <d> folds";; *) no "go <d> row not folded";; esac
 
-echo "(B) floor: no stored scope, bare"
-r=$( run "$TMP/ts" --callers=leafFn | rows );        has "ts callers" "$r" "matchChunk"; hasnt "ts callers" "$r" "Pattern.matchChunk"
+echo "(B) floor: no stored scope (Java), bare; TS by containment"
+r=$( run "$TMP/ts" --callers=leafFn | rows );        has "ts callers" "$r" "Pattern.matchChunk"; hasnt "ts callers" "$r" "matchChunk"   # js-def-naming: by containment, no longer the bare floor
 r=$( run "$TMP/java" --callers=leaf | rows );        has "java callers" "$r" "matchChunk"
 
 echo "(C) T1 controls"

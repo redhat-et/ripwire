@@ -28,10 +28,10 @@
 #   (D3) `path.match( /x/ )` (path: string), (D4) an un-annotated local, (D5) `this.name.match( re )` (name: string): not crossed.
 #   (D6) entity identity: a second class named App typing router as a Map makes the parameter shape undecided (not crossed),
 #        while `this.router` inside the first App stays crossed (owner by definition, not by name).
-#   (D7) a typed receiver over 17 candidates is no way in (near_sink stays external).
+#   (D7) a typed receiver over 17 candidates is no bridge crossing, but near_sink names the declined call (why=declined:N), never external (r1-followup).
 #   (D8) near_sink counts exactly the crossed sites (why="declined:2").
 #   (N1) to= with a slot hop: the root next= is --callers on to=; (N2) a to= with none keeps --expand; (N3) both legend forms.
-#   (I1) --impact ring: reaches="0" reaches_hedged="2", one <rh> row; (I2) a ring member already in reaches= is not counted;
+#   (I1) --impact ring: reaches="0" reaches_hedged="3" (composed hops: the third field hop), two <rh> rows; (I2) a ring member already in reaches= is not counted;
 #   (I3) no slot row: no reaches_hedged=, no <ring>; (I4) JSON twin, same names; (I5) columnar count; (I6) row cap 16 + next=.
 #   (M1) MCP path_between: the same <bridge> and next= as the CLI; (M2) MCP impact: the same reaches_hedged= and <ring>.
 #   (X1) ring cycle guard: a d=1 function is never reprinted as d=2 (ringcyc); (X2) slot_fns= prints the forward width, uncapped (fan);
@@ -321,8 +321,8 @@ t17 = path( tmp + "/w17", "c01", "sink" ); t16 = path( tmp + "/w16", "c01", "sin
 check( "(B4) a field 17 functions call through is not crossed", t17 != "" and bridge( t17 ) == "", repr( bridge( t17 ) ) )
 check( "(B4) a field 16 functions call through is (slot_callers=16)", 'via="slot" slot_callers="16"' in bridge( t16 ), repr( bridge( t16 ) ) )
 sj = repo + "/test/slotjoinfix"
-ts5 = path( sj, "run_outer", "on_cb" )
-check( "(B5) a slot joined by field name only is crossed as via=slot-name", 'n="on_cb" p="mode.c:7" via="slot-name" slot_callers="1"' in bridge( ts5 ), repr( bridge( ts5 ) ) )
+ts5 = path( sj, "run_nest", "on_go" )   # FN-SLOT S2: run_outer's nested literal is typed now; set_go's store (g_unknown) is untyped
+check( "(B5) a slot joined by field name only is crossed as via=slot-name", 'n="on_go" p="mode.c:12" via="slot-name" slot_callers="1"' in bridge( ts5 ), repr( bridge( ts5 ) ) )
 neg = tmp + "/neg"
 def crossed( a, b ):
     return bridge( path( neg, a, b ) ) != ""
@@ -351,8 +351,9 @@ check( "(D6) a second class App typing router as a Map (not an in-tree class) le
        tsbridge( ts2, "viaParam" ) == "" and path( ts2, "viaParam", "routers/a.ts:match" ) != "" )
 check( "(D6) this.router inside the first App stays crossed (owner by definition, not by name)", 'via="declined" cands="2"' in tsbridge( ts2, "dispatch" ), repr( tsbridge( ts2, "dispatch" ) ) )
 tw = path( tmp + "/wide", "dispatch", "routers/r1.ts:match" )
-check( "(D7) a typed receiver over 17 candidates is no way in (near_sink why=external, no bridge)",
-       tw != "" and bridge( tw ) == "" and 'why="external"' in body( tw ) and "declined" not in ( re.search( r'<near_sink .*?</near_sink>', body( tw ) ) or re.match( "", "" ) ).group( 0 ), repr( body( tw )[-400:] ) )
+nsw = re.search( r'<near_sink .*?</near_sink>', body( tw ) )
+check( "(D7) a typed receiver over 17 candidates is no bridge crossing, and its near_sink row names the declined call (why=declined:1 in=dispatch), not external",
+       tw != "" and bridge( tw ) == "" and nsw is not None and 'why="declined:1"' in nsw.group( 0 ) and 'in="dispatch"' in nsw.group( 0 ) and 'why="external"' not in nsw.group( 0 ), repr( body( tw )[-400:] ) )
 td = path( ts, "onString", "routers/a.ts:match" )
 check( "(D8) near_sink counts exactly the two crossed sites (why=declined:2)", 'why="declined:2"' in body( td ), repr( re.findall( r'<ns [^>]*>', body( td ) ) ) )
 
@@ -384,9 +385,12 @@ check( "(N3) the full legend says next= lists to='s callers exactly when it does
 
 # ── I: the --impact hedged slot ring ────────────────────────────────────────────────────────────────────────────────
 ti = run( c3, "--impact=cancel_cmd" ) or ""; ri = root( ti, "impact" )
-check( "(I1) reaches stays 0, reaches_hedged=2 beside it", attr( ri, "reaches" ) == "0" and attr( ri, "reaches_hedged" ) == "2", ri )
+# composed hops (by design): the chain is field-only and narrow, so the ring takes the THIRD slot hop (fire_command, d=3): 2 -> 3,
+# and every ring row prints its forward width (slot_fns=). The two-hop row is still the first row, byte for byte up to slot_fns=.
+check( "(I1) reaches stays 0, reaches_hedged=3 beside it (d=1, d=2 and the composed d=3 field hop)", attr( ri, "reaches" ) == "0" and attr( ri, "reaches_hedged" ) == "3", ri )
 check( "(I1) one d=2 row: send_keys_exec may call copy_command through a field at chain.c:22",
-       '<ring d="2" total="1" shown="1"><rh called_by="send_keys_exec" called_at="chain.c:22" via="slot" calls="copy_command"/></ring>' in body( ti ), repr( body( ti )[-500:] ) )
+       '<ring d="3" total="2" shown="2"><rh called_by="send_keys_exec" called_at="chain.c:22" via="slot" calls="copy_command" slot_fns="1"/>'
+       '<rh called_by="fire_command" called_at="chain.c:28" via="slot" calls="send_keys_exec" d="3" slot_fns="1"/></ring>' in body( ti ), repr( body( ti )[-500:] ) )
 tk = run( tmp + "/known", "--impact=copy_command" ) or ""; rk = root( tk, "impact" )
 check( "(I2) a ring member already in reaches= is not counted again (reaches=1, reaches_hedged=1)",
        attr( rk, "reaches" ) == "1" and attr( rk, "reaches_hedged" ) == "1" and '<rh called_by="fire_command"' in body( tk ), rk + " " + repr( body( tk )[-300:] ) )
@@ -399,10 +403,11 @@ try:
 except ValueError:
     j = {}
 check( "(I4) the JSON twin carries the same names",
-       j.get( "reaches" ) == 0 and j.get( "reaches_hedged" ) == 2
-       and j.get( "ring", {} ).get( "rows" ) == [ { "called_by": "send_keys_exec", "called_at": "chain.c:22", "via": "slot", "calls": "copy_command" } ], repr( tj[:400] ) )
+       j.get( "reaches" ) == 0 and j.get( "reaches_hedged" ) == 3
+       and j.get( "ring", {} ).get( "rows" ) == [ { "called_by": "send_keys_exec", "called_at": "chain.c:22", "via": "slot", "calls": "copy_command", "slot_fns": 1 },
+                                                  { "called_by": "fire_command", "called_at": "chain.c:28", "via": "slot", "calls": "send_keys_exec", "d": 3, "slot_fns": 1 } ], repr( tj[:400] ) )
 tc = run( c3, "--impact=cancel_cmd", "--format=columnar" ) or ""
-check( "(I5) the columnar form carries reaches_hedged=2", 'reaches_hedged="2"' in tc, repr( tc[:300] ) )
+check( "(I5) the columnar form carries reaches_hedged=3", 'reaches_hedged="3"' in tc, repr( tc[:300] ) )
 tcap = run( tmp + "/cap", "--impact=cancel_cmd" ) or ""; ring = re.search( r'<ring [^>]*>', body( tcap ) )
 check( "(I6) 17 two-hop rows: shown=16 of total=17, next= the callers of the first unshown row's calls=",
        ring is not None and attr( ring.group( 0 ), "total" ) == "17" and attr( ring.group( 0 ), "shown" ) == "16"
@@ -430,7 +435,7 @@ check( "(M1) MCP path_between: the same <bridge> and root next= as the CLI (slot
 cli3 = run( c3, "--impact=cancel_cmd" ) or ""
 ringm = re.search( r'<ring .*?</ring>', body( m3 ) ); ringc = re.search( r'<ring .*?</ring>', body( cli3 ) )
 check( "(M2) MCP impact: the same reaches_hedged= and <ring> as the CLI",
-       attr( root( m3, "impact" ), "reaches_hedged" ) == "2" and ringm is not None and ringc is not None and ringm.group( 0 ) == ringc.group( 0 ), repr( m3[-400:] ) )
+       attr( root( m3, "impact" ), "reaches_hedged" ) == "3" and ringm is not None and ringc is not None and ringm.group( 0 ) == ringc.group( 0 ), repr( m3[-400:] ) )
 
 # ── L: legends ──────────────────────────────────────────────────────────────────────────────────────────────────────
 pf = path( c3, "fire_command", "cancel_cmd", "--legend=full" )

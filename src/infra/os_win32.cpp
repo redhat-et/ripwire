@@ -782,9 +782,63 @@ bool isOwnerClassSid( PSID sid )
         || ::IsWellKnownSid( sid, WinBuiltinAdministratorsSid ) || ::IsWellKnownSid( sid, WinLocalSystemSid );
 }
 
+// POSIX `w` on a directory also covers removing and renaming entries, and the cache saves by temp + rename, so FILE_DELETE_CHILD is required too.
+constexpr DWORD kOwnerRwxMask = FILE_LIST_DIRECTORY | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | FILE_TRAVERSE | FILE_DELETE_CHILD;
+
+// The rights the owner-class allow ACEs of a protected DACL grant this user, or 0 when the DACL is not owner-only: unprotected, an ACE that
+// is not a plain allow for an owner-class principal, or a deny that applies to the object and touches a kOwnerRwxMask bit. Fails closed.
+DWORD ownerOnlyGrantedMask( PACL dacl, PSECURITY_DESCRIPTOR descriptor )
+{
+    constexpr GENERIC_MAPPING kFileGenericMapping { FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_GENERIC_EXECUTE, FILE_ALL_ACCESS };
+    WORD  control   = 0;
+    DWORD revision  = 0;
+    DWORD ownerMask = 0;
+    if( dacl == nullptr || !::GetSecurityDescriptorControl( descriptor, &control, &revision ) || ( control & SE_DACL_PROTECTED ) == 0 )
+    {
+        return 0;
+    }
+    for( DWORD aceIndex = 0; aceIndex < dacl->AceCount; ++aceIndex )
+    {
+        LPVOID ace = nullptr;
+        if( !::GetAce( dacl, aceIndex, &ace ) )
+        {
+            return 0;
+        }
+        const auto* const header        = static_cast<ACE_HEADER*>( ace );
+        const bool        appliesToSelf = ( header->AceFlags & INHERIT_ONLY_ACE ) == 0;
+        if( header->AceType == ACCESS_DENIED_ACE_TYPE )
+        {
+            // A deny on a required bit means not 0700 whichever SID it names, order aside. CheckTokenMembership is FALSE for a deny-only
+            // group (a UAC-filtered Administrators) although the access check still applies the deny, so the SID is not asked.
+            DWORD mask = static_cast<ACCESS_DENIED_ACE*>( ace )->Mask;
+            ::MapGenericMask( &mask, const_cast<PGENERIC_MAPPING>( &kFileGenericMapping ) );
+            if( appliesToSelf && ( mask & kOwnerRwxMask ) != 0 )
+            {
+                return 0;
+            }
+            continue;
+        }
+        auto* const allowed = static_cast<ACCESS_ALLOWED_ACE*>( ace );
+        const PSID  sid     = reinterpret_cast<PSID>( &allowed->SidStart );
+        if( header->AceType != ACCESS_ALLOWED_ACE_TYPE || !isOwnerClassSid( sid ) )
+        {
+            return 0;
+        }
+        if( appliesToSelf && ( ownedByThisUser( sid ) || ::IsWellKnownSid( sid, WinCreatorOwnerRightsSid ) ) )
+        {
+            DWORD mask = allowed->Mask;
+            ::MapGenericMask( &mask, const_cast<PGENERIC_MAPPING>( &kFileGenericMapping ) );
+            ownerMask |= mask;
+        }
+    }
+    return ownerMask;
+}
+
 // Owner and permission bits from the handle's security descriptor: st_uid as above; mode 0700 when the DACL is
-// PROTECTED (inherits nothing) and every allow entry names an owner-class principal, else the attribute-derived bits
-// stat reports. A descriptor that cannot be read leaves st as it was (st_uid = kOwnerNotRead: fails closed).
+// PROTECTED (inherits nothing), every allow entry names an owner-class principal, no deny touches a required bit, and
+// the owner's effective entries grant read, write/create/remove and search (kOwnerRwxMask),
+// else the attribute-derived bits stat reports. A descriptor that cannot be read leaves st as it was (st_uid =
+// kOwnerNotRead: fails closed).
 void readOwnerAndMode( HANDLE handle, stat_t* st )
 {
     PSID                 owner      = nullptr;
@@ -797,25 +851,7 @@ void readOwnerAndMode( HANDLE handle, stat_t* st )
     const UniqueLocal          descriptorOwner( rawDescriptor );
     const PSECURITY_DESCRIPTOR descriptor = rawDescriptor;
     st->st_uid = ownedByThisUser( owner ) ? tokenIdentity().uid : kOwnerSomeoneElse;
-    WORD  control  = 0;
-    DWORD revision = 0;
-    bool  ownerOnly = dacl != nullptr && ::GetSecurityDescriptorControl( descriptor, &control, &revision ) && ( control & SE_DACL_PROTECTED ) != 0;
-    for( DWORD aceIndex = 0; ownerOnly && aceIndex < dacl->AceCount; ++aceIndex )
-    {
-        LPVOID ace = nullptr;
-        if( !::GetAce( dacl, aceIndex, &ace ) )
-        {
-            ownerOnly = false;
-            break;
-        }
-        const BYTE aceType = static_cast<ACE_HEADER*>( ace )->AceType;
-        if( aceType == ACCESS_DENIED_ACE_TYPE )
-        {
-            continue;
-        }
-        ownerOnly = aceType == ACCESS_ALLOWED_ACE_TYPE && isOwnerClassSid( reinterpret_cast<PSID>( &static_cast<ACCESS_ALLOWED_ACE*>( ace )->SidStart ) );
-    }
-    if( ownerOnly )
+    if( ( ownerOnlyGrantedMask( dacl, descriptor ) & kOwnerRwxMask ) == kOwnerRwxMask )
     {
         st->st_mode = ( st->st_mode & ~static_cast<mode_t>( 0777 ) ) | 0700;
     }
@@ -1576,9 +1612,14 @@ int chmod( const char* path, mode_t mode )
     {
         return fail( native.error() );
     }
-    const bool   ownerOnly = ( mode & 077 ) == 0;
-    const DWORD  access    = FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | ( ownerOnly ? READ_CONTROL | WRITE_DAC : 0 );
-    const UniqueHandle handle( ::CreateFileW( native.c_str(), access, kShareAll, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr ) );
+    constexpr DWORD kNoFollow = FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT;
+    const bool      ownerOnly = ( mode & 077 ) == 0;
+    const DWORD     access    = FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | ( ownerOnly ? READ_CONTROL | WRITE_DAC : 0 );
+    UniqueHandle    handle( ::CreateFileW( native.c_str(), access, kShareAll, nullptr, OPEN_EXISTING, kNoFollow, nullptr ) );
+    if( !handle.valid() && ownerOnly && ::GetLastError() == ERROR_ACCESS_DENIED )
+    {
+        handle.reset( ::CreateFileW( native.c_str(), FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC, kShareAll, nullptr, OPEN_EXISTING, kNoFollow, nullptr ) );
+    }
     if( !handle.valid() )
     {
         return failLastError();
@@ -2389,6 +2430,27 @@ std::FILE* popen( const char* command, const char* mode )
     const std::lock_guard<std::mutex> lock( childMutex() );
     pipeChildren().push_back( PipeChild{ stream, std::move( started.process ), std::move( started.job ), TemporaryFile( script.keep() ) } );
     return stream;
+}
+
+// pipeReadSome: a Windows pipe has no poll; PeekNamedPipe says whether a read would block, and a broken pipe (the writer
+// gone) falls through to the read, which reports the end of the stream.
+long pipeReadSome( std::FILE* stream, char* buf, std::size_t size, int timeoutMs )
+{
+    const int    fd     = _fileno( stream );
+    const HANDLE handle = reinterpret_cast<HANDLE>( _get_osfhandle( fd ) );
+    for( int waited = 0;; waited += 10 )
+    {
+        DWORD available = 0;
+        if( !PeekNamedPipe( handle, nullptr, 0, nullptr, &available, nullptr ) || available > 0 )
+        {
+            return long( _read( fd, buf, static_cast<unsigned>( size ) ) );
+        }
+        if( waited >= timeoutMs )
+        {
+            return kPipeNothingYet;
+        }
+        Sleep( 10 );
+    }
 }
 
 // pclose: close the stream, wait for the shell, and return its wait status (WEXITSTATUS is the exit code) — callers

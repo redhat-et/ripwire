@@ -150,7 +150,12 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 // lane rust-degraded's placeholder 42.
 // 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
 // (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
-constexpr std::uint32_t kCacheVersion = 44;           // 44: train 37b — rust-degraded FileHealth::useBoundsBlanked (above 43 / placeholder 42)
+constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
+                                                      //    moves; its placeholder 47), strictly above main 46 and that placeholder; no other
+                                                      //    train-42b lane changed a record format.
+                                                      // 46: train 40 — lane js-def-naming's LocalBindKind JsObjectLiteral (appended; its placeholder 45),
+                                                      //    strictly above main 44 and that placeholder; no other train-40 lane changed a record format.
+                                                      // 44: train 37b — rust-degraded FileHealth::useBoundsBlanked (above 43 / placeholder 42)
                                                       // 43: train 36 — #155 Kotlin trailingLambda ref byte (above 40 / 41 / 42)
                                                       // 40: train 34 — strictly above main 39 and every live value (train-33 refs, #432 39; #427 / #429 38): the
                                                       //    fc3-js-rebind record change (LocalBindKind JsRebind, appended) lands; no other train-34 lane changed a format.
@@ -361,7 +366,60 @@ constexpr std::uint32_t kCacheVersion = 44;           // 44: train 37b — rust-
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 233;          // bump on any grammar/.scm/extraction change
+constexpr std::uint32_t kParserVer    = 285;          // bump on any grammar/.scm/extraction change
+                                                      // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
+                                                      //   qualifier of more than one segment keeps it whole in Reference::fieldName (ingest_names.h rustWrittenQualifier).
+                                                      //   Rich file tag 286. kCacheVersion stays 48: no record changes shape.
+                                                      // 283 = 2026-10-31 (train 43b: lanes registrar (placeholders 273..281), string-import (274, 275) and their extraction: Python registrar facts,
+                                                      //   TS/JS provider-record literal marks, Python dotted-string and import-sink facts). Strictly above 281 (rich 282) and every lane value. Rich file tag 284.
+                                                      //   kCacheVersion stays 48: no record changes shape.
+                                                      // 281 = 2026-10-30 (lane registrar fix round 4, PLACEHOLDER; 280 is 279's rich tag): a ProviderRecord literal is marked only when it is an element of an
+                                                      //   array (call argument / const / `providers` property) and holds only plain unique pairs (no spread, method, accessor, computed or duplicate key)
+                                                      // 279 = 2026-10-30 (lane registrar fix round 3, PLACEHOLDER: the train renumbers; 278 is 277's rich tag): a TS/JS Value row
+                                                      //   read from a ProviderRecord object literal carries that literal's start byte (qualifier "<scope><shadow>@<byte>") when the
+                                                      //   literal is a direct call argument or a `const` initialiser; a Python registrar fact is refused unless the method's other
+                                                      //   parameters are provably beside the point (a defaulted one stored into `self` refuses; a subscript key of the store is allowed).
+                                                      // 277 = 2026-10-30 (lane registrar fix round 2, PLACEHOLDER: the train renumbers; 276 is 275's rich tag): a Python
+                                                      //   lambda parameter / comprehension target files a VarDecl `~name` (kPythonLocalScopePrefix), and a method whose body also
+                                                      //   uses another parameter written without a default records no registrar fact.
+                                                      // 275 = 2026-10-30 (lane registrar fix round 1, PLACEHOLDER: the train renumbers; 274 is 273's rich tag): a Python
+                                                      //   parameter written with a default (`sender=None`) records no registrar fact.
+                                                      // 273 = 2026-10-30 (lane registrar, PLACEHOLDER: the train renumbers): Python files record
+                                                      //   registrar facts (model.h kValueRefRegParamScope: a method parameter stored into a container a
+                                                      //   field of self holds). Strictly above train-42b's 271 (rich 272). Rich file tag 274. kCacheVersion
+                                                      //   stays 46: no record changes shape (a new scope char in an existing field).
+                                                      // 271 = 2026-10-30 (train 42b: lanes iface-peel (placeholders 259/260: a C++ smart-pointer alias record carries its
+                                                      //   pointee, a Rust `-> &dyn T` / `Box<dyn T>` / `impl T` result records a ReturnType with kDispatchResultBit, a C++
+                                                      //   member whose written type is an enclosing template parameter carries kTemplateParamMemberType) and alias-import
+                                                      //   (261/262: TS/TSX/JS re-export specifiers captured as LocalBindKind::ReExport records)). Strictly above train
+                                                      //   41b's 269 (rich 270) and every live lane placeholder (259, 260, 261, 263, 265, 267). Rich file tag 272.
+                                                      //   kCacheVersion 48 (ReExport appended).
+                                                      // 269 = 2026-10-29 (train 41b: lane fn-slot-s2 (placeholders 257/258, 259 and 260 over its fix rounds): C++ `&Cls::m`
+                                                      //   value refs (memberRoot = Cls; memberVia = written qualifier / enclosing scope / `using namespace` directives),
+                                                      //   `( o.*x.f )( … )` slot calls, C nested designated paths and macro-cast slot calls + their "()M" alias facts, a class
+                                                      //   body fact's scope path, and a C++ base that is a template parameter of the deriving class (baseBind 0xFFFFFFFE)).
+                                                      //   Strictly above train 41's 259 (rich 260) and every live lane placeholder (iface-peel 259, alias-import 261,
+                                                      //   the string/literal lanes 263/265/267; train 42 goes above 269). Rich file tag 270. kCacheVersion stays 46:
+                                                      //   no record changes shape.
+                                                      // 259 = 2026-10-28 (train 41: lanes fn-slot-2 (placeholder 249/250; Rust files record the slot join's records:
+                                                      //   function-path arguments of path calls, field stores, registrar parameter facts, `(x.f)( … )` slot calls) and
+                                                      //   py-split-marker (255/256; a Python module-scope def/class inside an if/try/with/loop files a second VarDecl
+                                                      //   `?name`)). Strictly above train 40's 251 (rich 252), every lane placeholder (249/250, 255/256) and
+                                                      //   fn-slot-s2's 257/258 (train 41b takes the next). Rich file tag 260. kCacheVersion stays 46: no record changes shape.
+                                                      // 251 = 2026-10-27 (train 40: lanes js-def-naming (placeholder 238; JS `module.exports = <anonymous fn>` named
+                                                      //   by its file stem, module-scope `NAME = { … }` binding names), string-keyed (241; Pattern qualifier "t" at a
+                                                      //   hasattr test / JS-TS subscript store) and fn-slot (247; Go function-valued slot records)). Strictly above
+                                                      //   train 39's 239 (rich 240) and every lane placeholder (238, 241/242, 247/248, fn-slot-2's 249/250). Rich file
+                                                      //   tag 252. kCacheVersion 46 (js-def-naming's LocalBindKind JsObjectLiteral record change).
+                                                      // 239 = 2026-10-27 (train 39: lane receiver-fixes, placeholder 237 / rich 238): TS `#private` field declarations and
+                                                      //   `this.#f = …` record MemberType; Python `self.f: T` / `T | None` / `Optional[ T ]` annotations and `mod.X( … )`
+                                                      //   constructors type fields and locals (a RecvType / MemberType with its qualifier), and `x = mod.X( … )` no longer
+                                                      //   writes the base Type tombstone. Strictly above train 38's 235 (rich 236) and every lane placeholder (237/238). Rich file
+                                                      //   tag 240. No record format changed: kCacheVersion stays 44.
+                                                      // 235 = 2026-10-27 (train 38: lane queue-hop, placeholder 228 / rich 229): a Python queue call (put/put_nowait/get/get_nowait)
+                                                      //   carrying keyword arguments records them on its call reference's composeRel (model.h pyKwTag), so QueueHops reads
+                                                      //   `put( v, timeout=1 )` as one item. Strictly above train 37b's 233 (rich 234). Rich file tag 236. No record format
+                                                      //   changed (the tag rides the existing composeRel string of writeRef/readRef): kCacheVersion stays 44.
                                                       // 233 = 2026-10-26 (train 37b: lane rust-degraded, placeholder 229 / rich 230): a Rust file whose
                                                       //   first parse holds error bytes is re-parsed with its precise-capturing use<..> bounds blanked
                                                       //   (src/rustusebounds.h) — different defs. Strictly above train 36's 231 (rich 232). Rich file tag 234.

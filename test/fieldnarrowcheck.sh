@@ -1231,8 +1231,9 @@ for caller in viaString viaChain viaTemplate viaArray viaRegex viaNumber viaNega
     litFixed "$JSLIT" src/literals.js  "$caller"
     litFixed "$TSLIT" src/literals.tsx "$caller"
 done
+# js-def-naming: a TS method row names its class (Rewriter.replace, String.loud, Widget.render, AMD.replace); these controls pin the edge, so the owner prefix is optional
 OBJOUT="$( "$BIN" "$OBJ" --callees=src/user.ts:viaObjectReceiver --no-cache 2>/dev/null )"
-printf '%s' "$OBJOUT" | grep -q 'n="replace" p="src/rewriter.ts:2"' \
+printf '%s' "$OBJOUT" | grep -Eq 'n="([A-Za-z]+\.)?replace" p="src/rewriter.ts:2"' \
     && ok "(kg-ts control) a typed user-object receiver r.replace() keeps its edge to Rewriter.replace (rewriter.ts:2)" \
     || no "(kg-ts control) viaObjectReceiver lost its edge to Rewriter.replace — a literal-receiver rule over-reached: $( printf '%s' "$OBJOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 PROTOOUT="$( "$BIN" "$OBJ" --callees=src/proto.js:viaPrototypeExtension --no-cache 2>/dev/null )"
@@ -1256,7 +1257,7 @@ printf '%s' "$DEFOUT" | grep -q 'n="defx"' \
     && ok "(kg-ts control) Object.defineProperty(String.prototype, 'x', { value: function x(){} }) keeps its edge" \
     || no "(kg-ts control) viaDefine lost defx: $( printf '%s' "$DEFOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 LOUDOUT="$( "$BIN" "$CTRL" --callees=src/loud.ts:viaLoud --no-cache 2>/dev/null )"
-printf '%s' "$LOUDOUT" | grep -q 'n="loud"' \
+printf '%s' "$LOUDOUT" | grep -Eq 'n="([A-Za-z]+\.)?loud"' \
     && ok "(kg-ts control) TS declare global { interface String { loud() } } keeps its edge" \
     || no "(kg-ts control) viaLoud lost loud: $( printf '%s' "$LOUDOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 OWNOUT="$( "$BIN" "$CTRL" --callees=src/user.ts:viaOwnLiteral --no-cache 2>/dev/null )"
@@ -1264,11 +1265,11 @@ printf '%s' "$OWNOUT" | grep -q 'n="replace" p="src/user.ts:3"' \
     && ok "(kg-ts control) object-literal own method ({ replace(){} }).replace() keeps its edge" \
     || no "(kg-ts control) viaOwnLiteral lost the object-literal replace edge: $( printf '%s' "$OWNOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 FINDOUT="$( "$BIN" "$CTRL" --callees=src/user.ts:viaFindRender --no-cache 2>/dev/null )"
-printf '%s' "$FINDOUT" | grep -q 'n="render" p="src/widget.ts:1"' \
+printf '%s' "$FINDOUT" | grep -Eq 'n="([A-Za-z]+\.)?render" p="src/widget.ts:1"' \
     && ok "(kg-ts control) [new Widget()].find(...)!.render() keeps Widget.render — certainty ends at find/!" \
     || no "(kg-ts control) viaFindRender lost Widget.render: $( printf '%s' "$FINDOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 THISOUT="$( "$BIN" "$CTRL" --callees=src/user.ts:apply --no-cache 2>/dev/null )"
-printf '%s' "$THISOUT" | grep -q 'n="replace" p="src/user.ts:5"' \
+printf '%s' "$THISOUT" | grep -Eq 'n="([A-Za-z]+\.)?replace" p="src/user.ts:5"' \
     && ok "(kg-ts control) this.replace() inside a class that defines replace keeps its edge" \
     || no "(kg-ts control) AMD.apply lost this.replace() at user.ts:5: $( printf '%s' "$THISOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 NSOUT="$( "$BIN" "$CTRL" --callees=src/user.ts:viaNs --no-cache 2>/dev/null )"
@@ -1276,7 +1277,7 @@ printf '%s' "$NSOUT" | grep -q 'n="transform"' \
     && ok "(kg-ts control) helpers.transform() namespace import keeps its edge" \
     || no "(kg-ts control) viaNs lost helpers.transform(): $( printf '%s' "$NSOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 CASTOUT="$( "$BIN" "$CTRL" --callees=src/user.ts:viaCast --no-cache 2>/dev/null )"
-printf '%s' "$CASTOUT" | grep -q 'n="render" p="src/widget.ts:1"' \
+printf '%s' "$CASTOUT" | grep -Eq 'n="([A-Za-z]+\.)?render" p="src/widget.ts:1"' \
     && ok "(kg-ts control) (\"x\" as unknown as Widget).render() keeps Widget.render — a cast ends certainty" \
     || no "(kg-ts control) viaCast lost Widget.render: $( printf '%s' "$CASTOUT" | grep -oE '<callees [^>]*>|<s [^>]*/>' | tr '\n' ' ' )"
 

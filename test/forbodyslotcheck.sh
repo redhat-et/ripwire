@@ -656,7 +656,7 @@ ds(){   # ds KEY ARM DECL_NAME DECL_PATH DECL_RANK DEF_PATH DEF_LINE [DECL_ROW_N
 ds tsover DS1 format src/format.ts 1 src/format.ts 5
 ds cppvirt DS2 Dispatch src/dispatch.h 1 src/dispatch.cc 2 PoolDispatcher::Dispatch
 ds goiface DS3 Pack src/packer.go 1 src/packer.go 10 Packer.Pack
-ds tsabs DS4 print src/printer.ts 1 src/printer.ts 6
+ds tsabs DS4 print src/printer.ts 1 src/printer.ts 6 Base.print   # js-def-naming: the TS declaration row names its class; the <b n=> body keeps print
 # Q1 member owner: the head-tier class's member, defined past the head tier (no name owner exists)
 q1(){   # q1 KEY CLASS_RANK_MAX CLASS CLASS_PATH MEMBER MEMBER_PATH MEMBER_LINE LANG
     local k="$1" cmax="$2" c="$3" cp="$4" m="$5" mp="$6" ml="$7" lang="$8" cr mr

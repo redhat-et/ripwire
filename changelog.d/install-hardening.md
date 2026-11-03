@@ -1,0 +1,35 @@
+### Security — `skills/install.sh` takes the installer hardening list from #293 (hardening from #293 by @s0undt3ch)
+
+@s0undt3ch's #293 proposed moving skill and hook installation into the binary. We kept the installer a script, but
+its four review rounds produced a list of ways an installer can be talked into writing or deleting the wrong thing,
+and every item that applies to a shell installer now lives in `skills/install.sh` (#293, thanks @s0undt3ch):
+
+- **Absolute roots only.** A relative or empty `HOME`, `CLAUDE_CONFIG_DIR`, `AGENTS_HOME`, `CODEX_HOME` or
+  `HERMES_HOME` is refused with status 2 instead of installing relative to the current directory (an empty `HOME`
+  used to mean `/.claude`). Windows drive paths still count as absolute; an explicit destination argument still
+  resolves against the current directory.
+- **Nothing it creates is group- or world-writable.** The umask is only tightened, so `umask 000` no longer yields a
+  0777 skills directory or a 0666 `settings.json`, and a stricter `umask 077` is left alone.
+- **`settings.json` / `hooks.json` are merged safely.** A symlinked file (a dotfiles setup) is written through and the
+  link kept, the temp file is built beside the target so the final rename is atomic, and the file's mode survives the
+  merge (CWE-732). A first-time file is still created owner-only (0600), as before.
+- **The hook command is quoted** when its path needs it, so a checkout under a path with a space registers a hook
+  that runs; the ordinary path is registered byte-for-byte as before, and re-runs still recognise the entry.
+  `ripwire --doctor --agent=claude|codex` and the hook-removal step in `INSTALL.md` read the quoted form too, so a
+  working hook is not reported broken and the documented removal takes it out. A path holding a single quote is
+  refused.
+- **`jq` is found only through absolute `PATH` entries** (CWE-426): an empty or relative entry no longer runs a
+  `jq` planted in the current directory.
+- **No stray temp files.** The installer's temp files are removed on a normal exit and on HUP, INT and TERM. A
+  SIGKILL cannot be trapped, so it can still leave one `.tmp.*` file beside the file being written.
+- **The prune removes only what is provably ripwire's:** a symlink the previous manifest recorded, a dangling one, or
+  one pointing into this checkout (compared by whole path components, never a string prefix, and never through a `..`).
+  A live symlink of your own that happens to be named `ripwire-*`, and a regular file with such a name, are kept and
+  reported. Likewise a regular file of yours sitting at the name of a skill ripwire ships is kept, not replaced.
+
+Not carried over from #293, and why: the items that apply only to the embedded store (byte-comparing it against the
+binary, `lstat` of its key and intermediate directories) have no counterpart here, because this installer links
+straight to the checkout; the release-archive lookup of the `ripwire` binary does not apply, because this script never
+needs the binary; the Windows copy fallback and the link-loop/link-failure reporting that #293 also added were already
+here (the copy fallback and the `FAILED` report came with #334, and a loop at a shipped name is repaired). Thanks again
+@s0undt3ch. Windows behaviour is unchanged. Gate: `test/skillinstallcheck.sh` sections (J)-(Q), each red against the previous script.

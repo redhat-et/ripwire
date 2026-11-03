@@ -22,6 +22,7 @@
 #          rows, more distinct files in the head-8 (a file the OFF head-8 left out enters it), r=1 unchanged, files_first= == the rows whose rank changed, reading present
 #   H2 [P] a C typedef/struct pair (pair): the same, and the fixture exercises the name rule (the model without it differs)
 #   H3 [G] the fold serves the score top three: the first three rows of the RIPWIRE_NO_HEAD_RR=1 answer (mono, pair)
+#   H3b [P fix1] the loop aggregator dispatchQueuedJobs (mono) is never followed (review F6; red on 5351fbbb)
 #   H4 [P] --json: the rows in the XML ON order, "files_first" present;  H4m [P] MCP `for`: the same order, files_first= present
 #   H5 [G] exempt, byte-identical to RIPWIRE_NO_HEAD_RR=1: the name-exact route, --no-route, a question naming src/scheduler.ts,
 #          --token-budget=1200
@@ -106,7 +107,16 @@ if cmd == "rr":            # ON OFF [names] — ON is the round-robin of OFF; fi
 elif cmd == "fold":        # ON OFF — the fold's rows are the score top three (OFF's first three rows), and ON's fold is OFF's
     t = load(args[0]); m = re.search(r'<fold [^>]*>(.*?)</fold>', t, re.S)
     if not m: fail("no <fold>")
-    got = [attrs(x.group(1)).get("n") for x in re.finditer(r'<(?:b|skip|slice) ([^>]*)>', m.group(1))]
+    # WRAPPER-FOLLOW (src/hopbody.h): a <b follow_of=> is a thin wrapper's callee riding after it, not a ranked row — the ranked rows
+    # are still exactly the score top three; a follow body must name a wrapper the fold serves
+    pieces = [attrs(x.group(1)) for x in re.finditer(r'<(?:b|skip|slice) ([^>]*)>', m.group(1))]
+    got = [a.get("n") for a in pieces if "follow_of" not in a]
+    # a follow names (as Owner.name or bare) the body just before it: a ranked row, an earlier follow (a 2-level chain), or the
+    # slot owner's body served ahead of the fold (review F6: each of the three is a legitimate wrapper)
+    slot = [attrs(x.group(1)).get("n") for x in re.finditer(r'<b ([^>]*)>', t[:t.find('<fold ')])]
+    wrappers = set(got) | {a.get("n") for a in pieces if "follow_of" in a} | set(slot)
+    spell = lambda q: {q, q.split(".")[-1], q.split("::")[-1]} | ({q.split("#", 1)[1]} if "#" in q[1:] and "." not in q else set())
+    if any(not (spell(a["follow_of"]) & wrappers) for a in pieces if "follow_of" in a): fail("a follow_of body names no served wrapper")
     want = [n for p, n in rows(load(args[1]))[:3]]
     mo = re.search(r'<fold [^>]*>.*?</fold>', load(args[1]), re.S)
     if not mo or mo.group(0) != m.group(0): fail("the fold differs from the RIPWIRE_NO_HEAD_RR=1 answer's")
@@ -164,6 +174,9 @@ run "$TMP/mono.on" "$FIX/mono" 0 --for="$Q_MONO"; run "$TMP/mono.off" "$FIX/mono
 if ran "$TMP/mono.on" H1 && ran "$TMP/mono.off" "H1 (twin)"; then
     chk "H1 one file holds most rows: the head names each file first" rr "$TMP/mono.on" "$TMP/mono.off" morefiles
     chk "H3 mono: the fold serves the score top three" fold "$TMP/mono.on" "$TMP/mono.off"
+    # fix1 (review F6): dispatchQueuedJobs is a loop aggregator (let n; for … { dispatchJobToWorker(…); n++ } return n), not a thin
+    # delegator — its one call is not its last statement, so it is never followed (RED on 5351fbbb, where H3 went red in CI)
+    if grep -q 'follow_of="[^"]*dispatchQueuedJobs"' "$TMP/mono.on"; then no "H3b mono: the loop aggregator dispatchQueuedJobs is followed"; else ok "H3b mono: the loop aggregator dispatchQueuedJobs is never followed"; fi
 fi
 run "$TMP/pair.on" "$FIX/pair" 0 --for="$Q_PAIR"; run "$TMP/pair.off" "$FIX/pair" 1 --for="$Q_PAIR"
 if ran "$TMP/pair.on" H2 && ran "$TMP/pair.off" "H2 (twin)"; then
