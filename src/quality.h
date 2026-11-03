@@ -864,11 +864,10 @@ inline bool pythonFrameworkInvokedSymbol( const Symbol& s, std::string_view p ) 
 // internally-consistent heuristic — the delta only needs baseline↔current consistency, not parity with the
 // fuller --dead-code verb. `topLevelCallees` is the sorted set topLevelCalleeNameHashes builds and
 // `registeredMacroIds` the sorted set registeredMacroSymbolIds builds (below, past forEachSymbolBody), and `dropImplIds` the
-// sorted set rustDropImplMethodIds builds: every call site builds all three ONCE outside its symbol loop. `exemptedByRegisterMacro`,
-// when non-null, is
-// set true iff this symbol satisfied every OTHER test here and was excluded SOLELY by the macro check —
-// the signal a caller needs to disclose an honest "N excluded" count instead of just applying the rule
-// silently (P2.2's honesty requirement).
+// sorted set rustDropImplMethodIds builds. Every call site builds all three ONCE outside its symbol loop. `exemptedByRegisterMacro`,
+// when non-null, is set true iff this symbol satisfied every OTHER test here and was excluded SOLELY by the macro check — the
+// signal a caller needs to disclose an honest "N excluded" count instead of just applying the rule silently (P2.2's honesty
+// requirement).
 inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
                              const std::vector<std::uint64_t>& topLevelCallees,
                              const std::vector<NodeId>& registeredMacroIds,
