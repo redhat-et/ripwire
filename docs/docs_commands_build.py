@@ -79,6 +79,26 @@ def is_address( match ):
     return match.group( 1 ).lower() not in FILE_EXT_NOT_TLD
 
 
+def scrub_root( text, root, repl ):
+    """Replace `root` with `repl` only where it is a WHOLE path: not preceded by a path character and not
+    followed by one (a trailing '.' counts as punctuation unless a name continues after it). A plain
+    str.replace turned `src/wrap` into `src.rap` for a checkout at `/w` (#438 review); `root + "/"` still
+    becomes `repl + "/"`. test/showcasecapturecheck.sh arm (S) pins the bytes."""
+    root = root.rstrip( '/' )
+    if not root:
+        return text
+    pat = re.compile( r'(?<![\w./-])' + re.escape( root ) + r'(?![\w-]|\.[\w-])' )
+    return pat.sub( lambda _m: repl, text )
+
+
+def scratch_outside_repo( repo, scratch ):
+    """True when `scratch` is not `repo` and not inside it. A scratch dir inside the repo would be
+    scrubbed as a repo path (`./build/sc/aux/…`) instead of `<scratch>`."""
+    r = os.path.realpath( repo )
+    s = os.path.realpath( scratch )
+    return s != r and not s.startswith( r + os.sep )
+
+
 def scrub_emails( text ):
     return EMAIL.sub( lambda m: '<author>' if is_address( m ) else m.group( 0 ), text )
 

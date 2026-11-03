@@ -2,10 +2,10 @@ package app;
 
 // Review B3: Java receivers the source TYPES resolve (a typed parameter, a typed / constructed / `var` local, a typed field
 // read bare or through `this`), against two classes that both define spill(). Near misses stay hedged: an untyped local,
-// a local that hides the field, an interface-typed receiver with two implementors.
-interface Spiller { void spill(); }
-class Tank implements Spiller { public void spill() {} }
-class Barrel implements Spiller { public void spill() {} }
+// a local that hides the field, an interface-typed receiver with two implementors (two abstract methods: no lambda implements it).
+interface Spiller { void spill(); void vent(); }
+class Tank implements Spiller { public void spill() {} public void vent() {} }
+class Barrel implements Spiller { public void spill() {} public void vent() {} }
 
 public class Pump {
     private Tank tank = new Tank();

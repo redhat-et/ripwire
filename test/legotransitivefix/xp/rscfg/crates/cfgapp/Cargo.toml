@@ -1,0 +1,6 @@
+[package]
+name = "xp-cfg-app"
+[dependencies]
+xpcfgcore = "1"
+xpcfgtwo = "1"
+serde = "1"

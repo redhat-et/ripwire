@@ -138,7 +138,7 @@ rowsOf(){
     out="$( "$BIN" "$RFIX" "--callees=$1" --no-cache 2>/dev/null )"
     printf '%s' "$out" | grep -q "<callees [^>]*of=\"$1\" defs=\"1\"" || { printf 'NO-CALLEES-ANSWER'; return; }
     printf '%s' "$out" | grep -o '<s [^>]*>' | sed -n 's/.* n="\([^"]*\)".* p="r\.cpp:\([0-9]*\)".*/\1@\2/p' \
-        | grep "^$2@" | sort -u | tr '\n' ' ' | sed 's/ $//'
+        | grep -E "^[A-Za-z_]+::$2@" | LC_ALL=C sort -u | tr '\n' ' ' | sed 's/ $//'
 }
 # the census mechanism for one (Class::caller, callee) site
 mechOf(){ awk -F '\t' -v c="::$1#" -v n="$2" '$1 == "C" && index( $6, c ) > 0 && $7 == n { print $2 }' "$TMP/recv.tsv" 2>/dev/null | sort -u | tr '\n' ' ' | sed 's/ $//'; }
@@ -163,27 +163,27 @@ done
 #       (Train 29 call-result typing: `auto other = make()` with an in-tree `Target* make()` is no longer untyped — the
 #       receiver takes make's declared result, arm 5b. Arms 5 and 8 keep their untyped premise through a factory this file
 #       does not define, `unknownMake()`.)
-expectSite "(5)" Decoy::untypedLocal pick "pick@1 pick@15 pick@6" split
+expectSite "(5)" Decoy::untypedLocal pick "Decoy::pick@6 Target::pick@1 Wrapper::pick@15" split
 # ── 5b) the call-result twin: `auto other = make()` (Target* make()). C++ call-result typing is OFF (owner 2026-10-17, fix
 #       round 6: model.h callResultFamilyOf), so this is a FLOOR — untyped, as on base: the three same-file picks split.
-#       With the macro-aware C++ card it is `"pick@1" receiver-rule` again.
-expectSite "(5b)" Typed::viaCall pick "pick@1 pick@15 pick@6" split
+#       With the macro-aware C++ card it is `"Target::pick@1" receiver-rule` again.
+expectSite "(5b)" Typed::viaCall pick "Decoy::pick@6 Target::pick@1 Wrapper::pick@15" split
 # ── 6) delegation through a member whose type Rule 2b cannot read (the measured dominant shape).
-expectSite "(6)" Wrapper::forward pick "pick@1 pick@15 pick@6" split
+expectSite "(6)" Wrapper::forward pick "Decoy::pick@6 Target::pick@1 Wrapper::pick@15" split
 # ── 6b) control: the member Rule 2b CAN read — a std smart pointer's pointee through `->` — is a narrow, not a split.
-expectSite "(6b)" Wrapper::forwardOwned pick "pick@1" receiver-rule
+expectSite "(6b)" Wrapper::forwardOwned pick "Target::pick@1" receiver-rule
 # ── 7) a TYPED receiver whose type defines no `pick`: Rule 2 declines, CHA-lite's cone keeps nothing and degrades.
-expectSite "(7)" Decoy::typedNoMethod pick "pick@1 pick@15 pick@6" split
+expectSite "(7)" Decoy::typedNoMethod pick "Decoy::pick@6 Target::pick@1 Wrapper::pick@15" split
 # ── 8) control — the target stays: the tier is {Decoy::peek itself, Target::peek}; the caller is never its own answer, so
 #       Target::peek is the one row. Since FE-B (test/receiverevidencecheck.sh) an untyped receiver's call is NAME-ONLY and
 #       never reaches the tie-break, so the disclosure moved from the census's `locality` pin to the row itself: via="name"
 #       (the census labels a lone name-only target `unique`, as it labels a lone global).
-expectSite "(8)" Decoy::peek peek "peek@1" unique
-"$BIN" "$RFIX" --callees=Decoy::peek --no-cache 2>/dev/null | grep -q '<s t="method" n="peek" p="r.cpp:1" via="name"/>' \
+expectSite "(8)" Decoy::peek peek "Target::peek@1" unique
+"$BIN" "$RFIX" --callees=Decoy::peek --no-cache 2>/dev/null | grep -q '<s t="method" n="Target::peek" p="r.cpp:1" via="name"/>' \
     && ok "(8) Decoy::peek(): the Target::peek row says via=\"name\" — the pick is disclosed on the row" \
     || no "(8) Decoy::peek(): the Target::peek row is not marked via=\"name\""
 # ── 9) control — Rule 2 narrows a typed local before the tie-break: one precise edge, untouched.
-expectSite "(9)" Decoy::typedLocal pick "pick@1" receiver-rule
+expectSite "(9)" Decoy::typedLocal pick "Target::pick@1" receiver-rule
 
 # ── 10) (cli-perf-068) the per-(name, language) candidate memo answers every call as the plain walk did. One name, `ok`,
 #       is defined in 18 shell scripts AND 18 Python files (36 definitions, past the memo's 16-candidate floor), and each

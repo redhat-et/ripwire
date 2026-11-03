@@ -4,6 +4,8 @@
 [package]
 name = "rsrecv"
 version = "0.1.0"
+[dependencies]
+nsown = "1"
 @@@ rsrecv/src/lib.rs
 // test/receiverevidencecheck.sh arm (RS): Rust receiver evidence (lane rust-receivers).
 pub mod model;
@@ -23,6 +25,74 @@ pub mod stdqown;
 pub mod stdqp;
 pub mod extglob;
 pub mod thisname;
+
+pub mod nsown;
+pub mod stdn;
+pub mod stdnuse;
+pub mod stdnre;
+pub mod nshadow;
+pub mod nsownuse;
+pub mod nsre;
+pub mod nsglob;
+pub mod nsglobuse;
+pub mod nsglobstar;
+pub mod rvtests;
+pub mod rvglob;
+pub mod rvexpl;
+pub mod rvgt;
+pub mod rvgtuse;
+pub mod rvcfg;
+pub mod rvinl;
+pub mod rvinluse;
+pub mod rvext;
+pub mod gcpar;
+pub mod gcab1;
+pub mod gcab2;
+pub mod gcabuse;
+pub mod gcinl;
+pub mod gcd1;
+pub mod gcd2;
+pub mod gcd3;
+pub mod gcd4;
+pub mod gcd5;
+pub mod gcd6;
+pub mod gcd7;
+pub mod gcdeep;
+pub mod gutu;
+pub mod gutuown;
+pub mod gus1;
+pub mod gus2;
+pub mod gus3;
+pub mod gus4;
+pub mod gususe;
+pub mod gususeown;
+pub mod gsh;
+pub mod gshown;
+pub mod gsre;
+pub mod gsreuse;
+pub mod gdq;
+pub mod gdq4;
+pub mod gdq3;
+pub mod gdq2;
+pub mod gdq1;
+pub mod gdqx4;
+pub mod gdqx3;
+pub mod gdqo;
+pub mod gdo4;
+pub mod gdo3;
+pub mod gdo2;
+pub mod gdo1;
+pub mod gdox4;
+pub mod gcz1;
+pub mod gcz2;
+pub mod gcz3;
+pub mod gcz4;
+pub mod gcz5;
+pub mod gczg;
+pub mod gczuse;
+pub mod gctn;
+pub mod gcto;
+pub mod gctq;
 @@@ rsrecv/src/model.rs
 // Book and Other both define spin / iter; Cfg and Knob both define tune: a call proves one only through its receiver's type.
 pub struct Book { pub items: Vec<u32> }
@@ -133,6 +203,10 @@ pub struct PathBuf;
 impl PathBuf {
     pub fn from(p: &str) -> Self { PathBuf }
     pub fn as_pb(&self) -> u8 { 16 }
+}
+// fc1: a String constructor whose result is written by the type's own NAME (stdnuse.rs spells the prelude's String)
+impl String {
+    pub fn with_n(n: usize) -> String { String }
 }
 @@@ rsrecv/src/kinds.rs
 // an enum with methods and a trait with a default method, both spelled like receivers below
@@ -333,3 +407,351 @@ impl Mine {
 // CodeRabbit #424 (rustQualifiedTypeOwns): a UFCS cast `<String as Default>::default()` writes a path (rustQualifierOf leaves the
 // Reference qualifier empty), so its `-> Self` must not type the local onto the in-tree Knob::default's class
 pub fn near_ufcs_cast() -> u8 { let k = <String as Default>::default(); k.tune() }
+
+@@@ rsrecv/src/nsown.rs
+// fc1: in-tree types named like std's whose constructors write the result by the TYPE'S OWN NAME (not `Self`), plainly,
+// fully qualified, and inside Result / Option / Box; a free function named like std::fs::read_to_string
+pub struct OsString;
+impl OsString {
+    pub fn from(s: &str) -> OsString { OsString }
+    pub fn from_q(s: &str) -> crate::nsown::OsString { OsString }
+    pub fn try_x(s: &str) -> Result<OsString, ()> { Ok(OsString) }
+    pub fn opt_x(s: &str) -> Option<OsString> { Some(OsString) }
+    pub fn boxed_x(s: &str) -> Box<OsString> { Box::new(OsString) }
+    pub fn as_os(&self) -> u8 { 21 }
+}
+pub struct Duration;
+impl Duration {
+    pub fn from_secs(n: u64) -> Duration { Duration }
+    pub fn as_dur(&self) -> u8 { 22 }
+}
+pub fn read_to_string(p: &str) -> OsString { OsString }
+@@@ rsrecv/src/stdn.rs
+// fc1: each call's qualifier names std's / core's / an external crate's / no module's type or function, never nsown's, so the
+// callee's result written by NAME must type nothing (base typed every one onto nsown)
+use std::ffi;
+use std::fs;
+pub fn full_from() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn full_from_q() -> u8 { let s = std::ffi::OsString::from_q("x"); s.as_os() }
+pub fn full_try() -> u8 { let s = std::ffi::OsString::try_x("x").unwrap(); s.as_os() }
+pub fn full_opt() -> u8 { let s = std::ffi::OsString::opt_x("x").unwrap(); s.as_os() }
+pub fn full_box() -> u8 { let s = std::ffi::OsString::boxed_x("x"); s.as_os() }
+pub fn mod_from() -> u8 { let s = ffi::OsString::from("x"); s.as_os() }
+pub fn core_secs() -> u8 { let d = core::time::Duration::from_secs(1); d.as_dur() }
+pub fn std_secs() -> u8 { let d = std::time::Duration::from_secs(1); d.as_dur() }
+pub fn ext_from() -> u8 { let s = serde::OsString::from("x"); s.as_os() }
+pub fn unknown_from() -> u8 { let s = nosuch::OsString::from("x"); s.as_os() }
+pub fn ufcs_from() -> u8 { let s = <std::ffi::OsString>::from("x"); s.as_os() }
+pub fn free_full() -> u8 { let s = std::fs::read_to_string("x"); s.as_os() }
+pub fn free_mod() -> u8 { let s = fs::read_to_string("x"); s.as_os() }
+pub fn re_path() -> u8 { let s = crate::stdnre::OsString::from("x"); s.as_os() }
+pub fn re_alias_path() -> u8 { let s = crate::stdnre::P::from("x"); s.as_os() }
+pub fn turbofish_std() -> u8 { let s = std::ffi::OsString::from::<u8>("x"); s.as_os() }
+@@@ rsrecv/src/stdnuse.rs
+// fc1: std's types by a `use`, a glob, the prelude; nsown's / other's namesakes never imported here
+use std::ffi::OsString;
+use std::time::*;
+pub fn use_from() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub fn glob_secs() -> u8 { let d = Duration::from_secs(1); d.as_dur() }
+pub fn prelude_with() -> usize { let s = String::with_n(3); s.lenx() }
+@@@ rsrecv/src/stdnre.rs
+// fc1: a re-export, a renamed re-export and a type alias of std's OsString
+pub use std::ffi::OsString;
+pub use std::ffi::OsString as Os;
+pub type P = std::ffi::OsString;
+pub fn re_alias() -> u8 { let s = Os::from("x"); s.as_os() }
+pub fn ty_alias() -> u8 { let s = P::from("x"); s.as_os() }
+@@@ rsrecv/src/nshadow.rs
+// fc1: an in-tree `mod std`: a path's first segment is the module's own item before the extern prelude, so bare `std::` here IS the in-tree one (proven), like `self::std::`
+pub mod std {
+    pub mod ffi {
+        pub struct OsStr;
+        impl OsStr {
+            pub fn new(s: &str) -> OsStr { OsStr }
+            pub fn as_sh(&self) -> u8 { 23 }
+        }
+    }
+}
+pub fn shadow_bare() -> u8 { let s = std::ffi::OsStr::new("x"); s.as_sh() }
+pub fn shadow_self() -> u8 { let s = self::std::ffi::OsStr::new("x"); s.as_sh() }
+@@@ rsrecv/src/nsownuse.rs
+// fc1 twins: the qualifier reaches nsown's own type or module (crate::, a `use`d module, a `use`d type, a re-export to the
+// in-tree type), so the result written by NAME types the local as before
+use crate::nsown;
+use crate::nsown::OsString;
+use crate::other::String;
+pub fn own_full() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+pub fn own_q() -> u8 { let s = crate::nsown::OsString::from_q("x"); s.as_os() }
+pub fn own_try() -> u8 { let s = OsString::try_x("x").unwrap(); s.as_os() }
+pub fn own_opt() -> u8 { let s = OsString::opt_x("x").unwrap(); s.as_os() }
+pub fn own_box() -> u8 { let s = nsown::OsString::boxed_x("x"); s.as_os() }
+pub fn own_use() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub fn own_mod() -> u8 { let d = nsown::Duration::from_secs(1); d.as_dur() }
+pub fn own_free() -> u8 { let s = nsown::read_to_string("x"); s.as_os() }
+pub fn own_free_full() -> u8 { let s = crate::nsown::read_to_string("x"); s.as_os() }
+pub fn own_reexp() -> u8 { let s = crate::nsre::OsString::from("x"); s.as_os() }
+pub fn own_prelude_twin() -> usize { let s = String::with_n(3); s.lenx() }
+pub fn own_turbofish() -> u8 { let s = crate::nsown::OsString::from::<u8>("x"); s.as_os() }
+@@@ rsrecv/src/nsre.rs
+// fc1: a re-export of the in-tree OsString (its path reaches nsown's type)
+pub use crate::nsown::OsString;
+pub fn re_own_self() -> u8 { let s = self::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/nsglob.rs
+// fc1: an in-tree glob re-export: the walk does not follow it, so a T reached through it keeps the base rule
+pub use crate::nsown::*;
+@@@ rsrecv/src/nsglobuse.rs
+use crate::nsglob::OsString;
+pub fn glob_reexp_own() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub fn glob_reexp_path() -> u8 { let s = crate::nsglob::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/nsglobstar.rs
+// fc1: this file's own glob of an in-tree module may bring OsString in: the base rule holds
+use crate::nsglob::*;
+pub fn glob_star_own() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/rvtests.rs
+// fc1 fix 1 (B1): the commonest Rust shape, a `#[cfg(test)] mod tests { use super::*; }`, never brings `std`: a std-rooted
+// call leads out of the tree beside it and inside it [N]; the in-tree path stays [P]
+pub fn t_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn t_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn inner() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+    fn inner_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+}
+@@@ rsrecv/src/rvglob.rs
+// fc1 fix 1 (B1): a glob of an in-tree module that declares no `std` / `core` [N]; the in-tree path [P]
+use crate::model::*;
+pub fn g_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn g_core() -> u8 { let d = core::time::Duration::from_secs(1); d.as_dur() }
+pub fn g_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/rvexpl.rs
+// fc1 fix 1 (B1): an explicit `use` of std's type shadows the glob of the in-tree namesake's module [N]; a name only the
+// glob brings (Duration) is nsown's [P]
+use crate::nsown::*;
+use std::ffi::OsString;
+pub fn expl_from() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub fn expl_glob() -> u8 { let d = Duration::from_secs(1); d.as_dur() }
+@@@ rsrecv/src/rvgt.rs
+// fc1 fix 1 (B1 twin): a glob's TARGET declares the root (`inner`): the glob may bring it, the base rule holds
+pub mod inner {
+    pub use crate::nsown::OsString;
+}
+@@@ rsrecv/src/rvgtuse.rs
+use crate::rvgt::*;
+pub fn gt_own() -> u8 { let s = inner::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/rvcfg.rs
+// fc1 fix 1 (B2): cfg-gated duplicate `use`s that all lead out [N]; all reaching the in-tree type [P]
+#[cfg(unix)]
+use std::ffi::OsString;
+#[cfg(windows)]
+use std::ffi::OsString;
+#[cfg(unix)]
+use crate::nsown::Duration;
+#[cfg(windows)]
+use crate::nsown::Duration;
+pub fn cfg_from() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub fn cfg_own() -> u8 { let d = Duration::from_secs(1); d.as_dur() }
+@@@ rsrecv/src/rvinl.rs
+// fc1 fix 1 (B3): an INLINE module's re-export of std's type leads out [N]; of the in-tree type, reaches it [P]
+pub mod a {
+    pub use std::ffi::OsString;
+}
+pub mod b {
+    pub use crate::nsown::OsString;
+}
+pub fn inl_path() -> u8 { let s = a::OsString::from("x"); s.as_os() }
+pub fn inl_self() -> u8 { let s = self::a::OsString::from("x"); s.as_os() }
+pub fn inl_own() -> u8 { let s = b::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/rvinluse.rs
+pub fn inl_cross() -> u8 { let s = crate::rvinl::a::OsString::from("x"); s.as_os() }
+pub fn inl_cross_own() -> u8 { let s = crate::rvinl::b::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/rvext.rs
+// fc1 fix 1 (N4): an extern crate (Cargo dep `nsown`) named like the in-tree module crate::nsown: in a non-root file a bare
+// `nsown::` path (2018) names the extern crate, never lib.rs's child module [N]; `crate::nsown::` is the in-tree one [P]
+pub fn ext_mod() -> u8 { let s = nsown::OsString::from("x"); s.as_os() }
+pub fn ext_mod_q() -> u8 { let s = ::nsown::OsString::from("x"); s.as_os() }
+pub fn ext_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gcpar.rs
+// fc1 fix 2 (rv-fc1-delta1 C1): a glob CYCLE — the parent re-exports its child and the child globs the parent — terminates
+// with the true answer: no module brings `std`, so the std call leads out [N]; the in-tree path stays [P]
+mod kid;
+pub use self::kid::*;
+pub fn gcpar_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn gcpar_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gcpar/kid.rs
+use super::*;
+pub struct Kid;
+pub fn gckid_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn gckid_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gcab1.rs
+pub use crate::gcab2::*;
+pub struct Ab1;
+@@@ rsrecv/src/gcab2.rs
+pub use crate::gcab1::*;
+pub struct Ab2;
+@@@ rsrecv/src/gcabuse.rs
+// two files that glob each other, the std call from a third
+use crate::gcab1::*;
+pub fn gcab_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn gcab_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gcinl.rs
+// an inline `mod` that globs its parent, the parent re-exporting it
+pub use self::kid::*;
+pub struct Mk;
+pub mod kid {
+    pub use super::*;
+    pub fn gcinl_kid_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+    pub fn gcinl_kid_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+}
+pub fn gcinl_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn gcinl_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gcd1.rs
+pub use crate::gcd2::*;
+pub struct D1;
+@@@ rsrecv/src/gcd2.rs
+pub use crate::gcd3::*;
+pub struct D2;
+@@@ rsrecv/src/gcd3.rs
+pub use crate::gcd4::*;
+pub struct D3;
+@@@ rsrecv/src/gcd4.rs
+pub use crate::gcd5::*;
+pub struct D4;
+@@@ rsrecv/src/gcd5.rs
+pub use crate::gcd6::*;
+pub struct D5;
+@@@ rsrecv/src/gcd6.rs
+pub use crate::gcd7::*;
+pub struct D6;
+@@@ rsrecv/src/gcd7.rs
+pub struct D7;
+@@@ rsrecv/src/gcdeep.rs
+// an acyclic 7-deep glob chain, no module declaring `std`: past the old depth cap, still [N]
+use crate::gcd1::*;
+pub fn gcdeep_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+pub fn gcdeep_own() -> u8 { let s = crate::nsown::OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gutu.rs
+// fc1 fix 2 (rv-fc1-delta1 C2): a test module's `use super::*;` sees the parent's PRIVATE `use std::ffi::OsString`, so the
+// bare name is std's there too [N]; a parent `use crate::nsown::OsString` stays the in-tree one [P] (gutuown.rs)
+use std::ffi::OsString;
+pub fn gutu_top() -> u8 { let s = OsString::from("x"); s.as_os() }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn gutu_in() -> u8 { let s = OsString::from("x"); s.as_os() }
+}
+pub mod tests2 {
+    use super::*;
+    pub fn gutu_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+    pub fn gutu_full() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }
+}
+@@@ rsrecv/src/gutuown.rs
+use crate::nsown::OsString;
+pub fn gutuown_top() -> u8 { let s = OsString::from("x"); s.as_os() }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn gutuown_in() -> u8 { let s = OsString::from("x"); s.as_os() }
+}
+pub mod tests2 {
+    use super::*;
+    pub fn gutuown_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+}
+@@@ rsrecv/src/gus1.rs
+pub use crate::gus2::*;
+@@@ rsrecv/src/gus2.rs
+pub use std::ffi::OsString;
+@@@ rsrecv/src/gus3.rs
+pub use crate::gus4::*;
+@@@ rsrecv/src/gus4.rs
+pub use crate::nsown::OsString;
+@@@ rsrecv/src/gususe.rs
+// a glob chain ending in a named re-export: std's (the bare name leads out) / the in-tree type's
+use crate::gus1::*;
+pub fn gus_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gususeown.rs
+use crate::gus3::*;
+pub fn gusown_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gsh.rs
+// fc1 fix 3 (rv-fc1-delta2 D1): a named `use std::ffi::OsString` SHADOWS the glob of the in-tree prelude at its level, so a child's
+// `use super::*;` sees std's name too [N]; the reverse (a std glob + an explicit in-tree `use`) stays the in-tree type [P] (gshown.rs)
+use crate::nsown::*;
+use std::ffi::OsString;
+pub fn gsh_top() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub mod tests { use super::*; pub fn gsh_in() -> u8 { let s = OsString::from("x"); s.as_os() } }
+@@@ rsrecv/src/gshown.rs
+use std::ffi::*;
+use crate::nsown::OsString;
+pub fn gsho_top() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub mod tests { use super::*; pub fn gsho_in() -> u8 { let s = OsString::from("x"); s.as_os() } }
+@@@ rsrecv/src/gsre.rs
+// a glob target that names std's type and globs the in-tree prelude: the named `use` wins for whoever globs this module
+pub use std::ffi::OsString;
+pub use crate::nsown::*;
+@@@ rsrecv/src/gsreuse.rs
+use crate::gsre::*;
+pub fn gsre_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gdq.rs
+// fc1 fix 3 (rv-fc1-delta2 D2): a glob chain 4 deep ending in a named std re-export — the walk is cut at rustPathOutside's depth
+// cap, and a cut is never a proof onto the in-tree type [N]; 3 deep is followed out (also [N]); the same chain ending in the in-tree type stays [P]
+pub use std::ffi::OsString;
+@@@ rsrecv/src/gdq4.rs
+pub use crate::gdq::OsString;
+@@@ rsrecv/src/gdq3.rs
+pub use crate::gdq4::*;
+@@@ rsrecv/src/gdq2.rs
+pub use crate::gdq3::*;
+@@@ rsrecv/src/gdq1.rs
+pub use crate::gdq2::*;
+@@@ rsrecv/src/gdqx4.rs
+use crate::gdq1::*;
+pub fn gdq4_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gdqx3.rs
+use crate::gdq2::*;
+pub fn gdq3_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gdqo.rs
+pub use crate::nsown::OsString;
+@@@ rsrecv/src/gdo4.rs
+pub use crate::gdqo::OsString;
+@@@ rsrecv/src/gdo3.rs
+pub use crate::gdo4::*;
+@@@ rsrecv/src/gdo2.rs
+pub use crate::gdo3::*;
+@@@ rsrecv/src/gdo1.rs
+pub use crate::gdo2::*;
+@@@ rsrecv/src/gdox4.rs
+use crate::gdo1::*;
+pub fn gdo4_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gcz1.rs
+// a CUT walk (rv-fc1-delta2 D2): a re-export chain of named `use`s longer than rustPathOutside's depth cap, ending in std — the cap
+// answers "not outside", which is a cut and never a proof onto the in-tree type [N] (the same chain ending in-tree is hedged too: a floor)
+pub use crate::gcz2::OsString;
+@@@ rsrecv/src/gcz2.rs
+pub use crate::gcz3::OsString;
+@@@ rsrecv/src/gcz3.rs
+pub use crate::gcz4::OsString;
+@@@ rsrecv/src/gcz4.rs
+pub use crate::gcz5::OsString;
+@@@ rsrecv/src/gcz5.rs
+pub use std::ffi::OsString;
+@@@ rsrecv/src/gczg.rs
+pub use crate::gcz1::OsString;
+pub use crate::nsown::*;
+@@@ rsrecv/src/gczuse.rs
+use crate::gczg::*;
+pub fn gcz_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gctn.rs
+// rv-fc1-delta3 E1: the same 5-hop named chain with NO glob in between — the cut is in the top-level walk, and a cut is hedged [N]
+use crate::gcz1::OsString;
+pub fn gctn_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gcto.rs
+// [P] twin: a 2-hop named chain ending in the in-tree type stays proven
+use crate::gdo4::OsString;
+pub fn gcto_bare() -> u8 { let s = OsString::from("x"); s.as_os() }
+@@@ rsrecv/src/gctq.rs
+pub fn gctq_full() -> u8 { let s = crate::gcz1::OsString::from("x"); s.as_os() }
+@@@ rsrecv/benches/nsb.rs
+// fc1: a file outside every crate's module tree (a bench target): its qualifier resolves nowhere, so the base rule holds
+use rsrecv::nsown::OsString;
+pub fn bench_own() -> u8 { let s = OsString::from("x"); s.as_os() }
+pub fn bench_std() -> u8 { let s = std::ffi::OsString::from("x"); s.as_os() }

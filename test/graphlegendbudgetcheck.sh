@@ -42,6 +42,12 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 info(){ printf '  INFO  %s\n' "$*"; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN (build first)"; exit 1; }
+echo "graphlegendbudgetcheck: BIN=$BIN"
+# PROCESS rule 5 (lane ls2-size-targets): each budget below is a STAIR-STEP TARGET (exceed = a registered present-only clause in
+# test/legend_over_target.tsv, printed OVER-TARGET, or FAIL) under a hard RUNAWAY GUARD of 2 x the target rounded up to 500 B;
+# RIPWIRE_LEGEND_PINS=strict is the rule 4 twin (today's hard pins). One shared verdict: test/lib/legendtarget.sh.
+. "$ROOT/test/lib/legendtarget.sh"
+lt_selftest
 
 measure(){    # $1=file -> prints "total legend payload" (bytes)
     python3 - "$1" <<'PY'
@@ -141,11 +147,7 @@ for v in $VERBS; do
     "$BIN" "$ROOT" "--$v=rootRelPathsLegend" --legend=full >"$TMP/$v.xml" 2>/dev/null
     read -r total legend payload <<<"$( measure "$TMP/$v.xml" )"
     budget="$( budgetFor "$v" )"
-    if [ "$legend" -le "$budget" ]; then
-        ok "(a) --$v legend is $legend B (<= $budget B budget; total=$total payload=$payload)"
-    else
-        no "(a) --$v legend is $legend B (> $budget B budget) — the shared essay re-inflated"
-    fi
+    lt_gate "(a) --$v full legend (total=$total payload=$payload)" "full:$v" "$legend" "$budget" "$legend" "$( lt_full_guard "$budget" )" "$TMP/$v.xml"
     if [ "$legend" -le "$payload" ]; then
         ok "(a2) --$v: legend ($legend B) <= payload ($payload B) on this symbol"
     else
@@ -171,11 +173,7 @@ PY
 )"
 case "$twin" in
     NOPREMISE*) no "(a-twin) --callers legend twin cannot measure: ${twin#NOPREMISE }" ;;
-    *)  if [ -n "$twin" ] && [ "$twin" -eq "$twin" ] 2>/dev/null && [ "$twin" -le 3429 ]; then
-            ok "(a-twin) --callers legend minus the sites_at= sentence is $twin B <= 3429 B (the pre-CALLSITE-AT pin)"
-        else
-            no "(a-twin) --callers legend minus the sites_at= sentence is ${twin:-?} B > 3429 B — the rest re-inflated"
-        fi ;;
+    *)  lt_gate "(a-twin) --callers legend minus the sites_at= sentence (the pre-CALLSITE-AT pin)" full:callers "$twin" 3429 "$twin" "$( lt_full_guard 3429 )" "$TMP/callers.xml" ;;
 esac
 
 # ── (b) the honesty vocabulary a reader must meet on all three, unchanged by the trim (test/floormarkcheck.sh
@@ -212,5 +210,6 @@ for v in $VERBS; do
     if diff -q "$TMP/$v.xml" "$TMP/$v.2.xml" >/dev/null; then ok "(c) --$v deterministic (byte-identical twice)"; else no "(c) --$v differs across two runs"; fi
 done
 
+lt_summary graphlegendbudgetcheck
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

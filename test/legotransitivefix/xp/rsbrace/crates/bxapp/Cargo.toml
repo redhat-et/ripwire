@@ -1,0 +1,5 @@
+[package]
+name = "xp-brace-app"
+[dependencies]
+xp-brace-core = { path = "../bxcore" }
+serde = "1"

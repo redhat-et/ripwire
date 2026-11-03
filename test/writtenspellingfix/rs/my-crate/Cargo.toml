@@ -1,0 +1,3 @@
+[package]
+name = "my-crate"
+version = "0.1.0"

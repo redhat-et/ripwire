@@ -125,9 +125,11 @@ QUERIES_CAPPED=(stale cache buffer resize DISCLOSE)
 # `--grep-in=any`, and train 3 took it to 107, capped. pageWindow and diskPath sat at 99, PageWindow at 80 and
 # crawlSkips at 75 on the same tree. All five were swapped for identifiers whose count held between main a5ce95e2
 # and train 3 (resolveAtSeed 21, langOfPath 31, RankedGraph 12, BindSite 19, findByField 10).
+# BindSite (74 hits at the l6-iface merge, past the headroom: the type is in every bind-pushing signature) was swapped for
+# rankGraphTeleport (24 hits: one function and its doc mentions).
 UNCAPPED_HEADROOM=70
 QUERIES_UNCAPPED=(appendCdataSafe truncateUtf8WithEllipsis resolveAtSeed langOfPath RankedGraph McpPageArgs
-                  GrepHit GrepRawHit lineStarts BindSite findByField xmllint)
+                  GrepHit GrepRawHit lineStarts rankGraphTeleport findByField xmllint)
 
 # ── presence guards (CONTRIBUTING.md §2: a gate that cannot observe what it asserts is green for the
 #    wrong reason) — before trusting a byte count, prove the feature that is supposed to produce it fired ──

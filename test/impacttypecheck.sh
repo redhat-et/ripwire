@@ -515,14 +515,15 @@ else:
 # still lists its file
 d20 = run("rsimpl", "--impact=Shape")
 r20, s20 = rf(d20), srows(d20)
-areas = [d for n, d in s20 if n == "area" and d == "1"]
-if len(areas) >= 2 and r20.get("tri.rs", {}).get("via") == "type" and r20.get("tri.rs", {}).get("syms", "0") != "0" and "empty.rs" in r20:
+# member rows print Owner::name: the two impl methods are exactly Sq::area (lib.rs) and Tri::area (tri.rs)
+areas = sorted(n for n, d in s20 if n.endswith("::area") and d == "1")
+if areas == ["Sq::area", "Tri::area"] and r20.get("tri.rs", {}).get("via") == "type" and r20.get("tri.rs", {}).get("syms", "0") != "0" and "empty.rs" in r20:
     ok("(20) --impact=Shape: both impl methods `area` at d=1 (lib.rs and tri.rs), tri.rs via=type syms=%s, empty.rs listed" % r20["tri.rs"].get("syms"))
 else:
     no("(20) --impact=Shape rows %r rf %r" % (s20, r20))
 d20b = run("rsimpl", "--impact=Sq")
 s20b = dict(srows(d20b))
-if s20b.get("side") == "1" and s20b.get("area") == "1":
+if s20b.get("Sq::side") == "1" and s20b.get("Sq::area") == "1":
     ok("(20b) --impact=Sq: the inherent impl's side and the trait impl's area at d=1")
 else:
     no("(20b) --impact=Sq rows %r" % srows(d20b))

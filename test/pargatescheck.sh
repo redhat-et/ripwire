@@ -41,8 +41,8 @@ grep -qE '^DEFAULT_TIMEOUT_SEC = 300$' "$PARGATES" \
     && ok "static: DEFAULT_TIMEOUT_SEC is 300 (the flat cap everything NOT overridden still gets)" \
     || no "static: DEFAULT_TIMEOUT_SEC is not the expected 300 — check for an accidental global raise"
 
-grep -qE '"cppbenchcheck\.sh":\s*1200' "$PARGATES" \
-    && ok "static: cppbenchcheck.sh has an honest 1200s budget" \
+grep -qE '"cppbenchcheck\.sh":\s*2400' "$PARGATES" \
+    && ok "static: cppbenchcheck.sh has an honest 2400s budget (CI-FLAKES-2: killed at 1200 s three times on slow macOS draws)" \
     || no "static: cppbenchcheck.sh missing (or wrong) from GATE_BUDGET_SEC"
 
 grep -qE '"bodydialectcheck\.sh":\s*900' "$PARGATES" \
@@ -361,6 +361,61 @@ else
         || no "functional(bytecode): MUTANT -- expected tree_writes=0 for a gitignored write the tripwire cannot see; got rc=$rcM: $( printf '%s\n' "$outM" | grep -E '^gates=' )"
 fi
 
+# ── THE HARNESS SCALE REACHES THE GATE (CI-FLAKES, 2026-10-27) ──────────────────────────────────────────────
+# --budget-scale multiplies the gate's whole budget, but a gate's own inner alarm (cppqualcheck's perl `alarm 30` around
+# its first, cold, repo-root parse) never saw it: that call is CPU-bound by tree size and shares the runner's 3-4 cores
+# with the other -j 3 gates, so on macOS Release shard 3 it crossed 30 s on most runs of 2026-10-26 (CI runs
+# 40380040283, 40417160699, 40382636401, 40388958004) while the gate's own 1200 s budget sat unused. run() now exports
+# the factor as PARGATES_BUDGET_SCALE. Three arms on the synthetic corpus shape above:
+#   SCALED   --budget-scale 4: the probe gate reads PARGATES_BUDGET_SCALE=4.
+#   DEFAULT  no flag: it reads 1 (a local run is unscaled).
+#   MUTANT   a copy of run() without the export line -> the same gate sees nothing and FAILS, so SCALED is not vacuous.
+grep -qE '^    env\["PARGATES_BUDGET_SCALE"\] = f"\{budget_scale:g\}"$' "$PARGATES" \
+    && ok "static: run() exports PARGATES_BUDGET_SCALE (the --budget-scale factor) to every gate" \
+    || no "static: run() no longer exports PARGATES_BUDGET_SCALE -- a gate's inner alarm stops following the CI scale (cppqualcheck's cold repo-root parse)"
+mkScaleCorpus(){   # mkScaleCorpus <dir>
+    local d="$1"
+    mkdir -p "$d/test"
+    cat > "$d/test/scaleprobecheck.sh" <<'EOF'
+#!/usr/bin/env bash
+if [ "${PARGATES_BUDGET_SCALE:-unset}" = "${EXPECT_SCALE:-}" ]; then
+    printf '  PASS  %s\n' "saw PARGATES_BUDGET_SCALE=${PARGATES_BUDGET_SCALE}"; echo "ALL PASS"; exit 0
+else
+    printf '  FAIL  %s\n' "expected PARGATES_BUDGET_SCALE=${EXPECT_SCALE:-} saw ${PARGATES_BUDGET_SCALE:-unset}"; echo "FAILURES ABOVE"; exit 1
+fi
+EOF
+    chmod +x "$d/test/scaleprobecheck.sh"
+    ( cd "$d" && git init -q . && git config user.email t@t && git config user.name t \
+      && git add -A && git commit -qm base ) >/dev/null 2>&1 \
+      || { no "functional(scale): could not init the synthetic git corpus at $d"; return 1; }
+}
+SCL="$TMP/scl"; mkScaleCorpus "$SCL"
+NOSCL="$TMP/pargates_noscale.py"
+python3 - "$PARGATES" "$NOSCL" 2>/dev/null <<'PYEOF'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src).read()
+needle = '    env["PARGATES_BUDGET_SCALE"] = f"{budget_scale:g}"\n'
+assert needle in text, "run()'s export line not found verbatim -- the static arm above should already have failed"
+open(dst, "w").write(text.replace(needle, '', 1))
+PYEOF
+outS="$( env -u PARGATES_BUDGET_SCALE EXPECT_SCALE=4 python3 "$PARGATES" "$SCL" "$FAKEBIN" --only scaleprobecheck --budget-scale 4 2>&1 )"; rcS=$?
+[ "$rcS" -eq 0 ] && printf '%s\n' "$outS" | grep -qE '^gates=1 pass=1 ' \
+    && ok "functional(scale): SCALED -- --budget-scale 4 reaches the gate as PARGATES_BUDGET_SCALE=4" \
+    || no "functional(scale): SCALED -- expected the gate to see 4, rc 0; got rc=$rcS: $( printf '%s\n' "$outS" | grep -E '^gates=|FAIL' | head -3 )"
+outD="$( env -u PARGATES_BUDGET_SCALE EXPECT_SCALE=1 python3 "$PARGATES" "$SCL" "$FAKEBIN" --only scaleprobecheck 2>&1 )"; rcD=$?
+[ "$rcD" -eq 0 ] && printf '%s\n' "$outD" | grep -qE '^gates=1 pass=1 ' \
+    && ok "functional(scale): DEFAULT -- no --budget-scale reaches the gate as PARGATES_BUDGET_SCALE=1" \
+    || no "functional(scale): DEFAULT -- expected the gate to see 1, rc 0; got rc=$rcD: $( printf '%s\n' "$outD" | grep -E '^gates=|FAIL' | head -3 )"
+if [ ! -s "$NOSCL" ]; then
+    no "functional(scale): MUTANT -- could not build the mutant: run()'s export line is not verbatim (the static arm above says why)"
+else
+    outN="$( env -u PARGATES_BUDGET_SCALE EXPECT_SCALE=4 python3 "$NOSCL" "$SCL" "$FAKEBIN" --only scaleprobecheck --budget-scale 4 2>&1 )"; rcN=$?
+    [ "$rcN" -ne 0 ] && printf '%s\n' "$outN" | grep -qE '^gates=1 pass=0 ' \
+        && ok "functional(scale): MUTANT -- without the export the same gate sees no scale and fails (the probe is live)" \
+        || no "functional(scale): MUTANT -- without the export the probe gate still passed (rc=$rcN): SCALED proves nothing"
+fi
+
 # ── THE DECLARED BUDGET IS A FLOOR, NOT A CEILING (2026-09-10, CI run 34479806177) ───────────────────────
 # GATE_BUDGET_SEC entries were originally exempt from --budget-scale, on the reasoning that each was derived
 # from a CI measurement and should stand as declared. Under CI's --budget-scale 4 that inverted the table's
@@ -633,6 +688,11 @@ PREREVIEW = '''def _stop_group(p):
 # run_gate() as e442a5d8 had it: the stop was checked only after a STOP_POLL_SEC wait, so a gate admitted as the signal
 # was recorded ran that long before anything looked. Re-spelled 2026-09-11 against the file-backed capture; the defect is
 # the ORDER of the two checks, not how the output is collected.
+# The first wait is 3.0 s here, not STOP_POLL_SEC (0.5 s): the arm needs the probe gate (bash start + a 0.3 s sleep, then its
+# "late" line) to get past its 0.3 s mark INSIDE that wait. At 0.5 s the 0.2 s of slack is eaten by process starts on a loaded host
+# (the (I control) admission arm FAILED 3 of 3 runs at load average 9-13 on unmodified main 12056c16, "late recorded: False") and
+# the mutant was stopped before it could show its defect. A longer wait changes no ordering: the defect is still
+# "wait first, look at the stop second"; the fixed run_gate() checks the stop before any wait and is not affected.
 READFIRST = '''def run_gate(argv, env, limit):
     deadline = time.monotonic() + limit
     fd, capture = tempfile.mkstemp(prefix="ripwire-pargates-capture-", suffix=".out")
@@ -642,7 +702,7 @@ READFIRST = '''def run_gate(argv, env, limit):
              subprocess.Popen(argv, cwd=root, env=env, stdout=fh, stderr=subprocess.STDOUT,
                               start_new_session=True) as p:
             while True:
-                if _wait_for(p, max(0.0, min(STOP_POLL_SEC, deadline - time.monotonic()))):
+                if _wait_for(p, max(0.0, min(3.0, deadline - time.monotonic()))):
                     return p.returncode, _capture_read(capture), "exited"
                 if stop_signal is not None:
                     _stop_group(p)

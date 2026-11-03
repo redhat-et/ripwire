@@ -209,10 +209,9 @@ RENAME = {
     "p":    { "file", "line" },            # row: p="file:line" splits into two JSON keys
     "l":    { "line" },
     "hits": { "total" },                   # grep: the CLI's hits= is the JSON total
-    # quality_delta (lane lean-trio, idea #11): a regression-free CLI answer collapses its <sa> rows to stale_by_kind= and
-    # stale_next= (the --show-stale call); the twin LISTS those rows as "sa", so the two facts survive as the rows themselves.
-    "stale_by_kind": { "sa" },
-    "stale_next":    { "sa" },
+    # quality_delta: lane lean-trio's RENAME stale_by_kind/stale_next -> "sa" is GONE (lane lean2b, card #9 MCP-FOLD). The twin
+    # now folds like the CLI and carries both keys BY NAME, so root parity is plain name parity again; the COUNT twin below
+    # asserts the fold lost nothing (stale on both surfaces, stale_by_kind summing to it, show_stale=true listing the rows).
 }
 
 def report( label, cliNames, twinNames, lens ):
@@ -241,6 +240,45 @@ if qdMcp.startswith( "__ERROR__" ):
 else:
     report( "quality_delta root", xmlRootAttrs( qdXml, "quality-delta" ) or set(),
             jsonTopKeys( qdMcp ), declaredLens( qdMcp ) )
+
+# lean2b (card #9) COUNT PARITY — the twin of the RENAME removal above. Name parity alone would pass a fold that dropped a
+# row or miscounted a kind, so the values are compared where they are a closed count: CLI stale= == MCP stale; when either
+# surface folds, BOTH fold, and stale_by_kind sums to stale on each and is the SAME string; MCP show_stale=true lists exactly
+# `stale` "sa" rows and carries neither fold key; and the folded and show_stale=true documents agree on every other key.
+def kindSum( v ):
+    try:    return sum( int( kv.rsplit( ":", 1 )[ 1 ] ) for kv in v.split( "," ) if kv )
+    except Exception: return -1
+qdFull = mcp( "quality_delta", { "path": ROOT, "show_stale": True } )
+try:
+    jDef  = json.loads( qdMcp )
+    jFull = json.loads( qdFull )
+except Exception:
+    jDef = jFull = None
+check( jDef is not None and jFull is not None, "COUNT: MCP quality_delta default and show_stale=true both parse as JSON" )
+if jDef is not None and jFull is not None:
+    cliRoot  = stripComments( qdXml )
+    mStale   = re.search( r'<quality-delta\b[^>]*\bstale="(\d+)"', cliRoot )
+    mKinds   = re.search( r'<quality-delta\b[^>]*\bstale_by_kind="([^"]*)"', cliRoot )
+    cliStale = int( mStale.group( 1 ) ) if mStale else None
+    check( cliStale is not None and cliStale == jDef.get( "stale" ) == jFull.get( "stale" ),
+           "COUNT: stale= agrees on the CLI (%r), MCP default (%r) and show_stale=true (%r)" % ( cliStale, jDef.get( "stale" ), jFull.get( "stale" ) ) )
+    mcpFolds = "stale_by_kind" in jDef
+    # the twin folds only where the CLI does, and declines only where its JSON fold would not PAY (foldPays: < 75 % of the bytes)
+    cut      = qdFull.rfind( '"sa":[' )
+    predict  = qdFull[ :cut ] + '"stale_by_kind":"' + ( mKinds.group( 1 ) if mKinds else "" ) + '","stale_next":"show_stale=true"}'
+    jsonPays = bool( mKinds ) and cut >= 0 and len( predict.encode() ) * 100 < len( qdFull.encode() ) * 75
+    check( mcpFolds == jsonPays and ( not mcpFolds or qdMcp == predict ),
+           "COUNT: the MCP default folds exactly when the CLI does AND the JSON fold pays, into the predicted bytes (cli=%s pays=%s mcp=%s)"
+           % ( bool( mKinds ), jsonPays, mcpFolds ) )
+    if mcpFolds:
+        check( "sa" not in jDef and jDef.get( "stale_next" ) == "show_stale=true",
+               "COUNT: a folded twin drops sa and names show_stale=true in stale_next (got %r)" % ( jDef.get( "stale_next" ), ) )
+        check( kindSum( jDef[ "stale_by_kind" ] ) == jDef.get( "stale" ), "COUNT: MCP stale_by_kind sums to stale (%r)" % ( jDef[ "stale_by_kind" ], ) )
+        check( bool( mKinds ) and mKinds.group( 1 ) == jDef[ "stale_by_kind" ], "COUNT: CLI and MCP stale_by_kind are the same string" )
+    check( "stale_by_kind" not in jFull and "stale_next" not in jFull and len( jFull.get( "sa", [] ) ) == jFull.get( "stale" ),
+           "COUNT: show_stale=true lists exactly stale (%r) sa rows (%r) and no fold key" % ( jFull.get( "stale" ), len( jFull.get( "sa", [] ) ) ) )
+    rest = lambda d: { k: v for k, v in d.items() if k not in ( "sa", "stale_by_kind", "stale_next" ) }
+    check( rest( jDef ) == rest( jFull ), "COUNT: default and show_stale=true agree on every key outside the fold" )
 
 # A2 (found-items 2026-09-17): VALUE parity for the "sidecar present but unreadable" baseline marker.
 # attrparity above is deliberately NAME-only (a git stamp or a root path legitimately differs by value),

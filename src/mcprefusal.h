@@ -374,6 +374,8 @@ inline constexpr McpValueSpec kMcpValueFields[] = {
     { "no_route",      "a BOOLEAN: true forces plain subtoken+body BM25 (omit it for the default router)", "no_route=true", "boolean" },
     // whereis-lean (review C1): the CLI --whereis-full-text twin, the replay a <t_cut next=> names. Terse: it rides tools/list.
     { "full_text",     "a BOOLEAN: true prints every t= line whole", "full_text=true", "boolean" },
+    // lane lean2b: the CLI --show-stale twin, the replay quality_delta's stale_next names. Terse: it rides tools/list.
+    { "show_stale",    "a BOOLEAN: true = the full stale list", "show_stale=true", "boolean" },
     // ── the ENVELOPE, outside `params` (§B6 M6/M7) ──
     // These four were read through the bare findString/findObject path, which collapses "absent" onto
     // "present but not the shape I read" — so `"method":5` became `-32700 "parse error"` (a JSON that parsed
@@ -1047,7 +1049,7 @@ inline constexpr McpVerbFields kMcpVerbFields[] = {
     { "batch",                    "path queries legend" },
     // ── flagship-reflex verbs ──
     { "exemplar",                 "path paths kind task legend" },
-    { "quality_delta",            "path" },
+    { "quality_delta",            "path show_stale" },
     { "quality_baseline",         "path", McpVerbFields::Effect::Writes },
     { "impact",                   "path paths symbol limit offset legend" },
     // LB-G (r10 GitNexus round): limit/offset are DECLARED here because the verb now HONORS them

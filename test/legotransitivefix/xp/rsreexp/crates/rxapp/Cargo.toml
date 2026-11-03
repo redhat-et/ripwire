@@ -1,0 +1,5 @@
+[package]
+name = "xp-reexp-app"
+[dependencies]
+xp-reexp-core = { path = "../rxcore" }
+serde = "1"

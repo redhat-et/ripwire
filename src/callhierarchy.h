@@ -27,6 +27,7 @@
 #include "defattrib.h" // the per-row definition attribution every surface of these rows serves (and tsContractSignatures)
 #include "filter.h"    // pathTierIndexOver / compareTierThenPath — the tier-then-path row order both surfaces serve
 #include "graph.h"     // resolveAllByNameQualified, the CSR, testSymbolForwardReach / countTestedIn / isTestedByReach
+#include "memberowner.h"   // QUALNAME-1: MemberOwners / qualifiedMemberName — n="Owner.name" on every member row
 #include "model.h"
 #include "nextverb.h"  // nextFlag / nextAttrXml / nextFieldJson — a cut <in> block's next=
 #include "sarif.h"     // rootRelativeUri — the <in> blocks' p=, as every other row
@@ -188,6 +189,7 @@ inline ClosureBlocksOut closureBlocks( const IngestResult& ing, const Graph& g, 
     };
     std::string out = json ? ",\"in\":[" : "";
     const std::size_t blocks = std::min( closures.size(), kClosureBlocks );
+    const std::optional<MemberOwners> owners = json ? std::nullopt : std::optional<MemberOwners>( std::in_place, ing );   // QUALNAME-1: XML rows only (JSON keys stay)
     for( std::size_t b = 0; b < blocks; ++b )
     {
         const NodeId              inner = closures[b];
@@ -212,7 +214,7 @@ inline ClosureBlocksOut closureBlocks( const IngestResult& ing, const Graph& g, 
             const bool    via = edgeNameOnly( g, inner, rows[i] );   // FE-B: a name-only edge says so, as on the callees rows
             out += json ? std::string( i == 0 ? "" : "," ) + "{\"t\":\"" + symTag( s.kind ) + "\",\"n\":\"" + jsonStr( s.name ) + "\",\"p\":\"" + jsonStr( rel( s ) ) + "\""
                               + ( via ? ",\"via\":\"name\"" : "" ) + "}"
-                        : "<s t=\"" + std::string( symTag( s.kind ) ) + "\" n=\"" + ex( s.name ) + "\" p=\"" + ex( rel( s ) ) + "\"" + viaNameAttr( via ) + "/>";
+                        : "<s t=\"" + std::string( symTag( s.kind ) ) + "\" n=\"" + ex( qualifiedMemberName( *owners, s ) ) + "\" p=\"" + ex( rel( s ) ) + "\"" + viaNameAttr( via ) + "/>";
         }
         out += json ? "]}" : "</in>";
     }
@@ -390,6 +392,52 @@ inline CallHierarchyRows withOneHopAttribution( const IngestResult& ing, const G
     return rows;
 }
 
+// LB-G (r10 §5): the served order of a one-hop listing — TIER before path (filter.h states the key once and --uses shares
+// it; plain path order put 171 `tests/` rows ahead of anything useful on django's `--callers=bulk_create`), then line, then name.
+inline void sortOneHopRows( const IngestResult& ing, std::vector<NodeId>& rows )
+{
+    const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; } );
+    std::sort( rows.begin(), rows.end(), [ & ]( NodeId a, NodeId b )
+    {
+        const Symbol& sa = ing.symbols[a];
+        const Symbol& sb = ing.symbols[b];
+        if( const int c = compareTierThenPath( ing, tierOfFile, sa.fileId, sb.fileId ); c != 0 )
+        {
+            return c < 0;
+        }
+        return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
+    } );
+}
+
+// The 1-hop CALLER rows of `defs` — the callers verb's rows, and the --for caller hop's (forcallerhop.h): every distinct
+// in-edge source of any def, in sortOneHopRows' order, then RANKED BEFORE THE CAP.
+// cut-fix C (2026-09-23): within a tier the most-called caller comes first (graph.h navRelevanceWeight; the path order is the
+// tie-break), so every window over the callers rows — the CLI's default cap, find_referencing_symbols, and find_symbol's
+// calledBy array — keeps the rows most depended on and drops the lightest (filter.h rankBeforeCap states the rule and its
+// paging guarantee). CALLERS ONLY. Fix round 1 (2026-09-24, rv-cutfix-navlists B1, blocking): the first cut of that lane
+// applied the SAME rank to the callee direction too, unmeasured. It made callees WORSE: this repo's own co-blame instrument
+// fell 0.592 -> 0.466 at the default cap (n=18, W/L 1/11), and every multi-row --callees / find_symbol `calls` answer led
+// with the row's LEAST specific neighbours (empty, empty, empty, size, c_str) because a callee's rank there is ITS OWN caller
+// count, which measures how widely-called that callee is elsewhere, not how central it is to the body that calls it.
+inline std::vector<NodeId> oneHopCallerRows( const IngestResult& ing, const Graph& g, std::span<const NodeId> defs )
+{
+    std::vector<NodeId> rows;
+    std::vector<char>   seen( ing.symbols.size(), 0 );
+    const auto*         ro = g.inEdges.rowOffsets();
+    const auto*         ci = g.inEdges.colIndices();
+    for( const NodeId x : defs )
+    {
+        for( std::uint32_t k = ro[x]; k < ro[x + 1]; ++k )
+        {
+            if( NodeId c = ci[k]; c < seen.size() && !seen[c] ) { seen[c] = 1;  rows.push_back( c ); }
+        }
+    }
+    sortOneHopRows( ing, rows );
+    rankBeforeCap( ing, rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; },
+                   [ & ]( NodeId r ) { return navRelevanceWeight( g, r ); } );
+    return rows;
+}
+
 inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph& g, std::string_view selector, bool wantCallers,
                                             const ValueRefIndex* valueIndex = nullptr )   // the MCP server passes its cached one
 {
@@ -405,19 +453,14 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
     }
     out.crossKind = crossKindValue( ing, out.matches );
 
-    std::vector<char> seen( ing.symbols.size(), 0 );
-    for( const NodeId x : out.matches )
+    if( wantCallers )
     {
-        if( wantCallers )
-        {
-            const auto* ro = g.inEdges.rowOffsets();
-            const auto* ci = g.inEdges.colIndices();
-            for( std::uint32_t k = ro[x]; k < ro[x + 1]; ++k )
-            {
-                if( NodeId c = ci[k]; c < seen.size() && !seen[c] ) { seen[c] = 1;  out.rows.push_back( c ); }
-            }
-        }
-        else
+        out.rows = oneHopCallerRows( ing, g, out.matches );   // collected, tier/path ordered and ranked before the cap (below)
+    }
+    else
+    {
+        std::vector<char> seen( ing.symbols.size(), 0 );
+        for( const NodeId x : out.matches )
         {
             for( std::uint32_t k = g.outOff[x]; k < g.outOff[x + 1]; ++k )
             {
@@ -430,50 +473,19 @@ inline CallHierarchyRows callHierarchyRows( const IngestResult& ing, const Graph
                 ++out.bodylessDefs;
             }
         }
+        sortOneHopRows( ing, out.rows );   // callees keep the tier/path order: no rank (oneHopCallerRows says why)
     }
 
     std::tie( out.declinedCalls, out.declinedSites ) = declinedCallsAndSites( ing, g, out.matches, wantCallers );   // the count and its <dc> rows
     out.declinedIface = wantCallers ? declinedIfaceCallsNaming( ing, g, out.matches ) : 0;
     out.stdCalls      = wantCallers ? StdMemberCallsMade{} : stdMemberCallsMadeBy( g, out.matches );
 
-    // LB-G (r10 §5): TIER before path — filter.h states the key once and --uses shares it. Plain path order
-    // put 171 `tests/` rows ahead of anything useful on django's `--callers=bulk_create`.
-    const std::vector<std::uint8_t> tierOfFile = pathTierIndexOver( ing, out.rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; } );
-    std::sort( out.rows.begin(), out.rows.end(), [ & ]( NodeId a, NodeId b )
-    {
-        const Symbol& sa = ing.symbols[a];
-        const Symbol& sb = ing.symbols[b];
-        if( const int c = compareTierThenPath( ing, tierOfFile, sa.fileId, sb.fileId ); c != 0 )
-        {
-            return c < 0;
-        }
-        return sa.line != sb.line ? sa.line < sb.line : sa.name < sb.name;
-    } );
-    // cut-fix C (2026-09-23): RANK BEFORE THE CAP — CALLERS ONLY. Within a tier the most-called caller comes
-    // first (graph.h navRelevanceWeight; the path order above is the tie-break), so every window over the
-    // callers rows — the CLI's default cap, find_referencing_symbols, and find_symbol's calledBy array — keeps
-    // the rows most depended on and drops the lightest (filter.h rankBeforeCap states the rule and its paging
-    // guarantee).
-    //
-    // Fix round 1 (2026-09-24, rv-cutfix-navlists B1, blocking): the first cut of this lane applied the SAME
-    // rank to the callee direction too, unmeasured. It made callees WORSE: this repo's own co-blame instrument
-    // (the same one the table above reports) fell 0.592 -> 0.466 at the default cap (n=18, W/L 1/11), and every
-    // multi-row --callees / find_symbol `calls` answer led with the row's LEAST specific neighbours (empty,
-    // empty, empty, size, c_str) because a callee's rank there is ITS OWN caller count, which measures how
-    // widely-called that callee is elsewhere, not how central it is to the body that calls it. Guarded on
-    // wantCallers so callees (and find_symbol's `calls`) keep the tier/path order above, byte-identical to
-    // origin/main.
     // Reference-as-value round: the <vr> rows beside the call rows — the binding sites of `matches` (callers), or what
     // `matches` stores/passes and may call through (callees). Never merged into `rows`: they are not calls.
     {
         const std::optional<ValueRefIndex> local = valueIndex == nullptr ? std::optional<ValueRefIndex>( std::in_place, ing ) : std::nullopt;
         const ValueRefIndex&               vri   = valueIndex != nullptr ? *valueIndex : *local;
         out.valueRefs = withPatternRows( wantCallers ? valueRefCallerRows( ing, vri, out.matches ) : valueRefCalleeRows( ing, vri, out.matches ), PatternIndex( ing, vri ), out.matches, wantCallers );
-    }
-    if( wantCallers )
-    {
-        rankBeforeCap( ing, out.rows, [ & ]( NodeId r ) { return ing.symbols[r].fileId; },
-                       [ & ]( NodeId r ) { return navRelevanceWeight( g, r ); } );
     }
     return withOneHopAttribution( ing, g, std::move( out ), wantCallers );
 }
@@ -504,13 +516,14 @@ inline CallersByteBand callersByteBand( const IngestResult& ing, std::span<const
     {
         return CallersByteBand{};
     }
-    RowCallSites      sites = rowCallSites( ing, defs, rows, rr, keptForwards );
-    std::vector<char> esc;   // the escape buffer the row's n= and p= are measured through
+    RowCallSites       sites = rowCallSites( ing, defs, rows, rr, keptForwards );
+    std::vector<char>  esc;   // the escape buffer the row's n= and p= are measured through
+    const MemberOwners owners( ing );   // QUALNAME-1: the row's n= is its owner-qualified name (memberowner.h), so the estimate charges it
     std::size_t       bytes = 0;
     for( std::size_t i = 0; i < rows.size(); ++i )
     {
         const Symbol&     s       = ing.symbols[ rows[i] ];
-        const std::size_t nameLen = escapeXml( s.name, esc ).size();
+        const std::size_t nameLen = escapeXml( qualifiedMemberName( owners, s ), esc ).size();
         const std::size_t pathLen = escapeXml( vrPath( ing, s.fileId, rr ), esc ).size();
         bytes += std::string_view( "<s t=\"\" n=\"\" p=\":\"/>" ).size() + std::string_view( symTag( s.kind ) ).size() + nameLen + pathLen
                + std::to_string( s.line ).size()

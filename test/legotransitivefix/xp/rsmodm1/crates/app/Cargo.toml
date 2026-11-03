@@ -1,0 +1,4 @@
+[package]
+name = "app"
+[dependencies]
+xp-m1-core = { path = "../xp_m1_core" }

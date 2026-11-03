@@ -366,13 +366,197 @@ else
 fi
 
 # (B6) MCP: a soft stop answers with the envelope disclosure, and every answer from that partial index keeps it
-printf '%s\n' \
-    "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
-    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$FX\",\"symbol\":\"a_02\"}}}" \
-    | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6.out"
+#      WHICH files survive crawl:30 used to be the filesystem's readdir order (recursive_directory_iterator, no sort
+#      before the stop): APFS kept a/f02.c, ext4's hashed order could drop it (a simulation over random orders kept it
+#      ~37 % of the time), and find_symbol of a name outside the kept files was a JSON-RPC ERROR with no
+#      result._memory_stop at all (CI 40671724898 and #458 runs: B6b "_memory_stop=''" on ubuntu only). The crawl now
+#      walks in byte order of file names (SortedDirWalk), so the kept set is the same on every filesystem, and EVERY
+#      answer from a cut index — a result or a not-found/refusal error — carries the partial-index sentence.
+#      Kept set at crawl:30 (pre-order; the 30th entry is the one the seam stops AT, so 29 are kept): a, a/f00..f17
+#      (entries 1-19), b, b/f00..f08 (20-29).
+cut_req(){   # $1 = id, $2 = tool, $3 = arguments JSON object
+    printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}\n' "$1" "$2" "$3"
+}
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 grep "{\"path\":\"$FX\",\"pattern\":\"a_02\"}"
+  cut_req 4 find_symbol "{\"path\":\"$FX\",\"symbol\":\"a_02\"}"
+  cut_req 5 grep "{\"path\":\"$FX\",\"pattern\":\"b_08\"}"
+  cut_req 6 grep "{\"path\":\"$FX\",\"pattern\":\"b_09\"}"
+  cut_req 7 find_symbol "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 8 find_referencing_symbols "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 9 impact "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 10 uses "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 11 mentions "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 12 owners "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 13 slice "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 14 path_between "{\"path\":\"$FX\",\"from\":\"d_17\",\"to\":\"a_00\"}"
+  cut_req 15 connect "{\"path\":\"$FX\",\"symbols\":[\"d_17\",\"c_17\"]}"
+  cut_req 16 find_symbol "{\"path\":\"$FX\",\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6.out"
 ms2="$( mcp_field "$TMP/b6.out" 2 _memory_stop )"; ms3="$( mcp_field "$TMP/b6.out" 3 _memory_stop )"
 case "$ms2" in *"memory guard"*crawl*64M*) ok "(B6) MCP grep under a crawl stop carries _memory_stop";; *) no "(B6) id=2 _memory_stop='${ms2:0:200}' resp: $( head -c 300 "$TMP/b6.out" )";; esac
-case "$ms3" in *"memory guard"*) ok "(B6b) the next answer from the same partial index still carries it";; *) no "(B6b) id=3 _memory_stop='${ms3:0:200}'";; esac
+case "$ms3" in *"memory guard"*) ok "(B6b) the next answer from the same partial index still carries it";; *) no "(B6b) id=3 _memory_stop='${ms3:0:200}' resp: $( grep '"id":3' "$TMP/b6.out" | head -c 300 )";; esac
+# (B6b2) a third verb on the same index. a_02 is inside the kept set on EVERY filesystem, so this is always a result
+ms4="$( mcp_field "$TMP/b6.out" 4 _memory_stop )"
+case "$ms4" in *"memory guard"*) ok "(B6b2) find_symbol a_02 (inside the kept files) is a result and carries _memory_stop";; *) no "(B6b2) id=4 error='$( mcp_field "$TMP/b6.out" 4 error )' _memory_stop='${ms4:0:200}'";; esac
+# (B6d) the kept set is the SAME on every filesystem: b_08 (entry 29) is in, b_09 (entry 30, where the seam stops) is out
+hits5="$( mcp_field "$TMP/b6.out" 5 text | grep -oE '"files":[0-9]+' | head -1 )"; hits6="$( mcp_field "$TMP/b6.out" 6 text | grep -oE '"files":[0-9]+' | head -1 )"
+if [ "$hits5" = '"files":1' ] && [ "$hits6" = '"files":0' ]; then
+    ok "(B6d) crawl:30 keeps the 29 entries before the stop in file-name order (b_08 in, b_09 out), whatever the readdir order"
+else
+    no "(B6d) b_08 $hits5 (want 1), b_09 $hits6 (want 0) — the crawl is not walking in name order"
+fi
+# (B6e) an ABSENCE answered from a cut index is never unqualified: d_17 is outside the kept files, so each verb answers
+#       not-found (an error), and every one of those errors names the partial index, the count it covers and the override
+nfbad=""
+for id in 7 8 9 10 11 12 13 14 15 16; do
+    em="$( mcp_field "$TMP/b6.out" $id error )"
+    case "$em" in
+        *"is partial"*"not proof of absence"*"memory guard stopped the crawl"*"covers "*" files"*"max-memory"*) ;;
+        *) nfbad="$nfbad id=$id:'${em:0:160}'" ;;
+    esac
+done
+if [ -z "$nfbad" ]; then
+    ok "(B6e) 10 not-found / refusal errors from the cut index (find_symbol, refs, impact, uses, mentions, owners, slice, path_between, connect, an unknown name) each name the partial index, its file count and the override"
+else
+    no "(B6e) errors without the disclosure:$nfbad"
+fi
+# (B6e2) the error is still the not-found it was (the disclosure is appended, nothing replaced): the echo and the code survive
+case "$( mcp_field "$TMP/b6.out" 7 error )" in "symbol not found: 'd_17'"*) ok "(B6e2) the not-found keeps its own wording ahead of the disclosure";; *) no "(B6e2) id=7: $( mcp_field "$TMP/b6.out" 7 error | head -c 200 )";; esac
+# (B6e3) the words "memory guard" in ECHOED caller text are not a disclosure (CR 4419328423): a not-found for a symbol literally
+#        named "memory guard" still takes the partial-index clause (the suppression keys on the shared override sentence, which
+#        every guard sentence ends with, not on the two words)
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"path\":\"$FX\",\"symbol\":\"memory guard\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6e3.out"
+em="$( mcp_field "$TMP/b6e3.out" 3 error )"
+case "$em" in
+    "symbol not found: 'memory guard'"*"is partial"*"not proof of absence"*"covers "*" files"*"max-memory"*) ok "(B6e3) an echoed 'memory guard' in the not-found does not suppress the partial-index clause";;
+    *) no "(B6e3) id=3 error='${em:0:240}'";;
+esac
+# (B6f) near miss: a request for ANOTHER, whole index must not inherit the earlier index's cut. $HOMEDIR/proj has 1 file, so
+#       the same crawl:30 seam never fires there; its not-found carries no memory sentence
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"path\":\"$HOMEDIR/proj\",\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6f.out"
+em="$( mcp_field "$TMP/b6f.out" 3 error )"
+case "$em" in
+    "") no "(B6f) the whole index answered a result, expected a not-found: $( grep '"id":3' "$TMP/b6f.out" | head -c 200 )";;
+    *"memory guard"*|*"partial"*) no "(B6f) a whole index's not-found carries the other index's cut: '${em:0:200}'";;
+    *) ok "(B6f) a not-found from a WHOLE index (another root, same server) carries no memory sentence";;
+esac
+# (B6f2) near miss: an error raised before ANY index is read, for a root that is not the cut one (an unknown field on a
+#        request for $HOMEDIR/proj while the cut $FX is the resident index), says nothing about the guard
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"path\":\"$HOMEDIR/proj\",\"symbol\":\"hp\",\"bogus_field\":1}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6f2.out"
+em="$( mcp_field "$TMP/b6f2.out" 3 error )"
+case "$em" in
+    "unknown field"*) case "$em" in *"memory guard"*|*"partial"*) no "(B6f2) a usage error for another root carries the cut index's sentence: '${em:0:200}'";; *) ok "(B6f2) a usage error for a root that is not the cut one carries no memory sentence";; esac;;
+    *) no "(B6f2) id=3 error='${em:0:200}'";;
+esac
+# (B6i) a multi-root `paths` workspace over one cut root and one whole root is a cut index (the merged stop): its not-found
+#       carries the sentence; a LATER request for the whole root alone (a different index) does not
+FX2="$TMP/fx2"; mkdir -p "$FX2"; printf 'int hp2( void ) { return 1; }\n' >"$FX2/p.c"
+{ cut_req 2 grep "{\"paths\":[\"$FX\",\"$FX2\"],\"pattern\":\"a_01\"}"
+  cut_req 3 find_symbol "{\"paths\":[\"$FX\",\"$FX2\"],\"symbol\":\"zzz_nope\"}"
+  cut_req 4 find_symbol "{\"paths\":[\"$FX2\"],\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6i.out"
+em3="$( mcp_field "$TMP/b6i.out" 3 error )"; em4="$( mcp_field "$TMP/b6i.out" 4 error )"
+case "$em3" in
+    *"is partial"*"memory guard stopped the crawl"*) case "$em4" in "symbol not found"*) case "$em4" in *"memory guard"*|*"partial"*) no "(B6i) the whole root alone inherits the workspace's cut: '${em4:0:200}'";; *) ok "(B6i) a cut workspace's not-found carries the sentence; the whole root alone, asked next, does not";; esac;; *) no "(B6i) id=4 error='${em4:0:200}'";; esac;;
+    *) no "(B6i) id=3 error='${em3:0:240}'";;
+esac
+# (B6j) a `batch` sub-query's not-found is an ok="0" err= INSIDE a result, not a JSON-RPC error — it is the same
+#       absence from the same cut index, so it carries the same partial-index clause; the same batch on an uncut server does not
+{ cut_req 2 grep "{\"path\":\"$FX\",\"pattern\":\"a_01\"}"
+  cut_req 3 batch "{\"path\":\"$FX\",\"queries\":[\"callers: d_17\",\"callers: a_02\"]}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6j.out"
+bt="$( mcp_field "$TMP/b6j.out" 3 text )"
+case "$bt" in
+    *'ok="0" err="symbol not found'*)
+        case "$bt" in
+            *'ok="0" err="symbol not found'*"is partial"*"not proof of absence"*"covers "*" files"*"max-memory"*) ok "(B6j) a batch sub-query's not-found from the cut index carries the partial-index clause";;
+            *) no "(B6j) batch err= without the clause: $( printf '%s' "$bt" | grep -o '<q [^>]*ok="0"[^>]*>' | head -c 300 )";;
+        esac;;
+    *) no "(B6j) id=3 expected an ok=0 sub-query: $( printf '%s' "$bt" | head -c 300 )";;
+esac
+{ printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"batch\",\"arguments\":{\"path\":\"$FX\",\"queries\":[\"callers: zzz_nope\"]}}}"; } \
+    | mcp_call "$TMP" >"$TMP/b6j2.out"
+bt="$( mcp_field "$TMP/b6j2.out" 2 text )"
+case "$bt" in
+    *'ok="0" err="symbol not found'*) case "$bt" in *"memory guard"*|*"partial"*) no "(B6j2) an uncut batch not-found mentions the guard";; *) ok "(B6j2) near miss: an uncut server's batch not-found is plain";; esac;;
+    *) no "(B6j2) id=2 expected an ok=0 sub-query: $( printf '%s' "$bt" | head -c 300 )";;
+esac
+# (B6k) the FIRST request, the one that builds the cut index, is not the exception: its not-found carries the same shared clause,
+#       not only the older "the memory guard stopped an ingest this request ran" sentence (find_symbol, edit_check, quality_delta)
+fkbad=""
+for spec in 'find_symbol|{"path":"'"$FX"'","symbol":"d_17"}' 'edit_check|{"path":"'"$FX"'","symbol":"d_17"}' 'quality_delta|{"path":"'"$FX"'"}'; do
+    tool="${spec%%|*}"; args="${spec#*|}"
+    cut_req 2 "$tool" "$args" | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6k.out"
+    em="$( mcp_field "$TMP/b6k.out" 2 error )"
+    case "$em" in
+        *"is partial"*"not proof of absence"*"covers "*" files"*"max-memory"*) ;;
+        *) fkbad="$fkbad $tool:'${em:0:200}'" ;;
+    esac
+done
+if [ -z "$fkbad" ]; then
+    ok "(B6k) the first request's error (find_symbol, edit_check, quality_delta) carries the shared partial-index clause"
+else
+    no "(B6k) first-request errors without the clause:$fkbad"
+fi
+# (B6k2) near miss: edit_check's own cut ingest is one REQUEST's fact — the next request, for a whole root, is plain
+{ cut_req 2 edit_check "{\"path\":\"$FX\",\"symbol\":\"d_17\"}"
+  cut_req 3 find_symbol "{\"path\":\"$HOMEDIR/proj\",\"symbol\":\"zzz_nope\"}"
+} | RIPWIRE_TEST_MEMGUARD=crawl:30 mcp_call "$TMP" --max-memory=64M >"$TMP/b6k2.out"
+em2="$( mcp_field "$TMP/b6k2.out" 2 error )"; em3="$( mcp_field "$TMP/b6k2.out" 3 error )"
+case "$em2" in
+    *"is partial"*)
+        case "$em3" in
+            "symbol not found"*) case "$em3" in *"memory guard"*|*"partial"*) no "(B6k2) the next request inherits the edit_check ingest's cut: '${em3:0:200}'";; *) ok "(B6k2) near miss: the request after a cut edit_check, for a whole root, carries no memory sentence";; esac;;
+            *) no "(B6k2) id=3 error='${em3:0:200}'";;
+        esac;;
+    *) no "(B6k2) id=2 error='${em2:0:200}'";;
+esac
+# (B6l) a grep from a cut index never says "complete":true in its payload — a hit absent from it may sit in the files that were
+#       never read (a_01: inside the kept set; b_09: outside it); the uncut twin keeps the claim
+cc="$( mcp_field "$TMP/b6.out" 2 text; mcp_field "$TMP/b6.out" 6 text )"
+case "$cc" in
+    *'"files"'*) case "$cc" in *'"complete":true'*) no "(B6l) a cut index's grep payload claims complete:true";; *) ok "(B6l) a grep payload from a cut index (a_01 inside the kept set, b_09 outside) never claims complete:true";; esac;;
+    *) no "(B6l) no grep payload read: $( printf '%s' "$cc" | head -c 200 )";;
+esac
+printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    | mcp_call "$TMP" >"$TMP/b6l.out"
+case "$( mcp_field "$TMP/b6l.out" 2 text )" in
+    *'"complete":true'*) ok "(B6l2) near miss: the same grep on an uncut index keeps complete:true";;
+    *) no "(B6l2) an uncut grep lost complete:true: $( mcp_field "$TMP/b6l.out" 2 text | head -c 300 )";;
+esac
+# (B6g) near miss: an uncut server's not-found is the plain one
+printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
+    "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"find_symbol\",\"arguments\":{\"path\":\"$FX\",\"symbol\":\"zzz_nope\"}}}" \
+    | mcp_call "$TMP" >"$TMP/b6g.out"
+em="$( mcp_field "$TMP/b6g.out" 3 error )"
+case "$em" in
+    "symbol not found"*) case "$em" in *"memory guard"*|*"partial"*) no "(B6g) an uncut not-found mentions the guard: '${em:0:200}'";; *) ok "(B6g) an uncut index's not-found carries no memory sentence";; esac;;
+    *) no "(B6g) id=3 error='${em:0:200}'";;
+esac
+# (B6h) the CLI twin: a not-found-shaped ask against a cut index REFUSES (exit 5, empty stdout, the guard named) instead of
+#       printing a not-found — pinned for a name the cut lost (d_17) and one that never existed
+for sym in d_17 zzz_nope; do
+    run_trip crawl:30 "$FX" --callers=$sym --max-memory=64M --no-cache >"$TMP/b6h.out" 2>"$TMP/b6h.err"; rc=$?
+    if [ "$rc" = 5 ] && [ ! -s "$TMP/b6h.out" ] && grep -q '^ripwire: the memory guard stopped the crawl' "$TMP/b6h.err"; then
+        ok "(B6h) CLI --callers=$sym on a cut index refuses (exit 5, empty stdout) rather than answering not-found"
+    else
+        no "(B6h) $sym rc=$rc stdout=$( head -c 120 "$TMP/b6h.out" ) stderr: $( head -c 200 "$TMP/b6h.err" )"
+    fi
+done
+# (B6h2) the CLI twin of the grep completeness claim: --grep on a cut index refuses too, so no complete="1" is ever printed from one
+run_trip crawl:30 "$FX" --grep=a_01 --max-memory=64M --no-cache >"$TMP/b6h2.out" 2>"$TMP/b6h2.err"; rc=$?
+if [ "$rc" = 5 ] && [ ! -s "$TMP/b6h2.out" ] && ! grep -q 'complete=' "$TMP/b6h2.out"; then
+    ok "(B6h2) CLI --grep=a_01 on a cut index refuses (exit 5, empty stdout): no complete=\"1\" claim"
+else
+    no "(B6h2) rc=$rc stdout=$( head -c 160 "$TMP/b6h2.out" ) stderr: $( head -c 160 "$TMP/b6h2.err" )"
+fi
 printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"grep\",\"arguments\":{\"path\":\"$FX\",\"pattern\":\"a_01\"}}}" \
     | mcp_call "$TMP" >"$TMP/b6c.out"
 if grep -q '_memory_stop' "$TMP/b6c.out"; then
@@ -433,8 +617,13 @@ else
     no "(B8) $( b8why "$rc" "$TMP/b8.out" "$TMP/b8.err" )"
 fi
 RIPWIRE_TEST_MEMGUARD=crawl:999999999 "$BIN" "$EG" --no-cache --max-memory=64M >"$TMP/b8b.out" 2>"$TMP/b8b.err"; rc=$?
+# B8b asks one thing: is the REAL guard still on under a never-firing seam. A time-gated soft stop is the real guard too
+# (macOS CI leg, 2026-11-02: rc 0, memory_stop=crawl in the answer, "the memory guard stopped the parse" on stderr), so it
+# passes; a run with no memory_stop and no guard line, the disabled-guard shape, still fails.
 if [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ingest' "$TMP/b8b.err" && [ ! -s "$TMP/b8b.out" ]; then
     ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 still exits 5 with the ingest line)"
+elif [ "$rc" = 0 ] && grep -qE 'memory_stop=[a-z]+' "$TMP/b8b.out" && grep -q '^ripwire: the memory guard stopped' "$TMP/b8b.err"; then
+    ok "(B8b) RIPWIRE_TEST_MEMGUARD cannot disable the guard (crawl:999999999 ended on the real guard's disclosed soft stop)"
 else
     no "(B8b) the never-firing seam changed the real outcome: $( b8why "$rc" "$TMP/b8b.out" "$TMP/b8b.err" )"
 fi
@@ -519,8 +708,11 @@ fi
 #        beside the ingest; a memory-guard refusal used to join that walk's future before exiting, so the exit code waited for
 #        the end of the log. With a git shim whose `log --name-only` (the walk's own stream; its sha-list probe and every other
 #        git call reach the real git) streams one line every 0.1 s for 6 s, the refusal must return well before the stream ends:
-#        the walker stops at its next line and the join ends there (<= 4 s against the 6 s stream: measured 2 s plain and under
-#        ASan on a loaded 10-core host; the pre-fix binary took 17-25 s). Fresh TMPDIR, so no cached stream from an earlier arm
+#        the walker stops at its next line and the join ends there (measured 2 s plain and under ASan on a loaded 10-core host;
+#        the pre-fix binary took 17-25 s). The verdict is NOT a wall-clock bound: a fixed 4 s failed at 5 s on a host at load
+#        average 13-19, where the shim's own 60 spawned sleeps stretch the 6 s stream too. A join can only end when the stream
+#        does, so the shim writes log-done after its last line and the refusal must have returned without it (the abandoned
+#        walker gets SIGPIPE at its next echo and exits before reaching it); the elapsed seconds stay in the message. Fresh TMPDIR, so no cached stream from an earlier arm
 #        stands in for the walk; the shim records that it served the walk.
 SHIM="$TMP/shim"; mkdir -p "$SHIM" "$TMP/b21tmp"
 REALGIT="$( command -v git )"
@@ -531,6 +723,7 @@ for a in "\$@"; do
         : > "$SHIM/log-served"
         i=0
         while [ \$i -lt 60 ]; do echo "shim-line \$i" || exit 0; sleep 0.1; i=\$((i+1)); done
+        : > "$SHIM/log-done"
         exit 0
     fi
 done
@@ -542,10 +735,10 @@ PATH="$SHIM:$PATH" TMPDIR="$TMP/b21tmp" run_trip crawl:30 "$FXG" --no-cache --fo
 el=$(( $( date +%s ) - t0 ))
 if [ ! -e "$SHIM/log-served" ]; then
     no "(B21) premise: the shim never served a git log --name-only — the history walk did not run against it (rc=$rc)"
-elif [ "$rc" = 5 ] && grep -q '^ripwire: .*cannot answer from a partial index' "$TMP/b21.err" && [ "$el" -le 4 ]; then
+elif [ "$rc" = 5 ] && grep -q '^ripwire: .*cannot answer from a partial index' "$TMP/b21.err" && [ ! -e "$SHIM/log-done" ]; then
     ok "(B21) --for over a crawl stop refuses in ${el}s while the shim's log still streams: the walk is abandoned, not joined"
 else
-    no "(B21) rc=$rc elapsed=${el}s (the shim's log streams for 6 s; a join waits it out) stderr: $( grep '^ripwire:' "$TMP/b21.err" | head -c 200 )"
+    no "(B21) rc=$rc elapsed=${el}s stream-finished-before-return=$( [ -e "$SHIM/log-done" ] && echo yes || echo no ) (the shim's log streams for 6 s; a join waits it out) stderr: $( grep '^ripwire:' "$TMP/b21.err" | head -c 200 )"
 fi
 # (B16) --query --format=candidates is a report verb, so it refuses a partial index like the rest (pinned: its
 #       <candidates> root has no header to carry the cut)
@@ -740,33 +933,90 @@ fi
 #       ENVIRONMENT outcome, not the property: it is re-run, up to 6 attempts, and the arm passes only on an attempt that
 #       shows the whole property. Anything else fails at once — the D1 shape (rc 5, "before anything was built"), a stop
 #       that keeps no z/ file, a wrong line. Six environment outcomes in a row fail too: the arm never passes blind.
-# (the fixture, $EG, is built above B8, which shares it)
+# FIXTURE, $EG12 (CI-FLAKES, 2026-10-27; this arm used to share $EG with B8). The headroom above was real but its margin
+#       was thin and the arm's own attempt loop could not absorb a runner that moved it: on $EG (z/ functions that CALL
+#       each other, 1500 per file) the OS peak footprint (`/usr/bin/time -l`, an upper bound on the hard-line reading, which
+#       is taken between phases) was 62.9-66.7 MB of the 67.1 MB limit over 10 runs foreground and 10 under `taskpolicy -b`
+#       (10-core macOS, plain build), and the arm stopped passing at ~1.6x the z/ function count (rc 5 at 2400 per file),
+#       because the call edges are what grows between the parse stop and the graph build. PR #443 run 40408050413 attempt
+#       1 (macOS plain shard 1) failed B12/B12b with "memory limit reached during the ingest (limit 64M, from
+#       --max-memory)" even after the loop; that runner's shift was NOT reproduced here (20/20 passes on both fixtures
+#       under 8 concurrent cold parses), so the fix widens the margin rather than naming the runner's cause. B12 does not
+#       need call edges: it needs the parse line (half the limit) crossed by a REAL reading, big files sorting last and
+#       parsing first, and an answer after the stop. $EG12 keeps the shape (320 small a-h files, 80 big z/ files of 1500
+#       functions each) but the z/ functions CALL nothing: the same 10 files are parsed at the stop and the peak footprint
+#       is 35.4-40.4 MB (53-60 % of the limit, 40 runs incl. loaded), and it still passes at 2400 functions per file.
+#       $EG, and B8's need for an unguarded peak far over the limit, are unchanged.
+# CI-FLAKES FIX1 (2026-10-27): the call-free $EG12 of the first fix was still shaped like $EG -- the stop is reached by what the
+#       parse RETAINS (~26 MB of facts) -- and that shape depends on the worker count. Reproduced with the pool forced to W
+#       workers (a DYLD_INTERPOSE shim on std::thread::hardware_concurrency, Release and plain builds, 10-core host): W=10/16
+#       stop after 10-20 files and end under the hard line; W=3 (the macOS runner: CI run 40439389312, macos-26 Release shard
+#       4/4, "34 of them parsed", the stop line and THEN rc 5 "memory limit reached during the graph build") needs 33-34 files
+#       to reach the parse line, because three in-flight trees are a small share of 32 MB, so nearly all of it is facts, and
+#       the graph build roughly doubles facts: 2/3 runs at W=3 and W=4 ended on the hard line (rc 5, "none" parsed), and
+#       the six-attempt loop could not help because the runner repeats the outcome. The fixture's size is therefore not one
+#       number: a few big files whose TREES carry the footprint (a function whose body is one C array of N elements is one
+#       def and no calls, so it is almost all tree and almost no facts) reach the parse line from the workers in flight, W x tree, and leave little
+#       to double. How much one tree weighs against 32 MB is the pool's business, so the arm walks a short ladder of element
+#       counts by outcome (rc 0 with no stop = too light, go up; the hard line after the stop = too heavy, go down) and
+#       passes on the first rung that shows the whole property. Measured, Release, workers forced to 3/4/6/10/16: 9000 elements
+#       -> rc 0 with the stop at W=3,4,6,10,16 (2 of 2 each); 14000 -> the same; 20000 -> rc 5 at W=10 and 16 and
+#       4000 -> no stop at W=3,4 (so the ladder is not decoration).
+EG12="$TMP/eg12"
+mkeg12(){   # mkeg12 ELEMENTS: 320 small a-h files + 40 z/ files of 4 array-holding functions each (no calls)
+    rm -rf "$EG12"; mkdir -p "$EG12"
+    python3 - "$EG12" "$1" <<'PY3'
+import os, sys
+root, n = sys.argv[1], int( sys.argv[2] )
+for d in "abcdefgh":
+    os.makedirs( os.path.join( root, d ), exist_ok=True )
+    for f in range( 40 ):
+        open( os.path.join( root, d, "f%02d.c" % f ), "w" ).write( "int %s_%d(int x){ return x; }\n" % ( d, f ) )
+os.makedirs( os.path.join( root, "z" ), exist_ok=True )
+for f in range( 40 ):
+    open( os.path.join( root, "z", "big%02d.c" % f ), "w" ).write(
+        "".join( "int z%d_%d(int x){ int a[] = {%s}; return x; }\n" % ( f, k, ",".join( [ "1" ] * n ) ) for k in range( 4 ) ) )
+PY3
+}
 # ASan quarantine inflates the footprint past the hard line before the soft parse stop is visible (review G1:
 #   peak 498 MB under ASan vs 82 MB plain); a plain binary ignores the option. A sanitizer build keeps 128M: its runtime
 #   carries a fixed footprint of its own that does not double after the stop (measured with llvm@22 ASan: 64M ends on
 #   the hard line during the ingest 3/3, 128M passes), which is the headroom the floor buys a plain build.
 B12LIM=64M
 LC_ALL=C grep -q -a '__asan_init' "$BIN" 2>/dev/null && B12LIM=128M
-b12="" b12env=""
-for attempt in 1 2 3 4 5 6; do
-    ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}quarantine_size_mb=0" RIPWIRE_TEST_MEMGUARD=eager:1 "$BIN" "$EG" --no-cache --max-memory=$B12LIM --top-k=3 >"$TMP/b12.out" 2>"$TMP/b12.err"; rc=$?
+b12="" b12env="" b12lad=( 2500 4000 6000 9000 14000 ) b12i=3 b12lo=0 b12hi=4 b12trail=""
+LC_ALL=C grep -q -a '__asan_init' "$BIN" 2>/dev/null && b12lad=( 5000 8000 12000 18000 28000 )
+for attempt in 1 2 3 4 5 6 7 8; do
+    mkeg12 "${b12lad[$b12i]}"
+    ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}quarantine_size_mb=0" RIPWIRE_TEST_MEMGUARD=eager:1 "$BIN" "$EG12" --no-cache --max-memory=$B12LIM --top-k=3 >"$TMP/b12.out" 2>"$TMP/b12.err"; rc=$?
     hdr="$( grep -oE '<!-- files=[^>]*-->' "$TMP/b12.out" | head -1 )"
     parsed="$( printf '%s' "$hdr" | grep -oE 'memory_parsed=[0-9]+' | grep -oE '[0-9]+' )"
+    b12trail="$b12trail [${b12lad[$b12i]} elems: rc=$rc parsed=${parsed:--}]"
     if [ "$rc" = 0 ] && case "$hdr" in *"memory_stop=parse"*) true;; *) false;; esac && [ "${parsed:-0}" -ge 2 ] && grep -q 'p="z/' "$TMP/b12.out"; then
         b12=pass; break
     fi
-    if { [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ' "$TMP/b12.err" && ! grep -q 'before anything was built' "$TMP/b12.err"; } \
-       || { [ "$rc" = 0 ] && ! grep -q 'memory_stop=' "$TMP/b12.out"; }; then
-        b12env="$b12env [attempt $attempt: rc=$rc $( grep '^ripwire:' "$TMP/b12.err" | tail -1 | head -c 70 )]"
-        continue
+    if [ "$rc" = 5 ] && grep -q '^ripwire: memory limit reached during the ' "$TMP/b12.err" && ! grep -q 'before anything was built' "$TMP/b12.err"; then
+        b12hi=$(( b12i - 1 ))   # too heavy: the parse stop landed too late for the hard line; lighter trees
+    elif [ "$rc" = 0 ] && ! grep -q 'memory_stop=' "$TMP/b12.out"; then
+        b12lo=$(( b12i + 1 ))   # too light: the parse line was never crossed; heavier trees
+    else
+        break                    # anything else (the D1 shape, a stop that keeps no z/ file, a wrong line) fails at once
     fi
-    break
+    if [ "$b12lo" -gt "$b12hi" ]; then b12lo=0; b12hi=4; fi   # the window closed on a noisy reading: walk the ladder again
+    b12i=$(( ( b12lo + b12hi ) / 2 ))
 done
-[ -n "$b12env" ] && printf '  ..    (B12) environment outcome(s) re-run:%s\n' "$b12env"
+[ "$b12" != pass ] && [ -n "$b12trail" ] && b12env="$b12trail"
+[ -n "$b12env" ] && [ "$b12" = pass ] && printf '  ..    (B12) ladder:%s\n' "$b12trail"
+# a red here must say WHAT the runner measured, in the FAIL line itself (CI run 40439389312 showed only failure-shaped lines,
+# so a separate diagnostic line never reached the log): the rungs tried, and the unguarded OS peak of the last rung (macOS `time -l`)
+b12diag=""
+if [ "$b12" != pass ] && [ -x /usr/bin/time ]; then
+    b12diag=" unguarded: $( RIPWIRE_TEST_MEMGUARD=eager:1 /usr/bin/time -l "$BIN" "$EG12" --no-cache --max-memory=4G --top-k=3 2>&1 >/dev/null | grep -E 'peak memory footprint|maximum resident' | tr -s ' ' | tr '\n' ';' )"
+fi
 if [ "$b12" = pass ]; then
     ok "(B12) a real parse stop ($B12LIM, eager readings) answers from the $parsed files it parsed — the big z/ files, first in the parse order (attempt $attempt)"
 else
-    no "(B12) rc=$rc header: $hdr stderr: $( grep '^ripwire:' "$TMP/b12.err" | head -c 200 )"
+    no "(B12) rc=$rc header: $hdr stderr: $( grep '^ripwire:' "$TMP/b12.err" | head -c 200 ) rungs:$b12trail$b12diag"
 fi
 if [ "$b12" = pass ] && grep -q "^ripwire: the memory guard stopped the parse at the parse line (half of the $B12LIM limit)" "$TMP/b12.err"; then
     ok "(B12b) the stop line names the parse line (half of the limit), not the limit it did not reach"

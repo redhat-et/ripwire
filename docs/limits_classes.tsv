@@ -41,6 +41,8 @@ kExtendedLengthThresholdUnits	BOUNDARY
 kFieldWalkCap	INDEXING
 kForPageRowsDefault	OUTPUT
 kForPageUnionSymbolCap	INDEXING
+kForRankedHopHeadRows	BOUNDARY
+kForRankedHopMaxCallers	BOUNDARY
 kHandoffCochangeRows	OUTPUT
 kHandoffDocRows	OUTPUT
 kHandoffNoteRows	OUTPUT
@@ -124,6 +126,7 @@ kMinValueNameLen	BOUNDARY
 kNameCandidateCap	OUTPUT
 kNoticeByteCap	OUTPUT
 kOtherDefCap	OUTPUT
+kPathRouteRefuseCandsThreshold	BOUNDARY
 kRadixThreshold	BOUNDARY
 kRegexMaxGroupDepth	BOUNDARY
 kRegexMaxPatternBytes	BOUNDARY

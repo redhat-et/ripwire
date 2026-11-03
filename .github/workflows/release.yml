@@ -296,6 +296,14 @@ jobs:
           set -eu
           tag="${{ inputs.tag || github.ref_name }}"
           ver="${tag#v}"
+          # Entries live one file per change under changelog.d/ until the release step folds them in
+          # (scripts/changelog_assemble.py release; CONTRIBUTING.md "Cutting a release"). A fragment still
+          # there at tag time is an entry this release's notes would silently leave out.
+          left="$( find changelog.d -maxdepth 1 -type f ! -name README.md 2>/dev/null | sort )"
+          if [ -n "$left" ]; then
+            printf 'changelog.d/ still holds fragments — fold them (python3 scripts/changelog_assemble.py release %s DATE) before tagging %s:\n%s\n' "$ver" "$tag" "$left" >&2
+            exit 1
+          fi
           awk -v ver="$ver" '
             $0 ~ "^## \\[" ver "\\]" { on = 1; print; next }
             on && /^## \[/            { exit }

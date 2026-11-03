@@ -576,11 +576,13 @@ reaches(){
 # misses SYM CALLER WHY — CALLER is NOT a caller of SYM
 misses(){
     callers "$FIX" "$1" || return
-    grep -q " n=\"$2\"" "$DIR/c.rows" && no "$2 reaches $1 — $3" || ok "$2 does not reach $1 ($3)"
+    # QUALNAME-1: a Ruby method caller prints Owner#name — the negative rejects the bare AND every Owner#-qualified spelling
+    # (a bare-only probe would pass vacuously); the matching reaches arms pin the exact qualified rows, so this can fail.
+    grep -qE " n=\"([A-Za-z0-9_:]+#)?$2\"" "$DIR/c.rows" && no "$2 reaches $1 — $3" || ok "$2 does not reach $1 ($3)"
 }
 
 echo "=== a mixin is an ancestor: the base walk reaches it, ahead of a same-file namesake ==="
-reaches SignalMixin::signal act "include Hub::SignalMixin — the mixin's def answers"
+reaches SignalMixin::signal Ctl#act "include Hub::SignalMixin — the mixin's def answers"
 misses  Hub::signal act "Hub is not an ancestor of Ctl, only the mixin's namespace"
 reaches RegistryDsl::register Registry "extend RegistryDsl — the class-body DSL call reaches the extended module"
 misses  Robot::register       Registry "Robot is no ancestor of Registry"
@@ -590,24 +592,24 @@ reaches Catalog::define_section Catalog "define_section :first inside Ns::Catalo
 misses  Ns::define_section      Catalog "the enclosing namespace's method is not self's"
 
 echo "=== below the caller: a subclass's or an includer's method answers a self call ==="
-reaches Impl::hook           template "BaseTemplate#template's hook dispatches to Impl < BaseTemplate"
+reaches Impl::hook           BaseTemplate#template "BaseTemplate#template's hook dispatches to Impl < BaseTemplate"
 misses  Unrelated::hook      template "Unrelated is neither above nor below BaseTemplate"
-reaches Order::audit_target  audit    "Auditable#audit's audit_target dispatches to its includer Order"
+reaches Order::audit_target  Auditable#audit    "Auditable#audit's audit_target dispatches to its includer Order"
 misses  Unrelated::audit_target audit "Unrelated does not include Auditable"
 
-reaches Renderer::story       summary  "GroupContent#summary's story reaches Reacted's superclass Renderer through the includer"
+reaches Renderer::story       GroupContent#summary  "GroupContent#summary's story reaches Reacted's superclass Renderer through the includer"
 misses  CommentsMod::story    summary  "naming CommentsMod in the concern's file does not put it in reach — the include narrow picks the reachable"
 
-reaches Write::_write_attribute       "id=" "a mixin inside a concern's included block joins its includer's ancestors"
+reaches Write::_write_attribute       "PrimaryKey#id=" "a mixin inside a concern's included block joins its includer's ancestors"
 misses  WriterDecoy::_write_attribute "id=" "WriterDecoy is neither above nor below PrimaryKey"
 
 reaches ClassMethods::define_hooks Wrapper "include Callbacky extends its ClassMethods onto Wrapper (the Concern convention)"
 misses  HookDecoy::define_hooks    Wrapper "an unrelated class's namesake stays out of reach"
 
 echo "=== a module's own bare call walks its includes (langfacts mixinAncestry: both graph.h sites) ==="
-reaches MixHelpers::mix_target run_mix "a module method's bare call reaches the module it includes, not only its includer's namesake"
+reaches MixHelpers::mix_target MixMod#run_mix "a module method's bare call reaches the module it includes, not only its includer's namesake"
 misses  MixHost::mix_target    run_mix "the includer's namesake does not split the call"
-reaches SubHelpers::[] run_sub "self[ 3 ] in a module method (the subscript tier) reaches the included module's []"
+reaches SubHelpers::[] SubMod#run_sub "self[ 3 ] in a module method (the subscript tier) reaches the included module's []"
 misses  SubHost::[]    run_sub "the includer's [] does not split the subscript"
 
 echo "=== out of reach: the method Ruby runs is not in the tree, so the call is refused as external (external=) ==="
@@ -641,23 +643,23 @@ else
 fi
 
 echo "=== floor (b): a class that delegates is exempt — its bare calls bind by name as before ==="
-reaches Quoting::quote_name        build "delegate :quote_name, to: :@conn — the delegated method is not indexed, Creation is exempt"
-reaches Quoting::owner_name        label "delegate … prefix: true — exempt the same way"
-reaches Pool::checkout             count "def_delegators :@pool, :checkout — Forwardable, exempt"
-reaches Pool::forwarded_anywhere   go    "delegate_missing_to forwards any name, as method_missing does"
-reaches Pool::computed_name        go    "delegate( *NAMES, … ) — the names are computed, the class is exempt"
+reaches Quoting::quote_name        Creation#build "delegate :quote_name, to: :@conn — the delegated method is not indexed, Creation is exempt"
+reaches Quoting::owner_name        Creation#label "delegate … prefix: true — exempt the same way"
+reaches Pool::checkout             Counter#count "def_delegators :@pool, :checkout — Forwardable, exempt"
+reaches Pool::forwarded_anywhere   Forwarder#go    "delegate_missing_to forwards any name, as method_missing does"
+reaches Pool::computed_name        Computed#go    "delegate( *NAMES, … ) — the names are computed, the class is exempt"
 
 echo "=== a top-level def is reachable only while every ancestor in reach is in the tree ==="
 misses  top_helper display "TopCtl < ActionController::Base: the out-of-tree ancestor answers before Object's private method"
 
 echo "=== a reopened Object, Kernel, Module or Class is every self's ancestor ==="
-reaches Object::blank_ish?     probe_blank "class Object; def blank_ish? — any self reaches it"
+reaches Object::blank_ish?     UsesObject#probe_blank "class Object; def blank_ish? — any self reaches it"
 misses  BlankDecoy::blank_ish? probe_blank "an unrelated class's namesake stays out of reach"
 
 echo "=== what the rule leaves alone ==="
-reaches top_helper              m      "a top-level def is a private method of Object, reachable from any self"
-reaches UserModel::display_name label  "floor (a): a SimpleDelegator subclass forwards what it lacks"
-reaches UserModel::phantom      m      "floor (a): a class with method_missing answers any name"
+reaches top_helper              UsesTop#m      "a top-level def is a private method of Object, reachable from any self"
+reaches UserModel::display_name UserDeco#label  "floor (a): a SimpleDelegator subclass forwards what it lacks"
+reaches UserModel::phantom      Ghost#m      "floor (a): a class with method_missing answers any name"
 reaches spec_only_helper "&lt;file-scope&gt;" "floor (f): an example group's block is in no class"
 
 echo "=== determinism and warm == cold ==="

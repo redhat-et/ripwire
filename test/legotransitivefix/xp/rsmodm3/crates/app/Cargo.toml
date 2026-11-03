@@ -1,0 +1,4 @@
+[package]
+name = "app"
+[dependencies]
+xp-m3-core = { path = "../core" }

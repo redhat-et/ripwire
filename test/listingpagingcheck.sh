@@ -182,7 +182,14 @@ while [ "$i" -lt 5 ]; do
     gitq commit -q -m "round $i"
     i=$(( i + 1 ))
 done
-printf 'inline int coreEntryPointTwo() { return 8; }\n' >> "$TMP/st/core.h"
+# RE-PINNED (2026-09-27, the symbol-granular change set): the working-tree edit is a MODULE-LEVEL append.
+# --situ/--test-gate now narrow the change set to the symbols the diff's hunks LOCATE (situ.h
+# computeSymbolChangeSet; test/situhunkcheck.sh pins that behavior). An appended never-called function
+# locates in that function alone, and nothing transitively depends on it — this arm's blast radius would
+# (correctly) be 0 and the paging fixture would never reach a cap. A hunk no function/method body span
+# contains is the documented per-file fallback, so one module-scope line keeps this fixture's change set
+# file-granular — the arm keeps testing PAGING; granularity has its own gate.
+printf 'inline int coreModuleStateTwo = 8;\n' >> "$TMP/st/core.h"
 
 run(){ dir="$1"; out="$2"; shift 2; "$BIN" "$dir" "$@" >"$TMP/$out" 2>"$TMP/$out.err"; }
 

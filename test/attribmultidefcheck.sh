@@ -238,9 +238,9 @@ if ans a_cpp cpp callers s xml -- --callers=empty; then
     expect P a_cpp UsesPiece "$SP"
     expect P a_cpp UsesEval  "$EV"
     expect P a_cpp UsesBoth  "$EV $SP"
-    expect P a_cpp ParseDefault "$EV"
+    expect P a_cpp ManifestParser::ParseDefault "$EV"
     invariant P a_cpp
-    rowset C a_cpp 4 "ParseDefault UsesBoth UsesEval UsesPiece"
+    rowset C a_cpp 4 "ManifestParser::ParseDefault UsesBoth UsesEval UsesPiece"
     # the std::string::empty confounder: the C++ standard-member gate declines it (no row), or the row names no group proven
     g="$( row a_cpp UsesStd )"
     case "$g" in
@@ -251,6 +251,8 @@ if ans a_cpp cpp callers s xml -- --callers=empty; then
     sed 's/-->.*//' "$DIR/a_cpp.out" | grep -q 'of_def='; say $? "[P] a_cpp: the legend defines of_def= (present-only clause)" \
         "[P] a_cpp: of_def= is not defined in the answer's legend"
 fi
+# QUALNAME-1 observation: --callers --json, --safe-delete (xml) and the MCP find_referencing_symbols still print the caller row BARE
+# (ParseDefault); only the XML --callers/--callees rows print Owner::name. Pinned as they are (a_cppj / a_sd / a_mcp); a future widening goes red here.
 if ans a_cppj cpp - callers json -- --callers=empty --json; then
     expect P a_cppj UsesPiece "$SP"; expect P a_cppj UsesBoth "$EV $SP"
     rowset C a_cppj 4 "ParseDefault UsesBoth UsesEval UsesPiece"
@@ -286,9 +288,11 @@ if ans b_cpp cpp callees s xml -- --callees=ParseDefault; then
         [ "$n_split" = 2 ]; say $? "[P] b_cpp: both $n arms carry prov=\"split\"" \
             "[P] b_cpp: $n_split of 2 $n rows carry prov=\"split\""
     done
-    for n in empty ReadPath CanonicalizePath; do
-        [ -z "$( rowflags b_cpp "$n" )" ]; say $? "[N] b_cpp: proven callee $n carries no hedge" \
-            "[N] b_cpp: proven callee $n hedged '$( rowflags b_cpp "$n" )'"
+    # QUALNAME-1: the member callees print Owner::name; each probe also requires the ROW to exist, so the no-hedge
+    # check cannot pass vacuously on a spelling that matches no row
+    for n in EvalString::empty Lexer::ReadPath CanonicalizePath; do
+        [ -n "$( row b_cpp "$n" )" ] && [ -z "$( rowflags b_cpp "$n" )" ]; say $? "[N] b_cpp: proven callee $n is a row and carries no hedge" \
+            "[N] b_cpp: proven callee $n missing or hedged '$( rowflags b_cpp "$n" )'"
     done
     n_canon="$( awk -F'\t' '$1=="ROW" && $2=="CanonicalizePath"' "$DIR/b_cpp.rows" | wc -l | tr -d ' ' )"
     [ "$n_canon" = 1 ]; say $? "[N] b_cpp: CanonicalizePath lists ONE overload (the 3-parameter one cannot take 2 arguments)" \
@@ -299,14 +303,14 @@ if ans b_cpp2 cpp callers s xml -- --callers=CanonicalizePath; then
     [ "$( groups b_cpp2 )" = 2 ]; say $? "[N] b_cpp2: two groups (each util.h declaration folds into its util.cc definition)" \
         "[N] b_cpp2: <def> rows=$( groups b_cpp2 ), want 2"
     # ParseDefault's 2-argument call binds the 2-parameter overload alone, proven (it was hedged over both before train 29)
-    expect N b_cpp2 ParseDefault util.cc:2
+    expect N b_cpp2 ManifestParser::ParseDefault util.cc:2
     # the string* overload's own call passes three arguments: the resolver binds it to the 3-parameter overload, proven
     expect N b_cpp2 CanonicalizePath util.cc:6
 fi
 if ans b_norm cpp callers s xml -- --callers=Normalize; then
     [ "$( groups b_norm )" = 2 ]; say $? "[N] b_norm: two groups (each util.h declaration folds into its util.cc definition)" \
         "[N] b_norm: <def> rows=$( groups b_norm ), want 2"
-    hedged P b_norm ParseDefault "util.cc:9 util.cc:12"
+    hedged P b_norm ManifestParser::ParseDefault "util.cc:9 util.cc:12"
 fi
 if ans b_rp cpp callers s xml -- --callers=ReadPath; then plain N b_rp; fi
 # UsesPiece is declared in piece_user.cc with no #include that ties it to parser.cc's definition: the identity rule answers
@@ -318,7 +322,7 @@ if ans b_q cpp callers s xml -- --callers=string_piece.h:empty; then plain N b_q
 # Q1 (orchestrator ruling): the split-arm hedge rides single-definition answers too (by-design byte change on them)
 if ans b_one cpp callees s xml -- --callees=PutInt; then
     plain N b_one split
-    n_split="$( awk -F'\t' '$1=="ROW" && $2=="put" && $4 ~ /prov=split/' "$DIR/b_one.rows" | wc -l | tr -d ' ' )"
+    n_split="$( awk -F'\t' '$1=="ROW" && $2=="Fmt::put" && $4 ~ /prov=split/' "$DIR/b_one.rows" | wc -l | tr -d ' ' )"
     [ "$n_split" = 2 ]; say $? "[P] b_one: a single-definition --callees=PutInt marks both put arms prov=\"split\"" \
         "[P] b_one: $n_split of 2 put rows carry prov=\"split\" on the single-definition answer"
 fi
@@ -361,7 +365,7 @@ if ( cd "$FIX/cpp" && "$BIN" . --no-cache --callers=get --legend=full ) >"$DIR/c
 else no "c_getl: --callers=get --legend=full failed"; fi
 # S4 premise: the resolver's binding this lane hedges and does not fix (the resolver card flips this arm when it lands)
 if ans c_geti cpp callees s xml -- --callees=GetInt; then
-    grep -q 'n="get" p="fmt.h:14"' "$DIR/c_geti.out"; say $? "[C] c_geti: premise — the resolver binds GetInt's b.get() to the primary (fmt.h:14)" \
+    grep -q 'n="Box::get" p="fmt.h:14"' "$DIR/c_geti.out"; say $? "[C] c_geti: premise — the resolver binds GetInt's b.get() to the primary (fmt.h:14)" \
         "[C] c_geti: premise moved — GetInt's get is no longer fmt.h:14 (resolver card landed? re-anchor c_get): $( grep -o '<s [^>]*>' "$DIR/c_geti.out" | head -2 | tr '\n' ' ' )"
 fi
 if ans c_tal cpp callers s xml -- --callers=tally; then
@@ -399,18 +403,20 @@ for c in measure:box.ts:7:box.ts:8 ring:box.ts:9:box.ts:10 doIt:Doer.java:2:Doer
 done
 if ans lf_baz lf callers s xml -- --callers=baz; then plain N lf_baz; fi   # a Rust trait requirement is no definition: one def, one group
 if ( cd "$FIX/cpp" && "$BIN" . --no-cache --for=empty ) >"$DIR/c_for.out" 2>/dev/null; then
-    n_d="$( grep -oE '<d [^>]*n="empty"[^>]*>' "$DIR/c_for.out" | grep -c 'sc="' )"
-    [ "$n_d" -ge 2 ]; say $? "[C] c_for: --for=empty serves each definition as its own row with sc= ($n_d)" \
-        "[C] c_for: --for=empty rows with sc=: $n_d"
+    # QUALNAME-1: a member's scope folds into n= (no sc=): each definition is its own Owner::empty row
+    n_d="$( grep -oE '<d [^>]*n="(EvalString|StringPiece)::empty"[^>]*>' "$DIR/c_for.out" | grep -vc 'sc="' )"
+    n_bare="$( grep -oE '<d [^>]*n="empty"[^>]*>' "$DIR/c_for.out" | wc -l | tr -d ' ' )"
+    { [ "$n_d" = 2 ] && [ "$n_bare" = 0 ]; }; say $? "[C] c_for: --for=empty serves each definition as its own EvalString::empty / StringPiece::empty row, no sc=, no bare row ($n_d)" \
+        "[C] c_for: --for=empty qualified rows=$n_d (want 2), bare n=\"empty\" rows=$n_bare (want 0)"
 else no "c_for: --for=empty failed"; fi
 
 # ── (D) impact: per-row attribution through the transitive reach, and the file rollup ───────────────────────────────
 echo "(D) C++ --impact=empty"
 if ans d_imp cpp impact s xml -- --impact=empty; then
     expect P d_imp UsesPiece "$SP"; expect P d_imp UsesEval "$EV"; expect P d_imp UsesBoth "$EV $SP"
-    expect P d_imp DrivePiece "$SP";  expect P d_imp DriveEval "$EV"; expect P d_imp ParseDefault "$EV"
+    expect P d_imp DrivePiece "$SP";  expect P d_imp DriveEval "$EV"; expect P d_imp ManifestParser::ParseDefault "$EV"
     invariant P d_imp
-    rowset C d_imp 6 "DriveEval DrivePiece ParseDefault UsesBoth UsesEval UsesPiece"
+    rowset C d_imp 6 "DriveEval DrivePiece ManifestParser::ParseDefault UsesBoth UsesEval UsesPiece"
 fi
 if ans d_rf cpp impact rf xml -- --impact=empty --limit=2; then
     expect P d_rf parser.cc "$EV $SP"
@@ -441,9 +447,9 @@ fi
 if ans e_sp cpp path s xml -- --path=PutInt,put; then
     # the hop into put is one arm of a split call (Fmt::put(int) vs Fmt::put(const char*)): the row that ends the path says
     # so, and the root does not claim the arm the BFS happened to take as the definition put was bound to
-    # path-owners (train 30): a member hop names its owner, so the hop into Fmt::put reads n="Fmt.put" (pathownercheck)
-    case "$( rowflags e_sp Fmt.put )" in *prov=split*) ok "[P] e_sp: the split hop into a multi-definition to= carries prov=\"split\"" ;;
-        *) no "[P] e_sp: the hop into Fmt.put is a split arm but carries '$( rowflags e_sp Fmt.put )'" ;; esac
+    # path-owners (train 30): a member hop names its owner, so the hop into Fmt::put reads n="Fmt::put" in C++ (the language separator) (pathownercheck)
+    case "$( rowflags e_sp Fmt::put )" in *prov=split*) ok "[P] e_sp: the split hop into a multi-definition to= carries prov=\"split\"" ;;
+        *) no "[P] e_sp: the hop into Fmt::put is a split arm but carries '$( rowflags e_sp Fmt::put )'" ;; esac
     [ "$( rootf e_sp to_p )" = "-" ]; say $? "[P] e_sp: a to= bound only by a split hop carries no to_p" \
         "[P] e_sp: to_p=\"$( rootf e_sp to_p )\" claimed for a to= the path reached by a split arm"
     [ "$( rootf e_sp from_p )" = "fmt.cc:6" ]; say $? "[N] e_sp: the single-definition from= keeps from_p" \

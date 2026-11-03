@@ -1,0 +1,4 @@
+[package]
+name = "other"
+[dependencies]
+xp-m1-core = "1"

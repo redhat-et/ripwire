@@ -307,6 +307,10 @@ inline Facts collectFacts( const IngestResult& ing, const NameDefs& byName,
         {
             continue;   // a doc→code mention is a reader's cross-reference, not a thing the code resolves; a subscript is a call only once graph.h proves it
         }
+        if( isSlotJoinRecord( r ) )
+        {
+            continue;   // IX-1: a slot fact / slot call is the slot join's input, not a site — this calibrated stream stays the pre-IX-1 one
+        }
         // member-variable round (card A3): a MEMBER ACCESS (`o.count`, `this->name`, model.h isMemberAccessSite)
         // names a field, and a field is never in ing.symbols; resolving it here by NAME would bind `s.name` to
         // every FUNCTION called `name`, which is not a thing the code resolves. Same scoping rule as the Type

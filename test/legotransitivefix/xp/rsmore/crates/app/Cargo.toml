@@ -1,0 +1,6 @@
+[package]
+name = 'xp-lead-app'
+version = "0.1.0"
+
+[dependencies]
+serde = "1"

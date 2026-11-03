@@ -156,7 +156,10 @@ done
 
 # ── (D) --for, name-exact → the auto body walk ────────────────────────────────────────────────────────
 cap "$TMP/d.xml" "$TMP/leak" --no-cache --for=clampQuantity
-drow="$( grep -oE '<d [^>]*n="clampQuantity"[^>]*>' "$TMP/d.xml" | head -1 )"
+# QUALNAME-1 honesty: the <d> row of the swallowed free function stays BARE (n="clampQuantity", the misfiled scope kept as sc=) — an
+# extent-suspect symbol's scope is no claim, so it never folds into n=Owner::name (memberowner.h); the <b> row stays bare too
+drow="$( grep -oE '<d [^>]*n="clampQuantity" sc="IndiaError"[^>]*>' "$TMP/d.xml" | head -1 )"
+if grep -q 'n="IndiaError::clampQuantity"' "$TMP/d.xml"; then no "(D) --for names the swallowed free function as a member of IndiaError"; else ok "(D) --for never folds the misfiled scope into n="; fi
 brow="$( grep -oE '<b [^>]*n="clampQuantity"[^>]*>' "$TMP/d.xml" | head -1 )"
 if [ -n "$( reasonOf "$drow" )" ]; then ok "(D) --for <d> row carries extent_suspect=\"$( reasonOf "$drow" )\""; else no "(D) --for <d> row lacks extent_suspect=: ${drow:-no <d> row}"; fi
 if [ -n "$( reasonOf "$brow" )" ]; then ok "(D) --for <b> row carries extent_suspect=\"$( reasonOf "$brow" )\""; else no "(D) --for <b> row lacks extent_suspect=: ${brow:-no <b> row}"; fi

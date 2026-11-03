@@ -26,6 +26,7 @@
 #   9) MCP `lego` verb returns the same interface + impls as --lego
 #  10) xmllint: --for and --lego output well-formed
 #  11) mutation-check: a deliberately-wrong assertion FAILS (the gate can detect regressions)
+#  12) --lego=Render: a Rust trait with implementors beats a data-only C++ class of the same name (rv-pr432-delta B1)
 #
 # §P3 (2026-07-28): --for's embedded <lego> block now carries p= on <iface>/<impl> (identity parity with
 # the standalone verb) and is SCOPED to the task's resolved surface. Assertion 2 below was updated: it
@@ -225,6 +226,42 @@ if printf '%s' "$MCPNF" | grep -qi '"error"' && printf '%s' "$MCPNF" | grep -q '
     ok "MCP lego verb: NoSuchType errors with an unambiguous not-found message (D8: no longer conflated)"
 else
     no "MCP lego verb: NoSuchType should error with a not-found message, got: $MCPNF"
+fi
+
+# ── 15) rv-pr432-delta B1: implementors outrank "contract extracted" on --lego's type rung ───────────────────────
+# Kept in a throwaway corpus, not test/legofix (other gates pin that tree's bytes). A Rust `trait Render` with two
+# implementors and a same-named, data-only C++ class (no methods, no implementors) in a vendored header: the
+# extracted-contract key depends on the LANGUAGE only (C++/ObjC), so it must sort BELOW hasImplementor, or the
+# empty C++ answer would beat the trait. Red before the key swap, green after.
+XC="$TMP/xlangpick"; mkdir -p "$XC/src" "$XC/ext"
+cat > "$XC/src/render.rs" <<'RS'
+pub trait Render {
+    fn render(&self) -> String;
+}
+pub struct Button;
+impl Render for Button {
+    fn render(&self) -> String { String::from("b") }
+}
+pub struct Label;
+impl Render for Label {
+    fn render(&self) -> String { String::from("l") }
+}
+RS
+cat > "$XC/ext/render.hpp" <<'HPP'
+namespace vendor {
+class Render {
+ public:
+  int frame;
+};
+}
+HPP
+"$BIN" "$XC" --no-cache --lego=Render 2>/dev/null > "$TMP/lego_xpick"
+XP="$( cat "$TMP/lego_xpick" )"
+if printf '%s' "$XP" | grep -q '<iface n="Render" [^>]*p="src/render.rs"[^>]*implementors="2"' \
+   && printf '%s' "$XP" | grep -q '<impl n="Button"' && printf '%s' "$XP" | grep -q '<impl n="Label"'; then
+    ok "--lego=Render: the Rust trait with 2 implementors beats a data-only C++ class of the same name"
+else
+    no "--lego=Render: expected the Rust trait (src/render.rs, implementors=2, Button+Label), got: $XP"
 fi
 
 # ── 9) MCP `lego` verb parity with --lego=Shape ───────────────────────────────

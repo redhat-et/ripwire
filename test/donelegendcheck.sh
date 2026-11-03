@@ -49,6 +49,10 @@ command -v git >/dev/null 2>&1 || { echo "  SKIP  donelegendcheck (git required 
 
 WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
 echo "donelegendcheck: BIN=$BIN  (temp git corpora)"
+# PROCESS rule 5 (lane ls2-size-targets): the byte budgets below are STAIR-STEP TARGETs (exceed = a registered present-only clause
+# in test/legend_over_target.tsv, printed OVER-TARGET, or FAIL) under a hard RUNAWAY GUARD of 2 x the target rounded up to 500 B;
+# RIPWIRE_LEGEND_PINS=strict is the rule 4 twin (today's hard pins). One shared verdict: test/lib/legendtarget.sh.
+. "$ROOT/test/lib/legendtarget.sh"
 
 # ── the fixture. ONE committed file with two symbols, then an uncommitted edit that adds a verbatim clone of
 # one of them plus a deeply nested, high-arity function. That mix is chosen to light every conditional
@@ -147,11 +151,7 @@ run_budget(){
     read -r total legend payload <<EOF
 $( split "$WORK/$name.xml" )
 EOF
-    if [ "$legend" -le "$budget" ]; then
-        ok "(a) $name legend $legend B <= $budget B (was $pre B; total=$total payload=$payload)"
-    else
-        no "(a) $name legend $legend B > $budget B — the essay re-inflated (pre-fix was $pre B)"
-    fi
+    lt_gate "(a) $name full legend (pre-fix $pre B; total=$total payload=$payload)" "full:$name" "$legend" "$budget" "$legend" "$( lt_full_guard "$budget" )" "$WORK/$name.xml"
     printf '%s' "$total $legend $payload" >"$WORK/$name.split"
 }
 
@@ -218,11 +218,7 @@ case "$sdRest" in
     *)  read -r restB cutB <<EOF
 $sdRest
 EOF
-        if [ -n "${restB:-}" ] && [ "$restB" -eq "$restB" ] 2>/dev/null && [ "$restB" -le 3800 ]; then
-            ok "(a) sd_uses twin: legend minus the sites_at= sentence ($cutB B) is $restB B <= 3800 B (the pre-CALLSITE-LINE ceiling)"
-        else
-            no "(a) sd_uses twin: legend minus the sites_at= sentence ($cutB B) is ${restB:-?} B > 3800 B — the rest of the essay re-inflated"
-        fi ;;
+        lt_gate "(a) sd_uses twin: legend minus the sites_at= sentence ($cutB B; the pre-CALLSITE-LINE ceiling)" full:sd_uses "${restB:-}" 3800 "${restB:-}" "$( lt_full_guard 3800 )" "$WORK/sd_uses.xml" ;;
 esac
 # tg_empty 1200 -> 1400 (2026-09-04, capture-audit wave-1 close, lane L4 M15): the zero-row root now carries
 # graph_ambiguous=/graph_unresolved= (the resolver gauge every graph-floored root spells, floormarkcheck arm 11),
@@ -348,5 +344,6 @@ diff -q "$WORK/qd_refpair.xml" "$WORK/qd_twice.xml" >/dev/null \
     && ok "(e) quality-delta deterministic (byte-identical twice on the same fixture state)" \
     || no "(e) quality-delta differs across two runs on an unchanged fixture"
 
+lt_summary donelegendcheck
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

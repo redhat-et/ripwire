@@ -25,6 +25,14 @@
 #      an include, the package, a qualifier). A name-only edge's row is hedged base_by="name" and not walked; an edge the
 #      evidence binds to ANOTHER same-named type adds no row and is counted transitive_other_base=. Python's `A.B` base is
 #      B (inside A), `Generic[K]`'s type argument and `metaclass=M` are no base. Red on 4d59c804 (the namesake rows listed).
+# (XP) lane fc2-lego-extparent: a class whose base clause the file's OWN import binds OUTSIDE the tree is no implementor of an
+#      in-tree namesake (Python `ext.Base` / `from ext import Base`, TS/JS `import { Base } from 'lib'` / `lib.Base`, Rust
+#      `use ext::Base`, Java/Kotlin `import org.ext.Base` / `extends org.ext.Base`); a real in-tree implementor by bare,
+#      qualified, re-exported, relative, same-package or imported spelling stays; an undecided binding (a star or wildcard
+#      import), a workspace crate spelled with `_` for its `-` directory, and the tree's own package name keep their row.
+#      Red on 27eddee1 (every outside namesake listed). Corpus xp/{py,ts,js,rs,java,kt}. Fix round 1: a Cargo package/[lib] name
+#      (tests/, examples/, main.rs, a renamed workspace crate), the Node self-reference on a multi-root run, a root-is-the-package
+#      Python self import keep their row; a clause dropped for a DECIDED outside binding adds no implementors_floor.
 # (UW) fix 2 (rule 5): a DIRECT row whose own extends clause is not proven (a cross-package Java import, a Kotlin import, a C#
 #      using, an ES import of a CommonJS base) is not walked below, and the answer SAYS so: the row carries unwalked="1", the
 #      <iface> counts those rows transitive_unwalked=N and names the first one's --lego as unwalked_next=; a present-only
@@ -356,6 +364,148 @@ fi
 if "$BIN" "$FIX" --no-cache --lego=BaseFormatter --legend=full >"$DIR/full" 2>"$DIR/err" && ! grep -q 'unwalked' "$DIR/full"; then ok "an answer with no unwalked row carries no unwalked clause"; else no "the unwalked clause rides an answer without an unwalked row"; fi
 M="$( printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"lego\",\"arguments\":{\"path\":\"$FIX\",\"type\":\"UwCRoot\"}}}" | "$BIN" --mcp 2>/dev/null )"
 if printf '%s' "$M" | grep -q 'transitive_unwalked=\\"1\\" unwalked_next=\\"--lego=uw/cs/UwCMid.cs:UwCMid\\"' && printf '%s' "$M" | grep -q 'unwalked=\\"1\\"/>'; then ok "MCP lego carries the same count, next and row mark"; else no "MCP lego UwCRoot: $( printf '%s' "$M" | head -c 400 )"; fi
+
+echo "=== (XP) a base the file imports from OUTSIDE the tree is no implementor of an in-tree namesake ==="
+# xp SEL "absent rows" "present rows": one --lego answer; every absent row must be missing, every present row listed
+xp(){
+    local sel="$1" absent="$2" present="$3" n
+    lego "$sel" || return 0
+    for n in $absent
+    do
+        if has "<impl n=\"$n\""; then no "--lego=$sel lists $n, whose base clause is bound outside the tree: $( iface )"; else ok "--lego=$sel: no $n (outside-bound base)"; fi
+    done
+    for n in $present
+    do
+        if has "<impl n=\"$n\""; then ok "--lego=$sel lists $n"; else no "--lego=$sel lost $n: $( iface )"; fi
+    done
+}
+xp py/xpkg/core.py:XpBase "XpOutQual XpOutBare XpOutDotted" "XpInBare XpInQual XpInReexport XpInRelative XpStar"
+xp XpTsBase "XpTsOutBare XpTsOutNs"                      "XpTsInBare XpTsInNs"
+xp XpJsBase "XpJsOutBare"                                "XpJsInBare"
+xp XpRsBase "XpRsOutUse"                                 "XpRsInUse"
+xp XpJBase  "XpJOutImport XpJOutQual"                    "XpJSamePkg XpJInImport XpJInQual XpJOutWild"
+xp XpKBase  "XpKOutImport"                               "XpKInImport"
+# near misses an outside-looking spelling must NOT drop: a workspace crate whose directory spells the crate with `-`
+# (`use xp_core::XpWsBase` beside crates/xp-core), and an import of the tree's OWN package name (Node self-reference)
+xp XpWsBase   "" "XpWsImpl"
+xp XpSelfBase "" "XpSelfUser"
+# fix round 1 (review B1): a crate's own name (`use xp_selfcrate::T` from tests/, examples/, src/main.rs beside the Cargo.toml
+# naming it xp-selfcrate) and a workspace crate whose Cargo name differs from its directory (crates/ren-dir = xp-renamed-core)
+# are IN the tree: every real implementor stays listed
+xp XpRsSelfBase "" "XpRsSelfMain XpRsSelfTest XpRsSelfExample"
+xp XpRenBase    "" "XpRenImpl"
+# fix round 2 (review D1): the other spellings of an in-tree crate — a renamed dependency KEY (`xpdep2 = { package = "xp-dep-core",
+# path = … }`, also a `[dev-dependencies.xpdep3]` table), an `extern crate … as` alias, a `use crate_name as alias;` alias, a
+# leading `::` — are in the tree too; `use serde::…` beside them is still outside
+xp XpDepBase  "XpDepOutSerde" "XpDepRenamed XpDepExternAlias XpDepUseAlias XpDepEntryTable"
+xp XpLeadBase "XpLeadOutSerde" "XpLeadColons"
+# fix round 3 (review rv-fc2-delta2 R1, R2, S-a): the Rust decision is INVERTED — a `use` head is decided OUTSIDE only when it is std/core/
+# alloc/proc_macro/test or a registry or git dependency some Cargo.toml of the tree declares; every other head (a crate-root `extern crate`
+# alias used from another file, a rename only [patch] names, a `path =` crate outside the indexed root) is UNDECIDED: its clause draws no row
+# and carries implementors_floor, never a confident implementors="0". A brace alias of std in a file moves no other head of it.
+xpfloor(){
+    local sel="$1" absent="$2" n
+    lego "$sel" || return 0
+    if iface | grep -q 'implementors_floor="1"'; then ok "--lego=$sel: the undecided clause keeps implementors_floor"; else no "--lego=$sel: an undecided clause is a confident drop (no floor): $( iface )"; fi
+    for n in $absent
+    do
+        if has "<impl n=\"$n\""; then no "--lego=$sel lists $n, whose base head the tree cannot place: $( iface )"; else ok "--lego=$sel: no $n (undecided head, floor instead)"; fi
+    done
+}
+xpfloor XpReexpBase  "XpReexpReal XpReexpOutSerde"
+xpfloor XpPatchBase  "XpPatchReal XpPatchOutSerde"
+xpfloor XpPathExtBase "XpPathExtOut"
+xp XpBraceBase "XpBraceOutBrace XpBraceOutPlain" "XpBraceInGroup"
+xp XpWsInhBase "XpWsInhOutAlias" "XpWsInhReal XpWsInhTarget"
+# fix round 4 (review rv-fc2-delta3 B1, B2): a rename only a `.cargo/config(.toml)` [patch] names (the tree root's, and a member's own
+# extensionless one) makes its key undecided, and so does ONE dependency key that two members mean differently (in the tree in one,
+# a registry crate in the other): floor, no row either way. A key every member means the same way stays decided.
+xpfloor XpCfgBase     "XpCfgOutSerde"
+xpfloor XpCfgTwoBase  ""
+xpfloor XpKeyBase     "XpKeyReal XpKeyOutReg"
+# fix round 5 (review rv-fc2-delta4 C1): the same two meanings when the key is also an in-tree PACKAGE name (`xp-pkg-core` is a path
+# dependency of one member and a registry crate of another): floor, no row either way
+xpfloor XpPkgBase     "XpPkgReal XpPkgOutReg"
+# fix round 6 (review rv-fc2-delta5 D1 and its class sweep: no key is in the tree by a NAME match, only by a `path =` under the root):
+# (1) a renamed key with NO `path =` (`xpnp = { package = "xp-np-core", version = "1" }`, or the entry table's own `package =` / `version =` lines) is a
+# registry crate even when its package name is an in-tree package: floor, never a listed implementor
+# (2) an inline table that does not close on its line cannot be read, so no path proves it: undecided, not in the tree
+# (3) ONE manifest that writes a key as a registry crate in [dependencies] and as a path crate in [dev-dependencies] means it two ways: floor
+xpfloor XpNpBase      "XpNpOutReg XpNpOutEntry"
+xpfloor XpMlBase      "XpMlOutReg"
+xpfloor XpTtBase      "XpTtOutReg"
+# fix round 7 (review rv-fc2-delta6 E1: no head is in the tree by a MODULE or DIRECTORY name match either — only a module of the using file's OWN
+# crate, `crate`/`self`/`super`, or a `path =` key): a registry crate whose name is only some other member's directory (M1: crates/xp_m1_core
+# beside `xp-m1-core = "1"`) or an unrelated module of another member (M3: app's xpm3fc.rs beside `xpm3fc = { package = "xp-m3-core", version = "1" }`)
+# is floored like the same shape without the name match. Controls: M2 (a dashed directory + a registry rename), T1 (one manifest, two tables), C5
+# (no name match), L2 (a two-line rename) keep their floor (M2, L2 and M3 also their Real implementor).
+for k in m1 m2 m3 t1 c5 l2
+do
+    K="$( printf '%s' "$k" | tr 'a-z' 'A-Z' )"
+    xpfloor "XpMd${K}Base" "XpMd${K}OutReg"
+    case "$k" in m2|m3|l2) xp "XpMd${K}Base" "" "XpMd${K}Real" ;; esac   # m1/t1/c5: the key is two-meaning for the app member too, so its Real row floors with the rest
+done
+# the same six shapes as their OWN root (the review's fixtures are standalone): M1's every outside-looking head matches another member's directory,
+# so the plain FE-A table is empty there and the crate-aware reader must still run
+for k in m1 m2 m3 t1 c5 l2
+do
+    K="$( printf '%s' "$k" | tr 'a-z' 'A-Z' )"
+    if "$BIN" "$FIX/xp/rsmod$k" --no-cache --lego="XpMd${K}Base" >"$DIR/out" 2>"$DIR/err"
+    then
+        OUT="$( sed 's/></>\n</g' "$DIR/out" )"
+        if iface | grep -q 'implementors_floor="1"'; then ok "standalone rsmod$k: the undecided clause keeps implementors_floor"; else no "standalone rsmod$k: no floor: $( iface )"; fi
+        if has "<impl n=\"XpMd${K}OutReg\""; then no "standalone rsmod$k lists XpMd${K}OutReg: $( iface )"; else ok "standalone rsmod$k: no XpMd${K}OutReg"; fi
+    else
+        no "standalone rsmod$k run exited non-zero: $( head -3 "$DIR/err" )"
+    fi
+done
+xp XpKeyBothBase "" "XpKeyBothA XpKeyBothB"
+xp XpKeyCtlBase "XpKeyCtlOut" ""
+if lego XpKeyCtlBase && iface | grep -q 'implementors_floor'; then no "XpKeyCtlBase carries a floor for a key every member declares as a registry crate: $( iface )"; else ok "XpKeyCtlBase: a key registry in every member stays decided (no floor)"; fi
+if lego XpKeyBothBase && iface | grep -q 'implementors_floor'; then no "XpKeyBothBase carries a floor for a key in the tree in every member: $( iface )"; else ok "XpKeyBothBase: a key in the tree in every member stays decided (no floor)"; fi
+# (P1) a repo whose ROOT is the package (top-level __init__.py, no src/) importing its own name keeps its row; an outside
+# namesake beside it is still dropped
+if "$BIN" "$FIX/xp/pyflat" --no-cache --lego=XpFlatBase >"$DIR/out" 2>"$DIR/err"
+then
+    OUT="$( sed 's/></>\n</g' "$DIR/out" )"
+    if has '<impl n="XpFlatImpl"'; then ok "a root-is-the-package self import keeps XpFlatImpl"; else no "pyflat lost XpFlatImpl: $( iface )"; fi
+    if has '<impl n="XpFlatOut"'; then no "pyflat lists XpFlatOut, whose base is imported from extflat: $( iface )"; else ok "pyflat: no XpFlatOut (outside-bound base)"; fi
+else
+    no "pyflat run exited non-zero: $( head -3 "$DIR/err" )"
+fi
+# (B2) the Node self-reference on a MULTI-root run: the second root is not the package's, the labeled path is not on disk
+# (diskPath), and the row must stay
+if "$BIN" "$FIX/xp/jsself" "$FIX/xp/mrroot" --no-cache --lego=XpSelfBase >"$DIR/out" 2>"$DIR/err"
+then
+    OUT="$( sed 's/></>\n</g' "$DIR/out" )"
+    if has '<impl n="XpSelfUser"'; then ok "multi-root: the Node self-reference keeps XpSelfUser"; else no "multi-root lost XpSelfUser: $( iface )"; fi
+else
+    no "multi-root run exited non-zero: $( head -3 "$DIR/err" )"
+fi
+# (N1) a clause dropped because its import is DECIDED outside draws no implementors_floor (the floor says a clause bound
+# nowhere may be hiding an implementor; this one is accounted for)
+if lego XpRsBase
+then
+    if iface | grep -q 'implementors_floor'; then no "XpRsBase carries a floor for a decided-outside clause: $( iface )"; else ok "XpRsBase: no implementors_floor for the outside-bound XpRsOutUse"; fi
+    if has '<impl n="XpRsInUse"'; then ok "XpRsBase still lists XpRsInUse"; else no "XpRsBase lost XpRsInUse: $( iface )"; fi
+fi
+for t in XpDepBase XpLeadBase XpBraceBase XpWsInhBase
+do
+    if lego "$t"
+    then
+        if iface | grep -q 'implementors_floor'; then no "$t carries a floor, every dropped clause is decided outside: $( iface )"; else ok "$t: no implementors_floor (the outside-bound clause is decided)"; fi
+    fi
+done
+if lego py/xpkg/core.py:XpBase
+then
+    if iface | grep -q 'implementors="6"'; then ok "implementors= counts the in-tree rows alone (five + XpShadowed, a same-file namesake's: card)"; else no "XpBase count: $( iface )"; fi
+fi
+# the shadowing declaration itself: `from extlib import XpBase` then `class XpBase:` in the same file — the local class is
+# the one XpShadowed extends (tier 1 wins over the import), so it lists XpShadowed
+if lego py/outside/shadow.py:XpBase
+then
+    if has '<impl n="XpShadowed"'; then ok "a same-file declaration after an outside import still binds the clause (XpShadowed)"; else no "shadow: $( iface )"; fi
+fi
 
 echo "=== (M3) the focus is a CODE definition whenever one matched ==="
 if lego Loader

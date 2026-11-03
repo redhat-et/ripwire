@@ -181,7 +181,7 @@ if echo "$CH" | grep -q '<c n="name="'; then ok "chained: w.inner.name = 5 → e
 echo "=== verbs address the setter by its own name ==="
 CL="$( "$BIN" "$FIX" --no-cache --callers=name= 2>/dev/null )"
 if echo "$CL" | grep -q 'count="4"'; then ok "--callers=name= reports count=4 (writer, rename, explicit, chained)"; else no "--callers=name= did not report count=4: $( echo "$CL" | grep -o '<callers[^>]*' )"; fi
-if echo "$CL" | grep -q 'n="writer"' && echo "$CL" | grep -q 'n="rename"'; then ok "…listing writer and rename"; else no "--callers=name= is missing writer or rename"; fi
+if echo "$CL" | grep -q 'n="writer"' && echo "$CL" | grep -q 'n="W#rename"'; then ok "…listing writer and W#rename (Ruby member rows print Owner#name)"; else no "--callers=name= is missing writer or rename"; fi
 CG="$( "$BIN" "$FIX" --no-cache --callers=W::name 2>/dev/null )"
 echo "$CG" | grep -q 'n="writer"' && no "--callers=W::name lists writer — a setter call still reaches the getter" || ok "--callers=W::name does not list writer"
 if echo "$CG" | grep -q 'n="reader"'; then ok "--callers=W::name lists reader"; else no "--callers=W::name is missing reader: $CG"; fi

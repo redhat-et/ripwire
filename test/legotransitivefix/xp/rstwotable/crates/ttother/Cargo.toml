@@ -1,0 +1,6 @@
+[package]
+name = "xp-tt-other"
+[dependencies]
+xp-tt-core = "1"
+[dev-dependencies]
+xp-tt-core = { path = "../ttcore" }

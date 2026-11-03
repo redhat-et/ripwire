@@ -1,0 +1,7 @@
+[package]
+name = "xp-ml-other"
+[dependencies]
+xpml = {
+    package = "xp-ml-core",
+    version = "1"
+}

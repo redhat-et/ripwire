@@ -91,7 +91,10 @@ callers_of(){
 callers_of "Deb::Package" 1 Run
 callers_of "Deb.Package" 1 Run
 callers_of "Packager::Package" 1
-callers_of "Matcher::Loop" 1 Loop
+callers_of "Matcher::Loop" 1 Terminal.Loop
+# twin (QUALNAME-1): a Go method caller prints Owner.name, so the bare spelling is NOT a row; the positive above
+# can only pass on the qualified row, and this proves the row probe fails on a spelling that is not printed
+if grep -q '<s t="[a-z]*" n="Loop"' "$TMP/out"; then no "(B) --callers=Matcher::Loop still prints a bare n=\"Loop\" row"; else ok "(B) --callers=Matcher::Loop prints no bare n=\"Loop\" row (Terminal.Loop is Owner-qualified)"; fi
 callers_of "Package" 3
 callers_of "Loop" 2
 

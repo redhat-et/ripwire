@@ -195,7 +195,7 @@ say( af.ok and cands.get( ( "Package", "24" ) ) == { "deb/deb.go:15", "rpm/rpm.g
 r = ask( RS, "callees", "preprocess_book" )
 say( r.ok and dc_sites( r, ( "n", "l" ) ) == [ ( "run", "18", "2" ) ], "[P] a_rs",
      "rust --callees=preprocess_book names preprocessor.run@18 through Box<dyn Preprocessor> (cands=2)", r.why() )
-say( r.ok and r.a( "count" ) == "2" and sorted( x.get( "n" ) for x in r.rows ) == [ "new", "preprocessor_should_run" ], "[C] a_rs_count",
+say( r.ok and r.a( "count" ) == "2" and sorted( x.get( "n" ) for x in r.rows ) == [ "PreprocessorContext::new", "preprocessor_should_run" ], "[C] a_rs_count",
      "count=\"2\" (PreprocessorContext::new, preprocessor_should_run) unchanged", r.why() )
 rf = ask( RS, "callees", "preprocess_book", "--legend=full" )
 say( rf.ok and len( rf.dc ) == 1 and set( rf.dc[ 0 ].get( "cand", "" ).split() ) == { "src/builtin/index/mod.rs:10", "src/builtin/links/mod.rs:10" },

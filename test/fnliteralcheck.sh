@@ -108,8 +108,8 @@ if diff -q "$TMP/a" "$TMP/b" >/dev/null; then ok "default map byte-identical run
 echo "=== 6. edges: function-local defs yield outside their function ==="
 EDGE="$ROOT/test/fnliteraledgefix"
 callees(){ ( cd "$EDGE/$1" && "$BIN" . --callees="$2" --no-cache --legend=compact 2>/dev/null ) | sed 's/></>\n</g'; }
-edge(){ # dir caller callee-name callee-path why
-    if callees "$1" "$2" | grep -qE "<s t=\"[^\"]*\" n=\"$3\" p=\"$4\""; then ok "$2 -> $3@$4 ($5)"; else no "$2: expected an edge to $3@$4 ($5) — got: $( callees "$1" "$2" | grep -E '^<callees |^<s t="' | tr '\n' ' ' )"; fi
+edge(){ # dir caller callee-name callee-path why   (js-def-naming: a TS/JS method row names its class, so `Tui.start` meets callee-name `start`)
+    if callees "$1" "$2" | grep -qE "<s t=\"[^\"]*\" n=\"([A-Za-z]+\.)?$3\" p=\"$4\""; then ok "$2 -> $3@$4 ($5)"; else no "$2: expected an edge to $3@$4 ($5) — got: $( callees "$1" "$2" | grep -E '^<callees |^<s t="' | tr '\n' ' ' )"; fi
 }
 noedge(){ # dir caller callee-name why
     if callees "$1" "$2" | grep -qE "<s t=\"[^\"]*\" n=\"$3\""; then no "$2: must not bind $3 ($4) — got: $( callees "$1" "$2" | grep -E '^<s t="' | tr '\n' ' ' )"; else ok "$2 binds no $3 ($4)"; fi

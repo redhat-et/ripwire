@@ -119,11 +119,15 @@ block a tool call, they need `jq`, and they are registered only when you pass `-
 
 The CLI is the cheaper interface; the MCP server is a second way in. `ripwire wrap <agent>` prints the exact
 configuration for `claude`, `codex`, `cursor`, `gemini`, `windsurf`, `opencode`, `hermes` or `openclaw`, plus
-a short block to paste into that agent's rules file. For Claude Code it is:
+a short block to paste into that agent's rules file. For Claude Code, `ripwire wrap claude` prints:
 
 ```bash
-claude mcp add ripwire -- ripwire --mcp
+claude mcp add ripwire -- ripwire --mcp --mcp-tools=no-edit
 ```
+
+`--mcp-tools=no-edit` leaves out the three edit twins (Claude Code edits through a ranged Read and its native
+Edit); `ripwire wrap claude --mcp-tools=full` keeps them, and a bare `claude mcp add ripwire -- ripwire --mcp`
+serves all 33 tools.
 
 ## Check and upgrade
 
@@ -169,7 +173,7 @@ A skill you copied by hand carries no marker, so this keeps it; delete that copy
 Codex's `hooks.json`, keeps every other hook, and saves a `.bak` copy of each file first.
 
 ```bash
-strip='def ripwire: (.command // "") | split(" ")[0] | test("/hooks/ripwire-[a-z-]+\\.sh$");
+strip='def ripwire: (.command // "") | (if startswith("\u0027") then (.[1:] | split("\u0027")[0]) else split(" ")[0] end) | test("/hooks/ripwire-[a-z-]+\\.sh$");
   if .hooks then .hooks |= with_entries(.value |= (map(.hooks |= map(select(ripwire | not))) | map(select((.hooks | length) > 0)))) else . end'
 for f in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" "${CODEX_HOME:-$HOME/.codex}/hooks.json"; do
   [ -f "$f" ] && cp "$f" "$f.bak" && jq "$strip" "$f.bak" > "$f.tmp" && mv "$f.tmp" "$f"

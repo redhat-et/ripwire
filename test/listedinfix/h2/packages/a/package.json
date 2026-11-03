@@ -1,0 +1,11 @@
+{
+  "name": "a",
+  "exports": {
+    "./cors": {
+      "import": "./dist/middleware/cors/index.js"
+    },
+    "./log": {
+      "import": "./dist/middleware/log/index.js"
+    }
+  }
+}

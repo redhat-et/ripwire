@@ -188,7 +188,7 @@ inline int runEval( const std::string& root, const IngestResult& ing, const Grap
     }
     for( const Reference& rf : ing.references )
     {
-        if( rf.role != RefRole::Subscript )   // an element access names an operator, not a name the source spells
+        if( rf.role != RefRole::Subscript && !isSlotJoinRecord( rf ) )   // an element access names an operator, not a name the source spells; an IX-1 slot record is the join's input
         {
             add( rf.fileId, rf.calleeName );
         }

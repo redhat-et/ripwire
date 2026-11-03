@@ -27,6 +27,11 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN (build first)"; exit 1; }
+echo "testgatelegendbudgetcheck: BIN=$BIN"
+# PROCESS rule 5 (lane ls2-size-targets): the byte budget below is a STAIR-STEP TARGET (exceed = a registered present-only clause
+# in test/legend_over_target.tsv, printed OVER-TARGET, or FAIL) under a hard RUNAWAY GUARD of 2 x the target rounded up to 500 B;
+# RIPWIRE_LEGEND_PINS=strict is the rule 4 twin (today's hard pins). One shared verdict: test/lib/legendtarget.sh.
+. "$ROOT/test/lib/legendtarget.sh"
 
 # A FIXED file argument (never the bare git-diff default): --test-gate=src/model.h reports the SAME facts
 # regardless of the caller's own working-tree dirtiness, which a bare `--test-gate` does not — this repo's
@@ -138,11 +143,7 @@ EOF
 # run_first=N being on the root (it rides only when the run-first tier splits the <t> rows, as it does over src/model.h):
 # testmap.h kRunFirstLegend, 237 B (renamed from must_run= in review, with the not-a-skip-list reading). Measured on this fixture: 3634 -> 3871 B; 3930 leaves
 # ~59 B — the same posture as every pin above.
-if [ "$legend" -le 3930 ]; then
-    ok "(a) --test-gate legend is $legend B (<= 3930 B budget; total=$total payload=$payload)"
-else
-    no "(a) --test-gate legend is $legend B (> 3930 B budget) — the essay re-inflated"
-fi
+lt_gate "(a) --test-gate full legend (total=$total payload=$payload)" "full:test-gate" "$legend" 3930 "$legend" "$( lt_full_guard 3930 )" "$TMP/tg.xml"
 
 # (b) the honesty vocabulary + the §B12.5 cross-verb UNIT-collision anchors (test/testgatecheck.sh arm (g)
 #     already gates these exact phrases tool-wide; this arm is the lane's own quick check on this one verb).
@@ -167,5 +168,6 @@ fi
 "$BIN" "$ROOT" --test-gate=src/model.h --legend=full >"$TMP/tg2.xml" 2>/dev/null
 if diff -q "$TMP/tg.xml" "$TMP/tg2.xml" >/dev/null; then ok "(c) deterministic (byte-identical twice)"; else no "(c) differs across two runs"; fi
 
+lt_summary testgatelegendbudgetcheck
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

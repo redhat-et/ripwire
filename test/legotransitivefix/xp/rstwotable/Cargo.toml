@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/ttcore", "crates/ttother"]

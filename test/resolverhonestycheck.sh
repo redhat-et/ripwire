@@ -150,7 +150,10 @@ for pair in "f1:bar:foo" "f8:bar8:foo8" "f9:compute9:area"; do
     d="${pair%%:*}"; rest="${pair#*:}"; sym="${rest%%:*}"; nm="${rest#*:}"
     cc="$( callees "$F/$d" "$sym" )"
     # every <s ... n="X"/> in the callee list must have n="<nm>"
-    bad="$( echo "$cc" | grep -oE 'n="[^"]+"' | grep -v "n=\"$nm\"" | grep -v "n=\"$sym\"" )"
+    # QUALNAME-1: a member target prints Owner::name — the LAST segment must still be exactly the wanted name; the presence
+    # guard makes the empty-`bad` verdict non-vacuous (the callee list must hold at least one such row)
+    bad="$( echo "$cc" | grep -oE 'n="[^"]+"' | grep -vE "n=\"([A-Za-z0-9_]+(::|[.#]))?$nm\"" | grep -v "n=\"$sym\"" )"
+    echo "$cc" | grep -qE "n=\"([A-Za-z0-9_]+(::|[.#]))?$nm\"" || bad="no '$nm' row at all"
     [ -z "$bad" ] && ok "F$d... soundness: every $sym edge targets a '$nm' def (no wrong-name edge)" \
       || { no "F$d soundness: $sym has an edge to a non-'$nm' target"; echo "    $cc"; }
 done

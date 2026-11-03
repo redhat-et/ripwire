@@ -37,6 +37,11 @@ ok(){ printf '  PASS  %s\n' "$*" || { fail=1; printf '  FAIL  could not write th
 no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN (build first)"; exit 1; }
+echo "panellegendcheck: BIN=$BIN"
+# PROCESS rule 5 (lane ls2-size-targets): the byte budget below is a STAIR-STEP TARGET (exceed = a registered present-only clause
+# in test/legend_over_target.tsv, printed OVER-TARGET, or FAIL) under a hard RUNAWAY GUARD of 2 x the target rounded up to 500 B;
+# RIPWIRE_LEGEND_PINS=strict is the rule 4 twin (today's hard pins). One shared verdict: test/lib/legendtarget.sh.
+. "$ROOT/test/lib/legendtarget.sh"
 
 # L1 (2026-09-19): the CLI default legend is compact; every arm here budgets and reads the FULL legend, so the runs ask for it.
 "$BIN" "$ROOT" --quality-panel --legend=full >"$TMP/panel.xml" 2>/dev/null
@@ -64,11 +69,8 @@ else
 fi
 
 # (b) the ratchet that made this gate red-first: the leading legend comment fits a 4200 B budget (see header).
-if [ "$legendBytes" -le 4200 ]; then
-    ok "(b) leading legend comment is $legendBytes B (<= 4200 B budget)"
-else
-    no "(b) leading legend comment is $legendBytes B (> 4200 B budget) — the essay belongs in docs/COMMANDS.md, not in every emission"
-fi
+# (the essay belongs in docs/COMMANDS.md, not in every emission; a clause past the target needs a registered present-only row)
+lt_gate "(b) leading legend comment" "full:quality-panel" "$legendBytes" 4200 "$legendBytes" "$( lt_full_guard 4200 )" "$TMP/panel.xml"
 
 # (c) the honesty vocabulary survives the trim — these are contract, not prose.
 sed 's/-->/-->\n/' "$TMP/panel.xml" | sed -n '1,/-->/p' >"$TMP/legend.txt"
@@ -94,5 +96,6 @@ fi
 "$BIN" "$ROOT" --quality-panel --legend=full >"$TMP/panel2.xml" 2>/dev/null
 if diff -q "$TMP/panel.xml" "$TMP/panel2.xml" >/dev/null; then ok "(d) panel deterministic (byte-identical twice)"; else no "(d) panel differs across two runs"; fi
 
+lt_summary panellegendcheck
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

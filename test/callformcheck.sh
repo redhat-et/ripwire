@@ -295,13 +295,13 @@ uses rust turbo_bare   1 "8. turbofish on a bare fn (generic_function)"
 uses rust turbo_scoped 1 "9. turbofish on a scoped path"
 uses rust mymac        2 "11. macro invocations (two sites)"
 uses rust file_mod_fn  1 "13. file-module call: src/plainmod.rs IS module plainmod"
-calleeRow rust calls_self self_fn "6. Self::self_fn() reaches the impl's own method, precisely"
+calleeRow rust calls_self Widget::self_fn "6. Self::self_fn() reaches the impl's own method, precisely"
 # 10 + 12. `<T as Trait>::method()` was NOT-CHECKED in the survey. MEASURED: CAPTURED, and resolved
 # to the trait impl — the qualified_type path binds its final segment like any other scoped_identifier.
 uses rust trait_fn 2 "10+12. trait method via receiver AND via <T as Trait>::method() — both captured"
-calleeRow rust caller_ufcs_cast trait_fn "12. NOT-CHECKED->MEASURED: <Widget as Spin>::trait_fn() IS captured and resolves"
+calleeRow rust caller_ufcs_cast Widget::trait_fn "12. NOT-CHECKED->MEASURED: <Widget as Spin>::trait_fn() IS captured and resolves"
 DRUSTU="$( cxrun "$FIX/rust" --callees=caller_ufcs_cast --no-cache )"
-printf '%s' "$DRUSTU" | grep -qE '<s [^>]*n="trait_fn" p="[^"]*lib\.rs:9"' \
+printf '%s' "$DRUSTU" | grep -qE '<s [^>]*n="Widget::trait_fn" p="[^"]*lib\.rs:9"' \
     && ok "[rust] …and it lands on the impl's trait_fn (lib.rs:9), not the trait declaration" \
     || no "[rust] <T as Trait>::method() bound the wrong def: $DRUSTU"
 MAPRUST="$( cxrun "$FIX/rust" --no-cache )"

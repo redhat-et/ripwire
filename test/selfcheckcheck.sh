@@ -116,7 +116,8 @@ OLD = [ "VERIFY", "VERIFY_TEXT", "VERIFY_DEBUG_ONLY", "VERIFY_DEBUG_ONLY_TEXT", 
 OLD_RE = re.compile( r"(?<![A-Za-z0-9_])(" + "|".join( sorted( OLD, key = len, reverse = True ) ) + r")(?![A-Za-z0-9_])(?!-A-CLAIM| A CLAIM)" )
 # Dated records whose text IS the measurement (renaming would falsify them), and release-owned artefacts.
 HISTORY_PREFIX = ( "docs/captures/", "bench/capsweep/", "bench/locbench/results/", "bench/recalleval/snapshot.mdpack",
-                   "present/", "third_party/" )
+                   "present/", "third_party/",
+                   "changelog.d/" )   # CHANGELOG.md's unreleased entries, one file per change, folded into it at release
 HISTORY_EXACT = { "CHANGELOG.md", "docs/EVALS.md", "bench/PROFILE.md", "docs/LINEAGE.md", ".ripwire_quality_acks",
                   "test/selfcheckcheck.sh",
                   "docs/COMMANDS.md" }   # GENERATED from the release capture; the next capture renames it (docscommandscheck owns it)

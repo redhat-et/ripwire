@@ -18,12 +18,11 @@
 //
 // NEAREST MANIFEST, WALKING UP (mirrors pythonrunner::hasPytestProject exactly): monorepo/workspace layouts
 // are common (the issue's own point 1), so the search starts at the test file's own directory and climbs to
-// the crawl root, inclusive, stopping at the first package.json found. The command is still spelled ROOT-
-// RELATIVE, same as every other run= this codebase emits (testmap.h::spellUncached) — a package.json found
-// in a subdirectory is evidence of WHICH runner, not a cd target; running the emitted command may need the
-// reader's own shell to be inside that subdirectory on a workspace where the runner is not hoisted to the
-// crawl root's node_modules. That is a stated scope limit (see the fix report), not a silent one: it is the
-// SAME limit testmap.h's Python branch already carries (a nested pyproject.toml is evidence, not a `cd`).
+// the crawl root, inclusive, stopping at the first package.json found. The command is spelled ROOT-
+// RELATIVE, same as every other run= this codebase emits (testmap.h::spellUncached): a package.json found in a
+// subdirectory is evidence of WHICH runner, and its directory is where the runner runs (#335). A package below
+// root= is entered with `cd <pkg> && ` in the emitted command (testmap.h::spellJsRun), so the command still pastes
+// from root= and its path is package-relative. The walk reports the climb depth (evidenceClimbs) for that cd.
 //
 // LANGUAGE NEUTRALITY (BRIEF_COMMON, standing house rule): the mechanism — walk up from a test file to the
 // nearest project manifest and read its OWN declared scripts/dependencies as evidence, never guess — is the
@@ -534,6 +533,45 @@ inline bool looksLikeJsTestFile( std::string_view path ) noexcept
     return false;
 }
 
+/// Whether `rootRelPath` (relative to the crawl root, ancestors kept) is a file vitest's or jest's DEFAULT
+/// include collects. The vitest rule is `defaultVitestFileName` from #330 by @rainhuang0220. looksLikeJsTestFile
+/// above is the broad pre-filter: it accepts `.test.` anywhere in the name and a `__tests__/` segment for every
+/// runner. Measured with vitest 5.0.2 and jest 30.5.2: `x.test.helper.ts` exits 1 on both ("No test files found" /
+/// "No tests found"), and `__tests__/y.ts` exits 1 on vitest.
+///   vitest  `**/*.{test,spec}.?(c|m)[jt]s?(x)`
+///   jest    `**/?(*.)+(spec|test).?([mc])[jt]s?(x)` and `**/__tests__/**/*.?([mc])[jt]s?(x)`
+/// jest matches its `__tests__` glob against the whole path, so a `__tests__` directory ABOVE the package also
+/// collects (measured, jest 30.5.2: `__tests__/pkg/src/example.js` run from `pkg` passes); hence the root-relative path.
+/// FLOORS, stated: jest 29's default lacks the `.mjs`/`.cjs`/`.mts`/`.cts` extensions, so a jest 29 package gets a
+/// command for such a file that exits 1; and a vitest.config.* / jest.config.* `include`/`testMatch` is NOT read.
+/// A config that narrows the default still gets a command, and one that widens it gets run_unknown="1" for the
+/// files only it adds.
+inline bool matchesDefaultInclude( Framework fw, std::string_view rootRelPath ) noexcept
+{
+    static constexpr std::string_view kExts[] = { ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts" };
+    std::string_view stem;
+    for( const std::string_view ext : kExts )
+    {
+        if( rootRelPath.size() > ext.size() && rootRelPath.ends_with( ext ) )
+        {
+            stem = rootRelPath.substr( 0, rootRelPath.size() - ext.size() );
+            break;
+        }
+    }
+    if( stem.empty() )
+    {
+        return false;   // none of the eight extensions either runner's default names
+    }
+    const std::size_t      slash = stem.rfind( '/' );
+    const std::string_view name  = ( slash == std::string_view::npos ) ? stem : stem.substr( slash + 1 );
+    const bool             named = name.size() > 5 && ( name.ends_with( ".test" ) || name.ends_with( ".spec" ) );
+    if( named || fw != Framework::Jest )
+    {
+        return named;
+    }
+    return rootRelPath.starts_with( "__tests__/" ) || rootRelPath.find( "/__tests__/" ) != std::string_view::npos;
+}
+
 /// The CLI verb for a detected framework, or nullptr for `Framework::None` — nullptr propagates to testmap.h
 /// as "no runner", the same contract runnerVerb() already uses for an unrecognized extension. A table, not a
 /// switch, matching testmap.h::runnerVerb's own kRunnerKinds shape (a small sorted-by-nothing row scan reads
@@ -591,6 +629,9 @@ struct PackageManifests
 {
     std::string evidence;   // the deciding manifest, else the nearest one (the runner evidence)
     std::string nearest;    // the nearest non-empty package.json, decisive or not
+    // #335: directories the walk climbed from the test file's own directory to the DECIDING manifest (0 = the
+    // file's own directory). npos when no manifest decided, so no package directory is known to cd into.
+    std::size_t evidenceClimbs = std::string::npos;
 };
 
 inline PackageManifests nearestPackageManifests( const std::string& file, std::string_view root )
@@ -598,8 +639,11 @@ inline PackageManifests nearestPackageManifests( const std::string& file, std::s
     namespace fs = std::filesystem;
     std::string fallback;   // the NEAREST manifest found, even if it decides nothing (F5)
     std::string decisive;
+    std::size_t climbs         = 0;   // directories visited so far; the file's own directory is visited first
+    std::size_t decisiveClimbs = std::string::npos;
     rw::dirwalk::ascendToRoot( file, root, [ & ]( const fs::path& dir )
     {
+        const std::size_t here = climbs++;
         std::error_code sec;
         const fs::path candidate = dir / "package.json";
         if( !fs::is_regular_file( fs::symlink_status( candidate, sec ) ) )   // never follow a manifest symlink out of the project
@@ -620,12 +664,14 @@ inline PackageManifests nearestPackageManifests( const std::string& file, std::s
         {
             return false;   // F5: a true marker (no script, no decisive dependency) decides nothing HERE
         }
-        decisive = std::move( bytes );   // G1: an authoritative-but-unrecognized script also ends the walk
+        decisive       = std::move( bytes );   // G1: an authoritative-but-unrecognized script also ends the walk
+        decisiveClimbs = here;
         return true;
     } );
     PackageManifests out;
-    out.nearest  = fallback;
-    out.evidence = decisive.empty() ? std::move( fallback ) : std::move( decisive );
+    out.nearest        = fallback;
+    out.evidence       = decisive.empty() ? std::move( fallback ) : std::move( decisive );
+    out.evidenceClimbs = decisiveClimbs;
     return out;
 }
 

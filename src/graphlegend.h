@@ -709,6 +709,17 @@ inline constexpr const char* kDeclinedSitesSideClause =
     "gate=side: a Ruby call whose in-reach definitions answer on the other side of self. ";
 inline constexpr const char* kDeclinedSitesNameGateClause =
     "gate=builtin|std: declined by the builtin-method or the standard-member name gate (per-language name lists, C++ and Rust). ";
+// lane L6 (ifacedispatch.h): the interface-typed dispatch rows, and a generic receiver's bound
+inline constexpr const char* kDeclinedSitesIfaceClause =
+    "gate=\"iface\": the receiver's recorded type is an interface, trait or abstract class, and cands=K counts the methods of the called name its implementors in this tree own (and its own default): K implementors of the receiver's interface; which one runs is unproven. K is a floor where a type conforms with no implements clause (a TypeScript object literal or matching class is not counted). Never a by-name list. ";
+inline constexpr const char* kDeclinedSitesBoundClause =
+    "bound=\"G: T\": the receiver is a generic G bounded by trait T; its candidates are T's implementors', never resolved by name. ";
+inline constexpr const char* kDeclinedSitesIfaceClauseMcp =
+    "gate iface: the receiver's recorded type is an interface, trait or abstract class, and cands counts the methods of the called name its implementors in this tree own (and its own default): K implementors of the receiver's interface; which one runs is unproven; K is a floor where a type conforms with no implements clause (TypeScript). bound (G: T): a generic receiver bounded by trait T. ";
+// lane L6: an edge via="impl" — the one implementor in the tree (a row of the callers / callees answers, a map <c>)
+inline constexpr const char* kViaImplLegend =
+    "via=\"impl\" on a row: the receiver's recorded type is an interface, trait or abstract class whose only implementor in this tree owns the called method, so the edge is to it; an implementor outside the tree, or one a macro writes, may exist. ";
+inline const char* viaImplLegend( bool on ) noexcept { return on ? kViaImplLegend : ""; }
 inline constexpr const char* kDeclinedSitesOfDefCallees =
     "of_def=K on a <dc>: the definition (ix=K) making the call, a fact. ";
 inline constexpr const char* kDeclinedSitesOfDefCallers =
@@ -729,6 +740,8 @@ struct DeclinedSitesLegendFlags
     bool ofDef = false; // a row carries of_def=
     bool cut = false; // the root carries dc_shown= / dc_next=
     bool cand = false; // a row carries cand= (legend full)
+    bool iface = false; // a row says gate="iface" (lane L6)
+    bool bound = false; // a row carries bound= (lane L6)
 };
 // train 28 (declined-sites review N3): the MCP twins carry the same sites as "declined_sites" entries with their own keys, so
 // their declined_note names those keys ({name, line, cands, via} / {in, file, line, cands}) instead of the XML attributes.
@@ -756,6 +769,8 @@ inline std::string declinedSitesLegend( const DeclinedSitesLegendFlags& f, bool 
     out += f.callersForm ? ( mcp ? kDeclinedSitesCallersFormMcp : kDeclinedSitesCallersForm ) : ( mcp ? kDeclinedSitesCalleesFormMcp : kDeclinedSitesCalleesForm );
     out += f.side ? kDeclinedSitesSideClause : "";
     out += f.nameGate ? kDeclinedSitesNameGateClause : "";
+    out += f.iface ? ( mcp ? kDeclinedSitesIfaceClauseMcp : kDeclinedSitesIfaceClause ) : "";
+    out += f.bound && !mcp ? kDeclinedSitesBoundClause : "";
     out += f.ofDef ? ( f.callersForm ? ( mcp ? kDeclinedSitesOfDefCallersMcp : kDeclinedSitesOfDefCallers )
                                      : ( mcp ? kDeclinedSitesOfDefCalleesMcp : kDeclinedSitesOfDefCallees ) )
                    : "";
@@ -810,6 +825,16 @@ inline std::string countFieldOrEmpty( std::string_view name, std::size_t count, 
 inline std::string countAttrXmlOrEmpty( std::string_view name, std::size_t count )
 {
     return countFieldOrEmpty( name, count, /*json=*/false );
+}
+// The same absent-when-empty shape for a TEXT value the caller already escaped for its dialect: ` name="v"` or `,"name":"v"`
+// (grep's pattern_meta= and its MCP twin spell through it).
+inline std::string textFieldOrEmpty( std::string_view name, std::string_view escaped, bool json )
+{
+    if( escaped.empty() )
+    {
+        return {};
+    }
+    return json ? ",\"" + std::string( name ) + "\":\"" + std::string( escaped ) + "\"" : " " + std::string( name ) + "=\"" + std::string( escaped ) + "\"";
 }
 
 // The attribute and the key, one spelling each, absent at zero like bodyless_defs= and graph_unindexed=.
@@ -1028,6 +1053,43 @@ inline std::string tsImportRootAttrXml( std::uint64_t importsUnresolved, std::ui
     std::string s = importsUnresolvedAttrXml( importsUnresolved ) + countAttrXmlOrEmpty( "imports_dts", std::size_t( importsDts ) ) + countAttrXmlOrEmpty( "tsconfig_unread", std::size_t( tsconfigUnread ) );
     return importsUnresolved > 0 || tsconfigUnread > 0 ? s + kGraphPartialAttrXml : s;
 }
+// Lane arch-honest: the root's disclosure of files in a language with no file edges (lintrules.h noFileEdgeFiles). Absent at zero, and
+// graph_partial="1" rides once: alreadyPartial says tsImportRootAttrXml wrote it, and a second copy would be malformed XML.
+inline std::string noFileEdgesRootAttrXml( std::string_view langs, std::size_t files, bool alreadyPartial )
+{
+    if( files == 0 )
+    {
+        return {};
+    }
+    std::string s = " no_file_edges=\"" + std::string( langs ) + "\"" + countAttrXmlOrEmpty( "unmeasured_files", files );
+    return alreadyPartial ? s : s + kGraphPartialAttrXml;
+}
+inline constexpr const char* kDepsNoFileEdgesLegend =
+    "no_file_edges=LANGS unmeasured_files=N graph_partial=1 (root, absent when none): N files are in languages whose imports this build almost never resolves to a file (Go only across a go.mod replace), so the index holds few or no edges for them and a zero would come from the missing data, not the design. A <f> row with no_file_edges= and no edge observed has no afferent=/instab=/transitive=: unknown, not zero. <health> has no ccd=/acd=/nccd=/shape= when no edge is left among the measured files (see masked_files=). godfiles, stabledeps and cycles cover the resolved edges only. ";
+inline constexpr const char* kArchNoFileEdgesLegend =
+    " no_file_edges=LANGS unmeasured_files=N graph_partial=1 (absent when none): N files are in languages whose imports this build almost never resolves to a file (Go only across a go.mod replace), so an edge through one was mostly never judged and violations= is a floor. <m zone=unknown no_file_edges=LANGS> holds such a file: with no edge observed its ca/ce/I/D/reachable are absent, unknown rather than zero; with one observed, ca/ce are floors over the resolved edges and I/D/leaf/isolated/reachable are absent, as no verdict is drawn from them. propagation_cost is absent when no edge is left among the measured files.";
+inline constexpr const char* kDepsMaskedFilesLegend =
+    "masked_files=N (<health>, absent at 0): N no_file_edges= files are left out of dep_files= and of ccd/acd/nccd/shape, an edgeless one would sit there as a cone of one and pull the verdict toward horizontal and one with an edge has a cone that is only a floor; the numbers cover the other dep_files= files. ";
+inline constexpr const char* kArchMaskedFilesLegend =
+    " masked_files=N (<metrics>, absent at 0): N no_file_edges= files are left out of the propagation_cost denominator, an edgeless one would add a cone of one and one with an edge has a cone that is only a floor; the number covers the other dependency-capable files.";
+inline const char* depsNoFileEdgesLegend( bool on ) noexcept { return on ? kDepsNoFileEdgesLegend : ""; }
+inline const char* archNoFileEdgesLegend( bool on ) noexcept { return on ? kArchNoFileEdgesLegend : ""; }
+inline const char* depsMaskedFilesLegend( bool on ) noexcept { return on ? kDepsMaskedFilesLegend : ""; }
+inline const char* archMaskedFilesLegend( bool on ) noexcept { return on ? kArchMaskedFilesLegend : ""; }
+// --impact (CLI and the MCP twin): the root's no_file_edges= (graph.h ImportTier::noFileEdgeLangs), exactly when it rides.
+inline constexpr const char* kImpactNoFileEdgesLegend =
+    "no_file_edges=LANGS (absent when none): a definition's file is in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace), so importers= is a floor: 0 means none resolved, not none exist. ";
+inline const char* impactNoFileEdgesLegend( bool on ) noexcept { return on ? kImpactNoFileEdgesLegend : ""; }
+// --cochange / --pr-context (gitmine.h coPairAttr): a pair with a side in such a language, and no observed edge between the files. Its own
+// comment (the kind the history verbs append after their legend), present-only, opening like the verb's legend so the compact layer reads it as prose.
+inline constexpr const char* kCochangeNoFileEdgesLegend =
+    "<!-- ripwire cochange: no_file_edges=LANGS replaces surprising= on a pair with a side in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace): no edge between the two files was observed, and that proves nothing there, so the hidden-coupling question is unknown, not answered. -->";
+inline const char* cochangeNoFileEdgesLegend( bool on ) noexcept { return on ? kCochangeNoFileEdgesLegend : ""; }
+// --cochange-groups: the same fourth state on the group form's root (verbs_report.h emitCochangeGroups). Groups are built from the surprising=1 pairs
+// only, so pairs with a side in such a language and no observed edge left them silently and groups=0 read as "no modularity violation".
+inline constexpr const char* kCochangeGroupsNoFileEdgesLegend =
+    "<!-- ripwire cochange groups: no_file_edges=LANGS unknown_pairs=N (root, absent when none): N pairs with a side in a language whose imports this build almost never resolves to a file (Go only across a go.mod replace) and no observed edge between the two files are in no group and not counted in groups= or pairs_covered=. Whether each is hidden coupling is unknown, so a low or zero groups= here is not a finding of no violation; drop the cochange-groups flag to list those pairs. -->";
+inline const char* cochangeGroupsNoFileEdgesLegend( bool on ) noexcept { return on ? kCochangeGroupsNoFileEdgesLegend : ""; }
 inline constexpr const char* kDepsImportsDtsLegend =
     "imports_dts=N (root, absent at 0): N TS/JS imports resolved through a paths alias, a baseUrl path or a workspace package only to a .d.ts declaration, not to source; their edges are in every count. ";
 inline constexpr const char* kDepsTsconfigUnreadLegend =
@@ -1035,6 +1097,15 @@ inline constexpr const char* kDepsTsconfigUnreadLegend =
 inline constexpr const char* kArchImportsDtsLegend = " imports_dts=N (absent at 0): N TS/JS imports resolved only to a .d.ts declaration.";
 inline constexpr const char* kArchTsconfigUnreadLegend =
     " tsconfig_unread=N graph_partial=1 (absent at 0): N config files that could declare an alias or a workspace package were not read (an extends base or referenced project not in the tree, one that does not parse, or a tsconfig/jsconfig/workspace root above the crawl root, looked for up to the git top-level), so an edge through one was never judged: violations= can only rise, and the metrics are measured over resolved edges; unresolved imports could add, merge or remove cycles and change ratios.";
+// #478 gap 3: <pruned_packages> in --deps and --arch (serialize.h buildPrunedPackagesBlock), exactly when the block is printed.
+inline constexpr const char* kPrunedPackagesLegend =
+    "<pruned_packages count=N shown=M next= note=> (present only when the crawl denylist removed a real package, one that holds its own __init__.py, by a build-output name such as build, dist, out or target): p path= names one of the first M; the skipped verb (next=) rows them as why=pruned-package, at most 500 rows (rows_capped=1 there says N is more than it lists; N stays exact). They are not indexed, so edges to and from them are missing from every number here.";
+// --deps' legend clauses end in a space (the last one is followed by the cap sentence), --arch's start with one.
+inline std::string prunedPackagesLegend( bool on, bool leadingSpace )
+{
+    return !on ? std::string() : leadingSpace ? std::string( " " ) + kPrunedPackagesLegend
+                                              : std::string( kPrunedPackagesLegend ) + " ";
+}
 // Two legend clauses, each exactly when its count is non-zero (the #220 composers below all have this shape).
 inline std::string clausesForCounts( std::uint64_t countA, const char* clauseA, std::uint64_t countB, const char* clauseB )
 {
@@ -1129,12 +1200,18 @@ inline constexpr const char* kPathUnboundLegend =
     "An endpoint with several definitions that nothing bound prints no from_p or to_p: unreached, or (to) reached only through a "
     "split or by-name hop. ";
 inline const char* pathUnboundLegend( bool on ) noexcept { return on ? kPathUnboundLegend : ""; }
-// PATH-OWNERS (defattrib.h pathHopOwners): rides only when a hop row carries an owner, so an owner-free answer is unchanged.
-inline constexpr const char* kPathOwnerLegend =
-    "n=Owner.name on a hop: its definition's scope names a class, struct, interface, named type or module the index defines in "
-    "that language (Owner = the scope's last segment, the spelling a selector takes); a bare n= is a free function, a type, or a "
-    "member of a scope the index defines no such owner for (a C++ namespace, or a language whose defs carry no sc=). ";
-inline const char* pathOwnerLegend( bool on ) noexcept { return on ? kPathOwnerLegend : ""; }
+// QUALNAME-1 (memberowner.h MemberOwners; train 30's PATH-OWNERS widened): rides only when a row carries an owner, so an owner-free
+// answer is unchanged. One clause for every row kind that prints one (--path hops, --callers/--callees/--impact rows).
+inline constexpr const char* kMemberOwnerLegend =
+    "n=Owner.name on a row: Owner is its stored scope, shown when the index defines that name as a type or module in that language "
+    "(Owner::name C/C++/Rust, Owner#name Ruby, a singleton too; a C++ namespace sharing a name with a class prints alike); "
+    "bare: a free function, a type, a closure, or no such owner. ";
+inline const char* memberOwnerLegend( bool on ) noexcept { return on ? kMemberOwnerLegend : ""; }
+// lane js-def-naming: TS/JS store no scope, so a member row's owner there is read by containment (memberowner.h). Present-only: rides
+// beside the clause above exactly when a shown row's owner came that way, so every other answer is unchanged. No double hyphen.
+inline constexpr const char* kMemberOwnerContainedLegend =
+    "On a TS/JS row Owner is the class whose body holds it (no stored scope); an object-literal or nested member stays bare. ";
+inline const char* memberOwnerContainedLegend( bool on ) noexcept { return on ? kMemberOwnerContainedLegend : ""; }
 
 // ── issue #60: the module-scope owner's clause, emitted exactly when a t="modscope" ROW is in the answer ──
 // A file-scope call (a top-level statement, or a call inside an anonymous callback body) used to have no
@@ -1356,7 +1433,7 @@ inline constexpr const char* kUnprovenDefsVerifyLegend =
 inline constexpr const char* kUnprovenDefsAffectedLegend =
     "unproven_defs=K (absent when 0) counts same-named DEFINITIONS a file:name item found and could not tie to the file it named, summed item by item (a path item adds 0): they are NOT in seeds=, the caller walk never started from them, and so a test that reaches only them is in neither tests=, reached= nor the rows. A bare NAME item that also matches an indexed path is read as that path. ";
 // AND ON edit-check, lego, connect, around AND slice (decltodefcheck arms E2n..E2t). --lego, --connect and --around resolve
-// through resolveFocus, the lowest-id projection of the same resolver, so a drop left the DECLARATION as their focus;
+// through resolveFocus, the tower-front projection of the same resolver, so a drop left the DECLARATION as their focus;
 // --edit-check and --slice read the whole match set, and a set holding that one declaration is answered about it. On the
 // same repro each read a zero with nothing beside it: edit-check callers="0" incompatible="0" — a false "no broken caller"
 // when the dropped definition is the one whose caller stopped binding — lego implementors="0", connect edges="0" groups="0",

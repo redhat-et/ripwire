@@ -109,7 +109,7 @@ expect callees caller   9 "all 9 spellings in caller() resolve, each to its own 
 
 # ── §2 CANONICAL PRECISION — the right target, not merely a target ─────────────────────────────────────
 CAL="$( run "$FIX" --callees=caller --no-cache )"
-for want in 'n="free"' 'n="new"' 'n="bump"' 'n="tool"' 'n="deepfn"' 'n="generic"' 'n="area"' 'n="gadget_free"' 'n="plainfn"'; do
+for want in 'n="free"' 'n="Widget::new"' 'n="Widget::bump"' 'n="util::tool"' 'n="deep::deepfn"' 'n="generic"' 'n="Widget::area"' 'n="gadget_free"' 'n="plainfn"'; do
     printf '%s' "$CAL" | grep -q "$want" \
         && ok "caller binds $want" || no "caller is MISSING $want: $CAL"
 done
@@ -126,10 +126,10 @@ XD="$( run "$FIX" --callees=crossdir_caller --no-cache )"
 [ "$( cnt "$XD" )" = 2 ] \
     && ok "--callees=crossdir_caller count=2 (both cross-directory Type::new() calls survive)" \
     || no "--callees=crossdir_caller expected 2, got '$( cnt "$XD" )': $XD"
-printf '%s' "$XD" | grep -q 'n="new" p="src/lib.rs' \
+printf '%s' "$XD" | grep -q 'n="Widget::new" p="src/lib.rs' \
     && ok "crossdir_caller → Widget::new in src/lib.rs (ACROSS a directory boundary, precise)" \
     || no "crossdir_caller did not bind lib.rs's Widget::new: $XD"
-printf '%s' "$XD" | grep -q 'n="new" p="src/gadget/mod.rs' \
+printf '%s' "$XD" | grep -q 'n="Gadget::new" p="src/gadget/mod.rs' \
     && ok "crossdir_caller → Gadget::new in src/gadget/mod.rs (its own impl, precise)" \
     || no "crossdir_caller did not bind gadget/mod.rs's Gadget::new: $XD"
 # and neither call is ambiguous — canonical keying, not a lucky tier win. (V3 L-8: match the attribute
@@ -163,10 +163,10 @@ printf '%s' "$MAP" | grep -qE 'n="crossdir_amb"[^>]*amb="1"' \
 #   bare `detached()`  → count=3 and bump carries amb="1"   (Rule 3 narrows to the FILE, i.e. to both defs)
 #   `Self::detached()` → count=2 and bump carries NO amb=   (canonical `Widget::detached`)
 BUMP="$( run "$FIX" --callees=bump --no-cache )"
-printf '%s' "$BUMP" | grep -q 'n="helper" p="src/lib.rs' \
+printf '%s' "$BUMP" | grep -q 'n="Widget::helper" p="src/lib.rs' \
     && ok "Self::helper() inside Widget::bump → lib.rs's Widget::helper (Self resolved to Widget)" \
     || no "Widget::bump did not bind lib.rs's helper: $BUMP"
-printf '%s' "$BUMP" | grep -q 'n="detached" p="src/gadget/mod.rs' \
+printf '%s' "$BUMP" | grep -q 'n="Widget::detached" p="src/gadget/mod.rs' \
     && ok "Self::detached() reaches the CROSS-DIRECTORY impl Widget block" \
     || no "Widget::bump did not bind gadget/mod.rs's Widget::detached: $BUMP"
 [ "$( cnt "$BUMP" )" = 2 ] \
@@ -176,7 +176,7 @@ printf '%s' "$MAP" | grep -qE 'n="bump"[^>]*amb=' \
     && no "bump carries amb= — Self:: did NOT pin the target (a bare call scores amb=\"1\" here)" \
     || ok "PRECISE: bump carries no amb= — the discriminating Self:: arm (bare would be amb=\"1\")"
 SPIN="$( run "$FIX" --callees=spin --no-cache )"
-printf '%s' "$SPIN" | grep -q 'n="helper" p="src/gadget/mod.rs' \
+printf '%s' "$SPIN" | grep -q 'n="Gadget::helper" p="src/gadget/mod.rs' \
     && ok "Self::helper() inside Gadget::spin → gadget/mod.rs's Gadget::helper (per-directory Self)" \
     || no "Gadget::spin did not bind gadget/mod.rs's helper: $SPIN"
 [ "$( cnt "$SPIN" )" = 1 ] \

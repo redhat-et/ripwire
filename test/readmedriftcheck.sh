@@ -35,8 +35,9 @@
 #       control, exactly as (C) is (B)'s, and E6/E7 carry their own. E9 checks a SECOND restatement
 #       of the folded/surveyed pair that drifted independently of the one E5 checks — see E9's own
 #       comment for the round that found it stale.
-#   (G) the COLD-START arm — README's "orient once" invocation is the PLAIN map (owner 2026-10-09), and --max-tokens=3000 must
-#       keep the bare map's head under 4,500 est_tokens (G1 presence, G2 property, G3 mutation, G4 promise)
+#   (G) the COLD-START arm — README's "orient once" invocation is the PLAIN map (owner 2026-10-09), and --max-tokens=3000
+#       keeps the plain map's head, prices fewer est_tokens than the uncut map and discloses the cut (G1 presence, G2 property,
+#       G3 mutation, G4 promise); no arm pins an absolute est_tokens size
 #
 # WHY E6-E8 EXIST. A count can be arithmetically correct and still be a lie about a SET. LINEAGE.md
 # claims its folded tables and its surveyed table are DISJOINT — that is what makes "36 folded plus
@@ -633,7 +634,7 @@ else
 import re, sys
 text = open( sys.argv[ 1 ] ).read()
 m = re.search( r'for _g in (.*?); do', text, re.S )
-sys.exit( 'no loop found' ) if not m else print( len( m.group( 1 ).split() ) )
+sys.exit( 'no loop found' ) if not m else print( len( [ w for w in m.group( 1 ).split() if w != chr( 92 ) ] ) )
 " "$REGRESSION" 2>/dev/null )"
     readmeGates="$( grep -oE '\*\*[0-9]+ gate scripts\*\*' "$README" | head -1 | grep -oE '[0-9]+' )"
 
@@ -720,8 +721,9 @@ fi
 #      fewer est_tokens than the plain map (it IS a cut), and its header discloses the cut (shown= below symbols=).
 ( cd "$ROOT" && "$BIN" . --no-cache ) > "$TMP/map_bare.xml" 2>/dev/null
 ( cd "$ROOT" && "$BIN" . --no-cache --max-tokens=3000 ) > "$TMP/map_budget.xml" 2>/dev/null
-verdict="$( python3 - "$TMP/map_bare.xml" "$TMP/map_budget.xml" <<'PY'
+cat > "$TMP/g4.py" <<'PY'
 import re, sys
+MIN_DATA_ROWS = 10    # the presence guard: a cut map that kept fewer ranked rows than this is (near) empty; the plain-map cut keeps ~19
 def rows( path ):
     text = open( path, encoding="utf-8" ).read()
     est = re.search( r'<r [^>]*est_tokens="(\d+)"', text )
@@ -733,21 +735,58 @@ def rows( path ):
         attrs = dict( re.findall( r'([a-z_]+)="([^"]*)"', m.group( 2 ) ) )
         if m.group( 1 ) == "f":
             cur = attrs.get( "p", "" ); continue
+        # DATA rows only (G4-THIN): a ranked row carries k=; the legend's literal `<s t= n= sc= k= amb=>` has no k="..." value and a
+        # stem="1" row is the file-name namesake MAP-STEM adds after the ranked rows, so neither counts toward the promised rows
+        if "k" not in attrs or attrs.get( "stem" ) == "1":
+            continue
         keys.add( attrs.get( "id" ) or f'{cur}::{attrs.get("t")}::{attrs.get("n")}' )
     return ( int( est.group( 1 ) ) if est else -1 ), keys, ( int( shown.group( 1 ) ) if shown else -1 ), ( int( total.group( 1 ) ) if total else -1 )
 bareEst, bare, _, _ = rows( sys.argv[ 1 ] )
 budEst,  bud, shown, total = rows( sys.argv[ 2 ] )
 problems = []
-if len( bud ) < 20:             problems.append( f"cut map has only {len(bud)} rows (presence guard)" )
+if len( bud ) < MIN_DATA_ROWS:  problems.append( f"cut map has only {len(bud)} data rows (presence guard)" )
 if not bud <= bare:             problems.append( f"{len(bud - bare)} cut-map row(s) absent from the plain map — not a head, a different ranking" )
 if not 0 < budEst < bareEst:    problems.append( f"cut est_tokens={budEst} is not below the plain map's {bareEst} — the budget cut nothing" )
 if not ( 0 <= shown < total ):  problems.append( f"the cut map's header does not disclose the cut (shown={shown} symbols={total})" )
 print( ( "FAIL " + "; ".join( problems ) ) if problems else f"OK plain={bareEst} cut={budEst} rows={len(bud)}/{len(bare)} shown={shown} of {total}" )
 PY
-)"
+verdict="$( python3 "$TMP/g4.py" "$TMP/map_bare.xml" "$TMP/map_budget.xml" )"
 case "$verdict" in
     OK*) ok "(G4) --max-tokens=3000 keeps the plain map's head and discloses the cut (${verdict#OK })" ;;
     *)   no "(G4) --max-tokens=3000 does not keep the promise the orient comment makes: ${verdict#FAIL }" ;;
+esac
+# (G4-THIN) the guard counts DATA rows only. Mutation controls on a synthetic cut map (red on the gate before G4-THIN, which counted the
+# legend's literal `<s t= n= ...>` and every stem row as a row: 5 ranked rows + the literal + 14 stem rows = 20, not below its
+# 20 guard, so it passed): 5 ranked rows padded that way must FAIL the presence guard; 10 ranked rows with the same padding pass.
+# (a) alone catches the stem-row half only (cr-prepass-37a mutation: dropping the `"k" not in attrs` test left it green, since
+# 5 + the literal = 6 is still below the guard); (c) is the legend-literal half: 9 ranked rows + the literal = 10 would pass.
+python3 - "$TMP" <<'PY'
+import sys
+tmp = sys.argv[ 1 ]
+def rows( n ): return "".join( f'<s t="fn" n="f{i}" k="0.01"></s>' for i in range( n ) )
+def stems(): return "".join( f'<s t="cls" n="C{i}" stem="1" k="0.001"></s>' for i in range( 14 ) )
+def mk( est, shown, n ):
+    return ( f'<!-- legend: <s t= n= sc= k= amb=> rows --><!-- files=3 symbols=99 shown={shown} est_tokens={est} -->'
+             f'<r est_tokens="{est}"><f p="a.py">{rows( n )}{stems()}</f></r>' )
+open( tmp + "/g4_bare.xml", "w" ).write( mk( 900, 99, 30 ) )
+open( tmp + "/g4_thin.xml", "w" ).write( mk( 100, 19, 5 ) )
+open( tmp + "/g4_ok.xml", "w" ).write( mk( 100, 24, 10 ) )
+open( tmp + "/g4_thin9.xml", "w" ).write( mk( 100, 23, 9 ) )
+PY
+v_thin="$( python3 "$TMP/g4.py" "$TMP/g4_bare.xml" "$TMP/g4_thin.xml" )"
+v_ok="$( python3 "$TMP/g4.py" "$TMP/g4_bare.xml" "$TMP/g4_ok.xml" )"
+v_thin9="$( python3 "$TMP/g4.py" "$TMP/g4_bare.xml" "$TMP/g4_thin9.xml" )"
+case "$v_thin" in
+    FAIL*presence*) ok "(G4-THIN a) 5 ranked rows padded with the legend literal and 14 stem rows still FAIL the presence guard" ;;
+    *)              no "(G4-THIN a) a map of 5 ranked rows padded to 20 'rows' by the legend literal and stem rows was not refused: $v_thin" ;;
+esac
+case "$v_thin9" in
+    FAIL*presence*) ok "(G4-THIN c) 9 ranked rows plus the legend literal (10 'rows') still FAIL the presence guard" ;;
+    *)              no "(G4-THIN c) 9 ranked rows were counted up to the guard by the legend literal: $v_thin9" ;;
+esac
+case "$v_ok" in
+    OK*) ok "(G4-THIN b) 10 ranked rows pass the presence guard with or without stem-row padding" ;;
+    *)   no "(G4-THIN b) a map of 10 ranked rows (plus padding) was refused: $v_ok" ;;
 esac
 
 # ── (H) SUMMARY-LINE NUMBERS ─────────────────────────────────────────────────────────────────────

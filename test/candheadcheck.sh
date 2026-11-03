@@ -88,7 +88,7 @@ fi
 # p="…"> wrapper prints its path ONCE per file, so counting <d n="Frobnicator"> rows (not p="…" occurrences)
 # is what actually counts ranked ROWS. --for rows may carry e="N" (the definition's end line) right after l=
 # (lane/for-spine-span-068); it is optional here so the count is the same rows with or without it.
-rowcount="$( tr '>' '\n' <"$TMP/lens" | grep -cE '<d l="[0-9]*"( e="[0-9]+")? n="Frobnicator"' )"
+rowcount="$( tr '>' '\n' <"$TMP/lens" | grep -cE '<d l="[0-9]*"( e="[0-9]+")? n="(Frobnicator::)?Frobnicator"' )"   # the constructor row prints Frobnicator::Frobnicator (member-owner spelling)
 [ "$rowcount" = "9" ] \
     && ok "all nine Frobnicator rows (7 pollutants + the gold's cls+fn) still appear ranked — reorder, not a filter" \
     || no "expected 9 Frobnicator rows in <sigs>, got $rowcount"

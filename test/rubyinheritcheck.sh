@@ -307,11 +307,11 @@ CI="$( rowOf 'n="call_inherited" ' )"
 [ "$( edgesTo "$CI" build )" -eq 1 ] && ok "Child.build → exactly one edge named build (Parent::build through the base walk)" \
     || no "Child.build produced $( edgesTo "$CI" build ) build edges: $CI"
 CLP="$( "$BIN" "$FIX" --no-cache --callers=Parent::build 2>/dev/null )"
-echo "$CLP" | grep -q 'n="call_inherited"' && ok "--callers=Parent::build lists call_inherited" \
+echo "$CLP" | grep -q 'n="Caller#call_inherited"' && ok "--callers=Parent::build lists call_inherited" \
     || no "--callers=Parent::build does not list call_inherited"
 if runq CLU "$FIX" --no-cache --callers=Unrelated::build
 then
-    echo "$CLU" | grep -q 'n="call_inherited"' && no "--callers=Unrelated::build lists call_inherited — the walk took an unrelated same-named def" \
+    echo "$CLU" | grep -qE 'n="([A-Za-z_0-9]+#)?call_inherited"' && no "--callers=Unrelated::build lists call_inherited — the walk took an unrelated same-named def" \
         || ok "--callers=Unrelated::build does not list call_inherited"
 fi
 
@@ -322,7 +322,7 @@ CS="$( rowOf 'n="call_scoped_base" ' )"
 [ "$( edgesTo "$CS" make )" -eq 1 ] && ok "Derived.make → exactly one edge (base written as Space::Base)" \
     || no "Derived.make produced $( edgesTo "$CS" make ) make edges: $CS"
 CLM="$( "$BIN" "$FIX" --no-cache --callers=Base::make 2>/dev/null )"
-echo "$CLM" | grep -q 'n="call_scoped_base"' && ok "--callers=Base::make lists call_scoped_base" \
+echo "$CLM" | grep -q 'n="Caller#call_scoped_base"' && ok "--callers=Base::make lists call_scoped_base" \
     || no "--callers=Base::make does not list call_scoped_base"
 
 echo "=== an implicit-self call inside a subclass reaches the superclass method (Rule 1's bare arm) ==="
@@ -330,7 +330,7 @@ UI="$( rowOf 'n="use_inherited" ' )"
 [ "$( edgesTo "$UI" shared_helper )" -eq 1 ] && ok "a bare shared_helper inside Child → exactly one edge (Parent#shared_helper)" \
     || no "a bare shared_helper inside Child produced $( edgesTo "$UI" shared_helper ) edges: $UI"
 CLS="$( "$BIN" "$FIX" --no-cache --callers=Parent::shared_helper 2>/dev/null )"
-echo "$CLS" | grep -q 'n="use_inherited"' && ok "--callers=Parent::shared_helper lists use_inherited" \
+echo "$CLS" | grep -q 'n="Child#use_inherited"' && ok "--callers=Parent::shared_helper lists use_inherited" \
     || no "--callers=Parent::shared_helper does not list use_inherited"
 
 # Parser version 130 (test/rubybarecallcheck.sh) mints the bare, parenthesis-less call this arm once pinned as minting

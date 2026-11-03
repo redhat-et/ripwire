@@ -1,0 +1,4 @@
+[package]
+name = "xp-pkg-app"
+[dependencies]
+xp-pkg-core = { path = "../pkgcore" }

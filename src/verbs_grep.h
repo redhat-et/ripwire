@@ -4,6 +4,8 @@
 #endif
 
 #include "infra/emit.h" // rw::emitTo — THE emitter (std::print, or std::format+fputs where <print> is absent)
+#include "infra/enumcount.h" // rw::enumCountIsExact — kDisclosureWhyCount proved exact beside its enum
+#include <array>             // std::to_array — the reads_skipped= name table, size deduced
 #include <string_view>       // std::string_view — the %.*s (precision, pointer) pair collapses to one view
 
 // verbs_grep.h — the --grep verb family, moved VERBATIM from main.cpp in the 2026-08-29 split:
@@ -61,6 +63,10 @@ std::string grepCarrierAttrs( const rw::GrepCarrier& c, bool singleRoot, std::st
         return out;
     };
     std::string out;
+    if( !t.at.empty() )
+    {
+        out += " p=\"" + std::string( rw::escapeXml( t.at, esc ) ) + "\"";   // A3: the anchor of a path-less vals= @line
+    }
     if( !t.readsAt.empty() )
     {
         out += " reads=\"" + std::to_string( c.reads ) + "\" reads_at=\"" + joined( t.readsAt ) + "\"";
@@ -205,12 +211,17 @@ void emitGrepEncRows( const rw::IngestResult& ing, const rw::Graph& g, std::span
 struct GrepCarrierReadsSource
 {
     enum class DisclosureWhy : std::uint8_t { MemoryStop, HardLimit };
+    static constexpr std::size_t kDisclosureWhyCount = std::size_t( DisclosureWhy::HardLimit ) + 1;
     std::optional<DisclosureWhy> stop;   // set by a stopped second ingest: reads= stays unknown and the root names why
     void disclose( DisclosureWhy why ) noexcept { stop = why; }
 };
+static_assert( rw::enumCountIsExact<GrepCarrierReadsSource::DisclosureWhy, GrepCarrierReadsSource::kDisclosureWhyCount>(),
+               "kDisclosureWhyCount must equal the DisclosureWhy count — raise it with the append" );
 
-// The root's reads_skipped= spelling of each stop, indexed by DisclosureWhy (the legends define both).
-inline constexpr std::array<std::string_view, 2> kGrepReadsSkippedName = { "memory_stop", "hard_limit" };
+// The root's reads_skipped= spelling of each stop, indexed by DisclosureWhy (the legends define both). Its size is DEDUCED and
+// asserted against the enum's count, so an appended stop without a spelling is a compile error, never a read past the table.
+inline constexpr auto kGrepReadsSkippedName = std::to_array<std::string_view>( { "memory_stop", "hard_limit" } );
+static_assert( kGrepReadsSkippedName.size() == GrepCarrierReadsSource::kDisclosureWhyCount, "one reads_skipped= spelling per DisclosureWhy" );
 
 struct GrepPageCarriers
 {
@@ -327,8 +338,13 @@ inline constexpr const char* kGrepCarrierClause =
     "file:line in tier, path, line order (source before tests, then path and line, not the order the uses verb prints); vals= names up to three function values the "
     "carrier itself stores (resolved by name to an indexed function), as slot=function@line: the slot key (absent for a "
     "plain assignment) and the line of the one definition that name resolves to (path:line when it is in another file, no "
-    "line when the name resolves to several); vals_total= counts all of them when more than three. When the top hit sits in a carrier with "
-    "reads=, the root next= is the uses verb on that carrier instead of the at verb. ";
+    "line when the name resolves to several); vals_total= counts all of them when more than three. When the top hit sits in a "
+    "carrier with reads=, the root next= is the uses verb on that carrier instead of the at verb. ";
+
+// A3: p= beside vals= — its own present-only clause (the full legend's reading of the attribute), spliced only when a row on the
+// page PRINTS p= (a reads-only carrier page and a defs=2 row with vals= define no p=). Same rules as the clause above.
+inline constexpr const char* kGrepCarrierAtClause =
+    "p= beside vals= is the carrier's own definition as file:line (a row of one definition), the file a path-less line is in. ";
 
 // L4: the root's disclosure when the memory guard stopped the rich ingest that counts reads (grepReadsIngest) — spliced
 // only on such an answer. Same rules as the clause above.
@@ -398,6 +414,66 @@ std::string grepUnindexedAttrs( const rw::GrepAuxCollection& aux )
     return attr;
 }
 
+// The per-row tail both hit lists print after l= and in=: line_bytes= (the matched line was cut; absent = whole) and,
+// honest-lex, occ= (the pattern occurs N times on this one line; absent = once).
+std::string grepRowTailAttrs( std::uint32_t lineBytes, std::uint32_t occ )
+{
+    return rw::countAttrXmlOrEmpty( "line_bytes", lineBytes ) + rw::countAttrXmlOrEmpty( "occ", occ > 1 ? occ : 0 );
+}
+
+// honest-lex GREP-META: pattern_meta= on a LITERAL answer whose pattern reads as regex syntax (search.h grepPatternMeta
+// states the rule); "" on a regex answer or a plain literal.
+std::string grepMetaAttr( const rw::Config& cfg, std::string_view pat, std::vector<char>& esc )
+{
+    return rw::textFieldOrEmpty( "pattern_meta", cfg.grepRegex ? std::string_view() : rw::escapeXml( rw::grepPatternMeta( pat ), esc ), /*json=*/false );
+}
+
+// The present-only legend clauses for honest-lex's two attributes (full legend; the compact one leans on the dict).
+std::string grepHonestLexClause( bool metaOn, bool occOn )
+{
+    std::string clause;
+    if( metaOn )
+    {
+        clause += "pattern_meta= (present only on a literal answer) lists the pieces of the pattern that read as regex syntax: | between "
+                  "words, a backslash escape, .* or .+ inside the pattern, a leading ^ or trailing $, a bracket class. This scan matched "
+                  "them as LITERAL text, so a zero or a short list here may only mean the pattern was meant as a regex; next= is then the "
+                  "regex verb on it (a basic-grep alternation written backslash-bar rewritten to a bare bar), whatever the hit count. ";
+    }
+    if( occOn )
+    {
+        clause += "A hit is one LINE: occ= on a row (present only above one) counts the pattern's occurrences on that line, and hits=, "
+                  "shown= and the window count lines, not occurrences. ";
+    }
+    return clause;
+}
+
+// P3 (L7, nextverb.h): the root's one follow-up. honest-lex first: a regex-shaped literal → the regex run (zero-hit or
+// not, when the regex verb would accept it). Then a CUT answer → the next page, under the compact legend (the page is
+// what the agent wants, not the prose it has already read); a carrier → its reads (L4); a hit → the enclosing-definition
+// chain at the top hit (--at=FILE:LINE, the grep→at→expand chain lens 8 named); zero hits → the conceptual fallback.
+template <class CarrierNextFn, class TopHitAtFn>
+std::string grepRootNext( const rw::Config& cfg, const std::string& pat, bool isCut, std::size_t pageEnd,
+                          CarrierNextFn&& carrierNext, TopHitAtFn&& topHitAt )
+{
+    if( const std::string metaRegex = cfg.grepRegex || rw::grepPatternMeta( pat ).empty() ? std::string() : rw::grepMetaRegex( pat ); !metaRegex.empty() )
+    {
+        return rw::nextFlag( "--regex=", metaRegex );
+    }
+    if( isCut )
+    {
+        return rw::nextFlag( cfg.grepRegex ? "--regex=" : "--grep=", pat ) + " --offset=" + std::to_string( pageEnd ) + " --legend=compact";
+    }
+    if( std::string carrier = carrierNext(); !carrier.empty() )
+    {
+        return carrier;   // L4: the top hit sits in a carrier the uses verb lists reads for — those reads are the next hop
+    }
+    if( const std::string at = topHitAt(); !at.empty() )
+    {
+        return rw::nextFlag( "--at=", at );
+    }
+    return rw::nextFlag( "--for=", pat );
+}
+
 // §R-J <unindexed> emission, lifted out of emitGrepReport for the same reason emitGrepEncRows/
 // emitGrepSuggest above were: pure serialization of an already-collected list (search.h's grepCollectAux),
 // so the "collapse by contiguous path" grouping loop is a helper's job, not emitGrepReport's. Omitted
@@ -438,14 +514,7 @@ void emitGrepUnindexed( const std::vector<rw::GrepAuxHit>& hits, const rw::PageW
             appendCdataSafe( h.text, safe );
             // P12 (L7): no <m> wrapper here either. line_bytes= is the indexed row's own matched-line
             // disclosure, restated on this list because it is served by the SAME 512 B cut.
-            if( h.lineBytes != 0 )
-            {
-                rw::emitTo( stdout, "<hit l=\"{}\" line_bytes=\"{}\"><![CDATA[", h.line, h.lineBytes );
-            }
-            else
-            {
-                rw::emitTo( stdout, "<hit l=\"{}\"><![CDATA[", h.line );
-            }
+            rw::emitTo( stdout, "<hit l=\"{}\"{}><![CDATA[", h.line, grepRowTailAttrs( h.lineBytes, h.occ ) );
             std::fwrite( safe.data(), 1, safe.size(), stdout );
             rw::emitTo( stdout, "]]></hit>" );
         }
@@ -610,7 +679,7 @@ void emitCompactGrepLegend()
 {
     rw::emitTo( stdout, "<!-- ripwire grep ripwire.grep/v1: files group source-ordered hits; l=line, m=matched text, "
                  "in=enclosing name when known. shown/capped disclose the printed window; hits_capped=1 makes hits a floor; "
-                 "complete=1 only for an exhaustive literal scan whose whole unfiltered window printed. root anchors relative p; "
+                 "complete=1 only for an exhaustive literal scan (beside pattern_meta=, of the literal reading only) whose whole unfiltered window printed. root anchors relative p; "
                  "enc callers remain a call-graph floor; tier/suppressed and corpus attrs disclose excluded populations, tier_partial=1 "
                  "meaning that label was elected over a partial classification. files/hits/shown/total/complete are IN-INDEX only; "
                  "unindexed_hits sizes the second population, whose element carries its own count/shown/capped under the same window. -->" );
@@ -720,6 +789,7 @@ GrepScanPhases collectGrepScanPhases( const rw::Config& cfg, const rw::IngestRes
         phases.found = grepApplySpanTiers( ing, std::move( phases.found ), ( cfg.grepIn == "any" ) ? GrepIn::Any : GrepIn::Code,
                                            phases.tier, /*useMemo=*/!cfg.noCache, cfg.grepRegex ? std::string_view() : std::string_view( pat ) );
     }
+    phases.found = grepFoldLines( std::move( phases.found ) );   // honest-lex: one row per line, occ= for the rest
     // §R-J: additive scan over CrawlSkips::unsupported — the "unsupported-ext, text-looking" population the
     // crawl already computed at ingest time (queries/*/tags.scm and its siblings). Reuses the SAME per-file
     // ceiling the crawl applies to indexed files, so a huge unsupported-ext file is excluded exactly like an
@@ -790,22 +860,64 @@ void joinGrepScanPrefetch( std::thread& worker )
 // and the run printed hits= as a measurement at exit 0. Refused here, by name, before a byte reaches stdout —
 // the same shape and exit code as the pattern refusal above, so a caller handles both the one way it already
 // does. The file named is the lowest-fileId indexed one (else the first unindexed one): deterministic.
+//
+// A stopped scan has ONE cause: the ENGINE abandoning a match. It had two until the PR #397 review removed the
+// guard's per-file match budget (round 4 had split the message per cause, because one run could stop files both
+// ways); with the budget gone the split carried nothing, so the refusal is one sentence again — the engine's own
+// count, reason and first file.
+
+// One stopped scan resolved to the four facts its sentence needs: how many files it stopped, the reason sentence
+// to quote, the file to name, and the advice that fixes it.
+struct AbandonedRegexCause
+{
+    std::uint32_t    count = 0;
+    std::string_view reason;
+    std::string_view firstPath;
+    std::string_view advice;
+};
+
+// The file named for a stopped scan: the lowest-fileId INDEXED one, else the first UNINDEXED one. A single real
+// root rewrites an indexed path root-relative — the same spelling every other verb reports a file with.
+inline std::string_view abandonedRegexFirstPath( const rw::Config& cfg, const rw::IngestResult& ing,
+                                                 const rw::GrepCollection& found, const rw::GrepAuxCollection& aux )
+{
+    if( found.regexAbandonedFiles == 0 )
+    {
+        return std::string_view( aux.firstRegexAbandonedPath );
+    }
+    const std::uint32_t fileId     = found.firstRegexAbandonedFile;
+    const bool          singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
+    return singleRoot ? rw::sarif::rootRelativeUri( ing.files[ fileId ], rw::sarif::rootPrefixOf( std::string( cfg.roots[0] ) ) )
+                      : std::string_view( ing.files[ fileId ] );
+}
+
+// The trailing advice: the engine's own offence, fixed by narrowing what it must try — bounding the outer
+// quantifier or narrowing the search — never by rewriting an alternation the screen has already refused.
+inline constexpr std::string_view kAbandonedEngineAdvice =
+    "bound the OUTER quantifier of the pattern, or narrow the search, so it cannot backtrack on the subject";
+
+// The refusal sentence. Its head — the pattern, the reason, the count and the file — is one shape; the reason word
+// and the trailing advice name the one cause. When an engine abandonment reaches this seam the reason is
+// kRegexAbandonedReason and the advice kAbandonedEngineAdvice, on purpose (and NOT byte-identical to any
+// pre-round-4 message: the reason named the engine's give-up and the advice named the outer quantifier from that
+// round on).
+inline void emitAbandonedRegexRefusal( std::string_view pattern, const AbandonedRegexCause& cause )
+{
+    rw::emitTo( stderr, "ripwire: --regex='{}' refused, no hit is reported: {} in {} file(s), first {} — the hits collected before that "
+                        "point would be a floor this verb cannot state ({})\n",
+                pattern, cause.reason, cause.count, cause.firstPath, cause.advice );
+}
+
 static bool refuseAbandonedRegexScan( const rw::Config& cfg, const rw::IngestResult& ing, const rw::GrepCollection& found, const rw::GrepAuxCollection& aux )
 {
-    const std::uint32_t abandonedCount = found.regexAbandonedFiles + aux.regexAbandonedFiles;
-    if( !cfg.grepRegex || abandonedCount == 0 )
+    const std::uint32_t stoppedCount = found.regexAbandonedFiles + aux.regexAbandonedFiles;
+    if( !cfg.grepRegex || stoppedCount == 0 )
     {
         return false;
     }
-    const bool             singleRoot = ing.realPaths.empty() && cfg.roots.size() == 1;
-    const std::string      rootPrefix = singleRoot ? rw::sarif::rootPrefixOf( std::string( cfg.roots[0] ) ) : std::string();
-    const std::string_view firstPath  = found.regexAbandonedFiles == 0 ? std::string_view( aux.firstRegexAbandonedPath )
-                                      : singleRoot ? rw::sarif::rootRelativeUri( ing.files[ found.firstRegexAbandonedFile ], rootPrefix )
-                                                   : std::string_view( ing.files[ found.firstRegexAbandonedFile ] );
-    rw::emitTo( stderr, "ripwire: --regex='{}' refused, no hit is reported: {} in {} file(s), first {} — the hits collected before that "
-                        "point would be a floor this verb cannot state (rewrite the pattern so no two of its alternatives can match the "
-                        "same text, e.g. (a|b)+ rather than (a|a)+)\n",
-                cfg.grep, rw::kRegexAbandonedReason, abandonedCount, firstPath );
+    const AbandonedRegexCause cause{ stoppedCount, rw::kRegexAbandonedReason,
+                                     abandonedRegexFirstPath( cfg, ing, found, aux ), kAbandonedEngineAdvice };
+    emitAbandonedRegexRefusal( cfg.grep, cause );
     return true;
 }
 
@@ -939,14 +1051,14 @@ int emitGrepReport( const MainDispatch& d )
     // the WINDOW: a pure slice of the sorted list. pageWindow() clamps a past-the-end offset to an empty
     // page, so a 64-bit offset can never index out of range.
     const PageWindow           grepPage = pageWindow( hitCount, rowCap, cfg.pageOffset );
-    const std::vector<GrepHit> hits     = grepEnrich( ing, std::span<const GrepRawHit>( found.raw ).subspan( grepPage.begin, grepPage.end - grepPage.begin ),
-                                                      cfg.grepBefore, cfg.grepAfter );
+    const std::vector<GrepHit> hits     = grepEnrichPage( ing, found, grepPage.begin, grepPage.end - grepPage.begin, cfg.grepBefore, cfg.grepAfter );
     const std::vector<GrepEncRow>  encRows   = grepEnclosingRows( ing, g, std::span<const GrepHit>( hits ) );   // R1b, before the legend
     const std::vector<CallerFloor> encFloors = grepEncFloors( ing, g, encRows );
     const bool anyEncFloor = std::ranges::any_of( encFloors, []( const CallerFloor& f ) { return f.isFloor; } );
     const GrepPageCarriers         pageCarriers = grepPageCarriers( d, hits, encRows );   // L4, before the legend
     const std::vector<GrepCarrier>& encCarriers = pageCarriers.carriers;
     const bool anyCarrierAttr = std::ranges::any_of( encCarriers, []( const GrepCarrier& c ) { return ( c.readsKnown && c.reads > 0 ) || !c.vals.empty(); } );
+    const bool anyCarrierAt   = std::ranges::any_of( encCarriers, []( const GrepCarrier& c ) { return !grepCarrierAt( c, true, {} ).empty(); } );   // p= prints iff this is non-empty
     const std::vector<GrepHitRef> hitRefs = grepHitRefs( cfg, ing, tierReport, encRows, hits );   // idea #5: ref= (empty off a code+string answer)
     std::vector<char> esc;
     const auto        ex = [ & ]( std::string_view s ) -> std::string { return std::string( escapeXml( s, esc ) ); };
@@ -997,7 +1109,7 @@ int emitGrepReport( const MainDispatch& d )
     //            absent above is absent from every indexed file", and that is false the moment a comment or
     //            string row was held back. --grep-in=any (no filtering) keeps the claim, which is what makes
     //            the claim recoverable rather than lost.
-    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex;
+    const bool scanExhaustive = found.cleanScan() && !cfg.grepRegex && !ing.memoryStop.isSet();   // notfound-on-cut: a cut index never claims it (the CLI refuses one first; this is the twin of the MCP term)
     const bool windowWhole    = grepPage.begin == 0 && grepPage.end == hitCount;
     const bool nothingHeldBack = tierReport.suppressedComment == 0 && tierReport.suppressedString == 0;
     const char* const completeAttr = ( scanExhaustive && windowWhole && nothingHeldBack ) ? " complete=\"1\"" : "";
@@ -1095,7 +1207,7 @@ int emitGrepReport( const MainDispatch& d )
                  // parse this verb's header counters by grep, and a quoted numeric example here would be matched first — the quality-delta legend's rule.
                  "After the hit rows, <enc> rows list each DISTINCT enclosing symbol NAME of THIS page (first-appearance order, bounded by the page) with callers= its 1-hop DISTINCT-caller count, "
                  "unioned across same-named defs like the callers verb (a FLOOR — dynamic dispatch contributes no edge), defs= how many defs the name grouped (only when more than one), cx= complexity; "
-                 "{}{}{}"   // count-floor: kGrepEncFloorClause, present-only (a row on this page carries callers_floor=); L4: kGrepCarrierClause and kGrepCarrierSkipClause, the same
+                 "{}{}{}{}"   // count-floor: kGrepEncFloorClause, present-only (a row on this page carries callers_floor=); L4: kGrepCarrierClause, kGrepCarrierAtClause (p=) and kGrepCarrierSkipClause, the same
                  "amp=/tested= join only when a metrics co-run already computed that lens. On a zero-hit answer a <suggest> element may follow: SUGGESTIONS, never matches — near= the nearest indexed "
                  "symbol name (did-you-mean), next= a ready-to-paste conceptual fallback; absent for regex/non-word-like patterns or when nothing plausible exists. "
                  // T1: the completeness claim, defined where it appears (no attribute=value literal in these
@@ -1148,13 +1260,14 @@ int emitGrepReport( const MainDispatch& d )
                  // P3 (L7): next= on the root, defined where the reader meets it
                  "next= is the one pasteable follow-up: the at verb on the top hit; the next page (compact legend) when cut; "
                  "the conceptual lens on a zero-hit answer. "
-                 "{} -->", anyEncFloor ? kGrepEncFloorClause : "", anyCarrierAttr ? kGrepCarrierClause : "",
-                 pageCarriers.skippedAttrs.empty() ? "" : kGrepCarrierSkipClause, rw::kPageRaiseCapClause );
+                 "{}{} -->", anyEncFloor ? kGrepEncFloorClause : "", anyCarrierAttr ? kGrepCarrierClause : "", anyCarrierAt ? kGrepCarrierAtClause : "",
+                 pageCarriers.skippedAttrs.empty() ? "" : kGrepCarrierSkipClause,
+                 grepHonestLexClause( !grepMetaAttr( cfg, pat, esc ).empty(), !found.occ.empty() ), rw::kPageRaiseCapClause );
     }
     emitGrepHandleLegend( cfg.grepHandles );
     // G3: terms=/scope=/suppressed= — only when AND/NOT was actually given, so a plain --grep answer
     // stays byte-identical to before G3 landed (the "purely additive" rule every ripwire flag follows).
-    const std::string termsAttr = grepTermsAttrs( pat, grepTerms, grepScopeVal, termsSuppressed, esc );
+    const std::string termsAttr = grepTermsAttrs( pat, grepTerms, grepScopeVal, termsSuppressed, esc ) + grepMetaAttr( cfg, pat, esc );
     // G4 (2026-08-15 harvest, report-ugrep §F6): corpus_excluded=/corpus_oversize= — so hits="0" can
     // distinguish "not in this repo" from "in a file the crawl never scanned" (an --exclude= match, or a
     // file past --max-file-size). Absent when zero, matching skippedOversize's own "absent means nothing
@@ -1182,26 +1295,10 @@ int emitGrepReport( const MainDispatch& d )
     }
     scanShortAttr += pageCarriers.skippedAttrs;   // L4: the reads the memory guard stopped (reads_skipped=, reads_next=), or ""
     const char* schemaAttr = cfg.legend == "compact" ? " schema=\"ripwire.grep/v1\"" : "";
-    // P3 (L7, nextverb.h): the one follow-up. A CUT answer → the next page, under the compact legend (the page
-    // is what the agent wants, not the prose it has already read); a hit → the enclosing-definition chain at the
-    // top hit (--at=FILE:LINE, the grep→at→expand chain lens 8 named); zero hits → the conceptual fallback.
-    std::string grepNext;
-    if( grepPage.end < hitCount || hitsCapped != 0 )
-    {
-        grepNext = rw::nextFlag( cfg.grepRegex ? "--regex=" : "--grep=", pat ) + " --offset=" + std::to_string( grepPage.end ) + " --legend=compact";
-    }
-    else if( const std::string carrierNext = rw::grepCarrierNext( ing, hits, encRows, encCarriers ); !carrierNext.empty() )
-    {
-        grepNext = carrierNext;   // L4: the top hit sits in a carrier the uses verb lists reads for — those reads are the next hop
-    }
-    else if( !hits.empty() )
-    {
-        grepNext = rw::nextFlag( "--at=", std::string( pathFor( hits[ 0 ].fileId ) ) + ":" + std::to_string( hits[ 0 ].line ) );
-    }
-    else
-    {
-        grepNext = rw::nextFlag( "--for=", pat );
-    }
+    // P3 (L7) + honest-lex: the one follow-up (grepRootNext above states the order).
+    const std::string grepNext = grepRootNext( cfg, pat, grepPage.end < hitCount || hitsCapped != 0, grepPage.end,
+                                               [ & ] { return rw::grepCarrierNext( ing, hits, encRows, encCarriers ); },
+                                               [ & ] { return hits.empty() ? std::string() : std::string( pathFor( hits[ 0 ].fileId ) ) + ":" + std::to_string( hits[ 0 ].line ); } );
     rw::emitTo( stdout, "<grep pattern=\"{}\"{}{}{} files=\"{}\" hits=\"{}\"{} hits_capped=\"{}\"{}{}{}{}{}{}{}>",
                  ex( pat ).c_str(), schemaAttr, rootAttr.c_str(), termsAttr.c_str(), filesMatched, hitCount,
                  pageDisclosure( grab, sizeof( grab ), grepPage.end - grepPage.begin, hitCount, grepPage.end,
@@ -1237,10 +1334,7 @@ int emitGrepReport( const MainDispatch& d )
             {
                 rw::emitTo( stdout, " in=\"{}\"", ex( h.enclosing ).c_str() );
             }
-            if( h.lineBytes != 0 )                    // the matched-line cut, disclosed: absent = the whole line is here
-            {
-                rw::emitTo( stdout, " line_bytes=\"{}\"", h.lineBytes );
-            }
+            rw::emitTo( stdout, "{}", grepRowTailAttrs( h.lineBytes, h.occ ) );   // line_bytes= (cut line), occ= (honest-lex)
             if( !c.more.empty() )
             {
                 rw::emitTo( stdout, " n=\"{}\"", c.more.size() + 1 );   // 1 (this row) + the folded sites — sums to shown=

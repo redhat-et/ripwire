@@ -419,6 +419,9 @@ else
             for-named)
                 if printf '%s' "$EST_OUT" | grep -Eq '<d l="[0-9]+" e="[0-9]+"'; then ok "#18d for-named: the pinned answer carries e= rows"
                 else no "#18d for-named: the pinned answer carries no e= row — the pin no longer describes the e= path"; fi ;;
+            for-named-nohop)
+                if printf '%s' "$EST_OUT" | grep -q '<callers '; then no "#18d for-named-nohop: the twin carries <callers> — RIPWIRE_NO_CALLER_HOP=1 did not reach the binary"
+                else ok "#18d for-named-nohop: the twin is the hop-off answer (RIPWIRE_NO_CALLER_HOP=1)"; fi ;;
             for-named-noe)
                 if ! printf '%s' "$EST_OUT" | grep -q '<d '; then no "#18d for-named-noe: the twin printed no <d> rows (premise)"
                 elif printf '%s' "$EST_OUT" | grep -Eq ' e="[0-9]+"'; then no "#18d for-named-noe: the twin carries e= — RIPWIRE_FOR_ENDLINES=never did not reach the binary"
@@ -455,10 +458,10 @@ else
         fi
     fi
 
-    # #18c MUTATION CONTROL. Nine pins are committed (eight verbs + for-named's e=-free twin); a loop that measured
+    # #18c MUTATION CONTROL. Ten pins are committed (eight verbs + for-named's e=-free twin + its hop-off twin); a loop that measured
     # fewer (a manifest truncated by a merge, a verb that stopped printing est_tokens) asserted less than the PASS
     # lines above suggest.
-    if [ "$est_pins" -ge 9 ]; then
+    if [ "$est_pins" -ge 10 ]; then
         ok "#18c $est_pins pins measured against the tokenizer manifest"
     else
         no "#18c only $est_pins pin(s) measured — the band arms above asserted almost nothing"

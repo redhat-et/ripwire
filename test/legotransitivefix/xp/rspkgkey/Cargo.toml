@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/pkgcore", "crates/pkgapp", "crates/pkgother"]

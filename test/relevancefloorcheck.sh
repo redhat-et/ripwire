@@ -181,13 +181,26 @@ a_bytes="$( printf '%s' "$A_OUT" | wc -c | tr -d ' ' )"
 # `<t p=… sym=…/>` — and its full legend clause grew 391 -> 598 B to define them. (4) normalises those out too (the page rows,
 # and the clause back to its old 391 B), so its 3000 B assertion still measures what it measured; (4b), the whole answer,
 # moves 3300 -> 3400 B (measured 3366): still far below the 5307 B padded answer this arm exists to keep out.
-a_norm_bytes="$( printf '%s' "$A_OUT" | sed -E 's/ e="[0-9]+"//g; s/; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known \(extent_suspect, docs, config\), never 0; l= is the line of the definition.s name, so a definition can start above l=//' \
+# RE-PIN 2026-10-22 (lane mf1-nx, by design; rule 4): the anchor is ONE function on the name-exact route, so the answer now carries
+# the caller hop (src/forcallerhop.h) — here the empty <callers … total="0"> shell (the anchor has no callers) and its full legend
+# clause. (4) normalises both out, so its 3000 B assertion still measures what it measured; (4b) moves 3400 -> 4100 B (measured
+# 3967); (4d) is the twin: the answer minus the hop equals RIPWIRE_NO_CALLER_HOP=1, the pre-hop answer, under (4b)'s old 3400 B.
+a_norm_bytes="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); sys.stdout.write(s)' | sed -E 's/ e="[0-9]+"//g; s/; e= on a d row: the 1-based line where that definition ends, body-inclusive; absent when the extent is not known \(extent_suspect, docs, config\), never 0; l= is the line of the definition.s name, so a definition can start above l=//' \
                  | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<t p=\"[^\"]*\" sym=\"[^\"]*\"/>","",s); m=re.search(r"; tail: [^\]]*?budget-trimmed row\)",s); s=s.replace(m.group(0),"x"*391) if m and len(m.group(0))>391 else s; sys.stdout.write(s)' | wc -c | tr -d ' ' )"
 case "$a_bytes$a_norm_bytes" in *[!0-9]*|'') no "(4) byte counts are not numeric ('$a_bytes' / '$a_norm_bytes')"; a_bytes=999999; a_norm_bytes=999999 ;; esac
 [ "$a_norm_bytes" -lt 3000 ] && ok "(4) the floored bundle without e= and its clause is $a_norm_bytes B (< 3000; pre-fix was 5307 B on this fixture)" \
                              || no "(4) the floored bundle without e= and its clause is $a_norm_bytes B, over the 3000 B ceiling"
-[ "$a_bytes" -lt 3400 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 3400 with e=, the tail page rows and their legend clauses)" \
-                        || no "(4b) the whole floored bundle is $a_bytes B, over the 3400 B ceiling"
+[ "$a_bytes" -lt 4100 ] && ok "(4b) the whole floored bundle is $a_bytes B (< 4100 with e=, the tail page rows, the caller hop and their legend clauses)" \
+                        || no "(4b) the whole floored bundle is $a_bytes B, over the 4100 B ceiling"
+A_OFF="$( RIPWIRE_NO_CALLER_HOP=1 rw --for=FLOORANCHOR_uniquefn --legend=full )"
+a_off_bytes="$( printf '%s' "$A_OFF" | wc -c | tr -d ' ' )"
+a_on_strip="$( printf '%s' "$A_OUT" | python3 -c 'import re,sys; s=sys.stdin.read(); s=re.sub(r"<callers [^>]*>.*?</callers>","",s,flags=re.S); s=re.sub(r"; callers of=:.*?next= lists the whole caller radius","",s,flags=re.S); s=re.sub(r" est_tokens=\"[0-9]+\"","",s); sys.stdout.write(s)' )"
+a_off_strip="$( printf '%s' "$A_OFF" | sed -E 's/ est_tokens="[0-9]+"//g' )"
+if [ -n "$A_OFF" ] && [ "$a_on_strip" = "$a_off_strip" ] && [ "$a_off_bytes" -lt 3400 ]; then
+    ok "(4d) the answer minus the caller hop is the RIPWIRE_NO_CALLER_HOP=1 answer ($a_off_bytes B, < the old 3400 B ceiling)"
+else
+    no "(4d) the answer minus the caller hop differs from RIPWIRE_NO_CALLER_HOP=1, or that answer is $a_off_bytes B (>= 3400)"
+fi
 if printf '%s' "$A_OUT" | grep -q ' e="'; then
     [ "$a_norm_bytes" -lt "$a_bytes" ] \
         && ok "(4c) the normalisation in (4) removed e= bytes ($a_bytes -> $a_norm_bytes B), so the 3000 B twin is live" \

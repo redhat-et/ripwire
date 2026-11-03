@@ -1,0 +1,6 @@
+[package]
+name = "other"
+[dependencies]
+xp-t1-core = "1"
+[target.'cfg(unix)'.dependencies]
+xp-t1-core = { path = "../core" }

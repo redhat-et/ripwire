@@ -1,0 +1,5 @@
+[project]
+name = "pkg"
+
+[project.entry-points."x.report"]  # see [docs]
+fmt = "pkg.mod:Fmt"

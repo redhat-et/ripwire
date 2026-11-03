@@ -1,0 +1,6 @@
+[package]
+name = "xp-key-other"
+[dependencies]
+xpkey = "0.4"
+xpboth = { path = "../keycore", package = "xp-key-core" }
+xpctl = "1"

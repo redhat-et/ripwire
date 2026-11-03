@@ -187,7 +187,7 @@ echo
 echo "=== 6b. R2c (the 2026-08-12 usage mine): a bare symbol NAME is accepted where a handle is expected ==="
 # fetch_body's strict handle parse stays (steps 5/6 above are untouched contracts), but a string that is
 # not even handle-SHAPED is now tried as a symbol name through the same lookup path find_symbol uses
-# (resolveAllByNameQualified, lowest-id pick), DISCLOSED via resolved_from_name + the REAL handle in the
+# (resolveAllByNameQualified, the tower-front pick), DISCLOSED via resolved_from_name + the REAL handle in the
 # result — so the one-shot answer also teaches the handle for next time. A "sym#..."-prefixed string is
 # NEVER treated as a name (a corrupt real handle must keep the malformed refusal — step 6's guard).
 
@@ -241,7 +241,7 @@ grep -q GUARD_OK "$TMP/symgarbchk" \
     && ok "(6b-3) 'sym#'-prefixed garbage keeps the malformed-handle refusal (no name fallback)" \
     || no "(6b-3) $(cat "$TMP/symgarbchk")"
 
-# (6b-4) [red] same-named defs in DIFFERENT files: serve the lowest-id pick, DISCLOSE the others
+# (6b-4) [red] same-named defs in DIFFERENT files: serve the tower-front pick, DISCLOSE the others
 #         (name_defs + other_defs with file:line + each one's handle — the honest sibling of step 2b'\''s
 #         overload note, for the name path). A second def is planted in the PRIVATE corpus copy.
 printf 'int dupTwinFn( int x ) { return x + 1; }\n'  > "$CORPUS/core/twin_a.cpp"
@@ -261,7 +261,7 @@ okO    = len(others) == 1 and str(others[0].get("handle","")).startswith("sym#")
 print("DUP_OK" if (okN and okO) else "DUP_BAD:name_defs=%s others=%s" % (j.get("name_defs"), json.dumps(others)[:160]))
 ' "$TMP/dupname" > "$TMP/dupchk"
 grep -q DUP_OK "$TMP/dupchk" \
-    && ok "(6b-4) [red] same-named defs: lowest-id pick served, name_defs + other_defs disclosed" \
+    && ok "(6b-4) [red] same-named defs: tower-front pick served, name_defs + other_defs disclosed" \
     || no "(6b-4) [red] $(cat "$TMP/dupchk")"
 
 # (6b-5) determinism: the by-name fetch is byte-identical across two server processes. Two FRESH calls

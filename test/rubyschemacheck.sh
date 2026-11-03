@@ -130,8 +130,8 @@ done
 "$BIN" "$FIX" --callers=name --no-cache 2>/dev/null >"$TMP/callers_name"
 # attrib-multidef: the 19 definitions form several groups, so each row also names its definitions (of_def=, defattrib.h)
 [ "$( callershead name )"       = 'of="name" defs="19" count="2"' ] \
-    && grep -qE '<s t="method" n="render_label" p="consumer_ambiguous.rb:7" via="name"( of_def="[^"]*")? sites_at="consumer_ambiguous.rb:8"/>' "$TMP/callers_name" \
-    && grep -qE '<s t="method" n="lookup" p="pair_def_column.rb:14"( of_def="[^"]*")? sites_at="pair_def_column.rb:15"/>' "$TMP/callers_name" \
+    && grep -qE '<s t="method" n="ConsumerAmbiguous#render_label" p="consumer_ambiguous.rb:7" via="name"( of_def="[^"]*")? sites_at="consumer_ambiguous.rb:8"/>' "$TMP/callers_name" \
+    && grep -qE '<s t="method" n="PairDefColumn#lookup" p="pair_def_column.rb:14"( of_def="[^"]*")? sites_at="pair_def_column.rb:15"/>' "$TMP/callers_name" \
     && ok 'defs-only: the 2 name callers are METHODS (render_label by name alone, lookup pinned by its own class) — the 9 columns contribute zero edges to the 19-def set; SingleColumn.new.name binds nothing (no in-tree def on that model)' \
     || no "defs-only: name callers: $( callershead name )"
 
@@ -145,7 +145,7 @@ grep -q 'p="consumer_ambiguous.rb:8"' "$TMP/uses_name" \
     && ok 'ambiguous arm: rec.name on a plain local SPLITS over the whole def set (its row is in the gauge)' \
     || no 'ambiguous arm: consumer_ambiguous.rb:8 row missing'
 grep -q 'p="pair_def_column.rb:15"' "$TMP/uses_name" \
-    && [ "$( "$BIN" "$FIX" --callees=lookup --no-cache 2>/dev/null | grep -oE '<s t="[^"]*" n="[^"]*" p="[^"]*"[^>]*>' | tr -d '\n' )" = '<s t="method" n="name" p="pair_def_column.rb:6"/>' ] \
+    && [ "$( "$BIN" "$FIX" --callees=lookup --no-cache 2>/dev/null | grep -oE '<s t="[^"]*" n="[^"]*" p="[^"]*"[^>]*>' | tr -d '\n' )" = '<s t="method" n="PairDefColumn#name" p="pair_def_column.rb:6"/>' ] \
     && ok 'locality arm: self.name in the instance method PairDefColumn#lookup pins exactly its own class'"'"'s def name (pair_def_column.rb:6, no via=) and its use row is NOT in the ambiguous gauge — never a column' \
     || no "locality arm: pair_def_column.rb:15 row missing or lookup does not pin pair_def_column.rb:6 alone"
 grep -q 'p="column_consumers.rb:7"' "$TMP/uses_name" \

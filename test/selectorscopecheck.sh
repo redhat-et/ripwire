@@ -36,13 +36,13 @@ echo "selectorscopecheck: BIN=$BIN  FIX=$FIX"
 
 # ── (a)/(b) Scope::name picks ONE scope's definition on the graph verbs ─────────────────────────────
 OUTA="$( "$BIN" "$FIX" --no-cache --callees=Box::lid 2>&1 )"
-if printf '%s' "$OUTA" | grep -q 'n="boxHelper"' && ! printf '%s' "$OUTA" | grep -q 'n="crateHelper"'; then
+if printf '%s' "$OUTA" | grep -q 'n="Box::boxHelper"' && ! printf '%s' "$OUTA" | grep -qE 'n="([A-Za-z]+::)?crateHelper"'; then
     ok "(a) --callees=Box::lid resolves and names boxHelper only"
 else
     no "(a) --callees=Box::lid did not resolve to Box's definition"; printf '%s\n' "$OUTA" | tail -2
 fi
 OUTB="$( "$BIN" "$FIX" --no-cache --callees=Crate::lid 2>&1 )"
-if printf '%s' "$OUTB" | grep -q 'n="crateHelper"' && ! printf '%s' "$OUTB" | grep -q 'n="boxHelper"'; then
+if printf '%s' "$OUTB" | grep -q 'n="Crate::crateHelper"' && ! printf '%s' "$OUTB" | grep -qE 'n="([A-Za-z]+::)?boxHelper"'; then
     ok "(b) --callees=Crate::lid resolves and names crateHelper only"
 else
     no "(b) --callees=Crate::lid did not resolve to Crate's definition"; printf '%s\n' "$OUTB" | tail -2
@@ -81,7 +81,7 @@ fi
 
 # ── (g) additivity: the bare name still unions across scopes, byte-for-byte semantics unchanged ─────
 OUTG="$( "$BIN" "$FIX" --no-cache --callees=lid 2>&1 )"
-if printf '%s' "$OUTG" | grep -q 'n="boxHelper"' && printf '%s' "$OUTG" | grep -q 'n="crateHelper"'; then
+if printf '%s' "$OUTG" | grep -q 'n="Box::boxHelper"' && printf '%s' "$OUTG" | grep -q 'n="Crate::crateHelper"'; then
     ok "(g) bare --callees=lid still unions both scopes (the pre-tier contract)"
 else
     no "(g) the bare-name union changed — the tier is not additive"; printf '%s\n' "$OUTG" | tail -2
@@ -100,7 +100,7 @@ fi
 # answered "not found" while `Class::method` resolved. RED-FIRST on the parent binary: (i)-(l) fail; (m) is a pin.
 for sel in 'Box.lid' 'Box#lid'; do
     OUTI="$( "$BIN" "$FIX" --no-cache --callees="$sel" 2>&1 )"
-    if printf '%s' "$OUTI" | grep -q 'n="boxHelper"' && ! printf '%s' "$OUTI" | grep -q 'n="crateHelper"'; then
+    if printf '%s' "$OUTI" | grep -q 'n="Box::boxHelper"' && ! printf '%s' "$OUTI" | grep -qE 'n="([A-Za-z]+::)?crateHelper"'; then
         ok "(i) --callees=$sel resolves like Box::lid and names boxHelper only"
     else
         no "(i) --callees=$sel did not resolve to Box::lid alone"; printf '%s\n' "$OUTI" | tail -2

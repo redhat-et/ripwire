@@ -112,7 +112,7 @@ PYMODULEHOLE
 python3 - "$TMP/module-hole-callees.xml" <<'PYMODULETARGET'
 import sys, xml.etree.ElementTree as ET
 rows = {(s.get('n'), s.get('p')) for s in ET.parse(sys.argv[1]).iter('s')}
-assert rows == {('bar/1', 'modules.ex:2')}, f'live hole bound to the wrong module: {rows}'
+assert rows == {('Real.bar/1', 'modules.ex:2')}, f'live hole bound to the wrong module: {rows}'
 print('  PASS live hole reaches Real.bar/1, not the same-file Other.bar/1')
 PYMODULETARGET
 
@@ -373,8 +373,9 @@ printf 'defmodule Tab do\n def tabbed(), do:\t123456789\nend\n' > "$TMP/tabbed/t
 "$BIN" "$TMP/tabbed" --no-cache --pack-signatures > "$TMP/tabbed.xml"
 python3 - "$TMP/tabbed.xml" <<'PYBODY'
 import sys, xml.etree.ElementTree as ET
-rows = [d for d in ET.parse(sys.argv[1]).iter('d') if d.get('n') == 'tabbed/0']
-assert len(rows) == 1
+rows = [d for d in ET.parse(sys.argv[1]).iter('d') if d.get('n') == 'Tab.tabbed/0']
+assert len(rows) == 1, 'the signature row prints in the Owner.name spelling'
+assert not [d for d in ET.parse(sys.argv[1]).iter('d') if d.get('n') == 'tabbed/0'], 'a bare signature row beside the qualified one'
 assert '123456789' not in ''.join(rows[0].itertext()), rows[0].text
 print('  PASS tab-separated keyword body is elided from signatures')
 PYBODY

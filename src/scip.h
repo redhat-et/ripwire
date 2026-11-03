@@ -634,9 +634,9 @@ inline ScipOverlay buildScipOverlay( const IngestResult& ing, const std::vector<
     refEnclosing.reserve( ing.references.size() );
     for( const Reference& rf : ing.references )
     {
-        if( rf.fromSymbol == kNoNode )
+        if( rf.fromSymbol == kNoNode || isSlotJoinRecord( rf ) )
         {
-            continue; // file-scope ref: no enclosing symbol
+            continue; // file-scope ref: no enclosing symbol; an IX-1 slot record is no occurrence
         }
         const std::uint64_t key = ( std::uint64_t( rf.fileId ) << 32 ) | std::uint64_t( rf.line );
         const auto it = refEnclosing.find( key );

@@ -118,7 +118,11 @@ run_arms(){   # $1 = binary, $2 = arm-label suffix (e.g. "new" or "old")
     # round-3 LOW (review rv-p6.md): a class-BODY rebind reaches no call site at all — Python method
     # bodies do not inherit their enclosing class body's scope — so it must neither veto this method NOR
     # any other function in the file; the alias narrow should bind normally here.
-    assert_bound     "$B" pkg/target_mod.py:run         uses_rebind_classbody  "rebind: class-body assignment does not leak into its own method ($L)"
+    assert_bound     "$B" pkg/target_mod.py:run         RebindClassBody.uses_rebind_classbody  "rebind: class-body assignment does not leak into its own method ($L)"
+    # twin (QUALNAME-1): a method caller prints Owner.name, so the bare spelling is NO row — this proves the
+    # exact-match probe above is a real exact check (it can only pass on the qualified row) and that the
+    # alias still binds the method, not a stray bare `uses_rebind_classbody` function.
+    assert_not_bound "$B" pkg/target_mod.py:run         uses_rebind_classbody  "rebind: class-body method row is Owner-qualified, never bare ($L)"
 }
 
 # ── the binary under test: every arm ────────────────────────────────────────────────────────────────
@@ -221,7 +225,7 @@ run_monotonic_arms()
     must_fix_rebind      pkg/target_mod.py:run       uses_rebind_unresolved "later re-import to an unresolvable name"
     must_stay_unbound    pkg/target_mod.py:run       uses_rebind_tryexcept  "try/except fallback import, both in-tree"
     must_stay_unbound    pkg/sub/deep.py:run         uses_rebind_tryexcept  "try/except fallback import, both in-tree, other arm"
-    must_fix_overrefusal pkg/target_mod.py:run       uses_rebind_classbody  "class-body assignment does not leak into its own method"
+    must_fix_overrefusal pkg/target_mod.py:run       RebindClassBody.uses_rebind_classbody  "class-body assignment does not leak into its own method"
 }
 
 monotonic_check()

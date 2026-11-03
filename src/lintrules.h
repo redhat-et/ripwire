@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "model.h"              // Lang enum
+#include "langfacts.h"          // LangFacts::fileEdges — which languages can carry a file edge
 #include "depdialect.h"         // DepDialect + dependencyDialect — moved out of here for #358
 #include "ingest.h"             // AstQuerySpec, AstMatch, astQuery, IngestResult
 #include "docparse.h"           // detail::readWholeFile — THE canonical whole-file byte read; never re-rolled
@@ -289,24 +290,30 @@ inline bool dependencyPairCapable( Lang a, Lang b ) noexcept
     return da != DepDialect::None && da == dependencyDialect( b );
 }
 
+// The terse labels of the languages a predicate holds for, comma-joined in Lang-enum order, so an answer's bytes never depend on file order.
+template<class Pred>
+inline std::string langTagsWhere( Pred holds )
+{
+    std::string      out;
+    std::string_view sep;
+    for( std::size_t i = 0; i < kLangCount; ++i )
+    {
+        if( holds( Lang( i ) ) )
+        {
+            out.append( sep ).append( langTag( Lang( i ) ) );
+            sep = ",";
+        }
+    }
+    return out;
+}
+
 // The capable SET, as the terse output labels, comma-joined in Lang-enum order — derived from
 // dependencyCapable() and langTag() so it can never drift from the predicate it documents. `--deps
 // <health dep_langs=>` publishes it: a `dep_files=` denominator that changed between two releases is
 // otherwise an unexplained number, and this makes the set that produced it readable off the same line.
 inline std::string dependencyCapableLangTags()
 {
-    std::string out;
-    for( std::size_t i = 0; i < kLangCount; ++i )
-    {
-        const Lang l = Lang( i );
-        if( l == Lang::Unknown || !dependencyCapable( l ) )
-        {
-            continue;
-        }
-        if( !out.empty() ) { out.push_back( ',' ); }
-        out.append( langTag( l ) );
-    }
-    return out;
+    return langTagsWhere( []( Lang l ) { return l != Lang::Unknown && dependencyCapable( l ); } );
 }
 
 // One mask, built once, shared by --deps <health> (graph.h::dependencyHealth) and --arch's
@@ -320,6 +327,92 @@ inline std::vector<char> dependencyCapableMask( const IngestResult& ing )
         mask[f] = dependencyCapable( langOfPath( ing.files[f] ) ) ? 1 : 0;
     }
     return mask;
+}
+
+// Lane arch-honest: the files of this index in a language that cannot carry a file edge (LangFacts::fileEdges), the count and the
+// languages. Every coupling number over them is unknown, not zero. Absent from an answer when files == 0, so a tree with no such
+// file is byte-identical to the build before it.
+struct NoFileEdgeFiles
+{
+    std::size_t   files = 0;
+    std::uint32_t langs = 0;   // bit i = Lang( i )
+};
+static_assert( kLangCount <= 32, "NoFileEdgeFiles::langs is one bit per Lang" );
+
+inline bool langHasNoFileEdges( Lang lang ) noexcept
+{
+    return langFacts( lang ).fileEdges == FileEdges::Unmeasured;
+}
+inline std::uint32_t noFileEdgeLangBit( Lang lang ) noexcept
+{
+    return langHasNoFileEdges( lang ) ? std::uint32_t( 1 ) << static_cast<std::uint32_t>( lang ) : 0;
+}
+inline NoFileEdgeFiles noFileEdgeFiles( const IngestResult& ing )
+{
+    NoFileEdgeFiles out;
+    for( const auto& path : ing.files )
+    {
+        if( const std::uint32_t bit = noFileEdgeLangBit( langOfPath( path ) ); bit != 0 )
+        {
+            ++out.files;
+            out.langs |= bit;
+        }
+    }
+    return out;
+}
+// The value of no_file_edges=.
+inline std::string noFileEdgeLangTags( std::uint32_t langs )
+{
+    return langTagsWhere( [ langs ]( Lang l ) { return ( ( langs >> static_cast<std::uint32_t>( l ) ) & 1u ) != 0; } );
+}
+// no_file_edges="go" (present-only, leading space): the one spelling every row and root that names these languages shares.
+inline std::string noFileEdgesAttrXml( std::uint32_t langs )
+{
+    return langs == 0 ? std::string() : " no_file_edges=\"" + noFileEdgeLangTags( langs ) + "\"";
+}
+
+// The files a SYSTEM-level number (ccd, nccd, shape, propagation_cost) can be computed over: dependencyCapableMask minus EVERY file
+// in a no-edge language, whether or not it drew an observed edge. An edgeless one sits in the denominator as a cone of one, and with
+// enough of them a tangled tree reads horizontal (cockroach: nccd 0.81 printed, ~9.16 over the rest). One that drew an edge (Go across
+// a go.mod replace) has a cone that is only a floor, because its other imports are unseen, so it stays out too. The numbers over `mask`
+// are then exact over the rest. A tree with no no-edge file gets dependencyCapableMask itself, byte for byte.
+// `measuredEdge` says whether any edge has both ends inside `mask`: with none, a cone is a file alone and nothing behind ccd/nccd/shape or
+// propagation_cost is a measurement (one edgeless sh file beside masked Go files read propagation_cost 1.000 on a tree with no edge).
+struct DependencyMeasure
+{
+    std::vector<char> mask;                 // 1 = in the denominator
+    std::size_t       depFiles = 0;         // mask's population: dep_files=
+    std::size_t       masked   = 0;         // no-edge files left out: masked_files=
+    bool              measuredEdge = false; // an edge with both ends in mask
+};
+inline DependencyMeasure dependencyMeasure( const IngestResult& ing, const std::vector<std::vector<std::uint32_t>>& adj )
+{
+    DependencyMeasure m;
+    m.mask = dependencyCapableMask( ing );
+    const std::size_t F = m.mask.size();
+    for( std::size_t f = 0; f < F; ++f )
+    {
+        if( m.mask[f] && langHasNoFileEdges( langOfPath( ing.files[f] ) ) )
+        {
+            m.mask[f] = 0;
+            ++m.masked;
+        }
+    }
+    for( std::size_t f = 0; f < adj.size() && f < F && !m.measuredEdge; ++f )
+    {
+        if( !m.mask[f] ) { continue; }
+        for( const std::uint32_t g : adj[f] )
+        {
+            if( g < F && m.mask[g] ) { m.measuredEdge = true; break; }
+        }
+    }
+    m.depFiles = std::size_t( std::count( m.mask.begin(), m.mask.end(), char( 1 ) ) );
+    return m;
+}
+// healthUnknown / shownPropCost: a system number is withheld exactly when a no-edge file exists and no edge is measured.
+inline bool systemNumbersUnknown( const NoFileEdgeFiles& noEdge, const DependencyMeasure& m ) noexcept
+{
+    return noEdge.files != 0 && !m.measuredEdge;
 }
 
 // ── the tiny YAML-subset parser ──────────────────────────────────────────────────────────────────

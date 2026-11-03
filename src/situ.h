@@ -16,6 +16,8 @@
 #include "filter.h"
 #include "gitmine.h"
 #include "infra/sortutil.h"   // svLess — string_view order without libstdc++'s length subtraction (#344)
+#include "lexical.h"     // lexicalScanText — the working-tree bytes of a file, read once, for the hunk-coverage and accessor checks below
+#include "diffhunks.h"   // gitDiffHunksAllVsHead — the ONE-spawn whole-tree hunk evidence the symbol-granular change set narrows by
 #include "prcontext.h"   // A3-F17b/A3-F13: reuse the ONE numstat-based mask builder (gitDiffChangedMaskNumstat)
 #include "gitstamp.h"    // r26-stamp Task A: gitstamp::atAttr — the at="<sha>[+dirty]" root anchor
 #include "testmap.h"     // §P11.4: TestRunnerIndex / runAttr — the run= hint on a named test row
@@ -566,6 +568,335 @@ inline SituSiblings lexicalSiblings( const IngestResult& ing, const std::vector<
     return out;
 }
 
+// ── THE SYMBOL-GRANULAR CHANGE SET — what the diff actually touched, not every symbol of every file it touched
+//
+// WHY. Field report (PR #302 thread, a 759-file Flask monolith): a two-function edit in a 37,000-line
+// routes.py answered --situ with 117 suggested tests and a 1,414-symbol blast radius, unrelated payment and
+// encounter tests ranked highly "because routes.py is shared". Reproduced on django at depth-1: a 3-line edit
+// inside QuerySet.exists() answered 4,748 symbols across 442 files and 323 tests — most of the suite. The
+// cause is granularity, not traversal: the caller walk seeded from EVERY symbol of every changed file, so one
+// edited function in a shared monolith file dragged in every caller of every other function in it. The walk
+// was never wrong; it was faithfully answering a question nobody asked.
+//
+// THE RULE. When git hunk evidence exists (working tree vs HEAD, diff --unified=0 — diffhunks.h's ONE-spawn
+// whole-tree form), a symbol is IN the change set when a hunk's NEW-side range overlaps the symbol's
+// working-tree span [line, line+loc-1]. Only BODY-BEARING symbols locate a hunk — Function and Method:
+// an edit inside one propagates to its CALLERS, which the name-based graph models. Every other kind
+// (Var/Field/Macro/Section/Class/Struct/Interface/ModuleScope/Other) does NOT locate: an edit to a
+// declaration, constant, macro or class body propagates to its READERS and instantiators, which a call graph
+// never models, so pretending to locate one would trade the tool's known blind spot for a silent miss.
+//
+// THE FALLBACK IS PER-FILE AND CONSERVATIVE — one unlocatable hunk returns its WHOLE FILE to the
+// file-granular treatment this verb has always had:
+//   * a hunk no body-bearing span overlaps  — a module-level statement, an import, a decorator line the
+//     extractor's span does not cover, a class-body attribute default;
+//   * newCount==0 — a DELETION. The removed symbol has no working-tree span to be located in, and its
+//     callers are precisely the ones that break;
+//   * no hunks for the file at all — a pure rename, a file the diff and the mask builder disagree about,
+//     or git degraded (diffhunks.h's contract: degrade-only, empty = "no evidence", never "no change");
+//   * a hunk only PARTLY inside body spans — one that also covers module-level lines (a statement right
+//     below a function, a file-wide CRLF rewrite). Located means every non-blank new-side line sits inside a
+//     body-bearing span; the module-level remainder seeds the file (maintainer round, CodeRabbit on #423);
+//   * a hunk inside a member that callers reach through its CLASS — a constructor, destructor, dunder
+//     (`__init__`, `__enter__`), initializer, or a property/getter/setter. Nobody calls `__init__` by name, so
+//     seeding it walks zero callers and the gate would go green on an edit every user of the class feels.
+//     The honest answer is the file-level one (maintainer round, owner-chosen: fall back, never guess a class).
+// An EXPLICIT file list (`--situ=F`, `--test-gate=F`, the MCP `diff` argument) is never narrowed at all: the
+// caller named FILES, and a working-tree hunk elsewhere in them says nothing about which symbols they meant.
+// In every direction the failure mode is the OLD answer (a superset), never a narrower wrong one, and the
+// report names which treatment applied — the honesty contract: a narrower answer must say what narrowed it.
+//
+// DETERMINISM: one git spawn; files visited in ascending fileId order; symbols marked through a mask and
+// collected in ascending NodeId order; the HashMap bind only ever answers "which file does this diff path
+// name" through gitmine.h's forEachBoundGitPath — the ONE join the numstat mask builder itself uses, so the
+// hunks and the changed-file mask can never disagree about a path.
+
+// Members whose callers reach the CLASS, not the member by name — the constructor spellings of every language
+// the extractor indexes (Python `__init__`/`__new__`/`__post_init__`, PHP `__construct`, JS/TS `constructor`,
+// Swift `init`/`deinit`, Ruby `initialize`); C++/Java/C# constructors are the owner's own name, tested below.
+// Rust `new` and Go `NewT` are ordinary named functions that callers do name (measured), so they stay out.
+inline constexpr std::string_view kClassEntryNames[] = { "__construct", "__destruct", "__init__", "__new__", "__post_init__",
+                                                         "constructor", "deinit", "init", "initialize" };
+static_assert( std::ranges::is_sorted( kClassEntryNames, rw::sortutil::svLess ), "kClassEntryNames is binary-searched: keep it sorted" );
+
+// Is `s` entered through its class by NAME alone: a constructor/destructor/initializer spelling, any other
+// Python dunder (`__enter__`, `__eq__`: invoked by a protocol, never by name — quality.h's dead-code note), or a
+// member spelled as its owner (C++ `Widget::Widget`, Java/C# `Widget`, destructor `~Widget`).
+inline bool isClassEntryByName( const Symbol& s ) noexcept
+{
+    const std::string_view n = s.name;
+    if( n.empty() ) { return false; }
+    if( std::ranges::binary_search( kClassEntryNames, n, rw::sortutil::svLess ) || n.front() == '~' ) { return true; }
+    if( n.size() > 4 && n.starts_with( "__" ) && n.ends_with( "__" ) ) { return true; }
+    return !s.scope.empty() && n == scopeLastSegment( s.scope );
+}
+
+// One file's working-tree bytes, read at most once per run and only when a hunk needs them (coverage gaps,
+// accessor decorators): the common narrowed edit never touches the disk beyond the index.
+struct HunkSourceText
+{
+    const IngestResult& ing;
+    std::uint32_t       fileId;
+    std::string         scratch;
+    const std::string*  text  = nullptr;
+    std::vector<std::size_t> lineStart;   // byte offset of each 1-based line (index 0 = line 1)
+
+    HunkSourceText( const IngestResult& i, std::uint32_t f ) : ing( i ), fileId( f ) {}
+    const std::string& bytes()
+    {
+        if( !text )
+        {
+            text = lexicalScanText( ing, fileId, scratch );
+            lineStart.push_back( 0 );
+            for( std::size_t i = 0; i < text->size(); ++i )
+            {
+                if( ( *text )[i] == '\n' ) { lineStart.push_back( i + 1 ); }
+            }
+        }
+        return *text;
+    }
+    // the text of 1-based `line` without its newline; empty view when out of range or unreadable
+    std::string_view line( std::uint32_t n )
+    {
+        const std::string& t = bytes();
+        if( n == 0 || n > lineStart.size() ) { return {}; }
+        const std::size_t a = lineStart[n - 1];
+        const std::size_t b = n < lineStart.size() ? lineStart[n] - 1 : t.size();
+        return a <= b && b <= t.size() ? std::string_view( t ).substr( a, b - a ) : std::string_view();
+    }
+};
+
+// A property / getter / setter, read off the declaration's own text (the extractor keeps no flag for it), by two
+// language-neutral probes that cost nothing where they do not apply (a miss only means "narrow", a false hit only
+// means "fall back"): a decorator line at or directly above the symbol that names `property` / `.setter` / `.getter` /
+// `.deleter` (Python's `@property` family), and a `get` / `set` keyword right before the member's name on its line
+// (JS/TS accessors). Callers read these as attributes, so the call graph has no edge to the member.
+inline bool isAccessorDeclaration( const Symbol& s, HunkSourceText& src )
+{
+    if( s.kind != SymKind::Method && s.scope.empty() ) { return false; }   // a member: the extractor files some class members as Function with the class as scope
+    const auto isDecorator = [ & ]( std::uint32_t ln ) { const std::string_view t = trimWs( src.line( ln ) ); return !t.empty() && t.front() == '@'; };
+    const auto namesAccessor = [ & ]( std::uint32_t ln )
+    {
+        const std::string_view t = trimWs( src.line( ln ) );
+        return t.find( "property" ) != std::string_view::npos || t.find( ".setter" ) != std::string_view::npos
+            || t.find( ".getter" ) != std::string_view::npos || t.find( ".deleter" ) != std::string_view::npos;
+    };
+    // The symbol's line is its `def` — or, when the extractor starts a decorated def at its first decorator, a
+    // decorator line itself. Either way the decorator run is the contiguous `@` lines around that line.
+    for( std::uint32_t k = 1; k < 8 && k < s.line && isDecorator( s.line - k ); ++k )
+    {
+        if( namesAccessor( s.line - k ) ) { return true; }
+    }
+    for( std::uint32_t ln = s.line; ln < s.line + 8 && isDecorator( ln ); ++ln )
+    {
+        if( namesAccessor( ln ) ) { return true; }
+    }
+    const std::string_view ln  = src.line( s.line );
+    const std::size_t      pos = ln.find( s.name );
+    if( pos == std::string_view::npos ) { return false; }
+    const std::string_view before = trimWs( ln.substr( 0, pos ) );
+    for( const std::string_view kw : { std::string_view( "get" ), std::string_view( "set" ) } )
+    {
+        if( before.ends_with( kw ) && ( before.size() == kw.size() || before[before.size() - kw.size() - 1] == ' ' ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Is every NON-BLANK new-side line of the hunk [hStart, hEnd] inside one of `spans` (sorted by start, the
+// overlapping body spans already clipped to the hunk)? A gap of blank lines (the separator between two functions
+// a hunk straddles) is covered; a gap holding any other line is module-level text the narrowing must not drop.
+inline bool hunkFullyInBodies( const std::vector<std::pair<std::uint32_t, std::uint32_t>>& spans, std::uint32_t hStart,
+                               std::uint32_t hEnd, HunkSourceText& src )
+{
+    std::uint32_t next = hStart;   // first line not yet accounted for
+    const auto    gapIsBlank = [ & ]( std::uint32_t a, std::uint32_t b )
+    {
+        for( std::uint32_t ln = a; ln <= b; ++ln )
+        {
+            if( !trimWs( src.line( ln ) ).empty() ) { return false; }
+        }
+        return true;
+    };
+    for( const auto& [ a, b ] : spans )
+    {
+        if( a > next && !gapIsBlank( next, a - 1 ) ) { return false; }
+        next = std::max( next, b + 1 );
+    }
+    return next > hEnd || gapIsBlank( next, hEnd );
+}
+
+struct SymbolChangeSet
+{
+    std::vector<NodeId> changedSyms;         // ascending NodeId — the caller walk's seeds
+    std::vector<char>   symMask;             // parallel to ing.symbols, 1 = seed
+    std::size_t         fileSymbols       = 0;   // every symbol of every changed file (the file-granular count)
+    std::size_t         hunksTotal        = 0;   // hunks the diff held for the changed files
+    std::size_t         hunksLocated      = 0;   // of those, the ones inside a body-bearing symbol's span
+    std::size_t         hunksUnlocated    = 0;   // of those, the ones that forced a file back to file-granular
+    std::size_t         filesNarrowed     = 0;   // changed files seeded from their located symbols only
+    std::size_t         filesFileGranular = 0;   // changed files kept whole (fallback / no evidence)
+    bool                evidence          = false;   // the whole-tree hunk spawn succeeded
+};
+
+// granularity=symbol when every changed file narrowed, =file when none did, =mixed in between. The label is
+// the report's one-word answer to "how much did the hunk evidence decide this change set".
+inline const char* changeGranularityLabel( std::size_t narrowed, std::size_t fileGranular ) noexcept
+{
+    if( narrowed && !fileGranular ) { return "symbol"; }
+    if( !narrowed )                 { return "file"; }
+    return "mixed";
+}
+
+// One changed file's hunks located against its symbols. `mark` is parallel to the file's symbol list.
+struct FileHunkLocation
+{
+    std::vector<char> mark;
+    std::size_t       located   = 0;
+    std::size_t       unlocated = 0;
+};
+
+// A hunk is LOCATED when it (1) lies wholly inside body-bearing spans (hunkFullyInBodies), and (2) touches no
+// member callers reach through its class (isClassEntryByName / isAccessorDeclaration). Anything else is
+// unlocated and returns the whole file to the file-granular treatment. EVERY overlapping body-bearing symbol,
+// inner and enclosing, is marked: a nested def's edit changes its outer function too.
+inline FileHunkLocation locateHunksInFile( const IngestResult& ing, std::uint32_t fileId, const std::vector<NodeId>& syms,
+                                           const std::vector<DiffHunk>& hunks )
+{
+    FileHunkLocation out;
+    out.mark.assign( syms.size(), 0 );
+    HunkSourceText src( ing, fileId );   // bytes read lazily: only a gap check or an accessor probe pays for them
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> spans;
+    for( const DiffHunk& h : hunks )
+    {
+        if( h.newCount == 0 )
+        {
+            ++out.unlocated;   // deletion: nothing on the NEW side to locate in — the removed symbol's callers are exactly the risk
+            continue;
+        }
+        const std::uint32_t hStart = h.newStart;
+        const std::uint32_t hEnd   = h.newStart + h.newCount - 1;
+        spans.clear();
+        bool viaClass = false;
+        for( std::size_t idx = 0; idx < syms.size(); ++idx )
+        {
+            const Symbol& s = ing.symbols[ syms[idx] ];
+            if( !ReceiverEvidence::callableKind( s.kind ) || s.line == 0 )   // body-bearing: function or method — the one test (receiverevidence.h)
+            {
+                continue;
+            }
+            const std::uint32_t sEnd = s.line + ( s.loc > 0 ? s.loc - 1 : 0 );
+            if( s.line <= hEnd && hStart <= sEnd )
+            {
+                out.mark[idx] = 1;
+                spans.emplace_back( std::max( s.line, hStart ), std::min( sEnd, hEnd ) );
+                viaClass = viaClass || isClassEntryByName( s ) || isAccessorDeclaration( s, src );
+            }
+        }
+        std::sort( spans.begin(), spans.end() );
+        if( !spans.empty() && !viaClass && hunkFullyInBodies( spans, hStart, hEnd, src ) ) { ++out.located; } else { ++out.unlocated; }
+    }
+    return out;
+}
+
+inline SymbolChangeSet computeSymbolChangeSet( const std::string& root, const IngestResult& ing,
+                                               const std::vector<char>& changedFile,
+                                               std::uint32_t onlyRoot = UINT32_MAX,   // multi-root §5: bind this root's diff paths only
+                                               bool narrow = true )   // false for an EXPLICIT file list: no spawn, every changed file stays whole
+{
+    SymbolChangeSet     out;
+    const std::uint32_t N = std::uint32_t( ing.symbols.size() );
+    out.symMask.assign( N, 0 );
+
+    std::vector<std::uint32_t> changedFiles;
+    for( std::uint32_t f = 0; f < std::uint32_t( ing.files.size() ) && f < changedFile.size(); ++f )
+    {
+        if( changedFile[f] )
+        {
+            changedFiles.push_back( f );
+        }
+    }
+    if( changedFiles.empty() )
+    {
+        return out;
+    }
+
+    // the changed files' symbols, bucketed per file (one pass, NodeId-ascending within each bucket)
+    std::vector<std::vector<NodeId>> symsByFile( ing.files.size() );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        const std::uint32_t f = ing.symbols[i].fileId;
+        if( f < changedFile.size() && changedFile[f] )
+        {
+            symsByFile[f].push_back( i );
+            ++out.fileSymbols;
+        }
+    }
+
+    // ONE spawn for the whole working tree, bound to fileIds through the mask builder's own join. An explicit
+    // file list skips it (`narrow` false): `all` stays empty and `evidence` false, so every file is kept whole.
+    const HunkDiffAll all = narrow ? gitDiffHunksAllVsHead( root ) : HunkDiffAll{};
+    out.evidence          = all.ok;
+    HashMap<std::uint32_t, const std::vector<DiffHunk>*> hunksByFile;
+    if( all.ok && !all.byPath.empty() )
+    {
+        // GENERIC lambda, deliberately (the mapChurnCountsOntoFiles pattern): unordered_dense's value_type is
+        // pair<Key, Value> with a NON-const key, so a concrete pair<const string, …> parameter would bind
+        // through a per-entry TEMPORARY — and the stored &entry.second would dangle the moment the callback
+        // returned. `const auto&` binds the map's own value; all.byPath outlives every use below and receives
+        // no further inserts, so the pointers stay put.
+        forEachBoundGitPath( all.byPath, ing, onlyRoot,
+                             [ & ]( std::uint32_t fileId, const auto& entry )
+                             { hunksByFile.emplace( fileId, &entry.second ); } );   // first binding wins; the join is one-file-per-path by construction
+    }
+
+    for( const std::uint32_t f : changedFiles )
+    {
+        const auto                          hit   = hunksByFile.find( f );
+        const std::vector<DiffHunk>* const  hunks = hit != hunksByFile.end() ? hit->second : nullptr;
+        bool                                narrowed = false;
+        if( hunks && !hunks->empty() )
+        {
+            out.hunksTotal += hunks->size();
+            const FileHunkLocation loc = locateHunksInFile( ing, f, symsByFile[f], *hunks );
+            out.hunksLocated += loc.located;
+            out.hunksUnlocated += loc.unlocated;
+            if( loc.unlocated == 0 )
+            {
+                narrowed = true;   // every hunk located ⇒ at least one symbol marked, by construction of locateHunksInFile
+                for( std::size_t idx = 0; idx < symsByFile[f].size(); ++idx )
+                {
+                    if( loc.mark[idx] )
+                    {
+                        out.symMask[ symsByFile[f][idx] ] = 1;
+                    }
+                }
+                ++out.filesNarrowed;
+            }
+        }
+        if( !narrowed )
+        {
+            for( const NodeId i : symsByFile[f] )
+            {
+                out.symMask[i] = 1;
+            }
+            ++out.filesFileGranular;
+        }
+    }
+
+    out.changedSyms.reserve( out.fileSymbols );
+    for( NodeId i = 0; i < N; ++i )
+    {
+        if( out.symMask[i] )
+        {
+            out.changedSyms.push_back( i );
+        }
+    }
+    return out;
+}
+
 // Section [1]'s decl/def rows and section [3]'s empty-co-change line, as their own emitters: writeSituation
 // is already this file's largest function and the quality bar counts what a caller ADDS to it, so a fact that
 // is nameable gets a name. `pathRel` is the caller's own root-relative spelling, passed in rather than
@@ -642,7 +973,6 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
                             SituPageArgs page = {} )   // C1 F-10: sections [1] and [3] page; section [2] is the answer and never does
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
-    const std::uint32_t N = std::uint32_t( ing.symbols.size() );
 
     // R-E (2026-08-17 harvest): same single-root condition every other verb's root= uses (sarif.h) — this is
     // plain text, not XML/JSON, so there is no attribute to carry root= on; the disclosure is instead the
@@ -669,16 +999,14 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
             ++nChanged;
         }
     }
-    std::vector<NodeId> changedSyms;
-    for( NodeId i = 0; i < N; ++i )
-    {
-        if( changedFile[ing.symbols[i].fileId] )
-        {
-            changedSyms.push_back( i );
-        }
-    }
+    // THE SYMBOL-GRANULAR CHANGE SET (computeSymbolChangeSet above): the seeds are the symbols the diff
+    // actually touched when hunk evidence locates them, else — per file, conservatively — every symbol of the
+    // file, which is exactly the pre-narrowing set. ONE implementation, shared with computeSituationFacts,
+    // so this report and its MCP twin cannot disagree about what "the change" is.
+    const SymbolChangeSet         scs         = computeSymbolChangeSet( root, ing, changedFile, onlyRoot, page.selector.empty() );   // a named --situ=FILES list is never narrowed
+    const std::vector<NodeId>&    changedSyms = scs.changedSyms;
 
-    rw::emitTo( out, "ripwire situational-awareness — {} changed file(s), {} symbols in them\n", nChanged, changedSyms.size() );
+    rw::emitTo( out, "ripwire situational-awareness — {} changed file(s), {} symbols in them\n", nChanged, scs.fileSymbols );
     if( situSingleRoot )
     {
         rw::emitTo( out, "root: {}\n", root.c_str() );
@@ -709,6 +1037,18 @@ inline void writeSituation( std::FILE* out, const std::string& root, const Inges
         }
         return;
     }
+
+    // THE GRANULARITY DISCLOSURE — the honesty half of the narrowing above: a narrower answer must say what
+    // narrowed it, and a fallback must say the superset is back. granularity= reads as one word (symbol /
+    // file / mixed, changeGranularityLabel); the counts audit it; evidence=0 rides ONLY when no hunk evidence
+    // was used — the spawn failed, or an explicit FILES list (never narrowed) skipped it (the attribute⇒clause convention the floor line's graph_unindexed= uses). Every number
+    // here is exact — a zero is "none found" (no hunks located) never "none exists" (the diff held none).
+    rw::emitTo( out, "  change_set: granularity={} changed_symbols={} file_symbols={} files_narrowed={} files_file_granular={} diff_hunks={} diff_hunks_located={} diff_hunks_unlocated={}{}"
+                     " — seeds = symbols a diff -U0-vs-HEAD hunk overlaps (function/method body spans only); "
+                     "an unlocated hunk (module-level, deletion, rename) returns its file to file-granular\n",
+                   changeGranularityLabel( scs.filesNarrowed, scs.filesFileGranular ), scs.changedSyms.size(), scs.fileSymbols,
+                   scs.filesNarrowed, scs.filesFileGranular, scs.hunksTotal, scs.hunksLocated, scs.hunksUnlocated,
+                   scs.evidence ? "" : " evidence=0" );
 
     // (1) blast radius — transitive callers (everything that reaches the changed symbols), per non-changed file
     std::vector<std::uint32_t> situDepth;   // H2H-Graft F1: the SAME walk, keeping hops for the [2] rows
@@ -931,10 +1271,21 @@ struct SituationFacts
     bool                                          shallow = false; // 0.6.7: the root is a depth-limited clone — coCommits and hotspots' churn count only the fetched commits
     std::vector<std::pair<std::uint32_t, std::uint64_t>> hotspots; // (changed file, cx×churn score) for high-risk changed files (score desc, path asc)
     std::vector<std::string>                      modulesTouched; // distinct TOP-LEVEL directory of each changed file (sorted)
+    // THE SYMBOL-GRANULAR CHANGE SET's own facts (situ.h computeSymbolChangeSet) — carried on the FACTS, not
+    // re-derived per surface, so the CLI report's change_set: line, this verb's JSON keys and --handoff
+    // cannot disclose the narrowing three ways or two of them forget it. Same convention as coWindow/coCommits.
+    std::size_t                                   changedSymbolCount = 0;   // the seeds the walks actually used (post-narrowing)
+    std::size_t                                   fileSymbolCount    = 0;   // every symbol of every changed file (the file-granular count)
+    std::size_t                                   hunksTotal         = 0;
+    std::size_t                                   hunksLocated       = 0;
+    std::size_t                                   hunksUnlocated     = 0;
+    std::size_t                                   filesNarrowed      = 0;
+    std::size_t                                   filesFileGranular  = 0;
+    bool                                          hunkEvidence       = false;   // the whole-tree hunk spawn succeeded
 };
 
 inline SituationFacts computeSituationFacts( const std::string& root, const IngestResult& ing, const Graph& g,
-                                             const std::vector<char>& changedFile )
+                                             const std::vector<char>& changedFile, bool narrowByDiff = true )   // false: the mask is an explicit file list
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
     const std::uint32_t N = std::uint32_t( ing.symbols.size() );
@@ -949,13 +1300,18 @@ inline SituationFacts computeSituationFacts( const std::string& root, const Inge
     }
 
     std::vector<NodeId> changedSyms;
-    for( NodeId i = 0; i < N; ++i )
-    {
-        if( changedFile[ing.symbols[i].fileId] )
-        {
-            changedSyms.push_back( i );
-        }
-    }
+    // The SAME symbol-granular change set the CLI report walks (writeSituation) — one implementation, both
+    // arms, so the MCP payload and the text report can never seed their blast radii from different sets.
+    const SymbolChangeSet scs = computeSymbolChangeSet( root, ing, changedFile, UINT32_MAX, narrowByDiff );
+    changedSyms               = scs.changedSyms;
+    facts.changedSymbolCount  = scs.changedSyms.size();
+    facts.fileSymbolCount     = scs.fileSymbols;
+    facts.hunksTotal          = scs.hunksTotal;
+    facts.hunksLocated        = scs.hunksLocated;
+    facts.hunksUnlocated      = scs.hunksUnlocated;
+    facts.filesNarrowed       = scs.filesNarrowed;
+    facts.filesFileGranular   = scs.filesFileGranular;
+    facts.hunkEvidence        = scs.evidence;
 
     // (1) blast radius — files (non-changed) with ≥1 symbol transitively reaching the changed set, ranked by
     //     dependent-symbol count then path. (2) tests — the test files among them, in EVIDENCE order (F1).
@@ -1104,6 +1460,13 @@ struct TestGateResult
     // Declined calls (graph.h declinedCallsNaming) that could have reached a changed symbol or one in its radius: callers
     // the radius above could not walk, so a test behind one of them is in no row. declined_calls=, absent at zero.
     std::size_t                declinedCalls    = 0;
+    // THE SYMBOL-GRANULAR CHANGE SET this gate's obligations seeded from (computeSymbolChangeSet) — carried on
+    // the RESULT so both report dialects disclose the SAME facts (the --situ twin's change_set: line reads
+    // these same numbers), and so a zero-evidence run (clean tree, explicit selector on clean files) is
+    // byte-identical to the pre-narrowing report: hunksTotal==0 && filesNarrowed==0 suppresses every new
+    // attribute and legend clause. Default-constructed for the callers that do not narrow (--plan-lanes'
+    // per-symbol claims), whose reports therefore carry none of it — a lane's claim set is not a git diff.
+    SymbolChangeSet            changeSet;
     bool                       hasObligations  = false; // !tests.empty() || !untested.empty()
 };
 
@@ -1200,13 +1563,19 @@ inline TestGateResult computeTestGateFor( const IngestResult& ing, const Graph& 
     return r;
 }
 
-// The changed-FILE form — every pre-existing caller (--test-gate, --affected, the MCP test_gate verb). A file
-// mask marks EVERY symbol of every changed file as "the change", which is what this function's own inline loop
-// did before it was expressed over computeTestGateFor, so its output is byte-identical.
-inline TestGateResult computeTestGate( const IngestResult& ing, const Graph& g, const std::vector<char>& changedFile )
+// The changed-FILE form — the CLI --test-gate dispatch (verbs_change.h; the comment's old "--affected, the MCP
+// test_gate verb" callers are long gone — grep says this function has exactly ONE call site). The file mask
+// still decides changed= (a docs-only changed file with no symbols still counts, exactly as before), but the
+// SEEDS now come through computeSymbolChangeSet — the SAME symbol-granular change set --situ walks, so the
+// two siblings can never disagree about one dirty tree (an agent reading --situ's 56 tests and the gate's
+// 323 obligations has no way to know which is the answer). Takes `root` for that one git spawn. When no hunk
+// evidence exists for a file — clean selector runs, renames, deletions, module-level edits — its treatment is
+// byte-identical to the pre-narrowing file-granular set; the disclosure attributes ride only when evidence
+// shaped the answer (testGateHunkShaped).
+inline TestGateResult computeTestGate( const std::string& root, const IngestResult& ing, const Graph& g, const std::vector<char>& changedFile,
+                                       bool narrowByDiff = true )   // false: `changedFile` is an explicit --test-gate=FILES list, kept whole
 {
     const std::uint32_t F = std::uint32_t( ing.files.size() );
-    const std::uint32_t N = std::uint32_t( ing.symbols.size() );
 
     std::uint32_t changedFileCount = 0;
     for( std::uint32_t f = 0; f < F; ++f )
@@ -1217,21 +1586,63 @@ inline TestGateResult computeTestGate( const IngestResult& ing, const Graph& g, 
         }
     }
 
-    std::vector<char>   isChangedSym( N, 0 );
-    std::vector<NodeId> changedSyms;
-    for( NodeId i = 0; i < N; ++i )
-    {
-        if( changedFile[ing.symbols[i].fileId] )
-        {
-            isChangedSym[i] = 1;
-            changedSyms.push_back( i );
-        }
-    }
+    const SymbolChangeSet scs = computeSymbolChangeSet( root, ing, changedFile, UINT32_MAX, narrowByDiff );
 
-    TestGateResult result = computeTestGateFor( ing, g, changedSyms, isChangedSym, changedFileCount, nullptr );
+    TestGateResult result = computeTestGateFor( ing, g, scs.changedSyms, scs.symMask, changedFileCount, nullptr );
+    result.changeSet  = scs;
     result.shellGates = buildShellGateIndex( ing, changedFile );
     result.hasObligations = result.hasObligations || !result.shellGates.obligations.empty();
     return result;
+}
+
+// Did hunk evidence shape this gate's change set? THE ONE predicate every emitter consults before spending a
+// byte on the narrowing disclosure — attributes, JSON keys and both legend clauses ride together or not at
+// all, so a document can never carry an attribute its legend does not define (legendcoveragecheck's class)
+// and a zero-evidence run stays byte-identical to the pre-narrowing report.
+inline bool testGateHunkShaped( const TestGateResult& r ) noexcept
+{
+    return r.changeSet.hunksTotal > 0 || r.changeSet.filesNarrowed > 0;
+}
+
+// The narrowing's root attributes, ONE builder for the XML dialect; "" when no evidence shaped the change set
+// (the attribute⇒clause convention: absent means "this gate never consulted a diff", present means the reads
+// in the legend clause below). Spelled diff_hunks* — NOT hunks= — because naming-calibration's root already
+// carries hunks= with a different unit (§P8's same-spelling-different-meaning class: a NEW attribute gets a
+// NEW name rather than joining the collision table).
+inline std::string testGateGranularityAttrXml( const TestGateResult& r )
+{
+    if( !testGateHunkShaped( r ) )
+    {
+        return {};
+    }
+    const SymbolChangeSet& s = r.changeSet;
+    return " change_granularity=\"" + std::string( changeGranularityLabel( s.filesNarrowed, s.filesFileGranular ) )
+         + "\" changed_symbols=\"" + std::to_string( s.changedSyms.size() )
+         + "\" file_symbols=\"" + std::to_string( s.fileSymbols )
+         + "\" files_narrowed=\"" + std::to_string( s.filesNarrowed )
+         + "\" files_file_granular=\"" + std::to_string( s.filesFileGranular )
+         + "\" diff_hunks=\"" + std::to_string( s.hunksTotal )
+         + "\" diff_hunks_located=\"" + std::to_string( s.hunksLocated )
+         + "\" diff_hunks_unlocated=\"" + std::to_string( s.hunksUnlocated ) + "\"";
+}
+
+// The JSON twin's keys — same facts, same names, same gate (jsonparitycheck's class: the two dialects of one
+// report cannot carry different vocabularies).
+inline std::string testGateGranularityJson( const TestGateResult& r )
+{
+    if( !testGateHunkShaped( r ) )
+    {
+        return {};
+    }
+    const SymbolChangeSet& s = r.changeSet;
+    return ",\"change_granularity\":\"" + std::string( changeGranularityLabel( s.filesNarrowed, s.filesFileGranular ) )
+         + "\",\"changed_symbols\":" + std::to_string( s.changedSyms.size() )
+         + ",\"file_symbols\":" + std::to_string( s.fileSymbols )
+         + ",\"files_narrowed\":" + std::to_string( s.filesNarrowed )
+         + ",\"files_file_granular\":" + std::to_string( s.filesFileGranular )
+         + ",\"diff_hunks\":" + std::to_string( s.hunksTotal )
+         + ",\"diff_hunks_located\":" + std::to_string( s.hunksLocated )
+         + ",\"diff_hunks_unlocated\":" + std::to_string( s.hunksUnlocated );
 }
 
 // The changed-SYMBOL form (§7.4a). `changedSyms` need not be sorted or unique; the mask is
@@ -1316,6 +1727,20 @@ inline constexpr const char* kUntestedModscopeLegend =
 inline constexpr const char* kUntestedModscopeZeroLegend =
     "untested_modscope=0: no <file-scope> owner excluded from untested= (#324). ";
 inline const char* untestedModscopeLegend( bool on ) noexcept { return on ? kUntestedModscopeLegend : kUntestedModscopeZeroLegend; }
+
+// The change-set narrowing's FULL-legend clause — gated on the attributes being present (testGateHunkShaped),
+// the untested_modscope pattern: a document no git-diff evidence shaped pays none of these bytes, which is
+// what keeps testgatelegendbudgetcheck's clean-model.h-selector fixture and donelegendcheck's tg_empty
+// ratchet untouched. The compact dialect's readings live in compactlegend.h's test-gate vocabulary (the
+// present-only completeness layer assembles them from the same attributes); this clause is the --legend=full
+// half of the same one-definition rule (legendcoveragecheck: no attribute without a reading where it is met).
+inline constexpr const char* kTestGateGranularityLegend =
+    "change_granularity=: how the change set seeded — symbol = only the symbols a git hunk (diff -U0 vs HEAD) "
+    "locates inside a function/method body; file = whole changed files (a hunk no body span contains — "
+    "module-level, deletion, rename — returns its file to file-granular); mixed = both. changed_symbols=/"
+    "file_symbols=: the seeds vs all symbols of the changed files. files_narrowed=/files_file_granular=: "
+    "files under each treatment. diff_hunks=/diff_hunks_located=/diff_hunks_unlocated=: the hunk tally; an "
+    "unlocated hunk is WHY a file went file-granular. ";
 
 inline constexpr const char* kTestGateLegend =
     "ripwire test-gate (TDAD-parity, arXiv 2603.17973, -70% agent-caused regressions): tests to run for this "
@@ -1429,11 +1854,12 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     // on here. (It remains a legitimate CALLER row elsewhere — --callers/--impact/--for still carry
     // rw::modScopeLegend for their own t="modscope" rows; this document has none of those, only <u> rows.)
     const std::string tgRunFirst = runFirstField( r.testRows, testRows, /*json=*/false );   // hono-20/textual-20: the run-first head
-    rw::emitTo( out, "<!-- {}{}{}{}{}{}{}-->{}", kTestGateLegend,
+    rw::emitTo( out, "<!-- {}{}{}{}{}{}{}{}-->{}", kTestGateLegend,
                   tgHasRows ? kTestGateRowLegend : "", std::string_view( kTestRowEvidenceLegend.data(), tgHasRows ? int( kTestRowEvidenceLegend.size() ) : 0 ),
                   runFirstLegend( !tgRunFirst.empty() ),   // exactly when the root carries run_first=
                   runHintClauseIfRows( testRows, runsAreRootRelative( ing, root ) ),   // the ONE gate: this clause is about <t> rows, so an untested-only report pays nothing
                   untestedModscopeLegend( r.untestedModscope > 0 ),   // F3: the full clause at N>0, a one-line definition at 0
+                  testGateHunkShaped( r ) ? kTestGateGranularityLegend : "",   // the change-set narrowing, defined exactly when its attributes ride
                   ( std::string( rw::graphUnindexedLegend( rw::graphGaugeClauses( g ) ) )   // #66: exactly when the root carries the attribute
                     + ( r.declinedCalls > 0 ? rw::kDeclinedCallsTestGateLegend : "" )                               // exactly when it carries declined_calls=
                     + rw::declinedCallsGateLegend( r.declinedCalls > 0 && g.gateDeclinedCalls > 0 ) ).c_str(),   // the short form above makes no
@@ -1452,7 +1878,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
     rw::emitTo( out, "<test-gate changed=\"{}\" impacted=\"{}\" tests=\"{}\" untested=\"{}\" untested_modscope=\"{}\""
                        " shown_tests=\"{}\" tests_capped=\"{}\" shown_untested=\"{}\" untested_capped=\"{}\""
                        " script_gates_unmodelled=\"{}\" script_gates_registered=\"{}\" script_gates_mapped=\"{}\""
-                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}{}>",
+                       " script_gates_unresolved_dynamic=\"{}\" ccx_bar=\"{}\"{}{}{}{}{}{}{}{}>",
                   r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                   shownTests, shownTests < testRows ? 1 : 0, shownRows, shownRows < r.untested.size() ? 1 : 0,
                   scriptGatesUnmodelledCount( ing ),
@@ -1462,6 +1888,7 @@ inline void writeTestGateReport( std::FILE* out, const IngestResult& ing, const 
                   pagingDisclosure( uab, sizeof( uab ), r.untested.size(), uw.end, pageLimit, pageOffset ),
                   gitstamp::atAttr( root ).c_str(), tgRootAttr.c_str(),
                   declinedCallsAttrXml( r.declinedCalls ).c_str(),   // callers the radius could not walk; absent at zero
+                  testGateGranularityAttrXml( r ).c_str(),   // the symbol-granular change set; absent without hunk evidence
                   nextAttrXml( testGateNextInvocation( ing, r, gateRunners ) ).c_str()  );   // P3 (L7)
     rw::emitRaw( out, testRowsJoined( gateRunners, evidenceRowsOut( r.testRows, EvDialect::Xml, tgPathRel ), TestRowShape{ RowDialect::Xml, "t" }, ex ).c_str() );   // E1: <g> where no runner is derivable
     for( const ShellGateObligation& gate : r.shellGates.obligations )
@@ -1522,14 +1949,16 @@ inline void writeTestGateReportJson( std::FILE* out, const IngestResult& ing, co
     rw::emitTo( out, "{{\"changed\":{},\"impacted\":{},\"tests\":{},\"untested\":{},\"untested_modscope\":{}"
                        ",\"shown_tests\":{},\"tests_capped\":{},\"shown_untested\":{},\"untested_capped\":{}"
                        ",\"script_gates_unmodelled\":{},\"script_gates_registered\":{},\"script_gates_mapped\":{}"
-                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{}{},\"at\":{}{}{}{},\"tests_to_run\":[",
+                       ",\"script_gates_unresolved_dynamic\":{},\"ccx_bar\":{}{}{}{}{},\"at\":{}{}{}{},\"tests_to_run\":[",
                  r.changedFiles, r.impactedSymbols, testRows, r.untested.size(), r.untestedModscope,
                  shownTestsJ, shownTestsJ < testRows ? "true" : "false", shownRows,
                  shownRows < r.untested.size() ? "true" : "false",
                  scriptGatesUnmodelledCount( ing ), r.shellGates.registered, r.shellGates.mapped, r.shellGates.unresolvedDynamic, kTestGateCcxBarMirror,
                  runFirstField( r.testRows, testRows, /*json=*/true ).c_str(),   // the XML twin's run_first=
                  graphCountFloorAttrJson( g ).c_str(),   // M15: the JSON twin's gauge + "counts_floor":true
-                 rw::cstr( pageJson ), atJson.c_str(), tgJRootJson.c_str(),   // M12: root= rides only when the document has rows (same gate as the XML twin)
+                 rw::cstr( pageJson ),
+                 testGateGranularityJson( r ).c_str(),   // the XML twin's change_granularity= family, key-for-key
+                 atJson.c_str(), tgJRootJson.c_str(),   // M12: root= rides only when the document has rows (same gate as the XML twin)
                  declinedCallsKeyJson( r.declinedCalls ).c_str(),                // the XML twin's declined_calls=
                  nextFieldJson( testGateNextInvocation( ing, r, gateRunnersJ ) ).c_str()  );   // P3 (L7): the XML twin's next=
     const TestRunnerIndex gateRunners( ing, root );                       // §P11.4, the JSON sibling of the XML run=

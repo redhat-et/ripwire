@@ -326,7 +326,8 @@ callees(){ # dir name tag
     return 0
 }
 has_row(){ grep -qF -- "n=\"$2\" p=\"$3\"" "$DIR/$1.rows"; }
-no_op_row(){ ! grep -qE -- 'n="(\[\]|\[\]=|__getitem__|__setitem__)"' "$DIR/$1.rows"; }
+# QUALNAME-1: a member row prints Owner.name / Owner#name, so the negative rejects the bare AND any Owner-qualified spelling
+no_op_row(){ ! grep -qE -- 'n="([^"]*[.#:])?(\[\]|\[\]=|__getitem__|__setitem__)"' "$DIR/$1.rows"; }
 
 echo "== Ruby: an element access is a call of the receiver class's []/[]= where a rule proves the class"
 pos_rb(){ # name tag op line what
@@ -335,13 +336,13 @@ pos_rb(){ # name tag op line what
         else no "R $5: $1 should call $3 at registry.rb:$4 with no via=: $( tr '\n' ' ' < "$DIR/$2.rows" )"; fi
     fi
 }
-pos_rb find_self  r1 '[]'  "$RGET" "self[ k ] through an included module"
-pos_rb put_self   r2 '[]=' "$RSET" "self[ k ] = v names the writer"
-pos_rb get_built  r3 '[]'  "$RGET" "a local the code builds (r = Registry.new)"
-pos_rb get_value  r4 '[]'  "$RGET" "a value receiver (Registry.new[ k ])"
-pos_rb by_class   r5 '[]'  "$RCLS" "a class constant reaches its def self.[]"
-pos_rb or_assign  r6 '[]'  "$RGET" "floor: self[ k ] ||= v is recorded as the read form"
-if [ -s "$DIR/r5.rows" ] && ! has_row r5 '[]' "registry.rb:$RGET"; then ok "R class side: Registry[ k ] does not reach the instances' []"
+pos_rb find_self  r1 'Lookup#[]'  "$RGET" "self[ k ] through an included module"
+pos_rb put_self   r2 'Lookup#[]=' "$RSET" "self[ k ] = v names the writer"
+pos_rb get_built  r3 'Lookup#[]'  "$RGET" "a local the code builds (r = Registry.new)"
+pos_rb get_value  r4 'Lookup#[]'  "$RGET" "a value receiver (Registry.new[ k ])"
+pos_rb by_class   r5 'Registry#[]'  "$RCLS" "a class constant reaches its def self.[]"
+pos_rb or_assign  r6 'Lookup#[]'  "$RGET" "floor: self[ k ] ||= v is recorded as the read form"
+if [ -s "$DIR/r5.rows" ] && ! has_row r5 'Lookup#[]' "registry.rb:$RGET"; then ok "R class side: Registry[ k ] does not reach the instances' []"
 else no "R class side: Registry[ k ] must not reach Lookup#[]: $( tr '\n' ' ' < "$DIR/r5.rows" 2>/dev/null )"; fi
 
 neg_rb(){ # name tag what
@@ -410,13 +411,13 @@ pos_py(){ # name tag op line what
         else no "P $5: $1 should call $3 at registry.py:$4 with no via=: $( tr '\n' ' ' < "$DIR/$2.rows" )"; fi
     fi
 }
-pos_py lookup_self p1 __getitem__ "$PGET" "self[ k ] in the class"
-pos_py store_self  p2 __setitem__ "$PSET" "self[ k ] = v names __setitem__"
-pos_py first       p3 __getitem__ "$PGET" "self[ k ] in a subclass reaches the base's"
-pos_py use_typed   p4 __getitem__ "$PGET" "a typed parameter"
-pos_py use_built   p5 __getitem__ "$PGET" "a constructed local"
-pos_py via_field   p6 __getitem__ "$PGET" "a field the class assigns (self.reg = Registry())"
-pos_py aug         p7 __getitem__ "$PGET" "floor: o[ k ] += 1 is recorded as the read form"
+pos_py lookup_self p1 Registry.__getitem__ "$PGET" "self[ k ] in the class"
+pos_py store_self  p2 Registry.__setitem__ "$PSET" "self[ k ] = v names __setitem__"
+pos_py first       p3 Registry.__getitem__ "$PGET" "self[ k ] in a subclass reaches the base's"
+pos_py use_typed   p4 Registry.__getitem__ "$PGET" "a typed parameter"
+pos_py use_built   p5 Registry.__getitem__ "$PGET" "a constructed local"
+pos_py via_field   p6 Registry.__getitem__ "$PGET" "a field the class assigns (self.reg = Registry())"
+pos_py aug         p7 Registry.__getitem__ "$PGET" "floor: o[ k ] += 1 is recorded as the read form"
 neg_py(){ # name tag what
     if callees "$PY" "$1" "$2"; then
         if no_op_row "$2"; then ok "P negative $3: $1 has no subscript row"
@@ -437,7 +438,7 @@ echo "== langfacts-fold pins: the subscript record's two Ruby-only rules (src/in
 # A Ruby receiver the shape rules cannot classify stays a FieldOfVar site (the typing walk may still type it); a Python one
 # (a call result) records nothing. A Ruby constant receiver keeps its path as written, so a scoped constant reaches its own
 # class's def self.[] and a bare or top-level one the top-level class's.
-rows_are(){ [ "$( grep -c 'n="\[\]"' "$DIR/$1.rows" )" = 1 ] && has_row "$1" '[]' "$2" && ! grep -q 'prov=\|via=' "$DIR/$1.rows"; }
+rows_are(){ [ "$( grep -c 'n="[^"]*#\[\]"' "$DIR/$1.rows" )" = 1 ] && [ "$( grep -c 'n="\[\]"' "$DIR/$1.rows" )" = 0 ] && has_row "$1" 'Cache#[]' "$2" && ! grep -q 'prov=\|via=' "$DIR/$1.rows"; }
 for trip in pick:lf1:3:"Outer::Cache[ k ] reaches Outer::Cache.[]" pick_top:lf2:10:"::Cache[ k ] reaches the top-level Cache.[]" pick_bare:lf3:10:"Cache[ k ] reaches the top-level Cache.[]"; do
     IFS=: read -r nm tg ln what <<<"$trip"
     if callees "$RB" "$nm" "$tg"; then

@@ -20,8 +20,10 @@
 //     `site` module ran, not part of the language) and the five non-callable constants (True False None
 //     Ellipsis NotImplemented — never in callee position). The exception and warning classes are KEPT: they
 //     are callable (`ValueError(…)`). 141 names. The stdlib MODULE surface (`sys.stdlib_module_names`) is
-//     deliberately NOT a table: a stdlib member only becomes a bare name through an import, and the import
-//     binding decides that by resolution (LocalBindKind::Import), not by list.
+//     NOT a table HERE: a stdlib member only becomes a bare name through an import, and the import binding decides
+//     that by resolution (LocalBindKind::Import), not by list. The one place that list is read is pythonstdlib.h,
+//     for the layout-root fallback of a Python import (resolve.h pythonFallbackRoots), where resolution cannot
+//     decide because a same-named file exists; it never feeds this veto.
 //
 //   kCFamilyStdNames — the ISO C11 §7 library function names by header, plus the C++23 `std::` function
 //     templates a BARE spelling reaches through ADL or a using-directive, by header. Function names only
@@ -375,6 +377,19 @@ inline constexpr std::string_view kRustStdMemberNames[] = {
     "to_uppercase", "to_vec", "trim", "unwrap", "unwrap_or", "unwrap_or_default", "unwrap_or_else", "values"
 };
 
+// ── THE KOTLIN SCOPE-FUNCTION TABLE (graph.h FalseEdgeRules, the Kotlin arm; gate test/kotlincheck.sh §15 and test/falseedgecheck.sh
+// arm J). A Kotlin call with a TRAILING lambda to one of these names is the stdlib scope function, never a Java method of the same
+// name: `s.run { }`, `with( sb ) { }`, `s?.let { }`, `xs.also { }`. The fact is the call's trailing lambda (ingest_metrics.h
+// kotlinTrailingLambda); the name alone is never a veto — `block.run()` on a Runnable has no lambda and keeps its edge.
+// PROVENANCE: the five functions the Kotlin documentation names as scope functions — "There are five of them: let, run, with,
+// apply, and also" (https://kotlinlang.org/docs/scope-functions.html, read 2026-10-24) — each an inline function of kotlin-stdlib
+// 2.4.0 (https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.4.0/kotlin-stdlib-2.4.0.jar), class
+// kotlin.StandardKt__StandardKt. Regenerated and diffed by ONE command, which prints exactly these five names:
+//     javap -p -cp kotlin-stdlib-2.4.0.jar kotlin.StandardKt__StandardKt | sed -n 's/.* \([a-z][A-Za-z]*\)(.*/\1/p' | grep -xE 'let|run|with|apply|also' | LC_ALL=C sort -u
+// takeIf, takeUnless, repeat and use stay OUT: the documentation does not call them scope functions, and no corpus evidence joined them.
+// 5 names; sorted by byte (isStrictlySortedTable below).
+inline constexpr std::string_view kKotlinScopeFunctionNames[] = { "also", "apply", "let", "run", "with" };
+
 // The standard templates whose `->` reaches their FIRST template argument, so a `->` call through a declaration written
 // `std::unique_ptr<ns::List>` / `std::shared_ptr<…>` / `std::optional<…>` may be a member of that argument (graph.h
 // StdMemberGate::stdArrowPointee reads the declaration's recorded text). std::weak_ptr and std::reference_wrapper have no
@@ -406,6 +421,16 @@ static_assert( isStrictlySortedTable( kRustStdMemberNames ), "kRustStdMemberName
 static_assert( isStrictlySortedTable( kCppStdArrowTemplates ), "kCppStdArrowTemplates must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kCppStdElementFirstArg ), "kCppStdElementFirstArg must be strictly sorted (binary search)" );
 static_assert( isStrictlySortedTable( kCppStdElementSecondArg ), "kCppStdElementSecondArg must be strictly sorted (binary search)" );
+static_assert( isStrictlySortedTable( kKotlinScopeFunctionNames ), "kKotlinScopeFunctionNames must be strictly sorted (binary search)" );
+// #155: the lookup of a strictly sorted table (isStrictlySortedTable), taken as a span so a new table reuses it.
+inline bool inSortedTable( std::span<const std::string_view> table, std::string_view name ) noexcept
+{
+    return std::binary_search( table.begin(), table.end(), name, rw::sortutil::svLess );
+}
+inline bool isKotlinScopeFunction( std::string_view name ) noexcept
+{
+    return inSortedTable( kKotlinScopeFunctionNames, name );
+}
 
 // Which template argument an element access of the standard container `name` ("map", "vector") yields: 0 or 1, or -1 when `name`
 // is no container of kCppStdElementFirstArg / kCppStdElementSecondArg.

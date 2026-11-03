@@ -1,0 +1,8 @@
+# legend_over_target.tsv — clauses allowed to take a legend PAST its stair-step target (PROCESS rule 5; test/lib/legendtarget.sh).
+# One row per clause: which content, why the answer needs it. A row explains an excess only on an answer where the clause RIDES
+# (its marker, a verbatim substring of the clause, is in the legend) AND is present-only there (its attr token is rendered in the
+# payload). The registered bytes must cover the whole excess. Re-pinning the target down to the measured value stays a one-line edit
+# in the gate; a row here is for content a complete answer needs that the old number did not foresee.
+# Columns (tab-separated): surface  clause  bytes  attr  marker  reason
+#   surface  ripwire.<key>/v1 (compactlegendcheck (U)), loop, mcp:<verb>, mcp:edit_check:answer, full:<shape> (the full-dialect gates)
+# No rows yet: every legend fits its target at the base (train-32a fe71bfc9).

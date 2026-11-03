@@ -58,6 +58,8 @@
 #   (G) the predicates can fail (a line that does not sum, unaccounted=1, a bare zero, a header without declined=,
 #       a uses answer that drops the declined site, a next= that incorrectly retains the narrowed selector)
 #   (H) determinism x2 (map and census), xmllint, no degrade alert on stderr
+#   (K) lane L6: an interface-typed decline (gate="iface") is counted in declined= / declined_calls=, conserved, never in count=;
+#       one implementor is an edge via="impl" (test/ifacedispatchfix/rs; the full arms are test/ifacedispatchcheck.sh)
 #   (I) declined_iface=: on an inline TS tree (an interface, two implementations, an annotated caller) the callers
 #       and impact answers in every dialect and the MCP twins count the decline an interface-typed receiver explains,
 #       with its legend clause; a decline with no signature of its name, and the callees form, carry neither
@@ -584,6 +586,34 @@ printf '%s' "$M" | grep -oE '<impact [^>]*>' | grep -q ' declined_iface="1"' && 
 # the TS arm of the main fixture has a decline but no signature: nothing there may carry the key
 rw --callers=tsHop >"$TMP/if0.xml"; grep -q 'declined_iface' "$TMP/if0.xml" && no "(I) declinefix --callers=tsHop carries declined_iface" \
     || ok "(I) declinefix --callers=tsHop (declined, no signature): no declined_iface"
+
+# ── (K) lane L6: an interface-typed decline (gate="iface") is a decline like any other ─────────────────────────────
+# The tier between the receiver rules and the name tiers ends a call two ways: one implementor binds it (an edge via="impl",
+# disposition bound), several decline it with THAT list (gate="iface"). Each such exit must land in exactly one disposition,
+# be counted in the header's declined= and the callees answer's declined_calls=, and never in count=. RED on a binary
+# without the tier: no row carries gate="iface".
+echo "=== (K) interface-typed declines are counted and conserved (test/ifacedispatchfix/rs) ==="
+IFD="$ROOT/test/ifacedispatchfix/rs"
+( cd "$IFD" && "$BIN" "$IFD" --no-cache --pin-census="$TMP/ifd.tsv" ) >"$TMP/ifd.xml" 2>/dev/null
+DL="$( grep -m1 '^# dispositions ' "$TMP/ifd.tsv" 2>/dev/null )"
+if [ -n "$DL" ] && conserves "$DL"; then ok "(K) ifacedispatchfix/rs: the dispositions sum to calls= and unaccounted=0"; else no "(K) conservation on ifacedispatchfix/rs: ${DL:-no dispositions line}"; fi
+IHDR="$( stats "$TMP/ifd.xml" )"
+[ "$( disp_in "$TMP/ifd.tsv" declined )" = "$( gauge "$IHDR" declined )" ] && ok "(K) census declined == header declined= ($( gauge "$IHDR" declined ))" \
+    || no "(K) census declined=$( disp_in "$TMP/ifd.tsv" declined ) but header declined=$( gauge "$IHDR" declined )"
+( cd "$IFD" && "$BIN" "$IFD" --no-cache --callees=dyn_ref ) >"$TMP/ifd1.xml" 2>/dev/null
+R="$( root_tag "$TMP/ifd1.xml" callees )"
+if [ "$( attr "$R" declined_calls )" = 1 ] && [ "$( attr "$R" count )" = 0 ] && grep -q '<dc n="render" l="15" cands="6" via="declined" gate="iface"/>' "$TMP/ifd1.xml"; then
+    ok "(K) --callees=dyn_ref: declined_calls=\"1\" count=\"0\" and its one row gate=\"iface\" cands=\"6\""
+else
+    no "(K) --callees=dyn_ref: ${R:-no root} $( grep -oE '<dc [^>]*>' "$TMP/ifd1.xml" | head -2 | tr '\n' ' ' )"
+fi
+( cd "$IFD" && "$BIN" "$IFD" --no-cache --callees=solo_dyn ) >"$TMP/ifd2.xml" 2>/dev/null
+R="$( root_tag "$TMP/ifd2.xml" callees )"
+if [ "$( attr "$R" count )" = 1 ] && [ -z "$( attr "$R" declined_calls )" ] && grep -q 'n="OnlySolo::solo_step" p="src/solo/mod.rs:8" via="impl"' "$TMP/ifd2.xml"; then   # train 33: QUALNAME-1 prints the owner
+    ok "(K) --callees=solo_dyn: the one implementor is an edge (count=\"1\", via=\"impl\"), not a decline"
+else
+    no "(K) --callees=solo_dyn: ${R:-no root} $( grep -oE '<s [^>]*>' "$TMP/ifd2.xml" | head -2 | tr '\n' ' ' )"
+fi
 
 # ── (H) determinism, well-formedness, no degrade alert ────────────────────────────────────────────────────────
 echo "=== (H) determinism + well-formedness ==="

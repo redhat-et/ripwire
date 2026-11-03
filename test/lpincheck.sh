@@ -187,7 +187,7 @@ printf '%s' "$RESH" | grep -q ' edges=1 ' \
     && ok "(I) the name-only residual lists ONE edge (the cross-file candidate; the caller's own def stays a dropped self-loop)" \
     || no "(I) the tier-1 residual moved again — update this arm AND src/graph.h's stated floor: $RESH"
 RESC="$( cd "$RESD" && "$BIN" . --no-cache --callees=a.py:ping 2>/dev/null )"
-printf '%s' "$RESC" | grep -q '<s t="fn" n="ping" p="b.py:2" via="name"/>' \
+printf '%s' "$RESC" | grep -q '<s t="fn" n="Beta.ping" p="b.py:2" via="name"/>' \
     && ok "(I) …and that edge is HEDGED: --callees marks Beta.ping via=\"name\" (no confident cross-file edge)" \
     || no "(I) the residual's cross-file edge is not marked via=\"name\": $( printf '%s' "$RESC" | grep -o '<s [^>]*/>' | tr '\n' ' ' )"
 

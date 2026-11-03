@@ -2,6 +2,7 @@
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
+#include <format>            // gitWalkCutSentence
 
 
 // gitmine.h — git-history mining shared by the CLI (main.cpp) and the MCP server (mcp.h): shell-quoting,
@@ -20,6 +21,10 @@
                                  // gitmine.h no longer carries its own copy; see jsonesc.h for the dedup rationale
 
 #include <algorithm>
+#include <chrono>
+#include <system_error>
+#include <thread>
+#include <cstring>
 #include <array>        // popenTrimmed's 64 KB read block
 #include <atomic>       // the join's once-per-process disclosure flags
 #include <bit>          // std::popcount — the recurrence mask's set-bit count (Clio sub-windows)
@@ -37,6 +42,7 @@
 #include <vector>
 
 #include <limits.h>    // PATH_MAX (hasEnclosingGitRepo realpath buffer)
+#include "infra/pipefields.h"  // PipeFieldReader — the record walk's deadline-keeping read
 #include "infra/os.h"  // rw::os::stat — the zero-popen .git walk-up pre-check; popen/pclose/realpath/localtime_r
 
 namespace rw
@@ -677,6 +683,7 @@ struct GitCommandLines
     bool                     isStarted = false;
     int                      status    = 0;
     bool                     abandoned = false;   // the read stopped early (abandonGitWalks): lines is a prefix, never an answer
+    bool                     timedOut  = false;   // gitCommandLinesBy only: the read outlived its deadline; lines is empty, never an answer
 };
 
 // A git walk this run no longer needs: --for / --metrics / --exemplar start the 18-month history walk beside the ingest
@@ -733,6 +740,563 @@ inline GitCommandLines gitCommandLines( const std::string& cmd )
     out.abandoned = gitWalksAbandoned();   // the rest of the stream was never read; pclose ends the child at its next write
     out.status    = os::pclose( pipe );
     return out;
+}
+
+// ── the ONE git-log record frame (audit finding #4): every --name-only consumer reads through here ──
+//
+// The old frame was a LINE frame: `--format=tformat:__C__…` printed a marker LINE, and the five
+// consumers below each re-derived it with their own test (exact match, rfind prefix, 5-byte prefix). A
+// line marker is ambiguous three ways at once — a committed file named `__C__` IS the marker line, a
+// file named `__C__x|<epoch>` prefix-matches it, and a filename containing '\n' splits into phantom
+// records — and the ownership walk's `__C__%ae|%at` header let one forged name attribute every path
+// after it to a forged author. `git log -z` closes all three: fields and paths are NUL-terminated and
+// RAW (no C-quoting), and the marker is a WHOLE-FIELD sentinel a path can never spell.
+//
+// The pinned byte layout (specs/git-porcelain-framing/evidence/layout-pin.md; the prototype command
+// that produced it is in the spec's Implementation Notes; re-pinned by test/gitframingcheck.sh):
+//
+//   \0 __C__ \0 <author-email> \0 <author-ts> \0 <committer-ts> [ \0 ] [ \n <path1> | <path1> ] \0 <path2> \0 …
+//
+// Every record opens with an empty field, then the marker, then its three metadata fields. A commit
+// with paths follows the metadata with a '\n'-prefixed first path (git's separator); a path-less
+// commit stops after its metadata. A MERGE follows with one MORE empty field — the prefix empty —
+// and then BARE paths with no '\n', which is what a combined diff emits; a clean merge stops after
+// its prefix empty. The next record's opening empty field is the record boundary. A field that ends
+// at end-of-stream without its delimiter still counts; readNulSafeField returns it.
+//
+// The boundary rule, with ONE field of lookahead: an empty field ends the current record and opens
+// the next iff the field after it is the marker (or the stream ends). Any other empty field is a
+// merge prefix and is skipped — that is what keeps a merge's combined-diff files, the ones the first
+// migration draft dropped, attached to the merge that introduced them. The one collision left is the
+// same class the line frame had: a merge whose FIRST combined path is a file literally named `__C__`
+// reads as a pathless record, because its prefix empty is followed by the marker-spelled path: the
+// merge's next three paths become a phantom record's email and (unparsable, so 0) epochs, and a fifth
+// and later path rides that phantom at epoch 0. That boundary is disclosed here and pinned in the gate
+// rather than papered over.
+struct GitLogRecord
+{
+    std::string              authorEmail;
+    std::int64_t             authorTs    = 0;
+    std::int64_t             committerTs = 0;
+    std::vector<std::string> paths;
+};
+
+// The walk's exit status, carried so the K51 contract (a prefix is not an answer) survives the
+// migration: `unread` — git would not start, or died part-way, so the records are empty or a prefix, or
+// it exited 0 and printed a NON-EMPTY stream that never carried a record marker (a git answering in a
+// format other than the one asked for, a PATH shim): no record could be framed, and "no records" would
+// read as a clean empty history; `notRun` — git never ran at all (no popen, not on PATH, not
+// executable), so there is no prefix either.
+// The visitor form streams: there is no records vector to keep, which is the point — one record in
+// memory at a time, the whole-history walk costs what it always cost.
+//
+// THE BUDGET (HISTORY-WALK-HANG). No walk runs past a commit count or a wall time; `--since` alone bounded nothing on a repo
+// that commits fast. Rates measured on `-c --no-renames` (git 2.50.1, this Mac): kubernetes' WHOLE history, 142 K commits, 9.8 s
+// (its 18-month window, 12.8 K, 1.0 s); textual 1.7 K, 0.12 s; risingwave 2.5 K, 0.18 s; ClickHouse 10 K in 26 s, 50 K in 112 s,
+// 124 K of the 134 K window still unfinished at 300 s, git itself at 1.9 GB RSS. A walk now reads no blob, so a full clone and a
+// blobless one pay the same. 20 s is twice the slowest whole history that finished in reasonable time and is what an agent
+// tolerates on top of an ingest; the walk runs beside the ingest, so on any big repo most of it is hidden anyway. 200 K commits
+// never trips before the clock on a repo like ClickHouse; it bounds memory on a repo fast enough to beat the clock.
+// RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS move them (0 = no limit, at most 1e9: a larger or malformed value keeps the default), for a user willing to wait.
+// A cut walk is a prefix, newest first, and is DISCLOSED: amp=/churn= by history_unread (historyread.h), every other walk by
+// gitWalkCutsToDisclose, which main() prints once after the answer.
+enum class GitWalkCut : std::uint8_t { None, Commits, Time };
+inline constexpr std::uint64_t kGitWalkMaxCommits = 200'000;
+inline constexpr std::uint64_t kGitWalkMaxSeconds = 20;
+
+inline constexpr std::uint64_t kGitWalkBudgetCeiling = 1'000'000'000;   // far above any real budget; keeps now() + seconds and maxCommits + 1 in range
+
+inline std::uint64_t gitWalkBudgetValue( const char* envName, std::uint64_t fallback ) noexcept
+{
+    const char* raw = std::getenv( envName );
+    if( raw == nullptr || *raw == '\0' )
+    {
+        return fallback;
+    }
+    char*               end   = nullptr;
+    const std::uint64_t value = std::strtoull( raw, &end, 10 );
+    // external input: anything but a plain number up to the ceiling keeps the default (a huge one overflowed the deadline, and
+    // UINT64_MAX + 1 wrapped the commit cap to `git log -n 0`, an empty history read as a clean one)
+    if( !VALIDATE( *end == '\0' && *raw != '-' && value <= kGitWalkBudgetCeiling, "RIPWIRE_GIT_WALK_* is a plain number no larger than 1e9 (0 = no limit)" ) )
+    {
+        return fallback;
+    }
+    return value;
+}
+inline std::uint64_t gitWalkMaxCommits() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_COMMITS", kGitWalkMaxCommits ); }
+inline std::uint64_t gitWalkMaxSeconds() noexcept { return gitWalkBudgetValue( "RIPWIRE_GIT_WALK_SECONDS", kGitWalkMaxSeconds ); }
+inline std::chrono::steady_clock::time_point gitWalkDeadline() noexcept
+{
+    const std::uint64_t seconds = gitWalkMaxSeconds();
+    return seconds == 0 ? std::chrono::steady_clock::time_point::max() : std::chrono::steady_clock::now() + std::chrono::seconds( seconds );
+}
+
+// A git read that keeps a deadline. gitCommandLines blocks in fread, so a git that stopped writing, or one that is still working out
+// what to say, holds the caller for as long as it likes. This reads the descriptor with poll (os::pipeReadSome) and, at the deadline,
+// drops what it has: `timedOut`, and `lines` is a PREFIX no caller may serve as an answer. pclose goes to a thread of its own then, for
+// the reason finishGitLogWalk gives; git is not killed (popen holds no pid), it ends at its next write or when ripwire exits.
+inline GitCommandLines gitCommandLinesBy( const std::string& cmd, std::chrono::steady_clock::time_point deadline )
+{
+    GitCommandLines out;
+    std::FILE*      pipe = os::popen( cmd.c_str(), "r" );
+    if( !pipe )
+    {
+        return out;
+    }
+    out.isStarted = true;
+    std::string       tail;
+    std::vector<char> block( 64u * 1024u );
+    const auto        flush = [ & ]( std::string_view row )
+    {
+        while( !row.empty() && ( row.back() == '\r' ) )
+        {
+            row.remove_suffix( 1 );
+        }
+        if( !row.empty() )
+        {
+            out.lines.emplace_back( row );
+        }
+    };
+    for( ;; )
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if( now >= deadline )
+        {
+            out.timedOut = true;
+            break;
+        }
+        const auto leftMs = std::chrono::duration_cast<std::chrono::milliseconds>( std::min( deadline - now, std::chrono::steady_clock::duration( std::chrono::milliseconds( 100 ) ) ) ).count() + 1;
+        const long got    = os::pipeReadSome( pipe, block.data(), block.size(), static_cast<int>( leftMs ) );
+        if( got == os::kPipeNothingYet )
+        {
+            if( gitWalksAbandoned() )
+            {
+                out.abandoned = true;
+                break;
+            }
+            continue;
+        }
+        if( got <= 0 )
+        {
+            break;
+        }
+        tail.append( block.data(), static_cast<std::size_t>( got ) );
+        std::size_t from = 0;
+        for( std::size_t nl = tail.find( '\n', from ); nl != std::string::npos; nl = tail.find( '\n', from ) )
+        {
+            flush( std::string_view( tail ).substr( from, nl - from ) );
+            from = nl + 1;
+        }
+        tail.erase( 0, from );
+    }
+    if( out.timedOut || out.abandoned )
+    {
+        out.lines.clear();
+        try
+        {
+            std::thread( [ pipe ]() noexcept { os::pclose( pipe ); } ).detach();
+        }
+        catch( const std::system_error& )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the answer is whole; only one pipe stays open until the process ends",
+                      "gitmine: no thread for a timed-out read's pclose — the pipe is left to the process's exit" );
+        }
+        return out;
+    }
+    flush( tail );
+    out.status = os::pclose( pipe );
+    return out;
+}
+
+// PARTIAL CLONE (HISTORY-WALK-HANG, F1). A clone made with --filter=blob:none holds commits and trees and fetches blobs on demand; ripwire
+// never downloads (gitcmd.h NEVER DOWNLOAD), so a read that needs an absent blob fails. It fails LATE: with lazy fetch off, git parses
+// every object of the promisor pack before it dies "could not fetch" (is_promisor_object > for_each_packed_object), and on a pack of
+// millions of objects that is minutes to hours (ClickHouse, 5.2 M objects: `diff --numstat`, `archive` and `log -p` all still running
+// at 90 s, 8 min for the numstat). So a command that would read a blob is never STARTED on a partial clone; the caller takes a
+// tree-level read or refuses, and says so. The test reads configuration only, no object: extensions.partialClone names the promisor
+// remote, `remote.<name>.promisor` marks it (a clone made with --filter writes both). Once per root.
+inline bool gitIsPartialClone( const std::string& root )
+{
+    static std::mutex                                   lock;
+    static std::vector<std::pair<std::string, bool>>    memo;   // a handful of roots at most (an MCP server's), so a scan
+    {
+        const std::lock_guard<std::mutex> guard( lock );
+        for( const auto& [ known, answer ] : memo )
+        {
+            if( known == root )
+            {
+                return answer;
+            }
+        }
+    }
+    bool                  partial = false;
+    const GitCommandLines cfg     = gitCommandLines( gitCmd( " -C " ) + shSingleQuote( root )
+                                                     + " config --get-regexp '^(extensions[.]partialclone|remote[.].*[.]promisor)$' 2>/dev/null" );
+    for( const std::string& row : cfg.lines )
+    {
+        const std::size_t sp = row.find( ' ' );
+        if( sp == std::string::npos || sp + 1 >= row.size() )
+        {
+            continue;
+        }
+        const std::string_view key   = std::string_view( row ).substr( 0, sp );
+        const std::string_view value = std::string_view( row ).substr( sp + 1 );
+        partial = partial || key == "extensions.partialclone" || value == "true" || value == "yes" || value == "on" || value == "1";
+    }
+    const std::lock_guard<std::mutex> guard( lock );
+    memo.emplace_back( root, partial );
+    return partial;
+}
+
+// Which blobs of one commit's tree this clone lacks: the count, or -1 when it could not be told in the budget. `rev-list --objects
+// --no-walk --missing=print` names the absent objects and fetches nothing and does not scan the promisor pack (ClickHouse HEAD~3: 86,609
+// objects listed, 5 absent, 4 s). A caller that would run `git archive <rev>` asks first on a partial clone.
+inline long gitAbsentBlobCount( const std::string& root, const std::string& rev )
+{
+    const GitCommandLines listed = gitCommandLinesBy( gitCmd( " -C " ) + shSingleQuote( root ) + " rev-list --objects --no-walk --missing=print "
+                                                    + shSingleQuote( rev ) + " -- 2>/dev/null", std::chrono::steady_clock::now() + std::chrono::seconds( 60 ) );
+    if( !listed.isStarted || listed.timedOut || listed.abandoned || listed.status != 0 )
+    {
+        return -1;
+    }
+    long absent = 0;
+    for( const std::string& row : listed.lines )
+    {
+        absent += !row.empty() && row.front() == '?';
+    }
+    return absent;
+}
+
+// The DISCLOSE sink for a walk whose consumer has no history_unread of its own. Worker threads write it; main() reads it last.
+struct GitWalkCutReport
+{
+    std::atomic<std::uint32_t> walks{ 0 };
+    std::atomic<std::uint64_t> commitsRead{ 0 };
+};
+inline GitWalkCutReport& gitWalkCutsToDisclose() noexcept
+{
+    static GitWalkCutReport report;
+    return report;
+}
+
+// What the process has cut so far, read before and after one unit of work (an MCP request) to say what THAT work cut.
+struct GitWalkCutMark
+{
+    std::uint32_t walks   = 0;
+    std::uint64_t commits = 0;
+};
+inline GitWalkCutMark gitWalkCutMark() noexcept
+{
+    const GitWalkCutReport& report = gitWalkCutsToDisclose();
+    return GitWalkCutMark{ report.walks.load( std::memory_order_relaxed ), report.commitsRead.load( std::memory_order_relaxed ) };
+}
+
+// The one sentence for "N history walks hit their budget": the CLI's stdout comment, its stderr line and the MCP envelope's
+// `_history_cut` all print it. `walks`/`commits` are the cut walks and the commits they read. "" when nothing was cut.
+inline std::string gitWalkCutSentence( std::uint32_t walks, std::uint64_t commits )
+{
+    if( walks == 0 )
+    {
+        return {};
+    }
+    return std::format( "history_cut={}: that many git history walks hit their budget and read only the newest commits ({} read in all), so co-change, "
+                        "owner and churn numbers from history in this answer are floors, and the prefix a time cut reaches moves with machine load, so two "
+                        "runs can differ. RIPWIRE_GIT_WALK_SECONDS and RIPWIRE_GIT_WALK_COMMITS raise the budget.", walks, commits );
+}
+
+// A refusal that would say "git unavailable / no history" when the history walk was ended by its budget before it read one commit
+// names that instead: git ran, there IS history, the clock or the commit cap stopped the read. "" when no walk was cut.
+// `since` scopes it to one unit of work: an MCP server lives for many requests, and a walk an earlier request cut is not the cause of this
+// one's empty answer. The default (the whole process) is the CLI's, which answers one verb.
+inline std::string gitWalkCutRefusalCause( const GitWalkCutMark& since = {} )
+{
+    const GitWalkCutMark mark = gitWalkCutMark();
+    if( mark.walks <= since.walks )
+    {
+        return {};
+    }
+    return "the git history walk hit its budget before it read a commit that answers this (git ran; the history exists but was not read in time) - raise "
+           "RIPWIRE_GIT_WALK_SECONDS or RIPWIRE_GIT_WALK_COMMITS";
+}
+
+struct GitLogWalk
+{
+    bool                      unread   = false;
+    bool                      notRun   = false;
+    int                       exitCode = 0;
+    // The degraded-epoch count — records whose author or committer epoch field was empty or
+    // unparsable (parseEpochField nullopt): their epochs read 0, so a window cut on them excluded
+    // those commits and its count is a FLOOR. The count is KEPT rather than folded into a zero so a
+    // disclosure can read it; NO consumer reads it yet — the visitor consumers discard the walk, so
+    // that floor is not stated on any answer (a documented K51 deferral, see historyread.h NOT
+    // COVERED; CodeRabbit on #469). git itself never prints a non-numeric %at/%ct: a non-zero count
+    // means a malformed stream or the disclosed `__C__` merge collision.
+    int                       epochUnparsed = 0;
+    GitWalkCut                cut           = GitWalkCut::None;   // the budget ended the walk: the records are the newest part
+    std::uint64_t             commitsVisited = 0;
+};
+
+// One field of lookahead over a NUL-framed stream: `next` reads a field (infra/pipefields.h) or hands back the one the boundary
+// rule in forEachGitLogRecord parked in `held` while it decided what an empty field means.
+struct NulFieldStream
+{
+    PipeFieldReader reader;
+    std::string     held;
+    bool            hasHeld = false;
+
+    bool next( std::string& field )
+    {
+        if( hasHeld ) { field = std::move( held ); hasHeld = false; return true; }
+        return reader.next( field );
+    }
+};
+
+// The marker as a whole field. A path may carry these bytes; only a field that IS this string opens a record.
+inline constexpr const char* kGitLogMarker = "__C__";
+
+// An epoch field: git's decimal seconds. nullopt when the field is empty, carries non-digits, or
+// leaves bytes unconsumed — a DEGRADED read the walk counts (GitLogWalk::epochUnparsed) instead of
+// folding it into a genuine zero, because epoch 0 is 1970 and can be real, while a failed parse
+// means a commit whose window position is unknown: it falls below every cutoff, and any count that
+// excluded it is a floor until the consumer says so. PR #433 review.
+inline std::optional<std::int64_t> parseEpochField( const std::string& field ) noexcept
+{
+    if( field.empty() ) { return std::nullopt; }
+    char*               end = nullptr;
+    const std::int64_t  v   = std::strtoll( field.c_str(), &end, 10 );
+    return ( end != nullptr && end != field.c_str() && *end == '\0' ) ? std::optional<std::int64_t>{ v } : std::nullopt;
+}
+
+// A pclose()/wait status as an exit code: WEXITSTATUS on a normal exit, -1 for a signal or an unreadable status.
+inline int decodedExitCode( int status ) noexcept
+{
+    return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
+}
+
+// The one command every --name-only consumer shares. `extraArgs` is the per-consumer tail: the window
+// args (`--since=…`) and, for the single-file ownership query, the trailing `-- <relpath>` pathspec.
+// The diff-program hardening (--no-ext-diff --no-textconv, upstream train 28) and the
+// combined-diff flag ride HERE, once, instead of on five command lines that could drift apart.
+//
+// extraArgs rides at the END, after every option, and that position is LOAD-BEARING: a pathspec is only
+// a pathspec when it comes last, and everything after `--` is read as a path or revision. Put the
+// pathspec first and git consumes the `-z --name-only --format=…` that follows it as path arguments —
+// the flags never apply, git answers in its DEFAULT format, and the reader sees a stream with no marker
+// field in it. Measured: `--owners=SYM` answered "git unavailable / no history" on a healthy one-commit
+// repo while the all-files form beside it was correct. A `--since=` window is an option and rides
+// anywhere; both forms end in a space, which is what keeps the redirect from gluing on.
+//
+// --no-renames: a walk reads commits and trees and never a blob. Rename detection is what read blobs: the similarity score
+// needs each candidate's content, so on a partial clone it was the lazy fetch (risingwave without it: git dies after 73 of
+// 2455 commits under GIT_NO_LAZY_FETCH, 1.78 s; with it, every commit in 0.18 s), and on a full clone it was the cost. What it
+// changes: a rename now lists BOTH paths where it listed the new one, so a commit only ever GAINS a path, the old one. Whole
+// history, base vs this: textual 92 of 13104 commits differ (354 paths added, 5 of them at a path that exists at HEAD), hono
+// 50 of 2862 (286, 3), tmux 15 of 12243 (23, 1), none lost. A path gone from HEAD resolves to nothing and drops out at the
+// join; one that exists again was in fact touched by that commit, so it counts. Nothing here follows a file through a rename.
+inline std::string gitLogRecordsCmd( const std::string& root, const std::string& extraArgs )
+{
+    // One past the budget, so the walk can tell "the budget ended it" from "the history ended exactly there".
+    const std::uint64_t maxCommits  = gitWalkMaxCommits();
+    const std::string   maxCountArg = maxCommits == 0 ? std::string{} : "-n " + std::to_string( maxCommits + 1 ) + " ";
+    return gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
+         + " log --no-ext-diff --no-textconv --no-renames " + kMergeDiffArgs
+         + maxCountArg + "-z --name-only --format=%x00__C__%x00%ae%x00%at%x00%ct " + extraArgs + "2>/dev/null";
+}
+
+// Stream every record of one `git log --name-only` walk to `visit`, one record in memory at a time, so
+// the whole-history walk costs what it always cost. Returns the walk's exit status; the records arrive
+// through the visitor in the stream's order (newest commit first, git's order). The budget (above) ends the walk early with
+// `cut` set and a clean exit status; `cutSink` then hears of it, unless this walk's consumer carries the cut itself.
+enum class GitWalkCutDisclosure : std::uint8_t { ProcessTail, CarriedByCaller };
+
+// A walk's end: the exit status, or, for a cut walk, the disclosure. `unframed`: bytes arrived and no field ever opened a record.
+inline void finishGitLogWalk( std::FILE* pipe, GitLogWalk& walk, GitWalkCutDisclosure cutSink, bool unframed )
+{
+    if( walk.cut != GitWalkCut::None )
+    {
+        // The pipe closes now and git dies at its next write, but a git that is not writing would hold pclose's wait for as long
+        // as it stays silent, which is what the deadline exists to end. So the wait goes to a thread of its own.
+        try
+        {
+            std::thread( [ pipe ]() noexcept { os::pclose( pipe ); } ).detach();
+        }
+        catch( const std::system_error& )
+        {
+            DISCLOSE( Diagnostics::answerUnchanged, "the walk's answer is whole; only one pipe stays open until the process ends",
+                      "gitmine: no thread for a cut walk's pclose — the pipe is left to the process's exit" );
+        }
+        if( cutSink == GitWalkCutDisclosure::ProcessTail )
+        {
+            gitWalkCutsToDisclose().walks.fetch_add( 1, std::memory_order_relaxed );
+            gitWalkCutsToDisclose().commitsRead.fetch_add( walk.commitsVisited, std::memory_order_relaxed );
+        }
+        return;
+    }
+    walk.exitCode = decodedExitCode( os::pclose( pipe ) );
+    if( walk.exitCode != 0 )
+    {
+        walk.unread = true;
+        walk.notRun = ( walk.exitCode == 127 || walk.exitCode == 126 );
+    }
+    else if( unframed && !gitWalksAbandoned() )
+    {
+        // Exit 0, bytes on the pipe, yet no field ever opened a record: the stream was not framed
+        // (CodeRabbit on #469). It is NOT "read, no history" — an abandoned walk stopped on purpose and
+        // is reported by the abandon flag instead.
+        walk.unread = true;
+    }
+}
+
+template<typename Visitor>
+inline GitLogWalk forEachGitLogRecord( const std::string& root, const std::string& extraArgs, Visitor&& visit,
+                                       GitWalkCutDisclosure cutSink = GitWalkCutDisclosure::ProcessTail )
+{
+    GitLogWalk walk;
+    const std::uint64_t maxCommits = gitWalkMaxCommits();
+    const std::string cmd = gitLogRecordsCmd( root, extraArgs );
+    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
+    if( !pipe )
+    {
+        walk.unread   = true;
+        walk.notRun   = true;
+        walk.exitCode = -1;
+        return walk;
+    }
+
+    // The walkers' abandon contract rides into the field read: the flag is polled per byte, so a
+    // stream whose fields never arrive (the default-format degrade, a test shim's bare lines) stops
+    // the read where the old line reader stopped it — at its next unit — instead of blocking to
+    // end-of-stream inside one unterminated field.
+    NulFieldStream fields{ .reader = PipeFieldReader( pipe, &gGitWalksAbandoned, gitWalkDeadline() ) };
+    std::string    field;
+    std::string    lookahead;
+    bool           haveLookahead = false;
+    bool           atEnd         = false;
+
+    GitLogRecord cur;
+    bool         inRecord  = false;   // a record is open (its opening empty field was seen)
+    bool         sawMarker = false;   // ...and its marker was read: a record without one is never visited
+    bool         wantMarker = false;  // the next field must be the marker
+    bool         anyMarker  = false;  // a marker field opened at least one record in this stream
+    bool         anyData    = false;  // a non-empty field arrived at all (an empty history is an empty stream)
+    int          metaLeft  = 0;       // metadata fields still to read for this record
+    int          empties   = 0;       // empty fields since this record's metadata (0 = none, 1 = a merge prefix)
+    bool         havePath  = false;   // this record has taken its first path
+
+    const auto closeRecord = [ & ]()
+    {
+        if( inRecord && sawMarker )
+        {
+            if( maxCommits != 0 && walk.commitsVisited == maxCommits ) { walk.cut = GitWalkCut::Commits; }
+            else                                                       { visit( cur ); ++walk.commitsVisited; }
+        }
+        cur        = GitLogRecord{};
+        sawMarker  = false;
+    };
+
+    while( !atEnd && walk.cut == GitWalkCut::None )
+    {
+        if( gitWalksAbandoned() ) { break; }   // the walk readers' abandon contract: stop at the next field; pclose ends the child
+        // COPY, not move: the slot is a reusable buffer, and a copy hands the held value over while
+        // leaving the slot in a valid state for its next fill. No read ever sees a moved-from slot —
+        // the two writers below each assign a FRESH value before they set the flag — but a move here
+        // is what bugprone-use-after-move reads as a second use of a moved-from object: the
+        // reassignment that makes it safe happens in an earlier iteration than the next move, and no
+        // analyzer can prove the correlation between the flag and the writers. (A swap is no better:
+        // it reads the slot too, so the checker relocates the finding to the move at the path append
+        // below.) The copy runs once per record boundary — and once per a merge's prefix empty —
+        // against a walk that spawns a git child per run, so it costs nothing measurable, and it
+        // leaves the slot's lifetime readable to man and machine alike.
+        if( haveLookahead ) { field = lookahead; haveLookahead = false; }
+        else if( !fields.next( field ) ) { atEnd = true; break; }
+        if( !field.empty() ) { anyData = true; }
+
+        // An empty field's meaning is decided by ONE field of lookahead, and the pending-metadata
+        // state changes only the non-boundary reading: an empty followed by the MARKER (or the end
+        // of the stream) is a record boundary no matter what is pending — that is also how a
+        // truncated phantom record (the disclosed collision) is closed without swallowing the record
+        // after it. An empty followed by anything else is DATA while the record still owes its
+        // marker or metadata — git accepts an empty author email (--author="No Email <>"), so %ae
+        // can arrive legitimately empty, and eating it as a merge prefix shifted the whole record
+        // (email←the %at digits, epochs off by one, the first path's '\n' unstripped) into a
+        // pathless phantom. Only a record that owes no metadata reads a non-boundary empty as a
+        // merge prefix. PR #433 review.
+        if( field.empty() )
+        {
+            // One field of lookahead decides what this empty IS: the record boundary (the next field is
+            // the marker, or the stream ends here) or a merge's prefix empty (anything else follows).
+            // The held-lookahead slot is ALWAYS empty here: the top of the loop consumes it (and clears the
+            // flag) before any field is examined, and the only writers — the two branches below — each
+            // assign a FRESH value before the next iteration. So the field after this empty is always the
+            // next one on the stream; there is no held field to prefer. A `haveLookahead ? … : …` here would
+            // be dead code, and its move of `lookahead` is also what made the slot's lifetime unreadable to
+            // bugprone-use-after-move (a second move in a later iteration that no reader can prove safe).
+            std::string next;
+            bool        haveNext = fields.next( next );
+            if( !haveNext || next == kGitLogMarker )
+            {
+                closeRecord();
+                inRecord    = true;
+                wantMarker  = true;
+                metaLeft    = 3;
+                empties     = 0;
+                havePath    = false;
+                if( haveNext ) { lookahead = std::move( next ); haveLookahead = true; }
+                continue;
+            }
+            if( wantMarker || metaLeft > 0 )
+            {
+                // DATA: park the lookahead and fall through — the empty field itself is delivered to
+                // the state machine below as the pending metadata field it is (the empty-%ae shape).
+                lookahead = std::move( next ); haveLookahead = true;
+            }
+            else
+            {
+                ++empties;   // a merge prefix (or the record's own close): skipped, but counted
+                lookahead = std::move( next ); haveLookahead = true;
+                continue;
+            }
+        }
+
+        if( wantMarker )
+        {
+            wantMarker = false;
+            if( field == kGitLogMarker ) { sawMarker = true; anyMarker = true; }   // anything else: a malformed stream — skip to the next boundary
+            continue;
+        }
+        if( metaLeft > 0 )
+        {
+            if( metaLeft == 3 ) { cur.authorEmail = field; }
+            else
+            {
+                const std::optional<std::int64_t> epoch = parseEpochField( field );
+                if( !epoch ) { ++walk.epochUnparsed; }
+                if( metaLeft == 2 ) { cur.authorTs    = epoch.value_or( 0 ); }
+                else                { cur.committerTs = epoch.value_or( 0 ); }
+            }
+            --metaLeft;
+            continue;
+        }
+
+        // A path. The first path of a REGULAR commit arrives with git's '\n' separator (no empty was
+        // counted since the metadata); a merge's first path arrives bare after its prefix empty.
+        if( !havePath )
+        {
+            havePath = true;
+            if( empties == 0 && !field.empty() && field.front() == '\n' ) { field.erase( 0, 1 ); }
+        }
+        cur.paths.push_back( std::move( field ) );
+    }
+    if( fields.reader.timedOut )
+    {
+        walk.cut = GitWalkCut::Time;   // the open record lost its tail: not visited
+    }
+    else if( walk.cut == GitWalkCut::None )
+    {
+        closeRecord();
+    }
+    finishGitLogWalk( pipe, walk, cutSink, anyData && !anyMarker );
+    return walk;
 }
 
 // The repo TOPLEVEL enclosing `absDir` (absolute and already realpath'd), or empty when `absDir` is not inside
@@ -1501,35 +2065,20 @@ inline std::vector<std::vector<std::uint32_t>> gitLogFileSets( const std::string
     // open --name-only pipe would leave a filled pipe buffer waiting on us while we wait on the probe.
     const GitPathIndex byGitPath = gitPathIndexOfFiles( ing, onlyRoot );
 
-    const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " log --no-ext-diff --no-textconv " + kMergeDiffArgs + windowArgs + "--name-only --format=tformat:__C__ 2>/dev/null";
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe )
-    {
-        return sets;
-    }
-
     std::vector<std::uint32_t> cur;
     const auto flush = [ & ]() { recordCommitFileSet( cur, maxFiles, sets, outCensus ); };
-    std::string s;
-    while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
+    forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
     {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
+        for( const std::string& p : rec.paths )
         {
-            s.pop_back();
+            const std::uint32_t f = resolveGitPath( byGitPath, p );
+            if( f != UINT32_MAX )
+            {
+                cur.push_back( f );
+            }
         }
-        if( s == "__C__" ) { flush(); continue; }
-        if( s.empty() )
-        {
-            continue;
-        }
-        const std::uint32_t f = resolveGitPath( byGitPath, s );
-        if( f != UINT32_MAX )
-        {
-            cur.push_back( f );
-        }
-    }
-    flush();
-    os::pclose( pipe );
+        flush();
+    } );
     return sets;
 }
 
@@ -1593,72 +2142,26 @@ struct RawCommitStream
     bool notRun = false;
     // git's decoded exit code (WEXITSTATUS), -1 when it did not exit normally or never started; 0 on a clean read.
     int exitCode = 0;
+    // The budget ended the walk (GitWalkCut above): `commits` is the newest part of the window, disclosed, and cached with this set.
+    GitWalkCut cut = GitWalkCut::None;
 };
-
-// K51: mark a walk unread. `exitCode` is git's decoded exit (-1: it never started, or did not exit normally); the shell's 127
-// (not on PATH) and 126 (not executable) mean git never ran either, so `commits` is empty, not a prefix.
-inline void markWalkUnread( RawCommitStream& out, int exitCode, bool neverStarted ) noexcept
-{
-    out.unread   = true;
-    out.exitCode = exitCode;
-    out.notRun   = neverStarted || exitCode == 127 || exitCode == 126;
-}
-
-// A pclose()/wait status as an exit code: WEXITSTATUS on a normal exit, -1 for a signal or an unreadable status.
-inline int decodedExitCode( int status ) noexcept
-{
-    return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
-}
-
-// K51: fold the walk's pclose() status into `out` — 0 is a clean read and changes nothing.
-inline void noteWalkExit( RawCommitStream& out, int status ) noexcept
-{
-    if( status != 0 )
-    {
-        markWalkUnread( out, decodedExitCode( status ), false );
-    }
-}
 
 inline RawCommitStream gitLogNameOnlyRaw( const std::string& root, const std::string& coSince )
 {
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitLogNameOnlyRaw (git log --name-only popen)" );
     RawCommitStream out;
-    const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                          + " log --no-ext-diff --no-textconv " + kMergeDiffArgs + "--since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: HEAD-anchored when `coSince` is a default month window
-                          + " --name-only --format=tformat:__C__%x20%ct 2>/dev/null";
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe )
+    // F1: HEAD-anchored when `coSince` is a default month window (defaultWindowSince resolves it)
+    const std::string extraArgs = "--since=" + shSingleQuote( defaultWindowSince( root, coSince ) ) + " ";
+    const GitLogWalk walk      = forEachGitLogRecord( root, extraArgs, [ & ]( const GitLogRecord& rec )
     {
-        markWalkUnread( out, -1, true );
-        return out;
-    }
-
-    std::string s;
-    while( readWalkLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across; stops when abandoned
-    {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
-        {
-            s.pop_back();
-        }
-        if( s.rfind( "__C__", 0 ) == 0 )                       // new commit marker: "__C__ <epoch>"
-        {
-            const std::int64_t epoch = ( s.size() > 6 ) ? std::strtoll( s.c_str() + 6, nullptr, 10 ) : 0;
-            out.commits.push_back( RawCommitStream::Commit{ epoch, {} } );
-            continue;
-        }
-        if( s.empty() )
-        {
-            continue;
-        }
-        if( out.commits.empty() )
-        {
-            out.commits.push_back( RawCommitStream::Commit {} ); // defensive: tformat always emits the marker first, but never crash on a malformed stream
-        }
-        out.commits.back().paths.push_back( std::move( s ) );   // readByteSafeLine clear()s its buffer first, so moving out of it is safe
-    }
-    // K51: git died (a missing or corrupt object, a bad ref) — the lines above are a prefix, not the window — or the shell
-    // never ran it (127: not on PATH, 126: not executable), and there are no lines at all.
-    noteWalkExit( out, os::pclose( pipe ) );
+        out.commits.push_back( RawCommitStream::Commit{ rec.committerTs, rec.paths } );
+    }, GitWalkCutDisclosure::CarriedByCaller );   // main.cpp's amp=/churn= block turns it into history_unread
+    // K51: git died (a missing or corrupt object, a bad ref) — the records above are a prefix, not the
+    // window — or the shell never ran it (127: not on PATH, 126: not executable), and there are none.
+    out.unread   = walk.unread;
+    out.notRun   = walk.notRun;
+    out.exitCode = walk.exitCode;
+    out.cut      = walk.cut;
     return out;
 }
 
@@ -1678,6 +2181,7 @@ inline std::string gitWindowBoundarySha( const std::string& root, const std::str
     // the output to one line, so `.back()` is that line; gitCommandLines has already stripped its CR/LF tail.
     const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
                           + " log --no-ext-diff --no-textconv --since=" + shSingleQuote( defaultWindowSince( root, coSince ) )   // F1: the probe must resolve the window it guards, by the same rule
+                          + ( gitWalkMaxCommits() == 0 ? std::string{} : " -n " + std::to_string( gitWalkMaxCommits() + 1 ) )   // the walk it guards never reads past this
                           + " --format=%H 2>/dev/null | tail -1";
     const GitCommandLines res = gitCommandLines( cmd );
     if( !res.isStarted || res.lines.empty() )
@@ -1818,8 +2322,21 @@ inline std::int64_t gitHeadCommitEpoch( const std::string& root )
     return epoch > 0 ? epoch : 0;
 }
 
-inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::string& root, const IngestResult& ing, std::uint32_t days )
+// `windowUnreadOut` (hwh-fix4, N1): set when the walk ended (budget, failed or not started git) before it passed the
+// window floor, so a count can be short of the truth and a file under the threshold is not known to be cold. A walk
+// that ends past the floor read every window commit and does not set it; no history at all (no HEAD epoch) does not.
+// A walk that stopped (cut, failed, not started) before it read a record older than the window floor.
+inline bool gitWalkStoppedAboveFloor( const GitLogWalk& walk, bool passedFloor ) noexcept
 {
+    return ( walk.unread || walk.cut != GitWalkCut::None ) && !passedFloor;
+}
+
+inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::string& root, const IngestResult& ing, std::uint32_t days,
+                                                                  bool* windowUnreadOut = nullptr )
+{
+    bool  unreadSink = false;
+    bool& unread     = windowUnreadOut ? *windowUnreadOut : unreadSink;
+    unread           = false;
     PROFILE_SCOPE_DESCRIBE( "gitmine: gitFileCommitCountsInDayWindow (short-horizon churn)" );
     std::vector<std::uint32_t> counts( ing.files.size(), 0 );
     if( ing.files.empty() )
@@ -1839,57 +2356,35 @@ inline std::vector<std::uint32_t> gitFileCommitCountsInDayWindow( const std::str
     const GitPathIndex byGitPath = gitPathIndexOfFiles( ing );
     const auto         resolve   = [ & ]( const std::string& gp ) { return resolveGitPath( byGitPath, gp ); };
 
-    // Stream `git log --name-only` with each commit's epoch on its __C__ marker line: "__C__ <epoch>".
-    // A commit counts once per file it touches, iff its epoch is within [cutoff, headEpoch].
-    const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                          + " log --no-ext-diff --no-textconv " + kMergeDiffArgs + "--name-only --format=tformat:__C__%x20%ct 2>/dev/null";
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe )
+    // Stream `git log --name-only` through the shared NUL-framed reader: one record per commit, its
+    // committer epoch in hand. A commit counts once per file it touches, iff its epoch is within
+    // [cutoff, headEpoch].
+    std::vector<std::uint32_t> cur;   // this commit's resolved fileIds (dedup before tally)
+    bool passedFloor = false;         // a record older than the window was read: every window commit came before it
+    const GitLogWalk walk = forEachGitLogRecord( root, "", [ & ]( const GitLogRecord& rec )
     {
-        return counts;
-    }
-
-    bool                       inWindow = false;   // is the commit we are currently reading files for in-window?
-    std::vector<std::uint32_t> cur;                // this commit's resolved fileIds (dedup before tally)
-    const auto flush = [ & ]()
-    {
-        if( inWindow )
+        passedFloor |= ( rec.committerTs > 0 ) & ( rec.committerTs < cutoff );   // branch-free: a parsed epoch below the floor
+        if( rec.committerTs < cutoff || rec.committerTs > headEpoch )
         {
-            std::sort( cur.begin(), cur.end() );
-            cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
-            for( std::uint32_t f : cur )
+            return;   // out of window: this commit's files do not count
+        }
+        for( const std::string& gp : rec.paths )
+        {
+            const std::uint32_t f = resolve( gp );
+            if( f != UINT32_MAX )
             {
-                ++counts[f];
+                cur.push_back( f );
             }
         }
+        std::sort( cur.begin(), cur.end() );
+        cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
+        for( std::uint32_t f : cur )
+        {
+            ++counts[f];
+        }
         cur.clear();
-    };
-    std::string s;
-    while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
-    {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
-        {
-            s.pop_back();
-        }
-        if( s.rfind( "__C__", 0 ) == 0 )                       // new commit marker: "__C__ <epoch>"
-        {
-            flush();
-            const std::int64_t epoch = ( s.size() > 6 ) ? std::strtoll( s.c_str() + 6, nullptr, 10 ) : 0;
-            inWindow = ( epoch >= cutoff && epoch <= headEpoch );
-            continue;
-        }
-        if( s.empty() || !inWindow )
-        {
-            continue;
-        }
-        const std::uint32_t f = resolve( s );
-        if( f != UINT32_MAX )
-        {
-            cur.push_back( f );
-        }
-    }
-    flush();
-    os::pclose( pipe );
+    } );
+    unread = gitWalkStoppedAboveFloor( walk, passedFloor );
     return counts;
 }
 
@@ -2070,20 +2565,25 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
     // built BEFORE the log pipe opens, for the reason gitLogFileSets states: it runs a git probe of its own.
     const GitPathIndex byGitPath = gitPathIndexOfFiles( ing, onlyRoot );
 
-    const std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " log --no-ext-diff --no-textconv " + kMergeDiffArgs + windowArgs
-                          + "--name-only --format=tformat:__C__%x20%ct 2>/dev/null";
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe )
+    // Stream `git log --name-only` through the shared NUL-framed reader: one record per commit, its
+    // committer epoch in hand, its paths resolved against the index built above.
+    bool anyCommit = false;
+    forEachGitLogRecord( root, windowArgs, [ & ]( const GitLogRecord& rec )
     {
-        return m;
-    }
+        anyCommit                 = true;
+        const std::int64_t epoch  = rec.committerTs;
+        const std::int64_t ageSec = ( epoch > 0 && headEpoch > epoch ) ? ( headEpoch - epoch ) : 0;   // clamped: never > 1
+        const double       curWeight = std::pow( 0.5, ( double( ageSec ) / 86400.0 ) / kChurnDecayHalfLifeDays );
 
-    bool                       anyCommit = false;
-    double                     curWeight = 0.0;   // this commit's decayed weight
-    std::int64_t               curEpoch  = 0;     // this commit's committer epoch (F3: the newest one per file is kept)
-    std::vector<std::uint32_t> cur;               // this commit's resolved fileIds (dedup before tally)
-    const auto flush = [ & ]()
-    {
+        std::vector<std::uint32_t> cur;   // this commit's resolved fileIds (dedup before tally)
+        for( const std::string& gp : rec.paths )
+        {
+            const std::uint32_t f = resolveGitPath( byGitPath, gp );
+            if( f != UINT32_MAX )
+            {
+                cur.push_back( f );
+            }
+        }
         std::sort( cur.begin(), cur.end() );
         cur.erase( std::unique( cur.begin(), cur.end() ), cur.end() );
         if( cur.size() >= 1 && cur.size() <= maxFiles )
@@ -2091,44 +2591,14 @@ inline DecayedChurnMined gitLogDecayedFileMining( const std::string& root, const
             for( std::uint32_t f : cur )
             {
                 weights[f] += curWeight;
-                if( curEpoch > m.lastEpoch[f] ) { m.lastEpoch[f] = curEpoch; }
+                if( epoch > m.lastEpoch[f] ) { m.lastEpoch[f] = epoch; }   // F3: the newest epoch per file is kept
             }
         }
         else if( cur.size() > maxFiles )
         {
             ++m.mergeBombsSkipped;   // the rule fired: disclosed on <recent>, never silently absorbed
         }
-        cur.clear();
-    };
-    std::string s;
-    while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
-    {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
-        {
-            s.pop_back();
-        }
-        if( s.rfind( "__C__", 0 ) == 0 )   // new commit marker: "__C__ <epoch>"
-        {
-            flush();
-            anyCommit                 = true;
-            const std::int64_t epoch  = ( s.size() > 6 ) ? std::strtoll( s.c_str() + 6, nullptr, 10 ) : 0;
-            const std::int64_t ageSec = ( epoch > 0 && headEpoch > epoch ) ? ( headEpoch - epoch ) : 0;   // clamped: never > 1
-            curWeight                 = std::pow( 0.5, ( double( ageSec ) / 86400.0 ) / kChurnDecayHalfLifeDays );
-            curEpoch                  = epoch;
-            continue;
-        }
-        if( s.empty() )
-        {
-            continue;
-        }
-        const std::uint32_t f = resolveGitPath( byGitPath, s );
-        if( f != UINT32_MAX )
-        {
-            cur.push_back( f );
-        }
-    }
-    flush();
-    os::pclose( pipe );
+    } );
     m.anyHistory = anyCommit;
     return m;
 }
@@ -2430,11 +2900,12 @@ inline std::vector<FileOwnership> gitFileAuthors(
     };
     const std::string rootSlash = root + "/";
 
-    // git log -c --name-only --format=tformat:__C__%ae|%at 2>/dev/null  (optionally scoped to one path with
-    // -- <relpath>): one "__C__email|unix-ts" header per commit, then its changed files, one per line,
-    // until a blank line / the next header. Mirrors gitCommitFileSets' exact invocation style.
-    std::string cmd = gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root )
-                     + " log --no-ext-diff --no-textconv " + kMergeDiffArgs + "--name-only --format=tformat:__C__%ae\\|%at";
+    // git log -c -z --name-only --format='%x00__C__%x00%ae%x00%at%x00%ct' 2>/dev/null  (optionally
+    // scoped to one path with `-- <relpath>`): one record per commit through the shared NUL-framed
+    // reader, author email and author timestamp as their own fields. NO trailing %x00 — the last
+    // field runs to the stream's end, and the boundary rule reads the empty that FOLLOWS it.
+    // Mirrors every other consumer's single-pass invocation style.
+    std::string extraArgs;
     if( singleFile )
     {
         const std::string& fp = ing.files[ onlyFileId ];
@@ -2443,65 +2914,49 @@ inline std::vector<FileOwnership> gitFileAuthors(
         {
             relPath = fp.substr( rootSlash.size() );
         }
-        cmd += " -- " + shSingleQuote( relPath );
+        // extraArgs rides at the END of the command (see gitLogRecordsCmd): a pathspec is only a pathspec
+        // when it comes last, and anything after `--` is read as a path or revision. The trailing space
+        // keeps the `2>/dev/null` redirect from gluing onto the quoted path. Both properties are
+        // load-bearing — without the first, git reads the following -z --name-only --format=… as path
+        // arguments and answers in its DEFAULT format, which the reader sees as a stream with no marker
+        // in it (measured as "git unavailable / no history" while the all-files form was correct).
+        extraArgs = " -- " + shSingleQuote( relPath ) + " ";
     }
-    cmd += " 2>/dev/null";
 
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe )
+    forEachGitLogRecord( root, extraArgs, [ & ]( const GitLogRecord& rec )
     {
-        return {};
-    }
-
-    std::string  curEmail;
-    std::int64_t curTs = 0;
-    bool         haveCommit = false;
-    std::string  s;
-    while( readByteSafeLine( pipe, s ) )   // F6: THE line reader, not a char[4096] a long path can be split across
-    {
-        while( !s.empty() && ( s.back() == '\n' || s.back() == '\r' ) )
+        // The old line frame parsed `email|ts` out of one field and skipped the commit's files when
+        // either half was missing or the epoch did not parse. Under the NUL frame the epoch half of
+        // that guard stands alone: git never stamps a real commit at or before the epoch, and a
+        // header that forged one is exactly what this frame exists to make impossible. The EMAIL half
+        // had to go — git accepts an empty author email (--author="No Email <>", PR #433 review), and
+        // the frame now delivers such a record intact, so skipping on an empty email would discard
+        // real history; the ownership key for it is honestly empty.
+        if( rec.authorTs <= 0 )
         {
-            s.pop_back();
+            return;
         }
-        if( s.compare( 0, 5, "__C__" ) == 0 )
+        std::string curEmail = rec.authorEmail;
+        for( char& c : curEmail )
         {
-            const std::string_view rest( s.data() + 5, s.size() - 5 );
-            const std::size_t      pipePos = rest.find( '|' );
-            if( pipePos == std::string_view::npos || pipePos == 0 || pipePos + 1 >= rest.size() )
+            c = char( std::tolower( static_cast<unsigned char>( c ) ) );
+        }
+        const std::int64_t curTs = rec.authorTs;
+        for( const std::string& gp : rec.paths )
+        {
+            const std::uint32_t f = resolve( gp );
+            if( f == UINT32_MAX )
             {
-                haveCommit = false;
                 continue;
             }
-            curEmail = rest.substr( 0, pipePos );
-            for( char& c : curEmail )
+            perFile[ f ][ curEmail ].push_back( curTs );
+            std::int64_t& newest = newestTsByFile[ f ];
+            if( curTs > newest )
             {
-                c = char( std::tolower( static_cast<unsigned char>( c ) ) );
+                newest = curTs;
             }
-            const std::string tsStr( rest.substr( pipePos + 1 ) );
-            char* end = nullptr;
-            curTs = std::strtoll( tsStr.c_str(), &end, 10 );
-            haveCommit = ( end != tsStr.c_str() );
-            continue;
         }
-        if( s.empty() || !haveCommit )
-        {
-            continue; // blank separator line, or malformed header — skip its files
-        }
-
-        const std::uint32_t f = resolve( s );
-        if( f == UINT32_MAX )
-        {
-            continue;
-        }
-
-        perFile[ f ][ curEmail ].push_back( curTs );
-        std::int64_t& newest = newestTsByFile[ f ];
-        if( curTs > newest )
-        {
-            newest = curTs;
-        }
-    }
-    os::pclose( pipe );
+    } );
 
     std::vector<FileOwnership> result;
     result.reserve( perFile.size() );
@@ -2904,13 +3359,28 @@ inline bool coPairDependencyCapable( const IngestResult& ing, std::uint32_t a, s
 //   degRev  = conf(partner => probed): the other direction, over the PARTNER's own commit count.
 //             The pair form's symmetric deg= is max(deg, degRev) — see coConfidence above.
 //   recur   = how many of `subWindows` sub-windows contain a joint commit (Clio recurrence).
-struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; double degRev; std::uint32_t recur; bool surprising; bool depCapable; };
+struct CoPartner { std::uint32_t fileId; std::uint32_t together; double deg; double degRev; std::uint32_t recur; bool surprising; bool depCapable;
+                   std::uint32_t noEdgeLangs = 0; };   // arch-honest: non-zero = a side's language draws no file edge, so surprising= is unknown (coPairVerdict)
 
 // The row's verdict attribute, rendered ONCE for all four emitters (--cochange repo-wide `<pair>`, its
 // per-file `<f>`, --pr-context's `<partner>`, and — via the JSON pair below — the MCP verb). Three states,
 // two spellings: hidden coupling ⇒ surprising="1"; coupled and explained ⇒ nothing (the quiet default);
 // the question undefined for this pair ⇒ dep_capable="0". Spelled here so a later edit cannot teach one
 // emitter a vocabulary the others do not speak — the §P9.1 defect, one attribute over.
+//
+// arch-honest: a fourth state. A pair with a side in a language this build draws no file edge for (Go, Java, ...) and no observed
+// edge between the files proves nothing: the missing edge is the missing resolver, not an absent dependency. It carries
+// no_file_edges="go" where surprising="1" would be, never the hidden-coupling claim (nfpm: 20 of 64 Go pairs read it).
+struct CoPairVerdict { bool surprising = false; std::uint32_t noEdgeLangs = 0; };
+inline CoPairVerdict coPairVerdict( const IngestResult& ing, std::uint32_t a, std::uint32_t b, bool isDepCapable, bool isStaticallyCoupled ) noexcept
+{
+    if( !isDepCapable || isStaticallyCoupled )
+    {
+        return {};
+    }
+    const std::uint32_t langs = noFileEdgeLangBit( langOfPath( ing.files[a] ) ) | noFileEdgeLangBit( langOfPath( ing.files[b] ) );
+    return langs != 0 ? CoPairVerdict{ false, langs } : CoPairVerdict{ true, 0 };
+}
 inline const char* coPairAttr( bool isDepCapable, bool isSurprising ) noexcept
 {
     if( !isDepCapable )
@@ -2919,7 +3389,18 @@ inline const char* coPairAttr( bool isDepCapable, bool isSurprising ) noexcept
     }
     return isSurprising ? " surprising=\"1\"" : "";
 }
-inline const char* coPairAttr( const CoPartner& p ) noexcept { return coPairAttr( p.depCapable, p.surprising ); }
+// The fourth state rides beside it: noEdgeLangs != 0 only on a dependency-capable pair whose surprising is false (coPairVerdict).
+inline std::string coPairAttr( const CoPartner& p )
+{
+    std::string attr( coPairAttr( p.depCapable, p.surprising ) );
+    attr += noFileEdgesAttrXml( p.noEdgeLangs );
+    return attr;
+}
+// The MCP twin's JSON key for the same fourth state: present only where the XML row carries no_file_edges=.
+inline std::string coPairNoEdgeKeyJson( const CoPartner& p )
+{
+    return p.depCapable && p.noEdgeLangs != 0 ? ",\"no_file_edges\":\"" + noFileEdgeLangTags( p.noEdgeLangs ) + "\"" : std::string();
+}
 
 // Partners of `fileSubstr`: files that historically change in the same commit. deg = fraction of the
 // file's commits the partner also appears in; surprising = no transitive static #include either way (A4-F22:
@@ -2999,9 +3480,10 @@ inline std::vector<CoPartner> cochangePartners( const IngestResult& ing, std::st
             // §A9.3: surprising= is gated on BOTH sides being dependency-capable — see coPairDependencyCapable.
             const bool isDepCapable = coPairDependencyCapable( ing, fid, other );
             const auto maskIt       = recurMask.find( other );
+            const CoPairVerdict verdict = coPairVerdict( ing, fid, other, isDepCapable, isDepCapable && cache.get( ing ).isStaticallyCoupled( fid, other ) );
             res.push_back( { other, n, coConfidence( n, freq[fid] ), coConfidence( n, freq[other] ),
                              coRecurrenceOf( maskIt == recurMask.end() ? 0u : maskIt->second ),
-                             isDepCapable && !cache.get( ing ).isStaticallyCoupled( fid, other ), isDepCapable } );
+                             verdict.surprising, isDepCapable, verdict.noEdgeLangs } );
         }
     }
     std::sort( res.begin(), res.end(), [ & ]( const CoPartner& x, const CoPartner& y )
@@ -3362,17 +3844,18 @@ inline bool gitChurnCounts( const std::string& root, const rw::IngestResult& ing
                      std::uint32_t onlyRoot = UINT32_MAX )   // multi-root §5: count ONLY files of that root
 {
     const std::string windowArgs = rw::historyWindowArgs( root, scope, since );
-    const rw::GitCommandLines touched = rw::gitCommandLines(
-        gitCmd( " -c core.quotepath=false -C " ) + shSingleQuote( root ) + " log --no-ext-diff --no-textconv " + rw::kMergeDiffArgs + windowArgs + "--name-only --format= 2>/dev/null" );
-    if( !touched.isStarted )
+    // Through THE record walk (forEachGitLogRecord): the same paths, with its --no-renames, its budget and its cut disclosure.
+    rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
+    const rw::GitLogWalk walk = rw::forEachGitLogRecord( root, windowArgs, [ & ]( const rw::GitLogRecord& rec )
+    {
+        for( const std::string& p : rec.paths )
+        {
+            ++counts[p];
+        }
+    } );
+    if( walk.notRun )
     {
         return false;
-    }
-
-    rw::HashMap<std::string, std::uint32_t> counts;   // repo-relative path → # commits touching it
-    for( const std::string& p : touched.lines )
-    {
-        ++counts[p];
     }
     if( counts.empty() )
     {

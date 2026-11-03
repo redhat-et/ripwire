@@ -6,16 +6,17 @@
 # against every same-named definition the corpus holds.
 #
 # THE CONTRACT. A hop whose definition scope names a TYPE or MODULE definition the index holds in the same language (a
-# class/struct/interface/named type, or a module: Rust mod, Ruby module) prints n="Owner.name", with Owner the scope's last
-# segment — the same spelling the shared selector resolves (--callers=Owner.name). A free function, a member of a scope the
+# class/struct/interface/named type, or a module: Rust mod, Ruby module) prints n="Owner<sep>name", Owner the stored scope and
+# <sep> the language's (QUALNAME-1: `::` C/C++/Rust, `#` Ruby — a `def self.` singleton too, a disclosed floor — `.` elsewhere) —
+# a spelling the shared selector resolves (--callers=Owner::name). A free function, a member of a scope the
 # index holds no such definition for (a C++ namespace), and a type hop itself stay bare. The legend clause rides only when a
 # row carries an owner, so an answer without one is byte-identical. MCP path_between prints the same rows.
 #
 # ARMS
-#   (A) C++: topCpp -> Matcher::run -> outer::inner::Scanner::scan -> inner::leaf — Matcher.run, Scanner.scan; leaf (namespace) bare.
+#   (A) C++: topCpp -> Matcher::run -> outer::inner::Scanner::scan -> inner::leaf — Matcher::run, Scanner::scan; leaf (namespace) bare.
 #   (B) Python: entry -> Reader.read -> Writer.write -> helper; the module functions stay bare.
-#   (C) Rust: rs_entry -> Engine.start -> Engine.ignite -> m.modfn (a `mod` is an indexed module owner).
-#   (D) Ruby: Task.run -> Exec.execute; a module method: Util.fmt -> Inner.go.
+#   (C) Rust: rs_entry -> Engine::start -> Engine::ignite -> m::modfn (a `mod` is an indexed module owner).
+#   (D) Ruby: Task#run -> Exec#execute; a module method: Util#fmt (singleton, `#` by the disclosed floor) -> Inner#go.
 #   (E) two owners, one name, one path: callA -> A.go -> B.go -> twoOwners — the two go rows are distinguishable.
 #   (F) negative: a path of free functions only (C) prints bare rows and no owner legend clause.
 #   (G) negative: a C++ function in namespace Reader beside a Python class Reader stays bare (owner must be the hop's language).
@@ -147,12 +148,12 @@ expect(){   # LABEL DIR FROM,TO EXPECTED-ROWS
 }
 
 echo "(A)-(E) owners on member hops"
-expect "(A) C++ class members, namespace function bare" "$TMP/cpp" "topCpp,leaf" "topCpp Matcher.run Scanner.scan leaf"
+expect "(A) C++ class members, namespace function bare" "$TMP/cpp" "topCpp,leaf" "topCpp Matcher::run Scanner::scan leaf"
 expect "(B) Python methods, module functions bare"      "$TMP/py"  "entry,helper" "entry Reader.read Writer.write helper"
-expect "(C) Rust impl methods + mod member"             "$TMP/rs"  "rs_entry,modfn" "rs_entry Engine.start Engine.ignite m.modfn"
-expect "(D1) Ruby class methods"                        "$TMP/rb"  "run,execute" "Task.run Exec.execute"
-expect "(D2) Ruby module method"                        "$TMP/rb"  "fmt,go" "Util.fmt Inner.go"
-expect "(E) two owners of one name in one path"         "$TMP/two" "callA,twoOwners" "callA A.go B.go twoOwners"
+expect "(C) Rust impl methods + mod member"             "$TMP/rs"  "rs_entry,modfn" "rs_entry Engine::start Engine::ignite m::modfn"
+expect "(D1) Ruby class methods"                        "$TMP/rb"  "run,execute" "Task#run Exec#execute"
+expect "(D2) Ruby module method"                        "$TMP/rb"  "fmt,go" "Util#fmt Inner#go"
+expect "(E) two owners of one name in one path"         "$TMP/two" "callA,twoOwners" "callA A::go B::go twoOwners"
 
 echo "(F)/(G)/(I) bare where no owner"
 expect "(F) free functions only" "$TMP/c" "c_top,c_leaf" "c_top c_mid c_leaf"
@@ -187,7 +188,7 @@ for spec in "cpp topCpp,leaf" "py entry,helper" "rs rs_entry,modfn" "rb run,exec
     set -- $spec
     runp "$TMP/$1" "$2"
     for n in $( hops ); do
-        case "$n" in *.*) ;; *) continue ;; esac
+        case "$n" in *.*|*::*|*'#'*) ;; *) continue ;; esac   # QUALNAME-1: every language separator (., ::, #)
         xn=$(( xn + 1 ))
         out="$( "$BIN" "$TMP/$1" --no-cache "--callers=$n" 2>&1 )"; xrc=$?
         d="$( printf '%s' "$out" | grep -o '<callers [^>]* defs="[0-9]*"' | grep -o 'defs="[0-9]*"' | grep -o '[0-9]*' )"
@@ -230,7 +231,7 @@ mrc=$?
 if [ "$mrc" -eq 0 ]; then ok "(M) path_between rows + owner clause equal the CLI's on A-E"; else no "(M) MCP path_between disagrees with the CLI (rc=$mrc, details above)"; fi
 
 echo "(H) Go receiver owners"
-if "$BIN" "$TMP/go" --no-cache --for="scan Loop" --signatures-only 2>/dev/null | grep -q 'n="scan" sc="Matcher"'; then
+if "$BIN" "$TMP/go" --no-cache --for="scan Loop" --signatures-only 2>/dev/null | grep -q 'n="Matcher.scan"'; then   # QUALNAME-1: a <d> member row folds sc= into n=
     expect "(H) Go methods by receiver" "$TMP/go" "Loop,goLeaf" "Matcher.Loop Matcher.scan goLeaf"
 else
     no "(H) Go methods carry no sc= on this binary (go-scope #403 is on main): the receiver owners cannot print"

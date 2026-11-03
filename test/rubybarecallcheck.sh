@@ -489,7 +489,9 @@ reaches(){
 # misses SYM CALLER WHY — CALLER is NOT a caller of SYM
 misses(){
     callers "$FIX" "$1" || return
-    grep -q " n=\"$2\"" "$DIR/c.rows" && no "$2 reaches $1 — $3" || ok "$2 does not reach $1 ($3)"
+    # QUALNAME-1: a Ruby method caller prints Owner#name — the negative rejects the bare AND every Owner#-qualified spelling
+    # (a bare-only probe would pass vacuously); the matching reaches arms pin the exact qualified rows, so this can fail.
+    grep -qE " n=\"([A-Za-z0-9_:]+#)?$2\"" "$DIR/c.rows" && no "$2 reaches $1 — $3" || ok "$2 does not reach $1 ($3)"
 }
 # missesFrom SYM FILE WHY — no caller of SYM sits in FILE
 missesFrom(){
@@ -503,32 +505,32 @@ uncalled(){
 }
 
 echo "=== a bare word is a call: each shape reaches the method it names ==="
-reaches Person::first_name     full_name      "an operand of +"
-reaches Person::last_name      full_name      "the other operand"
-reaches Person::render_profile show           "a statement on its own"
-reaches Person::greeting       render_profile "inside string interpolation"
-reaches Person::items          total          "the receiver of another call"
-reaches Person::message        logs           "an argument"
-reaches Person::payload        shorthand      "a hash shorthand { payload: } reads payload"
-reaches Person::endless_target endless        "an endless def's body"
-reaches Person::process_one    each_item      "inside a block — i is the block's parameter, process_one is not"
-reaches Person::title          label          "an attr_reader's accessor"
+reaches Person::first_name     Person#full_name      "an operand of +"
+reaches Person::last_name      Person#full_name      "the other operand"
+reaches Person::render_profile Person#show           "a statement on its own"
+reaches Person::greeting       Person#render_profile "inside string interpolation"
+reaches Person::items          Person#total          "the receiver of another call"
+reaches Person::message        Person#logs           "an argument"
+reaches Person::payload        Person#shorthand      "a hash shorthand { payload: } reads payload"
+reaches Person::endless_target Person#endless        "an endless def's body"
+reaches Person::process_one    Person#each_item      "inside a block — i is the block's parameter, process_one is not"
+reaches Person::title          Person#label          "an attr_reader's accessor"
 reaches boot_now               "&lt;file-scope&gt;" "a top-level bare call is owned by the file"
 
 echo "=== implicit self: the caller's own class, then its superclass — never a split ==="
-reaches Person::helper           run "Rule 1: the enclosing class defines helper"
+reaches Person::helper           Person#run "Rule 1: the enclosing class defines helper"
 misses  Robot::helper            run "Robot::helper is another class's method"
-reaches Parent::inherited_helper go  "the base walk: Child < Parent"
+reaches Parent::inherited_helper Child#go  "the base walk: Child < Parent"
 misses  Robot::inherited_helper  go  "Robot is not an ancestor of Child"
 
 echo "=== Ruby has no declarations: a body-less accessor or hook is the definition a call names ==="
-reaches Tracker::aliases t_bare  "the caller's own private attr_reader"
+reaches Tracker::aliases Tracker#t_bare  "the caller's own private attr_reader"
 misses  Join::aliases    t_bare  "Join::aliases is another class's method"
-reaches Tracker::aliases t_self  "self.aliases — the receiver form, misrouted before this round too"
+reaches Tracker::aliases Tracker#t_self  "self.aliases — the receiver form, misrouted before this round too"
 misses  Join::aliases    t_self  "self.aliases never reaches Join"
-reaches Tracker::aliases t_paren "aliases() — the parenthesised form"
+reaches Tracker::aliases Tracker#t_paren "aliases() — the parenthesised form"
 misses  Join::aliases    t_paren "aliases() never reaches Join"
-reaches Hooks::on_event  fire    "an inherited EMPTY hook is a definition: the base walk finds it"
+reaches Hooks::on_event  Hooked#fire    "an inherited EMPTY hook is a definition: the base walk finds it"
 misses  Join::on_event   fire    "Join is not an ancestor of Hooked"
 
 # calleeIn FN NAME FILE WHY — FN's callees include NAME defined in FILE
@@ -554,10 +556,10 @@ misses Decoy::it implicit_params "it inside a parameterless block is the block's
 uncalled Decoy::x_defined "floor (a): defined?( x ) calls nothing (stated)"
 
 echo "=== the same spelling IS a call where Ruby says so ==="
-reaches Decoy::pre_bound   before_bind     "a read BEFORE the assignment is a call"
-reaches Decoy::sib_local   sibling         "a local of a sibling block does not leak out of it"
-reaches Decoy::wall_x      through_wall    "a class-body local does not cross the def wall"
-reaches Decoy::other_param no_param_here   "another method's parameter is not in scope here"
+reaches Decoy::pre_bound   Scoping#before_bind     "a read BEFORE the assignment is a call"
+reaches Decoy::sib_local   Scoping#sibling         "a local of a sibling block does not leak out of it"
+reaches Decoy::wall_x      Scoping#through_wall    "a class-body local does not cross the def wall"
+reaches Decoy::other_param Scoping#no_param_here   "another method's parameter is not in scope here"
 misses  Decoy::other_param param_elsewhere "the parameter itself is a local where it is declared"
 
 echo "=== RSpec: a group's lets, subject and named subject bind over the whole group ==="
@@ -590,7 +592,7 @@ sed 's/^    x_asg = 1$/    y_asg = 1/' "$FIX/lib/app/locals.rb" >"$MUT/lib/app/l
 grep -q '^    y_asg = 1$' "$MUT/lib/app/locals.rb" || no "mutation did not apply"
 if callers "$MUT" "Decoy::x_asg"
 then
-    grep -q ' n="assign"' "$DIR/c.rows" && ok "mutation: with the binding renamed, assign → Decoy::x_asg (the included module's method)" \
+    grep -q ' n="Locals#assign"' "$DIR/c.rows" && ok "mutation: with the binding renamed, assign → Decoy::x_asg (the included module's method)" \
         || no "mutation: renamed binding, but assign still does not call Decoy::x_asg"
 fi
 

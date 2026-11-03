@@ -1,0 +1,4 @@
+[package]
+name = "app"
+[dependencies]
+xp-c5-core = { path = "../core" }

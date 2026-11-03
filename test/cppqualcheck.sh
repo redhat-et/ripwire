@@ -59,22 +59,49 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 [ -d "$FIX" ] || { echo "no test/cppqualfix dir — fixture missing"; exit 2; }
 cd "$ROOT"
 
-# BINARY FLAVOUR, detected once (§9 reads it too). From the binary's UNDEFINED symbols: a -fsanitize=integer
-# build imports __ubsan_handle_* from the runtime and an ASan build __asan_report_*; a plain one imports none.
-# `strings` is the fallback for a toolchain without nm; if neither tool is present the flavour is UNKNOWN.
+# BINARY FLAVOUR, detected once (§9 reads it too). Three independent signs, any one is enough:
+#   (1) UNDEFINED symbols: a -fsanitize=integer build imports __ubsan_handle_* from the runtime and an ASan build
+#       __asan_report_*; a plain one imports none. This is how a macOS (dynamic-runtime) build is recognised.
+#   (2) the runtime's own symbol names INSIDE the binary: Linux clang links the sanitizer runtime STATICALLY, so
+#       there the same symbols are DEFINED and `nm -u` lists none of them — (1) alone read the Linux ASan CI binary
+#       as "plain" (every ubuntu asan log printed `flavour=plain alarm=30s`), which silently kept the 30 s plain
+#       alarm on a sanitizer binary whose one cold repo-root call costs ~22-30 s (issue #421: two TIMEOUTs).
+#   (3) the runtime answering ASAN_OPTIONS=help=1 (the probe abicheck.sh uses) — survives a stripped binary.
+# A binary none of the three recognises stays plain (or UNKNOWN without nm and strings): it is never guessed up.
 BINFLAV="unknown"
 if command -v nm >/dev/null 2>&1; then
     nm -u "$BIN" 2>/dev/null | grep -qE '__ubsan_handle|__asan_report' && BINFLAV="sanitizer" || BINFLAV="plain"
 elif command -v strings >/dev/null 2>&1; then
     strings -a "$BIN" 2>/dev/null | grep -q '__asan_annotation' && BINFLAV="sanitizer" || BINFLAV="plain"
 fi
+if [ "$BINFLAV" != sanitizer ]; then
+    if LC_ALL=C grep -q -a -E '__asan_init|__asan_report_load|__ubsan_handle_' "$BIN" 2>/dev/null \
+        || ASAN_OPTIONS=help=1 "$BIN" --version 2>&1 | grep -q 'AddressSanitizer'; then
+        BINFLAV="sanitizer"
+    fi
+fi
 
 # PER-CALL BUDGET. Every call runs under a perl alarm so a hang fails the gate instead of the CI job. 30 s for a
-# plain binary; 90 s for a sanitizer one, which runs ~3x slower locally and slower still on a shared CI runner
-# (the macOS ASan leg measured 16-30 s for ONE cold repo-root call, so a 30 s budget was a coin toss there).
+# plain binary; 90 s for a sanitizer one, which runs ~3-4x slower locally and slower still on a shared CI runner
+# (CI measured 22-30 s for ONE cold repo-root call on BOTH asan legs, so a 30 s budget was a coin toss there).
+# The alarm is a HANG guard, not a speed gate: 90 s is 3x the worst measured ASan call, and a 10x slowdown of that
+# call (220-300 s) or a true hang still trips it; the plain build keeps 30 s (its call costs ~6-9 s on a loaded Mac).
 ALARM=30
 [ "$BINFLAV" = sanitizer ] && ALARM=90
-echo "cppqualcheck: BIN=$BIN  CORPUS=test/cppqualfix + repo root  flavour=$BINFLAV  alarm=${ALARM}s per call"
+# THE COLD REPO-ROOT PARSE FOLLOWS THE HARNESS SCALE (CI-FLAKES, 2026-10-27). The first call of each verb at the repo root
+# parses all ~4,400 tracked files cold; it is CPU-bound and splits the cores with whatever else the shard runs. Measured on
+# a 10-core Mac with a plain build: 3.8 s alone, 11.7 s next to 3 more cold parses, 28.7 s next to 7 (linear in the load) —
+# and a CI runner has 3-4 cores with `-j 3` gates sharing them, which is the "3-8x multiplier" test/pargates.py already
+# declares and passes down as --budget-scale. macOS Release shard 3 crossed the 30 s alarm on that first call on most
+# runs of 2026-10-26 (CI runs 40380040283, 40417160699, 40382636401, 40388958004: both --uses=selectBaseline and
+# --uses=readWholeFile timed out, the killed parse writing no cache for the second to reuse). The harness exports that
+# factor as PARGATES_BUDGET_SCALE; a COLD repo-root call gets ALARM x it (never less than ALARM: a stray 0.5 or a word
+# does not shrink the guard), a WARM call (cache file present: ~1 s alone) keeps ALARM, and a hang still trips either.
+# A local run has no harness, so the scale is 1 and nothing changes there.
+SCALE="${PARGATES_BUDGET_SCALE:-1}"
+COLDALARM="$( awk -v a="$ALARM" -v s="$SCALE" 'BEGIN { if( s !~ /^[0-9]+([.][0-9]+)?$/ || s + 0 < 1 ) s = 1; v = a * s; printf "%d", ( v == int( v ) ) ? v : int( v ) + 1 }' )"
+case "$COLDALARM" in ''|*[!0-9]*) COLDALARM="$ALARM";; esac
+echo "cppqualcheck: BIN=$BIN  CORPUS=test/cppqualfix + repo root  flavour=$BINFLAV  alarm=${ALARM}s per call (cold repo-root parse: ${COLDALARM}s, harness scale ${SCALE})"
 
 # A call that is KILLED or FAILS prints nothing on stdout, and an empty output reads as a count of '' — which
 # used to surface as "expected 32", a wrong-answer verdict for what was a timeout (CHECKLIST 14). So `run`
@@ -127,7 +154,7 @@ expect callers freeTmpl   1 "explicit-template-arg call names its caller"
 # `b::Box<int>::get` as `Box` and spray an edge onto the Box CLASS DEF — a plausible, wrong graph. The
 # re-split (last TOP-LEVEL `::`, template args stripped from the scope half) is what prevents it.
 CALLEES="$( run "$FIX" --callees=callerQualified --no-cache )"
-printf '%s' "$CALLEES" | grep -q 'n="get"' \
+printf '%s' "$CALLEES" | grep -q 'n="Box::get"' \
     && ok "templated-scope call resolves to the METHOD get" \
     || no "templated-scope call did not resolve to get: $CALLEES"
 printf '%s' "$CALLEES" | grep -q 'n="Box"' \
@@ -222,8 +249,12 @@ RCDIR="$( mktemp -d )"; trap 'rm -rf "$RCDIR"' EXIT
 # rrun VAR --VERB=SYM… — one repo-root call on that verb's cache: stdout into VAR, returns the call's own rc
 # (non-zero has already printed its TIMEOUT/ERROR line). An arm compares a count only when the call succeeded.
 rrun(){
-    local __out __rc __verb="${2%%=*}"
-    __out="$( run . "${@:2}" --cache="$RCDIR/${__verb#--}.cache" )"; __rc=$?
+    local __out __rc __verb="${2%%=*}" __cache __budget="$ALARM" __cold=0 __t0
+    __cache="$RCDIR/${__verb#--}.cache"
+    [ -e "$__cache" ] || { __cold=1; __budget="$COLDALARM"; }   # no cache file yet: this call parses the whole tree cold
+    __t0="$( date +%s )"
+    __out="$( ALARM="$__budget" run . "${@:2}" --cache="$__cache" )"; __rc=$?
+    [ "$__cold" = 1 ] && printf '  ..    cold repo-root parse (%s): rc=%s in %ss of its %ss budget\n' "$2" "$__rc" "$(( $( date +%s ) - __t0 ))" "$__budget"
     printf -v "$1" '%s' "$__out"
     return "$__rc"
 }
@@ -308,10 +339,31 @@ rrun US --uses=selectBaseline \
 # through the canonical helper — one new call site, same helper.
 # 31 -> 32 (lane/cr-qd-kinds-068): quality.h defectSitesOf reads each C++ / Python / Bash test-script file for the
 # defect-shape scanners through the canonical helper — one new call site, same helper.
+# 32 -> 35 (lane/fc2-lego-extparent fix 1 + fix 2): cargoCrateNames and pythonRootPackageImports read each Cargo.toml / the root
+# pyproject.toml through the canonical helper (two call sites, fix 1), and rustFileAlias (called by rustOutsideUses) reads a .rs file to find its
+# `extern crate … as` / `use … as` crate aliases (one more, fix 2) — three new call sites, same helper.
+# 35 -> 36 (lane/ep-manifest): findGroupConsumers reads each indexed .py file once for the entry-point group literals.
+# 36 -> 37 (lane/qn-input, train 37b): the written-spelling seed tier (graph.h resolveAllByWrittenSpelling) reads a C/C++ candidate's
+# source through the canonical helper to read its namespace and class chain — one new call site, same helper.
+# 37 -> 38 (lane/testonly-dead, D1): --dead-code's test-only name vetting (verbs_quality.h dropTestOnlySpelledInLibrary) reads each
+# non-test code file once through the canonical helper — one new call site, same helper, no new fopen/fread.
+# 38 -> 39 2026-10-28 (train 41, lane/upward-2hop): the ranked caller hop's seed choice (forcallerhop.h ForRankedSources::of)
+# reads a candidate's file once through the canonical helper to find its message literal — one new call site, same helper
+# (measured: the one new <u> row at src/forcallerhop.h:322 on the composed tree; main 12056c16 answers 38).
+# 39 -> 41 2026-10-29 (lane/alias-import): the re-export hop rows (forreexport.h) read two kinds of file through the canonical helper — a
+# crate's Cargo.toml (buildRustCrates, once per manifest) and a statement's source file (Sources::of, once per file, memoised, for the
+# `pub` check and the row's line). Two new call sites, same helper, no new fopen/fread.
+# 41 -> 44 2026-10-30 (train 42b, composition of lane/alias-import and lane/mf1-lit): the literal block (forliteral.h) reads the
+# shown sites' files through the same helper at three sites (the docstring/tier read, the owner body, the context rows). No new fopen.
+# 44 -> 45 2026-10-30 (train 43a, composition of lane/for-file-anchor over train 42b): src/forfilepage.h loadFileText reads the named
+# file's whole text (the page's top-level lines) through the same canonical helper — one new call site, same helper
+# (the lane's own step was 39 -> 40, CI run 41021256300 answered 40 at fa51be6b).
+# 45 -> 46 2026-11-01 (lane/unused-in-file fix round 1): src/forunused.h reads every file its scan touches (indexed files, unindexed text files,
+# manifests) through ONE helper, readText; the round first made four new call sites (49), the helper is the one that remains. No new fopen.
 rrun RW --uses=readWholeFile \
-&& { [ "$( cnt "$RW" )" = 32 ] \
-    && ok "repo: --uses=readWholeFile count=32 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
-    || no "repo: --uses=readWholeFile expected 32, got '$( cnt "$RW" )'"; }
+&& { [ "$( cnt "$RW" )" = 46 ] \
+    && ok "repo: --uses=readWholeFile count=46 (docparse::detail:: — a seam the audit's rw::-anchored grep missed)" \
+    || no "repo: --uses=readWholeFile expected 46, got '$( cnt "$RW" )'"; }
 rrun WC --callers=writeTally \
 && { [ "$( cnt "$WC" )" = 1 ] \
     && ok "repo: --callers=writeTally count=1 (was 0 — both template call sites are in writeDocDriftPage)" \
@@ -428,8 +480,8 @@ if [ -d "$DEC" ]; then
     printf '%s' "$DMAP" | grep -q 'ambiguous=0 unresolved=0' \
         && ok "decoy corpus: ambiguous=0 — the template-arg strip kept every call canonically bound" \
         || no "decoy corpus: expected ambiguous=0 (a lost stripTemplateArgs sprays Box::get across Other::get): $( printf '%s' "$DMAP" | grep -oE 'ambiguous=[0-9]+ unresolved=[0-9]+' )"
-    printf '%s' "$DSTR" | grep -qE '<s [^>]*n="get" p="[^"]*decoy\.cpp:41"' \
-        && printf '%s' "$DSTR" | grep -qE '<s [^>]*n="get" p="[^"]*decoy\.cpp:46"' \
+    printf '%s' "$DSTR" | grep -qE '<s [^>]*n="Box::get" p="[^"]*decoy\.cpp:41"' \
+        && printf '%s' "$DSTR" | grep -qE '<s [^>]*n="Other::get" p="[^"]*decoy\.cpp:46"' \
         && ok "decoy: Box<int>::get -> :41 and Other::get -> :46, each on its own def" \
         || no "decoy: callerStrip did not reach both gets by line: $DSTR"
 

@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/xp-m2-core", "crates/app", "crates/other"]

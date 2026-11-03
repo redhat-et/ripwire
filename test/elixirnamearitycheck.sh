@@ -227,7 +227,7 @@ printf '%s' "$OUT2" | grep -q 'status="contract-change"' && printf '%s' "$OUT2" 
 # ── (D) --for by exact name ─────────────────────────────────────────────────────────────────────────────
 "$BIN" "$F" --for=generate_app --no-cache >"$TMP/for_snake.xml" 2>/dev/null
 firstd(){ grep -oE '<d [^>]*>' "$1" | head -1 | grep -oE ' n="[^"]*"'; }
-[ "$( firstd "$TMP/for_snake.xml" )" = ' n="generate_app/1"' ] && ! grep -q 'reason="no_candidates"' "$TMP/for_snake.xml" \
+[ "$( firstd "$TMP/for_snake.xml" )" = ' n="Work.generate_app/1"' ] && ! grep -q 'reason="no_candidates"' "$TMP/for_snake.xml" \
     && ok "(D) --for=generate_app ranks generate_app/1 first (no no_candidates)" \
     || no "(D) --for=generate_app: first row $( firstd "$TMP/for_snake.xml" ); ctx $( grep -oE 'reason="[^"]*"' "$TMP/for_snake.xml" | head -1 )"
 # the fixture copy is scanned by an absolute path, so the evidence is the elided form `<top>/.../work.ex`
@@ -294,7 +294,7 @@ callee_ps(){ "$BIN" "$R" "--callees=$1" --no-cache 2>/dev/null | grep -oE '<s [^
     && ok "(H) Shell.late/0 (after the declaration): Ring.Core.spin() names the nested Shell.Ring.Core, not the top-level decoy" \
     || no "(H) Shell.late/0 reached the wrong spin/0: $( callee_ps 'Shell::late/0' ) (expected lib/shell.ex:6)"
 "$BIN" "$R" '--callers=lib/ring.ex:spin/0' --no-cache --legend=full >"$TMP/callers_top_spin.xml" 2>/dev/null
-grep -q '<callers of="lib/ring.ex:spin/0" defs="1" count="1"' "$TMP/callers_top_spin.xml" && grep -q 'n="early/0"' "$TMP/callers_top_spin.xml" \
+grep -q '<callers of="lib/ring.ex:spin/0" defs="1" count="1"' "$TMP/callers_top_spin.xml" && grep -q 'n="Shell.early/0"' "$TMP/callers_top_spin.xml" && ! grep -q 'n="early/0"' "$TMP/callers_top_spin.xml" \
     && ok "(H) the top-level Ring.Core.spin/0 keeps exactly one caller, early/0 — the call written before the declaration" \
     || no "(H) top-level spin/0 callers wrong: $( grep -oE '<callers [^>]*>|<s [^>]*/>' "$TMP/callers_top_spin.xml" | tr '\n' ' ' )"
 [ "$( callee_ps 'Shell::early/0' )" = 'p="lib/ring.ex:3"' ] \
@@ -332,7 +332,7 @@ use_ids "$TMP/uses_disc.xml" | grep -q '::Shape.Disc::literal/1"' && use_ids "$T
     && ok "(J) by_capture/0: the bare capture &_seed/0 -> _seed/0" \
     || no "(J) by_capture/0 has no _seed/0 edge: '$( callees "$TMP/resolve.xml" '::Seeds::by_capture/0' )'"
 "$BIN" "$R" --callers=Seeds::_seed/0 --no-cache --legend=full >"$TMP/callers_seed.xml" 2>/dev/null
-grep -q '<callers of="Seeds::_seed/0" defs="1" count="3"' "$TMP/callers_seed.xml" && grep -q 'n="by_capture/0"' "$TMP/callers_seed.xml" \
+grep -q '<callers of="Seeds::_seed/0" defs="1" count="3"' "$TMP/callers_seed.xml" && grep -q 'n="Seeds.by_capture/0"' "$TMP/callers_seed.xml" && ! grep -q 'n="by_capture/0"' "$TMP/callers_seed.xml" \
     && ok "(J) --callers=Seeds::_seed/0: count=3 — the bare capture, the remote capture and the plain call" \
     || no "(J) --callers=Seeds::_seed/0 wrong: $( grep -oE '<callers [^>]*>|<s [^>]*/>' "$TMP/callers_seed.xml" | tr '\n' ' ' )"
 [ "$( callees "$TMP/resolve.xml" '::Seeds::by_remote_capture/0' )" = "_seed/0" ] && [ "$( callees "$TMP/resolve.xml" '::Seeds::by_call/0' )" = "_seed/0" ] \
@@ -348,7 +348,8 @@ grep -q '<path from="caller/0" to="default/0" [^>]*reachable="1"' "$TMP/path_cal
     && ok "(K) --path=caller/0,default/0: f() omits the argument, so default/0 is reachable through the head" \
     || no "(K) --path=caller/0,default/0 unreachable: $( grep -oE '<path [^>]*>' "$TMP/path_caller.xml" | grep -oE 'reachable="[0-9]"' )"
 "$BIN" "$R" --impact=default/0 --no-cache >"$TMP/impact_default.xml" 2>/dev/null
-grep -q 'n="caller/0"' "$TMP/impact_default.xml" && ! grep -q 'n="caller_explicit/0"' "$TMP/impact_default.xml" \
+grep -q 'n="Dflt.caller/0"' "$TMP/impact_default.xml" && ! grep -q 'n="caller/0"' "$TMP/impact_default.xml" \
+    && ! grep -q 'n="Dflt.caller_explicit/0"' "$TMP/impact_default.xml" && ! grep -q 'n="caller_explicit/0"' "$TMP/impact_default.xml" \
     && ok "(K) --impact=default/0 lists caller/0 and not caller_explicit/0" \
     || no "(K) --impact=default/0 wrong: $( grep -oE '<s [^>]*/>' "$TMP/impact_default.xml" | tr '\n' ' ' )"
 [ "$( callee_ps 'Dflt::caller/0' )" = 'p="lib/dflt.ex:5" p="lib/dflt.ex:6" p="lib/dflt.ex:7"' ] \

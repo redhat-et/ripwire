@@ -143,7 +143,7 @@ check(){   # label | selector | want rows | want declined_calls
 
 # ── (A) + (B) Python ──────────────────────────────────────────────────────────────────────────────────────────
 echo "=== (A)(B) Python: the evidenced callers stay, the builtin calls are declined and counted ==="
-PYGET='py/uses_pool.py:true_field py/uses_pool.py:true_local py/uses_smart.py:via_subclass'
+PYGET='py/uses_pool.py:PoolUser.true_field py/uses_pool.py:true_local py/uses_smart.py:via_subclass'
 check "(A)+(B) --callers=py/pool.py:get is exactly the typed local, the self.pool field and the subclass-evidenced parameter; declined_calls=\"4\"" \
       py/pool.py:get "$PYGET" 4
 rows "$TMP/callers.xml" | grep -q 'py/plain.py' \
@@ -153,7 +153,7 @@ rows "$TMP/callers.xml" | grep -q 'py/plain.py' \
 # ── (C) the nested helper ─────────────────────────────────────────────────────────────────────────────────────
 echo "=== (C) a nested helper is no method ==="
 check "(C) --callers=py/pool.py:decode is only its enclosing render; raw.decode(\"utf-8\") is external, not declined against it" \
-      py/pool.py:decode 'py/pool.py:render' ''
+      py/pool.py:decode 'py/pool.py:ConnectionPool.render' ''
 
 # ── (D) control: a name outside the table keeps the ladder ────────────────────────────────────────────────────
 echo "=== (D) control: a non-builtin name still binds by name ==="
@@ -282,10 +282,10 @@ R="$( root_tag "$TMP/impact.xml" impact )"
 
 # ── (K) the predicates can fail ───────────────────────────────────────────────────────────────────────────────
 echo "=== (K) mutation controls ==="
-printf '<callers of="py/pool.py:get" count="4" declined_calls="4"><s t="fn" n="dict_get" p="py/plain.py:4"/><s t="fn" n="true_field" p="py/uses_pool.py:13"/><s t="fn" n="true_local" p="py/uses_pool.py:4"/><s t="fn" n="via_subclass" p="py/uses_smart.py:8"/></callers>' >"$TMP/mut1.xml"
+printf '<callers of="py/pool.py:get" count="4" declined_calls="4"><s t="fn" n="dict_get" p="py/plain.py:4"/><s t="fn" n="PoolUser.true_field" p="py/uses_pool.py:13"/><s t="fn" n="true_local" p="py/uses_pool.py:4"/><s t="fn" n="via_subclass" p="py/uses_smart.py:8"/></callers>' >"$TMP/mut1.xml"
 callers_are py/pool.py:get "$PYGET" 4 "$TMP/mut1.xml" && no "(K) a callers document with a plain.py row passed the (A) predicate" \
     || ok "(K) a plain.py caller row turns the (A) predicate red"
-printf '<callers of="py/pool.py:get" count="3"><s t="fn" n="true_field" p="py/uses_pool.py:13"/><s t="fn" n="true_local" p="py/uses_pool.py:4"/><s t="fn" n="via_subclass" p="py/uses_smart.py:8"/></callers>' >"$TMP/mut2.xml"
+printf '<callers of="py/pool.py:get" count="3"><s t="fn" n="PoolUser.true_field" p="py/uses_pool.py:13"/><s t="fn" n="true_local" p="py/uses_pool.py:4"/><s t="fn" n="via_subclass" p="py/uses_smart.py:8"/></callers>' >"$TMP/mut2.xml"
 callers_are py/pool.py:get "$PYGET" 4 "$TMP/mut2.xml" && no "(K) a callers document without declined_calls= passed the (A) predicate" \
     || ok "(K) a silent drop (no declined_calls=) turns the (A) predicate red"
 
@@ -433,17 +433,18 @@ def caller_PRet(factory):
 PY
 for probe in param:PTyped local:PLocal str:PStr opt:POpt list:PList selfattr:PSelfAttr inst:PInst ret:PRet; do
     pf="${probe%%:*}"; pc="${probe#*:}"
+    own=""; [ "$pf" = selfattr ] && own="Holder."   # QUALNAME-1: a METHOD caller prints Owner.name (selfattr's caller is Holder's method)
     PROWS="$( cd "$T" && "$BIN" . --no-cache --callers=pkg/ann_$pf.py:get 2>/dev/null | grep -oE '<s [^>]*/>' | grep -oE ' n="[^"]*"' )"
-    case "$PROWS" in *"n=\"caller_$pc\""*) ok "(T) same-file annotation ($pf): caller_$pc keeps its edge to $pc.get";;
+    case "$PROWS" in *"n=\"${own}caller_$pc\""*) ok "(T) same-file annotation ($pf): caller_$pc keeps its edge to $pc.get";;
         *) no "(T) same-file annotation ($pf): caller_$pc lost its edge to $pc.get: [$PROWS]";; esac
 done
 TCALL="$( cd "$T" && "$BIN" . --no-cache --callers=pkg/registry.py:get 2>/dev/null )"
-TROWS="$( printf '%s' "$TCALL" | grep -oE '<s [^>]*/>' | grep -oE ' n="[^"]*"' | sed -E 's/ n="([^"]*)"/\1/' | sort | tr '\n' ' ' )"
+TROWS="$( printf '%s' "$TCALL" | grep -oE '<s [^>]*/>' | grep -oE ' n="[^"]*"' | sed -E 's/ n="([^"]*)"/\1/' | LC_ALL=C sort | tr '\n' ' ' )"
 case " $TROWS" in *" load_repos "*|*" find_alias "*) no "(T) a same-file dict .get binds to ConnectionPool.get: rows [$TROWS]";;
     *) ok "(T) data.get / entry.get in the defining file do not bind to ConnectionPool.get";; esac
-[ "$TROWS" = "probe true_local warm " ] \
+[ "$TROWS" = "ConnectionPool.probe ConnectionPool.warm true_local " ] \
     && ok "(T) self.get, cls.get and the importing file's typed local keep their edges" \
-    || no "(T) callers should be exactly probe true_local warm: [$TROWS]"
+    || no "(T) callers should be exactly ConnectionPool.probe ConnectionPool.warm true_local: [$TROWS]"
 [ "$( attr "$( printf '%s' "$TCALL" | grep -oE '<callers [^>]*>' | head -1 )" declined_calls )" = 2 ] \
     && ok "(T) the two decoys are counted: declined_calls=\"2\"" \
     || no "(T) declined_calls should be 2: $( printf '%s' "$TCALL" | grep -oE '<callers [^>]*>' | head -1 )"

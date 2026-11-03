@@ -1,6 +1,7 @@
 #pragma once
 #include "infra/emit.h" // rw::emitTo / emitRaw / formatTo — THE emitter and its siblings
 #include "gitcmd.h"         // rw::gitCmd — every git child starts with --no-optional-locks -c core.fsmonitor=false
+#include "langfacts.h"
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
 
 
@@ -30,10 +31,12 @@
 #include "arch.h"               // fnv1a64
 #include "pathguard.h"          // CWE-59/367: rw::pathguard::openNoFollowTruncate — writeBaseline truncates, so its open must refuse a link atomically
 #include "gitmine.h"            // shSingleQuote + gitFileCommitCountsInDayWindow — short-horizon-churn window mining
+#include "diffhunks.h"          // DiffHunk + gitDiffHunksVsHead + diffHunksMemoized — THE zero-context hunk primitive (extracted from this header 2026-09-27; situ.h's change-set narrowing is its second consumer)
 #include "docparse.h"           // docparse::detail::readWholeFile — THE canonical whole-file byte read (commentcoherence.h names it that); reused rather than re-rolled, see forEachSymbolBody
 #include "filter.h"             // B10.1a: isTestPath — the general test-dir convention behind isTestScriptPath
 #include "memguard.h"           // #387: loadRefTree reads the hard line between a commit's ingest and its graph
 #include "infra/Diagnostics.h"  // DISCLOSE — the degrade path when git archive/ingest fails (no-op under NDEBUG; a gate-visible degrade line needs its own fprintf)
+#include "infra/namesplit.h"    // afterLast — a path's last component (isConftestFile, pythonModuleTail), not a third hand-rolled basename
 #include "infra/jsonesc.h"      // L2 — rw::jsonesc::escapeMcp for staleAcksJsonArray's kind= field (the same posture serialize.h's jsonStr uses)
 #include "infra/platform.h"     // RW_LIFETIMEBOUND — the DefectSiteKey projection lambdas; owned here, not transitively
 #include "sourceidentity.h"    // rw::kRipwireSourceIdentity — the producer identity the qsnap/qbody keys and blob header carry
@@ -427,9 +430,7 @@ inline bool isTestScriptPath( std::string_view p ) noexcept
     {
         return false;
     }
-    const auto ends = [ & ]( std::string_view e )
-    { return p.size() >= e.size() && p.compare( p.size() - e.size(), e.size(), e ) == 0; };
-    return ends( ".sh" ) || ends( ".bash" ) || ends( ".zsh" );
+    return endsWithLowerAscii( p, ".sh" ) || endsWithLowerAscii( p, ".bash" ) || endsWithLowerAscii( p, ".zsh" );
 }
 
 // ---- P2.2 (agent-friction round, 2026-08-29): self-registering test/benchmark macros -------------------
@@ -817,6 +818,45 @@ inline bool languageInvokedSymbol( const Symbol& s ) noexcept
     return false;
 }
 
+// Python test-framework hook names, ONE table per framework (CONTRIBUTING: one place per feature family). Two consumers read
+// them: pythonFrameworkInvokedSymbol below (the --quality-delta dead set) and pythonRunnerRoot (--dead-code / --safe-delete).
+//   kXunitHooks           pytest's xunit-style fixtures, collected from a test module with no call in the tree
+//   kUnittestHooks        unittest/Django TestCase methods the runner calls around a test (class scope)
+//   kUnittestModuleHooks  unittest's module-level entry points
+inline constexpr std::array<std::string_view, 8> kXunitHooks = { "setup_module", "teardown_module", "setup_function", "teardown_function",
+                                                                  "setup_class",  "teardown_class",  "setup_method",   "teardown_method" };
+inline constexpr std::array<std::string_view, 8> kUnittestHooks = { "setUp",         "tearDown",     "setUpClass", "tearDownClass",
+                                                                    "setUpTestData", "runTest",      "asyncSetUp", "asyncTearDown" };
+inline constexpr std::array<std::string_view, 3> kUnittestModuleHooks = { "setUpModule", "tearDownModule", "load_tests" };
+
+// Python test-framework entry points (#228). unittest and Django's TestCase call the kUnittestHooks names around tests, the
+// kUnittestModuleHooks names around a module, and run every test* method as a test. Pytest runs test_* too, and calls the
+// kXunitHooks names (setup_method, teardown_module, ...) of a test module. No call in the indexed tree names them, so zero
+// in-edges says nothing. Name-level, like the dunder rule in languageInvokedSymbol: errs toward live. The test* and xunit
+// clauses also need a test module (isTestPath, or Django's tests.py), so a helper named testSomething or setup_method in
+// application code still reads as dead. Not covered, still reported: pytest's conftest hooks (pytest_configure ...).
+// @pytest.fixture functions need no clause here: a decorated def is handed to its decorator as a value (ingest_valuerefs.h
+// emitDecorators), so --quality-delta never reports one, and --dead-code lists none (pythonDecoratedDef, decorated-excluded=).
+inline bool pythonFrameworkInvokedSymbol( const Symbol& s, std::string_view p ) noexcept
+{
+    if( !langFacts( s.lang ).frameworkEntryHooks || ( s.kind != SymKind::Method && s.kind != SymKind::Function ) )
+    {
+        return false;
+    }
+    const std::string_view n = s.name;
+    if( std::ranges::contains( kUnittestHooks, n ) || std::ranges::contains( kUnittestModuleHooks, n ) )
+    {
+        return true;
+    }
+    if( n.substr( 0, 4 ) != "test" && !std::ranges::contains( kXunitHooks, n ) )
+    {
+        return false;
+    }
+    const std::size_t      sl = p.rfind( '/' );
+    const std::string_view fn = sl == std::string_view::npos ? p : p.substr( sl + 1 );
+    return isTestPath( p ) || fn == "tests.py";
+}
+
 // A "dead deletion-candidate": has a body, no caller in the indexed tree, not invoked from file scope, not
 // invoked by the LANGUAGE itself (languageInvokedSymbol, above), not a test fixture, not produced by a
 // registered self-registering macro. A SIMPLE,
@@ -864,6 +904,10 @@ inline bool isDeadCandidate( const IngestResult& ing, const Graph& g, NodeId i,
         return false; // Q-DIAL-2: the LANGUAGE calls it — see languageInvokedSymbol (this replaced a blanket header exclusion)
     }
     const std::string_view p = rootRelPath( ing, s.fileId );   // #228: a directory above the root never decides this
+    if( pythonFrameworkInvokedSymbol( s, p ) )
+    {
+        return false; // #228: unittest/Django/pytest call this by protocol (see pythonFrameworkInvokedSymbol)
+    }
     if( isFixturePath( p ) )
     {
         return false; // fixtures are dead by design (noise rules)
@@ -1203,8 +1247,29 @@ inline void forEachSymbolBody( const IngestResult& ing, Fn&& visit )
     }
 }
 
-// Direct Python class members only; module-level and nested functions have no class owner.
-inline std::vector<NodeId> pythonMethodOwners( const IngestResult& ing )
+// Direct Python class members get an owner: the enclosing class. A def nested inside a method gets a host: the
+// nearest enclosing method, whose self/cls it reads as a free variable. Module-level functions have neither.
+struct PythonScopes
+{
+    std::vector<NodeId> owner;
+    std::vector<NodeId> host;
+};
+
+// Records one definition's enclosing scope: a class makes it a direct member; a method, or a closure in one, makes
+// the nearest method its host.
+inline void pythonRecordParent( PythonScopes& scopes, const IngestResult& ing, NodeId id, NodeId parent ) noexcept
+{
+    if( ing.symbols[parent].kind != SymKind::Class )
+    {
+        scopes.host[id] = scopes.owner[parent] != kNoNode ? parent : scopes.host[parent];
+    }
+    else if( ing.symbols[id].kind != SymKind::Class )
+    {
+        scopes.owner[id] = parent;
+    }
+}
+
+inline PythonScopes pythonMethodOwners( const IngestResult& ing )
 {
     const bool hasClasses = std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& s )
     {
@@ -1214,7 +1279,9 @@ inline std::vector<NodeId> pythonMethodOwners( const IngestResult& ing )
     {
         return {};
     }
-    std::vector<NodeId> owner( ing.symbols.size(), kNoNode );
+    PythonScopes scopes;
+    scopes.owner.assign( ing.symbols.size(), kNoNode );
+    scopes.host.assign( ing.symbols.size(), kNoNode );
     SymbolsByFile byFile = symbolsByFileInIdOrder( ing, []( const Symbol& s )
     {
         return s.lang == Lang::Python && ( s.kind == SymKind::Class || s.kind == SymKind::Function || s.kind == SymKind::Method );
@@ -1239,50 +1306,85 @@ inline std::vector<NodeId> pythonMethodOwners( const IngestResult& ing )
             {
                 parents.pop_back();
             }
-            if( s.kind != SymKind::Class && !parents.empty() && ing.symbols[parents.back()].kind == SymKind::Class )
+            if( !parents.empty() )
             {
-                owner[id] = parents.back();
+                pythonRecordParent( scopes, ing, id, parents.back() );
             }
             parents.push_back( id );
         }
     }
-    return owner;
+    return scopes;
 }
 
-// Python VarDecl bindings are parameter names in source order (emitBindings); the first one
-// identifies the conventional receiver. Reuse those AST facts, including commented/typed parameters.
-// A non-receiver first parameter is marked 3 so a later parameter named cls cannot replace it.
-inline std::vector<std::uint8_t> pythonReceiverParameters( const IngestResult& ing )
+// The conventional receiver of each Python def and the receiver names it binds as parameters. Parameters are
+// VarDecl bindings in source order (emitBindings). kind: 1 self, 2 cls, 3 a first parameter that is neither, 0 none;
+// the first parameter decides it, so a later parameter named cls cannot replace it. bound: bit 1 self, bit 2 cls,
+// wherever the name sits in the list.
+struct PythonReceivers
 {
-    std::vector<std::uint8_t> receiver( ing.symbols.size(), 0 );
+    std::vector<std::uint8_t> kind;
+    std::vector<std::uint8_t> bound;
+};
+
+inline PythonReceivers pythonReceiverParameters( const IngestResult& ing )
+{
+    PythonReceivers receivers;
+    receivers.kind.assign( ing.symbols.size(), 0 );
+    receivers.bound.assign( ing.symbols.size(), 0 );
     for( const Binding& b : ing.bindings )
     {
-        if( b.fromSymbol >= receiver.size() || ing.symbols[b.fromSymbol].lang != Lang::Python
-            || b.kind != LocalBindKind::VarDecl || b.spanStart != 0 || b.spanEnd != 0 || receiver[b.fromSymbol] != 0 )
+        if( b.fromSymbol >= receivers.kind.size() || !langFacts( ing.symbols[b.fromSymbol].lang ).closureReceiverDispatch
+            || b.kind != LocalBindKind::VarDecl || b.spanStart != 0 || b.spanEnd != 0 )
         {
             continue;
         }
-        receiver[b.fromSymbol] = b.var == "self" ? 1 : b.var == "cls" ? 2 : 3;
+        const std::uint8_t name = b.var == "self" ? 1 : b.var == "cls" ? 2 : 0;
+        receivers.bound[ b.fromSymbol ] |= name;
+        if( receivers.kind[ b.fromSymbol ] == 0 )
+        {
+            receivers.kind[ b.fromSymbol ] = name != 0 ? name : 3;
+        }
     }
-    return receiver;
+    return receivers;
 }
 
-// Deduplicate receiver-call evidence before walking inheritance; repeated call sites have the same
-// possible targets. Views borrow the ingested reference names for this one snapshot computation.
+// The method whose receiver a self./cls. call reads, or kNoNode. A method reads its own receiver. A closure nested
+// in a method reads the enclosing method's, unless the closure binds that receiver name itself. The method's receiver
+// must be the conventional one: self for ThisObj, cls for the NamedVar cls.
+inline NodeId pythonReceiverScope( const PythonScopes& scopes, const PythonReceivers& receivers, const Reference& r ) noexcept
+{
+    const std::uint8_t want  = r.recv == RecvKind::ThisObj ? 1 : 2;
+    NodeId             scope = kNoNode;
+    if( scopes.owner[ r.fromSymbol ] != kNoNode )
+    {
+        scope = r.fromSymbol;
+    }
+    else if( scopes.host[ r.fromSymbol ] != kNoNode && ( receivers.bound[ r.fromSymbol ] & want ) == 0 )
+    {
+        scope = scopes.host[ r.fromSymbol ];
+    }
+    return scope != kNoNode && receivers.kind[ scope ] == want ? scope : kNoNode;
+}
+
+// Deduplicate receiver-call evidence before walking inheritance; repeated call sites have the same possible targets.
+// Views borrow the ingested reference names for this one snapshot computation.
 inline std::vector<std::pair<NodeId, std::string_view>> pythonDispatchRequests( const IngestResult& ing,
-    std::span<const NodeId> owner, std::span<const std::uint8_t> receiver )
+    const PythonScopes& scopes, const PythonReceivers& receivers )
 {
     std::vector<std::pair<NodeId, std::string_view>> requests;
     for( const Reference& r : ing.references )
     {
-        if( r.lang != Lang::Python || r.role != RefRole::Call || r.fromSymbol >= owner.size()
-            || owner[r.fromSymbol] == kNoNode || !r.qualifier.empty()
-            || !( ( r.recv == RecvKind::ThisObj && receiver[r.fromSymbol] == 1 )
-                  || ( r.recv == RecvKind::NamedVar && r.recvVar == "cls" && receiver[r.fromSymbol] == 2 ) ) )
+        const bool selfOrCls = r.recv == RecvKind::ThisObj || ( r.recv == RecvKind::NamedVar && r.recvVar == "cls" );
+        if( !langFacts( r.lang ).closureReceiverDispatch || r.role != RefRole::Call || r.fromSymbol >= scopes.owner.size()
+            || !r.qualifier.empty() || !selfOrCls )
         {
             continue;
         }
-        requests.emplace_back( owner[r.fromSymbol], r.calleeName );
+        const NodeId scope = pythonReceiverScope( scopes, receivers, r );
+        if( scope != kNoNode )
+        {
+            requests.emplace_back( scopes.owner[ scope ], r.calleeName );
+        }
     }
     std::sort( requests.begin(), requests.end(), []( const auto& a, const auto& b )
     {
@@ -1310,11 +1412,12 @@ inline std::vector<NodeId> pythonDispatchClasses( const Graph& g, NodeId base )
 // This is conservative liveness, not a model of Python's MRO, descriptors, or monkey-patching.
 inline std::vector<NodeId> pythonDispatchedMethodIds( const IngestResult& ing, const Graph& g )
 {
-    const std::vector<NodeId> owner = pythonMethodOwners( ing );
-    if( owner.empty() )
+    const PythonScopes scopes = pythonMethodOwners( ing );
+    if( scopes.owner.empty() )
     {
         return {};
     }
+    const std::vector<NodeId>& owner = scopes.owner;
     HashMap<NodeId, std::vector<NodeId>> methods;
     methods.reserve( 32 );
     for( NodeId i = 0; i < owner.size(); ++i )
@@ -1324,9 +1427,9 @@ inline std::vector<NodeId> pythonDispatchedMethodIds( const IngestResult& ing, c
             methods[ owner[i] ].push_back( i );
         }
     }
-    const std::vector<std::uint8_t> receiver = pythonReceiverParameters( ing );
+    const PythonReceivers receivers = pythonReceiverParameters( ing );
     std::vector<NodeId> result;
-    for( const auto& [ base, name ] : pythonDispatchRequests( ing, owner, receiver ) )
+    for( const auto& [ base, name ] : pythonDispatchRequests( ing, scopes, receivers ) )
     {
         for( NodeId id : pythonDispatchClasses( g, base ) )
         {
@@ -1370,15 +1473,11 @@ inline std::vector<NodeId> pythonDispatchedMethodIds( const IngestResult& ing, c
 // descendants, `#` for the shell/Python/Ruby/Elixir/config family (in the C family `#` opens a PREPROCESSOR
 // directive, which is code — that is why this is per-language and not one union set), `--` for Lua. Markdown
 // and JSON have no comment syntax, so every non-blank line there is content.
-inline bool langUsesHashComment( Lang l ) noexcept
-{
-    return l == Lang::Python || l == Lang::Bash || l == Lang::Ruby || l == Lang::Elixir
-        || l == Lang::Toml   || l == Lang::Yaml || l == Lang::GDScript;
-}
+// Slice 6c: hashComment moved to langFacts(l) in langfacts.h
 
 inline std::uint32_t codeLinesInBody( std::string_view body, Lang lang ) noexcept
 {
-    const bool hash   = langUsesHashComment( lang );
+    const bool hash   = langFacts( lang ).hashComment;
     const bool cLike  = !hash && lang != Lang::Markdown && lang != Lang::Json && lang != Lang::Lua;
     const bool lua    = lang == Lang::Lua;
     std::uint32_t  code    = 0;
@@ -1868,7 +1967,10 @@ inline std::string cacheDirLadder()
     os::stat_t st {};
     if( mkdirRc == 0 || ( os::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == os::getuid() ) )
     {
-        if( os::chmod( d.c_str(), 0700 ) == 0
+        // Win32 chmod propagates inheritable ACLs through the whole cache tree, even when unchanged.
+        // lstat already verifies a protected owner-only DACL; repair only a missing/private-mode mismatch.
+        const bool alreadyOwnerOnly = ( st.st_mode & 0777 ) == 0700;
+        if( ( alreadyOwnerOnly || os::chmod( d.c_str(), 0700 ) == 0 )
             && os::lstat( d.c_str(), &st ) == 0 && S_ISDIR( st.st_mode ) && st.st_uid == os::getuid()
             && ( st.st_mode & 0777 ) == 0700 )
         {
@@ -1932,6 +2034,7 @@ struct RenameMap
     bool          truncatedPairs  = false;   // kRenameMaxPairs hit — some renames are NOT in this map
     bool          truncatedWindow = false;   // history is deeper than kRenameWindowCommits — older renames unseen
     bool          available       = false;   // git answered at all (a non-git root leaves this false)
+    bool          refusedPartial  = false;   // hwh-fix4 (N1): a partial clone, so the map was not asked for (no commit scanned)
 
     // Every path this one is known to have had, oldest-last, capped at kRenameMaxChain. Empty when the path
     // was never renamed — the overwhelmingly common case, and the one that must cost nothing.
@@ -1987,6 +2090,16 @@ inline RenameMap gitRenameMap( const std::string& root, const std::string& span 
     const unsigned long long tot = std::strtoull( depth.c_str(), nullptr, 10 );
     rm.commitsScanned            = std::uint32_t( tot < kRenameWindowCommits ? tot : kRenameWindowCommits );
     rm.truncatedWindow           = tot > kRenameWindowCommits;
+    if( gitIsPartialClone( root ) )
+    {
+        // F1: rename detection (-M50%) reads blobs, and on a partial clone git scans the whole promisor pack before it fails (gitmine.h
+        // gitIsPartialClone). So the map is not asked for: no commit was scanned (rename_window_commits="0") and the window is said to be
+        // truncated, which is the existing way to say "older renames unseen". Git's recorded renames are not consulted; content routes remain.
+        rm.commitsScanned  = 0;
+        rm.truncatedWindow = true;
+        rm.refusedPartial  = true;
+        return rm;
+    }
 
     const auto absorb = [ & ]( const std::string& raw )
     {
@@ -2336,12 +2449,36 @@ inline std::string cacheRootKeyHex( const std::string& root )
 // `static_assert( quality::kIngestParserVerMirror == kParserVer && … )`, so a missed mirror now fails the build. It does
 // not include this header; it relies on ingest.cpp including quality.h (line 13) before ingest_cache.h, and a reorder
 // that broke that fails the build on the undeclared name rather than passing.
-constexpr std::uint32_t kIngestCacheVersionMirror   = 36;   // MUST equal ingest.cpp's kCacheVersion (gated); 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
-constexpr std::uint32_t kIngestParserVerMirror    = 214;  // MUST equal ingest.cpp's kParserVer   (gated)
-                                                          // 214 = 2026-10-21 (#358 1a, PR #420: above main 206/207 and train 32a 212/213;
+constexpr std::uint32_t kIngestCacheVersionMirror   = 48;   // MUST equal ingest.cpp's kCacheVersion (gated); 48 = train 42b (alias-import LocalBindKind ReExport; its placeholder 47), 46 = train 40 (js-def-naming JsObjectLiteral; its placeholder 45), 44 = train 37b (rust-degraded FileHealth::useBoundsBlanked; its placeholder 42), 43 = train 36 (#155 trailingLambda ref byte; above main 40, #438's placeholder 41, rust-degraded's 42), 40 = train 34 (fc3-js-rebind JsRebind; above main 39), 39 = train 33 (above main 36 and l6-iface 38), 38 = train 32 lane l6-iface fix round 1: LocalBindKind ImplBlock (train renumbers), 37 = train 32 lane l6-iface: LocalBindKind DispatchType (train renumbers), 36 = train 30 (above call-result-typing's and fcall-forward's 33, name-template-dispatch's 35, main's 34), 34 = train 29 (above lane arity-min's and call-result-typing's 33), 33 = train 29 lane arity-min: def record paramsMin (the train renumbers), 33 = lane call-result-typing: RawBind resultIndex + unwrapDepth, 33 = lane fcall-forward: ref `forwarded` byte, 35 = lane name-template-dispatch: RefRole Pattern 11, 32 = train 28: RefRole Subscript 9 + Inert 10, 31 = train 27: lego-transitive's inherit-ref baseBind (the lane's 30), 29 = FE-B ref memberPath/memberCtor + 4 bind kinds, 28 = FE-A ref memberCall/memberRoot, 27 = corrected fnScope values, 26 = function-local def scope span (25 = #157 + #150)
+constexpr std::uint32_t kIngestParserVerMirror    = 287;  // MUST equal ingest.cpp's kParserVer   (gated)
+                                                         // 285 = 2026-11-02 (lane rule3-member-guard fix 4, placeholder: a Rust path call's whole written qualifier)
+                                                          // 283 = 2026-10-31 (train 43b: registrar + string-import extraction; above the lane placeholders up to 281, rich 282)
+                                                          // 271 = 2026-10-30 (train 42b: iface-peel alias pointee / dyn-result / template-param
+                                                          //   member records and alias-import ReExport records, placeholders 259, 260, 261; above 41b's 269/270)
+                                                          // 269 = 2026-10-29 (train 41b: fn-slot-s2 C/C++ member-pointer / nested-designator /
+                                                          //   macro-cast slot extraction, placeholders 257, 259, 260; above train 41's 259/260)
+                                                          // 259 = 2026-10-28 (train 41: fn-slot-2 Rust slot records / py-split-marker `?name`,
+                                                          //   placeholders 249, 255; above fn-slot-s2's 257/258)
+                                                          // 251 = 2026-10-27 (train 40: js-def-naming / string-keyed / fn-slot extraction,
+                                                          //   placeholders 238, 241, 247; above train 39's 239/240 and fn-slot-2's 249)
+                                                          // 239 = 2026-10-27 (train 39: receiver-fixes typing, placeholder 237/238; above train 38
+                                                          //   235/236; see the kParserVer note)
+                                                          // 235 = 2026-10-27 (train 38: queue-hop keyword tag on a Python queue call, placeholder
+                                                          //   228/229; above train 37b 233/234; see the kParserVer note)
+                                                          // 233 = 2026-10-26 (train 37b: rust-degraded use<..> re-parse, placeholder 229/230;
+                                                          //   above train 36 231/232; see the kParserVer note)
+                                                          // 231 = 2026-10-25 (train 36: above main 226/227, #438 228, rust-degraded 229/230;
                                                           //   see the kParserVer note)
+                                                          // 226 = 2026-10-24 (train 34: above main / #432 / ind4b 224/225, ind5 222/223,
+                                                          //   fc3 218/219; see the kParserVer note)
+                                                          // 224 = 2026-10-23 (train 33: above main 220/221, ind5 222/223, #420 214/215, fc1 216/217,
+                                                          //   ind4b 218/219, l6-iface 212/213; see the kParserVer note)
+                                                          // 220 = 2026-10-22 (train 32b: above main 212/213, ix1-slot 204/205, #420 214/215,
+                                                          //   #426 / fc1 216/217, ind4b 218/219, l6-iface 212/213; see the kParserVer note)
                                                           // 212 = 2026-10-21 (train 32a: above main 206/207, rust-receivers 202/203, ix1-slot
                                                           //   204/205, l6-iface 210/211; #420 reserves 214/215; see the kParserVer note)
+                                                          // 212 = 2026-10-21 (lane l6-iface fix round 1: ImplBlock records; rich 213; see the kParserVer note)
+                                                          // 210 = 2026-10-19 (train 32 lane l6-iface: DispatchType; strictly above main 206/207; see the kParserVer note)
                                                           // 206 = 2026-10-18 (#409, PR #414, renumbered again at merge: above main 196/197,
                                                           //   train 31 198/199, rust-receivers 202/203, ix1-slot 204/205; see the kParserVer note)
                                                           // 202 = lane rust-receivers (reservation 202/203; the train renumbers): Rust written-type
@@ -2353,6 +2490,8 @@ constexpr std::uint32_t kIngestParserVerMirror    = 214;  // MUST equal ingest.c
                                                           // 185 = 2026-10-18 (#409): cross-file markdown links carry their written path#slug
                                                           //   (memberPath); graph.h pins the exact heading. 185, not 184: 184 is train 29.
                                                           //   Rich file tag 186. kCacheVersion stays 34.
+                                                          // 204 = lane ix1-slot (reservation 204/205; the train renumbers): C/C++ struct-field
+                                                          //   slots (memberPath/memberCtor), Through calls via a field, slot facts
                                                           // 196 = 2026-10-18 (train 30: above call-result-typing 180/181, fcall-forward
                                                           //   188/189, go-local-var 190/191, name-template-dispatch 192/193, h1-annot
                                                           //   194/195; see the kParserVer note)
@@ -3511,6 +3650,9 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 //   pythonDispatchClasses     (quality.h) — downward-only inheritance reachability
 //   pythonDispatchedMethodIds  (quality.h) — Python inherited receiver-call evidence for the dead set
 //   isDeadCandidate            (quality.h) — the dead-set predicate itself
+//   pythonFrameworkInvokedSymbol (quality.h) — the framework-hook exemption isDeadCandidate calls into (#228)
+//   pythonRecordParent         (quality.h) — fills the closure host and owner that pythonReceiverScope reads (#228)
+//   pythonReceiverScope        (quality.h) — which method a self./cls. call in a closure belongs to (#228)
 //   isFixturePath              (quality.h) — a fixture-path exemption isDeadCandidate calls into
 //   isTestScriptPath           (quality.h) — the test-script exemption isDeadCandidate calls into (the exact
 //                                             helper B10.1a added without a bump — the finding this guards)
@@ -3648,7 +3790,17 @@ inline void evictOldHeadSnapCaches( const std::string& dir, const std::string& r
 // the standard-member gate gained a Rust row (graph.h kStdMemberNames), so a Rust definition a DECLINED call could have meant is
 // no dead candidate (Graph::gateDeclinedTarget), as v15 did for the builtin-method gate. No extraction change: kParserVer and its
 // mirror stay. The producer identity already keeps this build's blobs apart; bumped 21 -> 22 so the history above stays complete.
-constexpr std::uint32_t kQSnapCacheScheme = 22;
+// v23 (2026-10-24, #228: Django/unittest hooks and closure dispatch) — no blob shape change; the dead SET's inputs moved.
+// isDeadCandidate exempts Python framework entry points (pythonFrameworkInvokedSymbol: setUp, tearDown, setUpClass,
+// tearDownClass, setUpTestData, setUpModule, tearDownModule, load_tests, and test* methods in test modules), and
+// pythonDispatchedMethodIds keeps a self./cls. call inside a closure nested in a method live: the overrides of the called name on that method's class and its subclasses.
+// The producer identity already keeps this build's blobs apart; bumped 22 -> 23 so the history above stays complete.
+// v24 (2026-10-25, train 36) — #228's v23 was the PR's placeholder; renumbered above every live value (main / train 35 / every
+// other ref 22, #437 23). No further shape change.
+// v25 (2026-11-01, land-472, #466 / #472) — filter.h's isTestPath reads the hyphen test names `test-*.sh`, `*-test.sh` (and the
+// other shell/batch suffixes) and `.e2e-spec.` / `.perf-spec.` as tests, and isTestScriptPath calls it, so a shell test script the
+// dead-set exemption did not cover before is covered now. A v24 blob holds the old dead set. Renumbered above every live value (24).
+constexpr std::uint32_t kQSnapCacheScheme = 25;
 constexpr char          kQSnapMagic[4]    = { 'Q', 'S', 'N', 'P' };
 
 // The qsnap EXCLUDES-config key folds the qsnap SCHEME (independent of the ingest cache's kHeadSnapCacheScheme)
@@ -4125,6 +4277,19 @@ inline std::string materializeCommitTree( const std::string& root, const std::st
     {
         DISCLOSE( tree, MaterializedTree::DisclosureWhy::RevisionUnresolved, "quality: commit-tree revision does not resolve to a commit — refusing to archive" );
         return tree.root;
+    }
+
+    // F1 (HISTORY-WALK-HANG): on a partial clone `git archive` of a tree with an absent blob parses every object of the promisor pack
+    // before it fails (ClickHouse: past 90 s; gitmine.h gitIsPartialClone). The blobs are asked about first, by a read that fetches
+    // nothing and does not scan the pack; archive is not started unless every blob of the tree is here. -1 (not told in time) refuses too.
+    if( gitIsPartialClone( root ) )
+    {
+        const long absent = gitAbsentBlobCount( root, rev );
+        if( absent != 0 )
+        {
+            DISCLOSE( tree, MaterializedTree::DisclosureWhy::ArchiveFailed, "quality: partial clone, the commit tree has blobs this clone does not hold - git archive not started" );
+            return tree.root;
+        }
     }
 
     std::error_code ec;
@@ -4937,7 +5102,19 @@ computeWindowRefBodyHashes( const std::string& root, std::uint32_t days,
 // newest prefix of the window) as if it were the window, and the key cannot tell that blob from a real read. K51 never
 // stores one, but a blob already on disk would keep serving its silent zero or prefix, with no history_unread=, until HEAD
 // moved. The bump makes every pre-K51 blob a clean miss; the cost is one cold walk per repository.
-constexpr std::uint32_t kQChurnCacheScheme = 3;
+// SCHEME 4 (2026-10-23, the git-porcelain-framing lane): the walk's READER was rebuilt — the line-framed
+// `__C__` marker parse became one NUL-framed reader with a whole-field sentinel and one field of lookahead
+// (test/gitframingcheck.sh). On a repository whose committed paths spell the marker bytes, carry a
+// newline, or sort after a path that does, the OLD reader's stream was corrupted (forged commit headers,
+// swallowed paths), so a blob written by a pre-lane binary would keep serving that corrupted stream to a
+// fixed one until HEAD moved — the same wrong-answer-from-cache as scheme 2, one layer down: there the
+// COMMAND changed under an unchanged key, here the PARSE did. Neither is visible to the key, which is why
+// this bump is manual. On ordinary trees the two readers' streams are byte-identical (the lane's golden
+// arm over owners/hotspots/cochange), so the bump costs those repos one cold walk and changes no answer.
+// SCHEME 5 (2026-11-01, HISTORY-WALK-HANG): the COMMAND changed under an unchanged key again (--no-renames, gitLogRecordsCmd:
+// a rename now lists its old path too), the scheme 2 case. The blob also carries the walk's budget cut, so a cached prefix
+// still says it is one.
+constexpr std::uint32_t kQChurnCacheScheme = 5;
 constexpr char          kQChurnMagic[4]    = { 'Q', 'C', 'H', 'N' };
 
 inline std::string serializeRawCommitStream( const RawCommitStream& raw, const std::string& keyMat )
@@ -4946,6 +5123,7 @@ inline std::string serializeRawCommitStream( const RawCommitStream& raw, const s
     buf.append( kQChurnMagic, 4 );
     qsnapPut( buf, kQChurnCacheScheme );
     qsnapPut( buf, fnv1a64( keyMat ) );
+    qsnapPut( buf, std::uint32_t( raw.cut ) );
     qsnapPut( buf, std::uint32_t( raw.commits.size() ) );
     for( const RawCommitStream::Commit& c : raw.commits )
     {
@@ -4999,12 +5177,18 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
     // both counts are measured against the bytes left before either sizes a reserve (qsnapCountFits).
     constexpr std::size_t kMinCommitRecordBytes = sizeof( RawCommitStream::Commit::epoch ) + sizeof( std::uint32_t );
     constexpr std::size_t kMinPathRecordBytes   = sizeof( std::uint32_t );
+    std::uint32_t cutCode = 0;
+    if( !qsnapGet( p, end, cutCode ) || cutCode > std::uint32_t( GitWalkCut::Time ) )
+    {
+        return false;
+    }
     std::uint32_t nCommits = 0;
     if( !qsnapGet( p, end, nCommits ) || !qsnapCountFits( p, end, nCommits, kMinCommitRecordBytes ) )
     {
         return false;
     }
     RawCommitStream r;
+    r.cut = GitWalkCut( cutCode );
     r.commits.reserve( nCommits );
     for( std::uint32_t i = 0; i < nCommits; ++i )
     {
@@ -5048,7 +5232,10 @@ inline bool deserializeRawCommitStream( const std::string& blob, const std::stri
 // degrades to an empty stream; no resolvable HEAD to the uncached walk (which itself degrades to an empty stream —
 // gitLogNameOnlyRaw's contract). Thread-safe: every memo it reaches (the HEAD anchor, the toplevel) takes its own
 // mutex, and the blob write is an atomic rename. K51: a walk git could not complete comes back with `unread` set and is never stored.
-inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince )
+// A prefix the BUDGET cut (gitmine.h THE BUDGET) is stored only when it is worth keeping: a Time cut under kMinStoredTimeCutCommits is a git
+// that stalled, not a slow repo, and `noCache` (--no-cache) neither reads nor writes any cut, so the flag that asks for a fresh answer gets one.
+inline constexpr std::size_t kMinStoredTimeCutCommits = 1024;
+inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const char* coSince, bool noCache = false )
 {
     if( !hasEnclosingGitRepo( root ) )
     {
@@ -5079,14 +5266,18 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
     keyMat.push_back( '\x1f' ); keyMat += coSince;
     keyMat.push_back( '\x1f' ); keyMat += boundary;
     keyMat += "qchurn" + std::to_string( kQChurnCacheScheme );
+    // The budget is in the key: a prefix cut under one budget must not answer a run that raised it.
+    keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxCommits() );
+    keyMat.push_back( '\x1f' ); keyMat += std::to_string( gitWalkMaxSeconds() );
     const std::string cachePath = shaKeyedCachePath( "qchurn", repoHex, std::string{}, keyMat );
 
     RawCommitStream                  raw;
     const std::optional<std::string> blob = readQSnapBlob( cachePath );
-    if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) )
+    if( blob && deserializeRawCommitStream( *blob, keyMat, raw ) && !( noCache && raw.cut != GitWalkCut::None ) )
     {
         return raw;                                                                // warm hit — no walk
     }
+    raw = RawCommitStream{};   // a stored cut that --no-cache refused to read is walked again
 
     raw = gitLogNameOnlyRaw( root, coSince );                                      // cold — the 431 ms walk
     if( raw.unread || gitWalksAbandoned() )
@@ -5097,6 +5288,14 @@ inline RawCommitStream gitRawCommitStreamCached( const std::string& root, const 
         // An abandoned read (a memory-guard refusal stopped the walk) is a prefix too, even when git exited 0: never cached.
         return raw;
     }
+    if( raw.cut != GitWalkCut::None
+        && ( noCache || ( raw.cut == GitWalkCut::Time && raw.commits.size() < kMinStoredTimeCutCommits ) ) )
+    {
+        return raw;   // --no-cache keeps no cut; a clock that ran out within the first ~1,000 commits is a stalled git, not a prefix worth keeping until HEAD moves
+    }
+    // A cut prefix IS stored (a Commits cut, or a Time cut of a slow repo): re-walking would cost the whole budget on every call of a repo
+    // that will only cut again, and the blob carries the cut, so the next answer still discloses it. Where the clock decided, WHICH commits
+    // it reached moves with machine load, so the answer says so (renderHistoryUnread). It is the same prefix until HEAD moves.
     atomicWriteFile( cachePath, serializeRawCommitStream( raw, keyMat ) );         // best-effort; a failed
                                                                                    // write just recomputes next time
     return raw;
@@ -5110,9 +5309,9 @@ struct HistoryWalk
     RawCommitStream raw;
 };
 
-inline HistoryWalk gitHistoryWalk( std::string root )
+inline HistoryWalk gitHistoryWalk( std::string root, bool noCache = false )
 {
-    RawCommitStream raw = gitRawCommitStreamCached( root, "18 months ago" );
+    RawCommitStream raw = gitRawCommitStreamCached( root, "18 months ago", noCache );
     return HistoryWalk{ std::move( root ), std::move( raw ) };
 }
 
@@ -6395,13 +6594,16 @@ inline std::string gitBlameConfigPins( const std::string& root )
 // same commit carry the bare "<sha> <orig> <final> <n>" header alone. So the header line sets the CURRENT
 // sha and the committer-time line decides whether that sha counts — a repeat header with no metadata needs no
 // second decision, because the sha is already in (or already out of) the set.
-inline void gitBlameRangeWindowCommits( const std::string& root, const std::string& relPath,
+//
+// hwh-fix4 (N1): returns false when git did not answer (spawn failed, or blame exited non-zero: on a partial clone an absent
+// intermediate blob fails it in about a second). A failed blame is not "no window commit": the caller says unknown.
+inline bool gitBlameRangeWindowCommits( const std::string& root, const std::string& relPath,
                                         std::uint32_t startLine, std::uint32_t lineCount, std::int64_t windowCutoffEpoch,
                                         std::vector<std::uint64_t>& outShas )
 {
     if( startLine == 0 || lineCount == 0 )
     {
-        return;
+        return true;
     }
     const std::string cmd = gitCmd( " -c core.quotepath=false" ) + gitBlameConfigPins( root ) + " -C " + shSingleQuote( root )
                           + " blame --no-ext-diff --no-textconv --porcelain -L " + std::to_string( startLine ) + ",+" + std::to_string( lineCount )
@@ -6409,8 +6611,9 @@ inline void gitBlameRangeWindowCommits( const std::string& root, const std::stri
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
     if( !pipe )
     {
-        return;
+        return false;
     }
+    const std::size_t shasBefore = outShas.size();
     std::uint64_t curSha = 0;
     char buf[ 512 ];
     while( std::fgets( buf, sizeof( buf ), pipe ) )
@@ -6438,89 +6641,18 @@ inline void gitBlameRangeWindowCommits( const std::string& root, const std::stri
             }
         }
     }
-    os::pclose( pipe );
-}
-
-// One zero-context unified-diff hunk, in the two coordinate systems the SELF test needs: the OLD-side range
-// (what `git blame` is asked about) and the NEW-side range (what the symbol's working-tree line span is
-// compared against). SoA is pointless for four u32s read together — this is one cache line either way.
-struct DiffHunk
-{
-    std::uint32_t oldStart = 0;
-    std::uint32_t oldCount = 0;
-    std::uint32_t newStart = 0;
-    std::uint32_t newCount = 0;
-};
-static_assert( sizeof( DiffHunk ) == 16, "DiffHunk is a 4×u32 POD" );
-
-// P3 (r27) — the RUN-SCOPED hunk memo. `git diff --unified=0 HEAD -- <path>` is a pure function of (HEAD,
-// working tree), both FIXED for the life of one --quality-delta call (the code's own section comment says so),
-// yet the churn blame pass spawned it once PER SYMBOL: a subprocess-shim log showed EIGHT byte-identical
-// spawns for a single dirty file. Caller owns the storage (house rule — views/handles at seams, no hidden
-// process-global state that a second root or a second MCP request would silently share).
-using DiffHunkMemo = HashMap<std::string, std::vector<DiffHunk>>;
-
-// Parse `relPath`'s zero-context hunk headers vs HEAD. Degrade-only: no git / no HEAD / path absent at HEAD →
-// an EMPTY vector, which the caller reads as "no evidence" → AMBIENT (never inflates severity).
-//
-// Same ambient-config seam as the blame above, pinned for the same reason and in the same commit: a
-// configured `diff.algorithm` moves hunk BOUNDARIES (which lines land in an oldCount>0 hunk at all), and a
-// `diff.external` driver replaces this output wholesale with something these two sscanf forms cannot parse —
-// silently emptying the vector, which the caller reads as AMBIENT. Neither is a hang or an error, which is
-// what makes them worth pinning: they change a reported number with nothing on the record saying so.
-//
-// The external driver is disarmed with git's own `--no-ext-diff` flag, NOT with `-c diff.external=`: an
-// EMPTY diff.external is not "no external diff", it is an external diff whose command is the empty string,
-// and git dies trying to exec it ("error: cannot run : No such file or directory / fatal: external diff
-// died"). That mistake reads as a fix in review and shows up as every churn row silently going AMBIENT —
-// measured here as 8 gating churn rows collapsing to 0 before the flag replaced it.
-inline std::vector<DiffHunk> gitDiffHunksVsHead( const std::string& root, const std::string& relPath )
-{
-    std::vector<DiffHunk> hunks;
-    const std::string cmd = gitCmd( " -c core.quotepath=false -c diff.algorithm=myers -C " ) + shSingleQuote( root )
-                          + " diff --no-ext-diff --no-textconv --ignore-submodules=dirty --unified=0 --no-color HEAD -- " + shSingleQuote( relPath ) + " 2>/dev/null";
-    std::FILE* pipe = os::popen( cmd.c_str(), "r" );
-    if( !pipe ) { DISCLOSE( "quality: churn hunk diff could not be spawned" ); return hunks; }
-
-    char buf[ 4096 ];
-    while( std::fgets( buf, sizeof( buf ), pipe ) )
+    if( os::pclose( pipe ) != 0 )
     {
-        if( buf[0] != '@' || buf[1] != '@' )
-        {
-            continue; // only hunk-header lines matter here
-        }
-        int oldStart = 0, oldCount = 1, newStart = 0, newCount = 1;
-        if( std::sscanf( buf, "@@ -%d,%d +%d,%d @@", &oldStart, &oldCount, &newStart, &newCount ) == 4 ) {}
-        else if( std::sscanf( buf, "@@ -%d,%d +%d @@", &oldStart, &oldCount, &newStart ) == 3 ) { newCount = 1; }
-        else if( std::sscanf( buf, "@@ -%d +%d,%d @@", &oldStart, &newStart, &newCount ) == 3 ) { oldCount = 1; }
-        else if( std::sscanf( buf, "@@ -%d +%d @@", &oldStart, &newStart ) == 2 ) { oldCount = 1; newCount = 1; }
-        else
-        {
-            continue; // malformed/unexpected header — skip (degrade per-hunk)
-        }
-        if( oldStart < 0 || oldCount < 0 || newStart < 0 || newCount < 0 )
-        {
-            continue; // git never emits these; refuse rather than wrap
-        }
-
-        hunks.push_back( DiffHunk{ std::uint32_t( oldStart ), std::uint32_t( oldCount ),
-                                   std::uint32_t( newStart ), std::uint32_t( newCount ) } );
+        outShas.resize( shasBefore );   // a failed blame's partial output is not evidence either way
+        return false;
     }
-    os::pclose( pipe );
-    return hunks;
+    return true;
 }
 
-// Memoized accessor: one `git diff` spawn per PATH per run, not per symbol. A path with no hunks memoizes the
-// empty vector too, so a repeatedly-queried clean path costs one spawn, not N.
-inline const std::vector<DiffHunk>& diffHunksMemoized( DiffHunkMemo& memo, const std::string& root, const std::string& relPath )
-{
-    const auto it = memo.find( relPath );
-    if( it != memo.end() )
-    {
-        return it->second;
-    }
-    return memo.emplace( relPath, gitDiffHunksVsHead( root, relPath ) ).first->second;
-}
+// DiffHunk / DiffHunkMemo / gitDiffHunksVsHead / diffHunksMemoized / parseHunkHeaderLine — MOVED to
+// diffhunks.h (2026-09-27) when --situ grew the symbol-granular change set and needed the same primitive:
+// one hunk parser, both consumers (this churn lens and situ.h's change-set narrowing), zero clones. The
+// types and both per-path accessors are unchanged; churnEditWindowCommitCount below consumes them as before.
 
 // HOW MANY DISTINCT in-window COMMITS last wrote the pre-existing lines that the CURRENT uncommitted edit to
 // `relPath` (vs HEAD) modifies inside the symbol's [symStart, symStart+symLoc-1] span. See the section comment
@@ -6533,10 +6665,13 @@ inline const std::vector<DiffHunk>& diffHunksMemoized( DiffHunkMemo& memo, const
 //   >= kShortHorizonMinCommits  the lines were rewritten by that many COMMITTED commits inside the window,
 //         the working edit excluded (blame is on HEAD) → this is the rewrite-thrash the kind exists to name,
 //         and the only form of it that gates.
-// 0 (no hunk, no git, no blame) stays AMBIENT, the degrade that never inflates severity on missing evidence.
+// 0 (no hunk) stays AMBIENT. hwh-fix4 (N1): a hunk diff or a blame git refused sets `unreadOut` — the count is then not known
+// (it may be short of the truth), and the caller reports churn="unknown", never ambient: a failed read is not "no window commit".
 inline std::uint32_t churnEditWindowCommitCount( DiffHunkMemo& memo, const std::string& root, const std::string& relPath,
-                                                 std::uint32_t symStart, std::uint32_t symLoc, std::int64_t windowCutoffEpoch )
+                                                 std::uint32_t symStart, std::uint32_t symLoc, std::int64_t windowCutoffEpoch,
+                                                 bool& unreadOut )
 {
+    unreadOut = false;
     if( symStart == 0 )
     {
         return 0;
@@ -6544,7 +6679,13 @@ inline std::uint32_t churnEditWindowCommitCount( DiffHunkMemo& memo, const std::
     std::vector<std::uint64_t> shas;
     const std::uint32_t symEnd = symStart + ( symLoc > 0 ? symLoc - 1 : 0 );
 
-    for( const DiffHunk& h : diffHunksMemoized( memo, root, relPath ) )
+    const DiffHunkRead& read = diffHunksMemoized( memo, root, relPath );
+    if( !read.ok )
+    {
+        unreadOut = true;
+        return 0;
+    }
+    for( const DiffHunk& h : read.hunks )
     {
         if( h.oldCount == 0 )
         {
@@ -6574,7 +6715,10 @@ inline std::uint32_t churnEditWindowCommitCount( DiffHunkMemo& memo, const std::
             continue; // this hunk falls outside the symbol
         }
 
-        gitBlameRangeWindowCommits( root, relPath, h.oldStart, h.oldCount, windowCutoffEpoch, shas );
+        if( !gitBlameRangeWindowCommits( root, relPath, h.oldStart, h.oldCount, windowCutoffEpoch, shas ) )
+        {
+            unreadOut = true;   // keep reading the other hunks: their commits still count, but the total is now a floor
+        }
     }
     std::sort( shas.begin(), shas.end() );
     shas.erase( std::unique( shas.begin(), shas.end() ), shas.end() );   // a commit spanning two hunks of one symbol counts ONCE
@@ -8792,6 +8936,27 @@ inline std::string staleAcksXml( const std::vector<StaleAck>& staleAcks, EscapeF
     return out;
 }
 
+// idea #11 (lane lean-trio), shared by lane lean2b: stale= split by ack KIND as `kind:N,...`, in first-appearance order of the
+// ledger's own row order — the stale_by_kind= value of the folded CLI --quality-delta AND of the MCP quality_delta twin, so the
+// two surfaces cannot count differently. The KIND drops the ack's :new-symbol/:preexisting facet; the rows (--show-stale /
+// show_stale=true) carry it. Unescaped: each caller escapes for its own dialect.
+inline std::string staleByKindValue( const std::vector<StaleAck>& staleAcks )
+{
+    std::vector<std::pair<std::string, std::size_t>> byKind;
+    for( const StaleAck& a : staleAcks )
+    {
+        const std::string kind = a.kind.substr( 0, a.kind.find( ':' ) );
+        const auto it = std::find_if( byKind.begin(), byKind.end(), [ & ]( const auto& kv ) { return kv.first == kind; } );
+        if( it == byKind.end() ) { byKind.emplace_back( kind, 1 ); } else { ++it->second; }
+    }
+    std::string kinds;
+    for( const auto& [ kind, n ] : byKind )
+    {
+        kinds += ( kinds.empty() ? "" : "," ) + kind + ":" + std::to_string( n );
+    }
+    return kinds;
+}
+
 inline std::string staleAcksJsonArray( const std::vector<StaleAck>& staleAcks )   // returns `"sa":[...]`, ready to splice in
 {
     std::string out = "\"sa\":[";
@@ -9089,6 +9254,43 @@ inline void appendDeadCodeRows( std::vector<Regression>& regs, const IngestResul
 //   dead-code: a dead-candidate not in the baseline.
 //   api-surface: a PUBLIC/exported symbol (isPublicApi) whose canonId is not in the baseline set (contract
 //     drift — new exported surface; §1c 2606.21804). A SET signal → overload-collision-proof by construction.
+// hwh-fix4 (N1) — the history a gating kind needed and could not read. short-horizon-churn is the one kind whose gating input
+// comes from git history (the window commit counts, the window ref tree, the blame of the edited lines); on a partial clone the
+// no-download rule refuses the tree and fails the blame, and a budget can cut the walk. Each used to read as "no churn" or
+// churn="ambient", so a gating row vanished and --quality-delta exited 0. Now each is named on the answer (unread_history=), a
+// row whose self/ambient split could not be read says churn="unknown", and an answer with no gating row exits 6, never 0.
+struct HistoryUnread
+{
+    bool          churnWindow = false;   // the window commit-count walk ended before the window floor: a file's count is a floor
+    bool          churnTree   = false;   // the window ref tree was refused or failed: no symbol's committed-rewrite evidence was read
+    std::uint32_t churnRows   = 0;       // rows whose blame or hunk diff git refused: churn="unknown"
+    bool          renames     = false;   // a pinned sidecar floor, and the rename map was refused (partial clone): a baseline row
+                                         // under a renamed path is not re-filed, so its symbol reads as new and cannot gate
+    bool any() const noexcept { return churnWindow || churnTree || churnRows > 0 || renames; }
+};
+
+// unread_history= (XML) and "unread_history":[…] (JSON, CLI and MCP alike), built once for every emitter; empty when all was read.
+// The values, in this order: churn-window, churn-tree, churn-blame, renames.
+inline std::pair<std::string, std::string> historyUnreadDisclosure( const HistoryUnread& h )
+{
+    if( !h.any() )
+    {
+        return {};
+    }
+    std::vector<const char*> parts;
+    if( h.churnWindow ) { parts.push_back( "churn-window" ); }
+    if( h.churnTree )   { parts.push_back( "churn-tree" ); }
+    if( h.churnRows )   { parts.push_back( "churn-blame" ); }
+    if( h.renames )     { parts.push_back( "renames" ); }
+    std::string xml = " unread_history=\"", json = ",\"unread_history\":[";
+    for( std::size_t i = 0; i < parts.size(); ++i )
+    {
+        xml  += ( i ? "," : "" ) + std::string( parts[i] );
+        json += ( i ? ",\"" : "\"" ) + std::string( parts[i] ) + "\"";
+    }
+    return { xml + "\"", json + "]" };
+}
+
 // `root` = the ingest root exactly as invoked; every baseline COMPARISON key is the root-relative
 // baselineCanonId (S2) so a committed baseline matches regardless of how the root was spelled on either run.
 // The human-readable `Regression.sym` keeps the FULL g.canonId (display only — never hashed/compared), so the
@@ -9105,8 +9307,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
                                              std::vector<CloneIdiomFact>* cloneIdiomsOut = nullptr,   // every CURRENT-tree clone group's (hash, idiom), for the legacy-ack backfill
                                              std::size_t* declinedCallExcludedOut = nullptr,          // symbols kept out of dead-code ONLY by a declined call (declinedCallMayReach)
                                              std::size_t* valueRefExcludedOut = nullptr,              // ... ONLY because a table/field/argument holds them as a VALUE
-                                             const KindScope& scope = {} )                            // qd-memory-degrade: the kinds to report (see computeSnapshot)
+                                             const KindScope& scope = {},                             // qd-memory-degrade: the kinds to report (see computeSnapshot)
+                                             HistoryUnread* historyUnreadOut = nullptr )              // hwh-fix4 (N1): history a gating kind could not read
 {
+    HistoryUnread historyUnread;
     if( declinedCallExcludedOut )
     {
         *declinedCallExcludedOut = 0;
@@ -9747,114 +9951,122 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     // no git / no HEAD / no obtainable window ref → this kind simply reports nothing (degrade, precision-first).
     {
         // qd-memory-degrade: no window mining when the kind is not asked for (no count reaches the threshold, so no row)
+        bool walkUnread = false;   // hwh-fix4 (N1): the count walk ended before the window floor, so a count can be short
         const std::vector<std::uint32_t> commitCounts = kindSelected( scope.kinds, "short-horizon-churn" )
-                                                      ? gitFileCommitCountsInDayWindow( std::string( root ), ing, kShortHorizonDays ) : std::vector<std::uint32_t>{};
+                                                      ? gitFileCommitCountsInDayWindow( std::string( root ), ing, kShortHorizonDays, &walkUnread )
+                                                      : std::vector<std::uint32_t>{};
         const bool anyChurn = std::any_of( commitCounts.begin(), commitCounts.end(),
                                            []( std::uint32_t c ){ return c >= kShortHorizonMinCommits; } );
-        if( anyChurn )
+        // Gate 2 and the exemptions first, from the trees in hand: the history reads below (the window ref tree, the blame)
+        // are asked only for a symbol this diff rewrites, so an unread one is named only when it could have held a row
+        // (hwh-fix4, N1: a clean tree or an untouched file never reports history it did not need).
+        struct ChurnCandidate { NodeId node; std::uint64_t key; std::uint64_t baseBody; };
+        std::vector<ChurnCandidate> candidates;
+        if( anyChurn || walkUnread )
         {
-            const auto [ refBody, refOk ] = computeWindowRefBodyHashes( std::string( root ), kShortHorizonDays, excludes, maxFileBytes );
-            if( refOk )
+            const gtl::btree_map<std::uint64_t, std::uint64_t> nowBody = bodyHashesBySym( ing, root );
+
+            // fixture exemption, hoisted per file (path scan once, not per symbol).
+            std::vector<std::uint8_t> fixtureByFile( ing.files.size(), 0 );
+            for( std::uint32_t f = 0; f < ing.files.size(); ++f )
             {
-                const gtl::btree_map<std::uint64_t, std::uint64_t> nowBody = bodyHashesBySym( ing, root );
+                fixtureByFile[f] = isFixturePath( rootRelPath( ing, f ) ) ? 1 : 0;
+            }
 
-                // fixture exemption, hoisted per file (path scan once, not per symbol).
-                std::vector<std::uint8_t> fixtureByFile( ing.files.size(), 0 );
-                for( std::uint32_t f = 0; f < ing.files.size(); ++f )
+            ScratchMap<std::uint8_t> churnSeen( ing.symbols.size() );
+            for( NodeId i = 0; i < ing.symbols.size(); ++i )
+            {
+                if( i >= g.canonId.size() || g.canonId[i].empty() )
                 {
-                    fixtureByFile[f] = isFixturePath( rootRelPath( ing, f ) ) ? 1 : 0;
+                    continue;
+                }
+                const Symbol& s = ing.symbols[i];
+                if( s.kind == SymKind::Section || s.kind == SymKind::ModuleScope )
+                {
+                    continue; // doc sections churn by design; a module scope has no body to churn (exempt)
+                }
+                if( s.fileId >= commitCounts.size() || fixtureByFile[s.fileId] )
+                {
+                    continue; // fixtures churn by design (exempt)
+                }
+                // W1-S2: join on the path-qualified identity, NOT keyByNode — a scope-less symbol's
+                // bare-canonId key folded every same-named symbol in the tree into one identity, so
+                // gates 2+3 judged cross-file FOLDS (see bodyHashesBySym's doc; gate: §1d).
+                const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );
+                if( !insertScratchSeen( churnSeen, key ) )
+                {
+                    continue; // one report per (file, scope, name) identity — same-file overloads fold (one key = one file, one gate 1)
+                }
+                const auto nb = nowBody.find( key );
+                if( nb == nowBody.end() )
+                {
+                    continue; // no hashable body now (decl only) → nothing to rewrite
+                }
+                const auto bb = base.bodyHashBySym.find( key );
+                if( bb == base.bodyHashBySym.end() || bb->second == nb->second )
+                {
+                    continue; // gate 2: absent from baseline = a first write, never churn; equal = this diff does not rewrite it
+                }
+                if( commitCounts[s.fileId] < kShortHorizonMinCommits )
+                {
+                    historyUnread.churnWindow = historyUnread.churnWindow || walkUnread;   // gate 1 not met, or not known to be
+                    continue;
+                }
+                candidates.push_back( { i, key, bb->second } );
+            }
+        }
+
+        // The window ref tree is read only when a candidate needs it (an empty candidate list reads nothing and loses nothing);
+        // a file reached the window threshold, so history exists: a ref tree that did not load is unread, not absent.
+        using RefBodies = std::pair<gtl::btree_map<std::uint64_t, std::uint64_t>, bool>;
+        const auto [ refBody, refOk ] = candidates.empty() ? RefBodies{ {}, true }
+                                                           : computeWindowRefBodyHashes( std::string( root ), kShortHorizonDays, excludes, maxFileBytes );
+        historyUnread.churnTree = !refOk;
+        if( refOk && !candidates.empty() )
+        {
+            // B10.2d — SELF-vs-AMBIENT window cutoff, same basis as gates 1/3 (HEAD's own committer epoch
+            // minus the window, never wall-clock). A failed lookup leaves churnCutoffEpoch==0, and every
+            // candidate below then reads churn="unknown" (the blame cannot be asked).
+            const std::int64_t churnHeadEpoch   = gitHeadCommitEpoch( std::string( root ) );   // the same `log -1 --format=%ct HEAD` read, 0 on failure
+            const std::int64_t churnCutoffEpoch = churnHeadEpoch > 0 ? churnHeadEpoch - std::int64_t( kShortHorizonDays ) * 86400 : 0;
+
+            // P3 (r27) — ONE `git diff --unified=0 HEAD -- <path>` spawn per PATH for the whole loop. The
+            // diff is a pure function of (HEAD, working tree), both fixed for this call, yet it used to be
+            // re-spawned per symbol (measured: 8 byte-identical spawns for a single dirty file).
+            DiffHunkMemo churnHunkMemo;
+            for( const ChurnCandidate& c : candidates )
+            {
+                const Symbol& s  = ing.symbols[c.node];
+                const auto    rb = refBody.find( c.key );
+                // gate 3: rewritten across window commits (ref ≠ baseline body), or first COMMITTED inside the window.
+                if( rb != refBody.end() && rb->second == c.baseBody )
+                {
+                    continue;
                 }
 
-                // B10.2d — SELF-vs-AMBIENT window cutoff, same basis as gates 1/3 (HEAD's own committer epoch
-                // minus the window, never wall-clock). A failed lookup (should not happen here since refOk
-                // already proved resolvable history, but kept defensive) leaves churnCutoffEpoch==0, which
-                // degrades every symbol below to AMBIENT (churnEditWindowCommitCount is gated on `> 0`).
-                std::int64_t churnCutoffEpoch = 0;
-                {
-                    const std::string epochStr = gitOneLine( std::string( root ), "log --no-ext-diff --no-textconv -1 --format=%ct HEAD 2>/dev/null" );
-                    if( !epochStr.empty() )
-                    {
-                        const std::int64_t headEpoch = std::strtoll( epochStr.c_str(), nullptr, 10 );
-                        if( headEpoch > 0 )
-                        {
-                            churnCutoffEpoch = headEpoch - std::int64_t( kShortHorizonDays ) * 86400;
-                        }
-                    }
-                }
-
-                // P3 (r27) — ONE `git diff --unified=0 HEAD -- <path>` spawn per PATH for the whole loop. The
-                // diff is a pure function of (HEAD, working tree), both fixed for this call, yet it used to be
-                // re-spawned per symbol (measured: 8 byte-identical spawns for a single dirty file).
-                DiffHunkMemo             churnHunkMemo;
-                ScratchMap<std::uint8_t> churnSeen( ing.symbols.size() );
-                for( NodeId i = 0; i < ing.symbols.size(); ++i )
-                {
-                    if( i >= g.canonId.size() || g.canonId[i].empty() )
-                    {
-                        continue;
-                    }
-                    const Symbol& s = ing.symbols[i];
-                    if( s.kind == SymKind::Section || s.kind == SymKind::ModuleScope )
-                    {
-                        continue; // doc sections churn by design; a module scope has no body to churn (exempt)
-                    }
-                    if( s.fileId >= commitCounts.size() || commitCounts[s.fileId] < kShortHorizonMinCommits )
-                    {
-                        continue;
-                    }
-                    if( fixtureByFile[s.fileId] )
-                    {
-                        continue; // fixtures churn by design (exempt)
-                    }
-                    // W1-S2: join on the path-qualified identity, NOT keyByNode — a scope-less symbol's
-                    // bare-canonId key folded every same-named symbol in the tree into one identity, so
-                    // gates 2+3 judged cross-file FOLDS (see bodyHashesBySym's doc; gate: §1d).
-                    const std::uint64_t key = pathQualifiedKey( relForHash( ing.files[ s.fileId ], root ), s );
-                    if( !insertScratchSeen( churnSeen, key ) )
-                    {
-                        continue; // one report per (file, scope, name) identity — same-file overloads fold
-                    }
-                    const auto nb = nowBody.find( key );
-                    if( nb == nowBody.end() )
-                    {
-                        continue; // no hashable body now (decl only) → nothing to rewrite
-                    }
-                    const auto bb = base.bodyHashBySym.find( key );
-                    if( bb == base.bodyHashBySym.end() )
-                    {
-                        continue; // gate 2: absent from baseline = a first write, never churn
-                    }
-                    if( bb->second == nb->second )
-                    {
-                        continue; // gate 2: this diff does not rewrite it
-                    }
-                    const auto rb = refBody.find( key );
-                    // gate 3: rewritten across window commits (ref ≠ baseline body), or first COMMITTED inside the window.
-                    if( rb != refBody.end() && rb->second == bb->second )
-                    {
-                        continue;
-                    }
-
-                    // B10.2d: SELF vs AMBIENT — does THIS diff modify a pre-existing line that was itself
-                    // last committed inside the window? See the section comment above churnEditWindowCommitCount.
-                    // Q-DIAL-1 — ONE blame-derived number decides both the facet and the severity (see
-                    // churnEditWindowCommitCount): >=1 in-window commit on the edited lines is SELF, and it
-                    // is now INFORMATIONAL exactly as AMBIENT already was; >= kShortHorizonMinCommits is the
-                    // rewrite-thrash that gates. Measured on twelve LANDED commits of this repo (audit Q1
-                    // §2b): the old "SELF gates" rule fired 135 of 171 gating rows, 0% of them a finding a
-                    // reviewer would act on, because on an active branch the symbol you wrote this week and
-                    // are touching again is churn="self" by construction.
-                    const std::uint32_t windowCommits = churnCutoffEpoch > 0
-                                                      ? churnEditWindowCommitCount( churnHunkMemo, std::string( root ),
-                                                                                    std::string( relForHash( ing.files[ s.fileId ], root ) ),
-                                                                                    s.line, s.loc, churnCutoffEpoch )
-                                                      : 0u;
-                    const bool self  = windowCommits > 0;
-                    const bool gates = windowCommits >= kShortHorizonMinCommits;
-                    regs.push_back( { "short-horizon-churn", g.canonId[i], 0, commitCounts[ s.fileId ], key,
-                                      !gates, self ? "self" : "ambient", false } );   // now = window commit count on the file; origin: ALWAYS preexisting (gate 2 above required a baseline body)
-                    stampLoc( i );
-                }
+                // B10.2d: SELF vs AMBIENT — does THIS diff modify a pre-existing line that was itself
+                // last committed inside the window? See the section comment above churnEditWindowCommitCount.
+                // Q-DIAL-1 — ONE blame-derived number decides both the facet and the severity (see
+                // churnEditWindowCommitCount): >=1 in-window commit on the edited lines is SELF, and it
+                // is now INFORMATIONAL exactly as AMBIENT already was; >= kShortHorizonMinCommits is the
+                // rewrite-thrash that gates. Measured on twelve LANDED commits of this repo (audit Q1
+                // §2b): the old "SELF gates" rule fired 135 of 171 gating rows, 0% of them a finding a
+                // reviewer would act on, because on an active branch the symbol you wrote this week and
+                // are touching again is churn="self" by construction.
+                bool                blameUnread   = churnCutoffEpoch <= 0;   // no HEAD epoch: the blame cannot be asked
+                const std::uint32_t windowCommits = churnCutoffEpoch > 0
+                                                  ? churnEditWindowCommitCount( churnHunkMemo, std::string( root ),
+                                                                                std::string( relForHash( ing.files[ s.fileId ], root ) ),
+                                                                                s.line, s.loc, churnCutoffEpoch, blameUnread )
+                                                  : 0u;
+                const bool gates = windowCommits >= kShortHorizonMinCommits;   // a floor at the bar already proves it, read or not
+                // hwh-fix4 (N1): a refused read under the bar is unknown, never ambient (and never a gating claim it cannot prove)
+                const bool unknown = blameUnread && !gates;
+                historyUnread.churnRows += unknown ? 1u : 0u;
+                const bool self = windowCommits > 0;
+                regs.push_back( { "short-horizon-churn", g.canonId[c.node], 0, commitCounts[ s.fileId ], c.key,
+                                  !gates, unknown ? "unknown" : self ? "self" : "ambient", false } );   // now = window commit count on the file; origin: ALWAYS preexisting (gate 2 above required a baseline body)
+                stampLoc( c.node );
             }
         }
     }
@@ -9972,6 +10184,10 @@ inline std::vector<Regression> computeDelta( const IngestResult& ing, const Grap
     }
     std::sort( regs.begin(), regs.end(), []( const Regression& a, const Regression& b )
     { return a.kind != b.kind ? a.kind < b.kind : a.sym < b.sym; } );
+    if( historyUnreadOut )
+    {
+        *historyUnreadOut = historyUnread;
+    }
     return regs;
 }
 
@@ -10018,6 +10234,17 @@ inline bool offsetInComment( std::string_view source, std::size_t spanBegin, std
     return open != std::string_view::npos && span.find( "*/", open + 2 ) == std::string_view::npos;
 }
 
+// CR 4396503844: C99 `int api(int values[static 1])` — `static` inside [ ] qualifies the array parameter, it is no storage class.
+inline bool insideSquareBrackets( std::string_view source, std::size_t begin, std::size_t position ) noexcept
+{
+    int depth = 0;
+    for( std::size_t at = begin; at < position; ++at )
+    {
+        depth += source[ at ] == '[' ? 1 : source[ at ] == ']' && depth > 0 ? -1 : 0;
+    }
+    return depth > 0;
+}
+
 inline bool sourceHasStaticToken( std::string_view source, std::size_t sigStartByte, std::size_t sigEndByte ) noexcept
 {
     const std::size_t begin = std::min( sigStartByte, source.size() );
@@ -10033,13 +10260,22 @@ inline bool sourceHasStaticToken( std::string_view source, std::size_t sigStartB
         const auto isIdentifier = []( char c ) noexcept { return std::isalnum( static_cast<unsigned char>( c ) ) || c == '_'; };
         const bool leftBoundary  = position == begin || !isIdentifier( source[ position - 1 ] );
         const bool rightBoundary = position + token.size() == end || !isIdentifier( source[ position + token.size() ] );
-        if( leftBoundary && rightBoundary && !offsetInComment( source, begin, position ) )
+        if( leftBoundary && rightBoundary && !offsetInComment( source, begin, position ) && !insideSquareBrackets( source, begin, position ) )
         {
             return true;
         }
         position += token.size();
     }
     return false;
+}
+
+// D1 fix round 1: internal linkage of ONE definition. The token is the C-family storage class, so the scan runs only for a
+// language whose LangFacts row says `staticLinkage` (C, C++, Objective-C). A Python parameter `static=False`, a TypeScript literal
+// type `'static'` and a Rust `'static` lifetime are the same four letters and no linkage: before this gate they made a public
+// function an "internal-linkage" row (--dead-code `<d>`: zed listed 67 Rust rows; the test-only `<to>` rows inherited it).
+inline bool symbolHasStaticLinkage( const Symbol& s, std::string_view source ) noexcept
+{
+    return langFacts( s.lang ).staticLinkage && sourceHasStaticToken( source, s.sigStartByte, s.sigEndByte );
 }
 
 // The nearest non-blank, non-comment line above a Python def at `defByte` (or the def's own first byte) opens with '@'.
@@ -10112,21 +10348,131 @@ inline bool pythonRunnerRoot( std::string_view path, const Symbol& s, std::strin
     const std::string_view baseName   = slash == std::string_view::npos ? path : path.substr( slash + 1 );
     const bool             pytestFile = ( baseName.starts_with( "test_" ) || baseName.ends_with( "_test.py" ) ) && baseName.ends_with( ".py" );
     const std::string_view name       = s.name;
-    constexpr std::array<std::string_view, 8> kXunitHooks = { "setup_module", "teardown_module", "setup_function", "teardown_function",
-                                                              "setup_class",  "teardown_class",  "setup_method",   "teardown_method" };
-    constexpr std::array<std::string_view, 6> kUnittestHooks = { "setUp", "tearDown", "setUpClass", "tearDownClass", "asyncSetUp", "asyncTearDown" };
-    const auto listed = []( const auto& table, std::string_view n ) noexcept { return std::find( table.begin(), table.end(), n ) != table.end(); };
-    if( pytestFile && ( name.starts_with( "test" ) || listed( kXunitHooks, name ) ) )
+    if( pytestFile && ( name.starts_with( "test" ) || std::ranges::contains( kXunitHooks, name ) ) )
     {
         return true;
     }
-    if( s.scope.empty() || !( name.starts_with( "test" ) || listed( kUnittestHooks, name ) ) )
+    if( s.scope.empty() || !( name.starts_with( "test" ) || std::ranges::contains( kUnittestHooks, name ) ) )
     {
         return false;
     }
     const std::size_t scopeSep = s.scope.rfind( "::" );
     return pythonClassBasesNameTestCase( source, scopeSep == std::string::npos ? std::string_view( s.scope ) : std::string_view( s.scope ).substr( scopeSep + 2 ),
                                          s.sigStartByte );
+}
+
+// D1 TESTONLY-DEAD: Python's own internal-interface evidence, standing in for the `static` token C/C++ spells — PEP 8's
+// "internal interfaces" convention: a leading-underscore name, or a def inside a module or package whose path component
+// starts with one underscore (`_segment_tools.py`, `_internal/x.py`). A dunder component (`__init__.py`, `__main__.py`)
+// is the language's own spelling, not a privacy mark. `relPath` is ROOT-relative, so a directory above the root never
+// counts. MODULE-LEVEL defs only (empty scope): a method's reach is its class's, and a class in a private module is often
+// re-exported as public API (textual's widgets/_data_table.py DataTable), with methods a framework dispatches by name
+// (action_*, _on_*). Only a language whose LangFacts row sets underscorePrivacy (Python); every other language is false.
+// Read only by --dead-code's test-only rows (test-only=).
+inline bool underscorePrivateDef( std::string_view relPath, const Symbol& s ) noexcept
+{
+    if( !langFacts( s.lang ).underscorePrivacy || !s.scope.empty() )
+    {
+        return false;
+    }
+    const auto privateMark = []( std::string_view part ) noexcept { return part.size() > 1 && part[ 0 ] == '_' && part[ 1 ] != '_'; };
+    if( privateMark( s.name ) )
+    {
+        return true;
+    }
+    std::size_t start = 0;
+    while( start < relPath.size() )
+    {
+        const std::size_t slash = relPath.find( '/', start );
+        const std::size_t end   = slash == std::string_view::npos ? relPath.size() : slash;
+        if( privateMark( relPath.substr( start, end - start ) ) )
+        {
+            return true;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+
+// D1 fix round 1 (F4): pytest's own test file. A root `conftest.py` sits outside every test/ directory, so the shared test-path
+// rule (filter.h isTestPath) reads its helpers as library code; --dead-code's test-only rows must not list them as library
+// functions. The base name alone decides (any conftest.py, at any depth).
+inline bool isConftestFile( std::string_view path ) noexcept
+{
+    return namesplit::afterLast( path, "/" ) == "conftest.py";
+}
+
+// D1 fix round 1 (F3): the module name a Python file answers to at its tail: the file stem, or the package directory's name for
+// `__init__.py`. "" for a path that is not a .py file (or an __init__.py with no directory).
+inline std::string_view pythonModuleTail( std::string_view relPath ) noexcept
+{
+    if( !relPath.ends_with( ".py" ) )
+    {
+        return {};
+    }
+    relPath.remove_suffix( 3 );
+    if( namesplit::afterLast( relPath, "/" ) != "__init__" )
+    {
+        return namesplit::afterLast( relPath, "/" );
+    }
+    relPath.remove_suffix( relPath.size() == 8 ? 8 : 9 );   // "__init__" or "/__init__"
+    return namesplit::afterLast( relPath, "/" );
+}
+
+// CR 4396503848: the offset of the `import` keyword of a `from <module> import …` line, or npos for any other line. Any run of
+// spaces or tabs may stand around the keyword (`from ._impl  import *`); the keyword is a whole word between two of them.
+inline std::size_t pythonImportKeywordAt( std::string_view line ) noexcept
+{
+    const auto blank = [ & ]( std::size_t at ) noexcept { return at < line.size() && ( line[ at ] == ' ' || line[ at ] == '\t' ); };
+    if( !line.starts_with( "from" ) || !blank( 4 ) )
+    {
+        return std::string_view::npos;
+    }
+    for( std::size_t imp = line.find( "import" ); imp != std::string_view::npos; imp = line.find( "import", imp + 1 ) )
+    {
+        if( blank( imp - 1 ) && blank( imp + 6 ) )
+        {
+            return imp;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// D1 fix round 1 (F3): the tail of every module a `from <module> import *` line in `text` names (`from ._impl import *` and
+// `from pkg._impl import *` both give "_impl"). A glob re-exports the module's public names through the importing package, so a
+// def in that module is part of the package's public surface even when no other file spells its name. Line-based text, not
+// parsed Python: a glob inside a string or a comment reads as one too (a row fewer, never one more).
+inline std::vector<std::string_view> pythonGlobImportTails( std::string_view text )
+{
+    std::vector<std::string_view> tails;
+    for( std::size_t at = 0; at < text.size(); )
+    {
+        const std::size_t eol  = std::min( text.find( '\n', at ), text.size() );
+        std::string_view  line = text.substr( at, eol - at );
+        at                     = eol + 1;
+        line.remove_prefix( std::min( line.find_first_not_of( " \t" ), line.size() ) );
+        const std::size_t imp = pythonImportKeywordAt( line );
+        if( imp == std::string_view::npos )
+        {
+            continue;
+        }
+        std::string_view after = line.substr( imp + 7 );
+        after.remove_prefix( std::min( after.find_first_not_of( " \t" ), after.size() ) );
+        if( !after.starts_with( '*' ) )
+        {
+            continue;
+        }
+        std::string_view module = line.substr( 5, imp - 5 );
+        module.remove_prefix( std::min( module.find_first_not_of( " \t" ), module.size() ) );
+        module.remove_suffix( module.size() - std::min( module.find_last_not_of( " \t" ) + 1, module.size() ) );
+        const std::size_t dot = module.rfind( '.' );
+        const std::string_view tail = dot == std::string_view::npos ? module : module.substr( dot + 1 );
+        if( !tail.empty() )
+        {
+            tails.push_back( tail );
+        }
+    }
+    return tails;
 }
 
 // lane/safe-delete: the --dead-code high-confidence PRECONDITIONS on symbol KIND/PLACEMENT alone — a

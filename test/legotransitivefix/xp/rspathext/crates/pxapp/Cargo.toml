@@ -1,0 +1,5 @@
+[package]
+name = "xp-pathext-app"
+[dependencies]
+xp-pathext-core = { path = "../pxcore" }
+xpextlib = { path = "../../../../../../../../vendor-outside/xpextlib" }

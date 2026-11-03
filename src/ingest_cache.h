@@ -91,6 +91,7 @@ struct RawRef
     std::string   memberVia;           // FE-B on #373: the method a Ruby typed receiver was built by (`new`, a finder); see model.h
     bool          memberFactory = false;   // FE-B on #373: memberCtor names a FactoryBot factory, not a class
     bool          forwarded = false;       // lane fcall-forward fix 1: a JS/TS `f.call/f.apply` site standing for `f( … )` (model.h Reference::forwarded)
+    bool          trailingLambda = false;  // #155: a Kotlin call whose lambda is written after its argument list (model.h Reference::trailingLambda)
     std::uint32_t baseBind = 0;          // lane lego-transitive fix 1, an inherit ref only: 1 + the name byte of the same-file
                                          //   declaration the base binds to (ingest_relations.h localBaseBinding); 0 none, ~0u unknown
 };
@@ -144,7 +145,27 @@ constexpr std::uint32_t kCacheMagic   = 0x4b505443;   // "CTPK"
 //   all match) rather than silently re-absolutizing a key that was never root-relative to begin
 //   with — a v2 cache simply misses on every lookup that survives the guard, which is exactly the
 //   self-healing full-reparse path already used for any other corrupt/stale cache.
-constexpr std::uint32_t kCacheVersion = 36;           // 36: train 30 — strictly above every number a train-30 build used: lane call-result-typing
+// 43 (train 36, #155 Kotlin scope functions; the PR's placeholder was 41): the `trailingLambda` u8 in writeRef/readRef changes
+// the on-disk ref record, so an older cache must be rejected. 43 sits above every live value: main / train 35 40, #438's 41,
+// lane rust-degraded's placeholder 42.
+// 44 (train 37b, lane rust-degraded; its placeholder was 42): the FILE record gains a sixth FileHealth u32, useBoundsBlanked
+// (the Rust precise-capture re-parse, src/rustusebounds.h), so an older cache must be rejected. 44 is above train 36's 43.
+constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane alias-import's LocalBindKind ReExport (appended; readBind's kind bound
+                                                      //    moves; its placeholder 47), strictly above main 46 and that placeholder; no other
+                                                      //    train-42b lane changed a record format.
+                                                      // 46: train 40 — lane js-def-naming's LocalBindKind JsObjectLiteral (appended; its placeholder 45),
+                                                      //    strictly above main 44 and that placeholder; no other train-40 lane changed a record format.
+                                                      // 44: train 37b — rust-degraded FileHealth::useBoundsBlanked (above 43 / placeholder 42)
+                                                      // 43: train 36 — #155 Kotlin trailingLambda ref byte (above 40 / 41 / 42)
+                                                      // 40: train 34 — strictly above main 39 and every live value (train-33 refs, #432 39; #427 / #429 38): the
+                                                      //    fc3-js-rebind record change (LocalBindKind JsRebind, appended) lands; no other train-34 lane changed a format.
+                                                      // 39: train 33 — strictly above main 36 and every live value (lane l6-iface 38, #427 / #429 38): the
+                                                      //    l6-iface record change (LocalBindKind DispatchType + ImplBlock, appended) lands; no other train-33 lane changed a format.
+                                                      // 38: train 32 lane l6-iface fix round 1 (train renumbers) — LocalBindKind gained ImplBlock
+                                                      //    (appended): an older binary would reject the byte, a newer must not read a blob that predates it as complete.
+                                                      // 37: train 32 lane l6-iface (train renumbers) — LocalBindKind gained DispatchType
+                                                      //    (appended): an older binary would reject the byte, a newer must not read a blob that predates it as complete.
+                                                      // 36: train 30 — strictly above every number a train-30 build used: lane call-result-typing
                                                       //    33 (RawBind resultIndex + unwrapDepth), lane fcall-forward 33, lane name-template-dispatch 35
                                                       //    (RefRole Pattern 11), main 34; so no blob a branch build wrote is read here.
                                                       // 35: train 30 lane name-template-dispatch (train renumbers) — RefRole gained
@@ -345,15 +366,98 @@ constexpr std::uint32_t kCacheVersion = 36;           // 36: train 30 — strict
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 214;          // bump on any grammar/.scm/extraction change
-                                                      // 214 = 2026-10-21 (#358 1a, PR #420, merged with main 320f8d8f): C# using directives move to shared
-                                                      //   captures; import-free deep containers no longer disclose a cut or lose whole-cache eligibility.
-                                                      //   Alias/edge facts unchanged. Reserved for #420 above main 206 (rich 207) and the train-32 numbers
-                                                      //   212/213 (32a); train 32b goes above. Rich file tag 215. kCacheVersion stays 36 (no record format change).
+constexpr std::uint32_t kParserVer    = 287;          // bump on any grammar/.scm/extraction change
+                                                      // 287 = 2026-11-03 (#358 slice 1a, PR #420, merge main 85d2277f): C# using directives move to shared
+                                                      //   @import.path captures; import-free deep containers no longer disclose a cut or lose whole-cache eligibility.
+                                                      //   Alias/edge facts unchanged. Above main 285 (rich 286); rich file tag 288. kCacheVersion stays 48.
+                                                      // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
+                                                      //   qualifier of more than one segment keeps it whole in Reference::fieldName (ingest_names.h rustWrittenQualifier).
+                                                      //   Rich file tag 286. kCacheVersion stays 48: no record changes shape.
+                                                      // 283 = 2026-10-31 (train 43b: lanes registrar (placeholders 273..281), string-import (274, 275) and their extraction: Python registrar facts,
+                                                      //   TS/JS provider-record literal marks, Python dotted-string and import-sink facts). Strictly above 281 (rich 282) and every lane value. Rich file tag 284.
+                                                      //   kCacheVersion stays 48: no record changes shape.
+                                                      // 281 = 2026-10-30 (lane registrar fix round 4, PLACEHOLDER; 280 is 279's rich tag): a ProviderRecord literal is marked only when it is an element of an
+                                                      //   array (call argument / const / `providers` property) and holds only plain unique pairs (no spread, method, accessor, computed or duplicate key)
+                                                      // 279 = 2026-10-30 (lane registrar fix round 3, PLACEHOLDER: the train renumbers; 278 is 277's rich tag): a TS/JS Value row
+                                                      //   read from a ProviderRecord object literal carries that literal's start byte (qualifier "<scope><shadow>@<byte>") when the
+                                                      //   literal is a direct call argument or a `const` initialiser; a Python registrar fact is refused unless the method's other
+                                                      //   parameters are provably beside the point (a defaulted one stored into `self` refuses; a subscript key of the store is allowed).
+                                                      // 277 = 2026-10-30 (lane registrar fix round 2, PLACEHOLDER: the train renumbers; 276 is 275's rich tag): a Python
+                                                      //   lambda parameter / comprehension target files a VarDecl `~name` (kPythonLocalScopePrefix), and a method whose body also
+                                                      //   uses another parameter written without a default records no registrar fact.
+                                                      // 275 = 2026-10-30 (lane registrar fix round 1, PLACEHOLDER: the train renumbers; 274 is 273's rich tag): a Python
+                                                      //   parameter written with a default (`sender=None`) records no registrar fact.
+                                                      // 273 = 2026-10-30 (lane registrar, PLACEHOLDER: the train renumbers): Python files record
+                                                      //   registrar facts (model.h kValueRefRegParamScope: a method parameter stored into a container a
+                                                      //   field of self holds). Strictly above train-42b's 271 (rich 272). Rich file tag 274. kCacheVersion
+                                                      //   stays 46: no record changes shape (a new scope char in an existing field).
+                                                      // 271 = 2026-10-30 (train 42b: lanes iface-peel (placeholders 259/260: a C++ smart-pointer alias record carries its
+                                                      //   pointee, a Rust `-> &dyn T` / `Box<dyn T>` / `impl T` result records a ReturnType with kDispatchResultBit, a C++
+                                                      //   member whose written type is an enclosing template parameter carries kTemplateParamMemberType) and alias-import
+                                                      //   (261/262: TS/TSX/JS re-export specifiers captured as LocalBindKind::ReExport records)). Strictly above train
+                                                      //   41b's 269 (rich 270) and every live lane placeholder (259, 260, 261, 263, 265, 267). Rich file tag 272.
+                                                      //   kCacheVersion 48 (ReExport appended).
+                                                      // 269 = 2026-10-29 (train 41b: lane fn-slot-s2 (placeholders 257/258, 259 and 260 over its fix rounds): C++ `&Cls::m`
+                                                      //   value refs (memberRoot = Cls; memberVia = written qualifier / enclosing scope / `using namespace` directives),
+                                                      //   `( o.*x.f )( … )` slot calls, C nested designated paths and macro-cast slot calls + their "()M" alias facts, a class
+                                                      //   body fact's scope path, and a C++ base that is a template parameter of the deriving class (baseBind 0xFFFFFFFE)).
+                                                      //   Strictly above train 41's 259 (rich 260) and every live lane placeholder (iface-peel 259, alias-import 261,
+                                                      //   the string/literal lanes 263/265/267; train 42 goes above 269). Rich file tag 270. kCacheVersion stays 46:
+                                                      //   no record changes shape.
+                                                      // 259 = 2026-10-28 (train 41: lanes fn-slot-2 (placeholder 249/250; Rust files record the slot join's records:
+                                                      //   function-path arguments of path calls, field stores, registrar parameter facts, `(x.f)( … )` slot calls) and
+                                                      //   py-split-marker (255/256; a Python module-scope def/class inside an if/try/with/loop files a second VarDecl
+                                                      //   `?name`)). Strictly above train 40's 251 (rich 252), every lane placeholder (249/250, 255/256) and
+                                                      //   fn-slot-s2's 257/258 (train 41b takes the next). Rich file tag 260. kCacheVersion stays 46: no record changes shape.
+                                                      // 251 = 2026-10-27 (train 40: lanes js-def-naming (placeholder 238; JS `module.exports = <anonymous fn>` named
+                                                      //   by its file stem, module-scope `NAME = { … }` binding names), string-keyed (241; Pattern qualifier "t" at a
+                                                      //   hasattr test / JS-TS subscript store) and fn-slot (247; Go function-valued slot records)). Strictly above
+                                                      //   train 39's 239 (rich 240) and every lane placeholder (238, 241/242, 247/248, fn-slot-2's 249/250). Rich file
+                                                      //   tag 252. kCacheVersion 46 (js-def-naming's LocalBindKind JsObjectLiteral record change).
+                                                      // 239 = 2026-10-27 (train 39: lane receiver-fixes, placeholder 237 / rich 238): TS `#private` field declarations and
+                                                      //   `this.#f = …` record MemberType; Python `self.f: T` / `T | None` / `Optional[ T ]` annotations and `mod.X( … )`
+                                                      //   constructors type fields and locals (a RecvType / MemberType with its qualifier), and `x = mod.X( … )` no longer
+                                                      //   writes the base Type tombstone. Strictly above train 38's 235 (rich 236) and every lane placeholder (237/238). Rich file
+                                                      //   tag 240. No record format changed: kCacheVersion stays 44.
+                                                      // 235 = 2026-10-27 (train 38: lane queue-hop, placeholder 228 / rich 229): a Python queue call (put/put_nowait/get/get_nowait)
+                                                      //   carrying keyword arguments records them on its call reference's composeRel (model.h pyKwTag), so QueueHops reads
+                                                      //   `put( v, timeout=1 )` as one item. Strictly above train 37b's 233 (rich 234). Rich file tag 236. No record format
+                                                      //   changed (the tag rides the existing composeRel string of writeRef/readRef): kCacheVersion stays 44.
+                                                      // 233 = 2026-10-26 (train 37b: lane rust-degraded, placeholder 229 / rich 230): a Rust file whose
+                                                      //   first parse holds error bytes is re-parsed with its precise-capturing use<..> bounds blanked
+                                                      //   (src/rustusebounds.h) — different defs. Strictly above train 36's 231 (rich 232). Rich file tag 234.
+                                                      // 231 = 2026-10-25 (train 36: #438 Kotlin trailing-lambda capture, #437, #431): strictly above every
+                                                      //   live number — main / train 35 226 (rich 227), #438's placeholder 228, lane rust-degraded's placeholder
+                                                      //   229 (rich 230). Rich file tag 232. kCacheVersion 43 moves with it (#438's trailingLambda ref byte).
+                                                      // 226 = 2026-10-24 (train 34: lean2b, fc2-lego-extparent, honest-lex, ind4b-k5-tighten-k5c, hop1, fc3-js-rebind):
+                                                      //   strictly above every live number — main 224 (rich 225), #432 224, lane ind4b's placeholder 224 (it collided with
+                                                      //   main's), lane ind5-glob-imports 222 (223, reserved), lane fc3-js-rebind 218, #426 216, #420 214. Rich file tag 227.
+                                                      //   Mandatory: fc3-js-rebind adds LocalBindKind::JsRebind records (kCacheVersion 40); ind4b emits VarDecl records for a
+                                                      //   Python match capture, a PEP 695 type alias / type parameter, and "from:x" in an aliased import's importedName.
+                                                      // 224 = 2026-10-23 (train 33: ls2-size-targets, fc1-std-qualified-name, ix5-classnew, mf1-nx, qn1-qualname, l6-iface,
+                                                      //   changelog-fragments): strictly above every live number — main 220 (rich 221), lane ind5-glob-imports 222 (223, reserved),
+                                                      //   #420 214 (215), #426 / lane fc1 216 (217), lane ind4b / fc3-js-rebind 218 (219), lane l6-iface and #429 212 (213).
+                                                      //   Rich file tag 225. Mandatory: l6-iface adds DispatchType / ImplBlock records (kCacheVersion 39) and fc1 changes what a
+                                                      //   Rust qualified call result resolves to, so a 220 cache would replay the older facts.
+                                                      // 220 = 2026-10-22 (train 32b: ix1-slot + cppqual-alarm): strictly above every live number — main 212 (rich 213),
+                                                      //   lane ix1-slot 204 (205), #420 214 (215), #426 / lane fc1 216 (217), lane ind4b 218 (219), lane l6-iface 212 (213).
+                                                      //   Rich file tag 221. Mandatory for IX-1: its fix rounds changed slot extraction under the one 204 reservation, so a
+                                                      //   stale 204 cache would bring back the typedef-vs-tag and two-bodies joins. kCacheVersion stays 36: IX-1 rides
+                                                      //   memberPath/memberCtor of the existing value/through records (no record format changed); cppqual-alarm is test-only.
                                                       // 212 = 2026-10-21 (train 32a: member-names + rust-receivers): strictly above every live number — main 206 (rich 207),
                                                       //   lane rust-receivers 202 (203), lane ix1-slot 204 (205), lane l6-iface 210 (211); #420 reserves 214 (215), so train
                                                       //   32b can go above. Rich file tag 213. kCacheVersion stays 36: neither lane changed a record format (rust-receivers
                                                       //   writes ReturnType isFromAssignment in an existing byte; member-names is output only).
+                                                      // 212 = 2026-10-21 (lane l6-iface fix round 1, rich 213; the train renumbers): an ImplBlock record
+                                                      //   (model.h) for every Rust `impl T for X` block (its span), a Rust trait under a mock attribute, a Java
+                                                      //   anonymous class, a Kotlin object expression and a Kotlin `fun interface` (ingest_relations.h
+                                                      //   rustImplVisitNode, ingest_binds.h anonymousImplementorOf).
+                                                      // 210 = 2026-10-19 (train 32 lane l6-iface, reservation 210 / rich 211; the train renumbers):
+                                                      //   Rust records a DispatchType (model.h) for a parameter, `let` or struct field typed `&dyn T`,
+                                                      //   `Box<dyn T>`, `impl T` or a generic bounded by T (ingest_binds.h rustDispatchTrait) in place of
+                                                      //   its tombstone.
+                                                      //   Merge of main cd11226a: strictly above main 206 (rich 207) and lane rust-receivers 202 (203). kCacheVersion 37 is
+                                                      //   above main's 36 (main appended AugAssign / OperatorResult; DispatchType follows them).
                                                       // 206 = 2026-10-18 (#409, PR #414, renumbered again at merge with main 939dbb69): strictly above every
                                                       //   live number — main 196 (rich 197), train 31 198 (199), lane rust-receivers 202 (203), lane ix1-slot
                                                       //   204 (205). Rich file tag 207. kCacheVersion stays 36 (no record format change).
@@ -372,6 +476,10 @@ constexpr std::uint32_t kParserVer    = 214;          // bump on any grammar/.sc
                                                       //   CallResult's importedName is the call's WRITTEN qualifier path, and a ReturnType's isFromAssignment
                                                       //   marks a result written `Self` — a cache from a pre-fix-round 202 build reads every result as not-Self.
                                                       //   kCacheVersion unchanged (no record format changes).
+                                                      // 204 = 2026-10-18 (train 32 lane ix1-slot, IX-1 slot-type join; train renumbers): C/C++ value rows
+                                                      //   whose slot is a struct field carry memberPath/memberCtor, calls through a struct field are
+                                                      //   Through records (qualifier 's'), and struct field types / typedef aliases are slot facts
+                                                      //   (Value, qualifier 't'). Same record layout: kCacheVersion unchanged. Rich file tag 205.
                                                       // 196 = 2026-10-18 (train 30): strictly above every number a live build used — main 184 (rich 185),
                                                       //   lane call-result-typing 180 (rich 181), lane fcall-forward 188 (189), lane go-local-var 190 (191),
                                                       //   lane name-template-dispatch 192 (193), lane h1-annot (train 31) 194 (195); tail-sym and
@@ -2307,6 +2415,13 @@ struct ByteR
         const std::uint8_t v = u8();
         return fitsBelow( v, enumCount ) ? E( v ) : E{};
     }
+    // A FLAG byte: the writer stores a bool as exactly 0 or 1, so any other value is corruption, same as an enum byte past its
+    // count. `u8() != 0` read a 2 as true; a doctored trailingLambda byte then dropped the Java candidates of a Kotlin call that
+    // has no trailing lambda (CodeRabbit on PR #441; test/cachefuzzcheck.sh Part 3, flag arms). Same refusal path as fitsBelow.
+    bool flagU8()
+    {
+        return enumU8<std::uint8_t>( 2 ) != 0;
+    }
     // A 16-bit field the writer stores in a u32 slot (writeDef's ppAlt/humps/deepLoc/ev/params, writeRef's argCount).
     // The writer only ever holds a uint16_t there; a plain `std::uint16_t( u32() )` kept the low bits of a wider value
     // and believed them (test/hazardpatterncheck.sh rule D, test/cachefuzzcheck.sh Part 3).
@@ -2419,7 +2534,7 @@ inline void writeDef( ByteW& w, const RawDef& d, bool withLex, std::size_t fileD
         }
     }
 }
-inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); w.str( r.memberVia ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
+inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8( std::uint8_t( r.lang ) ); w.str( r.name ); w.u8( r.isInherit ? 1 : 0 ); w.u8( r.isDocLink ? 1 : 0 ); w.str( r.qualifier ); w.u8( std::uint8_t( r.recv ) ); w.str( r.recvVar ); w.u8( r.isCompose ? 1 : 0 ); w.str( r.fieldName ); w.str( r.composeRel ); w.u8( std::uint8_t( r.role ) ); w.u32( r.line ); w.u32( r.argCount ); w.u8( r.argCountKnown ? 1 : 0 ); w.u8( r.viaArrow ? 1 : 0 ); w.u8( r.qualifierRootsStd ? 1 : 0 ); w.u8( r.memberCall ? 1 : 0 ); w.str( r.memberRoot ); w.str( r.memberPath ); w.str( r.memberCtor ); w.str( r.memberVia ); w.u8( r.memberFactory ? 1 : 0 ); w.u8( r.forwarded ? 1 : 0 ); w.u8( r.trailingLambda ? 1 : 0 ); if( r.isInherit ) { w.u32( r.baseBind ); } }
 
 // loadCache's countFits() bounds a corrupt on-disk record COUNT against remaining bytes /
 // minRecordBytes BEFORE reserve() — the guard that keeps a hostile blob's 0xFFFFFFFF count from reaching
@@ -2440,13 +2555,13 @@ inline void   writeRef( ByteW& w, const RawRef& r ) { w.u32( r.startByte ); w.u8
 // `qualifierRootsStd` u8 then added a 9th u8 — 40 -> 41, kCacheVersion 25; FE-A's `memberCall` u8 and `memberRoot`
 // str then added a 10th u8 and a 6th str — 41 -> 46, kCacheVersion 28; FE-B's `memberPath` and `memberCtor` strs then
 // added a 7th and 8th str — 46 -> 54, kCacheVersion 29; fcall-forward fix 1's `forwarded` u8 then added a 12th u8 —
-// 59 -> 60, kCacheVersion 33).
+// 59 -> 60, kCacheVersion 33; #155's `trailingLambda` u8 then added a 13th u8 — 60 -> 61, kCacheVersion 41).
 // verifyCacheRecordMinimaTripwire() below derives these
 // same numbers from the REAL writer functions at runtime so the next field added to writeDef/writeRef
 // can't silently stale them.
 inline constexpr std::size_t kMinDefRecordBytesLean      = 92;   // 17×u32 + 16×u8 + 2×str(len u32, empty) (paramsMin u32: 88 -> 92, kCacheVersion 33)
 inline constexpr std::size_t kMinDefRecordBytesRichExtra =  9;   // v10 rich withLex extra: dlWeighted u32 + tokenCount u32 + tfWidth u8
-inline constexpr std::size_t kMinRefRecordBytes          = 60;   // 3×u32 + 12×u8 + 9×str(len u32, empty)
+inline constexpr std::size_t kMinRefRecordBytes          = 61;   // 3×u32 + 13×u8 + 9×str(len u32, empty)
 
 inline std::size_t minDefRecordBytes( bool captureValueUses ) noexcept
 {
@@ -2563,11 +2678,11 @@ inline RawDef readDef( ByteR& r, bool withLex, const std::vector<std::uint64_t>&
     }
     return d;
 }
-inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.u8() != 0; x.isDocLink = r.u8() != 0; x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.u8() != 0; x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.u8() != 0; x.viaArrow = r.u8() != 0; x.qualifierRootsStd = r.u8() != 0; x.memberCall = r.u8() != 0; x.memberRoot = r.str(); x.memberPath = r.str(); x.memberCtor = r.str(); x.memberVia = r.str(); x.memberFactory = r.u8() != 0; x.forwarded = r.u8() != 0; if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
+inline RawRef readRef ( ByteR& r ) { RawRef x; x.startByte = r.u32(); x.lang = r.enumU8<Lang>( kLangCount ); x.name = r.str(); x.isInherit = r.flagU8(); x.isDocLink = r.flagU8(); x.qualifier = r.str(); x.recv = r.enumU8<RecvKind>( kRecvKindCount ); x.recvVar = r.str(); x.isCompose = r.flagU8(); x.fieldName = r.str(); x.composeRel = r.str(); x.role = r.enumU8<RefRole>( kRefRoleCount ); x.line = r.u32(); x.argCount = r.u16Of32(); x.argCountKnown = r.flagU8(); x.viaArrow = r.flagU8(); x.qualifierRootsStd = r.flagU8(); x.memberCall = r.flagU8(); x.memberRoot = r.str(); x.memberPath = r.str(); x.memberCtor = r.str(); x.memberVia = r.str(); x.memberFactory = r.flagU8(); x.forwarded = r.flagU8(); x.trailingLambda = r.flagU8(); if( x.isInherit ) { x.baseBind = r.u32(); } return x; }
 inline void   writeBind( ByteW& w, const RawBind& b ) { w.u32( b.startByte ); w.u8( std::uint8_t( b.lang ) ); w.u8( std::uint8_t( b.kind ) ); w.u8( b.isFromAssignment ? 1 : 0 ); w.u8( b.resultIndex ); w.u8( b.unwrapDepth ); w.u32( b.spanStart ); w.u32( b.spanEnd ); w.str( b.var ); w.str( b.typeName ); w.str( b.importedName ); }
-inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.u8() != 0; b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
+inline RawBind readBind( ByteR& r ) { RawBind b; b.startByte = r.u32(); b.lang = r.enumU8<Lang>( kLangCount ); b.kind = r.enumU8<LocalBindKind>( kLocalBindKindCount ); b.isFromAssignment = r.flagU8(); b.resultIndex = r.u8(); b.unwrapDepth = r.u8(); b.spanStart = r.u32(); b.spanEnd = r.u32(); b.var = r.str(); b.typeName = r.str(); b.importedName = r.str(); return b; }
 inline void   writeFfi( ByteW& w, const BindingAlias& a ) { w.u8( std::uint8_t( a.kind ) ); w.u8( a.lowConf ? 1 : 0 ); w.str( a.aliasName ); w.str( a.targetName ); w.str( a.targetScope ); }
-inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = r.enumU8<BindKind>( kBindKindCount ); a.lowConf = r.u8() != 0; a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
+inline BindingAlias readFfi( ByteR& r ) { BindingAlias a; a.kind = r.enumU8<BindKind>( kBindKindCount ); a.lowConf = r.flagU8(); a.aliasName = r.str(); a.targetName = r.str(); a.targetScope = r.str(); return a; }
 // B6.3: RouteDef needs no startByte (its handler is resolved by NAME in buildGraph); RawRouteUse mirrors
 // RawBind (startByte for the enclosing-def byte-span attribution done in the ingest() model-build below).
 inline void   writeRouteDef( ByteW& w, const RouteDef& d ) { w.u32( d.line ); w.u8( std::uint8_t( d.method ) ); w.str( d.path ); w.str( d.handlerName ); }
@@ -2642,6 +2757,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.health.fileBytes = r.u32();
     ffOut.health.wsBytes   = r.u32();
     ffOut.health.macroBlanked = r.u32();   // v20: member-macro re-parse — rides the record so the disclosure survives a warm run
+    ffOut.health.useBoundsBlanked = r.u32();   // v44: its Rust layer (use<..> bounds blanked) — same reason
     if( !r.ok )
     {
         return false;
@@ -2699,11 +2815,11 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
     ffOut.incs.reserve( ni );
     for( std::uint32_t j = 0; j < ni && r.ok; ++j )
     {
-        const bool          isAngle    = r.u8() != 0;
-        const bool          isLazy     = r.u8() != 0;   // kParserVer 72: TS/JS function-body require/import marker; parser version 82: Ruby autoload
-        const bool          isSymbolic = r.u8() != 0;   // parser version 82: a Ruby constant target, resolved by index, never by path
+        const bool          isAngle    = r.flagU8();
+        const bool          isLazy     = r.flagU8();   // kParserVer 72: TS/JS function-body require/import marker; parser version 82: Ruby autoload
+        const bool          isSymbolic = r.flagU8();   // parser version 82: a Ruby constant target, resolved by index, never by path
         const std::uint32_t byte       = r.u32();       // parser version 82: the directive's start byte (lexical nesting recovery)
-        const bool          isValueUse = r.u8() != 0;   // parser version 93 / format 21: argument or rescue origin — not narrow evidence
+        const bool          isValueUse = r.flagU8();   // parser version 93 / format 21: argument or rescue origin — not narrow evidence
         ffOut.incs.push_back( Include { 0, isAngle, isLazy, isSymbolic, byte, isValueUse, r.str() } );
     }
     const std::uint32_t nb = r.u32();
@@ -2757,7 +2873,7 @@ inline bool readFileRecord( ByteR& r, bool captureValueUses, std::vector<std::ui
         ConstOpen co;                                   // parser version 82 (fileId re-labelled by the caller)
         co.startByte     = r.u32();
         co.endByte       = r.u32();
-        co.namespaceOnly = r.u8() != 0;
+        co.namespaceOnly = r.flagU8();
         co.written       = r.str();
         ffOut.constOpens.push_back( std::move( co ) );
     }
@@ -3275,6 +3391,7 @@ inline void saveCache( const std::string& path, std::string_view rootDir, const 
                 const FileHealth fh = f < fileHealth.size() ? fileHealth[f] : FileHealth{};
                 w.u32( fh.errNodes );  w.u32( fh.errBytes );  w.u32( fh.fileBytes );  w.u32( fh.wsBytes );
                 w.u32( fh.macroBlanked );   // v20: the member-macro re-parse's per-file count (0 ⇒ the first parse was kept)
+                w.u32( fh.useBoundsBlanked );   // v44: the Rust precise-capture re-parse's per-file count (0 ⇒ first parse kept)
             }
             if( captureValueUses )
             {

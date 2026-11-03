@@ -367,9 +367,18 @@ check( listingDesc.endswith( "default: more defs listed, else the shorter page" 
 # a future change that moves the manifest without updating CHANGELOG's prose is a red here, not a rediscovery.
 # Once the entry rolls under a dated release heading it is a historical record of what was true when it was
 # measured, same as the dated blocks train10.md declined to touch, so this only reads inside [Unreleased].
+# Since changelog.d/ (one file per change), [Unreleased] is a stub in CHANGELOG.md and its entries are fragments:
+# read the section as the release will publish it — CHANGELOG.md's own [Unreleased] body, then the fragments in
+# assembly order (scripts/changelog_assemble.py print) — so "the LAST claim" below is the last one a reader sees.
 changelog = open( os.path.join( ROOT, "CHANGELOG.md" ), encoding = "utf-8" ).read()
 _, _, afterHeading = changelog.partition( "## [Unreleased]" )
 unreleased = afterHeading.split( "\n## [", 1 )[ 0 ]  # [Unreleased]'s body, up to the next dated heading
+if os.path.isdir( os.path.join( ROOT, "changelog.d" ) ):
+    asm = subprocess.run( [ sys.executable, os.path.join( ROOT, "scripts", "changelog_assemble.py" ), "print", ROOT ],
+                          capture_output = True, text = True )
+    check( asm.returncode == 0, "(1b) changelog.d/ assembles (scripts/changelog_assemble.py print): %s"
+           % ( asm.stderr.strip()[ :200 ] or "ok" ) )
+    unreleased += "\n" + asm.stdout
 claims = re.findall( r"tools/list.? manifest grows [\d,]+[^\d]+([\d,]+) B", unreleased )
 m = claims[ -1 ] if claims else None   # #362 round 4 (B5c): several [Unreleased] entries restate the figure
                                        # (theirs pre-paging, ours the merged tree's). The LAST claim describes

@@ -19,7 +19,7 @@
 #     [13:21) u64 blobWriteNs         [21:25) u32 entryCount
 #   RECORDS, [25, tableOffset), ascending pathHash:
 #     u32 pathLen, pathBytes, u64 contentHash, u64 sizeBytes, u64 mtimeNs, u64 ctimeNs,
-#     4x u32 FileHealth, [rich: u32 dictCount + dict], u32 defCount, [def records], ...
+#     6x u32 FileHealth (v20 macroBlanked, v44 useBoundsBlanked), [rich: u32 dictCount + dict], u32 defCount, [def records], ...
 #   OFFSET TABLE, entryCount x 32 B at tableOffset:
 #     u64 pathHash, u64 recOffset, u64 contentHash, u32 recLength, u32 recSum
 #   TRAILER, last 24 B: u64 tableOffset, u32 entryCount, u32 reserved, u64 tableSum
@@ -203,7 +203,7 @@ hash_off  = path_off + path_len
 size_off  = hash_off + 8
 mtime_off = size_off + 8
 ctime_off = mtime_off + 8
-nd_off    = ctime_off + 8 + 20   # past ctimeNs and the five FileHealth u32s (v20 added macroBlanked): the LEAN def-record count
+nd_off    = ctime_off + 8 + 24   # past ctimeNs and the six FileHealth u32s (v20 macroBlanked, v44 useBoundsBlanked): the LEAN def-record count
 
 mutations = {}
 
@@ -930,20 +930,20 @@ for i in range(n):
         sites.setdefault(cls, (p, blob[p])); skip(1)
     def site32(cls, rel):                                                 # a u32 slot `rel` bytes ahead; p does not move
         sites.setdefault(cls, (p + rel, struct.unpack_from("<I", blob, p + rel)[0]))
-    s(); skip(4 * 8 + 5 * 4)                                              # path, hash/size/mtime/ctime, FileHealth
+    s(); skip(4 * 8 + 6 * 4)                                              # path, hash/size/mtime/ctime, FileHealth (6 u32 since v44)
     for _ in range(u32()):                                                # defs (LEAN family: no subtoken rows)
         site32("def.ppAlt", 9 * 4); site32("def.params", 13 * 4)
         if "def.paramsMin" not in pmin and struct.unpack_from("<I", blob, p + 13 * 4)[0] >= 1:   # B2.2 pair rule: a def with params >= 1
             pmin["def.paramsMin"] = (p + 14 * 4, struct.unpack_from("<I", blob, p + 14 * 4)[0], struct.unpack_from("<I", blob, p + 13 * 4)[0])
         skip(15 * 4 + 6 + 2 * 4); site("def.kind"); site("def.lang"); s(); s(); skip(8)   # #150: +1 u8 (scopeRootsStd); cache v26: +2 u32 (fnScopeStart/End) before kind; cache v33: +1 u32 (paramsMin) after params
     for _ in range(u32()):                                                # refs
-        skip(4); site("ref.lang"); s(); skip(2); s(); site("ref.recv"); s(); skip(1); s(); s(); site("ref.role"); site32("ref.argCount", 4); skip(12); s(); s(); s(); s(); skip(2)   # line, argCount, argCountKnown, viaArrow, #150's qualifierRootsStd, FE-A's memberCall u8 + memberRoot str, FE-B's memberPath + memberCtor + memberVia strs, memberFactory u8, fcall-forward's forwarded u8
+        skip(4); site("ref.lang"); s(); skip(2); s(); site("ref.recv"); s(); skip(1); s(); s(); site("ref.role"); site32("ref.argCount", 4); skip(12); s(); s(); s(); s(); skip(1); site("ref.forwarded"); site("ref.trailingLambda")   # line, argCount, argCountKnown, viaArrow, #150's qualifierRootsStd, FE-A's memberCall u8 + memberRoot str, FE-B's memberPath + memberCtor + memberVia strs, memberFactory u8, fcall-forward's forwarded u8, #155's trailingLambda u8
     for _ in range(u32()):                                                # includes
-        skip(3 + 4 + 1); s()
+        site("include.isAngle"); skip(2 + 4 + 1); s()
     for _ in range(u32()):                                                # binds
-        skip(4); site("bind.lang"); site("bind.kind"); skip(1 + 2 + 8); s(); s(); s()   # isFromAssignment, resultIndex/unwrapDepth (v33), spanStart/End
+        skip(4); site("bind.lang"); site("bind.kind"); site("bind.isFromAssignment"); skip(2 + 8); s(); s(); s()   # isFromAssignment, resultIndex/unwrapDepth (v33), spanStart/End
     for _ in range(u32()):                                                # FFI aliases
-        site("ffi.kind"); skip(1); s(); s(); s()
+        site("ffi.kind"); site("ffi.lowConf"); s(); s(); s()
     for _ in range(u32()):                                                # route defs
         skip(4); site("routedef.method"); s(); s()
     for _ in range(u32()):                                                # route uses
@@ -1008,6 +1008,17 @@ else:
     for tag, value in (("above", params + 1), ("inrange", params if orig != params else 0)):
         open(f"{outdir}/def.paramsMin.{tag}.cache", "wb").write(rebuilt_with(off, value, 4))
         print(f"def.paramsMin\tpmin\t{tag}\t{value}\t{orig}\t{params}")
+# The same three runs cover the FLAG bytes (a bool the writer stores as 0 or 1). `r.u8() != 0` read a 2 as true: a doctored
+# `trailingLambda` byte made a Kotlin call without a trailing lambda drop its Java candidates (CodeRabbit on PR #441). (a) the
+# values 2 and 255 must refuse that record, (c) the other legal value (1 - orig) must be accepted.
+for cls in ("ref.forwarded", "ref.trailingLambda", "bind.isFromAssignment", "ffi.lowConf", "include.isAngle"):
+    if cls not in sites:
+        print(f"{cls}\tflag\tABSENT\t-\t-\t-")
+        continue
+    off, orig = sites[cls]
+    for tag, value in (("two", 2), ("allones", 255), ("inrange", 1 - orig if orig in (0, 1) else 0)):
+        open(f"{outdir}/{cls}.{tag}.cache", "wb").write(rebuilt_with(off, value))
+        print(f"{cls}\tflag\t{tag}\t{value}\t{orig}\t2")
 PYEOF
 planRc=$?
 if [ "$planRc" -ne 0 ]; then
@@ -1022,6 +1033,7 @@ elif [ -n "$GOOD_RECORDS" ]; then
         mutant="$EDIR/$cls.$tag.cache"
         if [ "$enum" = "u16" ]; then what="16-bit field stored wider than 16 bits"
         elif [ "$enum" = "pmin" ]; then what="paramsMin above its def's params ($enumCount)"
+        elif [ "$enum" = "flag" ]; then what="flag byte other than 0 or 1"
         else what="$enum byte past the last enumerator (count $enumCount)"; fi
         if cmp -s "$mutant" "$EDIR/good.cache"; then
             no "[enum:$cls=$value] the mutation did not take (mutant equals the good cache)"
@@ -1243,7 +1255,7 @@ def fnv1a64(data):
     for c in data:
         h = ((h ^ c) * 1099511628211) & ((1 << 64) - 1)
     return h
-QCHURN_COUNT_OFF = 16   # magic(4) + scheme(4) + fnv(key)(8): the key check must pass for the count to be read at all
+QCHURN_COUNT_OFF = 20   # magic(4) + scheme(4) + fnv(key)(8) + the budget cut(4): the key check must pass for the count to be read at all
 # Verify the layout on the good blob before aiming a row at it: walking commits and paths from QCHURN_COUNT_OFF must
 # land exactly on the trailer. A header that grew a field would make that walk miss, and the rows would then be
 # refused by an earlier guard while passing — so a miss fails the arm instead.

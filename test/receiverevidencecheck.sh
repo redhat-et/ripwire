@@ -53,6 +53,7 @@
 #   exactproven— the set of unhedged rows is exactly the given set (no false candidate rides along unhedged)
 #   visible    — the named row is present, hedged or not (a true target is never dropped)
 #   marked     — the named row is present WITH the hedge (a name-only true edge is kept and labelled)
+#   ifacenamed — lane L6: the named row is a candidate of the answer's gate="iface" <dc> row (--legend=full cand=)
 #
 # ARMS (one fixture root per language under test/receiverevidencefix/; each root is indexed on its own).
 #   (J) JS:  Bm ctx.onerror (plain, optional-chained, aliased, destructured), an object-literal module's
@@ -465,11 +466,15 @@ getrows(){
     ran_ok "($1) --$2=$3" "$f" || return 1
     rowsof "($1) --$2=$3" "$f"
 }
+# QUALNAME-1: a member row prints Owner::name / Owner.name / Owner#name (the owner is part of the spelling). Every arm below keys a row by
+# (kind, BARE name, path[:line]) - the bare name matches the bare spelling AND any Owner-qualified one, so a notproven negative rejects both
+# spellings (never a vacuous pass on a row that moved to its qualified name). The exact qualified spelling is pinned by the (Qs) arms.
+AWKB='function bare( s ) { sub( /^.*(::|[.#])/, "", s ); return s }'
 # match SPEC — the awk condition for "n path[:line]" over a rows line "t n path line H d"
 specmatch(){   # prints the matching rows of $GOT for SPEC
     local n="${1%% *}" p="${1#* }" l=""
     case "$p" in *:[0-9]*) l="${p##*:}"; p="${p%:*}";; esac
-    printf '%s\n' "$GOT" | awk -v n="$n" -v p="$p" -v l="$l" 'NF >= 5 && $2 == n && $3 == p && ( l == "" || $4 == l )'
+    printf '%s\n' "$GOT" | awk -v n="$n" -v p="$p" -v l="$l" "$AWKB"' NF >= 5 && ( $2 == n || bare( $2 ) == n ) && $3 == p && ( l == "" || $4 == l )'
 }
 show(){ printf '%s' "$GOT" | awk 'NF >= 5 { printf "%s %s %s:%s%s; ", $1, $2, $3, $4, ( $5 == "name" ? " via=name" : "" ) }'; }
 
@@ -496,8 +501,8 @@ proven(){
 exactproven(){
     local r="$1" v="$2" s="$3" want="$4" got
     getrows "$r" "$v" "$s" || return
-    got="$( printf '%s\n' "$GOT" | awk 'NF >= 5 && $5 != "name" { print $1 " " $2 " " $3 }' | sort -u | tr '\n' ';' | sed 's/;$//' )"
-    want="$( printf '%s' "$want" | tr ';' '\n' | sort -u | tr '\n' ';' | sed 's/;$//' )"
+    got="$( printf '%s\n' "$GOT" | awk "$AWKB"' NF >= 5 && $5 != "name" { print $1 " " bare( $2 ) " " $3 }' | sort -u | tr '\n' ';' | sed 's/;$//' )"
+    want="$( printf '%s' "$want" | tr ';' '\n' | awk "$AWKB"' { n = $2; $2 = bare( n ); print }' | sort -u | tr '\n' ';' | sed 's/;$//' )"
     if [ "$got" = "$want" ]; then ok "($r) --$v=$s unhedged rows are exactly [${want:-none}]"
     else no "($r) --$v=$s unhedged rows are [${got:-none}], want [${want:-none}]"; fi
 }
@@ -508,6 +513,19 @@ visible(){
     for spec in "$@"; do
         if [ -n "$( specmatch "$spec" )" ]; then ok "($r) --$v=$s shows the true target [$spec] (hedged or not)"
         else no "($r) --$v=$s does not show the true target [$spec]: $( show )"; fi
+    done
+}
+# lane L6: the true targets are named as the candidates of a gate="iface" <dc> row (the call declined through its receiver's
+# interface, ifacedispatch.h) — on --legend=full, where cand= lists them as file:line
+ifacenamed(){
+    local r="$1" v="$2" s="$3"; shift 3
+    local f; f="$( answer "$r" "$v" "$s" --legend=full )"
+    ran_ok "($r) --$v=$s --legend=full" "$f" || return
+    local spec cands
+    cands="$( grep -o '<dc [^>]*gate="iface"[^>]*>' "$f" | grep -o 'cand="[^"]*"' | sed 's/^cand="//; s/"$//' | tr ' ' '\n' )"
+    for spec in "$@"; do
+        if printf '%s\n' "$cands" | grep -qx "${spec#* }"; then ok "($r) --$v=$s names the true target [$spec] as a gate=\"iface\" candidate"
+        else no "($r) --$v=$s does not name [$spec] among its gate=\"iface\" candidates: [$( printf '%s' "$cands" | tr '\n' ' ' )]"; fi
     done
 }
 marked(){
@@ -549,7 +567,7 @@ hopnotproven(){
             no "($r) --for=\"$q\" shows no hop <h n=\"$h\">, and it was no dropped hop candidate (score r=$hr on the RR-off twin, hops total=$htot, noedge=$hne)"; return
         fi
         getrows "$r" callees "$hp:$h" || return
-        if [ -z "$( printf '%s\n' "$GOT" | awk -v n="$n" 'NF >= 5 && $2 == n' )" ]; then
+        if [ -z "$( printf '%s\n' "$GOT" | awk -v n="$n" "$AWKB"' NF >= 5 && ( $2 == n || bare( $2 ) == n )' )" ]; then
             no "($r) --for=\"$q\" dropped hop $h, and --callees=$hp:$h does not list $n either: $( show )"
         elif [ -n "$( printf '%s\n' "$GOT" | awk 'NF >= 5 && $5 != "name"' )" ]; then
             no "($r) --for=\"$q\" dropped hop $h, yet --callees=$hp:$h proves a row (the hop-slot rule does not explain the drop): $( show )"
@@ -682,7 +700,7 @@ proven      java  callees src/main/java/app/Pump.java:param "method spill src/ma
 notproven   java  callees src/main/java/app/Pump.java:untyped "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"       # near miss: an untyped local
 notproven   java  callees src/main/java/app/Pump.java:shadow "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"        # near miss: a local hides the field
 notproven   java  callees src/main/java/app/Pump.java:viaIface "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"      # near miss: an interface, two implementors
-visible     java  callees src/main/java/app/Pump.java:viaIface "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"
+ifacenamed  java  callees src/main/java/app/Pump.java:viaIface "spill src/main/java/app/Pump.java:7" "spill src/main/java/app/Pump.java:8"   # lane L6: was `visible` as two via="name" rows; now one gate="iface" <dc> naming both
 exactproven cs    callees App/Pump.cs:Param "method Spill App/Pump.cs"
 exactproven cs    callees App/Pump.cs:TypedLocal "method Spill App/Pump.cs;method MakeTank App/Pump.cs"
 exactproven cs    callees App/Pump.cs:CtorLocal "method Spill App/Pump.cs;cls Tank App/Pump.cs"
@@ -703,7 +721,7 @@ proven      kt    callees src/app/Pump.kt:constructedProperty "fn spill src/app/
 notproven   kt    callees src/app/Pump.kt:untyped "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
 notproven   kt    callees src/app/Pump.kt:shadow "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
 notproven   kt    callees src/app/Pump.kt:viaIface "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
-visible     kt    callees src/app/Pump.kt:viaIface "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"
+ifacenamed  kt    callees src/app/Pump.kt:viaIface "spill src/app/Pump.kt:7" "spill src/app/Pump.kt:8"   # lane L6: was `visible` as two via="name" rows; now one gate="iface" <dc> naming both
 exactproven swift callees Sources/App/Pump.swift:param "fn spill Sources/App/Pump.swift"
 exactproven swift callees Sources/App/Pump.swift:typedLocal "fn spill Sources/App/Pump.swift;fn makeTank Sources/App/Pump.swift"
 exactproven swift callees Sources/App/Pump.swift:ctorLocal "cls Tank Sources/App/Pump.swift;fn spill Sources/App/Pump.swift"
@@ -1036,7 +1054,7 @@ merge_arms(){
     printf '%s' "$proven" | grep -q 'x="' \
         && no "(H) merge near miss: proven's evidence-bound get row was merged: $proven" \
         || ok "(H) merge near miss: a proven row is never merged (proven's get carries no x=)"
-    [ "$( grep -o '<s [^>]*n="get"' "$cal" | wc -l | tr -d ' ' )" = 3 ] \
+    [ "$( grep -oE '<s [^>]*n="([A-Za-z]+\.)?get"' "$cal" | wc -l | tr -d ' ' )" = 3 ] \
         && ok "(H) merge: --callees=u.js:use lists all three get candidates (the merged row is recoverable)" \
         || no "(H) merge: --callees=u.js:use does not list three get candidates: $( head -c 600 "$cal" )"
     grep -q 'x=N' "$full" && P legend "$full" && [ "$PARSED" = "DEFINED" ] \
@@ -1123,7 +1141,7 @@ echo "--- (H) parity: the hedge bit is value-equal across CLI and MCP, and acros
 cli_set(){ local f rc rows; f="$( answer "$1" "$2" "$3" )"; rc="$( cat "$f.rc" 2>/dev/null )"
            if [ "$rc" != "0" ]; then echo "RUNFAIL --$2=$3 rc=${rc:-unknown}"; return; fi
            rows="$( python3 "$TMP/parse.py" rows "$f" 2>/dev/null )" || { echo "RUNFAIL reader on --$2=$3"; return; }
-           printf '%s\n' "$rows" | awk 'NF >= 5 { print $2 "@" $3 "#" $5 } $0 == "NOROOT" { print }' | sort -u; }
+           printf '%s\n' "$rows" | awk 'NF >= 5 { n = $2; sub(/^[A-Za-z_]+\./, "", n); print n "@" $3 "#" $5 } $0 == "NOROOT" { print }' | sort -u; }   # js-def-naming: the CLI XML row names a JS/TS method by its class (Application.onerror); the MCP JSON key stays bare (QUALNAME-1), so the parity reads the leaf
 mcp_set(){ local out rc rows; out="$TMP/mcpset.$1.$2.$( printf '%s' "$3" | tr '/:.' '___' )"; mcp "$1" "$2" "$3" "$out"
            rc="$( cat "$out.rc" 2>/dev/null )"
            if [ "$rc" != "0" ]; then echo "RUNFAIL MCP $2 $3 rc=${rc:-unknown}"; return; fi
@@ -1520,12 +1538,12 @@ while read -r tag id lang form scope target root sel verdict a b c; do
     if ! getrows "$CR/$root" callees "$sel"; then mxred=$(( mxred + 1 )); continue; fi
     if [ "$verdict" = "P" ]; then
         f="${c%:*}"; l="${c##*:}"
-        want="$( printf '%s\n' "$GOT" | awk -v t="$a" -v n="$b" -v f="$f" -v l="$l" '$1 == t && $2 == n && $3 == f && $4 == l && $5 != "name"' )"
-        extra="$( printf '%s\n' "$GOT" | awk -v n="$b" -v f="$f" -v l="$l" '$2 == n && $5 != "name" && !( $3 == f && $4 == l )' )"
+        want="$( printf '%s\n' "$GOT" | awk -v t="$a" -v n="$b" -v f="$f" -v l="$l" "$AWKB"' $1 == t && ( $2 == n || bare( $2 ) == n ) && $3 == f && $4 == l && $5 != "name"' )"
+        extra="$( printf '%s\n' "$GOT" | awk -v n="$b" -v f="$f" -v l="$l" "$AWKB"' ( $2 == n || bare( $2 ) == n ) && $5 != "name" && !( $3 == f && $4 == l )' )"
         if [ -n "$want" ] && [ -z "$extra" ]; then ok "$label proves exactly [$b $c]"
         else no "$label: expected exactly the proven row [$a $b $c]: $( show )"; mxred=$(( mxred + 1 )); fi
     else
-        hits="$( printf '%s\n' "$GOT" | awk -v n="$a" '$2 == n && $5 != "name"' )"
+        hits="$( printf '%s\n' "$GOT" | awk -v n="$a" "$AWKB"' ( $2 == n || bare( $2 ) == n ) && $5 != "name"' )"
         if [ -z "$hits" ]; then ok "$label proves no [$a]${b:+ ($b)}"
         else no "$label shows [$a] as a PROVEN edge${b:+ (a $b cell must hedge)}: $( show )"; mxred=$(( mxred + 1 )); fi
     fi
@@ -1693,6 +1711,85 @@ proven      rsrecv callees "src/stdqown.rs:own_new" "method get_it $QO:28"      
 proven      rsrecv callees "src/stdqown.rs:own_full_create" "method sync_all $QO:8"                                # [P]
 proven      rsrecv callees "src/stdqown.rs:own_module_now" "method elapsed_x $QO:39"                               # [P]
 proven      rsrecv callees "src/stdqown.rs:own_full_from" "method lenx $QO:34"                                     # [P]
+# fc1 (rv-l3-delta check 2 / N-c): the same class for a result written by the TYPE'S OWN NAME (`-> OsString`, a path
+# `-> crate::nsown::OsString`, `Result<OsString, ()>` / `Option<..>` + unwrap, `Box<..>`), not `Self`. A qualified member
+# call `T::f()` types its local only when T, read as a written type at the call site, reaches f's in-tree class, whatever
+# the result spelling. [N] (each proven on base dd378171): std's fully qualified, a `use`d std module, core's, std::time's,
+# an external crate's (`serde::`), an unknown root's, a re-export of std's (`crate::stdnre::OsString`), a `use` of std's
+# type, a std glob, the prelude's String. Hedged on base too (kept): UFCS `<std::ffi::OsString>::from()`, a renamed std
+# re-export, a type alias of std's, a free function std::fs::read_to_string / fs::read_to_string beside an in-tree namesake.
+NS="src/nsown.rs"
+for f in full_from full_from_q full_try full_opt full_box mod_from ext_from unknown_from re_path ufcs_from re_alias_path free_full free_mod; do
+    notproven rsrecv callees "src/stdn.rs:$f" "as_os $NS:10"                                                   # [N]
+done
+for f in core_secs std_secs; do notproven rsrecv callees "src/stdn.rs:$f" "as_dur $NS:15"; done                    # [N]
+notproven   rsrecv callees "src/stdnuse.rs:use_from" "as_os $NS:10"                                                # [N]
+notproven   rsrecv callees "src/stdnuse.rs:glob_secs" "as_dur $NS:15"                                              # [N]
+notproven   rsrecv callees "src/stdnuse.rs:prelude_with" "lenx $QO:34"                                             # [N]
+for f in re_alias ty_alias; do notproven rsrecv callees "src/stdnre.rs:$f" "as_os $NS:10"; done                    # [N]
+# [P] twins (proven on base, kept): crate::nsown::T, its path result, Result / Option + unwrap, Box, a `use`d module, a
+# `use`d type, a re-export reaching the in-tree type (`crate::nsre::OsString`, `self::OsString` inside nsre), the in-tree
+# String by its `use`, the free function by its module path. An in-tree `mod std` (nshadow.rs): a non-import path's first
+# segment is an item of the module before the extern prelude, so `std::ffi::OsStr::new()` there IS the in-tree one [P].
+for f in own_full own_q own_try own_opt own_box own_use own_free own_free_full own_reexp; do
+    proven  rsrecv callees "src/nsownuse.rs:$f" "method as_os $NS:10"                                          # [P]
+done
+proven      rsrecv callees "src/nsownuse.rs:own_mod" "method as_dur $NS:15"                                        # [P]
+proven      rsrecv callees "src/nsownuse.rs:own_prelude_twin" "method lenx $QO:34"                                 # [P]
+proven      rsrecv callees "src/nsre.rs:re_own_self" "method as_os $NS:10"                                         # [P]
+for f in shadow_bare shadow_self; do proven rsrecv callees "src/nshadow.rs:$f" "method as_sh src/nshadow.rs:7"; done   # [P]
+# [P] a T the walk cannot follow keeps the base row: the in-tree glob re-export `pub use crate::nsown::*;` (nsglob.rs) by a
+# `use`, by its path and by the file's own glob of it (nsglobstar.rs), and a bench file outside every crate's module tree
+# (`use rsrecv::nsown::OsString`). [N] there: a std root (`std::ffi::OsString::from()`) leads out of the tree from any file.
+for f in glob_reexp_own glob_reexp_path; do proven rsrecv callees "src/nsglobuse.rs:$f" "method as_os $NS:10"; done # [P]
+proven      rsrecv callees "src/nsglobstar.rs:glob_star_own" "method as_os $NS:10"                                # [P]
+proven      rsrecv callees "benches/nsb.rs:bench_own" "method as_os $NS:10"                                         # [P]
+notproven   rsrecv callees "benches/nsb.rs:bench_std" "as_os $NS:10"                                                # [N]
+# fc1 fix 1 (rv-fc1 B1-B3, N4): the walk's "cannot follow" exits no longer fire on code that provably leaves the tree.
+# B1: a glob brings a root only when its TARGET module declares or re-exports an item of that name, and only a glob at the
+# level the call sits in (a fn body, then its module): `mod tests { use super::*; }` beside and around a std call, a glob of
+# a module with no `std` / `core`, an explicit `use std::ffi::OsString` beside an in-tree glob (it shadows the glob). B2:
+# cfg-gated duplicate `use`s lead out when every one does. B3: an inline module's re-export of std's type. N4: an extern
+# crate named like an in-tree module. [N] each proven on dd378171 and 5cd18c99; [P] twins reach the in-tree type.
+for f in rvtests.rs:t_full rvtests.rs:inner rvglob.rs:g_full rvexpl.rs:expl_from rvcfg.rs:cfg_from rvinl.rs:inl_path \
+         rvinl.rs:inl_self rvinluse.rs:inl_cross rvext.rs:ext_mod rvext.rs:ext_mod_q; do
+    notproven rsrecv callees "src/$f" "as_os $NS:10"                                                           # [N]
+done
+notproven   rsrecv callees "src/rvglob.rs:g_core" "as_dur $NS:15"                                                  # [N]
+for f in rvtests.rs:t_own rvtests.rs:inner_own rvglob.rs:g_own rvgtuse.rs:gt_own rvinl.rs:inl_own rvinluse.rs:inl_cross_own \
+         rvext.rs:ext_own; do
+    proven  rsrecv callees "src/$f" "method as_os $NS:10"                                                      # [P]
+done
+for f in rvexpl.rs:expl_glob rvcfg.rs:cfg_own; do proven rsrecv callees "src/$f" "method as_dur $NS:15"; done     # [P]
+# fc1 fix 2 (rv-fc1-delta1 C1, C2): a glob CYCLE (parent `pub use self::kid::*` + kid's `use super::*`, two files globbing each
+# other, an inline mod globbing its parent) and a 7-deep acyclic glob chain end with the true answer — no module brings `std`,
+# so the std call leads out [N] (each proven before); a private `use std::ffi::OsString` a `use super::*` sees is std's [N]
+# (`#[cfg(test)] mod tests`, a plain child mod), and so is a std name at the end of a glob chain of named re-exports [N];
+# [P] twins: the in-tree path on every cycle, a parent's `use crate::nsown::OsString`, a chain ending in the in-tree re-export.
+for f in gcpar.rs:gcpar_full gcpar/kid.rs:gckid_full gcabuse.rs:gcab_full gcinl.rs:gcinl_kid_full gcinl.rs:gcinl_full gcdeep.rs:gcdeep_full \
+         gutu.rs:gutu_in gutu.rs:gutu_bare gutu.rs:gutu_top gususe.rs:gus_bare; do
+    notproven rsrecv callees "src/$f" "as_os $NS:10"                                                           # [N]
+done
+for f in gcpar.rs:gcpar_own gcpar/kid.rs:gckid_own gcabuse.rs:gcab_own gcinl.rs:gcinl_kid_own gcinl.rs:gcinl_own gcdeep.rs:gcdeep_own \
+         gutuown.rs:gutuown_top gutuown.rs:gutuown_in gutuown.rs:gutuown_bare gususeown.rs:gusown_bare; do
+    proven  rsrecv callees "src/$f" "method as_os $NS:10"                                                      # [P]
+done
+# fc1 fix 3 (rv-fc1-delta2 D1, D2): a named `use` of the name shadows the level's globs (so `use std::ffi::OsString;` beside
+# `use crate::nsown::*;` is std's name for a child's `use super::*;` and for a glob of that module) [N]; a glob chain 4 deep
+# ending in a named std re-export is cut at the path walk's depth cap, and a cut is never a proof onto the in-tree type [N]
+# (3 deep is followed out, still [N]); [P] twins: a std glob + an explicit in-tree `use`, the same chain ending in the in-tree type.
+for f in gsh.rs:gsh_in gsreuse.rs:gsre_bare gdqx4.rs:gdq4_bare gsh.rs:gsh_top gdqx3.rs:gdq3_bare gczuse.rs:gcz_bare; do
+    notproven rsrecv callees "src/$f" "as_os $NS:10"                                                           # [N]
+done
+for f in gshown.rs:gsho_top gshown.rs:gsho_in gdox4.rs:gdo4_bare; do
+    proven  rsrecv callees "src/$f" "method as_os $NS:10"                                                      # [P]
+done
+# fc1 fix 4 (rv-fc1-delta3 E1): a named re-export chain longer than the depth cap, with NO glob in between, is cut in the TOP-LEVEL
+# walk (bare `use` and a written full path), and a cut is hedged, never proven onto the in-tree namesake [N]; [P] twin: a short chain in-tree
+for f in gctn.rs:gctn_bare gctq.rs:gctq_full; do
+    notproven rsrecv callees "src/$f" "as_os $NS:10"                                                           # [N]
+done
+proven      rsrecv callees "src/gcto.rs:gcto_bare" "method as_os $NS:10"                                      # [P]
 # guard: `Book::new()` is a path call the canonical tier answers (rustqualcheck's shape), unchanged
 proven      rsrecv callees "$RSA:let_new" "method new $RSM:4"
 
@@ -1761,8 +1858,28 @@ PY
     else no "(C) ($r) conservation broken: $DL"; fi
 done
 
+echo "=== (Qs) the exact Owner-qualified spelling of the unhedged callee rows (QUALNAME-1; the arms above key by bare name) ==="
+# exactnames ROOT VERB SEL "kind QualName path;..." - the unhedged rows are exactly these, spelled exactly (a bare name FAILs here)
+exactnames(){
+    local r="$1" v="$2" s="$3" want="$4" got
+    getrows "$r" "$v" "$s" || return
+    got="$( printf '%s\n' "$GOT" | awk 'NF >= 5 && $5 != "name" { print $1 " " $2 " " $3 }' | sort -u | tr '\n' ';' | sed 's/;$//' )"
+    want="$( printf '%s' "$want" | tr ';' '\n' | sort -u | tr '\n' ';' | sed 's/;$//' )"
+    if [ "$got" = "$want" ]; then ok "(Qs) ($r) --$v=$s spells its unhedged rows exactly [$want]"
+    else no "(Qs) ($r) --$v=$s unhedged rows spelled [${got:-none}], want exactly [$want]"; fi
+}
+exactnames py    callees src/tui/uses.py:clone     "fn Styles.copy src/tui/css/styles.py"
+exactnames go    callees src/result.go:fromValue   "method Chars.Get src/util/chars.go"
+exactnames kt    callees src/app/Pump.kt:param     "fn Tank.spill src/app/Pump.kt"
+exactnames cpp   callees src/logger.cpp:close      "method Base::flush src/logger.cpp;method Logger::reset src/logger.cpp"
+exactnames rb    callees lib/app/logger.rb:line    "method Helpers#stamp lib/app/helpers.rb"
+exactnames rsrecv callees src/app.rs:typed_param   "method Book::spin src/model.rs"
+
 echo "=== (K) the predicates can fail ==="
 kread(){ P rows "$1" && GOT="$PARSED"; }
+printf '<callees of="x" defs="1"><s t="method" n="Application#onerror" p="lib/application.js:12"/></callees>' >"$TMP/kq.xml"; kread "$TMP/kq.xml"
+if [ -n "$( specmatch "onerror lib/application.js" | awk '$5 != "name"' )" ] && [ -z "$( specmatch "other lib/application.js" )" ]; then ok "(K) an unhedged planted Owner#name row reads as PROVEN under the bare spelling (notproven would fail it), and only that name"
+else no "(K) the reader missed an unhedged planted qualified row: [$GOT]"; fi
 printf '<callees of="x" defs="1"><s t="method" n="onerror" p="lib/application.js:12"/></callees>' >"$TMP/k1.xml"; kread "$TMP/k1.xml"
 if [ -n "$( specmatch "onerror lib/application.js" | awk '$5 != "name"' )" ]; then ok "(K) an unhedged planted row reads as PROVEN (notproven would fail it)"
 else no "(K) the reader missed an unhedged planted row: [$GOT]"; fi

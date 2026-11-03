@@ -37,10 +37,14 @@ DECL = re.compile(r'^[ \t]*(?:static[ \t]+)?(?:inline[ \t]+)?constexpr[ \t]+[\w:
                   r'\b(k[A-Z][A-Za-z0-9_]*)[ \t]*=[ \t]*(?:\r?\n[ \t]*)?([0-9][0-9_.eE+-]*)[ \t]*;(.*)$',
                   re.M)
 KEY  = re.compile(r'Max|Cap|Limit|Top|Budget|Ceil|Threshold|Rows|Len|Depth|Width|Shown|Hits'
-                  r'|Per\w*File')       # Per\w*File, not PerFile: kHandoffCodeSymbolsPerFile and
+                  r'|Per\w*File'       # Per\w*File, not PerFile: kHandoffCodeSymbolsPerFile and
                                         # kHandoffSymbolsPerCodeFile are the same kind of cap, and a
                                         # NAME filter that turns on a compound spelling is the defect
                                         # this widening exists to remove, not a smaller instance of it.
+                  r'|Files$|Hops$|SigBytes$')   # CodeRabbit on #481: kForFilePageDirFiles / ListFiles / CallerFiles / SigBytes and
+                                        # kPathRouteRefuseNameHops are declared caps whose names END in a count noun the list above
+                                        # did not turn on (files per page, a hop count, a signature byte cap); $ keeps a mid-name
+                                        # `Files`/`Hops` (kFilesTotal) out
 
 # A CAP answers "how many of X survive". A HYPERPARAMETER answers "how is X weighted or apportioned".
 # They are not the same instrument and must not share a table: a cap is judged by what it truncates and
@@ -74,7 +78,9 @@ WEIGHT_NAME = re.compile(r'Mul(?!ti)|Blend|Share|Tolerance|Headroom|Decay|Weight
 # be judged neither by an EVALS anchor nor by shown=/total=. Rendering it as an **unsourced** ranking
 # parameter asked for a measurement that could not exist and stated something false about it; BOUNDARY,
 # the third answer the census kept getting wrong, is the right class.
-NOT_A_WEIGHT = re.compile(r'AgeDays|RadixThreshold|ExtendedLengthThreshold')
+# `RefuseCandsThreshold` (path-route-v2 fix1) is the same kind: the route_cands count at which a --path chain of 4+ by-name hops is
+# refused instead of hedged. It decides which SIDE of a verdict a chain falls on and truncates nothing.
+NOT_A_WEIGHT = re.compile(r'AgeDays|RadixThreshold|ExtendedLengthThreshold|RefuseCandsThreshold')
 
 def is_weight(name, val):
     if NOT_A_WEIGHT.search(name):
@@ -199,6 +205,18 @@ def render(caps, disc, classes):
     w('document. To reach a declaration, search its file for the name (`grep -n <name> <file>`, or')
     w('`ripwire . --grep=<name>`). A file that declares the same name, value and note more than once shows')
     w('it once, marked `×N`.\n')
+    w('**Known residual — a single pathological match is unbounded on libstdc++.** One `std::regex` call is atomic to')
+    w('its caller, so no caller-side counter can see the work inside one, and libstdc++\'s engine never throws; libc++')
+    w('returns only because its ENGINE throws `error_complexity`. The multi-quantifier family (`a*a*a*a*a*b`,')
+    w('`^(a)*(a)*(a)*(a)*(a)*$`) is admitted by the screen by construction: a subject that holds a required literal and')
+    w('then a long run is unbounded work, named and reachable, **tracked by `regex-screen-multiquantifier` (follow-on')
+    w('spec), never claimed closed**. (The guard\'s former per-file match budget — `kRegexFileMatchBudget`, removed in')
+    w('the PR #397 review — cannot be revived against this residual: it counted line-match attempts BETWEEN engine')
+    w('calls, so it refused fast linear answers and still bounded nothing inside one call.) A second admitted shape is a')
+    w('bounded quantifier over a group that itself repeats: `((a|aa){2,5}){2,5}b$` passes the screen because both')
+    w('quantifiers are bounded, yet it is exponential on libstdc++ (and abandoned by libc++), so "make the outer quantifier')
+    w('a small explicit bound" is safe only when nothing inside the group repeats; it is the same class as')
+    w('`(a|aa){1,100}b$`, tracked with the multi-quantifier family above.\n')
     allcaps = caps
     caps, weights = partition(caps)
     silent = [c for c in caps if not disc.get(c[2])]
@@ -340,3 +358,19 @@ else:
     print('limits_build: wrote %s — %d caps (%d silent), %d parameters, %d caps classified' %
           (rel(a.out), len(_real), sum(1 for c in _real if not disc.get(c[2])), len(_wts),
            sum(1 for c in _real if c[0] in classes)))
+    # README.md restates the two counts in one sentence, which test/readmedriftcheck.sh (L2) compares with
+    # this generator. Writing it here as well means a merge that moved the counts is settled by re-running
+    # the generator (scripts/merge_main.sh does), instead of by hand-editing a number on a conflict line.
+    _readme = ROOT / 'README.md'
+    if _readme.exists() and not a.root:
+        _rt = _readme.read_text(encoding='utf-8')
+        _pat = re.compile(r'\b([0-9]+)(\s+compile-time\s+caps\s+and\s+)([0-9]+)(\s+ranking\s+parameters)\b')
+        _hits = _pat.findall(_rt)
+        if len(_hits) == 1:
+            _new = _pat.sub(lambda m: '%d%s%d%s' % (len(_real), m.group(2), len(_wts), m.group(4)), _rt)
+            if _new != _rt:
+                _readme.write_text(_new, encoding='utf-8')
+                print('limits_build: rewrote README.md\'s cap-inventory sentence — %d caps, %d parameters' % (len(_real), len(_wts)))
+        else:
+            print('limits_build: README.md states the cap inventory %d times, expected once — left as is '
+                  '(test/readmedriftcheck.sh (L2) checks it)' % len(_hits))

@@ -830,5 +830,75 @@ fi
 [ -z "$( hline H3 )" ] && ok "(H3) the MCP stray_content twin defines every attribute it emits, diffable= included" \
                        || no "(H3) the MCP stray_content legend does not define: $( hline H3 )"
 
+# ── (S) slot bridge / hedged ring (train 34, rv-hop1-delta1 D1): HOP1's slot crossings print via= / slot_callers= /
+#     slot_fns= on a SECOND <s> row and the hedged ring on <ring>/<rh>, which the roster's first-instance sweep never
+#     enumerates. A C slot chain (hop1check's c3 fixture): every attribute ANY element of the answer carries must be
+#     defined (`name=`) in the leading legend of --path and --impact, default and compact. (S0) is the precondition: the
+#     answer really holds a via="slot" row with slot_fns= (else the arm proves nothing); (S5) is the mutation control: the
+#     same probe over a copy of the legend without its slot_fns= definition reports that gap (the arm can fail).
+SF="$TMP/slotfix"; mkdir -p "$SF"
+cat > "$SF/chain.c" <<'CEOF'
+struct entry { const char *name; void (*exec)( void ); };
+struct mode { const char *name; void (*command)( int ); };
+struct cmdt { const char *name; void (*f)( void ); };
+struct wme { const struct mode *mode; };
+struct wme *current_wme( void );
+static void cancel_cmd( void ) { }
+static void other_cmd( void ) { }
+static const struct cmdt cmd_table[] = { { "cancel", cancel_cmd }, { "other", other_cmd } };
+void copy_command( int i ) { cmd_table[i].f(); }
+const struct mode copy_mode = { .name = "copy", .command = copy_command };
+void send_keys_exec( void ) { struct wme *w = current_wme(); w->mode->command( 0 ); }
+const struct entry send_keys_entry = { .name = "send-keys", .exec = send_keys_exec };
+void fire_command( struct entry *e ) { e->exec(); }
+CEOF
+( cd "$SF" && "$BIN" "$SF" --no-cache --path=fire_command,cancel_cmd >"$TMP/s_pdef" 2>/dev/null
+  "$BIN" "$SF" --no-cache --path=fire_command,cancel_cmd --legend=compact >"$TMP/s_pcmp" 2>/dev/null
+  "$BIN" "$SF" --no-cache --impact=cancel_cmd >"$TMP/s_idef" 2>/dev/null
+  "$BIN" "$SF" --no-cache --impact=cancel_cmd --legend=compact >"$TMP/s_icmp" 2>/dev/null )
+python3 - "$TMP" <<'PYS' >"$TMP/s_out" 2>&1
+import os, re, sys
+T = sys.argv[1]
+def rd( p ): return open( os.path.join( T, p ), "rb" ).read().decode( "utf-8", "replace" )
+def legendOf( doc ):
+    m = re.match( r'\A(?:\s*<!--.*?-->)+', doc, re.S )
+    return m.group( 0 ) if m else ""
+def defined( a, legend ): return re.search( r'(?<![\w:.-])' + re.escape( a ) + r'\s*=', legend ) is not None
+def gaps( doc, legend = None ):
+    legend = legendOf( doc ) if legend is None else legend
+    body   = re.sub( r'<!--.*?-->', '', re.sub( r'<!\[CDATA\[.*?\]\]>', '', doc, flags = re.S ), flags = re.S )
+    keys   = set()
+    for m in re.finditer( r'<([a-zA-Z][\w-]*)((?:\s+[\w:.-]+="[^"]*")*)\s*/?>', body ):
+        for a in re.findall( r'\s([\w:.-]+)="', m.group( 2 ) ):
+            if a not in { "p", "n", "t", "id", "l", "k", "c" }: keys.add( m.group( 1 ) + "@" + a )
+    return sorted( k for k in keys if not defined( k.split( "@", 1 )[ 1 ], legend ) )
+docs = { k: rd( "s_" + k ) for k in ( "pdef", "pcmp", "idef", "icmp" ) }
+slot = re.compile( r'<s [^>]*via="slot"[^>]*slot_fns="\d+"' )
+ring = re.compile( r'<rh [^>]*via="slot"' )
+print( "S0 %d %d %d %d" % ( bool( slot.search( docs[ "pdef" ] ) ), bool( slot.search( docs[ "pcmp" ] ) ),
+                            bool( ring.search( docs[ "idef" ] ) ), bool( ring.search( docs[ "icmp" ] ) ) ) )
+for k in ( "pdef", "pcmp", "idef", "icmp" ): print( "S-" + k + " " + " ".join( gaps( docs[ k ] ) ) )
+cut = re.sub( r'(?<![\w:.-])slot_fns\s*=', 'slot-fns ', legendOf( docs[ "pdef" ] ) )
+print( "S5 " + " ".join( gaps( docs[ "pdef" ], cut ) ) )
+PYS
+sline(){ sed -n "s/^$1 //p" "$TMP/s_out"; }
+if [ "$( sline S0 )" = "1 1 1 1" ]; then
+    ok "(S0) the slot fixture answers --path with a via=\"slot\" slot_fns= row and --impact with a <rh via=\"slot\"> ring, default and compact"
+else
+    no "(S0) no slot row (path def/cmp, impact def/cmp = $( sline S0 )) — (S1)-(S5) prove nothing: $( head -c 300 "$TMP/s_out" )"
+fi
+for k in "pdef:1:--path default" "pcmp:2:--path --legend=compact" "idef:3:--impact default" "icmp:4:--impact --legend=compact"; do
+    key=${k%%:*}; rest=${k#*:}; n=${rest%%:*}; what=${rest#*:}
+    if [ -z "$( sline "S-$key" )" ]; then
+        ok "(S$n) the $what slot answer defines every attribute it emits (via= slot_callers= slot_fns= reaches_hedged= ring)"
+    else
+        no "(S$n) the $what slot answer's legend does not define: $( sline "S-$key" )"
+    fi
+done
+case " $( sline S5 ) " in
+    *" s@slot_fns "*) ok "(S5) mutation control: the probe reports s@slot_fns once the legend loses its slot_fns= definition" ;;
+    *)                no "(S5) mutation control: a legend without slot_fns= still read as covered ($( sline S5 ))" ;;
+esac
+
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "legendcoveragecheck: FAILURES ABOVE"
 exit "$fail"

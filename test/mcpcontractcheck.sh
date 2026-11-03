@@ -371,6 +371,9 @@ TWIN = {
     # lane lego-transitive (2026-10-10): --lego joined the paging set the same conditional way for its DEEPER implementor
     # rows (serialize.h legoClosurePage); its twin takes the same limit/offset through mcpPageArgs.
     "--lego": "lego",
+    # lane D2 DEFS-LOOKUP (2026-10-28): --defs pages (one name's definition rows); no MCP twin yet -- MCP find_symbol keeps its own
+    # table until PLAN_DEFS_LOOKUP part 2 moves it onto rw::lookupDefs (card DEFS-ONE-CORE), so --defs is CLI-only for now.
+    "--defs": "",
 }
 unmapped = sorted( v for v in pagingCli if v not in TWIN )
 check( not unmapped, "(G) every paging CLI verb is classified twin-or-not (%s)" % ( ",".join( unmapped ) or "none unmapped" ) )

@@ -1,0 +1,4 @@
+[package]
+name = "other"
+[dependencies]
+xpm3fc = { package = "xp-m3-core", version = "1" }

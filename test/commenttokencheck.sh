@@ -70,7 +70,7 @@ echo "commenttokencheck: BIN=$BIN"
 root_tag(){ grep -oE "<$2( [^>]*)?>" "$1" | head -1; }
 attr(){ printf '%s' "$1" | grep -oE " $2=\"[^\"]*\"" | head -1 | sed -E 's/^[^"]*"([^"]*)"$/\1/'; }
 # the caller NAMES of a callers document, sorted, space-joined
-names(){ grep -oE '<s [^>]*/>' "$1" | grep -oE ' n="[^"]*"' | sed -E 's/ n="([^"]*)"/\1/' | sort | tr '\n' ' ' | sed -E 's/ $//'; }
+names(){ grep -oE '<s [^>]*/>' "$1" | grep -oE ' n="[^"]*"' | sed -E 's/ n="([^"]*)"/\1/' | LC_ALL=C sort | tr '\n' ' ' | sed -E 's/ $//'; }
 # callers_of DIR SELECTOR → $TMP/callers.xml; echoes "names|declined_calls" ("" when the attribute is absent)
 callers_of(){
     ( cd "$1" && "$BIN" . --no-cache --callers="$2" ) >"$TMP/callers.xml" 2>"$TMP/callers.err"
@@ -88,19 +88,19 @@ pyfix(){
 # the decline verdict: data.get is NOT a caller, self.get (warm) still is, and the decline is counted once
 expect_declined(){   # label dir
     local got; got="$( callers_of "$2" m.py:get )"
-    if [ "$got" = "warm|1" ]; then
-        ok "$1: data.get declined, warm keeps its edge (names=[warm] declined_calls=1)"
+    if [ "$got" = "Pool.warm|1" ]; then
+        ok "$1: data.get declined, warm keeps its edge (names=[Pool.warm] declined_calls=1)"
     else
-        no "$1: expected names=[warm] declined_calls=1, got [$got]"
+        no "$1: expected names=[Pool.warm] declined_calls=1, got [$got]"
     fi
 }
 # the keep verdict: data.get binds to Pool.get (the file names Pool in CODE), nothing declined
 expect_kept(){       # label dir
     local got; got="$( callers_of "$2" m.py:get )"
-    if [ "$got" = "load warm|" ]; then
-        ok "$1: the code mention keeps data.get bound (names=[load warm], no declined_calls=)"
+    if [ "$got" = "Pool.warm load|" ]; then
+        ok "$1: the code mention keeps data.get bound (names=[Pool.warm load], no declined_calls=)"
     else
-        no "$1: expected names=[load warm] and no declined_calls=, got [$got]"
+        no "$1: expected names=[Pool.warm load] and no declined_calls=, got [$got]"
     fi
 }
 

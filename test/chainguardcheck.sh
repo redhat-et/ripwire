@@ -113,63 +113,63 @@ done
 # ── Bug 1 / #B1 — corrected targets: the wrong PRECISE pin becomes the complete honest split ──────────
 # (a) FieldOfThis: `this->m_pool.run()` must reach Pool::run (a.cpp:1) AND keep App::run (a.cpp:10).
 T="$( callees goThis )"
-printf '%s\n' "$T" | grep 'n="run"' | grep -q 'a.cpp:1"' \
+printf '%s\n' "$T" | grep 'n="Pool::run"' | grep -q 'a.cpp:1"' \
     && ok "(a) goThis() this->m_pool.run() reaches Pool::run — the chained receiver is no longer a bare call" \
     || no "(a) goThis() has NO edge to Pool::run — bareCish still wrong-narrows the chained receiver to the caller's own class"
-printf '%s\n' "$T" | grep 'n="run"' | grep -q 'a.cpp:10"' \
+printf '%s\n' "$T" | grep 'n="App::run"' | grep -q 'a.cpp:10"' \
     && ok "(a) goThis() keeps App::run inside the split (zero lost edges)" \
     || no "(a) goThis() LOST its App::run edge — the widening removed a candidate instead of widening the pin"
 
 # (b) FieldOfVar over a FIELD base: `m_box.opts.tick()` → split {Opts::tick a.cpp:4, App::tick a.cpp:11}.
 V="$( callees goVar )"
-printf '%s\n' "$V" | grep 'n="tick"' | grep -q 'a.cpp:4"' \
+printf '%s\n' "$V" | grep 'n="Opts::tick"' | grep -q 'a.cpp:4"' \
     && ok "(b) goVar() m_box.opts.tick() reaches Opts::tick — the field-based chain is no longer a bare call" \
     || no "(b) goVar() has NO edge to Opts::tick — bareCish still wrong-narrows the field-based chain"
-printf '%s\n' "$V" | grep 'n="tick"' | grep -q 'a.cpp:11"' \
+printf '%s\n' "$V" | grep 'n="App::tick"' | grep -q 'a.cpp:11"' \
     && ok "(b) goVar() keeps App::tick inside the split (zero lost edges)" \
     || no "(b) goVar() LOST its App::tick edge"
 
 # (c) FieldOfVar over a typed LOCAL base: `Box b; b.opts.tick()` → the same complete split.
 L="$( callees goLoc )"
-printf '%s\n' "$L" | grep 'n="tick"' | grep -q 'a.cpp:4"' \
+printf '%s\n' "$L" | grep 'n="Opts::tick"' | grep -q 'a.cpp:4"' \
     && ok "(c) goLoc() b.opts.tick() reaches Opts::tick — the local-based chain is no longer a bare call" \
     || no "(c) goLoc() has NO edge to Opts::tick — bareCish still wrong-narrows the local-based chain"
-printf '%s\n' "$L" | grep 'n="tick"' | grep -q 'a.cpp:11"' \
+printf '%s\n' "$L" | grep 'n="App::tick"' | grep -q 'a.cpp:11"' \
     && ok "(c) goLoc() keeps App::tick inside the split (zero lost edges)" \
     || no "(c) goLoc() LOST its App::tick edge"
 
 # ── Bug 2 / #B2 — recovered edges: the shadow-deleted member call comes back ──────────────────────────
 # (d) multi-def flavor: `int enable = 0; this->m_cfg.enable();` recovers as the honest 2-way split.
 S="$( callees goShadow )"
-printf '%s\n' "$S" | grep 'n="enable"' | grep -q 'a.cpp:2"' \
+printf '%s\n' "$S" | grep 'n="Cfg::enable"' | grep -q 'a.cpp:2"' \
     && ok "(d) goShadow() this->m_cfg.enable() recovered — a local named enable no longer deletes the member call" \
     || no "(d) goShadow() emits NO edge to Cfg::enable — shadow suppression still deletes the receiver-qualified call"
-printf '%s\n' "$S" | grep 'n="enable"' | grep -q 'a.cpp:3"' \
+printf '%s\n' "$S" | grep 'n="EDecoy::enable"' | grep -q 'a.cpp:3"' \
     && ok "(d) goShadow() recovers as the COMPLETE honest split (EDecoy::enable linked too — no sneak narrow)" \
     || no "(d) goShadow() recovered only a partial split — a recovered call must spray honestly, not guess"
 
 # (e) single-def flavor: `int ping = 0; m_box.opts.ping();` recovers precise (ping has ONE def).
 P="$( callees goVarShadow )"
-printf '%s\n' "$P" | grep 'n="ping"' | grep -q 'a.cpp:4"' \
+printf '%s\n' "$P" | grep 'n="Opts::ping"' | grep -q 'a.cpp:4"' \
     && ok "(e) goVarShadow() m_box.opts.ping() recovered to Opts::ping (single-def name lands precise)" \
     || no "(e) goVarShadow() emits NO edge to Opts::ping — shadow suppression still deletes the chained call"
 
 # ── controls — green before AND after ─────────────────────────────────────────────────────────────────
 # (f) a genuinely BARE call inside the class still Rule-1 narrows: goBare() → App::run ONLY.
 BQ="$( callees goBare )"
-printf '%s\n' "$BQ" | grep 'n="run"' | grep -q 'a.cpp:10"' \
+printf '%s\n' "$BQ" | grep 'n="App::run"' | grep -q 'a.cpp:10"' \
     && ok "(f) goBare() run() still Rule-1 pins App::run (bare calls unaffected)" \
     || no "(f) goBare() lost its App::run pin — the widening broke Rule 1's genuine bare arm"
-printf '%s\n' "$BQ" | grep 'n="run"' | grep -q 'a.cpp:1"' \
+printf '%s\n' "$BQ" | grep 'n="Pool::run"' | grep -q 'a.cpp:1"' \
     && no "(f) goBare() linked to Pool::run — a genuine bare call must stay narrowed to the enclosing class" \
     || ok "(f) goBare() decoy Pool::run NOT linked (Rule 1 narrow intact)"
 
 # (g) a depth-1 NamedVar field receiver still Rule-2b narrows: goOne() m_cfg.enable() → Cfg::enable ONLY.
 O="$( callees goOne )"
-printf '%s\n' "$O" | grep 'n="enable"' | grep -q 'a.cpp:2"' \
+printf '%s\n' "$O" | grep 'n="Cfg::enable"' | grep -q 'a.cpp:2"' \
     && ok "(g) goOne() m_cfg.enable() still Rule-2b narrows to Cfg::enable (depth-1 receivers unaffected)" \
     || no "(g) goOne() lost its Cfg::enable narrow — the widening broke Rule 2b's depth-1 arm"
-printf '%s\n' "$O" | grep 'n="enable"' | grep -q 'a.cpp:3"' \
+printf '%s\n' "$O" | grep 'n="EDecoy::enable"' | grep -q 'a.cpp:3"' \
     && no "(g) goOne() linked to EDecoy::enable — Rule 2b's narrow regressed to a spray" \
     || ok "(g) goOne() decoy EDecoy::enable NOT linked (Rule 2b narrow intact)"
 
@@ -180,11 +180,11 @@ printf '%s\n' "$O" | grep 'n="enable"' | grep -q 'a.cpp:3"' \
 #     App::tick, amb=1) instead of Rule 1's wrong App::tick pin, and deepShadow() (the same call under a
 #     shadowing local `tick`) keeps both edges instead of being deleted by shadow suppression.
 D="$( callees deepPin )"
-( printf '%s\n' "$D" | grep 'n="tick"' | grep -q 'a.cpp:4"' ) && ( printf '%s\n' "$D" | grep 'n="tick"' | grep -q 'a.cpp:11"' ) \
+( printf '%s\n' "$D" | grep 'n="Opts::tick"' | grep -q 'a.cpp:4"' ) && ( printf '%s\n' "$D" | grep 'n="App::tick"' | grep -q 'a.cpp:11"' ) \
     && ok "(h) deepPin() depth-3 chain takes the honest split (Opts::tick + App::tick) — no enclosing-class pin" \
     || no "(h) deepPin() depth-3 chain is not the complete Opts::tick + App::tick split: $( printf '%s' "$D" | tr '\n' ' ' )"
 DS="$( callees deepShadow )"
-( printf '%s\n' "$DS" | grep 'n="tick"' | grep -q 'a.cpp:4"' ) && ( printf '%s\n' "$DS" | grep 'n="tick"' | grep -q 'a.cpp:11"' ) \
+( printf '%s\n' "$DS" | grep 'n="Opts::tick"' | grep -q 'a.cpp:4"' ) && ( printf '%s\n' "$DS" | grep 'n="App::tick"' | grep -q 'a.cpp:11"' ) \
     && ok "(h) deepShadow() depth-3 shadowed chain keeps its split — shadow suppression no longer deletes it" \
     || no "(h) deepShadow() lost its edges under the shadowing local — the depth-3 chain is read as a bare name again"
 

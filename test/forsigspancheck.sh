@@ -227,12 +227,12 @@ PY
 fi
 TE="$( ask ts ctx 'How is a per-request context created?' )"
 if ran_ok "$TE" "E/TS"; then
-    echeck "$TE" "E/TS" "$CORPUS/ts" createContext:src/application.ts:11:18 handle:src/application.ts:20:22
+    echeck "$TE" "E/TS" "$CORPUS/ts" Application.createContext:src/application.ts:11:18 Application.handle:src/application.ts:20:22   # js-def-naming: a TS method row names its class
     oracle "$TE" "E+U/TS" "$CORPUS/ts"
 fi
 PE="$( ask py compute 'What does LookupCache._compute return, and how are entries evicted?' )"
 if ran_ok "$PE" "E/PY"; then
-    echeck "$PE" "E/PY" "$CORPUS/py" _compute:src/pump/cache.py:12:13 evict_entries:src/pump/cache.py:15:20
+    echeck "$PE" "E/PY" "$CORPUS/py" LookupCache._compute:src/pump/cache.py:12:13 LookupCache.evict_entries:src/pump/cache.py:15:20
     oracle "$PE" "E+U/PY" "$CORPUS/py"
 fi
 JE="$( ask js run 'How does a queued job get run?' )"
@@ -285,8 +285,10 @@ if mode == "nohop":
 elif mode == "hop":
     good = name in names; why = "<h n=%s> kept (a proven callee edge)" % name
 elif mode == "order":
-    rank = { ( a.get( "n" ), a.get( "p" ), a.get( "l" ) ): int( a[ "r" ] ) for _, a in drows( doc ) if a.get( "r", "" ).isdigit() }
-    rs = [ rank.get( ( h.get( "n" ), h.get( "p" ), h.get( "l" ) ) ) for h in hs ]
+    # a <d> row prints Owner.name / Owner::name (QUALNAME-1); an <h> hop row keeps the BARE name: join on (bare name, p, l)
+    bare = lambda n: ( n or "" ).replace( "::", "." ).split( "." )[ -1 ]
+    rank = { ( bare( a.get( "n" ) ), a.get( "p" ), a.get( "l" ) ): int( a[ "r" ] ) for _, a in drows( doc ) if a.get( "r", "" ).isdigit() }
+    rs = [ rank.get( ( bare( h.get( "n" ) ), h.get( "p" ), h.get( "l" ) ) ) for h in hs ]
     good = bool( rs ) and None not in rs and rs == sorted( rs ); why = "<h> rows in r= order %s" % rs
 else:
     print( "  FAIL  %s: unknown mode" % label ); sys.exit( 1 )
@@ -302,9 +304,9 @@ PY
 FEB="$TMP/py.callers.fetch_entry.xml"; run py "$FEB" --callers=fetch_entry
 FEB_ON=0
 if ran_ok "$FEB" "H premise"; then
-    if ! grep -q '<callers ' "$FEB" || ! grep -q 'n="pull"' "$FEB"; then
+    if ! grep -q '<callers ' "$FEB" || ! grep -q 'n="Downloader.pull"' "$FEB"; then
         no "H premise: --callers=fetch_entry did not answer with the pull row (cannot decide the hedge capability)"
-    elif grep -Eq '<s [^>]*n="pull"[^>]*via="name"|<s [^>]*via="name"[^>]*n="pull"' "$FEB"; then
+    elif grep -Eq '<s [^>]*n="Downloader.pull"[^>]*via="name"|<s [^>]*via="name"[^>]*n="Downloader.pull"' "$FEB"; then
         FEB_ON=1
     fi
 fi

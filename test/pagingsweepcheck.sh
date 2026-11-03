@@ -752,6 +752,10 @@ TABLE = {
     # has_more="1" next=), so the <ctx> root is uncut by construction and the "quintet absent" branch applies; the page
     # itself is test/legotransitivecheck.sh's arm.
     "--lego":               ( [ "--lego=CalleeCallsSink" ], None ),
+    # lane D2 DEFS-LOOKUP (2026-10-28): --defs=NAME pages ONE name's definition rows (--limit/--offset, shown=/offset=/next= on the
+    # <name> child; test/defslookupcheck.sh (F) is the page itself). escapeXml binds a handful of definitions here (under the 16-row
+    # page), so the root is uncut and the "cut nothing => quintet absent" branch applies, as for --callers.
+    "--defs":               ( [ "--defs=escapeXml" ], None ),
 }
 fail = 0
 missing = [ v for v in universe if v not in TABLE ]

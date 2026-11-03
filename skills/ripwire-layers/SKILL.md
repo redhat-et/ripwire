@@ -58,6 +58,9 @@ reviewing whether the codebase is trending toward or away from clean layering.
    heuristics — mechanistically plausible, widely implemented, but no independent
    outcome-based study has validated them. Trust the god-file/cycle read hardest; treat
    nccd/D as descriptive, not proof.**
+   A row with `no_file_edges=` is a language whose imports this build almost never resolves to files (Go, Java, Kotlin, C#, PHP,
+   Swift, Dart, GDScript, Clojure): `zone="unknown"` and an absent number mean not measured, never zero or uncoupled, and a
+   `ca=`/`ce=` beside the attribute is a floor.
    **Action**: a file in the top-3 by `afferent` is doing double duty as a de-facto layer
    boundary with no rule enforcing it — that's the concrete next step, not just a note: add it
    as a named `layer` in `rules.txt` and write the `deny` rules that keep new dependents out of

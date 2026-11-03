@@ -143,7 +143,14 @@ APPEOF
 # dirty working tree so the diff-seeded verbs (--test-gate, --situ) have a change set at all.
 printf 'int extra( int x ) { return x - 1; }\n' >> "$WORK/src/app.cpp"
 ( cd "$WORK" && git add -A && git commit -qm second >/dev/null 2>&1 )
-printf 'int extra2( int x ) { return x - 2; }\n' >> "$WORK/src/app.cpp"
+# RE-PINNED (2026-09-27, the symbol-granular change set): the uncommitted app.cpp edit is a MODULE-LEVEL
+# append, not a never-called function. --test-gate/--handoff now narrow to the symbols the hunks locate
+# (situ.h computeSymbolChangeSet; test/situhunkcheck.sh), and an appended uncalled function would leave
+# app.cpp's tests (they reach compute/wrapper, not the new symbol) out of every row — the arms below would
+# assert over an empty document. The module-scope line is the documented unlocated-hunk fallback, so
+# app.cpp's change set stays file-granular and every pinned row/multiset holds. util.cpp's body-only sed
+# needs no such help: it LOCATES in helper_core, its only symbol — narrowed == file-granular there.
+printf 'int extra2_state = 2;\n' >> "$WORK/src/app.cpp"
 # dirty helper_core's BODY only, so nobody_tests_me stays unchanged and lands in the untested blast radius.
 sed -i.bak 's/return x + 0;/return x + 7;/' "$WORK/src/util.cpp" && rm -f "$WORK/src/util.cpp.bak"
 
@@ -355,7 +362,11 @@ printf '#!/usr/bin/env bash\necho leaf_b\n' > "$W2/test/t_leaf_b.sh"; chmod +x "
 # (and arm 14's positive control) would be asserting over an empty document.
 printf 'int leaf_extra( int x )\n{\n    return x + 2;\n}\n' >> "$W2/src/leaf.cpp"
 ( cd "$W2" && git add -A && git commit -qm second >/dev/null 2>&1 )
-printf 'int leaf_extra2( int x )\n{\n    return x + 3;\n}\n' >> "$W2/src/leaf.cpp"
+# RE-PINNED (2026-09-27, the symbol-granular change set): module-level append, as in WORK above — the
+# selector arms here (--test-gate=src/leaf.cpp, --situ=src/leaf.cpp, --handoff) must keep seeing leaf.cpp's
+# WHOLE symbol set so the eight pinned paths at three hops survive; a never-called appended function would
+# narrow the seeds to itself and empty every row (situ.h computeSymbolChangeSet's located-hunk rule).
+printf 'int leaf_extra2_state = 3;\n' >> "$W2/src/leaf.cpp"
 rw2(){ ( cd "$W2" && "$BIN" . "$@" --no-cache 2>/dev/null ); }
 A12="$( rw2 --affected=src/leaf.cpp )"
 G12="$( rw2 --test-gate=src/leaf.cpp )"

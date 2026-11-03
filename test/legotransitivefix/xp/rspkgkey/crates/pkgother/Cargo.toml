@@ -1,0 +1,4 @@
+[package]
+name = "xp-pkg-other"
+[dependencies]
+xp-pkg-core = "1"

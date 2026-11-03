@@ -1,0 +1,4 @@
+[package]
+name = "xp-np-app"
+[dependencies]
+xp-np-core = { path = "../npcore" }

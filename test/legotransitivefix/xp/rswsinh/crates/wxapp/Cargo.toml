@@ -1,0 +1,7 @@
+[package]
+name = "xp-wsinh-app"
+[dependencies]
+xpwscore.workspace = true
+serde = { workspace = true }
+[target.'cfg(unix)'.dependencies]
+xptcore = { package = "xp-wsinh-core", path = "../wxcore" }

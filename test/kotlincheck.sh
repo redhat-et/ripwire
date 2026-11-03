@@ -203,7 +203,7 @@ echo "$( grep -o '<s t="fn" n="doubled"[^>]*>' "$MAP_OUT" )" | grep -q 'sc=' \
     || ok "scope: top-level extension function doubled() is correctly scope-less"
 
 CR="$( "$BIN" "$FIX" --callers=square --no-cache 2>/dev/null )"
-echo "$CR" | grep -q 'n="greet"' && ok "--callers=square lists greet (Greeter.kt -> Util.kt, cross-file)" \
+echo "$CR" | grep -q 'n="Greeter.greet"' && ok "--callers=square lists greet (Greeter.kt -> Util.kt, cross-file)" \
     || no "--callers=square did not list greet: $CR"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -886,7 +886,7 @@ for L in split flat; do
     got="$( calleeFiles "$BL/$L" JSvc.java:call pong )"
     [ "$got" = "${J}JSvc.java" ] && ok "$L: Java's s.pong() keeps its own interface declaration — Kotlin's KPong.pong body does not evict it" \
         || no "$L: Java's s.pong() binds [${got:-nothing}], expected ${J}JSvc.java — the collapse crossed the Kotlin/Java line"
-    got="$( calleeFiles "$BL/$L" KPinger.kt:usePinger ping )"
+    got="$( calleeFiles "$BL/$L" KPinger.kt:usePinger KPinger.ping )"
     [ "$got" = "${K}KPinger.kt" ] && ok "$L: a bodyless Kotlin FUNCTION is still a declaration — p.ping() binds KPinger's override, not Pinger's member" \
         || no "$L: p.ping() binds [${got:-nothing}], expected ${K}KPinger.kt — the interface member stopped collapsing into its Kotlin body"
 done
@@ -1126,6 +1126,261 @@ pyedit "$TMP/jvminv_mut/k/Kt.kt" 'interface Marker' '// interface Marker removed
              && ok "mutation: Kotlin Marker deleted -> Tagged implements the Java Marker (the bridge, once Kotlin has none)" \
              || no "mutation 14c: with no Kotlin Marker, Tagged did not become the Java Marker's implementor: [$( markerImpls "$TMP/jvminv_mut" )]"; } \
     || no "mutation 14c: the Marker deletion did not apply — the arm would have been inert"
+
+# ════════════════════════════════════════════════════════════════════════
+echo
+echo "=== 15. KOTLIN SCOPE FUNCTIONS (#155): a trailing-lambda call to let/run/with/apply/also never binds a Java method ==="
+# ════════════════════════════════════════════════════════════════════════
+# The fact is the call's TRAILING LAMBDA, read at the call site (`x.run { }`, `with( x ) { }`, `x?.let { }`), never the name:
+# `block.run()` on a Runnable (no lambda) keeps its Java edge, and a Kotlin `run` the tree defines keeps its own. Each tree
+# asks ONE question (does Kotlin define the name or not), so no arm mixes the own-language rule with the trailing-lambda rule.
+# Trees: a = Use.kt (build, kick) beside Job.java; b = Scopes.kt (the four bare/safe-call shapes and a real b.with()) beside
+# Builder.java; c = Task.kt, which DEFINES run (tree C of the issue); d = the true-edge shapes; e = a parenthesised lambda (floor).
+SC="$TMP/scope"; rm -rf "$SC"; mkdir -p "$SC/a/java/jobs" "$SC/a/kt" "$SC/b/java/lib" "$SC/b/kt" "$SC/c/java/jobs" "$SC/c/kt" "$SC/d/java/jobs" "$SC/d/kt" "$SC/e/java/lib" "$SC/e/kt" "$SC/jo/java/jobs" "$SC/jo/java/lib"
+cat > "$SC/a/java/jobs/Job.java" <<'JAVA'
+package jobs;
+
+public class Job implements Runnable {
+    @Override
+    public void run() {
+    }
+}
+JAVA
+cat > "$SC/a/kt/Use.kt" <<'KT'
+data class User(val name: String)
+
+fun build(s: String): User = s.run { User(this) }
+
+fun kick(j: jobs.Job) {
+    j.run()
+}
+KT
+cat > "$SC/b/java/lib/Builder.java" <<'JAVA'
+package lib;
+
+public class Builder {
+    public Builder with(String s) { return this; }
+    public Builder apply(int x) { return this; }
+    public void let() { }
+    public void also() { }
+}
+JAVA
+cat > "$SC/b/kt/Scopes.kt" <<'KT'
+fun useWith(sb: StringBuilder): String = with(sb) { toString() }
+
+fun useApply(): MutableList<Int> = mutableListOf<Int>().apply { add(1) }
+
+fun useLet(s: String?): Int = s?.let { it.length } ?: 0
+
+fun useAlso(xs: MutableList<Int>) = xs.also { it.clear() }
+
+fun realWith(b: lib.Builder) = b.with("x")
+
+fun typedApply(b: lib.Builder) = b.apply { }
+KT
+cp "$SC/a/java/jobs/Job.java" "$SC/c/java/jobs/Job.java"; cp "$SC/a/java/jobs/Job.java" "$SC/d/java/jobs/Job.java"; cp "$SC/a/java/jobs/Job.java" "$SC/jo/java/jobs/Job.java"
+cat > "$SC/c/kt/Task.kt" <<'KT'
+class Task {
+    fun run(block: () -> Unit) = block()
+}
+
+fun go(t: Task) = t.run { }
+
+fun build(s: String): Int = s.run { length }
+
+fun kick(j: jobs.Job) {
+    j.run()
+}
+KT
+cat > "$SC/d/kt/Dispatch.kt" <<'KT'
+fun dispatch(block: Runnable) = block.run()
+KT
+cat > "$SC/d/kt/Kick.kt" <<'KT'
+fun kick(j: jobs.Job) {
+    j.run()
+}
+KT
+cp "$SC/b/java/lib/Builder.java" "$SC/e/java/lib/Builder.java"
+cat > "$SC/e/kt/Paren.kt" <<'KT'
+fun useParen(s: String): Int = s.let({ it.length })
+KT
+cat > "$SC/jo/java/lib/Builder.java" <<'JAVA'
+package lib;
+
+public class Builder {
+    public Builder with(String s) { return this; }
+    public Builder apply(int x) { return this; }
+    public void let() { }
+    public void also() { }
+}
+JAVA
+cat > "$SC/jo/java/lib/Caller.java" <<'JAVA'
+package lib;
+
+public class Caller {
+    public void go() {
+        Builder b = new Builder();
+        b.with("x");
+        b.apply(1);
+        b.let();
+        b.also();
+    }
+
+    public void spin(jobs.Job j) {
+        j.run();
+    }
+}
+JAVA
+
+# callerNames ROOT SEL — the --callers rows as "name@file " tokens, sorted (the line number is dropped: a shifted line is no failure)
+callerNames(){ "$BIN" "$1" --callers="$2" --no-cache 2>/dev/null | grep -oE '<s t="[a-z]*" n="[^"]*" p="[^"]*"' | sed -E 's/<s t="[a-z]*" n="([^"]*)" p="([^"]*):[0-9]+"/\1@\2/' | LC_ALL=C sort | tr '\n' ' '; }
+# expectCallers ROOT SEL WANT LABEL — the caller rows of SEL are exactly WANT
+expectCallers(){ local got; got="$( callerNames "$1" "$2" )"; if [ "$got" = "$3" ]; then ok "$4"; else no "$4: got [$got], want [$3]"; fi; }
+# matchRows ROOT QUERY — the tree-sitter captures of QUERY as "file:line in=symbol" tokens
+matchRows(){ "$BIN" "$1" --no-cache --match="$2" 2>/dev/null | grep -oE '<m p="[^"]*" in="[^"]*"' | LC_ALL=C sort -u | tr '\n' ' '; }
+
+# PRESENCE first: each trailing-lambda shape and its no-lambda twin must be in the tree, or an absence below proves nothing.
+Q_NAV_LAMBDA='(call_expression (navigation_expression) (call_suffix (annotated_lambda) @l)) @c'
+Q_BARE_LAMBDA='(call_expression (simple_identifier) (call_suffix (value_arguments) (annotated_lambda) @l)) @c'
+Q_NAV_PLAIN='(call_expression (navigation_expression) (call_suffix (value_arguments) @v)) @c'
+for spec in "a|Q_NAV_LAMBDA|in=\"build\"|s.run { } (navigation, trailing lambda)" "b|Q_BARE_LAMBDA|in=\"useWith\"|with( x ) { } (bare call, ordinary argument and trailing lambda)" \
+            "b|Q_NAV_LAMBDA|in=\"useLet\"|x?.let { } (safe call, trailing lambda)" "a|Q_NAV_PLAIN|in=\"kick\"|j.run() (navigation, no lambda)"; do
+    IFS='|' read -r tree qname needle label <<< "$spec"
+    qv="${!qname}"
+    if matchRows "$SC/$tree" "$qv" | grep -qF "$needle"; then ok "presence: --match finds $label"
+    else no "presence: --match does not find $label ($needle) — the arms below would be vacuous"; fi
+done
+
+# THE DEFECT AND ITS CONTROLS, one question per tree.
+expectCallers "$SC/a" run 'kick@kt/Use.kt ' "15a tree A: --callers=run is exactly kick — the Kotlin s.run { User(this) } no longer binds Job.run"
+expectCallers "$SC/d" Job.java:run 'dispatch@kt/Dispatch.kt kick@kt/Kick.kt ' "15b tree D: block.run() on a Runnable and j.run() still bind Job.run (the true edges)"
+expectCallers "$SC/b" with 'realWith@kt/Scopes.kt ' "15c tree B: with( sb ) { } binds nothing in Java, and realWith's b.with( \"x\" ) still binds Builder.with"
+expectCallers "$SC/b" apply '' "15d tree B: mutableList.apply { } binds nothing in Java"
+expectCallers "$SC/b" let '' "15e tree B: s?.let { } binds nothing in Java"
+expectCallers "$SC/b" also '' "15f tree B: xs.also { } binds nothing in Java"
+# Tree C (Kotlin DEFINES run): own-language-first keeps the Kotlin run for the two trailing-lambda and receiver sites. PINNED at
+# today's answer: build (s.run { length }) reaches the Kotlin run, not Job.run — the receiver gap the fix does not close (a
+# navigation_expression arm in isMemberAccessNode is the next round). kick's j.run() binds Job.run on main (the kit's claim
+# that it reaches Task.run is stale); the arm pins that too.
+expectCallers "$SC/c" Task.kt:run 'build@kt/Task.kt go@kt/Task.kt ' "15g tree C: go still binds Task.run; build is pinned at today's answer (receiver gap: the Kotlin run takes s.run { length })"
+expectCallers "$SC/c" Job.java:run 'kick@kt/Task.kt ' "15h tree C: kick's j.run() still binds Job.run (no lambda, so the fix does not touch it)"
+# FLOOR, pinned: a parenthesised lambda is not the trailing-lambda grammar, so its Java edge stays (disclosed, not closed).
+expectCallers "$SC/e" let 'useParen@kt/Paren.kt ' "15i floor: s.let({ it.length }) keeps its Builder.let edge (the parenthesised lambda is out of scope)"
+# Tree F (Kotlin only, two classes define run): a receiver whose type the source states still picks ITS class's run — the arm
+# skips a receiver pick only when it holds a Java method (rv-pr438: skipping every pick split go and go2 over both runs, via="name").
+mkdir -p "$SC/f/kt"
+cat > "$SC/f/kt/A.kt" <<'KT'
+class Task {
+    fun run(block: () -> Unit) = block()
+}
+class Other {
+    fun run(block: () -> Unit) = block()
+}
+fun go(t: Task) = t.run { }
+fun go2() { val o = Other(); o.run { } }
+KT
+expectCallers "$SC/f" Task.run 'go@kt/A.kt ' "15l tree F: t.run { } on a typed t: Task binds Task.run alone (the receiver rule still decides a Kotlin pick)"
+expectCallers "$SC/f" Other.run 'go2@kt/A.kt ' "15l tree F: o.run { } on a constructed Other binds Other.run alone"
+goRow="$( "$BIN" "$SC/c" --callers=Task.kt:run --no-cache 2>/dev/null | grep -oE '<s t="fn" n="go" [^>]*>' )"
+case "$goRow" in
+    "") no "15m tree C: --callers=Task.kt:run printed no go row — the via= check below would be vacuous" ;;
+    *'via="name"'*) no "15m tree C: go's t.run { } binds Task.run only by name ($goRow), but its receiver t: Task proves it" ;;
+    *) ok "15m tree C: go's t.run { } binds Task.run with its receiver proof (no via=\"name\")" ;;
+esac
+
+# DISPOSITION: every refused site is a C external census row, the header gauge rises by exactly that many, and nothing is unaccounted.
+ext_names(){ python3 - "$1" <<'PY'
+import sys
+for line in open( sys.argv[ 1 ], encoding="utf-8", errors="replace" ):
+    f = line.rstrip( "\n" ).split( "\t" )
+    if len( f ) >= 9 and f[ 0 ] == "C" and f[ 1 ] == "external":
+        head, _, tail = f[ 5 ].partition( "::" )
+        print( tail.rsplit( "#", 1 )[ 0 ].split( "::" )[ -1 ] + ">" + f[ 6 ] )
+PY
+}
+for t in a b c; do
+    "$BIN" "$SC/$t" --no-cache --pin-census="$TMP/sc_$t.tsv" > "$TMP/sc_$t.xml" 2>/dev/null
+done
+want_ext(){ # tree the external= the census must state, the sorted census rows it must hold
+    local t="$1" n="$2" rows="$3" got gx
+    gx="$( grep -m1 '^# dispositions ' "$TMP/sc_$t.tsv" | grep -oE ' external=[0-9]+' | grep -oE '[0-9]+$' )"
+    got="$( ext_names "$TMP/sc_$t.tsv" | LC_ALL=C sort | tr '\n' ' ' )"
+    if [ "${gx:-x}" = "$n" ] && [ "$got" = "$rows" ] && grep -m1 '^# dispositions ' "$TMP/sc_$t.tsv" | grep -q ' unaccounted=0'; then
+        ok "disposition (tree $t): external=$n, the census rows are [${rows:-none}], unaccounted=0 — each refusal is counted"
+    else
+        no "disposition (tree $t): external=${gx:-?} census=[${got:-none}], want external=$n [${rows:-none}] with unaccounted=0"
+    fi
+}
+want_ext a 1 'build>run '
+want_ext b 5 'typedApply>apply useAlso>also useApply>apply useLet>let useWith>with '
+want_ext c 0 ''
+
+# MUTATION, keyed on the fact: the same site with NO trailing lambda (s.run()) must bind Job.run again, so the arm reads the lambda.
+rm -rf "$TMP/scmut"; cp -R "$SC/a" "$TMP/scmut"
+if pyedit "$TMP/scmut/kt/Use.kt" 's.run { User(this) }' 's.run()'; then
+    expectCallers "$TMP/scmut" run 'build@kt/Use.kt kick@kt/Use.kt ' "15k mutation: s.run() with no lambda binds Job.run again (the arm keys on the trailing lambda, not the name)"
+else
+    no "15k mutation: the s.run { } -> s.run() edit did not apply — the arm would be inert"
+fi
+
+# JAVA INVARIANT (the §14c pattern): a Java-only tree, then the same tree plus the Kotlin scope shapes. Every Java caller row
+# of the Java definitions named below, and every Java row of the full map, must be exactly what the Java-only tree gave.
+cp -R "$SC/jo" "$SC/jk"; mkdir -p "$SC/jk/kt"; cp "$SC/b/kt/Scopes.kt" "$SC/jk/kt/"; cp "$SC/a/kt/Use.kt" "$SC/jk/kt/"
+javaCallers(){ "$BIN" "$1" --callers="$2" --no-cache 2>/dev/null | grep -oE '<s t="[a-z]*" n="[^"]*" p="[^"]*\.java:[0-9]+"' | LC_ALL=C sort | tr '\n' ' '; }
+jmoved=""; jcount=0
+for target in Job.java:run Builder.java:with Builder.java:apply Builder.java:let Builder.java:also; do
+    a="$( javaCallers "$SC/jo" "$target" )"; b="$( javaCallers "$SC/jk" "$target" )"
+    [ -n "$a" ] && jcount=$(( jcount + 1 ))
+    [ "$a" = "$b" ] || jmoved="$jmoved $target"
+done
+if [ "$jcount" -eq 5 ] && [ -z "$jmoved" ]; then
+    ok "invariant: adding the Kotlin scope shapes moved NO Java caller row (Job.run, Builder.with/apply/let/also each keep their Java caller)"
+else
+    no "invariant: Java caller rows moved or were empty (populated targets: $jcount of 5; moved:${jmoved:- none})"
+fi
+"$BIN" "$SC/jo" --top-k=100000 --no-cache > "$TMP/jo.xml" 2>/dev/null
+"$BIN" "$SC/jk" --top-k=100000 --no-cache > "$TMP/jk.xml" 2>/dev/null
+read -r jrows jdiff <<< "$( python3 - "$TMP/jo.xml" "$TMP/jk.xml" <<'PYEOF'
+import sys, xml.etree.ElementTree as ET
+def java_rows(path):
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    root = ET.fromstring(raw[raw.find("<r "):])
+    rows = set()
+    for f in root.iter("f"):
+        if not f.get("p", "").endswith(".java"):
+            continue
+        for s in f.iter("s"):
+            key = (f.get("p"), s.get("t"), s.get("n"), s.get("id") or "")
+            rows.add(key + ("amb", s.get("amb") or ""))
+            for c in s.iter("c"):
+                rows.add(key + ("c", c.get("n"), c.get("prov") or ""))
+    return rows
+a, b = java_rows(sys.argv[1]), java_rows(sys.argv[2])
+print(len(a), len(a ^ b))
+PYEOF
+)"
+if [ "${jrows:-0}" -gt 0 ] && [ "${jdiff:-x}" = 0 ]; then
+    ok "invariant: the full map's $jrows Java rows (edges, prov=, amb=) are identical with and without the Kotlin files"
+else
+    no "invariant: the map's Java rows moved (rows=${jrows:-?}, symmetric difference=${jdiff:-?})"
+fi
+
+# DETERMINISM: a warm run from the cache equals a cold run, two cold runs are byte-identical, and the XML is well formed.
+mkdir -p "$TMP/scd_warm"
+"$BIN" "$SC/b" --top-k=100000 --no-cache > "$TMP/scd_cold.xml" 2>/dev/null
+"$BIN" "$SC/b" --top-k=100000 --no-cache > "$TMP/scd_cold2.xml" 2>/dev/null
+TMPDIR="$TMP/scd_warm" "$BIN" "$SC/b" --top-k=100000 > "$TMP/scd_w1.xml" 2>/dev/null
+TMPDIR="$TMP/scd_warm" "$BIN" "$SC/b" --top-k=100000 > "$TMP/scd_w2.xml" 2>/dev/null
+if cmp -s "$TMP/scd_cold.xml" "$TMP/scd_cold2.xml" && cmp -s "$TMP/scd_cold.xml" "$TMP/scd_w1.xml" && cmp -s "$TMP/scd_cold.xml" "$TMP/scd_w2.xml"; then
+    ok "determinism: cold run, second cold run and warm runs (cache written, then served) are byte-identical"
+else
+    no "determinism: the scope tree's cold, warm or repeated runs differ"
+fi
+if xmllint --noout "$TMP/scd_cold.xml" 2>/dev/null && xmllint --noout "$TMP/sc_a.xml" 2>/dev/null; then
+    ok "determinism: the map XML of the scope trees is well formed (xmllint --noout)"
+else
+    no "determinism: xmllint rejects the scope tree's map XML"
+fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo

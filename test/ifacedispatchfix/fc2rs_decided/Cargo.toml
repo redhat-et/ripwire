@@ -1,0 +1,6 @@
+[package]
+name = "fc2rs_decided"
+version = "0.1.0"
+
+[dependencies]
+mystery_crate = "1"

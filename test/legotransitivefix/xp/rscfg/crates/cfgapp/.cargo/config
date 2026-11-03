@@ -1,0 +1,2 @@
+[patch.crates-io]
+xpcfgtwo = { path = "../cfgcore2", package = "xp-cfg-core2" }

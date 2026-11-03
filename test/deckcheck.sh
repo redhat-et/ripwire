@@ -174,6 +174,9 @@ addSource "$ROOT/AGENTS.md" root
 addSource "$ROOT/CLAUDE.md" root
 addSource "$ROOT/CONTRIBUTING.md" root
 addSource "$ROOT/CHANGELOG.md" root
+# Unreleased entries live one file per change under changelog.d/ (scripts/changelog_assemble.py folds them into
+# CHANGELOG.md at release): the same prose, read before the fold so it is checked while it is still mutable.
+for f in "$ROOT"/changelog.d/*.md; do addSource "$f" root; done
 for f in "$ROOT"/docs/*.md; do
     # docs/COMMANDS.md is GENERATED from `--help` plus recorded capture samples, and it has a strictly
     # stronger gate of its own: test/docscommandscheck.sh arm (B) proves its documented flag set EQUALS

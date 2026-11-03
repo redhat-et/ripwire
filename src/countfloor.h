@@ -319,7 +319,7 @@ inline std::vector<CallerFloor> callerFloors( const IngestResult& ing, const Gra
 // The structural-typing limit (a TS class or Go type that satisfies an interface without naming it) leaves no
 // reference at all, and is stated in the legend rather than guessed at here.
 inline std::vector<char> implementorFloors( const IngestResult& ing, const std::vector<std::vector<NodeId>>& graphImplementors,
-                                            std::span<const NodeId> ifaces )
+                                            std::span<const NodeId> ifaces, std::span<const std::uint32_t> decidedOutside = {} )
 {
     std::vector<char>      out( ifaces.size(), 0 );
     countfloor::RowsOfName rowsOfName;
@@ -336,7 +336,10 @@ inline std::vector<char> implementorFloors( const IngestResult& ing, const std::
     }
     const countfloor::IdsOfName boundDerived = countfloor::relatedByName( ing, rowsOfName, graphImplementors.size(),
         [ & ]( NodeId id, std::vector<NodeId>& into ) { into.insert( into.end(), graphImplementors[id].begin(), graphImplementors[id].end() ); } );
-    countfloor::markUnboundSpellings( ing, rowsOfName, boundDerived, []( const Reference& r ) { return r.isInherit || r.role == RefRole::Extends; },
+    // a clause whose own import binds its base OUTSIDE the tree (Graph::baseOutsideClauses, sorted) is decided, not unbound
+    const auto notDecided = [ & ]( const Reference& r )
+    { return !std::binary_search( decidedOutside.begin(), decidedOutside.end(), std::uint32_t( &r - ing.references.data() ) ); };
+    countfloor::markUnboundSpellings( ing, rowsOfName, boundDerived, [ & ]( const Reference& r ) { return ( r.isInherit || r.role == RefRole::Extends ) && notDecided( r ); },
                                       [ & ]( const Reference& r, std::span<const NodeId> ids ) { return countfloor::inheritIsBound( ing, r, ids ); },
                                       {},   // an inherit clause is never a forwarded call
                                       [ & ]( std::uint32_t row ) { out[row] = 1; } );
@@ -396,10 +399,11 @@ inline std::string legoClosureLegendComment( const std::vector<std::vector<NodeI
          + ( closure.unwalked.empty() ? "" : kLegoClosureUnwalkedLegendComment );
 }
 
-inline const char* implementorsFloorLegendComment( const IngestResult& ing, const std::vector<std::vector<NodeId>>& graphImplementors, NodeId focus )
+inline const char* implementorsFloorLegendComment( const IngestResult& ing, const std::vector<std::vector<NodeId>>& graphImplementors, NodeId focus,
+                                                   std::span<const std::uint32_t> decidedOutside = {} )
 {
     const NodeId one[1] = { focus };
-    return implementorFloors( ing, graphImplementors, std::span<const NodeId>( one ) )[0] ? kImplementorsFloorLegendComment : "";
+    return implementorFloors( ing, graphImplementors, std::span<const NodeId>( one ), decidedOutside )[0] ? kImplementorsFloorLegendComment : "";
 }
 
 }   // namespace rw

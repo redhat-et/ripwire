@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/xp_m1_core", "crates/app", "crates/other"]

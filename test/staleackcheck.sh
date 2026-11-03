@@ -124,6 +124,62 @@ fi
 sed 's/<quality-delta.*//' "$TMP/targetgone_c" | grep -q 'stale_by_kind=' \
     && ok "(2c) stale_by_kind= and stale_next= are defined in the collapsed answer's own legend" \
     || no "(2c) stale_by_kind= emitted with no legend definition"
+# ── (2m) the MCP twin folds too (lane lean2b, card #9 MCP-FOLD; owner bar LOSSLESS). The fold rides only when it PAYS (foldPays:
+#     at least a quarter of the bytes; JSON rows are cheaper than the CLI's legend-carrying XML, so the two surfaces can decide
+#     differently on a two-row ledger). So the arm predicts the default answer EXACTLY from the show_stale=true one: the "sa"
+#     array replaced by "stale_by_kind" (the CLI's own string) + "stale_next":"show_stale=true" when that is under 75 % of the
+#     bytes, else the show_stale=true document byte for byte. Either way stale = the CLI's count and show_stale=true lists the
+#     CLI --show-stale rows by key. Run on this two-row tree (no fold: it saves < 25 %) and again after twelve more acks go
+#     stale (fold). RED on ffbec708: show_stale is refused as an unknown argument, and the 14-row default carries "sa".
+if command -v python3 >/dev/null 2>&1; then
+    mcpqd(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"quality_delta","arguments":{"path":"%s"%s}}}\n' "$REPO" "$1" \
+             | env -u TMPDIR XDG_CACHE_HOME="$XDG" "$BIN" --mcp 2>/dev/null \
+             | python3 -c 'import sys,json
+for line in sys.stdin:
+    try: d=json.loads(line)
+    except Exception: continue
+    c=(d.get("result") or {}).get("content")
+    if c: sys.stdout.write(c[0].get("text","")); break
+    if d.get("error"): sys.stdout.write("__ERROR__"+json.dumps(d["error"])); break'; }
+    mcpfold(){   # LABEL EXPECT(fold|full) CLI_COLLAPSED CLI_SHOWSTALE
+        mcpqd '' >"$TMP/mcp_qd_def"; mcpqd ',"show_stale":true' >"$TMP/mcp_qd_full"
+        if python3 - "$TMP/mcp_qd_def" "$TMP/mcp_qd_full" "$3" "$4" "$2" <<'PY'
+import json, re, sys
+dT, fT = ( open( p, encoding = "utf-8" ).read() for p in sys.argv[ 1:3 ] )
+cliC, cliF = ( open( p ).read() for p in sys.argv[ 3:5 ] )
+want = sys.argv[ 5 ]
+f = json.loads( fT )
+stale = int( re.search( r'<quality-delta\b[^>]*\bstale="(\d+)"', cliC ).group( 1 ) )
+kinds = re.search( r'<quality-delta\b[^>]*\bstale_by_kind="([^"]*)"', cliC ).group( 1 )
+cliKeys = sorted( re.findall( r'<sa kind="[^"]*" key="([0-9a-f]+)"', cliF ) )
+cut = fT.rfind( '"sa":[' )
+folded = fT[ :cut ] + '"stale_by_kind":"' + kinds + '","stale_next":"show_stale=true"}'
+pays = len( folded.encode() ) * 100 < len( fT.encode() ) * 75
+ok = True
+for cond, msg in (
+        ( f.get( "stale" ) == stale > 0 and f.get( "regressions" ) == 0, "show_stale=true: stale == the CLI's (%r vs %r), no regression" % ( f.get( "stale" ), stale ) ),
+        ( sorted( a[ "key" ] for a in f.get( "sa", [] ) ) == cliKeys,   "show_stale=true lists the CLI --show-stale rows by key (%d)" % len( cliKeys ) ),
+        ( "stale_by_kind" not in f and "stale_next" not in f,           "show_stale=true carries no fold key" ),
+        ( pays == ( want == "fold" ),                                   "the fixture's fold decision is the expected one (%s, pays=%s)" % ( want, pays ) ),
+        ( dT == ( folded if pays else fT ),                             "the default answer is exactly the predicted %s document" % ( "folded" if pays else "full" ) ) ):
+    if not cond: print( "    " + msg ); ok = False
+sys.exit( 0 if ok else 1 )
+PY
+        then ok "$1"; else no "$1"; fi
+    }
+    mcpfold "(2m) MCP quality_delta, 2 stale rows: the fold does not pay, the default is the show_stale=true document byte for byte" full "$TMP/targetgone_c" "$TMP/targetgone"
+    # twelve more acked symbols, then deleted: 14 stale rows — the fold pays
+    { cat "$REPO/src/lib.cpp"; for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo "int gone$i( int a ) { return a * $i; }"; done; } >"$TMP/lib_more.cpp"
+    cp "$ACKS" "$TMP/acks_saved"   # restored below: the arms after this one read the two-row ledger
+    cp "$TMP/lib_more.cpp" "$REPO/src/lib.cpp"
+    run --quality-delta --quality-ack="fixture: twelve uncalled helpers" >/dev/null 2>&1
+    printf 'int stable( int a ) { return a + 1; }\n' >"$REPO/src/lib.cpp"
+    run --quality-delta --show-stale >"$TMP/tg14" 2>/dev/null; run --quality-delta >"$TMP/tg14_c" 2>/dev/null
+    mcpfold "(2m) MCP quality_delta, more stale rows: the default folds to stale_by_kind + stale_next=show_stale=true, counts kept" fold "$TMP/tg14_c" "$TMP/tg14"
+    cp "$TMP/acks_saved" "$ACKS"
+else
+    printf '  SKIP  (2m) MCP fold (no python3)\n'
+fi
 run --show-stale >/dev/null 2>&1 && no "(2c) --show-stale alone was accepted" || ok "(2c) --show-stale alone is refused (it modifies --quality-delta)"
 
 # ── (3) FINDING-GONE: knotty() survives (same canonId) but is simplified back under the complexity bar ──

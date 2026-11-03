@@ -102,9 +102,9 @@ echo 'int compute(int a, int b);' > "$FOLD/src/calc.h"
 } > "$FOLD/src/calc.c"
 ( cd "$FOLD" && git init -q && git config user.email t@t && git config user.name t && git add -A && git commit -qm init >/dev/null 2>&1 )
 fec(){ _s="$1"; shift; ( cd "$FOLD" && "$BIN" . --edit-check="$_s" --no-cache "$@" 2>/dev/null ); }
-fold_verdict(){   # LABEL OUT CALLERS — the verdict alone: callers= counted, no <c> rows, rows_next= naming the --limit call
+fold_verdict(){   # LABEL OUT CALLERS SYM [ROWS_NEXT] — the verdict alone: callers= counted, no <c> rows, rows_next= naming the --limit call
     if printf '%s' "$2" | grep -q "status=\"unchanged\" defs=\"1\" callers=\"$3\"" && [ -z "$( rows "$2" )" ] \
-       && printf '%s' "$2" | grep -q "rows_next=\"--edit-check=$4 --limit=$3\""; then ok "$1"; else no "$1"; printf '%s\n' "$2"; fi
+       && printf '%s' "$2" | grep -q "rows_next=\"${5:---edit-check=$4 --limit=$3}\""; then ok "$1"; else no "$1"; printf '%s\n' "$2"; fi
 }
 fold_rows(){      # LABEL OUT ROW — the full document: the named row listed, no rows_next=
     if rows "$2" | grep -qF "$3" && ! printf '%s' "$2" | grep -q 'rows_next='; then ok "$1"; else no "$1"; printf '%s\n' "$2"; fi
@@ -124,6 +124,27 @@ F_TSL="$( fec blend --limit=16 )"
 [ "$( rows "$F_TSL" | wc -l | tr -d ' ' )" = 16 ] && rows "$F_TSL" | grep -qF '<c n="go" p="src/main.ts:2"/>' \
     && ok "(1v-b) the rows_next= call lists all 16 callers, main.ts:go among them" \
     || { no "(1v-b) the rows_next= call does not list the 16 callers"; printf '%s\n' "$F_TSL"; }
+# (1v-m) lane lean2b (card #9 MCP-FOLD): the MCP edit_check verb takes the SAME verdict fold. Default: the verdict alone with
+# rows_next= naming --limit=16 (= the verb's limit argument); limit=16: the 16 rows, byte-identical to the CLI --limit=16
+# rows; 3 callers: the fold does not pay and the rows ride. RED on ffbec708: the MCP default lists all 16 rows.
+mec(){ printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"edit_check","arguments":{"path":"%s","symbol":"%s"%s}}}\n' "$FOLD" "$1" "$2" \
+       | "$BIN" --mcp --no-cache 2>/dev/null \
+       | python3 -c 'import sys,json
+for line in sys.stdin:
+    try: d=json.loads(line)
+    except Exception: continue
+    c=(d.get("result") or {}).get("content")
+    if c: print(c[0].get("text","")); break'; }
+if command -v python3 >/dev/null 2>&1; then
+    M_TS="$( mec blend '' )"; M_TSL="$( mec blend ',"limit":16' )"
+    fold_verdict "(1v-m) MCP edit_check, clean tree, 16 callers: the verdict alone, rows_next= names the MCP call (fix1 B3)" "$M_TS" 16 blend "edit_check symbol=blend limit=16"
+    [ "$( rows "$M_TSL" | wc -l | tr -d ' ' )" = 16 ] && [ "$( rows "$M_TSL" )" = "$( rows "$F_TSL" )" ] \
+        && ok "(1v-m) MCP limit=16 lists the 16 caller rows, identical to the CLI --limit=16 rows" \
+        || { no "(1v-m) MCP limit=16 does not reproduce the CLI rows"; printf '%s\n' "$M_TSL"; }
+    fold_rows "(1v-m) MCP edit_check, 3 callers: the fold does not pay, m1 listed" "$( mec mix '' )" '<c n="m1" p="src/util.ts:'
+else
+    printf '  SKIP  (1v-m) MCP fold (no python3)\n'
+fi
 # ruling 5: 3 callers' rows cost about what the verdict line's legend costs, so the rows ride in both postures
 fold_rows "(1v-c) clean tree, 3 callers (default): the fold does not pay, m1 listed" "$( fec mix )" '<c n="m1" p="src/util.ts:'
 fold_rows "(1v-c) clean tree, 3 callers (--legend=full): the rows ride there too (L1)" "$( fec mix --legend=full )" '<c n="m1" p="src/util.ts:'

@@ -1,0 +1,3 @@
+### Fixed — Windows: warm runs no longer rewrite the cache directory's ACL
+
+- The per-user cache directory ladder skips `chmod(0700)` when `lstat` already reports an owner-only directory. On Win32 that `chmod` re-applies a protected DACL with inheritable ACEs, which Windows propagates through every file under the cache: with 38,000 files in the cache a warm run took ~2,024 ms instead of ~10.6 ms (p50 of 3, same revision, only this guard changed). A permissive directory is still repaired. Regression: `test/cache_ladder_windows.py` and the Windows arm of `test/cacheisolationcheck.sh` (#436, thanks @lennix1337).

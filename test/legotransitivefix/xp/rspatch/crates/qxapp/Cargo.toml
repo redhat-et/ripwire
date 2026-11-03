@@ -1,0 +1,7 @@
+[package]
+name = "xp-patch-app"
+[dependencies]
+xpmycore = "1"
+serde = "1"
+[patch.crates-io]
+xpmycore = { path = "../qxcore", package = "xp-patch-core" }

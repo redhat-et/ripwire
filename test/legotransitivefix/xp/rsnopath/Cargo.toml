@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/npcore", "crates/npapp", "crates/npother", "crates/npentry"]

@@ -60,6 +60,37 @@
 #        spelled like a builtin type's method and (2) the namesake's owner (its class in its file, else its file) owning
 #        something the forward search reached — K1 owner out of reach, K2 builtin-spelled (owner in reach), K3 both,
 #        K4 near miss (owner in reach, not builtin: both hedges stay; S4/B4 run on the same fixture).
+#   (K6-K12) lane ind4b, K5 rule 2 by namesake shape (pathgaps.h NamesakeOwnerReach::admits; one helper for both hedges):
+#        2b a FILE-OWNED namesake (a free definition, or a JS/TS method: no class scope) needs the caller's file to be or
+#        import its file — K6 the koa accessor shape and K7 the nunjucks `this.init` shape (owner in reach, no import) are
+#        withheld, K8 the koa near miss whose caller file requires the namesake's file keeps why=name. 2c override dispatch:
+#        a class-owned namesake whose class derives (by name, transitively) from the bound definition's class and whose
+#        file imports that class's file is a way in (K9 direct, K10 via an in-file middle class: near_sink AND bridge; K10b
+#        a Python src/ layout, whose import only FE-A's suffix match places);
+#        K11 a same-named method on an UNRELATED class (§(a) 11) and K12 a class whose parent is an EXTERNAL same-named
+#        class (`ext.Base`, `from ext import Base`: §(a) 2) stay withheld.
+#   (K13-K14) fix 1: 2c's derivation is bound per file — every hop a BaseBound::Proven implementors edge (the deriving
+#        class's base name bound by its own file's import of that name) — so K13 a same-named in-tree Base elsewhere, an
+#        external parent whose file reaches a.py transitively or directly, and an unrelated class whose file imports Base
+#        stay withheld (near_sink + bridge); K14 a package re-export (`from pkg.x import Base`) is a way in.
+#   (K13 assign/annot/tuple, K15) fix 2: a base name REBOUND at module scope after its import (`Base = Other`, `Base: type =
+#        Other`, `Base, spare = Other, 1`) is no binding — withheld; K15 the same assignment inside a function body rebinds no
+#        module name, so the override stays a way in.
+#   (K13 star/starfirst/starext/dupimp/clsbody/fnlocal/fnparam/fnloop, K16) fix 3: the Python rule is inverted — a base name is a
+#        binding only when, in the scope chain the class statement runs in, the import is its ONE binding: any other binding
+#        there (a star import that could bind it, a class-body or function-local rebinding, a parameter, a loop target, a
+#        second import) is withheld; K16 the twins whose scope chain holds only the import stay a way in.
+#   (K17-K18) fix 4: the file-wide import tables never decide for an import outside the class's chain (qualmod, qualfn), a `global`
+#        rebinding in a def at byte 0 is module scope (glob0), a match-statement capture and a PEP 695 `type` statement are bindings
+#        (matchas/matchbare/matchsplat/matchkw/matchdict/matchfn, typestmt); K18 qualctl and matchctl stay a way in.
+#   (K19-K20) fix 5: `from m import Other as Base` (memberalias), `from pkg.x import other as a` (qualalias) and `import pkg.x` (dottedroot,
+#        binds the root) name something else than the written name says, and a PEP 695 type parameter shadows the base (tpclass,
+#        tpdef): all withheld; K19 qualok now PROVES `from pkg.x import a as q` (q.Base) through the recorded member name; K20 stays.
+#   (K21-K22) fix 6: a package that BINDS the name (`from pkg.y import base2 as a` in pkg/x/__init__.py) is not its submodule a.py (shadowalias,
+#        shadowplain), and a re-export hop that RENAMES (`from pkg.x.a import Other as Base` in the package or a middle module) exports Other,
+#        not a.py's Base (reexpalias, reexpmod, reexpmid): all withheld; K22 re-exports under the SAME name and stays a way in.
+#   (K23) fix 7: a re-export hop file that rebinds the name any way but its one plain import (star, assignment, global, globals(), setattr, def ...) is withheld at every hop.
+#   (K24) fix 8: a chain ENDPOINT whose class is rebound later in its file (assignment, global, star import) is withheld; the def alone is the way in.
 #
 # Usage: test/pathgapcheck.sh [BIN]   (BIN defaults to RIPWIRE_BIN, then build/ripwire)
 set -u
@@ -306,7 +337,7 @@ gapArm "(P4) unresolved" "$TMP/unr" "begin,finish"              "unresolved:1" "
 
 # P7's premise: the call really is bound by name alone to A.process only (else the arm would test the old resolver)
 f="$TMP/lpycallees.xml"; "$BIN" "$TMP/lpy" --no-cache --callees=run > "$f" 2>&1
-if [ "$( grep -o '<s [^>]*n="process"[^>]*/>' "$f" | wc -l | tr -d ' ' )" = "1" ] && grep -q '<s [^>]*n="process" p="pkg/x/a.py:2" via="name"' "$f"; then
+if [ "$( grep -o '<s [^>]*n="[A-Za-z.]*process"[^>]*/>' "$f" | wc -l | tr -d ' ' )" = "1" ] && grep -q '<s [^>]*n="A.process" p="pkg/x/a.py:2" via="name"' "$f"; then
     ok "(P7) premise: run's obj.process() is via=\"name\" to pkg/x/a.py's A.process only"
     gapArm "(P7) name" "$TMP/lpy" "run,target" "name:1" "run"
 else
@@ -383,7 +414,7 @@ if premise "(N4)" "$rc" "$f"; then
 fi
 cleanArm "(N5) a value the search also calls" "$TMP/valin" "handleRequest,other"
 f="$TMP/lpyxcallees.xml"; "$BIN" "$TMP/lpyx" --no-cache --callees=run > "$f" 2>&1
-if grep -q '<s [^>]*n="process" p="pkg/x/a.py:2" via="name"' "$f"; then
+if grep -q '<s [^>]*n="A.process" p="pkg/x/a.py:2" via="name"' "$f"; then
     cleanArm "(N6) via=name, namesakes of another language/kind" "$TMP/lpyx" "run,target"
 else
     no "(N6) premise: run's obj.process() is not via=name to A.process here: $( grep -o '<callees .*' "$f" | head -c 500 )"
@@ -391,8 +422,8 @@ fi
 f="$TMP/lpyinhelper.xml"; "$BIN" "$TMP/lpyin" --no-cache --callees=helper > "$f" 2>&1; fh_rc=$?
 f2="$TMP/lpyinrun.xml"; "$BIN" "$TMP/lpyin" --no-cache --callees=run > "$f2" 2>&1; fr_rc=$?
 if [ "$fh_rc" -eq 0 ] && [ "$fr_rc" -eq 0 ] \
-   && grep -q '<s [^>]*n="process" p="other/b.py:2" via="name"' "$f" && ! grep -q 'p="pkg/x/a.py:2"' "$f" \
-   && grep -q '<s [^>]*n="process" p="pkg/x/a.py:2"' "$f2"; then
+   && grep -q '<s [^>]*n="B.process" p="other/b.py:2" via="name"' "$f" && ! grep -q 'p="pkg/x/a.py:2"' "$f" \
+   && grep -q '<s [^>]*n="A.process" p="pkg/x/a.py:2"' "$f2"; then
     cleanArm "(N7) via=name, the unlisted namesake is in the searched cone" "$TMP/lpyin" "run,target"
 else
     no "(N7) premise: helper lists only other/B.process by name and run reaches pkg/x/A.process (rc=$fh_rc/$fr_rc): $( grep -o '<callees .*' "$f" | head -c 300 ) | $( grep -o '<callees .*' "$f2" | head -c 300 )"
@@ -434,6 +465,264 @@ for nm in process update; do for own in in out; do
     fi
     printf 'def target():\n    return 2\n\nclass B:\n    @staticmethod\n    def make():\n        return 0\n\n    def %s(self):\n        return target()\n' "$nm" > "$d/other/b.py"
 done; done
+# K6-K8 fixtures (rule 2b, JS). kq_*: a getter/setter pair `method` in lib/req.js, lib/ctx.js's file scope calls .method('a')
+# — bound by name alone to one accessor, the other is the namesake; from= kind lives in req.js, so its owner (the file) is in
+# reach. kq_imp's ctx.js also requires ./req (the near miss). nj_noimp: ui/pop.js's `this.init(el)` is bound by name alone to
+# ui/tip.js's prototype init; core/parser.js's class method init is the namesake; from= render lives in parser.js.
+for v in noimp imp; do d="$TMP/kq_$v"; mkdir -p "$d/lib"
+    printf "function target() {\n  return 2;\n}\nmodule.exports = {\n  kind() {\n    return 1;\n  },\n  get method() {\n    return target();\n  },\n  set method(val) {\n    this.m = val;\n  }\n};\n" > "$d/lib/req.js"
+    req=""; [ "$v" = imp ] && req="const req = require('./req');\n"
+    printf "${req}function delegate(p) {\n  return p;\n}\nconst proto = {};\ndelegate(proto)\n  .method('a');\n" > "$d/lib/ctx.js"
+done
+mkdir -p "$TMP/nj_noimp/ui" "$TMP/nj_noimp/core"
+printf 'function Tip(el) {\n  this.el = el;\n}\nTip.prototype.init = function (el) {\n  this.el = el;\n};\n' > "$TMP/nj_noimp/ui/tip.js"
+printf 'function target() {\n  return 2;\n}\nfunction render() {\n  return 0;\n}\nclass Parser {\n  init(tokens) {\n    return target();\n  }\n}\nmodule.exports = { Parser, render };\n' > "$TMP/nj_noimp/core/parser.js"
+printf 'var Pop = function (el) {\n  this.init(el);\n};\n' > "$TMP/nj_noimp/ui/pop.js"
+# K10b fixture (rule 2c, Python src/ layout — textual's shape): `from tx.driver import Driver` names src/tx/driver.py, which
+# the precise import adjacency's Step-A cannot place (no src/ root); FE-A's suffix match can.
+mkdir -p "$TMP/c5_src/src/tx/drivers"; : > "$TMP/c5_src/src/tx/__init__.py"; : > "$TMP/c5_src/src/tx/drivers/__init__.py"
+printf 'class Driver:\n    def stop_mode(self):\n        return 1\n' > "$TMP/c5_src/src/tx/driver.py"
+printf 'from tx.driver import Driver\n\ndef target():\n    return 2\n\nclass LinuxDriver(Driver):\n    def stop_mode(self):\n        return target()\n' > "$TMP/c5_src/src/tx/drivers/linux.py"
+printf 'from tx.driver import Driver\ndef run(driver):\n    return driver.stop_mode()\n' > "$TMP/c5_src/src/tx/app.py"
+# K9-K12 fixtures (rule 2c, Python): run(obj) in pkg/x/c.py calls obj.render_line(), bound by name alone to the imported
+# Base.render_line; other/b.py's Sub.render_line (calls target) is the namesake and nothing run reaches is owned by Sub.
+for v in der der2 unrel ext extbare same exttr extdir selfnm unimp reexp assign annot tuple fnbind star starfirst starext starclean dupimp; do d="$TMP/c5_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+    printf 'class Base:\n    def render_line(self):\n        return 1\n' > "$d/pkg/x/a.py"
+    printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
+    case "$v" in
+        der)     hdr='from pkg.x.a import Base\n';  cls='class Sub(Base):' ;;
+        der2)    hdr='from pkg.x.a import Base\n';  cls='class Mid(Base):\n    pass\n\nclass Sub(Mid):' ;;
+        unrel)   hdr='';                             cls='class Sub:' ;;
+        ext)     hdr='import ext\n';                cls='class Sub(ext.Base):' ;;
+        extbare) hdr='from ext import Base\n';      cls='class Sub(Base):' ;;
+        same)    hdr='from pkg.y.base2 import Base\n'; cls='class Sub(Base):'; mkdir -p "$d/pkg/y"
+                 printf 'import pkg.x.a\n\nclass Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py" ;;
+        exttr)   hdr='import ext\nimport pkg.util\n'; cls='class Sub(ext.Base):'
+                 printf 'import pkg.x.a\n\ndef util():\n    return 4\n' > "$d/pkg/util.py" ;;
+        extdir)  hdr='import ext\nimport pkg.x.a\n';  cls='class Sub(ext.Base):' ;;
+        selfnm)  hdr='import ext\nimport pkg.x.a\n';  cls='class Base(ext.Base):' ;;
+        unimp)   hdr='from pkg.x.a import Base\n';  cls='class Sub:' ;;
+        reexp)   hdr='from pkg.x import Base\n';    cls='class Sub(Base):'; printf 'from .a import Base\n' > "$d/pkg/x/__init__.py" ;;
+        assign)  hdr='from pkg.y.base2 import Base as Other\nfrom pkg.x.a import Base\nBase = Other\n';        cls='class Sub(Base):'
+                 printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py" ;;
+        annot)   hdr='from pkg.y.base2 import Base as Other\nfrom pkg.x.a import Base\nBase: type = Other\n';   cls='class Sub(Base):'
+                 printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py" ;;
+        tuple)   hdr='from pkg.y.base2 import Base as Other\nfrom pkg.x.a import Base\nBase, spare = Other, 1\n'; cls='class Sub(Base):'
+                 printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py" ;;
+        fnbind)  hdr='from pkg.y.base2 import Base as Other\nfrom pkg.x.a import Base\n\ndef later():\n    Base = Other\n    return Base\n'; cls='class Sub(Base):'
+                 printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py" ;;
+        star)      hdr='from pkg.x.a import Base\nfrom pkg.y.base2 import *\n';  cls='class Sub(Base):'
+                 printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py" ;;
+        starfirst) hdr='from pkg.y.base2 import *\nfrom pkg.x.a import Base\n';  cls='class Sub(Base):'
+                 printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py" ;;
+        starext)   hdr='from pkg.x.a import Base\nfrom ext import *\n';          cls='class Sub(Base):' ;;
+        starclean) hdr='from pkg.x.a import Base\nfrom pkg.y.helpers import *\n'; cls='class Sub(Base):'
+                 printf 'def helper():\n    return 5\n' > "$d/pkg/y/helpers.py" ;;
+        dupimp)  hdr='from pkg.x.a import Base\nfrom pkg.x.a import Base\n';     cls='class Sub(Base):' ;;
+    esac
+    printf "${hdr}\ndef target():\n    return 2\n\n${cls}\n    def render_line(self):\n        return target()\n" > "$d/other/b.py"
+done
+# K16 fixtures (lane ind4b fix 3): the class statement sits INSIDE a class body or a function, so the base name is read in that scope chain
+# (its own class body or function, then enclosing functions, then the module — an enclosing class body is skipped). The tail of every
+# fixture is the same `class Sub(Base): def render_line` calling target().
+for v in clsbody fnlocal fnparam fnloop clsskip methcls fnimp; do d="$TMP/c5_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+    printf 'class Base:\n    def render_line(self):\n        return 1\n' > "$d/pkg/x/a.py"
+    printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
+    printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
+    imp='from pkg.y.base2 import Base as Other\nfrom pkg.x.a import Base\n\ndef target():\n    return 2\n\n'
+    case "$v" in
+        clsbody) body='class Outer:\n    Base = Other\n    class Sub(Base):\n        def render_line(self):\n            return target()\n' ;;
+        fnlocal) body='def make():\n    Base = Other\n    class Sub(Base):\n        def render_line(self):\n            return target()\n    return Sub\n' ;;
+        fnparam) body='def make(Base):\n    class Sub(Base):\n        def render_line(self):\n            return target()\n    return Sub\n' ;;
+        fnloop)  body='def make():\n    for Base in (Other,):\n        class Sub(Base):\n            def render_line(self):\n                return target()\n' ;;
+        clsskip) body='class Outer:\n    Base = Other\n    class Mid:\n        class Sub(Base):\n            def render_line(self):\n                return target()\n' ;;
+        methcls) body='class Outer:\n    Base = Other\n    def make(self):\n        class Sub(Base):\n            def render_line(self):\n                return target()\n        return Sub\n' ;;
+        fnimp)   imp='from pkg.y.base2 import Base as Other\n\ndef target():\n    return 2\n\n'
+                 body='def make():\n    from pkg.x.a import Base\n    class Sub(Base):\n        def render_line(self):\n            return target()\n    return Sub\n' ;;
+    esac
+    printf "${imp}${body}" > "$d/other/b.py"
+done
+# K17 fixtures (lane ind4b fix 4): the other binding forms the scope-chain rule must not miss. The tail of every fixture is the same
+# `class Sub(<base>): def render_line` calling target(); CPython (3.13) gives Sub's base for each, noted per variant.
+#   qualmod/qualfn: the qualifier `q` is imported in the class's chain AND (in the other form) in an unrelated function - the file-wide
+#     import tables hold the unrelated one; qualctl: the module-form import is the chain's, the unrelated one a `from` import (stays a way in)
+#   glob0/glob1: `global Base` rebinding inside `later()` - first in the file (def at byte 0), then after a comment line
+#   matchas/matchbare/matchsplat/matchkw/matchdict/matchfn: a match-statement capture binds Base; matchctl: it captures another name
+#   typestmt: `type Base = Other` (3.12): the name is a TypeAliasType
+# K17 begin
+for v in qualmod qualfn qualctl glob0 glob1 matchas matchbare matchsplat matchkw matchdict matchfn matchctl typestmt; do d="$TMP/c5_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+    printf 'class Base:\n    def render_line(self):\n        return 1\n' > "$d/pkg/x/a.py"
+    printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
+    printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
+    tgt='def target():\n    return 2\n\n'
+    sub='class Sub(Base):\n    def render_line(self):\n        return target()\n'
+    glob='def later():\n    global Base\n    Base = Other\nfrom pkg.y.base2 import Base as Other\nfrom pkg.x.a import Base\nlater()\n\n'
+    pre='from pkg.y.base2 import Base as Other\nfrom pkg.x.a import Base\n'
+    case "$v" in
+        qualmod) out="from pkg.y import base2 as q\ndef g():\n    import pkg.x.a as q\n    return q\n\n${tgt}class Sub(q.Base):\n    def render_line(self):\n        return target()\n" ;;
+        qualfn)  out="def g():\n    import pkg.x.a as q\n    return q\n\n${tgt}def make():\n    from pkg.y import base2 as q\n    class Sub(q.Base):\n        def render_line(self):\n            return target()\n    return Sub\n" ;;
+        qualctl) out="import pkg.x.a as q\ndef g():\n    from pkg.y import base2 as q\n    return q\n\n${tgt}class Sub(q.Base):\n    def render_line(self):\n        return target()\n" ;;
+        glob0)   out="${glob}${tgt}${sub}" ;;
+        glob1)   out="# a leading comment: byte 0 is not a def\n${glob}${tgt}${sub}" ;;
+        matchas)    out="${pre}match Other:\n    case _ as Base:\n        pass\n\n${tgt}${sub}" ;;
+        matchbare)  out="${pre}match Other:\n    case Base:\n        pass\n\n${tgt}${sub}" ;;
+        matchsplat) out="${pre}match [Other]:\n    case [*Base]:\n        pass\n\n${tgt}${sub}" ;;
+        matchkw)    out="${pre}match Other:\n    case type(__base__=Base):\n        pass\n\n${tgt}${sub}" ;;
+        matchdict)  out="${pre}match {'k': Other}:\n    case {'k': Base}:\n        pass\n\n${tgt}${sub}" ;;
+        matchfn)    out="${pre}\n${tgt}def make():\n    match Other:\n        case Base:\n            pass\n    class Sub(Base):\n        def render_line(self):\n            return target()\n    return Sub\n" ;;
+        matchctl)   out="${pre}match Other:\n    case Other(x=1) | Other.other:\n        pass\n    case _ as Spare:\n        pass\n\n${tgt}${sub}" ;;
+        typestmt)   out="${pre}type Base = Other\n\n${tgt}${sub}" ;;
+    esac
+    printf "$out" > "$d/other/b.py"
+done
+# K17 end
+# K19 fixtures (lane ind4b fix 5): the import forms whose local name is not the name the module holds, and PEP 695 type parameters. The
+# tail of every fixture is `class Sub(<base>): def render_line` calling target(); CPython (3.13) truth noted per variant.
+#   memberalias: `from pkg.x.a import Other as Base` - Sub's base is pkg.x.a.Other, not the Base this file also happens to hold (E1)
+#   qualalias:   `from pkg.x import other as a` + Sub(a.Base) - a is pkg/x/other.py, not pkg/x/a.py (E2)
+#   dottedroot:  `import pkg.x` binds the ROOT package pkg: pkg.Base is pkg/__init__.py's class, not pkg/x/__init__.py's re-export (E3)
+#   tpclass/tpdef: `class Sub[Base](Base)` / `def make[Base](): class Sub(Base)` - the type parameter is the name (TypeError, no base) (N8)
+#   Controls (stay a way in): sameas (`import Base as Base`), qualok (`from pkg.x import a as q` + q.Base is pkg/x/a.py), outform (an
+#   unrelated function's `import pkg.y.base2 as Base` does not touch the bare member import), dotted2 (`import pkg.x.a as q` + q.Base)
+# K19 begin
+for v in memberalias qualalias dottedroot tpclass tpdef sameas qualok outform dotted2; do d="$TMP/c5_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+    printf 'class Base:\n    def render_line(self):\n        return 1\n' > "$d/pkg/x/a.py"
+    printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
+    printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
+    : > "$d/pkg/__init__.py"; : > "$d/pkg/x/__init__.py"; : > "$d/pkg/y/__init__.py"
+    tgt='def target():\n    return 2\n\n'
+    sub() { printf 'class Sub(%s):\n    def render_line(self):\n        return target()\n' "$1"; }
+    case "$v" in
+        memberalias) printf 'class Other:\n    pass\n' >> "$d/pkg/x/a.py"
+                     out="from pkg.x.a import Other as Base\n\n${tgt}$(sub Base)\n" ;;
+        qualalias)   printf 'class Base:\n    pass\n' > "$d/pkg/x/other.py"
+                     out="from pkg.x import other as a\n\n${tgt}$(sub a.Base)\n" ;;
+        dottedroot)  printf 'class Base:\n    def other(self):\n        return 4\n' > "$d/pkg/__init__.py"
+                     printf 'from pkg.x.a import Base\n' > "$d/pkg/x/__init__.py"
+                     out="import pkg.x\n\n${tgt}$(sub pkg.Base)\n" ;;
+        tpclass)     out="from pkg.x.a import Base\n\n${tgt}class Sub[Base](Base):\n    def render_line(self):\n        return target()\n" ;;
+        tpdef)       out="from pkg.x.a import Base\n\n${tgt}def make[Base]():\n    class Sub(Base):\n        def render_line(self):\n            return target()\n    return Sub\n" ;;
+        sameas)      out="from pkg.x.a import Base as Base\n\n${tgt}$(sub Base)\n" ;;
+        qualok)      out="from pkg.x import a as q\n\n${tgt}$(sub q.Base)\n" ;;
+        outform)     out="from pkg.x.a import Base\ndef g():\n    import pkg.y.base2 as Base\n    return Base\n\n${tgt}$(sub Base)\n" ;;
+        dotted2)     out="import pkg.x.a as q\n\n${tgt}$(sub q.Base)\n" ;;
+    esac
+    printf "$out" > "$d/other/b.py"
+done
+# K19 end
+# K21 fixtures (lane ind4b fix 6): what the package a name is imported from BINDS, and the renamed import a re-export chain hops through.
+#   CPython (3.13) truth per variant: shadowalias/shadowplain: pkg/x/__init__.py binds `a` to pkg.y.base2, so `from pkg.x import a [as q]` is
+#   base2 (getattr first, the submodule only as a fallback) - F1; reexpalias/reexpmod/reexpmid: the hop file reads `from pkg.x.a import Other as
+#   Base`, so Sub's base is pkg.x.a.Other, not the Base a.py also holds - F2 (reexpmod: `import pkg.x as q` + q.Base; reexpmid: the hop is
+#   pkg/x/mid.py, not the package). Controls (stay a way in): reexpplain (the hop re-exports the SAME name), reexpmidplain (the same, through mid.py).
+# K21 begin
+for v in shadowalias shadowplain reexpalias reexpmod reexpmid reexpplain reexpmidplain; do d="$TMP/c6_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+    printf 'class Base:\n    def render_line(self):\n        return 1\n\nclass Other:\n    pass\n' > "$d/pkg/x/a.py"
+    printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
+    printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
+    : > "$d/pkg/__init__.py"; : > "$d/pkg/x/__init__.py"; : > "$d/pkg/y/__init__.py"
+    tgt='def target():\n    return 2\n\n'
+    sub() { printf 'class Sub(%s):\n    def render_line(self):\n        return target()\n' "$1"; }
+    case "$v" in
+        shadowalias)  printf 'from pkg.y import base2 as a\n' > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import a as q\n\n${tgt}$(sub q.Base)\n" ;;
+        shadowplain)  printf 'from pkg.y import base2 as a\n' > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import a\n\n${tgt}$(sub a.Base)\n" ;;
+        reexpalias)   printf 'from pkg.x.a import Other as Base\n' > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        reexpmod)     printf 'from pkg.x.a import Other as Base\n' > "$d/pkg/x/__init__.py"
+                      out="import pkg.x as q\n\n${tgt}$(sub q.Base)\n" ;;
+        reexpmid)     printf 'from pkg.x.a import Other as Base\n' > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        reexpplain)   printf 'from pkg.x.a import Base\n' > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        reexpmidplain) printf 'from pkg.x.a import Base\n' > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+    esac
+    printf "$out" > "$d/other/b.py"
+done
+# K21 end
+# K23 fixtures (lane ind4b fix 7, the hop-wide rule): EVERY file a re-export chain hops through must bind the name by its one, unrenamed import.
+#   CPython (3.13) truth per variant: starmid/starinit/starqual/starqualmid: the hop's star import `from pkg.y.base2 import *` follows the import, so
+#   Base is pkg.y.base2.Base; assignmid/assigninit/assignqual/globalmid: `Base = Other` (or a `global Base; Base = Other` in a def that runs) makes it
+#   pkg.x.a.Other; globalsinit: `globals()['a'] = base2` in the package binds `a` to pkg.y.base2; setattrinit: setattr(sys.modules[__name__], 'a', ...)
+#   does the same; globalsmid/setattrmid/globalsinitre: the same two writes after the hop's own re-export of Base (`globals()['Base'] = Other`), in a mid.py hop and in
+#   an __init__ hop, which reads the write marker in pythonFileBindsOnlyByImport (the re-export hop, not the package-attribute path); augmid/forinit/withinit/walrusinit/defmid/classmid: later rebinds of every other form. Controls (stay a way in): the K22 pair.
+# K23 begin
+for v in starmid starinit starqual starqualmid assignmid assigninit assignqual globalmid globalsinit setattrinit globalsmid setattrmid globalsinitre augmid forinit withinit walrusinit defmid classmid; do d="$TMP/c7_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+    printf 'class Base:\n    def render_line(self):\n        return 1\n\nclass Other:\n    pass\n' > "$d/pkg/x/a.py"
+    printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
+    printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
+    : > "$d/pkg/__init__.py"; : > "$d/pkg/x/__init__.py"; : > "$d/pkg/y/__init__.py"
+    tgt='def target():\n    return 2\n\n'
+    sub() { printf 'class Sub(%s):\n    def render_line(self):\n        return target()\n' "$1"; }
+    hop='from pkg.x.a import Base, Other\n'
+    case "$v" in
+        starmid)      printf 'from pkg.x.a import Base\nfrom pkg.y.base2 import *\n' > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        starinit)     printf 'from pkg.x.a import Base\nfrom pkg.y.base2 import *\n' > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        starqual)     printf 'from pkg.x.a import Base\nfrom pkg.y.base2 import *\n' > "$d/pkg/x/__init__.py"
+                      out="import pkg.x as q\n\n${tgt}$(sub q.Base)\n" ;;
+        starqualmid)  printf 'from pkg.x.a import Base\nfrom pkg.y.base2 import *\n' > "$d/pkg/x/mid.py"
+                      out="import pkg.x.mid as q\n\n${tgt}$(sub q.Base)\n" ;;
+        assignmid)    printf "${hop}Base = Other\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        assigninit)   printf "${hop}Base = Other\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        assignqual)   printf "${hop}Base = Other\n" > "$d/pkg/x/__init__.py"
+                      out="import pkg.x as q\n\n${tgt}$(sub q.Base)\n" ;;
+        globalmid)    printf "${hop}def f():\n    global Base\n    Base = Other\nf()\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        globalsinit)  printf "from pkg.y import base2 as _b\nglobals()['a'] = _b\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import a as q\n\n${tgt}$(sub q.Base)\n" ;;
+        setattrinit)  printf "import sys\nfrom pkg.y import base2 as _b\nsetattr(sys.modules[__name__], 'a', _b)\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import a as q\n\n${tgt}$(sub q.Base)\n" ;;
+        globalsmid)   printf "${hop}globals()['Base'] = Other\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        setattrmid)   printf "import sys\n${hop}setattr(sys.modules[__name__], 'Base', Other)\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        globalsinitre) printf "${hop}globals()['Base'] = Other\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        augmid)       printf "${hop}Base += Other\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        forinit)      printf "${hop}for Base in (Other,):\n    pass\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        withinit)     printf "import contextlib\n${hop}with contextlib.nullcontext(Other) as Base:\n    pass\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        walrusinit)   printf "${hop}(Base := Other)\n" > "$d/pkg/x/__init__.py"
+                      out="from pkg.x import Base\n\n${tgt}$(sub Base)\n" ;;
+        defmid)       printf "from pkg.x.a import Base\ndef Base():\n    pass\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+        classmid)     printf "from pkg.x.a import Base\nclass Base:\n    pass\n" > "$d/pkg/x/mid.py"
+                      out="from pkg.x.mid import Base\n\n${tgt}$(sub Base)\n" ;;
+    esac
+    printf "$out" > "$d/other/b.py"
+done
+# K23 end
+# K24 fixtures (lane ind4b fix 8, the endpoint rule): the chain's ENDPOINT file holds the candidate class pkg/x/a.py:Base, which is what the importer's
+#   Base means only when that name has ONE module-scope binding there, its own class statement, and no star import of that file may supply it.
+#   CPython (3.13) truth per variant: rebdirect/rebmid: `Base = Other` after the class makes Sub's base pkg.x.a.Other; globaldirect: a `global Base;
+#   Base = Other` in a def that runs does the same; stardirect/starmid: a trailing `from pkg.y.base2 import *` rebinds Base, so the base is pkg.y.base2.Base.
+#   Controls (stay a way in): K9-K22, whose endpoints bind the name by their class alone.
+# K24 begin
+for v in rebdirect rebmid globaldirect stardirect starmid; do d="$TMP/c8_$v"; mkdir -p "$d/pkg/x" "$d/pkg/y" "$d/other"
+    printf 'class Base:\n    def render_line(self):\n        return 1\n\nclass Other:\n    pass\n' > "$d/pkg/x/a.py"
+    printf 'from pkg.x.a import Base\ndef run(obj):\n    return obj.render_line()\n' > "$d/pkg/x/c.py"
+    printf 'class Base:\n    def other(self):\n        return 3\n' > "$d/pkg/y/base2.py"
+    : > "$d/pkg/__init__.py"; : > "$d/pkg/x/__init__.py"; : > "$d/pkg/y/__init__.py"
+    imp='from pkg.x.a import Base\n'
+    case "$v" in
+        rebdirect|rebmid)   printf '\nBase = Other\n' >> "$d/pkg/x/a.py" ;;
+        globaldirect)       printf '\ndef f():\n    global Base\n    Base = Other\nf()\n' >> "$d/pkg/x/a.py" ;;
+        stardirect|starmid) printf '\nfrom pkg.y.base2 import *\n' >> "$d/pkg/x/a.py" ;;
+    esac
+    case "$v" in
+        *mid) printf 'from pkg.x.a import Base\n' > "$d/pkg/x/mid.py"; imp='from pkg.x.mid import Base\n' ;;
+    esac
+    printf "${imp}\ndef target():\n    return 2\n\nclass Sub(Base):\n    def render_line(self):\n        return target()\n" > "$d/other/b.py"
+done
+# K24 end
 nsblock(){ grep -o '<near_sink [^>]*>.*</near_sink>' "$1"; }
 nshead(){ grep -o '<near_sink [^>]*>' "$1"; }
 nsrows(){ grep -o '<ns [^>]*/>' "$1"; }
@@ -840,6 +1129,188 @@ if [ -s "$f" ] && grep -q '<path ' "$f"; then
 else
     no "(K5x) premise: K1's answer is missing"
 fi
+
+# K6-K12 (lane ind4b): K5 rule 2 by namesake shape. Exact rows: a withheld="name:1" row proves the by-name hit exists (the
+# premise), so a withheld arm cannot pass because the resolver stopped making the hedged edge.
+nsArm "(K6) 2b koa accessor: ctx.js never imports req.js, so the by-name .method() is withheld though req.js is in reach" "$TMP/kq_noimp" "kind,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=lib/req.js:method">' \
+    '<ns d="1" t="method" n="method" p="lib/req.js:8" withheld="name:1"/>'
+nsArm "(K7) 2b nunjucks this.init: pop.js never imports parser.js, so Parser.init is withheld though parser.js is in reach" "$TMP/nj_noimp" "render,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=core/parser.js:init">' \
+    '<ns d="1" t="method" n="init" p="core/parser.js:8" withheld="name:1"/>'
+nsArm "(K8) 2b near miss: ctx.js requires ./req, so the by-name .method() stays a way in" "$TMP/kq_imp" "kind,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=lib/req.js:method">' \
+    '<ns d="1" t="method" n="method" p="lib/req.js:8" why="name:1" in="&lt;file-scope&gt;" site="lib/ctx.js:6"/>'
+nsArm "(K9) 2c override dispatch: Sub(Base) overrides render_line, so run's obj.render_line() may run it" "$TMP/c5_der" "run,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+    '<ns d="1" t="fn" n="render_line" p="other/b.py:7" why="name:1" in="run" site="pkg/x/c.py:3" met="1"/>'
+brArm "(K9b) 2c: the bridge crosses to the override the same way" "$TMP/c5_der" "run,target" \
+    '<bridge proven="0" crossings="1" hops="2"><s t="fn" n="run" p="pkg/x/c.py:2"/><s t="fn" n="render_line" p="other/b.py:7" via="namesake" cands="1"/><s t="fn" n="target" p="other/b.py:3"/></bridge>'
+nsArm "(K10) 2c transitive: Sub(Mid), Mid(Base) — the override two classes down is a way in" "$TMP/c5_der2" "run,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+    '<ns d="1" t="fn" n="render_line" p="other/b.py:10" why="name:1" in="run" site="pkg/x/c.py:3" met="1"/>'
+nsArm "(K10b) 2c src/ layout: LinuxDriver(Driver) imports src/tx/driver.py by its package name — the override is a way in" "$TMP/c5_src" "run,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=src/tx/drivers/linux.py:stop_mode">' \
+    '<ns d="1" t="fn" n="stop_mode" p="src/tx/drivers/linux.py:7" why="name:1" in="run" site="src/tx/app.py:3" met="1"/>'
+nsArm "(K11) §(a) 11: render_line on an UNRELATED class Sub (no base) stays withheld" "$TMP/c5_unrel" "run,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+    '<ns d="1" t="fn" n="render_line" p="other/b.py:6" withheld="name:1"/>'
+for fx in ext extbare; do
+    nsArm "(K12) §(a) 2 external parent ($fx): Sub's base is an external same-named Base, so its render_line stays withheld" "$TMP/c5_$fx" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        '<ns d="1" t="fn" n="render_line" p="other/b.py:7" withheld="name:1"/>'
+    brArm "(K12b) §(a) 2 external parent ($fx): no namesake bridge to it either" "$TMP/c5_$fx" "run,target" ''
+done
+# K13-K15 (lane ind4b fix 1): 2c binds the base NAME per file (BaseBound::Proven at every hop), not a name graph plus file
+# reach. Each withheld arm's namesake file reaches pkg/x/a.py over its imports, so only the per-file binding withholds it.
+for fx in same:7 exttr:8 extdir:8 selfnm:8 unimp:7 assign:9 annot:9 tuple:9 star:8 starfirst:8 starext:8 dupimp:8 clsbody:10 fnlocal:10 fnparam:9 fnloop:10; do v=${fx%%:*}; ln=${fx##*:}
+    case "$v" in
+        same)   why="Sub's Base is pkg/y/base2.py's same-named class (base2.py itself imports pkg.x.a)" ;;
+        exttr)  why="Sub(ext.Base) is external; b.py reaches pkg/x/a.py only through pkg/util.py" ;;
+        extdir) why="Sub(ext.Base) is external though b.py imports pkg.x.a directly" ;;
+        selfnm) why="class Base(ext.Base) is external though b.py imports pkg.x.a directly" ;;
+        unimp)  why="b.py imports Base but its class Sub has no base (the derivation check alone withholds it)" ;;
+        assign) why="b.py imports Base, then rebinds it at module scope (Base = Other, pkg/y/base2's class): Sub derives from that" ;;
+        annot)  why="the module-scope rebinding is annotated (Base: type = Other)" ;;
+        tuple)  why="the module-scope rebinding is a tuple target (Base, spare = Other, 1)" ;;
+        star)      why="a star import AFTER the explicit import (from pkg.y.base2 import *) could rebind Base to base2's class" ;;
+        starfirst) why="a star import BEFORE the explicit import: the name has two possible bindings, so it is undecided" ;;
+        starext)   why="a star import from a module outside the tree (from ext import *) could bind any name" ;;
+        dupimp)    why="the same import twice: the name has two bindings, so it is undecided" ;;
+        clsbody)   why="class Outer: Base = Other; class Sub(Base): the base is read in Outer's class body, where Base is Other" ;;
+        fnlocal)   why="def make(): Base = Other; class Sub(Base): the base is the function's local Base" ;;
+        fnparam)   why="def make(Base): class Sub(Base): the base is the parameter" ;;
+        fnloop)    why="def make(): for Base in (Other,): class Sub(Base): the base is the loop target" ;;
+    esac
+    nsArm "(K13) 2c per-file base binding ($v): $why — withheld" "$TMP/c5_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" withheld=\"name:1\"/>"
+    brArm "(K13b) 2c per-file base binding ($v): no namesake bridge to it either" "$TMP/c5_$v" "run,target" ''
+done
+nsArm "(K14) 2c package re-export: from pkg.x import Base binds pkg/x/__init__.py's re-export of a.Base — a way in" "$TMP/c5_reexp" "run,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+    '<ns d="1" t="fn" n="render_line" p="other/b.py:7" why="name:1" in="run" site="pkg/x/c.py:3" met="1"/>'
+brArm "(K14b) 2c package re-export: the bridge crosses to the override" "$TMP/c5_reexp" "run,target" \
+    '<bridge proven="0" crossings="1" hops="2"><s t="fn" n="run" p="pkg/x/c.py:2"/><s t="fn" n="render_line" p="other/b.py:7" via="namesake" cands="1"/><s t="fn" n="target" p="other/b.py:3"/></bridge>'
+
+# K15 (lane ind4b fix 2): the rebinding's twin — the same names, but the assignment sits INSIDE a function body, which does not
+# rebind the module's Base: Sub(Base) still derives from pkg/x/a.py's class, so the override is a way in (shown + bridge).
+nsArm "(K15) 2c per-file base binding (fnbind): Base = Other inside a function body rebinds no module name — a way in" "$TMP/c5_fnbind" "run,target" \
+    '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+    '<ns d="1" t="fn" n="render_line" p="other/b.py:12" why="name:1" in="run" site="pkg/x/c.py:3" met="1"/>'
+brArm "(K15b) 2c per-file base binding (fnbind): the bridge crosses to the override" "$TMP/c5_fnbind" "run,target" \
+    '<bridge proven="0" crossings="1" hops="2"><s t="fn" n="run" p="pkg/x/c.py:2"/><s t="fn" n="render_line" p="other/b.py:12" via="namesake" cands="1"/><s t="fn" n="target" p="other/b.py:8"/></bridge>'
+
+# K16 (lane ind4b fix 3): the base name is read where the class statement runs. The rebinding forms above are withheld in the loop
+# (clsbody, fnlocal, fnparam, fnloop, star*, dupimp). The twins below stay a way in: Python skips an enclosing class body for a
+# class nested one level down or defined in a method (checked against CPython), an import inside the function that holds the class is
+# the one binding, and a star import from a module that binds no Base could not rebind it.
+for fx in starclean:8:4 clsskip:11:4 methcls:11:4 fnimp:9:3; do v=${fx%%:*}; rest=${fx#*:}; ln=${rest%%:*}; tl=${rest##*:}
+    nsArm "(K16) 2c per-file base binding ($v): Base is still pkg/x/a.py's class where Sub is defined — a way in" "$TMP/c5_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" why=\"name:1\" in=\"run\" site=\"pkg/x/c.py:3\" met=\"1\"/>"
+    brArm "(K16b) 2c per-file base binding ($v): the bridge crosses to the override" "$TMP/c5_$v" "run,target" \
+        "<bridge proven=\"0\" crossings=\"1\" hops=\"2\"><s t=\"fn\" n=\"run\" p=\"pkg/x/c.py:2\"/><s t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" via=\"namesake\" cands=\"1\"/><s t=\"fn\" n=\"target\" p=\"other/b.py:$tl\"/></bridge>"
+done
+
+# K17 (lane ind4b fix 4): the binding forms fix 3's scope-chain rule still missed (each withheld arm is shown + bridged at fix 3's head).
+# The import tables are file-wide, so an import of the qualifier outside the class's chain must not decide (qualmod, qualfn); a `global`
+# rebinding inside a def that starts at byte 0 is module scope (glob0; glob1 is the same file after a comment, withheld before too); a
+# match-statement capture and a PEP 695 `type` statement bind the name. qualctl (the chain's import is the module form, the unrelated one
+# a `from` import) and matchctl (a match that captures another name) stay a way in.
+for fx in qualmod:10 qualfn:11 glob0:12 glob1:13 matchas:11 matchbare:11 matchsplat:11 matchkw:11 matchdict:11 matchfn:12 typestmt:9; do v=${fx%%:*}; ln=${fx##*:}
+    case "$v" in
+        qualmod)    why="Sub(q.Base): q is the module-scope 'from pkg.y import base2 as q'; an unrelated function's 'import pkg.x.a as q' fills the file-wide table" ;;
+        qualfn)     why="Sub(q.Base) inside make(), whose own 'from pkg.y import base2 as q' is the chain's import; another function's 'import pkg.x.a as q' fills the table" ;;
+        glob0)      why="def later(): global Base; Base = Other starts the file (byte 0) and runs: Base is pkg/y/base2.py's class" ;;
+        glob1)      why="the same file after a leading comment line (the def is no longer at byte 0)" ;;
+        matchas)    why="match Other: case _ as Base: binds Base" ;;
+        matchbare)  why="match Other: case Base: (a bare capture pattern) binds Base" ;;
+        matchsplat) why="case [*Base]: (a star capture) binds Base" ;;
+        matchkw)    why="case type(__base__=Base): (a keyword pattern's capture) binds Base" ;;
+        matchdict)  why="case {'k': Base}: (a mapping value capture) binds Base" ;;
+        matchfn)    why="def make(): match Other: case Base: ... class Sub(Base): the capture is the function's local Base" ;;
+        typestmt)   why="type Base = Other binds Base (a TypeAliasType, no derivation at all)" ;;
+    esac
+    nsArm "(K17) 2c per-scope base binding ($v): $why — withheld" "$TMP/c5_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" withheld=\"name:1\"/>"
+    brArm "(K17b) 2c per-scope base binding ($v): no namesake bridge to it either" "$TMP/c5_$v" "run,target" ''
+done
+for fx in qualctl:10:6 matchctl:13:9; do v=${fx%%:*}; rest=${fx#*:}; ln=${rest%%:*}; tl=${rest##*:}
+    nsArm "(K18) 2c per-scope base binding ($v): Base is still pkg/x/a.py's class where Sub is defined — a way in" "$TMP/c5_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" why=\"name:1\" in=\"run\" site=\"pkg/x/c.py:3\" met=\"1\"/>"
+    brArm "(K18b) 2c per-scope base binding ($v): the bridge crosses to the override" "$TMP/c5_$v" "run,target" \
+        "<bridge proven=\"0\" crossings=\"1\" hops=\"2\"><s t=\"fn\" n=\"run\" p=\"pkg/x/c.py:2\"/><s t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" via=\"namesake\" cands=\"1\"/><s t=\"fn\" n=\"target\" p=\"other/b.py:$tl\"/></bridge>"
+done
+
+# K19 (lane ind4b fix 5): the names an import does NOT bind, and PEP 695 type parameters (each withheld arm is shown + bridged at fix 4's head).
+# `from m import Other as Base` binds the local Base to m's Other (memberalias); `from pkg.x import other as a` binds a to pkg/x/other.py
+# (qualalias); `import pkg.x` binds the root pkg, not pkg.x (dottedroot); a class/def type parameter is a TypeVar, never a base (tpclass, tpdef).
+# qualok (`from pkg.x import a as q`, q is pkg/x/a.py) is the one that GAINS: the alias is resolved through the recorded member name.
+# sameas, outform and dotted2 stay a way in (K20): an alias equal to the name, an unrelated function's import, a dotted import with an alias.
+for fx in memberalias:7 qualalias:7 dottedroot:7 tpclass:7 tpdef:8; do v=${fx%%:*}; ln=${fx##*:}
+    case "$v" in
+        memberalias) why="from pkg.x.a import Other as Base: Sub's base is pkg.x.a.Other, not the Base that file also holds" ;;
+        qualalias)   why="from pkg.x import other as a; Sub(a.Base): a is pkg/x/other.py, not pkg/x/a.py" ;;
+        dottedroot)  why="import pkg.x binds the root package pkg; pkg.Base is pkg/__init__.py's class" ;;
+        tpclass)     why="class Sub[Base](Base): the type parameter is the name (CPython: TypeError, no base)" ;;
+        tpdef)       why="def make[Base](): class Sub(Base): the function's type parameter is the name" ;;
+    esac
+    nsArm "(K19) 2c import/type-parameter binding ($v): $why — withheld" "$TMP/c5_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" withheld=\"name:1\"/>"
+    brArm "(K19b) 2c import/type-parameter binding ($v): no namesake bridge to it either" "$TMP/c5_$v" "run,target" ''
+done
+for fx in sameas:7:3 qualok:7:3 outform:10:6 dotted2:7:3; do v=${fx%%:*}; rest=${fx#*:}; ln=${rest%%:*}; tl=${rest##*:}
+    nsArm "(K20) 2c import binding ($v): Base is still pkg/x/a.py's class where Sub is defined — a way in" "$TMP/c5_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" why=\"name:1\" in=\"run\" site=\"pkg/x/c.py:3\" met=\"1\"/>"
+    brArm "(K20b) 2c import binding ($v): the bridge crosses to the override" "$TMP/c5_$v" "run,target" \
+        "<bridge proven=\"0\" crossings=\"1\" hops=\"2\"><s t=\"fn\" n=\"run\" p=\"pkg/x/c.py:2\"/><s t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" via=\"namesake\" cands=\"1\"/><s t=\"fn\" n=\"target\" p=\"other/b.py:$tl\"/></bridge>"
+done
+
+# K21 (lane ind4b fix 6): a name the package already binds is not its submodule, and a renamed import is not the name it is filed under.
+# Every withheld arm is shown + bridged at fix 5's head (4994f5ae); the two controls re-export under the SAME name and stay a way in.
+for fx in shadowalias:7 shadowplain:7 reexpalias:7 reexpmod:7 reexpmid:7; do v=${fx%%:*}; ln=${fx##*:}
+    case "$v" in
+        shadowalias)  why="pkg/x/__init__.py binds a to pkg.y.base2, so from pkg.x import a as q is base2, not the submodule a.py" ;;
+        shadowplain)  why="the same unaliased: from pkg.x import a; Sub(a.Base)" ;;
+        reexpalias)   why="the package reads from pkg.x.a import Other as Base: the Base it exports is Other" ;;
+        reexpmod)     why="import pkg.x as q; Sub(q.Base): the package's Base is the renamed Other" ;;
+        reexpmid)     why="the hop is pkg/x/mid.py, which renames Other to Base" ;;
+    esac
+    nsArm "(K21) 2c package binding ($v): $why - withheld" "$TMP/c6_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" withheld=\"name:1\"/>"
+    brArm "(K21b) 2c package binding ($v): no namesake bridge to it either" "$TMP/c6_$v" "run,target" ''
+done
+for fx in reexpplain:7:3 reexpmidplain:7:3; do v=${fx%%:*}; rest=${fx#*:}; ln=${rest%%:*}; tl=${rest##*:}
+    nsArm "(K22) 2c re-export under the same name ($v): Base is still pkg/x/a.py's class - a way in" "$TMP/c6_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" why=\"name:1\" in=\"run\" site=\"pkg/x/c.py:3\" met=\"1\"/>"
+    brArm "(K22b) 2c re-export under the same name ($v): the bridge crosses to the override" "$TMP/c6_$v" "run,target" \
+        "<bridge proven=\"0\" crossings=\"1\" hops=\"2\"><s t=\"fn\" n=\"run\" p=\"pkg/x/c.py:2\"/><s t=\"fn\" n=\"render_line\" p=\"other/b.py:$ln\" via=\"namesake\" cands=\"1\"/><s t=\"fn\" n=\"target\" p=\"other/b.py:$tl\"/></bridge>"
+done
+
+# K23 (lane ind4b fix 7): a hop file whose binding of the name is not its one unrenamed import ends the chain - at EVERY hop, whatever the shape.
+# Every arm is shown + bridged at fix 6's head (a02e8439); the K22 controls above stay a way in.
+for v in starmid starinit starqual starqualmid assignmid assigninit assignqual globalmid globalsinit setattrinit globalsmid setattrmid globalsinitre augmid forinit withinit walrusinit defmid classmid; do
+    nsArm "(K23) 2c hop file rebinds the name ($v) - withheld" "$TMP/c7_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:7\" withheld=\"name:1\"/>"
+    brArm "(K23b) 2c hop file rebinds the name ($v): no namesake bridge to it either" "$TMP/c7_$v" "run,target" ''
+done
+
+# K24 (lane ind4b fix 8): a chain endpoint whose class is not the name's one binding there (a later rebind of any form, a star import) is withheld.
+# Every arm is shown + bridged at fix 7's head (96f6189d); the K9-K22 controls above stay a way in.
+for v in rebdirect rebmid globaldirect stardirect starmid; do
+    nsArm "(K24) 2c endpoint class is rebound after its def ($v) - withheld" "$TMP/c8_$v" "run,target" \
+        '<near_sink depth="2" callers="1" rows="1" next="--callers=other/b.py:render_line">' \
+        "<ns d=\"1\" t=\"fn\" n=\"render_line\" p=\"other/b.py:7\" withheld=\"name:1\"/>"
+    brArm "(K24b) 2c endpoint class is rebound after its def ($v): no namesake bridge to it either" "$TMP/c8_$v" "run,target" ''
+done
 
 echo "(M) MCP path_between carries the same clause"
 # Two MCP legend postures (lean-answers): the unchanged assertions run on --mcp-legend=inline, the pre-posture spelling

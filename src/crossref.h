@@ -505,6 +505,7 @@ inline bool isRevisionToken( std::string_view s ) noexcept
 struct StreamBlobStats
 {
     std::uint32_t missing    = 0;      // "<oid> missing" / malformed header — the object could not be read
+    std::vector<std::string> missingShas;   // those objects' names, in the order asked: a partial clone's blobs (git will not download them)
     std::uint32_t nonBlob    = 0;      // wrong object type or negative size — never scanned
     std::uint32_t oversized  = 0;      // > kMaxBlobBytes, consumed but DISCARDED unread
     std::uint32_t binary     = 0;      // NUL in the probe window — outside a text-scoped claim, not a failure
@@ -593,7 +594,7 @@ inline void streamBlobs( const std::string& root, const std::vector<std::string>
 
         const std::size_t sp2 = header.rfind( ' ' );
         const std::size_t sp1 = ( sp2 == std::string::npos ) ? std::string::npos : header.rfind( ' ', sp2 - 1 );
-        if( sp1 == std::string::npos ) { ++st.missing;  onBlob( shas[ served ], std::string_view{}, false ); continue; }
+        if( sp1 == std::string::npos ) { ++st.missing;  st.missingShas.push_back( shas[ served ] );  onBlob( shas[ served ], std::string_view{}, false ); continue; }
 
         const std::string_view type( header.data() + sp1 + 1, sp2 - sp1 - 1 );
         const long long        size = std::strtoll( header.c_str() + sp2 + 1, nullptr, 10 );
@@ -709,6 +710,14 @@ public:
             facts_.emplace( sha, std::move( f ) );
             ++fetched_;
         }, &stats_ );
+        missing_.insert( stats_.missingShas.begin(), stats_.missingShas.end() );
+    }
+
+    // An object git could not read (a partial clone's blob: ripwire never downloads one, gitcmd.h NEVER DOWNLOAD). Its facts are the
+    // shared empty record, which is "this side contributed no lines" - a measurement it is not, so a verdict that rests on it is Unknown.
+    bool absent( const std::string& sha ) const noexcept
+    {
+        return missing_.contains( sha );
     }
 
     // K75: a batch that never started (the sha list could not be written under the cache dir, git did not spawn) or died
@@ -732,6 +741,7 @@ public:
 private:
     std::string                              root_;
     gtl::btree_map<std::string, BlobFacts>   facts_;
+    gtl::btree_set<std::string>              missing_;       // the shas git could not read (stats_.missingShas, deduplicated)
     std::vector<std::string>                 pending_;
     std::size_t                              fetched_ = 0;
     StreamBlobStats                          stats_;
@@ -1310,6 +1320,17 @@ inline RefRow analyzeRef( const RefInfo& ref, const RefPlumbing& plumb, const st
             continue; // byte-identical on the live line
         }
 
+        if( blobs.absent( r.aSha ) || blobs.absent( r.bSha ) || blobs.absent( headSide ) )
+        {
+            // A side git could not read reads as an EMPTY side, and an empty side makes added work look like it was never there
+            // ("merged"). Not known, so Unknown, never Merged (Verdict's own comment).
+            row.ok      = false;
+            row.verdict = Verdict::Unknown;
+            row.files.clear();
+            row.strayLines = row.strayFiles = row.supersededLines = 0;
+            return row;
+        }
+
         const BlobFacts& base = blobs.get( r.aSha );
         const BlobFacts& mine = blobs.get( r.bSha );
         const BlobFacts& live = blobs.get( headSide );
@@ -1587,6 +1608,7 @@ struct WhereResult
     std::string           headSha;
     bool                  onHead = false;     // SYM occurs in HEAD's tree
     bool                  headLabelsFromIndex = false;   // §A7: HEAD rows' kind= came from the index, not the shape test
+    bool                  indexKnowsNoDef = false;       // honest-lex: the parsed index defines no symbol of this name (head_defs="0")
     BranchLabelCensus     branchLabels;      // how the OTHER refs' rows got kind= (labelBranchRowsByParse; <unparsed> on the page)
     std::size_t           refsScanned = 0;
     std::size_t           distinctBlobs = 0;
@@ -1726,54 +1748,372 @@ inline bool insideArgumentList( std::string_view line, std::size_t at ) noexcept
     return depth > 0;
 }
 
-// Is this line SHAPED like a definition of `sym`? A declarative marker table over the languages ripwire indexes,
-// read LEXICALLY over raw text. It labels NO row on another ref: there parseWorthyLine, a looser superset of it, only
-// CHOOSES which blobs the tags path parses (labelBranchRowsByParse — a blob with no such row is not parsed, and its rows
-// read kind="ref"). Its one
-// remaining LABELLING role is HEAD's fallback, head_labels="lexical" (no index def of the name, or a working tree that
-// drifted from HEAD). It errs in BOTH directions, and each costs something different in each role:
-//   * a quoted signature in a doc, a call on a line ending in `}` or `)` (`if( x ) { f( a ); }`), `go f(a)`, `@f(1)`,
-//     `f( a, [&]( int x ) {` read as definition-shaped: a false kind="def" on the HEAD fallback (as a chooser, one
-//     wasted parse that then labels the row a reference);
-//   * a definition it does not shape — a signature wrapped before its `)` or ending in `,`, a declarator followed by a
-//     comment, `fun f(x) = x + 1`, `export const f = (a) =>`, a `name() {` at column 0 — reads as a reference: on the
-//     HEAD fallback a definition missing from the definitions page (counted among the refs). parseWorthyLine takes the
-//     cheap ones of these back in for the chooser; the rest stay a disclosed floor there too.
-// A stricter reading of the line only trades one error for the other (the round-1 prefix and tail rules lost
-// `#define NAME(`, `decltype(auto) NAME(`, `@Test(…) public void NAME()` …): the parser is the fix, not the line.
-inline bool definitionShaped( std::string_view line, std::string_view sym, std::size_t at )
+// ── the lexical definition-shape tests (HEAD's head_labels="lexical" fallback, and the parse CHOOSER below) ──────
+// The declaration marker words, one table for both readings: definitionShaped wants one DIRECTLY before the name
+// (declMarkerBefore); parseWorthyLine's loose superset takes one anywhere earlier on the line (declMarkerEarlier).
+inline constexpr std::string_view kDeclMarkers[] = {
+    "class ", "struct ", "enum ", "union ", "interface ", "namespace ", "trait ", "impl ", "protocol ",
+    "def ", "func ", "fn ", "function ", "type ", "typedef ", "using ", "template", "extension ",
+};
+
+// The old reading, kept for the parse chooser alone (a wrong "yes" there costs one parse): ANY marker substring
+// anywhere before the name. It is not a label: `// a class published its name`, `"struct (like --lego)"` and every
+// `struct T *data` local read definition-shaped under it (the honest-lex Stage 0: 241 false kind="def" HEAD rows).
+inline bool declMarkerEarlier( std::string_view line, std::size_t at ) noexcept
 {
-    static constexpr std::string_view kDeclMarkers[] = {
-        "class ", "struct ", "enum ", "union ", "interface ", "namespace ", "trait ", "impl ", "protocol ",
-        "def ", "func ", "fn ", "function ", "type ", "typedef ", "using ", "template", "extension ",
-    };
-    for( std::string_view m : kDeclMarkers )
+    return std::ranges::any_of( kDeclMarkers, [ & ]( std::string_view m ) { const std::size_t f = line.find( m ); return f != std::string_view::npos && f < at; } );
+}
+
+// The C-family definition: the name is immediately followed by '(', something precedes it on the line (the return
+// type / qualified scope), it is not a member call on a receiver, it is not itself an ARGUMENT (§A7), and the line
+// does NOT end in ';' — a trailing ';' is a prototype or a call statement, both of which are references, not
+// definitions. The accepted terminators are '{' (body opens here), '}' (whole one-line body), ')' (signature wraps
+// to the next line) and ':' (a constructor's init list follows), tested AFTER declaratorEnd() has stripped any
+// trailing specifier tail.
+inline bool cFamilyDefShaped( std::string_view line, std::string_view sym, std::size_t at )
+{
+    const std::size_t after = at + sym.size();
+    if( after >= line.size() || line[ after ] != '(' )
     {
-        if( line.find( m ) != std::string_view::npos && line.find( m ) < at )
+        return false;
+    }
+    const std::size_t e = declaratorEnd( line );
+    const char last     = ( e > 0 ) ? line[ e - 1 ] : ';';
+    const bool endsDecl = last == '{' || last == '}' || last == ')' || last == ':';
+    const bool isCall   = at >= 1 && ( line[ at - 1 ] == '.' || ( at >= 2 && line[ at - 2 ] == '-' && line[ at - 1 ] == '>' ) );
+    return endsDecl && !isCall && at > 0 && !insideArgumentList( line, at );
+}
+
+inline bool isBlankByte( char c ) noexcept { return c == ' ' || c == '\t'; }
+
+// Does the line's first non-blank text open a COMMENT (or a docstring) in one of the indexed languages? Such a line
+// never defines anything, whatever words follow. `//`, `/*`, a block comment's ` * ` continuation or `*/`, `<!--`,
+// `"""`/`'''`, `;` (Lisp, tree-sitter queries, assembly, INI), `-- ` (SQL, Lua, Haskell), `% ` (Erlang, TeX) and
+// `#`. '#' is a comment in Python, Ruby, shell, YAML, TOML and Perl but a PREPROCESSOR line in the C family; every
+// preprocessor line but `#define` (definesNameAt, tested first) is no definition either, so both read the same here.
+// `#[…]` / `#![…]` are Rust attributes, which may open a definition's line (`#[inline] fn f()`): never a comment.
+inline bool lineOpensComment( std::string_view line ) noexcept
+{
+    const std::size_t first = line.find_first_not_of( " \t" );
+    if( first == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::string_view s            = line.substr( first );
+    const auto             blankOrEndAt = [ & ]( std::size_t i ) { return i >= s.size() || isBlankByte( s[ i ] ); };
+    if( s.starts_with( "//" ) || s.starts_with( "/*" ) || s.starts_with( "<!--" ) || s.starts_with( "\"\"\"" ) || s.starts_with( "'''" ) || s[ 0 ] == ';' )
+    {
+        return true;
+    }
+    switch( s[ 0 ] )
+    {
+        case '*': return blankOrEndAt( 1 ) || s[ 1 ] == '/';
+        case '-': return s.starts_with( "--" ) && ( blankOrEndAt( 2 ) || s[ 2 ] == '-' || s[ 2 ] == '[' );
+        case '%': return blankOrEndAt( 1 );
+        case '#': return s.size() == 1 || ( s[ 1 ] != '[' && s[ 1 ] != '!' );
+        default:  return false;
+    }
+}
+
+// Does `at` sit after a comment opener, or inside a "…" or `…` literal, opened EARLIER on this line? One left-to-right
+// pass with one state, so `//` inside a string (`"http://x"`) opens no comment and a quote inside a comment opens no
+// string. Trailing openers: `//`, `/*` (unless its `*/` closes before `at`), ` # ` (a blank before, a blank, a
+// letter or the end after: `x = 1  # note`; never `##` or `#[`), ` -- `. Single quotes are NOT strings here: a Rust
+// lifetime (`impl<'a> Foo`) or a C char literal would flip the parity of every line holding one.
+inline bool insideCommentOrString( std::string_view line, std::size_t at ) noexcept
+{
+    char quote = 0;
+    for( std::size_t i = 0; i < at; ++i )
+    {
+        const char c = line[ i ];
+        if( quote != 0 )
+        {
+            i += ( c == '\\' ) ? 1 : 0;
+            quote = ( c == quote ) ? 0 : quote;
+            continue;
+        }
+        const char next    = i + 1 < line.size() ? line[ i + 1 ] : '\0';
+        const bool blankBefore = i > 0 && isBlankByte( line[ i - 1 ] );
+        if( c == '"' || c == '`' )
+        {
+            quote = c;
+        }
+        else if( c == '/' && next == '*' )
+        {
+            const std::size_t close = line.find( "*/", i + 2 );
+            if( close == std::string_view::npos || close + 2 > at )
+            {
+                return true;
+            }
+            i = close + 1;
+        }
+        else if( ( c == '/' && next == '/' )
+                 || ( c == '#' && blankBefore && ( next == '\0' || isBlankByte( next ) || std::isalpha( (unsigned char)next ) ) )
+                 || ( c == '-' && next == '-' && blankBefore && ( i + 2 >= line.size() || isBlankByte( line[ i + 2 ] ) ) ) )
         {
             return true;
         }
     }
+    return quote != 0;
+}
 
-    // A C-family definition: the name is immediately followed by '(', something precedes it on the line (the
-    // return type / qualified scope), it is not a member call on a receiver, it is not itself an ARGUMENT
-    // (§A7), and the line does NOT end in ';' — a trailing ';' is a prototype or a call statement, both of
-    // which are references, not definitions. The accepted terminators are '{' (body opens here), '}' (whole
-    // one-line body), ')' (signature wraps to the next line) and ':' (a constructor's init list follows),
-    // tested AFTER declaratorEnd() has stripped any trailing specifier tail.
-    const std::size_t after = at + sym.size();
-    if( after < line.size() && line[ after ] == '(' )
+// `#define NAME` / `# define NAME …`: the C preprocessor's definition of the name at `at`, object-like or function-like.
+inline bool definesNameAt( std::string_view line, std::size_t at ) noexcept
+{
+    std::size_t i = line.find_first_not_of( " \t" );
+    if( i == std::string_view::npos || line[ i ] != '#' )
     {
-        const std::size_t e = declaratorEnd( line );
-        const char last     = ( e > 0 ) ? line[ e - 1 ] : ';';
-        const bool endsDecl = last == '{' || last == '}' || last == ')' || last == ':';
-        const bool isCall   = at >= 1 && ( line[ at - 1 ] == '.' || ( at >= 2 && line[ at - 2 ] == '-' && line[ at - 1 ] == '>' ) );
-        return endsDecl && !isCall && at > 0 && !insideArgumentList( line, at );
+        return false;
     }
-    // ObjC method: "- (ret) sym" / "+ (ret) sym"
-    if( !line.empty() && ( line[0] == '-' || line[0] == '+' ) && line.find( ')' ) < at )
+    i = line.find_first_not_of( " \t", i + 1 );
+    if( i == std::string_view::npos || line.compare( i, 6, "define" ) != 0 || i + 6 >= line.size() || !isBlankByte( line[ i + 6 ] ) )
+    {
+        return false;
+    }
+    return line.find_first_not_of( " \t", i + 6 ) == at;
+}
+
+// The identifier ending just before `end` (`end` past its last byte), or "" when no identifier byte ends there.
+inline std::string_view identEndingAt( std::string_view line, std::size_t end ) noexcept
+{
+    std::size_t b = end;
+    while( b > 0 && isIdentByte( (unsigned char)line[ b - 1 ] ) )
+    {
+        --b;
+    }
+    return line.substr( b, end - b );
+}
+
+inline std::size_t skipBlanksBack( std::string_view line, std::size_t p ) noexcept
+{
+    while( p > 0 && isBlankByte( line[ p - 1 ] ) )
+    {
+        --p;
+    }
+    return p;
+}
+
+// Skip back over one balanced bracket group that CLOSES just before `p` (`<…>` or `(…)`); `p` itself when the
+// brackets do not balance on this line.
+inline std::size_t skipGroupBack( std::string_view line, std::size_t p, char open, char close ) noexcept
+{
+    int depth = 0;
+    for( std::size_t i = p; i > 0; --i )
+    {
+        depth += ( line[ i - 1 ] == close ) ? 1 : ( line[ i - 1 ] == open ) ? -1 : 0;
+        if( depth == 0 )
+        {
+            return i - 1;
+        }
+    }
+    return p;
+}
+
+inline bool isDeclMarkerWord( std::string_view w ) noexcept
+{
+    return !w.empty() && std::ranges::any_of( kDeclMarkers, [ & ]( std::string_view m ) { return m.starts_with( w ) && ( m.size() == w.size() || m[ w.size() ] == ' ' ); } );
+}
+
+// An export or attribute macro between `class` and its name (`class RW_API Foo`): ALL-CAPS, digits and '_'.
+inline bool isAllCapsMacro( std::string_view w ) noexcept
+{
+    // static_cast, one per line: --lint's c-style-cast count collapses two casts on one line into one visible row
+    // (dedupeLintFindings), which lintbudgetcheck then reads as a disagreement with --match's raw capture count.
+    const auto upper = []( char c ) { return std::isupper( static_cast<unsigned char>( c ) ) != 0; };
+    const auto digit = []( char c ) { return std::isdigit( static_cast<unsigned char>( c ) ) != 0; };
+    return w.size() >= 2 && std::ranges::all_of( w, [ & ]( char c ) { return upper( c ) || digit( c ) || c == '_'; } )
+        && std::ranges::any_of( w, upper );
+}
+
+// The index of the bracket that closes the group opening at `open` (`<…>`), or npos when it does not close on this line.
+inline std::size_t skipGroupForward( std::string_view line, std::size_t open, char opener, char closer ) noexcept
+{
+    int depth = 0;
+    for( std::size_t i = open; i < line.size(); ++i )
+    {
+        depth += ( line[ i ] == opener ) ? 1 : ( line[ i ] == closer ) ? -1 : 0;
+        if( depth == 0 )
+        {
+            return i;
+        }
+    }
+    return std::string_view::npos;
+}
+
+// After `struct|union|enum|class NAME`, does the text DECLARE the tag or only USE it as a type? A use is followed by a
+// declarator (`struct T *data`, `struct T data;`, `enum T type = …`), a reference (`&`), a parameter's end (`)` or
+// `,`), an initializer or a scope qualifier (`struct T::U`). A declaration is followed by its body or forward
+// semicolon (`{`, `;`), a base list or underlying type (`:`), generics or a tuple body (`<`, `(`), the end of the
+// line (the brace on the next), or — `class` alone, where OOP languages put words there — `extends`/`final`/….
+inline bool tagDeclares( std::string_view word, char follow, std::string_view line, std::size_t next ) noexcept
+{
+    if( follow == ':' )
+    {
+        return line.compare( next, 2, "::" ) != 0;
+    }
+    if( follow == '\0' || follow == '{' || follow == ';' || follow == '<' || follow == '(' )
     {
         return true;
+    }
+    return word == "class" && isIdentByte( (unsigned char)follow );
+}
+
+// The token run DIRECTLY before the name at `at`, read right to left: does a declaration marker introduce the name?
+// Between the marker and the name only these may sit: a qualification chain (`namespace a::b::NAME`, Ruby's
+// `def self.NAME`), `*`/`&` (`function* NAME`), template or generic arguments (`impl<T> NAME`), a Go receiver
+// (`func (r *T) NAME`) and one ALL-CAPS export macro after class/struct/union/enum (`class RW_API NAME`). Rust's
+// `impl Trait for NAME` implements a trait for NAME, it does not define NAME (it reads as a reference).
+// `template<…>` followed by a return type before a parameter list (`template <class T> T NAME(`)
+// is the one marker a return type may follow. Anything else — prose, a parameter list, a `struct T *NAME` local, an
+// assignment — breaks the run: `using namespace NAME` names a namespace, it does not define one.
+inline bool declMarkerBefore( std::string_view line, std::string_view sym, std::size_t at ) noexcept
+{
+    std::size_t p         = at;
+    bool        qualified = false;
+    while( true )   // the qualification chain the name ends
+    {
+        if( p >= 2 && line[ p - 1 ] == ':' && line[ p - 2 ] == ':' )
+        {
+            p -= 2;
+        }
+        else if( p >= 1 && line[ p - 1 ] == '.' && line.substr( 0, p - 1 ).find( "def " ) != std::string_view::npos )
+        {
+            p -= 1;
+        }
+        else
+        {
+            break;
+        }
+        qualified = true;
+        p -= identEndingAt( line, p ).size();
+    }
+    p = skipBlanksBack( line, p );
+    while( p > 0 && ( line[ p - 1 ] == '*' || line[ p - 1 ] == '&' ) )
+    {
+        p = skipBlanksBack( line, p - 1 );
+    }
+    if( p > 0 && line[ p - 1 ] == ')' )   // a Go method's receiver
+    {
+        const std::size_t open = skipGroupBack( line, p, '(', ')' );
+        return open < p && identEndingAt( line, skipBlanksBack( line, open ) ) == "func";
+    }
+    if( p > 1 && line[ p - 1 ] == '>' && line[ p - 2 ] != '-' )
+    {
+        p = skipBlanksBack( line, skipGroupBack( line, p, '<', '>' ) );
+    }
+    const std::string_view word   = identEndingAt( line, p );
+    const std::size_t      before = skipBlanksBack( line, p - word.size() );
+    const std::string_view prior  = identEndingAt( line, before );
+    if( word == "namespace" && prior == "using" )
+    {
+        return false;
+    }
+    const std::size_t      next   = line.find_first_not_of( " \t", at + sym.size() );
+    const char             follow = next == std::string_view::npos ? '\0' : line[ next ];
+    if( word == "using" )   // an alias (`using NAME = …`), never a using-declaration (`using std::NAME;`) or an import
+    {
+        return follow == '=' && !qualified;
+    }
+    if( word == "struct" || word == "union" || word == "enum" || word == "class" )
+    {
+        return tagDeclares( word, follow, line, next );
+    }
+    if( isDeclMarkerWord( word ) && word != "template" && word != "typedef" )
+    {
+        return true;
+    }
+    if( isAllCapsMacro( word ) && ( prior == "class" || prior == "struct" || prior == "union" || prior == "enum" ) )
+    {
+        return follow == '\0' || follow == '{' || ( follow == ':' && line.compare( next, 2, "::" ) != 0 ) || line.compare( next, 5, "final" ) == 0;
+    }
+    // `template<…> [qualifiers] RetType NAME(`: the line opens with template, and only a type run sits between.
+    const std::size_t first = line.find_first_not_of( " \t" );
+    if( first == std::string_view::npos || line.compare( first, 8, "template" ) != 0 || at + sym.size() >= line.size() || line[ at + sym.size() ] != '(' )
+    {
+        return false;
+    }
+    const std::size_t args = line.find( '<', first );
+    if( args == std::string_view::npos )
+    {
+        return false;
+    }
+    const std::size_t shut = skipGroupForward( line, args, '<', '>' );
+    return shut < at && line.substr( shut + 1, at - shut - 1 ).find_first_not_of( " \t*&:<>,_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" ) == std::string_view::npos;
+}
+
+// C's typedef: the name is the LAST declarator — `typedef unsigned long long NAME;` (or `NAME[…]`), or a function
+// pointer's `(*NAME)` / block's `(^NAME)` — on a line that opens with typedef. A type the typedef only USES
+// (`typedef void (*cb)( key_code, … );`, `typedef struct T NAME;` for T) is not its definition.
+inline bool typedefDeclares( std::string_view line, std::string_view sym, std::size_t at ) noexcept
+{
+    const std::size_t first = line.find_first_not_of( " \t" );
+    if( first == std::string_view::npos || line.compare( first, 8, "typedef " ) != 0 )
+    {
+        return false;
+    }
+    const std::size_t after = line.find_first_not_of( " \t", at + sym.size() );
+    const char        next  = after == std::string_view::npos ? ';' : line[ after ];
+    if( next == ';' || next == '[' )
+    {
+        return true;
+    }
+    const std::size_t b = skipBlanksBack( line, at );
+    return next == ')' && b >= 2 && ( line[ b - 1 ] == '*' || line[ b - 1 ] == '^' ) && line[ skipBlanksBack( line, b - 1 ) - 1 ] == '(';
+}
+
+// A word that makes the C-family shape a CALL or an expression, not a signature: `new NAME(`, `throw new NAME()`,
+// `return NAME(`, `yield NAME(`, `await NAME(`, `delete NAME(`, `case NAME(`, `else NAME(` — or an `=` before the name.
+// The label test applies it; the chooser (definitionShapedLoose) keeps the bare shape.
+inline bool callWordBefore( std::string_view line, std::size_t at ) noexcept
+{
+    const std::size_t      p    = skipBlanksBack( line, at );
+    const std::string_view word = identEndingAt( line, p );
+    static constexpr std::string_view kCallWords[] = { "new", "throw", "return", "yield", "await", "delete", "case", "else", "go", "defer" };
+    return ( p > 0 && line[ p - 1 ] == '=' ) || std::ranges::find( kCallWords, word ) != std::end( kCallWords );
+}
+
+// Is this line SHAPED like a definition of `sym`, read LEXICALLY over raw text? Its one LABELLING role is HEAD's
+// fallback, head_labels="lexical" (no index def of the name, or a working tree that drifted from HEAD); parseWorthyLine
+// below, a looser superset, only CHOOSES which blobs the tags path parses. The reading (honest-lex, 2026-10-23):
+//   * never a definition: a name after a comment opener or inside a "…"/`…` literal opened earlier on its line, or
+//     a line that opens with a comment (lineOpensComment: `//`, `#`, `;`, `-- `, ` * `, `"""` …);
+//   * a definition: `#define NAME` (object- or function-like); a declaration marker DIRECTLY before the name
+//     (declMarkerBefore: `class NAME`, `pub fn NAME`, `func (r *T) NAME`, `impl<T> NAME`, `template<…> T
+//     NAME(`); a typedef's last declarator (typedefDeclares); the C-family `ret NAME( … ) {` shape
+//     (cFamilyDefShaped); an Objective-C method `- (ret) NAME`.
+// It still errs in BOTH directions, each a disclosed floor (head_labels="lexical" says the labels are this guess):
+//   * prose whose marker word sits right before the name (`a class Foo that…` in a docstring line), a call on a line
+//     ending in `{`/`}`/`)` with no call word before it (`if( x ) { f( a ); }`, `@f(1)`), a markdown bullet spelled
+//     like an ObjC method (`- (see) NAME`): a false kind="def" (`new NAME()`, `return NAME(`, `go NAME(`, `x = NAME(`
+//     are calls: callWordBefore);
+//   * a definition it does not shape — a signature wrapped before its `)` or ending in `,`, a declarator followed by a
+//     comment, `fun f(x) = x + 1`, `export const f = (a) =>`, a `name() {` at column 0, an enumerator, a field — reads
+//     as a reference (counted among the refs). parseWorthyLine takes the cheap ones back in for the chooser.
+// The parser is the fix, not the line: head_labels="index" answers wherever the index knows a def of the name.
+inline bool definitionShaped( std::string_view line, std::string_view sym, std::size_t at )
+{
+    if( insideCommentOrString( line, at ) )
+    {
+        return false;
+    }
+    if( definesNameAt( line, at ) )
+    {
+        return true;
+    }
+    if( lineOpensComment( line ) )
+    {
+        return false;
+    }
+    if( declMarkerBefore( line, sym, at ) || typedefDeclares( line, sym, at ) || ( cFamilyDefShaped( line, sym, at ) && !callWordBefore( line, at ) ) )
+    {
+        return true;
+    }
+    // ObjC method: "- (ret) sym" / "+ (ret) sym" — the name right after the return type's ')'
+    if( !line.empty() && ( line[ 0 ] == '-' || line[ 0 ] == '+' ) )
+    {
+        const std::size_t open = line.find_first_not_of( " \t", 1 );
+        const std::size_t shut = open == std::string_view::npos || line[ open ] != '(' ? std::string_view::npos : line.find( ')', open );
+        return shut != std::string_view::npos && line.find_first_not_of( " \t", shut + 1 ) == at;
     }
     return false;
 }
@@ -1828,9 +2168,18 @@ inline bool headingOpensWith( std::string_view line, std::size_t at ) noexcept
     return hashes != std::string_view::npos && h > hashes && h < at && line.find_first_not_of( " \t", h ) == at;
 }
 
+// The chooser's reading of the shape: everything the label test (definitionShaped) accepts, plus everything the
+// pre-honest-lex reading accepted — a marker word anywhere earlier on the line, the C-family shape on a comment or
+// string line, an ObjC `- (…` line — so tightening the LABEL never leaves a blob unparsed that used to be parsed.
+inline bool definitionShapedLoose( std::string_view line, std::string_view sym, std::size_t at )
+{
+    const bool objcLine = !line.empty() && ( line[ 0 ] == '-' || line[ 0 ] == '+' ) && line.find( ')' ) < at;
+    return declMarkerEarlier( line, at ) || cFamilyDefShaped( line, sym, at ) || objcLine || definitionShaped( line, sym, at );
+}
+
 inline bool parseWorthyLine( std::string_view line, std::string_view sym, std::size_t at )
 {
-    if( at == 0 || definitionShaped( line, sym, at ) )
+    if( at == 0 || definitionShapedLoose( line, sym, at ) )
     {
         return true;
     }
@@ -1838,7 +2187,7 @@ inline bool parseWorthyLine( std::string_view line, std::string_view sym, std::s
     for( const std::string_view opener : { std::string_view( "//" ), std::string_view( "/*" ), std::string_view( " #" ) } )
     {
         const std::size_t c = line.find( opener, after );
-        if( c != std::string_view::npos && definitionShaped( line.substr( 0, c ), sym, at ) )
+        if( c != std::string_view::npos && definitionShapedLoose( line.substr( 0, c ), sym, at ) )
         {
             return true;   // the shape, once the comment after the declarator is set aside
         }
@@ -3399,6 +3748,7 @@ inline WhereResult computeWhereis( const std::string& root, std::string_view sym
     // §A7: HEAD's rows are the INDEX's answer, not the shape test's — before the sort, because "definitions
     // before references" is a sort key and a wrong label re-orders the first screen.
     result.headLabelsFromIndex = relabelHeadHitsFromIndex( result.hits, evidence.indexDefs );
+    result.indexKnowsNoDef     = evidence.indexDefs.empty();
     // …and the other refs' rows are a PARSER's answer too, after HEAD's: a ref holding HEAD's own blob takes HEAD's labels.
     labelBranchRowsByParse( root, result, branchJobs, budget );
     demoteTestLocalDefs( result.hits );
@@ -4105,9 +4455,13 @@ inline void writeWhereisRoot( std::FILE* out, const WhereResult& res, const Wher
                                    + ( listed.defsFolded > 0 ? ( " folded=\"" + std::to_string( listed.defsFolded ) + "\"" ) : std::string() )
                                    + ( anyBranchRow ? std::string( " ref_labels=\"parsed\"" ) : std::string() );
     const std::string headDateAttr = anyHoist ? ( " head_date=\"" + ex( headDate ) + "\"" ) : std::string();
-    rw::emitTo( out, "<whereis sym=\"{}\" on-head=\"{}\" refs_scanned=\"{}\" blobs=\"{}\" hits=\"{}\" head_labels=\"{}\"{}{}{}{} at=\"{:.9}{}\"{}{}>",
+    // head_defs="0" (honest-lex): the lexical labels stand AND the parsed index defines no symbol of this name, so every
+    // HEAD kind="def" below is the text test's guess with no definition behind it in the indexed tree. Absent otherwise
+    // (index labels, or lexical over a working tree that drifted from the index's def sites).
+    const char* const headDefsAttr = ( !res.headLabelsFromIndex && res.indexKnowsNoDef ) ? " head_defs=\"0\"" : "";
+    rw::emitTo( out, "<whereis sym=\"{}\" on-head=\"{}\" refs_scanned=\"{}\" blobs=\"{}\" hits=\"{}\" head_labels=\"{}\"{}{}{}{}{} at=\"{:.9}{}\"{}{}>",
                   ex( res.sym ).c_str(), res.onHead ? 1 : 0, res.refsScanned, res.distinctBlobs, res.hits.size(),
-                  res.headLabelsFromIndex ? "index" : "lexical", whFilterAttr.c_str(),
+                  res.headLabelsFromIndex ? "index" : "lexical", headDefsAttr, whFilterAttr.c_str(),
                   pageDisclosure( pab, sizeof( pab ), hitPage.end - hitPage.begin, listedCount, hitPage.end,
                                   pageLimit, pageOffset, true ),
                   listingAttr.c_str(), headDateAttr.c_str(),
@@ -4320,8 +4674,11 @@ inline void writeWhereisListedPage( std::FILE* out, const WhereResult& res, std:
                        "as HEAD's index would. kind=\"text\" is a line worth parsing whose blob no parse read (the unparsed "
                        "element counts them and says why): not a confirmed definition, not a confirmed reference. With "
                        "head_labels=\"lexical\" (no index was supplied, the index knows no def of this name, or the working tree has "
-                       "drifted from HEAD) HEAD's rows fall back to a stricter lexical shape test, which reads a quoted signature in a doc as a "
-                       "definition and can miss an unusual declarator. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a "
+                       "drifted from HEAD) HEAD's rows fall back to a lexical shape test: a declaration word directly before the name, a #define of it, a typedef's "
+                       "own declarator or a C-family signature, never a line that opens a comment nor a name after a comment opener or inside a "
+                       "string. It still reads prose whose declaration word sits right before the name as a definition and can miss an unusual "
+                       "declarator; head_defs=\"0\" beside it means the parsed index defines no symbol of this name, so no HEAD kind=\"def\" row "
+                       "has an indexed definition behind it. refs_scanned= is the SCAN DENOMINATOR (how many refs besides HEAD were read), NOT a "
                        "count of refs that matched — hits= and the rows are the matched set. on-head=\"0\" alongside ref hits is the case this verb exists "
                        "for: content that lives only on a branch. A TREE scan can only find content some ref still carries, "
                        "so hits=\"0\" on its own does not distinguish a name this repo never had from one it deleted; run "

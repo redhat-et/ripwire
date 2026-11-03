@@ -1,0 +1,4 @@
+[package]
+name = "other"
+[dependencies]
+xp-c5-core = "0.9"

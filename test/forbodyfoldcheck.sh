@@ -463,7 +463,9 @@ if [ -n "${RIPWIRE_BASE_BIN:-}" ] && [ -x "$RIPWIRE_BASE_BIN" ]; then
 --callers=respond
 ARGV
     for q in "$T_ROUTER" "$T_RESP"; do
-        "$RIPWIRE_BASE_BIN" "$FIX" --no-cache --for="$q" 2>/dev/null | strip_at >"$TMP/i.base"
+        # the same switches on both sides: a pre-fold base ignores them (the arm's original premise), a base that already folds
+        # is compared fold-off against fold-off (else every post-fold base fails this arm by construction)
+        RIPWIRE_NO_BODY_FOLD=1 RIPWIRE_NO_MEMBER_NAMES=1 "$RIPWIRE_BASE_BIN" "$FIX" --no-cache --for="$q" 2>/dev/null | strip_at >"$TMP/i.base"
         RIPWIRE_NO_BODY_FOLD=1 RIPWIRE_NO_MEMBER_NAMES=1 "$BIN" "$FIX" --no-cache --for="$q" 2>/dev/null | strip_at >"$TMP/i.head"   # member-names off: the base has none
         if [ -s "$TMP/i.base" ] && cmp -s "$TMP/i.base" "$TMP/i.head"; then ok "(I-off) RIPWIRE_NO_BODY_FOLD=1 == the base binary: $q"; else no "(I-off) RIPWIRE_NO_BODY_FOLD=1 differs from the base binary: $q"; fi
     done

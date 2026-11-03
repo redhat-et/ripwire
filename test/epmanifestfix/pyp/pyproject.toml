@@ -1,0 +1,8 @@
+[project]
+name = "pkg"
+
+[project.entry-points."x.report"]
+fmt = "pkg.mod:Fmt"
+
+[project.scripts]
+pkgtool = "pkg.cli:main"

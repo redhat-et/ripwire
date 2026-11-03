@@ -205,14 +205,16 @@ if python3 - "$TMP/pn.fresh" "$TMP/pn.bin" "$ROOT" <<'PY'
 import copy, pathlib, re, struct, sys, xml.etree.ElementTree as ET
 from collections import Counter
 
-# readFileRecord/writeBind in ingest_cache.h, lean cache v36 (train 30: 34 -> 36 moved the number only, above three lanes'
+# readFileRecord/writeBind in ingest_cache.h, lean cache v48 (train 42b: 46 -> 48, lane alias-import's appended LocalBindKind::ReExport (its placeholder 47), a TS/JS record no Python fixture writes, layout unchanged; train 40: 44 -> 46 for lane js-def-naming, its PLACEHOLDER 45: appended LocalBindKind::JsObjectLiteral, a JS/TS record no Python fixture writes, layout unchanged; train 37b: 43 -> 44, lane rust-degraded: FileHealth gains useBoundsBlanked, a sixth u32 (the walker below skips 6 * 4); train 36: 40 -> 43, #155 appends a `trailingLambda` u8 to every RawRef after `forwarded`, taken below; train 34: 39 -> 40 appended LocalBindKind::JsRebind only, a JS/TS record no Python fixture writes; train 33: 38 -> 39 moved the number only, above every live 38; lane l6-iface fix round 1: 37 -> 38 appended LocalBindKind::ImplBlock only;
+# lane l6-iface: 36 -> 37 appended LocalBindKind::DispatchType only, no
+# record layout change; train renumbers) (train 30: 34 -> 36 moved the number only, above three lanes'
 # 33/33/35; name-template-dispatch: 32 -> 35 appended RefRole::Pattern = 11 only; fcall-forward: a RawRef appends the `forwarded` u8 after memberFactory; call-result-typing: a bind record gains two u8 after isFromAssignment, resultIndex and unwrapDepth, which a
 # Python bind leaves at 0xFF / 0 — asserted below; train 29: 33 -> 34 moved the number only; arity-min: 32 -> 33 appends
 # paramsMin to the DEF record, which this lean fixture never holds; train 28: 31 -> 32 moved the number only). No heuristic
 # string searches: walk the counted arrays and require complete file coverage, clean parse health and exact EOF.
 blob = pathlib.Path(sys.argv[2]).read_bytes()
 endian = '<' if sys.byteorder == 'little' else '>'
-assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 36, 'update the cache walker for a new layout'
+assert blob[:4] == b'CTPK' and struct.unpack_from(endian + 'I', blob, 4)[0] == 48, 'update the cache walker for a new layout'
 table, count = struct.unpack_from(endian + 'QI', blob, len(blob) - 24)
 assert count == 5 == struct.unpack_from(endian + 'I', blob, 21)[0], 'all five fixtures must be cached'
 assert table + count * 32 == len(blob) - 24, 'cache table bounds'
@@ -234,15 +236,15 @@ for i in range(count):
     path = string()
     assert path not in facts, 'duplicate file record'
     take(4 * 8)  # content hash and size/mtime/ctime
-    health = struct.unpack(endian + '5I', take(5 * 4))
-    assert health[0] == health[1] == 0 and health[2] > 0, (path, 'fixture must parse cleanly', health)
+    health = struct.unpack(endian + '6I', take(6 * 4))   # v44: + useBoundsBlanked (0: no Python file is re-parsed)
+    assert health[0] == health[1] == health[5] == 0 and health[2] > 0, (path, 'fixture must parse cleanly', health)
     assert number('I') == 0, 'lean fixture must contain no definitions/dictionary'
     for _ in range(number('I')):  # RawRef: only its variable-length strings affect the walk
         take(5); string(); inherit = take(2)[0]; string(); take(1); string(); take(1)
         string(); string(); take(13)  # argCount is serialized u32, narrowed by u16Of32 on read
         for _ in range(4):
             string()  # memberRoot/memberPath/memberCtor/memberVia
-        take(2)  # memberFactory, forwarded (fcall-forward)
+        take(3)  # memberFactory, forwarded (fcall-forward), trailingLambda (#155)
         if inherit:
             take(4)  # baseBind
     incs = []
@@ -277,9 +279,13 @@ want = {
     'builtin_call.py': ([], []),
     'importlib_call.py': ([include('importlib')], [bind('importlib', 'importlib', 'module')]),
     'dotted.py': ([include('a.b as c')], [bind('c', 'a.b', 'module')]),
+    # HISTORY (lane ind4b, fix 5 -> fix 6): the Import RawBind of an ALIASED from-import used to carry importedName '' (no marker); fix 5
+    # records the member's own name for it, 'from:a' (kPythonFromMemberMark + a), so `from . import a as b` + `b.Base` can be read as the
+    # submodule a. The change is on purpose, not erosion: the pin still asserts the exact value (a wrong or missing marker fails, see the
+    # wrong_marker control below), and only a plain `from m import x` or a module-form import keeps ''/'module'.
     # The receiver-evidence pass also writes this NameAlias. Pin all its fields and count;
     # its position relative to the Import bind is an implementation detail of the two passes.
-    'relative.py': ([include('.')], [('b', 'a', '', 14, py, name_alias, 0, (0, 0)), bind('b', '.', '')]),
+    'relative.py': ([include('.')], [('b', 'a', '', 14, py, name_alias, 0, (0, 0)), bind('b', '.', 'from:a')]),
 }
 def check(actual):
     assert actual.keys() == want.keys() and all(
@@ -317,7 +323,7 @@ for path in ('dotted.py', 'relative.py'):
         else: raise AssertionError((path, channel, 'missing fact escaped the alias assertion'))
 print('  PASS  #382: 16 corrupt-fact controls rejected by the exact Include/RawBind predicate')
 PY
-then ok '#382: future/dynamic negatives; c -> a.b with module marker; relative Include . and b -> . without marker'
+then ok '#382: future/dynamic negatives; c -> a.b with module marker; relative Include . and b -> . with the member marker from:a'
 else no '#382: negative/alias extraction or assertion controls failed'
 fi
 

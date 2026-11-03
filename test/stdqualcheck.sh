@@ -118,11 +118,11 @@ expect uses    swap                4 "every swap site is still a use-site (uncha
 
 # ── §2 THE TRUE MEMBER CALLS ARE KEPT ────────────────────────────────────────────────────────────────────────
 USEBUF="$( run "$FIX" --callees=useBuf --no-cache )"
-{ [ "$( cnt "$USEBUF" )" = 1 ] && printf '%s' "$USEBUF" | grep -q 'n="move" p="buffers.h:21"'; } \
+{ [ "$( cnt "$USEBUF" )" = 1 ] && printf '%s' "$USEBUF" | grep -q 'n="Buf::move" p="buffers.h:21"'; } \
     && ok "--callees=useBuf count=1 -> Buf::move (buffers.h:21) — buf.move() still binds" \
     || no "useBuf lost its true edge to Buf::move: $( el "$USEBUF" )"
 USESLOT="$( run "$FIX" --callees=useSlot --no-cache )"
-{ [ "$( cnt "$USESLOT" )" = 1 ] && printf '%s' "$USESLOT" | grep -q 'n="swap" p="buffers.h:29"'; } \
+{ [ "$( cnt "$USESLOT" )" = 1 ] && printf '%s' "$USESLOT" | grep -q 'n="Slot::swap" p="buffers.h:29"'; } \
     && ok "--callees=useSlot count=1 -> Slot::swap (buffers.h:29) — a.swap( b ) still binds" \
     || no "useSlot lost its true edge to Slot::swap: $( el "$USESLOT" )"
 
@@ -163,7 +163,7 @@ expect callees rotate              0 "std::exchange narrowed by Rule 3 to Token:
 # ── §5 THE CUDA GRAMMAR PATH ─────────────────────────────────────────────────────────────────────────────────
 expect callees clearHost           0 "kernels.cu std::fill binds nothing in-repo (was Grid::fill)"
 CGRID="$( run "$FIX" --callees=clearGrid --no-cache )"
-{ [ "$( cnt "$CGRID" )" = 1 ] && printf '%s' "$CGRID" | grep -q 'n="fill" p="kernels.cu:7"'; } \
+{ [ "$( cnt "$CGRID" )" = 1 ] && printf '%s' "$CGRID" | grep -q 'n="Grid::fill" p="kernels.cu:7"'; } \
     && ok "--callees=clearGrid count=1 -> Grid::fill (kernels.cu:7) — the CUDA member call still binds" \
     || no "clearGrid lost its true edge to Grid::fill: $( el "$CGRID" )"
 
@@ -183,7 +183,7 @@ expect callees bareMove            0 "unqualified move( x ) binds nothing — th
 # qualifier flips the FLOOR arm below — rewrite it to count=0 in the same commit.
 expect callees bridgeMove          0 "bridge.mm std::move — refused by the Phase-5 veto, not by this guard"
 BSTOP="$( run "$FIX" --callees=bridgeStop --no-cache )"
-{ [ "$( cnt "$BSTOP" )" = 1 ] && printf '%s' "$BSTOP" | grep -q 'n="unreachable" p="buffers.h:38"'; } \
+{ [ "$( cnt "$BSTOP" )" = 1 ] && printf '%s' "$BSTOP" | grep -q 'n="Cursor::unreachable" p="buffers.h:38"'; } \
     && ok "FLOOR: bridge.mm std::unreachable() still binds Cursor::unreachable — ObjC++ carries no qualifier" \
     || no "the ObjC++ floor moved (bridgeStop no longer binds Cursor::unreachable) — update this arm and the fixture: $( el "$BSTOP" )"
 expect callers Cursor::unreachable 1 "only the ObjC++ floor remains under Cursor::unreachable (was 2: stopHere too)"
@@ -397,7 +397,7 @@ printf '%s' "$NMAP" | grep -qE 'files=4 symbols=11 edges=3 shown=11 est_tokens=[
     && ok "#150 FIXED header: files=4 symbols=11 edges=3 ambiguous=0 unresolved=0 external=3 (was edges=6, no external=)" \
     || no "#150 header REGRESSED: $( printf '%s' "$NMAP" | grep -oE 'files=4 [^-]*' | head -1 ) — expected edges=3 external=3"
 
-nedge drain 1 'n="move" p="decoys.h:5"' \
+nedge drain 1 'n="Pool::move" p="decoys.h:5"' \
     "CONTROL: --callees=drain count=1 -> Pool::move (decoys.h:5): a true member call keeps its edge" \
     "CONTROL LOST: drain no longer binds Pool::move — the change took a true member call"
 nedge sampleTicks 1 'n="duration_cast" p="decoys.h:13"' \

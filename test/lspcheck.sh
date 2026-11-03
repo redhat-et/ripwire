@@ -38,6 +38,31 @@
 #        inside a wall-clock cap (no hang)
 #   (17) workspace/symbol's 20-row cap is DISCLOSED: 25 matches answer 20 rows after a window/logMessage naming
 #        "first 20 of 25"; 10 matches answer all 10 with no notice
+#   (18) picker order (task C): on the copied rubyschemafix collision tree, workspace/symbol, definition and
+#        hover all lead with the Method def — the tower (kindSpecificity desc, reference-language first, id asc)
+#        — with the Var next, the schema column before the yaml section, byte-pinned
+#   (18b) schema-column click (user GO): a call site naming a schema column alone resolves to its
+#        schema.rb def (the collision tree holds it at the root, no db/ prefix); the multi-name click lands
+#        on the first schema row (split, id tail) WITH the N-definitions disclosure — cross-kind columns stay
+#        REACHABLE, only their order moves
+#   (19) multi-def disclosure (task C): a name with N>1 defs carries ONE sentence — N definitions, counts are
+#        floors, the resolver splits — in the hover markdown and in one window/logMessage ahead of every
+#        definition answer; absent on single-def names, whose hover must ANSWER before the silence is credited
+#   (20) Used-at parity (task C): hover Used-at for the colliding name answers every CLI --uses call row, with the
+#        kLspHoverUseCap=8 tier premise pinned first — past the cap a missing link is the disclosed truncation, not a defect
+#   (21) C/C++ decl/def no-regression (task C): on a tree whose HEADER sorts first — so the prototype carries the LOWER
+#        crawl-order id — the single-pick --around still walks the bodyful definition (the resolveFocus refinement
+#        composes with the tower sort); textDocument/definition is pinned beside it as the whole-list answer it is
+#   (22) determinism x2 on the new collision dialog (house pattern)
+#   (23) the known gap stays COHERENT: --around's CLI row shows the tower front AND its defs= count, so
+#        edge-vs-display disagreement is visible on the row, never hidden
+#   (24) a constructor never outranks its class (maintainer, #432 review): Java `public Shape() {}` inside class Shape
+#        and C++ `Widget::Widget()` beside a header-first class Widget — --lego names the class and its implementor,
+#        --around focuses the class row; a near-miss Java method named like ANOTHER class keeps the Method rung
+#   (25) a C prototype beside its body is counted in the (19) sentence but never described as a resolver split
+#   (26) the tower's tiers in ORDER: kind before language — a Python class (rung 3) sits between a Ruby method (5)
+#        and a Ruby attr (1) although the leading language is Ruby (arms 18-23 are single-language and cannot see a
+#        swap of the two tiers)
 #
 # Usage:  RIPWIRE_BIN=build/ripwire bash test/lspcheck.sh   |   bash test/lspcheck.sh path/to/ripwire
 
@@ -51,7 +76,7 @@ no(){ printf '  FAIL  %s\n' "$*"; fail=1; }
 
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 
-WORK="$( mktemp -d )"; trap 'rm -rf "$WORK"' EXIT
+WORK="$( cd "$( mktemp -d )" && pwd -P )"; trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/src"
 
 # C++ fixture — line numbers below are load-bearing (the arms address them):
@@ -341,5 +366,272 @@ noticeLine="$( grep -n '"method":"window/logMessage"' "$WORK/r17" | cut -d: -f1 
     && [ -n "$noticeLine" ] && [ "$noticeLine" -lt "$resp30Line" ] \
     && ok "(17) workspace/symbol: 25 matches → 20 rows after one window/logMessage 'first 20 of 25'; 10 matches (capfn10-19) → 10 rows, no notice" \
     || { no "(17) cap disclosure wrong: rows30=$rows30 rows31=$rows31 notices=$notices"; head -c 500 "$WORK/r17"; }
+# ── (18) picker order: the tower sorts every multi-def answer, byte-pinned on the collision fixture ───
+cp -r "$ROOT/test/rubyschemafix" "$WORK/collide"
+uriColl="file://$WORK/collide"
+uriCA="file://$WORK/collide/consumer_ambiguous.rb"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"$uriColl\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"$uriCA\",\"languageId\":\"ruby\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/collide/all_four.rb\",\"languageId\":\"ruby\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"name\"}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"$uriCA\"},\"position\":{\"line\":7,\"character\":10}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"$uriCA\"},\"position\":{\"line\":7,\"character\":10}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":43,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/collide/all_four.rb\"},\"position\":{\"line\":9,\"character\":8}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d18"
+"$BIN" --lsp < "$WORK/d18" > "$WORK/raw18" 2>/dev/null
+decodeFrames "$WORK/raw18" > "$WORK/r18" 2>/dev/null
+head40="$( grep '"id":40,' "$WORK/r18" )"; head41="$( grep '"id":41,' "$WORK/r18" )"; R42="$( grep '"id":42,' "$WORK/r18" )"; R43="$( grep '"id":43,' "$WORK/r18" )"
+p_m="$( printf '%s' "$head40" | grep -bo 'all_four.rb","range":{"start":{"line":9' | cut -d: -f1 | head -1 )"
+p_v="$( printf '%s' "$head40" | grep -bo 'all_four.rb","range":{"start":{"line":7' | cut -d: -f1 | head -1 )"
+p_c="$( printf '%s' "$head40" | grep -bo 'schema.rb","range":{"start":{"line":14' | cut -d: -f1 | head -1 )"
+p_y="$( printf '%s' "$head40" | grep -bo 'spike_names.yml","range":{"start":{"line":3' | cut -d: -f1 | head -1 )"
+# The def-front clause pins the FIRST row by OFFSET, like the ws/symbol rows above: a Location row is ~130 bytes, so the
+# old "first 260 bytes contain a "line":9 field" window also matched the SECOND row — a Var-first order still printed PASS.
+q_m="$( printf '%s' "$head41" | grep -bo 'all_four.rb","range":{"start":{"line":9' | cut -d: -f1 | head -1 )"
+q_v="$( printf '%s' "$head41" | grep -bo 'all_four.rb","range":{"start":{"line":7' | cut -d: -f1 | head -1 )"
+# The hover-front clause is pinned by offset the same way. lspAppendHoverDefs renders up to kLspHoverDefCap=8 of the 19 defs,
+# so the old membership grep matched the Method block wherever it sat: on the pre-tower binary it is the SECOND block of the
+# hover (a Var leads it) and that clause still printed PASS. The FIRST def block is the one a reader reads first, so the
+# Method block's offset must EQUAL the offset of the first "**<kind>** `" marker, not merely exist somewhere in the answer.
+h_first="$( printf '%s' "$R43" | grep -bo '\*\*[a-z]*\*\* `' | cut -d: -f1 | head -1 )"
+h_m="$( printf '%s' "$R43" | grep -bo '\*\*method\*\* `AllFour::name`' | cut -d: -f1 | head -1 )"
+[ -n "$p_m" ] && [ -n "$p_v" ] && [ -n "$p_c" ] && [ -n "$p_y" ] \
+    && [ "$p_m" -lt "$p_v" ] && [ "$p_v" -lt "$p_c" ] && [ "$p_c" -lt "$p_y" ] \
+    && [ -n "$q_m" ] && [ -n "$q_v" ] && [ "$q_m" -lt "$q_v" ] \
+    && [ -n "$h_first" ] && [ -n "$h_m" ] && [ "$h_m" = "$h_first" ] \
+    && ok "(18) picker order: Method before Var before column-Section before yaml-Section on ws/symbol, def-front and hover-front" \
+    || { no "(18) tower order wrong: m=$p_m v=$p_v c=$p_c y=$p_y d_m=$q_m d_v=$q_v h_m=$h_m h_first=$h_first"; printf '%s\n' "$head40" | head -c 400; printf '%s\n' "$head41" | head -c 240; }
+
+# ── (19) the ONE multi-def disclosure sentence, hover + definition logMessage, absent on single-def ───
+printf '%s' "$R42" | grep -q '19 definitions for .name. — counts are floors; a call may bind to any one of them' \
+    && ok "(19) hover discloses the def count + may-bind sentence on the colliding name" \
+    || { no "(19) hover disclosure missing"; printf '%s\n' "$R42" | head -c 400; }
+n19="$( grep -c 'window/logMessage.*19 definitions for .name. — counts are floors; a call may bind to any one of them' "$WORK/r18" )"
+l41="$( grep -n '"id":41,' "$WORK/r18" | cut -d: -f1 )"; l19="$( grep -n 'window/logMessage.*19 definitions' "$WORK/r18" | head -1 | cut -d: -f1 )"
+[ "$n19" = 1 ] && [ -n "$l19" ] && [ -n "$l41" ] && [ "$l19" -lt "$l41" ] \
+    && ok "(19) the definition answer carries ONE window/logMessage disclosure AHEAD of it" \
+    || { no "(19) definition logMessage wrong: n=$n19 noticeLine=$l19 respLine=$l41"; }
+# Premise (fix round 4): credit the silence only to an ANSWERING hover. When the id-5 row was absent (dialog
+# truncated, decodeFrames threw) or its result null (lspHover regressed), the old bare `grep -q` failed and the ||
+# branch printed PASS — the one clause of the round that could not tell "no disclosure, because the name has one
+# def" from "no answer at all". R 5 reads $WORK/resp, the geometry dialog: the single-def tree this control is about.
+if ! printf '%s' "$R5" | grep -q '"result":{'; then
+    no "(19) premise broken — the id-5 hover did not answer (row absent or result null), so its silence proves nothing: $( printf '%s' "$R5" | head -c 160 )"
+elif printf '%s' "$R5" | grep -q 'definitions for .scale.'; then
+    no "(19) single-def name carries a multi-def disclosure"
+else
+    ok "(19) scale (single def) carries no disclosure (premise held: the id-5 hover answered)"
+fi
+
+# ── (20) Used-at parity: hover answers every CLI --uses call row for the colliding name ────────────────
+UR="$( cd "$WORK/collide" && "$BIN" --uses=name . 2>/dev/null | grep -oE '<u role="call" p="[^"]+"' | sed 's/.*p="//; s/"$//' | sort -u )"
+n_ur="$( printf '%s\n' "$UR" | grep -c . )"
+# Premise (fix round 4): the hover's Used-at tier is capped at kLspHoverUseCap=8 (src/lsp.h:65, applied by
+# lspAppendSiteTier at src/lsp.h:912, which discloses a cut as "_+N more_"); the CLI --uses list is NOT capped, so
+# "every CLI row appears in the hover" is a server promise only while the rows fit the tier. Pin that before the
+# loop: widen the fixture past 8 and a correct, properly disclosed truncation used to read as a parity failure.
+if [ -z "$UR" ]; then
+    no "(20) premise broken — the CLI --uses answer carries no call rows to compare"
+elif [ "$n_ur" -gt 8 ]; then
+    no "(20) premise broken — $n_ur CLI --uses rows exceed the hover tier's kLspHoverUseCap=8; parity is only promised within the cap"
+else
+    miss=""
+    for row in $UR; do
+        site="${row%:*}"; ln="${row##*:}"
+        printf '%s' "$R42" | grep -qF "$site#L$ln" || miss="$miss $row"
+    done
+    [ -z "$miss" ] \
+        && ok "(20) Used-at parity within the cap: all $n_ur CLI --uses call rows (<= kLspHoverUseCap=8) appear as hover links" \
+        || { no "(20) parity missing rows:$miss (rows seen: $( echo $UR | tr ' ' ',' ))"; }
+fi
+
+# ── (18b) schema-column click: definition on a column use-site lands on schema.rb, unique and split ───
+cat > "$WORK/collide/click_single.rb" <<'EOF'
+# C task arm 18b: consumer of the UNIQUE column event_id -> schema.rb line 29 (0-based 28)
+Spike::IdRenamed.new.event_id
+EOF
+cat > "$WORK/collide/click_split.rb" <<'EOF'
+# C task arm 18b: consumer of a COLUMN-ONLY repeated name (timestamps, no code def) -> schema row first
+Spike::ColumnYaml.new.created_at
+EOF
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"$uriColl\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/collide/click_single.rb\",\"languageId\":\"ruby\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/collide/click_split.rb\",\"languageId\":\"ruby\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":44,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/collide/click_single.rb\"},\"position\":{\"line\":1,\"character\":25}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":45,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/collide/click_split.rb\"},\"position\":{\"line\":1,\"character\":25}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":46,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/collide/click_split.rb\"},\"position\":{\"line\":1,\"character\":25}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d18b"
+"$BIN" --lsp < "$WORK/d18b" > "$WORK/raw18b" 2>/dev/null
+decodeFrames "$WORK/raw18b" > "$WORK/r18b" 2>/dev/null
+head44="$( grep '"id":44,' "$WORK/r18b" | head -1 )"; head45="$( grep '"id":45,' "$WORK/r18b" | head -1 )"; R46="$( grep '"id":46,' "$WORK/r18b" )"
+# Both clauses pin the FIRST Location row by offset, like arm (18)'s def-front sibling. The old 340-byte window spanned the
+# WHOLE id-45 answer (two ~130-byte rows plus a 35-byte prefix = ~300 bytes), so it proved the schema.rb:75 row was PRESENT,
+# never that it led: with the t.timestamps-minted row ahead of it the needle still fell inside the window and printed PASS.
+# r1_4x is the start of the answer's first row, r2_4x the start of its second (empty when the answer holds one row); the
+# needle must lie inside the first row, and for the split name ahead of the other schema row.
+r1_44="$( printf '%s' "$head44" | grep -bo '{"uri":"' | cut -d: -f1 | head -1 )"; r2_44="$( printf '%s' "$head44" | grep -bo '},{"uri":"' | cut -d: -f1 | head -1 )"
+r1_45="$( printf '%s' "$head45" | grep -bo '{"uri":"' | cut -d: -f1 | head -1 )"; r2_45="$( printf '%s' "$head45" | grep -bo '},{"uri":"' | cut -d: -f1 | head -1 )"
+o28="$( printf '%s' "$head44" | grep -bo 'schema\.rb","range":{"start":{"line":28' | cut -d: -f1 | head -1 )"
+o75="$( printf '%s' "$head45" | grep -bo 'schema\.rb","range":{"start":{"line":75' | cut -d: -f1 | head -1 )"
+o82="$( printf '%s' "$head45" | grep -bo 'schema\.rb","range":{"start":{"line":82' | cut -d: -f1 | head -1 )"
+[ -n "$o28" ] && [ -n "$r1_44" ] && [ "$o28" -ge "$r1_44" ] && { [ -z "$r2_44" ] || [ "$o28" -lt "$r2_44" ]; } \
+    && [ -n "$o75" ] && [ -n "$r1_45" ] && [ -n "$r2_45" ] && [ "$o75" -ge "$r1_45" ] && [ "$o75" -lt "$r2_45" ] \
+    && [ -n "$o82" ] && [ "$o75" -lt "$o82" ] \
+    && printf '%s' "$R46" | grep -q 'definitions for .created_at.' \
+    && ok "(18b) column clicks land on schema.rb — unique event_id -> its row; column-only created_at -> schema first with the N-definitions disclosure" \
+    || { no "(18b) schema-column click wrong: e44 needle=$o28 in[$r1_44,${r2_44:-end}] | s45 needle=$o75 in[$r1_45,${r2_45:-end}] other=$o82"; printf '%s\n' "$head44" | head -c 240; printf '%s\n' "$head45" | head -c 240; }
+
+# ── (21) C/C++ decl/def: the LOWER-id header prototype yields to the bodyful def on the SINGLE-PICK verb ─────
+# WHY THE FIXTURE IS NAMED quad.h + z_quad.cpp: ids follow SORTED crawl order, and "quad.h" sorts before
+# "z_quad.cpp", so the bodyless prototype carries the LOWER NodeId and the tower's id-ASC tie leads with it. That is
+# the only order in which resolveFocus's same-scope body preference (graph.h) decides the answer: delete the yield and
+# the focus stays quad.h's declaration, which carries no call or extends edges — the walk would then name the
+# declaration's own row and never reach use_quad. textDocument/definition cannot show that pick at all (lsp.h
+# lspDefinition answers the WHOLE def list via resolveAllByName), so it is pinned here beside the pick, as the
+# no-regression answer it actually is, and the pick itself is read off a single-pick verb.
+mkdir -p "$WORK/cppdd"
+cat > "$WORK/cppdd/quad.h" <<'EOF'
+// decl/def fixture — the HEADER sorts FIRST, so this prototype carries the lower crawl-order id
+int quad( int f );
+EOF
+cat > "$WORK/cppdd/z_quad.cpp" <<'EOF'
+int quad( int f )
+{
+    return f * 4;
+}
+
+int use_quad()
+{
+    return quad( 2 );
+}
+EOF
+uriCpp="file://$WORK/cppdd"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"$uriCpp\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/cppdd/z_quad.cpp\",\"languageId\":\"cpp\",\"version\":1,\"text\":\"\"}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://$WORK/cppdd/z_quad.cpp\"},\"position\":{\"line\":7,\"character\":11}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d21"
+"$BIN" --lsp < "$WORK/d21" > "$WORK/raw21" 2>/dev/null
+decodeFrames "$WORK/raw21" > "$WORK/r21" 2>/dev/null
+resp50="$( grep '"id":50,' "$WORK/r21" | head -1 )"
+# the whole-list answer: BOTH definitions are named, the body among them (the list is not a pick — do not read order here)
+printf '%s' "$resp50" | grep -qF "\"uri\":\"file://$WORK/cppdd/quad.h\",\"range\":{\"start\":{\"line\":1" \
+    && printf '%s' "$resp50" | grep -qF "\"uri\":\"file://$WORK/cppdd/z_quad.cpp\",\"range\":{\"start\":{\"line\":0" \
+    || { no "(21) the def list no longer names both the prototype (quad.h:2) and the body (z_quad.cpp:1)"; printf '%s\n' "$resp50" | head -c 300; }
+ar21="$( cd "$WORK/cppdd" && "$BIN" --around=quad . 2>/dev/null )"
+printf '%s' "$ar21" | grep -q '<r [^>]*defs="2"' \
+    || no "(21) premise broken — --around=quad's root carries no defs=\"2\", so the name has no pick for the refinement to make: $( printf '%s' "$ar21" | grep -m1 -o '<r [^>]*>' | head -c 160 )"
+w21="$( printf '%s' "$ar21" | grep -cF '<f p="z_quad.cpp"><s t="fn" n="quad"' )"
+c21="$( printf '%s' "$ar21" | grep -cF '<s t="fn" n="use_quad"' )"
+n21="$( printf '%s' "$ar21" | grep -cF '<f p="quad.h">' )"
+[ "$w21" = 1 ] && [ "$c21" = 1 ] && [ "$n21" = 0 ] \
+    && ok "(21) single-pick decl/def refinement composes with the sort: --around walks the bodyful .cpp def and reaches its caller, never the lower-id header prototype" \
+    || { no "(21) the pick did not move to the body — the same-scope yield is what does that here (bodyRow=$w21 caller=$c21 declRow=$n21)"; printf '%s\n' "$ar21" | grep -o '<r [^>]*>\|<f p="[^"]*">' | head -4; }
+
+# ── (23) known-gap coherence: the CLI row shows the tower front AND its defs= count ───────────────────
+c23="$( cd "$WORK/collide" && "$BIN" --around=name . 2>/dev/null | grep -m1 -o '<s t="method" n="name" sc="AllFour"' )"
+d23="$( cd "$WORK/collide" && "$BIN" --around=name . 2>/dev/null | grep -m1 -o 'defs="[0-9]*"' )"
+[ -n "$c23" ] && [ "$d23" = 'defs="19"' ] \
+    && ok "(23) --around names the tower front (t=method AllFour::name) while disclosing defs=\"19\" — the edge-vs-display gap is visible on the row" \
+    || { no "(23) known-gap coherence broken: focus='$c23' count='$d23'"; }
+
+# ── (24) a constructor never outranks its class ──────────────────────────────────────────────────────
+mkdir -p "$WORK/ctorj" "$WORK/ctorc"
+cat > "$WORK/ctorj/Shape.java" <<'EOF'
+public class Shape {
+  public Shape() {}
+  public void area() {}
+}
+class Sq extends Shape { public void area() {} }
+class Maker { public Sq Sq() { return null; } }
+EOF
+cat > "$WORK/ctorc/a_widget.h" <<'EOF'
+class Widget {
+public:
+    Widget();
+    virtual void draw() = 0;
+};
+EOF
+cat > "$WORK/ctorc/widget.cpp" <<'EOF'
+#include "a_widget.h"
+Widget::Widget() {}
+class Button : public Widget { public: void draw() override {} };
+EOF
+lj24="$( cd "$WORK/ctorj" && "$BIN" --lego=Shape . 2>/dev/null )"
+aj24="$( cd "$WORK/ctorj" && "$BIN" --around=Shape . 2>/dev/null )"
+lc24="$( cd "$WORK/ctorc" && "$BIN" --lego=Widget . 2>/dev/null )"
+ac24="$( cd "$WORK/ctorc" && "$BIN" --around=Widget . 2>/dev/null )"
+nm24="$( cd "$WORK/ctorj" && "$BIN" --around=Sq . 2>/dev/null )"
+printf '%s' "$lj24" | grep -q '<iface n="Shape" [^>]*defs="2" implementors="1"' && printf '%s' "$lj24" | grep -qF '<impl n="Sq"' \
+    && ok "(24) Java: --lego=Shape answers the class (implementors=1, Sq), not its constructor" \
+    || { no "(24) Java --lego=Shape lost the class to its constructor"; printf '%s' "$lj24" | grep -o '<iface [^>]*>' | head -1; }
+printf '%s' "$aj24" | grep -qF '<s t="cls" n="Shape"' \
+    && ok "(24) Java: --around=Shape focuses the class row" \
+    || { no "(24) Java --around=Shape focus is not the class"; printf '%s' "$aj24" | grep -o '<s [^>]*>' | head -1; }
+printf '%s' "$lc24" | grep -q '<iface n="Widget" p="a_widget.h" [^>]*implementors="1"' && printf '%s' "$lc24" | grep -qF '<impl n="Button"' \
+    && ok "(24) C++: --lego=Widget answers the header class (implementors=1, Button), not the out-of-line Widget::Widget()" \
+    || { no "(24) C++ --lego=Widget lost the class to its constructor"; printf '%s' "$lc24" | grep -o '<iface [^>]*>' | head -1; }
+printf '%s' "$ac24" | grep -qF '<f p="a_widget.h"><s t="cls" n="Widget"' \
+    && ok "(24) C++: --around=Widget focuses the class row in a_widget.h" \
+    || { no "(24) C++ --around=Widget focus is not the class"; printf '%s' "$ac24" | grep -o '<f p="[^"]*"><s [^>]*>' | head -1; }
+printf '%s' "$nm24" | grep -qF '<f p="Shape.java"><s t="method" n="Sq"' \
+    && ok "(24) near-miss: Maker.Sq(), a method named like ANOTHER class, keeps the Method rung (not a constructor)" \
+    || { no "(24) near-miss: the constructor rung swallowed a method that merely shares a class's name"; printf '%s' "$nm24" | grep -o '<s [^>]*>' | head -1; }
+
+# ── (25) a prototype beside its body is COUNTED, never called a split ──────────────────────────────
+# The graph binds helper(2) to the body alone (no amb=), so the sentence may count the prototype but must not say the
+# resolver split the call: "a call may bind to any one of them" is the claim the mechanism supports.
+mkdir -p "$WORK/protodef"
+printf 'int helper(int x);\n' > "$WORK/protodef/h.h"
+printf '#include "h.h"\nint helper(int x) { return x + 1; }\nint top(void) { return helper(2); }\n' > "$WORK/protodef/h.c"
+uriPD="file://$WORK/protodef/h.c"
+{
+  msg "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"rootUri\":\"file://$WORK/protodef\",\"capabilities\":{}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"$uriPD\"},\"position\":{\"line\":2,\"character\":25}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"$uriPD\"},\"position\":{\"line\":2,\"character\":25}}}"
+  msg "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\"}"
+  msg "{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}"
+} > "$WORK/d25"
+( cd "$WORK/protodef" && "$BIN" --lsp < "$WORK/d25" > "$WORK/raw25" 2>/dev/null )
+decodeFrames "$WORK/raw25" > "$WORK/r25" 2>/dev/null
+h25="$( grep '"id":52,' "$WORK/r25" )"
+n25="$( grep -c 'window/logMessage.*2 definitions for .helper.' "$WORK/r25" )"
+printf '%s' "$h25" | grep -q '2 definitions for .helper.' && [ "$n25" = 1 ] \
+    || no "(25) premise broken — the prototype+body pair no longer reads as 2 definitions (hover/logMessage=$n25)"
+grep -q 'splits over' "$WORK/r25" \
+    && no "(25) the disclosure says the resolver SPLIT a call it bound to the body alone" \
+    || ok "(25) prototype+body: counted as 2 definitions, no split claimed (the call binds to the body)"
+
+# ── (26) kind tier before language tier ──────────────────────────────────────────────────────────────
+mkdir -p "$WORK/mixlang"
+printf 'class AllFour\n  attr_reader :name\nend\n' > "$WORK/mixlang/a.rb"
+printf 'class name:\n    pass\n' > "$WORK/mixlang/b.py"
+printf 'class Other\n  def name\n    1\n  end\nend\nOther.new.name\n' > "$WORK/mixlang/c.rb"
+o26="$( cd "$WORK/mixlang" && "$BIN" --impact=name . 2>/dev/null | grep -o '<def ix="[0-9]*" t="[a-z]*"[^>]*p="[^"]*"' | tr '\n' ' ' )"
+case "$o26" in
+    *'ix="1" t="method" sc="Other" p="c.rb:2"'*'ix="2" t="cls" sc="name" p="b.py:1"'*'ix="3" t="var" sc="AllFour" p="a.rb:2"'*)
+        ok "(26) kind before language: Ruby method, then the Python class, then the Ruby attr" ;;
+    *)  no "(26) tier order wrong (a language-first comparator puts the Ruby attr ahead of the Python class): $o26" ;;
+esac
+
+# ── (22) determinism x2 on the collision dialog (house pattern) ───────────────────────────────────────
+"$BIN" --lsp < "$WORK/d18" > "$WORK/raw22a" 2>/dev/null
+"$BIN" --lsp < "$WORK/d18" > "$WORK/raw22b" 2>/dev/null
+cmp -s "$WORK/raw22a" "$WORK/raw22b" && [ -s "$WORK/raw22a" ] \
+    && ok "(22) collision dialog byte-identical across two runs" \
+    || { no "(22) collision dialogs differ"; ls -l "$WORK/raw22a" "$WORK/raw22b"; }
+
 [ "$fail" = 0 ] && echo "ALL PASS" || echo "FAILURES ABOVE"
 exit $fail

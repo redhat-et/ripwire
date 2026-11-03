@@ -51,10 +51,11 @@ namespace rw
 inline constexpr std::size_t kDeclinedSiteCap     = 16;   // <dc> rows per answer by default; --limit=N raises it (dc_next= does)
 inline constexpr std::size_t kDeclinedSiteCandCap = 8;    // cand= entries per row on --legend=full; cand_more= counts the rest
 
-// gate= on a row: which name gate (or Ruby's side cut) declined the call; nothing for the ladder's own tier-3 decline and
-// for Ruby's `new` (its candidates are `initialize`, the row's n= is the called `new`).
+// gate= on a row: which name gate (or Ruby's side cut) declined the call — "iface" (lane L6) the receiver's interface type, its
+// candidates that type's implementors' methods; nothing for the ladder's own tier-3 decline and for Ruby's `new` (its
+// candidates are `initialize`, the row's n= is the called `new`).
 // Indexed by DeclinedSiteKind, in its declaration order (Ladder, Builtin, Std, RubySide, RubyNew, Iface).
-inline constexpr const char* kDeclinedSiteGateNames[] = { nullptr, "builtin", "std", "side", nullptr, nullptr };
+inline constexpr const char* kDeclinedSiteGateNames[] = { nullptr, "builtin", "std", "side", nullptr, "iface" };
 static_assert( std::size( kDeclinedSiteGateNames ) == std::size_t( DeclinedSiteKind::Iface ) + 1, "one gate= spelling per DeclinedSiteKind" );
 inline const char* declinedSiteGate( DeclinedSiteKind kind ) noexcept
 {
@@ -122,6 +123,14 @@ inline std::pair<std::size_t, std::vector<std::uint32_t>> declinedCallsAndSites(
     return { calls, std::move( sites ) };
 }
 
+// lane L6: the generic bound record `site` was typed through (Graph::declinedSiteBound, record order), "" when none
+inline std::string_view declinedSiteBoundOf( const Graph& g, std::uint32_t site )
+{
+    const auto it = std::lower_bound( g.declinedSiteBound.begin(), g.declinedSiteBound.end(), site,
+                                      []( const std::pair<std::uint32_t, std::string>& b, std::uint32_t k ) { return b.first < k; } );
+    return it != g.declinedSiteBound.end() && it->first == site ? std::string_view( it->second ) : std::string_view();
+}
+
 // One row's facts, surface-neutral: every dialect below spells these and nothing else.
 struct DeclinedSiteView
 {
@@ -132,6 +141,7 @@ struct DeclinedSiteView
     std::size_t              cands = 0;   // the candidate list's size
     bool                     candsKnown = false;   // false only for a list internDeclinedList could not store
     const char*              gate = nullptr;
+    std::string_view         bound;       // lane L6: a gate="iface" row typed through a generic bound (`R: Renderer`), "" otherwise
     std::vector<std::string> ofDef;       // callees: {"K"}, the definition making the call; callers: {"K~d", ...}
     std::vector<std::string> cand;        // --legend=full: the candidates as file:line, at most kDeclinedSiteCandCap
     std::size_t              candMore = 0;
@@ -174,6 +184,7 @@ inline std::vector<DeclinedSiteView> declinedSiteViews( const IngestResult& ing,
         v.file   = vrPath( ing, r.fileId, vr );
         v.caller = ing.symbols[ g.declinedSiteCaller[ site ] ].name;
         v.gate   = declinedSiteGate( g.declinedSiteKind[ site ] );
+        v.bound  = declinedSiteBoundOf( g, site );
         const std::uint32_t list = g.declinedSiteList[ site ];
         std::span<const NodeId> cand;
         if( list != kNoDeclinedList )
@@ -245,6 +256,10 @@ inline std::string declinedSitesXml( std::span<const DeclinedSiteView> views, bo
         {
             out += std::string( " gate=\"" ) + v.gate + "\"";
         }
+        if( !v.bound.empty() )
+        {
+            out += " bound=\"" + ex( v.bound ) + "\"";
+        }
         for( std::size_t i = 0; i < v.ofDef.size(); ++i )
         {
             out += ( i == 0 ? " of_def=\"" : " " ) + v.ofDef[i] + ( i + 1 == v.ofDef.size() ? "\"" : "" );
@@ -301,6 +316,10 @@ inline std::string declinedSitesJson( std::span<const DeclinedSiteView> views, b
         if( v.gate != nullptr )
         {
             out += std::string( ",\"gate\":\"" ) + v.gate + "\"";
+        }
+        if( !v.bound.empty() )
+        {
+            out += ",\"bound\":\"" + jsonStr( v.bound ) + "\"";
         }
         if( !v.ofDef.empty() )
         {
@@ -369,6 +388,8 @@ inline DeclinedSitesLegendFlags declinedSitesLegendFlags( std::span<const Declin
         const std::string_view gate = v.gate != nullptr ? std::string_view( v.gate ) : std::string_view();
         f.side     = f.side || gate == "side";
         f.nameGate = f.nameGate || gate == "builtin" || gate == "std";
+        f.iface    = f.iface || gate == "iface";
+        f.bound    = f.bound || !v.bound.empty();
         f.ofDef    = f.ofDef || !v.ofDef.empty();
         f.cand     = f.cand || !v.cand.empty();
     }

@@ -95,6 +95,17 @@ export TMPDIR="$TMP/cache"; mkdir -p "$TMPDIR"
 
 run(){ "$BIN" "$FIX" "$@" 2>"$TMP/err"; }
 
+# PROCESS rule 5 (lane ls2-size-targets): every legend byte pin in (U) PIN_TABLE, (L) and (M) is a STAIR-STEP TARGET — the
+# number is unchanged; exceeding it passes only for clauses registered in test/legend_over_target.tsv that ride AND are
+# present-only on that answer (each printed OVER-TARGET), else FAIL; a smaller measure never fails — under a hard RUNAWAY GUARD
+# (8,000 B of comments per compact answer; 16,000 B for the (L) loop) that prints LEGEND-RUNAWAY with the clause breakdown.
+# RIPWIRE_LEGEND_PINS=strict is the rule 4 twin: today's hard pins, registry ignored; lt_summary at the end reports the strict
+# verdict of every run. The old-path size twins ((U-twin*), (LT), (U-TWIN)) use the SAME surface id as their main arm, so a
+# registered clause relaxes a twin exactly as it relaxes the main arm (test/lib/legendtarget.sh); only RIPWIRE_LEGEND_PINS=strict hard-pins them.
+# One shared verdict: test/lib/legendtarget.sh. Census: legend-shorten §4 items 1, 2, 3, 5.
+. "$ROOT/test/lib/legendtarget.sh"
+LT_GUARD_COMPACT=8000; LT_GUARD_LOOP=16000
+
 [ -x "$BIN" ] || { echo "no ripwire binary at $BIN — build first"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found — required by the universe arm"; exit 2; }
 
@@ -356,6 +367,11 @@ echo "=== (A-PIN) --legend=full is BYTE-IDENTICAL to the pre-L1 default (pinned 
 # at= and est_tokens= masked) equals it exactly. 5527 -> 5688 B. The six other pins are unchanged.
 # RE-ANCHORED BY HAND 2026-10-19 (markdown section links), map.xml only: the two fixture callees gain via="link",
 # the full legend gains the via="link" comment, and est_tokens= prices them, 901 -> 929.
+# RE-ANCHORED BY HAND 2026-10-23 (lane honest-lex, CI fix round 1), grep.xml only: the lane's intended output change, nothing
+# else. Checked: the pin equals the previous head's --legend=full output with exactly four edits -- the full legend gains the
+# sentence "A hit is one LINE: occ= on a row (present only above one) counts the pattern's occurrences on that line, and
+# hits=, shown= and the window count lines, not occurrences."; the root's hits=/shown= read 7 (was 8: the two occurrences on
+# geometry.cpp:16 are one line now); that row's n="2" + its at-tagged sibling become occ="2" (one hit per line).
 PIN_DIR="$ROOT/test/compactlegendfix/pre_l1_full"
 # the one normalisation, in python on BOTH sides so no sed dialect decides it (BSD sed appends a final newline, GNU
 # sed does not): at="…" masked, trailing newlines dropped.
@@ -626,6 +642,23 @@ probeFor()
 # A name with several definitions now serves lean (no ride-along map), so the whole-file answer this probe reaches carries
 # topk_default="0" (+112 B reading) and map_next= (+56 B reading) on its root, both present-only (compactlegend.h). The
 # (U-twin-expand) arm below keeps the OLD 360 B pin for everything else in that legend.
+# RE-PINNED 2026-10-21 (this review-fix round, but the BYTES are the reviewed commit's): ripwire.around/v1 770 -> 830
+# (measured 812, the --around=distance probe; the table held 760). e5d39f70 "say tower front where the code now means it"
+# rewrote the compact defs= READING from "lowest-id walked, code first, a C/C++ body in the same scope over its declaration"
+# (107 B) to "most-specific kind walked first, its language ahead, id last, code first, a C/C++ body in the same scope over its
+# declaration" (151 B, +44 B) and left this row where it was — splice that pre-e5d39f70 term back into THIS build's answer and
+# the same probe measures 768 B, inside the old 770, which localises the whole breach to that one reading. The (U) arm was
+# therefore already red on the branch before this round. This round's own half of the same fix — the FULL --around seed clause,
+# re-worded to the tower-front pick — costs (U) nothing: the compact dialect drops that clause, so no full-legend phrase is
+# billed here. No (U-twin): a twin holds an OLD PATH that still exists, and here the same probe in the same dialect simply
+# speaks the pick correctly, so the row is the whole story.
+# RE-PINNED 2026-10-21 (this review-fix round, the BYTES are the reviewed branch's): ripwire.safe-delete/v1 measured
+# 828 -> 830 (the --safe-delete=distance probe), pin 840 UNCHANGED. e5d39f70 re-worded that verb's own compact purpose
+# clause (compactlegend.h:130, "t= p= its lowest-id match's kind and file:line" -> "its tower-front match's ...", 9 B ->
+# 11 B, +2 B), a clause every compact --safe-delete answer emits, and left this row at 828. Nothing goes red:
+# round-up-to-10(830) + 10 is still 840, and the (U-twin) cut holds its own reading — so this is the attribution the
+# table's rule above asks for (re-pin in the commit that adds the bytes, with the bytes attributed there), the same one
+# the around/v1 row carries.
 # RE-PINNED 2026-10-10 (lane lean-trio, idea #11): ripwire.edit-check/v1 610 -> 650 (measured 636, the --edit-check=distance
 # probe; 595 on main 0852bc0f). The probe's contract is unchanged with nothing flagged, so the answer is now the verdict
 # line (no <c> rows), and the compact legend reads its two new facts: rows_next= (the --limit call listing the callers) and
@@ -684,16 +717,16 @@ ripwire.affected/v1               840   826
 ripwire.verify/v1                 440   421
 ripwire.help-task/v1              440   429
 ripwire.query/v1                 790   775
-ripwire.grep/v1                  1380  1368
+ripwire.grep/v1                  1432  1420
 ripwire.match/v1                  370   355
 ripwire.lego/v1                  290   275
 ripwire.exemplar/v1               440   422
-ripwire.around/v1                770   760
+ripwire.around/v1                830   812
 ripwire.callers/v1               450   438
 ripwire.callees/v1                500   484
 ripwire.uses/v1                   510   500
 ripwire.batch/v1                  250   238
-ripwire.safe-delete/v1           840   828
+ripwire.safe-delete/v1           840   830
 ripwire.at/v1                    180   161
 ripwire.from-trace/v1            1300  1281
 ripwire.plan-lint/v1              570   551
@@ -706,7 +739,11 @@ ripwire.pack-top-n/v1            830   813
 ripwire.expand/v1                280   265
 ripwire.expand-file/v1            510   508
 ripwire.for/v1                   1100  1099
+ripwire.defs/v1                   490   472
 '
+# PINNED 2026-10-27 (lane/defs-lookup): ripwire.defs/v1 on this gate's --defs=zzqq9 probe. First pin 340 on 316 B, measured BEFORE
+# the not-found readings existed; RE-PINNED 2026-10-28 to 490 on 472 B = the verb's purpose line (~290 B) plus the shared not-found
+# answer's found=/of=/near= readings (compactlegendcheck UG required them). Present-only: none of the defs row readings ride here.
 pinFor()
 {
     printf '%s\n' "$PIN_TABLE" | awk -v schema="$1" '$1 == schema { printf "%s", $2; exit }'
@@ -738,11 +775,7 @@ else
     case "$sdtCut" in
         NOPREMISE*) no "(U-twin) safe-delete twin cannot measure: ${sdtCut#NOPREMISE }" ;;
         *)  sdtRest="$( leg prose "$TMP/sdt.cut" "$TMP/sdt.full" )"
-            if [ -n "$sdtRest" ] && [ "$sdtRest" -eq "$sdtRest" ] 2>/dev/null && [ "$sdtRest" -le 720 ]; then
-                ok "(U-twin) safe-delete compact prose minus the sites_at= reading ($sdtCut B) is $sdtRest B <= 720 B (the pre-CALLSITE-LINE pin)"
-            else
-                no "(U-twin) safe-delete compact prose minus the sites_at= reading ($sdtCut B) is ${sdtRest:-?} B > 720 B — the rest re-inflated"
-            fi ;;
+            lt_gate "(U-twin) safe-delete compact prose minus the sites_at= reading ($sdtCut B; the pre-CALLSITE-LINE pin)" ripwire.safe-delete/v1 "$sdtRest" 720 "$( leg bytes "$TMP/sdt.cut" )" "$LT_GUARD_COMPACT" "$TMP/sdt.cut" ;;
     esac
 fi
 # (U-twin-fold) FIX1 B2 (rule 4: a re-pin keeps a twin for the old path): the 820 -> 1100 re-pin of ripwire.for/v1 above paid for
@@ -753,10 +786,8 @@ fi
 ufRest="$( leg prose "$TMP/uf.c" "$TMP/uf.full" )"
 if [ "$rcUf" -ne 0 ] || grep -q '<fold ' "$TMP/uf.c"; then
     no "(U-twin-fold) the fold-off --for=geometry probe exited $rcUf or still carries a <fold>"
-elif [ -n "$ufRest" ] && [ "$ufRest" -eq "$ufRest" ] 2>/dev/null && [ "$ufRest" -le 820 ]; then
-    ok "(U-twin-fold) --for=geometry compact prose with the fold off is $ufRest B <= 820 B (the pre-fold pin)"
 else
-    no "(U-twin-fold) --for=geometry compact prose with the fold off is ${ufRest:-?} B > 820 B — the rest re-inflated"
+    lt_gate "(U-twin-fold) --for=geometry compact prose with the fold off (the pre-fold pin)" ripwire.for/v1 "$ufRest" 820 "$( leg bytes "$TMP/uf.c" )" "$LT_GUARD_COMPACT" "$TMP/uf.c"
 fi
 # (U-twin-callers) the pre-2026-10-09 ripwire.callers/v1 pin, kept the same way: the 330 -> 450 re-pin paid for ONE
 # reading, the caller row's sites_at=. The --callers=distance compact answer with exactly that reading cut out still fits
@@ -782,11 +813,7 @@ else
     case "$catCut" in
         NOPREMISE*) no "(U-twin-callers) callers twin cannot measure: ${catCut#NOPREMISE }" ;;
         *)  catRest="$( leg prose "$TMP/cat.cut" "$TMP/cat.full" )"
-            if [ -n "$catRest" ] && [ "$catRest" -eq "$catRest" ] 2>/dev/null && [ "$catRest" -le 330 ]; then
-                ok "(U-twin-callers) callers compact prose minus the sites_at= reading ($catCut B) is $catRest B <= 330 B (the pre-CALLSITE-AT pin)"
-            else
-                no "(U-twin-callers) callers compact prose minus the sites_at= reading ($catCut B) is ${catRest:-?} B > 330 B — the rest re-inflated"
-            fi ;;
+            lt_gate "(U-twin-callers) callers compact prose minus the sites_at= reading ($catCut B; the pre-CALLSITE-AT pin)" ripwire.callers/v1 "$catRest" 330 "$( leg bytes "$TMP/cat.cut" )" "$LT_GUARD_COMPACT" "$TMP/cat.cut" ;;
     esac
 fi
 # (U-twin-path) the pre-2026-10-18 ripwire.path/v1 pin (550 B), kept (PROCESS rule 4): the --path=total_area,distance probe
@@ -822,11 +849,7 @@ else
     case "$pthCut" in
         NOPREMISE*) no "(U-twin-path) path twin cannot measure: ${pthCut#NOPREMISE }" ;;
         *)  pthRest="$( leg prose "$TMP/pth.cut" "$TMP/pth.full" )"
-            if [ -n "$pthRest" ] && [ "$pthRest" -eq "$pthRest" ] 2>/dev/null && [ "$pthRest" -le 550 ]; then
-                ok "(U-twin-path) path compact prose minus the near_sink readings ($pthCut B) is $pthRest B <= 550 B (the pre-ix2-slice pin)"
-            else
-                no "(U-twin-path) path compact prose minus the near_sink readings ($pthCut B) is ${pthRest:-?} B > 550 B — the rest re-inflated"
-            fi ;;
+            lt_gate "(U-twin-path) path compact prose minus the near_sink readings ($pthCut B; the pre-ix2-slice pin)" ripwire.path/v1 "$pthRest" 550 "$( leg bytes "$TMP/pth.cut" )" "$LT_GUARD_COMPACT" "$TMP/pth.cut" ;;
     esac
 fi
 # (U-twin-expand) the pre-2026-10-08 ripwire.expand-file/v1 pin (360 B), kept (PROCESS rule 4): the same --expand=distance probe
@@ -855,11 +878,7 @@ else
     case "$xftCut" in
         NOPREMISE*) no "(U-twin-expand) expand-file twin cannot measure: ${xftCut#NOPREMISE }" ;;
         *)  xftRest="$( leg prose "$TMP/xft.cut" "$TMP/xft.full" )"
-            if [ -n "$xftRest" ] && [ "$xftRest" -eq "$xftRest" ] 2>/dev/null && [ "$xftRest" -le 360 ]; then
-                ok "(U-twin-expand) expand-file compact prose minus the two lean-default readings ($xftCut B) is $xftRest B <= 360 B (the pre-lean pin)"
-            else
-                no "(U-twin-expand) expand-file compact prose minus the two lean-default readings ($xftCut B) is ${xftRest:-?} B > 360 B — the rest re-inflated"
-            fi ;;
+            lt_gate "(U-twin-expand) expand-file compact prose minus the two lean-default readings ($xftCut B; the pre-lean pin)" ripwire.expand-file/v1 "$xftRest" 360 "$( leg bytes "$TMP/xft.cut" )" "$LT_GUARD_COMPACT" "$TMP/xft.cut" ;;
     esac
 fi
 nXml=0; nXmlBad=0; nRefuse=0; nSkip=0; loopBytes=0; xmlVerbs=""; nDefBad=0
@@ -927,8 +946,11 @@ UGEOF
     pin="$( pinFor "$schema" )"
     if [ -z "$pin" ]; then
         no "(U) $probe answers $schema, which has no per-verb pin: measure its compact PROSE legend ($lb B here) and pin it in pinFor"
-    elif [ "$lb" -gt "$pin" ]; then
-        no "(U) $probe compact PROSE legend is $lb B (> its $pin B pin for $schema; all comments $lball B, full $lbfull B): $( leg legend "$TMP/u.c" | head -c 200 )"
+    else
+        # census §4 item 5: the PROSE subset (comments the full dialect lacks) is what the target bounds; ALL comments (what the
+        # reader pays) is printed beside it and is what the runaway guard bounds
+        lt_gate "(U) $probe $schema compact PROSE legend [all comments $lball B, full $lbfull B]" "$schema" "$lb" "$pin" "$lball" "$LT_GUARD_COMPACT" "$TMP/u.c" \
+            || printf '        legend head: %s\n' "$( leg legend "$TMP/u.c" | head -c 200 )"
     fi
     [ "$flag" != "--for=" ] || [ "$lb" -lt "$lbfull" ] || no "(U) --for compact legend ($lb B) did not shrink vs full ($lbfull B)"
     # L1 fix round: the whole-file --expand serving is the one answer whose FULL legend (236 B here) defines only <src>/<s> —
@@ -995,8 +1017,8 @@ fi
 ( cd "$REPO" && "$BIN" . --whereis=distance --whereis-listing=all --legend=full >"$TMP/wall.f" 2>/dev/null </dev/null )
 wallLb="$( leg prose "$TMP/wall.c" "$TMP/wall.f" )"
 if [ "$rcWall" -eq 0 ] && [ "$( leg schema "$TMP/wall.c" )" = "ripwire.whereis/v1" ] && ! grep -o '<whereis [^>]*>' "$TMP/wall.c" | grep -q ' listing=' \
-   && [ -n "$wallLb" ] && [ "$wallLb" -gt 0 ] 2>/dev/null && [ "$wallLb" -le 700 ]; then
-    ok "(U-TWIN) --whereis=distance --whereis-listing=all compact PROSE legend is $wallLb B (<= its 700 B pin; the default's pin is 1040)"
+   && [ -n "$wallLb" ] && [ "$wallLb" -gt 0 ] 2>/dev/null; then
+    lt_gate "(U-TWIN) --whereis=distance --whereis-listing=all compact PROSE legend (its own pin; the default's pin is 1040)" ripwire.whereis/v1 "$wallLb" 700 "$( leg bytes "$TMP/wall.c" )" "$LT_GUARD_COMPACT" "$TMP/wall.c"
 else
     no "(U-TWIN) --whereis-listing=all compact PROSE legend is '${wallLb:-none}' B (pin 700; exit $rcWall): $( leg legend "$TMP/wall.c" | head -c 200 )"
 fi
@@ -1007,8 +1029,8 @@ fi
 ( cd "$REPO" && "$BIN" . --top-k=3 --no-inventory --legend=full >"$TMP/mnoinv.f" 2>/dev/null </dev/null )
 mniLb="$( leg prose "$TMP/mnoinv.c" "$TMP/mnoinv.f" )"
 if [ "$rcMni" -eq 0 ] && [ "$( leg schema "$TMP/mnoinv.c" )" = "ripwire.map/v1" ] && ! grep -q '<inv listed="' "$TMP/mnoinv.c" \
-   && [ -n "$mniLb" ] && [ "$mniLb" -gt 0 ] 2>/dev/null && [ "$mniLb" -le 910 ]; then
-    ok "(U-TWIN) --top-k=3 --no-inventory compact PROSE legend is $mniLb B (<= the pre-D7 910 B pin; the tiered probe's pin is 1140)"
+   && [ -n "$mniLb" ] && [ "$mniLb" -gt 0 ] 2>/dev/null; then
+    lt_gate "(U-TWIN) --top-k=3 --no-inventory compact PROSE legend (the pre-D7 pin; the tiered probe's pin is 1140)" ripwire.map/v1 "$mniLb" 910 "$( leg bytes "$TMP/mnoinv.c" )" "$LT_GUARD_COMPACT" "$TMP/mnoinv.c"
 else
     no "(U-TWIN) --top-k=3 --no-inventory compact PROSE legend is '${mniLb:-none}' B (pin 910; exit $rcMni): $( leg legend "$TMP/mnoinv.c" | head -c 200 )"
 fi
@@ -1655,19 +1677,17 @@ echo
 # (kForFilesFirstNote); the other nine verbs unmoved. The old bar is kept as the twin: with RIPWIRE_NO_HEAD_RR=1 the same loop
 # still pays <= 8,200 B (LT). Same rule: the next multiple of 100 B.
 echo "=== (L) the canonical ten-verb edit loop: compact legend bill ≤ 8,400 B (34,716 B in full on the fixture) ==="
-loopBytes=0; fullBytes=0; loopBytesT=0
+loopBytes=0; fullBytes=0; loopBytesT=0; : >"$TMP/l.all"; : >"$TMP/l.allt"
 for v in "--for=geometry distance" "--callers=distance" "--impact=distance" "--uses=distance" "--edit-check=total_area" \
          "--quality-delta" "--test-gate=geometry.cpp" "--affected=geometry.cpp" "--safe-delete=total_area" "--slice=total_area"; do
     rrun "$v" --legend=compact >"$TMP/l.c"; rrun "$v" --legend=full >"$TMP/l.f"   # L1: the full bill is asked for by name
     [ -s "$TMP/l.c" ] || no "(L) $v --legend=compact answered NOTHING (a refusal is not a 0 B legend): $( head -c 120 "$TMP/rerr" )"
-    b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"
+    b="$( leg bytes "$TMP/l.c" )"; f="$( leg bytes "$TMP/l.f" )"; cat "$TMP/l.c" >>"$TMP/l.all"
     loopBytes=$(( loopBytes + b )); fullBytes=$(( fullBytes + f ))
-    RIPWIRE_NO_HEAD_RR=1 rrun "$v" --legend=compact >"$TMP/l.ct"; loopBytesT=$(( loopBytesT + $( leg bytes "$TMP/l.ct" ) ))
+    RIPWIRE_NO_HEAD_RR=1 rrun "$v" --legend=compact >"$TMP/l.ct"; cat "$TMP/l.ct" >>"$TMP/l.allt"; loopBytesT=$(( loopBytesT + $( leg bytes "$TMP/l.ct" ) ))
 done
-[ "$loopBytes" -le 8400 ] && ok "(L) ten-verb loop: $loopBytes B of compact legend (full: $fullBytes B)" \
-                          || no "(L) ten-verb loop pays $loopBytes B of compact legend (> 8,400 B; full: $fullBytes B)"
-[ "$loopBytesT" -le 8200 ] && ok "(LT) [RIPWIRE_NO_HEAD_RR=1 twin] ten-verb loop: $loopBytesT B of compact legend (the pre-hrr bar, 8,200 B)" \
-                           || no "(LT) [RIPWIRE_NO_HEAD_RR=1 twin] ten-verb loop pays $loopBytesT B of compact legend (> 8,200 B)"
+lt_gate "(L) ten-verb loop compact legend bill [full: $fullBytes B]" loop "$loopBytes" 8400 "$loopBytes" "$LT_GUARD_LOOP" "$TMP/l.all"
+lt_gate "(LT) [RIPWIRE_NO_HEAD_RR=1 twin] ten-verb loop compact legend bill (the pre-hrr bar)" loop "$loopBytesT" 8200 "$loopBytesT" "$LT_GUARD_LOOP" "$TMP/l.allt"
 
 echo
 echo "=== (M) MCP: legend:\"compact\" on edit_check answers in ≤ 900 B on a clean tree; every XML verb takes the argument, within its per-verb legend pin ==="
@@ -1686,10 +1706,11 @@ mcp_text edit_check '{"path":".","symbol":"total_area","legend":"compact"}' >"$T
 mb="$( wc -c <"$TMP/m.ec" | tr -d ' ' )"
 if grep -q '^__ERROR__' "$TMP/m.ec"; then
     no "(M) MCP edit_check legend:compact refused: $( head -c 160 "$TMP/m.ec" )"
-elif [ "$mb" -le 900 ] && grep -q '<edit-check[^>]* schema="ripwire.edit-check/v1"' "$TMP/m.ec"; then
-    ok "(M) MCP edit_check legend:compact = $mb B with the schema id (full legend alone was 5,127 B)"
+elif grep -q '<edit-check[^>]* schema="ripwire.edit-check/v1"' "$TMP/m.ec"; then
+    # the whole answer is the target's measure here (900 B); the runaway guard bounds its comments like any compact answer
+    lt_gate "(M) MCP edit_check legend:compact whole answer, schema id present (full legend alone was 5,127 B)" mcp:edit_check:answer "$mb" 900 "$( leg bytes "$TMP/m.ec" )" "$LT_GUARD_COMPACT" "$TMP/m.ec"
 else
-    no "(M) MCP edit_check legend:compact = $mb B (want ≤ 900 with schema=\"ripwire.edit-check/v1\")"
+    no "(M) MCP edit_check legend:compact = $mb B without schema=\"ripwire.edit-check/v1\""
 fi
 # M1 RE-PIN: this call is the FULL-legend reference the compact payload is compared against. It used to
 # rely on the default BEING full; the default is compact now, so it asks for the posture it means. The
@@ -1710,6 +1731,8 @@ grep -q '^__ERROR__' "$TMP/m.bad" && ok "(M) MCP edit_check legend:\"terse\" is 
 # RE-PINNED 2026-09-19 (the L1 fix round, rv-r1-L1 HIGH-1: every emitted attribute defined — the (U) pins' note): uses 290 -> 510
 # (measured 500), path_between 280 -> 430 (419), exemplar 260 -> 350 (331); impact and lego did not cross their pins.
 # Fix round 2: path_between 430 -> 540 (measured 535 — the no-path hint= reading).
+# RE-PINNED 2026-10-24 (honest-lex fix 2): grep/v1 1380 -> 1432 (measured 1420; 1368 on the base binary) -- the +52 B clause
+# "(beside pattern_meta=, of the literal reading only)" that says complete=/hits= speak of the literal reading (review N1).
 # RE-PINNED 2026-10-18 (lane ix2-slice): path_between 540 -> 860 — the same <near_sink>/<ns> readings the (U) table's
 # ripwire.path/v1 row states (one emitter, src/pathgaps.h pathNearSinkXml); the (U-twin-path) arm keeps the old 550 B CLI pin.
 # RE-PINNED 2026-09-23 (cut-fix C): impact 780 -> 810 (measured 797; 777 on the base binary) — the same +20 B
@@ -1725,10 +1748,11 @@ for pair in "impact:940:{\"path\":\".\",\"symbol\":\"distance\",\"legend\":\"com
     mcp_text "$verb" "$args" >"$TMP/m.v"
     if grep -q '^__ERROR__' "$TMP/m.v"; then
         no "(M) MCP $verb legend:compact refused: $( head -c 160 "$TMP/m.v" )"
-    elif [ "$( leg bytes "$TMP/m.v" )" -le "$mpin" ] && [ -n "$( leg schema "$TMP/m.v" )" ]; then
-        ok "(M) MCP $verb legend:compact: $( leg bytes "$TMP/m.v" ) B legend (pin $mpin B), schema $( leg schema "$TMP/m.v" )"
+    elif [ -n "$( leg schema "$TMP/m.v" )" ]; then
+        mvb="$( leg bytes "$TMP/m.v" )"
+        lt_gate "(M) MCP $verb legend:compact legend, schema $( leg schema "$TMP/m.v" )" "mcp:$verb" "$mvb" "$mpin" "$mvb" "$LT_GUARD_COMPACT" "$TMP/m.v"
     else
-        no "(M) MCP $verb legend:compact: legend $( leg bytes "$TMP/m.v" ) B (pin $mpin B), schema '$( leg schema "$TMP/m.v" )'"
+        no "(M) MCP $verb legend:compact: legend $( leg bytes "$TMP/m.v" ) B (pin $mpin B), no schema"
     fi
 done
 
@@ -2014,9 +2038,10 @@ for v in "" "--query=distance" "--rank-by=hub" "--around=total_area" "--impact=d
     for spec in pr_iters pr_converged "#declined" "#external" "#locality_pinned" "#extent_suspect_syms" "#macro_blanked_files" \
                 "#ignored_files" "#ignored_dirs" "#max_tokens" "#fit_bytes" "#over_ceiling" r:defs r:rank_by r:window; do
         attr="${spec#*:}"; attr="${attr#\#}"
-        # Since the fourth sweep (2026-09-12) --impact's purpose line reads its OWN defs=, so the map root's defs= reading is
-        # found by its opener rather than its attribute name, the way (D17)/(D23) find theirs.
-        if [ "$spec" = r:defs ]; then isRead="$( ca mentions "$TMP/d12.c" "the lowest-id one was walked" )"; else isRead="$( ca defines "$TMP/d12.c" "$attr" )"; fi
+        # Since the fourth sweep (2026-09-12) --impact's purpose line reads its OWN defs=, so the map root's defs= reading is found by its opener rather
+        # than its attribute name, the way (D17)/(D23) find theirs. THE NEEDLE IS THE COMPACT TERM'S OPENER (compactlegend.h's defs row) — these documents
+        # are read under --legend=compact, where the full clause is never printed, so a full-legend phrase here would silently match nothing.
+        if [ "$spec" = r:defs ]; then isRead="$( ca mentions "$TMP/d12.c" "most-specific kind walked first" )"; else isRead="$( ca defines "$TMP/d12.c" "$attr" )"; fi
         if [ "$isRead" = 1 ] && [ "$( ca carries "$TMP/d12.c" "$spec" )" != 1 ]; then
             no "(D12) ${v:-the flagless map}: the compact legend defines $attr= but the document carries no $spec — a reading of a field that is not there"
             d12bad=1
@@ -2847,6 +2872,10 @@ for f in leak_anon.cpp leak_plain.cpp leak_lambda.cpp leak_c.c leak_objc.m leak_
 done
 "$BIN" "$XHOT"  --skipped --legend=compact >"$TMP/s.hot"  2>/dev/null </dev/null
 "$BIN" "$XLEAK" --skipped --legend=compact >"$TMP/s.leak" 2>/dev/null </dev/null
+# the Rust layer of the same re-parse (src/rustusebounds.h): its row and root counts take the same live route
+XRUST="$TMP/xrust"; mkdir -p "$XRUST"
+for f in capture_plus.rs capture_split.rs; do cp "$ROOT/test/macroreparsefix/rust/$f" "$XRUST/" 2>/dev/null || no "(S) fixture missing: test/macroreparsefix/rust/$f"; done
+"$BIN" "$XRUST" --skipped --legend=compact >"$TMP/s.rust" 2>/dev/null </dev/null
 # #60: graphlegend.h kModScopeLegend is conditional and its clause opens with `t="modscope"`, so the source
 # reader above asks for a `t` term. It deliberately has none. `t=` is not an absent-at-zero attribute like
 # the rest of this population — it is on EVERY <s> row of every ranked answer, and a term keyed on it would
@@ -2859,7 +2888,7 @@ MODS="$TMP/modscope/src"; mkdir -p "$MODS"
 printf 'export function setPhase(p: string): void { console.log(p) }\n' > "$MODS/lifecycle.ts"
 printf "import { setPhase } from './lifecycle'\nsetPhase('starting')\n"  > "$MODS/index.ts"
 "$BIN" "$TMP/modscope" --no-cache --callers=setPhase --legend=compact >"$TMP/s.mods" 2>/dev/null </dev/null
-liveDoc(){ case "$1" in extent_suspect_files|extent_suspect_syms) printf '%s' "$TMP/s.hot" ;; macro_blanked_files|macro_blanked) printf '%s' "$TMP/s.leak" ;; t) printf '%s' "$TMP/s.mods" ;; *) printf '' ;; esac; }
+liveDoc(){ case "$1" in extent_suspect_files|extent_suspect_syms) printf '%s' "$TMP/s.hot" ;; macro_blanked_files|macro_blanked) printf '%s' "$TMP/s.leak" ;; use_bounds_blanked_files|use_bounds_blanked) printf '%s' "$TMP/s.rust" ;; t) printf '%s' "$TMP/s.mods" ;; *) printf '' ;; esac; }
 while IFS='|' read -r kind name where <&3; do
     case "$kind" in
         PASS) ok "(S) $name" ;;
@@ -3237,5 +3266,6 @@ if grep -q '<fold kind="bodies"' "$TMP/fl.c" && [ "$flc" -gt 0 ] && [ "$flc" -le
 else
     no "(FOLD-L) fold clause compact=$flc B full=$flf B (want 0 < compact <= 300 < full <= 500, beside a <fold>)"
 fi
+lt_summary compactlegendcheck
 
 exit "$fail"

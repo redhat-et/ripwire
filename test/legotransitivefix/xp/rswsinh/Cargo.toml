@@ -1,0 +1,5 @@
+[workspace]
+members = ["crates/wxcore", "crates/wxapp"]
+[workspace.dependencies]
+xpwscore = { package = "xp-wsinh-core", path = "crates/wxcore" }
+serde = "1"

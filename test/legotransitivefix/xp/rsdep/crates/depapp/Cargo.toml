@@ -1,0 +1,11 @@
+[package]
+name = "xp-dep-app"
+version = "0.1.0"
+
+[dependencies]
+xpdep2 = { package = "xp-dep-core", path = "../depcore" }
+serde = "1"
+
+[dev-dependencies.xpdep3]
+package = "xp-dep-core"
+path = "../depcore"

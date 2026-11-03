@@ -250,10 +250,10 @@ echo "$Q" | grep -q 'prov="split"' && no "qualified_call still carries prov=\"sp
 echo "$Q" | grep -q 'amb=' && no "qualified_call still carries amb= — the call stayed ambiguous" || ok "…and no amb= on the row"
 
 CL="$( "$BIN" "$FIX" --no-cache --callers=Calc::add 2>/dev/null )"
-echo "$CL" | grep -q 'n="qualified_call"' && ok "--callers=Calc::add lists qualified_call" \
+echo "$CL" | grep -q 'n="Caller#qualified_call"' && ok "--callers=Calc::add lists qualified_call" \
     || no "--callers=Calc::add does not list qualified_call: $( echo "$CL" | grep -o '<callers[^>]*' )"
 CT="$( "$BIN" "$FIX" --no-cache --callers=Tally::add 2>/dev/null )"
-callersLacks "$FIX" Tally::add 'n="qualified_call"' "--callers=Tally::add STILL lists qualified_call — the wrong half of the split survived" "--callers=Tally::add does not list qualified_call"
+callersLacks "$FIX" Tally::add 'n="Caller#qualified_call"' "--callers=Tally::add STILL lists qualified_call — the wrong half of the split survived" "--callers=Tally::add does not list qualified_call"
 echo "$CT" | grep -q 'count="0"' && ok "…and reports count=\"0\" (Tally::add has no caller in this tree)" \
     || no "--callers=Tally::add did not report count=0: $( echo "$CT" | grep -o '<callers[^>]*' )"
 
@@ -262,17 +262,17 @@ S="$( rowOf 'n="scoped_call" ' )"
 [ "$( edgesTo "$S" run )" -eq 1 ] && ok "Outer::Engine.run( 3 ) → exactly one edge named run" \
     || no "Outer::Engine.run( 3 ) produced $( edgesTo "$S" run ) run edges: $S"
 CE="$( "$BIN" "$FIX" --no-cache --callers=Engine::run 2>/dev/null )"
-echo "$CE" | grep -q 'n="scoped_call"' && ok "--callers=Engine::run lists scoped_call" \
+echo "$CE" | grep -q 'n="Caller#scoped_call"' && ok "--callers=Engine::run lists scoped_call" \
     || no "--callers=Engine::run does not list scoped_call"
-callersLacks "$FIX" Motor::run 'n="scoped_call"' "--callers=Motor::run lists scoped_call — Outer::Engine reached Other::Motor" "--callers=Motor::run does not list scoped_call"
+callersLacks "$FIX" Motor::run 'n="Caller#scoped_call"' "--callers=Motor::run lists scoped_call — Outer::Engine reached Other::Motor" "--callers=Motor::run does not list scoped_call"
 
 A="$( rowOf 'n="absolute_call" ' )"
 [ "$( edgesTo "$A" ping )" -eq 1 ] && ok "::Top.ping → exactly one edge named ping (the absolute spelling has no scope: child)" \
     || no "::Top.ping produced $( edgesTo "$A" ping ) ping edges: $A"
 CP="$( "$BIN" "$FIX" --no-cache --callers=Top::ping 2>/dev/null )"
-echo "$CP" | grep -q 'n="absolute_call"' && ok "--callers=Top::ping lists absolute_call" \
+echo "$CP" | grep -q 'n="Caller#absolute_call"' && ok "--callers=Top::ping lists absolute_call" \
     || no "--callers=Top::ping does not list absolute_call"
-callersLacks "$FIX" Radar::ping 'n="absolute_call"' "--callers=Radar::ping lists absolute_call — ::Top reached Radar" "--callers=Radar::ping does not list absolute_call"
+callersLacks "$FIX" Radar::ping 'n="Caller#absolute_call"' "--callers=Radar::ping lists absolute_call — ::Top reached Radar" "--callers=Radar::ping does not list absolute_call"
 
 echo "=== a MODULE is a receiver too (Util.format, and the :: spelling of the same call) ==="
 M="$( rowOf 'n="module_call" ' )"
@@ -308,11 +308,11 @@ I="$( rowOf 'n="inherited_call" ' )"
 [ "$( edgesTo "$I" build )" -eq 1 ] && ok "Child.build → exactly one edge (Parent::build, through the inheritance edge captureBases now mints for Ruby)" \
     || no "Child.build produced $( edgesTo "$I" build ) build edges — if Ruby LOST its inheritance edges, that is the regression: see ingest_relations.h::isBaseTypeNode's Ruby arm and test/rubyinheritcheck.sh: $I"
 CB="$( "$BIN" "$FIX" --no-cache --callers=Parent::build 2>/dev/null )"
-echo "$CB" | grep -q 'n="inherited_call"' && ok "--callers=Parent::build lists inherited_call" \
+echo "$CB" | grep -q 'n="Caller#inherited_call"' && ok "--callers=Parent::build lists inherited_call" \
     || no "--callers=Parent::build does not list inherited_call"
 # An absence arm must fail on a broken run: a crash or refusal leaves CBU empty, which the grep alone reads as a PASS.
 if CBU="$( "$BIN" "$FIX" --no-cache --callers=Unrelated::build 2>"$DIR/cbu.err" )"; then
-    if echo "$CBU" | grep -q 'n="inherited_call"'; then no "--callers=Unrelated::build lists inherited_call — the walk took an unrelated same-named def"
+    if echo "$CBU" | grep -q 'n="Caller#inherited_call"'; then no "--callers=Unrelated::build lists inherited_call — the walk took an unrelated same-named def"
     else ok "--callers=Unrelated::build does not list inherited_call"; fi
 else
     no "--callers=Unrelated::build exited non-zero: $( head -3 "$DIR/cbu.err" )"
@@ -346,7 +346,7 @@ CTL="$( "$BIN" "$FIX" --no-cache --callers=Tally::scale 2>/dev/null )"; CTL_RC=$
 if [ "$CCL_RC" -ne 0 ] || [ "$CTL_RC" -ne 0 ]
 then
     no "--callers=Calc::scale / --callers=Tally::scale exited $CCL_RC / $CTL_RC — the absence half cannot be read off a failed run"
-elif echo "$CCL" | grep -q 'n="chain_call"' && ! echo "$CTL" | grep -q 'n="chain_call"'
+elif echo "$CCL" | grep -q 'n="Caller#chain_call"' && ! echo "$CTL" | grep -q 'n="Caller#chain_call"'
 then
     ok "Calc.new.scale( 8 ) → Calc::scale alone (floor (c) lifted: the receiver the code builds is a Calc — test/rubytypedrecvcheck.sh)"
 else
@@ -375,9 +375,9 @@ sed 's/    Calc\.add( 1, 2 )/    Tally.add( 1, 2 )/' "$FIX/caller.rb" >"$MUT/cal
 grep -q 'Tally.add( 1, 2 )' "$MUT/caller.rb" || no "mutation did not apply"
 MQ="$( "$BIN" "$MUT" --no-cache 2>/dev/null | sed 's/></>\n</g' | awk '/n="qualified_call" /{f=1;print;next} /^<s /{f=0} f' )"
 MCL="$( "$BIN" "$MUT" --no-cache --callers=Tally::add 2>/dev/null )"
-echo "$MCL" | grep -q 'n="qualified_call"' && ok "mutation: Tally.add → --callers=Tally::add now lists qualified_call" \
+echo "$MCL" | grep -q 'n="Caller#qualified_call"' && ok "mutation: Tally.add → --callers=Tally::add now lists qualified_call" \
     || no "mutation: the edge did not follow the receiver: $MQ"
-callersLacks "$MUT" Calc::add 'n="qualified_call"' "mutation: --callers=Calc::add still lists qualified_call — the pin is not reading the receiver" "mutation: Calc::add no longer lists it"
+callersLacks "$MUT" Calc::add 'n="Caller#qualified_call"' "mutation: --callers=Calc::add still lists qualified_call — the pin is not reading the receiver" "mutation: Calc::add no longer lists it"
 
 echo
 [ "$fail" -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

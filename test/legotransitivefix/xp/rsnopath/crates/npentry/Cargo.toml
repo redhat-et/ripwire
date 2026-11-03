@@ -1,0 +1,5 @@
+[package]
+name = "xp-np-entry"
+[dependencies.xpnpe]
+package = "xp-np-core"
+version = "1"

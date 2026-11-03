@@ -1,0 +1,4 @@
+[package]
+name = "xp-np-other"
+[dependencies]
+xpnp = { package = "xp-np-core", version = "1" }

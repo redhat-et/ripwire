@@ -12,6 +12,7 @@
 #include "nextverb.h"   // P3 (L7): next= on the top-ranked <d> row
 #include "countfloor.h"   // count-floor: implementorFloors — the <iface> implementors_floor= evidence
 #include "arch.h"        // P3: builtinLayer() — the file-node layer= tag
+#include "memberowner.h"   // QUALNAME-1: MemberOwners — the <d> row folds a member's sc= into n="Owner.name"
 #include "graph.h"     // H6/F2: definitionCountOfName — the ONE resolver behind --lego's defs= single-pick disclosure
 #include "graphlegend.h"   // R-E fix (2026-08-19): rw::rootRelPathsLegend — the ONE root= definition
 #include "lintrules.h"   // §P9.4: langOfPath / dependencyCapable — packDeps' dep_files= denominator
@@ -28,6 +29,7 @@
 #include "prconverge.h" // W2-F: RankDisclosure + the pr_iters= / pr_converged= spellings (CLI and MCP share them)
 #include "historyread.h" // K51: history_unread= on every root that prints churn=/amp=
 #include "gitmine.h"    // F3 (H2H-Graft): RecentFile — the map's <recent> rows are the churn-decay miner's own product
+#include "lexical.h"       // MAP-STEM: rw::subtokens — the one subtoken rule (lexLowerByte rides with it)
 #include "mapinventory.h"   // D7: the map scope's <inv> tier — computeMapInventory, kMapInventoryLegend
 
 #include <algorithm>
@@ -1345,11 +1347,12 @@ struct ChargedSection
 // CA4 w1fix2-verifier G4: this once read `value[0] == '1'`, so `=10`, `=1x` and `=1000000` all injected the
 // fault — a prefix test where the contract is a switch. That rule now lives in ONE place, rw::faultSwitchOn
 // (infra/emit.h), which every fault switch reads through, so the next one cannot get it wrong again; the
-// once-per-process `static` stays here, where determinism needs it.
+// once-per-process read is likewise rw::faultSwitchOnOnce there, whose per-tag `static` is where determinism
+// needs it.
+struct ChargeBufferFaultTag {};   // this switch's own faultSwitchOnOnce cache (infra/emit.h)
 inline bool isChargeBufferFaultInjected() noexcept
 {
-    static const bool isOn = rw::faultSwitchOn( "RIPWIRE_FAULT_CHARGE_BUFFER" );
-    return isOn;
+    return rw::faultSwitchOnOnce<ChargeBufferFaultTag>( "RIPWIRE_FAULT_CHARGE_BUFFER" );
 }
 
 // Drop-in for `open_memstream` at every est_tokens-family measurement buffer. nullptr ⇒ the caller takes its
@@ -2020,6 +2023,198 @@ inline DataSectionsCut codeFirstKeep( const IngestResult& ing, std::vector<NodeI
     order = std::move( picked );
     return c;
 }
+
+// ── MAP-STEM (lane peer-s; mechanism learned from graphify's report communities, Apache-2.0, no code taken) ─────────────────
+// A file row of the map lists the file's kept rows in rank order, so a file named for a type (starlette's formparsers.py:
+// FormParser, MultiPartParser) could show only its exception and data classes, which outrank the type the file is named for.
+// The map scope now reserves one row per shown file for its STEM-NAMESAKE type when the rank cut left it out: a class, struct
+// or interface defined in that file with the most name subtokens (3+ bytes, lowercased) found inside the file's lowercased stem
+// (`formparsers` holds `form` and `parser`: FormParser 2, MultiPartParser 1); ties go to the larger definition, then the earlier line.
+// TIGHT (lane map-stem-tight; the loose rule cost +16.9 KB over 14 maps for one needed row): only a COMPLETE namesake is a candidate,
+// at least 2 subtokens and EVERY one of the name's 3+ byte subtokens inside the stem (FormParser in formparsers.py; not
+// BaseHTTPMiddleware in base.py, not WidgetRegistryStore in widgetstore.py). The filter is applied per candidate, so an incomplete
+// class never shadows a complete one. RIPWIRE_NO_MAP_STEM_TIGHT (any value) restores the loose rule. It is ADDED
+// after the file's kept rows (no kept row is dropped), marked stem="1", and counted in the root's shown=. A file whose kept
+// rows already hold a COMPLETE namesake with as many shared subtokens gets none (a kept FormParserError does not hold off FormParser), and so does a test file (layer="test"). UNDER --max-tokens none is
+// printed (a stem row is extra bytes: it would displace ranked rows from the budgeted cut) and the root says how many it left out, stem_cut=N.
+// RIPWIRE_NO_MAP_STEM (any value) turns it off.
+namespace map_stem_detail
+{
+// The tight rule (lane map-stem-tight): a stem row must be a COMPLETE namesake, at least kMapStemMinShared subtokens and every one of them in the stem.
+inline constexpr std::size_t kMapStemMinShared = 2;
+struct StemShare
+{
+    std::size_t shared = 0;   // the >= 3-byte subtokens of the name found inside the stem
+    std::size_t total  = 0;   // all the name's >= 3-byte subtokens
+    [[nodiscard]] bool complete() const noexcept { return shared >= kMapStemMinShared && shared == total; }
+};
+// How many of a type name's subtokens (rw::subtokens: the lexical rule, lowercased; the >= 3-byte ones, since a shorter one such
+// as `id` or `io` matches inside too many stems) occur inside the lowercased file stem: a stem is written run together as often
+// as not (`formparsers` holds `form` and `parser` of FormParser; `body_limit` holds `body` and `limit`).
+inline StemShare stemShare( std::string_view stemLower, std::string_view name, std::vector<std::string>& scratch )
+{
+    scratch.clear();
+    subtokens( name, scratch );
+    StemShare r;
+    for( const std::string& t : scratch )
+    {
+        if( t.size() >= 3 )
+        {
+            ++r.total;
+            r.shared += stemLower.find( t ) != std::string_view::npos ? 1 : 0;
+        }
+    }
+    return r;
+}
+// Does a KEPT class already stand for the file's namesake? Loose: it shares as many subtokens as the pick. Tight: it must also be a
+// COMPLETE namesake itself, so a kept FormParserError (form+parser of form+parser+error) does not hold off the complete FormParser.
+inline bool holdsStemSlot( const StemShare& kept, std::size_t pickShared, bool tight ) noexcept
+{
+    return kept.shared >= pickShared && ( !tight || kept.complete() );
+}
+inline std::string_view fileStem( std::string_view path ) noexcept
+{
+    if( const std::size_t slash = path.find_last_of( "/\\" ); slash != std::string_view::npos )
+    {
+        path.remove_prefix( slash + 1 );
+    }
+    if( const std::size_t dot = path.find( '.' ); dot != std::string_view::npos && dot > 0 )
+    {
+        path = path.substr( 0, dot );
+    }
+    return path;
+}
+}   // namespace map_stem_detail
+
+// The XML legend clause for stem_cut=, charged only to a --max-tokens map that carries it. No double hyphen inside a comment (G4).
+inline constexpr std::string_view kMapStemCutLegend =
+    "<!-- stem_cut=N: N file-name rows (stem=1) left out to fit max_tokens -->";
+
+// The XML legend clause, charged only to a map that carries the attribute. No double hyphen inside a comment (G4).
+inline constexpr std::string_view kMapStemLegend =
+    "<!-- stem=\"1\": the class/struct/interface a file is named for (2+ name words, all in the file name), "
+    "added after the file's top-K rows because the rank cut left it out (no kept row dropped; counted in shown=) -->";
+
+// The same clause under RIPWIRE_NO_MAP_STEM_TIGHT (CodeRabbit 4381174514): the loose rule needs ONE shared name word, so the tight
+// clause's "2+ name words, all in the file name" would be false. (compactlegend.h's stem reading is never printed beside a map: this comment is spelled in both dialects.)
+inline constexpr std::string_view kMapStemLooseLegend =
+    "<!-- stem=\"1\" (loose rule, RIPWIRE_NO_MAP_STEM_TIGHT): the class/struct/interface a file is named for (1+ name word in the file name), "
+    "added after the file's top-K rows because the rank cut left it out (no kept row dropped; counted in shown=) -->";
+
+inline bool mapStemOn()
+{
+    return std::getenv( "RIPWIRE_NO_MAP_STEM" ) == nullptr;
+}
+
+// RIPWIRE_NO_MAP_STEM_TIGHT (any value) restores the loose rule: any one shared subtoken makes a candidate (the pre-tight map, +16.9 KB over the 14 -01 rows).
+inline bool mapStemTightOn()
+{
+    return std::getenv( "RIPWIRE_NO_MAP_STEM_TIGHT" ) == nullptr;
+}
+
+// Appends each shown file's ranked-out stem-namesake type to its bucket; returns the added ids, sorted (the stem="1" lookup).
+inline std::vector<NodeId> addMapStemRows( const IngestResult& ing, std::vector<std::vector<NodeId>>& buckets, const std::vector<std::uint32_t>& fileOrder )
+{
+    using namespace map_stem_detail;
+    const bool tight = mapStemTightOn();
+    std::vector<NodeId> added;
+    if( fileOrder.empty() )
+    {
+        return added;
+    }
+    std::vector<std::uint32_t> slotOf( ing.files.size(), UINT32_MAX );   // shown file -> its index in fileOrder
+    for( std::uint32_t i = 0; i < fileOrder.size(); ++i )
+    {
+        if( std::string_view( builtinLayer( rootRelPath( ing, fileOrder[i] ) ) ) != "test" )
+        {
+            slotOf[ fileOrder[i] ] = i;   // a test file's row reserves nothing: its namesake is a fixture class, not the file's subject
+        }
+    }
+    std::vector<std::string>              stems( fileOrder.size() );
+    std::vector<char>                     stemDone( fileOrder.size(), 0 );
+    std::vector<NodeId>                   best( fileOrder.size(), kNoNode );
+    std::vector<std::size_t>              bestShared( fileOrder.size(), 0 );
+    std::vector<std::string>              scratch;
+    const auto stemOf = [ & ]( std::uint32_t slot ) -> std::string_view
+    {
+        if( !stemDone[slot] )
+        {
+            for( const char ch : fileStem( ing.files[ fileOrder[slot] ] ) )
+            {
+                stems[slot].push_back( char( lexLowerByte( static_cast<unsigned char>( ch ) ) ) );
+            }
+            stemDone[slot] = 1;
+        }
+        return stems[slot];
+    };
+    const auto spanOf = [ & ]( NodeId id ) { return ing.symbols[id].endByte - std::min( ing.symbols[id].endByte, ing.symbols[id].sigStartByte ); };
+    for( NodeId id = 0; id < ing.symbols.size(); ++id )
+    {
+        const Symbol& s = ing.symbols[id];
+        if( !ReceiverEvidence::classLike( s.kind ) || s.fileId >= slotOf.size() || slotOf[ s.fileId ] == UINT32_MAX || s.name.empty() )
+        {
+            continue;
+        }
+        const std::uint32_t slot   = slotOf[ s.fileId ];
+        const StemShare     share  = stemShare( stemOf( slot ), s.name, scratch );
+        const std::size_t   shared = share.shared;
+        if( shared == 0 || ( tight && !share.complete() ) )
+        {
+            continue;
+        }
+        const NodeId b = best[slot];
+        if( b == kNoNode || shared > bestShared[slot] || ( shared == bestShared[slot] && ( spanOf( id ) > spanOf( b ) || ( spanOf( id ) == spanOf( b ) && s.line < ing.symbols[b].line ) ) ) )
+        {
+            best[slot]       = id;
+            bestShared[slot] = shared;
+        }
+    }
+    for( std::uint32_t slot = 0; slot < fileOrder.size(); ++slot )
+    {
+        const NodeId pick = best[slot];
+        if( pick == kNoNode )
+        {
+            continue;
+        }
+        std::vector<NodeId>& rows = buckets[ fileOrder[slot] ];
+        const bool held = std::ranges::any_of( rows, [ & ]( NodeId r )
+        {
+            return r == pick || ( ReceiverEvidence::classLike( ing.symbols[r].kind ) && holdsStemSlot( stemShare( stemOf( slot ), ing.symbols[r].name, scratch ), bestShared[slot], tight ) );
+        } );
+        if( !held )
+        {
+            rows.push_back( pick );
+            added.push_back( pick );
+        }
+    }
+    std::ranges::sort( added );
+    return added;
+}
+
+// What the map scope does with the stem rows. Under a --max-tokens fit (the budget's top-K search prices the whole emitted map)
+// a stem row is EXTRA bytes that would crowd a ranked row out of the cut, so there it is the first to go: none is printed, and the
+// count the unbudgeted map would have added is disclosed as stem_cut=N (`cut`). Unbudgeted, `rows` are added to the buckets.
+struct MapStemPick
+{
+    std::vector<NodeId> rows;      // the stem="1" ids, sorted
+    std::size_t         cut = 0;   // stem rows a --max-tokens fit left out
+};
+inline MapStemPick pickMapStemRows( const IngestResult& ing, const MapAnnotations& ann, std::vector<std::vector<NodeId>>& buckets, const std::vector<std::uint32_t>& fileOrder )
+{
+    MapStemPick pick;
+    if( !ann.codeFirstRows || !mapStemOn() )
+    {
+        return pick;
+    }
+    if( ann.maxTokensFit == nullptr )
+    {
+        pick.rows = addMapStemRows( ing, buckets, fileOrder );
+        return pick;
+    }
+    std::vector<std::vector<NodeId>> scratch = buckets;   // priced, not printed
+    pick.cut = addMapStemRows( ing, scratch, fileOrder ).size();
+    return pick;
+}
 inline std::string dataSectionsNext( const DataSectionsCut& c )
 {
     // The registered spelling, offset before limit (so nextverb.h pagedNext, which writes limit first, is not it).
@@ -2580,6 +2775,31 @@ inline std::string buildIgnoredAttr( const CrawlSkips& skips )
     return attr;
 }
 
+// #478 gap 3: --arch and --deps report on modules, and a real package the crawl denylist removed reads there as if it did not exist
+// (pip's operations/build). Names them, present only when one was pruned; the rows are capped and count= with next= carry the rest.
+inline constexpr std::size_t kMaxPrunedPackagesShown = 8;
+inline std::string buildPrunedPackagesBlock( const CrawlSkips& skips, std::string_view rootArg )
+{
+    if( skips.prunedPackages == 0 )
+    {
+        return {};
+    }
+    const std::string rootPrefix = rootArg.empty() ? std::string() : rw::sarif::rootPrefixOf( rootArg );
+    const std::size_t shown      = std::min( skips.prunedPackageRows.size(), kMaxPrunedPackagesShown );
+    std::string       out = "<pruned_packages count=\"" + std::to_string( skips.prunedPackages ) + "\" shown=\"" + std::to_string( shown )
+                          + "\" next=\"--skipped\" note=\"packages the crawl denylist removed by name: not indexed, so edges to and from them are missing here\">";
+    std::vector<char> esc;
+    for( std::size_t i = 0; i < shown; ++i )
+    {
+        const std::string& p = skips.prunedPackageRows[ i ].path;
+        out += "<p path=\"";
+        out += escapeXml( rootArg.empty() ? std::string_view( p ) : rw::sarif::rootRelativeUri( p, rootPrefix ), esc );
+        out += "\"/>";
+    }
+    out += "</pruned_packages>";
+    return out;
+}
+
 // §SEC1 — how many files the crawl REFUSED because a symlink took them out of the root (ingest.h carries the
 // rule). On the DEFAULT map, not only on --skipped, because the default map is the surface an agent actually
 // reads and a corpus that quietly shrank is precisely what the honesty contract forbids: files= would
@@ -2644,12 +2864,14 @@ inline std::uint32_t counterAt( const std::vector<std::uint32_t>* v, NodeId id )
     return ( v && id < v->size() ) ? ( *v )[ id ] : 0u;
 }
 
-// The <c> row's prov=, via=, x= and anchor="missing" tail. One writer so the row loop stays a scan.
+// The <c> row's prov= (or via="impl"), via=, x= and anchor="missing" tail. One writer so the row loop stays a scan.
 inline void writeMapCalleeAttrs( XmlWriter& w, std::uint8_t prov, bool link, bool nameOnly, std::size_t repeats, bool miss )
 {
     if( prov != 0 )
     {
-        w.write( "\" prov=\"" );
+        w.write( "\" " );
+        w.write( provAttrName( prov ) );   // lane L6: via="impl" (the one implementor in the tree), prov= otherwise
+        w.write( "=\"" );
         w.write( provLabel( prov ) );
     }
     if( link )
@@ -2995,6 +3217,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         if( !seen[f] ) { seen[f] = 1;  fileOrder.push_back( f ); }
         buckets[f].push_back( id );
     }
+    // MAP-STEM: the map scope's one reserved row per shown file (addMapStemRows above); added after the kept rows
+    const MapStemPick         stemPick = stubbed ? MapStemPick{} : pickMapStemRows( ing, ann, buckets, fileOrder );
+    const std::vector<NodeId>& stemRows = stemPick.rows;
     // D7: the inventory over the files the kept rows did NOT reach (`seen` is exactly the printed <f> groups)
     const MapInventory inventory = ( mapInventoryWanted( ing, ann ) && !stubbed )
                                  ? computeMapInventory( ing, outOff, outTargets, seen, pathRel ) : MapInventory{};
@@ -3075,6 +3300,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += kModScopeMapLegend;
     }
+    // lane L6: a <c via="impl"> edge's reading, under the same absent-at-zero rule over the rows WRITTEN (fix round 1, N1): only
+    // when a kept row or an inventory entry has a one-implementor edge — never because one exists elsewhere in the graph
+    if( outProv != nullptr && !stubbed
+        && ( markedOutAny( outOff, *outProv, std::span<const NodeId>( order.data(), std::min( keep, order.size() ) ), kProvImpl )
+             || markedOutAny( outOff, *outProv, std::span<const NodeId>( inventory.entries.data(), inventory.entries.size() ), kProvImpl ) ) )
+    {
+        legend += "<!-- c:via=impl:the-one-implementor-in-the-tree-of-the-receiver's-interface/trait/abstract-type-owns-the-callee(an-outside-or-macro-made-one-may-exist) -->";
+    }
     // honesty-small-068: the Go named-type kinds' clause, under the same absent-at-zero rule as modscope's above.
     if( std::any_of( ing.symbols.begin(), ing.symbols.end(), []( const Symbol& sym )
                      { return sym.kind == SymKind::NamedType || sym.kind == SymKind::Alias || sym.kind == SymKind::FuncType; } ) )
@@ -3136,9 +3369,9 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     {
         legend += "<!-- of= is the resolved SEED this neighbourhood is centred on; depth= call hops walked and fanout= "
                   "neighbours kept per hop are its whole boundary, so a row's absence means outside them, not nonexistent. "
-                  "defs= (only when >1) = that NAME has N definitions and the lowest-id one was walked (a CODE definition before a doc "
-                  "heading or config key, and a C/C++ declaration without a body yields to the lowest-id definition of its "
-                  "scope that has one); qualify with "
+                  "defs= (only when >1) = that NAME has N definitions and the most specific one was walked (kind first, its language "
+                  "ahead, id last: a CODE definition before a doc heading or config key, and a C/C++ declaration without a body yields to "
+                  "the first bodied definition of its scope in that order); qualify with "
                   "file:name or @FILE:LINE to pick another. -->";
         legend += seedBiteLegend( ann.seed );   // C2: charged only on a run whose root carries a bite attribute (the at= rule)
         // H1: charged only on a run whose root carries unproven_defs= — the same rule, and part of the head est_tokens prices.
@@ -3173,6 +3406,14 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
     if( dataSecCut.cut > 0 )
     {
         legend += kDataSectionsCutLegend;   // charged to the map that carries data_sections_cut=
+    }
+    if( !stemRows.empty() )
+    {
+        legend += mapStemTightOn() ? kMapStemLegend : kMapStemLooseLegend;   // MAP-STEM: charged to the map that carries stem="1"; the rule the run selected
+    }
+    if( stemPick.cut > 0 )
+    {
+        legend += kMapStemCutLegend;        // MAP-STEM: charged to the --max-tokens map that carries stem_cut=
     }
     if( inventory.active )
     {
@@ -3306,7 +3547,7 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         stats += std::to_string( ing.files.size() );
         stats += " symbols=";    stats += std::to_string( S );
         stats += " edges=";      stats += std::to_string( outTargets.size() );
-        stats += " shown=";      stats += std::to_string( ann.stubSymbols ? std::size_t( 0 ) : keep );   // C1-b: the stub prints no row
+        stats += " shown=";      stats += std::to_string( ann.stubSymbols ? std::size_t( 0 ) : keep + stemRows.size() );   // C1-b: the stub prints no row
         stats += " est_tokens="; stats += std::to_string( estTokens );
         if( estimate.isModelled )
         {
@@ -3414,6 +3655,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
         {
             h += " data_sections_cut=\"";  h += std::to_string( dataSecCut.cut );  h += "\"";
             h += nextAttrXml( dataSectionsNext( dataSecCut ) );
+        }
+        if( stemPick.cut > 0 )
+        {
+            h += " stem_cut=\"";  h += std::to_string( stemPick.cut );  h += "\"";   // MAP-STEM: absent unless a --max-tokens fit left stem rows out
         }
         h += ">";
         h += renderHistoryUnread( DiscloseAs::LegendComment );   // K51: its own definition, right behind the root it marks
@@ -3542,6 +3787,10 @@ inline void serialize( std::FILE* out, const IngestResult& ing, const std::vecto
                 // exactly when the canonical id differed from the bare name (canonicalId degrades to the name on an
                 // empty scope), so the row set that carries an identity attribute is unchanged.
                 writeScopeAttr( w, s, esc );
+                if( !stemRows.empty() && std::ranges::binary_search( stemRows, id ) )
+                {
+                    w.write( " stem=\"1\"" );   // MAP-STEM: the file's stem-namesake type, added below the top-K cut
+                }
 
                 w.write( overloadsAttr( rows.overloads[i] ) );   // see overloadsAttr() above — empty in the common case
                 w.write( splitLineAttr( rows, i, s ) );            // --metrics per-definition rows only
@@ -4458,6 +4707,8 @@ struct SigRowFacts
                                                            //   when "0" — its legend says an absent one IS 0. Only where in=
                                                            //   is measured on every row (fanIn supplied): without fanIn an
                                                            //   absent in= means "not measured" (P2.4), so nothing is elided.
+    const MemberOwners*               owners = nullptr;    // QUALNAME-1: a member row prints n="Owner.name" and no sc= (memberowner.h);
+                                                           //   nullptr ⇒ n= bare and sc= as before.
 };
 
 // Whether this row's zero cx=/ccx=/in= are omitted (SigRowFacts::elideZero): the lens asked AND in= is measured here.
@@ -4540,9 +4791,12 @@ inline std::string sigRowHead( const IngestResult& ing, NodeId id, const SigRowF
     char lineAttr[ 32 ];
     rw::formatTo( lineAttr, sizeof( lineAttr ), "<d l=\"{}\" n=\"", s.line );
     std::string head = lineAttr;
-    head += escapeXml( s.name, esc );          // escapeXml returns a view INTO esc — copy before the next call
+    // QUALNAME-1: a member's scope FOLDS into n= (n="Owner.name", the language's separator; memberowner.h says when) — the id is
+    // then p::Owner::name, the scope still spelled once; every other scoped row keeps n= bare and sc= (row 6).
+    const std::string_view owner = facts.owners != nullptr ? facts.owners->ownerOf( s ) : std::string_view();
+    head += escapeXml( qualifiedMemberName( owner, s ), esc );          // escapeXml returns a view INTO esc — copy before the next call
     head += "\"";
-    if( hasScopeAttr( s ) )   // row 6: the short id — the scope segment only; p= (this row's, or its <f>'s) supplies the rest
+    if( owner.empty() && hasScopeAttr( s ) )   // row 6: the short id — the scope segment only; p= (this row's, or its <f>'s) supplies the rest
     { head += " sc=\"";  head += escapeXml( s.scope, esc );  head += "\""; }
     // P7 (terminality round A, lane R, 2026-09-05): p= (and layer= when the file sits in a builtin layer) ride
     // EVERY row that carries r= — the lens serving is FLAT now (rows in rank order, no <f p=> wrapper), so the
@@ -5729,6 +5983,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                                                              //   r=1: the rank-adaptive doc/sig tiers and the r=1 row's next= hint key
                                                              //   on GLOBAL rank), so pages merge without duplicate r=
 {
+    const MemberOwners sigOwners( ing );   // QUALNAME-1: one owner pass per <sigs> block, a binary search per row
     const SigsCutContinuation* const cutNext = cutOut != nullptr ? cutOut->continuationRequest : nullptr;
     // forbudget-soft: the two other INPUTS the report carries (the row-drop budget and whether past_target= is printed), read
     // before the reset like the continuation request
@@ -5965,7 +6220,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
                     }
                 }
 
-                const SigRowFacts rowFacts{ metrics, fanIn, qbuf, pure, globalRank, topRowNext, spelling.elideZeroMetrics };
+                const SigRowFacts rowFacts{ metrics, fanIn, qbuf, pure, globalRank, topRowNext, spelling.elideZeroMetrics, &sigOwners };
                 std::string head = sigRowHead( ing, id, rowFacts, esc, rootArg );   // d1: rank fact (ladder path)
 
                 std::string doc = docCommentBefore( src, a );
@@ -6100,7 +6355,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
         // may change. The moved row keeps the row spelling it was charged and shown with (both reorders).
         const auto reheadXml = [ & ]( SigEntry& e, std::uint32_t newRank )
         { e.head = sigRowHead( ing, e.id, SigRowFacts{ metrics, fanIn, e.lensRun.c_str(), e.pureSig ? " pure=\"1\"" : "", newRank, topRowNext,
-                                                       spelling.elideZeroMetrics }, esc, rootArg ); };
+                                                       spelling.elideZeroMetrics, &sigOwners }, esc, rootArg ); };
         const auto isDocRow = [ & ]( const SigEntry& e ) { return ing.symbols[ e.id ].lang == Lang::Markdown; };   // both reorders' one doc test
         if( hasSigLensRule( lensRules, SigLensRules::HeadRoundRobin ) )
         {
@@ -6313,7 +6568,7 @@ inline void packSignatures( std::FILE* out, const IngestResult& ing, const std::
 
             // identity (n=/id=) + descriptive facts (cx=complexity, ccx=cognitive, in=reuse-count, Q3 lens, pure)
             // d1: rank 0 = non-lens serving — r= (and P7's p=) absent by contract.
-            std::string row = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, /*rank=*/0u }, esc, rootArg );
+            std::string row = sigRowHead( ing, id, SigRowFacts{ metrics, fanIn, qbuf, pure, /*rank=*/0u, {}, false, &sigOwners }, esc, rootArg );
             std::string doc = docCommentBefore( src, a );   // L2: the human-written intent, if any
             redactInPlace( doc, redact );                    // a doc-comment body can hold a pasted secret
             if( !doc.empty() ) { row += "<doc>";  row += escapeXml( doc, esc );  row += "</doc>";  used += doc.size() + 12; }
@@ -9148,6 +9403,82 @@ inline const char* legoContractCaveat( bool isContractExtracted, bool isTargeted
     return ( isTargeted && !isContractExtracted ) ? "\" methods=\"0\" caveat=\"not-extracted-for-lang" : "";
 }
 
+// --lego's ROLE order over the tower (graph.h applyNameTower), view-local: the answer to "--lego=NAME" is a TYPE with
+// something to show, so every type kind (Class/Struct/Interface/named type) shares ONE rung, and on it the keys are,
+// in order: at least one implementor (the <impl> rows); a method contract that is extracted (legoMethodContractSound —
+// no not-extracted caveat, its <m> rows are read; today a C++ / Objective-C definition, decided by the language alone,
+// so it must NOT outrank an implementor: a data-only C++ class would beat a Rust trait that has implementors,
+// rv-pr432-delta B1); then the tower's own key — kind rank (an Interface above a
+// Class), the leading symbol's language, id ASC. Every other rung keeps the tower rank (a Method above the types, a
+// constructor just below them). Measured (diagnosis @mpapis, #432): `--lego=Shape` on this repository answered an
+// Elixir `shape.ex` (Interface, methods="0" caveat) over the C++ `Shape` whose contract is extracted
+// (a9disclosurecheck §A9.4); `--lego=Marker` answered the Java `interface Marker` (no implementor) over the Kotlin
+// one the grammar tags as a class, which `Tagged` implements (kotlincheck §13). A Rust trait still leads a same-named
+// struct (nushell FromValue, PluginCommand): its implementors keep it ahead, and so does the kind rank.
+// Where every candidate has implementors (§A9.4 Shape: C++ 4, Elixir 2, Rust 2) the extracted contract settles it.
+inline std::vector<NodeId> legoRoleOrder( const IngestResult& ing, const std::vector<std::vector<NodeId>>& implementors, std::vector<NodeId> ids )
+{
+    if( ids.size() < 2 )
+    {
+        return ids;
+    }
+    struct RoleKey
+    {
+        int    rung;
+        bool   hasImplementor;
+        bool   isContractExtracted;
+        int    towerRank;
+        NodeId id;
+    };
+    const std::vector<int> towerRanks = nameTowerRanks( ing, ids );
+    const int              typeRung   = 2 * kindSpecificity( SymKind::Interface );
+    std::vector<RoleKey>   keys;
+    keys.reserve( ids.size() );
+    for( std::size_t i = 0; i < ids.size(); ++i )
+    {
+        const NodeId  id     = ids[ i ];
+        const Symbol& s      = ing.symbols[ id ];
+        const bool    isType = namespaceCompatible( RefRole::Type, s.kind );   // graph.h's one statement of "a type definition"
+        keys.push_back( RoleKey{ isType ? typeRung : towerRanks[ i ], isType && id < implementors.size() && !implementors[ id ].empty(),
+                                 isType && legoMethodContractSound( s.lang ), towerRanks[ i ], id } );
+    }
+    const auto ahead = []( const RoleKey& a, const RoleKey& b ) noexcept
+    {
+        return std::tuple( a.rung, a.hasImplementor, a.isContractExtracted, a.towerRank )
+             > std::tuple( b.rung, b.hasImplementor, b.isContractExtracted, b.towerRank );
+    };
+    const RoleKey reference = *std::min_element( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b )
+                                                 { return ahead( a, b ) || ( !ahead( b, a ) && a.id < b.id ); } );
+    const Lang referenceLang = ing.symbols[ reference.id ].lang;
+    std::sort( keys.begin(), keys.end(), [ & ]( const RoleKey& a, const RoleKey& b ) noexcept
+               {
+                   if( ahead( a, b ) || ahead( b, a ) )
+                   {
+                       return ahead( a, b );
+                   }
+                   const bool refA = ing.symbols[ a.id ].lang == referenceLang, refB = ing.symbols[ b.id ].lang == referenceLang;
+                   if( refA != refB )
+                   {
+                       return refA;
+                   }
+                   return a.id < b.id;
+               } );
+    for( std::size_t i = 0; i < ids.size(); ++i )
+    {
+        ids[ i ] = keys[ i ].id;
+    }
+    return ids;
+}
+
+// --lego's single pick (CLI --lego=TYPE and the MCP lego verb): resolveFocus's pick (graph.h focusOfOrderedMatches:
+// code first, a bodyless C/C++ front yields to its same-scope body) over legoRoleOrder instead of the bare tower.
+inline NodeId resolveLegoFocus( const IngestResult& ing, const std::vector<std::vector<NodeId>>& implementors, std::string_view spec,
+                                std::size_t* unprovenDefCountOut )
+{
+    std::vector<NodeId> matches = resolveAllByNameQualified( ing, spec, unprovenDefCountOut );   // the tower order, every tier
+    return focusOfOrderedMatches( ing, legoRoleOrder( ing, implementors, std::move( matches ) ) );
+}
+
 // §P3 SCOPE (bundle embeddings only). packLego's ranked mode treats "has implementors" as "is an interface",
 // so scoping THAT map is the filter: this returns a view of `implementors` in which every interface the task
 // did not reach has an EMPTY implementor list — packLego then ranks and emits only what is left, and emits no
@@ -9400,12 +9731,18 @@ struct LegoTargetedArgs
     int              pageOffset = 0;        // --offset / MCP offset
     const std::vector<std::vector<std::uint8_t>>* implementorBound = nullptr;   // fix 1: Graph::implementorBound (null: nothing proven)
     std::span<const RubyMainMixinRow> mainMixins;   // lane ruby-pair: Graph::rubyMainMixins (sorted by base) — the main-object rows (withMainRows)
+    std::span<const std::uint32_t> decidedOutside;   // lane fc2-lego-extparent: Graph::baseOutsideClauses — clauses implementors_floor must not count
     LegoTargetedArgs() = default;
     LegoTargetedArgs( std::string_view floorAttr, int limit = 0, int offset = 0, const std::vector<std::vector<std::uint8_t>>* bound = nullptr )
         : graphCountFloorAttr( floorAttr ), pageLimit( limit ), pageOffset( offset ), implementorBound( bound ) {}
     LegoTargetedArgs&& withMainRows( std::span<const RubyMainMixinRow> rows ) && noexcept
     {
         mainMixins = rows;
+        return std::move( *this );
+    }
+    LegoTargetedArgs&& withDecidedOutside( std::span<const std::uint32_t> clauses ) && noexcept
+    {
+        decidedOutside = clauses;
         return std::move( *this );
     }
 };
@@ -9546,7 +9883,7 @@ inline void packLego( std::FILE* out, const IngestResult& ing, const std::vector
     // count-floor (countfloor.h implementorFloors): an extends/implements clause spelled like a kept interface that the graph
     // bound to no definition of that name — implementors= cannot count it. Both modes: absent unless such a clause exists.
     const std::vector<std::vector<NodeId>>& countMap = graphImplementors != nullptr ? *graphImplementors : implementors;
-    const std::vector<char> implFloor = implementorFloors( ing, countMap, std::span<const NodeId>( ifaces.data(), keep ) );
+    const std::vector<char> implFloor = implementorFloors( ing, countMap, std::span<const NodeId>( ifaces.data(), keep ), targeted.decidedOutside );
 
     XmlWriter         w( out );
     std::vector<char> esc;
@@ -9785,9 +10122,10 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     {
         return rootArg.empty() ? std::string_view( ing.files[ fileId ] ) : rw::sarif::rootRelativeUri( ing.files[ fileId ], rootPrefix );
     };
-    // §P9.4: dep_files= denominator (see graph.h::restrictDependencyHealth) — derived from `ing`, already a param.
-    const auto        depCapableMask = dependencyCapableMask( ing );
-    const std::size_t depFiles       = std::size_t( std::count( depCapableMask.begin(), depCapableMask.end(), char( 1 ) ) );
+    // §P9.4: dep_files= denominator (see graph.h::restrictDependencyHealth) — derived from `ing` and the graph; arch-honest: a
+    // no-edge file nothing touches is left out of it (lintrules.h dependencyMeasure), and masked_files= says how many.
+    const rw::DependencyMeasure measure  = rw::dependencyMeasure( ing, adj );
+    const std::size_t           depFiles = measure.depFiles;
     std::vector<std::vector<std::uint32_t>> byFile( F );   // file → indices into ing.includes
     for( std::uint32_t i = 0; i < ing.includes.size(); ++i )
     {
@@ -9846,6 +10184,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     }
     w.write( rw::depsImportsUnresolvedLegend( tsImports.unresolved > 0 ) );   // #220: exactly when the root carries the pair
     w.write( rw::depsTsImportExtrasLegend( tsImports.dts, tsImports.unread ) );
+    w.write( rw::prunedPackagesLegend( ing.crawlSkips.prunedPackages > 0, /*leadingSpace=*/ false ) );   // #478 gap 3: exactly when the block below is printed
+    // arch-honest: files in a language with no file edges (lintrules.h noFileEdgeFiles); every attribute below is absent at files == 0
+    const rw::NoFileEdgeFiles noEdge       = rw::noFileEdgeFiles( ing );
+    const bool                healthUnknown = rw::systemNumbersUnknown( noEdge, measure );   // no measured edge left: every cone is one file, nothing behind ccd/nccd/shape but the missing data
+    w.write( rw::depsNoFileEdgesLegend( noEdge.files != 0 ) );
+    w.write( rw::depsMaskedFilesLegend( measure.masked != 0 ) );
     w.write( "raise the default cap with limit=N (offset=M pages; a cut listing carries total=/has_more=/next_offset= so a paging loop can continue from it). -->" );
 
     // discloseCap=TRUE, and this is the one un-paginated byte-shape change here: --deps caps the listing at
@@ -9861,8 +10205,10 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         // (the V1-1 truncation class main.cpp's own history warns about) — written separately.
         if( !rootArg.empty() ) { w.write( " root=\"" );  w.write( escapeXml( rootArg, esc ) );  w.write( "\"" ); }
         w.write( rw::tsImportRootAttrXml( tsImports.unresolved, tsImports.dts, tsImports.unread ) );   // #220: absent at 0; partial, not a floor — see graphlegend.h
+        w.write( rw::noFileEdgesRootAttrXml( rw::noFileEdgeLangTags( noEdge.langs ), noEdge.files, tsImports.unresolved > 0 || tsImports.unread > 0 ) );
         w.write( ">" );
     }
+    w.write( buildPrunedPackagesBlock( ing.crawlSkips, rootArg ) );   // #478 gap 3: absent when no real package was pruned
 
     // whole-codebase dependency health (Lakos): NCCD<1 horizontal/flat/good, >1 vertical, >2 tangled.
     // §P9.4: files=corpus size, dep_files=the ccd/acd/nccd/shape denominator (dependency-capable only).
@@ -9875,10 +10221,18 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
     // it is the SAME predicate --arch's propagation_cost N and --cochange's dep_capable= are built on.
     const std::string depLangs = rw::dependencyCapableLangTags();
     char hb[ 176 ];
-    rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
-                   ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
-                   nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+    if( healthUnknown )
+    {
+        rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\"", ing.files.size(), depFiles );
+    }
+    else
+    {
+        rw::formatTo( hb, sizeof( hb ), "<health files=\"{}\" dep_files=\"{}\" ccd=\"{}\" acd=\"{:.1f}\" nccd=\"{:.2f}\" shape=\"{}\"",
+                       ing.files.size(), depFiles, static_cast<unsigned long long>( ccd ), acd, nccd,
+                       nccd < 1.0 ? "horizontal" : ( nccd > 2.0 ? "tangled" : "vertical" ) );
+    }
     w.write( hb );
+    w.write( rw::countAttrXmlOrEmpty( "masked_files", measure.masked ) );   // arch-honest: absent at 0, so a tree without a no-edge file is byte-identical
     if( lazyEdges > 0 )   // absent exactly when nothing was left out — never a hidden 0, and byte-identical for every corpus without a lazy directive
     {
         char lb[ 40 ];  rw::formatTo( lb, sizeof( lb ), " lazy_edges=\"{}\"", static_cast<unsigned long long>( lazyEdges ) );
@@ -10032,7 +10386,12 @@ inline void packDeps( std::FILE* out, const IngestResult& ing, int topN,
         const double inst = ( ce_ + ca_ ) > 0.0 ? ce_ / ( ce_ + ca_ ) : 0.0;   // instability I = Ce/(Ca+Ce), project-only
         const std::uint32_t lazyHere = f < lazyEdgesByFile.size() ? lazyEdgesByFile[f] : 0u;
         char hdr[ 144 ];
-        if( lazyHere > 0 )   // the resolved pairs this row's directives make that the structure leaves out (parser version 83)
+        const Lang rowLang = langOfPath( ing.files[f] );
+        if( langHasNoFileEdges( rowLang ) && ce_ == 0.0 && ca_ == 0.0 )   // arch-honest: its imports were captured, none could resolve: unknown, not zero
+        {
+            rw::formatTo( hdr, sizeof( hdr ), "\" includes=\"{}\" no_file_edges=\"{}\">", byFile[f].size(), langTag( rowLang ) );
+        }
+        else if( lazyHere > 0 )   // the resolved pairs this row's directives make that the structure leaves out (parser version 83)
         {
             rw::formatTo( hdr, sizeof( hdr ), "\" includes=\"{}\" lazy_edges=\"{}\" afferent=\"{}\" instab=\"{:.2f}\" transitive=\"{}\">",
                            byFile[f].size(), lazyHere, f < afferent.size() ? afferent[f] : 0u, inst, trans( f ) );
@@ -10346,6 +10705,7 @@ struct JsonMapHeader
     std::size_t                      nestRefusedCount   = 0;    // #157: "nest_refused":N, the JSON twin of the XML nest_refused=, absent when 0
     bool                             isEstModelled      = false;   // MapEstimate: "est_measured":false, absent when measured
     DataSectionsCut                  dataSectionsCut    = {};      // the code-first pick's swaps: "data_sections_cut":N + "next", absent at N=0
+    std::size_t                      stemCut            = 0;       // MAP-STEM: "stem_cut":N, the XML stem_cut=, absent at N=0
 };
 
 // §B1.2: the PROVENANCE stamp — the JSON half of the XML `<r at= rank_by= window=>` attributes. Without it
@@ -10575,6 +10935,10 @@ inline void writeJsonMapHeader( JsonWriter& w, std::string& esc, const JsonMapHe
         w.write( ",\"data_sections_cut\":" + std::to_string( h.dataSectionsCut.cut ) + ",\"next\":" );   // composed, not a fixed buffer
         writeJsonStr( w, dataSectionsNext( h.dataSectionsCut ), esc );
     }
+    if( h.stemCut > 0 )
+    {
+        w.write( ",\"stem_cut\":" + std::to_string( h.stemCut ) );   // the JSON twin of the XML root's stem_cut=
+    }
 
     // §A4b: the multi-root prologue (A13) — `roots_count` joins the header gauges and a
     // `roots` table maps each label to its root path, ONLY when N≥2 (single-root output byte-unchanged).
@@ -10627,7 +10991,7 @@ inline void writeMapInventoryJson( JsonWriter& w, const IngestResult& ing, const
             w.write( e > outOff[ id ] ? ",{\"n\":" : "{\"n\":" );  writeJsonStr( w, ing.symbols[ outTargets[ e ] ].name, esc );
             if( outProv && e < outProv->size() && ( *outProv )[ e ] )
             {
-                w.write( ",\"prov\":" );  writeJsonStr( w, provLabel( ( *outProv )[ e ] ), esc );
+                w.write( ",\"" );  w.write( provAttrName( ( *outProv )[ e ] ) );  w.write( "\":" );  writeJsonStr( w, provLabel( ( *outProv )[ e ] ), esc );   // L6: "via":"impl"
             }
             if( outNameOnly && e < outNameOnly->size() )
             {
@@ -10731,6 +11095,9 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
         if( !seen[f] ) { seen[f] = 1;  fileOrder.push_back( f ); }
         buckets[f].push_back( id );
     }
+    // MAP-STEM: the XML twin's reserved stem-namesake rows, the same rule over the same buckets
+    const MapStemPick         stemPick = pickMapStemRows( ing, ann, buckets, fileOrder );
+    const std::vector<NodeId>& stemRows = stemPick.rows;
     // D7: the XML twin's inventory, the same selection (mapinventory.h) over the same printed-file set
     const MapInventory inventory = mapInventoryWanted( ing, ann ) ? computeMapInventory( ing, outOff, outTargets, seen, pathRel )
                                                                   : MapInventory{};
@@ -10794,10 +11161,10 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
     const auto  emitHeader = [ & ]( std::FILE* dst, std::size_t estTokens )
     {
         JsonWriter hw( dst );
-        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep, estTokens, ambTotal,
+        writeJsonMapHeader( hw, esc, JsonMapHeader{ ing, S, outTargets.size(), keep + stemRows.size(), estTokens, ambTotal,
                                                     unresolvedTotal, orderAttr, outProv, &ann, rootArg, locPinTotal, externalCalls, declinedTotal,
                                                     extentSuspectTotal, macroBlankedFileCount( ing ), ing.crawlSkips.nestRefusedFiles,
-                                                    estimate.isModelled, dataSecCut } );
+                                                    estimate.isModelled, dataSecCut, stemPick.cut } );
         hw.write( ",\"r\":[" );
     };
 
@@ -10840,6 +11207,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                 w.write( ",\"n\":" );  writeJsonStr( w, s.name, esc );
 
                 if( hasScopeAttr( s ) ) { w.write( ",\"sc\":" );  writeJsonStr( w, s.scope, esc ); }   // row 6: the XML sibling's sc=, one presence rule (hasScopeAttr)
+                if( !stemRows.empty() && std::ranges::binary_search( stemRows, id ) ) { w.write( ",\"stem\":1" ); }   // MAP-STEM: the XML sibling's stem="1"
 
                 if( rows.overloads[ rowIndex ] > 1 )
                 { rw::formatTo( num, sizeof( num ), ",\"overloads\":{}", rows.overloads[ rowIndex ] );  w.write( num ); }
@@ -10882,7 +11250,7 @@ inline void serializeJson( std::FILE* out, const IngestResult& ing, const std::v
                     // the gate that says so.
                     if( outProv && e < outProv->size() && (*outProv)[e] )
                     {
-                        w.write( ",\"prov\":" );  writeJsonStr( w, provLabel( (*outProv)[e] ), esc );
+                        w.write( ",\"" );  w.write( provAttrName( (*outProv)[e] ) );  w.write( "\":" );  writeJsonStr( w, provLabel( (*outProv)[e] ), esc );   // L6: "via":"impl"
                     }
                     if( outNameOnly && e < outNameOnly->size() )
                     {

@@ -69,6 +69,29 @@
 #   (R) Rust (no implicit receiver either): a bare call imported from an outside crate never reaches a same-named
 #            METHOD; a same-module function, `h.render()`, `History::new()`, `History::render( &h )` and
 #            `Self::width()` and the fully qualified `<History as Render>::render_all( h )` keep their edges.
+#   (S) JS/TS REBIND (FC3, T1 class 14 alias-through-assignment; root jsrebind/): a binding WRITTEN after its
+#            declaration — `let { Eng, Foo } = require( … ); Eng = Foo; new Eng()` builds a Foo — binds nothing: the
+#            call is unresolved=, never its declared target nor a same-spelled class. Shapes: destructured and plain
+#            require, a conditional write, `[Eng] = [Foo]`, `({ Eng } = o)`, `(Eng) = Foo`, `+=`, `++`, `for ( Eng of xs )`,
+#            a second `var Eng = Foo`, a write inside a nested function (the whole declaring scope: h() too), a write
+#            AFTER the call in a loop or after a closure that calls it (byte order is not run order), a redefined
+#            `function Eng`, an undeclared global, a written bare function `leaf`. Near misses keep: no write; a
+#            write to ANOTHER binding of the name (a parameter, a function's own `let`, another file's); `o.Eng =`;
+#            `{ Eng }` as a value; `var Eng;` without an initializer; `const` and ES import bindings (a write throws);
+#            a named class expression's own name; TS rows the base already left unresolved stay so; a write whose value
+#            KEEPS the name (`Eng = require( … ).Eng` in both branches of an if, `({ Eng } = mod)`) over a declaration
+#            WITHOUT an initializer (`var Eng;` / `let Eng;`) — the declare-then-assign test idiom (over `let { Eng } =
+#            require( 'a' )` or `class Eng` the write replaces a pinned definition: withheld) — while a default (`({ Eng = mod.Foo } = mod)`) does not keep it; `reply.run()` beside
+#            a written local `run` (a member call is not the bare name); a MEMBER call through a written ROOT name
+#            (`Eng = Foo; Eng.run()`, `m = require( b ); m.Eng()`, `let tank = new Tank(); tank = b; tank.drip()`) keeps only the
+#            by-name hedge (via="name", every candidate) — never a pinned row, never the class its SPELLING names, with or
+#            without a declaration (FIX2 C1/C2); patterns nested 20000 deep.
+#            FLOOR (FC3 delta2 C3, card FC6, pre-existing at 320f8d8f): a member `.limit()` site rides UNHEDGED in a caller row merged
+#            with a bare imported `limit(...)` call (kysely clear.test.ts / insert.test.ts `.$call( limit( 1, dialect ) )`).
+#   (J) Kotlin (#155): a call with a TRAILING lambda to let/run/with/apply/also is the stdlib scope function: its Java
+#            candidates are dropped, and an emptied set is external= (kt/: `s.run { }`, `with( sb ) { }`, `s?.let { }`,
+#            `xs.also { }`, `apply { }`). The same Java names with no lambda (`block.run()`), and Kotlin's own definition of
+#            `run` (ktown/: `go` binds Task.run; build's `s.run { length }` is pinned there, the receiver gap), keep their edges.
 #   (F) propagation: --callers and --impact of the in-repo decoys no longer list the false callers.
 #   (G) disclosure: every call the arms above unbind is a `C external` census row (empty targets) — except a Python bare
 #            name nothing binds and no builtin table holds (run_all's `process`, siblings.py's `helper`), which has no
@@ -89,6 +112,8 @@
 #   * dynamic receivers (`promise.then`, `map.set`, `dict.get`, a parameter called as a function) — a later lane.
 #   * Python `max = mymax; max( a, b )`: no edge before or after (the builtin veto wins over the rebinding).
 #   * JS `const f = make(); f()` and a Go method value `f := h.append; f()`: no edge before or after.
+#   * JS/TS `let { Eng } = require( 'a' ); Eng = require( 'a' ).Eng; new Eng()`: the SAME module's member written over a
+#     declaration that already pinned it is withheld too (the spelling is not the proof) — honest over-withholding.
 #   * rows() compares (kind, name, file) without the line: two same-named definitions in one file read as one row.
 #
 # Exits non-zero on any failure.
@@ -144,14 +169,16 @@ ran_ok(){
     if [ "$rc" = "0" ]; then return 0; fi
     no "($1) --$2=$3 exited rc=${rc:-unknown}"; return 1
 }
-# lacks ROOT VERB SEL "N FILE" … — no row names N at FILE (any kind); the root element must be present
+# lacks ROOT VERB SEL "N FILE" … — no row names N at FILE (any kind), spelled bare OR owner-qualified (Owner::N, Owner.N,
+# Owner#N — the member-owner vocabulary), so a wrong edge to a method cannot hide behind its qualified spelling;
+# the root element must be present
 lacks(){
     local r="$1" v="$2" s="$3"; shift 3
     local f got; f="$( answer "$r" "$v" "$s" )"; ran_ok "$r" "$v" "$s" "$f" || return; got="$( rows "$f" )"
     if [ "$got" = "NOROOT" ]; then no "($r) --$v=$s produced no <$v> answer about a symbol"; return; fi
     local nf
     for nf in "$@"; do
-        if printf '%s\n' "$got" | grep -qE "^[^ ]+ ${nf% *} ${nf#* }\$"; then
+        if printf '%s\n' "$got" | grep -qE "^[^ ]+ ([^ ]*(::|\.|#))?${nf% *} ${nf#* }\$"; then
             no "($r) --$v=$s still lists ${nf% *} at ${nf#* } — a false edge: $( printf '%s' "$got" | tr '\n' ';' )"
         else
             ok "($r) --$v=$s does not list ${nf% *} at ${nf#* }"
@@ -167,6 +194,40 @@ has(){
     for row in "$@"; do
         if printf '%s\n' "$got" | grep -qxF "$row"; then ok "($r) --$v=$s keeps the pinned row [$row]"
         else no "($r) --$v=$s lost the pinned row [$row]: $( printf '%s' "$got" | tr '\n' ';' )"; fi
+    done
+}
+# hedged ROOT VERB SEL "n file" — the row for symbol n at file is present and carries via="name" (the name ladder's HEDGED
+# reading, never a pinned binding); absent, or a pinned row (no via=), fails
+hedged(){
+    local r="$1" v="$2" s="$3" want="$4"
+    local f; f="$( answer "$r" "$v" "$s" )"; ran_ok "$r" "$v" "$s" "$f" || return
+    if python3 - "$f" "${want% *}" "${want#* }" <<'PY'
+import re, sys
+doc, name, path = sys.argv[ 1: ]
+for s in re.findall( r"<s [^>]*/>", open( doc, encoding="utf-8", errors="replace" ).read() ):
+    n = re.search( r' n="([^"]*)"', s ); p = re.search( r' p="([^"]*)"', s )
+    if n and p and n.group( 1 ) == name and p.group( 1 ).rsplit( ":", 1 )[ 0 ] == path and ' via="name"' in s: sys.exit( 0 )
+sys.exit( 1 )
+PY
+    then ok "($r) --$v=$s lists [$want] as a hedged via=name row"
+    else no "($r) --$v=$s has no hedged via=name row [$want]"; fi
+}
+# unpinned ROOT VERB SEL "n file" … — each named row is absent or carries via="name": never a confident (pinned) row
+unpinned(){
+    local r="$1" v="$2" s="$3"; shift 3
+    local f; f="$( answer "$r" "$v" "$s" )"; ran_ok "$r" "$v" "$s" "$f" || return
+    local want
+    for want in "$@"; do
+        if python3 - "$f" "${want% *}" "${want#* }" <<'PY'
+import re, sys
+doc, name, path = sys.argv[ 1: ]
+for s in re.findall( r"<s [^>]*/>", open( doc, encoding="utf-8", errors="replace" ).read() ):
+    n = re.search( r' n="([^"]*)"', s ); p = re.search( r' p="([^"]*)"', s )
+    if n and p and n.group( 1 ) == name and p.group( 1 ).rsplit( ":", 1 )[ 0 ] == path and ' via="name"' not in s: sys.exit( 1 )
+sys.exit( 0 )
+PY
+        then ok "($r) --$v=$s has no confident row [$want]"
+        else no "($r) --$v=$s lists [$want] as a confident (pinned) row"; fi
     done
 }
 # exactly ROOT VERB SEL "t n file;t n file" — the exact row set (";"-separated, sorted); "" = no rows at all
@@ -194,7 +255,7 @@ reaches_fn(){
 }
 
 # ── census: one per root, written FIRST so no arm reads a missing file ─────────────────────────────────────────
-ROOTS="go gonomod gomodcomment goreplace js ts tsimport py c cpp rs"
+ROOTS="go gonomod gomodcomment goreplace js ts tsimport py c cpp rs jsrebind kt ktown"
 for r in $ROOTS; do
     if ! rw "$r" --pin-census="$TMP/$r.tsv" >"$TMP/$r.map.xml"; then no "($r) the census run exited non-zero"; fi
     if [ ! -s "$TMP/$r.tsv" ]; then no "($r) the census run wrote no census — every census arm for this root would be vacuous"; fi
@@ -235,7 +296,7 @@ echo "--- (A) near misses: true edges kept"
 exactly go callees own/own.go:Pick "fn min own/own.go;fn score own/own.go"
 has go callees util/copy.go:Dup "fn copy util/copy.go"
 lacks go callees util/copy.go:Dup "len hist/cache.go"
-exactly go callees hist/history.go:Remember "method append hist/history.go"
+exactly go callees hist/history.go:Remember "method History.append hist/history.go"
 exactly go callees own/hook.go:Fire "var hook own/hook.go"
 exactly go callees algo/route.go:Route "fn Pick own/own.go"
 has go callees own/extra.go:Twice "fn min own/own.go" "fn score own/own.go" "var hook own/hook.go"
@@ -289,7 +350,7 @@ exactly js callees tests/context.test.js:encodeQuery "fn stringify lib/query.js"
 exactly js callees lib/shadow.js:emit "fn stringify lib/query.js"
 exactly js callees lib/shadow.js:load "fn fetch lib/shadow.js"
 exactly js callees lib/arrow.js:clean "fn normalize lib/arrow.js"
-exactly js callees lib/response.js:parseType "method from lib/content-type.js"
+exactly js callees lib/response.js:parseType "method ContentType.from lib/content-type.js"   # js-def-naming: a JS method row names its class
 has js callees lib/response.js:redirect "method set lib/response.js"
 has js callees lib/request.js:host "method get lib/request.js"
 exactly js callees esm/ns.mjs:nsUse "fn stringify lib/query.js"
@@ -310,15 +371,15 @@ lacks tsimport callees src/remote.ts:pull "fetch src/client.ts"
 lacks ts callees src/selfalias.ts:onTick "process src/selfalias.ts"
 echo "--- (C) near misses: true edges kept, and the outside-package pins"
 exactly ts callees src/app.ts:readCookie "fn parse src/utils/cookie.ts"
-exactly ts callees src/app.ts:serve "cls App src/base.ts;method dispatch src/base.ts"
+exactly ts callees src/app.ts:serve "cls App src/base.ts;method App.dispatch src/base.ts"
 exactly ts callees src/client.ts:probe ""
 exactly ts callees src/client.ts:check ""
 exactly tsimport callees src/use.ts:load "fn fetch src/client.ts"
 exactly ts callees src/ns.ts:nsUse "fn stringify src/helpers.ts"
 exactly ts callees src/ns.ts:nsVerify "fn verify src/utils/token.ts"
 exactly ts callees src/script.ts:report "fn track src/globals.d.ts"
-exactly ts callees src/selfalias.ts:run "method process src/selfalias.ts"
-exactly ts callees src/selfalias.ts:viaWindow "method process src/selfalias.ts"
+exactly ts callees src/selfalias.ts:run "method Pump.process src/selfalias.ts"
+exactly ts callees src/selfalias.ts:viaWindow "method Pump.process src/selfalias.ts"
 
 echo "=== (D) Python: an imported function beats same-named methods; a bare call never reaches a method ==="
 exactly py callees src/ui/widget.py:prune_children "fn match src/ui/css/match.py"
@@ -328,14 +389,14 @@ lacks py callees src/ui/siblings.py:run "helper src/ui/siblings.py"
 echo "--- (D) near misses: true edges kept, and the builtin pins"
 exactly py callees src/ui/use_lists.py:grow "fn append src/ui/lists.py"
 exactly py callees src/ui/use_lists.py:twice "fn helper src/ui/use_lists.py"
-exactly py callees src/ui/worker.py:Worker "fn _default src/ui/worker.py"
+exactly py callees src/ui/worker.py:Worker "fn Worker._default src/ui/worker.py"
 exactly py callees src/ui/star.py:use_var "var handler src/ui/star.py"
 exactly py callees src/ui/star.py:build "cls Worker src/ui/worker.py"
 exactly py callees src/ui/star.py:fmt "fn format src/ui/text.py"
-exactly py callees src/ui/alias.py:flush "fn write src/ui/alias.py"
-exactly py callees src/ui/closure.py:line_width "fn label_width src/ui/closure.py"
+exactly py callees src/ui/alias.py:flush "fn Driver.write src/ui/alias.py"
+exactly py callees src/ui/closure.py:line_width "fn Tree.label_width src/ui/closure.py"
 # a pin, not a claim of truth: a call through a CAPTURED parameter keeps whatever the unchanged ladder decided
-has py callees src/ui/closure.py:run "fn reparse src/ui/sheet.py"
+has py callees src/ui/closure.py:run "fn Sheet.reparse src/ui/sheet.py"
 lacks py callees src/ui/widget.py:read_config "open src/ui/worker.py"
 lacks py callees src/ui/report.py:render "format src/ui/text.py"
 
@@ -345,15 +406,86 @@ reaches_fn c usemacro.c:clampit region 'region\.c|usemacro\.c'
 has c callees usemacro.c:clampit "macro CLAMP macro.h"
 exactly c callees copy.c:classify "fn window_count window.c"
 exactly c callees window.c:elapsed ""
-exactly cpp callees use.cpp:origin "cls Point point.hpp;fn Point point.hpp"
+exactly cpp callees use.cpp:origin "cls Point point.hpp;fn Point::Point point.hpp"
 
 echo "=== (R) Rust: no implicit receiver either — a bare call never reaches a method ==="
 lacks rs callees src/lib.rs:draw "render src/history.rs"
-exactly rs callees src/lib.rs:paint "fn helper src/lib.rs;method render src/history.rs"
-exactly rs callees src/assoc.rs:build "method new src/assoc.rs;method render src/history.rs"
-exactly rs callees src/assoc.rs:count "method width src/assoc.rs"
-exactly rs callees src/ufcs.rs:draw_all "method render_all src/ufcs.rs"
+exactly rs callees src/lib.rs:paint "fn helper src/lib.rs;method History::render src/history.rs"
+exactly rs callees src/assoc.rs:build "method History::new src/assoc.rs;method History::render src/history.rs"
+exactly rs callees src/assoc.rs:count "method History::width src/assoc.rs"
+exactly rs callees src/ufcs.rs:draw_all "method History::render_all src/ufcs.rs"
 
+echo "=== (S) JS/TS rebind: a written binding names nothing (FC3) ==="
+# the exact row set: every case file whose binding is written is GONE; each near miss keeps its row (nestedP keeps h,
+# its g wrote its own `let Eng`; classexprP's m constructs its own class expression)
+exactly jsrebind callers Eng "fn h cases/nestedP.js;method Eng.m cases/classexprP.js;modscope &lt;file-scope&gt; cases/constwriteP.js;modscope &lt;file-scope&gt; cases/esimport.js;modscope &lt;file-scope&gt; cases/keepdestrP.js;modscope &lt;file-scope&gt; cases/keepmemberP.js;modscope &lt;file-scope&gt; cases/memberroot.js;modscope &lt;file-scope&gt; cases/memberwriteP.js;modscope &lt;file-scope&gt; cases/norewriteP.js;modscope &lt;file-scope&gt; cases/otherfileP_y.js;modscope &lt;file-scope&gt; cases/paramP.js;modscope &lt;file-scope&gt; cases/redeclnoinitP.js"
+lacks jsrebind callers leaf "&lt;file-scope&gt; cases/fncall.js"
+has jsrebind callers leaf "method Eng.run src/eng.js"
+lacks jsrebind callers Foo "&lt;file-scope&gt; cases/destr.js" "&lt;file-scope&gt; cases/plainreq.js"   # undecided is not Foo either
+# a member call spelled like a written LOCAL is not that local: `let run = ''; run += ' '; reply.run( … )` keeps its row
+has jsrebind callers run "fn onSendEnd cases/memberwriteP.js"
+# FIX1 B3: a MEMBER call is read through its ROOT name — `Eng = Foo; Eng.run()` calls Foo's, a rebound module alias
+# `m = require( b ); m.Eng()` whatever b holds (memberroot.js: a hedged row below), and a
+# local class `Pack = Crate; Pack.make()` — when the write REPLACES a value the declaration bound. Near misses keep: a
+# name nobody writes, and `let rig; … rig = new Rig(); rig.fire()` (the declaration bound nothing: the test-file idiom;
+# measured: refusing it dropped 400+ true rows from hono alone)
+# FIX2 C1: such a member call is not DROPPED either — a written root is no receiver, so the call keeps the by-name ladder's
+# hedge (via="name", every candidate): the true target stays visible, never a pinned row (memberclass, memberlocal, memberroot)
+hedged jsrebind callers run "&lt;file-scope&gt; cases/memberclass.js"
+hedged jsrebind callers Eng "&lt;file-scope&gt; cases/memberroot.js"
+exactly jsrebind callers make "modscope &lt;file-scope&gt; cases/memberlocal.js;modscope &lt;file-scope&gt; cases/membernowriteP.js"
+hedged jsrebind callers make "&lt;file-scope&gt; cases/memberlocal.js"
+hedged jsrebind callers drip "reassign cases/pinnedhedgeP.js"   # `let tank = new Tank(); tank = b; tank.drip()`
+# FIX2 C2: a root ASSIGNED anywhere in its scope never decides by its own SPELLING — `Eng = Foo; Eng.run()` is not the class
+# `Eng`, with or without a declaration, nor `Cog = require( … ).Gear; Cog.spin()` the class `Cog`: hedged at best, never pinned
+unpinned jsrebind callers spin "&lt;file-scope&gt; cases/spellnodeclP.js" "&lt;file-scope&gt; cases/spellimplicitP.js" "&lt;file-scope&gt; cases/spellvarP.js"
+hedged jsrebind callers spin "&lt;file-scope&gt; cases/spellnodeclP.js"   # the by-name hedge keeps both candidates, not a guess at either
+has jsrebind callers fire "modscope &lt;file-scope&gt; cases/memberunpinnedP.js"
+# FIX1 FC5: `reply.leaf( … )` is a member call: the ES-imported function `leaf` of the same file does not PIN it
+hedged jsrebind callers leaf "send cases/esmemberP.js"   # by name at best: not the imported `leaf` as a pinned row
+# FIX1 B2: the name-keeping exception is for `var x;` / `let x;` / an undeclared name only. keepotherinit.js / keepclass.js
+# (above: absent from the Eng rows) write another module's `Eng` over a declaration that already pinned one. NAMED FLOOR:
+# keepsamemod.js re-assigns the SAME module's `Eng` over its destructured require — true, but the spelling is not the proof,
+# so it is withheld too (honest over-withholding; the positive reading `x = mod.member` is a later lane)
+lacks jsrebind callers Eng "&lt;file-scope&gt; cases/keepsamemod.js"
+# FIX1 B1: patterns nest as deep as a file likes — an assignment target / declarator 20000 object patterns deep (a recursive
+# walk overflows the stack: rc 138 / SIGBUS / ASan stack-overflow) answers, exits 0, and binds nothing it cannot read
+deep="$TMP/jsdeep"; mkdir -p "$deep/src" "$deep/test"
+printf 'class Eng { run() { return 1; } }\nmodule.exports = { Eng };\n' >"$deep/src/a.js"
+python3 - "$deep/test" <<'PY'
+import sys
+d, n = sys.argv[ 1 ], 20000
+pat = "{a:" * n + "{Eng}" + "}" * n
+open( d + "/assign.test.js", "w" ).write( 'let { Eng } = require("../src/a");\n(' + pat + ' = o);\ntest("x", () => { new Eng(); });\n' )
+open( d + "/decl.test.js", "w" ).write( 'var ' + pat + ' = o;\nvar Eng = require("../src/a").Eng;\ntest("x", () => { new Eng(); });\n' )
+PY
+deepf="$TMP/jsdeep.callers.xml"
+( cd "$deep" && "$BIN" . --no-cache --callers=Eng >"$deepf" 2>/dev/null ); deeprc=$?
+if [ "$deeprc" -ne 0 ]; then no "(jsrebind) --callers=Eng over 20000-deep object patterns exited rc=$deeprc"
+elif ! grep -q '<callers [^>]* defs="1"' "$deepf"; then no "(jsrebind) --callers=Eng over 20000-deep object patterns produced no answer about Eng"
+elif grep -q 'test/assign.test.js' "$deepf"; then no "(jsrebind) the 20000-deep assignment still binds a row: $( tr '<' '\n' <"$deepf" | grep 'assign.test' | tr '\n' ';' )"
+else ok "(jsrebind) 20000-deep object patterns: exit 0, the written \`Eng\` binds no row"; fi
+
+echo "=== (J) Kotlin: a trailing-lambda scope function never binds a Java method (#155) ==="
+# A Kotlin call with a trailing lambda to let/run/with/apply/also is the stdlib scope function: its Java candidates are dropped
+# and an emptied set is external= (kotlin scope arm of FalseEdgeRules). Kotlin's own candidates are kept, and a call with no
+# lambda (`block.run()` on a Runnable) keeps every candidate the ladder had.
+exactly kt callers java/jobs/Job.java:run "fn dispatch kt/Dispatch.kt;fn kick kt/Use.kt"
+lacks kt callers java/jobs/Job.java:run "build kt/Use.kt"
+exactly kt callers java/lib/Builder.java:with "fn realWith kt/Scopes.kt"
+exactly kt callers java/lib/Builder.java:apply ""
+exactly kt callers java/lib/Builder.java:let ""
+exactly kt callers java/lib/Builder.java:also ""
+# Kotlin DEFINES run (ktown): own-language-first keeps the Kotlin run for go and build (the receiver gap, pinned); kick's j.run()
+# has no lambda and keeps Job.run, as it did before the fix.
+exactly ktown callers kt/Task.kt:run "fn build kt/Task.kt;fn go kt/Task.kt"
+exactly ktown callers java/jobs/Job.java:run "fn kick kt/Task.kt"
+
+externals kt kt/Use.kt build run
+externals kt kt/Scopes.kt useWith with
+externals kt kt/Scopes.kt useApply apply
+externals kt kt/Scopes.kt useLet let
+externals kt kt/Scopes.kt useAlso also
 echo "=== (F) propagation: the decoys' callers and impact ==="
 exactly go callers hist/history.go:append "fn Remember hist/history.go"
 lacks go impact hist/history.go:append "Collect algo/algo.go"

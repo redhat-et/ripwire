@@ -551,6 +551,33 @@ inline TemplateParameterLists templateParameterListsAbove( TSNode node ) noexcep
     return lists;
 }
 
+// fn-slot S2 fix 2: does `base` (a bare identifier, as written in a class header) name a type parameter of a `template <…>` list above
+// the class `self`? Then it is a dependent base: no in-tree class of that name is meant (kBaseBindTemplateParam).
+inline bool baseNamesTemplateParameter( TSNode self, std::string_view base, std::string_view src )
+{
+    if( ts_node_is_null( self ) || base.empty() )
+    {
+        return false;
+    }
+    const TemplateParameterLists lists = templateParameterListsAbove( self );
+    for( std::size_t l = 0; l < lists.count; ++l )
+    {
+        for( std::uint32_t p = 0, n = ts_node_named_child_count( lists.innerFirst[ l ] ); p < n; ++p )
+        {
+            const TSNode param = ts_node_named_child( lists.innerFirst[ l ], p );
+            if( kindIs( ts_node_type( param ), "parameter_declaration" ) )
+            {
+                continue;   // a non-type parameter names a value, never a base
+            }
+            if( cppTemplateParameterName( nodeTextOf( param, src ) ) == base )
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // How many `scope:` links of the qualified class name `name` are template-ids.
 inline std::size_t templateScopeLinksIn( TSNode name ) noexcept
 {
@@ -974,6 +1001,30 @@ inline std::string rustQualifierOf( TSNode nameNode, std::string_view src )
         qualifier = rustEnclosingScopeOf( nameNode, src, /*includeModules=*/false );
     }
     return qualifier;
+}
+
+// RULE3-MEMBER-GUARD fix 4: the WHOLE qualifier a Rust path call is written with when it has more than one segment — `crate::far` for
+// `crate::far::helper()`, `super::far::deep` for `super::far::deep::dd()`, `std::io` for `std::io::stdout()` — blanks dropped. "" for a
+// one-segment qualifier (rustQualifierOf already holds it whole), a bare call, and a path with a generic or `<T as Trait>` segment or a
+// leading `::`. rustQualifierOf keeps only the last segment, so a reader that walks the path from its root (graph.h W3, receiverevidence.h
+// rustRule3Proves) reads this one; stored in Reference::fieldName (model.h), which a Rust call reference does not otherwise use.
+inline std::string rustWrittenQualifier( TSNode nameNode, std::string_view src )
+{
+    const TSNode parent = ts_node_parent( nameNode );
+    const TSNode path   = ts_node_is_null( parent ) || !kindIs( ts_node_type( parent ), "scoped_identifier" ) ? TSNode{} : fieldChild( parent, NodeField::Path );
+    if( ts_node_is_null( path ) || !kindIs( ts_node_type( path ), "scoped_identifier" ) )
+    {
+        return {};
+    }
+    std::string out;
+    for( const char c : nodeTextOf( path, src ) )
+    {
+        if( c != ' ' && c != '\t' && c != '\n' && c != '\r' )
+        {
+            out.push_back( c );
+        }
+    }
+    return out.find_first_of( "<>" ) != std::string::npos || out.starts_with( "::" ) ? std::string{} : out;
 }
 
 // The name a written type ends in: `Deb`, `*Deb` → "Deb"; `Stack[T]`, `*Stack[T]`, `Foo<T>` → the name, never the
@@ -1454,36 +1505,54 @@ inline bool rustAttrIsTestMarker( std::string_view attr ) noexcept
 // `attribute_item` nodes in front of the item they decorate, not children of it (verified by --match
 // probes on real parses, not assumed) — so the scan walks backwards and stops at the first sibling
 // that is neither an attribute nor a comment, which is where this item's own attribute run began.
+// The run is walked once by rustItemAttrRunAny; `marks( attribute_item )` says whether one attribute of it is the one asked for.
+template< class Marks >
+inline bool rustItemAttrRunAny( TSNode item, const Marks& marks )
+{
+    // the run is attributes and comments (a doc comment may sit between an attribute and its item); any other sibling ends it
+    const auto inRun = []( const char* k ) { return kindIs( k, "attribute_item" ) || kindIs( k, "line_comment" ) || kindIs( k, "block_comment" ); };
+    TSNode prev = ts_node_prev_sibling( item );
+    while( !ts_node_is_null( prev ) && inRun( ts_node_type( prev ) ) )
+    {
+        const bool attr = kindIs( ts_node_type( prev ), "attribute_item" );
+        if( attr && marks( prev ) )
+        {
+            return true;
+        }
+        prev = ts_node_prev_sibling( prev );
+    }
+    return false;
+}
 inline bool rustItemCarriesTestAttr( TSNode item, std::string_view src ) noexcept
 {
-    for( TSNode prev = ts_node_prev_sibling( item ); !ts_node_is_null( prev ); prev = ts_node_prev_sibling( prev ) )
+    return rustItemAttrRunAny( item, [ & ]( TSNode attr )
     {
-        const char* t = ts_node_type( prev );
-        if( kindIs( t, "attribute_item" ) )
+        // O(children): `#[ /*…*/ test ]` puts the comments in the attribute_item — 56x at 16 000
+        // (test/childwalkscalecheck.sh, arm B23). The sibling climb this sits in is a different scan:
+        // ts_node_prev_sibling restarts from the parent's first child too (the parent-chain family).
+        // One level down (maxDepth 1): the attribute_item's own children, stopping at the first test marker (train 33: the
+        // shared tschildren.h walk, not a second hand-written cursor loop — quality-delta paired it with vrStaticMember).
+        return anyChildBelow( attr, 1, /*namedOnly=*/false, [ & ]( TSNode ch )
+                              { return kindIs( ts_node_type( ch ), "attribute" ) && rustAttrIsTestMarker( nodeTextOf( ch, src ) ); } );
+    } );
+}
+// lane L6 fix round 1 (B1 iii): a mock attribute in the run — mockall's `#[automock]` in any spelling (`#[mockall::automock]`,
+// `#[cfg_attr(any(test, feature = "mock"), automock)]`), or any attribute naming a mock (case-insensitive) — writes an
+// implementor of the trait (`MockT`) no source holds.
+inline bool rustItemCarriesMockAttr( TSNode item, std::string_view src )
+{
+    return rustItemAttrRunAny( item, [ & ]( TSNode attr )
+    {
+        const std::string_view text = nodeTextOf( attr, src );
+        for( std::size_t at = 0; at + 4 <= text.size(); ++at )
         {
-            // O(children): `#[ /*…*/ test ]` puts the comments in the attribute_item — 56x at 16 000
-            // (test/childwalkscalecheck.sh, arm B23). The sibling climb this sits in is a different scan:
-            // ts_node_prev_sibling restarts from the parent's first child too (the parent-chain family).
-            bool        marked = false;
-            ChildCursor cursor( prev );
-            forEachChild( prev, cursor.cur, [ & ]( TSNode ch )
-            {
-                marked = kindIs( ts_node_type( ch ), "attribute" ) && rustAttrIsTestMarker( nodeTextOf( ch, src ) );
-                return !marked;
-            } );
-            if( marked )
+            if( ( text[ at ] | 0x20 ) == 'm' && ( text[ at + 1 ] | 0x20 ) == 'o' && ( text[ at + 2 ] | 0x20 ) == 'c' && ( text[ at + 3 ] | 0x20 ) == 'k' )
             {
                 return true;
             }
-            continue;
         }
-        if( kindIs( t, "line_comment" ) || kindIs( t, "block_comment" ) )
-        {
-            continue;   // a doc comment may sit between an attribute and its item
-        }
-        break;
-    }
-    return false;
+        return false;
+    } );
 }
 
 // Python `class Test<Something>` — the unittest/pytest convention. The character after `Test` MUST be
@@ -2261,6 +2330,7 @@ inline bool cppBlockScopeDirectInit( TSNode fnDeclarator, std::string_view src )
 
 // forward declarations for dropGatedCapture below — the helpers live after nodeTextOf's section.
 inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept;
+inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPrototypeMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline bool isPyEnumMemberTarget( TSNode nameNode, std::string_view src ) noexcept;
 inline TSNode jsClassFactoryReceiver( TSNode nameNode, std::string_view src ) noexcept;
@@ -2388,7 +2458,7 @@ inline bool dropGatedCapture( std::string_view defCapSv, Lang lang, std::string_
     }
     if( defCapSv == "definition.cjsexport" )
     {
-        return !isCjsExportTarget( nameNode, src );
+        return !isCjsExportTarget( nameNode, src ) && !isCjsModuleExportsItself( nameNode, src );   // the bare form is named by captureTagsFacts
     }
     if( defCapSv == "definition.classfactory" )
     {
@@ -2457,6 +2527,21 @@ inline bool isCjsExportTarget( TSNode nameNode, std::string_view src ) noexcept
             && nodeTextOf( fieldChild( obj, NodeField::Property ), src ) == "exports";
     }
     return false;
+}
+
+// Lane js-def-naming (koa-11: lib/is-stream.js): the bare `module.exports = ( … ) => …` / `module.exports = function ( … ) {…}`. The
+// @name capture is then the `exports` property itself — the left side IS module.exports — so the function the module exports has no
+// name of its own (a named function expression already defines its own, the query's `!name`). captureTagsFacts names it by the
+// file's stem, the rule a Markdown file's own node is named by (ingest_parsepool.h: `fs::path( path ).stem()`).
+inline bool isCjsModuleExportsItself( TSNode nameNode, std::string_view src ) noexcept
+{
+    const TSNode member = ts_node_parent( nameNode );
+    if( ts_node_is_null( member ) || !kindIs( ts_node_type( member ), "member_expression" ) || nodeTextOf( nameNode, src ) != "exports" )
+    {
+        return false;
+    }
+    const TSNode obj = fieldChild( member, NodeField::Object );
+    return !ts_node_is_null( obj ) && kindIs( ts_node_type( obj ), "identifier" ) && nodeTextOf( obj, src ) == "module";
 }
 
 // `Foo.prototype.NAME = fn` at any qualifier depth: the member_expression under `object:` must name

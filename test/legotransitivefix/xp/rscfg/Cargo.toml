@@ -1,0 +1,2 @@
+[workspace]
+members = ["crates/cfgcore", "crates/cfgcore2", "crates/cfgapp"]

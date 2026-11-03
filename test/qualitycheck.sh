@@ -463,6 +463,221 @@ else
     no "Python inherited self/cls hooks were classified dead or the orphan was hidden"
 fi
 
+# Python test-framework hooks (#228): unittest and Django call setUp/tearDown/setUpClass/setUpTestData and
+# test_* methods by protocol, so the call graph never sees them. Closures inside a method reach the method's
+# self/cls as a free variable. Both must stay live. The orphans are the sensitivity control: the arm must
+# still see real dead code in the same tree.
+if python3 - "$BIN" "$WORK/django-hooks" <<'PYHOOKS'
+import pathlib
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+binary, directory = sys.argv[1:]
+root = pathlib.Path(directory)
+root.mkdir()
+
+def git(*args):
+    return subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                           "-c", "core.hooksPath=/dev/null", *args], cwd=root,
+                          check=True, capture_output=True, text=True)
+
+def run(*args):
+    return subprocess.run([binary, ".", *args, "--no-cache"], cwd=root, text=True, capture_output=True)
+
+def dead_rows(result):
+    assert result.returncode in (0, 2), result.stderr
+    return sorted(row.attrib["sym"] for row in ET.fromstring(result.stdout).findall("r")
+                  if row.attrib["kind"] == "dead-code")
+
+(root / "app.py").write_text("def main():\n    return 0\n")
+git("init", "-q")
+git("add", ".")
+git("commit", "-qm", "application only")
+
+(root / "tests").mkdir()
+(root / "tests/__init__.py").write_text("")
+(root / "tests/base_case.py").write_text("""from django.test import TestCase
+
+
+class BaseCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        def inner():
+            return cls.make_shared()
+        cls.shared = inner()
+
+    @classmethod
+    def make_shared(cls):
+        return 1
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+
+    def setUp(self):
+        self.value = self.make_value()
+
+    def make_value(self):
+        return 2
+
+    def tearDown(self):
+        pass
+
+    def test_thing(self):
+        self.run_closure()
+        self.run_bound()
+        return self.value
+
+    def testCamel(self):
+        return 3
+
+    def run_closure(self):
+        def inner():
+            return self.closure_hook()
+        return inner()
+
+    def closure_hook(self):
+        return 4
+
+    def run_bound(self):
+        def cb(self):
+            return self.bound_hook()
+        return cb
+
+    def bound_hook(self):
+        return 10
+
+    def never_called(self):
+        return 5
+
+
+def unused_helper():
+    return 6
+""")
+(root / "tests/test_fw.py").write_text("""from tests.base_case import BaseCase
+
+
+class FwCase(BaseCase):
+    @classmethod
+    def make_shared(cls):
+        return 9
+
+    def setUp(self):
+        super().setUp()
+
+    def make_value(self):
+        return 7
+
+    def closure_hook(self):
+        return 8
+
+    def bound_hook(self):
+        return 11
+""")
+(root / "app_helpers.py").write_text("""def test_helper():
+    return 1
+
+
+class Svc:
+    def testThing(self):
+        return 2
+
+    def setup_method(self, method):
+        return 3
+""")
+(root / "tests/test_xunit.py").write_text("""def setup_module(module):
+    return 1
+
+
+def teardown_module(module):
+    return 2
+
+
+def setup_function(function):
+    return 3
+
+
+def teardown_function(function):
+    return 4
+
+
+class TestShop:
+    @classmethod
+    def setup_class(cls):
+        return 5
+
+    @classmethod
+    def teardown_class(cls):
+        return 6
+
+    def setup_method(self, method):
+        return 7
+
+    def teardown_method(self, method):
+        return 8
+
+    def test_buy(self):
+        return 9
+""")
+(root / "plugin_hooks.py").write_text("""import pytest
+
+
+@pytest.fixture
+def shared_resource():
+    return 1
+
+
+def pytest_configure(config):
+    return 2
+""")
+(root / "checks").mkdir()
+(root / "checks/tests.py").write_text("""from django.test import TestCase
+
+
+class ChecksTests(TestCase):
+    def setUp(self):
+        self.ready = True
+
+    def test_one(self):
+        return self.ready
+
+    def testlower(self):
+        return 1
+
+    def runTest(self):
+        return 2
+
+    async def asyncSetUp(self):
+        return 3
+
+    async def asyncTearDown(self):
+        return 4
+""")
+git("add", ".")
+git("commit", "-qm", "django hooks")
+
+# Framework hooks, the closure dispatch, and the subclass overrides must not be dead. The two orphans
+# (never_called, unused_helper) are the control: the arm must still see real dead code in this shape.
+rows = dead_rows(run("--quality-delta=HEAD~1..HEAD"))
+# Negatives: a test* def in application code stays dead (the test-module clause), and a closure that binds self as
+# its own parameter does not keep the host's overrides live (the bound-receiver clause). The pytest xunit hooks in
+# tests/test_xunit.py are live (kXunitHooks, shared with pythonRunnerRoot); the same name in application code
+# (Svc.setup_method) is not.
+# plugin_hooks.py: a conftest hook (pytest_configure) is still reported; the @pytest.fixture beside it is not (the changelog
+# fragment says so, and a decorated def is a value-use: ingest_valuerefs.h emitDecorators).
+expected = sorted(["tests/base_case.py::BaseCase::never_called", "unused_helper", "test_helper", "pytest_configure",
+                   "app_helpers.py::Svc::testThing", "app_helpers.py::Svc::setup_method",
+                   "tests/test_fw.py::FwCase::bound_hook"])
+assert rows == expected, rows
+print("django hooks and closure dispatch stay live; the two orphans gate")
+PYHOOKS
+then
+    ok "Django/unittest hooks (setUp, setUpTestData, test_*) and closure self-dispatch are not dead"
+else
+    no "Django/unittest hooks or closure self-dispatch classified dead (#228)"
+fi
+
 # ── (U) THE UNCHANGED-TREE INVARIANT — a no-op diff must never gate (issue #228, part 1) ──────────────────
 #
 # THE CONTRACT: a working tree whose TRACKED files are identical to HEAD reports regressions="0" gating="0"

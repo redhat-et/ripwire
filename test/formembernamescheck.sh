@@ -98,7 +98,8 @@ def row(t, name, path=None):   # path may be P@L (two rows of one name in one fi
     return rs[0]
 if cmd == "exact":            # FILE OWNER PATH MEMBER... : mem= == the direct members less the names shown as rows, none cut
     t = load(args[0]); r = row(t, args[1], args[2])
-    shown = {x.get("n") for x in rows(t)}
+    # a member row prints Owner::name / Owner.name (QUALNAME-1); the product drops a member whose BARE name is shown as a row
+    shown = {re.split(r"::|\.|#", x.get("n"))[-1] for x in rows(t)} | {x.get("n") for x in rows(t)}
     want = [m for m in args[3:] if m not in shown and m != args[1]]
     got = r.get("mem", "").split(",") if "mem" in r else []
     if not want: fail(f"vacuous: every member of {args[1]} is shown as a row")

@@ -1,0 +1,4 @@
+[package]
+name = "other"
+[dependencies]
+xpm2fc = { package = "xp-m2-core", version = "1" }

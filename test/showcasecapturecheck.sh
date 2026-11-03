@@ -30,6 +30,11 @@
 #       drifts onto a line inside a DIFFERENT function exits 0 with a well-formed <at> element naming
 #       the wrong symbol. main's 09-05 and 09-07 captures shipped exactly that — l="1148"
 #       sym="buildGraph" under a rankGraphTeleport demo — and this arm is red on both.
+#   (S) SCRUB BOUNDARY (train 36, #438 review) — the capture replaces the repo root with "." and the
+#       per-run scratch dir with "<scratch>" only where the root is a WHOLE path (not inside a longer one):
+#       a checkout at /w once turned `src/wrap` into `src.rap` and `.github/workflows` into `.github.orkflows`.
+#       Byte-exact over a planted text with ROOT=/w and a scratch dir outside it; a mutation (plain str.replace)
+#       must differ; and the generator refuses a scratch dir inside the repo (it would publish ./… paths).
 #
 # NOTE: the python3 helpers below live in FILES under $TMP, not `<<'PY' ... PY` heredocs inside a `$( )`
 # command substitution — macOS's stock bash (3.2.57, frozen there for licensing reasons) has a long-standing
@@ -220,7 +225,11 @@ def measure(n):
         data = json.loads(mp)
     except json.JSONDecodeError:
         return None, "could not parse --top-k=%d --json map" % n
-    sels = ["%s:%s" % (f["p"], s["n"]) for f in data.get("r", []) for s in f.get("s", [])]
+    # MAP-STEM (train 35): the map adds one "stem":1 row per shown file AFTER its top-K rows (outside the ranked
+    # set). --pack-top-n=N packs only the N ranked symbols, so the body side must take the same N: counting the stem
+    # rows put 2/10/27 extra class bodies in the denominator (88.9/86.1/87.9 -> 90.0/88.1/89.9 with no signature byte
+    # changed) — a population change, not an elision change.
+    sels = ["%s:%s" % (f["p"], s["n"]) for f in data.get("r", []) for s in f.get("s", []) if not s.get("stem")]
     if not sels:
         return None, "empty top-%d symbol set" % n
     # L1 (2026-09-19): the CLI default legend is compact, and its legend spells row shapes (<d r=N>, <b t= n= p= l=>)
@@ -628,6 +637,139 @@ EOF
     else
         no "(I) mutation control: the planted stale figure [$mutRecorded] was NOT distinguishable from the live reading [$live] — (I) proves nothing"
     fi
+fi
+
+# (S) SCRUB BOUNDARY — see the header. The planted text and its expected bytes are files (bash 3.2 note above).
+cat >"$TMP/s_in.txt" <<'EOF'
+$ ./build/ripwire /w --at=/w/src/graph.h:10
+src/wrap.h .github/workflows/ci.yml which.hy /which.hy a/w /w/x/w b "/w" (/w) /w. /w/
+scratch=/tmp/rw_sc_q/aux/b.txt /tmp/rw_sc_qq /w/.github/workflows/ci.yml
+EOF
+cat >"$TMP/s_want.txt" <<'EOF'
+$ ./build/ripwire . --at=./src/graph.h:10
+src/wrap.h .github/workflows/ci.yml which.hy /which.hy a/w ./x/w b "." (.) .. ./
+scratch=<scratch>/aux/b.txt /tmp/rw_sc_qq ./.github/workflows/ci.yml
+EOF
+cat >"$TMP/s_run.py" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import docs_commands_build as ex
+t = open(sys.argv[2]).read()
+if sys.argv[3] == "mutant":
+    out = t.replace("/w", ".").replace("/tmp/rw_sc_q", "<scratch>")
+else:
+    out = ex.scrub_root(ex.scrub_root(t, "/tmp/rw_sc_q", "<scratch>"), "/w", ".")
+sys.stdout.write(out)
+EOF
+if python3 "$TMP/s_run.py" "$ROOT/docs" "$TMP/s_in.txt" fixed >"$TMP/s_got.txt" 2>"$TMP/s_err.txt" && cmp -s "$TMP/s_got.txt" "$TMP/s_want.txt"; then
+    ok "(S) scrub boundary: ROOT=/w + an outside scratch dir scrub byte-exact (src/wrap, .github/workflows, which.hy, a/w kept)"
+else
+    no "(S) scrub boundary: ROOT=/w output differs from the expected bytes: $( diff "$TMP/s_want.txt" "$TMP/s_got.txt" 2>&1 | head -6 | tr '\n' '|' ) $( tail -1 "$TMP/s_err.txt" )"
+fi
+python3 "$TMP/s_run.py" "$ROOT/docs" "$TMP/s_in.txt" mutant >"$TMP/s_mut.txt" 2>/dev/null
+if ! cmp -s "$TMP/s_mut.txt" "$TMP/s_want.txt" && grep -q 'src\.rap' "$TMP/s_mut.txt"; then
+    ok "(S) mutation control: a plain str.replace scrub produces src.rap (the arm can fail)"
+else
+    no "(S) mutation control: the plain-replace mutant matched the expected bytes — (S) proves nothing"
+fi
+cat >"$TMP/s_inside.py" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import docs_commands_build as ex
+r = sys.argv[2]
+cases = [(r + "/build/sc", False), (r + "/../elsewhere_sc", True), (r + "_sc", True), ("/tmp/rw_sc_q", True)]
+bad = [c for c, want in cases if ex.scratch_outside_repo(r, c) != want]
+print("BAD " + " ".join(bad) if bad else "OK")
+EOF
+sOut="$( python3 "$TMP/s_inside.py" "$ROOT/docs" "$ROOT" 2>&1 | tail -1 )"
+if [ "$sOut" = "OK" ] && grep -q 'scratch_outside_repo( *REPO, *SCRATCH *)' "$SCRIPT"; then
+    ok "(S) a scratch dir inside the repo is refused (scratch_outside_repo: inside / sibling-prefix / outside cases; the generator calls it)"
+else
+    no "(S) scratch-inside-repo refusal missing or wrong: $sOut"
+fi
+# The arms above call scrub_root directly; they cannot see the generator go back to a plain replace. Pin the call site: both the
+# scratch dir and the repo root go through exportscrub.scrub_root, and no .replace( REPO / SCRATCH ) is left in the generator.
+if grep -qE 'scrub_root\(.*SCRATCH, *"<scratch>"\), *REPO, *"\."' "$SCRIPT" && ! grep -qE '\.replace\( *(REPO|SCRATCH)\b' "$SCRIPT"; then
+    ok "(S) the generator scrubs the scratch dir and the repo root through scrub_root (no plain .replace( REPO / SCRATCH ))"
+else
+    no "(S) showcase_capture.py no longer routes the root and scratch scrub through exportscrub.scrub_root"
+fi
+
+# ── (J) the --in= window may rest on ONE lane merge (train 41b) ──────────────────────────────────────────────
+# A train whose only source change is one merge commit (then a pin and the capture, which touch no source) has an
+# empty margin HEAD~1, and every N >= 3 spans the previous train: the generator refused and (I) stayed red. chooseInWindow
+# now falls back to a margin held by the merge behind it (its first-parent diff touches src/, nothing after it does) —
+# only when the ordinary scan finds no N. Pure arms: the REAL chooseInWindow / marginHeldByMerge are pulled out of the live
+# script with `ast` (module level runs the whole capture) and driven with fakes and throwaway git repos.
+cat >"$TMP/j_window.py" <<'PYEOF'
+import ast, subprocess, sys, os, tempfile, shutil
+src = open(sys.argv[1], encoding="utf-8").read()
+want = ("chooseInWindow", "marginHeldByMerge", "firstWindow")
+funcs = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in want]
+if len(funcs) != 3:
+    print("EXTRACT_FAIL got %d of 3 functions" % len(funcs)); sys.exit(0)
+ns = {"subprocess": subprocess, "sys": sys, "REPO": ".", "_IN_DIR": "src", "_IN_LIMIT": 3, "_IN_LIMIT_NARROW": 2}
+exec(compile(ast.Module(body=funcs, type_ignores=[]), "<extract>", "exec"), ns)
+choose, held = ns["chooseInWindow"], ns["marginHeldByMerge"]
+res = []
+def chk(name, cond): res.append((name, bool(cond)))
+def pick(unshown, holds):
+    try:
+        return choose(1, 14, unshown, holds)
+    except SystemExit:
+        return "refused"
+GONE = ["gone"]
+# one lane merge: N=2 shows, its margin HEAD~1 shows nothing, N>=3 spans the previous train (past the display cut)
+one = lambda n, lim=3: [] if n == 2 else GONE
+chk("one-merge train: N=2 when the margin is held by the merge", pick(one, lambda m: m == 1) == (2, 3))
+chk("one-merge train: the fallback off refuses (red on the pre-fix generator)", pick(one, lambda m: False) == "refused")
+# multi-merge train: the ordinary scan finds N=3 (margin HEAD~2 shows); a true mergeHolds must not pull it down to N=2
+multi = lambda n, lim=3: GONE if n in (1, 4) else []
+chk("multi-merge train: unchanged N=3 even with mergeHolds always true", pick(multi, lambda m: True) == (3, 3))
+chk("everything shows: unchanged N=2, page 3", pick(lambda n, lim=3: [], lambda m: True) == (2, 3))
+chk("N never accepted when its own window does not show", pick(lambda n, lim=3: GONE, lambda m: True) == "refused")
+# a one-merge train with a few source fixes after the merge: the margin holds 3 source files, enough for --limit=2 only
+few = lambda n, lim=3: [] if lim == 2 and n >= 2 else GONE
+chk("few post-merge source files: the last resort derives N=3 with --limit=2", pick(few, lambda m: False) == (3, 2))
+chk("the narrower page is never tried while --limit=3 works", pick(lambda n, lim=3: [] if n >= 3 else GONE, lambda m: False) == (4, 3))
+# the real git predicate on throwaway repos
+def mk(steps):
+    d = tempfile.mkdtemp(prefix="rw_j_")
+    def g(*a): subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", *a], cwd=d, check=True, capture_output=True)
+    g("init", "-q", "-b", "main")
+    for kind, path in steps:
+        if kind == "c":
+            os.makedirs(os.path.dirname(os.path.join(d, path)) or d, exist_ok=True)
+            open(os.path.join(d, path), "a").write("x\n"); g("add", "-A"); g("commit", "-q", "-m", path)
+        elif kind == "b": g("checkout", "-q", "-b", path)
+        elif kind == "m": g("checkout", "-q", "main"); g("merge", "-q", "--no-ff", "-m", "merge", path)
+    return d
+base = [("c", "src/a.c"), ("b", "lane")]
+oneMerge = mk(base + [("c", "src/b.c"), ("m", "lane"), ("c", "test/pin.txt")])
+srcAfter = mk(base + [("c", "src/b.c"), ("m", "lane"), ("c", "src/c.c")])
+docMerge = mk(base + [("c", "docs/d.md"), ("m", "lane"), ("c", "test/pin.txt")])
+chk("git: a source merge followed by a source-free pin holds the margin", held(1, oneMerge, "src"))
+chk("git: HEAD itself / a non-merge commit does not", not held(0, oneMerge, "src") and not held(2, oneMerge, "src"))
+chk("git: a source commit after the merge breaks the hold", not held(1, srcAfter, "src"))
+chk("git: a merge whose first-parent diff has no src/ does not hold", not held(1, docMerge, "src"))
+for d in (oneMerge, srcAfter, docMerge): shutil.rmtree(d, ignore_errors=True)
+for name, ok in res: print(("OK " if ok else "BAD ") + name)
+PYEOF
+jOut="$( python3 "$TMP/j_window.py" "$SCRIPT" 2>&1 )"
+if printf '%s\n' "$jOut" | grep -q '^EXTRACT_FAIL\|Traceback'; then
+    no "(J) could not run the window arms: $( printf '%s' "$jOut" | tail -2 | tr '\n' '|' )"
+else
+    jBad="$( printf '%s\n' "$jOut" | grep '^BAD ' || true )"; jOk="$( printf '%s\n' "$jOut" | grep -c '^OK ' || true )"
+    if [ -z "$jBad" ] && [ "$jOk" -eq 11 ]; then
+        ok "(J) --in= window: a one-merge train derives N=2 from the merge's first-parent diff; multi-merge N unchanged; fallback off refuses ($jOk arms)"
+    else
+        no "(J) --in= window arms: ok=$jOk of 11 $( printf '%s' "$jBad" | tr '\n' '|' )"
+    fi
+fi
+if grep -q 'chooseInWindow()' "$SCRIPT"; then
+    ok "(J) the generator derives its --in= window through chooseInWindow()"
+else
+    no "(J) showcase_capture.py no longer calls chooseInWindow()"
 fi
 
 echo

@@ -468,7 +468,9 @@ def count_predicates(listing, perlang):
     for path, body in re.findall(r'<f p="([^"]+)"[^>]*>(.*?)</f>', listing, re.S):
         if os.path.basename(path) in perlang:
             continue
-        for line, code in re.findall(r'<hit l="(\d+)" in="[^"]*"><!\[CDATA\[(.*?)\]\]></hit>', body, re.S):
+        # honest-lex prints a line holding the pattern twice as ONE row with occ="N" (train 34): read that row too, or every
+        # line with two Lang:: mentions drops out of the count (336 -> 250 on the composed tree).
+        for line, code in re.findall(r'<hit l="(\d+)" in="[^"]*"(?: occ="\d+")?><!\[CDATA\[(.*?)\]\]></hit>', body, re.S):
             if (path, line) in seen:
                 continue
             seen.add((path, line))

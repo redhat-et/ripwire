@@ -154,9 +154,12 @@ def legend(t):
     return " ".join(re.findall(r'<!--(.*?)-->', t, re.S))
 def fail(msg):
     print(msg); sys.exit(1)
-def first_row(t, name):
+def bare(n):
+    """a <d> row prints Owner::name / Owner.name (QUALNAME-1); a <b n=> body row keeps the BARE name"""
+    return re.split(r"::|\.|#", n)[-1]
+def first_row(t, name, rowname=None):
     for r, n, p, a in rows(t):
-        if n == name:
+        if n == (rowname or name) or (rowname is None and bare(n) == name):
             return a
     return None
 def defstart(a, cd):
@@ -312,7 +315,8 @@ elif cmd == "rowline":                  # rowline FILE R : print the l= of the r
     hit = [a for r, n, p, a in rows(load(args[0])) if r == int(args[1])]
     print(hit[0].get("l", "") if hit else "")
 elif cmd == "rankof":                   # rankof FILE NAME PATH : print the rank of the row n=NAME p=PATH (0 = not among the rows)
-    hit = [r for r, n, p, a in rows(load(args[0])) if n == args[1] and p == args[2]]
+    # the row may print Owner::name (QUALNAME-1): the rank of the symbol is read by its bare name as well, never 0 for a spelling change
+    hit = [r for r, n, p, a in rows(load(args[0])) if (n == args[1] or bare(n) == args[1]) and p == args[2]]
     print(hit[0] if hit else 0)
 elif cmd == "bodiessec":                # bodiessec FILE : the <bodies>…</bodies> element verbatim
     m = re.search(r'<bodies\b.*?</bodies>', load(args[0]), re.S)
@@ -570,7 +574,7 @@ if r="$( chk utf8whole "$TMP/hyd.xml" hydrate 'restored: true' )"; then ok "(D11
 if r="$( chk rowis "$TMP/rs.xml" 1 walk src/rs/indexer.rs )"; then :; else no "(L1) premise: $r"; fi
 if r="$( chk body "$TMP/rs.xml" index src/rs/indexer.rs "let order = walk(" )"; then ok "(L1) Rust: $r — the entry point (index calls walk) beats walk at r1"; else no "(L1) Rust: $r"; fi
 if r="$( chk nobodyof "$TMP/rs.xml" walk )"; then ok "(L1) Rust: not walk's body"; else no "(L1) Rust: $r"; fi
-if r="$( chk rowis "$TMP/cpp.xml" 1 Build src/cpp/build.h )"; then :; else no "(L2) premise: $r"; fi
+if r="$( chk rowis "$TMP/cpp.xml" 1 Builder::Build src/cpp/build.h )"; then :; else no "(L2) premise: $r"; fi
 if r="$( chk body "$TMP/cpp.xml" Build src/cpp/build.cc "cannot make progress" )"; then ok "(L2) C++: $r — the out-of-line definition, not the r1 header declaration"; else no "(L2) C++: $r"; fi
 if r="$( chk nobodyat "$TMP/cpp.xml" '\.h$' )" && r2="$( chk nobodyof "$TMP/cpp.xml" Builder )"; then ok "(L2) C++: no header declaration, no class body"; else no "(L2) C++: ${r:-} ${r2:-}"; fi
 if r="$( chk body "$TMP/go.xml" Package src/go/packager.go "guessing packager from target file extension" )"; then ok "(L3) Go: $r (the method)"; else no "(L3) Go: $r"; fi
@@ -630,8 +634,8 @@ for f in q1.cpp q1.rs q1.py q1.ts q1.go q1.deep q1.other q1.common ep.name ep.se
     if r="$( chk sigsopen "$TMP/$f.xml" )"; then :; else no "(0) $f.xml: $r — the runtime root answered nothing"; fi
 done
 # EP1 namesake: ModalScreen.refresh's only edge is super().refresh() — a same-named owner, never an entry point
-if r="$( chk rowis "$TMP/ep.name.xml" 3 refresh src/screens.py )" && [ "$( chk rankof "$TMP/ep.name.xml" refresh src/screens.py )" = 3 ] \
-   && "$BIN" "$TMP/rt/name" --no-cache --callees=ModalScreen.refresh 2>/dev/null | grep -q '<s t="fn" n="refresh" p="src/screens.py:7"/>'; then
+if r="$( chk rowis "$TMP/ep.name.xml" 3 Screen.refresh src/screens.py )" && [ "$( chk rankof "$TMP/ep.name.xml" refresh src/screens.py )" = 3 ] \
+   && "$BIN" "$TMP/rt/name" --no-cache --callees=ModalScreen.refresh 2>/dev/null | grep -q '<s t="fn" n="Screen.refresh" p="src/screens.py:7"/>'; then
     if r="$( chk bodyat "$TMP/ep.name.xml" refresh src/screens.py 7 )"; then ok "(EP1) namesake: $r — the r3 row; r4's super().refresh() edge names the same word"; else no "(EP1) namesake: $r"; fi
 else
     no "(EP1) premise: r3 Screen.refresh (l=7) and ModalScreen.refresh's edge to it — ${r:-not read}"
@@ -643,16 +647,16 @@ else
     no "(EP2) premise: ${r:-} ${r2:-}"
 fi
 # DS1-DS4: the declaration outranks its definition; the body is the definition's
-ds(){   # ds KEY ARM DECL_NAME DECL_PATH DECL_RANK DEF_PATH DEF_LINE
-    local k="$1" arm="$2" n="$3" p="$4" dr="$5" dp="$6" dl="$7"
-    if ! r="$( chk rowis "$TMP/ds.$k.xml" "$dr" "$n" "$p" )"; then no "($arm) premise: $r"; return; fi
+ds(){   # ds KEY ARM DECL_NAME DECL_PATH DECL_RANK DEF_PATH DEF_LINE [DECL_ROW_NAME]  (the <d> row spelling; the <b n=> body keeps DECL_NAME)
+    local k="$1" arm="$2" n="$3" p="$4" dr="$5" dp="$6" dl="$7" rn="${8:-$3}"
+    if ! r="$( chk rowis "$TMP/ds.$k.xml" "$dr" "$rn" "$p" )"; then no "($arm) premise: $r"; return; fi
     if [ "$( chk rowline "$TMP/ds.$k.xml" "$dr" )" = "$dl" ] && [ "$p" = "$dp" ]; then no "($arm) premise: the r$dr row IS the definition (l=$dl): no declaration outranks it"; return; fi
     if r="$( chk bodyat "$TMP/ds.$k.xml" "$n" "$dp" "$dl" )"; then ok "($arm) $k: $r — the definition, not the r$dr declaration"; else no "($arm) $k: $r"; fi
 }
 ds tsover DS1 format src/format.ts 1 src/format.ts 5
-ds cppvirt DS2 Dispatch src/dispatch.h 1 src/dispatch.cc 2
-ds goiface DS3 Pack src/packer.go 1 src/packer.go 10
-ds tsabs DS4 print src/printer.ts 1 src/printer.ts 6
+ds cppvirt DS2 Dispatch src/dispatch.h 1 src/dispatch.cc 2 PoolDispatcher::Dispatch
+ds goiface DS3 Pack src/packer.go 1 src/packer.go 10 Packer.Pack
+ds tsabs DS4 print src/printer.ts 1 src/printer.ts 6 Base.print   # js-def-naming: the TS declaration row names its class; the <b n=> body keeps print
 # Q1 member owner: the head-tier class's member, defined past the head tier (no name owner exists)
 q1(){   # q1 KEY CLASS_RANK_MAX CLASS CLASS_PATH MEMBER MEMBER_PATH MEMBER_LINE LANG
     local k="$1" cmax="$2" c="$3" cp="$4" m="$5" mp="$6" ml="$7" lang="$8" cr mr

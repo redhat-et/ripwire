@@ -13,6 +13,156 @@
 set -eu
 src="$( cd "$( dirname "$0" )" && pwd )"
 
+# ── HARDENING ported from PR #293 (2026-10, thanks @s0undt3ch). #293 proposed moving this installer into the
+#    ripwire binary; that was declined (2026-10-07), but its four review rounds produced a list of ways an installer
+#    can be talked into writing or deleting the wrong thing, and every item that applies to a shell installer lives
+#    here: absolute roots only, nothing created group/world-writable, a symlinked settings.json written through (not
+#    replaced), its mode kept (CWE-732), a quoted hook command, jq found only through absolute PATH entries
+#    (CWE-426), temp files removed on a normal exit and on HUP, INT and TERM (not on SIGKILL, which no script can catch),
+#    and a prune that removes only what it can show is ours.
+#    test/skillinstallcheck.sh sections (J)-(Q) drive each one; every arm was red against the script before this.
+
+# A file or directory this script CREATES must not be group/world-writable, whatever the caller's umask: under
+# `umask 000` a first-time settings.json, hooks.json or skills directory came out 0666/0777. Only TIGHTENS: OR 022
+# into the current mask, so a stricter user umask (077) stays stricter and the common 022 is unchanged.
+umask "$( printf '%04o' $(( 0$( umask ) | 022 )) )"
+
+# The temp files this run created are removed on a normal exit and on HUP/INT/TERM. A SIGKILL cannot be trapped: it can
+# leave one `.tmp.*` file beside the file being written, and a later run does not sweep it. A temp file renamed into
+# place no longer exists, so the removal is then a no-op. `exit N` in the signal traps runs the EXIT trap. At most one
+# settings temp ($tmp) and one manifest temp ($manifestTmp) are live at a time, so there is no list to split: a list
+# of paths cut at newlines would `rm` a piece of a root that itself holds a newline.
+tmp=""
+manifestTmp=""
+cleanup_tmps()
+{
+    [ -z "$tmp" ] || rm -f -- "$tmp" 2>/dev/null || true
+    [ -z "$manifestTmp" ] || rm -f -- "$manifestTmp" 2>/dev/null || true
+    return 0
+}
+trap cleanup_tmps EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# is_abs_path P — absolute on POSIX, or a Windows drive/UNC path (Git Bash hands those through unchanged). The drive and
+# UNC forms are accepted on every platform: on POSIX a root spelled `x:/y` is therefore taken as absolute and created
+# under the current directory (a known gap; the Windows arms pin the drive form).
+is_abs_path()
+{
+    case "$1" in
+        /*) return 0 ;;
+        [A-Za-z]:[/\\]*) return 0 ;;
+        \\\\*) return 0 ;;
+    esac
+    return 1
+}
+# abs_home / abs_root VALUE OVERRIDE — a destination root taken from the ENVIRONMENT must be absolute. A relative
+# CLAUDE_CONFIG_DIR / AGENTS_HOME / CODEX_HOME / HERMES_HOME used to install into ./relcfg, wherever the shell was,
+# and an empty HOME turned `$HOME/.claude` into `/.claude`. Refuse (status 2) instead of guessing. An explicit PATH
+# argument is typed on the command line and keeps resolving against the current directory.
+abs_home()
+{
+    _h="${HOME-}"
+    if [ -z "$_h" ]; then
+        echo "skills/install.sh: HOME is unset or empty; refusing to guess a destination. Set HOME, name the destination (an explicit PATH argument), or set CLAUDE_CONFIG_DIR / AGENTS_HOME / CODEX_HOME / HERMES_HOME to an absolute path." >&2
+        return 1
+    fi
+    if ! is_abs_path "$_h"; then
+        echo "skills/install.sh: HOME must be an absolute path (got '$_h'); refusing to install relative to the current directory." >&2
+        return 1
+    fi
+    printf '%s\n' "$_h"
+}
+abs_root()
+{
+    # $1 = the root as resolved (`${VAR:-$HOME/.sub}`, spelled exactly as before so the census gates still read it);
+    # $2 = the override variable's own value, "" when the HOME fallback was taken (then HOME itself must be usable)
+    if [ -z "$2" ]; then abs_home >/dev/null || return 1; fi
+    if [ -z "$1" ] || ! is_abs_path "$1"; then
+        echo "skills/install.sh: the destination root '$1' is not an absolute path (HOME, CLAUDE_CONFIG_DIR, AGENTS_HOME, CODEX_HOME and HERMES_HOME must be absolute); refusing to install relative to the current directory." >&2
+        return 1
+    fi
+    printf '%s\n' "$1"
+}
+
+# find_jq — set $jqBin to an ABSOLUTE path to jq, or "" when there is none. An empty or relative PATH entry means
+# "the current directory", i.e. whatever repository the user happens to be standing in: a planted ./jq would run
+# with the user's rights (CWE-426). Only absolute entries are searched. (The final `command -v` is for hosts, such
+# as Git Bash, whose PATH can hold forms this walk does not recognise; its answer is used only if it is absolute.)
+jqBin=""
+find_jq()
+{
+    jqBin=""
+    set -f; _oifs="$IFS"; IFS=:
+    for _d in $PATH; do
+        IFS="$_oifs"
+        is_abs_path "$_d" || continue
+        for _n in jq jq.exe; do
+            if [ -f "$_d/$_n" ] && [ -x "$_d/$_n" ]; then jqBin="$_d/$_n"; break 2; fi
+        done
+    done
+    IFS="$_oifs"; set +f
+    if [ -z "$jqBin" ]; then
+        _c="$( command -v jq 2>/dev/null )" || _c=""
+        if [ -n "$_c" ] && is_abs_path "$_c"; then jqBin="$_c"; fi
+    fi
+    return 0
+}
+
+# resolve_link FILE — FILE with symbolic links followed to the real file, so a dotfiles setup (settings.json ->
+# ~/dotfiles/claude/settings.json) has the hook written INTO the real file and the link kept. A temp-then-rename onto
+# the link itself would replace the link with a regular file and the dotfiles copy would never get the hook.
+resolve_link()
+{
+    _p="$1"; _n=0
+    while [ -L "$_p" ]; do
+        _n=$(( _n + 1 ))
+        if [ "$_n" -gt 40 ]; then
+            echo "skills/install.sh: too many levels of symbolic links resolving $1" >&2
+            return 1
+        fi
+        _l="$( readlink "$_p" )" || return 1
+        case "$_l" in
+            /*|[A-Za-z]:[/\\]*) _p="$_l" ;;
+            *) _p="$( dirname "$_p" )/$_l" ;;
+        esac
+    done
+    printf '%s\n' "$_p"
+}
+
+# mk_tmp FILE — set $tmp to a fresh temp file BESIDE FILE, tracked for removal. Beside, not in $TMPDIR, so the final
+# `mv` is a rename within one filesystem (atomic) and not a copy across two that a kill can leave half-written. It
+# starts as a copy of FILE's mode, so rewriting a 0640 config does not change it (CWE-732; mktemp alone makes 0600).
+# A read-only original (0444) ends up owner-writable. Falls back to a plain `mktemp` if the template is unusable.
+mk_tmp()
+{
+    tmp="$( mktemp "$1.tmp.XXXXXX" 2>/dev/null )" || tmp="$( mktemp )" || {
+        echo "skills/install.sh: could not create a temporary file for $1" >&2
+        exit 1
+    }
+    if [ -f "$1" ]; then
+        cp -p "$1" "$tmp" 2>/dev/null || true
+        chmod u+w "$tmp" 2>/dev/null || true
+    fi
+}
+
+# hook_cmd PATH — PATH as a hook `command` string. Written bare when it holds only characters a shell leaves alone
+# (so the ordinary install is byte-for-byte what it was); otherwise single-quoted, because the agent runs the string
+# through a shell and a checkout under a path with a space gave a hook that could not run. A path holding a single
+# quote cannot be both quoted here and recognised again on the next run, so it is refused.
+hook_cmd()
+{
+    case "$1" in
+        *[!A-Za-z0-9_./:@%+=,-]*)
+            case "$1" in
+                *\'*) echo "skills/install.sh: --hook cannot register a hook script whose path contains a single quote: $1" >&2; return 1 ;;
+            esac
+            printf "'%s'\n" "$1" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 # ── the PreToolUse matcher, in one place. It is not cosmetic: a matcher decides which tool calls the
 #    hook is ever SHOWN. Read/Glob are here because the whole-file read is the largest token sink in an
 #    agent loop and the one default a skill description cannot intercept; mcp__ripwire__.* is here for
@@ -46,7 +196,10 @@ codexHookMatcher="^(Bash|Read|Glob|Grep|Edit|Write|MultiEdit|NotebookEdit|mcp__r
 # trailing ` --session-start` argument. When an entry is found, both its matcher AND its command are
 # brought to the current values: refreshing one and not the other is how the stale half survives.
 # test/skillinstallcheck.sh arm (D) drives the exact scenario and counts the entries.
-jqIsScript='def isScript($n): (.command // "") | split(" ")[0] | endswith("/hooks/" + $n);'
+# A command registered from a path with a space is single-quoted (hook_cmd above): its script is what lies between the
+# quotes. \u0027 is the single quote, which cannot appear inside this single-quoted shell string.
+jqIsScript='def cmdWord: (.command // "") | if startswith("\u0027") then (.[1:] | split("\u0027")[0]) else split(" ")[0] end;
+def isScript($n): cmdWord | endswith("/hooks/" + $n);'
 
 # ── refresh_hook_matcher SETTINGS HOOKSCRIPT — bring an ALREADY-registered entry's matcher up to date.
 # An entry written by an older installer carries an older matcher, and a stale one undercounts forever,
@@ -54,14 +207,14 @@ jqIsScript='def isScript($n): (.command // "") | split(" ")[0] | endswith("/hook
 # agrees is left untouched, and this never adds, removes or reorders an entry.
 refresh_hook_matcher()
 {
-    if ! jq -e --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
+    if ! "$jqBin" -e --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
         any((.hooks.PreToolUse // [])[]?; (any(.hooks[]?; isScript($n))) and ((.matcher != $m) or (any(.hooks[]?; isScript($n) and .command != $cmd))))' \
         "$1" >/dev/null 2>&1; then
         echo "ripwire PreToolUse hook already registered in $1 ($2) — nothing to do."
         return 0
     fi
-    tmp="$( mktemp )"
-    if jq --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
+    mk_tmp "$1"
+    if "$jqBin" --arg cmd "$2" --arg m "$3" --arg n "ripwire-nudge.sh" "$jqIsScript"'
         .hooks.PreToolUse |= map( if any(.hooks[]?; isScript($n))
                                   then .matcher = $m | .hooks |= map( if isScript($n) then .command = $cmd else . end )
                                   else . end )' \
@@ -92,14 +245,15 @@ install_claude_route()
         return 1
     }
     chmod +x "$routeScript" 2>/dev/null || true
+    routeCmd="$( hook_cmd "$routeScript" )" || return 1
 
-    if jq -e --arg n "ripwire-claude-route.sh" "$jqIsScript"'
+    if "$jqBin" -e --arg n "ripwire-claude-route.sh" "$jqIsScript"'
         any((.hooks.UserPromptSubmit // [])[]?.hooks[]?; isScript($n))' "$1" >/dev/null 2>&1; then
-        tmp="$( mktemp )"
-        if jq --arg cmd "$routeScript" --arg n "ripwire-claude-route.sh" "$jqIsScript"'
+        mk_tmp "$1"
+        if "$jqBin" --arg cmd "$routeCmd" --arg n "ripwire-claude-route.sh" "$jqIsScript"'
             .hooks.UserPromptSubmit |= map( .hooks |= map( if isScript($n) then .command = $cmd else . end ) )' \
             "$1" >"$tmp" && [ -s "$tmp" ] && mv "$tmp" "$1"; then
-            echo "ripwire UserPromptSubmit router already registered in $1 — command refreshed to $routeScript."
+            echo "ripwire UserPromptSubmit router already registered in $1 — command refreshed to $routeCmd."
         else
             rm -f "$tmp"
             echo "skills/install.sh: could not refresh the router command in $1 (is it valid JSON?); nothing changed." >&2
@@ -109,15 +263,15 @@ install_claude_route()
     fi
 
     echo "skills/install.sh --hook will add this OPT-IN, advisory-only entry to $1:"
-    echo "  hooks.UserPromptSubmit += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$routeScript\" }] }]"
+    echo "  hooks.UserPromptSubmit += [{ matcher: \"*\", hooks: [{ type: \"command\", command: \"$routeCmd\" }] }]"
     echo "  behavior: asks ripwire --help-task before the first tool is chosen and, ONLY at high"
     echo "            confidence, adds one paste-ready command as context. It never blocks a prompt."
     echo "  counting: appends one row per prompt to ~/.ripwire/routing.jsonl carrying a CHECKSUM and"
     echo "            byte length of the prompt and a hashed session id — never the prompt text."
     echo "            RIPWIRE_ROUTE_METER=0 opts out of that without disabling routing."
 
-    tmp="$( mktemp )"
-    if jq --arg cmd "$routeScript" '
+    mk_tmp "$1"
+    if "$jqBin" --arg cmd "$routeCmd" '
         .hooks //= {} |
         .hooks.UserPromptSubmit //= [] |
         .hooks.UserPromptSubmit += [{ matcher: "*", hooks: [{ type: "command", command: $cmd, timeout: 8 }] }]
@@ -135,25 +289,28 @@ install_claude_route()
 # once per session per pattern. Idempotent — re-running does not duplicate the settings.json entry.
 install_claude_hook()
 {
-    settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+    settings="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/settings.json" || exit 2
     hookScript="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     chmod +x "$hookScript" 2>/dev/null || true
+    hookCmd="$( hook_cmd "$hookScript" )" || exit 1
 
-    if ! command -v jq >/dev/null 2>&1; then
+    find_jq
+    if [ -z "$jqBin" ]; then
         echo "skills/install.sh --hook needs jq on PATH to safely merge $settings (not found)." >&2
         echo "Add these by hand instead:" >&2
-        echo "  hooks.PreToolUse  += [{\"matcher\":\"$hookMatcher\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookScript\"}]}]" >&2
-        echo "  hooks.SessionStart += [{\"matcher\":\"startup|resume|clear\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookScript --session-start\"}]}]" >&2
+        echo "  hooks.PreToolUse  += [{\"matcher\":\"$hookMatcher\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd\"}]}]" >&2
+        echo "  hooks.SessionStart += [{\"matcher\":\"startup|resume|clear\",\"hooks\":[{\"type\":\"command\",\"command\":\"$hookCmd --session-start\"}]}]" >&2
         exit 1
     fi
 
     mkdir -p "$( dirname "$settings" )"
-    [ -f "$settings" ] || echo '{}' >"$settings"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )   # a first-time config stays owner-only, as it always was
+    settings="$( resolve_link "$settings" )" || exit 1
 
-    if jq -e --arg n "ripwire-nudge.sh" "$jqIsScript"'
+    if "$jqBin" -e --arg n "ripwire-nudge.sh" "$jqIsScript"'
         any((.hooks.PreToolUse // [])[]?.hooks[]?; isScript($n))' \
         "$settings" >/dev/null 2>&1; then
-        refresh_hook_matcher "$settings" "$hookScript" "$hookMatcher" || return $?
+        refresh_hook_matcher "$settings" "$hookCmd" "$hookMatcher" || return $?
         install_claude_route "$settings"
         return $?
     fi
@@ -167,8 +324,8 @@ install_claude_hook()
     # otherwise be a pure undercount (docs/SUBSTITUTION_METER.md). The hook never nudges those calls,
     # nor the native edit tools, which are metered only so the EDIT band can see them.
     echo "skills/install.sh --hook will add these OPT-IN, advisory-only entries to $settings:"
-    echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookScript\" }] }]"
-    echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookScript --session-start\" }] }]"
+    echo "  hooks.PreToolUse  += [{ matcher: \"$hookMatcher\", hooks: [{ type: \"command\", command: \"$hookCmd\" }] }]"
+    echo "  hooks.SessionStart += [{ matcher: \"startup|resume|clear\", hooks: [{ type: \"command\", command: \"$hookCmd --session-start\" }] }]"
     echo "  behavior: never blocks/denies/rewrites a tool call, and since 2026-09-02 never speaks on it"
     echo "            either — the advisory nudge was measured inert and retired (docs/EVALS.md §4)."
     echo "            What remains on PreToolUse is the substitution meter and the router's adoption"
@@ -182,8 +339,8 @@ install_claude_hook()
     echo "            (the nudge itself keeps working). Details: docs/SUBSTITUTION_METER.md."
     echo "  remove:   delete those two entries from $settings (or re-run with the entries already absent)."
 
-    tmp="$( mktemp )"
-    if jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg m "$hookMatcher" '
+    mk_tmp "$settings"
+    if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg m "$hookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
         .hooks.PreToolUse += [{ matcher: $m, hooks: [{ type: "command", command: $cmd }] }] |
@@ -201,7 +358,7 @@ install_claude_hook()
 
 install_codex_hook()
 {
-    settings="${CODEX_HOME:-$HOME/.codex}/hooks.json"
+    settings="$( abs_root "${CODEX_HOME:-$HOME/.codex}" "${CODEX_HOME:-}" )/hooks.json" || exit 2
     hookScript="$( dirname "$src" )/hooks/ripwire-codex-nudge.sh"
     sharedHook="$( dirname "$src" )/hooks/ripwire-nudge.sh"
     routeScript="$( dirname "$src" )/hooks/ripwire-codex-route.sh"
@@ -210,18 +367,22 @@ install_codex_hook()
         exit 1
     }
     chmod +x "$hookScript" "$sharedHook" "$routeScript" 2>/dev/null || true
+    hookCmd="$( hook_cmd "$hookScript" )" || exit 1
+    routeCmd="$( hook_cmd "$routeScript" )" || exit 1
 
-    if ! command -v jq >/dev/null 2>&1; then
+    find_jq
+    if [ -z "$jqBin" ]; then
         echo "skills/install.sh --codex --hook needs jq on PATH to safely merge $settings (not found)." >&2
         exit 1
     fi
 
     mkdir -p "$( dirname "$settings" )"
-    [ -f "$settings" ] || echo '{}' >"$settings"
+    [ -f "$settings" ] || ( umask 077; echo '{}' >"$settings" )   # a first-time config stays owner-only, as it always was
+    settings="$( resolve_link "$settings" )" || exit 1
 
     echo "skills/install.sh --codex --hook will add or refresh advisory-only entries in $settings."
-    tmp="$( mktemp )"
-    if jq --arg cmd "$hookScript" --arg scmd "$hookScript --session-start" --arg rcmd "$routeScript" --arg m "$codexHookMatcher" '
+    mk_tmp "$settings"
+    if "$jqBin" --arg cmd "$hookCmd" --arg scmd "$hookCmd --session-start" --arg rcmd "$routeCmd" --arg m "$codexHookMatcher" '
         .hooks //= {} |
         .hooks.PreToolUse //= [] |
         .hooks.SessionStart //= [] |
@@ -283,12 +444,12 @@ if [ "$wantHook" -eq 1 ] && [ "$explicitMode" -eq 0 ]; then
 fi
 
 case "$mode" in
-    codex) dst="${AGENTS_HOME:-$HOME/.agents}/skills" ;;
+    codex) dst="$( abs_root "${AGENTS_HOME:-$HOME/.agents}" "${AGENTS_HOME:-}" )/skills" || exit 2 ;;
     # openclaw resolves to the SAME root Codex uses -- openclaw's docs call it a "compatibility skill
     # root". A repeated value, not a second code path. But it is conditional, and the condition is worth
     # a line of output rather than a support thread: openclaw skips this root entirely unless its state
     # dir is the default. Verified against docs.openclaw.ai, 2026-09-08.
-    openclaw) dst="$HOME/.agents/skills"
+    openclaw) dst="$( abs_home )/.agents/skills" || exit 2
               # NOT ${AGENTS_HOME:-...}: that is Codex's variable. openclaw honours no such override, so a
               # user who relocated AGENTS_HOME for Codex would be told to install where openclaw never looks.
               if [ -n "${AGENTS_HOME:-}" ] && [ "${AGENTS_HOME}" != "$HOME/.agents" ]; then
@@ -300,9 +461,9 @@ case "$mode" in
                   echo "  openclaw only reads $dst when its state dir is the default $HOME/.openclaw." >&2
                   echo "  Installing there anyway; openclaw will not discover these skills until that is unset." >&2
               fi ;;
-    codex-legacy) dst="${CODEX_HOME:-$HOME/.codex}/skills" ;;
-    claude) dst="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" ;;
-    hermes) dst="${HERMES_HOME:-$HOME/.hermes}/skills" ;;
+    codex-legacy) dst="$( abs_root "${CODEX_HOME:-$HOME/.codex}" "${CODEX_HOME:-}" )/skills" || exit 2 ;;
+    claude) dst="$( abs_root "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "${CLAUDE_CONFIG_DIR:-}" )/skills" || exit 2 ;;
+    hermes) dst="$( abs_root "${HERMES_HOME:-$HOME/.hermes}" "${HERMES_HOME:-}" )/skills" || exit 2 ;;
     path) dst="$explicitPath" ;;
 esac
 mkdir -p "$dst"
@@ -400,6 +561,24 @@ wanted_skill() { [ "$wantContributor" -eq 1 ] || ! is_contributor_skill "$1"; }
 
 pruned=0
 kept=0
+# link_is_ours LINK NAME — may the prune remove this SYMLINK? Only one it can show ripwire made: dangling (nothing of the
+# user's is behind it), recorded by the previous manifest, or pointing into THIS checkout (compared by whole path
+# components: "$src"/*, never a string prefix, so a sibling directory sharing the checkout's name does not match).
+# A live link anywhere else is the user's own asset that merely happens to be named ripwire-* (#293 review).
+oldManifest="$dst/.ripwire-manifest-v1"
+link_is_ours()
+{
+    if [ ! -e "$1" ]; then return 0; fi
+    if [ -f "$oldManifest" ] && grep -qxF "skill=$2" "$oldManifest" 2>/dev/null; then return 0; fi
+    _t="$( readlink "$1" 2>/dev/null )" || return 1
+    case "$_t" in
+        /*|[A-Za-z]:[/\\]*) ;;
+        *) _t="$( dirname "$1" )/$_t" ;;
+    esac
+    case "$_t" in */..|*/../*) return 1 ;; esac                # a `..` can leave the checkout after the prefix matched
+    case "$_t" in "$src"/*) return 0 ;; esac
+    return 1
+}
 for existing in "$dst"/ripwire-*; do
     [ -e "$existing" ] || [ -L "$existing" ] || continue      # skip the literal glob when nothing matches
     name="$( basename "$existing" )"
@@ -416,6 +595,18 @@ for existing in "$dst"/ripwire-*; do
         why="$name (contributor-only; pass --contributor to activate it)"
     fi
     [ -n "$why" ] || continue
+    if [ -L "$existing" ]; then
+        if ! link_is_ours "$existing" "$name"; then
+            echo "kept $name: a symlink ripwire did not create (yours) — remove it yourself if it is stale"
+            kept=$(( kept + 1 ))
+            continue
+        fi
+    elif [ ! -d "$existing" ]; then
+        # a regular file is never something this installer made (it creates links, and copied directories)
+        echo "kept $name: not installed by ripwire (your own file) — remove it yourself if it is stale"
+        kept=$(( kept + 1 ))
+        continue
+    fi
     if foreign_dir "$existing" "$( shipped_src_for "$name" )"; then
         # Before #334 this was `rm -f` on a directory, which failed and aborted the whole install under set -e.
         # C4: a name this run once wrote to the manifest is not by itself proof this directory is still ours —
@@ -443,6 +634,13 @@ install_skill()
         # attempting either. It is not a FAILURE (nothing this run was asked to do went wrong) — it is the
         # user's own directory (C4), so it is left exactly as it is and not counted as installed.
         echo "kept $2: not installed by ripwire (your own directory)"
+        kept=$(( kept + 1 ))
+        return 0
+    fi
+    if [ -f "$target" ] && [ ! -L "$target" ]; then
+        # a regular file is never something this installer made (it creates links, and copied directories): the user's
+        # own file at a shipped skill's name is kept, like a foreign directory, not replaced (#293: refuse foreign files)
+        echo "kept $2: not installed by ripwire (your own file)"
         kept=$(( kept + 1 ))
         return 0
     fi
