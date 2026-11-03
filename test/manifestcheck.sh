@@ -85,6 +85,18 @@ text = open(sys.argv[1]).read()
 m = re.search(r'for _g in (.*?); do', text, re.S)
 sys.exit('no loop found') if not m else print(len([w for w in m.group(1).split() if w != chr( 92 )]))
 " "$REGRESSION" )"
+# Since 2026-11-02 the sites publish the dated counts snapshot (docs/counts.tsv, test/lib/countsnapshot.sh),
+# so every arm below compares a stated count with THAT; the live loop length is printed beside it, and
+# `python3 docs/counts_snapshot.py check` asserts snapshot == loop at a refresh and a release.
+. "$ROOT/test/lib/countsnapshot.sh"
+liveLoopNames="$loopNames"
+snapGates="$( countsSnapshotValue "$ROOT" gates.scripts )"; snapRc=$?
+if [ "$snapRc" = 0 ]; then
+    loopNames="$snapGates"
+    printf 'INFO: published gate count = counts snapshot %s (docs/counts.tsv); the loop names %s today\n' "$snapGates" "$liveLoopNames"
+elif [ "$snapRc" = 2 ]; then
+    printf 'FAIL: docs/counts.tsv exists but has no readable gates.scripts / taken line\n'; fail=1
+fi
 # ── SYNTAX ARM: test/regression.sh must actually PARSE ────────────────────────────────────────────
 # Nothing in this repository syntax-checks the file that drives every gate. Verified empirically:
 # appending an unterminated `if` to regression.sh leaves `bash -n` reporting "syntax error: unexpected

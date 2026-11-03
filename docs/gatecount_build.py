@@ -24,7 +24,14 @@
 # drifted). Do not spell the literal marker inside a site file except at a real site; document it in
 # CONTRIBUTING.md, which is not a site.
 #
-# Usage: python3 docs/gatecount_build.py [--check] [--root DIR]
+# THE SNAPSHOT (2026-11-02). Since GEN-DOCS-MERGE the sites state the gate count of the dated snapshot
+# docs/counts.tsv (key gates.scripts), not the live loop: two open PRs that each add a gate then never both
+# rewrite the same eight lines, so neither goes CONFLICTING when the other lands. The loop is still parsed on
+# every run (a loop that changed shape is refused) and --check prints the live length beside the snapshot;
+# `python3 docs/counts_snapshot.py check` asserts snapshot == loop, `refresh` re-takes it. A tree with no
+# docs/counts.tsv (the synthetic trees the gates build with --root) publishes the live length, as before.
+#
+# Usage: python3 docs/gatecount_build.py [--check] [--root DIR] [--live-counts]
 #   --check rewrites nothing and exits 1 if any site has drifted (this is what the gate runs).
 #   --root retargets the whole tree. It exists so test/gatecountcheck.sh can prove this generator CAN go
 #          red on a real loop change without editing the tree it is gating — a probe copy dropped into
@@ -114,6 +121,8 @@ ap.add_argument( '--root', default = None )
 # tuple, the gate's own copy, and test/manifestcheck.sh's `gateCountSites` name the same files — three
 # hand-kept copies of one list is the shape that let a site go unscanned in the first place.
 ap.add_argument( '--sites', action = 'store_true' )
+# --live-counts prints this generator's live totals as `key<TAB>value` (docs/counts_snapshot.py reads it)
+ap.add_argument( '--live-counts', action = 'store_true' )
 a = ap.parse_args()
 if a.sites:
     print( '\n'.join( SITES ) )
@@ -121,7 +130,19 @@ if a.sites:
 if a.root:
     ROOT = pathlib.Path( a.root ).resolve()
 
-count = loopCount( ROOT )
+live = loopCount( ROOT )
+if a.live_counts:
+    print( 'gates.scripts\t%d' % live )
+    sys.exit( 0 )
+snap = None
+if ( ROOT / 'docs' / 'counts.tsv' ).exists():     # a synthetic --root tree has none, and no counts_snapshot.py either
+    sys.path.insert( 0, str( pathlib.Path( __file__ ).resolve().parent ) )
+    import counts_snapshot
+    snap = counts_snapshot.read( ROOT )
+    count = counts_snapshot.published( snap, { 'gates.scripts': live }, 'gatecount_build' )[ 'gates.scripts' ]
+else:
+    count = live
+source = ( 'the counts snapshot taken %s (docs/counts.tsv)' % snap[ 'taken' ] ) if snap else 'the live loop'
 plans = rewrite_marked_sites( ROOT, count )
 sites = sum( len( s ) for _, _, s in plans )
 
@@ -134,10 +155,10 @@ if a.check:
             # a difference this scan cannot name is still a difference — never report clean on one
             drift += named or [ '%s differs from what this generator produces' % rel ]
     if drift:
-        sys.exit( 'gatecount_build: the loop in test/regression.sh names %d, but %s — run: '
-                  'python3 docs/gatecount_build.py' % ( count, '; '.join( drift ) ) )
-    print( 'gatecount_build: %d marked site(s) in %d file(s) all state the loop in test/regression.sh '
-           'names %d' % ( sites, len( SITES ), count ) )
+        sys.exit( 'gatecount_build: %s says %d, but %s — run: '
+                  'python3 docs/gatecount_build.py' % ( source, count, '; '.join( drift ) ) )
+    print( 'gatecount_build: %d marked site(s) in %d file(s) all state %d, %s; the loop in test/regression.sh '
+           'names %d today' % ( sites, len( SITES ), count, source, live ) )
 else:
     changed = 0
     for rel, newText, _ in plans:
@@ -145,5 +166,5 @@ else:
         if path.read_text( encoding = 'utf-8', errors = 'surrogateescape' ) != newText:
             path.write_text( newText, encoding = 'utf-8', errors = 'surrogateescape' )
             changed += 1
-    print( 'gatecount_build: wrote %d to %d marked site(s) across %d file(s) (%d file(s) changed)' %
-           ( count, sites, len( SITES ), changed ) )
+    print( 'gatecount_build: wrote %d (%s) to %d marked site(s) across %d file(s) (%d file(s) changed); '
+           'the loop names %d today' % ( count, source, sites, len( SITES ), changed, live ) )

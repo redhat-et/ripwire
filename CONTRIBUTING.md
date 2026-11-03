@@ -968,8 +968,14 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
    for you, including a hand-written number on a marked line; fix it, `git add`, and run
    `scripts/merge_main.sh --continue` (not a plain `git commit`, which skips the generators). `--continue`
    refuses staged conflict markers and an unregistered gate file. Exit 3 lists binary-pinned files to
-   regenerate after a build; the list is also in the merge commit message. `test/mergemaincheck.sh` pins
-   each of these. See below.
+   regenerate after a build (including main's newer showcase capture, whose legend-dictionary `dictv=` line
+   names main's binary); the list is also in the merge commit message. Build the merged tree, then run
+   `scripts/merge_main.sh --regen-after-build build/ripwire`: it re-records the marked files and commits them.
+   `test/mergemaincheck.sh` pins each of these. See below.
+   **Totals are a dated snapshot.** The gate count, the cap inventory and the LIMITS/TUNING totals are published
+   from `docs/counts.tsv`, so a change that adds a gate or a cap leaves every total line alone and two open PRs
+   do not conflict on them (`test/gendocsmergecheck.sh`). Do not run `python3 docs/counts_snapshot.py refresh`
+   in a feature change; it is a maintainer step (a release commit, or a standalone change).
 6. If your change alters emitted output, regenerate the goldens as their **own** commit with the
    diff reviewed by eye — never bundled with logic.
 7. Keep formatting churn out of logic commits.
@@ -982,7 +988,8 @@ ls /tmp/tsanlog.*     # one file per process that raced; none means no report
 9. **Cutting a release:** bump the version in `CMakeLists.txt`'s `project()` call, fold the fragments
    with `python3 scripts/changelog_assemble.py release X.Y.Z YYYY-MM-DD` (it writes the
    `## [X.Y.Z] — date` section under the `## [Unreleased]` stub and deletes the folded files; edit the
-   section's opening summary in by hand after it), commit that before tagging (the release workflow
+   section's opening summary in by hand after it), run `python3 docs/counts_snapshot.py refresh` (the
+   release's totals; `… check` must then pass), commit that before tagging (the release workflow
    refuses a tag while `changelog.d/` still holds fragments), and add the release's blurb to
    README.md's `## Release notes` section (newest first, with a `Thanks to` line where one applies) —
    never to a `## What's new` section, which no longer exists (moved 2026-09-25; see git history if
@@ -1069,7 +1076,10 @@ round. Each takes minutes to check; each miss costs a review round.
     every predicate that refused or degraded the original run. Arm: a path with a space round-trips as one argv
     word, and the replay at the named value is not degraded again.
 
-**The gate count is a build product.** It is stated in `README.md`, `docs/EVALS.md` and
+**The gate count is a build product** — of a dated snapshot since 2026-11-02 (`docs/counts.tsv`): the sites
+state the snapshot's number, `docs/gatecount_build.py --check` fails a site that disagrees with it and prints
+the live loop length beside it, and `python3 docs/counts_snapshot.py check` asserts snapshot == loop at a
+refresh and a release. The history below is why the number is generated at all. It is stated in `README.md`, `docs/EVALS.md` and
 `present/deck5_ripwire_build.js` — eight sites — and every one of them is written by
 `docs/gatecount_build.py` from the single absorb loop in `test/regression.sh`, then gated by
 `test/gatecountcheck.sh`. Hand-writing it is not a style preference. Two lanes that each add one gate

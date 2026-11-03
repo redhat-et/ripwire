@@ -853,21 +853,33 @@ def cap_partition(names, meta):
                  % (len(liveTun), len(liveCe), len(unswept), len(names)))
     return liveTun, liveCe, unswept, gone
 
-def partition_prose(caps, names, meta):
-    """The paragraph that states the partition, with every number read from the partition itself.
+def live_census(caps, meta):
+    """Every live-census number TUNING.md states, as `tuning.*` totals. The partition is checked here, on the
+    live tree, on every run; the published numbers come from the dated snapshot docs/counts.tsv when one exists
+    (docs/counts_snapshot.py), so two open changes that each add a cap do not both rewrite the paragraph."""
+    names = sorted({c[0] for c in caps})
+    liveTun, liveCe, unswept, gone = cap_partition(names, meta)
+    dup   = sorted(n for n in names if sum(1 for c in caps if c[0] == n) > 1)
+    shown = ', '.join('`%s`' % n for n in unswept[:6]) + ('' if len(unswept) <= 6 else ', +%d more' % (len(unswept) - 6))
+    return {'tuning.declarations': len(caps), 'tuning.names': len(names),
+            'tuning.duplicated': ', '.join('`%s`' % n for n in dup) or 'no name',
+            'tuning.tunable_live': len(liveTun), 'tuning.constexpr_live': len(liveCe), 'tuning.unswept': len(unswept),
+            'tuning.unswept_shown': shown or 'none', 'tuning.gone': len(gone),
+            'tuning.gone_shown': ', '.join('`%s`' % n for n in gone[:4]) or 'none'}
+
+def partition_prose(cen, meta):
+    """The paragraph that states the partition, with every number read from the census (live_census).
 
     WRAPPED, not hand-broken: every number in it is derived, so pinning the line breaks by hand would
     make a rewrap a second place to get the paragraph wrong.
     """
-    liveTun, liveCe, unswept, gone = cap_partition(names, meta)
-    dup     = sorted(n for n in names if sum(1 for c in caps if c[0] == n) > 1)
-    shown   = ', '.join('`%s`' % n for n in unswept[:6]) + ('' if len(unswept) <= 6 else ', +%d more' % (len(unswept) - 6))
+    C       = lambda k: cen['tuning.' + k]
     frozen  = len(meta['tunable'])
-    goneSay = ('' if not gone else
+    goneSay = ('' if not C('gone') else
                ' The `tunable` column above reads %d rather than %d because %s no longer declared in `src/` at all: %s.'
-               % (frozen, len(liveTun),
-                  'one name the sweep classified is' if len(gone) == 1 else '%d names the sweep classified are' % len(gone),
-                  ', '.join('`%s`' % n for n in gone[:4])))
+               % (frozen, C('tunable_live'),
+                  'one name the sweep classified is' if C('gone') == 1 else '%d names the sweep classified are' % C('gone'),
+                  C('gone_shown')))
     para = ('The first two columns are not the same number, and the gap is not a rounding: `src/` holds '
             '**%d cap declarations** under **%d distinct names** (%s declared in more than one file). The sweep '
             'patches by NAME, so its own population is NAMES and not declarations — and the two columns beside '
@@ -877,12 +889,12 @@ def partition_prose(caps, names, meta):
             'which no measurement has touched** (%s). %d + %d + %d = %d, and `emit` refuses to render a partition '
             'that does not add up.%s Quoting "%d of %d" would be wrong in both halves at once, which is the shape '
             'of error a generated table exists to prevent.'
-            % (len(caps), len(names), ', '.join('`%s`' % n for n in dup) or 'no name', len(names),
-               len(liveTun), len(liveCe), len(unswept), shown,
-               len(liveTun), len(liveCe), len(unswept), len(names), goneSay, frozen + 1, len(caps)))
+            % (C('declarations'), C('names'), C('duplicated'), C('names'),
+               C('tunable_live'), C('constexpr_live'), C('unswept'), C('unswept_shown'),
+               C('tunable_live'), C('constexpr_live'), C('unswept'), C('names'), goneSay, frozen + 1, C('declarations')))
     return textwrap.fill(para, width=100)
 
-def render(sweep, meta, caps, disc):
+def render(sweep, meta, caps, disc, cen, taken):
     """docs/TUNING.md as a PURE FUNCTION of (frozen measurements, live cap census).
 
     Line numbers are deliberately absent, here and (since 2026-09-10) in docs/LIMITS.md: a line would
@@ -905,15 +917,20 @@ def render(sweep, meta, caps, disc):
     L.append('env var — production keeps its `constexpr` and is never patched — then running real')
     L.append('invocations at the default value and at a probe value. The tunable binary is byte-identical')
     L.append('to production at defaults; that control is what makes these numbers mean anything.\n')
+    if taken:
+        L.append('**The census is a dated snapshot.** The first two columns below and the paragraph after them are')
+        L.append('the counts snapshot taken %s (`docs/counts.tsv`), so two open changes that each add a cap do not' % taken)
+        L.append('both rewrite them; the per-cap tables are re-read from `src/` on every run.')
+        L.append('`python3 docs/counts_snapshot.py show` prints today\'s numbers beside these.\n')
     L.append('| cap declarations | distinct names | tunable | must stay `constexpr` | move >= 1 invocation | move nothing measurable |')
     L.append('| --- | --- | --- | --- | --- | --- |')
     L.append('| %d | %d | %d | %d | **%d** | %d |\n'
-             % (len(caps), len(names), len(tun), len(ce), len(sweep), len(tun) - len(sweep)))
-    L.append(partition_prose(caps, names, meta) + '\n')
+             % (cen['tuning.declarations'], cen['tuning.names'], len(tun), len(ce), len(sweep), len(tun) - len(sweep)))
+    L.append(partition_prose(cen, meta) + '\n')
     L.append('## Read this ratio before the tables\n')
     L.append('**%d of %d tunable caps move any invocation at all. %d move nothing measurable.** That is the'
              % (len(sweep), len(tun), len(tun) - len(sweep)))
-    L.append('finding, and it says what NOT to do: this is not a %d-cap audit. Most of these constants are' % len(caps))
+    L.append('finding, and it says what NOT to do: this is not a %d-cap audit. Most of these constants are' % cen['tuning.declarations'])
     L.append('inert on real invocations and should be left alone. The work worth doing is the small set below,')
     L.append('plus the caps that fire SILENTLY — a cap that bites without disclosing is a defect independent of')
     L.append('whether its value is right, and that fix is both cheaper and larger than any retuning.\n')
@@ -977,7 +994,17 @@ def cmd_emit(a):
     if stale:
         sys.exit('capsweep: %d measured cap(s) no longer match src/ — the sweep is STALE, re-run it:\n  %s'
                  % (len(stale), '\n  '.join(stale)))
-    body = render(sweep, meta, caps, disc)
+    live = live_census(caps, meta)
+    if a.live_counts:
+        print(''.join('%s\t%s\n' % kv for kv in sorted(live.items())), end='')
+        return
+    snap, cen = None, live
+    if (REPO / 'docs' / 'counts.tsv').exists():
+        sys.path.insert(0, str(REPO / 'docs'))
+        import counts_snapshot
+        snap = counts_snapshot.read(REPO)
+        cen = counts_snapshot.published(snap, live, 'capsweep')
+    body = render(sweep, meta, caps, disc, cen, snap['taken'] if snap else None)
     out  = pathlib.Path(a.out)
     if a.check:
         cur = out.read_text() if out.exists() else ''
@@ -1045,6 +1072,7 @@ if __name__ == '__main__':
     ap.add_argument('--data', default=str(HERE), help='emit: dir holding the frozen tunable/sweep TSV')
     ap.add_argument('--out',  default=str(REPO / 'docs' / 'TUNING.md'), help='emit: the document to write')
     ap.add_argument('--check', action='store_true', help='emit: compare instead of writing; exit 1 on drift')
+    ap.add_argument('--live-counts', action='store_true', help='emit: print the live census totals as key<TAB>value, write nothing')
     ap.add_argument('--root', default=None, help='patch: the SCRATCH tree to rewrite (never the repo)')
     ap.add_argument('--corpus', default=None, help='check-corpus/run-corpus: the frozen corpus')
     ap.add_argument('--binary', default=None, help='run-corpus: the binary (or stub) to run')

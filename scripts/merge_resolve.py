@@ -15,9 +15,13 @@ with their markers:
              deck), a hunk whose every non-blank line on both sides carries a generator marker
              (`<!-- gatecount -->`, `// gatecount`) or is the README cap-inventory sentence, and whose two
              sides differ ONLY in the number spans a generator owns (the gate count's SPELLINGS, the cap
-             sentence's two numbers). Every other digit is compared literally, so a hand-written number or a
-             prose edit on a marked line stays a conflict. The other side's text is taken, and merge_main.sh
-             then re-runs the generator that owns those spans (the value is recomputed, not chosen).
+             sentence's two numbers), or ONE side differs from the base only in those spans (it just re-ran
+             the generator) while the other also edited the prose (2026-11-02: the counts-snapshot rewording
+             met every open branch that had regenerated a count). Every other digit is compared literally, so
+             a hand-written number, or prose edited on both sides, stays a conflict. The side carrying the
+             prose edit is taken (the other side when neither does); a prose side that changed any non-owned number
+             stays a conflict, and merge_main.sh then re-runs the
+             generator that owns those spans (the value is recomputed, not chosen).
              docs/LIMITS.md and docs/TUNING.md are generated whole: the file is taken and rebuilt.
   (b) PIN    files the binary's own output pins (test/printf_parity.manifest, docs/COMMANDS.md,
              docs/captures/*): the other side's text is taken and the path is reported as REGEN-AFTER-BUILD,
@@ -158,7 +162,7 @@ def classify( path, ours, base, theirs ):
     if path == 'test/regression.sh' and reshape_sides( ours, base, theirs ) is not None:
         return 'r'
     nonblank = [ l for l in ours + theirs if l.strip() ]
-    if path in GEN_SITES and nonblank and all( GEN_LINE.search( l ) for l in nonblank ) and owned_only( ours, theirs ):
+    if path in GEN_SITES and nonblank and all( GEN_LINE.search( l ) for l in nonblank ) and gen_side( ours, base, theirs ) is not None:
         return 'c'
     if path.startswith( BIN_PINNED ):
         return 'b'
@@ -171,6 +175,23 @@ def owned_only( ours, theirs ):
     number on a marked line (docs/EVALS.md's "~210 ... 200+") or any prose edit stays a conflict for a person."""
     mask = lambda ls: [ MASK_OWNED( l ) for l in ls ]
     return mask( ours ) == mask( theirs )
+
+def gen_side( ours, base, theirs ):
+    """The side a (c) hunk resolves to, or None when it is not (c): either side when they differ only in owned
+    numbers; otherwise, with a base, the side that changed more than owned numbers when the other changed
+    nothing else (its edit was a generator re-run, which merge_main.sh repeats on the merged tree). The prose side
+    must keep every non-owned number of the base literally: a hand-written number changed on a marked line
+    (docs/EVALS.md's "~210") stays a conflict for a person, as before."""
+    if owned_only( ours, theirs ):
+        return theirs
+    if base is None:
+        return None
+    digits = lambda ls: [ re.findall( r'[0-9]+', MASK_OWNED( l ) ) for l in ls ]
+    if owned_only( ours, base ) and digits( theirs ) == digits( base ):
+        return theirs
+    if owned_only( theirs, base ) and digits( ours ) == digits( base ):
+        return ours
+    return None
 
 def resolve_list( ours, base, theirs ):
     o, b, t = set( ours ), set( base ), set( theirs )
@@ -205,8 +226,10 @@ def main():
                 outLines += resolve_list( ours, base, theirs )
             elif c == 'r':
                 outLines += resolve_reshape( *reshape_sides( ours, base, theirs ) )
-            elif c in ( 'b', 'c' ):
+            elif c == 'b':
                 outLines += theirs
+            elif c == 'c':
+                outLines += gen_side( ours, base, theirs )
             else:
                 outLines += raw; left += 1; continue
             counts[ c ] += 1
