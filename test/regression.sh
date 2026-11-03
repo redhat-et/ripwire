@@ -318,6 +318,7 @@ for _g in \
     atomscheck \
     attribmultidefcheck \
     attrvocabcheck \
+    barrelshortkeycheck \
     baselinecheck \
     baselinedirtycheck \
     baselineportcheck \
@@ -549,6 +550,7 @@ for _g in \
     gatecountcheck \
     gateexitcheck \
     gdscriptcheck \
+    gendocsmergecheck \
     genrecallcheck \
     gitchildoptscheck \
     gitenvhermeticcheck \

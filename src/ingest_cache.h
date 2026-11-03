@@ -366,10 +366,13 @@ constexpr std::uint32_t kCacheVersion = 48;           // 48: train 42b — lane 
                                                       //    (Py `pkg.mod`, TS `./x`, Rust `crate::a::b`/`mod:x`) —
                                                       //    a target FORMAT change → old caches must be rejected.
                                                       // 4: Include gained a `bool isAngle` (quote/angle) field
-constexpr std::uint32_t kParserVer    = 287;          // bump on any grammar/.scm/extraction change
-                                                      // 287 = 2026-11-03 (#358 slice 1a, PR #420, merge main 85d2277f): C# using directives move to shared
+constexpr std::uint32_t kParserVer    = 291;          // bump on any grammar/.scm/extraction change
+                                                      // 291 = 2026-11-03 (#358 slice 1a, PR #420, merge main dfd26fc1): C# using directives move to shared
                                                       //   @import.path captures; import-free deep containers no longer disclose a cut or lose whole-cache eligibility.
-                                                      //   Alias/edge facts unchanged. Above main 285 (rich 286); rich file tag 288. kCacheVersion stays 48.
+                                                      //   Alias/edge facts unchanged. Above main 289 (rich 290); rich file tag 292. kCacheVersion stays 48.
+                                                      // 289 = 2026-11-02 (lane barrel-short-key): the TS/TSX/JS tags queries capture `export * as ns from 'm'`
+                                                      //   (ReExport var=ns importedName="*", a namespace re-export). Placeholder above RULE3 #504 (285/286, merged) and
+                                                      //   DOCS-REST #506 (moving to 287/288 in its next round); rich file tag 290; the train renumbers. kCacheVersion stays 48: no record changes shape.
                                                       // 285 = 2026-11-02 (lane rule3-member-guard fix 4; PLACEHOLDER, the train renumbers): a Rust path call with a
                                                       //   qualifier of more than one segment keeps it whole in Reference::fieldName (ingest_names.h rustWrittenQualifier).
                                                       //   Rich file tag 286. kCacheVersion stays 48: no record changes shape.

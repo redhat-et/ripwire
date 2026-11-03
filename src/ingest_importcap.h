@@ -343,13 +343,17 @@ inline bool pythonImportBindOf( TSNode namesNode, TSNode aliasNode, std::string_
 // Web (lane alias-import): a RE-EXPORT — `export { a [as b] } from 'm'` (one record per specifier) and `export * from 'm'`. The
 // tags query captures the specifier's `name:` (with its `alias:` when written) or, for a star, the `source:` string itself. The
 // record binds no local name: var = the exported spelling ("*" for a star), typeName = the module, importedName = the name taken
-// from it ("*"), kind = ReExport (model.h). `export * as ns from` names a namespace and is not captured by the query; a
-// string-named specifier (`export { "a b" as c }`) is not an identifier and is refused here.
+// from it ("*"), kind = ReExport (model.h). `export * as ns from 'm'` (BARREL-SHORT-KEY) is a NAMESPACE re-export: var = ns,
+// importedName = "*" (the whole module, published under one name). A string-named specifier (`export { "a b" as c }`,
+// `export * as "a b" from`) is not an identifier and is refused here.
 inline bool webReexportBindOf( TSNode namesNode, TSNode aliasNode, std::string_view src, CapturedImportBind& out )
 {
     static constexpr std::string_view kStar = "*";
-    const bool star = kindIs( ts_node_type( namesNode ), "string" );
-    out.directive   = star ? ts_node_parent( namesNode ) : ts_node_parent( ts_node_parent( ts_node_parent( namesNode ) ) );
+    const bool star      = kindIs( ts_node_type( namesNode ), "string" );
+    const bool namespc   = !star && kindIs( ts_node_type( ts_node_parent( namesNode ) ), "namespace_export" );
+    out.directive        = star ? ts_node_parent( namesNode )
+                         : namespc ? ts_node_parent( ts_node_parent( namesNode ) )
+                                   : ts_node_parent( ts_node_parent( ts_node_parent( namesNode ) ) );
     if( ts_node_is_null( out.directive ) || !kindIs( ts_node_type( out.directive ), "export_statement" )   // a capture the query did not
         || ( !star && !kindIs( ts_node_type( namesNode ), "identifier" ) ) )                                // shape this way is refused
     {
@@ -357,7 +361,7 @@ inline bool webReexportBindOf( TSNode namesNode, TSNode aliasNode, std::string_v
     }
     out.kind         = LocalBindKind::ReExport;
     out.bound        = star ? kStar : nodeTextOf( ts_node_is_null( aliasNode ) ? namesNode : aliasNode, src );
-    out.importedName = star ? std::string( kStar ) : std::string( nodeTextOf( namesNode, src ) );
+    out.importedName = star || namespc ? std::string( kStar ) : std::string( nodeTextOf( namesNode, src ) );
     out.target       = std::string( pattern::stripQuotePair( nodeTextOf( fieldChild( out.directive, NodeField::Source ), src ) ) );
     return true;
 }
