@@ -94,8 +94,9 @@ w "$P/dyn/__init__.py" ''
 w "$P/dyn/gmod.py" 'def dyn_f(v):\n    return v\n\ndef __getattr__(name):\n    return dyn_f\n'
 w "$P/dyn/wmod.py" 'def dyn_w(v):\n    return v\nglobals()["dyn_w"] = len\n'
 w "$P/dyn/cmod.py" 'import os\nif os.name == "nt":\n    def dyn_c(v):\n        return v\nelse:\n    dyn_c = len\n'
-w "$P/other_pkg/dyn3.py" 'def dyn_w(v):\n    return v\n\ndef dyn_c(v):\n    return v\n'
-w "$P/use_dyn.py" 'from dyn import gmod, wmod, cmod\n\ndef run_dyn():\n    gmod.dyn_f(1)\n    return wmod.dyn_w(1)\n\ndef run_dynw():\n    return wmod.dyn_w(2)\n\ndef run_dync():\n    return cmod.dyn_c(1)\n'
+w "$P/dyn/smod.py" 'def dyn_s(v):\n    return v\n\ntry:\n    from _speedups import *\nexcept ImportError:\n    pass\n'
+w "$P/other_pkg/dyn3.py" 'def dyn_w(v):\n    return v\n\ndef dyn_c(v):\n    return v\n\ndef dyn_s(v):\n    return v\n'
+w "$P/use_dyn.py" 'from dyn import gmod, wmod, cmod, smod\n\ndef run_dyn():\n    gmod.dyn_f(1)\n    return wmod.dyn_w(1)\n\ndef run_dynw():\n    return wmod.dyn_w(2)\n\ndef run_dync():\n    return cmod.dyn_c(1)\n\ndef run_dyns():\n    return smod.dyn_s(1)\n'
 # a package __init__ that re-exports the function: not read through yet (a floor, declined)
 w "$P/reexp/__init__.py" ''
 w "$P/reexp/inner/__init__.py" 'from .impl import re_f\n'
@@ -127,6 +128,7 @@ row N4.ambiguous    x_f      use_amb.py        run_amb   declined
 row N5.pkggetattr   lazy_f   use_lazy.py       run_lazy  declined
 row N6.globals      dyn_w    use_dyn.py        run_dynw  declined
 row N7.conddef      dyn_c    use_dyn.py        run_dync  declined
+row N7.starimport   dyn_s    use_dyn.py        run_dyns  declined
 row N8.reexport     re_f     use_re.py         run_re    declined
 row N9.twomodules   two_f    app/use_two.py    run_two   declined
 row N10.method      only_meth app/use_meth.py  run_meth  name

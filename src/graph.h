@@ -2528,7 +2528,8 @@ inline void finalizePythonSubmoduleBinds( HashMap<std::string, PythonSubmoduleBi
 // PY-MOD-CALL-SITES: may `y.f()` read submodule file `sub`'s own module-scope f? Not when nothing proved the binding (kNoFile), when
 // the module may write its namespace dynamically (`globals()` / `setattr`, kPythonDynamicWrite: any name may be rebound), or when f's
 // def sits under an `if` / `try` / `with` / loop (kPythonCondDefPrefix: it may not run, and the other branch may bind f otherwise —
-// `json_bytes = partial(...)` — or leave it to a module `__getattr__`). An unconditional def answers before any `__getattr__` (PEP 562).
+// `json_bytes = partial(...)` — or leave it to a module `__getattr__`), or when the module star-imports another (an accelerator's
+// `from _elementtree import *` rebinds f, in which order is not read). An unconditional def answers before any `__getattr__` (PEP 562).
 // `key` is the caller's reused buffer.
 inline bool pythonSubmoduleAttrProven( const ExternalVetoTables& v, std::uint32_t sub, std::string_view f, std::string& key )
 {
@@ -2541,7 +2542,8 @@ inline bool pythonSubmoduleAttrProven( const ExternalVetoTables& v, std::uint32_
         key.clear();  Narrower::appendUint( key, sub );  key.push_back( '#' );  key.append( a ).append( b );
         return v.pythonModuleRebind.contains( key );
     };
-    return !marked( kPythonDynamicWrite, {} ) && !marked( kPythonCondDefPrefix, f );
+    const bool star = sub < v.pythonScopes.starTargets.size() && !v.pythonScopes.starTargets[ sub ].empty();   // `from _c import *` may rebind f
+    return !star && !marked( kPythonDynamicWrite, {} ) && !marked( kPythonCondDefPrefix, f );
 }
 
 // the file a Python import directive names — Step-A, else the memoized suffix match; kNoFile for a non-Python includer or no match
