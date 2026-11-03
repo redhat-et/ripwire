@@ -110,32 +110,38 @@ def write( root, values, taken ):
     with open( path( root ), 'w', encoding = 'utf-8' ) as fh:
         fh.write( body )
 
+def refresh( root, live ):
+    taken = os.environ.get( 'COUNTS_TAKEN' ) or datetime.datetime.now( datetime.timezone.utc ).strftime( '%Y-%m-%d' )
+    if not DATE.match( taken ):
+        sys.exit( 'counts_snapshot: COUNTS_TAKEN=%r is not YYYY-MM-DD' % taken )
+    write( root, live, taken )
+    for gen, _, writeArgv in GENERATORS:
+        p = subprocess.run( [ sys.executable, '-B', os.path.join( root, gen ) ] + writeArgv, cwd = root )
+        if p.returncode != 0:
+            sys.exit( 'counts_snapshot: %s %s failed after the refresh (exit %d)' % ( gen, ' '.join( writeArgv ), p.returncode ) )
+    print( 'counts_snapshot: took %d totals on %s and rewrote the docs from them' % ( len( live ), taken ) )
+    return 0
+
+def show( snap, live ):
+    for k in sorted( live ):
+        print( '%-28s snapshot %-12s live %s%s' % ( k, snap.get( k, '?' ), live[ k ], '' if snap.get( k ) == live[ k ] else '   (differs)' ) )
+    print( 'counts_snapshot: taken %s; %d of %d totals differ from the live tree' % ( snap[ 'taken' ], len( drift( snap, live ) ), len( live ) ) )
+    return 0
+
 def main( argv ):
     if len( argv ) != 2 or argv[ 1 ] not in ( 'show', 'check', 'refresh' ):
         sys.stderr.write( __doc__.split( 'Usage:' )[ 1 ] ); return 2
     root = os.path.dirname( HERE )
     live = live_counts( root )
     if argv[ 1 ] == 'refresh':
-        taken = os.environ.get( 'COUNTS_TAKEN' ) or datetime.datetime.now( datetime.timezone.utc ).strftime( '%Y-%m-%d' )
-        if not DATE.match( taken ):
-            sys.exit( 'counts_snapshot: COUNTS_TAKEN=%r is not YYYY-MM-DD' % taken )
-        write( root, live, taken )
-        for gen, _, writeArgv in GENERATORS:
-            p = subprocess.run( [ sys.executable, '-B', os.path.join( root, gen ) ] + writeArgv, cwd = root )
-            if p.returncode != 0:
-                sys.exit( 'counts_snapshot: %s %s failed after the refresh (exit %d)' % ( gen, ' '.join( writeArgv ), p.returncode ) )
-        print( 'counts_snapshot: took %d totals on %s and rewrote the docs from them' % ( len( live ), taken ) )
-        return 0
+        return refresh( root, live )
     snap = read( root )
     if snap is None:
         sys.exit( 'counts_snapshot: no %s — run: python3 docs/counts_snapshot.py refresh' % NAME )
     stale = drift( snap, live )
     extra = sorted( k for k in snap if k != 'taken' and k not in live )
     if argv[ 1 ] == 'show':
-        for k in sorted( live ):
-            print( '%-28s snapshot %-12s live %s%s' % ( k, snap.get( k, '?' ), live[ k ], '' if snap.get( k ) == live[ k ] else '   (differs)' ) )
-        print( 'counts_snapshot: taken %s; %d of %d totals differ from the live tree' % ( snap[ 'taken' ], len( stale ), len( live ) ) )
-        return 0
+        return show( snap, live )
     if stale or extra:
         print( 'counts_snapshot: the snapshot taken %s is STALE against the tree: %s — run: python3 docs/counts_snapshot.py refresh'
                % ( snap[ 'taken' ], '; '.join( stale + [ '%s no longer published' % k for k in extra ] ) ) )

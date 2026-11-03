@@ -894,7 +894,7 @@ def partition_prose(cen, meta):
                C('tunable_live'), C('constexpr_live'), C('unswept'), C('names'), goneSay, frozen + 1, C('declarations')))
     return textwrap.fill(para, width=100)
 
-def render(sweep, meta, caps, disc, cen, taken):
+def render(sweep, meta, caps, disc, cen):
     """docs/TUNING.md as a PURE FUNCTION of (frozen measurements, live cap census).
 
     Line numbers are deliberately absent, here and (since 2026-09-10) in docs/LIMITS.md: a line would
@@ -917,6 +917,7 @@ def render(sweep, meta, caps, disc, cen, taken):
     L.append('env var — production keeps its `constexpr` and is never patched — then running real')
     L.append('invocations at the default value and at a probe value. The tunable binary is byte-identical')
     L.append('to production at defaults; that control is what makes these numbers mean anything.\n')
+    taken = cen.get('taken')                       # set only when the census came from docs/counts.tsv
     if taken:
         L.append('**The census is a dated snapshot.** The first two columns below and the paragraph after them are')
         L.append('the counts snapshot taken %s (`docs/counts.tsv`), so two open changes that each add a cap do not' % taken)
@@ -1004,7 +1005,7 @@ def cmd_emit(a):
         import counts_snapshot
         snap = counts_snapshot.read(REPO)
         cen = counts_snapshot.published(snap, live, 'capsweep')
-    body = render(sweep, meta, caps, disc, cen, snap['taken'] if snap else None)
+    body = render(sweep, meta, caps, disc, dict(cen, taken=snap['taken'] if snap else None))
     out  = pathlib.Path(a.out)
     if a.check:
         cur = out.read_text() if out.exists() else ''
