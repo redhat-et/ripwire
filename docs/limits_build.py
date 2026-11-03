@@ -189,7 +189,23 @@ def pinned(cells):
 def times(k):
     return ' ×%d' % k if k > 1 else ''
 
-def render(caps, disc, classes):
+def live_totals(caps, disc, classes):
+    """Every aggregate this document (and README's cap sentence) states, from the live tree. Published from
+    the dated snapshot docs/counts.tsv instead when one exists (docs/counts_snapshot.py says why)."""
+    real, weights = partition(caps)
+    silent = [c for c in real if not disc.get(c[2])]
+    cls = lambda k: sum(1 for c in real if classes.get(c[0]) == k)
+    return {'limits.caps': len(real), 'limits.files': len({c[2] for c in real}),
+            'limits.disclosing': len(real) - len(silent), 'limits.silent': len(silent),
+            'limits.parameters': len(weights), 'limits.constants': len(caps),
+            'limits.indexing': cls('INDEXING'), 'limits.output': cls('OUTPUT'), 'limits.boundary': cls('BOUNDARY')}
+
+def unsourced_phrase(weights):
+    """How many parameters read unsourced, from the live table below it (per-item content, not a snapshot total)."""
+    n = sum(1 for x in weights if not anchor_of(x[4]))
+    return 'All %d read unsourced today' % n if n == len(weights) else '%d of the %d read unsourced today' % (n, len(weights))
+
+def render(caps, disc, classes, tot, taken):
     out = []
     w = out.append
     w('# Limits\n')
@@ -217,19 +233,20 @@ def render(caps, disc, classes):
     w('quantifiers are bounded, yet it is exponential on libstdc++ (and abandoned by libc++), so "make the outer quantifier')
     w('a small explicit bound" is safe only when nothing inside the group repeats; it is the same class as')
     w('`(a|aa){1,100}b$`, tracked with the multi-quantifier family above.\n')
-    allcaps = caps
     caps, weights = partition(caps)
-    silent = [c for c in caps if not disc.get(c[2])]
+    if taken:
+        w('**Totals are a dated snapshot.** Every total on this page (the table below, the class counts, the')
+        w('file count) is the counts snapshot taken %s (`docs/counts.tsv`), so two open changes that each add a' % taken)
+        w('cap do not both rewrite the same line; the per-file tables are re-read from `src/` on every run.')
+        w('`python3 docs/counts_snapshot.py show` prints today\'s numbers beside these.\n')
+    T = lambda k: tot['limits.' + k]
     w('| total caps | files | caps whose file discloses | caps whose file discloses NOTHING |')
     w('| --- | --- | --- | --- |')
-    w('| %d | %d | %d | **%d** |\n' % (len(caps), len({c[2] for c in caps}),
-                                       len(caps) - len(silent), len(silent)))
-    w('Plus %d ranking and apportionment parameters, in their own table below: they are not caps, they' % len(weights))
+    w('| %d | %d | %d | **%d** |\n' % (T('caps'), T('files'), T('disclosing'), T('silent')))
+    w('Plus %d ranking and apportionment parameters, in their own table below: they are not caps, they' % T('parameters'))
     w('are not counted as caps, and %d + %d is the %d constants this generator parses out of `src/`.\n'
-      % (len(caps), len(weights), len(allcaps)))
-    ix = sum(1 for c in caps if classes.get(c[0]) == 'INDEXING')
-    op = sum(1 for c in caps if classes.get(c[0]) == 'OUTPUT')
-    bd = sum(1 for c in caps if classes.get(c[0]) == 'BOUNDARY')
+      % (T('caps'), T('parameters'), T('constants')))
+    ix, op, bd = T('indexing'), T('output'), T('boundary')
     w('## INDEXING, OUTPUT or BOUNDARY — which half of the answer a cap bounds\n')
     w('**INDEXING** caps bound what can EVER be found. A silent one is unrecoverable by the caller: no')
     w('flag, no budget, no second call gets the answer back, and the output reads as "none exists".')
@@ -244,9 +261,9 @@ def render(caps, disc, classes):
     w('a disclosure — labelling them OUTPUT would ask for a `capped="1"` that could never honestly fire.')
     w('The distinction was named in review on #108 and the rows below now carry it.\n')
     w('The `class` column below carries that answer where it is known. **%d of %d caps are classified'
-      % (ix + op + bd, len(caps)))
+      % (ix + op + bd, T('caps')))
     w('(%d INDEXING, %d OUTPUT, %d BOUNDARY); the remaining %d render `—`, which means NOT YET'
-      % (ix, op, bd, len(caps) - ix - op - bd))
+      % (ix, op, bd, T('caps') - ix - op - bd))
     w('CLASSIFIED — never "neither".** Classifications live in `docs/limits_classes.tsv`, a sidecar with')
     w('a known expiry:')
     w('the tag belongs on the declaration itself, and this file exists only because the round that')
@@ -273,8 +290,7 @@ def render(caps, disc, classes):
         w('measurement that chose it; listing them beside truncation caps invites tuning them by intuition.\n')
         w('The **anchor** column is read from each constant\'s own trailing comment. **unsourced** means the')
         w('comment cites no measurement — the value came from somewhere, but not from anything a reader can')
-        w('check. All %d read unsourced today, which is the finding, not an omission: `kSpecificMinLen` has'
-          % len(weights))
+        w('check. %s, which is the finding, not an omission: `kSpecificMinLen` has' % unsourced_phrase(weights))
         w('the widest measured blast radius of any constant in this tree (14 invocations across 9 verbs, per')
         w('`docs/TUNING.md`) and its entire stated provenance is the parenthetical `(aider\'s)`. Sourcing them')
         w('means editing `src/`; a cited anchor that `docs/EVALS.md` does not contain makes this generator')
@@ -291,8 +307,7 @@ def render(caps, disc, classes):
     # attribution filed every cap in this document under "Not caps" (limitstablecheck arm K). It is written
     # unconditionally: with no parameters, the tables would fall under the refuted section instead.
     w('## Caps, by file\n')
-    w('One table for each of the %d files that declare a cap — the %d caps counted above, and no parameter.\n'
-      % (len({c[2] for c in caps}), len(caps)))
+    w('One table for each file that declares a cap in today\'s `src/` (the totals above are the dated snapshot), and no parameter.\n')
     for rel in sorted({c[2] for c in caps}):
         rows = [c for c in caps if c[2] == rel]
         d = ', '.join('`%s_capped`' % a if a else '`capped`' for a in sorted(disc.get(rel, []))) or '**none**'
@@ -323,6 +338,8 @@ ap.add_argument('--root', default=None)
 # the committed one. Same reason as --root: a gate that has to modify the tree to prove it can go red
 # perturbs the population every other gate measures.
 ap.add_argument('--classes', default=None)
+# --live-counts prints the live totals as `key<TAB>value` and writes nothing (docs/counts_snapshot.py reads it)
+ap.add_argument('--live-counts', action='store_true')
 a = ap.parse_args()
 if a.root:
     ROOT = pathlib.Path(a.root).resolve()
@@ -345,18 +362,35 @@ if bad:
              '  A row pointing at nothing is worse than one admitting it is unsourced.'
              % (len(bad), '\n  '.join(bad)))
 
-body = render(caps, disc, classes)
+_live = live_totals(caps, disc, classes)
+if a.live_counts:
+    print(''.join('%s\t%d\n' % kv for kv in sorted(_live.items())), end='')
+    sys.exit(0)
+_snap, _tot = None, _live
+if (ROOT / 'docs' / 'counts.tsv').exists():         # a synthetic --root tree has none, and no counts_snapshot.py either
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import counts_snapshot
+    _snap = counts_snapshot.read(ROOT)
+    _tot = counts_snapshot.published(_snap, _live, 'limits_build')
+body = render(caps, disc, classes, _tot, _snap['taken'] if _snap else None)
 _real, _wts = partition(caps)
+_liveNote = ('' if not _snap else '; counts snapshot taken %s, live src/ now %d caps, %d parameters'
+             % (_snap['taken'], _live['limits.caps'], _live['limits.parameters']))
 if a.check:
     cur = pathlib.Path(a.out).read_text() if pathlib.Path(a.out).exists() else ''
     if cur != body:
         sys.exit('limits_build: %s is STALE — run: python3 docs/limits_build.py' % rel(a.out))
-    print('limits_build: %s matches src/ (%d caps, %d parameters, %d classified)'
-          % (rel(a.out), len(_real), len(_wts), sum(1 for c in _real if c[0] in classes)))
+    print('limits_build: %s matches src/ (%d caps, %d parameters, %d classified%s)'
+          % (rel(a.out), _tot['limits.caps'], _tot['limits.parameters'],
+             _tot['limits.indexing'] + _tot['limits.output'] + _tot['limits.boundary'], _liveNote))
 else:
     pathlib.Path(a.out).write_text(body)
-    print('limits_build: wrote %s — %d caps (%d silent), %d parameters, %d caps classified' %
-          (rel(a.out), len(_real), sum(1 for c in _real if not disc.get(c[2])), len(_wts),
+    # The first "N caps" / "M parameters" this line prints are the PUBLISHED totals (the snapshot's, the ones
+    # LIMITS.md and README.md state); the live tree follows in _liveNote. tools that read the counts off this
+    # line (a pre-review sweep comparing README) must compare published with published.
+    print('limits_build: wrote %s — %d caps (%d silent), %d parameters, %d classified published%s; live src/ classifies %d caps' %
+          (rel(a.out), _tot['limits.caps'], _tot['limits.silent'], _tot['limits.parameters'],
+           _tot['limits.indexing'] + _tot['limits.output'] + _tot['limits.boundary'], _liveNote,
            sum(1 for c in _real if c[0] in classes)))
     # README.md restates the two counts in one sentence, which test/readmedriftcheck.sh (L2) compares with
     # this generator. Writing it here as well means a merge that moved the counts is settled by re-running
@@ -364,13 +398,18 @@ else:
     _readme = ROOT / 'README.md'
     if _readme.exists() and not a.root:
         _rt = _readme.read_text(encoding='utf-8')
+        _datePat = re.compile(r'(?<=counts snapshot )[0-9]{4}-[0-9]{2}-[0-9]{2}')
         _pat = re.compile(r'\b([0-9]+)(\s+compile-time\s+caps\s+and\s+)([0-9]+)(\s+ranking\s+parameters)\b')
         _hits = _pat.findall(_rt)
         if len(_hits) == 1:
-            _new = _pat.sub(lambda m: '%d%s%d%s' % (len(_real), m.group(2), len(_wts), m.group(4)), _rt)
+            _new = _pat.sub(lambda m: '%d%s%d%s' % (_tot['limits.caps'], m.group(2), _tot['limits.parameters'], m.group(4)), _rt)
+            if _snap:   # the sentence's own "counts snapshot YYYY-MM-DD" follows the snapshot (one line, the sentence's)
+                _ln = [l for l in _new.split('\n') if _pat.search(l)][0]
+                _new = _new.replace(_ln, _datePat.sub(_snap['taken'], _ln), 1)
             if _new != _rt:
                 _readme.write_text(_new, encoding='utf-8')
-                print('limits_build: rewrote README.md\'s cap-inventory sentence — %d caps, %d parameters' % (len(_real), len(_wts)))
+                print('limits_build: rewrote README.md\'s cap-inventory sentence — %d caps, %d parameters'
+                      % (_tot['limits.caps'], _tot['limits.parameters']))
         else:
             print('limits_build: README.md states the cap inventory %d times, expected once — left as is '
                   '(test/readmedriftcheck.sh (L2) checks it)' % len(_hits))
