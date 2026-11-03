@@ -126,7 +126,7 @@ def loop_names( text ):
     if text is None:
         return None
     m = re.search( r'for _g in (.*?); do', text, re.S )
-    return set( m.group( 1 ).split() ) if m else None
+    return set( w for w in m.group( 1 ).split() if w != chr( 92 ) ) if m else None   # one name per line since 2026-11-02
 
 def tombstones( text ):
     if text is None:
@@ -244,11 +244,14 @@ def mkrepo():
     os.makedirs( os.path.join( d, "test" ), exist_ok = True )
     return d
 
-def commitLoop( repo, names, parents, tombs = () ):
+def commitLoop( repo, names, parents, tombs = (), perLine = False ):
     body = "#!/usr/bin/env bash\n"
     for t in tombs:
         body += "# retired: %s - synthetic fixture\n" % t
-    body += "for _g in " + " ".join( names ) + "; do\n  :\ndone\n"
+    if perLine:   # the one-name-per-line list regression.sh has carried since 2026-11-02
+        body += "for _g in \\\n" + "".join( "    %s \\\n" % n for n in names ) + "    ; do\n  :\ndone\n"
+    else:
+        body += "for _g in " + " ".join( names ) + "; do\n  :\ndone\n"
     with open( os.path.join( repo, "test", "regression.sh" ), "w" ) as fh:
         fh.write( body )
     git( repo, [ "add", "test/regression.sh" ] )
@@ -288,6 +291,14 @@ def buildLinear( repo ):
     c = commitLoop( repo, BASE_NAMES, [ a ] )                       # victimcheck dropped, no tombstone
     return a, c
 arm( "(B) mutation control, LINEAR silent drop —", buildLinear, "victimcheck" )
+
+# ── (B2) the same silent drop, across the 2026-11-02 change of shape: a one-line parent, a one-name-per-line child
+# that lost a name. The line-continuation backslashes must not read as names, and the drop must still be named.
+def buildLinearReshaped( repo ):
+    a = commitLoop( repo, BASE_NAMES + [ "victimcheck" ], [] )
+    c = commitLoop( repo, BASE_NAMES, [ a ], perLine = True )
+    return a, c
+arm( "(B2) mutation control, LINEAR silent drop across the one-name-per-line reshape —", buildLinearReshaped, "victimcheck" )
 
 # ── (C) single-parent drop WITH the tombstone the convention requires — must stay green ───────────────
 def buildLinearTombstoned( repo ):

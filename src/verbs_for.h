@@ -17,11 +17,13 @@
 #include "fordispatchhop.h"   // mf1-nx wave 4: a task-named call declined at an interface receiver carries its implementations
 #include "forselfhook.h"      // lane self-hook: a served Python override names where its base classes reach it through self
 #include "forcallerhop.h"   // mf1-nx: a name-exact answer about ONE function carries that function's callers
+#include "subjectanchor.h"  // SUBJECT-ANCHOR: the symbol a descriptive subject names is the anchor, not the words around it
 #include "regindex.h"       // registrar: <reg> rows joining a registry key to its registrations
 #include "epmanifest.h"     // ep-manifest: the manifest entry-point groups that register a shown row
 #include "listedin.h"       // manifest-noncode: the build/package/registry manifest lines that list a shown file (creation tasks)
 #include "forreexport.h"    // ALIAS-IMPORT: the re-export hop rows of a definition the task names
 #include "forfilepage.h"    // FOR-FILE-ANCHOR (#466): the named file's page when the subject IS a file
+#include "forunused.h"      // UNUSED-IN-FILE: the public-def table when the subject asks what is unused in a named file
 #include <algorithm>         // std::ranges::find: the ep manifest re-picked from the rows <sigs> emits
 #include <optional>          // the redaction-tally snapshots a degraded pre-render restores
 #include <string_view>       // %.*s (precision, pointer) collapses to one view
@@ -121,7 +123,18 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     // chosen ONCE here and reused below rather than classified twice — chooseForRanker is pure over
     // (ing, task), so hoisting it is byte-neutral by construction.
     const bool        routeOn      = !cfg.noRoute;
-    const RouteChoice rc           = routeOn ? chooseForRanker( ing, task ) : RouteChoice{};
+    // A flip trades the ranked map for the anchor's body AND its <callers>; test that the call prints both, not a list of flags.
+    // The auto-bodies bundle (autoBundleMode below), unpaged and at its own byte budgets, is the one posture that serves them:
+    // --signatures-only, --detail=N (bodies, no callers hop), --json, --format=columnar|candidates, the --limit/--offset file page and
+    // an explicit --token-budget or --pack-budget-bytes (a ceiling the single-anchor allowance never sees) each print one without the
+    // other, or may cut the body (subjectanchor.h flipServesBodyAndCallers)
+    const bool        servesBodies = cfg.detail == 0 && !cfg.signaturesOnly && !cfg.json && !cfg.columnar && !cfg.candidates && cfg.tokenBudget == 0
+                                     && cfg.pageLimit == 0 && cfg.pageOffset == 0 && cfg.packBudgetBytes == rw::Config{}.packBudgetBytes
+                                     && rw::forCallerHopOn();
+    SubjectRoute      subjectRoute = routeOn ? chooseSubjectRoute( ing, g, task, servesBodies ) : SubjectRoute{};
+    const RouteChoice& rc          = subjectRoute.route;
+    // SUBJECT-ANCHOR: the ranker and the mention anchor read the names alone when the words were dropped from the route
+    const std::string_view rankTask = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     const bool        compactRoute = routeOn && compactCandidate && rc.which == LexMode::SubtokenBody;
 
     std::size_t       forPruneK = 0;
@@ -161,7 +174,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     std::vector<float>& lensRank = out.rank;
     if( routeOn )
     {
-        lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
+        lensRank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                            : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, forPruneK, ifaceExactPtr, &tierMul,
                                                                                   0, 0, {}, &out.evidence );   // L-W: the term evidence rides out
         if( rc.which == LexMode::NameExact )
@@ -170,7 +183,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
             // read comes from one exhaustive subtoken pass whose scores are discarded — pure lookups over the
             // persisted statistics (lexindex.h), a small fraction of a --for call (measured ~520 ms warm on a
             // 2,000-file C++ tree, most of it the cache load), paid on the identifier route only.
-            lexicalScoresTiered( ing, g.outOff, g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence );
+            lexicalScoresTiered( ing, g.outOff, g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &out.evidence );
         }
         // §L10b + verify-wave2 F6: no leading space+"[" AND no trailing "]". This string lands ONLY in the
         // route= attribute value (and its JSON "route" twin) now, never spliced into free comment prose, so
@@ -183,7 +196,9 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
         out.routeNote  = routeNoteOf( rc, shape, /*noRoute=*/false );   // row 6: the code itself, no "routed: " prose prefix — ONE producer (filter.h)
         out.docTierTag = shapeDocTierTag( shape );   // §A4f: the machine form of the same fact, for --format=candidates
         out.routeTag   = ( rc.which == LexMode::NameExact ) ? "name-exact" : "subtoken+body";   // §A4f: the machine form of the same fact
-        out.anchorDefs = std::move( const_cast<RouteChoice&>( rc ).anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
+        out.anchorNoSource = subjectRoute.anchorNoSource;   // CONFIDENCE-ANCHOR
+        out.anchorDefs = std::move( subjectRoute.route.anchorDefs );   // empty unless the route was DECIDED by names (lexical.h)
+        out.subjectCallerCandidates = std::move( subjectRoute.callerCandidates );   // SUBJECT-ANCHOR: empty unless a conceptual route's subject names a symbol
     }
     else
     {
@@ -220,7 +235,7 @@ rw::LensRanking computeLensRanking( const MainDispatch& d, std::string_view task
     if( !cfg.noRoute && !cfg.noMentionBoost && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
-        if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
+        if( applyMentionBoost( ing, rankTask, lensRank, &mentionInfo ) )
         {
             char nb[ 220 ];
             rw::formatTo( nb, sizeof( nb ), " [mention anchor: {} file{} + {} symbols named in the task, score lifted to within 5% of the top score; "
@@ -606,6 +621,7 @@ struct ForLensHeaderParts
                                             // regime (forcallerhop.h forCallerHopTargets), so a <callers> rides and its clause
                                             // defines it; set after construction, cleared with the section
     bool             callerHopRanked = false;  // UPWARD-2HOP: that <callers> is the ranked seed's (by="rank"), so ITS clause rides instead
+    bool             callerHopSubject = false; // SUBJECT-ANCHOR: that <callers> is the subject's named symbol (by="subject"), so ITS clause rides instead
     bool             dispatchHopPresent = false; // mf1-nx wave 4 (fordispatchhop.h): a <dispatch> rides; its clause defines it
     bool             selfHookPresent = false;    // lane self-hook (forselfhook.h): a <selfhooks> rides; its clause defines it
     bool             epPresent = false;        // ep-manifest (epmanifest.h): a manifest entry-point group registers a shown row in
@@ -613,6 +629,7 @@ struct ForLensHeaderParts
     bool             listedPresent = false;    // manifest-noncode (listedin.h): a manifest lists a shown file on a creation task, so a
                                             // <listed> rides and its clause defines it; cleared with it
     bool             filePagePresent = false;  // FOR-FILE-ANCHOR (forfilepage.h): the subject is a file, so its <named-file> page rides
+    bool             unusedPresent   = false;  // UNUSED-IN-FILE (forunused.h): the subject asks what is unused in a named file
 };
 
 // Splice a pre-formatted fragment in front of a structural boundary, or leave the document exactly as it
@@ -817,6 +834,10 @@ inline constexpr std::string_view presentOnlyClause( bool present, bool compact,
 // mf1-nx / UPWARD-2HOP: the caller hop's present-only clause — the named-route one, or the ranked seed's (by="rank")
 inline constexpr std::string_view callerHopClause( const ForLensHeaderParts& p, bool compact ) noexcept
 {
+    if( p.callerHopSubject )
+    {
+        return presentOnlyClause( p.callerHopPresent, compact, rw::kForCompactSubjectCallerHopLegend, rw::kForSubjectCallerHopLegend );
+    }
     return p.callerHopRanked ? presentOnlyClause( p.callerHopPresent, compact, rw::kForCompactRankedCallerHopLegend, rw::kForRankedCallerHopLegend )
                              : presentOnlyClause( p.callerHopPresent, compact, rw::kForCompactCallerHopLegend, rw::kForCallerHopLegend );
 }
@@ -839,6 +860,7 @@ inline std::string peerRowClauses( const ForLensHeaderParts& p, bool compact )
     out += presentOnlyClause( p.epPresent, compact, rw::kForCompactEpManifestLegend, rw::kForEpManifestLegend );   // ep-manifest
     out += presentOnlyClause( p.listedPresent, compact, rw::kForCompactListedInLegend, rw::kForListedInLegend );   // manifest-noncode
     out += presentOnlyClause( p.filePagePresent, compact, rw::kForCompactFilePageLegend, rw::kForFilePageLegend );   // FOR-FILE-ANCHOR
+    out += presentOnlyClause( p.unusedPresent, compact, rw::kForCompactUnusedLegend, rw::kForUnusedLegend );   // UNUSED-IN-FILE
     return out;
 }
 inline std::string_view hopsCallsNextLegend( const ForLensHeaderParts& p, bool compact ) noexcept
@@ -2623,7 +2645,35 @@ inline rw::CallerHopRender rankedCallerHop( const RankedHopPosture& p, const rw:
         return held;
     }
     const std::vector<rw::NodeId> ids = rw::forRankedCallerHopTargets( ing, g, shownSigIds, cfg.forTask );
-    return ids.empty() ? held : rw::renderForCallerHop( ing, g, ids, rootArg, /*ranked=*/true );
+    return ids.empty() ? held : rw::renderForCallerHop( ing, g, ids, rootArg, "rank" );
+}
+
+// SUBJECT-ANCHOR (subjectanchor.h): the conceptual route's answer stands and the callers of the function its subject names ride on
+// top, on the ranked hop's late-splice posture and with no task gate: the subject match is the trigger. The first named symbol that
+// is ONE function, by the callers verb's own resolution, or by the qualifier when that placed exactly one definition.
+inline rw::CallerHopRender subjectCallerHop( const RankedHopPosture& p, const rw::Config& cfg, const rw::IngestResult& ing, const rw::Graph& g,
+                                             const std::vector<std::vector<rw::NodeId>>& candidates, std::string_view rootArg )
+{
+    if( candidates.empty() || p.namedHop || !p.bundleCompact || !p.sigsRendered || p.surfaceOff || p.hopsCutMarker || rw::isNameExactRouteTag( p.routeTag ) || cfg.json
+        || cfg.tokenBudget > 0 || !rw::forCallerHopOn() )
+    {
+        return {};
+    }
+    for( const std::vector<rw::NodeId>& defs : candidates )
+    {
+        std::vector<rw::NodeId> ids = rw::forCallerHopTargets( ing, g, defs );
+        if( ids.empty() && defs.size() == 1 && rw::ReceiverEvidence::callableKind( ing.symbols[ defs.front() ].kind ) )
+        {
+            ids = defs;
+        }
+        // no rows is no element: the block is a lead on top of an answer, and a bare total="0" here would read as "nobody calls it"
+        // where a member call with an unproven receiver may (the callers verb says so with its own hedges)
+        if( !ids.empty() && !rw::oneHopCallerRows( ing, g, ids ).empty() )
+        {
+            return rw::renderForCallerHop( ing, g, ids, rootArg, "subject" );
+        }
+    }
+    return {};
 }
 
 // mf1-nx (forcallerhop.h): the ONE function whose callers ride — `nameExactBodies` is the posture runForLensPass knows (the auto
@@ -3066,7 +3116,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             lensSurfaceIds.resize( cap );
         }
 
-        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline );
+        ForConfidence forConf = deriveForConfidence( forCut, forTopN, forHomonymDecline, lr.anchorNoSource );
 
         // ── THE BUDGETED-BUNDLE CANDIDATE PAGE (paging PoC, issue #294): budget + explicit window ⇒ the
         // resumable candidate page (shared inline; the un-paged bundle below stays byte-identical).
@@ -3395,7 +3445,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( rw::forEpManifestOn() )
             {
-                epManifest = rw::renderForEpManifest( ing, epHead );
+                epManifest = rw::renderForEpManifest( ing, epHead , cfg.forTask );
             }
             if( rw::forListedInOn() )
             {
@@ -3409,6 +3459,9 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         const std::string filePageXml = ( autoBundleMode && !cfg.json && cfg.tokenBudget <= 0 && rw::forFilePageOn() )
                                       ? rw::renderForFilePage( ing, g, cfg.forTask, redactPtr ) : std::string();
         headerParts.filePagePresent = !filePageXml.empty();
+        // UNUSED-IN-FILE (forunused.h): present-only, same regime as the page, its own allowance (priced with the markup, exempt from the sigs charge)
+        const std::string unusedXml = ( autoBundleMode && !cfg.json && cfg.tokenBudget <= 0 && rw::forUnusedOn() ) ? rw::renderForUnusedTable( ing, g, cfg.forTask ) : std::string();
+        headerParts.unusedPresent = !unusedXml.empty();
         const auto buildForHeader = [ & ]( bool withRouteAttr, bool withTaskEcho, std::string_view extraNotes )
         { return forLensHeaderText( headerParts, withRouteAttr, withTaskEcho, extraNotes ); };
         std::string headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
@@ -3695,7 +3748,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                                  + presentOnlyClause( headerParts.epPresent, compactLegendOn, rw::kForCompactEpManifestLegend, rw::kForEpManifestLegend ).size()   // ep-manifest: same contract
                                                  + presentOnlyClause( headerParts.dispatchHopPresent, compactLegendOn, rw::kForCompactDispatchHopLegend, rw::kForDispatchHopLegend ).size()   // mf1-nx wave 4: same contract
                                                  + presentOnlyClause( headerParts.listedPresent, compactLegendOn, rw::kForCompactListedInLegend, rw::kForListedInLegend ).size()   // manifest-noncode: same contract
-                                                 + presentOnlyClause( headerParts.filePagePresent, compactLegendOn, rw::kForCompactFilePageLegend, rw::kForFilePageLegend ).size();   // FOR-FILE-ANCHOR: same contract
+                                                 + presentOnlyClause( headerParts.filePagePresent, compactLegendOn, rw::kForCompactFilePageLegend, rw::kForFilePageLegend ).size()
+                                                 + presentOnlyClause( headerParts.unusedPresent, compactLegendOn, rw::kForCompactUnusedLegend, rw::kForUnusedLegend ).size();   // FOR-FILE-ANCHOR: same contract
         // attrib-multidef Q1: the prov="split" clause is a disclosure on the same contract — exempt, as e= is, so <sigs> (rows and
         // its continuation's budget) is byte-identical with and without it (fordisclosurecheck #2: auto vs --signatures-only)
         const std::size_t splitLegendEmitted = !headerParts.splitPresent ? 0u
@@ -3736,7 +3790,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
                                               + presentOnlyClause( headerParts.epPresent, /*compact=*/false, rw::kForCompactEpManifestLegend, rw::kForEpManifestLegend ).size()  // ep-manifest
                                               + presentOnlyClause( headerParts.dispatchHopPresent, /*compact=*/false, rw::kForCompactDispatchHopLegend, rw::kForDispatchHopLegend ).size()  // mf1-nx wave 4
                                               + presentOnlyClause( headerParts.listedPresent, /*compact=*/false, rw::kForCompactListedInLegend, rw::kForListedInLegend ).size()  // manifest-noncode
-                                              + presentOnlyClause( headerParts.filePagePresent, /*compact=*/false, rw::kForCompactFilePageLegend, rw::kForFilePageLegend ).size()  // FOR-FILE-ANCHOR
+                                              + presentOnlyClause( headerParts.filePagePresent, /*compact=*/false, rw::kForCompactFilePageLegend, rw::kForFilePageLegend ).size()
+                                              + presentOnlyClause( headerParts.unusedPresent, /*compact=*/false, rw::kForCompactUnusedLegend, rw::kForUnusedLegend ).size()  // FOR-FILE-ANCHOR
                                               + ( headerParts.splitPresent ? rw::kForSplitClause.size() : 0u );   // attrib-multidef Q1
             std::size_t       fullCharged     = fullExempt > fullHeaderBytes ? fullHeaderBytes : fullHeaderBytes - fullExempt;
             fullCharged -= std::min( fullCharged, rw::forZeroNoteBytes( fullHeader ) );   // lean-answers: exempt, as above
@@ -4406,7 +4461,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             }
             if( epEmitted.size() != epHead.size() && headerParts.epPresent )
             {
-                epManifest = rw::renderForEpManifest( ing, epEmitted );
+                epManifest = rw::renderForEpManifest( ing, epEmitted , cfg.forTask );
                 if( epManifest.xml.empty() )
                 {
                     headerParts.epPresent = false;   // its clause goes with it
@@ -4498,10 +4553,19 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         }
         // ── UPWARD-2HOP (forcallerhop.h forRankedCallerHopTargets): an error-shaped task's ranked caller hop, a late splice on the
         // rows <sigs> EMITTED (rankedCallerHop states the posture); its clause rides beside it
-        callerHop = rankedCallerHop( RankedHopPosture{ .bundleCompact = autoBundleMode && plan.compact, .sigsRendered = sigsPreRendered,
-                                                       .surfaceOff = enrich.surfaceOff, .hopsCutMarker = enrich.hopsCutMarker,
-                                                       .namedHop = headerParts.callerHopPresent, .routeTag = lr.routeTag },
-                                     cfg, ing, g, shownSigIds, flRootArg, std::move( callerHop ) );
+        RankedHopPosture lateHop{ .bundleCompact = autoBundleMode && plan.compact, .sigsRendered = sigsPreRendered,
+                                  .surfaceOff = enrich.surfaceOff, .hopsCutMarker = enrich.hopsCutMarker,
+                                  .namedHop = headerParts.callerHopPresent, .routeTag = lr.routeTag };
+        // SUBJECT-ANCHOR: a symbol the subject names outranks a lead found by rank
+        if( rw::CallerHopRender byName = subjectCallerHop( lateHop, cfg, ing, g, lr.subjectCallerCandidates, flRootArg ); !byName.xml.empty() )
+        {
+            callerHop                    = std::move( byName );
+            headerParts.callerHopPresent = true;
+            headerParts.callerHopSubject = true;
+            lateHop.namedHop             = true;
+            headerStr = buildForHeader( /*withRouteAttr=*/true, /*withTaskEcho=*/true, {} );
+        }
+        callerHop = rankedCallerHop( lateHop, cfg, ing, g, shownSigIds, flRootArg, std::move( callerHop ) );
         if( !callerHop.xml.empty() && !headerParts.callerHopPresent )
         {
             headerParts.callerHopPresent = true;   // the ranked clause rides beside the element it defines
@@ -4527,7 +4591,7 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
             // F2: everything OUTSIDE the header at the markup rate. enrich.markupBytes is the compact <hops> section,
             // folded in here rather than charged separately — one rate, one rounding (ForEnrichmentPlan).
             .nonHeaderMarkupBytes = forHdrXml.size() + sigsStr.size() + legoStr.size() + composeStr.size() + routeStr.size() + graphSection.xml.size()
-                                  + enrich.markupBytes + tailStr.size() + slot.markupBytes + fold.markupBytes + callerHop.xml.size() + epManifest.xml.size() + ( dispatchHop.xml.size() - dispatchHop.bodyBytes ) + selfHookXml.size() + listedIn.xml.size() + filePageXml.size() + 6,   // + "</ctx>" (deep-tail: the tail at the markup rate)
+                                  + enrich.markupBytes + tailStr.size() + slot.markupBytes + fold.markupBytes + callerHop.xml.size() + epManifest.xml.size() + ( dispatchHop.xml.size() - dispatchHop.bodyBytes ) + selfHookXml.size() + listedIn.xml.size() + filePageXml.size() + unusedXml.size() + 6,   // + "</ctx>" (deep-tail: the tail at the markup rate)
             // T3: the body-rate sections; enrich.bodyTokens is zero on the compact route (markup, above); for-body-slot: the
             // owner body at the body rate (a skipped slot's element is markup, above)
             .bodyTokens           = detailSection.tokens + enrich.bodyTokens + slot.bodyTokens + fold.bodyTokens   // body-fold: its bodies
@@ -4550,6 +4614,8 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         std::fwrite( forHdrXml.data(), 1, forHdrXml.size(), stdout );
         // FOR-FILE-ANCHOR: the named file's page, the head of a file-shaped answer ("" when none; priced with the markup above)
         std::fwrite( filePageXml.data(), 1, filePageXml.size(), stdout );
+        // UNUSED-IN-FILE: the table, straight after the page ("" when the subject has no cue or names no file)
+        std::fwrite( unusedXml.data(), 1, unusedXml.size(), stdout );
         if( sigsPreRendered )
         {
             std::fwrite( sigsStr.data(), 1, sigsStr.size(), stdout );
@@ -4651,6 +4717,14 @@ std::optional<int> runForLensPass( const MainDispatch& d, rw::LensRanking lr, co
         {
             const std::string reexports = rw::renderForReexports( ing, cfg.forTask, /*held=*/cfg.tokenBudget > 0 );   // CR pre-pass 42b: held under --token-budget
             std::fwrite( reexports.data(), 1, reexports.size(), stdout );
+        }
+        // SHORT-KEY-FOR (forreexport.h): a name-exact route that served no signature row gets the fallback ladder; "" otherwise. Its own
+        // byte allowance, outside est_tokens: no auto-served body pays for it. XML only, like the block above.
+        if( !cfg.json && !cfg.columnar && !cfg.candidates && !d.multiRoot )
+        {
+            const std::string shortKey = rw::renderShortKeyFallback( ing, rw::ShortKeyArgs{ .routeNote = routeNoteRaw, .noDefinitionServed = sigsPreRendered && shownSigIds.empty(),
+                                                                                             .held = cfg.tokenBudget > 0, .redact = redactPtr, .rootArg = flRootArg } );
+            std::fwrite( shortKey.data(), 1, shortKey.size(), stdout );
         }
         appendLiteralAnchorBlock( d, flRootArg, detailSection.xml + autoSection.xml + slot.xml + fold.xml + callerHop.xml + dispatchHop.xml );   // MF1-LIT: "" unless the task names a literal with a site (dispatchHop: train 42b, its single-candidate <b>)
         if( peerManifestRegime )   // STRING-IMPORT (fordottedstring.h): after the ordinary answer, outside est_tokens; "" unless a dotted string names a shown row

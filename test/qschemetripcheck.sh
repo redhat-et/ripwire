@@ -37,6 +37,14 @@ PIN="$ROOT/test/qschemetrip.hash"
 # 2026-11-02, PR fix/rust-test-harness-dead-code (#493): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text: registeredMacroSymbolIds
 #   now reads registersItself (a Rust #[test] / #[tokio::test] attribute above a definition exempts it), and kQSnapCacheScheme 24 -> 25
 #   (quality.h's v25 note). kParserVer and kCacheVersion stay: no extraction change, no record shape change.
+# 2026-11-02, lane rule3-member-guard fix 4 (base main 00a16550; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1.
+#   Watched text: kParserVer 283 -> 285 (rich 286; 284 is 283's rich tag): a Rust path call whose qualifier has more than one segment keeps
+#   it whole in Reference::fieldName; quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:
+#   no record changes shape and no watched quality.h function moved.
+# 2026-11-02, lane barrel-short-key (base main 02aebc91; PLACEHOLDER, the train renumbers): RE-PINNED ONCE with UPDATE_GOLDEN=1. Watched text:
+#   kParserVer 285 -> 289 (rich 290; above RULE3's 285/286 and DOCS-REST's 287/288): the TS/TSX/JS tags queries capture `export * as ns from`
+#   as a namespace re-export. quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24: no record
+#   changes shape and no watched quality.h function moved.
 # 2026-10-31, train 43b (lanes registrar, string-import, self-hook, decl-row merged onto main 65210e86): RE-DERIVED ONCE with UPDATE_GOLDEN=1 on the
 #   composed tree (main's pin and the registrar / string-import branch pins conflicted). Watched text: kParserVer 271 -> 283 (rich 284; above the
 #   lane placeholders up to 281, rich 282), quality.h's kIngestParserVerMirror with it. kCacheVersion stays 48 and kQSnapCacheScheme stays 24:

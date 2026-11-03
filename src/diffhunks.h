@@ -97,13 +97,24 @@ inline std::string gitDiffHunksCmd( const std::string& root, const std::string& 
 // spawned it per SYMBOL: a subprocess-shim log showed EIGHT byte-identical spawns for a single dirty file.
 // Caller owns the storage (house rule — views/handles at seams, no hidden process-global state that a second
 // root or a second MCP request would silently share).
-using DiffHunkMemo = HashMap<std::string, std::vector<DiffHunk>>;
+// hwh-fix4 (N1): the read carries whether git answered. A failed diff (git refused, an absent HEAD blob on a partial clone) is not
+// "no hunks": the churn lens reports that row's self/ambient split as unknown instead of reading the silence as ambient.
+struct DiffHunkRead
+{
+    std::vector<DiffHunk> hunks;
+    bool                  ok = true;   // false: the spawn failed or git exited non-zero; `hunks` is then empty
+};
+using DiffHunkMemo = HashMap<std::string, DiffHunkRead>;
 
 // Parse `relPath`'s zero-context hunk headers vs HEAD. Degrade-only: no git / no HEAD / path absent at HEAD →
 // an EMPTY vector, which the caller reads as "no evidence" → its conservative fallback (quality.h's churn
 // lens: AMBIENT, never inflates severity; situ.h: file-granular, never narrows on missing evidence).
-inline std::vector<DiffHunk> gitDiffHunksVsHead( const std::string& root, const std::string& relPath )
+inline std::vector<DiffHunk> gitDiffHunksVsHead( const std::string& root, const std::string& relPath, bool* okOut = nullptr )
 {
+    if( okOut )
+    {
+        *okOut = false;
+    }
     std::vector<DiffHunk> hunks;
     const std::string cmd = gitDiffHunksCmd( root, " -- " + shSingleQuote( relPath ) );
     std::FILE* pipe = os::popen( cmd.c_str(), "r" );
@@ -118,20 +129,30 @@ inline std::vector<DiffHunk> gitDiffHunksVsHead( const std::string& root, const 
             hunks.push_back( h );
         }
     }
-    os::pclose( pipe );
+    const int rc = os::pclose( pipe );
+    if( okOut )
+    {
+        *okOut = rc == 0;
+    }
+    if( rc != 0 )
+    {
+        hunks.clear();   // a non-zero git exit is not an empty diff (CR lens 5): no partial hunk list survives it
+    }
     return hunks;
 }
 
 // Memoized accessor: one `git diff` spawn per PATH per run, not per symbol. A path with no hunks memoizes the
 // empty vector too, so a repeatedly-queried clean path costs one spawn, not N.
-inline const std::vector<DiffHunk>& diffHunksMemoized( DiffHunkMemo& memo, const std::string& root, const std::string& relPath )
+inline const DiffHunkRead& diffHunksMemoized( DiffHunkMemo& memo, const std::string& root, const std::string& relPath )
 {
     const auto it = memo.find( relPath );
     if( it != memo.end() )
     {
         return it->second;
     }
-    return memo.emplace( relPath, gitDiffHunksVsHead( root, relPath ) ).first->second;
+    DiffHunkRead read;
+    read.hunks = gitDiffHunksVsHead( root, relPath, &read.ok );
+    return memo.emplace( relPath, std::move( read ) ).first->second;
 }
 
 // The WHOLE-TREE shape: ONE spawn, every dirty path's hunks, keyed by the diff's own repo-root-relative

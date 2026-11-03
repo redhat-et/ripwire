@@ -44,6 +44,7 @@
 #include "testmap.h"       // lane/t10-mcp-coverage: writeAffectedReport — the shared --affected / `affected` verb renderer
 #include "fordispatchhop.h"   // mf1-nx wave 4: the dispatch element (the CLI twin's rows)
 #include "forselfhook.h"      // lane self-hook: the self-hook element (the CLI twin's rows)
+#include "subjectanchor.h"    // SUBJECT-ANCHOR: chooseSubjectRoute, the CLI twin's route
 #include "fordeclrow.h"     // DECL-ROW: the `for` verb's declaration rows (the CLI twin's renderer)
 #include "forgraphverb.h"   // FOR-ROUTE-DECLINED: the `for` verb's subject-read graph-verb block (the CLI twin's wrapper)
 #include "pathgaps.h"      // PATH-GAP: the shared gap analysis + clause of --path / path_between
@@ -2477,7 +2478,9 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // them is part of the routed reading. A default-constructed RouteChoice IS that reading: SubtokenBody,
     // no reason, no anchors, so there is no route= to disclose and ctxRootOpen omits the attribute, which is
     // byte-for-byte what the CLI emits under --no-route.
-    const RouteChoice        rc        = noRoute ? RouteChoice{} : chooseForRanker( ing, task );
+    const SubjectRoute       subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, ix.g, task, /*servesBodiesAndCallers=*/false );   // SUBJECT-ANCHOR, the CLI twin's
+    const RouteChoice&       rc        = subjectRoute.route;
+    const std::string_view   rankTask  = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     // NOT const: LB-A's relevance floor narrows it below, once every boost has landed on lensRank. The
     // MaxScore pruning bound two stanzas down consumes the PRE-floor value, which is the safe direction —
     // a bound computed for a larger K can only keep more candidates, never fewer.
@@ -2505,12 +2508,12 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // twin's computeLensRanking makes the same two calls (one exhaustive subtoken pass on the identifier route).
     LexTermEvidence    mcpEvidence;
     std::vector<float> lensRank  = ( rc.which == LexMode::NameExact )
-                                       ? lexicalScoresNameExactRanked( ing, task, &tierMul )
+                                       ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                        : lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, &ifaceExact, &tierMul,
                                                               0, 0, {}, &mcpEvidence );
     if( rc.which == LexMode::NameExact )
     {
-        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, task, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
+        lexicalScoresTiered( ing, ix.g.outOff, ix.g.outTargets, rankTask, /*pruneTopK=*/0, nullptr, &tierMul, 0, 0, {}, &mcpEvidence );
     }
 
     // B8 (query-mention anchoring): same default-on contract as the CLI --for — files / dotted modules /
@@ -2537,7 +2540,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     if( !noRoute && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
-        if( applyMentionBoost( ing, task, lensRank, &mentionInfo ) )
+        if( applyMentionBoost( ing, rankTask, lensRank, &mentionInfo ) )
         {
             char nb[ 220 ];
             rw::formatTo( nb, sizeof( nb ), " [mention anchor: {} file{} + {} symbols named in the task, score lifted to within 5% of the top score; "
@@ -2659,7 +2662,7 @@ inline std::optional<std::string> forTaskText( const std::string& root, const st
     // it; synthesize the same three-state tag verbs_for.h's routeTag carries so all three read one string.
     const char* const   mcpRouteTag        = noRoute ? "no-route" : ( rc.which == LexMode::NameExact ? "name-exact" : "subtoken+body" );
     const bool          mcpHomonymDecline = isAdaptiveHomonymDecline( isNameExactRouteTag( mcpRouteTag ), mcpForCut, 5 );
-    ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline );
+    ForConfidence       mcpForConf = deriveForConfidence( mcpForCut, forTopN, mcpHomonymDecline, subjectRoute.anchorNoSource );   // CONFIDENCE-ANCHOR
     // THE BUNDLE'S RESOLVED SURFACE (top-N by lensRank — the set <sigs> selects), shared by the compose
     // view, the B6.3 route view and (§P3) the <lego> scope filter. Same order the CLI --for uses. Hoisted
     // above the header (L-W): the thin verdict reads it.
@@ -3348,7 +3351,8 @@ inline std::optional<std::string> impactText( const std::string& root, const std
     const bool          imHasLink   = std::any_of( show.begin() + ipw.begin, show.begin() + ipw.end, [ & ]( NodeId n ) { return impactDirectLink( g, seeds, depth, n ); } );
     rw::emitTo( mem, "{}{}. {}{}{}{}{}{}{}{}{}{}{}{}-->", kImpactLegendOpen, kPageRaiseCapClause,
                   reach.empty() ? "" : kImpactDepthLegend,           // 0.6.5: exactly when d=/by_depth= ride, as on the CLI
-                  ( std::string( kImpactImportTierLegend ) + importersNextLegend( !imports.next.empty() ) ).c_str(),   // cut-fix E, as on the CLI
+                  ( std::string( kImpactImportTierLegend ) + importersNextLegend( !imports.next.empty() )
+                    + importersRollupLegend( importTierRollupShown( imports ) ) ).c_str(),   // cut-fix E, as on the CLI; IMPACT-ROLLUP likewise
                   ( impactTsImportLegend( imports.importsUnresolved, imports.tsconfigUnread ) + impactNoFileEdgesLegend( imports.noFileEdgeLangs != 0 )   // #220: exactly when the root carries them, as on the CLI
                     + viaNameLegend( imHasVia, true )
                     + viaLinkLegend( imHasLink ) + impactAnchorLegendFor( g, seeds, depth, show, ipw.begin, ipw.end ) ).c_str(),
@@ -4521,6 +4525,9 @@ struct QualityDeltaOutcome
     // the JSON, under the same absent-means-the-ordinary-archived-tree rule as the CLI, so mcpclidiffcheck's
     // key-set lens stays satisfied.
     const char*                       headBasis             = nullptr;
+    // hwh-fix4 (N1): the CLI root's unread_history= twin (quality::historyUnreadDisclosure), present-only. An MCP client has no exit
+    // code, so this field is the only way it learns that "gating":0 is a floor over history that could not be read.
+    std::string                       historyJson;
 };
 
 // §B6 M10 — a CORRUPT sidecar used to read as "no sidecar". readBaseline reports a file that yields no header,
@@ -4645,8 +4652,11 @@ inline QualityDeltaOutcome computeQualityDelta( const std::string& root )
     auto       acks = rw::quality::readAckRecords( qualityAcksPath( root ) );
     const auto heal = rw::quality::healIdentity( baseSel.snapshot, acks, ing, g, root, root, /*wantContentIds=*/false );
 
+    rw::quality::HistoryUnread historyUnread;
     oc.regs       = rw::quality::computeDelta( ing, g, baseSel.snapshot, root, {}, rw::kDefaultMaxFileBytes, &oc.registerMacroExcluded, &oc.apiNewSurface,
-                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded );
+                                               nullptr, &oc.declinedCallExcluded, &oc.valueRefExcluded, rw::quality::KindScope{}, &historyUnread );
+    historyUnread.renames = heal.renames.refusedPartial && baseSel.marker == std::string_view( "sidecar" );   // the CLI's own rule
+    oc.historyJson = rw::quality::historyUnreadDisclosure( historyUnread ).second;
 
     // signal-to-noise round: honor the per-finding ack ratchet exactly like the CLI — the acks sidecar is
     // root-qualified (same SIDECAR LOCATION discipline as the baseline), suppression is reported via `acked`.
@@ -4737,6 +4747,7 @@ inline std::pair<std::string, std::string> qualityDeltaJson( const std::string& 
                     + oc.identityJson
                     // #228 — the CLI root's head_basis= twin, present-only: absent means the archived HEAD tree.
                     + ( oc.headBasis == nullptr ? std::string() : std::string( ",\"head_basis\":\"" ) + mcpdetail::jsonEscape( oc.headBasis ) + "\"" )
+                    + oc.historyJson
                     + ",\"at\":" + atJson + ",\"r\":[";
     bool first = true;
     for( const rw::quality::Regression& r : oc.regs )
@@ -4892,7 +4903,9 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     LensRanking       lr;
     // See forTaskText's own note: `noRoute` is the CLI --no-route over MCP, and it skips the shape demotion,
     // the mention anchor and the co-change prior with the ranker, because all four are the routed reading.
-    const RouteChoice rc = noRoute ? RouteChoice{} : chooseForRanker( ing, task );
+    const SubjectRoute     subjectRoute = noRoute ? SubjectRoute{} : chooseSubjectRoute( ing, g, task, /*servesBodiesAndCallers=*/false );   // SUBJECT-ANCHOR, the CLI twin's
+    const RouteChoice&     rc           = subjectRoute.route;
+    const std::string_view rankTask     = subjectRoute.rankQuery.empty() ? task : std::string_view( subjectRoute.rankQuery );
     std::vector<char> ifaceExact( ing.symbols.size(), 0 );
     for( std::size_t i = 0; i < ix.g.implementors.size() && i < ifaceExact.size(); ++i )
     {
@@ -4906,7 +4919,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     const queryshape::Verdict shape   = queryshape::classify( task );
     const std::vector<float>  tierMul = rankTierSymbolMultipliersShaped( ing, !noRoute && shape.fires() );
     const std::vector<float>  docNoiseMul = !noRoute ? docNoiseSymbolMultipliers( ing, task ) : std::vector<float>{};   // the CLI twin's lift order
-    lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, task, &tierMul )
+    lr.rank      = ( rc.which == LexMode::NameExact ) ? lexicalScoresNameExactRanked( ing, rankTask, &tierMul )
                                                        : lexicalScoresTiered( ing, g.outOff, g.outTargets, task, 0, &ifaceExact, &tierMul,
                                                                               0, 0, {}, &lr.evidence );
     // §L10b + verify-wave2 F6: same trim as the other route= construction sites — neither bracket.
@@ -4923,7 +4936,7 @@ inline std::string packTaskText( const std::string& root, const std::string& tas
     if( !noRoute && !std::getenv( "RIPWIRE_NO_MENTION" ) )
     {
         MentionBoostInfo mentionInfo;
-        if( applyMentionBoost( ing, task, lr.rank, &mentionInfo ) )
+        if( applyMentionBoost( ing, rankTask, lr.rank, &mentionInfo ) )
         {
             char nb[ 160 ];
             rw::formatTo( nb, sizeof( nb ), " [mention anchor: {} file{} + {} symbols named in the task, score lifted to within 5% of the top score]",
@@ -6255,6 +6268,7 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         {
             return bad( refusal );
         }
+        const GitWalkCutMark       cutsBefore   = gitWalkCutMark();
         std::optional<std::string> ownersAnswer = ownersText( root, symbol, pageParse.page );      // symbol optional (empty = all files); M13: paged
         if( !ownersAnswer )
         {
@@ -6263,8 +6277,10 @@ inline BatchSub runBatchSub( const std::string& root, const std::string& obj, in
         r.payload = std::move( *ownersAnswer );
         if( r.payload.empty() )
         {
-            return bad( symbol.empty() ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
-                                       : symbolMissing( "owners", symbol ) );   // N7: the hint comes from the table row
+            const std::string cut = rw::gitWalkCutRefusalCause( cutsBefore );   // F2: a walk THIS request's budget ended is not "no history"
+            return bad( !cut.empty() ? "owners is mined from git: " + cut
+                        : symbol.empty() ? std::string( "no git history for this tree (owners is mined from git; not a repo, or no commits)" )
+                                         : symbolMissing( "owners", symbol ) );   // N7: the hint comes from the table row
         }
     }
     else if( r.verb == "cochange" )
