@@ -34,9 +34,14 @@
 #   (RM) MERGE-MAIN-RST-MARKER: an RST `=======` underline (test/restdocscheck.sh:77) in a file identical to MERGE_HEAD's
 #        is main's text, not a leftover marker: the merge commits (exit 0). Neighbour: a real conflict hunk staged in
 #        another file is still refused (exit 1) and named, the RST file is not; resolved for real it commits.
+#   (RS) the staged-path loop reads one path per line, literally: an RST file named with a space, identical to
+#        MERGE_HEAD's, merges (exit 0); a real staged marker in a file named with a space is refused and named in
+#        the detail list; a real marker in `d/[a]` beside an identical RST `d/a` is refused (never globbed to `d/a`).
 #   (PV) MERGE-PARSERVER-CHECK: both sides bumped kParserVer past the merge base -> the merged value must clear both.
-#        Kept main's / kept the lane's / only equal to one side: refused (exit 1, nothing committed, the message names
-#        both numbers). Twin: set above both (max+2, with quality.h's mirror) commits; one side bumped merges (exit 0).
+#        Kept main's, kept the lane's: refused (exit 1, nothing committed, the message names both numbers). Twin:
+#        set to max+1 (with quality.h's mirror) commits. Only main bumped, and the resolution restored the lane's
+#        lower number: refused (exit 1, nothing committed); twin: main's number commits. One side bumped and
+#        nothing restored, either way round: merges (exit 0). Every (PV) arm branches fresh from base.
 # The fixture runs the generators WITHOUT docs/counts.tsv (live totals), the shape every branch cut before the
 # counts snapshot has; test/gendocsmergecheck.sh covers merges of branches that have the snapshot.
 set -u
@@ -353,14 +358,54 @@ else
     else no "(RM neighbour twin) rc=$rc: $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
 fi
 
-# ── (PV) both sides bumped kParserVer: the merged value must clear both ───────────────────────────────
+# ── (RS) staged paths with a space or glob characters are read literally ─────────────────────────────
+# Red-first: a word-split loop refuses the spaced RST file and prints no detail line for the spaced conflict; a
+# globbing loop turns `d/[a]` into `d/a` (identical to main's, skipped) and commits the real marker.
+fresh rs-base base && mkdir -p "$R/docs/ref" "$R/d" && printf 'old\n' > "$R/docs/ref/sp ace.txt" \
+    && printf 'line one\nline two\n' > "$R/docs/ref/con flict.txt" && printf 'old\n' > "$R/d/a" \
+    && printf 'line one\nline two\n' > "$R/d/[a]" && commitAll "paths with a space and a bracket"
+fresh rs-main rs-base && rstText > "$R/docs/ref/sp ace.txt" && commitAll "main adds an RST underline to a spaced path"
+fresh rs-lane rs-base && printf 'lane work\n' > "$R/lane.txt" && commitAll "lane work"
+mm rs-main; rc=$?
+if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse rs-main )" ]; then
+    ok "(RS space skip) a spaced RST file identical to MERGE_HEAD's merges (exit 0, committed)"
+else no "(RS space skip) rc=$rc (want 0, committed): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+fresh rs-main2 rs-base && printf 'line one\nmain side\n' > "$R/docs/ref/con flict.txt" && commitAll "main edits a spaced file"
+fresh rs-lane2 rs-base && printf 'line one\nlane side\n' > "$R/docs/ref/con flict.txt" && commitAll "lane edits the same line"
+head0="$( g rev-parse HEAD )"
+mm rs-main2; rc=$?
+if [ "$rc" != 1 ] || ! grep -q '^<<<<<<< ' "$R/docs/ref/con flict.txt"; then no "(RS space named) setup: the conflict did not stop the merge (rc=$rc)"
+else
+    g add -- "docs/ref/con flict.txt"; mm --continue; rc=$?
+    if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -qF '    docs/ref/con flict.txt:' "$TMP/out"; then
+        ok "(RS space named) a real marker in a spaced path is refused (exit 1) and named in the detail list"
+    else no "(RS space named) rc=$rc (want 1, nothing committed, 'docs/ref/con flict.txt:' named): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+fi
+fresh rs-main3 rs-base && rstText > "$R/d/a" && printf 'line one\nmain side\n' > "$R/d/[a]" && commitAll "main: RST d/a, edits d/[a]"
+fresh rs-lane3 rs-base && printf 'line one\nlane side\n' > "$R/d/[a]" && commitAll "lane edits d/[a]"
+head0="$( g rev-parse HEAD )"
+mm rs-main3; rc=$?
+if [ "$rc" != 1 ] || ! grep -q '^<<<<<<< ' "$R/d/[a]"; then no "(RS glob) setup: the conflict did not stop the merge (rc=$rc)"
+else
+    g add -- ':(literal)d/[a]'; mm --continue; rc=$?
+    if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -qF '    d/[a]:' "$TMP/out" && ! grep -qF '    d/a:' "$TMP/out"; then
+        ok "(RS glob) a real marker in d/[a] beside an identical RST d/a is refused (exit 1) and named; d/a is not"
+    else no "(RS glob) rc=$rc (want 1, nothing committed, d/[a] named, d/a not): $( tail -3 "$TMP/out" | tr '\n' ' ' )"; fi
+fi
+
+# ── (PV) kParserVer: the merged value must clear both sides' bumps, and never fall below main's ──────────
 pvOf(){ sed -n 's/^constexpr .*kParserVer *= *\([0-9][0-9]*\);.*$/\1/p' "$R/src/ingest_cache.h" | head -1; }
 setPV(){   # $1 number: kParserVer and quality.h's mirror, in the work tree
     sed -i.bak -e "s/\(constexpr .*kParserVer  *= *\)[0-9][0-9]*;/\1$1;/" "$R/src/ingest_cache.h" \
         && sed -i.bak -e "s/\(constexpr .*kIngestParserVerMirror  *= *\)[0-9][0-9]*;/\1$1;/" "$R/src/quality.h" \
         && rm -f "$R/src/ingest_cache.h.bak" "$R/src/quality.h.bak"
 }
-pv0="$( g checkout -q base && pvOf )"
+pvBoth(){   # a fresh lane off pv-lane with main's pv-main merge stopped on the two bumps; head0 = the lane's HEAD
+    fresh pv-t pv-lane || return 1; head0="$( g rev-parse HEAD )"
+    mm pv-main; rc=$?
+    [ "$rc" = 1 ] || { no "(PV $1) setup: the two bumps did not stop the merge (rc=$rc)"; return 1; }
+}
+fresh pv-b base; pv0="$( pvOf )"
 if ! [ "$pv0" -gt 0 ] 2>/dev/null; then no "(PV) setup: could not read kParserVer from the fixture's src/ingest_cache.h"
 else
     pvMain=$(( pv0 + 3 )); pvLane=$(( pv0 + 5 ))
@@ -369,22 +414,40 @@ else
     fresh pv-lane1 base && printf 'lane\n' > "$R/lane.txt" && commitAll "lane does not bump"
     # the bumps are one line apart on both sides: git stops on src/ingest_cache.h (and quality.h's mirror)
     for keep in main lane; do
-        fresh pv-t pv-lane; head0="$( g rev-parse HEAD )"
-        mm pv-main; rc=$?
-        if [ "$rc" != 1 ]; then no "(PV $keep) setup: the two bumps did not stop the merge (rc=$rc)"; continue; fi
+        pvBoth "$keep" || continue
         case "$keep" in main) want="$pvMain" ;; *) want="$pvLane" ;; esac
         g checkout -q "$( [ "$keep" = lane ] && echo pv-lane || echo pv-main )" -- src/ingest_cache.h src/quality.h
         g add src/ingest_cache.h src/quality.h; mm --continue; rc=$?
         if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -q "both sides bumped kParserVer: lane $pvLane, main $pvMain" "$TMP/out" \
-           && grep -q "max+2 = $(( pvLane + 2 ))" "$TMP/out"; then
+           && grep -q "max+1 = $(( pvLane + 1 ))" "$TMP/out"; then
             ok "(PV $keep) both sides bumped, the merge kept $want: refused (exit 1, nothing committed, lane $pvLane / main $pvMain named)"
         else no "(PV $keep) kept $want: rc=$rc (want 1, nothing committed, message naming both): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
     done
-    # twin: above both -> commits, and the mirror agrees
-    setPV "$(( pvLane + 2 ))"; g add src/ingest_cache.h src/quality.h; mm --continue; rc=$?
-    if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse pv-main )" ] && [ "$( pvOf )" = "$(( pvLane + 2 ))" ]; then
-        ok "(PV twin) kParserVer set above both ($(( pvLane + 2 ))) commits (exit 0)"
-    else no "(PV twin) above both: rc=$rc (want 0, committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    # twin: max+1 (lean and rich are separate cache files) -> commits, and the mirror agrees
+    if pvBoth twin; then
+        g checkout -q pv-lane -- src/ingest_cache.h src/quality.h; setPV "$(( pvLane + 1 ))"
+        g add src/ingest_cache.h src/quality.h; mm --continue; rc=$?
+        if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse pv-main )" ] && [ "$( pvOf )" = "$(( pvLane + 1 ))" ]; then
+            ok "(PV twin) kParserVer set to max+1 ($(( pvLane + 1 ))) commits (exit 0)"
+        else no "(PV twin) max+1: rc=$rc (want 0, committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    fi
+    # only main bumped, and a resolution restored the lane's lower number: refused; main's number commits
+    fresh pv-main2 pv-main && printf 'line one\nmain side\n' > "$R/conflict.txt" && commitAll "main bumps and edits"
+    fresh pv-lane2 pv-lane1 && printf 'line one\nlane side\n' > "$R/conflict.txt" && commitAll "lane edits the same line"
+    head0="$( g rev-parse HEAD )"
+    mm pv-main2; rc=$?
+    if [ "$rc" != 1 ] || ! grep -q '^<<<<<<< ' "$R/conflict.txt"; then no "(PV below main) setup: the conflict did not stop the merge (rc=$rc)"
+    else
+        printf 'line one\nlane side\nmain side\n' > "$R/conflict.txt"
+        g checkout -q pv-lane2 -- src/ingest_cache.h src/quality.h; g add conflict.txt src/ingest_cache.h src/quality.h; mm --continue; rc=$?
+        if [ "$rc" = 1 ] && [ "$( g rev-parse HEAD )" = "$head0" ] && grep -q "main bumped kParserVer to $pvMain (merge base $pv0), the merge has $pv0" "$TMP/out"; then
+            ok "(PV below main) only main bumped, the merge restored $pv0: refused (exit 1, nothing committed, $pvMain named)"
+        else no "(PV below main) rc=$rc (want 1, nothing committed, main's $pvMain named): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+        g checkout -q pv-main2 -- src/ingest_cache.h src/quality.h; g add src/ingest_cache.h src/quality.h; mm --continue; rc=$?
+        if [ "$rc" = 0 ] && [ "$( g rev-parse HEAD^2 )" = "$( g rev-parse pv-main2 )" ] && [ "$( pvOf )" = "$pvMain" ]; then
+            ok "(PV below main twin) the merge keeps main's $pvMain: commits (exit 0)"
+        else no "(PV below main twin) rc=$rc (want 0, committed): $( tail -2 "$TMP/out" | tr '\n' ' ' )"; fi
+    fi
     # one side bumped (either way round) merges clean
     for pair in "pv-lane1 pv-main" "pv-lane pv-lane1"; do
         set -- $pair; fresh pv-o "$1"; mm "$2"; rc=$?
