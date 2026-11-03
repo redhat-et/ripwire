@@ -97,7 +97,9 @@ two_rows(){ # file, subject: rows="2", the definition row, the header row decl_o
     python3 - "$1" "$2" <<'PY'
 import re, sys
 s = open( sys.argv[1], encoding="utf8" ).read()
-m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows></ctx>$', s )
+# a trailing <shortkey> (the out-of-band fallback ladder, gate barrelshortkeycheck: `app::run_it` is unproven under namespace app)
+# whose legend declares it outside est_tokens may follow; nothing else may
+m = re.search( r'<decl_rows of="([^"]*)" rows="(\d+)">(.*?)</decl_rows>(?:<!-- shortkey[^>]*?not in est_tokens[^>]*?-->(?:<shortkey [^>]*/>|<shortkey [^>]*>.*?</shortkey>))?</ctx>$', s, re.S )
 if not m or m.group( 1 ) != sys.argv[2] or m.group( 2 ) != "2": sys.exit( 1 )
 rows = re.findall( r'<d [^>]*/>', m.group( 3 ) )
 if len( rows ) != 2: sys.exit( 1 )
