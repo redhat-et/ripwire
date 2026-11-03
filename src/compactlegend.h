@@ -393,6 +393,9 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     { "no_file_edges",     "no_file_edges=LANGS: this build resolves almost none of these languages' imports to files (Go only across go.mod replace); counts over them (ca/ce and violations= of the arch verb) are floors over the resolved edges only, and a coupling number absent beside it is unknown, not zero" },
     { "unmeasured_files",  "unmeasured_files=N: files in the no_file_edges= languages; an edge to or from them is in a count only where this build resolved it" },
     { "masked_files",      "masked_files=N: no_file_edges= files, left out of dep_files=/ccd/nccd/shape and propagation_cost (an edgeless one would count as a cone of one; one with an edge has only a floor)", true },
+    // DEPS-SHAPE-HONEST / RUST-MOD-DECL (serialize.h packDeps): absent-at-zero counts on <health>, so they read here (arm (S))
+    { "cyclic_files", "health cyclic_files=N: dep_files= files inside an include cycle (all cycles, not only the listed ones); absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
+    { "containment_edges", "health containment_edges=N: Rust mod x; pairs whose only directive is the declaration, out of transitive=/cycles/ccd/shape, in Ca/Ce", true, "health", MapHeaderRead::No, {}, "deps" },
     // --cochange-groups root (verbs_report.h countAttrXmlOrEmpty): a countAttrXmlOrEmpty attribute takes its row here, test/compactlegendcheck.sh (S). onTag + onKey: only that root.
     { "unknown_pairs", "unknown_pairs=N: pairs left out of groups= because surprising= is unknown for them, not 0; drop the cochange-groups flag to list them", true, "cochange", MapHeaderRead::No, {}, "cochange" },
     // #220 part 2: the resolver's other two root gauges (graphlegend.h tsImportRootAttrXml), absent at zero, --deps/--arch;
@@ -542,6 +545,14 @@ inline constexpr CompactCompletenessTerm kCompactCompletenessTerms[] =
     // (kZoomBridgeCap); shown_symbols= is --tree's on <tree> (kTreeSymbolsPerFile). Their *_capped= siblings read in the
     // shared sub-cap clause.
     { "importers_next",    "importers_next=: the call listing every importer", true, "impact" },
+    // IMPACT-ROLLUP (graph.h importTierRollup): present-only, beside importers_capped=1
+    { "importers_tests",   "importers_tests=/importers_dirs=: over EVERY importer of a cut tier: test/bench/fixture files / the 3 dirs (2 path segments) holding most, dir:count", true, "impact" },   // also defines importers_dirs=
+    // IMPACT-PATH (verbs_navigate.h emitImpactPathAnswer): present-only, on a path selector's answer
+    { "unresolved_naming", "unresolved_naming=: files whose include/import target is a suffix of this path and resolved to no indexed file; each may import it, so importers= may be a floor", true, "impact" },
+    { "selector",          "selector=file: of= names an indexed file, not a symbol; the answer is its importers only, no call reach (of=FILE:SYM for a symbol); file= is the file answered for", true, "impact" },
+    { "matched",           "matched=suffix: of= is not a whole indexed path; file= is the one indexed file whose path ends with it", true, "impact" },
+    // IMPACT-PATH (verbs_navigate.h impactPathOrRefuse): an ambiguous path suffix's refusal, beside near=
+    { "matches",           "matches=N: N indexed files end with the path selector; near= is the first by path, one whole path answers", true, "impact" },
     // idea #6 (lane lean-trio): the reach set's per-file rollup element and the umbrella-header count, present-only
     { "importers_umbrella", "importers_umbrella=1: SYM's file is imported by half the files that import anything (and over 40); importers are a count, importers_next= lists them", true, "impact" },
     { "shown_files", "files files=/shown_files=: files the WHOLE reach set touches (rides beside a cut symbol window) / listed; rf syms= reached symbols there, d= fewest hops; files_capped=1 + files_next= when cut", true, "files", MapHeaderRead::No, {}, "impact" },
@@ -1614,7 +1625,7 @@ inline constexpr CompactCompletenessTerm kCompactAttributeReadings[] =
     { "dep_files", "health dep_files=N: dependency-capable files (dep_langs=), the ccd/acd/nccd denominator", true, "health", MapHeaderRead::No, {}, "deps" },
     { "dep_langs", "health dep_langs=: the languages dep_files= counts; compare its numbers across builds only when equal", true, "health", MapHeaderRead::No, {}, "deps" },
     { "ccd", "ccd=/acd=/nccd=: Lakos: sum of per-file transitive cones (self incl) / per file / over a balanced tree's", true, "health", MapHeaderRead::No, {}, "deps" },   // also defines acd= nccd=
-    { "shape", "health shape=: the nccd= verdict: horizontal below 1, vertical 1 to 2, tangled above 2 (a heuristic)", true, "health", MapHeaderRead::No, {}, "deps" },
+    { "shape", "health shape=: tangled when cyclic_files= is 1 in 20 of dep_files= or more, else nccd= below 1 horizontal, from 1 vertical (a heuristic)", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "health lazy_edges=N: in-closure (lazy) include pairs kept OUT of cones, cycles and ccd; absent at 0", true, "health", MapHeaderRead::No, {}, "deps" },
     { "lazy_edges", "f lazy_edges=N: this file's lazy pairs; still in its inc rows, out of afferent=/instab=/transitive=", true, "f", MapHeaderRead::No, {}, "deps" },
     { "size", "cycle size=/cost=: files in that include cycle / size squared, the cycle's share of ccd=", true, "cycle", MapHeaderRead::No, {}, "deps" },   // also defines cost=
