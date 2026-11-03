@@ -437,6 +437,7 @@ for _g in \
     dmmcheck \
     docanchorcheck \
     docdemotecheck \
+    docdemotefpcheck \
     docdriftcheck \
     docdriftcommentcheck \
     docmdcachecheck \
