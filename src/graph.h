@@ -2609,6 +2609,32 @@ inline std::vector<std::vector<std::uint32_t>> buildPythonStarTargets( const Ing
     return stars;
 }
 
+// buildPythonImportVetoes: 'i' an in-repo module (a relative import cannot leave the package, or Step-A pinned the file), 'u' unknown
+// (the head names an indexed module), 'x' external.
+inline char pythonImportVerdict( const Binding& b, std::uint32_t resolved, const HashMap<std::string, char>& moduleNames )
+{
+    if( b.typeName.front() == '.' || resolved != kNoFile )
+    {
+        return 'i';
+    }
+    const std::size_t dot = b.typeName.find( '.' );
+    const std::string head( dot == std::string::npos ? std::string_view( b.typeName ) : std::string_view( b.typeName ).substr( 0, dot ) );
+    return moduleNames.find( head ) != moduleNames.end() ? 'u' : 'x';
+}
+
+// PY-MOD-CALL-SITES: the module file an absolute `from pkg import y` names (recordSubmoduleBind's moduleFile) — Step-A's file, else the
+// memoized suffix match; kNoFile for `import pkg.y` (importedName "module") and for a relative spec (recordSubmoduleBind derives the
+// package directory from the importer path instead).
+inline std::uint32_t pythonFromImportModuleFile( const Binding& b, std::uint32_t resolved, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                                 PythonSuffixMemo& memo )
+{
+    if( b.importedName == "module" || b.typeName.front() == '.' )
+    {
+        return kNoFile;
+    }
+    return resolved != kNoFile ? resolved : memo.resolve( b.typeName, fileIndex, b.fileId );
+}
+
 inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, const HashMap<std::string, std::uint32_t>& fileIndex,
                                                     const HashMap<std::string, char>& moduleNames,
                                                     const HashMap<std::string, char>& pythonModuleRebind )
@@ -2627,35 +2653,11 @@ inline PythonImportVetoes buildPythonImportVetoes( const IngestResult& ing, cons
         // `verdict` below is already 'i' without needing it) — recordImportBindFile wants the REAL file,
         // not just verdict's "cannot leave the package" evidence.
         const std::uint32_t resolved = inImporterRoot( ing.fileRoot, b.fileId, resolvePreciseInclude( rootRelPath( ing, b.fileId ), b.typeName, /*isAngle=*/ false, fileIndex ) );
-        char verdict = 'x';
-        if( b.typeName.front() == '.' )
-        {
-            verdict = 'i';   // a relative import cannot leave the package
-        }
-        else if( resolved != kNoFile )
-        {
-            verdict = 'i';
-        }
-        else
-        {
-            const std::size_t dot = b.typeName.find( '.' );
-            const std::string head( dot == std::string::npos ? std::string_view( b.typeName ) : std::string_view( b.typeName ).substr( 0, dot ) );
-            if( moduleNames.find( head ) != moduleNames.end() )
-            {
-                verdict = 'u';
-            }
-        }
+        const char verdict = pythonImportVerdict( b, resolved, moduleNames );
         recordImportBindFile( b, resolved, fileIndex, pythonModuleRebind, key, t.importBindFile,
                               ing.fileRoot.empty() ? nullptr : &ing.fileRoot );
         recordMemberImportFile( b, resolved, fileIndex, key, t.memberImportFile, memo );
-        if( b.importedName != "module" && b.typeName.front() != '.' )
-        {
-            recordSubmoduleBind( ing, b, resolved != kNoFile ? resolved : memo.resolve( b.typeName, fileIndex, b.fileId ), fileIndex, key, t.submodules );
-        }
-        else
-        {
-            recordSubmoduleBind( ing, b, kNoFile, fileIndex, key, t.submodules );
-        }
+        recordSubmoduleBind( ing, b, pythonFromImportModuleFile( b, resolved, fileIndex, memo ), fileIndex, key, t.submodules );
         key.clear();  Narrower::appendUint( key, b.fileId );  key.push_back( '#' );  key.append( b.var );
         const auto [ it, inserted ] = t.importBind.try_emplace( key, verdict );
         if( !inserted && it->second == 'x' && verdict != 'x' )
