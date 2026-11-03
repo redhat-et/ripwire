@@ -84,6 +84,15 @@ enum class FileEdges : std::uint8_t
     NotApplicable,
 };
 
+/// #404: which type definitions' --lego method contract (<m>) is read off the method symbols inside the type's own body
+/// (serialize.h legoMethodContractSound). None keeps the rows suppressed and the named verb says so (caveat=).
+enum class LegoContract : std::uint8_t
+{
+    None,             // members are not methods scoped to the type: TS/Java/Rust's span scan read the declaration line itself
+    EveryType,        // C++, Objective-C: a class's or interface's methods are declared in its body, each scoped to it
+    InterfacesOnly,   // Go: an interface's method_elem rows sit in its body; a struct's methods are declared by receiver outside it
+};
+
 /// What proves a call Rule 3 narrowed (LangFacts::rule3NameProof): nothing (Rule 3 decides), a Rust `use` or module qualifier, a Python import binding.
 enum class Rule3NameProof : std::uint8_t { None, RustUse, PythonImport };
 
@@ -319,6 +328,9 @@ struct LangFacts
     /// TypeScript, JavaScript, Rust, Swift, Kotlin: a bare `{` assigned or returned inside a function body is an object literal (a
     /// call's options or a value), a block or a closure, never a table; in Python (a dict), C, C++, Java, Go it can hold data (forliteral.h).
     bool localBraceNotData = false;
+
+    /// C++, Objective-C (every type), Go (interfaces): the --lego method contract is read off the type's own body (LegoContract).
+    LegoContract legoContract = LegoContract::None;
 };
 
 /// java.lang.Object's public methods an interface may redeclare abstract (LangFacts::samIgnoredMembers).
@@ -328,7 +340,8 @@ inline constexpr std::array<std::string_view, 3> kJavaObjectMethods = { "equals"
 inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
     { .lang = Lang::Cpp, .defectShapeNeedsMacroSet = true, .noNestedNamedFunctions = true, .aliasPeelsSmartPointer = true, .memberSeparator = "::",
       .transitiveIncludes = true, .writtenModule = WrittenModuleRule::SourceChain, .staticLinkage = true,
-      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved },
+      .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .signatureRows = true, .fileEdges = FileEdges::Resolved,
+      .legoContract = LegoContract::EveryType },
     { .lang = Lang::Python, .frameworkEntryHooks = true, .closureReceiverDispatch = true, .externalVetoBeforeRule3 = true, .rule3NameProof = Rule3NameProof::PythonImport, .baseImportEvidence = BaseImportEvidence::PythonImport,
       .instanceReceiver = "self", .underscorePrivacy = true, .leadingDocstring = true,
       .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .hashComment = true, .fileEdges = FileEdges::Resolved, .tupleParens = true },
@@ -336,12 +349,13 @@ inline constexpr std::array<LangFacts, kLangCount> kLangFacts = { {
       .writtenBindingUndecided = true, .namespaceBodies = true, .objectLiteralMembers = true, .containmentOwners = true,
       .classNameReceiver = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
     { .lang = Lang::Go, .structuralTyping = true, .writtenModule = WrittenModuleRule::PackageDir,
-      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true },
+      .memberNeverReachesFreeFunction = true, .moduleCallReachesFunctionsOnly = true, .signatureRows = true, .legoContract = LegoContract::InterfacesOnly },
     { .lang = Lang::Rust, .contractSignaturesUnindexed = true, .traitImplBlocks = true, .rule3NameProof = Rule3NameProof::RustUse, .returnTypedDispatchLet = true, .constructorMethod = "new", .memberSeparator = "::", .baseImportEvidence = BaseImportEvidence::RustUse,
       .instanceReceiver = "self", .memberNeverReachesFreeFunction = true, .fileEdges = FileEdges::Resolved, .localBraceNotData = true },
     { .lang = Lang::Swift, .writtenModule = WrittenModuleRule::DirsOnly, .instanceReceiver = "self",
       .implicitReceiver = true, .memberNeverReachesFreeFunction = true, .classNameReceiver = true, .localBraceNotData = true },
-    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved },
+    { .lang = Lang::ObjC, .noNestedNamedFunctions = true, .transitiveIncludes = true, .staticLinkage = true, .fileEdges = FileEdges::Resolved,
+      .legoContract = LegoContract::EveryType },
     { .lang = Lang::Markdown, .notCode = true, .linkSections = true, .fileEdges = FileEdges::NotApplicable },
     { .lang = Lang::JavaScript, .structuralTyping = true, .importBoundConstruction = true, .baseImportEvidence = BaseImportEvidence::JsImport,
       .writtenBindingUndecided = true, .objectLiteralMembers = true, .containmentOwners = true,
