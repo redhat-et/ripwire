@@ -93,11 +93,12 @@ inline void dedupRawDefs( std::vector<RawDef>& rawDefs )
 //     C++ functions carry Lang::ObjC too, but a C++ overload set inside a .mm is out of this fixture's scope
 //     and the same key limitation applies — so we restrict to the observed ObjC node shapes by language and
 //     rely on the byte-identical + langcheck gates. Never manufactures a symbol the tags query didn't capture.
-// INDEX-ALIAS-CONST: a RawDef whose bodyByte carries its alias target's start (ingest_sidecap.h sets it only on a C++ alias row,
-// which has no body field of its own)
+// INDEX-ALIAS-CONST: a RawDef whose bodyByte carries its alias target's start. ingest_sidecap.h sets it only on an alias row of a
+// LangFacts::aliasTargetDefs language, which has no body field of its own; any other alias row (Go `type A = B`) has bodyByte 0
+// (aliasdefcheck pins the Go row), so the kind and the span are the whole test.
 inline bool rawDefIsAliasRow( const RawDef& d ) noexcept
 {
-    return langFacts( d.lang ).aliasTargetDefs && d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
+    return d.kind == SymKind::Alias && d.bodyByte > d.startByte && d.bodyByte < d.endByte;
 }
 
 inline void collapseObjCDeclDefs( std::vector<RawDef>& rawDefs )

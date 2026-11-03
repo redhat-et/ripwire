@@ -95,6 +95,13 @@ defs "$F/c" S2; r=$( row ); if [ "$drc" -eq 0 ] && [ -n "$r" ] && ! printf '%s' 
 ( cd "$F/c" && "$BIN" . --no-cache ) > "$TMP/map" 2>/dev/null; mrc=$?
 if [ "$mrc" -eq 0 ] && grep -q 't=alias|functype-in-C/C++' "$TMP/map" && ! grep -q 'a-Go-named-type' "$TMP/map"; then ok "[RED] C++ map: the C/C++ alias clause, no Go clause"; else no "[RED] C++ map clause: rc=$mrc cpp=$( grep -c 'functype-in-C/C++' "$TMP/map" ) go=$( grep -c 'a-Go-named-type' "$TMP/map" )"; fi
 
+# a Go `type A = B` stays a t="alias" def with no to= (Go records no target; LangFacts::aliasTargetDefs is C/C++ only)
+mkdir -p "$F/g"; printf 'package p\n\ntype Real struct{}\n\ntype GoAlias = Real\n' > "$F/g/a.go"
+defs "$F/g" GoAlias; r=$( row )
+if [ "$drc" -eq 0 ] && printf '%s' "$r" | grep -q 't="alias"' && ! printf '%s' "$r" | grep -q ' to'; then ok "Go type alias: t=alias, no to= (unchanged)"; else no "Go type alias: rc=$drc row=${r:-<none>}"; fi
+( cd "$F/g" && "$BIN" . --no-cache ) > "$TMP/gmap" 2>/dev/null
+if grep -q 'a-Go-named-type' "$TMP/gmap" && ! grep -q 'functype-in-C/C++' "$TMP/gmap"; then ok "Go map: the Go clause only"; else no "Go map clause: go=$( grep -c 'a-Go-named-type' "$TMP/gmap" ) cpp=$( grep -c 'functype-in-C/C++' "$TMP/gmap" )"; fi
+
 # NOT aliases: a function-local alias; `using namespace` and a using-declaration add no definition
 absent(){ # dir name why
     local r; defs "$1" "$2"; r=$( row )
