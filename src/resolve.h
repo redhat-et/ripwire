@@ -2327,6 +2327,18 @@ inline std::uint32_t resolveCIncludeRoots( std::string_view dir, std::string_vie
     return hit;
 }
 
+// The second step for one directive after resolvePreciseInclude missed: a C/C++ QUOTE include (never an angle one, never a
+// symbolic record) probed at the include roots; kNoFile for anything else.
+inline std::uint32_t resolveCQuoteAtRoots( const Include& inc, std::string_view includerPath, const HashMap<std::string, std::uint32_t>& fileIndex,
+                                           const WsIncludeCtx* ws, std::uint64_t* ambiguousOut )
+{
+    if( inc.isAngle || inc.isSymbolic || inc.target.empty() || includeLangOf( includerPath ) != IncludeLang::CFamily )
+    {
+        return kNoFile;
+    }
+    return resolveCIncludeRoots( includerDir( includerPath ), inc.target, fileIndex, ws, inc.fileId, ambiguousOut );
+}
+
 // Resolve ONE #include / import target to a concrete repo fileId by LEXICAL path semantics, dispatched on
 // the INCLUDER's language (its file extension). `fileIndex` maps each canonical `ing.files` path → its
 // fileId. `crateRootDir`/`hasCrateRoot` carry the Rust crate root (empty/false for non-Rust);
@@ -2334,8 +2346,8 @@ inline std::uint32_t resolveCIncludeRoots( std::string_view dir, std::string_vie
 // do not build one — an Elixir target then simply stays unresolved, never guessed). Returns the
 // fileId on a UNIQUE precise hit, else kNoFile (unresolved → contributes nothing; NEVER a basename
 // fallback, NEVER a guess).
-//   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit; on a miss,
-//     the include roots (resolveCIncludeRoots) unless `cIncludeRoots` is false (the call narrow — see the seam above it).
+//   * C-family quote `"x.h"` (isAngle==false): resolve relative-to-includer, collapse `.`/`..`, exact hit. The include
+//     roots are a second step a caller adds on a miss (resolveCQuoteAtRoots below; the call narrow does not — see the seam).
 //   * C-family angle `<x.h>` (isAngle==true): external without a build system ⇒ kNoFile (never matched).
 //   * Python / TS / Rust / Bash / Ruby / Lua / Elixir: their per-language Step-A above (unique-or-degrade).
 //   * Go / Swift / Other: DEFERRED / no path ⇒ kNoFile (contributes nothing — honest).
@@ -2343,8 +2355,7 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
                                             const HashMap<std::string, std::uint32_t>& fileIndex,
                                             std::string_view crateRootDir = {}, bool hasCrateRoot = false,
                                             const WsIncludeCtx* ws = nullptr, std::uint32_t includerFileId = kNoFile,
-                                            const HashMap<std::string, std::uint32_t>* moduleIndex = nullptr,
-                                            std::uint64_t* cAmbiguousOut = nullptr, bool cIncludeRoots = true )
+                                            const HashMap<std::string, std::uint32_t>* moduleIndex = nullptr )
 {
     if( target.empty() )
     {
@@ -2404,10 +2415,7 @@ inline std::uint32_t resolvePreciseInclude( std::string_view includerPath, std::
                 }
                 return ( hit == kNoFile || hit == kNoFile - 1 ) ? kNoFile : hit;
             }
-            {
-                const std::uint32_t own = joinNormalizeLookup( includerDir( includerPath ), target, fileIndex, ws, includerFileId );
-                return ( own != kNoFile || !cIncludeRoots ) ? own : resolveCIncludeRoots( includerDir( includerPath ), target, fileIndex, ws, includerFileId, cAmbiguousOut );
-            }
+            return joinNormalizeLookup( includerDir( includerPath ), target, fileIndex, ws, includerFileId );
         case IncludeLang::Python: return resolvePythonImport( includerPath, target, fileIndex, ws, includerFileId );
         case IncludeLang::Ts:     return resolveTsImport( includerPath, target, fileIndex, ws, includerFileId );
         case IncludeLang::Rust:   return resolveRustImport( includerPath, target, fileIndex, crateRootDir, hasCrateRoot, ws, includerFileId );
@@ -4670,6 +4678,7 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
     HashMap<std::string, std::pair<std::uint32_t, std::uint32_t>> rubyMemo;
 
     std::optional<tsimport::ImportResolver> tsResolver;   // #220: built on the first bare TS/JS specifier that missed
+    const bool cIncludeRoots = !forCallNarrow || kCallNarrowReadsCIncludeRoots;   // C-ROOT-INCLUDE: the seam (see that constant)
     for( const Include& inc : ing.includes )
     {
         if( inc.fileId >= F )
@@ -4710,8 +4719,11 @@ inline std::pair<rw::FileAdjacency, WsIncludeCtx> buildPreciseIncludeAdjWithCont
             hasCrd = hasCrateByRoot[ r ] != 0;
         }
         std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle,
-                                                   fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex, importsUnresolvedOut,
-                                                   /*cIncludeRoots=*/!forCallNarrow || kCallNarrowReadsCIncludeRoots );
+                                                   fileIndex, crd, hasCrd, ws, inc.fileId, moduleIndex );
+        if( to == kNoFile && cIncludeRoots )
+        {
+            to = resolveCQuoteAtRoots( inc, rootRelPath( ing, inc.fileId ), fileIndex, ws, importsUnresolvedOut );
+        }
         if( to == kNoFile && tsimport::isBareTsSpecifier( rootRelPath( ing, inc.fileId ), inc.target ) )
         {
             to = resolveBareTsImport( ing, fileIndex, tsResolver, ws, inc, importsUnresolvedOut, extrasOut );

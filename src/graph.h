@@ -13800,8 +13800,12 @@ inline void markCandidateFilesIncludingDecl( const IngestResult& ing, const std:
         {
             continue;
         }
-        const std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle, declIndex,   // same view as declIndex's keys
-                                                        {}, false, ws, inc.fileId, nullptr );
+        std::uint32_t to = resolvePreciseInclude( rootRelPath( ing, inc.fileId ), inc.target, inc.isAngle, declIndex,   // same view as declIndex's keys
+                                                  {}, false, ws, inc.fileId, nullptr );
+        if( to == kNoFile )
+        {
+            to = resolveCQuoteAtRoots( inc, rootRelPath( ing, inc.fileId ), declIndex, ws, nullptr );   // C-ROOT-INCLUDE: a file-graph proof, not the call narrow
+        }
         if( to != kNoFile && to < isDecl.size() && isDecl[ to ] != 0 )
         {
             proven[ inc.fileId ] = char( 1 );
