@@ -715,10 +715,13 @@ inline std::string parseDocFile( const std::string& path, std::string_view extLo
 //                    PHRASE-level, never the bare word "generated": measured here, "Generated: 2026-06-29"
 //                    is a human's date stamp (reviews/MEASUREMENTS.md) and "regenerated capture" is prose
 //                    (the capture's own subtitle) — a substring test flags both, the phrase list neither.
-//   • Size+fences  — the document is BOTH extreme for THIS corpus (>= kGeneratedSizeRatio x the median
+//   • Size+fences  — the document is extreme for THIS corpus (>= kGeneratedSizeRatio x the median
 //                    doc's bytes, and at least kGeneratedMinBytes absolute) AND mostly QUOTED OUTPUT
-//                    (>= kGeneratedFencedFraction of its lines inside ``` fences). Neither half alone
-//                    demotes: a design doc is allowed to be long, a tutorial is allowed to be fence-dense.
+//                    (>= kGeneratedFencedFraction of its lines inside ``` fences) AND it has almost NO
+//                    PROSE of its own around those fences (under kGeneratedMaxProseShare of its bytes —
+//                    see "Prose share" below). No one half demotes: a design doc is allowed to be long, a
+//                    tutorial is allowed to be fence-dense, and a long reference page full of examples is
+//                    allowed to be both, because a person wrote the sentences between its examples.
 //
 // Calibration (148 markdown docs of this repo, median 9,340 B — the numbers the thresholds were picked
 // from, so a future round can re-measure rather than re-guess):
@@ -735,9 +738,39 @@ inline std::string parseDocFile( const std::string& path, std::string_view extLo
 // hand-written docs sit above the size line untouched because none is fence-dense. HONEST LIMIT: a
 // capture that dumps raw XML/JSON with no fences at all scores low here and is NOT demoted unless it
 // carries a marker — this under-claims by design; a wrongly demoted design doc is the worse error.
+//
+// Prose share (DOCS-DEMOTE-FP, 2026-11-02). Size + fence density alone demoted the best hand-written
+// reference pages of other repos: a page of many short examples clears 0.35 fenced lines easily, and in a
+// corpus of many tiny docs (test books, per-error pages) 5x the median is only a few KB. A demoted doc ranks
+// below every other match, so even the page's own heading as the query missed it. What a capture or a test
+// golden lacks is the writing BETWEEN its fences, so the arm now also requires that prose — the bytes of
+// non-blank lines outside every fence that are not ATX headings (a heading per dumped block is structure,
+// not explanation) — be under kGeneratedMaxProseShare of the document. Measured with --recall="the" over the
+// eight in-sample doc repos, every size+fences verdict, read and labelled by hand:
+//
+//     population (count)                                   prose share     heading density (per KB)
+//     compiler test goldens, all ``` output (25)              0.00             0.04 - 0.59
+//     syntax-highlighting fixture, heading + fence each (1)   0.00             2.86
+//     this repo's command captures, docs/captures/ (33)       0.04 - 0.06      0.27 - 0.40
+//     hand-written guides / reference / blog posts (74)       0.31 - 0.94      0.23 - 2.10
+//
+// (The captures row is measured with this file's scanner directly, since the crawl skips docs/captures/. Eight
+// of them quote --recall output in a ````` fence whose inner ```bash block is cut short; the CommonMark closer
+// rule (scanMarkdownFences, below) keeps them at 0.06 — the old toggle-on-any-``` rule read them as 0.82 prose.)
+//
+// So 0.15 sits 2.5x above the generated maximum and 2x below the hand-written minimum. Heading density was
+// the other candidate and does NOT separate (goldens reach 0.59 per KB, a hand-written tutorial is 0.23), so
+// it is not used. HONEST LIMIT: a generated doc that wraps its output in prose-shaped lines (tables, or raw
+// unfenced output) is not demoted by this arm — a table-style OpenAPI markdown export (fences + tables + HTML
+// headings, ~0.49 prose) is one, and this repo's own generated flag reference (docs/COMMANDS.md, 0.45 prose)
+// is another, which is intended: over 8 natural questions about this repo it reached the top 8 in 6 and
+// served the exact flag section in 4. Only a marker phrase would demote either. The other direction — hiding a page a person wrote — is the error that
+// cost answers. Out of sample, two hand-written pages still sit under 0.15 (a config reference whose
+// explanation lives in YAML comments inside its fence, 0.03; a short-prose customization page, 0.08).
 inline constexpr std::size_t kGeneratedMarkerHeadLines = 10;      // a marker introduces a file; it is not buried
 inline constexpr double      kGeneratedSizeRatio       = 5.0;     // x the corpus median doc bytes
 inline constexpr double      kGeneratedFencedFraction  = 0.35;    // of the document's lines inside ``` fences
+inline constexpr double      kGeneratedMaxProseShare   = 0.15;    // of the document's bytes that are its own prose
 inline constexpr std::size_t kGeneratedMinBytes        = 4096;    // absolute floor — 5x a tiny median is not "huge"
 inline constexpr std::size_t kGeneratedMinDocCount     = 3;       // below this a median has no middle to speak of
 
@@ -761,20 +794,101 @@ inline const char* generatedReasonTag( GeneratedDocReason reason ) noexcept
 // fence scanner in the tool — recall.h's truncation repair reads `endsInsideFence`, the generated-doc
 // signal reads `fencedLineCount` — so the two can never disagree about what "inside a fence" means.
 //
-// Fence rule, reduced to what markdown prose needs: a line whose first non-space characters are three-or-
-// more backticks TOGGLES the state, and counts as fenced itself. No tilde fences, no info-string
-// validation, no indented-code-block exemption. Pure text in, pure counts out — no map order, no clock.
+// Fence rule (CommonMark's, minus the indent limit): a line whose first non-space characters are a run of
+// three-or-more backticks or tildes OPENS a fence (a backtick opener's info string may not hold a backtick,
+// so "```foo``` bar" is inline code, not a fence). Only a line with the SAME character, a run at LEAST as
+// long, and nothing but whitespace after the run CLOSES it; every other line inside, ```bash included, is
+// content. So a ````markdown fence that quotes a ```bash block stays one fence (DOCS-DEMOTE-FP-FIX1: the old
+// toggle-on-any-``` rule closed it at the inner line and counted the rest of the dump as prose). Any indent
+// is accepted on both sides (list-nested fences), and there is no indented-code-block exemption. A fence
+// line counts as fenced itself. Pure text in, pure counts out — no map order, no clock.
 struct MarkdownFenceScan
 {
     std::size_t lineCount       = 0;
     std::size_t fencedLineCount = 0;
+    std::size_t proseBytes      = 0;   // bytes (newline excluded) of non-blank lines outside every fence that are
+                                       // not ATX headings — the document's own writing, for the size+fences arm
     bool        endsInsideFence = false;
+    char        openFenceChar   = 0;   // when endsInsideFence: '`' or '~' — a repair must close with the same
+    std::size_t openFenceRun    = 0;   // character and at least this many of it
 };
+
+namespace detail
+{
+
+// The fence state machine, one line at a time — shared by scanMarkdownFences and recall.h's protected-range
+// pass, so the two cannot disagree. `cursor` is the line's first non-blank byte, `lineEnd` its end (the
+// newline's index, or the text's size). Returns true when the line is a fence line (opener or closer);
+// a non-fence line inside an open fence returns false with isInside() still true.
+struct MarkdownFenceTracker
+{
+    char        openChar = 0;
+    std::size_t openRun  = 0;
+
+    bool isInside() const noexcept { return openChar != 0; }
+
+    bool advance( std::string_view text, std::size_t cursor, std::size_t lineEnd ) noexcept
+    {
+        if( cursor >= lineEnd || ( text[cursor] != '`' && text[cursor] != '~' ) )
+        {
+            return false;
+        }
+        const char  fenceChar = text[cursor];
+        std::size_t run       = 0;
+        while( cursor + run < lineEnd && text[cursor + run] == fenceChar )
+        {
+            ++run;
+        }
+        if( run < 3 )
+        {
+            return false;
+        }
+        const std::string_view rest = text.substr( cursor + run, lineEnd - ( cursor + run ) );
+        if( !isInside() )
+        {
+            if( fenceChar == '`' && rest.find( '`' ) != std::string_view::npos )
+            {
+                return false;   // inline code spanning the line, not an opener
+            }
+            openChar = fenceChar;
+            openRun  = run;
+            return true;
+        }
+        if( fenceChar != openChar || run < openRun || rest.find_first_not_of( " \t\r" ) != std::string_view::npos )
+        {
+            return false;   // content of the open fence: another character, a shorter run, or an info string
+        }
+        openChar = 0;
+        openRun  = 0;
+        return true;
+    }
+};
+
+// An ATX heading line, given the cursor at its first non-blank byte: one to six '#' and then a space, a tab
+// or the end of the line ('\r' of a CRLF counts as the end). "#hashtag" and "####### seven" are not
+// headings (CommonMark), so they stay prose. planlint.h's parseHeading is file-local, wants the space
+// only, and trims the text, so it is not this predicate.
+inline bool isAtxHeadingAt( std::string_view text, std::size_t cursor, std::size_t lineEnd ) noexcept
+{
+    std::size_t hashCount = 0;
+    while( cursor + hashCount < lineEnd && text[cursor + hashCount] == '#' )
+    {
+        ++hashCount;
+    }
+    if( hashCount == 0 || hashCount > 6 )
+    {
+        return false;
+    }
+    const std::size_t after = cursor + hashCount;
+    return after == lineEnd || text[after] == ' ' || text[after] == '\t' || text[after] == '\r';
+}
+
+}   // namespace detail
 
 inline MarkdownFenceScan scanMarkdownFences( std::string_view text ) noexcept
 {
-    MarkdownFenceScan scan;
-    bool              isInsideFence = false;
+    MarkdownFenceScan              scan;
+    detail::MarkdownFenceTracker   fence;
     for( std::size_t lineStart = 0; lineStart < text.size(); )
     {
         std::size_t lineEnd = text.find( '\n', lineStart );
@@ -788,19 +902,19 @@ inline MarkdownFenceScan scanMarkdownFences( std::string_view text ) noexcept
         {
             ++cursor;
         }
-        std::size_t tickCount = 0;
-        while( cursor + tickCount < lineEnd && text[cursor + tickCount] == '`' )
-        {
-            ++tickCount;
-        }
-
         ++scan.lineCount;
-        if( tickCount >= 3 )        { isInsideFence = !isInsideFence; ++scan.fencedLineCount; }
-        else if( isInsideFence )    { ++scan.fencedLineCount; }
+        const bool wasInside = fence.isInside();
+        if( fence.advance( text, cursor, lineEnd ) || wasInside ) { ++scan.fencedLineCount; }
+        else if( cursor < lineEnd && text[cursor] != '\r' && !detail::isAtxHeadingAt( text, cursor, lineEnd ) )
+        {
+            scan.proseBytes += lineEnd - lineStart;   // a whitespace-only line ("\r" for CRLF) is blank, not prose
+        }
 
         lineStart = lineEnd + 1;   // past text.size() when lineEnd was the tail — the loop condition ends it
     }
-    scan.endsInsideFence = isInsideFence;
+    scan.endsInsideFence = fence.isInside();
+    scan.openFenceChar   = fence.openChar;
+    scan.openFenceRun    = fence.openRun;
     return scan;
 }
 
@@ -887,9 +1001,15 @@ inline GeneratedDocReason classifyGeneratedDoc( std::string_view text, std::size
     {
         return GeneratedDocReason::None;
     }
-    if( fencedLineFraction( scanMarkdownFences( text ) ) < kGeneratedFencedFraction )
+    const MarkdownFenceScan scan = scanMarkdownFences( text );
+    if( fencedLineFraction( scan ) < kGeneratedFencedFraction )
     {
         return GeneratedDocReason::None;
+    }
+    // the "did a person write around these fences" number; text is non-empty here (bytes >= kGeneratedMinBytes)
+    if( double( scan.proseBytes ) >= kGeneratedMaxProseShare * double( text.size() ) )
+    {
+        return GeneratedDocReason::None;   // a person wrote between the fences: a reference page, not a dump
     }
     return GeneratedDocReason::SizeAndFences;
 }
